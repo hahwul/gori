@@ -725,6 +725,14 @@ module Gori
       # STDOUT stays a pure HAR document (pipe it straight to a file); every caveat — flows
       # skipped, bodies capped — goes to STDERR, because a silently short export is exactly
       # the failure this file keeps having to fix.
+      # The HAR writer's transcript lookup: under a profile, the sanitized copy made beside the
+      # flow's report (never a second store read); otherwise the store's.
+      private def self.har_ws_lookup(store : Store, matcher : Redact::Matcher?,
+                                     clean_ws : Hash(Int64, Array(Store::WsMessage))) : Int64 -> Array(Store::WsMessage)
+        return ->(id : Int64) { store.ws_messages(id) } unless matcher
+        ->(id : Int64) { clean_ws.delete(id) || [] of Store::WsMessage }
+      end
+
       private def self.emit_har(store : Store, rows : Array(Store::FlowRow), query : String?,
                                 view : String?, limit : Int32, truncated : Bool,
                                 redaction : RedactFlags = RedactFlags.new,
@@ -740,12 +748,19 @@ module Gori
         # whole flows: a report is a handful of `Hit`s, and holding the sanitized bodies of a
         # 5000-flow export in memory is what `details` streams to avoid.
         reports = [] of {Int64?, Redact::Report}
+        # A flow's sanitized transcript, made beside its report so the count includes the
+        # frames, and handed to the writer's lookup below (which takes it back out). Under a
+        # profile that lookup never goes back to the store, so there is still one transcript
+        # read per flow; a preview keeps only the hits, since nothing is written.
+        clean_ws = {} of Int64 => Array(Store::WsMessage)
         details = rows.reverse.each.compact_map do |r|
           d = store.get_flow(r.id)
           next nil if d.nil?
           next d unless m = matcher
           clean, report = Redact::Wire.flow(d, m)
-          reports << {r.id.as(Int64?), report}
+          frames, hits = Redact::Wire.ws_messages(store.ws_messages(r.id), m)
+          clean_ws[r.id] = frames unless frames.empty? || redaction.preview?
+          reports << {r.id.as(Int64?), report.copy_with(frames: hits)}
           clean
         end
         # The transcript lookup. `Export::Har.log` calls this for EVERY flow, including the
@@ -772,7 +787,7 @@ module Gori
           print_redact_preview(reports, choice, "history")
           return
         end
-        report = Export::Har.log(STDOUT, details, ws: ->(id : Int64) { store.ws_messages(id) })
+        report = Export::Har.log(STDOUT, details, ws: har_ws_lookup(store, matcher, clean_ws))
         STDOUT.puts
         redact_notes(reports, choice, "history")
         report.notes.each { |n| STDERR.puts "gori run history: #{n}" }
@@ -844,7 +859,7 @@ module Gori
           {d, show_ws_messages(store, d), redact_choice(store, redaction), d.try { store.interims(id) }}
         end
         abort "gori run show: no flow ##{id}" unless detail
-        detail, redact_report, previewed = show_redaction(detail, choice, redaction)
+        detail, ws_msgs, redact_report, previewed = show_redaction(detail, ws_msgs, choice, redaction)
         return if previewed
 
         show_request = !resp_only
@@ -885,17 +900,23 @@ module Gori
       # Returns the detail to render, the report to report (nil when this invocation is not
       # redacting), and whether the command is DONE: `--redact-preview` prints its rows from
       # here, because there is no document left to build.
-      private def self.show_redaction(detail : Store::FlowDetail, choice : Redact::Policy::Choice,
-                                      flags : RedactFlags) : {Store::FlowDetail, Redact::Report?, Bool}
+      #
+      # The WebSocket transcript goes through the same profile: every writer below prints it,
+      # and a login frame carries the credential an HTTP body would (MCP `get_flow` already did).
+      private def self.show_redaction(detail : Store::FlowDetail, ws_msgs : Array(Store::WsMessage),
+                                      choice : Redact::Policy::Choice,
+                                      flags : RedactFlags) : {Store::FlowDetail, Array(Store::WsMessage), Redact::Report?, Bool}
         # After the store closed (`abort` skips `ensure`), which is why the resolve above hands
         # its refusal back rather than aborting where it is made.
         abort "gori run show: #{choice.error}" if choice.error
         matcher = choice.matcher
-        return {detail, nil, false} unless matcher
+        return {detail, ws_msgs, nil, false} unless matcher
         clean, report = Redact::Wire.flow(detail, matcher)
-        return {clean, report, false} unless flags.preview?
+        frames, hits = Redact::Wire.ws_messages(ws_msgs, matcher)
+        report = report.copy_with(frames: hits)
+        return {clean, frames, report, false} unless flags.preview?
         print_redact_preview(redact_one(report), choice, "show")
-        {clean, report, true}
+        {clean, frames, report, true}
       end
 
       # The flow's REQUEST as a runnable `curl` command — headless "Copy as → cURL".

@@ -198,9 +198,12 @@ module Gori
       profile : Profile,
       request : Wire::Sanitized,
       response : Wire::Sanitized,
-      pattern_errors : Array(String) = [] of String do
+      pattern_errors : Array(String) = [] of String,
+      frames : Array(Hit) = [] of Hit do
+      # Frames are counted with the bodies: a WebSocket login frame carries the same credential
+      # an HTTP body does, and a report that left them out said "0 values redacted" over one.
       def count : Int32
-        request.count + response.count
+        request.count + response.count + frames.size
       end
 
       def redacted? : Bool
@@ -226,6 +229,7 @@ module Gori
         rows = [] of {String, Hit}
         request.hits.each { |h| rows << {"request", h} }
         response.hits.each { |h| rows << {"response", h} }
+        frames.each { |h| rows << {"frame", h} }
         rows
       end
     end
@@ -239,17 +243,19 @@ module Gori
       # survive a sanitized export, which is the conservative answer and the reason the raw path
       # exists). gori's own `[gori] …` advisory rows go through unchanged in practice: they carry
       # no field names a profile matches.
+      #
+      # Returns the hits too, not just their count: a CLI preview lists each replacement.
       def self.ws_messages(messages : Array(Store::WsMessage),
-                           matcher : Matcher) : {Array(Store::WsMessage), Int32}
-        count = 0
+                           matcher : Matcher) : {Array(Store::WsMessage), Array(Hit)}
+        hits = [] of Hit
         clean = messages.map do |m|
           result = matcher.body(m.payload, nil)
           next m unless result.redacted?
-          count += result.count
+          hits.concat(result.hits)
           Store::WsMessage.new(m.id, m.flow_id, m.repeater_id, m.created_at, m.direction,
             m.opcode, result.bytes, m.shape)
         end
-        {clean, count}
+        {clean, hits}
       end
 
       # Both sides of a stored flow, sanitized, plus the report that describes them.
