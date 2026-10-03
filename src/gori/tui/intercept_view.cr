@@ -8,6 +8,7 @@ require "./traffic_empty_state"
 require "../settings"
 require "./highlight"
 require "./text_area"
+require "./text_read_state"
 require "./hex_edit"
 # The class body continues in `intercept_view/` — a class-reopen slice, the same shape
 # `repeater_view/` uses. This file keeps the state (ivars + `initialize`) the slice reads.
@@ -84,6 +85,11 @@ module Gori::Tui
       # without having read it.
       @editor.wrap = true
       @editing = false
+      # The TEXT editor opens in READ, as the Repeater's and the Fuzzer's do: a bare letter is a
+      # command there, and `i`/`↵` (or the queue's `↵`/`e`) enter INS. Meaningless while the hex
+      # editor is up — it has no READ mode.
+      @insert = false
+      @read = TextReadState.new
       # Filter bar: the catch direction + on/off mirror the Interceptor (captured on
       # reload, rendered as chips); the condition query is a local edit buffer pushed
       # to the Interceptor on every keystroke (live, like History's filter).
@@ -453,7 +459,10 @@ module Gori::Tui
     # it to flip. The hex editor is the answer the Repeater's `^X` already was — nibble
     # overtype and byte insert/delete over an `Array(UInt8)` that never becomes a String — so
     # the refusal is gone and the lossy path is still never taken.
-    def toggle_edit : Nil
+    #
+    # `insert` picks the text editor's mode: ↵/`e` on the queue ask to edit and land in INS,
+    # Tab into the pane lands in READ, where a typed `i` is the way in rather than a byte.
+    def toggle_edit(insert : Bool = true) : Nil
       if @editing
         @editing = false
       elsif it = selected_item
@@ -461,7 +470,47 @@ module Gori::Tui
         @loaded_id = it.id
         @loaded_ws = it.kind.ws?
         @editing = true
+        @insert = insert
       end
+    end
+
+    def text_insert? : Bool
+      text_editing? && @insert
+    end
+
+    def text_read? : Bool
+      text_editing? && !@insert
+    end
+
+    def enter_insert! : Nil
+      @insert = true if text_editing?
+    end
+
+    # Back to READ, carrying an INS ⇧arrow selection over (see TextReadState#adopt_editor_selection).
+    def exit_insert! : Nil
+      return unless text_insert?
+      @insert = false
+      @read.adopt_editor_selection(@editor)
+    end
+
+    # The buffer READ-mode edits run against (`TabController#editor_text_buffer`).
+    def read_edit_buffer : {TextArea, TextReadState}?
+      text_editing? ? {@editor, @read} : nil
+    end
+
+    # READ navigation: the caret and selection are `@read`'s, never a buffer change.
+    def read_move(dr : Int32, dc : Int32, selecting : Bool = false) : Nil
+      @read.move(@editor, dr, dc, selecting: selecting) if text_read?
+    end
+
+    def read_page(dir : Int32, selecting : Bool = false) : Nil
+      read_move(dir * @editor.page_rows, 0, selecting)
+    end
+
+    def read_line_edge(dir : Int32, selecting : Bool = false) : Nil
+      return unless text_read?
+      dir < 0 ? @editor.home(selecting) : @editor.end_of_line(selecting)
+      @read.sync_to(@editor, selecting: selecting)
     end
 
     # Only reload from pristine bytes when switching to a DIFFERENT held item; re-entering
@@ -782,12 +831,14 @@ module Gori::Tui
     def editor_drag_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
       return unless text_editing?
       _, right = split_panes(body_rect(rect))
+      return @read.click(@editor, right.inset(1, 1), mx, my, selecting: true) unless @insert
       @editor.click_to_cursor(right.inset(1, 1), mx, my, selecting: true)
     end
 
     def editor_select_word(rect : Rect, mx : Int32, my : Int32) : Bool
       return false unless text_editing?
       _, right = split_panes(body_rect(rect))
+      return @read.select_word(@editor, right.inset(1, 1), mx, my) unless @insert
       @editor.select_word_at(right.inset(1, 1), mx, my)
     end
 
@@ -868,21 +919,21 @@ module Gori::Tui
 
     # --- focus ring (driven by the Runner's Tab/Shift-Tab) ---
     # Two panes: queue (editing off) ▸ detail editor (editing on). Entering the
-    # detail pane starts editing the selected item; pane_advance returns false at
+    # detail pane opens the selected item's editor in READ; pane_advance returns false at
     # an end so the Runner wraps focus back to the tab bar.
     def focus_first : Nil
       @editing = false
     end
 
     def focus_last : Nil
-      toggle_edit unless @editing
+      toggle_edit(insert: false) unless @editing
     end
 
     def pane_advance(dir : Int32) : Bool
       if dir > 0
         return false if @editing # detail → off the end (to the tab bar)
         return false unless selected_item
-        toggle_edit # queue → detail (start editing)
+        toggle_edit(insert: false) # queue → detail, in READ
         true
       else
         return false unless @editing # queue → off the end (to the tab bar)
@@ -982,6 +1033,7 @@ module Gori::Tui
     def editor_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
       return unless text_editing?
       _, right = split_panes(body_rect(rect))
+      return @read.click(@editor, right.inset(1, 1), mx, my) unless @insert
       @editor.click_to_cursor(right.inset(1, 1), mx, my)
     end
 
@@ -1333,11 +1385,17 @@ module Gori::Tui
       if @editing && @loaded_id == it.id && (h = @hex)
         @hex_scroll = h.render(screen, inner, focused, @hex_scroll)
       elsif @editing && @loaded_id == it.id
-        @editor.render(screen, inner, cursor: focused, highlight: mode, gauge: true, gauge_focused: focused)
+        render_text_editor(screen, inner, focused, mode)
       else
         sync_preview(it)
         @preview.render(screen, inner, focused, styled_at: preview_styled_at(it))
       end
+    end
+
+    # The INS caret, or READ's caret and band painted over the frame the editor drew.
+    private def render_text_editor(screen : Screen, inner : Rect, focused : Bool, mode : Symbol?) : Nil
+      @editor.render(screen, inner, cursor: focused && @insert, highlight: mode, gauge: true, gauge_focused: focused)
+      @read.paint_chrome(screen, inner, @editor, focused && !@insert)
     end
 
     # The item's styled window, and the plain projection of it the caret/selection/copy use.
@@ -1371,10 +1429,12 @@ module Gori::Tui
     end
 
     def preview_select_line : Nil
+      return @read.select_line(@editor) if text_read?
       with_preview { @preview.select_line }
     end
 
     def preview_clear_selection : Nil
+      @read.clear_selection
       @preview.clear_selection
     end
 
@@ -1386,6 +1446,7 @@ module Gori::Tui
     # RepeaterView#pane_selection? / #request_copy_text; all three change together.
     def preview_selection? : Bool
       return false if hex_editing? # the byte editor has a cursor, not a selection
+      return @read.selection?(@editor) if text_read?
       @editing ? @editor.selection? : @preview.selection?
     end
 
@@ -1396,6 +1457,7 @@ module Gori::Tui
       if (h = @hex) && @editing # `hex_editing?`, spelled out so the buffer is bound
         return String.new(h.to_bytes).scrub
       end
+      return @read.copy_text(@editor) if text_read?
       return @editor.selection_text || @editor.text if @editing
       it = selected_item || return ""
       sync_preview(it)

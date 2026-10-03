@@ -399,6 +399,30 @@ describe Gori::Tui::InterceptView do
         view.preview_copy_text.should eq("GET")
       end
     end
+
+    # The focus ring opens the editor in READ: the caret and the band are the read state's, and
+    # an INS ⇧arrow selection is still there to copy after `esc`.
+    it "selects and copies in READ, and keeps an INS selection across esc" do
+      tmp_interceptor do |ic|
+        hold_req(ic, "acme.test", "/e", "GET /e HTTP/1.1\r\nHost: acme.test\r\n\r\n")
+        view = InterceptView.new
+        view.reload(ic)
+        view.render(Screen.new(MemoryBackend.new(110, 16)), Rect.new(0, 0, 110, 16))
+        view.pane_advance(1)
+        view.text_read?.should be_true
+        3.times { view.read_move(0, 1, selecting: true) }
+        view.preview_selection?.should be_true
+        view.preview_copy_text.should eq("GET")
+
+        view.enter_insert! # INS resumes from the READ caret, column 3
+        view.edit_move(1, 0)
+        4.times { view.edit_move(0, 1, selecting: true) }
+        view.exit_insert!
+        view.text_read?.should be_true
+        view.preview_copy_text.should eq("t: a")
+        view.held_edit_id.should be_nil # navigation and selection never dirty the hold
+      end
+    end
   end
 
   it "edits a held request and forwards the edited bytes" do
