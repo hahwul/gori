@@ -20,16 +20,11 @@ module Gori::Tui
   # reopen; collected tokens are live secrets and stay in-memory (never on disk).
   class SequencerController < TabController
     include SeededToolTabs
-    DRAIN_CAP = 512
 
     def initialize(host : Host)
       super(host)
       @sessions = [] of SequencerTab
-      @host.session.store.sequencer_sessions.each do |rec|
-        view = SequencerView.new
-        view.restore(rec)
-        @sessions << SequencerTab.new(view, rec.flow_id, rec.id)
-      end
+      session_rows.each { |rec| @sessions << restore_tab(rec) }
       @current_idx = @sessions.empty? ? -1 : 0
       @seq_events = Channel({SequencerView, Sequencer::Event}).new(256)
     end
@@ -398,20 +393,6 @@ module Gori::Tui
       end
     end
 
-    # --- rename ---
-    def apply_rename(view : SequencerView, name : String) : Nil
-      return unless tab = @sessions.find(&.view.same?(view))
-      clean = name.strip
-      view.name = clean.empty? ? nil : clean
-      if id = tab.db_id
-        # See FuzzerController#apply_rename: the view already carries the new label, so a
-        # refused write is a silent no-op unless the store's answer is reported.
-        unless @host.session.store.set_sequencer_session_name(id, view.name)
-          @host.status("rename NOT saved (project busy) — the chip reads the new name until the session reloads")
-        end
-      end
-    end
-
     # --- cross-tab seeds ---
     def build_seed_from_flow(id : Int64) : SequenceSeed?
       return nil unless detail = @host.session.store.get_flow(id)
@@ -611,20 +592,6 @@ module Gori::Tui
       @host.status("stopping…", :busy)
     end
 
-    # --- async (run loop) ---
-    def drain_events : Bool
-      applied = false
-      n = 0
-      while n < DRAIN_CAP && (pair = poll(@seq_events))
-        n += 1
-        v, ev = pair
-        next unless @sessions.any?(&.view.same?(v))
-        apply_event(v, ev)
-        applied = true
-      end
-      applied
-    end
-
     private def apply_event(v : SequencerView, ev : Sequencer::Event) : Nil
       case ev
       when Sequencer::SampleEvent then v.append_sample(ev.sample)
@@ -691,22 +658,31 @@ module Gori::Tui
       (tab && (id = tab.db_id)) ? Jobs::Goto.new(:sequencer, id) : nil
     end
 
-    # --- close / persist ---
-    # ^W closes the MARKED sub-tabs when the strip carries marks, the active one otherwise
-    # (`target_subtab_indices` — the one target rule).
-    def request_close : Nil
-      return unless tab = current_tab_obj
-      if refs = batch_subtab_refs
-        @host.confirm("CLOSE SEQUENCERS", "Close #{marked_subtab_phrase(refs.size)}?\nEach config and its collected tokens are discarded.",
-          confirm_label: "close", danger: true) { close_marked_sessions(refs) }
-        return
-      end
-      @host.confirm("CLOSE SEQUENCER", "Close sequencing session “#{tab.view.summary}”?\nIts config and collected tokens are discarded.",
-        confirm_label: "close", danger: true) { close_tab }
-    end
-
     private def delete_session_row(id : Int64) : Bool
       @host.session.store.delete_sequencer_session(id)
+    end
+
+    # --- SeededToolTabs hooks ---
+    private def session_rows
+      @host.session.store.sequencer_sessions
+    end
+
+    private def restore_tab(row) : SequencerTab
+      view = SequencerView.new
+      view.restore(row)
+      SequencerTab.new(view, row.flow_id, row.id)
+    end
+
+    private def save_session_name(id : Int64, name : String?) : Bool
+      @host.session.store.set_sequencer_session_name(id, name)
+    end
+
+    private def session_events
+      @seq_events
+    end
+
+    private def close_wording : {String, String, String}
+      {"SEQUENCER", "sequencing", "collected tokens"}
     end
 
     def save_current : Nil
@@ -717,52 +693,6 @@ module Gori::Tui
       @host.session.store.update_sequencer_session(id, v.target_origin, v.request_bytes, v.http2?, v.sni_override, cfg, v.name)
       v.mark_config_synced(cfg)
       v.clear_dirty
-    end
-
-    def reconcile : Nil
-      rows = @host.session.store.sequencer_sessions
-      by_id = rows.index_by(&.id)
-      cur_db = current_tab_obj.try(&.db_id)
-      cur_view = current_tab_obj.try(&.view)
-
-      @sessions.each do |tab|
-        next unless (id = tab.db_id) && (row = by_id[id]?)
-        next if tab_locked?(tab)
-        v = tab.view
-        next if v.session_side_matches?(row)
-        v.apply_peer_session(row)
-      end
-
-      local_ids = @sessions.compact_map(&.db_id).to_set
-      rows.each do |row|
-        next if local_ids.includes?(row.id)
-        view = SequencerView.new
-        view.restore(row)
-        @sessions << SequencerTab.new(view, row.flow_id, row.id)
-      end
-
-      @sessions.reject! do |tab|
-        (id = tab.db_id) && !by_id.has_key?(id) && !tab_locked?(tab)
-      end
-
-      @sessions.sort_by! do |tab|
-        if (id = tab.db_id) && (row = by_id[id]?)
-          {row.position, id}
-        else
-          {Int32::MAX, Int64::MAX}
-        end
-      end
-
-      @current_idx =
-        if cur_db && (idx = @sessions.index { |t| t.db_id == cur_db })
-          idx
-        elsif (cv = cur_view) && (idx = @sessions.index(&.view.same?(cv)))
-          idx
-        elsif @sessions.empty?
-          -1
-        else
-          @current_idx.clamp(0, @sessions.size - 1)
-        end
     end
   end
 end
