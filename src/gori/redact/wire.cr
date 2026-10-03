@@ -258,6 +258,18 @@ module Gori
         {clean, hits}
       end
 
+      # A frozen evidence copy, both sides sanitized — the count of replacements, and whether a
+      # body's transfer was undone to read it. One home for every surface that shows evidence
+      # (`gori run evidence show`, MCP `get_evidence`, the TUI's copy): a field `get_flow`
+      # masks must not come back in clear because it was frozen first.
+      def self.evidence(ev : Store::IssueEvidence, matcher : Matcher) : {Store::IssueEvidence, Int32, Bool}
+        request = message(ev.request_head, ev.request_body, matcher)
+        response = message(ev.response_head, ev.response_body, matcher)
+        clean = Store::IssueEvidence.new(ev.meta, request.head, request.body,
+          ev.response_head.nil? ? nil : response.head, response.body)
+        {clean, request.count + response.count, request.decoded? || response.decoded?}
+      end
+
       # Both sides of a stored flow, sanitized, plus the report that describes them.
       #
       # Returns a NEW `FlowDetail`; the one handed in is untouched, and so is the row behind it.

@@ -571,11 +571,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   private def sanitized_evidence(ev : Store::IssueEvidence) : {Store::IssueEvidence, Int32?}
     matcher = Redact::Policy.ambient(@session.store) || return {ev, nil}
-    request = Redact::Wire.message(ev.request_head, ev.request_body, matcher)
-    response = Redact::Wire.message(ev.response_head, ev.response_body, matcher)
-    clean = Store::IssueEvidence.new(ev.meta, request.head, request.body,
-      ev.response_head.nil? ? nil : response.head, response.body)
-    {clean, request.count + response.count}
+    clean, count, _ = Redact::Wire.evidence(ev, matcher)
+    {clean, count}
   end
 
   # The live card's half of `sanitized_evidence` — same ambient #1035 policy, same two

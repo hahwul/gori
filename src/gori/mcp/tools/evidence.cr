@@ -111,12 +111,8 @@ module Gori
                                   include_sensitive : Bool) : {Store::IssueEvidence, Serialize::RedactionNote?}
         return {ev, nil} if include_sensitive
         matcher = Redact::Policy.ambient(store) || return {ev, nil}
-        request = Redact::Wire.message(ev.request_head, ev.request_body, matcher)
-        response = Redact::Wire.message(ev.response_head, ev.response_body, matcher)
-        clean = Store::IssueEvidence.new(ev.meta, request.head, request.body,
-          ev.response_head.nil? ? nil : response.head, response.body)
-        {clean, Serialize::RedactionNote.new(matcher.profile.name, request.count + response.count, 0,
-          request.decoded? || response.decoded?)}
+        clean, count, decoded = Redact::Wire.evidence(ev, matcher)
+        {clean, Serialize::RedactionNote.new(matcher.profile.name, count, 0, decoded)}
       end
 
       @[Tool("delete_evidence", gated: true, agent_action: true, permission: "write")]
