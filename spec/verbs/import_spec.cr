@@ -5,19 +5,21 @@ require "../support/fake_context"
 # method; the CLI mirror of the same sources is covered in spec/cli/run/import_spec.cr.
 describe "Gori::Verbs.register_import" do
   r = Gori::Verbs.registry
+  # id → the dispatch it must make: the path-prompt kinds share `open_import`, each with its
+  # own literal kind; cURL is a paste box with its own intent.
   verbs = {
-    "import.har"      => :import_har,
-    "import.urls"     => :import_urls,
-    "import.oas"      => :import_oas,
-    "import.postman"  => :import_postman,
-    "import.insomnia" => :import_insomnia,
-    "import.burp"     => :import_burp,
-    "import.wsdl"     => :import_wsdl,
-    "import.curl"     => :import_curl,
+    "import.har"      => {:open_import, ["har"]},
+    "import.urls"     => {:open_import, ["urls"]},
+    "import.oas"      => {:open_import, ["oas"]},
+    "import.postman"  => {:open_import, ["postman"]},
+    "import.insomnia" => {:open_import, ["insomnia"]},
+    "import.burp"     => {:open_import, ["burp"]},
+    "import.wsdl"     => {:open_import, ["wsdl"]},
+    "import.curl"     => {:import_curl, [] of String},
   }
 
   it "registers one Global, chordless verb per import source" do
-    verbs.each do |id, intent|
+    verbs.each do |id, (intent, _)|
       verb = r[id]
       verb.scope.should eq(Gori::Verb::Scope::Global)
       verb.category.should eq(Gori::Verb::Category::Action)
@@ -27,12 +29,12 @@ describe "Gori::Verbs.register_import" do
     end
   end
 
-  it "keeps every source on its own handler (no shared 'import' dispatcher)" do
-    # A single handler taking a kind would be one closure-capture slip away from importing
-    # a HAR as a URL list; one id → one intent is the invariant, however many sources exist.
+  it "keeps every source on its own handler, each naming its own kind" do
+    # One handler per id, each with a LITERAL kind: a single handler fed the kind from a loop
+    # would be one closure-capture slip away from importing a HAR as a URL list.
     ctx = FakeExecContext.new
     verbs.each_key { |id| r[id].call(ctx) }
-    ctx.call_names.should eq(verbs.values)
+    ctx.calls.map { |c| {c.name, c.args} }.should eq(verbs.values)
   end
 
   it "gives every import kind a way in" do

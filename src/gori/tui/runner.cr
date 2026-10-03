@@ -4462,7 +4462,7 @@ module Gori::Tui
 
     # --- Import path popup (palette → import.har/urls/oas/postman/insomnia/burp/wsdl) ---
 
-    private def open_import(kind : Symbol) : Nil
+    def open_import(kind : Symbol) : Nil
       ov = ImportOverlay.new(kind)
       ov.on_commit = -> { submit_import(ov) }
       open_overlay(ov)
@@ -6429,32 +6429,6 @@ module Gori::Tui
       persisted ? line : "#{line} — but NOT saved (project busy); it reverts when you reopen this project"
     end
 
-    # Open the settings editor for `section` (palette → settings:network/editor/theme/
-    # tabs/hotkeys). All sections are implemented; an unknown one toasts a TODO.
-    def import_har : Nil
-      open_import(:har)
-    end
-
-    def import_urls : Nil
-      open_import(:urls)
-    end
-
-    def import_oas : Nil
-      open_import(:oas)
-    end
-
-    def import_postman : Nil
-      open_import(:postman)
-    end
-
-    def import_insomnia : Nil
-      open_import(:insomnia)
-    end
-
-    def import_burp : Nil
-      open_import(:burp)
-    end
-
     def import_running? : Bool
       !@import_job.nil?
     end
@@ -6463,10 +6437,6 @@ module Gori::Tui
       return @toast = "no import is running" unless @import_job
       @import_cancel = true
       status("cancelling the import after its current chunk…", :busy)
-    end
-
-    def import_wsdl : Nil
-      open_import(:wsdl)
     end
 
     def import_curl : Nil

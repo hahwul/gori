@@ -1995,32 +1995,8 @@ private class FakeContext < ExecContext
     @calls << :open_preferences
   end
 
-  def import_har : Nil
-    @calls << :import_har
-  end
-
-  def import_urls : Nil
-    @calls << :import_urls
-  end
-
-  def import_oas : Nil
-    @calls << :import_oas
-  end
-
-  def import_postman : Nil
-    @calls << :import_postman
-  end
-
-  def import_insomnia : Nil
-    @calls << :import_insomnia
-  end
-
-  def import_burp : Nil
-    @calls << :import_burp
-  end
-
-  def import_wsdl : Nil
-    @calls << :import_wsdl
+  def open_import(kind : Symbol) : Nil
+    @calls << :open_import
   end
 
   def import_curl : Nil

@@ -209,15 +209,10 @@ module Gori
       # top-bar chip do the same). The per-section open_settings jumps straight to one.
       abstract def open_preferences : Nil
 
-      # import: palette-only bulk importers — each opens a path prompt, parses the
-      # file, and inserts flows into History (Sitemap derives from the same store).
-      abstract def import_har : Nil
-      abstract def import_urls : Nil
-      abstract def import_oas : Nil
-      abstract def import_postman : Nil
-      abstract def import_insomnia : Nil
-      abstract def import_burp : Nil
-      abstract def import_wsdl : Nil
+      # import: palette-only bulk importers — each opens a path prompt for `kind` (an
+      # `Import::LABELS` key), parses the file, and inserts flows into History (Sitemap
+      # derives from the same store).
+      abstract def open_import(kind : Symbol) : Nil
       # Import: cURL (#1244) — a paste box rather than a path prompt; every request in the
       # pasted command(s) becomes a History flow.
       abstract def import_curl : Nil
