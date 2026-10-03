@@ -16,7 +16,7 @@ describe Gori::Proxy::H2::HPACK do
   end
 
   it "the Huffman table is a complete prefix code (Kraft equality)" do
-    sum = HPACK::HUFF_LEN.sum { |l| 2.0 ** (-l.to_i) } + 2.0 ** (-HPACK::EOS_LEN)
+    sum = HPACK::HUFF_LEN.sum { |l| 2.0 ** (-l.to_i) } + 2.0 ** -30 # the 30-bit EOS code
     sum.should be_close(1.0, 1e-9)
   end
 

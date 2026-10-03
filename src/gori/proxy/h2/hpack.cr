@@ -130,9 +130,6 @@ module Gori::Proxy::H2
       26, 27, 26, 26, 27, 27, 27, 27, 27, 28, 27, 27, 27, 27, 27, 26,
     ] of UInt8
 
-    EOS_CODE = 0x3fffffff_u32
-    EOS_LEN  =             30
-
     # Static-table reverse lookups (built once) for the encoder.
     STATIC_PAIR = begin
       h = {} of {String, String} => Int32

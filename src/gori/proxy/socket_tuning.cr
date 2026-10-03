@@ -15,7 +15,7 @@ module Gori::Proxy
   # ClientConn/TlsMitm signatures.
   module SocketTuning
     # Per-read/write timeout while reading a request head/body or writing a response. Matches
-    # the upstream leg's existing 30 s (Upstream::IO_TIMEOUT) — a stall THIS long between reads
+    # the upstream leg's existing 30 s (Settings.io_timeout) — a stall THIS long between reads
     # is treated as a dead/hostile peer. It is per-read (per 64 KiB copy iteration), not a
     # whole-body budget, so only a ≥30 s stall trips it, never a genuinely slow-but-progressing
     # transfer.

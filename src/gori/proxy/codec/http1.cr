@@ -17,7 +17,6 @@ require "./message"
 # `peek`; see `consume_peeked` for why the bulk form is worth the scan.
 module Gori::Proxy::Codec::Http1
   CRLF           = "\r\n"
-  CRLF_CRLF      = "\r\n\r\n".to_slice
   MAX_HEAD_BYTES = 1024 * 256
 
   # A head read that ran out of time, carrying HOW MANY head bytes had arrived when it did.
