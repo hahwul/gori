@@ -96,7 +96,7 @@ module Gori
         end
         # Layer 1 (the project's include list) BEFORE Layer 2 (Sandbox / explicit excludes) —
         # the order every other direct-dial surface makes them in.
-        target = (bytes = plan.requests.first?) ? Gori::Outbound.request_target(bytes) : "/"
+        target = (bytes = plan.scope_requests.first?) ? Gori::Outbound.request_target(bytes) : "/"
         verdict = @outbound.check_request(plan.scheme, plan.host, target, plan.port)
         if verdict.blocked?
           return Observation.new(blocked_reason: Retest.clip(

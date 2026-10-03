@@ -272,17 +272,19 @@ rule set, through one chokepoint: `Gori::Outbound` (`src/gori/outbound.cr`). The
 `Fuzz::Sender` and `Repeater::Sender` take it as a **constructor argument**, so an ungated
 sender does not compile (P5). It carries two layers:
 
-- **Layer 1**, up front and once: the include/allowlist decision. Its strictness is the only
+- **Layer 1**, before side effects: the include/allowlist decision. Its strictness is the only
   thing that legitimately varies per surface, and the variants are named rather than
   re-derived at each call site: `Outbound.agent` (MCP, refusing anything not included,
   including an unconfigured project), `Outbound.cli` (`gori run`, where an unconfigured
   project stays permissive), `Outbound.interactive` (TUI, no up-front gate because the
-  operator typed the target).
+  operator typed the target). A Repeater send is judged on its binding-expanded
+  request-target (`Plan#scope_requests`), and the sender asks again on the real wire.
 - **Layer 2**, per send: Sandbox mode always, plus explicit EXCLUDE rules for an automated
   sweep. Identical on every surface, and applied even when Layer 1 was waived.
 
 Both layers judge the URL anchored on the host actually being **dialled**, not the one in the
-request line (`Outbound.scope_url`). A raw request may deliberately carry an absolute-form
+request line (`Outbound.scope_url`). A refusal never prints an expanded target, which may
+carry a live credential. A raw request may deliberately carry an absolute-form
 request line pointing somewhere else, which is a legitimate Host-header, cache-poisoning, or
 SSRF test and still goes out verbatim (P7); scoping on that spoofed host would let an anchored
 include rule authorise a send to a different origin.
@@ -4816,3 +4818,16 @@ follow the same rule in every ladder now, as Project and Issues already document
 Discoverability goes to a playground in Preferences → Keys (the wizard's pad plus each
 keyset's full key list), not to more keys. It only tries: the keyset is set on the row above
 it, and a second setter in the card was one more way for the two to disagree.
+
+### 2026-10-03: Repeater scope follows the final request-target
+
+Refines: [§3](#s3) and the 2026-09-03 `verbatim` entry above.
+
+That entry deliberately left Layer 1 on `Plan#bytes` while Layer 2 followed the send seam, to
+avoid matching a path include against a live binding. The split let a strict MCP or CLI scope
+allow a draft path and then send a different, binding-expanded path. Every up-front Layer-1
+gate (MCP, `gori run`, Retest, macros, session refresh) now reads `Plan#scope_requests`, the
+same side-effect-free prediction Layer 2 already used, so a refused send fires no session
+refresh first. `Repeater::Sender` repeats Layer 1 on the real wire, which a refresh can still
+move. Refusals never print the expanded target. `verbatim` still decides whether bindings
+resolve; when they do, the scope rule follows the bytes that leave gori.

@@ -647,7 +647,7 @@ module Gori
       # Layer 1 (the surface's scope policy) before Layer 2 (Sandbox / explicit excludes) — the
       # order every direct-dial surface asks them in (`Retest::LiveBackend#send`).
       private def step_refusal(plan : Repeater::Plan, outbound : Outbound) : String?
-        target = (bytes = plan.requests.first?) ? Outbound.request_target(bytes) : "/"
+        target = (bytes = plan.scope_requests.first?) ? Outbound.request_target(bytes) : "/"
         verdict = outbound.check_request(plan.scheme, plan.host, target, plan.port)
         return "#{plan.host} is out of the project scope — #{outbound.remedy(verdict)}" if verdict.blocked?
         plan.refusal

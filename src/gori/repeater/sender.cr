@@ -26,6 +26,8 @@ module Gori
     # status line, a CLI abort, an MCP SCOPE_BLOCKED error) BEFORE anything is printed;
     # `#send` re-checks anyway, so a caller that forgets still cannot put bytes on the wire.
     class Sender
+      SCOPE_REFUSAL_PREFIX = "blocked by scope"
+
       getter scheme : String
       getter host : String
       getter port : Int32
@@ -160,24 +162,22 @@ module Gori
       # the wire — one path-scoped include or exclude rule away from a decision taken about a
       # URL that never existed. Whichever way the pass is switched, both halves move together.
       #
-      # SCOPED TO THIS GATE, which is Layer 2 (Sandbox/exclude). LAYER 1 — MCP's
-      # `request_scope_url` and the CLI's `repeater_scope_verdict` — still builds its URL from
-      # `Plan#bytes`, the PRE-seam draft, so on a send that DOES expand the two layers are
-      # asked about different targets. That is older and wider than this seam (it is a question
-      # about whether an include list should be matched against a live credential at all), and
-      # `verbatim` narrows it rather than widening it: with the pass off, the draft and the
-      # wire are the same bytes and both layers read one URL.
-      #
-      # DRAFT bytes: predict the seam, then ask. `wire` is what will actually run, so the
-      # prediction has to be the same pass — the overlay is header-only, so it cannot move the
-      # request line this reads and does not need repeating here.
+      # Layer 1 reads the same prediction (`Plan#scope_requests`). It used to read `Plan#bytes`,
+      # the pre-seam draft, so a `$BIND.*` path could pass a path-scoped include as authored
+      # and go out somewhere else; `wire_refusal` re-checks the real wire.
       #
       # (There was a `String` overload beside this one and it had no callers: `send_fields`
       # passes `H2Engine.field_scope_line`, which returns `Bytes`. It was a second copy of the
       # predicate this seam exists to have one of, so it is gone.)
       def refusal(bytes : Bytes) : String?
-        return refusal_wired(bytes) unless resolve_bindings?
-        refusal_wired(expand_send(bytes, generation, @refresh_slot))
+        refusal_wired(predict(bytes))
+      end
+
+      # The request line `wire` will produce, predicted without its side effects (the session
+      # refresh): the binding pass only, since the overlay and client hints touch headers. What
+      # every up-front gate reads, so a refused send fires no login chain first.
+      def predict(bytes : Bytes) : Bytes
+        resolve_bindings? ? expand_send(bytes, generation, @refresh_slot) : bytes
       end
 
       # FINAL bytes: the rule itself, asked about the slice the socket gets.
@@ -193,6 +193,18 @@ module Gori
       # is arranged to prevent. A binding whose own value carries a `$NAME` is the same shape.
       private def refusal_wired(wire : Bytes) : String?
         @outbound.send_block(@scheme, @host, Gori::Outbound.request_target(wire), @port)
+      end
+
+      # Layer 1 at the final send seam. Surface preflights still provide their own structured
+      # refusal before recording or reporting a send, but this check closes paths that expand
+      # between preflight and the socket (bindings, WebSocket handshake shaping, and repeated
+      # race/timing sends). Never include the request-target in the error: it may contain a
+      # live binding value.
+      private def wire_refusal(wire : Bytes) : String?
+        target = Gori::Outbound.request_target(wire)
+        verdict = @outbound.check_wire_request(@scheme, @host, target, @port)
+        return "#{SCOPE_REFUSAL_PREFIX} — #{@outbound.remedy(verdict)}" if verdict.blocked?
+        refusal_wired(wire)
       end
 
       # Does the `$NAME` binding pass run at this seam? The two independent reasons it does not
@@ -330,7 +342,7 @@ module Gori
       # `refusal` would run the binding pass over it a SECOND time. That is not the no-op this
       # comment used to claim — see `refusal_wired`.
       def send_wire(wire : Bytes, cancel : Proc(Bool)? = nil) : Result
-        if reason = refusal_wired(wire)
+        if reason = wire_refusal(wire)
           return Result.new(Bytes.new(0), nil, nil, 0_i64, reason)
         end
         result =
@@ -350,8 +362,8 @@ module Gori
 
       # Send a field-native h2 request: the operator's exact HPACK field list plus body, with
       # no h1-text carrier in between (see `H2Engine.send_fields`). Gated identically to `send`
-      # — Sandbox / exclude on a request line synthesized from `:method`/`:path`, so a
-      # field-native send can no more reach a blocked host than a byte-authored one.
+      # on a request line synthesized from `:method`/`:path`, so a field-native send can no
+      # more reach an out-of-scope target than a byte-authored one.
       #
       # Nothing on this path expands: the fields ARE the message and go to the encoder as
       # given. The synthetic line is built from `:method`/`:path`, which ARE operator-typed and
@@ -361,7 +373,7 @@ module Gori
       def send_fields(fields : Array({String, String}), body : Bytes?,
                       cancel : Proc(Bool)? = nil) : Result
         scope = H2Engine.field_scope_line(fields)
-        if reason = refusal(scope)
+        if reason = wire_refusal(scope)
           return Result.new(Bytes.new(0), nil, nil, 0_i64, reason)
         end
         # No SESSION SLOT overlay here, and this is a limit rather than an omission: a slot's
@@ -388,7 +400,7 @@ module Gori
         # `Plan#refusal` still predicts from the drafts, which is what lets a caller report the
         # block before printing anything.
         requests = requests.map { |b| wire(b) }
-        if reason = requests.each.compact_map { |b| refusal_wired(b) }.first?
+        if reason = requests.each.compact_map { |b| wire_refusal(b) }.first?
           return requests.map { Result.new(Bytes.new(0), nil, nil, 0_i64, reason) }
         end
         results = Engine.send_pipeline(requests, scheme: @scheme, host: @host, port: @port,
@@ -414,7 +426,7 @@ module Gori
       # Sender's), which the surface enforces before building the plan.
       def send_race(requests : Array(Bytes)) : Array(Result)
         requests = requests.map { |b| wire(b) }
-        if reason = requests.each.compact_map { |b| refusal_wired(b) }.first?
+        if reason = requests.each.compact_map { |b| wire_refusal(b) }.first?
           return requests.map { Result.new(Bytes.new(0), nil, nil, 0_i64, reason) }
         end
         results =
@@ -442,7 +454,7 @@ module Gori
         # This used to gate the draft and wire separately, so the handshake was passed through
         # the seam twice and the verdict could be taken on a URL the socket never got.
         wired = wire(upgrade)
-        if reason = refusal_wired(wired)
+        if reason = wire_refusal(wired)
           return WsEngine::Result.new(Bytes.new(0), [] of WsEngine::Message, 0_i64, reason)
         end
         # EXTRACTION is handshake-only — a WS frame is not an HTTP response and `TokenExtract`'s

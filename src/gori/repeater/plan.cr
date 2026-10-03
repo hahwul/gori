@@ -383,6 +383,13 @@ module Gori::Repeater
     # one narrow window (h1 last-byte-sync, h2 single-packet), the multi-endpoint TOCTOU
     # primitive (#1236). The members share this plan's ONE origin (the surface resolved them to
     # it); `refusal` above already covers the whole group.
+    # Each member as Layer 1 must judge it: through the seam's binding pass, so a `$BIND.*`
+    # path is asked about where it goes, not as authored (`Sender#predict`). Field-native h2
+    # does not expand. The sender re-checks the real wire, which a refresh may still move.
+    def scope_requests : Array(Bytes)
+      @h2_fields ? @requests : @requests.map { |r| @sender.predict(r) }
+    end
+
     def send_race : Array(Result)
       @sender.send_race(@requests)
     end

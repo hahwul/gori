@@ -626,14 +626,18 @@ module Gori
       # Layer 1 is asked of EVERY request in the plan, like Layer 2 (`Plan#refusal`): a race or
       # timing group shares one origin but not one path, so gating on the first member alone
       # let an out-of-scope path ride behind an in-scope one. One blocked member refuses the
-      # group; the first member's verdict is the one reported.
+      # group; the first member's verdict is the one reported. Each member is judged as the
+      # binding pass will send it (`Plan#scope_requests`), and the refusal names it by number
+      # only: the expanded target may carry a live bound value.
       private def send_gate(ob : Outbound, plan : Repeater::Plan) : ScopeCheck | Result
-        sc = ob.check(request_scope_url(plan), plan.host, request_exclude_url(plan))
+        requests = plan.scope_requests
+        first = requests.first? || plan.bytes
+        sc = ob.check(request_scope_url(plan, first), plan.host, request_exclude_url(plan, first))
         return scope_blocked(sc) if sc.blocked?
-        plan.requests.each_with_index do |req, i|
+        requests.each_with_index do |req, i|
           next if i == 0
           member = ob.check(request_scope_url(plan, req), plan.host, request_exclude_url(plan, req))
-          return scope_blocked(member, "member #{i + 1} (#{request_target(req)})") if member.blocked?
+          return scope_blocked(member, "member #{i + 1}") if member.blocked?
         end
         if reason = plan.refusal
           return sandbox_blocked(reason, plan.host, "url")
@@ -1173,7 +1177,8 @@ module Gori
         # Anchor on the same scheme://host/TARGET url send_request uses (Outbound.scope_url).
         # Checking a bare "/" made a path-scoped include (e.g. string:/chat) refuse the very
         # WS repeater it was written to allow, while the identical send_request passed.
-        sc = ob.check(request_scope_url(plan), host, request_exclude_url(plan))
+        upgrade = plan.scope_requests.first? || plan.bytes
+        sc = ob.check(request_scope_url(plan, upgrade), host, request_exclude_url(plan, upgrade))
         return scope_blocked(sc) if sc.blocked?
         # Layer 2 (Sandbox) — allow_unscoped does not lift it; refuse before the link write.
         if reason = plan.refusal
