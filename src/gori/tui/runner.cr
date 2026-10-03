@@ -2925,24 +2925,7 @@ module Gori::Tui
         render_safe_frame(screen, layout, failed)
         return
       end
-      Chrome.render_top_bar(screen, layout.topbar, project: @session.project.name,
-        listen: listen_chip_label,
-        scope: scope_label, probe: probe_label, rules: rules_label, intercept: intercept_label,
-        sandbox: sandbox_label,
-        unread: @notifications.unread, capturing: @session.capturing?,
-        write_failures: @session.store.write_failures, bypass: Settings.passthrough_count,
-        listeners: listener_chip_count, listener_errors: @session.listener_errors.size,
-        authorize: authorize_chip_label, session: session_slot_chip, agents: agent_chip,
-        asks: answerable_questions.size)
-      Chrome.render_rule(screen, layout.rule)
-      # One reconcile per frame: the menu strip, the off-bar count AND the slot numbers all
-      # derive from the same tab reconcile — split_tabs computes them in a single pass.
-      vis_tabs, _, slots = effective_bar
-      Chrome.render_menu(screen, layout.menu, active_tab: @active_tab,
-        focused: @focus == :menu && !@menu_more,
-        tabs: vis_tabs, intercept_count: @session.interceptor.pending_count,
-        more_focused: @focus == :menu && @menu_more,
-        numbered: Settings.tab_numbers?, slots: slots)
+      render_chrome(screen, layout)
       # Text the companion will cover is ellipsized at her edge, not left as a stump that reads
       # like a real value (see Screen#occlusion). Body only: nothing else shares her rows.
       screen.occlusion = companion_occlusion(layout.body)
@@ -2981,13 +2964,8 @@ module Gori::Tui
       flush_screen
     end
 
-    # The frame drawn while a full render is failing (see `absorb_tick_error`): the top bar,
-    # the tab menu and the status row exactly as `render` draws them, and the error where the
-    # body would be. Nothing pane-owned is asked to draw — the body, the companion, overlays,
-    # the prompts and the controllers' hint strips are all suspects — so this frame can only
-    # fail if the chrome itself is broken. The tab menu is kept LIVE (focus, active tab) so
-    # 1-9 / ←→ still read as what they do: the way out of a tab that cannot draw.
-    private def render_safe_frame(screen : Screen, layout : Layout, ex : Exception) : Nil
+    # The top bar, rule and tab menu — shared by `render` and `render_safe_frame`.
+    private def render_chrome(screen : Screen, layout : Layout) : Nil
       Chrome.render_top_bar(screen, layout.topbar, project: @session.project.name,
         listen: listen_chip_label,
         scope: scope_label, probe: probe_label, rules: rules_label, intercept: intercept_label,
@@ -2998,12 +2976,24 @@ module Gori::Tui
         authorize: authorize_chip_label, session: session_slot_chip, agents: agent_chip,
         asks: answerable_questions.size)
       Chrome.render_rule(screen, layout.rule)
+      # One reconcile per frame: the menu strip, the off-bar count AND the slot numbers all
+      # derive from the same tab reconcile — split_tabs computes them in a single pass.
       vis_tabs, _, slots = effective_bar
       Chrome.render_menu(screen, layout.menu, active_tab: @active_tab,
         focused: @focus == :menu && !@menu_more,
         tabs: vis_tabs, intercept_count: @session.interceptor.pending_count,
         more_focused: @focus == :menu && @menu_more,
         numbered: Settings.tab_numbers?, slots: slots)
+    end
+
+    # The frame drawn while a full render is failing (see `absorb_tick_error`): the top bar,
+    # the tab menu and the status row exactly as `render` draws them, and the error where the
+    # body would be. Nothing pane-owned is asked to draw — the body, the companion, overlays,
+    # the prompts and the controllers' hint strips are all suspects — so this frame can only
+    # fail if the chrome itself is broken. The tab menu is kept LIVE (focus, active tab) so
+    # 1-9 / ←→ still read as what they do: the way out of a tab that cannot draw.
+    private def render_safe_frame(screen : Screen, layout : Layout, ex : Exception) : Nil
+      render_chrome(screen, layout)
       body = layout.body
       # A message may carry wire bytes or newlines (an IndexError's does not, a parser's may):
       # one line, valid UTF-8, or the frame meant to report the crash would be the next one.
