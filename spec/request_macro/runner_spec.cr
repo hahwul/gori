@@ -34,6 +34,13 @@ private class CountingBudget
 end
 
 describe Gori::RequestMacro::Runner do
+  # The id test was a Regex, which raised on the invalid UTF-8 an argv `--macro` can carry.
+  it "names a step that is invalid UTF-8 as no such session, without raising" do
+    with_store do |store|
+      expect_raises(RM::Error, /macro step 1/) { runner_for(store, [String.new(Bytes[0xff, 0xfe])]) }
+    end
+  end
+
   it "sends the step, rebinds the extract rule, and records the step in History as source macro" do
     origin = MacroTokenOrigin.new
     with_macro_project(origin) do |store, bindings, _|

@@ -92,9 +92,10 @@ module Gori::RequestMacro
 
     # One Repeater session for one `steps` entry: `3`, `#3` (an id) or the tab's name.
     private def self.resolve(store : Store, token : String, n : Int32) : Step
+      # A char scan, not a Regex: PCRE raises on the invalid UTF-8 an argv can carry.
       rec =
-        if token.matches?(/\A#?\d+\z/)
-          id = token.lchop('#').to_i64?
+        if !(digits = token.lchop('#')).empty? && digits.each_char.all?(&.ascii_number?)
+          id = digits.to_i64?
           (id && store.get_repeater(id)) ||
             raise Error.new("macro step #{n}: there is no Repeater session ##{token.lchop('#')} in this project")
         else

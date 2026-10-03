@@ -250,7 +250,10 @@ module Gori
       text = descriptor.strip
       raise Error.new("empty payload source — expected `<QL> <projection>`, " \
                       "projection one of #{Projection.labels.join(", ")}") if text.empty?
-      query, _, token = text.rpartition(/\s+/) # no whitespace at all: the whole text is the projection
+      # Not `rpartition(/\s+/)`: PCRE raises on invalid UTF-8, and the stdlib retries the match
+      # at every position, quadratic in a text with no whitespace (200k chars took >20 s).
+      token = text.split.last # no whitespace at all: the whole text is the projection
+      query = text.rchop(token)
       name, colon, rule = token.partition(':')
       projection = Projection.parse?(name)
       unless projection
