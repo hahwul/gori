@@ -927,3 +927,13 @@ describe SettingsView do
     end
   end
 end
+
+# termisu reads Tab as the printable '\t'; a settings text field must not take it as text.
+describe "SettingsOverlay Tab" do
+  it "does not type a tab into the focused text field" do
+    ov = SettingsOverlay.new(:editor)
+    before = ov.@view.@values.dup
+    ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Tab))
+    ov.@view.@values.should eq(before)
+  end
+end
