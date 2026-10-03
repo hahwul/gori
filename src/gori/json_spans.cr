@@ -23,9 +23,9 @@ module Gori
   module JsonSpans
     extend self
 
-    # One member of an object: its decoded key, and the byte span of its value (a string's
-    # span includes its quotes).
-    record Member, key : String, value_start : Int32, value_end : Int32 do
+    # One member of an object: its decoded key, where the key's opening quote sits, and the
+    # byte span of its value (a string's span includes its quotes).
+    record Member, key : String, value_start : Int32, value_end : Int32, key_start : Int32 do
       def string?(bytes : Bytes) : Bool
         bytes[value_start] == '"'.ord
       end
@@ -42,6 +42,7 @@ module Gori
       property close : Int32 = -1
       # The key a member is still waiting for its value under, and where that value started.
       property pending_key : String? = nil
+      property pending_key_start : Int32 = -1
       property pending_start : Int32 = -1
 
       def initialize(@open : Int32, @object : Bool)
@@ -150,6 +151,7 @@ module Gori
       return j unless top
       if top.object? && top.pending_key.nil?
         top.pending_key = String.from_json(String.new(bytes[from, j - from]))
+        top.pending_key_start = from
       else
         value_at(top, from, j)
       end
@@ -167,7 +169,7 @@ module Gori
       c.tail = stop
       return unless c.object?
       if key = c.pending_key
-        c.members << Member.new(key, c.pending_start, stop)
+        c.members << Member.new(key, c.pending_start, stop, c.pending_key_start)
       end
       c.pending_key = nil
     end
