@@ -619,9 +619,12 @@ module Gori::Tui
 
     def self.fit(str : String, w : Int32) : String
       return "" if w <= 0
-      return (str.each_grapheme.first?.try(&.to_s) || "") if w == 1 # first GRAPHEME (not codepoint): keep flags/ZWJ/combining intact, matching Highlight.draw
-      cur = 0                                                       # width accumulated into `head` (the ellipsis prefix, within w-1)
-      total = 0                                                     # running total width, to detect overflow past `w`
+      if w == 1 # first GRAPHEME (not codepoint): keep flags/ZWJ/combining intact, matching Highlight.draw
+        g = str.each_grapheme.first?.try(&.to_s) || ""
+        return Screen.grapheme_cols(g) <= 1 ? g : "…" # a wide glyph would paint 2 cells into 1
+      end
+      cur = 0   # width accumulated into `head` (the ellipsis prefix, within w-1)
+      total = 0 # running total width, to detect overflow past `w`
       overflow = false
       head = String.build do |io|
         str.each_grapheme do |g|

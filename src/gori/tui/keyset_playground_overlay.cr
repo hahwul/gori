@@ -96,8 +96,8 @@ module Gori::Tui
     end
 
     def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
-      return :stay unless box = overlay_box(area)
-      return :cancel unless box.contains?(mx, my)
+      box = overlay_box(area)
+      return :cancel if box.nil? || !box.contains?(mx, my) # "needs a larger window" closes on a click too
       row = my - box.y
       if 0 <= row - OFFER_ROW < KINDS.size
         leave_pad

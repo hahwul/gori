@@ -186,19 +186,10 @@ class Gori::Tui::RepeaterView
     return unless host_idx
     new_line = "Host: #{authority}"
     return if head_lines[host_idx] == new_line
-    # Single-token value only — the `Content-Length` guard's rule for the same reason (this
-    # rewrite replaces the WHOLE line, so anything else riding on it would be destroyed) and
-    # for the same second reason: an authority carrying a space is either mid-edit text or a
-    # deliberately malformed Host, and neither is gori's to silently correct.
-    return unless single_token_header?(head_lines[host_idx])
+    # Only while the line is still the scaffold's: the one-shot can stay armed past a body
+    # edit (focus left the target before it moved off the placeholder), and a Host the
+    # operator typed in the meantime is the payload, never gori's to overwrite.
+    return unless head_lines[host_idx] == BLANK_HOST_LINE
     @editor.replace_line(host_idx, new_line)
-  end
-
-  # Whether a header line's value is one whitespace-free token — see the call site.
-  private def single_token_header?(line : String) : Bool
-    value = line.split(':', 2)[1]?
-    return false unless value
-    token = value.strip
-    !token.empty? && !token.each_char.any?(&.whitespace?)
   end
 end

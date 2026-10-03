@@ -384,6 +384,13 @@ describe Gori::Tui::Highlight do
       b.row(0)[0, 1].should eq("h")
     end
 
+    it "shows an ellipsis, not a 2-column glyph, in a 1-wide slot" do
+      Screen.fit("안녕", 1).should eq("…")
+      b = MemoryBackend.new(5, 1)
+      Highlight.draw(Screen.new(b), 0, 0, [Highlight::Span.new("안녕", Theme.text)], width: 1).should eq(1)
+      b.row(0)[0, 1].should eq("…")
+    end
+
     it "matches Screen#text across a MIXED ascii+wide multi-span line at every width" do
       # draw's ASCII fast path (width-1 char draw) and its grapheme path must compose:
       # width accumulates continuously across a span boundary where the branch flips, so a

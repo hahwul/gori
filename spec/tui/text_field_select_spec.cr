@@ -270,3 +270,12 @@ describe Gori::Tui::TextField do
     end
   end
 end
+
+describe "LineFieldRead#copy_text past the line" do
+  # A reload can shrink the line under a standing anchor; copy the line, never "" or raise.
+  it "copies the whole line when the band lies beyond it" do
+    r = Gori::Tui::LineFieldRead.new
+    r.move_cx(20, 10, 40, selecting: true) # anchor 20, caret 30
+    r.copy_text("short", 30).should eq("short")
+  end
+end

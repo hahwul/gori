@@ -161,10 +161,13 @@ class FakeHost
   # "did the rows go" assertion cannot see. `action.call` keeps every existing caller's
   # behaviour: the dialog is not what those examples are about.
   getter confirms = [] of {String, String}
+  # Runs while the dialog is "up", before the action: a data_version tick under the modal.
+  property under_modal : Proc(Nil)? = nil
 
   def confirm(title : String, message : String, *, confirm_label : String, danger : Bool,
               return_to : Symbol = :none, &action : -> Nil) : Nil
     @confirms << {title, message}
+    @under_modal.try(&.call)
     action.call
   end
 

@@ -976,7 +976,11 @@ module Gori::Tui
       vis.each_with_index do |i, pos|
         next if pos < start
         seg_w = widths[i]
-        break if x + seg_w > rect.right - 1 # leave the last column for the › marker
+        # A first chip wider than the whole strip (a long CJK session name on a narrow pane)
+        # is clipped rather than dropped: `scroll_start` parked the window on it, so dropping
+        # it left the strip with no active chip and nothing to click.
+        seg_w = {seg_w, rect.right - 1 - x}.min if segs.empty?
+        break if seg_w < 3 || x + seg_w > rect.right - 1 # leave the last column for the › marker
         segs << {i, labels[i], Rect.new(x, rect.y, seg_w, 1)}
         x += seg_w + 2 # two columns of breathing room between chips
         last = pos

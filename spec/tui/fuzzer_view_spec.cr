@@ -1906,6 +1906,19 @@ describe "Gori::Tui::FuzzerView durable run state" do
     view.results_saveable?.should be_true
   end
 
+  # `buffer_error` accepts anything `to_i64?` reads; a value past Int32 must clamp, not fall
+  # back to the default while the row still shows what was typed.
+  it "clamps Advanced numbers past Int32 rather than dropping them" do
+    view = loaded_fuzzer
+    view.apply_advanced(view.advanced_snapshot.copy_with(
+      conc: "99999999999", retries: "99999999999", race: "3000000000", timeout: "2147483648"))
+    view.config_json
+    view.config.concurrency.should eq(1000)
+    view.config.retries.should eq(1000)
+    view.config.race_count.should eq(Gori::Fuzz::Engine::MAX_RACE_SIZE)
+    view.config.timeout.should eq(Int32::MAX.seconds)
+  end
+
   it "marks a max-requests cutoff as budget_exhausted" do
     view = loaded_fuzzer
     view.@config.max_requests = 3_i64

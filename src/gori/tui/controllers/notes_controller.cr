@@ -502,8 +502,12 @@ module Gori::Tui
         do_notes_close
         return
       end
+      # By identity at answer time: a peer reload under the modal can move the selection.
+      ref = subtab_ref(@notes.current_index)
       @host.confirm("CLOSE NOTE", "Close “#{@notes.current_label}”?\nIts text will be discarded.",
-        confirm_label: "close", danger: true) { do_notes_close }
+        confirm_label: "close", danger: true) do
+        (idx = ref && subtab_index_of(ref)) ? do_notes_close(idx) : @host.status("already closed")
+      end
     end
 
     private def close_marked_notes(refs : Array(SubtabRef)) : Nil
@@ -520,8 +524,8 @@ module Gori::Tui
       false
     end
 
-    private def do_notes_close : Nil
-      close_note_at(@notes.current_index)
+    private def do_notes_close(idx : Int32 = @notes.current_index) : Nil
+      close_note_at(idx)
       refresh_link_preview
       @host.status("closed note (#{@notes.count} open)")
     end

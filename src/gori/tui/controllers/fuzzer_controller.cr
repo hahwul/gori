@@ -427,14 +427,6 @@ module Gori::Tui
       save_current
     end
 
-    private def switch_subtab(c : Char?) : Nil
-      return unless c
-      idx = c.to_i - 1
-      if idx < @sessions.size
-        select_subtab(idx)
-      end
-    end
-
     private def printable(ev : Termisu::Event::Key) : Char?
       return nil if ev.ctrl? || ev.alt?
       ev.char || ev.key.to_char
@@ -1798,6 +1790,7 @@ module Gori::Tui
         @auto_load_considered.add(id)
       end
       @current_idx = @sessions.size - 1
+      reveal_active_subtab
       @host.goto_tab(:fuzzer)
     end
 
@@ -1822,8 +1815,9 @@ module Gori::Tui
         @host.status(reason)
         return
       end
+      ref = subtab_ref(@current_idx)
       @host.confirm("CLOSE FUZZER", "Close fuzz session “#{tab.view.summary}”?\nIts template/config, private temporary spool, and every saved run are deleted.",
-        confirm_label: "close", danger: true) { close_tab }
+        confirm_label: "close", danger: true) { close_named(ref) }
     end
 
     private def close_marked_fuzzers(refs : Array(SubtabRef)) : Nil

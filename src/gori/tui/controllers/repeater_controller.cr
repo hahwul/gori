@@ -1547,7 +1547,7 @@ module Gori::Tui
         next unless @repeaters.find(&.view.same?(view)) # sub-tab closed mid-flight
         view.apply_group(labeled)
         ok = labeled.count { |(_, r)| r.error.nil? }
-        @host.status("send group: #{ok}/#{labeled.size} ok on one connection")
+        @host.status("send group: #{ok}/#{labeled.size} ok on one connection#{result_origin(view)}")
         applied = true
       end
       while pair = poll(@race_results)
@@ -1560,7 +1560,7 @@ module Gori::Tui
         # release-relative timing — so this does NOT editorialize (a multi-endpoint race where
         # both endpoints SHOULD return 2xx is the normal case, not a double-spend).
         ok2xx = labeled.count { |(_, r)| r.error.nil? && (s = r.response.try(&.status)) && 200 <= s < 300 }
-        @host.status("send race: #{responded}/#{labeled.size} responded · #{ok2xx}×2xx")
+        @host.status("send race: #{responded}/#{labeled.size} responded · #{ok2xx}×2xx#{result_origin(view)}")
         applied = true
       end
       while pair = poll(@minimize_events)
@@ -1843,6 +1843,7 @@ module Gori::Tui
         @host.status("repeater: #{view.summary} — #{graphql_raw_note(detail)}type to edit · ^R send · ^N new · ⇧1-9 switch · esc back")
       end
       @current_repeater_idx = @repeaters.size - 1
+      reveal_active_subtab
       @host.goto_tab(:repeater)
     end
 
@@ -1852,6 +1853,7 @@ module Gori::Tui
       view.load_blank
       @repeaters << RepeaterTab.new(view, nil, persist_new_repeater(view, nil))
       @current_repeater_idx = @repeaters.size - 1
+      reveal_active_subtab
       @host.goto_tab(:repeater)
       @host.status("new repeater — edit the request & target · ^R send · ⇧1-9 switch · esc back")
     end
@@ -1877,6 +1879,7 @@ module Gori::Tui
       end
       @repeaters << RepeaterTab.new(view, nil, db_id)
       @current_repeater_idx = @repeaters.size - 1
+      reveal_active_subtab
       @host.goto_tab(:repeater)
     end
 
@@ -1939,6 +1942,7 @@ module Gori::Tui
       end
       @repeaters << RepeaterTab.new(view, nil, db_id)
       @current_repeater_idx = @repeaters.size - 1
+      reveal_active_subtab
       frames_lost
     end
 
@@ -2535,7 +2539,8 @@ module Gori::Tui
     # The marked sub-tabs ARE the group, and they must share ONE origin and ONE transport
     # (h1 xor h2): the h2 single-packet attack is one connection = one host, and the h1 form is
     # kept to the same shape for a legible transcript (cross-host h1 is a deliberate follow-up).
-    # The transcript renders in the CURRENT tab's pane, reusing `apply_group`.
+    # The transcript renders in the FIRST marked tab's pane (the anchor), reusing `apply_group`;
+    # the status names that tab when it is not the one on screen.
     def repeater_send_race : Nil
       refs = batch_subtab_refs
       unless refs
@@ -2566,7 +2571,7 @@ module Gori::Tui
       return unless collected = collect_race_members(tabs) # sets its own status on a refusal
       drafts, labels = collected
 
-      # ONE plan over all members, built from the anchor (current) tab's send context (session
+      # ONE plan over all members, built from the anchor tab's send context (session
       # slot, TLS preset, SNI). Its Sender is origin-bound to the shared origin every member
       # resolved to.
       return unless plan = repeater_plan(view, drafts, http2: view.http2?)

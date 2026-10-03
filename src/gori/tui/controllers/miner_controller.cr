@@ -395,6 +395,7 @@ module Gori::Tui
     private def open_session(view : MinerView, flow_id : Int64?) : Nil
       @sessions << MinerTab.new(view, flow_id, persist_new(view, flow_id))
       @current_idx = @sessions.size - 1
+      reveal_active_subtab
     end
 
     # Content-only clone of the active miner session (request + config; no findings/links).

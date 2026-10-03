@@ -2657,7 +2657,7 @@ module Gori::Tui
       elsif @palette.edit(ev, self) # ↑/↓, ⌃/⌥←→, Home/End, Delete, ⌥⌫, ←/→ — before ⌫ and the printables
       elsif key.backspace?
         @palette.backspace(self)
-      elsif c && !ev.ctrl? && !ev.alt?
+      elsif c && !c.control? && !ev.ctrl? && !ev.alt? # termisu reads Tab as '\t'
         @palette.append(c, self)
         @palette.set_preedit("") if @palette.responds_to?(:set_preedit)
       end
@@ -3486,6 +3486,7 @@ module Gori::Tui
       repeater_controller.stop_all
       oast_controller.stop_all
       authorize_controller.stop_all
+      sitemap_controller.stop_all
       # A retest run is the Issues tab's one background sender (#1036). Cooperative like the
       # rest: the fiber owns its sockets and checks the flag between steps.
       issues_controller.halt_retest
@@ -6926,10 +6927,13 @@ module Gori::Tui
       MouseDrag.disable(io) # our mode 1002 rides along: the child would get motion reports too
       term.disable_mouse
       begin
-        if m = mode
-          term.with_mode(m, preserve_screen: false) { yield }
-        else
-          term.suspend { yield }
+        # Shield outside the mode switch: the tty is cooked (ISIG on) from the moment it flips.
+        shield_tty_signals do
+          if m = mode
+            term.with_mode(m, preserve_screen: false) { yield }
+          else
+            term.suspend { yield }
+          end
         end
       ensure
         if mouse
@@ -6939,6 +6943,23 @@ module Gori::Tui
           MouseDrag.forget
           MouseDrag.enable(io)
         end
+      end
+    end
+
+    # The child shares gori's process group (Crystal's `Process` has no `setpgid`) and the
+    # cooked tty has ISIG on, so a ^C or ^\ meant for an editor that leaves ISIG alone
+    # (`code --wait`) reached gori as well: SignalGuard tore the session down, and an untrapped
+    # QUIT killed it with the screen still wrecked. A no-op trap keeps gori alive, and the
+    # child still gets the default disposition — Crystal resets trapped signals before exec.
+    TTY_SIGNALS = [Signal::INT, Signal::QUIT]
+
+    def self.shield_tty_signals(&)
+      saved = TTY_SIGNALS.map(&.trap_handler?)
+      TTY_SIGNALS.each(&.trap { })
+      begin
+        yield
+      ensure
+        TTY_SIGNALS.zip(saved) { |sig, handler| handler ? sig.trap(&handler) : sig.reset }
       end
     end
 

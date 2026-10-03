@@ -150,8 +150,9 @@ class Gori::Tui::RepeaterView
 
   # The starting scaffold for a hand-authored request (Repeater `^N`): a minimal
   # but immediately sendable HTTP/1.1 message the user edits in place.
-  BLANK_TARGET  = "https://example.com"
-  BLANK_REQUEST = "GET / HTTP/1.1\nHost: example.com\nUser-Agent: gori\nAccept: */*\n\n"
+  BLANK_TARGET    = "https://example.com"
+  BLANK_HOST_LINE = "Host: example.com"
+  BLANK_REQUEST   = "GET / HTTP/1.1\n#{BLANK_HOST_LINE}\nUser-Agent: gori\nAccept: */*\n\n"
 
   def load(detail : Store::FlowDetail) : Nil
     @flow = detail

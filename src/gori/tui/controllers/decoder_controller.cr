@@ -221,7 +221,7 @@ module Gori::Tui
     # match the query; the batch clamp can land on a hidden chip too), close the popup and
     # preedit, and mark the set for the next persist.
     private def after_change : Nil
-      clear_subtab_filter if (h = subtab_hidden) && h.includes?(@idx)
+      reveal_active_subtab
       @popup.close
       @chain_pre = ""
       @dirty = true

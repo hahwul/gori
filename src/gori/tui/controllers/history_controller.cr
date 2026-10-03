@@ -347,7 +347,7 @@ module Gori::Tui
       if pane = @history.preview_pane_at(rect.inset(1, 1), mx, my)
         @history.wheel_preview(pane, step)
       else
-        @history.move(step)
+        @history.move_list(step)
       end
       true
     end

@@ -276,6 +276,8 @@ private class FakeHost
 
   getter statuses = [] of String
   getter applied_config : Gori::Settings::ProjectNetworkConfig? = nil
+  # Runs while the confirm is "up", before the action — the tick that reloads under a modal.
+  property under_modal : Proc(Nil)? = nil
 
   def initialize(@session : Gori::Session)
     @jobs = Gori::Tui::Jobs.new
@@ -301,6 +303,7 @@ private class FakeHost
   # The delete path is behind a confirm; run the action, which is what pressing "delete" does.
   def confirm(title : String, message : String, *, confirm_label : String, danger : Bool,
               return_to : Symbol = :none, &action : -> Nil) : Nil
+    @under_modal.try(&.call)
     action.call
   end
 
@@ -545,6 +548,24 @@ describe Gori::Tui::ProjectController do
       # The row is back, because the store still has it — see the save example above.
       c.view.env_vars.should eq([{"TOKEN", "sekrit"}])
       Gori::Settings.project_env_vars.should eq([{"TOKEN", "sekrit"}])
+    end
+  end
+
+  # The confirm names a key, and the data_version tick reloads the list under the modal: a
+  # peer's delete above the selection must not shift the delete onto a neighbour.
+  it "deletes the var the confirm named after the list reloads under it" do
+    with_env_controller do |c, host, session|
+      Gori::Env.save_project(session.store, [{"A", "1"}, {"B", "2"}, {"C", "3"}])
+      c.view.reload_env_vars
+      c.view.env_select(1)
+      c.view.selected_env_key.should eq("B")
+      host.under_modal = -> {
+        Gori::Env.save_project(session.store, [{"B", "2"}, {"C", "3"}])
+        c.view.reload_env_vars
+      }
+      c.env_delete_var
+      c.view.env_vars.should eq([{"C", "3"}])
+      host.statuses.last.should contain("deleted: B")
     end
   end
 

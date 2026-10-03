@@ -93,7 +93,7 @@ module Gori::Tui
 
     # `sitemap.js-scan` — read the JS responses and HTML pages behind the tree's own flow set
     # (its `/` query and lenses, the Params sub-tab's rule) that no scan has read yet, and store
-    # what they reference. Sends nothing. A project switch mid-scan stops it between flows.
+    # what they reference. Sends nothing. Leaving the project mid-scan stops it between flows.
     def js_scan(filter : QL::Filter) : Nil
       if @js_scanning
         @host.status("a JavaScript scan is already running")
@@ -106,7 +106,7 @@ module Gori::Tui
       @host.status("scanning captured JavaScript…")
       spawn(name: "gori-js-scan") do
         message = begin
-          report = JsRefs.scan(store, JsRefs::ScanOptions.new(filter: filter), -> { !me.bound_to?(store) })
+          report = JsRefs.scan(store, JsRefs::ScanOptions.new(filter: filter), -> { me.stopped? })
           SitemapController.js_scan_toast(report)
         rescue ex
           "JavaScript scan failed: #{ex.message || ex.class.name}"
@@ -115,10 +115,13 @@ module Gori::Tui
       end
     end
 
-    # Whether `store` is still the project this tab shows — a scan started before a switch
-    # stops at its next flow instead of writing on into a store the session let go of.
-    def bound_to?(store : Store) : Bool
-      @host.session.store.same?(store)
+    # A Runner — and so its store — lives for one project, so a project switch is a Runner
+    # teardown: `stop_all` (from `Runner#stop_all_jobs`) stops a scan at its next flow instead
+    # of writing on into a store the session is closing.
+    getter? stopped = false
+
+    def stop_all : Nil
+      @stopped = true
     end
 
     # The finished scan as one line: what it found, then every cap and failure — a capped scan
@@ -488,7 +491,7 @@ module Gori::Tui
       when key.right?     then @sitemap.tag_move(1)
       when key.backspace? then @sitemap.tag_backspace
       else
-        if c && !ev.ctrl? && !ev.alt?
+        if c && !c.control? && !ev.ctrl? && !ev.alt? # termisu reads Tab as '\t'
           @sitemap.tag_insert(c)
           @sitemap.set_tag_preedit("") # clear preedit on committed char
         end

@@ -1214,6 +1214,9 @@ module Gori::Tui
       draw_guides(screen, rect, row, y, bg)
 
       mx = rect.x + 1 + row.depth * 2
+      # A path deeper than the pane is wide (a crawler trap — MAX_DEPTH is 128) has no room for
+      # its marker and label: draw only the guides that fit, never over the right border.
+      return if mx + 2 >= rect.right - 1
       marker, mcolor = node_marker(node, host && node.in_scope)
       screen.cell(mx, y, marker, mcolor, bg)
       lx0 = mx + 2
@@ -1333,7 +1336,9 @@ module Gori::Tui
     # Faint vertical guides at each ancestor level whose branch continues below this row.
     private def draw_guides(screen : Screen, rect : Rect, row : VisibleRow, y : Int32, bg : Color) : Nil
       (0...row.depth).each do |l|
-        screen.cell(rect.x + 1 + l * 2, y, '│', Theme.border, bg) unless (row.guides & (1_u64 << l)) == 0
+        gx = rect.x + 1 + l * 2
+        break if gx >= rect.right - 1
+        screen.cell(gx, y, '│', Theme.border, bg) unless (row.guides & (1_u64 << l)) == 0
       end
     end
 

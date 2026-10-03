@@ -58,10 +58,13 @@ module Gori::Tui
       {x0, x1}
     end
 
+    # nil when the band lies past the line: a reload (a peer's shorter target) can shrink the
+    # line under a standing anchor, and that copies the line rather than "" or raising.
     def selection_text(line : String, cx : Int32) : String?
       span = selection_span(cx)
       return nil unless span
-      line[span[0]...span[1]]
+      text = line[span[0]...span[1]]?
+      text unless text.nil? || text.empty?
     end
 
     def copy_text(line : String, cx : Int32) : String

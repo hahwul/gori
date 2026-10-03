@@ -116,3 +116,14 @@ describe Gori::Tui::ColumnOverlay do
     runs.should eq(before)
   end
 end
+
+# A short body clips the rows above the preview band; a click there must not land on a row
+# render never drew — the Save row, whose click commits the form.
+describe "ColumnOverlay#row_at on a clipped form" do
+  it "maps no row under the last drawn one" do
+    ov = ColumnOverlay.adding
+    box = ov.overlay_box(Gori::Tui::Rect.new(0, 0, 80, 12)).not_nil!
+    ov.row_at(box, box.x + 4, box.bottom - 2).should be_nil # the preview band
+    ov.row_at(box, box.x + 4, box.bottom - 1).should be_nil # the bottom border
+  end
+end

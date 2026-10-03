@@ -233,6 +233,30 @@ describe SettingsView do
     end
   end
 
+  # A save can shorten the value under the caret (`editor` is stripped); the next ⌫ must
+  # clamp first rather than slice `v[0, -1]` and raise.
+  it "survives a backspace after a save shortened the focused value" do
+    dir = File.tempname("gori-settings-bs")
+    Dir.mkdir_p(dir)
+    prev_home = ENV["GORI_HOME"]?
+    prev = Gori::Settings.editor
+    begin
+      ENV["GORI_HOME"] = dir
+      v = SettingsView.new
+      v.reload(:editor)
+      set_text(v, "   ")
+      v.save
+      v.backspace
+      v.insert('x')
+      v.save
+      Gori::Settings.editor.should eq("x")
+    ensure
+      prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+      Gori::Settings.editor = prev
+      FileUtils.rm_rf(dir)
+    end
+  end
+
   it "reverts the EDITOR section toggles to their defaults on save" do
     dir = File.tempname("gori-settings-reset-ed")
     Dir.mkdir_p(dir)
@@ -901,5 +925,15 @@ describe SettingsView do
       prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
       FileUtils.rm_rf(dir)
     end
+  end
+end
+
+# termisu reads Tab as the printable '\t'; a settings text field must not take it as text.
+describe "SettingsOverlay Tab" do
+  it "does not type a tab into the focused text field" do
+    ov = SettingsOverlay.new(:editor)
+    before = ov.@view.@values.dup
+    ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Tab))
+    ov.@view.@values.should eq(before)
   end
 end

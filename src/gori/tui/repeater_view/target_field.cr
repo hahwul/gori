@@ -29,7 +29,7 @@ module Gori::Tui::TargetField
     else
       @target_field = :sni
       @scx = @sni.size
-      @target_mode = InputMode::Insert
+      enter_target_insert!
     end
   end
 

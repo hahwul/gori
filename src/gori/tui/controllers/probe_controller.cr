@@ -301,7 +301,7 @@ module Gori::Tui
       if @probe.preview_enabled? && @probe.preview_at?(content, mx, my)
         @probe.wheel_preview(step)
       else
-        @probe.move(step)
+        @probe.move_list(step)
       end
       true
     end

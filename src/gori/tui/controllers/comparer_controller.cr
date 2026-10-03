@@ -61,6 +61,7 @@ module Gori::Tui
     def comparer_new : Nil
       @sessions << ComparerView.new
       @idx = @sessions.size - 1
+      after_change
       @host.request_focus(:body)
       @host.status("new comparison (#{@sessions.size} open)")
     end

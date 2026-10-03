@@ -1143,6 +1143,13 @@ module Gori::Tui
         scroll_preview(delta)
         return
       end
+      move_list(delta)
+    end
+
+    # The list cursor whatever has keyboard focus — the wheel over the list (`move` would
+    # scroll a focused preview instead).
+    def move_list(delta : Int32) : Nil
+      return if @rows.empty?
       @selected = (@selected + delta).clamp(0, @rows.size - 1)
       # "Following" the live tail means sitting on the newest row (top or bottom).
       @follow = (@selected == follow_index)
@@ -3509,7 +3516,7 @@ module Gori::Tui
       # status word + 1-col gap, then chips (same as render)
       start = x + 1 + detail_mode_status(hex, ws, dv).size + 1
       chips = detail_mode_chips(hex, ws, dv).map { |(id, label, _)| {id, label} }
-      Frame.left_chip_hit(mx, my, rect.y, start, chips)
+      Frame.left_chip_hit(mx, my, rect.y, start, chips, limit: rect.right) # render's own clip
     end
 
     # Compact mode word shown before the toggle chips (and asserted by specs).
