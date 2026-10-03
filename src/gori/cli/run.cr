@@ -751,7 +751,7 @@ module Gori
       # value. A `return` in the block still closes the store; an `abort` does not (`exit` skips
       # `ensure`), which is what `abort_closing` is for.
       private def self.with_store(project : Project, *, read_only : Bool = false,
-                                  long_running : Bool = false, & : Store -> T) : T forall T
+                                  long_running : Bool = false, &)
         store = open_store(project, read_only: read_only, long_running: long_running)
         begin
           yield store
