@@ -211,23 +211,17 @@ module Gori::Tui
       verb = @results[idx]
       active = idx == @selected
       bg = active ? Theme.accent_bg : Theme.panel
-      soon = verb.coming_soon?
       screen.fill(Rect.new(box.x + 1, ry, box.w - 2, 1), bg)
       screen.cell(box.x + 1, ry, active ? '▎' : ' ', Theme.accent, bg)
       # Category sigil — a colour-coded glyph grouping the command by kind
       # (navigation »/action ▸/settings ≡/system ×) so the list reads at a glance.
       # Drawn at a fixed column with the title one cell past it, so a width-1 or
-      # width-2 glyph both stay aligned. Dimmed (with the title) for coming-soon.
+      # width-2 glyph both stay aligned.
       glyph, gfg = category_badge(verb.category)
-      screen.cell(box.x + 3, ry, glyph, soon && !active ? Theme.muted : gfg, bg)
-      # Coming-soon verbs are dimmed at rest (still readable when selected) so the
-      # list signals what's not functional yet without hiding it.
-      title_fg = active ? Theme.text_bright : (soon ? Theme.muted : Theme.text)
+      screen.cell(box.x + 3, ry, glyph, gfg, bg)
+      title_fg = active ? Theme.text_bright : Theme.text
       screen.text(box.x + 5, ry, @tab_titles[verb.id]? || verb.title, title_fg, bg, width: box.w - 21)
-      if soon
-        badge = "soon"
-        screen.text(box.right - badge.size - 2, ry, badge, Theme.yellow, bg)
-      elsif hint = fast_path(verb, overrides, tab: idx < @tab_count)
+      if hint = fast_path(verb, overrides, tab: idx < @tab_count)
         screen.text(box.right - hint.size - 2, ry, hint, Theme.muted, bg)
       end
     end

@@ -620,19 +620,11 @@ module Gori::Proxy::Codec
       return parse_chunk_size_strict(line) unless 0 < stop <= 15
       n = 0_i64
       stop.times do |i|
-        digit = hex_digit(line.unsafe_fetch(i))
+        digit = line.unsafe_fetch(i).unsafe_chr.to_i?(16).try(&.to_i64)
         return parse_chunk_size_strict(line) unless digit
         n = (n << 4) | digit
       end
       n
-    end
-
-    private def self.hex_digit(b : UInt8) : Int64?
-      case b
-      when 0x30_u8..0x39_u8 then (b - 0x30_u8).to_i64 # 0-9
-      when 0x61_u8..0x66_u8 then (b - 0x57_u8).to_i64 # a-f
-      when 0x41_u8..0x46_u8 then (b - 0x37_u8).to_i64 # A-F
-      end
     end
 
     # The general reader `parse_chunk_size` falls back to.

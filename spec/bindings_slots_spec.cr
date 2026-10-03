@@ -523,7 +523,6 @@ describe "Bindings × session slots" do
         # No slot active — the pre-slot playbook's send context, and the `--bind-from` one.
         b.observe(login("TOK"), subject).should be_empty
         b.unasked(subject).should eq([{"SESSION", ["idA", "idB"]}])
-        b.claiming_slots("SESSION").should eq(["idA", "idB"])
 
         # A slot that does not claim it is active: same story.
         slots.activate("anon")
@@ -556,7 +555,6 @@ describe "Bindings × session slots" do
         b = Gori::Bindings.load(store, slots)
         b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid", host: "other.test")
         b.unasked(subject).should be_empty
-        b.claiming_slots("SESSION").should eq(["idA"])
         # `scoped_out` does NOT know about the host glob and must not pretend to: it answers
         # "this rule cannot be asked here at all", which stays true on any message.
         b.scoped_out.should eq([{"SESSION", ["idA"]}])
@@ -572,7 +570,6 @@ describe "Bindings × session slots" do
         b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid")
         b.unasked(subject).should be_empty
         b.scoped_out.should be_empty
-        b.claiming_slots("SESSION").should be_empty
       end
     end
   end

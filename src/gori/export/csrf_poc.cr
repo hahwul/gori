@@ -83,14 +83,14 @@ module Gori
                     (multipart || ct.empty? || ct == "application/x-www-form-urlencoded")
           dropped_headers_comment(b, parts, carried: carried ? "content-type" : nil)
           b << "<body onload=\"document.forms[0].submit()\">\n"
-          b << "  <form action=\"" << attr(action) << "\" method=\"" << (method == "GET" ? "GET" : "POST") << "\""
+          b << "  <form action=\"" << HTML.escape(action) << "\" method=\"" << (method == "GET" ? "GET" : "POST") << "\""
           b << " enctype=\"multipart/form-data\"" if multipart
           b << ">\n"
           fields.each do |(name, value, note)|
             if note
               b << "    <!-- " << html_comment_safe(note) << " -->\n"
             end
-            b << "    <input type=\"hidden\" name=\"" << attr(name) << "\" value=\"" << attr(value) << "\">\n"
+            b << "    <input type=\"hidden\" name=\"" << HTML.escape(name) << "\" value=\"" << HTML.escape(value) << "\">\n"
           end
           b << "    <input type=\"submit\" value=\"Submit\">\n"
           b << "  </form>\n</body>\n</html>\n"
@@ -301,12 +301,6 @@ module Gori
         return s[0, s.bytesize - 2] if s.ends_with?("\r\n")
         return s[0, s.bytesize - 1] if s.ends_with?("\n")
         s
-      end
-
-      # HTML attribute-value escaping (inside "…"): the five that matter, so a value cannot
-      # break out of the attribute or the tag.
-      private def self.attr(s : String) : String
-        s.gsub('&', "&amp;").gsub('<', "&lt;").gsub('>', "&gt;").gsub('"', "&quot;").gsub('\'', "&#39;")
       end
 
       # Text safe to sit inside an HTML comment: `--` (which would close the comment early) and a

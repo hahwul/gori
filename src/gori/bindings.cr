@@ -871,14 +871,6 @@ module Gori
       end
     end
 
-    # Which slots claim `name`, in list order. Empty when no slot does — which is also the
-    # answer for a project with no slots at all.
-    def claiming_slots(name : String) : Array(String)
-      slots = @slots
-      return [] of String unless slots && slots.scoped?
-      slots.slots.select(&.claims?(name)).map(&.name)
-    end
-
     # Rules this message MATCHED — host glob and condition both — that `candidates` did NOT
     # ask, because a slot claims them and that slot is not the send context. One entry per
     # rule: `{binding name, the slots claiming it}`.

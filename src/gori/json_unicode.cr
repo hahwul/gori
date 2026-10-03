@@ -134,7 +134,7 @@ module Gori::JsonUnicode
     return nil if start + 4 > chars.size
     value = 0
     4.times do |offset|
-      digit = hex_value(chars[start + offset].ord)
+      digit = chars[start + offset].to_i?(16)
       return nil unless digit
       value = (value << 4) | digit
     end
@@ -145,26 +145,10 @@ module Gori::JsonUnicode
     return nil if start + 4 > source.size
     value = 0
     4.times do |offset|
-      digit = hex_value_byte(source[start + offset])
+      digit = source[start + offset].unsafe_chr.to_i?(16)
       return nil unless digit
       value = (value << 4) | digit
     end
     value
-  end
-
-  private def self.hex_value_byte(byte : UInt8) : Int32?
-    case byte
-    when 0x30_u8..0x39_u8 then byte.to_i32 - 0x30
-    when 0x61_u8..0x66_u8 then byte.to_i32 - 0x61 + 10
-    when 0x41_u8..0x46_u8 then byte.to_i32 - 0x41 + 10
-    end
-  end
-
-  private def self.hex_value(codepoint : Int32) : Int32?
-    case codepoint
-    when '0'.ord..'9'.ord then codepoint - '0'.ord
-    when 'a'.ord..'f'.ord then codepoint - 'a'.ord + 10
-    when 'A'.ord..'F'.ord then codepoint - 'A'.ord + 10
-    end
   end
 end

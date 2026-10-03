@@ -103,14 +103,6 @@ module Gori
       }
     end
 
-    def delete_oast_session(id : Int64) : Nil
-      exec_task ->(c : DB::Connection) {
-        c.exec("DELETE FROM oast_callbacks WHERE session_id = ?", id)
-        c.exec("DELETE FROM oast_sessions WHERE id = ?", id)
-        nil
-      }
-    end
-
     # Incremental (watermark) load: callbacks with id > since_id, oldest first. Callbacks are
     # append-only, so the caller keeps @max_seen_id and never re-selects the whole table.
     def oast_callbacks(session_id : Int64, since_id : Int64 = 0) : Array(OastCallbackRecord)

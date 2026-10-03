@@ -163,12 +163,6 @@ module Gori
         c.ctrl && !c.alt && !c.shift
       end
 
-      # Turn Settings' string overrides into Chord overrides (one place; unparseable
-      # strings are dropped, so a stored empty list stays an explicit unbind).
-      def self.parse_overrides(raw : Hash(String, Array(String))) : Hash(String, Array(Chord))
-        raw.transform_values { |cs| cs.compact_map { |s| Chord.parse(s) } }
-      end
-
       # Verb id bound to `chord` in `scope` (or globally), if any.
       def lookup(chord : Chord, scope : Scope) : String?
         lookup_in(chord, scope) || lookup_in(chord, Scope::Global)

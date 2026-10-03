@@ -283,14 +283,6 @@ describe Gori::Settings do
     end
   end
 
-  describe "Listener#effective_target_port" do
-    it "uses the configured port, else the conventional one for the protocol" do
-      listener("127.0.0.1", 8443, "transparent", 8443).effective_target_port(true).should eq(8443)
-      listener("127.0.0.1", 8443, "transparent").effective_target_port(true).should eq(443)
-      listener("127.0.0.1", 8080, "transparent").effective_target_port(false).should eq(80)
-    end
-  end
-
   # #508: the live reconcile validates a set it read from DISK and deliberately does not write
   # back over `Settings.listeners` (that would let the next save clobber a hand edit), so every
   # validator has to be able to say which set it means.

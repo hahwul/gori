@@ -199,23 +199,6 @@ describe "Gori::Store project-tab aggregates (AT A GLANCE viz)" do
       f[4].should eq(1) # critical
     end
   end
-
-  it "tallies probe issues by severity" do
-    with_store do |store|
-      store.upsert_probe_issue(Gori::Probe::Detection.new(
-        code: "missing_hsts", category: "security", host: "acme.test",
-        url: "http://acme.test/", title: "no hsts", severity: Gori::Store::Severity::Medium))
-      store.upsert_probe_issue(Gori::Probe::Detection.new(
-        code: "cors_wildcard", category: "security", host: "acme.test",
-        url: "http://acme.test/api", title: "cors *", severity: Gori::Store::Severity::High))
-      store.flush
-
-      p = store.probe_severity_counts
-      p[2].should eq(1) # medium
-      p[3].should eq(1) # high
-      p[4].should eq(0) # critical (none)
-    end
-  end
 end
 
 # #408: abandon_pending! finalises orphaned in-flight Pending rows to Error on session

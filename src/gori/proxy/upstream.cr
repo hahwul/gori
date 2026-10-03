@@ -32,9 +32,6 @@ module Gori::Proxy
   # a TLS socket to the proxy, or (for an https origin through a TLS proxy) origin TLS nested
   # inside proxy TLS. Everything downstream already reads and writes an `IO`.
   module Upstream
-    CONNECT_TIMEOUT = 30.seconds
-    IO_TIMEOUT      = 30.seconds
-
     # Run an operation while polling a cooperative stop predicate and closing only the IO it
     # owns when that predicate becomes true. The watcher is joined before returning so a
     # cancelled send cannot leave a fiber behind. TLS dials use this on the underlying socket

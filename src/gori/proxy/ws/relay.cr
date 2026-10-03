@@ -87,7 +87,7 @@ module Gori::Proxy::WS
     # CLOSE (RFC 6455 §7.1.1 closing handshake), before tearing the tunnel down. This is a
     # local channel wait (not a network read — the WS tunnel's socket timeouts are relaxed,
     # see SocketTuning.relax in ClientConn), so it's kept well under the proxy's 30 s
-    # baseline IO timeout (SocketTuning::CLIENT_IO_TIMEOUT / Upstream::IO_TIMEOUT): a real
+    # baseline IO timeout (SocketTuning::CLIENT_IO_TIMEOUT / Settings.io_timeout): a real
     # peer replies near-instantly, and a dead one shouldn't pin the tunnel for 30 s.
     #
     # It is ALSO, once a hold is armed, the operator's decision window: from the moment

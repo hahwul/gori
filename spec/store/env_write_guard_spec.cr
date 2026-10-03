@@ -28,7 +28,7 @@ private NS   = Gori::Env::Syntax::Namespaced
 describe "Store env-grammar write guard" do
   it "re-spells a repeater a BARE process writes into a NAMESPACED database" do
     with_marked_store(NS, BARE) do |store|
-      store.env_token_syntax.should eq(NS)
+      store.env_token_syntax?.should eq(NS)
       id = store.insert_repeater("https://$API", "GET / HTTP/1.1\r\nX-A: $id\r\nX-B: $token\r\n\r\n".to_slice,
         false, true, nil, 0, sni: "$API")
       store.flush

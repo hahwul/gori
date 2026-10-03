@@ -34,7 +34,7 @@ describe "OAST persistence (V39)" do
     end
   end
 
-  it "persists a session incl. the RSA private key PEM and deletes with its callbacks" do
+  it "persists a session incl. the RSA private key PEM and its callbacks" do
     with_store do |store|
       sid = store.insert_oast_session(nil, "interactsh", "https://oast.pro", "corr20", "sec13",
         "-----BEGIN PRIVATE KEY-----\nAAA\n-----END PRIVATE KEY-----", nil)
@@ -47,10 +47,6 @@ describe "OAST persistence (V39)" do
       store.insert_oast_callback(sid, "uid-1", "dns", "A", "1.2.3.4", "corr20abc.oast.pro",
         "raw".to_slice, nil, 1000_i64)
       store.oast_callbacks(sid).size.should eq(1)
-
-      store.delete_oast_session(sid)
-      store.get_oast_session(sid).should be_nil
-      store.oast_callbacks(sid).should be_empty # cascade removed the callback
     end
   end
 

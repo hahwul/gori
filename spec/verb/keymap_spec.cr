@@ -89,14 +89,6 @@ describe Gori::Verb::Keymap do
     end
   end
 
-  describe ".parse_overrides" do
-    it "parses label strings into chords and drops garbage" do
-      parsed = Keymap.parse_overrides({"t.a" => ["ctrl-g", "nope", ""], "t.b" => [] of String})
-      parsed["t.a"].should eq([Chord.new("g", ctrl: true)])
-      parsed["t.b"].should be_empty # preserved as an unbind
-    end
-  end
-
   describe "the editable surface is conflict-free + reserved-free" do
     # The guards target the REBINDABLE surface (Hotkeys.rebindable?). Hidden nav
     # primitives legitimately reuse structural keys (escape on palette.close), have

@@ -90,11 +90,6 @@ module Gori
       yield last unless last.empty?
     end
 
-    # :ditto: as a predicate, for a caller that only has to decide.
-    def self.advertises_h3?(value : String) : Bool
-      !h3_evidence(value).nil?
-    end
-
     # How many removed values a sentence quotes before it stops. The evidence is remote-chosen
     # and there is no bound on how many `Alt-Svc` fields one response may carry: a head packed
     # with them produced a 220 KB advisory, written to `flows.advisory` on every such response,

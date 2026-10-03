@@ -321,13 +321,6 @@ module Gori
       [] of {String, String}
     end
 
-    def probe_suppressed?(code : String, host : String) : Bool
-      !@db.query_one?("SELECT 1 FROM probe_suppressions WHERE code = ? AND host = ?",
-        code, host, as: Int64).nil?
-    rescue
-      false
-    end
-
     private def bump_probe_generation : Nil
       @probe_generation += 1
     end
@@ -360,12 +353,6 @@ module Gori
       @db.scalar("SELECT COUNT(*) FROM probe_issues").as(Int64).to_i
     rescue
       0
-    end
-
-    # Probe-issue count per Severity value (index 0=Info … 4=Critical). Small table — a
-    # plain scan, GROUP BY on the severity column.
-    def probe_severity_counts : StaticArray(Int64, 5)
-      severity_tally("SELECT severity, COUNT(*) FROM probe_issues GROUP BY severity")
     end
 
     # Distinct (tech code, host, evidence) rows — the raw material for the project's

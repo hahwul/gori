@@ -221,7 +221,7 @@ module Gori
                  elsif resp_version.starts_with?("HTTP/2")
                    ""
                  else
-                   status_reason(status)
+                   HTTP::Status.new(status).description.to_s
                  end
         resp_headers = headers_list(resp["headers"]?)
         resp_body, mime_type, resp_declared = response_body(resp)
@@ -503,22 +503,6 @@ module Gori
           end
         time = Time.utc unless Builder.representable?(time)
         time.to_unix_ms * 1_000
-      end
-
-      private def self.status_reason(status : Int32) : String
-        case status
-        when 200 then "OK"
-        when 201 then "Created"
-        when 204 then "No Content"
-        when 301 then "Moved Permanently"
-        when 302 then "Found"
-        when 400 then "Bad Request"
-        when 401 then "Unauthorized"
-        when 403 then "Forbidden"
-        when 404 then "Not Found"
-        when 500 then "Internal Server Error"
-        else          ""
-        end
       end
     end
   end
