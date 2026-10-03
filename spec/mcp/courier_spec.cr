@@ -18,6 +18,8 @@ private class Rig
   property? claimable = true
   getter claimed_ids = [] of Int64
   getter released_ids = [] of Int64
+  # Runs inside a claim — the window in which another reader in the process can carry a row.
+  property on_claim : Proc(Int64, Nil)? = nil
 
   def initialize(@store)
   end
@@ -29,7 +31,7 @@ private class Rig
     Courier.new(pid: pid, store: -> { @store.as(Gori::Store?) }, client: -> { @client },
       channels: -> { @channels }, emit: ->(f : String) { @frames << f; nil }, inbox: -> { @inbox },
       codex: -> { @codex_lookups += 1; @codex },
-      claim: ->(id : Int64) { @claimed_ids << id; @claimable },
+      claim: ->(id : Int64) { @claimed_ids << id; @on_claim.try(&.call(id)); @claimable },
       release: ->(id : Int64) { @released_ids << id; nil },
       expire: -> { @expiries += 1; nil },
       answered: ->(qid : Int64) { @answered << qid; nil })
@@ -373,6 +375,27 @@ describe Gori::MCP::Courier do
         c.tick.should eq(1)
         rig.claimed_ids.should eq([m])
         rig.released_ids.should eq([m]) # the durable row answers for it from here on
+      end
+    end
+  end
+
+  it "does not deliver a later row another route carried while an earlier one was handed off" do
+    with_fake_inbox do |path, got|
+      with_store do |store|
+        rig = Rig.new(store)
+        rig.inbox = path
+        c = rig.courier(5_i64)
+        c.tick
+        one = store.post_agent_message("one", "pid:5", nil)
+        two = store.post_agent_message("two", "pid:5", nil)
+        rig.on_claim = ->(id : Int64) do
+          store.record_agent_delivery(two, Gori::AgentDelivery::VIA_TOOL_RESULT, "t pid 5", true, pid: 5_i64) if id == one
+          nil
+        end
+        c.tick.should eq(2)
+        c.delivered.should eq(1)
+        Fiber.yield
+        got.join.should_not contain("two")
       end
     end
   end
