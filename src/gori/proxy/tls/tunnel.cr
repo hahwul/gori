@@ -1,5 +1,6 @@
 require "openssl"
-require "../connect"
+require "../conn/self_page"
+require "../codec/http1"
 require "../head_rewriter"
 require "../extractor"
 require "../../interceptor"
@@ -17,7 +18,10 @@ module Gori::Proxy::Tls
   # cert (so the client speaks TLS to us), then runs the normal HTTP/1.1 request
   # loop with the upstream pinned to the CONNECT target over a TLS client
   # connection — so the same codec/capture path serves decrypted traffic.
-  class Tunnel < Proxy::TlsMitm
+  #
+  # ClientConn and Server take it as an optional `@tls` (nil => an HTTPS CONNECT is
+  # blind-tunnelled, and the self-page omits the certificate download).
+  class Tunnel
     # Connect timeout for the ALPN-reflection probe (see reflect_origin_h2). Capped well below
     # the full connect timeout: the probe only CLASSIFIES the origin's ALPN, and an unreachable
     # origin would otherwise burn the full timeout here AND again when the h1 fallback re-dials
@@ -48,7 +52,7 @@ module Gori::Proxy::Tls
 
     # Live-mutable too: Session#set_serve_landing flips whether a direct browser hit to the
     # listener gets the gori welcome + CA-download page (vs the 502 self-loop refusal). Read
-    # per-request in ClientConn via the TlsMitm seam below, so the next request picks it up.
+    # per-request in ClientConn, so the next request picks it up.
     property? serve_landing : Bool
 
     def initialize(@ca : CertAuthority, @verify_upstream : Bool = true,
@@ -69,8 +73,8 @@ module Gori::Proxy::Tls
       @handshake_noticed = Set({String, String}).new
     end
 
-    # TlsMitm seam: hand the connection loop the root CA (for the self-serve download
-    # page) without coupling it to the FFI CertAuthority type.
+    # Hand the connection loop the root CA (for the self-serve download page) as plain
+    # types, not the FFI CertAuthority.
     def ca_cert_pem : String?
       @ca.ca_cert_pem
     end
@@ -109,6 +113,37 @@ module Gori::Proxy::Tls
       close_client_transport(client, client_tls)
     end
 
+    # The self-page response bytes for one request, assembled from the CA accessors above.
+    # GET/HEAD serve the page; anything else gets an explicit 405, because the
+    # CONNECT-tunnelled callers have no origin to fall through to and silence there would
+    # just hang the client. One place for every caller — ClientConn's direct-hit path, its
+    # plaintext CONNECT path, and the TLS tunnel — so they can't drift.
+    def self_page_reply(method : String, target : String, listen : {String, Int32}) : Bytes
+      head_only = method == "HEAD"
+      unless head_only || method == "GET"
+        return Proxy::SelfPage.method_not_allowed(head_only)
+      end
+      Proxy::SelfPage.respond(target,
+        pem: ca_cert_pem, der: ca_cert_der, spki: ca_spki_sha256,
+        ca_path: ca_cert_path, listen: listen, version: Gori::VERSION, head_only: head_only)
+    end
+
+    # Read ONE request off an already-established stream and answer it with the self page,
+    # then return so the caller can close. One request is the whole protocol here: every
+    # SelfPage response is `Connection: close`, and the page has no subresources (its CSS is
+    # inlined, the favicon 204s), so a browser following the `/ca.der` link simply opens a
+    # fresh connection. The head read carries the same slowloris bound as the main request
+    # loop. Best-effort: a dead peer or a torn-down stream just ends the connection.
+    def serve_self_page_once(stream : IO, listen : {String, Int32}) : Nil
+      head = Proxy::Codec::Http1.read_head(stream,
+        deadline: Proxy::SocketTuning::HEAD_DEADLINE, timeout_sock: Proxy::SocketTuning.underlying_socket(stream))
+      return unless head
+      req = Proxy::Codec::Http1.parse_request_head(head)
+      stream.write(self_page_reply(req.method, req.target, listen))
+      stream.flush
+    rescue
+    end
+
     # Tear down the client side of a handshake attempt, whichever half owns it.
     #
     # `sync_close: true` hands the transport to the TLS socket — but only once the
@@ -136,7 +171,27 @@ module Gori::Proxy::Tls
       end
     end
 
+    # Wrap `client` (already past the 200 reply) as a TLS server using a per-host leaf, dial
+    # host:port as a TLS client, and run the decrypted HTTP/1.1 request loop, capturing flows
+    # to `sink`.
+    #
+    # `tls_upstream: false` terminates TLS with the client but speaks CLEARTEXT to the origin.
+    # Only a REVERSE listener can ask for that (`server.cr#serve_reverse_tls`), and only
+    # because its origin scheme is declared: on the CONNECT and transparent paths the client
+    # asked for `https://host`, so downgrading the origin leg would be gori silently weakening
+    # a connection the client believes is end-to-end TLS. Defaulted to true so those two paths
+    # keep their exact behaviour.
+    #
+    # `rewrite_host` replaces the forwarded `Host` header with the pinned authority. Only a
+    # REVERSE listener sets it: there the client dials gori under some name of its own and the
+    # origin is declared, so a vhosted origin has to be addressed by the name gori forwards to.
+    # The CONNECT and transparent paths must never set it — there the client's `Host` IS the
+    # authority it asked for, and rewriting it would be gori changing the request's meaning.
+    # Defaulted to false so those two paths keep their exact behaviour.
+    #
     # `dial_addr` is the seam #529 needed: `host` names the connection, `dial_addr` reaches it.
+    # A TRANSPARENT listener sets it from the kernel's original destination (`Proxy::OrigDst`),
+    # which is where the client was going before the redirect.
     # Everything in here that identifies the connection — the leaf `@ca.context_for` mints, the
     # `h2_candidate?`/`notice_downgrade` host, the `@h1_only_origins` key, the relay's scope
     # authority, the `ClientConn` `fixed_host` and so the whole capture record — keeps using
@@ -243,10 +298,9 @@ module Gori::Proxy::Tls
     # projected from a `RawRequest`, and there is none here — the connection got as far as a
     # ClientHello, and the request that would have been captured is exactly what the failed
     # handshake prevented. (The CONNECT's own `RawRequest` does exist, one frame up in
-    # `ClientConn#handle_connect`, and threading a reason back out through the `TlsMitm#intercept`
-    # seam so that frame could record a flow is the alternative. It was declined: the seam is
-    # implemented by two classes and called from four sites for a diagnostic whose population is
-    # dominated by the case below.)
+    # `ClientConn#handle_connect`, and threading a reason back out through `#intercept` so that
+    # frame could record a flow is the alternative. It was declined: `#intercept` is called from
+    # four sites, for a diagnostic whose population is dominated by the case below.)
     #
     # That population is why the volume has to be bounded either way. A client that does not
     # trust gori's CA is the ORDINARY member of it, and it retries — so is a browser's

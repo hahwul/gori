@@ -1,6 +1,6 @@
 require "socket"
 require "./sink"
-require "./connect"
+require "./tls/tunnel"
 require "./head_rewriter"
 require "./extractor"
 require "../interceptor"
@@ -18,7 +18,7 @@ require "./h2/frame"
 
 module Gori::Proxy
   # The listening proxy. Accepts client connections and spawns one ClientConn
-  # fiber per connection. TLS interception is injected as an optional TlsMitm
+  # fiber per connection. TLS interception is injected as an optional Tls::Tunnel
   # (nil => HTTPS CONNECT requests are blind-tunnelled).
   class Server
     getter host : String
@@ -56,7 +56,7 @@ module Gori::Proxy
     # carries one mode string, and `serve_connection` branches on the four in order.
     getter? socks5 : Bool
 
-    def initialize(@host : String, @port : Int32, @sink : FlowSink, @tls : TlsMitm? = nil,
+    def initialize(@host : String, @port : Int32, @sink : FlowSink, @tls : Tls::Tunnel? = nil,
                    @rewriter : HeadRewriter? = nil, @interceptor : Gori::Interceptor? = nil,
                    @host_overrides : Gori::HostOverrides? = nil,
                    max_connections : Int32 = MAX_CONNECTIONS,

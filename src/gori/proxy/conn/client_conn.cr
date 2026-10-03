@@ -15,7 +15,7 @@ require "../socket_tuning"
 require "../h2/relay"
 require "../h2/frame"
 require "../tls/client_hello"
-require "../connect"
+require "../tls/tunnel"
 require "../upstream"
 require "../pump"
 require "../ws/relay"
@@ -162,7 +162,7 @@ module Gori::Proxy
     # rewrites Host implicitly, but that is a mutation of operator-supplied bytes on the live
     # path (P7), so here it has to be asked for. What is CAPTURED is unaffected: the client's
     # original head is what History shows, exactly as with a Match&Replace-free forward.
-    def initialize(@io : IO, @scheme : String, @sink : FlowSink, @tls : TlsMitm? = nil,
+    def initialize(@io : IO, @scheme : String, @sink : FlowSink, @tls : Tls::Tunnel? = nil,
                    @fixed_host : String? = nil, @fixed_port : Int32 = 0,
                    @listener_pinned : Bool = false,
                    @tls_upstream : Bool = false, @verify_upstream : Bool = true,
@@ -2442,7 +2442,7 @@ module Gori::Proxy
     # the tunnel consumes it — which is why this returns Nil and `handle_connect` falls through
     # to its own `false`.
     private def intercept_tunnel(req : Codec::RawRequest, host : String, port : Int32,
-                                 tls : TlsMitm) : Nil
+                                 tls : Tls::Tunnel) : Nil
       @io.write("HTTP/1.1 200 Connection Established\r\n\r\n".to_slice)
       @io.flush
       # Peek to route the tunnel. THREE outcomes, not two, and each one decided on enough
@@ -2601,7 +2601,7 @@ module Gori::Proxy
     end
 
     # The CONNECT half of the reserved-host route (see handle_connect). Answers 200, then peeks
-    # ONE byte: a TLS ClientHello (0x16) goes to the TlsMitm seam, anything else is a plaintext
+    # ONE byte: a TLS ClientHello (0x16) goes to the TLS tunnel, anything else is a plaintext
     # CONNECT tunnel (`curl --proxytunnel` at port 80) and is served in the clear rather than
     # forced into a doomed handshake.
     #
@@ -3546,10 +3546,10 @@ module Gori::Proxy
 
     # Serve the welcome + CA-download page (see the two guards in handle_request: a direct
     # hit on the listener, or a request for the reserved host).
-    # The CA bytes/fingerprint/path come through the TlsMitm seam so this stays decoupled
-    # from the FFI cert code; a HEAD request gets headers only. Best-effort — a write error
+    # The CA bytes/fingerprint/path come from the tunnel as plain types, not the FFI cert
+    # code; a HEAD request gets headers only. Best-effort — a write error
     # just drops the connection like every other canned response here.
-    private def serve_self_page(req : Codec::RawRequest, tls : TlsMitm, self_addr : {String, Int32}) : Nil
+    private def serve_self_page(req : Codec::RawRequest, tls : Tls::Tunnel, self_addr : {String, Int32}) : Nil
       @io.write(tls.self_page_reply(req.method, req.target, listen_display(self_addr)))
       @io.flush
     rescue

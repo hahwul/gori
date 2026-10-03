@@ -12,7 +12,7 @@ module Gori::Proxy
   # and SO_KEEPALIVE takes over reaping a dead (half-open) peer without a wall-clock cutoff on
   # live-but-idle traffic. Resolving the underlying Socket through the TLS/PrefixIO wrappers lets
   # every seam relax by handle (`SocketTuning.relax(@io)`) without threading raw sockets through
-  # ClientConn/TlsMitm signatures.
+  # ClientConn/Tls::Tunnel signatures.
   module SocketTuning
     # Per-read/write timeout while reading a request head/body or writing a response. Matches
     # the upstream leg's existing 30 s (Settings.io_timeout) — a stall THIS long between reads
