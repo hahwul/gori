@@ -552,8 +552,20 @@ module Gori::Tui
 
     # The selection (or current line) text without the clipboard write — for the
     # "Send selection to" flow. Gated upstream by read_selection_active?.
-    def notes_selection_text : String
+    def selection_text : String
       @notes.copy_text
+    end
+
+    def selection_active? : Bool
+      @notes.selection?
+    end
+
+    def select_line : Nil
+      @notes.select_line
+    end
+
+    def clear_selection : Nil
+      @notes.clear_selection
     end
 
     # Copy the entire current note (space menu).

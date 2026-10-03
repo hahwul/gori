@@ -268,9 +268,9 @@ describe Gori::Tui::DecoderController do
         dc.focus_last                # OUTPUT
         dc.handle_body_key(key(Termisu::Input::Key::Down))
         dc.handle_body_key(shift(Termisu::Input::Key::Down))
-        dc.decoder_selection_active?.should be_true
+        dc.selection_active?.should be_true
         dc.on_enter
-        dc.decoder_selection_active?.should be_true
+        dc.selection_active?.should be_true
       end
     end
   end
@@ -294,7 +294,7 @@ describe Gori::Tui::DecoderController do
         dc = DecoderController.new(host)
         dc.input_area.set_text("one\ntwo")
         dc.handle_body_key(shift(Termisu::Input::Key::Down))
-        dc.decoder_selection_active?.should be_true
+        dc.selection_active?.should be_true
         dc.handle_body_key(shift(Termisu::Input::Key::Down)) # already on the last line
         dc.goto_symbol.should eq :decoder_input
         dc.handle_body_key(shift(Termisu::Input::Key::Up))

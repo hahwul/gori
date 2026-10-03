@@ -6071,100 +6071,31 @@ module Gori::Tui
       "Clear #{Gori.plural(n, "mark")}" if verb_id == "issues.mark-clear"
     end
 
+    # The tab whose READ-mode selection hooks (`TabController#selection_active?` and friends)
+    # the `read_*` verbs reach. History's selection lives in its detail overlay, so that tab
+    # only counts while the overlay is open.
+    private def read_tab : TabController?
+      return nil if @active_tab == :history && !@overlay.detail?
+      @tabs[@active_tab]?
+    end
+
     def read_selection_active? : Bool
-      case @active_tab
-      when :notes     then notes_controller.view.selection?
-      when :repeater  then repeater_controller.repeater_selection_active?
-      when :fuzzer    then fuzzer_controller.fuzzer_selection_active?
-      when :decoder   then decoder_controller.decoder_selection_active?
-      when :jwt       then jwt_controller.selection_active?
-      when :cookie    then cookie_controller.selection_active?
-      when :issues    then issues_controller.issues_notes_selection_active?
-      when :project   then project_controller.project_desc_selection_active?
-      when :rewriter  then rewriter_controller.rewriter_selection_active?
-      when :comparer  then comparer_controller.comparer_selection_active?
-      when :intercept then intercept_controller.intercept_preview_selection_active?
-      when :oast      then oast_controller.oast_detail_selection_active?
-      when :probe     then probe_controller.probe_detail_selection_active?
-      when :sequencer then sequencer_controller.sequencer_selection_active?
-      when :miner     then miner_controller.miner_selection_active?
-      when :history
-        @overlay.detail? && history_controller.detail_selection_active?
-      else
-        false
-      end
+      read_tab.try(&.selection_active?) || false
     end
 
     # The focused pane's current selection (or current line) as a string, without the
-    # clipboard write — the payload for "Send selection to". Mirrors
-    # read_selection_active?'s per-@active_tab dispatch, reusing each controller's
-    # *_selection_text getter. "" when the active tab has no selection surface.
+    # clipboard write — the payload for "Send selection to". "" when the active tab has no
+    # selection surface.
     def read_selection_text : String
-      case @active_tab
-      when :notes     then notes_controller.notes_selection_text
-      when :repeater  then repeater_controller.repeater_selection_text
-      when :fuzzer    then fuzzer_controller.fuzzer_selection_text
-      when :decoder   then decoder_controller.decoder_selection_text
-      when :jwt       then jwt_controller.selection_text
-      when :cookie    then cookie_controller.selection_text
-      when :issues    then issues_controller.issues_notes_selection_text
-      when :project   then project_controller.project_desc_selection_text
-      when :rewriter  then rewriter_controller.rewriter_selection_text
-      when :comparer  then comparer_controller.comparer_selection_text
-      when :intercept then intercept_controller.intercept_preview_selection_text
-      when :oast      then oast_controller.oast_detail_selection_text
-      when :probe     then probe_controller.probe_detail_selection_text
-      when :sequencer then sequencer_controller.sequencer_selection_text
-      when :miner     then miner_controller.miner_selection_text
-      when :history
-        @overlay.detail? ? history_controller.detail_selection_text : ""
-      else
-        ""
-      end
+      read_tab.try(&.selection_text) || ""
     end
 
     def read_select_line : Nil
-      case @active_tab
-      when :notes     then notes_controller.view.select_line
-      when :repeater  then repeater_controller.repeater_select_line
-      when :fuzzer    then fuzzer_controller.fuzzer_select_line
-      when :decoder   then decoder_controller.decoder_select_line
-      when :jwt       then jwt_controller.select_line
-      when :cookie    then cookie_controller.select_line
-      when :issues    then issues_controller.issues_notes_select_line
-      when :project   then project_controller.project_desc_select_line
-      when :rewriter  then rewriter_controller.rewriter_select_line
-      when :comparer  then comparer_controller.comparer_select_line
-      when :intercept then intercept_controller.intercept_preview_select_line
-      when :oast      then oast_controller.oast_detail_select_line
-      when :probe     then probe_controller.probe_detail_select_line
-      when :sequencer then sequencer_controller.sequencer_select_line
-      when :miner     then miner_controller.miner_select_line
-      when :history
-        history_controller.detail_select_line if @overlay.detail?
-      end
+      read_tab.try(&.select_line)
     end
 
     def read_clear_selection : Nil
-      case @active_tab
-      when :notes     then notes_controller.view.clear_selection
-      when :repeater  then repeater_controller.repeater_clear_selection
-      when :fuzzer    then fuzzer_controller.fuzzer_clear_selection
-      when :decoder   then decoder_controller.decoder_clear_selection
-      when :jwt       then jwt_controller.clear_selection
-      when :cookie    then cookie_controller.clear_selection
-      when :issues    then issues_controller.issues_notes_clear_selection
-      when :project   then project_controller.project_desc_clear_selection
-      when :rewriter  then rewriter_controller.rewriter_clear_selection
-      when :comparer  then comparer_controller.comparer_clear_selection
-      when :intercept then intercept_controller.intercept_preview_clear_selection
-      when :oast      then oast_controller.oast_detail_clear_selection
-      when :probe     then probe_controller.probe_detail_clear_selection
-      when :sequencer then sequencer_controller.sequencer_clear_selection
-      when :miner     then miner_controller.miner_clear_selection
-      when :history
-        history_controller.detail_clear_selection if @overlay.detail?
-      end
+      read_tab.try(&.clear_selection)
     end
 
     # The unified "Copy" fallback: selection if one is active, else the whole

@@ -414,19 +414,19 @@ module Gori::Tui
       !@intercept.empty?
     end
 
-    def intercept_preview_selection_active? : Bool
+    def selection_active? : Bool
       @intercept.preview_selection?
     end
 
-    def intercept_preview_selection_text : String
+    def selection_text : String
       @intercept.preview_copy_text
     end
 
-    def intercept_preview_select_line : Nil
+    def select_line : Nil
       @intercept.preview_select_line
     end
 
-    def intercept_preview_clear_selection : Nil
+    def clear_selection : Nil
       @intercept.preview_clear_selection
     end
 

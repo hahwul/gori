@@ -925,19 +925,19 @@ module Gori::Tui
       @probe.affected_url
     end
 
-    def probe_detail_selection_active? : Bool
+    def selection_active? : Bool
       @probe.detail_selection?
     end
 
-    def probe_detail_selection_text : String
+    def selection_text : String
       @probe.detail_copy_text
     end
 
-    def probe_detail_select_line : Nil
+    def select_line : Nil
       @probe.detail_select_line
     end
 
-    def probe_detail_clear_selection : Nil
+    def clear_selection : Nil
       @probe.detail_clear_selection
     end
 

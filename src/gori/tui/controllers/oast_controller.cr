@@ -1846,22 +1846,22 @@ module Gori::Tui
       callbacks_sub? && @cb_detail && !selected_callback.nil?
     end
 
-    def oast_detail_selection_active? : Bool
+    def selection_active? : Bool
       @cb_detail && @cb_pane.selection?
     end
 
-    def oast_detail_selection_text : String
+    def selection_text : String
       row = selected_callback
       return "" unless row && callbacks_sub? && @cb_detail
       sync_cb_pane(row)
       @cb_pane.copy_text
     end
 
-    def oast_detail_select_line : Nil
+    def select_line : Nil
       with_cb_pane { @cb_pane.select_line }
     end
 
-    def oast_detail_clear_selection : Nil
+    def clear_selection : Nil
       @cb_pane.clear_selection
     end
 

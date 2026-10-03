@@ -252,24 +252,24 @@ module Gori::Tui
       current_view.try { |v| v.focus == :samples && !v.selected_sample.nil? } || false
     end
 
-    def sequencer_selection_active? : Bool
+    def selection_active? : Bool
       v = current_view
       return false unless v
       v.focus == :detail ? v.detail_selection? : v.analysis_selection?
     end
 
-    def sequencer_selection_text : String
+    def selection_text : String
       v = current_view
       return "" unless v
       v.focus == :detail ? v.detail_copy_text : v.analysis_copy_text
     end
 
-    def sequencer_select_line : Nil
+    def select_line : Nil
       v = current_view || return
       v.focus == :detail ? v.detail_select_line : v.analysis_select_line
     end
 
-    def sequencer_clear_selection : Nil
+    def clear_selection : Nil
       v = current_view || return
       v.focus == :detail ? v.detail_clear_selection : v.analysis_clear_selection
     end

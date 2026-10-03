@@ -831,7 +831,7 @@ module Gori::Tui
 
     # The focused pane's selection (or current line) text without copying — for the
     # "Send selection to" flow.
-    def fuzzer_selection_text : String
+    def selection_text : String
       (v = current_view) ? v.pane_copy_text : ""
     end
 
@@ -855,15 +855,15 @@ module Gori::Tui
       end
     end
 
-    def fuzzer_selection_active? : Bool
+    def selection_active? : Bool
       current_view.try(&.pane_selection?) == true
     end
 
-    def fuzzer_select_line : Nil
+    def select_line : Nil
       current_view.try(&.pane_select_line)
     end
 
-    def fuzzer_clear_selection : Nil
+    def clear_selection : Nil
       current_view.try(&.pane_clear_selection)
     end
 

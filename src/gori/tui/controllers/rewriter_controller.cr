@@ -747,7 +747,7 @@ module Gori::Tui
     # is the editable sample. The INPUT half used to be absent everywhere here, so a ⇧arrow
     # selection built in that editor could be destroyed by the next printable (TextArea#insert
     # cuts it) but never copied. Same shape as RepeaterView#pane_selection?.
-    def rewriter_selection_active? : Bool
+    def selection_active? : Bool
       return false unless @sub == :rules
       case @focus
       when :preview_out then @out.selection?
@@ -756,7 +756,7 @@ module Gori::Tui
       end
     end
 
-    def rewriter_selection_text : String
+    def selection_text : String
       return "" unless @sub == :rules
       case @focus
       when :preview_in then @preview_input.selection_text || @preview_input.text
@@ -767,17 +767,17 @@ module Gori::Tui
       end
     end
 
-    def rewriter_select_line : Nil
+    def select_line : Nil
       return unless @sub == :rules && @focus == :preview_out
       sync_preview_out
       @out.select_line
     end
 
-    # Both panes, for the same reason `rewriter_selection_active?` answers for both: the verb
+    # Both panes, for the same reason `selection_active?` answers for both: the verb
     # that calls this is gated on THAT predicate, so a ⇧arrow band built in the INPUT editor
     # made "Clear selection" appear in the menu and then do nothing — the one gesture that
     # offers itself and refuses.
-    def rewriter_clear_selection : Nil
+    def clear_selection : Nil
       return unless @sub == :rules
       case @focus
       when :preview_in  then @preview_input.clear_selection
@@ -802,7 +802,7 @@ module Gori::Tui
     # decision is worth asserting on its own, and `Clipboard.copy` writes OSC 52 to the tty.
     # `nil` text = a focus that has no copy (the rule list).
     #
-    # This is NOT `rewriter_selection_text`, which is the "Send selection to" payload and
+    # This is NOT `selection_text`, which is the "Send selection to" payload and
     # always narrows to the band; a copy with no band falls back to the whole pane.
     def rewriter_copy_target : {Bool, String?}
       return {false, nil} unless @sub == :rules

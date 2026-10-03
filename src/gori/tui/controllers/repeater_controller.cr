@@ -371,7 +371,7 @@ module Gori::Tui
       # when there is not (`Runner#read_copy`) — and the token said "copy" for both, so the
       # first `y` on an unselected response put 256 bytes on the clipboard and announced
       # "copied all" after the fact. The strip says which one it is about to be.
-      read_common = "⇧arrows select · #{y} copy#{repeater_selection_active? ? "" : " all"} · space cmds"
+      read_common = "⇧arrows select · #{y} copy#{selection_active? ? "" : " all"} · space cmds"
       if v.ws_mode?
         # The response column has two cards on a WS tab, so name the card being read and the
         # key that swaps them — the same shape `ws_hint` uses for the request column's two.
@@ -1169,7 +1169,7 @@ module Gori::Tui
 
     # The focused pane's selection (or current line) text without copying — for the
     # "Send selection to" flow.
-    def repeater_selection_text : String
+    def selection_text : String
       (v = current_view) ? v.pane_copy_text : ""
     end
 
@@ -1282,15 +1282,15 @@ module Gori::Tui
       end
     end
 
-    def repeater_selection_active? : Bool
+    def selection_active? : Bool
       current_view.try(&.pane_selection?) == true
     end
 
-    def repeater_select_line : Nil
+    def select_line : Nil
       current_view.try(&.pane_select_line)
     end
 
-    def repeater_clear_selection : Nil
+    def clear_selection : Nil
       current_view.try(&.pane_clear_selection)
     end
 

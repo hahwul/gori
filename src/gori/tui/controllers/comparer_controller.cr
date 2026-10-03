@@ -207,19 +207,19 @@ module Gori::Tui
       view.both_set?
     end
 
-    def comparer_selection_active? : Bool
+    def selection_active? : Bool
       view.selection?
     end
 
-    def comparer_selection_text : String
+    def selection_text : String
       view.copy_text
     end
 
-    def comparer_select_line : Nil
+    def select_line : Nil
       view.select_row_line
     end
 
-    def comparer_clear_selection : Nil
+    def clear_selection : Nil
       view.clear_selection
     end
 

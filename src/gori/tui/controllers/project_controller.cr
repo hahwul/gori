@@ -493,15 +493,15 @@ module Gori::Tui
       @project_view.pane == :desc && !@project_view.desc_insert_mode?
     end
 
-    def project_desc_selection_active? : Bool
+    def selection_active? : Bool
       @project_view.desc_selection?
     end
 
-    def project_desc_select_line : Nil
+    def select_line : Nil
       @project_view.desc_select_line
     end
 
-    def project_desc_clear_selection : Nil
+    def clear_selection : Nil
       @project_view.desc_clear_selection
     end
 
@@ -727,7 +727,7 @@ module Gori::Tui
     end
 
     # The description selection (or current line) text without copying — "Send selection to".
-    def project_desc_selection_text : String
+    def selection_text : String
       @project_view.desc_copy_text
     end
 

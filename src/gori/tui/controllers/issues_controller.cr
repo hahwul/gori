@@ -926,15 +926,15 @@ module Gori::Tui
       @issues.detail_open? && @issues.notes_focused? && !@issues.notes_insert_mode?
     end
 
-    def issues_notes_selection_active? : Bool
+    def selection_active? : Bool
       @issues.notes_selection?
     end
 
-    def issues_notes_select_line : Nil
+    def select_line : Nil
       @issues.notes_select_line
     end
 
-    def issues_notes_clear_selection : Nil
+    def clear_selection : Nil
       @issues.notes_clear_selection
     end
 
@@ -1209,7 +1209,7 @@ module Gori::Tui
     end
 
     # The notes selection (or current line) text without copying — "Send selection to".
-    def issues_notes_selection_text : String
+    def selection_text : String
       @issues.notes_copy_text
     end
 

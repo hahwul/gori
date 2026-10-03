@@ -125,8 +125,8 @@ describe "the core-loop hints" do
         ctl.body_hint(:body).should contain("y copy all")
 
         v.focus_pane(:request)
-        ctl.repeater_select_line # `x` — a band in READ, the state `y` copies
-        ctl.repeater_selection_active?.should be_true
+        ctl.select_line # `x` — a band in READ, the state `y` copies
+        ctl.selection_active?.should be_true
         hint = ctl.body_hint(:body)
         hint.should contain("y copy")
         hint.should_not contain("copy all")

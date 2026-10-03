@@ -1611,6 +1611,23 @@ module Gori::Tui
       editor_pane? && body_badge != :editor
     end
 
+    # The READ-mode selection hooks behind `Runner#read_selection_active?` / `read_selection_text`
+    # / `read_select_line` / `read_clear_selection`. Defaults: no selection surface, so the
+    # gate is false, the "Send selection to" payload is "" and the motions are no-ops.
+    def selection_active? : Bool
+      false
+    end
+
+    def selection_text : String
+      ""
+    end
+
+    def select_line : Nil
+    end
+
+    def clear_selection : Nil
+    end
+
     # The five editor actions the shell routes to whichever pane holds focus, mirroring the
     # READ-mode set (`read_select_line` / `read_copy` / …) the Runner already dispatches this
     # way. Each returns whether the focused pane handled it, so a verb fired in a pane that
