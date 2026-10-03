@@ -396,11 +396,17 @@ module Gori
       # clients take, in a third file format.
       def self.install_yaml(config_path : String, exe_path : String, args : Array(String)) : Nil
         existing = File.file?(config_path) ? File.read(config_path) : ""
+        # A BOM is not part of the first key: left on, `\uFEFFmcp_servers:` was not found as the
+        # root, a second `mcp_servers:` was appended, and the parser's last-key-wins dropped
+        # every other server. Set aside here and put back on write.
+        bom = existing.starts_with?('\uFEFF')
+        existing = existing.lchop('\uFEFF')
 
         # Refuse a file that is not a YAML mapping, for the reason install_json refuses a
         # non-JSON one: this is the user's whole agent config — model and provider choice,
         # plugins, and every other MCP server with its own `env:` block of API keys — so a
         # transient hand-edit error must not be answered by replacing it with a two-line file.
+        kept = [] of String
         unless existing.strip.empty?
           parsed =
             begin
@@ -413,10 +419,12 @@ module Gori
             raise "Refusing to overwrite #{config_path}: it exists but isn't a YAML mapping. " \
                   "Fix or remove it, then re-run the installer."
           end
+          kept = parsed.dig?("mcp_servers").try(&.as_h?).try(&.keys.compact_map(&.as_s?)) || kept
         end
 
         updated = upsert_yaml_server(existing, "mcp_servers", SERVER_NAME,
           yaml_server_body(exe_path, args))
+        updated = "\uFEFF#{updated}" if bom
 
         # Read the splice back BEFORE it reaches disk. Everything above edits YAML as text,
         # and text editing goes wrong in ways a value comparison catches and an eyeball does
@@ -426,7 +434,7 @@ module Gori
         # happily and finds no gori server in — the failure mode this installer is worst at,
         # because the path is real, the file is real, and nothing looks wrong until the
         # tools are silently absent.
-        verify_yaml_entry!(config_path, updated, exe_path, args)
+        verify_yaml_entry!(config_path, updated, exe_path, args, kept)
         write_atomic(config_path, updated)
       end
 
@@ -442,17 +450,26 @@ module Gori
         body
       end
 
+      #
+      # *kept* is every server the file held before: a splice that made a second `mcp_servers:`
+      # reads back with gori in it and the others gone (a duplicate key's last one wins).
       private def self.verify_yaml_entry!(config_path : String, content : String,
-                                          exe_path : String, args : Array(String)) : Nil
-        entry =
+                                          exe_path : String, args : Array(String),
+                                          kept : Array(String) = [] of String) : Nil
+        doc =
           begin
-            YAML.parse(content).dig?("mcp_servers", SERVER_NAME)
+            YAML.parse(content)
           rescue ex : YAML::ParseException
             raise "Refusing to write #{config_path}: the updated file would not have been " \
                   "valid YAML (#{ex.message}). Add the gori server to mcp_servers by hand."
           end
+        entry = doc.dig?("mcp_servers", SERVER_NAME)
         command = entry.try(&.dig?("command")).try(&.as_s?)
         written = entry.try(&.dig?("args")).try(&.as_a?).try(&.map(&.as_s?))
+        if lost = kept.find { |name| doc.dig?("mcp_servers", name).nil? }
+          raise "Refusing to write #{config_path}: the server #{lost.inspect} already in it would " \
+                "not have survived the edit. Add the gori server to mcp_servers by hand."
+        end
         return if command == exe_path && written == args
         raise "Refusing to write #{config_path}: the gori entry did not read back as written. " \
               "Add it to mcp_servers by hand instead."
