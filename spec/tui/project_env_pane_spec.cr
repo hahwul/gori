@@ -54,7 +54,7 @@ private def env_view(store : Gori::Store, project : Gori::Project) : ProjectView
 end
 
 private def type(view : ProjectView, text : String) : Nil
-  text.each_char { |c| view.env_input(c) }
+  text.each_char { |c| view.env_field.not_nil!.insert(c) }
 end
 
 # The screen row a var's KEY is drawn on, so a hit-test can be asserted against the DRAW rather
@@ -146,9 +146,8 @@ describe "ProjectView ENV pane" do
         type(view, "TOKEN abc123")
         view.@env_field.move(-99) # ← to the head of the line
 
-        # True ⇒ "the row still has text", which is what stops the caller closing it. The old
-        # answer was about the CARET, so this ⌫ threw the whole line away.
-        view.env_backspace.should be_true
+        # A caret at 0 with text behind it makes ⌫ a no-op, never a discard of the line.
+        view.env_field.not_nil!.backspace
         view.env_commit.should eq(:ok)
         view.env_vars.should eq([{"TOKEN", "abc123"}])
       end
@@ -164,19 +163,6 @@ describe "ProjectView ENV pane" do
 
         view.env_commit.should eq(:ok)
         view.env_vars.should eq([{"TOKEN", "  value  "}])
-      end
-    end
-  end
-
-  it "closes the row only once it is genuinely empty" do
-    tmp_store do |store, project|
-      with_project_vars([] of {String, String}) do
-        view = env_view(store, project)
-        view.env_add_start
-        type(view, "ab")
-        view.env_backspace.should be_true
-        view.env_backspace.should be_true
-        view.env_backspace.should be_false # nothing left ⇒ the caller closes the row
       end
     end
   end

@@ -32,7 +32,7 @@ private def collected_samples(ctl : SequencerController) : SequencerView
     ctl.drain_events
     break unless view.running?
   end
-  view.collected_count.should eq(50)
+  view.@samples.count(&.token).should eq(50)
   view.focus_pane(:samples)
   view
 end
@@ -57,7 +57,7 @@ describe SequencerController do
       ctl.drain_events
 
       # The cursor should follow to the last sample (index 19 of 20 samples)
-      view.collected_count.should eq(20)
+      view.@samples.count(&.token).should eq(20)
       view.samples_selected_index.should eq(19)
       view.running?.should be_false
     end

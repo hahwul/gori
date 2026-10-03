@@ -3,11 +3,6 @@ require "../../support/fake_host"
 require "../../support/fake_context"
 require "../../support/memory_backend"
 
-# A typed key for the hex editor (`hex_key` → `HexEdit#handle_key`).
-private def hex_ev(c : Char) : Termisu::Event::Key
-  Termisu::Event::Key.new(Termisu::Input::Key.from_char(c), Termisu::Input::Modifier::None, c)
-end
-
 include Gori::Tui
 
 # RepeaterController — `^X` is the hex of the pane that has focus (#1295). The request pane

@@ -202,6 +202,22 @@ def shift_chord(letter : Char) : Gori::Verb::Chord
   typed_chord(letter.downcase.to_s, shift: true)
 end
 
+# A typed key for the hex editor (`hex_key` → `HexEdit#handle_key`).
+def hex_ev(c : Char) : Termisu::Event::Key
+  Termisu::Event::Key.new(Termisu::Input::Key.from_char(c), Termisu::Input::Modifier::None, c)
+end
+
+def hex_ev(k : Termisu::Input::Key) : Termisu::Event::Key
+  Termisu::Event::Key.new(k, Termisu::Input::Modifier::None, nil)
+end
+
+# Every line the response pane is showing, materialised — through `resp_line_source`, the one
+# definition of what that pane holds.
+def resp_lines(view : Gori::Tui::RepeaterView) : Array(String)
+  size, line_at = view.resp_line_source
+  (0...size).map { |i| line_at.call(i) }
+end
+
 # The scope decision for a spec that is exercising something OTHER than the scope gate
 # (payload generation, host overrides, engine plumbing). `Gori::Outbound` is a required
 # constructor argument on every active sender — that is the whole point of the seam — so

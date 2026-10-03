@@ -379,12 +379,6 @@ module Gori::Tui
       @desc_read.move(@desc_area, dr, dc, selecting: selecting)
     end
 
-    # READ-mode top / bottom of the description (`editor.top` / `editor.bottom`).
-    def desc_read_to_edge(dir : Int32) : Nil
-      return if desc_insert_mode?
-      @desc_read.to_edge(@desc_area, dir)
-    end
-
     # READ-mode undo (`editor.undo`). `undo` moves the EDITOR caret and READ paints from
     # `@desc_read`, so the read cursor has to adopt what was restored — the handover
     # `desc_read_move` gets for free and a direct `undo` does not. INS keeps its own ^Z.
@@ -1663,36 +1657,11 @@ module Gori::Tui
       @ov_field.set("")
     end
 
-    def ov_input(ch : Char) : Nil
-      @ov_field.insert(ch)
-    end
-
-    # Every other key of the open row — caret motion, word jumps, Home/End, selection, ⌥⌫,
-    # Delete, ^Z — through the shared editor. Answers whether the field took it.
-    def ov_edit_key(ev : Termisu::Event::Key) : Bool
-      @ov_field.handle_edit_key(ev)
-    end
-
-    # Backspace the add/edit row; false when the ROW is empty (the controller then closes it)
-    # — never merely because the caret sits at 0, which discarded a typed line the operator
-    # had only moved the caret inside. Same rule as `env_backspace`, which spells it out.
-    def ov_backspace : Bool
-      return false if @ov_field.value.empty?
-      @ov_field.backspace
-      true
-    end
-
-    # --- pointer contract for the open row (see `Overlay#text_fields` for the shape) ---
-    # A press inside the field is a CARET; a drag extends a selection; a pair selects a word.
-    # The field answers from the geometry it was last drawn at, so the row moving between the
-    # add line and an entry's own line costs the hit-test nothing. All three are false while
-    # no row is open, so a list click can never land a caret in a field that is not on screen.
-    def ov_field_click(mx : Int32, my : Int32, selecting : Bool = false) : Bool
-      @ov_adding && @ov_field.click_to_cursor(mx, my, selecting: selecting)
-    end
-
-    def ov_field_select_word(mx : Int32, my : Int32) : Bool
-      @ov_adding && @ov_field.select_word_at(mx, my)
+    # The open add/edit row's field, nil while no row is open — a list click can never land a
+    # caret in a field that is not on screen. Keys, caret, selection and the pointer contract
+    # (see `Overlay#text_fields`) all go through the shared `TextField`.
+    def ov_field : TextField?
+      @ov_field if @ov_adding
     end
 
     # Commit the add/edit row. Parses "IP host" (/etc/hosts order — IP first). Returns
@@ -1850,41 +1819,9 @@ module Gori::Tui
       {:ok, text}
     end
 
-    def env_input(ch : Char) : Nil
-      @env_field.insert(ch)
-    end
-
-    # Every other key of the open add/edit/prefix row, through the shared editor (see
-    # `ov_edit_key`).
-    def env_edit_key(ev : Termisu::Event::Key) : Bool
-      @env_field.handle_edit_key(ev)
-    end
-
-    # Pointer contract for whichever ENV row is open — see `ov_field_click`.
-    def env_field_click(mx : Int32, my : Int32, selecting : Bool = false) : Bool
-      env_row_open? && @env_field.click_to_cursor(mx, my, selecting: selecting)
-    end
-
-    def env_field_select_word(mx : Int32, my : Int32) : Bool
-      env_row_open? && @env_field.select_word_at(mx, my)
-    end
-
-    private def env_row_open? : Bool
-      @env_adding || @env_prefix_editing
-    end
-
-    # Whether the row still holds text — the callers read this to tell a ⌫ that edited the
-    # line from one on an EMPTY row, which closes the row.
-    #
-    # The question is whether the ROW is empty, NOT whether the caret is at 0. Answering the
-    # caret question threw the line away: ← to the start of a typed "TOKEN abc123" and one ⌫
-    # closed the row with the text unsaved, which is the one thing a ⌫ must never do. A caret
-    # already at 0 with text behind it is an ordinary no-op, and that is what `TextField`
-    # (`EnvOverlay`'s field, the same editor one modal away) has always done.
-    def env_backspace : Bool
-      return false if @env_field.value.empty?
-      @env_field.backspace
-      true
+    # The open ENV row's field (add/edit/prefix), nil while none is open — see `ov_field`.
+    def env_field : TextField?
+      @env_field if @env_adding || @env_prefix_editing
     end
 
     def env_commit : Symbol

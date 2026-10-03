@@ -792,7 +792,7 @@ describe "ProjectView DESCRIPTION READ selection across a document hand-over" do
       view.enter_desc_insert!
       view.insert('!') # dirty; typed at the caret, which the band left at column 10
       view.exit_desc_insert!
-      view.desc_read_to_edge(-1)
+      view.desc_read_move(0, -99)
       view.desc_read_move(0, 6)
       view.desc_read_move(0, 4, selecting: true)
       store.set_setting(ProjectView::DESC_KEY, "zzzzzzzzzzzzzzzzzzzz")

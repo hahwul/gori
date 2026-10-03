@@ -1,13 +1,6 @@
 require "../spec_helper"
 require "../support/memory_backend"
 
-# Every line the response pane is showing, materialised — through `resp_line_source`, the one
-# definition of what that pane holds.
-private def resp_lines(view : Gori::Tui::RepeaterView) : Array(String)
-  size, line_at = view.resp_line_source
-  (0...size).map { |i| line_at.call(i) }
-end
-
 include Gori::Tui
 
 # The response body rect the view derives internally, re-derived here so a click spec can

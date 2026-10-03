@@ -4,11 +4,6 @@ require "../support/demo_descriptor"
 require "base64"
 require "file_utils"
 
-# A typed key for the hex editor (`hex_key` → `HexEdit#handle_key`).
-private def hex_ev(k : Termisu::Input::Key) : Termisu::Event::Key
-  Termisu::Event::Key.new(k, Termisu::Input::Modifier::None, nil)
-end
-
 include Gori::Tui
 
 private alias PB = Gori::Protobuf
