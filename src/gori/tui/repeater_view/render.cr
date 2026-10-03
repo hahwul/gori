@@ -110,39 +110,4 @@ class Gori::Tui::RepeaterView
     draw_target_row(screen, rect, rect.y + 1, TARGET_PREFIX, @target, @tcx, url_active, target_insert?)
     draw_target_row(screen, rect, rect.y + 2, SNI_PREFIX, @sni, @scx, sni_active_row, target_insert?) if sni_active? && rect.h >= 4
   end
-
-  # One single-line field row of the TARGET card: a marker prefix, then the value,
-  # with the block caret + terminal cursor when this row is the active field.
-  private def draw_target_row(screen : Screen, rect : Rect, row : Int32, prefix : String, value : String,
-                              cx : Int32, active : Bool, insert : Bool) : Nil
-    screen.text(rect.x + 2, row, prefix, active ? Theme.accent : Theme.muted)
-    base = field_base(rect, prefix)
-    w = {rect.right - base - 1, 1}.max
-    Highlight.draw(screen, base, row, Highlight.env_line(value, Theme.text_bright), width: w)
-    # AFTER the value, and before the caret below. `Highlight.draw` writes its own `bg`
-    # into every cell it touches, so a band painted first was applied and erased on the
-    # same frame: ⇧←/→ on this row selected, `y` copied the right slice, and the operator
-    # saw nothing. The caret still goes last, because when the selection grows LEFTWARD
-    # the caret cell is inside the span and the band would otherwise erase it.
-    if active && !insert
-      if span = @target_read.selection_span(cx)
-        paint_char_span_bg(screen, base, row, value, span[0], span[1], Theme.accent_bg)
-      end
-    end
-    if active
-      # column_width — the measure paint_char_span_bg (the selection tint, a few lines up)
-      # already uses on this same value in this same render, and the exact inverse of the
-      # Screen.column_for that target_click_to_cursor uses to turn a click back into `cx`.
-      # display_width scored a zero-width char as 0, so the three disagreed: the tint
-      # covered one span, the caret sat a column left of its glyph, and a click landed a
-      # character off. A URL carrying U+200B is ordinary traffic for this tool (it is a
-      # stock filter-bypass payload), so this is reachable, not theoretical.
-      cursor_x = base + Screen.draw_width(value[0, cx])
-      if cursor_x < rect.right - 1
-        ch = cx < value.size ? value[cx] : ' '
-        screen.cell(cursor_x, row, ch, Theme.bg, insert ? Theme.accent : Theme.accent_bg)
-        screen.cursor(cursor_x, row)
-      end
-    end
-  end
 end

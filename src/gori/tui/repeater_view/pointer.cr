@@ -247,18 +247,6 @@ class Gori::Tui::RepeaterView
     @target_field == :sni ? (@scx = cx) : (@tcx = cx)
   end
 
-  # Pointer moved with the button held over the target card — extend from the press.
-  #
-  # READ mode only, because that is the only mode whose band `draw_target_row` paints
-  # (`active && !insert`). Extending in INSERT would plant an anchor nothing draws and
-  # `target_copy_text` would then hand back a slice the operator never saw selected — a
-  # silent selection is worse than none. The INSERT half of this field has no selection at
-  # all yet; when it grows one, this guard is what lifts.
-  def target_drag_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
-    return if target_insert?
-    target_click_to_cursor(rect, mx, my, selecting: true)
-  end
-
   # Double-click: take the word the press already placed the caret on. Spreads from THAT
   # caret rather than hit-testing again (the same rule the request/response panes follow),
   # so the two presses of the pair cannot disagree about which character was under the
