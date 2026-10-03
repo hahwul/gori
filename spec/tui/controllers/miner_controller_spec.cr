@@ -246,5 +246,23 @@ describe MinerController do
         host.statuses.last.should eq("closed — none open")
       end
     end
+
+    # `reconcile` runs under the modal: a peer closing the named session slides the index onto
+    # its neighbour, which the accepted confirm must not then close in its place.
+    it "never closes a neighbour when a peer closed the named session under the confirm" do
+      with_miner_controller do |_, session|
+        store = session.store
+        a = store.insert_miner_session("https://a.test", "GET /a HTTP/1.1\r\nHost: a.test\r\n\r\n".to_slice, false, nil, "{}", nil, 0)
+        store.insert_miner_session("https://b.test", "GET /b HTTP/1.1\r\nHost: b.test\r\n\r\n".to_slice, false, nil, "{}", nil, 1)
+        host = FakeHost.new(session)
+        ctl = MinerController.new(host)
+        ctl.subtab_index.should eq(0)
+        host.under_modal = -> { store.delete_miner_session(a); ctl.reconcile }
+        ctl.request_close
+        host.statuses.last.should eq("already closed")
+        store.miner_sessions.size.should eq(1)
+        ctl.current_view.should_not be_nil
+      end
+    end
   end
 end

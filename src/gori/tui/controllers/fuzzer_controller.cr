@@ -1822,8 +1822,9 @@ module Gori::Tui
         @host.status(reason)
         return
       end
+      ref = subtab_ref(@current_idx)
       @host.confirm("CLOSE FUZZER", "Close fuzz session “#{tab.view.summary}”?\nIts template/config, private temporary spool, and every saved run are deleted.",
-        confirm_label: "close", danger: true) { close_tab }
+        confirm_label: "close", danger: true) { close_named(ref) }
     end
 
     private def close_marked_fuzzers(refs : Array(SubtabRef)) : Nil

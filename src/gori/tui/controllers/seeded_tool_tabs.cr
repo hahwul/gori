@@ -238,8 +238,17 @@ module Gori::Tui
           confirm_label: "close", danger: true) { close_marked_sessions(refs) }
         return
       end
+      ref = subtab_ref(@current_idx)
       @host.confirm("CLOSE #{noun}", "Close #{gerund} session “#{tab.view.summary}”?\nIts config and #{contents} are discarded.",
-        confirm_label: "close", danger: true) { close_tab }
+        confirm_label: "close", danger: true) { close_named(ref) }
+    end
+
+    # Close the sub-tab a confirm named. `reconcile` runs under the modal and can drop a
+    # peer-closed session, sliding `@current_idx` onto a neighbour, so re-find it by identity.
+    private def close_named(ref : SubtabRef?) : Nil
+      return @host.status("already closed") unless ref && (idx = subtab_index_of(ref))
+      @current_idx = idx
+      close_tab
     end
 
     private def close_marked_sessions(refs : Array(SubtabRef)) : Nil
