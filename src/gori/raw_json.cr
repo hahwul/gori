@@ -513,29 +513,28 @@ module Gori
 
     # A value followed by anything but end-of-input is not one JSON document.
     #
-    # The pull parser checks what follows a root ARRAY or OBJECT, but past a root SCALAR it
-    # reports EOF whatever comes next: `1[,]`, `1 2` and `"a" "b"` all read as one value. A
-    # walker trusting that answer popped an empty stack. Inside brackets the same scalar is
-    # a container's member, where the parser does check what follows, so it is re-read there.
+    # The pull parser's EOF is not that answer at the top level: past a root SCALAR it reports
+    # EOF whatever follows (`1[,]`, `1 2`), and past a root array or object it accepts a comma
+    # and one more scalar (`[1],2`). A walker trusting it popped an empty stack. So the
+    # tokens are counted here: the one after the root value closes must be the end.
     private def finish(pull : JSON::PullParser, json : String) : Nil
-      return if pull.kind.eof? && (container_root?(json) || lone_scalar?(json))
+      return if pull.kind.eof? && one_value?(json)
       raise JSON::ParseException.new("unexpected trailing data", pull.line_number, pull.column_number)
     end
 
-    private def container_root?(json : String) : Bool
-      json.each_byte do |b|
-        next if b === ' ' || b === '\t' || b === '\n' || b === '\r'
-        return b === '{' || b === '['
+    private def one_value?(json : String) : Bool
+      lexer = JSON::Lexer.new(json)
+      depth = 0
+      loop do
+        case lexer.next_token.kind
+        when .begin_array?, .begin_object? then depth += 1
+        when .end_array?, .end_object?     then depth -= 1
+        when .eof?                         then return false
+        else # a scalar, a key, `:` or `,`
+        end
+        break if depth <= 0
       end
-      false
-    end
-
-    private def lone_scalar?(json : String) : Bool
-      pull = JSON::PullParser.new("[#{json}]")
-      pull.skip
-      pull.kind.eof?
-    rescue JSON::ParseException
-      false
+      depth == 0 && lexer.next_token.kind.eof?
     end
   end
 end

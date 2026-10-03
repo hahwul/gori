@@ -1306,9 +1306,10 @@ describe "gori run — the root logger" do
     # store is exactly the one that was polluting stdout.
     dispatch.index("route_logs_to_stderr").not_nil!
       .should be < dispatch.index("dispatch_subcommand(args)").not_nil!
-    # And it must name STDERR — the stream `gori mcp` and `App#run_capture` already use.
+    # And it must be STDERR — the stream `gori mcp` and `App#run_capture` already use — through
+    # `StderrLog`, which survives a closed one.
     setup = body[/^ *private def self\.route_logs_to_stderr.*?\n( *)end\n/m].not_nil!
-    setup.should contain("STDERR")
+    setup.should contain("StderrLog")
     setup.should_not contain("STDOUT")
   end
 end
