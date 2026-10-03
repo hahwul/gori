@@ -1,0 +1,889 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script>
+    /* Set the color theme before first paint to avoid a flash. Default: dark. */
+    (function () {
+      document.documentElement.classList.add("has-js");
+      try {
+        var t = localStorage.getItem("gori-theme");
+        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Every built-in Probe scan rule by id: what it checks, its category, and what an active rule costs per flow.">
+  
+  <title>Probe Scan Rules - gori</title>
+  <link rel="icon" type="image/png" href="https://gori.hahwul.com/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="https://gori.hahwul.com/icons/favicon.svg" />
+  <link rel="shortcut icon" href="https://gori.hahwul.com/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="https://gori.hahwul.com/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Gori" />
+  <link rel="manifest" href="https://gori.hahwul.com/icons/site.webmanifest" />
+  <meta property="og:title" content="Probe Scan Rules">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gori.hahwul.com/reference/probe-rules/">
+  <meta property="og:description" content="Every built-in Probe scan rule by id: what it checks, its category, and what an active rule costs per flow.">
+  <meta property="og:image" content="https://gori.hahwul.com/og-images/reference-probe-rules.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Probe Scan Rules">
+  <meta name="twitter:description" content="Every built-in Probe scan rule by id: what it checks, its category, and what an active rule costs per flow.">
+  <meta name="twitter:image" content="https://gori.hahwul.com/og-images/reference-probe-rules.png">
+  <meta property="og:site_name" content="gori">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:locale:alternate" content="ko_KR">
+  
+  <link rel="canonical" href="https://gori.hahwul.com/reference/probe-rules/">
+  
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Probe Scan Rules","url":"https://gori.hahwul.com/reference/probe-rules/","description":"Every built-in Probe scan rule by id: what it checks, its category, and what an active rule costs per flow.","image":"https://gori.hahwul.com/og-images/reference-probe-rules.png"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"gori","item":"https://gori.hahwul.com/"},{"@type":"ListItem","position":2,"name":"CLI, Configuration, and Query Reference","item":"https://gori.hahwul.com/reference/"},{"@type":"ListItem","position":3,"name":"Probe Scan Rules"}]}</script>
+  <link rel="alternate" hreflang="en" href="https://gori.hahwul.com/reference/probe-rules/">
+<link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/reference/probe-rules/">
+  <link rel="alternate" hreflang="x-default" href="https://gori.hahwul.com/reference/probe-rules/">
+  
+  
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/style.css">
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/docs.css">
+  
+  
+  
+  
+  
+</head>
+<body class="is-doc" data-section="reference">
+  <a class="skip-link" href="#main">Skip to content</a>
+<header class="docs-header">
+  <a href="https://gori.hahwul.com/" class="logo" aria-label="gori home">
+    <span class="logo-mark" aria-hidden="true" style="--logo-src: url('https://gori.hahwul.com/images/gori.png')" title="Right-click to download logo"></span>
+    <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
+  </a>
+
+  
+  <nav class="top-nav" aria-label="Primary">
+    <a href="https://gori.hahwul.com/getting-started/">Start</a>
+    <a href="https://gori.hahwul.com/playbooks/">Playbooks</a>
+    <a href="https://gori.hahwul.com/guide/">Guide</a>
+    <a href="https://gori.hahwul.com/reference/" class="active" aria-current="true">Reference</a>
+  </nav>
+
+  
+  <details class="nav-compact">
+    <summary class="nav-compact-trigger" aria-label="Primary">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </summary>
+    <div class="nav-compact-panel" role="navigation" aria-label="Primary">
+      <a href="https://gori.hahwul.com/getting-started/">Start</a>
+      <a href="https://gori.hahwul.com/playbooks/">Playbooks</a>
+      <a href="https://gori.hahwul.com/guide/">Guide</a>
+      <a href="https://gori.hahwul.com/reference/" class="active" aria-current="true">Reference</a>
+      <a href="https://gori.hahwul.com/getting-started/installation/">Install</a>
+    </div>
+  </details>
+
+  
+  <div class="header-right">
+    <button class="search-trigger" onclick="openSearch()" aria-label="Search documentation" title="Search documentation (&#8984;K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+    </button>
+    
+    
+    <nav class="lang-switch" aria-label="Language">
+      
+      <a href="https://gori.hahwul.com/reference/probe-rules/" hreflang="en" lang="en" aria-label="EN: English" title="English" class="is-current" aria-current="true">EN</a>
+      
+      <a href="https://gori.hahwul.com/ko/reference/probe-rules/" hreflang="ko" lang="ko" aria-label="KO: 한국어" title="한국어">KO</a>
+      
+    </nav>
+    
+    <a class="github-link" href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer" aria-label="View on GitHub" title="View on GitHub">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58C20.57 22.29 24 17.79 24 12.5 24 5.87 18.63.5 12 .5z"/></svg>
+    </a>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle color theme" title="Toggle theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2v2.2M12 19.8V22M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2 12h2.2M19.8 12H22M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="logo-menu" id="logo-menu" hidden role="menu" aria-label="Download logo">
+  <div class="logo-menu-sep" aria-hidden="true">PNG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.png" download="gori-logo.png">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.png" download="gori-logo-dark.png">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.png" download="gori-logo-color.png">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">WebP</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.webp" download="gori-logo.webp">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.webp" download="gori-logo-dark.webp">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.webp" download="gori-logo-color.webp">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">SVG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.svg" download="gori-logo.svg">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.svg" download="gori-logo-dark.svg">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.svg" download="gori-logo-color.svg">Color</a>
+  <div class="logo-menu-sep logo-menu-sep--rule" aria-hidden="true"></div>
+  <button type="button" role="menuitem" id="copy-logo-url" data-logo-url="https://gori.hahwul.com/images/gori.svg" data-label="Copy SVG URL" data-copied="Copied">Copy SVG URL</button>
+  <a role="menuitem" href="https://gori.hahwul.com/reference/brand/">Brand kit →</a>
+</div>
+<div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)closeSearch()">
+  <div class="search-modal" role="dialog" aria-modal="true" aria-label="Search documentation">
+    <div class="search-input-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m21 21-4.3-4.3"></path>
+      </svg>
+      <input type="search" id="searchInput" aria-label="Search" placeholder="Search the docs…" autocomplete="off" spellcheck="false">
+      <kbd class="search-esc" onclick="closeSearch()">ESC</kbd>
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+</div>
+
+
+<div class="docs-container">
+  <aside class="docs-sidebar">
+  <details class="docs-navigation" open>
+    <summary class="docs-navigation-toggle">Browse documentation</summary>
+
+    
+    <nav class="manual-nav" aria-label="Documentation">
+      <span class="manual-nav-label">Documentation</span>
+
+      
+      <details class="nav-group nav-section">
+        <summary>Install gori and Capture Your First Request</summary>
+        <ul class="nav-links">
+          <li><a href="https://gori.hahwul.com/getting-started/">Overview</a></li>
+          
+          <li><a href="https://gori.hahwul.com/getting-started/installation/">Install gori</a></li>
+          
+          <li><a href="https://gori.hahwul.com/getting-started/quick-start/">gori Quick Start</a></li>
+          
+          <li><a href="https://gori.hahwul.com/getting-started/ai-setup/">gori MCP and AI Agent Setup</a></li>
+          
+          <li><a href="https://gori.hahwul.com/getting-started/configuration/">Configure gori and Its Root CA</a></li>
+          
+        </ul>
+      </details>
+      
+
+      
+      <section class="nav-section guide-navigation" aria-labelledby="guide-navigation-title">
+        <h2 id="guide-navigation-title">HTTP Proxy and Web Security Guides</h2>
+        <a class="nav-overview" href="https://gori.hahwul.com/guide/">Overview</a>
+
+        
+        
+        
+        
+        <details class="nav-group">
+          <summary>Core</summary>
+          <ul class="nav-links">
+        
+            <li><a href="https://gori.hahwul.com/guide/space-menu-and-palette/">Space Menu &amp; Palette</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/proxy/">Proxy &amp; History</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/scanning/">Web Security Scanning and Issues</a></li>
+        
+        
+        
+        </ul></details>
+        <details class="nav-group">
+          <summary>Workbenches</summary>
+          <ul class="nav-links">
+        
+            <li><a href="https://gori.hahwul.com/guide/decoder/">Decoder: Encode, Decode, and Hash</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/jwt/">JWT Security Testing</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/cookie/">Session Cookie Security</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/sequencer/">Token Randomness Testing</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/oast/">OAST for Blind Vulnerabilities</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/authorize/">Authorization Testing</a></li>
+        
+        
+        
+        </ul></details>
+        <details class="nav-group">
+          <summary>Automation</summary>
+          <ul class="nav-links">
+        
+            <li><a href="https://gori.hahwul.com/guide/scripting/">CLI Scripting with gori run</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/mcp/">MCP Server</a></li>
+        
+        
+        
+        </ul></details>
+        <details class="nav-group">
+          <summary>Customize</summary>
+          <ul class="nav-links">
+        
+            <li><a href="https://gori.hahwul.com/guide/settings/">TUI Settings</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/themes/">TUI Themes</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/hotkeys/">Keyboard Shortcuts</a></li>
+        
+        
+        
+            <li><a href="https://gori.hahwul.com/guide/statusline/">Custom TUI Statusline</a></li>
+        </ul></details>
+        
+      </section>
+      
+
+      
+      <a class="book-promo" href="https://gori.hahwul.com/playbooks/">
+        <span>The gori field guide</span>
+        <strong>Playbooks →</strong>
+      </a>
+      
+
+      
+      <details class="nav-group nav-section" open>
+        <summary>CLI, Configuration, and Query Reference</summary>
+        <ul class="nav-links">
+          <li><a href="https://gori.hahwul.com/reference/">Overview</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/capabilities/">Capability Matrix</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/cli/">CLI Reference</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/config/">Configuration Reference</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/query-language/">gori Query Language</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/probe-rules/" class="active" aria-current="page">Probe Scan Rules</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/brand/">Brand Kit</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/miss-ring/">Miss Ring</a></li>
+          
+        </ul>
+      </details>
+      
+    </nav>
+    
+  </details>
+</aside>
+  <main id="main" class="docs-main">
+    <nav class="document-path" aria-label="You are here">
+      <a href="https://gori.hahwul.com/">gori</a>
+      <span aria-hidden="true">/</span><a href="https://gori.hahwul.com/reference/">CLI, Configuration, and Query Reference</a>
+      
+    </nav>
+    <header class="document-heading">
+      <p class="doc-kicker">Reference</p>
+      <h1>Probe Scan Rules</h1>
+    </header>
+    <div class="toc-placeholder" aria-hidden="true"></div>
+    <article class="document-body"><p>This page lists every built-in rule the <a href="/guide/scanning/#probe-the-scanner">Probe scanner</a> ships, under the id that the rule commands take. The <a href="/guide/scanning/#probe-the-scanner">Scanning guide</a> explains what the categories mean and how passive and active scanning differ. Use this page to look up a rule before turning it on or off.</p>
+<p>The list here matches <code>gori run probe rules</code> on a fresh project. That command, the Probe tab's <strong>Rules</strong> sub-tab and the MCP <code>list_probe_rules</code> tool all read one catalog. They are the authority for the build you are running, and they also show your custom rules and which rules this project has switched off.</p>
+<h2 id="managing">Turning a rule on or off</h2>
+<p>The switch is per project. Disabling a built-in stops new detections; findings it already produced stay in the Probe list.</p>
+<table>
+<thead>
+<tr>
+<th>Surface</th>
+<th>How</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TUI</td>
+<td>Probe tab → <strong>Rules</strong> sub-tab: <code>t</code> toggles the rule under the cursor, <code>/</code> filters the list</td>
+</tr>
+<tr>
+<td>CLI</td>
+<td><code>gori run probe rules enable &lt;id&gt;</code> / <code>disable &lt;id&gt;</code>; <code>gori run probe rules --kind active</code> lists one kind</td>
+</tr>
+<tr>
+<td>MCP</td>
+<td><code>set_probe_rule_enabled</code>, and <code>list_probe_rules</code> to read the state</td>
+</tr>
+</tbody>
+</table>
+<pre><code class="language-bash hljs">gori run probe rules --kind active          # the active rules and which are armed
+gori run probe rules enable sqli_time_based # arm a rule that ships off
+gori run probe rules disable sri            # stop one noisy passive check
+</code></pre>
+<p>A rule id is not a finding code, because one rule can raise several kinds of finding: <code>security_headers</code> files <code>missing_hsts</code>, <code>missing_csp</code> and more. <code>gori run probe issues</code> prints each finding's code. <code>gori run probe dismiss --code</code> takes that code, not the rule id.</p>
+<h2 id="passive">Passive rules</h2>
+<p>Passive rules read traffic you have already captured (History flows and Repeater send results) and send nothing. All of them ship enabled.</p>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Name</th>
+<th>Category</th>
+<th>What it checks</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>tech</code></td>
+<td>Technology fingerprints</td>
+<td><code>tech</code></td>
+<td>Identifies server software, frameworks, and protocols (WebSocket, gRPC, GraphQL, SSE, HTTP/2, HTTP/3) from headers and bodies.</td>
+</tr>
+<tr>
+<td><code>secret_in_url</code></td>
+<td>Secrets in URL</td>
+<td><code>infoleak</code></td>
+<td>Flags credentials, tokens, and JWTs carried in the request URL, where they leak via logs, history, and Referer.</td>
+</tr>
+<tr>
+<td><code>security_headers</code></td>
+<td>Security headers</td>
+<td><code>headers</code></td>
+<td>Checks for missing or weak HSTS, CSP (incl. report-only-only and a missing base-uri), X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, and Cross-Origin-Opener-Policy.</td>
+</tr>
+<tr>
+<td><code>mime_confusion</code></td>
+<td>MIME type confusion</td>
+<td><code>headers</code></td>
+<td>Flags responses whose body type disagrees with the Content-Type in a way that enables MIME-sniffing XSS (HTML body under a sniffable type without nosniff; JSON served as text/html).</td>
+</tr>
+<tr>
+<td><code>cacheable_api</code></td>
+<td>Cacheable API responses</td>
+<td><code>headers</code></td>
+<td>Flags JSON/API responses cacheable by browsers or shared caches, which may retain tokens or PII.</td>
+</tr>
+<tr>
+<td><code>cookies</code></td>
+<td>Cookie flags</td>
+<td><code>cookies</code></td>
+<td>Checks Set-Cookie flags, SameSite values, Partitioned, security prefixes (including <code>__Http-</code>), and parent Domain scope.</td>
+</tr>
+<tr>
+<td><code>cors</code></td>
+<td>CORS misconfiguration</td>
+<td><code>cors</code></td>
+<td>Flags wildcard, null-origin, and reflected-origin CORS responses.</td>
+</tr>
+<tr>
+<td><code>body_leaks</code></td>
+<td>Response body leaks</td>
+<td><code>infoleak</code></td>
+<td>Scans response bodies for private IPs, stack traces, secrets, mixed content, and insecure form actions.</td>
+</tr>
+<tr>
+<td><code>auth</code></td>
+<td>Insecure authentication</td>
+<td><code>headers</code></td>
+<td>Flags Basic authentication and Bearer token submission over cleartext http://.</td>
+</tr>
+<tr>
+<td><code>graphql_introspection</code></td>
+<td>GraphQL introspection</td>
+<td><code>infoleak</code></td>
+<td>Detects enabled GraphQL introspection, which exposes the full API schema.</td>
+</tr>
+<tr>
+<td><code>jwt</code></td>
+<td>JWT weaknesses</td>
+<td><code>headers</code></td>
+<td>Decodes JWTs carried in Authorization/Cookie/Set-Cookie and flags alg:none, non-standard algorithms, key-injection header parameters (jku/x5u/jwk), missing expiry, and sensitive claim names.</td>
+</tr>
+<tr>
+<td><code>sourcemap</code></td>
+<td>Source map exposure</td>
+<td><code>infoleak</code></td>
+<td>Flags production JavaScript that points at its source map, from which the original sources can be reconstructed.</td>
+</tr>
+<tr>
+<td><code>sri</code></td>
+<td>Missing Subresource Integrity</td>
+<td><code>headers</code></td>
+<td>Flags cross-origin scripts and stylesheets without supported integrity metadata (supply-chain exposure).</td>
+</tr>
+<tr>
+<td><code>directory_listing</code></td>
+<td>Directory listing</td>
+<td><code>infoleak</code></td>
+<td>Detects an Apache/nginx auto-generated directory index, which enumerates files for anyone who asks.</td>
+</tr>
+<tr>
+<td><code>exposed_config</code></td>
+<td>Exposed configuration files</td>
+<td><code>infoleak</code></td>
+<td>Detects server configuration and diagnostic artifacts served to clients: .env, .git/config, phpinfo(), .htpasswd, wp-config credentials, and Spring actuator env.</td>
+</tr>
+<tr>
+<td><code>serialized_object</code></td>
+<td>Serialized object exposure</td>
+<td><code>infoleak</code></td>
+<td>Detects native-serialization blobs (Java, .NET BinaryFormatter/ViewState, PHP) in cookies, parameters, and hidden fields — the insecure-deserialization attack surface.</td>
+</tr>
+<tr>
+<td><code>debug_mode_exposed</code></td>
+<td>Debug mode exposed</td>
+<td><code>infoleak</code></td>
+<td>Detects framework debug mode, interactive debuggers, and profilers reachable in production (Symfony, Werkzeug/Flask, Django, Laravel, Rails, ASP.NET).</td>
+</tr>
+<tr>
+<td><code>subdomain_takeover</code></td>
+<td>Subdomain takeover (suspected)</td>
+<td><code>infoleak</code></td>
+<td>Flags an error page in which the hosting provider says the backing resource is unclaimed (S3/GCS bucket, GitHub Pages, Heroku, Pantheon, Shopify, Fastly, Azure, Zendesk, Vercel, Tumblr) — the dangling-DNS shape an attacker can claim.</td>
+</tr>
+<tr>
+<td><code>cleartext_credentials</code></td>
+<td>Cleartext credential submission</td>
+<td><code>headers</code></td>
+<td>Flags a password submitted in a request body over http://, and a password input served over http://.</td>
+</tr>
+<tr>
+<td><code>shared_cache</code></td>
+<td>Shared-cache exposure</td>
+<td><code>headers</code></td>
+<td>Flags a Set-Cookie on a publicly cacheable response, and a reflected CORS origin cached without Vary: Origin.</td>
+</tr>
+<tr>
+<td><code>internal_host_leak</code></td>
+<td>Internal host disclosed in a response header</td>
+<td><code>infoleak</code></td>
+<td>Scans response headers for RFC 1918 addresses and internal-only hostnames (.local, .internal, .corp, …).</td>
+</tr>
+<tr>
+<td><code>ws_payloads</code></td>
+<td>WebSocket payload secrets</td>
+<td><code>infoleak</code></td>
+<td>Scans WebSocket text and binary frames for exposed secrets.</td>
+</tr>
+<tr>
+<td><code>dom_xss</code></td>
+<td>DOM-based XSS (suspected)</td>
+<td><code>client</code></td>
+<td>Flags a DOM taint source (location.hash, document.URL, postMessage data, …) flowing into an execution sink (innerHTML, document.write, eval, …) in the same statement of a page/bundle script.</td>
+</tr>
+<tr>
+<td><code>dom_clobbering</code></td>
+<td>DOM clobbering (suspected)</td>
+<td><code>client</code></td>
+<td>Flags client code that trusts a clobberable global: named HTMLCollection access (document.forms[…], document.all[…]) or the window.X = window.X || … fallback idiom.</td>
+</tr>
+<tr>
+<td><code>prototype_pollution</code></td>
+<td>Prototype pollution (suspected)</td>
+<td><code>client</code></td>
+<td>Flags client code writing to <code>__proto__</code>/<code>constructor.prototype</code> or using pollution-prone deep-merge APIs, and requests carrying <code>__proto__</code>/<code>constructor[prototype]</code> parameters.</td>
+</tr>
+<tr>
+<td><code>post_message</code></td>
+<td>Cross-origin messaging (postMessage)</td>
+<td><code>client</code></td>
+<td>Flags message handlers with no origin check, postMessage(...) to a wildcard target origin, and document.domain relaxation.</td>
+</tr>
+<tr>
+<td><code>api_docs_exposed</code></td>
+<td>API documentation exposed</td>
+<td><code>infoleak</code></td>
+<td>Detects Swagger UI, OpenAPI/Swagger specs, and interactive GraphQL IDEs (GraphiQL, Playground, ReDoc) reachable in production.</td>
+</tr>
+<tr>
+<td><code>session_id_in_url</code></td>
+<td>Session identifier in URL</td>
+<td><code>infoleak</code></td>
+<td>Flags a known framework session identifier (PHPSESSID, JSESSIONID, ASP.NET_SessionId, …) carried in the request URL, where it leaks via logs, history, and Referer.</td>
+</tr>
+<tr>
+<td><code>open_cross_domain_policy</code></td>
+<td>Permissive cross-domain policy</td>
+<td><code>cors</code></td>
+<td>Flags a Flash/Silverlight cross-domain policy that grants access to all origins (<code>domain=&quot;*&quot;</code>).</td>
+</tr>
+<tr>
+<td><code>bare_lf_response</code></td>
+<td>Bare-LF response head</td>
+<td><code>headers</code></td>
+<td>Flags a response head that ends lines with a bare LF instead of CRLF, where parsers can disagree on the message&#39;s framing (a response desync / splitting precondition).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="active">Active rules</h2>
+<p>Active rules send requests of their own. The automatic pipeline runs them only once the project's scan mode is <code>active</code> or <code>aggressive</code>. A per-flow <strong>Run active scan</strong> and <code>gori run probe --active</code> run them in any mode. By default they re-send only safe methods (<code>GET</code> / <code>HEAD</code>), and each unique surface is tested once.</p>
+<p><strong>Cost</strong> is the number of requests the rule sends for one flow, the same figure the Rules sub-tab shows beside the row. <strong>Notes</strong> marks the rules that do not run on the defaults alone:</p>
+<ul>
+<li><strong>off by default</strong>: the rule ships disabled; enable it deliberately (see <a href="#managing">above</a>).</li>
+<li><strong>needs unsafe</strong>: every probe the rule sends uses an unsafe method, so it builds nothing until unsafe methods are allowed (the popup's <strong>unsafe methods</strong> box, <code>--unsafe</code>, or AGGRESSIVE mode).</li>
+<li><strong>needs OAST</strong>: the rule is enabled but inert until the project has a registered <a href="/guide/oast/">OAST</a> listener to mint a payload from; its cost stays out of the estimate until then.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Name</th>
+<th>Category</th>
+<th>Cost</th>
+<th>Notes</th>
+<th>What it checks</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>reflected_param</code></td>
+<td>Reflected parameter</td>
+<td><code>active</code></td>
+<td>1</td>
+<td></td>
+<td>Sends a canary in query parameters and flags unencoded reflection (potential XSS).</td>
+</tr>
+<tr>
+<td><code>cors_reflection</code></td>
+<td>CORS arbitrary origin</td>
+<td><code>cors</code></td>
+<td>1</td>
+<td></td>
+<td>Probes whether the server reflects an arbitrary Origin with Allow-Credentials: true.</td>
+</tr>
+<tr>
+<td><code>forbidden_bypass</code></td>
+<td>Access-control bypass (IP headers)</td>
+<td><code>active</code></td>
+<td>2</td>
+<td></td>
+<td>Re-sends a denied (401/403) request with spoofed client-IP headers and flags a 2xx bypass.</td>
+</tr>
+<tr>
+<td><code>nginx_alias_traversal</code></td>
+<td>NGINX alias traversal</td>
+<td><code>active</code></td>
+<td>1–2</td>
+<td></td>
+<td>Re-fetches a static asset through a folded <code>..</code> (/static../static/…) and flags a byte-identical hit.</td>
+</tr>
+<tr>
+<td><code>backslash_powered</code></td>
+<td>Backslash-powered scanning</td>
+<td><code>active</code></td>
+<td>4–8</td>
+<td></td>
+<td>Appends <code>\</code> and <code>\\</code> to each query parameter; flags a parameter where the lone backslash perturbs the response but the doubled one does not (server-side string interpretation).</td>
+</tr>
+<tr>
+<td><code>sqli_error_based</code></td>
+<td>Error-based SQL injection</td>
+<td><code>active</code></td>
+<td>3–5</td>
+<td></td>
+<td>Appends a SQL-syntax-breaking payload to each query parameter; flags a parameter where a database-error signature appears in the probe response but not in the clean baseline.</td>
+</tr>
+<tr>
+<td><code>sqli_boolean_based</code></td>
+<td>Boolean-based blind SQL injection</td>
+<td><code>active</code></td>
+<td>4–8</td>
+<td></td>
+<td>Appends an always-true and an always-false SQL predicate to each parameter; flags a parameter whose true leg matches the baseline while its false leg diverges (blind injection with no error and no reflection).</td>
+</tr>
+<tr>
+<td><code>sqli_time_based</code></td>
+<td>Time-based blind SQL injection</td>
+<td><code>active</code></td>
+<td>6–10</td>
+<td>off by default</td>
+<td>Injects a server-side delay (SLEEP/pg_sleep/WAITFOR) into each parameter and confirms it in the response latency across a baseline and two increasing delays. Ships off by default because it deliberately waits.</td>
+</tr>
+<tr>
+<td><code>graphql_introspection_active</code></td>
+<td>GraphQL introspection (active)</td>
+<td><code>infoleak</code></td>
+<td>1</td>
+<td></td>
+<td>Sends an introspection query to a GraphQL endpoint and confirms the schema is exposed.</td>
+</tr>
+<tr>
+<td><code>lfi_param_traversal</code></td>
+<td>Parameter path traversal</td>
+<td><code>active</code></td>
+<td>3</td>
+<td></td>
+<td>Re-fetches a file parameter through a folded <code>..</code> (file=x/../doc) and flags a byte-identical hit.</td>
+</tr>
+<tr>
+<td><code>open_redirect</code></td>
+<td>Open redirect</td>
+<td><code>active</code></td>
+<td>1</td>
+<td></td>
+<td>Replaces a redirect parameter with an external host and flags a Location that follows it.</td>
+</tr>
+<tr>
+<td><code>host_header_injection</code></td>
+<td>Host header injection</td>
+<td><code>active</code></td>
+<td>1</td>
+<td></td>
+<td>Sends a synthetic X-Forwarded-Host and flags it reflected as an absolute-URL authority.</td>
+</tr>
+<tr>
+<td><code>crlf_injection</code></td>
+<td>CRLF header injection</td>
+<td><code>active</code></td>
+<td>1</td>
+<td></td>
+<td>Injects an encoded CRLF + header in request parameters (query/form/JSON) and flags a reflected response header.</td>
+</tr>
+<tr>
+<td><code>path_normalization_bypass</code></td>
+<td>Access-control bypass (path normalization)</td>
+<td><code>active</code></td>
+<td>6–7</td>
+<td></td>
+<td>Re-requests a denied (401/403) path through normalization tricks and flags a 2xx bypass.</td>
+</tr>
+<tr>
+<td><code>url_rewrite_bypass</code></td>
+<td>Access-control bypass (URL-rewrite headers)</td>
+<td><code>active</code></td>
+<td>3</td>
+<td></td>
+<td>Requests / with X-Original-URL/X-Rewrite-URL naming a denied path and flags a served 2xx.</td>
+</tr>
+<tr>
+<td><code>ssti</code></td>
+<td>Server-side template injection</td>
+<td><code>active</code></td>
+<td>2</td>
+<td></td>
+<td>Injects a template arithmetic polyglot and flags a parameter whose value is evaluated.</td>
+</tr>
+<tr>
+<td><code>nextjs_action_no_auth</code></td>
+<td>Next.js server action missing authorization</td>
+<td><code>active</code></td>
+<td>1</td>
+<td>needs unsafe</td>
+<td>Re-sends a Next.js server action (Next-Action) with the session cookie/Authorization stripped and flags a still-successful 2xx.</td>
+</tr>
+<tr>
+<td><code>request_smuggling</code></td>
+<td>HTTP request smuggling / desync (CL.TE/TE.CL/TE.TE)</td>
+<td><code>active</code></td>
+<td>8–10</td>
+<td>off by default · needs unsafe</td>
+<td>Sends incomplete CL.TE/TE.CL/TE.TE framing probes and flags a front-end/back-end desync by a timing hang (differential confirm under aggressive+unsafe). Off by default; sends POST bodies.</td>
+</tr>
+<tr>
+<td><code>ssrf_oast</code></td>
+<td>Blind SSRF (out-of-band)</td>
+<td><code>active</code></td>
+<td>1</td>
+<td>needs OAST</td>
+<td>Points one query, form, or JSON URL parameter at an OAST payload and flags the finding when the server calls back.</td>
+</tr>
+<tr>
+<td><code>cmd_injection_oast</code></td>
+<td>Blind OS command injection (out-of-band)</td>
+<td><code>active</code></td>
+<td>1</td>
+<td>needs OAST</td>
+<td>Appends a shell-breakout OAST payload to a command/diagnostic parameter and flags the finding when the server&#39;s shell calls back.</td>
+</tr>
+<tr>
+<td><code>xxe_oast</code></td>
+<td>XML external entity (out-of-band)</td>
+<td><code>active</code></td>
+<td>1</td>
+<td>needs OAST · needs unsafe</td>
+<td>Adds one external parameter entity to an XML body; an OAST callback confirms resolution. Needs unsafe opt-in.</td>
+</tr>
+<tr>
+<td><code>rfi_oast</code></td>
+<td>Remote file inclusion (out-of-band)</td>
+<td><code>active</code></td>
+<td>1</td>
+<td>needs OAST</td>
+<td>Points one include-shaped parameter at a language-marked OAST resource and flags the finding when the server calls back.</td>
+</tr>
+<tr>
+<td><code>ratelimit_bypass</code></td>
+<td>Rate-limit bypass (spoofed client IP)</td>
+<td><code>active</code></td>
+<td>2</td>
+<td></td>
+<td>Re-sends a rate-limited (429) request with spoofed client-IP headers and flags a served response.</td>
+</tr>
+<tr>
+<td><code>forbidden_method_bypass</code></td>
+<td>Access-control bypass (HTTP method)</td>
+<td><code>active</code></td>
+<td>2–5</td>
+<td></td>
+<td>Re-requests a denied (401/403) resource with a method case variant, and — under unsafe — alternate methods and method-override headers, flagging a 2xx bypass.</td>
+</tr>
+<tr>
+<td><code>insecure_http_methods</code></td>
+<td>Insecure HTTP methods</td>
+<td><code>active</code></td>
+<td>2</td>
+<td></td>
+<td>Sends OPTIONS and TRACE to flag Cross-Site Tracing (TRACE) and dangerous methods advertised in the Allow header.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="custom">Custom rules</h2>
+<p>Your own match rules live in the same catalog under the <code>custom</code> category, with ids like <code>custom_p_7</code>. Each one tests a string, a regex or a command against one region of every captured flow. Add them from the Rules sub-tab (<code>a</code>), with <code>gori run probe rules add</code>, or with the MCP <code>create_probe_rule</code> tool. See <a href="/guide/scanning/#probe-the-scanner">Probe: the Scanner</a> for the fields, and <a href="/guide/scripting/#process-hooks">Process hooks</a> for the command form.</p>
+</article>
+    
+
+
+<nav class="page-navigation" aria-label="Continue reading">
+  
+  <a href="https://gori.hahwul.com/reference/query-language/" rel="prev"><span>← Previous</span><strong>gori Query Language</strong></a>
+  
+  
+  <a href="https://gori.hahwul.com/reference/brand/" rel="next"><span>Next →</span><strong>Brand Kit</strong></a>
+  
+</nav>
+
+  </main>
+  <aside class="docs-toc-rail" id="tocRail" aria-label="On this page" data-title="On this page"></aside>
+</div>
+
+
+<footer class="docs-footer">
+  <p class="footer-meta">
+    <a class="footer-sig" href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul, Built with Love">
+      <span class="hahwul-img" aria-hidden="true"></span>
+      <span class="footer-love">Built with Love</span>
+    </a>
+    <span aria-hidden="true">·</span>
+    <span>Apache-2.0 · © HAHWUL</span>
+  </p>
+</footer>
+<script>
+  /* Theme toggle: flip data-theme, remember the choice, and swap the TUI
+     screenshots to the matching light/dark capture. */
+  (function () {
+    /* Point every TUI screenshot at its light or dark capture. The light set
+       lives under images/tui/light/; the theme gallery (theme-*.svg) is left
+       alone, and any shot without a light twin falls back to the dark one. */
+    function syncTuiShots() {
+      var light = document.documentElement.getAttribute("data-theme") === "light";
+      var imgs = document.querySelectorAll('img[src*="/images/tui/"]');
+      for (var i = 0; i < imgs.length; i++) {
+        var img = imgs[i];
+        if (img.dataset.noLight === "1") continue;
+        /* Decide from the ORIGINAL dark src, not the live one (which may already
+           be swapped to the light path from a previous toggle). */
+        var orig = img.dataset.darkSrc || img.getAttribute("src");
+        if (orig.indexOf("/images/tui/light/") !== -1 || /\/images\/tui\/theme-/.test(orig)) continue;
+        if (!img.dataset.darkSrc) img.dataset.darkSrc = orig;
+        var want = light ? orig.replace("/images/tui/", "/images/tui/light/") : orig;
+        if (img.getAttribute("src") === want) continue;
+        if (light) {
+          img.onerror = function () { this.onerror = null; this.dataset.noLight = "1"; this.setAttribute("src", this.dataset.darkSrc); };
+        } else {
+          img.onerror = null;
+        }
+        img.setAttribute("src", want);
+      }
+    }
+
+    var btn = document.getElementById("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("gori-theme", next); } catch (e) {}
+        syncTuiShots();
+      });
+    }
+    syncTuiShots();
+  })();
+
+  /* The search tooltip ships as ⌘K; outside Apple platforms say Ctrl K
+     instead (search.js already answers to both modifiers). */
+  (function () {
+    var st = document.querySelector(".search-trigger");
+    if (st && !/Mac|iPhone|iPad|iPod/.test(navigator.platform || "")) {
+      st.title = st.title.replace("⌘K", "Ctrl K");
+    }
+  })();
+
+  /* Hero install picker: swap the one-liner for the chosen channel, copy it
+     on click. Present only on the home page. */
+  (function () {
+    var root = document.getElementById("heroInstall");
+    if (!root) return;
+    var cmd = document.getElementById("installCmd");
+    var tabs = root.querySelectorAll(".install-tab");
+    function pick() {
+      for (var i = 0; i < tabs.length; i++) tabs[i].setAttribute("aria-pressed", tabs[i] === this ? "true" : "false");
+      cmd.textContent = this.getAttribute("data-cmd");
+    }
+    for (var i = 0; i < tabs.length; i++) tabs[i].addEventListener("click", pick);
+
+    var btn = document.getElementById("installCopy");
+    var timer = null;
+    btn.addEventListener("click", function () {
+      var text = cmd.textContent;
+      function done() {
+        btn.classList.add("copied");
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(function () { btn.classList.remove("copied"); }, 1600);
+      }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      } else {
+        /* http:// preview, or clipboard API rejections (focus/permission) */
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { if (document.execCommand("copy")) done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  })();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+<script src="https://gori.hahwul.com/js/search.js" defer></script>
+<script src="https://gori.hahwul.com/js/toc.js" defer></script>
+<script src="https://gori.hahwul.com/js/docs.js" defer></script>
+<script src="https://gori.hahwul.com/js/codecopy.js" defer></script>
+<script src="https://gori.hahwul.com/js/logo-menu.js" defer></script>
+
+</body>
+</html>
