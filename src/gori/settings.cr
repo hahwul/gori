@@ -685,6 +685,15 @@ module Gori
       nil
     end
 
+    private def self.keep_unmergeable(disk : String) : Nil
+      return unless disk.presence
+      write_private("#{path}.corrupt", disk)
+      # `Log`, not `warning_io`: this runs mid-session, where stderr is under the TUI's screen.
+      ::Log.warn { "settings: #{path} was not valid JSON when gori saved over it — kept at #{path}.corrupt" }
+    rescue
+      nil
+    end
+
     # Record the reason and put it on the warning io at most once — shared with `load`'s rescue
     # so a PARTIAL read is announced on exactly the channel an unparseable file already was,
     # rather than being the one degraded outcome that says nothing.
@@ -855,6 +864,9 @@ module Gori
       cur_h = (JSON.parse(current).as_h? rescue nil)
       base_h = (JSON.parse(base).as_h? rescue nil)
       disk_h = (JSON.parse(disk).as_h? rescue nil)
+      # A file a peer or a hand edit (`gori settings --edit` validates nothing) left unparseable is
+      # replaced by this write, so its bytes are set aside first, as `load_root` does at startup.
+      keep_unmergeable(disk) unless disk_h
       return current unless cur_h && base_h && disk_h
       keys = (cur_h.keys + disk_h.keys).uniq!
       JSON.build(indent: "  ") do |j|

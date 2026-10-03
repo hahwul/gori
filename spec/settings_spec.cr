@@ -1172,6 +1172,28 @@ describe Gori::Settings do
     end
   end
 
+  # The same promise when the file breaks AFTER a clean load: a hand edit left a trailing comma
+  # while a TUI was running, and that TUI's next save replaces the file.
+  it "keeps a .corrupt copy of a file that broke after load before saving over it" do
+    dir = File.tempname("gori-settings-corrupt-late")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    prev_theme = Gori::Settings.theme
+    begin
+      ENV["GORI_HOME"] = dir
+      File.write(Gori::Settings.path, %({"theme":"goriday"}))
+      Gori::Settings.load
+      broken = %({"theme":"dracula",})
+      File.write(Gori::Settings.path, broken)
+      Gori::Settings.save.should be_true
+      File.read("#{Gori::Settings.path}.corrupt").should eq(broken)
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.theme = prev_theme
+    end
+  end
+
   it "preserves a recoverable .corrupt copy when the settings file is unparseable" do
     dir = File.tempname("gori-settings-corrupt")
     Dir.mkdir_p(dir)
