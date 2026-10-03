@@ -367,23 +367,13 @@ module Gori
       depth = 0
       buf = String::Builder.new
       i = 0
-      while i < n
-        return nil if buf.bytesize > MAX_OUT_PRETTY
+      # Stops at the cap with output the caller's own size check then refuses.
+      while i < n && buf.bytesize <= MAX_OUT_PRETTY
         if src[i] == 0x3C # '<'
           tend = tag_end(src, i)
           return nil if tend < 0
-          tok = String.new(src[i, tend - i])
-          case classify(tok)
-          when :close
-            depth -= 1
-            return nil if depth < 0
-            xml_line(buf, depth, tok)
-          when :open
-            xml_line(buf, depth, tok)
-            depth += 1
-          else # selfclose / comment / cdata / decl / doctype
-            xml_line(buf, depth, tok)
-          end
+          depth = xml_tag(buf, depth, String.new(src[i, tend - i]))
+          return nil if depth < 0
           i = tend
         else
           start = i
@@ -423,10 +413,8 @@ module Gori
       depth = 0
       prev_was_tag = false
       i = 0
-      while i < n
-        # The cap as output accrues; see `indent_xml`.
-        return nil if buf.bytesize > MAX_OUT_PRETTY
-        if src[i] == 0x3C # '<'
+      while i < n && buf.bytesize <= MAX_OUT_PRETTY # the cap as output accrues; see `indent_xml`
+        if src[i] == 0x3C                           # '<'
           tend = tag_end(src, i)
           return nil if tend < 0
           tok = String.new(src[i, tend - i])
@@ -462,6 +450,21 @@ module Gori
         end
       end
       buf.to_s
+    end
+
+    # One tag's line; returns the depth after it, negative on a stray close.
+    private def xml_tag(buf : String::Builder, depth : Int32, tok : String) : Int32
+      case classify(tok)
+      when :close
+        depth -= 1
+        xml_line(buf, depth, tok) unless depth < 0
+      when :open
+        xml_line(buf, depth, tok)
+        depth += 1
+      else # selfclose / comment / cdata / decl / doctype
+        xml_line(buf, depth, tok)
+      end
+      depth
     end
 
     private def xml_line(buf : String::Builder, depth : Int32, text : String) : Nil
