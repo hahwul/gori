@@ -625,32 +625,12 @@ module Gori::Tui
       store.set_setting(Store::DECODER_SESSIONS_KEY, DecoderSessions.to_json(session_tuples))
     end
 
-    # This project's persisted sub-tabs — or, for a store that has none yet, the one-time
-    # adoption of the legacy GLOBAL settings.json block. The legacy sessions are cleared from
-    # settings.json as they move, so the FIRST project opened after the upgrade inherits the
-    # workbench and every later one starts clean (leaving them in place would seed the very
-    # cross-project carry-over this split exists to stop). A blank legacy block is dropped
-    # rather than migrated: there is nothing to inherit, and writing an empty row would only
-    # mark the project as "already migrated" for no gain.
+    # This project's persisted sub-tabs (none yet for a fresh store).
     private def restore_sessions : Array({String, String, String})
       if raw = store.setting(Store::DECODER_SESSIONS_KEY)
         return DecoderSessions.parse(raw)
       end
-      none = [] of {String, String, String}
-      legacy = Settings.decoder_sessions
-      if DecoderSessions.blank?(legacy)
-        Settings.decoder_sessions = none # nothing to inherit; keep later projects clean
-        return none
-      end
-      # Adopt into the store FIRST, and only drop the settings.json copy once that write
-      # committed — a busy store must not cost the operator the sessions it failed to take.
-      # Either way the workbench opens with them; a failed adoption just means the next open
-      # retries the migration.
-      if store.set_setting(Store::DECODER_SESSIONS_KEY, DecoderSessions.to_json(legacy))
-        Settings.decoder_sessions = none
-        Settings.drop_legacy_decoder_sessions
-      end
-      legacy
+      [] of {String, String, String}
     end
 
     # ---- output actions (also the space-menu verbs, via the runner) ----

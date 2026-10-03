@@ -34,12 +34,4 @@ describe Gori::Tui::DecoderSessions do
     legacy = %([{"input":"tok","chain":"base64-decode > json","name":"jwt"}])
     DecoderSessions.parse(legacy).should eq([{"tok", "base64-decode > json", "jwt"}])
   end
-
-  it "reports a workbench with nothing worth persisting" do
-    DecoderSessions.blank?([] of {String, String, String}).should be_true
-    DecoderSessions.blank?([{"", "", ""}, {"", "", ""}]).should be_true
-    DecoderSessions.blank?([{"", "", "named"}]).should be_false
-    DecoderSessions.blank?([{"", "hex", ""}]).should be_false
-    DecoderSessions.blank?([{"x", "", ""}]).should be_false
-  end
 end

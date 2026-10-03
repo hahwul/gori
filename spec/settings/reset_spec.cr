@@ -253,7 +253,7 @@ describe "Settings.reset_to_factory" do
   # meaning no reset example reached the 3-way merge at all, and the merge is where the reset
   # was leaking. Each key below is a different way to be absent from BOTH `mine` and `base`:
   #
-  #   decoder.sessions   — a LEGACY block `serialize` never writes back, so it is absent from
+  #   decoder.sessions   — a retired block `serialize` never writes back, so it is absent from
   #                        the base even though the file has it (and it holds whatever the
   #                        operator pasted into a Decoder tab — the confirm dialog names
   #                        "saved decoder chains" among the things a reset drops)

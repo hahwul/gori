@@ -116,8 +116,7 @@ describe Gori::DurableFile do
   end
 
   describe "temp files" do
-    # `"#{path}.tmp"` was shared by every process writing that path — and, for settings.json,
-    # by `Settings.save` and `drop_legacy_decoder_sessions` within one process. Two stagers
+    # `"#{path}.tmp"` was shared by every process writing that path. Two stagers
     # then wrote one file and one renamed the other's half-written bytes into place.
     it "does not derive the temp name from the destination alone" do
       DurableFileSpec.in_tmp do |dir|

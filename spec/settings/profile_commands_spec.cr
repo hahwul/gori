@@ -129,16 +129,6 @@ describe "Settings.command_rules — a rewriter pipe rule" do
     rules_in(%({"decoder":{"chains":[{"name":"c","spec":"base64-decode > exec:"}]}})).should be_empty
   end
 
-  it "reports a pre-upgrade `presets` block, which imports DISABLED" do
-    found = rules_in(<<-JSON)
-      { "rewriter": { "presets": [
-        { "name": "legacy", "pattern": "a", "replacement": "/bin/echo", "op": "pipe" } ] } }
-      JSON
-    found.size.should eq(1)
-    found[0].name.should eq("legacy")
-    found[0].enabled.should be_false
-  end
-
   it "does not report THIS INSTALL'S rules for a node of the wrong shape" do
     with_global_rules do
       Gori::Settings.rewriter_rules = [pipe_rule("/usr/local/bin/mine")]
@@ -146,7 +136,6 @@ describe "Settings.command_rules — a rewriter pipe rule" do
       # report the operator's own hook as though the profile carried it — and refuse the import
       # over a rule already on their disk.
       rules_in(%({"rewriter":{"rules":"nonsense"}})).should be_empty
-      rules_in(%({"rewriter":{"presets":42}})).should be_empty
       rules_in(%({"rewriter":[]})).should be_empty
       rules_in(%({"rewriter":{}})).should be_empty
     end

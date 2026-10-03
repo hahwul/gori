@@ -883,41 +883,32 @@ describe Gori::Settings do
     end
   end
 
-  it "migrates the retired \"pet\" section to \"companion\" and drops it from the file" do
-    dir = File.tempname("gori-settings-companion-legacy")
+  # Pre-v0.3 upgrade shims are gone: the `pet` section, `decoder.sessions` and `rewriter.presets`
+  # are no longer read or migrated, but a file still carrying them must load, keep every other
+  # section, and save without crashing.
+  it "tolerates retired pet / decoder.sessions / rewriter.presets keys" do
+    dir = File.tempname("gori-settings-retired-keys")
     Dir.mkdir_p(dir)
     prev = ENV["GORI_HOME"]?
-    prev_companion = {Gori::Settings.companion?, Gori::Settings.companion_placement,
-                      Gori::Settings.companion_motion, Gori::Settings.companion_notices?}
     begin
       ENV["GORI_HOME"] = dir
-      # What a v0.1.x install left on disk.
-      File.write(Gori::Settings.path,
-        %({"pet":{"enabled":true,"placement":"bar","motion":"calm","notices":false}}))
+      Gori::Settings.decoder_chains = [] of {String, String}
+      Gori::Settings.rewriter_rules = [] of Gori::Settings::RewriterRule
+      File.write(Gori::Settings.path, %({"theme":"goridark","pet":{"enabled":true},) +
+                                      %("decoder":{"sessions":[{"input":"tok","chain":"base64"}],"chains":[{"name":"h","spec":"md5"}]},) +
+                                      %("rewriter":{"presets":[{"name":"strip csp","pattern":"x"}]}}))
       Gori::Settings.load
-      Gori::Settings.companion?.should be_true
-      Gori::Settings.companion_placement.should eq("bar")
-      Gori::Settings.companion_motion.should eq("calm")
-      Gori::Settings.companion_notices?.should be_false
-
-      # The next save writes the new name and clears the old one — without the explicit drop
-      # the 3-way merge reads "pet" as a section this process never touched and keeps disk's.
+      Gori::Settings.theme.should eq("goridark")
+      Gori::Settings.decoder_chains.should eq([{"h", "md5"}])
+      Gori::Settings.rewriter_rules.should be_empty
       Gori::Settings.save.should be_true
       saved = File.read(Gori::Settings.path)
-      saved.should contain(%("companion"))
-      saved.should_not contain(%("pet"))
-
-      # Both names present = the file has already been migrated once; the current one wins.
-      File.write(Gori::Settings.path,
-        %({"pet":{"enabled":false},"companion":{"enabled":true,"motion":"calm"}}))
-      Gori::Settings.load
-      Gori::Settings.companion?.should be_true
-      Gori::Settings.companion_motion.should eq("calm")
+      saved.should contain("goridark")
+      saved.should contain("md5")
     ensure
       prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
       FileUtils.rm_rf(dir)
-      Gori::Settings.companion, Gori::Settings.companion_placement = prev_companion[0], prev_companion[1]
-      Gori::Settings.companion_motion, Gori::Settings.companion_notices = prev_companion[2], prev_companion[3]
+      Gori::Settings.decoder_chains = [] of {String, String}
     end
   end
 
@@ -1519,7 +1510,6 @@ describe Gori::Settings do
     prev = ENV["GORI_HOME"]?
     begin
       ENV["GORI_HOME"] = dir
-      Gori::Settings.decoder_sessions = [] of {String, String, String}
       Gori::Settings.decoder_chains = [{"hash", "base64 > sha256"}, {"enc", "url-encode"}]
       Gori::Settings.save.should be_true
       Gori::Settings.decoder_chains = [] of {String, String}
@@ -1557,54 +1547,6 @@ describe Gori::Settings do
       prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
       FileUtils.rm_rf(dir)
       Gori::Settings.decoder_chains = [] of {String, String}
-      Gori::Settings.decoder_sessions = [] of {String, String, String}
-    end
-  end
-
-  # Open sub-tabs moved to the per-project store; settings.json only still READS a
-  # pre-upgrade block so DecoderController can adopt it once. Saving must never write one
-  # back — that block is exactly what carried one project's decoded material into the next.
-  it "reads a legacy Decoder sessions block but never writes one back" do
-    dir = File.tempname("gori-settings-decoder-sessions")
-    Dir.mkdir_p(dir)
-    prev = ENV["GORI_HOME"]?
-    begin
-      ENV["GORI_HOME"] = dir
-      Gori::Settings.decoder_chains = [] of {String, String}
-      File.write(Gori::Settings.path,
-        %({"decoder":{"sessions":[{"input":"in1","chain":"base64","name":"first"},{"input":"in2","chain":"hex > upper"}]}}))
-      Gori::Settings.load
-      Gori::Settings.decoder_sessions.should eq([{"in1", "base64", "first"}, {"in2", "hex > upper", ""}])
-
-      # save no longer SERIALIZES sessions, but it cannot erase what disk already has: an
-      # unserialized section reads as "unchanged" to the 3-way merge and yields to the copy on
-      # disk. That gap is exactly why the migration needs its own eraser.
-      File.write(Gori::Settings.path,
-        %({"theme":"goridark","decoder":{"sessions":[{"input":"tok","chain":"base64"}],"chains":[{"name":"h","spec":"md5"}]}}))
-      Gori::Settings.load
-      Gori::Settings.save.should be_true
-      File.read(Gori::Settings.path).includes?(%("sessions")).should be_true
-
-      Gori::Settings.drop_legacy_decoder_sessions.should be_true
-      after = File.read(Gori::Settings.path)
-      after.includes?(%("sessions")).should be_false
-      after.includes?(%("md5")).should be_true   # the named chains survive
-      after.includes?("goridark").should be_true # and so does every unrelated section
-      # a fresh process (empty property) finds nothing left to adopt from the erased file —
-      # the tolerant parser keeps the CURRENT value for an absent node, so clear it first
-      Gori::Settings.decoder_sessions = [] of {String, String, String}
-      Gori::Settings.load
-      Gori::Settings.decoder_sessions.should be_empty
-      Gori::Settings.decoder_chains.should eq([{"h", "md5"}])
-
-      # idempotent: a second pass (or a file that never had the block) is a no-op success
-      Gori::Settings.drop_legacy_decoder_sessions.should be_true
-      File.read(Gori::Settings.path).should eq(after)
-    ensure
-      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
-      FileUtils.rm_rf(dir)
-      Gori::Settings.decoder_chains = [] of {String, String}
-      Gori::Settings.decoder_sessions = [] of {String, String, String}
     end
   end
 
@@ -1615,19 +1557,11 @@ describe Gori::Settings do
     begin
       ENV["GORI_HOME"] = dir
       Gori::Settings.decoder_chains = [] of {String, String}
-      Gori::Settings.decoder_sessions = [] of {String, String, String}
-      Gori::Settings.save.should be_true
-      File.read(Gori::Settings.path).includes?("decoder").should be_false
-
-      # sessions no longer feed the block at all — even a non-blank legacy set (still in
-      # memory before the migration clears it) must not resurrect a "decoder" section
-      Gori::Settings.decoder_sessions = [{"secret-token", "base64-decode", "loot"}]
       Gori::Settings.save.should be_true
       File.read(Gori::Settings.path).includes?("decoder").should be_false
     ensure
       prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
       FileUtils.rm_rf(dir)
-      Gori::Settings.decoder_sessions = [] of {String, String, String}
     end
   end
 
@@ -2081,48 +2015,6 @@ describe Gori::Settings do
       Gori::Settings.colormarker_colors = [] of Gori::Settings::ColormarkerColor
       Gori::Settings.colormarker_rules = [] of Gori::Settings::ColormarkerRule
       Gori::Settings.colormarker_next_rule_id = 1_i64
-    end
-  end
-
-  # The pre-upgrade preset library. A preset was INERT — it did nothing until loaded into a
-  # project — so it must not come back as a live rule in every project.
-  it "adopts legacy rewriter presets as DISABLED global rules" do
-    dir = File.tempname("gori-settings-rwlegacy")
-    Dir.mkdir_p(dir)
-    prev = ENV["GORI_HOME"]?
-    begin
-      ENV["GORI_HOME"] = dir
-      Gori::Settings.rewriter_rules = [] of Gori::Settings::RewriterRule
-      Gori::Settings.rewriter_next_rule_id = 1_i64
-      File.write(Gori::Settings.path, %({"rewriter":{"presets":[\
-{"id":"a1","name":"strip csp","pattern":"Content-Security-Policy","op":"remove_header","target":"response"},\
-{"id":"b2","name":"","pattern":"x"}]}}))
-      Gori::Settings.load
-      # The unnamed entry is dropped (a preset was addressed by name); the named one arrives OFF.
-      Gori::Settings.rewriter_rules.size.should eq(1)
-      adopted = Gori::Settings.rewriter_rules.first
-      adopted.name.should eq("strip csp")
-      adopted.enabled.should be_false
-      adopted.op.should eq("remove_header")
-
-      # In-memory and idempotent: a second load of the same file adopts the same one rule
-      # rather than appending a copy per launch.
-      Gori::Settings.load
-      Gori::Settings.rewriter_rules.size.should eq(1)
-
-      # The first save that touches the section replaces `presets` with `rules` outright —
-      # the 3-way merge sees the section change, so this process wins it.
-      Gori::Settings.set_rewriter_rule_enabled(adopted.id, true).should be_true
-      raw = File.read(Gori::Settings.path)
-      raw.includes?("presets").should be_false
-      raw.includes?("\"rules\"").should be_true
-      Gori::Settings.load
-      Gori::Settings.rewriter_rules.first.enabled.should be_true
-    ensure
-      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
-      FileUtils.rm_rf(dir)
-      Gori::Settings.rewriter_rules = [] of Gori::Settings::RewriterRule
-      Gori::Settings.rewriter_next_rule_id = 1_i64
     end
   end
 

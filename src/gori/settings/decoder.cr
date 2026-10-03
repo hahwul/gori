@@ -4,13 +4,6 @@ require "../decoder"
 # DECODER section: the Decoder tab's named chain specs. See settings.cr for the
 # module-level overview and the load/save/serialize orchestration.
 module Gori::Settings
-  # LEGACY, READ-ONLY. Open Decoder sub-tabs used to live here, which carried one project's
-  # decoded material into the next one on a project switch. They now live in each project's
-  # own store (`Store::DECODER_SESSIONS_KEY`); this property only still parses so
-  # DecoderController#restore_sessions can adopt a pre-upgrade block once and clear it.
-  # Deliberately NOT serialized — writing it again would recreate the global block.
-  class_property decoder_sessions : Array({String, String, String}) = [] of {String, String, String}
-
   # Named, saved chain specs (name -> spec) the user can re-load with ^O — and CALL by name as
   # a single chain step (`myenc > url-encode`) anywhere a spec is accepted. Global on purpose:
   # a chain like "base64-decode > gunzip" is tool config, reusable in every project — only
@@ -39,9 +32,6 @@ module Gori::Settings
   # carry. Returns whether the write reached disk; a name that is not there is a successful
   # no-op, because the caller's intent — "this chain is not in the library" — already holds.
   #
-  # Unlike drop_legacy_decoder_sessions this CAN go through `save`: `chains` is still
-  # serialized, so the 3-way merge sees the section change and this process wins it.
-  #
   # A write that did not reach disk puts the entry BACK. The setter also republishes the
   # engine's library, so without this a refused save left the picker without the row and
   # the name unresolvable in every open conversion — while the toast said "could not delete"
@@ -52,58 +42,6 @@ module Gori::Settings
     return true if save
     self.decoder_chains = before
     false
-  end
-
-  # Erase a pre-upgrade `decoder.sessions` block from settings.json, keeping every other
-  # section (including `decoder.chains`) byte-identical. Returns whether the file is now free
-  # of it. Called once, by DecoderController#restore_sessions, after the sessions have been
-  # adopted into a project store.
-  #
-  # `save` CANNOT do this. Its 3-way merge asks "did this process change the section?" by
-  # comparing its own serialization against the same serialization at load time — and since
-  # sessions are no longer serialized at all, `decoder` reads as unchanged on both sides and
-  # therefore YIELDS TO DISK. The block would survive every future save and re-seed the next
-  # project opened after every restart. So this rewrites the file it actually finds (never
-  # this process's in-memory picture, which would clobber a concurrent peer's sections),
-  # dropping exactly one field.
-  def self.drop_legacy_decoder_sessions : Bool
-    raw = load_raw
-    return true unless raw # no file yet — nothing to erase
-    root = (JSON.parse(raw).as_h? rescue nil)
-    return false unless root
-    dec = root["decoder"]?.try(&.as_h?)
-    return true unless dec && dec.has_key?("sessions")
-    kept = dec.reject("sessions")
-    doc = JSON.build(indent: "  ") do |j|
-      j.object do
-        root.each do |k, v|
-          next if k == "decoder"
-          j.field k, v
-        end
-        j.field "decoder", kept unless kept.empty?
-      end
-    end
-    write_private(path, doc)
-    true
-  rescue
-    false
-  end
-
-  # Tolerant sub-tab session parse (legacy blocks only — see decoder_sessions): a non-array
-  # (or absent) node keeps the current value. Missing fields default to "" (a blank session
-  # is valid — an empty sub-tab). Mirrors parse_decoder_chains.
-  private def self.parse_decoder_sessions(node : JSON::Any?) : Array({String, String, String})
-    arr = node.try(&.as_a?)
-    return decoder_sessions unless arr
-    out = [] of {String, String, String}
-    arr.each do |e|
-      next unless o = e.as_h?
-      input = o["input"]?.try(&.as_s?) || ""
-      chain = o["chain"]?.try(&.as_s?) || ""
-      name = o["name"]?.try(&.as_s?) || ""
-      out << {input, chain, name}
-    end
-    out
   end
 
   # Tolerant named-chain parse: a non-array (or absent) node keeps the current
@@ -130,11 +68,8 @@ module Gori::Settings
 
   # Factory reset for this section (dispatched by Settings.reset_to_factory). `chains` goes
   # through the SETTER so the Decoder engine's library is emptied with it — a chain left
-  # callable as a step after the library it came from was dropped would be a ghost. The
-  # legacy `sessions` block is cleared too: it is never written back, but an unadopted
-  # pre-upgrade block would otherwise survive a factory reset in memory.
+  # callable as a step after the library it came from was dropped would be a ghost.
   private def self.reset_decoder : Nil
-    self.decoder_sessions = [] of {String, String, String}
     self.decoder_chains = [] of {String, String}
   end
 

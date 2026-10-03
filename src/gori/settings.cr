@@ -206,10 +206,10 @@ module Gori
         # the #594 data loss, where `gori settings import` reported success while replacing a
         # live config with defaults.
         #
-        # Scoped to `apply_sections` ALONE, not to the whole method. `serialize` and
-        # `migrate_legacy_sections` below run only after every section applied, so a raise
-        # there leaves nothing at a default — latching the flag for those would refuse every
-        # save for the rest of the process over a file that was read in full.
+        # Scoped to `apply_sections` ALONE, not to the whole method. `serialize` below runs
+        # only after every section applied, so a raise there leaves nothing at a default —
+        # latching the flag for it would refuse every save for the rest of the process over
+        # a file that was read in full.
         @@load_partial = true
         # Half a file proves nothing about the grammar, so the origin says `Unreadable` and no
         # project database is re-spelled off this run (`env_syntax_stated?`).
@@ -230,23 +230,11 @@ module Gori
       # Re-base on our OWN serialization of what we just read, the same rule `save` applies
       # to `mine`. See `@@loaded_raw` for why the raw text cannot be the base.
       @@loaded_raw = serialize
-      # Renamed sections, read here and NOT in `apply_sections`, so an import keeps telling the
-      # truth: `import_document` drops a key outside SECTION_KEYS before it ever reaches the
-      # parsers, and a legacy name accepted there would be reported "unrecognised … ignored"
-      # and then applied anyway — the exact failure SECTION_KEYS exists to prevent. A file on
-      # disk has no such contract: it is this install's own older state, so it migrates.
-      #
-      # AFTER the re-base, deliberately. The base is what DISK says, and disk says it under the
-      # old name; migrating first would leave the migrated section identical to the base, the
-      # merge would read that as "this process did not touch it" and take disk's — which has no
-      # such key — so the value the migration just recovered would be dropped by the very next
-      # save. Migrating after makes it a genuine change, which is what it is.
-      migrate_legacy_sections(root)
       # LAST, so the re-base above describes the file as it was READ and the rewrite below is a
       # genuine change to the `env` and `rewriter` sections rather than a no-op the merge discards.
       adopt_env_syntax_for_absent_key if env_syntax_origin.absent?
     rescue
-      # `serialize` or `migrate_legacy_sections` raised. Every section from disk is already
+      # `serialize` raised. Every section from disk is already
       # applied by here, so the in-memory state is whole and `save` stays allowed — a
       # re-base that could not be computed only costs the merge its base, which is the same
       # position a first run is in. Swallowed, as it was before the partial-load guard
@@ -432,7 +420,6 @@ module Gori
       self.oast_providers = parse_oast_providers(root["oast_providers"]?)
       parse_hotkeys(root["hotkeys"]?)
       if cv = object_section(root, "decoder")
-        self.decoder_sessions = parse_decoder_sessions(cv["sessions"]?)
         self.decoder_chains = parse_decoder_chains(cv["chains"]?)
       end
       if rw = object_section(root, "rewriter")
@@ -461,27 +448,6 @@ module Gori
       parse_general(root["general"]?)
       parse_update(root["update"]?)
       Env.bump_highlight_rev
-    end
-
-    # Top-level keys written by an OLDER gori, mapped to the key that replaced them. Read on
-    # load (see `migrate_legacy_sections`) and dropped from the file by the next `save`, so a
-    # rename costs the operator nothing and leaves nothing behind.
-    LEGACY_SECTION_KEYS = {
-      # v0.1.x wrote the Miss Ring prefs under "pet".
-      "pet" => "companion",
-    }
-
-    # Apply a legacy section ONLY when the current name is absent — an install that has already
-    # been through one save carries both keys for the moment between the migration and that
-    # save, and the new one is the one that was last written.
-    private def self.migrate_legacy_sections(root : JSON::Any) : Nil
-      LEGACY_SECTION_KEYS.each do |old, new|
-        next if root[new]?
-        next unless node = object_section(root, old)
-        case old
-        when "pet" then parse_companion(node)
-        end
-      end
     end
 
     # Read the settings file; nil on missing/unreadable (a first run keeps defaults).
@@ -771,12 +737,11 @@ module Gori
       Paths.ensure_dir(File.dirname(path), tighten: false)
       # Durable write: a torn File.write (crash / two instances / disk-full) would leave a
       # half-written settings.json that load()'s blanket rescue silently resets to factory
-      # defaults — losing theme, hotkeys, hostname overrides, tab prefs, decoder sessions.
+      # defaults — losing theme, hotkeys, hostname overrides, tab prefs, decoder chains.
       # `DurableFile` stages to a randomly-named sibling and fsyncs before the rename, which
       # is what makes those three threats actually survivable: the fixed `"#{path}.tmp"` this
-      # used to stage through was shared with every peer process AND with
-      # `drop_legacy_decoder_sessions`, so "two instances" raced on one temp file, and
-      # without the fsync the rename could still land ahead of the bytes.
+      # used to stage through was shared with every peer process, so "two instances" raced
+      # on one temp file, and without the fsync the rename could still land ahead of the bytes.
       #
       # `mine` = THIS process's serialization of its OWN in-memory state. Base the next
       # merge on it, NOT on a re-read of the file we just wrote: that file also carries a
@@ -889,11 +854,7 @@ module Gori
       base_h = (JSON.parse(base).as_h? rescue nil)
       disk_h = (JSON.parse(disk).as_h? rescue nil)
       return current unless cur_h && base_h && disk_h
-      # Retired names are subtracted here: one is never in `cur_h` (nothing serializes it), so
-      # the rule below would read it as "I did not change this section" and copy disk's block
-      # forward for good. `load` has already folded its value into the section that replaced
-      # it, so this is the one place the old block can actually be cleared.
-      keys = (cur_h.keys + disk_h.keys).uniq! - LEGACY_SECTION_KEYS.keys
+      keys = (cur_h.keys + disk_h.keys).uniq!
       JSON.build(indent: "  ") do |j|
         j.object do
           keys.each do |k|
@@ -979,17 +940,12 @@ module Gori
     }
     RULE_SECTION_COUNTER = "next_rule_id"
 
-    # Retired keys INSIDE a rule section, subtracted for exactly the reason LEGACY_SECTION_KEYS
-    # is subtracted at the top level: nothing serializes one, so the key-by-key rule below would
-    # read it as "I did not change this" and copy disk's block forward for good. `parse_rewriter`
-    # has already folded `presets` into `rules` in memory, so a save that touches the section is
-    # the one place the old block can actually be cleared — which is what it did while the whole
-    # section was decided as a unit, and what it has to keep doing now that it is not.
+    # Retired keys INSIDE a rule section, subtracted so a stale one is cleared by the next save:
+    # nothing serializes it, so the key-by-key rule below would read it as "I did not change
+    # this" and copy disk's block forward for good.
     #
     # One flat list rather than one per section: `presets` was only ever a `rewriter` key, and a
-    # name retired from one of these sections is not a name another may start using. Pinned by
-    # spec/settings_spec.cr's "adopts legacy rewriter presets as DISABLED global rules", which
-    # asserts the saved file no longer mentions them.
+    # name retired from one of these sections is not a name another may start using.
     LEGACY_RULE_SECTION_KEYS = ["presets"]
 
     # Merge one rule section key by key: its lists entry by entry, its counter by high-water
@@ -1096,9 +1052,8 @@ module Gori
       # `colormarker.colors` is written only when there is a colour to write, so "no key" is how
       # "no colours" is spelled, and reading it as unmergeable would drop a peer's new colour
       # along with the last one of ours. `rules` is written whenever its section is, so ITS
-      # absence means something else wrote this section — the pre-upgrade `rewriter.presets`
-      # block, or a hand edit — and the in-memory list came from a migration `pick_changed` has
-      # to carry through whole.
+      # absence means something else wrote this section — a hand edit — and the in-memory list
+      # came from a repair `pick_changed` has to carry through whole.
       return ({} of String => JSON::Any) if entries.nil? && list[:optional]
       arr = entries.try(&.as_a?)
       return nil unless arr
@@ -1333,27 +1288,15 @@ module Gori
       acc
     end
 
-    # `rewriter`: the same `rules`-else-legacy-`presets` branch `parse_rewriter` takes, so a
-    # profile carrying a pre-upgrade preset block is read the way the import will read it.
-    #
-    # A node of the wrong SHAPE is skipped rather than parsed, and that is not pedantry:
+    # `rewriter`: a node of the wrong SHAPE is skipped rather than parsed, and that is not pedantry:
     # `parse_rewriter_rules` answers a non-array with THIS INSTALL'S current global rules, so
     # handing it one would report the operator's own hooks as though the profile carried them —
     # and, at the import gate, refuse an import over rules that are already on disk.
     private def self.rewriter_command_entries(node : JSON::Any, acc : Array(CommandEntry)) : Nil
       return unless node.as_h?
-      rules =
-        if raw = node["rules"]?
-          return unless raw.as_a?
-          parse_rewriter_rules(raw)
-        else
-          legacy = node["presets"]?
-          return unless legacy && legacy.as_a?
-          # Adopted DISABLED by `parse_legacy_presets`, and reported anyway: the profile is
-          # still carrying the command, and `enabled` says which of the two it is.
-          parse_legacy_presets(legacy)
-        end
-      rules.each do |r|
+      raw = node["rules"]?
+      return unless raw && raw.as_a?
+      parse_rewriter_rules(raw).each do |r|
         cmd = r.command.presence
         acc << CommandEntry.new("rewriter", r.op, r.name, cmd, r.enabled) if cmd
       end

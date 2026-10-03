@@ -129,13 +129,9 @@ module Gori::Settings
   RULE_OPS     = %w[replace add_header set_header remove_header short_circuit pipe]
   RULE_KINDS   = %w[literal regex]
 
-  # Parse the `rewriter` section: `rules` when present, else the pre-upgrade `presets` block.
+  # Parse the `rewriter` section.
   private def self.parse_rewriter(node : JSON::Any) : Nil
-    if node["rules"]?
-      self.rewriter_rules = parse_rewriter_rules(node["rules"]?)
-    else
-      self.rewriter_rules = parse_legacy_presets(node["presets"]?)
-    end
+    self.rewriter_rules = parse_rewriter_rules(node["rules"]?)
     stored = node["next_rule_id"]?.try(&.as_i64?) || 0_i64
     # Never go BACKWARDS from the ids actually present, whatever the file says: a hand-edited
     # (or truncated) counter must not be able to mint a duplicate id.
@@ -293,48 +289,6 @@ module Gori::Settings
   # `index_entries` in settings.cr). One predicate, so the two cannot drift apart.
   protected def self.usable_id?(id : Int64) : Bool
     id > 0 && id < Int64::MAX
-  end
-
-  # Adopt a pre-upgrade `rewriter.presets` block as global rules, DISABLED. A preset was inert
-  # by construction — it did nothing until you loaded it into a project — so adopting one as a
-  # live rule would start rewriting traffic in every project on the strength of an upgrade.
-  # They arrive as rows in the Rewriter list, off, where `x` arms them.
-  #
-  # No eraser is needed for the legacy key (contrast `drop_legacy_decoder_sessions`): the
-  # migration is in-memory and idempotent — `rules` wins the moment it exists, so a stale
-  # `presets` block is never read again — and the first save that touches the section replaces
-  # it with `rules` outright, because the merge sees the section change.
-  private def self.parse_legacy_presets(node : JSON::Any?) : Array(RewriterRule)
-    arr = node.try(&.as_a?)
-    return rewriter_rules unless arr
-    list = [] of RewriterRule
-    arr.each do |e|
-      next unless o = e.as_h?
-      name = o["name"]?.try(&.as_s?)
-      pattern = o["pattern"]?.try(&.as_s?)
-      next if name.nil? || name.empty? || pattern.nil? || pattern.empty?
-      op, raw_op = parse_rule_label(o["op"]?, RULE_OPS, "replace")
-      target, raw_target = parse_rule_label(o["target"]?, RULE_TARGETS, "request")
-      part, raw_part = parse_rule_label(o["part"]?, RULE_PARTS, "head")
-      match_kind, raw_match_kind = parse_rule_label(o["match_kind"]?, RULE_KINDS, "literal")
-      next if known_rule_shape?(op, part) && impossible_shape?(op, part)
-      extra = o.reject { |k, _| KNOWN_RULE_KEYS.includes?(k) }
-      list << RewriterRule.new(
-        (list.size + 1).to_i64, false, name,
-        target, part,
-        pattern,
-        o["replacement"]?.try(&.as_s?) || "",
-        op,
-        match_kind,
-        o["host"]?.try(&.as_s?) || "",
-        o["body_file"]?.try(&.as_s?) || "",
-        extra_keys: extra,
-        raw_target: raw_target,
-        raw_part: raw_part,
-        raw_op: raw_op,
-        raw_match_kind: raw_match_kind)
-    end
-    list
   end
 
   # Re-read the `rewriter` section from settings.json into memory, leaving every other section
