@@ -1260,6 +1260,73 @@ module Gori::Tui
       (ev.char || ev.key.to_char) == '?'
     end
 
+    # The QL `/` bar's keys for History, Sitemap, Issues and Probe — one grammar, one set of
+    # gestures. `bar` is the tab's view; the block is the tab's Esc. Returns true (swallows).
+    protected def handle_ql_bar_key(ev : Termisu::Event::Key, bar, help : Symbol, & : -> Nil) : Bool
+      key = ev.key
+      c = ev.char || key.to_char
+      return true if ql_bar_nav(ev, bar)
+      case
+      when key.enter?     then ql_bar_enter(bar)
+      when key.escape?    then yield
+      when key.tab?       then (bar.query_complete; on_query_edit)
+      when key.backspace? then (bar.query_backspace; on_query_edit)
+        # Above the printable arm below, which would otherwise type the `?` (see ql_help_key?).
+      when TabController.ql_help_key?(ev, bar.query) then @host.open_help_query(help)
+      else
+        if c && !ev.ctrl? && !ev.alt?
+          bar.query_insert(c)
+          on_query_edit
+          # Clear the preedit on a committed char. Issues and Probe name the bar's setter apart
+          # from the `set_preedit` their notes/rules editor answers to.
+          bar.responds_to?(:query_set_preedit) ? bar.query_set_preedit("") : bar.set_preedit("")
+        end
+      end
+      true
+    end
+
+    # Hook: the bar's text changed. History and Sitemap reload on a debounce and schedule it
+    # here; Issues and Probe re-filter inside the view (`query_edited`) and need nothing.
+    protected def on_query_edit : Nil
+    end
+
+    # Hook: ↵ applied the filter. A debounced bar runs its pending reload now.
+    protected def flush_query_reload : Nil
+    end
+
+    # ↓/↑ drive the dropdown, ←/→ the caret. Handled ahead of the `case` above rather than as
+    # four more arms in it: the dropdown's two keys pushed the key handler past the complexity
+    # gate CI runs, and "move something" is a different question from "what does this key do".
+    # `↓`/`↑` were dead in this bar before the dropdown — a one-line field has no second row to
+    # move a caret to — which is why they could be claimed without displacing anything.
+    private def ql_bar_nav(ev : Termisu::Event::Key, bar) : Bool
+      key = ev.key
+      case
+      when act = LineEdit.action(ev) # ⌃/⌥←→, Home/End, Delete, ⌥⌫ — before the bare arrows
+        bar.query_edit(act)
+        on_query_edit if LineEdit.mutating?(act)
+      when key.down?  then bar.popup_down
+      when key.up?    then bar.popup_up
+      when key.left?  then bar.query_move(-1)
+      when key.right? then bar.query_move(1)
+      else                 return false
+      end
+      true
+    end
+
+    # ↵ with the dropdown open takes the highlighted candidate and SHUTS it — the same thing ↹
+    # does, except for the shutting, which is what lets the next ↵ reach `stop_query`. Closed, it
+    # is unchanged: apply the filter and leave edit mode.
+    private def ql_bar_enter(bar) : Nil
+      if bar.popup_open?
+        bar.query_complete(close: true)
+        on_query_edit
+      else
+        flush_query_reload
+        bar.stop_query
+      end
+    end
+
     # --- filter bar rendering (shared by every opt-in tab's render_body) ---
     # Base height: guidance/input row + hairline (the bar owns the strip divider). While
     # editing, an optional suggestion row sits between the input and the hairline.

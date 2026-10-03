@@ -841,54 +841,7 @@ module Gori::Tui
     end
 
     def handle_query_key(ev : Termisu::Event::Key) : Bool
-      key = ev.key
-      c = ev.char || key.to_char
-      return true if query_nav(ev)
-      case
-      when key.enter?     then query_enter
-      when key.escape?    then query_escape
-      when key.tab?       then @issues.query_complete
-      when key.backspace? then @issues.query_backspace
-        # Above the printable arm below, which would otherwise type the `?` (see ql_help_key?).
-      when TabController.ql_help_key?(ev, @issues.query) then @host.open_help_query(:issues)
-      else
-        if c && !ev.ctrl? && !ev.alt?
-          @issues.query_insert(c)
-          @issues.query_set_preedit("")
-        end
-      end
-      true
-    end
-
-    # ↓/↑ drive the dropdown, ←/→ the caret. Handled ahead of the `case` above rather than as
-    # four more arms in it, for the reason `SitemapController#query_nav` gives: the two
-    # dropdown keys push `handle_query_key` past the complexity gate CI runs, and "move
-    # something" is a different question from "what does this key do". Both keys were DEAD in
-    # this bar before the dropdown — a one-line field has no second row to move a caret to —
-    # which is why they can be claimed without displacing anything.
-    private def query_nav(ev : Termisu::Event::Key) : Bool
-      key = ev.key
-      case
-      when act = LineEdit.action(ev) # ⌃/⌥←→, Home/End, Delete, ⌥⌫ — before the bare arrows
-        @issues.query_edit(act)
-      when key.down?  then @issues.popup_down
-      when key.up?    then @issues.popup_up
-      when key.left?  then @issues.query_move(-1)
-      when key.right? then @issues.query_move(1)
-      else                 return false
-      end
-      true
-    end
-
-    # Open dropdown ⇒ ↵ takes the highlighted candidate and shuts it; closed ⇒ apply the
-    # filter and leave edit mode. Mirrors History and Sitemap — one grammar, one set of
-    # gestures.
-    private def query_enter : Nil
-      if @issues.popup_open?
-        @issues.query_complete(close: true)
-      else
-        @issues.stop_query
-      end
+      handle_ql_bar_key(ev, @issues, :issues) { query_escape }
     end
 
     # esc closes the dropdown first, so opening the list to look at it never costs the typed

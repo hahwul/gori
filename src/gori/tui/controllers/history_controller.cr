@@ -637,58 +637,7 @@ module Gori::Tui
     # --- QL filter bar (a text sub-mode; the shell claims it before the focus ring) ---
     # Returns true (swallows) — mirrors the old `return handle_query_key(ev)`.
     def handle_query_key(ev : Termisu::Event::Key) : Bool
-      key = ev.key
-      c = ev.char || key.to_char
-      store = @host.session.store
-      return true if query_nav(ev)
-      case
-      when key.enter?  then query_enter
-      when key.escape? then query_escape(store)
-      when key.tab?    then (@history.query_complete; schedule_query_reload)
-      when key.backspace? then @history.query_backspace; schedule_query_reload
-      # Above the printable arm below, which would otherwise type the `?` (see ql_help_key?).
-      when TabController.ql_help_key?(ev, @history.query) then @host.open_help_query(:history)
-      else
-        if c && !ev.ctrl? && !ev.alt?
-          @history.query_insert(c)
-          schedule_query_reload
-          @history.set_preedit("") # clear preedit on committed char
-        end
-      end
-      true
-    end
-
-    # ↵ with the dropdown open takes the highlighted candidate and SHUTS it — the same thing ↹
-    # does, except for the shutting, which is what lets the next ↵ reach `stop_query`. Closed, it
-    # is unchanged: apply the filter and leave edit mode.
-    # ↓/↑ drive the dropdown, ←/→ the caret. Handled ahead of the `case` below rather than as
-    # four more arms in it: the dropdown's two keys pushed `handle_query_key` past the complexity
-    # gate CI runs, and "move something" is a different question from "what does this key do".
-    # `↓`/`↑` were dead in this bar before the dropdown — a one-line field has no second row to
-    # move a caret to — which is why they could be claimed without displacing anything.
-    private def query_nav(ev : Termisu::Event::Key) : Bool
-      key = ev.key
-      case
-      when act = LineEdit.action(ev) # ⌃/⌥←→, Home/End, Delete, ⌥⌫ — before the bare arrows
-        @history.query_edit(act)
-        schedule_query_reload if LineEdit.mutating?(act)
-      when key.down?  then @history.popup_down
-      when key.up?    then @history.popup_up
-      when key.left?  then @history.query_move(-1)
-      when key.right? then @history.query_move(1)
-      else                 return false
-      end
-      true
-    end
-
-    private def query_enter : Nil
-      if @history.popup_open?
-        @history.query_complete(close: true)
-        schedule_query_reload
-      else
-        flush_query_reload
-        @history.stop_query
-      end
+      handle_ql_bar_key(ev, @history, :history) { query_escape(@host.session.store) }
     end
 
     # esc closes the DROPDOWN first and clears the filter only on a second press. Otherwise
@@ -715,7 +664,7 @@ module Gori::Tui
     end
 
     # Defer the filter reload until typing pauses (coalesces a burst into one search).
-    private def schedule_query_reload : Nil
+    protected def on_query_edit : Nil
       invalidate_search
       @query_reload_at = Time.instant + QUERY_DEBOUNCE
     end

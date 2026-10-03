@@ -379,47 +379,7 @@ module Gori::Tui
     # The `/` filter bar — a text sub-mode the shell claims before the focus ring (mirrors
     # Issues). Live filtering: every edit re-derives the visible list inside the view.
     def handle_query_key(ev : Termisu::Event::Key) : Bool
-      key = ev.key
-      c = ev.char || key.to_char
-      return true if query_nav(ev)
-      case
-      when key.enter?     then query_enter
-      when key.escape?    then query_escape
-      when key.tab?       then @probe.query_complete
-      when key.backspace? then @probe.query_backspace
-        # Above the printable arm below, which would otherwise type the `?` (see ql_help_key?).
-      when TabController.ql_help_key?(ev, @probe.query) then @host.open_help_query(:probe)
-      else
-        if c && !ev.ctrl? && !ev.alt?
-          @probe.query_insert(c)
-          @probe.query_set_preedit("")
-        end
-      end
-      true
-    end
-
-    # ↓/↑ drive the dropdown, ←/→ the caret — see `IssuesController#query_nav`, the sibling
-    # bar over the sibling backend.
-    private def query_nav(ev : Termisu::Event::Key) : Bool
-      key = ev.key
-      case
-      when act = LineEdit.action(ev) # ⌃/⌥←→, Home/End, Delete, ⌥⌫ — before the bare arrows
-        @probe.query_edit(act)
-      when key.down?  then @probe.popup_down
-      when key.up?    then @probe.popup_up
-      when key.left?  then @probe.query_move(-1)
-      when key.right? then @probe.query_move(1)
-      else                 return false
-      end
-      true
-    end
-
-    private def query_enter : Nil
-      if @probe.popup_open?
-        @probe.query_complete(close: true)
-      else
-        @probe.stop_query
-      end
+      handle_ql_bar_key(ev, @probe, :probe) { query_escape }
     end
 
     # esc closes the dropdown first, so opening the list to look at it never costs the typed
