@@ -120,10 +120,7 @@ module Gori
         end
 
         private def body_reflects?(result : Repeater::Result) : Bool
-          decoded, _ = Proxy::Codec::ContentDecode.decode(result.head, result.body, BODY_CAP)
-          bytes = decoded || result.body
-          return false if bytes.nil? || bytes.empty?
-          authority_reflection?(String.new(bytes[0, {bytes.size, BODY_CAP}.min]).scrub, PROBE_HOST)
+          authority_reflection?(decoded_text(result), PROBE_HOST)
         end
 
         # Does `token` appear as the AUTHORITY host of an absolute/scheme-relative URL in `text`? The

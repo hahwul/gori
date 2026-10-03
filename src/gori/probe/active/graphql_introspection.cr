@@ -92,12 +92,11 @@ module Gori
         private def introspection_response?(result : Repeater::Result) : Bool
           ct = response_content_type(result)
           return false unless ct.empty? || ct.includes?("json") || ct.includes?("graphql")
-          decoded, _ = Proxy::Codec::ContentDecode.decode(result.head, result.body, BODY_CAP)
-          bytes = decoded || result.body
-          return false if bytes.nil? || bytes.empty?
+          bytes = decoded_body(result.head, result.body)
+          return false unless bytes
           # `Utf8.text` rather than `String#scrub` — same repair, but a valid body (which a JSON
           # introspection result always is) skips the character walk. See `Gori::Utf8`.
-          INTROSPECTION_RESULT.matches?(Utf8.text(bytes[0, {bytes.size, BODY_CAP}.min]))
+          INTROSPECTION_RESULT.matches?(Utf8.text(bytes))
         end
 
         # The shared gate both `plan` and `dedup_key` funnel through, returning {probe_method,

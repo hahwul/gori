@@ -157,9 +157,7 @@ module Gori
         end
 
         private def body_size(result : Repeater::Result) : Int32
-          decoded, _ = Proxy::Codec::ContentDecode.decode(result.head, result.body, BODY_CAP)
-          b = decoded || result.body
-          b ? {b.size, BODY_CAP}.min : 0
+          decoded_body(result.head, result.body).try(&.size) || 0
         end
       end
     end

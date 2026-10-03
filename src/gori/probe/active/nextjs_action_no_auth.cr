@@ -186,10 +186,8 @@ module Gori
         # stripped probe and the authenticated baseline so their sizes compare symmetrically, and
         # both go through the same content-decode so a gzip'd baseline vs a gzip'd probe is fair.
         private def capped_decoded(head : Bytes?, body : Bytes?) : Bytes
-          return Bytes.empty if head.nil? || body.nil? || body.empty?
-          decoded, _ = Proxy::Codec::ContentDecode.decode(head, body, BODY_CAP)
-          bytes = decoded || body
-          bytes[0, {bytes.size, BODY_CAP}.min]
+          return Bytes.empty if head.nil?
+          decoded_body(head, body) || Bytes.empty
         end
 
         # Rebuild the request with the credential headers removed: split off the head, drop any

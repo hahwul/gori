@@ -163,7 +163,7 @@ module Gori
         # really changed shape, so ordinary same-length content jitter doesn't read as a difference.
         # `with_size: false` substitutes a constant, so a jittery endpoint compares on the other two.
         private def attrs(result : Repeater::Result, with_size : Bool) : {Int32, String?, Int32}
-          body = decoded_body(result)
+          body = decoded_text(result)
           {probe_status(result), error_signature_of(body), with_size ? body.bytesize : -1}
         end
 
@@ -185,15 +185,6 @@ module Gori
             return label if needles.any? { |n| hay.includes?(n) }
           end
           nil
-        end
-
-        private def decoded_body(result : Repeater::Result) : String
-          decoded, _ = Proxy::Codec::ContentDecode.decode(result.head, result.body, BODY_CAP)
-          bytes = decoded || result.body
-          return "" unless bytes && !bytes.empty?
-          String.new(bytes[0, {bytes.size, BODY_CAP}.min]).scrub
-        rescue
-          ""
         end
 
         # A short human tag for the evidence line: prefer the interpreter-error class, else the
