@@ -4,6 +4,7 @@ require "../text_area"
 require "../input_mode"
 require "../text_read_state"
 require "../clipboard"
+require "./memory_session_strip"
 
 module Gori::Tui
   # One workbench session (a sub-tab) of a two-lens tool — the JWT and Cookie tabs. Carries
@@ -73,6 +74,8 @@ module Gori::Tui
   # wheel, bulk paste and the copy helpers. The pane tables — which panes each lens has, where
   # a key or a click lands, what each pane copies — stay in the tool, behind the hooks below.
   abstract class WorkbenchController(S) < TabController
+    include MemorySessionStrip
+
     @sessions : Array(S)
 
     def initialize(host : Host)
@@ -149,23 +152,7 @@ module Gori::Tui
       @sessions[@idx]
     end
 
-    # --- sub-tab strip (runner-owned chrome; shown from the first session) ---
-    def subtab_labels : Array(String)
-      @sessions.map_with_index { |s, i| "#{i + 1}:#{session_label(s)}" }
-    end
-
-    def subtab_index : Int32
-      @idx
-    end
-
-    def subtab_strip_shown? : Bool
-      true
-    end
-
-    def subtab_filter_enabled? : Bool
-      true
-    end
-
+    # --- sub-tab strip: `MemorySessionStrip`, plus the filter's fields ---
     def filter_fields : Array(String)
       %w[name]
     end
@@ -174,28 +161,6 @@ module Gori::Tui
       @sessions.map do |s|
         Repeater::SubtabFilter::Subject.new(s.view.name, s.input.text, "", "", [] of String)
       end
-    end
-
-    # The chip label: the custom name, else the tool's summary of the input, capped ~18 cols.
-    private def session_label(s : S) : String
-      raw = (n = s.view.name) ? n : session_summary(s)
-      raw.size > 18 ? raw[0, 17] + "…" : raw
-    end
-
-    def move_subtab(dir : Int32) : Nil
-      if t = step_visible(@idx, dir)
-        switch_to(t)
-      end
-    end
-
-    def jump_subtab(idx : Int32) : Nil
-      return unless 0 <= idx < @sessions.size
-      clear_subtab_filter if (h = subtab_hidden) && h.includes?(idx)
-      switch_to(idx) if idx != @idx
-    end
-
-    private def switch_to(idx : Int32) : Nil
-      @idx = idx
     end
 
     # --- session lifecycle ---
@@ -216,79 +181,18 @@ module Gori::Tui
       @host.status("sent selection to #{tool_label} (#{text.bytesize}b)")
     end
 
-    # Duplicates the MARKED sub-tabs when the strip carries marks, the active one otherwise
-    # (`target_subtab_indices` — the one target rule).
     def duplicate_session : Nil
-      msg = nil.as(String?)
-      if refs = batch_subtab_refs
-        msg = duplicate_marked_subtabs(refs, "session") { |i| duplicate_at(i) }
-        return unless msg
-      else
-        duplicate_at(@idx)
-      end
-      @host.request_focus(:body)
-      @host.status(msg ? "#{msg} (#{@sessions.size} open)" : "duplicated #{tool_label} session (#{@sessions.size} open)")
+      duplicate_sessions("session", "duplicated #{tool_label} session")
     end
 
-    # ^W closes the MARKED sub-tabs when the strip carries marks, the active one otherwise
-    # (`target_subtab_indices` — the one target rule). The single close stays confirm-free as
-    # it has always been; a plural one asks, because it discards more than the operator can
-    # see at the moment they press the key.
     def close_session : Nil
-      if refs = batch_subtab_refs
-        @host.confirm("CLOSE #{tool_label.upcase} SESSIONS", "Close #{marked_subtab_phrase(refs.size)}?\nEach #{item_noun} and its edits are discarded.",
-          confirm_label: "close", danger: true) { close_marked_sessions(refs) }
-        return
-      end
-      close_at(@idx)
-      @host.status(@sessions.size == 1 ? "session closed" : "session closed (#{@sessions.size} open)")
+      close_sessions("CLOSE #{tool_label.upcase} SESSIONS", "Each #{item_noun} and its edits are discarded.",
+        "session closed", "session closed")
     end
 
-    private def close_marked_sessions(refs : Array(SubtabRef)) : Nil
-      msg = close_marked_subtabs(refs)
-      @host.status(msg)
-      @host.resolve_subtab_focus
-    end
-
-    # Nothing here is persisted, so a close can never leave a saved session behind.
-    protected def close_subtab_at(idx : Int32) : Bool
-      close_at(idx)
-      false
-    end
-
-    # Close sub-tab `idx`, keeping at least one session: the last one is REPLACED by a blank
-    # rather than removed, so the tab always has something to type into. That replacement
-    # also retires the old view object, which is what drops its mark.
-    private def close_at(idx : Int32) : Nil
-      return if idx < 0 || idx >= @sessions.size
-      if @sessions.size <= 1
-        @sessions[0] = make_session("", nil)
-        @idx = 0
-      else
-        @sessions.delete_at(idx)
-        # Closing a session to the LEFT slides the active one down; a bare clamp would read
-        # that as "stay put" and land the operator on its neighbour.
-        @idx -= 1 if idx < @idx
-        @idx = @idx.clamp(0, @sessions.size - 1)
-      end
-    end
-
-    # The session's view, for the rename prompt (re-found by view identity). Unannotated on
-    # purpose: the type is the tool's own view class, which `S` carries and this generic
-    # cannot name.
-    def view_at(idx : Int32)
-      (0 <= idx < @sessions.size) ? @sessions[idx].view : nil
-    end
-
-    # The object that IS sub-tab `idx`, for the strip's mark set (#683). The view, not the
-    # index: a reconcile can reorder or drop chips under a standing mark.
-    def subtab_ref(idx : Int32) : SubtabRef?
-      view_at(idx)
-    end
-
-    def apply_rename(view : WorkbenchView, name : String) : Nil
-      clean = name.strip
-      view.name = clean.empty? ? nil : clean
+    # The replacement also retires the old view object, which is what drops its mark.
+    private def blank_session(old : S) : S
+      make_session("", nil)
     end
 
     # --- render ---

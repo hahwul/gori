@@ -1,6 +1,7 @@
 require "../tab_controller"
 require "../comparer_view"
 require "../subtab_clone"
+require "./memory_session_strip"
 require "../../hotkeys"
 
 module Gori::Tui
@@ -9,6 +10,8 @@ module Gori::Tui
   # only (no project DB) — switching sub-tabs keeps prior pairs so History "Send to
   # Comparer" no longer clobbers earlier work. Strip chrome mirrors Decoder/Repeater.
   class ComparerController < TabController
+    include MemorySessionStrip
+
     def initialize(host : Host)
       super(host)
       @sessions = [ComparerView.new] of ComparerView
@@ -35,23 +38,10 @@ module Gori::Tui
       Verb::Scope::Comparer
     end
 
-    # --- sub-tab strip -------------------------------------------------------
-
-    def subtab_labels : Array(String)
-      @sessions.map_with_index { |v, i| "#{i + 1}:#{v.label}" }
-    end
-
-    def subtab_index : Int32
-      @idx
-    end
-
-    def subtab_strip_shown? : Bool
-      true # from the first session (Repeater/Notes style)
-    end
-
-    # --- sub-tab filter (issue #121) ---
-    def subtab_filter_enabled? : Bool
-      true
+    # --- sub-tab strip: `MemorySessionStrip`, plus the filter's fields and search ---
+    # A session IS its view, and labels itself.
+    private def session_label(v : ComparerView) : String
+      v.label
     end
 
     def filter_fields : Array(String)
@@ -68,20 +58,6 @@ module Gori::Tui
       @sessions.map { |v| search_extra(v.search_text) }
     end
 
-    # Filter-aware strip nav: ←/→ skip hidden chips; ^1-9 to a hidden chip drops the
-    # filter (chip numbers are absolute). Sessions are in-memory, so no persist on switch.
-    def move_subtab(dir : Int32) : Nil
-      if t = step_visible(@idx, dir)
-        @idx = t
-      end
-    end
-
-    def jump_subtab(idx : Int32) : Nil
-      return unless 0 <= idx < @sessions.size
-      clear_subtab_filter if (h = subtab_hidden) && h.includes?(idx)
-      @idx = idx if idx != @idx
-    end
-
     def comparer_new : Nil
       @sessions << ComparerView.new
       @idx = @sessions.size - 1
@@ -89,64 +65,26 @@ module Gori::Tui
       @host.status("new comparison (#{@sessions.size} open)")
     end
 
-    # Close active session. Last session is reset to blank (always keep ≥1).
-    # ^W closes the MARKED sub-tabs when the strip carries marks, the active one otherwise
-    # (`target_subtab_indices` — the one target rule).
+    # Close the active session, or the marked ones. The last one is reset to blank (always
+    # keep ≥1).
     def comparer_close : Nil
-      if refs = batch_subtab_refs
-        @host.confirm("CLOSE COMPARISONS", "Close #{marked_subtab_phrase(refs.size)}?\nEach pair of slots is discarded.",
-          confirm_label: "close", danger: true) { close_marked_sessions(refs) }
-        return
-      end
-      close_at(@idx)
-      @host.status(@sessions.size == 1 ? "comparison cleared" : "comparison closed (#{@sessions.size} open)")
+      close_sessions("CLOSE COMPARISONS", "Each pair of slots is discarded.", "comparison cleared", "comparison closed")
     end
 
-    private def close_marked_sessions(refs : Array(SubtabRef)) : Nil
-      @host.status(close_marked_subtabs(refs))
-      @host.resolve_subtab_focus
+    # The last comparison is RESET IN PLACE rather than replaced — which is exactly why the
+    # batch driver hands its marks back explicitly instead of leaning on `SubtabMarks#retain`:
+    # this view object survives the close, so "still open" and "still marked" would otherwise
+    # both stay true.
+    private def blank_session(old : ComparerView) : ComparerView
+      old.reset!
+      old
     end
 
-    # Nothing here is persisted, so a close can never leave a saved session behind.
-    protected def close_subtab_at(idx : Int32) : Bool
-      close_at(idx)
-      false
-    end
-
-    # Close sub-tab `idx`, keeping at least one comparison. The last one is RESET IN PLACE
-    # rather than replaced — which is exactly why the batch driver hands its marks back
-    # explicitly instead of leaning on `SubtabMarks#retain`: this view object survives the
-    # close, so "still open" and "still marked" would otherwise both stay true.
-    private def close_at(idx : Int32) : Nil
-      return if idx < 0 || idx >= @sessions.size
-      if @sessions.size <= 1
-        @sessions[0].reset!
-        @idx = 0
-      else
-        @sessions.delete_at(idx)
-        # Closing a session to the LEFT slides the active one down; a bare clamp would read
-        # that as "stay put" and land the operator on its neighbour.
-        @idx -= 1 if idx < @idx
-        @idx = @idx.clamp(0, @sessions.size - 1)
-      end
-    end
-
-    # Duplicates the MARKED sub-tabs when the strip carries marks, the active one otherwise
-    # (`target_subtab_indices` — the one target rule).
     def comparer_duplicate : Nil
-      if refs = batch_subtab_refs
-        msg = duplicate_marked_subtabs(refs, "comparison") { |i| duplicate_at(i) }
-        return unless msg
-        @host.request_focus(:body)
-        @host.status("#{msg} (#{@sessions.size} open)")
-        return
-      end
-      duplicate_at(@idx)
-      @host.request_focus(:body)
-      @host.status("duplicated comparison (#{@sessions.size} open)")
+      duplicate_sessions("comparison", "duplicated comparison")
     end
 
-    # Clone sub-tab `idx` onto the end of the strip. Toast-free — the arms above say it.
+    # Clone sub-tab `idx` onto the end of the strip. Toast-free.
     private def duplicate_at(idx : Int32) : Nil
       return unless src = @sessions[idx]?
       @sessions << src.duplicate
@@ -155,18 +93,6 @@ module Gori::Tui
 
     def view_at(idx : Int32) : ComparerView?
       (0 <= idx < @sessions.size) ? @sessions[idx] : nil
-    end
-
-    # The object that IS sub-tab `idx`, for the strip's mark set (#683). The view, not the
-    # index: a reconcile can reorder or drop chips under a standing mark.
-    def subtab_ref(idx : Int32) : SubtabRef?
-      view_at(idx)
-    end
-
-    def apply_rename(v : ComparerView, name : String) : Nil
-      return unless @sessions.any?(&.same?(v))
-      clean = name.strip
-      v.name = clean.empty? ? nil : clean
     end
 
     # --- render / input ------------------------------------------------------

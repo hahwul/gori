@@ -9,6 +9,7 @@ require "../../decoder"
 require "../../settings"
 require "../../hotkeys"
 require "../subtab_clone"
+require "./memory_session_strip"
 
 module Gori::Tui
   # One open conversion — a "sub-tab" under the Decoder tab. Each carries its own
@@ -47,6 +48,8 @@ module Gori::Tui
   # named chains a conversion can load stay in the global settings.json — a chain spec is
   # tool config, reusable everywhere; what was run THROUGH it is project data.
   class DecoderController < TabController
+    include MemorySessionStrip
+
     SEPS = {'>', '|', ','}
 
     @sessions : Array(DecoderSession)
@@ -113,26 +116,7 @@ module Gori::Tui
       DecoderSession.new(view, input, chain, chain.size, :input, result)
     end
 
-    # --- sub-tab strip (runner-owned chrome; shown from the first session) ---
-    def subtab_labels : Array(String)
-      @sessions.map_with_index { |s, i| "#{i + 1}:#{session_label(s)}" }
-    end
-
-    def subtab_index : Int32
-      @idx
-    end
-
-    # Show the strip from the FIRST session (not ≥2), like Repeater/Notes: a lone
-    # conversion still labels its chip and exposes the strip's space-menu.
-    def subtab_strip_shown? : Bool
-      true
-    end
-
-    # --- sub-tab filter (issue #121) ---
-    def subtab_filter_enabled? : Bool
-      true
-    end
-
+    # --- sub-tab strip: `MemorySessionStrip`, plus the filter's fields and search ---
     def filter_fields : Array(String)
       %w[name] # a conversion has no HTTP context; free-text covers the chain + input
     end
@@ -172,28 +156,12 @@ module Gori::Tui
       end
     end
 
-    # The chip label: the custom name if set, else a compact preview of the chain
-    # spec (or "empty" when blank), capped to ~18 cols like Repeater/Notes.
-    private def session_label(s : DecoderSession) : String
-      raw = (n = s.view.name) ? n : (s.chain.strip.empty? ? "empty" : s.chain.strip)
-      raw.size > 18 ? raw[0, 17] + "…" : raw
+    # The chip label's fallback: a compact preview of the chain spec, or "empty" when blank.
+    private def session_summary(s : DecoderSession) : String
+      s.chain.strip.empty? ? "empty" : s.chain.strip
     end
 
-    # Move the active sub-tab by ±1 (strip ←/→), clamped, no wrap. No persist needed:
-    # every session keeps its own state in memory, so switching loses nothing.
-    # Filter-aware: ←/→ skip hidden chips; ^1-9 to a hidden chip escapes the filter.
-    def move_subtab(dir : Int32) : Nil
-      if t = step_visible(@idx, dir)
-        switch_to(t)
-      end
-    end
-
-    def jump_subtab(idx : Int32) : Nil
-      return unless 0 <= idx < @sessions.size
-      clear_subtab_filter if (h = subtab_hidden) && h.includes?(idx)
-      switch_to(idx) if idx != @idx
-    end
-
+    # `MemorySessionStrip#switch_to`, plus dropping the CURRENT session's popup and preedit.
     private def switch_to(idx : Int32) : Nil
       @idx = idx
       @popup.close
@@ -209,9 +177,7 @@ module Gori::Tui
       clear_subtab_filter
       @sessions << make_session("", "", nil)
       @idx = @sessions.size - 1
-      @popup.close
-      @chain_pre = ""
-      @dirty = true
+      after_change
       @host.request_focus(:body)
       @host.status("new conversion (#{@sessions.size} open)")
     end
@@ -225,30 +191,15 @@ module Gori::Tui
       clear_subtab_filter # see decoder_new
       @sessions << make_session(text, "", name)
       @idx = @sessions.size - 1
-      @popup.close
-      @chain_pre = ""
-      @dirty = true
+      after_change
       @host.goto_tab(:decoder)
       @host.status("sent selection to Decoder (#{text.bytesize}b)")
     end
 
-    # Content-only clone of the active conversion (input + chain + chip name).
-    # Duplicates the MARKED sub-tabs when the strip carries marks, the active one otherwise
-    # (`target_subtab_indices` — the one target rule).
+    # Content-only clone of the active conversion (input + chain + chip name), or of every
+    # marked one.
     def decoder_duplicate : Nil
-      msg = nil.as(String?)
-      if refs = batch_subtab_refs
-        msg = duplicate_marked_subtabs(refs, "conversion") { |i| duplicate_at(i) }
-        return unless msg
-      else
-        duplicate_at(@idx)
-      end
-      unstrand_from_filter
-      @popup.close
-      @chain_pre = ""
-      @dirty = true
-      @host.request_focus(:body)
-      @host.status(msg ? "#{msg} (#{@sessions.size} open)" : "duplicated conversion (#{@sessions.size} open)")
+      duplicate_sessions("conversion", "duplicated conversion")
     end
 
     # Clone sub-tab `idx` onto the end of the strip. Toast-free — the arm above says it.
@@ -258,74 +209,26 @@ module Gori::Tui
       @idx = @sessions.size - 1
     end
 
-    # Close the active conversion (^W / space menu). Keeps ≥1 — closing the last just
-    # resets it to a blank session (like Notes). The runner re-resolves focus after.
-    # ^W closes the MARKED sub-tabs when the strip carries marks, the active one otherwise
-    # (`target_subtab_indices` — the one target rule). The single close stays confirm-free as
-    # it has always been; a plural one asks, because it discards more than the operator can
-    # see at the moment they press the key.
+    # Close the active conversion (^W / space menu), or the marked ones. Keeps ≥1 — closing the
+    # last just resets it to a blank session (like Notes). The runner re-resolves focus after.
     def decoder_close : Nil
-      if refs = batch_subtab_refs
-        @host.confirm("CLOSE CONVERSIONS", "Close #{marked_subtab_phrase(refs.size)}?\nEach conversion’s input, chain and output are discarded.",
-          confirm_label: "close", danger: true) { close_marked_sessions(refs) }
-        return
-      end
-      close_at(@idx)
-      unstrand_from_filter
-      @popup.close
-      @chain_pre = ""
-      @dirty = true
-      @host.status(@sessions.size == 1 ? "conversion closed" : "conversion closed (#{@sessions.size} open)")
+      close_sessions("CLOSE CONVERSIONS", "Each conversion’s input, chain and output are discarded.",
+        "conversion closed", "conversion closed")
     end
 
-    # Drop the sub-tab filter when the ACTIVE session is one it hides — a close lands the
-    # neighbour, a duplicate lands the clone, and neither is guaranteed to match the query.
-    private def unstrand_from_filter : Nil
+    # Every session-set change: drop the sub-tab filter when the ACTIVE session is one it hides
+    # (a close lands the neighbour, a duplicate lands the clone, and neither is guaranteed to
+    # match the query; the batch clamp can land on a hidden chip too), close the popup and
+    # preedit, and mark the set for the next persist.
+    private def after_change : Nil
       clear_subtab_filter if (h = subtab_hidden) && h.includes?(@idx)
-    end
-
-    private def close_marked_sessions(refs : Array(SubtabRef)) : Nil
-      msg = close_marked_subtabs(refs)
-      unstrand_from_filter # the clamp can land on a hidden chip here too
       @popup.close
       @chain_pre = ""
       @dirty = true
-      @host.status(msg)
-      @host.resolve_subtab_focus
     end
 
-    # Nothing here is persisted, so a close can never leave a saved session behind.
-    protected def close_subtab_at(idx : Int32) : Bool
-      close_at(idx)
-      false
-    end
-
-    # Close sub-tab `idx`, keeping at least one session: the last one is REPLACED by a blank
-    # rather than removed, so the tab always has something to type into. That replacement
-    # also retires the old view object, which is what drops its mark.
-    private def close_at(idx : Int32) : Nil
-      return if idx < 0 || idx >= @sessions.size
-      if @sessions.size <= 1
-        @sessions[0] = make_session("", "", nil)
-        @idx = 0
-      else
-        @sessions.delete_at(idx)
-        # Closing a session to the LEFT slides the active one down; a bare clamp would read
-        # that as "stay put" and land the operator on its neighbour.
-        @idx -= 1 if idx < @idx
-        @idx = @idx.clamp(0, @sessions.size - 1)
-      end
-    end
-
-    # The session's output view, for the rename prompt (re-found by view identity).
-    def view_at(idx : Int32) : DecoderView?
-      (0 <= idx < @sessions.size) ? @sessions[idx].view : nil
-    end
-
-    # The object that IS sub-tab `idx`, for the strip's mark set (#683). The view, not the
-    # index: a reconcile can reorder or drop chips under a standing mark.
-    def subtab_ref(idx : Int32) : SubtabRef?
-      view_at(idx)
+    private def blank_session(old : DecoderSession) : DecoderSession
+      make_session("", "", nil)
     end
 
     # Apply a typed name to the captured sub-tab's view (the prompt held it by identity,
@@ -336,8 +239,7 @@ module Gori::Tui
     # path reaches `commit` before a tab switch or quit, so a rename was the one edit an
     # abnormal exit lost. `commit` stays dirty when the store is busy, as everywhere.
     def apply_rename(view : DecoderView, name : String) : Nil
-      clean = name.strip
-      view.name = clean.empty? ? nil : clean
+      view.name = name.strip.presence
       @dirty = true
       commit
     end
