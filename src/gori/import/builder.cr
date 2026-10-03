@@ -16,6 +16,8 @@ module Gori
       record FlowPair, request : Store::CapturedRequest, response : Store::CapturedResponse?,
         ws_messages : Array(Store::ImportedWsMessage) = [] of Store::ImportedWsMessage
 
+      MAX_DECLARED_SIZE = 1_i64 << 50 # 1 PiB, see `capped`
+
       # Bound a stored import body to the same ceiling live capture uses, so a HAR
       # with a huge (e.g. media/base64) body can't insert an arbitrarily large,
       # never-truncated BLOB straight into the DB. Returns {stored, truncated, true_size}.
@@ -26,11 +28,14 @@ module Gori
       # have, the body arrives already truncated and is stored that way: dropping the flag
       # would present a capture-capped body as complete one hop later, which is the whole
       # thing the export marking exists to prevent. Every other import source passes nil and
-      # keeps its exact previous behaviour.
+      # keeps its exact previous behaviour. A declared size past `MAX_DECLARED_SIZE` is not a
+      # size anything sent, and near Int64::MAX it overflowed the head + body sums the store
+      # takes on insert and on every read of the row; it is ignored like an absent one.
       def self.capped(body : Bytes?, declared_size : Int64? = nil) : {Bytes?, Bool, Int64?}
         return {nil, false, nil} unless body
         size = body.size.to_i64
         max = Settings.capture_max
+        declared_size = nil if declared_size && declared_size > MAX_DECLARED_SIZE
         true_size = declared_size && declared_size > size ? declared_size : size
         return {body[0, max].dup, true, true_size} if body.size > max
         {body, true_size > size, true_size}

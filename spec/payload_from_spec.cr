@@ -57,6 +57,15 @@ describe Gori::PayloadFrom do
       s.label.should eq("path-segments")
     end
 
+    # The split used to be `rpartition(/\s+/)`: PCRE raised on invalid UTF-8, and the stdlib's
+    # retry at every position made a text with no whitespace quadratic.
+    it "refuses invalid UTF-8 and a long unspaced text cleanly and quickly" do
+      refuses(/does not end in a projection/) { PF.parse(String.new(Bytes[0xff, 0xfe])) }
+      started = Time.instant
+      refuses(/does not end in a projection/) { PF.parse("A" * 200_000) }
+      (Time.instant - started).should be < 1.second
+    end
+
     it "keeps a QL value with spaces when it is quoted" do
       PF.parse(%(path:"/a b" c:d param-values)).query.should eq(%(path:"/a b" c:d))
     end

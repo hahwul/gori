@@ -91,6 +91,10 @@ module Gori::Sequencer
       end
     end
 
+    def stopped? : Bool
+      @stopped
+    end
+
     def stop : Nil
       @stopped = true
       # The dispatcher may be HOLDING for an in-flight sample to settle (see
@@ -174,7 +178,7 @@ module Gori::Sequencer
           break if @collected >= @config.goal
           break if @dispatched >= @config.max_sends
           break if backend.cap_reached?
-          pace(interval)
+          break unless pace(interval)
           # BEFORE the send: `jobs.send` yields when the buffer is full, and during that
           # yield a worker can take this very job and settle it — decrementing a slot the
           # dispatcher had not opened yet.

@@ -550,7 +550,7 @@ module Gori
       # gori stores timestamps as unix MICROseconds; SARIF property values are free-form, so
       # emit RFC 3339 UTC rather than a raw integer a human can't read in a dashboard.
       private def self.rfc3339(micros : Int64) : String
-        Time.unix_ms(micros // 1000).to_utc.to_rfc3339
+        Gori::LocalTime.utc(micros, "%Y-%m-%dT%H:%M:%SZ")
       end
     end
   end

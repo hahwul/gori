@@ -115,7 +115,9 @@ module Gori
         id = doc.next_id
         notes = doc.notes + [NoteEntry.new(id, text)]
         created = id
-        serialize(notes.size - 1, notes, id + 1)
+        # `&+`, here and at every id step: a stored id at Int64::MAX (a foreign or hand-edited
+        # row) made each of them raise, so the notes could be neither read nor saved.
+        serialize(notes.size - 1, notes, id &+ 1)
       end
       committed ? created : nil
     end
@@ -221,7 +223,7 @@ module Gori
       return nil unless doc
       arr = doc["notes"]?.try(&.as_a?)
       return nil unless arr
-      cur = doc["cur"]?.try(&.as_i?) || 0
+      cur = doc["cur"]?.try(&.as_i64?).try(&.clamp(0, Int32::MAX).to_i32) || 0
       next_id = doc["next_id"]?.try(&.as_i64?) || 0_i64
       entries = [] of NoteEntry
       legacy_id = 1_i64
@@ -230,11 +232,11 @@ module Gori
           id = obj["id"]?.try(&.as_i64?) || legacy_id
           text = obj["text"]?.try(&.as_s?) || ""
           entries << NoteEntry.new(id, text)
-          legacy_id = {legacy_id, id + 1}.max
+          legacy_id = {legacy_id, id &+ 1}.max
         else
           text = v.as_s? || ""
           entries << NoteEntry.new(legacy_id, text)
-          legacy_id += 1
+          legacy_id &+= 1
         end
       end
       next_id = {next_id, legacy_id}.max
@@ -312,7 +314,7 @@ module Gori
       # cross-session-unique ids: the two notes fold into one and the later text wins. It also
       # adopts the deleted note's `entity_links`, since those are keyed by (Note, id).
       Doc.new(cur.clamp(0, {result.size - 1, 0}.max), result,
-        {next_id, persisted.next_id, max_id + 1}.max)
+        {next_id, persisted.next_id, max_id &+ 1}.max)
     end
 
     # The note's title: its first non-blank line, trimmed, with a Markdown ATX heading marker

@@ -57,5 +57,12 @@ module Gori
     def format(micros : Int64, fmt : String, fallback : String = "—") : String
       at(micros).try(&.to_s(fmt)) || fallback
     end
+
+    # `format` without the timezone: for the exports that spell a stored instant in UTC.
+    def utc(micros : Int64, fmt : String, fallback : String = "—") : String
+      Time.unix(micros // 1_000_000).to_s(fmt)
+    rescue ArgumentError
+      fallback
+    end
   end
 end

@@ -91,7 +91,7 @@ module Gori::CLI
     end
 
     # Logs to STDERR ONLY — STDOUT is reserved for the JSON-RPC stream.
-    Log.setup(:info, Log::IOBackend.new(STDERR))
+    Log.setup(:info, StderrLog.new)
     Settings.load # send_request's repeater engines read the upstream-proxy setting from here
     # A fuzz or mine job grows the heap the way capture does; give it back once the agent is idle.
     IdleGc.start

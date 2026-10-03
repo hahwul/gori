@@ -481,9 +481,12 @@ module Gori::Discover
     # cannot appear inside a URI, so the non-greedy class cannot run past its own member.
     LINK_TARGET = /<([^<>]*)>/
 
+    # The three header readers below hand a wire value to PCRE, which RAISES on invalid UTF-8
+    # (a Latin-1 cookie) — and the raise cost the whole page, body links included. Scrubbed
+    # the way the body already is (`Utf8.text`).
     def self.from_link_header(value : String) : Array(String)
       out = [] of String
-      value.scan(LINK_TARGET) do |m|
+      Gori::Utf8.subject(value).scan(LINK_TARGET) do |m|
         v = m[1]?.try(&.strip)
         out << v if v && !v.empty?
       end
@@ -496,7 +499,7 @@ module Gori::Discover
     REFRESH_URL = /url\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s;]+))/i
 
     def self.refresh_url(value : String) : String?
-      return nil unless m = value.match(REFRESH_URL)
+      return nil unless m = Gori::Utf8.subject(value).match(REFRESH_URL)
       (m[1]? || m[2]? || m[3]?).presence
     end
 
@@ -510,7 +513,7 @@ module Gori::Discover
 
     def self.cookie_path(value : String) : String?
       last = nil.as(String?)
-      value.scan(COOKIE_PATH) { |m| last = m[1]?.try(&.strip) }
+      Gori::Utf8.subject(value).scan(COOKIE_PATH) { |m| last = m[1]?.try(&.strip) }
       return nil unless last && last.starts_with?('/') && last != "/"
       last
     end

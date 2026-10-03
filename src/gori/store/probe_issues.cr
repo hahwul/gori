@@ -196,7 +196,7 @@ module Gori
         rs.each do
           list << ProbeIssueRow.new(
             rs.read(Int64), rs.read(String), rs.read(String), rs.read(String), rs.read(String),
-            Severity.new(rs.read(Int32)), Status.new(rs.read(Int32)), rs.read(Int64),
+            Severity.stored(rs.read(Int32)), Status.stored(rs.read(Int32)), rs.read(Int64),
             rs.read(Int64).to_i32, rs.read(Int64?), rs.read(String?),
             rs.read(Int64), rs.read(Int64), rs.read(Int64?))
         end
@@ -401,7 +401,7 @@ module Gori
     private def read_probe_issue(rs : DB::ResultSet) : ProbeIssue
       ProbeIssue.new(
         rs.read(Int64), rs.read(String), rs.read(String), rs.read(String), rs.read(String),
-        Severity.new(rs.read(Int32)), Status.new(rs.read(Int32)), rs.read(Int64),
+        Severity.stored(rs.read(Int32)), Status.stored(rs.read(Int32)), rs.read(Int64),
         parse_affected(rs.read(String)), rs.read(Int64?), rs.read(String?),
         rs.read(Int64), rs.read(Int64), rs.read(Int64?))
     end

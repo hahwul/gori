@@ -92,9 +92,10 @@ module Gori::RequestMacro
 
     # One Repeater session for one `steps` entry: `3`, `#3` (an id) or the tab's name.
     private def self.resolve(store : Store, token : String, n : Int32) : Step
+      # A char scan, not a Regex: PCRE raises on the invalid UTF-8 an argv can carry.
       rec =
-        if token.matches?(/\A#?\d+\z/)
-          id = token.lchop('#').to_i64?
+        if !(digits = token.lchop('#')).empty? && digits.each_char.all?(&.ascii_number?)
+          id = digits.to_i64?
           (id && store.get_repeater(id)) ||
             raise Error.new("macro step #{n}: there is no Repeater session ##{token.lchop('#')} in this project")
         else
@@ -235,10 +236,11 @@ module Gori::RequestMacro
         n = i + 1
         # A stop lands between steps, not after the last one: the steps are a login-shaped chain
         # of round trips, and the promise is that only requests already in flight finish.
+        # Asked AFTER the pacer: a stop ends its wait early, and the step must not then go out.
+        pacer.try(&.call)
         if cancelled.try(&.call)
           return Outcome.new(false, total, sent, n, step.label, nil, "the run was stopped", [] of String, flows, stopped: true)
         end
-        pacer.try(&.call)
         plan = begin
           Repeater::Plan.build(Runner.plan_options(step.rec, @overrides, @verify), @outbound)
         rescue ex : Repeater::PlanError

@@ -64,3 +64,11 @@ describe "Gori.iso_micros" do
     Gori.iso_micros(Int64::MAX).should eq("—")
   end
 end
+
+describe "Gori::LocalTime.utc" do
+  it "formats in UTC and reads an unrepresentable instant as the dash" do
+    Gori::LocalTime.utc(0_i64, "%Y-%m-%d %H:%M:%S UTC").should eq("1970-01-01 00:00:00 UTC")
+    Gori::LocalTime.utc(Int64::MAX, "%Y").should eq("—")
+    Gori::LocalTime.utc(Int64::MIN, "%Y").should eq("—")
+  end
+end

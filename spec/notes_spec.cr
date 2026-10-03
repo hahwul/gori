@@ -200,3 +200,18 @@ describe Gori::Notes do
     end
   end
 end
+
+describe "Gori::Notes.parse with out-of-range numbers" do
+  it "reads a cur or id past Int32/Int64 without raising" do
+    doc = Gori::Notes.parse(%({"cur":9223372036854775807,"notes":[{"id":9223372036854775807,"text":"a"},"b"]})).not_nil!
+    doc.notes.size.should eq(2)
+    Gori::Notes.parse(%({"notes":[{"id":9223372036854775806,"text":"a"},"b","c"]})).not_nil!.notes.size.should eq(3)
+  end
+
+  it "creates a note when the stored next id is Int64::MAX" do
+    with_store do |store|
+      store.set_setting(Gori::Notes::DOCS_KEY, %({"cur":0,"notes":[{"id":9223372036854775807,"text":"a"}],"next_id":9223372036854775807}))
+      Gori::Notes.create(store, "b").should_not be_nil
+    end
+  end
+end

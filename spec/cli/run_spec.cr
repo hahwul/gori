@@ -1306,9 +1306,24 @@ describe "gori run — the root logger" do
     # store is exactly the one that was polluting stdout.
     dispatch.index("route_logs_to_stderr").not_nil!
       .should be < dispatch.index("dispatch_subcommand(args)").not_nil!
-    # And it must name STDERR — the stream `gori mcp` and `App#run_capture` already use.
+    # And it must be STDERR — the stream `gori mcp` and `App#run_capture` already use — through
+    # `StderrLog`, which survives a closed one.
     setup = body[/^ *private def self\.route_logs_to_stderr.*?\n( *)end\n/m].not_nil!
-    setup.should contain("STDERR")
+    setup.should contain("StderrLog")
     setup.should_not contain("STDOUT")
+  end
+end
+
+# A closed STDERR made the stdlib backend's write raise, which killed the async log fiber and
+# then blocked every later `Log` call (`gori mcp` stopped answering tools).
+describe Gori::CLI::StderrLog do
+  it "drops an entry it cannot write instead of raising" do
+    r, w = IO.pipe
+    r.close
+    backend = Gori::CLI::StderrLog.new
+    backend.io = w
+    entry = Log::Entry.new("spec", Log::Severity::Info, "nobody reads this", Log::Metadata.empty, nil)
+    3.times { backend.write(entry) }
+    w.close rescue nil
   end
 end

@@ -638,3 +638,13 @@ describe Gori::Discover::Extract do
     end
   end
 end
+
+# A header value reaches PCRE, which raises on invalid UTF-8; the raise used to cost the page.
+describe "Gori::Discover::Extract header readers on invalid UTF-8" do
+  it "reads a Latin-1 Link, Refresh or Set-Cookie value without raising" do
+    latin = ->(s : String) { String.new(s.to_slice.map { |b| b == '~'.ord ? 0xe9_u8 : b }) }
+    Gori::Discover::Extract.cookie_path(latin.call("sid=~t~; Path=/app")).should eq("/app")
+    Gori::Discover::Extract.refresh_url(latin.call("0; url=/n~xt")).should_not be_nil
+    Gori::Discover::Extract.from_link_header(latin.call("</a~>; rel=next")).size.should eq(1)
+  end
+end

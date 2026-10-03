@@ -108,6 +108,21 @@ require "../plural"
 
 module Gori
   module CLI
+    # The headless surfaces' log sink. A closed STDERR (an agent that stopped reading it, a
+    # `2>&-`) made the stdlib backend's write raise EPIPE, which killed the async dispatcher's
+    # fiber: about 2k entries later every `Log` call blocked for good, and `gori mcp` stopped
+    # answering tools and never exited on stdin EOF. A log line nobody reads is dropped.
+    class StderrLog < ::Log::IOBackend
+      def initialize
+        super(STDERR)
+      end
+
+      def write(entry : ::Log::Entry) : Nil
+        super
+      rescue IO::Error
+      end
+    end
+
     # `gori run <subcommand>` — the non-interactive CLI. Scripts the same project
     # data the TUI works on, built directly on the Store / Repeater / Session APIs
     # (NOT the verb system, whose ExecContext is ~60 UI-action methods that only
@@ -133,7 +148,7 @@ module Gori
       # in `dispatch_subcommand`: `run capture` calls `setup_logging` itself and this must not
       # be the thing that decides for it, but it must be in place before ANY subcommand runs.
       private def self.route_logs_to_stderr : Nil
-        ::Log.setup(:info, ::Log::IOBackend.new(STDERR))
+        ::Log.setup(:info, StderrLog.new)
       rescue
         # A logger that cannot be configured is not a reason to refuse the command; the worst
         # case is the behaviour that shipped.

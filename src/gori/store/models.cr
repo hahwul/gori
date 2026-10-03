@@ -734,6 +734,12 @@ module Gori
       High
       Critical
 
+      # A stored value read back. A foreign or hand-edited row can hold any integer, and an
+      # out-of-range member raises in every exhaustive `case` over it; clamp to the scale.
+      def self.stored(value : Int32) : self
+        new(value.clamp(Info.value, Critical.value))
+      end
+
       def label : String
         to_s.downcase
       end
@@ -746,6 +752,11 @@ module Gori
       Confirmed
       FalsePositive
       Resolved
+
+      # A stored value read back; see `Severity.stored`. An unknown state reads as Open.
+      def self.stored(value : Int32) : self
+        from_value?(value) || Open
+      end
 
       def label : String
         case self

@@ -1071,7 +1071,7 @@ module Gori::Fuzz
         break if @stopped
         # Calibration samples are real requests at the target, sent before `start`'s dispatch
         # loop exists — so without this they were the one burst that ignored `--rate` outright.
-        pace(interval)
+        break unless pace(interval)
         # Through the macro's gate like any candidate (#1350): a sample carries the same template,
         # so a baseline taken with a stale token would be a baseline of 403s, and every real
         # response would then differ from it.
@@ -1114,6 +1114,10 @@ module Gori::Fuzz
       end
     end
 
+    def stopped? : Bool
+      @stopped
+    end
+
     def stop : Nil
       @stopped = true
     end
@@ -1128,7 +1132,7 @@ module Gori::Fuzz
         # can exhaust CappedBackend mid-run while @dispatched is still under cap.
         raise Halt.new if (cap = @config.max_requests) && cap > 0 && @dispatched >= cap
         raise Halt.new if @backend.cap_reached?
-        pace(interval)
+        raise Halt.new unless pace(interval)
         @jobs.send(job)
         @dispatched += 1
       end
@@ -1550,7 +1554,7 @@ module Gori::Fuzz
         # chain ran at up to (max_redirects + 1)x the configured rate — 6x at defaults, on
         # every 3xx, which is the ordinary shape of an auth-gated target. `pace` claims its
         # slot without yielding, so calling it from this worker fiber is safe.
-        pace(pace_interval)
+        break unless pace(pace_interval)
         hop = @backend.send(nxt, Backend.all_verbatim(nxt))
         retried ||= hop.retried?
         total_us += hop.duration_us

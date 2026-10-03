@@ -38,7 +38,9 @@ module Gori
         # header says it exists to close.
         escalate = -> {
           if seen
-            STDERR.puts "\ninterrupted again — exiting without finishing"
+            # Every STDERR write here is `rescue nil`: with STDERR closed it raises, and the
+            # stop or exit behind it never ran, so the process outlived INT and TERM.
+            STDERR.puts "\ninterrupted again — exiting without finishing" rescue nil
             exit 130
           end
           seen = true
@@ -52,7 +54,7 @@ module Gori
         spawn(name: fiber_name) do
           shutdown.receive
           interrupted = true
-          STDERR.puts "\n#{notice}"
+          STDERR.puts "\n#{notice}" rescue nil
           stop.call
         end
         -> { interrupted }
@@ -66,7 +68,7 @@ module Gori
       # request failed, so falling through would print a diagnosis of the wrong cause. 130 is
       # the conventional status for "terminated by SIGINT".
       def self.report_interrupted(count : Int, noun : String, verb : String) : NoReturn
-        STDERR.puts "interrupted — #{count} #{noun}#{count == 1 ? "" : "s"} #{verb}"
+        STDERR.puts "interrupted — #{count} #{noun}#{count == 1 ? "" : "s"} #{verb}" rescue nil
         exit 130
       end
     end

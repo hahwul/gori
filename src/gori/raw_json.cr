@@ -26,7 +26,7 @@ module Gori
     def parse(json : String) : JSON::Any
       pull = JSON::PullParser.new(json)
       value = read_any(pull)
-      finish(pull)
+      finish(pull, json)
       value
     end
 
@@ -36,7 +36,7 @@ module Gori
     def valid?(json : String) : Bool
       pull = JSON::PullParser.new(json)
       pull.skip
-      finish(pull)
+      finish(pull, json)
       true
     rescue JSON::ParseException
       false
@@ -48,7 +48,7 @@ module Gori
     def reformat(json : String, indent : String? = nil) : String
       pull = JSON::PullParser.new(json)
       text = JSON.build(indent) { |j| pull.read_raw(j) }
-      finish(pull)
+      finish(pull, json)
       text
     end
 
@@ -449,12 +449,12 @@ module Gori
       pull = JSON::PullParser.new(json)
       unless pull.kind.begin_object?
         pull.read_raw
-        finish(pull)
+        finish(pull, json)
         return nil
       end
       acc = [] of {String, String}
       pull.read_object { |key| acc << {key, pull.read_raw} }
-      finish(pull)
+      finish(pull, json)
       acc
     end
 
@@ -512,9 +512,29 @@ module Gori
     end
 
     # A value followed by anything but end-of-input is not one JSON document.
-    private def finish(pull : JSON::PullParser) : Nil
-      return if pull.kind.eof?
+    #
+    # The pull parser's EOF is not that answer at the top level: past a root SCALAR it reports
+    # EOF whatever follows (`1[,]`, `1 2`), and past a root array or object it accepts a comma
+    # and one more scalar (`[1],2`). A walker trusting it popped an empty stack. So the
+    # tokens are counted here: the one after the root value closes must be the end.
+    private def finish(pull : JSON::PullParser, json : String) : Nil
+      return if pull.kind.eof? && one_value?(json)
       raise JSON::ParseException.new("unexpected trailing data", pull.line_number, pull.column_number)
+    end
+
+    private def one_value?(json : String) : Bool
+      lexer = JSON::Lexer.new(json)
+      depth = 0
+      loop do
+        case lexer.next_token.kind
+        when .begin_array?, .begin_object? then depth += 1
+        when .end_array?, .end_object?     then depth -= 1
+        when .eof?                         then return false
+        else # a scalar, a key, `:` or `,`
+        end
+        break if depth <= 0
+      end
+      depth == 0 && lexer.next_token.kind.eof?
     end
   end
 end

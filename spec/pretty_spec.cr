@@ -524,3 +524,16 @@ describe Gori::Pretty do
     end
   end
 end
+
+# Each tag reflows onto its own line indented up to MAX_DEPTH, ~170x the input for a run of
+# `<a>`. The cap used to be checked on the joined result, after allocating all of it.
+describe "Gori::Pretty markup output cap" do
+  it "refuses an over-cap XML/HTML reflow before building it" do
+    body = "<a>" * 340_000 # just under MAX_PRETTY
+    %w[text/html text/xml].each do |ct|
+      before = GC.stats.total_bytes
+      pretty(ct, body).should be_nil
+      (GC.stats.total_bytes - before).should be < 100_000_000
+    end
+  end
+end
