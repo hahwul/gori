@@ -159,14 +159,8 @@ module Gori
         # `abort` skips `ensure`, so each refusal closes the store itself first.
         edit = begin
           plan, err = Settings.plan_project_network_set(Settings.project_network_rows(store), k, value, password)
-          unless plan
-            store.close
-            abort "gori run project network set: #{network_refusal_text(k, err || "invalid value")}"
-          end
-          unless Settings.apply_project_network_edit(store, plan)
-            store.close
-            abort "gori run project network set: project is busy (write did not commit) — #{k.key} is unchanged; try again"
-          end
+          plan || abort_closing(store, "gori run project network set: #{network_refusal_text(k, err || "invalid value")}")
+          Settings.apply_project_network_edit(store, plan) || abort_closing(store, "gori run project network set: project is busy (write did not commit) — #{k.key} is unchanged; try again")
           plan
         ensure
           store.close
@@ -190,14 +184,8 @@ module Gori
         project = resolve_read_project(proj.name, proj.db)
         edit = with_store(project) do |store|
           plan, err = Settings.plan_project_network_unset(Settings.project_network_rows(store), k)
-          unless plan
-            store.close
-            abort "gori run project network unset: #{err || "cannot unset #{k.key}"}"
-          end
-          unless Settings.apply_project_network_edit(store, plan)
-            store.close
-            abort "gori run project network unset: project is busy (write did not commit) — #{k.key} is unchanged; try again"
-          end
+          plan || abort_closing(store, "gori run project network unset: #{err || "cannot unset #{k.key}"}")
+          Settings.apply_project_network_edit(store, plan) || abort_closing(store, "gori run project network unset: project is busy (write did not commit) — #{k.key} is unchanged; try again")
           plan
         end
         puts "#{k.key} unset — the project inherits the global value" unless edit.rows.empty?

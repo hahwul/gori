@@ -118,8 +118,7 @@ module Gori
         end
         if err = fts_backlog_error(store, filter,
              "#{query.inspect} would leave #{lost} with nothing saying so. Nothing was printed;")
-          store.close
-          abort "gori run #{sub}: #{err}"
+          abort_closing(store, "gori run #{sub}: #{err}")
         end
         filter
       end

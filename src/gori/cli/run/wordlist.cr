@@ -263,8 +263,7 @@ module Gori
             resolved = begin
               PayloadFrom.resolve(store, spec)
             rescue ex : PayloadFrom::Error
-              store.close
-              abort "gori run wordlist save: #{ex.message}"
+              abort_closing(store, "gori run wordlist save: #{ex.message}")
             end
             reports << resolved.report
             resolved.values.each { |v| values << v if seen.add?(v) }

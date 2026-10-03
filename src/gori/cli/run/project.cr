@@ -793,9 +793,8 @@ module Gori
           # names the duplicate; this makes the two agree, and leaves whatever false survives
           # it meaning the store, exactly as MCP's `update_scope_rule` splits the same pair.
           if scope.rules.any? { |r| r.id != id && r.kind == new_kind && r.match_type == new_type && r.pattern == new_pattern }
-            store.close
-            abort "gori run project scope update: rule ##{id} NOT updated — #{new_kind} #{new_type} #{new_pattern} " \
-                  "already exists as another rule; the scope is unchanged"
+            abort_closing(store, "gori run project scope update: rule ##{id} NOT updated — #{new_kind} #{new_type} #{new_pattern} " \
+                                 "already exists as another rule; the scope is unchanged")
           end
           # Through `Scope#update`, like `scope add`/`scope delete` beside it. Going straight at
           # the store skipped `ConfigLog`, which is recorded at the MODEL (see its header, which
@@ -839,11 +838,8 @@ module Gori
         project = resolve_read_project(proj.name, proj.db)
         with_store(project) do |store|
           scope = Scope.load(store)
-          unless scope.add(kind, match_type, pat)
-            store.close
-            abort "gori run project scope add: rule NOT added (duplicate, empty, invalid, " \
-                  "or the store was busy/unwritable); the scope is unchanged"
-          end
+          scope.add(kind, match_type, pat) || abort_closing(store, "gori run project scope add: rule NOT added (duplicate, empty, invalid, " \
+                                                                   "or the store was busy/unwritable); the scope is unchanged")
           # `Scope#add` reloads its own rule list, so the new rule — and the id every later
           # `scope update`/`delete` takes — is found by the triple it was added under (the
           # table is UNIQUE on it). It used to be printed nowhere, so a script adding a rule it
@@ -854,8 +850,7 @@ module Gori
               # Committed, then gone before the read — a peer deleted it in between. Refused like
               # every other create's read-back: an `"id": null` a script feeds to `scope delete`
               # fails there, far from the cause.
-              store.close
-              abort "gori run project scope add: the rule was added, but another gori removed it before it could be read back"
+              abort_closing(store, "gori run project scope add: the rule was added, but another gori removed it before it could be read back")
             end
             puts(JSON.build { |j| scope_rule_json(j, rule) })
           else
@@ -891,18 +886,12 @@ module Gori
         project = resolve_read_project(proj.name, proj.db)
         with_store(project) do |store|
           scope = Scope.load(store)
-          unless scope.rules.any? { |r| r.id == id }
-            store.close
-            abort "gori run project scope delete: no scope rule with id #{id}"
-          end
+          scope.rules.any? { |r| r.id == id } || abort_closing(store, "gori run project scope delete: no scope rule with id #{id}")
           # `Scope#remove` now hands back `remove_scope_rule`'s committed flag (it is
           # `exec_task_ok`, so the answer always existed). Without this a busy/locked project
           # reported a security rule "deleted successfully" while it was still gating traffic —
           # the failure mode `scope enable/disable` and `sandbox on/off` already refuse to have.
-          unless scope.remove(id)
-            store.close
-            abort "gori run project scope delete: rule ##{id} NOT deleted (project busy) — try again"
-          end
+          scope.remove(id) || abort_closing(store, "gori run project scope delete: rule ##{id} NOT deleted (project busy) — try again")
           puts "Scope rule ##{id} deleted successfully."
           warn_scope_blackhole(scope, "gori run project scope delete")
         end
@@ -928,10 +917,7 @@ module Gori
           # enable/disable return false when the write didn't commit (store busy/locked/
           # closing, e.g. a live capture holds the writer): don't claim success then.
           ok = enable ? scope.enable : scope.disable
-          unless ok
-            store.close
-            abort "gori run project scope #{enable ? "enable" : "disable"}: project is busy (write did not commit) — try again"
-          end
+          ok || abort_closing(store, "gori run project scope #{enable ? "enable" : "disable"}: project is busy (write did not commit) — try again")
           puts enable ? "Scope filtering enabled." : "Scope filtering disabled."
         end
       end
@@ -1022,8 +1008,7 @@ module Gori
           # check). A busy/locked store must not report success: the in-memory flag flips
           # either way, and the next reload reverts it to the disk value.
           unless enable ? scope.enable_sandbox : scope.disable_sandbox
-            store.close
-            abort "gori run project sandbox #{action}: project is busy (write did not commit) — try again"
+            abort_closing(store, "gori run project sandbox #{action}: project is busy (write did not commit) — try again")
           end
           puts enable ? "Sandbox enabled." : "Sandbox disabled."
         end
@@ -1112,10 +1097,7 @@ module Gori
           # concurrent writer (a running `gori mcp`, the TUI's ENV pane, a second shell) added
           # in between — while still printing "set". The read happens inside the write
           # transaction, so only this key changes.
-          unless Env.set_project_var(store, key, val)
-            store.close
-            abort "gori run project env set: project is busy (write did not commit) — try again"
-          end
+          Env.set_project_var(store, key, val) || abort_closing(store, "gori run project env set: project is busy (write did not commit) — try again")
           # Spelled through `Env.spell`, because the answer to "how do I use it now?" is
           # mode-dependent: `$ENV.KEY` on a namespaced install, `$KEY` on a bare one.
           puts "Env var #{key} set — reference it as #{Env.spell(key, Env::Namespace::Env)}."
@@ -1169,13 +1151,9 @@ module Gori
           # `false` a busy store returns and the two need different exit messages. The write
           # is transactional, so removing this key cannot drop a peer's.
           if Settings.project_env_vars.none? { |(k, _)| k == key }
-            store.close
-            abort "gori run project env delete: no env var named '#{key}'"
+            abort_closing(store, "gori run project env delete: no env var named '#{key}'")
           end
-          unless Env.delete_project_var(store, key)
-            store.close
-            abort "gori run project env delete: project is busy (write did not commit) — try again"
-          end
+          Env.delete_project_var(store, key) || abort_closing(store, "gori run project env delete: project is busy (write did not commit) — try again")
           puts "Env var #{key} deleted."
         end
       end
@@ -1283,11 +1261,8 @@ module Gori
         project = resolve_read_project(proj.name, proj.db)
         with_store(project) do |store|
           ov = HostOverrides.load(store)
-          unless ov.add(h, i)
-            store.close
-            abort "gori run project host-override add: override NOT added (duplicate host, empty, " \
-                  "invalid, or the store was busy/unwritable); nothing was created"
-          end
+          ov.add(h, i) || abort_closing(store, "gori run project host-override add: override NOT added (duplicate host, empty, " \
+                                               "invalid, or the store was busy/unwritable); nothing was created")
           # `OverrideHost.key` is the form `add` stored, so this is the lookup that finds it.
           # `downcase` alone missed a fully-qualified `--host=api.test.` and dropped this to
           # the id-less fallback below — the id being the operator's only handle for a later
@@ -1295,10 +1270,7 @@ module Gori
           key = OverrideHost.key(h)
           e = ov.entries.find { |x| x.host == key }
           if format == :json
-            unless e
-              store.close
-              abort "gori run project host-override add: the override was added, but it was gone before it could be read back"
-            end
+            e || abort_closing(store, "gori run project host-override add: the override was added, but it was gone before it could be read back")
             puts(JSON.build { |j| host_override_json(j, e.id, e.host, e.ip) })
           elsif e
             puts "Host override ##{e.id} added: #{e.ip} → #{e.host}"
@@ -1331,14 +1303,8 @@ module Gori
         project = resolve_read_project(proj.name, proj.db)
         with_store(project) do |store|
           ov = HostOverrides.load(store)
-          unless ov.entries.any? { |e| e.id == id }
-            store.close
-            abort "gori run project host-override update: no override with id #{id}"
-          end
-          unless ov.update(id, h, i)
-            store.close
-            abort "gori run project host-override update: NOT updated (duplicate host, or store busy or unwritable)"
-          end
+          ov.entries.any? { |e| e.id == id } || abort_closing(store, "gori run project host-override update: no override with id #{id}")
+          ov.update(id, h, i) || abort_closing(store, "gori run project host-override update: NOT updated (duplicate host, or store busy or unwritable)")
           puts "Host override ##{id} updated: #{i} → #{OverrideHost.key(h)}" # the stored form, not the typed one
         end
       end
@@ -1358,14 +1324,8 @@ module Gori
         project = resolve_read_project(proj.name, proj.db)
         with_store(project) do |store|
           ov = HostOverrides.load(store)
-          unless ov.entries.any? { |e| e.id == id }
-            store.close
-            abort "gori run project host-override delete: no override with id #{id}"
-          end
-          unless ov.remove(id)
-            store.close
-            abort "gori run project host-override delete: project is busy (write did not commit) — try again"
-          end
+          ov.entries.any? { |e| e.id == id } || abort_closing(store, "gori run project host-override delete: no override with id #{id}")
+          ov.remove(id) || abort_closing(store, "gori run project host-override delete: project is busy (write did not commit) — try again")
           puts "Host override ##{id} deleted."
         end
       end

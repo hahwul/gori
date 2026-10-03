@@ -782,15 +782,9 @@ module Gori
             else
               store.match_rules.any? { |r| r.id == id }
             end
-          unless exists
-            store.close
-            abort "gori run rewriter rm: no #{scope.global? ? "global " : ""}rule with id #{id}"
-          end
-          unless Gori::Rules.load(store).remove(id, scope)
-            store.close
-            abort scope.global? ? "gori run rewriter rm: settings not writable (nothing was deleted)" \
-                                   : "gori run rewriter rm: project is busy (write did not commit) — try again"
-          end
+          exists || abort_closing(store, "gori run rewriter rm: no #{scope.global? ? "global " : ""}rule with id #{id}")
+          Gori::Rules.load(store).remove(id, scope) || abort_closing(store, scope.global? ? "gori run rewriter rm: settings not writable (nothing was deleted)" \
+                                                                                             : "gori run rewriter rm: project is busy (write did not commit) — try again")
           puts scope.global? ? "Global rule ##{id} deleted — from every project." : "Rule ##{id} deleted."
         end
       end
@@ -832,21 +826,12 @@ module Gori
             # The library's own default. `set_default`, not `set_enabled`: the latter writes
             # THIS project's override, and agreeing with the default drops it rather than
             # pinning it — the disposition the Rewriter tab's `x` has.
-            unless rules.set_default(id, enable)
-              store.close
-              abort "gori run rewriter #{action}: settings not writable (the rule is unchanged)"
-            end
+            rules.set_default(id, enable) || abort_closing(store, "gori run rewriter #{action}: settings not writable (the rule is unchanged)")
             puts "Global rule ##{id} #{enable ? "enabled" : "disabled"} by default (every project without an override)."
             return
           end
-          unless scope.global? || store.match_rules.any? { |r| r.id == id }
-            store.close
-            abort "gori run rewriter #{action}: no rule with id #{id}"
-          end
-          unless rules.set_enabled(id, enable, scope)
-            store.close
-            abort "gori run rewriter #{action}: project is busy (write did not commit) — try again"
-          end
+          scope.global? || store.match_rules.any? { |r| r.id == id } || abort_closing(store, "gori run rewriter #{action}: no rule with id #{id}")
+          rules.set_enabled(id, enable, scope) || abort_closing(store, "gori run rewriter #{action}: project is busy (write did not commit) — try again")
           if scope.global?
             puts "Global rule ##{id} #{enable ? "enabled" : "disabled"} in project #{CLI::Output.term_safe(project.name)}."
           else

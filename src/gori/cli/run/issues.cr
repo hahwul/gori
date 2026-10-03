@@ -407,14 +407,10 @@ module Gori
 
         project = resolve_read_project(proj.name, proj.db)
         with_store(project) do |store|
-          unless store.get_issue(id)
-            store.close
-            abort "gori run issues update: no issue with id #{id}"
-          end
+          store.get_issue(id) || abort_closing(store, "gori run issues update: no issue with id #{id}")
 
           if title.nil? && severity.nil? && notes.nil? && status.nil? && cvss.nil? && !clear_cvss
-            store.close
-            abort "gori run issues update: no fields to update (provide at least one of --title/--severity/--notes[-file|-stdin]/--status/--cvss)"
+            abort_closing(store, "gori run issues update: no fields to update (provide at least one of --title/--severity/--notes[-file|-stdin]/--status/--cvss)")
           end
 
           masked_title = title.try { |t| Env.mask_secrets(t) }
@@ -424,8 +420,7 @@ module Gori
           # don't report success then.
           unless store.update_issue(id, title: masked_title, severity: severity, notes: masked_notes, status: status,
                    cvss: cvss, clear_cvss: clear_cvss)
-            store.close
-            abort "gori run issues update: project is busy (write did not commit) — try again"
+            abort_closing(store, "gori run issues update: project is busy (write did not commit) — try again")
           end
           puts "Issue ##{id} updated successfully."
         end

@@ -325,8 +325,7 @@ module Gori
         with_store(project) do |store|
           id = store.insert_color_rule(f, color, style, name, !disabled)
           if id == 0
-            store.close
-            abort "gori run colormarker add: project is busy (write did not commit) — try again"
+            abort_closing(store, "gori run colormarker add: project is busy (write did not commit) — try again")
           end
           puts format == :json ? colormarker_added_json(id, store) : "Colour rule ##{id} added."
           print_color_advice(f)
@@ -437,15 +436,11 @@ module Gori
         project = resolve_read_project(project_name, db_path)
         with_store(project) do |store|
           current = store.color_rules.find { |r| r.id == id }
-          unless current
-            store.close
-            abort "gori run colormarker update: no colour rule with id #{id}"
-          end
+          current || abort_closing(store, "gori run colormarker update: no colour rule with id #{id}")
           f = filter || current.match_filter
           unless store.update_color_rule(id, f, color || current.color,
                    style || current.style, name || current.name)
-            store.close
-            abort "gori run colormarker update: project is busy (write did not commit) — the rule is unchanged"
+            abort_closing(store, "gori run colormarker update: project is busy (write did not commit) — the rule is unchanged")
           end
           puts "Colour rule ##{id} updated."
           print_color_advice(f)
@@ -484,14 +479,8 @@ module Gori
 
         project = resolve_read_project(proj.name, proj.db)
         with_store(project) do |store|
-          unless store.color_rules.any? { |r| r.id == id }
-            store.close
-            abort "gori run colormarker rm: no colour rule with id #{id}"
-          end
-          unless store.delete_color_rule(id)
-            store.close
-            abort "gori run colormarker rm: project is busy (write did not commit) — the row colour is unchanged"
-          end
+          store.color_rules.any? { |r| r.id == id } || abort_closing(store, "gori run colormarker rm: no colour rule with id #{id}")
+          store.delete_color_rule(id) || abort_closing(store, "gori run colormarker rm: project is busy (write did not commit) — the row colour is unchanged")
           puts "Colour rule ##{id} deleted."
         end
       end
@@ -539,21 +528,12 @@ module Gori
             # Same disposition `Colormarker#toggle` writes: agreeing with the default DROPS the
             # override rather than pinning it, so this project keeps following the library.
             ok = default == enable ? store.clear_colormarker_override(id) : store.set_colormarker_override(id, enable)
-            unless ok
-              store.close
-              abort "gori run colormarker #{action}: project is busy (write did not commit) — try again"
-            end
+            ok || abort_closing(store, "gori run colormarker #{action}: project is busy (write did not commit) — try again")
             puts "Global colour rule ##{id} #{enable ? "enabled" : "disabled"} in project #{CLI::Output.term_safe(project.name)}."
             return
           end
-          unless store.color_rules.any? { |r| r.id == id }
-            store.close
-            abort "gori run colormarker #{action}: no colour rule with id #{id}"
-          end
-          unless store.set_color_rule_enabled(id, enable)
-            store.close
-            abort "gori run colormarker #{action}: project is busy (write did not commit) — the row colour is unchanged"
-          end
+          store.color_rules.any? { |r| r.id == id } || abort_closing(store, "gori run colormarker #{action}: no colour rule with id #{id}")
+          store.set_color_rule_enabled(id, enable) || abort_closing(store, "gori run colormarker #{action}: project is busy (write did not commit) — the row colour is unchanged")
           puts "Colour rule ##{id} #{enable ? "enabled" : "disabled"}."
         end
       end
@@ -613,19 +593,12 @@ module Gori
         with_store(project) do |store|
           ids = store.color_rules.map(&.id)
           i = ids.index(id)
-          unless i
-            store.close
-            abort "gori run colormarker move: no colour rule with id #{id}"
-          end
+          i || abort_closing(store, "gori run colormarker move: no colour rule with id #{id}")
           j = i + dir
           if j < 0 || j >= ids.size
-            store.close
-            abort "gori run colormarker move: rule ##{id} is already at the #{dir < 0 ? "top" : "bottom"} of the project block"
+            abort_closing(store, "gori run colormarker move: rule ##{id} is already at the #{dir < 0 ? "top" : "bottom"} of the project block")
           end
-          unless store.move_color_rule(id, dir)
-            store.close
-            abort "gori run colormarker move: project is busy (write did not commit) — the precedence order is unchanged"
-          end
+          store.move_color_rule(id, dir) || abort_closing(store, "gori run colormarker move: project is busy (write did not commit) — the precedence order is unchanged")
           puts "Colour rule ##{id} moved #{dir < 0 ? "up" : "down"}."
         end
       end

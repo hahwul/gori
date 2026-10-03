@@ -65,8 +65,7 @@ module Gori
         filter = sitemap_export_filter(store, query, filter, in_scope, hide_static)
         choice = examples ? Redact::Policy.resolve(store, redact_profile, on: true) : nil
         if err = choice.try(&.error)
-          store.close
-          abort "gori run sitemap export: #{err}"
+          abort_closing(store, "gori run sitemap export: #{err}")
         end
         opts = Export::OpenApi::Options.new(filter: filter, host: host, scheme: scheme, port: port, path_prefix: path_prefix,
           max_flows: max_flows, max_samples: max_samples, max_endpoints: max_endpoints,
@@ -103,11 +102,8 @@ module Gori
         filter = QL.and(filter, QL.hide_static) if hide_static
         return filter unless in_scope
         scope = Scope.load(store)
-        unless scope.configured?
-          store.close
-          abort "gori run sitemap export: --in-scope, but no scope rules are configured — nothing is " \
-                "in scope (add rules with `gori run project scope add`, or drop --in-scope)"
-        end
+        scope.configured? || abort_closing(store, "gori run sitemap export: --in-scope, but no scope rules are configured — nothing is " \
+                                                  "in scope (add rules with `gori run project scope add`, or drop --in-scope)")
         QL.and(scope.filter(force: true), filter)
       end
 

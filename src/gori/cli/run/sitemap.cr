@@ -196,8 +196,7 @@ module Gori
         if err = fts_backlog_error(store, filter,
              "#{query.inspect} would leave endpoints out of the tree with nothing saying so. " \
              "Nothing was printed;")
-          store.close
-          abort "gori run sitemap: #{err}"
+          abort_closing(store, "gori run sitemap: #{err}")
         end
         # `--hide-static` is per-FLOW, unlike `--in-scope` here: it joins the flow filter the tree is
         # built from, exactly as the TUI's lens joins `flow_filter_of`, so a host survives it with

@@ -921,10 +921,7 @@ module Gori
                                              ws_messages : Int32, rewrote_request_line : Bool) : String
         rows = store.repeaters_mcp
         i = rows.index { |r| r.id == id }
-        unless i
-          store.close
-          abort "gori run repeater create: session ##{id} was created, but another gori deleted it before it could be read back"
-        end
+        i || abort_closing(store, "gori run repeater create: session ##{id} was created, but another gori deleted it before it could be read back")
         JSON.build do |j|
           j.object do
             repeater_row_fields(j, rows[i], i + 1)

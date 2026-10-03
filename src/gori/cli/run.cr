@@ -1007,8 +1007,7 @@ module Gori
         scope = begin
           Gori::Scope.load(store)
         rescue ex
-          store.close
-          abort "gori run: could not load project scope (refusing to send unscoped): #{ex.message}"
+          abort_closing(store, "gori run: could not load project scope (refusing to send unscoped): #{ex.message}")
         end
         # Every caller takes --allow-unscoped, so a refusal worded by the Outbound itself (gRPC
         # reflection, a retest step) names it as the remedy, as `guard_outbound` does.

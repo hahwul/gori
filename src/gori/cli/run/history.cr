@@ -125,8 +125,7 @@ module Gori
         # costs no store open is worth keeping.
         lens = Scope.ql_lens(store)
         if err = delete_scope_error(q, lens)
-          store.close
-          abort "gori run history delete: #{err}"
+          abort_closing(store, "gori run history delete: #{err}")
         end
         filter = QL.parse(q, scope: lens)
         # A `body:`/free-text delete drains the trigram index first, because an under-reporting
@@ -136,14 +135,12 @@ module Gori
         if err = fts_backlog_error(store, filter,
              "#{q.inspect} cannot see all of them and this delete would silently spare some. " \
              "NOTHING was deleted;")
-          store.close
-          abort "gori run history delete: #{err}"
+          abort_closing(store, "gori run history delete: #{err}")
         end
         ids = begin
           matching_flow_ids(store, filter)
         rescue ex
-          store.close
-          abort "gori run history delete: query #{q.inspect} failed: #{ex.message}"
+          abort_closing(store, "gori run history delete: query #{q.inspect} failed: #{ex.message}")
         end
 
         begin
@@ -448,16 +445,12 @@ module Gori
           if vn = view_name
             unless view = SavedViews.resolve_by_name(store, vn)
               known = SavedViews.names(store).join(", ")
-              store.close
-              abort "gori run history: no view named #{vn.inspect} (known: #{known})"
+              abort_closing(store, "gori run history: no view named #{vn.inspect} (known: #{known})")
             end
             # A view whose query compiles to nothing is REFUSED, not applied. `QL.and` folds an
             # EMPTY side away, so applying it would list EVERY flow while the command line says
             # a view is narrowing — the same failure the query refusal below exists to stop.
-            unless f = SavedViews.filter(view, scope: lens)
-              store.close
-              abort "gori run history: view #{view.name.inspect} is not a usable query (#{view.query.inspect}) — fix it with `gori run views set`"
-            end
+            f = SavedViews.filter(view, scope: lens) || abort_closing(store, "gori run history: view #{view.name.inspect} is not a usable query (#{view.query.inspect}) — fix it with `gori run views set`")
             view_filter = f
             view_label = view.name if view.narrowing?
           end
@@ -492,8 +485,7 @@ module Gori
               # yields the match-all EMPTY filter — silently dumping every flow,
               # the opposite of what the user asked. Refuse it instead.
               if !q.strip.empty? && filter == QL::EMPTY
-                store.close
-                abort "gori run history: query #{q.inspect} did not match any field (check syntax, e.g. status:>=500 host:example.com method:POST)"
+                abort_closing(store, "gori run history: query #{q.inspect} did not match any field (check syntax, e.g. status:>=500 host:example.com method:POST)")
               end
               # The hide-static lens LAST, after the operator's own terms, the way the TUI and MCP
               # order it: a cheap `host LIKE` rejects a row before the lens is consulted.
@@ -508,14 +500,12 @@ module Gori
               # answer — a caveat on STDERR is gone the moment the rows are piped to a file.
               if err = fts_backlog_error(store, combined,
                    "#{q.inspect} would silently omit them. Nothing was listed;")
-                store.close
-                abort "gori run history: #{err}"
+                abort_closing(store, "gori run history: #{err}")
               end
               begin
                 store.search(combined, limit_probe(limit), raise_on_error: true)
               rescue ex
-                store.close
-                abort "gori run history: query #{q.inspect} failed: #{ex.message}"
+                abort_closing(store, "gori run history: query #{q.inspect} failed: #{ex.message}")
               end
             elsif in_scope || view_filter != QL::EMPTY || hide_static
               # `view_filter` belongs in this condition and not only in the AND above: without
@@ -527,8 +517,7 @@ module Gori
               # to use `body:`, and this listing IS the answer.
               if err = fts_backlog_error(store, combined,
                    "the #{view_name.inspect} view would silently omit them. Nothing was listed;")
-                store.close
-                abort "gori run history: #{err}"
+                abort_closing(store, "gori run history: #{err}")
               end
               # Same rescue the query branch has: a view can hold a regex or an OR chain that
               # PARSES but SQLite still refuses to run (hand-edited settings.json, a peer's
@@ -536,8 +525,7 @@ module Gori
               begin
                 store.search(combined, limit_probe(limit), raise_on_error: true)
               rescue ex
-                store.close
-                abort "gori run history: #{view_name ? "view #{view_name.inspect}" : "listing"} failed: #{ex.message}"
+                abort_closing(store, "gori run history: #{view_name ? "view #{view_name.inspect}" : "listing"} failed: #{ex.message}")
               end
             else
               store.recent_flows(limit_probe(limit))
@@ -745,8 +733,7 @@ module Gori
         # project's own profiles live on a settings row in this database.
         choice = redact_choice(store, redaction)
         if err = choice.error
-          store.close
-          abort "gori run history: #{err}"
+          abort_closing(store, "gori run history: #{err}")
         end
         matcher = choice.matcher
         # The per-flow reports, kept so the ONE line at the end can total them. Reports, not
