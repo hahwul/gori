@@ -2,6 +2,7 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "./overlay"
+require "./note_detail_overlay"
 
 module Gori::Tui
   # A centered yes/no confirmation modal for destructive actions — deleting a
@@ -238,62 +239,7 @@ module Gori::Tui
     # and `overlay_box` share this one definition, so the card's height still matches what is
     # drawn into it — the invariant `overlay_box`'s doc already claims.
     private def display_lines(area : Rect) : Array(String)
-      width = {area.w - 2, MAX_WIDTH}.min - TEXT_INSET
-      lines = [] of String
-      @message.split('\n') { |line| wrap_line(line, width, lines) }
-      lines
-    end
-
-    # Greedy word wrap measured in terminal COLUMNS, not characters, so a CJK message wraps
-    # where it is drawn rather than where its character count happens to land.
-    private def wrap_line(line : String, width : Int32, into : Array(String)) : Nil
-      if width <= 0 || Screen.display_width(line) <= width
-        into << line
-        return
-      end
-      current = [] of String
-      current_w = 0
-      line.split(' ') do |word|
-        parts = hard_split(word, width)
-        parts.each_with_index do |part, i|
-          pw = Screen.display_width(part)
-          if current.empty?
-            current << part
-            current_w = pw
-          elsif current_w + 1 + pw <= width
-            current << part
-            current_w += 1 + pw
-          else
-            into << current.join(' ')
-            current = [part]
-            current_w = pw
-          end
-          # A hard-split chunk fills the line by construction; its remainder starts the next.
-          next if i == parts.size - 1
-          into << current.join(' ')
-          current = [] of String
-          current_w = 0
-        end
-      end
-      into << current.join(' ') unless current.empty?
-    end
-
-    # One word wider than the whole line, cut at grapheme-cluster starts. Cut rather than
-    # clipped: an over-long token is usually a URL, a project name or a payload, and its tail
-    # is the half that identifies it. `Screen.column_for` floors to a cluster start, so a wide
-    # glyph is never split down the middle; the `{cut, 1}.max` keeps a single glyph wider than
-    # the budget from looping forever.
-    private def hard_split(word : String, width : Int32) : Array(String)
-      return [word] if Screen.display_width(word) <= width
-      parts = [] of String
-      rest = word
-      while Screen.display_width(rest) > width
-        cut = {Screen.column_for(rest, width), 1}.max
-        parts << rest[0, cut]
-        rest = rest[cut..]
-      end
-      parts << rest unless rest.empty?
-      parts
+      NoteDetailOverlay.wrap_text(@message, {area.w - 2, MAX_WIDTH}.min - TEXT_INSET)
     end
 
     private def longest(lines : Array(String)) : Int32
