@@ -425,6 +425,20 @@ describe "gori run repeater — Layer-1 scope gate (#406)" do
       File.delete?(path); File.delete?("#{path}-wal"); File.delete?("#{path}-shm")
     end
   end
+
+  it "judges a $BIND path where it resolves, not as authored" do
+    with_env_syntax(Gori::Env::Syntax::Namespaced) do
+      with_store_env do |store|
+        Gori::Env.layer = SpecBindingLayer.new(["PATH"], {"PATH" => "admin"})
+        scope = Gori::Scope.load(store)
+        scope.add("include", "string", "/$BIND.PATH") # matches the draft, not the wire
+        plan = Gori::Repeater::Plan.build(
+          Gori::Repeater::PlanOptions.new(["GET /$BIND.PATH HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice],
+            target: "http://127.0.0.1:9/", expand_request: false), Gori::Outbound.cli(scope, false))
+        Gori::CLI::Run.repeater_out_of_scope_for_spec(Gori::Outbound.cli(scope, false), plan).should be_true
+      end
+    end
+  end
 end
 
 describe "gori run repeater race/timing — Layer-1 scope gate over every member" do

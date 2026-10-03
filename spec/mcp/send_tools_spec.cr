@@ -44,6 +44,32 @@ private def start_mcp_http_origin(body : String, extra_headers = "") : Int32
   port
 end
 
+# A response binds a request-target value for the next send. Records each request line so
+# the scope-gate example can prove an out-of-scope bound path never reaches this origin.
+private def start_mcp_binding_origin(seen : Array(String)) : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    conn = origin.accept?
+    if conn
+      begin
+        conn.read_timeout = 5.seconds
+        head = Gori::Proxy::Codec::Http1.read_head(conn)
+        if head
+          seen << String.new(head).lines.first.to_s.strip
+          conn << "HTTP/1.1 200 OK\r\nX-Route: /admin\r\nContent-Length: 0\r\n\r\n"
+          conn.flush
+        end
+      rescue
+      ensure
+        conn.close rescue nil
+      end
+    end
+    origin.close rescue nil
+  end
+  port
+end
+
 # One-shot origin that writes RAW response bytes (framing and all), so a test can hand the
 # engine a chunked body with a trailer section, an 8-bit header value, or two conflicting
 # Content-Length lines — shapes `start_mcp_http_origin` cannot express.
@@ -701,6 +727,47 @@ describe Gori::MCP::Server do
         resp["isError"].as_bool.should be_true
         resp["structuredContent"]["error_code"].as_s.should eq("SCOPE_BLOCKED")
         store.count.should eq(0) # refused before any History write
+      end
+    end
+
+    it "checks a binding-expanded request-target before recording the send" do
+      with_env_syntax(Gori::Env::Syntax::Bare) do
+        with_store_env do |store|
+          scope = Gori::Scope.load(store)
+          scope.add("include", "string", "/$route")
+          scope.enable
+          Gori::Bindings.load(store).add("route", "", Gori::ExtractKind::Header, "X-Route").should be_nil
+          seen = [] of String
+          port = start_mcp_binding_origin(seen)
+          first = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:#{port}/seed","allow_unscoped":true}}})
+          raw = "GET /$route HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n\r\n"
+          second = JSON.build do |j|
+            j.object do
+              j.field "jsonrpc", "2.0"
+              j.field "id", 2
+              j.field "method", "tools/call"
+              j.field "params" do
+                j.object do
+                  j.field "name", "send_request"
+                  j.field "arguments" do
+                    j.object do
+                      j.field "url", "http://127.0.0.1:#{port}/"
+                      j.field "raw", raw
+                    end
+                  end
+                end
+              end
+            end
+          end
+
+          responses = mcp_drive(store, first, second, verify_upstream: false)
+          responses[1]["result"]["isError"].as_bool.should be_true
+          responses[1]["result"]["structuredContent"]["error_code"].as_s.should eq("SCOPE_BLOCKED")
+          # Only the allowed seed request was sent and recorded. The bound value moved the
+          # second request from the included /$route path to /admin.
+          seen.should eq(["GET /seed HTTP/1.1"])
+          store.count.should eq(1)
+        end
       end
     end
 

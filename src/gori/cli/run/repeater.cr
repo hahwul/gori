@@ -965,10 +965,11 @@ module Gori
       # Every request in the plan is asked, as Layer 2 already is: a race or timing group shares
       # one origin but not one path. The first blocked member's verdict wins, else the first's.
       private def self.repeater_scope_verdict(outbound : Gori::Outbound, plan : Repeater::Plan) : Gori::Outbound::Verdict
-        target = (bytes = plan.requests.first?) ? Gori::Outbound.request_target(bytes) : "/"
+        requests = plan.scope_requests
+        target = (bytes = requests.first?) ? Gori::Outbound.request_target(bytes) : "/"
         first = outbound.check_request(plan.scheme, plan.host, target, plan.port)
         return first if first.blocked?
-        plan.requests.each_with_index do |req, i|
+        requests.each_with_index do |req, i|
           next if i == 0
           verdict = outbound.check_request(plan.scheme, plan.host, Gori::Outbound.request_target(req), plan.port)
           return verdict if verdict.blocked?

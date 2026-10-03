@@ -18,9 +18,10 @@ module Gori
   # without (`Fuzz::Sender`, `Repeater::Sender`), so forgetting it is a compile error
   # rather than a security hole. It carries both layers of the gate:
   #
-  #   Layer 1 (`check`)        — the up-front include/allowlist decision, made ONCE before
-  #                              the first byte. Its strictness is the ONE thing that
-  #                              legitimately differs per surface (see `Gate`).
+  #   Layer 1 (`check`)        — the surface-selected include/allowlist decision, made
+  #                              before side effects. Its strictness is the ONE thing that
+  #                              legitimately differs per surface (see `Gate`); a Repeater
+  #                              sender repeats it on the final wire target.
   #   Layer 2 (`sweep_block` / — the per-send HARD gate: Sandbox mode (and, for automated
   #            `send_block`)     sweeps, explicit EXCLUDE rules). Identical on every
   #                              surface, and applied even when Layer 1 was waived.
@@ -239,7 +240,7 @@ module Gori
 
     # ── layer 1: the up-front decision ───────────────────────────────────────────
 
-    # The scope verdict for one target URL. Made ONCE, before anything is sent.
+    # The scope verdict for one target URL.
     #
     # `url` is the ALLOWLIST spelling — port-free, the one every url-level include was written
     # for. `port_url` is the same url WITH its port and is read by the EXCLUDE side only; pass
@@ -266,6 +267,15 @@ module Gori
     def check_request(scheme : String, host : String, target : String, port : Int32) : Verdict
       check(Outbound.scope_url(scheme, host, target), host,
         Outbound.exclude_url(scheme, host, target, port))
+    end
+
+    # Re-check a hand-authored send after its bytes have gone through the send seam. A
+    # Repeater path can contain a `$BIND.*` value that changes the request-target after a
+    # surface's preflight; scope must cover the target the socket will actually receive.
+    # The throttled reload also makes this final check observe mid-run scope changes.
+    def check_wire_request(scheme : String, host : String, target : String, port : Int32) : Verdict
+      refresh
+      check_request(scheme, host, target, port)
     end
 
     # Whether Layer 1 is enforced at all — for the log/audit line that records how a send

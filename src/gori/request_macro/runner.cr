@@ -246,7 +246,7 @@ module Gori::RequestMacro
         rescue ex : Repeater::PlanError
           return failed(total, sent, n, step.label, "could not build the request: #{ex.message}", nil, flows)
         end
-        target = Outbound.request_target(plan.bytes)
+        target = Outbound.request_target(plan.scope_requests.first)
         verdict = @outbound.check_request(plan.scheme, plan.host, target, plan.port)
         if verdict.blocked?
           return failed(total, sent, n, step.label,
