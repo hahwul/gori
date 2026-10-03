@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Intercept: catch holds requests only by default, so a forwarded request's response no longer waits for a second `f` (`c` still picks responses or both), and the held-message editor opens in READ when you `⇥` into it, as the Repeater's does, so `i` starts typing instead of typing an `i` (#1505)
+- Query: a comparison typed without its colon, such as `status>=400`, still searches as text, but History, Sitemap, `gori run history` and MCP `ql_explain` now suggest `status:>=400` (#1504)
 - TUI: the project picker opens on your most recent project instead of `+ New project`, typing in the scope rule form lands in the pattern from any row, and the top bar reads `scope:off(N)` when rules wait on a lens that is off (#1503)
 - TUI: a Ctrl chord the tab's list binds, such as History's `^R`, now answers on the tab bar with the `↵` that reaches it instead of doing nothing, and the setup wizard no longer lists `^1-9`, which many terminals never deliver (#1501)
 - Import: a HAR with an absurd `bodySize` or `content.size` no longer makes every History read in the project fail, and a HAR or OpenAPI file the parser chokes on is reported as a bad file instead of a backtrace (#1497)

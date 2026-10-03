@@ -613,6 +613,30 @@ module Gori
       FilterAst.suggest(name, CANDIDATE_FIELDS)
     end
 
+    # A bare word spelled `<field><op><value>` (`status>=400`, `host=api`) is a comparison typed
+    # without its colon. It stays free text — the word may really be text someone searches for,
+    # so the query and its result do not change — but it almost always matches nothing, and an
+    # empty list then reads as "no such traffic". This names the colon form, for every surface
+    # that explains an empty answer. A quoted or negated word was typed on purpose and is left
+    # alone, as is a name `known_field?` does not know. nil when no term looks like one.
+    MISSING_COLON = /\A([a-z][a-z0-9_.]*)(>=|<=|!=|>|<|=)([^<>=!].*)\z/i
+
+    def self.missing_colon_hint(query : String) : String?
+      FilterAst.terms(FilterAst.parse(query)).each do |term|
+        next if term.negate? || term.source.includes?('"')
+        next unless m = MISSING_COLON.match(term.text)
+        name, op, value = m[1].downcase, m[2], m[3]
+        next unless known_field?(name)
+        meant = case op
+                when "="  then "#{name}:#{value}"
+                when "!=" then "-#{name}:#{value}"
+                else           "#{name}:#{op}#{value}"
+                end
+        return "`#{term.source}` is searched as text — did you mean `#{meant}`?"
+      end
+      nil
+    end
+
     # One line per field, for the surfaces that TEACH this language rather than parse it — the
     # completion row's description column and Help's Query page. Both used to be prose written
     # by hand next to the widget, which is why `FILTER_HINT` and `QUERY_HINT` disagreed with each

@@ -926,16 +926,10 @@ module Gori::Tui
       end
       bad = QL.invalid_regex_terms(@query)
       return "invalid regex in #{bad.first}" unless bad.empty?
-      # A `field:` QL does not implement free-texts the WHOLE token, so `hostt:api` runs a
-      # literal substring search, matches nothing, and is indistinguishable on this list from
-      # "no such traffic". `gori run history` refuses it outright and MCP errors on it; the bar
-      # must not (an operator types `meth` on the way to `method:`), so it is named HERE, once
-      # the list the query produced is empty. Ahead of the backlog and lens notes, which send
-      # the operator to a control that is not the problem — those are about a query that RAN,
-      # this is about one that was mistyped.
-      if u = FilterAst.unknown_field(@query, FilterAst::SEPS_FIELD_REGEX, QL_KNOWN,
-           QL::SIDE_PREFIXES, QL::CANDIDATE_FIELDS)
-        return FilterAst.unknown_field_note(u)
+      # Ahead of the backlog and lens notes, which send the operator to a control that is not
+      # the problem — those are about a query that RAN, this is about one that was mistyped.
+      if note = mistyped_note
+        return note
       end
       # First of the notes that describe a query which RAN, and that order is the point: the
       # index lag is the one note here that is TRUE ONLY RIGHT NOW (the backlog drains), it
@@ -961,6 +955,20 @@ module Gori::Tui
       # empty list. Named LAST because a broken regex or a dropped term is a defect in what they
       # just typed, while this one is a standing mode they may have set days ago.
       standing_lens_note
+    end
+
+    # A `field:` QL does not implement free-texts the WHOLE token, so `hostt:api` runs a
+    # literal substring search, matches nothing, and is indistinguishable on this list from
+    # "no such traffic". `gori run history` refuses it outright and MCP errors on it; the bar
+    # must not (an operator types `meth` on the way to `method:`), so it is named once the list
+    # the query produced is empty. `status>=400` is the same trap from the other side: a
+    # comparison missing its colon, which free-texts and matches nothing.
+    private def mistyped_note : String?
+      if u = FilterAst.unknown_field(@query, FilterAst::SEPS_FIELD_REGEX, QL_KNOWN,
+           QL::SIDE_PREFIXES, QL::CANDIDATE_FIELDS)
+        return FilterAst.unknown_field_note(u)
+      end
+      QL.missing_colon_hint(@query)
     end
 
     # The view and the hide-static lens — the standing modes that AND over the bar. Both named

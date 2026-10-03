@@ -106,6 +106,13 @@ describe "MCP ql_explain verdict" do
     end
   end
 
+  it "names the colon form of a comparison typed without one" do
+    with_store do |store|
+      w = explain(store, "status>=400")["warnings"].as_a.map(&.as_s)
+      w.should contain("`status>=400` is searched as text — did you mean `status:>=400`?")
+    end
+  end
+
   it "leaves did_you_mean null when nothing is close enough to name" do
     with_store do |store|
       explain(store, "xyzzy:foo")["unknown_fields"][0]["did_you_mean"].raw.should be_nil

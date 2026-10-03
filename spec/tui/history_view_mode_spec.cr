@@ -214,6 +214,20 @@ describe "HistoryView — view mode" do
     end
   end
 
+  it "names the colon form of a comparison typed without one, ahead of the view note" do
+    with_store do |store|
+      add_flow(store, Gori::FlowSource::Kind::Proxy, "keep.test", 500)
+      view = HistoryView.new
+      view.set_view(Gori::SavedViews.default_view(store))
+      view.set_query("status>=400")
+      view.reload(store)
+      view.rows.should be_empty
+      text = screen_text(view)
+      text.should contain("did you mean `status:>=400`?")
+      text.should_not contain("also narrows to")
+    end
+  end
+
   it "names the view in the note when the BAR is what the operator can see" do
     with_store do |store|
       add_flow(store, Gori::FlowSource::Kind::Proxy, "keep.test", 200)

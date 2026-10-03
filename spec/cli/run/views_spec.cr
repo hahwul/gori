@@ -122,6 +122,11 @@ describe "gori run history — the empty-listing sentence" do
       .should eq(%(no flows match "host:cdn" in scope (static assets hidden)))
   end
 
+  it "names the colon form of a comparison typed without one" do
+    Gori::CLI::Run.empty_listing_note("status>=400", nil, false)
+      .should eq(%(no flows match "status>=400" (`status>=400` is searched as text — did you mean `status:>=400`?)))
+  end
+
   it "stays quiet about All, which excluded nothing" do
     # The caller passes nil for a non-narrowing view. Naming it would send an operator looking
     # at a lens that had no part in the answer.
