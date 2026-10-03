@@ -26,8 +26,6 @@ abstract class Gori::Verb::ExecContext
   abstract def fuzzer_rename_subtab : Nil      # open the rename prompt for the active sub-tab
   abstract def fuzzer_close_subtab : Nil       # close the active sub-tab (confirm-gated)
   abstract def fuzzer_duplicate_subtab : Nil   # clone the active sub-tab's content into a new sibling
-  abstract def fuzzer_copy : Nil               # copy selection or current line (READ panes)
-  abstract def fuzzer_copy_all : Nil           # copy the whole focused pane text
   abstract def fuzzer_read_mode? : Bool        # focused pane is READ (y/copy verbs gate on this)
   abstract def fuzzer_result_selected? : Bool  # a result row is selected in the focused fuzz session
   abstract def fuzz_repeater_selected : Nil    # send the selected fuzz result's request to Repeater

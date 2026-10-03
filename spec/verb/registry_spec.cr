@@ -406,14 +406,6 @@ private class FakeContext < ExecContext
     @calls << :repeater_attach_chain
   end
 
-  def repeater_copy : Nil
-    @calls << :repeater_copy
-  end
-
-  def repeater_copy_all : Nil
-    @calls << :repeater_copy_all
-  end
-
   def repeater_open_response_external : Nil
     @calls << :repeater_open_response_external
   end
@@ -520,14 +512,6 @@ private class FakeContext < ExecContext
 
   def fuzzer_duplicate_subtab : Nil
     @calls << :fuzzer_duplicate_subtab
-  end
-
-  def fuzzer_copy : Nil
-    @calls << :fuzzer_copy
-  end
-
-  def fuzzer_copy_all : Nil
-    @calls << :fuzzer_copy_all
   end
 
   def fuzzer_read_mode? : Bool

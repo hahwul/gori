@@ -405,32 +405,12 @@ module Gori::Tui
       end
     end
 
-    # ^S on the TARGET pane: edit the TLS SNI the whole sweep presents, leaving the dialed
-    # host alone. Same chord, same focus rule and same status wording as the Repeater's — a
-    # fuzz session seeded from History (⇧I) could otherwise never set one, so an https vhost
-    # sweep always presented the dialed IP.
-    def fuzz_toggle_sni : Nil
-      if (view = current_view) && view.focus == :target
-        view.toggle_sni_field
-        @host.status(view.editing_sni? ? "SNI override: type a domain · ^S/↵/esc back to URL" : "editing target URL")
-      else
-        @host.status("SNI override (^S) applies to the TARGET pane — ↹ to it")
-      end
-    end
-
     # Flip the run between HTTP/1.1 and HTTP/2, overriding the seed flow's protocol so the
     # next run dials the other engine (Engine vs H2Engine).
     def fuzz_toggle_http2 : Nil
       return unless view = current_view
       h2 = view.toggle_http2
       @host.status(h2 ? "transport: HTTP/2 (h2)" : "transport: HTTP/1.1")
-    end
-
-    # Strip every §…§ marker (and its chain) from the template. Space-menu only —
-    # `^U` now pretty-prints (matching Repeater); clearing lives in the space menu here too.
-    def fuzz_clear_marks : Nil
-      return unless view = current_view
-      @host.status(view.clear_marks)
     end
 
     # The Runner calls these when an overlay applies (esc / ↵-on-last-field).
@@ -821,28 +801,6 @@ module Gori::Tui
       true
     end
 
-    def fuzzer_copy : Nil
-      v = current_view
-      return unless v
-      text = v.pane_copy_text
-      return if text.empty?
-      copy_text(text)
-    end
-
-    # The focused pane's selection (or current line) text without copying — for the
-    # "Send selection to" flow.
-    def selection_text : String
-      (v = current_view) ? v.pane_copy_text : ""
-    end
-
-    def fuzzer_copy_all : Nil
-      v = current_view
-      return unless v
-      text = v.pane_copy_all_text
-      return if text.empty?
-      copy_text(text, "all")
-    end
-
     def fuzzer_read_mode? : Bool
       v = current_view
       return false unless v
@@ -853,18 +811,6 @@ module Gori::Tui
       when :results  then true
       else                false
       end
-    end
-
-    def selection_active? : Bool
-      current_view.try(&.pane_selection?) == true
-    end
-
-    def select_line : Nil
-      current_view.try(&.pane_select_line)
-    end
-
-    def clear_selection : Nil
-      current_view.try(&.pane_clear_selection)
     end
 
     # --- editor $ENV autocomplete + tab-as-text (template pane in insert mode) ---

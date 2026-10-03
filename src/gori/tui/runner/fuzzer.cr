@@ -128,11 +128,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   def fuzz_toggle_sni : Nil
-    fuzzer_controller.fuzz_toggle_sni
+    fuzzer_controller.toggle_sni
   end
 
   def fuzz_clear_marks : Nil
-    fuzzer_controller.fuzz_clear_marks
+    fuzzer_controller.clear_marks
   end
 
   # Space-menu (:subtab) counterparts of the strip's `e` rename chord / ^W close —
@@ -147,14 +147,6 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   def fuzzer_duplicate_subtab : Nil
     fuzzer_controller.fuzz_duplicate
-  end
-
-  def fuzzer_copy : Nil
-    fuzzer_controller.fuzzer_copy
-  end
-
-  def fuzzer_copy_all : Nil
-    fuzzer_controller.fuzzer_copy_all
   end
 
   def fuzzer_read_mode? : Bool

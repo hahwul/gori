@@ -24,6 +24,61 @@ module Gori::Tui
       v.pane_insert?(v.focus)
     end
 
+    # ^S on the TARGET pane: edit the TLS SNI the session presents, leaving the dialed host
+    # alone. One chord, focus rule and status wording on both tabs — a fuzz session seeded
+    # from History (⇧I) could otherwise never set one, so an https vhost sweep always
+    # presented the dialed IP.
+    def toggle_sni : Nil
+      if (view = current_view) && view.focus == :target
+        view.toggle_sni_field
+        @host.status(view.editing_sni? ? "SNI override: type a domain · ^S/↵/esc back to URL" : "editing target URL")
+      else
+        @host.status("SNI override (^S) applies to the TARGET pane — ↹ to it")
+      end
+    end
+
+    # Strip every §…§ marker (and its chain). Space-menu only on both tabs — `^U`
+    # pretty-prints.
+    def clear_marks : Nil
+      return unless view = current_view
+      @host.status(view.clear_marks)
+    end
+
+    # READ-mode copy: the selection (or current line), and the whole focused pane.
+    def copy : Nil
+      v = current_view
+      return unless v
+      text = v.pane_copy_text
+      return if text.empty?
+      copy_text(text)
+    end
+
+    def copy_all : Nil
+      v = current_view
+      return unless v
+      text = v.pane_copy_all_text
+      return if text.empty?
+      copy_text(text, "all")
+    end
+
+    # The focused pane's selection (or current line) text without copying — for the
+    # "Send selection to" flow.
+    def selection_text : String
+      (v = current_view) ? v.pane_copy_text : ""
+    end
+
+    def selection_active? : Bool
+      current_view.try(&.pane_selection?) == true
+    end
+
+    def select_line : Nil
+      current_view.try(&.pane_select_line)
+    end
+
+    def clear_selection : Nil
+      current_view.try(&.pane_clear_selection)
+    end
+
     # --- mouse drag + double-click (see TabController#supports_drag?) ---
     def supports_drag? : Bool
       !current_view.nil?

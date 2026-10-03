@@ -39,8 +39,6 @@ abstract class Gori::Verb::ExecContext
   abstract def repeater_insert_marker : Nil # drop a single § at the cursor (bracket by hand)
   abstract def repeater_clear_marks : Nil   # strip all markers (and their chains)
   abstract def repeater_attach_chain : Nil  # open the chain-edit prompt for the marker at the cursor
-  abstract def repeater_copy : Nil          # copy selection or current line (READ panes)
-  abstract def repeater_copy_all : Nil      # copy the whole focused pane text
   abstract def repeater_read_mode? : Bool   # focused pane is READ (y/copy verbs gate on this)
   # The Repeater is in front and its tab splits the request into envelope and decoded payload
   # (a SAML/GraphQL decode or a WebSocket handshake), so ^T flips a view rather than dropping

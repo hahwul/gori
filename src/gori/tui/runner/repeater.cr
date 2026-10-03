@@ -105,7 +105,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   def repeater_toggle_sni : Nil
-    repeater_controller.repeater_toggle_sni
+    repeater_controller.toggle_sni
   end
 
   def repeater_toggle_auto_content_length : Nil
@@ -174,21 +174,13 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   def repeater_clear_marks : Nil
-    repeater_controller.repeater_clear_marks
+    repeater_controller.clear_marks
   end
 
   # ^Q: jump focus DOWN into the visible CHAIN pane (the marker under the cursor). The
   # controller gates on the request pane + cursor-in-marker and toasts otherwise.
   def repeater_attach_chain : Nil
     repeater_controller.repeater_focus_chain_pane
-  end
-
-  def repeater_copy : Nil
-    repeater_controller.repeater_copy
-  end
-
-  def repeater_copy_all : Nil
-    repeater_controller.repeater_copy_all
   end
 
   def repeater_read_mode? : Bool

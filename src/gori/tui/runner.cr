@@ -6104,8 +6104,8 @@ module Gori::Tui
     private def read_copy_dispatch : Nil
       case @active_tab
       when :notes    then read_selection_active? ? notes_copy : notes_copy_all
-      when :repeater then read_selection_active? ? repeater_copy : repeater_copy_all
-      when :fuzzer   then read_selection_active? ? fuzzer_copy : fuzzer_copy_all
+      when :repeater then read_selection_active? ? repeater_controller.copy : repeater_controller.copy_all
+      when :fuzzer   then read_selection_active? ? fuzzer_controller.copy : fuzzer_controller.copy_all
       when :decoder  then read_selection_active? ? decoder_copy_selection : decoder_copy_all
       when :jwt      then jwt_copy
       when :cookie   then cookie_copy
