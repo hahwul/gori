@@ -190,6 +190,16 @@ describe "MCP protocol version negotiation" do
     end
   end
 
+  # A JSON null is an absent cursor: an SDK that serializes every unset field still gets the list.
+  it "lists the tools for a null cursor" do
+    with_store do |store|
+      resp = mcp_drive(store, %({"jsonrpc":"2.0","id":7,"method":"tools/list","params":{"cursor":null}}))
+        .find! { |l| l["id"]? == 7 }
+      resp["error"]?.should be_nil
+      resp["result"]["tools"].as_a.should_not be_empty
+    end
+  end
+
   # The version half of the gate still applies there — that refusal is how a dual-era client
   # learns the server is modern and must not fall back to `initialize`.
   it "still refuses a server/discover that names a version it does not speak" do

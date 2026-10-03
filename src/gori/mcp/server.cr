@@ -170,7 +170,10 @@ module Gori
           @pending << key
           return work.send(-> do
             begin
-              handle_document(root)
+              # Cancelled while still queued: nothing has run, so nothing runs. Only the
+              # reply was suppressed before, and a `create_*` or `*_start` then took effect
+              # with no answer to tell the client it had — not even a job id to stop.
+              handle_document(root) unless @cancelled.includes?(key)
             ensure
               @pending.delete(key)
               @cancelled.delete(key)
@@ -912,7 +915,9 @@ module Gori
         # of a silent loop — a client resuming from a cursor it believes in gets the head of
         # the list back and no way to tell. "Invalid cursors SHOULD result in an error with
         # code -32602" is the spec's answer and it is also the honest one.
-        if cursor = obj_field(params, "cursor")
+        # A JSON null is an absent cursor, as it is an absent argument everywhere else here:
+        # some SDKs serialize every unset field, and `JSON::Any(nil)` is truthy.
+        if (cursor = obj_field(params, "cursor")) && !cursor.raw.nil?
           return write_error(id, -32602,
             "tools/list: unknown cursor #{cursor.to_json} — this server returns the whole " \
             "catalogue in one page and never issues a nextCursor")
@@ -1221,7 +1226,11 @@ module Gori
         # find, and nothing here reaches the caller's payload.
         line = line.scrub unless line.valid_encoding?
         head = line[0, {line.index(%("method")) || line.size, line.index(%("params")) || line.size}.min]
-        m = head.match(/"id"\s*:\s*(?:(-?\d{1,18})|"([^"\\]{0,128})")/)
+        # Read at the FIRST `"id"` only, and a number whole: a fractional or out-of-range id
+        # read as its prefix (`1.5` as 1), or a scan that moved on to a nested `"id"`, resolves
+        # some other request the client is waiting on. `to_i64?` decides the range.
+        at = head.index(%("id")) || return
+        m = head[at..].match(/\A"id"\s*:\s*(?:(-?\d+)(?![\d.eE])|"([^"\\]{0,128})")/)
         return nil unless m
         if n = m[1]?
           n.to_i64?.try { |i| JSON::Any.new(i) }
