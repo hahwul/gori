@@ -34,43 +34,15 @@ class Gori::Tui::InterceptView
 
   # --- hex edit (a held WebSocket BINARY message) ---
   # Delegates from the controller's hex key handler, named exactly as `RepeaterView`'s `^X`
-  # ones are: the two panes take the same gestures and there is no reason for a reader to
-  # learn them twice. Navigation never dirties; every mutator marks the hold edited, which is
-  # what makes `forward_bytes` send the edited buffer instead of the pristine `raw`.
-  def hex_set_nibble(c : Char) : Nil
-    return unless (h = @hex) && (v = c.to_i?(16))
-    mark_hex_edit if h.set_nibble(v)
+  # ones are: the two panes take the same gestures (`HexEdit#handle_key`). Navigation never
+  # dirties; every edit marks the hold edited, which is what makes `forward_bytes` send the
+  # edited buffer instead of the pristine `raw`.
+  def hex_key(ev : Termisu::Event::Key) : Nil
+    mark_hex_edit if @hex.try(&.handle_key(ev))
   end
 
   def hex_move(dr : Int32, dc : Int32) : Nil
-    return unless h = @hex
-    if dr != 0
-      h.move_rows(dr)
-    elsif dc < 0
-      h.move_left
-    elsif dc > 0
-      h.move_right
-    end
-  end
-
-  def hex_home : Nil
-    @hex.try(&.home)
-  end
-
-  def hex_end : Nil
-    @hex.try(&.end_of_row)
-  end
-
-  def hex_insert : Nil
-    mark_hex_edit if @hex.try(&.insert_byte)
-  end
-
-  def hex_backspace : Nil
-    mark_hex_edit if @hex.try(&.backspace)
-  end
-
-  def hex_delete : Nil
-    mark_hex_edit if @hex.try(&.delete)
+    @hex.try(&.move(dr, dc))
   end
 
   # Mouse: the nibble under a click in the detail pane (`HexEdit#click_to_nibble` inverts

@@ -1,7 +1,9 @@
-# The TARGET card's two fields — the target URL and the optional TLS SNI override: editing
-# them, moving between them, READ-mode motion and copy. Reopens Gori::Tui::RepeaterView
-# (see tui/repeater_view.cr).
-class Gori::Tui::RepeaterView
+# The TARGET card's two single-line fields — the target URL and the optional TLS SNI override —
+# shared by RepeaterView and FuzzerView: editing them, moving between them, READ-mode motion,
+# copy, the card's height rule and the row painter. An includer holds `@target`/`@tcx`,
+# `@sni`/`@scx`, `@target_field`, `@target_mode`, `@target_read`, `@focus` and `@dirty`, and
+# answers `target_insert?`, `target_click_to_cursor` and `paint_char_span_bg`.
+module Gori::Tui::TargetField
   # --- target field (focus == :target) ---
   # The TARGET pane edits one of two single-line fields — the URL or the SNI host
   # override — selected by @target_field (^S toggles). The mutators below act on
@@ -120,6 +122,74 @@ class Gori::Tui::RepeaterView
   def target_copy_text : String
     @target_read.copy_text(target_active_line, target_active_cx)
   end
+
+  # The TARGET card grows to a second content row (4 high vs 3) whenever an SNI
+  # override is set OR is being edited — so the override is always visible, and the
+  # input row only appears once you reach for it (^S).
+  private def sni_active? : Bool
+    !@sni.strip.empty? || (editing_sni? && @focus == :target)
+  end
+
+  private def target_card_h : Int32
+    sni_active? ? 4 : 3
+  end
+
+  private def field_base(rect : Rect, prefix : String) : Int32
+    rect.x + 2 + prefix.size + 1
+  end
+
+  # One single-line field row of the TARGET card: a marker prefix, then the value,
+  # with the block caret + terminal cursor when this row is the active field.
+  private def draw_target_row(screen : Screen, rect : Rect, row : Int32, prefix : String, value : String,
+                              cx : Int32, active : Bool, insert : Bool) : Nil
+    screen.text(rect.x + 2, row, prefix, active ? Theme.accent : Theme.muted)
+    base = field_base(rect, prefix)
+    w = {rect.right - base - 1, 1}.max
+    Highlight.draw(screen, base, row, Highlight.env_line(value, Theme.text_bright), width: w)
+    # AFTER the value, and before the caret below. `Highlight.draw` writes its own `bg`
+    # into every cell it touches, so a band painted first was applied and erased on the
+    # same frame: ⇧←/→ on this row selected, `y` copied the right slice, and the operator
+    # saw nothing. The caret still goes last, because when the selection grows LEFTWARD
+    # the caret cell is inside the span and the band would otherwise erase it.
+    if active && !insert
+      if span = @target_read.selection_span(cx)
+        paint_char_span_bg(screen, base, row, value, span[0], span[1], Theme.accent_bg)
+      end
+    end
+    if active
+      # column_width — the measure paint_char_span_bg (the selection tint, a few lines up)
+      # already uses on this same value in this same render, and the exact inverse of the
+      # Screen.column_for that target_click_to_cursor uses to turn a click back into `cx`.
+      # display_width scored a zero-width char as 0, so the three disagreed: the tint
+      # covered one span, the caret sat a column left of its glyph, and a click landed a
+      # character off. A URL carrying U+200B is ordinary traffic for this tool (it is a
+      # stock filter-bypass payload), so this is reachable, not theoretical.
+      cursor_x = base + Screen.draw_width(value[0, cx])
+      if cursor_x < rect.right - 1
+        ch = cx < value.size ? value[cx] : ' '
+        screen.cell(cursor_x, row, ch, Theme.bg, insert ? Theme.accent : Theme.accent_bg)
+        screen.cursor(cursor_x, row)
+      end
+    end
+  end
+
+  # Pointer moved with the button held over the target card — extend from the press.
+  #
+  # READ mode only, because that is the only mode whose band `draw_target_row` paints
+  # (`active && !insert`). Extending in INSERT would plant an anchor nothing draws and
+  # `target_copy_text` would then hand back a slice the operator never saw selected — a
+  # silent selection is worse than none. The INSERT half of this field has no selection at
+  # all yet; when it grows one, this guard is what lifts.
+  def target_drag_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
+    return if target_insert?
+    target_click_to_cursor(rect, mx, my, selecting: true)
+  end
+end
+
+# The Repeater's half: the module above, plus the per-send TLS fingerprint. Reopens
+# Gori::Tui::RepeaterView (see tui/repeater_view.cr).
+class Gori::Tui::RepeaterView
+  include TargetField
 
   # --- per-send TLS fingerprint (#844) --------------------------------------------------
   #

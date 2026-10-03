@@ -3,6 +3,11 @@ require "../../support/fake_host"
 require "../../support/fake_context"
 require "../../support/memory_backend"
 
+# A typed key for the hex editor (`hex_key` → `HexEdit#handle_key`).
+private def hex_ev(c : Char) : Termisu::Event::Key
+  Termisu::Event::Key.new(Termisu::Input::Key.from_char(c), Termisu::Input::Modifier::None, c)
+end
+
 include Gori::Tui
 
 # RepeaterController — `^X` is the hex of the pane that has focus (#1295). The request pane
@@ -84,8 +89,8 @@ describe "RepeaterController leaving request hex (#1426)" do
   bodied = "POST /b HTTP/1.1\r\nHost: h.test\r\nContent-Length: 4\r\n\r\nABCD"
   grow = ->(v : RepeaterView) do
     v.hex_move(1000, 0)
-    v.hex_set_nibble('4')
-    v.hex_set_nibble('5')
+    v.hex_key(hex_ev('4'))
+    v.hex_key(hex_ev('5'))
   end
 
   it "names the resynced Content-Length on ^X" do
@@ -189,11 +194,12 @@ describe "RepeaterController ⌃Home/⌃End on the response (#1425)" do
     with_repeater_controller do |ctl, _|
       rect = Rect.new(0, 0, 80, 20)
       v = jump_view(ctl, numbered_body(60), rect)
-      last = v.resp_plain_lines.size - 1
+      size, line_at = v.resp_line_source
+      last = size - 1
 
       ctl.handle_body_key(mod_key(Termisu::Input::Key::End)).should be_true
       v.resp_cursor.cy.should eq(last)
-      v.resp_cursor.cx.should eq(v.resp_plain_lines[last].size) # the buffer's end, as in the request editor
+      v.resp_cursor.cx.should eq(line_at.call(last).size) # the buffer's end, as in the request editor
 
       b = drawn(v, rect)
       y = (0...rect.h).find { |r| b.row(r).includes?("L060") }.not_nil!

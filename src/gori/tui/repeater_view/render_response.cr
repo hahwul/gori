@@ -42,11 +42,7 @@ class Gori::Tui::RepeaterView
   end
 
   private def key_label(id : String, fallback : String) : String
-    if registry = @menu_registry
-      Hotkeys.binding_label(registry, id, fallback)
-    else
-      fallback
-    end
+    @menu_registry.try { |r| Hotkeys.binding_label(r, id, fallback) } || fallback
   end
 
   private def not_sent_hint : String

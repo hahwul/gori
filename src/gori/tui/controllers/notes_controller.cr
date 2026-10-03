@@ -151,11 +151,6 @@ module Gori::Tui
       true
     end
 
-    def editor_append_insert : Bool
-      @notes.read_move(0, 1)
-      editor_enter_insert
-    end
-
     def editor_exit_insert : Bool
       @notes.exit_insert!
       true
@@ -163,16 +158,6 @@ module Gori::Tui
 
     def editor_undo : Bool
       @notes.undo
-      true
-    end
-
-    def editor_to_top : Bool
-      @notes.read_to_edge(-1)
-      true
-    end
-
-    def editor_to_bottom : Bool
-      @notes.read_to_edge(1)
       true
     end
 
@@ -492,10 +477,7 @@ module Gori::Tui
       msg = "duplicated note"
       if refs = batch_subtab_refs
         batch = duplicate_marked_subtabs(refs, "note") { |i| @notes.duplicate_at(i) }
-        unless batch
-          @host.status("#{refs.size} sub-tabs marked — duplicate is capped at #{Runner::BATCH_SUBTAB_CAP}")
-          return
-        end
+        return unless batch
         msg = batch
       else
         @notes.duplicate_current
@@ -565,12 +547,7 @@ module Gori::Tui
     # Copy selection (or current line) in READ mode.
     def notes_copy : Nil
       text = @notes.copy_text
-      if text.empty?
-        @host.status("nothing to copy")
-        return
-      end
-      written = Clipboard.copy(text)
-      @host.status("copied #{written}b to clipboard#{Clipboard.note(written, text)}")
+      copy_text(text)
     end
 
     # The selection (or current line) text without the clipboard write — for the

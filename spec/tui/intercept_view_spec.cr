@@ -1,6 +1,15 @@
 require "../spec_helper"
 require "../support/memory_backend"
 
+# A typed key for the hex editor (`hex_key` → `HexEdit#handle_key`).
+private def hex_ev(c : Char) : Termisu::Event::Key
+  Termisu::Event::Key.new(Termisu::Input::Key.from_char(c), Termisu::Input::Modifier::None, c)
+end
+
+private def hex_ev(k : Termisu::Input::Key) : Termisu::Event::Key
+  Termisu::Event::Key.new(k, Termisu::Input::Modifier::None, nil)
+end
+
 include Gori::Tui
 
 private def tmp_interceptor(&)
@@ -1045,9 +1054,9 @@ describe "Intercept verbs (P1)" do
         view.toggle_edit
         # A pure peek is byte-exact (P7): opening the editor must not mutate a held message.
         view.forward_bytes(it0).should eq(Bytes[0x00, 0xFF, 0x10, 0x82])
-        view.hex_set_nibble('d') # high nibble of byte 0
-        view.hex_set_nibble('e') # low nibble of byte 0 — the cursor now sits on byte 1
-        view.hex_delete          # drop the byte under the cursor (0xFF)
+        view.hex_key(hex_ev('d'))                         # high nibble of byte 0
+        view.hex_key(hex_ev('e'))                         # low nibble of byte 0 — the cursor now sits on byte 1
+        view.hex_key(hex_ev(Termisu::Input::Key::Delete)) # drop the byte under the cursor (0xFF)
         view.forward_bytes(it0).should eq(Bytes[0xDE, 0x10, 0x82])
         view.pending_edit.not_nil![0].should eq(it0.id)
         # No Content-Length line spliced in, and no CRLF normalisation: a WS payload has no
@@ -1063,7 +1072,7 @@ describe "Intercept verbs (P1)" do
         view = InterceptView.new
         view.reload(ic)
         view.toggle_edit
-        view.hex_set_nibble('f')
+        view.hex_key(hex_ev('f'))
         view.stop_edit
         view.toggle_edit                                     # back onto the SAME row — the in-progress edit survives
         view.forward_bytes(bin).should eq(Bytes[0xF1, 0x02]) # the high nibble of byte 0

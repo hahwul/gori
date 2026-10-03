@@ -1,6 +1,7 @@
 require "../tab_controller"
 require "../traffic_empty_state"
 require "../repeater_view"
+require "./request_editor_tab"
 require "../clipboard"
 require "../copy_menu"
 require "../../redact/policy"
@@ -33,6 +34,8 @@ module Gori::Tui
   # save-on-leave. The sub-tab STRIP + the rename prompt are shell-owned chrome that
   # reach in through the small public API below.
   class RepeaterController < TabController
+    include RequestEditorTab
+
     def initialize(host : Host)
       super(host)
       # Re-open repeater tabs persisted for this project — they survive a reopen AND the
@@ -151,12 +154,6 @@ module Gori::Tui
       Verb::Scope::Repeater
     end
 
-    # The space menu's CONTEXT section: whichever pane the active session's editor
-    # is focused on. :common when no session is open (empty state).
-    def command_section : Symbol
-      current_view.try(&.focus) || :common
-    end
-
     # --- shell-facing accessors (strip machinery + orthogonal prompts read these) ---
     def count : Int32
       @repeaters.size
@@ -218,11 +215,6 @@ module Gori::Tui
     # The gRPC field list takes ↑/↓ and ↵ for itself, like an editor.
     def pane_captures_keys? : Bool
       super || current_view.try(&.grpc_fields?) || false
-    end
-
-    # Cross-tab "Insert OAST payload": drop the URL at the request-editor caret.
-    def insert_oast_payload(url : String) : Bool
-      (v = current_view) ? v.insert_oast_payload(url) : false
     end
 
     def subtab_labels : Array(String)
@@ -510,16 +502,6 @@ module Gori::Tui
     # Returns false when the key should fall through to the shell keymap (rebindable
     # verbs + Global breath). READ panes own structure (nav, i/↵ INS, space menu, and
     # pane-local `x`); command letters like `y`/`d`/`p` and unmatched bare keys defer.
-    # The pane's own INS/READ mode, asked of the view (`pane_insert?` also answers true for the
-    # request pane's HEX editor and its gRPC field form). Broader than `editor_captures_tab?`,
-    # which is false on the single-line TARGET/SNI field — where a digit is very much a
-    # character, ports being what they are.
-    def body_takes_text? : Bool
-      v = current_view
-      return false unless v
-      v.pane_insert?(v.focus)
-    end
-
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
       if ev.ctrl? && key.lower_p?
@@ -1182,8 +1164,7 @@ module Gori::Tui
       return unless v
       text = v.pane_copy_text
       return if text.empty?
-      written = Clipboard.copy(text)
-      @host.status("copied #{written}b to clipboard#{Clipboard.note(written, text)}")
+      copy_text(text)
     end
 
     # The focused pane's selection (or current line) text without copying — for the
@@ -1197,8 +1178,7 @@ module Gori::Tui
       return unless v
       text = v.pane_copy_all_text
       return if text.empty?
-      written = Clipboard.copy(text)
-      @host.status("copied all (#{written}b)#{Clipboard.note(written, text)}")
+      copy_text(text, "all")
     end
 
     def repeater_read_mode? : Bool
@@ -1319,10 +1299,6 @@ module Gori::Tui
     end
 
     # --- mouse drag + double-click (see TabController#supports_drag?) ---
-    def supports_drag? : Bool
-      !current_view.nil?
-    end
-
     # Motion with the button held. No focus/save side effects: the press that started the
     # drag already did those, and re-running them per motion event would save the tab dozens
     # of times while the pointer moves.
@@ -1424,10 +1400,6 @@ module Gori::Tui
       current_view.try(&.focus_last)
     end
 
-    def focus_resume : Nil
-      current_view.try(&.focus_resume)
-    end
-
     def insert_key_refusal : String?
       return nil unless (v = current_view) && v.focus == :response
       "the response is read-only — i edits the REQUEST (↹ up); intercept toggles from the tab bar"
@@ -1441,10 +1413,6 @@ module Gori::Tui
     def editor_pane? : Bool
       return false unless v = current_view
       v.focus == :request || v.focus == :target
-    end
-
-    def editor_text_buffer : {TextArea, TextReadState}?
-      current_view.try(&.read_edit_buffer)
     end
 
     def editor_enter_insert : Bool
@@ -1466,22 +1434,6 @@ module Gori::Tui
       when :target  then v.target_read_move(1)
       else               return false
       end
-      editor_enter_insert
-    end
-
-    # Esc over a READ selection: the TARGET's lives in the view's `LineFieldRead`, not in a
-    # `TextReadState`, so the view's own pane pair answers for every pane here.
-    def editor_drop_read_selection : Bool
-      return false unless (v = current_view) && v.pane_selection?
-      v.pane_clear_selection
-      true
-    end
-
-    # `⇧A` / `⇧I` on the one-line TARGET: its own End / Home, then INSERT. The multi-line
-    # buffer beside it takes the shared path through `editor_text_buffer`.
-    def editor_line_insert(dir : Int32) : Bool
-      return super unless (v = current_view) && v.focus == :target
-      dir < 0 ? v.target_home : v.target_end
       editor_enter_insert
     end
 
@@ -1523,15 +1475,7 @@ module Gori::Tui
     # Move the active sub-tab by ±1 (strip ←/→) among the VISIBLE (filtered) chips, so
     # h/l walks exactly the chips shown; clamped, no wrap, saving the outgoing tab first.
     def move_subtab(dir : Int32) : Nil
-      vis = visible_indices
-      return if vis.size < 2
-      cur = vis.index(@current_repeater_idx)
-      target = if cur
-                 vis[(cur + dir).clamp(0, vis.size - 1)]
-               else
-                 dir < 0 ? vis.first : vis.last # current filtered out → step onto an edge
-               end
-      return if target == @current_repeater_idx
+      return unless target = step_visible(@current_repeater_idx, dir)
       save_current_repeater
       @current_repeater_idx = target
       refresh_evidence_marker
@@ -1563,8 +1507,7 @@ module Gori::Tui
     # reconcile may have reordered/removed it) — gone → no-op, never hits a neighbour.
     def apply_rename(view : RepeaterView, name : String) : Nil
       return unless tab = @repeaters.find(&.view.same?(view))
-      clean = name.strip
-      view.name = clean.empty? ? nil : clean
+      view.name = name.strip.presence
       if id = tab.db_id
         unless @host.session.store.set_repeater_name(id, view.name)
           @host.status("rename NOT saved (project busy) — the chip reads the new name until the tab reloads")
@@ -1598,7 +1541,7 @@ module Gori::Tui
       # #apply_refusal), so this is how the shell learns a response pane changed under it.
       applied = @refusal_applied
       @refusal_applied = false
-      while pair = nonblocking_repeater_result
+      while pair = poll(@repeater_results)
         view, result, record_note, sent_digest = pair
         # Drop a result whose sub-tab was closed (^W) mid-flight — applying it would
         # mutate an orphaned view and flash a toast for a gone session.
@@ -1624,7 +1567,7 @@ module Gori::Tui
         end
         applied = true
       end
-      while pair = nonblocking_ws_result
+      while pair = poll(@ws_results)
         view, result, sent_digest = pair
         next unless tab = @repeaters.find(&.view.same?(view)) # sub-tab closed mid-flight
         view.apply_ws(result)
@@ -1647,7 +1590,7 @@ module Gori::Tui
         end
         applied = true
       end
-      while pair = nonblocking_group_result
+      while pair = poll(@group_results)
         view, labeled = pair
         next unless @repeaters.find(&.view.same?(view)) # sub-tab closed mid-flight
         view.apply_group(labeled)
@@ -1655,7 +1598,7 @@ module Gori::Tui
         @host.status("send group: #{ok}/#{labeled.size} ok on one connection")
         applied = true
       end
-      while pair = nonblocking_race_result
+      while pair = poll(@race_results)
         view, labeled = pair
         next unless @repeaters.find(&.view.same?(view)) # sub-tab closed mid-flight
         view.apply_group(labeled)
@@ -1668,7 +1611,7 @@ module Gori::Tui
         @host.status("send race: #{responded}/#{labeled.size} responded · #{ok2xx}×2xx")
         applied = true
       end
-      while pair = nonblocking_minimize_event
+      while pair = poll(@minimize_events)
         view, msg = pair
         next unless tab = @repeaters.find(&.view.same?(view)) # sub-tab closed mid-run → drop
         case msg
@@ -1786,51 +1729,6 @@ module Gori::Tui
       msgs = Probe.ws_messages_from(result.messages, flow_id: flow_id, repeater_id: repeater_id)
       @host.session.probe.scan_detail(detail, repeater_id: repeater_id, ws_messages: msgs)
     rescue
-    end
-
-    private def nonblocking_repeater_result : {RepeaterView, Repeater::Result, String?, String?}?
-      select
-      when p = @repeater_results.receive
-        p
-      else
-        nil
-      end
-    end
-
-    private def nonblocking_ws_result : {RepeaterView, Repeater::WsEngine::Result, String?}?
-      select
-      when p = @ws_results.receive
-        p
-      else
-        nil
-      end
-    end
-
-    private def nonblocking_group_result : {RepeaterView, Array({String, Repeater::Result})}?
-      select
-      when p = @group_results.receive
-        p
-      else
-        nil
-      end
-    end
-
-    private def nonblocking_race_result : {RepeaterView, Array({String, Repeater::Result})}?
-      select
-      when p = @race_results.receive
-        p
-      else
-        nil
-      end
-    end
-
-    private def nonblocking_minimize_event : {RepeaterView, Repeater::Minimize::Progress | Repeater::Minimize::Report}?
-      select
-      when p = @minimize_events.receive
-        p
-      else
-        nil
-      end
     end
 
     # Converge local repeater tabs with the project's `repeaters` rows after a peer
@@ -3366,37 +3264,9 @@ module Gori::Tui
       view.edit_delete_word
     end
 
-    # A modified ⌫ — delete a WORD. The `char` half is not defensive padding: a terminal sends
-    # ⌥⌫ as ESC + 0x7F, and termisu's Alt-prefix branch maps the payload byte through
-    # `Key.from_char`, which has no name for DEL — so the event arrives as `Key::Unknown` +
-    # Alt carrying DEL rather than as `Key::Backspace`. Reading the char is what makes
-    # the chord work on a real terminal; the `backspace?` half covers a terminal (or a
-    # keyboard-protocol mode) that does report it as the named key.
-    private def word_delete?(ev : Termisu::Event::Key) : Bool
-      return false unless ev.ctrl? || ev.alt?
-      return true if ev.key.backspace?
-      c = ev.char
-      !!c && (c == '\u{7F}' || c == '\b')
-    end
-
     # Every modified key the EDITOR owns rather than the keymap — see the `handle_body_key`
     # branch. Shared with the Fuzzer's controller in spirit, not in code: the two dispatchers
     # have different shapes, and one predicate each is cheaper than a mixin nobody else wants.
-
-    # A backspace/forward-delete of a marker delimiter (§/¦) would unbalance the marker
-    # and expose its concealed ¦chain. Confirm first; on accept, strip the WHOLE marker
-    # down to its raw value. Returns true when it intercepted (a confirm was raised), so
-    # the caller skips the plain edit; false to let the edit through.
-    private def guard_marker_delete(view : RepeaterView, span : {Int32, Int32}?) : Bool
-      return false unless span
-      n = view.marker_ordinal(span)
-      @host.confirm("REMOVE MARKER",
-        "Deleting this character breaks marker §#{n}.\nRemove the whole marker and keep only its value?",
-        confirm_label: "remove marker", danger: true) do
-        view.strip_marker_span(span)
-      end
-      true
-    end
 
     # FIELDS-form keys for the REQUEST pane of a gRPC tab. Two modes in one handler because
     # they are two states of one widget: NAVIGATING the list (↑/↓, ↵ opens a value) and TYPING
@@ -3441,21 +3311,8 @@ module Gori::Tui
 
     # Hex-edit keys for the REQUEST pane (overtype with 0-9a-f; Ins/Del/⌫ change length).
     private def edit_repeater_request_hex(ev : Termisu::Event::Key, view : RepeaterView) : Nil
-      key = ev.key
-      c = ev.char || key.to_char
-      case
-      when key.up?        then view.at_top? ? view.focus_first : view.hex_move(-1, 0) # ↑-at-top → target field above
-      when key.down?      then view.hex_move(1, 0)
-      when key.left?      then view.hex_move(0, -1)
-      when key.right?     then view.hex_move(0, 1)
-      when key.home?      then view.hex_home
-      when key.end?       then view.hex_end
-      when key.insert?    then view.hex_insert
-      when key.delete?    then view.hex_delete
-      when key.backspace? then view.hex_backspace
-      else
-        view.hex_set_nibble(c) if c && !ev.ctrl? && !ev.alt? # only 0-9a-fA-F take effect
-      end
+      return view.focus_first if ev.key.up? && view.at_top? # ↑-at-top → target field above
+      view.hex_key(ev)
     end
 
     private def edit_repeater_target(ev : Termisu::Event::Key, view : RepeaterView) : Bool

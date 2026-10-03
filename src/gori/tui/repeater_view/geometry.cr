@@ -10,17 +10,6 @@ class Gori::Tui::RepeaterView
     Repeater::FlowRequest.parse_target(Env.expand(@target))
   end
 
-  # The TARGET card grows to a second content row (4 high vs 3) whenever an SNI
-  # override is set OR is being edited — so the override is always visible, and the
-  # input row only appears once you reach for it (^S).
-  private def sni_active? : Bool
-    !@sni.strip.empty? || (editing_sni? && @focus == :target)
-  end
-
-  private def target_card_h : Int32
-    sni_active? ? 4 : 3
-  end
-
   # The TARGET card row prefixes (marker + the field value 1 col to its right). Kept
   # as constants so render_target and the click→caret mapping agree on the value base.
   TARGET_PREFIX = "›"
@@ -74,10 +63,6 @@ class Gori::Tui::RepeaterView
       tls_x = edge
     end
     {sni_x, tls_x, edge}
-  end
-
-  private def field_base(rect : Rect, prefix : String) : Int32
-    rect.x + 2 + prefix.size + 1
   end
 
   # Rows the request | response columns need before they are drawn at all: a card's two

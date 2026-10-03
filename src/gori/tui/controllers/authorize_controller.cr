@@ -373,21 +373,10 @@ module Gori::Tui
     private def drain_seeds : Bool
       added = false
       DRAIN_CAP.times do
-        break unless detail = next_seed
+        break unless detail = poll(@seeds)
         added = true if accept_seed(detail)
       end
       added
-    end
-
-    # One queued flow if the watcher found any, else nil — a non-blocking channel poll, the
-    # twin of `next_outcome`.
-    private def next_seed : Store::FlowDetail?
-      select
-      when d = @seeds.receive
-        d
-      else
-        nil
-      end
     end
 
     # Decide one flow the watcher handed over, COUNTING the outcome either way. Every refusal
@@ -770,7 +759,7 @@ module Gori::Tui
     def drain_events : Bool
       drained = drain_seeds
       DRAIN_CAP.times do
-        break unless o = next_outcome
+        break unless o = poll(@events)
         apply_outcome(o)
         drained = true
       end
@@ -781,16 +770,6 @@ module Gori::Tui
       # stretch an operator is asking "is this doing anything?".
       @view.passive_note = passive_readout if @passive
       drained
-    end
-
-    # One finished request if any is queued, else nil — a non-blocking channel poll.
-    private def next_outcome : Outcome?
-      select
-      when o = @events.receive
-        o
-      else
-        nil
-      end
     end
 
     private def apply_outcome(o : Outcome) : Nil

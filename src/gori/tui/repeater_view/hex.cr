@@ -98,41 +98,13 @@ class Gori::Tui::RepeaterView
     {before[i].split(':', 2)[1]?.to_s.strip, after[i].split(':', 2)[1]?.to_s.strip}
   end
 
-  # Mutators delegated from the Runner's hex key handler (each marks @dirty only on
-  # a real change, so save persists + the cross-session reconcile won't clobber).
-  def hex_set_nibble(c : Char) : Nil
-    return unless (h = @req_hex_edit) && (v = c.to_i?(16))
-    @dirty = true if h.set_nibble(v)
+  # The hex editor's keys (`HexEdit#handle_key`), marking @dirty only on a real change so save
+  # persists and the cross-session reconcile won't clobber.
+  def hex_key(ev : Termisu::Event::Key) : Nil
+    @dirty = true if @req_hex_edit.try(&.handle_key(ev))
   end
 
   def hex_move(dr : Int32, dc : Int32) : Nil # navigation does NOT dirty
-    return unless h = @req_hex_edit
-    if dr != 0
-      h.move_rows(dr)
-    elsif dc < 0
-      h.move_left
-    elsif dc > 0
-      h.move_right
-    end
-  end
-
-  def hex_home : Nil
-    @req_hex_edit.try(&.home)
-  end
-
-  def hex_end : Nil
-    @req_hex_edit.try(&.end_of_row)
-  end
-
-  def hex_insert : Nil
-    @dirty = true if @req_hex_edit.try(&.insert_byte)
-  end
-
-  def hex_backspace : Nil
-    @dirty = true if @req_hex_edit.try(&.backspace)
-  end
-
-  def hex_delete : Nil
-    @dirty = true if @req_hex_edit.try(&.delete)
+    @req_hex_edit.try(&.move(dr, dc))
   end
 end

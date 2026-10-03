@@ -201,15 +201,6 @@ class Gori::Tui::RepeaterView
     true
   end
 
-  # ⌃/⌥ + Home/End — the buffer's start/end, not the line's.
-  def edit_buffer_start(selecting : Bool = false) : Nil
-    req_editor.to_buffer_start(selecting) if @focus == :request
-  end
-
-  def edit_buffer_end(selecting : Bool = false) : Nil
-    req_editor.to_buffer_end(selecting) if @focus == :request
-  end
-
   # ⌥⌫ — delete back to the previous word boundary as one undo step.
   def edit_delete_word : Nil
     return unless @focus == :request

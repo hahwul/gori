@@ -20,16 +20,11 @@ module Gori::Tui
   # session (request + config) persists across reopen; results stay in-memory.
   class MinerController < TabController
     include SeededToolTabs
-    DRAIN_CAP = 512 # bounded per-tick drain so a fast run can't starve render
 
     def initialize(host : Host)
       super(host)
       @sessions = [] of MinerTab
-      @host.session.store.miner_sessions.each do |rec|
-        view = MinerView.new
-        view.restore(rec)
-        @sessions << MinerTab.new(view, rec.flow_id, rec.id)
-      end
+      session_rows.each { |rec| @sessions << restore_tab(rec) }
       @current_idx = @sessions.empty? ? -1 : 0
       @mine_events = Channel({MinerView, Miner::Event}).new(256)
       @seed_names = Channel({Int64, MineConfigOverlay, Hash(Int64, Array(String))?}).new(1)
@@ -222,21 +217,6 @@ module Gori::Tui
       true
     end
 
-    # Select the row under the cursor (grabbing focus from another pane on the first click),
-    # or — a second click on the already-selected row while FINDINGS already holds focus —
-    # open its detail, so the mouse matches ↵. History, Issues, Probe, OAST and the Fuzzer
-    # all read this way; this list had no row hit-test at all.
-    private def click_results(v : MinerView, body : Rect, mx : Int32, my : Int32) : Nil
-      already = v.focus == :results
-      row = v.results_row_at(body, mx, my)
-      if row && already && row == v.results_selected_index
-        v.open_detail
-      else
-        v.focus_pane(:results)
-        v.select_result_row(row) if row
-      end
-    end
-
     # --- mouse drag + double-click (see TabController#supports_drag?) ---
     # The FINDING pane only. Its rows are two columns, so there is no word to double-click.
     def supports_drag? : Bool
@@ -287,9 +267,7 @@ module Gori::Tui
       sel = v.detail_selection?
       text = sel ? v.detail_copy_text : v.detail_copy_all
       return if text.empty?
-      written = Clipboard.copy(text)
-      note = Clipboard.note(written, text)
-      @host.status(sel ? "copied #{written}b to clipboard#{note}" : "copied all (#{written}b)#{note}")
+      copy_text(text, sel ? nil : "all")
     end
 
     # PgUp/PgDn/Home/End over FINDINGS: `handle_results` declines them, and `results_move`
@@ -321,20 +299,6 @@ module Gori::Tui
 
     def db_id_at(idx : Int32) : Int64?
       @sessions[idx]?.try(&.db_id)
-    end
-
-    # --- rename (orthogonal rename prompt drives this by VIEW identity) ---
-    def apply_rename(view : MinerView, name : String) : Nil
-      return unless tab = @sessions.find(&.view.same?(view))
-      clean = name.strip
-      view.name = clean.empty? ? nil : clean
-      if id = tab.db_id
-        # See FuzzerController#apply_rename: the view already carries the new label, so a
-        # refused write is a silent no-op unless the store's answer is reported.
-        unless @host.session.store.set_miner_session_name(id, view.name)
-          @host.status("rename NOT saved (project busy) — the chip reads the new name until the session reloads")
-        end
-      end
     end
 
     # --- cross-tab seeds (build the config-overlay seed) ---
@@ -439,10 +403,7 @@ module Gori::Tui
     def miner_duplicate : Nil
       if refs = batch_subtab_refs
         msg = duplicate_marked_subtabs(refs, "miner session") { |i| duplicate_at(i) }
-        unless msg
-          @host.status("#{refs.size} sub-tabs marked — duplicate is capped at #{Runner::BATCH_SUBTAB_CAP}")
-          return
-        end
+        return unless msg
         @host.goto_tab(:miner)
         @host.status("#{msg} (#{@sessions.size} open)")
         return
@@ -600,29 +561,6 @@ module Gori::Tui
       @host.status("stopping…", :busy)
     end
 
-    # --- async (run loop) ---
-    def drain_events : Bool
-      applied = false
-      n = 0
-      while n < DRAIN_CAP && (pair = nonblocking_event)
-        n += 1
-        v, ev = pair
-        next unless @sessions.any?(&.view.same?(v)) # session closed mid-run → drop
-        apply_event(v, ev)
-        applied = true
-      end
-      applied
-    end
-
-    private def nonblocking_event : {MinerView, Miner::Event}?
-      select
-      when p = @mine_events.receive
-        p
-      else
-        nil
-      end
-    end
-
     private def apply_event(v : MinerView, ev : Miner::Event) : Nil
       case ev
       when Miner::BaselineEvent then v.apply_baseline(ev)
@@ -690,22 +628,31 @@ module Gori::Tui
       (tab && (id = tab.db_id)) ? Jobs::Goto.new(:miner, id) : nil
     end
 
-    # --- close / persist ---
-    # ^W closes the MARKED sub-tabs when the strip carries marks, the active one otherwise
-    # (`target_subtab_indices` — the one target rule).
-    def request_close : Nil
-      return unless tab = current_tab_obj
-      if refs = batch_subtab_refs
-        @host.confirm("CLOSE MINERS", "Close #{marked_subtab_phrase(refs.size)}?\nEach config and its results are discarded.",
-          confirm_label: "close", danger: true) { close_marked_sessions(refs) }
-        return
-      end
-      @host.confirm("CLOSE MINER", "Close mining session “#{tab.view.summary}”?\nIts config and results are discarded.",
-        confirm_label: "close", danger: true) { close_tab }
-    end
-
     private def delete_session_row(id : Int64) : Bool
       @host.session.store.delete_miner_session(id)
+    end
+
+    # --- SeededToolTabs hooks ---
+    private def session_rows
+      @host.session.store.miner_sessions
+    end
+
+    private def restore_tab(row) : MinerTab
+      view = MinerView.new
+      view.restore(row)
+      MinerTab.new(view, row.flow_id, row.id)
+    end
+
+    private def save_session_name(id : Int64, name : String?) : Bool
+      @host.session.store.set_miner_session_name(id, name)
+    end
+
+    private def session_events
+      @mine_events
+    end
+
+    private def close_wording : {String, String, String}
+      {"MINER", "mining", "results"}
     end
 
     def save_current : Nil
@@ -716,54 +663,6 @@ module Gori::Tui
       @host.session.store.update_miner_session(id, v.target_origin, v.request_bytes, v.http2?, v.sni_override, cfg, v.name)
       v.mark_config_synced(cfg)
       v.clear_dirty
-    end
-
-    # Live converge with miner_sessions after a data_version bump. Soft-sync only —
-    # never full restore (would wipe findings + force focus defaults).
-    def reconcile : Nil
-      rows = @host.session.store.miner_sessions
-      by_id = rows.index_by(&.id)
-      cur_db = current_tab_obj.try(&.db_id)
-      cur_view = current_tab_obj.try(&.view)
-
-      @sessions.each do |tab|
-        next unless (id = tab.db_id) && (row = by_id[id]?)
-        next if tab_locked?(tab)
-        v = tab.view
-        next if v.session_side_matches?(row)
-        v.apply_peer_session(row)
-      end
-
-      local_ids = @sessions.compact_map(&.db_id).to_set
-      rows.each do |row|
-        next if local_ids.includes?(row.id)
-        view = MinerView.new
-        view.restore(row)
-        @sessions << MinerTab.new(view, row.flow_id, row.id)
-      end
-
-      @sessions.reject! do |tab|
-        (id = tab.db_id) && !by_id.has_key?(id) && !tab_locked?(tab)
-      end
-
-      @sessions.sort_by! do |tab|
-        if (id = tab.db_id) && (row = by_id[id]?)
-          {row.position, id}
-        else
-          {Int32::MAX, Int64::MAX}
-        end
-      end
-
-      @current_idx =
-        if cur_db && (idx = @sessions.index { |t| t.db_id == cur_db })
-          idx
-        elsif (cv = cur_view) && (idx = @sessions.index(&.view.same?(cv)))
-          idx
-        elsif @sessions.empty?
-          -1
-        else
-          @current_idx.clamp(0, @sessions.size - 1)
-        end
     end
   end
 end

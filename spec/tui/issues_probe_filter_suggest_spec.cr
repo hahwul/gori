@@ -402,9 +402,9 @@ end
 
 # `apply_filter` re-anchors the selection by id, so running it on a caret move leaves state
 # identical — the cost is invisible to any assertion about the list. What IS observable is the
-# gate, through the public hook it guards. `HistoryController` and `SitemapController` both
-# write `schedule_query_reload if LineEdit.mutating?(act)` deliberately; these two bars did not,
-# so Home/End/⌥←/⌥→ re-parsed the query and re-ran the predicate over every row — and in Probe
+# gate, through the public hook it guards. The shared `TabController#ql_bar_nav` writes
+# `on_query_edit if LineEdit.mutating?(act)` deliberately; these two bars' views did not, so
+# Home/End/⌥←/⌥→ re-parsed the query and re-ran the predicate over every row — and in Probe
 # `apply_filter` additionally re-selects `@all` by status, runs `recount` and applies the scope
 # lens.
 private class SpyIssuesView < Gori::Tui::IssuesView

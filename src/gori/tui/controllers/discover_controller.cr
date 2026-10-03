@@ -454,7 +454,7 @@ module Gori::Tui
     def drain_events : Bool
       applied = false
       n = 0
-      while n < DRAIN_CAP && (pair = nonblocking_event)
+      while n < DRAIN_CAP && (pair = poll(@discover_events))
         n += 1
         run, ev = pair
         next unless @view.runs.any?(&.same?(run)) # run gone → drop
@@ -463,15 +463,6 @@ module Gori::Tui
       end
       flush_persist if applied
       applied
-    end
-
-    private def nonblocking_event : {DiscoverRun, Discover::Event}?
-      select
-      when p = @discover_events.receive
-        p
-      else
-        nil
-      end
     end
 
     private def apply_event(run : DiscoverRun, ev : Discover::Event) : Nil

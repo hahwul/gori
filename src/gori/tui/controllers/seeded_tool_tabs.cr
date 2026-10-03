@@ -1,10 +1,16 @@
 module Gori::Tui
   # The sub-tab shell MinerController and SequencerController share: a list of seeded sessions
   # (`@sessions`, each a record with a `view`, a `flow_id` and a `db_id`), drawn, keyed, scrolled,
-  # filtered and closed the same way. An includer supplies `current_view`, `view_at`, the pane
-  # keys (`session_key`, `wheel_pane`, `navigable_pane?`) and `delete_session_row`, the one
-  # store call that differs on close.
+  # filtered, reconciled, renamed and closed the same way. An includer supplies `current_view`,
+  # `view_at`, the pane keys (`session_key`, `wheel_pane`, `navigable_pane?`), its run channel
+  # (`session_events`), `close_wording`, and the store calls that differ per tool:
+  # `session_rows`, `restore_tab`, `delete_session_row` and `save_session_name`.
+  #
+  # FuzzerController includes it for the strip, filter and wheel; its own render, keys, drain,
+  # reconcile, rename and close shadow the ones here.
   module SeededToolTabs
+    DRAIN_CAP = 512 # bounded per-tick drain so a fast run can't starve render
+
     def subtab_labels : Array(String)
       @sessions.map_with_index { |t, i| "#{i + 1}:#{t.view.label(18)}" }
     end
@@ -180,7 +186,62 @@ module Gori::Tui
       @sessions.index { |t| t.db_id == id }
     end
 
+    # --- async (run loop) ---
+    def drain_events : Bool
+      applied = false
+      n = 0
+      while n < DRAIN_CAP && (pair = poll(session_events))
+        n += 1
+        v, ev = pair
+        next unless @sessions.any?(&.view.same?(v)) # session closed mid-run → drop
+        apply_event(v, ev)
+        applied = true
+      end
+      applied
+    end
+
+    # --- rename (orthogonal rename prompt drives this by VIEW identity) ---
+    def apply_rename(view, name : String) : Nil
+      return unless tab = @sessions.find(&.view.same?(view))
+      view.name = name.strip.presence
+      if id = tab.db_id
+        # See FuzzerController#apply_rename: the view already carries the new label, so a
+        # refused write is a silent no-op unless the store's answer is reported.
+        unless save_session_name(id, view.name)
+          @host.status("rename NOT saved (project busy) — the chip reads the new name until the session reloads")
+        end
+      end
+    end
+
+    # Select the row under the cursor (grabbing focus from another pane on the first click),
+    # or — a second click on the already-selected row while FINDINGS already holds focus —
+    # open its detail, so the mouse matches ↵. History, Issues, Probe and OAST all read this way.
+    private def click_results(v, body : Rect, mx : Int32, my : Int32) : Nil
+      already = v.focus == :results
+      row = v.results_row_at(body, mx, my)
+      if row && already && row == v.results_selected_index
+        v.open_detail
+      else
+        v.focus_pane(:results)
+        v.select_result_row(row) if row
+      end
+    end
+
     # --- close ---
+    # ^W closes the MARKED sub-tabs when the strip carries marks, the active one otherwise
+    # (`target_subtab_indices` — the one target rule).
+    def request_close : Nil
+      return unless tab = current_tab_obj
+      noun, gerund, contents = close_wording
+      if refs = batch_subtab_refs
+        @host.confirm("CLOSE #{noun}S", "Close #{marked_subtab_phrase(refs.size)}?\nEach config and its #{contents} are discarded.",
+          confirm_label: "close", danger: true) { close_marked_sessions(refs) }
+        return
+      end
+      @host.confirm("CLOSE #{noun}", "Close #{gerund} session “#{tab.view.summary}”?\nIts config and #{contents} are discarded.",
+        confirm_label: "close", danger: true) { close_tab }
+    end
+
     private def close_marked_sessions(refs : Array(SubtabRef)) : Nil
       @host.status(close_marked_subtabs(refs))
       @host.resolve_subtab_focus
@@ -223,6 +284,56 @@ module Gori::Tui
         next unless tab.view.running?
         tab.view.request_stop
         @host.jobs.finish(tab.view.job_id, :stopped, "project closed")
+      end
+    end
+
+    # Live converge with the tool's session rows after a data_version bump. Soft-sync only —
+    # never full restore (would wipe findings + force focus defaults).
+    def reconcile : Nil
+      rows = session_rows
+      by_id = rows.index_by(&.id)
+      cur_db = current_tab_obj.try(&.db_id)
+      cur_view = current_tab_obj.try(&.view)
+
+      @sessions.each do |tab|
+        next unless (id = tab.db_id) && (row = by_id[id]?)
+        next if tab_locked?(tab)
+        v = tab.view
+        next if v.session_side_matches?(row)
+        v.apply_peer_session(row)
+      end
+
+      local_ids = @sessions.compact_map(&.db_id).to_set
+      rows.each do |row|
+        @sessions << restore_tab(row) unless local_ids.includes?(row.id)
+      end
+
+      @sessions.reject! do |tab|
+        (id = tab.db_id) && !by_id.has_key?(id) && !tab_locked?(tab)
+      end
+
+      @sessions.sort_by! do |tab|
+        if (id = tab.db_id) && (row = by_id[id]?)
+          {row.position, id}
+        else
+          {Int32::MAX, Int64::MAX}
+        end
+      end
+
+      @current_idx = reanchored_index(cur_db, cur_view)
+    end
+
+    # Where the active chip lands after a reconcile: the same row, else the same view, else a
+    # clamp.
+    private def reanchored_index(cur_db : Int64?, cur_view) : Int32
+      if cur_db && (idx = @sessions.index { |t| t.db_id == cur_db })
+        idx
+      elsif cur_view && (idx = @sessions.index(&.view.same?(cur_view)))
+        idx
+      elsif @sessions.empty?
+        -1
+      else
+        @current_idx.clamp(0, @sessions.size - 1)
       end
     end
 

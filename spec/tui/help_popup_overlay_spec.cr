@@ -390,13 +390,17 @@ describe "the QL reference key on a filter bar" do
     TabController.ql_help_key?(ev('?', alt: true), "").should be_false
   end
 
-  it "is wired into ALL THREE bars, above each printable arm" do
-    # The three handle_query_key methods are byte-for-byte parallel, so the failure mode is a
-    # partial fix: two bars answer `?` and the third silently types it. Source-scanned because
-    # there is no way to reach a controller without the Runner.
-    dir = File.join(__DIR__, "..", "..", "src", "gori", "tui", "controllers")
-    %w[history_controller sitemap_controller intercept_controller].each do |name|
-      src = File.read(File.join(dir, "#{name}.cr"))
+  it "is wired into every bar, above each printable arm" do
+    # History, Sitemap, Issues and Probe share `TabController#handle_ql_bar_key`; Intercept keeps
+    # its own. The failure mode is a partial fix: one bar answers `?` and another silently types
+    # it. Source-scanned because there is no way to reach a controller without the Runner.
+    tui = File.join(__DIR__, "..", "..", "src", "gori", "tui")
+    %w[history_controller sitemap_controller issues_controller probe_controller].each do |name|
+      File.read(File.join(tui, "controllers", "#{name}.cr")).includes?("handle_ql_bar_key").should be_true,
+        "#{name}.cr no longer routes its `/` bar through TabController#handle_ql_bar_key"
+    end
+    %w[tab_controller controllers/intercept_controller].each do |name|
+      src = File.read(File.join(tui, "#{name}.cr"))
       src.includes?("TabController.ql_help_key?").should be_true,
         "#{name}.cr never consults ql_help_key? — its filter bar still types the `?`"
       # Above the `else` that inserts the char, or the guard never runs.
