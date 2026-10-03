@@ -127,7 +127,7 @@ module Gori
                     cancel : Proc(Bool)? = nil) : Result
         started = Time.instant
         # `timeout` is a PER-OPERATION bound (connect, and idle between reads/writes),
-        # not a total request deadline — same model as the proxy's IO_TIMEOUT. A true
+        # not a total request deadline — same model as the proxy's `Settings.io_timeout`. A true
         # whole-request deadline would need a timer fiber racing a socket close.
         upstream, dial_error = dial_result(scheme, host, port, verify_upstream, sni, timeout,
           overrides, tls_preset, cancel)
