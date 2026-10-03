@@ -5,26 +5,6 @@ require "../proxy/codec/http1"
 
 module Gori
   module Probe
-    # Build a synthetic FlowDetail from a persisted Repeater tab so Passive.analyze can
-    # run over Repeater send results the same way it runs over History flows. Returns nil
-    # when there is no scorable response (no head, or only an error with empty head).
-    # Byte-level subsequence index. `String#index` cannot be used on these bytes: they may not
-    # be valid UTF-8, and scrubbing first is exactly what this file must not do to the body.
-    private def self.index_seq(hay : Bytes, needle : Bytes) : Int32?
-      return nil if needle.empty? || hay.size < needle.size
-      last = hay.size - needle.size
-      i = 0
-      while i <= last
-        j = 0
-        while j < needle.size && hay[i + j] == needle[j]
-          j += 1
-        end
-        return i if j == needle.size
-        i += 1
-      end
-      nil
-    end
-
     # Does this flow plausibly HOLD a WebSocket transcript — i.e. is it worth reading
     # `ws_messages` for? The gate in front of every WS rescan, and it is deliberately WIDER
     # than `Store::FlowDetail#websocket?`.
@@ -71,6 +51,9 @@ module Gori
       end
     end
 
+    # Build a synthetic FlowDetail from a persisted Repeater tab so Passive.analyze can
+    # run over Repeater send results the same way it runs over History flows. Returns nil
+    # when there is no scorable response (no head, or only an error with empty head).
     def self.detail_from_repeater(record : Store::RepeaterRecord) : Store::FlowDetail?
       head = record.response_head
       return nil if head.nil? || head.empty?
@@ -93,15 +76,14 @@ module Gori
       #     authored — differential rules compared against a differently-framed baseline, and
       #     corrupted bytes reached the origin.
       #
-      # Take whichever blank-line boundary occurs FIRST — the editor uses bare-LF, so a
-      # literal "\r\n\r\n" inside the body must not win over the true earlier "\n\n" head
-      # boundary (the naive `crlf || lf` fallback would snap to the body's sequence).
+      # `Env.head_body_separator` takes whichever blank-line boundary occurs FIRST — the
+      # editor uses bare-LF, so a literal "\r\n\r\n" inside the body must not win over the
+      # true earlier "\n\n" head boundary — and `String#index` cannot be used on these bytes:
+      # they may not be valid UTF-8, and scrubbing first is exactly what this must not do.
       raw_req = record.request
-      sep_crlf = index_seq(raw_req, "\r\n\r\n".to_slice)
-      sep_lf = index_seq(raw_req, "\n\n".to_slice)
-      sep = [sep_crlf, sep_lf].compact.min?
-      req_head_s = String.new(sep ? raw_req[0, sep] : raw_req).scrub
-      body_start = sep ? sep + (sep == sep_crlf ? 4 : 2) : nil
+      sep = Env.head_body_separator(raw_req)
+      req_head_s = String.new(sep ? raw_req[0, sep[0]] : raw_req).scrub
+      body_start = sep.try { |(offset, width)| offset + width }
       # The Repeater editor serializes request text with BARE-LF line endings, but
       # Http1.parse_headers recognizes only CRLF: without normalizing the internal separators,
       # the first CRLF found is the appended terminator, so parse_headers starts at the blank

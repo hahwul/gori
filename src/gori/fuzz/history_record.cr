@@ -76,7 +76,7 @@ module Gori
         return nil if websocket
         request = r.wire || r.request
         return nil unless request
-        head, body = split_head_body(request)
+        head, body = Env.split_head_body(request)
         # A line `split(' ')` cannot frame is filed the way the proxy files it (#1423).
         method, target, version = FlowMapper.authored_request(head, http2: http2)
         fid = store.insert_flow(Store::CapturedRequest.new(
@@ -124,13 +124,6 @@ module Gori
         # flows" over an empty table.
         return false if websocket
         policy == :all || r.matched?
-      end
-
-      private def split_head_body(bytes : Bytes) : {Bytes, Bytes?}
-        boundary = Env.head_body_boundary(bytes)
-        head = bytes[0, boundary]
-        body_size = bytes.size - boundary
-        {head, body_size > 0 ? bytes[boundary, body_size] : nil}
       end
     end
   end
