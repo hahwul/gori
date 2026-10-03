@@ -2076,6 +2076,7 @@ module Gori::Discover
       end
       target = p.query ? "#{p.path}?#{p.query}" : p.path
       attempts = 0
+      failed = nil.as(Repeater::Result?)
       interval = pace_interval
       loop do
         # The single funnel for this engine's wire sends, so pacing HERE is what makes
@@ -2085,7 +2086,12 @@ module Gori::Discover
         # plus one per probe, undershooting the rate by a slot per directory.
         pace(interval)
         raw = @capped.fetch(p.scheme, p.host, p.port, target)
-        if raw.error && raw.error != CappedBackend::CAP_ERROR && attempts < @config.retries
+        # A retry the budget refused sent nothing: book and answer the failure it was retrying
+        # (see `Sequencer::Engine#send_with_retries`), not "the budget ran out".
+        if (prior = failed) && raw.error == CappedBackend::CAP_ERROR
+          raw = prior
+        elsif raw.error && raw.error != CappedBackend::CAP_ERROR && attempts < @config.retries
+          failed = raw
           attempts += 1
           sleep @config.retry_pause
           next

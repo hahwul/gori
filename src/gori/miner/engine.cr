@@ -871,8 +871,12 @@ module Gori::Miner
 
     private def send_with_retries(bytes : Bytes, verbatim : Array({Int32, Int32})?) : Repeater::Result
       attempts = 0
+      failed = nil.as(Repeater::Result?)
       loop do
         raw = @backend.send(bytes, verbatim)
+        # A retry the budget refused sent nothing: answer with the failure it was retrying
+        # (see `Sequencer::Engine#send_with_retries`).
+        return failed if failed && raw.error == Fuzz::CappedBackend::CAP_ERROR
         if raw.error.nil?
           @successful_sends += 1
           return raw
@@ -886,6 +890,7 @@ module Gori::Miner
         # between the two calls, and each attempt is charged to the cap a second time
         # (`CappedBackend#send` increments AFTER the cap check but BEFORE the gate's).
         return raw if permanent_refusal?(raw.error) || attempts >= @config.retries
+        failed = raw
         # A STOP ends the retry chain. It was honoured everywhere else in the run — the
         # dispatcher breaks, a worker skips the bucket it just took — and invisible only here,
         # where a retry is a NEW request: measured, a `stop` on the first errored bucket put

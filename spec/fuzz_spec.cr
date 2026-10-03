@@ -661,6 +661,20 @@ describe F::Engine do
     backend.sent.should eq(6)            # …and that is what the origin really received
   end
 
+  # A retry the request budget refuses sent nothing: the row is the failure it was retrying.
+  # Recording the cap marker read a dead origin as a budget stop.
+  it "keeps the network failure when the budget refuses its retry" do
+    set = F::PayloadSet.new(F::InlineList.new(["a"]))
+    cfg = F::Config.new(mode: F::Mode::Sniper, concurrency: 1, retries: 1,
+      retry_pause: Time::Span.zero)
+    gen = F::Generator.new(base, [set], cfg)
+    dead = FakeBackend.new(F::Origin.new("http", "h", 80)) do |_b|
+      Gori::Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, "connect failed")
+    end
+    results, _ = drain(F::Engine.new(gen, F::Matcher.new, F::CappedBackend.new(dead, 1_i64), cfg))
+    results.first.error.should eq("connect failed")
+  end
+
   it "auto-calibration end-to-end: calibrate_baseline's synthetic sends capture EVERY shape " \
      "of a rotating-noise target, so the whole sweep is suppressed except a seeded status " \
      "anomaly planted mid-sweep (reproduces the reported bug: a single-snapshot baseline let " \

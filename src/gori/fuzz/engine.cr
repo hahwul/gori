@@ -1289,6 +1289,7 @@ module Gori::Fuzz
       end
       attempts = 0
       resent_count = 0
+      failed = nil.as(Repeater::Result?)
       loop do
         # The payload spans ride with the bytes: `Sender` needs them to tell the operator's
         # test case from the template it was spliced into (see `Backend#send`).
@@ -1297,6 +1298,12 @@ module Gori::Fuzz
         # retry is a request, so a `request` cadence gives it a value of its own.
         raw = candidate_send { @backend.send(job.bytes, job.payload_spans) }
         return nil unless raw
+        # A retry the budget refused sent nothing: the row is the failure it was retrying, and
+        # that retry was never a superseded attempt. Returning the cap marker read a dead origin
+        # as "the budget ran out" (as in Discover/Miner/Sequencer's `send_with_retries`).
+        if prior = budget_refused_retry(failed, raw)
+          return @matcher.build(job, prior, resent_count: resent_count - 1)
+        end
         # The macro failed, so the candidate was never sent. Its row stands in for it, is never
         # retried (the macro would only fail again, against the endpoint that just failed), and
         # is checked for the run-ending case.
@@ -1338,6 +1345,7 @@ module Gori::Fuzz
           unless @stopped
             attempts += 1
             resent_count += 1
+            failed = raw
             next
           end
         end
@@ -1358,10 +1366,15 @@ module Gori::Fuzz
     private def run_one_ws(job : Job, frames : Array(WsFrame)) : Result?
       attempts = 0
       resent_count = 0
+      failed = nil.as({Repeater::Result, WsOutcome}?)
       loop do
         pair = ws_send(job, frames)
         return nil unless pair
         raw, ws = pair
+        # As in `run_one`: a budget-refused retry answers with the failure it was retrying.
+        if (prior = failed) && raw.error == CappedBackend::CAP_ERROR
+          return @matcher.build(job, prior[0], resent_count: resent_count - 1).with_ws(prior[1])
+        end
         if Gori::RequestMacro.failed?(raw.error)
           note_macro_abort
           return @matcher.build(job, raw, resent_count: resent_count).with_ws(ws)
@@ -1378,11 +1391,17 @@ module Gori::Fuzz
           unless @stopped
             attempts += 1
             resent_count += 1
+            failed = pair
             next
           end
         end
         return @matcher.build(job, raw, resent_count: resent_count).with_ws(ws)
       end
+    end
+
+    # The failure a retry was retrying, when the budget refused that retry (nothing was sent).
+    private def budget_refused_retry(failed : Repeater::Result?, raw : Repeater::Result) : Repeater::Result?
+      failed if raw.error == CappedBackend::CAP_ERROR
     end
 
     # Whether a failed send is worth sending again. A permanent max-requests stop never is

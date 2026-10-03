@@ -278,9 +278,15 @@ module Gori::Sequencer
 
     private def send_with_retries(backend : Fuzz::CappedBackend, bytes : Bytes) : Repeater::Result
       attempts = 0
+      failed = nil.as(Repeater::Result?)
       loop do
         raw = backend.send(bytes)
+        # A retry the budget refused put nothing on the wire: the answer is the failure it was
+        # retrying, not "the budget ran out" — every caller reads the cap as a budget, so the
+        # connect error vanished and a dead origin read as a run with nothing wrong.
+        return failed if failed && raw.error == Fuzz::CappedBackend::CAP_ERROR
         return raw if raw.error.nil? || permanent_refusal?(raw.error) || attempts >= @config.retries
+        failed = raw
         attempts += 1
         # A STOP ends the retry chain. It was honoured everywhere else in the run — the
         # dispatcher breaks, a worker skips its next job — and invisible only here, where a

@@ -298,6 +298,18 @@ describe Gori::Discover::Engine do
     kinds.last.should eq(:done)
   end
 
+  # A retry the request budget refuses sent nothing, so its answer is the failure it was
+  # retrying. Returning the cap marker read as "the budget ran out": a dead origin finished as
+  # a clean run, exit 0 and no error, where `--retries 0` reported the connect failure.
+  it "reports the failure a budget-refused retry was retrying" do
+    cfg = D::Config.new(spider: true, bruteforce: false, max_depth: 1, concurrency: 1,
+      retries: 1, retry_pause: 1.millisecond, max_requests: 1_i64)
+    dead = RouteBackend.new(->(_t : String) { R.new(Bytes.new(0), nil, nil, 0_i64, "connect failed") })
+    kinds, messages = terminal_of(D::Engine.new("http://t/", [] of String, dead, cfg))
+    kinds.should contain(:error)
+    messages.join.should contain("connect failed")
+  end
+
   it "stops a /user/{n} link farm via template folding" do
     cfg = D::Config.new(spider: true, bruteforce: false, max_depth: 5, max_pages: 1000,
       template_saturation: 20, concurrency: 2, retries: 0)
