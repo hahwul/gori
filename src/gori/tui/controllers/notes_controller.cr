@@ -117,11 +117,12 @@ module Gori::Tui
     private def handle_read(ev : Termisu::Event::Key, c : Char?) : Bool
       return true.tap { @host.open_space_menu } if ev.key.space? && !ev.ctrl? && !ev.alt?
       key = ev.key
-      selecting = ev.shift? || editor_line_held?
+      selecting = ev.shift?
+      growing = selecting || editor_line_held? # vertical arms only: see RepeaterController
       case
       when key.enter? then return false # editor.insert-enter
       when nav_up?(ev)
-        if @notes.at_top? && !selecting # ⇧↑ / a held `⇧V` grows in place, never leaves
+        if @notes.at_top? && !growing # ⇧↑ / a held `⇧V` grows in place, never leaves
           save_notes
           @host.request_focus(:subtabs)
         else

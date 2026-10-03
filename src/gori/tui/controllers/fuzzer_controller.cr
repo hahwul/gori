@@ -682,10 +682,11 @@ module Gori::Tui
       return true.tap { @host.open_space_menu } if ev.key.space? && !ev.ctrl? && !ev.alt?
       key = ev.key
       c = ev.char || key.to_char
-      selecting = ev.shift? || editor_line_held?
+      selecting = ev.shift?
+      growing = selecting || editor_line_held? # vertical arms only: see RepeaterController
       case
       when key.enter? then return false # editor.insert-enter
-      when nav_up?(ev)              then template_up(v, selecting)
+      when nav_up?(ev)              then template_up(v, growing)
       when nav_down?(ev)            then v.template_read_move(1, 0, selecting: selecting)
       when editor_read_sideways(ev) then nil # ←/→ h/l, ⌥ by word
       when key.page_up?             then v.template_read_page(-1, selecting: selecting)

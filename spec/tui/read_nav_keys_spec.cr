@@ -124,10 +124,21 @@ describe "READ caret keys in every editor pane" do
       2.times { press(tab, TuiContract.plain('k')) }
       tab.editor_text_buffer.try(&.[0]).should be(area), "#{name}: k at the top left the pane"
       read.copy_text(area).should eq("one\ntwo"), name
+      # `h` at the very start does not cross either (an issue's notes hand ← to RELATED there);
+      # as a sideways step it collapses the selection, as it does everywhere. Two `k`s left the
+      # caret on the top line's start, which is exactly that spot.
+      {area.cy, area.cx}.should eq({0, 0}), name
+      press(tab, TuiContract.plain('h'))
+      tab.editor_text_buffer.try(&.[0]).should be(area), "#{name}: h at the start left the pane"
+      read.select_line(area, line_mode: true)
       3.times { press(tab, TuiContract.plain('j')) }
       tab.editor_text_buffer.try(&.[0]).should be(area), "#{name}: j at the bottom left the pane"
-      read.copy_text(area).should eq("two\nthree"), name
+      read.copy_text(area).should eq("one\ntwo\nthree"), name
       host.focus_requests.size.should eq(asked), "#{name}: asked the host to move focus"
+      # End is a caret move: it collapses the held line selection rather than reshaping it into a
+      # character span a following `d` would cut.
+      press(tab, TuiContract.key(Termisu::Input::Key::End))
+      read.selection?(area).should be_false, "#{name}: End kept the selection"
       seen << name
     end
     seen.size.should eq(8), "exercised only #{seen.join(", ")}"

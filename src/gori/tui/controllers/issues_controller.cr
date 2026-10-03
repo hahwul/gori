@@ -690,7 +690,7 @@ module Gori::Tui
     # `issue.copy` in `Scope::IssuesDetail` — chords those two verbs have carried since they
     # were written, and which this handler was what made dead (KEY_AUDIT §2d/§2e).
     private def handle_notes_read_key(ev : Termisu::Event::Key, key, c : Char?) : Bool
-      selecting = ev.shift? || editor_line_held?
+      selecting = ev.shift?
       case
       when key.escape?
         @issues.focus_links!
@@ -779,7 +779,7 @@ module Gori::Tui
     # `handle_notes_read_key` sits exactly on the cyclomatic ceiling CI gates, so a third arm
     # tipped it over — and "does this key leave the pane" is local to the key anyway.
     private def notes_read_up(ev : Termisu::Event::Key, selecting : Bool) : Nil
-      return @issues.focus_links! if notes_crossing?(ev) && !selecting && @issues.notes_at_top?
+      return @issues.focus_links! if notes_crossing?(ev) && @issues.notes_at_top?
       @issues.notes_read_move(-1, 0, selecting: selecting)
     end
 
@@ -799,7 +799,7 @@ module Gori::Tui
     # `notes_read_motion_key`, the shared editor set that owns ⌃←/⌥← as word motion. Same
     # guard, same reason, as `RewriterController#handle_preview_in_key`.
     private def notes_crossing?(ev : Termisu::Event::Key) : Bool
-      !ev.shift? && !ev.ctrl? && !ev.alt?
+      !ev.shift? && !ev.ctrl? && !ev.alt? && !editor_line_held? # a held `⇧V` grows, never leaves
     end
 
     private def handle_notes_insert_key(ev : Termisu::Event::Key, key, c : Char?) : Bool

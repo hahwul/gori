@@ -659,12 +659,13 @@ module Gori::Tui
     # `Scope::ProjectDesc`, whose chords this handler was what made dead (KEY_AUDIT §2e).
     private def handle_desc_read(ev : Termisu::Event::Key, key, c : Char?) : Bool
       return true.tap { @host.open_space_menu } if key.space? && !ev.ctrl? && !ev.alt?
-      selecting = ev.shift? || editor_line_held?
+      selecting = ev.shift?
+      growing = selecting || editor_line_held? # vertical arms only: see RepeaterController
       case
       when key.enter? then return false # editor.insert-enter
       when nav_up?(ev)
         # ⇧↑ stays in the pane: leaving mid-extend abandons a selection being built.
-        (@project_view.at_top? && !selecting) ? leave_to_strip : @project_view.desc_read_move(-1, 0, selecting: selecting)
+        (@project_view.at_top? && !growing) ? leave_to_strip : @project_view.desc_read_move(-1, 0, selecting: selecting)
       when nav_down?(ev)                          then @project_view.desc_read_move(1, 0, selecting: selecting)
       when editor_read_sideways(ev)               then nil # ←/→ h/l, ⌥ by word
       when @project_view.desc_read_motion_key(ev) then nil # Home/End/Page — the shared editor set

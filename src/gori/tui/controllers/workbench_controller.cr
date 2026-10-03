@@ -424,11 +424,12 @@ module Gori::Tui
       return true if space_menu?(ev)
       s = cur
       key = ev.key
-      selecting = ev.shift? || editor_line_held?
+      selecting = ev.shift?
+      growing = selecting || editor_line_held? # vertical arms only: see RepeaterController
       case
       when key.enter? then return false # editor.insert-enter
-      when nav_up?(ev)              then input_step(s, -1, selecting)
-      when nav_down?(ev)            then input_step(s, 1, selecting)
+      when nav_up?(ev)              then input_step(s, -1, growing)
+      when nav_down?(ev)            then input_step(s, 1, growing)
       when editor_read_sideways(ev) then nil                     # ←/→ h/l, ⌥ by word
       when key.home?                then s.input_home(selecting) # editor move + read-cursor adopt — see WorkbenchSession
       when key.end?                 then s.input_end(selecting)

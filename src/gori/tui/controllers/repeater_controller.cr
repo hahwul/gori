@@ -3483,12 +3483,15 @@ module Gori::Tui
       return true.tap { @host.open_space_menu } if ev.key.space? && !ev.ctrl? && !ev.alt?
       key = ev.key
       c = ev.char || key.to_char
-      selecting = ev.shift? || editor_line_held?
+      selecting = ev.shift?
+      # Only the VERTICAL arms ask about a held `⇧V`: at the pane's edge it must grow, not leave.
+      # A sideways step or Home/End stays a plain caret move that collapses it, as in Notes.
+      growing = selecting || editor_line_held?
       case
       when key.enter? then return false # editor.insert-enter
       when word_step?(ev)           then editor_word_move(key.left? ? -1 : 1, selecting)
-      when key.up?, key.lower_k?    then view.at_top? && !selecting ? view.focus_first : view.request_read_move(-1, 0, selecting: selecting)
-      when key.down?, key.lower_j?  then view.request_read_move(1, 0, selecting: selecting)
+      when key.up?, key.lower_k?    then view.at_top? && !growing ? view.focus_first : view.request_read_move(-1, 0, selecting: growing)
+      when key.down?, key.lower_j?  then view.request_read_move(1, 0, selecting: growing)
       when key.left?, key.lower_h?  then view.request_read_move(0, -1, selecting: selecting)
       when key.right?, key.lower_l? then view.request_read_move(0, 1, selecting: selecting)
       when key.page_up?             then view.request_read_page(-1, selecting: selecting)

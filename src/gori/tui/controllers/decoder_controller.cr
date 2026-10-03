@@ -908,20 +908,21 @@ module Gori::Tui
       return true.tap { @host.open_space_menu } if ev.key.space? && !ev.ctrl? && !ev.alt?
       s = cur
       key = ev.key
-      selecting = ev.shift? || editor_line_held?
+      selecting = ev.shift?
+      growing = selecting || editor_line_held? # vertical arms only: see RepeaterController
       case
       when key.enter? then return false # editor.insert-enter
       when nav_up?(ev)
         # A ⇧↑ on the first line extends the selection to its start rather than leaving the
         # pane (same for ⇧↓ below): a selection in progress is never a focus gesture.
-        if s.input.at_top? && !selecting
+        if s.input.at_top? && !growing
           commit
           @host.request_focus(:subtabs)
         else
           s.input_read.move(s.input, -1, 0, selecting: selecting)
         end
       when nav_down?(ev)
-        s.input.at_bottom? && !selecting ? focus_chain : s.input_read.move(s.input, 1, 0, selecting: selecting)
+        s.input.at_bottom? && !growing ? focus_chain : s.input_read.move(s.input, 1, 0, selecting: selecting)
       when editor_read_sideways(ev) then nil # ←/→ h/l, ⌥ by word
       # Home/End/Page over the READ caret: they move the EDITOR caret, so the read cursor —
       # which is what this mode paints — is mirrored back onto it.
