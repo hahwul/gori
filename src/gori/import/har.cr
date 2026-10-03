@@ -101,10 +101,12 @@ module Gori
         # never met the byte here — the hole arrived with the streaming rewrite. Reported as a
         # bad FILE, which is what it is; nothing in the HAR can be trusted past that byte.
         raise Gori::Error.new("HAR file is not valid UTF-8: #{ex.message}")
-      rescue ex : Gori::Error | IO::Error
-        # Ours, or the file's own read failing (`File::Error` is an `IO::Error`): the caller
-        # already says "cannot read" for that, which the clause below would mislabel.
+      rescue ex : Gori::Error
         raise ex
+      rescue ex : IO::Error
+        # The file's own read failing (EIO, a dropped mount), not its JSON — which the clause
+        # below would mislabel. Still a `Gori::Error`: every surface rescues only that.
+        raise Gori::Error.new("cannot read HAR file: #{ex.message}")
       rescue ex
         # `JSON::Any.new(pull)` raises a bare `Exception` ("Unknown pull kind: EndObject") on
         # some malformed input instead of a `JSON::ParseException`. A consumer's own raise is

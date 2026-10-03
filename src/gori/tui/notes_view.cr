@@ -107,7 +107,7 @@ module Gori::Tui
     # unlikely for any realistic note count.
     private def alloc_note_id : Int64
       id = Random::Secure.rand(1_i64..0x7fff_ffff_ffff_ffff_i64)
-      @next_id = {@next_id, id + 1}.max
+      @next_id = {@next_id, id &+ 1}.max
       @unpersisted << id
       id
     end

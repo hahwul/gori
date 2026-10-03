@@ -110,6 +110,18 @@ describe "Import::Har.each_flow" do
     end
   end
 
+  # A read failure (EISDIR here, EIO on a dropped mount) is a plain `IO::Error`, which every
+  # surface would print as a backtrace: it has to arrive as a `Gori::Error`, named as a read.
+  it "reports a HAR it cannot read as a clean read error" do
+    dir = File.tempname("gori-har-dir")
+    Dir.mkdir(dir)
+    begin
+      expect_raises(Gori::Error, /cannot read/) { Gori::Import::Har.each_flow(dir) { } }
+    ensure
+      Dir.delete(dir)
+    end
+  end
+
   # Each size fits Int64 on its own; their head + body and request + response sums did not,
   # so the batch rolled back on insert or, below that, every later read of the row raised.
   it "ignores a declared body size no wire could carry" do
