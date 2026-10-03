@@ -26,21 +26,20 @@ module Gori
     # already-BLOB-storage value, so this never changes behavior for the common case.
     REQUEST_COL = "CAST(request AS BLOB) AS request"
 
+    # The request-side columns every projection below starts with, read by `read_head`.
+    HEAD_COLS = "id, target, #{REQUEST_COL}, http2, auto_content_length, flow_id, position"
+    # A whole row, response BLOBs included, read by `read_full`.
+    FULL_COLS = "#{HEAD_COLS}, response_head, response_body, response_error, response_duration_us, " \
+                "name, sni, tags, ws_keep_key, ws_http_only, tls_preset, response_request_sha256"
+
     # Full repeater rows INCLUDING the persisted response BLOBs. Used once at project
     # open to seed each tab's last response (V11). NOT for the recurring reconcile
     # poll — use `repeaters_meta` there to avoid re-materializing every tab's
     # (potentially multi-MB) response on each cross-session commit.
     def repeaters : Array(RepeaterRecord)
       list = [] of RepeaterRecord
-      @db.query("SELECT id, target, #{REQUEST_COL}, http2, auto_content_length, flow_id, position, response_head, response_body, response_error, response_duration_us, name, sni, tags, ws_keep_key, ws_http_only, tls_preset, response_request_sha256 FROM repeaters ORDER BY position, id") do |rs|
-        rs.each do
-          list << RepeaterRecord.new(
-            rs.read(Int64), rs.read(String), rs.read(Bytes),
-            rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
-            rs.read(Bytes?), rs.read(Bytes?), rs.read(String?), rs.read(Int64?), rs.read(String?), rs.read(String?),
-            tags: rs.read(String?), ws_keep_key: rs.read(Int32) != 0, ws_http_only: rs.read(Int32) != 0,
-            tls_preset: rs.read(String?), response_request_sha256: rs.read(String?))
-        end
+      @db.query("SELECT #{FULL_COLS} FROM repeaters ORDER BY position, id") do |rs|
+        rs.each { list << read_full(rs) }
       end
       list
     end
@@ -49,12 +48,8 @@ module Gori
     # which only converges target/request/flags/position and never reads the
     # response (responses are personal per session). Response fields stay nil.
     def get_repeater(id : Int64) : RepeaterRecord?
-      @db.query(
-        "SELECT id, target, #{REQUEST_COL}, http2, auto_content_length, flow_id, position, sni, name, ws_keep_key, ws_http_only, tls_preset FROM repeaters WHERE id = ?",
-        id) do |rs|
-        return RepeaterRecord.new(
-          rs.read(Int64), rs.read(String), rs.read(Bytes),
-          rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
+      @db.query("SELECT #{HEAD_COLS}, sni, name, ws_keep_key, ws_http_only, tls_preset FROM repeaters WHERE id = ?", id) do |rs|
+        return RepeaterRecord.new(*read_head(rs),
           sni: rs.read(String?), name: rs.read(String?), ws_keep_key: rs.read(Int32) != 0,
           ws_http_only: rs.read(Int32) != 0, tls_preset: rs.read(String?)) if rs.move_next
       end
@@ -65,30 +60,17 @@ module Gori
     # for explicit, paged body reads; unlike `repeaters`, it never materializes all
     # repeater response BLOBs just to retrieve one continuation chunk.
     def get_repeater_full(id : Int64) : RepeaterRecord?
-      @db.query(
-        "SELECT id, target, #{REQUEST_COL}, http2, auto_content_length, flow_id, position, " \
-        "response_head, response_body, response_error, response_duration_us, name, sni, tags, ws_keep_key, ws_http_only, tls_preset, " \
-        "response_request_sha256 " \
-        "FROM repeaters WHERE id = ?", id) do |rs|
-        if rs.move_next
-          return RepeaterRecord.new(
-            rs.read(Int64), rs.read(String), rs.read(Bytes),
-            rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
-            rs.read(Bytes?), rs.read(Bytes?), rs.read(String?), rs.read(Int64?), rs.read(String?), rs.read(String?),
-            tags: rs.read(String?), ws_keep_key: rs.read(Int32) != 0, ws_http_only: rs.read(Int32) != 0,
-            tls_preset: rs.read(String?), response_request_sha256: rs.read(String?))
-        end
+      @db.query("SELECT #{FULL_COLS} FROM repeaters WHERE id = ?", id) do |rs|
+        return read_full(rs) if rs.move_next
       end
       nil
     end
 
     def repeaters_meta : Array(RepeaterRecord)
       list = [] of RepeaterRecord
-      @db.query("SELECT id, target, #{REQUEST_COL}, http2, auto_content_length, flow_id, position, sni, ws_keep_key, ws_http_only, tls_preset FROM repeaters ORDER BY position, id") do |rs|
+      @db.query("SELECT #{HEAD_COLS}, sni, ws_keep_key, ws_http_only, tls_preset FROM repeaters ORDER BY position, id") do |rs|
         rs.each do
-          list << RepeaterRecord.new(
-            rs.read(Int64), rs.read(String), rs.read(Bytes),
-            rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
+          list << RepeaterRecord.new(*read_head(rs),
             sni: rs.read(String?), ws_keep_key: rs.read(Int32) != 0, ws_http_only: rs.read(Int32) != 0,
             tls_preset: rs.read(String?))
         end
@@ -101,18 +83,29 @@ module Gori
     def repeaters_mcp : Array(RepeaterRecord)
       list = [] of RepeaterRecord
       @db.query(
-        "SELECT id, target, #{REQUEST_COL}, http2, auto_content_length, flow_id, position, sni, " \
-        "name, tags, response_head, response_error, response_duration_us, ws_keep_key, ws_http_only, tls_preset FROM repeaters ORDER BY position, id") do |rs|
+        "SELECT #{HEAD_COLS}, sni, name, tags, response_head, response_error, response_duration_us, " \
+        "ws_keep_key, ws_http_only, tls_preset FROM repeaters ORDER BY position, id") do |rs|
         rs.each do
-          list << RepeaterRecord.new(
-            rs.read(Int64), rs.read(String), rs.read(Bytes),
-            rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
+          list << RepeaterRecord.new(*read_head(rs),
             sni: rs.read(String?), name: rs.read(String?), tags: rs.read(String?),
             response_head: rs.read(Bytes?), response_error: rs.read(String?), response_duration_us: rs.read(Int64?),
             ws_keep_key: rs.read(Int32) != 0, ws_http_only: rs.read(Int32) != 0, tls_preset: rs.read(String?))
         end
       end
       list
+    end
+
+    # The `HEAD_COLS` of the current row, in order, as `RepeaterRecord.new`'s leading positionals.
+    private def read_head(rs : DB::ResultSet)
+      {rs.read(Int64), rs.read(String), rs.read(Bytes),
+       rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32)}
+    end
+
+    private def read_full(rs : DB::ResultSet) : RepeaterRecord
+      RepeaterRecord.new(*read_head(rs),
+        rs.read(Bytes?), rs.read(Bytes?), rs.read(String?), rs.read(Int64?), rs.read(String?), rs.read(String?),
+        tags: rs.read(String?), ws_keep_key: rs.read(Int32) != 0, ws_http_only: rs.read(Int32) != 0,
+        tls_preset: rs.read(String?), response_request_sha256: rs.read(String?))
     end
 
     # The position a NEW tab appends at: one past the highest in use — the same
