@@ -59,7 +59,7 @@ module Gori
         end
         abort "gori run repeater minimize: no repeater session ##{id}" unless rec
         activate_slot(slot, "gori run repeater minimize")
-        outbound = project_outbound(proj.name, proj.db, allow_unscoped)
+        outbound = project_outbound(project, allow_unscoped)
 
         text = String.new(rec.request)
         scheme, host, port = minimize_target_or_abort(id, rec, text, outbound)
