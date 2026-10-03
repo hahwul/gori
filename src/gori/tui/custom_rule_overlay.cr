@@ -232,7 +232,7 @@ module Gori::Tui
       else
         ok = valid?
         label = ok ? "[ Save rule ]" : "[ complete title, description & #{kind == "exec" ? "command" : "pattern"} ]"
-        screen.text(x, py, label, ok ? Theme.accent : Theme.muted, bg, Attribute::Bold)
+        screen.text(x, py, label, ok ? Theme.accent : Theme.muted, bg, Attribute::Bold, width: {box.right - 2 - x, 0}.max)
       end
     end
   end

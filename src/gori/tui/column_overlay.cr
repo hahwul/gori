@@ -240,7 +240,7 @@ module Gori::Tui
       else
         reason = invalid_reason
         label = reason ? "[ #{reason} ]" : "[ Save column ]"
-        screen.text(x, py, label, reason ? Theme.muted : Theme.accent, bg, Attribute::Bold)
+        screen.text(x, py, label, reason ? Theme.muted : Theme.accent, bg, Attribute::Bold, width: {box.right - 2 - x, 0}.max)
       end
     end
   end

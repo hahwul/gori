@@ -548,11 +548,12 @@ module Gori::Tui
       limit = width || (screen.width - x)
       return x if limit <= 0
 
-      # Special case for width=1: always show the first glyph (even if it is
-      # wide, e.g. Hangul), never ellipsis. Matches Screen#fit policy.
+      # Special case for width=1: show the first glyph, never an ellipsis — unless it is wide
+      # (e.g. Hangul), which would paint 2 cells into 1. Matches Screen#fit policy.
       if limit == 1
         if line.present? && !line[0].text.empty?
           first = line[0].text.each_grapheme.first.to_s
+          first = "…" if Screen.grapheme_cols(first) > 1
           # Char path so a leading C0 control becomes the space cell (not rejected).
           if first.size == 1
             screen.cell(x, y, first[0], line[0].fg, bg, line[0].attr)
