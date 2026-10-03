@@ -1,8 +1,7 @@
 require "./screen"
 require "./theme"
 require "./frame"
-require "./overlay"
-require "./viewport"
+require "./picker_overlay"
 require "../store"
 
 module Gori::Tui
@@ -11,14 +10,13 @@ module Gori::Tui
   # of BrowserPicker: a dumb list, while WHAT the pick applies to rides in as the
   # `on_commit` closure each open-site injects. Each row is fronted by a mnemonic key
   # (helix feel) and the value currently set is marked "● current".
-  class ChoicePicker < Overlay
+  class ChoicePicker < PlainPickerOverlay
     # `key` is optional: a picker built over an unbounded list (every Issue in the project)
     # runs out of mnemonics long before it runs out of rows, and reusing one letter would
     # make it COMMIT THE WRONG ROW — `index_for` is a first-match find. A keyless row is
     # reached with ↑/↓ and ↵ instead.
     record Choice, label : String, key : Char?, color : Color, value : Int32
 
-    getter selected : Int32
     # :severity | :status | :probe_mode. The severity/status open-sites share ONE apply
     # closure (both write the open issue), so that closure still branches on this.
     getter kind : Symbol
@@ -29,7 +27,6 @@ module Gori::Tui
     def initialize(@title : String, @choices : Array(Choice), @current : Int32, @kind : Symbol)
       # Open on the row that's currently set, so ↵ without moving is a no-op.
       @selected = @choices.index { |c| c.value == @current } || 0
-      @scroll = 0
     end
 
     # The coloured severity picker (Critical→Info), opened on the current level.
@@ -136,30 +133,12 @@ module Gori::Tui
       end
     end
 
-    # A click on a row selects AND applies it (matching the mnemonic model); a click
-    # outside the card dismisses; a click inside but off any row keeps it open.
-    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
-      box = overlay_box(area)
-      return :cancel if box.nil? || !box.contains?(mx, my)
-      if idx = row_at(box, mx, my)
-        set_selected(idx)
-        return :commit
-      end
-      :stay
-    end
-
-    def move(delta : Int32) : Nil
-      return if @choices.empty?
-      @selected = (@selected + delta).clamp(0, @choices.size - 1)
+    def entry_count : Int32
+      @choices.size
     end
 
     def selected_value : Int32
       @choices[@selected].value
-    end
-
-    def set_selected(idx : Int32) : Nil
-      return if @choices.empty?
-      @selected = idx.clamp(0, @choices.size - 1)
     end
 
     # The row whose mnemonic matches `c` (case-insensitive), or nil for a miss.
@@ -168,67 +147,27 @@ module Gori::Tui
       @choices.index { |ch| ch.key == lc }
     end
 
-    # Centered card geometry over `area` — inverse of render's offset math. nil
-    # when render would draw nothing (mirrors the w/h guard).
-    def overlay_box(area : Rect) : Rect?
-      w = {area.w - 4, label_w + 20}.min
-      h = {@choices.size + 2, area.h - 2}.min
-      return nil if w < 18 || area.h < 5
-      x = area.x + (area.w - w) // 2
-      y = area.y + (area.h - h) // 2
-      Rect.new(x, y, w, h)
+    private def card_w : Int32
+      label_w + 20
     end
 
-    # Row index under (mx,my), mirroring render's list loop; nil outside. Bound to
-    # the ACTUALLY rendered rows ({box.h - 2, size}.min, matching render's break),
-    # so a click on the bottom border of a height-clamped card can't pick a row
-    # that was never drawn.
-    def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
-      rows = {box.h - 2, @choices.size}.min
-      i = my - (box.y + 1)
-      return nil if i < 0 || i >= rows
-      return nil if mx <= box.x || mx >= box.right - 1
-      ci = @scroll + i
-      ci < @choices.size ? ci : nil
-    end
-
-    private def ensure_visible(rows : Int32) : Nil
-      @scroll = Viewport.scroll_to_show(@selected, @scroll, rows, @choices.size)
-    end
-
-    def render(screen : Screen, area : Rect) : Nil
-      box = overlay_box(area)
-      unless box
-        Overlay.too_small(screen, area, "picker needs a larger window")
-        return
-      end
-      Frame.card(screen, box, @title, border: Theme.border_focus)
-      rows = {box.h - 2, @choices.size}.min
-      ensure_visible(rows) # keep the pre-selected 'current' row visible on a short terminal
-      (0...rows).each do |i|
-        ci = @scroll + i
-        break if ci >= @choices.size
-        ch = @choices[ci]
-        ry = box.y + 1 + i
-        active = ci == @selected
-        bg = active ? Theme.accent_bg : Theme.panel
-        screen.fill(Rect.new(box.x + 1, ry, box.w - 2, 1), bg)
-        screen.cell(box.x + 1, ry, active ? '▎' : ' ', Theme.accent, bg)
-        screen.text(box.x + 3, ry, ch.key.to_s, Theme.accent, bg, Attribute::Bold)
-        # Bounded to the CARD, not to the screen. `Screen#text` defaults its limit to the
-        # terminal width, so a label wider than the box ran over the right border and into the
-        # backdrop — the box only ever widens to `area.w - 4`, and `label_w` cannot make it
-        # wider than that. Unreachable while every picker's rows were gori's own words; the
-        # agent-target picker (#1090) is the first whose rows carry a name the peer chose.
-        marker = ch.value == @current ? "● current" : nil
-        # `marker.size + 2`, not `+ 1`: the marker's own trailing column is the gap on its
-        # right, and a truncated label needs one on its left too, or the row reads `…● current`
-        # with the ellipsis touching the bullet.
-        room = box.right - 1 - (box.x + 6) - (marker ? marker.size + 2 : 0)
-        screen.text(box.x + 6, ry, ch.label, ch.color, bg, Attribute::Bold, width: room)
-        if marker
-          screen.text(box.right - marker.size - 2, ry, marker, active ? Theme.text_bright : Theme.muted, bg)
-        end
+    private def draw_row(screen : Screen, box : Rect, ry : Int32, idx : Int32,
+                         active : Bool, bg : Color) : Nil
+      ch = @choices[idx]
+      screen.text(box.x + 3, ry, ch.key.to_s, Theme.accent, bg, Attribute::Bold)
+      # Bounded to the CARD, not to the screen. `Screen#text` defaults its limit to the
+      # terminal width, so a label wider than the box ran over the right border and into the
+      # backdrop — the box only ever widens to `area.w - 4`, and `label_w` cannot make it
+      # wider than that. Unreachable while every picker's rows were gori's own words; the
+      # agent-target picker (#1090) is the first whose rows carry a name the peer chose.
+      marker = ch.value == @current ? "● current" : nil
+      # `marker.size + 2`, not `+ 1`: the marker's own trailing column is the gap on its
+      # right, and a truncated label needs one on its left too, or the row reads `…● current`
+      # with the ellipsis touching the bullet.
+      room = box.right - 1 - (box.x + 6) - (marker ? marker.size + 2 : 0)
+      screen.text(box.x + 6, ry, ch.label, ch.color, bg, Attribute::Bold, width: room)
+      if marker
+        screen.text(box.right - marker.size - 2, ry, marker, active ? Theme.text_bright : Theme.muted, bg)
       end
     end
 

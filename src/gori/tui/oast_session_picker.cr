@@ -2,7 +2,7 @@ require "./screen"
 require "./theme"
 require "./fmt"
 require "./frame"
-require "./picker_overlay"
+require "./oast_provider_picker"
 require "../plural"
 
 module Gori::Tui
@@ -20,7 +20,7 @@ module Gori::Tui
   # and `x` releases it — deregisters the server-side state for an engagement that is over,
   # without touching the callbacks already collected. Neither deletes anything local; the rows
   # in `oast_callbacks` are evidence.
-  class OastSessionPicker < PlainPickerOverlay
+  class OastSessionPicker < OastPicker
     # One persisted session as the card shows it. `hits` is the controller's own per-session
     # counter (the TOTAL folded, not the windowed view's size) and `live` marks the sessions
     # already polling — those rows stay listed rather than being filtered out, because a card
@@ -69,24 +69,8 @@ module Gori::Tui
     # A release does NOT commit: the card stays up. Releasing is a housekeeping pass over a
     # finished engagement ("drop these three"), and closing after each one would make the
     # operator reopen the card between them.
-    def handle_key(ev : Termisu::Event::Key) : Symbol
-      key = ev.key
-      case
-      when key.escape?  then return :cancel
-      when key.up?      then move(-1)
-      when key.down?    then move(1)
-      when page_key(ev) then nil
-      when key.enter?   then return :commit
-      else
-        if (c = ev.char) && !ev.ctrl? && !ev.alt?
-          case c
-          when 'x' then release_selected
-          when 'j' then move(1)
-          when 'k' then move(-1)
-          end
-        end
-      end
-      :stay
+    private def letter_key(c : Char) : Nil
+      release_selected if c == 'x'
     end
 
     # Hand the selected session to the open-site's release closure and mark the row released
@@ -102,51 +86,16 @@ module Gori::Tui
       @rows[@selected] = row.copy_with(live: false)
     end
 
-    # Floors at 30 cells, not the base's 18, like OastProviderPicker: every row carries a
-    # right-aligned "N hits · age · ● live" meta.
-    private def min_w : Int32
-      30
-    end
-
-    private def draw_row(screen : Screen, box : Rect, ry : Int32, idx : Int32, active : Bool, bg : Color) : Nil
+    # A session IS its payload host to the operator — "which of these is the oast.pro one" is
+    # the question this card gets asked.
+    private def row_parts(idx : Int32) : {String, String, String, Bool}
       row = @rows[idx]
-      # The right-hand meta ("4 hits · 2h · ● live") is laid down FIRST so the provider name
-      # can be width-clamped to whatever is left. The other order lets a long provider name
-      # push the age and the live marker off the card — and the live marker is the one cell
-      # that tells the operator this row needs no resume at all.
-      meta = meta_text(row)
-      mx = box.right - 1 - Screen.draw_width(meta)
-      screen.text(mx, ry, meta, row.live ? Theme.green : Theme.muted, bg)
-      name_w = {mx - (box.x + 3) - 1, 1}.max
-      screen.text(box.x + 3, ry, row.provider, active ? Theme.text_bright : Theme.text, bg,
-        Attribute::Bold, width: name_w)
-      # The payload host under the name would need a second row per session; instead it rides
-      # after the name when there is room. A session IS its payload host to the operator —
-      # "which of these is the oast.pro one" is the question this card gets asked.
-      #
-      # draw_width, not `size`: a provider name is whatever the operator typed, and a CJK one
-      # occupies two cells per character. Advancing by the CHARACTER count would start the host
-      # on top of the second half of the name it is supposed to follow.
-      used = Screen.draw_width(row.provider) + 1
-      if used < name_w
-        screen.text(box.x + 3 + used, ry, row.payload_host, Theme.muted, bg,
-          width: name_w - used)
-      end
+      {row.provider, row.payload_host, meta_text(row), row.live}
     end
 
     private def meta_text(row : Row) : String
       base = "#{Gori.plural(row.hits, "hit")} · #{Fmt.ago(row.started_at)}"
       row.live ? "#{base} · ● live" : base
-    end
-
-    # Widest row plus its padding, driving the card width. Same reason as draw_row's `used`:
-    # the provider name and the payload host are measured in CELLS, not characters.
-    private def card_w : Int32
-      widest = @rows.max_of do |r|
-        Screen.draw_width(r.provider) + Screen.draw_width(r.payload_host) +
-          Screen.draw_width(meta_text(r)) + 6
-      end
-      widest + 8
     end
   end
 end

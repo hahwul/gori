@@ -215,6 +215,29 @@ module Gori::Tui
       box.bottom - 1 - (box.y + LIST_OFFSET)
     end
 
+    # The card's widest, before the area clamp.
+    private def card_max_w : Int32
+      96
+    end
+
+    # A centred card filling the body height, `card_max_w` wide at most — a stable height, so
+    # it does not resize as the filter narrows. nil when there isn't room to draw.
+    def overlay_box(area : Rect) : Rect?
+      w = {area.w - 4, card_max_w}.min
+      h = area.h - 2
+      return nil if w < 30 || h < 8
+      Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - h) // 2, w, h)
+    end
+
+    # Row index under (mx,my), mirroring the list loop under `render_filter`; nil off it.
+    def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
+      i = my - (box.y + LIST_OFFSET)
+      return nil if i < 0 || i >= list_height(box)
+      return nil if mx < box.x + 1 || mx >= box.right - 1
+      ri = @scroll + i
+      ri < entry_count ? ri : nil
+    end
+
     # Recompute the visible rows for the current query and reset the cursor. Subclasses
     # own their row type, so each filters its own.
     protected abstract def refilter : Nil

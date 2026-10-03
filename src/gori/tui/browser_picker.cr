@@ -1,23 +1,18 @@
 require "./screen"
 require "./theme"
 require "./frame"
-require "./overlay"
+require "./picker_overlay"
 require "../browser"
-require "./viewport"
 
 module Gori::Tui
   # The "Open browser" overlay (palette → browser.open). Lists the browsers
   # detected on this system; ↵ launches the highlighted one pre-trusted (gori's
   # CA trusted + proxy set). A dumb list: the Runner owns detection, and the launch
   # itself rides in as the `on_commit` closure at the open-site.
-  class BrowserPicker < Overlay
-    getter selected : Int32
-
+  class BrowserPicker < PickerOverlay
     # `certutil_available` is resolved once by the caller (Runner) rather than probed
     # here on every render — detection belongs to the Runner, per this class's doc.
     def initialize(@browsers : Array(Browser::Found), @certutil_available : Bool = true)
-      @selected = 0
-      @scroll = 0
     end
 
     # --- Overlay contract (see overlay.cr) ---
@@ -50,21 +45,8 @@ module Gori::Tui
       end
     end
 
-    # A click on a row selects AND launches it (matching the ↵ model); a click outside
-    # the card dismisses; a click inside but off any row keeps it open.
-    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
-      box = overlay_box(area)
-      return :cancel if box.nil? || !box.contains?(mx, my)
-      if idx = row_at(box, mx, my)
-        set_selected(idx)
-        return :commit
-      end
-      :stay
-    end
-
-    def move(delta : Int32) : Nil
-      return if @browsers.empty?
-      @selected = (@selected + delta).clamp(0, @browsers.size - 1)
+    def entry_count : Int32
+      @browsers.size
     end
 
     def selected_browser : Browser::Found?
@@ -91,16 +73,6 @@ module Gori::Tui
       return nil if mx < box.x + 1 || mx >= box.right - 1
       ri = @scroll + i
       ri < @browsers.size ? ri : nil
-    end
-
-    private def ensure_visible(list_h : Int32) : Nil
-      @scroll = Viewport.scroll_to_show(@selected, @scroll, list_h, @browsers.size)
-    end
-
-    # Clamp + set the highlighted row (mirrors `move`'s clamp).
-    def set_selected(idx : Int32) : Nil
-      return if @browsers.empty?
-      @selected = idx.clamp(0, @browsers.size - 1)
     end
 
     # Centered list card over `area` (the body rect).
