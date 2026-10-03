@@ -173,6 +173,23 @@ describe "the redaction preview" do
     lines[1].should contain "/access_token"
   end
 
+  # A login frame carries the credential an HTTP body would; the report used to leave frames out
+  # and say "0 values redacted" over a transcript it printed in clear.
+  it "lists and counts a WebSocket frame's replacements with the bodies" do
+    frame = Gori::Store::WsMessage.new(0_i64, 3_i64, nil, 0_i64, "out", 1, %({"password":"pw"}).to_slice)
+    before = Gori::Redact.salt
+    Gori::Redact.salt = "spec-salt"
+    begin
+      clean, hits = Gori::Redact::Wire.ws_messages([frame], Gori::Redact::Matcher.new(Gori::Redact::DEFAULT_PROFILE))
+    ensure
+      Gori::Redact.salt = before
+    end
+    String.new(clean[0].payload).should_not contain(%("pw"))
+    report = report_for(request_body: "", response_body: "").copy_with(frames: hits)
+    report.count.should eq(1)
+    Gori::CLI::Run.redact_preview_for_spec(report).lines[0].should contain "frame"
+  end
+
   it "says plainly when a profile matches nothing here" do
     Gori::CLI::Run.redact_preview_for_spec(
       report_for(request_body: %({"a":1}), response_body: %({"b":2})))

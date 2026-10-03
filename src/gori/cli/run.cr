@@ -115,17 +115,10 @@ module Gori
     # and never take the capture lock, so they're safe to run alongside a live
     # capturing instance (SQLite WAL; #752).
     module Run
+      # A broken STDOUT pipe (`gori run … | head`) is answered once, in `CLI.run`.
       def self.dispatch(args : Array(String)) : Nil
         route_logs_to_stderr
         dispatch_subcommand(args)
-      rescue ex : IO::Error
-        # `gori run … | head` (or any reader that closes early) breaks the STDOUT
-        # pipe; a well-behaved Unix filter exits quietly on EPIPE rather than
-        # dumping an IO::Error backtrace. Re-raise anything that isn't a broken pipe.
-        # (Kept as a thin wrapper around the generated dispatch_subcommand; see the
-        # Subcommand registry below.)
-        raise ex unless ex.os_error == Errno::EPIPE
-        exit 0
       end
 
       # STDOUT on these commands is DATA — a flow listing, a sitemap tree, `--format json` being
@@ -181,7 +174,8 @@ module Gori
           # branches, where args[0] matched a subcommand string (so args is non-empty and the
           # tail slice is safe).
           case sub = args.first?
-          when nil, "-h", "--help" then print_help
+          # `help` too: it is the word people type, and refusing it pointed them at `shell`.
+          when nil, "-h", "--help", "help" then print_help
           {% for m in cmds %}
             when {{ m.annotation(Subcommand).args.splat }} then {{ m.name }}(args[1..])
           {% end %}
@@ -566,8 +560,8 @@ module Gori
       # for a file that exists but cannot be opened (mode 000, an unreadable parent, a
       # foreign-owned path), and it is a TOCTOU window besides — the path can be deleted
       # between the check and the read. `File.read` then raises `File::AccessDeniedError` /
-      # `File::NotFoundError`, and `File::Error < IO::Error` is re-raised by `Run.dispatch`
-      # (which only absorbs EPIPE), so it escapes `CLI.run`'s `Gori::Error`-only rescue.
+      # `File::NotFoundError`, and `File::Error < IO::Error` is re-raised by `CLI.run` (which
+      # absorbs only EPIPE of that class), so it escapes as a backtrace.
       # `run/rewriter.cr`'s `read_stub_response` reads through here for the same guard, rather
       # than keeping the copy it was once credited with and never had: `File.read` on a
       # DIRECTORY raises a bare `IO::Error` from `read(2)` (the `open(2)` succeeds), which a
@@ -618,7 +612,7 @@ module Gori
       # a pipe, a redirect or a file — the three spellings that do not echo and do end.
       #
       # The rescue is the point of routing through here rather than a bare `io.gets_to_end`.
-      # `Run.dispatch` re-raises any non-EPIPE `IO::Error` and `CLI.run` rescues only
+      # `CLI.run` re-raises any non-EPIPE `IO::Error` and otherwise rescues only
       # `Gori::Error`, so an unreadable stdin — fd 0 closed by a cron/systemd unit, or a
       # `Process.run` with no stdin pipe — reached the operator as a Crystal backtrace. Same
       # guard, and same reason for it, as `read_input_file`'s `File::Error` rescue.
@@ -636,8 +630,8 @@ module Gori
 
       # The IMPLICIT stdin road's read: no terminal guard — a terminal there means "no source
       # was given", and each caller already answers that with its own usage line — but the
-      # same `IO::Error` rescue the explicit doors get. `Run.dispatch` re-raises any non-EPIPE
-      # `IO::Error` and `CLI.run` rescues only `Gori::Error`, so fd 0 closed by a cron or
+      # same `IO::Error` rescue the explicit doors get. `CLI.run` re-raises any non-EPIPE
+      # `IO::Error` and otherwise rescues only `Gori::Error`, so fd 0 closed by a cron or
       # systemd unit (`gori run notes create 0<&-`) reached the operator as a Crystal
       # backtrace on all seven of these while the five flag doors printed a sentence.
       #
@@ -1673,7 +1667,7 @@ module Gori
         rest = [] of String
         # Classify on a scrubbed copy: argv comes from the OS unvalidated, and PCRE2 raises
         # "Regex match error: UTF-8 error" on a non-UTF-8 subject — `gori run history $'\xff'`
-        # backtraced out of `main`, since neither `Run.dispatch` nor `CLI.run` rescues
+        # backtraced out of `main`, since `CLI.run` does not rescue
         # ArgumentError. Same remedy as `read_token_list` in ./run/sequence.cr. `scrub` returns
         # self for valid UTF-8, and it is `a` (not `a.scrub`) that is kept, so the operator's
         # query bytes reach QL exactly as typed.
@@ -1887,7 +1881,7 @@ module Gori
       # after `--` arrives in the second, and dropping it was a bug here once. `-h` is added
       # after the command's own flags, so `--help` still lists it last. `invalid_option` and
       # `missing_option` are not optional: OptionParser's defaults RAISE, straight past
-      # `Run.dispatch` (rescues IO::Error) and `CLI.run` (rescues Gori::Error) to `main`, which
+      # `CLI.run` (rescues a broken pipe and Gori::Error) to `main`, which
       # prints a Crystal backtrace instead of a one-line refusal
       # (spec/cli/run/option_parser_missing_option_spec.cr).
       private def self.parse_args(args : Array(String), prefix : String, & : OptionParser ->) : Array(String)

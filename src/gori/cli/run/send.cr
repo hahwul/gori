@@ -112,7 +112,7 @@ module Gori
         # expands: those bytes are the body, the way MCP's `body_base64` is.
         body_bytes = body_file_bytes || body.try { |b| (verbatim ? b : Env.expand(b)).to_slice }
         built = send_built(dial_url, raw_content, method, header_pairs, body_bytes, verbatim)
-        outbound = project_outbound(project_name, db_path, allow_unscoped)
+        outbound = project_outbound(project, allow_unscoped)
         plan = begin
           # The shape MCP's `send_request{url}` hands the builder, for the reason it gives: the
           # request was expanded and framed above, so a second expansion pass would expand a

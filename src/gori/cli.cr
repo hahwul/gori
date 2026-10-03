@@ -80,6 +80,13 @@ module Gori
         print_main_help
         exit 1
       end
+    rescue ex : IO::Error
+      # `gori … | head` (or any reader that closes early) breaks the STDOUT pipe; a
+      # well-behaved Unix filter exits quietly on EPIPE rather than dumping a backtrace. Here,
+      # once, for every surface — it lived only in `gori run`, so `gori settings | true`,
+      # `gori ca --pem | true` and `gori --help | true` backtraced. Anything else re-raises.
+      raise ex unless ex.os_error == Errno::EPIPE
+      exit 0
     rescue ex : Error
       # Gori::Error is the project's EXPECTED-error type (see gori.cr) — something the
       # operator can act on, raised with a message written for them. One reaching the top

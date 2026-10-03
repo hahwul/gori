@@ -267,10 +267,19 @@ module Gori::Fuzz
   # Brute-force: every string of length min..max over a charset (odometer). `size`
   # saturates to nil on Int64 overflow so the run is gated by a cap.
   class BruteForce < PayloadSource
+    # The longest payload length any surface accepts. A real length, not Int32::MAX:
+    # `BruteIterator` allocates an odometer of `min` slots up front, so `ab:2000000000` was
+    # an 8.6 GB `Array.new` before a byte was sent — and the request budget caps how MANY
+    # payloads go out, never how long one is. 4096 leaves the one legitimate long shape (a
+    # single-character charset used as padding) intact.
+    MAX_LEN = 4096
+
+    # Lengths are clamped to MAX_LEN here, so no surface can reach the allocation (the TUI
+    # Fuzzer's brute row went straight through); the CLI refuses past it with a message first.
     def initialize(charset : String, min : Int32, max : Int32)
       @chars = charset.chars
-      @min = min < 1 ? 1 : min
-      @max = max < @min ? @min : max
+      @min = min.clamp(1, MAX_LEN).as(Int32)
+      @max = max.clamp(@min, MAX_LEN).as(Int32)
     end
 
     def size : Int64?

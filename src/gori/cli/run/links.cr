@@ -71,10 +71,10 @@ module Gori
                      abort("gori run links: invalid --owner '#{owner_s}' (issue|note)")
         # Copy out of the closure first: `owner_id` is assigned inside an OptionParser block,
         # so Crystal keeps it nilable and `x || abort` does not narrow it in place.
-        oid_opt, pos_opt = link_owner_selection("links", owner_id, note_position)
+        oid_opt, pos_opt = link_owner_selection("list", owner_id, note_position)
 
         oid, resolved = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
-          resolved_id = resolve_link_owner_id(store, owner_kind, oid_opt, pos_opt, "links")
+          resolved_id = resolve_link_owner_id(store, owner_kind, oid_opt, pos_opt, "list")
           # Validate the owner exists, like the mutate path and the MCP list_links tool do —
           # otherwise a typo'd id prints "no links on issue #99999", which reads as "this
           # issue has no evidence" rather than "there is no such issue".

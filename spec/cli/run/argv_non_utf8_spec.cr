@@ -3,7 +3,7 @@ require "../../spec_helper"
 # argv is whatever bytes the OS handed us — Crystal builds those Strings without validating
 # UTF-8 — and `split_ql_negations` matched a PCRE2 regex straight against them. PCRE2 does not
 # fail to match on a bad subject, it RAISES `ArgumentError: Regex match error: UTF-8 error`,
-# and neither `Run.dispatch` (rescues IO::Error) nor `CLI.run` (rescues Gori::Error) catches
+# and `CLI.run` (rescues a broken pipe and Gori::Error) does not catch
 # that, so `gori run history $'\xff'` printed a Crystal backtrace out of `main` before any
 # store was even opened. Reachable from a plain shell, and realistically from a wrapper script
 # interpolating a latin-1 term captured off the wire.

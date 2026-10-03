@@ -67,11 +67,17 @@ module Gori
         # The gate first, and its store separately from the one the cache is written through:
         # `project_outbound` hands its READ connection to the Outbound so the scope keeps
         # reloading, and that connection cannot take the write.
-        outbound = project_outbound(project_name, db_path, allow_unscoped)
+        #
+        # The project is resolved ONCE: the scope that gates the fetch and the project the
+        # schema is cached into must be the same one, not two reads of "most recently active".
+        project = resolve_read_project(project_name, db_path)
+        outbound = project_outbound(project, allow_unscoped)
+        # Routed as `repeater send` and `send` route: by the resolved project's overrides, named
+        # or defaulted — a defaulted one used to dial real DNS and cache that answer into it.
+        overrides = (with_store(project, read_only: true) { |store| Gori::HostOverrides.load(store) } rescue nil)
         client = Gori::Protobuf::Reflection::Client.new(outbound,
           scheme: parts.scheme, host: parts.host, port: parts.port,
-          verify: !insecure, timeout: timeout,
-          overrides: cli_host_overrides(project_name, db_path, nil))
+          verify: !insecure, timeout: timeout, overrides: overrides)
         outcome = begin
           client.fetch
         ensure
@@ -89,7 +95,7 @@ module Gori
         # the condition worth avoiding), and there is nothing to write on that path anyway.
         committed = true
         if (set = outcome.descriptor_set) && outcome.ok?
-          with_store(resolve_read_project(project_name, db_path)) do |store|
+          with_store(project) do |store|
             committed = Gori::Protobuf::Schemas.adopt(store, client.target, outcome.service,
               outcome.services.size, outcome.files, set)
           end

@@ -107,36 +107,34 @@ module Gori::CLI
     begin
       Paths.ensure_dirs
       ca = Proxy::Tls::CertAuthority.load_or_create(ca_dir)
-      if pem
-        print ca.ca_cert_pem
-        # PEM files usually already end with a newline; don't double them.
-        STDOUT.flush
-      else
-        puts ca.ca_cert_path
-      end
-      # `gori ca` is the CA's diagnostic command, so it is where a pair that LOADS but cannot
-      # serve gets named — nothing else ever says it, and the symptom shows up only at the
-      # client (see CertAuthority#usability_error). Reported after the answer, on stderr, and
-      # non-fatally: the path it printed is still correct, and `gori ca --pem | …` pipelines
-      # keep working.
-      begin
-        if problem = ca.usability_error
-          STDERR.puts "gori ca: WARNING — the root CA in #{ca_dir} is unusable: #{problem}. " \
-                      "Clients will reject every certificate gori mints. Run " \
-                      "`gori ca regenerate` (or `gori ca import`) to install a working pair, " \
-                      "then re-trust it."
-        elsif (gaps = ca.strict_verify_gaps).present?
-          STDERR.puts "gori ca: note — #{Proxy::Tls::CertAuthority.strict_verify_warning(gaps)}. " \
-                      "Run `gori ca regenerate` to mint a root that has them, then re-trust it."
-        end
-      rescue
-        # Its own guard, or "non-fatally" above would be a lie: this block sits INSIDE the
-        # rescue that aborts, so anything raised while merely INSPECTING the CA would turn a
-        # `gori ca` that had already printed the right path into exit 1. A diagnostic that
-        # cannot run is not a reason to fail the command the operator actually asked for.
-      end
     rescue ex
       abort "gori ca: could not create/read the CA in #{ca_dir}: #{ex.message}"
+    end
+    # `gori ca` is the CA's diagnostic command, so it is where a pair that LOADS but cannot
+    # serve gets named — nothing else ever says it, and the symptom shows up only at the
+    # client (see CertAuthority#usability_error). On stderr, non-fatally, and BEFORE the
+    # answer: a closed stdout ends the process at the print, and must not swallow it.
+    begin
+      if problem = ca.usability_error
+        STDERR.puts "gori ca: WARNING — the root CA in #{ca_dir} is unusable: #{problem}. " \
+                    "Clients will reject every certificate gori mints. Run " \
+                    "`gori ca regenerate` (or `gori ca import`) to install a working pair, " \
+                    "then re-trust it."
+      elsif (gaps = ca.strict_verify_gaps).present?
+        STDERR.puts "gori ca: note — #{Proxy::Tls::CertAuthority.strict_verify_warning(gaps)}. " \
+                    "Run `gori ca regenerate` to mint a root that has them, then re-trust it."
+      end
+    rescue
+      # A diagnostic that cannot run is not a reason to fail the command the operator
+      # actually asked for.
+    end
+    # Outside the rescue: a closed stdout is not a CA that could not be read.
+    if pem
+      print ca.ca_cert_pem
+      # PEM files usually already end with a newline; don't double them.
+      STDOUT.flush
+    else
+      puts ca.ca_cert_path
     end
   end
 
@@ -162,11 +160,15 @@ module Gori::CLI
       # pair, and requiring it made this command unusable in exactly the state it is the
       # documented repair for — a half-present pair, whose own error message says to run
       # `gori ca regenerate`. See CertAuthority.regenerate_at.
-      puts Proxy::Tls::CertAuthority.regenerate_at(ca_dir)
-      STDERR.puts "gori ca: regenerated — re-trust clients; restart any running gori"
+      path = Proxy::Tls::CertAuthority.regenerate_at(ca_dir)
     rescue ex
       abort "gori ca regenerate: could not replace the CA in #{ca_dir}: #{ex.message}"
     end
+    # Reported OUTSIDE the rescue: the CA is already replaced, and a closed stdout (`| true`)
+    # used to read as "could not replace", inviting a script to rotate it again. The stderr
+    # note goes first so a closed stdout cannot swallow it.
+    STDERR.puts "gori ca: regenerated — re-trust clients; restart any running gori"
+    puts path
   end
 
   # Interactive gate for regenerate (skipped when --yes). Non-tty stdin without --yes
@@ -227,12 +229,13 @@ module Gori::CLI
       # (the state an import is a perfectly good fix for) and, in a fresh dir, minted a gori
       # root just to overwrite it a moment later. See CertAuthority.import_at.
       path, warning = Proxy::Tls::CertAuthority.import_at(ca_dir, cert, key)
-      puts path
-      STDERR.puts "gori ca: WARNING — #{warning}" if warning
-      STDERR.puts "gori ca: imported — re-trust the imported cert; restart any running gori"
     rescue ex
       abort "gori ca import: could not install the CA in #{ca_dir}: #{ex.message}"
     end
+    # Outside the rescue and stderr first, as in regenerate: the import has already happened.
+    STDERR.puts "gori ca: WARNING — #{warning}" if warning
+    STDERR.puts "gori ca: imported — re-trust the imported cert; restart any running gori"
+    puts path
   end
 
   # Interactive gate for import (skipped when --yes). Same non-tty rule as regenerate.

@@ -165,12 +165,11 @@ module Gori
         abort "gori run repeater h2: --fields is required" if file.nil? || file.empty?
         fields, body = parse_h2_fields_file(read_input_file(file, "gori run repeater h2"))
 
-        overrides = begin
-          with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
-            Gori::HostOverrides.load(store)
-          end
-        end
-        outbound = project_outbound(proj.name, proj.db, allow_unscoped)
+        # Resolved ONCE: the scope that gates this send and the overrides that route it must
+        # come from the same project, not two reads of "most recently active".
+        project = resolve_read_project(proj.name, proj.db)
+        overrides = with_store(project, read_only: true) { |store| Gori::HostOverrides.load(store) }
+        outbound = project_outbound(project, allow_unscoped)
         plan = begin
           Repeater::Plan.build(Repeater::PlanOptions.new(
             h2_fields: fields, h2_body: body, target: tgt,
@@ -1172,7 +1171,7 @@ module Gori
         end
 
         activate_slot(slot, "gori run repeater race")
-        outbound = project_outbound(proj.name, proj.db, allow_unscoped)
+        outbound = project_outbound(project, allow_unscoped)
         plan, labels = build_cli_race_plan(loaded, mode, outbound, insecure, host_overrides,
           verbatim, timeout, reframe_grpc, tls_preset)
 
@@ -1237,7 +1236,7 @@ module Gori
         loaded, host_overrides, mode = load_timing_members(project, ids, verbatim, force_http2)
 
         activate_slot(slot, "gori run repeater timing")
-        outbound = project_outbound(proj.name, proj.db, allow_unscoped)
+        outbound = project_outbound(project, allow_unscoped)
         # Reuse the race's origin/transport unification — a differential pair rides one connection
         # shape too, so a mismatch is refused before any send.
         plan, labels = build_cli_race_plan(loaded, mode, outbound, insecure, host_overrides,
@@ -1374,9 +1373,13 @@ module Gori
       end
 
       # The request line (first line) of a member's stored request, for the race transcript.
+      #
+      # A display label, made printable once here for every writer that shows it: scrubbed (a
+      # stored request line need not be UTF-8, and the JSON form printed the raw byte) and
+      # term_safe (the text form printed control bytes straight to the terminal).
       private def self.race_request_line(request : Bytes) : String
-        line = String.new(request[0, {request.size, 200}.min]).lines.first?.try(&.strip)
-        line && !line.empty? ? line : "(no request line)"
+        line = String.new(request[0, {request.size, 200}.min]).scrub.lines.first?.try(&.strip)
+        line && !line.empty? ? Output.term_safe(line) : "(no request line)"
       end
 
       # Print one race's per-member results — status, size and RELEASE-RELATIVE timing (each
@@ -1563,7 +1566,7 @@ module Gori
         # The scope decision every active send passes through. `gori run repeater` dials
         # Repeater::Engine/H2Engine/WsEngine directly, bypassing the proxy's own gate, so
         # Sandbox mode's "blocks ALL out-of-scope traffic" promise lives here.
-        outbound = project_outbound(proj.name, proj.db, allow_unscoped)
+        outbound = project_outbound(project, allow_unscoped)
 
         plan = begin
           Repeater::Plan.build(session_plan_options(rec, insecure, host_overrides, verbatim, timeout, reframe_grpc,
@@ -2742,7 +2745,7 @@ module Gori
                  abort("gori run repeater: flow ##{id}'s request has no request line method to replace " \
                        "(#{request_line_preview(wire)})")
         end
-        outbound = project_outbound(proj.name, proj.db, allow_unscoped)
+        outbound = project_outbound(project, allow_unscoped)
         # Copied out of the closure-captured var first — Crystal keeps that one `Bool?`.
         forced = http2_override
         use_http2 = forced.nil? ? built.http2 : forced

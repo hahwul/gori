@@ -1170,14 +1170,8 @@ module Gori
       # Clamp a brute-force length so an absurd value can't OverflowError past the
       # clean-error handler (the run is still capped by FUZZ_MAX_REQUESTS regardless).
       #
-      # The ceiling is a real length, not Int32::MAX: `BruteIterator` allocates an odometer
-      # of `min` slots up front, so `{"charset":"ab","min":2147483647}` was an 8.6 GB
-      # `Array.new` on the job fiber — and a length that large is never a payload anyone
-      # meant to send. "try every string" is exactly what an agent emits, so bound it here,
-      # at the strict surface, rather than trusting the budget guard: FUZZ_MAX_REQUESTS caps
-      # how MANY payloads are sent, never how long one is. 4096 leaves the one legitimate
-      # long-length shape (a single-character charset used as padding) intact.
-      BRUTE_MAX_LEN = 4096
+      # The ceiling is `Fuzz::BruteForce::MAX_LEN` — see there; the CLI refuses past it.
+      BRUTE_MAX_LEN = Fuzz::BruteForce::MAX_LEN
 
       private def clamp_brute_len(n : Int64) : Int32
         n.clamp(0_i64, BRUTE_MAX_LEN.to_i64).to_i

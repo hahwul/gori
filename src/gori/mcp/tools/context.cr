@@ -412,7 +412,7 @@ module Gori
             ws_msgs = store.ws_messages_for_repeater(r.id)
             if include_content && (t = tally)
               ws_msgs, frames = Redact::Wire.ws_messages(ws_msgs, t.matcher)
-              t.ws_frames += frames
+              t.ws_frames += frames.size
             end
             j.field "ws_mode", true
             j.field "ws_message_count", ws_msgs.size

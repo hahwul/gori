@@ -158,23 +158,34 @@ module Gori
           p.banner = "Usage: gori run evidence show ID [--include-sensitive] [--format=text|json]\n\n" \
                      "Print one frozen copy: its provenance, then the request and the response as\n" \
                      "they were stored. Authorization / Cookie / Set-Cookie / API-key values read\n" \
-                     "[REDACTED] unless --include-sensitive; the SHA-256s cover the stored wire\n" \
-                     "bytes, so verifying them needs the raw head. Bodies are decoded and capped\n" \
-                     "at #{Issues::Export::EVIDENCE_CAP} bytes on the text form."
+                     "[REDACTED] unless --include-sensitive, and bodies go through the project's\n" \
+                     "default redaction profile (`gori run redact default`) unless it is passed;\n" \
+                     "the SHA-256s cover the stored wire bytes, so verifying them needs the raw\n" \
+                     "head. Bodies are decoded and capped at #{Issues::Export::EVIDENCE_CAP} bytes on the text form."
           project_options(p, proj, "read")
           p.on("--include-sensitive", "Emit credential header values verbatim instead of [REDACTED]") { include_sensitive = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
         id = require_positional_id(positional, "gori run evidence show", "id", "gori run evidence")
 
-        ev = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
-          store.get_evidence(id) || abort("gori run evidence show: no frozen evidence with id #{id}")
+        # The project's default body redaction, as MCP `get_evidence` and the TUI apply it — read
+        # while the store is open, since the profile lives on its settings row.
+        ev, note = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
+          ev = store.get_evidence(id) || abort_closing(store, "gori run evidence show: no frozen evidence with id #{id}")
+          matcher = include_sensitive ? nil : Redact::Policy.ambient(store)
+          next {ev, nil} unless matcher
+          clean, count, decoded = Redact::Wire.evidence(ev, matcher)
+          {clean, MCP::Serialize::RedactionNote.new(matcher.profile.name, count, 0, decoded)}
         end
 
         if format == :json
-          puts MCP::Serialize.evidence_json(ev, include_sensitive)
+          puts MCP::Serialize.evidence_json(ev, include_sensitive, redaction: note)
         else
           puts evidence_text(ev, include_sensitive)
+          if n = note
+            STDERR.puts "gori run evidence show: bodies sanitized with profile #{n.profile.inspect} " \
+                        "(#{Gori.plural(n.bodies, "value")} redacted; --include-sensitive shows them)"
+          end
         end
       end
 

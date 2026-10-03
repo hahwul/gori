@@ -81,7 +81,7 @@ module Gori
                  end
         io.puts "gori run #{command}: sanitized with profile #{profile.name.inspect}: " \
                 "#{Gori.plural(total, "value")} redacted from request/response " \
-                "bodies#{across} (heads, URLs and query strings are NOT redacted)"
+                "bodies and WebSocket frames#{across} (heads, URLs and query strings are NOT redacted)"
         if reports.any? { |(_, r)| r.decoded? }
           io.puts "gori run #{command}: a body was content-decoded to be read, so the sanitized " \
                   "head drops Content-Encoding/Transfer-Encoding and carries the new Content-Length"

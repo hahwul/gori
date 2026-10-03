@@ -1037,6 +1037,7 @@ module Gori
       private def self.cmd_env_list(args : Array(String)) : Nil
         proj = ProjectFlags.new
         format = :text
+        show_values = false
 
         leftover = parse_args(args, "gori run project env") do |p|
           p.banner = "Usage: gori run project env [options]\n\n" \
@@ -1045,8 +1046,11 @@ module Gori
                      "Or run with a subcommand:\n" \
                      "  gori run project env set KEY=value\n" \
                      "  gori run project env set KEY value\n" \
-                     "  gori run project env delete|rm KEY"
+                     "  gori run project env delete|rm KEY\n\n" \
+                     "VALUES are [REDACTED] — an env var is usually a token, and this list is\n" \
+                     "scrollback. --show-values prints them."
           project_options(p, proj, "read")
+          p.on("--show-values", "Print the values instead of [REDACTED]") { show_values = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
         refuse_list_leftovers(leftover, "project env", "set, delete/rm, list")
@@ -1060,8 +1064,8 @@ module Gori
               j.array do
                 vars.each do |(key, val)|
                   j.object do
-                    j.field "key", key
-                    j.field "value", val
+                    j.field "key", key.scrub
+                    j.field "value", show_values ? val.scrub : "[REDACTED]"
                   end
                 end
               end
@@ -1069,7 +1073,9 @@ module Gori
           elsif vars.empty?
             STDERR.puts "no project env vars configured"
           else
-            vars.each { |(key, val)| puts "#{key}=#{val}" }
+            # term_safe: a value can arrive in an imported project archive, so it is not
+            # necessarily something this operator typed.
+            vars.each { |(key, val)| puts "#{Output.term_safe(key)}=#{show_values ? Output.term_safe(val) : "[REDACTED]"}" }
           end
         end
       end

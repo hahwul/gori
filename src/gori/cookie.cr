@@ -63,12 +63,16 @@ module Gori
 
     # {format, payload, signature, …} JSON — the stable shape shared by `gori run cookie
     # --format json` and the MCP cookie_decode tool (the DecodedView lesson: one source).
+    #
+    # Scrubbed: a payload's bytes are the cookie's, lifted from captured traffic and chosen by
+    # whoever set it, and one that is not UTF-8 made the whole document invalid JSON. The
+    # structure is ASCII, so a bad byte can only sit inside a string literal.
     def decode_json(cookie : String, format : String? = nil) : String
       case resolve(cookie, format)
       when "flask" then Flask.decode_json(cookie)
       when "rack"  then Rack.decode_json(cookie)
       else              Django.decode_json(cookie)
-      end
+      end.scrub
     end
 
     # Does `secret` sign this cookie? False on a structural parse failure too (a malformed

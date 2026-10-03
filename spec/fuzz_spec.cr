@@ -362,11 +362,20 @@ describe F::PayloadSet do
     # count walked `len` steps per length — ~max²/2 of yield-free integer arithmetic. At
     # max 1e8 that is weeks, on the single-threaded scheduler, before any send: this example
     # simply does not RETURN without the short-circuit (MCP `brute a:1-100000000`).
-    F::BruteForce.new("a", 1, 100_000_000).size.should eq(100_000_000_i64)
+    # (The length is now clamped to MAX_LEN at construction as well — see the next example.)
+    F::BruteForce.new("a", 1, 100_000_000).size.should eq(F::BruteForce::MAX_LEN.to_i64)
     F::BruteForce.new("a", 3, 5).size.should eq(3) # "aaa", "aaaa", "aaaaa"
     vals = [] of String
     F::BruteForce.new("a", 1, 3).each { |v| vals << v }
     vals.should eq(["a", "aa", "aaa"])
+  end
+
+  # The iterator allocates MIN slots up front: an unclamped `ab:2000000000` from any surface
+  # (the TUI Fuzzer's brute row had no limit) was an ~8 GB allocation before the first send.
+  it "clamps both lengths to MAX_LEN, whatever surface built it" do
+    first = nil.as(String?)
+    F::BruteForce.new("ab", 2_000_000_000, 2_000_000_000).each { |v| first = v; break }
+    first.not_nil!.size.should eq(F::BruteForce::MAX_LEN)
   end
 end
 
@@ -650,6 +659,20 @@ describe F::Engine do
     d.progress.sent.should eq(2_i64)     # payloads
     d.progress.requests.should eq(6_i64) # 1 attempt + 2 retries each
     backend.sent.should eq(6)            # …and that is what the origin really received
+  end
+
+  # A retry the request budget refuses sent nothing: the row is the failure it was retrying.
+  # Recording the cap marker read a dead origin as a budget stop.
+  it "keeps the network failure when the budget refuses its retry" do
+    set = F::PayloadSet.new(F::InlineList.new(["a"]))
+    cfg = F::Config.new(mode: F::Mode::Sniper, concurrency: 1, retries: 1,
+      retry_pause: Time::Span.zero)
+    gen = F::Generator.new(base, [set], cfg)
+    dead = FakeBackend.new(F::Origin.new("http", "h", 80)) do |_b|
+      Gori::Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, "connect failed")
+    end
+    results, _ = drain(F::Engine.new(gen, F::Matcher.new, F::CappedBackend.new(dead, 1_i64), cfg))
+    results.first.error.should eq("connect failed")
   end
 
   it "auto-calibration end-to-end: calibrate_baseline's synthetic sends capture EVERY shape " \

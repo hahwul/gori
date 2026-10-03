@@ -383,9 +383,9 @@ module Gori
         matcher = Redact::Policy.ambient(store)
         return {detail, ws_msgs, nil} unless matcher
         clean, report = Redact::Wire.flow(detail, matcher)
-        frames, ws_count = Redact::Wire.ws_messages(ws_msgs, matcher)
+        frames, ws_hits = Redact::Wire.ws_messages(ws_msgs, matcher)
         {clean, frames, Serialize::RedactionNote.new(matcher.profile.name, report.count,
-          ws_count, report.decoded?)}
+          ws_hits.size, report.decoded?)}
       end
 
       # What `load_chunk_source` hands the pager: the head (nil where the source has none),
