@@ -829,7 +829,7 @@ module Gori::Tui
         @rename_name = @rename_name[0, {@rename_name.size - 1, 0}.max]
       elsif ev.ctrl_c?
         return :quit
-      elsif (c = ev.char || key.to_char) && !ev.ctrl? && !ev.alt?
+      elsif (c = ev.char || key.to_char) && !c.control? && !ev.ctrl? && !ev.alt? # termisu reads Tab as '\t'
         @rename_name += c
       end
       nil
@@ -1608,9 +1608,9 @@ module Gori::Tui
         else
           @desc = @desc[0, {@desc.size - 1, 0}.max]
         end
-      elsif key.up? || key.down?
+      elsif key.up? || key.down? || key.tab? || key.back_tab?
         @new_field = @new_field == :name ? :desc : :name
-      elsif (c = ev.char || key.to_char) && !ev.ctrl? && !ev.alt?
+      elsif (c = ev.char || key.to_char) && !c.control? && !ev.ctrl? && !ev.alt?
         if @new_field == :name
           @name += c
         else

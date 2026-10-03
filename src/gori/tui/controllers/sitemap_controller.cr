@@ -488,7 +488,7 @@ module Gori::Tui
       when key.right?     then @sitemap.tag_move(1)
       when key.backspace? then @sitemap.tag_backspace
       else
-        if c && !ev.ctrl? && !ev.alt?
+        if c && !c.control? && !ev.ctrl? && !ev.alt? # termisu reads Tab as '\t'
           @sitemap.tag_insert(c)
           @sitemap.set_tag_preedit("") # clear preedit on committed char
         end

@@ -1313,7 +1313,7 @@ module Gori::Tui
         @view.backspace
       elsif key.delete?
         @view.delete
-      elsif c && !ev.ctrl? && !ev.alt?
+      elsif c && !c.control? && !ev.ctrl? && !ev.alt? # termisu reads Tab as '\t'
         @view.insert(c)
         @view.set_preedit("")
         preview # space cycles the theme in the :theme section — preview it too

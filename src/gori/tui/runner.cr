@@ -2657,7 +2657,7 @@ module Gori::Tui
       elsif @palette.edit(ev, self) # ↑/↓, ⌃/⌥←→, Home/End, Delete, ⌥⌫, ←/→ — before ⌫ and the printables
       elsif key.backspace?
         @palette.backspace(self)
-      elsif c && !ev.ctrl? && !ev.alt?
+      elsif c && !c.control? && !ev.ctrl? && !ev.alt? # termisu reads Tab as '\t'
         @palette.append(c, self)
         @palette.set_preedit("") if @palette.responds_to?(:set_preedit)
       end

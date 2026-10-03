@@ -170,7 +170,7 @@ module Gori::Tui
         focused_form.try(&.delete)
       when ev.ctrl? && key.lower_r?
         return reset_focused
-      when c && !ev.ctrl? && !ev.alt?
+      when c && !c.control? && !ev.ctrl? && !ev.alt? # termisu reads Tab as '\t'
         # Printable (incl. space) → into the focused field, exactly like the overlay:
         # space toggles a bool / cycles a choice / types into text.
         if f = focused_form
