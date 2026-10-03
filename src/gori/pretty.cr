@@ -357,13 +357,18 @@ module Gori
     # text between tags is dropped; element text is trimmed. ANY imbalance (a stray
     # close, leftover open depth, or an unterminated `<`) aborts to nil so the caller
     # falls back to the raw bytes rather than showing a mangled tree.
+    #
+    # The output cap is checked as lines accrue, not on the joined result: each tag gets a
+    # line indented up to MAX_DEPTH, so a 1 MiB run of `<a>` reflows to ~170x its size and
+    # used to allocate hundreds of MB on every render just to be refused.
     private def indent_xml(str : String) : String?
       src = str.to_slice
       n = src.size
       depth = 0
-      lines = [] of String
+      buf = String::Builder.new
       i = 0
       while i < n
+        return nil if buf.bytesize > MAX_OUT_PRETTY
         if src[i] == 0x3C # '<'
           tend = tag_end(src, i)
           return nil if tend < 0
@@ -372,12 +377,12 @@ module Gori
           when :close
             depth -= 1
             return nil if depth < 0
-            lines << indent(depth) + tok
+            xml_line(buf, depth, tok)
           when :open
-            lines << indent(depth) + tok
+            xml_line(buf, depth, tok)
             depth += 1
           else # selfclose / comment / cdata / decl / doctype
-            lines << indent(depth) + tok
+            xml_line(buf, depth, tok)
           end
           i = tend
         else
@@ -386,11 +391,11 @@ module Gori
             i += 1
           end
           text = String.new(src[start, i - start]).strip
-          lines << indent(depth) + text unless text.empty?
+          xml_line(buf, depth, text) unless text.empty?
         end
       end
-      return nil if depth != 0 || lines.empty?
-      lines.join('\n')
+      return nil if depth != 0 || buf.empty?
+      buf.to_s
     end
 
     # ---- HTML (additive, insert-only — never drops/alters a byte) ----------
@@ -419,6 +424,7 @@ module Gori
       prev_was_tag = false
       i = 0
       while i < n
+        return nil if buf.bytesize > MAX_OUT_PRETTY # see `indent_xml`
         if src[i] == 0x3C # '<'
           tend = tag_end(src, i)
           return nil if tend < 0
@@ -455,6 +461,11 @@ module Gori
         end
       end
       buf.to_s
+    end
+
+    private def xml_line(buf : String::Builder, depth : Int32, text : String) : Nil
+      buf << '\n' unless buf.empty?
+      buf << indent(depth) << text
     end
 
     private def emit_tag(buf : String::Builder, depth : Int32, tok : String, prev_was_tag : Bool) : Nil

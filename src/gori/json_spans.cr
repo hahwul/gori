@@ -102,15 +102,11 @@ module Gori
       io.to_slice
     end
 
-    # Is `bytes` exactly one JSON value? The stdlib lexer's answer, without its number
-    # conversion: `skip` reads a number as the text it is.
+    # Is `bytes` exactly one JSON value? `RawJson.valid?`: the stdlib lexer without its number
+    # conversion, plus the trailing-data check it skips after a root scalar.
     def valid?(bytes : Bytes) : Bool
       return false if bytes.empty?
-      pull = JSON::PullParser.new(String.new(bytes))
-      pull.skip
-      pull.kind.eof?
-    rescue JSON::ParseException
-      false
+      RawJson.valid?(String.new(bytes))
     end
 
     # The structural walk over bytes `valid?` accepted. Iterative, so nesting depth costs heap

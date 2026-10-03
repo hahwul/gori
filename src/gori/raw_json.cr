@@ -26,7 +26,7 @@ module Gori
     def parse(json : String) : JSON::Any
       pull = JSON::PullParser.new(json)
       value = read_any(pull)
-      finish(pull)
+      finish(pull, json)
       value
     end
 
@@ -36,7 +36,7 @@ module Gori
     def valid?(json : String) : Bool
       pull = JSON::PullParser.new(json)
       pull.skip
-      finish(pull)
+      finish(pull, json)
       true
     rescue JSON::ParseException
       false
@@ -48,7 +48,7 @@ module Gori
     def reformat(json : String, indent : String? = nil) : String
       pull = JSON::PullParser.new(json)
       text = JSON.build(indent) { |j| pull.read_raw(j) }
-      finish(pull)
+      finish(pull, json)
       text
     end
 
@@ -449,12 +449,12 @@ module Gori
       pull = JSON::PullParser.new(json)
       unless pull.kind.begin_object?
         pull.read_raw
-        finish(pull)
+        finish(pull, json)
         return nil
       end
       acc = [] of {String, String}
       pull.read_object { |key| acc << {key, pull.read_raw} }
-      finish(pull)
+      finish(pull, json)
       acc
     end
 
@@ -512,9 +512,30 @@ module Gori
     end
 
     # A value followed by anything but end-of-input is not one JSON document.
-    private def finish(pull : JSON::PullParser) : Nil
-      return if pull.kind.eof?
+    #
+    # The pull parser checks what follows a root ARRAY or OBJECT, but past a root SCALAR it
+    # reports EOF whatever comes next: `1[,]`, `1 2` and `"a" "b"` all read as one value. A
+    # walker trusting that answer popped an empty stack. Inside brackets the same scalar is
+    # a container's member, where the parser does check what follows, so it is re-read there.
+    private def finish(pull : JSON::PullParser, json : String) : Nil
+      return if pull.kind.eof? && (container_root?(json) || lone_scalar?(json))
       raise JSON::ParseException.new("unexpected trailing data", pull.line_number, pull.column_number)
+    end
+
+    private def container_root?(json : String) : Bool
+      json.each_byte do |b|
+        next if b === ' ' || b === '\t' || b === '\n' || b === '\r'
+        return b === '{' || b === '['
+      end
+      false
+    end
+
+    private def lone_scalar?(json : String) : Bool
+      pull = JSON::PullParser.new("[#{json}]")
+      pull.skip
+      pull.kind.eof?
+    rescue JSON::ParseException
+      false
     end
   end
 end

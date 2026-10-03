@@ -64,3 +64,20 @@ describe Gori::JsonSpans do
     String.new(res[bytes.size - 1..]).should eq(%(,"p":"v"}))
   end
 end
+
+# The pull parser reports EOF after a root SCALAR whatever follows it, so these passed
+# `valid?` and the walk then popped an empty stack (an IndexError out of `gori run mine`).
+describe "Gori::JsonSpans on a root scalar with trailing data" do
+  it "is not one JSON value and yields no spans" do
+    ["1[,]", "true[]", %(0["a",{}]), "1 2", %("a" "b"), "1],[2"].each do |body|
+      bytes = body.to_slice
+      Gori::JsonSpans.valid?(bytes).should be_false
+      Gori::RawJson.valid?(body).should be_false
+      expect_raises(JSON::ParseException) { Gori::RawJson.parse(body) }
+    end
+    [" 1 ", %("s"), "null", "[1]", %({"a":1})].each do |body|
+      Gori::JsonSpans.valid?(body.to_slice).should be_true
+      Gori::RawJson.valid?(body).should be_true
+    end
+  end
+end
