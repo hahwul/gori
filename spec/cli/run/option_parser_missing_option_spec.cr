@@ -3,8 +3,8 @@ require "../../spec_helper"
 # Every parser under `src/gori/cli/` that takes a `=VALUE` flag, as a CLASS.
 #
 # `OptionParser`'s default `missing_option` handler RAISES `OptionParser::MissingOption`. That
-# is neither `Gori::Error` (the only type `CLI.run` rescues, src/gori/cli.cr) nor `IO::Error`
-# (the only type `Run.dispatch` rescues, src/gori/cli/run.cr), so a value flag left bare at the
+# is neither `Gori::Error` nor a broken-pipe `IO::Error` (the only two `CLI.run` rescues,
+# src/gori/cli.cr), so a value flag left bare at the
 # end of argv — `gori run rewriter rm 1 --project`, or an unset `--project "$P"` in a wrapper
 # script — reaches `main` and prints a Crystal backtrace instead of a one-line abort:
 #
