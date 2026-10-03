@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Settings: two gori windows no longer drop each other's saved decoder chains, global Probe scan rules or OAST providers (a deleted one no longer comes back), a custom colour deleted in another window can be re-created, and a `settings.json` that broke while gori ran is kept as `.corrupt` before the next save replaces it (#1495)
+- Settings: values gori cannot read stay as written instead of failing open — a non-string `network.upstream_proxy` keeps refusing routes after any save, a non-string rewriter `host` or `replacement` makes the rule inert rather than global, a non-boolean MCP permission switch denies its group, and a `--config` naming a new file or an `env.syntax` typo is no longer saved as `bare` (#1495)
+- Settings profiles: `import --dry-run` refuses a malformed upstream rule as the real import does, and a profile no longer carries this install's update-check state or recent wordlist paths (#1495)
+- Preferences: a section whose save could not be written is still applied to the running proxy, as its "applied" footer says (#1495)
 - Setup wizard: each step's card sits centred on its content instead of over three blank rows, so a short terminal shows more themes, and a mouse-wheel scroll cancels a pending esc-to-skip (#1494)
 - CLI: a closed pipe (`| head`) ends `gori --help`, `gori settings` and `gori ca` quietly as it already ended `gori run`, and `ca regenerate` / `ca import` no longer report a failure after they replaced the CA (#1493)
 - CLI: `gori run help` prints the help instead of suggesting `shell` (#1493)
