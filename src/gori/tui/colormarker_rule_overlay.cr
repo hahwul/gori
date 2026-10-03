@@ -346,7 +346,8 @@ module Gori::Tui
     end
 
     def render(screen : Screen, area : Rect) : Nil
-      refresh_preview # see there: a form opened on an existing rule has never had a keystroke
+      # see there: a form opened on an existing rule has never had a keystroke
+      refresh_preview if overlay_box(area)
       super
     end
 
