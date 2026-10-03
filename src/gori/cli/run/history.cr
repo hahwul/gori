@@ -668,7 +668,8 @@ module Gori
         scoped = in_scope ? " in scope" : ""
         viewed = view ? " in the #{view.inspect} view" : ""
         static = hide_static ? " (static assets hidden)" : ""
-        "no flows#{query ? " match #{query.inspect}" : ""}#{scoped}#{viewed}#{static}"
+        hint = query.try { |q| QL.missing_colon_hint(q) }.try { |h| " (#{h})" }
+        "no flows#{query ? " match #{query.inspect}" : ""}#{scoped}#{viewed}#{static}#{hint}"
       end
 
       # The sentence a listing cut by `--limit` prints, or nil when the page WAS the whole

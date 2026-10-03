@@ -203,6 +203,9 @@ module Gori
                            "list_history / list_sitemap / probe_scan REFUSE it (QUERY_SYNTAX) " \
                            "unless you pass lenient:true"
                 end
+                if hint = QL.missing_colon_hint(query)
+                  j.string hint
+                end
                 j.string "dropped (broadens results): #{a.ignored.join(", ")}" unless a.ignored.empty?
                 unless a.invalid_regex.empty?
                   j.string "invalid regex, matches nothing: #{a.invalid_regex.join(", ")} — " \

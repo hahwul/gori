@@ -1441,3 +1441,30 @@ describe "Gori::Store#search (QL)" do
     end
   end
 end
+
+describe "Gori::QL.missing_colon_hint" do
+  it "names the colon form of a comparison typed without one" do
+    Gori::QL.missing_colon_hint("status>=400")
+      .should eq("`status>=400` is searched as text — did you mean `status:>=400`?")
+    Gori::QL.missing_colon_hint("host:api dur>500ms").not_nil!.should contain("`dur:>500ms`")
+    Gori::QL.missing_colon_hint("Status<500").not_nil!.should contain("`status:<500`")
+    Gori::QL.missing_colon_hint("host=api.test").not_nil!.should contain("`host:api.test`")
+    Gori::QL.missing_colon_hint("method!=GET").not_nil!.should contain("`-method:GET`")
+    Gori::QL.missing_colon_hint("resp.size>=1k").not_nil!.should contain("`resp.size:>=1k`")
+  end
+
+  it "stays quiet on everything else" do
+    Gori::QL.missing_colon_hint("status:>=400").should be_nil   # a real field term
+    Gori::QL.missing_colon_hint(%("status>=400")).should be_nil # quoted: typed on purpose
+    Gori::QL.missing_colon_hint("-status>=400").should be_nil   # an exclude
+    Gori::QL.missing_colon_hint("NOT status>=400").should be_nil
+    Gori::QL.missing_colon_hint("stauts>=400").should be_nil # unknown field
+    Gori::QL.missing_colon_hint("a=b").should be_nil
+    Gori::QL.missing_colon_hint("status>=").should be_nil
+    Gori::QL.missing_colon_hint("admin").should be_nil
+  end
+
+  it "does not change what the query compiles to" do
+    Gori::QL.parse("status>=400").sql.should_not contain("status >=")
+  end
+end

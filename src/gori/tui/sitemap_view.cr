@@ -440,6 +440,9 @@ module Gori::Tui
            QL::SIDE_PREFIXES, CANDIDATE_FIELDS)
         return FilterAst.unknown_field_note(u)
       end
+      if hint = QL.missing_colon_hint(residual)
+        return hint
+      end
       # Same note History carries, for the same reason: an empty tree cannot say WHY it is empty.
       return "no scope rules — nothing is in scope" if QL.uses_scope?(residual) && !lens.try(&.configured?)
       return static_hidden_note if @hide_static
