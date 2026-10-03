@@ -236,10 +236,11 @@ module Gori::RequestMacro
         n = i + 1
         # A stop lands between steps, not after the last one: the steps are a login-shaped chain
         # of round trips, and the promise is that only requests already in flight finish.
+        # Asked AFTER the pacer: a stop ends its wait early, and the step must not then go out.
+        pacer.try(&.call)
         if cancelled.try(&.call)
           return Outcome.new(false, total, sent, n, step.label, nil, "the run was stopped", [] of String, flows, stopped: true)
         end
-        pacer.try(&.call)
         plan = begin
           Repeater::Plan.build(Runner.plan_options(step.rec, @overrides, @verify), @outbound)
         rescue ex : Repeater::PlanError

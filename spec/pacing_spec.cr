@@ -20,10 +20,9 @@ private class PaceHarness
     @last_dispatch = Time.instant
   end
 
-  # What a send site does: wait for the rate, then "send".
+  # What a send site does: wait for the rate, then "send" unless the run stopped meanwhile.
   def send_one : Nil
-    pace(pace_interval)
-    @stamps << Time.instant
+    @stamps << Time.instant if pace(pace_interval)
   end
 end
 
@@ -82,5 +81,6 @@ describe Gori::Pacing do
     started = Time.instant
     h.send_one
     (Time.instant - started).should be < 2.seconds
+    h.stamps.size.should eq(1) # the slot it waited for is not a send to make
   end
 end

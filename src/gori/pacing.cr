@@ -59,7 +59,11 @@ module Gori
     # `{.., now}.max` floors the claim at the present: after an idle stretch the stored
     # instant is far in the past, and without the floor a burst of callers would all compute
     # a target already elapsed and go out at once — the opposite of a rate limit.
-    private def pace(interval : Time::Span?) : Nil
+    #
+    # Returns false when the run was stopped during the wait: the slot it waited for is not
+    # a send to make, and every caller skips it. Sending anyway let a stop release all the
+    # held slots at once, unpaced.
+    private def pace(interval : Time::Span?) : Bool
       if interval
         now = Time.instant
         target = {@last_dispatch, now}.max
@@ -69,6 +73,7 @@ module Gori
       # Jitter applies on its own — don't gate it behind a base rate, which silently
       # dropped jitter unless rps/throttle was also set.
       nap(rand(@config.jitter_ms).milliseconds) if @config.jitter_ms > 0
+      !stopped?
     end
 
     NAP_SLICE = 250.milliseconds

@@ -351,7 +351,7 @@ module Gori::Miner
           # Early-out once the hard cap is hit — the CappedBackend also refuses any
           # send that slips past this racy check, so the network count never exceeds it.
           break if @backend.cap_reached?
-          pace(interval)
+          break unless pace(interval)
           @inflight += 1
           jobs.send(task)
         elsif @inflight > 0
@@ -544,7 +544,7 @@ module Gori::Miner
         # A confirm round is a REQUEST. Only the bucket send that produced this candidate was
         # paced by the dispatch loop, so these ran on top of the operator's rate — up to
         # `confirm_rounds` extra unpaced requests for every candidate that shows signal.
-        pace(interval)
+        break unless pace(interval)
         raw = send_with_retries(bytes, spans)
         if err = raw.error
           # A confirm round is a REQUEST like any other, and this was the one send path that
