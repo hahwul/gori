@@ -37,7 +37,7 @@ module Gori::CLI::Run
   end
 
   def self.rewriter_rule_json_for_spec(r : Store::MatchRule) : String
-    JSON.build { |j| rewriter_rule_json(j, r) }
+    JSON.build { |j| Gori::MCP::Serialize.match_rule(j, r) }
   end
 
   def self.extract_rule_row_for_spec(r : Store::ExtractRule) : String

@@ -928,8 +928,8 @@ describe Gori::CLI::Output do
   it "emits valid JSON for a non-UTF-8 payload (row and array)" do
     binary = String.new(Bytes[0xff_u8, 0xfe_u8])
     r = F::Result.new(1_i64, [binary], nil, 200, 3_i64, 1, 1, 10_i64, nil, true, false, nil)
-    row = Gori::CLI::Output.fuzz_row_json(r)     # jsonl path
-    arr = Gori::CLI::Output.fuzz_array_json([r]) # json path
+    row = Gori::CLI::Output.fuzz_row_json(r)                                     # jsonl path
+    arr = JSON.build { |j| j.array { Gori::CLI::Output.fuzz_row_fields(j, r) } } # json path
     # `valid_encoding?`, not `JSON.parse`: Crystal's parser tolerates its own invalid-UTF-8
     # output, but jq / python's json / every other consumer rejects a document with a raw
     # \xff in a string — which is exactly what the finding reproduced. The emitted bytes must

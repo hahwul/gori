@@ -1,6 +1,7 @@
 require "json"
 require "../../store"
 require "../../colormarker"
+require "../serialize"
 
 module Gori
   module MCP
@@ -31,24 +32,7 @@ module Gori
             j.field "count", rules.size
             j.field "rules" do
               j.array do
-                rules.each do |r|
-                  j.object do
-                    j.field "id", r.id
-                    j.field "scope", r.scope.label
-                    # The EFFECTIVE state here. For a global rule the library's own default may
-                    # differ — this project overrode it — and both are reported so an agent can
-                    # tell "off everywhere" from "off in this engagement".
-                    j.field "enabled", r.enabled?
-                    if r.global?
-                      j.field "overridden", r.overridden?
-                      j.field "default_enabled", Settings.colormarker_rules.find { |g| g.id == r.id }.try(&.enabled)
-                    end
-                    j.field "name", r.name
-                    j.field "when", r.match_filter
-                    j.field "color", r.color
-                    j.field "style", r.style.label
-                  end
-                end
+                rules.each { |r| Serialize.color_rule(j, r) }
               end
             end
           end

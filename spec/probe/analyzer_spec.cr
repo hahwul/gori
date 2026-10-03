@@ -724,13 +724,13 @@ describe "Gori::Probe.cwe" do
   it "emits cwe fields in the shared JSON shape, and omits them when unmapped" do
     mapped = Gori::Probe::Detection.new("dom_xss", "client", "acme.test", "https://acme.test/",
       "t", Gori::Store::Severity::Medium)
-    json = Gori::CLI::Output.probe_group_json(Gori::Probe.group([mapped]).first)
+    json = JSON.build { |j| Gori::Probe.group_json(j, Gori::Probe.group([mapped]).first) }
     JSON.parse(json)["cwe"].as_s.should eq("CWE-79")
     JSON.parse(json)["cwe_name"].as_s.should contain("Cross-site Scripting")
 
     tech = Gori::Probe::Detection.new("tech_server", "tech", "acme.test", "https://acme.test/",
       "t", Gori::Store::Severity::Info)
-    parsed = JSON.parse(Gori::CLI::Output.probe_group_json(Gori::Probe.group([tech]).first))
+    parsed = JSON.parse(JSON.build { |j| Gori::Probe.group_json(j, Gori::Probe.group([tech]).first) })
     parsed.as_h.has_key?("cwe").should be_false
     parsed.as_h.has_key?("cwe_name").should be_false
   end

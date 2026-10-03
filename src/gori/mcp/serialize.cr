@@ -6,11 +6,15 @@ require "../display_columns"
 require "../issues_export"
 require "../repeater/engine"
 require "../fuzz"
+require "../discover"
+require "../miner"
 require "../proxy/codec/content_decode"
 require "../proxy/h2/grpc"
 require "../protobuf"
 require "../redact/wire"
 require "../redact/headers"
+require "../rules/stub"
+require "../settings"
 
 module Gori
   module MCP
@@ -614,6 +618,50 @@ module Gori
         j.field "flow_id", flow_id if flow_id
       end
 
+      # --- discover / miner findings (MCP `*_results` and `gori run discover|mine --format json`)
+
+      def self.discover_finding(j : JSON::Builder, f : Discover::Finding, flow_id : Int64? = nil) : Nil
+        j.object do
+          # The captured exchange's row, for `get_flow`. Absent until its batch is flushed (see
+          # DISCOVER_PERSIST_INTERVAL), for a finding whose row was not saved (`unsaved_flows`),
+          # and on the CLI, which records no flow per finding.
+          j.field "flow_id", flow_id if flow_id
+          # A crawled URL is built from a page's own `<a href>` and `content_type` is a
+          # response header, so both are outside-origin. `Discover::Url.parse` percent-encodes
+          # the octets `<= 0x20` / `0x7F` (#394) but nothing above 0x7F, so a high byte reaches
+          # here intact.
+          j.field "url", text(f.url)
+          j.field "method", text(f.method)
+          j.field "status", f.status
+          j.field "length", f.length
+          j.field "content_type", text(f.content_type)
+          j.field "source", f.source.label
+          j.field "depth", f.depth
+          j.field "confidence", f.confidence.round(2)
+        end
+      end
+
+      def self.mine_finding(j : JSON::Builder, f : Miner::Finding) : Nil
+        j.object do
+          # name comes from a caller-supplied wordlist FILE (arbitrary bytes on disk).
+          j.field "name", text(f.name)
+          j.field "location", f.location.label
+          j.field "evidence", f.evidence.label
+          j.field "confidence", f.confidence.label
+          j.field "canary", text(f.canary)
+          j.field "status", f.status
+          j.field "delta", f.delta
+          # The gRPC CALL's outcome, from the confirming round's `grpc-status`/`grpc-message`
+          # trailers — `status` above is 200 for every gRPC response. Emitted only when the
+          # response actually carried it, so a non-gRPC run's rows are unchanged.
+          if gs = f.grpc_status
+            j.field "grpc_status", gs
+            j.field "grpc_status_name", Proxy::H2::Grpc.status_name(gs)
+          end
+          j.field "grpc_message", text(f.grpc_message) if f.grpc_message
+        end
+      end
+
       # Permanent fuzz-run metadata. `stored_results` is supplied by the caller so list/get
       # can use the same stable projection.
       def self.saved_fuzz_run(j : JSON::Builder, run : Store::FuzzRunRecord,
@@ -1117,6 +1165,60 @@ module Gori
               end
             end
           end
+        end
+      end
+
+      # --- rewriter and colour rules --------------------------------------------
+
+      # One Match & Replace rule, as MCP `list_rules` and `gori run rewriter --format json` both
+      # print it. `enabled` is the EFFECTIVE state in this project; `default_enabled` and
+      # `overridden` only appear for a global rule, where the library's own default may differ
+      # (this project overrode it), so a caller can tell "off everywhere" from "off in this
+      # engagement". A project rule has one state, and printing two fields for it would invite
+      # the reader to look for a difference that cannot exist.
+      def self.match_rule(j : JSON::Builder, r : Store::MatchRule) : Nil
+        j.object do
+          j.field "id", r.id
+          j.field "scope", r.scope.label
+          j.field "enabled", r.enabled?
+          j.field "inert", r.inert?
+          if reason = r.inert_reason
+            j.field "inert_reason", reason
+          end
+          if r.global?
+            j.field "overridden", r.overridden?
+            j.field "default_enabled", Settings.rewriter_rules.find { |g| g.id == r.id }.try(&.enabled)
+          end
+          j.field "name", r.name
+          j.field "target", r.target_label
+          j.field "part", r.part_label
+          j.field "op", r.op_label
+          j.field "match", r.match_kind_label
+          j.field "host", r.host
+          j.field "pattern", r.pattern
+          j.field "replacement", r.replacement
+          j.field "body_file", r.body_file
+          RuleStub.respond_json_fields(j, r)
+        end
+      end
+
+      # One colour rule, as MCP `list_color_rules` and `gori run colormarker --format json` both
+      # print it; `enabled` / `overridden` / `default_enabled` as in `match_rule` above.
+      def self.color_rule(j : JSON::Builder, r : Store::ColorRule) : Nil
+        j.object do
+          j.field "id", r.id
+          j.field "scope", r.scope.label
+          j.field "enabled", r.enabled?
+          if r.global?
+            j.field "overridden", r.overridden?
+            j.field "default_enabled", Settings.colormarker_rules.find { |g| g.id == r.id }.try(&.enabled)
+          end
+          j.field "name", r.name
+          # "when", the same key settings.json writes and the MCP tools accept — one vocabulary
+          # across all three surfaces.
+          j.field "when", r.match_filter
+          j.field "color", r.color
+          j.field "style", r.style.label
         end
       end
 

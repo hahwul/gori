@@ -411,7 +411,7 @@ module Gori
           if format == :json
             puts(JSON.build do |j|
               j.array do
-                rules.each { |r| rewriter_rule_json(j, r) }
+                rules.each { |r| MCP::Serialize.match_rule(j, r) }
               end
             end)
           elsif rules.empty?
@@ -419,35 +419,6 @@ module Gori
           else
             rules.each { |r| puts rewriter_rule_row(r) }
           end
-        end
-      end
-
-      # `enabled` is the EFFECTIVE state in this project; `default_enabled` and `overridden`
-      # only appear for a global rule, where the two can differ. A project rule has one state
-      # and printing two fields for it would invite the reader to look for a difference.
-      private def self.rewriter_rule_json(j : JSON::Builder, r : Store::MatchRule) : Nil
-        j.object do
-          j.field "id", r.id
-          j.field "scope", r.scope.label
-          j.field "enabled", r.enabled?
-          j.field "inert", r.inert?
-          if reason = r.inert_reason
-            j.field "inert_reason", reason
-          end
-          if r.global?
-            j.field "overridden", r.overridden?
-            j.field "default_enabled", Settings.rewriter_rules.find { |g| g.id == r.id }.try(&.enabled)
-          end
-          j.field "name", r.name
-          j.field "target", r.target_label
-          j.field "part", r.part_label
-          j.field "op", r.op_label
-          j.field "match", r.match_kind_label
-          j.field "host", r.host
-          j.field "pattern", r.pattern
-          j.field "replacement", r.replacement
-          j.field "body_file", r.body_file
-          RuleStub.respond_json_fields(j, r)
         end
       end
 
@@ -690,7 +661,7 @@ module Gori
       end
 
       # What `rewriter add` prints once the write committed. `--format json` (#1117) is the
-      # rule's `gori run rewriter --format json` object, through the same `rewriter_rule_json`,
+      # rule's `gori run rewriter --format json` object, through the same `MCP::Serialize.match_rule`,
       # read back through `Rules.merged` — the listing's own read — so `enabled`, `scope` and
       # the normalized target/part are what the listing will say, not what the flags said. A
       # rule a peer removed in that instant has no row, and the command refuses rather than
@@ -703,7 +674,7 @@ module Gori
         end
         rule = Gori::Rules.merged(store).find { |r| r.scope == scope && r.id == id } ||
                abort_closing(store, "gori run rewriter add: rule ##{id} was created, but it was gone before it could be read back")
-        JSON.build { |j| rewriter_rule_json(j, rule) }
+        JSON.build { |j| MCP::Serialize.match_rule(j, rule) }
       end
 
       # Validate the short-circuit-only flags and resolve --response-file into the stub text.

@@ -185,7 +185,7 @@ module Gori
         page = mjob.results[pg.offset, pg.limit]? || [] of Miner::Finding
         Result.new(JSON.build do |j|
           j.object do
-            j.field("findings") { j.array { page.each { |f| mine_finding_json(j, f) } } }
+            j.field("findings") { j.array { page.each { |f| Serialize.mine_finding(j, f) } } }
             emit_page(j, pg, page.size)
             j.field "total_available", mjob.results.size
             j.field "job_complete", mjob.status != :running
@@ -202,27 +202,6 @@ module Gori
         mjob = lookup_job(h, @mine_jobs, "mine", "stop")
         return mjob if mjob.is_a?(Result)
         stop_and_report(mjob)
-      end
-
-      private def mine_finding_json(j : JSON::Builder, f : Miner::Finding) : Nil
-        j.object do
-          # name comes from a caller-supplied wordlist FILE (arbitrary bytes on disk).
-          j.field "name", Serialize.text(f.name)
-          j.field "location", f.location.label
-          j.field "evidence", f.evidence.label
-          j.field "confidence", f.confidence.label
-          j.field "canary", Serialize.text(f.canary)
-          j.field "status", f.status
-          j.field "delta", f.delta
-          # The gRPC CALL's outcome, from the confirming round's `grpc-status`/`grpc-message`
-          # trailers — `status` above is 200 for every gRPC response. Emitted only when the
-          # response actually carried it, so a non-gRPC run's rows are unchanged.
-          if gs = f.grpc_status
-            j.field "grpc_status", gs
-            j.field "grpc_status_name", Proxy::H2::Grpc.status_name(gs)
-          end
-          j.field "grpc_message", Serialize.text(f.grpc_message) if f.grpc_message
-        end
       end
 
       # Build a ready-to-run mining engine + its origin + name count. Raises FuzzArgError
