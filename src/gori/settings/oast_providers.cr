@@ -30,7 +30,7 @@ module Gori::Settings
       kind = o["kind"]?.try(&.as_s?)
       host = o["host"]?.try(&.as_s?)
       next if id.nil? || id.empty? || name.nil? || name.empty? || kind.nil? || kind.empty? || host.nil? || host.empty?
-      token = o["token"]?.try(&.as_s?)
+      token = o["token"]?.try(&.as_s?).presence # blank is "no token", as the form saves it
       enabled = o["enabled"]?.try(&.as_bool?)
       out << OastProvider.new(id, name, kind, host, token, enabled.nil? ? true : enabled)
     end

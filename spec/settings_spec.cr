@@ -1686,6 +1686,26 @@ describe Gori::Settings do
   # Same shape for the global OAST provider library, whose mutators dropped `save`'s answer
   # entirely: a refused write stayed live under an "added provider" toast and was gone at the
   # next start.
+  # The form saves a blank token as "none"; a hand-edited `""` must read the same, or a
+  # resumed session polls with an empty token instead of its own.
+  it "reads a blank global OAST provider token as no token" do
+    dir = File.tempname("gori-settings-oast-token")
+    Dir.mkdir_p(dir)
+    prev_home = ENV["GORI_HOME"]?
+    prev = Gori::Settings.oast_providers
+    begin
+      ENV["GORI_HOME"] = dir
+      File.write(Gori::Settings.path,
+        %({"oast_providers":[{"id":"p1","name":"n","kind":"interactsh","host":"o.test","token":""}]}))
+      Gori::Settings.load
+      Gori::Settings.oast_providers.first.token.should be_nil
+    ensure
+      prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+      Gori::Settings.oast_providers = prev
+      FileUtils.rm_rf(dir)
+    end
+  end
+
   describe "global OAST provider CRUD on a refused save" do
     it "answers, and leaves the library as it was" do
       prev = Gori::Settings.oast_providers
