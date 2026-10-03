@@ -3486,6 +3486,7 @@ module Gori::Tui
       repeater_controller.stop_all
       oast_controller.stop_all
       authorize_controller.stop_all
+      sitemap_controller.stop_all
       # A retest run is the Issues tab's one background sender (#1036). Cooperative like the
       # rest: the fiber owns its sockets and checks the flag between steps.
       issues_controller.halt_retest
