@@ -1321,6 +1321,9 @@ module Gori::Decoder
 
     # `URI::Punycode.encode` raises a bare `Exception` on overflow, the only way it fails.
     private def puny_encode_label(label : String) : String
+      # Non-ASCII that downcase+NFC folds to ASCII (U+212A KELVIN SIGN -> "k"): RFC 3492 still
+      # writes the basic run plus its delimiter, which `URI::Punycode.encode` skips.
+      return "#{label}-" if label.ascii_only? && !label.empty?
       URI::Punycode.encode(label)
     rescue Exception
       raise DecoderError.new("punycode overflow")

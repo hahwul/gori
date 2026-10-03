@@ -294,6 +294,8 @@ describe Gori::Decoder do
       conv("punycode-encode", "münchen.de").should eq "xn--mnchen-3ya.de"
       conv("punycode-encode", "bücher").should eq "xn--bcher-kva"
       conv("punycode-encode", "日本語.jp").should eq "xn--wgv71a119e.jp"
+      # KELVIN SIGN folds to "k": the label keeps its RFC 3492 delimiter (`xn--k-`, not `xn--k`).
+      conv("punycode-encode", "\u212A").should eq "xn--k-"
       conv("punycode-decode", "xn--maana-pta.com").should eq "mañana.com"
       conv("punycode-decode", "xn--r8jz45g.xn--zckzah").should eq "例え.テスト"
       # Astral plane (a surrogate pair in UTF-16 terms) must survive the bootstring.
