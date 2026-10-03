@@ -8,7 +8,7 @@ private def char_key(c : Char) : Termisu::Event::Key
   Termisu::Event::Key.new(Termisu::Input::Key::Unknown, char: c)
 end
 
-private def with_held(& : InterceptController, Gori::Interceptor::Item ->)
+private def with_held(& : InterceptController, Gori::Interceptor::Item, TuiContract::Host ->)
   TuiContract.with_session("intercept-read") do |session|
     ic = session.interceptor
     ic.toggle
@@ -18,7 +18,7 @@ private def with_held(& : InterceptController, Gori::Interceptor::Item ->)
     host.tab = :intercept
     ctl = InterceptController.new(host)
     ctl.on_enter
-    yield ctl, ctl.view.selected_item.not_nil!
+    yield ctl, ctl.view.selected_item.not_nil!, host
   end
 end
 
@@ -70,6 +70,36 @@ describe InterceptController do
       ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::Right)).should be_true
       ctl.view.held_edit_id.should be_nil
       String.new(ctl.view.forward_bytes(it)).should eq(RAW)
+    end
+  end
+
+  # READ edits replay through the pane's own INS path (`ReadEdit`), so the hold is marked edited
+  # and the forward carries the edit — the same dirty tracking typing gets.
+  it "applies a READ-mode line delete as an edit of the hold" do
+    with_held do |ctl, it, _host|
+      ctl.pane_advance(1)
+      ctl.view.read_move(1, 0) # the Host line
+      key_in = ->(ev : Termisu::Event::Key) { ctl.handle_body_key(ev); nil }
+      ReadEdit.delete_line(ctl, key_in)
+      ctl.view.held_edit_id.should eq(it.id)
+      String.new(ctl.view.forward_bytes(it)).should_not contain("Host:")
+    end
+  end
+
+  it "says a status: condition holds nothing while catch holds requests only" do
+    with_held do |ctl, _it, host|
+      ctl.intercept_query
+      # Past the term, where the completion row (which outranks it) has nothing to offer.
+      "status:500 ".each_char { |ch| ctl.handle_query_key(char_key(ch)) }
+      TuiContract.render(ctl).contains?("only matches responses").should be_true
+      ctl.handle_query_key(Termisu::Event::Key.new(Termisu::Input::Key::Enter))
+      host.statuses.last.should contain("`status:` only matches responses")
+
+      ctl.intercept_cycle_direction # → responses: the note is gone
+      host.statuses.last.should eq("intercept catch: responses only")
+      ctl.intercept_cycle_direction # → all
+      ctl.intercept_cycle_direction # → back to requests only: said again
+      host.statuses.last.should contain("`status:` only matches responses")
     end
   end
 

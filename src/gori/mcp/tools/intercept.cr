@@ -203,7 +203,17 @@ module Gori
         if bad = Gori::InterceptFilter.unsupported_field_reason(q)
           return err(bad, "INVALID_ARGUMENT", field: "query")
         end
-        enqueue_intercept("set_filter", arg: q)
+        bridge = store.intercept_bridge_state
+        dir = bridge.try { |b| Interceptor::Direction.from_arg?(b.direction) }
+        enqueue_intercept("set_filter", arg: q, extra: direction_note_extra(q, dir))
+      end
+
+      # A `status:` condition under a requests-only catch holds nothing until the direction
+      # changes. Said as a `note` beside the ack, never a refusal: either half may change next.
+      private def direction_note_extra(query : String, dir : Interceptor::Direction?) : Hash(String, JSON::Any)?
+        return nil unless dir
+        note = Interceptor.direction_note(query, dir, "intercept_set_direction response or both holds them")
+        note ? {"note" => JSON::Any.new(note)} : nil
       end
 
       @[Tool("intercept_set_direction", gated: true, agent_action: true, permission: "intercept")]
@@ -215,7 +225,8 @@ module Gori
         unless dir = Interceptor::Direction.from_arg?(raw)
           return err("invalid 'direction' #{raw.inspect} (expected #{INTERCEPT_DIRECTIONS.join(" | ")})", "INVALID_ARGUMENT", field: "direction")
         end
-        enqueue_intercept("set_direction", arg: dir.arg)
+        filter = store.intercept_bridge_state.try(&.filter) || ""
+        enqueue_intercept("set_direction", arg: dir.arg, extra: direction_note_extra(filter, dir))
       end
 
       # Send one command to the live capturing instance and wait for its ack
@@ -252,7 +263,7 @@ module Gori
         when "edited"
           Result.new(JSON.build { |j| j.object { j.field "status", "forwarded"; j.field "edited", true; j.field "detail", detail; emit_extra(j, extra) } })
         when "toggled", "filter_set", "direction_set"
-          Result.new({status: status, detail: detail}.to_json)
+          Result.new(JSON.build { |j| j.object { j.field "status", status; j.field "detail", detail; emit_extra(j, extra) } })
         when "no_such_item"
           not_found(detail || "the held item is no longer held (already forwarded/dropped)")
         when "stale"

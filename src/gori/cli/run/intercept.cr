@@ -316,10 +316,36 @@ module Gori
                                          item_id : Int64? = nil, bytes : Bytes? = nil, arg : String? = nil) : {String, String?}
         project = resolve_read_project(project_name, db_path)
         with_store(project, long_running: true) do |store|
-          outcome = store.send_intercept_command(verb, item_id: item_id, bytes: bytes, arg: arg)
-          return {outcome.status, outcome.detail} if outcome.is_a?(Store::InterceptAck)
-          abort "gori run intercept: #{intercept_send_refusal(outcome)}"
+          send_or_abort(store, verb, item_id: item_id, bytes: bytes, arg: arg)
         end
+      end
+
+      # `enqueue_intercept` for `filter` / `direction`, plus `Interceptor.direction_note` read off
+      # the same store's bridge: the half this command does not set is the live one there.
+      private def self.enqueue_noted(proj : ProjectFlags, verb : String, arg : String, *,
+                                     query : String? = nil, dir : Interceptor::Direction? = nil) : {String, String?, String?}
+        project = resolve_read_project(proj.name, proj.db)
+        with_store(project, long_running: true) do |store|
+          note = intercept_direction_note(store.intercept_bridge_state, query, dir)
+          status, detail = send_or_abort(store, verb, arg: arg)
+          {status, detail, note}
+        end
+      end
+
+      # The note for the condition / direction being set, the other half read off `bridge`. Public
+      # and pure so a spec can pin it without a live capturing instance.
+      def self.intercept_direction_note(bridge : Store::InterceptBridgeState?, query : String?,
+                                        dir : Interceptor::Direction?) : String?
+        q = query || bridge.try(&.filter) || ""
+        d = dir || bridge.try { |b| Interceptor::Direction.from_arg?(b.direction) }
+        d.try { |live| Interceptor.direction_note(q, live, "`gori run intercept direction response` (or both) holds them") }
+      end
+
+      private def self.send_or_abort(store : Store, verb : String, *, item_id : Int64? = nil,
+                                     bytes : Bytes? = nil, arg : String? = nil) : {String, String?}
+        outcome = store.send_intercept_command(verb, item_id: item_id, bytes: bytes, arg: arg)
+        return {outcome.status, outcome.detail} if outcome.is_a?(Store::InterceptAck)
+        abort "gori run intercept: #{intercept_send_refusal(outcome)}"
       end
 
       # This command's words for a command that got no ack. Public and pure so a spec can pin
@@ -335,14 +361,16 @@ module Gori
         end
       end
 
-      private def self.emit_intercept_ack(status : String, detail : String?, format : Symbol) : Nil
+      private def self.emit_intercept_ack(status : String, detail : String?, format : Symbol,
+                                          note : String? = nil) : Nil
         ok = !status.in?("no_such_item", "stale", "error")
         if format == :json
-          puts(JSON.build { |j| j.object { j.field "status", status; j.field "ok", ok; j.field "detail", detail } })
+          puts(JSON.build { |j| j.object { j.field "status", status; j.field "ok", ok; j.field "detail", detail; j.field "note", note if note } })
         else
           # `term_safe`: an edit's receipt names its start line from the operator's own
           # `--raw-file` (#1430), which can carry an ESC the codec never saw.
           puts "#{status}#{detail ? ": #{CLI::Output.term_safe(detail)}" : ""}"
+          STDERR.puts "note: #{CLI::Output.term_safe(note)}" if note
         end
         exit 1 unless ok
       end
@@ -545,8 +573,8 @@ module Gori
           abort "gori run intercept filter: #{bad}"
         end
 
-        status, detail = enqueue_intercept(proj.name, proj.db, "set_filter", arg: positional[0])
-        emit_intercept_ack(status, detail, format)
+        status, detail, note = enqueue_noted(proj, "set_filter", positional[0], query: positional[0])
+        emit_intercept_ack(status, detail, format, note)
       end
 
       private def self.cmd_intercept_set_direction(args : Array(String)) : Nil
@@ -563,8 +591,8 @@ module Gori
         dir = Interceptor::Direction.from_arg?(positional[0])
         abort "gori run intercept direction: invalid direction '#{positional[0]}' (expected both|request|response)" unless dir
 
-        status, detail = enqueue_intercept(proj.name, proj.db, "set_direction", arg: dir.arg)
-        emit_intercept_ack(status, detail, format)
+        status, detail, note = enqueue_noted(proj, "set_direction", dir.arg, dir: dir)
+        emit_intercept_ack(status, detail, format, note)
       end
     end
   end

@@ -279,6 +279,15 @@ module Gori
     @direction : Direction
     @filter : InterceptFilter
 
+    # Why `source` may hold nothing under `dir`, or nil: it names a response-only field
+    # (`status:`) while catch holds requests only. A NOTE, never a refusal — the direction can
+    # change after the condition is set. `remedy` is the surface's own way to change it.
+    def self.direction_note(source : String, dir : Direction, remedy : String) : String?
+      return nil unless dir.request_only?
+      return nil unless field = InterceptFilter.response_fields(source).first?
+      "`#{field}:` only matches responses, and catch holds requests only — #{remedy}"
+    end
+
     def initialize(@scope : Scope)
       @mutex = Mutex.new
       @enabled = false

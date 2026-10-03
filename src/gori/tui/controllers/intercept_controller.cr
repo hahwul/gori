@@ -352,6 +352,7 @@ module Gori::Tui
         ic.set_filter(@intercept.query) if @intercept.query_complete(close: true)
       else
         @intercept.stop_query
+        @intercept.direction_note.try { |note| @host.status(note) }
       end
     end
 
@@ -784,7 +785,7 @@ module Gori::Tui
       return unless catch_control_allowed?
       dir = @host.session.interceptor.cycle_direction
       @intercept.reload(@host.session.interceptor)
-      @host.status("intercept catch: #{direction_phrase(dir)}")
+      @host.status(@intercept.direction_note || "intercept catch: #{direction_phrase(dir)}")
     end
 
     private def direction_phrase(dir : Interceptor::Direction) : String

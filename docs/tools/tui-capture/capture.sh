@@ -364,7 +364,7 @@ shoot_all() {
   run_scene space-menu-send 26 "gori · Space menu › Send flow to…" 3 SLEEP0.8 Down SLEEP0.3 Space SLEEP0.6 ">" SLEEP1
   run_scene sitemap      26 "gori · Sitemap"                   2 SLEEP1.2
   run_scene project      26 "gori · Project"                   1 SLEEP1.2
-  run_scene intercept    26 "gori · Intercept"                 4 SLEEP1.2
+  run_scene intercept    26 "gori · Intercept"                 4 SLEEP0.6 Enter SLEEP1.2
   # THE BAR IS NINE NUMBERED SLOTS, and `1`-`9` reach exactly those nine:
   #
   #   1 Project · 2 Target · 3 History · 4 Intercept · 5 Repeater · 6 Fuzzer ·

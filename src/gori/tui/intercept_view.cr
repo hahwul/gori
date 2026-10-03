@@ -1189,8 +1189,17 @@ module Gori::Tui
           width: {rect.w - 2, 0}.max)
         return
       end
+      if note = direction_note
+        screen.text(rect.x + 1, y, note, Theme.orange, width: {rect.w - 2, 0}.max)
+        return
+      end
       return unless QuerySuggest.hint_slot?(FilterAst.token_at(@query, @qcx).core)
       screen.text(rect.x + 1, y, QUERY_HINT, Theme.muted, width: {rect.w - 2, 0}.max)
+    end
+
+    # The condition names `status:` while catch holds requests only — see `Interceptor.direction_note`.
+    def direction_note : String?
+      Interceptor.direction_note(@query, @direction, "#{key_label("intercept.direction", "c")} for RES or ALL")
     end
 
     # The catch-direction chip: `c`-chord + which direction, coloured by enabled state.

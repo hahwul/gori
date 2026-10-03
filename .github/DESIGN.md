@@ -4843,12 +4843,17 @@ Fuzzer all teach as "enter INS" became a byte (`iGET /…`). The pane now opens 
 focus ring enters it, through the same `EditorPane` / `TextReadState` seam the Repeater and
 Fuzzer use: it joins `Scope::Editor`, `i`/`↵` enter INS, `esc` steps INS → READ → queue, and
 the border draws the real mode. `↵`/`e` on the queue still mean "edit" and go straight to INS.
-Holding is unchanged: READ moves a caret and a selection, never the buffer, so an unedited
-forward is still the held bytes verbatim (P7).
+Holding is unchanged. READ navigation and selection leave the buffer alone; the READ edits
+(`d`, `p`, `dd`, undo) reach it through `Scope::Editor`, which replays them through the pane's
+own INS path (`ReadEdit`), so they mark the hold edited exactly as typing does. A forward of a
+hold nobody edited is still the held bytes verbatim (P7).
 
 Catch defaulted to both legs, so forwarding a request held its response too and the client hung
 until a second `f`, while the tour said "Intercept holds each request". The default is now
 requests only, and `c` cycles requests → responses → both. An explicitly chosen direction
 (TUI, `gori run intercept direction`, MCP `intercept_set_direction`) behaves exactly as before.
 The cost is that a `status:` condition, which only a response can match, now needs `c` set to
-responses or both before it holds anything; the guide says so.
+responses or both before it holds anything. Every surface says so rather than refusing it, since
+either half can change next: the TUI condition bar and its toasts, and a `note` beside the
+`intercept_set_filter` / `intercept_set_direction` ack and on `gori run intercept filter` /
+`direction` (`Interceptor.direction_note`, over `InterceptFilter.response_fields`).

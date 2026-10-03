@@ -240,6 +240,21 @@ describe Gori::Interceptor do
   end
 end
 
+describe "Gori::Interceptor.direction_note" do
+  # A `status:` term never matches at the request gate, so under the requests-only default the
+  # condition holds nothing. Said, never refused: the direction may change next.
+  it "notes a response-only field only while catch holds requests only" do
+    note = Gori::Interceptor.direction_note("status:>=500", Gori::Interceptor::Direction::RequestOnly, "press c").not_nil!
+    note.should contain("`status:` only matches responses")
+    note.should end_with("press c")
+    Gori::Interceptor.direction_note("host:a.test -status:404", Gori::Interceptor::Direction::RequestOnly, "x").should_not be_nil
+    Gori::Interceptor.direction_note("status:>=500", Gori::Interceptor::Direction::Both, "x").should be_nil
+    Gori::Interceptor.direction_note("status:>=500", Gori::Interceptor::Direction::ResponseOnly, "x").should be_nil
+    Gori::Interceptor.direction_note("host:a.test", Gori::Interceptor::Direction::RequestOnly, "x").should be_nil
+    Gori::Interceptor.direction_note("\"status 500\"", Gori::Interceptor::Direction::RequestOnly, "x").should be_nil # free text, not a field
+  end
+end
+
 describe "Gori::Interceptor direction + condition gates" do
   # Requests only by default: holding both legs made every forwarded request's response wait
   # for a second decision while the client hung.
