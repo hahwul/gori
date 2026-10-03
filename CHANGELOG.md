@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- TUI: a confirm that names an env var or a Fuzzer, Miner, Sequencer or Notes sub-tab now acts on that one, where a peer's change under the dialog could shift it onto a neighbour, and the Authorize cursor stays on its request while a run re-labels a verdict-filtered list (#PRNUM)
+- TUI: a Host header typed on a fresh Repeater tab is no longer overwritten by the first target edit, and Tab no longer types a literal tab into Preferences, the palette, the project picker's forms or the Sitemap tag editor (it moves between the new-project fields) (#PRNUM)
+- TUI: ^C or ^\ typed at an external editor or the shell no longer kills gori, ⌫ after saving a shortened settings value no longer raises, and copying the Repeater target after it was reloaded shorter no longer raises (#PRNUM)
+- TUI: the mouse wheel over the History, Issues or Probe list moves the list even while the preview has focus, and a click below the drawn rows (a rule form's preview line, the Evidence border, a hidden History mode chip) no longer acts on a row or chip that is not on screen (#PRNUM)
+- TUI: ^1-9 in the Fuzzer, Miner and Sequencer and ^N in JWT and Cookie drop a strip filter that would hide the chip they land on, an active chip wider than the strip is clipped instead of vanishing, and race and group sends name the Repeater tab their transcript landed on (#PRNUM)
+- TUI: Fuzzer Advanced numbers past 2147483647 clamp instead of silently running the default, deep Sitemap rows and long rule-form errors stay inside their pane, and leaving a project stops a running Sitemap JavaScript scan (#PRNUM)
 - Settings: two gori windows no longer drop each other's saved decoder chains, global Probe scan rules or OAST providers (a deleted one no longer comes back), a custom colour deleted in another window can be re-created, and a `settings.json` that broke while gori ran is kept as `.corrupt` before the next save replaces it (#1495)
 - Settings: values gori cannot read stay as written instead of failing open — a non-string `network.upstream_proxy` keeps refusing routes after any save, a non-string rewriter `host` or `replacement` makes the rule inert rather than global, a non-boolean MCP permission switch denies its group, and a `--config` naming a new file or an `env.syntax` typo is no longer saved as `bare` (#1495)
 - Settings profiles: `import --dry-run` refuses a malformed upstream rule as the real import does, and a profile no longer carries this install's update-check state or recent wordlist paths (#1495)
