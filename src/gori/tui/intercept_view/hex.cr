@@ -92,7 +92,13 @@ class Gori::Tui::InterceptView
       render_edit_caveat(screen, rect, it, x, min_x)
       return
     end
-    x = Frame.toggle_badge(screen, rect.right - 1, rect.y, min_x, "e", "EDIT", @editing)
+    # The open text editor shows its REAL mode, as the Repeater's request pane does; closed, the
+    # chip is the `e` that opens it.
+    x = if text_editing?
+          Frame.mode_badge(screen, rect.right - 1, rect.y, min_x, @insert)
+        else
+          Frame.toggle_badge(screen, rect.right - 1, rect.y, min_x, "e", "EDIT", false)
+        end
     # `@loaded_ws`: a WS payload has no head — the sync never runs on it.
     x = Frame.toggle_badge(screen, x, rect.y, min_x, "^L", "CL", @sync_content_length) if @editing && !@loaded_ws
     render_edit_caveat(screen, rect, it, x, min_x)

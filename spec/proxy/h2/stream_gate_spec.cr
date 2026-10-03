@@ -982,6 +982,7 @@ describe Gori::Proxy::H2::StreamGate do
 
   it "completes cross-direction drops in both directions at once (the lock is never nested)" do
     with_ic do |ic|
+      ic.set_direction(Gori::Interceptor::Direction::Both)
       rig = Rig.new(ic)
       # Stream 1: a held REQUEST (drop crosses out→in). Stream 3: an open exchange whose
       # RESPONSE is held (drop crosses in→out). Both dropped before either releases.

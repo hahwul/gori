@@ -29,8 +29,10 @@ module Gori::Tui
       Verb::Scope::Intercept
     end
 
-    def body_badge : Symbol # the editor / condition bar capture text; else the queue list
-      @intercept.editing? || @intercept.querying? ? :editor : :body
+    # The editor in INS (or the hex editor) / condition bar capture text; else the queue list,
+    # or the held-message editor in READ.
+    def body_badge : Symbol
+      @intercept.text_insert? || @intercept.hex_editing? || @intercept.querying? ? :editor : :body
     end
 
     def body_hint(focus : Symbol) : String
@@ -40,7 +42,7 @@ module Gori::Tui
         # and the same gestures. No `⇧arrows select` / `^Y copy` band: the byte editor has a
         # nibble cursor and no selection, and `^Y` copies the whole payload.
         "HEX: 0-9a-f overtype · Ins/Del/⌫ bytes · ←/→/↑/↓ move · ^R forward · esc queue"
-      elsif @intercept.editing?
+      elsif @intercept.text_insert?
         # `⇧arrows select · ^Y copy`: this editor is the one INS strip in the tree that named
         # NEITHER, which is why the guard spec's "advertises a band, names no copy key" rule
         # could not see it. Both are live — `handle_edit_key` routes ⇧arrows through
@@ -48,7 +50,11 @@ module Gori::Tui
         # gate precisely for this pane. Bare `y` IS bound on the queue now, but it is a literal
         # character while typing (and `text_input_active?` stands the keymap down here), so `^Y`
         # is still the only copy there is in this strip.
-        "type to edit · ⇧arrows select · ^Y copy · ^R forward · ⇧↹/esc queue"
+        "type to edit · ⇧arrows select · ^Y copy · ^R forward · esc read · ⇧↹ queue"
+      elsif @intercept.text_read?
+        y = Hotkeys.binding_label(reg, "intercept.copy", "y")
+        f = Hotkeys.binding_label(reg, "intercept.forward", "f")
+        keys("{editor.insert}/↵ edit · ⇧arrows select · #{y} copy · #{f}/^R forward · space cmds · esc queue")
       elsif @intercept.querying?
         "type condition · ↹ complete · ↵ apply · esc clear"
       else
@@ -98,7 +104,7 @@ module Gori::Tui
     # matters most here: its whole alphabet is `0`-`9a`-`f`, so a digit claimed for the tab bar
     # would be a byte the operator could not type.
     def body_takes_text? : Bool
-      @intercept.text_editing? || @intercept.hex_editing? || @intercept.querying?
+      @intercept.text_insert? || @intercept.hex_editing? || @intercept.querying?
     end
 
     def handle_body_key(ev : Termisu::Event::Key) : Bool
@@ -106,9 +112,11 @@ module Gori::Tui
       if ev.ctrl? && key.lower_p?
         @host.open_palette
         true
-      elsif ev.key.space? && !ev.ctrl? && !ev.alt? && !@intercept.editing?
-        @host.open_space_menu # space menu in the navigable queue (editing swallows space as a char)
+      elsif ev.key.space? && !ev.ctrl? && !ev.alt? && !@intercept.text_insert? && !@intercept.hex_editing?
+        @host.open_space_menu # the queue, and the editor in READ (INS swallows space as a char)
         true
+      elsif @intercept.text_read?
+        handle_read_key(ev)
       elsif @intercept.text_editing? && (ev.ctrl? || ev.alt?) &&
             !ev.ctrl_z? && !(ev.ctrl? && key.lower_r?) && !(ev.ctrl? && key.lower_l?) &&
             !@intercept.edit_word_delete_key?(ev) && !editing_motion?(ev)
@@ -132,7 +140,7 @@ module Gori::Tui
       key = ev.key
       c = ev.char || key.to_char
       if key.escape?
-        @intercept.stop_edit
+        @intercept.exit_insert! # INS → READ; READ's esc then returns to the queue
       elsif ev.ctrl? && key.lower_r?
         intercept_forward
       elsif key.enter?
@@ -158,6 +166,38 @@ module Gori::Tui
         @intercept.edit_insert(c)
         report_replaced(@intercept.edit_last_replaced) # a printable over a selection REPLACES it
       end
+    end
+
+    # Keys over the held-message editor in READ: the caret and selection move, nothing is typed.
+    # Returns true when consumed.
+    private def handle_read_key(ev : Termisu::Event::Key) : Bool
+      key = ev.key
+      case
+      when key.escape?              then @intercept.stop_edit
+      when ev.ctrl? && key.lower_r? then intercept_forward
+      when ev.ctrl? && key.lower_l? then @intercept.toggle_content_length_sync
+      else                               return read_nav(ev)
+      end
+      true
+    end
+
+    # The READ caret's motions. Everything else returns false for the keymap, where the Editor
+    # scope answers ahead of this tab (`i`/↵ INSERT, the READ edits, undo) and the queue's own
+    # letters (`f` forward, `y` copy) still fire.
+    private def read_nav(ev : Termisu::Event::Key) : Bool
+      key = ev.key
+      selecting = ev.shift?
+      case
+      when nav_up?(ev)              then @intercept.read_move(-1, 0, selecting: selecting || editor_line_held?)
+      when nav_down?(ev)            then @intercept.read_move(1, 0, selecting: selecting || editor_line_held?)
+      when editor_read_sideways(ev) then nil # ←/→ h/l, ⌥ by word
+      when key.page_up?             then @intercept.read_page(-1, selecting)
+      when key.page_down?           then @intercept.read_page(1, selecting)
+      when key.home?                then @intercept.read_line_edge(-1, selecting)
+      when key.end?                 then @intercept.read_line_edge(1, selecting)
+      else                               return false
+      end
+      true
     end
 
     # Keys while editing a held WebSocket BINARY message as BYTES — the same set
@@ -312,6 +352,7 @@ module Gori::Tui
         ic.set_filter(@intercept.query) if @intercept.query_complete(close: true)
       else
         @intercept.stop_query
+        @intercept.direction_note.try { |note| @host.status(note) }
       end
     end
 
@@ -402,9 +443,10 @@ module Gori::Tui
     end
 
     # --- READ-pane delegators (the preview's read verbs + the Runner's read_* ladders) ---
-    # Gates `x`/`v`/`S` — the READ-pane verbs, which the editor has no use for.
+    # Gates `x`/`v`/`S` — the READ-pane verbs: the preview's, and the editor's in READ (the
+    # selection hooks below route to whichever is up). INS and the hex editor have no use for them.
     def intercept_preview_readable? : Bool
-      !@intercept.empty? && !@intercept.editing?
+      !@intercept.empty? && (!@intercept.editing? || @intercept.text_read?)
     end
 
     # Copy's gate, which is DELIBERATELY wider: it also fires while the held-bytes editor is
@@ -523,19 +565,46 @@ module Gori::Tui
     # declines it: a tab character is not a thing a nibble buffer can hold, so claiming the key
     # there would turn Tab into a dead key instead of the focus ring it is everywhere else.
     def editor_captures_tab? : Bool
-      @intercept.text_editing?
+      @intercept.text_insert?
     end
 
     def handle_editor_tab(ev : Termisu::Event::Key) : Bool
-      return false unless @intercept.text_editing?
+      return false unless @intercept.text_insert?
       @intercept.edit_insert('\t')
       true
     end
 
+    # --- Verb::Scope::Editor — the held-message TEXT editor (the hex editor has no READ) ---
+    def editor_pane? : Bool
+      @intercept.text_editing?
+    end
+
+    def editor_text_buffer : {TextArea, TextReadState}?
+      @intercept.read_edit_buffer
+    end
+
+    def editor_enter_insert : Bool
+      return false unless @intercept.text_editing?
+      @intercept.enter_insert!
+      true
+    end
+
+    def editor_exit_insert : Bool
+      return false unless @intercept.text_insert?
+      @intercept.exit_insert!
+      true
+    end
+
+    def editor_undo : Bool
+      return false unless @intercept.text_editing?
+      @intercept.edit_undo
+      true
+    end
+
     # --- focus ring (list ◂▸ detail editor) ---
-    # Tab into the detail pane opens the editor exactly as `↵`/`e` do, so it owes the same
-    # sentence: the caveat exists to be read BEFORE the operator types, and emitting it from
-    # `open_editor` alone skipped one of the two doors into the buffer.
+    # Tab into the detail pane opens the editor as `↵`/`e` do (in READ rather than INS), so it
+    # owes the same sentence: the caveat exists to be read BEFORE the operator types, and
+    # emitting it from `open_editor` alone skipped one of the two doors into the buffer.
     def pane_advance(dir : Int32) : Bool
       was = @intercept.editing?
       moved = @intercept.pane_advance(dir)
@@ -711,12 +780,12 @@ module Gori::Tui
       @host.status("catch condition: host: method: path: status: scheme: · ↹ complete · ↵ apply · esc clear")
     end
 
-    # Cycle which leg(s) to hold: all → requests → responses → all.
+    # Cycle which leg(s) to hold: requests (the default) → responses → all → requests.
     def intercept_cycle_direction : Nil
       return unless catch_control_allowed?
       dir = @host.session.interceptor.cycle_direction
       @intercept.reload(@host.session.interceptor)
-      @host.status("intercept catch: #{direction_phrase(dir)}")
+      @host.status(@intercept.direction_note || "intercept catch: #{direction_phrase(dir)}")
     end
 
     private def direction_phrase(dir : Interceptor::Direction) : String

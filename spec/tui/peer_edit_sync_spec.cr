@@ -701,7 +701,7 @@ describe "intercept in a VIEW-ONLY window" do
       ctrl = Gori::Tui::InterceptController.new(host)
 
       ctrl.intercept_cycle_direction
-      viewer.interceptor.direction.both?.should be_true # unchanged
+      viewer.interceptor.direction.request_only?.should be_true # unchanged
       host.last_status.should contain("view-only")
 
       ctrl.intercept_query
@@ -721,7 +721,7 @@ describe "intercept in a VIEW-ONLY window" do
 
       # And the other two, so the guard is not simply "the lock holder can do nothing either".
       ctrl.intercept_cycle_direction
-      session.interceptor.direction.request_only?.should be_true
+      session.interceptor.direction.response_only?.should be_true
       ctrl.intercept_query
       ctrl.view.querying?.should be_true
     end

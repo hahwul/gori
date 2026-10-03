@@ -58,6 +58,7 @@ module MenuLetterMeaning
     Gori::Verb::Scope::Cookie       => [:input],
     Gori::Verb::Scope::Repeater     => [:request, :target],
     Gori::Verb::Scope::Fuzzer       => [:template, :target],
+    Gori::Verb::Scope::Intercept    => [:detail],
     Gori::Verb::Scope::Notes        => nil,
     Gori::Verb::Scope::IssuesDetail => nil,
     Gori::Verb::Scope::ProjectDesc  => nil,

@@ -2739,8 +2739,7 @@ describe Gori::Proxy::Server do
     store = Gori::Store.open(store_path)
     interceptor = Gori::Interceptor.new(Gori::Scope.load(store))
     interceptor.toggle
-    interceptor.cycle_direction # Both → RequestOnly
-    interceptor.cycle_direction # → ResponseOnly (stream the request, hold only the response)
+    interceptor.set_direction(Gori::Interceptor::Direction::ResponseOnly) # stream the request, hold only the response
     interceptor.set_filter("path:/hi")
 
     sink = RecordingSink.new(done)

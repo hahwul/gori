@@ -240,14 +240,31 @@ describe Gori::Interceptor do
   end
 end
 
+describe "Gori::Interceptor.direction_note" do
+  # A `status:` term never matches at the request gate, so under the requests-only default the
+  # condition holds nothing. Said, never refused: the direction may change next.
+  it "notes a response-only field only while catch holds requests only" do
+    note = Gori::Interceptor.direction_note("status:>=500", Gori::Interceptor::Direction::RequestOnly, "press c").not_nil!
+    note.should contain("`status:` only matches responses")
+    note.should end_with("press c")
+    Gori::Interceptor.direction_note("host:a.test -status:404", Gori::Interceptor::Direction::RequestOnly, "x").should_not be_nil
+    Gori::Interceptor.direction_note("status:>=500", Gori::Interceptor::Direction::Both, "x").should be_nil
+    Gori::Interceptor.direction_note("status:>=500", Gori::Interceptor::Direction::ResponseOnly, "x").should be_nil
+    Gori::Interceptor.direction_note("host:a.test", Gori::Interceptor::Direction::RequestOnly, "x").should be_nil
+    Gori::Interceptor.direction_note("\"status 500\"", Gori::Interceptor::Direction::RequestOnly, "x").should be_nil # free text, not a field
+  end
+end
+
 describe "Gori::Interceptor direction + condition gates" do
-  it "cycle_direction wraps Both → RequestOnly → ResponseOnly → Both" do
+  # Requests only by default: holding both legs made every forwarded request's response wait
+  # for a second decision while the client hung.
+  it "defaults to RequestOnly and cycle_direction wraps RequestOnly → ResponseOnly → Both" do
     with_store do |store|
       ic = Gori::Interceptor.new(Gori::Scope.load(store))
-      ic.direction.should eq(Gori::Interceptor::Direction::Both)
-      ic.cycle_direction.should eq(Gori::Interceptor::Direction::RequestOnly)
+      ic.direction.should eq(Gori::Interceptor::Direction::RequestOnly)
       ic.cycle_direction.should eq(Gori::Interceptor::Direction::ResponseOnly)
       ic.cycle_direction.should eq(Gori::Interceptor::Direction::Both)
+      ic.cycle_direction.should eq(Gori::Interceptor::Direction::RequestOnly)
     end
   end
 
@@ -266,7 +283,7 @@ describe "Gori::Interceptor direction + condition gates" do
   it "set_direction sets an explicit value idempotently, bumping revision only on change (#123)" do
     with_store do |store|
       ic = Gori::Interceptor.new(Gori::Scope.load(store))
-      ic.direction.should eq(Gori::Interceptor::Direction::Both)
+      ic.direction.should eq(Gori::Interceptor::Direction::RequestOnly)
       r0 = ic.revision
       ic.set_direction(Gori::Interceptor::Direction::ResponseOnly)
       ic.direction.should eq(Gori::Interceptor::Direction::ResponseOnly)
@@ -280,19 +297,19 @@ describe "Gori::Interceptor direction + condition gates" do
   it "honours the catch direction at the request/response gates" do
     with_store do |store|
       ic = Gori::Interceptor.new(Gori::Scope.load(store))
-      ic.toggle # enable (default Both)
+      ic.toggle # enable (default RequestOnly)
       req_ok = -> { ic.intercepts_request?(method: "GET", host: "acme.test", target: "/x", scheme: "http", port: 80) }
       res_ok = -> { ic.intercepts_response?(method: "GET", host: "acme.test", target: "/x", scheme: "http", port: 80, status: 200) }
 
-      req_ok.call.should be_true
-      res_ok.call.should be_true
-
-      ic.cycle_direction # RequestOnly
       req_ok.call.should be_true
       res_ok.call.should be_false
 
       ic.cycle_direction # ResponseOnly
       req_ok.call.should be_false
+      res_ok.call.should be_true
+
+      ic.cycle_direction # Both
+      req_ok.call.should be_true
       res_ok.call.should be_true
     end
   end
@@ -319,6 +336,7 @@ describe "Gori::Interceptor direction + condition gates" do
     with_store do |store|
       ic = Gori::Interceptor.new(Gori::Scope.load(store))
       ic.toggle
+      ic.set_direction(Gori::Interceptor::Direction::Both)
       ic.set_filter("status:>=500")
       ic.intercepts_response?(method: "GET", host: "acme.test", target: "/x", scheme: "http", port: 80, status: 503).should be_true
       ic.intercepts_response?(method: "GET", host: "acme.test", target: "/x", scheme: "http", port: 80, status: 200).should be_false

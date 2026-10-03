@@ -51,7 +51,7 @@ module Gori::Tui
                scan_on : Bool = true,
                has_provider : Bool = true,
                body_focused : Bool = true,
-               catch_direction : String = "ALL",
+               catch_direction : String = "REQ",
                title : String? = nil) : Nil
       return if suppressed?
       return if rect.empty?

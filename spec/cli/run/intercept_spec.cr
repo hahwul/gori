@@ -439,3 +439,18 @@ describe "Gori::CLI::Run.intercept_send_refusal" do
       .should eq("command not confirmed within 3000ms — the capturing instance may be busy; retry")
   end
 end
+
+describe "Gori::CLI::Run.intercept_direction_note" do
+  it "reads the half a command does not set off the bridge" do
+    with_store do |store|
+      store.set_intercept_bridge(%({"direction":"requestonly","filter":"status:>=500"}))
+      bridge = store.intercept_bridge_state
+      Gori::CLI::Run.intercept_direction_note(bridge, nil, Gori::Interceptor::Direction::RequestOnly).not_nil!
+        .should contain("gori run intercept direction response")
+      Gori::CLI::Run.intercept_direction_note(bridge, nil, Gori::Interceptor::Direction::Both).should be_nil
+      Gori::CLI::Run.intercept_direction_note(bridge, "host:a.test", nil).should be_nil
+      Gori::CLI::Run.intercept_direction_note(bridge, "status:500", nil).should_not be_nil
+      Gori::CLI::Run.intercept_direction_note(nil, "status:500", nil).should be_nil # no bridge, no direction to judge
+    end
+  end
+end

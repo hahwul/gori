@@ -87,7 +87,7 @@ describe Gori::Tui::TrafficEmptyState do
     backend.contains?("no held messages").should be_true
     backend.contains?("INTERCEPT").should be_true
     backend.contains?("press i").should be_true
-    backend.contains?("c:ALL").should be_true
+    backend.contains?("c:REQ").should be_true
     (0...12).count { |y| backend.row(y).includes?("Catch is OFF") }.should eq(1)
   end
 

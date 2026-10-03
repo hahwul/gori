@@ -140,7 +140,7 @@ printf '\n'
   "upstream_rules": 0,
   "upstream_env": "",
   "scope": { "active": true, "rules": 2, "sandbox": false },
-  "intercept": { "enabled": false, "queued": 0, "direction": "both" },
+  "intercept": { "enabled": false, "queued": 0, "direction": "requestonly" },
   "probe": "passive",
   "issues": 7,
   "jobs": { "running": 1, "label": "fuzzing 1" }
@@ -161,7 +161,7 @@ printf '\n'
 | `scope.sandbox` | bool | [Sandbox](/ko/guide/proxy/#sandbox)가 스코프 밖 목적지를 기록만 안 하는 게 아니라 아예 차단하고 있는지 |
 | `intercept.enabled` | bool | catch가 켜져 있는지. 켜져 있는 동안 실제 클라이언트가 붙잡혀 있음 |
 | `intercept.queued` | integer | 지금 결정을 기다리는 메시지 수 |
-| `intercept.direction` | string | `both` · `requestonly` · `responseonly` — 어느 쪽 다리를 붙잡는지 |
+| `intercept.direction` | string | `requestonly`(기본값) · `responseonly` · `both` — 어느 쪽 다리를 붙잡는지 |
 | `probe` | string | [스캐너](/ko/guide/scanning/#probe-the-scanner) 모드: `off` · `passive` · `active` · `aggressive` |
 | `issues` | integer | 이 프로젝트에 기록된 이슈 수 |
 | `jobs.running` | integer | 진행 중인 백그라운드 작업 수 (fuzz · mine · discover 등) — 활동 칩이 세는 바로 그 장부라, 전송 중인 Repeater 요청은 포함되지 않음 |

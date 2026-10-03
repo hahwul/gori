@@ -316,7 +316,7 @@ module Gori
       # driven (Intercept scope) so they're rebindable; the queue defers `c`/`/` to here,
       # while the held-bytes editor + condition bar still swallow them as literal text.
       r.register Verb::Definition.new(
-        "intercept.direction", "Catch direction", "Cycle which to hold: all / requests only / responses only",
+        "intercept.direction", "Catch direction", "Cycle which to hold: requests only (default) / responses only / all",
         Verb::Scope::Intercept, [Verb::Chord.new("c")]) { |ctx| ctx.intercept_cycle_direction; nil }
       r.register Verb::Definition.new(
         "intercept.filter", "Catch condition", "Only hold messages matching a query (host: method: path: status: scheme:)",

@@ -203,6 +203,14 @@ module Gori
       QL.fields_used(source).map(&.name).uniq!.select! { |n| UNSUPPORTED_FIELDS.includes?(n) }
     end
 
+    # Fields only a RESPONSE carries (a request has no status), so a term naming one never matches
+    # at the request gate. Read off the same `QL.fields_used` tokens as `unsupported_fields`.
+    RESPONSE_FIELDS = %w[status]
+
+    def self.response_fields(source : String) : Array(String)
+      QL.fields_used(source).map(&.name).uniq!.select! { |n| RESPONSE_FIELDS.includes?(n) }
+    end
+
     # The refusal a condition naming one of those fields earns, or nil. ONE sentence, here rather
     # than at each surface, because five of them refuse it: `Bindings#validate` (so MCP
     # `create_extract_rule` and `gori run rewriter extract add` refuse an extract rule's `when:`),

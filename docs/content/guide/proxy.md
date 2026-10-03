@@ -27,7 +27,7 @@ Each flow records the full request and response: start line, headers, and body (
 
 ## Intercept
 
-Press `i` to enable **Intercept**. When on, matching requests (and optionally responses) are held so you can forward, drop, or edit them before they continue. A filter bar at the top of the Intercept tab lets you choose the direction to catch and narrow what gets held with a query-language expression, so you only pause on the traffic you care about. While the `s` scope lens is on, only in-scope traffic is held, whatever the condition says. On this tab `c` cycles the catch direction (all / requests / responses) and `/` edits the condition; the capture toggle is `c` everywhere else. Turning intercept **off** releases everything still held with its original bytes, so an edit you had not yet forwarded is discarded.
+Press `i` to enable **Intercept**. When on, matching requests are held (responses too, if you choose that direction; a `status:` condition only matches responses) so you can forward, drop, or edit them before they continue. A filter bar at the top of the Intercept tab lets you choose the direction to catch and narrow what gets held with a query-language expression, so you only pause on the traffic you care about. While the `s` scope lens is on, only in-scope traffic is held, whatever the condition says. On this tab `c` cycles the catch direction (requests, the default / responses / all) and `/` edits the condition; the capture toggle is `c` everywhere else. `↵` or `e` on a held row edits it; `⇥` opens it in READ, as the Repeater's editor opens, where `i` or `↵` starts typing and `esc` steps back to READ, then to the queue. Turning intercept **off** releases everything still held with its original bytes, so an edit you had not yet forwarded is discarded.
 
 <figure class="tui-shot">
   <img src="/images/tui/intercept.svg" alt="gori Intercept tab with a filter bar for catch direction and a query condition, and a card explaining forward and drop while catch is off">
@@ -57,7 +57,7 @@ proto:ws body:subscribe          hold only messages containing "subscribe"
 proto:ws host:acme.test          hold only this socket's messages
 ```
 
-`body:` is a substring of the message payload and matches WebSocket messages only, because at an HTTP hold gate the bytes do not exist yet. The `c:REQ` / `c:RES` chip works as usual: `REQ` is client → server, `RES` is server → client.
+`body:` is a substring of the message payload and matches WebSocket messages only, because at an HTTP hold gate the bytes do not exist yet. The `c:REQ` / `c:RES` chip works as usual: `REQ` is client → server, `RES` is server → client. `REQ` is the default, so press `c` to hold server → client messages (`RES`) or both (`ALL`).
 
 A held message goes in the same queue as a held request, with a `WS↑` or `WS↓` badge, the socket that carries it, and the start of the payload. Forward, drop, edit and the marks all work the same way. What is different:
 

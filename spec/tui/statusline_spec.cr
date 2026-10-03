@@ -340,7 +340,7 @@ describe Gori::Tui::StatuslineController do
         ctx["scope"]["sandbox"].as_bool.should eq(session.scope.sandbox?)
         ctx["intercept"]["enabled"].as_bool.should eq(session.interceptor.enabled?)
         ctx["intercept"]["queued"].as_i.should eq(session.interceptor.pending_count)
-        ctx["intercept"]["direction"].as_s.should eq("both")
+        ctx["intercept"]["direction"].as_s.should eq("requestonly")
         ctx["probe"].as_s.should eq(session.probe.mode.label)
         ctx["issues"].as_i.should eq(session.store.count_issues)
         ctx["jobs"]["running"].as_i.should eq(0)

@@ -5,10 +5,11 @@ require "../spec_helper"
 # to. `gori run intercept` drives the same bridge; this pins what an agent sees.
 
 private def publish_bridge(store : Gori::Store, *, heartbeat_ms : Int64? = Time.utc.to_unix_ms,
-                           capturing : Bool = true, token : String = "sess-1") : Nil
+                           capturing : Bool = true, token : String = "sess-1",
+                           filter : String = "host:a.test") : Nil
   h = {
     "capturing" => JSON::Any.new(capturing), "enabled" => JSON::Any.new(true),
-    "direction" => JSON::Any.new("request"), "filter" => JSON::Any.new("host:a.test"),
+    "direction" => JSON::Any.new("request"), "filter" => JSON::Any.new(filter),
     "session_token" => JSON::Any.new(token),
   }
   heartbeat_ms.try { |hb| h["heartbeat_ms"] = JSON::Any.new(hb) }
@@ -162,6 +163,31 @@ describe "MCP intercept write verbs" do
         r.error_code.should eq(code)
         r.text.should eq(text)
       end
+    end
+  end
+
+  # Not refused: the direction can change after the condition is set. The note rides beside the ack.
+  it "notes a status: condition, or a requests-only direction under one, without refusing it" do
+    with_store do |store|
+      publish_bridge(store) # direction: request
+      ack_first(store, "filter_set", "status:>=500")
+      r = tools_for(store).call("intercept_set_filter", JSON.parse(%({"query":"status:>=500"})))
+      r.is_error.should be_false
+      json = JSON.parse(r.text)
+      json["status"].should eq("filter_set")
+      json["note"].as_s.should contain("`status:` only matches responses")
+    end
+    with_store do |store|
+      publish_bridge(store, filter: "status:>=500")
+      ack_first(store, "direction_set", "requestonly")
+      r = tools_for(store).call("intercept_set_direction", JSON.parse(%({"direction":"request"})))
+      JSON.parse(r.text)["note"].as_s.should contain("intercept_set_direction")
+    end
+    with_store do |store|
+      publish_bridge(store, filter: "status:>=500")
+      ack_first(store, "direction_set", "both")
+      r = tools_for(store).call("intercept_set_direction", JSON.parse(%({"direction":"both"})))
+      r.text.should eq(%({"status":"direction_set","detail":"both"}))
     end
   end
 

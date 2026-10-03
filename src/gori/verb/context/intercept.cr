@@ -7,7 +7,7 @@ abstract class Gori::Verb::ExecContext
   abstract def intercept_drop : Nil            # drop the marked holds, else the cursor row
   abstract def intercept_forward_all : Nil     # forward every held message (marks or not)
   abstract def intercept_query : Nil           # focus the catch-condition filter bar
-  abstract def intercept_cycle_direction : Nil # cycle catch direction (all/req/res)
+  abstract def intercept_cycle_direction : Nil # cycle catch direction (req/res/all)
   abstract def selected_intercept_id : Int64?
 
   # multi-select over the hold queue: forward/drop act on the marks if any, else the cursor row

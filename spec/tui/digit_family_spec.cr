@@ -185,7 +185,7 @@ describe "the digit family — focus-state matrix" do
     body = src[/def body_takes_text\?.*?
     end/m].not_nil!
     body.should contain("hex_editing?")
-    body.should contain("text_editing?")
+    body.should contain("text_insert?") # the text editor takes digits in INS only, not READ
     body.should contain("querying?")
   end
 

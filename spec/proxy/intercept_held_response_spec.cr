@@ -51,7 +51,8 @@ describe "intercept held response" do
   it "labels the response with the EDITED request's method" do
     with_held_response_store do |store|
       ic = Gori::Interceptor.new(Gori::Scope.load(store))
-      ic.toggle # enable, both directions
+      ic.toggle # enable
+      ic.set_direction(Gori::Interceptor::Direction::Both)
       origin = TCPServer.new("127.0.0.1", 0)
       origin_port = origin.local_address.port
       seen = Channel(String).new(1)

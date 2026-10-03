@@ -210,7 +210,7 @@ module Gori
       end
 
       def direction : String
-        @fields["direction"]?.try(&.as_s?) || "both"
+        @fields["direction"]?.try(&.as_s?) || "requestonly"
       end
 
       def filter : String

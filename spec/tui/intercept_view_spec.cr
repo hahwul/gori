@@ -399,6 +399,30 @@ describe Gori::Tui::InterceptView do
         view.preview_copy_text.should eq("GET")
       end
     end
+
+    # The focus ring opens the editor in READ: the caret and the band are the read state's, and
+    # an INS ⇧arrow selection is still there to copy after `esc`.
+    it "selects and copies in READ, and keeps an INS selection across esc" do
+      tmp_interceptor do |ic|
+        hold_req(ic, "acme.test", "/e", "GET /e HTTP/1.1\r\nHost: acme.test\r\n\r\n")
+        view = InterceptView.new
+        view.reload(ic)
+        view.render(Screen.new(MemoryBackend.new(110, 16)), Rect.new(0, 0, 110, 16))
+        view.pane_advance(1)
+        view.text_read?.should be_true
+        3.times { view.read_move(0, 1, selecting: true) }
+        view.preview_selection?.should be_true
+        view.preview_copy_text.should eq("GET")
+
+        view.enter_insert! # INS resumes from the READ caret, column 3
+        view.edit_move(1, 0)
+        4.times { view.edit_move(0, 1, selecting: true) }
+        view.exit_insert!
+        view.text_read?.should be_true
+        view.preview_copy_text.should eq("t: a")
+        view.held_edit_id.should be_nil # navigation and selection never dirty the hold
+      end
+    end
   end
 
   it "edits a held request and forwards the edited bytes" do
@@ -659,7 +683,7 @@ describe "Intercept filter bar" do
       view.reload(ic)
       backend = MemoryBackend.new(100, 8)
       view.render(Screen.new(backend), Rect.new(0, 0, 100, 8))
-      backend.row(0).includes?("c:ALL").should be_true   # default direction chip (c cycles it)
+      backend.row(0).includes?("c:REQ").should be_true   # default direction chip (c cycles it)
       backend.row(0).includes?("i:CATCH").should be_true # master catch toggle badge
       backend.contains?("/ condition").should be_true    # field hint
     end
@@ -667,12 +691,12 @@ describe "Intercept filter bar" do
 
   it "reflects the interceptor's catch direction after a cycle" do
     tmp_interceptor do |ic|
-      ic.cycle_direction # Both → RequestOnly
+      ic.cycle_direction # RequestOnly → ResponseOnly
       view = InterceptView.new
       view.reload(ic)
       backend = MemoryBackend.new(100, 8)
       view.render(Screen.new(backend), Rect.new(0, 0, 100, 8))
-      backend.row(0).includes?("c:REQ").should be_true
+      backend.row(0).includes?("c:RES").should be_true
     end
   end
 
@@ -682,8 +706,7 @@ describe "Intercept filter bar" do
       Gori::Settings.keymap_overrides = {"intercept.direction" => ["shift-c"],
                                          "intercept.toggle"    => ["shift-i"]}
       tmp_interceptor do |ic|
-        ic.cycle_direction # Both → RequestOnly
-        view = InterceptView.new
+        view = InterceptView.new # the default direction, REQ
         view.menu_registry = Gori::Verbs.registry
         view.reload(ic)
 
@@ -886,7 +909,7 @@ describe "Intercept filter bar" do
       view.reload(ic)
       backend = MemoryBackend.new(100, 12)
       view.render(Screen.new(backend), Rect.new(0, 0, 100, 12))
-      backend.row(0).includes?("c:ALL").should be_true # bar on the top row
+      backend.row(0).includes?("c:REQ").should be_true # bar on the top row
       backend.contains?("QUEUE").should be_true        # queue card still drawn below
       backend.contains?("acme.test/login").should be_true
     end
