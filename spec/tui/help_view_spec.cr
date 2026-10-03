@@ -59,6 +59,20 @@ describe Gori::Tui::HelpView do
   # sheet both surfaces draw) rather than the SECTIONS literal: the check is that the row names
   # the key the registry actually binds. (Authorize had no row at all until this rollout, though
   # TAB_SECTION already pointed its Shortcuts popup at the section.)
+  # A key column of `^P`, five times over, said nothing about which palette entry to pick.
+  # Each chordless row spells `^P → <title>` across its two columns, with the title the
+  # palette actually lists, so typing it finds the row.
+  it "names the palette entry on every chordless ^P row" do
+    registry = Gori::Verbs.registry
+    help_item_rows(registry).each do |(title, item, row)|
+      next unless title == "GLOBAL" && row.a == "^P →"
+      id = item.verb_id.should_not be_nil
+      row.b.should start_with("#{registry[id].title} — ")
+    end
+    help_item_rows(registry).count { |(title, _, row)| title == "GLOBAL" && row.a.starts_with?("^P") }.should eq(6)
+    HelpView.shortcut_rows(registry).none?(&.b.includes?("hold-mode")).should be_true
+  end
+
   it "names the clear-all chord in every tab that has one" do
     registry = Gori::Verbs.registry
     rows = HelpView.shortcut_rows(registry)

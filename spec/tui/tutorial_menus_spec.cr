@@ -121,3 +121,13 @@ describe "Gori::Tui::Tutorial mock sub-tab strips" do
     end
   end
 end
+
+# Forward and drop decide the selected (top) request, so the mock queue must shrink from the
+# top: drawn as a count from the first row, `f` on /api/users made /admin vanish.
+describe "Gori::Tui::Tutorial intercept mock" do
+  it "drops the forwarded request, not the one below it" do
+    Tour.held_rows(2).map { |(_, path, _)| path }.should eq(["/api/users", "/admin"])
+    Tour.held_rows(1).map { |(_, path, _)| path }.should eq(["/admin"])
+    Tour.held_rows(0).should be_empty
+  end
+end
