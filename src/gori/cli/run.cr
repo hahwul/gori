@@ -310,15 +310,11 @@ module Gori
       # argument that leaves a SUCCESS status is the failure mode a scripted surface can least
       # afford, which is why every other command here refuses it.
       #
-      # Takes both halves of `unknown_args` for the reason the colormarker list documents: a
-      # bare word after `--` lands in `after`, and reading only `before` would lose it.
-      private def self.one_positional(before : Array(String), after : Array(String),
-                                      prefix : String, what : String) : String?
-        all = before + after
-        if msg = extra_positional_error(all, prefix, what)
-          abort msg
-        end
-        all.first?
+      # Parses through `parse_args`, so both halves of `unknown_args` are read: a bare word
+      # after `--` lands in the second, and reading only the first would lose it.
+      private def self.one_positional(args : Array(String), prefix : String, what : String,
+                                      & : OptionParser ->) : String?
+        one_positional_list(args, prefix, what) { |p| yield p }.first?
       end
 
       # The same guard for the sites that keep the ARRAY (because they read `.first?` later, or
@@ -328,6 +324,13 @@ module Gori
       # for that shape: `gori run probe rules delete a b` deleted `a` and exited 0, and so did
       # `project scope update 3 4 --host=x`, `session add x y`, `rewriter preset add p q`,
       # `probe rules enable a b` and `probe mode passive active`. Four of those are mutations.
+      private def self.one_positional_list(args : Array(String), prefix : String, what : String,
+                                           & : OptionParser ->) : Array(String)
+        one_positional_list(parse_args(args, prefix) { |p| yield p }, [] of String, prefix, what)
+      end
+
+      # …and from INSIDE an `unknown_args` handler, for a parser kept whole because its usage
+      # is printed later (`redact use`, `repeater move`).
       private def self.one_positional_list(before : Array(String), after : Array(String),
                                            prefix : String, what : String) : Array(String)
         all = before + after
@@ -362,18 +365,16 @@ module Gori
         "#{prefix}: unexpected argument#{all.size == 1 ? "" : "s"} #{all.join(" ").inspect} — #{hint}"
       end
 
-      # Parse a command whose every argument is a flag, refusing any leftover word.
+      # Parse a command whose every argument is a flag (`parse_args`), refusing any leftover word.
       #
-      # A method rather than three copies of the idiom, because the subtle half is
+      # A method rather than copies of the idiom, because the subtle half is
       # `before + after`: a copy that keeps only `before` lets a bare word after `--` through
       # in silence, which is the same footgun `optionparser-unknown-args` was written about.
-      # Installing the handler HERE makes the correct form the only form, and the call site
+      # Routing through `parse_args` makes the correct form the only form, and the call site
       # reads as what it means.
-      private def self.parse_no_positionals(parser : OptionParser, args : Array(String),
-                                            prefix : String, hint : String) : Nil
-        positional = [] of String
-        parser.unknown_args { |before, after| positional = before + after }
-        parser.parse(args)
+      private def self.parse_no_positionals(args : Array(String), prefix : String, hint : String,
+                                            & : OptionParser ->) : Nil
+        positional = parse_args(args, prefix) { |p| yield p }
         if msg = no_positional_error(positional, prefix, hint)
           abort msg
         end
@@ -1856,7 +1857,11 @@ module Gori
       # Build a parser, let the command register its flags, then add the tail every command
       # shares and parse `args`. Returns the positionals, BOTH halves of `unknown_args`: a word
       # after `--` arrives in the second, and dropping it was a bug here once. `-h` is added
-      # after the command's own flags, so `--help` still lists it last.
+      # after the command's own flags, so `--help` still lists it last. `invalid_option` and
+      # `missing_option` are not optional: OptionParser's defaults RAISE, straight past
+      # `Run.dispatch` (rescues IO::Error) and `CLI.run` (rescues Gori::Error) to `main`, which
+      # prints a Crystal backtrace instead of a one-line refusal
+      # (spec/cli/run/option_parser_missing_option_spec.cr).
       private def self.parse_args(args : Array(String), prefix : String, & : OptionParser ->) : Array(String)
         positional = [] of String
         parser = OptionParser.new do |p|

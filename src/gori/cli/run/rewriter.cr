@@ -55,18 +55,14 @@ module Gori
 
       private def self.cmd_rewriter_preset_list(args : Array(String)) : Nil
         format = :text
-        parser = OptionParser.new do |p|
+        parse_no_positionals(args, "gori run rewriter preset list",
+          "`preset list` takes no positional arguments; to install one use " \
+          "`gori run rewriter preset add <name>`") do |p|
           p.banner = "Usage: gori run rewriter preset list\n\n" \
                      "Lists the response-modification presets. Install one with\n" \
                      "  gori run rewriter preset add <name>"
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run rewriter preset list", f, p) }
-          p.missing_option { |f| abort "gori run rewriter preset list: missing value for #{f}" }
         end
-        parse_no_positionals(parser, args, "gori run rewriter preset list",
-          "`preset list` takes no positional arguments; to install one use " \
-          "`gori run rewriter preset add <name>`")
 
         presets = Gori::RulePresets.all
         if format == :json
@@ -94,21 +90,15 @@ module Gori
         proj = ProjectFlags.new
         disabled = false
         scope = Store::RuleScope::Project
-        leftover = [] of String
 
-        parser = OptionParser.new do |p|
+        leftover = one_positional_list(args, "gori run rewriter preset add", "<preset-name>") do |p|
           p.banner = "Usage: gori run rewriter preset add <name> [options]\n\n" \
                      "Installs a preset's rules as ordinary Match & Replace rules — visible,\n" \
                      "editable and disable-able like any other. Run `preset list` for names."
           project_options(p, proj, "update")
           p.on("--scope=SCOPE", "project (default) | global — a global rule applies in EVERY project") { |v| scope = parse_rule_scope(v) }
           p.on("--disabled", "Install the rules disabled, to review before they touch traffic") { disabled = true }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = one_positional_list(before, after, "gori run rewriter preset add", "<preset-name>") }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run rewriter preset add", f, p) }
-          p.missing_option { |f| abort "gori run rewriter preset add: missing value for #{f}" }
         end
-        parser.parse(args)
 
         name = leftover.first?
         abort "gori run rewriter preset add: a preset name is required (see `preset list`)" if name.nil? || name.empty?
@@ -209,7 +199,8 @@ module Gori
         disabled = false
         format = :text
 
-        parser = OptionParser.new do |p|
+        parse_no_positionals(args, "gori run rewriter extract add",
+          "pass the binding as --name NAME and --selector SEL") do |p|
           p.banner = "Usage: gori run rewriter extract add --name=SESSION --kind=cookie --selector=sid [options]\n\n" \
                      "The rule OBSERVES a response and binds one named value in memory; a Match &\n" \
                      "Replace rule then injects it with `--value='$BIND.SESSION'`\n" \
@@ -224,12 +215,7 @@ module Gori
           p.on("--range=A:B", "position only: a half-open byte range of the decoded body") { |v| range_s = v }
           p.on("--disabled", "Create the rule disabled") { disabled = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run rewriter extract add", f, p) }
-          p.missing_option { |f| abort "gori run rewriter extract add: missing value for #{f}" }
         end
-        parse_no_positionals(parser, args, "gori run rewriter extract add",
-          "pass the binding as --name NAME and --selector SEL")
 
         kind = Gori::ExtractKind.parse?(kind_s) ||
                abort("gori run rewriter extract add: invalid --kind '#{kind_s}' (cookie|header|regex|position|jsonpath)")
@@ -310,16 +296,10 @@ module Gori
       # The shared `<id> [--project|--db]` parse for rm/enable/disable.
       private def self.extract_target(args : Array(String), verb : String) : {Int64, Store}
         proj = ProjectFlags.new
-        parser = OptionParser.new do |p|
+        rest = parse_args(args, "gori run rewriter extract #{verb}") do |p|
           p.banner = "Usage: gori run rewriter extract #{verb} <id> [options]"
           project_options(p, proj, "update")
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run rewriter extract #{verb}", f, p) }
-          p.missing_option { |f| abort "gori run rewriter extract #{verb}: missing value for #{f}" }
         end
-        rest = [] of String
-        parser.unknown_args { |before, after| rest = before + after }
-        parser.parse(args)
         abort "gori run rewriter extract #{verb}: too many arguments (expected one <id>, got: #{rest.join(" ")})" if rest.size > 1
         id = rest.first?.try(&.to_i64?) || abort("gori run rewriter extract #{verb}: expected a rule id")
         {id, open_store(resolve_read_project(proj.name, proj.db))}
@@ -333,19 +313,15 @@ module Gori
       private def self.cmd_rewriter_bindings(args : Array(String)) : Nil
         proj = ProjectFlags.new
         format = :text
-        parser = OptionParser.new do |p|
+        parse_no_positionals(args, "gori run rewriter bindings",
+          "`rewriter bindings` takes no positional arguments; the project is named with --project") do |p|
           p.banner = "Usage: gori run rewriter bindings [options]\n\n" \
                      "Lists the names extract rules declare. Values are held in memory by the\n" \
                      "running gori and are never written anywhere, so another process cannot\n" \
                      "read them — open the Rewriter tab's `bindings` sub-tab for the live table."
           project_options(p, proj, "read")
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run rewriter bindings", f, p) }
-          p.missing_option { |f| abort "gori run rewriter bindings: missing value for #{f}" }
         end
-        parse_no_positionals(parser, args, "gori run rewriter bindings",
-          "`rewriter bindings` takes no positional arguments; the project is named with --project")
 
         store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
         begin
@@ -637,7 +613,9 @@ module Gori
         format = :text
         mock = MockFlags.new
 
-        parser = OptionParser.new do |p|
+        parse_no_positionals(args, "gori run rewriter add",
+          "pass the match as --find FIND and the replacement as --value VALUE — quote them, a value " \
+          "with spaces is one argument") do |p|
           p.banner = "Usage: gori run rewriter add [options]\n\n" \
                      "For replace: --find is the substring/regex, --value the replacement.\n" \
                      "For a header op: --find is the header NAME, --value the value.\n" \
@@ -675,13 +653,7 @@ module Gori
           p.on("--from-flow=ID", "short_circuit: copy flow ID's captured response into the rule (--find/--host/--value override)") { |v| mock.from_flow = parse_flow_id(v, "gori run rewriter add") }
           p.on("--disabled", "Create the rule disabled") { disabled = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run rewriter add", f, p) }
-          p.missing_option { |f| abort "gori run rewriter add: missing value for #{f}" }
         end
-        parse_no_positionals(parser, args, "gori run rewriter add",
-          "pass the match as --find FIND and the replacement as --value VALUE — quote them, a value " \
-          "with spaces is one argument")
 
         op = parse_rewriter_op(op_s)
         target = Store::RuleTarget.parse?(target_s) || abort("gori run rewriter add: invalid --target '#{target_s}'")
@@ -805,17 +777,11 @@ module Gori
       private def self.cmd_rewriter_rm(args : Array(String)) : Nil
         proj = ProjectFlags.new
         scope = Store::RuleScope::Project
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run rewriter rm") do |p|
           p.banner = "Usage: gori run rewriter rm|delete <id> [options]"
           project_options(p, proj, "update")
           p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_rule_scope(v) }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run rewriter rm", f, p) }
-          p.missing_option { |f| abort "gori run rewriter rm: missing value for #{f}" }
         end
-        positional = [] of String
-        parser.unknown_args { |before, after| positional = before + after }
-        parser.parse(args)
         abort "gori run rewriter rm: missing <id>" if positional.empty?
         abort "gori run rewriter rm: too many arguments (expected one <id>)" if positional.size > 1
         id = positional[0].to_i64? || abort("gori run rewriter rm: invalid rule id '#{positional[0]}'")
@@ -855,7 +821,7 @@ module Gori
         scope = Store::RuleScope::Project
         everywhere = false
         action = enable ? "enable" : "disable"
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run rewriter #{action}") do |p|
           p.banner = "Usage: gori run rewriter #{action} <id> [options]\n\n" \
                      "With --scope=global this writes THIS project's override of the rule,\n" \
                      "the way `x` does in the Rewriter tab. --everywhere changes the rule's\n" \
@@ -863,13 +829,7 @@ module Gori
           project_options(p, proj, "update")
           p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_rule_scope(v) }
           p.on("--everywhere", "global rules only: change the default for every project") { everywhere = true }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run rewriter #{action}", f, p) }
-          p.missing_option { |f| abort "gori run rewriter #{action}: missing value for #{f}" }
         end
-        positional = [] of String
-        parser.unknown_args { |before, after| positional = before + after }
-        parser.parse(args)
         abort "gori run rewriter #{action}: missing <id>" if positional.empty?
         abort "gori run rewriter #{action}: too many arguments (expected one <id>)" if positional.size > 1
         id = positional[0].to_i64? || abort("gori run rewriter #{action}: invalid rule id '#{positional[0]}'")
@@ -930,7 +890,9 @@ module Gori
         value = ""
         format = :text
 
-        parser = OptionParser.new do |p|
+        parse_no_positionals(args, "gori run rewriter preview",
+          "pass the match as --find FIND and the replacement as --value VALUE — quote them, a value " \
+          "with spaces is one argument") do |p|
           p.banner = "Usage: gori run rewriter preview [options]\n\n" \
                      "Estimate how many recent flows a rule WOULD affect, without creating it."
           project_options(p, proj, "read")
@@ -945,13 +907,7 @@ module Gori
           p.on("-fFIND", "--find=FIND", "Match substring/regex, or header name (required)") { |v| find = v }
           p.on("-vVALUE", "--value=VALUE", "Replacement, or header value") { |v| value = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run rewriter preview", f, p) }
-          p.missing_option { |f| abort "gori run rewriter preview: missing value for #{f}" }
         end
-        parse_no_positionals(parser, args, "gori run rewriter preview",
-          "pass the match as --find FIND and the replacement as --value VALUE — quote them, a value " \
-          "with spaces is one argument")
 
         abort "gori run rewriter preview: --find is required" if (f = find).nil? || f.empty?
         op = parse_rewriter_op(op_s)

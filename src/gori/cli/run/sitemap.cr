@@ -29,7 +29,12 @@ module Gori
         clear = false
         list = false
 
-        parser = OptionParser.new do |p|
+        # Both forms this parser serves, because a stray word is as likely on the read as on
+        # the write: naming only the write flags told a `--list acme.test` operator to pass
+        # --path and --tag, neither of which --list even reads.
+        parse_no_positionals(args, "gori run sitemap tag",
+          "pass the node as --host H --path P and the memo as --tag TEXT (quote a memo with " \
+          "spaces); --list narrows with --host H") do |p|
           p.banner = "Usage: gori run sitemap tag --host=H --path=P --tag=TEXT\n" \
                      "       gori run sitemap tag --list [--host=H]\n\n" \
                      "Pin a free-text memo onto one sitemap path (the same tags the TUI Sitemap\n" \
@@ -47,16 +52,7 @@ module Gori
           p.on("--tag=TEXT", "The memo to pin") { |v| tag = v.strip }
           p.on("--clear", "Remove the tag on --host/--path") { clear = true }
           p.on("--list", "List existing tags instead of setting one") { list = true }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run sitemap tag", f, p) }
-          p.missing_option { |f| abort "gori run sitemap tag: missing value for #{f}" }
         end
-        # Both forms this parser serves, because a stray word is as likely on the read as on
-        # the write: naming only the write flags told a `--list acme.test` operator to pass
-        # --path and --tag, neither of which --list even reads.
-        parse_no_positionals(parser, args, "gori run sitemap tag",
-          "pass the node as --host H --path P and the memo as --tag TEXT (quote a memo with " \
-          "spaces); --list narrows with --host H")
 
         if list && (path || tag || clear)
           abort "gori run sitemap tag: --list only reads (narrow it with --host); --path, --tag and --clear write a tag"
@@ -141,9 +137,10 @@ module Gori
         js_refs = false
         format = :text
         lenient = false
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        args = normalize_query_flag(args)
+        neg_terms, opt_args = split_ql_negations(args)
+        positional = parse_args(opt_args, "gori run sitemap") do |p|
           p.banner = "Usage: gori run sitemap [QL query] [options]\n\n" \
                      "Print the deduplicated host → path endpoint tree built from the captured flows.\n" \
                      "By default the query-string variants of one path fold into a single row\n" \
@@ -161,14 +158,7 @@ module Gori
           p.on("--no-fold-query", "Don't fold query-string variants (/search?q=1, /search?q=2) onto their path") { fold_query = false }
           p.on("--js-refs", "Also draw the endpoints captured JavaScript references and nobody requested (see `sitemap js --scan`)") { js_refs = true }
           format_flag(p, [:text, :json, :paths], "Output: text (default tree) | json | paths") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run sitemap", f, p) }
-          p.missing_option { |f| abort "gori run sitemap: missing value for #{f}" }
         end
-        args = normalize_query_flag(args)
-        neg_terms, opt_args = split_ql_negations(args)
-        parser.parse(opt_args)
         # Accept a positional QL too ("gori run sitemap host:api" / "-status:404"), mirroring
         # history's `/` bar. Shared with history through `compose_history_query` rather than
         # re-spelled: the local `query ||= (positional + neg_terms).join` this replaces threw both

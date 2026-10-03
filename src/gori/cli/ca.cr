@@ -84,13 +84,9 @@ module Gori::CLI
     "arguments#{cmd == "ca" ? " (verbs: #{CA_VERBS.join(", ")})" : ""}"
   end
 
-  # Wire the leftover check into a `gori ca` parser. `after` is the run following a `--`
-  # separator, which OptionParser strips and hands over separately; it is junk here too, so
-  # both halves are checked (mirrors reject_extra_args).
+  # Wire the leftover check into a `gori ca` parser, both halves (see `refuse_leftovers`).
   private def self.reject_ca_leftovers(cmd : String, p : OptionParser) : Nil
-    p.unknown_args do |before, after|
-      (msg = ca_leftover_error(cmd, before + after)) && abort("#{msg}\n#{p}")
-    end
+    refuse_leftovers(p) { |rest| ca_leftover_error(cmd, rest).try { |msg| "#{msg}\n#{p}" } }
   end
 
   # Path / PEM print path (the default `gori ca` action).
@@ -150,13 +146,10 @@ module Gori::CLI
   private def self.run_ca_regenerate(args : Array(String)) : Nil
     ca_dir = Paths.default_ca_dir
     yes = false
-    parser = OptionParser.new do |p|
+    parser = option_parser("gori ca regenerate") do |p|
       p.banner = "Usage: gori ca regenerate [--yes] [--ca-dir=DIR]"
       p.on("--ca-dir=DIR", "Directory for the root CA") { |v| ca_dir = v }
       p.on("-y", "--yes", "Skip the interactive confirm") { yes = true }
-      p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-      p.invalid_option { |flag| abort CLI.unknown_option_message("gori ca regenerate", flag, p) }
-      p.missing_option { |flag| abort "missing value for #{flag}" }
       reject_ca_leftovers("ca regenerate", p)
     end
     parser.parse(args)
@@ -201,15 +194,12 @@ module Gori::CLI
     cert_path = nil.as(String?)
     key_path = nil.as(String?)
     yes = false
-    parser = OptionParser.new do |p|
+    parser = option_parser("gori ca import") do |p|
       p.banner = "Usage: gori ca import --cert FILE --key FILE [--yes] [--ca-dir=DIR]"
       p.on("--cert FILE", "Root CA certificate PEM to adopt") { |v| cert_path = v }
       p.on("--key FILE", "Matching private key PEM") { |v| key_path = v }
       p.on("--ca-dir=DIR", "Directory for the root CA") { |v| ca_dir = v }
       p.on("-y", "--yes", "Skip the interactive confirm") { yes = true }
-      p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-      p.invalid_option { |flag| abort CLI.unknown_option_message("gori ca import", flag, p) }
-      p.missing_option { |flag| abort "missing value for #{flag}" }
       reject_ca_leftovers("ca import", p)
     end
     parser.parse(args)

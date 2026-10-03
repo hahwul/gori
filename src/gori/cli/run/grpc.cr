@@ -40,9 +40,8 @@ module Gori
         insecure = false
         timeout : Time::Span? = nil
         format = :text
-        url : String? = nil
 
-        parser = OptionParser.new do |p|
+        url = one_positional(args, "gori run grpc reflect", "URL") do |p|
           p.banner = "Usage: gori run grpc reflect URL\n\n" \
                      "Ask a gRPC target's server-reflection service for its descriptors and cache\n" \
                      "them in the project. `grpc.reflection.v1` is tried first, `v1alpha` second.\n" \
@@ -57,12 +56,7 @@ module Gori
             timeout = grpc_timeout(v) || abort("gori run grpc reflect: invalid --timeout '#{v}'")
           end
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| url = one_positional(before, after, "gori run grpc reflect", "URL") }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run grpc reflect", f, p) }
-          p.missing_option { |f| abort "gori run grpc reflect: missing value for #{f}" }
         end
-        parser.parse(args)
         refresh_verify_upstream(!insecure)
 
         raw = url
@@ -235,9 +229,8 @@ module Gori
         db_path : String? = nil
         project_name : String? = nil
         all = false
-        target : String? = nil
 
-        parser = OptionParser.new do |p|
+        target = one_positional(args, "gori run grpc forget", "TARGET") do |p|
           p.banner = "Usage: gori run grpc forget TARGET | --all\n\n" \
                      "Drop a cached reflection result. TARGET is the value `gori run grpc schema`\n" \
                      "prints (scheme://host:port). Nothing else is touched — a descriptor-set FILE\n" \
@@ -245,12 +238,7 @@ module Gori
           p.on("--project=NAME", "Project to use (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file") { |v| db_path = v }
           p.on("--all", "Forget every cached reflection target") { all = true }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| target = one_positional(before, after, "gori run grpc forget", "TARGET") }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run grpc forget", f, p) }
-          p.missing_option { |f| abort "gori run grpc forget: missing value for #{f}" }
         end
-        parser.parse(args)
 
         chosen = target
         if all

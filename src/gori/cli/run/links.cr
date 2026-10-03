@@ -41,9 +41,8 @@ module Gori
         owner_id : Int64? = nil
         note_position : Int32? = nil
         format = :text
-        leftover = [] of String
 
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run links") do |p|
           p.banner = "Usage: gori run links [list] --owner=issue|note --id=N|--note-position=N\n\n" \
                      "List the evidence an issue or note points at. A pointer whose target was\n" \
                      "pruned is shown as (stale) rather than hidden, so \"no evidence\" and\n" \
@@ -62,12 +61,7 @@ module Gori
           p.on("--note=N", "Stable note id (same as --owner=note --id=N)") { |v| owner_s = "note"; owner_id = parse_link_id(v, "--note"); note_position = nil }
           p.on("--note-position=N", "Note's 1-based list position shown by `gori run notes`") { |v| owner_s = "note"; owner_id = nil; note_position = parse_link_note_position(v) }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run links", f, p) }
-          p.missing_option { |f| abort "gori run links: missing value for #{f}" }
         end
-        parser.parse(args)
         # Only ever masked here by a flag mismatch: the COMPLETE mutate form aborts on `--ref`,
         # which the list parser does not own, but `links --project=X --owner=issue --id=1 delete`
         # listed and exited 0 with the verb discarded.
@@ -136,9 +130,8 @@ module Gori
         ref_s : String? = nil
         ref_id : Int64? = nil
         format = :text
-        leftover = [] of String
 
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run links #{verb}") do |p|
           p.banner = "Usage: gori run links #{verb} --owner=issue|note --id=N|--note-position=N --ref=KIND --ref-id=M\n\n" \
                      "#{action} an evidence pointer. Note --note=N uses the stable id; --note-position=N uses the 1-based position shown by `gori run notes`. --ref is flow|repeater|fuzz|miner.#{tail}"
           project_options(p, proj, "update")
@@ -153,12 +146,7 @@ module Gori
           # `add` only (#1117): it creates the row whose id a script needs back. `delete` has no
           # row left to describe, and a flag it parsed and ignored would be a silent drop.
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f } if add
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run links #{verb}", f, p) }
-          p.missing_option { |f| abort "gori run links #{verb}: missing value for #{f}" }
         end
-        parser.parse(args)
         # Every end of a link is named by a FLAG, so a positional here is always a mistake — most
         # likely a `--ref`/`--id` value the operator meant to attach to its flag. Silently dropping
         # it would file (or fail to remove) a different link than the one written.

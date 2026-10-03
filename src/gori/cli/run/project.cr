@@ -760,9 +760,8 @@ module Gori
         kind : String? = nil
         match_type : String? = nil
         pattern : String? = nil
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = one_positional_list(args, "gori run project scope update", "<id>") do |p|
           p.banner = "Usage: gori run project scope update <id> [options]\n\n" \
                      "Change an existing scope rule. Every field keeps its current value unless\n" \
                      "you pass it, so you can edit just the pattern."
@@ -770,12 +769,7 @@ module Gori
           p.on("-kKIND", "--kind=KIND", "Rule kind: include|exclude") { |v| kind = v }
           p.on("-tTYPE", "--type=TYPE", "Match type: host|string|regex") { |v| match_type = v }
           p.on("-pPATTERN", "--pattern=PATTERN", "Pattern to match") { |v| pattern = v }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run project scope update", "<id>") }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project scope update", f, p) }
-          p.missing_option { |f| abort "gori run project scope update: missing value for #{f}" }
         end
-        parser.parse(args)
 
         id_s = positional.first? || abort("gori run project scope update: <id> is required (see `gori run project scope list`)")
         id = id_s.to_i64? || abort("gori run project scope update: invalid rule id #{id_s.inspect}")
@@ -831,19 +825,15 @@ module Gori
         pattern : String? = nil
         format = :text
 
-        parser = OptionParser.new do |p|
+        parse_no_positionals(args, "gori run project scope add",
+          "pass the pattern as --pattern P, with --kind include|exclude and --type host|string|regex") do |p|
           p.banner = "Usage: gori run project scope add [options]"
           project_options(p, proj, "update")
           p.on("-kKIND", "--kind=KIND", "Rule kind: include|exclude (default: include)") { |v| kind = v }
           p.on("-tTYPE", "--type=TYPE", "Match type: host|string|regex (default: host)") { |v| match_type = v }
           p.on("-pPATTERN", "--pattern=PATTERN", "Pattern to match (required)") { |v| pattern = v }
           format_flag(p, [:text, :json], "Output: text (default) | json — the new rule, as `scope --format json` lists it") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project scope add", f, p) }
-          p.missing_option { |f| abort "gori run project scope add: missing value for #{f}" }
         end
-        parse_no_positionals(parser, args, "gori run project scope add",
-          "pass the pattern as --pattern P, with --kind include|exclude and --type host|string|regex")
 
         abort "gori run project scope add: --pattern is required" if (pat = pattern).nil? || pat.empty?
         abort "gori run project scope add: invalid kind '#{kind}' (must be include or exclude)" unless kind.in?(Scope::KINDS)
@@ -898,17 +888,10 @@ module Gori
       private def self.cmd_scope_delete(args : Array(String)) : Nil
         proj = ProjectFlags.new
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run project scope delete") do |p|
           p.banner = "Usage: gori run project scope delete|rm <rule-id> [options]"
           project_options(p, proj, "update")
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project scope delete", f, p) }
-          p.missing_option { |f| abort "gori run project scope delete: missing value for #{f}" }
         end
-
-        positional = [] of String
-        parser.unknown_args { |before, after| positional = before + after }
-        parser.parse(args)
 
         abort "gori run project scope delete: missing <rule-id>" if positional.empty?
         abort "gori run project scope delete: too many arguments (expected one <rule-id>)" if positional.size > 1
@@ -1036,15 +1019,11 @@ module Gori
         proj = ProjectFlags.new
         action = enable ? "on" : "off"
 
-        parser = OptionParser.new do |p|
+        parse_no_positionals(args, "gori run project sandbox #{action}",
+          "`sandbox #{action}` takes no positional arguments; the project is named with --project") do |p|
           p.banner = "Usage: gori run project sandbox #{action} [options]"
           project_options(p, proj, "update")
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project sandbox #{action}", f, p) }
-          p.missing_option { |f| abort "gori run project sandbox #{action}: missing value for #{f}" }
         end
-        parse_no_positionals(parser, args, "gori run project sandbox #{action}",
-          "`sandbox #{action}` takes no positional arguments; the project is named with --project")
 
         project = resolve_read_project(proj.name, proj.db)
         store = open_store(project)

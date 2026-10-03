@@ -34,9 +34,13 @@ module Gori
         proj = ProjectFlags.new
         query : String? = nil
         yes = false
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        # Same two pre-passes the listing runs, for the same reason: `-q` with a separate
+        # value, and QL negation terms ("-status:200"), which OptionParser would otherwise
+        # abort as unknown options before they could join the query.
+        args = normalize_query_flag(args)
+        neg_terms, opt_args = split_ql_negations(args)
+        positional = parse_args(opt_args, "gori run history delete") do |p|
           p.banner = "Usage: gori run history delete <id>…\n" \
                      "       gori run history delete -q QL --yes\n\n" \
                      "Hard-delete the captured flows named by id (every id must exist, or nothing is " \
@@ -45,17 +49,7 @@ module Gori
           project_options(p, proj, "update")
           p.on("-qQL", "--query=QL", "Delete every flow matching this QL query (host: status:>=500 method: …)") { |v| query = v }
           p.on("--yes", "Actually delete the query's matches (required — there is no interactive prompt here)") { yes = true }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run history delete", f, p) }
-          p.missing_option { |f| abort "gori run history delete: missing value for #{f}" }
         end
-        # Same two pre-passes the listing runs, for the same reason: `-q` with a separate
-        # value, and QL negation terms ("-status:200"), which OptionParser would otherwise
-        # abort as unknown options before they could join the query.
-        args = normalize_query_flag(args)
-        neg_terms, opt_args = split_ql_negations(args)
-        parser.parse(opt_args)
         query, dropped = Run.compose_history_query(query, [] of String, neg_terms)
         Run.warn_dropped_query_terms("history delete", dropped)
 
@@ -360,10 +354,11 @@ module Gori
         view_name : String? = nil
         column_specs = [] of String
         no_columns = false
-        positional = [] of String
         redaction = RedactFlags.new
 
-        parser = OptionParser.new do |p|
+        args = normalize_query_flag(args)
+        neg_terms, opt_args = split_ql_negations(args)
+        positional = parse_args(opt_args, "gori run history") do |p|
           p.banner = "Usage: gori run history [QL query] [options]   (alias: ls)\n\n" \
                      "Subcommands: history show <id> · history delete <id> · history clear --yes"
           project_options(p, proj, "read")
@@ -378,14 +373,7 @@ module Gori
           format_flag(p, [:text, :json, :jsonl, :har], "Output: text (default) | json (one array) | jsonl (one object per line) | har (one HAR 1.2 log)") { |f| format = f }
           p.on("--include-sensitive", "Emit Authorization/Cookie/Set-Cookie/API-key values in --format json's per-row headers instead of [REDACTED]") { include_sensitive = true }
           redact_options(p, redaction)
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run history", f, p) }
-          p.missing_option { |f| abort "gori run history: missing value for #{f}" }
         end
-        args = normalize_query_flag(args)
-        neg_terms, opt_args = split_ql_negations(args)
-        parser.parse(opt_args)
         # `--project=X delete 42` lands here because the dispatcher keys on args.first?.
         # `delete` is not QL; it is the discarded verb. Refuse it rather than search
         # for the free-text "delete 42" and exit 0 with the flow still on disk.

@@ -73,21 +73,15 @@ module Gori
         proj = ProjectFlags.new
         text : String? = nil
         format = :text
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run notes create") do |p|
           p.banner = "Usage: gori run notes create [--text TEXT] [options]\n\n" \
                      "Create a note. Body comes from --text, else the positional args,\n" \
                      "else STDIN (e.g. `some-tool | gori run notes create`)."
           project_options(p, proj, "update")
           p.on("--text=TEXT", "Note body (else positional args, else STDIN)") { |v| text = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run notes create", f, p) }
-          p.missing_option { |f| abort "gori run notes create: missing value for #{f}" }
         end
-        parser.parse(args)
 
         body = text || (positional.empty? ? nil : positional.join(' '))
         body ||= read_stdin_fallback(STDIN, "gori run notes", "note text") unless STDIN.tty?

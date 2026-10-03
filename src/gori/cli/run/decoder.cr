@@ -17,9 +17,8 @@ module Gori
         output_mode : Decoder::RenderAs? = nil
         input_flag : String? = nil
         format = :text
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run decoder") do |p|
           p.banner = "Usage: gori run decoder <chain> [input] [options]\n\n" \
                      "Run INPUT through a left-to-right converter CHAIN (separators: > | ,).\n" \
                      "INPUT comes from the 2nd positional arg, --input, or STDIN (verbatim).\n\n" \
@@ -32,12 +31,7 @@ module Gori
           p.on("--input=STR", "Value to convert (else 2nd positional arg, else STDIN)") { |v| input_flag = v }
           p.on("-oMODE", "--output=MODE", "Render final bytes: auto (default) | text | base64 | hex") { |v| output_mode = parse_render_mode(v) }
           format_flag(p, [:text, :json], "Output: text (default) | json (per-step detail)") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run decoder", f, p) }
-          p.missing_option { |f| abort "gori run decoder: missing value for #{f}" }
         end
-        parser.parse(args)
 
         abort "gori run decoder: missing <chain> (e.g. 'base64-decode'; see 'gori run decoder list')" if positional.empty?
         abort "gori run decoder: too many arguments (expected <chain> [input])" if positional.size > 2
@@ -153,16 +147,12 @@ module Gori
 
       private def self.cmd_decoder_list(args : Array(String)) : Nil
         format = :text
-        parser = OptionParser.new do |p|
+        parse_no_positionals(args, "gori run decoder list",
+          "`decoder list` takes no positional arguments; to run a value through a chain use " \
+          "`gori run decoder <chain> [input]`") do |p|
           p.banner = "Usage: gori run decoder list [options]\n\nList every converter (name, category, direction)."
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run decoder list", f, p) }
-          p.missing_option { |f| abort "gori run decoder list: missing value for #{f}" }
         end
-        parse_no_positionals(parser, args, "gori run decoder list",
-          "`decoder list` takes no positional arguments; to run a value through a chain use " \
-          "`gori run decoder <chain> [input]`")
 
         registry = Decoder.shared_registry
         if format == :json

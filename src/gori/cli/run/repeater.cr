@@ -139,7 +139,9 @@ module Gori
         headers_only = false
         max_body : Int32? = nil
 
-        parser = OptionParser.new do |p|
+        # A stray word here is refused, not dropped — see `Run.parse_no_positionals`.
+        parse_no_positionals(args, "gori run repeater h2",
+          "pass the origin as --target URL and the field list as --fields FILE") do |p|
           p.banner = "Usage: gori run repeater h2 --target URL --fields FILE [options]\n\n" \
                      "Send a field-native HTTP/2 request (exact HPACK field list, no h1-text carrier).\n" \
                      "FILE is JSON: a [[name,value],…] array, or {\"fields\":[…],\"body\":\"…\"}."
@@ -153,13 +155,7 @@ module Gori
           p.on("--headers-only", HEADERS_ONLY_HELP) { headers_only = true }
           p.on("--max-body=BYTES", MAX_BODY_HELP) { |v| max_body = parse_count(v, "--max-body") }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run repeater h2", f, p) }
-          p.missing_option { |f| abort "gori run repeater h2: missing value for #{f}" }
         end
-        # A stray word here is refused, not dropped — see `Run.parse_no_positionals`.
-        parse_no_positionals(parser, args, "gori run repeater h2",
-          "pass the origin as --target URL and the field list as --fields FILE")
         refresh_verify_upstream(!insecure)
         cap = body_cap(headers_only, max_body, "gori run repeater h2")
 
@@ -240,17 +236,13 @@ module Gori
         proj = ProjectFlags.new
         format = :text
 
-        parser = OptionParser.new do |p|
+        parse_no_positionals(args, "gori run repeater list",
+          "`repeater list` takes no positional arguments; to act on one session use " \
+          "`gori run repeater send <id>`") do |p|
           p.banner = "Usage: gori run repeater list [options]"
           project_options(p, proj, "read")
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run repeater list", f, p) }
-          p.missing_option { |f| abort "gori run repeater list: missing value for #{f}" }
         end
-        parse_no_positionals(parser, args, "gori run repeater list",
-          "`repeater list` takes no positional arguments; to act on one session use " \
-          "`gori run repeater send <id>`")
 
         project = resolve_read_project(proj.name, proj.db)
         store = open_store(project, read_only: true)
@@ -708,7 +700,11 @@ module Gori
         tls_preset : String? = nil
         format = :text
 
-        parser = OptionParser.new do |p|
+        # A bare word here is almost always the request or the target the operator meant to
+        # pass through a flag, and creating the session WITHOUT it left a row whose request
+        # was not the one they typed — reported as a clean "session #N created".
+        parse_no_positionals(args, "gori run repeater create",
+          "pass the request via --request-file/--request-raw/--request-stdin/--curl/--flow and the origin via --target") do |p|
           p.banner = "Usage: gori run repeater create [options]\n\n#{EVIDENCE_LINK_HELP}\n"
           project_options(p, proj, "update")
           p.on("-tURL", "--target=URL", "Target URL (scheme://host[:port])") { |v| target = v }
@@ -732,15 +728,7 @@ module Gori
           p.on("--ws-keep-key", "WebSocket: send the request's own Sec-WebSocket-Key instead of a fresh one (lets an absent/short/duplicate/non-base64 key be tested)") { ws_keep_key = true }
           p.on("--ws-http-only", "WebSocket: treat this session as plain HTTP — the handshake is sent as an ordinary request and its own answer (a 101, or the 2xx of an RFC 8441 extended CONNECT) read as the response, instead of the framed exchange. Stored on the session (the TUI's ^V); `repeater send --http` is the per-send form") { ws_http_only = true }
           format_flag(p, [:text, :json], "Output: text (default) | json — the new session as `repeater list --format json` prints it, plus websocket / ws_messages / request_line_rewritten") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run repeater create", f, p) }
-          p.missing_option { |f| abort "gori run repeater create: missing value for #{f}" }
         end
-        # A bare word here is almost always the request or the target the operator meant to
-        # pass through a flag, and creating the session WITHOUT it left a row whose request
-        # was not the one they typed — reported as a clean "session #N created".
-        parse_no_positionals(parser, args, "gori run repeater create",
-          "pass the request via --request-file/--request-raw/--request-stdin/--curl/--flow and the origin via --target")
 
         # ONE build of the source list, shared by the gate below and the `--flow` seeding
         # further down, so the two can never disagree about whether a request was handed in.

@@ -17,9 +17,10 @@ module Gori
         include_sensitive = false
         format = :text
         lenient = false
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        args = normalize_query_flag(args)
+        neg_terms, opt_args = split_ql_negations(args)
+        positional = parse_args(opt_args, "gori run sitemap params") do |p|
           p.banner = "Usage: gori run sitemap params [QL query] [options]\n\n" \
                      "List every parameter name the captured requests carry, per endpoint: where it\n" \
                      "appears (query/form/multipart/json/headers/cookies), how many flows carried it,\n" \
@@ -43,14 +44,7 @@ module Gori
           p.on("--include-sensitive", "Print cookie / credential / token values instead of [REDACTED]") { include_sensitive = true }
           p.on("--lenient", "Don't refuse a query naming an unknown field — search that token as text") { lenient = true }
           format_flag(p, [:text, :json, :names], "Output: text (default) | json | names (one name per line — a Miner wordlist)") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run sitemap params", f, p) }
-          p.missing_option { |f| abort "gori run sitemap params: missing value for #{f}" }
         end
-        args = normalize_query_flag(args)
-        neg_terms, opt_args = split_ql_negations(args)
-        parser.parse(opt_args)
         query, dropped = Run.compose_history_query(query, positional, neg_terms)
         Run.warn_dropped_query_terms("sitemap params", dropped)
         Run.refuse_unknown_query_fields("sitemap params", query, lenient)

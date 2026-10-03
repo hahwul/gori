@@ -90,9 +90,8 @@ module Gori
       private def self.cmd_network_get(args : Array(String)) : Nil
         proj = ProjectFlags.new
         format = :text
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = one_positional_list(args, "gori run project network get", "KEY") do |p|
           p.banner = "Usage: gori run project network get KEY [options]\n\n" \
                      "Print the value KEY has in this project: its own if it is set here, else the one it\n" \
                      "inherits (said on stderr, so `$(…)` captures the value alone). Credentials print the\n" \
@@ -100,12 +99,7 @@ module Gori
                      "#{project_network_help}\n"
           project_options(p, proj, "read")
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run project network get", "KEY") }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project network get", f, p) }
-          p.missing_option { |f| abort "gori run project network get: missing value for #{f}" }
         end
-        parser.parse(args)
         k = network_key_arg(positional.first?, "get")
 
         project = resolve_read_project(proj.name, proj.db)
@@ -189,20 +183,14 @@ module Gori
 
       private def self.cmd_network_unset(args : Array(String)) : Nil
         proj = ProjectFlags.new
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = one_positional_list(args, "gori run project network unset", "KEY") do |p|
           p.banner = "Usage: gori run project network unset|rm KEY [options]\n\n" \
                      "Drop this project's own value for KEY, so it inherits the global network.* value\n" \
                      "again. A key that is not set is already inherited, so that is not an error.\n\n" \
                      "#{project_network_help}\n"
           project_options(p, proj, "update")
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run project network unset", "KEY") }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project network unset", f, p) }
-          p.missing_option { |f| abort "gori run project network unset: missing value for #{f}" }
         end
-        parser.parse(args)
         k = network_key_arg(positional.first?, "unset")
 
         project = resolve_read_project(proj.name, proj.db)

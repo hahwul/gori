@@ -75,18 +75,14 @@ module Gori
       private def self.cmd_colormarker_color_add(args : Array(String)) : Nil
         name = ""
         hex = ""
-        parser = OptionParser.new do |p|
+        parse_no_positionals(args, "gori run colormarker color add",
+          "pass the colour as --name NAME and --hex #rrggbb") do |p|
           p.banner = "Usage: gori run colormarker color add --name=NAME --hex=#rrggbb\n\n" \
                      "Defines a global custom colour. The name is what a rule's --color references\n" \
                      "and what the picker shows; it must not be blank or one of the built-in words."
           p.on("--name=NAME", "The colour's name (the picker label + a rule's --color)") { |v| name = v }
           p.on("--hex=HEX", "The colour, as #rrggbb (or #rgb)") { |v| hex = v }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run colormarker color add", f, p) }
-          p.missing_option { |f| abort "gori run colormarker color add: missing value for #{f}" }
         end
-        parse_no_positionals(parser, args, "gori run colormarker color add",
-          "pass the colour as --name NAME and --hex #rrggbb")
         abort "gori run colormarker color add: --name is required" if name.strip.empty?
         abort "gori run colormarker color add: --hex is required" if hex.strip.empty?
         if err = Settings.add_colormarker_color(name, hex)
@@ -109,20 +105,14 @@ module Gori
       private def self.cmd_colormarker_color_update(args : Array(String)) : Nil
         new_name : String? = nil
         hex : String? = nil
-        positional = [] of String
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run colormarker color update") do |p|
           p.banner = "Usage: gori run colormarker color update <name> [--name=NEW] [--hex=#rrggbb]\n\n" \
                      "Edits a global custom colour in place. Rules that name it follow the change;\n" \
                      "a RENAME leaves them naming the old colour, which then falls back to a visible\n" \
                      "default (the same trade a delete makes)."
           p.on("--name=NAME", "Rename the colour (default: unchanged)") { |v| new_name = v }
           p.on("--hex=HEX", "Recolour it, as #rrggbb (or #rgb) (default: unchanged)") { |v| hex = v }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run colormarker color update", f, p) }
-          p.missing_option { |f| abort "gori run colormarker color update: missing value for #{f}" }
         end
-        parser.unknown_args { |before, after| positional = before + after }
-        parser.parse(args)
         abort "gori run colormarker color update: missing <name>" if positional.empty?
         abort "gori run colormarker color update: too many arguments (expected one <name>)" if positional.size > 1
         old = positional[0].strip.downcase
@@ -147,14 +137,9 @@ module Gori
       end
 
       private def self.cmd_colormarker_color_rm(args : Array(String)) : Nil
-        positional = [] of String
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run colormarker color rm") do |p|
           p.banner = "Usage: gori run colormarker color rm <name>"
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run colormarker color rm", f, p) }
         end
-        parser.unknown_args { |before, after| positional = before + after }
-        parser.parse(args)
         abort "gori run colormarker color rm: missing <name>" if positional.empty?
         abort "gori run colormarker color rm: too many arguments (expected one <name>)" if positional.size > 1
         name = positional[0].strip.downcase
@@ -258,8 +243,7 @@ module Gori
         proj = ProjectFlags.new
         format = :text
         scope = nil.as(Store::RuleScope?)
-        leftover = [] of String
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run colormarker") do |p|
           p.banner = "Usage: gori run colormarker [list] [options]\n\n" \
                      "Rules are listed in PRECEDENCE order: the global library first, then this\n" \
                      "project's own rows. The FIRST enabled match paints a History row and the\n" \
@@ -267,14 +251,7 @@ module Gori
           project_options(p, proj, "read")
           p.on("--scope=SCOPE", "Show only project | global rules") { |v| scope = parse_color_scope(v) }
           format_flag(p, [:text, :json], "text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run colormarker", f, p) }
-          p.missing_option { |f| abort "gori run colormarker: missing value for #{f}" }
         end
-        # BOTH halves of unknown_args: a bare word after `--` would otherwise be dropped
-        # silently and a typo'd subcommand would list instead of erroring.
-        parser.unknown_args { |before, after| leftover = before + after }
-        parser.parse(args)
         refuse_list_leftovers(leftover, "colormarker", "add, update/edit, rm/delete, enable, disable, move, preview, color")
 
         project = resolve_read_project(proj.name, proj.db)
@@ -309,7 +286,8 @@ module Gori
         scope = Store::RuleScope::Project
         format = :text
 
-        parser = OptionParser.new do |p|
+        parse_no_positionals(args, "gori run colormarker add",
+          "pass the condition as --when FILTER — quote it, an unquoted QL query splits into several arguments") do |p|
           p.banner = "Usage: gori run colormarker add --when=FILTER [options]\n\n" \
                      "--when is a History QL condition (#{Colormarker::USEFUL_FIELDS.join(": ")}:,\n" \
                      "plus ~regex, AND/OR/NOT and -negation) — the same query the History filter\n" \
@@ -325,12 +303,7 @@ module Gori
           p.on("--name=NAME", "Optional rule label") { |v| name = v }
           p.on("--disabled", "Create the rule disabled") { disabled = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run colormarker add", f, p) }
-          p.missing_option { |f| abort "gori run colormarker add: missing value for #{f}" }
         end
-        parse_no_positionals(parser, args, "gori run colormarker add",
-          "pass the condition as --when FILTER — quote it, an unquoted QL query splits into several arguments")
 
         abort "gori run colormarker add: --when is required" if (f = filter).nil?
         # The engine owns what is legal, so the CLI, the TUI form and MCP cannot disagree.
@@ -406,9 +379,8 @@ module Gori
         name : String? = nil
         filter : String? = nil
         scope = Store::RuleScope::Project
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run colormarker update") do |p|
           p.banner = "Usage: gori run colormarker update <id> [options]\n\n" \
                      "Edits a rule in place, keeping its PRECEDENCE — which delete + re-add does\n" \
                      "not: a re-added rule lands at the end of its scope block. Every field is\n" \
@@ -420,12 +392,7 @@ module Gori
           p.on("--style=STYLE", "full | strip (default: unchanged)") { |v| style_s = v }
           p.on("--name=NAME", "New rule label — pass an empty string to clear it (default: unchanged)") { |v| name = v }
           p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_color_scope(v) }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run colormarker update", f, p) }
-          p.missing_option { |f| abort "gori run colormarker update: missing value for #{f}" }
         end
-        parser.unknown_args { |before, after| positional = before + after }
-        parser.parse(args)
         abort "gori run colormarker update: missing <id>" if positional.empty?
         abort "gori run colormarker update: too many arguments (expected one <id>)" if positional.size > 1
         id = positional[0].to_i64? || abort("gori run colormarker update: invalid rule id '#{positional[0]}'")
@@ -497,17 +464,11 @@ module Gori
       private def self.cmd_colormarker_rm(args : Array(String)) : Nil
         proj = ProjectFlags.new
         scope = Store::RuleScope::Project
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run colormarker rm") do |p|
           p.banner = "Usage: gori run colormarker rm <id> [options]"
           project_options(p, proj, "update")
           p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_color_scope(v) }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run colormarker rm", f, p) }
-          p.missing_option { |f| abort "gori run colormarker rm: missing value for #{f}" }
         end
-        positional = [] of String
-        parser.unknown_args { |before, after| positional = before + after }
-        parser.parse(args)
         abort "gori run colormarker rm: missing <id>" if positional.empty?
         abort "gori run colormarker rm: too many arguments (expected one <id>)" if positional.size > 1
         id = positional[0].to_i64? || abort("gori run colormarker rm: invalid rule id '#{positional[0]}'")
@@ -552,7 +513,7 @@ module Gori
         scope = Store::RuleScope::Project
         everywhere = false
         action = enable ? "enable" : "disable"
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run colormarker #{action}") do |p|
           p.banner = "Usage: gori run colormarker #{action} <id> [options]\n\n" \
                      "With --scope=global this writes THIS project's override of the rule, the\n" \
                      "way `x` does in the Colormarker tab. --everywhere changes the rule's own\n" \
@@ -560,13 +521,7 @@ module Gori
           project_options(p, proj, "update")
           p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_color_scope(v) }
           p.on("--everywhere", "global rules only: change the default for every project") { everywhere = true }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run colormarker #{action}", f, p) }
-          p.missing_option { |f| abort "gori run colormarker #{action}: missing value for #{f}" }
         end
-        positional = [] of String
-        parser.unknown_args { |before, after| positional = before + after }
-        parser.parse(args)
         abort "gori run colormarker #{action}: missing <id>" if positional.empty?
         abort "gori run colormarker #{action}: too many arguments (expected one <id>)" if positional.size > 1
         id = positional[0].to_i64? || abort("gori run colormarker #{action}: invalid rule id '#{positional[0]}'")
@@ -626,7 +581,7 @@ module Gori
         proj = ProjectFlags.new
         scope = Store::RuleScope::Project
         dir = 0
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run colormarker move") do |p|
           p.banner = "Usage: gori run colormarker move <id> --up|--down [options]\n\n" \
                      "Moves the rule within its OWN scope. The scope boundary is not a position:\n" \
                      "every global rule resolves before every project one, so moving past the end\n" \
@@ -635,13 +590,7 @@ module Gori
           p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_color_scope(v) }
           p.on("--up", "Give the rule higher precedence") { dir = -1 }
           p.on("--down", "Give the rule lower precedence") { dir = 1 }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run colormarker move", f, p) }
-          p.missing_option { |f| abort "gori run colormarker move: missing value for #{f}" }
         end
-        positional = [] of String
-        parser.unknown_args { |before, after| positional = before + after }
-        parser.parse(args)
         abort "gori run colormarker move: missing <id>" if positional.empty?
         abort "gori run colormarker move: too many arguments (expected one <id>)" if positional.size > 1
         id = positional[0].to_i64? || abort("gori run colormarker move: invalid rule id '#{positional[0]}'")
@@ -705,7 +654,8 @@ module Gori
         format = :text
         scope = Store::RuleScope::Project
         limit = Colormarker::PREVIEW_SCAN
-        parser = OptionParser.new do |p|
+        parse_no_positionals(args, "gori run colormarker preview",
+          "pass the condition as --when FILTER — quote it, an unquoted QL query splits into several arguments") do |p|
           p.banner = "Usage: gori run colormarker preview --when=FILTER [options]\n\n" \
                      "Reports how many recent flows the condition MATCHES, and how many it would\n" \
                      "actually PAINT once the rules that already resolve ahead of it are counted.\n" \
@@ -719,12 +669,7 @@ module Gori
           p.on("--scope=SCOPE", "Preview as a project (default) | global rule — global resolves first") { |v| scope = parse_color_scope(v) }
           p.on("--limit=N", "Recent flows to scan (default #{Colormarker::PREVIEW_SCAN})") { |v| limit = parse_count(v, "--limit") }
           format_flag(p, [:text, :json], "text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run colormarker preview", f, p) }
-          p.missing_option { |f| abort "gori run colormarker preview: missing value for #{f}" }
         end
-        parse_no_positionals(parser, args, "gori run colormarker preview",
-          "pass the condition as --when FILTER — quote it, an unquoted QL query splits into several arguments")
         abort "gori run colormarker preview: --when is required" if (f = filter).nil?
         if reason = Colormarker.unusable_reason(f)
           abort "gori run colormarker preview: #{reason}"

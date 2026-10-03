@@ -21,9 +21,8 @@ module Gori
         insecure = false
         timeout = Authorize::ACTIVE_TIMEOUT
         format = :text
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run cache-deception") do |p|
           p.banner = "Usage: gori run cache-deception [<flow-id>…] [options]\n\n" \
                      "For each selected flow, replay it as its captured (AUTHENTICATED) identity to\n" \
                      "prime any cache, re-request the SAME url with NO session, then compare with an\n" \
@@ -41,12 +40,7 @@ module Gori
           p.on("-k", "--insecure-upstream", "Do not verify upstream TLS certificates") { insecure = true }
           p.on("--timeout=SEC", "Per-request connect + idle timeout (seconds)") { |v| timeout = parse_count(v, "--timeout").seconds }
           format_flag(p, [:text, :json, :jsonl], "Output: text (default) | json (one array at the end) | jsonl (streamed)") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run cache-deception", f, p) }
-          p.missing_option { |f| abort "gori run cache-deception: missing value for #{f}" }
         end
-        parser.parse(args)
         refresh_verify_upstream(!insecure)
         positional.each { |s| flow_ids << parse_flow_id(s, "gori run cache-deception") }
         abort "gori run cache-deception: name at least one flow id (or --flow ID)" if flow_ids.empty?

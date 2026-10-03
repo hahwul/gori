@@ -532,16 +532,12 @@ module Gori
         format = :text
         action = enable ? "enable" : "disable"
 
-        parser = OptionParser.new do |p|
+        parse_no_positionals(args, "gori run intercept #{action}",
+          "`intercept #{action}` takes no positional arguments; the project is named with --project") do |p|
           p.banner = "Usage: gori run intercept #{action} [options]"
           project_options(p, proj, "update")
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run intercept #{action}", f, p) }
-          p.missing_option { |f| abort "gori run intercept #{action}: missing value for #{f}" }
         end
-        parse_no_positionals(parser, args, "gori run intercept #{action}",
-          "`intercept #{action}` takes no positional arguments; the project is named with --project")
 
         status, detail = enqueue_intercept(proj.name, proj.db, "toggle", arg: enable ? "true" : "false")
         emit_intercept_ack(status, detail, format)

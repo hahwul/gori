@@ -254,8 +254,7 @@ module Gori
       private def self.cmd_session_add(args : Array(String)) : Nil
         proj = ProjectFlags.new
         edit = SlotEdit.new
-        positional = [] of String
-        parser = OptionParser.new do |p|
+        positional = one_positional_list(args, "gori run session add", "<name>") do |p|
           p.banner = "Usage: gori run session add --name NAME [options]\n\n" \
                      "Add a session slot. A slot that sets or strips nothing is `as captured` — the\n" \
                      "no-overlay baseline, worth having by name so a run can say which request went\n" \
@@ -271,12 +270,7 @@ module Gori
                   "`gori run session from-flow #{v} --name NAME`"
           end
           project_options(p, proj, "write")
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run session add", "<name>") }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run session add", f, p) }
-          p.missing_option { |f| abort "gori run session add: missing value for #{f}" }
         end
-        parser.parse(args)
         # `session add admin` reads as naturally as `--name admin`; accept both, and refuse
         # the pair rather than picking a winner.
         name = session_add_name(edit.name, positional.first?)
@@ -329,8 +323,7 @@ module Gori
         slot_name : String? = nil
         baseline = false
         show_values = false
-        positional = [] of String
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run session from-flow") do |p|
           p.banner = "Usage: gori run session from-flow <flow-id> --name NAME [options]\n\n" \
                      "Build a session slot from a captured LOGIN exchange. gori reads the flow's\n" \
                      "response and copies what it finds into the slot's header overlay:\n\n" \
@@ -351,12 +344,7 @@ module Gori
           p.on("--baseline", "Make it the Authorize baseline every other slot is judged against") { baseline = true }
           p.on("--show-values", "Print the captured header values instead of [REDACTED]") { show_values = true }
           project_options(p, proj, "read and write")
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run session from-flow", f, p) }
-          p.missing_option { |f| abort "gori run session from-flow: missing value for #{f}" }
         end
-        parser.parse(args)
         abort "gori run session from-flow: too many arguments (expected one flow id, got: " \
               "#{positional.join(" ")})" if positional.size > 1
         raw = positional.first?
@@ -486,8 +474,7 @@ module Gori
       private def self.cmd_session_edit(args : Array(String)) : Nil
         proj = ProjectFlags.new
         edit = SlotEdit.new
-        positional = [] of String
-        parser = OptionParser.new do |p|
+        positional = one_positional_list(args, "gori run session edit", "<name>") do |p|
           p.banner = "Usage: gori run session edit <name> [options]\n\n" \
                      "Change a slot. A collection flag REPLACES that whole collection: passing --set\n" \
                      "once rewrites the set-headers, and --clear-set empties them. A flag you do not\n" \
@@ -497,12 +484,7 @@ module Gori
                      "  gori run session edit admin --refresh 12,14 --refresh-before jwt-exp"
           session_edit_flags(p, edit, "gori run session edit")
           project_options(p, proj, "write")
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run session edit", "<name>") }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run session edit", f, p) }
-          p.missing_option { |f| abort "gori run session edit: missing value for #{f}" }
         end
-        parser.parse(args)
         target = positional.first?
         abort "gori run session edit: name the slot to change (`gori run session list`)" if target.nil?
 

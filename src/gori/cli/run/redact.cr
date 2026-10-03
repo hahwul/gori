@@ -190,19 +190,15 @@ module Gori
       private def self.cmd_redact_profiles(args : Array(String)) : Nil
         proj = ProjectFlags.new
         format = :text
-        parser = OptionParser.new do |p|
+        parse_no_positionals(args, "gori run redact profiles",
+          "`profiles` takes no positional arguments; to pick one use `gori run redact use <name>`") do |p|
           p.banner = "Usage: gori run redact profiles [options]\n\n" \
                      "Lists every redaction profile available here — the project's own first,\n" \
                      "then settings.json's, then the built-ins — and says which one a safe\n" \
                      "export would use."
           project_options(p, proj, "read")
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run redact profiles", f, p) }
-          p.missing_option { |f| abort "gori run redact profiles: missing value for #{f}" }
         end
-        parse_no_positionals(parser, args, "gori run redact profiles",
-          "`profiles` takes no positional arguments; to pick one use `gori run redact use <name>`")
 
         store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
         scope, profiles, choice = begin

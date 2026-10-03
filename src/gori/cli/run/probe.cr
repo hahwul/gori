@@ -53,9 +53,10 @@ module Gori
         in_scope = false
         persist = false
         persist_failed = false
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        args = normalize_query_flag(args)
+        neg_terms, opt_args = split_ql_negations(args)
+        positional = parse_args(opt_args, "gori run probe") do |p|
           p.banner = "Usage: gori run probe [QL query] [options]\n\n" \
                      "Scan captured History flows AND Repeater responses for issues —\n" \
                      "the headless equivalent of the TUI Probe tab. By default runs passive checks\n" \
@@ -87,14 +88,7 @@ module Gori
           p.on("--lenient", "Don't refuse a query naming an unknown field — search that token as text (old behaviour)") { lenient = true }
           p.on("--persist", "Also write the findings into the project's persisted list (what `probe issues` and the TUI Probe tab show), merged as the live scanner merges them") { persist = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run probe", f, p) }
-          p.missing_option { |f| abort "gori run probe: missing value for #{f}" }
         end
-        args = normalize_query_flag(args)
-        neg_terms, opt_args = split_ql_negations(args)
-        parser.parse(opt_args)
         refresh_verify_upstream(!insecure)
         # A positional QL is accepted too ("gori run probe status:>=500" / "-status:200"),
         # mirroring history. `compose_history_query` owns the precedence, and it is shared rather
@@ -498,19 +492,13 @@ module Gori
       private def self.cmd_probe_rule_enabled(args : Array(String), enabled : Bool) : Nil
         verb = enabled ? "enable" : "disable"
         proj = ProjectFlags.new
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = one_positional_list(args, "gori run probe rules #{verb}", "<rule-id>") do |p|
           p.banner = "Usage: gori run probe rules #{verb} <rule-id>\n\n" \
                      "Turn a scan rule on/off for this project (ids from `probe rules`).\n" \
                      "Disabling a built-in stops NEW detections; findings it already produced stay."
           project_options(p, proj, "write")
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run probe rules #{verb}", "<rule-id>") }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run probe rules #{verb}", f, p) }
-          p.missing_option { |f| abort "gori run probe rules #{verb}: missing value for #{f}" }
         end
-        parser.parse(args)
 
         id = positional.first? || abort("gori run probe rules #{verb}: <rule-id> is required (see `gori run probe rules`)")
         store = open_store(resolve_read_project(proj.name, proj.db))
@@ -552,7 +540,8 @@ module Gori
         sev_s = "info"
         format = :text
 
-        parser = OptionParser.new do |p|
+        parse_no_positionals(args, "gori run probe rules add",
+          "pass the rule as --title TEXT and --pattern P — quote them, a value with spaces is one argument") do |p|
           p.banner = "Usage: gori run probe rules add --title=T --pattern=P [options]\n\n" \
                      "Add a PROJECT custom match rule: a string or regex tested against one region\n" \
                      "of every captured flow, emitting a finding on a hit."
@@ -567,12 +556,7 @@ module Gori
                          "match, stdout = evidence. Run with no shell and with your own privileges") { match_kind = "exec" }
           p.on("-sSEVERITY", "--severity=SEVERITY", "info|low|medium|high|critical (default info)") { |v| sev_s = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run probe rules add", f, p) }
-          p.missing_option { |f| abort "gori run probe rules add: missing value for #{f}" }
         end
-        parse_no_positionals(parser, args, "gori run probe rules add",
-          "pass the rule as --title TEXT and --pattern P — quote them, a value with spaces is one argument")
 
         t = title
         abort "gori run probe rules add: --title is required" if t.nil? || t.empty?
@@ -616,18 +600,12 @@ module Gori
 
       private def self.cmd_probe_rule_delete(args : Array(String)) : Nil
         proj = ProjectFlags.new
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = one_positional_list(args, "gori run probe rules delete", "<custom-rule-id>") do |p|
           p.banner = "Usage: gori run probe rules delete <custom-rule-id>\n\n" \
                      "Delete a project custom rule. A built-in can only be DISABLED, never deleted."
           project_options(p, proj, "write")
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run probe rules delete", "<custom-rule-id>") }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run probe rules delete", f, p) }
-          p.missing_option { |f| abort "gori run probe rules delete: missing value for #{f}" }
         end
-        parser.parse(args)
 
         id = positional.first? || abort("gori run probe rules delete: <custom-rule-id> is required")
         row_id = probe_custom_row_id(id) ||
@@ -646,10 +624,9 @@ module Gori
       private def self.cmd_probe_mode(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
-        positional = [] of String
         modes = Probe::Mode.values.map(&.label)
 
-        parser = OptionParser.new do |p|
+        positional = one_positional_list(args, "gori run probe mode", "<mode>") do |p|
           p.banner = "Usage: gori run probe mode [#{modes.join("|")}]\n\n" \
                      "Get (no argument) or set the project's scan mode:\n" \
                      "  off         no analysis at all\n" \
@@ -661,12 +638,7 @@ module Gori
                      "This arms the AUTOMATIC pipeline for live captures, not just one scan."
           p.on("--project=NAME", "Project to read/write (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file") { |v| db_path = v }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run probe mode", "<mode>") }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run probe mode", f, p) }
-          p.missing_option { |f| abort "gori run probe mode: missing value for #{f}" }
         end
-        parser.parse(args)
 
         want = positional.first?.try(&.strip.downcase)
         # Mode.from_setting silently falls back to Passive on an unknown label — that would

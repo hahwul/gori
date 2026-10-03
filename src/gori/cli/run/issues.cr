@@ -38,9 +38,8 @@ module Gori
         format = :text
         export_path : String? = nil
         include_sensitive = false
-        leftover = [] of String
 
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run issues") do |p|
           p.banner = "Usage: gori run issues [options]\n\n" \
                      "Or run with a subcommand:\n" \
                      "  gori run issues create [options]\n" \
@@ -51,12 +50,7 @@ module Gori
           format_flag(p, [:text, :json, :markdown, :sarif], "Output: text (default) | json | markdown | sarif") { |f| format = f }
           p.on("--export=PATH", "Write to PATH instead of STDOUT") { |v| export_path = v }
           p.on("--include-sensitive", "Emit Authorization/Cookie/Set-Cookie/API-key values in --format sarif's webRequest/webResponse headers instead of [REDACTED]") { include_sensitive = true }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run issues", f, p) }
-          p.missing_option { |f| abort "gori run issues: missing value for #{f}" }
         end
-        parser.parse(args)
         refuse_list_leftovers(leftover, "issues", "create, update, delete/rm, list")
 
         project = resolve_read_project(proj.name, proj.db)
@@ -202,7 +196,8 @@ module Gori
         notes_stdin = false
         format = :text
 
-        parser = OptionParser.new do |p|
+        parse_no_positionals(args, "gori run issues create",
+          "pass the title as --title TEXT — quote it, a title with spaces is one argument") do |p|
           p.banner = "Usage: gori run issues create [options]\n\n" \
                      "The notes body is optional and comes from one of --notes, --notes-file or\n" \
                      "--notes-stdin; it is written with the issue, in one transaction.\n\n" \
@@ -217,12 +212,7 @@ module Gori
           p.on("--notes-file=FILE", "Read the notes from FILE, byte-for-byte") { |v| notes_file = v }
           p.on("--notes-stdin", "Read the notes from stdin, byte-for-byte, as --notes-file reads a file (`report-generator | gori run issues create -t … --notes-stdin`). Keeps a long write-up out of the argument vector, so it is not in the process listing or the shell history and cannot hit the command-line length limit. Needs a pipe or a redirect (`< notes.md`): a terminal is refused, because it would echo the notes back") { notes_stdin = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run issues create", f, p) }
-          p.missing_option { |f| abort "gori run issues create: missing value for #{f}" }
         end
-        parse_no_positionals(parser, args, "gori run issues create",
-          "pass the title as --title TEXT — quote it, a title with spaces is one argument")
 
         abort "gori run issues create: --title is required" if (t = title).nil? || t.empty?
 
@@ -366,7 +356,7 @@ module Gori
         cvss : String? = nil
         clear_cvss = false
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run issues update") do |p|
           p.banner = "Usage: gori run issues update <issue-id> [options]\n\n" \
                      "The notes body comes from one of --notes, --notes-file or --notes-stdin.\n" \
                      "--notes '' clears the notes; a file or pipe that gives no bytes is refused.\n\n" \
@@ -385,14 +375,7 @@ module Gori
           p.on("--notes-file=FILE", "Read the notes from FILE, byte-for-byte") { |v| notes_file = v }
           p.on("--notes-stdin", "Read the notes from stdin, byte-for-byte, as --notes-file reads a file (`report-generator | gori run issues update 7 --notes-stdin`). Keeps a long write-up out of the argument vector, so it is not in the process listing or the shell history and cannot hit the command-line length limit. Needs a pipe or a redirect (`< notes.md`): a terminal is refused, because it would echo the notes back") { notes_stdin = true }
           p.on("--status=STATUS", "Status: open|confirmed|false-positive|resolved") { |v| stat_s = v }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run issues update", f, p) }
-          p.missing_option { |f| abort "gori run issues update: missing value for #{f}" }
         end
-
-        positional = [] of String
-        parser.unknown_args { |before, after| positional = before + after }
-        parser.parse(args)
 
         abort "gori run issues update: missing <issue-id>" if positional.empty?
         abort "gori run issues update: too many arguments (expected one <issue-id>)" if positional.size > 1
