@@ -47,6 +47,10 @@ module Gori
         # `BruteForce` floors MIN at 1 silently; `abc:0-2` then sent 12 payloads under a banner
         # that counted them, minus the empty string the operator asked for. Refused by name.
         abort "gori run fuzz: --brute MIN must be at least 1 (got #{min}); use --null N for empty payloads" if min < 1
+        # The length MCP clamps to: past it, one flag allocated gigabytes before any send.
+        if max > Fuzz::BruteForce::MAX_LEN
+          abort "gori run fuzz: --brute MAX (#{max}) exceeds the longest payload length, #{Fuzz::BruteForce::MAX_LEN}"
+        end
         Fuzz::BruteForce.new(charset, min, max)
       end
 

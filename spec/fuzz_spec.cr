@@ -362,11 +362,20 @@ describe F::PayloadSet do
     # count walked `len` steps per length — ~max²/2 of yield-free integer arithmetic. At
     # max 1e8 that is weeks, on the single-threaded scheduler, before any send: this example
     # simply does not RETURN without the short-circuit (MCP `brute a:1-100000000`).
-    F::BruteForce.new("a", 1, 100_000_000).size.should eq(100_000_000_i64)
+    # (The length is now clamped to MAX_LEN at construction as well — see the next example.)
+    F::BruteForce.new("a", 1, 100_000_000).size.should eq(F::BruteForce::MAX_LEN.to_i64)
     F::BruteForce.new("a", 3, 5).size.should eq(3) # "aaa", "aaaa", "aaaaa"
     vals = [] of String
     F::BruteForce.new("a", 1, 3).each { |v| vals << v }
     vals.should eq(["a", "aa", "aaa"])
+  end
+
+  # The iterator allocates MIN slots up front: an unclamped `ab:2000000000` from any surface
+  # (the TUI Fuzzer's brute row had no limit) was an ~8 GB allocation before the first send.
+  it "clamps both lengths to MAX_LEN, whatever surface built it" do
+    first = nil.as(String?)
+    F::BruteForce.new("ab", 2_000_000_000, 2_000_000_000).each { |v| first = v; break }
+    first.not_nil!.size.should eq(F::BruteForce::MAX_LEN)
   end
 end
 
