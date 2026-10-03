@@ -424,7 +424,8 @@ module Gori
       prev_was_tag = false
       i = 0
       while i < n
-        return nil if buf.bytesize > MAX_OUT_PRETTY # see `indent_xml`
+        # The cap as output accrues; see `indent_xml`.
+        return nil if buf.bytesize > MAX_OUT_PRETTY
         if src[i] == 0x3C # '<'
           tend = tag_end(src, i)
           return nil if tend < 0
