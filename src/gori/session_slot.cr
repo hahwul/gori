@@ -439,11 +439,6 @@ module Gori
       end
     end
 
-    # First index of `needle` in `hay`, or nil. Public for `ClientHints.apply`.
-    def self.index_of(hay : Bytes, needle : Bytes) : Int32?
-      AsciiBytes.index(hay, needle)
-    end
-
     # The head alone, with the overlay applied. Removes run before sets so a slot that both
     # drops and sets a header ends with the set value. Values go out VERBATIM — an
     # operator-authored overlay is the operator's own bytes (the same provenance rule the

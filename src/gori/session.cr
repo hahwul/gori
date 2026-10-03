@@ -511,8 +511,8 @@ module Gori
     end
 
     # Flip the direct-access info page live (settings:network toggle). Pushed to the
-    # capture proxy's TLS tunnel, which ClientConn reads per request via the TlsMitm
-    # seam — so the next direct hit picks it up with no restart. Global; the persisted
+    # capture proxy's TLS tunnel, which ClientConn reads per request via `Tls::Tunnel`
+    # — so the next direct hit picks it up with no restart. Global; the persisted
     # Settings.serve_landing is the source of truth across restarts.
     def set_serve_landing(enabled : Bool) : Nil
       @tunnel.serve_landing = enabled

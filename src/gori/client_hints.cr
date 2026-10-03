@@ -125,7 +125,7 @@ module Gori
       head_len = SessionSlot.head_length(wire)
       # A byte scan before the preset lookup: a head that never says `Chrome/` cannot carry a UA
       # this would read, so it costs neither the lookup nor a parse.
-      return wire unless SessionSlot.index_of(wire[0, head_len], CHROME_TOKEN)
+      return wire unless AsciiBytes.index(wire[0, head_len], CHROME_TOKEN)
       return wire unless yield == "CHROME"
       lines = SessionSlot.split_head_lines(String.new(wire[0, head_len]))
       at = user_agent_line(lines) || return wire
