@@ -604,7 +604,7 @@ module Gori::Tui
     def drain_events : Bool
       applied = false
       n = 0
-      while n < DRAIN_CAP && (pair = nonblocking_event)
+      while n < DRAIN_CAP && (pair = poll(@mine_events))
         n += 1
         v, ev = pair
         next unless @sessions.any?(&.view.same?(v)) # session closed mid-run → drop
@@ -612,15 +612,6 @@ module Gori::Tui
         applied = true
       end
       applied
-    end
-
-    private def nonblocking_event : {MinerView, Miner::Event}?
-      select
-      when p = @mine_events.receive
-        p
-      else
-        nil
-      end
     end
 
     private def apply_event(v : MinerView, ev : Miner::Event) : Nil

@@ -564,12 +564,7 @@ module Gori::Tui
     end
 
     private def nonblocking_event(ch : Channel(Probe::Event)) : Probe::Event?
-      select
-      when e = ch.receive
-        e
-      else
-        nil
-      end
+      poll(ch)
     rescue Channel::ClosedError
       nil
     end

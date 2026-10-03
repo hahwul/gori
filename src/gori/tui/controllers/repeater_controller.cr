@@ -1598,7 +1598,7 @@ module Gori::Tui
       # #apply_refusal), so this is how the shell learns a response pane changed under it.
       applied = @refusal_applied
       @refusal_applied = false
-      while pair = nonblocking_repeater_result
+      while pair = poll(@repeater_results)
         view, result, record_note, sent_digest = pair
         # Drop a result whose sub-tab was closed (^W) mid-flight — applying it would
         # mutate an orphaned view and flash a toast for a gone session.
@@ -1624,7 +1624,7 @@ module Gori::Tui
         end
         applied = true
       end
-      while pair = nonblocking_ws_result
+      while pair = poll(@ws_results)
         view, result, sent_digest = pair
         next unless tab = @repeaters.find(&.view.same?(view)) # sub-tab closed mid-flight
         view.apply_ws(result)
@@ -1647,7 +1647,7 @@ module Gori::Tui
         end
         applied = true
       end
-      while pair = nonblocking_group_result
+      while pair = poll(@group_results)
         view, labeled = pair
         next unless @repeaters.find(&.view.same?(view)) # sub-tab closed mid-flight
         view.apply_group(labeled)
@@ -1655,7 +1655,7 @@ module Gori::Tui
         @host.status("send group: #{ok}/#{labeled.size} ok on one connection")
         applied = true
       end
-      while pair = nonblocking_race_result
+      while pair = poll(@race_results)
         view, labeled = pair
         next unless @repeaters.find(&.view.same?(view)) # sub-tab closed mid-flight
         view.apply_group(labeled)
@@ -1668,7 +1668,7 @@ module Gori::Tui
         @host.status("send race: #{responded}/#{labeled.size} responded · #{ok2xx}×2xx")
         applied = true
       end
-      while pair = nonblocking_minimize_event
+      while pair = poll(@minimize_events)
         view, msg = pair
         next unless tab = @repeaters.find(&.view.same?(view)) # sub-tab closed mid-run → drop
         case msg
@@ -1786,51 +1786,6 @@ module Gori::Tui
       msgs = Probe.ws_messages_from(result.messages, flow_id: flow_id, repeater_id: repeater_id)
       @host.session.probe.scan_detail(detail, repeater_id: repeater_id, ws_messages: msgs)
     rescue
-    end
-
-    private def nonblocking_repeater_result : {RepeaterView, Repeater::Result, String?, String?}?
-      select
-      when p = @repeater_results.receive
-        p
-      else
-        nil
-      end
-    end
-
-    private def nonblocking_ws_result : {RepeaterView, Repeater::WsEngine::Result, String?}?
-      select
-      when p = @ws_results.receive
-        p
-      else
-        nil
-      end
-    end
-
-    private def nonblocking_group_result : {RepeaterView, Array({String, Repeater::Result})}?
-      select
-      when p = @group_results.receive
-        p
-      else
-        nil
-      end
-    end
-
-    private def nonblocking_race_result : {RepeaterView, Array({String, Repeater::Result})}?
-      select
-      when p = @race_results.receive
-        p
-      else
-        nil
-      end
-    end
-
-    private def nonblocking_minimize_event : {RepeaterView, Repeater::Minimize::Progress | Repeater::Minimize::Report}?
-      select
-      when p = @minimize_events.receive
-        p
-      else
-        nil
-      end
     end
 
     # Converge local repeater tabs with the project's `repeaters` rows after a peer

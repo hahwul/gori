@@ -186,23 +186,12 @@ module Gori::Tui
     def drain_retest : Bool
       drained = false
       RETEST_DRAIN_CAP.times do
-        break unless ev = next_retest_event
+        break unless ev = poll(@retest_events)
         drained = true
         next unless ev.gen == @retest_active_gen # a superseded run's trailing rows
         apply_retest_event(ev)
       end
       drained
-    end
-
-    # One queued event if any, else nil — the non-blocking channel poll
-    # `AuthorizeController#next_outcome` uses.
-    private def next_retest_event : RetestEvent?
-      select
-      when ev = @retest_events.receive
-        ev
-      else
-        nil
-      end
     end
 
     private def apply_retest_event(ev : RetestEvent) : Nil

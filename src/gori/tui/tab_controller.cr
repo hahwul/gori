@@ -1671,5 +1671,16 @@ module Gori::Tui
     # result"). Default no-op; Repeater/Fuzzer/Miner controllers override to reveal the row.
     def reveal_session(id : Int64) : Nil
     end
+
+    # One queued value if the channel has any, else nil — the non-blocking poll every
+    # background-fiber drain loops on (`while ev = poll(@events)`).
+    protected def poll(ch : Channel(T)) : T? forall T
+      select
+      when v = ch.receive
+        v
+      else
+        nil
+      end
+    end
   end
 end

@@ -1520,7 +1520,7 @@ module Gori::Tui
       sel_key = selected_callback.try { |c| {c.session_id, c.uid} }
       n = 0
       inserted = false
-      while n < DRAIN_CAP && (ev = nonblocking_callback)
+      while n < DRAIN_CAP && (ev = poll(@oast_events))
         n += 1
         apply_callback(ev)
         applied = true
@@ -1607,7 +1607,7 @@ module Gori::Tui
 
     private def drain_registrations : Bool
       applied = false
-      while reg = nonblocking_reg
+      while reg = poll(@reg_events)
         apply_registration(reg)
         applied = true
       end
@@ -1620,7 +1620,7 @@ module Gori::Tui
     # server with their payloads pointed at it — that must not scroll past in the status bar.
     private def drain_releases : Bool
       applied = false
-      while res = nonblocking_release
+      while res = poll(@release_events)
         callbacks = @host.session.store.oast_callback_count(res.session_id)
         msg = Oast::Sessions.release_message(res.outcome, res.kind_label, res.session_id, callbacks)
         # The shared sentence names the provider and the consequence; the exception text is the
@@ -1635,33 +1635,6 @@ module Gori::Tui
         applied = true
       end
       applied
-    end
-
-    private def nonblocking_reg : RegResult?
-      select
-      when r = @reg_events.receive
-        r
-      else
-        nil
-      end
-    end
-
-    private def nonblocking_release : ReleaseResult?
-      select
-      when r = @release_events.receive
-        r
-      else
-        nil
-      end
-    end
-
-    private def nonblocking_callback : Oast::Event?
-      select
-      when e = @oast_events.receive
-        e
-      else
-        nil
-      end
     end
 
     private def apply_registration(reg : RegResult) : Nil

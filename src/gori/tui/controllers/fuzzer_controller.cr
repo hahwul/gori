@@ -1164,11 +1164,11 @@ module Gori::Tui
       while n < DRAIN_CAP
         # Save/load completion is rare and operator-visible; take it before another burst of
         # result rows so a fast run cannot starve a finished database operation indefinitely.
-        if io_event = nonblocking_io_event
+        if io_event = poll(@fuzz_io_events)
           n += 1
           apply_io_event(io_event)
           applied = true
-        elsif pair = nonblocking_event
+        elsif pair = poll(@fuzz_events)
           n += 1
           v, ev = pair
           next unless @fuzzers.any?(&.view.same?(v)) # session closed mid-run → drop
@@ -1179,24 +1179,6 @@ module Gori::Tui
         end
       end
       applied
-    end
-
-    private def nonblocking_event : {FuzzerView, Fuzz::Event}?
-      select
-      when p = @fuzz_events.receive
-        p
-      else
-        nil
-      end
-    end
-
-    private def nonblocking_io_event : IoEvent?
-      select
-      when event = @fuzz_io_events.receive
-        event
-      else
-        nil
-      end
     end
 
     private def apply_io_event(event : IoEvent) : Nil

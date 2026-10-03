@@ -615,7 +615,7 @@ module Gori::Tui
     def drain_events : Bool
       applied = false
       n = 0
-      while n < DRAIN_CAP && (pair = nonblocking_event)
+      while n < DRAIN_CAP && (pair = poll(@seq_events))
         n += 1
         v, ev = pair
         next unless @sessions.any?(&.view.same?(v))
@@ -623,15 +623,6 @@ module Gori::Tui
         applied = true
       end
       applied
-    end
-
-    private def nonblocking_event : {SequencerView, Sequencer::Event}?
-      select
-      when p = @seq_events.receive
-        p
-      else
-        nil
-      end
     end
 
     private def apply_event(v : SequencerView, ev : Sequencer::Event) : Nil

@@ -882,20 +882,11 @@ module Gori::Tui
     # this runs once per frame, and `receive?` would park the UI fiber on an empty channel.
     def drain_reflection : Bool
       dirty = false
-      while done = nonblocking_reflection
+      while done = poll(@reflect_results)
         dirty = true
         apply_reflection(done)
       end
       dirty
-    end
-
-    private def nonblocking_reflection : ReflectDone?
-      select
-      when d = @reflect_results.receive
-        d
-      else
-        nil
-      end
     end
 
     private def apply_reflection(done : ReflectDone) : Nil
