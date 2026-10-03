@@ -1008,12 +1008,6 @@ module Gori::Tui
       @notes_read.move(@notes, dr, dc, selecting: selecting)
     end
 
-    # READ-mode top / bottom of the notes buffer (`editor.top` / `editor.bottom`).
-    def notes_read_to_edge(dir : Int32) : Nil
-      return if notes_insert_mode?
-      @notes_read.to_edge(@notes, dir)
-    end
-
     # READ-mode undo (`editor.undo`). `notes_undo` above is the INS ladder's ^Z and is gated
     # on the mode; this one has to hand the caret `undo` restored back to the read cursor,
     # which is what READ paints from.

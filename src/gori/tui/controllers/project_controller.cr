@@ -231,7 +231,7 @@ module Gori::Tui
       when :overrides
         @project_view.focus_pane(:overrides)
         # A press inside the open add/edit row is a CARET, not a row pick — the row is text.
-        return true if @project_view.ov_field_click(mx, my)
+        return true if @project_view.ov_field.try(&.click_to_cursor(mx, my))
         # Leaving an open row for the list is a SAVE, the way the web reads a blur and the way
         # this tab's SETTINGS pane already applies a pending edit on a click out of it. A row
         # the store refuses stays open with its reason on the strip, and the pick is dropped —
@@ -245,8 +245,8 @@ module Gori::Tui
         end
       when :env
         @project_view.focus_pane(:env)
-        return true if @project_view.env_field_click(mx, my) # caret — see :overrides
-        return true if env_row_open? && !leave_env_row       # blur = save — see :overrides
+        return true if @project_view.env_field.try(&.click_to_cursor(mx, my)) # caret — see :overrides
+        return true if env_row_open? && !leave_env_row                        # blur = save — see :overrides
         # The card's scroll gauge rides its right hairline, which `env_row_at` excludes.
         if row = @project_view.env_gauge_row(rect, mx, my)
           @project_view.select_env(row)
@@ -344,8 +344,8 @@ module Gori::Tui
     def handle_drag(rect : Rect, mx : Int32, my : Int32) : Nil
       case @project_view.pane
       when :desc      then @project_view.desc_drag_to_cursor(rect, mx, my)
-      when :overrides then @project_view.ov_field_click(mx, my, selecting: true)
-      when :env       then @project_view.env_field_click(mx, my, selecting: true)
+      when :overrides then @project_view.ov_field.try(&.click_to_cursor(mx, my, selecting: true))
+      when :env       then @project_view.env_field.try(&.click_to_cursor(mx, my, selecting: true))
       end
     end
 
@@ -386,8 +386,18 @@ module Gori::Tui
       true
     end
 
+    # Backspace an open add/edit row; false when the ROW is empty (the caller then closes it)
+    # — never merely because the caret sits at 0, which discarded a typed line the operator
+    # had only moved the caret inside (← to the start of "TOKEN abc123", one ⌫ closed the row
+    # with the text unsaved). A caret at 0 with text behind it is an ordinary no-op. Public for its spec.
+    def self.backspace_row(field : TextField?) : Bool
+      return false if field.nil? || field.value.empty?
+      field.backspace
+      true
+    end
+
     private def double_click_override(rect : Rect, mx : Int32, my : Int32) : Bool
-      return true if @project_view.ov_field_select_word(mx, my)
+      return true if @project_view.ov_field.try(&.select_word_at(mx, my))
       # An open row the pair did not land on: the first press already tried to leave it
       # (`handle_click`) and was refused with a reason on the strip. Say nothing twice.
       return true if @project_view.ov_adding?
@@ -398,7 +408,7 @@ module Gori::Tui
     end
 
     private def double_click_env(rect : Rect, mx : Int32, my : Int32) : Bool
-      return true if @project_view.env_field_select_word(mx, my)
+      return true if @project_view.env_field.try(&.select_word_at(mx, my))
       return true if env_row_open? # as above
       return false unless idx = @project_view.env_row_at(rect, mx, my)
       @project_view.select_env(idx)
@@ -1069,16 +1079,16 @@ module Gori::Tui
         # ⌫ on an already-empty row means "I am done here", so the empty check comes BEFORE
         # the field sees the key — `TextField#backspace` on an empty value is a silent no-op
         # and the row would sit there with no way out but esc.
-        @project_view.cancel_ov_add unless @project_view.ov_backspace
+        @project_view.cancel_ov_add unless ProjectController.backspace_row(@project_view.ov_field)
       elsif key.tab?
         # ↹ types the IP/host separator rather than jumping focus. There is nowhere to jump
         # to: this row is one field holding two values, and the pair is what `ov_commit`
         # parses. Same in the ENV row below and in both global editors under Settings.
-        @project_view.ov_input(' ')
+        @project_view.ov_field.try(&.insert(' '))
       else
         # Everything else goes through the shared editor: caret motion, word jumps, Home/End,
         # selection, ⌥⌫, Delete and ^Z — the keys this row used to answer with ←/→ alone.
-        @project_view.ov_edit_key(ev)
+        @project_view.ov_field.try(&.handle_edit_key(ev))
       end
     end
 
@@ -1225,11 +1235,11 @@ module Gori::Tui
       elsif key.enter?
         commit_project_env
       elsif key.backspace?
-        @project_view.cancel_env_add unless @project_view.env_backspace
+        @project_view.cancel_env_add unless ProjectController.backspace_row(@project_view.env_field)
       elsif key.tab?
-        @project_view.env_input(' ') # Tab types the KEY/VALUE separator, not a pane jump
+        @project_view.env_field.try(&.insert(' ')) # Tab types the KEY/VALUE separator, not a pane jump
       else
-        @project_view.env_edit_key(ev)
+        @project_view.env_field.try(&.handle_edit_key(ev))
       end
     end
 
@@ -1263,9 +1273,9 @@ module Gori::Tui
       elsif key.enter?
         commit_project_env_prefix
       elsif key.backspace?
-        @project_view.cancel_env_prefix_edit unless @project_view.env_backspace
+        @project_view.cancel_env_prefix_edit unless ProjectController.backspace_row(@project_view.env_field)
       else
-        @project_view.env_edit_key(ev) # a sigil has no separator, so ↹ is the field's no-op
+        @project_view.env_field.try(&.handle_edit_key(ev)) # a sigil has no separator, so ↹ is the field's no-op
       end
     end
 

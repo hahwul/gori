@@ -169,7 +169,7 @@ describe "ProjectView#ov_commit" do
       view = ProjectView.new(Gori::Scope.load(store), overrides)
 
       view.ov_add_start
-      "10.0.0.1 staging.acme.test".each_char { |c| view.ov_input(c) }
+      "10.0.0.1 staging.acme.test".each_char { |c| view.ov_field.not_nil!.insert(c) }
       view.ov_commit.should eq(:ok)
       overrides.connect_address("staging.acme.test").should eq("10.0.0.1")
 
@@ -180,12 +180,12 @@ describe "ProjectView#ov_commit" do
       overrides.connect_address("staging.acme.test").should eq("10.0.0.1")
 
       view.ov_add_start
-      "10.0.0.9 staging.acme.test".each_char { |c| view.ov_input(c) }
+      "10.0.0.9 staging.acme.test".each_char { |c| view.ov_field.not_nil!.insert(c) }
       view.ov_commit.should eq(:dup) # a DIFFERENT row already maps that host
       overrides.connect_address("staging.acme.test").should_not eq("10.0.0.9")
 
       view.ov_add_start
-      "not-an-ip host.test".each_char { |c| view.ov_input(c) }
+      "not-an-ip host.test".each_char { |c| view.ov_field.not_nil!.insert(c) }
       view.ov_commit.should eq(:invalid)
     ensure
       store.close

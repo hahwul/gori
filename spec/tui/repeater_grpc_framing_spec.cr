@@ -2,11 +2,6 @@ require "../spec_helper"
 require "../support/memory_backend"
 require "compress/gzip"
 
-# A typed key for the hex editor (`hex_key` → `HexEdit#handle_key`).
-private def hex_ev(c : Char) : Termisu::Event::Key
-  Termisu::Event::Key.new(Termisu::Input::Key.from_char(c), Termisu::Input::Modifier::None, c)
-end
-
 include Gori::Tui
 
 private def grpc_tmp_store(&)

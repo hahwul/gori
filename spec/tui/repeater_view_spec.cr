@@ -1,18 +1,6 @@
 require "../spec_helper"
 require "../support/memory_backend"
 
-# Every line the response pane is showing, materialised — through `resp_line_source`, the one
-# definition of what that pane holds.
-private def resp_lines(view : Gori::Tui::RepeaterView) : Array(String)
-  size, line_at = view.resp_line_source
-  (0...size).map { |i| line_at.call(i) }
-end
-
-# A typed key for the hex editor (`hex_key` → `HexEdit#handle_key`).
-private def hex_ev(c : Char) : Termisu::Event::Key
-  Termisu::Event::Key.new(Termisu::Input::Key.from_char(c), Termisu::Input::Modifier::None, c)
-end
-
 include Gori::Tui
 
 private def repeater_tmp_store(&)

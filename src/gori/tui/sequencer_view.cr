@@ -474,10 +474,6 @@ module Gori::Tui
       "raise max requests to finish (the verdict below rests on this sample)"
     end
 
-    def collected_count : Int32
-      @samples.count(&.token)
-    end
-
     def selected_sample : Sequencer::Sample?
       @samples[@sel]?
     end
