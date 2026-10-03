@@ -726,12 +726,6 @@ module Gori::Tui
       true
     end
 
-    def editor_append_insert : Bool
-      return false unless editor_pane?
-      @issues.notes_read_move(0, 1)
-      editor_enter_insert
-    end
-
     # Leaves INSERT the way `esc` does in this pane: it SAVES, and a save refused over a peer's
     # rewrite stays in INSERT with the reason on screen (`save_notes_or_report`). A READ-mode
     # edit (`ReadEdit`) leaves through here, and leaving without the save would strand a `dd`
@@ -744,18 +738,6 @@ module Gori::Tui
 
     def editor_undo : Bool
       editor_pane? && @issues.notes_read_undo
-    end
-
-    def editor_to_top : Bool
-      return false unless editor_pane?
-      @issues.notes_read_to_edge(-1)
-      true
-    end
-
-    def editor_to_bottom : Bool
-      return false unless editor_pane?
-      @issues.notes_read_to_edge(1)
-      true
     end
 
     # `↑` on the first NOTES row and `←` at the start of a line hand focus back to RELATED —

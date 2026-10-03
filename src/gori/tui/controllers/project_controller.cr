@@ -690,12 +690,6 @@ module Gori::Tui
       true
     end
 
-    def editor_append_insert : Bool
-      return false unless editor_pane?
-      @project_view.desc_read_move(0, 1)
-      editor_enter_insert
-    end
-
     def editor_exit_insert : Bool
       return false unless editor_pane?
       save
@@ -705,18 +699,6 @@ module Gori::Tui
 
     def editor_undo : Bool
       editor_pane? && @project_view.desc_read_undo
-    end
-
-    def editor_to_top : Bool
-      return false unless editor_pane?
-      @project_view.desc_read_to_edge(-1)
-      true
-    end
-
-    def editor_to_bottom : Bool
-      return false unless editor_pane?
-      @project_view.desc_read_to_edge(1)
-      true
     end
 
     private def edit_desc_insert(ev : Termisu::Event::Key, key, c : Char?) : Nil

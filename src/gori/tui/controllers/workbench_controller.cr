@@ -534,13 +534,6 @@ module Gori::Tui
       true
     end
 
-    def editor_append_insert : Bool
-      return false unless editor_pane?
-      s = cur
-      s.input_read.move(s.input, 0, 1)
-      editor_enter_insert
-    end
-
     def editor_exit_insert : Bool
       return false unless editor_pane?
       cur.input_mode = InputMode::Read
@@ -555,21 +548,6 @@ module Gori::Tui
       s.input.undo
       s.input_read.sync_from(s.input)
       recompute_decode(s)
-      true
-    end
-
-    def editor_to_top : Bool
-      editor_input_edge(-1)
-    end
-
-    def editor_to_bottom : Bool
-      editor_input_edge(1)
-    end
-
-    private def editor_input_edge(dir : Int32) : Bool
-      return false unless editor_read_mode?
-      s = cur
-      s.input_read.to_edge(s.input, dir)
       true
     end
 

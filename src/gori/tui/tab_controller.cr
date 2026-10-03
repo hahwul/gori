@@ -1621,8 +1621,14 @@ module Gori::Tui
 
     # Append = one column right, then INSERT. Both halves are motions the editors already
     # have; there is no new editing operation here (and deliberately no `o`/open-line, which
-    # WOULD be one). Defaults to plain insert for a pane that has no caret to step.
+    # WOULD be one). The step is READ's, over `editor_text_buffer` (the read cursor writes its
+    # position back to the editor caret, so the step is what INS resumes from); a pane with no
+    # buffer just enters INSERT.
     def editor_append_insert : Bool
+      if editor_read_mode? && (buf = editor_text_buffer)
+        area, read = buf
+        read.move(area, 0, 1)
+      end
       editor_enter_insert
     end
 
@@ -1635,11 +1641,21 @@ module Gori::Tui
     end
 
     def editor_to_top : Bool
-      false
+      editor_to_edge(-1)
     end
 
     def editor_to_bottom : Bool
-      false
+      editor_to_edge(1)
+    end
+
+    # READ-mode top / bottom of `editor_text_buffer`. INSERT has its own caret keys, so the
+    # verb does nothing there and says so; a pane with no buffer (a one-line TARGET) has no
+    # edge to jump to.
+    private def editor_to_edge(dir : Int32) : Bool
+      return false unless editor_read_mode? && (buf = editor_text_buffer)
+      area, read = buf
+      read.to_edge(area, dir)
+      true
     end
 
     # The focused editor's BUFFER and its READ state, for the READ-mode edits (`ReadEdit`:
