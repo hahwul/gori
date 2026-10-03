@@ -219,11 +219,22 @@ describe Gori::Tui::KeysetPad do
   it "drops an armed d when the host takes the keys back" do
     p = pad(Kind::Vim)
     press(p, "d")
-    p.disarm
+    p.release
+    p.status.should_not contain("again") # the intro, not the dropped `d`'s "d again deletes"
     press(p, "j")
     p.status.should_not contain("cancelled")
     press(p, "d")
     p.armed?.should be_true # a fresh first press, not the second half of the old one
+    p.text.should eq(Gori::Tui::KeysetPad::SAMPLE)
+  end
+
+  it "leaves INSERT, and stops saying it is in it, when the host takes the keys back" do
+    p = pad
+    press(p, "i")
+    p.release
+    p.insert?.should be_false
+    p.status.should_not contain("INS")
+    press(p, "x") # READ again: a command, not a typed letter
     p.text.should eq(Gori::Tui::KeysetPad::SAMPLE)
   end
 

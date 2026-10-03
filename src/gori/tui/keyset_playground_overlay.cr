@@ -160,8 +160,7 @@ module Gori::Tui
 
     # The keys go back to the keyset rows: out of INSERT, and any armed `d` dropped with it.
     private def leave_pad : Nil
-      @pad.editor_exit_insert if @pad.insert?
-      @pad.disarm
+      @pad.release
       @focus = :choice
     end
   end

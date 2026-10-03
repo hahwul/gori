@@ -129,12 +129,16 @@ module Gori::Tui
       @cheats[kind] ||= CHEAT[kind].map { |(label, keys)| {label, expand(keys, kind)} }
     end
 
-    # Drop an armed `d` / `y`. The host calls it when the keys leave the pad: the Runner drops
-    # the operator once focus leaves the editor's READ mode, and a `d` left armed behind a ⇥
-    # would spend the first key typed on return, or delete a line with nothing on screen
-    # saying a `d` was waiting.
-    def disarm : Nil
+    # The host takes the keys back: out of INSERT, and an armed `d` / `y` dropped. The Runner
+    # drops the operator once focus leaves the editor's READ mode, and a `d` left armed behind a
+    # ⇥ would spend the first key typed on return, or delete a line with nothing on screen
+    # saying a `d` was waiting. The status goes back to the intro when either was live: "esc
+    # goes back to READ" or "d again deletes the line" stayed under the pad after both were gone.
+    def release : Nil
+      return unless @insert || @armed
+      editor_exit_insert if @insert
       @armed = nil
+      @status = intro
     end
 
     # One key. False only for the keys the pad hands back to its host: `esc` in READ with
