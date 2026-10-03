@@ -46,10 +46,38 @@ describe Gori::MCP::ClaudeInbox do
         ENV["CLAUDE_CODE_MESSAGING_SOCKET"] = path
         Inbox.discover(1_i64).should eq(path)
         Inbox.discover(1_i64 << 40).should be_nil
+        Inbox.discover(1_i64, uid: "4294967294").should be_nil # a socket another user owns
+        uid = LibC.getuid.to_s
+        Inbox.ours?(path, uid).should be_true
+        link = File.join(File.dirname(path), "2.sock")
+        File.symlink(path, link)
+        Inbox.ours?(link, uid).should be_false # a planted link is not followed to our socket
+        File.chmod(File.dirname(path), 0o777)
+        Inbox.ours?(path, uid).should be_false # a directory others can write lets them swap it
+        File.chmod(File.dirname(path), 0o700)
+        # the same socket spelled another way still gets the token it is owed
+        ENV["CLAUDE_CODE_MESSAGING_TOKEN"] = "t"
+        ENV["CLAUDE_CODE_MESSAGING_SOCKET"] = path.sub("/1.sock", "//1.sock")
+        Inbox.token_for(path).should eq("t")
+        ENV.delete("CLAUDE_CODE_MESSAGING_TOKEN")
       end
     ensure
       ENV.delete("CLAUDE_CODE_MESSAGING_SOCKET")
       ENV["CLAUDE_CODE_MESSAGING_SOCKET"] = saved if saved
+    end
+  end
+
+  it "hands the token only to the socket the env var names" do
+    saved = {ENV["CLAUDE_CODE_MESSAGING_SOCKET"]?, ENV["CLAUDE_CODE_MESSAGING_TOKEN"]?}
+    begin
+      ENV["CLAUDE_CODE_MESSAGING_TOKEN"] = "outer-token"
+      ENV["CLAUDE_CODE_MESSAGING_SOCKET"] = "/tmp/cc-socks/1.sock"
+      Inbox.token_for("/tmp/cc-socks/1.sock").should eq("outer-token")
+      Inbox.token_for("/tmp/cc-socks/2.sock").should be_nil
+    ensure
+      {"CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN"}.each_with_index do |k, i|
+        (v = saved[i]) ? (ENV[k] = v) : ENV.delete(k)
+      end
     end
   end
 
