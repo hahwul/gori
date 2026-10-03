@@ -569,5 +569,33 @@ module Gori::Tui
       end
       nil
     end
+
+    # The theme swatch: a strip in the theme's OWN palette (not the active one), its canvas
+    # colour framing five accent ticks, so a theme is previewed without making it active.
+    SWATCH_W = 7
+
+    def self.theme_swatch(screen : Screen, x : Int32, y : Int32, name : String) : Nil
+      pal = Theme.palette(name)
+      return unless pal
+      ticks = {pal.accent, pal.green, pal.yellow, pal.red, pal.syn_header}
+      screen.cell(x, y, ' ', pal.bg, pal.bg)
+      ticks.each_with_index { |c, i| screen.cell(x + 1 + i, y, '█', c, pal.bg) }
+      screen.cell(x + 6, y, ' ', pal.bg, pal.bg)
+    end
+
+    # One row of a theme picker `w` cells wide: the selection band and bar, a radio, the name,
+    # and the swatch right-aligned — one cell short of the row's end when `gauge_col` leaves
+    # its last column to a scroll gauge drawn inside the list.
+    def self.theme_row(screen : Screen, x : Int32, y : Int32, w : Int32, name : String,
+                       selected : Bool, gauge_col : Bool = false) : Nil
+      bg = selected ? Theme.accent_bg : Theme.panel
+      screen.fill(Rect.new(x, y, w, 1), bg)
+      screen.cell(x, y, selected ? '▎' : ' ', Theme.accent, bg)
+      screen.cell(x + 2, y, selected ? '◉' : '◯', selected ? Theme.accent : Theme.muted, bg)
+      sx = x + w - (gauge_col ? 1 : 0) - SWATCH_W
+      name_w = {sx - (x + 4) - 1, 1}.max
+      screen.text(x + 4, y, name, selected ? Theme.text_bright : Theme.text, bg, width: name_w)
+      theme_swatch(screen, sx, y, name)
+    end
   end
 end

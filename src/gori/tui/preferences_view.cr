@@ -447,26 +447,13 @@ module Gori::Tui
       if sec.sym == :theme
         name = Theme.canonical(Settings.theme)
         name_x = lx + Screen.draw_width(label) + 2
-        sx = cx - 1 - SWATCH_W
+        sx = cx - 1 - Frame::SWATCH_W
         if sx >= name_x
           screen.text(name_x, y, name, focused ? Theme.text_bright : Theme.muted, bg, width: {sx - name_x - 1, 1}.max)
-          draw_swatch(screen, sx, y, name)
+          Frame.theme_swatch(screen, sx, y, name)
         end
       end
       screen.text(cx, y, cue, focused ? Theme.accent : Theme.muted, bg, width: {content.right - cx, 1}.max)
-    end
-
-    # A tiny preview strip in the theme's OWN palette (its canvas colour framing 5 accent
-    # ticks) — the same swatch the theme card draws per row. Width == SWATCH_W.
-    SWATCH_W = 7
-
-    private def draw_swatch(screen : Screen, x : Int32, ry : Int32, name : String) : Nil
-      pal = Theme.palette(name)
-      return unless pal
-      ticks = {pal.accent, pal.green, pal.yellow, pal.red, pal.syn_header}
-      screen.cell(x, ry, ' ', pal.bg, pal.bg)
-      ticks.each_with_index { |c, i| screen.cell(x + 1 + i, ry, '█', c, pal.bg) }
-      screen.cell(x + 6, ry, ' ', pal.bg, pal.bg)
     end
 
     private def render_footer(screen : Screen, box : Rect) : Nil

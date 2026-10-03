@@ -1040,7 +1040,7 @@ module Gori::Tui
       vp.times do |row|
         i = @theme_scroll + row
         break if i >= names.size
-        draw_theme_row(screen, box, list_w, names[i], i == sel, list_top + row)
+        Frame.theme_row(screen, box.x + 1, list_top + row, list_w, names[i], i == sel, gauge_col: true)
       end
       # The shared gauge on the list area's last column — where the per-row ▲/▼/↕ markers used
       # to sit. Same replacement as the Settings theme list, which is a copy of this one.
@@ -1051,32 +1051,6 @@ module Gori::Tui
         px = box.x + 1 + list_w + PREVIEW_GAP
         render_theme_preview(screen, Rect.new(px, list_top, PREVIEW_W, vp), names[sel])
       end
-    end
-
-    private def draw_theme_row(screen : Screen, box : Rect, list_w : Int32, name : String,
-                               selected : Bool, ry : Int32) : Nil
-      bg = selected ? Theme.accent_bg : Theme.panel
-      screen.fill(Rect.new(box.x + 1, ry, list_w, 1), bg)
-      screen.cell(box.x + 1, ry, selected ? '▎' : ' ', Theme.accent, bg)
-      screen.cell(box.x + 3, ry, selected ? '◉' : '◯', selected ? Theme.accent : Theme.muted, bg)
-      # The list area's last column now carries the scroll gauge, so the swatch ends one cell
-      # short of it rather than leaving a gap for a per-row marker.
-      mark_x = box.x + list_w
-      swatch_w = 7
-      sx = mark_x - swatch_w
-      name_w = {sx - (box.x + 5) - 1, 1}.max
-      screen.text(box.x + 5, ry, name, selected ? Theme.text_bright : Theme.text, bg, width: name_w)
-      draw_swatch(screen, sx, ry, name)
-    end
-
-    # A 7-cell strip in the theme's OWN palette (Theme.palette, not the active one).
-    private def draw_swatch(screen : Screen, x : Int32, ry : Int32, name : String) : Nil
-      pal = Theme.palette(name)
-      return unless pal
-      ticks = {pal.accent, pal.green, pal.yellow, pal.red, pal.syn_header}
-      screen.cell(x, ry, ' ', pal.bg, pal.bg)
-      ticks.each_with_index { |c, i| screen.cell(x + 1 + i, ry, '█', c, pal.bg) }
-      screen.cell(x + 6, ry, ' ', pal.bg, pal.bg)
     end
 
     # A small mock of the History view rendered entirely in `name`'s OWN palette, so
