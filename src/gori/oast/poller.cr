@@ -9,11 +9,6 @@ module Gori::Oast
   # New interactions and poll errors flow out on the shared `events` channel the controller
   # (or CLI/MCP) drains; the loop never touches Store/TUI.
   class Poller
-    enum State
-      Running
-      Stopped
-    end
-
     getter session : Session
 
     # Did the LAST poll reach the provider? "Nothing came back" and "the server refused us" are
@@ -32,7 +27,6 @@ module Gori::Oast
 
     def initialize(@provider : Provider, @session : Session, @http : Http,
                    @interval : Time::Span, @events : Channel(Event))
-      @state = State::Running
       @wake = Channel(Nil).new(1)
     end
 
@@ -41,21 +35,21 @@ module Gori::Oast
     end
 
     def stop : Nil
-      @state = State::Stopped
+      @stopped = true
       poke
     end
 
     def running? : Bool
-      @state.running?
+      !@stopped
     end
 
     private def run : Nil
-      until @state.stopped?
+      until @stopped
         poll_once
-        break if @state.stopped?
+        break if @stopped
         select
         when @wake.receive
-          # woken by stop → loop re-checks @state and exits
+          # woken by stop → loop re-checks @stopped and exits
         when timeout(@interval)
         end
       end
@@ -65,7 +59,7 @@ module Gori::Oast
       interactions = poll_answering
       return unless interactions
       interactions.each do |interaction|
-        break if @state.stopped?
+        break if @stopped
         @events.send(CallbackEvent.new(@session.id, interaction))
       end
     rescue
@@ -90,7 +84,7 @@ module Gori::Oast
       out
     rescue ex
       @answering = false
-      return nil if @state.stopped?
+      return nil if @stopped
       @events.send(OastErrorEvent.new(@session.id, ex.message || "poll error"))
       nil
     end

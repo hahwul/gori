@@ -2151,18 +2151,11 @@ module Gori::Discover
     end
 
     private def poke : Nil
-      select
-      when @wake.send(nil)
-      else
-      end
+      offer(@wake, nil)
     end
 
     private def emit_progress : Nil
-      ev = ProgressEvent.new(progress_snapshot)
-      select
-      when @events.send(ev)
-      else
-      end
+      offer(@events, ProgressEvent.new(progress_snapshot))
     end
 
     private def progress_snapshot : Progress

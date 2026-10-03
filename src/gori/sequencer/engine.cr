@@ -22,11 +22,6 @@ module Gori::Sequencer
 
     MAX_CONCURRENCY = 50
 
-    enum State : UInt8
-      Running
-      Stopped
-    end
-
     getter events : Channel(Event)
 
     # nil for an ANALYSE-ONLY engine: manual mode replays a pasted token list and never
@@ -34,7 +29,7 @@ module Gori::Sequencer
     # combination (live replay without a backend), which is what makes this nil safe.
     @backend : Fuzz::CappedBackend?
     @concurrency : Int32
-    @state : State
+    @stopped = false
     @collected : Int32
     @sent : Int32
     @errors : Int32
@@ -67,7 +62,6 @@ module Gori::Sequencer
       # of the operator's budget, and only the tighter of the two may reach the wire.
       @backend = backend.try { |b| Fuzz::CappedBackend.new(b, @config.wire_cap) }
       @concurrency = @config.concurrency.clamp(1, MAX_CONCURRENCY)
-      @state = State::Running
       @settled = Channel(Nil).new(1)
       @events = Channel(Event).new(256)
       @collected = 0
@@ -97,7 +91,7 @@ module Gori::Sequencer
     end
 
     def stop : Nil
-      @state = State::Stopped
+      @stopped = true
       # The dispatcher may be HOLDING for an in-flight sample to settle (see
       # `await_outstanding`); without this nudge a stop taken during that hold waits out the
       # sample before it is noticed.
@@ -111,10 +105,10 @@ module Gori::Sequencer
       in Mode::Manual     then run_manual
       in Mode::LiveReplay then run_live
       end
-      @events.send(DoneEvent.new(@collected, @sent, @state.stopped?, wire_requests))
+      @events.send(DoneEvent.new(@collected, @sent, @stopped, wire_requests))
     rescue ex
       @events.send(ErrorEvent.new(ex.message || "sequencer error"))
-      @events.send(DoneEvent.new(@collected, @sent, @state.stopped?, wire_requests))
+      @events.send(DoneEvent.new(@collected, @sent, @stopped, wire_requests))
     ensure
       # Release the keep-alive pool's parked sockets (see `Plan.build`). In the `ensure` so a
       # stopped or raising run leaks no fd — the same standard `Fuzz::Engine` and
@@ -129,7 +123,7 @@ module Gori::Sequencer
 
     private def run_manual : Nil
       @config.manual_tokens.each do |tok|
-        break if @state.stopped?
+        break if @stopped
         next if tok.empty?
         @idx += 1
         @collected += 1
@@ -171,11 +165,11 @@ module Gori::Sequencer
 
       spawn(name: "sequencer-dispatch") do
         loop do
-          break if @state.stopped?
+          break if @stopped
           # Hold — do not break — while enough samples are already IN FLIGHT to reach the
           # goal; see `await_outstanding` for what the old break cost.
           await_outstanding
-          break if @state.stopped?
+          break if @stopped
           break if @collected >= @config.goal
           break if @dispatched >= @config.max_sends
           break if backend.cap_reached?
@@ -222,7 +216,7 @@ module Gori::Sequencer
     # outlive the `finished.receive` join that already waits on the same jobs, so it adds no
     # way to hang that the run did not already have.
     private def await_outstanding : Nil
-      while !@state.stopped? && @collected < @config.goal &&
+      while !@stopped && @collected < @config.goal &&
             @collected + @outstanding >= @config.goal && @outstanding > 0
         @settled.receive
       end
@@ -238,7 +232,7 @@ module Gori::Sequencer
     # comment above `run_live` names this exact leak and guards only the invalid-regex
     # case; this covers the rest. Count the sample as an error and keep sampling.
     private def run_job(backend : Fuzz::CappedBackend) : Nil
-      process_one(backend) unless @state.stopped?
+      process_one(backend) unless @stopped
     rescue ex
       @errors += 1
       @first_error ||= ex.message || ex.class.name
@@ -294,9 +288,9 @@ module Gori::Sequencer
         # `retry_pause` 500ms by default) scale that to 1000 requests and ~8 minutes PER
         # WORKER after `sequence_stop` returned. Checked on BOTH sides of the pause so
         # neither a stop that arrived during the send nor one during the pause costs another.
-        return raw if @state.stopped?
+        return raw if @stopped
         sleep @config.retry_pause
-        return raw if @state.stopped?
+        return raw if @stopped
       end
     end
 
@@ -329,21 +323,14 @@ module Gori::Sequencer
     end
 
     private def emit_progress : Nil
-      ev = ProgressEvent.new(@collected, @sent, total, @errors, wire_requests)
-      select
-      when @events.send(ev)
-      else
-      end
+      offer(@events, ProgressEvent.new(@collected, @sent, total, @errors, wire_requests))
     end
 
     # A non-blocking nudge. Dropping it when the buffer is already full costs nothing: the
-    # receiver re-reads `@state` and the counters and decides for itself, so a token that
+    # receiver re-reads `@stopped` and the counters and decides for itself, so a token that
     # never lands only means the decision it would have triggered has already been made.
     private def poke(ch : Channel(Nil)) : Nil
-      select
-      when ch.send(nil)
-      else
-      end
+      offer(ch, nil)
     end
   end
 end

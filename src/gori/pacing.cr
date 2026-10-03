@@ -69,5 +69,17 @@ module Gori
       # dropped jitter unless rps/throttle was also set.
       sleep(rand(@config.jitter_ms).milliseconds) if @config.jitter_ms > 0
     end
+
+    # A non-blocking channel send: deliver `value` if the buffer has room, drop it otherwise.
+    # The droppable events these engines emit — a progress nudge, an idle/wake poke — carry no
+    # state a receiver cannot re-derive from the counters, so a full buffer means the decision
+    # the dropped one would have triggered has already been made. Blocking here instead would
+    # let a slow consumer stall the hot send loop (P6).
+    private def offer(channel : Channel(T), value : T) : Nil forall T
+      select
+      when channel.send(value)
+      else
+      end
+    end
   end
 end
