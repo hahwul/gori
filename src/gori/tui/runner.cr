@@ -119,6 +119,21 @@ require "./keybind"
 require "../scope"
 require "../rules"
 require "../import"
+
+# Declared ahead of the class-reopen slices below, which use it.
+class Gori::Tui::Runner < Gori::Verb::ExecContext
+  # `forward a : Nil, b? : Bool, to: x_controller` emits `def a : Nil; x_controller.a; end`
+  # per name: the ExecContext verbs that only hand off to a same-named controller method.
+  # Stdlib `delegate` emits untyped defs, which do not satisfy ExecContext's typed abstracts.
+  private macro forward(*defs, to)
+    {% for d in defs %}
+      def {{ d.var }} : {{ d.type }}
+        {{ to }}.{{ d.var }}
+      end
+    {% end %}
+  end
+end
+
 require "./runner/agent_message"
 require "./runner/agent_question"
 require "./runner/agent_presence"

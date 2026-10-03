@@ -39,17 +39,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     open_mine_config(miner_controller.build_seed_from_request(v.target, v.request_text, v.http2?, v.sni_override))
   end
 
-  def mine_run : Nil
-    miner_controller.mine_run
-  end
-
-  def mine_stop : Nil
-    miner_controller.mine_stop
-  end
-
-  def mine_filter : Nil
-    miner_controller.mine_filter
-  end
+  forward mine_run : Nil,
+    mine_stop : Nil,
+    mine_filter : Nil,
+    to: miner_controller
 
   def miner_duplicate_subtab : Nil
     miner_controller.miner_duplicate
@@ -80,11 +73,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   # The FINDING pane holds focus — the gate for its read verbs.
-  def miner_detail_readable? : Bool
-    miner_controller.miner_detail_readable?
-  end
+  forward miner_detail_readable? : Bool, to: miner_controller
 
-  def miner_results_readable? : Bool
-    miner_controller.miner_results_readable?
-  end
+  forward miner_results_readable? : Bool, to: miner_controller
 end

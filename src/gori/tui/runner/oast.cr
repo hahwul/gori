@@ -128,7 +128,5 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   # A callback's detail is open — the gate for its read verbs.
-  def oast_detail_readable? : Bool
-    oast_controller.oast_detail_readable?
-  end
+  forward oast_detail_readable? : Bool, to: oast_controller
 end

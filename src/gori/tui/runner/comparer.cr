@@ -73,9 +73,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     @toast = view.toggle_fold ? "comparer: unchanged runs folded" : "comparer: showing every line"
   end
 
-  def comparer_new : Nil
-    comparer_controller.comparer_new
-  end
+  forward comparer_new : Nil, to: comparer_controller
 
   def comparer_close_subtab : Nil
     comparer_controller.comparer_close
@@ -168,7 +166,5 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   # Both flows are set — the gate for the diff's row select / copy verbs.
-  def comparer_diff_shown? : Bool
-    comparer_controller.comparer_diff_shown?
-  end
+  forward comparer_diff_shown? : Bool, to: comparer_controller
 end

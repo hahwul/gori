@@ -44,9 +44,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     jwt_controller.copy_output
   end
 
-  def jwt_copy_attack : Nil
-    jwt_controller.jwt_copy_attack
-  end
+  forward jwt_copy_attack : Nil, to: jwt_controller
 
   def jwt_read_mode? : Bool
     jwt_controller.read_mode?

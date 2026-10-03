@@ -87,17 +87,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   # Project SCOPE-pane rule editing (a/e/d + space menu → popup overlay).
-  def scope_add_rule : Nil
-    project_controller.scope_add_rule
-  end
+  forward scope_add_rule : Nil, to: project_controller
 
-  def scope_edit_rule : Nil
-    project_controller.scope_edit_rule
-  end
-
-  def scope_delete_rule : Nil
-    project_controller.scope_delete_rule
-  end
+  forward scope_edit_rule : Nil,
+    scope_delete_rule : Nil,
+    to: project_controller
 
   def scope_rule_selected? : Bool
     @scope.size > 0

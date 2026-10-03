@@ -5,25 +5,12 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     sitemap_controller.sitemap_move(delta)
   end
 
-  def sitemap_toggle : Nil
-    sitemap_controller.sitemap_toggle
-  end
-
-  def sitemap_expand : Nil
-    sitemap_controller.sitemap_expand
-  end
-
-  def sitemap_collapse : Nil
-    sitemap_controller.sitemap_collapse
-  end
-
-  def sitemap_query : Nil
-    sitemap_controller.sitemap_query
-  end
-
-  def sitemap_tag : Nil
-    sitemap_controller.sitemap_tag
-  end
+  forward sitemap_toggle : Nil,
+    sitemap_expand : Nil,
+    sitemap_collapse : Nil,
+    sitemap_query : Nil,
+    sitemap_tag : Nil,
+    to: sitemap_controller
 
   # `⇧E` — the marked paths, else the cursor's host or subtree, as an OpenAPI 3.0.3 document
   # (#1241). The flow set is the tree's own (the `/` query, the scope and hide-static lenses),
@@ -65,17 +52,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     @session.store.representative_flow_id(ep[:host], ep[:method], ep[:target], o.try(&.scheme), o.try(&.port))
   end
 
-  def sitemap_toggle_grouping : Nil
-    sitemap_controller.sitemap_toggle_grouping
-  end
-
-  def sitemap_toggle_query_fold : Nil
-    sitemap_controller.sitemap_toggle_query_fold
-  end
-
-  def sitemap_toggle_js_refs : Nil
-    sitemap_controller.sitemap_toggle_js_refs
-  end
+  forward sitemap_toggle_grouping : Nil,
+    sitemap_toggle_query_fold : Nil,
+    sitemap_toggle_js_refs : Nil,
+    to: sitemap_controller
 
   # `sitemap.js-scan` (#1243) — read the captured JS responses and HTML pages behind the tree's
   # own flow set that no scan has read, and store the endpoints they reference. Sends nothing;
@@ -89,17 +69,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   # --- multi-select marks ---
-  def sitemap_mark_toggle : Nil
-    sitemap_controller.sitemap_mark_toggle
-  end
-
-  def sitemap_mark_all : Nil
-    sitemap_controller.sitemap_mark_all
-  end
-
-  def sitemap_mark_clear : Nil
-    sitemap_controller.sitemap_mark_clear
-  end
+  forward sitemap_mark_toggle : Nil,
+    sitemap_mark_all : Nil,
+    sitemap_mark_clear : Nil,
+    to: sitemap_controller
 
   def sitemap_mark_extend(delta : Int32) : Nil
     sitemap_controller.sitemap_mark_extend(delta)
