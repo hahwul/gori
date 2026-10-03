@@ -2665,7 +2665,7 @@ module Gori::Tui
       # typed token text rather than the partial, because a row's `insert` is a whole spelling
       # (`$BIND.SESSION`) and a partial is only the tail of one: comparing the two would keep
       # the popup up forever on a token that is finished, and in bare mode would never match.
-      if matches.empty? || (matches.size == 1 && matches[0].insert == line[tok.sigil...cx])
+      if matches.empty? || (matches.size == 1 && matches[0].label == line[tok.sigil...cx])
         ec.close
       else
         ec.set(matches, tok.sigil)
@@ -2688,7 +2688,7 @@ module Gori::Tui
         .first(40)
         .each do |k|
           spelled = Env.spell(k, Env::Namespace::Env, Env::Syntax::Bare, prefix)
-          rows_out << EnvComplete::Match.new(:token, spelled, spelled,
+          rows_out << EnvComplete::Match.new(:token, spelled,
             env_value_preview(vars[k], bind_only || declared.includes?(k)), tok.token_end)
         end
       rows_out
@@ -2760,7 +2760,7 @@ module Gori::Tui
         next if table.nil? || table.empty?
         next unless pl.empty? || ns.label.downcase.starts_with?(pl)
         spelled = Env.input_hint(ns, syntax, prefix)
-        rows_out << EnvComplete::Match.new(:ns, spelled, spelled,
+        rows_out << EnvComplete::Match.new(:ns, spelled,
           "#{ns.description} · #{table.size}", tok.run_end + (tok.dot_follows ? 1 : 0))
       end
       # The fixed generators would otherwise fill the eight-row viewport on a bare `$` and
@@ -2795,7 +2795,7 @@ module Gori::Tui
         name, ns = row
         spelled = Env.spell(name, ns, syntax, prefix)
         hint = ns.gen? ? tables[ns][name] : env_value_preview(tables[ns][name]? || "", ns.secret?)
-        rows_out << EnvComplete::Match.new(:token, spelled, spelled,
+        rows_out << EnvComplete::Match.new(:token, spelled,
           hint, replace_end)
       end
     end

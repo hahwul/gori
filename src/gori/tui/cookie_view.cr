@@ -22,7 +22,6 @@ module Gori::Tui
     # where a right-chained badge may start.
     PAYLOAD_MIN_X = 11
     OPTS_MIN_X    = 11 # past ` OPTIONS `
-    SECRET_MIN_X  = 10 # past ` SECRET `
 
     # ---- DECODE lens layout: INPUT + DECODED + OPTIONS (fixed) + SECRET (fixed) ----
     def decode_layout(rect : Rect) : {Rect, Rect, Rect, Rect}

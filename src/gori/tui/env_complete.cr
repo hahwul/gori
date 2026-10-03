@@ -20,10 +20,8 @@ module Gori::Tui
   # while a token row on the same refresh replaces the whole `$NS.NAME` run. One span for
   # both kinds is what produced the double dot.
   class EnvComplete
-    # `label` is what the row PRINTS and `insert` what it writes — the same string today, and
-    # deliberately separate so a future row can print a decoration it does not type.
-    record Match, kind : Symbol, label : String, insert : String, hint : String,
-      replace_end : Int32
+    # `label` is what the row prints AND what accepting it writes.
+    record Match, kind : Symbol, label : String, hint : String, replace_end : Int32
 
     getter? open : Bool = false
     getter selected : Int32 = 0
@@ -66,7 +64,7 @@ module Gori::Tui
       m = @matches[@selected]? || return {line, cx, false}
       head = line[0...@tok_start.clamp(0, line.size)]
       tail = line[m.replace_end.clamp(0, line.size)..]
-      {"#{head}#{m.insert}#{tail}", @tok_start + m.insert.size, m.kind == :ns}
+      {"#{head}#{m.label}#{tail}", @tok_start + m.label.size, m.kind == :ns}
     end
 
     # Draw the dropdown anchored at the caret cell (ax, ay). Prefers to open DOWNWARD
