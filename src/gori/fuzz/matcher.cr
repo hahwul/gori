@@ -552,7 +552,7 @@ module Gori::Fuzz
     # baseline from the unmodified request).
     def metrics(raw : Repeater::Result) : Metrics
       body = decode(raw)
-      words, lines = count_metrics(body)
+      words, lines = Matcher.count_metrics(body)
       Metrics.new(raw.response.try(&.status), body.size.to_i64, words, lines, raw.duration_us)
     end
 
@@ -573,7 +573,7 @@ module Gori::Fuzz
       # origin is free to gzip that body like any other.
       grpc_status, grpc_message = GrpcVerdict.response(raw.head, body)
       length = body.size.to_i64
-      words, lines = count_metrics(body)
+      words, lines = Matcher.count_metrics(body)
 
       # The stop condition's regex counts toward `need_text` too — it is evaluated on this same
       # `text` below, so if it needs a body match the decode has to happen even when the run's
@@ -916,7 +916,9 @@ module Gori::Fuzz
     # and this one is not, which is `prev & (ws ^ 1)` with no branch to mispredict. Measured
     # 147µs -> 80µs on a 216 KB body; the counts are unchanged (`prev` starts at 1 because a body
     # begins "after whitespace", which is what `in_word = false` meant).
-    private def count_metrics(body : Bytes) : {Int32, Int32}
+    #
+    # Public because `Miner::Fingerprint` counts the same way over its own decode.
+    def self.count_metrics(body : Bytes) : {Int32, Int32}
       words = 0
       lines = 0
       prev_ws = 1
