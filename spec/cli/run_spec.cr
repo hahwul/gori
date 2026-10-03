@@ -1312,3 +1312,17 @@ describe "gori run — the root logger" do
     setup.should_not contain("STDOUT")
   end
 end
+
+# A closed STDERR made the stdlib backend's write raise, which killed the async log fiber and
+# then blocked every later `Log` call (`gori mcp` stopped answering tools).
+describe Gori::CLI::StderrLog do
+  it "drops an entry it cannot write instead of raising" do
+    r, w = IO.pipe
+    r.close
+    backend = Gori::CLI::StderrLog.new
+    backend.io = w
+    entry = Log::Entry.new("spec", Log::Severity::Info, "nobody reads this", Log::Metadata.empty, nil)
+    3.times { backend.write(entry) }
+    w.close rescue nil
+  end
+end
