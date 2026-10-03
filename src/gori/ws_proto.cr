@@ -15,7 +15,14 @@ module Gori
     # envelopes are chosen to prevent — a `0x1e` terminator, a NUL terminator, a leading digit,
     # a leading frame letter and a JSON object are disjoint — so this is the tie-break of last
     # resort, most-specific first.
-    PROTOCOLS = [SignalR::NAME, Stomp::NAME, SocketIo::NAME, SockJs::NAME, ActionCable::NAME]
+    DECODERS = [
+      {SignalR::NAME, SignalR::LABEL, ->SignalR.decode(Bytes), ->SignalR.hinted?(String)},
+      {Stomp::NAME, Stomp::LABEL, ->Stomp.decode(Bytes), ->Stomp.hinted?(String)},
+      {SocketIo::NAME, SocketIo::LABEL, ->SocketIo.decode(Bytes), ->SocketIo.hinted?(String)},
+      {SockJs::NAME, SockJs::LABEL, ->SockJs.decode(Bytes), ->SockJs.hinted?(String)},
+      {ActionCable::NAME, ActionCable::LABEL, ->ActionCable.decode(Bytes), ->ActionCable.hinted?(String)},
+    ]
+    PROTOCOLS = DECODERS.map(&.[0])
 
     # The decoded records a transcript carries, in transcript order. Empty ⇒ no pane.
     #
@@ -142,13 +149,7 @@ module Gori
     end
 
     private def decode_with(protocol : String, payload : Bytes) : Array(Decoded)?
-      case protocol
-      when SignalR::NAME     then SignalR.decode(payload)
-      when Stomp::NAME       then Stomp.decode(payload)
-      when SocketIo::NAME    then SocketIo.decode(payload)
-      when SockJs::NAME      then SockJs.decode(payload)
-      when ActionCable::NAME then ActionCable.decode(payload)
-      end
+      DECODERS.find { |d| d[0] == protocol }.try(&.[2].call(payload))
     end
 
     private def hinted_protocols(subprotocols : Array(String)?) : Array(String)
@@ -156,14 +157,7 @@ module Gori
       return [] of String if subs.nil? || subs.empty?
       PROTOCOLS.select do |p|
         subs.any? do |s|
-          case p
-          when SignalR::NAME     then SignalR.hinted?(s)
-          when Stomp::NAME       then Stomp.hinted?(s)
-          when SocketIo::NAME    then SocketIo.hinted?(s)
-          when SockJs::NAME      then SockJs.hinted?(s)
-          when ActionCable::NAME then ActionCable.hinted?(s)
-          else                        false
-          end
+          DECODERS.find { |d| d[0] == p }.try(&.[3].call(s)) || false
         end
       end
     end
@@ -197,14 +191,7 @@ module Gori
     end
 
     def label(protocol : String) : String
-      case protocol
-      when SignalR::NAME     then SignalR::LABEL
-      when Stomp::NAME       then Stomp::LABEL
-      when SocketIo::NAME    then SocketIo::LABEL
-      when SockJs::NAME      then SockJs::LABEL
-      when ActionCable::NAME then ActionCable::LABEL
-      else                        protocol
-      end
+      DECODERS.find { |d| d[0] == protocol }.try(&.[1]) || protocol
     end
 
     # The protocol a pane should NAME itself after: the one that read the most records, ties
