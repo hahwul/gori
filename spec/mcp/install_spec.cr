@@ -66,8 +66,16 @@ describe Gori::MCP::Install do
       end
     end
 
-    it "maps claude-code to ~/.claude.json" do
-      Gori::MCP::Install.config_path("claude-code").should eq(File.join(ENV["HOME"], ".claude.json"))
+    it "maps claude-code to ~/.claude.json, or CLAUDE_CONFIG_DIR" do
+      old = ENV["CLAUDE_CONFIG_DIR"]?
+      begin
+        ENV.delete("CLAUDE_CONFIG_DIR")
+        Gori::MCP::Install.config_path("claude-code").should eq(File.join(ENV["HOME"], ".claude.json"))
+        ENV["CLAUDE_CONFIG_DIR"] = "/opt/claude-alt"
+        Gori::MCP::Install.config_path("claude-code").should eq("/opt/claude-alt/.claude.json")
+      ensure
+        old ? (ENV["CLAUDE_CONFIG_DIR"] = old) : ENV.delete("CLAUDE_CONFIG_DIR")
+      end
     end
 
     it "maps agy to the antigravity-cli mcp_config.json" do
@@ -164,6 +172,30 @@ describe Gori::MCP::Install do
       # it here would install into a directory named " " that nothing reads.
       Gori::MCP::Install.hermes_home(home, :linux, hermes_home_env: "").should eq("/home/u/.hermes")
       Gori::MCP::Install.hermes_home(home, :linux, hermes_home_env: "   ").should eq("/home/u/.hermes")
+    end
+  end
+
+  describe ".invoked_path" do
+    # A package manager links a stable name to a versioned file; the stable one survives an upgrade.
+    it "keeps the symlink gori was found by, and only when it is the running binary" do
+      dir = File.tempname("gori-exe")
+      Dir.mkdir_p(File.join(dir, "cellar"))
+      Dir.mkdir_p(File.join(dir, "bin"))
+      real = File.join(dir, "cellar", "gori")
+      File.write(real, "")
+      File.chmod(real, 0o755)
+      link = File.join(dir, "bin", "gori")
+      File.symlink(real, link)
+      other = File.join(dir, "other")
+      File.write(other, "")
+      begin
+        Gori::MCP::Install.invoked_path("gori", real, File.join(dir, "bin")).should eq(link)
+        Gori::MCP::Install.invoked_path(link, real, nil).should eq(link)
+        Gori::MCP::Install.invoked_path("gori", other, File.join(dir, "bin")).should be_nil
+        Gori::MCP::Install.invoked_path("gori", real, File.join(dir, "nowhere")).should be_nil
+      ensure
+        FileUtils.rm_rf(dir)
+      end
     end
   end
 

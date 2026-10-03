@@ -60,7 +60,7 @@ module Gori
         when "claude"
           claude_desktop_path(home)
         when "claude-code"
-          File.join(home, ".claude.json")
+          File.join(claude_config_dir(home), ".claude.json")
         when "grok"
           # Grok Build TUI: GROK_HOME is not standard; config lives under ~/.grok.
           File.join(home, ".grok", "config.toml")
@@ -99,6 +99,12 @@ module Gori
         else
           raise ArgumentError.new("Unknown install target: #{target}")
         end
+      end
+
+      # CLAUDE_CONFIG_DIR moves `.claude.json` with the rest of Claude Code's config (checked
+      # against `claude mcp add -s user` with the variable set); without it, the home directory.
+      private def self.claude_config_dir(home : String) : String
+        File.expand_path(ENV["CLAUDE_CONFIG_DIR"]?.presence || home)
       end
 
       # Claude Desktop's config file, per platform. ELECTRON picks this directory, not
@@ -207,11 +213,24 @@ module Gori
         args
       end
 
-      # Resolve the absolute path of the running gori binary.
+      # Resolve the absolute path of the running gori binary, as it was invoked.
       def self.executable_path : String
         exe = Process.executable_path
         exe = File.realpath(PROGRAM_NAME) if exe.nil? || exe.empty?
-        exe
+        invoked_path(PROGRAM_NAME, exe) || exe
+      end
+
+      # The path gori was invoked by — found on PATH, or the path typed — when it is the same
+      # binary as *exe*. `Process.executable_path` resolves symlinks, so a brew or nix install
+      # recorded `…/Cellar/gori/<ver>/bin/gori` or a `/nix/store/<hash>-…` path, which the next
+      # upgrade's cleanup or garbage collection deletes, leaving every client's entry pointing
+      # at nothing.
+      def self.invoked_path(program : String, exe : String, path : String? = ENV["PATH"]?) : String?
+        found = Process.find_executable(program, path) || return
+        found = File.expand_path(found)
+        found if File.realpath(found) == File.realpath(exe)
+      rescue File::Error
+        nil
       end
 
       # Install gori into the target client's config. Returns the path written.

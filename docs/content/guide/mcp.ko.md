@@ -134,7 +134,7 @@ gori는 널리 쓰이는 클라이언트의 MCP 설정을 대신 작성해 줍�
 | 플래그 | 클라이언트 | 작성되는 설정 |
 |------|--------|----------------|
 | `--install-claude` | Claude Desktop | 플랫폼별 앱 설정 디렉터리의 `claude_desktop_config.json` (아래 참고) |
-| `--install-claude-code` | Claude Code | `~/.claude.json` (`mcpServers.gori`) |
+| `--install-claude-code` | Claude Code | `~/.claude.json` (`mcpServers.gori`), 또는 `$CLAUDE_CONFIG_DIR` |
 | `--install-codex` | OpenAI Codex | `~/.codex/config.toml` (`[mcp_servers.gori]`), 또는 `$CODEX_HOME` |
 | `--install-agy` | Antigravity CLI | `~/.gemini/antigravity-cli/mcp_config.json` |
 | `--install-grok` | Grok | `~/.grok/config.toml` (`[mcp_servers.gori]`) |

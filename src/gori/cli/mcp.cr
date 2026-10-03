@@ -39,7 +39,7 @@ module Gori::CLI
       p.on("--install-agy", "Install gori as an MCP server in Antigravity (~/.gemini/antigravity-cli/mcp_config.json)") { install_targets << "agy" }
       p.on("--install-codex", "Install gori as an MCP server in Codex (~/.codex/config.toml)") { install_targets << "codex" }
       p.on("--install-claude", "Install gori as an MCP server in Claude Desktop config") { install_targets << "claude" }
-      p.on("--install-claude-code", "Install gori as an MCP server in Claude Code (~/.claude.json)") { install_targets << "claude-code" }
+      p.on("--install-claude-code", "Install gori as an MCP server in Claude Code (~/.claude.json, or $CLAUDE_CONFIG_DIR)") { install_targets << "claude-code" }
       p.on("--install-grok", "Install gori as an MCP server in Grok (~/.grok/config.toml)") { install_targets << "grok" }
       p.on("--install-hermes", "Install gori as an MCP server in Hermes ($HERMES_HOME, default ~/.hermes/config.yaml)") { install_targets << "hermes" }
       p.on("--install-pi", "Install gori as an MCP server in Pi ($PI_CODING_AGENT_DIR, default ~/.pi/agent/mcp.json; requires an MCP adapter)") { install_targets << "pi" }
