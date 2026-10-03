@@ -247,18 +247,7 @@ module Gori::Tui
     # select, word motion, ⌥⌫), so a header line can be selected and retyped.
     private def edit(ev : Termisu::Event::Key) : Nil
       @refused = nil
-      key = ev.key
-      case
-      when key.enter?                    then @editor.insert_newline
-      when ev.ctrl? && key.lower_z?      then @editor.undo # the undo chord every body editor binds
-      when @editor.word_delete_key?(ev)  then @editor.handle_motion_key(ev)
-      when key.backspace?                then @editor.backspace
-      when key.delete?                   then @editor.delete
-      when @editor.handle_motion_key(ev) then nil
-      else
-        ch = ev.char || key.to_char
-        @editor.insert(ch) if ch && !ev.ctrl? && !ev.alt?
-      end
+      @editor.handle_edit_key(ev)
     end
 
     # Refuse to close on a form that cannot become an identity, and SAY why — the shell only

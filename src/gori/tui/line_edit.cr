@@ -1,4 +1,5 @@
 require "../filter_ast"
+require "./screen"
 
 module Gori::Tui
   # The caret edits a one-line bar takes beyond a character at a time — word motion, the
@@ -73,8 +74,10 @@ module Gori::Tui
       end
     end
 
-    # A modified ⌫. Same shape as `TextField#word_delete_key?`, and load-bearing for the same
-    # reason: a terminal sends ⌥⌫ as ESC + 0x7F, which arrives as Unknown + Alt carrying DEL.
+    # A modified ⌫ — the one test `TextField` and `TextArea` answer through too. The `char`
+    # half is load-bearing: a terminal sends ⌥⌫ as ESC + 0x7F, and termisu's Alt-prefix branch
+    # maps the payload through `Key.from_char`, which has no name for DEL — so it arrives as
+    # `Key::Unknown` + Alt carrying that char, not as Backspace.
     def self.word_delete_key?(ev : Termisu::Event::Key) : Bool
       return false unless ev.ctrl? || ev.alt?
       return true if ev.key.backspace?
@@ -110,6 +113,34 @@ module Gori::Tui
         i += 1
       end
       i
+    end
+
+    # The WORD under character index `cx` for a double-click, as `{start, end}`: a run of word
+    # characters or a run of punctuation, on the same rule as `word_left`/`word_right`, so a URL
+    # breaks at every `/`, `?` and `=` while a host label stays whole, and a double-click and
+    # ⌥←/→ agree about where a word ends. nil on whitespace or past the end — the gesture means
+    # "give me this token", and there is none. The one span TextArea, ReadCursor and
+    # LineFieldRead select, so the three cannot disagree.
+    def self.word_span(line : String, cx : Int32) : {Int32, Int32}?
+      # `Screen.column_for_click` rounds a POINTER to the NEAREST cluster boundary, so a
+      # double-click on the RIGHT half of a WIDE glyph — a Hangul syllable, a CJK ideograph:
+      # half of every pointer position over such text — resolves to the position AFTER it,
+      # where the word may have already ended and there is no token to take. Step back over
+      # that one glyph, and ONLY when it is wide: a 1-column cluster cannot be rounded past,
+      # so every ASCII gesture is bit-for-bit what it was (including "a double-click on a
+      # space takes nothing").
+      c = Screen.step_back_over_wide(line, cx.clamp(0, line.size))
+      return nil if c >= line.size || line[c].whitespace?
+      word = word_char?(line[c])
+      a = c
+      while a > 0 && !line[a - 1].whitespace? && word_char?(line[a - 1]) == word
+        a -= 1
+      end
+      b = c
+      while b < line.size && !line[b].whitespace? && word_char?(line[b]) == word
+        b += 1
+      end
+      a == b ? nil : {a, b}
     end
 
     private def self.word_char?(c : Char) : Bool

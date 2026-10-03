@@ -1,4 +1,5 @@
 require "./screen"
+require "./line_edit"
 require "./geometry"
 
 module Gori::Tui
@@ -246,36 +247,12 @@ module Gori::Tui
       return false if size <= 0
       @cy = @cy.clamp(0, size - 1)
       line = line_at.call(@cy)
-      cx = @cx.clamp(0, line.size)
-      # `Screen.column_for_click` rounds a POINTER to the NEAREST cluster boundary, so a
-      # double-click on the RIGHT half of a WIDE glyph — a Hangul syllable, a CJK ideograph:
-      # half of every pointer position over such text — resolves to the position AFTER it,
-      # where the word may have already ended and there is no token to take. Step back over
-      # that one glyph, and ONLY when it is wide: a 1-column cluster cannot be rounded past,
-      # so every ASCII gesture is bit-for-bit what it was (including "a double-click on a
-      # space takes nothing", which is this method's stated contract).
-      cx = Screen.step_back_over_wide(line, cx)
-      return false if cx >= line.size || line[cx].whitespace?
-      word = word_char?(line[cx])
-      a = cx
-      while a > 0 && !line[a - 1].whitespace? && word_char?(line[a - 1]) == word
-        a -= 1
-      end
-      b = cx
-      while b < line.size && !line[b].whitespace? && word_char?(line[b]) == word
-        b += 1
-      end
-      return false if a == b
+      return false unless span = LineEdit.word_span(line, @cx)
+      a, b = span
       @linewise = false
       @anchor = {@cy, a}
       @cx = b
       true
-    end
-
-    # See `TextArea#word_char?` — the two must agree, or double-click and ⌥←/→ would
-    # disagree about where a word ends in the same buffer.
-    private def word_char?(c : Char) : Bool
-      c.alphanumeric? || c == '_' || c == '-'
     end
 
     # The selection as a DOCUMENT-ORDERED {y0, x0, y1, x1}, or nil when there is none (or it is
