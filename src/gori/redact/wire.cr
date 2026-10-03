@@ -88,17 +88,19 @@ module Gori
       # a head on anything else). The count a surface then reports is 0 — nothing was examined,
       # as opposed to nothing matching — which is the honest reading of a buffer gori could not
       # split, and `--no-redact` / a non-hex edit is the way to have it looked at.
-      def self.wire(text : String, matcher : Matcher) : {String, Result}
+      #
+      # The third value is `Sanitized#decoded?`: whether the head now describes an undone transfer.
+      def self.wire(text : String, matcher : Matcher) : {String, Result, Bool}
         bytes = text.to_slice
         at = header_block_end(bytes)
         if at.nil?
-          return {text, Result.new(text: "", hits: [] of Hit, shape: Shape::Empty)}
+          return {text, Result.new(text: "", hits: [] of Hit, shape: Shape::Empty), false}
         end
         sep = terminator_at(bytes, at)
         head = bytes[0, at + sep]
         body = bytes[(at + sep), bytes.size - at - sep]
         clean = message(head, body, matcher)
-        {String.new(clean.head) + String.new(clean.body || Bytes.empty), clean.result}
+        {String.new(clean.head) + String.new(clean.body || Bytes.empty), clean.result, clean.decoded?}
       end
 
       # The head, describing `size` bytes of unencoded entity.
