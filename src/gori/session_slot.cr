@@ -474,7 +474,7 @@ module Gori
     # header into its predecessor, so the overlay reads the wrong name and silently applies to
     # nothing. Malformed framing is the payload here (DESIGN.md P7) — the operator's own
     # overlay instruction must still land on it. Byte-level, since a head need not be valid
-    # UTF-8 for the same reason `index_of` is.
+    # UTF-8 for the same reason `AsciiBytes.index` is.
     # Public for `ClientHints.apply`, for the same reason as `head_length`.
     def self.split_head_lines(head : String) : Array({String, String})
       out = [] of {String, String}
