@@ -86,6 +86,25 @@ module Gori
         "editor.bottom", "Bottom of pane", "Move the caret to the last line",
         Verb::Scope::Editor,
         available: in_read, mnemonic: 'G') { |ctx| ctx.editor_to_bottom; nil }
+      # Keyless by default, like top/bottom: `vim` spells them `w` / `b` and `⇧A` / `⇧I`. Word
+      # steps are the editor's own ⌥←/→ (READ answers those under both keysets); the line
+      # pair is Home/End then INSERT, the `a` of a whole line. A `mnemonic:` as top/bottom
+      # spell, never `menu: :palette`: no view lists an Editor verb, so `^P` could not find one.
+      # No `$` and no `0`: `$` is ⇧4, the Global sub-tab jump, and `0` opens Go to tab, so an
+      # editor binding either would shadow it.
+      r.register Verb::Definition.new(
+        "editor.word-next", "Next word", "Move the caret to the start of the next word",
+        Verb::Scope::Editor, available: in_read, mnemonic: 'w') { |ctx| ctx.editor_word_move(1); nil }
+      r.register Verb::Definition.new(
+        "editor.word-prev", "Previous word", "Move the caret to the start of the word before it",
+        Verb::Scope::Editor, available: in_read, mnemonic: 'b') { |ctx| ctx.editor_word_move(-1); nil }
+      r.register Verb::Definition.new(
+        "editor.append-line-end", "Append at line end", "Start typing at the end of the caret's line (INSERT mode)",
+        Verb::Scope::Editor, available: in_read, mnemonic: 'A') { |ctx| ctx.editor_line_insert(1); nil }
+      r.register Verb::Definition.new(
+        "editor.insert-line-start", "Insert at line start", "Start typing at the start of the caret's line (INSERT mode)",
+        Verb::Scope::Editor, available: in_read, mnemonic: 'I') { |ctx| ctx.editor_line_insert(-1); nil }
+
       # ^G / ^F: the shell's two bottom prompts. Their Ctrl form is answered by a hardcoded
       # guard in `Runner#handle_key` before the keymap is read — that is not changing, and it
       # is why these gate on the whole PANE rather than on READ (a find from inside INS is the

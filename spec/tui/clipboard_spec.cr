@@ -2,6 +2,20 @@ require "../spec_helper"
 require "base64"
 
 describe Gori::Tui::Clipboard do
+  # `copy` writes nothing and reports 0 with OSC 52 switched off, and the setting is process-wide:
+  # a spec that runs `gori run …` re-reads settings.json, which an earlier example may have saved
+  # with the clipboard off. Pin it on here rather than inherit whatever ran first (CI shard order
+  # put the two in one binary on main and on #1478).
+  around_each do |example|
+    prev = Gori::Settings.clipboard_osc52?
+    Gori::Settings.clipboard_osc52 = true
+    begin
+      example.run
+    ensure
+      Gori::Settings.clipboard_osc52 = prev
+    end
+  end
+
   # `Clipboard.copy` reads `ENV["TMUX"]` itself, so inside tmux it APPENDS the DCS
   # passthrough after the bare sequence's BEL — and `.rchop("\a")` then leaves that
   # whole tail glued to the base64. Cut at the first BEL instead of the last, so the

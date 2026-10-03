@@ -14,6 +14,13 @@ module Gori::Tui
     getter cy : Int32
     getter cx : Int32
 
+    # Whether the held selection came from `select_line` and is still WHOLE LINES by intent:
+    # a vertical step then grows it a line at a time (`extend_lines`) instead of carrying the
+    # caret's column into a char rectangle, and a delete or copy over it is linewise even where
+    # the span's shape could not say so (an empty last line ends at column 0). Every other
+    # write to the anchor drops it; `extend_lines_to` keeps it, since it keeps whole lines.
+    getter? linewise : Bool = false
+
     def initialize
       @cy = 0
       @cx = 0
@@ -36,12 +43,14 @@ module Gori::Tui
 
     def clear_selection : Nil
       @anchor = nil
+      @linewise = false
     end
 
     def reset : Nil
       @cy = 0
       @cx = 0
       @anchor = nil
+      @linewise = false
     end
 
     # Sync from an external caret (e.g. TextArea cy/cx) without disturbing selection.
@@ -61,6 +70,7 @@ module Gori::Tui
     # `highlight_spans` and `selection_text` clamp per line as they read. An anchor equal to
     # the caret collapses the selection, which `selection?` already reports as none.
     def select_range(anchor_cy : Int32, anchor_cx : Int32, cy : Int32, cx : Int32) : Nil
+      @linewise = false
       @anchor = {anchor_cy, anchor_cx}
       @cy = cy
       @cx = cx
@@ -76,6 +86,7 @@ module Gori::Tui
       @cy = @cy.clamp(0, size - 1)
       @anchor = {@cy, 0}
       @cx = line_at.call(@cy).size
+      @linewise = true
     end
 
     # Move the caret. `selecting` (shift held) grows/shrinks the selection from a fixed anchor.
@@ -114,6 +125,7 @@ module Gori::Tui
       # the whole TUI down (`Runner#absorb_tick_error`). The vertical branch already re-clamps;
       # this makes the horizontal one safe too, at the one place every `move` passes through.
       @cy = @cy.clamp(0, size - 1)
+      @linewise = false # a char step: what is selected now is the rectangle it paints
       if selecting
         @anchor ||= {@cy, @cx}
         if dr != 0
@@ -193,6 +205,7 @@ module Gori::Tui
     # end-of-line — see there for what that cost), so the two agree and the char rectangle is
     # the single model. A pane that wants whole lines asks for them with `extend_lines`.
     def move_to(cy : Int32, cx : Int32, selecting : Bool = false) : Nil
+      @linewise = false
       if selecting
         @anchor ||= {@cy, @cx}
       else
@@ -217,6 +230,7 @@ module Gori::Tui
         row = 0
       end
       selecting ? (@anchor ||= {@cy, @cx}) : (@anchor = nil)
+      @linewise = false
       @cy = {scroll + row, size - 1}.min
       cx0 = rect.x + gutter_w
       @cx = Screen.column_for_click(line_at.call(@cy), mx - cx0 + xscroll)
@@ -252,6 +266,7 @@ module Gori::Tui
         b += 1
       end
       return false if a == b
+      @linewise = false
       @anchor = {@cy, a}
       @cx = b
       true

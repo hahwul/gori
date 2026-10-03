@@ -909,23 +909,23 @@ module Gori::Tui
       s = cur
       key = ev.key
       selecting = ev.shift?
+      growing = selecting || editor_line_held? # vertical arms only: see RepeaterController
       case
       when key.enter? then return false # editor.insert-enter
       when nav_up?(ev)
         # A ⇧↑ on the first line extends the selection to its start rather than leaving the
         # pane (same for ⇧↓ below): a selection in progress is never a focus gesture.
-        if s.input.at_top? && !selecting
+        if s.input.at_top? && !growing
           commit
           @host.request_focus(:subtabs)
         else
           s.input_read.move(s.input, -1, 0, selecting: selecting)
         end
       when nav_down?(ev)
-        s.input.at_bottom? && !selecting ? focus_chain : s.input_read.move(s.input, 1, 0, selecting: selecting)
-      when key.left?  then s.input_read.move(s.input, 0, -1, selecting: selecting)
-      when key.right? then s.input_read.move(s.input, 0, 1, selecting: selecting)
-        # Home/End/Page over the READ caret: they move the EDITOR caret, so the read cursor —
-        # which is what this mode paints — is mirrored back onto it.
+        s.input.at_bottom? && !growing ? focus_chain : s.input_read.move(s.input, 1, 0, selecting: selecting)
+      when editor_read_sideways(ev) then nil # ←/→ h/l, ⌥ by word
+      # Home/End/Page over the READ caret: they move the EDITOR caret, so the read cursor —
+      # which is what this mode paints — is mirrored back onto it.
       when key.home?, key.end?
         key.home? ? s.input.home(selecting) : s.input.end_of_line(selecting)
         s.input_read.sync_to(s.input, selecting: selecting)
@@ -1105,8 +1105,8 @@ module Gori::Tui
       when key.up?, key.lower_k?
         s.view.output_at_top? ? focus_chain : out_nav_step(s, -1, 0, selecting)
       when key.down?, key.lower_j? then out_nav_step(s, 1, 0, selecting)
-      when key.left?               then out_nav_step(s, 0, -1, selecting)
-      when key.right?              then out_nav_step(s, 0, 1, selecting)
+      when nav_left?(ev)           then out_nav_step(s, 0, -1, selecting)
+      when nav_right?(ev)          then out_nav_step(s, 0, 1, selecting)
         # Home/End/Page. ⇧←/→ used to be H-SCROLL here; the pane soft-wraps now (like the
         # Repeater's RESPONSE, which draws the same line), so there is nothing off to the side
         # to pan to and the chord goes to the character selection every other text pane gives

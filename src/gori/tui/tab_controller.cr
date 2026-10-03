@@ -505,6 +505,14 @@ module Gori::Tui
       ev.key.right? || (ev.key.lower_l? && bare_chord?(ev))
     end
 
+    # A modified ←/→ — one WORD, not one character. Either modifier: ⌥ is the macOS spelling,
+    # ⌃ the one every other platform uses, and which of the two a terminal actually forwards
+    # is not something the operator should have to know. Test it BEFORE `nav_left?`, which
+    # takes any ←.
+    def word_step?(ev : Termisu::Event::Key) : Bool
+      (ev.ctrl? || ev.alt?) && (ev.key.left? || ev.key.right?)
+    end
+
     # No command modifier — the shape a pane-local letter must be matched in, since anything
     # carrying ⌃/⌥ belongs to the central keymap.
     def bare_chord?(ev : Termisu::Event::Key) : Bool
@@ -1575,6 +1583,54 @@ module Gori::Tui
     # save) runs exactly as it does for typing.
     def editor_text_buffer : {TextArea, TextReadState}?
       nil
+    end
+
+    # READ-mode WORD motion (⌥/⌃←→) over that same buffer: the editor's own word step, so READ
+    # and INSERT agree about where a word ends. One implementation for every pane, through the
+    # seam above rather than a `*_read_word` per view.
+    def editor_word_move(dir : Int32, selecting : Bool = false) : Bool
+      return false unless buf = editor_text_buffer
+      area, read = buf
+      read.word_move(area, dir, selecting)
+      true
+    end
+
+    # Is the focused READ caret holding vim's `⇧V` selection? Each READ ladder ORs this into its
+    # `selecting`, so a plain `j`/`k` at the pane's edge grows the selection the way ⇧↓/⇧↑ do,
+    # instead of leaving the pane with the lines still armed for the next `d`.
+    def editor_line_held? : Bool
+      return false unless buf = editor_text_buffer
+      area, read = buf
+      read.line_mode_held?(area)
+    end
+
+    # Esc's first job in READ: drop a live selection, so it is the SECOND Esc that leaves the
+    # pane. Every pane's own Esc leaves (to the strip, the previous card, RELATED), and with
+    # the selection kept, the next `d` deleted lines the operator had meant to let go of.
+    def editor_drop_read_selection : Bool
+      return false unless buf = editor_text_buffer
+      area, read = buf
+      return false unless read.selection?(area)
+      read.clear_selection
+      true
+    end
+
+    # `A` / `I`: the caret to the end / start of its line, then INSERT there.
+    def editor_line_insert(dir : Int32) : Bool
+      return false unless buf = editor_text_buffer
+      area, read = buf
+      read.line_edge(area, dir)
+      editor_enter_insert
+    end
+
+    # ←/→ and `h`/`l` over the same READ caret, a word at a time with ⌥/⌃ — the one sideways
+    # arm every READ ladder shares. False when `ev` is neither, or there is no buffer.
+    def editor_read_sideways(ev : Termisu::Event::Key) : Bool
+      dir = nav_left?(ev) ? -1 : (nav_right?(ev) ? 1 : 0)
+      return false if dir == 0 || !(buf = editor_text_buffer)
+      area, read = buf
+      word_step?(ev) ? read.word_move(area, dir, ev.shift?) : read.move(area, 0, dir, selecting: ev.shift?)
+      true
     end
 
     # --- the BODY's own `/` filter bar (the rule lists) ---------------------------------

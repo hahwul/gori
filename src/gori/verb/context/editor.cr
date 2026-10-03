@@ -26,6 +26,10 @@ abstract class Gori::Verb::ExecContext
   abstract def editor_undo : Nil          # undo the last edit in the focused editor
   abstract def editor_to_top : Nil        # caret to the first line
   abstract def editor_to_bottom : Nil     # caret to the last line
+  # The vim keyset's `w` / `b` (a word right / left) and `A` / `I` (INSERT at the end / start of
+  # the caret's line): motions the editors have, given keys. `dir` is -1 or 1.
+  abstract def editor_word_move(dir : Int32) : Nil
+  abstract def editor_line_insert(dir : Int32) : Nil
   # The READ-mode edits (`Tui::ReadEdit`). Each reports why when the pane cannot take it.
   abstract def editor_delete_selection : Nil # gori `d`: the selection, into the paste register
   abstract def editor_paste : Nil            # `p`: the paste register, after the caret

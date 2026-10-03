@@ -58,7 +58,7 @@ module Gori::Tui
       return false unless buf = tab.editor_text_buffer
       area, read = buf
       return false unless span = read.selection_span(area)
-      whole_lines?(span, area.lines_snapshot)
+      read.linewise?(area) || whole_lines?(span, area.lines_snapshot)
     end
 
     # A span that ENDS at column 0 of a later line is not a line selection, even when that
@@ -91,7 +91,7 @@ module Gori::Tui
         return delete_lines(tab, key_in, area.cy, area.cy) if lines[area.cy]?.try(&.empty?)
         return NOTHING_SEL
       end
-      if whole_lines?(span, lines)
+      if read.linewise?(area) || whole_lines?(span, lines)
         delete_lines(tab, key_in, span[0], span[2])
       else
         y0, x0, y1, x1 = span

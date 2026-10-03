@@ -77,6 +77,7 @@ require "../notes"
 require "./settings_view"
 require "./tabs_overlay"
 require "./hosts_overlay"
+require "./keyset_playground_overlay"
 require "./env_overlay"
 require "./user_agents_overlay"
 require "./env_syntax_seam"
@@ -1739,6 +1740,13 @@ module Gori::Tui
       # workbench tabs — only the active tab's controller can be in filter-edit mode.
       if @overlay.none? && (ctl = @tabs[@active_tab]?) && ctl.subtab_filter_editing?
         ctl.handle_subtab_filter_key(ev)
+        return
+      end
+      # Esc over a READ selection clears it and goes no further — vim's Esc out of `V`. Ahead
+      # of every pane's own Esc (an open issue's included), which would leave the pane with
+      # the selection still armed for the next `d`.
+      if ev.key.escape? && !ev.ctrl? && !ev.alt? && editor_read_mode? &&
+         @tabs[@active_tab]?.try(&.editor_drop_read_selection)
         return
       end
       if @active_tab == :issues && @overlay.none? && @focus == :body && issues_controller.view.detail_open?
@@ -6329,6 +6337,16 @@ module Gori::Tui
       @tabs[@active_tab]?.try(&.editor_to_bottom)
     end
 
+    # A one-line field (a TARGET) has no buffer to step words in; say so rather than eat it.
+    def editor_word_move(dir : Int32) : Nil
+      return if @tabs[@active_tab]?.try(&.editor_word_move(dir))
+      status("no word steps in a one-line field — ←/→ and Home/End move here")
+    end
+
+    def editor_line_insert(dir : Int32) : Nil
+      @tabs[@active_tab]?.try(&.editor_line_insert(dir))
+    end
+
     # --- READ-mode edits (verbs/editor.cr, the engine is `ReadEdit`) ---
     # The verb armed by the first press of `dd` / `yy`, waiting for its second. Only ever set
     # in an editor pane's READ mode, and spent by the very next key (`finish_editor_op`).
@@ -6615,13 +6633,14 @@ module Gori::Tui
     private def open_settings_section(section : Symbol, back : PreferencesOverlay?) : Nil
       case section
       when :network, :editor, :mouse, :keys, :layout, :statusline, :display, :companion, :notifications, :general, :mcp, :mcp_permissions
-        open_preferences(section)                           # the unified grouped modal, positioned at this section
-      when :theme       then open_overlay(theme_card(back)) # theme keeps its dedicated swatch-list card
-      when :tabs        then open_overlay(tabs_editor(back))
-      when :hosts       then open_overlay(hosts_editor(back))
-      when :env         then open_overlay(env_editor(back))
-      when :user_agents then open_overlay(user_agents_editor(back))
-      when :hotkeys     then open_overlay(hotkeys_editor(back))
+        open_preferences(section)                                 # the unified grouped modal, positioned at this section
+      when :theme             then open_overlay(theme_card(back)) # theme keeps its dedicated swatch-list card
+      when :tabs              then open_overlay(tabs_editor(back))
+      when :hosts             then open_overlay(hosts_editor(back))
+      when :env               then open_overlay(env_editor(back))
+      when :user_agents       then open_overlay(user_agents_editor(back))
+      when :hotkeys           then open_overlay(hotkeys_editor(back))
+      when :keyset_playground then open_overlay(keyset_playground(back))
       when :reset_all
         # The palette's "Settings: Reset" entry. Same verb the modal's Reset row runs, so it
         # goes through the same confirm rather than a second copy of the wording. `back` is
@@ -6689,6 +6708,15 @@ module Gori::Tui
       ov.on_toast = ->(msg : String) { @toast = msg; nil }
       ov.on_reset = -> { confirm_tabs_reset(ov) }
       ov.on_commit = -> { save_tabs(ov) }
+      ov
+    end
+
+    # Try-only: the keyset is set on the Keys row the card was opened from. The pad's practice
+    # copies leave the paste register on the way out.
+    private def keyset_playground(back : PreferencesOverlay?) : KeysetPlaygroundOverlay
+      ov = KeysetPlaygroundOverlay.new
+      ov.on_close = -> { ov.restore_register; resume_preferences(back) }
+      ov.on_palette = -> { ov.restore_register; jump_to_palette }
       ov
     end
 

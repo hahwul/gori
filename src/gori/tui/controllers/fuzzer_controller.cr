@@ -564,12 +564,12 @@ module Gori::Tui
       selecting = ev.shift?
       case
       when key.enter? then return false # editor.insert-enter
-      when key.up?    then @host.request_focus(subtab_strip_shown? ? :subtabs : :menu)
-      when key.down?  then v.pane_advance(1)
-      when key.left?  then v.target_read_move(-1, selecting: selecting)
-      when key.right? then v.target_read_move(1, selecting: selecting)
-      when key.home?  then v.target_home(selecting)
-      when key.end?   then v.target_end(selecting)
+      when nav_up?(ev)    then @host.request_focus(subtab_strip_shown? ? :subtabs : :menu)
+      when nav_down?(ev)  then v.pane_advance(1)
+      when nav_left?(ev)  then v.target_read_move(-1, selecting: selecting)
+      when nav_right?(ev) then v.target_read_move(1, selecting: selecting)
+      when key.home?      then v.target_home(selecting)
+      when key.end?       then v.target_end(selecting)
       when c && !ev.ctrl? && !ev.alt? && !c.control?
         return false # i INSERT, x select-line, y copy, Global breath → keymap
       end
@@ -645,11 +645,8 @@ module Gori::Tui
       v.template_delete_word
     end
 
-    # A modified ←/→ is a WORD step; a modified Home/End jumps the BUFFER. ⌥ is the macOS
-    # spelling and ⌃ the one everywhere else — accept both, as the Repeater does.
-    private def word_step?(ev : Termisu::Event::Key) : Bool
-      (ev.ctrl? || ev.alt?) && (ev.key.left? || ev.key.right?)
-    end
+    # A modified Home/End jumps the BUFFER (a modified ←/→ is `word_step?`'s WORD step). ⌥ is
+    # the macOS spelling and ⌃ the one everywhere else — accept both, as the Repeater does.
 
     private def buffer_jump?(ev : Termisu::Event::Key) : Bool
       ev.ctrl? || ev.alt?
@@ -686,16 +683,16 @@ module Gori::Tui
       key = ev.key
       c = ev.char || key.to_char
       selecting = ev.shift?
+      growing = selecting || editor_line_held? # vertical arms only: see RepeaterController
       case
       when key.enter? then return false # editor.insert-enter
-      when key.up?        then template_up(v, selecting)
-      when key.down?      then v.template_read_move(1, 0, selecting: selecting)
-      when key.left?      then v.template_read_move(0, -1, selecting: selecting)
-      when key.right?     then v.template_read_move(0, 1, selecting: selecting)
-      when key.page_up?   then v.template_read_page(-1, selecting: selecting)
-      when key.page_down? then v.template_read_page(1, selecting: selecting)
-      when key.home?      then v.template_home(selecting)
-      when key.end?       then v.template_end(selecting)
+      when nav_up?(ev)              then template_up(v, growing)
+      when nav_down?(ev)            then v.template_read_move(1, 0, selecting: selecting)
+      when editor_read_sideways(ev) then nil # ←/→ h/l, ⌥ by word
+      when key.page_up?             then v.template_read_page(-1, selecting: selecting)
+      when key.page_down?           then v.template_read_page(1, selecting: selecting)
+      when key.home?                then v.template_home(selecting)
+      when key.end?                 then v.template_end(selecting)
       when c && !ev.ctrl? && !ev.alt? && !c.control?
         return false # i INSERT, x/y + Global breath → keymap
       end
@@ -703,7 +700,7 @@ module Gori::Tui
     end
 
     private def template_up(v : FuzzerView, selecting : Bool = false) : Nil
-      if v.template_at_top?
+      if v.template_at_top? && !selecting
         v.pane_advance(-1)
       elsif v.template_insert?
         v.template_move(-1, 0)
@@ -1069,6 +1066,22 @@ module Gori::Tui
       when :target   then v.target_read_move(1)
       else                return false
       end
+      editor_enter_insert
+    end
+
+    # Esc over a READ selection: the TARGET's lives in the view's `LineFieldRead`, not in a
+    # `TextReadState`, so the view's own pane pair answers for every pane here.
+    def editor_drop_read_selection : Bool
+      return false unless (v = current_view) && v.pane_selection?
+      v.pane_clear_selection
+      true
+    end
+
+    # `⇧A` / `⇧I` on the one-line TARGET: its own End / Home, then INSERT. The multi-line
+    # buffer beside it takes the shared path through `editor_text_buffer`.
+    def editor_line_insert(dir : Int32) : Bool
+      return super unless (v = current_view) && v.focus == :target
+      dir < 0 ? v.target_home : v.target_end
       editor_enter_insert
     end
 

@@ -76,6 +76,32 @@ describe Gori::Tui::KeysetPad do
       p.status.should contain("cancelled")
     end
 
+    it "grows a ⇧V selection a line per j, as V then j does, and deletes the lines" do
+      p = pad(Kind::Vim)
+      press(p, "Vjd")
+      p.text.should eq(LINES[2])
+    end
+
+    it "moves the caret with h and l" do
+      p = pad(Kind::Vim)
+      press(p, "llhaZ")
+      p.handle_key(esc)
+      p.text.should start_with("GEZT")
+    end
+
+    it "steps words with w / b and types at a line edge with ⇧A / ⇧I" do
+      p = pad(Kind::Vim)
+      press(p, "wwbiZ") # GET → / → api, back to /
+      p.handle_key(esc)
+      p.text.should start_with("GET Z/api")
+      press(p, "AQ")
+      p.handle_key(esc)
+      p.text.lines[0].should end_with("HTTP/1.1Q")
+      press(p, "jIY")
+      p.handle_key(esc)
+      p.text.lines[1].should eq("YHost: example.test")
+    end
+
     it "undoes with u and selects the line with ⇧V, not x" do
       p = pad(Kind::Vim)
       press(p, "x")
@@ -87,6 +113,35 @@ describe Gori::Tui::KeysetPad do
     end
   end
 
+  it "deletes whole lines after growing a line selection upward, under both keysets" do
+    {Kind::Helix, Kind::Vim}.each do |kind|
+      Gori::Tui::Register.clear
+      p = pad(kind)
+      press(p, "jj")
+      press(p, kind.vim? ? "V" : "x")
+      p.handle_key(TuiContract.key(Termisu::Input::Key::Up, :shift))
+      press(p, "d")
+      p.text.should eq(LINES[0])
+    end
+  end
+
+  it "leaves helix-ish x then j a plain move: the selection collapses" do
+    p = pad
+    press(p, "xjd")
+    p.text.should eq(Gori::Tui::KeysetPad::SAMPLE)
+  end
+
+  # The key list is a third hand-written list beside REFERENCE and Help. It names verbs by
+  # token, so a rebind shows; this keeps a vim keyset row from being left out of it.
+  it "lists every vim keyset row in the playground's key list" do
+    listed = Gori::Tui::KeysetPad::CHEAT[Kind::Vim].map(&.[1]).join(" ")
+    Gori::Verb::Keyset::VIM.each do |id, chords|
+      next if chords.empty? || Gori::Verb::Keyset::SELECT_LINE_IDS.includes?(id)
+      listed.should contain("{#{id}}")
+    end
+    listed.should contain("{notes.select-line}") # the pad's stand-in for the fifteen select-lines
+  end
+
   it "types in INS and hands esc back only from a plain READ" do
     p = pad
     press(p, "i")
@@ -96,6 +151,17 @@ describe Gori::Tui::KeysetPad do
     p.insert?.should be_false
     p.text.should start_with("XGET")
     p.handle_key(esc).should be_false # READ: the host's key
+  end
+
+  it "clears a selection on esc, and hands the next esc back" do
+    p = pad(Kind::Vim)
+    press(p, "Vj")
+    p.handle_key(esc).should be_true
+    press(p, "d") # arms dd now: nothing is selected
+    p.armed?.should be_true
+    p.handle_key(esc).should be_true # …which esc cancels
+    p.handle_key(esc).should be_false
+    p.text.should eq(Gori::Tui::KeysetPad::SAMPLE)
   end
 
   it "keeps an armed d's esc for itself" do

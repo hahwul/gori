@@ -17,7 +17,8 @@ describe "Gori::Verbs.register_editor" do
 
   ids = %w[editor.insert editor.insert-enter editor.append editor.exit-insert
     editor.undo editor.top editor.bottom editor.goto-line editor.find
-    editor.delete editor.paste editor.delete-line editor.yank-line]
+    editor.delete editor.paste editor.delete-line editor.yank-line
+    editor.word-next editor.word-prev editor.append-line-end editor.insert-line-start]
 
   it "registers the editor family in Scope::Editor and nowhere else" do
     ids.each { |id| r[id].scope.should eq(Gori::Verb::Scope::Editor) }
@@ -39,13 +40,15 @@ describe "Gori::Verbs.register_editor" do
     # and the default keyset is "today's keys". They exist for a keyset to spell (and for a
     # user to bind — a keyless verb stays assignable in the hotkey editor). The two line
     # operators are vim's `dd` / `yy`, which only the vim keyset spells.
-    %w[editor.append editor.top editor.bottom editor.delete-line editor.yank-line].each { |id| r[id].chords.should be_empty }
+    %w[editor.append editor.top editor.bottom editor.delete-line editor.yank-line
+      editor.word-next editor.word-prev editor.append-line-end editor.insert-line-start].each { |id| r[id].chords.should be_empty }
   end
 
   it "gates the bare-key verbs on READ mode, not merely on the pane" do
     ctx = FakeExecContext.new
     bare = %w[editor.insert editor.insert-enter editor.append editor.undo editor.top editor.bottom
-      editor.delete editor.paste editor.delete-line editor.yank-line]
+      editor.delete editor.paste editor.delete-line editor.yank-line
+      editor.word-next editor.word-prev editor.append-line-end editor.insert-line-start]
     bare.each { |id| r[id].available?(ctx).should be_false } # no editor pane at all
 
     ctx.editor_pane = true

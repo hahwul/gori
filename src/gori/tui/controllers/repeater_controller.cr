@@ -1469,6 +1469,22 @@ module Gori::Tui
       editor_enter_insert
     end
 
+    # Esc over a READ selection: the TARGET's lives in the view's `LineFieldRead`, not in a
+    # `TextReadState`, so the view's own pane pair answers for every pane here.
+    def editor_drop_read_selection : Bool
+      return false unless (v = current_view) && v.pane_selection?
+      v.pane_clear_selection
+      true
+    end
+
+    # `⇧A` / `⇧I` on the one-line TARGET: its own End / Home, then INSERT. The multi-line
+    # buffer beside it takes the shared path through `editor_text_buffer`.
+    def editor_line_insert(dir : Int32) : Bool
+      return super unless (v = current_view) && v.focus == :target
+      dir < 0 ? v.target_home : v.target_end
+      editor_enter_insert
+    end
+
     def editor_exit_insert : Bool
       return false unless v = current_view
       case v.focus
@@ -3350,13 +3366,6 @@ module Gori::Tui
       view.edit_delete_word
     end
 
-    # A modified ←/→ — one WORD, not one character. Either modifier: ⌥ is the macOS spelling,
-    # ⌃ the one every other platform uses, and which of the two a terminal actually forwards
-    # is not something the operator should have to know.
-    private def word_step?(ev : Termisu::Event::Key) : Bool
-      (ev.ctrl? || ev.alt?) && (ev.key.left? || ev.key.right?)
-    end
-
     # A modified ⌫ — delete a WORD. The `char` half is not defensive padding: a terminal sends
     # ⌥⌫ as ESC + 0x7F, and termisu's Alt-prefix branch maps the payload byte through
     # `Key.from_char`, which has no name for DEL — so the event arrives as `Key::Unknown` +
@@ -3475,11 +3484,14 @@ module Gori::Tui
       key = ev.key
       c = ev.char || key.to_char
       selecting = ev.shift?
+      # Only the VERTICAL arms ask about a held `⇧V`: at the pane's edge it must grow, not leave.
+      # A sideways step or Home/End stays a plain caret move that collapses it, as in Notes.
+      growing = selecting || editor_line_held?
       case
       when key.enter? then return false # editor.insert-enter
-      when word_step?(ev)           then view.request_read_move(0, key.left? ? -1 : 1, selecting: selecting)
-      when key.up?, key.lower_k?    then view.at_top? ? view.focus_first : view.request_read_move(-1, 0, selecting: selecting)
-      when key.down?, key.lower_j?  then view.request_read_move(1, 0, selecting: selecting)
+      when word_step?(ev)           then editor_word_move(key.left? ? -1 : 1, selecting)
+      when key.up?, key.lower_k?    then view.at_top? && !growing ? view.focus_first : view.request_read_move(-1, 0, selecting: growing)
+      when key.down?, key.lower_j?  then view.request_read_move(1, 0, selecting: growing)
       when key.left?, key.lower_h?  then view.request_read_move(0, -1, selecting: selecting)
       when key.right?, key.lower_l? then view.request_read_move(0, 1, selecting: selecting)
       when key.page_up?             then view.request_read_page(-1, selecting: selecting)

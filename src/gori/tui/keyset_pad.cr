@@ -50,6 +50,26 @@ module Gori::Tui
                                  "{editor.undo} undo",
     }
 
+    # The whole READ grammar of each keyset, one row per kind of gesture, for the Preferences
+    # playground's key list. Tokens again, so a rebind shows; `h j k l`, `esc` and ⇧arrows are
+    # structural keys no keymap moves.
+    CHEAT = {
+      Verb::Keyset::Kind::Helix => [
+        {"move", "←↓↑→ or h j k l · ⌥←/⌥→ word · PgUp/PgDn · Home/End"},
+        {"type", "{editor.insert} insert · esc back to READ"},
+        {"select", "{notes.select-line} line (⇧↑/⇧↓ grow it) · ⇧arrows span · esc clears"},
+        {"edit", "{notes.select-line} then {editor.delete} delete · {notes.select-line} then {notes.copy} copy · {editor.paste} paste"},
+        {"other", "{editor.undo} undo · {editor.find} find · {editor.goto-line} go to line"},
+      ],
+      Verb::Keyset::Kind::Vim => [
+        {"move", "h j k l · {editor.word-next}/{editor.word-prev} word · {editor.top}/{editor.bottom} top/bottom · Home/End"},
+        {"type", "{editor.insert} insert · {editor.append} append · {editor.insert-line-start}/{editor.append-line-end} line start/end · esc back to READ"},
+        {"select", "{notes.select-line} line (j/k grow it) · ⇧arrows span · esc clears"},
+        {"edit", "{editor.delete-line}{editor.delete-line} delete · {editor.yank-line}{editor.yank-line} yank · {editor.paste} paste · over a selection: {editor.delete-line} / {editor.yank-line}"},
+        {"other", "{editor.undo} undo · {editor.find} find · {editor.goto-line} go to line"},
+      ],
+    }
+
     # The first status line under each keyset: the one gesture that differs, spelled out.
     INTRO = {
       Verb::Keyset::Kind::Helix => "READ · {notes.select-line} selects the line, then {editor.delete} deletes it · " \
@@ -77,6 +97,7 @@ module Gori::Tui
       @read = TextReadState.new
       @keymaps = {} of Verb::Keyset::Kind => Verb::Keymap
       @references = {} of Verb::Keyset::Kind => String
+      @cheats = {} of Verb::Keyset::Kind => Array({String, String})
       @status = intro
     end
 
@@ -103,6 +124,11 @@ module Gori::Tui
       @references[kind] ||= expand(REFERENCE[kind], kind)
     end
 
+    # `kind`'s `CHEAT` rows, expanded the same way and cached the same way.
+    def cheat_sheet(kind : Verb::Keyset::Kind) : Array({String, String})
+      @cheats[kind] ||= CHEAT[kind].map { |(label, keys)| {label, expand(keys, kind)} }
+    end
+
     # Drop an armed `d` / `y`. The host calls it when the keys leave the pad: the Runner drops
     # the operator once focus leaves the editor's READ mode, and a `d` left armed behind a ⇥
     # would spend the first key typed on return, or delete a line with nothing on screen
@@ -112,8 +138,9 @@ module Gori::Tui
     end
 
     # One key. False only for the keys the pad hands back to its host: `esc` in READ with
-    # nothing armed, which is "I am done trying". `esc` in INSERT leaves INSERT, and `esc`
-    # after a `d` cancels the `d`, exactly as in a real pane.
+    # nothing armed or selected, which is "I am done trying". `esc` in INSERT leaves INSERT,
+    # `esc` over a selection clears it, and `esc` after a `d` cancels the `d`, exactly as in a
+    # real pane.
     def handle_key(ev : Termisu::Event::Key) : Bool
       if id = @armed
         # Spent by this key whatever it is — the #1461 review found an armed `d` surviving
@@ -177,19 +204,33 @@ module Gori::Tui
     # then everything else through the keymap.
     private def read_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
-      return false if key.escape?
-      bare = !ev.ctrl? && !ev.alt?
-      selecting = ev.shift?
-      case
-      when key.up? || (bare && key.lower_k?)   then @read.move(@area, -1, 0, selecting: selecting)
-      when key.down? || (bare && key.lower_j?) then @read.move(@area, 1, 0, selecting: selecting)
-      when key.left?                           then @read.move(@area, 0, -1, selecting: selecting)
-      when key.right?                          then @read.move(@area, 0, 1, selecting: selecting)
-      when line_edge(ev)                       then nil
-      else                                          run(ev)
+      if key.escape?
+        return false unless ReadEdit.selection?(self) # READ with nothing selected: the host's
+        @read.clear_selection
+        @status = "selection cleared"
+        return true
+      end
+      if (ev.ctrl? || ev.alt?) && (key.left? || key.right?)
+        @read.word_move(@area, key.left? ? -1 : 1, ev.shift?) # ⌥/⌃←→ by word, as every pane
+      elsif step = caret_step(ev)
+        @read.move(@area, step[0], step[1], selecting: ev.shift?)
+      elsif !line_edge(ev)
+        run(ev)
       end
       true
     end
+
+    # The arrows, and `h`/`j`/`k`/`l` when bare: the caret keys a Notes READ pane answers.
+    private def caret_step(ev : Termisu::Event::Key) : {Int32, Int32}?
+      key = ev.key
+      return {-1, 0} if key.up?
+      return {1, 0} if key.down?
+      return {0, -1} if key.left?
+      return {0, 1} if key.right?
+      ev.char.try { |c| CARET_LETTERS[c]? } unless ev.ctrl? || ev.alt?
+    end
+
+    private CARET_LETTERS = {'k' => {-1, 0}, 'j' => {1, 0}, 'h' => {0, -1}, 'l' => {0, 1}}
 
     # Home/End move the EDITOR's caret; the READ cursor follows, extending a ⇧ selection.
     private def line_edge(ev : Termisu::Event::Key) : Bool
@@ -232,7 +273,7 @@ module Gori::Tui
     end
 
     private def dispatch(id : String, chord : Verb::Chord) : Nil
-      return if dispatch_edit(id) || dispatch_tab(id)
+      return if dispatch_edit(id) || dispatch_motion(id) || dispatch_tab(id)
       case id
       when "editor.insert", "editor.insert-enter"
         editor_enter_insert
@@ -246,9 +287,6 @@ module Gori::Tui
         @area.undo
         @read.sync_from(@area)
         @status = @area.edits == before ? "nothing to undo" : "undone"
-      when "editor.top", "editor.bottom"
-        @read.to_edge(@area, id == "editor.top" ? -1 : 1)
-        @status = id == "editor.top" ? "top of the pane" : "bottom of the pane"
       else
         title = @registry[id]?.try(&.title) || id
         @status = "#{Hotkeys.display_label(chord)}: #{title} — opens in a real pane, not here"
@@ -270,11 +308,30 @@ module Gori::Tui
       true
     end
 
+    # The caret motions: the buffer's edges, a word, and INSERT at a line edge. False for any
+    # other id.
+    private def dispatch_motion(id : String) : Bool
+      case id
+      when "editor.top", "editor.bottom"
+        @read.to_edge(@area, id == "editor.top" ? -1 : 1)
+        @status = id == "editor.top" ? "top of the pane" : "bottom of the pane"
+      when "editor.word-next", "editor.word-prev"
+        @read.word_move(@area, id == "editor.word-next" ? 1 : -1)
+      when "editor.append-line-end", "editor.insert-line-start"
+        @read.line_edge(@area, id == "editor.append-line-end" ? 1 : -1)
+        editor_enter_insert
+        @status = "INS at the line's #{id == "editor.append-line-end" ? "end" : "start"} · esc goes back to READ"
+      else
+        return false
+      end
+      true
+    end
+
     # The Notes tab verbs the pad borrows. False for any other id.
     private def dispatch_tab(id : String) : Bool
       case id
       when "notes.select-line"
-        @read.select_line(@area)
+        @read.select_line(@area, @keyset.vim?)
         @status = expand(@keyset.vim? ? "line selected · {editor.delete-line} deletes it · {editor.yank-line} copies it" : "line selected · {editor.delete} deletes it · {notes.copy} copies it")
       when "notes.clear-selection"
         @read.clear_selection

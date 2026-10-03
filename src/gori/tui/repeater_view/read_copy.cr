@@ -7,7 +7,9 @@ class Gori::Tui::RepeaterView
   # through the same helper — so the split column is one continuous document in both modes.
   def request_read_move(dr : Int32, dc : Int32, selecting : Bool = false) : Nil
     return if request_insert? || request_hex?
-    return if dc == 0 && try_cross_req_pane(dr)
+    # A selection being grown stays in its sub-pane: envelope and decoded are two editors, so
+    # crossing would silently drop it.
+    return if dc == 0 && !selecting && try_cross_req_pane(dr)
     request_read_step(dr, dc, selecting)
   end
 

@@ -118,18 +118,18 @@ module Gori::Tui
       return true.tap { @host.open_space_menu } if ev.key.space? && !ev.ctrl? && !ev.alt?
       key = ev.key
       selecting = ev.shift?
+      growing = selecting || editor_line_held? # vertical arms only: see RepeaterController
       case
       when key.enter? then return false # editor.insert-enter
       when nav_up?(ev)
-        if @notes.at_top?
+        if @notes.at_top? && !growing # ⇧↑ / a held `⇧V` grows in place, never leaves
           save_notes
           @host.request_focus(:subtabs)
         else
           @notes.read_move(-1, 0, selecting: selecting)
         end
       when nav_down?(ev)              then @notes.read_move(1, 0, selecting: selecting)
-      when key.left?                  then @notes.read_move(0, -1, selecting: selecting)
-      when key.right?                 then @notes.read_move(0, 1, selecting: selecting)
+      when editor_read_sideways(ev)   then nil # ←/→ h/l, ⌥ by word
       when @notes.read_motion_key(ev) then nil # Page keys + ⇧Home/⇧End — the shared editor set
       when c && !ev.ctrl? && !ev.alt? && !c.control?
         return false

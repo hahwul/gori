@@ -4776,3 +4776,43 @@ The operator asked for the edit itself: in gori's helix grammar, select and then
 - **The verbs never gate on "is there a selection".** A false `available?` would let `d` fall to
   the tab's own `d`, which deletes the selected flow, issue or rule in sixteen scopes. In an
   editor pane the letter is the editor's; a `d` with nothing to delete says so.
+
+### 2026-10-03: how far the vim keyset goes, and the four tests a new vim key has to pass
+
+Refines: the 2026-09-12 keyset entry and the 2026-10-02 READ-edit entry. gori is a proxy whose
+text panes hold requests, notes and tokens; a vim hand should not trip on its reflexes there,
+but gori is not becoming vim. A review of the keyset found it short on the basics: `h`/`l`
+moved only in the Repeater, a line selection grown by one row cut mid-line on a delete, and
+`esc` left the pane with the selection still armed for the next `d`. Fixing those and adding
+`w`/`b` and `⇧A`/`⇧I` drew the line this entry records. A vim key is added only when it passes
+all four:
+
+1. **The operation already exists in the editors.** The keyset names keys; it does not grow
+   editing operations (2026-09-12). `w`/`b` are the editor's ⌥←/→ word step; `⇧A`/`⇧I` are
+   End/Home then INSERT, as `a` is one column then INSERT. `e` (end of word) has no such
+   operation and is not offered.
+2. **One keystroke, or the one two-press operator.** `dd`/`yy` stay the only sequences
+   (2026-10-02). No counts, no motion after an operator, no text objects, no `.` repeat, no
+   `:` commands. `g` alone is the top.
+3. **It takes no key gori already answers in that pane.** A menu letter it meets is fine when
+   the vim key only moves, selects or starts typing (`VIM_MOTIONS`); a live binding is not.
+   That is why `$` (it arrives as ⇧4, the Global sub-tab jump) and `0` (Go to tab) are left
+   to End and Home.
+4. **A vim hand does it without thinking in a pane holding a request.** Move, select a line,
+   delete or yank it, paste, undo, find, start typing. `x`, `o`/`O`, `J`, `r`, `c`, `v`,
+   `n`/`N`, marks and macros fail this test or test 1, and stay in INSERT or out.
+
+Where a fix is not vim-specific it is not keyset-gated: `h j k l` in every READ pane, a line
+selection that stays whole lines under ⇧↑/⇧↓, and `esc` over a READ selection clearing it
+(`Runner#handle_key`, ahead of every pane's own `esc`) apply under both keysets. The one
+vim-only behaviour is the plain `j`/`k` that grows a `⇧V` selection, which is what makes `V`
+usable at all, and with it `g`/`⇧G` grow the selection to an edge (`V` `G` `d`); the keyset
+is named at select time (`TextReadState#select_line`), so the wizard's practice pad answers in
+the keyset it is showing. At a pane's first or last line a held `⇧V` counts as a selection
+being grown (`TabController#editor_line_held?`, ORed into each READ ladder's `selecting`), so
+`k`/`j` there stay in the pane instead of handing focus on with the lines still armed; ⇧↑/⇧↓
+follow the same rule in every ladder now, as Project and Issues already documented.
+
+Discoverability goes to a playground in Preferences → Keys (the wizard's pad plus each
+keyset's full key list), not to more keys. It only tries: the keyset is set on the row above
+it, and a second setter in the card was one more way for the two to disagree.

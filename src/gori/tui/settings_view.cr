@@ -123,9 +123,13 @@ module Gori::Tui
       Field.new("Command modifier", "which modifier fronts gori's built-in shortcuts (^P ^N ^W ^G ^F ^B ^E ^, ^1-9) — Option ADDS ⌥ as an alias, Ctrl keeps working; for terminals/multiplexers that swallow the Ctrl form (tmux's ^B, Ctrl+digit). macOS Terminal/iTerm must be set to send Option as Meta. ←/→ cycles",
         choices: COMMAND_MODIFIER_CHOICES, choice_labels: COMMAND_MODIFIER_LABELS),
       Field.new("Editor keyset",
-        "how the READ-mode keys of a text pane are spelled: helix-ish selects the line with x, then y copies it · vim-ish moves that to ⇧V and adds u undo, / find, a append, g/⇧G top-bottom. A mapping, not an emulation — two-key chords (gg dd yy) and :commands are not expressible, and no new editing operation is added. Your own rebindings win over the keyset. ←/→ cycles",
+        "how the READ-mode keys of a text pane are spelled: helix-ish selects the line with x, then d deletes or y copies it · vim-ish uses dd / yy, ⇧V line select, u undo, / find, a / ⇧A / ⇧I insert, w / b words, g / ⇧G top-bottom. A mapping, not an emulation — counts, motions after an operator and :commands are not offered. Your own rebindings win over the keyset. ←/→ cycles",
         choices: Gori::Hotkeys::KEYSETS, choice_labels: Gori::Hotkeys::KEYSET_LABELS),
+      Field.new("Keyset playground", "↵ to try both keysets on a practice pad, with every READ-mode key of each listed — pick yours on the row above",
+        opener: :keyset_playground),
     ]
+    # The playground row's value column: an opener shows a summary, and this one has no state.
+    KEYSET_PLAYGROUND_SUMMARY = "try helix-ish / vim-ish ›"
     # The THEME section is special: a single field whose value is the selected theme
     # name, but rendered as a vertical, scrollable list (built-ins + user themes) rather
     # than the inline ←/→ cycle the other `choices` fields use. `choices` is kept only so
@@ -355,7 +359,7 @@ module Gori::Tui
                   Settings::DEFAULT_MOUSE ? "on" : "off",
                   Settings::DEFAULT_MOUSE_DRAG,
                 ]
-                when :keys  then [Settings::DEFAULT_COMMAND_MODIFIER, Settings::DEFAULT_EDITOR_KEYSET]
+                when :keys  then [Settings::DEFAULT_COMMAND_MODIFIER, Settings::DEFAULT_EDITOR_KEYSET, KEYSET_PLAYGROUND_SUMMARY]
                 when :theme then [Theme.canonical(Settings::DEFAULT_THEME)]
                 when :layout then [
                   Settings::DEFAULT_HISTORY_PREVIEW ? "on" : "off",
@@ -493,7 +497,7 @@ module Gori::Tui
     # defence): a hand-edited settings.json holding an unknown keyset would otherwise show a
     # row whose ←/→ cycle cannot find its own current value in `choices`.
     private def keys_values : Array(String)
-      [Settings.command_modifier, Settings.normalize_editor_keyset(Settings.editor_keyset)]
+      [Settings.command_modifier, Settings.normalize_editor_keyset(Settings.editor_keyset), KEYSET_PLAYGROUND_SUMMARY]
     end
 
     # The GENERAL row values, read from the live Settings — one helper for the load and the
