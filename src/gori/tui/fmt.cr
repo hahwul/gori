@@ -135,5 +135,14 @@ module Gori::Tui
     def self.ago(t : Time::Instant) : String
       ago((Time.instant - t).total_seconds.to_i64)
     end
+
+    # The same age as a phrase, for prose rather than a column: "just now", "3m ago", "2d ago".
+    def self.ago_phrase(span : Time::Span) : String
+      secs = span.total_seconds
+      return "just now" if secs < 60
+      return "#{(secs / 60).to_i}m ago" if secs < 3600
+      return "#{(secs / 3600).to_i}h ago" if secs < 86_400
+      "#{(secs / 86_400).to_i}d ago"
+    end
   end
 end

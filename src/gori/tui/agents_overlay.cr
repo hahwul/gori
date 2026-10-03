@@ -1,4 +1,5 @@
 require "./screen"
+require "./fmt"
 require "./theme"
 require "./frame"
 require "./overlay"
@@ -62,17 +63,6 @@ module Gori::Tui
       cleaned = name.scrub.gsub(/\p{C}/, "").gsub(/\s+/, " ").strip
       return nil if cleaned.empty?
       Screen.fit(cleaned, CLIENT_MAX_CELLS)
-    end
-
-    # Relative "attached N ago" wording — the picker's own vocabulary ("just now", "3m ago"),
-    # written here rather than reached into the picker so this overlay stays spec-testable on
-    # its own.
-    def self.relative_time(span : Time::Span) : String
-      secs = span.total_seconds
-      return "just now" if secs < 60
-      return "#{(secs / 60).to_i}m ago" if secs < 3600
-      return "#{(secs / 3600).to_i}h ago" if secs < 86_400
-      "#{(secs / 86_400).to_i}d ago"
     end
 
     # --- Overlay contract (see overlay.cr) ---
@@ -155,7 +145,7 @@ module Gori::Tui
       label = row.client_version ? "#{name} (#{AgentsOverlay.safe_client(row.client_version) || "?"})" : name
       x = draw_seg(screen, x, py, label, sel ? Theme.text_bright : Theme.text, bg, right)
       x = draw_seg(screen, x + 2, py, row.pid ? "pid #{row.pid}" : "pid ?", Theme.muted, bg, right)
-      attached = row.attached_at.try { |t| "attached #{AgentsOverlay.relative_time(Time.utc - t)}" } || "attached ?"
+      attached = row.attached_at.try { |t| "attached #{Fmt.ago_phrase(Time.utc - t)}" } || "attached ?"
       x = draw_seg(screen, x + 2, py, attached, Theme.muted, bg, right)
       mode = row.read_only ? "read-only" : "actions"
       x = draw_seg(screen, x + 2, py, mode, row.read_only ? Theme.muted : Theme.accent, bg, right)

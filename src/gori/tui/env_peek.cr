@@ -36,14 +36,19 @@ module Gori::Tui
     # `bounds` (the editor's content rect) so it never paints past the pane.
     def render(screen : Screen, ax : Int32, ay : Int32, bounds : Rect) : Nil
       return if !@open || bounds.w < 4 || bounds.h < 2
+      w = box_width(bounds)
+      return unless at = EnvPeek.place(ax, ay, w, bounds)
+      draw_row(screen, at[0], at[1], w)
+    end
+
+    # Where a one-row caret tooltip `w` wide goes: the row below the caret cell (ax, ay), or
+    # the row above when there is more room there, clamped inside `bounds`. nil when neither
+    # side has a row. ChainPeek places itself the same way.
+    def self.place(ax : Int32, ay : Int32, w : Int32, bounds : Rect) : {Int32, Int32}?
       below = bounds.bottom - (ay + 1) # rows available under the caret
       above = ay - bounds.y            # rows available over the caret
-      return if below <= 0 && above <= 0
-      down = below >= above
-      w = box_width(bounds)
-      x = ax.clamp(bounds.x, {bounds.right - w, bounds.x}.max)
-      y = down ? ay + 1 : ay - 1
-      draw_row(screen, x, y, w)
+      return nil if below <= 0 && above <= 0
+      {ax.clamp(bounds.x, {bounds.right - w, bounds.x}.max), below >= above ? ay + 1 : ay - 1}
     end
 
     # Box width = the label + a space + the value, floored at 10, clamped to bounds. Both

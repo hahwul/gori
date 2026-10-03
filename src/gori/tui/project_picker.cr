@@ -11,6 +11,7 @@ require "../update"
 require "../fuzzy"
 require "./geometry"
 require "./screen"
+require "./fmt"
 require "./theme"
 require "./frame"
 require "./confirm_dialog"
@@ -2654,7 +2655,7 @@ module Gori::Tui
 
     private def project_meta(proj : Project) : Array({String, Color})
       held, status, agents = probe_running(proj)
-      idle = proj.last_modified.try { |t| relative_time(Time.utc - t) } || "new"
+      idle = proj.last_modified.try { |t| Fmt.ago_phrase(Time.utc - t) } || "new"
       ProjectPicker.meta_segments(held, status, agents, idle)
     end
 
@@ -2718,14 +2719,6 @@ module Gori::Tui
       rescue IO::Error | File::Error
         {false, nil, agents}
       end
-    end
-
-    private def relative_time(span : Time::Span) : String
-      secs = span.total_seconds
-      return "just now" if secs < 60
-      return "#{(secs / 60).to_i}m ago" if secs < 3600
-      return "#{(secs / 3600).to_i}h ago" if secs < 86_400
-      "#{(secs / 86_400).to_i}d ago"
     end
   end
 end

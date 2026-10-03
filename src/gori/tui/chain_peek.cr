@@ -1,5 +1,6 @@
 require "./screen"
 require "./theme"
+require "./env_peek"
 
 module Gori::Tui
   # A caret-anchored tooltip that reveals the CONCEALED `¦chain` of the §…§ marker under
@@ -36,14 +37,9 @@ module Gori::Tui
     # rect) so it never paints past the pane.
     def render(screen : Screen, ax : Int32, ay : Int32, bounds : Rect) : Nil
       return if !@open || bounds.w < 8 || bounds.h < 2
-      below = bounds.bottom - (ay + 1)
-      above = ay - bounds.y
-      return if below <= 0 && above <= 0
-      down = below >= above
       w = box_width(bounds)
-      x = ax.clamp(bounds.x, {bounds.right - w, bounds.x}.max)
-      y = down ? ay + 1 : ay - 1
-      draw_row(screen, x, y, w)
+      return unless at = EnvPeek.place(ax, ay, w, bounds)
+      draw_row(screen, at[0], at[1], w)
     end
 
     private def shown : String
