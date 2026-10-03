@@ -529,7 +529,7 @@ end
 # `<a>`. The cap used to be checked on the joined result, after allocating all of it.
 describe "Gori::Pretty markup output cap" do
   it "refuses an over-cap XML/HTML reflow before building it" do
-    body = "<a>" * 350_000
+    body = "<a>" * 340_000 # just under MAX_PRETTY
     %w[text/html text/xml].each do |ct|
       before = GC.stats.total_bytes
       pretty(ct, body).should be_nil
