@@ -136,10 +136,7 @@ module Gori::Tui
     def comparer_duplicate : Nil
       if refs = batch_subtab_refs
         msg = duplicate_marked_subtabs(refs, "comparison") { |i| duplicate_at(i) }
-        unless msg
-          @host.status("#{refs.size} sub-tabs marked — duplicate is capped at #{Runner::BATCH_SUBTAB_CAP}")
-          return
-        end
+        return unless msg
         @host.request_focus(:body)
         @host.status("#{msg} (#{@sessions.size} open)")
         return

@@ -405,10 +405,7 @@ module Gori::Tui
     def miner_duplicate : Nil
       if refs = batch_subtab_refs
         msg = duplicate_marked_subtabs(refs, "miner session") { |i| duplicate_at(i) }
-        unless msg
-          @host.status("#{refs.size} sub-tabs marked — duplicate is capped at #{Runner::BATCH_SUBTAB_CAP}")
-          return
-        end
+        return unless msg
         @host.goto_tab(:miner)
         @host.status("#{msg} (#{@sessions.size} open)")
         return

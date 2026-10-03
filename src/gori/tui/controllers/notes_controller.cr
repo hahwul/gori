@@ -492,10 +492,7 @@ module Gori::Tui
       msg = "duplicated note"
       if refs = batch_subtab_refs
         batch = duplicate_marked_subtabs(refs, "note") { |i| @notes.duplicate_at(i) }
-        unless batch
-          @host.status("#{refs.size} sub-tabs marked — duplicate is capped at #{Runner::BATCH_SUBTAB_CAP}")
-          return
-        end
+        return unless batch
         msg = batch
       else
         @notes.duplicate_current

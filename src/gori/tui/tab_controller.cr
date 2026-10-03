@@ -899,10 +899,13 @@ module Gori::Tui
     # or outbound, and a duplicate only opens tabs the same `^W` closes again. Ascending, so
     # the clones land in the order their originals sit in.
     #
-    # Returns the sentence, or nil when the batch was refused (the caller says why).
+    # Returns the sentence, or nil when the batch was refused (and toasts why).
     protected def duplicate_marked_subtabs(refs : Array(SubtabRef), noun : String, & : Int32 -> Nil) : String?
       idxs = resolve_subtab_refs(refs)
-      return nil if idxs.size > Tui::Runner::BATCH_SUBTAB_CAP
+      if idxs.size > Tui::Runner::BATCH_SUBTAB_CAP
+        @host.status("#{refs.size} sub-tabs marked — duplicate is capped at #{Tui::Runner::BATCH_SUBTAB_CAP}")
+        return nil
+      end
       idxs.each { |i| yield i }
       "duplicated #{idxs.size} #{noun}#{idxs.size == 1 ? "" : "s"}"
     end
