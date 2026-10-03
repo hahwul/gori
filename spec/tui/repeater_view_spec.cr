@@ -206,6 +206,21 @@ describe Gori::Tui::RepeaterView do
     view.request_text.should_not contain("Host: real.test")
   end
 
+  # Focus can leave the target while it still reads the placeholder, so the one-shot stays
+  # armed past a body edit: a Host typed then must survive the later target edit and send.
+  it "never clobbers a Host typed while the target was still the placeholder" do
+    view = RepeaterView.new
+    view.load_blank
+    view.focus_pane(:request) # target untouched → the one-shot stays armed
+    view.replace_edit_buffer("GET / HTTP/1.1\nHost: internal.local\nUser-Agent: gori\n\n")
+    view.focus_pane(:target)
+    view.enter_target_insert!
+    view.target.size.times { view.target_backspace }
+    "https://10.0.0.5".each_char { |c| view.target_insert(c) }
+    view.sync_host_to_target_once # send-time hook
+    view.request_text.should contain("Host: internal.local")
+  end
+
   # The response body is styled one visible line at a time and memoized (per-line) so an
   # unrelated re-render (a keystroke in the request editor) doesn't re-tokenize the pane.
   # The memo must be dropped in lockstep with the response view — a new send, or a pretty
