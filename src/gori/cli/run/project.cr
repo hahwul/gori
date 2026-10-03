@@ -696,8 +696,7 @@ module Gori
           "add, update/edit, delete/rm, enable, disable, list")
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project, read_only: true)
-        begin
+        with_store(project, read_only: true) do |store|
           scope = Scope.load(store)
           if format == :json
             puts(JSON.build do |j|
@@ -720,8 +719,6 @@ module Gori
               end
             end
           end
-        ensure
-          store.close
         end
       end
 
@@ -775,8 +772,7 @@ module Gori
         id = id_s.to_i64? || abort("gori run project scope update: invalid rule id #{id_s.inspect}")
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project)
-        begin
+        with_store(project) do |store|
           scope = Scope.load(store)
           existing = scope.rules.find { |r| r.id == id } ||
                      abort("gori run project scope update: no scope rule with id #{id}")
@@ -813,8 +809,6 @@ module Gori
           # `Scope#update` reloads its own rule list, so this reads the edit rather than the
           # list as it stood one write ago.
           warn_scope_blackhole(scope, "gori run project scope update")
-        ensure
-          store.close
         end
       end
 
@@ -843,8 +837,7 @@ module Gori
         end
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project)
-        begin
+        with_store(project) do |store|
           scope = Scope.load(store)
           unless scope.add(kind, match_type, pat)
             store.close
@@ -868,8 +861,6 @@ module Gori
           else
             puts added ? "Scope rule ##{added.id} added successfully (#{kind} #{match_type} #{pat.strip})." : "Scope rule added successfully."
           end
-        ensure
-          store.close
         end
       end
 
@@ -898,8 +889,7 @@ module Gori
         id = positional[0].to_i64? || abort("gori run project scope delete: invalid rule id '#{positional[0]}'")
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project)
-        begin
+        with_store(project) do |store|
           scope = Scope.load(store)
           unless scope.rules.any? { |r| r.id == id }
             store.close
@@ -915,8 +905,6 @@ module Gori
           end
           puts "Scope rule ##{id} deleted successfully."
           warn_scope_blackhole(scope, "gori run project scope delete")
-        ensure
-          store.close
         end
       end
 
@@ -935,8 +923,7 @@ module Gori
         end
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project)
-        begin
+        with_store(project) do |store|
           scope = Scope.load(store)
           # enable/disable return false when the write didn't commit (store busy/locked/
           # closing, e.g. a live capture holds the writer): don't claim success then.
@@ -946,8 +933,6 @@ module Gori
             abort "gori run project scope #{enable ? "enable" : "disable"}: project is busy (write did not commit) — try again"
           end
           puts enable ? "Scope filtering enabled." : "Scope filtering disabled."
-        ensure
-          store.close
         end
       end
 
@@ -998,8 +983,7 @@ module Gori
           read_verb: "status")
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project)
-        begin
+        with_store(project) do |store|
           scope = Scope.load(store)
           if format == :json
             puts(JSON.build do |j|
@@ -1010,8 +994,6 @@ module Gori
           else
             puts "Sandbox: #{scope.sandbox? ? "ENABLED" : "DISABLED"}"
           end
-        ensure
-          store.close
         end
       end
 
@@ -1026,8 +1008,7 @@ module Gori
         end
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project)
-        begin
+        with_store(project) do |store|
           scope = Scope.load(store)
           # Enabling with NO include rule turns the proxy into a black hole (every captured
           # request blocked). The TUI danger-confirms this; a headless run can't prompt, so
@@ -1045,8 +1026,6 @@ module Gori
             abort "gori run project sandbox #{action}: project is busy (write did not commit) — try again"
           end
           puts enable ? "Sandbox enabled." : "Sandbox disabled."
-        ensure
-          store.close
         end
       end
 
@@ -1090,8 +1069,8 @@ module Gori
         refuse_list_leftovers(leftover, "project env", "set, delete/rm, list")
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project, read_only: true)
-        begin
+        # Opened only for what `open_store` loads: the project's env vars.
+        with_store(project, read_only: true) do
           vars = Settings.project_env_vars
           if format == :json
             puts(JSON.build do |j|
@@ -1109,8 +1088,6 @@ module Gori
           else
             vars.each { |(key, val)| puts "#{key}=#{val}" }
           end
-        ensure
-          store.close
         end
       end
 
@@ -1129,8 +1106,7 @@ module Gori
         key, val = parsed
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project)
-        begin
+        with_store(project) do |store|
           # `Env.set_project_var`, not a load-edit-`save_project`: this command owns ONE key,
           # and persisting the whole array from a copy read beforehand deletes every var a
           # concurrent writer (a running `gori mcp`, the TUI's ENV pane, a second shell) added
@@ -1143,8 +1119,6 @@ module Gori
           # Spelled through `Env.spell`, because the answer to "how do I use it now?" is
           # mode-dependent: `$ENV.KEY` on a namespaced install, `$KEY` on a bare one.
           puts "Env var #{key} set — reference it as #{Env.spell(key, Env::Namespace::Env)}."
-        ensure
-          store.close
         end
       end
 
@@ -1189,8 +1163,7 @@ module Gori
         abort "gori run project env delete: invalid KEY '#{key}'" unless Env.valid_key?(key)
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project)
-        begin
+        with_store(project) do |store|
           # "no such key" is decided against the table this process just loaded (open_store
           # hydrates it), because `Env.delete_project_var` folds that case into the same
           # `false` a busy store returns and the two need different exit messages. The write
@@ -1204,8 +1177,6 @@ module Gori
             abort "gori run project env delete: project is busy (write did not commit) — try again"
           end
           puts "Env var #{key} deleted."
-        ensure
-          store.close
         end
       end
 
@@ -1252,8 +1223,7 @@ module Gori
         refuse_list_leftovers(leftover, "project host-override", "add, update, delete/rm, list")
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project, read_only: true)
-        begin
+        with_store(project, read_only: true) do |store|
           ov = HostOverrides.load(store)
           if format == :json
             puts(JSON.build { |j| j.array { ov.entries.each { |e| host_override_json(j, e.id, e.host, e.ip) } } })
@@ -1264,8 +1234,6 @@ module Gori
               puts "##{e.id}  #{e.ip.ljust(15)}  #{e.host}"
             end
           end
-        ensure
-          store.close
         end
       end
 
@@ -1313,8 +1281,7 @@ module Gori
         abort "gori run project host-override add: invalid host/ip (host hostname-shaped; ip an IPv4/IPv6 literal, optionally IP:PORT or [v6]:PORT)" unless HostOverrides.valid?(h, i)
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project)
-        begin
+        with_store(project) do |store|
           ov = HostOverrides.load(store)
           unless ov.add(h, i)
             store.close
@@ -1338,8 +1305,6 @@ module Gori
           else
             puts "Host override added: #{i} → #{key}"
           end
-        ensure
-          store.close
         end
       end
 
@@ -1364,8 +1329,7 @@ module Gori
         abort "gori run project host-override update: invalid host/ip (host hostname-shaped; ip an IPv4/IPv6 literal, optionally IP:PORT or [v6]:PORT)" unless HostOverrides.valid?(h, i)
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project)
-        begin
+        with_store(project) do |store|
           ov = HostOverrides.load(store)
           unless ov.entries.any? { |e| e.id == id }
             store.close
@@ -1376,8 +1340,6 @@ module Gori
             abort "gori run project host-override update: NOT updated (duplicate host, or store busy or unwritable)"
           end
           puts "Host override ##{id} updated: #{i} → #{OverrideHost.key(h)}" # the stored form, not the typed one
-        ensure
-          store.close
         end
       end
 
@@ -1394,8 +1356,7 @@ module Gori
         id = positional[0].to_i64? || abort("gori run project host-override delete: invalid id '#{positional[0]}'")
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project)
-        begin
+        with_store(project) do |store|
           ov = HostOverrides.load(store)
           unless ov.entries.any? { |e| e.id == id }
             store.close
@@ -1406,8 +1367,6 @@ module Gori
             abort "gori run project host-override delete: project is busy (write did not commit) — try again"
           end
           puts "Host override ##{id} deleted."
-        ensure
-          store.close
         end
       end
     end

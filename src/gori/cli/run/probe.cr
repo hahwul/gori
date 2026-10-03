@@ -300,12 +300,9 @@ module Gori
         end
         refuse_list_leftovers(leftover, "probe issues", "dismiss, promote, delete/rm, list")
 
-        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
-        issues = begin
+        issues = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
           list = store.probe_issues(category, host.try(&.strip).presence, min_sev)
           include_closed ? list : list.select(&.status.open?)
-        ensure
-          store.close
         end
 
         if format == :json
@@ -340,8 +337,7 @@ module Gori
           abort "gori run probe dismiss: pass exactly one of <id>, --code=CODE, or --host=HOST"
         end
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           if c = code
             n = store.open_probe_issue_count(code: c)
             abort "gori run probe dismiss: NOT applied (project busy) — the findings are unchanged" unless store.dismiss_probe_by_code(c)
@@ -356,8 +352,6 @@ module Gori
             abort "gori run probe dismiss: NOT applied (project busy) — finding ##{iid} is unchanged" if landed == issue.status
             puts "Finding ##{issue.id} is now #{landed.label}."
           end
-        ensure
-          store.close
         end
       end
 
@@ -376,8 +370,7 @@ module Gori
         id = parse_probe_issue_id(positional.first?, "gori run probe promote")
         abort "gori run probe promote: <id> is required (see `gori run probe issues`)" unless id
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           issue = store.get_probe_issue(id) || abort("gori run probe promote: no probe finding with id #{id}")
           res = Probe::Triage.promote(store, issue)
           case res.outcome
@@ -389,8 +382,6 @@ module Gori
             # Nothing was written — exit non-zero so a script retries rather than moving on.
             abort "gori run probe promote: finding ##{issue.id} NOT promoted (store busy or unwritable); it is unchanged"
           end
-        ensure
-          store.close
         end
       end
 
@@ -416,8 +407,7 @@ module Gori
         abort "gori run probe delete: pass <id> or --all" if id.nil? && !all
         abort "gori run probe delete: <id> and --all are mutually exclusive" if id && all
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           if all
             n = store.count_probe_issues
             unless yes
@@ -430,8 +420,6 @@ module Gori
             abort "gori run probe delete: finding ##{issue.id} NOT deleted (project busy)" unless store.delete_probe_issue(issue.id)
             puts "Deleted finding ##{issue.id}."
           end
-        ensure
-          store.close
         end
       end
 
@@ -471,13 +459,10 @@ module Gori
         end
         refuse_list_leftovers(leftover, "probe rules", "add, enable, disable, delete/rm")
 
-        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
-        entries, mode = begin
+        entries, mode = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
           list = Probe::RuleCatalog.load(store)
           list = list.select { |e| e.kind == kind } if kind
           {list, store.probe_mode}
-        ensure
-          store.close
         end
 
         if format == :json
@@ -501,8 +486,7 @@ module Gori
         end
 
         id = positional.first? || abort("gori run probe rules #{verb}: <rule-id> is required (see `gori run probe rules`)")
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           entry = Probe::RuleCatalog.load(store).find { |e| e.id == id } ||
                   abort("gori run probe rules #{verb}: no scan rule with id '#{id}' (see `gori run probe rules`)")
           # Both writers now answer whether the toggle COMMITTED, so this stops claiming a
@@ -524,8 +508,6 @@ module Gori
             end
           abort "gori run probe rules #{verb}: NOT applied (project busy) — rule '#{id}' is unchanged" unless ok
           puts "Rule '#{id}' is now #{enabled ? "enabled" : "disabled"}."
-        ensure
-          store.close
         end
       end
 
@@ -573,13 +555,10 @@ module Gori
         end
         severity = Store::Severity.parse?(sev_s.strip) || abort("gori run probe rules add: invalid --severity '#{sev_s}' (info|low|medium|high|critical)")
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           id = store.insert_probe_custom_rule(t, description, side, region, match_kind, pat, severity)
           abort "gori run probe rules add: failed to persist the rule (store busy or unwritable)" if id == 0
           puts probe_rule_added_output(store, id, format)
-        ensure
-          store.close
         end
       end
 
@@ -611,13 +590,10 @@ module Gori
         row_id = probe_custom_row_id(id) ||
                  abort("gori run probe rules delete: '#{id}' is not a project custom rule — a built-in can only be disabled (`probe rules disable #{id}`)")
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           abort "gori run probe rules delete: no custom rule with id '#{id}'" unless store.probe_custom_rules.any? { |r| r.id == row_id }
           abort "gori run probe rules delete: custom rule '#{id}' NOT deleted (project busy)" unless store.delete_probe_custom_rule(row_id)
           puts "Custom rule '#{id}' deleted."
-        ensure
-          store.close
         end
       end
 
@@ -645,8 +621,7 @@ module Gori
         # report success for a typo, so validate against the labels first.
         abort "gori run probe mode: invalid mode '#{want}' (#{modes.join("|")})" if want && !modes.includes?(want)
 
-        store = open_store(resolve_read_project(project_name, db_path))
-        begin
+        with_store(resolve_read_project(project_name, db_path)) do |store|
           if w = want
             mode = Probe::Mode.from_setting(w)
             unless store.set_probe_mode(mode)
@@ -657,8 +632,6 @@ module Gori
           else
             puts store.probe_mode.label
           end
-        ensure
-          store.close
         end
       end
 

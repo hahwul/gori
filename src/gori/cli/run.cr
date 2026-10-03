@@ -747,6 +747,19 @@ module Gori
         raise ex
       end
 
+      # `open_store`, yield, close — the shape nearly every command wants. Returns the block's
+      # value. A `return` in the block still closes the store; an `abort` does not (`exit` skips
+      # `ensure`), which is what `abort_closing` is for.
+      private def self.with_store(project : Project, *, read_only : Bool = false,
+                                  long_running : Bool = false, & : Store -> T) : T forall T
+        store = open_store(project, read_only: read_only, long_running: long_running)
+        begin
+          yield store
+        ensure
+          store.close
+        end
+      end
+
       # Everything a `gori run` store needs loaded into this process before a command reads a
       # token, a rule or a slot out of it. Split from `open_store` so a raise in here closes the
       # store it was hydrating (see the caller).
@@ -936,11 +949,8 @@ module Gori
       private def self.cli_host_overrides(project_name : String?, db_path : String?, flow_id : Int64?,
                                           repeater_id : Int64? = nil) : Gori::HostOverrides?
         return nil unless flow_id || repeater_id || project_name || db_path
-        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
-        begin
+        with_store(resolve_read_project(project_name, db_path), read_only: true) do |store|
           Gori::HostOverrides.load(store)
-        ensure
-          store.close
         end
       rescue
         nil
@@ -1244,11 +1254,8 @@ module Gori
         # open_store also installs the project's extract rules as `Env.layer` (see its
         # comment) — the seed depends on that having happened, which is why it reads the flow
         # through the same helper rather than opening the DB by hand.
-        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
-        detail, overrides = begin
+        detail, overrides = with_store(resolve_read_project(project_name, db_path), read_only: true) do |store|
           {store.get_flow(flow_id), Gori::HostOverrides.load(store)}
-        ensure
-          store.close
         end
         abort "#{cmd}: --bind-from: no flow ##{flow_id}" unless detail
         built = Repeater::FlowRequest.build(detail)

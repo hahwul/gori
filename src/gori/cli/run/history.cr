@@ -94,8 +94,7 @@ module Gori
                                     db_path : String?) : Nil
         ids = positional.map { |v| parse_flow_id(v, "gori run history delete") }.uniq!
 
-        store = open_store(resolve_read_project(project_name, db_path))
-        begin
+        with_store(resolve_read_project(project_name, db_path)) do |store|
           # flow_row is the row-only read; get_flow would materialize both BLOBs to answer
           # "does this exist?" — a 40 MB response would be read and discarded.
           missing = ids.reject { |id| store.flow_row(id) }
@@ -107,8 +106,6 @@ module Gori
             abort "gori run history delete: #{ids.size == 1 ? "flow ##{ids[0]}" : "flows"} NOT deleted (project busy) — try again"
           end
           puts ids.size == 1 ? "Flow ##{ids[0]} deleted." : "#{ids.size} flows deleted (#{ids.map { |id| "##{id}" }.join(", ")})."
-        ensure
-          store.close
         end
       end
 
@@ -328,8 +325,7 @@ module Gori
                 "To delete one flow: `gori run history delete <id>`"
         end
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           n = store.count?
           abort "gori run history clear: could not count the flows (project busy) — nothing deleted" unless n
           unless yes
@@ -337,8 +333,6 @@ module Gori
           end
           abort "gori run history clear: NOT cleared (project busy) — every flow is still there" unless store.clear_flows
           puts "Deleted #{Gori.plural(n, "flow")}."
-        ensure
-          store.close
         end
       end
 
@@ -429,9 +423,8 @@ module Gori
         # lives in this database). Opening read-only and discovering that afterwards would leave
         # the listing silently short of whatever the off-commit index had not caught up on —
         # exactly what `fts_backlog_error` refuses to let a one-shot answer do.
-        store = open_store(resolve_read_project(proj.name, proj.db),
-          read_only: !query_uses_fts?(query) && view_name.nil?)
-        begin
+        with_store(resolve_read_project(proj.name, proj.db),
+          read_only: !query_uses_fts?(query) && view_name.nil?) do |store|
           # The scope lens, opt-in and independent of the persisted `s` flag — the same per-flow
           # include/exclude filter the TUI History lens applies, so `--in-scope` here shows the
           # same set. Capture is untouched; this narrows only the VIEW. Empty (nothing in scope)
@@ -629,8 +622,6 @@ module Gori
             # site rather than defaulted, so the choice is visible where it is made.
             rows.each { |r| puts CLI::Output.flow_row_text(r, row_columns(store, r, prepared, include_sensitive: true).try(&.[0])) }
           end
-        ensure
-          store.close
         end
       end
 
@@ -861,12 +852,9 @@ module Gori
         # The redaction choice is resolved in here too, and for the same reason: it reads this
         # project's own profiles off the settings row, and its refusal ("no profile named …")
         # has to be reported AFTER the close.
-        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
-        detail, ws_msgs, choice, interims = begin
+        detail, ws_msgs, choice, interims = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
           d = store.get_flow(id)
           {d, show_ws_messages(store, d), redact_choice(store, redaction), d.try { store.interims(id) }}
-        ensure
-          store.close
         end
         abort "gori run show: no flow ##{id}" unless detail
         detail, redact_report, previewed = show_redaction(detail, choice, redaction)

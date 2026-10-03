@@ -197,11 +197,8 @@ module Gori
         refuse_list_leftovers(leftover, "oast providers",
           "add, update, enable, disable, delete/rm, list")
 
-        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
-        configs = begin
+        configs = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
           Oast.provider_configs(store)
-        ensure
-          store.close
         end
 
         if format == :json
@@ -286,16 +283,13 @@ module Gori
           Oast::ProviderKind.parse?(k) || abort("gori run oast providers #{verb}: unknown --kind '#{k}'")
         end
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           if update
             oast_provider_apply_update(store, oast_provider_row_id(store, id, verb),
               name, kind, host, token, enabled)
           else
             oast_provider_apply_add(store, name, kind, host, token, enabled, format)
           end
-        ensure
-          store.close
         end
       end
 
@@ -358,13 +352,10 @@ module Gori
         abort "gori run oast providers #{verb}: too many arguments (expected one <id>, got: #{leftover.join(" ")})" if leftover.size > 1
         id = leftover.first?
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           row = oast_provider_row_id(store, id, verb)
           abort "gori run oast providers: enable/disable NOT applied (project busy)" unless store.set_oast_provider_enabled(row, enabled)
           puts "OAST provider p_#{row} is now #{enabled ? "enabled" : "disabled"}."
-        ensure
-          store.close
         end
       end
 
@@ -378,13 +369,10 @@ module Gori
         abort "gori run oast providers delete: too many arguments (expected one <id>, got: #{leftover.join(" ")})" if leftover.size > 1
         id = leftover.first?
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           row = oast_provider_row_id(store, id, "delete")
           abort "gori run oast providers: NOT deleted (project busy) — the provider is unchanged" unless store.delete_oast_provider(row)
           puts "OAST provider p_#{row} deleted."
-        ensure
-          store.close
         end
       end
 
@@ -431,11 +419,8 @@ module Gori
         end
         refuse_list_leftovers(leftover, "oast", "list, resume, release")
 
-        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
-        sessions = begin
+        sessions = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
           Oast::Sessions.list(store)
-        ensure
-          store.close
         end
 
         if format == :json
@@ -606,8 +591,7 @@ module Gori
         abort "gori run oast release: too many arguments (expected one <id>, got: #{leftover.join(" ")})" if leftover.size > 1
 
         id = oast_session_id(leftover.first?, "release")
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           bound = oast_bind_session(store, id, "release")
           # Four outcomes, not two. A provider with NO deregistration API (BOAST) and one whose
           # deregister raised are both "still listening", and neither may print "released" —
@@ -618,8 +602,6 @@ module Gori
           message = Oast::Sessions.release_message(outcome, bound, id, store.oast_callback_count(id))
           abort "gori run oast release: #{message}" unless outcome.torn_down?
           puts message
-        ensure
-          store.close
         end
       end
 

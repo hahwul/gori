@@ -89,12 +89,9 @@ module Gori
         # the condition worth avoiding), and there is nothing to write on that path anyway.
         committed = true
         if (set = outcome.descriptor_set) && outcome.ok?
-          store = open_store(resolve_read_project(project_name, db_path))
-          begin
+          with_store(resolve_read_project(project_name, db_path)) do |store|
             committed = Gori::Protobuf::Schemas.adopt(store, client.target, outcome.service,
               outcome.services.size, outcome.files, set)
-          ensure
-            store.close
           end
         end
 
@@ -247,20 +244,18 @@ module Gori
           abort "gori run grpc forget: a TARGET (or --all) is required" if chosen.nil? || chosen.empty?
         end
 
-        store = open_store(resolve_read_project(project_name, db_path))
-        begin
+        committed = with_store(resolve_read_project(project_name, db_path)) do |store|
           known = Gori::Protobuf::Schemas.reflections(store).map(&.target)
           if (t = chosen) && !known.includes?(t)
             # A typo'd target must not print "forgotten" — that reads as "the schema is gone"
             # while the lens is still in place.
             abort "gori run grpc forget: no cached reflection for '#{t}'#{known.empty? ? "" : " (have: #{known.join(", ")})"}"
           end
-          committed = Gori::Protobuf::Schemas.forget(store, chosen)
+          saved = Gori::Protobuf::Schemas.forget(store, chosen)
           puts chosen ? "forgot #{chosen}" : "forgot #{known.size} reflected target(s)"
           puts "schema: #{Gori::Protobuf::Schemas.status}"
-          puts "  ! not saved (project busy); it comes back when you reopen this project" unless committed
-        ensure
-          store.close
+          puts "  ! not saved (project busy); it comes back when you reopen this project" unless saved
+          saved
         end
         exit 1 unless committed
       end

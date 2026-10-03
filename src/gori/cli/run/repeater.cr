@@ -166,11 +166,8 @@ module Gori
         fields, body = parse_h2_fields_file(read_input_file(file, "gori run repeater h2"))
 
         overrides = begin
-          store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
-          begin
+          with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
             Gori::HostOverrides.load(store)
-          ensure
-            store.close
           end
         end
         outbound = project_outbound(proj.name, proj.db, allow_unscoped)
@@ -245,8 +242,7 @@ module Gori
         end
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project, read_only: true)
-        begin
+        with_store(project, read_only: true) do |store|
           repeaters = store.repeaters_mcp
           if format == :json
             puts(JSON.build do |j|
@@ -279,8 +275,6 @@ module Gori
               end
             end
           end
-        ensure
-          store.close
         end
       end
 
@@ -370,8 +364,7 @@ module Gori
         abort "gori run repeater move: pass --to or --up/--down, not both" if to && dir != 0
         abort "gori run repeater move: pass one of --to N, --up or --down\n#{parser}" if to.nil? && dir == 0
 
-        store = open_store(resolve_read_project(project_name, db_path))
-        begin
+        with_store(resolve_read_project(project_name, db_path)) do |store|
           rows = store.repeaters_meta
           from = rows.index { |r| r.id == id }
           abort "gori run repeater move: no repeater session ##{id} (see `gori run repeater list`)" unless from
@@ -405,8 +398,6 @@ module Gori
           else
             puts "Repeater session ##{id} is already tab #{target}."
           end
-        ensure
-          store.close
         end
       end
 
@@ -442,8 +433,7 @@ module Gori
         end
         ids = ids.uniq
 
-        store = open_store(resolve_read_project(project_name, db_path))
-        begin
+        with_store(resolve_read_project(project_name, db_path)) do |store|
           rows = store.repeaters_mcp
           by_id = rows.index_by(&.id)
           missing = ids.reject { |i| by_id.has_key?(i) }
@@ -484,8 +474,6 @@ module Gori
             STDERR.puts "NOT deleted (project busy or unwritable): #{failed.join(", ")}" unless failed.empty?
           end
           exit 1 unless failed.empty?
-        ensure
-          store.close
         end
       end
 
@@ -768,8 +756,7 @@ module Gori
         end
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project)
-        begin
+        with_store(project) do |store|
           tgt_val = target
           tgt_str : String = tgt_val ? tgt_val : ""
           ws_messages = [] of Store::WsOutMessage
@@ -906,8 +893,6 @@ module Gori
           else
             puts "Repeater session ##{id} created successfully."
           end
-        ensure
-          store.close
         end
       end
 
@@ -1778,11 +1763,8 @@ module Gori
                                             persist : Bool = true) : Nil
         abort_if_blocked!(plan, "gori run repeater send")
 
-        store = open_store(project, read_only: true)
-        out_messages = begin
+        out_messages = with_store(project, read_only: true) do |store|
           ws_out_messages(store, id, message_override, verbatim, evidence)
-        ensure
-          store.close
         end
 
         idle = (idle_ms || 3000_i64).clamp(100_i64, 60_000_i64).milliseconds
@@ -2846,11 +2828,8 @@ module Gori
       # because a rule that fails (a hook, a refused binding) records an event row, and the
       # store the plan was read from is already closed by the time a plan exists.
       private def self.apply_request_rules(plan : Repeater::Plan, project : Project) : {Repeater::Plan, Bool}
-        store = open_store(project)
-        begin
+        with_store(project) do |store|
           Repeater::RequestRules.apply(plan, Gori::Rules.load(store))
-        ensure
-          store.close
         end
       end
 

@@ -74,8 +74,7 @@ module Gori
         refuse_list_leftovers(leftover, "views", "add, rm/delete, rename, set, scope")
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project, read_only: true)
-        begin
+        with_store(project, read_only: true) do |store|
           views = SavedViews.merged(store)
           views = views.select { |v| v.scope == scope } if scope
           active = SavedViews.active(store)
@@ -87,8 +86,6 @@ module Gori
             w = view_name_width(views)
             views.each { |v| puts view_row(v, active, w) }
           end
-        ensure
-          store.close
         end
       end
 
@@ -321,13 +318,7 @@ module Gori
       # resolved for every subcommand anyway, so `--project` means the same thing throughout and
       # `merged`/`name_taken?` can see both halves.
       private def self.with_views_store(project_name : String?, db_path : String?, &) : Nil
-        project = resolve_read_project(project_name, db_path)
-        store = open_store(project)
-        begin
-          yield store
-        ensure
-          store.close
-        end
+        with_store(resolve_read_project(project_name, db_path)) { |store| yield store }
       end
 
       # Resolve BY SCOPE, not through `resolve_by_name` — that one is for `--view`, where the

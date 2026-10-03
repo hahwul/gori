@@ -109,8 +109,7 @@ module Gori
         # BOTH scopes, because `Gori::Rules` is where the write and its audit line live and it
         # is built over a store. See `cmd_rewriter_add` for the whole argument.
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project)
-        begin
+        with_store(project) do |store|
           committed = Gori::Rules.load(store).add_preset(preset, scope: scope, enabled: !disabled)
           if committed == 0
             abort "gori run rewriter preset add: failed to persist rules " \
@@ -123,8 +122,6 @@ module Gori
           else
             puts "Installed preset \"#{preset.name}\": #{committed} rule#{suffix}#{state} added."
           end
-        ensure
-          store.close
         end
       end
 
@@ -173,8 +170,7 @@ module Gori
         end
         refuse_list_leftovers(leftover, "rewriter extract", "add, rm/delete, enable, disable")
 
-        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
-        begin
+        with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
           rules = store.extract_rules
           if format == :json
             puts(JSON.build { |j| j.array { rules.each { |r| MCP::Serialize.extract_rule(j, r) } } })
@@ -183,8 +179,6 @@ module Gori
           else
             rules.each { |r| puts extract_rule_row(r) }
           end
-        ensure
-          store.close
         end
       end
 
@@ -221,8 +215,7 @@ module Gori
                abort("gori run rewriter extract add: invalid --kind '#{kind_s}' (cookie|header|regex|position|jsonpath)")
         a, b = parse_extract_range(range_s)
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           # Through `Bindings`, not `store.insert_extract_rule`, so the CLI gets the SAME
           # refusals the TUI and MCP do — one name one writer, a valid key, a regex that
           # compiles — rather than a UNIQUE-constraint failure that reads as "store busy".
@@ -241,8 +234,6 @@ module Gori
                   "(store busy or unwritable) — it is ENABLED and already binding; retry the disable"
           end
           puts extract_added_output(store, id, name, kind, format)
-        ensure
-          store.close
         end
       end
 
@@ -323,8 +314,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
 
-        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
-        begin
+        with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
           rules = store.extract_rules
           if format == :json
             puts(JSON.build do |j|
@@ -343,8 +333,6 @@ module Gori
             puts
             puts "Values are held in memory by the running gori and are never persisted."
           end
-        ensure
-          store.close
         end
       end
 
@@ -417,8 +405,7 @@ module Gori
         refuse_list_leftovers(leftover, "rewriter", "add, rm/delete, enable, disable, preview, extract, bindings")
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project, read_only: true)
-        begin
+        with_store(project, read_only: true) do |store|
           rules = Gori::Rules.merged(store)
           rules = rules.select { |r| r.scope == scope } if scope
           if format == :json
@@ -432,8 +419,6 @@ module Gori
           else
             rules.each { |r| puts rewriter_rule_row(r) }
           end
-        ensure
-          store.close
         end
       end
 
@@ -691,8 +676,7 @@ module Gori
         # left the project's config feed with nothing to show for it. The model needs a store
         # to write that line into, so a global add resolves one too.
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project)
-        begin
+        with_store(project) do |store|
           f, match, rule_host, rule_value = add_fill(store, op, mock, respond, respond_args, body_file,
             find_arg, match, host_arg, value_arg)
           id = Gori::Rules.load(store).create(target, part, f, rule_value, op, match, name, rule_host,
@@ -702,8 +686,6 @@ module Gori
                   "(#{scope.global? ? "settings not writable" : "store busy or unwritable"})"
           end
           puts rewriter_added_output(store, id, scope, format)
-        ensure
-          store.close
         end
       end
 
@@ -793,8 +775,7 @@ module Gori
         # cannot reach. That one stays inert: global ids come from a monotonic counter and are
         # never reused, so nothing can inherit it.
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project)
-        begin
+        with_store(project) do |store|
           exists =
             if scope.global?
               Settings.rewriter_rules.any? { |r| r.id == id }
@@ -811,8 +792,6 @@ module Gori
                                    : "gori run rewriter rm: project is busy (write did not commit) — try again"
           end
           puts scope.global? ? "Global rule ##{id} deleted — from every project." : "Rule ##{id} deleted."
-        ensure
-          store.close
         end
       end
 
@@ -844,8 +823,7 @@ module Gori
         # Both scopes resolve a project, `--everywhere` included: `Gori::Rules` owns the write
         # and its audit line, and it is built over a store. See `cmd_rewriter_add`.
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project)
-        begin
+        with_store(project) do |store|
           rules = Gori::Rules.load(store)
           if enable && (rule = rules.rules.find { |r| r.id == id && r.scope == scope }) && rule.inert?
             abort "gori run rewriter #{action}: #{rule.inert_reason} — cannot enable this rule with this gori; use a newer version or delete it"
@@ -874,8 +852,6 @@ module Gori
           else
             puts "Rule ##{id} #{enable ? "enabled" : "disabled"}."
           end
-        ensure
-          store.close
         end
       end
 
@@ -925,8 +901,7 @@ module Gori
         target, part = Gori::Rules.normalize_shape(op, target, part)
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project)
-        begin
+        with_store(project) do |store|
           candidate = Store::MatchRule.new(0_i64, true, target, part, f, value, op, match, "", host)
           pv = Gori::Rules.new(store, [] of Store::MatchRule).preview(candidate)
           if format == :json
@@ -942,8 +917,6 @@ module Gori
             capped = pv.total > pv.scanned ? " (of #{pv.total} total; scan capped)" : ""
             puts "Would affect #{pv.matched} of #{pv.scanned} recent flows#{capped}."
           end
-        ensure
-          store.close
         end
       end
     end

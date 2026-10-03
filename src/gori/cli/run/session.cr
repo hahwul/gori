@@ -600,8 +600,7 @@ module Gori
         name = positional.first?
         abort "gori run session refresh: name the slot (`gori run session list`)" if name.nil?
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        outcome = begin
+        outcome = with_store(resolve_read_project(proj.name, proj.db)) do |store|
           slot = session_refresh_slot(store, name)
           runner = session_refresher(store)
           # Built here either way, not left to the runner's own gate: this command takes
@@ -613,8 +612,6 @@ module Gori
                                  "`gori run session edit #{name} --refresh ID,ID` (`gori run repeater list` shows the ids)")
           end
           runner.refresh(name, outbound)
-        ensure
-          store.close
         end
         if format == :json
           puts(JSON.build { |j| session_refresh_json(j, outcome) })

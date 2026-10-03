@@ -52,11 +52,8 @@ module Gori
         index = parse_note_index(positional.first?)
         abort "gori run notes: <n> and --all are mutually exclusive" if index && all
 
-        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
-        doc = begin
+        doc = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
           Notes.load(store)
-        ensure
-          store.close
         end
 
         if n = index
@@ -87,8 +84,7 @@ module Gori
         body ||= read_stdin_fallback(STDIN, "gori run notes", "note text") unless STDIN.tty?
         abort "gori run notes create: no note text (use --text, positional args, or pipe via STDIN)" if body.nil? || body.empty?
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           # `Notes.create` — the READ, the merge and the write in one transaction. Reading the
           # set here and writing it back was two statements, and a peer (a TUI on the same
           # project, a `gori mcp`, a second shell) that appended between them had its note
@@ -109,8 +105,6 @@ module Gori
           # where it actually landed among a peer's; a peer that deletes it in that instant
           # leaves nothing to number, and the id is then the only honest thing to print.
           puts note_created_output(Notes.load(store), new_id, format, store)
-        ensure
-          store.close
         end
       end
 
@@ -227,8 +221,7 @@ module Gori
         abort "gori run notes delete: too many arguments (expected one note number)" if positional.size > 1
         n = parse_note_index(positional.first).not_nil!
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           persisted = Notes.load(store)
           unless n <= persisted.size
             store.close
@@ -269,8 +262,6 @@ module Gori
             abort "gori run notes delete: project is busy (write did not commit) — try again"
           end
           puts "Note ##{n} deleted."
-        ensure
-          store.close
         end
       end
 

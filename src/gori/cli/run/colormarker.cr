@@ -255,8 +255,7 @@ module Gori
         refuse_list_leftovers(leftover, "colormarker", "add, update/edit, rm/delete, enable, disable, move, preview, color")
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project, read_only: true)
-        begin
+        with_store(project, read_only: true) do |store|
           rules = Gori::Colormarker.merged(store)
           rules = rules.select { |r| r.scope == scope } if scope
           if format == :json
@@ -271,8 +270,6 @@ module Gori
             w = colormarker_color_width(rules)
             rules.each { |r| puts colormarker_rule_row(r, w) }
           end
-        ensure
-          store.close
         end
       end
 
@@ -325,8 +322,7 @@ module Gori
         end
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project)
-        begin
+        with_store(project) do |store|
           id = store.insert_color_rule(f, color, style, name, !disabled)
           if id == 0
             store.close
@@ -334,8 +330,6 @@ module Gori
           end
           puts format == :json ? colormarker_added_json(id, store) : "Colour rule ##{id} added."
           print_color_advice(f)
-        ensure
-          store.close
         end
       end
 
@@ -441,8 +435,7 @@ module Gori
                                                   id : Int64, filter : String?, color : String?,
                                                   style : Store::MarkerStyle?, name : String?) : Nil
         project = resolve_read_project(project_name, db_path)
-        store = open_store(project)
-        begin
+        with_store(project) do |store|
           current = store.color_rules.find { |r| r.id == id }
           unless current
             store.close
@@ -456,8 +449,6 @@ module Gori
           end
           puts "Colour rule ##{id} updated."
           print_color_advice(f)
-        ensure
-          store.close
         end
       end
 
@@ -492,8 +483,7 @@ module Gori
         end
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project)
-        begin
+        with_store(project) do |store|
           unless store.color_rules.any? { |r| r.id == id }
             store.close
             abort "gori run colormarker rm: no colour rule with id #{id}"
@@ -503,8 +493,6 @@ module Gori
             abort "gori run colormarker rm: project is busy (write did not commit) — the row colour is unchanged"
           end
           puts "Colour rule ##{id} deleted."
-        ensure
-          store.close
         end
       end
 
@@ -546,8 +534,7 @@ module Gori
         end
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project)
-        begin
+        with_store(project) do |store|
           if scope.global?
             # Same disposition `Colormarker#toggle` writes: agreeing with the default DROPS the
             # override rather than pinning it, so this project keeps following the library.
@@ -568,8 +555,6 @@ module Gori
             abort "gori run colormarker #{action}: project is busy (write did not commit) — the row colour is unchanged"
           end
           puts "Colour rule ##{id} #{enable ? "enabled" : "disabled"}."
-        ensure
-          store.close
         end
       end
 
@@ -625,8 +610,7 @@ module Gori
         end
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project)
-        begin
+        with_store(project) do |store|
           ids = store.color_rules.map(&.id)
           i = ids.index(id)
           unless i
@@ -643,8 +627,6 @@ module Gori
             abort "gori run colormarker move: project is busy (write did not commit) — the precedence order is unchanged"
           end
           puts "Colour rule ##{id} moved #{dir < 0 ? "up" : "down"}."
-        ensure
-          store.close
         end
       end
 
@@ -676,8 +658,7 @@ module Gori
         end
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project)
-        begin
+        with_store(project) do |store|
           ahead = Gori::Colormarker.rules_ahead(Gori::Colormarker.merged(store), 0_i64, scope)
           pv = Gori::Colormarker.preview(store, f, ahead, limit)
           notes = Colormarker.advise(f)
@@ -707,8 +688,6 @@ module Gori
             puts "As a #{scope.label} rule: would match #{pv.matched} of #{pv.scanned} recent flows#{more}#{tail}."
             notes.each { |n| STDERR.puts "note: #{n}" }
           end
-        ensure
-          store.close
         end
       end
     end

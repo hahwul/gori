@@ -58,8 +58,7 @@ module Gori
           abort "gori run sitemap tag: --list only reads (narrow it with --host); --path, --tag and --clear write a tag"
         end
 
-        store = open_store(resolve_read_project(proj.name, proj.db), read_only: list)
-        begin
+        with_store(resolve_read_project(proj.name, proj.db), read_only: list) do |store|
           if list
             rows = store.sitemap_tags.to_a.sort_by { |(k, _)| k }
             rows = rows.select { |(k, _)| k[0] == host } if host
@@ -68,8 +67,6 @@ module Gori
             return
           end
           apply_sitemap_tag(store, host, path, tag, clear)
-        ensure
-          store.close
         end
       end
 

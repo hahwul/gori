@@ -73,8 +73,7 @@ module Gori
         # so Crystal keeps it nilable and `x || abort` does not narrow it in place.
         oid_opt, pos_opt = link_owner_selection("links", owner_id, note_position)
 
-        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
-        oid, resolved = begin
+        oid, resolved = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
           resolved_id = resolve_link_owner_id(store, owner_kind, oid_opt, pos_opt, "links")
           # Validate the owner exists, like the mutate path and the MCP list_links tool do —
           # otherwise a typo'd id prints "no links on issue #99999", which reads as "this
@@ -83,8 +82,6 @@ module Gori
             abort "gori run links: no #{owner_kind.label} with id #{resolved_id}"
           end
           {resolved_id, Links.resolve_all(store, store.list_links(owner_kind, resolved_id))}
-        ensure
-          store.close
         end
 
         if format == :json
@@ -170,8 +167,7 @@ module Gori
         oid_opt, pos_opt = link_owner_selection(verb, owner_id, note_position)
         ref_kind, rid = resolve_link_ref(verb, ref_s, ref_id)
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           oid = resolve_link_owner_id(store, owner_kind, oid_opt, pos_opt, verb)
           # Both ends must exist, or `add` would file an orphan row pointing at nothing and
           # still report success (the MCP add_link tool validates the same way).
@@ -193,8 +189,6 @@ module Gori
             abort "gori run links rm: NOT removed (project busy) — the link is unchanged" unless store.remove_link(owner_kind, oid, ref_kind, rid)
             puts "Unlinked #{owner_kind.label} ##{oid} → #{ref_kind.label} ##{rid}."
           end
-        ensure
-          store.close
         end
       end
 

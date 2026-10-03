@@ -109,8 +109,7 @@ module Gori
           "get, forward, drop, edit, enable, disable, filter, direction, list")
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project, long_running: true)
-        begin
+        with_store(project, long_running: true) do |store|
           bridge = store.intercept_bridge_state
           unless bridge
             unavailable = "no capturing gori instance is publishing intercept state (open the project's TUI to intercept)"
@@ -128,8 +127,6 @@ module Gori
           # script is watching (mirrors MCP intercept_list).
           store.touch_intercept_held(bridge.token, items.map(&.item_id), now_ms) unless items.empty?
           emit_intercept_list(bridge, items, include_sensitive, now_ms, format)
-        ensure
-          store.close
         end
       end
 
@@ -280,8 +277,7 @@ module Gori
         item_id = positional[0].to_i64? || abort("gori run intercept get: invalid item id '#{positional[0]}'")
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project, long_running: true)
-        begin
+        with_store(project, long_running: true) do |store|
           bridge = store.intercept_bridge_state
           abort "gori run intercept get: no capturing gori instance is publishing intercept state" unless bridge
           row = store.intercept_held_item(bridge, item_id)
@@ -311,8 +307,6 @@ module Gori
               puts "[#{body.size} bytes of #{what} — use --format json --include-sensitive for the raw bytes]"
             end
           end
-        ensure
-          store.close
         end
       end
 
@@ -323,13 +317,10 @@ module Gori
       private def self.enqueue_intercept(project_name : String?, db_path : String?, verb : String, *,
                                          item_id : Int64? = nil, bytes : Bytes? = nil, arg : String? = nil) : {String, String?}
         project = resolve_read_project(project_name, db_path)
-        store = open_store(project, long_running: true)
-        begin
+        with_store(project, long_running: true) do |store|
           outcome = store.send_intercept_command(verb, item_id: item_id, bytes: bytes, arg: arg)
           return {outcome.status, outcome.detail} if outcome.is_a?(Store::InterceptAck)
           abort "gori run intercept: #{intercept_send_refusal(outcome)}"
-        ensure
-          store.close
         end
       end
 
@@ -462,11 +453,8 @@ module Gori
       # here for the identical reason (`kind`/`binary?` before choosing a normalization rule).
       private def self.held_row_for_edit(project_name : String?, db_path : String?, item_id : Int64) : Store::HeldRow?
         project = resolve_read_project(project_name, db_path)
-        store = open_store(project, long_running: true)
-        begin
+        with_store(project, long_running: true) do |store|
           store.intercept_bridge_state.try { |bridge| store.intercept_held_item(bridge, item_id) }
-        ensure
-          store.close
         end
       end
 

@@ -107,8 +107,7 @@ module Gori
         # `long_running`: the store stays open for the whole crawl and every finding batch is
         # written through it, so it takes the Store's standard wait budget, not the one-shot
         # CLI one — a one-second refusal here is a dropped batch of findings, not a fast exit.
-        store = open_store(project, long_running: true)
-        begin
+        with_store(project, long_running: true) do |store|
           # The store stays open for the whole run (findings are written through it), so the
           # Outbound does NOT take ownership of it — the ensure below is what closes it.
           outbound = Gori::Outbound.cli(Scope.load(store), allow_unscoped)
@@ -146,8 +145,6 @@ module Gori
           (fid = bind_from) && seed_bindings(fid, project_name, db_path, outbound, insecure, "gori run discover")
           discover_preflight(plan, force)
           run_discover_stream(plan.engine, store, format, no_store, -> { plan.sender.pool_stats })
-        ensure
-          store.close
         end
       end
 

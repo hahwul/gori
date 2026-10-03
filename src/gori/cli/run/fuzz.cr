@@ -716,11 +716,8 @@ module Gori
         elsif rid = repeater_id
           fuzz_source_repeater(rid, project_name, db_path)
         elsif id = flow_id
-          store = open_store(resolve_read_project(project_name, db_path), read_only: true)
-          detail = begin
+          detail = with_store(resolve_read_project(project_name, db_path), read_only: true) do |store|
             store.get_flow(id)
-          ensure
-            store.close
           end
           abort "gori run fuzz: no flow ##{id}" unless detail
           built = Repeater::FlowRequest.build(detail)
@@ -770,15 +767,12 @@ module Gori
       # the frames are where the positions go.
       private def self.fuzz_source_repeater(id : Int64, project_name : String?,
                                             db_path : String?) : FuzzSeed
-        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
-        rec, ws_rows = begin
+        rec, ws_rows = with_store(resolve_read_project(project_name, db_path), read_only: true) do |store|
           r = store.get_repeater(id)
           # Fetched while the store is open, and only for a session that IS one — the same
           # read `cmd_repeater_send_ws` makes one command over.
           rows = r && Repeater::WsEngine.replayable?(String.new(r.request)) ? store.ws_messages_for_repeater(id) : nil
           {r, rows}
-        ensure
-          store.close
         end
         abort "gori run fuzz: no repeater session ##{id}" unless rec
         # `evidence` per FRAME mirrors `cmd_repeater_send_ws`: a session SEEDED from a captured
@@ -805,11 +799,8 @@ module Gori
       # row here was recorded by the WS relay, not typed by anyone.
       private def self.fuzz_ws_seed_flow(id : Int64, project_name : String?,
                                          db_path : String?) : Array(Fuzz::WsMessageSource)
-        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
-        rows = begin
+        rows = with_store(resolve_read_project(project_name, db_path), read_only: true) do |store|
           store.ws_messages(id)
-        ensure
-          store.close
         end
         fuzz_ws_seed_rows(rows, true)
       end

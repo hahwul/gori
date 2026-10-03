@@ -67,8 +67,7 @@ module Gori
         end
         iid, kind, rid = resolve_freeze_ends(issue_id, ref_s, ref_id)
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           abort "gori run evidence freeze: no issue with id #{iid}" unless store.get_issue(iid)
           snap = freeze_snapshot(store, kind, rid, allow_drift)
           abort "gori run evidence freeze: #{snap}" if snap.is_a?(String)
@@ -89,8 +88,6 @@ module Gori
             puts "  sha256 req #{meta.request_sha256}"
             puts "  sha256 res #{meta.response_sha256 || "— (no response)"}"
           end
-        ensure
-          store.close
         end
       end
 
@@ -134,16 +131,13 @@ module Gori
         refuse_list_leftovers(leftover, "evidence", "freeze, list, show, link, unlink, delete/rm")
         iid = issue_id
 
-        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
-        metas = begin
+        metas = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
           if iid
             abort "gori run evidence: no issue with id #{iid}" unless store.get_issue(iid)
             store.issue_evidence(iid)
           else
             store.evidence
           end
-        ensure
-          store.close
         end
 
         if format == :json
@@ -175,11 +169,8 @@ module Gori
         id_s = positional.first? || abort("gori run evidence show: <id> is required")
         id = parse_evidence_id(id_s, "<id>")
 
-        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
-        ev = begin
+        ev = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
           store.get_evidence(id) || abort("gori run evidence show: no frozen evidence with id #{id}")
-        ensure
-          store.close
         end
 
         if format == :json
@@ -211,8 +202,7 @@ module Gori
         abort "gori run evidence #{verb}: --issue is required" if iid_opt.nil?
         iid = iid_opt
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           meta = store.get_evidence_meta(id) || abort("gori run evidence #{verb}: no frozen evidence with id #{id}")
           abort "gori run evidence #{verb}: no issue with id #{iid}" unless store.get_issue(iid)
           if link
@@ -220,8 +210,6 @@ module Gori
           else
             evidence_unlink_one(store, meta, iid)
           end
-        ensure
-          store.close
         end
       end
 
@@ -262,8 +250,7 @@ module Gori
         id_s = positional.first? || abort("gori run evidence delete: <id> is required")
         id = parse_evidence_id(id_s, "<id>")
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           meta = store.get_evidence_meta(id) || abort("gori run evidence delete: no frozen evidence with id #{id}")
           # Gated like every other destructive verb here (`issues delete`, `notes delete`, …),
           # and for the reason the help gives: a frozen copy is the one that cannot come back.
@@ -274,8 +261,6 @@ module Gori
           abort "gori run evidence delete: NOT deleted (project busy or unwritable) — the copy is unchanged" unless store.delete_evidence(id)
           linked = meta.issue_ids.empty? ? " (orphaned)" : " linked to #{meta.issue_ids.map { |iid| "issue ##{iid}" }.join(", ")}"
           puts "Frozen evidence ##{id}#{linked} deleted."
-        ensure
-          store.close
         end
       end
 

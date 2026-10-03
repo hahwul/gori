@@ -63,11 +63,8 @@ module Gori
         refuse_list_leftovers(leftover, "project network", "get, set, unset, list")
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project, read_only: true)
-        rows = begin
+        rows = with_store(project, read_only: true) do |store|
           Settings.project_network_rows(store)
-        ensure
-          store.close
         end
         if format == :json
           puts(JSON.build do |j|
@@ -103,11 +100,8 @@ module Gori
         k = network_key_arg(positional.first?, "get")
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project, read_only: true)
-        stored = begin
+        stored = with_store(project, read_only: true) do |store|
           store.setting(k.key)
-        ensure
-          store.close
         end
         if format == :json
           puts(JSON.build { |j| network_entry_json(j, k, stored) })
@@ -194,8 +188,7 @@ module Gori
         k = network_key_arg(positional.first?, "unset")
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project)
-        edit = begin
+        edit = with_store(project) do |store|
           plan, err = Settings.plan_project_network_unset(Settings.project_network_rows(store), k)
           unless plan
             store.close
@@ -206,8 +199,6 @@ module Gori
             abort "gori run project network unset: project is busy (write did not commit) — #{k.key} is unchanged; try again"
           end
           plan
-        ensure
-          store.close
         end
         puts "#{k.key} unset — the project inherits the global value" unless edit.rows.empty?
         report_network_edit(edit, k, project)

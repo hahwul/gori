@@ -20,8 +20,7 @@ module Gori
         end
         abort "gori run fuzz list: unexpected argument #{positional.first.inspect}" unless positional.empty?
 
-        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
-        begin
+        with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
           runs = store.fuzz_runs(session_id, limit, offset)
           counts = store.fuzz_result_counts(runs.map(&.id))
           if format == :json
@@ -31,8 +30,6 @@ module Gori
           else
             runs.each { |run| puts fuzz_saved_run_line(run, counts[run.id]? || 0_i64) }
           end
-        ensure
-          store.close
         end
       end
 
@@ -81,8 +78,7 @@ module Gori
         result_idx = positional[1]?.try { |v| parse_flow_id(v, "gori run fuzz show") }
         check_fuzz_show_modes(clusters, cluster, result_idx)
 
-        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
-        begin
+        with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
           run = store.get_fuzz_run(run_id) || abort "gori run fuzz show: no saved run ##{run_id}"
           if clusters
             show_saved_fuzz_clusters(store, run, order, matched_only, limit, offset, format)
@@ -98,8 +94,6 @@ module Gori
             rows = store.fuzz_result_summaries(run_id, limit, offset, matched_only)
             show_saved_fuzz_run(store, run, rows, offset, matched_only, format)
           end
-        ensure
-          store.close
         end
       end
 
@@ -117,8 +111,7 @@ module Gori
         abort "gori run fuzz delete: expected one RUN_ID" unless positional.size == 1
         run_id = parse_flow_id(positional[0], "gori run fuzz delete")
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           run = store.get_fuzz_run(run_id) || abort "gori run fuzz delete: no saved run ##{run_id}"
           unless yes
             count = store.fuzz_result_count(run_id)
@@ -140,8 +133,6 @@ module Gori
           in Store::FuzzRunDeleteStatus::WriteFailed
             abort "gori run fuzz delete: NOT deleted (project busy)"
           end
-        ensure
-          store.close
         end
       end
 

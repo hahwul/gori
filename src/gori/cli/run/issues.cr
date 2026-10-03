@@ -248,8 +248,7 @@ module Gori
           what: "gori run issues create")
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project)
-        begin
+        with_store(project) do |store|
           if err = issue_flow_error(store, flow_id)
             abort "gori run issues create: #{err}"
           end
@@ -261,8 +260,6 @@ module Gori
             notes: body.try { |n| Env.mask_secrets(n) } || "")
           abort "gori run issues create: failed to persist issue (store busy or unwritable)" if id == 0
           puts issue_created_output(store, id, format)
-        ensure
-          store.close
         end
       end
 
@@ -326,16 +323,13 @@ module Gori
         id_s = positional.first? || abort("gori run issues delete: <id> is required")
         id = id_s.to_i64? || abort("gori run issues delete: invalid issue id #{id_s.inspect}")
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           abort "gori run issues delete: no issue with id #{id}" unless store.get_issue(id)
           if err = issue_delete_confirmation_error(id, yes)
             abort "gori run issues delete: #{err}"
           end
           abort "gori run issues delete: issue NOT deleted (store busy or unwritable)" unless store.delete_issue(id)
           puts "Issue ##{id} deleted."
-        ensure
-          store.close
         end
       end
 
@@ -412,8 +406,7 @@ module Gori
           what: "gori run issues update")
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project)
-        begin
+        with_store(project) do |store|
           unless store.get_issue(id)
             store.close
             abort "gori run issues update: no issue with id #{id}"
@@ -435,8 +428,6 @@ module Gori
             abort "gori run issues update: project is busy (write did not commit) — try again"
           end
           puts "Issue ##{id} updated successfully."
-        ensure
-          store.close
         end
       end
 
