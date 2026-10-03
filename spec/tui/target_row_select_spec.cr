@@ -84,6 +84,19 @@ describe "the TARGET row selection" do
     end
   end
 
+  # INSERT edits move the text under a standing READ anchor; back in READ the band would span
+  # what the operator never selected, and `y` would copy it.
+  it "drops the READ band on entering INSERT" do
+    each_target_view do |v, name|
+      v.target_end
+      v.target_read_move(-5, selecting: true)
+      v.pane_selection?.should be_true
+      v.enter_target_insert!
+      v.exit_target_insert!
+      v.pane_selection?.should be_false, "#{name}: the band survived an INSERT visit"
+    end
+  end
+
   describe "the pointer" do
     it "a press places the caret and a drag extends from it" do
       each_target_view do |v, name|

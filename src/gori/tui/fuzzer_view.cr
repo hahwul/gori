@@ -679,6 +679,7 @@ module Gori::Tui
 
     def enter_target_insert! : Nil
       @target_mode = InputMode::Insert
+      @target_read.clear_selection # INSERT edits move the text under a READ anchor
     end
 
     def exit_target_insert! : Nil
