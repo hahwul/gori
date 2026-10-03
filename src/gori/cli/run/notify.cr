@@ -38,12 +38,9 @@ module Gori
         project = resolve_read_project(proj.name, proj.db)
         # Counted BEFORE the write, for the reason `AgentPresence.tui_windows?` gives.
         windows = AgentPresence.tui_windows?(project.db_path)
-        store = open_store(project)
-        id = begin
+        id = with_store(project) do |store|
           store.record_script_notice(summary, detail.try(&.presence), level,
             "gori run pid #{Process.pid}", Process.pid.to_i64)
-        ensure
-          store.close
         end
         abort "gori run notify: project is busy (write did not commit) — try again" if id <= 0
         puts notify_output(id, project.name, AgentReply.summary_line(summary), windows, format)

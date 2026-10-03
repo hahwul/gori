@@ -22,7 +22,7 @@ module Gori::CLI
     # selector flags, spent on a whole client instead of one flag.
     install_targets = [] of String
 
-    parser = OptionParser.new do |p|
+    parser = option_parser("gori mcp") do |p|
       p.banner = "Usage: gori mcp [options]\n\n" \
                  "Start an MCP (Model Context Protocol) server over stdio. An AI client\n" \
                  "spawns this and talks JSON-RPC on stdin/stdout. With no --db/--project,\n" \
@@ -43,9 +43,6 @@ module Gori::CLI
       p.on("--install-grok", "Install gori as an MCP server in Grok (~/.grok/config.toml)") { install_targets << "grok" }
       p.on("--install-hermes", "Install gori as an MCP server in Hermes ($HERMES_HOME, default ~/.hermes/config.yaml)") { install_targets << "hermes" }
       p.on("--install-pi", "Install gori as an MCP server in Pi ($PI_CODING_AGENT_DIR, default ~/.pi/agent/mcp.json; requires an MCP adapter)") { install_targets << "pi" }
-      p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-      p.invalid_option { |flag| abort CLI.unknown_option_message("gori mcp", flag, p) }
-      p.missing_option { |flag| abort "missing value for #{flag}" }
     end
     parser.parse(args)
 

@@ -139,7 +139,9 @@ module Gori
         headers_only = false
         max_body : Int32? = nil
 
-        parser = OptionParser.new do |p|
+        # A stray word here is refused, not dropped — see `Run.parse_no_positionals`.
+        parse_no_positionals(args, "gori run repeater h2",
+          "pass the origin as --target URL and the field list as --fields FILE") do |p|
           p.banner = "Usage: gori run repeater h2 --target URL --fields FILE [options]\n\n" \
                      "Send a field-native HTTP/2 request (exact HPACK field list, no h1-text carrier).\n" \
                      "FILE is JSON: a [[name,value],…] array, or {\"fields\":[…],\"body\":\"…\"}."
@@ -153,13 +155,7 @@ module Gori
           p.on("--headers-only", HEADERS_ONLY_HELP) { headers_only = true }
           p.on("--max-body=BYTES", MAX_BODY_HELP) { |v| max_body = parse_count(v, "--max-body") }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run repeater h2", f, p) }
-          p.missing_option { |f| abort "gori run repeater h2: missing value for #{f}" }
         end
-        # A stray word here is refused, not dropped — see `Run.parse_no_positionals`.
-        parse_no_positionals(parser, args, "gori run repeater h2",
-          "pass the origin as --target URL and the field list as --fields FILE")
         refresh_verify_upstream(!insecure)
         cap = body_cap(headers_only, max_body, "gori run repeater h2")
 
@@ -170,11 +166,8 @@ module Gori
         fields, body = parse_h2_fields_file(read_input_file(file, "gori run repeater h2"))
 
         overrides = begin
-          store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
-          begin
+          with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
             Gori::HostOverrides.load(store)
-          ensure
-            store.close
           end
         end
         outbound = project_outbound(proj.name, proj.db, allow_unscoped)
@@ -240,21 +233,16 @@ module Gori
         proj = ProjectFlags.new
         format = :text
 
-        parser = OptionParser.new do |p|
+        parse_no_positionals(args, "gori run repeater list",
+          "`repeater list` takes no positional arguments; to act on one session use " \
+          "`gori run repeater send <id>`") do |p|
           p.banner = "Usage: gori run repeater list [options]"
           project_options(p, proj, "read")
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run repeater list", f, p) }
-          p.missing_option { |f| abort "gori run repeater list: missing value for #{f}" }
         end
-        parse_no_positionals(parser, args, "gori run repeater list",
-          "`repeater list` takes no positional arguments; to act on one session use " \
-          "`gori run repeater send <id>`")
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project, read_only: true)
-        begin
+        with_store(project, read_only: true) do |store|
           repeaters = store.repeaters_mcp
           if format == :json
             puts(JSON.build do |j|
@@ -287,8 +275,6 @@ module Gori
               end
             end
           end
-        ensure
-          store.close
         end
       end
 
@@ -378,8 +364,7 @@ module Gori
         abort "gori run repeater move: pass --to or --up/--down, not both" if to && dir != 0
         abort "gori run repeater move: pass one of --to N, --up or --down\n#{parser}" if to.nil? && dir == 0
 
-        store = open_store(resolve_read_project(project_name, db_path))
-        begin
+        with_store(resolve_read_project(project_name, db_path)) do |store|
           rows = store.repeaters_meta
           from = rows.index { |r| r.id == id }
           abort "gori run repeater move: no repeater session ##{id} (see `gori run repeater list`)" unless from
@@ -413,8 +398,6 @@ module Gori
           else
             puts "Repeater session ##{id} is already tab #{target}."
           end
-        ensure
-          store.close
         end
       end
 
@@ -450,8 +433,7 @@ module Gori
         end
         ids = ids.uniq
 
-        store = open_store(resolve_read_project(project_name, db_path))
-        begin
+        with_store(resolve_read_project(project_name, db_path)) do |store|
           rows = store.repeaters_mcp
           by_id = rows.index_by(&.id)
           missing = ids.reject { |i| by_id.has_key?(i) }
@@ -492,8 +474,6 @@ module Gori
             STDERR.puts "NOT deleted (project busy or unwritable): #{failed.join(", ")}" unless failed.empty?
           end
           exit 1 unless failed.empty?
-        ensure
-          store.close
         end
       end
 
@@ -708,7 +688,11 @@ module Gori
         tls_preset : String? = nil
         format = :text
 
-        parser = OptionParser.new do |p|
+        # A bare word here is almost always the request or the target the operator meant to
+        # pass through a flag, and creating the session WITHOUT it left a row whose request
+        # was not the one they typed — reported as a clean "session #N created".
+        parse_no_positionals(args, "gori run repeater create",
+          "pass the request via --request-file/--request-raw/--request-stdin/--curl/--flow and the origin via --target") do |p|
           p.banner = "Usage: gori run repeater create [options]\n\n#{EVIDENCE_LINK_HELP}\n"
           project_options(p, proj, "update")
           p.on("-tURL", "--target=URL", "Target URL (scheme://host[:port])") { |v| target = v }
@@ -732,15 +716,7 @@ module Gori
           p.on("--ws-keep-key", "WebSocket: send the request's own Sec-WebSocket-Key instead of a fresh one (lets an absent/short/duplicate/non-base64 key be tested)") { ws_keep_key = true }
           p.on("--ws-http-only", "WebSocket: treat this session as plain HTTP — the handshake is sent as an ordinary request and its own answer (a 101, or the 2xx of an RFC 8441 extended CONNECT) read as the response, instead of the framed exchange. Stored on the session (the TUI's ^V); `repeater send --http` is the per-send form") { ws_http_only = true }
           format_flag(p, [:text, :json], "Output: text (default) | json — the new session as `repeater list --format json` prints it, plus websocket / ws_messages / request_line_rewritten") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run repeater create", f, p) }
-          p.missing_option { |f| abort "gori run repeater create: missing value for #{f}" }
         end
-        # A bare word here is almost always the request or the target the operator meant to
-        # pass through a flag, and creating the session WITHOUT it left a row whose request
-        # was not the one they typed — reported as a clean "session #N created".
-        parse_no_positionals(parser, args, "gori run repeater create",
-          "pass the request via --request-file/--request-raw/--request-stdin/--curl/--flow and the origin via --target")
 
         # ONE build of the source list, shared by the gate below and the `--flow` seeding
         # further down, so the two can never disagree about whether a request was handed in.
@@ -780,8 +756,7 @@ module Gori
         end
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project)
-        begin
+        with_store(project) do |store|
           tgt_val = target
           tgt_str : String = tgt_val ? tgt_val : ""
           ws_messages = [] of Store::WsOutMessage
@@ -918,8 +893,6 @@ module Gori
           else
             puts "Repeater session ##{id} created successfully."
           end
-        ensure
-          store.close
         end
       end
 
@@ -948,10 +921,7 @@ module Gori
                                              ws_messages : Int32, rewrote_request_line : Bool) : String
         rows = store.repeaters_mcp
         i = rows.index { |r| r.id == id }
-        unless i
-          store.close
-          abort "gori run repeater create: session ##{id} was created, but another gori deleted it before it could be read back"
-        end
+        i || abort_closing(store, "gori run repeater create: session ##{id} was created, but another gori deleted it before it could be read back")
         JSON.build do |j|
           j.object do
             repeater_row_fields(j, rows[i], i + 1)
@@ -1790,11 +1760,8 @@ module Gori
                                             persist : Bool = true) : Nil
         abort_if_blocked!(plan, "gori run repeater send")
 
-        store = open_store(project, read_only: true)
-        out_messages = begin
+        out_messages = with_store(project, read_only: true) do |store|
           ws_out_messages(store, id, message_override, verbatim, evidence)
-        ensure
-          store.close
         end
 
         idle = (idle_ms || 3000_i64).clamp(100_i64, 60_000_i64).milliseconds
@@ -2858,11 +2825,8 @@ module Gori
       # because a rule that fails (a hook, a refused binding) records an event row, and the
       # store the plan was read from is already closed by the time a plan exists.
       private def self.apply_request_rules(plan : Repeater::Plan, project : Project) : {Repeater::Plan, Bool}
-        store = open_store(project)
-        begin
+        with_store(project) do |store|
           Repeater::RequestRules.apply(plan, Gori::Rules.load(store))
-        ensure
-          store.close
         end
       end
 

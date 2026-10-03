@@ -310,15 +310,11 @@ module Gori
       # argument that leaves a SUCCESS status is the failure mode a scripted surface can least
       # afford, which is why every other command here refuses it.
       #
-      # Takes both halves of `unknown_args` for the reason the colormarker list documents: a
-      # bare word after `--` lands in `after`, and reading only `before` would lose it.
-      private def self.one_positional(before : Array(String), after : Array(String),
-                                      prefix : String, what : String) : String?
-        all = before + after
-        if msg = extra_positional_error(all, prefix, what)
-          abort msg
-        end
-        all.first?
+      # Parses through `parse_args`, so both halves of `unknown_args` are read: a bare word
+      # after `--` lands in the second, and reading only the first would lose it.
+      private def self.one_positional(args : Array(String), prefix : String, what : String,
+                                      & : OptionParser ->) : String?
+        one_positional_list(args, prefix, what) { |p| yield p }.first?
       end
 
       # The same guard for the sites that keep the ARRAY (because they read `.first?` later, or
@@ -328,6 +324,13 @@ module Gori
       # for that shape: `gori run probe rules delete a b` deleted `a` and exited 0, and so did
       # `project scope update 3 4 --host=x`, `session add x y`, `rewriter preset add p q`,
       # `probe rules enable a b` and `probe mode passive active`. Four of those are mutations.
+      private def self.one_positional_list(args : Array(String), prefix : String, what : String,
+                                           & : OptionParser ->) : Array(String)
+        one_positional_list(parse_args(args, prefix) { |p| yield p }, [] of String, prefix, what)
+      end
+
+      # …and from INSIDE an `unknown_args` handler, for a parser kept whole because its usage
+      # is printed later (`redact use`, `repeater move`).
       private def self.one_positional_list(before : Array(String), after : Array(String),
                                            prefix : String, what : String) : Array(String)
         all = before + after
@@ -362,18 +365,16 @@ module Gori
         "#{prefix}: unexpected argument#{all.size == 1 ? "" : "s"} #{all.join(" ").inspect} — #{hint}"
       end
 
-      # Parse a command whose every argument is a flag, refusing any leftover word.
+      # Parse a command whose every argument is a flag (`parse_args`), refusing any leftover word.
       #
-      # A method rather than three copies of the idiom, because the subtle half is
+      # A method rather than copies of the idiom, because the subtle half is
       # `before + after`: a copy that keeps only `before` lets a bare word after `--` through
       # in silence, which is the same footgun `optionparser-unknown-args` was written about.
-      # Installing the handler HERE makes the correct form the only form, and the call site
+      # Routing through `parse_args` makes the correct form the only form, and the call site
       # reads as what it means.
-      private def self.parse_no_positionals(parser : OptionParser, args : Array(String),
-                                            prefix : String, hint : String) : Nil
-        positional = [] of String
-        parser.unknown_args { |before, after| positional = before + after }
-        parser.parse(args)
+      private def self.parse_no_positionals(args : Array(String), prefix : String, hint : String,
+                                            & : OptionParser ->) : Nil
+        positional = parse_args(args, prefix) { |p| yield p }
         if msg = no_positional_error(positional, prefix, hint)
           abort msg
         end
@@ -746,6 +747,19 @@ module Gori
         raise ex
       end
 
+      # `open_store`, yield, close — the shape nearly every command wants. Returns the block's
+      # value. A `return` in the block still closes the store; an `abort` does not (`exit` skips
+      # `ensure`), which is what `abort_closing` is for.
+      private def self.with_store(project : Project, *, read_only : Bool = false,
+                                  long_running : Bool = false, &)
+        store = open_store(project, read_only: read_only, long_running: long_running)
+        begin
+          yield store
+        ensure
+          store.close
+        end
+      end
+
       # Everything a `gori run` store needs loaded into this process before a command reads a
       # token, a rule or a slot out of it. Split from `open_store` so a raise in here closes the
       # store it was hydrating (see the caller).
@@ -935,11 +949,8 @@ module Gori
       private def self.cli_host_overrides(project_name : String?, db_path : String?, flow_id : Int64?,
                                           repeater_id : Int64? = nil) : Gori::HostOverrides?
         return nil unless flow_id || repeater_id || project_name || db_path
-        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
-        begin
+        with_store(resolve_read_project(project_name, db_path), read_only: true) do |store|
           Gori::HostOverrides.load(store)
-        ensure
-          store.close
         end
       rescue
         nil
@@ -996,8 +1007,7 @@ module Gori
         scope = begin
           Gori::Scope.load(store)
         rescue ex
-          store.close
-          abort "gori run: could not load project scope (refusing to send unscoped): #{ex.message}"
+          abort_closing(store, "gori run: could not load project scope (refusing to send unscoped): #{ex.message}")
         end
         # Every caller takes --allow-unscoped, so a refusal worded by the Outbound itself (gRPC
         # reflection, a retest step) names it as the remedy, as `guard_outbound` does.
@@ -1243,11 +1253,8 @@ module Gori
         # open_store also installs the project's extract rules as `Env.layer` (see its
         # comment) — the seed depends on that having happened, which is why it reads the flow
         # through the same helper rather than opening the DB by hand.
-        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
-        detail, overrides = begin
+        detail, overrides = with_store(resolve_read_project(project_name, db_path), read_only: true) do |store|
           {store.get_flow(flow_id), Gori::HostOverrides.load(store)}
-        ensure
-          store.close
         end
         abort "#{cmd}: --bind-from: no flow ##{flow_id}" unless detail
         built = Repeater::FlowRequest.build(detail)
@@ -1758,6 +1765,28 @@ module Gori
         list_leftover_error(leftover, sub, verbs)
       end
 
+      # One `what` positional naming an id (`rewriter rm <id>`, `intercept get <item-id>`):
+      # missing, too many and not-a-number, each refused in the words these commands use.
+      private def self.take_id(rest : Array(String), prefix : String, what : String, noun : String) : Int64
+        abort "#{prefix}: missing #{what}" if rest.empty?
+        abort "#{prefix}: too many arguments (expected one #{what})" if rest.size > 1
+        rest[0].to_i64? || abort("#{prefix}: invalid #{noun} '#{rest[0]}'")
+      end
+
+      # The `<id>` positional of `retest`/`evidence` verbs: too many, absent, then `parse_id`.
+      private def self.require_positional_id(positional : Array(String), cmd : String,
+                                             noun : String, parse_cmd : String) : Int64
+        abort "#{cmd}: too many arguments (expected one <#{noun}>, got: #{positional.join(" ")})" if positional.size > 1
+        v = positional.first?
+        abort "#{cmd}: <#{noun}> is required" if v.nil?
+        parse_id(v, parse_cmd, "<#{noun}>")
+      end
+
+      # An integer id out of a flag value or positional (`--issue`, `<id>`).
+      private def self.parse_id(v : String, cmd : String, flag : String) : Int64
+        v.to_i64? || abort("#{cmd}: invalid #{flag} #{v.inspect} (expected an integer)")
+      end
+
       private def self.take_flow_id(rest : Array(String), sub : String) : Int64
         abort "gori run #{sub}: missing <flow-id>" if rest.empty?
         abort "gori run #{sub}: too many arguments (expected one <flow-id>, got: #{rest.join(" ")})" if rest.size > 1
@@ -1856,7 +1885,11 @@ module Gori
       # Build a parser, let the command register its flags, then add the tail every command
       # shares and parse `args`. Returns the positionals, BOTH halves of `unknown_args`: a word
       # after `--` arrives in the second, and dropping it was a bug here once. `-h` is added
-      # after the command's own flags, so `--help` still lists it last.
+      # after the command's own flags, so `--help` still lists it last. `invalid_option` and
+      # `missing_option` are not optional: OptionParser's defaults RAISE, straight past
+      # `Run.dispatch` (rescues IO::Error) and `CLI.run` (rescues Gori::Error) to `main`, which
+      # prints a Crystal backtrace instead of a one-line refusal
+      # (spec/cli/run/option_parser_missing_option_spec.cr).
       private def self.parse_args(args : Array(String), prefix : String, & : OptionParser ->) : Array(String)
         positional = [] of String
         parser = OptionParser.new do |p|

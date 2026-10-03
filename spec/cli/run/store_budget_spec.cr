@@ -43,7 +43,7 @@ describe "gori run — the SQLite wait budget a subcommand opens with" do
       {"run/oast.cr", 2},      # listen --save and resume touch the session row every poll tick
       {"run/intercept.cr", 4}, # only has a job when a TUI is capturing into the project
     }.each do |file, expected|
-      cli_src(file).scan(/open_store\(.*long_running: true\)/).size.should eq(expected),
+      cli_src(file).scan(/(?:open|with)_store\(.*long_running: true\)/).size.should eq(expected),
         "#{file}: expected #{expected} long_running open(s)"
     end
   end

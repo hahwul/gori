@@ -19,9 +19,10 @@ module Gori
         max_endpoints = defaults.max_endpoints
         yaml = false
         lenient = false
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        args = normalize_query_flag(args)
+        neg_terms, opt_args = split_ql_negations(args)
+        positional = parse_args(opt_args, "gori run sitemap export") do |p|
           p.banner = "Usage: gori run sitemap export [QL query] [options]\n\n" \
                      "Write the captured API as an OpenAPI 3.0.3 document on stdout: templated paths\n" \
                      "(/users/123 → /users/{userId}), query/header/cookie parameters, request bodies\n" \
@@ -47,14 +48,7 @@ module Gori
           p.on("--max-flows=N", "Newest flows read in all (default #{max_flows})") { |v| max_flows = parse_count(v, "--max-flows") }
           p.on("--max-endpoints=N", "Operations in the document (default #{max_endpoints})") { |v| max_endpoints = parse_count(v, "--max-endpoints") }
           p.on("--lenient", "Don't refuse a query naming an unknown field — search that token as text") { lenient = true }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run sitemap export", f, p) }
-          p.missing_option { |f| abort "gori run sitemap export: missing value for #{f}" }
         end
-        args = normalize_query_flag(args)
-        neg_terms, opt_args = split_ql_negations(args)
-        parser.parse(opt_args)
         query, dropped = Run.compose_history_query(query, positional, neg_terms)
         Run.warn_dropped_query_terms("sitemap export", dropped)
         Run.refuse_unknown_query_fields("sitemap export", query, lenient)
@@ -71,8 +65,7 @@ module Gori
         filter = sitemap_export_filter(store, query, filter, in_scope, hide_static)
         choice = examples ? Redact::Policy.resolve(store, redact_profile, on: true) : nil
         if err = choice.try(&.error)
-          store.close
-          abort "gori run sitemap export: #{err}"
+          abort_closing(store, "gori run sitemap export: #{err}")
         end
         opts = Export::OpenApi::Options.new(filter: filter, host: host, scheme: scheme, port: port, path_prefix: path_prefix,
           max_flows: max_flows, max_samples: max_samples, max_endpoints: max_endpoints,
@@ -109,11 +102,8 @@ module Gori
         filter = QL.and(filter, QL.hide_static) if hide_static
         return filter unless in_scope
         scope = Scope.load(store)
-        unless scope.configured?
-          store.close
-          abort "gori run sitemap export: --in-scope, but no scope rules are configured — nothing is " \
-                "in scope (add rules with `gori run project scope add`, or drop --in-scope)"
-        end
+        scope.configured? || abort_closing(store, "gori run sitemap export: --in-scope, but no scope rules are configured — nothing is " \
+                                                  "in scope (add rules with `gori run project scope add`, or drop --in-scope)")
         QL.and(scope.filter(force: true), filter)
       end
 

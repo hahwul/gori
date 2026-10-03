@@ -6,6 +6,23 @@ require "../../spec_helper"
 private alias CD = Gori::CacheDeception
 private alias AZ = Gori::Authorize
 
+# The output shapes are `private def self.`, so a spec reaches them through a module reopen —
+# the pattern the other CLI specs use.
+module Gori::CLI::Run
+  def self.cache_deception_text_for_spec(report : CacheDeception::Report) : String
+    cache_deception_report_text(report)
+  end
+
+  def self.cache_deception_json_for_spec(report : CacheDeception::Report) : String
+    cache_deception_report_json(report)
+  end
+
+  def self.check_cache_deception_flows_for_spec(store : Store, engine : Authorize::Engine,
+                                                outbound : Outbound, flow_ids : Array(Int64))
+    check_cache_deception_flows(store, engine, outbound, flow_ids, false, :json)
+  end
+end
+
 private def cd_trial(name : String, baseline : Bool, status : Int32,
                      verdict : AZ::Verdict, cache_lines : Array(String) = [] of String) : AZ::Trial
   head = ("HTTP/1.1 #{status} OK\r\n" + cache_lines.map { |l| "#{l}\r\n" }.join + "\r\n").to_slice

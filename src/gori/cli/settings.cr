@@ -15,12 +15,9 @@ module Gori::CLI
     end
 
     edit = false
-    parser = OptionParser.new do |p|
+    parser = option_parser("gori settings") do |p|
       p.banner = SETTINGS_USAGE
       p.on("--edit", "Open the settings file in your editor (Settings: Editor / $VISUAL / $EDITOR / vi)") { edit = true }
-      p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-      p.invalid_option { |flag| abort CLI.unknown_option_message("gori settings", flag, p) }
-      p.missing_option { |flag| abort "missing value for #{flag}" }
     end
     reject_stray_args!("", parser, args)
 
@@ -95,10 +92,8 @@ module Gori::CLI
   # did not contain the name. The "not set" annotation keeps the information that was
   # genuinely useful about the old output.
   private def self.run_settings_sections(args : Array(String)) : Nil
-    parser = OptionParser.new do |p|
+    parser = option_parser("gori settings sections") do |p|
       p.banner = "Usage: gori settings sections"
-      p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-      p.invalid_option { |flag| abort CLI.unknown_option_message("gori settings sections", flag, p) }
     end
     reject_stray_args!("sections", parser, args)
 
@@ -119,13 +114,10 @@ module Gori::CLI
   private def self.run_settings_export(args : Array(String)) : Nil
     sections = nil.as(Array(String)?)
     out = nil.as(String?)
-    parser = OptionParser.new do |p|
+    parser = option_parser("gori settings export") do |p|
       p.banner = "Usage: gori settings export [--sections a,b] [-o FILE]"
       p.on("--sections=LIST", "Comma-separated top-level sections (default: all but #{Settings::SECRET_SECTIONS.join('/')})") { |v| sections = split_sections("export", v) }
       p.on("-o FILE", "--out=FILE", "Write here instead of stdout") { |v| out = v }
-      p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-      p.invalid_option { |flag| abort CLI.unknown_option_message("gori settings export", flag, p) }
-      p.missing_option { |flag| abort "missing value for #{flag}" }
     end
     reject_stray_args!("export", parser, args)
 
@@ -292,14 +284,11 @@ module Gori::CLI
     sections = nil.as(Array(String)?)
     dry = false
     allow_commands = false
-    parser = OptionParser.new do |p|
+    parser = option_parser("gori settings import") do |p|
       p.banner = "Usage: gori settings import FILE [--sections a,b] [--dry-run] [--allow-commands]"
       p.on("--sections=LIST", "Comma-separated top-level sections to apply (default: every section in FILE)") { |v| sections = split_sections("import", v) }
       p.on("--dry-run", "Print which sections would be applied, then exit without writing") { dry = true }
       p.on("--allow-commands", "Apply rules that run an external command (required when the profile carries one)") { allow_commands = true }
-      p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-      p.invalid_option { |flag| abort CLI.unknown_option_message("gori settings import", flag, p) }
-      p.missing_option { |flag| abort "missing value for #{flag}" }
     end
     # Same leftovers as every other verb, read as FILENAMES instead of refused — `--` carries
     # its POSIX meaning here. See `stray_args` for both halves of what dropping its run cost.
@@ -430,11 +419,8 @@ module Gori::CLI
   # which database it is allowed to write to — and the only one where a running peer is not holding
   # its own copy of those rows.
   private def self.run_settings_env_syntax(args : Array(String)) : Nil
-    parser = OptionParser.new do |p|
+    parser = option_parser("gori settings env-syntax") do |p|
       p.banner = "Usage: gori settings env-syntax [#{env_syntax_values}]"
-      p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-      p.invalid_option { |flag| abort CLI.unknown_option_message("gori settings env-syntax", flag, p) }
-      p.missing_option { |flag| abort "missing value for #{flag}" }
     end
     rest = stray_args(parser, args)
     abort "gori settings env-syntax: one value at a time (got #{rest.size}: #{rest.join(", ")})" if rest.size > 1
@@ -474,13 +460,10 @@ module Gori::CLI
   private def self.run_settings_user_agents(args : Array(String)) : Nil
     set_from = nil.as(String?)
     reset = false
-    parser = OptionParser.new do |p|
+    parser = option_parser("gori settings user-agents") do |p|
       p.banner = "Usage: gori settings user-agents [--set FILE|- | --reset]"
       p.on("--set FILE", "Replace the built-in list with FILE's lines (one User-Agent per line; - reads stdin)") { |v| set_from = v }
       p.on("--reset", "Go back to the built-in list") { reset = true }
-      p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-      p.invalid_option { |flag| abort CLI.unknown_option_message("gori settings user-agents", flag, p) }
-      p.missing_option { |flag| abort "missing value for #{flag}" }
     end
     reject_stray_args!("user-agents", parser, args)
     abort "gori settings user-agents: --set and --reset cannot be combined" if set_from && reset
@@ -794,7 +777,7 @@ module Gori::CLI
   private def self.run_settings_tls_fingerprint(args : Array(String)) : Nil
     json = false
     preset : String? = nil
-    parser = OptionParser.new do |p|
+    parser = option_parser("gori settings tls-fingerprint") do |p|
       p.banner = "Usage: gori settings tls-fingerprint [HOST] [--preset NAME] [--json]\n\n" \
                  "  With no HOST, reports every outbound_tls rule plus the no-rule default.\n" \
                  "  With a HOST, reports the single policy that host would actually get.\n" \
@@ -802,9 +785,6 @@ module Gori::CLI
                  "  same narrowing `--tls-preset` applies on a Repeater send or a fuzz run."
       p.on("--preset=NAME", "Report the ClientHello a per-send --tls-preset override would produce (#{Settings::TLS_PRESET_NAMES.join(" | ")}), narrowing each reported policy the way a send does") { |v| preset = v }
       p.on("--json", "Emit the report as JSON (includes the decomposed JA3 string and JA4_r)") { json = true }
-      p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-      p.invalid_option { |flag| abort CLI.unknown_option_message("gori settings tls-fingerprint", flag, p) }
-      p.missing_option { |flag| abort "missing value for #{flag}" }
     end
     rest = stray_args(parser, args)
     if rest.size > 1

@@ -52,9 +52,9 @@ module Gori
                      "and so is one whose request was edited after its stored response arrived —\n" \
                      "that pair never happened. Send it again, or --allow-drift to keep it anyway."
           project_options(p, proj, "update")
-          p.on("--issue=N", "Issue id that owns the copy (required)") { |v| issue_id = parse_evidence_id(v, "--issue") }
+          p.on("--issue=N", "Issue id that owns the copy (required)") { |v| issue_id = parse_id(v, "gori run evidence", "--issue") }
           p.on("--ref=KIND", "Source kind: flow | repeater (required)") { |v| ref_s = v.strip.downcase }
-          p.on("--ref-id=M", "Source id (required)") { |v| ref_id = parse_evidence_id(v, "--ref-id") }
+          p.on("--ref-id=M", "Source id (required)") { |v| ref_id = parse_id(v, "gori run evidence", "--ref-id") }
           p.on("--no-link", "Only copy — do not also file the live link `links add` would") { link = false }
           p.on("--allow-drift", "Freeze a Repeater tab whose request was edited after its stored response") { allow_drift = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
@@ -67,8 +67,7 @@ module Gori
         end
         iid, kind, rid = resolve_freeze_ends(issue_id, ref_s, ref_id)
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           abort "gori run evidence freeze: no issue with id #{iid}" unless store.get_issue(iid)
           snap = freeze_snapshot(store, kind, rid, allow_drift)
           abort "gori run evidence freeze: #{snap}" if snap.is_a?(String)
@@ -89,8 +88,6 @@ module Gori
             puts "  sha256 req #{meta.request_sha256}"
             puts "  sha256 res #{meta.response_sha256 || "— (no response)"}"
           end
-        ensure
-          store.close
         end
       end
 
@@ -128,22 +125,19 @@ module Gori
                      "  gori run evidence unlink ID --issue=N\n" \
                      "  gori run evidence delete ID   (`rm` is accepted)"
           project_options(p, proj, "read")
-          p.on("--issue=N", "Issue id (omit for the whole project archive)") { |v| issue_id = parse_evidence_id(v, "--issue") }
+          p.on("--issue=N", "Issue id (omit for the whole project archive)") { |v| issue_id = parse_id(v, "gori run evidence", "--issue") }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
         refuse_list_leftovers(leftover, "evidence", "freeze, list, show, link, unlink, delete/rm")
         iid = issue_id
 
-        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
-        metas = begin
+        metas = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
           if iid
             abort "gori run evidence: no issue with id #{iid}" unless store.get_issue(iid)
             store.issue_evidence(iid)
           else
             store.evidence
           end
-        ensure
-          store.close
         end
 
         if format == :json
@@ -171,15 +165,10 @@ module Gori
           p.on("--include-sensitive", "Emit credential header values verbatim instead of [REDACTED]") { include_sensitive = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
-        abort "gori run evidence show: too many arguments (expected one <id>, got: #{positional.join(" ")})" if positional.size > 1
-        id_s = positional.first? || abort("gori run evidence show: <id> is required")
-        id = parse_evidence_id(id_s, "<id>")
+        id = require_positional_id(positional, "gori run evidence show", "id", "gori run evidence")
 
-        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
-        ev = begin
+        ev = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
           store.get_evidence(id) || abort("gori run evidence show: no frozen evidence with id #{id}")
-        ensure
-          store.close
         end
 
         if format == :json
@@ -202,17 +191,14 @@ module Gori
                      "#{link ? "Attach" : "Detach"} an Issue without changing the frozen bytes, hashes, or provenance. " \
                      "Removing the last Issue leaves an orphan; it does not delete the snapshot."
           project_options(p, proj, "update")
-          p.on("--issue=N", "Issue id (required)") { |v| issue_id = parse_evidence_id(v, "--issue") }
+          p.on("--issue=N", "Issue id (required)") { |v| issue_id = parse_id(v, "gori run evidence", "--issue") }
         end
-        abort "gori run evidence #{verb}: too many arguments (expected one <id>, got: #{positional.join(" ")})" if positional.size > 1
-        id_s = positional.first? || abort("gori run evidence #{verb}: <id> is required")
-        id = parse_evidence_id(id_s, "<id>")
+        id = require_positional_id(positional, "gori run evidence #{verb}", "id", "gori run evidence")
         iid_opt = issue_id
         abort "gori run evidence #{verb}: --issue is required" if iid_opt.nil?
         iid = iid_opt
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           meta = store.get_evidence_meta(id) || abort("gori run evidence #{verb}: no frozen evidence with id #{id}")
           abort "gori run evidence #{verb}: no issue with id #{iid}" unless store.get_issue(iid)
           if link
@@ -220,8 +206,6 @@ module Gori
           else
             evidence_unlink_one(store, meta, iid)
           end
-        ensure
-          store.close
         end
       end
 
@@ -258,12 +242,9 @@ module Gori
           p.on("-y", "--yes", "Confirm deletion") { yes = true }
           project_options(p, proj, "update")
         end
-        abort "gori run evidence delete: too many arguments (expected one <id>, got: #{positional.join(" ")})" if positional.size > 1
-        id_s = positional.first? || abort("gori run evidence delete: <id> is required")
-        id = parse_evidence_id(id_s, "<id>")
+        id = require_positional_id(positional, "gori run evidence delete", "id", "gori run evidence")
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           meta = store.get_evidence_meta(id) || abort("gori run evidence delete: no frozen evidence with id #{id}")
           # Gated like every other destructive verb here (`issues delete`, `notes delete`, …),
           # and for the reason the help gives: a frozen copy is the one that cannot come back.
@@ -274,8 +255,6 @@ module Gori
           abort "gori run evidence delete: NOT deleted (project busy or unwritable) — the copy is unchanged" unless store.delete_evidence(id)
           linked = meta.issue_ids.empty? ? " (orphaned)" : " linked to #{meta.issue_ids.map { |iid| "issue ##{iid}" }.join(", ")}"
           puts "Frozen evidence ##{id}#{linked} deleted."
-        ensure
-          store.close
         end
       end
 
@@ -292,10 +271,6 @@ module Gori
           abort "gori run evidence freeze: invalid --ref '#{ref_s}' (flow|repeater — a fuzz or miner session has no single exchange to freeze)"
         end
         {issue_id, kind, ref_id}
-      end
-
-      private def self.parse_evidence_id(v : String, flag : String) : Int64
-        v.to_i64? || abort("gori run evidence: invalid #{flag} #{v.inspect} (expected an integer)")
       end
 
       # `34567 bytes (33.8kB)` — BOTH spellings wherever a size is printed in text mode. The

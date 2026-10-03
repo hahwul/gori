@@ -63,11 +63,8 @@ module Gori
         refuse_list_leftovers(leftover, "project network", "get, set, unset, list")
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project, read_only: true)
-        rows = begin
+        rows = with_store(project, read_only: true) do |store|
           Settings.project_network_rows(store)
-        ensure
-          store.close
         end
         if format == :json
           puts(JSON.build do |j|
@@ -90,9 +87,8 @@ module Gori
       private def self.cmd_network_get(args : Array(String)) : Nil
         proj = ProjectFlags.new
         format = :text
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = one_positional_list(args, "gori run project network get", "KEY") do |p|
           p.banner = "Usage: gori run project network get KEY [options]\n\n" \
                      "Print the value KEY has in this project: its own if it is set here, else the one it\n" \
                      "inherits (said on stderr, so `$(…)` captures the value alone). Credentials print the\n" \
@@ -100,20 +96,12 @@ module Gori
                      "#{project_network_help}\n"
           project_options(p, proj, "read")
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run project network get", "KEY") }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project network get", f, p) }
-          p.missing_option { |f| abort "gori run project network get: missing value for #{f}" }
         end
-        parser.parse(args)
         k = network_key_arg(positional.first?, "get")
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project, read_only: true)
-        stored = begin
+        stored = with_store(project, read_only: true) do |store|
           store.setting(k.key)
-        ensure
-          store.close
         end
         if format == :json
           puts(JSON.build { |j| network_entry_json(j, k, stored) })
@@ -171,14 +159,8 @@ module Gori
         # `abort` skips `ensure`, so each refusal closes the store itself first.
         edit = begin
           plan, err = Settings.plan_project_network_set(Settings.project_network_rows(store), k, value, password)
-          unless plan
-            store.close
-            abort "gori run project network set: #{network_refusal_text(k, err || "invalid value")}"
-          end
-          unless Settings.apply_project_network_edit(store, plan)
-            store.close
-            abort "gori run project network set: project is busy (write did not commit) — #{k.key} is unchanged; try again"
-          end
+          plan || abort_closing(store, "gori run project network set: #{network_refusal_text(k, err || "invalid value")}")
+          Settings.apply_project_network_edit(store, plan) || abort_closing(store, "gori run project network set: project is busy (write did not commit) — #{k.key} is unchanged; try again")
           plan
         ensure
           store.close
@@ -189,37 +171,22 @@ module Gori
 
       private def self.cmd_network_unset(args : Array(String)) : Nil
         proj = ProjectFlags.new
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = one_positional_list(args, "gori run project network unset", "KEY") do |p|
           p.banner = "Usage: gori run project network unset|rm KEY [options]\n\n" \
                      "Drop this project's own value for KEY, so it inherits the global network.* value\n" \
                      "again. A key that is not set is already inherited, so that is not an error.\n\n" \
                      "#{project_network_help}\n"
           project_options(p, proj, "update")
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run project network unset", "KEY") }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project network unset", f, p) }
-          p.missing_option { |f| abort "gori run project network unset: missing value for #{f}" }
         end
-        parser.parse(args)
         k = network_key_arg(positional.first?, "unset")
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project)
-        edit = begin
+        edit = with_store(project) do |store|
           plan, err = Settings.plan_project_network_unset(Settings.project_network_rows(store), k)
-          unless plan
-            store.close
-            abort "gori run project network unset: #{err || "cannot unset #{k.key}"}"
-          end
-          unless Settings.apply_project_network_edit(store, plan)
-            store.close
-            abort "gori run project network unset: project is busy (write did not commit) — #{k.key} is unchanged; try again"
-          end
+          plan || abort_closing(store, "gori run project network unset: #{err || "cannot unset #{k.key}"}")
+          Settings.apply_project_network_edit(store, plan) || abort_closing(store, "gori run project network unset: project is busy (write did not commit) — #{k.key} is unchanged; try again")
           plan
-        ensure
-          store.close
         end
         puts "#{k.key} unset — the project inherits the global value" unless edit.rows.empty?
         report_network_edit(edit, k, project)

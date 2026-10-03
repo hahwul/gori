@@ -22,10 +22,9 @@ require "../../spec_helper"
 # idiom from its neighbours, which is how every one of these got it. The MESSAGE half is
 # pinned on `no_positional_error` at the bottom.
 
-# The three spellings that reach a guard. `one_positional` / `one_positional_list` /
-# `refuse_list_leftovers` are not listed because they are called from INSIDE an
-# `.unknown_args` block, which the first entry already sees. A command built with `parse_args`
-# opens no `OptionParser.new` window at all: the helper installs the guard itself.
+# The three spellings that reach a guard inside an `OptionParser.new` window. A command built
+# with `parse_args` — or one of the helpers over it (`parse_no_positionals`, `one_positional*`,
+# `views_one_positional`) — opens no window at all: the helper installs the guard itself.
 private GUARDS = {".unknown_args", "parse_no_positionals(", "views_one_positional("}
 
 private def run_cli_dir : String
@@ -164,7 +163,7 @@ describe "gori run — every OptionParser reaches an unknown_args guard" do
       .should contain("parse_no_positionals(")
     method_body(File.read(File.join(run_cli_dir, "views.cr")), "cmd_views_add")
       .should contain("views_one_positional(")
-    method_body(File.read(File.join(run_cli_dir, "grpc.cr")), "cmd_grpc_reflect")
+    method_body(File.read(File.join(run_cli_dir, "redact.cr")), "cmd_redact_use")
       .should contain(".unknown_args")
   end
 
@@ -214,7 +213,7 @@ describe "gori run — every OptionParser reaches an unknown_args guard" do
     offenders = [] of String
     SWEPT.each do |(file, method, prefix)|
       body = method_body(File.read(File.join(run_cli_dir, file)), method)
-      unless body.includes?("parse_no_positionals(parser, args, \"#{prefix}\"")
+      unless body.includes?("parse_no_positionals(args, \"#{prefix}\"")
         offenders << "#{file}##{method}"
       end
     end
@@ -226,8 +225,8 @@ describe "gori run — every OptionParser reaches an unknown_args guard" do
   # nearly the same flags, and are the likeliest pair in the sweep to be given one message.
   it "would catch a guard that names the neighbouring subcommand" do
     body = method_body(File.read(File.join(run_cli_dir, "rewriter.cr")), "cmd_rewriter_preview")
-    body.includes?("parse_no_positionals(parser, args, \"gori run rewriter preview\"").should be_true
-    body.includes?("parse_no_positionals(parser, args, \"gori run rewriter add\"").should be_false
+    body.includes?("parse_no_positionals(args, \"gori run rewriter preview\"").should be_true
+    body.includes?("parse_no_positionals(args, \"gori run rewriter add\"").should be_false
   end
 end
 

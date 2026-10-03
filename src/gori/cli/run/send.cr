@@ -102,11 +102,8 @@ module Gori
         # only needed for what `open_store` installs (env, bindings, the project's network pin)
         # and for the host overrides, which are a snapshot.
         project = resolve_read_project(project_name, db_path)
-        store = open_store(project, read_only: true)
-        host_overrides = begin
+        host_overrides = with_store(project, read_only: true) do |store|
           Gori::HostOverrides.load(store)
-        ensure
-          store.close
         end
         activate_slot(slot, "gori run send")
 

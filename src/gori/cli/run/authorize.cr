@@ -18,9 +18,12 @@ module Gori
         insecure = false
         timeout = Authorize::ACTIVE_TIMEOUT
         format = :text
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        # `-q '-path:/x'` reads as another flag unless it is rewritten to `--query=…` first —
+        # the same normalization history/probe do. (Negation terms are NOT lifted out of argv
+        # here the way they are there: a positional on this command is a flow id, not a query,
+        # so a bare `-path:/x` is a usage error rather than a term to fold in.)
+        positional = parse_args(normalize_query_flag(args), "gori run authorize") do |p|
           p.banner = "Usage: gori run authorize [<flow-id>…] [options]\n\n" \
                      "Replay each selected flow under every IDENTITY — a header overlay standing in\n" \
                      "for an admin session, a low-privilege user, an anonymous client — and judge\n" \
@@ -45,19 +48,7 @@ module Gori
           p.on("-k", "--insecure-upstream", "Do not verify upstream TLS certificates") { insecure = true }
           p.on("--timeout=SEC", "Per-request connect + idle timeout (seconds)") { |v| timeout = parse_count(v, "--timeout").seconds }
           format_flag(p, [:text, :json, :jsonl], "Output: text (default) | json (one array at the end) | jsonl (streamed)") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          # BOTH halves: the second is everything after a `--`, which a handler binding only the
-          # first silently discards (see spec/cli_spec.cr's source guard). Here that would drop
-          # flow ids — `gori run authorize -- 42` would refuse with "no request selected".
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run authorize", f, p) }
-          p.missing_option { |f| abort "gori run authorize: missing value for #{f}" }
         end
-        # `-q '-path:/x'` reads as another flag unless it is rewritten to `--query=…` first —
-        # the same normalization history/probe do. (Negation terms are NOT lifted out of argv
-        # here the way they are there: a positional on this command is a flow id, not a query,
-        # so a bare `-path:/x` is a usage error rather than a term to fold in.)
-        parser.parse(normalize_query_flag(args))
         refresh_verify_upstream(!insecure)
         positional.each { |s| flow_ids << parse_flow_id(s, "gori run authorize") }
         # An unrecognized/uncompilable term makes the selection BROADER than asked, and every

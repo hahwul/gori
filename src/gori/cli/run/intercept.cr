@@ -109,8 +109,7 @@ module Gori
           "get, forward, drop, edit, enable, disable, filter, direction, list")
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project, long_running: true)
-        begin
+        with_store(project, long_running: true) do |store|
           bridge = store.intercept_bridge_state
           unless bridge
             unavailable = "no capturing gori instance is publishing intercept state (open the project's TUI to intercept)"
@@ -128,8 +127,6 @@ module Gori
           # script is watching (mirrors MCP intercept_list).
           store.touch_intercept_held(bridge.token, items.map(&.item_id), now_ms) unless items.empty?
           emit_intercept_list(bridge, items, include_sensitive, now_ms, format)
-        ensure
-          store.close
         end
       end
 
@@ -275,13 +272,10 @@ module Gori
           p.on("--include-sensitive", "Also include the full raw message base64 (unredacted)") { include_sensitive = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
-        abort "gori run intercept get: missing <item-id>" if positional.empty?
-        abort "gori run intercept get: too many arguments (expected one <item-id>)" if positional.size > 1
-        item_id = positional[0].to_i64? || abort("gori run intercept get: invalid item id '#{positional[0]}'")
+        item_id = take_id(positional, "gori run intercept get", "<item-id>", "item id")
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project, long_running: true)
-        begin
+        with_store(project, long_running: true) do |store|
           bridge = store.intercept_bridge_state
           abort "gori run intercept get: no capturing gori instance is publishing intercept state" unless bridge
           row = store.intercept_held_item(bridge, item_id)
@@ -311,8 +305,6 @@ module Gori
               puts "[#{body.size} bytes of #{what} — use --format json --include-sensitive for the raw bytes]"
             end
           end
-        ensure
-          store.close
         end
       end
 
@@ -323,13 +315,10 @@ module Gori
       private def self.enqueue_intercept(project_name : String?, db_path : String?, verb : String, *,
                                          item_id : Int64? = nil, bytes : Bytes? = nil, arg : String? = nil) : {String, String?}
         project = resolve_read_project(project_name, db_path)
-        store = open_store(project, long_running: true)
-        begin
+        with_store(project, long_running: true) do |store|
           outcome = store.send_intercept_command(verb, item_id: item_id, bytes: bytes, arg: arg)
           return {outcome.status, outcome.detail} if outcome.is_a?(Store::InterceptAck)
           abort "gori run intercept: #{intercept_send_refusal(outcome)}"
-        ensure
-          store.close
         end
       end
 
@@ -381,9 +370,7 @@ module Gori
           project_options(p, proj, "update")
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
-        abort "gori run intercept #{verb}: missing <item-id>" if positional.empty?
-        abort "gori run intercept #{verb}: too many arguments (expected one <item-id>)" if positional.size > 1
-        item_id = positional[0].to_i64? || abort("gori run intercept #{verb}: invalid item id '#{positional[0]}'")
+        item_id = take_id(positional, "gori run intercept #{verb}", "<item-id>", "item id")
         {item_id, proj.name, proj.db, format}
       end
 
@@ -412,9 +399,7 @@ module Gori
           p.on("--no-update-content-length", "Forward the Content-Length you declared instead of resyncing it to the body (the CL-desync / CL+TE smuggling primitive; mirrors MCP intercept_forward_edit{update_content_length:false})") { update_cl = false }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
-        abort "gori run intercept edit: missing <item-id>" if positional.empty?
-        abort "gori run intercept edit: too many arguments (expected one <item-id>)" if positional.size > 1
-        item_id = positional[0].to_i64? || abort("gori run intercept edit: invalid item id '#{positional[0]}'")
+        item_id = take_id(positional, "gori run intercept edit", "<item-id>", "item id")
 
         # Two replacement messages, one held item: refused like MCP's raw / raw_base64 pair,
         # never settled by which flag happened to win.
@@ -462,11 +447,8 @@ module Gori
       # here for the identical reason (`kind`/`binary?` before choosing a normalization rule).
       private def self.held_row_for_edit(project_name : String?, db_path : String?, item_id : Int64) : Store::HeldRow?
         project = resolve_read_project(project_name, db_path)
-        store = open_store(project, long_running: true)
-        begin
+        with_store(project, long_running: true) do |store|
           store.intercept_bridge_state.try { |bridge| store.intercept_held_item(bridge, item_id) }
-        ensure
-          store.close
         end
       end
 
@@ -532,16 +514,12 @@ module Gori
         format = :text
         action = enable ? "enable" : "disable"
 
-        parser = OptionParser.new do |p|
+        parse_no_positionals(args, "gori run intercept #{action}",
+          "`intercept #{action}` takes no positional arguments; the project is named with --project") do |p|
           p.banner = "Usage: gori run intercept #{action} [options]"
           project_options(p, proj, "update")
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run intercept #{action}", f, p) }
-          p.missing_option { |f| abort "gori run intercept #{action}: missing value for #{f}" }
         end
-        parse_no_positionals(parser, args, "gori run intercept #{action}",
-          "`intercept #{action}` takes no positional arguments; the project is named with --project")
 
         status, detail = enqueue_intercept(proj.name, proj.db, "toggle", arg: enable ? "true" : "false")
         emit_intercept_ack(status, detail, format)

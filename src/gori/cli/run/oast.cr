@@ -197,11 +197,8 @@ module Gori
         refuse_list_leftovers(leftover, "oast providers",
           "add, update, enable, disable, delete/rm, list")
 
-        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
-        configs = begin
+        configs = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
           Oast.provider_configs(store)
-        ensure
-          store.close
         end
 
         if format == :json
@@ -237,7 +234,6 @@ module Gori
         verb = update ? "update" : "add"
         proj = ProjectFlags.new
         id : String? = nil
-        positional = [] of String
         name : String? = nil
         # Nilable sentinels, not defaults: on `update` a field the caller did not mention must
         # keep its stored value. Replacing the whole row instead would silently drop the
@@ -248,7 +244,7 @@ module Gori
         enabled : Bool? = nil
         format = :text
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run oast providers #{verb}") do |p|
           p.banner = update ? "Usage: gori run oast providers update <id> [options]\n\nFields you do not pass keep their current value." \
                                : "Usage: gori run oast providers add --name=N [options]"
           project_options(p, proj, "update")
@@ -262,12 +258,7 @@ module Gori
           # registered on `update`, whose answer is the id the caller already typed — a flag
           # it parsed and ignored would be the silently-dropped argument this parser refuses.
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f } unless update
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run oast providers #{verb}", f, p) }
-          p.missing_option { |f| abort "gori run oast providers #{verb}: missing value for #{f}" }
         end
-        parser.parse(args)
 
         # The two verbs share this parser but not its positional: `update` takes exactly one
         # `<id>`, `add` takes NONE (its banner is `add --name=N [options]`). A stray token used
@@ -292,16 +283,13 @@ module Gori
           Oast::ProviderKind.parse?(k) || abort("gori run oast providers #{verb}: unknown --kind '#{k}'")
         end
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           if update
             oast_provider_apply_update(store, oast_provider_row_id(store, id, verb),
               name, kind, host, token, enabled)
           else
             oast_provider_apply_add(store, name, kind, host, token, enabled, format)
           end
-        ensure
-          store.close
         end
       end
 
@@ -364,13 +352,10 @@ module Gori
         abort "gori run oast providers #{verb}: too many arguments (expected one <id>, got: #{leftover.join(" ")})" if leftover.size > 1
         id = leftover.first?
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           row = oast_provider_row_id(store, id, verb)
           abort "gori run oast providers: enable/disable NOT applied (project busy)" unless store.set_oast_provider_enabled(row, enabled)
           puts "OAST provider p_#{row} is now #{enabled ? "enabled" : "disabled"}."
-        ensure
-          store.close
         end
       end
 
@@ -384,13 +369,10 @@ module Gori
         abort "gori run oast providers delete: too many arguments (expected one <id>, got: #{leftover.join(" ")})" if leftover.size > 1
         id = leftover.first?
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           row = oast_provider_row_id(store, id, "delete")
           abort "gori run oast providers: NOT deleted (project busy) — the provider is unchanged" unless store.delete_oast_provider(row)
           puts "OAST provider p_#{row} deleted."
-        ensure
-          store.close
         end
       end
 
@@ -437,11 +419,8 @@ module Gori
         end
         refuse_list_leftovers(leftover, "oast", "list, resume, release")
 
-        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
-        sessions = begin
+        sessions = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
           Oast::Sessions.list(store)
-        ensure
-          store.close
         end
 
         if format == :json
@@ -486,12 +465,11 @@ module Gori
       # the same table, and either can pick the session up afterwards.
       private def self.cmd_oast_session_resume(args : Array(String)) : Nil
         proj = ProjectFlags.new
-        id_arg : String? = nil
         interval = 5
         json = false
         once = false
 
-        parser = OptionParser.new do |p|
+        id_arg = one_positional(args, "gori run oast resume", "<id>") do |p|
           p.banner = "Usage: gori run oast resume <id> [options]\n\n" \
                      "Resume a saved session (see `gori run oast list`) and stream its\n" \
                      "callbacks. The registration is KEPT on exit — use `release` to drop it."
@@ -499,12 +477,7 @@ module Gori
           p.on("--interval=SEC", "Poll interval seconds (default 5)") { |v| interval = parse_count(v, "--interval") }
           p.on("--once", "Poll once and exit (no loop)") { once = true }
           p.on("--json", "Emit the payload and each callback as a JSON line (same shape as MCP)") { json = true }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| id_arg = one_positional(before, after, "gori run oast resume", "<id>") }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run oast resume", f, p) }
-          p.missing_option { |f| abort "gori run oast resume: missing value for #{f}" }
         end
-        parser.parse(args)
 
         id = oast_session_id(id_arg, "resume")
         # `long_running`: like `listen --save`, the handle is held through the whole poll loop,
@@ -618,8 +591,7 @@ module Gori
         abort "gori run oast release: too many arguments (expected one <id>, got: #{leftover.join(" ")})" if leftover.size > 1
 
         id = oast_session_id(leftover.first?, "release")
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           bound = oast_bind_session(store, id, "release")
           # Four outcomes, not two. A provider with NO deregistration API (BOAST) and one whose
           # deregister raised are both "still listening", and neither may print "released" —
@@ -630,8 +602,6 @@ module Gori
           message = Oast::Sessions.release_message(outcome, bound, id, store.oast_callback_count(id))
           abort "gori run oast release: #{message}" unless outcome.torn_down?
           puts message
-        ensure
-          store.close
         end
       end
 
@@ -664,7 +634,8 @@ module Gori
                                     db_path : String? = nil) : Nil
         check = false
         format = :text
-        parser = OptionParser.new do |p|
+        parse_no_positionals(args, "gori run oast presets",
+          "it takes no arguments; add --check to probe them") do |p|
           p.banner = "Usage: gori run oast presets [options] [--project NAME | --db PATH]\n\n" \
                      "List the built-in public OAST providers. --check probes each one and\n" \
                      "names the stage that fails (dns / connect / proxy / tls-verify / tls /\n" \
@@ -675,12 +646,7 @@ module Gori
                      "describes the run it is diagnosing."
           p.on("--check", "Probe each preset over the network and report reachability") { check = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run oast presets", f, p) }
-          p.missing_option { |f| abort "gori run oast presets: missing value for #{f}" }
         end
-        parse_no_positionals(parser, args, "gori run oast presets",
-          "it takes no arguments; add --check to probe them")
 
         presets = Oast::Presets.all
         # A named project is only meaningful to `--check`: the LIST is constants. Accepting and
@@ -832,7 +798,8 @@ module Gori
         json = false
         once = false
         save = false
-        parser = OptionParser.new do |p|
+        parse_no_positionals(args, "gori run oast listen",
+          "pass the provider as --provider KIND and its base URL as --server URL") do |p|
           p.banner = "Usage: gori run oast listen [options]"
           p.on("--provider=KIND", "interactsh (default) | custom-http | webhook.site | BOAST | postbin") { |v| provider = v }
           p.on("--server=URL", "Provider server/base URL (default: the provider's public preset)") { |v| server = v }
@@ -841,20 +808,7 @@ module Gori
           p.on("--once", "Poll once and exit (no loop)") { once = true }
           p.on("--save", "Save this registration as a project OAST session (see `oast list`); its callbacks persist, out-of-band probe rules can mint against it, and the registration is KEPT on exit — release it with `oast release ID`") { save = true }
           p.on("--json", "Emit each callback as a JSON line (same shape as MCP)") { json = true }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          # Without these, OptionParser's default raises straight past `Run.dispatch` (rescues
-          # IO::Error) and `CLI.run` (rescues Gori::Error) to `main`, printing a Crystal
-          # backtrace — the form cli.cr's own top-level rescue calls "the least usable there
-          # is". `gori run oast listen --bogus` already did it; narrowing the global version
-          # scan just routed `--version` there too. This parser was fixed first and read as the
-          # only one; a later sweep found eleven more parsers taking a `=VALUE` flag with no
-          # `missing_option`, so the invariant is now pinned by a source grep over every parser
-          # under src/gori/cli/ (spec/cli/run/option_parser_missing_option_spec.cr).
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run oast listen", f, p) }
-          p.missing_option { |f| abort "gori run oast listen: missing value for #{f}" }
         end
-        parse_no_positionals(parser, args, "gori run oast listen",
-          "pass the provider as --provider KIND and its base URL as --server URL")
         # Only `--save` opens a project; without it a named one (even a misspelt one) would be
         # accepted and ignored, the way `presets` refuses it off `--check`.
         if !save && (project_name || db_path)

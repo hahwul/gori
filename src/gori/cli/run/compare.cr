@@ -46,11 +46,8 @@ module Gori
         id_b = positional[1].to_i64? || abort("gori run compare: invalid flow id '#{positional[1]}'")
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project, read_only: true)
-        detail_a, detail_b = begin
+        detail_a, detail_b = with_store(project, read_only: true) do |store|
           {store.get_flow(id_a), store.get_flow(id_b)}
-        ensure
-          store.close
         end
         abort "gori run compare: no flow ##{id_a}" unless detail_a
         abort "gori run compare: no flow ##{id_b}" unless detail_b

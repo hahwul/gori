@@ -52,11 +52,8 @@ module Gori
         index = parse_note_index(positional.first?)
         abort "gori run notes: <n> and --all are mutually exclusive" if index && all
 
-        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
-        doc = begin
+        doc = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
           Notes.load(store)
-        ensure
-          store.close
         end
 
         if n = index
@@ -73,28 +70,21 @@ module Gori
         proj = ProjectFlags.new
         text : String? = nil
         format = :text
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run notes create") do |p|
           p.banner = "Usage: gori run notes create [--text TEXT] [options]\n\n" \
                      "Create a note. Body comes from --text, else the positional args,\n" \
                      "else STDIN (e.g. `some-tool | gori run notes create`)."
           project_options(p, proj, "update")
           p.on("--text=TEXT", "Note body (else positional args, else STDIN)") { |v| text = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run notes create", f, p) }
-          p.missing_option { |f| abort "gori run notes create: missing value for #{f}" }
         end
-        parser.parse(args)
 
         body = text || (positional.empty? ? nil : positional.join(' '))
         body ||= read_stdin_fallback(STDIN, "gori run notes", "note text") unless STDIN.tty?
         abort "gori run notes create: no note text (use --text, positional args, or pipe via STDIN)" if body.nil? || body.empty?
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           # `Notes.create` — the READ, the merge and the write in one transaction. Reading the
           # set here and writing it back was two statements, and a peer (a TUI on the same
           # project, a `gori mcp`, a second shell) that appended between them had its note
@@ -107,16 +97,11 @@ module Gori
           # saying "this is what I am working on now", the same thing `^N` means in the TUI
           # — which is what `Notes.create` persists.
           new_id = Notes.create(store, body)
-          unless new_id
-            store.close
-            abort "gori run notes create: project is busy (write did not commit) — try again"
-          end
+          new_id || abort_closing(store, "gori run notes create: project is busy (write did not commit) — try again")
           # The position is a DISPLAY figure read back after the commit, so it names the note
           # where it actually landed among a peer's; a peer that deletes it in that instant
           # leaves nothing to number, and the id is then the only honest thing to print.
           puts note_created_output(Notes.load(store), new_id, format, store)
-        ensure
-          store.close
         end
       end
 
@@ -159,19 +144,14 @@ module Gori
 
       private def self.apply_note_update(store : Store, n : Int32, body : String, append : Bool, format : Symbol) : Nil
         doc = Notes.load(store)
-        unless n <= doc.size
-          store.close
-          abort "gori run notes update: no note ##{n} (this project has #{Gori.plural(doc.size, "note")})"
-        end
+        n <= doc.size || abort_closing(store, "gori run notes update: no note ##{n} (this project has #{Gori.plural(doc.size, "note")})")
         # By the note's STABLE id, inside the write transaction — see `Notes.update`.
         id = doc.notes[n - 1].id
         case Notes.update(store, id, body, append: append)
         when .busy?
-          store.close
-          abort "gori run notes update: project is busy (write did not commit) — try again"
+          abort_closing(store, "gori run notes update: project is busy (write did not commit) — try again")
         when .missing?
-          store.close
-          abort "gori run notes update: note ##{n} was deleted before it could be updated"
+          abort_closing(store, "gori run notes update: note ##{n} was deleted before it could be updated")
         end
         after = Notes.load(store)
         idx = after.notes.index { |e| e.id == id }
@@ -233,13 +213,9 @@ module Gori
         abort "gori run notes delete: too many arguments (expected one note number)" if positional.size > 1
         n = parse_note_index(positional.first).not_nil!
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           persisted = Notes.load(store)
-          unless n <= persisted.size
-            store.close
-            abort "gori run notes delete: no note ##{n} (this project has #{Gori.plural(persisted.size, "note")})"
-          end
+          n <= persisted.size || abort_closing(store, "gori run notes delete: no note ##{n} (this project has #{Gori.plural(persisted.size, "note")})")
           target = persisted.notes[n - 1]
           # Gated AFTER the note is resolved, so the refusal can name the text that would go —
           # and after the "no note #n" abort, so a typo'd number still gets the specific answer.
@@ -251,8 +227,7 @@ module Gori
           # POSITION, so the note this refusal names would no longer be the note the second
           # handle deletes. One handle is what keeps the name honest.
           if err = note_delete_confirmation_error(n, target, yes)
-            store.close
-            abort "gori run notes delete: #{err}"
+            abort_closing(store, "gori run notes delete: #{err}")
           end
           # Delete by the note's STABLE id (not its list position) and merge, so a concurrent
           # writer's other notes aren't clobbered by a blind overwrite. See Notes.merge.
@@ -270,13 +245,8 @@ module Gori
           # reported success. (`Notes.delete` would be the smaller call but it re-clamps `cur`
           # by POSITION, which is exactly the drift `keep_id` above exists to avoid.)
           merged = Notes.save(store, [] of Notes::NoteEntry, Set{target_id}, keep_id, persisted.next_id)
-          unless merged
-            store.close
-            abort "gori run notes delete: project is busy (write did not commit) — try again"
-          end
+          merged || abort_closing(store, "gori run notes delete: project is busy (write did not commit) — try again")
           puts "Note ##{n} deleted."
-        ensure
-          store.close
         end
       end
 

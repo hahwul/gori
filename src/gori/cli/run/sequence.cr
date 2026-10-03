@@ -29,7 +29,6 @@ module Gori
         allow_unscoped = false
         bind_from : Int64? = nil
         slot : String? = nil
-        positional = [] of String
 
         set_loc = ->(k : Sequencer::ExtractKind, v : String) {
           abort "gori run sequence: pick ONE token location (--cookie/--header/--regex/--position/--jsonpath)" if kind
@@ -37,7 +36,7 @@ module Gori
           selector = v
         }
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run sequence") do |p|
           p.banner = "Usage: gori run sequence [<flow-id>] [options]"
           p.on("--flow=ID", "Seed the request from a captured flow (live replay)") { |v| flow_id = parse_flow_id(v, "gori run sequence") }
           p.on("--request=FILE", "Read a raw HTTP request to replay (live)") { |v| request_file = v }
@@ -68,12 +67,7 @@ module Gori
           p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $BIND.NAME tokens (bare syntax: $NAME)") { |v| slot = v.strip }
           p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
           format_flag(p, [:text, :json, :jsonl, :markdown], "Output: text (default) | json | jsonl | markdown") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run sequence", f, p) }
-          p.missing_option { |f| abort "gori run sequence: missing value for #{f}" }
         end
-        parser.parse(args)
         refresh_verify_upstream(!insecure)
 
         # Manual mode — analyze a token list, no network.
@@ -269,11 +263,8 @@ module Gori
         if file = request_file
           {read_input_file(file, "gori run sequence").to_slice, nil, false, false}
         elsif id = flow_id
-          store = open_store(resolve_read_project(project_name, db_path))
-          detail = begin
+          detail = with_store(resolve_read_project(project_name, db_path)) do |store|
             store.get_flow(id)
-          ensure
-            store.close
           end
           abort "gori run sequence: no flow ##{id}" unless detail
           built = Repeater::FlowRequest.build(detail)

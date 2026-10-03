@@ -38,9 +38,8 @@ module Gori
         format = :text
         export_path : String? = nil
         include_sensitive = false
-        leftover = [] of String
 
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run issues") do |p|
           p.banner = "Usage: gori run issues [options]\n\n" \
                      "Or run with a subcommand:\n" \
                      "  gori run issues create [options]\n" \
@@ -51,12 +50,7 @@ module Gori
           format_flag(p, [:text, :json, :markdown, :sarif], "Output: text (default) | json | markdown | sarif") { |f| format = f }
           p.on("--export=PATH", "Write to PATH instead of STDOUT") { |v| export_path = v }
           p.on("--include-sensitive", "Emit Authorization/Cookie/Set-Cookie/API-key values in --format sarif's webRequest/webResponse headers instead of [REDACTED]") { include_sensitive = true }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run issues", f, p) }
-          p.missing_option { |f| abort "gori run issues: missing value for #{f}" }
         end
-        parser.parse(args)
         refuse_list_leftovers(leftover, "issues", "create, update, delete/rm, list")
 
         project = resolve_read_project(proj.name, proj.db)
@@ -202,7 +196,8 @@ module Gori
         notes_stdin = false
         format = :text
 
-        parser = OptionParser.new do |p|
+        parse_no_positionals(args, "gori run issues create",
+          "pass the title as --title TEXT — quote it, a title with spaces is one argument") do |p|
           p.banner = "Usage: gori run issues create [options]\n\n" \
                      "The notes body is optional and comes from one of --notes, --notes-file or\n" \
                      "--notes-stdin; it is written with the issue, in one transaction.\n\n" \
@@ -217,12 +212,7 @@ module Gori
           p.on("--notes-file=FILE", "Read the notes from FILE, byte-for-byte") { |v| notes_file = v }
           p.on("--notes-stdin", "Read the notes from stdin, byte-for-byte, as --notes-file reads a file (`report-generator | gori run issues create -t … --notes-stdin`). Keeps a long write-up out of the argument vector, so it is not in the process listing or the shell history and cannot hit the command-line length limit. Needs a pipe or a redirect (`< notes.md`): a terminal is refused, because it would echo the notes back") { notes_stdin = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run issues create", f, p) }
-          p.missing_option { |f| abort "gori run issues create: missing value for #{f}" }
         end
-        parse_no_positionals(parser, args, "gori run issues create",
-          "pass the title as --title TEXT — quote it, a title with spaces is one argument")
 
         abort "gori run issues create: --title is required" if (t = title).nil? || t.empty?
 
@@ -258,8 +248,7 @@ module Gori
           what: "gori run issues create")
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project)
-        begin
+        with_store(project) do |store|
           if err = issue_flow_error(store, flow_id)
             abort "gori run issues create: #{err}"
           end
@@ -271,8 +260,6 @@ module Gori
             notes: body.try { |n| Env.mask_secrets(n) } || "")
           abort "gori run issues create: failed to persist issue (store busy or unwritable)" if id == 0
           puts issue_created_output(store, id, format)
-        ensure
-          store.close
         end
       end
 
@@ -336,16 +323,13 @@ module Gori
         id_s = positional.first? || abort("gori run issues delete: <id> is required")
         id = id_s.to_i64? || abort("gori run issues delete: invalid issue id #{id_s.inspect}")
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           abort "gori run issues delete: no issue with id #{id}" unless store.get_issue(id)
           if err = issue_delete_confirmation_error(id, yes)
             abort "gori run issues delete: #{err}"
           end
           abort "gori run issues delete: issue NOT deleted (store busy or unwritable)" unless store.delete_issue(id)
           puts "Issue ##{id} deleted."
-        ensure
-          store.close
         end
       end
 
@@ -366,7 +350,7 @@ module Gori
         cvss : String? = nil
         clear_cvss = false
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run issues update") do |p|
           p.banner = "Usage: gori run issues update <issue-id> [options]\n\n" \
                      "The notes body comes from one of --notes, --notes-file or --notes-stdin.\n" \
                      "--notes '' clears the notes; a file or pipe that gives no bytes is refused.\n\n" \
@@ -385,18 +369,9 @@ module Gori
           p.on("--notes-file=FILE", "Read the notes from FILE, byte-for-byte") { |v| notes_file = v }
           p.on("--notes-stdin", "Read the notes from stdin, byte-for-byte, as --notes-file reads a file (`report-generator | gori run issues update 7 --notes-stdin`). Keeps a long write-up out of the argument vector, so it is not in the process listing or the shell history and cannot hit the command-line length limit. Needs a pipe or a redirect (`< notes.md`): a terminal is refused, because it would echo the notes back") { notes_stdin = true }
           p.on("--status=STATUS", "Status: open|confirmed|false-positive|resolved") { |v| stat_s = v }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run issues update", f, p) }
-          p.missing_option { |f| abort "gori run issues update: missing value for #{f}" }
         end
 
-        positional = [] of String
-        parser.unknown_args { |before, after| positional = before + after }
-        parser.parse(args)
-
-        abort "gori run issues update: missing <issue-id>" if positional.empty?
-        abort "gori run issues update: too many arguments (expected one <issue-id>)" if positional.size > 1
-        id = positional[0].to_i64? || abort("gori run issues update: invalid issue id '#{positional[0]}'")
+        id = take_id(positional, "gori run issues update", "<issue-id>", "issue id")
 
         cvss.try do |c|
           abort "gori run issues update: invalid --cvss '#{c}' (a vector like CVSS:3.1/AV:N/... or a score 0.0-10.0)" unless Gori::Cvss.valid?(c)
@@ -429,16 +404,11 @@ module Gori
           what: "gori run issues update")
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project)
-        begin
-          unless store.get_issue(id)
-            store.close
-            abort "gori run issues update: no issue with id #{id}"
-          end
+        with_store(project) do |store|
+          store.get_issue(id) || abort_closing(store, "gori run issues update: no issue with id #{id}")
 
           if title.nil? && severity.nil? && notes.nil? && status.nil? && cvss.nil? && !clear_cvss
-            store.close
-            abort "gori run issues update: no fields to update (provide at least one of --title/--severity/--notes[-file|-stdin]/--status/--cvss)"
+            abort_closing(store, "gori run issues update: no fields to update (provide at least one of --title/--severity/--notes[-file|-stdin]/--status/--cvss)")
           end
 
           masked_title = title.try { |t| Env.mask_secrets(t) }
@@ -448,12 +418,9 @@ module Gori
           # don't report success then.
           unless store.update_issue(id, title: masked_title, severity: severity, notes: masked_notes, status: status,
                    cvss: cvss, clear_cvss: clear_cvss)
-            store.close
-            abort "gori run issues update: project is busy (write did not commit) — try again"
+            abort_closing(store, "gori run issues update: project is busy (write did not commit) — try again")
           end
           puts "Issue ##{id} updated successfully."
-        ensure
-          store.close
         end
       end
 

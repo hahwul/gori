@@ -73,18 +73,15 @@ module Gori
                      "  gori run retest show RUN\n" \
                      "  gori run retest forget RUN"
           project_options(p, proj, "read")
-          p.on("--issue=N", "Issue id (required)") { |v| issue_id = parse_retest_id(v, "--issue") }
+          p.on("--issue=N", "Issue id (required)") { |v| issue_id = parse_id(v, "gori run retest", "--issue") }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
         refuse_list_leftovers(leftover, "retest", RETEST_VERBS, "steps")
         iid = require_issue_id(issue_id, "gori run retest")
 
-        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
-        planned, last = begin
+        planned, last = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
           abort "gori run retest: no issue with id #{iid}" unless store.get_issue(iid)
           {Retest.plan(store, iid), store.last_retest_run(iid)}
-        ensure
-          store.close
         end
 
         if format == :json
@@ -135,8 +132,8 @@ module Gori
                      "Assertions (at most one per step, omit for \"record the outcome, assert nothing\"):\n" \
                      "#{retest_assert_help}"
           project_options(p, proj, "update")
-          p.on("--issue=N", "Issue id (required)") { |v| issue_id = parse_retest_id(v, "--issue") }
-          p.on("--repeater=M", "Repeater session id to send (required; ids from `gori run repeater list`)") { |v| repeater_id = parse_retest_id(v, "--repeater") }
+          p.on("--issue=N", "Issue id (required)") { |v| issue_id = parse_id(v, "gori run retest", "--issue") }
+          p.on("--repeater=M", "Repeater session id to send (required; ids from `gori run repeater list`)") { |v| repeater_id = parse_id(v, "gori run retest", "--repeater") }
           p.on("--role=ROLE", "setup | baseline | variant (default) | control | cleanup") { |v| role_s = v }
           p.on("--assert=EXPR", "The one expected result (see the list above)") { |v| assertion = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
@@ -156,8 +153,7 @@ module Gori
         parsed = Retest::Assertion.parse(assertion)
         abort "gori run retest add: --assert: #{parsed}" if parsed.is_a?(String)
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           abort "gori run retest add: no issue with id #{iid}" unless store.get_issue(iid)
           abort "gori run retest add: no repeater session ##{rid} (ids from `gori run repeater list`)" unless store.get_repeater(rid)
           id, status = store.add_retest_step(iid, role, Store::LinkRefKind::Repeater, rid, parsed.to_s)
@@ -174,8 +170,6 @@ module Gori
           else
             puts "Added step #{step.position} to issue ##{iid}: #{retest_step_line(planned)}"
           end
-        ensure
-          store.close
         end
       end
 
@@ -194,7 +188,7 @@ module Gori
           p.on("--role=ROLE", "setup | baseline | variant | control | cleanup") { |v| role_s = v }
           p.on("--assert=EXPR", "The one expected result (empty clears it)") { |v| assertion = v }
         end
-        id = require_positional_id(positional, "gori run retest update", "step")
+        id = require_positional_id(positional, "gori run retest update", "step", "gori run retest")
         abort "gori run retest update: nothing to change — pass --role and/or --assert" if role_s.nil? && assertion.nil?
         role = role_s.try do |s|
           Store::RetestRole.parse?(s) || abort("gori run retest update: invalid --role #{s.inspect} (#{retest_roles})")
@@ -205,8 +199,7 @@ module Gori
           parsed.to_s
         end
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           abort "gori run retest update: no retest step with id #{id}" unless store.get_retest_step(id)
           case store.update_retest_step(id, role: role, assertion: stored_assertion)
           in .issue_gone? then abort "gori run retest update: the issue was deleted before the edit landed"
@@ -216,8 +209,6 @@ module Gori
           end
           step = store.get_retest_step(id) || abort("gori run retest update: step ##{id} vanished before it could be read back")
           puts "Updated step #{step.position} of issue ##{step.issue_id}: #{retest_step_line(Retest.plan(store, [step]).first)}"
-        ensure
-          store.close
         end
       end
 
@@ -230,10 +221,9 @@ module Gori
                      "any entity link to it are untouched: a retest step is a test plan, not a link."
           project_options(p, proj, "update")
         end
-        id = require_positional_id(positional, "gori run retest remove", "step")
+        id = require_positional_id(positional, "gori run retest remove", "step", "gori run retest")
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           step = store.get_retest_step(id) || abort("gori run retest remove: no retest step with id #{id}")
           case store.remove_retest_step(id)
           in .issue_gone?, .step_gone? then abort "gori run retest remove: step ##{id} was already gone"
@@ -241,8 +231,6 @@ module Gori
           in .ok?                      then nil
           end
           puts "Removed step #{step.position} (#{step.role.label}, #{step.ref_label}) from issue ##{step.issue_id}."
-        ensure
-          store.close
         end
       end
 
@@ -260,16 +248,15 @@ module Gori
           # `OverflowError` — an unhandled crash out of an OptionParser block, for an argument
           # whose only meaning is "as far as it goes".
           p.on("--to=POS", "New 1-based position (required; clamped to the list)") do |v|
-            to = parse_retest_id(v, "--to").clamp(1_i64, Int32::MAX.to_i64).to_i
+            to = parse_id(v, "gori run retest", "--to").clamp(1_i64, Int32::MAX.to_i64).to_i
           end
         end
-        id = require_positional_id(positional, "gori run retest move", "step")
+        id = require_positional_id(positional, "gori run retest move", "step", "gori run retest")
         pos_opt = to
         abort "gori run retest move: --to is required" if pos_opt.nil?
         pos = pos_opt
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           abort "gori run retest move: no retest step with id #{id}" unless store.get_retest_step(id)
           case store.move_retest_step(id, pos)
           in .issue_gone?, .step_gone? then abort "gori run retest move: step ##{id} was deleted before the move landed"
@@ -281,8 +268,6 @@ module Gori
           # surface calls. Per-step it allocated a throwaway `[s]` and re-read the store N
           # times to print one listing.
           Retest.plan(store, store.retest_steps(step.issue_id)).each { |pl| puts retest_step_line(pl) }
-        ensure
-          store.close
         end
       end
 
@@ -296,7 +281,7 @@ module Gori
                      "Delete every step of one Issue's retest. The run history is KEPT: re-planning\n" \
                      "the check does not un-run it, and an old summary is the regression baseline."
           project_options(p, proj, "update")
-          p.on("--issue=N", "Issue id (required)") { |v| issue_id = parse_retest_id(v, "--issue") }
+          p.on("--issue=N", "Issue id (required)") { |v| issue_id = parse_id(v, "gori run retest", "--issue") }
           # `-y` too, because the option table documents the pair for BOTH verbs and `run`
           # registers both — following the docs on this one aborted with "unknown option: -y".
           p.on("-y", "--yes", "Actually delete the steps (required — there is no interactive prompt here)") { yes = true }
@@ -304,8 +289,7 @@ module Gori
         abort "gori run retest clear: unexpected argument#{leftover.size == 1 ? "" : "s"} #{leftover.join(" ").inspect}" unless leftover.empty?
         iid = require_issue_id(issue_id, "gori run retest clear")
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           abort "gori run retest clear: no issue with id #{iid}" unless store.get_issue(iid)
           n = store.count_retest_steps(iid)
           abort "gori run retest clear: issue ##{iid} has no retest steps" if n == 0
@@ -314,8 +298,6 @@ module Gori
           end
           abort "gori run retest clear: NOT cleared (project busy or unwritable)" unless store.clear_retest_steps(iid)
           puts "Cleared #{n} retest step#{n == 1 ? "" : "s"} from issue ##{iid}."
-        ensure
-          store.close
         end
       end
 
@@ -348,7 +330,7 @@ module Gori
                      "Exit code: 0 when the verdict is `pass`, 1 otherwise."
           p.on("--project=NAME", "Project to run in (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file") { |v| db_path = v }
-          p.on("--issue=N", "Issue id (required)") { |v| issue_id = parse_retest_id(v, "--issue") }
+          p.on("--issue=N", "Issue id (required)") { |v| issue_id = parse_id(v, "gori run retest", "--issue") }
           p.on("-y", "--yes", "Confirm a batch containing state-changing methods") { yes = true }
           p.on("--allow-cleanup", "Run cleanup steps even after gori refused a send") { allow_cleanup = true }
           p.on("--allow-unscoped", "Send even if a target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
@@ -369,8 +351,7 @@ module Gori
         project = resolve_read_project(project_name, db_path)
         # `long_running`: the live backend sends through this handle and the run summary is
         # written at the end of a retest several seconds long.
-        store = open_store(project, long_running: true)
-        begin
+        passed = with_store(project, long_running: true) do |store|
           abort "gori run retest run: no issue with id #{iid}" unless store.get_issue(iid)
           planned = Retest.plan(store, iid)
           if planned.empty?
@@ -402,11 +383,9 @@ module Gori
           # exit code — the placement `gori run repeater send` uses.
           report_unbound_slot_overlay("gori run retest run")
           emit_retest_report(iid, report, format)
-          passed = report.verdict.pass?
-        ensure
-          store.close
+          report.verdict.pass?
         end
-        # AFTER the ensure, never inside it: Crystal's `exit` calls `Crystal.exit` directly
+        # AFTER the store is closed, never inside the block: Crystal's `exit` calls `Crystal.exit` directly
         # and does NOT unwind, so an `exit` in the block above would skip `store.close`
         # entirely — leaving the writer fiber undrained, the WAL un-checkpointed and the
         # OpenLock held, on the one retest command that writes. `gori run oast`'s
@@ -426,19 +405,16 @@ module Gori
                      "surface, the verdict and the per-outcome counts. `gori run retest show RUN`\n" \
                      "prints one run's result table."
           project_options(p, proj, "read")
-          p.on("--issue=N", "Issue id (required)") { |v| issue_id = parse_retest_id(v, "--issue") }
+          p.on("--issue=N", "Issue id (required)") { |v| issue_id = parse_id(v, "gori run retest", "--issue") }
           p.on("--limit=N", "How many runs to print (default #{Retest::RUN_HISTORY}, which is all that is kept)") { |v| limit = parse_count(v, "--limit").to_i }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
         refuse_list_leftovers(leftover, "retest", RETEST_VERBS, "runs")
         iid = require_issue_id(issue_id, "gori run retest runs")
 
-        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
-        runs = begin
+        runs = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
           abort "gori run retest runs: no issue with id #{iid}" unless store.get_issue(iid)
           store.retest_runs(iid, limit)
-        ensure
-          store.close
         end
 
         if format == :json
@@ -462,14 +438,11 @@ module Gori
           project_options(p, proj, "read")
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
-        id = require_positional_id(positional, "gori run retest show", "run")
+        id = require_positional_id(positional, "gori run retest show", "run", "gori run retest")
 
-        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
-        run, steps = begin
+        run, steps = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
           r = store.get_retest_run(id) || abort("gori run retest show: no retest run with id #{id}")
           {r, store.retest_run_steps(id)}
-        ensure
-          store.close
         end
 
         if format == :json
@@ -498,15 +471,12 @@ module Gori
                      "History flows each send recorded stay — this drops the report, not the evidence."
           project_options(p, proj, "update")
         end
-        id = require_positional_id(positional, "gori run retest forget", "run")
+        id = require_positional_id(positional, "gori run retest forget", "run", "gori run retest")
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           run = store.get_retest_run(id) || abort("gori run retest forget: no retest run with id #{id}")
           abort "gori run retest forget: NOT deleted (project busy or unwritable)" unless store.delete_retest_run(id)
           puts "Forgot retest run ##{id} of issue ##{run.issue_id} (#{run.verdict.label}, #{Gori.plural(run.total, "step")})."
-        ensure
-          store.close
         end
       end
 
@@ -521,21 +491,8 @@ module Gori
         v
       end
 
-      # The one positional id every step/run verb takes — same narrowing problem, same shape.
-      private def self.require_positional_id(positional : Array(String), cmd : String,
-                                             noun : String) : Int64
-        abort "#{cmd}: too many arguments (expected one <#{noun}>, got: #{positional.join(" ")})" if positional.size > 1
-        v = positional.first?
-        abort "#{cmd}: <#{noun}> is required" if v.nil?
-        parse_retest_id(v, "<#{noun}>")
-      end
-
       private def self.retest_roles : String
         Store::RetestRole.values.map(&.label).join(" | ")
-      end
-
-      private def self.parse_retest_id(v : String, flag : String) : Int64
-        v.to_i64? || abort("gori run retest: invalid #{flag} #{v.inspect} (expected an integer)")
       end
 
       # `1  baseline  repeater #4  GET https://a.test/me  expect status:200`

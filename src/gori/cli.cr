@@ -273,7 +273,7 @@ module Gori
     # Everything OptionParser did not claim: the unrecognised words BEFORE a `--` separator, AND
     # the run after it, which OptionParser strips and hands over as a SECOND list.
     #
-    # Discarding that second list is a hole this file already closed once — `reject_extra_args`
+    # Discarding that second list is a hole this file already closed once — `refuse_leftovers`
     # below carries the same fix for `gori wizard` / `gori tutorial`, and says why. `gori
     # settings` never got it, so a `--` switched every guard here back off, silently, at exit 0:
     # `gori settings -- --edit` printed the path with the flag dropped, `gori settings sections
@@ -331,20 +331,35 @@ module Gori
       Run.dispatch(args)
     end
 
-    # `gori wizard` and `gori tutorial` take no arguments at all. `unknown_args` runs BEFORE
-    # `invalid_option` (both fire for an undeclared flag), so this is what actually reports one
-    # — the `invalid_option` handlers below are the fallback, not the primary path. A stray flag
+    # The `gori <cmd>` twin of `Run.parse_args`'s tail: build the parser, let the command
+    # register its flags, then add `-h` (so `--help` lists it last) and the two refusals whose
+    # OptionParser defaults RAISE past `CLI.run` as a backtrace. Returned unparsed, because the
+    # callers parse it their own way (`stray_args`) and several print it as their usage.
+    private def self.option_parser(prefix : String, & : OptionParser ->) : OptionParser
+      OptionParser.new do |p|
+        yield p
+        p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+        p.invalid_option { |flag| abort CLI.unknown_option_message(prefix, flag, p) }
+        p.missing_option { |flag| abort "missing value for #{flag}" }
+      end
+    end
+
+    # Refuse any leftover with `message`'s text (nil accepts them). Installed as the
+    # `unknown_args` handler, which runs BEFORE `invalid_option` (both fire for an undeclared
+    # flag), so the message also sees a stray FLAG first. Reads both halves: `after` is the run
+    # following a `--` separator, which OptionParser strips and hands over separately, and
+    # discarding it left `gori wizard -- --port 9000` launching with the flag silently dropped.
+    private def self.refuse_leftovers(p : OptionParser, &message : Array(String) -> String?) : Nil
+      p.unknown_args { |before, after| (msg = message.call(before + after)) && abort(msg) }
+    end
+
+    # `gori wizard`, `gori tutorial` and `gori update` take no arguments at all. A stray flag
     # and a stray word are named apart so `gori wizard --port 9000` reads as the misplaced
     # `gori tui` flag it actually is.
-    #
-    # `after` is the run following a `--` separator, which OptionParser strips and hands over
-    # separately. It has to be rejected too: discarding it left `gori wizard -- --port 9000`
-    # launching with the flag silently dropped, which is the whole failure this replaced.
-    private def self.reject_extra_args(cmd : String, rest : Array(String), after : Array(String),
-                                       parser : OptionParser) : Nil
-      return if (first = (rest + after).first?).nil?
-      abort unknown_option_message("gori #{cmd}", first, parser) if first.starts_with?('-')
-      abort "gori #{cmd} takes no arguments (got #{first.inspect})\nRun 'gori #{cmd} --help' for its options."
+    private def self.extra_args_error(cmd : String, rest : Array(String), parser : OptionParser) : String?
+      return nil if (first = rest.first?).nil?
+      return unknown_option_message("gori #{cmd}", first, parser) if first.starts_with?('-')
+      "gori #{cmd} takes no arguments (got #{first.inspect})\nRun 'gori #{cmd} --help' for its options."
     end
 
     # Every `invalid_option` handler's message (#1389): the flag, the nearest one this parser
@@ -406,16 +421,13 @@ module Gori
       # didn't recognise, so `gori wizard --port 9000` — which the help text below all but
       # invites, and which belongs to `gori tui` — was a silent no-op. Every other subcommand
       # aborts on an unknown flag; this one now does too.
-      parser = OptionParser.new do |p|
+      parser = option_parser("gori wizard") do |p|
         p.banner = "Usage: gori wizard\n" \
                    "  Interactive setup wizard: global proxy bind (default for projects), TUI theme, editor keyset (try it first), Miss Ring.\n" \
                    "  Runs automatically on first launch; use this to re-run it anytime.\n" \
                    "  Bind is the shared default — pin a different address per project in the Project tab;\n" \
                    "  `gori tui --listen/--port` override settings for one run only (not written to disk)."
-        p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-        p.invalid_option { |flag| abort CLI.unknown_option_message("gori wizard", flag, p) }
-        p.missing_option { |flag| abort "missing value for #{flag}" }
-        p.unknown_args { |rest, after| reject_extra_args("wizard", rest, after, p) }
+        refuse_leftovers(p) { |rest| extra_args_error("wizard", rest, p) }
       end
       parser.parse(args)
 
@@ -450,7 +462,7 @@ module Gori
     # / first launch; this command repeaters it anytime. Like the wizard it drives
     # /dev/tty directly, so it sets up its own terminal instead of going through App.
     private def self.run_tutorial(args : Array(String)) : Nil
-      parser = OptionParser.new do |p| # same reasoning as run_wizard's: no silent no-ops
+      parser = option_parser("gori tutorial") do |p| # same reasoning as run_wizard's: no silent no-ops
         p.banner = "Usage: gori tutorial\n" \
                    "  Interactive tour of gori's TUI on a mock UI: tab/pane navigation,\n" \
                    "  the command palette (^P), the action menu (space), edit mode\n" \
@@ -458,10 +470,7 @@ module Gori
                    "  you to try the key; a practice step covers the moves, then help,\n" \
                    "  quitting and a first-session checklist.\n" \
                    "  Also offered at the end of `gori wizard`; safe to re-run anytime."
-        p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-        p.invalid_option { |flag| abort CLI.unknown_option_message("gori tutorial", flag, p) }
-        p.missing_option { |flag| abort "missing value for #{flag}" }
-        p.unknown_args { |rest, after| reject_extra_args("tutorial", rest, after, p) }
+        refuse_leftovers(p) { |rest| extra_args_error("tutorial", rest, p) }
       end
       parser.parse(args)
 
@@ -508,7 +517,7 @@ module Gori
         # this, `gori update -- --exec` parsed clean and silently dropped the
         # flag, and `gori update whatever` ran a full self-update on a typo. Same
         # failure, same guard, as `gori wizard` / `gori tutorial`.
-        p.unknown_args { |rest, after| reject_extra_args("update", rest, after, p) }
+        refuse_leftovers(p) { |rest| extra_args_error("update", rest, p) }
       end
       parser.parse(args)
       begin

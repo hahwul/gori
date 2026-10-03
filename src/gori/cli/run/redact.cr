@@ -148,16 +148,13 @@ module Gori
       private def self.update_project_scope(project_name : String?, db_path : String?,
                                             command : String,
                                             &) : Nil
-        store = open_store(resolve_read_project(project_name, db_path))
-        ok, refusal = begin
+        ok, refusal = with_store(resolve_read_project(project_name, db_path)) do |store|
           answer = yield store, Redact::Policy.project_scope(store)
           if answer.is_a?(String)
             {false, answer}
           else
             {Redact::Policy.write_project_scope(store, answer), nil}
           end
-        ensure
-          store.close
         end
         abort "gori run #{command}: #{refusal}" if refusal
         abort "gori run #{command}: the project is busy — nothing was saved" unless ok
@@ -190,26 +187,19 @@ module Gori
       private def self.cmd_redact_profiles(args : Array(String)) : Nil
         proj = ProjectFlags.new
         format = :text
-        parser = OptionParser.new do |p|
+        parse_no_positionals(args, "gori run redact profiles",
+          "`profiles` takes no positional arguments; to pick one use `gori run redact use <name>`") do |p|
           p.banner = "Usage: gori run redact profiles [options]\n\n" \
                      "Lists every redaction profile available here — the project's own first,\n" \
                      "then settings.json's, then the built-ins — and says which one a safe\n" \
                      "export would use."
           project_options(p, proj, "read")
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run redact profiles", f, p) }
-          p.missing_option { |f| abort "gori run redact profiles: missing value for #{f}" }
         end
-        parse_no_positionals(parser, args, "gori run redact profiles",
-          "`profiles` takes no positional arguments; to pick one use `gori run redact use <name>`")
 
-        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
-        scope, profiles, choice = begin
+        scope, profiles, choice = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
           {Redact::Policy.project_scope(store), Redact::Policy.profiles(store),
            Redact::Policy.resolve(store, nil, true)}
-        ensure
-          store.close
         end
         project_names = scope.profiles.map(&.name)
         global_names = Settings.redaction_profiles.map(&.name)

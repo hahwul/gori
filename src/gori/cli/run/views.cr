@@ -62,8 +62,7 @@ module Gori
         proj = ProjectFlags.new
         scope : String? = nil
         format = :text
-        leftover = [] of String
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run views") do |p|
           p.banner = "Usage: gori run views [list] [options]\n\n" \
                      "History views: named QL queries the list narrows to, ANDed over the filter\n" \
                      "bar rather than replacing it. Built-ins come first, then the global library,\n" \
@@ -71,17 +70,11 @@ module Gori
           project_options(p, proj, "read")
           p.on("--scope=SCOPE", "Show only builtin | project | global views") { |v| scope = parse_view_list_scope(v) }
           format_flag(p, [:text, :json], "text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run views", f, p) }
-          p.missing_option { |f| abort "gori run views: missing value for #{f}" }
         end
-        parser.unknown_args { |before, after| leftover = before + after }
-        parser.parse(args)
         refuse_list_leftovers(leftover, "views", "add, rm/delete, rename, set, scope")
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project, read_only: true)
-        begin
+        with_store(project, read_only: true) do |store|
           views = SavedViews.merged(store)
           views = views.select { |v| v.scope == scope } if scope
           active = SavedViews.active(store)
@@ -93,8 +86,6 @@ module Gori
             w = view_name_width(views)
             views.each { |v| puts view_row(v, active, w) }
           end
-        ensure
-          store.close
         end
       end
 
@@ -135,7 +126,7 @@ module Gori
         query : String? = nil
         scope = "project"
         format = :text
-        parser = OptionParser.new do |p|
+        name = views_one_positional(args, "add", "<name>") do |p|
           p.banner = "Usage: gori run views add <name> --query=QL [options]\n\n" \
                      "--query is a History QL query — the same language the filter bar and\n" \
                      "`gori run history -q` take. It is validated here rather than at apply time:\n" \
@@ -145,10 +136,7 @@ module Gori
           p.on("-qQL", "--query=QL", "The view's query (required)") { |v| query = v }
           p.on("--scope=SCOPE", "project (default) | global — a global view appears in EVERY project") { |v| scope = parse_view_scope(v) }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.missing_option { |f| abort "gori run views add: missing value for #{f}" }
         end
-        name = views_one_positional(parser, args, "add", "<name>")
         abort "gori run views add: --query is required" if (q = query).nil?
         views_refuse_bad_name(name, "add")
         views_refuse_bad_query(q, "add")
@@ -183,14 +171,11 @@ module Gori
       private def self.cmd_views_rm(args : Array(String)) : Nil
         proj = ProjectFlags.new
         scope = "project"
-        parser = OptionParser.new do |p|
+        name = views_one_positional(args, "rm", "<name>") do |p|
           p.banner = "Usage: gori run views rm <name> [--scope=project|global]"
           project_options(p, proj, "update")
           p.on("--scope=SCOPE", "Which <name>: project (default) | global") { |v| scope = parse_view_scope(v) }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.missing_option { |f| abort "gori run views rm: missing value for #{f}" }
         end
-        name = views_one_positional(parser, args, "rm", "<name>")
 
         with_views_store(proj.name, proj.db) do |store|
           view = views_find_or_abort(store, name, scope, "rm")
@@ -220,15 +205,12 @@ module Gori
         proj = ProjectFlags.new
         scope = "project"
         to : String? = nil
-        parser = OptionParser.new do |p|
+        name = views_one_positional(args, "rename", "<name>") do |p|
           p.banner = "Usage: gori run views rename <name> --to=NAME [--scope=project|global]"
           project_options(p, proj, "update")
           p.on("--to=NAME", "The new name (required)") { |v| to = v }
           p.on("--scope=SCOPE", "Which <name>: project (default) | global") { |v| scope = parse_view_scope(v) }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.missing_option { |f| abort "gori run views rename: missing value for #{f}" }
         end
-        name = views_one_positional(parser, args, "rename", "<name>")
         abort "gori run views rename: --to is required" if (dest = to).nil?
         views_refuse_bad_name(dest, "rename")
 
@@ -248,16 +230,13 @@ module Gori
         proj = ProjectFlags.new
         scope = "project"
         query : String? = nil
-        parser = OptionParser.new do |p|
+        name = views_one_positional(args, "set", "<name>") do |p|
           p.banner = "Usage: gori run views set <name> --query=QL [--scope=project|global]\n\n" \
                      "Replace a view's query, keeping its name."
           project_options(p, proj, "update")
           p.on("-qQL", "--query=QL", "The view's new query (required)") { |v| query = v }
           p.on("--scope=SCOPE", "Which <name>: project (default) | global") { |v| scope = parse_view_scope(v) }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.missing_option { |f| abort "gori run views set: missing value for #{f}" }
         end
-        name = views_one_positional(parser, args, "set", "<name>")
         abort "gori run views set: --query is required" if (q = query).nil?
         views_refuse_bad_query(q, "set")
 
@@ -277,17 +256,14 @@ module Gori
         proj = ProjectFlags.new
         from = "project"
         to : String? = nil
-        parser = OptionParser.new do |p|
+        name = views_one_positional(args, "scope", "<name>") do |p|
           p.banner = "Usage: gori run views scope <name> --to=project|global [--scope=project|global]\n\n" \
                      "Move a view to the other store. A `src:` view belongs in every project; a\n" \
                      "`host:api.acme.test` one belongs in this engagement."
           project_options(p, proj, "update")
           p.on("--to=SCOPE", "Destination: project | global (required)") { |v| to = parse_view_scope(v) }
           p.on("--scope=SCOPE", "Which <name>: project (default) | global") { |v| from = parse_view_scope(v) }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.missing_option { |f| abort "gori run views scope: missing value for #{f}" }
         end
-        name = views_one_positional(parser, args, "scope", "<name>")
         abort "gori run views scope: --to is required (project|global)" if (dest = to).nil?
 
         with_views_store(proj.name, proj.db) do |store|
@@ -315,14 +291,11 @@ module Gori
 
       # --- shared helpers ---------------------------------------------------------------
 
-      # Exactly one positional, which is the view's name. Both halves of `unknown_args` for the
-      # reason the colormarker list does it: a bare word after `--` would otherwise vanish.
-      private def self.views_one_positional(parser : OptionParser, args : Array(String),
-                                            sub : String, what : String) : String
-        positional = [] of String
-        parser.unknown_args { |before, after| positional = before + after }
-        parser.invalid_option { |f| abort CLI.unknown_option_message("gori run views #{sub}", f, parser) }
-        parser.parse(args)
+      # Exactly one positional, which is the view's name. Parsed through `parse_args`, so a bare
+      # word after `--` is counted rather than vanishing.
+      private def self.views_one_positional(args : Array(String), sub : String, what : String,
+                                            & : OptionParser ->) : String
+        positional = parse_args(args, "gori run views #{sub}") { |p| yield p }
         abort "gori run views #{sub}: missing #{what}" if positional.empty?
         abort "gori run views #{sub}: too many arguments (expected one #{what})" if positional.size > 1
         positional[0]
@@ -345,13 +318,7 @@ module Gori
       # resolved for every subcommand anyway, so `--project` means the same thing throughout and
       # `merged`/`name_taken?` can see both halves.
       private def self.with_views_store(project_name : String?, db_path : String?, &) : Nil
-        project = resolve_read_project(project_name, db_path)
-        store = open_store(project)
-        begin
-          yield store
-        ensure
-          store.close
-        end
+        with_store(resolve_read_project(project_name, db_path)) { |store| yield store }
       end
 
       # Resolve BY SCOPE, not through `resolve_by_name` — that one is for `--view`, where the

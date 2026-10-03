@@ -224,11 +224,8 @@ module Gori
         if file = request_file
           {read_input_file(file, "gori run mine"), nil, false, false}
         elsif id = flow_id
-          store = open_store(resolve_read_project(project_name, db_path))
-          detail = begin
+          detail = with_store(resolve_read_project(project_name, db_path)) do |store|
             store.get_flow(id)
-          ensure
-            store.close
           end
           abort "gori run mine: no flow ##{id}" unless detail
           built = Repeater::FlowRequest.build(detail)

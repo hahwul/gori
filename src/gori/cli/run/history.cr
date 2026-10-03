@@ -34,9 +34,13 @@ module Gori
         proj = ProjectFlags.new
         query : String? = nil
         yes = false
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        # Same two pre-passes the listing runs, for the same reason: `-q` with a separate
+        # value, and QL negation terms ("-status:200"), which OptionParser would otherwise
+        # abort as unknown options before they could join the query.
+        args = normalize_query_flag(args)
+        neg_terms, opt_args = split_ql_negations(args)
+        positional = parse_args(opt_args, "gori run history delete") do |p|
           p.banner = "Usage: gori run history delete <id>…\n" \
                      "       gori run history delete -q QL --yes\n\n" \
                      "Hard-delete the captured flows named by id (every id must exist, or nothing is " \
@@ -45,17 +49,7 @@ module Gori
           project_options(p, proj, "update")
           p.on("-qQL", "--query=QL", "Delete every flow matching this QL query (host: status:>=500 method: …)") { |v| query = v }
           p.on("--yes", "Actually delete the query's matches (required — there is no interactive prompt here)") { yes = true }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run history delete", f, p) }
-          p.missing_option { |f| abort "gori run history delete: missing value for #{f}" }
         end
-        # Same two pre-passes the listing runs, for the same reason: `-q` with a separate
-        # value, and QL negation terms ("-status:200"), which OptionParser would otherwise
-        # abort as unknown options before they could join the query.
-        args = normalize_query_flag(args)
-        neg_terms, opt_args = split_ql_negations(args)
-        parser.parse(opt_args)
         query, dropped = Run.compose_history_query(query, [] of String, neg_terms)
         Run.warn_dropped_query_terms("history delete", dropped)
 
@@ -100,8 +94,7 @@ module Gori
                                     db_path : String?) : Nil
         ids = positional.map { |v| parse_flow_id(v, "gori run history delete") }.uniq!
 
-        store = open_store(resolve_read_project(project_name, db_path))
-        begin
+        with_store(resolve_read_project(project_name, db_path)) do |store|
           # flow_row is the row-only read; get_flow would materialize both BLOBs to answer
           # "does this exist?" — a 40 MB response would be read and discarded.
           missing = ids.reject { |id| store.flow_row(id) }
@@ -113,8 +106,6 @@ module Gori
             abort "gori run history delete: #{ids.size == 1 ? "flow ##{ids[0]}" : "flows"} NOT deleted (project busy) — try again"
           end
           puts ids.size == 1 ? "Flow ##{ids[0]} deleted." : "#{ids.size} flows deleted (#{ids.map { |id| "##{id}" }.join(", ")})."
-        ensure
-          store.close
         end
       end
 
@@ -134,8 +125,7 @@ module Gori
         # costs no store open is worth keeping.
         lens = Scope.ql_lens(store)
         if err = delete_scope_error(q, lens)
-          store.close
-          abort "gori run history delete: #{err}"
+          abort_closing(store, "gori run history delete: #{err}")
         end
         filter = QL.parse(q, scope: lens)
         # A `body:`/free-text delete drains the trigram index first, because an under-reporting
@@ -145,14 +135,12 @@ module Gori
         if err = fts_backlog_error(store, filter,
              "#{q.inspect} cannot see all of them and this delete would silently spare some. " \
              "NOTHING was deleted;")
-          store.close
-          abort "gori run history delete: #{err}"
+          abort_closing(store, "gori run history delete: #{err}")
         end
         ids = begin
           matching_flow_ids(store, filter)
         rescue ex
-          store.close
-          abort "gori run history delete: query #{q.inspect} failed: #{ex.message}"
+          abort_closing(store, "gori run history delete: query #{q.inspect} failed: #{ex.message}")
         end
 
         begin
@@ -334,8 +322,7 @@ module Gori
                 "To delete one flow: `gori run history delete <id>`"
         end
 
-        store = open_store(resolve_read_project(proj.name, proj.db))
-        begin
+        with_store(resolve_read_project(proj.name, proj.db)) do |store|
           n = store.count?
           abort "gori run history clear: could not count the flows (project busy) — nothing deleted" unless n
           unless yes
@@ -343,8 +330,6 @@ module Gori
           end
           abort "gori run history clear: NOT cleared (project busy) — every flow is still there" unless store.clear_flows
           puts "Deleted #{Gori.plural(n, "flow")}."
-        ensure
-          store.close
         end
       end
 
@@ -360,10 +345,11 @@ module Gori
         view_name : String? = nil
         column_specs = [] of String
         no_columns = false
-        positional = [] of String
         redaction = RedactFlags.new
 
-        parser = OptionParser.new do |p|
+        args = normalize_query_flag(args)
+        neg_terms, opt_args = split_ql_negations(args)
+        positional = parse_args(opt_args, "gori run history") do |p|
           p.banner = "Usage: gori run history [QL query] [options]   (alias: ls)\n\n" \
                      "Subcommands: history show <id> · history delete <id> · history clear --yes"
           project_options(p, proj, "read")
@@ -378,14 +364,7 @@ module Gori
           format_flag(p, [:text, :json, :jsonl, :har], "Output: text (default) | json (one array) | jsonl (one object per line) | har (one HAR 1.2 log)") { |f| format = f }
           p.on("--include-sensitive", "Emit Authorization/Cookie/Set-Cookie/API-key values in --format json's per-row headers instead of [REDACTED]") { include_sensitive = true }
           redact_options(p, redaction)
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run history", f, p) }
-          p.missing_option { |f| abort "gori run history: missing value for #{f}" }
         end
-        args = normalize_query_flag(args)
-        neg_terms, opt_args = split_ql_negations(args)
-        parser.parse(opt_args)
         # `--project=X delete 42` lands here because the dispatcher keys on args.first?.
         # `delete` is not QL; it is the discarded verb. Refuse it rather than search
         # for the free-text "delete 42" and exit 0 with the flow still on disk.
@@ -441,9 +420,8 @@ module Gori
         # lives in this database). Opening read-only and discovering that afterwards would leave
         # the listing silently short of whatever the off-commit index had not caught up on —
         # exactly what `fts_backlog_error` refuses to let a one-shot answer do.
-        store = open_store(resolve_read_project(proj.name, proj.db),
-          read_only: !query_uses_fts?(query) && view_name.nil?)
-        begin
+        with_store(resolve_read_project(proj.name, proj.db),
+          read_only: !query_uses_fts?(query) && view_name.nil?) do |store|
           # The scope lens, opt-in and independent of the persisted `s` flag — the same per-flow
           # include/exclude filter the TUI History lens applies, so `--in-scope` here shows the
           # same set. Capture is untouched; this narrows only the VIEW. Empty (nothing in scope)
@@ -467,16 +445,12 @@ module Gori
           if vn = view_name
             unless view = SavedViews.resolve_by_name(store, vn)
               known = SavedViews.names(store).join(", ")
-              store.close
-              abort "gori run history: no view named #{vn.inspect} (known: #{known})"
+              abort_closing(store, "gori run history: no view named #{vn.inspect} (known: #{known})")
             end
             # A view whose query compiles to nothing is REFUSED, not applied. `QL.and` folds an
             # EMPTY side away, so applying it would list EVERY flow while the command line says
             # a view is narrowing — the same failure the query refusal below exists to stop.
-            unless f = SavedViews.filter(view, scope: lens)
-              store.close
-              abort "gori run history: view #{view.name.inspect} is not a usable query (#{view.query.inspect}) — fix it with `gori run views set`"
-            end
+            f = SavedViews.filter(view, scope: lens) || abort_closing(store, "gori run history: view #{view.name.inspect} is not a usable query (#{view.query.inspect}) — fix it with `gori run views set`")
             view_filter = f
             view_label = view.name if view.narrowing?
           end
@@ -511,8 +485,7 @@ module Gori
               # yields the match-all EMPTY filter — silently dumping every flow,
               # the opposite of what the user asked. Refuse it instead.
               if !q.strip.empty? && filter == QL::EMPTY
-                store.close
-                abort "gori run history: query #{q.inspect} did not match any field (check syntax, e.g. status:>=500 host:example.com method:POST)"
+                abort_closing(store, "gori run history: query #{q.inspect} did not match any field (check syntax, e.g. status:>=500 host:example.com method:POST)")
               end
               # The hide-static lens LAST, after the operator's own terms, the way the TUI and MCP
               # order it: a cheap `host LIKE` rejects a row before the lens is consulted.
@@ -527,14 +500,12 @@ module Gori
               # answer — a caveat on STDERR is gone the moment the rows are piped to a file.
               if err = fts_backlog_error(store, combined,
                    "#{q.inspect} would silently omit them. Nothing was listed;")
-                store.close
-                abort "gori run history: #{err}"
+                abort_closing(store, "gori run history: #{err}")
               end
               begin
                 store.search(combined, limit_probe(limit), raise_on_error: true)
               rescue ex
-                store.close
-                abort "gori run history: query #{q.inspect} failed: #{ex.message}"
+                abort_closing(store, "gori run history: query #{q.inspect} failed: #{ex.message}")
               end
             elsif in_scope || view_filter != QL::EMPTY || hide_static
               # `view_filter` belongs in this condition and not only in the AND above: without
@@ -546,8 +517,7 @@ module Gori
               # to use `body:`, and this listing IS the answer.
               if err = fts_backlog_error(store, combined,
                    "the #{view_name.inspect} view would silently omit them. Nothing was listed;")
-                store.close
-                abort "gori run history: #{err}"
+                abort_closing(store, "gori run history: #{err}")
               end
               # Same rescue the query branch has: a view can hold a regex or an OR chain that
               # PARSES but SQLite still refuses to run (hand-edited settings.json, a peer's
@@ -555,8 +525,7 @@ module Gori
               begin
                 store.search(combined, limit_probe(limit), raise_on_error: true)
               rescue ex
-                store.close
-                abort "gori run history: #{view_name ? "view #{view_name.inspect}" : "listing"} failed: #{ex.message}"
+                abort_closing(store, "gori run history: #{view_name ? "view #{view_name.inspect}" : "listing"} failed: #{ex.message}")
               end
             else
               store.recent_flows(limit_probe(limit))
@@ -641,8 +610,6 @@ module Gori
             # site rather than defaulted, so the choice is visible where it is made.
             rows.each { |r| puts CLI::Output.flow_row_text(r, row_columns(store, r, prepared, include_sensitive: true).try(&.[0])) }
           end
-        ensure
-          store.close
         end
       end
 
@@ -766,8 +733,7 @@ module Gori
         # project's own profiles live on a settings row in this database.
         choice = redact_choice(store, redaction)
         if err = choice.error
-          store.close
-          abort "gori run history: #{err}"
+          abort_closing(store, "gori run history: #{err}")
         end
         matcher = choice.matcher
         # The per-flow reports, kept so the ONE line at the end can total them. Reports, not
@@ -873,12 +839,9 @@ module Gori
         # The redaction choice is resolved in here too, and for the same reason: it reads this
         # project's own profiles off the settings row, and its refusal ("no profile named …")
         # has to be reported AFTER the close.
-        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
-        detail, ws_msgs, choice, interims = begin
+        detail, ws_msgs, choice, interims = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
           d = store.get_flow(id)
           {d, show_ws_messages(store, d), redact_choice(store, redaction), d.try { store.interims(id) }}
-        ensure
-          store.close
         end
         abort "gori run show: no flow ##{id}" unless detail
         detail, redact_report, previewed = show_redaction(detail, choice, redaction)
