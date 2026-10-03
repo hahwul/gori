@@ -13,9 +13,12 @@ module Gori
     # to JSON). An ENCRYPTED token (JWE) takes the other shape below; `type` is the
     # discriminator, and it is present on both so a consumer never has to guess from which
     # fields happen to be there.
+    #
+    # Scrubbed, as `Cookie.decode_json` is: a header or payload segment decodes to whatever
+    # bytes the token's author chose, and one that is not UTF-8 made the document invalid JSON.
     def decode_json(token : String) : String
       if jwe = Jwe.parse(token)
-        return jwe_json(jwe)
+        return jwe_json(jwe).scrub
       end
       parts = token.strip.split('.')
       JSON.build do |j|
@@ -49,7 +52,7 @@ module Gori
                             "#{extra.size} segment(s) beyond header.payload.signature shown raw, not decoded"
           end
         end
-      end
+      end.scrub
     end
 
     # {type:"JWE", alg, enc, kid, header, payload:null, encrypted:true, …}. `payload` is
@@ -87,7 +90,7 @@ module Gori
           j.field "code", v.code.try(&.label)
           j.field "reason", v.reason
         end
-      end
+      end.scrub
     end
 
     # [{name, category, note, token}, …] for every generated testing payload.

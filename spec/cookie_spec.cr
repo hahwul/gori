@@ -336,3 +336,14 @@ describe Gori::Cookie do
     end
   end
 end
+
+describe "Gori::Cookie.decode_json" do
+  # A cookie's payload is whatever its issuer put there; one that is not UTF-8 used to make the
+  # whole document invalid JSON.
+  it "stays valid UTF-8 JSON when the payload is not" do
+    payload = Base64.urlsafe_encode(Bytes[0x7b, 0x22, 0x75, 0x22, 0x3a, 0x22, 0xff, 0x22, 0x7d], padding: false)
+    json = Gori::Cookie.decode_json("#{payload}.Zm9v.c2ln", "flask")
+    json.valid_encoding?.should be_true
+    JSON.parse(json)
+  end
+end
