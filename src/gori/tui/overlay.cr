@@ -205,7 +205,7 @@ module Gori::Tui
       w = {area.w - 4, RULE_FORM_W}.min
       h = {area.h - 2, natural}.min
       return nil if w < RULE_FORM_MIN_W || h < {RULE_FORM_MIN_H, natural}.min
-      Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - h) // 2, w, h)
+      area.center(w, h)
     end
 
     # One `label: value` row of such a form: the label in muted, the field's text (or its
@@ -732,7 +732,7 @@ module Gori::Tui
       rows = {entry_count, 6}.max
       h = {area.h - 2, rows + 4}.min # title gap + list + footer + bottom border
       return nil if w < 32 || h < 7
-      Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - h) // 2, w, h)
+      area.center(w, h)
     end
 
     def render(screen : Screen, area : Rect) : Nil

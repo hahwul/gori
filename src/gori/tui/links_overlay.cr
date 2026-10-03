@@ -173,9 +173,7 @@ module Gori::Tui
       w = {area.w - 4, 88}.min
       h = area.h - 2
       return nil if w < 30 || h < 8
-      x = area.x + (area.w - w) // 2
-      y = area.y + (area.h - h) // 2
-      Rect.new(x, y, w, h)
+      area.center(w, h)
     end
 
     # Still mode-aware even though `handle_click` no longer reaches it while adding: this is

@@ -91,7 +91,7 @@ module Gori::Tui
       h = {area.h - 2, Retest::Assertion::FORMS.size + 9}.min
       w = {area.w - 4, 80}.min
       return nil if w < 44 || h < 9
-      Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - h) // 2, w, h)
+      area.center(w, h)
     end
 
     def render(screen : Screen, area : Rect) : Nil

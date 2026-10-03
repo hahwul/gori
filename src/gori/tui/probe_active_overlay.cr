@@ -239,7 +239,7 @@ module Gori::Tui
       w = {area.w - 4, {longest + 6, 54}.max.clamp(30, 64)}.min
       h = {area.h - 2, @info.size + row_count + 4}.min # title + info + gap + rows + border
       return nil if w < 30 || h < 6
-      Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - h) // 2, w, h)
+      area.center(w, h)
     end
 
     # First interactive row's y: below the header block + a blank spacer line.

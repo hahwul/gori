@@ -264,7 +264,7 @@ module Gori::Tui
     def overlay_box(area : Rect) : Rect?
       w = {area.w - 4, CARD_W}.min
       return nil if w < 12 || area.h < CARD_H
-      Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - CARD_H) // 2, w, CARD_H)
+      area.center(w, CARD_H)
     end
 
     def render(screen : Screen, area : Rect) : Nil

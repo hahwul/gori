@@ -368,9 +368,7 @@ module Gori::Tui
       # drops below the render guard (box.h < 10) and the modal simply doesn't draw, rather
       # than spilling the card over the tab bar / status rows.
       h = {tallest + 7, area.h - 2}.min
-      x = area.x + (area.w - w) // 2
-      y = area.y + (area.h - h) // 2
-      Rect.new(x, y, w, h)
+      area.center(w, h)
     end
 
     # Interior content rows (between the strip divider and the two footer rows).

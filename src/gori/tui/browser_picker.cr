@@ -59,9 +59,7 @@ module Gori::Tui
       w = {area.w - 4, 52}.min
       h = {@browsers.size + 4, area.h - 2}.min
       return nil if w < 24 || area.h < 6
-      x = area.x + (area.w - w) // 2
-      y = area.y + (area.h - h) // 2
-      Rect.new(x, y, w, h)
+      area.center(w, h)
     end
 
     # Browser-row index under (mx,my), mirroring render's list loop; nil outside.

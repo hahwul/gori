@@ -218,9 +218,7 @@ module Gori::Tui
       # project's whole History. It degrades instead; `fitted_lines` spends the shortfall.
       h = {lines.size + CHROME_H, area.h}.min
       w = (content + TEXT_INSET).clamp(16, {area.w - 2, MAX_WIDTH}.min)
-      x = area.x + (area.w - w) // 2
-      y = area.y + (area.h - h) // 2
-      Rect.new(x, y, w, h)
+      area.center(w, h)
     end
 
     # The message as it will actually be DRAWN: split on '\n', then WRAPPED to the widest

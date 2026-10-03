@@ -515,7 +515,7 @@ module Gori::Tui
       w = {area.w - 4, 56}.min
       h = {area.h - 2, @rows.size + 5}.min # top border + search/divider + list + footer + bottom border
       return nil if w < 32 || h < 7
-      Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - h) // 2, w, h)
+      area.center(w, h)
     end
 
     private def list_capacity(box : Rect) : Int32

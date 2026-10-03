@@ -75,7 +75,7 @@ module Gori::Tui
       h = {@rows.size + 2, 4}.max
       h = {h, area.h - 2}.min
       return nil if w < 42 || h < 4
-      Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - h) // 2, w, h)
+      area.center(w, h)
     end
 
     def row_at(box : Rect, mx : Int32, my : Int32) : Int32?

@@ -26,6 +26,11 @@ module Gori::Tui
       px >= x && px < right && py >= y && py < bottom
     end
 
+    # A `w`×`h` rect centred in this one; an odd remainder puts the extra cell right/below.
+    def center(w : Int32, h : Int32) : Rect
+      Rect.new(x + (self.w - w) // 2, y + (self.h - h) // 2, w, h)
+    end
+
     # Shrink inward by dx/dy on each side (clamped at zero).
     def inset(dx : Int32, dy : Int32) : Rect
       Rect.new(x + dx, y + dy, {w - 2 * dx, 0}.max, {h - 2 * dy, 0}.max)

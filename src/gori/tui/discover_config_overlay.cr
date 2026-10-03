@@ -216,7 +216,7 @@ module Gori::Tui
       w = {area.w - 4, 56}.min
       h = {area.h - 2, ROWS + 5}.min
       return nil if w < 30 || h < 6
-      Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - h) // 2, w, h)
+      area.center(w, h)
     end
 
     def render(screen : Screen, area : Rect) : Nil

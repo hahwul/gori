@@ -716,9 +716,7 @@ module Gori::Tui
       w = {3 + g.ncols * cell + (g.ncols - 1) * COL_GAP, body.w - 2}.min
       h = {g.viewport + 2, body.h}.min
       return Rect.new(0, 0, 0, 0) if w < 10 || h < 3
-      x = body.x + (body.w - w) // 2
-      y = body.y + (body.h - h) // 2
-      Rect.new(x, y, w, h)
+      body.center(w, h)
     end
 
     # Draws the popup card — one "‹key›  Title" row at a time, with a dim

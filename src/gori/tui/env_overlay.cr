@@ -172,7 +172,7 @@ module Gori::Tui
       rows = {@items.size + (@adding ? 1 : 0) + (@prefix_editing ? 1 : 0), 6}.max
       h = {area.h - 2, rows + 4}.min
       return nil if w < 28 || h < 8
-      Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - h) // 2, w, h)
+      area.center(w, h)
     end
 
     # `global` in the meta, because this card has a TWIN: the Project tab's Env pane, with the

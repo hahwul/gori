@@ -118,9 +118,7 @@ module Gori::Tui
       # filter bar, a divider, and rows worth scrolling) — a two-row list is still a card.
       h = {area.h - 2, {@rows.size + 5, 8}.max}.min
       return nil if w < 24 || h < 8
-      x = area.x + (area.w - w) // 2
-      y = area.y + (area.h - h) // 2
-      Rect.new(x, y, w, h)
+      area.center(w, h)
     end
 
     def render(screen : Screen, area : Rect) : Nil
