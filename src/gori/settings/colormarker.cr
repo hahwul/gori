@@ -196,22 +196,14 @@ module Gori::Settings
     # Before both the snapshot and the mint — see `add_rewriter_rule` for why the counter in
     # particular cannot be read stale.
     reload_colormarker_from_disk
-    # The answer below is a COMMIT answer, so memory has to agree with it — the same snapshot
-    # `add_rewriter_rule` takes, for the same reason: `save` refuses the write outright when the
-    # last load only got half the file in (`@@load_partial`), and returns false on any transient
-    # write failure too. Mutating first and answering 0 left the rule in `colormarker_rules`,
-    # folded into `@compiled` by `Colormarker#refresh`'s unconditional call, so it painted
-    # History rows in EVERY project for the rest of the process while the operator was told it
-    # was not added — and the next unrelated save that DID succeed wrote it to disk. The array
-    # is replaced wholesale everywhere and never mutated in place, so the old reference IS the
-    # snapshot.
-    prev_rules = colormarker_rules
+    # The answer below is a COMMIT answer (`commit`): a rule left in `colormarker_rules` over a
+    # refused save is folded into `@compiled` by `Colormarker#refresh`'s unconditional call, so
+    # it painted History rows in EVERY project for the rest of the process while the operator was
+    # told it was not added.
     prev_next = colormarker_next_rule_id
     id = colormarker_next_rule_id
     self.colormarker_next_rule_id = next_id_after(id) # saturating — see `next_id_after`
-    self.colormarker_rules = colormarker_rules + [ColormarkerRule.new(id, enabled, name, match_filter, color, style)]
-    return id if save
-    self.colormarker_rules = prev_rules
+    return id if commit(colormarker_rules, colormarker_rules + [ColormarkerRule.new(id, enabled, name, match_filter, color, style)])
     # The counter too: a burned id is not cosmetic — a project's `colormarker_overrides` key
     # outlives the rule it names, which is the whole reason ids are never reused.
     self.colormarker_next_rule_id = prev_next
@@ -224,48 +216,25 @@ module Gori::Settings
                                    style : String, name : String = "") : Bool
     # A rule a peer deleted must not come back as an edit — see `update_rewriter_rule`.
     reload_colormarker_from_disk
-    prev_rules = colormarker_rules
-    found = false
-    self.colormarker_rules = colormarker_rules.map do |r|
-      next r unless r.id == id
-      found = true
-      ColormarkerRule.new(id, r.enabled, name, match_filter, color, style)
-    end
     # See `add_colormarker_rule`: a false answer means the edit did not commit, so the edited
     # condition and colour must not stay live in every project's list either.
-    ok = found && save
-    self.colormarker_rules = prev_rules unless ok
-    ok
+    commit(colormarker_rules, replace_by_id(colormarker_rules, id) do |r|
+      ColormarkerRule.new(id, r.enabled, name, match_filter, color, style)
+    end)
   end
 
   # The rule's DEFAULT state, which every project without an override follows.
   def self.set_colormarker_rule_enabled(id : Int64, enabled : Bool) : Bool
     reload_colormarker_from_disk # see `update_colormarker_rule`
-    prev_rules = colormarker_rules
-    found = false
-    self.colormarker_rules = colormarker_rules.map do |r|
-      next r unless r.id == id
-      found = true
-      r.copy_with(enabled: enabled)
-    end
-    # See `add_colormarker_rule`.
-    ok = found && save
-    self.colormarker_rules = prev_rules unless ok
-    ok
+    commit(colormarker_rules, replace_by_id(colormarker_rules, id, &.copy_with(enabled: enabled)))
   end
 
   def self.delete_colormarker_rule(id : Int64) : Bool
     reload_colormarker_from_disk # see `update_colormarker_rule`
-    prev_rules = colormarker_rules
-    kept = colormarker_rules.reject { |r| r.id == id }
-    return false if kept.size == colormarker_rules.size
-    self.colormarker_rules = kept
-    # See `add_colormarker_rule`. This one fails the OTHER way round: a dropped-then-unsaved rule
-    # has stopped painting while the caller reports "not deleted — it is still there", and it
-    # comes BACK at the next restart from the file that still holds it.
-    return true if save
-    self.colormarker_rules = prev_rules
-    false
+    # This one fails the OTHER way round: a dropped-then-unsaved rule has stopped painting while
+    # the caller reports "not deleted — it is still there", and it comes BACK at the next restart
+    # from the file that still holds it.
+    commit(colormarker_rules, remove_by_id(colormarker_rules, id))
   end
 
   # Swap the rule one slot earlier (dir < 0) / later (dir > 0) among the GLOBAL rules. Never
@@ -273,20 +242,10 @@ module Gori::Settings
   # change, which is its own action.
   def self.move_colormarker_rule(id : Int64, dir : Int32) : Bool
     reload_colormarker_from_disk # a position is only meaningful against the order on disk
-    list = colormarker_rules.dup
-    i = list.index { |r| r.id == id }
-    return false unless i
-    j = i + (dir < 0 ? -1 : 1)
-    return false if j < 0 || j >= list.size
-    list[i], list[j] = list[j], list[i]
-    prev_rules = colormarker_rules
-    self.colormarker_rules = list
-    # See `add_colormarker_rule`. Under first-match-wins the stakes are precedence: a swap left
-    # live over a refused write means a DIFFERENT rule paints the row than the operator was just
-    # told, in every project.
-    return true if save
-    self.colormarker_rules = prev_rules
-    false
+    # Under first-match-wins the stakes of `commit` are precedence: a swap left live over a
+    # refused write means a DIFFERENT rule paints the row than the operator was just told, in
+    # every project.
+    commit(colormarker_rules, swap_adjacent(colormarker_rules, id, dir) { false })
   end
 
   # --- custom colour CRUD ----------------------------------------------------------------
@@ -313,19 +272,15 @@ module Gori::Settings
     return "a colour named “#{n}” already exists" if colormarker_colors.any? { |c| c.name == n }
     h = normalize_hex(hex)
     return "invalid hex — use #rrggbb" unless h
-    # Snapshot + restore, exactly as `add_colormarker_rule` does and for the same reason: this
-    # answer is a COMMIT answer, so memory has to agree with it. Left mutated, a refused save
+    # `commit`, exactly as `add_colormarker_rule` does and for the same reason: this answer is a
+    # COMMIT answer, so memory has to agree with it. Left mutated, a refused save
     # put the colour in the picker of every project, primed `Theme.set_custom_marks` with a hue
     # nothing on disk defines, and let the next unrelated `save` write it out — while the
     # operator had just been told it was not written. It also poisoned the RETRY: the failed
     # save leaves the file's bytes unchanged, so `reload_colormarker_from_disk` short-circuits
     # on its own cache (see `Settings.reload_section`) and the second attempt came back
     # "a colour named “…” already exists" for a colour that had never been created.
-    prev = colormarker_colors
-    self.colormarker_colors = colormarker_colors + [ColormarkerColor.new(n, h)]
-    return nil if save
-    self.colormarker_colors = prev
-    "settings not writable"
+    commit(colormarker_colors, colormarker_colors + [ColormarkerColor.new(n, h)]) ? nil : "settings not writable"
   end
 
   # Edit a custom colour in place, keyed by its OLD name (which may be unchanged). A rename to a
@@ -343,11 +298,7 @@ module Gori::Settings
     return "invalid hex — use #rrggbb" unless h
     # See `add_colormarker_color`. A refused save here repainted every rule naming the colour
     # with a hue no file holds, until the next restart put the old one back.
-    prev = colormarker_colors
-    self.colormarker_colors = colormarker_colors.map { |c| c.name == old ? ColormarkerColor.new(n, h) : c }
-    return nil if save
-    self.colormarker_colors = prev
-    "settings not writable"
+    commit(colormarker_colors, colormarker_colors.map { |c| c.name == old ? ColormarkerColor.new(n, h) : c }) ? nil : "settings not writable"
   end
 
   # Delete a custom colour by name. Returns whether the write committed; a rule that still names
@@ -362,11 +313,7 @@ module Gori::Settings
     # colour is gone from the picker and from `Theme.set_custom_marks`, so every rule naming it
     # falls back to a default hue — while the caller reports "NOT deleted, it is still there",
     # and the next restart proves the caller right.
-    prev = colormarker_colors
-    self.colormarker_colors = kept
-    return true if save
-    self.colormarker_colors = prev
-    false
+    commit(colormarker_colors, kept)
   end
 
   # The name → hex map the render-side resolver consults (`Tui::Theme.set_custom_marks`). Built

@@ -4,6 +4,7 @@ require "compress/gzip"
 require "compress/zlib"
 require "compress/deflate"
 require "big"
+require "uri/punycode"
 require "../cookie"
 require "../jwt/jwe"
 require "../raw_json"
@@ -1284,15 +1285,8 @@ module Gori::Decoder
       end
     end
 
-    # ---- punycode / IDN (RFC 3492 bootstring) ----
-    PUNY_BASE         =   36
-    PUNY_TMIN         =    1
-    PUNY_TMAX         =   26
-    PUNY_SKEW         =   38
-    PUNY_DAMP         =  700
-    PUNY_INITIAL_BIAS =   72
-    PUNY_INITIAL_N    =  128
-    PUNY_MAX_IN       = 4096
+    # ---- punycode / IDN (RFC 3492 bootstring, via URI::Punycode) ----
+    PUNY_MAX_IN = 4096
 
     # Domain-aware, because that is the only form an operator ever holds: each dot-separated
     # label carrying non-ASCII becomes "xn--" + its bootstring encoding, and a pure-ASCII
@@ -1325,128 +1319,37 @@ module Gori::Decoder
       label.size > 4 && label[0, 4].downcase == "xn--" ? puny_decode_label(label[4..]) : label
     end
 
+    # `URI::Punycode.encode` raises a bare `Exception` on overflow, the only way it fails.
     private def puny_encode_label(label : String) : String
-      input = label.chars.map(&.ord)
-      n = PUNY_INITIAL_N
-      delta = 0_i64
-      bias = PUNY_INITIAL_BIAS
-      basic = input.select { |c| c < 0x80 }
-      h = b = basic.size
-      String.build do |io|
-        basic.each { |c| io << c.unsafe_chr }
-        io << '-' if b > 0
-        while h < input.size
-          m = input.select { |c| c >= n }.min
-          delta += (m - n).to_i64 * (h + 1)
-          raise DecoderError.new("punycode overflow") if delta > Int32::MAX
-          n = m
-          input.each do |c|
-            delta += 1 if c < n
-            next unless c == n
-            q = delta
-            k = PUNY_BASE
-            loop do
-              t = puny_threshold(k, bias)
-              break if q < t
-              io << puny_digit((t + ((q - t) % (PUNY_BASE - t))).to_i32)
-              q = (q - t) // (PUNY_BASE - t)
-              k += PUNY_BASE
-            end
-            io << puny_digit(q.to_i32)
-            bias = puny_adapt(delta, h + 1, h == b)
-            delta = 0_i64
-            h += 1
-          end
-          delta += 1
-          n += 1
-        end
-      end
+      # Non-ASCII that downcase+NFC folds to ASCII (U+212A KELVIN SIGN -> "k"): RFC 3492 still
+      # writes the basic run plus its delimiter, which `URI::Punycode.encode` skips.
+      return "#{label}-" if label.ascii_only? && !label.empty?
+      URI::Punycode.encode(label)
+    rescue Exception
+      raise DecoderError.new("punycode overflow")
     end
 
+    # Two refusals `URI::Punycode.decode` does not make, which it would otherwise answer with
+    # garbage. RFC 3492 §6.2: the basic-code-point run ends at the LAST delimiter, and a
+    # delimiter at index 0 means there is no basic run at all — that '-' then has to parse as
+    # a digit, which it cannot. And the basic run is ASCII by definition.
     private def puny_decode_label(s : String) : String
-      n = PUNY_INITIAL_N
-      i = 0_i64
-      bias = PUNY_INITIAL_BIAS
-      acc = [] of Char
-      chars = s.chars
-      # RFC 3492 §6.2: the basic-code-point run ends at the LAST delimiter. A delimiter at
-      # index 0 means there is no basic run at all (and that '-' then has to parse as a
-      # digit, which it cannot) — so only a strictly-positive index splits.
       delim = s.rindex('-')
-      pos = 0
-      if delim && delim > 0
-        chars[0, delim].each do |c|
-          raise DecoderError.new("invalid punycode: non-ASCII '#{c}' in the basic part") unless c.ord < 0x80
-          acc << c
-        end
-        pos = delim + 1
+      raise DecoderError.new("invalid punycode digit: -") if delim == 0
+      if delim && (c = s[0, delim].each_char.find { |ch| !ch.ascii? })
+        raise DecoderError.new("invalid punycode: non-ASCII '#{c}' in the basic part")
       end
-      while pos < chars.size
-        oldi = i
-        w = 1_i64
-        k = PUNY_BASE
-        loop do
-          raise DecoderError.new("invalid punycode: truncated variable-length integer") if pos >= chars.size
-          digit = puny_digit_value(chars[pos])
-          pos += 1
-          i += digit.to_i64 * w
-          raise DecoderError.new("punycode overflow") if i > Int32::MAX
-          t = puny_threshold(k, bias)
-          break if digit < t
-          w *= (PUNY_BASE - t)
-          raise DecoderError.new("punycode overflow") if w > Int32::MAX
-          k += PUNY_BASE
-        end
-        bias = puny_adapt(i - oldi, acc.size + 1, oldi == 0)
-        # Accumulate in Int64 and range-check BEFORE narrowing. The loop guard above only
-        # bounds `i` at Int32::MAX, so with `acc.size + 1 == 1` the addition itself could
-        # carry `n` past Int32 and raise a raw `OverflowError` — the one exit from this
-        # module that was not the `DecoderError` its callers are written around. (The chain's
-        # blanket rescue caught it, so the step merely read "Arithmetic overflow" instead of
-        # naming punycode.) Matches the explicit overflow guards at the two `raise`s above.
-        n_wide = n.to_i64 + (i // (acc.size + 1))
-        raise DecoderError.new("punycode overflow") if n_wide > Int32::MAX
-        n = n_wide.to_i32
-        raise DecoderError.new("invalid punycode: U+#{n.to_s(16).upcase} is not a Unicode scalar value") unless puny_scalar?(n)
-        i = i % (acc.size + 1)
-        acc.insert(i.to_i32, n.unsafe_chr)
-        i += 1
-      end
-      acc.join
+      URI::Punycode.decode(s)
+    rescue OverflowError
+      raise DecoderError.new("punycode overflow")
+    rescue ex : ArgumentError # a bad digit, a truncated integer, or not a Unicode scalar value
+      raise DecoderError.new("invalid punycode: #{ex.message}")
     end
 
-    private def puny_scalar?(n : Int32) : Bool
+    # A code point a `Char` may hold: in range and not a surrogate. Used by the numeric
+    # character-reference decoders.
+    private def unicode_scalar?(n : Int32) : Bool
       0 <= n <= 0x10FFFF && !(0xD800 <= n <= 0xDFFF)
-    end
-
-    private def puny_threshold(k : Int32, bias : Int32) : Int32
-      return PUNY_TMIN if k <= bias
-      return PUNY_TMAX if k >= bias + PUNY_TMAX
-      k - bias
-    end
-
-    private def puny_adapt(delta : Int64, numpoints : Int32, firsttime : Bool) : Int32
-      d = firsttime ? delta // PUNY_DAMP : delta // 2
-      d += d // numpoints
-      k = 0
-      while d > ((PUNY_BASE - PUNY_TMIN) * PUNY_TMAX) // 2
-        d //= (PUNY_BASE - PUNY_TMIN)
-        k += PUNY_BASE
-      end
-      k + (((PUNY_BASE - PUNY_TMIN + 1) * d) // (d + PUNY_SKEW)).to_i32
-    end
-
-    private def puny_digit(v : Int32) : Char
-      v < 26 ? ('a'.ord + v).unsafe_chr : ('0'.ord + v - 26).unsafe_chr
-    end
-
-    private def puny_digit_value(c : Char) : Int32
-      case c
-      when 'a'..'z' then c.ord - 'a'.ord
-      when 'A'..'Z' then c.ord - 'A'.ord
-      when '0'..'9' then c.ord - '0'.ord + 26
-      else               raise DecoderError.new("invalid punycode digit: #{c}")
-      end
     end
 
     # ---- XML (the five predefined entities) ----
@@ -1515,7 +1418,7 @@ module Gori::Decoder
         digits = body[(hex ? 2 : 1)..]
         return nil unless xml_digit_run?(digits, hex)
         cp = digits.to_i?(hex ? 16 : 10)
-        return nil unless cp && puny_scalar?(cp)
+        return nil unless cp && unicode_scalar?(cp)
         cp.unsafe_chr.to_s
       end
     end
@@ -1636,7 +1539,7 @@ module Gori::Decoder
     private def c_universal(bytes : Bytes, at : Int32, marker : UInt8) : {Bytes, Int32}?
       width = marker == 0x75_u8 ? 4 : 8
       cp = hex_n(bytes, at + 2, width)
-      return nil unless cp && puny_scalar?(cp)
+      return nil unless cp && unicode_scalar?(cp)
       {cp.unsafe_chr.to_s.to_slice, at + 2 + width}
     end
 

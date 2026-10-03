@@ -8,6 +8,22 @@ require "../proxy/h2/head_codec" # PROTOCOL_MARKER — see FlowDetail#websocket?
 
 module Gori
   class Store
+    # Gives a stored enum its `label` (the lowercase member name) and that label's EXACT inverse
+    # (`from_label?`, or the name `parse:` gives). Called right after the enum, since an enum body
+    # cannot hold a macro call. Exact on purpose: stdlib `Enum.parse?` is case-insensitive and would widen which stored Rewriter
+    # labels count as known (`addheader` must stay inert — `MatchRule#inert?`).
+    macro lowercase_label(type, parse = from_label?)
+      enum {{ type }}
+        def label : String
+          to_s.downcase
+        end
+
+        def self.{{ parse.id }}(s : String) : {{ type }}?
+          values.find { |v| v.label == s }
+        end
+      end
+    end
+
     # Lifecycle of a captured flow. Stored as the enum value (INTEGER).
     enum FlowState
       Pending  # request captured, response not yet received
@@ -745,15 +761,8 @@ module Gori
     enum LinkOwnerKind
       Issue
       Note
-
-      def label : String
-        to_s.downcase
-      end
-
-      def self.parse(s : String) : LinkOwnerKind?
-        values.find { |v| v.label == s }
-      end
     end
+    lowercase_label LinkOwnerKind, parse: parse
 
     # Target workbench entity referenced by an `entity_links` row.
     enum LinkRefKind
@@ -761,14 +770,6 @@ module Gori
       Repeater
       Fuzz
       Miner
-
-      def label : String
-        to_s.downcase
-      end
-
-      def self.parse(s : String) : LinkRefKind?
-        values.find { |v| v.label == s }
-      end
 
       # Short tag for the TUI list (e.g. "[hist]").
       def tag : String
@@ -778,6 +779,7 @@ module Gori
         "miner"
       end
     end
+    lowercase_label LinkRefKind, parse: parse
 
     # A link from an Issue or Note to a workbench entity (flow/repeater/fuzz/miner).
     struct EntityLink
@@ -1133,10 +1135,6 @@ module Gori
       Request
       Response
 
-      def label : String
-        to_s.downcase
-      end
-
       # TOTAL, like `RuleOp.from_label` and `MatchKind.from_label` beside it: an unrecognised
       # label reads as the CLI's own default rather than raising. `Enum.parse` is what this
       # was, and `Store#match_rules` reads the column straight into it — so one `match_rules`
@@ -1149,14 +1147,11 @@ module Gori
       # Settings intentionally retains an unknown string for forward-compatible round trips.
       # `from_label` is only the total enum projection; `Store#match_rules` carries the raw
       # value into `MatchRule`, whose `inert?` guard prevents the projection from running.
-      def self.from_label?(s : String) : RuleTarget?
-        values.find { |v| v.label == s }
-      end
-
       def self.from_label(s : String) : RuleTarget
         from_label?(s) || Request
       end
     end
+    lowercase_label RuleTarget
 
     # Which PART of a message a Match&Replace rule rewrites: the HEAD (request/
     # status line + headers), the BODY (the entity — de-chunked, but not
@@ -1175,17 +1170,9 @@ module Gori
       Body
       Ws
 
-      def label : String
-        to_s.downcase
-      end
-
       # Total for the reason `RuleTarget.from_label` gives: a stored row must not raise on the
       # way out of the store. `head` remains the legacy enum projection, and the raw database
       # label is preserved beside it so this fallback cannot make the row executable.
-      def self.from_label?(s : String) : RulePart?
-        values.find { |v| v.label == s }
-      end
-
       def self.from_label(s : String) : RulePart
         from_label?(s) || Head
       end
@@ -1202,6 +1189,7 @@ module Gori
         end
       end
     end
+    lowercase_label RulePart
 
     # What a Match&Replace rule DOES. `Replace` is the classic find/replace over the
     # selected PART (head or body). The three header ops act on the HEAD by header NAME
@@ -1300,18 +1288,11 @@ module Gori
       Literal
       Regex
 
-      def label : String
-        to_s.downcase
-      end
-
-      def self.from_label?(s : String) : MatchKind?
-        values.find { |v| v.label == s }
-      end
-
       def self.from_label(s : String) : MatchKind
         from_label?(s) || Literal
       end
     end
+    lowercase_label MatchKind
 
     # WHERE a `ShortCircuit` rule's answer comes from (#1237). Every other op ignores it.
     #
@@ -1331,20 +1312,13 @@ module Gori
       Dir
       Fault
 
-      def label : String
-        to_s.downcase
-      end
-
-      def self.from_label?(s : String) : RespondKind?
-        values.find { |v| v.label == s }
-      end
-
       # The sub-kind a row written before `respond` existed means: a `body_file` made it a file
       # stub. Used where the column (or the settings key) is absent, never over a stored label.
       def self.implied(body_file : String) : RespondKind
         body_file.empty? ? Inline : File
       end
     end
+    lowercase_label RespondKind
 
     # What a `Fault` rule does to the connection instead of answering (#1237).
     #
@@ -1356,15 +1330,8 @@ module Gori
       Close
       Reset
       Hang
-
-      def label : String
-        to_s.downcase
-      end
-
-      def self.from_label?(s : String) : FaultKind?
-        values.find { |v| v.label == s }
-      end
     end
+    lowercase_label FaultKind
 
     # The parameters of a short-circuit sub-kind, stored as a small JSON object in
     # `match_rules.respond_args` (and the `respond_args` key of a global rule). `""` is `{}`.
