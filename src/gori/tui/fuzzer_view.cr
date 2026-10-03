@@ -1533,16 +1533,18 @@ module Gori::Tui
     # Push the buffered numeric/regex fields into @config/@matcher (before a run and
     # before persistence) so they reflect the edited buffers.
     private def commit_buffers : Nil
-      @config.concurrency = (@s_conc.to_i? || 20).clamp(1, 1000)
+      # Int64 reads, then clamp: `buffer_error` accepts anything `to_i64?` parses, and a value
+      # past Int32 read with `to_i?` fell back to the default while the row kept showing it.
+      @config.concurrency = (@s_conc.to_i64? || 20_i64).clamp(1, 1000).to_i
       @config.rps = @s_rate.to_f?.try { |r| r > 0 ? r : nil }
-      @config.timeout = @s_timeout.to_i?.try { |t| t > 0 ? t.seconds : nil }
-      @config.retries = (@s_retries.to_i? || 0).clamp(0, 1000)
+      @config.timeout = @s_timeout.to_i64?.try { |t| t > 0 ? t.clamp(1, Int32::MAX).seconds : nil }
+      @config.retries = (@s_retries.to_i64? || 0_i64).clamp(0, 1000).to_i
       # Blank / unparsable / <= 0 all mean "no cap" — the same reading `--max-requests`
       # and MCP give an absent key, so clearing the field really does remove the ceiling.
       @config.max_requests = @s_max_req.to_i64?.try { |n| n > 0 ? n : nil }
       # Blank / unparsable / <= 0 all mean "off" — same reading as every other numeric
       # buffer here. Clamped at the same ceiling the engine itself clamps at.
-      @config.race_count = @s_race.to_i?.try { |n| n > 0 ? n.clamp(1, Fuzz::Engine::MAX_RACE_SIZE) : nil }
+      @config.race_count = @s_race.to_i64?.try { |n| n > 0 ? n.clamp(1, Fuzz::Engine::MAX_RACE_SIZE).to_i : nil }
       @matcher.match_regex = @s_m_regex.empty? ? nil : (Regex.new(@s_m_regex) rescue nil)
       @matcher.filter_regex = @s_f_regex.empty? ? nil : (Regex.new(@s_f_regex) rescue nil)
       # `stop_on` (issue #1240): blank / <= 0 = never, same reading as the numeric buffers. The
