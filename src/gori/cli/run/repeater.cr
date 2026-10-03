@@ -1374,9 +1374,13 @@ module Gori
       end
 
       # The request line (first line) of a member's stored request, for the race transcript.
+      #
+      # A display label, made printable once here for every writer that shows it: scrubbed (a
+      # stored request line need not be UTF-8, and the JSON form printed the raw byte) and
+      # term_safe (the text form printed control bytes straight to the terminal).
       private def self.race_request_line(request : Bytes) : String
-        line = String.new(request[0, {request.size, 200}.min]).lines.first?.try(&.strip)
-        line && !line.empty? ? line : "(no request line)"
+        line = String.new(request[0, {request.size, 200}.min]).scrub.lines.first?.try(&.strip)
+        line && !line.empty? ? Output.term_safe(line) : "(no request line)"
       end
 
       # Print one race's per-member results — status, size and RELEASE-RELATIVE timing (each
