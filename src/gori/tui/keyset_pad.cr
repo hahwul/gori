@@ -210,7 +210,9 @@ module Gori::Tui
         @status = "selection cleared"
         return true
       end
-      if step = caret_step(ev)
+      if (ev.ctrl? || ev.alt?) && (key.left? || key.right?)
+        @read.word_move(@area, key.left? ? -1 : 1, ev.shift?) # ⌥/⌃←→ by word, as every pane
+      elsif step = caret_step(ev)
         @read.move(@area, step[0], step[1], selecting: ev.shift?)
       elsif !line_edge(ev)
         run(ev)
