@@ -98,9 +98,6 @@ module Gori
           {/^Stack trace:\s*(?:\n|#\d)/m, "stack trace"},
         ].map { |(pat, label)| {Utf8.tolerant(pat), label} }
 
-        # Alias for callers/tests that still reference BodyLeaks::SECRET_PATTERNS.
-        SECRET_PATTERNS = Secrets::PATTERNS
-
         # An active sub-resource (script/iframe) loaded over plain http on an https page —
         # genuine active mixed content (browsers block it; it signals an insecure dependency).
         # The (?<![-\w]) guard requires a real attribute boundary before `src`, so a hyphenated

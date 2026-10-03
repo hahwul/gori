@@ -25,7 +25,6 @@ describe Gori::Authorize::Passive do
   describe ".skip_reason" do
     it "takes a safe request an identity would actually change" do
       Passive.skip_reason(detail, defaults).should be_nil
-      Passive.replayable?(detail, defaults).should be_true
     end
 
     # THE regression that made this mode look broken. On a site the operator is not logged
@@ -41,7 +40,7 @@ describe Gori::Authorize::Passive do
       # Left in, those rows read `⚠ same` — a finding manufactured out of nothing, on every
       # public page of the site.
       it "is what keeps a public site from lighting up as a bypass on every page" do
-        Passive.replayable?(detail(headers: "Accept: */*\r\n"), defaults).should be_false
+        Passive.skip_reason(detail(headers: "Accept: */*\r\n"), defaults).should_not be_nil
       end
 
       it "takes the same request once an identity SETS a session" do

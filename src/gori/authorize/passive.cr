@@ -36,10 +36,6 @@ module Gori
         nil
       end
 
-      def self.replayable?(detail : Store::FlowDetail, identities : Array(Identity)) : Bool
-        skip_reason(detail, identities).nil?
-      end
-
       # `skip_reason` plus the one rung only an UNATTENDED replay adds: a request gori itself
       # sent. Every explicit path — the TUI's manual queue, `gori run authorize 42`, MCP
       # `authorize_start{flow_ids}` — deliberately does NOT ask this, because there a person

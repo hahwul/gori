@@ -10,7 +10,6 @@ module Gori::Discover
   module Url
     UUID = /\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i
     HEX  = /\A[0-9a-f]{12,}\z/i # long hash/hex (md5/sha/git oid)
-    NUM  = /\A\d+\z/
     DATE = /\A\d{4}-\d{2}-\d{2}\z/
 
     record Parts, scheme : String, host : String, port : Int32, path : String, query : String?
@@ -223,7 +222,7 @@ module Gori::Discover
     # regex at all. All four patterns are ASCII-only, so a non-ASCII segment can never match and
     # is rejected before PCRE2 sees it. Sizes are exact for UUID/DATE and a floor for HEX.
     #
-    # ORDER IS LOAD-BEARING: HEX also matches a long run of digits, so NUM must be tested first
+    # ORDER IS LOAD-BEARING: HEX also matches a long run of digits, so the all-digits test must run first
     # or every long numeric id would fold to {hex}.
     def self.fold_segment(seg : String) : String
       d = ascii_downcase(seg)
@@ -254,7 +253,7 @@ module Gori::Discover
       seg
     end
 
-    # Allocation- and PCRE-free stand-in for NUM (`\A\d+\z`).
+    # Allocation- and PCRE-free stand-in for `\A\d+\z`.
     private def self.all_digits?(s : String) : Bool
       return false if s.empty?
       s.each_byte { |b| return false unless 0x30_u8 <= b <= 0x39_u8 }

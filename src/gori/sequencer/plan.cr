@@ -135,11 +135,6 @@ module Gori::Sequencer
       @engine.total
     end
 
-    # True when this plan sends nothing (manual mode).
-    def analyse_only? : Bool
-      @origin.nil?
-    end
-
     # The origin, for a surface whose options are statically live replay — `gori run
     # sequence` and MCP `sequence_start` both handle their manual path (--tokens /
     # sequence_analyze) without building a plan at all. Raises rather than returning nil so
