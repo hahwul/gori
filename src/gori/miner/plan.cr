@@ -462,35 +462,9 @@ module Gori::Miner
     private def self.resolve_origin(options : PlanOptions) : Fuzz::Origin
       raw = options.target.presence || options.default_target.presence
       raise PlanError.new(PlanError::Reason::NoTarget, "no target origin") unless raw
-      # `deferred: nil` — a DIAL TUPLE cannot defer. Every other unresolved-name site skips a
-      # DECLARED binding because a send seam re-scans the same value with `Env.expand_bindings`
-      # later; this value is read ONCE, frozen into the plan, and never
-      # looked at again — `Fuzz::Sender`/`Discover::Sender` build their ConnPool on it and the
-      # Layer-1 `Outbound#check` verdict was already taken against it, so re-resolving per send
-      # would move the dial target out from under a scope decision. Deferring bought nothing
-      # anyway: a binding value is a token observed from a response, never a hostname, a port
-      # or an SNI. Left deferred it shipped as the literal `$SESSION` — every send failing DNS,
-      # and `Outbound.scope_url` asked about `https://$SESSION/a`, a URL no rule can match, so
-      # the run was refused as out-of-scope, naming the wrong gate.
-      refuse_unresolved(Env.unresolved(raw, deferred: nil))
-      url = Env.expand(raw)
-      scheme, host, port = Repeater::FlowRequest.parse_target(url)
-      raise PlanError.new(PlanError::Reason::BadTarget, "could not parse a host from #{url.inspect}", url) if host.empty?
-      Fuzz::Origin.new(scheme, host, port)
-    end
-
-    # Refuse a run whose request or target still carries a token that resolves to
-    # nothing. `Env.expand` leaves an unregistered `$KEY` literal on purpose — right for
-    # a display path, wrong here, because the seven characters `$SESSION` then go out as
-    # a header value, the origin answers 401, and the results read as findings about the
-    # target rather than as a variable the operator never set (#519). This builder is the
-    # surface-independent chokepoint every mine surface expands through, so the check
-    # lives here once instead of in each of the three.
-    private def self.refuse_unresolved(names : Array(String)) : Nil
-      return if names.empty?
-      detail = Env.token_list(names)
-      raise PlanError.new(PlanError::Reason::UnresolvedEnv,
-        "unresolved env #{detail}", detail)
+      Fuzz::Origin.new(*Repeater::FlowRequest.dial_target(raw))
+    rescue e : Repeater::FlowRequest::DialTargetError
+      raise PlanError.new(e.unresolved? ? PlanError::Reason::UnresolvedEnv : PlanError::Reason::BadTarget, e.message.to_s, e.detail)
     end
 
     # The candidate list, in the order it is TESTED (which is what a `max_requests`-capped run

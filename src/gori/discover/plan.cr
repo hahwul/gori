@@ -179,22 +179,17 @@ module Gori::Discover
     # ONE `Env.expand` over the seed, then the scheme default: `acme.test/admin` means
     # `https://acme.test/admin` on every surface (the TUI used to reject it as invalid).
     private def self.resolve_seed(raw : String) : String
-      # `deferred: nil` — a DIAL TUPLE cannot defer. Every other unresolved-name site skips a
-      # DECLARED binding because a send seam re-scans the same value with `Env.expand_bindings`
-      # later; this value is read ONCE, frozen into the plan, and never
-      # looked at again — `Fuzz::Sender`/`Discover::Sender` build their ConnPool on it and the
-      # Layer-1 `Outbound#check` verdict was already taken against it, so re-resolving per send
-      # would move the dial target out from under a scope decision. Deferring bought nothing
-      # anyway: a binding value is a token observed from a response, never a hostname, a port
-      # or an SNI. Left deferred it shipped as the literal `$SESSION` — every send failing DNS,
-      # and `Outbound.scope_url` asked about `https://$SESSION/a`, a URL no rule can match, so
-      # the run was refused as out-of-scope, naming the wrong gate.
+      # A dial value cannot defer a binding — see `Repeater::FlowRequest.refuse_unresolved_dial`.
       # `.scrub` the seed once, up front: it is a raw `--target` / MCP argument, and the
       # scheme test below is a PCRE2 call that raises `ArgumentError` on a non-UTF-8
       # subject. The call site rescues only `PlanError`, and this runs AFTER `open_store`,
       # so an escaping raise also strands a half-migrated DB + WAL behind it.
       stripped = raw.scrub.strip
-      refuse_unresolved(Env.unresolved(stripped, deferred: nil))
+      begin
+        Repeater::FlowRequest.refuse_unresolved_dial(stripped)
+      rescue e : Repeater::FlowRequest::DialTargetError
+        raise PlanError.new(PlanError::Reason::UnresolvedEnv, e.message.to_s, e.detail)
+      end
       target = Env.expand(stripped)
       raise PlanError.new(PlanError::Reason::NoTarget, "no seed target") if target.empty?
       target.matches?(/\Ahttps?:\/\//i) ? target : "https://#{target}"
@@ -247,20 +242,6 @@ module Gori::Discover
         return UnscopedStoreScope.new(scope)
       end
       StoreScope.new(scope)
-    end
-
-    # Refuse a crawl whose seed or custom headers still carry a token that resolves to
-    # nothing. `Env.expand` leaves an unregistered `$KEY` literal on purpose — right for
-    # a display path, wrong here, because the seven characters `$SESSION` then go out as
-    # a header value on every probe, the origin answers 401 to all of them, and the run
-    # reports a uniformly locked-down target rather than a variable the operator never
-    # set (#519). This builder is the surface-independent chokepoint every discover
-    # surface expands through, so the check lives here once instead of in each of three.
-    private def self.refuse_unresolved(names : Array(String)) : Nil
-      return if names.empty?
-      detail = Env.token_list(names)
-      raise PlanError.new(PlanError::Reason::UnresolvedEnv,
-        "unresolved env #{detail}", detail)
     end
 
     # A missing/unreadable/binary wordlist is a user mistake, not a crash: every surface

@@ -296,45 +296,16 @@ module Gori::Sequencer
 
     # The explicit target when it has one, else the seeding flow's. Blank counts as absent
     # (an agent that sends `"url": ""` means "use the flow's", not "fail").
+    #
+    # The REQUEST half deliberately does NOT refuse an unresolved token — see `build`: a `$NAME`
+    # with no value is a literal string on the wire (`Env::Escape`), which a request may
+    # legitimately carry. The manual (analyse-only) path returns before this and needs none.
     private def self.resolve_origin(options : PlanOptions) : Fuzz::Origin
       raw = options.target.presence || options.default_target.presence
       raise PlanError.new(PlanError::Reason::NoTarget, "no target origin") unless raw
-      # `deferred: nil` — a DIAL TUPLE cannot defer. Every other unresolved-name site skips a
-      # DECLARED binding because a send seam re-scans the same value with `Env.expand_bindings`
-      # later; this value is read ONCE, frozen into the plan, and never
-      # looked at again — `Fuzz::Sender`/`Discover::Sender` build their ConnPool on it and the
-      # Layer-1 `Outbound#check` verdict was already taken against it, so re-resolving per send
-      # would move the dial target out from under a scope decision. Deferring bought nothing
-      # anyway: a binding value is a token observed from a response, never a hostname, a port
-      # or an SNI. Left deferred it shipped as the literal `$SESSION` — every send failing DNS,
-      # and `Outbound.scope_url` asked about `https://$SESSION/a`, a URL no rule can match, so
-      # the run was refused as out-of-scope, naming the wrong gate.
-      refuse_unresolved(Env.unresolved(raw, deferred: nil))
-      url = Env.expand(raw)
-      scheme, host, port = Repeater::FlowRequest.parse_target(url)
-      if host.empty?
-        raise PlanError.new(PlanError::Reason::BadTarget, "could not parse a host from #{url.inspect}", url)
-      end
-      Fuzz::Origin.new(scheme, host, port)
-    end
-
-    # Refuse a collection whose TARGET still carries a token that resolves to nothing.
-    # `Env.expand` leaves an unregistered `$KEY` literal on purpose — right for a display
-    # path, wrong for a dial tuple, because `$SESSION` then ships as the hostname: every send
-    # fails DNS and `Outbound.scope_url` is asked about `https://$SESSION/a`, a URL no rule
-    # can match, so the run is refused as out-of-scope and names the wrong gate (#519).
-    #
-    # The REQUEST half deliberately does NOT come through here — see `build`, where the
-    # head-only refusal it used to run was dropped: a `$NAME` with no value is a literal
-    # string on the wire (`Env::Escape`), which a request may legitimately carry. This
-    # builder is the surface-independent chokepoint every sequence surface expands through,
-    # so the target check lives here once instead of in each of the three. The manual
-    # (analyse-only) path returns before this and needs none — it opens no socket.
-    private def self.refuse_unresolved(names : Array(String)) : Nil
-      return if names.empty?
-      detail = Env.token_list(names)
-      raise PlanError.new(PlanError::Reason::UnresolvedEnv,
-        "unresolved env #{detail}", detail)
+      Fuzz::Origin.new(*Repeater::FlowRequest.dial_target(raw))
+    rescue e : Repeater::FlowRequest::DialTargetError
+      raise PlanError.new(e.unresolved? ? PlanError::Reason::UnresolvedEnv : PlanError::Reason::BadTarget, e.message.to_s, e.detail)
     end
   end
 end

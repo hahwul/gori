@@ -63,7 +63,7 @@ module Gori::Repeater
     #
     #   * `mask_secrets` resolves `Env.masking_vars` — env vars plus every session-binding
     #     value currently held. Sends resolve `Env.effective_vars` (env vars only), and
-    #     `Repeater::Plan` also calls `refuse_unresolved(Env.unresolved(s, deferred: nil))`,
+    #     `Repeater::Plan` also calls `FlowRequest.refuse_unresolved_dial` (`deferred: nil`),
     #     which refuses a declared binding name. Masking a binding value here would mint a
     #     `$NAME` that can never resolve on any send path.
     #   * The author's target is then unrecoverable. An author who sent
