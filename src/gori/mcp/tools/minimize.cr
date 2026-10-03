@@ -216,18 +216,22 @@ module Gori
       end
 
       # The same two-layer gate the other active tools use, now expressed through the one
-      # seam: Layer 2 (Sandbox) first — it is a hard containment gate allow_unscoped does
-      # NOT lift — then Layer 1's allowlist, which allow_unscoped does. Layer 2 is applied
-      # again per send inside Fuzz::Sender; this only lets minimize refuse with a precise
-      # message before it starts.
+      # seam: the sandbox first — a hard containment gate allow_unscoped does NOT lift, and
+      # the one answer that is right when it also falls outside the scope — then Layer 1's
+      # allowlist, which allow_unscoped does lift and whose refusal carries the remedy. Last, the
+      # excludes a waived Layer 1 no longer looks at: every candidate goes through
+      # Fuzz::Sender's sweep gate, which holds them. The engine reports any of these as a
+      # refusal too; this only lets minimize refuse with a precise message before it starts.
       private def scope_refusal(ob : Outbound, scheme : String, host : String, port : Int32, text : String) : Result?
         target = Outbound.request_target(text)
-        if reason = ob.send_block(scheme, host, target, port)
-          return err("#{reason} — minimize refuses to send", "SCOPE_BLOCKED",
-            field: "repeater_id", details: JSON.parse({"scope_decision" => "sandbox"}.to_json))
+        reason = ob.send_block(scheme, host, target, port)
+        unless reason
+          sc = ob.check_request(scheme, host, target, port)
+          return scope_blocked(sc, field: "repeater_id") if sc.blocked?
+          reason = ob.sweep_block(scheme, host, target, port) || return
         end
-        sc = ob.check_request(scheme, host, target, port)
-        sc.blocked? ? scope_blocked(sc, field: "repeater_id") : nil
+        err("#{reason} — minimize refuses to send", "SCOPE_BLOCKED",
+          field: "repeater_id", details: JSON.parse({"scope_decision" => Outbound.refusal_decision(reason)}.to_json))
       end
 
       # The tools/list schemas for the request-minimizer tools, kept beside the handlers that

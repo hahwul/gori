@@ -68,6 +68,12 @@ module Gori
       err == SANDBOX_SWEEP_ERROR || err == EXCLUDE_SWEEP_ERROR
     end
 
+    # Which Layer-2 gate a `sweep_block` refusal came from, as a `scope_decision` names it.
+    # Here because this is the one place the refusal strings are compared.
+    def self.refusal_decision(err : String) : String
+      err == EXCLUDE_SWEEP_ERROR ? "exclude" : "sandbox"
+    end
+
     # A running job's rules would otherwise be a start-time snapshot. A per-send DB read is
     # too heavy at high concurrency, so the in-place reload is time-throttled to this.
     RELOAD_INTERVAL = 1.second

@@ -367,6 +367,21 @@ describe "MCP minimize_repeater" do
     end
   end
 
+  # Every candidate goes through Fuzz::Sender, which honours excludes: the pre-check must too,
+  # or the run is refused send by send and reported as an aborted minimize.
+  it "refuses an excluded target up front even under allow_unscoped" do
+    with_store do |store|
+      id = store.insert_repeater("https://acme.test/", "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice,
+        false, true, nil, 0)
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "acme.test")
+      scope.add("exclude", "host", "acme.test")
+      r = tools_for(store).call("minimize_repeater", JSON.parse(%({"repeater_id":#{id},"allow_unscoped":true})))
+      r.error_code.should eq("SCOPE_BLOCKED")
+      r.details.not_nil!["scope_decision"].as_s.should eq("exclude")
+    end
+  end
+
   it "refuses a sandbox-blocked target even under allow_unscoped" do
     with_store do |store|
       id = store.insert_repeater("https://acme.test/", "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice,

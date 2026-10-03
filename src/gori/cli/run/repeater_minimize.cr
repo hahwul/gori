@@ -330,8 +330,9 @@ module Gori
         if verdict.blocked?
           abort "gori run repeater minimize: #{host} is out of the project scope — #{Gori::Outbound.remedy(verdict, "--allow-unscoped")}"
         end
-        # Layer 2 (Sandbox / exclude): applies even under --allow-unscoped.
-        if reason = outbound.send_block(scheme, host, target, port)
+        # Layer 2 (Sandbox / exclude): applies even under --allow-unscoped, in the sweep form every
+        # candidate send is held to (Fuzz::Sender), so an excluded target is refused up front.
+        if reason = outbound.sweep_block(scheme, host, target, port)
           abort "gori run repeater minimize: #{reason}"
         end
         {scheme, host, port}
