@@ -243,16 +243,15 @@ describe "gori run — stdin doors refuse a terminal" do
         .should contain("rescue ex : IO::Error")
     end
 
-    # A PATH that names a terminal is refused by the three wordlist loaders too, each raising
+    # A PATH that names a terminal is refused by both wordlist loaders too, each raising
     # what its own error funnel already catches — `Gori::Error` for fuzz, `IO::Error` for the
-    # miner/discover pair, whose `PlanError::Reason::Wordlist` arm reports it as
+    # miner/discover pair (`WordlistCatalog.load`), whose `PlanError::Reason::Wordlist` arm reports it as
     # `wordlist error: …`. The predicate itself has ONE home.
-    it "refuses a terminal wordlist in all three loaders, through one predicate" do
+    it "refuses a terminal wordlist in both loaders, through one predicate" do
       root = File.join(__DIR__, "..", "..", "..", "src", "gori")
       {
         {"fuzz/payload.cr", "Gori::Error.new"},
-        {"miner/wordlist.cr", "IO::Error.new"},
-        {"discover/wordlist.cr", "IO::Error.new"},
+        {"wordlist_catalog.cr", "IO::Error.new"},
       }.each do |file, raises|
         src = File.read(File.join(root, file))
         src.should contain("Gori::TtyPath.terminal?")

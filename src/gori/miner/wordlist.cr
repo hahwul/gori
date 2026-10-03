@@ -1,11 +1,10 @@
 require "../embedded_list"
-require "../tty_path"
 require "../wordlist_catalog"
 
 module Gori::Miner
   # The candidate parameter names. The built-in list is baked into the binary at
   # compile time (gori ships no runtime asset dir); an optional user file is merged in
-  # at load time. De-duplicated, order-preserving (built-in first).
+  # at load time by `WordlistCatalog.load`.
   module Wordlist
     # read_file takes a compile-time string; "#{__DIR__}/…" resolves relative to THIS
     # source file, so the embed works regardless of the process's working directory.
@@ -17,46 +16,8 @@ module Gori::Miner
       @@builtin ||= EmbeddedList.parse(BUILTIN_RAW)
     end
 
-    # Built-in names, then the optional user file (read at runtime). De-duped, order
-    # preserved. A missing/unreadable user path raises File::Error → the frontend reports it.
     def self.load(user_path : String? = nil) : Array(String)
-      names = builtin.dup
-      if path = user_path.try(&.strip) # open the STRIPPED path (the emptiness check used it too)
-        unless path.empty?
-          # A bare name is a list in the current directory or the global catalog (#1353); a
-          # path is opened exactly as given.
-          merge_user_file(WordlistCatalog.resolve_path(path)) { |line| names << line }
-        end
-      end
-      EmbeddedList.dedup(names)
-    end
-
-    # The user merge file is operator MATERIAL, not a curated gori asset: a leading or
-    # trailing space/tab in a parameter NAME is a real test (e.g. a literal `"id "` a
-    # backend framework trims before lookup while gori's own encoder does not), and the
-    # rest of the pipeline already carries it to the wire byte-exact once it survives
-    # the loader (`zzhash#x` -> `zzhash%23x`, interior tab -> `%09`) — only the loader
-    # was destroying it. So this reads with `chomp: true` (line-ending only, same
-    # fidelity as `Fuzz::WordlistFile#next_value`, payload.cr) and keeps the BLANK-LINE
-    # and `#`-COMMENT conventions (both standard for a line-oriented wordlist file, and
-    # neither is expressible any other way in the format) — but classifies blank/comment
-    # on the TRIMMED copy, never on the entry it yields, so `"zzp "` / `" zzp"` /
-    # `"zzTRAILTAB\t"` each survive as distinct, unstripped entries instead of being
-    # silently trimmed and then DEDUPED away against the trimmed twin (round 7,
-    # h1-seams.md FINDING 4).
-    private def self.merge_user_file(path : String, & : String ->) : Nil
-      # `IO::Error`, so it rides the same funnel a missing or unreadable path does and reaches
-      # every surface as `wordlist error: …` rather than as a backtrace. A terminal never ends
-      # and echoes every byte typed into the scrollback, so `--wordlist /dev/tty` hung (#1034).
-      if Gori::TtyPath.terminal?(path)
-        raise IO::Error.new("wordlist is a terminal, not a file: #{path} — pipe the list in " \
-                            "(`generator | gori run mine … --wordlist /dev/stdin`) or name a real path")
-      end
-      File.each_line(path, chomp: true) do |line|
-        trimmed = line.strip
-        next if trimmed.empty? || trimmed.starts_with?('#')
-        yield line
-      end
+      WordlistCatalog.load(builtin, user_path, tool: "mine")
     end
   end
 end

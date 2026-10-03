@@ -1,6 +1,7 @@
 require "./paths"
 require "./durable_file"
 require "./tty_path"
+require "./embedded_list"
 
 module Gori
   # The global wordlist catalog (#1353): named lists that live as plain files under
@@ -25,10 +26,10 @@ module Gori
   #
   # What it deliberately does NOT do is touch a list's bytes. A blank line or a line starting
   # with `#` is a legitimate Fuzzer payload (`Fuzz::WordlistFile` reads every line), while the
-  # Miner and Discover read the same two shapes as file formatting
-  # (`Miner::Wordlist.merge_user_file`). Both are right for their tool, so the file is the raw
-  # source and each consumer keeps its own documented line semantics — normalizing here would
-  # decide one tool's answer for all of them.
+  # Miner and Discover read the same two shapes as file formatting (`load`, which only those
+  # two call). Both are right for their tool, so the file is the raw source and each consumer
+  # keeps its own documented line semantics — normalizing in `resolve` would decide one tool's
+  # answer for all of them.
   module WordlistCatalog
     extend self
 
@@ -159,6 +160,46 @@ module Gori
     # The path `resolve` picks — for a loader that has no use for where it came from.
     def resolve_path(spec : String) : String
       resolve(spec).path
+    end
+
+    # The Miner's and Discover's candidate list: `builtin`, then the optional user file (read at
+    # runtime, a bare name resolved through the catalog). De-duped, order preserved. A
+    # missing/unreadable user path raises File::Error → the frontend reports it. `tool` is the
+    # `gori run` subcommand the terminal refusal names.
+    def load(builtin : Array(String), user_path : String?, *, tool : String) : Array(String)
+      names = builtin.dup
+      # Open the STRIPPED path (the emptiness check used it too).
+      if (path = user_path.try(&.strip)) && !path.empty?
+        merge_user_file(resolve_path(path), tool) { |line| names << line }
+      end
+      EmbeddedList.dedup(names)
+    end
+
+    # The user merge file is operator MATERIAL, not a curated gori asset: a leading or
+    # trailing space/tab in a parameter NAME or a path SEGMENT is a real test (a literal `"id "`
+    # a backend framework trims before lookup; the classic IIS/ASP.NET trailing-space /
+    # trailing-dot access-control bypass pair), and the rest of the pipeline already carries it
+    # to the wire byte-exact once it survives the loader (`zzhash#x` -> `zzhash%23x`, interior
+    # tab -> `%09`) — only the loader was destroying it. So this reads with `chomp: true`
+    # (line-ending only, same fidelity as `Fuzz::WordlistFile#next_value`, payload.cr) and keeps
+    # the BLANK-LINE and `#`-COMMENT conventions (both standard for a line-oriented wordlist
+    # file, and neither is expressible any other way in the format) — but classifies
+    # blank/comment on the TRIMMED copy, never on the entry it yields, so `"zzp "` / `" zzp"` /
+    # `"zzTRAILTAB\t"` each survive as distinct, unstripped entries instead of being silently
+    # trimmed and then DEDUPED away against the trimmed twin (round 7, h1-seams.md FINDING 4).
+    private def merge_user_file(path : String, tool : String, & : String ->) : Nil
+      # `IO::Error`, so it rides the same funnel a missing or unreadable path does and reaches
+      # every surface as `wordlist error: …` rather than as a backtrace. A terminal never ends
+      # and echoes every byte typed into the scrollback, so `--wordlist /dev/tty` hung (#1034).
+      if Gori::TtyPath.terminal?(path)
+        raise IO::Error.new("wordlist is a terminal, not a file: #{path} — pipe the list in " \
+                            "(`generator | gori run #{tool} … --wordlist /dev/stdin`) or name a real path")
+      end
+      File.each_line(path, chomp: true) do |line|
+        trimmed = line.strip
+        next if trimmed.empty? || trimmed.starts_with?('#')
+        yield line
+      end
     end
 
     # The sentence a not-found error appends for a name that was looked up rather than
