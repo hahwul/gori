@@ -1860,11 +1860,11 @@ module Gori::Tui
       @env_items[@env_sel]?.try { |(key, val)| "#{key}=#{val}" }
     end
 
-    def env_delete : String?
-      entry = @env_items[@env_sel]?
-      return nil unless entry
-      key, _ = entry
-      @env_items.delete_at(@env_sel)
+    # By key, not the selection: the confirm is a modal and the data_version tick reloads
+    # the list under it, so the row the operator named may have moved or gone.
+    def env_delete(key : String) : String?
+      idx = @env_items.index { |(k, _)| k == key } || return nil
+      @env_items.delete_at(idx)
       clamp_env_sel
       key
     end

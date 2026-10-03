@@ -1181,13 +1181,15 @@ module Gori::Tui
       # The KEY, never the value — a confirm is a modal an operator may be sharing a screen on.
       @host.confirm("DELETE ENV VAR", "Delete “#{key}”? This can't be undone.",
         confirm_label: "delete", danger: true) do
-        if removed = @project_view.env_delete
+        if removed = @project_view.env_delete(key)
           # Whether the write COMMITTED, like the host-override sibling above and like MCP's
           # `delete_env_var` / `gori run project env delete`. A dropped write reported as
           # "deleted" stayed convincing for the whole session, and the var came back at the
           # next launch.
           ok = persist_env_vars
           @host.status(ok ? "env var deleted: #{removed}" : "env var NOT deleted (project busy or unwritable) — try again")
+        else
+          @host.status("env var #{key} was already removed")
         end
       end
     end
