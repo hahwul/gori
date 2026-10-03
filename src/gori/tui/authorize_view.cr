@@ -511,6 +511,8 @@ module Gori::Tui
       @vis_key = key
       if (want = @sel_id) && (j = @vis.index { |i| @entries[i].id == want })
         @sel = j
+      else
+        @sel = @sel.clamp(0, {@vis.size - 1, 0}.max) # the anchor is filtered out: stay on a row
       end
       @vis
     end
