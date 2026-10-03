@@ -545,9 +545,10 @@ module Gori::Fuzz
       # both guards below (and NoPayloads, one screen down) are skipped when it is set.
       # (`race_count` is validated above, ahead of the gRPC field guard — see there.)
       raise PlanError.new(PlanError::Reason::NoPositions, "the template has no §…§ positions") if marked.position_count == 0 && !race_count
-      # The twin of `refuse_unresolved`, one line down and for the same reason: a `¦chain` this
-      # run cannot apply leaves the position's payload UNTRANSFORMED on the wire. See
-      # `refuse_unrunnable_chains` (the shared validator the Repeater send path also calls).
+      # The twin of the target's unresolved-token refusal (`resolve_origin`, below), for the same
+      # reason: a `¦chain` this run cannot apply leaves the position's payload UNTRANSFORMED on
+      # the wire. See `refuse_unrunnable_chains` (the shared validator the Repeater send path
+      # also calls).
       refuse_unrunnable_chains(marked.positions, Decoder.shared_registry)
 
       origin = resolve_origin(options)
@@ -828,21 +829,9 @@ module Gori::Fuzz
     private def self.resolve_origin(options : PlanOptions) : Origin
       raw = options.target.presence || options.default_target.presence
       raise PlanError.new(PlanError::Reason::NoTarget, "no target origin") unless raw
-      # `deferred: nil` — a DIAL TUPLE cannot defer. Every other unresolved-name site skips a
-      # DECLARED binding because a send seam re-scans the same value with `Env.expand_bindings`
-      # later; this value is read ONCE, frozen into the plan, and never
-      # looked at again — `Fuzz::Sender`/`Discover::Sender` build their ConnPool on it and the
-      # Layer-1 `Outbound#check` verdict was already taken against it, so re-resolving per send
-      # would move the dial target out from under a scope decision. Deferring bought nothing
-      # anyway: a binding value is a token observed from a response, never a hostname, a port
-      # or an SNI. Left deferred it shipped as the literal `$SESSION` — every send failing DNS,
-      # and `Outbound.scope_url` asked about `https://$SESSION/a`, a URL no rule can match, so
-      # the run was refused as out-of-scope, naming the wrong gate.
-      refuse_unresolved(Env.unresolved(raw, deferred: nil))
-      url = Env.expand(raw)
-      scheme, host, port = Repeater::FlowRequest.parse_target(url)
-      raise PlanError.new(PlanError::Reason::BadTarget, "could not parse a host from #{url.inspect}", url) if host.empty?
-      Origin.new(scheme, host, port)
+      Origin.new(*Repeater::FlowRequest.dial_target(raw))
+    rescue e : Repeater::FlowRequest::DialTargetError
+      raise PlanError.new(e.unresolved? ? PlanError::Reason::UnresolvedEnv : PlanError::Reason::BadTarget, e.message.to_s, e.detail)
     end
 
     # Race mode needs at least two connections in flight together (one is just a send).
@@ -905,21 +894,6 @@ module Gori::Fuzz
       Settings.tls_preset_normalize(name)
     end
 
-    # Refuse a run whose TARGET carries a token that resolves to nothing.
-    #
-    # The template half of this is gone — a `$NAME` with no value is a literal string on the
-    # wire now, everywhere. A DIAL TUPLE is the exception the note at the call site argues:
-    # `$` is not a legal byte in a hostname, so there is no operator test case to protect,
-    # and a literal `$SESSION` there makes `Outbound.scope_url` ask about `https://$SESSION/a`
-    # — a URL no rule can match — so the run comes back refused as OUT-OF-SCOPE, naming a
-    # gate that was never the problem. Refusing here names the real one.
-    private def self.refuse_unresolved(names : Array(String)) : Nil
-      return if names.empty?
-      detail = Env.token_list(names)
-      raise PlanError.new(PlanError::Reason::UnresolvedEnv,
-        "unresolved env #{detail}", detail)
-    end
-
     # Refuse a run whose `§value¦chain§` markers name a converter the registry cannot apply.
     #
     # `Template#apply_chains` returns the payload VERBATIM when its chain does not run, with a
@@ -933,8 +907,8 @@ module Gori::Fuzz
     # `"matched":true`. `gori run decoder` names the identical refusal off the identical
     # registry one screen away.
     #
-    # So it is refused HERE, beside `refuse_unresolved`, whose comment makes the same argument
-    # for `$KEY`: this builder is the surface-independent chokepoint every fuzz surface goes
+    # So it is refused HERE, the argument `FlowRequest.refuse_unresolved_dial` makes for a
+    # target's `$KEY`: this builder is the surface-independent chokepoint every fuzz surface goes
     # through, and a refusal before the first dial is the only report a sweep of ten thousand
     # requests can act on.
     #

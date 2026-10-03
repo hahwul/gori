@@ -250,6 +250,16 @@ module Gori
           qi ? origin_target[0...qi] : origin_target
         end
 
+        # The per-endpoint dedup key a rule stamps on its detections: `id|host:port|METHOD|path`,
+        # with an optional trailing `|tag` (an aggressive/unsafe mode, an injected param, an action
+        # id). `id` is `info.id`, so a rule whose key literal and `info.id` differ keeps its own
+        # `key_string`. Was hand-formatted identically in a dozen rules.
+        protected def endpoint_key(detail : Store::FlowDetail, method : String, path : String,
+                                   tag : String? = nil) : String
+          base = "#{info.id}|#{detail.row.host}:#{detail.row.port}|#{method}|#{path}"
+          tag ? "#{base}|#{tag}" : base
+        end
+
         # A copy of the query pairs with pair `idx`'s value replaced (name kept verbatim).
         protected def with_replaced(pairs : Array(String), idx : Int32, value : String) : String
           dup = pairs.dup

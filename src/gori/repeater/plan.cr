@@ -507,17 +507,8 @@ module Gori::Repeater
           "unsupported target scheme #{scheme.inspect}", scheme)
       end
 
-      # `deferred: nil` — a DIAL TUPLE cannot defer. Every other unresolved-name site skips a
-      # DECLARED binding because a send seam re-scans the same value with `Env.expand_bindings`
-      # later; this value is read ONCE, frozen into the plan, and never
-      # looked at again — `Fuzz::Sender`/`Discover::Sender` build their ConnPool on it and the
-      # Layer-1 `Outbound#check` verdict was already taken against it, so re-resolving per send
-      # would move the dial target out from under a scope decision. Deferring bought nothing
-      # anyway: a binding value is a token observed from a response, never a hostname, a port
-      # or an SNI. Left deferred it shipped as the literal `$SESSION` — every send failing DNS,
-      # and `Outbound.scope_url` asked about `https://$SESSION/a`, a URL no rule can match, so
-      # the run was refused as out-of-scope, naming the wrong gate.
-      options.sni.try { |s| refuse_unresolved(Env.unresolved(s, deferred: nil)) }
+      # A dial value cannot defer a binding — see `FlowRequest.refuse_unresolved_dial`.
+      options.sni.try { |s| refuse_unresolved(s) }
       sni = options.sni.try { |s| Env.expand(s).presence }
       # `evidence` reaches the SENDER, not just this builder. The comment on
       # `expand_requests` says a declared session binding is deliberately left for
@@ -584,7 +575,7 @@ module Gori::Repeater
         raise PlanError.new(PlanError::Reason::UnsupportedScheme,
           "unsupported target scheme #{scheme.inspect}", scheme)
       end
-      options.sni.try { |s| refuse_unresolved(Env.unresolved(s, deferred: nil)) }
+      options.sni.try { |s| refuse_unresolved(s) }
       sni = options.sni.try { |s| Env.expand(s).presence }
       tls_preset = resolve_tls_preset(options)
       # `expand_bindings: false` UNCONDITIONALLY, and not `options.expand_bindings?`: nothing on
@@ -614,31 +605,25 @@ module Gori::Repeater
         # A pre-resolved origin skips `Env.expand` because its builder already ran it —
         # but an unresolved `$HOST` survives that expansion as the literal host, and this
         # early return is the one path where nothing else would ever look at it again.
-        refuse_unresolved(Env.unresolved(o.host, deferred: nil)) # see the SNI note above
+        refuse_unresolved(o.host)
         return {normalize_scheme(o.scheme), o.host, o.port}
       end
       raw = options.target || options.default_target.presence
       raise PlanError.new(PlanError::Reason::NoTarget, "no target origin") unless raw
-      refuse_unresolved(Env.unresolved(raw, deferred: nil)) # see the SNI note above
-      url = Env.expand(raw)
-      scheme, host, port = FlowRequest.parse_target(url)
-      if host.empty? || port <= 0
-        raise PlanError.new(PlanError::Reason::BadTarget,
-          "could not determine a target host from #{url.inspect}", url)
+      begin
+        scheme, host, port = FlowRequest.dial_target(raw)
+      rescue e : FlowRequest::DialTargetError
+        raise PlanError.new(PlanError::Reason::UnresolvedEnv, e.message.to_s, e.detail) if e.unresolved?
+        bad_target(e.detail)
       end
+      bad_target(Env.expand(raw)) if port <= 0
       {normalize_scheme(scheme), host, port}
     end
 
-    # Refuse a send whose TARGET, host override or SNI still carries a token that resolves
-    # to nothing.
-    #
-    # The REQUEST half of this is gone — a `$NAME` with no value is a literal string on the
-    # wire now, everywhere, which is what makes a GraphQL query string sendable. A DIAL TUPLE
-    # is the exception the `deferred: nil` note above argues: `$` is not a legal byte in a
-    # hostname, so there is no operator test case to protect, and a literal `$SESSION` there
-    # makes `Outbound.scope_url` ask about `https://$SESSION/a` — a URL no rule can match —
-    # so the send comes back refused as OUT-OF-SCOPE, naming a gate that was never the
-    # problem. Refusing here names the real one.
+    private def self.bad_target(url : String) : NoReturn
+      raise PlanError.new(PlanError::Reason::BadTarget, "could not determine a target host from #{url.inspect}", url)
+    end
+
     # The validated per-send fingerprint override, or nil. Refuses an unknown name HERE — one
     # place, before any surface dials — so `gori run repeater`, MCP `send_request` and the TUI
     # cannot each decide differently what an unrecognised preset means (P1).
@@ -650,11 +635,13 @@ module Gori::Repeater
       Settings.tls_preset_normalize(name)
     end
 
-    private def self.refuse_unresolved(names : Array(String)) : Nil
-      return if names.empty?
-      detail = Env.token_list(names)
-      raise PlanError.new(PlanError::Reason::UnresolvedEnv,
-        "unresolved env #{detail}", detail)
+    # Refuse a send whose host override or SNI still carries a token that resolves to nothing
+    # (`FlowRequest.refuse_unresolved_dial`). The REQUEST half of this is gone — a `$NAME` with
+    # no value is a literal string on the wire now, which is what makes a GraphQL query sendable.
+    private def self.refuse_unresolved(raw : String) : Nil
+      FlowRequest.refuse_unresolved_dial(raw)
+    rescue e : FlowRequest::DialTargetError
+      raise PlanError.new(PlanError::Reason::UnresolvedEnv, e.message.to_s, e.detail)
     end
 
     # ws/wss are hand-typed spellings of http/https — the capture proxy only ever records

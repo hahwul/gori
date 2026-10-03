@@ -141,7 +141,7 @@ module Gori
       chain_error : String? = nil,
       # The rendered outbound frame script, or nil for an ordinary HTTP job. When set, `bytes`
       # is the HANDSHAKE — so `Outbound.request_target(job.bytes)`, `Result#request` and
-      # `HistoryRecord.split_head_body` all keep reading an HTTP request head, and the
+      # `Env.split_head_body` all keep reading an HTTP request head, and the
       # handshake is itself part 0 of the run's position space (see `Fuzz::WsScript`).
       ws_frames : Array(WsFrame)? = nil
 

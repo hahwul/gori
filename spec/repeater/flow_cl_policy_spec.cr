@@ -76,6 +76,15 @@ describe "Gori::Env.head_body_boundary" do
   end
 end
 
+describe "Gori::Env.split_head_body" do
+  it "keeps the terminator on the head and reads an empty body as nil" do
+    head, body = Gori::Env.split_head_body("GET / HTTP/1.1\nHost: h\n\nbody".to_slice)
+    String.new(head).should eq("GET / HTTP/1.1\nHost: h\n\n")
+    body.try { |b| String.new(b) }.should eq("body")
+    Gori::Env.split_head_body("GET / HTTP/1.1\r\n\r\n".to_slice)[1].should be_nil
+  end
+end
+
 # End-to-end proof that the `\n\r\n` boundary fix reaches the wire through the shared
 # plan builder. A draft whose Content-Length line is bare-LF-terminated and whose blank
 # line is CRLF used to read as all-head: `expand_wire` then promoted the BODY's bare LF to

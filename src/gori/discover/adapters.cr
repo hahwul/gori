@@ -159,17 +159,10 @@ module Gori::Discover
       Import::Builder::FlowPair.new(request, response)
     end
 
+    # The standard reason phrase for a status, or "" for one the enum does not name — the same
+    # strings the old hand-written table carried for the codes it covered, now the whole set.
     private def self.reason_for(status : Int32) : String
-      case status
-      when 200 then "OK"
-      when 201 then "Created"
-      when 204 then "No Content"
-      when 301 then "Moved Permanently"
-      when 302 then "Found"
-      when 401 then "Unauthorized"
-      when 403 then "Forbidden"
-      else          ""
-      end
+      HTTP::Status.new(status).description || ""
     end
   end
 end

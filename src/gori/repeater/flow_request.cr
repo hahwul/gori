@@ -310,6 +310,50 @@ module Gori
         "#{scheme}://#{authority(scheme, host, port)}"
       end
 
+      # A dial tuple's refusal, neutral so each tool's `Plan.build` maps it onto its own
+      # `PlanError::Reason`: `unresolved?` = `detail` lists the tokens that resolve to nothing
+      # (`UnresolvedEnv`), else `detail` is the expanded URL no host parsed out of (`BadTarget`).
+      class DialTargetError < Gori::Error
+        getter detail : String
+        getter? unresolved : Bool
+
+        def initialize(message : String, @detail : String, @unresolved : Bool)
+          super(message)
+        end
+      end
+
+      # Refuse a DIAL value (a target, a host, an SNI) carrying a token that resolves to nothing.
+      #
+      # `deferred: nil` — a DIAL TUPLE cannot defer. Every other unresolved-name site skips a
+      # DECLARED binding because a send seam re-scans the same value with `Env.expand_bindings`
+      # later; a dial value is read ONCE, frozen into the plan, and never
+      # looked at again — `Fuzz::Sender`/`Discover::Sender` build their ConnPool on it and the
+      # Layer-1 `Outbound#check` verdict was already taken against it, so re-resolving per send
+      # would move the dial target out from under a scope decision. Deferring bought nothing
+      # anyway: a binding value is a token observed from a response, never a hostname, a port
+      # or an SNI. Left deferred it shipped as the literal `$SESSION` — every send failing DNS,
+      # and `Outbound.scope_url` asked about `https://$SESSION/a`, a URL no rule can match, so
+      # the run was refused as out-of-scope, naming the wrong gate.
+      #
+      # `$` is not a legal byte in a hostname, so there is no operator test case to protect by
+      # sending it literally — unlike a request, where an unset `$NAME` rides the wire as written.
+      def self.refuse_unresolved_dial(raw : String) : Nil
+        names = Env.unresolved(raw, deferred: nil)
+        return if names.empty?
+        detail = Env.token_list(names)
+        raise DialTargetError.new("unresolved env #{detail}", detail, unresolved: true)
+      end
+
+      # The {scheme, host, port} a plan dials for target text `raw`: refused when a token in it
+      # resolves to nothing (`refuse_unresolved_dial`) or when no host parses out of it.
+      def self.dial_target(raw : String) : {String, String, Int32}
+        refuse_unresolved_dial(raw)
+        url = Env.expand(raw)
+        scheme, host, port = parse_target(url)
+        raise DialTargetError.new("could not parse a host from #{url.inspect}", url, unresolved: false) if host.empty?
+        {scheme, host, port}
+      end
+
       # {scheme, host, port} parsed back out of a target string (the inverse of
       # build_target; also used when the CLI accepts a hand-supplied --target).
       def self.parse_target(target : String) : {String, String, Int32}

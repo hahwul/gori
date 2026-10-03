@@ -10,6 +10,7 @@ require "../scope"
 require "../repeater/conn_pool"
 require "../repeater/h2_pool"
 require "../pacing"
+require "wait_group"
 
 module Gori::Fuzz
   # The keep-alive pool moved to `Repeater::ConnPool` when Discover became its second caller
@@ -691,12 +692,37 @@ module Gori::Fuzz
     end
   end
 
+  # A decorator over another Backend. `origin` and every reporting predicate are DELEGATED,
+  # not defaulted: a wrapper is what the Engine holds, so a `Backend#blocked` that stopped at
+  # the outermost layer would report 0 for every gated run there is, and a default
+  # `extra_requests` would hide every re-send the pool underneath it made. `evidence?` for that
+  # same reason once more (see `Backend#evidence?`): a `false` stopping at a wrapper would make
+  # the run's provenance unreadable from the outside and let a spec assert the wrong thing.
+  # A subclass overrides the two-argument `send`, which the one-argument form forwards to.
+  abstract class WrapperBackend < Backend
+    def initialize(@inner : Backend)
+    end
+
+    def origin : Origin
+      @inner.origin
+    end
+
+    delegate blocked, blocked_reason, extra_requests, evidence?, http2?, pooled?,
+      ws_notes, ws_note_reason, close, to: @inner
+
+    def send(bytes : Bytes) : Repeater::Result
+      send(bytes, nil)
+    end
+
+    abstract def send(bytes : Bytes, verbatim : Array({Int32, Int32})?) : Repeater::Result
+  end
+
   # Enforces a HARD ceiling on the total number of real network sends. Wraps any Backend
   # and, past the cap, returns a benign error Result WITHOUT touching the network — so
   # retries, redirect hops, and baseline calibration all count against `max_requests`,
   # unlike a dispatch-only check (which counts one-per-payload and overshoots). A nil or
   # non-positive cap is a pass-through no-op. (Shared by the fuzzer and the param-miner.)
-  class CappedBackend < Backend
+  class CappedBackend < WrapperBackend
     include Gori::RequestMacro::Budget
 
     # Stable error string so run_one can skip retries on a permanent budget stop. It IS the
@@ -734,27 +760,9 @@ module Gori::Fuzz
     def initialize(@inner : Backend, @cap : Int64?)
     end
 
-    def origin : Origin
-      @inner.origin
-    end
-
     def cap_reached? : Bool
       return true if @reserve_short
       (c = @cap) && c > 0 ? @sent >= c : false
-    end
-
-    # Delegated, not defaulted: this wrapper is what the Engine holds, so a Backend#blocked
-    # that stopped at the outermost layer would report 0 for every gated run there is, and a
-    # default `extra_requests` would hide every re-send the pool underneath it made.
-    # `evidence?` for that same reason once more: nothing here CONSUMES it (the widening
-    # happens inside `Sender#send`, below this wrapper), but this is the object every
-    # minimize surface and the Miner hold, so a `false` stopping at the cap would make the
-    # run's provenance unreadable from the outside and let a spec assert the wrong thing.
-    delegate blocked, blocked_reason, extra_requests, evidence?, http2?, pooled?,
-      ws_notes, ws_note_reason, close, to: @inner
-
-    def send(bytes : Bytes) : Repeater::Result
-      send(bytes, nil)
     end
 
     def send(bytes : Bytes, verbatim : Array({Int32, Int32})?) : Repeater::Result
@@ -810,22 +818,12 @@ module Gori::Fuzz
   # a scan drive the rules through a supplied Backend). `Sender` gates itself, so this is
   # only for the non-Sender case — it is never stacked on one, and both use the same
   # `Outbound#sweep_block` decision, so the gate can't drift between the two paths.
-  class GatedBackend < Backend
+  class GatedBackend < WrapperBackend
+    # This gate's own refusals, not the inner backend's.
     getter blocked : Int64 = 0_i64
     getter blocked_reason : String? = nil
 
     def initialize(@inner : Backend, @outbound : Gori::Outbound)
-    end
-
-    def origin : Origin
-      @inner.origin
-    end
-
-    # Delegated, as on `CappedBackend` — see `Backend#evidence?`.
-    delegate extra_requests, evidence?, http2?, pooled?, ws_notes, ws_note_reason, close, to: @inner
-
-    def send(bytes : Bytes) : Repeater::Result
-      send(bytes, nil)
     end
 
     def send(bytes : Bytes, verbatim : Array({Int32, Int32})?) : Repeater::Result
@@ -879,11 +877,6 @@ module Gori::Fuzz
     # randomly-payloaded samples can, at the cost of this many extra sends up front.
     CALIBRATION_SAMPLES = 6
 
-    enum State : UInt8
-      Running
-      Stopped
-    end
-
     # Thrown inside the captured generation block to halt it (a captured block can't
     # `break`). Unwinds the generator's iterator `ensure`s, so file fds still close.
     private class Halt < Exception
@@ -896,9 +889,9 @@ module Gori::Fuzz
     # `CappedBackend#sent` — the true wire count — without a runtime `is_a?` at every read.
     @backend : CappedBackend
     @concurrency : Int32
-    @state : State
+    @stopped = false
     @jobs : Channel(Job)
-    @finished : Channel(Nil)
+    @finished : WaitGroup
     @sent : Int64
     @matched : Int64
     @errors : Int64
@@ -941,10 +934,9 @@ module Gori::Fuzz
       # channel fleet — the CLI's --concurrency is otherwise unbounded.
       conc = @config.concurrency.clamp(1, MAX_CONCURRENCY)
       @concurrency = conc
-      @state = State::Running
       @jobs = Channel(Job).new(conc)
       @events = Channel(Event).new(EVENT_BUFFER)
-      @finished = Channel(Nil).new(conc)
+      @finished = WaitGroup.new(conc)
       @sent = 0_i64
       @matched = 0_i64
       @errors = 0_i64
@@ -961,7 +953,7 @@ module Gori::Fuzz
       # The macro's steps are this run's traffic: charged to its budget, held to its rate, and
       # stopped when it is. The pacer re-reads the interval each time, so a rate the operator
       # changes is the rate the steps keep too.
-      @request_macro.try(&.attach(@backend, -> { pace(pace_interval) }, -> { @state == State::Stopped }))
+      @request_macro.try(&.attach(@backend, -> { pace(pace_interval) }, -> { @stopped }))
     end
 
     # The run's macro lane, for a surface that reports it (`Plan#request_macro_info`) or the
@@ -1051,7 +1043,7 @@ module Gori::Fuzz
     def calibrate_baseline : Nil
       # A stop that landed before the run fiber's first tick (the TUI publishes `v.engine`
       # before spawning, so ^X can arrive here) must not open with a burst of real sends.
-      return if @state == State::Stopped
+      return if @stopped
       # A race run has no payload sweep to calibrate against. `Generator#calibration_requests`
       # for a 0-position race template returns copies of the baseline — i.e. the race request
       # ITSELF — so calibrating would fire that side-effecting request up to CALIBRATION_SAMPLES
@@ -1076,7 +1068,7 @@ module Gori::Fuzz
         # `pace` below widens that window to a full rate interval each (at rps 0.2, ~25s of
         # trailing sends under "stopping…"). `dispatch_loop` re-reads the flag every job for
         # the same reason; this is the same check at the phase that runs BEFORE it.
-        break if @state == State::Stopped
+        break if @stopped
         # Calibration samples are real requests at the target, sent before `start`'s dispatch
         # loop exists — so without this they were the one burst that ignored `--rate` outright.
         pace(interval)
@@ -1123,7 +1115,7 @@ module Gori::Fuzz
     end
 
     def stop : Nil
-      @state = State::Stopped
+      @stopped = true
     end
 
     # ── fibers ─────────────────────────────────────────────────────────────────
@@ -1131,7 +1123,7 @@ module Gori::Fuzz
     private def dispatch_loop : Nil
       interval = pace_interval
       @generator.each do |job|
-        raise Halt.new if @state == State::Stopped
+        raise Halt.new if @stopped
         # Soft job-count check (cheap) plus the hard real-send ceiling: retries/redirects
         # can exhaust CappedBackend mid-run while @dispatched is still under cap.
         raise Halt.new if (cap = @config.max_requests) && cap > 0 && @dispatched >= cap
@@ -1155,7 +1147,7 @@ module Gori::Fuzz
         # this the operator's stop still fired ~2x concurrency of extra requests; now
         # only the requests already in-flight (inside run_one) finish, matching the
         # documented "in-flight requests finish".
-        next if @state == State::Stopped
+        next if @stopped
         result =
           begin
             # nil: the run was stopped while this candidate waited at the macro's gate — nothing
@@ -1163,7 +1155,7 @@ module Gori::Fuzz
             # that never left the queue).
             run_one(job)
           rescue ex
-            # A raise here used to kill the worker outright. `@finished` still fires from the
+            # A raise here used to kill the worker outright. `@finished.done` still fires from the
             # ensure below, so `coordinate` completes and the sweep reports Done with a
             # plausible count — while that payload's row is gone and concurrency is silently
             # down one for the rest of the run. Worse, if EVERY worker dies this way,
@@ -1179,7 +1171,7 @@ module Gori::Fuzz
         record_result(result)
       end
     ensure
-      @finished.send(nil)
+      @finished.done
     end
 
     # One race group: N copies of the SAME baseline request (no §…§ substitution — a race
@@ -1189,7 +1181,7 @@ module Gori::Fuzz
     # `Backend#send_race` could not assemble/release carries a `race: …`-prefixed error
     # string in its Result rather than a new field — see `Sender#send_race`.
     private def run_race(n : Int32) : Nil
-      return if @state == State::Stopped
+      return if @stopped
       base = @generator.baseline_request
       jobs = Array.new(n) { |i| Job.new(i.to_i64, [] of String, nil, base) }
       results = race_send(jobs)
@@ -1215,7 +1207,7 @@ module Gori::Fuzz
       @events.send(ErrorEvent.new(ex.message || "fuzz race error"))
     ensure
       @backend.close rescue nil
-      @events.send(DoneEvent.new(snapshot, @state == State::Stopped, @stop_reason, @stop_index))
+      @events.send(DoneEvent.new(snapshot, @stopped, @stop_reason, @stop_index))
       @events.close
     end
 
@@ -1259,7 +1251,7 @@ module Gori::Fuzz
       return unless @stop_reason.nil?
       # Already stopped with no reason = an operator stop (^X, fuzz_stop) landed first. An
       # in-flight row that meets the condition afterwards must not relabel it `condition_met`.
-      return if @state == State::Stopped
+      return if @stopped
       if result.stop_hit?
         @stop_reason = "stop condition met on result #{result.index} after #{@sent} sent"
       elsif (n = @config.stop_after_matches) && n > 0 && @matched >= n
@@ -1272,7 +1264,7 @@ module Gori::Fuzz
     end
 
     private def coordinate : Nil
-      @concurrency.times { @finished.receive }
+      @finished.wait
       # Every worker has left run_one, so no fiber can be holding a checked-out socket:
       # release the keep-alive pool's parked ones instead of waiting for GC to finalize
       # them (a stopped 50-worker run would otherwise sit on 50 fds). `rescue nil` for the
@@ -1282,7 +1274,7 @@ module Gori::Fuzz
       # means `finalize_job` never runs, pinning the job at `:running` and blocking
       # `switch_project`/`delete_project` for the rest of the session.
       @backend.close rescue nil
-      @events.send(DoneEvent.new(snapshot, @state == State::Stopped, @stop_reason, @stop_index))
+      @events.send(DoneEvent.new(snapshot, @stopped, @stop_reason, @stop_index))
     ensure
       # ALWAYS close, on every exit path: closing is what turns the consumer's blocking
       # `receive?` into a nil and lets it finish. `Channel#close` is idempotent.
@@ -1338,12 +1330,12 @@ module Gori::Fuzz
         # a retry is a NEW request, so with `--retries 5 --retry-pause 1s` each busy worker kept
         # the origin under fire for five more sends and five more seconds after the stop (P5:
         # a stop stops). The attempt that already failed is reported as it stands.
-        if retryable?(raw) && attempts < @config.retries && @state != State::Stopped
+        if retryable?(raw) && attempts < @config.retries && !@stopped
           sleep @config.retry_pause
           # Re-read AFTER the pause: that is where a stop lands on a run whose retries are
           # paced. Counted only when the re-send actually happens, so `resent_count` stays
           # "attempts that were superseded" and not "pauses that were slept".
-          unless @state == State::Stopped
+          unless @stopped
             attempts += 1
             resent_count += 1
             next
@@ -1379,11 +1371,11 @@ module Gori::Fuzz
           @blocked_reason ||= raw.error
           return @matcher.build(job, raw, resent_count: resent_count).with_ws(ws)
         end
-        # `@state` guard for the reason `run_one` gives: a retry is a new session, not an
+        # `@stopped` guard for the reason `run_one` gives: a retry is a new session, not an
         # in-flight one, and a stop must not open five more.
-        if retryable?(raw) && attempts < @config.retries && @state != State::Stopped
+        if retryable?(raw) && attempts < @config.retries && !@stopped
           sleep @config.retry_pause
-          unless @state == State::Stopped
+          unless @stopped
             attempts += 1
             resent_count += 1
             next
@@ -1510,7 +1502,7 @@ module Gori::Fuzz
       while hops < @config.max_redirects
         # A hop is a NEW request, not an in-flight one — same rule as the retry loop in
         # `run_one`: after a stop the payload's own answer (the 3xx in `current`) is the row.
-        break if @state == State::Stopped
+        break if @stopped
         resp = current.response
         break unless resp && (300..399).includes?(resp.status)
         loc = resp.headers.get?("location")
@@ -1646,11 +1638,7 @@ module Gori::Fuzz
     end
 
     private def emit_progress : Nil
-      ev = ProgressEvent.new(snapshot)
-      select
-      when @events.send(ev)
-      else
-      end
+      offer(@events, ProgressEvent.new(snapshot))
     end
 
     private def snapshot : Progress

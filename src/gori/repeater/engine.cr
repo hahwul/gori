@@ -2,6 +2,7 @@ require "../proxy/upstream"
 require "../proxy/codec/http1"
 require "../proxy/codec/body"
 require "../proxy/socket_tuning"
+require "wait_group"
 
 module Gori
   module Repeater
@@ -283,17 +284,18 @@ module Gori
 
         # ── read: no longer time-critical once every byte is on the wire — fan out ──────────
         released = (0...n).select { |i| sockets[i] }
-        done = Channel(Nil).new(released.size)
+        done = WaitGroup.new(released.size)
         released.each do |i|
           spawn do
             if socket = sockets[i]
               results[i] = read_response(socket, wires[i], host, port, started, origin_scheme: scheme)
               socket.close rescue nil
             end
-            done.send(nil)
+          ensure
+            done.done
           end
         end
-        released.size.times { done.receive }
+        done.wait
 
         (0...n).map { |i| (r = results[i]) ? r.with_wire(wires[i]) : Result.new(Bytes.new(0), nil, nil, 0_i64, "race: no result") }
       end

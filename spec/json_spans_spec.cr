@@ -36,6 +36,7 @@ describe Gori::JsonSpans do
     root.members.map(&.key).should eq(["k1", "n", "o"])
     root.members.map { |m| src.byte_slice(m.value_start, m.value_end - m.value_start) }
       .should eq([%("v"), "-2", %({"z":null})])
+    root.members.map(&.key_start).should eq([1, 15, 22]) # each key's opening quote
     root.members[0].string?(src.to_slice).should be_true
     root.members[1].string?(src.to_slice).should be_false
   end

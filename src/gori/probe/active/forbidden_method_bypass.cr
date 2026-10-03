@@ -130,7 +130,7 @@ module Gori
         # host:PORT + METHOD + path, plus an `|unsafe` tag when allow_unsafe adds legs, so the
         # ACTIVE↔unsafe backfill re-arm does not skip an already-seen surface before the wider set ran.
         private def key_string(detail : Store::FlowDetail, method_upcase : String, path : String, opts : Options) : String
-          "forbidden_method_bypass|#{detail.row.host}:#{detail.row.port}|#{method_upcase}|#{path}#{opts.allow_unsafe ? "|unsafe" : ""}"
+          endpoint_key(detail, method_upcase, path, tag: opts.allow_unsafe ? "unsafe" : nil)
         end
 
         # Rebuild with a new request-line method (headers/body untouched), origin-form target.

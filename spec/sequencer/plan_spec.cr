@@ -70,7 +70,7 @@ private def shape_of(options : Q::PlanOptions) : Shape
   origin = plan.origin!
   Shape.new(scheme: origin.scheme, host: origin.host, port: origin.port, http2: plan.http2?,
     request: String.new(plan.request), request_target: plan.request_target, goal: plan.goal,
-    analyse_only: plan.analyse_only?, mode: plan.config.mode, token_loc: plan.config.token_loc,
+    analyse_only: plan.origin.nil?, mode: plan.config.mode, token_loc: plan.config.token_loc,
     concurrency: plan.config.concurrency, retries: plan.config.retries,
     timeout: plan.config.timeout, max_requests: plan.config.max_requests)
 end
@@ -384,7 +384,6 @@ describe Gori::Sequencer::Plan do
     it "carries no origin and no sender, and replays the pasted tokens" do
       cfg = Q::Config.new(mode: Q::Mode::Manual, manual_tokens: ["aa", "bb", "", "cc"])
       plan = Q::Plan.build(Q::PlanOptions.new(config: cfg), ungated_outbound)
-      plan.analyse_only?.should be_true
       plan.origin.should be_nil
       plan.request.size.should eq(0)
       plan.request_target.should eq("")
@@ -426,7 +425,7 @@ describe Gori::Sequencer::Plan do
         manual_tokens: ["aa"])
       plan = Q::Plan.build(Q::PlanOptions.new("GET / HTTP/1.1\r\nHost: t.test\r\n\r\n".to_slice,
         target: "::::", config: cfg), ungated_outbound)
-      plan.analyse_only?.should be_true
+      plan.origin.should be_nil
     end
   end
 

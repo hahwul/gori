@@ -2025,6 +2025,14 @@ module Gori
       end
     end
 
+    # `{head, body}` split at `head_body_boundary`: the head keeps its terminator, and an
+    # empty body is nil.
+    def self.split_head_body(bytes : Bytes) : {Bytes, Bytes?}
+      boundary = head_body_boundary(bytes)
+      body_size = bytes.size - boundary
+      {bytes[0, boundary], body_size > 0 ? bytes[boundary, body_size] : nil}
+    end
+
     # `{offset of the blank-line separator, its width in bytes}`, or nil when the message
     # carries none. The SCANNING half of `head_body_boundary`, and the only place the
     # three terminator spellings are enumerated.

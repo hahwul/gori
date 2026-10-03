@@ -110,7 +110,7 @@ module Gori
         # or the ACTIVE↔AGGRESSIVE backfill re-arm would skip an already-seen surface and never send the
         # extra variant. Stays byte-identical to plan's key for the SAME opts (equivalence invariant).
         private def key_string(detail : Store::FlowDetail, method_upcase : String, path : String, opts : Options) : String
-          "path_normalization_bypass|#{detail.row.host}:#{detail.row.port}|#{method_upcase}|#{path}#{opts.aggressive ? "|aggr" : ""}"
+          endpoint_key(detail, method_upcase, path, tag: opts.aggressive ? "aggr" : nil)
         end
 
         # Deterministic normalization variants of `path` (each {short label, rewritten path}). Every

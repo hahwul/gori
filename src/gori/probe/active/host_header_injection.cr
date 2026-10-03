@@ -71,7 +71,7 @@ module Gori
         end
 
         private def key_string(detail : Store::FlowDetail, method_upcase : String, path : String) : String
-          "host_header_injection|#{detail.row.host}:#{detail.row.port}|#{method_upcase}|#{path}"
+          endpoint_key(detail, method_upcase, path)
         end
 
         # A redirect that already points at its own Host (the reset-link shape — any content type) OR
@@ -120,10 +120,7 @@ module Gori
         end
 
         private def body_reflects?(result : Repeater::Result) : Bool
-          decoded, _ = Proxy::Codec::ContentDecode.decode(result.head, result.body, BODY_CAP)
-          bytes = decoded || result.body
-          return false if bytes.nil? || bytes.empty?
-          authority_reflection?(String.new(bytes[0, {bytes.size, BODY_CAP}.min]).scrub, PROBE_HOST)
+          authority_reflection?(decoded_text(result), PROBE_HOST)
         end
 
         # Does `token` appear as the AUTHORITY host of an absolute/scheme-relative URL in `text`? The

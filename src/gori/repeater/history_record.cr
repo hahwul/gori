@@ -104,20 +104,13 @@ module Gori
           target = H2Engine.pseudo_field(fields, ":path") || "/"
           {head, plan.h2_body, method, target, "HTTP/2"}
         else
-          head, body = split_head_body(wire)
+          head, body = Env.split_head_body(wire)
           # Not the strict parser: the bytes are the operator's and under `--verbatim` a bare-LF
           # terminator is the payload, and a line it cannot frame is filed the way the proxy
           # files it (#1423) — the same call MCP's recorder makes.
           method, target, version = FlowMapper.authored_request(head, http2: plan.http2?)
           {head, body, method, target, version}
         end
-      end
-
-      private def split_head_body(bytes : Bytes) : {Bytes, Bytes?}
-        boundary = Env.head_body_boundary(bytes)
-        head = bytes[0, boundary]
-        body_size = bytes.size - boundary
-        {head, body_size > 0 ? bytes[boundary, body_size] : nil}
       end
     end
   end

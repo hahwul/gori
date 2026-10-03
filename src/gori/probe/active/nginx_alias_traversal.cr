@@ -149,7 +149,7 @@ module Gori
         # rule + host:PORT + METHOD + PATH (no query — alias resolution is per-path, not per-value),
         # so the same host on another port/service is a distinct surface. One probe per path.
         private def key_string(detail : Store::FlowDetail, method_upcase : String, path : String) : String
-          "nginx_alias_traversal|#{detail.row.host}:#{detail.row.port}|#{method_upcase}|#{path}"
+          endpoint_key(detail, method_upcase, path)
         end
 
         # The leading path segment to fold `..` after, or nil unless the path is `/<seg>/<more>`:

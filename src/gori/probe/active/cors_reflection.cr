@@ -82,7 +82,7 @@ module Gori
 
         # The single key expression both `plan` and `dedup_key` use, so they can't drift.
         private def key_string(detail : Store::FlowDetail, method_upcase : String, target : String) : String
-          "cors_reflection|#{detail.row.host}:#{detail.row.port}|#{method_upcase}|#{path_key(target)}"
+          endpoint_key(detail, method_upcase, path_only(Active.origin_form(target)))
         end
 
         def detections(plan : Plan, result : Repeater::Result, detail : Store::FlowDetail) : Array(Detection)
@@ -141,11 +141,6 @@ module Gori
 
         # Dedup path: origin-form target with the query stripped (a CORS policy is per-endpoint,
         # not per-query-value), so one probe per (host, method, path).
-        private def path_key(target : String) : String
-          t = Active.origin_form(target)
-          qi = t.index('?')
-          qi ? t[0...qi] : t
-        end
       end
     end
   end

@@ -195,15 +195,10 @@ module Gori
           a[0] == b[0] && Discover::Fingerprint.hamming(a[1], b[1]) <= SIMHASH_DISTANCE
         end
 
-        # Decode + cap the response body to the bytes the SimHash reads. Not scrubbed: SimHash is
-        # byte-level (reads only ASCII alnum), so an invalid-UTF-8 origin can never make it raise.
+        # Decode + cap the response body to the bytes the SimHash reads, unscrubbed — SimHash is
+        # byte-level (reads only ASCII alnum), so it needs the raw bytes `Rule#decoded_body` returns.
         private def decoded_body(result : Repeater::Result) : Bytes
-          decoded, _ = Proxy::Codec::ContentDecode.decode(result.head, result.body, BODY_CAP)
-          bytes = decoded || result.body
-          return Bytes.empty if bytes.nil? || bytes.empty?
-          bytes[0, {bytes.size, BODY_CAP}.min]
-        rescue
-          Bytes.empty
+          decoded_body(result.head, result.body) || Bytes.empty
         end
 
         # The breakout set for this scan: the string-context pair by default, plus the numeric one

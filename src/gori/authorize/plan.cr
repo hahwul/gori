@@ -216,13 +216,6 @@ module Gori::Authorize
       @targets.size * @identities.size
     end
 
-    # The skip tally as one line ("2 not a safe method to repeat · 1 outside project
-    # scope"), or nil when nothing was skipped. A FALLBACK for a surface with nothing better
-    # to say — `skipped` is the structured form every surface should prefer.
-    def skip_summary : String?
-      @skipped.empty? ? nil : Plan.skip_tally(@skipped)
-    end
-
     # Replay every target under every identity, yielding each finished `Target` as it lands.
     # Returns the number of FLOWS replayed (each one is `identities.size` requests).
     #
@@ -523,7 +516,7 @@ module Gori::Authorize
       Passive.skip_reason(detail, identities)
     end
 
-    # The per-reason tally: the `NothingToSend` detail AND what `Plan#skip_summary` renders,
+    # The per-reason tally: the `NothingToSend` detail AND the report of a partial run,
     # one implementation so the refusal and the report of a partial run agree.
     def self.skip_tally(skipped : Array(Skipped)) : String
       counts = Hash(Symbol, Int32).new(0)

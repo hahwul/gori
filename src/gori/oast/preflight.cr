@@ -2,6 +2,7 @@ require "uri"
 require "./http"
 require "./presets"
 require "../http_transport"
+require "wait_group"
 
 module Gori::Oast
   # Reachability preflight for the built-in public providers (#1020).
@@ -62,17 +63,17 @@ module Gori::Oast
                        http : Http? = nil) : Array(Result)
       return [] of Result if presets.empty?
       slots = Array(Result?).new(presets.size, nil)
-      done = Channel(Nil).new(presets.size)
+      done = WaitGroup.new(presets.size)
       presets.each_with_index do |preset, i|
         spawn do
           slots[i] = check(preset, http || HttpClient.new)
         ensure
           # In the `ensure` so a fiber that dies anyway still releases the wait — otherwise a
           # single unexpected raise hangs the command forever instead of losing one row.
-          done.send(nil)
+          done.done
         end
       end
-      presets.size.times { done.receive }
+      done.wait
       slots.compact
     end
 

@@ -1,5 +1,6 @@
 require "json"
 require "../raw_json"
+require "../json_spans"
 require "./engine"
 require "./flow_request"
 require "../media_type"
@@ -434,9 +435,7 @@ module Gori::Repeater
         return nil unless sep
         new_body = body
         removed = false
-        loop do
-          spliced, hit = json_splice_key(new_body, key)
-          break unless hit
+        while spliced = json_splice_key(new_body, key)
           new_body = spliced
           removed = true
         end
@@ -447,122 +446,26 @@ module Gori::Repeater
 
     # Removes the FIRST top-level member whose (decoded) key equals `key` from a JSON object
     # `body`, splicing the ORIGINAL bytes so everything kept — duplicate keys, `\/`, `\uXXXX`,
-    # `1.50`, interior whitespace — is preserved byte-for-byte. Returns {new_body, true} on a
-    # removal, {body, false} when the object is malformed or the key is absent (caller then
-    # keeps the candidate, the safe direction). Parses ONLY to find the member's byte range.
-    private def self.json_splice_key(body : String, key : String) : {String, Bool}
+    # `1.50`, interior whitespace — is preserved byte-for-byte. nil when the object is malformed
+    # or the key is absent (caller then keeps the candidate, the safe direction). `JsonSpans`
+    # parses ONLY to find the member's byte range.
+    private def self.json_splice_key(body : String, key : String) : String?
       bytes = body.to_slice
-      n = bytes.size
-      i = json_skip_ws(bytes, 0, n)
-      return {body, false} unless i < n && bytes[i] == 0x7B_u8 # not a `{` object
-      i += 1
-      prev_comma = -1 # byte index of the comma before the current member, if any
-      first = true
-      while i < n
-        i = json_skip_ws(bytes, i, n)
-        break if i < n && bytes[i] == 0x7D_u8 # end of object, key not found
-        return {body, false} unless i < n
-        unless first
-          return {body, false} unless bytes[i] == 0x2C_u8 # members are comma-separated
-          prev_comma = i
-          i = json_skip_ws(bytes, i + 1, n)
-        end
-        first = false
-        return {body, false} unless i < n && bytes[i] == 0x22_u8 # a key is a `"`-string
-        key_start = i
-        key_end = json_string_end(bytes, i, n)
-        return {body, false} unless key_end
-        this_key = (String.from_json(body.byte_slice(key_start, key_end - key_start)) rescue nil)
-        i = json_skip_ws(bytes, key_end, n)
-        return {body, false} unless i < n && bytes[i] == 0x3A_u8 # `:` between key and value
-        i = json_skip_ws(bytes, i + 1, n)
-        value_end = json_value_end(bytes, i, n)
-        return {body, false} unless value_end
-        if this_key == key
-          # Cut the member plus exactly ONE adjacent comma so the survivors stay valid JSON
-          # and untouched. A trailing comma (there's a next member) is preferred; else the
-          # leading comma (this is the last member); else it was the sole member.
-          k = json_skip_ws(bytes, value_end, n)
-          if k < n && bytes[k] == 0x2C_u8
-            return {body.byte_slice(0, key_start) + body.byte_slice(k + 1, n - (k + 1)), true}
-          elsif prev_comma >= 0
-            return {body.byte_slice(0, prev_comma) + body.byte_slice(value_end, n - value_end), true}
-          else
-            return {body.byte_slice(0, key_start) + body.byte_slice(value_end, n - value_end), true}
-          end
-        end
-        i = value_end
-      end
-      {body, false}
-    end
-
-    # JSON insignificant whitespace (RFC 8259 §2): space, tab, LF, CR.
-    private def self.json_ws?(b : UInt8) : Bool
-      b == 0x20_u8 || b == 0x09_u8 || b == 0x0A_u8 || b == 0x0D_u8
-    end
-
-    # First byte offset at or after `i` that is not JSON whitespace (or `n` if none).
-    private def self.json_skip_ws(bytes : Bytes, i : Int32, n : Int32) : Int32
-      while i < n && json_ws?(bytes[i])
-        i += 1
-      end
-      i
-    end
-
-    # Byte offset just PAST the JSON string that starts at `bytes[i] == '"'`, honoring `\"`
-    # (and every other `\`-escape by skipping the escaped byte). nil if it is unterminated.
-    private def self.json_string_end(bytes : Bytes, i : Int32, n : Int32) : Int32?
-      j = i + 1
-      while j < n
-        c = bytes[j]
-        if c == 0x5C_u8 # backslash: the next byte is escaped, skip both
-          j += 2
-          next
-        end
-        return j + 1 if c == 0x22_u8 # closing quote
-        j += 1
-      end
-      nil
-    end
-
-    # Byte offset just PAST the JSON value beginning at the first non-ws byte `bytes[i]`. Skips
-    # a string (escape-aware), balances an object/array while honoring nested strings, or reads
-    # a literal (number/true/false/null) up to the next structural byte or whitespace. nil when
-    # the value is malformed/unterminated. Only structural ASCII bytes are inspected, so
-    # multi-byte UTF-8 inside a string passes through opaquely.
-    private def self.json_value_end(bytes : Bytes, i : Int32, n : Int32) : Int32?
-      return nil unless i < n
-      case bytes[i]
-      when 0x22_u8 # string
-        json_string_end(bytes, i, n)
-      when 0x7B_u8, 0x5B_u8 # object `{` or array `[`
-        depth = 0
-        j = i
-        while j < n
-          c = bytes[j]
-          if c == 0x22_u8
-            e = json_string_end(bytes, j, n)
-            return nil unless e
-            j = e
-            next
-          elsif c == 0x7B_u8 || c == 0x5B_u8
-            depth += 1
-          elsif c == 0x7D_u8 || c == 0x5D_u8
-            depth -= 1
-            return j + 1 if depth == 0
-          end
-          j += 1
-        end
-        nil
-      else # number / true / false / null — up to a structural byte or whitespace
-        j = i
-        while j < n
-          c = bytes[j]
-          break if c == 0x2C_u8 || c == 0x7D_u8 || c == 0x5D_u8 || json_ws?(c)
-          j += 1
-        end
-        j == i ? nil : j
-      end
+      return nil unless members = JsonSpans.root_object(bytes).try(&.members)
+      return nil unless idx = members.index { |mem| mem.key == key }
+      mem = members[idx]
+      # Cut the member plus exactly ONE adjacent comma so the survivors stay valid JSON and
+      # untouched. A trailing comma (there's a next member) is preferred; else the leading comma
+      # (this is the last member); else it was the sole member. Between a value and its comma
+      # there is only whitespace, so the first `,` after the value is that comma.
+      cut_from, cut_to = if idx + 1 < members.size
+                           {mem.key_start, bytes.index!(0x2C_u8, mem.value_end) + 1}
+                         elsif idx > 0
+                           {bytes.index!(0x2C_u8, members[idx - 1].value_end), mem.value_end}
+                         else
+                           {mem.key_start, mem.value_end}
+                         end
+      body.byte_slice(0, cut_from) + body.byte_slice(cut_to, bytes.size - cut_to)
     end
 
     # ── comparison ─────────────────────────────────────────────────────────────────────

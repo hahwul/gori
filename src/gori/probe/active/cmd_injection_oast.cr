@@ -2,6 +2,7 @@ require "uri"
 require "./types"
 require "../out_of_band"
 require "../../miner/inject"
+require "./insertion_points"
 require "../../fuzz/content_length"
 require "../../proxy/codec/http1"
 
@@ -92,27 +93,28 @@ module Gori
           # check is a nil test on an already-resolved field — it never mints, so the cheap
           # pre-plan key stays cheap.
           return nil unless opts.oob
-          g = gate(detail, opts) || return nil
-          key_string(detail, g[0], g[1], g[4])
+          surface, slot = gate(detail, opts) || return nil
+          key_string(detail, surface, slot)
         end
 
         def plan(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : Plan?
           minter = opts.oob || return nil
-          g = gate(detail, opts) || return nil
-          method_up, path, pairs, idx, name = g
+          surface, slot = gate(detail, opts) || return nil
           minted = minter.mint || return nil # listener went away between dedup_key and here
           payload, token, session_id = minted
-          value = inject_value(pairs[idx], payload)
-          request = rebuild_query(detail.request_head, detail.request_body, path,
-            with_replaced(pairs, idx, encode_value(value)))
+          # REPLACE (not RAW): the value is the original value plus the breakout fragments, and
+          # `build` percent-encodes the whole thing (`space_to_plus: false`) exactly as the old
+          # `encode_value` did — see `inject_value`.
+          change = InsertionPoints::Change.new(replace: inject_value(slot.value.scrub, payload))
+          request = InsertionPoints.build(detail, [{slot, change}])
           candidate = OutOfBand::Candidate.new(
             token: token, payload: payload, session_id: session_id,
             code: "cmd_injection_oast",
             title: "Blind OS command injection (server executed an injected command)",
             severity: Store::Severity::Critical,
-            evidence: "param `#{name}` injected with an OS-command OAST payload"[0, 120])
-          Plan.new(request, [Param.new("query", name, token)],
-            key_string(detail, method_up, path, name), oob: [candidate])
+            evidence: "param `#{slot.name}` injected with an OS-command OAST payload"[0, 120])
+          Plan.new(request, [Param.new("query", slot.name, token)],
+            key_string(detail, surface, slot), oob: [candidate])
         end
 
         # Blind by construction: nothing on the sending socket confirms it. The empty return is
@@ -125,9 +127,7 @@ module Gori
         # The injected value: the parameter's ORIGINAL (decoded) value, then every breakout
         # fragment with `HOST`/`URL` filled in. Keeping the original as a prefix lets the
         # legitimate leading command parse before the separators hand control to nslookup/curl.
-        private def inject_value(pair : String, payload : String) : String
-          eq = pair.index('=')
-          orig = eq ? decode(pair[(eq + 1)..]) : ""
+        private def inject_value(orig : String, payload : String) : String
           url, host = payload_parts(payload)
           orig + BREAKOUTS.join(&.gsub("HOST", host).gsub("URL", url))
         end
@@ -146,65 +146,23 @@ module Gori
           end
         end
 
-        # Percent-encode the injected value so the shell metacharacters (`;`, `|`, `&`, backtick,
-        # quotes, spaces, newlines) ride inside the parameter without corrupting the query.
-        # `space_to_plus: false` so a space becomes `%20`, which decodes to a real space under
-        # BOTH form- and percent-decoding — a `+` would survive verbatim on a percent-decoding
-        # endpoint and split `nslookup HOST` / `curl "URL"` into a bad argument.
-        private def encode_value(value : String) : String
-          URI.encode_www_form(value, space_to_plus: false)
-        end
-
-        # Shared gate for plan + dedup_key. Returns {METHOD, path, query pairs, index of the
-        # first command-shaped param, its DECODED name}, or nil. Both paths funnel here so they
-        # cannot drift (the equivalence-spec invariant).
-        private def gate(detail : Store::FlowDetail, opts : Options) : {String, String, Array(String), Int32, String}?
-          method, target, malformed = Proxy::Codec::Http1.parse_request_line(detail.request_head)
-          return nil if malformed
-          method_up = method.upcase
-          return nil unless method_allowed?(method_up, opts)
-          path, query = split_target(Active.origin_form(target))
-          return nil if query.empty?
-          pairs = query.split('&')
-          found = first_cmd_param(pairs) || return nil
-          {method_up, path, pairs, found[0], found[1]}
-        end
-
-        # {index, decoded name} of the first query pair whose NAME is a conventional command /
-        # diagnostic parameter, else nil. A non-empty value is required — an empty parameter
-        # carries nothing to concatenate a command onto.
-        private def first_cmd_param(pairs : Array(String)) : {Int32, String}?
-          pairs.each_with_index do |pair, i|
-            next if pair.empty?
-            eq = pair.index('=')
-            next unless eq
-            raw_name = pair[0...eq]
-            next if raw_name.empty?
-            raw_value = pair[(eq + 1)..]
-            next if raw_value.empty?
-            dname = decode(raw_name)
-            return {i, dname} if CMD_PARAMS.includes?(dname.downcase)
+        # Shared gate for plan + dedup_key: the enumerated QUERY surface and the FIRST query slot
+        # whose name is a conventional command/diagnostic parameter with a non-empty value. Both
+        # paths funnel here so they cannot drift (the equivalence-spec invariant). Only the query
+        # string is probed — body slots are not read.
+        private def gate(detail : Store::FlowDetail, opts : Options) : {InsertionPoints::Surface, InsertionPoints::Slot}?
+          method, _, malformed = Proxy::Codec::Http1.parse_request_line(detail.request_head)
+          return nil if malformed || !method_allowed?(method.upcase, opts)
+          surface = InsertionPoints.enumerate(detail, opts, [Miner::Location::Query]) || return nil
+          slot = surface.slots.find do |s|
+            !s.raw_value.empty? && CMD_PARAMS.includes?(s.name.scrub.downcase)
           end
-          nil
+          slot ? {surface, slot} : nil
         end
 
-        private def key_string(detail : Store::FlowDetail, method_upcase : String, path : String, name : String) : String
-          "cmd_injection_oast|#{detail.row.host}:#{detail.row.port}|#{method_upcase}|#{path}|#{name.bytesize}:#{name}"
-        end
-
-        # Percent-decoded AND scrubbed: a captured value can carry an invalid-UTF-8 byte (`%FF`),
-        # and it flows into string concatenation + `gsub`, so scrub keeps this total. Mirrors
-        # SsrfOast#decode (same reasoning, stated there in full).
-        private def decode(s : String) : String
-          URI.decode_www_form(s).scrub
-        rescue
-          s.scrub
-        end
-
-        private def split_target(target : String) : {String, String}
-          qi = target.index('?')
-          return {target, ""} unless qi
-          {target[0...qi], target[(qi + 1)..]}
+        private def key_string(detail : Store::FlowDetail, surface : InsertionPoints::Surface,
+                               slot : InsertionPoints::Slot) : String
+          InsertionPoints.dedup_key("cmd_injection_oast", detail, surface.method, surface.path, [slot])
         end
       end
     end

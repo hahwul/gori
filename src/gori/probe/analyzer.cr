@@ -112,9 +112,12 @@ module Gori
         # Rules sub-tab config: built-ins the operator disabled (by RuleInfo#id) + the merged
         # global+project custom match rules. Read once here so even a one-shot scan_detail
         # (CLI/MCP/Repeater, no start) honours them; reload_rule_config refreshes on UI edits.
-        @disabled, @disabled_degraded = load_disabled
+        # `degraded` = the disabled list could NOT be read, which is NOT "nothing is disabled":
+        # that set is the only thing between a disabled ACTIVE rule and a real request, so the
+        # active pipeline fails CLOSED (`active_degraded?`). Passive analysis runs regardless.
+        rules = Scan::RuleConfig.load(@store)
+        @disabled, @custom, @disabled_degraded = rules.disabled, rules.custom, rules.degraded
         @warned_degraded = false
-        @custom = load_custom
         # Out-of-band: the minter the OAST rules plan against (nil until this project registers
         # a listener), and the callback watermark. 0 so the first sweep is a FULL pass — a probe
         # planted in an earlier run and answered while gori was closed is matched on open.
@@ -130,9 +133,9 @@ module Gori
       # a new custom rule over already-seen traffic. Disabling a rule only stops NEW detections —
       # existing findings persist until dismissed/deleted/cleared.
       def reload_rule_config : Nil
-        @disabled, @disabled_degraded = load_disabled
+        rules = Scan::RuleConfig.load(@store)
+        @disabled, @custom, @disabled_degraded = rules.disabled, rules.custom, rules.degraded
         @warned_degraded = false unless @disabled_degraded # re-arm the warning if the store re-breaks
-        @custom = load_custom
         # Re-resolve the OAST minter too, so a Rules-tab edit picks up a listener started since
         # construction. The OAST tab arms it directly through `rearm_out_of_band` (starting a
         # listener is not a probe-config edit, so it does not route here).
@@ -168,18 +171,6 @@ module Gori
         arm_active_backfill
       end
 
-      # {the operator's disabled set, degraded}. `degraded` = the list could NOT be read (store
-      # error or corrupt JSON), which is NOT the same as "nothing is disabled": that set is the
-      # only thing between a disabled ACTIVE rule and a real request, so when it is unknown the
-      # active pipeline fails CLOSED (see the guards below). Passive analysis is request-free and
-      # runs regardless. `probe_disabled_rules` now RAISES on a read/parse failure precisely so
-      # this rescue is live — before, the store swallowed it and this could never fire.
-      private def load_disabled : {Set(String), Bool}
-        {@store.probe_disabled_rules_strict, false}
-      rescue DB::Error | SQLite3::Exception | JSON::ParseException
-        {Set(String).new, true}
-      end
-
       # Fail-closed guard for every active entry point: with the disabled-list unreadable we do
       # not know which active probes the operator authorised, so we send none and say so once.
       private def active_degraded? : Bool
@@ -189,12 +180,6 @@ module Gori
           ::Log.warn { "probe: the disabled-rule list could not be read — ACTIVE probing skipped (fail-closed). Passive analysis still runs. Fix the store/settings and re-scan." }
         end
         true
-      end
-
-      private def load_custom : Array(CustomRule)
-        Probe.custom_rules(@store)
-      rescue DB::Error | SQLite3::Exception
-        [] of CustomRule
       end
 
       def mode : Mode
@@ -287,7 +272,7 @@ module Gori
         return nil if reverting
         {prev, m}
       rescue DB::Error | SQLite3::Exception
-        # Same tolerance as `load_custom`: an unreadable settings row leaves the live mode
+        # Same tolerance as `Scan::RuleConfig`'s custom-rule read: an unreadable settings row leaves the live mode
         # alone and the next tick tries again. Both callers poll on the UI / capture fiber
         # with no per-call rescue of their own.
         nil
@@ -1114,12 +1099,7 @@ module Gori
       end
 
       # Bound a seen-set to `cap` by dropping its oldest entries (Set keeps insertion order).
-      private def trim(set : Set(Int64), cap : Int32) : Nil
-        return if set.size <= cap
-        set.first(set.size - cap).each { |x| set.delete(x) }
-      end
-
-      private def trim(set : Set(String), cap : Int32) : Nil
+      private def trim(set : Set(T), cap : Int32) : Nil forall T
         return if set.size <= cap
         set.first(set.size - cap).each { |x| set.delete(x) }
       end

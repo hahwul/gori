@@ -463,4 +463,15 @@ describe Gori::Repeater::FlowRequest do
         .should end_with("--B\r\nX: 1\r\n\r\nhi\r\n--B--\r\n")
     end
   end
+
+  describe ".default_port" do
+    # Not `URI.default_port`: a scheme it knows (ftp=21, redis=6379) must still dial 80 here,
+    # because the Fuzz/Miner/Sequencer plans take whatever scheme they are handed.
+    it "is 443 for https/wss and 80 for every other scheme" do
+      Gori::Repeater::FlowRequest.default_port("https").should eq(443)
+      Gori::Repeater::FlowRequest.default_port("wss").should eq(443)
+      Gori::Repeater::FlowRequest.default_port("ftp").should eq(80)
+      Gori::Repeater::FlowRequest.default_port("redis").should eq(80)
+    end
+  end
 end

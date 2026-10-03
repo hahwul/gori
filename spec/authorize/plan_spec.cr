@@ -96,7 +96,6 @@ describe Gori::Authorize::Plan do
         plan = Plan.build(options(store, flow_ids: [b, a]), ungated_outbound)
         plan.targets.map(&.row.id).should eq([b, a])
         plan.skipped.should be_empty
-        plan.skip_summary.should be_nil
         # 2 requests × 2 identities.
         plan.total_sends.should eq(4)
       end
@@ -121,7 +120,7 @@ describe Gori::Authorize::Plan do
         plan.targets.map(&.row.id).should eq([id])
         plan.skipped.map(&.reason).should eq([:duplicate])
         plan.skipped.first.flow_id.should eq(id)
-        plan.skip_summary.should eq("1 already queued")
+        Plan.skip_tally(plan.skipped).should eq("1 already queued")
       end
     end
 
