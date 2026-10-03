@@ -267,9 +267,7 @@ module Gori::Tui
       sel = v.detail_selection?
       text = sel ? v.detail_copy_text : v.detail_copy_all
       return if text.empty?
-      written = Clipboard.copy(text)
-      note = Clipboard.note(written, text)
-      @host.status(sel ? "copied #{written}b to clipboard#{note}" : "copied all (#{written}b)#{note}")
+      copy_text(text, sel ? nil : "all")
     end
 
     # PgUp/PgDn/Home/End over FINDINGS: `handle_results` declines them, and `results_move`

@@ -723,12 +723,7 @@ module Gori::Tui
 
     def project_copy : Nil
       text = @project_view.desc_copy_text
-      if text.empty?
-        @host.status("nothing to copy")
-        return
-      end
-      written = Clipboard.copy(text)
-      @host.status("copied #{written}b to clipboard#{Clipboard.note(written, text)}")
+      copy_text(text)
     end
 
     # The description selection (or current line) text without copying — "Send selection to".

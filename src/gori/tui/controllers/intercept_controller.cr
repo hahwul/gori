@@ -458,9 +458,7 @@ module Gori::Tui
       sel = @intercept.preview_selection?
       text = sel ? @intercept.preview_copy_text : @intercept.preview_copy_all
       return if text.empty?
-      written = Clipboard.copy(text)
-      note = Clipboard.note(written, text)
-      @host.status(sel ? "copied #{written}b to clipboard#{note}" : "copied all (#{written}b)#{note}")
+      copy_text(text, sel ? nil : "all")
     end
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool

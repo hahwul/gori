@@ -1875,9 +1875,7 @@ module Gori::Tui
       sel = @cb_pane.selection?
       text = sel ? @cb_pane.copy_text : @cb_pane.copy_all
       return if text.empty?
-      written = Clipboard.copy(text)
-      note = Clipboard.note(written, text)
-      @host.status(sel ? "copied #{written}b to clipboard#{note}" : "copied all (#{written}b)#{note}")
+      copy_text(text, sel ? nil : "all")
     end
   end
 end

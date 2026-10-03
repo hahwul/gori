@@ -684,12 +684,7 @@ module Gori::Tui
              when :input  then input_copy_text(s)
              else              "" # CHAIN has no selection (`decoder_selection_active?`); see decoder_copy_all
              end
-      if text.empty?
-        @host.status("nothing to copy")
-      else
-        written = Clipboard.copy(text)
-        @host.status("copied #{written}b to clipboard#{Clipboard.note(written, text)}")
-      end
+      copy_text(text)
     end
 
     # The no-selection fallback for the space-menu/palette "Copy" verb (decoder.copy):
@@ -707,12 +702,7 @@ module Gori::Tui
                # the decode under it is what they came for. The arm used to return `s.chain`.
              else s.view.output_copy(s.result)
              end
-      if text.empty?
-        @host.status("nothing to copy")
-      else
-        written = Clipboard.copy(text)
-        @host.status("copied all (#{written}b)#{Clipboard.note(written, text)}")
-      end
+      copy_text(text, "all")
     end
 
     # The focused pane's selection (or current line) text without copying — for the

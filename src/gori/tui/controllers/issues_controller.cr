@@ -1205,12 +1205,7 @@ module Gori::Tui
 
     def issues_copy : Nil
       text = @issues.notes_copy_text
-      if text.empty?
-        @host.status("nothing to copy")
-        return
-      end
-      written = Clipboard.copy(text)
-      @host.status("copied #{written}b to clipboard#{Clipboard.note(written, text)}")
+      copy_text(text)
     end
 
     # The notes selection (or current line) text without copying — "Send selection to".

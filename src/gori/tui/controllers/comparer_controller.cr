@@ -230,9 +230,7 @@ module Gori::Tui
       sel = view.selection?
       text = sel ? view.copy_text : view.copy_all
       return if text.empty?
-      written = Clipboard.copy(text)
-      note = Clipboard.note(written, text)
-      @host.status(sel ? "copied #{written}b to clipboard#{note}" : "copied all (#{written}b)#{note}")
+      copy_text(text, sel ? nil : "all")
     end
 
     def body_hint(focus : Symbol) : String

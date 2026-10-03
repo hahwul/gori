@@ -963,9 +963,7 @@ module Gori::Tui
       sel = @probe.detail_selection?
       text = sel ? @probe.detail_copy_text : @probe.detail_copy_all
       return if text.empty?
-      written = Clipboard.copy(text)
-      note = Clipboard.note(written, text)
-      @host.status(sel ? "copied #{written}b to clipboard#{note}" : "copied all (#{written}b)#{note}")
+      copy_text(text, sel ? nil : "all")
     end
   end
 end

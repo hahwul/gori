@@ -547,12 +547,7 @@ module Gori::Tui
     # Copy selection (or current line) in READ mode.
     def notes_copy : Nil
       text = @notes.copy_text
-      if text.empty?
-        @host.status("nothing to copy")
-        return
-      end
-      written = Clipboard.copy(text)
-      @host.status("copied #{written}b to clipboard#{Clipboard.note(written, text)}")
+      copy_text(text)
     end
 
     # The selection (or current line) text without the clipboard write — for the

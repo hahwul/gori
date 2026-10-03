@@ -1090,13 +1090,7 @@ module Gori::Tui
     def detail_copy : Nil
       sel = @history.detail_selection?
       text = sel ? @history.detail_copy_text : @history.detail_copy_all
-      if text.empty?
-        @host.status("nothing to copy")
-        return
-      end
-      written = Clipboard.copy(text)
-      note = Clipboard.note(written, text)
-      @host.status(sel ? "copied #{written}b to clipboard#{note}" : "copied all (#{written}b)#{note}")
+      copy_text(text, sel ? nil : "all")
     end
 
     # The detail pane's selection (or current line) text without copying — "Send selection to".

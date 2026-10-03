@@ -787,18 +787,14 @@ module Gori::Tui
 
     # `y`: the selection, or the whole transformed sample when nothing is selected. The pane is
     # the only place the post-rewrite bytes exist — the sample in the store is the INPUT.
-    # Same `Clipboard.copy` + status shape every other tab's copy verb uses, so the toast reads
-    # the same and the OSC-52 truncation note is not re-derived here.
+    # `copy_text`, the shape every other tab's copy verb uses, so the toast reads the same and
+    # the OSC-52 truncation note is not re-derived here. An empty pane answers "nothing to copy"
+    # rather than returning silently: on the INPUT sample `^Y` is the ONLY copy and the footer
+    # names it, so an empty pane swallowing the chord reads as a dead key.
     def rewriter_copy : Nil
       sel, text = rewriter_copy_target
       return if text.nil? # not a preview pane — the verb's gate should have caught it
-                # "nothing to copy" rather than a silent return: on the INPUT sample `^Y` is the ONLY
-                # copy and the footer names it, so an empty pane swallowing the chord reads as a dead
-                # key. Every sibling tab's `do_copy` answers here; this one returned.
-      return @host.status("nothing to copy") if text.empty?
-      written = Clipboard.copy(text)
-      note = Clipboard.note(written, text)
-      @host.status(sel ? "copied #{written}b to clipboard#{note}" : "copied all (#{written}b)#{note}")
+      copy_text(text, sel ? nil : "all")
     end
 
     # What `rewriter_copy` would put on the clipboard and whether it is a selection, without

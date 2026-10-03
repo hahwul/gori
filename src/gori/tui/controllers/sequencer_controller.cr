@@ -294,9 +294,7 @@ module Gori::Tui
                detail ? v.detail_copy_all : v.analysis_copy_all
              end
       return if text.empty?
-      written = Clipboard.copy(text)
-      note = Clipboard.note(written, text)
-      @host.status(sel ? "copied #{written}b to clipboard#{note}" : "copied all (#{written}b)#{note}")
+      copy_text(text, sel ? nil : "all")
     end
 
     # --- report out: export to a file, or file the verdict as an Issue ---
