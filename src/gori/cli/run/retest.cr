@@ -491,8 +491,6 @@ module Gori
         v
       end
 
-      # The one positional id every step/run verb takes — same narrowing problem, same shape.
-
       private def self.retest_roles : String
         Store::RetestRole.values.map(&.label).join(" | ")
       end

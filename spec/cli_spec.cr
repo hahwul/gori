@@ -202,7 +202,7 @@ end
 # The `--` separator used to switch every guard above back off. OptionParser strips the run
 # after it and hands it over as a SECOND list, which `gori settings` discarded — so two
 # characters turned each of these back into the silent-no-op-at-exit-0 the guards exist to
-# stop. `gori wizard` / `gori tutorial` already handled it (reject_extra_args); settings did not.
+# stop. `gori wizard` / `gori tutorial` already handled it (now `refuse_leftovers`); settings did not.
 describe "gori settings — arguments after a `--` separator" do
   it "sees a flag pushed past `--` as the stray argument it is" do
     # `gori settings -- --edit` printed the settings path and exited 0, editor never opened.

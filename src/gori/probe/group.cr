@@ -110,7 +110,7 @@ module Gori
     end
 
     # The canonical JSON object for one grouped issue — the single source of the field shape
-    # shared by `gori run probe --format json` (CLI::Output.probe_group_fields delegates here)
+    # shared by `gori run probe --format json` (CLI::Output.probe_array_json builds on it)
     # and the MCP probe_scan tool, so both describe an issue identically.
     def self.group_json(j : JSON::Builder, g : Group) : Nil
       j.object do
