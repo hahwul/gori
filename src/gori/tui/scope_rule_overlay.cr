@@ -103,6 +103,8 @@ module Gori::Tui
           adjust(1)
         elsif key.enter? || key.space?
           move(1)
+        else
+          type_into_pattern(ev)
         end
         :stay
       when 2 # pattern text field
@@ -110,12 +112,18 @@ module Gori::Tui
         @pattern.handle_edit_key(ev)
         :stay
       else # save row
-        if key.enter? || key.space?
-          :commit
-        else
-          :stay
-        end
+        return :commit if key.enter? || key.space?
+        type_into_pattern(ev)
+        :stay
       end
+    end
+
+    # The footer says "type pattern", and the form opens on `kind`: a printable typed on a
+    # non-text row moves focus to the pattern and lands there instead of being dropped.
+    private def type_into_pattern(ev : Termisu::Event::Key) : Nil
+      return unless (ch = ev.char) && ch.printable? && !ev.ctrl? && !ev.alt?
+      @sel = 2
+      @pattern.insert(ch)
     end
 
     def set_preedit(text : String) : Nil
