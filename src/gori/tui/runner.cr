@@ -6927,10 +6927,13 @@ module Gori::Tui
       MouseDrag.disable(io) # our mode 1002 rides along: the child would get motion reports too
       term.disable_mouse
       begin
-        if m = mode
-          term.with_mode(m, preserve_screen: false) { shield_tty_signals { yield } }
-        else
-          term.suspend { shield_tty_signals { yield } }
+        # Shield outside the mode switch: the tty is cooked (ISIG on) from the moment it flips.
+        shield_tty_signals do
+          if m = mode
+            term.with_mode(m, preserve_screen: false) { yield }
+          else
+            term.suspend { yield }
+          end
         end
       ensure
         if mouse
