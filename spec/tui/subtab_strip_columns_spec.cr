@@ -26,6 +26,15 @@ describe "Chrome sub-tab strip — chip geometry in display columns" do
     CJK_LABEL.size.should eq(14)
   end
 
+  # A chip wider than the whole strip is clipped to it, not dropped: the window parks on the
+  # active chip, so dropping it left no active chip and nothing to click.
+  it "keeps an active chip wider than the strip, clipped to it" do
+    rect = Gori::Tui::Rect.new(0, 0, 20, 1)
+    segs = Chrome.strip_segments(rect, cjk_labels, 0)
+    segs.map(&.[0]).should eq([0])
+    segs[0][1].right.should be <= rect.right - 1
+  end
+
   it "sizes a chip by the columns it paints, not by its character count" do
     seg = Chrome.strip_segments(CJK_RECT, cjk_labels, 0)[0][1]
     seg.w.should eq(Screen.display_width(CJK_LABEL) + 2) # " label " — one pad each side
