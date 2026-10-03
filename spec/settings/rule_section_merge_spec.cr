@@ -36,6 +36,7 @@ private def with_rule_home(&)
   prev_colors = Gori::Settings.colormarker_colors
   prev_views = Gori::Settings.saved_views
   prev_views_next = Gori::Settings.saved_views_next_id
+  prev_chains = Gori::Settings.decoder_chains
   # Every example here hands `Settings.load` a file holding nothing BUT its own section, so the
   # load resets the rest to factory defaults. Put back the ones a later spec file would notice.
   prev_theme = Gori::Settings.theme
@@ -65,6 +66,7 @@ private def with_rule_home(&)
     Gori::Settings.colormarker_colors = prev_colors
     Gori::Settings.saved_views = prev_views
     Gori::Settings.saved_views_next_id = prev_views_next
+    Gori::Settings.decoder_chains = prev_chains
     Gori::Settings.theme = prev_theme
     Gori::Settings.bind_port = prev_port
     Gori::Settings.env_vars = prev_env
@@ -147,6 +149,53 @@ end
 
 private def disk_saved_view_names : Array(String)
   disk_section("saved_views")["views"].as_a.map(&.["name"].as_s)
+end
+
+private def write_chains(names : Array(String), extra : String = "") : Nil
+  chains = names.map { |n| %({"name":"#{n}","spec":"#{n}-spec"}) }.join(",")
+  File.write(Gori::Settings.path, %({"decoder":{"chains":[#{chains}]#{extra}}}))
+end
+
+private def disk_chain_names : Array(String)
+  root = JSON.parse(File.read(Gori::Settings.path))
+  root["decoder"]?.try(&.["chains"].as_a.map(&.["name"].as_s)) || [] of String
+end
+
+describe "Settings — the decoder chain library against a concurrent writer" do
+  it "keeps a peer's chain when this process saves another" do
+    with_rule_home do
+      write_chains(["a"])
+      Gori::Settings.load
+      write_chains(["a", "peer"])
+
+      Gori::Settings.decoder_chains = Gori::Settings.decoder_chains + [{"ours", "ours-spec"}]
+      Gori::Settings.save.should be_true
+      disk_chain_names.should eq(["a", "peer", "ours"])
+    end
+  end
+
+  # Deleting the last chain drops the whole `decoder` block, so ours is ABSENT, not empty.
+  it "keeps a peer's chain when this process deletes its last one" do
+    with_rule_home do
+      write_chains(["a"])
+      Gori::Settings.load
+      write_chains(["a", "peer"])
+
+      Gori::Settings.delete_decoder_chain("a").should be_true
+      disk_chain_names.should eq(["peer"])
+    end
+  end
+
+  it "drops the block when both sides end up with no chains" do
+    with_rule_home do
+      write_chains(["a"])
+      Gori::Settings.load
+      write_chains(["a"], %(,"sessions":[{"token":"x"}]))
+
+      Gori::Settings.delete_decoder_chain("a").should be_true
+      JSON.parse(File.read(Gori::Settings.path))["decoder"]?.should be_nil
+    end
+  end
 end
 
 describe "Settings — the global rewriter section against a concurrent writer" do

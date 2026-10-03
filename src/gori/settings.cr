@@ -926,6 +926,12 @@ module Gori
       "saved_views" => [
         {key: "views", identity: :id, optional: false},
       ],
+      # A chain library is many decisions too, and two windows each saving a chain had both
+      # "changed the section". There is no counter: a chain's NAME is its identity, because
+      # `save_chain` already replaces a same-named entry.
+      "decoder" => [
+        {key: "chains", identity: :name, optional: true},
+      ],
     }
 
     # The id counter each of those sections carries, merged by MAX rather than by who changed
@@ -944,9 +950,10 @@ module Gori
     # nothing serializes it, so the key-by-key rule below would read it as "I did not change
     # this" and copy disk's block forward for good.
     #
-    # One flat list rather than one per section: `presets` was only ever a `rewriter` key, and a
-    # name retired from one of these sections is not a name another may start using.
-    LEGACY_RULE_SECTION_KEYS = ["presets"]
+    # One flat list rather than one per section: `presets` was only ever a `rewriter` key and
+    # `sessions` a `decoder` one (pasted tokens, so it must not outlive a reset), and a name
+    # retired from one of these sections is not a name another may start using.
+    LEGACY_RULE_SECTION_KEYS = ["presets", "sessions"]
 
     # Merge one rule section key by key: its lists entry by entry, its counter by high-water
     # mark, anything else by the section-level rule.
@@ -955,6 +962,14 @@ module Gori
                                         counter_key : String = RULE_SECTION_COUNTER) : JSON::Any?
       mine_h = mine.try(&.as_h?)
       disk_h = disk.try(&.as_h?)
+      # A section made of nothing but optional lists (`decoder`) is itself omitted when they are
+      # all empty, so its absence is how "empty" is spelled. Read as unmergeable, deleting our
+      # last chain would drop the one a peer saved meanwhile.
+      all_optional = lists.all?(&.[:optional])
+      if all_optional
+        mine_h ||= {} of String => JSON::Any if mine.nil?
+        disk_h ||= {} of String => JSON::Any if disk.nil?
+      end
       # One side has no object here at all, so there is no second list to lose — and if disk's
       # is not an object, nothing about it can be trusted to be reconciled with.
       return pick_changed(mine, base, disk) unless mine_h && disk_h
@@ -971,6 +986,7 @@ module Gori
             end
         merged[k] = v if v
       end
+      return nil if merged.empty? && all_optional
       JSON::Any.new(merged)
     end
 
@@ -1086,6 +1102,10 @@ module Gori
         hex = o["hex"]?.try(&.as_s?)
         return nil unless name && hex
         normalize_color_name(name) == name && normalize_hex(hex) == hex ? name : nil
+      when :name
+        # A decoder chain: `parse_decoder_chains` keeps a non-empty name with a string spec.
+        name = o["name"]?.try(&.as_s?)
+        name && !name.empty? && o["spec"]?.try(&.as_s?) ? name : nil
       end
     end
 
