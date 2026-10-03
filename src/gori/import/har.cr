@@ -221,7 +221,7 @@ module Gori
                  elsif resp_version.starts_with?("HTTP/2")
                    ""
                  else
-                   HTTP::Status.new(status).description || ""
+                   HTTP::Status.new(status).description.to_s
                  end
         resp_headers = headers_list(resp["headers"]?)
         resp_body, mime_type, resp_declared = response_body(resp)
