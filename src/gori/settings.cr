@@ -133,6 +133,7 @@ module Gori
       @@loaded_raw = nil
       @@load_partial = false
       @@load_unreadable = false
+      @@env_syntax_unread = nil
       reset_upstream_route_errors
       # A full load rewrites every section's class properties, including the two
       # `reload_section` folds and caches. Dropping the cache here keeps "we already folded
@@ -272,6 +273,7 @@ module Gori
       if absent_explicit
         self.env_syntax = UNREADABLE_ENV_SYNTAX
         self.env_syntax_origin = EnvSyntaxOrigin::Unreadable
+        @@env_syntax_unread = {nil.as(JSON::Any?)}
         note_load_warning("settings: #{path} does not exist and gori was pointed at it by name " \
                           "(--config / $GORI_CONFIG) — reading tokens as " \
                           "#{UNREADABLE_ENV_SYNTAX.to_s.downcase} for this run and re-spelling " \

@@ -449,7 +449,7 @@ module Gori::CLI
     # settings.json, not in a project database, so no project open will ever reach them. Both
     # directions, and a copy of the file is written beside it first.
     global = was == syntax ? nil : Gori::EnvMigration.migrate_global_rules(from: was, to: syntax)
-    Settings.env_syntax = syntax
+    Settings.adopt_stated_env_syntax(syntax) # stated now, so `save` writes it over a typo
     unless Settings.save
       abort "gori settings env-syntax: applied for this process but could not be written to #{Settings.path}"
     end

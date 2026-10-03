@@ -60,6 +60,12 @@ module Gori::Settings
 
   @@env_syntax_origin : EnvSyntaxOrigin = EnvSyntaxOrigin::Absent
 
+  # What `serialize_env` writes for `syntax` while the grammar in memory is a guess: the node the
+  # file carried (a typo stays a typo), or nothing when it carried none (a `--config` naming a new
+  # file). Writing the guess down as `"bare"` made it read as stated from then on. Nil when the
+  # value in memory is the one to write.
+  @@env_syntax_unread : {JSON::Any?}? = nil
+
   def self.env_syntax_origin : EnvSyntaxOrigin
     @@env_syntax_origin
   end
@@ -175,6 +181,7 @@ module Gori::Settings
         else
           self.env_syntax = UNREADABLE_ENV_SYNTAX
           self.env_syntax_origin = EnvSyntaxOrigin::Unreadable
+          @@env_syntax_unread = {node}
           note_load_warning("settings: env.syntax #{raw.inspect} is not one of " \
                             "#{Env::Syntax.values.join('/', &.to_s.downcase)} — reading tokens as " \
                             "#{UNREADABLE_ENV_SYNTAX.to_s.downcase} for this run, and re-spelling " \
@@ -183,6 +190,7 @@ module Gori::Settings
       else
         self.env_syntax = UNREADABLE_ENV_SYNTAX
         self.env_syntax_origin = EnvSyntaxOrigin::Unreadable
+        @@env_syntax_unread = {node}
         note_load_warning("settings: env.syntax must be a string (got #{node.to_json}) — reading " \
                           "tokens as #{UNREADABLE_ENV_SYNTAX.to_s.downcase} for this run, and " \
                           "re-spelling nothing until the value is fixed")
@@ -396,7 +404,11 @@ module Gori::Settings
   private def self.serialize_env(j : JSON::Builder) : Nil
     j.field "env" do
       j.object do
-        j.field "syntax", env_syntax.to_s.downcase
+        if (unread = @@env_syntax_unread) && env_syntax_origin.unreadable?
+          unread[0].try { |v| j.field "syntax", v }
+        else
+          j.field "syntax", env_syntax.to_s.downcase
+        end
         j.field "prefix", env_prefix unless env_prefix == DEFAULT_ENV_PREFIX
         unless env_vars.empty?
           j.field "vars" do

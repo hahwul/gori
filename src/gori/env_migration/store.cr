@@ -173,7 +173,9 @@ module Gori
       return lines unless Settings.env_syntax_follow_disk?
       found = disk_syntax
       return lines unless found
-      return lines if found == Settings.env_syntax
+      # Equal to a GUESS is still news: the file now states what we only assumed, so adopt it —
+      # or this process keeps writing the old unreadable value back over the repair.
+      return lines if found == Settings.env_syntax && !Settings.env_syntax_origin.unreadable?
       # A DEGRADED load is the one state where the grammar must not move. Half this process's
       # settings are factory defaults; flipping how it reads tokens while it cannot re-spell the
       # rows (`env_syntax_stated?` folds `load_degraded?` in) is the desync this function exists to
