@@ -20,8 +20,7 @@ module Gori
 
       @[Tool("freeze_evidence", gated: true, agent_action: true, permission: "write")]
       private def freeze_evidence(h) : Result
-        issue_id = int(h, "issue_id")
-        return Result.new(id_error(h, "issue_id"), is_error: true) unless issue_id
+        issue_id = required_id(h, "issue_id")
         return not_found("no issue with id #{issue_id}") unless store.get_issue(issue_id)
         kind_s = str(h, "ref_kind").try(&.strip.downcase).presence
         return err("missing required 'ref_kind' (flow|repeater)", "INVALID_ARGUMENT", field: "ref_kind") unless kind_s
@@ -30,8 +29,7 @@ module Gori
           return err("invalid ref_kind '#{kind_s}' (flow|repeater — a fuzz or miner session has no single exchange to freeze)",
             "INVALID_ARGUMENT", field: "ref_kind")
         end
-        ref_id = int(h, "ref_id")
-        return Result.new(id_error(h, "ref_id"), is_error: true) unless ref_id
+        ref_id = required_id(h, "ref_id")
         link = bool_arg(h, "link", true)
 
         snap = Evidence.snapshot_for(store, kind, ref_id)
@@ -94,8 +92,7 @@ module Gori
 
       @[Tool("get_evidence")]
       private def get_evidence(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
+        id = required_id(h, "id")
         ev = store.get_evidence(id)
         return not_found("no frozen evidence with id #{id}") unless ev
         include_sensitive = bool_arg(h, "include_sensitive", false)
@@ -124,8 +121,7 @@ module Gori
 
       @[Tool("delete_evidence", gated: true, agent_action: true, permission: "write")]
       private def delete_evidence(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
+        id = required_id(h, "id")
         meta = store.get_evidence_meta(id)
         return not_found("no frozen evidence with id #{id}") unless meta
         return busy("frozen evidence NOT deleted (store busy or unwritable); it is unchanged") unless store.delete_evidence(id)
@@ -134,10 +130,8 @@ module Gori
 
       @[Tool("link_evidence", gated: true, agent_action: true, permission: "write")]
       private def link_evidence(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
-        issue_id = int(h, "issue_id")
-        return Result.new(id_error(h, "issue_id"), is_error: true) unless issue_id
+        id = required_id(h, "id")
+        issue_id = required_id(h, "issue_id")
         return not_found("no frozen evidence with id #{id}") unless store.get_evidence_meta(id)
         return not_found("no issue with id #{issue_id}") unless store.get_issue(issue_id)
         return busy("evidence link NOT written (store busy or either row disappeared)") unless store.link_evidence(id, issue_id)
@@ -146,10 +140,8 @@ module Gori
 
       @[Tool("unlink_evidence", gated: true, agent_action: true, permission: "write")]
       private def unlink_evidence(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
-        issue_id = int(h, "issue_id")
-        return Result.new(id_error(h, "issue_id"), is_error: true) unless issue_id
+        id = required_id(h, "id")
+        issue_id = required_id(h, "issue_id")
         meta = store.get_evidence_meta(id)
         return not_found("no frozen evidence with id #{id}") unless meta
         return not_found("evidence #{id} is not linked to issue #{issue_id}") unless meta.issue_ids.includes?(issue_id)

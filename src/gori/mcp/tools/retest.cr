@@ -29,8 +29,7 @@ module Gori
 
       @[Tool("list_retest_steps")]
       private def list_retest_steps(h) : Result
-        issue_id = int(h, "issue_id")
-        return Result.new(id_error(h, "issue_id"), is_error: true) unless issue_id
+        issue_id = required_id(h, "issue_id")
         return not_found("no issue with id #{issue_id}") unless store.get_issue(issue_id)
         planned = Retest.plan(store, issue_id)
         last = store.last_retest_run(issue_id)
@@ -52,11 +51,9 @@ module Gori
 
       @[Tool("add_retest_step", gated: true, agent_action: true, permission: "write")]
       private def add_retest_step(h) : Result
-        issue_id = int(h, "issue_id")
-        return Result.new(id_error(h, "issue_id"), is_error: true) unless issue_id
+        issue_id = required_id(h, "issue_id")
         return not_found("no issue with id #{issue_id}") unless store.get_issue(issue_id)
-        repeater_id = int(h, "repeater_id")
-        return Result.new(id_error(h, "repeater_id"), is_error: true) unless repeater_id
+        repeater_id = required_id(h, "repeater_id")
         return not_found("no repeater with id #{repeater_id}") unless store.get_repeater(repeater_id)
         role = retest_role(h, default: "variant")
         return role if role.is_a?(Result)
@@ -76,8 +73,7 @@ module Gori
 
       @[Tool("update_retest_step", gated: true, agent_action: true, permission: "write")]
       private def update_retest_step(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
+        id = required_id(h, "id")
         return not_found("no retest step with id #{id}") unless store.get_retest_step(id)
         role = nil.as(Store::RetestRole?)
         if present?(h, "role")
@@ -107,11 +103,9 @@ module Gori
       # `position` is 1-based and CLAMPED to the list, so `position:1` always means "first".
       @[Tool("move_retest_step", gated: true, agent_action: true, permission: "write")]
       private def move_retest_step(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
+        id = required_id(h, "id")
         return not_found("no retest step with id #{id}") unless store.get_retest_step(id)
-        position = int(h, "position")
-        return Result.new(id_error(h, "position"), is_error: true) unless position
+        position = required_id(h, "position")
         # CLAMPED before `to_i`: the store clamps to the list anyway, and an unclamped
         # `Int64#to_i` past `Int32::MAX` raises `OverflowError` — a crash, not a refusal, for
         # an argument whose only meaning is "as far as it goes".
@@ -125,8 +119,7 @@ module Gori
 
       @[Tool("remove_retest_step", gated: true, agent_action: true, permission: "write")]
       private def remove_retest_step(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
+        id = required_id(h, "id")
         step = store.get_retest_step(id)
         return not_found("no retest step with id #{id}") unless step
         case store.remove_retest_step(id)
@@ -142,8 +135,7 @@ module Gori
       # happened, and re-planning a check does not un-run it.
       @[Tool("clear_retest_steps", gated: true, agent_action: true, permission: "write")]
       private def clear_retest_steps(h) : Result
-        issue_id = int(h, "issue_id")
-        return Result.new(id_error(h, "issue_id"), is_error: true) unless issue_id
+        issue_id = required_id(h, "issue_id")
         return not_found("no issue with id #{issue_id}") unless store.get_issue(issue_id)
         n = store.count_retest_steps(issue_id)
         return not_found("issue #{issue_id} has no retest steps") if n == 0
@@ -158,8 +150,7 @@ module Gori
       # last answer.
       @[Tool("delete_retest_run", gated: true, agent_action: true, permission: "write")]
       private def delete_retest_run(h) : Result
-        id = int(h, "run_id")
-        return Result.new(id_error(h, "run_id"), is_error: true) unless id
+        id = required_id(h, "run_id")
         run = store.get_retest_run(id)
         return not_found("no retest run with id #{id}") unless run
         return busy("run NOT deleted (store busy or unwritable)") unless store.delete_retest_run(id)
@@ -171,8 +162,7 @@ module Gori
       # Sandbox gates and is recorded in History as `src:retest`.
       @[Tool("run_retest", gated: true, agent_action: true, env_refresh: true, permission: "send")]
       private def run_retest(h) : Result
-        issue_id = int(h, "issue_id")
-        return Result.new(id_error(h, "issue_id"), is_error: true) unless issue_id
+        issue_id = required_id(h, "issue_id")
         return not_found("no issue with id #{issue_id}") unless store.get_issue(issue_id)
         planned = Retest.plan(store, issue_id)
         if planned.empty?
@@ -233,8 +223,7 @@ module Gori
 
       @[Tool("list_retest_runs")]
       private def list_retest_runs(h) : Result
-        issue_id = int(h, "issue_id")
-        return Result.new(id_error(h, "issue_id"), is_error: true) unless issue_id
+        issue_id = required_id(h, "issue_id")
         return not_found("no issue with id #{issue_id}") unless store.get_issue(issue_id)
         limit = bounded_int_arg(h, "limit", Retest::RUN_HISTORY.to_i64,
           min: 1_i64, max: Retest::RUN_HISTORY.to_i64).to_i
@@ -256,8 +245,7 @@ module Gori
 
       @[Tool("get_retest_run")]
       private def get_retest_run(h) : Result
-        id = int(h, "run_id")
-        return Result.new(id_error(h, "run_id"), is_error: true) unless id
+        id = required_id(h, "run_id")
         run = store.get_retest_run(id)
         return not_found("no retest run with id #{id}") unless run
         steps = store.retest_run_steps(id)

@@ -14,10 +14,8 @@ module Gori
       # cap, so the comparison matches what a human sees in the Comparer tab.
       @[Tool("compare_flows")]
       private def compare_flows(h) : Result
-        id_a = int(h, "flow_id_a")
-        return err(id_error(h, "flow_id_a"), "INVALID_ARGUMENT", field: "flow_id_a") unless id_a
-        id_b = int(h, "flow_id_b")
-        return err(id_error(h, "flow_id_b"), "INVALID_ARGUMENT", field: "flow_id_b") unless id_b
+        id_a = required_id(h, "flow_id_a")
+        id_b = required_id(h, "flow_id_b")
         detail_a = store.get_flow(id_a)
         return not_found("no flow with id #{id_a}") unless detail_a
         detail_b = store.get_flow(id_b)

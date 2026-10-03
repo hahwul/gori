@@ -1548,7 +1548,13 @@ module Gori
         if missing = missing_aliased(name, h)
           return missing
         end
-        result = dispatch_tool(name, h) || err("unknown tool: #{name}", "UNKNOWN_TOOL")
+        result = begin
+          dispatch_tool(name, h) || err("unknown tool: #{name}", "UNKNOWN_TOOL")
+        rescue ex : ArgError
+          # Answered as the handler's own early return was, so it is classified and recorded
+          # as an agent action like one — unlike the blanket `Gori::Error` rescue below.
+          err(ex.message || "invalid arguments for '#{name}'", "INVALID_ARGUMENT", field: ex.field)
+        end
         result = classify(result)
         log_agent_action(name, result) if @allow_actions && agent_action?(name, h)
         result
@@ -2405,6 +2411,30 @@ module Gori
       # 1.9 or "oops"), so the caller isn't told "missing" for a value it did send.
       private def id_error(h, key : String) : String
         present?(h, key) ? "invalid '#{key}' (expected an integer)" : "missing required '#{key}'"
+      end
+
+      # A required argument absent or unreadable, raised by `required_id` / `required_str` and
+      # answered by `call` as INVALID_ARGUMENT naming `field`.
+      class ArgError < Gori::Error
+        getter field : String
+
+        def initialize(message : String, @field : String)
+          super(message)
+        end
+      end
+
+      # The required integer argument `key`, or an `ArgError` worded by `id_error`.
+      private def required_id(h, key : String) : Int64
+        int(h, key) || raise ArgError.new(id_error(h, key), key)
+      end
+
+      # The required string argument `key`, stripped, or an `ArgError` ("missing required 'key'",
+      # then `hint`) when it is absent or blank. `blank: true` returns the value as sent and
+      # refuses only its absence — for an argument where "" means something (clear, match all).
+      private def required_str(h, key : String, hint : String? = nil, *, blank : Bool = false) : String
+        v = str(h, key)
+        v = v.try(&.strip).presence unless blank
+        v || raise ArgError.new(hint ? "missing required '#{key}' #{hint}" : "missing required '#{key}'", key)
       end
 
       # One sentence for every MCP tool whose builder refused an env token that resolves to

@@ -37,8 +37,7 @@ module Gori
 
       @[Tool("get_note")]
       private def get_note(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
+        id = required_id(h, "id")
         doc = Notes.load(store)
         entry = doc.notes.find { |n| n.id == id }
         return not_found("no note with id #{id}") unless entry
@@ -79,8 +78,7 @@ module Gori
 
       @[Tool("update_note", gated: true, agent_action: true, permission: "write")]
       private def update_note(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
+        id = required_id(h, "id")
         text = str(h, "text")
         return Result.new("missing 'text' parameter", is_error: true) unless text
 
@@ -99,8 +97,7 @@ module Gori
 
       @[Tool("delete_note", gated: true, agent_action: true, permission: "write")]
       private def delete_note(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
+        id = required_id(h, "id")
 
         case Notes.delete(store, id)
         when .missing?

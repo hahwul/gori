@@ -12,8 +12,7 @@ module Gori
         return err("invalid 'kind' (expected #{Scope::KINDS.join("|")})", "INVALID_ARGUMENT", field: "kind") unless kind.in?(Scope::KINDS)
         match_type = str(h, "match_type").try(&.strip.downcase).presence || "host"
         return err("invalid 'match_type' (expected #{Scope::TYPES.join("|")})", "INVALID_ARGUMENT", field: "match_type") unless match_type.in?(Scope::TYPES)
-        pattern = str(h, "pattern").try(&.strip)
-        return err("missing required 'pattern'", "INVALID_ARGUMENT", field: "pattern") if pattern.nil? || pattern.empty?
+        pattern = required_str(h, "pattern")
         if e = Scope.validation_error(match_type, pattern)
           return err(e, "INVALID_ARGUMENT", field: "pattern")
         end
@@ -46,8 +45,7 @@ module Gori
       # moment — leaves the scope gate without it.
       @[Tool("update_scope_rule", gated: true, agent_action: true, permission: "scope")]
       private def update_scope_rule(h) : Result
-        id = int(h, "id")
-        return err(id_error(h, "id"), "INVALID_ARGUMENT", field: "id") unless id
+        id = required_id(h, "id")
         scope = Scope.load(store)
         existing = scope.rules.find { |r| r.id == id }
         return not_found("no scope rule with id #{id}") unless existing
@@ -108,8 +106,7 @@ module Gori
 
       @[Tool("delete_scope_rule", gated: true, agent_action: true, permission: "scope")]
       private def delete_scope_rule(h) : Result
-        id = int(h, "id")
-        return err(id_error(h, "id"), "INVALID_ARGUMENT", field: "id") unless id
+        id = required_id(h, "id")
         scope = Scope.load(store)
         return not_found("no scope rule with id #{id}") unless scope.rules.any? { |r| r.id == id }
         # Through `Scope#remove`, not straight at the store, and confirm it committed — a

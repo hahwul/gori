@@ -23,8 +23,7 @@ module Gori
 
       @[Tool("get_issue")]
       private def get_issue(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
+        id = required_id(h, "id")
         f = store.get_issue(id)
         return not_found("no issue with id #{id}") unless f
         Result.new(JSON.build { |j| Serialize.issue(j, f, store, retest: true) })
@@ -95,8 +94,7 @@ module Gori
 
       @[Tool("update_issue", gated: true, agent_action: true, permission: "write")]
       private def update_issue(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
+        id = required_id(h, "id")
         return not_found("no issue with id #{id}") unless store.get_issue(id)
         # A blank severity/status means "leave unchanged"; only a present,
         # non-blank, unrecognised value is an error.
@@ -153,8 +151,7 @@ module Gori
       # its entity links (Store#delete_issue clears those in the same transaction).
       @[Tool("delete_issue", gated: true, agent_action: true, permission: "write")]
       private def delete_issue(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
+        id = required_id(h, "id")
         return not_found("no issue with id #{id}") unless store.get_issue(id)
         return busy("issue NOT deleted (store busy or unwritable); it is unchanged") unless store.delete_issue(id)
         Result.new({id: id, deleted: true}.to_json)

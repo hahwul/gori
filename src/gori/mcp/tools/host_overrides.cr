@@ -22,10 +22,8 @@ module Gori
 
       @[Tool("add_host_override", gated: true, agent_action: true, permission: "write")]
       private def add_host_override(h) : Result
-        host = str(h, "host").try(&.strip)
-        return err("missing required 'host'", "INVALID_ARGUMENT", field: "host") if host.nil? || host.empty?
-        ip = str(h, "ip").try(&.strip)
-        return err("missing required 'ip'", "INVALID_ARGUMENT", field: "ip") if ip.nil? || ip.empty?
+        host = required_str(h, "host")
+        ip = required_str(h, "ip")
         return err("invalid host/ip (host hostname-shaped; ip an IPv4/IPv6 literal, optionally IP:PORT or [v6]:PORT)", "INVALID_ARGUMENT") unless HostOverrides.valid?(host, ip)
         ov = HostOverrides.load(store)
         # `OverrideHost.key`, not `downcase` — it is the form `add` will STORE, so a lookup that
@@ -55,8 +53,7 @@ module Gori
 
       @[Tool("update_host_override", gated: true, agent_action: true, permission: "write")]
       private def update_host_override(h) : Result
-        id = int(h, "id")
-        return err(id_error(h, "id"), "INVALID_ARGUMENT", field: "id") unless id
+        id = required_id(h, "id")
         ov = HostOverrides.load(store)
         return not_found("no host override with id #{id}") unless ov.entries.any? { |e| e.id == id }
         host = str(h, "host").try(&.strip)
@@ -79,8 +76,7 @@ module Gori
 
       @[Tool("delete_host_override", gated: true, agent_action: true, permission: "write")]
       private def delete_host_override(h) : Result
-        id = int(h, "id")
-        return err(id_error(h, "id"), "INVALID_ARGUMENT", field: "id") unless id
+        id = required_id(h, "id")
         ov = HostOverrides.load(store)
         return not_found("no host override with id #{id}") unless ov.entries.any? { |e| e.id == id }
         return busy("host override NOT deleted (store busy or unwritable); it is unchanged") unless ov.remove(id)

@@ -22,8 +22,7 @@ module Gori
       private def minimize_repeater(h) : Result
         # `id` — the spelling `delete_repeater` / `update_repeater` use — arrives here folded
         # into `repeater_id` by `ARG_ALIASES`.
-        id = int(h, "repeater_id")
-        return Result.new(id_error(h, "repeater_id"), is_error: true) unless id
+        id = required_id(h, "repeater_id")
         rec = store.get_repeater(id)
         return not_found("no repeater with id #{id}") unless rec
 

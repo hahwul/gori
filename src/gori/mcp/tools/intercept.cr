@@ -55,8 +55,7 @@ module Gori
 
       @[Tool("intercept_get")]
       private def intercept_get(h) : Result
-        item_id = int(h, "item_id")
-        return err(id_error(h, "item_id"), "INVALID_ARGUMENT", field: "item_id") unless item_id
+        item_id = required_id(h, "item_id")
         include_sensitive = bool_arg(h, "include_sensitive", false)
         bridge = store.intercept_bridge_state
         return not_found("no capturing gori instance is publishing intercept state") unless bridge
@@ -81,22 +80,19 @@ module Gori
 
       @[Tool("intercept_forward", gated: true, agent_action: true, permission: "intercept")]
       private def intercept_forward(h) : Result
-        id = int(h, "item_id")
-        return err(id_error(h, "item_id"), "INVALID_ARGUMENT", field: "item_id") unless id
+        id = required_id(h, "item_id")
         enqueue_intercept("forward", item_id: id)
       end
 
       @[Tool("intercept_drop", gated: true, agent_action: true, permission: "intercept")]
       private def intercept_drop(h) : Result
-        id = int(h, "item_id")
-        return err(id_error(h, "item_id"), "INVALID_ARGUMENT", field: "item_id") unless id
+        id = required_id(h, "item_id")
         enqueue_intercept("drop", item_id: id)
       end
 
       @[Tool("intercept_forward_edit", gated: true, agent_action: true, permission: "intercept")]
       private def intercept_forward_edit(h) : Result
-        id = int(h, "item_id")
-        return err(id_error(h, "item_id"), "INVALID_ARGUMENT", field: "item_id") unless id
+        id = required_id(h, "item_id")
         row = held_row_for_edit(id)
         edited = intercept_edit_bytes(h, row)
         return edited if edited.is_a?(Result)
@@ -197,8 +193,7 @@ module Gori
 
       @[Tool("intercept_set_filter", gated: true, agent_action: true, permission: "intercept")]
       private def intercept_set_filter(h) : Result
-        q = str(h, "query")
-        return err("missing required 'query' (empty string to clear)", "INVALID_ARGUMENT", field: "query") if q.nil?
+        q = required_str(h, "query", "(empty string to clear)", blank: true)
         # A field the hold gate refuses (`InterceptFilter::UNSUPPORTED_FIELDS`) compiles to a
         # never-match, so `scope:in` here holds NOTHING and `-scope:in` holds EVERY in-flight
         # message until each is forwarded by hand — and an agent has no note row to read. Refused

@@ -215,8 +215,7 @@ module Gori
       # probe_promote — turn a machine finding into a human-confirmed Issue (the Issues report).
       @[Tool("probe_promote", gated: true, agent_action: true, permission: "write")]
       private def probe_promote(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
+        id = required_id(h, "id")
         issue = store.get_probe_issue(id)
         return not_found("no probe issue with id #{id}") unless issue
         res = Probe::Triage.promote(store, issue)
@@ -295,8 +294,7 @@ module Gori
       # a GLOBAL custom rule lives in the user's settings.json, outside this project).
       @[Tool("set_probe_rule_enabled", gated: true, agent_action: true, permission: "write")]
       private def set_probe_rule_enabled(h) : Result
-        id = str(h, "id").try(&.strip).presence
-        return err("missing required 'id' (see list_probe_rules)", "INVALID_ARGUMENT", field: "id") unless id
+        id = required_str(h, "id", "(see list_probe_rules)")
         enabled = optional_bool_arg(h, "enabled")
         return err("missing required 'enabled'", "INVALID_ARGUMENT", field: "enabled") if enabled.nil?
 
@@ -345,8 +343,7 @@ module Gori
 
       @[Tool("update_probe_rule", gated: true, agent_action: true, permission: "write")]
       private def update_probe_rule(h) : Result
-        id = str(h, "id").try(&.strip).presence
-        return err("missing required 'id' (see list_probe_rules)", "INVALID_ARGUMENT", field: "id") unless id
+        id = required_str(h, "id", "(see list_probe_rules)")
         row_id = custom_rule_row_id(id)
         return err("'#{id}' is not a project custom rule (only project custom rules are editable)",
           "INVALID_ARGUMENT", field: "id") unless row_id
@@ -368,8 +365,7 @@ module Gori
 
       @[Tool("delete_probe_rule", gated: true, agent_action: true, permission: "write")]
       private def delete_probe_rule(h) : Result
-        id = str(h, "id").try(&.strip).presence
-        return err("missing required 'id' (see list_probe_rules)", "INVALID_ARGUMENT", field: "id") unless id
+        id = required_str(h, "id", "(see list_probe_rules)")
         row_id = custom_rule_row_id(id)
         return err("'#{id}' is not a project custom rule — a built-in can only be DISABLED (set_probe_rule_enabled), never deleted",
           "INVALID_ARGUMENT", field: "id") unless row_id
@@ -416,10 +412,8 @@ module Gori
 
       # Validate + normalize the shared create/update field set.
       private def custom_rule_fields(h) : {String, String, String, String, String, String, Store::Severity} | Result
-        title = str(h, "title").try(&.strip).presence
-        return err("missing required 'title'", "INVALID_ARGUMENT", field: "title") unless title
-        pattern = str(h, "pattern").try(&.strip).presence
-        return err("missing required 'pattern'", "INVALID_ARGUMENT", field: "pattern") unless pattern
+        title = required_str(h, "title")
+        pattern = required_str(h, "pattern")
 
         spec = custom_rule_match_spec(h, pattern)
         return spec if spec.is_a?(Result)

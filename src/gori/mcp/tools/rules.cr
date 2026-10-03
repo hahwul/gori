@@ -561,8 +561,7 @@ module Gori
       # which reaches every project that has not overridden it.
       @[Tool("set_rule_enabled", gated: true, agent_action: true, permission: "write")]
       private def set_rule_enabled(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
+        id = required_id(h, "id")
         scope = rule_scope(h)
         return scope if scope.is_a?(Result)
         enabled = optional_bool_arg(h, "enabled")
@@ -598,8 +597,7 @@ module Gori
 
       @[Tool("delete_rule", gated: true, agent_action: true, permission: "write")]
       private def delete_rule(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
+        id = required_id(h, "id")
         scope = rule_scope(h)
         return scope if scope.is_a?(Result)
         return not_found("no #{scope.label} rule with id #{id}") unless rule_exists?(id, scope)
@@ -793,8 +791,7 @@ module Gori
 
       @[Tool("update_extract_rule", gated: true, agent_action: true, permission: "write")]
       private def update_extract_rule(h) : Result
-        id = int(h, "id")
-        return err(id_error(h, "id"), "INVALID_ARGUMENT", field: "id") unless id
+        id = required_id(h, "id")
         existing = store.extract_rules.find { |r| r.id == id }
         return not_found("no extract rule with id #{id}") unless existing
         name = extract_name_arg(present?(h, "name") ? str(h, "name") : existing.name)
@@ -824,8 +821,7 @@ module Gori
 
       @[Tool("set_extract_rule_enabled", gated: true, agent_action: true, permission: "write")]
       private def set_extract_rule_enabled(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
+        id = required_id(h, "id")
         enabled = optional_bool_arg(h, "enabled")
         return Result.new("missing required 'enabled' (true|false)", is_error: true) if enabled.nil?
         return not_found("no extract rule with id #{id}") unless store.extract_rules.any?(&.id.==(id))
@@ -835,8 +831,7 @@ module Gori
 
       @[Tool("delete_extract_rule", gated: true, agent_action: true, permission: "write")]
       private def delete_extract_rule(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
+        id = required_id(h, "id")
         return not_found("no extract rule with id #{id}") unless store.extract_rules.any?(&.id.==(id))
         return busy("extract rule NOT deleted (store busy or unwritable); it is unchanged") unless store.delete_extract_rule(id)
         Result.new({id: id, deleted: true}.to_json)

@@ -43,8 +43,7 @@ module Gori
         if bad = exec_step_refusal(spec)
           return bad
         end
-        raw = str(h, "input")
-        return Result.new("missing required 'input'", is_error: true) if raw.nil?
+        raw = required_str(h, "input", blank: true)
 
         input =
           if bool_arg(h, "input_base64", false)

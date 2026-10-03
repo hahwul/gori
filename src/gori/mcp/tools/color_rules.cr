@@ -79,8 +79,7 @@ module Gori
 
       @[Tool("create_color_rule", gated: true, agent_action: true, permission: "write")]
       private def create_color_rule(h) : Result
-        filter = str(h, "when")
-        return err("missing required 'when'", "INVALID_ARGUMENT", field: "when") if filter.nil?
+        filter = required_str(h, "when", blank: true)
         # The engine owns what is legal, so the TUI form, the CLI and this surface cannot
         # disagree. All three refusals name a rule that would otherwise fail SILENTLY.
         if reason = Gori::Colormarker.unusable_reason(filter)
@@ -128,8 +127,7 @@ module Gori
 
       @[Tool("update_color_rule", gated: true, agent_action: true, permission: "write")]
       private def update_color_rule(h) : Result
-        id = int(h, "id")
-        return err(id_error(h, "id"), "INVALID_ARGUMENT", field: "id") unless id
+        id = required_id(h, "id")
         scope = rule_scope(h)
         return scope if scope.is_a?(Result)
         existing = Gori::Colormarker.merged(store).find { |r| r.id == id && r.scope == scope }
@@ -168,8 +166,7 @@ module Gori
       # instead, which reaches every project that has not overridden it.
       @[Tool("set_color_rule_enabled", gated: true, agent_action: true, permission: "write")]
       private def set_color_rule_enabled(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
+        id = required_id(h, "id")
         scope = rule_scope(h)
         return scope if scope.is_a?(Result)
         enabled = optional_bool_arg(h, "enabled")
@@ -208,8 +205,7 @@ module Gori
 
       @[Tool("delete_color_rule", gated: true, agent_action: true, permission: "write")]
       private def delete_color_rule(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
+        id = required_id(h, "id")
         scope = rule_scope(h)
         return scope if scope.is_a?(Result)
         return not_found("no #{scope.label} colour rule with id #{id}") unless color_rule_exists?(id, scope)
@@ -232,8 +228,7 @@ module Gori
       # before every project one, so moving past the end of a block is a scope change.
       @[Tool("move_color_rule", gated: true, agent_action: true, permission: "write")]
       private def move_color_rule(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
+        id = required_id(h, "id")
         scope = rule_scope(h)
         return scope if scope.is_a?(Result)
         dir_s = str(h, "direction")
@@ -271,8 +266,7 @@ module Gori
       # the one that answers "will I see this": an earlier enabled rule may already claim the row.
       @[Tool("preview_color_rule")]
       private def preview_color_rule(h) : Result
-        filter = str(h, "when")
-        return err("missing required 'when'", "INVALID_ARGUMENT", field: "when") if filter.nil?
+        filter = required_str(h, "when", blank: true)
         if reason = Gori::Colormarker.unusable_reason(filter)
           return err(reason, "INVALID_ARGUMENT", field: "when")
         end
@@ -328,10 +322,8 @@ module Gori
 
       @[Tool("create_custom_color", gated: true, agent_action: true, permission: "write")]
       private def create_custom_color(h) : Result
-        name = str(h, "name")
-        return err("missing required 'name'", "INVALID_ARGUMENT", field: "name") if name.nil?
-        hex = str(h, "hex")
-        return err("missing required 'hex'", "INVALID_ARGUMENT", field: "hex") if hex.nil?
+        name = required_str(h, "name", blank: true)
+        hex = required_str(h, "hex", blank: true)
         # The settings registry is the arbiter of name/hex legality and uniqueness — a non-nil
         # message means it refused, said the same way the CLI and TUI say it.
         if msg = Settings.add_colormarker_color(name, hex)
@@ -350,8 +342,7 @@ module Gori
       # `new_name` alone renames. The registry is the arbiter of legality and uniqueness.
       @[Tool("update_custom_color", gated: true, agent_action: true, permission: "write")]
       private def update_custom_color(h) : Result
-        name = str(h, "name")
-        return err("missing required 'name'", "INVALID_ARGUMENT", field: "name") if name.nil?
+        name = required_str(h, "name", blank: true)
         key = name.strip.downcase
         current = Settings.colormarker_colors.find { |c| c.name == key }
         return not_found("no custom colour named '#{key}'") unless current
@@ -376,8 +367,7 @@ module Gori
 
       @[Tool("delete_custom_color", gated: true, agent_action: true, permission: "write")]
       private def delete_custom_color(h) : Result
-        name = str(h, "name")
-        return err("missing required 'name'", "INVALID_ARGUMENT", field: "name") if name.nil?
+        name = required_str(h, "name", blank: true)
         key = name.strip.downcase
         return not_found("no custom colour named '#{key}'") unless Settings.colormarker_colors.any? { |c| c.name == key }
         return busy("custom colour NOT deleted (settings not writable)") unless Settings.delete_colormarker_color(key)

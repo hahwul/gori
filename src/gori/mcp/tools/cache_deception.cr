@@ -21,8 +21,7 @@ module Gori
       # resolve, so there is no project env to re-read before the send.
       @[Tool("cache_deception_check", gated: true, agent_action: true, requires: ["get_flow"], permission: "send")]
       private def cache_deception_check(h) : Result
-        flow_id = int(h, "flow_id")
-        return err(id_error(h, "flow_id"), "INVALID_ARGUMENT", field: "flow_id") unless flow_id
+        flow_id = required_id(h, "flow_id")
         detail = store.get_flow(flow_id)
         return not_found("no flow with id #{flow_id}") unless detail
 

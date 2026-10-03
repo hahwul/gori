@@ -883,8 +883,7 @@ module Gori
       # why `id` stays a database id everywhere (see `repeater_tui_index`).
       @[Tool("move_repeater", gated: true, agent_action: true, permission: "write")]
       private def move_repeater(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
+        id = required_id(h, "id")
 
         rows = store.repeaters_mcp
         from = repeater_tui_index(id, rows)
@@ -901,8 +900,7 @@ module Gori
 
         target =
           if has_to
-            to = int(h, "to_index")
-            return Result.new(id_error(h, "to_index"), is_error: true) unless to
+            to = required_id(h, "to_index")
             # REFUSED, not clamped. A clamp would move the tab somewhere other than where the
             # call named, report success, and leave the caller's model of the strip wrong.
             unless 1 <= to <= rows.size

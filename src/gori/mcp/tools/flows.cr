@@ -338,8 +338,7 @@ module Gori
 
       @[Tool("get_flow", requires: ["get_response_body_chunk"])]
       private def get_flow(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
+        id = required_id(h, "id")
         detail = store.get_flow(id)
         return not_found("no flow with id #{id}") unless detail
         # A WebSocket flow carries a separate message log; fetch it so get_flow surfaces the
@@ -607,8 +606,7 @@ module Gori
       # so no extra confirmation — unlike clear_history.
       @[Tool("delete_flow", gated: true, agent_action: true, permission: "write")]
       private def delete_flow(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
+        id = required_id(h, "id")
         # flow_row is the row-only read; get_flow would materialize both BLOBs to answer
         # "does this exist?" — a 40 MB response would be read and discarded.
         return not_found("no flow with id #{id}") unless store.flow_row(id)

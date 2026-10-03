@@ -22,8 +22,7 @@ module Gori
       private def cookie_verify_tool(h) : Result
         cookie = str(h, "cookie")
         return Result.new("missing required 'cookie'", is_error: true) if cookie.nil? || cookie.strip.empty?
-        secret = str(h, "secret")
-        return Result.new("missing required 'secret'", is_error: true) if secret.nil?
+        secret = required_str(h, "secret", blank: true)
         ok = cookie_verify(cookie.strip, secret, h)
         Result.new({valid: ok, format: cookie_resolved_format(cookie.strip, h)}.to_json)
       rescue ex : Cookie::CookieError
@@ -65,8 +64,7 @@ module Gori
       private def cookie_forge_tool(h) : Result
         format = str(h, "format").try(&.downcase)
         return Result.new("missing required 'format' (flask/rack/django)", is_error: true) if format.nil? || format.empty?
-        secret = str(h, "secret")
-        return Result.new("missing required 'secret'", is_error: true) if secret.nil?
+        secret = required_str(h, "secret", blank: true)
         # An explicitly-present but uncoercible 'timestamp' is a named refusal, not a
         # silent "now" (optional_int_arg raises Gori::Error → INVALID_ARGUMENT). Absent
         # still defaults to now. Negatives can't be a signed-cookie timestamp — refuse.

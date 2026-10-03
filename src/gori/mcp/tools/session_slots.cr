@@ -72,8 +72,7 @@ module Gori
 
       @[Tool("create_session_slot", gated: true, agent_action: true, permission: "write")]
       private def create_session_slot(h) : Result
-        name = str(h, "name").try(&.strip)
-        return err("missing required 'name'", "INVALID_ARGUMENT", field: "name") if name.nil? || name.empty?
+        name = required_str(h, "name")
         registry = fresh_slots
         # Deterministic and un-retryable, so INVALID_ARGUMENT rather than PROJECT_BUSY — the
         # #414 shape: an agent that trusts `retryable` loops forever on a duplicate.
@@ -200,8 +199,7 @@ module Gori
       # never read (and would blank).
       @[Tool("update_session_slot", gated: true, agent_action: true, permission: "write")]
       private def update_session_slot(h) : Result
-        name = str(h, "name").try(&.strip)
-        return err("missing required 'name'", "INVALID_ARGUMENT", field: "name") if name.nil? || name.empty?
+        name = required_str(h, "name")
         registry = fresh_slots
         current = registry.find(name)
         return not_found("no session slot named '#{name}' (see list_session_slots)") unless current
@@ -243,8 +241,7 @@ module Gori
 
       @[Tool("delete_session_slot", gated: true, agent_action: true, permission: "write")]
       private def delete_session_slot(h) : Result
-        name = str(h, "name").try(&.strip)
-        return err("missing required 'name'", "INVALID_ARGUMENT", field: "name") if name.nil? || name.empty?
+        name = required_str(h, "name")
         registry = fresh_slots
         return not_found("no session slot named '#{name}' (see list_session_slots)") unless registry.find(name)
         unless registry.remove(name)
@@ -321,8 +318,7 @@ module Gori
       # the step's answer is the result the caller asked for.
       @[Tool("refresh_session_slot", gated: true, agent_action: true, env_refresh: true, permission: "send")]
       private def refresh_session_slot(h) : Result
-        name = str(h, "name").try(&.strip)
-        return err("missing required 'name'", "INVALID_ARGUMENT", field: "name") if name.nil? || name.empty?
+        name = required_str(h, "name")
         registry = fresh_slots
         slot = registry.find(name)
         return not_found("no session slot named '#{name}' (see list_session_slots)") unless slot
