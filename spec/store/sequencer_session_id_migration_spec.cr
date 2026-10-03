@@ -171,7 +171,7 @@ describe "Store::Schema V41 (AUTOINCREMENT on sequencer_sessions)" do
       b = new_session(store)
       store.delete_sequencer_session(b).should be_true
       new_session(store).should eq(b + 1)
-      store.get_sequencer_session(a).should_not be_nil
+      store.sequencer_sessions.find(&.id.==(a)).should_not be_nil
     end
   end
 end

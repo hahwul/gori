@@ -139,7 +139,7 @@ describe "delete_sequencer_session" do
         Gori::Store::LinkRefKind::Fuzz, fuzz_sid).should_not be_nil
 
       store.delete_sequencer_session(sid)
-      store.get_sequencer_session(sid).should be_nil
+      store.sequencer_sessions.find(&.id.==(sid)).should be_nil
       store.list_links(Gori::Store::LinkOwnerKind::Issue, issue_id).size.should eq(1)
     end
   end

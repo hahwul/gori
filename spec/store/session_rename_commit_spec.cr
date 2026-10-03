@@ -71,7 +71,7 @@ describe "workbench session renames report whether the write committed" do
       m = store.get_miner_session(miner).should_not be_nil
       m.name.should eq("login params")
       m.request.should eq(req)
-      s = store.get_sequencer_session(seq).should_not be_nil
+      s = store.sequencer_sessions.find(&.id.==(seq)).should_not be_nil
       s.name.should eq("session token")
       s.request.should eq(req)
 

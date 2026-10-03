@@ -94,14 +94,6 @@ module Gori::Settings
       mode == "socks5"
     end
 
-    # The upstream port for a transparent connection the kernel could not answer for, when the
-    # derived host carries none. `tls` picks the sensible default so a plain `{host, port, mode}`
-    # entry works for both halves of a redirect pair without the operator spelling out 80/443.
-    def effective_target_port(tls : Bool) : Int32
-      return target_port if target_port > 0
-      tls ? 443 : 80
-    end
-
     # `origin` split into {scheme, host, port}, or nil when it is absent or unusable.
     # One parse shared by validation, the Session wiring and the readout, so a string that
     # saves cannot then fail to dial — and so no two of them can disagree about which port

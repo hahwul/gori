@@ -17,7 +17,6 @@ describe Gori::AltSvc do
       # RFC 7838 §3: `clear` tells the client to FORGET the alternatives it cached. Stripping
       # it would leave a client holding an h3 route gori had just taken the invitation for.
       Gori::AltSvc.h3_evidence("clear").should be_nil
-      Gori::AltSvc.advertises_h3?("clear").should be_false
     end
 
     it "matches the protocol-id as a whole token, never a substring" do
@@ -31,7 +30,6 @@ describe Gori::AltSvc do
       # the second half — so gori removed a field advertising no HTTP/3 at all, while the flow
       # advisory claimed it had removed an h3 advertisement.
       Gori::AltSvc.h3_evidence(%(fake=":443"; p="a, h3=x")).should be_nil
-      Gori::AltSvc.advertises_h3?(%(fake=":443"; p="a, h3=x")).should be_false
       # A backslash escapes the next octet inside the quotes, so the run does not end early.
       Gori::AltSvc.h3_evidence(%(fake=":443"; p="a\\", h3=x")).should be_nil
       # …and the separators that ARE separators still separate.

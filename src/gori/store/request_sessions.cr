@@ -125,10 +125,6 @@ module Gori
       request_sessions("sequencer")
     end
 
-    def get_sequencer_session(id : Int64) : RequestSessionRecord?
-      get_request_session("sequencer", id)
-    end
-
     def insert_sequencer_session(target : String, request : Bytes, http2 : Bool, sni : String?,
                                  config : String, flow_id : Int64?, position : Int32, name : String? = nil) : Int64
       insert_request_session("sequencer", target, request, http2, sni, config, flow_id, position, name)

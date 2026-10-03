@@ -306,7 +306,7 @@ describe Gori::Probe::Analyzer do
       # TUI delete path: memory suppress + store delete (store also writes probe_suppressions)
       a.suppress(code, host)
       store.delete_probe_issue(issue.id)
-      store.probe_suppressed?(code, host).should be_true
+      store.probe_suppressions.includes?({code, host}).should be_true
       store.count_probe_issues.should eq(store.probe_issues.size)
 
       # Simulate leave_project → open again: brand-new Analyzer loads durable suppressions
@@ -335,10 +335,10 @@ describe Gori::Probe::Analyzer do
       store.upsert_probe_issue(d)
       id = store.probe_issues.first.id
       store.delete_probe_issue(id)
-      store.probe_suppressed?("reflected_param", "xss.test").should be_true
+      store.probe_suppressions.includes?({"reflected_param", "xss.test"}).should be_true
 
       store.clear_probe_issues
-      store.probe_suppressed?("reflected_param", "xss.test").should be_false
+      store.probe_suppressions.includes?({"reflected_param", "xss.test"}).should be_false
       store.upsert_probe_issue(d)
       store.count_probe_issues.should eq(1)
     end

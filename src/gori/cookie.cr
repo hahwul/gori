@@ -131,17 +131,10 @@ module Gori
       b64url(Slice.new(bytes.to_unsafe, bytes.size))
     end
 
-    def b64_to_int(seg : String) : Int64
-      n = 0_i64
-      b64decode(seg).each { |byte| n = n << 8 | byte }
-      n
-    end
-
-    # Tolerant sibling of `b64_to_int` for the DECODE path (Crystal's raise-vs-`?`
-    # convention): nil when the segment isn't valid base64 OR decodes to more than 8 bytes
+    # The DECODE path's segment reader: nil when the segment isn't valid base64 OR decodes to more than 8 bytes
     # (no real itsdangerous unix second is that wide). A crafted Flask cookie chooses this
     # segment freely, so `Flask.decode_text`/`decode_json` must render "(invalid …)"/null
-    # rather than let `b64_to_int`'s raise refuse the whole cookie — hiding the perfectly
+    # rather than raise and refuse the whole cookie — hiding the perfectly
     # readable payload and signature. This is the exact contract `base62_decode` already
     # gives Django's timestamp (see spec: "decodes a cookie carrying an oversized/invalid
     # timestamp instead of crashing"); Flask had been left the odd sibling out.

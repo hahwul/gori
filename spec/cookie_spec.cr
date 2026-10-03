@@ -72,17 +72,17 @@ describe Gori::Cookie do
     it "int_to_b64 is the itsdangerous timestamp codec (plain unix, minimal big-endian)" do
       # The FLASK vector's timestamp segment decodes back to a real unix second.
       seg = FLASK.split('.')[1]
-      Gori::Cookie.int_to_b64(Gori::Cookie.b64_to_int(seg)).should eq(seg)
+      Gori::Cookie.int_to_b64(Gori::Cookie.b64_to_int?(seg).not_nil!).should eq(seg)
     end
 
     it "b64_to_int? answers nil (not raise) on an invalid or oversized segment" do
-      # The tolerant DECODE sibling of b64_to_int, mirroring the nil contract base62_decode
+      # The DECODE reader, mirroring the nil contract base62_decode
       # already gives Django, so a mangled Flask timestamp renders "(invalid …)"/null instead
       # of raising CookieError and refusing the whole cookie.
       seg = FLASK.split('.')[1]
-      Gori::Cookie.b64_to_int?(seg).should eq(Gori::Cookie.b64_to_int(seg)) # a real ts still decodes
-      Gori::Cookie.b64_to_int?("@@@bad@@@").should be_nil                   # not valid base64
-      Gori::Cookie.b64_to_int?("AAAAAAAAAAAAAAAA").should be_nil            # decodes to > 8 bytes
+      Gori::Cookie.b64_to_int?(seg).should_not be_nil            # a real ts still decodes
+      Gori::Cookie.b64_to_int?("@@@bad@@@").should be_nil        # not valid base64
+      Gori::Cookie.b64_to_int?("AAAAAAAAAAAAAAAA").should be_nil # decodes to > 8 bytes
     end
 
     it "b64_to_int? answers nil (not a wrapped-negative) on an 8-byte value past Int64::MAX" do

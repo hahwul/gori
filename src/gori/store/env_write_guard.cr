@@ -54,17 +54,6 @@ module Gori
       extract_rules.select(&.enabled?).map(&.name).to_set
     end
 
-    # The grammar THIS database's tokens are spelled in. `EnvMigration.stored_syntax`'s reading, on
-    # the store's own handle — absent (or unreadable) means bare, which is exactly true of every
-    # database written before namespaces existed.
-    def env_token_syntax : Env::Syntax
-      raw = setting(Env::PROJECT_SYNTAX_KEY)
-      return Env::Syntax::Bare unless raw
-      Env::Syntax.parse?(raw.strip) || Env::Syntax::Bare
-    rescue
-      Env::Syntax::Bare
-    end
-
     # The marker as a STATEMENT: nil when the database carries none.
     #
     # The distinction is what scopes this guard. An absent marker means bare, and it means it
