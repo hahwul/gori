@@ -1,6 +1,7 @@
 require "../tab_controller"
 require "../traffic_empty_state"
 require "../repeater_view"
+require "./request_editor_tab"
 require "../clipboard"
 require "../copy_menu"
 require "../../redact/policy"
@@ -33,6 +34,8 @@ module Gori::Tui
   # save-on-leave. The sub-tab STRIP + the rename prompt are shell-owned chrome that
   # reach in through the small public API below.
   class RepeaterController < TabController
+    include RequestEditorTab
+
     def initialize(host : Host)
       super(host)
       # Re-open repeater tabs persisted for this project — they survive a reopen AND the
@@ -151,12 +154,6 @@ module Gori::Tui
       Verb::Scope::Repeater
     end
 
-    # The space menu's CONTEXT section: whichever pane the active session's editor
-    # is focused on. :common when no session is open (empty state).
-    def command_section : Symbol
-      current_view.try(&.focus) || :common
-    end
-
     # --- shell-facing accessors (strip machinery + orthogonal prompts read these) ---
     def count : Int32
       @repeaters.size
@@ -218,11 +215,6 @@ module Gori::Tui
     # The gRPC field list takes ↑/↓ and ↵ for itself, like an editor.
     def pane_captures_keys? : Bool
       super || current_view.try(&.grpc_fields?) || false
-    end
-
-    # Cross-tab "Insert OAST payload": drop the URL at the request-editor caret.
-    def insert_oast_payload(url : String) : Bool
-      (v = current_view) ? v.insert_oast_payload(url) : false
     end
 
     def subtab_labels : Array(String)
@@ -510,16 +502,6 @@ module Gori::Tui
     # Returns false when the key should fall through to the shell keymap (rebindable
     # verbs + Global breath). READ panes own structure (nav, i/↵ INS, space menu, and
     # pane-local `x`); command letters like `y`/`d`/`p` and unmatched bare keys defer.
-    # The pane's own INS/READ mode, asked of the view (`pane_insert?` also answers true for the
-    # request pane's HEX editor and its gRPC field form). Broader than `editor_captures_tab?`,
-    # which is false on the single-line TARGET/SNI field — where a digit is very much a
-    # character, ports being what they are.
-    def body_takes_text? : Bool
-      v = current_view
-      return false unless v
-      v.pane_insert?(v.focus)
-    end
-
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
       if ev.ctrl? && key.lower_p?
@@ -1317,10 +1299,6 @@ module Gori::Tui
     end
 
     # --- mouse drag + double-click (see TabController#supports_drag?) ---
-    def supports_drag? : Bool
-      !current_view.nil?
-    end
-
     # Motion with the button held. No focus/save side effects: the press that started the
     # drag already did those, and re-running them per motion event would save the tab dozens
     # of times while the pointer moves.
@@ -1422,10 +1400,6 @@ module Gori::Tui
       current_view.try(&.focus_last)
     end
 
-    def focus_resume : Nil
-      current_view.try(&.focus_resume)
-    end
-
     def insert_key_refusal : String?
       return nil unless (v = current_view) && v.focus == :response
       "the response is read-only — i edits the REQUEST (↹ up); intercept toggles from the tab bar"
@@ -1439,10 +1413,6 @@ module Gori::Tui
     def editor_pane? : Bool
       return false unless v = current_view
       v.focus == :request || v.focus == :target
-    end
-
-    def editor_text_buffer : {TextArea, TextReadState}?
-      current_view.try(&.read_edit_buffer)
     end
 
     def editor_enter_insert : Bool
@@ -1464,22 +1434,6 @@ module Gori::Tui
       when :target  then v.target_read_move(1)
       else               return false
       end
-      editor_enter_insert
-    end
-
-    # Esc over a READ selection: the TARGET's lives in the view's `LineFieldRead`, not in a
-    # `TextReadState`, so the view's own pane pair answers for every pane here.
-    def editor_drop_read_selection : Bool
-      return false unless (v = current_view) && v.pane_selection?
-      v.pane_clear_selection
-      true
-    end
-
-    # `⇧A` / `⇧I` on the one-line TARGET: its own End / Home, then INSERT. The multi-line
-    # buffer beside it takes the shared path through `editor_text_buffer`.
-    def editor_line_insert(dir : Int32) : Bool
-      return super unless (v = current_view) && v.focus == :target
-      dir < 0 ? v.target_home : v.target_end
       editor_enter_insert
     end
 
@@ -3319,37 +3273,9 @@ module Gori::Tui
       view.edit_delete_word
     end
 
-    # A modified ⌫ — delete a WORD. The `char` half is not defensive padding: a terminal sends
-    # ⌥⌫ as ESC + 0x7F, and termisu's Alt-prefix branch maps the payload byte through
-    # `Key.from_char`, which has no name for DEL — so the event arrives as `Key::Unknown` +
-    # Alt carrying DEL rather than as `Key::Backspace`. Reading the char is what makes
-    # the chord work on a real terminal; the `backspace?` half covers a terminal (or a
-    # keyboard-protocol mode) that does report it as the named key.
-    private def word_delete?(ev : Termisu::Event::Key) : Bool
-      return false unless ev.ctrl? || ev.alt?
-      return true if ev.key.backspace?
-      c = ev.char
-      !!c && (c == '\u{7F}' || c == '\b')
-    end
-
     # Every modified key the EDITOR owns rather than the keymap — see the `handle_body_key`
     # branch. Shared with the Fuzzer's controller in spirit, not in code: the two dispatchers
     # have different shapes, and one predicate each is cheaper than a mixin nobody else wants.
-
-    # A backspace/forward-delete of a marker delimiter (§/¦) would unbalance the marker
-    # and expose its concealed ¦chain. Confirm first; on accept, strip the WHOLE marker
-    # down to its raw value. Returns true when it intercepted (a confirm was raised), so
-    # the caller skips the plain edit; false to let the edit through.
-    private def guard_marker_delete(view : RepeaterView, span : {Int32, Int32}?) : Bool
-      return false unless span
-      n = view.marker_ordinal(span)
-      @host.confirm("REMOVE MARKER",
-        "Deleting this character breaks marker §#{n}.\nRemove the whole marker and keep only its value?",
-        confirm_label: "remove marker", danger: true) do
-        view.strip_marker_span(span)
-      end
-      true
-    end
 
     # FIELDS-form keys for the REQUEST pane of a gRPC tab. Two modes in one handler because
     # they are two states of one widget: NAVIGATING the list (↑/↓, ↵ opens a value) and TYPING

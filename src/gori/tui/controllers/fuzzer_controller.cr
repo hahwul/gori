@@ -3,6 +3,7 @@ require "../traffic_empty_state"
 require "../fuzzer_view"
 require "../clipboard"
 require "./seeded_tool_tabs"
+require "./request_editor_tab"
 require "../../store"
 require "../../fuzz"
 require "../../hotkeys"
@@ -22,6 +23,7 @@ module Gori::Tui
   # results stay in-memory per session and the latest successfully saved snapshot is restored
   # asynchronously when a persisted session is first activated.
   class FuzzerController < TabController
+    include RequestEditorTab
     include SeededToolTabs
 
     CONFIRM_THRESHOLD = 1000 # confirm before a run larger than this (or unknown size)
@@ -89,12 +91,6 @@ module Gori::Tui
       Verb::Scope::Fuzzer
     end
 
-    # The space menu's CONTEXT section: whichever pane the active session is focused
-    # on (:target/:template/:config/:results/:detail). :common with no session open.
-    def command_section : Symbol
-      current_view.try(&.focus) || :common
-    end
-
     # --- shell-facing accessors ---
     def count : Int32
       @sessions.size
@@ -118,11 +114,6 @@ module Gori::Tui
       when "fuzz.toggle-http2" then SpaceMenu.on_off(v.http2?)
       when "fuzz.toggle-sni"   then SpaceMenu.on_off(!v.sni_override.nil?)
       end
-    end
-
-    # Cross-tab "Insert OAST payload": drop the URL at the template caret.
-    def insert_oast_payload(url : String) : Bool
-      (v = current_view) ? v.insert_oast_payload(url) : false
     end
 
     # The ⌕ picker also searches each session's TEMPLATE (base hook, capped): a fuzz
@@ -256,14 +247,6 @@ module Gori::Tui
     # --- input ---
     # Returns false when the key should fall through to the shell keymap (rebindable
     # verbs + Global breath). READ panes own structure; command letters defer.
-    # The pane's own INS/READ mode — see RepeaterController#body_takes_text? for why this is
-    # `pane_insert?` rather than `editor_captures_tab?`.
-    def body_takes_text? : Bool
-      v = current_view
-      return false unless v
-      v.pane_insert?(v.focus)
-    end
-
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       v = current_view
       if v.nil?
@@ -294,10 +277,6 @@ module Gori::Tui
     end
 
     # --- mouse drag + double-click (see TabController#supports_drag?) ---
-    def supports_drag? : Bool
-      !current_view.nil?
-    end
-
     # Motion with the button held — the two TEXT panes only. The RESULTS list selects rows, and
     # a drag across rows would just be a fast repeated select. No save/focus side effects: the
     # press that began the drag already did those.
@@ -618,31 +597,7 @@ module Gori::Tui
       ev.ctrl? || ev.alt?
     end
 
-    # A modified ⌫ — delete a WORD. See `RepeaterController#word_delete?` for why the `char`
-    # half is load-bearing (⌥⌫ arrives as ESC + 0x7F, i.e. `Key::Unknown` + Alt).
-    private def word_delete?(ev : Termisu::Event::Key) : Bool
-      return false unless ev.ctrl? || ev.alt?
-      return true if ev.key.backspace?
-      c = ev.char
-      !!c && (c == '\u{7F}' || c == '\b')
-    end
-
     # Every modified key the TEMPLATE editor owns rather than the keymap — see `handle_body_key`.
-
-    # A backspace/forward-delete of a marker delimiter (§/¦) would unbalance the marker and
-    # expose its concealed ¦chain. Confirm first; on accept, strip the WHOLE marker down to
-    # its raw value. Returns true when it intercepted (a confirm was raised), so the caller
-    # skips the plain edit; false to let the edit through.
-    private def guard_marker_delete(v : FuzzerView, span : {Int32, Int32}?) : Bool
-      return false unless span
-      n = v.marker_ordinal(span)
-      @host.confirm("REMOVE MARKER",
-        "Deleting this character breaks marker §#{n}.\nRemove the whole marker and keep only its value?",
-        confirm_label: "remove marker", danger: true) do
-        v.strip_marker_span(span)
-      end
-      true
-    end
 
     private def handle_template_read(ev : Termisu::Event::Key, v : FuzzerView) : Bool
       return true.tap { @host.open_space_menu } if ev.key.space? && !ev.ctrl? && !ev.alt?
@@ -945,10 +900,6 @@ module Gori::Tui
       true
     end
 
-    def focus_resume : Nil
-      current_view.try(&.focus_resume)
-    end
-
     def insert_key_refusal : String?
       return nil unless (v = current_view) && (v.focus == :results || v.focus == :detail)
       keys("results are read-only — {editor.insert} edits the TEMPLATE (↹ up); intercept toggles from the tab bar")
@@ -958,10 +909,6 @@ module Gori::Tui
     def editor_pane? : Bool
       return false unless v = current_view
       v.focus == :template || v.focus == :target
-    end
-
-    def editor_text_buffer : {TextArea, TextReadState}?
-      current_view.try(&.read_edit_buffer)
     end
 
     def editor_enter_insert : Bool
@@ -981,22 +928,6 @@ module Gori::Tui
       when :target   then v.target_read_move(1)
       else                return false
       end
-      editor_enter_insert
-    end
-
-    # Esc over a READ selection: the TARGET's lives in the view's `LineFieldRead`, not in a
-    # `TextReadState`, so the view's own pane pair answers for every pane here.
-    def editor_drop_read_selection : Bool
-      return false unless (v = current_view) && v.pane_selection?
-      v.pane_clear_selection
-      true
-    end
-
-    # `⇧A` / `⇧I` on the one-line TARGET: its own End / Home, then INSERT. The multi-line
-    # buffer beside it takes the shared path through `editor_text_buffer`.
-    def editor_line_insert(dir : Int32) : Bool
-      return super unless (v = current_view) && v.focus == :target
-      dir < 0 ? v.target_home : v.target_end
       editor_enter_insert
     end
 
