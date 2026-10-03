@@ -58,6 +58,22 @@ private def verdict_col(be : MemoryBackend, header_row : Int32) : Int32
 end
 
 describe AuthorizeView do
+  # A run re-labels every row, so a `/` lens on the verdict word reshuffles the visible list
+  # with no keypress. The cursor follows the request, not the row number — a later `d` acts on
+  # what is under it.
+  it "keeps the cursor on its request while a run reshuffles a verdict-word filter" do
+    v = AuthorizeView.new
+    ids = %w(/a /b /c /d).map { |p| v.add(flow(target: p)) }
+    ids.each { |id| v.apply_result(id, target(false)) }
+    v.filter_start
+    "enforced".each_char { |c| v.handle_filter_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }
+    v.move_row(-1) # `add` left the cursor on /d
+    v.selected_entry.not_nil!.detail.row.target.should eq("/c")
+    v.mark_running(ids.to_set)
+    [ids[3], ids[0], ids[2]].each { |id| v.apply_result(id, target(false)) } # /b still running
+    v.selected_entry.not_nil!.detail.row.target.should eq("/c")
+  end
+
   # A master row and its detail pane must not contradict each other — the rule `settle_running`
   # states. The detail pane draws a trials table whenever a target is there, so a state that
   # means "no result" has to drop the one the run before it left.

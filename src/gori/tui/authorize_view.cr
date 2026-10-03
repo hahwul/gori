@@ -133,7 +133,10 @@ module Gori::Tui
       @identity_rev = 0
       @passive_note = nil.as(String?)
       @next_id = 0
-      @sel = 0  # master (request) cursor
+      @sel = 0 # master (request) cursor
+      # The entry the operator put the cursor on. A run re-labels rows under a `/` lens on the
+      # verdict word, so the visible list reshuffles with no keypress; `visible` re-finds this.
+      @sel_id = nil.as(Int32?)
       @tsel = 0 # identity sub-cursor within the selected request
       # Window offsets for the three scrolling regions. Each is DERIVED on the draw path from
       # its cursor and the rows the pane turned out to have (`Viewport`), never set by a
@@ -168,6 +171,7 @@ module Gori::Tui
       touch
       # Land on the new seed — unless the lens hides it, in which case the cursor stays.
       @sel = visible.index(@entries.size - 1) || @sel.clamp(0, {visible.size - 1, 0}.max)
+      anchor_sel
       @tsel = 0
       @trial_scroll = 0
       @detail_scroll = 0
@@ -235,6 +239,7 @@ module Gori::Tui
       @entries.delete(e)
       touch
       @sel = @sel.clamp(0, {visible.size - 1, 0}.max)
+      anchor_sel
       @tsel = 0
       @trial_scroll = 0
       @detail_scroll = 0
@@ -408,6 +413,7 @@ module Gori::Tui
       touch
       @entries.clear
       @sel = 0
+      @sel_id = nil
       @tsel = 0
       @list_scroll = 0
       @trial_scroll = 0
@@ -426,6 +432,7 @@ module Gori::Tui
       n = visible.size
       return if n == 0
       @sel = (@sel + delta).clamp(0, n - 1)
+      anchor_sel
       @tsel = 0
       @trial_scroll = 0
       @detail_scroll = 0
@@ -481,6 +488,7 @@ module Gori::Tui
       prev = selected_entry.try(&.id)
       @filter.handle_key(ev)
       @sel = (prev && visible.index { |i| @entries[i].id == prev }) || @sel.clamp(0, {visible.size - 1, 0}.max)
+      anchor_sel
       true
     end
 
@@ -492,11 +500,18 @@ module Gori::Tui
       @rev += 1
     end
 
+    private def anchor_sel : Nil
+      @sel_id = selected_entry.try(&.id)
+    end
+
     private def visible : Array(Int32)
       key = {@rev, @filter.query}
       return @vis if key == @vis_key
       @vis = (0...@entries.size).select { |i| @filter.matches?(entry_haystack(@entries[i])) }
       @vis_key = key
+      if (want = @sel_id) && (j = @vis.index { |i| @entries[i].id == want })
+        @sel = j
+      end
       @vis
     end
 
@@ -581,6 +596,7 @@ module Gori::Tui
       n = visible.size
       return if n == 0
       @sel = i.clamp(0, n - 1)
+      anchor_sel
       @tsel = 0
       @trial_scroll = 0
       @detail_scroll = 0
