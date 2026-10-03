@@ -6927,9 +6927,9 @@ module Gori::Tui
       term.disable_mouse
       begin
         if m = mode
-          term.with_mode(m, preserve_screen: false) { yield }
+          term.with_mode(m, preserve_screen: false) { shield_tty_signals { yield } }
         else
-          term.suspend { yield }
+          term.suspend { shield_tty_signals { yield } }
         end
       ensure
         if mouse
@@ -6939,6 +6939,23 @@ module Gori::Tui
           MouseDrag.forget
           MouseDrag.enable(io)
         end
+      end
+    end
+
+    # The child shares gori's process group (Crystal's `Process` has no `setpgid`) and the
+    # cooked tty has ISIG on, so a ^C or ^\ meant for an editor that leaves ISIG alone
+    # (`code --wait`) reached gori as well: SignalGuard tore the session down, and an untrapped
+    # QUIT killed it with the screen still wrecked. A no-op trap keeps gori alive, and the
+    # child still gets the default disposition — Crystal resets trapped signals before exec.
+    TTY_SIGNALS = [Signal::INT, Signal::QUIT]
+
+    def self.shield_tty_signals(&)
+      saved = TTY_SIGNALS.map(&.trap_handler?)
+      TTY_SIGNALS.each(&.trap { })
+      begin
+        yield
+      ensure
+        TTY_SIGNALS.zip(saved) { |sig, handler| handler ? sig.trap(&handler) : sig.reset }
       end
     end
 

@@ -173,3 +173,30 @@ describe "Runner.reclaim_foreground_pgrp" do
     Runner.reclaim_foreground_pgrp
   end
 end
+
+# A ^C typed at an editor that leaves ISIG on (`code --wait`) reaches gori too — the child shares
+# its process group. While the child owns the tty that signal must not tear gori down, and
+# whatever handled it before (SignalGuard's restore-and-die) must be back afterwards.
+describe "Runner.shield_tty_signals" do
+  it "swallows INT while the child runs and restores the previous handler" do
+    hits = Channel(Nil).new(1)
+    Signal::INT.trap { hits.send(nil) }
+    begin
+      Runner.shield_tty_signals do
+        Process.signal(Signal::INT, Process.pid)
+        sleep 50.milliseconds
+      end
+      select
+      when hits.receive then fail "the guard ran while the child owned the tty"
+      else
+      end
+      Process.signal(Signal::INT, Process.pid)
+      select
+      when hits.receive
+      when timeout(2.seconds) then fail "the previous INT handler was not restored"
+      end
+    ensure
+      Signal::INT.reset
+    end
+  end
+end
