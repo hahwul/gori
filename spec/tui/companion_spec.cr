@@ -1096,7 +1096,7 @@ describe Gori::Tui::Companion do
     left.should eq(right - (Mascot::W - 2)) # the equator, where draw_row put it
     row[right + 1].should eq('!')           # …and the borrowed badge cell beside it
 
-    args = {focus: "BODY", resource: "CPU 1%", time: "01:23 PM", companion: frame}
+    args = {focus: "BODY", hints: "hints here", resource: "CPU 1%", time: "01:23 PM", companion: frame}
     Chrome.status_bar_chip_at(rect, left, rect.y, **args).should eq(:companion)
     Chrome.status_bar_chip_at(rect, right + 1, rect.y, **args).should eq(:companion)
     # The clock to her left is not her, and neither is the edge past her.

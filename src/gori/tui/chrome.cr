@@ -1041,8 +1041,9 @@ module Gori::Tui
       hint_x = status_hint_x(rect, focus)
 
       chips = status_chips(activity: activity, resource: resource, time: time, companion: companion)
-      hint_w = {rect.right - hint_x - chips_width(chips) - 2, 1}.max
-      screen.text(hint_x, rect.y, hints, Theme.muted, Theme.panel, width: hint_w)
+      chips = yield_chips(chips, hints, rect, hint_x)
+      hint_w = status_hint_room(rect, hint_x, chips)
+      screen.text(hint_x, rect.y, fit_hints(hints, hint_w), Theme.muted, Theme.panel, width: hint_w)
       # Floor the chips at the hint start so they can never overwrite the badge.
       render_chips(screen, rect, chips, min_x: hint_x)
       # The companion chip is the one chip that is not a single colour — its rim, lashes, pupils
@@ -1058,6 +1059,47 @@ module Gori::Tui
       end
     end
 
+    # The passive readouts give their room to the key hints before any hint is dropped: a
+    # beginner needs `^P cmds` more than gori's own CPU figure. Meter first, then the clock;
+    # activity (a running job) and the companion (clickable) always stay.
+    YIELDING_CHIPS = {:resource, :time}
+
+    private def self.yield_chips(chips : Array(Chip), hints : String, rect : Rect, hint_x : Int32) : Array(Chip)
+      YIELDING_CHIPS.each do |tag|
+        break if Screen.display_width(hints) <= status_hint_room(rect, hint_x, chips)
+        chips = chips.reject { |c| c.tag == tag }
+      end
+      chips
+    end
+
+    private def self.status_hint_room(rect : Rect, hint_x : Int32, chips : Array(Chip)) : Int32
+      {rect.right - hint_x - chips_width(chips) - 2, 1}.max
+    end
+
+    # Fit a ` · `-separated hint into `width` by dropping WHOLE segments, never cutting one
+    # mid-token. Hints read most-important-first, except the escape hatches parked at the
+    # tail: the command menu (`^P cmds` / `space cmds`) and everything after it. So segments
+    # go right-to-left from just BEFORE that tail, keeping the first; only then the tail
+    # itself from the right. Losing the LAST segment (a toast has no `cmds` anchor, so that is
+    # its only cut) ends the line with ` …`, so a cut tail still reads as cut; middle drops
+    # stay silent. A lone segment still too wide is left for Screen#text's `…`.
+    def self.fit_hints(hints : String, width : Int32) : String
+      sep = " · "
+      return hints if Screen.display_width(hints) <= width
+      segs = hints.split(sep)
+      last = segs.last
+      text = -> { segs.last.same?(last) ? segs.join(sep) : "#{segs.join(sep)} …" }
+      cut = segs.rindex(&.ends_with?(" cmds")) || segs.size
+      while cut > 1 && Screen.display_width(text.call) > width
+        cut -= 1
+        segs.delete_at(cut)
+      end
+      while segs.size > 1 && Screen.display_width(text.call) > width
+        segs.pop
+      end
+      text.call
+    end
+
     # Where the hint text starts, which is also the floor the chip run may not cross.
     # Shared by render_status and status_bar_chip_at, so the two cannot disagree about the
     # run's left edge — and with it about which cells a chip occupies.
@@ -1068,13 +1110,16 @@ module Gori::Tui
     # Hit-test the status row's chips. Mirrors top_bar_chip_at, and for the same reason the
     # chips carry a `tag`: render and hit-test read ONE ordered source, so a chip cannot be
     # drawn in cells the pointer misses. Takes `focus` because the focus badge is what
-    # pushes the hint start, and the hint start is the run's floor.
-    def self.status_bar_chip_at(rect : Rect, mx : Int32, my : Int32, *, focus : String,
+    # pushes the hint start, and the hint start is the run's floor; `hints` because an
+    # overflowing hint makes the readouts yield (yield_chips), which changes the run.
+    def self.status_bar_chip_at(rect : Rect, mx : Int32, my : Int32, *, focus : String, hints : String,
                                 activity : {String, Color}? = nil, resource : String? = nil,
                                 time : String? = nil, companion : Mascot::Frame? = nil) : Symbol?
       return nil unless rect.contains?(mx, my)
+      hint_x = status_hint_x(rect, focus)
       chips = status_chips(activity: activity, resource: resource, time: time, companion: companion)
-      rects = chip_layout(rect, chips, status_hint_x(rect, focus))
+      chips = yield_chips(chips, hints, rect, hint_x)
+      rects = chip_layout(rect, chips, hint_x)
       chips.each_with_index do |chip, i|
         next unless chip.clickable
         r = rects[i]?

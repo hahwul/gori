@@ -2878,7 +2878,7 @@ module Gori::Tui
     # "nothing bound here" from one row above a list header that reads `/ filter`: true about
     # the SIDEBAR scope and useless, because the key the operator wanted was `↵` and nothing
     # said so. The letter deliberately does not fall through (that is the tab bar's own
-    # decision, see the `1-9 slots` hint); it is ANSWERED instead.
+    # decision, see the `1-9/0 tabs` hint); it is ANSWERED instead.
     #
     # `verb` names what the key does down there, so the line teaches the pair rather than just
     # refusing: `‹/› — press ↵ to enter the list, then / filter`.
@@ -3268,7 +3268,9 @@ module Gori::Tui
         # keypress lands on one of them — and both change what the PROXY does, from a tab that
         # shows neither: `i` starts holding every request, `c` stops recording entirely. They
         # were the only unadvertised keys at this focus with an effect outside the current tab.
-        return Hotkeys.expand(@session.registry, "←/→ switch tab · ↹/↵ enter · 1-9 slots · 0 all tabs · {capture.toggle} capture · {intercept.toggle} intercept · ^P cmds · q projects · ^D quit") if @focus == :menu
+        # `{tab.help}` sits in the escape-hatch tail with `^P cmds`, which Chrome.fit_hints keeps
+        # when the row is narrow: it drops the head's extras first.
+        return Hotkeys.expand(@session.registry, "←/→ switch tab · ↹/↵ enter · 1-9/0 tabs · {capture.toggle} capture · {intercept.toggle} intercept · ^P cmds · {tab.help} help · q projects · ^D quit") if @focus == :menu
         if @focus == :subtabs
           # On the ⌕ affordance the strip's own keys are the wrong story — ↵ lists every
           # sub-tab here instead of entering one. Only ever reached when the pill is really

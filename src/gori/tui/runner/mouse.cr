@@ -299,6 +299,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     return false unless frame = @companion.frame # not drawn yet, or dropped while disabled
     if Settings.companion_in_bar?
       return false unless Chrome.status_bar_chip_at(layout.status, mx, my, focus: focus_label,
+                            hints: Hotkeys.retag(status_line || key_hints),
                             activity: activity_chip, resource: @resource.label,
                             time: clock_label, companion: frame) == :companion
     else
