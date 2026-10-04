@@ -300,6 +300,9 @@ module Gori::Tui
       # entering a project would bury the notification center under standing state the
       # `bypass:N` chip is already reporting.
       @passthrough_announced = Settings.passthrough_count
+      # Whether an untrusted-CA handshake has already raised its one toast (see
+      # drain_untrusted_handshakes).
+      @untrusted_toasted = false
       # #123: high-water-mark of intercept_commands drained + applied to the live interceptor
       # (agent forward/drop/edit/toggle). Seeded to the current max at run start so a fresh
       # session never replays a prior command; advances monotonically as commands are consumed.
@@ -751,6 +754,8 @@ module Gori::Tui
             dirty = true if drain_passthrough_notices
             # …and what intercept could not hold. Same placement, same reason.
             dirty = true if drain_intercept_notices
+            # …and a client that refused gori's certificate. Same placement, same reason.
+            dirty = true if drain_untrusted_handshakes
             # Session-slot refreshes (#1233): a finished one raises its toast, and a start or
             # finish moves the `session:` chip (`⟳` / `!`), so repaint on the runner's rev
             # rather than on a timer.
@@ -4274,6 +4279,27 @@ module Gori::Tui
       notices = @session.interceptor.drain_notices
       return false if notices.empty?
       notices.each { |n| @notifications.push(:warn, n, Jobs::Goto.new(:intercept), source: "app") }
+      true
+    end
+
+    # Say on screen that a client refused gori's certificate. Otherwise the only trace is
+    # `Tunnel#notice_handshake_failure`'s `::Log.warn`, which under `gori tui` lands in
+    # `~/.gori/gori.log`: a beginner who just pointed a browser at gori saw an empty History and
+    # no reason. Once per `host:port` (the tunnel's own dedup), with the remedy.
+    private def drain_untrusted_handshakes : Bool
+      hosts = @session.tunnel.drain_untrusted_handshakes
+      return false if hosts.empty?
+      remedy = "Install it from http://gori.proxy/ (or #{Tutorial.reach(@session.registry, "ca.export")})"
+      hosts.each do |hp|
+        msg = "HTTPS to #{hp} failed — the client doesn't trust gori's CA. #{remedy}"
+        @notifications.push(:warn, msg, source: "app")
+        # A toast for the FIRST one only: as the system proxy, every cert-pinning OS service
+        # fails here too, and a toast per host would own the status line. The badge counts the rest.
+        next if @untrusted_toasted || !Settings.notify_toast?
+        @untrusted_toasted = true
+        # Short enough for an 80-column status line to keep the remedy; the notification has the rest.
+        status("HTTPS failed: trust gori's CA from http://gori.proxy/ (#{hp})")
+      end
       true
     end
 

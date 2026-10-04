@@ -132,10 +132,11 @@ private def with_mitm_proxy(&)
   begin
     ca = CertAuthority.load_or_create(dir)
     sink = RecordingSink.new(done)
-    proxy = Server.new("127.0.0.1", 0, sink, tls: Tunnel.new(ca, verify_upstream: false))
+    tunnel = Tunnel.new(ca, verify_upstream: false)
+    proxy = Server.new("127.0.0.1", 0, sink, tls: tunnel)
     proxy.start
     begin
-      yield proxy, sink, done
+      yield proxy, sink, done, tunnel
     ensure
       proxy.stop
     end
@@ -344,17 +345,26 @@ describe "a CONNECT tunnel whose payload is not TLS" do
   # population is a client that does not trust gori's CA, which retries.
   it "says in gori.log why a client handshake it could not complete was closed (#755)" do
     origin_port = start_tls_origin("unused")
+    drained = [] of String
     logs = Log.capture(level: Log::Severity::Warn) do
-      with_mitm_proxy do |proxy, _sink, _done|
-        raw = open_tunnel(proxy, "localhost:#{origin_port}")
-        # A well-formed TLS record header (so the peek admits it) carrying a handshake body
-        # OpenSSL cannot make sense of.
-        raw.write(Bytes[0x16, 0x03, 0x01, 0x00, 0x05, 0x01, 0x00, 0x00, 0x01, 0xff])
-        raw.flush
-        raw.gets_to_end
-        raw.close
+      with_mitm_proxy do |proxy, _sink, _done, tunnel|
+        # Twice: a retrying client is the ordinary member of this population, and the TUI queue
+        # rides the log line's {host:port, class} dedup.
+        2.times do
+          raw = open_tunnel(proxy, "localhost:#{origin_port}")
+          # A well-formed TLS record header (so the peek admits it) carrying a handshake body
+          # OpenSSL cannot make sense of.
+          raw.write(Bytes[0x16, 0x03, 0x01, 0x00, 0x05, 0x01, 0x00, 0x00, 0x01, 0xff])
+          raw.flush
+          raw.gets_to_end
+          raw.close
+        end
+        drained = tunnel.drain_untrusted_handshakes
+        tunnel.drain_untrusted_handshakes.should be_empty # taken, not peeked
       end
     end
     logs.check(:warn, /client TLS handshake failed for localhost:#{origin_port}/)
+    # The OpenSSL class is the untrusted-CA one, so it is queued for the TUI too — once.
+    drained.should eq(["localhost:#{origin_port}"])
   end
 end
