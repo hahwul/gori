@@ -832,7 +832,7 @@ The override *narrows* the destination policy rather than replacing it: it takes
 
 ## Project Tab
 
-The **Project** home tab is more than a summary. Under the overview sits a sub-tab strip: `←`/`→` switch cards, `↓`/`Enter` drop into the one showing, and `Esc` (or `↑` at the top) comes back up to the strip.
+The **Project** tab is more than a summary. Under the overview sits a sub-tab strip: `←`/`→` switch cards, `↓`/`Enter` drop into the one showing, and `Esc` (or `↑` at the top) comes back up to the strip.
 
 The overview band carries the project's own facts: name, directory, its registry short id and
 bound workspace, the proxy address with whether capture is live, flow and byte counts, confirmed

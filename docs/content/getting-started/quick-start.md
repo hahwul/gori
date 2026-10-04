@@ -30,7 +30,7 @@ By default the proxy listens on `127.0.0.1:8070`. Override it for a single run (
 gori --listen 0.0.0.0 --port 8080
 ```
 
-**Checkpoint.** Your project session is open. The tab bar shows Project, Target, History, …, and the top bar shows the proxy address, `127.0.0.1:8070`.
+**Checkpoint.** Your project session is open on **History**. The tab bar shows Project, Target, History, …, and the top bar shows the proxy address, `127.0.0.1:8070`.
 
 ## 2. Trust the CA and capture your first flow
 

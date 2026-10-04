@@ -199,8 +199,8 @@ module Gori::Tui
       @scope = @session.scope
       @palette = PaletteState.new(@session.registry)
       @space_menu = SpaceMenu.new(@session.registry)
-      # Land on the home tab, but never on a hidden one (settings:tabs may hide Project;
-      # Miner is hidden by default). Settings is loaded (cli.cr) before Runner.new.
+      # Land on History — where traffic arrives and where the first-run steps live — but never
+      # on a hidden tab (settings:tabs may hide it). Settings is loaded (cli.cr) before Runner.new.
       @evidence_available = @session.store.count_evidence > 0
       # A layout saved before the nine slots may name more visible tabs than the bar holds.
       # Settle that ONCE, here, before anything reads the prefs — it rewrites them, so the
@@ -208,7 +208,7 @@ module Gori::Tui
       # (it is not initialised yet at this point in the ladder).
       fold_notice = Runner.settle_tab_slots
       vis = available_tabs(Chrome.visible_tabs(Settings.tab_prefs)).map(&.first)
-      @active_tab = vis.includes?(:project) ? :project : (vis.first? || :project)
+      @active_tab = Runner.landing_tab(vis)
       # Custom Colormarker colours are absolute hexes (unlike the theme-relative built-ins), so
       # the render-side resolver keeps its own name→hue map. Prime it from settings now, and
       # re-sync it whenever the colour set changes (the data-version poll below, keyed on the
@@ -510,6 +510,10 @@ module Gori::Tui
       # (#listen_chip_label), the status line, the listeners overlay, the traffic empty states
       # — all of which read `@session.proxy.port` directly — plus the toast above.
       startup_step(:input) { announce_env_syntax_migration }
+      # Landing on History is entering it: `on_enter` is where a saved view that has gone
+      # missing gets said (HistoryController holds it until then). Not over a bind or env-migration
+      # toast, which matter more; the note then waits for the next entry, as it did when Project was home.
+      startup_step(:input) { history_controller.on_enter if @active_tab == :history && @toast.nil? }
       startup_step(:input) { project_controller.reload }
       startup_step(:input) { open_focus_flow }
       # Replies an agent sent while no window was open (#1322): one note, before the first
@@ -2474,7 +2478,7 @@ module Gori::Tui
       # flush which silently dropped the others at hide-time.
       flush_active_tab_edits
       # `vis` can be empty here: an Evidence-only layout reused in a project whose archive is
-      # empty. Project is the home tab and `effective_bar` falls back to it for the same
+      # empty. Project is the last resort here and `effective_bar` falls back to it for the same
       # reason, so the two agree on where a stranded operator lands.
       @active_tab = vis.first?.try(&.[0]) || :project
       on_enter_tab
@@ -2552,6 +2556,12 @@ module Gori::Tui
 
     def self.filing_return_state(origin : FilingOrigin) : {Symbol, Symbol, OverlayKind}
       {origin.tab, origin.focus, origin.drill_in ? OverlayKind::Detail : OverlayKind::None}
+    end
+
+    # The tab a project opens on, from the visible ones in bar order. Pure because `Runner.new`
+    # owns a terminal. Tab ORDER is untouched: Project keeps slot 1, focus just starts on History.
+    def self.landing_tab(visible : Array(Symbol)) : Symbol
+      visible.includes?(:history) ? :history : (visible.first? || :project)
     end
 
     # Snapshot the origin and open the new issue in the Issues detail. Returns the clause the
