@@ -428,6 +428,29 @@ describe Gori::Tui::Chrome do
     backend.fg_at(res_x, 0).should eq(Theme.muted) # a passive readout, not an alert
   end
 
+  it "drops whole hint segments before the command-menu tail, never cutting a token" do
+    hints = "←/→ switch tab · ↹/↵ enter · 1-9/0 tabs · c capture · ^P cmds · ? help · ^D quit"
+    Chrome.fit_hints(hints, 200).should eq(hints)
+    # Middle drops (before the `cmds` tail) are silent: the last segment is still there.
+    Chrome.fit_hints(hints, 50).should eq("←/→ switch tab · ^P cmds · ? help · ^D quit")
+    # No `cmds` tail (an overlay hint, a toast): segments go from the right, marked ` …`.
+    Chrome.fit_hints("↑/↓ select · ↵ run · esc close", 20).should eq("↑/↓ select · ↵ run …")
+    # Too narrow even for head + tail: the tail goes from the right, the head stays.
+    Chrome.fit_hints(hints, 26).should eq("←/→ switch tab · ^P cmds …")
+  end
+
+  it "makes the CPU/MEM meter, then the clock, yield their room to overflowing hints" do
+    hints = "←/→ panes · ↓/↵ enter · ⇧N/⇧P flow · ↑/← list · ^R repeater · ↹ pane · space cmds"
+    backend = MemoryBackend.new(100, 1)
+    Chrome.render_status(Screen.new(backend), Rect.new(0, 0, 100, 1),
+      focus: "DETAIL", hints: hints, resource: "CPU 1% MEM 54M", time: "02:30 PM")
+    row = backend.row(0)
+    row.should contain("space cmds") # the whole hint fits once the meter steps aside
+    row.should_not contain("CPU")
+    row.should contain("02:30 PM") # the clock only goes when the meter was not enough
+    row.should_not contain("…")
+  end
+
   it "leaves the status bar chip-free when the resource meter is off" do
     backend = MemoryBackend.new(90, 1)
     Chrome.render_status(Screen.new(backend), Rect.new(0, 0, 90, 1),
