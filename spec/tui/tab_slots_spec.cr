@@ -195,3 +195,16 @@ describe "Runner.settle_tab_slots — the one-time migration" do
     end
   end
 end
+
+describe "Runner.landing_tab" do
+  it "opens on History while the bar keeps Project in slot 1" do
+    vis = Chrome.visible_tabs([] of {String, Bool}).map(&.first)
+    vis.first.should eq(:project)
+    Runner.landing_tab(vis).should eq(:history)
+  end
+
+  it "falls back to the first visible tab when History is hidden, and to Project on an empty bar" do
+    Runner.landing_tab([:target, :repeater]).should eq(:target)
+    Runner.landing_tab([] of Symbol).should eq(:project)
+  end
+end

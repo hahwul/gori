@@ -2060,7 +2060,7 @@ module Gori::Tui
       y = box.y + 2
       # Every key named here is one the real app binds the same way (Help → TABS & FOCUS).
       # The LAST line names the SUBTABS level Project and Target (and Repeater, Notes…) put
-      # between the bar and the body — the first tab a new user lands on has one, and the
+      # between the bar and the body — the tab in slot 1 has one, and the
       # try line below passes through Target's. It is last because it is the line a short
       # card drops first, and the mock shows the strip anyway.
       detail = [

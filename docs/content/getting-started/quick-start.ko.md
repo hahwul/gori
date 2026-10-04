@@ -30,7 +30,7 @@ gori
 gori --listen 0.0.0.0 --port 8080
 ```
 
-**확인.** 프로젝트 세션이 열렸습니다. Project, Target, History, … 탭과 프록시 주소 `127.0.0.1:8070`을 보여주는 상단 바가 보입니다.
+**확인.** 프로젝트 세션이 **History** 탭에서 열렸습니다. Project, Target, History, … 탭과 프록시 주소 `127.0.0.1:8070`을 보여주는 상단 바가 보입니다.
 
 ## 2. CA 신뢰 후 첫 플로우 캡처 {#2-trust-the-ca-and-capture-your-first-flow}
 
