@@ -43,7 +43,7 @@ module Gori::Tui
       end
     end
 
-    # Run `command` via `/bin/sh -c`, feeding `stdin_json` on stdin, and return the
+    # Run `command` via `/bin/sh -c` (cmd.exe on Windows), feeding `stdin_json` on stdin, and return the
     # FIRST line of its stdout (styling still embedded). On timeout, failure or spawn
     # error, return a short marker instead of raising.
     #
@@ -53,10 +53,7 @@ module Gori::Tui
     # detached fiber. This fiber never blocks on a bare `process.wait`, so a child still
     # writing more output can never wedge us.
     def self.run(command : String, stdin_json : String, timeout_span : Time::Span) : Outcome
-      process = Process.new("/bin/sh", ["-c", command],
-        input: Process::Redirect::Pipe,
-        output: Process::Redirect::Pipe,
-        error: Process::Redirect::Close) # discard stderr (browser.cr pattern)
+      process = spawn_shell(command)
       begin
         process.input.print(stdin_json)
         process.input.flush
@@ -123,6 +120,19 @@ module Gori::Tui
       failed ? Outcome.marker(line) : Outcome.said(line)
     rescue File::NotFoundError | RuntimeError | IO::Error
       Outcome.marker("⋯ (statusline failed)")
+    end
+
+    # The command under a full shell, stderr discarded (browser.cr pattern). Windows hands
+    # cmd.exe the line as ONE string (`/s /c "…"`, whose outer quotes cmd strips): argv quoting
+    # would escape a `"` as `\"`, which cmd does not read.
+    private def self.spawn_shell(command : String) : Process
+      {% if flag?(:win32) %}
+        Process.new(%(#{ShellEnv.comspec} /d /s /c "#{command}"), shell: true,
+          input: Process::Redirect::Pipe, output: Process::Redirect::Pipe, error: Process::Redirect::Close)
+      {% else %}
+        Process.new("/bin/sh", ["-c", command],
+          input: Process::Redirect::Pipe, output: Process::Redirect::Pipe, error: Process::Redirect::Close)
+      {% end %}
     end
 
     # Tear down a child we are done with: SIGTERM, a grace, then SIGKILL — and exactly one

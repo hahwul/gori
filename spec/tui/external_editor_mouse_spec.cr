@@ -149,7 +149,14 @@ describe "Runner.copy_shell_command" do
     cmd_fish = Runner.copy_shell_command("127.0.0.1:8070", nasty_ca,
       Gori::ShellEnv::Syntax::Fish, executable: "/usr/local/bin/gori")
     cmd_fish.should contain(Gori::ShellEnv.fish_quote(File.expand_path(nasty_ca)))
-    cmd_fish.should_not contain(Process.quote(File.expand_path(nasty_ca)))
+    cmd_fish.should_not contain(Process.quote_posix(File.expand_path(nasty_ca)))
+  end
+
+  it "runs the quoted path with `&` and pipes into Invoke-Expression for PowerShell" do
+    cmd = Runner.copy_shell_command("127.0.0.1:8070", "/path/it's/ca",
+      Gori::ShellEnv::Syntax::Powershell, executable: "/opt/custom bin/gori")
+    cmd.should eq("& '/opt/custom bin/gori' run shell --print --shell powershell --proxy '127.0.0.1:8070' " \
+                  "--ca-dir '/path/it''s/ca' | Out-String | Invoke-Expression")
   end
 
   it "falls back to 'gori' when executable is nil" do
@@ -163,7 +170,7 @@ describe "Runner.copy_shell_command" do
   it "makes a relative CA directory absolute against gori's cwd" do
     cmd = Runner.copy_shell_command("127.0.0.1:8070", "./ca",
       Gori::ShellEnv::Syntax::Posix, executable: "gori")
-    cmd.should eq(%(eval "$(gori run shell --print --proxy 127.0.0.1:8070 --ca-dir #{Process.quote(File.join(Dir.current, "ca"))})"))
+    cmd.should eq(%(eval "$(gori run shell --print --proxy 127.0.0.1:8070 --ca-dir #{Process.quote_posix(File.join(Dir.current, "ca"))})"))
     cmd.should_not contain("./ca")
   end
 end

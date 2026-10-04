@@ -7185,7 +7185,13 @@ module Gori::Tui
     # and the pasted command runs in another pane's.
     def self.copy_shell_command(authority : String, ca_dir : String, syntax : ShellEnv::Syntax,
                                 executable : String? = Process.executable_path) : String
-      quote = ->(s : String) { syntax.fish? ? ShellEnv.fish_quote(s) : Process.quote(s) }
+      quote = ->(s : String) do
+        case syntax
+        in .fish?       then ShellEnv.fish_quote(s)
+        in .powershell? then ShellEnv.powershell_quote(s)
+        in .posix?      then Process.quote_posix(s)
+        end
+      end
       bin_arg = quote.call(executable || "gori")
       proxy_arg = quote.call(authority)
       ca_arg = quote.call(File.expand_path(ca_dir))
@@ -7194,6 +7200,9 @@ module Gori::Tui
         %(eval "$(#{bin_arg} run shell --print --proxy #{proxy_arg} --ca-dir #{ca_arg})")
       in ShellEnv::Syntax::Fish
         "#{bin_arg} run shell --print --shell fish --proxy #{proxy_arg} --ca-dir #{ca_arg} | source"
+      in ShellEnv::Syntax::Powershell
+        # `&` runs a quoted path; PowerShell would otherwise read it as a string.
+        "& #{bin_arg} run shell --print --shell powershell --proxy #{proxy_arg} --ca-dir #{ca_arg} | Out-String | Invoke-Expression"
       end
     end
 
@@ -7214,7 +7223,7 @@ module Gori::Tui
           "clipboard is off (Settings) — run `gori run shell --print` in the other pane instead"
         else
           off = @session.capturing? ? "" : " (capture is off — start it with c)"
-          "copied #{syntax.fish? ? "fish" : "sh"} env for proxy http://#{authority} — paste it into another pane#{off}"
+          "copied #{syntax.posix? ? "sh" : syntax.to_s.downcase} env for proxy http://#{authority} — paste it into another pane#{off}"
         end
     end
 

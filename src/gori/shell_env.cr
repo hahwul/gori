@@ -69,6 +69,7 @@ module Gori
     enum Syntax
       Posix
       Fish
+      Powershell
 
       # The `--shell` spellings. Every POSIX-family name maps to one syntax: they all read
       # `export NAME='value'` / `unset NAME` the same way.
@@ -76,12 +77,27 @@ module Gori
         case name.strip.downcase
         when "sh", "posix", "bash", "zsh", "ksh", "dash" then Posix
         when "fish"                                      then Fish
+        when "powershell", "pwsh"                        then Powershell
         end
       end
 
       # The syntax for a `$SHELL` path, for a surface with no flag to ask (the TUI's copy).
+      # Windows sets no SHELL, so there an unset one means PowerShell, the default terminal.
       def self.for_shell(path : String?) : Syntax
-        File.basename(path.to_s) == "fish" ? Fish : Posix
+        return default unless path.presence
+        case File.basename(path.to_s).downcase.rchop(".exe")
+        when "fish"               then Fish
+        when "pwsh", "powershell" then Powershell
+        else                           Posix
+        end
+      end
+
+      def self.default : Syntax
+        {% if flag?(:win32) %}
+          Syntax::Powershell
+        {% else %}
+          Syntax::Posix
+        {% end %}
       end
     end
 
@@ -250,7 +266,7 @@ module Gori
     end
 
     # `result` as lines a shell evaluates: `eval "$(…)"` for POSIX shells, `… | source` for
-    # fish. `header` prefixes the caveats as comments — off for text that is PASTED, since an
+    # fish, `… | Out-String | Invoke-Expression` for PowerShell. `header` prefixes the caveats as comments — off for text that is PASTED, since an
     # interactive zsh without INTERACTIVE_COMMENTS runs `#` as a command.
     def self.render(result : Result, syntax : Syntax, *, header : Array(String) = [] of String) : String
       String.build do |s|
@@ -261,6 +277,8 @@ module Gori
             value ? (s << "export " << name << '=' << posix_quote(value)) : (s << "unset " << name)
           in Syntax::Fish
             value ? (s << "set -gx " << name << ' ' << fish_quote(value)) : (s << "set -e " << name)
+          in Syntax::Powershell
+            value ? (s << "$env:" << name << " = " << powershell_quote(value)) : (s << "Remove-Item Env:" << name << " -ErrorAction Ignore")
           end
           s << '\n'
         end
@@ -271,6 +289,17 @@ module Gori
     # escaped and reopened.
     def self.posix_quote(value : String) : String
       "'#{value.gsub("'", %('\\''))}'"
+    end
+
+    # PowerShell single quotes take everything literally; a quote inside is doubled. PowerShell
+    # reads the typographic single quotes (‘ ’ ‚ ‛) as quotes too.
+    def self.powershell_quote(value : String) : String
+      "'#{value.gsub(/['\x{2018}-\x{201B}]/) { |q| q * 2 }}'"
+    end
+
+    # Windows' command interpreter: `%COMSPEC%`, else cmd.exe.
+    def self.comspec(env = ENV) : String
+      env["COMSPEC"]?.presence || "cmd.exe"
     end
 
     # fish single quotes honour exactly two escapes: `\'` and `\\`.

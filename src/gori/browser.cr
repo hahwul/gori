@@ -45,7 +45,8 @@ module Gori
     end
 
     # A candidate browser + where to look for it: absolute app binaries on macOS
-    # (checked with File.exists?), bare command names on Linux (looked up on PATH).
+    # (checked with File.exists?), bare command names on Linux (looked up on PATH), and on
+    # Windows install paths under `%VAR%` roots, which move with the install.
     # A leading "~" expands to the home dir. First location that resolves wins.
     private record Candidate, id : String, name : String, kind : Kind, locations : Array(String)
 
@@ -67,6 +68,26 @@ module Gori
         Candidate.new("firefox", "Firefox", Kind::Firefox,
           ["/Applications/Firefox.app/Contents/MacOS/firefox",
            "~/Applications/Firefox.app/Contents/MacOS/firefox"]),
+      ]
+    {% elsif flag?(:win32) %}
+      CANDIDATES = [
+        Candidate.new("chrome", "Google Chrome", Kind::Chromium,
+          [%q(%ProgramFiles%\Google\Chrome\Application\chrome.exe),
+           %q(%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe),
+           %q(%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe)]),
+        Candidate.new("chromium", "Chromium", Kind::Chromium,
+          [%q(%LOCALAPPDATA%\Chromium\Application\chrome.exe)]),
+        Candidate.new("brave", "Brave", Kind::Chromium,
+          [%q(%ProgramFiles%\BraveSoftware\Brave-Browser\Application\brave.exe),
+           %q(%LOCALAPPDATA%\BraveSoftware\Brave-Browser\Application\brave.exe)]),
+        Candidate.new("edge", "Microsoft Edge", Kind::Chromium,
+          [%q(%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe),
+           %q(%ProgramFiles%\Microsoft\Edge\Application\msedge.exe)]),
+        Candidate.new("vivaldi", "Vivaldi", Kind::Chromium,
+          [%q(%LOCALAPPDATA%\Vivaldi\Application\vivaldi.exe)]),
+        Candidate.new("firefox", "Firefox", Kind::Firefox,
+          [%q(%ProgramFiles%\Mozilla Firefox\firefox.exe),
+           %q(%ProgramFiles(x86)%\Mozilla Firefox\firefox.exe)]),
       ]
     {% else %}
       CANDIDATES = [
@@ -366,7 +387,10 @@ module Gori
 
     # Resolve a candidate location to an existing executable path, or nil.
     private def self.resolve(loc : String) : String?
-      if loc.starts_with?('/') || loc.starts_with?('~')
+      if loc.starts_with?('%')
+        path = loc.gsub(/%([^%]+)%/) { ENV[$1]? || return nil }
+        File.exists?(path) ? path : nil
+      elsif loc.starts_with?('/') || loc.starts_with?('~')
         path = loc.starts_with?('~') ? Path.home.join(loc[2..]).to_s : loc
         File.exists?(path) ? path : nil
       else

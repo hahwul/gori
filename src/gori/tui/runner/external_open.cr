@@ -71,7 +71,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
         input: Process::Redirect::Close,
         output: Process::Redirect::Close,
         error: Process::Redirect::Close)
-      unless st.success?
+      # explorer.exe answers 1 even when it opened the file, so on Windows its code says nothing.
+      unless st.success? || {{ flag?(:win32) }}
         return status("open in browser: #{program} exited #{st.exit_code} — the file is at #{result.path}")
       end
     rescue File::NotFoundError

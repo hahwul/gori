@@ -43,9 +43,10 @@ describe "gori run shell — flags" do
     Gori::CLI::Run.shell_usage_error([] of String, ["curl"], true, nil, nil, nil, nil).not_nil!.should contain("--print")
     Gori::CLI::Run.shell_usage_error([] of String, [] of String, false, "fish", nil, nil, nil).not_nil!
       .should contain("--shell only applies to --print")
-    Gori::CLI::Run.shell_usage_error([] of String, [] of String, true, "pwsh", nil, nil, nil).not_nil!
+    Gori::CLI::Run.shell_usage_error([] of String, [] of String, true, "cmd", nil, nil, nil).not_nil!
       .should contain("unknown --shell")
     Gori::CLI::Run.shell_usage_error([] of String, [] of String, true, "fish", nil, nil, nil).should be_nil
+    Gori::CLI::Run.shell_usage_error([] of String, [] of String, true, "pwsh", nil, nil, nil).should be_nil
   end
 
   it "refuses two answers to where the proxy is" do

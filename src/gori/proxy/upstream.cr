@@ -988,6 +988,10 @@ module Gori::Proxy
     # SSL_CERT_FILE/DIR, or a resolvable system CA path. Callers gate the startup warning
     # on this together with verify being on.
     def self.system_trust_available? : Bool
+      # Crystal's Windows OpenSSL context imports the Windows root store itself.
+      {% if flag?(:win32) %}
+        return true
+      {% end %}
       return true if env_ca_override?
       return true if openssl_default_store_populated?
       file, dir = resolve_ca_source

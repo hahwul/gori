@@ -1044,7 +1044,8 @@ module Gori::Tui
       order = [] of String
       dir = Paths.themes_dir
       if Dir.exists?(dir)
-        Dir.glob(File.join(dir, "*.json")).sort.each do |file|
+        # Not `Dir.glob`: its pattern takes `/` only, and a Windows `dir` is spelled with `\`.
+        Dir.children(dir).select { |n| n.ends_with?(".json") && !n.starts_with?(".") }.sort!.map { |name| File.join(dir, name) }.each do |file|
           name = sanitize_name(File.basename(file, ".json"))
           next if name.empty? || BUILTIN_THEMES.has_key?(name) || custom.has_key?(name)
           if pal = parse_theme_file(file)
