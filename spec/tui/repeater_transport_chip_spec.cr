@@ -35,12 +35,12 @@ describe "RepeaterView transport chip" do
       b = render.call(view, rect)
 
       row = b.row(rect.y)
-      row.should contain("^V:h1")
-      col = row.index("^V:h1").not_nil!
+      row.should contain("^V:HTTP/1.1")
+      col = row.index("^V:HTTP/1.1").not_nil!
       view.chrome_hit(rect, col + 1, rect.y).should eq(:transport)
 
       view.toggle_http2.should be_true
-      render.call(view, rect).row(rect.y).should contain("^V:h2")
+      render.call(view, rect).row(rect.y).should contain("^V:HTTP/2")
     end
 
     # The reason the chip is not on the REQUEST border: at 100 columns the request column is 49
@@ -76,7 +76,7 @@ describe "RepeaterView transport chip" do
       view.load_blank
       rect = Rect.new(0, 0, 100, 24)
       b = render.call(view, rect)
-      col = b.row(rect.y).index("^V:h1").not_nil!
+      col = b.row(rect.y).index("^V:HTTP/1.1").not_nil!
       b.bg_at(col, rect.y).should eq(Theme.accent_bg)
       b.bg_at(col, rect.y).should_not eq(Theme.bg)
     end
@@ -95,11 +95,11 @@ describe "RepeaterView transport chip" do
       # Both ends, not just the destination: the request card is titled REQUEST once the
       # override is on, so this chip is the only text left saying the tab holds a handshake.
       view.cycle_ws_transport
-      render.call(view, rect).row(rect.y).should contain("^V:WS→h1")
+      render.call(view, rect).row(rect.y).should contain("^V:WS→HTTP/1.1")
       view.transport_badge_lit?.should be_true # …h1 on a handshake tab is the operator's call
 
       view.cycle_ws_transport
-      render.call(view, rect).row(rect.y).should contain("^V:WS→h2")
+      render.call(view, rect).row(rect.y).should contain("^V:WS→HTTP/2")
 
       view.cycle_ws_transport
       render.call(view, rect).row(rect.y).should contain("^V:WS")
@@ -120,7 +120,7 @@ describe "RepeaterView transport chip" do
       view.transport_badge_lit?.should be_false
 
       view.cycle_ws_transport
-      render.call(view, rect).row(rect.y).should contain("^V:WS→h2")
+      render.call(view, rect).row(rect.y).should contain("^V:WS→HTTP/2")
       view.ws_mode?.should be_false
       view.transport_badge_lit?.should be_true
 
@@ -140,7 +140,7 @@ describe "RepeaterView transport chip" do
       rect = Rect.new(0, 0, 100, 30)
 
       view.cycle_ws_transport
-      render.call(view, rect).row(rect.y).should contain("^V:WS→h2")
+      render.call(view, rect).row(rect.y).should contain("^V:WS→HTTP/2")
       view.cycle_ws_transport
       render.call(view, rect).row(rect.y).should contain("^V:WS")
     end
@@ -157,7 +157,7 @@ describe "RepeaterView transport chip" do
 
       view.cycle_ws_transport
       b2 = render.call(view, rect)
-      h1_col = b2.row(rect.y).index("^V:WS→h1").not_nil!
+      h1_col = b2.row(rect.y).index("^V:WS→HTTP/1.1").not_nil!
       # ACCENT, not `focus_gold`. An override still has to interrupt the glance — that part
       # was right — but this chip rides the TARGET card's own top border, and that border IS
       # `focus_gold` when the card has focus. Filling it gold put two golds on one edge, so
@@ -179,12 +179,12 @@ describe "RepeaterView transport chip" do
       view.cycle_ws_transport # the pane geometry changes here; the TARGET band does not
       b2 = render.call(view, rect)
       row = b2.row(rect.y)
-      col2 = row.index("^V:WS→h1").not_nil!
+      col2 = row.index("^V:WS→HTTP/1.1").not_nil!
       view.chrome_hit(rect, col2 + 1, rect.y).should eq(:transport)
       # The wider label must not run into its neighbour: the last cell of the chip still
       # hit-tests as the chip, and the cell after it does not. `→` measures one column.
-      view.chrome_hit(rect, col2 + "^V:WS→h1".size, rect.y).should eq(:transport)
-      view.chrome_hit(rect, col2 + "^V:WS→h1".size + 1, rect.y).should_not eq(:transport)
+      view.chrome_hit(rect, col2 + "^V:WS→HTTP/1.1".size, rect.y).should eq(:transport)
+      view.chrome_hit(rect, col2 + "^V:WS→HTTP/1.1".size + 1, rect.y).should_not eq(:transport)
     end
   end
 
@@ -229,8 +229,8 @@ describe "RepeaterView transport chip" do
 
     row.should contain("↵:READ")
     row.should contain("SNI")
-    row.should contain("^V:h1")
-    row.index("^V:h1").not_nil!.should be < row.index("SNI").not_nil!
+    row.should contain("^V:HTTP/1.1")
+    row.index("^V:HTTP/1.1").not_nil!.should be < row.index("SNI").not_nil!
     row.index("SNI").not_nil!.should be < row.index("↵:READ").not_nil!
   end
 end

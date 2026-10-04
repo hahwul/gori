@@ -136,7 +136,7 @@ class Gori::Tui::RepeaterView
       @scroll_req = h.render(screen, rect.inset(1, 1), focused, @scroll_req)
       return
     end
-    cl_x = Frame.toggle_badge(screen, send_edge, rect.y, min_x, key_label("repeater.toggle-auto-content-length", "^L"), "CL", @auto_content_length)
+    cl_x = Frame.toggle_badge(screen, send_edge, rect.y, min_x, key_label("repeater.toggle-auto-content-length", "^L"), cl_badge_name(min_x, right_edge), @auto_content_length)
     mode_x = Frame.toggle_badge(screen, cl_x, rect.y, min_x, key_label("repeater.pretty-request", "^U"), "PRETTY", false)
     mark_x = Frame.mode_badge(screen, mode_x, rect.y, min_x, request_insert?) # the REAL mode — see Frame.mode_badge
     # The INERT half only. `literal_markers?` is a state nothing else on screen shows: the

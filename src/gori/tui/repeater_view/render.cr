@@ -82,7 +82,7 @@ class Gori::Tui::RepeaterView
       fg, bg = tls_preset_live? ? {Theme.text_bright, Theme.accent_bg} : {Theme.muted, Theme.bg}
       screen.text(tls_x, rect.y, tls_chip_label, fg, bg)
     end
-    # ` ^V:h1 ` / ` ^V:h2 ` / ` ^V:WS ` — the transport `^R` will dial, and the only thing on
+    # ` ^V:HTTP/1.1 ` / ` ^V:HTTP/2 ` / ` ^V:WS ` — the transport `^R` will dial, and the only thing on
     # screen saying `^V` has anything to offer. It rides the TARGET band rather than the
     # REQUEST border because that is where the rest of "how do we connect" already lives
     # (the URL, the SNI override) and because the request border is a half-width column that
