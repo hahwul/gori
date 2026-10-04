@@ -2033,8 +2033,8 @@ module Gori::Tui
       y = box.y + 2
       moves = [
         "1.  tabs & panes     1-9  ·  ←/→  ·  ↓  ·  esc  ·  ⇥",
-        "2.  action menu      space — what you do most, right here",
-        Hotkeys.retag("3.  command palette  ^P   — find any action by name"),
+        "2.  action menu      space — main actions for where you are",
+        Hotkeys.retag("3.  command palette  ^P   — search all actions here + app-wide"),
         "4.  edit mode        READ / INS — browse, then type",
         "5.  traffic          proxy & CA · capture #{reach("capture.toggle")} · intercept #{reach("intercept.toggle")}",
       ]
@@ -2103,7 +2103,7 @@ module Gori::Tui
         "the key on the right is the row's shortcut, for next time",
       ]
       keep, sy = Tutorial.lesson_split(box, fixed: 2, detail: detail.size)
-      screen.text(ix, y, "space lists what you do most in the pane you're in.", Theme.text_bright, Theme.panel, width: iw)
+      screen.text(ix, y, "space lists the main actions for the place you're in.", Theme.text_bright, Theme.panel, width: iw)
       y += 1
       detail[0, keep].each do |ln|
         screen.text(ix, y, ln, Theme.muted, Theme.panel, width: iw)
@@ -2146,11 +2146,11 @@ module Gori::Tui
       iw = {box.w - 4, 1}.max
       y = box.y + 2
       detail = [
-        "this tab's actions first, each with its key or menu path (␣ means space)",
-        "rarely used actions live only here — the menu stays short",
+        "type to search here + app-wide; empty search browses app commands",
+        "each row shows its key or menu path (␣ means space)",
       ]
       keep, sy = Tutorial.lesson_split(box, fixed: 2, detail: detail.size)
-      screen.text(ix, y, Hotkeys.retag("^P finds any action by name — this tab's, then the app's."), Theme.text_bright, Theme.panel, width: iw)
+      screen.text(ix, y, Hotkeys.retag("^P searches every action available here, even ones space leaves out."), Theme.text_bright, Theme.panel, width: iw)
       y += 1
       detail[0, keep].each do |ln|
         screen.text(ix, y, ln, Theme.muted, Theme.panel, width: iw)
