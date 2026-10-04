@@ -100,41 +100,46 @@ describe Gori::Tui::TrafficEmptyState do
       variant: :intercept, listen: {"127.0.0.1", 8070}, capturing: true, catch_on: false)
     backend.contains?("no held messages").should be_true
     backend.contains?("INTERCEPT").should be_true
-    backend.contains?("press i").should be_true
+    backend.contains?("Holds each matching request here").should be_true
+    backend.contains?("catch is OFF — press to start holding").should be_true
     backend.contains?("c:REQ").should be_true
-    (0...12).count { |y| backend.row(y).includes?("Catch is OFF") }.should eq(1)
+    backend.contains?("c:REQ   hold requests, responses or both").should be_true
+    backend.contains?("f forward · d drop").should be_true
+    backend.contains?("/ condition").should be_true
   end
 
-  it "names intercept actions without bare keys while body focus is elsewhere" do
-    backend = MemoryBackend.new(60, 12)
-    TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 60, 12),
-      variant: :intercept, capturing: false, catch_on: false, body_focused: false,
-      catch_direction: "REQ")
-    backend.contains?("focus body").should be_true
-    backend.contains?("DIR:REQ").should be_true
-    backend.contains?("c:REQ").should be_false
-    backend.contains?("f forward").should be_false
-    backend.contains?("d drop").should be_false
-    backend.contains?("/ condition").should be_false
-    backend.contains?("tab bar").should be_true
+  # From the tab bar the queue's keys are spelled behind the key that enters it, never bare
+  # (`c` there stops capture); `i` is Global and needs no route. Every row fits 80 columns.
+  it "routes intercept queue keys through ↓ while the tab bar has focus" do
+    {120, 76}.each do |w|
+      backend = MemoryBackend.new(w, 13)
+      TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, w, 13),
+        variant: :intercept, capturing: false, catch_on: false, body_focused: false,
+        catch_direction: "REQ")
+      backend.contains?("focus body").should be_false
+      backend.contains?("DIR:REQ").should be_true
+      backend.contains?("c:REQ").should be_false
+      backend.contains?("↓ then f forward · d drop").should be_true
+      backend.contains?("↓ then c: hold requests, responses or both").should be_true
+      backend.contains?("↓ then / condition").should be_true
+      backend.contains?(" i   catch is OFF").should be_true
+      backend.contains?("tab bar").should be_true
+      backend.contains?("…").should be_false
+    end
   end
 
-  it "does not advertise Intercept action keys in the medium unfocused card" do
+  it "routes intercept queue keys through ↓ in the medium unfocused card" do
     backend = MemoryBackend.new(50, 5)
     TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 50, 5),
       variant: :intercept, catch_on: true, body_focused: false)
-    backend.contains?("focus body to forward, drop or filter").should be_true
-    backend.contains?("f forward").should be_false
-    backend.contains?("/ condition").should be_false
+    backend.contains?("↓ then f forward · d drop · / condition").should be_true
   end
 
-  it "does not advertise Intercept action keys in the minimal unfocused card" do
+  it "routes the intercept filter key through ↓ in the minimal unfocused card" do
     backend = MemoryBackend.new(50, 4)
     TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 50, 4),
       variant: :intercept, catch_on: true, body_focused: false)
-    backend.contains?("focus body to catch or filter").should be_true
-    backend.contains?("i catch").should be_false
-    backend.contains?("/ filter").should be_false
+    backend.contains?("i catch · ↓ then / filter").should be_true
   end
 
   it "does not advertise a send chord on an empty Miner session" do

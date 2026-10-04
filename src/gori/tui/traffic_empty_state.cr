@@ -190,7 +190,7 @@ module Gori::Tui
                  "#{palette_route("browser.open", "Open browser")} · or set HTTP+HTTPS proxy"].compact
               when :intercept
                 [headline,
-                 catch_on ? "⏸ queue empty · matching traffic pauses here" : "#{body_focused ? "press" : "focus body, then press"} #{key("i", "intercept.toggle")} to enable catch",
+                 catch_on ? "⏸ queue empty · matching traffic pauses here" : "press #{key("i", "intercept.toggle")} to hold matching requests",
                  medium_intercept_action_hint(body_focused)]
               when :repeater
                 [headline, "flow ──► edit ──► send", "^N new tab · History #{key("^R", "history.repeater")} repeater"]
@@ -419,26 +419,30 @@ module Gori::Tui
                                       addr : String, capturing : Bool, catch_on : Bool,
                                       body_focused : Bool, catch_direction : String) : Nil
       inner_h = full_inner_h(:intercept, capturing: capturing)
-      catch_key = key("i", "intercept.toggle")
-      msg = catch_on ? "Matching traffic pauses here for review before it continues." : "Catch is OFF — #{body_focused ? "press" : "focus body, then press"} #{catch_key} to hold matching requests/responses."
-      inner, ix, iw = begin_card(screen, rect, :intercept, headline, "INTERCEPT", inner_h, Screen.display_width(msg))
+      go = queue_route(body_focused)
+      msg = catch_on ? "Catch is ON — each matching request waits here until you decide." : "Holds each matching request here until you forward or drop it."
+      flow = "request ──► ⏸ held ──► #{go}#{key("f", "intercept.forward")} forward · #{key("d", "intercept.drop")} drop"
+      catch_hint = catch_on ? "catch is ON — press to stop holding" : "catch is OFF — press to start holding"
+      direction_chip = body_focused ? " #{key("c", "intercept.direction")}:#{catch_direction} " : " DIR:#{catch_direction} "
+      direction_hint = "#{"#{go}#{key("c", "intercept.direction")}: " unless body_focused}hold requests, responses or both"
+      condition = "▸ #{go}#{key("/", "intercept.filter")} condition: only hold matches (host: path:)"
+      min_w = [msg, flow, condition, "▸ #{direction_chip}  #{direction_hint}"].max_of { |l| Screen.display_width(l) }
+      inner, ix, iw = begin_card(screen, rect, :intercept, headline, "INTERCEPT", inner_h, min_w)
       y = inner.y
 
       draw_wrapped_message(screen, ix, y, iw, msg)
       y += 2
-      screen.text(ix, y, "traffic ──► ⏸ hold ──► #{intercept_action_hint(body_focused)}", Theme.muted, Theme.bg, width: iw)
+      screen.text(ix, y, flow, Theme.muted, Theme.bg, width: iw)
       y += 2
       unless capturing
         screen.text(ix, y, capture_off_hint, Theme.yellow, Theme.bg, width: iw)
         y += 1
       end
-      direction_chip = body_focused ? " #{key("c", "intercept.direction")}:#{catch_direction} " : " DIR:#{catch_direction} "
-      direction_hint = body_focused ? "cycle direction (#{catch_direction})" : "focus body to change direction (#{catch_direction})"
+      y = draw_chord_hint(screen, ix, y, iw, " i ", catch_hint, bullet: "▸ ", verb: "intercept.toggle")
       y = draw_chord_hint(screen, ix, y, iw, direction_chip, direction_hint, bullet: "▸ ",
         verb: body_focused ? "intercept.direction" : nil)
-      screen.text(ix, y, intercept_filter_hint(body_focused), Theme.muted, Theme.bg, width: iw)
-      y += 1
-      draw_palette_hint(screen, ix, y, iw, bullet: "▸ ")
+      screen.text(ix, y, condition, Theme.muted, Theme.bg, width: iw)
+      draw_palette_hint(screen, ix, y + 1, iw, bullet: "▸ ")
     end
 
     # "FUZZ RUN", not "RESULTS": this card draws INSIDE the pane the Fuzzer titles RESULTS, and a
@@ -721,28 +725,20 @@ module Gori::Tui
       {inner, inner.x + 1, {inner.w - 2, 1}.max}
     end
 
-    private def intercept_action_hint(body_focused : Bool) : String
-      return "focus body for actions" unless body_focused
-      "#{key("f", "intercept.forward")} forward · #{key("d", "intercept.drop")} drop"
-    end
-
-    private def intercept_filter_hint(body_focused : Bool) : String
-      body_focused ? "▸ #{key("/", "intercept.filter")} condition — filter what gets held" : "▸ focus body to filter what gets held"
+    # The queue's keys (f/d/c//) answer only inside the Intercept body. From the tab bar a hint
+    # spells the key that gets there first ("↓ then f forward"), so it never implies a key is
+    # live where it is not. `i` needs no route: it is Global, and the tab bar answers it too.
+    private def queue_route(body_focused : Bool) : String
+      body_focused ? "" : "#{key("↓", "sidebar.enter")} then "
     end
 
     private def medium_intercept_action_hint(body_focused : Bool) : String
-      return "focus body to forward, drop or filter held traffic" unless body_focused
-      "#{key("f", "intercept.forward")} forward · #{key("d", "intercept.drop")} drop · #{key("/", "intercept.filter")} condition"
+      "#{queue_route(body_focused)}#{key("f", "intercept.forward")} forward · #{key("d", "intercept.drop")} drop · #{key("/", "intercept.filter")} condition"
     end
 
     private def minimal_intercept_hint(catch_on : Bool, body_focused : Bool) : String
-      if body_focused
-        catch_on ? "⏸ queue empty · #{key("i", "intercept.toggle")} catch · #{key("/", "intercept.filter")} filter" : "press #{key("i", "intercept.toggle")} to enable catch"
-      elsif catch_on
-        "⏸ queue empty · focus body to catch or filter"
-      else
-        "focus body, then press #{key("i", "intercept.toggle")} to enable catch"
-      end
+      return "press #{key("i", "intercept.toggle")} to hold matching requests" unless catch_on
+      "⏸ queue empty · #{key("i", "intercept.toggle")} catch · #{queue_route(body_focused)}#{key("/", "intercept.filter")} filter"
     end
 
     private def draw_medium_lines(screen : Screen, rect : Rect, lines : Array(String)) : Nil
