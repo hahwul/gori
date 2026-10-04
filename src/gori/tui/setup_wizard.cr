@@ -64,7 +64,7 @@ module Gori::Tui
     BIND_ROWS      = 8 # heading, gap, ip, port, gap, 2 info lines, status
     COMPANION_ROWS = 7 # heading, gap, 2 offer rows, gap, motion row, info line
     KEYS_ROWS      = 9 # heading, 2 offer rows, the 5-row practice pad, its status line
-    REVIEW_ROWS    = 9 # title, 5 recap rows, gap, 2 offer rows
+    REVIEW_ROWS    = 9 # title, 6 recap rows (HTTPS fills the gap), 2 offer rows
 
     # Interior row offsets (from the card's top border) of the rows a click can land on. ONE
     # home each, read by the renderer AND the mouse hit-test, so a row cannot move on screen
@@ -938,7 +938,7 @@ module Gori::Tui
       case @step
       when Step::Bind
         if @bind_field == :ip
-          ["↵ edit port · ↑/↓ field · esc skip", "↵ port · esc skip"]
+          ["↵ next field · ↑/↓ field · esc skip", "↵ port · esc skip"]
         else
           ["↵ next · ↑/↓ field · esc skip", "↵ next · esc skip"]
         end
@@ -1182,7 +1182,7 @@ module Gori::Tui
       rerun = "re-run anytime: gori wizard"
       screen.text(tx + 3, y, rerun, Theme.muted, Theme.panel) if tx + 3 + rerun.size <= box.right - 1
       y = box.y + REVIEW_RECAP_ROW
-      recap_labels = ["Proxy default", "Theme", "Editor keys", "Miss Ring", "Shortcuts"]
+      recap_labels = ["Proxy default", "Theme", "Editor keys", "Miss Ring", "Shortcuts", "HTTPS"]
       vx = ix + recap_labels.max_of { |l| Screen.draw_width(l) } + 2 # +2 = min visible gap before the value column
       recap(screen, box, ix, vx, y, "Proxy default", "#{effective_ip}:#{@port.strip}"); y += 1
       recap(screen, box, ix, vx, y, "Theme", @theme_name); y += 1
@@ -1192,6 +1192,9 @@ module Gori::Tui
       # and the macOS caveat — a user who picks ⌥ without Option-as-Meta would see nothing
       # happen.
       recap(screen, box, ix, vx, box.y + REVIEW_SHORTCUTS_ROW, "Shortcuts", SetupWizard.modifier_recap(@modifier))
+      # Fills the gap row above the offers (REVIEW_ROWS and MIN_H stay put): HTTPS sites fail until
+      # the CA is trusted, and the proxy answers this URL itself (SelfPage::MAGIC_URL).
+      recap(screen, box, ix, vx, box.y + REVIEW_SHORTCUTS_ROW + 1, "HTTPS", "trust the CA: #{Proxy::SelfPage::MAGIC_URL} · gori ca")
       y = box.y + REVIEW_OFFER_ROW
       # No prompt line above the offer: the two rows below say "Take the guided tour" /
       # "Skip — finish setup" in full, so "New to gori? Take a quick tour of the TUI:" was
@@ -1213,7 +1216,7 @@ module Gori::Tui
       if modifier == "alt"
         "⌥P ⌥N ⌥W ⌥1-9  (←/→ for Ctrl · needs Option-as-Meta)"
       else
-        "^P ^N ^W  (←/→ to add ⌥ aliases)"
+        "^P palette · ^N new · ^W close  (←/→ adds ⌥)"
       end
     end
 
