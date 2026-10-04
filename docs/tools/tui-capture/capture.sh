@@ -406,7 +406,13 @@ shoot_all() {
   # #1274; it was a level-1 `q` before the family, and a bare `q` now does nothing there).
   run_scene sequencer    26 "gori · Sequencer"                 3 SLEEP1.4 Down Down Down Down Down Down Down SLEEP0.5 Space SLEEP0.4 ">" SLEEP0.4 s SLEEP1.4
   run_scene repeater     26 "gori · Repeater"                  3 SLEEP0.6 Enter SLEEP0.4 C-r SLEEP1.2 C-r SLEEP3
-  run_scene fuzzer       34 "gori · Fuzzer"                    3 SLEEP0.6 Enter SLEEP0.3 Down SLEEP0.3 I SLEEP1 C-a SLEEP0.6 C-l SLEEP0.8 admin Enter root SLEEP0.5 Escape SLEEP0.7 C-r SLEEP5
+  # The Fuzzer shot is a FINISHED run, not the idle tab. History's `/` filter picks
+  # /anything/api/users?role=admin&id=42 by PATH, not by row count (another seed must not
+  # retarget it) — the seed with query params, so ^A has something to mark (the old Down x1
+  # hit example.com/ and the status line said "mark a position first"). /anything echoes the request, so each payload comes back
+  # a different length. ⇧I sends it over, ^L types a three-value list, ^R runs it; 2 × 3 = 6
+  # rows, and SLEEP5 covers the run against httpbingo.
+  run_scene fuzzer       34 "gori · Fuzzer"                    3 SLEEP0.6 Enter SLEEP0.3 / SLEEP0.3 path:/anything/api/users SLEEP0.6 Enter SLEEP0.6 I SLEEP1 C-a SLEEP0.6 C-l SLEEP0.8 admin Enter root Enter guest SLEEP0.5 Escape SLEEP0.7 C-r SLEEP5
   # JWT is off the bar, so this reaches it the way the guide tells a reader to (`0`, type,
   # ↵), then types the sample token and sends the caret Home so INPUT shows where the token
   # STARTS — typing leaves the view on its tail, which reads as a truncated blob.
