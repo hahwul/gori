@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- TUI: the tutorial advances completed Practice on Enter, including from INS, and keeps navigation and Help & Leaving cues readable on a 40-column terminal (#1509)
 - Intercept: catch holds requests only by default, so a forwarded request's response no longer waits for a second `f`; `c` still picks responses or both, and a `status:` condition says it needs one of them (#1505)
 - Intercept: the held-message editor opens in READ when you `⇥` into it, as the Repeater's does, so `i` starts typing instead of typing an `i` (#1505)
 - Query: a comparison typed without its colon, such as `status>=400`, still searches as text, but History, Sitemap, `gori run history` and MCP `ql_explain` now suggest `status:>=400` (#1504)

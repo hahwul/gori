@@ -341,10 +341,28 @@ module Gori::Tui
       compact_step_hint(step, registry)
     end
 
+    # The live key handler checks this before its INS editor branch.
+    def self.practice_next_on_enter?(step : Step, completed : Bool,
+                                     key : Termisu::Input::Key) : Bool
+      step.practice? && completed && key.enter?
+    end
+
+    def self.practice_status_hint(overlay : Symbol, completed : Bool, insert : Bool,
+                                  tabs : String) : String
+      return "Overlay open · ↵ run · esc close" unless overlay == :none
+      return "✓ Nicely done — click Next or press ↵." if completed
+      return "INS mode — type, then esc back to READ." if insert
+      Hotkeys.retag("#{tabs}/←→ tabs · ↓ in · ↑/esc out · ⇥ panes · space · ^P · i in REQUEST")
+    end
+
+    def self.navigation_try_hint : String
+      "try 2, ↓ until BODY, ↑ until TABS · n next · b back"
+    end
+
     private def self.compact_step_hint(step : Step, registry : Verb::Registry) : String
       case step
       when Step::Welcome   then "↵/n start · esc esc leave"
-      when Step::Navigate  then "2/↓/↑ move · n next · b back"
+      when Step::Navigate  then "2, ↓ until BODY, ↑ until TABS · n/b"
       when Step::SpaceMenu then "space menu · n next · b back"
       when Step::Palette   then Hotkeys.retag("^P palette · n next · b back")
       when Step::Edit      then "i INS · n next · b back"
@@ -652,6 +670,13 @@ module Gori::Tui
       # Overlay owns keys while open (esc/↵ close; ↑↓ move; type filters palette).
       return handle_overlay_key(ev) unless @overlay == :none
 
+      # Practice's completed state makes Enter the Next action, including when its last
+      # check left the mock editor in INS. Before completion, INS keeps its real-editor Enter.
+      if Tutorial.practice_next_on_enter?(@step, practice_done?, key)
+        advance
+        return
+      end
+
       # INS owns printables + esc (leave READ). Tour nav already handled above.
       if @edit_insert
         return handle_edit_key(ev)
@@ -662,13 +687,8 @@ module Gori::Tui
         return handle_escape
       end
 
-      # Practice / Navigate live: shell keys first. When practice goals are done,
-      # ↵ matches the Next button so the keyboard path isn't a dead end.
+      # Practice / Navigate live: shell keys first.
       if @step.practice?
-        if practice_done? && key.enter?
-          advance
-          return
-        end
         handle_live_shell_key(ev, practice: true)
         return
       end
@@ -1909,7 +1929,7 @@ module Gori::Tui
                       end
           "next: #{next_move} · #{tab_span} / ←→ tabs · ⇥ panes · #{tour}"
         else
-          "try 2, then ↓ · #{tour} to skip"
+          Tutorial.navigation_try_hint
         end
       when Step::SpaceMenu
         if @overlay == :space
@@ -2345,15 +2365,7 @@ module Gori::Tui
       end
 
       return if pad == 0
-      msg = if practice_done?
-              "✓ Nicely done — click Next or press ↵."
-            elsif @overlay != :none
-              "Overlay open — ↵ runs, esc closes, click outside dismisses."
-            elsif @edit_insert
-              "INS mode — type, then esc back to READ."
-            else
-              Hotkeys.retag("#{tab_span}/←→ tabs · ↓ in · ↑/esc out · ⇥ panes · space · ^P · i in REQUEST")
-            end
+      msg = Tutorial.practice_status_hint(@overlay, practice_done?, @edit_insert, tab_span)
       screen.text(ix, box.bottom - 2, msg, practice_done? ? Theme.green : Theme.muted, Theme.panel, width: iw)
     end
 
@@ -2385,7 +2397,7 @@ module Gori::Tui
         {reach("help.tour"), "this tour, from inside a session"},
       ]
       gaps = Tutorial.prose_gaps(box, rows.size + 1, 1)
-      screen.text(ix, y, "Help is one key away; quitting takes two, so it's never an accident.", Theme.text_bright, Theme.panel, width: iw)
+      screen.text(ix, y, "In a gori session:", Theme.text_bright, Theme.panel, width: iw)
       y += 1
       y += 1 if gaps > 0
       # One key column when the widest key and description fit side by side, else each
