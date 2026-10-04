@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Intercept: the empty queue names a real key on every row — `i` to start holding, `f` forward, `d` drop, `c` for requests, responses or both, `/` for a condition — instead of telling you to "focus body" (#1516)
 - Setup wizard: the review step says how to trust gori's CA for HTTPS and spells out what `^P`, `^N` and `^W` do, and the listen-IP hint says Enter moves to the next field (#1515)
 - TUI: an empty History walks through the three steps to capture, including trusting gori's CA for HTTPS, the Project tab's first-run line fits an 80-column terminal, and empty-state palette rows read as `^P → Open browser` instead of a chord (#1514)
 - TUI: a status line too narrow for its key hints drops whole hints and the CPU/MEM readout first, so `^P cmds`, `space cmds` and quit stay visible, and the tab bar now advertises `?` for Help (#1513)
