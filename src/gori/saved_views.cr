@@ -123,13 +123,13 @@ module Gori
     DEFAULT_ID = "proxy+repeater"
 
     # Short chip labels for builtins whose NAME does not fit the chip, keyed by id. Only one
-    # entry earns its place: `History + Repeater` is 18 columns against a 14-column budget
+    # entry earns its place: `History + Repeater` is 18 columns against a 16-column budget
     # (`HistoryView::VIEW_CHIP_NAME_MAX`), so the DEFAULT view — the one a fresh project opens
     # on and therefore the chip most operators look at all day — rendered as `v:History + Re…`.
     #
-    # `rptr` rather than `rep` because it is not a new abbreviation: the SRC column already
-    # teaches `PROXY · RPTR · FUZZ · CRAWL · IMPRT`, and `src:rptr` is typeable in the bar.
-    CHIP_LABELS = {DEFAULT_ID => "history+rptr"}
+    # Spelled out, not `rptr`: this is the first chip a newcomer reads, and an abbreviation
+    # there is jargon. The filter hint gives way before the chips do (`QuerySuggest.idle_hint`).
+    CHIP_LABELS = {DEFAULT_ID => "history+repeater"}
 
     BUILTINS = [
       View.new(ALL_ID, "All", "", "builtin"),

@@ -48,8 +48,7 @@ module Gori::Tui
     # and `>= < on status size dur`; `Issues::Filter.known_field?` refuses `~` outright and
     # this backend has no `size`/`dur`, so the default text would re-break what
     # b28aaaaa fixed — a filter bar naming a field it does not have.
-    FILTER_HINT = QuerySuggest.idle_hint("/ filter", Issues::Filter::HINT_FIELDS)
-    QUERY_HINT  = QuerySuggest.cold_hint(Issues::Filter::HINT_FIELDS, help_key: true,
+    QUERY_HINT = QuerySuggest.cold_hint(Issues::Filter::HINT_FIELDS, help_key: true,
       regex: false, compare: "severity cvss")
 
     # The bar's field vocabulary, asked per separator (`FilterAst.spans`). Without it an
@@ -1428,7 +1427,7 @@ module Gori::Tui
           Highlight.filter_query(@query, Theme.text, FilterAst::SEPS_FIELD, known: QUERY_KNOWN, shaped: Issues::Filter::FIELD_SHAPED),
           Theme.text, width: {rect.x + 1 + left_w - qx, 0}.max)
       else
-        screen.text(rect.x + 1, rect.y, FILTER_HINT, Theme.muted, width: left_w)
+        screen.text(rect.x + 1, rect.y, QuerySuggest.idle_hint("/ filter", Issues::Filter::HINT_FIELDS, left_w), Theme.muted, width: left_w)
       end
     end
 

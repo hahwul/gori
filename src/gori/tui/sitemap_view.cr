@@ -68,8 +68,7 @@ module Gori::Tui
     # list (`QuerySuggest`) rather than written out — as prose these drifted from `QL_FIELDS` and
     # never mentioned `-term` at all. `tag:` is appended because it is this surface's own field
     # and the shared sample cannot know about it.
-    FILTER_HINT = QuerySuggest.idle_hint("/ filter", ["tag"] + QL::HINT_FIELDS)
-    QUERY_HINT  = QuerySuggest.cold_hint(["tag"] + QL::HINT_FIELDS, help_key: true)
+    QUERY_HINT = QuerySuggest.cold_hint(["tag"] + QL::HINT_FIELDS, help_key: true)
     # The highlighter's field vocabulary: everything QL ACCEPTS (a superset of `QL_FIELDS`, which
     # is only what Tab offers here) plus this surface's own `tag:`, which QL knows nothing about
     # because `partition` pulls it out before the query ever reaches the parser.
@@ -1457,7 +1456,7 @@ module Gori::Tui
         # affordance + fields rather than a bare "(in-scope only)": the Scope lens is
         # already signalled by the `s` chip on the right, so this row isn't wasted
         # repeating it, and the user's next move here is to ADD a query atop the lens.
-        screen.text(rect.x + 1, rect.y, FILTER_HINT, Theme.muted, width: left_w)
+        screen.text(rect.x + 1, rect.y, QuerySuggest.idle_hint("/ filter", ["tag"] + QL::HINT_FIELDS, left_w), Theme.muted, width: left_w)
       end
     end
 

@@ -33,12 +33,11 @@ module Gori::Tui
     include IssuePresentation
     include DrillIn::Host # the rail/detail split, its render, and the step-key labels
 
-    # See `IssuesView::QUERY_PREFIX` / `FILTER_HINT` / `QUERY_HINT` — the sibling bar over the
+    # See `IssuesView::QUERY_PREFIX` / `QUERY_HINT` — the sibling bar over the
     # sibling backend, and the same two reasons: the dropdown anchors to the column the query
     # starts in, and `cold_hint`'s defaults name a `~regex` and `size`/`dur` axes this parser
     # does not have.
     QUERY_PREFIX = "filter › "
-    FILTER_HINT  = QuerySuggest.idle_hint("/ filter", Probe::Filter::HINT_FIELDS)
     QUERY_HINT   = QuerySuggest.cold_hint(Probe::Filter::HINT_FIELDS, help_key: true,
       regex: false, compare: "severity")
 
@@ -1119,7 +1118,7 @@ module Gori::Tui
         label = @query.blank? ? "(in-scope only)" : ": #{@query}"
         screen.text(rect.x + 1, y, label, Theme.text, width: left_w)
       else
-        screen.text(rect.x + 1, y, FILTER_HINT, Theme.muted, width: left_w)
+        screen.text(rect.x + 1, y, QuerySuggest.idle_hint("/ filter", Probe::Filter::HINT_FIELDS, left_w), Theme.muted, width: left_w)
       end
     end
 
