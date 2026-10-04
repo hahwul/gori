@@ -312,6 +312,29 @@ describe "RepeaterView#chrome_hit" do
   end
 end
 
+describe "RepeaterView plain-word badges" do
+  # `^L` spells AUTO-LEN only when the whole chain still fits; the 100-column example above
+  # keeps CL, so a narrow border never trades a chip for the longer word.
+  it "spells AUTO-LEN on a wide border, clickable where drawn, and names the TLS default" do
+    view = RepeaterView.new
+    view.load_blank
+    rect = Rect.new(0, 0, 120, 24)
+    b = MemoryBackend.new(120, 24)
+    view.render(Screen.new(b), rect, focused: false)
+
+    req_y = rect.y + 3
+    row = b.row(req_y)
+    row.should contain("^L:AUTO-LEN")
+    row.should contain("↵:READ")
+    col = row.index!("^L:AUTO-LEN")
+    view.chrome_hit(rect, col, req_y).should eq(:cl)
+    view.chrome_hit(rect, col + "^L:AUTO-LEN".size - 1, req_y).should eq(:cl)
+
+    tls = b.row(rect.y).index!("TLS default")
+    view.chrome_hit(rect, tls, rect.y).should eq(:tls_preset)
+  end
+end
+
 describe "InterceptView#bar_zone_at" do
   it "maps i:CATCH / direction / condition to separate zones" do
     view = InterceptView.new

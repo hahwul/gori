@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Repeater: the pane badges say `HTTP/1.1`, `TLS default` and `AUTO-LEN` instead of `h1`, `tls` and `CL` (`CL` stays where the border is too short), and Help describes the TLS fingerprint toggle (#1523)
 - TUI: the History, Sitemap, Probe, Issues and Intercept filter bars drop whole examples on a narrow pane instead of cutting one mid-word, keeping field examples like `host:` over the operators, and History's default view chip reads `history+repeater` (#1522)
 - Intercept: the empty queue names a real key on every row — `i` to start holding, `f` forward, `d` drop, `c` for requests, responses or both, `/` for a condition — instead of telling you to "focus body" (#1516)
 - Setup wizard: the review step says how to trust gori's CA for HTTPS and spells out what `^P`, `^N` and `^W` do, and the listen-IP hint says Enter moves to the next field (#1515)

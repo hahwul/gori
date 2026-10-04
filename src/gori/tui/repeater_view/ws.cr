@@ -40,14 +40,14 @@ class Gori::Tui::RepeaterView
   # The transport `^R` will dial, as the `^V` badge names it. Only meaningful when
   # `transport_switchable?` — a gRPC tab is always h2 and draws no badge to say so.
   #
-  # An overridden handshake tab names BOTH ends ("WS→h1"): its request card is titled
+  # An overridden handshake tab names BOTH ends ("WS→HTTP/1.1"): its request card is titled
   # REQUEST, because that is what `^R` sends, so this chip is the only text on screen saying
   # the tab holds a WebSocket handshake at all. Naming just the destination would put the tab
   # back where it started — indistinguishable from an ordinary request with a hidden MESSAGES
   # pane, which is the defect the card title used to carry alone.
   def transport_label : String
     return "WS" if ws_mode?
-    http = @http2 ? "h2" : "h1"
+    http = @http2 ? "HTTP/2" : "HTTP/1.1"
     ws_http_only? ? "WS→#{http}" : http
   end
 

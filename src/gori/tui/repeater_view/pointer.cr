@@ -12,6 +12,16 @@ class Gori::Tui::RepeaterView
     [{:send, key_label("repeater.send", "^R"), "SEND"}, {:ws_key, menu_chip("repeater.toggle-ws-key"), "KEY"}] of {Symbol, String, String}
   end
 
+  # `^L`'s name on the HTTP request border: `AUTO-LEN` when the whole chain (SEND, it, PRETTY,
+  # the widest mode chip, MARK while drawn) still fits, else `CL` — so a narrow border never
+  # drops a chip it used to draw. ONE answer, read by `render_request` and the hit-test below.
+  private def cl_badge_name(min_x : Int32, right_edge : Int32) : String
+    chips = [" #{key_label("repeater.send", "^R")}:SEND ", " #{key_label("repeater.toggle-auto-content-length", "^L")}:AUTO-LEN ",
+             " #{key_label("repeater.pretty-request", "^U")}:PRETTY ", Frame.mode_badge_label(false)]
+    chips << " #{key_label("repeater.toggle-decoded", "^T")}:MARK " if !decode_mode? && literal_markers?
+    chips.sum { |c| Screen.draw_width(c) } <= right_edge - min_x ? "AUTO-LEN" : "CL"
+  end
+
   # Border-chrome hit-test for REQUEST/RESPONSE toggle chips. Shares geometry with
   # render_request / render_response_chrome (label strings + start_x / right chain).
   # Returns a chip id, or nil so the caller can fall through to caret placement.
@@ -89,7 +99,7 @@ class Gori::Tui::RepeaterView
                elsif @req_hex_edit
                  [{:send, key_label("repeater.send", "^R"), "SEND"}, {:req_hex, key_label("repeater.toggle-hex", "^X"), "HEX"}] of {Symbol, String, String}
                else
-                 [{:send, key_label("repeater.send", "^R"), "SEND"}, {:cl, key_label("repeater.toggle-auto-content-length", "^L"), "CL"}, {:pretty_req, key_label("repeater.pretty-request", "^U"), "PRETTY"}] of {Symbol, String, String}
+                 [{:send, key_label("repeater.send", "^R"), "SEND"}, {:cl, key_label("repeater.toggle-auto-content-length", "^L"), cl_badge_name(min_x, right_edge)}, {:pretty_req, key_label("repeater.pretty-request", "^U"), "PRETTY"}] of {Symbol, String, String}
                end
       if hit = Frame.right_badge_hit(mx, my, req_card.y, right_edge, min_x, badges)
         return hit
