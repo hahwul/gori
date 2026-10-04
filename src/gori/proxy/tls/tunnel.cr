@@ -71,6 +71,10 @@ module Gori::Proxy::Tls
       @downgrade_noticed = Set({String, String}).new
       # The same, for notice_handshake_failure.
       @handshake_noticed = Set({String, String}).new
+      # `host:port`s whose client refused gori's certificate, since the last
+      # drain_untrusted_handshakes. Fed only past @handshake_noticed's dedup and cap, so it stays
+      # bounded by HANDSHAKE_NOTICE_MAX even when nobody drains (a headless Session).
+      @untrusted_pending = [] of String
     end
 
     # Hand the connection loop the root CA (for the self-serve download page) as plain
@@ -319,6 +323,20 @@ module Gori::Proxy::Tls
       return if @handshake_noticed.includes?(key) || @handshake_noticed.size >= HANDSHAKE_NOTICE_MAX
       @handshake_noticed << key
       ::Log.warn { "client TLS handshake failed for #{host}:#{port}: #{handshake_failure_reason(ex)} Nothing was captured for this connection." }
+      # Under `gori tui` that line reaches only `gori.log`, and an untrusted CA is the one reason
+      # here a beginner must act on, so it is also queued for the TUI to show (the
+      # `Interceptor#drain_notices` shape). A timeout or a client that went away is nothing to
+      # fix, and stays a log line.
+      @untrusted_pending << key[0] if ex.is_a?(OpenSSL::SSL::Error)
+    end
+
+    # The `host:port`s queued by notice_handshake_failure since the last call. A fresh empty
+    # array on the fast path, never the live buffer: see `Interceptor#drain_notices`.
+    def drain_untrusted_handshakes : Array(String)
+      return Array(String).new(0) if @untrusted_pending.empty?
+      out = @untrusted_pending
+      @untrusted_pending = [] of String
+      out
     end
 
     # What to blame, from the exception the handshake raised. Keyed on the class rather than on

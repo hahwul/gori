@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- TUI: an HTTPS client that does not trust gori's CA now raises a notification naming the host and where to get the CA, instead of leaving History silently empty (#1512)
 - TUI: the tutorial completes Practice on Enter (also in INS), keeps navigation and Help cues readable at 40 columns, and contrasts Space's main actions with Ctrl-P's full current-area and app-wide search (#1509, #1511)
 - Intercept: catch holds requests only by default, so a forwarded request's response no longer waits for a second `f`; `c` still picks responses or both, and a `status:` condition says it needs one of them (#1505)
 - Intercept: the held-message editor opens in READ when you `⇥` into it, as the Repeater's does, so `i` starts typing instead of typing an `i` (#1505)
