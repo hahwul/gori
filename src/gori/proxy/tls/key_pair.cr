@@ -50,7 +50,7 @@ module Gori::Proxy::Tls
       # and cannot protect is not a key to hand out.
       File.open(path, "w", perm: perm) { }
       File.chmod(path, perm)
-      bio = LibCrypto.bio_new_file(path, "w")
+      bio = LibCrypto.bio_new_file(path, "wb") # binary: a text-mode Windows fopen writes CRLF
       raise Gori::Error.new("BIO_new_file(#{path}) failed") if bio.null?
       begin
         ok = LibCrypto.pem_write_bio_privatekey(bio, @handle, Pointer(Void).null,
@@ -87,7 +87,8 @@ module Gori::Proxy::Tls
     end
 
     def write_pem(path : String) : Nil
-      bio = LibCrypto.bio_new_file(path, "w")
+      # Binary, so the file is byte-identical to `to_pem`: a text-mode Windows fopen writes CRLF.
+      bio = LibCrypto.bio_new_file(path, "wb")
       raise Gori::Error.new("BIO_new_file(#{path}) failed") if bio.null?
       begin
         raise Gori::Error.new("PEM_write_bio_X509 failed") if LibCrypto.pem_write_bio_x509(bio, @handle) != 1

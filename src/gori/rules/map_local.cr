@@ -1,4 +1,5 @@
 require "uri"
+require "../paths"
 
 module Gori
   module RuleStub
@@ -125,8 +126,7 @@ module Gori
           return Result.new(Outcome::Missing, rel: rel, reason: "no file for #{rel} in the mapped directory")
         end
         real = File.realpath(candidate)
-        base = root.ends_with?('/') ? root : "#{root}/"
-        return refused("the path resolves outside the mapped directory", rel) unless real.starts_with?(base)
+        return refused("the path resolves outside the mapped directory", rel) unless Paths.within?(real, root)
         Result.new(Outcome::Hit, path: real, rel: rel)
       end
 

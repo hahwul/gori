@@ -142,3 +142,19 @@ describe Gori::Paths do
     end
   end
 end
+
+describe Gori::Paths do
+  # `File::SEPARATOR` is `/` everywhere, but a joined or resolved Windows path separates with `\`:
+  # the archive's protected-destination check and map-local's confinement both ask this.
+  describe ".within?" do
+    it "takes either separator, and never a sibling that merely shares the prefix" do
+      dir = File.join(Dir.tempdir, "gori-within")
+      Gori::Paths.within?(dir, dir).should be_true
+      Gori::Paths.within?(File.join(dir, "a", "b.db"), dir).should be_true
+      Gori::Paths.within?("#{dir}/a", dir).should be_true
+      Gori::Paths.within?(File.join(dir, "a"), "#{dir}/").should be_true
+      Gori::Paths.within?("#{dir}-other", dir).should be_false
+      Gori::Paths.within?(File.join("#{dir}-other", "a"), dir).should be_false
+    end
+  end
+end

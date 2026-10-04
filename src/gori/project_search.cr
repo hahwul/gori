@@ -363,9 +363,12 @@ module Gori
         name = path
         if immutable
           # A URI, since `immutable` is only spelled that way. Percent-encoded, so a `?`, `#`
-          # or `%` in a path cannot end the filename early and turn into a parameter.
+          # or `%` in a path cannot end the filename early and turn into a parameter. A Windows
+          # path is spelled `/C:/…`: SQLite reads anything before that first `/` as the authority.
           flags |= SQLite3::Flag::URI
-          name = "file://#{URI.encode_path(File.expand_path(path))}?immutable=1"
+          abs = Path[File.expand_path(path)].to_posix(mappings: false).to_s
+          abs = "/#{abs}" unless abs.starts_with?('/')
+          name = "file://#{URI.encode_path(abs)}?immutable=1"
         end
         rc = LibSQLite3.open_v2(name, out db, flags, nil)
         {db.null? ? nil : new(db), rc}

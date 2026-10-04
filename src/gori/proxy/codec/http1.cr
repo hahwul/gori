@@ -83,7 +83,9 @@ module Gori::Proxy::Codec::Http1
       return true if @state == State::Empty
       return false unless @state == State::Failed && @bytes.empty?
       ex = @error
-      ex.is_a?(IO::Error) && ex.os_error == Errno::ECONNRESET
+      # Windows reports the reset as a Winsock code, and a write into a socket its peer already
+      # closed aborts the connection locally (WSAECONNABORTED) before the read sees it.
+      ex.is_a?(IO::Error) && ex.os_error.in?(Errno::ECONNRESET, WinError::WSAECONNRESET, WinError::WSAECONNABORTED)
     end
 
     # Restore read_head's established public behavior for callers that do not need the richer

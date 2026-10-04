@@ -78,7 +78,13 @@ module Gori::MCP
       # a refused connect does not leave the fd to the finalizer.
       sock = Socket.unix(Socket::Type::STREAM)
       begin
-        sock.connect(Socket::UNIXAddress.new(path), timeout: timeout)
+        begin
+          sock.connect(Socket::UNIXAddress.new(path), timeout: timeout)
+        rescue ex : Socket::Error
+          # Any refusal, not only a `ConnectError`: Windows raises a plain `Socket::Error`
+          # (WSAENETDOWN) for a path nothing listens on.
+          return "session not accepting messages (#{ex.message})"
+        end
         sock.write_timeout = timeout
         if token && !token.empty?
           sock.puts({type: "auth", token: token}.to_json)
@@ -89,8 +95,6 @@ module Gori::MCP
         sock.close rescue nil
       end
       nil
-    rescue ex : Socket::ConnectError
-      "session not accepting messages (#{ex.message})"
     rescue IO::TimeoutError
       "session did not read the message in #{timeout.total_seconds.to_i}s"
     rescue ex : IO::Error | Socket::Error
