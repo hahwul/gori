@@ -177,10 +177,12 @@ require "./runner/views"
 require "./runner/columns"
 require "../plural"
 
-lib LibC
-  fun tcsetpgrp(fd : Int32, pgrp : PidT) : Int32
-  fun getpgrp : PidT
-end
+{% unless flag?(:win32) %}
+  lib LibC
+    fun tcsetpgrp(fd : Int32, pgrp : PidT) : Int32
+    fun getpgrp : PidT
+  end
+{% end %}
 
 module Gori::Tui
   # The shell controller for ONE open project: owns view state, implements the
@@ -7030,7 +7032,11 @@ module Gori::Tui
     # (`code --wait`) reached gori as well: SignalGuard tore the session down, and an untrapped
     # QUIT killed it with the screen still wrecked. A no-op trap keeps gori alive, and the
     # child still gets the default disposition — Crystal resets trapped signals before exec.
-    TTY_SIGNALS = [Signal::INT, Signal::QUIT]
+    {% if flag?(:win32) %}
+      TTY_SIGNALS = [Signal::INT] # Windows has no QUIT
+    {% else %}
+      TTY_SIGNALS = [Signal::INT, Signal::QUIT]
+    {% end %}
 
     def self.shield_tty_signals(&)
       saved = TTY_SIGNALS.map(&.trap_handler?)
@@ -7138,23 +7144,26 @@ module Gori::Tui
     # SIGTTOU is ignored around tcsetpgrp so the kernel does not stop gori while it
     # reclaims the terminal.
     def self.reclaim_foreground_pgrp : Nil
-      Signal::TTOU.ignore
-      begin
-        pgrp = LibC.getpgrp
-        if tty = (File.open("/dev/tty", "r") rescue nil)
-          begin
-            LibC.tcsetpgrp(tty.fd, pgrp)
-          ensure
-            tty.close
+      # Windows has no process groups or job control: nothing can take the console away.
+      {% unless flag?(:win32) %}
+        Signal::TTOU.ignore
+        begin
+          pgrp = LibC.getpgrp
+          if tty = (File.open("/dev/tty", "r") rescue nil)
+            begin
+              LibC.tcsetpgrp(tty.fd, pgrp)
+            ensure
+              tty.close
+            end
+          elsif LibC.isatty(0) == 1
+            LibC.tcsetpgrp(0, pgrp)
           end
-        elsif LibC.isatty(0) == 1
-          LibC.tcsetpgrp(0, pgrp)
+        rescue
+          # Headless or test environments without a controlling terminal
+        ensure
+          Signal::TTOU.reset
         end
-      rescue
-        # Headless or test environments without a controlling terminal
-      ensure
-        Signal::TTOU.reset
-      end
+      {% end %}
     end
 
     # How long a shell has to have lived for its exit status to be the SHELL's. A shell exits

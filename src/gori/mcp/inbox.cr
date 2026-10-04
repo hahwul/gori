@@ -21,7 +21,7 @@ module Gori::MCP
     # documented fallback is a per-user directory. Both are tried, plus the env var when a
     # launcher passed it through.
     def self.candidates(pid : Int64 = Process.ppid.to_i64) : Array(String)
-      list = ["/tmp/cc-socks/#{pid}.sock", "/tmp/cc-socks-#{LibC.getuid}/#{pid}.sock"]
+      list = ["/tmp/cc-socks/#{pid}.sock", "/tmp/cc-socks-#{uid}/#{pid}.sock"]
       # The env var is trusted only when it names THIS parent: a `gori mcp` under Codex, or
       # under a Claude session started from another Claude session's Bash tool, inherits the
       # OUTER session's socket path, and writing there would land the operator's line in a
@@ -34,8 +34,18 @@ module Gori::MCP
 
     # The first candidate that is this user's socket, or nil when this process's parent is not
     # a Claude Code session (any other MCP client, or a launcher between the two).
-    def self.discover(pid : Int64 = Process.ppid.to_i64, uid : String = LibC.getuid.to_s) : String?
+    def self.discover(pid : Int64 = Process.ppid.to_i64, uid : String = self.uid) : String?
       candidates(pid).find { |p| ours?(p, uid) }
+    end
+
+    # This process's uid. Windows has none, and no Unix socket under `/tmp` for `ours?` to
+    # accept, so there `discover` finds nothing and the courier keeps to polling.
+    def self.uid : String
+      {% if flag?(:win32) %}
+        ""
+      {% else %}
+        LibC.getuid.to_s
+      {% end %}
     end
 
     # A socket this user owns (not a symlink to one), in a directory only this user can change.

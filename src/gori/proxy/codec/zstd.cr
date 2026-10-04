@@ -79,7 +79,8 @@ module Gori::Proxy::Codec
 end
 
 {% unless flag?(:without_native_codecs) %}
-  @[Link(pkg_config: "libzstd")]
+  # The lib name is what MSVC links (`zstd.lib`); it ignores pkg-config.
+  @[Link("zstd", pkg_config: "libzstd")]
   lib LibZstd
     struct InBuffer
       src : Void*

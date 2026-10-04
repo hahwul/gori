@@ -67,7 +67,12 @@ module Gori
     # alternate screen and SGR-1006 mouse reporting still on and only `reset` recovers it.
     # `gori run capture` never touched the tty, so its exit-on-HUP costs at most a partial
     # line — and trapping it there would silently turn a documented 129 into a 0.
-    TUI_SIGNALS = CAPTURE_SIGNALS + [Signal::HUP]
+    {% if flag?(:win32) %}
+      # Windows has no HUP; a closed console window arrives as TERM (`win32_signal.cr`).
+      TUI_SIGNALS = CAPTURE_SIGNALS
+    {% else %}
+      TUI_SIGNALS = CAPTURE_SIGNALS + [Signal::HUP]
+    {% end %}
 
     # Restores the terminal when a DELIVERED signal would otherwise kill the TUI outright.
     #
@@ -103,7 +108,12 @@ module Gori
 
       # Never returns: a signal sent to self under the default disposition terminates the
       # process inside the `kill` syscall, before any further fiber can be scheduled.
-      REAL_DIE = ->(sig : Signal) { Process.signal(sig, Process.pid) }
+      {% if flag?(:win32) %}
+        # Windows cannot signal a process: exit with the status a signal death reads as.
+        REAL_DIE = ->(sig : Signal) { exit 128 + sig.value }
+      {% else %}
+        REAL_DIE = ->(sig : Signal) { Process.signal(sig, Process.pid) }
+      {% end %}
 
       def initialize(@restore : Proc(Nil),
                      @signals : Array(Signal) = TUI_SIGNALS,

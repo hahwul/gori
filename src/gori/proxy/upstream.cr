@@ -462,10 +462,15 @@ module Gori::Proxy
     # The error a non-blocking connect left on `sock`, or nil. A getsockopt that itself fails
     # answers nil: it cannot tell us the connect failed, so it must not claim so.
     private def self.pending_error(sock : ::Socket) : Errno?
-      err = 0
-      len = LibC::SocklenT.new(sizeof(Int32))
-      return nil unless LibC.getsockopt(sock.fd, LibC::SOL_SOCKET, SO_ERROR, pointerof(err), pointerof(len)) == 0
-      err == 0 ? nil : Errno.new(err)
+      {% if flag?(:win32) %}
+        # ConnectEx reports a refusal itself, and SO_ERROR there holds a WSA code, not an errno.
+        nil
+      {% else %}
+        err = 0
+        len = LibC::SocklenT.new(sizeof(Int32))
+        return nil unless LibC.getsockopt(sock.fd, LibC::SOL_SOCKET, SO_ERROR, pointerof(err), pointerof(len)) == 0
+        err == 0 ? nil : Errno.new(err)
+      {% end %}
     end
 
     # Connect to the upstream HTTP proxy and CONNECT-tunnel to the origin. Used for

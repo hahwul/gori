@@ -164,11 +164,10 @@ module Gori::Repeater
       false
     end
 
-    # `MSG_PEEK` on a socket fd: read-without-consume, non-blocking because Crystal's sockets
-    # are evented. 0 means the peer sent FIN; anything else (a byte, or EAGAIN) does not.
+    # A read-without-consume peek: 0 means the peer sent FIN; anything else (a byte, nothing
+    # waiting, an error) does not.
     private def self.fin?(sock : TCPSocket) : Bool
-      buf = uninitialized UInt8[1]
-      LibC.recv(sock.fd, buf.to_unsafe.as(Void*), LibC::SizeT.new(1), ConnPool::MSG_PEEK) == 0
+      Proxy::SocketResidue.peek(sock) == 0
     end
 
     # A REUSED connection that failed before any response byte arrived — the h2 twin of

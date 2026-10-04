@@ -206,7 +206,10 @@ module Gori
         # Crystal's runtime ignores SIGPIPE for itself, and an ignored signal survives exec:
         # without this the shell and everything it starts inherit it, and `yes | head` prints
         # "Broken pipe" instead of ending quietly. Nothing of ours writes after the exec.
-        Signal::PIPE.reset
+        {% unless flag?(:win32) %}
+          # Windows has no SIGPIPE
+          Signal::PIPE.reset
+        {% end %}
         Process.exec(program, argv, env: result.to_env)
       rescue File::NotFoundError
         STDERR.puts "gori run shell: #{program}: command not found"

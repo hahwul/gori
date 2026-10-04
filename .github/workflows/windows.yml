@@ -1,0 +1,136 @@
+---
+name: Windows
+# Native Windows build + smoke test (#1510). Its own workflow rather than a ci.yml job
+# because it also runs on stacked PRs, whose base is not main.
+on:
+  pull_request:
+    # No `branches:` filter: Windows work lands as stacked PRs.
+    paths:
+      - .github/workflows/windows.yml
+      - scripts/build-windows.sh
+      - shard.yml
+      - shard.lock
+      - "**/*.cr"
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/windows.yml
+      - scripts/build-windows.sh
+      - shard.yml
+      - shard.lock
+      - "**/*.cr"
+  workflow_dispatch:
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: 1.21.0
+      - name: Cache vcpkg libraries
+        uses: actions/cache@v4
+        with:
+          path: C:/vcpkg/installed
+          key: vcpkg-${{ hashFiles('scripts/build-windows.sh') }}
+      - name: Build
+        id: build
+        # Static, as the released .exe is built (release-binary.yml calls the same script).
+        run: scripts/build-windows.sh src/main.cr bin/gori.exe
+      - name: Smoke test
+        # Proxy one http and one MITM'd https request, then read them back from the store:
+        # sockets, TLS, the CA, SQLite and the writer fiber, end to end.
+        run: |
+          export GORI_HOME="$RUNNER_TEMP/gori-home"
+          ./bin/gori.exe --version
+          ./bin/gori.exe run capture --port 18070 --max 2 --for 90s > "$RUNNER_TEMP/capture.log" 2>&1 &
+          pid=$!
+          trap 'echo "--- capture.log"; cat "$RUNNER_TEMP/capture.log"' EXIT
+          # The first request doubles as the wait for the listener.
+          for _ in $(seq 1 30); do
+            curl -fsS -m 20 -o /dev/null -x http://127.0.0.1:18070 http://example.com/ && break
+            sleep 1
+          done
+          curl -fsS -m 20 -o /dev/null -k -x http://127.0.0.1:18070 https://example.com/
+          wait "$pid"
+          ./bin/gori.exe run history | tee "$RUNNER_TEMP/history.txt"
+          test "$(grep -c example.com "$RUNNER_TEMP/history.txt")" -eq 2
+      - name: TUI smoke (ConPTY)
+        # The TUI under a real Windows pseudo-console: termisu's console backend (modes, size,
+        # VT input) and the renderer, driven the way an operator would — skip the wizard, watch
+        # a proxied request land in History, quit with ^C ^C.
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: python
+        run: |
+          import os, re, subprocess, sys, threading, time
+          sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+          subprocess.run([sys.executable, "-m", "pip", "install", "-q", "pywinpty", "pyte"], check=True)
+          import pyte
+          from winpty import PtyProcess
+
+          home = os.path.join(os.environ["RUNNER_TEMP"], "tui-home")
+          os.makedirs(home, exist_ok=True)
+          env = dict(os.environ, GORI_HOME=home)
+          p = PtyProcess.spawn([r"bin\gori.exe", "--db", os.path.join(home, "t.db"), "--port", "18094"],
+                               dimensions=(40, 120), env=env)
+          # The renderer redraws only the cells that changed, so the raw stream is not text to
+          # search: replay it into a VT screen and read the screen.
+          screen = pyte.Screen(120, 40)
+          stream = pyte.Stream(screen)
+          lock = threading.Lock()
+
+          def pump():
+              while True:
+                  try:
+                      chunk = p.read(4096)
+                  except EOFError:
+                      return
+                  with lock:
+                      stream.feed(chunk)
+
+          threading.Thread(target=pump, daemon=True).start()
+
+          def shown():
+              with lock:
+                  return "\n".join(screen.display)
+
+          def wait_for(text, timeout=60):
+              end = time.time() + timeout
+              while time.time() < end:
+                  if text in shown():
+                      print(f"saw {text!r}")
+                      return
+                  time.sleep(0.2)
+              print(shown())
+              sys.exit(f"the TUI never showed {text!r}")
+
+          wait_for("setup wizard")
+          p.write("\x1b")
+          time.sleep(1)
+          p.write("\x1b")
+          wait_for("waiting for traffic")
+          subprocess.run(["curl", "-fsS", "-m", "20", "-o", os.devnull,
+                          "-x", "http://127.0.0.1:18094", "http://example.com/"], check=True)
+          wait_for("example.com")
+          p.write("\x03")
+          time.sleep(1)
+          p.write("\x03")
+          end = time.time() + 20
+          while p.isalive() and time.time() < end:
+              time.sleep(0.2)
+          if p.isalive():
+              p.terminate(force=True)
+              sys.exit("the TUI did not quit on ^C ^C")
+          print(f"exit status {p.exitstatus}")
+          sys.exit(0 if p.exitstatus == 0 else 1)

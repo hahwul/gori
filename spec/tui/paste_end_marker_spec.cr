@@ -82,7 +82,7 @@ describe "the termisu pin the carried paste patch is written against" do
     lock = File.read(File.join(__DIR__, "..", "..", "shard.lock"))
     pinned = lock[/termisu:.*?commit\.([0-9a-f]{40})/m, 1]?
 
-    pinned.should eq("5bdf49380e935dfc21bcdbd9e9296347f5991112")
+    pinned.should eq("ca964e5f9256990d9d1e6aa5ca3aa1fb2635fb6b")
   end
 end
 

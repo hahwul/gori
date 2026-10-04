@@ -319,9 +319,6 @@ module Gori::Repeater
       end
     end
 
-    # POSIX `MSG_PEEK`, from its home beside the probe (`H2Pool` reads it from here).
-    MSG_PEEK = Proxy::SocketResidue::MSG_PEEK
-
     # The socket-residue probe (`Proxy::SocketResidue.state`), asked of a parked socket at
     # checkout. Kept under this name because it is the question the pool asks; the probe itself
     # lives under the proxy, which asks it of a retired upstream too.

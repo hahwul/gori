@@ -109,16 +109,39 @@ module Gori::Proxy
     # so handing back a socket proved dead DROPPED the request. It is now its own answer — and
     # a better one for every method, because a FIN observed BEFORE the write means the origin
     # never saw the request at all.
-    # `MSG_PEEK` on a socket fd: read-without-consume, non-blocking because Crystal's sockets
-    # are evented. EAGAIN/EWOULDBLOCK means nothing is waiting, a byte means residue, 0 means
-    # the peer sent FIN. ~0.38µs measured. Shared by the plaintext branch and the fd half of
-    # the TLS one, so the two cannot disagree about what a peek means.
+    # A byte waiting means residue, 0 means the peer sent FIN, nothing waiting is clean, and a
+    # failed peek proves nothing so it reads as residue. ~0.38µs measured. Shared by the
+    # plaintext branch and the fd half of the TLS one, so the two cannot disagree about what a
+    # peek means.
     private def self.peek_state(sock : TCPSocket) : State
-      buf = uninitialized UInt8[1]
-      n = LibC.recv(sock.fd, buf.to_unsafe.as(Void*), LibC::SizeT.new(1), MSG_PEEK)
-      return State::Closed if n == 0
-      return State::Residue if n > 0
-      {Errno::EAGAIN, Errno::EWOULDBLOCK}.includes?(Errno.value) ? State::Clean : State::Residue
+      case peek(sock)
+      when nil then State::Clean
+      when 0   then State::Closed
+      else          State::Residue
+      end
+    end
+
+    # What a read-without-consume would see on the socket: a count (> 0 bytes waiting, 0 FIN,
+    # < 0 an error), or nil when nothing is waiting. Also `H2Pool`'s FIN check.
+    #
+    # POSIX: one byte of `recv(MSG_PEEK)`, which returns at once because Crystal's POSIX sockets
+    # are non-blocking (evented IO). Windows: Crystal's sockets there are blocking ones driven
+    # through IOCP, where a peek on an empty socket parks the whole scheduler thread in `recv`.
+    # So it asks instead: `WSAPoll` with no timeout (is anything readable?), then `FIONREAD`
+    # (how much?) — readable with nothing to read is the FIN.
+    def self.peek(sock : TCPSocket) : Int32?
+      {% if flag?(:win32) %}
+        pfd = LibC::WSAPOLLFD.new(fd: sock.fd, events: LibC::POLLRDNORM)
+        ready = LibC.WSAPoll(pointerof(pfd), 1, 0)
+        return nil if ready == 0
+        return -1 if ready < 0 || pfd.revents & LibC::POLLERR != 0
+        return -1 unless LibC.ioctlsocket(sock.fd, LibC::FIONREAD, out avail) == 0
+        avail.to_i32
+      {% else %}
+        buf = uninitialized UInt8[1]
+        n = LibC.recv(sock.fd, buf.to_unsafe.as(Void*), LibC::SizeT.new(1), MSG_PEEK).to_i32
+        n < 0 && Errno.value.in?(Errno::EAGAIN, Errno::EWOULDBLOCK) ? nil : n
+      {% end %}
     end
 
     # Let the transport itself say what is waiting, bounded by DRAIN_PROBE. `nil` = EOF (the
@@ -196,3 +219,19 @@ module Gori::Proxy
     end
   end
 end
+
+{% if flag?(:win32) %}
+  lib LibC
+    struct WSAPOLLFD
+      fd : SOCKET
+      events : Short
+      revents : Short
+    end
+
+    POLLERR    = 0x0001_i16
+    POLLRDNORM = 0x0100_i16
+    FIONREAD   = 0x4004667F
+
+    fun WSAPoll(fds : WSAPOLLFD*, nfds : ULong, timeout : Int) : Int
+  end
+{% end %}

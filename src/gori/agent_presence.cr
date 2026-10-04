@@ -1,5 +1,6 @@
 require "json"
 require "./paths"
+require "./open_lock"
 
 module Gori
   # "A process is attached to this PROJECT" — a per-process marker file in a directory beside
@@ -230,7 +231,7 @@ module Gori
             # EAGAIN/EWOULDBLOCK is the one refusal that MEANS a live holder (same errno
             # discrimination as `OpenLock.contention?`); any other failure is "cannot tell",
             # which must neither sweep nor count.
-            unless contention?(ex)
+            unless OpenLock.contention?(ex)
               unsure.try(&.call)
               next
             end
@@ -243,15 +244,6 @@ module Gori
           probe.close rescue nil
         end
       end
-    end
-
-    # Was this flock failure "somebody holds it" rather than "flock does not work here"?
-    # The stdlib raises one `IO::Error` for both; the errno separates them (`open_lock.cr`
-    # spells out why these two values and why a missing os_error reads as NOT contention —
-    # here that direction skips a sweep rather than inventing a live agent).
-    private def self.contention?(ex : IO::Error) : Bool
-      err = ex.os_error
-      !err.nil? && err.in?(Errno::EAGAIN, Errno::EWOULDBLOCK)
     end
 
     private def self.parse_entry(path : String, kind : String) : Entry
