@@ -23,7 +23,7 @@ module Gori
   # - `gori ca`                     → print root CA path (or PEM); `ca regenerate` rotates it
   # - `gori run <sub>`              → non-interactive CLI (see Gori::CLI::Run)
   # - `gori mcp`                    → MCP (Model Context Protocol) server over stdio
-  # - `gori wizard`                 → interactive first-run setup wizard (bind/theme/keys/companion)
+  # - `gori wizard`                 → interactive first-run setup wizard (bind/theme/companion)
   # - `gori tutorial`               → guided TUI tour (navigation, menu, palette, edit, traffic)
   # - `gori update`                 → channel-aware self-update (binary / brew / snap / AUR)
   module CLI
@@ -186,7 +186,7 @@ module Gori
       puts "  settings  Show the settings.json path (or --edit to open it)"
       puts "  ca        Print the root CA path, or regenerate it (see gori ca --help)"
       puts "  run       Non-interactive CLI: capture, history, show, repeater, issues, project"
-      puts "  wizard    Interactive setup wizard (bind, theme, editor keys, companion) — also runs on first launch"
+      puts "  wizard    Interactive setup wizard (bind, theme, companion) — also runs on first launch"
       puts "  tutorial  Guided TUI tour with try-it steps (nav, menu, palette, edit, proxy, intercept)"
       puts "  mcp       Start an MCP server over stdio (AI/tool integration)"
       puts "  update    Update gori (channel-aware: binary download or package manager)"
@@ -418,7 +418,7 @@ module Gori
     end
 
     # `gori wizard` launches the interactive, step-by-step setup wizard (bind
-    # address → theme → editor keyset → Miss Ring). It also runs automatically on first launch
+    # address → theme → Miss Ring → review). It also runs automatically on first launch
     # (App#run_tui, when settings.json doesn't exist yet); this command re-runs it
     # anytime. Config-only — it edits settings.json + the live theme, so it sets up
     # its own terminal directly instead of going through App (which eagerly loads
@@ -430,7 +430,7 @@ module Gori
       # aborts on an unknown flag; this one now does too.
       parser = option_parser("gori wizard") do |p|
         p.banner = "Usage: gori wizard\n" \
-                   "  Interactive setup wizard: global proxy bind (default for projects), TUI theme, editor keyset (try it first), Miss Ring.\n" \
+                   "  Interactive setup wizard: global proxy bind (default for projects), TUI theme, Miss Ring.\n" \
                    "  Runs automatically on first launch; use this to re-run it anytime.\n" \
                    "  Bind is the shared default — pin a different address per project in the Project tab;\n" \
                    "  `gori tui --listen/--port` override settings for one run only (not written to disk)."

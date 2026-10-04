@@ -29,7 +29,7 @@ describe "hint templates — every verb token expands to a chord" do
     # DESCRIBED as `{verb.id}` in five places, and that placeholder is not a token to expand.
     ids = Set(String).new
     # A file whose templates are expanded under a NAMED keyset rather than the active one: the
-    # setup wizard's practice pad spells vim's `dd` as `{editor.delete-line}` twice, and expands
+    # keyset playground's practice pad spells vim's `dd` as `{editor.delete-line}` twice, and expands
     # it only while vim-ish is the keyset on trial (`KeysetPad#expand`). Its tokens must still
     # name a verb with a key, just under some keyset; `keyset_pad_spec` checks each template
     # under the keyset it is drawn in.

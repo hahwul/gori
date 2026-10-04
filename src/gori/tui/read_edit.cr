@@ -25,7 +25,7 @@ module Gori::Tui
   #
   # Pure over an `EditorPane` and a key sink, so it is spec-able without a terminal: the
   # Runner passes its own `handle_key`, a spec passes the controller's `handle_body_key`, and
-  # the setup wizard's practice pad (`KeysetPad`) passes its own INSERT ladder.
+  # the keyset playground's practice pad (`KeysetPad`) passes its own INSERT ladder.
   # Each operation returns the status line to show, or nil when the pane already said why.
   module ReadEdit
     alias KeyIn = Proc(Termisu::Event::Key, Nil)

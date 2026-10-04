@@ -18,7 +18,7 @@ With no subcommand, gori opens the project picker. The proxy starts when you ope
 gori
 ```
 
-The first launch runs a short [setup wizard](#first-run-wizard) (global bind, theme, editor keys, and the Miss Ring mascot), then offers a [guided UI tour](#guided-ui-tour). You can take the tour now or skip it and come back; this page covers the same ground against live traffic.
+The first launch runs a short [setup wizard](#first-run-wizard) (global bind, theme, and the Miss Ring mascot), then offers a [guided UI tour](#guided-ui-tour). You can take the tour now or skip it and come back; this page covers the same ground against live traffic.
 
 At the picker, select **New project**, enter a name, then press `Enter` twice (the description is optional). The guided tour returns you to this picker when it finishes on first launch.
 
@@ -217,7 +217,7 @@ Keep this table nearby until the chords stick:
 
 ## First-run wizard
 
-Re-run the guided setup (global proxy bind default, then theme, editor keys, then Miss Ring) at any time:
+Re-run the guided setup (global proxy bind default, then theme, then Miss Ring) at any time:
 
 ```bash
 gori wizard
@@ -225,9 +225,7 @@ gori wizard
 
 The listen IP defaults to `127.0.0.1` (this computer only); `0.0.0.0` lets other devices reach the proxy. The first `Enter` moves from IP to port, and the next continues. The choice becomes the shared default in `settings.json`; a project can pin a different address from its Project tab. If the port is busy, `Enter` again keeps it. `Esc` twice skips the wizard.
 
-The **Keys** step picks the [editor keyset](/guide/hotkeys/#editor-keysets), `helix-ish` (the default) or `vim-ish`, and lets you try it first. `↑`/`↓` switches the keyset; `Tab`, a click, or just typing a key moves into the practice pad below, which answers in the highlighted keyset (`x` then `d` deletes a line under helix-ish, `dd` under vim-ish, `p` puts it back). `Tab`, or `Esc` from READ, hands the keys back. Nothing is saved until you finish.
-
-The final **Review** step recaps what you picked and carries one editable row: **Shortcuts**, which `←`/`→` flips between `Ctrl` and `Option (⌥)` for gori's built-in chord family (`^P` `^N` `^W` `^1-9`). Choosing Option *adds* `⌥` aliases rather than replacing Ctrl, which is useful when your terminal or multiplexer never delivers the Ctrl form. See [Command modifier](/guide/hotkeys/#command-modifier) for the macOS Option-as-Meta requirement.
+The final **Review** step recaps what you picked, names your [editor keyset](/guide/hotkeys/#editor-keysets) and where to change it (the wizard never sets it), and carries one editable row: **Shortcuts**, which `←`/`→` flips between `Ctrl` and `Option (⌥)` for gori's built-in chord family (`^P` `^N` `^W` `^1-9`). Choosing Option *adds* `⌥` aliases rather than replacing Ctrl, which is useful when your terminal or multiplexer never delivers the Ctrl form. See [Command modifier](/guide/hotkeys/#command-modifier) for the macOS Option-as-Meta requirement.
 
 ## Guided UI tour
 

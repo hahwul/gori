@@ -7,9 +7,9 @@ require "./register"
 require "../verb"
 
 module Gori::Tui
-  # Preferences → Keys → Keyset playground: the setup wizard's practice pad, reachable after
-  # the wizard, with the whole READ grammar of the keyset being tried listed under it. The pad
-  # is the wizard's (`KeysetPad`, the real keymap and the real `ReadEdit` engine); this card
+  # Preferences → Keys → Keyset playground: a practice pad with the whole READ grammar of the
+  # keyset being tried listed under it. The pad is `KeysetPad` (the real keymap and the real
+  # `ReadEdit` engine); this card
   # adds the key list. It only tries: the keyset is picked on the Editor keyset row right above
   # the row that opens it, and a second setter here would be one more way for the two to
   # disagree about what is saved.

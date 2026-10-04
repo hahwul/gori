@@ -126,7 +126,7 @@ module Gori::Tui
     # An agent's `ask_operator` question (#1324): its choices on digit keys, opened by the
     # operator from the ring, the `ask:` chip or app.answer-agent — never by the question.
     AgentQuestion
-    # Preferences → Keys → Keyset playground: the wizard's practice pad plus each keyset's key
+    # Preferences → Keys → Keyset playground: the practice pad plus each keyset's key
     # list, born on the seam.
     KeysetPlayground
 

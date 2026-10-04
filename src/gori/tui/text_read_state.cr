@@ -131,7 +131,7 @@ module Gori::Tui
     end
 
     # `line_mode` is vim's `V`: an unshifted vertical step grows the selection rather than
-    # leaving it. The keyset is the caller's to name, because the wizard's practice pad answers
+    # leaving it. The keyset is the caller's to name, because the playground's practice pad answers
     # in the keyset it has highlighted, not the saved one.
     def select_line(editor : TextArea, line_mode : Bool = Verb::Keyset.active.vim?) : Nil
       lines = editor.lines_snapshot

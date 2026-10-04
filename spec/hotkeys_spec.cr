@@ -446,7 +446,7 @@ describe "Gori::Hotkeys.expand memo" do
     end
   end
 
-  # A caller may name a keyset that is not the active one (the setup wizard's practice pad
+  # A caller may name a keyset that is not the active one (the Keyset playground's practice pad
   # does). The memo used to be keyed without it, so whichever keyset expanded a template first
   # answered for both.
   it "keys the memo by the keyset a caller names" do
