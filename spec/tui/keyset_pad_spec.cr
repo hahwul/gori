@@ -1,7 +1,7 @@
 require "../spec_helper"
 require "../support/tui_contract"
 
-# src/gori/tui/keyset_pad.cr — the setup wizard's practice pad. It must answer a key the way an
+# src/gori/tui/keyset_pad.cr — the keyset playground's practice pad. It must answer a key the way an
 # editor pane does under the STAGED keyset, so these examples press real key events and read
 # the text the pad ends up holding. One registry for the file: `Verbs.registry` builds a new
 # one on every call.

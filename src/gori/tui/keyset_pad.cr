@@ -13,8 +13,8 @@ require "./theme"
 require "../plural"
 
 module Gori::Tui
-  # The setup wizard's practice pad: a three-line editor on which a new operator tries an
-  # editor keyset before choosing it.
+  # The keyset playground's practice pad (Preferences → Keys): a three-line editor on which an
+  # operator tries an editor keyset before choosing it.
   #
   # It is the real grammar, not a picture of one. A key resolves through a `Verb::Keymap`
   # built for the STAGED keyset (with the operator's own rebinds, which win over a keyset in
@@ -26,9 +26,10 @@ module Gori::Tui
   #
   # Two things are deliberately NOT real:
   # - copies stay in the paste register. A real `y` also writes the system clipboard (OSC 52),
-  #   and the wizard has no business replacing what the operator copied elsewhere with sample
-  #   text. The wizard restores the register on its way out, too (`SetupWizard#run`).
-  # - prompts (`^F` find, `^G` go to line) are named, not opened: the wizard has no prompt bar.
+  #   and a practice pad has no business replacing what the operator copied elsewhere with
+  #   sample text. The playground restores the register on its way out, too
+  #   (`KeysetPlaygroundOverlay#restore_register`).
+  # - prompts (`^F` find, `^G` go to line) are named, not opened: the pad has no prompt bar.
   #
   # Pure over its own state, so the whole grammar is spec-able without a terminal.
   class KeysetPad

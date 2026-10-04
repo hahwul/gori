@@ -4857,3 +4857,16 @@ responses or both before it holds anything. Every surface says so rather than re
 either half can change next: the TUI condition bar and its toasts, and a `note` beside the
 `intercept_set_filter` / `intercept_set_direction` ack and on `gori run intercept filter` /
 `direction` (`Interceptor.direction_note`, over `InterceptFilter.response_fields`).
+
+### 2026-10-04: the setup wizard no longer asks for an editor keyset
+
+Reverses the wizard's KEYS step (#1462); the keyset itself and the Preferences → Keys
+playground (2026-10-03 entry above) are unchanged.
+
+A first run asked "how should a text editor's READ keys feel?" with a practice pad, before the
+user had opened a single editor. That is jargon and a decision a beginner cannot make yet, and
+the default (helix-ish) serves them fine. The wizard is now NETWORK → THEME → COMPANION →
+REVIEW and never writes `editor_keyset`, so re-running `gori wizard` keeps a choice made in
+Preferences. REVIEW's Editor keys row shows the saved keyset and the palette entry that changes it
+(Settings: Keys, its title read from the registry; no chord, since REVIEW's Shortcuts row can
+change the palette's modifier before finish). MIN_H stays 15: REVIEW was already the tallest step.

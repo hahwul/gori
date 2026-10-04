@@ -7,7 +7,6 @@ require "./frame"
 require "./layout"
 require "./mascot"
 require "./tutorial"
-require "./keyset_pad"
 require "./viewport"
 require "../settings"
 
@@ -18,8 +17,9 @@ module Gori::Tui
   # `gori wizard`. A config-only tool — no Session/proxy/CA — so it just edits the
   # global Settings + live Theme, mirroring ProjectPicker's run-loop/render shape.
   #
-  # Steps: NETWORK (bind ip/port) → THEME (list + live preview) → KEYS (editor keyset, with a
-  # practice pad to try each one on) → COMPANION (Miss Ring) → REVIEW (recap + finish).
+  # Steps: NETWORK (bind ip/port) → THEME (list + live preview) → COMPANION (Miss Ring) →
+  # REVIEW (recap + finish). The editor keyset is left to Preferences → Keys: REVIEW names the
+  # saved one and where to change it, and the wizard never writes it.
   #
   # Edits are STAGED in wizard-local fields and committed to Settings only on
   # finish, so "skip" (Esc) is coherent: it reverts the live theme preview to the
@@ -38,17 +38,10 @@ module Gori::Tui
     # reword the line and this number is what decides whether the reworded one survives.
     COMPANION_TEXT_MIN = 48
     LABEL_W            =  9 # widest bind label ("Bind Port")
-    KEYS_LABEL_W       = 21 # "helix-ish (default)" + 2 columns before its key summary
-    # The KEYS step's opening line, widest first, like `footer_hints`.
-    KEYS_HEADINGS = [
-      "How should a text editor's READ keys feel? Try both, then pick.",
-      "Try both keysets on the pad, then pick.",
-      "Try both, then pick one.",
-    ]
-    PREVIEW_W    = 30 # theme-preview panel width (two-column theme step)
-    PREVIEW_GAP  =  2
-    LIST_MIN     = 24 # minimum theme-list width before the preview is dropped
-    THEME_VP_MAX = 10 # most theme rows shown at once
+    PREVIEW_W          = 30 # theme-preview panel width (two-column theme step)
+    PREVIEW_GAP        =  2
+    LIST_MIN           = 24 # minimum theme-list width before the preview is dropped
+    THEME_VP_MAX       = 10 # most theme rows shown at once
 
     # Interior content rows each FIXED-LAYOUT step draws, below the card's top border + 1 pad
     # row. Each must match what the matching render_* actually draws at its fixed offsets, and
@@ -63,7 +56,6 @@ module Gori::Tui
     # demanding one; see `content_rows`.)
     BIND_ROWS      = 8 # heading, gap, ip, port, gap, 2 info lines, status
     COMPANION_ROWS = 7 # heading, gap, 2 offer rows, gap, motion row, info line
-    KEYS_ROWS      = 9 # heading, 2 offer rows, the 5-row practice pad, its status line
     REVIEW_ROWS    = 9 # title, 6 recap rows (HTTPS fills the gap), 2 offer rows
 
     # Interior row offsets (from the card's top border) of the rows a click can land on. ONE
@@ -75,10 +67,6 @@ module Gori::Tui
     BIND_FIELD_ROW       = 4 # Bind IP; Bind Port is the row under it
     COMPANION_OFFER_ROW  = 4 # "Show Miss Ring"; "No mascot" is the row under it
     COMPANION_MOTION_ROW = COMPANION_OFFER_ROW + 3
-    KEYS_OFFER_ROW       = 3 # "helix-ish"; "vim-ish" is the row under it
-    KEYS_PAD_ROW         = KEYS_OFFER_ROW + 2
-    KEYS_PAD_H           = 5 # border, the pad's three sample lines, border
-    KEYS_STATUS_ROW      = KEYS_PAD_ROW + KEYS_PAD_H
     REVIEW_RECAP_ROW     = 3 # five recap rows; Shortcuts (the editable one) is the last
     REVIEW_SHORTCUTS_ROW = REVIEW_RECAP_ROW + 4
     REVIEW_OFFER_ROW     = REVIEW_SHORTCUTS_ROW + 2 # "Take the guided tour"; "Skip" under it
@@ -102,7 +90,7 @@ module Gori::Tui
     # `card_h` can only reach `h - 3`. See the spec, which pins the derivation in both
     # directions so a new REVIEW row can't quietly raise the real floor past this number.
     MIN_W = 40 # Layout.usable?'s width floor; step_card clamps to 34 columns inside it
-    MIN_H = {BIND_ROWS, COMPANION_ROWS, KEYS_ROWS, REVIEW_ROWS}.max + 6
+    MIN_H = {BIND_ROWS, COMPANION_ROWS, REVIEW_ROWS}.max + 6
 
     # The failed-save footer once the full one no longer fits — see render_footer.
     SAVE_FAILED_SHORT = "save failed · ↵ retry · esc discard"
@@ -145,7 +133,6 @@ module Gori::Tui
     enum Step
       Bind       # bind ip/port
       Appearance # theme (named Appearance to avoid clashing with the Theme module)
-      Keys       # editor keyset: helix-ish / vim-ish, tried on a practice pad first
       Companion  # Miss Ring: on/off + motion (enum members are scoped to Step, so this
       #            does NOT shadow Gori::Tui::Companion — which the wizard never touches anyway)
       Review # recap + finish
@@ -190,15 +177,7 @@ module Gori::Tui
       # turning on.
       @companion_enabled = Settings.companion?
       @companion_motion = Settings.companion_motion
-      # Keys step — STAGED like the companion, and for her reason: `skip` saves, so a keyset
-      # set live while the operator was only trying it would be persisted by the Esc that
-      # promises to leave Settings alone. The pad builds its keymap from this value instead.
-      @keyset = Verb::Keyset.active
-      # :choice (the two offer rows) or :pad (keys go to the practice pad). ↑/↓/←/→ and ↵ are
-      # the pad's own keys while it has focus, so the step needs a focus where the other steps
-      # split their two choices across ↑/↓ and ←/→.
-      @keys_focus = :choice
-      @pad = nil.as(KeysetPad?) # built on first sight of the step: `Verbs.registry` is not free
+      @keys_route = nil.as(String?) # REVIEW's "change in …": `Verbs.registry` is not free
       # Review step — offer a guided TUI tour after setup. `@launch_tutorial` is set
       # on finish and read by `run` (below) to launch the tour in this same terminal.
       @offer = :tour # :tour | :skip
@@ -225,28 +204,20 @@ module Gori::Tui
       @theme_name = Theme.canonical(@theme_name)
       @theme_baseline = Theme.active_name
       @running = true
-      # The practice pad deletes and copies into gori's paste register, and on the first-run
-      # path the session that follows runs in this same process: its first `p` would paste
-      # the pad's sample text. Both callers run the wizard before anything else has written
-      # the register, so emptying it on the way out is restoring it.
-      begin
-        loop do
-          render
-          case ev = @term.poll_event(50)
-          when Termisu::Event::Resize
-            @backend.resize(ev.width, ev.height) # re-fit grids off the event dims (lockstep w/ termisu)
-            @resized = true                      # buffer already resized; force a full repaint next frame
-          when Termisu::Event::Key
-            handle_key(ev)
-          when Termisu::Event::Mouse
-            handle_mouse(ev)
-          when Termisu::Event::Preedit
-            @preedit = ev.text # live IME composition; the committed key clears it
-          end
-          break unless @running
+      loop do
+        render
+        case ev = @term.poll_event(50)
+        when Termisu::Event::Resize
+          @backend.resize(ev.width, ev.height) # re-fit grids off the event dims (lockstep w/ termisu)
+          @resized = true                      # buffer already resized; force a full repaint next frame
+        when Termisu::Event::Key
+          handle_key(ev)
+        when Termisu::Event::Mouse
+          handle_mouse(ev)
+        when Termisu::Event::Preedit
+          @preedit = ev.text # live IME composition; the committed key clears it
         end
-      ensure
-        Register.clear
+        break unless @running
       end
       # Opted into the tour on the Review step → run it now, reusing this terminal
       # (already in raw mode with enhanced keyboard on). Skip/Esc leaves it false.
@@ -280,7 +251,7 @@ module Gori::Tui
         return
       end
       if key.escape?
-        handle_escape unless pad_escape(ev)
+        handle_escape
         return
       end
       @esc_armed = false # any other key is intent to stay (see handle_escape)
@@ -294,21 +265,9 @@ module Gori::Tui
       case @step
       when Step::Bind       then handle_bind_key(ev)
       when Step::Appearance then handle_theme_key(ev)
-      when Step::Keys       then handle_keys_key(ev)
       when Step::Companion  then handle_companion_key(ev)
       when Step::Review     then handle_review_key(ev)
       end
-    end
-
-    # The pad's esc, taken before the wizard's: INS → READ and a cancelled `d` stay in the pad,
-    # and esc in its plain READ only hands focus back to the offer rows. A user who types, then
-    # reaches for esc twice to get out of INSERT, must not have that second press skip the
-    # wizard. False when the pad does not hold the keys.
-    private def pad_escape(ev : Termisu::Event::Key) : Bool
-      return false unless @step.keys? && @keys_focus == :pad && fits?(*@backend.size)
-      @esc_armed = false
-      @keys_focus = :choice unless pad.handle_key(ev)
-      true
     end
 
     # esc skips the wizard — on a DELIBERATE second press.
@@ -370,7 +329,7 @@ module Gori::Tui
     private def handle_theme_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
       if key.enter? || key.tab?
-        @step = Step::Keys
+        @step = Step::Companion
       elsif key.back_tab?
         back_to_bind
       elsif key.up? || key.left?
@@ -388,7 +347,7 @@ module Gori::Tui
       if key.enter? || key.tab?
         @step = Step::Review
       elsif key.back_tab?
-        @step = Step::Keys
+        @step = Step::Appearance
       elsif key.up? || key.down?
         @companion_enabled = !@companion_enabled
       elsif (key.left? || key.right?) && @companion_enabled
@@ -400,52 +359,6 @@ module Gori::Tui
         # factory-default.
         cycle_companion_motion(key.left? ? -1 : 1)
       end
-    end
-
-    # Keys step. On the offer rows: ↑/↓ pick the keyset, ⇥ moves into the pad, ↵ next, ⇧⇥
-    # back. A letter typed there goes straight to the pad as well: trying a key is the point
-    # of the step, and "⇥ first" is one more thing to learn before the first try.
-    #
-    # In the pad every key is the pad's (its arrows move the caret, its ↵ enters INSERT) except
-    # ⇥ / ⇧⇥, which hand focus back; esc is routed in `handle_key`.
-    private def handle_keys_key(ev : Termisu::Event::Key) : Nil
-      return pad_key(ev) if @keys_focus == :pad
-      key = ev.key
-      if key.enter?
-        @step = Step::Companion
-      elsif key.tab?
-        @keys_focus = :pad
-      elsif key.back_tab?
-        @step = Step::Appearance
-      elsif key.up? || key.down?
-        stage_keyset(@keyset.vim? ? Verb::Keyset::Kind::Helix : Verb::Keyset::Kind::Vim)
-      elsif (c = typed_char(ev)) && !c.control? && !key.space?
-        @keys_focus = :pad
-        pad.handle_key(ev)
-      end
-    end
-
-    private def pad_key(ev : Termisu::Event::Key) : Nil
-      if ev.key.tab? || ev.key.back_tab?
-        leave_pad
-      else
-        pad.handle_key(ev)
-      end
-    end
-
-    # The keys go back to the offer rows: out of INSERT, and any armed `d` dropped with it.
-    private def leave_pad : Nil
-      pad.release
-      @keys_focus = :choice
-    end
-
-    private def stage_keyset(kind : Verb::Keyset::Kind) : Nil
-      @keyset = kind
-      pad.keyset = kind
-    end
-
-    private def pad : KeysetPad
-      @pad ||= KeysetPad.new(@keyset)
     end
 
     # CYCLES the three motions, in the order the settings view lists them, and rides
@@ -605,12 +518,10 @@ module Gori::Tui
       prev_host, prev_port = Settings.bind_host, Settings.bind_port
       prev_theme, prev_modifier = Settings.theme, Settings.command_modifier
       prev_companion, prev_motion = Settings.companion?, Settings.companion_motion
-      prev_keyset = Settings.editor_keyset
       Settings.bind_host = effective_ip
       Settings.bind_port = @port.strip.to_i? || Settings.bind_port
       Settings.theme = @theme_name
       Settings.command_modifier = Settings.normalize_command_modifier(@modifier)
-      Settings.editor_keyset = Verb::Keyset.name_of(@keyset)
       # Miss Ring — the ONE place the wizard writes her, so Esc can never persist a preview.
       # Motion is written only when she is ON: a user who declined her must not leave a
       # non-default motion behind, so "No mascot" writes exactly one answer — `enabled: false`
@@ -630,7 +541,6 @@ module Gori::Tui
       Settings.command_modifier = prev_modifier
       Settings.companion = prev_companion
       Settings.companion_motion = prev_motion
-      Settings.editor_keyset = prev_keyset
       # Held on REVIEW: the staged choices live on in this object's own fields, so ↵ retries
       # the write once the user has unblocked it (a full disk, a read-only --config path).
       # "esc DISCARD", not "esc leave": Esc runs `skip`, which saves the rolled-back values, so
@@ -681,7 +591,6 @@ module Gori::Tui
       case @step
       when Step::Appearance then click_theme(mx, my)
       when Step::Bind       then click_bind(box, mx, my)
-      when Step::Keys       then click_keys(box, mx, my)
       when Step::Companion  then click_companion(box, mx, my)
       when Step::Review     then click_review(box, mx, my)
       end
@@ -710,23 +619,6 @@ module Gori::Tui
       when COMPANION_OFFER_ROW + 1 then @companion_enabled = false
       when COMPANION_MOTION_ROW    then cycle_companion_motion(1) if @companion_enabled
       end
-    end
-
-    # A click on an offer row picks that keyset; a click on the pad hands it the keys.
-    private def click_keys(box : Rect, mx : Int32, my : Int32) : Nil
-      case row = card_row(box, mx, my)
-      when KEYS_OFFER_ROW     then click_keyset(Verb::Keyset::Kind::Helix)
-      when KEYS_OFFER_ROW + 1 then click_keyset(Verb::Keyset::Kind::Vim)
-      else
-        @keys_focus = :pad if row && KEYS_PAD_ROW <= row < KEYS_PAD_ROW + KEYS_PAD_H
-      end
-    end
-
-    # The offer rows take the keys with the click, so the band lands on the row clicked and ↑/↓
-    # move between keysets again rather than the pad's caret.
-    private def click_keyset(kind : Verb::Keyset::Kind) : Nil
-      leave_pad
-      stage_keyset(kind)
     end
 
     # A click on an offer row picks it, and a click on the row ALREADY picked confirms —
@@ -805,7 +697,6 @@ module Gori::Tui
       case @step
       when Step::Bind      then BIND_ROWS
       when Step::Companion then COMPANION_ROWS
-      when Step::Keys      then KEYS_ROWS
       when Step::Review    then REVIEW_ROWS
         # ≥7 so the preview panel (header + 3 status rows) is unclipped, capped so a long theme
         # list scrolls (the list viewport derives from the card height, `theme_vp`) instead of
@@ -854,7 +745,6 @@ module Gori::Tui
       case @step
       when Step::Bind       then render_bind(screen, box)
       when Step::Appearance then render_theme(screen, box)
-      when Step::Keys       then render_keys(screen, box)
       when Step::Companion  then render_companion(screen, box)
       when Step::Review     then render_review(screen, box)
       end
@@ -892,7 +782,6 @@ module Gori::Tui
       case @step
       when Step::Bind       then "NETWORK · proxy address"
       when Step::Appearance then "THEME · appearance"
-      when Step::Keys       then "KEYS · editor keyset"
       when Step::Companion  then "COMPANION · Miss Ring"
       else                       "REVIEW"
       end
@@ -944,18 +833,6 @@ module Gori::Tui
         end
       when Step::Appearance
         ["↑/↓ pick theme · ↵ next · ⇧⇥ back · esc skip", "↑/↓ theme · ↵ next · esc skip"]
-      when Step::Keys
-        # In the pad, esc is the pad's (INS → READ, then back to the offer rows), so the hint
-        # says what that press does there rather than "skip".
-        if @keys_focus == :choice
-          ["↑/↓ keyset · ⇥ or type to try it · ↵ next · ⇧⇥ back · esc skip", "↑/↓ keyset · ⇥ try · esc skip"]
-        elsif pad.insert?
-          ["typing in the pad · ⇥ done trying · esc → READ", "⇥ done · esc → READ"]
-        elsif pad.armed?
-          ["the same key again acts on the line · ⇥ done trying · esc cancels", "⇥ done · esc cancels"]
-        else
-          ["keys go to the pad · ⇥ done trying · esc back", "⇥ done · esc back"]
-        end
       when Step::Companion
         # ←/→ is only offered while she is on — it does nothing under "No mascot", and the
         # motion row it drives is hidden there too.
@@ -1084,36 +961,6 @@ module Gori::Tui
       end
     end
 
-    # The two keysets, each with the keys that differ spelled from the real keymap, over a live
-    # pad that answers in the staged one. Fixed offsets (KEYS_*), like the other fixed steps.
-    private def render_keys(screen : Screen, box : Rect) : Nil
-      ix = box.x + 3
-      iw = {box.w - 6, 1}.max
-      heading = KEYS_HEADINGS.find { |h| Screen.draw_width(h) <= iw } || KEYS_HEADINGS.last
-      screen.text(ix, box.y + 2, heading, Theme.text, Theme.panel, width: iw)
-      p = pad
-      ry = box.y + KEYS_OFFER_ROW
-      on_choice = @keys_focus == :choice
-      # A narrow card keeps the key summary rather than the "(default)" note: the summary is
-      # what tells the two rows apart.
-      compact = iw < KEYS_LABEL_W + 40
-      label_w = compact ? 11 : KEYS_LABEL_W
-      {Verb::Keyset::Kind::Helix, Verb::Keyset::Kind::Vim}.each_with_index do |kind, i|
-        name = Verb::Keyset.name_of(kind)
-        label = compact ? "#{name}-ish" : (Hotkeys::KEYSET_LABELS[name]? || name)
-        picked = kind == @keyset
-        # The band follows the FOCUS: drawn while the offer rows own the keys, a plain ◉ while
-        # the pad does, so the accent sits on whichever part ↑/↓ is moving.
-        render_offer_row(screen, box, ry + i, label, picked && on_choice)
-        screen.cell(box.x + 3, ry + i, '◉', Theme.accent, Theme.panel) if picked && !on_choice
-        rx = box.x + 5 + label_w
-        bg = picked && on_choice ? Theme.accent_bg : Theme.panel
-        screen.text(rx, ry + i, p.reference(kind), Theme.muted, bg, width: {ix + iw - rx, 1}.max)
-      end
-      p.render(screen, Rect.new(ix, box.y + KEYS_PAD_ROW, iw, KEYS_PAD_H), !on_choice)
-      screen.text(ix, box.y + KEYS_STATUS_ROW, p.status, Theme.muted, Theme.panel, width: iw)
-    end
-
     # Miss Ring: an on/off ring, her motion, and a STATIC sprite of what "on" looks like.
     #
     # The sprite is drawn from Mascot directly — pure art, no Companion, no tick, no
@@ -1186,7 +1033,10 @@ module Gori::Tui
       vx = ix + recap_labels.max_of { |l| Screen.draw_width(l) } + 2 # +2 = min visible gap before the value column
       recap(screen, box, ix, vx, y, "Proxy default", "#{effective_ip}:#{@port.strip}"); y += 1
       recap(screen, box, ix, vx, y, "Theme", @theme_name); y += 1
-      recap(screen, box, ix, vx, y, "Editor keys", Hotkeys::KEYSET_LABELS[Verb::Keyset.name_of(@keyset)]? || Verb::Keyset.name_of(@keyset)); y += 1
+      # The palette entry's name alone, no chord: the Shortcuts row below can change which
+      # modifier opens the palette before finish, and a chord read here would go stale.
+      route = @keys_route ||= (Verbs.registry["settings.keys"]?.try(&.title) || "Settings: Keys")
+      recap(screen, box, ix, vx, y, "Editor keys", SetupWizard.keys_recap(Hotkeys.editor_keyset, route)); y += 1
       recap(screen, box, ix, vx, y, "Miss Ring", @companion_enabled ? "on · #{@companion_motion}" : "off"); y += 1
       # The only EDITABLE recap row (←/→, or a click). Spell out both the chords it moves
       # and the macOS caveat — a user who picks ⌥ without Option-as-Meta would see nothing
@@ -1206,6 +1056,12 @@ module Gori::Tui
       # (Editor keys) took the gap under the headline for the same reason (REVIEW_RECAP_ROW).
       render_offer_row(screen, box, y, "Take the guided tour", @offer == :tour); y += 1
       render_offer_row(screen, box, y, "Skip — finish setup", @offer == :skip)
+    end
+
+    # The Editor keys recap value: the SAVED keyset (the wizard never sets it) and where to
+    # change it, short enough for the 80-column card's value column (the floor spec checks).
+    def self.keys_recap(keyset : String, route : String) : String
+      "#{Hotkeys::KEYSET_LABELS[keyset]? || keyset} · change in #{route}"
     end
 
     # The Shortcuts recap value: what's staged, plus how to change it / what it costs.

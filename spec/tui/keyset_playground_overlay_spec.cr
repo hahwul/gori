@@ -5,7 +5,7 @@ require "../support/tui_contract"
 include Gori::Tui
 
 # src/gori/tui/keyset_playground_overlay.cr — Preferences → Keys → Keyset playground. The pad
-# is the wizard's (keyset_pad_spec.cr covers its grammar); these examples pin the card around
+# is `KeysetPad` (keyset_pad_spec.cr covers its grammar); these examples pin the card around
 # it: which part holds the keys, what ↵ and esc mean, the key list, and the paste register.
 private REGISTRY = Gori::Verbs.registry
 
