@@ -12,10 +12,24 @@ describe Gori::Tui::TrafficEmptyState do
     backend.contains?("waiting for traffic").should be_true
     backend.contains?("FLOW LOG").should be_true
     backend.contains?("localhost:8070").should be_true
-    backend.contains?("Open browser").should be_true
-    backend.contains?("HTTP/3 / QUIC bypasses").should be_true
-    backend.contains?("──►").should be_true
     backend.contains?("SITE MAP").should be_false
+  end
+
+  # The beginner's three steps: proxy (address once), HTTPS trust, or the browser that does
+  # both. Every palette row reads as a route (`^P` → title), and nothing clips with `…`.
+  it "walks the history card through proxy, CA trust and Open browser without clipping" do
+    {120, 80}.each do |w|
+      backend = MemoryBackend.new(w, 14)
+      TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, w, 14),
+        variant: :history, listen: {"127.0.0.1", 18997}, capturing: true)
+      text = (1...14).join("\n") { |y| backend.row(y) } # row 0 is the "waiting…" headline
+      text.scan("localhost:18997").size.should eq(1)
+      backend.contains?("set your client's HTTP+HTTPS proxy").should be_true
+      backend.contains?("trust gori's CA — browse http://gori.proxy/").should be_true
+      backend.contains?("^P → Copy CA certificate path").should be_true
+      backend.contains?("^P   → Open browser: proxied, CA trusted").should be_true
+      text.includes?('…').should be_false
+    end
   end
 
   it "renders the sitemap site-map card with tree hints" do
@@ -460,6 +474,6 @@ describe Gori::Tui::TrafficEmptyState do
       variant: :sitemap, listen: {"127.0.0.1", 8070}, capturing: false)
     backend.contains?("no traffic captured").should be_true
     backend.contains?("◆ proxy").should be_true
-    backend.contains?("^P Open br").should be_true # truncated on narrow panes
+    backend.contains?("^P → Op").should be_true # truncated on narrow panes
   end
 end

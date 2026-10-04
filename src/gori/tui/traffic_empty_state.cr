@@ -4,6 +4,7 @@ require "./frame"
 require "./empty_art"
 require "../bind_address"
 require "../settings"
+require "../proxy/conn/self_page"
 
 module Gori::Tui
   # Rich onboarding panels for tabs with nothing to show yet. Each variant has its
@@ -182,11 +183,11 @@ module Gori::Tui
       lines = case variant
               when :history
                 [headline, "──► proxy #{addr} ──► flows",
-                 capturing ? "HTTP/3 / QUIC bypasses proxy — use ^P" : capture_off_hint,
-                 "^P → Open browser · or set HTTP+HTTPS proxy"]
+                 capturing ? "HTTPS: trust the CA at #{Proxy::SelfPage::MAGIC_URL}" : capture_off_hint,
+                 "#{palette_route("browser.open", "Open browser")} · proxied, CA trusted"]
               when :sitemap
                 [headline, "◆ proxy #{addr} → host tree", (capture_off_hint unless capturing),
-                 "^P → Open browser · or set HTTP+HTTPS proxy"].compact
+                 "#{palette_route("browser.open", "Open browser")} · or set HTTP+HTTPS proxy"].compact
               when :intercept
                 [headline,
                  catch_on ? "⏸ queue empty · matching traffic pauses here" : "#{body_focused ? "press" : "focus body, then press"} #{key("i", "intercept.toggle")} to enable catch",
@@ -248,9 +249,9 @@ module Gori::Tui
                                scan_on : Bool, has_provider : Bool, body_focused : Bool) : Nil
       hint = case variant
              when :history
-               "──► #{addr} ──► ^P Open browser#{capturing ? "" : " · tabs: #{key("c", "capture.toggle")}"}"
+               "──► #{addr} · #{palette_route("browser.open", "Open browser")}#{capturing ? "" : " · tabs: #{key("c", "capture.toggle")}"}"
              when :sitemap
-               "◆ proxy #{addr} · ^P Open browser#{capturing ? "" : " · tabs: #{key("c", "capture.toggle")}"}"
+               "◆ proxy #{addr} · #{palette_route("browser.open", "Open browser")}#{capturing ? "" : " · tabs: #{key("c", "capture.toggle")}"}"
              when :intercept
                minimal_intercept_hint(catch_on, body_focused)
              when :repeater
@@ -351,34 +352,34 @@ module Gori::Tui
       {inner, inner.x + 1, {inner.w - 2, 1}.max}
     end
 
+    # Three steps, because the first thing a beginner misses is not the proxy but HTTPS: a
+    # client pointed at gori with its CA untrusted shows TLS errors and this list stays empty.
+    # The address appears once (step 1), and every row is sized into `min_w` so none clips.
     private def render_history_full(screen : Screen, rect : Rect, headline : String,
                                     addr : String, capturing : Bool) : Nil
-      # +3 (not +2): the intro/addr/diagram block spans through relative row 3, the
-      # divider + palette hint reach row 6, and the final "or set your client's proxy"
-      # line lands on row 7 — which the old budget pushed onto the card's bottom border.
       inner_h = full_inner_h(:history, capturing: capturing)
       desc = "Requests stream in here as they pass through the proxy."
-      inner, ix, iw = begin_card(screen, rect, :history, headline, "FLOW LOG", inner_h, Screen.display_width(desc))
+      steps = ["1 once: set your client's HTTP+HTTPS proxy to",
+               "2 HTTPS: trust gori's CA — browse #{Proxy::SelfPage::MAGIC_URL}",
+               Hotkeys.retag("  through the proxy, or #{palette_route("ca.export", "Copy CA certificate path")}")]
+      browser = "→ #{verb_title("browser.open", "Open browser")}: proxied, CA trusted"
+      min_w = (steps + [desc, "    #{addr}", "▸  ^P   #{browser}"]).max_of { |l| Screen.display_width(l) }
+      inner, ix, iw = begin_card(screen, rect, :history, headline, "FLOW LOG", inner_h, min_w)
       y = inner.y
 
       draw_wrapped_message(screen, ix, y, iw, desc)
       y += 2
-      screen.text(ix + 2, y, addr, Theme.accent, Theme.bg, Attribute::Bold, width: iw)
-      y += 1
-      screen.text(ix, y, fit_history_flow(addr, iw), Theme.muted, Theme.bg, width: iw)
-      if capturing
-        y += 1
-        screen.text(ix, y, "HTTP/3 / QUIC bypasses TCP proxy — use ^P or --disable-quic", Theme.muted, Theme.bg, width: iw)
-        y += 1
-      else
-        y += 2
+      screen.text(ix, y, steps[0], Theme.muted, Theme.bg, width: iw)
+      screen.text(ix + 4, y + 1, addr, Theme.accent, Theme.bg, Attribute::Bold, width: {iw - 4, 0}.max)
+      screen.text(ix, y + 2, steps[1], Theme.muted, Theme.bg, width: iw)
+      screen.text(ix, y + 3, steps[2], Theme.muted, Theme.bg, width: iw)
+      y += 4
+      unless capturing
         screen.text(ix, y, capture_off_hint, Theme.yellow, Theme.bg, width: iw)
         y += 1
       end
       Frame.inner_divider(screen, inner, y, bg: Theme.bg, border: Theme.border)
-      y += 1
-      y = draw_palette_hint(screen, ix, y, iw, bullet: "▸ ")
-      screen.text(ix, y, "or set your client's HTTP+HTTPS proxy", Theme.muted, Theme.bg, width: iw)
+      draw_palette_hint(screen, ix, y + 1, iw, bullet: "▸ ", label: browser)
     end
 
     private def render_sitemap_full(screen : Screen, rect : Rect, headline : String,
@@ -679,11 +680,11 @@ module Gori::Tui
         # resolve. The prefix is a once-a-session setting, so its row is palette-only (#1282):
         # the space menu offers only Add here, and the last bullet names the palette search that
         # finds it, the way `Hotkeys.route` spells any palette-only verb (#1433).
-        title = registry.try(&.[]?("env.edit-prefix")).try(&.title) || "Change prefix"
+        title = verb_title("env.edit-prefix", "Change prefix")
         CardSpec.new("VARIABLES", "Store values to reuse across requests.",
           "#{Env.spell("KEY", Env::Namespace::Env)} in a request expands when you send",
           [ChordLine.new(" a ", "add a variable", "env.add-var"),
-           ChordLine.new(" ^P ", title, "app.palette")])
+           ChordLine.new(" ^P ", "→ #{title}", "app.palette")])
       when :project_activity
         # Unlike its four neighbours this card asks for nothing: the pane REPORTS. So the
         # bullets name what makes rows appear rather than a key that would create one, and the
@@ -757,8 +758,22 @@ module Gori::Tui
       end
     end
 
-    private def draw_palette_hint(screen : Screen, ix : Int32, y : Int32, iw : Int32, *, bullet : String) : Int32
-      draw_chord_hint(screen, ix, y, iw, " ^P ", "Open browser", bullet: bullet)
+    # A palette row reads as the route it is — ` ^P ` → Open browser — never as a ` ^P ` chip
+    # that looks like the verb's own chord.
+    private def draw_palette_hint(screen : Screen, ix : Int32, y : Int32, iw : Int32, *, bullet : String,
+                                  label : String = "→ #{verb_title("browser.open", "Open browser")}") : Int32
+      draw_chord_hint(screen, ix, y, iw, " ^P ", label, bullet: bullet, verb: "app.palette")
+    end
+
+    # How to reach `verb` (`Tutorial.reach`: its own chord, a menu path, or `^P → <title>`);
+    # without a registry, the palette route spelled from `literal`.
+    private def palette_route(verb : String, literal : String) : String
+      return "^P → #{literal}" unless reg = registry
+      Tutorial.reach(reg, verb)
+    end
+
+    private def verb_title(verb : String, literal : String) : String
+      registry.try(&.[]?(verb)).try(&.title) || literal
     end
 
     # `literal` as written unless a registry is set and `verb` resolves — then the verb's
@@ -806,13 +821,6 @@ module Gori::Tui
       x = Frame.chip(screen, bx, y, Hotkeys.retag(chip_text(chord, verb)), true) + 1
       screen.text(x, y, " #{label}", Theme.text, bg, width: {ix + iw - x, 0}.max)
       y + 1
-    end
-
-    private def fit_history_flow(listen : String, max_w : Int32) : String
-      full = "client ──► #{listen} ──► flows"
-      return full if full.size <= max_w
-      short = "──► proxy ──► flows"
-      short.size <= max_w ? short : "──► #{listen} ──►"
     end
 
     # The RESULTS/SAMPLES-pane variants (fuzz/mine/token run) draw inside a pane nested a

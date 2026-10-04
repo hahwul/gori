@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- TUI: an empty History walks through the three steps to capture, including trusting gori's CA for HTTPS, the Project tab's first-run line fits an 80-column terminal, and empty-state palette rows read as `^P → Open browser` instead of a chord (#1514)
 - TUI: a status line too narrow for its key hints drops whole hints and the CPU/MEM readout first, so `^P cmds`, `space cmds` and quit stay visible, and the tab bar now advertises `?` for Help (#1513)
 - TUI: an HTTPS client that does not trust gori's CA now raises a notification naming the host and where to get the CA, instead of leaving History silently empty (#1512)
 - TUI: the tutorial completes Practice on Enter (also in INS), keeps navigation and Help cues readable at 40 columns, and contrasts Space's main actions with Ctrl-P's full current-area and app-wide search (#1509, #1511)

@@ -233,6 +233,20 @@ describe "ProjectView created time out of range" do
   end
 end
 
+describe "ProjectView first-run signpost" do
+  # The line used to name three steps and clipped at 80 columns. It now carries the one step
+  # that needs no setup and points at History's card for the rest, whole at 80.
+  it "fits whole on an 80-column terminal" do
+    with_store do |store|
+      view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
+      view.reload(Gori::Project.new("t", File.tempname("gori-first-run")), store)
+      b = MemoryBackend.new(76, 20) # the tab body an 80x24 terminal gives the view
+      view.render(Screen.new(b), Rect.new(0, 0, 76, 20), focused: false)
+      b.contains?("▸ first run — ^P → Open browser, or see History").should be_true
+    end
+  end
+end
+
 describe "ProjectView SCOPE list" do
   it "shows the onboarding card (art + TARGETS card) when empty" do
     with_store do |store|
