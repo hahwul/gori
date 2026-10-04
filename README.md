@@ -78,6 +78,8 @@ curl -fsSL https://gori.hahwul.com/install.sh | bash
 
 Then update later with `gori update` (self-update for binary installs; package-manager guidance for Homebrew / Snap / AUR).
 
+On Windows, download `gori-windows-x86_64.exe` from [Releases](https://github.com/hahwul/gori/releases/latest), rename it to `gori.exe` and put it on your `PATH`.
+
 ### Homebrew
 
 ```bash

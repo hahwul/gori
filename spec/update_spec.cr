@@ -243,9 +243,15 @@ describe Gori::Update do
       Gori::Update.asset_name("v1.2.3", "macos", "aarch64").should eq("gori-v1.2.3-osx-arm64.tar.gz")
     end
 
+    it "builds Windows .exe asset names" do
+      Gori::Update.asset_name("0.17.0", "windows", "x86_64").should eq("gori-v0.17.0-windows-x86_64.exe")
+      Gori::Update.asset_name("0.17.0", "win32", "amd64").should eq("gori-v0.17.0-windows-x86_64.exe")
+      Gori::Update.alias_asset_name("windows", "x86_64").should eq("gori-windows-x86_64.exe")
+    end
+
     it "rejects unsupported OS" do
       expect_raises(Gori::Error, /unsupported OS/) do
-        Gori::Update.asset_name("0.1.0", "windows", "x86_64")
+        Gori::Update.asset_name("0.1.0", "plan9", "x86_64")
       end
     end
   end
@@ -1048,6 +1054,28 @@ describe Gori::Update do
       end
     end
   end
+
+  {% if flag?(:win32) %}
+    describe ".atomic_install on Windows" do
+      it "moves the old binary aside to swap in the new one, then drops it" do
+        dir = File.tempname("gori-winexe-")
+        Dir.mkdir_p(dir)
+        begin
+          target = File.join(dir, "gori.exe")
+          source = File.join(dir, "new.exe")
+          File.write(target, "old-build")
+          File.write(source, "new-build")
+          Gori::Update.atomic_install(source, target)
+          File.read(target).should eq("new-build")
+          # Nothing runs the old one here, so it is gone at once; a running one would stay
+          # under the temp prefix for the next sweep.
+          Dir.children(dir).select(&.starts_with?(".gori-update.")).should be_empty
+        ensure
+          FileUtils.rm_rf(dir)
+        end
+      end
+    end
+  {% end %}
 
   describe ".install_from_download (macOS-style tarball + lib/)" do
     it "extracts gori and refreshes sibling lib/ next to the target in a dedicated dir" do

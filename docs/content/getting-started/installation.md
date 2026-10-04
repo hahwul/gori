@@ -1,6 +1,6 @@
 +++
 title = "Install gori"
-description = "Install gori via curl, Homebrew, the AUR, Snap, Nix, Docker, a pre-built binary, or from source."
+description = "Install gori via curl, Homebrew, the AUR, Snap, Nix, Docker, a pre-built binary (Linux, macOS, Windows), or from source."
 weight = 10
 +++
 
@@ -39,6 +39,9 @@ curl -fsSL -o gori https://github.com/hahwul/gori/releases/latest/download/gori-
 
 # macOS arm64 / x86_64: a tarball holding gori plus its lib/
 curl -fsSL -o gori.tar.gz https://github.com/hahwul/gori/releases/latest/download/gori-osx-arm64.tar.gz
+
+# Windows x86_64: a self-contained .exe
+curl -fsSL -o gori.exe https://github.com/hahwul/gori/releases/latest/download/gori-windows-x86_64.exe
 ```
 
 The versioned names (`gori-v0.7.1-linux-x86_64`) stay published alongside them; use those when you want to pin a build.
@@ -175,7 +178,7 @@ container builder start --cpus 8 --memory 8g
 
 ## Pre-built Binary
 
-Standalone binaries for macOS and Linux are attached to every [GitHub Release](https://github.com/hahwul/gori/releases/latest).
+Standalone binaries for macOS and Linux are attached to every [GitHub Release](https://github.com/hahwul/gori/releases/latest), and for Windows (x86_64) from the release after v0.7.1.
 
 | Platform | Asset |
 |----------|-------|
@@ -183,6 +186,7 @@ Standalone binaries for macOS and Linux are attached to every [GitHub Release](h
 | Linux arm64 | `gori-v*-linux-arm64` |
 | macOS Apple Silicon | `gori-v*-osx-arm64.tar.gz` |
 | macOS Intel | `gori-v*-osx-x86_64.tar.gz` |
+| Windows x86_64 | `gori-v*-windows-x86_64.exe` |
 
 ### Linux
 
@@ -205,6 +209,18 @@ sudo ln -sf /usr/local/opt/gori/gori /usr/local/bin/gori
 ```
 
 > The binaries are ad-hoc signed. If Gatekeeper blocks the download, clear the quarantine flag: `xattr -dr com.apple.quarantine /usr/local/opt/gori`. Installing via [Homebrew](#homebrew) avoids this.
+
+### Windows
+
+The Windows binary is statically linked: nothing else to install, and no DLL beside it. Rename it to `gori.exe` and put it in a folder on your `PATH`:
+
+```powershell
+New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\Programs\gori" | Out-Null
+Move-Item gori-v*-windows-x86_64.exe "$env:LOCALAPPDATA\Programs\gori\gori.exe"
+# then add that folder to your user PATH (Settings → Environment Variables)
+```
+
+Run the TUI in Windows Terminal (or any console that speaks VT sequences, which every Windows 10 1809+ console does). `gori update` replaces the `.exe` in place. `GORI_HOME` defaults to `%USERPROFILE%\.gori`.
 
 ## Build from Source
 
@@ -246,6 +262,17 @@ shards build --release -Dwithout_native_codecs
 ```
 
 > If linking fails with undefined `BrotliDecoder*` symbols, `libbrotlidec` is missing or `pkg-config` cannot find it. Install `brotli` (see above) or use `-Dwithout_native_codecs`.
+
+### Building on Windows
+
+Crystal's Windows installer ships every library gori links except SQLite (with FTS5), Brotli and Zstd. Take those from [vcpkg](https://vcpkg.io/) as static libraries, and build with `--static` so the static C runtime matches them:
+
+```bash
+vcpkg install --triplet x64-windows-static "sqlite3[fts5]" brotli zstd
+export CRYSTAL_LIBRARY_PATH="$(crystal env CRYSTAL_LIBRARY_PATH);C:\vcpkg\installed\x64-windows-static\lib"
+shards install
+crystal build src/main.cr -o bin/gori.exe --release --static
+```
 
 ## Verify the Installation
 
