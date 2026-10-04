@@ -73,7 +73,7 @@ describe Gori::ShellEnv do
       squash(text).should contain(squash(File.read(ca).split("-----BEGIN CERTIFICATE-----")[1].split("-----END")[0]))
       File.dirname(r.bundle_path).should eq(File.join(root, "shell"))
       File.basename(r.bundle_path).should match(/\Aca-bundle-[0-9a-f]{16}\.pem\z/)
-      File.info(r.bundle_path).permissions.value.should eq(0o644)
+      File.info(r.bundle_path).permissions.value.should eq(0o644) unless {{ flag?(:win32) }}
     end
   end
 
@@ -208,6 +208,7 @@ describe Gori::ShellEnv do
   end
 
   it "assembles the base from a hashed-certificate directory when the system has no bundle file" do
+    posix_only!("File.symlink needs Developer Mode")
     with_shell_fixture do |root, ca, system|
       certs = File.join(root, "certs")
       Dir.mkdir_p(certs)
@@ -316,9 +317,11 @@ describe Gori::ShellEnv do
       file = File.tempname("gori-shell-quote")
       begin
         File.write(file, "X=#{Gori::ShellEnv.posix_quote(nasty)}\n")
-        out = Process.run("/bin/sh", ["-c", %(. "$0"; printf %s "$X"), file],
-          output: Process::Redirect::Pipe) { |p| p.output.gets_to_end }
-        out.should eq(nasty)
+        unless {{ flag?(:win32) }}
+          out = Process.run("/bin/sh", ["-c", %(. "$0"; printf %s "$X"), file],
+            output: Process::Redirect::Pipe) { |p| p.output.gets_to_end }
+          out.should eq(nasty)
+        end
         if fish = Process.find_executable("fish")
           File.write(file, "set -l X #{Gori::ShellEnv.fish_quote(nasty)}\nprintf %s $X\n")
           out = Process.run(fish, [file], output: Process::Redirect::Pipe) { |p| p.output.gets_to_end }

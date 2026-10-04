@@ -41,6 +41,7 @@ end
 # A hook that appends one line to a tally per run and passes stdin through, tagging its output
 # so the backend can see the transform reached the wire.
 private def with_counting_hook(&)
+  posix_only!("a #!/bin/sh hook script")
   dir = File.tempname("gori-miner-hook")
   Dir.mkdir_p(dir)
   path = File.join(dir, "h.sh")
@@ -149,6 +150,7 @@ describe "Miner per-request hook (#846)" do
   # bytes and the signature no longer covers what ships. The hook here REWRITES the overlaid
   # header, so seeing the rewrite proves the overlay ran first.
   it "applies the active slot overlay before the hook, so the hook signs the slot's headers" do
+    posix_only!("a #!/bin/sh hook script")
     dir = File.tempname("gori-slot-hook")
     Dir.mkdir_p(dir)
     hook = File.join(dir, "sign.sh")

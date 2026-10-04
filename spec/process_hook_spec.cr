@@ -2,6 +2,7 @@ require "./spec_helper"
 
 # A tiny executable script on disk, for the paths that need a real child.
 private def with_hook(body : String, &)
+  posix_only!("a #!/bin/sh hook script")
   dir = File.tempname("gori-hook")
   Dir.mkdir_p(dir)
   path = File.join(dir, "hook.sh")
@@ -56,6 +57,7 @@ describe Gori::ProcessHook do
 
   describe ".run" do
     it "pipes stdin through the command and returns its stdout verbatim" do
+      posix_only!("POSIX userland binaries (cat, sleep, sh)")
       res = Gori::ProcessHook.run(["/bin/cat"], "hello".to_slice)
       res.ok?.should be_true
       String.new(res.stdout).should eq "hello"
@@ -63,6 +65,7 @@ describe Gori::ProcessHook do
     end
 
     it "passes binary through untouched (P7 - no re-encoding around the hook)" do
+      posix_only!("POSIX userland binaries (cat, sleep, sh)")
       raw = Bytes[0x00, 0xff, 0xfe, 0x41, 0x0a, 0x80]
       res = Gori::ProcessHook.run(["/bin/cat"], raw)
       res.ok?.should be_true
@@ -98,6 +101,7 @@ describe Gori::ProcessHook do
     end
 
     it "TIMES OUT and returns within the budget rather than waiting on the child" do
+      posix_only!("POSIX userland binaries (cat, sleep, sh)")
       started = Time.instant
       res = Gori::ProcessHook.run(["/bin/sleep", "30"], Bytes.empty, 400.milliseconds)
       elapsed = Time.instant - started
@@ -118,6 +122,7 @@ describe Gori::ProcessHook do
     end
 
     it "treats OVERSIZED OUTPUT as a failure rather than handing back a truncated body" do
+      posix_only!("POSIX userland binaries (cat, sleep, sh)")
       # `yes` is unbounded; the cap has to stop it, and half a body is corruption, not output.
       res = Gori::ProcessHook.run(["/bin/sh", "-c", "yes gorigorigorigorigorigori"],
         Bytes.empty, 30.seconds)

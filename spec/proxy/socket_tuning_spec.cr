@@ -6,7 +6,7 @@ alias ST = Gori::Proxy::SocketTuning
 describe Gori::Proxy::SocketTuning do
   describe ".underlying_socket" do
     it "returns a raw Socket unchanged" do
-      a, b = UNIXSocket.pair
+      a, b = stream_pair
       begin
         ST.underlying_socket(a).should be(a)
       ensure
@@ -15,7 +15,7 @@ describe Gori::Proxy::SocketTuning do
     end
 
     it "unwraps a PrefixIO to its inner socket" do
-      a, b = UNIXSocket.pair
+      a, b = stream_pair
       begin
         pio = Gori::Proxy::PrefixIO.new("PRI".to_slice, a)
         ST.underlying_socket(pio).should be(a)
@@ -32,7 +32,7 @@ describe Gori::Proxy::SocketTuning do
 
   describe ".arm / .relax" do
     it "sets then clears the read+write timeout on the socket" do
-      a, b = UNIXSocket.pair
+      a, b = stream_pair
       begin
         ST.arm(a, 7.seconds)
         a.read_timeout.should eq(7.seconds)
@@ -46,7 +46,7 @@ describe Gori::Proxy::SocketTuning do
     end
 
     it "arms through a PrefixIO wrapper (reaches the underlying socket)" do
-      a, b = UNIXSocket.pair
+      a, b = stream_pair
       begin
         ST.arm(Gori::Proxy::PrefixIO.new(Bytes.empty, a), 3.seconds)
         a.read_timeout.should eq(3.seconds)
@@ -63,6 +63,7 @@ describe Gori::Proxy::SocketTuning do
 
   describe ".enable_keepalive" do
     it "never raises, even where the tunables are unsupported" do
+      posix_only!("UNIXSocket.pair")
       a, b = UNIXSocket.pair
       begin
         ST.enable_keepalive(a) # a UNIX socket may reject SO_KEEPALIVE tunables — must be swallowed
@@ -75,7 +76,7 @@ end
 
 describe "Http1.read_head with a head-completion deadline (drip-feed slowloris bound)" do
   it "raises after the deadline when the head never completes" do
-    a, b = UNIXSocket.pair
+    a, b = stream_pair
     begin
       # A partial head (no terminating CRLFCRLF): the first bytes arrive, then the reader blocks.
       a.write("GET / HTTP/1.1\r\nHost: x\r\n".to_slice)
@@ -92,7 +93,7 @@ describe "Http1.read_head with a head-completion deadline (drip-feed slowloris b
   # count. `ClientConn` records a flow for one of these shapes and stays silent for the other.
   describe "Http1::HeadTimeout#received" do
     it "is 0 when the peer connected and sent nothing at all (server-speaks-first)" do
-      a, b = UNIXSocket.pair
+      a, b = stream_pair
       begin
         # The PRODUCTION shape: the deadline is the full HEAD_DEADLINE and never arms, because
         # `head_started` needs a first byte. What fires is the caller's own baseline read_timeout
@@ -110,7 +111,7 @@ describe "Http1.read_head with a head-completion deadline (drip-feed slowloris b
     end
 
     it "counts the bytes that DID arrive when a partial head stalls (slowloris, not silence)" do
-      a, b = UNIXSocket.pair
+      a, b = stream_pair
       begin
         a.write("GET ".to_slice)
         a.flush
@@ -125,7 +126,7 @@ describe "Http1.read_head with a head-completion deadline (drip-feed slowloris b
   end
 
   it "returns a complete head and RESTORES the baseline timeout for the body read" do
-    a, b = UNIXSocket.pair
+    a, b = stream_pair
     begin
       b.read_timeout = 5.seconds # caller's baseline (armed by `run`)
       a.write("GET / HTTP/1.1\r\n\r\n".to_slice)

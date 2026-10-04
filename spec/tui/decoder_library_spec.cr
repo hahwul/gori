@@ -251,6 +251,7 @@ describe Gori::Tui::DecoderController do
     # `exec:` conversion the project open had held then ran its command the moment the tab
     # was pressed, and a selection left in OUTPUT was thrown away by a round trip elsewhere.
     it "neither runs a held exec: step nor disturbs the OUTPUT caret" do
+      posix_only!("exec:/bin/cat")
       with_decoder_host do |host|
         seed = DecoderController.new(host)
         seed.input_area.set_text("hi")
@@ -335,6 +336,7 @@ describe Gori::Tui::DecoderController do
     # The re-derive withheld hooks for EVERY session, the one on screen included — so the
     # ^S that saved a chain replaced the decode the operator was reading with "chain held".
     it "keeps running the ACTIVE conversion's exec: step" do
+      posix_only!("exec:/bin/cat")
       with_decoder_host do |host|
         Gori::Settings.decoder_chains = [] of {String, String}
         dc = DecoderController.new(host)
@@ -373,6 +375,7 @@ describe Gori::Tui::DecoderController do
     end
 
     it "does not run the active conversation's exec: step for a gesture made elsewhere" do
+      posix_only!("exec:/bin/cat")
       with_decoder_host do |host|
         Gori::Settings.decoder_chains = [] of {String, String}
         dc = DecoderController.new(host)
@@ -390,6 +393,7 @@ describe Gori::Tui::DecoderController do
     end
 
     it "leaves a conversation no library edit can affect exactly as it is" do
+      posix_only!("exec:/bin/cat")
       with_decoder_host do |host|
         Gori::Settings.decoder_chains = [] of {String, String}
         dc = DecoderController.new(host)

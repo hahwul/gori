@@ -342,8 +342,8 @@ describe "Settings::COMMAND_SECTIONS" do
     # that section in COMMAND_SECTIONS so both ends of a profile report it.
     root = File.expand_path(File.join(__DIR__, "..", ".."))
     actual = Hash(String, Int32).new(0)
-    Dir.glob(File.join(root, "src", "**", "*.cr")).sort.each do |path|
-      rel = path.sub("#{root}/", "")
+    glob_files(root, "src", "**", "*.cr").sort.each do |path|
+      rel = Path[path].relative_to(root).to_posix.to_s
       File.read_lines(path).each do |line|
         next if line.lstrip.starts_with?('#')
         actual[rel] += 1 if line.includes?("Process.new(") || line.includes?("Process.run(") ||

@@ -68,11 +68,12 @@ describe "gori run shell — flags" do
     end
   end
 
-  it "falls back to /bin/sh when $SHELL is unset or not runnable" do
-    Gori::CLI::Run.login_shell({"SHELL" => "/bin/sh"}).should eq("/bin/sh")
-    Gori::CLI::Run.login_shell({} of String => String).should eq("/bin/sh")
-    Gori::CLI::Run.login_shell({"SHELL" => "/no/such/shell"}).should eq("/bin/sh")
-    Gori::CLI::Run.login_shell({"SHELL" => "/tmp"}).should eq("/bin/sh")
+  it "falls back to the platform shell when $SHELL is unset or not runnable" do
+    fallback = {{ flag?(:win32) ? "cmd.exe" : "/bin/sh" }}
+    Gori::CLI::Run.login_shell({"SHELL" => "/bin/sh"}).should eq(fallback)
+    Gori::CLI::Run.login_shell({} of String => String).should eq(fallback)
+    Gori::CLI::Run.login_shell({"SHELL" => "/no/such/shell"}).should eq(fallback)
+    Gori::CLI::Run.login_shell({"SHELL" => Dir.tempdir}).should eq(fallback)
   end
 end
 
@@ -159,6 +160,7 @@ describe "gori run shell — which gori" do
   end
 
   it "sanitizes the --print header so a hostile project name cannot break out of comments" do
+    posix_only!("evaluates the rendered POSIX script with /bin/sh")
     with_capture_project do |_project, ca, root|
       pwned = File.join(root, "PWNED")
       hostile_target = Gori::CLI::Run::ShellTarget.new("127.0.0.1:8070", ca,

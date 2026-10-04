@@ -6,6 +6,7 @@ require "../spec_helper"
 # the leaking and the non-leaking version, so an assertion on the error alone would pass
 # either way.
 private def open_fd_count : Int32
+  posix_only!("/dev/fd")
   Dir.children("/dev/fd").size
 end
 
@@ -159,6 +160,7 @@ end
 
 describe "Gori::Store.open against a path that is not a regular file" do
   it "refuses a FIFO by name instead of blocking on its open" do
+    posix_only!("mkfifo")
     dir = File.tempname("gori-open-fifo")
     Dir.mkdir_p(dir)
     path = File.join(dir, "gori.db")

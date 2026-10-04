@@ -323,7 +323,7 @@ describe Gori::Outbound do
       # verbatim, and load-bearing here: the Miner and Sequencer comments legitimately name
       # EXCLUDE_SWEEP_ERROR in prose while their code no longer does.
       offenders = [] of String
-      Dir.glob(File.join(root, "src", "**", "*.cr")).sort.each do |path|
+      glob_files(root, "src", "**", "*.cr").sort.each do |path|
         rel = Path[path].relative_to(root).to_s
         next if rel == File.join("src", "gori", "outbound.cr")
         File.read_lines(path).each_with_index do |line, i|

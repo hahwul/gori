@@ -24,7 +24,7 @@ describe "Overlay key hints" do
     # it belongs to the degraded line, which draws from `area` and is exempt below.
     keyish = /esc cancel|esc close|esc saves|↵ save|↑\/↓ field|←\/→/
     offenders = [] of String
-    Dir.glob(File.join(dir, "*.cr")).sort.each do |path|
+    glob_files(dir, "*.cr").sort.each do |path|
       src = File.read(path)
       next unless src.includes?("< Overlay")
       src.lines.each_with_index do |line, i|

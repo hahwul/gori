@@ -17,7 +17,7 @@ describe "Frame.mode_badge callers" do
   it "pass the pane's real mode, never a focus-gated one" do
     root = File.join(__DIR__, "..", "..", "src", "gori", "tui")
     offenders = [] of String
-    Dir.glob(File.join(root, "**", "*.cr")).sort.each do |path|
+    glob_files(root, "**", "*.cr").sort.each do |path|
       next if File.basename(path) == "frame.cr"
       src = File.read(path)
       src.lines.each_with_index do |line, i|
@@ -48,7 +48,7 @@ describe "Frame.mode_badge callers" do
     # not decide whether the chip exists.
     root = File.join(__DIR__, "..", "..", "src", "gori", "tui")
     offenders = [] of String
-    Dir.glob(File.join(root, "**", "*.cr")).sort.each do |path|
+    glob_files(root, "**", "*.cr").sort.each do |path|
       next if File.basename(path) == "frame.cr"
       lines = File.read(path).lines
       lines.each_with_index do |line, i|

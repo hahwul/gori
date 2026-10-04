@@ -26,19 +26,17 @@ private def with_globals(&)
 end
 
 # `Settings.save` refusing every write, reached without lock contention and without touching
-# Settings' in-memory state — the `File.chmod` lever spec/colormarker_spec.cr uses.
+# Settings' in-memory state — the lever spec/colormarker_spec.cr uses.
 private def with_unwritable_settings(&)
   jail = File.tempname("gori-saved-views-settings")
-  Dir.mkdir_p(jail)
-  dir = File.join(jail, "home") # never created: the parent below refuses it
+  File.write(jail, "")
+  dir = File.join(jail, "home") # never created: its parent is a file
   prev_home = ENV["GORI_HOME"]?
   begin
     ENV["GORI_HOME"] = dir
-    File.chmod(jail, 0o500)
     Gori::Settings.save.should be_false # the lever works
     yield
   ensure
-    File.chmod(jail, 0o700)
     prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
     FileUtils.rm_rf(jail)
   end

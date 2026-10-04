@@ -323,7 +323,7 @@ describe "gori run — a refresh step verifies upstream TLS as the command's -k 
   it "is called by every command that parses -k" do
     dir = File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run")
     missing = [] of String
-    Dir.glob(File.join(dir, "*.cr")).each do |file|
+    glob_files(dir, "*.cr").each do |file|
       File.read(file).split(/^\s*(?:private )?def self\./m).each do |body|
         next unless body.includes?("p.on(\"-k\"")
         name = body[/\A\w+/]

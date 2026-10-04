@@ -126,6 +126,7 @@ describe "Gori::OpenLock resilience" do
   end
 
   it "keys on the canonicalized database, so two spellings share one lock" do
+    posix_only!("File.symlink needs Developer Mode")
     real = File.tempname("gori-lock-real")
     link = File.tempname("gori-lock-link")
     Dir.mkdir_p(File.join(real, "projects", "api"))
@@ -173,6 +174,7 @@ describe "Gori::OpenLock resilience" do
   end
 
   it "does not open a store unannounced while an exclusive guard is held" do
+    posix_only!("/dev/fd")
     with_project do |_registry, project|
       Gori::Store.open(project.db_path).close # materialize the lock file
       guard = Gori::OpenLock.try_exclusive(project.db_path).not_nil!

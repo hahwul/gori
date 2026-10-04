@@ -4,6 +4,7 @@ require "../spec_helper"
 # CODE is the verdict. See `Probe::CustomRule#exec_evidence`.
 
 private def with_hook(body : String, &)
+  posix_only!("a #!/bin/sh hook script")
   dir = File.tempname("gori-probe-hook")
   Dir.mkdir_p(dir)
   path = File.join(dir, "hook.sh")
@@ -97,6 +98,7 @@ describe "Probe exec rule" do
   end
 
   it "raises nothing and reports when the hook times out" do
+    posix_only!("/bin/sleep as a hook that outlives its timeout")
     with_store do |store|
       prev = Gori::Settings.hook_timeout_secs
       begin

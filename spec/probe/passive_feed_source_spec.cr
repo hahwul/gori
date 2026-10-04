@@ -207,7 +207,7 @@ describe "Probe::Analyzer passive feed provenance" do
   # scanned. Comments are stripped so a call named only in prose cannot vouch for itself.
   it "backs every self_scanned? kind with a real scan_detail call site" do
     root = File.expand_path(File.join(__DIR__, "..", ".."))
-    src = Dir.glob(File.join(root, "src", "**", "*.cr")).sort
+    src = glob_files(root, "src", "**", "*.cr").sort
       .reject(&.ends_with?(File.join("probe", "analyzer.cr")))
       .join('\n') do |f|
         File.read_lines(f).reject { |l| l.lstrip.starts_with?('#') }.join('\n')

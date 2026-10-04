@@ -144,6 +144,7 @@ describe Gori::WordlistCatalog do
     end
 
     it "follows a symlink to a list" do
+      posix_only!("File.symlink needs Developer Mode")
       with_wordlist_home do |dir|
         Dir.mkdir_p(dir)
         real = File.join(File.dirname(dir), "elsewhere.txt")
@@ -189,6 +190,7 @@ describe Gori::WordlistCatalog do
     end
 
     it "reports a link to a list as a list, marked, with the target's size" do
+      posix_only!("File.symlink needs Developer Mode")
       with_wordlist_home do |dir|
         Dir.mkdir_p(dir)
         real = File.join(File.dirname(dir), "elsewhere.txt")
@@ -357,6 +359,7 @@ describe Gori::WordlistCatalog do
     end
 
     it "creates the directory owner-only and the list 0600" do
+      posix_only!("POSIX mode bits")
       with_wordlist_home do |dir|
         Catalog.save_values("p.txt", ["a"])
         (File.info(dir).permissions.value & 0o777).should eq(0o700)
@@ -406,6 +409,7 @@ describe Gori::WordlistCatalog do
     end
 
     it "refuses to write through, or replace, a symlink" do
+      posix_only!("File.symlink needs Developer Mode")
       with_wordlist_home do |dir|
         Dir.mkdir_p(dir)
         real = File.join(File.dirname(dir), "elsewhere.txt")
@@ -502,6 +506,7 @@ describe Gori::WordlistCatalog do
     end
 
     it "removes a link, never what it points at" do
+      posix_only!("File.symlink needs Developer Mode")
       with_wordlist_home do |dir|
         Dir.mkdir_p(dir)
         real = File.join(File.dirname(dir), "elsewhere.txt")
@@ -579,6 +584,7 @@ describe Gori::WordlistCatalog do
     end
 
     it "moves a symlink as a link and will not clobber a link's target" do
+      posix_only!("File.symlink needs Developer Mode")
       with_wordlist_home do |dir|
         Dir.mkdir_p(dir)
         real = File.join(File.dirname(dir), "elsewhere.txt")

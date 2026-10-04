@@ -31,6 +31,7 @@ describe "gori run wordlist — renderers" do
   end
 
   it "marks a symlinked list" do
+    posix_only!("File.symlink needs Developer Mode")
     with_wordlist_home do |dir|
       Dir.mkdir_p(dir)
       real = File.join(File.dirname(dir), "elsewhere.txt")

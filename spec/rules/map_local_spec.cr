@@ -108,6 +108,7 @@ describe Gori::RuleStub::MapLocal do
   end
 
   it "refuses a symlink that leads out of the root, and serves one that stays inside" do
+    posix_only!("File.symlink needs Developer Mode")
     with_mapped_dir do |root, outside|
       File.symlink("/", File.join(root, "escape"))
       File.symlink(File.join(outside, "secret.txt"), File.join(root, "leak.txt"))

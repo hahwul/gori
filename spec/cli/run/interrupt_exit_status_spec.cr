@@ -16,7 +16,7 @@ describe "gori run — interrupt trap and non-zero exit are one pair" do
   it "is honoured by every subcommand that installs the trap" do
     dir = File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run")
     offenders = [] of String
-    Dir.glob(File.join(dir, "**", "*.cr")).sort.each do |path|
+    glob_files(dir, "**", "*.cr").sort.each do |path|
       next if File.basename(path) == "interrupt.cr" # where the pair is defined
       src = File.read(path)
       next unless src.includes?("install_interrupt_trap(")
@@ -62,7 +62,7 @@ describe "gori run — every engine-driven sweep installs the interrupt trap" do
   it "leaves no long active sweep killable only by SIGKILL-or-lose-everything" do
     dir = File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run")
     offenders = [] of String
-    Dir.glob(File.join(dir, "**", "*.cr")).sort.each do |path|
+    glob_files(dir, "**", "*.cr").sort.each do |path|
       src = File.read(path)
       next unless RUN_MANY_SEND_ENGINES.any? { |engine| src.includes?(engine) }
       offenders << File.basename(path) unless src.includes?("install_interrupt_trap(")
@@ -74,7 +74,7 @@ describe "gori run — every engine-driven sweep installs the interrupt trap" do
   # name would quietly make the check above vacuous.
   it "selects exactly the six engine-driven subcommands" do
     dir = File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run")
-    matched = Dir.glob(File.join(dir, "**", "*.cr")).sort.select do |path|
+    matched = glob_files(dir, "**", "*.cr").sort.select do |path|
       src = File.read(path)
       RUN_MANY_SEND_ENGINES.any? { |engine| src.includes?(engine) }
     end

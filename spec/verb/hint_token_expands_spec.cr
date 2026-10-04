@@ -35,7 +35,7 @@ describe "hint templates — every verb token expands to a chord" do
     # under the keyset it is drawn in.
     keyset_scoped = {File.join(root, "gori", "tui", "keyset_pad.cr")}
     scoped_ids = Set(String).new
-    Dir.glob(File.join(root, "**", "*.cr")).each do |file|
+    glob_files(root, "**", "*.cr").each do |file|
       bucket = keyset_scoped.includes?(file) ? scoped_ids : ids
       File.each_line(file) do |line|
         next if line.lstrip.starts_with?('#')
@@ -80,7 +80,7 @@ private HAND_SPELLED_PENDING = [] of {String, String}
 describe "hint templates — space-menu letters come from the registry" do
   root = File.expand_path("../../src/gori", __DIR__)
   lines = [] of {String, Int32, String}
-  Dir.glob(File.join(root, "**", "*.cr")).each do |file|
+  glob_files(root, "**", "*.cr").each do |file|
     File.read_lines(file).each_with_index(1) do |line, n|
       next if line.lstrip.starts_with?('#')
       lines << {file.sub(root + "/", ""), n, line}

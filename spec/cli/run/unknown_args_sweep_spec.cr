@@ -131,7 +131,7 @@ private SWEPT = [
 describe "gori run — every OptionParser reaches an unknown_args guard" do
   it "leaves no parser under src/gori/cli/run without one" do
     offenders = [] of String
-    Dir.glob(File.join(run_cli_dir, "**", "*.cr")).sort.each do |path|
+    glob_files(run_cli_dir, "**", "*.cr").sort.each do |path|
       src = File.read(path)
       parser_windows(src).each do |(at, window)|
         next if GUARDS.any? { |g| window.includes?(g) }
@@ -173,7 +173,7 @@ describe "gori run — every OptionParser reaches an unknown_args guard" do
   # then reads only the first, which that regex cannot see.
   it "uses both halves in every `cli/run` unknown_args handler" do
     offenders = [] of String
-    Dir.glob(File.join(run_cli_dir, "**", "*.cr")).sort.each do |path|
+    glob_files(run_cli_dir, "**", "*.cr").sort.each do |path|
       lines = File.read_lines(path)
       lines.each_index do |i|
         offenders << "#{File.basename(path)}:#{i + 1}" if handler_uses_both_halves?(lines, i) == false

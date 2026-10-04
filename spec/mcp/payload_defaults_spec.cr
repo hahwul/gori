@@ -142,6 +142,7 @@ describe "MCP export_openapi output_path" do
   end
 
   it "refuses a dangling symlink and a database a gori has open" do
+    posix_only!("File.symlink needs Developer Mode")
     with_store do |store|
       eo_flow(store, "/users/1")
       tools = tools_for(store)

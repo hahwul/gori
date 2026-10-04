@@ -94,6 +94,7 @@ end
 # Shared because both the CodexQueue spec (which reads the argv) and the Courier spec (which
 # only needs a `codex` that succeeds) need the same stand-in, and a second copy would drift.
 def mcp_with_fake_codex(exit_code : Int32 = 0, stderr : String = "", &)
+  posix_only!("a #!/bin/sh stand-in codex on PATH")
   dir = File.tempname("gori-fake-codex")
   Dir.mkdir_p(dir)
   log = File.join(dir, "argv.txt")

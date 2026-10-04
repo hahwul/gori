@@ -42,6 +42,7 @@ private class Rig
 end
 
 private def with_fake_inbox(&)
+  posix_only!("Claude Code's inbox is a Unix socket gori only looks for on POSIX")
   dir = File.tempname("gori-courier")
   Dir.mkdir_p(dir)
   path = File.join(dir, "1.sock")

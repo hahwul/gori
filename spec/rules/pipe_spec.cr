@@ -9,6 +9,7 @@ require "../spec_helper"
 # those; the whole risk of this feature is what happens when the operator's script misbehaves.
 
 private def with_hook(body : String, &)
+  posix_only!("a #!/bin/sh hook script")
   dir = File.tempname("gori-pipe-hook")
   Dir.mkdir_p(dir)
   path = File.join(dir, "hook.sh")
@@ -88,6 +89,7 @@ describe "Rewriter pipe op" do
   end
 
   it "passes the original bytes through when the hook TIMES OUT, without holding the message" do
+    posix_only!("/bin/sleep as a hook that outlives its timeout")
     with_store do |store|
       prev = Gori::Settings.hook_timeout_secs
       begin
@@ -115,6 +117,7 @@ describe "Rewriter pipe op" do
   end
 
   it "spends ONE budget across every match in a message, not one per match" do
+    posix_only!("/bin/sleep as a hook that outlives its timeout")
     with_store do |store|
       prev = Gori::Settings.hook_timeout_secs
       begin
@@ -213,6 +216,7 @@ describe "Rewriter pipe op" do
   end
 
   it "spends ONE budget across every pipe RULE in a rewrite, not one each" do
+    posix_only!("/bin/sleep as a hook that outlives its timeout")
     # Per-rule deadlines multiplied: three rules at the 60s ceiling would hold one head for
     # three minutes, which is not a bound at all.
     with_store do |store|

@@ -223,6 +223,7 @@ describe Gori::ExternalOpen do
     # captured data is 0600 (store, settings, project registry, CA key); a bare `File.write`
     # made these 0644, readable by every account on the box.
     it "writes the preview 0600, like every other file that holds captured data" do
+      posix_only!("POSIX mode bits")
       with_preview_home do
         r = Gori::ExternalOpen.write("flow-15", resp("text/html"), "<h1>secret</h1>".to_slice)
         (File.info(r.path).permissions.value & 0o777).should eq(0o600)
@@ -314,6 +315,8 @@ describe Gori::ExternalOpen do
         cmd.should eq({"open", ["/tmp/x.html"]})
       {% elsif flag?(:linux) %}
         cmd.should eq({"xdg-open", ["/tmp/x.html"]})
+      {% elsif flag?(:win32) %}
+        cmd.should eq({"explorer.exe", ["/tmp/x.html"]})
       {% else %}
         cmd.should be_nil
       {% end %}

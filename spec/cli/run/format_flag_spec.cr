@@ -37,7 +37,7 @@ describe "gori run --format / --json (#1386)" do
   it "registers --format only through format_flag, so every such command also takes --json" do
     root = File.join(__DIR__, "..", "..", "..", "src", "gori", "cli")
     bare = [] of String
-    Dir.glob(File.join(root, "**", "*.cr")).sort.each do |path|
+    glob_files(root, "**", "*.cr").sort.each do |path|
       next if FORMAT_FLAG_EXEMPT.includes?(File.basename(path))
       File.read_lines(path).each_with_index do |line, i|
         next if line.lstrip.starts_with?('#')

@@ -14,7 +14,7 @@ describe "HTTP status colour" do
   it "comes from Theme.status_color, never a local >= 400 test" do
     root = File.join(__DIR__, "..", "..", "src", "gori", "tui")
     offenders = [] of String
-    Dir.glob(File.join(root, "**", "*.cr")).sort.each do |path|
+    glob_files(root, "**", "*.cr").sort.each do |path|
       next if File.basename(path) == "theme.cr" # the ladder itself
       File.read(path).lines.each_with_index do |line, i|
         # A status threshold deciding a colour on the same line — the shape both Repeater
@@ -69,7 +69,7 @@ describe "state signals carry a word or a glyph" do
     # symbol name, one meaning, two hues.
     root = File.join(__DIR__, "..", "..", "src", "gori", "tui")
     offenders = [] of String
-    Dir.glob(File.join(root, "**", "*.cr")).sort.each do |path|
+    glob_files(root, "**", "*.cr").sort.each do |path|
       File.read(path).lines.each_with_index do |line, i|
         # Colour branches only. `:error` is also a key in the mascot's FACE table and the
         # companion's mood map, where it selects a glyph and an animation — different channels,
@@ -171,7 +171,7 @@ describe "pane borders" do
     # exactly the seam the third dress grew in, and four files had one.
     root = File.join(__DIR__, "..", "..", "src", "gori", "tui")
     offenders = [] of String
-    Dir.glob(File.join(root, "**", "*.cr")).sort.each do |path|
+    glob_files(root, "**", "*.cr").sort.each do |path|
       next if File.basename(path) == "frame.cr"
       File.read(path).lines.each_with_index do |line, i|
         next unless line.matches?(/def [a-z_]*pane_border/)

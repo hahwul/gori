@@ -95,6 +95,7 @@ private def search_all(projects : Array(Gori::Project), needle : String,
 end
 
 private def open_fds : Int32
+  posix_only!("/dev/fd")
   Dir.children("/dev/fd").size
 end
 

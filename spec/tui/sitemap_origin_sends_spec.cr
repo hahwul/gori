@@ -10,7 +10,7 @@ require "../spec_helper"
 # joins the check without anyone listing it.
 private def runner_slices : Hash(String, String)
   dir = File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner")
-  Dir.glob(File.join(dir, "*.cr")).to_h do |path|
+  glob_files(dir, "*.cr").to_h do |path|
     {File.basename(path), File.read(path).lines.reject(&.lstrip.starts_with?('#')).join('\n')}
   end
 end

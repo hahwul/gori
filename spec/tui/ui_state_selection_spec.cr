@@ -101,7 +101,7 @@ describe "the base-owned selection hooks" do
     # `write_selection_fields` and `list_selection_ident`.
     root = File.join(__DIR__, "..", "..", "src", "gori", "tui")
     offenders = [] of String
-    Dir.glob(File.join(root, "**", "*.cr")).each do |path|
+    glob_files(root, "**", "*.cr").each do |path|
       next if File.basename(path) == "tab_controller.cr"
       File.read(path).lines.each_with_index do |line, i|
         code = line.lstrip

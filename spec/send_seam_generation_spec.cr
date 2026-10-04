@@ -37,7 +37,7 @@ end
 describe "the send seam's $GEN context" do
   it "names the dial at every construction, or a reason it cannot" do
     found = Hash(String, Int32).new(0)
-    Dir.glob(File.join(SRC, "**", "*.cr")).each do |path|
+    glob_files(SRC, "**", "*.cr").each do |path|
       rel = path.lchop(SRC + "/")
       File.each_line(path) do |line|
         next if line.lstrip.starts_with?("#")
@@ -57,7 +57,7 @@ describe "the send seam's $GEN context" do
     gen_call = /Env\.(expand|expand_wire)\(/
     passed = /generation:\s*(?!nil\b)[\w@]|Generation\.for_dial|[(,]\s*(\w+_)?gen\s*\)/
     bare = [] of String
-    Dir.glob(File.join(SRC, "**", "*.cr")).each do |path|
+    glob_files(SRC, "**", "*.cr").each do |path|
       rel = path.lchop(SRC + "/")
       next if rel == "env.cr"
       lines = File.read_lines(path)
@@ -86,7 +86,7 @@ describe "the send seam's client hints" do
   it "follow the slot overlay at every gori-originated seam" do
     overlays = Hash(String, Int32).new(0)
     hints = Hash(String, Int32).new(0)
-    Dir.glob(File.join(SRC, "**", "*.cr")).each do |path|
+    glob_files(SRC, "**", "*.cr").each do |path|
       rel = path.lchop(SRC + "/")
       next if rel == "env.cr" # where both are defined
       File.each_line(path) do |line|

@@ -41,7 +41,7 @@ describe "Gori::Proxy::Tls::CertAuthority#import!" do
         ca.ca_cert_pem.should eq(imported_pem) # ...replaced by the imported one
         # The swap is persisted: a reload reads the IMPORTED root off disk.
         Gori::Proxy::Tls::CertAuthority.load_or_create(dir).ca_cert_pem.should eq(imported_pem)
-        File.info(File.join(dir, "root.key.pem")).permissions.value.should eq(0o600)
+        File.info(File.join(dir, "root.key.pem")).permissions.value.should eq(0o600) unless {{ flag?(:win32) }}
       end
     end
   end

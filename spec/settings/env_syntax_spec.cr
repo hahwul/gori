@@ -165,7 +165,7 @@ describe "Settings env.syntax" do
       Gori::Settings.load
       Gori::Settings.rewriter_rules.map(&.replacement).should eq(["$1 $$ $ne"])
       Gori::Settings.take_env_syntax_global_migration.should be_nil
-      Dir.glob(File.join(dir, "settings.json.pre-*")).should be_empty
+      glob_files(dir, "settings.json.pre-*").should be_empty
     end
   end
 
@@ -301,7 +301,7 @@ describe "Settings env.syntax" do
       Gori::Settings.take_env_syntax_global_migration.should be_nil
       Gori::Settings.rewriter_rules[0].replacement.should eq("X-Key: $API")
       # And no `settings.json.pre-namespaced-*` copy beside a file that was never rewritten.
-      Dir.glob(File.join(dir, "*.pre-namespaced-*")).should be_empty
+      glob_files(dir, "*.pre-namespaced-*").should be_empty
       # One line, and it names the path the operator typed.
       io.to_s.should contain(missing)
       io.to_s.should contain("reading tokens as bare")

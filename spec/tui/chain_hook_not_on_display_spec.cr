@@ -18,6 +18,7 @@ include Gori::Tui
 
 # A hook that appends one line per run and passes stdin through, plus a reader for the tally.
 private def with_counting_hook(&)
+  posix_only!("a #!/bin/sh hook script")
   dir = File.tempname("gori-chain-hook")
   Dir.mkdir_p(dir)
   path = File.join(dir, "h.sh")
@@ -72,6 +73,7 @@ describe "an exec: chain on a display path" do
   # turning Auto-CL OFF hands the header to the operator, and `finalize_wire` stops resyncing,
   # so that gesture is the last moment gori can make the number true. It spends exactly one run.
   it "refreshes the header once when Auto-CL is switched off, and only then" do
+    posix_only!("a #!/bin/sh hook script")
     dir = File.tempname("gori-cl-hook")
     Dir.mkdir_p(dir)
     hook = File.join(dir, "h.sh")

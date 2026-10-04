@@ -422,7 +422,7 @@ describe Gori::EnvMigration do
       line.should contain("re-spelled to $ENV.KEY/$BIND.NAME")
       line.should contain("backup at ")
 
-      backups = Dir.glob("#{db_path}.pre-namespaced-*")
+      backups = glob_files("#{db_path}.pre-namespaced-*")
       backups.size.should eq(1)
       File.size(backups[0]).should be > 0
       report.backup.should eq(backups[0])
@@ -583,7 +583,7 @@ describe Gori::EnvMigration do
             ro.close
           end
         end
-        Dir.glob("#{db_path}.pre-*").should be_empty
+        glob_files("#{db_path}.pre-*").should be_empty
         # …and the marker is untouched, so the next open (once the permissions are fixed) tries again.
       ensure
         File.chmod(db_path, 0o644) rescue nil
@@ -598,6 +598,7 @@ describe Gori::EnvMigration do
   # `gori run repeater list` on a read-only project directory stopped working instead of saying what
   # it could not do.
   it "reports rather than raises when the BACKUP itself cannot be written" do
+    posix_only!("a read-only directory (Windows has no directory write bit)")
     with_migration_home do |db_path|
       seed_migration_project(db_path)
       Gori::Settings.env_syntax = NS
@@ -617,7 +618,7 @@ describe Gori::EnvMigration do
       ensure
         File.chmod(dir, 0o755) rescue nil
       end
-      Dir.glob("#{db_path}.pre-*").should be_empty
+      glob_files("#{db_path}.pre-*").should be_empty
     end
   end
 
@@ -632,6 +633,7 @@ describe Gori::EnvMigration do
   # (`Paths.ensure_dir(…, tighten: false)`) — under GORI_HOME, `save` chmods the home back to 0700
   # on its way past, which is the correct behaviour for a directory gori does own.
   it "copies settings.json aside only when it can be written, and says when the save failed" do
+    posix_only!("a read-only directory (Windows has no directory write bit)")
     with_migration_home do |db_path|
       dir = File.join(File.dirname(File.dirname(File.dirname(db_path))), "cfg")
       Dir.mkdir_p(dir)
@@ -656,7 +658,7 @@ describe Gori::EnvMigration do
         Gori::Settings.env_syntax.should eq(NS)
         Gori::Settings.rewriter_rules.map(&.replacement).should eq(["X-A: $ENV.TOKEN"])
         # But nothing was copied, and nothing was written: not once, and not per start.
-        Dir.glob("#{path}.pre-*").should be_empty
+        glob_files("#{path}.pre-*").should be_empty
         Gori::Settings.take_env_syntax_global_migration.not_nil!.backup.should be_nil
         JSON.parse(File.read(path)).as_h["rewriter"].as_h["rules"].as_a[0].as_h["replacement"]
           .as_s.should eq("X-A: $TOKEN")
@@ -691,7 +693,7 @@ describe Gori::EnvMigration do
         Gori::Settings.load
         report = Gori::Settings.take_env_syntax_global_migration.not_nil!
         report.backup.should_not be_nil
-        Dir.glob("#{path}.pre-*").size.should eq(1)
+        glob_files("#{path}.pre-*").size.should eq(1)
         JSON.parse(File.read(path)).as_h["rewriter"].as_h["rules"].as_a[0].as_h["replacement"]
           .as_s.should eq("X-A: $ENV.TOKEN")
       ensure
@@ -734,7 +736,7 @@ describe Gori::EnvMigration do
       with_open_store(db_path) do |store|
         Gori::EnvMigration.reconcile(store, db_path, "demo").should be_nil
       end
-      Dir.glob("#{db_path}.pre-namespaced-*").size.should eq(1)
+      glob_files("#{db_path}.pre-namespaced-*").size.should eq(1)
       with_open_store(db_path) { |store| String.new(store.repeaters[0].request) }.should eq(before)
     end
   end
@@ -749,7 +751,7 @@ describe Gori::EnvMigration do
       with_open_store(db_path) do |store|
         Gori::EnvMigration.apply_after_peer_for_spec(store, db_path, "demo").should be_nil
       end
-      Dir.glob("#{db_path}.pre-namespaced-*").should be_empty
+      glob_files("#{db_path}.pre-namespaced-*").should be_empty
     end
   end
 
@@ -790,7 +792,7 @@ describe Gori::EnvMigration do
       report.quiet?.should be_true
       report.notices.should be_empty # nothing to say, so no surface says anything
       report.backup.should be_nil
-      Dir.glob("#{db_path}.pre-*").should be_empty
+      glob_files("#{db_path}.pre-*").should be_empty
       with_open_store(db_path) { |s| s.setting(Gori::Env::PROJECT_SYNTAX_KEY) }.should eq("namespaced")
     end
   end
@@ -812,7 +814,7 @@ describe Gori::EnvMigration do
       end.not_nil!
       report.quiet?.should be_true
       report.backup.should be_nil
-      Dir.glob("#{db_path}.pre-*").should be_empty
+      glob_files("#{db_path}.pre-*").should be_empty
       with_open_store(db_path) do |store|
         store.setting(Gori::Env::PROJECT_SYNTAX_KEY).should eq("namespaced")
         # `$ne` is a Mongo operator in both grammars, and it is still `$ne`.
@@ -892,7 +894,7 @@ describe Gori::EnvMigration do
         # …and a dial tuple gets none either: it is expanded, but nothing unescapes it.
         store.repeaters.find { |r| r.flow_id.nil? }.not_nil!.target.should eq("https://$API")
       end
-      Dir.glob("#{db_path}.pre-bare-*").size.should eq(1)
+      glob_files("#{db_path}.pre-bare-*").size.should eq(1)
     end
   end
 
@@ -935,7 +937,7 @@ describe Gori::EnvMigration do
       report.notices.size.should eq(2) # the project line, then the hint
       # NOT rewritten, and no second backup of settings.json: the rule is the operator's to fix.
       Gori::Settings.rewriter_rules[0].replacement.should eq("Bearer $token")
-      Dir.glob("#{File.dirname(Gori::Settings.path)}/settings.json.pre-*").should be_empty
+      glob_files("#{File.dirname(Gori::Settings.path)}/settings.json.pre-*").should be_empty
     ensure
       Gori::Settings.rewriter_rules = [] of Gori::Settings::RewriterRule
     end

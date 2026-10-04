@@ -223,7 +223,7 @@ describe "MCP payload_from" do
           r["payload_source"]["values"].as_i.should eq(2)
           r["payload_source"]["policy"].as_s.should eq("sensitive-excluded")
           File.read(File.join(dir, "api-names.txt")).lines.sort!.should eq(["alphaparam", "betaparam"])
-          (File.info(File.join(dir, "api-names.txt")).permissions.value & 0o777).should eq(0o600)
+          (File.info(File.join(dir, "api-names.txt")).permissions.value & 0o777).should eq(0o600) unless {{ flag?(:win32) }}
         end
       end
     end

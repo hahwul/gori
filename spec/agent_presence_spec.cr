@@ -172,6 +172,7 @@ describe Gori::AgentPresence do
   end
 
   it "keys on the canonicalized database, so two spellings share one marker directory" do
+    posix_only!("File.symlink needs Developer Mode")
     real = File.tempname("gori-agents-real")
     link = File.tempname("gori-agents-link")
     Dir.mkdir_p(File.join(real, "projects", "api"))
@@ -233,6 +234,7 @@ describe Gori::AgentPresence do
   # sweep) is not live, which is an answer: `count?` must not turn it into "cannot tell".
   # A dangling symlink holds that listed-but-unopenable state still for the spec.
   it "counts a marker that vanished after the listing as gone, not unsure" do
+    posix_only!("File.symlink needs Developer Mode")
     with_project do |_registry, project|
       window = Gori::AgentPresence.announce(project.db_path, client: "gori tui",
         client_version: nil, read_only: false, selection_source: nil,

@@ -138,8 +138,29 @@ jobs:
       - name: Specs
         # Runs even when the smoke test failed: the two find different things.
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        env:
+          # A hang is a failure to see, not five minutes to wait out.
+          GORI_SPEC_EXAMPLE_TIMEOUT: "60"
         # Built, not `crystal spec`: that hands --static to the runner instead of the linker.
+        # One process per spec file: on Windows an exception raised from an `ensure` while
+        # another unwinds aborts the whole process (FAST_FAIL), so a single run would lose
+        # every result after the first such failure.
         run: |
           echo 'require "./spec/**"' > all_specs.cr
           crystal build all_specs.cr -o bin/specs.exe --no-debug --static
-          ./bin/specs.exe --verbose
+          run_file() {
+            locs=$(grep -nE '^\s*it "' "$1" | cut -d: -f1 | sed "s|^|--location $1:|" || true)
+            [ -n "$locs" ] || return 0
+            # An outer timeout too: a call that blocks the whole scheduler starves the watchdog.
+            out=$(timeout -k 5 180 ./bin/specs.exe --verbose $locs 2>&1)
+            code=$?
+            [ "$code" -eq 0 ] && return 0
+            [ "$code" -eq 124 ] && out="$out
+          TIMEOUT: still running after 180s"
+            printf '::group::FAIL %s\n%s\n::endgroup::\n' "$1" "$(echo "$out" | tail -60)"
+          }
+          export -f run_file
+          find spec -name '*_spec.cr' | sort | xargs -P 4 -I{} bash -c 'run_file "$1"' _ {} | tee spec-results.txt
+          failed=$(grep -c '^::group::FAIL' spec-results.txt || true)
+          echo "spec files failing: $failed"
+          test "$failed" -eq 0

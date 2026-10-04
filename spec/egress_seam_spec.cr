@@ -6,8 +6,8 @@ describe "egress seams" do
   it "keeps sockets and HTTP clients in their single owners" do
     root = File.expand_path(File.join(__DIR__, ".."))
     offenders = [] of String
-    Dir.glob(File.join(root, "src", "gori", "**", "*.cr")).sort.each do |path|
-      relative = Path[path].relative_to(root).to_s
+    glob_files(root, "src", "gori", "**", "*.cr").sort.each do |path|
+      relative = Path[path].relative_to(root).to_posix.to_s
       File.read_lines(path).each_with_index do |line, index|
         next if line.lstrip.starts_with?('#')
         if line.matches?(/\b(?:TCPSocket|UDPSocket)\.new|\bSocket\.(?:tcp|udp)/) &&

@@ -15,7 +15,7 @@ describe "confirm dialog wording" do
 
   it "gives every dialog an UPPERCASE heading" do
     offenders = [] of String
-    Dir.glob(File.join(root, "**", "*.cr")).sort.each do |path|
+    glob_files(root, "**", "*.cr").sort.each do |path|
       File.read(path).lines.each_with_index do |line, i|
         next unless m = line.match(/\bconfirm\("([^"]+)"/)
         heading = m[1]
@@ -33,7 +33,7 @@ describe "confirm dialog wording" do
     # per-site and `cancel_label` defaults to `cancel`, so a capitalised confirm verb is the
     # one that breaks the pair.
     offenders = [] of String
-    Dir.glob(File.join(root, "**", "*.cr")).sort.each do |path|
+    glob_files(root, "**", "*.cr").sort.each do |path|
       File.read(path).lines.each_with_index do |line, i|
         line.scan(/(?:confirm|cancel)_label: "([^"]+)"/) do |m|
           label = m[1]

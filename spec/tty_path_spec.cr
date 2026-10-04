@@ -22,6 +22,7 @@ describe Gori::TtyPath do
     # exists to serve. `mkfifo` and then ask with no writer anywhere — the answer has to come
     # back immediately.
     it "is false for a FIFO, and answers without opening it" do
+      posix_only!("mkfifo")
       dir = File.tempname("gori-fifo")
       Dir.mkdir_p(dir)
       path = File.join(dir, "wl")

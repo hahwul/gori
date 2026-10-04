@@ -44,18 +44,21 @@ end
 
 describe Gori::Tui::Statusline do
   it "renders the first line of stdout and hands the context JSON to the script" do
+    posix_only!("a /bin/sh command line (cmd.exe has no printf, cat or sleep)")
     Statusline.run("printf 'hello\\nsecond\\n'", "{}", 2.seconds).line.should eq("hello")
     Statusline.run("cat", %({"version":1,"project":"acme"}), 2.seconds)
       .line.should eq(%({"version":1,"project":"acme"}))
   end
 
   it "marks a run that outlives its timeout" do
+    posix_only!("a /bin/sh command line (cmd.exe has no printf, cat or sleep)")
     Statusline.run("sleep 3; printf 'ready\\n'", "{}", 1.second).line.should eq("⋯ (timed out)")
   end
 
   # The timeout is the RUN's, not the refresh interval's: a script slower than the interval
   # used to be killed at its deadline on every single run and never render at all.
   it "renders a script slower than the refresh interval, given a longer timeout" do
+    posix_only!("a /bin/sh command line (cmd.exe has no printf, cat or sleep)")
     interval = {Gori::Settings::DEFAULT_STATUSLINE_INTERVAL, 1}.max
     timeout = {Gori::Settings::DEFAULT_STATUSLINE_TIMEOUT, 1}.max
     timeout.should be > interval # the defaults themselves must leave headroom
@@ -65,25 +68,30 @@ describe Gori::Tui::Statusline do
   # `sh` always spawns, so a typo'd command exits 127 with EMPTY stdout — indistinguishable
   # on screen from a script that printed nothing until the status is surfaced.
   it "reports a failing command's exit status instead of a blank row" do
+    posix_only!("a /bin/sh command line (cmd.exe has no printf, cat or sleep)")
     Statusline.run("gori-no-such-binary-xyz", "{}", 2.seconds).line.should eq("⋯ (exit 127)")
     Statusline.run("exit 3", "{}", 2.seconds).line.should eq("⋯ (exit 3)")
   end
 
   it "reports a signal-killed command as killed" do
+    posix_only!("a /bin/sh command line (cmd.exe has no printf, cat or sleep)")
     Statusline.run("kill -TERM $$", "{}", 2.seconds).line.should eq("⋯ (killed)")
   end
 
   it "leaves the row empty for a command that exits cleanly having printed nothing" do
+    posix_only!("a /bin/sh command line (cmd.exe has no printf, cat or sleep)")
     Statusline.run("true", "{}", 2.seconds).line.should eq("")
   end
 
   # A non-empty first line wins over the status: the script said something, so show it even
   # if it goes on to fail (and even if it is still running).
   it "keeps output from a command that printed a line and then failed" do
+    posix_only!("a /bin/sh command line (cmd.exe has no printf, cat or sleep)")
     Statusline.run("printf 'up\\n'; exit 9", "{}", 2.seconds).line.should eq("up")
   end
 
   it "does not wait on a command that backgrounds a child holding the pipe" do
+    posix_only!("a /bin/sh command line (cmd.exe has no printf, cat or sleep)")
     t0 = Time.instant
     Statusline.run("printf 'now\\n'; (sleep 5) &", "{}", 3.seconds).line.should eq("now")
     (Time.instant - t0).should be < 2.seconds
@@ -95,6 +103,7 @@ describe Gori::Tui::Statusline do
   # characters, so a text match here would be a guess — which is the whole reason `Outcome`
   # exists rather than a String.
   it "separates gori's own markers from the script's output" do
+    posix_only!("a /bin/sh command line (cmd.exe has no printf, cat or sleep)")
     Statusline.run("printf 'hello\\n'", "{}", 2.seconds).failed.should be_false
     Statusline.run("true", "{}", 2.seconds).failed.should be_false                   # legitimately silent
     Statusline.run("printf 'up\\n'; exit 9", "{}", 2.seconds).failed.should be_false # it spoke
@@ -107,6 +116,7 @@ describe Gori::Tui::Statusline do
   # A script that prints the marker's own text is still the SCRIPT talking. The flag is the
   # only thing that can tell them apart, and it says so.
   it "does not mistake a script echoing the marker text for a failure" do
+    posix_only!("a /bin/sh command line (cmd.exe has no printf, cat or sleep)")
     out = Statusline.run("printf '⋯ (exit 3)\\n'", "{}", 2.seconds)
     out.line.should eq("⋯ (exit 3)")
     out.failed.should be_false
@@ -120,6 +130,7 @@ describe Gori::Tui::Statusline do
   # `& wait` is interruptible, and is also exactly the shape that leaves a descendant behind.
   # The scripts that can orphan something are the scripts whose trap can fire.
   it "gives a timed-out script a trappable signal before killing it" do
+    posix_only!("a /bin/sh command line (cmd.exe has no printf, cat or sleep)")
     mark = File.tempname("gori-statusline-trap")
     File.delete(mark) rescue nil
     begin
@@ -139,6 +150,7 @@ describe Gori::Tui::Statusline do
   # …and the courtesy must not become a second way to hang: a script that IGNORES the TERM
   # is killed anyway, and `run` never waits for either — it has already returned the marker.
   it "returns at its deadline even when the script ignores SIGTERM" do
+    posix_only!("a /bin/sh command line (cmd.exe has no printf, cat or sleep)")
     t0 = Time.instant
     Statusline.run("trap '' TERM; sleep 5", "{}", 1.second).line.should eq("⋯ (timed out)")
     (Time.instant - t0).should be < 2.seconds
@@ -315,6 +327,7 @@ end
 
 describe Gori::Tui::StatuslineController do
   it "hands the script a context describing the live session" do
+    posix_only!("a /bin/sh command line (cmd.exe has no printf, cat or sleep)")
     with_statusline_settings do
       with_statusline_controller do |ctl, session|
         Gori::Settings.statusline_enabled = true
@@ -354,6 +367,7 @@ describe Gori::Tui::StatuslineController do
   # command changed too so the controller relaunches immediately (a settings edit resets the
   # interval) and `@rendered` cannot suppress the repaint.
   it "re-reads the session's modes on every run" do
+    posix_only!("a /bin/sh command line (cmd.exe has no printf, cat or sleep)")
     with_statusline_settings do
       with_statusline_controller do |ctl, session|
         Gori::Settings.statusline_enabled = true
@@ -380,6 +394,7 @@ describe Gori::Tui::StatuslineController do
   # A command that fails is gori's report, not the script's, and the controller has to carry
   # that verdict to the render seam — `failed?` is what Chrome.render_statusline colours on.
   it "reports a failing command as its own failure, and recovers when the command is fixed" do
+    posix_only!("a /bin/sh command line (cmd.exe has no printf, cat or sleep)")
     with_statusline_settings do
       with_statusline_controller do |ctl, _session|
         Gori::Settings.statusline_enabled = true

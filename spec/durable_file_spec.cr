@@ -9,6 +9,7 @@ describe Gori::DurableFile do
     # way to point gori at a version-controlled settings file; a rename over the link
     # detaches it, and the repo copy then goes stale with nothing to show in `git status`.
     it "writes THROUGH a symlink instead of replacing it" do
+      posix_only!("File.symlink needs Developer Mode")
       DurableFileSpec.in_tmp do |dir|
         real = File.join(dir, "real.json")
         link = File.join(dir, "link.json")
@@ -23,6 +24,7 @@ describe Gori::DurableFile do
     end
 
     it "replaces a DANGLING symlink with a real file rather than failing" do
+      posix_only!("File.symlink needs Developer Mode")
       DurableFileSpec.in_tmp do |dir|
         link = File.join(dir, "link.json")
         target = File.join(dir, "gone.json")
@@ -42,6 +44,7 @@ describe Gori::DurableFile do
     # The temp has to be staged beside the TARGET, not beside the link, or the rename
     # crosses a filesystem boundary and the mode lands on the wrong side.
     it "stages beside the target when the link points into another directory" do
+      posix_only!("File.symlink needs Developer Mode")
       DurableFileSpec.in_tmp do |dir|
         link_dir = File.join(dir, "home")
         real_dir = File.join(dir, "dotfiles")
@@ -63,6 +66,8 @@ describe Gori::DurableFile do
   end
 
   describe "permissions" do
+    before_each { posix_only!("POSIX mode bits") }
+
     it "carries an existing file's mode across the replace" do
       DurableFileSpec.in_tmp do |dir|
         path = File.join(dir, "cfg.json")

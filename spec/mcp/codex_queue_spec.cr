@@ -24,6 +24,7 @@ describe Gori::MCP::CodexQueue do
   end
 
   it "takes the NEWEST lock when the parent holds more than one" do
+    posix_only!("Codex's lock path is matched in its POSIX spelling")
     # A `/new` in the Codex TUI opens the next thread's lock while the old fd is still open.
     # First-match would hand the operator's line to the thread they just left — and a CARRIED
     # row would then retire it before the live thread ever saw it.
@@ -56,6 +57,7 @@ describe Gori::MCP::CodexQueue do
   end
 
   it "finds a live lock through the platform's open-file list" do
+    posix_only!("open files come from /proc or lsof")
     # Against THIS process, which is the same question `discover` asks about its parent — and
     # the only way to pin the `/proc` and `lsof` halves on the platform that runs them.
     dir = File.tempname("gori-codex-home")

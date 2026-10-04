@@ -672,6 +672,7 @@ end
 # and again at send — every hook's runs doubled before the first dial.
 describe "Fuzz::Plan gRPC field preflight and exec hooks" do
   it "does not run a field's exec: chain at plan time" do
+    posix_only!("a #!/bin/sh hook script")
     with_demo_schema do
       dir = File.tempname("gori-grpc-hook")
       Dir.mkdir_p(dir)

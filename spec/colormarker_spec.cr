@@ -66,20 +66,18 @@ private def close_bounded(store : Gori::Store, span : Time::Span) : Bool
 end
 
 # `Settings.save` refusing every write, reached without any lock contention and without
-# touching Settings' in-memory state: an unwritable config dir (the `File.chmod` lever
-# spec/durable_file_spec.cr:70 already uses).
+# touching Settings' in-memory state: a config dir that cannot be created because its parent
+# is a file — refused for root and on Windows too, where a mode bit is not.
 private def with_unwritable_settings(&)
   jail = File.tempname("gori-colormarker-settings")
-  Dir.mkdir_p(jail)
-  dir = File.join(jail, "home") # never created: the parent below refuses it
+  File.write(jail, "")
+  dir = File.join(jail, "home") # never created: its parent is a file
   prev_home = ENV["GORI_HOME"]?
   begin
     ENV["GORI_HOME"] = dir
-    File.chmod(jail, 0o500)
     Gori::Settings.save.should be_false # the lever works
     yield
   ensure
-    File.chmod(jail, 0o700)
     prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
     FileUtils.rm_rf(jail)
   end

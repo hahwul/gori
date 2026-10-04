@@ -152,6 +152,7 @@ describe "gori run — what a refused open blames" do
   # SQLite writes `-wal` and `-shm` BESIDE the file, so a writable database in a read-only
   # directory fails exactly the same way and has to be named the same way.
   it "counts the directory, because WAL needs it" do
+    posix_only!("a read-only directory (Windows has no directory write bit)")
     next unless permissions_enforced?
     with_tempdir do |dir|
       db = File.join(dir, "gori.db")
@@ -185,6 +186,7 @@ describe "gori run — what a refused open blames" do
   # history --db …` on one answered "not a valid SQLite database (or unreadable)" about a
   # database that is both — the single most misleading thing this surface could say.
   it "names the directory when even a READ needs it" do
+    posix_only!("a read-only directory (Windows has no directory write bit)")
     next unless permissions_enforced?
     with_tempdir do |dir|
       db = File.join(dir, "gori.db")

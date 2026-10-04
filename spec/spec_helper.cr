@@ -87,6 +87,22 @@ rescue
   false
 end
 
+# Two connected stream sockets, for an example that needs real fds talking to each other.
+# Loopback TCP rather than `UNIXSocket.pair`, which has no Windows implementation.
+def stream_pair : {TCPSocket, TCPSocket}
+  server = TCPServer.new("127.0.0.1", 0)
+  begin
+    pair = {TCPSocket.new("127.0.0.1", server.local_address.port), server.accept}
+  ensure
+    server.close
+  end
+  pair.each do |sock|
+    sock.sync = true
+    sock.tcp_nodelay = true
+  end
+  pair
+end
+
 # A hung example is not a failure, it is a suite that never ends: a bare `channel.receive`
 # waiting on a server that was never reached parks the one fiber the runner has, the process
 # sits at 0% CPU, and the dots are buffered so the log says nothing. Such processes outlived
@@ -107,6 +123,14 @@ SPEC_EXAMPLE_TIMEOUT = ENV["GORI_SPEC_EXAMPLE_TIMEOUT"]?.try(&.to_i?) || 300
 {% if flag?(:win32) %}
   STDOUT.sync = true
 {% end %}
+
+# Marks the running example pending on Windows, where *reason* (a POSIX-only mechanism the
+# example depends on) does not exist. Everywhere else it is a no-op.
+def posix_only!(reason : String, file = __FILE__, line = __LINE__) : Nil
+  {% if flag?(:win32) %}
+    pending!("POSIX only: #{reason}", file, line)
+  {% end %}
+end
 
 module SpecWatchdog
   class_property ticks = 0_i64
@@ -445,4 +469,10 @@ def stdout_silenced(&)
       STDOUT.reopen(IO::FileDescriptor.new(saved))
     end
   {% end %}
+end
+
+# `Dir.glob` over path parts joined like `File.join`. A glob pattern takes `/` on every
+# platform (`\` escapes), so on Windows the joined parts are turned POSIX first.
+def glob_files(*parts : String) : Array(String)
+  Dir.glob(Path.new(*parts).to_posix.to_s)
 end

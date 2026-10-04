@@ -22,6 +22,7 @@ end
 describe Gori::Paths do
   describe ".ensure_dir" do
     it "creates a missing directory at 0700" do
+      posix_only!("POSIX mode bits")
       with_tmp_dir do |dir|
         fresh = File.join(dir, "made", "by", "gori")
         Gori::Paths.ensure_dir(fresh)
@@ -30,6 +31,7 @@ describe Gori::Paths do
     end
 
     it "tightens a pre-existing loose directory by default" do
+      posix_only!("POSIX mode bits")
       with_tmp_dir do |dir|
         # An 0755 tree from an install that predates DIR_MODE.
         File.chmod(dir, 0o755)
@@ -42,6 +44,7 @@ describe Gori::Paths do
     # ~/dotfiles to 0700, and a relative `--config gori.json` did it to the working
     # directory.
     it "leaves a pre-existing directory's mode alone with tighten: false" do
+      posix_only!("POSIX mode bits")
       with_tmp_dir do |dir|
         File.chmod(dir, 0o755)
         Gori::Paths.ensure_dir(dir, tighten: false)
@@ -52,6 +55,7 @@ describe Gori::Paths do
     # Not owning a directory it FINDS does not mean not owning one it MAKES: an intermediate
     # gori has to create for the config file is still gori's, so it is created locked.
     it "still creates a missing directory at 0700 with tighten: false" do
+      posix_only!("POSIX mode bits")
       with_tmp_dir do |dir|
         File.chmod(dir, 0o755)
         nested = File.join(dir, "profiles")
@@ -100,6 +104,7 @@ end
 describe Gori::Paths do
   describe ".ensure_dir failure reporting" do
     it "reports an unwritable parent as a Gori::Error, not a File::Error" do
+      posix_only!("a read-only directory (Windows has no directory write bit)")
       with_tmp_dir do |dir|
         locked = File.join(dir, "locked")
         Dir.mkdir(locked, 0o500) # readable + traversable, NOT writable

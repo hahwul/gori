@@ -125,8 +125,8 @@ describe Gori::Tui::CAImportOverlay do
     h.press(Termisu::Input::Key::Enter)
     h.type("~/gori-spec-no-such-dir/ca.key")
     ov.cert_path.should eq("~/gori-spec-no-such-dir/ca.pem")
-    ov.resolved_cert_path.should eq(File.join(Path.home.to_s, "gori-spec-no-such-dir/ca.pem"))
-    ov.resolved_key_path.should eq(File.join(Path.home.to_s, "gori-spec-no-such-dir/ca.key"))
+    ov.resolved_cert_path.should eq(File.join(Path.home.to_s, "gori-spec-no-such-dir", "ca.pem"))
+    ov.resolved_key_path.should eq(File.join(Path.home.to_s, "gori-spec-no-such-dir", "ca.key"))
     CAImportOverlay.new.resolved_cert_path.should be_empty # empty stays empty: "both required"
   end
 end

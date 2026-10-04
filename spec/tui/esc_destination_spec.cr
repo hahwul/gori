@@ -21,7 +21,7 @@ describe "the esc hint names where esc actually goes" do
     # promise nothing keeps.
     root = File.join(__DIR__, "..", "..", "src", "gori")
     offenders = [] of String
-    Dir.glob(File.join(root, "tui", "controllers", "*.cr")).sort.each do |path|
+    glob_files(root, "tui", "controllers", "*.cr").sort.each do |path|
       src = File.read(path)
       # `esc sub-tabs` contains `esc tabs` as a substring; the preceding char separates them.
       next unless src.matches?(/[^-]esc tabs/)

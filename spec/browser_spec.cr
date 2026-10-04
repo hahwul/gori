@@ -144,6 +144,7 @@ describe Gori::Browser do
   describe ".launch" do
     root = File.join(Dir.tempdir, "gori-browser-launch-spec-#{Process.pid}")
     bin = ->(name : String, body : String) do
+      posix_only!("a #!/bin/sh stand-in browser")
       Dir.mkdir_p(root)
       path = File.join(root, name)
       File.write(path, "#!/bin/sh\n#{body}\n")
@@ -233,6 +234,7 @@ describe Gori::Browser do
     # launch() has to pass found.id into chromium_args — the unit spec above only
     # covers the builder. A wrapper that dies on --test-type is the #700 shape.
     it "launches Brave without --test-type so a 1.92+ CHECK does not fire" do
+      posix_only!("a #!/bin/sh stand-in browser")
       Dir.mkdir_p(root)
       path = File.join(root, "brave-probe")
       File.write(path, "#!/bin/sh\necho \"$@\" | grep -q -- --test-type && exit 133\nsleep 30\n")

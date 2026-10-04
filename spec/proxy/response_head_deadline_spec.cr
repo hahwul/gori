@@ -34,7 +34,7 @@ describe "proxy head reads carry the slowloris deadline" do
   it "passes deadline:/timeout_sock: at every Codec::Http1.read_head call under src/gori/proxy" do
     root = File.join(__DIR__, "..", "..", "src", "gori", "proxy")
     offenders = [] of String
-    Dir.glob(File.join(root, "**", "*.cr")).sort.each do |path|
+    glob_files(root, "**", "*.cr").sort.each do |path|
       src = File.read(path)
       # One level of nesting is enough for the `SocketTuning.underlying_socket(io)` argument.
       src.scan(/Codec::Http1\.read_head\((?:[^()]|\([^()]*\))*\)/m) do |m|
