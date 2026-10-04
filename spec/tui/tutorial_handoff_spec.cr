@@ -93,4 +93,38 @@ describe "Gori::Tui::Tutorial minimum-width footer" do
       Gori::Tui::Screen.draw_width(hint).should be <= 40
     end
   end
+
+  it "keeps the entire navigation move visible at the 40-column floor" do
+    hint = Tour.navigation_try_hint
+    hint.should contain("↓ until BODY")
+    hint.should contain("↑ until TABS")
+    Gori::Tui::Screen.draw_width(hint).should be > 40
+
+    hint = Tour.compact_footer_hint(Tour::Step::Navigate)
+    hint.should contain("↓ until BODY")
+    hint.should contain("↑ until TABS")
+    Gori::Tui::Screen.draw_width(hint).should be <= 40
+  end
+
+  it "marks Enter as Next only for completed Practice" do
+    enter = Termisu::Input::Key::Enter
+    Tour.practice_next_on_enter?(Tour::Step::Practice, true, enter).should be_true
+    Tour.practice_next_on_enter?(Tour::Step::Practice, false, enter).should be_false
+    Tour.practice_next_on_enter?(Tour::Step::Navigate, true, enter).should be_false
+    Tour.practice_next_on_enter?(Tour::Step::Practice, true, Termisu::Input::Key::LowerA).should be_false
+  end
+
+  it "shows overlay controls before the completed Practice hint" do
+    hint = Tour.practice_status_hint(:palette, true, false, "1-5")
+    hint.should contain("↵ run")
+    hint.should contain("esc close")
+    hint.should_not contain("Nicely done")
+    Gori::Tui::Screen.draw_width(hint).should be <= 36
+  end
+
+  it "shows the completed Practice handoff instead of the INS hint" do
+    hint = Tour.practice_status_hint(:none, true, true, "1-5")
+    hint.should contain("Nicely done")
+    hint.should contain("press ↵")
+  end
 end
