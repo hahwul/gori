@@ -115,17 +115,17 @@ describe "HistoryView — view mode" do
   end
 
   it "draws the DEFAULT view's chip whole — the one everybody looks at was the one being cut" do
-    # `History + Repeater` is 18 columns against VIEW_CHIP_NAME_MAX's 14, so the chip a fresh
+    # `History + Repeater` is 18 columns against VIEW_CHIP_NAME_MAX's 16, so the chip a fresh
     # project opens on read `v:History + Re…`. `CHIP_LABELS` is what stops the most-seen chip
     # on the bar from being the one wearing an ellipsis.
     with_store do |store|
       view = HistoryView.new
       view.set_view(Gori::SavedViews.default_view(store))
       view.reload(store)
-      # Its neighbour immediately after it: a truncated label would read `v:history+rpt…`, and
+      # Its neighbour immediately after it: a truncated label would read `v:history+repea…`, and
       # an ellipsis anywhere else on this row belongs to the filter hint, not to the chip.
       row = screen_rows(view).first
-      row.should contain("v:history+rptr ⌁follow")
+      row.should contain("v:history+repeater ⌁follow")
       row.should_not contain("v:History")
     end
   end
@@ -152,7 +152,7 @@ describe "HistoryView — view mode" do
 
       view.set_view(Gori::SavedViews::View.new("2", "A Name Far Too Long To Fit", "src:proxy", "project"))
       view.reload(store)
-      screen_text(view).should contain("v:a name far to…")
+      screen_text(view).should contain("v:a name far too …")
     end
   end
 
@@ -210,7 +210,7 @@ describe "HistoryView — view mode" do
       # The bar's own branch, not the first-run card: the note explains WHY (the view is also
       # narrowing) and the hint points back at the thing they just typed.
       text.should contain("/ to edit the filter")
-      text.should contain("v:history+rptr also narrows to")
+      text.should contain("v:history+repeater also narrows to")
     end
   end
 

@@ -106,10 +106,9 @@ module Gori::Tui
     # while Intercept's listed both — so an operator looking for "everything EXCEPT" found nothing
     # on the two surfaces most likely to be asked the question.
     #
-    # FILTER_HINT sits on the idle bar (press `/` to start filtering); QUERY_HINT sits on the
+    # `idle_hint` fills the idle bar (press `/` to start filtering); QUERY_HINT sits on the
     # suggestion row at a cold start (already editing, nothing to Tab-complete yet).
-    FILTER_HINT = QuerySuggest.idle_hint("/ filter")
-    QUERY_HINT  = QuerySuggest.cold_hint(help_key: true)
+    QUERY_HINT = QuerySuggest.cold_hint(help_key: true)
     # The editing bar's label. A constant because `render_query_popup` has to line the dropdown
     # up under the token, which means knowing exactly how far the query text is indented.
     QUERY_PREFIX = "filter › "
@@ -4008,7 +4007,7 @@ module Gori::Tui
         # affordance + fields rather than a bare "(in-scope only)": the Scope lens is
         # already signalled by the `s` chip on the right, so this row isn't wasted
         # repeating it, and the user's next move here is to ADD a query atop the lens.
-        screen.text(rect.x + 1, rect.y, FILTER_HINT, Theme.muted, width: left_w)
+        screen.text(rect.x + 1, rect.y, QuerySuggest.idle_hint("/ filter", width: left_w), Theme.muted, width: left_w)
       end
     end
 
@@ -4098,7 +4097,7 @@ module Gori::Tui
     # Every builtin fits under this by construction — `SavedViews::CHIP_LABELS` shortens the one
     # that did not — and `spec/tui/history_view_mode_spec.cr` holds them to it, so the `fit`
     # below truncates operator-typed names ONLY, the one case where an ellipsis is honest.
-    VIEW_CHIP_NAME_MAX = 14
+    VIEW_CHIP_NAME_MAX = 16
 
     # `Screen.fit`, not `screen.fit`: this is measured by the hit-test as well as drawn, and
     # the hit-test has no Screen. The truncation is stateless either way.

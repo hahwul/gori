@@ -44,9 +44,6 @@ module Gori::Tui
     # a fact no generator over a field list could know.
     QUERY_HINT = QuerySuggest.cold_hint(InterceptFilter::HINT_FIELDS,
       note: "proto:ws opts WS messages IN", help_key: true)
-    # The idle bar, before `/` opens the condition. Same generator as History's and Sitemap's, so
-    # the three stop disagreeing about which operators exist.
-    IDLE_HINT = QuerySuggest.idle_hint("/ condition", InterceptFilter::HINT_FIELDS)
     # The highlighter's field vocabulary. This backend's `FIELDS` really is the whole of what it
     # accepts (the comment there requires it to stay in lockstep with `field_symbol`), so unlike
     # History there is no wider accepted set to reach for.
@@ -1127,7 +1124,7 @@ module Gori::Tui
         return
       end
       if @query.blank?
-        screen.text(x, rect.y, IDLE_HINT, Theme.muted, width: left_w)
+        screen.text(x, rect.y, QuerySuggest.idle_hint("/ condition", InterceptFilter::HINT_FIELDS, left_w), Theme.muted, width: left_w)
       else
         # The committed condition stays highlighted — this readout is what you scan to
         # check WHY something is (or isn't) being held.

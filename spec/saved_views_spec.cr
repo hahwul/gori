@@ -68,8 +68,8 @@ describe Gori::SavedViews do
       # `--view`, MCP and the docs all keep `History + Repeater`, and `resolve_by_name`
       # downcases, so a chip read off the bar and typed back in still resolves.
       Gori::SavedViews::BUILTINS.map(&.chip_label).should eq(
-        ["all", "history", "history+rptr", "websocket", "grpc", "sse", "errors"])
-      # `rptr` is not new vocabulary: it is what the SRC column prints and what `src:rptr` takes.
+        ["all", "history", "history+repeater", "websocket", "grpc", "sse", "errors"])
+      # Spelled out: the default chip is the first one a newcomer reads.
       Gori::SavedViews::CHIP_LABELS.size.should eq(1)
     end
 
