@@ -56,11 +56,16 @@ describe Gori::App::SignalGuard do
     rec.armed.should contain(Signal::TERM)
     # HUP: an SSH drop kills gori while the tmux/screen session it ran in survives, so the
     # surviving pane is the one left wrecked. Headless capture deliberately does NOT trap it.
-    rec.armed.should contain(Signal::HUP)
+    {% unless flag?(:win32) %}
+      # Windows has no HUP
+      rec.armed.should contain(Signal::HUP)
+    {% end %}
     # The TUI owns a raw-mode tty and headless capture does not, so the TUI can never handle
     # a strictly smaller set than the path that has less to lose.
     (Gori::App::CAPTURE_SIGNALS - Gori::App::TUI_SIGNALS).should be_empty
-    Gori::App::CAPTURE_SIGNALS.should_not contain(Signal::HUP)
+    {% unless flag?(:win32) %}
+      Gori::App::CAPTURE_SIGNALS.should_not contain(Signal::HUP)
+    {% end %}
     # Arming alone must not fire anything — the terminal is still in use.
     rec.died.should be_empty
   end
@@ -94,9 +99,10 @@ describe Gori::App::SignalGuard do
     restore = rec.restore { raise IO::Error.new("tty is gone") }
     Gori::App::SignalGuard.new(restore, arm: rec.arm, die: rec.die).install
 
-    rec.handlers[Signal::HUP].call
+    sig = Gori::App::TUI_SIGNALS.last # HUP, TERM on Windows
+    rec.handlers[sig].call
     rec.trace.should eq([:restore, :die])
-    rec.died.should eq([Signal::HUP])
+    rec.died.should eq([sig])
   end
 
   it "honours an explicit signal set" do

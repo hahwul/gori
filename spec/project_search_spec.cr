@@ -323,7 +323,11 @@ describe Gori::ProjectSearch do
       empty = project_in(dir, "empty")
       File.write(empty.db_path, "")
       fifo = project_in(dir, "fifo")
-      LibC.mkfifo(fifo.db_path, 0o600).should eq(0)
+      {% if flag?(:win32) %}
+        Dir.mkdir(fifo.db_path) # no FIFOs on Windows; a directory is not a regular file either
+      {% else %}
+        LibC.mkfifo(fifo.db_path, 0o600).should eq(0)
+      {% end %}
       corrupt = project_in(dir, "corrupt")
       File.write(corrupt.db_path, Gori::Store::SQLITE_MAGIC.to_a.map(&.chr).join + ("\xff" * 4000))
       foreign = project_in(dir, "foreign")

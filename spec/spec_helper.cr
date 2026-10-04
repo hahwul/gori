@@ -102,6 +102,12 @@ end
 # The one-second timer does not fire during sleep, so ticks only count time the suite had.
 SPEC_EXAMPLE_TIMEOUT = ENV["GORI_SPEC_EXAMPLE_TIMEOUT"]?.try(&.to_i?) || 300
 
+# A native crash on Windows ends the process without flushing a buffered STDOUT, which would
+# take the name of the example that crashed with it.
+{% if flag?(:win32) %}
+  STDOUT.sync = true
+{% end %}
+
 module SpecWatchdog
   class_property ticks = 0_i64
   class_property running : {Spec::Example, Int64}? = nil
@@ -412,4 +418,31 @@ def with_wordlist_home(&)
     FileUtils.rm_rf(home)
     FileUtils.rm_rf(cwd)
   end
+end
+
+{% unless flag?(:win32) %}
+  # `dup(2)` is not in Crystal's LibC bindings; one line binds it for the helper below.
+  lib LibC
+    fun dup(fd : Int) : Int
+  end
+{% end %}
+
+# Run the block with STDOUT pointed at /dev/null — for driving a `gori run` entry point whose
+# normal output is the help page, when the example is about a side effect and not the page.
+# Windows runs it unsilenced: its STDOUT is a handle, not an fd to `dup`, and the noise is
+# only cosmetic.
+def stdout_silenced(&)
+  {% if flag?(:win32) %}
+    yield
+  {% else %}
+    STDOUT.flush
+    saved = LibC.dup(STDOUT.fd)
+    File.open(File::NULL, "w") { |null| STDOUT.reopen(null) }
+    begin
+      yield
+    ensure
+      STDOUT.flush
+      STDOUT.reopen(IO::FileDescriptor.new(saved))
+    end
+  {% end %}
 end

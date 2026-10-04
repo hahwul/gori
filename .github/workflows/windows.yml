@@ -1,6 +1,6 @@
 ---
 name: Windows
-# Native Windows build + smoke test (#1510). Its own workflow rather than a ci.yml job
+# Native Windows build, smoke test and spec suite (#1510). Its own workflow rather than a ci.yml job
 # because it also runs on stacked PRs, whose base is not main.
 on:
   pull_request:
@@ -31,6 +31,7 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 90
     defaults:
       run:
         shell: bash
@@ -134,3 +135,11 @@ jobs:
               sys.exit("the TUI did not quit on ^C ^C")
           print(f"exit status {p.exitstatus}")
           sys.exit(0 if p.exitstatus == 0 else 1)
+      - name: Specs
+        # Runs even when the smoke test failed: the two find different things.
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        # Built, not `crystal spec`: that hands --static to the runner instead of the linker.
+        run: |
+          echo 'require "./spec/**"' > all_specs.cr
+          crystal build all_specs.cr -o bin/specs.exe --no-debug --static
+          ./bin/specs.exe --verbose

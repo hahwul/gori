@@ -1,3 +1,7 @@
+# Drives termisu's reader over a pipe fd, which the Windows reader does not read (it reads the
+# console, `termisu/windows.cr`); the pins below run on every POSIX job.
+{% skip_file if flag?(:win32) %}
+
 require "../spec_helper"
 
 # Guards the carried patch in `src/gori/tui/paste_end_marker_patch.cr` by asserting the

@@ -47,7 +47,7 @@ describe Gori::MCP::ClaudeInbox do
         Inbox.discover(1_i64).should eq(path)
         Inbox.discover(1_i64 << 40).should be_nil
         Inbox.discover(1_i64, uid: "4294967294").should be_nil # a socket another user owns
-        uid = LibC.getuid.to_s
+        uid = Inbox.uid
         Inbox.ours?(path, uid).should be_true
         link = File.join(File.dirname(path), "2.sock")
         File.symlink(path, link)
