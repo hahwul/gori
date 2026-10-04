@@ -9,18 +9,7 @@ private def with_store(&)
   begin
     yield store
   ensure
-    # ponytail: a read after `close` (each example's write reads first) reopens the pool, and
-    # Windows will not delete a file that is still open. Left in the temp dir there; the
-    # reopen itself is a separate store bug.
-    {% if flag?(:win32) %}
-      File.delete?(path) rescue nil
-      File.delete?("#{path}-wal") rescue nil
-      File.delete?("#{path}-shm") rescue nil
-    {% else %}
-      File.delete?(path)
-      File.delete?("#{path}-wal")
-      File.delete?("#{path}-shm")
-    {% end %}
+    delete_db_files(path) # each example's write reads after `close`, which reopens the pool
   end
 end
 

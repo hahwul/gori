@@ -183,7 +183,8 @@ describe Gori::WordlistCatalog do
         Dir.mkdir_p(File.join(dir, "adir"))
         File.write(File.join(dir, ".DS_Store"), "x")
         File.write(File.join(dir, ".ok.txt.gori123.tmp"), "x")
-        File.write(File.join(dir, "trailing-dot."), "x")
+        # Windows strips a trailing dot from a file name, so there it would create `trailing-dot`.
+        File.write(File.join(dir, "trailing-dot."), "x") unless {{ flag?(:win32) }}
         File.write(File.join(dir, "good.txt"), "x\n")
         Catalog.list.entries.map(&.name).should eq(["good.txt"])
       end

@@ -127,6 +127,11 @@ module Gori
         end
         real = File.realpath(candidate)
         return refused("the path resolves outside the mapped directory", rel) unless Paths.within?(real, root)
+        # Again on the resolved path: a Windows 8.3 short name (`GIT~1`) or a symlink can reach a
+        # dotfile the request never spelled.
+        if Path.new(real[root.rstrip(Path::SEPARATORS.join).size..]).parts.any?(&.starts_with?('.'))
+          return refused("the path resolves to a dot segment or a dotfile", rel)
+        end
         Result.new(Outcome::Hit, path: real, rel: rel)
       end
 

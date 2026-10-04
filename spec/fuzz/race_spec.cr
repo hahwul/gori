@@ -70,6 +70,8 @@ private class RaceOrigin
       conn << "HTTP/1.1 200 OK\r\nContent-Length: #{body.bytesize}\r\n\r\n" << body
       conn.flush
     end
+  rescue IO::Error
+    # The same abandoned connection, noticed on the answer instead (Windows: WSASend aborted).
   ensure
     conn.close rescue nil
   end
@@ -135,6 +137,7 @@ describe "Fuzz::Sender#send_race" do
   end
 
   it "excludes a connection that fails to dial, and still races the rest" do
+    posix_only!("a closed listener refuses the next dial; Windows has already queued it in the backlog")
     origin = RaceOrigin.new(max_accepts: 4)
     n = 5
     results = race_sender(origin).send_race(race_jobs(n))

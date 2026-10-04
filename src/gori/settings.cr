@@ -512,6 +512,8 @@ module Gori
     # size have not moved has not been written; a same-size rewrite still moves its mtime.
     @@reloaded_stat : Hash(String, {String, Time, Int64}) = {} of String => {String, Time, Int64}
 
+    private RACY_WINDOW = 2.seconds
+
     private def self.file_signature : {String, Time, Int64}?
       info = File.info(path)
       {path, info.modification_time, info.size.to_i64}
@@ -551,7 +553,11 @@ module Gori
     private def self.settle_section(key : String, here : {String, String},
                                     sig : {String, Time, Int64}?) : Nil
       @@reloaded_from[key] = here
-      @@reloaded_stat[key] = sig if sig
+      # A stamp too fresh to trust is not kept (git's "racily clean"): a filesystem with a coarse
+      # clock, Windows' for one, stamps two same-length writes a few milliseconds apart alike,
+      # so a peer's write right after this read would match it. Until the stamp ages, the
+      # content check above decides.
+      @@reloaded_stat[key] = sig if sig && sig[1] < Time.utc - RACY_WINDOW
     end
 
     # Forget what `reload_section` last folded, so the next call re-reads whatever the file says.

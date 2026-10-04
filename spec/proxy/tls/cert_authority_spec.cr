@@ -240,6 +240,7 @@ describe Gori::Proxy::Tls::CertAuthority do
   # lone cert and refused to start. Both now wait on an flock of the directory.
   describe "the CA directory lock" do
     it "makes a first run wait for another process holding the dir" do
+      posix_only!("flock on a directory; Windows will not open one as a file, so the lock is skipped there")
       with_ca_dir do |dir|
         Dir.mkdir_p(dir)
         holder = File.open(dir, "r")
@@ -265,6 +266,7 @@ describe Gori::Proxy::Tls::CertAuthority do
     end
 
     it "makes a rotation wait too, and is not held after it returns" do
+      posix_only!("flock on a directory; Windows will not open one as a file, so the lock is skipped there")
       with_ca_dir do |dir|
         ca = Gori::Proxy::Tls::CertAuthority.load_or_create(dir)
         before = File.read(ca.ca_cert_path)

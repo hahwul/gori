@@ -241,10 +241,6 @@ describe "gori run repeater create — the request source" do
   end
 end
 
-lib LibC
-  fun dup(fd : Int) : Int
-end
-
 # With `--curl`, `--flow` is provenance only: the curl command already said which protocol it
 # speaks. The flow's own protocol overwrote it, while MCP `create_repeater{curl, flow_id}` kept
 # curl's — the same inputs stored `http2` both ways.
@@ -268,7 +264,7 @@ describe "gori run repeater create --curl --flow" do
       store.close
     ensure
       File.delete?(curl)
-      {db, "#{db}-wal", "#{db}-shm"}.each { |p| File.delete?(p) }
+      delete_db_files(db)
     end
   end
 end

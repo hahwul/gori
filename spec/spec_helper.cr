@@ -96,10 +96,7 @@ def stream_pair : {TCPSocket, TCPSocket}
   ensure
     server.close
   end
-  pair.each do |sock|
-    sock.sync = true
-    sock.tcp_nodelay = true
-  end
+  pair.each(&.tcp_nodelay = true)
   pair
 end
 
@@ -291,16 +288,39 @@ end
 # the store, an event channel, a retention knob, an Env layer restored on exit) keeps a
 # file-private `with_store` of its own — a top-level `private def` shadows this one inside
 # that file only, so the two never collide.
+#
+# The teardown runs after the `rescue`, never in an `ensure`: on Windows a fiber switch while an
+# exception unwinds (`Store#close` waits on the writer fiber) ends the process without a word, so
+# an example that failed, or went pending, inside the store took the rest of its file with it.
 def with_store(&)
   path = File.tempname("gori-spec", ".db")
   store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
+  raised = run_capturing { yield store }
+  store.close
+  delete_db_files(path)
+  raise raised if raised
+end
+
+# Runs the block and hands back what it raised, so a teardown that switches fibers can run once
+# the exception has finished unwinding (see `with_store`), and re-raise it after.
+def run_capturing(&) : Exception?
+  yield
+  nil
+rescue ex
+  ex
+end
+
+# Deletes a throwaway database and its WAL/SHM sidecars. Windows will not delete a file that
+# is still open, and a read after `Store#close` reopens the pool (a known store bug; an example
+# that closes its store to make writes fail reads after it), so there the files are left in
+# the temp dir rather than failing an example on its teardown.
+def delete_db_files(path : String) : Nil
+  {path, "#{path}-wal", "#{path}-shm"}.each do |file|
+    {% if flag?(:win32) %}
+      File.delete?(file) rescue nil
+    {% else %}
+      File.delete?(file)
+    {% end %}
   end
 end
 
@@ -336,17 +356,13 @@ def with_store_env(&)
   store = Gori::Store.open(path)
   prev_env = Gori::Settings.project_env_vars
   prev_layer = Gori::Env.layer
-  begin
-    yield store
-  ensure
-    Gori::Env.layer = prev_layer
-    Gori::Settings.project_env_vars = prev_env
-    Gori::Env.bump_highlight_rev
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
+  raised = run_capturing { yield store } # not an `ensure`: see `with_store`
+  Gori::Env.layer = prev_layer
+  Gori::Settings.project_env_vars = prev_env
+  Gori::Env.bump_highlight_rev
+  store.close
+  delete_db_files(path)
+  raise raised if raised
 end
 
 # The MCP tool facade over a store, built the way `gori mcp` builds it for a bound project:
@@ -475,4 +491,11 @@ end
 # platform (`\` escapes), so on Windows the joined parts are turned POSIX first.
 def glob_files(*parts : String) : Array(String)
   Dir.glob(Path.new(*parts).to_posix.to_s)
+end
+
+# Reads a request head off a test origin's connection before it answers. Windows answers a
+# close over unread bytes with an RST, which throws the reply away before the client reads it.
+def drain_request_head(io : IO) : Nil
+  while (line = io.gets) && !line.empty?
+  end
 end

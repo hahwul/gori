@@ -544,7 +544,7 @@ describe Gori::Proxy::Tls::Tunnel do
       seen = Channel(String).new(1)
       done = Channel(Nil).new(1)
       store = Gori::Store.open(dbpath)
-      begin
+      raised = run_capturing do # not an `ensure`: see `with_store`
         origin_port = start_tls_origin("FROM-ORIGIN", seen)
         ca = CertAuthority.load_or_create(dir)
         rules = Gori::Rules.load(store)
@@ -574,12 +574,16 @@ describe Gori::Proxy::Tls::Tunnel do
         outcome = begin
           tls.gets_to_end.empty? ? "eof" : "bytes"
         rescue ex : IO::Error | OpenSSL::SSL::Error
-          ex.message.to_s.downcase.includes?("reset") ? "reset" : "error: #{ex.message}"
+          # Windows words a reset as "An existing connection was forcibly closed by the remote host".
+          msg = ex.message.to_s.downcase
+          msg.includes?("reset") || msg.includes?("forcibly closed") ? "reset" : "error: #{ex.message}"
         end
         tls.close rescue nil
         proxy.stop
 
-        outcome.should eq(kind == "reset" ? "reset" : "eof")
+        # Crystal's Windows sockets read a reset as EOF (`connreset_is_error: false`); the
+        # recorded error below still tells the two apart there.
+        outcome.should eq(kind == "reset" && !{{ flag?(:win32) }} ? "reset" : "eof")
         sink.requests.first.short_circuited?.should be_true
         sink.responses.first.error.not_nil!.should start_with("injected #{kind} by project rule #")
         select
@@ -587,13 +591,11 @@ describe Gori::Proxy::Tls::Tunnel do
           fail "gori reached the origin for a faulted request"
         else
         end
-      ensure
-        store.close
-        FileUtils.rm_rf(dir) if Dir.exists?(dir)
-        File.delete?(dbpath)
-        File.delete?("#{dbpath}-wal")
-        File.delete?("#{dbpath}-shm")
       end
+      store.close
+      FileUtils.rm_rf(dir) if Dir.exists?(dir)
+      delete_db_files(dbpath)
+      raise raised if raised
     end
   end
 

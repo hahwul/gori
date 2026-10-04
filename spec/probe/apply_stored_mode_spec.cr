@@ -13,9 +13,7 @@ private def with_probe_store(&)
     yield store
   ensure
     store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
+    delete_db_files(path)
   end
 end
 
@@ -47,9 +45,7 @@ private def with_refused_writes(&)
   ensure
     mine.close
     peer.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
+    delete_db_files(path)
   end
 end
 

@@ -69,6 +69,7 @@ private def start_origin(*extra : String) : Int32
   lines = extra.join("\r\n")
   spawn do
     while conn = origin.accept?
+      drain_request_head(conn)
       conn << "HTTP/1.1 200 OK\r\n#{lines}\r\nContent-Length: 4\r\nConnection: close\r\n\r\nBODY"
       conn.flush
       conn.close

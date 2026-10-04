@@ -262,7 +262,7 @@ describe Gori::MCP::Server do
 
         rules = mcp_tool_payload(mcp_drive(store, %({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_rules"}}))[0])["rules"]
         rules[0]["respond"].as_s.should eq("dir")
-        rules[0]["body_file"].as_s.should eq("/srv/js")
+        rules[0]["body_file"].as_s.should eq(File.expand_path("/srv/js"))
         rules[0]["respond_args"]["strip_prefix"].as_s.should eq("/static/")
         rules[0]["fallthrough"].as_bool.should be_true
         rules[1]["respond"].as_s.should eq("fault")
@@ -383,7 +383,7 @@ describe Gori::MCP::Server do
         mcp_tool_payload(mcp_drive(store, move)[0])["updated"].as_bool.should be_true
         rule = store.match_rules.first
         rule.respond.dir?.should be_true
-        rule.body_file.should eq("/srv/b")
+        rule.body_file.should eq(File.expand_path("/srv/b"))
         rule.args.strip_prefix.should eq("/s/")
 
         both = %({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"create_rule","arguments":{"op":"short_circuit","pattern":"/p","dir":"/x","fault":"reset"}}})

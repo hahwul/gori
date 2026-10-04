@@ -247,7 +247,7 @@ describe Gori::Settings do
       Gori::Settings.upstream_proxy_ca_error("").should be_nil
       Gori::Settings.upstream_proxy_ca_error("/nonexistent/gori-spec/ca.pem").to_s
         .should contain("does not exist")
-      Gori::Settings.upstream_proxy_ca_error("/tmp").to_s.should contain("not a regular file")
+      Gori::Settings.upstream_proxy_ca_error(Dir.tempdir).to_s.should contain("not a regular file")
     end
 
     it "warns about the legacy spelling and about unverified proxy TLS, and refuses neither" do
@@ -1428,7 +1428,7 @@ describe Gori::Settings do
         ENV.delete("VISUAL"); ENV["EDITOR"] = "nano"
         Gori::Settings.editor_command.should eq(["nano"])
         ENV.delete("EDITOR")
-        Gori::Settings.editor_command.should eq(["vi"])
+        Gori::Settings.editor_command.should eq([{{ flag?(:win32) ? "notepad" : "vi" }}])
       ensure
         v ? (ENV["VISUAL"] = v) : ENV.delete("VISUAL")
         e ? (ENV["EDITOR"] = e) : ENV.delete("EDITOR")

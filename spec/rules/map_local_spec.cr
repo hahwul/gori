@@ -116,10 +116,16 @@ describe Gori::RuleStub::MapLocal do
       resolve(root, "/escape/etc/hosts").outcome.should eq(ML::Outcome::Refused)
       resolve(root, "/leak.txt").outcome.should eq(ML::Outcome::Refused)
       resolve(root, "/alias.js").path.should eq(File.join(root, "js", "app.js"))
+      # Inside the root but a dotfile once resolved — what a Windows 8.3 name (`GIT~1`) reaches too.
+      Dir.mkdir(File.join(root, ".git"))
+      File.write(File.join(root, ".git", "config"), "secret")
+      File.symlink(File.join(root, ".git"), File.join(root, "gitlink"))
+      resolve(root, "/gitlink/config").outcome.should eq(ML::Outcome::Refused)
     end
   end
 
   it "serves under a root of / without refusing everything" do
+    posix_only!("a root of / names every absolute path; a Windows path starts with a drive")
     with_mapped_dir do |root, _|
       rel = File.join(root, "js", "app.js").lchop('/')
       res = resolve("/", "/#{rel}")

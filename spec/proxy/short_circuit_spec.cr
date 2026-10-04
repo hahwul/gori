@@ -34,14 +34,10 @@ end
 private def with_rules(&)
   path = File.tempname("gori-sc-proxy", ".db")
   store = Gori::Store.open(path)
-  begin
-    yield Gori::Rules.load(store)
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
+  raised = run_capturing { yield Gori::Rules.load(store) } # not an `ensure`: see `with_store`
+  store.close
+  delete_db_files(path)
+  raise raised if raised
 end
 
 private def add_stub(rules : Gori::Rules, pattern : String, response : String, body_file : String = "")
@@ -84,6 +80,7 @@ private def start_counting_origin(accepts : Channel(Nil)) : Int32
   spawn do
     while conn = origin.accept?
       accepts.send(nil)
+      drain_request_head(conn)
       conn << "HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\nORIGIN"
       conn.flush
       conn.close
@@ -578,10 +575,13 @@ describe "proxy — short-circuit rule" do
         done.receive
         reset = begin
           client.read_timeout = 5.seconds
-          client.gets_to_end
-          false
+          # Crystal's Windows sockets read a reset as EOF (`connreset_is_error: false`), so
+          # there an empty read is all a client can see of it.
+          client.gets_to_end.empty? && {{ flag?(:win32) }}
         rescue ex : IO::Error
-          ex.message.to_s.downcase.includes?("reset")
+          # Windows words a reset as "An existing connection was forcibly closed by the remote host".
+          msg = ex.message.to_s.downcase
+          msg.includes?("reset") || msg.includes?("forcibly closed")
         end
         client.close rescue nil
         proxy.stop

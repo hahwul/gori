@@ -21,9 +21,8 @@ module Gori::Settings
   def self.canonical_wordlist(path : String) : String
     p = path.strip
     dir = Paths.wordlists_dir
-    return p if p == dir || !Paths.within?(p, dir)
-    name = p[dir.size..]
-    name = name[1..] if Path::SEPARATORS.includes?(name[0]?)
+    return p unless Paths.within?(p, dir)
+    name = p[dir.size..].lstrip(Path::SEPARATORS.join)
     WordlistCatalog.valid_name?(name) ? name : p
   end
 

@@ -35,7 +35,8 @@ describe "the termisu pin the carried input back-off is written against" do
     # Both halves asserted non-nil first: `patch[re]? == upstream[re]?` is satisfied by
     # nil == nil, so a rename on BOTH sides (upstream restructures, someone renames the
     # override to match) would leave this green while it checks nothing.
-    signature = /private def run_loop\([^)]*\)[^\n]*/
+    # `\r` too: a Windows checkout of the shard may carry CRLF line ends.
+    signature = /private def run_loop\([^)]*\)[^\r\n]*/
     found = upstream[signature]?
     found.should_not be_nil
     patch[signature]?.should eq(found)

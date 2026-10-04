@@ -105,11 +105,11 @@ describe Gori::Tui::CAImportOverlay do
     begin
       ov = CAImportOverlay.new
       h = OverlayHarness.new(ov)
-      h.type("#{dir}/")                 # opens the dropdown on root.pem
-      h.press(Termisu::Input::Key::Tab) # accept the completion
-      ov.cert_path.should eq(File.join(dir, "root.pem"))
-      h.type("X") # …and the caret is at the END
-      ov.cert_path.should eq(File.join(dir, "root.pemX"))
+      h.type("#{dir}/")                         # opens the dropdown on root.pem
+      h.press(Termisu::Input::Key::Tab)         # accept the completion
+      ov.cert_path.should eq("#{dir}/root.pem") # after the prefix as typed
+      h.type("X")                               # …and the caret is at the END
+      ov.cert_path.should eq("#{dir}/root.pemX")
       h.commits.should eq(0) # completing is not committing
     ensure
       FileUtils.rm_rf(dir)

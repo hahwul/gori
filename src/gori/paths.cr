@@ -98,8 +98,8 @@ module Gori
     # and resolves paths with `\`.
     def self.within?(path : String, dir : String) : Bool
       return true if path == dir
-      return false unless path.starts_with?(dir)
-      Path::SEPARATORS.includes?(dir[-1]?) || Path::SEPARATORS.includes?(path[dir.size]?)
+      base = dir.rstrip(Path::SEPARATORS.join)
+      path.starts_with?(base) && Path::SEPARATORS.includes?(path[base.size]?)
     end
 
     def self.ensure_dirs : Nil

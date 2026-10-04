@@ -20,6 +20,11 @@ private DIAL_LESS = {
   "authorize/passive.cr"  => {2, "a predicate over bytes it throws away"},
 }
 
+# A path under SRC as the tables above spell it: `/`-separated, which a Windows glob is not.
+private def rel_of(path : String) : String
+  Path[path].relative_to(SRC).to_posix.to_s
+end
+
 private def with_tls_rules(rules : Array(Gori::Settings::OutboundTlsRule), &)
   previous = Gori::Settings.outbound_tls
   Gori::Settings.outbound_tls = rules
@@ -38,7 +43,7 @@ describe "the send seam's $GEN context" do
   it "names the dial at every construction, or a reason it cannot" do
     found = Hash(String, Int32).new(0)
     glob_files(SRC, "**", "*.cr").each do |path|
-      rel = path.lchop(SRC + "/")
+      rel = rel_of(path)
       File.each_line(path) do |line|
         next if line.lstrip.starts_with?("#")
         found[rel] += line.scan(/Generation\.new\b/).size
@@ -58,7 +63,7 @@ describe "the send seam's $GEN context" do
     passed = /generation:\s*(?!nil\b)[\w@]|Generation\.for_dial|[(,]\s*(\w+_)?gen\s*\)/
     bare = [] of String
     glob_files(SRC, "**", "*.cr").each do |path|
-      rel = path.lchop(SRC + "/")
+      rel = rel_of(path)
       next if rel == "env.cr"
       lines = File.read_lines(path)
       lines.each_with_index do |line, i|
@@ -87,7 +92,7 @@ describe "the send seam's client hints" do
     overlays = Hash(String, Int32).new(0)
     hints = Hash(String, Int32).new(0)
     glob_files(SRC, "**", "*.cr").each do |path|
-      rel = path.lchop(SRC + "/")
+      rel = rel_of(path)
       next if rel == "env.cr" # where both are defined
       File.each_line(path) do |line|
         next if line.lstrip.starts_with?("#")

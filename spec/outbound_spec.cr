@@ -11,9 +11,7 @@ private def with_scope(&)
     yield Gori::Scope.load(store), store
   ensure
     store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
+    delete_db_files(path)
   end
 end
 
@@ -466,9 +464,7 @@ describe Gori::Outbound do
         ob.sweep_block("https", "acme.test", "/s", 443).should be_nil
         ob.sweep_block("https", "other.test", "/s", 443).should eq(Gori::Outbound::SANDBOX_SWEEP_ERROR)
       ensure
-        File.delete?(path)
-        File.delete?("#{path}-wal")
-        File.delete?("#{path}-shm")
+        delete_db_files(path)
       end
     end
   end
