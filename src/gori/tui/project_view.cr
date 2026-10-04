@@ -2168,11 +2168,12 @@ module Gori::Tui
       return if inner.h <= 0 || inner.w <= 0
       y = inner.y
 
-      # First run (no flows yet): a one-line signpost on how to start, since the empty
-      # History/Sitemap tabs don't say. Costs a row, and `overview_plan` already charged it.
+      # First run (no flows yet): a one-line signpost on how to start. Costs a row, and
+      # `overview_plan` already charged it. One step that needs no setup, plus where the rest
+      # lives (History's empty card: proxy address, CA trust); fits the 80-column overview.
       if plan.signpost
         screen.text(inner.x + 1, y,
-          Hotkeys.retag("▸ first run — point your client at the proxy · ^P: Open browser · Export CA certificate"),
+          Hotkeys.retag("▸ first run — ^P → Open browser, or see History"),
           Theme.muted, width: {inner.right - inner.x - 1, 0}.max)
         y += 1
       end
