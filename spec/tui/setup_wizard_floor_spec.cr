@@ -25,6 +25,10 @@ describe Gori::Tui::SetupWizard do
     SW.modifier_recap("alt").should contain("⌥1-9")
   end
 
+  it "names what each Ctrl chord does in the Shortcuts recap" do
+    SW.modifier_recap("ctrl").should eq("^P palette · ^N new · ^W close  (←/→ adds ⌥)")
+  end
+
   it "keeps local and other-device guidance readable at the minimum width" do
     inner = SW.card_w(SW::MIN_W, 64) - 6
     hints = SW.bind_guidance(inner)
