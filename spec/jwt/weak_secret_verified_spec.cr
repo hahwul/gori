@@ -45,6 +45,14 @@ describe "Jwt.attacks · a weak key that is THIS token's key" do
     verified[0].note.should contain("--encode --secret secret")
   end
 
+  it "reads a header holding a number past Int64, and keeps its digits in every payload" do
+    big = %({"alg":"HS256","typ":"JWT","x5t":18446744073709551616})
+    attacks = Gori::Jwt.attacks(token_for(big, %({"sub":"1"}), "HS256", "secret"))
+    attacks.count(&.verified).should eq(1)
+    none = attacks.find! { |a| a.name == "alg=none" }
+    String.new(Base64.decode(none.token.split('.')[0])).should eq(%({"alg":"none","typ":"JWT","x5t":18446744073709551616}))
+  end
+
   it "leaves every other key a probe, with the note it always had" do
     rows = weak_rows(token_for(%({"alg":"HS256","typ":"JWT"}), %({"sub":"1"}), "HS256", "secret"))
     rows.reject(&.verified).each do |a|

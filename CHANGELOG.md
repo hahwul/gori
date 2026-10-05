@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- JWT: `--attacks` (and MCP `jwt_attacks`, the TUI's payload list) reads a token whose header holds a number past 64 bits, which it refused as undecodable, and keeps that number's digits in every payload
 - Sequencer: a jittered decimal counter collected with two replies swapped is flagged sequential, as the same tokens spelled in hex already were, instead of passing as `non-monotonic`
 - Cookie tools: a Rack session cookie copied off the wire (`%3D`-escaped) now decodes, verifies and cracks, and a forged or re-signed one escapes `+`, which Rack would otherwise read as a space
 - CLI: `evidence show`, `evidence list` and `evidence freeze` name the error a frozen copy stored beside its status, where a cut-short response read as a clean `→ 200`
