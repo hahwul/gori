@@ -167,6 +167,14 @@ describe Gori::Sequencer::Stats do
     seq_detail(shuffled).should eq("constant step 1 (sorted — arrival order was shuffled)")
   end
 
+  it "detects a jittered decimal counter that arrived with one pair swapped, as its hex spelling is" do
+    rng = Random.new(7_u64)
+    vals = (0...300).map { |i| 10_i64**17 + i.to_i64 * 10_i64**12 + rng.rand(10_i64**12) }
+    vals.swap(10, 11)
+    S.analyze(vals.map(&.to_s)).sequential.should be_true
+    S.analyze(vals.map { |v| "%015x" % v }).sequential.should be_true
+  end
+
   it "does not flag a shuffled sample of genuinely random numeric tokens as sequential" do
     rng = Random.new(99_u64)
     random_ints = Array.new(200) { rng.rand(1_000_000).to_s }
