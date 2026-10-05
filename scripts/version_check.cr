@@ -19,7 +19,7 @@ MARKERS = [
   Marker.new("shard.yml", /^version:\s*(\S+)/m),
   Marker.new("src/gori.cr", /VERSION = "([^"]+)"/),
   Marker.new("snap/snapcraft.yaml", /^version:\s*(\S+)/m),
-  Marker.new("aur/PKGBUILD", /^pkgver=(\S+)/m),
+  Marker.new("packaging/aur/PKGBUILD", /^pkgver=(\S+)/m),
   Marker.new("flake.nix", /version = "([^"]+)";/),
   Marker.new("spec/gori_spec.cr", /VERSION\.should eq\("([^"]+)"\)/),
   Marker.new("docs/content/getting-started/installation.md", /You should see `gori ([^`]+)`\./, "version output"),

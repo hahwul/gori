@@ -53,15 +53,15 @@ jobs:
         env:
           PKGREL: ${{ github.event.inputs.pkgrel || '1' }}
         run: |
-          sed -i "s/^pkgver=.*/pkgver=${VERSION}/" aur/PKGBUILD
-          sed -i "s/^pkgrel=.*/pkgrel=${PKGREL}/" aur/PKGBUILD
-          cat aur/PKGBUILD
+          sed -i "s/^pkgver=.*/pkgver=${VERSION}/" packaging/aur/PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=${PKGREL}/" packaging/aur/PKGBUILD
+          cat packaging/aur/PKGBUILD
 
       - name: Publish to AUR
         uses: KSXGitHub/github-actions-deploy-aur@v4.1.2
         with:
           pkgname: gori
-          pkgbuild: aur/PKGBUILD
+          pkgbuild: packaging/aur/PKGBUILD
           commit_username: hahwul
           commit_email: hahwul@gmail.com
           ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}

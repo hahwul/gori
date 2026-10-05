@@ -26,16 +26,17 @@ build:
 nix-build:
     nix build .#gori
 
-# Regenerate nix/shards.nix from shard.lock (run it alongside any dependency change).
-# crystal2nix takes no path arguments: it reads ./shard.lock and writes ./shards.nix,
-# so the file is moved into nix/ afterwards — that is where flake.nix reads it from.
+# Regenerate packaging/nix/shards.nix from shard.lock (run it alongside any dependency
+# change). crystal2nix takes no path arguments: it reads ./shard.lock and writes
+# ./shards.nix, so the file is moved into packaging/nix/ afterwards — that is where
+# flake.nix reads it from.
 [group('build')]
 nix-shards:
     nix run nixpkgs#crystal2nix
-    mv shards.nix nix/shards.nix
+    mv shards.nix packaging/nix/shards.nix
 
-# Verify nix/shards.nix still pins what shard.lock does — the check that makes the
-# recipe above mandatory rather than customary. Forgetting it is silent: the flake
+# Verify packaging/nix/shards.nix still pins what shard.lock does — the check that makes
+# the recipe above mandatory rather than customary. Forgetting it is silent: the flake
 # keeps building the OLD revisions and `nix build` stays green. Reads the two files
 # directly, so unlike `nix-build` it needs neither Nix nor the network, which is why
 # CI can afford to run it on every PR.
@@ -45,17 +46,17 @@ nix-shards-check:
 
 # Nothing builds the image on a PR any more — ci.yml dropped its `build-docker`
 # job, and publish-ghcr.yml only runs on a push to `main` — so this recipe is the
-# pre-merge check that docker/Dockerfile still compiles.
+# pre-merge check that packaging/docker/Dockerfile still compiles.
 #
 # BuildKit is pinned because the ignore list lives at
-# `docker/Dockerfile.dockerignore`: only BuildKit reads a Dockerfile-adjacent
+# `packaging/docker/Dockerfile.dockerignore`: only BuildKit reads a Dockerfile-adjacent
 # one. The classic builder looks for `.dockerignore` in the context root, finds
 # none, and ships `bin/`, `lib/` and `.git/` into the build context instead.
 
 # Build the container image locally (host arch only).
 [group('docker')]
 docker-build tag="gori:dev":
-    DOCKER_BUILDKIT=1 docker build -f docker/Dockerfile -t {{tag}} .
+    DOCKER_BUILDKIT=1 docker build -f packaging/docker/Dockerfile -t {{tag}} .
 
 # Bare, it starts the TUI, which needs the TTY `-it` gives it; state lives in the
 # `gori` volume so the CA survives a run. Trailing args pick a headless
@@ -70,7 +71,7 @@ docker-run tag="gori:dev" *args:
 # the same flags as the two recipes above, so these mirror them rather than reshaping
 # anything: `-v gori:/data` auto-creates the named volume, and `-it` gives the TUI its
 # terminal. Its ignore-file rule is the STRICTER half of the note above — it looks for
-# `docker/Dockerfile.dockerignore` and nothing else, never falling back to a
+# `packaging/docker/Dockerfile.dockerignore` and nothing else, never falling back to a
 # context-root `.dockerignore` the way BuildKit does.
 #
 # Two more differences worth knowing. The builder runs in its own VM, which does not
@@ -82,7 +83,7 @@ docker-run tag="gori:dev" *args:
 # Build the container image with Apple's `container` (macOS 26+).
 [group('docker')]
 container-build tag="gori:dev":
-    container build -f docker/Dockerfile -t {{tag}} .
+    container build -f packaging/docker/Dockerfile -t {{tag}} .
 
 # Run the image `container-build` produced.
 [group('docker')]
@@ -202,7 +203,7 @@ fix:
     lib/ameba/bin/ameba.cr --fix
 
 # Check that every version-bearing file agrees: shard.yml, src/gori.cr,
-# snap/snapcraft.yaml, aur/PKGBUILD and the spec assertion.
+# snap/snapcraft.yaml, packaging/aur/PKGBUILD and the spec assertion.
 [group('version')]
 version-check:
     crystal run scripts/version_check.cr

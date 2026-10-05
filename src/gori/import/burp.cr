@@ -14,8 +14,8 @@ module Gori
     # Deliberately parsed with a string scanner rather than `require "xml"`. libxml2 is not
     # currently linked into gori, and pulling it in would mean adding `libxml2-dev` +
     # `libxml2-static` (and its transitive static deps) to every packaging path that builds
-    # `--static` — docker/Dockerfile, the release workflow, flake.nix, Homebrew, AUR, snap —
-    # for one import format. Burp's export is machine-generated with a fixed, flat shape, so
+    # `--static` — packaging/docker/Dockerfile, the release workflow, flake.nix, Homebrew,
+    # AUR, snap — for one import format. Burp's export is machine-generated with a fixed, flat shape, so
     # a scanner is sufficient and, as a side effect, has no XXE or entity-expansion surface
     # at all. The bound: this is NOT a general XML parser. Namespaced, re-ordered or
     # hand-edited variants (and Logger++/other third-party exports) are out of scope.

@@ -1,4 +1,5 @@
-# Verifies that nix/shards.nix still describes the dependency set shard.lock pins.
+# Verifies that packaging/nix/shards.nix still describes the dependency set shard.lock
+# pins.
 #
 # `just nix-shards` regenerates that file with crystal2nix, and AGENTS.md asks for
 # it in the same commit as the dependency change — but nothing enforced it, and the
@@ -15,7 +16,7 @@
 require "yaml"
 
 LOCK_PATH = "shard.lock"
-NIX_PATH  = "nix/shards.nix"
+NIX_PATH  = "packaging/nix/shards.nix"
 
 # shard.lock's `git:` value is a full URL; a `github:`/`gitlab:`/`bitbucket:` value is
 # the bare `owner/repo` that resolver implies. Qualifying it HERE, where the key that

@@ -7,8 +7,8 @@ module Gori
     #
     # WHY NOT `require "xml"`. libxml2 is not linked into gori, and linking it would mean
     # adding `libxml2-dev` + `libxml2-static` (and its transitive static deps) to every
-    # packaging path that builds `--static` — docker/Dockerfile, the release workflow,
-    # flake.nix, Homebrew, AUR, snap. `import/burp.cr` states the same reasoning for its
+    # packaging path that builds `--static` — packaging/docker/Dockerfile, the release
+    # workflow, flake.nix, Homebrew, AUR, snap. `import/burp.cr` states the same reasoning for its
     # flat scanner; this is that decision applied to a document that actually needs a tree.
     #
     # WHY NOT `Import::Burp`'s scanner. That one matches `<name` by string index over a

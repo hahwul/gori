@@ -1,5 +1,5 @@
 # Shows the current version, prompts for a new one (blank keeps it), then
-# writes it to every version-bearing marker. Resets aur/PKGBUILD's pkgrel to 1
+# writes it to every version-bearing marker. Resets packaging/aur/PKGBUILD's pkgrel to 1
 # on every bump. Keep the tracked list in sync with scripts/version_check.cr.
 #
 # Usage: crystal run scripts/version_update.cr  (just vu)
@@ -27,7 +27,7 @@ MARKERS = [
   Marker.new("shard.yml", /^version:\s*\S+/m, ->(v : String) { "version: #{v}" }),
   Marker.new("src/gori.cr", /VERSION = "[^"]+"/, ->(v : String) { %(VERSION = "#{v}") }),
   Marker.new("snap/snapcraft.yaml", /^version:\s*\S+/m, ->(v : String) { "version: #{v}" }),
-  Marker.new("aur/PKGBUILD", /^pkgver=\S+/m, ->(v : String) { "pkgver=#{v}" }),
+  Marker.new("packaging/aur/PKGBUILD", /^pkgver=\S+/m, ->(v : String) { "pkgver=#{v}" }),
   Marker.new("flake.nix", /version = "[^"]+";/, ->(v : String) { %(version = "#{v}";) }),
   Marker.new("spec/gori_spec.cr", /VERSION\.should eq\("[^"]+"\)/, ->(v : String) { %(VERSION.should eq("#{v}")) }),
   Marker.new("docs/content/getting-started/installation.md",
@@ -69,7 +69,7 @@ end
 
 MARKERS.each do |marker|
   updated = File.read(marker.path).sub(marker.pattern, marker.replace.call(target))
-  updated = updated.sub(/^pkgrel=\d+/m, "pkgrel=1") if marker.path == "aur/PKGBUILD"
+  updated = updated.sub(/^pkgrel=\d+/m, "pkgrel=1") if marker.path == "packaging/aur/PKGBUILD"
   File.write(marker.path, updated)
   puts "  ✓ #{marker.name}"
 end
