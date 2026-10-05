@@ -371,20 +371,20 @@ describe Gori::Import do
   it "keeps a HAR entry whose postData or response content is null, and frames multipart params with their boundary" do
     har = File.tempname("gori", ".har")
     begin
-      File.write(har, <<-JSON)
+      File.write(har, <<-'JSON')
         {"log": {"entries": [
           {"startedDateTime": "2026-06-01T12:00:00+00:00",
            "request": {"method": "GET", "url": "https://api.test/a", "headers": [null], "postData": null},
            "response": {"status": 200, "headers": [], "content": null}},
           {"startedDateTime": "2026-06-01T12:00:01+00:00",
            "request": {"method": "POST", "url": "https://api.test/up",
-             "headers": [{"name": "Content-Type", "value": "multipart/form-data; boundary=\\"X B\\""}],
-             "postData": {"mimeType": "multipart/form-data; boundary=\\"X B\\"",
+             "headers": [{"name": "Content-Type", "value": "multipart/form-data; boundary=\"X B\""}],
+             "postData": {"mimeType": "multipart/form-data; boundary=\"X B\"",
                "params": [{"name": "a", "value": "1"}, {"name": "f", "fileName": "x.txt", "contentType": "text/plain", "value": "hi"}]}}},
           {"startedDateTime": "2026-06-01T12:00:02+00:00",
            "request": {"method": "POST", "url": "https://api.test/inject",
              "postData": {"mimeType": "multipart/form-data; boundary=XB",
-               "params": [{"name": "a\\r\\nX-Injected: 1", "value": "1"}]}}}]}}
+               "params": [{"name": "a\r\nX-Injected: 1", "value": "1"}]}}}]}}
         JSON
 
       with_store do |store|

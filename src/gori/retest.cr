@@ -718,14 +718,7 @@ module Gori
       end
       return literal.downcase == "null" if node.raw.nil?
       if i = node.as_i64?
-        return true if literal.to_i64? == i
-        # An exact decimal compare, so `1e3` and `1.0` still name 1000 and 1, but nothing past
-        # 2^53 rounds onto a different ID the way a double did (an IDOR retest PASSED against
-        # the wrong owner). The finite-double gate keeps `1e999999999` from building a BigInt.
-        if literal.to_f64?.try(&.finite?) && (d = (BigDecimal.new(literal) rescue nil))
-          return true if d == BigDecimal.new(i)
-        end
-        return literal == i.to_s
+        return literal.to_i64? == i || decimal_equals?(literal, i) || literal == i.to_s
       end
       if f = node.as_f?
         return true if (lit = literal.to_f64?) && lit == f
@@ -734,6 +727,14 @@ module Gori
       # An object or an array: compare the compact JSON text, which is the only literal an
       # operator could have typed for one.
       raw == literal
+    end
+
+    # An exact decimal compare, so `1e3` and `1.0` still name 1000 and 1, but nothing past 2^53
+    # rounds onto a different ID the way a double did (an IDOR retest PASSED against the wrong
+    # owner). The finite-double gate keeps `1e999999999` from building a BigInt.
+    private def self.decimal_equals?(literal : String, i : Int64) : Bool
+      return false unless literal.to_f64?.try(&.finite?)
+      (d = (BigDecimal.new(literal) rescue nil)) ? d == BigDecimal.new(i) : false
     end
 
     # A JSON value as the result row quotes it — the compact JSON text, so a string keeps its
