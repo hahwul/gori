@@ -321,11 +321,12 @@ describe Gori::Export::OpenApi do
     with_salt do
       with_store do |store|
         body = "n=3&on=true&ratio=0.5"
-        oa_flow(store, "/t?id=1&id=2&f=false", method: "POST", body: body,
+        oa_flow(store, "/t?id=1&id=2&f=false&zip=02134", method: "POST", body: body,
           req_headers: "Content-Type: application/x-www-form-urlencoded\r\nContent-Length: #{body.bytesize}\r\n")
         post = op(OA.build(store, OA::Options.new(examples: true)).doc, "/t", "post")
         param(post, "id", "query").not_nil!["example"].should eq([1])
         param(post, "f", "query").not_nil!["example"].should be_false
+        param(post, "zip", "query").not_nil!["example"].should eq("02134") # its schema says integer; the wire said 02134
         ex = post["requestBody"]["content"]["application/x-www-form-urlencoded"]["example"]
         {ex["n"], ex["on"], ex["ratio"]}.should eq({3, true, 0.5})
       end

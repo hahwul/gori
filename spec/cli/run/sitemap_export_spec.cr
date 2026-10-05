@@ -59,6 +59,8 @@ describe "gori run sitemap export" do
     report = OAR.new
     report.skip(Gori::Export::OpenApi::Skip::Gori)
     Gori::CLI::Run.sitemap_export_notes_for_spec(report, nil).lines[0].should contain("--include-gori")
+    report.skip(Gori::Export::OpenApi::Skip::WebSocket)
+    Gori::CLI::Run.sitemap_export_notes_for_spec(report, nil).lines[0].should contain("relax the query")
   end
 
   it "names the profile, a dead pattern and an unsaved salt when examples were redacted" do

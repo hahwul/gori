@@ -112,7 +112,7 @@ module Gori
                                             choice : Redact::Policy::Choice?, io : IO = STDERR) : Nil
         cmd = "gori run sitemap export"
         if report.operations == 0
-          hint = report.skipped[Export::OpenApi::Skip::Gori]? ? "--include-gori keeps the requests gori sent" : "capture some traffic, or relax the query"
+          hint = report.skipped.keys == [Export::OpenApi::Skip::Gori] ? "--include-gori keeps the requests gori sent" : "capture some traffic, or relax the query"
           io.puts "#{cmd}: no operations (#{report.flows_read} flows read — #{hint})"
         else
           io.puts "#{cmd}: #{report.summary}"

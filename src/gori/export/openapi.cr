@@ -915,9 +915,11 @@ module Gori
       # flags. A value that does not read as that type (a redaction placeholder) stays text.
       private def typed_example(ex : String, schema : JSON::Any) : JSON::Any
         case schema["type"]?.try(&.as_s?)
-        when "array"   then return JSON::Any.new([typed_example(ex, schema["items"])])
-        when "integer" then ex.to_i64?.try { |i| return JSON::Any.new(i) }
-        when "number"  then ex.to_f64?.try { |f| return JSON::Any.new(f) if f.finite? }
+        when "array" then return JSON::Any.new([typed_example(ex, schema["items"])])
+          # Only a value that spells back the same: `02134` (a zip) or `1.50` as a number would
+          # be a different value than the one captured.
+        when "integer" then ex.to_i64?.try { |i| return JSON::Any.new(i) if i.to_s == ex }
+        when "number"  then ex.to_f64?.try { |f| return JSON::Any.new(f) if f.finite? && f.to_s == ex }
         when "boolean" then return JSON::Any.new(ex == "true") if ex.in?("true", "false")
         end
         JSON::Any.new(ex.scrub)
