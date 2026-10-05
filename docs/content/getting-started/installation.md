@@ -188,7 +188,7 @@ container builder start --cpus 8 --memory 8g
 
 ## Pre-built Binary
 
-Standalone binaries for macOS and Linux are attached to every [GitHub Release](https://github.com/hahwul/gori/releases/latest), and for Windows (x86_64) from the release after v0.7.1.
+Standalone binaries for macOS and Linux are attached to every [GitHub Release](https://github.com/hahwul/gori/releases/latest), and for Windows (x86_64) from the release after v0.7.1. [Platform Support](/reference/platform-support/) lists what each platform's tier promises and the known gaps on Windows.
 
 | Platform | Asset |
 |----------|-------|

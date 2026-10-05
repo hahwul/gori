@@ -187,7 +187,7 @@ container builder start --cpus 8 --memory 8g
 
 ## 사전 빌드 바이너리 {#pre-built-binary}
 
-macOS와 Linux용 독립 실행 바이너리가 모든 [GitHub Release](https://github.com/hahwul/gori/releases/latest)에 첨부되며, Windows(x86_64)용은 v0.7.1 다음 릴리스부터 제공됩니다.
+macOS와 Linux용 독립 실행 바이너리가 모든 [GitHub Release](https://github.com/hahwul/gori/releases/latest)에 첨부되며, Windows(x86_64)용은 v0.7.1 다음 릴리스부터 제공됩니다. 플랫폼별 지원 등급과 Windows에서 알려진 한계는 [플랫폼 지원](/ko/reference/platform-support/)에 정리되어 있습니다.
 
 | 플랫폼 | 자산 |
 |----------|-------|
