@@ -134,6 +134,13 @@ describe "gori run evidence" do
     end
   end
 
+  it "flags a copy that stored an error beside its status" do
+    m = Gori::Store::IssueEvidenceMeta.new(1_i64, [2_i64], 0_i64, Gori::Store::LinkRefKind::Flow, 3_i64,
+      "GET", "http://a.test/t", "HTTP/1.1", 200, nil, "upstream response body was incomplete",
+      false, false, "a" * 64, "b" * 64, 10_i64)
+    Gori::CLI::Run.evidence_line_for_spec(m).should contain("→ 200 (error)")
+  end
+
   # A size is printed for a HUMAN and grepped by a SCRIPT, and the two want different
   # spellings, so the text form gives both with the raw count first and unchanged.
   it "prints the raw byte count AND the human size on the list line and the show form" do
