@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Retest: a `json:` check on an integer past 2^53 compares its digits, where two different 64-bit IDs could pass as equal, and a body or JSON check on a response whose body was cut short is inconclusive instead of judged on the partial body
 - Import: a HAR entry with `postData: null`, `content: null` or a `null` header row is imported instead of dropped, and multipart `postData.params` are framed with the request's boundary instead of being rebuilt as a form body
 - Import: an Insomnia request resolves variables from its folders' environments and nested values such as `{{ _.api.host }}`, which skipped it as undefined, and a multipart body sent with Insomnia's own bare `multipart/form-data` header now names its boundary
 - Import: a Postman collection's bearer, basic or API-key auth replaces the request's own header of that name instead of adding a second one, and an empty bearer token adds no `Authorization: Bearer ` header, as Postman sends it

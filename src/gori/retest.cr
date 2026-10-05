@@ -577,6 +577,16 @@ module Gori
           return {Outcome::Error, Retest.clip(err)}
         end
         return {Outcome::Pass, Retest.actual(obs)} if assertion.none?
+        # A partial read still answered, so its STATUS decides; a body or JSON assertion would
+        # judge the short body as the whole one (`body:diff` passed on a dropped connection).
+        unless assertion.kind.status?
+          if e = obs.error
+            return {Outcome::Inconclusive, Retest.clip("response incomplete: #{e}")}
+          end
+          if (assertion.kind.body_same? || assertion.kind.body_diff?) && (e = baseline.try(&.error))
+            return {Outcome::Inconclusive, Retest.clip("baseline response incomplete: #{e}")}
+          end
+        end
         Retest.evaluate(assertion, obs, baseline, baseline_note)
       end
     end
@@ -708,7 +718,9 @@ module Gori
       return literal.downcase == "null" if node.raw.nil?
       if i = node.as_i64?
         return true if literal.to_i64? == i
-        return true if (f = literal.to_f64?) && f == i.to_f64
+        # Through a double only below 2^53, where it is exact: past that two different IDs
+        # round to one double and an IDOR retest would PASS against the wrong owner.
+        return true if (f = literal.to_f64?) && f.abs < 9007199254740992.0 && f == i.to_f64
         return literal == i.to_s
       end
       if f = node.as_f?
