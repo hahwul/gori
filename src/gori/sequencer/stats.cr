@@ -953,7 +953,10 @@ module Gori::Sequencer
         # replays swapped is neither monotonic nor evenly stepped, yet tracks arrival order
         # as closely as the hex path's correlation test asks — the same values spelled in hex
         # were flagged. Gated like the sorted check: three random values correlate by chance.
-        if n >= SMALL_SAMPLE && (r = pearson(Array(Float64).new(n, &.to_f), vals.map(&.to_f))).abs > 0.9
+        # Offset by the minimum first: a 1.7e15 time-based id with small jitter loses its whole
+        # spread to the sum-of-squares in raw magnitude.
+        lo = vals.min
+        if n >= SMALL_SAMPLE && (r = pearson(Array(Float64).new(n, &.to_f), vals.map { |v| (v - lo).to_f })).abs > 0.9
           return {true, "corr=#{fmt(r)}"}
         end
         return {false, "non-monotonic"}
