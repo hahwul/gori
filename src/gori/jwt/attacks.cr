@@ -277,14 +277,8 @@ module Gori
         RawJson.parse(pair[1])
       end
 
-      # Every occurrence of a duplicated key takes the value, so no parser reads the old one.
       def []=(key : String, value : JSON::Any) : JSON::Any
-        raw = value.to_json
-        if @members.any? { |(k, _)| k == key }
-          @members.map! { |(k, v)| k == key ? {k, raw} : {k, v} }
-        else
-          @members << {key, raw}
-        end
+        RawJson.set_member(@members, key, value.to_json)
         value
       end
 
