@@ -347,6 +347,22 @@ describe Gori::Import::Postman do
     hs[3].should_not contain("Authorization")
   end
 
+  it "replaces the request's own same-named header with the signed one, and signs nothing for an empty token" do
+    result = parse(<<-JSON)
+      {"info": {"name": "n"},
+       "auth": {"type": "bearer", "bearer": [{"key": "token", "value": "COLL"}]},
+       "item": [
+         {"request": {"method": "GET", "url": "https://a.test/x",
+           "header": [{"key": "authorization", "value": "Bearer MINE"}]}},
+         {"request": {"method": "GET", "url": "https://a.test/empty",
+           "auth": {"type": "bearer", "bearer": [{"key": "token", "value": ""}]}}}]}
+      JSON
+    hs = heads(result)
+    hs[0].scan(/authorization/i).size.should eq(1)
+    hs[0].should contain("Authorization: Bearer COLL")
+    hs[1].should_not contain("Authorization")
+  end
+
   it "rejects a v1 collection with an actionable message" do
     ex = expect_raises(Gori::Error) do
       parse(%({"id": "x", "name": "old", "requests": [{"url": "https://a.test/"}]}))

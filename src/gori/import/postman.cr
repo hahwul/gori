@@ -99,7 +99,11 @@ module Gori
         if content_type && !headers.any? { |(k, _)| k.compare("content-type", case_insensitive: true) == 0 }
           headers << {"Content-Type", content_type}
         end
-        headers.concat(auth_headers(h["auth"]? || auth, vars))
+        signed = auth_headers(h["auth"]? || auth, vars)
+        # Postman's auth signers REPLACE a same-named header (removeHeader, ignoring case)
+        # rather than add a second one beside the request's own.
+        signed.each { |(name, _)| headers.reject! { |(k, _)| k.compare(name, case_insensitive: true) == 0 } }
+        headers.concat(signed)
         Builder.pending_request(now, url, method, headers, body,
           source_surface: prov.surface, source_ref: prov.ref)
       end
@@ -369,7 +373,9 @@ module Gori
         p = auth_params(h[type]?, vars)
         case type
         when "bearer"
-          list << {"Authorization", "Bearer #{p["token"]? || ""}"}
+          # An empty token signs nothing in Postman, rather than sending `Bearer `.
+          token = p["token"]?.presence
+          list << {"Authorization", "Bearer #{token}"} if token
         when "basic"
           list << {"Authorization", "Basic #{Base64.strict_encode("#{p["username"]? || ""}:#{p["password"]? || ""}")}"}
         when "apikey"
