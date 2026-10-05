@@ -1,3 +1,4 @@
+require "big"
 require "json"
 require "./store"
 require "./entity"
@@ -577,6 +578,16 @@ module Gori
           return {Outcome::Error, Retest.clip(err)}
         end
         return {Outcome::Pass, Retest.actual(obs)} if assertion.none?
+        # A partial read still answered, so its STATUS decides; a body or JSON assertion would
+        # judge the short body as the whole one (`body:diff` passed on a dropped connection).
+        unless assertion.kind.status?
+          if e = obs.error
+            return {Outcome::Inconclusive, Retest.clip("response incomplete: #{e}")}
+          end
+          if (assertion.kind.body_same? || assertion.kind.body_diff?) && (e = baseline.try(&.error))
+            return {Outcome::Inconclusive, Retest.clip("baseline response incomplete: #{e}")}
+          end
+        end
         Retest.evaluate(assertion, obs, baseline, baseline_note)
       end
     end
@@ -707,9 +718,7 @@ module Gori
       end
       return literal.downcase == "null" if node.raw.nil?
       if i = node.as_i64?
-        return true if literal.to_i64? == i
-        return true if (f = literal.to_f64?) && f == i.to_f64
-        return literal == i.to_s
+        return literal.to_i64? == i || decimal_equals?(literal, i) || literal == i.to_s
       end
       if f = node.as_f?
         return true if (lit = literal.to_f64?) && lit == f
@@ -718,6 +727,14 @@ module Gori
       # An object or an array: compare the compact JSON text, which is the only literal an
       # operator could have typed for one.
       raw == literal
+    end
+
+    # An exact decimal compare, so `1e3` and `1.0` still name 1000 and 1, but nothing past 2^53
+    # rounds onto a different ID the way a double did (an IDOR retest PASSED against the wrong
+    # owner). The finite-double gate keeps `1e999999999` from building a BigInt.
+    private def self.decimal_equals?(literal : String, i : Int64) : Bool
+      return false unless literal.to_f64?.try(&.finite?)
+      (d = (BigDecimal.new(literal) rescue nil)) ? d == BigDecimal.new(i) : false
     end
 
     # A JSON value as the result row quotes it — the compact JSON text, so a string keeps its

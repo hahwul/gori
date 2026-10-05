@@ -209,6 +209,15 @@ describe "Gori::Retest.evaluate" do
     RT.evaluate(RT::Assertion.parse("json:ids=[18446744073709551615,1.50]").as(RT::Assertion), obs(body: body), nil)[0].pass?.should be_true
   end
 
+  it "compares an Int64 past 2^53 by its digits, never through a double" do
+    body = %({"owner":1234567890123456788,"n":9007199254740992,"k":3})
+    {"json:owner=1234567890123456789", "json:n=9007199254740993"}.each do |text|
+      RT.evaluate(RT::Assertion.parse(text).as(RT::Assertion), obs(body: body), nil)[0].fail?.should be_true
+    end
+    RT.evaluate(RT::Assertion.parse("json:k=3.0").as(RT::Assertion), obs(body: body), nil)[0].pass?.should be_true
+    RT.evaluate(RT::Assertion.parse("json:ts=1e18").as(RT::Assertion), obs(body: %({"ts":1000000000000000000})), nil)[0].pass?.should be_true
+  end
+
   it "answers INCONCLUSIVE for a body comparison with no baseline behind it" do
     outcome, detail = RT.evaluate(RT::Assertion.parse("body:same").as(RT::Assertion), obs(body: "x"), nil)
     outcome.inconclusive?.should be_true
@@ -232,6 +241,20 @@ describe Gori::Retest::Engine do
     backend.sent.should eq([1_i64, 2_i64])
     backend.finished?.should be_true
     results.map(&.outcome.pass?).should eq([true, true])
+  end
+
+  it "decides a partial read's status but not its body" do
+    backend = TableBackend.new({
+      1_i64 => obs(body: "a complete body"),
+      2_i64 => obs(body: "a comp", error: "upstream response body was incomplete"),
+    })
+    plan = [planned(1_i64, :baseline), planned(2_i64, :variant, "body:diff")]
+    results = RT::Engine.new(backend).run(plan)
+    results[1].outcome.inconclusive?.should be_true
+    results[1].detail.should contain("incomplete")
+    status_plan = [planned(1_i64, :baseline), planned(2_i64, :variant, "status:200")]
+    RT::Engine.new(TableBackend.new({1_i64 => obs, 2_i64 => obs(error: "upstream response body was incomplete")}))
+      .run(status_plan)[1].outcome.pass?.should be_true
   end
 
   it "drops the anchor when a LATER baseline fails to establish one" do

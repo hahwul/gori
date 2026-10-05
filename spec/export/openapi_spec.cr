@@ -268,7 +268,7 @@ describe Gori::Export::OpenApi do
           text.should_not contain(s)
         end
         keys = op(result.doc, "/keys", "get")
-        param(keys, "page", "query").not_nil!["example"].should eq("2")
+        param(keys, "page", "query").not_nil!["example"].should eq(2) # typed as its integer schema
         param(keys, "x-trace", "header").not_nil!["example"].should eq("t1")
         {"qs-secret", "pw-secret", "hdr-secret", "cookie-secret", "eyJhbGci"}.each { |s| text.should_not contain(s) }
         post = op(result.doc, "/login", "post")
@@ -313,6 +313,22 @@ describe Gori::Export::OpenApi do
         post = op(result.doc, "/login", "post")
         post["requestBody"]["content"]["application/json"]["example"]["user"].should eq("ada")
         result.report.redacted.should eq(3)
+      end
+    end
+  end
+
+  it "types an example as its schema does, and leaves a value that does not read so as text" do
+    with_salt do
+      with_store do |store|
+        body = "n=3&on=true&ratio=0.5"
+        oa_flow(store, "/t?id=1&id=2&f=false&zip=02134", method: "POST", body: body,
+          req_headers: "Content-Type: application/x-www-form-urlencoded\r\nContent-Length: #{body.bytesize}\r\n")
+        post = op(OA.build(store, OA::Options.new(examples: true)).doc, "/t", "post")
+        param(post, "id", "query").not_nil!["example"].should eq([1])
+        param(post, "f", "query").not_nil!["example"].should be_false
+        param(post, "zip", "query").not_nil!["example"].should eq("02134") # its schema says integer; the wire said 02134
+        ex = post["requestBody"]["content"]["application/x-www-form-urlencoded"]["example"]
+        {ex["n"], ex["on"], ex["ratio"]}.should eq({3, true, 0.5})
       end
     end
   end
@@ -408,7 +424,7 @@ describe Gori::Export::OpenApi do
         oa_flow(store, "/orders/123456789")    # nine digits: an SSN's length, not a row id's
         doc = OA.build(store, OA::Options.new(examples: true)).doc
         param(op(doc, "/reset/{resetId}", "get"), "resetId", "path").not_nil!["example"]?.should be_nil
-        param(op(doc, "/items/{itemId}", "get"), "itemId", "path").not_nil!["example"].should eq("42")
+        param(op(doc, "/items/{itemId}", "get"), "itemId", "path").not_nil!["example"].should eq(42)
         param(op(doc, "/ssn/{ssnId}", "get"), "ssnId", "path").not_nil!["example"]?.should be_nil
         param(op(doc, "/national_id/{nationalIdId}", "get"), "nationalIdId", "path").not_nil!["example"]?.should be_nil
         param(op(doc, "/orders/{orderId}", "get"), "orderId", "path").not_nil!["example"]?.should be_nil

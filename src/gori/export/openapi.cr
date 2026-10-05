@@ -835,7 +835,7 @@ module Gori
             "required" => JSON::Any.new(true),
             "schema"   => path_schema(op.path_kinds[i]),
           }
-          op.path_examples[i].try { |ex| h["example"] = JSON::Any.new(ex.scrub) }
+          op.path_examples[i].try { |ex| h["example"] = typed_example(ex, h["schema"]) }
           out << JSON::Any.new(h)
         end
         {"query", "header", "cookie"}.each do |loc|
@@ -854,7 +854,7 @@ module Gori
                           else
                             scalar
                           end
-            acc.example.try { |ex| h["example"] = JSON::Any.new(ex.scrub) }
+            acc.example.try { |ex| h["example"] = typed_example(ex, h["schema"]) }
             out << JSON::Any.new(h)
           end
         end
@@ -905,8 +905,31 @@ module Gori
         JSON::Any.new(bodies.keys.sort!.to_h do |media|
           acc = bodies[media]
           h = {"schema" => body_schema(acc)}
-          acc.example.try { |ex| h["example"] = ex }
+          acc.example.try { |ex| h["example"] = acc.kind.form? ? typed_members(ex, h["schema"]) : ex }
           {media.scrub, JSON::Any.new(h)}
+        end)
+      end
+
+      # A value read off the wire is text, but its example takes the JSON type its schema states:
+      # an `integer` parameter showing `example: "1"` is a type mismatch every OpenAPI validator
+      # flags. A value that does not read as that type (a redaction placeholder) stays text.
+      private def typed_example(ex : String, schema : JSON::Any) : JSON::Any
+        case schema["type"]?.try(&.as_s?)
+        when "array" then return JSON::Any.new([typed_example(ex, schema["items"])])
+          # Only a value that spells back the same: `02134` (a zip) or `1.50` as a number would
+          # be a different value than the one captured.
+        when "integer" then ex.to_i64?.try { |i| return JSON::Any.new(i) if i.to_s == ex }
+        when "number"  then ex.to_f64?.try { |f| return JSON::Any.new(f) if f.finite? && f.to_s == ex }
+        when "boolean" then return JSON::Any.new(ex == "true") if ex.in?("true", "false")
+        end
+        JSON::Any.new(ex.scrub)
+      end
+
+      # A form example's fields, each typed by its property schema (see `typed_example`).
+      private def typed_members(ex : JSON::Any, schema : JSON::Any) : JSON::Any
+        return ex unless (members = ex.as_h?) && (props = schema["properties"]?.try(&.as_h?))
+        JSON::Any.new(members.to_h do |k, v|
+          {k, (text = v.as_s?) && (prop = props[k]?) ? typed_example(text, prop) : v}
         end)
       end
 

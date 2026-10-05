@@ -54,6 +54,29 @@ describe Gori::Import::Insomnia do
     heads(result).first.should contain("Authorization: Bearer DEV") # sub-environment wins
   end
 
+  it "layers folder environments over the workspace's and reads nested values by dotted path" do
+    result = parse(<<-JSON)
+      {"_type": "export", "__export_format": 4, "resources": [
+        {"_id": "wrk_1", "_type": "workspace"},
+        {"_id": "env_base", "_type": "environment", "parentId": "wrk_1",
+         "data": {"api": {"host": "nested.test", "port": "1"}, "base_url": "https://base.test"}},
+        {"_id": "env_sub", "_type": "environment", "parentId": "env_base",
+         "data": {"api": {"host": "nested.test"}}},
+        {"_id": "fld_1", "_type": "request_group", "parentId": "wrk_1",
+         "environment": {"base_url": "https://outer.test"}},
+        {"_id": "fld_2", "_type": "request_group", "parentId": "fld_1",
+         "environment": {"path": "inner"}},
+        {"_id": "req_1", "_type": "request", "parentId": "fld_2", "method": "GET",
+         "url": "{{ _.base_url }}/{{ _.path }}"},
+        {"_id": "req_2", "_type": "request", "parentId": "wrk_1", "method": "GET",
+         "url": "https://{{ _.api.host }}/n"},
+        {"_id": "req_3", "_type": "request", "parentId": "wrk_1", "method": "GET",
+         "url": "https://nested.test/{{ _.api.port }}"}]}
+      JSON
+    result.skipped.should eq(1) # the sub-environment replaced `api`, so `api.port` is gone
+    result.flows.map { |f| {f.request.host, f.request.target} }.should eq([{"outer.test", "/inner"}, {"nested.test", "/n"}])
+  end
+
   it "also expands the legacy brace form without the _. prefix" do
     result = parse(<<-JSON)
       {"_type": "export", "__export_format": 4, "resources": [
@@ -161,6 +184,23 @@ describe Gori::Import::Insomnia do
     bodies[2].should eq(%({"a":1}))
     bodies[3].should be_nil # a `fileName`-only body names a path on the exporter's disk
     heads(result)[2].should contain("Content-Type: application/json")
+  end
+
+  it "fills the boundary into Insomnia's own bare multipart Content-Type header" do
+    result = parse(<<-JSON)
+      {"_type": "export", "__export_format": 4, "resources": [
+        {"_id": "r1", "_type": "request", "method": "POST", "url": "https://a.test/multi",
+         "headers": [{"name": "Content-Type", "value": "multipart/form-data; boundary=XYZ"},
+                     {"name": "Authorization", "value": "Bearer MINE"}],
+         "authentication": {"type": "bearer", "token": "AUTH"},
+         "body": {"mimeType": "multipart/form-data", "params": [{"name": "field", "value": "val"}]}}]}
+      JSON
+    head = heads(result).first
+    head.should contain("Content-Type: multipart/form-data; boundary=")
+    head.scan(/content-type/i).size.should eq(1)
+    head.should_not contain("XYZ")
+    head.scan(/authorization/i).size.should eq(1) # the request's own header stands
+    head.should contain("Bearer MINE")
   end
 
   it "seeds bearer / basic / apikey-header auth and nothing else" do

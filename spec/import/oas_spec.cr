@@ -55,6 +55,48 @@ describe Gori::Import::Oas do
     end
   end
 
+  it "fills a parameter from its example, examples, default or enum before synthesizing one" do
+    body = <<-JSON
+      {
+        "openapi": "3.0.3",
+        "info": {"title": "t", "version": "1"},
+        "servers": [{"url": "https://api.example.test"}],
+        "paths": {
+          "/users/{id}": {
+            "get": {
+              "parameters": [
+                {"name": "id", "in": "path", "required": true, "example": 43, "schema": {"type": "integer"}},
+                {"name": "sort", "in": "query", "required": true, "schema": {"type": "string", "enum": ["asc", "desc"]}},
+                {"name": "lang", "in": "query", "required": true, "examples": {"ko": {"value": "ko"}}},
+                {"name": "page", "in": "query", "required": true, "schema": {"type": "integer", "default": 5}},
+                {"name": "q", "in": "query", "required": true, "schema": {"type": "string"}},
+                {"name": "o", "in": "query", "required": true, "example": {"k": 1}, "schema": {"type": "string", "enum": [null, "x"]}}
+              ],
+              "responses": {"200": {"description": "ok"}}
+            }
+          }
+        }
+      }
+      JSON
+    with_spec(body, ".json") do |path|
+      target = Gori::Import::Oas.parse_file(path).flows.first.request.target
+      target.should eq("/users/43?sort=asc&lang=ko&page=5&q=q&o=x")
+    end
+  end
+
+  it "percent-encodes an example spliced into a path segment" do
+    body = <<-JSON
+      {"openapi": "3.0.3", "info": {"title": "t", "version": "1"},
+       "servers": [{"url": "https://api.example.test"}],
+       "paths": {"/users/{name}/a": {"get": {
+         "parameters": [{"name": "name", "in": "path", "required": true, "example": "john doe#b"}],
+         "responses": {"200": {"description": "ok"}}}}}}
+      JSON
+    with_spec(body, ".json") do |path|
+      Gori::Import::Oas.parse_file(path).flows.first.request.target.should eq("/users/john%20doe%23b/a")
+    end
+  end
+
   it "resolves local parameter, requestBody, and schema refs at path and operation level" do
     body = <<-JSON
       {

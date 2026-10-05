@@ -273,6 +273,8 @@ module Gori::Tui
       end
       if st = snap.status
         line << sep << Highlight::Span.new(st.to_s, Theme.status_color(st), Attribute::Bold)
+        # A partial read keeps its status; without this it read as a clean exchange.
+        snap.error.try { |err| line << sep << Highlight::Span.new("ERR #{err}".scrub, Theme.red) }
       elsif err = snap.error
         line << sep << Highlight::Span.new("ERR #{err}".scrub, Theme.red)
       else

@@ -1,4 +1,5 @@
 require "crypto/subtle"
+require "uri"
 
 module Gori
   module Cookie
@@ -21,8 +22,9 @@ module Gori
       SIG_LEN = 40 # hex of an HMAC-SHA1 digest
 
       record Parsed,
-        data : String,     # base64 (standard alphabet) of the marshalled session
-        signature : String # 40-char hex
+        data : String,      # base64 (standard alphabet) of the marshalled session, unescaped
+        signature : String, # 40-char hex
+        escaped : Bool      # the value arrived percent-escaped, as Rack writes it on the wire
 
       # `Cookie.detect`: a "--" separator with a 40-hex tail. The hex check keeps a random
       # base64 blob that merely contains "--" from being misread as Rack.
@@ -49,8 +51,24 @@ module Gori
         idx = s.rindex("--") || raise CookieError.new("not a Rack cookie (missing --signature)")
         sig = s[(idx + 2)..]
         raise CookieError.new("not a Rack cookie (signature is not a 40-char hex HMAC-SHA1)") unless hex_sig?(sig)
+        # Rack writes the value through `Utils.escape` (`=` → %3D, `+` → %2B, `/` → %2F) and
+        # unescapes it before checking the HMAC, so a cookie lifted off the wire is signed over
+        # its UNESCAPED text.
+        data, escaped = unescape(s[0...idx])
         # `downcase` is safe here only because the tail is now proven pure ASCII hex.
-        Parsed.new(s[0...idx], sig.downcase)
+        Parsed.new(data, sig.downcase, escaped)
+      end
+
+      # Base64 never holds a `%`, so one marks the escaped wire form.
+      private def unescape(value : String) : {String, Bool}
+        value.includes?('%') ? {URI.decode(value), true} : {value, false}
+      end
+
+      # The value as a Cookie header must carry it. Rack's unescape reads a raw `+` as a space,
+      # so a value holding one is written escaped as Rack itself writes it, and so is one that
+      # arrived escaped — one rule, so a re-sign of a forged cookie gives back the same bytes.
+      private def wire(data : String, escaped : Bool) : String
+        escaped || data.includes?('+') ? URI.encode_www_form(data) : data
       end
 
       # signature = lowercase hex of HMAC-SHA1(secret, data).
@@ -74,13 +92,14 @@ module Gori
       # Re-sign the SAME data with `secret` — byte-identical to the input when correct.
       def resign(cookie : String, secret : String) : String
         p = parse(cookie)
-        "#{p.data}--#{compute_sig(p.data, secret)}"
+        "#{wire(p.data, p.escaped)}--#{compute_sig(p.data, secret)}"
       end
 
       # Mint a cookie from an opaque base64 `data` value + secret. `data` is the marshalled
       # session, base64'd — the operator supplies it (from a decoded cookie, possibly edited).
       def forge(data : String, secret : String) : String
-        "#{data.strip}--#{compute_sig(data.strip, secret)}"
+        value, escaped = unescape(data.strip)
+        "#{wire(value, escaped)}--#{compute_sig(value, secret)}"
       end
 
       MAX_PREVIEW = 512 # cap the hex / ASCII dump of the opaque value

@@ -84,7 +84,7 @@ module Gori
             puts(JSON.build { |j| j.object { MCP::Serialize.evidence_meta(j, meta); j.field "linked", link } })
           else
             puts "Frozen evidence ##{id} on issue ##{iid} from #{meta.source_label}#{link ? " (linked)" : ""}: " \
-                 "#{Evidence.label(meta)} → #{meta.status || (meta.error ? "error" : "no response")}, #{evidence_bytes_text(meta.bytes)}"
+                 "#{Evidence.label(meta)} → #{Evidence.outcome(meta)}, #{evidence_bytes_text(meta.bytes)}"
             puts "  sha256 req #{meta.request_sha256}"
             puts "  sha256 res #{meta.response_sha256 || "— (no response)"}"
           end
@@ -300,7 +300,7 @@ module Gori
       # `#12  hist #3  2026-09-11T05:02:33Z  POST acme.test/login → 200  34567 bytes  sha256 req a1b2… res c3d4…`
       # — one row per copy, the provenance the RELATED card shows plus the hash prefixes.
       private def self.evidence_line(m : Store::IssueEvidenceMeta) : String
-        outcome = m.status.try(&.to_s) || (m.error ? "error" : "no response")
+        outcome = Evidence.outcome(m)
         notes = [] of String
         notes << "request truncated" if m.request_truncated?
         notes << "response truncated" if m.response_truncated?
@@ -330,6 +330,7 @@ module Gori
           io << "exchange: " << Issues::Export.one_line(Evidence.label(m)) << " → "
           if st = m.status
             io << st
+            m.error.try { |e| io << " · error: " << Issues::Export.one_line(e) }
           elsif e = m.error
             io << "error: " << Issues::Export.one_line(e)
           else

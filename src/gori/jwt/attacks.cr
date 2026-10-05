@@ -1,6 +1,7 @@
 require "base64"
 require "json"
 require "./jwe"
+require "../raw_json"
 
 module Gori
   # Testing-payload generator: given a JWT, produce the family of tampered tokens a tester
@@ -147,7 +148,7 @@ module Gori
     # The HS algorithm to re-sign the weak-secret family under: the token's declared alg when
     # it is one of the HMAC family (matched case-insensitively, emitted in canonical form), so
     # the re-signs verify on a server that pins that alg; HS256 otherwise.
-    private def weak_secret_alg(header : Hash(String, JSON::Any)) : String
+    private def weak_secret_alg(header : RawHeader) : String
       case header["alg"]?.try(&.as_s?).try(&.upcase)
       when "HS384" then "HS384"
       when "HS512" then "HS512"
@@ -252,10 +253,38 @@ module Gori
       Attack.new(name, "header-inject", "#{b64url(h.to_json)}.#{payload_seg}.", note)
     end
 
-    private def decode_header(seg : String) : Hash(String, JSON::Any)?
-      JSON.parse(String.new(Base64.decode(seg))).as_h
+    private def decode_header(seg : String) : RawHeader?
+      RawJson.members(String.new(Base64.decode(seg))).try { |m| RawHeader.new(m) }
     rescue
       nil
+    end
+
+    # A token header kept as its raw members: `JSON.parse` refused a header holding a number
+    # past Int64 (a valid token then had no payloads at all), and a parsed Hash would re-emit
+    # such a number as a string. `[]?` reads a member as `RawJson.parse` does; `[]=` and
+    # `to_json` write, every other member re-emitted byte for byte (#1169, as `force_alg`).
+    private class RawHeader
+      def initialize(@members : Array({String, String}))
+      end
+
+      def dup : RawHeader
+        RawHeader.new(@members.dup)
+      end
+
+      # The LAST occurrence, as a JSON parser reads a duplicated key.
+      def []?(key : String) : JSON::Any?
+        pair = @members.reverse_each.find { |(k, _)| k == key } || return nil
+        RawJson.parse(pair[1])
+      end
+
+      def []=(key : String, value : JSON::Any) : JSON::Any
+        RawJson.set_member(@members, key, value.to_json)
+        value
+      end
+
+      def to_json : String
+        RawJson.object(@members)
+      end
     end
   end
 end

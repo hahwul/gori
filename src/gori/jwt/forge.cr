@@ -343,12 +343,7 @@ module Gori
     # re-serialize compact. Raises ForgeError when the header isn't a JSON object.
     private def force_alg(header_json : String, alg : String) : String
       members = object_members(header_json, "header")
-      value = alg.to_json
-      if members.any? { |(k, _)| k == "alg" }
-        members.map! { |(k, v)| k == "alg" ? {k, value} : {k, v} }
-      else
-        members << {"alg", value}
-      end
+      RawJson.set_member(members, "alg", alg.to_json)
       RawJson.object(members)
     end
 

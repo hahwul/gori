@@ -36,6 +36,7 @@ module Gori
         raise Gori::Error.new("Insomnia export has no `resources` array — is this an Insomnia v4 export?") unless resources
 
         vars = environment_table(resources)
+        groups = request_groups(resources)
         now = Time.utc.to_unix * 1_000_000
         pairs = [] of Builder::FlowPair
         missing = Set(String).new
@@ -48,7 +49,7 @@ module Gori
           found += 1
           # One bad request skips; the rest of the export still imports.
           begin
-            pairs << Vars.per_entry { resource_to_flow(now, h, vars, missing, prov) }
+            pairs << Vars.per_entry { resource_to_flow(now, h, folder_vars(h, groups, vars), missing, prov) }
           rescue
             skipped += 1
           end
@@ -81,8 +82,42 @@ module Gori
         (base + subs.first(1)).each do |h|
           data = h["data"]?.try(&.as_h?)
           next unless data
-          data.each { |k, v| table[k] = Vars.value_to_s(v) }
+          flatten_into(table, data)
         end
+        table
+      end
+
+      # Nunjucks resolves `{{ _.api.host }}` through nested objects, so a nested value is also
+      # filed under its dotted path. A later environment REPLACES an object wholesale, so the
+      # dotted keys an earlier one filed under that name go first.
+      private def self.flatten_into(table : Vars::Table, data : Hash(String, JSON::Any), prefix : String = "") : Nil
+        data.each do |k, v|
+          key = prefix.empty? ? k : "#{prefix}.#{k}"
+          table.reject! { |name, _| name.starts_with?("#{key}.") }
+          table[key] = Vars.value_to_s(v)
+          v.as_h?.try { |nested| flatten_into(table, nested, key) }
+        end
+      end
+
+      # The `request_group` (folder) resources by id, for `folder_vars` to walk.
+      private def self.request_groups(resources : Array(JSON::Any)) : Hash(String, Hash(String, JSON::Any))
+        resources.compact_map { |r| (h = r.as_h?) && h["_type"]?.to_s == "request_group" ? {h["_id"]?.to_s, h} : nil }.to_h
+      end
+
+      # Insomnia layers each enclosing folder's `environment` over the workspace's, outermost
+      # first, so a request's `{{ _.base_url }}` may be defined on its folder alone.
+      private def self.folder_vars(res : Hash(String, JSON::Any), groups : Hash(String, Hash(String, JSON::Any)),
+                                   vars : Vars::Table) : Vars::Table
+        chain = [] of Hash(String, JSON::Any)
+        seen = Set(String).new
+        id = res["parentId"]?.to_s
+        while (group = groups[id]?) && seen.add?(id) # `seen`: a parentId cycle ends the walk
+          chain << group
+          id = group["parentId"]?.to_s
+        end
+        return vars if chain.empty?
+        table = vars.dup
+        chain.reverse_each { |g| g["environment"]?.try(&.as_h?).try { |env| flatten_into(table, env) } }
         table
       end
 
@@ -93,10 +128,23 @@ module Gori
         url = resolve_url(res, vars, missing)
         headers = header_list(res["headers"]?, vars)
         body, content_type = body_of(res["body"]?, vars)
-        if content_type && !headers.any? { |(k, _)| k.compare("content-type", case_insensitive: true) == 0 }
-          headers << {"Content-Type", content_type}
+        if content_type
+          if i = headers.index { |(k, _)| k.compare("content-type", case_insensitive: true) == 0 }
+            # Insomnia writes its own `multipart/form-data` header and frames the parts with a
+            # boundary it picks when it sends; the body here is framed with gori's, so the
+            # header must name that one, whatever boundary (if any) it was exported with.
+            name, value = headers[i]
+            if value.downcase.starts_with?("multipart/form-data") && content_type.includes?("boundary=")
+              headers[i] = {name, content_type}
+            end
+          else
+            headers << {"Content-Type", content_type}
+          end
         end
-        headers.concat(auth_headers(res["authentication"]?, vars))
+        # Insomnia adds its auth header only when the request does not already carry one.
+        auth_headers(res["authentication"]?, vars).each do |pair|
+          headers << pair unless headers.any? { |(k, _)| k.compare(pair[0], case_insensitive: true) == 0 }
+        end
         Builder.pending_request(now, url, method, headers, body,
           source_surface: prov.surface, source_ref: prov.ref)
       end

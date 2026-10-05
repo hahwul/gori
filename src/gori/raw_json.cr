@@ -463,6 +463,16 @@ module Gori
       JSON.build { |j| j.object { members.each { |(k, v)| j.field(k) { j.raw(v) } } } }
     end
 
+    # Set `key` to the raw JSON `raw`: EVERY occurrence of a duplicated key, so no parser reads
+    # the old value, else appended. The one rule a re-signed header and an attack payload share.
+    def set_member(members : Array({String, String}), key : String, raw : String) : Nil
+      if members.any? { |(k, _)| k == key }
+        members.map! { |(k, v)| k == key ? {k, raw} : {k, v} }
+      else
+        members << {key, raw}
+      end
+    end
+
     # One member's value, parsed — the LAST occurrence, which is what `JSON.parse` reports
     # for a duplicated key. nil when absent or when that one value is itself unrepresentable,
     # so an oversized `uid` no longer hides the `exp` beside it.

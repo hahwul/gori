@@ -382,7 +382,9 @@ module Gori
           next unless p["in"]?.to_s == "path"
           name = p["name"]?.to_s
           next if name.empty?
-          result = result.gsub("{#{name}}", sample_value(spec, p))
+          # Encoded: an author's example (`john doe`, `a#b`) is a segment value, and a raw space
+          # or `#` would break the request line or cut the path.
+          result = result.gsub("{#{name}}", URI.encode_path_segment(sample_value(spec, p)))
         end
         result
       end
@@ -411,11 +413,32 @@ module Gori
         p["required"]?.try(&.as_bool?) == true
       end
 
+      # The author's own value beats a synthesized one, as it does for a body: the parameter's
+      # `example`/`examples` (Swagger 2: its `default`/`enum`), then its schema's. A `sort=sort`
+      # where the spec says `enum: [asc, desc]` is a template the server answers with a 400.
       private def self.sample_value(spec : JSON::Any, p : JSON::Any) : String
         schema_node = p["schema"]?
         schema = schema_node ? resolve_ref(spec, schema_node).as_h? : nil
+        # The first candidate that HAS a text spelling: an object example or a null enum member
+        # must not hide the schema's usable value behind it.
+        param = p.as_h?
+        {param.try { |h| media_example(spec, h) }, param.try { |h| given_sample(h) }, schema.try { |h| given_sample(h) }}.each do |given|
+          if text = given.try { |g| param_text(g) }
+            return text
+          end
+        end
         type = schema.try { |h| h["type"]?.try(&.as_s?) } || p["type"]?.try(&.as_s?)
         scalar_sample(type, p["name"]?.to_s)
+      end
+
+      # A given value as the text a path, query or header carries: a scalar as written, an
+      # array's first member. An object has no single spelling, so it is not one.
+      private def self.param_text(value : JSON::Any) : String?
+        value = (list = value.as_a?) ? list.first? : value
+        case raw = value.try(&.raw)
+        when String               then raw
+        when Int64, Float64, Bool then raw.to_s
+        end
       end
 
       private def self.scalar_sample(type : String?, name : String) : String
@@ -471,7 +494,7 @@ module Gori
           value = object[key]?
           return value if value && !value.raw.nil?
         end
-        object["enum"]?.try(&.as_a?).try(&.first?)
+        object["enum"]?.try(&.as_a?).try(&.find { |v| !v.raw.nil? })
       end
 
       private def self.object_sample(spec : JSON::Any, object : Hash(String, JSON::Any),
