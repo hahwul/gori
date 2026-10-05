@@ -49,9 +49,10 @@ module Gori::Decoder
       description: "Base64 URL-safe encode (-_ alphabet, padded)") { |b| Base64.urlsafe_encode(b, padding: true) }
 
     # ---------------- ENCODING: url ----------------
-    r.register text("url-encode", "url", "urlencode", "percent-encode",
-      category: Category::Encoding, direction: Direction::Encode,
-      description: "URL/percent encode (form style: space -> '+')") { |s| URI.encode_www_form(s) }
+    # Byte-wise, like url-decode's output: a binary intermediate round-trips (%FF stays %FF).
+    r.register encode("url-encode", "url", "urlencode", "percent-encode",
+      category: Category::Encoding,
+      description: "URL/percent encode (form style: space -> '+')") { |b| URI.encode_www_form(String.new(b)) }
     r.register text("url-decode", "urldecode", "percent-decode",
       category: Category::Encoding, direction: Direction::Decode,
       description: "URL/percent decode ('+' -> space, %XX)") { |s| URI.decode_www_form(s) }

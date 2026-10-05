@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Decoder: `url-encode` takes the binary that `url-decode` or a hex/base64 step produces (`%FF` round-trips), where it refused anything that was not UTF-8 text
 - Windows: gori now builds and runs natively on Windows (x86_64), ships as a self-contained `.exe` that `gori update` can replace in place, and is published to Chocolatey on each release after v0.7.1; `gori run shell --print` gains a PowerShell syntax, the default there; a Platform Support docs page lists each platform's support tier and the known gaps on Windows (#1510)
 - TUI: a project now opens on the History tab, where traffic arrives and the first-run steps live, instead of the Project tab's description; tab order is unchanged (#1524)
 - Repeater: the pane badges say `HTTP/1.1`, `TLS default` and `AUTO-LEN` instead of `h1`, `tls` and `CL` (`CL` stays where the border is too short), and Help describes the TLS fingerprint toggle (#1523)

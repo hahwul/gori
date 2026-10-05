@@ -125,6 +125,11 @@ describe Gori::Decoder do
       conv("url-decode", "a+b%2Bc").should eq "a b+c"
     end
 
+    it "url-encode takes the binary url-decode yields, so the pair round-trips" do
+      String.new(conv_bytes("url-encode", Bytes[0xff, 0xfe, 0x20])).should eq "%FF%FE+"
+      conv_bytes("url-decode", conv_bytes("url-encode", Bytes[0xff, 0x00])).should eq Bytes[0xff, 0x00]
+    end
+
     it "url-encode-all percent-encodes every byte (uppercase)" do
       conv("url-encode-all", "A/").should eq "%41%2F"
       conv("url-encode-all", "hi").should eq "%68%69"
