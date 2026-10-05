@@ -170,7 +170,7 @@ module Gori::Tui
         return nil unless Gori::WordlistCatalog.entry(name)
         return Entry.new(name, catalog_insert(name), false)
       end
-      dir = File.directory?(p)
+      dir = dir?(p)
       Entry.new(p, "#{p}#{dir ? "/" : ""}", dir)
     end
 
@@ -195,7 +195,16 @@ module Gori::Tui
         end
       end
       scored.sort_by! { |(name, rank)| {-rank, name} }
-      scored.first(CAP).map { |(name, rank)| {name, File.directory?(File.join(dir, name)), rank} }
+      scored.first(CAP).map { |(name, rank)| {name, dir?(File.join(dir, name)), rank} }
+    end
+
+    # `File.directory?` raises rather than answering false for a path it cannot stat: on
+    # Windows a file another process holds open (`D:\DumpStack.log.tmp` at a drive root)
+    # refuses even the attribute read. A dropdown row is not worth a crash.
+    private def dir?(path : String) : Bool
+      File.directory?(path)
+    rescue File::Error
+      false
     end
 
     # Per-directory children cache (bounded): re-read only when a dir is first seen.

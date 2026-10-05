@@ -22,6 +22,7 @@ end
 describe Gori::Paths do
   describe ".ensure_dir" do
     it "creates a missing directory at 0700" do
+      posix_only!("POSIX mode bits")
       with_tmp_dir do |dir|
         fresh = File.join(dir, "made", "by", "gori")
         Gori::Paths.ensure_dir(fresh)
@@ -30,6 +31,7 @@ describe Gori::Paths do
     end
 
     it "tightens a pre-existing loose directory by default" do
+      posix_only!("POSIX mode bits")
       with_tmp_dir do |dir|
         # An 0755 tree from an install that predates DIR_MODE.
         File.chmod(dir, 0o755)
@@ -42,6 +44,7 @@ describe Gori::Paths do
     # ~/dotfiles to 0700, and a relative `--config gori.json` did it to the working
     # directory.
     it "leaves a pre-existing directory's mode alone with tighten: false" do
+      posix_only!("POSIX mode bits")
       with_tmp_dir do |dir|
         File.chmod(dir, 0o755)
         Gori::Paths.ensure_dir(dir, tighten: false)
@@ -52,6 +55,7 @@ describe Gori::Paths do
     # Not owning a directory it FINDS does not mean not owning one it MAKES: an intermediate
     # gori has to create for the config file is still gori's, so it is created locked.
     it "still creates a missing directory at 0700 with tighten: false" do
+      posix_only!("POSIX mode bits")
       with_tmp_dir do |dir|
         File.chmod(dir, 0o755)
         nested = File.join(dir, "profiles")
@@ -100,6 +104,7 @@ end
 describe Gori::Paths do
   describe ".ensure_dir failure reporting" do
     it "reports an unwritable parent as a Gori::Error, not a File::Error" do
+      posix_only!("a read-only directory (Windows has no directory write bit)")
       with_tmp_dir do |dir|
         locked = File.join(dir, "locked")
         Dir.mkdir(locked, 0o500) # readable + traversable, NOT writable
@@ -134,6 +139,22 @@ describe Gori::Paths do
         Gori::Paths.ensure_dir(dir)
         Gori::Paths.ensure_dir(dir)
       end
+    end
+  end
+end
+
+describe Gori::Paths do
+  # `File::SEPARATOR` is `/` everywhere, but a joined or resolved Windows path separates with `\`:
+  # the archive's protected-destination check and map-local's confinement both ask this.
+  describe ".within?" do
+    it "takes either separator, and never a sibling that merely shares the prefix" do
+      dir = File.join(Dir.tempdir, "gori-within")
+      Gori::Paths.within?(dir, dir).should be_true
+      Gori::Paths.within?(File.join(dir, "a", "b.db"), dir).should be_true
+      Gori::Paths.within?("#{dir}/a", dir).should be_true
+      Gori::Paths.within?(File.join(dir, "a"), "#{dir}/").should be_true
+      Gori::Paths.within?("#{dir}-other", dir).should be_false
+      Gori::Paths.within?(File.join("#{dir}-other", "a"), dir).should be_false
     end
   end
 end

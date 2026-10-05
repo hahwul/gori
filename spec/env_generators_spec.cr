@@ -296,7 +296,7 @@ describe "Gori::Env generators" do
     roots = [File.join(__DIR__, "..", "src"), __DIR__]
     offenders = [] of String
     roots.each do |root|
-      Dir.glob(File.join(root, "**", "*.cr")).sort.each do |path|
+      glob_files(root, "**", "*.cr").sort.each do |path|
         File.read(path).each_line do |line|
           next unless line.matches?(/^\s*def overlay\(wire\s*:\s*Bytes/)
           # `SessionSlots#overlay(wire, &)` is a different method on a different class — the

@@ -29,6 +29,8 @@ describe Gori::Proxy::Tls::CertAuthority do
   # `--config` (#466): 0700 for one gori CREATES, never a chmod on one it FINDS. What keeps
   # the secret secret is the key file's own mode, pinned by the group below.
   describe "the CA directory it was pointed at" do
+    before_each { posix_only!("POSIX mode bits") }
+
     it "creates a missing one at 0700" do
       with_ca_dir do |dir|
         Gori::Proxy::Tls::CertAuthority.load_or_create(dir)
@@ -58,6 +60,8 @@ describe Gori::Proxy::Tls::CertAuthority do
   end
 
   describe "the root private key's mode" do
+    before_each { posix_only!("POSIX mode bits") }
+
     it "is 0600 even when the CA dir is world-traversable" do
       with_ca_dir do |dir|
         Dir.mkdir_p(dir)
@@ -236,6 +240,7 @@ describe Gori::Proxy::Tls::CertAuthority do
   # lone cert and refused to start. Both now wait on an flock of the directory.
   describe "the CA directory lock" do
     it "makes a first run wait for another process holding the dir" do
+      posix_only!("flock on a directory; Windows will not open one as a file, so the lock is skipped there")
       with_ca_dir do |dir|
         Dir.mkdir_p(dir)
         holder = File.open(dir, "r")
@@ -261,6 +266,7 @@ describe Gori::Proxy::Tls::CertAuthority do
     end
 
     it "makes a rotation wait too, and is not held after it returns" do
+      posix_only!("flock on a directory; Windows will not open one as a file, so the lock is skipped there")
       with_ca_dir do |dir|
         ca = Gori::Proxy::Tls::CertAuthority.load_or_create(dir)
         before = File.read(ca.ca_cert_path)
@@ -520,7 +526,7 @@ describe Gori::Proxy::Tls::CertAuthority do
       ca.context_for("a.test").should_not be(old_leaf) # stale leaf evicted
       # The swap is persisted: a reload reads the NEW root, not the old one.
       Gori::Proxy::Tls::CertAuthority.load_or_create(dir).ca_cert_pem.should eq(ca.ca_cert_pem)
-      File.info(File.join(dir, "root.key.pem")).permissions.value.should eq(0o600)
+      File.info(File.join(dir, "root.key.pem")).permissions.value.should eq(0o600) unless {{ flag?(:win32) }}
     end
   end
 

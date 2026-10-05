@@ -1116,6 +1116,10 @@ describe Gori::Proxy::Upstream do
           # Answers immediately, so OpenSSL parses the reply as a TLS record and refuses —
           # the complement of the silent case above, which times out instead.
           sock.write("HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n".to_slice) rescue nil
+          # Takes the ClientHello before closing: a socket closed with it unread is reset, and
+          # Windows then discards the reply the client has not read yet.
+          sock.read_timeout = 2.seconds
+          sock.read(Bytes.new(4096)) rescue nil
           sock.close rescue nil
         end
       end
@@ -1127,7 +1131,8 @@ describe Gori::Proxy::Upstream do
         err.try(&.kind).should eq(Gori::Proxy::Upstream::DialErrorKind::Tls)
         # Under verify-on this used to be indistinguishable from an untrusted certificate.
         err.try(&.kind).should_not eq(Gori::Proxy::Upstream::DialErrorKind::TlsVerify)
-        err.try(&.cause).to_s.downcase.should contain("version")
+        # Windows' OpenSSL words the same refusal "packet length too long".
+        err.try(&.cause).to_s.downcase.should match(/version|packet length/)
       ensure
         origin.close rescue nil
       end

@@ -373,7 +373,7 @@ describe Gori::Proxy::Codec::Http1 do
       end
 
       it "retains received response bytes when the head-completion deadline expires" do
-        client, origin = UNIXSocket.pair
+        client, origin = stream_pair
         raw = "HTTP/1.1 200 OK\nContent-Length: 6\n\nsecond"
         begin
           client.write(raw.to_slice)
@@ -402,7 +402,7 @@ describe Gori::Proxy::Codec::Http1 do
     # to be buffered behind it. The bulk path has to truncate at that byte for the same reason.
     describe "with detect_non_http" do
       it "stops on the deciding byte even when the whole preface is already buffered" do
-        a, b = UNIXSocket.pair
+        a, b = stream_pair
         begin
           a.write(Bytes[0x10, 0x0c, 0x00, 0x04, 0x4d, 0x51, 0x54, 0x54]) # MQTT CONNECT
           a.flush
@@ -415,7 +415,7 @@ describe Gori::Proxy::Codec::Http1 do
       end
 
       it "keeps reading past the blank line RFC 7230 §3.5 permits before deciding" do
-        a, b = UNIXSocket.pair
+        a, b = stream_pair
         begin
           a.write("\r\n".to_slice)
           a.write(Bytes[0x16, 0x03, 0x01]) # a TLS ClientHello after the blank line
@@ -432,7 +432,7 @@ describe Gori::Proxy::Codec::Http1 do
       # read. A bulk scan that looked past it would reject the connection as non-HTTP over a
       # byte the reader is not entitled to have seen.
       it "stops on a terminator that completes before any byte could be judged" do
-        a, b = UNIXSocket.pair
+        a, b = stream_pair
         begin
           a.write("\r\n\r\n".to_slice)
           a.write(Bytes[0x10, 0x0c]) # MQTT, on the far side of a head that is already over
@@ -446,7 +446,7 @@ describe Gori::Proxy::Codec::Http1 do
       end
 
       it "reads a real head whole, terminator and all, and leaves the body" do
-        a, b = UNIXSocket.pair
+        a, b = stream_pair
         begin
           a.write("GET / HTTP/1.1\r\nHost: a\r\n\r\nBODY".to_slice)
           a.flush
@@ -488,7 +488,7 @@ describe Gori::Proxy::Codec::Http1 do
 
     it "ends it on the deadline path too, without waiting out the deadline" do
       lf_heads.each do |head|
-        a, b = UNIXSocket.pair
+        a, b = stream_pair
         begin
           a.write("#{head}body".to_slice)
           a.flush
@@ -525,7 +525,7 @@ describe Gori::Proxy::Codec::Http1 do
           resp = Http1.parse_response_head(head)
           expect_raises(Gori::Error, /ambiguous framing/) { Body.response_framing(resp, "GET") }
         end
-        a, b = UNIXSocket.pair
+        a, b = stream_pair
         begin
           a.write("#{strict_head}#{body}".to_slice)
           a.flush

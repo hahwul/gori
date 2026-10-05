@@ -32,7 +32,7 @@ describe "TUI background fibers" do
 
     # `src/gori/tui.cr` as well as the directory: the module's own file holds terminal
     # construction, and a glob of the directory alone would never look at it.
-    paths = Dir.glob(File.join(root, "src", "gori", "tui", "**", "*.cr"))
+    paths = glob_files(root, "src", "gori", "tui", "**", "*.cr")
     paths << File.join(root, "src", "gori", "tui.cr")
 
     paths.sort.each do |path|

@@ -419,15 +419,17 @@ module Gori::Settings
     end
   end
 
+  FALLBACK_EDITOR = {{ flag?(:win32) ? "notepad" : "vi" }}
+
   # Effective external-editor argv (program + args), WITHOUT the file path:
-  # Settings.editor (if set) → $VISUAL → $EDITOR → "vi". Whitespace-split so
+  # Settings.editor (if set) → $VISUAL → $EDITOR → "vi" ("notepad" on Windows). Whitespace-split so
   # "code --wait" / "emacs -nw" keep their flags; the caller appends the path.
   def self.editor_command : Array(String)
     raw = editor.strip
     raw = ENV["VISUAL"]?.to_s.strip if raw.empty?
     raw = ENV["EDITOR"]?.to_s.strip if raw.empty?
-    raw = "vi" if raw.empty?
+    raw = FALLBACK_EDITOR if raw.empty?
     parts = raw.split # collapses whitespace runs, drops empties
-    parts.empty? ? ["vi"] : parts
+    parts.empty? ? [FALLBACK_EDITOR] : parts
   end
 end

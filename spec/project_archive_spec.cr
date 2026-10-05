@@ -175,7 +175,7 @@ describe Gori::ProjectArchive do
         archive_path = File.join(root, "snapshot.gori")
         prepared_export.write(archive_path).should eq(archive_path)
         read_archive(archive_path).keys.sort!.should eq(["gori.db", "manifest.json"])
-        (File.info(archive_path).permissions.to_i & 0o777).should eq(0o600)
+        (File.info(archive_path).permissions.to_i & 0o777).should eq(0o600) unless {{ flag?(:win32) }}
 
         # A later WAL commit does not change the already prepared snapshot.
         store.insert_flow(archive_request("/later"))
@@ -222,6 +222,7 @@ describe Gori::ProjectArchive do
   end
 
   it "requires explicit overwrite and refuses destinations inside the source project" do
+    posix_only!("File.symlink needs Developer Mode")
     with_archive_project do |_registry, project, _store, root|
       prepared = Gori::ProjectArchive.prepare_export(project)
       begin

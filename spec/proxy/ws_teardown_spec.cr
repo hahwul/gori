@@ -201,11 +201,11 @@ describe "WS::Relay teardown" do
   # "could not be delivered" disposition both write sites already have.
   #
   # Asserted on the socket rather than by stalling a peer, because the arming is the fix and a
-  # filled send buffer is a timing test. `UNIXSocket` is used for the same reason `SocketTuning`
-  # resolves through wrappers: the timeout lives on the fd, not on the relay.
+  # filled send buffer is a timing test. A real socket pair is used for the same reason
+  # `SocketTuning` resolves through wrappers: the timeout lives on the fd, not on the relay.
   it "re-arms a bounded write timeout on both legs before the teardown writes" do
-    client, client_peer = UNIXSocket.pair
-    upstream, upstream_peer = UNIXSocket.pair
+    client, client_peer = stream_pair
+    upstream, upstream_peer = stream_pair
     Gori::Proxy::SocketTuning.relax(client)
     Gori::Proxy::SocketTuning.relax(upstream)
     client.write_timeout.should be_nil # the state Relay.run inherits from ClientConn

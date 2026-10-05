@@ -50,6 +50,10 @@ module MenuLetterMeaning
 
   alias Pair = {String, String}
 
+  # `violations`, swept once on first use. The sweep builds every profile × keyset, which takes
+  # seconds: run at load time it was paid by every process linking this file, examples or not.
+  class_getter(found : Hash(Pair, Set(String))) { violations }
+
   # Where `Runner#editor_pane?` is true, from each controller's own #editor_pane?: the
   # sections whose pane is a text editor, or nil when every view of the scope is one.
   EDITOR_VIEWS = {
@@ -387,15 +391,15 @@ MENU_LETTER_ALLOWED = {
 } of MenuLetterMeaning::Pair => String
 
 describe "space-menu letters vs the keys the same tab answers (R1)" do
-  found = MenuLetterMeaning.violations
-
   it "names no key the tab answers with a different action" do
+    found = MenuLetterMeaning.found
     fresh = found.keys.reject { |pair| MENU_LETTER_ALLOWED.has_key?(pair) }
     fresh.map { |(menu, other)| "#{menu} ~ #{other} (#{found[{menu, other}].to_a.sort.join(", ")})" }
       .should eq([] of String)
   end
 
   it "keeps no allowlist entry that has stopped violating" do
+    found = MenuLetterMeaning.found
     MENU_LETTER_ALLOWED.keys.reject { |pair| found.has_key?(pair) }.should eq([] of MenuLetterMeaning::Pair)
   end
 

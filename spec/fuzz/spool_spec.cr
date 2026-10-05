@@ -149,6 +149,7 @@ describe Gori::Fuzz::Spool do
   end
 
   it "creates a 0700 directory and lets Store enforce private database modes" do
+    posix_only!("POSIX mode bits")
     with_spool_root do |root|
       spool = Gori::Fuzz::Spool.new(root)
       run = spool.start(Gori::Fuzz::SavedRunMeta.new(nil,

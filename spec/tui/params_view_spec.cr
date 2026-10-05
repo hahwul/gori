@@ -262,7 +262,7 @@ describe ParamsController do
         entries.size.should eq(1)
         entries.first.name.should match(/\Aparams-.*-\d{8}-\d{6}\.txt\z/)
         File.read(entries.first.path).lines.sort!.should eq(["page", "q"])
-        (File.info(entries.first.path).permissions.value & 0o777).should eq(0o600)
+        (File.info(entries.first.path).permissions.value & 0o777).should eq(0o600) unless {{ flag?(:win32) }}
       end
     end
   end

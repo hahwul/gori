@@ -87,6 +87,19 @@ rescue
   false
 end
 
+# Two connected stream sockets, for an example that needs real fds talking to each other.
+# Loopback TCP rather than `UNIXSocket.pair`, which has no Windows implementation.
+def stream_pair : {TCPSocket, TCPSocket}
+  server = TCPServer.new("127.0.0.1", 0)
+  begin
+    pair = {TCPSocket.new("127.0.0.1", server.local_address.port), server.accept}
+  ensure
+    server.close
+  end
+  pair.each(&.tcp_nodelay = true)
+  pair
+end
+
 # A hung example is not a failure, it is a suite that never ends: a bare `channel.receive`
 # waiting on a server that was never reached parks the one fiber the runner has, the process
 # sits at 0% CPU, and the dots are buffered so the log says nothing. Such processes outlived
@@ -101,6 +114,20 @@ end
 # while the machine sleeps, so closing a laptop lid mid-suite would otherwise read as a hang.
 # The one-second timer does not fire during sleep, so ticks only count time the suite had.
 SPEC_EXAMPLE_TIMEOUT = ENV["GORI_SPEC_EXAMPLE_TIMEOUT"]?.try(&.to_i?) || 300
+
+# A native crash on Windows ends the process without flushing a buffered STDOUT, which would
+# take the name of the example that crashed with it.
+{% if flag?(:win32) %}
+  STDOUT.sync = true
+{% end %}
+
+# Marks the running example pending on Windows, where *reason* (a POSIX-only mechanism the
+# example depends on) does not exist. Everywhere else it is a no-op.
+def posix_only!(reason : String, file = __FILE__, line = __LINE__) : Nil
+  {% if flag?(:win32) %}
+    pending!("POSIX only: #{reason}", file, line)
+  {% end %}
+end
 
 module SpecWatchdog
   class_property ticks = 0_i64
@@ -261,16 +288,39 @@ end
 # the store, an event channel, a retention knob, an Env layer restored on exit) keeps a
 # file-private `with_store` of its own — a top-level `private def` shadows this one inside
 # that file only, so the two never collide.
+#
+# The teardown runs after the `rescue`, never in an `ensure`: on Windows a fiber switch while an
+# exception unwinds (`Store#close` waits on the writer fiber) ends the process without a word, so
+# an example that failed, or went pending, inside the store took the rest of its file with it.
 def with_store(&)
   path = File.tempname("gori-spec", ".db")
   store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
+  raised = run_capturing { yield store }
+  store.close
+  delete_db_files(path)
+  raise raised if raised
+end
+
+# Runs the block and hands back what it raised, so a teardown that switches fibers can run once
+# the exception has finished unwinding (see `with_store`), and re-raise it after.
+def run_capturing(&) : Exception?
+  yield
+  nil
+rescue ex
+  ex
+end
+
+# Deletes a throwaway database and its WAL/SHM sidecars. Windows will not delete a file that
+# is still open, and a read after `Store#close` reopens the pool (a known store bug; an example
+# that closes its store to make writes fail reads after it), so there the files are left in
+# the temp dir rather than failing an example on its teardown.
+def delete_db_files(path : String) : Nil
+  {path, "#{path}-wal", "#{path}-shm"}.each do |file|
+    {% if flag?(:win32) %}
+      File.delete?(file) rescue nil
+    {% else %}
+      File.delete?(file)
+    {% end %}
   end
 end
 
@@ -306,17 +356,13 @@ def with_store_env(&)
   store = Gori::Store.open(path)
   prev_env = Gori::Settings.project_env_vars
   prev_layer = Gori::Env.layer
-  begin
-    yield store
-  ensure
-    Gori::Env.layer = prev_layer
-    Gori::Settings.project_env_vars = prev_env
-    Gori::Env.bump_highlight_rev
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
-  end
+  raised = run_capturing { yield store } # not an `ensure`: see `with_store`
+  Gori::Env.layer = prev_layer
+  Gori::Settings.project_env_vars = prev_env
+  Gori::Env.bump_highlight_rev
+  store.close
+  delete_db_files(path)
+  raise raised if raised
 end
 
 # The MCP tool facade over a store, built the way `gori mcp` builds it for a bound project:
@@ -411,5 +457,45 @@ def with_wordlist_home(&)
     prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
     FileUtils.rm_rf(home)
     FileUtils.rm_rf(cwd)
+  end
+end
+
+{% unless flag?(:win32) %}
+  # `dup(2)` is not in Crystal's LibC bindings; one line binds it for the helper below.
+  lib LibC
+    fun dup(fd : Int) : Int
+  end
+{% end %}
+
+# Run the block with STDOUT pointed at /dev/null — for driving a `gori run` entry point whose
+# normal output is the help page, when the example is about a side effect and not the page.
+# Windows runs it unsilenced: its STDOUT is a handle, not an fd to `dup`, and the noise is
+# only cosmetic.
+def stdout_silenced(&)
+  {% if flag?(:win32) %}
+    yield
+  {% else %}
+    STDOUT.flush
+    saved = LibC.dup(STDOUT.fd)
+    File.open(File::NULL, "w") { |null| STDOUT.reopen(null) }
+    begin
+      yield
+    ensure
+      STDOUT.flush
+      STDOUT.reopen(IO::FileDescriptor.new(saved))
+    end
+  {% end %}
+end
+
+# `Dir.glob` over path parts joined like `File.join`. A glob pattern takes `/` on every
+# platform (`\` escapes), so on Windows the joined parts are turned POSIX first.
+def glob_files(*parts : String) : Array(String)
+  Dir.glob(Path.new(*parts).to_posix.to_s)
+end
+
+# Reads a request head off a test origin's connection before it answers. Windows answers a
+# close over unread bytes with an RST, which throws the reply away before the client reads it.
+def drain_request_head(io : IO) : Nil
+  while (line = io.gets) && !line.empty?
   end
 end

@@ -73,7 +73,7 @@ describe Gori::ShellEnv do
       squash(text).should contain(squash(File.read(ca).split("-----BEGIN CERTIFICATE-----")[1].split("-----END")[0]))
       File.dirname(r.bundle_path).should eq(File.join(root, "shell"))
       File.basename(r.bundle_path).should match(/\Aca-bundle-[0-9a-f]{16}\.pem\z/)
-      File.info(r.bundle_path).permissions.value.should eq(0o644)
+      File.info(r.bundle_path).permissions.value.should eq(0o644) unless {{ flag?(:win32) }}
     end
   end
 
@@ -208,6 +208,7 @@ describe Gori::ShellEnv do
   end
 
   it "assembles the base from a hashed-certificate directory when the system has no bundle file" do
+    posix_only!("File.symlink needs Developer Mode")
     with_shell_fixture do |root, ca, system|
       certs = File.join(root, "certs")
       Dir.mkdir_p(certs)
@@ -316,12 +317,21 @@ describe Gori::ShellEnv do
       file = File.tempname("gori-shell-quote")
       begin
         File.write(file, "X=#{Gori::ShellEnv.posix_quote(nasty)}\n")
-        out = Process.run("/bin/sh", ["-c", %(. "$0"; printf %s "$X"), file],
-          output: Process::Redirect::Pipe) { |p| p.output.gets_to_end }
-        out.should eq(nasty)
+        unless {{ flag?(:win32) }}
+          out = Process.run("/bin/sh", ["-c", %(. "$0"; printf %s "$X"), file],
+            output: Process::Redirect::Pipe) { |p| p.output.gets_to_end }
+          out.should eq(nasty)
+        end
         if fish = Process.find_executable("fish")
           File.write(file, "set -l X #{Gori::ShellEnv.fish_quote(nasty)}\nprintf %s $X\n")
           out = Process.run(fish, [file], output: Process::Redirect::Pipe) { |p| p.output.gets_to_end }
+          out.should eq(nasty)
+        end
+        if pwsh = Process.find_executable("pwsh")
+          script = "#{file}.ps1"
+          File.write(script, "$X = #{Gori::ShellEnv.powershell_quote(nasty)}\n[Console]::Out.Write($X)\n")
+          out = Process.run(pwsh, ["-NoProfile", "-File", script], output: Process::Redirect::Pipe) { |p| p.output.gets_to_end }
+          File.delete?(script)
           out.should eq(nasty)
         end
       ensure
@@ -331,13 +341,30 @@ describe Gori::ShellEnv do
   end
 
   describe "Syntax" do
-    it "maps every POSIX-family name to one syntax and fish to its own" do
+    it "maps every POSIX-family name to one syntax, and fish and PowerShell to their own" do
       %w[sh bash zsh ksh dash posix SH].each { |n| Gori::ShellEnv::Syntax.parse?(n).should eq(Gori::ShellEnv::Syntax::Posix) }
       Gori::ShellEnv::Syntax.parse?("fish").should eq(Gori::ShellEnv::Syntax::Fish)
-      Gori::ShellEnv::Syntax.parse?("pwsh").should be_nil
+      %w[pwsh powershell PowerShell].each { |n| Gori::ShellEnv::Syntax.parse?(n).should eq(Gori::ShellEnv::Syntax::Powershell) }
+      Gori::ShellEnv::Syntax.parse?("cmd").should be_nil
       Gori::ShellEnv::Syntax.for_shell("/opt/homebrew/bin/fish").should eq(Gori::ShellEnv::Syntax::Fish)
       Gori::ShellEnv::Syntax.for_shell("/bin/zsh").should eq(Gori::ShellEnv::Syntax::Posix)
-      Gori::ShellEnv::Syntax.for_shell(nil).should eq(Gori::ShellEnv::Syntax::Posix)
+      Gori::ShellEnv::Syntax.for_shell("/usr/local/bin/pwsh").should eq(Gori::ShellEnv::Syntax::Powershell)
+      Gori::ShellEnv::Syntax.for_shell("powershell.exe").should eq(Gori::ShellEnv::Syntax::Powershell)
+      # No SHELL: the platform's default terminal syntax.
+      Gori::ShellEnv::Syntax.for_shell(nil).should eq(Gori::ShellEnv::Syntax.default)
+    end
+
+    it "doubles every quote PowerShell reads as one, typographic ones included" do
+      Gori::ShellEnv.powershell_quote("a'b\u2019c").should eq("'a''b\u2019\u2019c'")
+    end
+
+    it "renders PowerShell assignments and removals" do
+      with_shell_fixture do |root, ca, system|
+        ps = Gori::ShellEnv.render(build(root, ca, system), Gori::ShellEnv::Syntax::Powershell)
+        ps.should contain("$env:HTTPS_PROXY = 'http://127.0.0.1:8070'\n")
+        ps.should contain("Remove-Item Env:NO_PROXY -ErrorAction Ignore\n")
+        ps.should_not contain("export ")
+      end
     end
   end
 

@@ -353,7 +353,7 @@ describe "host overrides reach every dialer (source-grep guard)" do
     }
     root = File.expand_path(File.join(__DIR__, "..", ".."))
     offenders = [] of String
-    Dir.glob(File.join(root, "src", "**", "*.cr")).sort.each do |path|
+    glob_files(root, "src", "**", "*.cr").sort.each do |path|
       rel = Path[path].relative_to(root).to_s
       lines = File.read_lines(path)
       lines.each_with_index do |line, i|

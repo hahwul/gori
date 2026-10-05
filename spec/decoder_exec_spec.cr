@@ -4,6 +4,7 @@ require "./spec_helper"
 # colon-prefixed keyword rather than the `|` the issue drew.
 
 private def with_hook(body : String, &)
+  posix_only!("a #!/bin/sh hook script")
   dir = File.tempname("gori-chain-hook")
   Dir.mkdir_p(dir)
   path = File.join(dir, "hook.sh")

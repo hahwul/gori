@@ -12,6 +12,7 @@ include Gori::Tui
 # `ExternalEditor` itself was hardened for exactly this (byte-exact wire kinds, conditional
 # trailing-newline chop); the invariant was defeated one layer up, in its two callers.
 private def with_fake_editor(script : String, &)
+  posix_only!("a #!/bin/sh stand-in editor")
   dir = File.tempname("gori-ed")
   Dir.mkdir_p(dir)
   path = File.join(dir, "fake-editor.sh")

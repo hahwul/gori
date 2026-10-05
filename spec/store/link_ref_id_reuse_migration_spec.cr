@@ -41,9 +41,7 @@ private def migrate_and_open(path : String, &)
 end
 
 private def cleanup(path : String)
-  File.delete?(path)
-  File.delete?("#{path}-wal")
-  File.delete?("#{path}-shm")
+  delete_db_files(path)
 end
 
 # V10 makes rowid reuse impossible on the two tables an `entity_links` row can name.

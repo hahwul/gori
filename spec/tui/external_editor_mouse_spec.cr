@@ -135,6 +135,7 @@ end
 
 describe "Runner.copy_shell_command" do
   it "uses the absolute path of the running gori binary and quotes arguments" do
+    posix_only!("a POSIX absolute CA path, quoted the POSIX way")
     cmd_posix = Runner.copy_shell_command("127.0.0.1:8070", "/path/with space/ca",
       Gori::ShellEnv::Syntax::Posix, executable: "/opt/custom bin/gori")
     cmd_posix.should eq(%(eval "$('/opt/custom bin/gori' run shell --print --proxy 127.0.0.1:8070 --ca-dir '/path/with space/ca')"))
@@ -149,10 +150,19 @@ describe "Runner.copy_shell_command" do
     cmd_fish = Runner.copy_shell_command("127.0.0.1:8070", nasty_ca,
       Gori::ShellEnv::Syntax::Fish, executable: "/usr/local/bin/gori")
     cmd_fish.should contain(Gori::ShellEnv.fish_quote(File.expand_path(nasty_ca)))
-    cmd_fish.should_not contain(Process.quote(File.expand_path(nasty_ca)))
+    cmd_fish.should_not contain(Process.quote_posix(File.expand_path(nasty_ca)))
+  end
+
+  it "runs the quoted path with `&` and pipes into Invoke-Expression for PowerShell" do
+    cmd = Runner.copy_shell_command("127.0.0.1:8070", "/path/it's/ca",
+      Gori::ShellEnv::Syntax::Powershell, executable: "/opt/custom bin/gori")
+    ca = File.expand_path("/path/it's/ca").gsub("'", "''")
+    cmd.should eq("& '/opt/custom bin/gori' run shell --print --shell powershell --proxy '127.0.0.1:8070' " \
+                  "--ca-dir '#{ca}' | Out-String | Invoke-Expression")
   end
 
   it "falls back to 'gori' when executable is nil" do
+    posix_only!("a POSIX absolute CA path, quoted the POSIX way")
     cmd = Runner.copy_shell_command("127.0.0.1:8070", "/ca",
       Gori::ShellEnv::Syntax::Posix, executable: nil)
     cmd.should eq(%(eval "$(gori run shell --print --proxy 127.0.0.1:8070 --ca-dir /ca)"))
@@ -163,7 +173,7 @@ describe "Runner.copy_shell_command" do
   it "makes a relative CA directory absolute against gori's cwd" do
     cmd = Runner.copy_shell_command("127.0.0.1:8070", "./ca",
       Gori::ShellEnv::Syntax::Posix, executable: "gori")
-    cmd.should eq(%(eval "$(gori run shell --print --proxy 127.0.0.1:8070 --ca-dir #{Process.quote(File.join(Dir.current, "ca"))})"))
+    cmd.should eq(%(eval "$(gori run shell --print --proxy 127.0.0.1:8070 --ca-dir #{Process.quote_posix(File.join(Dir.current, "ca"))})"))
     cmd.should_not contain("./ca")
   end
 end
@@ -179,6 +189,7 @@ end
 # whatever handled it before (SignalGuard's restore-and-die) must be back afterwards.
 describe "Runner.shield_tty_signals" do
   it "swallows INT while the child runs and restores the previous handler" do
+    posix_only!("Process.signal")
     hits = Channel(Nil).new(1)
     int = Runner::TTY_SIGNALS.first # INT, trapped the way SignalGuard arms it
     int.trap { hits.send(nil) }

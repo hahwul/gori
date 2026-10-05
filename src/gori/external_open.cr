@@ -85,6 +85,11 @@ module Gori
     # Keyed on `MediaType.essence` (folded, parameters dropped), plus the structured-suffix
     # fallbacks below for the `+json` / `+xml` families, which is how a vendor type
     # (`application/vnd.api+json`) still opens as what it is.
+    # Windows' default handler for `.js` is Windows Script Host, which RUNS the file outside any
+    # browser: a captured script opened there would execute with the operator's rights. So on
+    # Windows it opens as the text it is.
+    JS_SUFFIX = {{ flag?(:win32) ? ".txt" : ".js" }}
+
     SUFFIXES = {
       "text/html"                         => ".html",
       "application/xhtml+xml"             => ".xhtml",
@@ -92,9 +97,9 @@ module Gori
       "text/css"                          => ".css",
       "text/csv"                          => ".csv",
       "text/markdown"                     => ".md",
-      "text/javascript"                   => ".js",
-      "application/javascript"            => ".js",
-      "application/x-javascript"          => ".js",
+      "text/javascript"                   => JS_SUFFIX,
+      "application/javascript"            => JS_SUFFIX,
+      "application/x-javascript"          => JS_SUFFIX,
       "application/json"                  => ".json",
       "application/manifest+json"         => ".json",
       "text/xml"                          => ".xml",
@@ -213,9 +218,9 @@ module Gori
       end
     end
 
-    # {program, args} for handing a path to the desktop. nil where there is no opener to call,
-    # which is every platform but macOS and Linux today — the caller then says so rather than
-    # spawning something that does not exist.
+    # {program, args} for handing a path to the desktop. nil where there is no opener to call —
+    # the caller then says so rather than spawning something that does not exist. Windows uses
+    # `explorer`, not `cmd /c start`, so no path ever goes through cmd.exe's parser.
     #
     # `xdg-open` is not assumed to be installed: a bare Linux box or a minimal container has
     # none, and `Process.run` would raise `File::NotFoundError` from inside the spawn. The
@@ -225,6 +230,8 @@ module Gori
         {"open", [path]}
       {% elsif flag?(:linux) %}
         {"xdg-open", [path]}
+      {% elsif flag?(:win32) %}
+        {"explorer.exe", [path]}
       {% else %}
         nil
       {% end %}

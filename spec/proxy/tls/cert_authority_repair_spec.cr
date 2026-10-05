@@ -72,7 +72,7 @@ describe "Gori::Proxy::Tls::CertAuthority — repairing a broken CA dir" do
       # Repaired for real: the dir loads again, and the restored key is owner-only.
       reloaded = Gori::Proxy::Tls::CertAuthority.load_or_create(dir)
       reloaded.usability_error.should be_nil
-      File.info(File.join(dir, "root.key.pem")).permissions.value.should eq(0o600)
+      File.info(File.join(dir, "root.key.pem")).permissions.value.should eq(0o600) unless {{ flag?(:win32) }}
     end
   end
 

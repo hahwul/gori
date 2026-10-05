@@ -13,7 +13,7 @@ describe "the ▎ selection bar" do
   it "is drawn in Theme.accent by every list" do
     root = File.join(__DIR__, "..", "..", "src", "gori", "tui")
     offenders = [] of String
-    Dir.glob(File.join(root, "**", "*.cr")).sort.each do |path|
+    glob_files(root, "**", "*.cr").sort.each do |path|
       File.read(path).lines.each_with_index do |line, i|
         # The selection-bar idiom specifically: glyph-or-space on a per-row flag, which is
         # what makes the cell a MARKER COLUMN the list owns on every row. A bare `'▎'` is a

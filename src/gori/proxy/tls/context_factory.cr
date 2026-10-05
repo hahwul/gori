@@ -1,5 +1,23 @@
 require "./key_pair"
 
+# `Context::Server.insecure` without the system-root import the Windows stdlib adds to it
+# (`Crystal::System::Crypto.populate_system_root_certificates`, which on POSIX `insecure` never
+# did): a bare `SSL_CTX_new`, the very context `insecure` builds everywhere else. Reaching into
+# stdlib internals deliberately, like `socket_residue.cr`, so a rename fails to compile.
+class OpenSSL::SSL::Context::Server
+  def self.gori_bare(method : LibSSL::SSLMethod = Context.default_method) : self
+    obj = allocate
+    obj.gori_init_bare(method)
+    GC.add_finalizer(obj)
+    obj
+  end
+
+  protected def gori_init_bare(method : LibSSL::SSLMethod) : Nil
+    @handle = LibSSL.ssl_ctx_new(method)
+    raise OpenSSL::Error.new("SSL_CTX_new") if @handle.null?
+  end
+end
+
 module Gori::Proxy::Tls
   # Builds a stdlib SSL server context with an in-memory leaf cert/key injected
   # via FFI (no temp files, validated in SPIKE 1). We advertise ALPN "h2": the
@@ -24,7 +42,8 @@ module Gori::Proxy::Tls
       ctx
     end
 
-    # `OpenSSL::SSL::Context::Server.new` minus its `set_default_verify_paths`. That call loads
+    # `OpenSSL::SSL::Context::Server.new` minus its `set_default_verify_paths` (and, on Windows,
+    # its import of the system root store, which `insecure` does too: hence `gori_bare`). That call loads
     # the system CA bundle into the context's X509 store, which a server context only consults
     # to verify a CLIENT certificate — and no gori server context asks for one (none sets
     # `verify_mode`). Per leaf it cost ~3 ms of parsing on the scheduler thread and ~1.1 MB of
@@ -33,7 +52,7 @@ module Gori::Proxy::Tls
     # stdlib (`openssl/ssl/context.cr`); spec/proxy/tls/context_factory_spec.cr compares the
     # result against a stdlib context so a stdlib change shows up as a failing spec.
     def self.lean_server : OpenSSL::SSL::Context::Server
-      ctx = OpenSSL::SSL::Context::Server.insecure
+      ctx = OpenSSL::SSL::Context::Server.gori_bare
       ctx.add_options(OpenSSL::SSL::Options.flags(
         ALL,
         NO_TLS_V1,

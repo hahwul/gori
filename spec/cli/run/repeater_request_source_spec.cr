@@ -241,10 +241,6 @@ describe "gori run repeater create — the request source" do
   end
 end
 
-lib LibC
-  fun dup(fd : Int) : Int
-end
-
 # With `--curl`, `--flow` is provenance only: the curl command already said which protocol it
 # speaks. The flow's own protocol overwrote it, while MCP `create_repeater{curl, flow_id}` kept
 # curl's — the same inputs stored `http2` both ways.
@@ -260,21 +256,15 @@ describe "gori run repeater create --curl --flow" do
         head: "GET /v1 HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, source: Gori::FlowSource::Kind::Proxy))
       store.close
       File.write(curl, "curl --http2 https://acme.test/v1")
-      STDOUT.flush
-      saved = LibC.dup(STDOUT.fd)
-      File.open(File::NULL, "w") { |null| STDOUT.reopen(null) }
-      begin
+      stdout_silenced do
         Gori::CLI::Run.dispatch(["repeater", "create", "--curl", curl, "--flow", fid.to_s, "--db", db])
-      ensure
-        STDOUT.flush
-        STDOUT.reopen(IO::FileDescriptor.new(saved))
       end
       store = Gori::Store.open(db)
       store.repeaters.last.http2?.should be_true
       store.close
     ensure
       File.delete?(curl)
-      {db, "#{db}-wal", "#{db}-shm"}.each { |p| File.delete?(p) }
+      delete_db_files(db)
     end
   end
 end

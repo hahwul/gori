@@ -151,7 +151,7 @@ describe "R1 · the unbound-overlay drain has a consumer" do
     it "is wired on every `gori run` verb that accepts --slot" do
       dir = File.join(__DIR__, "../../..", "src/gori/cli/run")
       offenders = [] of String
-      Dir.glob(File.join(dir, "*.cr")).sort.each do |path|
+      glob_files(dir, "*.cr").sort.each do |path|
         src = File.read(path)
         next unless src.includes?("\"--slot")
         offenders << File.basename(path) unless src.includes?("report_unbound_slot_overlay(")
@@ -161,7 +161,7 @@ describe "R1 · the unbound-overlay drain has a consumer" do
 
     it "keeps the population non-trivial, so an empty glob cannot pass it vacuously" do
       dir = File.join(__DIR__, "../../..", "src/gori/cli/run")
-      with_slot = Dir.glob(File.join(dir, "*.cr")).count { |p| File.read(p).includes?("\"--slot") }
+      with_slot = glob_files(dir, "*.cr").count { |p| File.read(p).includes?("\"--slot") }
       # fuzz, mine, sequence, discover, repeater, repeater_minimize — six today, and the
       # assertion is a floor, not the count, so adding a seventh is not a spec edit.
       with_slot.should be >= 6

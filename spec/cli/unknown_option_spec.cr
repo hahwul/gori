@@ -44,7 +44,7 @@ describe "unknown options and subcommands (#1389)" do
   it "routes every invalid_option handler through CLI.unknown_option_message" do
     root = File.join(__DIR__, "..", "..", "src", "gori")
     stray = [] of String
-    Dir.glob(File.join(root, "**", "*.cr")).sort.each do |path|
+    glob_files(root, "**", "*.cr").sort.each do |path|
       File.read_lines(path).each_with_index do |line, i|
         next if line.lstrip.starts_with?('#')
         next unless line.includes?(".invalid_option")

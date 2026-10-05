@@ -32,18 +32,14 @@ private def force_rebuild(c : DB::Connection) : Nil
 end
 
 private def cleanup(path : String) : Nil
-  File.delete?(path)
-  File.delete?("#{path}-wal")
-  File.delete?("#{path}-shm")
+  delete_db_files(path)
 end
 
 private def open_and(path : String, &)
   store = Gori::Store.open(path)
-  begin
-    yield store
-  ensure
-    store.close
-  end
+  raised = run_capturing { yield store } # not an `ensure`: see `with_store`
+  store.close
+  raise raised if raised
 end
 
 # Sessions 1..6 existed; 2, 5 and the top id 6 were deleted, so a pre-V41 insert got 5 again.

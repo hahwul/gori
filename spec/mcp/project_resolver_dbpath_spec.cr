@@ -5,6 +5,7 @@ require "file_utils"
 # exactly as the process was given it. Matching `--db` against that as a STRING meant the same
 # database, named by its resolved path, matched no project at all.
 private def with_symlinked_home(&)
+  posix_only!("File.symlink needs Developer Mode")
   real = File.tempname("gori-home-real")
   link = File.tempname("gori-home-link")
   Dir.mkdir_p(real)

@@ -243,9 +243,15 @@ describe Gori::Update do
       Gori::Update.asset_name("v1.2.3", "macos", "aarch64").should eq("gori-v1.2.3-osx-arm64.tar.gz")
     end
 
+    it "builds Windows .exe asset names" do
+      Gori::Update.asset_name("0.17.0", "windows", "x86_64").should eq("gori-v0.17.0-windows-x86_64.exe")
+      Gori::Update.asset_name("0.17.0", "win32", "amd64").should eq("gori-v0.17.0-windows-x86_64.exe")
+      Gori::Update.alias_asset_name("windows", "x86_64").should eq("gori-windows-x86_64.exe")
+    end
+
     it "rejects unsupported OS" do
       expect_raises(Gori::Error, /unsupported OS/) do
-        Gori::Update.asset_name("0.1.0", "windows", "x86_64")
+        Gori::Update.asset_name("0.1.0", "plan9", "x86_64")
       end
     end
   end
@@ -307,6 +313,8 @@ describe Gori::Update do
   end
 
   describe "lib destination safety" do
+    before_each { posix_only!("the macOS archive layout's /usr and /opt roots") }
+
     it "forbids shared system library roots" do
       Gori::Update.forbidden_lib_destination?("/usr/local/lib").should be_true
       Gori::Update.forbidden_lib_destination?("/usr/lib").should be_true
@@ -717,6 +725,7 @@ describe Gori::Update do
     end
 
     it "update_binary installs from the mock and prints staged download lines" do
+      posix_only!("self-update has no Windows asset, and the archive path needs tar")
       payload = "#!/bin/sh\necho mock-new\n"
       root = File.tempname("gori-upd-")
       Dir.mkdir_p(root)
@@ -810,6 +819,7 @@ describe Gori::Update do
     end
 
     it "update_binary refuses to install a truncated download and leaves the target untouched (Bug A)" do
+      posix_only!("self-update has no Windows asset, and the archive path needs tar")
       payload = "y" * 40_000
       root = File.tempname("gori-trunc-")
       Dir.mkdir_p(root)
@@ -837,6 +847,7 @@ describe Gori::Update do
     end
 
     it "verifies and installs when the release advertises a correct sha256 digest (R2-10)" do
+      posix_only!("self-update has no Windows asset, and the archive path needs tar")
       payload = "#!/bin/sh\necho mock-verified\n"
       root = File.tempname("gori-sha-ok-")
       Dir.mkdir_p(root)
@@ -875,6 +886,7 @@ describe Gori::Update do
     end
 
     it "refuses to install on a sha256 checksum mismatch and leaves the target untouched (R2-10)" do
+      posix_only!("self-update has no Windows asset, and the archive path needs tar")
       # A well-formed download whose advertised digest does NOT match the body — the
       # CDN/transit-tampering (or wrong-asset) case the digest check exists to catch.
       payload = "z" * 4096
@@ -962,6 +974,7 @@ describe Gori::Update do
 
   describe ".update_binary permission pre-check" do
     it "refuses an unwritable install dir before downloading anything" do
+      posix_only!("self-update has no Windows asset, and the archive path needs tar")
       root = File.tempname("gori-ro-")
       Dir.mkdir_p(root)
       begin
@@ -991,6 +1004,7 @@ describe Gori::Update do
 
   describe ".install_from_download (plain binary)" do
     it "replaces the target path with the downloaded file via the shipped installer" do
+      posix_only!("an executable bit on a #!/bin/sh binary")
       dir = File.tempname("gori-inst-")
       Dir.mkdir_p(dir)
       begin
@@ -1041,8 +1055,31 @@ describe Gori::Update do
     end
   end
 
+  {% if flag?(:win32) %}
+    describe ".atomic_install on Windows" do
+      it "moves the old binary aside to swap in the new one, then drops it" do
+        dir = File.tempname("gori-winexe-")
+        Dir.mkdir_p(dir)
+        begin
+          target = File.join(dir, "gori.exe")
+          source = File.join(dir, "new.exe")
+          File.write(target, "old-build")
+          File.write(source, "new-build")
+          Gori::Update.atomic_install(source, target)
+          File.read(target).should eq("new-build")
+          # Nothing runs the old one here, so it is gone at once; a running one would stay
+          # under the temp prefix for the next sweep.
+          Dir.children(dir).select(&.starts_with?(".gori-update.")).should be_empty
+        ensure
+          FileUtils.rm_rf(dir)
+        end
+      end
+    end
+  {% end %}
+
   describe ".install_from_download (macOS-style tarball + lib/)" do
     it "extracts gori and refreshes sibling lib/ next to the target in a dedicated dir" do
+      posix_only!("self-update has no Windows asset, and the archive path needs tar")
       root = File.tempname("gori-tar-")
       Dir.mkdir_p(root)
       begin
@@ -1076,6 +1113,7 @@ describe Gori::Update do
     # beside the old binary with the backup already deleted — unrecoverable when a
     # bundled dylib's basename changed between releases.
     it "rolls lib/ back when the binary install fails" do
+      posix_only!("self-update has no Windows asset, and the archive path needs tar")
       root = File.tempname("gori-rollback-")
       Dir.mkdir_p(root)
       begin
@@ -1102,13 +1140,14 @@ describe Gori::Update do
 
         File.read(File.join(target_dir, "lib", "libexample.dylib")).should eq("old-dylib")
         # And no staging debris survives the failure.
-        Dir.glob(File.join(target_dir, "lib.gori-*")).should be_empty
+        glob_files(target_dir, "lib.gori-*").should be_empty
       ensure
         FileUtils.rm_rf(root) if File.exists?(root)
       end
     end
 
     it "removes a freshly installed lib/ when the target had none to restore" do
+      posix_only!("self-update has no Windows asset, and the archive path needs tar")
       # The other rollback branch: the archive carries lib/ but the install dir did
       # not, so reverting means taking the new tree back out rather than moving one
       # back in. Untested, this is a silent rm_rf.
@@ -1272,6 +1311,7 @@ describe Gori::Update do
     end
 
     it "refuses archive install when lib/ would land on a shared system path" do
+      posix_only!("self-update has no Windows asset, and the archive path needs tar")
       root = File.tempname("gori-unsafe-")
       Dir.mkdir_p(root)
       begin
@@ -1488,6 +1528,7 @@ describe Gori::Update do
 
   describe "update_binary alias retry" do
     it "falls back to the version-less alias when the versioned name 404s" do
+      posix_only!("self-update has no Windows asset, and the archive path needs tar")
       payload = "#!/bin/sh\necho from-alias\n"
       root = File.tempname("gori-alias-")
       Dir.mkdir_p(root)
@@ -1542,6 +1583,7 @@ describe Gori::Update do
     end
 
     it "does not retry the alias for a non-404 failure" do
+      posix_only!("self-update has no Windows asset, and the archive path needs tar")
       # A truncated transfer (or a checksum mismatch) means the asset IS there and
       # came back wrong. Retrying it under a second name would paper over exactly
       # the signal the integrity checks exist to raise.
@@ -1733,6 +1775,7 @@ describe Gori::Update do
     # than returning a failed status, so `tar list failed` never got a chance to
     # run on a minimal image — the macOS archive install backtraced instead.
     it "wraps a missing tar" do
+      posix_only!("Windows finds tar.exe in System32 without PATH")
       expect_raises(Gori::Error, /could not run tar/) do
         with_env({"PATH" => File.tempname("gori-empty-path-", "")}) do
           Gori::Update.list_tar_entries("/nonexistent.tar.gz")
@@ -1841,6 +1884,7 @@ describe Gori::Update do
     # Matched by prefix over Dir.children rather than by Dir.glob, for the reason
     # sweep_lib_leftovers gives: the install path belongs to the operator.
     it "treats glob metacharacters in the install path as literal" do
+      posix_only!("'*' and '?' in a directory name")
       root = File.tempname("gori-sweep-glob-")
       dir = File.join(root, "gori[1]*?")
       Dir.mkdir_p(dir)

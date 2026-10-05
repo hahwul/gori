@@ -1579,6 +1579,7 @@ end
 # network, so a run wide enough to cross the sub-budget is still fast.
 describe "MCP fuzz — failures cannot crowd matches out of the stored set" do
   it "stops storing errored rows at the unmatched sub-budget, not at the total cap" do
+    posix_only!("an immediate connect-refused; Windows spends about two seconds refusing each loopback dial")
     probe = TCPServer.new("127.0.0.1", 0)
     port = probe.local_address.port
     probe.close

@@ -35,7 +35,7 @@ module Gori
           p.on("--proxy=HOST:PORT", "Use this proxy address instead of looking up a live capture") { |v| proxy = v }
           p.on("--ca-dir=DIR", "CA directory (default: the capturing gori's, else ~/.gori/ca)") { |v| ca_dir = v }
           p.on("--print", "Print export lines for eval instead of starting a shell") { print = true }
-          p.on("--shell=SYNTAX", "Syntax for --print: sh (default; bash, zsh) | fish") { |v| syntax_name = v }
+          p.on("--shell=SYNTAX", "Syntax for --print: sh (default off Windows; bash, zsh) | fish | powershell (default on Windows; pwsh)") { |v| syntax_name = v }
           p.on("--keep-no-proxy", "Keep the inherited NO_PROXY instead of unsetting it") { keep_no_proxy = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort CLI.unknown_option_message("gori run shell", f, p, "(put the command after --: gori run shell -- CMD)") }
@@ -49,7 +49,7 @@ module Gori
         if msg = shell_usage_error(before, command, print, syntax_name, proxy, project_name, db_path)
           abort msg
         end
-        syntax = syntax_name.try { |n| ShellEnv::Syntax.parse?(n) } || ShellEnv::Syntax::Posix
+        syntax = syntax_name.try { |n| ShellEnv::Syntax.parse?(n) } || ShellEnv::Syntax.default
 
         project = proxy ? nil : resolve_read_project(project_name, db_path)
         target = shell_target(project, proxy, ca_dir)
@@ -88,7 +88,7 @@ module Gori
         return "#{prefix}: --print prints the environment; it does not run a command" if print && !command.empty?
         if name = syntax_name
           return "#{prefix}: --shell only applies to --print" unless print
-          return "#{prefix}: unknown --shell #{name.inspect} (expected sh or fish)" unless ShellEnv::Syntax.parse?(name)
+          return "#{prefix}: unknown --shell #{name.inspect} (expected sh, fish or powershell)" unless ShellEnv::Syntax.parse?(name)
         end
         if proxy && (project_name.try(&.presence) || db_path.try(&.presence))
           return "#{prefix}: pass --proxy HOST:PORT or --project/--db, not both " \
@@ -206,8 +206,18 @@ module Gori
         # Crystal's runtime ignores SIGPIPE for itself, and an ignored signal survives exec:
         # without this the shell and everything it starts inherit it, and `yes | head` prints
         # "Broken pipe" instead of ending quietly. Nothing of ours writes after the exec.
-        Signal::PIPE.reset
-        Process.exec(program, argv, env: result.to_env)
+        {% if flag?(:win32) %}
+          # Windows' exec starts the child and ends this process at once, which hands the console
+          # back to the parent shell while the child still reads it. Wait for it instead — and
+          # live through the ^C meant for the child, which the console delivers to every process
+          # on it. A handler, not `Process.ignore_interrupts!`: that state the child inherits.
+          Signal::INT.ignore
+          status = Process.run(program, argv, env: result.to_env, input: :inherit, output: :inherit, error: :inherit)
+          exit status.exit_code? || 1
+        {% else %}
+          Signal::PIPE.reset
+          Process.exec(program, argv, env: result.to_env)
+        {% end %}
       rescue File::NotFoundError
         STDERR.puts "gori run shell: #{program}: command not found"
         exit 127
@@ -216,10 +226,16 @@ module Gori
         exit 126
       end
 
-      # `$SHELL` when it names something runnable, else /bin/sh.
+      # `$SHELL` when it names something runnable, else /bin/sh — or on Windows, which sets no
+      # SHELL (Git Bash's is a POSIX path), `%COMSPEC%`.
       def self.login_shell(env = ENV) : String
         path = env["SHELL"]?.try(&.strip).presence
-        path && File.file?(path) && File::Info.executable?(path) ? path : "/bin/sh"
+        return path if path && File.file?(path) && File::Info.executable?(path)
+        {% if flag?(:win32) %}
+          ShellEnv.comspec(env)
+        {% else %}
+          "/bin/sh"
+        {% end %}
       end
     end
   end

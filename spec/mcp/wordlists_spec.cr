@@ -241,6 +241,7 @@ describe "MCP wordlist catalog" do
   # This server's stdin is its transport: `/dev/stdin` as a wordlist read the JSON-RPC stream
   # as payloads and hung the server. `/dev/null` stands in for every non-regular file.
   it "refuses a wordlist that is not a regular file, on every tool that reads one" do
+    posix_only!("/dev/null as the non-regular file")
     with_store do |store|
       tools = tools_for(store)
       flask = "eyJhIjoxfQ.aGVsbG8.c2ln"

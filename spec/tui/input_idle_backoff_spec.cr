@@ -13,7 +13,7 @@ describe "the termisu pin the carried input back-off is written against" do
     lock = File.read(File.join(__DIR__, "..", "..", "shard.lock"))
     pinned = lock[/termisu:.*?commit\.([0-9a-f]{40})/m, 1]?
 
-    pinned.should eq("5bdf49380e935dfc21bcdbd9e9296347f5991112")
+    pinned.should eq("ca964e5f9256990d9d1e6aa5ca3aa1fb2635fb6b")
   end
 
   # The patch reopens `Termisu::Event::Source::Input` and overrides a PRIVATE method, so no spec
@@ -35,7 +35,8 @@ describe "the termisu pin the carried input back-off is written against" do
     # Both halves asserted non-nil first: `patch[re]? == upstream[re]?` is satisfied by
     # nil == nil, so a rename on BOTH sides (upstream restructures, someone renames the
     # override to match) would leave this green while it checks nothing.
-    signature = /private def run_loop\([^)]*\)[^\n]*/
+    # `\r` too: a Windows checkout of the shard may carry CRLF line ends.
+    signature = /private def run_loop\([^)]*\)[^\r\n]*/
     found = upstream[signature]?
     found.should_not be_nil
     patch[signature]?.should eq(found)

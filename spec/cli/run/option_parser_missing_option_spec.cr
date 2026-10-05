@@ -24,7 +24,7 @@ describe "gori run — missing_option on every value-taking parser" do
   it "is bound wherever a =VALUE flag is declared" do
     dir = File.join(__DIR__, "..", "..", "..", "src", "gori", "cli")
     offenders = [] of String
-    Dir.glob(File.join(dir, "**", "*.cr")).sort.each do |path|
+    glob_files(dir, "**", "*.cr").sort.each do |path|
       lines = File.read_lines(path)
       i = 0
       while i < lines.size

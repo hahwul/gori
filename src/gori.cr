@@ -16,6 +16,7 @@ module Gori
   end
 end
 
+require "./gori/win32_signal"
 require "./gori/json_nesting"
 require "./gori/local_time"
 require "./gori/proxy/socks5"

@@ -752,7 +752,7 @@ describe "Gori::Probe::Scan rules config parity" do
   it "gates every probe rule through Probe.rule_disabled?, never a bare set lookup" do
     root = File.join(__DIR__, "..", "src", "gori", "probe")
     offenders = [] of String
-    Dir.glob(File.join(root, "**", "*.cr")).sort.each do |path|
+    glob_files(root, "**", "*.cr").sort.each do |path|
       File.read(path).lines.each_with_index do |line, i|
         next if line.lstrip.starts_with?('#') # a comment may name the old shape; code may not
         next unless line.matches?(/\bdisabled\.includes\?\(/)

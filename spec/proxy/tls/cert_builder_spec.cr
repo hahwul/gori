@@ -2,6 +2,7 @@ require "../../spec_helper"
 require "socket"
 require "file_utils"
 require "digest/sha1"
+require "base64"
 
 private def with_tmp_dir(&)
   dir = File.tempname("gori-certb")
@@ -16,7 +17,15 @@ end
 private def ext_text(cert : Gori::Proxy::Tls::Cert, dir : String, exts : String) : String
   path = File.join(dir, "c#{Random.rand(1_000_000)}.pem")
   cert.write_pem(path)
-  `openssl x509 -in #{path} -noout -ext #{exts} 2>&1`
+  openssl("x509", "-in", path, "-noout", "-ext", exts)
+end
+
+# The openssl CLI's stdout and stderr. An argv, not a backtick: a Windows backtick hands its
+# string to CreateProcess with no shell, so `2>&1` or a `|` would reach openssl as arguments.
+private def openssl(*args : String) : String
+  io = IO::Memory.new
+  Process.run("openssl", args.to_a, output: io, error: io)
+  io.to_s
 end
 
 # The hex after an extension's header line, e.g. "AB:CD:…" — what `openssl x509 -ext` prints
@@ -155,7 +164,7 @@ describe Gori::Proxy::Tls::CertBuilder do
       ext_text(root, dir, "subjectKeyIdentifier").should_not contain("Subject Key Identifier")
       leaf, _ = Gori::Proxy::Tls::CertBuilder.build_leaf("a.test", root, Gori::Proxy::Tls::KeyPair.read_pem(key_path))
 
-      spki = `openssl x509 -in #{cert_path} -noout -pubkey | openssl pkey -pubin -outform DER`.to_slice
+      spki = Base64.decode(openssl("x509", "-in", cert_path, "-noout", "-pubkey").lines.reject(&.starts_with?("-----")).join)
       # P-256 SPKI: the BIT STRING's 65-byte uncompressed point is the tail of the DER.
       want = Digest::SHA1.hexdigest(spki[-65..]).upcase.scan(/../).map(&.[0]).join(':')
       key_id(ext_text(leaf, dir, "authorityKeyIdentifier"), "Authority Key Identifier").should eq(want)

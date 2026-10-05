@@ -89,7 +89,7 @@ describe "MCP export_project" do
       manifest.project_name.should eq("Source")
       manifest.flow_count.should eq(1_i64)
       manifest.created_at.should eq(body["archive"]["created_at"].as_s)
-      (File.info(target).permissions.to_i & 0o777).should eq(0o600)
+      (File.info(target).permissions.to_i & 0o777).should eq(0o600) unless {{ flag?(:win32) }}
     end
   end
 

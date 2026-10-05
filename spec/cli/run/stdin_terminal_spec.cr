@@ -280,7 +280,7 @@ describe "gori run — stdin doors refuse a terminal" do
       read = /STDIN\.(gets|read|each_line|peek)|IO\.copy\(\s*STDIN|read_stdin_fallback\(\s*STDIN/
       negative_guard = /(unless\s+.*STDIN\.tty\?)|(!\s*STDIN\.tty\?)/
       unguarded = [] of String
-      Dir.glob(File.join(CLI_DIR, "**", "*.cr")).sort.each do |path|
+      glob_files(CLI_DIR, "**", "*.cr").sort.each do |path|
         lines = File.read_lines(path)
         # Method starts, so a read can be attributed to the body it sits in.
         starts = [] of Int32

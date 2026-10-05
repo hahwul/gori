@@ -34,7 +34,7 @@ describe "editor key-hint strips" do
   # and every one of them has at least two segments.
   hint = ->(text : String) { text.includes?(" · ") }
 
-  hint_sources = Dir.glob(File.join(__DIR__, "..", "..", "src", "gori", "tui", "**", "*.cr")).sort
+  hint_sources = glob_files(__DIR__, "..", "..", "src", "gori", "tui", "**", "*.cr").sort
 
   it "name a copy key whenever they advertise a selection" do
     offenders = [] of String
@@ -74,7 +74,7 @@ describe "editor key-hint strips" do
   # so the tab that registers one owes its operator a strip that says so, somewhere.
   it "every tab whose Copy verb carries ^Y names it somewhere in its own footers" do
     ids = [] of String
-    Dir.glob(File.join(__DIR__, "..", "..", "src", "gori", "verbs", "*.cr")).sort.each do |path|
+    glob_files(__DIR__, "..", "..", "src", "gori", "verbs", "*.cr").sort.each do |path|
       lines = File.read(path).lines
       lines.each_with_index do |line, i|
         next unless m = line.match(/"([a-z]+)\.copy", "Copy"/)

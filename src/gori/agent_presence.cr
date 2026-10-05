@@ -1,5 +1,6 @@
 require "json"
 require "./paths"
+require "./open_lock"
 
 module Gori
   # "A process is attached to this PROJECT" — a per-process marker file in a directory beside
@@ -116,7 +117,7 @@ module Gori
         # 0644 like `CaptureStatus.write_at`: the body is not a secret, the 0700 project
         # directory above it is what keeps it private.
         file = File.open(tmp, "w", perm: File::Permissions.new(0o644))
-        file.flock_exclusive(blocking: false) # a fresh temp file: nothing to contend with
+        lock!(file) # a fresh temp file: nothing to contend with
         presence = new(file, File.join(dir, name), kind: kind, client: client,
           client_version: client_version, read_only: read_only,
           selection_source: selection_source, pid: Process.pid.to_i64,
@@ -221,7 +222,7 @@ module Gori
         end
         begin
           begin
-            probe.flock_exclusive(blocking: false)
+            lock!(probe)
             # We got the lock ⇒ the owner is gone. Sweep it; a peer sweeping the same file
             # concurrently makes the second `delete?` a no-op.
             File.delete?(path) rescue nil
@@ -230,7 +231,7 @@ module Gori
             # EAGAIN/EWOULDBLOCK is the one refusal that MEANS a live holder (same errno
             # discrimination as `OpenLock.contention?`); any other failure is "cannot tell",
             # which must neither sweep nor count.
-            unless contention?(ex)
+            unless OpenLock.contention?(ex)
               unsure.try(&.call)
               next
             end
@@ -245,13 +246,28 @@ module Gori
       end
     end
 
-    # Was this flock failure "somebody holds it" rather than "flock does not work here"?
-    # The stdlib raises one `IO::Error` for both; the errno separates them (`open_lock.cr`
-    # spells out why these two values and why a missing os_error reads as NOT contention —
-    # here that direction skips a sweep rather than inventing a live agent).
-    private def self.contention?(ex : IO::Error) : Bool
-      err = ex.os_error
-      !err.nil? && err.in?(Errno::EAGAIN, Errno::EWOULDBLOCK)
+    # Take a marker's liveness lock without waiting; a held one raises the stdlib's "already
+    # locked" `IO::Error`, which `OpenLock.contention?` reads the same way on every platform.
+    #
+    # Windows' `LockFileEx` is mandatory, so the whole-file lock `flock_exclusive` takes there
+    # would bar every other process from READING the body, which is what a marker is for. There
+    # the lock covers one byte far past any body instead: liveness is still the lock, and the
+    # body stays readable.
+    private def self.lock!(file : File) : Nil
+      {% if flag?(:win32) %}
+        offset = LibC::OVERLAPPED_OFFSET.new
+        offset.offsetHigh = 0x4000_0000_u32
+        span = LibC::OVERLAPPED_UNION.new
+        span.offset = offset
+        overlapped = LibC::OVERLAPPED.new
+        overlapped.union = span
+        flags = LibC::LOCKFILE_EXCLUSIVE_LOCK | LibC::LOCKFILE_FAIL_IMMEDIATELY
+        if LibC.LockFileEx(LibC::HANDLE.new(file.fd), flags, 0, 1, 0, pointerof(overlapped)) == 0
+          raise IO::Error.from_winerror("Error applying file lock: file is already locked", target: file)
+        end
+      {% else %}
+        file.flock_exclusive(blocking: false)
+      {% end %}
     end
 
     private def self.parse_entry(path : String, kind : String) : Entry

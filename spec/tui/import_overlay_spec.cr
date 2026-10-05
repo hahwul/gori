@@ -100,11 +100,11 @@ describe Gori::Tui::ImportOverlay do
     File.write(File.join(dir, "sample.har"), "{}")
     begin
       ov = ImportOverlay.new(:har)
-      type(ov, "#{dir}/")                              # opens the dropdown on sample.har
-      ov.handle_key(key(Termisu::Input::Key::Tab))     # accept the completion
-      ov.path.should eq(File.join(dir, "sample.har"))  # applied…
-      type(ov, "X")                                    # …and the caret is at the END
-      ov.path.should eq(File.join(dir, "sample.harX")) # not "sample.Xhar" or similar
+      type(ov, "#{dir}/")                          # opens the dropdown on sample.har
+      ov.handle_key(key(Termisu::Input::Key::Tab)) # accept the completion
+      ov.path.should eq("#{dir}/sample.har")       # applied after the prefix as typed…
+      type(ov, "X")                                # …and the caret is at the END
+      ov.path.should eq("#{dir}/sample.harX")      # not "sample.Xhar" or similar
     ensure
       FileUtils.rm_rf(dir)
     end

@@ -87,8 +87,8 @@ describe Gori::Tui::ExportOverlay do
     home.resolved_path.should eq(File.join(Path.home.to_s, "notes", "x.md"))
     home.resolved_path.should_not contain('~')
 
-    abs = ExportOverlay.new(:note, "/tmp/x.md")
-    abs.resolved_path.should eq("/tmp/x.md")
+    absolute = File.join(Dir.tempdir, "x.md")
+    ExportOverlay.new(:note, absolute).resolved_path.should eq(absolute)
   end
 
   it "refuses an empty field with a notice instead of committing" do

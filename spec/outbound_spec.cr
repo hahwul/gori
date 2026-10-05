@@ -11,9 +11,7 @@ private def with_scope(&)
     yield Gori::Scope.load(store), store
   ensure
     store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
+    delete_db_files(path)
   end
 end
 
@@ -323,7 +321,7 @@ describe Gori::Outbound do
       # verbatim, and load-bearing here: the Miner and Sequencer comments legitimately name
       # EXCLUDE_SWEEP_ERROR in prose while their code no longer does.
       offenders = [] of String
-      Dir.glob(File.join(root, "src", "**", "*.cr")).sort.each do |path|
+      glob_files(root, "src", "**", "*.cr").sort.each do |path|
         rel = Path[path].relative_to(root).to_s
         next if rel == File.join("src", "gori", "outbound.cr")
         File.read_lines(path).each_with_index do |line, i|
@@ -466,9 +464,7 @@ describe Gori::Outbound do
         ob.sweep_block("https", "acme.test", "/s", 443).should be_nil
         ob.sweep_block("https", "other.test", "/s", 443).should eq(Gori::Outbound::SANDBOX_SWEEP_ERROR)
       ensure
-        File.delete?(path)
-        File.delete?("#{path}-wal")
-        File.delete?("#{path}-shm")
+        delete_db_files(path)
       end
     end
   end

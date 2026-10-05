@@ -257,6 +257,7 @@ end
 # DELETES `env` (token values) and `decoder` in place, says "wrote <path>", and exits 0.
 describe "gori settings export — same-file detection for -o" do
   it "matches the same file through `..`, a relative path and a symlink" do
+    posix_only!("File.symlink needs Developer Mode")
     dir = File.tempname("gori-cli-samefile")
     Dir.mkdir_p(File.join(dir, "home"))
     settings = File.join(dir, "home", "settings.json")
@@ -367,7 +368,7 @@ describe "gori run — the `--` half of unknown_args" do
   it "is bound by every subcommand parser" do
     dir = File.join(__DIR__, "..", "src", "gori", "cli", "run")
     offenders = [] of String
-    Dir.glob(File.join(dir, "**", "*.cr")).sort.each do |path|
+    glob_files(dir, "**", "*.cr").sort.each do |path|
       File.read_lines(path).each_with_index do |line, i|
         next unless line.includes?("unknown_args")
         # The second block parameter discarded as `_` — the whole defect, in one token.

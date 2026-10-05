@@ -32,7 +32,7 @@ describe "layering contract" do
 
     paths = [] of String
     subsystems.each do |name|
-      paths.concat(Dir.glob(File.join(root, "src", "gori", name, "**", "*.cr")))
+      paths.concat(glob_files(root, "src", "gori", name, "**", "*.cr"))
     end
     # The module files that sit alongside those directories. There is no `src/gori/proxy.cr`
     # — the proxy is directory-only — so it is absent from this half of the set.

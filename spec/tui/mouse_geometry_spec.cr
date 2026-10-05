@@ -94,7 +94,7 @@ describe "mode badges" do
   it "are never drawn behind a focus gate" do
     root = File.join(__DIR__, "..", "..", "src", "gori", "tui")
     offenders = [] of String
-    Dir.glob(File.join(root, "**", "*.cr")).sort.each do |path|
+    glob_files(root, "**", "*.cr").sort.each do |path|
       next if File.basename(path) == "frame.cr" # the helper itself
       lines = File.read(path).lines
       lines.each_with_index do |line, i|
@@ -212,7 +212,7 @@ describe "advertised chords" do
     out = Set(String).new
     root = File.join(__DIR__, "..", "..", "src", "gori", "tui")
     paths = [File.join(root, file)]
-    paths.concat(Dir.glob(File.join(root, File.basename(file, ".cr"), "*.cr")).sort)
+    paths.concat(glob_files(root, File.basename(file, ".cr"), "*.cr").sort)
     paths.each do |path|
       File.read(path).each_line do |line|
         next if line.matches?(/^\s*#/) # prose, not a label

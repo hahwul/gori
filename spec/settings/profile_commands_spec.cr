@@ -308,8 +308,8 @@ private SPAWN_SITES = {
   "src/gori/decoder/chain.cr"                         => {1, "decoder"},
   "src/gori/probe/custom_rule.cr"                     => {1, "scan_rules"},
   "src/gori/cli/settings.cr"                          => {1, "editor"},
-  "src/gori/tui/runner.cr"                            => {2, "editor"}, # + Open shell's `gori run shell` (#1238)
-  "src/gori/tui/controllers/statusline_controller.cr" => {1, "statusline"},
+  "src/gori/tui/runner.cr"                            => {2, "editor"},     # + Open shell's `gori run shell` (#1238)
+  "src/gori/tui/controllers/statusline_controller.cr" => {2, "statusline"}, # /bin/sh, or cmd.exe on Windows
   # NOT settings-derived: the program is discovered, hardcoded, or comes off the wire
   "src/gori/browser.cr"                  => {2, nil}, # a detected browser; certutil
   "src/gori/tui/runner/external_open.cr" => {1, nil}, # hardcoded open/xdg-open
@@ -317,6 +317,7 @@ private SPAWN_SITES = {
   "src/gori/update/channel.cr"           => {1, nil}, # the platform package manager
   "src/gori/miner/inject.cr"             => {1, nil}, # a mine RUN's own `hook` argument
   "src/gori/mcp/codex_queue.cr"          => {2, nil}, # lsof, and the codex CLI found on PATH
+  "src/gori/cli/run/shell.cr"            => {1, nil}, # Windows: $SHELL/%COMSPEC% or the operator's -- CMD
 }
 
 describe "Settings::COMMAND_SECTIONS" do
@@ -341,8 +342,8 @@ describe "Settings::COMMAND_SECTIONS" do
     # that section in COMMAND_SECTIONS so both ends of a profile report it.
     root = File.expand_path(File.join(__DIR__, "..", ".."))
     actual = Hash(String, Int32).new(0)
-    Dir.glob(File.join(root, "src", "**", "*.cr")).sort.each do |path|
-      rel = path.sub("#{root}/", "")
+    glob_files(root, "src", "**", "*.cr").sort.each do |path|
+      rel = Path[path].relative_to(root).to_posix.to_s
       File.read_lines(path).each do |line|
         next if line.lstrip.starts_with?('#')
         actual[rel] += 1 if line.includes?("Process.new(") || line.includes?("Process.run(") ||

@@ -148,6 +148,20 @@ private def start_h2_origin_authority(status : Int32, seen : Channel(String)) : 
   port
 end
 
+# Hangs up with a FIN after the bytes written, then drains the client before closing. A close
+# with the client's SETTINGS ack still unread is a reset instead, and Windows discards whatever
+# the reset overtakes, so the client would never see the frames the example is about.
+private def hang_up(conn : TCPSocket) : Nil
+  conn.close_write
+  conn.read_timeout = 2.seconds
+  buf = Bytes.new(4096)
+  while conn.read(buf) > 0
+  end
+rescue IO::Error
+ensure
+  conn.close rescue nil
+end
+
 # A cleartext-h2 origin that sends HEADERS(:status) + one DATA frame WITHOUT
 # END_STREAM, then drops the connection — a truncated response the client must
 # flag as incomplete (no END_STREAM ever arrives).
@@ -175,7 +189,7 @@ private def start_h2_origin_truncated_midframe(status : Int32, partial : String)
     # A PARTIAL frame header — 5 of the 9 bytes — then close. EOF lands mid-frame.
     conn.write(Bytes[0, 0, 8, 0, 0])
     conn.flush
-    conn.close
+    hang_up(conn)
   end
   port
 end
@@ -198,7 +212,7 @@ private def start_h2_origin_truncated(status : Int32, partial : String) : Int32
     # DATA WITHOUT END_STREAM, then close mid-stream.
     conn.write(Frame::Header.new(Frame::Type::Data.value, 0_u8, 1_u32, partial.to_slice).to_bytes)
     conn.flush
-    conn.close
+    hang_up(conn)
   end
   port
 end
@@ -353,7 +367,7 @@ private def start_h2_origin_goaway(code : UInt32, debug : String) : Int32
       conn.flush
       break
     end
-    conn.close
+    hang_up(conn)
   end
   port
 end

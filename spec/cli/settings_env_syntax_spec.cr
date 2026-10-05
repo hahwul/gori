@@ -216,7 +216,7 @@ describe "gori settings env-syntax" do
       msg.should contain("then retry")
       # …and the rule is untouched, because the refusal lands before the re-spelling.
       Gori::Settings.rewriter_rules.map(&.replacement).should eq(["X-A: $TOKEN"])
-      Dir.glob("#{path}.pre-*").should be_empty
+      glob_files("#{path}.pre-*").should be_empty
 
       # The repair the message names is NOT refused: asking for the grammar gori is already reading
       # re-spells nothing (`was == want` skips the migration) and just writes the value down, so the

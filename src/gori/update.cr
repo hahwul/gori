@@ -491,7 +491,14 @@ module Gori
       begin
         FileUtils.cp(source, tmp)
         File.chmod(tmp, 0o755)
-        File.rename(tmp, target)
+        {% if flag?(:win32) %}
+          replace_running_exe(tmp, target, dir)
+        {% else %}
+          File.rename(tmp, target)
+        {% end %}
+      rescue ex : Error
+        File.delete?(tmp)
+        raise ex # replace_running_exe's own account of where the old binary went
       rescue ex
         File.delete?(tmp)
         raise Error.new(
@@ -499,6 +506,27 @@ module Gori
           "(the binary already installed there was left untouched)"
         )
       end
+    end
+
+    # Windows will not rename over a running .exe, but it will rename the running one. So the
+    # old binary moves aside first and moves back if the new one cannot take its place. Then
+    # it is deleted if it can be; a running one cannot, and keeps the temp prefix so a later
+    # run's sweep deletes it once nothing runs it.
+    private def self.replace_running_exe(tmp : String, target : String, dir : String) : Nil
+      aside = File.join(dir, "#{INSTALL_TMP_PREFIX}old.#{Process.pid}.#{Random::Secure.hex(4)}")
+      File.rename(target, aside) if File.file?(target)
+      begin
+        File.rename(tmp, target)
+      rescue ex
+        begin
+          File.rename(aside, target) if File.exists?(aside)
+        rescue
+          raise Error.new("failed to install binary to #{target}: #{ex.message}, and the old binary " \
+                          "could not be moved back: it is at #{aside}; rename it to #{target}")
+        end
+        raise ex
+      end
+      File.delete?(aside) rescue nil
     end
 
     # Remove `.gori-update.*` siblings stranded by an interrupted run.

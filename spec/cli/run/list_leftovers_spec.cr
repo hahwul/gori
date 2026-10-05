@@ -139,7 +139,7 @@ describe Gori::CLI::Run do
   it "leaves no unknown_args sink whose .first? read drops the rest" do
     dir = File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run")
     offenders = [] of String
-    Dir.glob(File.join(dir, "**", "*.cr")).sort.each do |path|
+    glob_files(dir, "**", "*.cr").sort.each do |path|
       src = File.read(path)
       # A `parse_args` result is the same sink, assigned outside the block.
       src.scan(/unknown_args\s*(?:do|\{)\s*\|[^|]*\|\s*(\w+)\s*=\s*([^\n}]*)|(\w+)\s*=\s*parse_args\(/) do |m|
@@ -166,7 +166,7 @@ describe Gori::CLI::Run do
   # the `size > 1` escape stops applying and the check above starts failing.
   it "still recognises the hand-rolled guards it exempts" do
     dir = File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run")
-    guarded = Dir.glob(File.join(dir, "**", "*.cr")).sort.select do |path|
+    guarded = glob_files(dir, "**", "*.cr").sort.select do |path|
       File.read(path).includes?(".size > 1")
     end
     guarded.should_not be_empty

@@ -270,7 +270,7 @@ module Gori
             error: Process::Redirect::Pipe)
         rescue ex : Exception
           # `Process.new` raises for ENOENT/EACCES/EISDIR and for a fork that fails outright.
-          return Result.spawn_failed(label, spawn_message(ex))
+          return Result.spawn_failed(label, spawn_message(ex, argv[0]))
         end
 
       out_ch, err_ch, wait_ch = start_pumps(process, stdin)
@@ -389,9 +389,15 @@ module Gori
     # `Process.new`'s exception, phrased for an operator rather than for a stack trace. The
     # common ones by far are "the path is wrong" and "it is not executable", and the raw
     # `Error initializing process: …` prefix buries both.
-    private def self.spawn_message(ex : Exception) : String
+    #
+    # Windows quotes the whole command line where POSIX quotes the program alone, and an
+    # argument can carry a captured token: that quote is narrowed to the program.
+    private def self.spawn_message(ex : Exception, program : String) : String
       msg = (ex.message || ex.class.name).gsub(/\s+/, " ").strip
       msg = msg.sub(/\AError (initializing|executing) process:?\s*/i, "")
+      {% if flag?(:win32) %}
+        msg = msg.sub(/\A'.*'(?=:)/) { "'#{program}'" } # a block: `\` in a path is no backreference
+      {% end %}
       "could not run it (#{msg})"
     end
   end

@@ -13,8 +13,8 @@ require "../spec_helper"
 # its two wirings.
 private def each_src_line(&)
   root = File.join(__DIR__, "..", "..", "src")
-  Dir.glob(File.join(root, "**", "*.cr")).each do |path|
-    rel = Path[path].relative_to(root).to_s
+  glob_files(root, "**", "*.cr").each do |path|
+    rel = Path[path].relative_to(root).to_posix.to_s
     File.read(path).each_line do |line|
       next if line.lstrip.starts_with?('#')
       yield rel, line

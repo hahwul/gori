@@ -1,3 +1,7 @@
+# Drives termisu's reader over a pipe fd, which the Windows reader does not read (it reads the
+# console, `termisu/windows.cr`); the pins below run on every POSIX job.
+{% skip_file if flag?(:win32) %}
+
 require "../spec_helper"
 
 # Guards the carried patch in `src/gori/tui/paste_end_marker_patch.cr` by asserting the
@@ -82,7 +86,7 @@ describe "the termisu pin the carried paste patch is written against" do
     lock = File.read(File.join(__DIR__, "..", "..", "shard.lock"))
     pinned = lock[/termisu:.*?commit\.([0-9a-f]{40})/m, 1]?
 
-    pinned.should eq("5bdf49380e935dfc21bcdbd9e9296347f5991112")
+    pinned.should eq("ca964e5f9256990d9d1e6aa5ca3aa1fb2635fb6b")
   end
 end
 

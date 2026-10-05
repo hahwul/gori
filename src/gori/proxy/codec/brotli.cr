@@ -68,7 +68,10 @@ module Gori::Proxy::Codec
 end
 
 {% unless flag?(:without_native_codecs) %}
-  @[Link(pkg_config: "libbrotlidec")]
+  # The lib names are what MSVC links (`brotlidec.lib`); it ignores pkg-config, so the
+  # static `brotlicommon` that pkg-config pulls in through Requires.private is named too.
+  @[Link("brotlidec", pkg_config: "libbrotlidec")]
+  @[Link("brotlicommon", pkg_config: "libbrotlicommon")]
   lib LibBrotliDec
     fun create_instance = BrotliDecoderCreateInstance(alloc : Void*, free : Void*, opaque : Void*) : Void*
     fun destroy_instance = BrotliDecoderDestroyInstance(state : Void*) : Void

@@ -58,9 +58,10 @@ describe Gori::ProjectRegistry do
       acme.matches?(acme.id.not_nil![0, 4]).should be_true
       acme.matches?("nope").should be_false
 
-      checkout.workspace.should eq("/src/shop/checkout-api")
-      checkout.matches?("shop/checkout").should be_true # the workspace a headless bind wrote
-      acme.matches?("shop/checkout").should be_false
+      # Expanded, so on Windows it gains the current drive and its own separators.
+      checkout.workspace.should eq(File.expand_path("/src/shop/checkout-api"))
+      checkout.matches?(File.join("shop", "checkout")).should be_true # the workspace a headless bind wrote
+      acme.matches?(File.join("shop", "checkout")).should be_false
 
       # An empty needle narrows nothing rather than matching nothing — `needle` folds a
       # blank argument away first, so no caller has to decide that twice.
@@ -397,8 +398,8 @@ describe Gori::ProjectRegistry do
   it "reopens a project whose uncapped slug directory predates the cap" do
     with_root do |root|
       reg = Gori::ProjectRegistry.new(root)
-      name = "c" * 200
-      Dir.mkdir_p(File.join(root, name)) # a project created before slugs were capped
+      name = "c" * (Gori::ProjectRegistry::MAX_SLUG + 1) # no longer: Windows caps a path at 260
+      Dir.mkdir_p(File.join(root, name))                 # a project created before slugs were capped
       legacy = reg.create_or_reopen(name).first
       legacy.dir.should eq(File.join(root, name))
       reg.create_or_reopen(name).should eq({legacy, false})

@@ -16,7 +16,7 @@ describe "status-strip wording" do
     # sequence of deletes can be checked afterwards. The `removed <noun>:` and
     # `deleted <noun> "<name>"` variants are the two this replaced.
     offenders = [] of String
-    Dir.glob(File.join(root, "**", "*.cr")).sort.each do |path|
+    glob_files(root, "**", "*.cr").sort.each do |path|
       File.read(path).lines.each_with_index do |line, i|
         next unless line.matches?(/(status|toast)\(.*"removed /)
         offenders << "#{File.basename(path)}:#{i + 1} — #{line.strip}"
@@ -31,7 +31,7 @@ describe "status-strip wording" do
     # only `<verb> failed` refusal, its only semicolon, and `—` introducing the cause where
     # every peer puts the consequence.
     offenders = [] of String
-    Dir.glob(File.join(root, "**", "*.cr")).sort.each do |path|
+    glob_files(root, "**", "*.cr").sort.each do |path|
       File.read(path).lines.each_with_index do |line, i|
         next unless line.matches?(/(status|toast)\(.*"[a-z ]*delete failed/)
         offenders << "#{File.basename(path)}:#{i + 1}"
@@ -46,7 +46,7 @@ describe "status-strip wording" do
     # `\"…\"` form was in both, including two confirms — so DELETE FLOW and DELETE ISSUE wore
     # a different quote from every other dialog.
     offenders = [] of String
-    Dir.glob(File.join(root, "**", "*.cr")).sort.each do |path|
+    glob_files(root, "**", "*.cr").sort.each do |path|
       File.read(path).lines.each_with_index do |line, i|
         next unless line.includes?("confirm(")
         next unless line.matches?(/\\"#\{/)
@@ -60,7 +60,7 @@ describe "status-strip wording" do
     # Near-even (13 vs 15) and split by MODULE, not by meaning: engine controllers said
     # `cannot`, the shell and pickers `can't`. Confirms have always said "This can't be undone."
     offenders = [] of String
-    Dir.glob(File.join(root, "**", "*.cr")).sort.each do |path|
+    glob_files(root, "**", "*.cr").sort.each do |path|
       File.read(path).lines.each_with_index do |line, i|
         next unless line.matches?(/(status|toast|@toast =)\(?.*"[^"]*\bcannot\b/)
         offenders << "#{File.basename(path)}:#{i + 1}"
@@ -76,7 +76,7 @@ describe "status-strip wording" do
     # the session they had just made. `repeater_new` had it right ("edit the request &
     # target"); the fuzzer's line promised the mode it does not open in.
     offenders = [] of String
-    Dir.glob(File.join(root, "**", "*.cr")).sort.each do |path|
+    glob_files(root, "**", "*.cr").sort.each do |path|
       File.read(path).lines.each_with_index do |line, i|
         next unless line.matches?(/(status|toast)\(.*"new [^"]*\btype\b/)
         offenders << "#{File.basename(path)}:#{i + 1} — #{line.strip}"
@@ -89,7 +89,7 @@ describe "status-strip wording" do
     # `type to edit` sent a first-timer into READ-mode commands: `xd` deleted the request
     # line, `c` stopped capture and `s` flipped the scope lens.
     offenders = [] of String
-    Dir.glob(File.join(root, "**", "*.cr")).sort.each do |path|
+    glob_files(root, "**", "*.cr").sort.each do |path|
       File.read(path).lines.each_with_index do |line, i|
         next unless line.matches?(/status\(.*type to edit/)
         offenders << "#{File.basename(path)}:#{i + 1} — #{line.strip}"
@@ -115,7 +115,7 @@ describe "status glyph kinds" do
     # messages, so no glyph applies to them.
     emitted = [] of String
     unmarked = [] of String
-    Dir.glob(File.join(root, "**", "*.cr")).sort.each do |path|
+    glob_files(root, "**", "*.cr").sort.each do |path|
       File.read(path).lines.each_with_index do |line, i|
         next unless line.matches?(/(status\(|@toast =|toast\()/)
         next unless line.matches?(/"([a-z]+ error): #\{/)

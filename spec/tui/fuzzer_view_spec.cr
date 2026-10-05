@@ -1247,6 +1247,24 @@ describe Gori::Tui::PathComplete do
     end
   end
 
+  # Windows refuses to stat a file another process holds open (`D:\DumpStack.log.tmp` at a
+  # drive root), and `File.directory?` raises instead of answering. A readable directory without
+  # search permission is the POSIX shape of the same refusal: it lists, but its children do not stat.
+  it "lists a child it cannot stat as a plain file instead of raising" do
+    posix_only!("a directory that lists but does not stat its children (chmod)")
+    root = File.tempname("gori_pc")
+    Dir.mkdir_p(File.join(root, "locked", "sub"))
+    File.chmod(File.join(root, "locked"), 0o600)
+    begin
+      pc = PathComplete.new
+      pc.refresh("#{root}/locked/")
+      pc.entries.map { |e| {e.label, e.dir} }.should eq([{"sub", false}])
+    ensure
+      File.chmod(File.join(root, "locked"), 0o700)
+      FileUtils.rm_rf(root)
+    end
+  end
+
   # A list in the global catalog is inserted by NAME (#1353): the engine resolves a bare name
   # against the working directory and then the catalog, so the name is enough (it used to have to
   # be the absolute path, because a wordlists-dir-only name failed at run time). The one case a
@@ -1279,6 +1297,7 @@ describe Gori::Tui::PathComplete do
   end
 
   it "keeps the absolute path for a catalog file whose name the catalog cannot address" do
+    posix_only!("Windows strips a trailing dot from a file name")
     with_wordlist_home do |wl|
       Dir.mkdir_p(wl)
       File.write(File.join(wl, "trailing.dot."), "")

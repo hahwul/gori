@@ -87,7 +87,7 @@ describe "Store#insert_issue" do
   # INSERT that could skip the link. A new one would have to be added here deliberately.
   it "is the only INSERT INTO issues in the source tree" do
     writers = [] of String
-    Dir.glob(File.join(__DIR__, "..", "..", "src", "**", "*.cr")).each do |path|
+    glob_files(__DIR__, "..", "..", "src", "**", "*.cr").each do |path|
       writers << path if File.read(path).includes?("INSERT INTO issues")
     end
     writers.map { |p| File.basename(p) }.should eq(["issues.cr"])

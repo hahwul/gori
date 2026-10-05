@@ -439,7 +439,7 @@ module Gori::Tui
       TCPServer.new(host, port).close
       false
     rescue ex : Socket::BindError
-      ex.os_error == Errno::EADDRINUSE
+      ex.os_error.in?(Errno::EADDRINUSE, WinError::WSAEADDRINUSE) # Windows reports a Winsock code
     rescue Socket::Error | IO::Error
       false
     end

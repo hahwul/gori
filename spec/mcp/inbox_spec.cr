@@ -5,6 +5,7 @@ private alias Inbox = Gori::MCP::ClaudeInbox
 
 # A stand-in for the CLI's inbox: accepts one connection, reads it to EOF, hands back the lines.
 private def with_inbox(&)
+  posix_only!("Claude Code's inbox is a Unix socket gori only looks for on POSIX")
   dir = File.tempname("gori-inbox")
   Dir.mkdir_p(dir)
   path = File.join(dir, "1.sock")
@@ -33,6 +34,7 @@ describe Gori::MCP::ClaudeInbox do
   end
 
   it "discovers only a path that is a live socket" do
+    posix_only!("File.symlink needs Developer Mode")
     # This spec may itself run under a Claude Code session, whose env names a real socket:
     # clear it so the pid candidates are the only ones in play, and restore it after.
     saved = ENV["CLAUDE_CODE_MESSAGING_SOCKET"]?
@@ -47,7 +49,7 @@ describe Gori::MCP::ClaudeInbox do
         Inbox.discover(1_i64).should eq(path)
         Inbox.discover(1_i64 << 40).should be_nil
         Inbox.discover(1_i64, uid: "4294967294").should be_nil # a socket another user owns
-        uid = LibC.getuid.to_s
+        uid = Inbox.uid
         Inbox.ours?(path, uid).should be_true
         link = File.join(File.dirname(path), "2.sock")
         File.symlink(path, link)

@@ -1,0 +1,3 @@
+# Check out LF everywhere, Windows included: `read_file` embeds wordlists and tables into
+# the binary at compile time, and a CRLF checkout would build every line with a stray \r.
+* text=auto eol=lf

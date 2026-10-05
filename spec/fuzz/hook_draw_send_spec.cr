@@ -7,6 +7,7 @@ private alias F = Gori::Fuzz
 # correct behaviour. A hook that appends one line per run and passes stdin through, plus a
 # reader for the tally.
 private def with_counting_hook(&)
+  posix_only!("a #!/bin/sh hook script")
   dir = File.tempname("gori-fuzz852")
   Dir.mkdir_p(dir)
   path = File.join(dir, "h.sh")

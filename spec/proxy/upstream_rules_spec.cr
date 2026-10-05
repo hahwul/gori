@@ -33,9 +33,13 @@ private def with_proxy_environment(values : Hash(String, String), &)
   end
 end
 
-private def resolved_ipv4(host : String) : String
+# What the platform resolver makes of a numeric spelling, or nil when it refuses one: Windows'
+# resolver reads no octal (`0177.0.0.1`), so there is nothing to agree with.
+private def resolved_ipv4(host : String) : String?
   Socket::Addrinfo.resolve(host, 80, Socket::Family::INET, Socket::Type::STREAM)
     .first.ip_address.address
+rescue Socket::Addrinfo::Error
+  nil
 end
 
 private def rule(host : String, kind : String, addr : String = "",
@@ -286,9 +290,9 @@ describe "upstream rules" do
           Gori::Settings.upstream_route(host, "http", 3000).direct?.should be_true, host
         end
         host = "0177.0.0.1"
-        resolved_ipv4(host).starts_with?("127.").should eq(
-          Gori::Settings.upstream_route(host, "http", 3000).direct?
-        )
+        if ip = resolved_ipv4(host)
+          ip.starts_with?("127.").should eq(Gori::Settings.upstream_route(host, "http", 3000).direct?)
+        end
       end
     ensure
       reset_upstream
@@ -304,8 +308,9 @@ describe "upstream rules" do
         Gori::Settings.environment_upstream_in_effect?.should be_true
 
         ENV["https_proxy"] = "socks5h://[::1]:1080"
+        # Windows environment names are case-insensitive, so the upper-case spelling, asked first, finds it.
         Gori::Settings.environment_upstream_summary.should eq(
-          "HTTP_PROXY → http proxy env-proxy.test:3128; https_proxy → socks5h proxy [::1]:1080")
+          "HTTP_PROXY → http proxy env-proxy.test:3128; #{{{ flag?(:win32) ? "HTTPS_PROXY" : "https_proxy" }}} → socks5h proxy [::1]:1080")
 
         Gori::Settings.upstream_proxy = "global.test:8080"
         Gori::Settings.environment_upstream_in_effect?.should be_false
@@ -347,9 +352,9 @@ describe "upstream rules" do
           Gori::Settings.upstream_route(host, "http", 8080).direct?.should be_true, host
         end
         host = "012.0.0.1"
-        resolved_ipv4(host).starts_with?("10.").should eq(
-          Gori::Settings.upstream_route(host, "http", 8080).direct?
-        )
+        if ip = resolved_ipv4(host)
+          ip.starts_with?("10.").should eq(Gori::Settings.upstream_route(host, "http", 8080).direct?)
+        end
         Gori::Settings.upstream_route("11.1", "http", 8080).host.should eq("env-proxy.test")
       end
     ensure

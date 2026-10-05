@@ -224,6 +224,7 @@ describe "settings profiles" do
     # 0700 tree covers it, but --config can put it in a shared checkout or a 0755 home, where
     # the file's OWN mode is the only thing protecting it.
     it "writes the settings file owner-only" do
+      posix_only!("POSIX mode bits")
       with_config_home do |dir|
         target = File.join(dir, "shared", "profile.json")
         Gori::Settings.path_override = target
@@ -235,6 +236,7 @@ describe "settings profiles" do
     # A `.tmp` left behind by a crashed save keeps its own mode through the rename, so the
     # create-time perm alone is not enough — the chmod has to run too.
     it "tightens a leftover temp file rather than inheriting its mode" do
+      posix_only!("POSIX mode bits")
       with_config_home do |dir|
         target = File.join(dir, "profile.json")
         stale = "#{target}.tmp"
@@ -249,6 +251,7 @@ describe "settings profiles" do
     # The regression: `--config` into an existing directory used to chmod that directory to
     # 0700. It is the operator's, not gori's — and with a relative --config it is the cwd.
     it "does not re-mode a parent directory the operator named" do
+      posix_only!("POSIX mode bits")
       with_config_home do |dir|
         parent = File.join(dir, "shared")
         Dir.mkdir_p(parent)

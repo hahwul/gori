@@ -416,8 +416,8 @@ describe Gori::Proxy::WS do
 
       # Real (evented) socket pairs, not IO.pipe: kernel buffering + truly
       # independent directions, so a 16 MiB stream doesn't deadlock the fibers.
-      client_side, relay_client = UNIXSocket.pair
-      origin_side, relay_upstream = UNIXSocket.pair
+      client_side, relay_client = stream_pair
+      origin_side, relay_upstream = stream_pair
 
       # Drain forwarded-to-client bytes concurrently (the ~16 MiB write would block).
       # The relay closes its end when both pumps finish, so the read sees EOF then.
@@ -470,8 +470,8 @@ describe Gori::Proxy::WS do
       f2_hdr = hdr.to_slice
       payload = Bytes.new(big, 0x41_u8)
 
-      client_side, relay_client = UNIXSocket.pair
-      origin_side, relay_upstream = UNIXSocket.pair
+      client_side, relay_client = stream_pair
+      origin_side, relay_upstream = stream_pair
 
       drain = Channel(Nil).new
       spawn do

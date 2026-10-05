@@ -33,6 +33,7 @@ module Gori::Update
     case os.downcase
     when "darwin", "macos", "osx" then "osx"
     when "linux"                  then "linux"
+    when "windows", "win32"       then "windows"
     else                               os.downcase
     end
   end
@@ -105,8 +106,10 @@ module Gori::Update
       "gori-#{version_part}linux-#{arch_n}"
     when "osx"
       "gori-#{version_part}osx-#{arch_n}.tar.gz"
+    when "windows"
+      "gori-#{version_part}windows-#{arch_n}.exe"
     else
-      raise Error.new("unsupported OS for gori release assets: #{os} (need linux or osx/darwin)")
+      raise Error.new("unsupported OS for gori release assets: #{os} (need linux, osx/darwin or windows)")
     end
   end
 
@@ -115,6 +118,8 @@ module Gori::Update
       "osx"
     {% elsif flag?(:linux) %}
       "linux"
+    {% elsif flag?(:win32) %}
+      "windows"
     {% else %}
       "unknown"
     {% end %}

@@ -231,9 +231,11 @@ private def unreachable_port : Int32
 end
 
 # Pump the render loop's drain until the run fiber has sent its terminal marker.
+# A deadline rather than a count of ticks: Windows spends about two seconds refusing a loopback
+# dial to a closed port, which an example's dead capture is.
 private def drain_until_idle(ctrl : Gori::Tui::AuthorizeController) : Nil
-  200.times do
-    break unless ctrl.running?
+  deadline = Time.instant + 10.seconds
+  while ctrl.running? && Time.instant < deadline
     ctrl.drain_events
     Fiber.yield
     sleep 5.milliseconds if ctrl.running?

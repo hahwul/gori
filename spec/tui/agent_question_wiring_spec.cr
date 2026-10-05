@@ -66,7 +66,7 @@ describe "the Runner's question wiring" do
   # A question never raises its own card: only the operator does (ring ↵, chip, verb).
   it "opens the card only from operator-driven paths" do
     callers = [] of String
-    Dir.glob(File.join(__DIR__, "..", "..", "src", "gori", "**", "*.cr")).each do |path|
+    glob_files(__DIR__, "..", "..", "src", "gori", "**", "*.cr").each do |path|
       File.read(path).lines.reject(&.lstrip.starts_with?('#')).each do |l|
         callers << File.basename(path) if l.includes?("open_question_card(") && !l.includes?("def open_question_card")
       end

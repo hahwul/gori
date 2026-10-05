@@ -94,9 +94,12 @@ module Gori
 
     # Whether *path* is *dir* itself or anything beneath it. Both sides are compared as given,
     # so canonicalize them first (`canonical_file`) when they may be spelled differently.
+    # Either separator counts: `File::SEPARATOR` is `/` on every platform, while Windows joins
+    # and resolves paths with `\`.
     def self.within?(path : String, dir : String) : Bool
       return true if path == dir
-      path.starts_with?(dir.ends_with?(File::SEPARATOR) ? dir : dir + File::SEPARATOR)
+      base = dir.rstrip(Path::SEPARATORS.join)
+      path.starts_with?(base) && Path::SEPARATORS.includes?(path[base.size]?)
     end
 
     def self.ensure_dirs : Nil

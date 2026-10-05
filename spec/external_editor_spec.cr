@@ -10,13 +10,12 @@ private def fake_editor(new_content : String?, success : Bool = true)
   end
 end
 
-# Real Process::Status via trivial shells (true/false), since it has no public ctor.
 private def run_ok : Process::Status
-  Process.run("true")
+  Process::Status[0]
 end
 
 private def run_fail : Process::Status
-  Process.run("false")
+  Process::Status[1]
 end
 
 describe Gori::ExternalEditor do

@@ -69,6 +69,7 @@ end
 
 describe Gori::Fuzz::WordlistFile do
   it "counts and iterates a FIFO whose writer has already exited (one read, no hang)" do
+    posix_only!("mkfifo")
     path = File.tempname("gori-wl-fifo")
     Process.run("mkfifo", [path]).success?.should be_true
     begin
@@ -85,6 +86,7 @@ describe Gori::Fuzz::WordlistFile do
   # descriptor: both opens share one offset, so even `-w /dev/stdin < wordlist.txt` was
   # counted and then read empty. `/dev/fd/N` reproduces that without touching real stdin.
   it "agrees between size and iteration on a /dev/fd path" do
+    posix_only!("/dev/fd")
     path = File.tempname("gori-wl-fd")
     File.write(path, "alpha\nbeta\ngamma\n")
     begin

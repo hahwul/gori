@@ -363,9 +363,7 @@ describe "a read-only Gori::Store" do
       close_within(store, 20.seconds).should be_true
     ensure
       close_within(store, 10.seconds)
-      File.delete?(path)
-      File.delete?("#{path}-wal")
-      File.delete?("#{path}-shm")
+      delete_db_files(path)
     end
   end
 end

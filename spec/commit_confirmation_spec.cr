@@ -9,9 +9,7 @@ private def with_store(&)
   begin
     yield store
   ensure
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
+    delete_db_files(path) # each example's write reads after `close`, which reopens the pool
   end
 end
 

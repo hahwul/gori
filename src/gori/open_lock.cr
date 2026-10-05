@@ -176,11 +176,14 @@ module Gori
     # stdlib's own spelling of the pair (`errno.in?(Errno::EAGAIN, Errno::EWOULDBLOCK)`, same
     # file) rather than a guess about which of the two a platform uses.
     #
+    # EWOULDBLOCK is EAGAIN on every POSIX target (and absent from Windows' Errno). On Windows
+    # the lock is `LockFileEx`, whose refusal the stdlib raises as the same "already locked"
+    # error carrying `ERROR_LOCK_VIOLATION`.
+    #
     # A missing `os_error` reads as NOT contention: that direction costs one store opening
     # unannounced, the other direction costs a project nobody can open at all.
-    private def self.contention?(ex : IO::Error) : Bool
-      err = ex.os_error
-      !err.nil? && err.in?(Errno::EAGAIN, Errno::EWOULDBLOCK)
+    def self.contention?(ex : IO::Error) : Bool
+      ex.os_error.in?(Errno::EAGAIN, WinError::ERROR_LOCK_VIOLATION)
     end
 
     # Take the EXCLUSIVE lock and HOLD it, for a caller about to do something destructive to the
