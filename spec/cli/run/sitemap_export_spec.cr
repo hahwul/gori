@@ -55,6 +55,12 @@ describe "gori run sitemap export" do
       .should start_with("gori run sitemap export: no operations (0 flows read")
   end
 
+  it "names --include-gori when every flow it skipped was sent by gori" do
+    report = OAR.new
+    report.skip(Gori::Export::OpenApi::Skip::Gori)
+    Gori::CLI::Run.sitemap_export_notes_for_spec(report, nil).lines[0].should contain("--include-gori")
+  end
+
   it "names the profile, a dead pattern and an unsaved salt when examples were redacted" do
     profile = Gori::Redact::Profile.new(name: "strict", json_fields: ["x"], patterns: ["(unclosed"])
     choice = Gori::Redact::Policy::Choice.new(matcher: Gori::Redact::Matcher.new(profile), salt_persisted: false)
