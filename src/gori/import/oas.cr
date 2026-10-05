@@ -382,7 +382,9 @@ module Gori
           next unless p["in"]?.to_s == "path"
           name = p["name"]?.to_s
           next if name.empty?
-          result = result.gsub("{#{name}}", sample_value(spec, p))
+          # Encoded: an author's example (`john doe`, `a#b`) is a segment value, and a raw space
+          # or `#` would break the request line or cut the path.
+          result = result.gsub("{#{name}}", URI.encode_path_segment(sample_value(spec, p)))
         end
         result
       end
@@ -417,10 +419,13 @@ module Gori
       private def self.sample_value(spec : JSON::Any, p : JSON::Any) : String
         schema_node = p["schema"]?
         schema = schema_node ? resolve_ref(spec, schema_node).as_h? : nil
-        given = p.as_h?.try { |param| media_example(spec, param) || given_sample(param) }
-        given ||= schema.try { |h| given_sample(h) }
-        if text = given.try { |g| param_text(g) }
-          return text
+        # The first candidate that HAS a text spelling: an object example or a null enum member
+        # must not hide the schema's usable value behind it.
+        param = p.as_h?
+        {param.try { |h| media_example(spec, h) }, param.try { |h| given_sample(h) }, schema.try { |h| given_sample(h) }}.each do |given|
+          if text = given.try { |g| param_text(g) }
+            return text
+          end
         end
         type = schema.try { |h| h["type"]?.try(&.as_s?) } || p["type"]?.try(&.as_s?)
         scalar_sample(type, p["name"]?.to_s)
@@ -489,7 +494,7 @@ module Gori
           value = object[key]?
           return value if value && !value.raw.nil?
         end
-        object["enum"]?.try(&.as_a?).try(&.first?)
+        object["enum"]?.try(&.as_a?).try(&.find { |v| !v.raw.nil? })
       end
 
       private def self.object_sample(spec : JSON::Any, object : Hash(String, JSON::Any),

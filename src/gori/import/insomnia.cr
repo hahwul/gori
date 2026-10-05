@@ -88,10 +88,12 @@ module Gori
       end
 
       # Nunjucks resolves `{{ _.api.host }}` through nested objects, so a nested value is also
-      # filed under its dotted path (the object itself keeps its JSON text under its own name).
+      # filed under its dotted path. A later environment REPLACES an object wholesale, so the
+      # dotted keys an earlier one filed under that name go first.
       private def self.flatten_into(table : Vars::Table, data : Hash(String, JSON::Any), prefix : String = "") : Nil
         data.each do |k, v|
           key = prefix.empty? ? k : "#{prefix}.#{k}"
+          table.reject! { |name, _| name.starts_with?("#{key}.") }
           table[key] = Vars.value_to_s(v)
           v.as_h?.try { |nested| flatten_into(table, nested, key) }
         end
@@ -128,18 +130,21 @@ module Gori
         body, content_type = body_of(res["body"]?, vars)
         if content_type
           if i = headers.index { |(k, _)| k.compare("content-type", case_insensitive: true) == 0 }
-            # Insomnia writes a bare `multipart/form-data` header itself and adds the boundary
-            # when it sends; the body here is framed with gori's, so the header must name it.
+            # Insomnia writes its own `multipart/form-data` header and frames the parts with a
+            # boundary it picks when it sends; the body here is framed with gori's, so the
+            # header must name that one, whatever boundary (if any) it was exported with.
             name, value = headers[i]
-            if value.downcase.starts_with?("multipart/form-data") && !value.includes?("boundary=") &&
-               content_type.includes?("boundary=")
+            if value.downcase.starts_with?("multipart/form-data") && content_type.includes?("boundary=")
               headers[i] = {name, content_type}
             end
           else
             headers << {"Content-Type", content_type}
           end
         end
-        headers.concat(auth_headers(res["authentication"]?, vars))
+        # Insomnia adds its auth header only when the request does not already carry one.
+        auth_headers(res["authentication"]?, vars).each do |pair|
+          headers << pair unless headers.any? { |(k, _)| k.compare(pair[0], case_insensitive: true) == 0 }
+        end
         Builder.pending_request(now, url, method, headers, body,
           source_surface: prov.surface, source_ref: prov.ref)
       end

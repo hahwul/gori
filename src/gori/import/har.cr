@@ -449,7 +449,8 @@ module Gori
         if mime.downcase.starts_with?("multipart/form-data")
           # The parts go out under the request's own multipart Content-Type, so they are framed
           # with ITS boundary; without one there is no body to rebuild that it would accept.
-          boundary = mime[/boundary="?([^";\s]+)/i, 1]? || return {nil, false}
+          m = mime.scrub.match(/boundary=(?:"([^"]+)"|([^";\s]+))/i) || return {nil, false}
+          boundary = m[1]? || m[2]
           return {multipart_body(params, boundary), true}
         end
         pairs = params.map do |p|
@@ -458,14 +459,21 @@ module Gori
         {pairs.join('&').to_slice, true}
       end
 
+      # The part headers are gori's own framing, so a name, filename or type that could forge a
+      # header line is refused (the entry is skipped) and quotes are escaped, as OAS's does.
       private def self.multipart_body(params : Array(JSON::Any), boundary : String) : Bytes
+        quoted = ->(s : String) { s.gsub("\\", "\\\\").gsub("\"", "\\\"") }
         String.build do |b|
           params.each do |p|
+            name, file, type = p["name"]?.to_s, p["fileName"]?.try(&.as_s?), p["contentType"]?.try(&.as_s?).presence
+            if {name, file, type}.any? { |v| v && Builder.inject_bytes?(v) }
+              raise Gori::Error.new("multipart param #{name.inspect} carries a control character")
+            end
             b << "--" << boundary << "\r\n"
-            b << %(Content-Disposition: form-data; name="#{p["name"]?}")
-            p["fileName"]?.try(&.as_s?).try { |f| b << %(; filename="#{f}") }
+            b << %(Content-Disposition: form-data; name="#{quoted.call(name)}")
+            file.try { |f| b << %(; filename="#{quoted.call(f)}") }
             b << "\r\n"
-            p["contentType"]?.try(&.as_s?).presence.try { |ct| b << "Content-Type: " << ct << "\r\n" }
+            type.try { |ct| b << "Content-Type: " << ct << "\r\n" }
             b << "\r\n" << p["value"]?.to_s << "\r\n"
           end
           b << "--" << boundary << "--\r\n"

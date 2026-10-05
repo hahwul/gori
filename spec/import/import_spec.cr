@@ -91,7 +91,7 @@ describe Gori::Import do
         JSON
 
       with_store do |store|
-        Gori::Import.import_file(store, :har, har).count.should eq(2)
+        Gori::Import.import_file(store, :har, har).count.should eq(2) # the injected part name is skipped
         rows = store.search(Gori::QL::EMPTY, 10)
         http = rows.find { |r| r.target == "/items" }.not_nil!
         chat = rows.find { |r| r.target == "/chat" }.not_nil!
@@ -378,18 +378,22 @@ describe Gori::Import do
            "response": {"status": 200, "headers": [], "content": null}},
           {"startedDateTime": "2026-06-01T12:00:01+00:00",
            "request": {"method": "POST", "url": "https://api.test/up",
-             "headers": [{"name": "Content-Type", "value": "multipart/form-data; boundary=XB"}],
+             "headers": [{"name": "Content-Type", "value": "multipart/form-data; boundary=\\"X B\\""}],
+             "postData": {"mimeType": "multipart/form-data; boundary=\\"X B\\"",
+               "params": [{"name": "a", "value": "1"}, {"name": "f", "fileName": "x.txt", "contentType": "text/plain", "value": "hi"}]}}},
+          {"startedDateTime": "2026-06-01T12:00:02+00:00",
+           "request": {"method": "POST", "url": "https://api.test/inject",
              "postData": {"mimeType": "multipart/form-data; boundary=XB",
-               "params": [{"name": "a", "value": "1"}, {"name": "f", "fileName": "x.txt", "contentType": "text/plain", "value": "hi"}]}}}]}}
+               "params": [{"name": "a\\r\\nX-Injected: 1", "value": "1"}]}}}]}}
         JSON
 
       with_store do |store|
-        Gori::Import.import_file(store, :har, har).count.should eq(2)
+        Gori::Import.import_file(store, :har, har).count.should eq(2) # the injected part name is skipped
         rows = store.search(Gori::QL::EMPTY, 2)
         up = store.get_flow(rows.find!(&.target.==("/up")).id).not_nil!
         String.new(up.request_body.not_nil!).should eq(
-          "--XB\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n" \
-          "--XB\r\nContent-Disposition: form-data; name=\"f\"; filename=\"x.txt\"\r\nContent-Type: text/plain\r\n\r\nhi\r\n--XB--\r\n")
+          "--X B\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n" \
+          "--X B\r\nContent-Disposition: form-data; name=\"f\"; filename=\"x.txt\"\r\nContent-Type: text/plain\r\n\r\nhi\r\n--X B--\r\n")
       end
     ensure
       File.delete?(har)
@@ -1403,7 +1407,7 @@ describe Gori::Import::Builder do
         File.write(har, {"log" => {"version" => "1.2", "creator" => {"name" => "hand", "version" => "1"},
                                    "entries" => [request.call("/clcl", clcl), request.call("/bad", malformed)]}}.to_json)
         with_store do |store|
-          Gori::Import.import_file(store, :har, har).count.should eq(2)
+          Gori::Import.import_file(store, :har, har).count.should eq(2) # the injected part name is skipped
           details = store.recent_flows(2).map { |row| store.get_flow(row.id).not_nil! }
           clcl_detail = details.find { |detail| detail.row.target == "/clcl" }.not_nil!
           malformed_detail = details.find { |detail| detail.row.target == "/bad" }.not_nil!
