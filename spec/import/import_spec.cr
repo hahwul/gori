@@ -368,6 +368,34 @@ describe Gori::Import do
     end
   end
 
+  it "keeps a HAR entry whose postData or response content is null, and frames multipart params with their boundary" do
+    har = File.tempname("gori", ".har")
+    begin
+      File.write(har, <<-JSON)
+        {"log": {"entries": [
+          {"startedDateTime": "2026-06-01T12:00:00+00:00",
+           "request": {"method": "GET", "url": "https://api.test/a", "headers": [null], "postData": null},
+           "response": {"status": 200, "headers": [], "content": null}},
+          {"startedDateTime": "2026-06-01T12:00:01+00:00",
+           "request": {"method": "POST", "url": "https://api.test/up",
+             "headers": [{"name": "Content-Type", "value": "multipart/form-data; boundary=XB"}],
+             "postData": {"mimeType": "multipart/form-data; boundary=XB",
+               "params": [{"name": "a", "value": "1"}, {"name": "f", "fileName": "x.txt", "contentType": "text/plain", "value": "hi"}]}}}]}}
+        JSON
+
+      with_store do |store|
+        Gori::Import.import_file(store, :har, har).count.should eq(2)
+        rows = store.search(Gori::QL::EMPTY, 2)
+        up = store.get_flow(rows.find!(&.target.==("/up")).id).not_nil!
+        String.new(up.request_body.not_nil!).should eq(
+          "--XB\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n" \
+          "--XB\r\nContent-Disposition: form-data; name=\"f\"; filename=\"x.txt\"\r\nContent-Type: text/plain\r\n\r\nhi\r\n--XB--\r\n")
+      end
+    ensure
+      File.delete?(har)
+    end
+  end
+
   it "overwrites a stale Content-Length to match a HAR params-only reconstructed body (R2-8)" do
     har = File.tempname("gori", ".har")
     begin

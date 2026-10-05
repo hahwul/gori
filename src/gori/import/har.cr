@@ -413,6 +413,7 @@ module Gori
         arr = node.try(&.as_a?)
         return list unless arr
         arr.each do |item|
+          next unless item.as_h? # a `null` row would raise out of `[]?` and drop the entry
           name = item["name"]?.to_s
           value = item["value"]?.to_s
           next if name.empty? || name.starts_with?(':')
@@ -433,25 +434,47 @@ module Gori
       # the same head it left, or the export→import fixed point breaks and a replay carries a
       # header the capture did not (see `Builder.synthesized_length`). A `params` body IS ours to
       # frame, since we composed it.
+      #
+      # `postData: null` (a GET some exporters write) is no body, not a reason to drop the entry:
+      # `[]?` raises on a JSON null, which the per-entry rescue turned into a lost request.
       private def self.post_body(node : JSON::Any?) : {Bytes?, Bool}
-        return {nil, false} unless node
+        return {nil, false} unless node && node.as_h?
         if body = encoded_body(node["text"]?.to_s, node["encoding"]?.to_s)
           return {body, false}
         end
-        if params = node["params"]?.try(&.as_a?)
-          pairs = params.compact_map do |p|
-            name = p["name"]?.to_s
-            next if name.empty?
-            "#{URI.encode_www_form(name)}=#{URI.encode_www_form(p["value"]?.to_s)}"
-          end
-          return {pairs.join('&').to_slice, true} unless pairs.empty?
+        params = node["params"]?.try(&.as_a?).try(&.select(&.as_h?)) || return {nil, false}
+        params.reject! { |p| p["name"]?.to_s.empty? }
+        return {nil, false} if params.empty?
+        mime = node["mimeType"]?.to_s
+        if mime.downcase.starts_with?("multipart/form-data")
+          # The parts go out under the request's own multipart Content-Type, so they are framed
+          # with ITS boundary; without one there is no body to rebuild that it would accept.
+          boundary = mime[/boundary="?([^";\s]+)/i, 1]? || return {nil, false}
+          return {multipart_body(params, boundary), true}
         end
-        {nil, false}
+        pairs = params.map do |p|
+          "#{URI.encode_www_form(p["name"]?.to_s)}=#{URI.encode_www_form(p["value"]?.to_s)}"
+        end
+        {pairs.join('&').to_slice, true}
+      end
+
+      private def self.multipart_body(params : Array(JSON::Any), boundary : String) : Bytes
+        String.build do |b|
+          params.each do |p|
+            b << "--" << boundary << "\r\n"
+            b << %(Content-Disposition: form-data; name="#{p["name"]?}")
+            p["fileName"]?.try(&.as_s?).try { |f| b << %(; filename="#{f}") }
+            b << "\r\n"
+            p["contentType"]?.try(&.as_s?).presence.try { |ct| b << "Content-Type: " << ct << "\r\n" }
+            b << "\r\n" << p["value"]?.to_s << "\r\n"
+          end
+          b << "--" << boundary << "--\r\n"
+        end.to_slice
       end
 
       private def self.response_body(resp : JSON::Any) : {Bytes?, String?, Int64?}
         content = resp["content"]?
-        return {nil, nil, nil} unless content
+        return {nil, nil, nil} unless content && content.as_h?
         mime = content["mimeType"]?.to_s.presence
         body = encoded_body(content["text"]?.to_s, content["encoding"]?.to_s)
         {body, mime, declared_size(content["size"]?)}

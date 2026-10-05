@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Import: a HAR entry with `postData: null`, `content: null` or a `null` header row is imported instead of dropped, and multipart `postData.params` are framed with the request's boundary instead of being rebuilt as a form body
 - Import: an Insomnia request resolves variables from its folders' environments and nested values such as `{{ _.api.host }}`, which skipped it as undefined, and a multipart body sent with Insomnia's own bare `multipart/form-data` header now names its boundary
 - Import: a Postman collection's bearer, basic or API-key auth replaces the request's own header of that name instead of adding a second one, and an empty bearer token adds no `Authorization: Bearer ` header, as Postman sends it
 - Import: an OpenAPI or Swagger path, query or header parameter takes its `example`, `examples`, `default` or first `enum` value, where gori sent `sort=sort` or `id=1` whatever the spec said
