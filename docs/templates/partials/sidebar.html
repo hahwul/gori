@@ -36,12 +36,12 @@
     </nav>
 
     {% else %}
+    {# Three levels, one look each: section (the top nav's short label) →
+       group (Guide only) → page. Every level folds with the same chevron. #}
     <nav class="manual-nav" aria-label="{{ "docs.manual" | t }}">
-      <span class="manual-nav-label">{{ "docs.manual" | t }}</span>
-
       {% for sec in site.sections | sort(attribute="weight") %}{% if sec.name == "getting-started" and sec.language == page_language %}
-      <details class="nav-group nav-section"{% if page.section == sec.name %} open{% endif %}>
-        <summary>{{ sec.title | e }}</summary>
+      <details class="nav-section"{% if page.section == sec.name %} open{% endif %}>
+        <summary>{{ "nav.start" | t }}</summary>
         <ul class="nav-links">
           <li><a href="{{ base_url }}{{ sec.url }}"{% if page.url == sec.url %} class="active" aria-current="page"{% endif %}>{{ "docs.overview" | t }}</a></li>
           {% for p in sec.pages | rejectattr("is_index") | sort(attribute="weight") %}
@@ -52,34 +52,28 @@
       {% endif %}{% endfor %}
 
       {% for sec in site.sections | sort(attribute="weight") %}{% if sec.name == "guide" and sec.language == page_language %}
-      <section class="nav-section guide-navigation" aria-labelledby="guide-navigation-title">
-        <h2 id="guide-navigation-title">{{ sec.title | e }}</h2>
-        <a class="nav-overview{% if page.url == sec.url %} active{% endif %}" href="{{ base_url }}{{ sec.url }}"{% if page.url == sec.url %} aria-current="page"{% endif %}>{{ "docs.overview" | t }}</a>
-
-        {% set ordered = sec.pages | rejectattr("is_index") | sort(attribute="weight") %}
-        {% for p in ordered %}
-        {% if loop.first or p.extra.group != ordered[loop.index0 - 1].extra.group %}
-        {% if not loop.first %}</ul></details>{% endif %}
-        <details class="nav-group"{% if page.section == "guide" and page.extra.group == p.extra.group %} open{% endif %}>
-          <summary>{{ p.extra.group | e }}</summary>
-          <ul class="nav-links">
-        {% endif %}
-            <li><a href="{{ base_url }}{{ p.url }}"{% if page.url == p.url %} class="active" aria-current="page"{% endif %}>{{ p.title | e }}</a></li>
-        {% if loop.last %}</ul></details>{% endif %}
-        {% endfor %}
-      </section>
-      {% endif %}{% endfor %}
-
-      {% for sec in site.sections | sort(attribute="weight") %}{% if sec.name == "playbooks" and sec.language == page_language %}
-      <a class="book-promo{% if page.section == sec.name %} active{% endif %}" href="{{ base_url }}{{ sec.url }}">
-        <span>{{ "docs.book" | t }}</span>
-        <strong>{{ sec.title | e }} →</strong>
-      </a>
+      <details class="nav-section"{% if page.section == sec.name %} open{% endif %}>
+        <summary>{{ "nav.guide" | t }}</summary>
+        <ul class="nav-links">
+          <li><a href="{{ base_url }}{{ sec.url }}"{% if page.url == sec.url %} class="active" aria-current="page"{% endif %}>{{ "docs.overview" | t }}</a></li>
+          {% set ordered = sec.pages | rejectattr("is_index") | sort(attribute="weight") %}
+          {% for p in ordered %}
+          {% if loop.first or p.extra.group != ordered[loop.index0 - 1].extra.group %}
+          {% if not loop.first %}</ul></details></li>{% endif %}
+          <li><details class="nav-group"{% if page.section == "guide" and page.extra.group == p.extra.group %} open{% endif %}>
+            <summary>{{ p.extra.group | e }}</summary>
+            <ul class="nav-links">
+          {% endif %}
+              <li><a href="{{ base_url }}{{ p.url }}"{% if page.url == p.url %} class="active" aria-current="page"{% endif %}>{{ p.title | e }}</a></li>
+          {% if loop.last %}</ul></details></li>{% endif %}
+          {% endfor %}
+        </ul>
+      </details>
       {% endif %}{% endfor %}
 
       {% for sec in site.sections | sort(attribute="weight") %}{% if sec.name == "reference" and sec.language == page_language %}
-      <details class="nav-group nav-section"{% if page.section == sec.name %} open{% endif %}>
-        <summary>{{ sec.title | e }}</summary>
+      <details class="nav-section"{% if page.section == sec.name %} open{% endif %}>
+        <summary>{{ "nav.reference" | t }}</summary>
         <ul class="nav-links">
           <li><a href="{{ base_url }}{{ sec.url }}"{% if page.url == sec.url %} class="active" aria-current="page"{% endif %}>{{ "docs.overview" | t }}</a></li>
           {% for p in sec.pages | rejectattr("is_index") | sort(attribute="weight") %}
@@ -87,6 +81,13 @@
           {% endfor %}
         </ul>
       </details>
+      {% endif %}{% endfor %}
+
+      {% for sec in site.sections | sort(attribute="weight") %}{% if sec.name == "playbooks" and sec.language == page_language %}
+      <a class="book-promo{% if page.section == sec.name %} active{% endif %}" href="{{ base_url }}{{ sec.url }}">
+        <span>{{ "docs.book" | t }}</span>
+        <strong>{{ sec.title | e }} →</strong>
+      </a>
       {% endif %}{% endfor %}
     </nav>
     {% endif %}

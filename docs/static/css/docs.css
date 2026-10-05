@@ -48,47 +48,64 @@
   text-transform: uppercase;
   color: var(--muted);
 }
-.nav-section { margin-bottom: 22px; }
-.guide-navigation h2 {
-  margin: 0 0 6px 10px;
-  color: var(--heading);
-  font-size: 13px;
-  font-weight: 650;
-}
-.nav-group { margin-block: 3px; }
-.nav-group summary {
+/* Level 1 is a section, level 2 a guide group, level 3 a page; each level
+   has its own type, and all of them fold with the same chevron on the right
+   edge, centered on the first line however long the label wraps. */
+.nav-section + .nav-section { border-top: 1px solid var(--line); }
+.nav-section { padding-block: 6px; }
+.nav-section > summary, .nav-group > summary {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
-  min-height: 35px;
-  padding: 7px 10px;
+  padding: 8px 10px;
   list-style: none;
   cursor: pointer;
-  color: var(--text);
-  font-size: 13px;
-  line-height: 1.5;
   border-radius: var(--radius-xs);
 }
-.nav-group summary::-webkit-details-marker { display: none; }
-.nav-group summary::before { content: "+"; width: 10px; color: var(--muted); font: 14px var(--font-mono); }
-.nav-group[open] > summary::before { content: "−"; color: var(--accent); }
+.nav-section > summary::-webkit-details-marker, .nav-group > summary::-webkit-details-marker { display: none; }
+.nav-section > summary::after, .nav-group > summary::after {
+  content: "";
+  flex: none;
+  width: 5px;
+  height: 5px;
+  margin: calc(0.75em - 3px) 2px 0 auto;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  color: var(--muted);
+  transform: rotate(-45deg);
+  transition: transform var(--transition);
+}
+.nav-section[open] > summary::after, .nav-group[open] > summary::after { transform: rotate(45deg); }
+.nav-section > summary {
+  padding-block: 10px;
+  color: var(--text);
+  font: 600 11px/1.5 var(--font-mono);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+.nav-section[open] > summary { color: var(--accent-strong); }
+.nav-group { margin-block: 1px; }
+.nav-group > summary { color: var(--text); font-size: 13px; font-weight: 550; line-height: 1.5; }
 .nav-group[open] > summary { color: var(--heading); }
-.nav-group summary:hover, .nav-overview:hover, .nav-links a:hover { background: var(--bg-panel); color: var(--heading); }
-.nav-links { list-style: none; padding: 0; margin: 2px 0 10px 15px; border-left: 1px solid var(--line); }
+.nav-section > summary:hover, .nav-group > summary:hover, .nav-overview:hover, .nav-links a:hover { background: var(--bg-panel); color: var(--heading); }
+.nav-links { list-style: none; padding: 0; margin: 0 0 6px; }
 .nav-links li { margin: 0; }
 .nav-links a, .nav-overview {
   display: block;
   position: relative;
-  padding: 7px 10px 7px 15px;
-  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+  padding: 7px 10px;
+  border-radius: var(--radius-xs);
   color: var(--muted);
   font-size: 13px;
   line-height: 1.5;
   text-decoration: none;
 }
-.nav-overview { padding-left: 10px; margin: 2px 0 4px; border-radius: var(--radius-xs); }
+/* Pages inside a group hang off a rule under the group's label. */
+.nav-group .nav-links { margin: 2px 0 8px 15px; border-left: 1px solid var(--line); }
+.nav-group .nav-links a { padding-left: 15px; border-radius: 0 var(--radius-xs) var(--radius-xs) 0; }
+.nav-overview { margin: 2px 0 4px; }
 .manual-nav a.active { color: var(--accent-strong); background: var(--selection); }
-.nav-links a.active::before { content: ""; position: absolute; left: -1px; top: 0; bottom: 0; width: 2px; background: var(--accent); }
+.nav-group .nav-links a.active::before { content: ""; position: absolute; left: -1px; top: 0; bottom: 0; width: 2px; background: var(--accent); }
 .book-promo {
   display: block;
   padding: 16px 14px;
