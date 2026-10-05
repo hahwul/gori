@@ -36,6 +36,11 @@ module Gori
         raise Gori::Error.new("Insomnia export has no `resources` array — is this an Insomnia v4 export?") unless resources
 
         vars = environment_table(resources)
+        groups = {} of String => Hash(String, JSON::Any)
+        resources.each do |res|
+          h = res.as_h?
+          groups[h["_id"]?.to_s] = h if h && h["_type"]?.to_s == "request_group"
+        end
         now = Time.utc.to_unix * 1_000_000
         pairs = [] of Builder::FlowPair
         missing = Set(String).new
@@ -48,7 +53,7 @@ module Gori
           found += 1
           # One bad request skips; the rest of the export still imports.
           begin
-            pairs << Vars.per_entry { resource_to_flow(now, h, vars, missing, prov) }
+            pairs << Vars.per_entry { resource_to_flow(now, h, folder_vars(h, groups, vars), missing, prov) }
           rescue
             skipped += 1
           end
@@ -81,8 +86,35 @@ module Gori
         (base + subs.first(1)).each do |h|
           data = h["data"]?.try(&.as_h?)
           next unless data
-          data.each { |k, v| table[k] = Vars.value_to_s(v) }
+          flatten_into(table, data)
         end
+        table
+      end
+
+      # Nunjucks resolves `{{ _.api.host }}` through nested objects, so a nested value is also
+      # filed under its dotted path (the object itself keeps its JSON text under its own name).
+      private def self.flatten_into(table : Vars::Table, data : Hash(String, JSON::Any), prefix : String = "") : Nil
+        data.each do |k, v|
+          key = prefix.empty? ? k : "#{prefix}.#{k}"
+          table[key] = Vars.value_to_s(v)
+          v.as_h?.try { |nested| flatten_into(table, nested, key) }
+        end
+      end
+
+      # Insomnia layers each enclosing folder's `environment` over the workspace's, outermost
+      # first, so a request's `{{ _.base_url }}` may be defined on its folder alone.
+      private def self.folder_vars(res : Hash(String, JSON::Any), groups : Hash(String, Hash(String, JSON::Any)),
+                                   vars : Vars::Table) : Vars::Table
+        chain = [] of Hash(String, JSON::Any)
+        seen = Set(String).new
+        id = res["parentId"]?.to_s
+        while (group = groups[id]?) && seen.add?(id) # `seen`: a parentId cycle ends the walk
+          chain << group
+          id = group["parentId"]?.to_s
+        end
+        return vars if chain.empty?
+        table = vars.dup
+        chain.reverse_each { |g| g["environment"]?.try(&.as_h?).try { |env| flatten_into(table, env) } }
         table
       end
 
@@ -93,8 +125,18 @@ module Gori
         url = resolve_url(res, vars, missing)
         headers = header_list(res["headers"]?, vars)
         body, content_type = body_of(res["body"]?, vars)
-        if content_type && !headers.any? { |(k, _)| k.compare("content-type", case_insensitive: true) == 0 }
-          headers << {"Content-Type", content_type}
+        if content_type
+          if i = headers.index { |(k, _)| k.compare("content-type", case_insensitive: true) == 0 }
+            # Insomnia writes a bare `multipart/form-data` header itself and adds the boundary
+            # when it sends; the body here is framed with gori's, so the header must name it.
+            name, value = headers[i]
+            if value.downcase.starts_with?("multipart/form-data") && !value.includes?("boundary=") &&
+               content_type.includes?("boundary=")
+              headers[i] = {name, content_type}
+            end
+          else
+            headers << {"Content-Type", content_type}
+          end
         end
         headers.concat(auth_headers(res["authentication"]?, vars))
         Builder.pending_request(now, url, method, headers, body,

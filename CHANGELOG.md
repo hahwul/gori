@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Import: an Insomnia request resolves variables from its folders' environments and nested values such as `{{ _.api.host }}`, which skipped it as undefined, and a multipart body sent with Insomnia's own bare `multipart/form-data` header now names its boundary
 - Import: a Postman collection's bearer, basic or API-key auth replaces the request's own header of that name instead of adding a second one, and an empty bearer token adds no `Authorization: Bearer ` header, as Postman sends it
 - Import: an OpenAPI or Swagger path, query or header parameter takes its `example`, `examples`, `default` or first `enum` value, where gori sent `sort=sort` or `id=1` whatever the spec said
 - Sitemap export: with `--examples`, a query, path or form value whose schema is `integer`, `number` or `boolean` is written as that type instead of a string, which OpenAPI validators flagged, and an export that left out only gori's own requests names `--include-gori`
