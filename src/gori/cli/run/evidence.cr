@@ -84,7 +84,7 @@ module Gori
             puts(JSON.build { |j| j.object { MCP::Serialize.evidence_meta(j, meta); j.field "linked", link } })
           else
             puts "Frozen evidence ##{id} on issue ##{iid} from #{meta.source_label}#{link ? " (linked)" : ""}: " \
-                 "#{Evidence.label(meta)} → #{evidence_outcome(meta)}, #{evidence_bytes_text(meta.bytes)}"
+                 "#{Evidence.label(meta)} → #{Evidence.outcome(meta)}, #{evidence_bytes_text(meta.bytes)}"
             puts "  sha256 req #{meta.request_sha256}"
             puts "  sha256 res #{meta.response_sha256 || "— (no response)"}"
           end
@@ -299,15 +299,8 @@ module Gori
 
       # `#12  hist #3  2026-09-11T05:02:33Z  POST acme.test/login → 200  34567 bytes  sha256 req a1b2… res c3d4…`
       # — one row per copy, the provenance the RELATED card shows plus the hash prefixes.
-      # The status, flagged when the copy also stored an error: a partial read keeps its status,
-      # and a bare `→ 200` read as a clean exchange.
-      private def self.evidence_outcome(m : Store::IssueEvidenceMeta) : String
-        return (m.error ? "error" : "no response") unless st = m.status
-        m.error ? "#{st} (error)" : st.to_s
-      end
-
       private def self.evidence_line(m : Store::IssueEvidenceMeta) : String
-        outcome = evidence_outcome(m)
+        outcome = Evidence.outcome(m)
         notes = [] of String
         notes << "request truncated" if m.request_truncated?
         notes << "response truncated" if m.response_truncated?

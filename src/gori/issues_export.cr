@@ -192,7 +192,7 @@ module Gori
         metas.each do |m|
           io << "- **frozen** " << one_line(m.method) << " " << one_line(m.url)
           io << " — " << m.source_label << " · " << Gori::LocalTime.utc(m.created_at, "%Y-%m-%d %H:%M:%S UTC")
-          io << " · " << (m.status || (m.error ? "error" : "no response"))
+          io << " · " << Evidence.outcome(m)
           io << " · " << m.bytes << " bytes"
           io << " · sha256 req " << m.request_sha256
           io << " res " << (m.response_sha256 || "—")

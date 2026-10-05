@@ -315,6 +315,13 @@ module Gori
     #
     # `.scrub`, because the url is display text built from captured wire bytes and the TUI
     # funnels display text through `Hotkeys.retag`, whose regex raises on non-UTF-8.
+    # The status, flagged when the copy also stored an error: a partial read keeps its status,
+    # and a bare `200` read as a clean exchange. The CLI listing and the Markdown report say it.
+    def self.outcome(meta : Store::IssueEvidenceMeta) : String
+      return (meta.error ? "error" : "no response") unless st = meta.status
+      meta.error ? "#{st} (error)" : st.to_s
+    end
+
     def self.label(meta : Store::IssueEvidenceMeta) : String
       u = meta.url
       if Url.absolute_form?(u) && (i = u.index("://"))
