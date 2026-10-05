@@ -189,7 +189,24 @@ jobs:
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v5
 
+      # The artifact service has failed this download with a transient 403
+      # (v0.7.1), and a failed job here skips every downstream publisher
+      # (Homebrew, AUR, Chocolatey), so it gets one retry.
       - name: Download built assets
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: build-*
+          merge-multiple: true
+
+      - name: Wait before retrying the download
+        if: steps.download.outcome == 'failure'
+        run: sleep 30
+
+      - name: Download built assets (retry)
+        if: steps.download.outcome == 'failure'
         uses: actions/download-artifact@v4
         with:
           path: artifacts
