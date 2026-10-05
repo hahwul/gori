@@ -24,13 +24,13 @@ on:
       # landing without the regeneration); this line covers the other direction —
       # an edit to the generated file alone, which would otherwise merge with the
       # job that reads it never waking up.
-      - nix/shards.nix
+      - packaging/nix/shards.nix
       # Read by a spec, not just rendered: `spec/mcp/catalogue_size_spec.cr` checks the
       # MCP guide's catalogue table against the build (#1137). A docs-only edit to a row
       # would otherwise merge unchecked, and fail the next unrelated `.cr` PR instead.
       - docs/content/guide/mcp.md
       - docs/content/guide/mcp.ko.md
-      # `docker/Dockerfile` is deliberately absent: nothing in this workflow
+      # `packaging/docker/Dockerfile` is deliberately absent: nothing in this workflow
       # builds the image any more (see the note under `tests`), so listing it
       # would only wake the Crystal build and the spec matrix to test nothing
       # that changed.
@@ -69,9 +69,9 @@ jobs:
       - uses: crystal-lang/install-crystal@v1
         with:
           crystal: 1.21.0
-      - name: Check nix/shards.nix against shard.lock
-        # The Nix flake builds from `nix/shards.nix`, which crystal2nix generates from
-        # shard.lock (`just nix-shards`). Nothing forced the regeneration, and skipping
+      - name: Check packaging/nix/shards.nix against shard.lock
+        # The Nix flake builds from `packaging/nix/shards.nix`, which crystal2nix generates
+        # from shard.lock (`just nix-shards`). Nothing forced the regeneration, and skipping
         # it fails silently in the worst way: the flake goes on linking the OLD
         # revisions and `nix build` stays green, so the packaged binary stops matching
         # the tree that produced it.
@@ -359,7 +359,7 @@ jobs:
         run: |
           mapfile -t files < <(scripts/spec_shard.sh "${{ matrix.shard }}" 4)
           crystal spec --link-flags "-Wl,--no-export-dynamic" "${files[@]}"
-# No `build-docker` job here. It used to build docker/Dockerfile for amd64 and
+# No `build-docker` job here. It used to build packaging/docker/Dockerfile for amd64 and
 # arm64 on every PR, and those two builds — each compiling a static Crystal
 # binary from source, the arm64 one on a native runner because QEMU is far too
 # slow for it — dominated PR wall-clock while catching almost nothing: the

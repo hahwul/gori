@@ -24,7 +24,7 @@ force_full=0
 # four runners.
 while IFS= read -r f; do
   case "$f" in
-    .github/workflows/ci.yml|shard.yml|shard.lock|nix/shards.nix|\
+    .github/workflows/ci.yml|shard.yml|shard.lock|packaging/nix/shards.nix|\
     scripts/ci_test_scope.sh|scripts/spec_for_changes.sh|scripts/spec_shard.sh)
       force_full=1
       ;;

@@ -86,8 +86,8 @@
           nativeLibs = with pkgs; [ brotli zstd sqlite gmp ];
 
           # `lib/` and `bin/` are shards' working dirs: buildCrystalPackage populates
-          # `lib/` itself from nix/shards.nix, so a checkout that already ran `shards
-          # install` must not leak its copy into the sandbox. `docs/` is the website
+          # `lib/` itself from packaging/nix/shards.nix, so a checkout that already ran
+          # `shards install` must not leak its copy into the sandbox. `docs/` is the website
           # and is never compiled — dropping it keeps doc edits from busting the
           # build's input hash.
           src = lib.cleanSourceWith {
@@ -105,10 +105,10 @@
           inherit src;
 
           # `crystal` (not `shards`) as the builder: `lib/` is already materialised
-          # from nix/shards.nix during configurePhase, so going through shards would
-          # only add a dependency resolution step that the sandbox has no network for.
+          # from packaging/nix/shards.nix during configurePhase, so going through shards
+          # would only add a dependency resolution step that the sandbox has no network for.
           format = "crystal";
-          shardsFile = ./nix/shards.nix;
+          shardsFile = ./packaging/nix/shards.nix;
 
           crystalBinaries.gori.src = "src/main.cr";
           # Deliberately NO `-Dpreview_mt`: Store, Fuzz::Engine, Miner::Engine and
@@ -185,7 +185,7 @@
           inputsFrom = [ gori ];
           # `shards` is absent from a format = "crystal" build; the dev loop needs it,
           # plus `just` for the task runner and `crystal2nix` to regenerate
-          # nix/shards.nix whenever shard.lock moves.
+          # packaging/nix/shards.nix whenever shard.lock moves.
           nativeBuildInputs = with pkgs; [ shards crystal2nix just git ];
 
           shellHook = ''

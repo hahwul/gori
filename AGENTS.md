@@ -212,12 +212,13 @@ key grammar, the 2026-09-25 #1274 entries and the 2026-09-26 #1295 entries).
 | Proxy benchmark | `just benchmark` |
 | Seed a demo project | `just seed-demo` (`scripts/seed_demo.cr`) |
 | Version consistency | `just vc` |
-| nix/shards.nix drift | `just nix-shards-check` (`scripts/nix_shards_check.cr`) |
+| packaging/nix/shards.nix drift | `just nix-shards-check` (`scripts/nix_shards_check.cr`) |
 
 What CI gates, and what it does not:
 
 - **Gated:** `shards build`, `crystal spec`, `crystal tool format --check src spec bench scripts`,
-  `scripts/bench_check.sh`, and `scripts/nix_shards_check.cr` (nix/shards.nix against shard.lock).
+  `scripts/bench_check.sh`, and `scripts/nix_shards_check.cr` (packaging/nix/shards.nix
+  against shard.lock).
   Format, bench and the shards gate are real gates — `just test` touches none of them, so a green
   suite is not a green CI.
 - **Gated as a diff, on pull requests:** ameba. The full run is not a gate — it carries a
@@ -251,6 +252,11 @@ subsystems at once and so mirrors no single file (`layering_spec.cr`, `send_seam
 | `scope.cr`, `outbound.cr` | scope model and the active-traffic chokepoint |
 | `ql.cr`, `filter_ast.cr` | the query language behind every filter |
 | one dir per tool | `repeater/`, `fuzz/`, `miner/`, `discover/`, `sequencer/`, `probe/`, `oast/`, `decoder/`, `import/`, `jwt/` |
+
+Outside `src/`, distribution recipes live under `packaging/` (`aur/`, `chocolatey/`, `docker/`,
+`nix/shards.nix`). Two stay at the root because their tool only looks there: `flake.nix` +
+`flake.lock` (a flake must sit at the repo root) and `snap/snapcraft.yaml` (snapcraft finds its
+project file only inside the directory it packs).
 
 ## House rules
 
@@ -309,7 +315,7 @@ type(scope): what changed, imperative (#123)
 - A user-visible change gets its CHANGELOG line, in the shape above.
 - If your change makes a `DESIGN.md` section wrong, fix that section in the same PR, and
   append to the §7 decision log instead of quietly widening a principle to fit.
-- Changing `shard.lock` means regenerating `nix/shards.nix` (`just nix-shards`) in the same commit. CI enforces it (`just nix-shards-check`); skipping it is otherwise silent, since the flake keeps building the old revisions.
+- Changing `shard.lock` means regenerating `packaging/nix/shards.nix` (`just nix-shards`) in the same commit. CI enforces it (`just nix-shards-check`); skipping it is otherwise silent, since the flake keeps building the old revisions.
 
 ## Traps
 

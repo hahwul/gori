@@ -24,6 +24,9 @@ jobs:
     steps:
       - name: Check out Git repository
         uses: actions/checkout@v6
+      # snap/ stays at the repo root, not under packaging/: snapcraft only finds its
+      # project file at fixed paths inside the project dir it packs (snap/, root,
+      # build-aux/snap/), and action-build's `path` moves the whole project dir.
       - uses: canonical/action-build@v1
         id: build
       - name: Smoke-test the built snap
