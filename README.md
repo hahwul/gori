@@ -76,9 +76,17 @@ surface limits explicitly.
 curl -fsSL https://gori.hahwul.com/install.sh | bash
 ```
 
-Then update later with `gori update` (self-update for binary installs; package-manager guidance for Homebrew / Snap / AUR).
+Then update later with `gori update` (self-update for binary installs; package-manager guidance for Chocolatey / Homebrew / Snap / AUR).
 
 On Windows, download `gori-windows-x86_64.exe` from [Releases](https://github.com/hahwul/gori/releases/latest), rename it to `gori.exe` and put it on your `PATH`.
+
+### Chocolatey
+
+Starting with the release after v0.7.1, install the Windows x86_64 package with:
+
+```powershell
+choco install gori
+```
 
 ### Homebrew
 

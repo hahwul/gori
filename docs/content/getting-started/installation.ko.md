@@ -1,6 +1,6 @@
 +++
 title = "gori 설치"
-description = "curl, Homebrew, AUR, Snap, Nix, Docker, 사전 빌드 바이너리(Linux, macOS, Windows), 또는 소스에서 gori를 설치합니다."
+description = "curl, Chocolatey, Homebrew, AUR, Snap, Nix, Docker, 사전 빌드 바이너리(Linux, macOS, Windows), 또는 소스에서 gori를 설치합니다."
 weight = 10
 +++
 
@@ -14,7 +14,7 @@ macOS와 Linux용 한 줄 명령입니다. OS/아키텍처를 감지해 알맞�
 curl -fsSL https://gori.hahwul.com/install.sh | bash
 ```
 
-`/usr/local`에 쓸 수 있으면 그 아래에, 아니면 `~/.local`에 설치합니다. `GORI_INSTALL_PREFIX`로 재정의할 수 있습니다. 설치 후에는 `gori update`가 바이너리를 스스로 업데이트합니다(설치를 담당하는 채널이 Homebrew / Snap / AUR인 경우 그쪽으로 안내합니다).
+`/usr/local`에 쓸 수 있으면 그 아래에, 아니면 `~/.local`에 설치합니다. `GORI_INSTALL_PREFIX`로 재정의할 수 있습니다. 설치 후에는 `gori update`가 바이너리를 스스로 업데이트합니다(설치를 담당하는 채널이 Chocolatey / Homebrew / Snap / AUR인 경우 그쪽으로 안내합니다).
 
 ### GitHub rate limit에 걸린 경우 {#rate-limit}
 
@@ -70,6 +70,16 @@ brew install gori
 ```
 
 macOS 보틀은 링크된 모든 dylib를 바이너리 옆에 함께 번들한 자립형 tarball이고, Linux 보틀은 정적 빌드입니다. 어느 쪽도 추가 Homebrew 의존성을 끌어오지 않습니다.
+
+## Chocolatey (Windows) {#chocolatey}
+
+Chocolatey 커뮤니티 저장소에서 설치합니다:
+
+```powershell
+choco install gori
+```
+
+Windows x86_64 릴리스 바이너리가 제공되는 v0.7.1 다음 릴리스부터 Chocolatey 패키지를 사용할 수 있습니다. `gori update`는 Chocolatey 설치를 인식해 `choco upgrade gori -y`를 안내하며, `choco`가 `PATH`에 있으면 `gori update --exec`가 실행합니다.
 
 ## Arch Linux (AUR) {#arch-linux-aur}
 
