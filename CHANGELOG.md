@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Cookie tools: a Rack session cookie copied off the wire (`%3D`-escaped) now decodes, verifies and cracks, and a forged or re-signed one escapes `+`, which Rack would otherwise read as a space
 - CLI: `evidence show`, `evidence list` and `evidence freeze` name the error a frozen copy stored beside its status, where a cut-short response read as a clean `→ 200`
 - Retest: a `json:` check on an integer past 2^53 compares its digits, where two different 64-bit IDs could pass as equal, and a body or JSON check on a response whose body was cut short is inconclusive instead of judged on the partial body
 - Import: a HAR entry with `postData: null`, `content: null` or a `null` header row is imported instead of dropped, and multipart `postData.params` are framed with the request's boundary instead of being rebuilt as a form body

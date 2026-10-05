@@ -239,6 +239,19 @@ describe Gori::Cookie do
       Gori::Cookie::Rack.forge(value, SECRET).should eq(RACK) # same value+secret → same cookie
     end
 
+    it "verifies, cracks and re-signs the percent-escaped form Rack puts on the wire" do
+      wire = RACK.sub("==--", "%3D%3D--")
+      Gori::Cookie.verify(wire, SECRET).should be_true
+      Gori::Cookie.crack(wire, ["x", SECRET]).should eq(SECRET)
+      Gori::Cookie::Rack.resign(wire, SECRET).should eq(wire)
+      JSON.parse(Gori::Cookie.decode_json(wire))["value_size"].as_i.should eq(28)
+    end
+
+    it "escapes a forged value's `+`, which Rack would read back as a space" do
+      Gori::Cookie::Rack.forge("a+b=", SECRET).should start_with("a%2Bb=--")
+      Gori::Cookie.verify(Gori::Cookie::Rack.forge("a+b=", SECRET), SECRET).should be_true
+    end
+
     # A cookie is bytes lifted verbatim off the wire, so the tail after "--" need not be valid
     # UTF-8. The hex-tail test used to be a Regex, and PCRE2 RAISES on an invalid byte instead
     # of not matching — `gori run cookie` died with a Crystal backtrace, and `verify`'s "false
