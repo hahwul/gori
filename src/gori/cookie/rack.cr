@@ -64,10 +64,11 @@ module Gori
         value.includes?('%') ? {URI.decode(value), true} : {value, false}
       end
 
-      # The value as a Cookie header must carry it: Rack's unescape reads a raw `+` as a space,
-      # so it is always escaped, and an input that arrived fully escaped is written back so.
+      # The value as a Cookie header must carry it. Rack's unescape reads a raw `+` as a space,
+      # so a value holding one is written escaped as Rack itself writes it, and so is one that
+      # arrived escaped — one rule, so a re-sign of a forged cookie gives back the same bytes.
       private def wire(data : String, escaped : Bool) : String
-        escaped ? URI.encode_www_form(data) : data.gsub('+', "%2B")
+        escaped || data.includes?('+') ? URI.encode_www_form(data) : data
       end
 
       # signature = lowercase hex of HMAC-SHA1(secret, data).

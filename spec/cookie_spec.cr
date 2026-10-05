@@ -248,8 +248,10 @@ describe Gori::Cookie do
     end
 
     it "escapes a forged value's `+`, which Rack would read back as a space" do
-      Gori::Cookie::Rack.forge("a+b=", SECRET).should start_with("a%2Bb=--")
-      Gori::Cookie.verify(Gori::Cookie::Rack.forge("a+b=", SECRET), SECRET).should be_true
+      forged = Gori::Cookie::Rack.forge("a+b/c=", SECRET)
+      forged.should start_with("a%2Bb%2Fc%3D--")
+      Gori::Cookie.verify(forged, SECRET).should be_true
+      Gori::Cookie::Rack.resign(forged, SECRET).should eq(forged)
     end
 
     # A cookie is bytes lifted verbatim off the wire, so the tail after "--" need not be valid
