@@ -53,12 +53,15 @@ module Gori
         raise CookieError.new("not a Rack cookie (signature is not a 40-char hex HMAC-SHA1)") unless hex_sig?(sig)
         # Rack writes the value through `Utils.escape` (`=` → %3D, `+` → %2B, `/` → %2F) and
         # unescapes it before checking the HMAC, so a cookie lifted off the wire is signed over
-        # its UNESCAPED text. Base64 never holds a `%`, so one marks the escaped form.
-        data = s[0...idx]
-        escaped = data.includes?('%')
-        data = URI.decode(data) if escaped
+        # its UNESCAPED text.
+        data, escaped = unescape(s[0...idx])
         # `downcase` is safe here only because the tail is now proven pure ASCII hex.
         Parsed.new(data, sig.downcase, escaped)
+      end
+
+      # Base64 never holds a `%`, so one marks the escaped wire form.
+      private def unescape(value : String) : {String, Bool}
+        value.includes?('%') ? {URI.decode(value), true} : {value, false}
       end
 
       # The value as a Cookie header must carry it: Rack's unescape reads a raw `+` as a space,
@@ -94,9 +97,7 @@ module Gori
       # Mint a cookie from an opaque base64 `data` value + secret. `data` is the marshalled
       # session, base64'd — the operator supplies it (from a decoded cookie, possibly edited).
       def forge(data : String, secret : String) : String
-        value = data.strip
-        escaped = value.includes?('%')
-        value = URI.decode(value) if escaped
+        value, escaped = unescape(data.strip)
         "#{wire(value, escaped)}--#{compute_sig(value, secret)}"
       end
 

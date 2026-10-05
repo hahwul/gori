@@ -99,12 +99,7 @@ module Gori
 
       # The `request_group` (folder) resources by id, for `folder_vars` to walk.
       private def self.request_groups(resources : Array(JSON::Any)) : Hash(String, Hash(String, JSON::Any))
-        groups = {} of String => Hash(String, JSON::Any)
-        resources.each do |res|
-          h = res.as_h?
-          groups[h["_id"]?.to_s] = h if h && h["_type"]?.to_s == "request_group"
-        end
-        groups
+        resources.compact_map { |r| (h = r.as_h?) && h["_type"]?.to_s == "request_group" ? {h["_id"]?.to_s, h} : nil }.to_h
       end
 
       # Insomnia layers each enclosing folder's `environment` over the workspace's, outermost
