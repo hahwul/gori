@@ -32,7 +32,7 @@ Tier 2 platforms can be thought of as "works, with known gaps". Each one builds 
 |--------|---------------|----------------|-----------|
 | Windows x86_64 | `gori-v*-windows-x86_64.exe` (static) | Chocolatey | On every pull request that touches Crystal code: a native build, a smoke test that proxies an HTTP and an HTTPS request and reads them back from the project, the TUI driven under a real Windows pseudo-console (ConPTY), and the spec suite, one file at a time |
 
-Release binaries for Windows start with the first release after v0.7.1.
+Release binaries for Windows start with v0.8.0.
 
 ### Windows known gaps {#windows-gaps}
 

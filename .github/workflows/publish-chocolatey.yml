@@ -70,7 +70,7 @@ jobs:
           }
           $release = $releaseJson | ConvertFrom-Json
           if ($release.assets.name -notcontains $assetName) {
-            throw "Release $releaseTag is missing required Windows asset $assetName. Chocolatey publishing starts with releases after v0.7.1."
+            throw "Release $releaseTag is missing required Windows asset $assetName. Chocolatey publishing starts with v0.8.0."
           }
 
           New-Item -ItemType Directory -Force -Path out | Out-Null
