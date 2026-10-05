@@ -54,6 +54,7 @@ module Gori
     enum Channel
       Homebrew
       Snap
+      Chocolatey
       Pacman
       Deb
       Rpm
@@ -905,7 +906,8 @@ module Gori
       path = exe_path || resolve_executable_path
       resolved_owner = owner || (system_package_path?(path) ? probe_package_owner(path) : OwnerResult::None)
       resolved_family = os_family || load_os_family
-      channel = detect_channel(path, owner: resolved_owner, os_family: resolved_family)
+      channel = detect_channel(path, owner: resolved_owner, os_family: resolved_family,
+        chocolatey_root: ENV["ChocolateyInstall"]?)
 
       io.puts "gori #{display_version(VERSION)}"
       io.puts "install channel: #{channel.to_s.downcase} (#{path})"

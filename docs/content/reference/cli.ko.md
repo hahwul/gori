@@ -19,7 +19,7 @@ gori [command] [options]
 | `settings` | `settings.json` 표시 또는 편집 |
 | `wizard` | 대화형 최초 실행 설정 |
 | `tutorial` | 가이드형 TUI 투어 (탐색, space 메뉴, 팔레트, 편집 모드, 프록시와 CA, 캡처, 인터셉트) |
-| `update` | 채널 인식 자체 업데이트 (바이너리 / Homebrew / Snap / AUR / Nix) |
+| `update` | 채널 인식 자체 업데이트 (바이너리 / Chocolatey / Homebrew / Snap / AUR / Nix) |
 
 전역 플래그: `-v` / `-V` / `--version`, `-h` / `--help`, 그리고 `--config PATH`(이번 실행에만 쓸 설정 파일, 아래 [`--config PATH`](#config-flag) 참고).
 
@@ -2065,6 +2065,7 @@ gori update --exec   # Homebrew/Snap: run the package-manager command
 | 독립 실행 바이너리 (curl 설치, 수동 다운로드, 워크스페이스 빌드, 또는 어떤 패키지 관리자도 소유하지 않은 `/usr/bin`으로의 수동 복사) | 이 OS/arch에 맞는 최신 GitHub 릴리스 자산을 내려받아 바이너리를 교체 (macOS는 전용 디렉터리의 형제 `lib/`도 갱신) |
 | Homebrew | `brew upgrade gori` 출력 (`--exec`로 실행; brew 관리 경로는 절대 덮어쓰지 않음) |
 | Snap | `snap refresh gori` 출력 (`--exec`로 실행) |
+| Chocolatey | `choco upgrade gori -y` 출력; Windows는 실행 중인 `gori.exe`를 교체하지 않으므로 gori를 닫고 관리자 셸에서 실행 |
 | pacman / AUR | `yay` / `paru` / `pacman` 안내 출력 |
 | deb (dpkg) | `apt` 업그레이드 안내 출력 |
 | rpm | `dnf` / `yum` / `zypper` 안내 출력 |

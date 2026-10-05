@@ -6,7 +6,7 @@ module Gori::Update
   # Channel detection (pure + injectable probes)
   # ---------------------------------------------------------------------------
 
-  # Classify an install from the executable path plus optional ownership/OS hints.
+  # Classify an install from the executable path plus package ownership, OS, and Chocolatey root hints.
   #
   # The Nix store is checked first: it is the one root that is *immutable*, so a
   # self-update there cannot even be attempted (and `~/.nix-profile/bin/gori` is a
@@ -18,10 +18,12 @@ module Gori::Update
   # - unprobed → fall back to os-release family for package guidance, else Binary
   def self.detect_channel(exe_path : String, *,
                           owner : OwnerResult = OwnerResult::Unknown,
-                          os_family : OsFamily = OsFamily::Unknown) : Channel
+                          os_family : OsFamily = OsFamily::Unknown,
+                          chocolatey_root : String? = nil) : Channel
     return Channel::Nix if nix_path?(exe_path)
     return Channel::Snap if snap_path?(exe_path)
     return Channel::Homebrew if homebrew_path?(exe_path)
+    return Channel::Chocolatey if chocolatey_path?(exe_path, chocolatey_root)
 
     if system_package_path?(exe_path)
       return channel_for_system_bin(owner, os_family)
@@ -66,6 +68,20 @@ module Gori::Update
 
   def self.snap_path?(path : String) : Bool
     path.starts_with?("/snap/") || path.includes?("/snap/gori/")
+  end
+
+  def self.chocolatey_path?(path : String, root : String? = nil) : Bool
+    normalized = path.gsub('\\', '/').downcase
+    roots = [] of String
+    roots << root if root && !root.empty?
+    roots << "C:\\ProgramData\\chocolatey"
+
+    roots.uniq.any? do |candidate|
+      normalized_root = candidate.gsub('\\', '/').downcase
+      normalized_root = normalized_root[0...-1] if normalized_root.ends_with?('/')
+      normalized.starts_with?("#{normalized_root}/lib/gori/") ||
+        normalized == "#{normalized_root}/bin/gori.exe"
+    end
   end
 
   # Covers every Nix entry point — `nix profile`, `nix run`, NixOS/home-manager —
@@ -203,6 +219,13 @@ module Gori::Update
         message: "Snap install detected. Refresh with the package manager:",
         command: "snap refresh gori",
       }
+    when .chocolatey?
+      # Print-only: Windows will not replace a running gori.exe, and Chocolatey's lib dir needs
+      # an elevated shell, so `--exec` from inside gori could only fail.
+      {
+        message: "Chocolatey install detected. Close gori, then upgrade from an elevated shell:\n  choco upgrade gori -y",
+        command: nil,
+      }
     when .pacman?
       {
         message: "pacman/AUR install detected. Upgrade with your AUR helper (or pacman if packaged in a repo):\n  yay -Syu gori\n  paru -Syu gori\n  # or: sudo pacman -Syu gori",
@@ -234,6 +257,6 @@ module Gori::Update
   end
 
   def self.package_managed?(channel : Channel) : Bool
-    channel.homebrew? || channel.snap? || channel.pacman? || channel.deb? || channel.rpm? || channel.nix?
+    channel.homebrew? || channel.snap? || channel.chocolatey? || channel.pacman? || channel.deb? || channel.rpm? || channel.nix?
   end
 end

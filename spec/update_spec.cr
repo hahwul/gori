@@ -127,6 +127,19 @@ describe Gori::Update do
       Gori::Update.detect_channel("/snap/bin/gori").should eq(Gori::Update::Channel::Snap)
     end
 
+    it "detects Chocolatey package binaries and shims" do
+      Gori::Update.detect_channel("C:\\ProgramData\\chocolatey\\lib\\gori\\tools\\gori.exe")
+        .should eq(Gori::Update::Channel::Chocolatey)
+      Gori::Update.detect_channel("c:/programdata/chocolatey/bin/gori.exe")
+        .should eq(Gori::Update::Channel::Chocolatey)
+      Gori::Update.detect_channel("D:\\choco\\lib\\gori\\tools\\gori.exe", chocolatey_root: "D:\\choco")
+        .should eq(Gori::Update::Channel::Chocolatey)
+      Gori::Update.detect_channel("D:/choco/bin/gori.exe", chocolatey_root: "D:/choco")
+        .should eq(Gori::Update::Channel::Chocolatey)
+      Gori::Update.detect_channel("C:\\ProgramData\\chocolatey\\lib\\other\\tools\\gori.exe")
+        .should eq(Gori::Update::Channel::Binary)
+    end
+
     it "detects Nix store paths" do
       Gori::Update.detect_channel("/nix/store/0fhkwk15n3ya0llfr0754awcldpz4x54-gori-0.1.3/bin/gori")
         .should eq(Gori::Update::Channel::Nix)
@@ -483,6 +496,14 @@ describe Gori::Update do
       action[:message].should match(/Snap/i)
     end
 
+    it "returns Chocolatey upgrade guidance" do
+      action = Gori::Update.package_action(Gori::Update::Channel::Chocolatey)
+      # Print-only: a running gori.exe cannot replace itself through choco.
+      action[:command].should be_nil
+      action[:message].should contain("choco upgrade gori -y")
+      action[:message].should contain("elevated")
+    end
+
     it "returns pacman/AUR helper guidance without a single auto-run command" do
       action = Gori::Update.package_action(Gori::Update::Channel::Pacman)
       action[:command].should be_nil
@@ -535,6 +556,24 @@ describe Gori::Update do
       out = io.to_s
       out.should contain("install channel: snap")
       out.should contain("snap refresh gori")
+    end
+
+    it "prints Chocolatey upgrade guidance for a package-managed Windows binary" do
+      io = IO::Memory.new
+      Gori::Update.run(io, io,
+        exe_path: "C:\\ProgramData\\chocolatey\\lib\\gori\\tools\\gori.exe")
+      out = io.to_s
+      out.should contain("install channel: chocolatey")
+      out.should contain("choco upgrade gori -y")
+      out.should_not contain("--exec")
+    end
+
+    it "uses ChocolateyInstall when the package manager is installed outside its default path" do
+      with_env({"ChocolateyInstall" => "D:\\choco"}) do
+        io = IO::Memory.new
+        Gori::Update.run(io, io, exe_path: "D:/choco/bin/gori.exe")
+        io.to_s.should contain("install channel: chocolatey")
+      end
     end
 
     it "prints pacman guidance when ownership is pacman" do

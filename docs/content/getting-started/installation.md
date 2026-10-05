@@ -1,6 +1,6 @@
 +++
 title = "Install gori"
-description = "Install gori via curl, Homebrew, the AUR, Snap, Nix, Docker, a pre-built binary (Linux, macOS, Windows), or from source."
+description = "Install gori via curl, Chocolatey, Homebrew, the AUR, Snap, Nix, Docker, a pre-built binary (Linux, macOS, Windows), or from source."
 weight = 10
 +++
 
@@ -14,7 +14,7 @@ macOS and Linux one-liner. Detects OS/arch, downloads the matching [GitHub Relea
 curl -fsSL https://gori.hahwul.com/install.sh | bash
 ```
 
-Installs under `/usr/local` when writable, otherwise `~/.local`. Override with `GORI_INSTALL_PREFIX`. After install, `gori update` self-updates the binary (or guides you through Homebrew / Snap / AUR when those channels own the install).
+Installs under `/usr/local` when writable, otherwise `~/.local`. Override with `GORI_INSTALL_PREFIX`. After install, `gori update` self-updates the binary (or guides you through Chocolatey / Homebrew / Snap / AUR when those channels own the install).
 
 ### If you hit a GitHub rate limit
 
@@ -70,6 +70,16 @@ brew install gori
 ```
 
 The macOS bottle is a self-contained tarball with every linked dylib bundled next to the binary, and the Linux bottle is a static build. Neither pulls extra Homebrew dependencies.
+
+## Chocolatey (Windows)
+
+Install gori from the Chocolatey community repository:
+
+```powershell
+choco install gori
+```
+
+The package is published from the first release after v0.7.1, when gori's Windows x86_64 binary is available; a new package's first version is held for Chocolatey's community moderation before it can be installed. `gori update` recognizes a Chocolatey install and prints `choco upgrade gori -y`. Run that from an elevated shell with gori closed, since Windows will not replace a running `gori.exe`.
 
 ## Arch Linux (AUR)
 

@@ -510,6 +510,7 @@ module Gori
           puts "  • standalone binary  — download the latest GitHub release asset"
           puts "  • Homebrew           — print (or --exec) brew upgrade gori"
           puts "  • Snap               — print (or --exec) snap refresh gori"
+          puts "  • Chocolatey         — print choco upgrade gori -y (run it with gori closed)"
           puts "  • pacman/AUR         — print yay/paru/pacman guidance"
           puts "  • deb (dpkg)         — print apt upgrade guidance"
           puts "  • rpm                — print dnf/yum/zypper guidance"
