@@ -411,11 +411,29 @@ module Gori
         p["required"]?.try(&.as_bool?) == true
       end
 
+      # The author's own value beats a synthesized one, as it does for a body: the parameter's
+      # `example`/`examples` (Swagger 2: its `default`/`enum`), then its schema's. A `sort=sort`
+      # where the spec says `enum: [asc, desc]` is a template the server answers with a 400.
       private def self.sample_value(spec : JSON::Any, p : JSON::Any) : String
         schema_node = p["schema"]?
         schema = schema_node ? resolve_ref(spec, schema_node).as_h? : nil
+        given = p.as_h?.try { |param| media_example(spec, param) || given_sample(param) }
+        given ||= schema.try { |h| given_sample(h) }
+        if text = given.try { |g| param_text(g) }
+          return text
+        end
         type = schema.try { |h| h["type"]?.try(&.as_s?) } || p["type"]?.try(&.as_s?)
         scalar_sample(type, p["name"]?.to_s)
+      end
+
+      # A given value as the text a path, query or header carries: a scalar as written, an
+      # array's first member. An object has no single spelling, so it is not one.
+      private def self.param_text(value : JSON::Any) : String?
+        value = (list = value.as_a?) ? list.first? : value
+        case raw = value.try(&.raw)
+        when String               then raw
+        when Int64, Float64, Bool then raw.to_s
+        end
       end
 
       private def self.scalar_sample(type : String?, name : String) : String

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Import: an OpenAPI or Swagger path, query or header parameter takes its `example`, `examples`, `default` or first `enum` value, where gori sent `sort=sort` or `id=1` whatever the spec said
 - Sitemap export: with `--examples`, a query, path or form value whose schema is `integer`, `number` or `boolean` is written as that type instead of a string, which OpenAPI validators flagged, and an export that left out only gori's own requests names `--include-gori`
 - Decoder: `url-encode` takes the binary that `url-decode` or a hex/base64 step produces (`%FF` round-trips), where it refused anything that was not UTF-8 text
 - Windows: gori now builds and runs natively on Windows (x86_64), ships as a self-contained `.exe` that `gori update` can replace in place, and is published to Chocolatey on each release after v0.7.1; `gori run shell --print` gains a PowerShell syntax, the default there; a Platform Support docs page lists each platform's support tier and the known gaps on Windows (#1510)
