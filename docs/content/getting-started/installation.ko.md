@@ -79,7 +79,7 @@ Chocolatey 커뮤니티 저장소에서 설치합니다:
 choco install gori
 ```
 
-Windows x86_64 릴리스 바이너리가 제공되는 v0.7.1 다음 릴리스부터 Chocolatey 패키지를 사용할 수 있습니다. `gori update`는 Chocolatey 설치를 인식해 `choco upgrade gori -y`를 안내하며, `choco`가 `PATH`에 있으면 `gori update --exec`가 실행합니다.
+패키지는 Windows x86_64 바이너리가 제공되는 v0.7.1 다음 릴리스부터 게시되며, 처음 올라가는 버전은 Chocolatey 커뮤니티 검수를 통과한 뒤에 설치할 수 있습니다. `gori update`는 Chocolatey 설치를 인식해 `choco upgrade gori -y`를 안내합니다. Windows는 실행 중인 `gori.exe`를 교체하지 않으므로, gori를 닫고 관리자 셸에서 실행하세요.
 
 ## Arch Linux (AUR) {#arch-linux-aur}
 

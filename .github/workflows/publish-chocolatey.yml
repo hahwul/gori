@@ -138,8 +138,18 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:CHOCOLATEY_KEY)) {
             throw 'CHOCOLATEY_KEY is not configured.'
           }
-          choco push "gori.$env:VERSION.nupkg" --source https://push.chocolatey.org/ --api-key "$env:CHOCOLATEY_KEY"
-          if ($LASTEXITCODE -ne 0) { throw 'Chocolatey package push failed.' }
+          $out = choco push "gori.$env:VERSION.nupkg" --source https://push.chocolatey.org/ --api-key "$env:CHOCOLATEY_KEY" 2>&1
+          $code = $LASTEXITCODE
+          $text = $out -join "`n"
+          Write-Host $text
+          if ($code -ne 0) {
+            # A re-run of a release already pushed is not a failure: the feed refuses a version twice.
+            if ($text -match '409|already exists|Conflict') {
+              Write-Host "gori $env:VERSION is already on Chocolatey; nothing to push."
+            } else {
+              throw 'Chocolatey package push failed.'
+            }
+          }
 
       - name: Report dry run
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == true }}

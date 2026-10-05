@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Windows: gori now builds and runs natively on Windows (x86_64), ships as a self-contained `.exe` that `gori update` can replace in place, and publishes to Chocolatey on each release after v0.7.1; `gori run shell --print` gains a PowerShell syntax, the default there (#1510)
+- Windows: gori now builds and runs natively on Windows (x86_64), ships as a self-contained `.exe` that `gori update` can replace in place, and is published to Chocolatey on each release after v0.7.1; `gori run shell --print` gains a PowerShell syntax, the default there (#1510)
 - TUI: a project now opens on the History tab, where traffic arrives and the first-run steps live, instead of the Project tab's description; tab order is unchanged (#1524)
 - Repeater: the pane badges say `HTTP/1.1`, `TLS default` and `AUTO-LEN` instead of `h1`, `tls` and `CL` (`CL` stays where the border is too short), and Help describes the TLS fingerprint toggle (#1523)
 - TUI: the History, Sitemap, Probe, Issues and Intercept filter bars drop whole examples on a narrow pane instead of cutting one mid-word, keeping field examples like `host:` over the operators, and History's default view chip reads `history+repeater` (#1522)

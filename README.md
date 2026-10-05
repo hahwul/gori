@@ -82,7 +82,7 @@ On Windows, download `gori-windows-x86_64.exe` from [Releases](https://github.co
 
 ### Chocolatey
 
-Starting with the release after v0.7.1, install the Windows x86_64 package with:
+Starting with the release after v0.7.1 (once the first version clears Chocolatey's moderation), install the Windows x86_64 package with:
 
 ```powershell
 choco install gori

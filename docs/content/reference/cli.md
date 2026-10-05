@@ -19,7 +19,7 @@ gori [command] [options]
 | `settings` | Show or edit `settings.json` |
 | `wizard` | Interactive first-run setup |
 | `tutorial` | Guided TUI tour (navigation, space menu, palette, edit mode, proxy & CA, capture, intercept) |
-| `update` | Channel-aware self-update (binary / Homebrew / Snap / AUR / Nix) |
+| `update` | Channel-aware self-update (binary / Chocolatey / Homebrew / Snap / AUR / Nix) |
 
 Global flags: `-v` / `-V` / `--version`, `-h` / `--help`, and `--config PATH` (a settings file for one run; see [`--config PATH`](#config-path) below).
 
@@ -2073,6 +2073,7 @@ Detects how this `gori` binary was installed and updates accordingly:
 | Standalone binary (curl install, manual download, workspace build, or a manual copy into `/usr/bin` that no package manager owns) | Downloads the latest GitHub release asset for this OS/arch and replaces the binary (macOS also refreshes sibling `lib/` in a dedicated dir) |
 | Homebrew | Prints `brew upgrade gori` (use `--exec` to run it; never overwrites the brew-managed path) |
 | Snap | Prints `snap refresh gori` (use `--exec` to run it) |
+| Chocolatey | Prints `choco upgrade gori -y`; run it from an elevated shell with gori closed, since Windows will not replace a running `gori.exe` |
 | pacman / AUR | Prints `yay` / `paru` / `pacman` guidance |
 | deb (dpkg) | Prints `apt` upgrade guidance |
 | rpm | Prints `dnf` / `yum` / `zypper` guidance |

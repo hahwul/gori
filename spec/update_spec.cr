@@ -498,8 +498,10 @@ describe Gori::Update do
 
     it "returns Chocolatey upgrade guidance" do
       action = Gori::Update.package_action(Gori::Update::Channel::Chocolatey)
-      action[:command].should eq("choco upgrade gori -y")
-      action[:message].should match(/Chocolatey/i)
+      # Print-only: a running gori.exe cannot replace itself through choco.
+      action[:command].should be_nil
+      action[:message].should contain("choco upgrade gori -y")
+      action[:message].should contain("elevated")
     end
 
     it "returns pacman/AUR helper guidance without a single auto-run command" do
@@ -563,7 +565,7 @@ describe Gori::Update do
       out = io.to_s
       out.should contain("install channel: chocolatey")
       out.should contain("choco upgrade gori -y")
-      out.should contain("Re-run with --exec to run the command above automatically.")
+      out.should_not contain("--exec")
     end
 
     it "uses ChocolateyInstall when the package manager is installed outside its default path" do

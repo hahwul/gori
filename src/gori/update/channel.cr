@@ -80,8 +80,7 @@ module Gori::Update
       normalized_root = candidate.gsub('\\', '/').downcase
       normalized_root = normalized_root[0...-1] if normalized_root.ends_with?('/')
       normalized.starts_with?("#{normalized_root}/lib/gori/") ||
-        normalized == "#{normalized_root}/bin/gori.exe" ||
-        normalized == "#{normalized_root}/bin/gori"
+        normalized == "#{normalized_root}/bin/gori.exe"
     end
   end
 
@@ -221,9 +220,11 @@ module Gori::Update
         command: "snap refresh gori",
       }
     when .chocolatey?
+      # Print-only: Windows will not replace a running gori.exe, and Chocolatey's lib dir needs
+      # an elevated shell, so `--exec` from inside gori could only fail.
       {
-        message: "Chocolatey install detected. Upgrade with the package manager:",
-        command: "choco upgrade gori -y",
+        message: "Chocolatey install detected. Close gori, then upgrade from an elevated shell:\n  choco upgrade gori -y",
+        command: nil,
       }
     when .pacman?
       {

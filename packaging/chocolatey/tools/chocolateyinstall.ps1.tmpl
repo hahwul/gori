@@ -3,5 +3,5 @@ $toolsDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 
 Get-ChocolateyWebFile -PackageName 'gori' `
   -FileFullPath (Join-Path $toolsDir 'gori.exe') `
-  -Url 'https://github.com/hahwul/gori/releases/download/v__VERSION__/gori-v__VERSION__-windows-x86_64.exe' `
-  -Checksum '__SHA256__' -ChecksumType 'sha256'
+  -Url64bit 'https://github.com/hahwul/gori/releases/download/v__VERSION__/gori-v__VERSION__-windows-x86_64.exe' `
+  -Checksum64 '__SHA256__' -ChecksumType64 'sha256'

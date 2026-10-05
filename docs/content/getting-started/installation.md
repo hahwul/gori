@@ -79,7 +79,7 @@ Install gori from the Chocolatey community repository:
 choco install gori
 ```
 
-The Chocolatey package starts with the first release after v0.7.1, when gori's Windows x86_64 release binary is available. `gori update` recognizes Chocolatey installs and prints `choco upgrade gori -y`; `gori update --exec` runs it when `choco` is on `PATH`.
+The package is published from the first release after v0.7.1, when gori's Windows x86_64 binary is available; a new package's first version is held for Chocolatey's community moderation before it can be installed. `gori update` recognizes a Chocolatey install and prints `choco upgrade gori -y`. Run that from an elevated shell with gori closed, since Windows will not replace a running `gori.exe`.
 
 ## Arch Linux (AUR)
 
