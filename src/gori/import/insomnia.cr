@@ -36,11 +36,7 @@ module Gori
         raise Gori::Error.new("Insomnia export has no `resources` array — is this an Insomnia v4 export?") unless resources
 
         vars = environment_table(resources)
-        groups = {} of String => Hash(String, JSON::Any)
-        resources.each do |res|
-          h = res.as_h?
-          groups[h["_id"]?.to_s] = h if h && h["_type"]?.to_s == "request_group"
-        end
+        groups = request_groups(resources)
         now = Time.utc.to_unix * 1_000_000
         pairs = [] of Builder::FlowPair
         missing = Set(String).new
@@ -99,6 +95,16 @@ module Gori
           table[key] = Vars.value_to_s(v)
           v.as_h?.try { |nested| flatten_into(table, nested, key) }
         end
+      end
+
+      # The `request_group` (folder) resources by id, for `folder_vars` to walk.
+      private def self.request_groups(resources : Array(JSON::Any)) : Hash(String, Hash(String, JSON::Any))
+        groups = {} of String => Hash(String, JSON::Any)
+        resources.each do |res|
+          h = res.as_h?
+          groups[h["_id"]?.to_s] = h if h && h["_type"]?.to_s == "request_group"
+        end
+        groups
       end
 
       # Insomnia layers each enclosing folder's `environment` over the workspace's, outermost

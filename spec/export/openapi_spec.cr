@@ -325,7 +325,7 @@ describe Gori::Export::OpenApi do
           req_headers: "Content-Type: application/x-www-form-urlencoded\r\nContent-Length: #{body.bytesize}\r\n")
         post = op(OA.build(store, OA::Options.new(examples: true)).doc, "/t", "post")
         param(post, "id", "query").not_nil!["example"].should eq([1])
-        param(post, "f", "query").not_nil!["example"].should eq(false)
+        param(post, "f", "query").not_nil!["example"].should be_false
         ex = post["requestBody"]["content"]["application/x-www-form-urlencoded"]["example"]
         {ex["n"], ex["on"], ex["ratio"]}.should eq({3, true, 0.5})
       end

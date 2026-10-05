@@ -443,7 +443,7 @@ module Gori
           return {body, false}
         end
         params = node["params"]?.try(&.as_a?).try(&.select(&.as_h?)) || return {nil, false}
-        params.reject! { |p| p["name"]?.to_s.empty? }
+        params.reject!(&.["name"]?.to_s.empty?)
         return {nil, false} if params.empty?
         mime = node["mimeType"]?.to_s
         if mime.downcase.starts_with?("multipart/form-data")
