@@ -1,3 +1,4 @@
+require "big"
 require "json"
 require "./store"
 require "./entity"
@@ -718,9 +719,12 @@ module Gori
       return literal.downcase == "null" if node.raw.nil?
       if i = node.as_i64?
         return true if literal.to_i64? == i
-        # Through a double only below 2^53, where it is exact: past that two different IDs
-        # round to one double and an IDOR retest would PASS against the wrong owner.
-        return true if (f = literal.to_f64?) && f.abs < 9007199254740992.0 && f == i.to_f64
+        # An exact decimal compare, so `1e3` and `1.0` still name 1000 and 1, but nothing past
+        # 2^53 rounds onto a different ID the way a double did (an IDOR retest PASSED against
+        # the wrong owner). The finite-double gate keeps `1e999999999` from building a BigInt.
+        if literal.to_f64?.try(&.finite?) && (d = (BigDecimal.new(literal) rescue nil))
+          return true if d == BigDecimal.new(i)
+        end
         return literal == i.to_s
       end
       if f = node.as_f?

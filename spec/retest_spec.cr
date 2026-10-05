@@ -215,6 +215,7 @@ describe "Gori::Retest.evaluate" do
       RT.evaluate(RT::Assertion.parse(text).as(RT::Assertion), obs(body: body), nil)[0].fail?.should be_true
     end
     RT.evaluate(RT::Assertion.parse("json:k=3.0").as(RT::Assertion), obs(body: body), nil)[0].pass?.should be_true
+    RT.evaluate(RT::Assertion.parse("json:ts=1e18").as(RT::Assertion), obs(body: %({"ts":1000000000000000000})), nil)[0].pass?.should be_true
   end
 
   it "answers INCONCLUSIVE for a body comparison with no baseline behind it" do
