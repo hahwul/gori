@@ -48,6 +48,9 @@ module Gori
                      "the body, -b a cookie), or read whole from --request-file/-raw/-stdin (the URL then only\n" \
                      "names where to dial). It goes out through this project's upstream proxy, host overrides,\n" \
                      "scope and Sandbox, like every other gori send.\n\n" \
+                     "Exit status and JSON `ok` report the exchange, not the HTTP verdict: a 404 or 500 exits 0\n" \
+                     "with `ok: true`, so check `status`. Exit 1 / `ok: false` means the exchange failed: no\n" \
+                     "response, or one gori could not frame or finish reading (`status` may still be set).\n\n" \
                      "  gori run send https://api.example.com/v1/items/42 -H 'Accept: application/json' -b 'sid=abc'\n" \
                      "  gori run send --url https://api.example.com/v1/items -d '{\"a\":1}' -H 'Content-Type: application/json' --record-history\n" \
                      "  gori run send --url https://api.example.com --request-file req.http --headers-only\n"

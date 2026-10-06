@@ -298,7 +298,7 @@ module Gori
         session.close
         exit 1
       end
-      print_banner(session)
+      print_banner(session, max, every)
       IdleGc.start # hand the heap a capture burst grew back to the OS once the process is idle
       printer_done = Channel(Nil).new(1)
       spawn { capture_printer(session, format, max, printer_done) }
@@ -616,7 +616,7 @@ module Gori
       stop
     end
 
-    private def print_banner(session : Session) : Nil
+    private def print_banner(session : Session, max : Int32?, every : Time::Span?) : Nil
       proxy = session.proxy
       upstream = @config.insecure_upstream? ? "insecure-upstream" : "verify-upstream"
       # The bind is what we CALL the listener; `addr` is what the user can actually type
@@ -637,7 +637,15 @@ module Gori
       Settings.outbound_tls_warnings.each { |w| STDERR.puts "  ⚠ #{w}" }
       # See the sibling emission in `open_and_run`.
       Settings.upstream_proxy_warnings.each { |w| STDERR.puts "  ⚠ #{w}" }
-      STDERR.puts "  press Ctrl-C to stop"
+      # A timed or counted run ends by itself, so "press Ctrl-C to stop" alone read as if it
+      # would not (#1507). `--for` only takes whole s/m/h, which `span_label` prints exactly.
+      stops = [every.try { |e| "after #{SessionSlot::RefreshBefore.span_label(e)}" },
+               max.try { |n| "after #{Gori.plural(n, "flow")}" }].compact
+      if stops.empty?
+        STDERR.puts "  press Ctrl-C to stop"
+      else
+        STDERR.puts "  stops #{stops.join(" or ")}; press Ctrl-C to stop sooner"
+      end
     end
 
     # Headless capture's orderly stop: the main fiber is parked on `@shutdown.receive`, so a

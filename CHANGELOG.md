@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- CLI: `gori run` help now says when a timed capture stops, how it picks its default project, what `send`'s exit status means, and that `import --urls` sends nothing (#1507)
+
 ## v0.8.0
 
 ### New features

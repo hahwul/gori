@@ -34,7 +34,7 @@ module Gori
             listen = listen_flag = v.strip
           end
           p.on("-pPORT", "--port=PORT", "Listen port (default #{port})") { |v| port = port_flag = parse_port(v) }
-          p.on("--project=NAME", "Capture into project NAME (created if missing; default 'default')") { |v| project_name = v }
+          p.on("--project=NAME", "Capture into project NAME (created if missing). Default: $#{DEFAULT_PROJECT_ENV}, else the project pinned by `gori run project switch`, else 'default'") { |v| project_name = v }
           p.on("--db=PATH", "Capture into an explicit SQLite db file") { |v| db_path = v }
           p.on("-k", "--insecure-upstream", "Do not verify upstream TLS certificates") { insecure = true }
           p.on("--ca-dir=DIR", "Directory for the root CA (default #{Paths.default_ca_dir}), as `gori --ca-dir` and `gori ca` take it") { |v| ca_dir = v }

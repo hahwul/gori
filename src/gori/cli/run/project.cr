@@ -232,7 +232,7 @@ module Gori
             end
           end)
         elsif entries.empty?
-          STDERR.puts "no projects yet — capture some traffic (gori run capture / the TUI) first"
+          STDERR.puts "no projects yet — capture some traffic (gori run capture / the TUI) first, or create one with `gori run project create NAME`"
         else
           rows.each do |row|
             pr = row.project
