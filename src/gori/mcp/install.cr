@@ -189,7 +189,8 @@ module Gori
       def self.build_args(db_path : String? = nil, project : String? = nil,
                           read_only : Bool = false, insecure_upstream : Bool = false,
                           use_active_project : Bool = false, no_project : Bool = false,
-                          config_path : String? = nil, tools_spec : String? = nil) : Array(String)
+                          config_path : String? = nil, tools_spec : String? = nil,
+                          pin_project : Bool = false) : Array(String)
         args = ["mcp"]
         # expand_path throughout (not realpath): neither the db nor the config need exist yet
         # — `gori mcp` creates the db on first serve, and realpath raises File::NotFoundError
@@ -203,10 +204,9 @@ module Gori
         args << "--config=#{File.expand_path(config_path, home: true)}" if config_path && !config_path.empty?
         args << "--db=#{File.expand_path(db_path, home: true)}" if db_path && !db_path.empty?
         args << "--project=#{project}" if project && !project.empty?
-        args << "--no-project" if no_project
-        args << "--read-only" if read_only
-        args << "--insecure-upstream" if insecure_upstream
-        args << "--use-active-project" if use_active_project
+        # A tuple, not five `if`s: one more flag would put this method over ameba's complexity cap.
+        { {"--no-project", no_project}, {"--read-only", read_only}, {"--insecure-upstream", insecure_upstream},
+         {"--use-active-project", use_active_project}, {"--pin-project", pin_project} }.each { |flag, on| args << flag if on }
         if spec = tools_spec.try(&.presence)
           args << "--tools=#{spec}"
         end
@@ -276,11 +276,12 @@ module Gori
                            db_path : String? = nil, project : String? = nil,
                            read_only : Bool = false, insecure_upstream : Bool = false,
                            use_active_project : Bool = false, no_project : Bool = false,
-                           settings_path : String? = nil, tools_spec : String? = nil) : Array(Outcome)
+                           settings_path : String? = nil, tools_spec : String? = nil,
+                           pin_project : Bool = false) : Array(Outcome)
         # Built once, outside the loop: every target writes the identical argv, and building
         # it here is what lets each Outcome carry exactly what was installed.
         args = build_args(db_path, project, read_only, insecure_upstream, use_active_project,
-          no_project, settings_path, tools_spec)
+          no_project, settings_path, tools_spec, pin_project)
         targets.uniq.map do |target|
           Outcome.new(target, install_argv(target, exe_path, args), nil, args)
         rescue ex

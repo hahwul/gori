@@ -121,6 +121,8 @@ gori mcp --tools='-fuzz_*,-mine_*,-discover_*,-sequence_*'       # 비동기 워
 
 스펙을 너무 좁히면 서버가 프로젝트를 *고를* 방법조차 잃을 수 있습니다. Git 워크스페이스 밖이거나 `--no-project`로 시작했거나 지정한 데이터베이스가 열리지 않아 바인딩이 없는데 스펙이 `switch_project`와 `create_project`를 둘 다 남기지 않으면, 에이전트가 무엇을 호출해도 프로젝트를 붙일 수 없습니다. `list_projects`는 여기 포함되지 않습니다 — 목록만 보여줄 뿐 아무것도 바인딩하지 않습니다. gori는 이를 시작 시점에 경고하고, `NO_PROJECT` 오류도 없는 도구를 가리키는 대신 같은 사실을 말합니다. 스펙에 `switch_project`를 남기거나 `--project`/`--db`를 넘기세요.
 
+반대로 서버를 한 프로젝트에 *묶어 두려면* `--pin-project`를 씁니다. 서버를 다시 바인딩하거나 다른 프로젝트를 읽는 도구(`list_projects`, `switch_project`, `create_project`, `delete_project`, `import_project`, `export_project`, `diff_projects`)를 `--tools`·`--read-only`가 좁힌 결과에서 추가로 뺍니다. `--read-only`만으로는 `switch_project`가 그대로 동작합니다. 파일시스템 울타리는 아닙니다. 경로를 받는 도구(`import_flows`, 워드리스트 파일)는 서버가 읽을 수 있는 파일이면 여전히 읽습니다. 고정한 채 프로젝트 없이 시작하게 되면(`--no-project`, 워크스페이스 밖, 열리지 않는 데이터베이스) 아무것도 복구할 수 없는 서버를 띄우는 대신 시작을 중단합니다.
+
 아무것도 매치하지 않는 패턴이나 프로필은 조용히 좁히는 대신 시작 시 중단하며 후보를 제안합니다(`--tools: "list_hisotry" matches no tool — did you mean list_history?`). 도구가 빠진 서버는 그 기능이 아예 없는 gori와 구분되지 않기 때문입니다. 제외된 도구는 `tools/list`에 나오지 않고, 그래도 호출하면 어떤 플래그가 감췄는지 밝히며 거절합니다. `--tools`는 `--read-only`와 함께 쓸 수 있고, 다른 플래그처럼 `--install-*`과 같이 주면 설치되는 명령에 기록됩니다.
 
 ## TUI에서 에이전트 보기 {#seeing-an-agent-from-the-tui}
@@ -160,7 +162,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 
 클라이언트가 리포지토리 디렉터리 밖에서 MCP를 시작해도 서버는 unbound로 연결되며, 에이전트가 도구로 프로젝트를 고르거나 만들 수 있습니다. 설치 시점에 고정 engagement를 박아 두려면 선택자를 넘기세요. 예: `gori mcp --project my-engagement --install-codex`.
 
-`--install-*`과 함께 넘긴 플래그는 모두 설치되는 커맨드에 그대로 기록됩니다. 선택자(`--project`, `--db`, `--no-project`, `--use-active-project`)는 물론 `--read-only`, `--tools`, `--insecure-upstream`, `--config`까지 포함되므로 클라이언트가 띄우는 커맨드가 입력한 그대로가 됩니다. 경로는 절대 경로로 변환됩니다. 클라이언트는 사용자가 고르지 않은 작업 디렉터리에서 서버를 실행하기 때문입니다.
+`--install-*`과 함께 넘긴 플래그는 모두 설치되는 커맨드에 그대로 기록됩니다. 선택자(`--project`, `--db`, `--no-project`, `--use-active-project`)는 물론 `--read-only`, `--tools`, `--pin-project`, `--insecure-upstream`, `--config`까지 포함되므로 클라이언트가 띄우는 커맨드가 입력한 그대로가 됩니다. 경로는 절대 경로로 변환됩니다. 클라이언트는 사용자가 고르지 않은 작업 디렉터리에서 서버를 실행하기 때문입니다.
 
 ## 도구 {#tools}
 
@@ -220,7 +222,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `ql_reference` | 쿼리 언어 레퍼런스 |
 | `ql_explain` | 쿼리를 실행하지 않고 진단. 요청을 쓰기 전에 필터를 점검할 때 사용 |
 
-**액션 도구**(`--read-only`로 비활성화됨. 단, `switch_project`는 항상 동작하고 `create_project`는 서버가 언바운드일 때 동작합니다). 소켓을 여는 도구(`send_request`, `send_websocket`, `fuzz_*`, `mine_*`, `authorize_*`, `cache_deception_check`, `sequence_*`, `discover_*`, `grpc_reflect`, `minimize_repeater`, `race_requests`, `timing_requests`, `run_retest`, `refresh_session_slot`, 그리고 `active:true`를 준 `probe_scan`)는 모두 스코프 게이트를 지납니다. 설정된 스코프 밖의 대상, 또는 스코프가 없는 대상은 호출에 명시적 예외 선언인 `allow_unscoped:true`를 주지 않는 한 `SCOPE_BLOCKED`로 거부되며, 그때도 샌드박스와 명시적 제외 규칙은 그대로 적용됩니다.
+**액션 도구**(`--read-only`로 비활성화됨. 단, `switch_project`는 `--pin-project`로 빼지 않는 한 동작하고 `create_project`는 서버가 언바운드일 때 동작합니다). 소켓을 여는 도구(`send_request`, `send_websocket`, `fuzz_*`, `mine_*`, `authorize_*`, `cache_deception_check`, `sequence_*`, `discover_*`, `grpc_reflect`, `minimize_repeater`, `race_requests`, `timing_requests`, `run_retest`, `refresh_session_slot`, 그리고 `active:true`를 준 `probe_scan`)는 모두 스코프 게이트를 지납니다. 설정된 스코프 밖의 대상, 또는 스코프가 없는 대상은 호출에 명시적 예외 선언인 `allow_unscoped:true`를 주지 않는 한 `SCOPE_BLOCKED`로 거부되며, 그때도 샌드박스와 명시적 제외 규칙은 그대로 적용됩니다.
 
 | 도구 | 용도 |
 |------|---------|

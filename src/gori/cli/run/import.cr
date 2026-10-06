@@ -32,7 +32,8 @@ module Gori
           p.banner = "Usage: gori run import (--har PATH | --urls PATH | --oas PATH | --postman PATH | --insomnia PATH | --burp PATH | --wsdl PATH | --curl PATH) [options]\n\n" \
                      "Bulk-import flows into the project's History. Exactly one source is required:\n" \
                      "  --har       a browser/proxy HAR (HTTP Archive) export\n" \
-                     "  --urls      a text file of URLs, one per line (# comments and blanks ignored)\n" \
+                     "  --urls      a text file of URLs, one per line (# comments and blanks ignored); each becomes a\n" \
+                     "              Pending flow — nothing is sent to the listed hosts\n" \
                      "  --oas       OpenAPI 3.x or Swagger 2.0 request templates (JSON or YAML; local refs only)\n" \
                      "  --postman   request templates from a Postman Collection v2 export (JSON)\n" \
                      "  --insomnia  request templates from an Insomnia v4 export (JSON)\n" \

@@ -74,3 +74,9 @@ describe "gori mcp catalogue wording" do
     end
   end
 end
+
+describe "gori mcp --pin-project" do
+  it "withholds only real tools, so the pin never aborts as a misspelled --tools term (#1508)" do
+    Gori::CLI::MCP_PIN_EXCLUDES.each { |t| Gori::MCP::Tools::TOOL_NAMES.should contain(t) }
+  end
+end

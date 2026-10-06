@@ -1364,7 +1364,7 @@ module Gori
         return h unless h.keys.any? { |k| withheld.includes?(k) }
         set = h.keys.find { |k| withheld.includes?(k) && !h[k].raw.nil? && bool_value(h[k]) != false }
         if set
-          return err("'#{set}' is not served here: this server was started with --tools=#{f.spec.inspect}, " \
+          return err("'#{set}' is not served here: this server was started with #{f.flags}, " \
                      "whose profile serves #{name} without #{withheld.to_a.sort.join(", ")}. Restart with " \
                      "#{name} named in --tools to serve it whole.", "TOOL_DISABLED", field: set)
         end
@@ -1396,7 +1396,7 @@ module Gori
         return nil unless f
         return nil if f.allows?(name) || !TOOL_NAMES.includes?(name)
         err("tool '#{name}' is not served by this gori MCP server: it was started with " \
-            "--tools=#{f.spec.inspect}, which advertises #{served_count} of #{TOOL_NAMES.size} tools. " \
+            "#{f.flags}, which advertises #{served_count} of #{TOOL_NAMES.size} tools. " \
             "Everything available is in tools/list.", "UNKNOWN_TOOL")
       end
 

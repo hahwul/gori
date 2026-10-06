@@ -470,7 +470,7 @@ module Gori
         end
         case chosen = default_project(registry, ENV[DEFAULT_PROJECT_ENV]?, read_default_pin)
         in String then abort "gori run: #{chosen}"
-        in Nil    then abort "gori run: no projects yet — capture some traffic first, or pass --db PATH"
+        in Nil    then abort "gori run: no projects yet — capture some traffic first, create one with `gori run project create NAME`, or pass --db PATH"
         in Tuple
           announce_default_project(*chosen)
           chosen[0]
