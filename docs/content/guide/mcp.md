@@ -121,6 +121,8 @@ Tools that document a required follow-up—such as async job status/results/stop
 
 A narrow spec can also leave the server with no way to *pick* a project. If it starts unbound — outside a Git workspace, with `--no-project`, or because the configured database would not open — and the spec keeps neither `switch_project` nor `create_project`, nothing the agent calls can bind one. `list_projects` does not count: it lists projects and binds none of them. gori warns at startup, and the `NO_PROJECT` errors say the same thing instead of naming tools that are not there. Keep `switch_project` in the spec, or pass `--project`/`--db`.
 
+The opposite need, a server that must *stay* on one project, is `--pin-project`. It withholds every tool that rebinds the server or reads another project (`list_projects`, `switch_project`, `create_project`, `delete_project`, `import_project`, `export_project`, `diff_projects`), on top of whatever `--tools` and `--read-only` already narrow; `--read-only` alone leaves `switch_project` working. It is not a filesystem fence: a tool that reads a path you give it (`import_flows`, a wordlist file) can still read any file the server can. A pinned start that ends up with no project (`--no-project`, outside a workspace, or a database that will not open) aborts instead of serving a server nothing can repair.
+
 A pattern or profile that matches nothing aborts at startup with a suggestion (`--tools: "list_hisotry" matches no tool — did you mean list_history?`) rather than quietly serving a smaller set — a server missing a tool looks exactly like a gori that never had the feature. Tools left out are absent from `tools/list` **and** refused if called anyway, naming the flag that hid them. `--tools` composes with `--read-only`, and like every other flag it is written into the command when you pass it alongside `--install-*`.
 
 ## Seeing an Agent From the TUI
@@ -160,7 +162,7 @@ Codex and Grok use TOML with an `[mcp_servers.gori]` table, and Hermes YAML with
 
 If a client starts MCP outside your repository directory, the server starts unbound and the agent can pick or create a project over tools. To pin a fixed engagement at install time instead, pass a selector, for example `gori mcp --project my-engagement --install-codex`.
 
-Every flag you pass alongside `--install-*` is written into the installed command, so what the client spawns matches what you typed: selectors (`--project`, `--db`, `--no-project`, `--use-active-project`), `--read-only`, `--tools`, `--insecure-upstream`, and `--config`. Paths are made absolute, because the client spawns the server from a working directory you did not choose.
+Every flag you pass alongside `--install-*` is written into the installed command, so what the client spawns matches what you typed: selectors (`--project`, `--db`, `--no-project`, `--use-active-project`), `--read-only`, `--tools`, `--pin-project`, `--insecure-upstream`, and `--config`. Paths are made absolute, because the client spawns the server from a working directory you did not choose.
 
 ## Tools
 
@@ -220,7 +222,7 @@ Where two tools name one object differently, both spellings are accepted: `flow_
 | `ql_reference` | The query-language reference |
 | `ql_explain` | Diagnose a query without running it, to check a filter before spending requests on it |
 
-**Action tools** (disabled by `--read-only`, except `switch_project`, which always works, and `create_project`, which works while the server is unbound). Every one that opens a socket (`send_request`, `send_websocket`, `fuzz_*`, `mine_*`, `authorize_*`, `cache_deception_check`, `sequence_*`, `discover_*`, `grpc_reflect`, `minimize_repeater`, `race_requests`, `timing_requests`, `run_retest`, `refresh_session_slot`, and `probe_scan` with `active:true`) is scope-gated: a target outside, or without, a configured scope is refused with `SCOPE_BLOCKED` unless the call passes `allow_unscoped:true`, the explicit waiver, and the sandbox and explicit excludes apply even then.
+**Action tools** (disabled by `--read-only`, except `switch_project`, which works unless `--pin-project` withholds it, and `create_project`, which works while the server is unbound). Every one that opens a socket (`send_request`, `send_websocket`, `fuzz_*`, `mine_*`, `authorize_*`, `cache_deception_check`, `sequence_*`, `discover_*`, `grpc_reflect`, `minimize_repeater`, `race_requests`, `timing_requests`, `run_retest`, `refresh_session_slot`, and `probe_scan` with `active:true`) is scope-gated: a target outside, or without, a configured scope is refused with `SCOPE_BLOCKED` unless the call passes `allow_unscoped:true`, the explicit waiver, and the sandbox and explicit excludes apply even then.
 
 | Tool | Purpose |
 | ------ | --------- |

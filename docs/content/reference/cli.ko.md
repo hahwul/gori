@@ -1760,8 +1760,9 @@ MCP stdio 서버입니다. 도구 세부사항은 [MCP 가이드](/ko/guide/mcp/
 | `--use-active-project` | Git 워크스페이스 선택을 무시하고 활성 TUI/MRU 프로젝트를 명시적으로 제공 |
 | `--no-project` | Git 워크스페이스 안에서도 unbound로 시작 (에이전트가 list/create/switch로 선택) |
 | `--insecure-upstream` | `send_request`: 업스트림 TLS 검증 생략 |
-| `--read-only` | 액션 도구 비활성화 (`send_request`, 이슈 생성/수정, fuzz/mine); `switch_project`(및 unbound 시 `create_project`)는 유지 |
+| `--read-only` | 액션 도구 비활성화 (`send_request`, 이슈 생성/수정, fuzz/mine); `switch_project`(및 unbound 시 `create_project`)는 `--pin-project`가 아니면 유지 |
 | `--tools=SPEC` | 지정한 도구만 노출: 쉼표로 구분한 이름, 글롭, 프로필(`@minimal`, `@recon`)이며, 앞에 `-`를 붙이면 제외 (`@recon`, `@minimal,send_request` 또는 `-fuzz_*,-mine_*`). 제공하는 카탈로그 크기는 시작 로그에 나옵니다. [노출할 도구 고르기](/ko/guide/mcp/#choosing-which-tools-are-exposed) 참고 |
+| `--pin-project` | 시작한 프로젝트에 서버를 고정: `list_projects`, `switch_project`, `create_project`, `delete_project`, `import_project`, `export_project`, `diff_projects`를 노출하지 않음. `--no-project`와 함께 쓸 수 없고, 바인딩 없이 시작하게 되면 중단 |
 | `--install-claude` | Claude Desktop `mcpServers` 설정 기록 |
 | `--install-claude-code` | Claude Code `~/.claude.json` `mcpServers` 항목 기록 |
 | `--install-codex` | OpenAI Codex `~/.codex/config.toml` `[mcp_servers.gori]` 기록 (또는 `$CODEX_HOME`) |
@@ -1770,7 +1771,7 @@ MCP stdio 서버입니다. 도구 세부사항은 [MCP 가이드](/ko/guide/mcp/
 | `--install-hermes` | Hermes `~/.hermes/config.yaml` `mcp_servers.gori` 기록 (또는 `$HERMES_HOME`) |
 | `--install-pi` | Pi `~/.pi/agent/mcp.json` `mcpServers.gori` 기록 (또는 `$PI_CODING_AGENT_DIR`); MCP 어댑터 필요 |
 
-`--install-*`은 한 번에 여러 개 지정할 수 있습니다. 클라이언트마다 따로 설정하고 따로 보고하며, 하나가 실패해도 나머지는 그대로 진행됩니다. 커맨드라인의 다른 플래그(`--db`, `--project`, `--no-project`, `--use-active-project`, `--read-only`, `--tools`, `--insecure-upstream`, 전역 `--config`)는 모두 설치되는 커맨드에 기록되고, 경로는 절대 경로로 바뀝니다(`--project`는 이름 그대로 기록). 기존 설정 파일은 제자리에서 갱신됩니다. 다른 항목·테이블·주석은 유지되고, 권한도 보존되며, 교체는 원자적입니다.
+`--install-*`은 한 번에 여러 개 지정할 수 있습니다. 클라이언트마다 따로 설정하고 따로 보고하며, 하나가 실패해도 나머지는 그대로 진행됩니다. 커맨드라인의 다른 플래그(`--db`, `--project`, `--no-project`, `--use-active-project`, `--read-only`, `--tools`, `--pin-project`, `--insecure-upstream`, 전역 `--config`)는 모두 설치되는 커맨드에 기록되고, 경로는 절대 경로로 바뀝니다(`--project`는 이름 그대로 기록). 기존 설정 파일은 제자리에서 갱신됩니다. 다른 항목·테이블·주석은 유지되고, 권한도 보존되며, 교체는 원자적입니다.
 
 ## gori ca {#gori-ca}
 

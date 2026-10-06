@@ -861,7 +861,7 @@ module Gori
         # `served_count`, not `f.size`: under `--read-only` the filter's own count is the set
         # it KEPT, and the gate then withholds some of it. One number here, and it is the one
         # the very next `tools/list` will return.
-        " This server was started with --tools=#{f.spec.inspect} and advertises #{@tools.served_count} of " \
+        " This server was started with #{f.flags} and advertises #{@tools.served_count} of " \
         "#{Tools::TOOL_NAMES.size} tools; tools/list is the authority on what it has."
       end
 

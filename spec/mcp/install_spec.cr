@@ -499,6 +499,12 @@ describe Gori::MCP::Install do
       Gori::MCP::Install.build_args(tools_spec: "").should eq(["mcp"])
     end
 
+    it "carries --pin-project into the installed argv" do
+      # Dropped here, the spawned server could switch projects the operator meant to lock (#1508).
+      Gori::MCP::Install.build_args(project: "eng", read_only: true, pin_project: true).should eq(
+        ["mcp", "--project=eng", "--read-only", "--pin-project"])
+    end
+
     it "carries --config into the installed argv, absolute" do
       # The client spawns this command from a directory the user never chose, so a
       # relative --config would resolve against the wrong tree (or not at all).

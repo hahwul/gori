@@ -105,10 +105,15 @@ module Gori
       ]
 
       getter spec : String
+      # How refusals and the banner name the flags behind this filter: the operator's own
+      # words, so a `--pin-project` subtraction is never blamed on a `--tools` nobody typed.
+      getter flags : String
       @allowed : Set(String)
       @withheld : Hash(String, Set(String))
 
-      private def initialize(@spec, @allowed, @withheld = {} of String => Set(String))
+      private def initialize(@spec, @allowed, @withheld = {} of String => Set(String),
+                             flags : String? = nil)
+        @flags = flags || "--tools=#{@spec}"
       end
 
       # The arguments `name` is served without (a profile's `withheld`), or nil when it is
@@ -125,7 +130,7 @@ module Gori
       # Parses SPEC against `known` — the registry's full name list, and only ever that.
       # Returns the filter, or the message to abort with.
       def self.parse(spec : String, known : Enumerable(String),
-                     dependencies : Hash(String, Array(String))) : ToolFilter | String
+                     dependencies : Hash(String, Array(String)), flags : String? = nil) : ToolFilter | String
         terms = spec.split(',').map(&.strip).reject(&.empty?)
         return "--tools: no tool patterns given" if terms.empty?
 
@@ -167,7 +172,7 @@ module Gori
           return "--tools: #{spec.inspect} selects no tools; the server would advertise nothing"
         end
         withheld = restricted.reject { |tool, _| named.includes?(tool) || !selected.includes?(tool) }
-        new(spec, selected, withheld)
+        new(spec, selected, withheld, flags)
       end
 
       # One term's effect on the profile-withheld arguments (`Profile#withheld`): a subtraction
