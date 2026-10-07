@@ -72,10 +72,6 @@ module Gori::Tui
       @sub_idx
     end
 
-    def subtab_strip_shown? : Bool
-      true
-    end
-
     def subtabs_fixed? : Bool
       true
     end

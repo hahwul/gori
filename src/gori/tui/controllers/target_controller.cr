@@ -90,10 +90,6 @@ module Gori::Tui
       @active_sub
     end
 
-    def subtab_strip_shown? : Bool
-      true
-    end
-
     def subtabs_fixed? : Bool
       true
     end
