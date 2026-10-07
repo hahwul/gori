@@ -2320,10 +2320,10 @@ module Gori::Tui
     # request back into the editor when done. One minimize at a time, per project.
     def repeater_minimize : Nil
       return unless (tab = current_repeater_tab) && (view = tab.view).loaded?
-      # `minimize_refusal`, not `minimizable?` + a sentence of our own: the view now owns
-      # BOTH the predicate and the wording (`minimizable?` is defined as this being nil), so
-      # the two cannot drift. The old sentence here named hex/gRPC/WS/decode and §markers,
-      # and answered none of the three problems for a `%%%` group document.
+      # `minimize_refusal`, not a predicate + a sentence of our own: the view owns BOTH the
+      # predicate and the wording (nil = minimizable), so the two cannot drift. The old
+      # sentence here named hex/gRPC/WS/decode and §markers, and answered none of the three
+      # problems for a `%%%` group document.
       if reason = view.minimize_refusal
         @host.status("minimize: #{reason}")
         return
@@ -2949,7 +2949,7 @@ module Gori::Tui
     #
     # The condition's home is `RepeaterView#group_sendable?`, whose own comment already
     # names MARK alongside hex / gRPC / WS / decode; it simply never grew the term its
-    # sibling `minimizable?` has. It sits here for now, at the ONE call site of
+    # sibling `minimize_refusal` has. It sits here for now, at the ONE call site of
     # `pipeline_requests`.
     #
     # `self.` and pure for the reason `.literal_bindings` above is: what the operator is

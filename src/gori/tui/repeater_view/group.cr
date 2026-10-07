@@ -34,20 +34,17 @@ class Gori::Tui::RepeaterView
 
   # "Minimize request" removes header/cookie/param lines from the plain-text request and
   # re-sends to verify the response is unchanged.
-  def minimizable? : Bool
-    minimize_refusal.nil?
-  end
-
-  # Why minimize cannot run on this buffer, or nil. Public and NAMED because these are three
-  # different problems and "not minimizable" answers none of them; `minimizable?` is defined
-  # in terms of it so the predicate and the sentence cannot drift.
+  #
+  # Why minimize cannot run on this buffer, or nil (nil = minimizable). Public and NAMED
+  # because these are three different problems and "not minimizable" answers none of them;
+  # the predicate and the sentence are one method, so they cannot drift.
   #
   # The `%%%` clause is the third whole-buffer reader on this branch. `repeater_minimize`
   # never calls `request_bytes` — it snapshots `request_text` and re-syncs Content-Length
   # over the whole buffer in its own `resolve` — so the framing `^R` now refuses ONCE, a
   # minimize did up to `Minimize::SEND_CAP` times in one keypress:
   #
-  #   pane     Content-Length: 3     minimizable?  true
+  #   pane     Content-Length: 3     minimize_refusal  nil
   #   resolve  Content-Length: 60    ×hundreds of probe sends
   #
   # Unlike `group_framing_refusal` this is NOT scoped to auto-CL: `Minimize.run` reads

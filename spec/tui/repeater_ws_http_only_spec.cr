@@ -91,11 +91,9 @@ describe "RepeaterView WebSocket transport override" do
     # endpoint could only ever be tested as a WebSocket. `minimize_refusal` is the one that
     # says so in words, which makes it the honest witness for the whole set.
     ws = ws_view
-    ws.minimizable?.should be_false
     ws.minimize_refusal.not_nil!.should contain("plain HTTP text request")
 
     http = ws_view(http_only: true)
-    http.minimizable?.should be_true
     http.minimize_refusal.should be_nil
   end
 
