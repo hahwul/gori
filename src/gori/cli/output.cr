@@ -411,8 +411,8 @@ module Gori
       # `주문 조회 재전송` in a 20-column cell and put seven spaces too many after it, stepping
       # the `→ target` column of that ONE row out of line. The TUI's History list, laid out
       # from the same data, is exactly aligned — so this was a surface divergence, not a
-      # missing feature. `gori settings import` already measured this way (see its own
-      # `column_width`); this is that measure given one home for the whole surface.
+      # missing feature. `gori settings import` already measured this way; this is that
+      # measure given one home for the whole surface.
       #
       # `Tui::Screen` is a surface reaching into another surface, which the layering contract
       # allows (it gates CORE subsystems, not `cli/` ↔ `tui/`), and `display_width` is a pure
