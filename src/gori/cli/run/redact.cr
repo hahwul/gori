@@ -273,17 +273,14 @@ module Gori
         global = false
         none = false
         positional = [] of String
-        parser = OptionParser.new do |p|
+        parser = option_parser("gori run redact use") do |p|
           p.banner = "Usage: gori run redact use <name> [options]\n\n" \
                      "Picks the profile a safe export uses. Writes the PROJECT by default, so\n" \
                      "the choice stays with this engagement; --global writes settings.json."
           project_options(p, proj, "write")
           p.on("--global", "Write settings.json instead of this project") { global = true }
           p.on("--none", "Clear the choice at this scope (fall back to the wider one)") { none = true }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run redact use", "profile name") }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run redact use", f, p) }
-          p.missing_option { |f| abort "gori run redact use: missing value for #{f}" }
         end
         parser.parse(args)
         abort "gori run redact use: name a profile, or pass --none\n#{parser}" if positional.empty? && !none
@@ -325,7 +322,7 @@ module Gori
         global = false
         clear = false
         positional = [] of String
-        parser = OptionParser.new do |p|
+        parser = option_parser("gori run redact default") do |p|
           p.banner = "Usage: gori run redact default on|off [options]\n\n" \
                      "Whether shareable output is sanitized WITHOUT --redact. Off at the factory;\n" \
                      "once on, --no-redact is the explicit path back to the captured bytes.\n" \
@@ -333,10 +330,7 @@ module Gori
           project_options(p, proj, "write")
           p.on("--global", "Write settings.json instead of this project") { global = true }
           p.on("--none", "Clear this project's answer and inherit the global one") { clear = true }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run redact default", "`on` or `off`") }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run redact default", f, p) }
-          p.missing_option { |f| abort "gori run redact default: missing value for #{f}" }
         end
         parser.parse(args)
         abort "gori run redact default: --none is a project-scope answer, not a global one" if clear && global
@@ -381,7 +375,7 @@ module Gori
         form_keys = [] of String
         patterns = [] of String
         positional = [] of String
-        parser = OptionParser.new do |p|
+        parser = option_parser("gori run redact set") do |p|
           p.banner = "Usage: gori run redact set <name> [--json-field F]… [options]\n\n" \
                      "Creates or REPLACES a profile. Every rule flag repeats. Writes the PROJECT\n" \
                      "by default (field names that describe one target belong to one engagement);\n" \
@@ -393,10 +387,7 @@ module Gori
           p.on("--json-pointer=PTR", "An RFC 6901 pointer; `-` means any array index (repeatable)") { |v| pointers << v }
           p.on("--form-key=KEY", "An x-www-form-urlencoded key (repeatable)") { |v| form_keys << v }
           p.on("--pattern=REGEX", "A regex over body text; group 1 is replaced if present (repeatable)") { |v| patterns << v }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run redact set", "profile name") }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run redact set", f, p) }
-          p.missing_option { |f| abort "gori run redact set: missing value for #{f}" }
         end
         parser.parse(args)
         abort "gori run redact set: name the profile\n#{parser}" if positional.empty?
@@ -428,16 +419,13 @@ module Gori
         proj = ProjectFlags.new
         global = false
         positional = [] of String
-        parser = OptionParser.new do |p|
+        parser = option_parser("gori run redact rm") do |p|
           p.banner = "Usage: gori run redact rm <name> [options]\n\n" \
                      "Deletes a profile from this project, or from settings.json with --global.\n" \
                      "A built-in profile cannot be deleted; define one of the same name to replace it."
           project_options(p, proj, "write")
           p.on("--global", "Write settings.json instead of this project") { global = true }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run redact rm", "profile name") }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run redact rm", f, p) }
-          p.missing_option { |f| abort "gori run redact rm: missing value for #{f}" }
         end
         parser.parse(args)
         abort "gori run redact rm: name the profile\n#{parser}" if positional.empty?

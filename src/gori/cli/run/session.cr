@@ -225,7 +225,7 @@ module Gori
         proj = ProjectFlags.new
         format = :text
         show_values = false
-        positional = parse_args(args, "gori run session show") do |p|
+        positional = one_positional_list(args, "gori run session show", "name") do |p|
           p.banner = "Usage: gori run session show <name> [options]\n\n" \
                      "One slot in full: the headers it upserts, the ones it strips, and the extract\n" \
                      "rules whose bound values land in its table instead of the global one."
@@ -233,7 +233,6 @@ module Gori
           p.on("--show-values", "Print set-header values instead of [REDACTED]") { show_values = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
-        abort "gori run session show: too many arguments (expected one name, got: #{positional.join(" ")})" if positional.size > 1
         name = positional.first?
         abort "gori run session show: name a slot (`gori run session list` shows them)" if name.nil?
 
@@ -323,7 +322,7 @@ module Gori
         slot_name : String? = nil
         baseline = false
         show_values = false
-        positional = parse_args(args, "gori run session from-flow") do |p|
+        positional = one_positional_list(args, "gori run session from-flow", "flow id") do |p|
           p.banner = "Usage: gori run session from-flow <flow-id> --name NAME [options]\n\n" \
                      "Build a session slot from a captured LOGIN exchange. gori reads the flow's\n" \
                      "response and copies what it finds into the slot's header overlay:\n\n" \
@@ -345,8 +344,6 @@ module Gori
           p.on("--show-values", "Print the captured header values instead of [REDACTED]") { show_values = true }
           project_options(p, proj, "read and write")
         end
-        abort "gori run session from-flow: too many arguments (expected one flow id, got: " \
-              "#{positional.join(" ")})" if positional.size > 1
         raw = positional.first?
         abort "gori run session from-flow: name the captured flow to read " \
               "(`gori run history` lists them)" if raw.nil?
@@ -405,7 +402,7 @@ module Gori
         baseline = false
         show_values = false
         copy_headers = [] of String
-        positional = parse_args(args, "gori run session from-request") do |p|
+        positional = one_positional_list(args, "gori run session from-request", "flow id") do |p|
           p.banner = "Usage: gori run session from-request <flow-id> --name NAME " \
                      "--copy-header NAME [options]\n\n" \
                      "Build a session slot from selected headers on a captured REQUEST. Repeat " \
@@ -429,8 +426,6 @@ module Gori
           p.on("--show-values", "Print the captured header values instead of [REDACTED]") { show_values = true }
           project_options(p, proj, "read and write")
         end
-        abort "gori run session from-request: too many arguments (expected one flow id, got: " \
-              "#{positional.join(" ")})" if positional.size > 1
         raw = positional.first?
         abort "gori run session from-request: name the captured flow to read " \
               "(`gori run history` lists them)" if raw.nil?
@@ -525,13 +520,12 @@ module Gori
 
       private def self.cmd_session_rm(args : Array(String)) : Nil
         proj = ProjectFlags.new
-        positional = parse_args(args, "gori run session rm") do |p|
+        positional = one_positional_list(args, "gori run session rm", "name") do |p|
           p.banner = "Usage: gori run session rm <name> [options]\n\n" \
                      "Delete a session slot. Any extract rule it claimed goes back to writing the\n" \
                      "GLOBAL binding table, which is where an unclaimed rule has always written."
           project_options(p, proj, "write")
         end
-        abort "gori run session rm: too many arguments (expected one name, got: #{positional.join(" ")})" if positional.size > 1
         name = positional.first?
         abort "gori run session rm: name the slot to delete (`gori run session list`)" if name.nil?
 
@@ -548,13 +542,12 @@ module Gori
 
       private def self.cmd_session_baseline(args : Array(String)) : Nil
         proj = ProjectFlags.new
-        positional = parse_args(args, "gori run session baseline") do |p|
+        positional = one_positional_list(args, "gori run session baseline", "name") do |p|
           p.banner = "Usage: gori run session baseline <name> [options]\n\n" \
                      "Move the Authorize BASELINE — the one slot every other slot's response is\n" \
                      "judged against. Exactly one slot holds it."
           project_options(p, proj, "write")
         end
-        abort "gori run session baseline: too many arguments (expected one name, got: #{positional.join(" ")})" if positional.size > 1
         name = positional.first?
         abort "gori run session baseline: name the slot (`gori run session list`)" if name.nil?
 

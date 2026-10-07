@@ -31,14 +31,18 @@ private def run_cli_dir : String
   File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run")
 end
 
-# Each parser's window: from its own `OptionParser.new` to the NEXT one. Anchoring on the
+# A parser this file builds and keeps whole: `OptionParser.new`, or `Run.option_parser`, which
+# adds the `-h`/refusal tail but installs no `unknown_args` guard of its own.
+private PARSER_OPENER = /OptionParser\.new do \||(?<![.\w])option_parser\("/
+
+# Each parser's window: from its own opener to the NEXT one. Anchoring on the
 # `parse(` call instead let a block that spells its parse differently (or returns early)
 # swallow the rest of the file, so a LATER block's handler satisfied the check for one that
 # had none — the gate going green on exactly the drift it exists to catch.
 private def parser_windows(src : String) : Array({Int32, String})
   starts = [] of Int32
   pos = 0
-  while at = src.index("OptionParser.new do |", pos)
+  while at = src.index(PARSER_OPENER, pos)
     starts << at
     pos = at + 1
   end
@@ -153,6 +157,7 @@ describe "gori run — every OptionParser reaches an unknown_args guard" do
     windows = parser_windows(src)
     windows.size.should eq(1)
     GUARDS.any? { |g| windows[0][1].includes?(g) }.should be_false
+    parser_windows(%(parser = option_parser("gori run x") do |p|\nend)).size.should eq(1)
   end
 
   # Anchored on the enclosing METHOD rather than on a parser ordinal: an index would follow

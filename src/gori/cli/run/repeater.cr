@@ -325,7 +325,7 @@ module Gori
         format = :text
         positional = [] of String
 
-        parser = OptionParser.new do |p|
+        parser = option_parser("gori run repeater move") do |p|
           p.banner = "Usage: gori run repeater move <repeater-id> (--to N | --up | --down)"
           p.on("--to=N", "Move to this 1-based tab number (the number `repeater list` prints)") do |v|
             to = v.to_i32? || abort("gori run repeater move: invalid --to '#{v}' (expected a 1-based tab number)")
@@ -343,9 +343,6 @@ module Gori
           p.on("--project=NAME", "Project to act on (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file") { |v| db_path = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run repeater move", f, p) }
-          p.missing_option { |f| abort "gori run repeater move: missing value for #{f}" }
           # Through the helper IN the sink, not twenty lines below it: a bare
           # `positional = before + after` here reads fine and drops every token after the
           # first, which is the shape `list_leftovers_spec`'s source gate exists to catch.
@@ -413,15 +410,12 @@ module Gori
         format = :text
         positional = [] of String
 
-        parser = OptionParser.new do |p|
+        parser = option_parser("gori run repeater delete") do |p|
           p.banner = "Usage: gori run repeater delete <repeater-id> [<repeater-id>…] --yes"
           p.on("-y", "--yes", "Confirm the deletion (required)") { yes = true }
           p.on("--project=NAME", "Project to act on (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file") { |v| db_path = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run repeater delete", f, p) }
-          p.missing_option { |f| abort "gori run repeater delete: missing value for #{f}" }
           p.unknown_args { |before, after| positional = before + after }
         end
         parser.parse(args)
@@ -525,12 +519,7 @@ module Gori
       # not resend it), which is exactly why the machine-readable half has to carry the answer:
       # a report emitted before the side effect cannot, so both writes now happen before the
       # emit (#1118).
-      struct WriteOutcome
-        getter error : String?
-
-        def initialize(@error : String?)
-        end
-
+      record WriteOutcome, error : String? do
         def ok? : Bool
           @error.nil?
         end
@@ -538,14 +527,7 @@ module Gori
 
       # The post-send writes for `--save-as-repeater`. The id is present once the session row
       # committed, even if the response write that follows it did not.
-      struct SendRepeaterOutcome
-        getter id : Int64?
-        getter save_write : WriteOutcome
-        getter response_write : WriteOutcome?
-
-        def initialize(@id, @save_write, @response_write)
-        end
-      end
+      record SendRepeaterOutcome, id : Int64?, save_write : WriteOutcome, response_write : WriteOutcome?
 
       # Persist a completed one-shot send without turning a project write failure into a retry
       # of a request that already reached its origin.
@@ -977,10 +959,6 @@ module Gori
         first
       end
 
-      private def self.repeater_out_of_scope?(outbound : Gori::Outbound, plan : Repeater::Plan) : Bool
-        repeater_scope_verdict(outbound, plan).blocked?
-      end
-
       # A saved repeater SESSION row IS the option set: its target, http2 toggle, SNI and
       # auto-Content-Length switch, straight into the one builder every surface assembles
       # through. The builder classifies the request as a WebSocket upgrade too, so the
@@ -1114,7 +1092,7 @@ module Gori
         format = :text
         positional = [] of String
 
-        parser = OptionParser.new do |p|
+        parser = option_parser("gori run repeater race") do |p|
           p.banner = "Usage: gori run repeater race <id> <id> [<id>…] [options]\n\n" \
                      "Fire several saved repeater SESSIONS (ids from `gori run repeater list`) as ONE\n" \
                      "synchronized race — N distinct requests on the wire together to hit a\n" \
@@ -1131,10 +1109,7 @@ module Gori
           p.on("--tls-preset=NAME", "#{TLS_PRESET_HELP}, overriding the sessions' stored one") { |v| tls_preset = v }
           p.on("--max-requests=N", "Refuse the race if it would exceed N members (a race is sent whole, never split)") { |v| max_requests = parse_count(v, "--max-requests") }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run repeater race", f, p) }
-          p.missing_option { |f| abort "gori run repeater race: missing value for #{f}" }
         end
         parser.parse(args)
         refresh_verify_upstream(!insecure)
@@ -1201,7 +1176,7 @@ module Gori
         format = :text
         positional = [] of String
 
-        parser = OptionParser.new do |p|
+        parser = option_parser("gori run repeater timing") do |p|
           p.banner = "Usage: gori run repeater timing <idA> <idB> [options]\n\n" \
                      "Differential TIMING analysis of exactly TWO saved repeater sessions (A vs B):\n" \
                      "send the pair many times and decide which is CONSISTENTLY slower by response\n" \
@@ -1222,10 +1197,7 @@ module Gori
           p.on("--reframe-grpc", "HTTP/2 only: recompute the gRPC length prefix over the body being sent") { reframe_grpc = true }
           p.on("--tls-preset=NAME", "#{TLS_PRESET_HELP}, overriding the sessions' stored one") { |v| tls_preset = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run repeater timing", f, p) }
-          p.missing_option { |f| abort "gori run repeater timing: missing value for #{f}" }
         end
         parser.parse(args)
         refresh_verify_upstream(!insecure)
@@ -1473,7 +1445,7 @@ module Gori
         max_body : Int32? = nil
         positional = [] of String
 
-        parser = OptionParser.new do |p|
+        parser = option_parser("gori run repeater send") do |p|
           p.banner = "Usage: gori run repeater send <repeater-id> [options]\n\n" \
                      "Replay a saved repeater SESSION (ids from `gori run repeater list`).\n" \
                      "A WebSocket-upgrade session performs a real RFC 6455 framed exchange."
@@ -1501,10 +1473,7 @@ module Gori
           p.on("--headers-only", HEADERS_ONLY_HELP) { headers_only = true }
           p.on("--max-body=BYTES", MAX_BODY_HELP) { |v| max_body = parse_count(v, "--max-body") }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run repeater send", f, p) }
-          p.missing_option { |f| abort "gori run repeater send: missing value for #{f}" }
         end
         parser.parse(args)
         refresh_verify_upstream(!insecure)

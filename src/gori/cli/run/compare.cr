@@ -15,7 +15,7 @@ module Gori
         format = :text
         positional = [] of String
 
-        parser = OptionParser.new do |p|
+        parser = option_parser("gori run compare") do |p|
           p.banner = "Usage: gori run compare <id-a> <id-b> [options]\n\n" \
                      "Diff two flows' request or response (default: response)."
           project_options(p, proj, "read")
@@ -33,10 +33,7 @@ module Gori
             context = n
           end
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run compare", f, p) }
-          p.missing_option { |f| abort "gori run compare: missing value for #{f}" }
         end
         parser.parse(args)
 

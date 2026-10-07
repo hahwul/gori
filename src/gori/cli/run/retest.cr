@@ -119,7 +119,8 @@ module Gori
         assertion = ""
         format = :text
 
-        leftover = parse_args(args, "gori run retest add") do |p|
+        parse_no_positionals(args, "gori run retest add",
+          "every end is named by a flag (--issue, --repeater)") do |p|
           p.banner = "Usage: gori run retest add --issue=N --repeater=M [--role=ROLE] [--assert=EXPR]\n\n" \
                      "Append a Repeater session to an Issue's retest. The session is NOT copied:\n" \
                      "the step sends whatever the tab holds when the retest runs, which is what\n" \
@@ -137,12 +138,6 @@ module Gori
           p.on("--role=ROLE", "setup | baseline | variant (default) | control | cleanup") { |v| role_s = v }
           p.on("--assert=EXPR", "The one expected result (see the list above)") { |v| assertion = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-        end
-        # Deferred past `parse` for the reason `cmd_evidence_freeze` gives: the unknown-args
-        # callback runs before the flag sweep, so aborting inside it misdiagnoses a typo'd flag.
-        unless leftover.empty?
-          abort "gori run retest add: unexpected argument#{leftover.size == 1 ? "" : "s"} " \
-                "#{leftover.join(" ").inspect} — every end is named by a flag (--issue, --repeater)"
         end
         iid = require_issue_id(issue_id, "gori run retest add")
         rid_opt = repeater_id

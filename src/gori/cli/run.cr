@@ -248,11 +248,8 @@ module Gori
         puts "Usage: gori run <subcommand> [options]"
         puts ""
         puts "Subcommands:"
-        SUBCOMMANDS.each do |name, desc|
-          gap = SUBCMD_COL_W - name.size
-          gap = 1 if gap < 1
-          puts "  #{name}#{" " * gap}#{desc}"
-        end
+        # At least one space after an overlong name.
+        SUBCOMMANDS.each { |name, desc| puts "  #{name.ljust(SUBCMD_COL_W - 1)} #{desc}" }
         puts ""
         puts "Most read subcommands accept --project NAME or --db PATH; with neither they"
         puts "use the most-recently-active project. See 'gori run <subcommand> --help'."
@@ -1220,7 +1217,7 @@ module Gori
 
       # The {scheme, host, target} `guard_outbound` judges a `--bind-from` seed by. Named rather
       # than inlined so the decision is spec-able without a live send, the way
-      # `repeater_out_of_scope?` is for `gori run repeater`. The target comes from
+      # `repeater_scope_verdict` is for `gori run repeater`. The target comes from
       # `Outbound.request_target` — the one home for reading a request-target off raw bytes,
       # which recovers it from an irregular request line instead of gating an empty path.
       private def self.bind_from_scope_parts(built : Repeater::FlowRequest::Built) : {String, String, String, Int32}
@@ -1901,15 +1898,18 @@ module Gori
       # (spec/cli/run/option_parser_missing_option_spec.cr).
       private def self.parse_args(args : Array(String), prefix : String, & : OptionParser ->) : Array(String)
         positional = [] of String
-        parser = OptionParser.new do |p|
+        option_parser(prefix) do |p|
           yield p
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message(prefix, f, p) }
-          p.missing_option { |f| abort "#{prefix}: missing value for #{f}" }
-        end
-        parser.parse(args)
+        end.parse(args)
         positional
+      end
+
+      # `parse_args`'s parser, unparsed, for a command that keeps it whole (to print as its
+      # usage, or to sink `unknown_args` its own way). `CLI.option_parser`, with the prefix
+      # on the missing-value refusal as every `gori run` message carries it.
+      private def self.option_parser(prefix : String, & : OptionParser ->) : OptionParser
+        CLI.option_parser(prefix, "#{prefix}: ") { |p| yield p }
       end
 
       private def self.parse_format(v : String, allowed : Array(Symbol)) : Symbol

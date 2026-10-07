@@ -650,11 +650,13 @@ module Gori::CLI
       # wrote, and a name or command carrying `\e[2K` would erase the warning printed above it.
       {"#{e.section} #{e.kind}", printable(e.name.presence || "(unnamed)"), printable(e.command), e.enabled}
     end
-    shape_w = rows.max_of { |(shape, _, _, _)| column_width(shape) }
-    name_w = rows.max_of { |(_, name, _, _)| column_width(name) }
+    # Padded by TERMINAL WIDTH, not codepoint count: `ljust` under-pads a CJK rule name and
+    # steps the command beside it out of line, in a listing read before a command is armed.
+    shape_w = rows.max_of { |(shape, _, _, _)| Output.cell_width(shape) }
+    name_w = rows.max_of { |(_, name, _, _)| Output.cell_width(name) }
     lines = ["#{run_a_command(found.size)} a local command here, with your privileges:"]
     rows.each do |(shape, name, command, enabled)|
-      lines << "  #{pad(shape, shape_w)}  #{pad(name, name_w)}  #{command}#{"  [disabled]" unless enabled}"
+      lines << "  #{Output.pad(shape, shape_w)}  #{Output.pad(name, name_w)}  #{command}#{"  [disabled]" unless enabled}"
     end
     lines << command_report_footer(found.size, dry, allowed)
     lines
@@ -664,19 +666,6 @@ module Gori::CLI
     return "importing #{count == 1 ? "it" : "them"} is the same trust decision as running the author's script" unless dry
     return "--dry-run writes nothing; --allow-commands is set, so a real import would apply #{count == 1 ? "it" : "them"}" if allowed
     "--dry-run writes nothing; a real import of this profile needs --allow-commands"
-  end
-
-  # Column padding by TERMINAL WIDTH, not codepoint count. `ljust` measures `String#size`, so a
-  # CJK rule name — two cells per character — under-padded its column and stepped the command
-  # beside it out of line, in a listing whose whole purpose is to be read carefully before a
-  # command is armed. `Output.cell_width` is that measure, now shared with every `gori run`
-  # listing that pads an operator-typed name.
-  private def self.column_width(s : String) : Int32
-    Output.cell_width(s)
-  end
-
-  private def self.pad(s : String, width : Int32) : String
-    Output.pad(s, width)
   end
 
   # A string from a profile, safe to put on a terminal: scrubbed to valid UTF-8, with every

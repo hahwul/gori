@@ -86,15 +86,8 @@ module Gori
       # The OAST dispatcher has to inspect argv before each nested parser can claim its own
       # options. Keep the list of value-taking flags here so a value equal to a subcommand (for
       # example `--provider providers`) is never mistaken for the first positional token.
-      private def self.oast_value_flag?(arg : String) : Bool
-        case arg
-        when "--project", "--db", "--provider", "--server", "--token", "--interval",
-             "--format", "--name", "--kind", "--host"
-          true
-        else
-          false
-        end
-      end
+      private OAST_VALUE_FLAGS = %w[--project --db --provider --server --token --interval
+        --format --name --kind --host]
 
       # `strip_project_flags` runs before an OptionParser, so a missing value would otherwise
       # be consumed as another flag (or disappear at argv's end) and the command could print
@@ -111,7 +104,7 @@ module Gori
         i = 0
         while i < args.size
           a = args[i]
-          if oast_value_flag?(a)
+          if OAST_VALUE_FLAGS.includes?(a)
             if a == "--project" || a == "--db"
               if err = oast_project_flag_error(a, args[i + 1]?)
                 abort err
@@ -345,11 +338,10 @@ module Gori
         verb = enabled ? "enable" : "disable"
         proj = ProjectFlags.new
 
-        leftover = parse_args(args, "gori run oast providers #{verb}") do |p|
+        leftover = one_positional_list(args, "gori run oast providers #{verb}", "<id>") do |p|
           p.banner = "Usage: gori run oast providers #{verb} <id>"
           project_options(p, proj, "update")
         end
-        abort "gori run oast providers #{verb}: too many arguments (expected one <id>, got: #{leftover.join(" ")})" if leftover.size > 1
         id = leftover.first?
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
@@ -362,11 +354,10 @@ module Gori
       private def self.cmd_oast_provider_delete(args : Array(String)) : Nil
         proj = ProjectFlags.new
 
-        leftover = parse_args(args, "gori run oast providers delete") do |p|
+        leftover = one_positional_list(args, "gori run oast providers delete", "<id>") do |p|
           p.banner = "Usage: gori run oast providers delete <id>"
           project_options(p, proj, "update")
         end
-        abort "gori run oast providers delete: too many arguments (expected one <id>, got: #{leftover.join(" ")})" if leftover.size > 1
         id = leftover.first?
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
@@ -582,13 +573,12 @@ module Gori
       private def self.cmd_oast_session_release(args : Array(String)) : Nil
         proj = ProjectFlags.new
 
-        leftover = parse_args(args, "gori run oast release") do |p|
+        leftover = one_positional_list(args, "gori run oast release", "<id>") do |p|
           p.banner = "Usage: gori run oast release <id>\n\n" \
                      "Deregister the session's server-side state. Its stored callbacks stay,\n" \
                      "but payloads minted from it stop resolving."
           project_options(p, proj, "read")
         end
-        abort "gori run oast release: too many arguments (expected one <id>, got: #{leftover.join(" ")})" if leftover.size > 1
 
         id = oast_session_id(leftover.first?, "release")
         with_store(resolve_read_project(proj.name, proj.db)) do |store|

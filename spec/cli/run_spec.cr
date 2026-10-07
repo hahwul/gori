@@ -392,12 +392,12 @@ end
 
 # #406: `gori run repeater send/<flow-id>/minimize` ran only the Layer-2 (Sandbox/exclude)
 # gate, so a configured project scope was silently inert and there was no --allow-unscoped
-# waiver — unlike fuzz/mine/sequence/discover and MCP. `repeater_out_of_scope?` is the Layer-1
+# waiver — unlike fuzz/mine/sequence/discover and MCP. `repeater_scope_verdict` is the Layer-1
 # decision `abort_if_out_of_scope!` acts on; a Gate::Configured outbound must refuse an
 # out-of-scope origin and a waived one must not.
 module Gori::CLI::Run
   def self.repeater_out_of_scope_for_spec(ob : Gori::Outbound, plan : Gori::Repeater::Plan) : Bool
-    repeater_out_of_scope?(ob, plan)
+    repeater_scope_verdict(ob, plan).blocked?
   end
 end
 

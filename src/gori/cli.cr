@@ -65,7 +65,7 @@ module Gori
         # dispatch and not inside each subcommand: `gori run` has dozens of leaves, and a leaf
         # that forgot would file its writes under whatever ran last.
         FlowSource.surface = FlowSource::Surface::Cli
-        run_run(subargs)
+        Run.dispatch(subargs)
       when "wizard"
         run_wizard(subargs)
       when "tutorial"
@@ -331,23 +331,18 @@ module Gori
             "those defaults, not your settings.\nFix or remove that file, then re-run."
     end
 
-    # Handler for `gori run` (the non-interactive CLI mode). Named run_run to match
-    # the run_<subcommand> dispatch convention; the subcommand suite itself lives in
-    # `Gori::CLI::Run` (src/gori/cli/run.cr).
-    private def self.run_run(args : Array(String)) : Nil
-      Run.dispatch(args)
-    end
-
     # The `gori <cmd>` twin of `Run.parse_args`'s tail: build the parser, let the command
     # register its flags, then add `-h` (so `--help` lists it last) and the two refusals whose
     # OptionParser defaults RAISE past `CLI.run` as a backtrace. Returned unparsed, because the
     # callers parse it their own way (`stray_args`) and several print it as their usage.
-    private def self.option_parser(prefix : String, & : OptionParser ->) : OptionParser
+    # `missing_prefix` leads the missing-value refusal: `gori run` names the command there
+    # (`Run.option_parser`), `gori <cmd>` never has.
+    def self.option_parser(prefix : String, missing_prefix : String = "", & : OptionParser ->) : OptionParser
       OptionParser.new do |p|
         yield p
         p.on("-h", "--help", "Show this help") { puts p; exit 0 }
         p.invalid_option { |flag| abort CLI.unknown_option_message(prefix, flag, p) }
-        p.missing_option { |flag| abort "missing value for #{flag}" }
+        p.missing_option { |flag| abort "#{missing_prefix}missing value for #{flag}" }
       end
     end
 
