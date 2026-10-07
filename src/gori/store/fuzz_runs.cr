@@ -388,29 +388,21 @@ module Gori
         count = 0
         last_idx = 0_i64
         last_id = 0_i64
+        keyset = ""
+        args = [run_id] of DB::Any
         if idx = after_idx
-          @db.query("SELECT #{columns} FROM fuzz_results WHERE run_id = ?#{matched} " \
-                    "AND (idx > ? OR (idx = ? AND id > ?)) ORDER BY idx, id LIMIT ?",
-            run_id, idx, idx, after_id, batch_size) do |rs|
-            rs.each do
-              row = read_fuzz_result(rs)
-              count += 1
-              last_idx = row.idx
-              last_id = row.id
-              block.call(row)
-            end
-          end
-        else
-          @db.query("SELECT #{columns} FROM fuzz_results WHERE run_id = ?#{matched} " \
-                    "ORDER BY idx, id LIMIT ?",
-            run_id, batch_size) do |rs|
-            rs.each do
-              row = read_fuzz_result(rs)
-              count += 1
-              last_idx = row.idx
-              last_id = row.id
-              block.call(row)
-            end
+          keyset = "AND (idx > ? OR (idx = ? AND id > ?)) "
+          args << idx << idx << after_id
+        end
+        args << batch_size
+        @db.query("SELECT #{columns} FROM fuzz_results WHERE run_id = ?#{matched} " \
+                  "#{keyset}ORDER BY idx, id LIMIT ?", args: args) do |rs|
+          rs.each do
+            row = read_fuzz_result(rs)
+            count += 1
+            last_idx = row.idx
+            last_id = row.id
+            block.call(row)
           end
         end
         break if count < batch_size
