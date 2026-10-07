@@ -37,10 +37,6 @@ module Gori::Tui
       Verb::Scope::Sequencer
     end
 
-    def command_section : Symbol
-      :common
-    end
-
     # --- shell-facing accessors ---
     def count : Int32
       @sessions.size
@@ -52,10 +48,6 @@ module Gori::Tui
 
     def view_at(idx : Int32) : SequencerView?
       (0 <= idx < @sessions.size) ? @sessions[idx].view : nil
-    end
-
-    def body_badge : Symbol
-      :body # read-only display + navigable tables — never an editor
     end
 
     def body_hint(focus : Symbol) : String
