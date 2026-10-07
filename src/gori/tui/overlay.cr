@@ -530,6 +530,39 @@ module Gori::Tui
       @sel = idx unless skip_row?(idx)
     end
 
+    # The text field on `row`, or nil when the row is not one (a cycler, the commit row).
+    private def text_field_for(row : Int32) : TextField?
+      nil
+    end
+
+    # Live IME composition goes to the selected row's text field, when it has one.
+    def set_preedit(text : String) : Nil
+      text_field_for(@sel).try(&.set_preedit(text))
+    end
+
+    # A cycler row's keys: ←/→ step its value (the form's `adjust`), ↵/space moves on.
+    private def cycler_key(key : Termisu::Input::Key) : Symbol
+      case
+      when key.left?              then adjust(-1)
+      when key.right?             then adjust(1)
+      when key.enter?, key.space? then move(1)
+      end
+      :stay
+    end
+
+    # A text row's keys: ↵ commits when `commit` (the form's last text row) and moves on
+    # otherwise; anything else edits the row's field.
+    private def text_row_key(ev : Termisu::Event::Key, commit : Bool) : Symbol
+      field = text_field_for(@sel)
+      if ev.key.enter?
+        return :commit if commit
+        move(1)
+      elsif field
+        field.handle_edit_key(ev)
+      end
+      :stay
+    end
+
     # ↑/⇤ and ↓/↹ step between rows. True when `ev` was one of the four, so a key ladder can
     # take it as one arm.
     private def field_nav?(ev : Termisu::Event::Key) : Bool

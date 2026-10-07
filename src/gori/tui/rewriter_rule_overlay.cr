@@ -410,12 +410,7 @@ module Gori::Tui
       return :stay if field_nav?(ev)
 
       if cycler_row?(@sel)
-        case
-        when key.left?              then adjust(-1)
-        when key.right?             then adjust(1)
-        when key.enter?, key.space? then move(1)
-        end
-        :stay
+        cycler_key(key)
       elsif @sel == ROW_SAVE
         (key.enter? || key.space?) ? :commit : :stay
       elsif @sel == ROW_VALUE && short_circuit_op?
@@ -426,22 +421,11 @@ module Gori::Tui
         @on_edit_options.try(&.call) if key.enter? || key.space?
         :stay
       else # text row
-        field = text_field_for(@sel)
-        if key.enter?
-          # ↵ on the LAST text row commits — the value, or the header name when the op has no
-          # value row (remove header). A stub's body-file row is followed by its options, so ↵
-          # there moves on like every other row before the end.
-          return :commit if @sel == ROW_VALUE || (@sel == ROW_FIND && skip_row?(ROW_VALUE) && !short_circuit_op?)
-          move(1)
-        elsif field
-          field.handle_edit_key(ev)
-        end
-        :stay
+        # ↵ on the LAST text row commits — the value, or the header name when the op has no
+        # value row (remove header). A stub's body-file row is followed by its options, so ↵
+        # there moves on like every other row before the end.
+        text_row_key(ev, @sel == ROW_VALUE || (@sel == ROW_FIND && skip_row?(ROW_VALUE) && !short_circuit_op?))
       end
-    end
-
-    def set_preedit(text : String) : Nil
-      text_field_for(@sel).try(&.set_preedit(text))
     end
 
     def row_count : Int32
