@@ -250,19 +250,4 @@ describe Gori::Authorize::Identity do
     Gori::Authorize::Identity.should eq(Gori::SessionSlot)
     Gori::Authorize::Identity.new("admin").should be_a(Gori::SessionSlot)
   end
-
-  it "serializes through the Authorize entry points into the same blob" do
-    list = [Gori::Authorize::Identity.new("admin", set_headers: [{"Cookie", "s=1"}])]
-    Gori::Authorize.serialize(list).should eq(Gori::SessionSlot.serialize(list))
-    Gori::Authorize.parse_json(Gori::SessionSlot.serialize(list)).map(&.name).should eq(["admin"])
-  end
-
-  it "overlays through the Authorize entry points identically" do
-    h = head("GET / HTTP/1.1", "Host: x")
-    id = Gori::Authorize::Identity.new("admin", set_headers: [{"Cookie", "s=1"}])
-    Gori::Authorize.overlay_head(h, id).should eq(Gori::SessionSlot.overlay_head(h, id))
-    Gori::Authorize.overlay_wire(h, id).should eq(Gori::SessionSlot.overlay_wire(h, id))
-    Gori::Authorize.overlay_request(h, "b".to_slice, id)
-      .should eq(Gori::SessionSlot.overlay_request(h, "b".to_slice, id))
-  end
 end

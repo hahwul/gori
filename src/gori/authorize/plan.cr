@@ -118,7 +118,7 @@ module Gori::Authorize
     # becomes `identities.size` real requests, so an uncapped query turns a browse into a
     # replay of the whole session.
     property limit : Int32
-    # Explicit identities as JSON — the shape `Authorize.parse_json` already reads, so a
+    # Explicit identities as JSON — the shape `SessionSlot.parse_json` already reads, so a
     # `--identities FILE`, an MCP `identities` array serialized back, and the project's own
     # stored blob are one format. Nil falls back to the project's saved set.
     property identities_json : String?
@@ -301,9 +301,9 @@ module Gori::Authorize
       raw = options.identities_json ||
             options.store.setting(Store::AUTHORIZE_IDENTITIES_KEY)
       # A malformed blob degrades to an empty list rather than raising — see
-      # `Authorize.parse_json`. That is right on the project-open path and wrong here, so
+      # `SessionSlot.parse_json`. That is right on the project-open path and wrong here, so
       # the emptiness is what gets named, with `detail` saying which source produced it.
-      list = Authorize.parse_json(raw)
+      list = SessionSlot.parse_json(raw)
       reject_duplicate_names(list)
       reject_multiple_baselines(list)
       list = [Identity.as_captured(baseline_name(list))] + list unless list.any?(&.baseline?)
