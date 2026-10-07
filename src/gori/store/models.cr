@@ -739,11 +739,8 @@ module Gori
       def self.stored(value : Int32) : self
         new(value.clamp(Info.value, Critical.value))
       end
-
-      def label : String
-        to_s.downcase
-      end
     end
+    lowercase_label Severity
 
     # Triage state of an issue, independent of severity (stored as the enum
     # value; V12). Open is the default for a freshly captured issue.
@@ -823,10 +820,6 @@ module Gori
       Control
       Cleanup
 
-      def label : String
-        to_s.downcase
-      end
-
       def self.parse?(s : String) : RetestRole?
         v = s.strip.downcase
         values.find { |r| r.label == v }
@@ -839,6 +832,7 @@ module Gori
         setup?
       end
     end
+    lowercase_label RetestRole
 
     # What one step's result says. Six, not a bool: the four ways a step can fail to produce
     # an answer are acted on differently, and folding them into `fail` reports a finding the
@@ -851,15 +845,12 @@ module Gori
       Blocked      # gori REFUSED to send (scope, Sandbox, an exclude rule)
       Skipped      # never attempted
 
-      def label : String
-        to_s.downcase
-      end
-
       def self.parse?(s : String) : RetestOutcome?
         v = s.strip.downcase
         values.find { |o| o.label == v }
       end
     end
+    lowercase_label RetestOutcome
 
     # A run folded into one word — what a regression check exits on.
     enum RetestVerdict
@@ -868,15 +859,12 @@ module Gori
       Inconclusive
       Blocked
 
-      def label : String
-        to_s.downcase
-      end
-
       def self.parse?(s : String) : RetestVerdict?
         v = s.strip.downcase
         values.find { |x| x.label == v }
       end
     end
+    lowercase_label RetestVerdict
 
     # One configured step of an issue's retest. `ref_kind`/`ref_id` reuse `LinkRefKind` so a
     # step and an entity link name the same workbench object the same way; only `Repeater` is
@@ -1460,10 +1448,6 @@ module Gori
       Project
       Global
 
-      def label : String
-        to_s.downcase
-      end
-
       # Unknown → Project. Same tolerant shape `MatchKind.from_label` has, and the safe
       # direction: a mistyped scope addresses THIS project rather than every future one.
       def self.from_label(s : String) : RuleScope
@@ -1475,6 +1459,7 @@ module Gori
         global? ? "G" : "P"
       end
     end
+    lowercase_label RuleScope
 
     # A Match&Replace rule (the "Rewriter" tab): rewrites a request/response HEAD
     # (request line + headers) or BODY (the entity body) in flight. Human-authored (P4),
@@ -1731,11 +1716,8 @@ module Gori
       Green
       Blue
       Purple
-
-      def label : String
-        to_s.downcase
-      end
     end
+    lowercase_label MarkerColor
 
     # HOW a Colormarker rule paints its row. `Full` tints the whole row's background; `Strip`
     # paints one saturated cell in a narrow column History reserves ahead of TIME.
@@ -1749,14 +1731,11 @@ module Gori
       Full
       Strip
 
-      def label : String
-        to_s.downcase
-      end
-
       def self.from_label(s : String) : MarkerStyle
         s.downcase == "full" ? Full : Strip
       end
     end
+    lowercase_label MarkerStyle
 
     # A Colormarker rule: paint the History rows whose flow matches `match_filter` in `color`,
     # using `style`. DISPLAY ONLY — nothing here reaches the proxy. A rule paints a row that
