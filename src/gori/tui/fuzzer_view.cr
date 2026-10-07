@@ -203,7 +203,7 @@ module Gori::Tui
       # which the user may have edited (adding/removing §…§ markers) since the run.
       @run_template = nil.as(Fuzz::Template?)
       @pending_template = nil.as(Fuzz::Template?)
-      # {update_content_length?, add_content_length_when_missing?, keep_bodies} as of the run
+      # {update_content_length?, add_cl_when_missing (always true), keep_bodies} as of the run
       # that produced @results — frozen alongside @run_template for the same reason: the
       # reconstruction and the note that names the retention policy must describe THAT run,
       # not whatever the CONFIG pane says now.
@@ -1730,7 +1730,7 @@ module Gori::Tui
       # Freeze the CL knobs + retention policy the same way: the reconstruction in
       # `result_request` has to reproduce what THIS run's generator did, and its note has to
       # name the retention THIS run used — not what the CONFIG pane says after a post-run edit.
-      @pending_policy = {@config.update_content_length?, @config.add_content_length_when_missing?,
+      @pending_policy = {@config.update_content_length?, true,
                          @matcher.keep_bodies}
       @pending_auto_encode = plan.auto_encode
       # The generator's OWN answer, not `@config.reframe_grpc?`: the knob is only half of it —
@@ -3950,7 +3950,7 @@ module Gori::Tui
     # The frozen {update_cl, add_cl_when_missing, keep_bodies} of the run that produced
     # @results, falling back to the live config for a view whose results predate the freeze.
     private def run_policy : {Bool, Bool, Symbol}
-      @run_policy || {@config.update_content_length?, @config.add_content_length_when_missing?,
+      @run_policy || {@config.update_content_length?, true,
                       @matcher.keep_bodies}
     end
 

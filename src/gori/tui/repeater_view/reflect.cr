@@ -141,13 +141,13 @@ class Gori::Tui::RepeaterView
   # `reflect_chunk_content_length`'s `synced == source` early return means this predicate is
   # never even reached for one.
   #
-  # THE predicate lives in `Repeater::FlowRequest`, because the WIRE has to apply the same
+  # THE predicate lives in `Proxy::Codec::Http1`, because the WIRE has to apply the same
   # rule and did not: `resync_content_length` rewrote a `Content-Length: 0abc` that this
   # guard deliberately preserved, so the pane went on showing `0abc` while the socket got
   # `Content-Length: 2` — the display-vs-wire lie the paragraph above is entirely about,
   # told by the half nobody was looking at.
   private def plain_numeric_header?(line : String) : Bool
-    Repeater::FlowRequest.rewritable_length_header?(line)
+    Proxy::Codec::Http1.rewritable_length_header?(line)
   end
 
   # See @link_host_to_target: on the FIRST target edit of a fresh ^N tab, mirror the new

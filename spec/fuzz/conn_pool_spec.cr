@@ -163,7 +163,7 @@ private class PoisonOrigin
         # ONE write, not two. `TCPSocket#sync` is true by default, so `conn << resp << ghost`
         # is two `write` syscalls and therefore two segments — the residue then arrives after
         # the response instead of with it, and whether it has landed by the time
-        # `checkout_state` looks is a race this spec loses roughly one full-suite run in three
+        # `SocketResidue.state` looks is a race this spec loses roughly one full-suite run in three
         # (it never loses it alone, which is what made it read as a mystery). A real
         # out-of-process origin whose body over-ran its Content-Length puts the leftover in
         # the same send as the response, which is the case under test; residue still in
@@ -535,7 +535,7 @@ describe F::ConnPool do
       # A body longer than its Content-Length: gori reads the framed 4 bytes and the rest sits
       # in the receive buffer. Parking it would hand the NEXT request that leftover response —
       # a 200 attributed to the wrong payload, silently. `reusable_response?` sees only the
-      # head, so the checkout-time `checkout_state` is what has to catch this.
+      # head, so the checkout-time `SocketResidue.state` is what has to catch this.
       #
       # The poison is the FIRST payload deliberately: this origin is a same-process fiber, and
       # on a REUSED socket the scheduler can interleave its write past gori's checkout so the

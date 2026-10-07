@@ -1657,7 +1657,7 @@ store.set_repeater_name(ids[:repeater_bound], "bound #{bind_token("token")}")
 store.set_repeater_tags(ids[:repeater_bound], "bindings env")
 
 # A WebSocket tab. A repeater is a WS session when its request bytes are an upgrade
-# handshake (Repeater::WsEngine.upgrade_request?) — nothing else marks it — and the
+# handshake (Proxy::WS.upgrade_request?) — nothing else marks it — and the
 # outbound frames live in ws_messages beside the captured ones.
 ws_repeater_req = String.build do |b|
   b << "GET /ws/chat HTTP/1.1\r\n"

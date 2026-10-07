@@ -55,11 +55,11 @@ module Gori::Discover
       n = body.size
       while i < n && tokens < MAX_TOKENS
         # skip non-alnum
-        while i < n && !alnum?(body.unsafe_fetch(i))
+        while i < n && !body.unsafe_fetch(i).unsafe_chr.ascii_alphanumeric?
           i += 1
         end
         start = i
-        while i < n && alnum?(body.unsafe_fetch(i))
+        while i < n && body.unsafe_fetch(i).unsafe_chr.ascii_alphanumeric?
           i += 1
         end
         len = i - start
@@ -123,12 +123,6 @@ module Gori::Discover
     # runs it over the baseline set for every probe.
     def self.hamming(a : UInt64, b : UInt64) : Int32
       (a ^ b).popcount.to_i32
-    end
-
-    private def self.alnum?(b : UInt8) : Bool
-      (b >= 0x30_u8 && b <= 0x39_u8) ||   # 0-9
-        (b >= 0x41_u8 && b <= 0x5a_u8) || # A-Z
-        (b >= 0x61_u8 && b <= 0x7a_u8)    # a-z
     end
 
     # A token is "dynamic" (skipped) when it's all digits, or a long all-hex run — i.e. an

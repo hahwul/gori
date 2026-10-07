@@ -31,21 +31,11 @@ module Gori::Settings
     int_field(h, "max_flows").try { |v| self.retention_max_flows = v < 0 ? 0 : v }
   end
 
-  # Factory reset for this section (dispatched by Settings.reset_to_factory).
-  private def self.reset_retention : Nil
-    self.retention_max_flows = DEFAULT_RETENTION_FLOWS
-  end
-
-  # Omitted at the factory default, like the other optional sections, so an untouched install
-  # keeps a settings.json free of values nobody chose.
-  private def self.serialize_retention(j : JSON::Builder) : Nil
-    return if retention_max_flows == DEFAULT_RETENTION_FLOWS
-    j.field "retention" do
-      j.object do
-        j.field "max_flows", retention_max_flows
-      end
-    end
-  end
+  # Factory reset + writer (reset dispatched by Settings.reset_to_factory). Omitted at the
+  # factory default, like the other optional sections, so an untouched install keeps a
+  # settings.json free of values nobody chose.
+  defaulted_section retention, "retention",
+    {"max_flows", retention_max_flows, DEFAULT_RETENTION_FLOWS}
 
   # nil if `value` is an acceptable cap; an error message otherwise. Only a non-integer is
   # rejected — 0 is the documented "unlimited", and there is no upper bound to enforce (a huge

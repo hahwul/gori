@@ -368,7 +368,7 @@ module Gori::Miner
     # a `debug` parameter the origin reflects, the mine reported `baseline: stable · 0 found ·
     # 0 errors` and exit 0, while the same seed carrying `Content-Length: 5` found it.
     #
-    # This is `Fuzz::Config#add_content_length_when_missing`'s default-TRUE decision (#905) at
+    # This is `Fuzz::Config#update_content_length`'s add-when-missing decision (#905) at
     # the sibling builder that was missed. It is done to the SEED rather than left to
     # `Inject.apply`'s own `add_cl_when_missing` flag — which no surface can set, and which
     # `Baseline`'s plain stability rounds never reach — because the baseline sends `@base`

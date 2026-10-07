@@ -37,7 +37,7 @@ module Gori
     # file under `active/`; the analyzer iterates RULES, sending each rule's probe and folding
     # its detections. To add a check: drop a new `Rule` subclass in `active/` and append it here.
     module Active
-      # The primary rule, reused for the registry AND the module-level facade.
+      # The primary rule, first in the registry.
       PRIMARY = ReflectedParam.new
 
       # The empty "nothing turned off" set — a shared constant so the `disabled` default in
@@ -56,14 +56,6 @@ module Gori
                SsrfOast.new, CmdInjectionOast.new, XxeOast.new, RfiOast.new,
                RateLimitBypass.new, ForbiddenMethodBypass.new,
                InsecureHttpMethods.new] of Rule
-
-      def self.plan(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : Plan?
-        PRIMARY.plan(detail, opts)
-      end
-
-      def self.detections(plan : Plan, result : Repeater::Result, detail : Store::FlowDetail) : Array(Detection)
-        PRIMARY.detections(plan, result, detail)
-      end
 
       # The WHOLE probe request, marked as bytes the session-binding pass must copy through
       # untouched (`Fuzz::Backend#send`'s `verbatim`). Not a convenience — the provenance of

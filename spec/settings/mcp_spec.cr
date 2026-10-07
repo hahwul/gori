@@ -62,7 +62,7 @@ describe "Settings mcp section" do
       end
     end
 
-    # load_bool_h, not a plain `||` — a stored `false` must survive, not resurrect the prior
+    # load_bool, not a plain `||` — a stored `false` must survive, not resurrect the prior
     # in-memory value (which a naive `|| current` would do, since false is falsy).
     it "a stored false survives a reload, even from a prior true" do
       with_mcp_home do

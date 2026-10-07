@@ -184,6 +184,43 @@ module Gori
       raise CookieError.new("invalid zlib-compressed payload")
     end
 
+    # The JSON inside a Flask/Django payload segment, inflated first when a leading "."
+    # marks it zlib-compressed.
+    def payload_bytes(seg : String) : Bytes
+      compressed = seg.starts_with?('.')
+      raw = b64decode(compressed ? seg[1..] : seg)
+      compressed ? zlib_inflate(raw) : raw
+    end
+
+    # The session JSON, pretty-printed. "(undecodable payload)" when it doesn't
+    # base64url→JSON, mirroring jwt_decode.
+    def payload_pretty(seg : String) : String
+      RawJson.reformat(String.new(payload_bytes(seg)), "  ")
+    rescue
+      "(undecodable payload)"
+    end
+
+    def payload_json_or_null(seg : String) : String
+      RawJson.reformat(String.new(payload_bytes(seg)))
+    rescue
+      "null"
+    end
+
+    def compact_json(json : String) : String
+      RawJson.reformat(json) # numbers and duplicate keys as written (#1200, as #1169 for JWT)
+    rescue ex : JSON::ParseException
+      raise CookieError.new("invalid payload JSON: #{ex.message}")
+    end
+
+    # First of `secrets` whose signature (the block) matches `signature`, compared in
+    # constant time; nil when none does.
+    def first_signing(secrets, signature : String, & : String -> String) : String?
+      secrets.each do |s|
+        return s if Crypto::Subtle.constant_time_compare(yield(s), signature)
+      end
+      nil
+    end
+
     BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
     # django.core.signing timestamp codec: base62 of the plain unix second.

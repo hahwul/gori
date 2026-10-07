@@ -71,7 +71,7 @@ module Gori::Settings
   private def self.parse_redaction(node : JSON::Any?) : Nil
     h = node.try(&.as_h?) || return
     h["active"]?.try(&.as_s?).try { |v| self.redaction_active = v.strip }
-    self.redaction_default = load_bool_h(h, "default", redaction_default?)
+    self.redaction_default = load_bool(h, "default", redaction_default?)
     h["salt"]?.try(&.as_s?).try(&.strip).try { |v| Redact.salt = v unless v.empty? }
     h["profiles"]?.try(&.as_a?).try { self.redaction_profiles = Redact::Profile.list_from_json(h["profiles"]) }
   end

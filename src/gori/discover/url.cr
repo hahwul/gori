@@ -245,7 +245,9 @@ module Gori::Discover
     # segment and that callers rely on `template_key` being case-folded, and that was the one
     # input where it did not: `/ÄÖÜ/1` and `/äöü/1` are one route and produced two `@templates`
     # entries, so the second spelling re-paid a whole directory's brute-force budget.
-    # `Url.ascii_lower` draws the same line for the same reason.
+    #
+    # `resolve` reads it too, for the copy it saves: it lowers every href it is handed only to
+    # test a handful of scheme prefixes, and a link is usually written lowercase already.
     private def self.ascii_downcase(seg : String) : String
       seg.each_byte do |b|
         return seg.downcase if (0x41_u8 <= b <= 0x5a_u8) || b >= 0x80_u8
@@ -376,20 +378,6 @@ module Gori::Discover
       (ext = StaticAsset.extension(path)) ? BINARY_EXT.includes?(ext) : false
     end
 
-    # Answers `s.downcase`, returning `s` ITSELF when lowering it would change nothing — which
-    # is the common href, since a link is written lowercase. `resolve` lowers every href it is
-    # handed only to test a handful of scheme prefixes and to feed `scheme_prefixed?`, so that
-    # copy was a whole string minted per considered link, on the orchestrator fiber, for a
-    # value nothing keeps. The scan answers the same question the copy would: every ASCII byte
-    # outside `A-Z` is its own lowercase, so a string carrying neither an ASCII capital nor a
-    # byte >= 0x80 is unchanged by `downcase`, and anything else still takes it.
-    private def self.ascii_lower(s : String) : String
-      s.each_byte do |b|
-        return s.downcase if (0x41_u8 <= b <= 0x5a_u8) || b >= 0x80_u8
-      end
-      s
-    end
-
     # Resolve `href` (from a page at `base`) into an absolute http(s) URL, or nil for
     # non-http / fragment-only / unparseable. Handles absolute, scheme-relative (//h/p),
     # absolute-path (/p), and relative (p, ../p) forms with dot-segment normalization.
@@ -401,7 +389,7 @@ module Gori::Discover
         h = h[0, fi]
       end
       return nil if h.empty? || h.starts_with?('#')
-      lower = ascii_lower(h)
+      lower = ascii_downcase(h)
       return nil if lower.starts_with?("mailto:") || lower.starts_with?("tel:") ||
                     lower.starts_with?("javascript:") || lower.starts_with?("data:") ||
                     lower.starts_with?("about:") || lower.starts_with?("blob:")

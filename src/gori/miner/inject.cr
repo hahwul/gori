@@ -3,6 +3,7 @@ require "json"
 require "mime/multipart"
 require "./types" # Location, which apply's own signature names
 require "../fuzz/content_length"
+require "../ascii_bytes"
 require "../process_hook"
 require "../json_spans"
 
@@ -316,19 +317,6 @@ module Gori::Miner
       body.size >= 2 && body[body.size - 2] == 0x0d_u8 && body[body.size - 1] == 0x0a_u8
     end
 
-    # First occurrence of `needle` at or after `from`, byte-wise (String#index would corrupt a
-    # non-UTF-8 body). Used to locate an injected JSON fragment in the spliced body.
-    private def self.forward_index_of(haystack : Bytes, needle : Bytes, from : Int32) : Int32?
-      return nil if needle.empty? || needle.size > haystack.size
-      i = from < 0 ? 0 : from
-      last = haystack.size - needle.size
-      while i <= last
-        return i if haystack[i, needle.size] == needle
-        i += 1
-      end
-      nil
-    end
-
     # Sort spans by start and fold any that touch or overlap into one. `Env.expand_bindings`
     # walks the verbatim list with a single forward cursor, so it requires sorted + disjoint
     # ranges; only the JSON path can emit incidentally overlapping fragments, but every caller
@@ -448,7 +436,8 @@ module Gori::Miner
       params.each do |(n, v)|
         frag = "#{n.to_json}:#{v.to_json}".to_slice
         from = 0
-        while idx = forward_index_of(new_body, frag, from)
+        # Byte-wise: String#index would corrupt a non-UTF-8 body.
+        while idx = AsciiBytes.index(new_body, frag, from)
           spans << {body_off + idx, body_off + idx + frag.size}
           from = idx + frag.size
         end
@@ -485,7 +474,7 @@ module Gori::Miner
     # byte of `body` copied through verbatim. The road for a body the node walk cannot take —
     # one that is not valid UTF-8, or not one JSON value. nil when there is no `{` to splice into.
     private def self.splice_json_object(body : Bytes, params : Array({String, String})) : Bytes?
-      bi = forward_index_of(body, "{".to_slice, 0)
+      bi = body.index(0x7b_u8) # `{`
       return nil unless bi
       at = bi + 1
       inserts = json_members(params)

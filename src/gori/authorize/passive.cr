@@ -112,10 +112,10 @@ module Gori
         base_id = identities.find(&.baseline?) || identities.first
         # A context per identity, dial-less: nothing here goes on a wire, and a `$GEN` value
         # differing between two identities is not what this predicate asks about.
-        base = Authorize.overlay_head(head, Authorize.resolve_without_report(base_id, Env::Generation.new))
+        base = SessionSlot.overlay_head(head, Authorize.resolve_without_report(base_id, Env::Generation.new))
         identities.any? do |id|
           next false if id.same?(base_id)
-          Authorize.overlay_head(head, Authorize.resolve_without_report(id, Env::Generation.new)) != base
+          SessionSlot.overlay_head(head, Authorize.resolve_without_report(id, Env::Generation.new)) != base
         end
       end
 

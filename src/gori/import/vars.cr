@@ -105,6 +105,48 @@ module Gori
         authority.includes?('{') || authority.includes?('}')
       end
 
+      # The expanded URL, or a skip naming why it cannot be stored: a variable left
+      # unexpanded (recorded in `missing`, so a file that resolves to nothing can say which),
+      # a braced host, or nothing at all.
+      def self.checked_url(url : String, missing : Set(String)) : String
+        left = unresolved(url)
+        unless left.empty?
+          left.each { |n| missing << n }
+          raise Gori::Error.new("unresolved variable in URL: #{url}")
+        end
+        raise Gori::Error.new("templated host in URL: #{url}") if braced_authority?(url)
+        raise Gori::Error.new("request has an empty url") if url.empty?
+        url
+      end
+
+      # A fixed boundary (not a random one): imports must be reproducible, and two runs over
+      # the same collection should produce byte-identical flows.
+      FORM_BOUNDARY = "----GoriImportFormBoundary"
+
+      # A multipart body of a form editor's enabled text rows; the block reads each format's
+      # own `{name, value}` pairs out of them. A `type: "file"` part references a path on
+      # the exporter's machine, so dropping it keeps the other fields rather than discarding
+      # the whole request.
+      def self.form_data(node : JSON::Any?, & : JSON::Any -> Array({String, String})) : {Bytes?, String?}
+        arr = node.try(&.as_a?)
+        return {nil, nil} unless arr
+        text_parts = arr.select do |item|
+          h = item.as_h?
+          !!h && h["disabled"]?.try(&.as_bool?) != true && h["type"]?.to_s != "file"
+        end
+        pairs = yield JSON::Any.new(text_parts)
+        return {nil, nil} if pairs.empty?
+        body = String.build do |b|
+          pairs.each do |(k, v)|
+            b << "--" << FORM_BOUNDARY << "\r\n"
+            b << %(Content-Disposition: form-data; name="#{k}") << "\r\n\r\n"
+            b << v << "\r\n"
+          end
+          b << "--" << FORM_BOUNDARY << "--\r\n"
+        end
+        {body.to_slice, "multipart/form-data; boundary=#{FORM_BOUNDARY}"}
+      end
+
       # Collect `[{key/name: …, value: …}]` — the shape Postman's `variable` array and
       # Insomnia's environment `data` both reduce to — into a table, skipping disabled rows.
       def self.merge!(table : Table, node : JSON::Any?) : Table

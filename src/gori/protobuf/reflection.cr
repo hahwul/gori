@@ -212,7 +212,7 @@ module Gori::Protobuf
       # `host:port` as the cache keys it and as every surface prints it. The scheme rides
       # along because http (h2c) and https are different targets.
       def authority : String
-        Repeater::H2Engine.authority(@host, @port, @scheme)
+        Gori::Url.authority(@scheme, @host, @port)
       end
 
       # The cache key: scheme + authority, so `https://api.test` and `http://api.test` are
@@ -569,7 +569,8 @@ module Gori::Protobuf
 
     # The HPACK field list for one ServerReflectionInfo stream. Written out in full rather
     # than derived from an h1 head: `send_fields` takes the fields verbatim, which is why
-    # `:authority` is here explicitly (see `H2Engine.authority`).
+    # `:authority` is here explicitly (`Gori::Url.authority`, the IPv6 bracketing and
+    # default-port rule `H2Engine` writes too).
     private def fields(client : Client, service : String) : Array({String, String})
       [
         {":method", "POST"},

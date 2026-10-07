@@ -100,17 +100,6 @@ module Gori::Fuzz
   class WsError < Gori::Error
   end
 
-  # A `stop_on` (issue #1240) asked for alongside a shape it cannot ride.
-  #
-  # Deliberately NOT a `PlanError::Reason`, for the reason `WsError`/`GrpcFieldError` above are
-  # not: that enum is `case … in`'d exhaustively across three surfaces, and this refusal reads
-  # identically on all of them (`stop_on cannot combine with --race …`), so the builder writes
-  # the sentence once and every surface's existing `Gori::Error` path carries it. Today the one
-  # incompatibility is `--race`: a race group is released whole, so there is no per-row verdict
-  # for a stop condition to fire on.
-  class StopOnError < Gori::Error
-  end
-
   # A normalized, surface-independent description of ONE fuzz run.
   #
   # Each surface's remaining job is to parse ITS OWN input format into this — `OptionParser`
@@ -330,7 +319,7 @@ module Gori::Fuzz
     # A NOTE and not a refusal, for the reason `ws_ignored_knobs` gives: an unframed request is
     # a legitimate thing to send on purpose, and refusing a run over it would be hostile. What
     # is not legitimate is sending it by accident and being told nothing, which is what happened
-    # while `add_content_length_when_missing` defaulted false (see there). The remedy this one
+    # while `update_content_length` stopped short of adding the header (see there). The remedy this one
     # names is the OPPOSITE of `rewrites_content_length?`'s: turn the knob ON, not off.
     getter? unframed_body : Bool
     # The marked WebSocket script, or nil for an ordinary HTTP sweep. `template` above stays the
@@ -708,10 +697,10 @@ module Gori::Fuzz
     # `\n\r\n`, a `Transfer-Encoding` that only the last coding makes chunked) cannot be judged
     # one way by the framing check and another by the pass that does the framing.
     #
-    # The guard comes first so the healthy default (both knobs on, gori frames it) pays no
+    # The guard comes first so the healthy default (the knob on, gori frames it) pays no
     # render at all — this runs once per plan build, but `baseline_raw` can be a large capture.
     private def self.unframed_body?(config : Config, raw : Bytes) : Bool
-      return false if config.update_content_length? && config.add_content_length_when_missing?
+      return false if config.update_content_length?
       ContentLength.sync(raw, true) != ContentLength.sync(raw, false)
     end
 
@@ -876,12 +865,18 @@ module Gori::Fuzz
     # `validate_race_count` above: a plan-INPUT refusal, so it rides the `rescue
     # Fuzz::PlanError` every surface already wraps `Plan.build` in. Returns the NORMALISED
     # name, which is what the sender, the pool and the run record all carry.
-    # `stop_on` (a match count or a separate condition) cannot ride a race run — see
-    # `StopOnError`. A no-op for every run that set neither, so the ordinary sweep is untouched.
+    # `stop_on` (issue #1240: a match count or a separate condition) cannot ride a race run: a
+    # race group is released whole, so there is no per-row verdict for it to fire on. A no-op
+    # for every run that set neither, so the ordinary sweep is untouched.
+    #
+    # A plain `Gori::Error`, deliberately NOT a `PlanError::Reason`, for the reason
+    # `WsError`/`GrpcFieldError` above are not: that enum is `case … in`'d exhaustively across
+    # three surfaces, and this refusal reads identically on all of them, so the builder writes
+    # the sentence once and every surface's existing `Gori::Error` path carries it.
     private def self.validate_stop_on(race_count : Int32?, config : Config, matcher : Matcher) : Nil
       return unless race_count
       return unless config.stop_after_matches || matcher.stop_condition
-      raise StopOnError.new(
+      raise Gori::Error.new(
         "stop_on cannot combine with --race: a race group is N byte-identical copies of ONE " \
         "request released together in a single write, so there is no per-response verdict for a " \
         "stop condition or a match count to fire on. Drop --race, or drop the stop condition")

@@ -160,7 +160,7 @@ describe Gori::Authorize::Plan do
   end
 
   describe "identity resolution" do
-    it "reads explicit JSON in the shape Authorize.parse_json already takes" do
+    it "reads explicit JSON in the shape SessionSlot.parse_json already takes" do
       with_store do |store|
         id = seed(store)
         plan = Plan.build(options(store, flow_ids: [id]), ungated_outbound)
@@ -176,7 +176,7 @@ describe Gori::Authorize::Plan do
       with_store do |store|
         id = seed(store)
         saved = [Identity.as_captured, Identity.new("low-priv", set_headers: [{"Cookie", "session=USER"}])]
-        store.set_setting(Gori::Store::AUTHORIZE_IDENTITIES_KEY, Gori::Authorize.serialize(saved))
+        store.set_setting(Gori::Store::AUTHORIZE_IDENTITIES_KEY, Gori::SessionSlot.serialize(saved))
         plan = Plan.build(PlanOptions.new(store, flow_ids: [id]), ungated_outbound)
         plan.identities.map(&.name).should eq(["as-captured", "low-priv"])
       end
@@ -635,7 +635,7 @@ describe "Gori::Authorize::Passive provenance" do
   # structurally impossible; the `source` column is the explicit marker it said would be needed.
   it "declines a flow gori sent, by name, on the unattended path" do
     with_store do |store|
-      idents = Gori::Authorize.parse_json(IDENTS_JSON)
+      idents = Gori::SessionSlot.parse_json(IDENTS_JSON)
       sent_by_gori = store.get_flow(seed(store, source: Gori::FlowSource::Kind::Repeater)).not_nil!
       Gori::Authorize::Passive.passive_skip_reason(sent_by_gori, idents).should eq(:gori_originated)
       Gori::Authorize::Passive.reason_label(:gori_originated).should eq("sent by gori, not the browser")
@@ -644,7 +644,7 @@ describe "Gori::Authorize::Passive provenance" do
 
   it "still replays what the browser produced, and what somebody else captured" do
     with_store do |store|
-      idents = Gori::Authorize.parse_json(IDENTS_JSON)
+      idents = Gori::SessionSlot.parse_json(IDENTS_JSON)
       captured = store.get_flow(seed(store, source: Gori::FlowSource::Kind::Proxy)).not_nil!
       Gori::Authorize::Passive.passive_skip_reason(captured, idents).should be_nil
       # An import is not gori's traffic: it describes a real endpoint somebody captured, and
@@ -660,7 +660,7 @@ describe "Gori::Authorize::Passive provenance" do
     # manual queue, `gori run authorize 42`, MCP `authorize_start{flow_ids}` — asks
     # `skip_reason` / `manual_skip_reason`, neither of which consults provenance.
     with_store do |store|
-      idents = Gori::Authorize.parse_json(IDENTS_JSON)
+      idents = Gori::SessionSlot.parse_json(IDENTS_JSON)
       id = seed(store, source: Gori::FlowSource::Kind::Repeater)
       detail = store.get_flow(id).not_nil!
       Gori::Authorize::Passive.skip_reason(detail, idents).should be_nil
@@ -675,7 +675,7 @@ describe "Gori::Authorize::Passive provenance" do
     # were written — so reading "not recorded" as "gori's own" would switch passive replay off
     # for every project captured with an older gori.
     with_store do |store|
-      idents = Gori::Authorize.parse_json(IDENTS_JSON)
+      idents = Gori::SessionSlot.parse_json(IDENTS_JSON)
       detail = store.get_flow(seed(store)).not_nil!
       row = detail.row
       legacy = Gori::Store::FlowRow.new(row.id, row.created_at, row.scheme, row.method, row.host,

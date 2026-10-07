@@ -42,7 +42,7 @@ module Gori::Miner
   # Single-threaded fiber scheduler (no -Dpreview_mt): plain ivar increments and array
   # appends never yield mid-op, so the counters and per-round outcome array need no locks.
   class Engine
-    # Outbound rate limiting (rps / throttle_ms / jitter_ms) over `@last_dispatch`.
+    # Outbound rate limiting (rps / throttle_ms) over `@last_dispatch`.
     include Gori::Pacing
 
     MAX_CONCURRENCY = 100
@@ -392,8 +392,7 @@ module Gori::Miner
       # to the live credential and leaves gori for the target, the run reporting `0 errors`.
       # Resolved ONCE for the send: the padding, the byte delta and the decision all need it.
       ref = report.reference_for(task.location)
-      bytes, spans = Inject.apply_with_spans(@base, task.location, pad_pairs(pairs, ref),
-        @config.add_content_length_when_missing?)
+      bytes, spans = Inject.apply_with_spans(@base, task.location, pad_pairs(pairs, ref))
       # Nothing was injected, so this location cannot carry candidates in THIS request — e.g.
       # a request line that is not METHOD SP TARGET SP VERSION, which `inject_query` bails on
       # unmodified rather than rewrite the operator's bytes (P7, and it is right to). Sending
@@ -544,8 +543,7 @@ module Gori::Miner
         break unless pace(interval)
         c = Canary.fresh
         # Same span-protection as the main loop — the confirm re-send injects the same name.
-        bytes, spans = Inject.apply_with_spans(@base, location, pad_pairs([{name, c}], ref),
-          @config.add_content_length_when_missing?)
+        bytes, spans = Inject.apply_with_spans(@base, location, pad_pairs([{name, c}], ref))
         raw = send_with_retries(bytes, spans)
         if err = raw.error
           # A confirm round is a REQUEST like any other, and this was the one send path that
@@ -890,7 +888,7 @@ module Gori::Miner
         # change. A Layer-2 refusal is permanent for the same reason: the scope did not move
         # between the two calls, and each attempt is charged to the cap a second time
         # (`CappedBackend#send` increments AFTER the cap check but BEFORE the gate's).
-        return raw if permanent_refusal?(raw.error) || attempts >= @config.retries
+        return raw if Miner.permanent_refusal?(raw.error) || attempts >= @config.retries
         failed = raw
         # A STOP ends the retry chain. It was honoured everywhere else in the run — the
         # dispatcher breaks, a worker skips the bucket it just took — and invisible only here,
@@ -905,10 +903,6 @@ module Gori::Miner
         sleep @config.retry_pause
         return raw if @stopped
       end
-    end
-
-    private def permanent_refusal?(err : String?) : Bool
-      Miner.permanent_refusal?(err)
     end
 
     # End the run when the macro has ended it: a failure under `stop`, or too many in a row. The

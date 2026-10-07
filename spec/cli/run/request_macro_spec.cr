@@ -12,7 +12,7 @@ describe "gori run --macro" do
     flags.steps.concat(Gori::RequestMacro::Spec.parse_steps("csrf-fetch,7"))
     spec = Gori::CLI::Run.request_macro_spec("gori run fuzz", flags).not_nil!
     spec.steps.should eq(["csrf-fetch", "7"])
-    spec.cadence.per_request?.should be_true
+    spec.cadence.every.should eq(1)
     spec.on_failure.should eq(Gori::RequestMacro::OnFailure::Skip)
     spec.expect.should be_empty
     spec.active?.should be_true

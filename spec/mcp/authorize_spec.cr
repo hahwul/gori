@@ -191,7 +191,7 @@ describe "MCP authorize tools" do
       port = start_authz_origin(enforce: true)
       with_store do |store|
         flow = seed_authz_flow(store, port)
-        store.set_setting(Gori::Store::AUTHORIZE_IDENTITIES_KEY, Gori::Authorize.serialize([
+        store.set_setting(Gori::Store::AUTHORIZE_IDENTITIES_KEY, Gori::SessionSlot.serialize([
           Gori::Authorize::Identity.as_captured,
           Gori::Authorize::Identity.new("anon", remove_headers: ["Cookie"]),
         ]))
