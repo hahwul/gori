@@ -503,7 +503,7 @@ module Gori::Tui
     #
     # Requests go out one at a time and each finished one streams back its own Target, so the
     # table fills as the run proceeds. The scope gate (Outbound) is the one Probe active uses.
-    def run(mode : Symbol = :pending) : Nil
+    def run(mode : Symbol) : Nil
       return @host.status("send requests here first (Send to Authorize from History)") unless @view.any_requests?
       return @host.status("a run is already in flight") if running?
       batch = select_batch(mode)
