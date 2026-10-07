@@ -49,8 +49,9 @@ module Gori::Proxy
       end
     end
 
-    # Set the read+write timeout on `io`'s socket. No-op if the socket can't be resolved.
-    def self.arm(io : IO?, timeout : Time::Span) : Nil
+    # Set the read+write timeout on `io`'s socket (nil clears it). No-op if the socket can't
+    # be resolved.
+    def self.arm(io : IO?, timeout : Time::Span?) : Nil
       sock = underlying_socket(io) || return
       sock.read_timeout = timeout
       sock.write_timeout = timeout
@@ -60,10 +61,7 @@ module Gori::Proxy
 
     # Clear the read+write timeout on `io`'s socket, for entering a long-lived tunnel/relay.
     def self.relax(io : IO?) : Nil
-      sock = underlying_socket(io) || return
-      sock.read_timeout = nil
-      sock.write_timeout = nil
-    rescue
+      arm(io, nil)
     end
 
     # Enable TCP keepalive on a socket (best-effort tunables). Never fails the connection over
