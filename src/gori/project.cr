@@ -48,8 +48,8 @@ module Gori
     # a project opened in another window is listening, so it reported the wrong port, or a
     # live project with no address.
     #
-    # The canonical registry db keeps the legacy per-directory path, so the picker's
-    # `CaptureStatus.read(project.dir)` (and every existing marker on disk) is unchanged.
+    # The canonical registry db keeps the legacy per-directory path, so the picker's read of
+    # `CaptureStatus.path(project.dir)` (and every existing marker on disk) is unchanged.
     def capture_status_path : String
       sidecar_path(CaptureStatus.path(dir), ".capture.status")
     end

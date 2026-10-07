@@ -2262,7 +2262,7 @@ module Gori
     def self.parse_vars_json(raw : String?) : Array({String, String})
       return [] of {String, String} if raw.nil? || raw.strip.empty?
       # A malformed row degrades to "no vars", matching every sibling reader of a persisted
-      # JSON blob (`Notes.parse`, `CaptureStatus.parse_file`, `Analyzer#load_disabled`). The
+      # JSON blob (`Notes.parse`, `CaptureStatus.read_at`, `Analyzer#load_disabled`). The
       # `.as_a?` below already says that is the intent for a bad SHAPE; without this rescue a
       # bad PARSE escaped instead — out of `load_project`, and so out of `Session.open` and
       # `CLI::Run.open_store`, failing the whole project open on a raw JSON::ParseException.

@@ -18,15 +18,15 @@ describe Gori::CaptureStatus do
       Gori::CaptureStatus.write_at(Gori::CaptureStatus.path(dir), "127.0.0.1", 8070, true)
       File.exists?(Gori::CaptureStatus.path(dir)).should be_true
 
-      status = Gori::CaptureStatus.read(dir)
+      status = Gori::CaptureStatus.read_at(Gori::CaptureStatus.path(dir))
       status.should_not be_nil
       status.not_nil!.host.should eq("127.0.0.1")
       status.not_nil!.port.should eq(8070)
       status.not_nil!.listening.should be_true
 
-      Gori::CaptureStatus.clear_at(Gori::CaptureStatus.path(dir))
+      File.delete?(Gori::CaptureStatus.path(dir))
       File.exists?(Gori::CaptureStatus.path(dir)).should be_false
-      Gori::CaptureStatus.read(dir).should be_nil
+      Gori::CaptureStatus.read_at(Gori::CaptureStatus.path(dir)).should be_nil
     ensure
       FileUtils.rm_rf(dir) if Dir.exists?(dir)
     end
@@ -50,19 +50,19 @@ describe Gori::CaptureStatus do
   end
 
   it "formats loopback hosts as localhost" do
-    Gori::CaptureStatus.format_endpoint("127.0.0.1", 8070).should eq("localhost:8070")
-    Gori::CaptureStatus.format_endpoint("::1", 9000).should eq("localhost:9000")
+    Gori::BindAddress.display("127.0.0.1", 8070, terse: true).should eq("localhost:8070")
+    Gori::BindAddress.display("::1", 9000, terse: true).should eq("localhost:9000")
   end
 
   it "shows a wildcard bind as the dialable address, not '0.0.0.0'" do
     # The picker row used to read "● 0.0.0.0:8070" — an address no client can connect to.
     # Terse (no "(all interfaces)" note): this rides inside a chip in a project row.
-    Gori::CaptureStatus.format_endpoint("0.0.0.0", 8070).should eq("localhost:8070")
-    Gori::CaptureStatus.format_endpoint("::", 8070).should eq("localhost:8070")
+    Gori::BindAddress.display("0.0.0.0", 8070, terse: true).should eq("localhost:8070")
+    Gori::BindAddress.display("::", 8070, terse: true).should eq("localhost:8070")
   end
 
   it "brackets an IPv6 bind so the chip stays copy-pasteable" do
-    Gori::CaptureStatus.format_endpoint("fe80::1", 8070).should eq("[fe80::1]:8070")
+    Gori::BindAddress.display("fe80::1", 8070, terse: true).should eq("[fe80::1]:8070")
   end
 end
 
@@ -112,11 +112,11 @@ describe Gori::Session, "capture status sidecar" do
       session = Gori::Session.open(config, ca, registry, project)
       session.capturing?.should be_true
 
-      status = Gori::CaptureStatus.read(project.dir)
+      status = Gori::CaptureStatus.read_at(Gori::CaptureStatus.path(project.dir))
       status.should_not be_nil
       status.not_nil!.listening.should be_true
       status.not_nil!.port.should eq(session.proxy.port)
-      Gori::CaptureStatus.format_endpoint(status.not_nil!.host, status.not_nil!.port)
+      Gori::BindAddress.display(status.not_nil!.host, status.not_nil!.port, terse: true)
         .should eq("localhost:#{session.proxy.port}")
 
       session.close
@@ -135,7 +135,7 @@ describe Gori::Session, "capture status sidecar" do
 
       session = Gori::Session.open(Gori::Config.new(listen: "127.0.0.1", port: 0), ca, registry, project, bind_fallback: true)
       session.capturing_lock_held?.should be_false
-      Gori::CaptureStatus.read(project.dir).should be_nil
+      Gori::CaptureStatus.read_at(Gori::CaptureStatus.path(project.dir)).should be_nil
       session.close
 
       held.flock_unlock
@@ -156,7 +156,7 @@ describe Gori::Session, "capture status sidecar" do
       second.capturing?.should be_false
       second.capturing_lock_held?.should be_true
 
-      status = Gori::CaptureStatus.read(second.project.dir)
+      status = Gori::CaptureStatus.read_at(Gori::CaptureStatus.path(second.project.dir))
       status.should_not be_nil
       status.not_nil!.listening.should be_false
       status.not_nil!.port.should eq(taken)
@@ -175,12 +175,12 @@ describe Gori::Session, "capture status sidecar" do
 
       session.capturing?.should be_true
       session.toggle_capture.should be_false
-      off = Gori::CaptureStatus.read(project.dir)
+      off = Gori::CaptureStatus.read_at(Gori::CaptureStatus.path(project.dir))
       off.should_not be_nil
       off.not_nil!.listening.should be_false
 
       session.toggle_capture.should be_true
-      on = Gori::CaptureStatus.read(project.dir)
+      on = Gori::CaptureStatus.read_at(Gori::CaptureStatus.path(project.dir))
       on.should_not be_nil
       on.not_nil!.listening.should be_true
       on.not_nil!.port.should eq(session.proxy.port)
@@ -198,7 +198,7 @@ describe Gori::Session, "capture status sidecar" do
 
       session.proxy.rebind("127.0.0.1", 0)
       session.sync_capture_status!
-      rebound = Gori::CaptureStatus.read(project.dir)
+      rebound = Gori::CaptureStatus.read_at(Gori::CaptureStatus.path(project.dir))
       rebound.should_not be_nil
       rebound.not_nil!.listening.should be_true
       rebound.not_nil!.port.should eq(session.proxy.port)
@@ -206,7 +206,7 @@ describe Gori::Session, "capture status sidecar" do
       session.toggle_capture
       session.proxy.rebind("127.0.0.1", 9150)
       session.sync_capture_status!
-      paused = Gori::CaptureStatus.read(project.dir)
+      paused = Gori::CaptureStatus.read_at(Gori::CaptureStatus.path(project.dir))
       paused.should_not be_nil
       paused.not_nil!.listening.should be_false
       paused.not_nil!.port.should eq(9150)

@@ -128,7 +128,7 @@ module Gori
         ca = ca_dir ? default_ca : (status.ca_cert_path || default_ca)
         return shell_ca_refusal(ca, ca_dir) unless File.file?(ca)
         ShellTarget.new(ShellEnv.dial_authority(status.host, status.port), ca,
-          "#{project.name} on #{CaptureStatus.format_endpoint(status.host, status.port)}", warnings)
+          "#{project.name} on #{BindAddress.display(status.host, status.port, terse: true)}", warnings)
       end
 
       # `--proxy` as given: no capture is looked up, so the CA is `--ca-dir`'s or the default.

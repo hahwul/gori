@@ -578,7 +578,7 @@ module Gori
       # Best-effort: a delete failure here must not skip the lock/probe/store teardown below
       # (which would leak the flock + writer fiber + fibers) or, via a caller's `ensure`,
       # replace the real exception being unwound.
-      (CaptureStatus.clear_at(@project.capture_status_path) if capturing_lock_held?) rescue nil
+      (File.delete?(@project.capture_status_path) if capturing_lock_held?) rescue nil
       # Stop Probe FIRST so its active workers wind down and its passive fiber stops issuing
       # get_flow against a live DB; this also closes the probe_events channel it consumes.
       @probe.stop

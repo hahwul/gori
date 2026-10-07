@@ -2676,9 +2676,9 @@ module Gori::Tui
                            idle : String) : Array({String, Color})
       right = if held
                 if status && status.listening
-                  {"● #{CaptureStatus.format_endpoint(status.host, status.port)}", Theme.green}
+                  {"● #{BindAddress.display(status.host, status.port, terse: true)}", Theme.green}
                 elsif status
-                  {"● off · #{CaptureStatus.format_endpoint(status.host, status.port)}", Theme.yellow}
+                  {"● off · #{BindAddress.display(status.host, status.port, terse: true)}", Theme.yellow}
                 else
                   {"● off", Theme.yellow}
                 end
@@ -2720,8 +2720,8 @@ module Gori::Tui
       begin
         held = CaptureLock.held?(proj.dir)
         return {false, nil, agents} unless held
-        status = CaptureStatus.read(proj.dir)
-        status ||= CaptureStatus.read(proj.dir) # retry once after a concurrent write
+        status = CaptureStatus.read_at(CaptureStatus.path(proj.dir))
+        status ||= CaptureStatus.read_at(CaptureStatus.path(proj.dir)) # retry once after a concurrent write
         {true, status, agents}
       rescue IO::Error | File::Error
         {false, nil, agents}
