@@ -218,10 +218,7 @@ class Gori::Tui::RepeaterView
 
   private def combine(head : Bytes, body : Bytes?) : Bytes
     return head unless body && !body.empty?
-    io = IO::Memory.new
-    io.write(head)
-    io.write(body)
-    io.to_slice
+    head + body
   end
 
   # The shared projection (`Repeater::MessageLines`), so the diff tab tells two same-size binary

@@ -599,10 +599,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   private def join_message(head : Bytes, body : Bytes?) : Bytes
     return head unless body && !body.empty?
-    io = IO::Memory.new(head.size + body.size)
-    io.write(head)
-    io.write(body)
-    io.to_slice
+    head + body
   end
 
   # --- the LINKS card's `f` -------------------------------------------------
