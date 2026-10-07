@@ -5,13 +5,13 @@ describe Gori::CaptureLock do
   it "acquires a free dir, denies a second concurrent holder, and frees on close" do
     dir = File.tempname("gori-lock")
     begin
-      a = Gori::CaptureLock.try(dir)
+      a = Gori::CaptureLock.try_at(Gori::CaptureLock.path(dir))
       a.should_not be_nil
       # A second acquire opens a NEW fd on the same path; flock treats separate
       # opens as independent OFDs and denies the second while `a` holds it.
-      Gori::CaptureLock.try(dir).should be_nil
+      Gori::CaptureLock.try_at(Gori::CaptureLock.path(dir)).should be_nil
       a.not_nil!.close
-      b = Gori::CaptureLock.try(dir) # freed on close
+      b = Gori::CaptureLock.try_at(Gori::CaptureLock.path(dir)) # freed on close
       b.should_not be_nil
       b.not_nil!.close
     ensure
@@ -24,7 +24,7 @@ describe Gori::CaptureLock do
     dir = File.join(parent, "proj")
     begin
       Dir.exists?(dir).should be_false
-      lock = Gori::CaptureLock.try(dir)
+      lock = Gori::CaptureLock.try_at(Gori::CaptureLock.path(dir))
       lock.should_not be_nil
       Dir.exists?(dir).should be_true
       File.exists?(Gori::CaptureLock.path(dir)).should be_true

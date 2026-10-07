@@ -72,7 +72,7 @@ describe Gori::CaptureLock do
     begin
       Gori::CaptureLock.held?(dir).should be_false
 
-      lock = Gori::CaptureLock.try(dir)
+      lock = Gori::CaptureLock.try_at(Gori::CaptureLock.path(dir))
       lock.should_not be_nil
       Gori::CaptureLock.held?(dir).should be_true
 

@@ -199,7 +199,7 @@ module Gori
               "another gori instance already holds this database's capture lock"
             end
           rescue ex
-            # CaptureLock.try itself failed (can't create/open the lock file) — not a
+            # CaptureLock.try_at itself failed (can't create/open the lock file) — not a
             # bind issue; release anything we opened and report it.
             lock.try(&.close) rescue nil
             lock = nil

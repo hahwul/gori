@@ -267,7 +267,7 @@ describe Gori::ProjectRegistry do
       reg = Gori::ProjectRegistry.new(root)
       p = reg.create("busy")
       Gori::Store.open(p.db_path).close
-      lock = Gori::CaptureLock.try(p.dir).not_nil! # simulate a live capturer holding the lock
+      lock = Gori::CaptureLock.try_at(Gori::CaptureLock.path(p.dir)).not_nil! # simulate a live capturer holding the lock
       begin
         expect_raises(Gori::Error, /in use/) { reg.delete(p) }
         Dir.exists?(p.dir).should be_true # not wiped out from under the capturer
