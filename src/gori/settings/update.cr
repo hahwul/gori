@@ -23,7 +23,7 @@ module Gori::Settings
   # Tolerant update section: absent/non-object keeps current.
   private def self.parse_update(node : JSON::Any?) : Nil
     return unless o = node.try(&.as_h?)
-    self.update_check_enabled = load_bool_h(o, "check_enabled", update_check_enabled?)
+    self.update_check_enabled = load_bool(o, "check_enabled", update_check_enabled?)
     if v = o["notified_version"]?.try(&.as_s?)
       self.update_notified_version = v
     end

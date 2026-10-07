@@ -78,7 +78,7 @@ module Gori
   # section). This file keeps only the orchestration shared by every section: path
   # resolution, load, save, the 3-way merge-with-disk, the top-level serialize
   # dispatcher, and the couple of generic JSON-parsing helpers (load_bool/
-  # load_bool_h/normalize_os) reused across sections.
+  # normalize_os) reused across sections.
   module Settings
     # THIS process's own serialization of the state it last read from (or wrote to) disk;
     # nil = never loaded. It's the 3-way-merge BASE at save time: a top-level section this
@@ -739,11 +739,6 @@ module Gori
       @@warning_io.try(&.puts(warning))
     end
 
-    # load_bool over a Hash (the layout object), same false-preserving semantics as load_bool.
-    private def self.load_bool_h(h : Hash(String, JSON::Any), key : String, current : Bool) : Bool
-      (v = h[key]?) && !(b = v.as_bool?).nil? ? b : current
-    end
-
     private def self.normalize_os(raw : String?) : String
       down = raw.try(&.downcase)
       %w[darwin linux windows].includes?(down) ? down.not_nil! : "auto"
@@ -752,7 +747,7 @@ module Gori
     # Read a boolean field, keeping `current` when it's absent or non-bool. A plain
     # `|| current` would wrongly resurrect a stored `false` (false is falsy), so we
     # assign only when a real bool is present.
-    private def self.load_bool(node : JSON::Any, key : String, current : Bool) : Bool
+    private def self.load_bool(node : JSON::Any | Hash(String, JSON::Any), key : String, current : Bool) : Bool
       (v = node[key]?) && !(b = v.as_bool?).nil? ? b : current
     end
 

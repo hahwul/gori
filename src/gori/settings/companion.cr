@@ -94,9 +94,9 @@ module Gori::Settings
   # Tolerant companion section: absent/non-object keeps current.
   private def self.parse_companion(node : JSON::Any?) : Nil
     return unless o = node.try(&.as_h?)
-    # load_bool_h, not `|| companion?` — a plain `||` resurrects a stored `false`.
-    self.companion = load_bool_h(o, "enabled", companion?)
-    self.companion_notices = load_bool_h(o, "notices", companion_notices?)
+    # load_bool, not `|| companion?` — a plain `||` resurrects a stored `false`.
+    self.companion = load_bool(o, "enabled", companion?)
+    self.companion_notices = load_bool(o, "notices", companion_notices?)
     o["motion"]?.try(&.as_s?).try { |v| self.companion_motion = normalize_companion_motion(v) }
     o["placement"]?.try(&.as_s?).try { |v| self.companion_placement = normalize_companion_placement(v) }
     o["replies"]?.try(&.as_s?).try { |v| self.companion_replies = normalize_companion_replies(v) }

@@ -166,17 +166,17 @@ module Gori::Settings
   # Tolerant layout section: absent/non-object keeps current; depth/order clamped to allowed set.
   private def self.parse_layout(node : JSON::Any?) : Nil
     return unless o = node.try(&.as_h?)
-    self.history_preview = load_bool_h(o, "history_preview", history_preview)
-    self.probe_preview = load_bool_h(o, "probe_preview", probe_preview)
-    self.issues_preview = load_bool_h(o, "issues_preview", issues_preview)
+    self.history_preview = load_bool(o, "history_preview", history_preview)
+    self.probe_preview = load_bool(o, "probe_preview", probe_preview)
+    self.issues_preview = load_bool(o, "issues_preview", issues_preview)
     if ord = o["history_list_order"]?.try(&.as_s?)
       self.history_list_order = normalize_history_list_order(ord)
     end
     if d = int_field(o, "sitemap_expand_depth")
       self.sitemap_expand_depth = normalize_sitemap_depth(d)
     end
-    self.tab_numbers = load_bool_h(o, "tab_numbers", tab_numbers?)
-    self.tab_slots = load_bool_h(o, "tab_slots", tab_slots?)
+    self.tab_numbers = load_bool(o, "tab_numbers", tab_numbers?)
+    self.tab_slots = load_bool(o, "tab_slots", tab_slots?)
   end
 
   # Whether the statusline row is actually LIVE — enabled AND given something to run.
@@ -191,7 +191,7 @@ module Gori::Settings
   # Tolerant statusline section: absent/non-object keeps current; interval/timeout floored at 1.
   private def self.parse_statusline(node : JSON::Any?) : Nil
     return unless o = node.try(&.as_h?)
-    self.statusline_enabled = load_bool_h(o, "enabled", statusline_enabled?)
+    self.statusline_enabled = load_bool(o, "enabled", statusline_enabled?)
     if cmd = o["command"]?.try(&.as_s?)
       self.statusline_command = cmd
     end
@@ -213,12 +213,12 @@ module Gori::Settings
     if v = o["history_time_format"]?.try(&.as_s?)
       self.history_time_format = v == "relative" ? "relative" : "absolute"
     end
-    self.show_gutter = load_bool_h(o, "show_gutter", show_gutter)
-    self.wrap_lines = load_bool_h(o, "wrap_lines", wrap_lines?)
+    self.show_gutter = load_bool(o, "show_gutter", show_gutter)
+    self.wrap_lines = load_bool(o, "wrap_lines", wrap_lines?)
     if v = int_field(o, "preview_body_kib")
       self.preview_body_kib = v.clamp(1, MAX_PREVIEW_BODY_KIB)
     end
-    self.resource_meter = load_bool_h(o, "resource_meter", resource_meter?)
+    self.resource_meter = load_bool(o, "resource_meter", resource_meter?)
     if v = o["terminal_title"]?.try(&.as_s?)
       self.terminal_title = normalize_terminal_title(v)
     end
@@ -232,8 +232,8 @@ module Gori::Settings
   # Tolerant notifications section: absent/non-object keeps current; retention floored at 1.
   private def self.parse_notifications(node : JSON::Any?) : Nil
     return unless o = node.try(&.as_h?)
-    self.notify_bell = load_bool_h(o, "bell", notify_bell?)
-    self.notify_toast = load_bool_h(o, "toast", notify_toast?)
+    self.notify_bell = load_bool(o, "bell", notify_bell?)
+    self.notify_toast = load_bool(o, "toast", notify_toast?)
     if v = int_field(o, "retention")
       self.notify_retention = {v, 1}.max
     end
@@ -242,9 +242,9 @@ module Gori::Settings
   # Tolerant general section: absent/non-object keeps current.
   private def self.parse_general(node : JSON::Any?) : Nil
     return unless o = node.try(&.as_h?)
-    self.clipboard_osc52 = load_bool_h(o, "clipboard_osc52", clipboard_osc52?)
-    self.confirm_quit = load_bool_h(o, "confirm_quit", confirm_quit?)
-    self.repeater_record_history = load_bool_h(o, "repeater_record_history", repeater_record_history?)
+    self.clipboard_osc52 = load_bool(o, "clipboard_osc52", clipboard_osc52?)
+    self.confirm_quit = load_bool(o, "confirm_quit", confirm_quit?)
+    self.repeater_record_history = load_bool(o, "repeater_record_history", repeater_record_history?)
   end
 
   # Allowed depths: -1 (all) or 0..3. Anything else falls back to default.

@@ -126,8 +126,8 @@ module Gori::Settings
   # Tolerant mcp section: absent/non-object keeps current.
   private def self.parse_mcp(node : JSON::Any?) : Nil
     return unless o = node.try(&.as_h?)
-    # load_bool_h, not `|| mcp_channels?` — a plain `||` resurrects a stored `false`.
-    self.mcp_channels = load_bool_h(o, "channels", mcp_channels?)
+    # load_bool, not `|| mcp_channels?` — a plain `||` resurrects a stored `false`.
+    self.mcp_channels = load_bool(o, "channels", mcp_channels?)
   end
 
   # An object replaces the whole set: the file records only denials, so a key it no longer
