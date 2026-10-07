@@ -305,24 +305,7 @@ module Gori::Proxy::Tls
       end
     end
 
-    def self.ja3(hello : Hello) : String
-      Digest::MD5.hexdigest(ja3_text(hello))
-    end
-
     # ── JA4 ────────────────────────────────────────────────────────────────────────────────
-
-    # `t13d1516h2_8daaf6152771_e5627efa2ab1`. See `ja4_raw` for the unhashed form.
-    def self.ja4(hello : Hello) : String
-      a, b, c = ja4_parts(hello)
-      "#{a}_#{truncated_sha256(b, b.empty?)}_#{truncated_sha256(c, ja4_c_extensions(hello).empty?)}"
-    end
-
-    # JA4_r: the same fingerprint with both hashes replaced by the lists they hash. This is
-    # what makes a JA4 actionable — the digest says two clients differ, the raw form says how.
-    def self.ja4_raw(hello : Hello) : String
-      a, b, c = ja4_parts(hello)
-      "#{a}_#{b}_#{c}"
-    end
 
     # The three sections, unhashed. One place so the digest and the raw form cannot describe
     # different hellos, and so `report` — which needs both — derives them once.
@@ -371,17 +354,11 @@ module Gori::Proxy::Tls
     private def self.ja4_alpn(hello : Hello) : String
       first = hello.alpn.first?
       return "00" if first.nil? || first.empty?
-      head = first[0]
-      tail = first[first.size - 1]
-      return "#{head.unsafe_chr}#{tail.unsafe_chr}" if alnum?(head) && alnum?(tail)
+      head = first[0].unsafe_chr
+      tail = first[first.size - 1].unsafe_chr
+      return "#{head}#{tail}" if head.ascii_alphanumeric? && tail.ascii_alphanumeric?
       hex = first.hexstring
       "#{hex[0]}#{hex[hex.size - 1]}"
-    end
-
-    private def self.alnum?(byte : UInt8) : Bool
-      (0x30_u8..0x39_u8).includes?(byte) ||
-        (0x41_u8..0x5a_u8).includes?(byte) ||
-        (0x61_u8..0x7a_u8).includes?(byte)
     end
 
     private def self.ja4_b_text(hello : Hello) : String
