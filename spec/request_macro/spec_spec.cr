@@ -5,9 +5,9 @@ private alias RM = Gori::RequestMacro
 describe Gori::RequestMacro::Cadence do
   it "reads off, request and a number" do
     RM::Cadence.parse?("off").not_nil!.off?.should be_true
-    RM::Cadence.parse?("REQUEST").not_nil!.per_request?.should be_true
+    RM::Cadence.parse?("REQUEST").not_nil!.every.should eq(1)
     RM::Cadence.parse?(" 5 ").not_nil!.every.should eq(5)
-    RM::Cadence.parse?("1").not_nil!.per_request?.should be_true
+    RM::Cadence.parse?("1").not_nil!.every.should eq(1)
     RM::Cadence.parse?("0").not_nil!.off?.should be_true
   end
 
@@ -71,7 +71,7 @@ describe Gori::RequestMacro::Spec do
   it "reads a blob written by a peer that dropped or misspelled a key as its defaults" do
     back = RM::Spec.from_json?(JSON.parse(%({"steps":[3,"a"],"every":"sometimes"}))).not_nil!
     back.steps.should eq(["3", "a"])
-    back.cadence.per_request?.should be_true
+    back.cadence.every.should eq(1)
     back.on_failure.should eq(RM::OnFailure::Skip)
     RM::Spec.from_json?(JSON.parse("[]")).should be_nil
     RM::Spec.from_json?(nil).should be_nil
