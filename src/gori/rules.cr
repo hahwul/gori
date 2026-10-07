@@ -1388,20 +1388,19 @@ module Gori
     private def substitute(repl : String, prefix : String, snap : SubstSnapshot,
                            regex : Bool, head : Bool = false) : String | Refused
       bytes = repl.to_slice
-      prefix_bytes = prefix.to_slice
       syntax = Settings.env_syntax
       n = bytes.size
-      plen = prefix_bytes.size
+      plen = prefix.bytesize
       buf = IO::Memory.new(n)
       i = 0
       while i < n
-        unless prefix_at?(bytes, prefix_bytes, i)
+        unless Env.prefix_at?(bytes, prefix, i)
           buf.write_byte(bytes[i])
           i += 1
           next
         end
         # `$$` → one literal prefix, consuming both.
-        if prefix_at?(bytes, prefix_bytes, i + plen)
+        if Env.prefix_at?(bytes, prefix, i + plen)
           buf << prefix
           i += 2 * plen
           next
@@ -1533,11 +1532,6 @@ module Gori
                                  key : String) : Bool
       return false unless declared.includes?(key)
       (v = vars[key]?) ? Bindings.boundary_forging?(v) : false
-    end
-
-    private def prefix_at?(bytes : Bytes, prefix_bytes : Bytes, at : Int32) : Bool
-      return false if at + prefix_bytes.size > bytes.size
-      prefix_bytes.each_with_index.all? { |b, j| bytes[at + j] == b }
     end
 
     # Double every backslash so a substituted value cannot be read as a capture reference
