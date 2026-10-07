@@ -73,13 +73,13 @@ macOS 보틀은 링크된 모든 dylib를 바이너리 옆에 함께 번들한 �
 
 ## Chocolatey (Windows) {#chocolatey}
 
-Chocolatey 커뮤니티 저장소에서 설치합니다:
+[Chocolatey 커뮤니티 저장소](https://community.chocolatey.org/packages/gori)에서 설치합니다:
 
 ```powershell
 choco install gori
 ```
 
-패키지는 Windows x86_64 바이너리가 처음 제공되는 v0.8.0부터 게시되며, 처음 올라가는 버전은 Chocolatey 커뮤니티 검수를 통과한 뒤에 설치할 수 있습니다. `gori update`는 Chocolatey 설치를 인식해 `choco upgrade gori -y`를 안내합니다. Windows는 실행 중인 `gori.exe`를 교체하지 않으므로, gori를 닫고 관리자 셸에서 실행하세요.
+패키지는 v0.8.0부터 제공되는 Windows x86_64 바이너리를 설치합니다. `gori update`는 Chocolatey 설치를 인식해 `choco upgrade gori -y`를 안내합니다. Windows는 실행 중인 `gori.exe`를 교체하지 않으므로, gori를 닫고 관리자 셸에서 실행하세요.
 
 ## Arch Linux (AUR) {#arch-linux-aur}
 

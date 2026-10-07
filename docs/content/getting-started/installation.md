@@ -73,13 +73,13 @@ The macOS bottle is a self-contained tarball with every linked dylib bundled nex
 
 ## Chocolatey (Windows)
 
-Install gori from the Chocolatey community repository:
+Install gori from the [Chocolatey community repository](https://community.chocolatey.org/packages/gori):
 
 ```powershell
 choco install gori
 ```
 
-The package is published from v0.8.0, the first release with a Windows x86_64 binary; a new package's first version is held for Chocolatey's community moderation before it can be installed. `gori update` recognizes a Chocolatey install and prints `choco upgrade gori -y`. Run that from an elevated shell with gori closed, since Windows will not replace a running `gori.exe`.
+The package ships the Windows x86_64 binary, available from v0.8.0. `gori update` recognizes a Chocolatey install and prints `choco upgrade gori -y`. Run that from an elevated shell with gori closed, since Windows will not replace a running `gori.exe`.
 
 ## Arch Linux (AUR)
 

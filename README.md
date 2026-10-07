@@ -78,11 +78,11 @@ curl -fsSL https://gori.hahwul.com/install.sh | bash
 
 Then update later with `gori update` (self-update for binary installs; package-manager guidance for Chocolatey / Homebrew / Snap / AUR).
 
-On Windows, download `gori-windows-x86_64.exe` from [Releases](https://github.com/hahwul/gori/releases/latest), rename it to `gori.exe` and put it on your `PATH`.
+On Windows, use [Chocolatey](#chocolatey), or download `gori-windows-x86_64.exe` from [Releases](https://github.com/hahwul/gori/releases/latest), rename it to `gori.exe` and put it on your `PATH`.
 
 ### Chocolatey
 
-Starting with v0.8.0 (once the first version clears Chocolatey's moderation), install the Windows x86_64 package with:
+The [Chocolatey package](https://community.chocolatey.org/packages/gori) installs the Windows x86_64 binary:
 
 ```powershell
 choco install gori
