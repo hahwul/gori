@@ -18,7 +18,7 @@ require "file_utils"
 # double twice over.
 #
 # Same hazard, same buffer, already fixed twice elsewhere: `TextArea#searchable?` refuses ^F on
-# it, `Fuzz::Template.mark_json` rescues the ArgumentError, `MCP::RequestBuilder.normalize_raw`
+# it, `Fuzz::Template.mark_json` rescues the ArgumentError, `Repeater::UrlRequest.normalize_raw`
 # walks bytes. These three seeds kept the naked regex.
 #
 # Driven through the PUBLIC entry points the Runner actually calls — `build_seed_from_request`
