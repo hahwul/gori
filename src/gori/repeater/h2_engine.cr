@@ -5,6 +5,7 @@ require "../proxy/h2/head_codec"
 require "../proxy/h2/grpc"
 require "../proxy/codec/http1"
 require "./engine"
+require "../url"
 
 module Gori
   module Repeater
@@ -1452,7 +1453,7 @@ module Gori
         end
 
         headers = [{":method", method}, {":path", path}, {":scheme", scheme},
-                   {":authority", authority_override || authority(host, port, scheme)}]
+                   {":authority", authority_override || Gori::Url.authority(scheme, host, port)}]
         # RFC 8441 §4: `:protocol` is a pseudo-header, so it belongs in this block and never
         # among the regular fields (§8.3 requires every pseudo to precede them).
         protocol.try { |p| headers << {":protocol", p} }
@@ -1601,19 +1602,6 @@ module Gori
             "cannot send over h2: #{name.inspect} carries a CR, LF or NUL, which has no " \
             "HTTP/2 representation (RFC 9113 §8.2.1) — h1 sends those bytes verbatim, h2 cannot.")
         end
-      end
-
-      # PUBLIC: `send_fields` injects no pseudo-headers (that is its whole point), so a
-      # caller that BUILDS a field list — `Protobuf::Reflection` — has to write `:authority`
-      # itself, and the IPv6 bracketing / default-port rule below is exactly the one it must
-      # not re-derive differently.
-      def self.authority(host : String, port : Int32, scheme : String) : String
-        default = scheme == "https" ? 443 : 80
-        # An IPv6 literal host must be bracketed in the :authority pseudo-header, else the
-        # colons collide with the port separator and a strict server rejects the stream
-        # (mirrors FlowRequest.build_target's h1 bracketing).
-        h = host.includes?(':') && !host.starts_with?('[') ? "[#{host}]" : host
-        port == default ? h : "#{h}:#{port}"
       end
 
       # Split at the first CRLFCRLF (head/body boundary); the editor always joins
