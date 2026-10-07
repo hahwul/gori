@@ -101,7 +101,7 @@ bottleneck every time.
 - All writes funnel through one writer fiber fed by a buffered `Channel`, batched into one
   transaction to amortize fsync. Replies and events fire only **after** commit, and a failed
   batch must not kill the writer fiber or every blocked caller deadlocks (`Store#writer_loop`).
-- Measure, don't guess. 36 harnesses live in `bench/` and are cited back from the source they
+- Measure, don't guess. 27 harnesses live in `bench/` and are cited back from the source they
   justify. Allocation-shaped wins are real; CPU micro-optimizations usually are not.
   `bench/proxy_bench.cr` has ±40% run-to-run noise, so use `bench/capture_bench.cr` for
   allocation deltas.
