@@ -888,7 +888,7 @@ module Gori::Miner
         # change. A Layer-2 refusal is permanent for the same reason: the scope did not move
         # between the two calls, and each attempt is charged to the cap a second time
         # (`CappedBackend#send` increments AFTER the cap check but BEFORE the gate's).
-        return raw if permanent_refusal?(raw.error) || attempts >= @config.retries
+        return raw if Miner.permanent_refusal?(raw.error) || attempts >= @config.retries
         failed = raw
         # A STOP ends the retry chain. It was honoured everywhere else in the run — the
         # dispatcher breaks, a worker skips the bucket it just took — and invisible only here,
@@ -903,10 +903,6 @@ module Gori::Miner
         sleep @config.retry_pause
         return raw if @stopped
       end
-    end
-
-    private def permanent_refusal?(err : String?) : Bool
-      Miner.permanent_refusal?(err)
     end
 
     # End the run when the macro has ended it: a failure under `stop`, or too many in a row. The
