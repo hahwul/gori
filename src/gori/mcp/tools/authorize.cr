@@ -158,11 +158,7 @@ module Gori
         j.field("failed") do
           j.array do
             ajob.failures.each do |(flow_id, url, msg)|
-              j.object do
-                j.field "flow_id", flow_id
-                j.field "url", Serialize.text(url)
-                j.field "error", Serialize.text(msg)
-              end
+              {flow_id: flow_id, url: Serialize.text(url), error: Serialize.text(msg)}.to_json(j)
             end
           end
         end
@@ -424,13 +420,13 @@ module Gori
         j.field("skipped") do
           j.array do
             skipped.each do |s|
-              j.object do
-                j.field "flow_id", s.flow_id
-                j.field "method", Serialize.text(s.method)
-                j.field "url", Serialize.text(s.url)
-                j.field "reason", s.reason.to_s
-                j.field "reason_label", s.label
-              end
+              {
+                flow_id:      s.flow_id,
+                method:       Serialize.text(s.method),
+                url:          Serialize.text(s.url),
+                reason:       s.reason.to_s,
+                reason_label: s.label,
+              }.to_json(j)
             end
           end
         end

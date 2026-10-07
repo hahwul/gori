@@ -812,11 +812,7 @@ module Gori
         j.field("order") do
           j.array do
             rows.each_with_index do |r, i|
-              j.object do
-                j.field "id", r.id
-                j.field "tui_index", i + 1
-                j.field "name", r.name || ""
-              end
+              {id: r.id, tui_index: i + 1, name: r.name || ""}.to_json(j)
             end
           end
         end

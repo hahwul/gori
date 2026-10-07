@@ -104,10 +104,7 @@ module Gori
             j.field "steps" do
               j.array do
                 result.steps.each do |s|
-                  j.object do
-                    j.field "converter", s.name
-                    j.field "state", s.state.to_s.downcase
-                  end
+                  {converter: s.name, state: s.state.to_s.downcase}.to_json(j)
                 end
               end
             end

@@ -280,15 +280,15 @@ module Gori
                 j.field "rules" do
                   j.array do
                     ps.rules.each do |spec|
-                      j.object do
-                        j.field "target", spec.target.label
-                        j.field "part", spec.part.label
-                        j.field "op", spec.op.label
-                        j.field "match", spec.match_kind.label
-                        j.field "pattern", spec.pattern
-                        j.field "replacement", spec.replacement
-                        j.field "name", spec.name
-                      end
+                      {
+                        target:      spec.target.label,
+                        part:        spec.part.label,
+                        op:          spec.op.label,
+                        match:       spec.match_kind.label,
+                        pattern:     spec.pattern,
+                        replacement: spec.replacement,
+                        name:        spec.name,
+                      }.to_json(j)
                     end
                   end
                 end

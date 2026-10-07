@@ -102,27 +102,27 @@ module Gori
             j.field "sources" do
               j.array do
                 Gori::Protobuf::Schemas.sources.each do |src|
-                  j.object do
-                    j.field "origin", src.origin.to_s.downcase
-                    j.field "path", src.path
-                    j.field "messages", src.messages
-                    j.field "methods", src.methods
-                    j.field "error", src.error
-                  end
+                  {
+                    origin:   src.origin.to_s.downcase,
+                    path:     src.path,
+                    messages: src.messages,
+                    methods:  src.methods,
+                    error:    src.error,
+                  }.to_json(j)
                 end
               end
             end
             j.field "reflections" do
               j.array do
                 reflections.each do |r|
-                  j.object do
-                    j.field "target", r.target
-                    j.field "service", r.service
-                    j.field "fetched_at", r.fetched_at
-                    j.field "services", r.services
-                    j.field "files", r.files
-                    j.field "bytes", r.descriptor.size
-                  end
+                  {
+                    target:     r.target,
+                    service:    r.service,
+                    fetched_at: r.fetched_at,
+                    services:   r.services,
+                    files:      r.files,
+                    bytes:      r.descriptor.size,
+                  }.to_json(j)
                 end
               end
             end

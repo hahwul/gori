@@ -641,10 +641,7 @@ module Gori
       # `Implementation`: who this is. The handshake carries it as `serverInfo`, the modern
       # revision as `_meta["io.modelcontextprotocol/serverInfo"]` on every result.
       private def emit_implementation(j : JSON::Builder) : Nil
-        j.object do
-          j.field "name", "gori"
-          j.field "version", Gori::VERSION
-        end
+        {name: "gori", version: Gori::VERSION}.to_json(j)
       end
 
       # Surfaced at the handshake so the client/model knows up front what this server

@@ -141,12 +141,12 @@ module Gori
                   j.field("fields") do
                     j.array do
                       g.fields.each do |f|
-                        j.object do
-                          j.field "spec", f.spec
-                          j.field "name", f.defn.name
-                          j.field "number", f.defn.number.to_i64
-                          j.field "type", f.defn.type_label
-                        end
+                        {
+                          spec:   f.spec,
+                          name:   f.defn.name,
+                          number: f.defn.number.to_i64,
+                          type:   f.defn.type_label,
+                        }.to_json(j)
                       end
                     end
                   end

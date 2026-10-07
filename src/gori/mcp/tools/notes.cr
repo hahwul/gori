@@ -22,12 +22,12 @@ module Gori
             j.field "notes" do
               j.array do
                 doc.notes.each_with_index do |entry, idx|
-                  j.object do
-                    j.field "id", entry.id
-                    j.field "title", note_title(entry)
-                    j.field "line_count", Notes.line_count(entry.text)
-                    j.field "current", doc.cur == idx
-                  end
+                  {
+                    id:         entry.id,
+                    title:      note_title(entry),
+                    line_count: Notes.line_count(entry.text),
+                    current:    doc.cur == idx,
+                  }.to_json(j)
                 end
               end
             end

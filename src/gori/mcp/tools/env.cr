@@ -29,11 +29,11 @@ module Gori
               j.array do
                 if Settings.env_syntax.namespaced?
                   Env::GENERATOR_HINTS.each do |name, description|
-                    j.object do
-                      j.field "name", name
-                      j.field "token", Env.spell(name, Env::Namespace::Gen)
-                      j.field "description", description
-                    end
+                    {
+                      name:        name,
+                      token:       Env.spell(name, Env::Namespace::Gen),
+                      description: description,
+                    }.to_json(j)
                   end
                 end
               end
@@ -41,12 +41,7 @@ module Gori
             # Where the USER_AGENT generators draw from (#1154): the operator's own list in
             # settings, or the built-in one. Counts only — the lines are public browser strings,
             # but an agent choosing a family name needs to know whether it is the operator's.
-            j.field "user_agents" do
-              j.object do
-                j.field "source", Env.user_agents_source
-                j.field "count", Env.user_agents.size
-              end
-            end
+            j.field "user_agents", {source: Env.user_agents_source, count: Env.user_agents.size}
           end
         end)
       end
