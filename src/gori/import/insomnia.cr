@@ -157,19 +157,11 @@ module Gori
                                    vars : Vars::Table, missing : Set(String)) : String
         url = Vars.expand(res["url"]?.to_s.strip, vars)
         query = query_string(res["parameters"]?, vars)
-        url = Builder.append_query(url, query)
-        left = Vars.unresolved(url)
-        unless left.empty?
-          left.each { |n| missing << n }
-          raise Gori::Error.new("unresolved variable in URL: #{url}")
-        end
-        raise Gori::Error.new("templated host in URL: #{url}") if Vars.braced_authority?(url)
-        raise Gori::Error.new("request has an empty url") if url.empty?
-        url
+        Vars.checked_url(Builder.append_query(url, query), missing)
       end
 
       private def self.query_string(node : JSON::Any?, vars : Vars::Table) : String
-        named(node, vars).map { |(k, v)| "#{URI.encode_www_form(k)}=#{URI.encode_www_form(v)}" }.join('&')
+        URI::Params.build { |f| named(node, vars).each { |(k, v)| f.add(k, v) } }
       end
 
       # Insomnia's rows are `{name, value, disabled}` (Postman uses `key`); `Vars.merge!`
@@ -194,20 +186,17 @@ module Gori
         list
       end
 
-      FORM_BOUNDARY = "----GoriImportFormBoundary"
-
       private def self.body_of(node : JSON::Any?, vars : Vars::Table) : {Bytes?, String?}
         h = node.try(&.as_h?)
         return {nil, nil} unless h
         mime = h["mimeType"]?.to_s
         case mime
         when "application/x-www-form-urlencoded"
-          pairs = named(h["params"]?, vars).map do |(k, v)|
-            "#{URI.encode_www_form(k)}=#{URI.encode_www_form(v)}"
-          end
-          pairs.empty? ? {nil, nil} : {pairs.join('&').to_slice, mime}
+          pairs = named(h["params"]?, vars)
+          return {nil, nil} if pairs.empty?
+          {URI::Params.build { |f| pairs.each { |(k, v)| f.add(k, v) } }.to_slice, mime}
         when "multipart/form-data"
-          form_data(h["params"]?, vars)
+          Vars.form_data(h["params"]?) { |rows| named(rows, vars) }
         else
           # Everything else is stored as `text` — JSON, XML, GraphQL (already a JSON
           # `{query, variables}` document), plain text. A body with only `fileName` names a
@@ -216,26 +205,6 @@ module Gori
           return {nil, nil} if text.empty?
           {text.to_slice, mime.presence}
         end
-      end
-
-      private def self.form_data(node : JSON::Any?, vars : Vars::Table) : {Bytes?, String?}
-        arr = node.try(&.as_a?)
-        return {nil, nil} unless arr
-        text_parts = arr.select do |item|
-          h = item.as_h?
-          !!h && h["disabled"]?.try(&.as_bool?) != true && h["type"]?.to_s != "file"
-        end
-        pairs = named(JSON::Any.new(text_parts), vars)
-        return {nil, nil} if pairs.empty?
-        body = String.build do |b|
-          pairs.each do |(k, v)|
-            b << "--" << FORM_BOUNDARY << "\r\n"
-            b << %(Content-Disposition: form-data; name="#{k}") << "\r\n\r\n"
-            b << v << "\r\n"
-          end
-          b << "--" << FORM_BOUNDARY << "--\r\n"
-        end
-        {body.to_slice, "multipart/form-data; boundary=#{FORM_BOUNDARY}"}
       end
 
       private def self.auth_headers(node : JSON::Any?, vars : Vars::Table) : Builder::Headers

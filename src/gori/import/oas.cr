@@ -390,13 +390,15 @@ module Gori
       end
 
       private def self.query_string(spec : JSON::Any, params : Array(JSON::Any)) : String
-        params.compact_map do |p|
-          next unless p["in"]?.to_s == "query"
-          next unless required?(p)
-          name = p["name"]?.to_s
-          next if name.empty?
-          "#{URI.encode_www_form(name)}=#{URI.encode_www_form(sample_value(spec, p))}"
-        end.join('&')
+        URI::Params.build do |f|
+          params.each do |p|
+            next unless p["in"]?.to_s == "query"
+            next unless required?(p)
+            name = p["name"]?.to_s
+            next if name.empty?
+            f.add(name, sample_value(spec, p))
+          end
+        end
       end
 
       private def self.header_params(spec : JSON::Any, params : Array(JSON::Any)) : Builder::Headers
@@ -584,9 +586,7 @@ module Gori
       end
 
       private def self.urlencoded_body(fields : Array(FormField)) : Bytes
-        fields.join('&') do |f|
-          "#{URI.encode_www_form(f.name)}=#{URI.encode_www_form(f.value)}"
-        end.to_slice
+        URI::Params.build { |b| fields.each { |f| b.add(f.name, f.value) } }.to_slice
       end
 
       private def self.multipart_body(fields : Array(FormField), label : String) : Bytes

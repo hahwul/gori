@@ -57,7 +57,7 @@ describe "Fuzzer request-time macro" do
       engine, err = view.build_engine(false, Gori::Scope.load(store), nil, store)
       err.should be_nil
       view.config.request_macro.not_nil!.steps.should eq(["csrf-fetch"])
-      view.config.request_macro.not_nil!.cadence.per_request?.should be_true
+      view.config.request_macro.not_nil!.cadence.every.should eq(1)
       info = view.macro_info.not_nil!
       info.line.should contain("csrf-fetch")
       info.concurrency.should eq(1)

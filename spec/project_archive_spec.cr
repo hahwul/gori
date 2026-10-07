@@ -426,7 +426,7 @@ describe Gori::ProjectArchive do
       store.set_setting(Gori::Settings::PROJECT_CAPTURE_MAX_KEY, "16")
       store.add_host_override("api.example.test", "203.0.113.4")
       store.set_setting(Gori::Store::AUTHORIZE_IDENTITIES_KEY,
-        Gori::Authorize.serialize([Gori::SessionSlot.new("operator",
+        Gori::SessionSlot.serialize([Gori::SessionSlot.new("operator",
           [{"Authorization", "Bearer identity-secret"}])]))
       provider_id = store.insert_oast_provider("saved", "interactsh", "https://oast.test", "provider-token", true, 0)
       store.insert_oast_session(provider_id, "interactsh", "https://oast.test", "correlation",

@@ -36,14 +36,14 @@ module Gori
 
         def dedup_key(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : String?
           g = gate(detail, opts) || return nil
-          key_string(detail, g[0], g[1])
+          endpoint_key(detail, g[0], g[1])
         end
 
         def plan(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : Plan?
           g = gate(detail, opts) || return nil
           method_up, path = g
           request = rebuild_with_xfh(detail.request_head, detail.request_body)
-          Plan.new(request, [] of Param, key_string(detail, method_up, path))
+          Plan.new(request, [] of Param, endpoint_key(detail, method_up, path))
         end
 
         def detections(plan : Plan, result : Repeater::Result, detail : Store::FlowDetail) : Array(Detection)
@@ -68,10 +68,6 @@ module Gori
           return nil unless method_allowed?(method_up, opts)
           return nil unless host_reflection_prone?(detail)
           {method_up, path_only(Active.origin_form(target))}
-        end
-
-        private def key_string(detail : Store::FlowDetail, method_upcase : String, path : String) : String
-          endpoint_key(detail, method_upcase, path)
         end
 
         # A redirect that already points at its own Host (the reset-link shape — any content type) OR

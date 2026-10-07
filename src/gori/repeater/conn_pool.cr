@@ -156,7 +156,7 @@ module Gori::Repeater
         # check is an early retire, and THIS one, right before we write onto the socket, is the
         # reliable one: by now any straggler residue is on the wire. Without it a poisoned socket
         # would frame this request's response against the previous response's leftovers.
-        case ConnPool.checkout_state(io)
+        case Proxy::SocketResidue.state(io) # the residue probe, asked of a parked socket at checkout
         when Checkout::Closed
           # The origin's FIN was on the socket BEFORE gori wrote a byte of this request. That
           # proves what `stale?` (below) explicitly cannot: the ORIGIN NEVER SAW THIS REQUEST.
@@ -309,7 +309,7 @@ module Gori::Repeater
     # CHECKOUT (`send`), not here. Residue can arrive AFTER we would park — the origin's write
     # races our recycle — so checking here would miss a straggler and still hand a poisoned
     # socket to the next send. `reusable_response?` interrogates only the response HEAD and
-    # cannot see the leftover bytes; the checkout-time `checkout_state` is what catches them, once
+    # cannot see the leftover bytes; the checkout-time `SocketResidue.state` is what catches them, once
     # they are reliably on the wire.
     private def recycle(io : IO, result : Repeater::Result, keepable : Bool, method : String) : Nil
       if @pooling && keepable && @idle.size < @max_idle && ConnPool.reusable_response?(result, method)
@@ -317,13 +317,6 @@ module Gori::Repeater
       else
         close(io)
       end
-    end
-
-    # The socket-residue probe (`Proxy::SocketResidue.state`), asked of a parked socket at
-    # checkout. Kept under this name because it is the question the pool asks; the probe itself
-    # lives under the proxy, which asks it of a retired upstream too.
-    def self.checkout_state(io : IO) : Checkout
-      Proxy::SocketResidue.state(io)
     end
 
     # A REUSED socket that failed at the request write or produced zero-byte EOF/reset while

@@ -125,7 +125,9 @@ describe Gori::Cookie do
     end
 
     it "re-signs byte-identically (round-trip) with the correct secret" do
-      Gori::Cookie::Flask.resign(FLASK, SECRET).should eq(FLASK)
+      p = Gori::Cookie::Flask.parse(FLASK)
+      input = Gori::Cookie::Flask.signing_input(p)
+      "#{input}.#{Gori::Cookie::Flask.compute_sig(input, SECRET)}".should eq(FLASK)
     end
 
     it "decodes the payload, timestamp, and signature" do
@@ -175,7 +177,9 @@ describe Gori::Cookie do
     end
 
     it "re-signs byte-identically" do
-      Gori::Cookie::Django.resign(DJANGO, SECRET).should eq(DJANGO)
+      p = Gori::Cookie::Django.parse(DJANGO)
+      input = Gori::Cookie::Django.signing_input(p)
+      "#{input}:#{Gori::Cookie::Django.compute_sig(input, SECRET)}".should eq(DJANGO)
     end
 
     it "honors a custom salt (the signed-with-salt variant)" do
@@ -189,7 +193,6 @@ describe Gori::Cookie do
     # `get_cookie_signer()` applies, so a real session cookie never verified.
     it "verifies a real signed_cookies session cookie under the session salt" do
       Gori::Cookie::Django.verify(DJANGO_SESSION, SECRET, salt: Gori::Cookie::Django::SESSION_SALT).should be_true
-      Gori::Cookie::Django.resign(DJANGO_SESSION, SECRET, salt: Gori::Cookie::Django::SESSION_SALT).should eq(DJANGO_SESSION)
       Gori::Cookie::Django.forge(%({"_auth_user_id":"1"}), SECRET, 1785656674_i64,
         salt: Gori::Cookie::Django::SESSION_SALT).should eq(DJANGO_SESSION)
     end
@@ -223,10 +226,6 @@ describe Gori::Cookie do
       Gori::Cookie.verify(RACK, "wrong").should be_false
     end
 
-    it "re-signs byte-identically" do
-      Gori::Cookie::Rack.resign(RACK, SECRET).should eq(RACK)
-    end
-
     it "surfaces the opaque marshalled value as hex + ascii, never verifying" do
       j = JSON.parse(Gori::Cookie.decode_json(RACK))
       j["format"].as_s.should eq("rack")
@@ -243,7 +242,7 @@ describe Gori::Cookie do
       wire = RACK.sub("==--", "%3D%3D--")
       Gori::Cookie.verify(wire, SECRET).should be_true
       Gori::Cookie.crack(wire, ["x", SECRET]).should eq(SECRET)
-      Gori::Cookie::Rack.resign(wire, SECRET).should eq(wire)
+      Gori::Cookie::Rack.forge(wire.rpartition("--")[0], SECRET).should eq(wire)
       JSON.parse(Gori::Cookie.decode_json(wire))["value_size"].as_i.should eq(28)
     end
 
@@ -251,7 +250,7 @@ describe Gori::Cookie do
       forged = Gori::Cookie::Rack.forge("a+b/c=", SECRET)
       forged.should start_with("a%2Bb%2Fc%3D--")
       Gori::Cookie.verify(forged, SECRET).should be_true
-      Gori::Cookie::Rack.resign(forged, SECRET).should eq(forged)
+      Gori::Cookie::Rack.forge(forged.rpartition("--")[0], SECRET).should eq(forged)
     end
 
     # A cookie is bytes lifted verbatim off the wire, so the tail after "--" need not be valid

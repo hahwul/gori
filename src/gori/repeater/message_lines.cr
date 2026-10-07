@@ -31,6 +31,12 @@ module Gori
       # Without it, an errored flow has no head/body at all and this returns an empty array,
       # so a diff against it renders as an unexplained "response removed" — every line of the
       # OTHER side deleted, with no hint why — instead of showing the actual, more useful fact.
+      #
+      # A source holding the request as ONE wire blob (a Repeater send, a fuzz row) splits it
+      # with `Env.split_head_body` first, or its body reaches here as part of the HEAD and skips
+      # the binary / UTF-8 handling. That split is deliberately NOT applied in here: a captured
+      # head that simply has no body can hold a bare-LF blank line INSIDE it (the proxy ends a
+      # head only at CRLFCRLF), and splitting there would misread the rest of it as a body.
       def of(head : Bytes?, body : Bytes?, *, decode : Bool, error : String? = nil) : Array(String)
         b = decode ? display_body(head, body) : body
         lines = error ? ["error: #{error}"] : [] of String
@@ -66,17 +72,6 @@ module Gori
       # differences" (#1162). 16 hex digits: an identity for a diff, not a security claim.
       private def short_digest(bytes : Bytes) : String
         Digest::SHA256.hexdigest(bytes)[0, 16]
-      end
-
-      # A whole wire message as {head, body}, split at the one shared boundary, for a source
-      # that holds the request as a single blob (a Repeater send, a fuzz row). Without it the
-      # blob's body reaches `of` as part of the HEAD and skips the binary / UTF-8 handling a
-      # split source's body gets. Deliberately NOT applied inside `of`: a captured head that
-      # simply has no body can hold a bare-LF blank line INSIDE it (the proxy ends a head only
-      # at CRLFCRLF), and splitting there would misread the rest of that head as a body.
-      def split_wire(blob : Bytes) : {Bytes, Bytes?}
-        at = Env.head_body_boundary(blob)
-        at < blob.size ? {blob[0, at], blob[at..]} : {blob, nil}
       end
 
       # The head's lines, WITHOUT the empty trailing field `split` leaves behind for its final

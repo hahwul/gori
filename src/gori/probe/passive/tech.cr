@@ -40,22 +40,18 @@ module Gori
           check_frameworks(ctx, acc)
         end
 
-        # Evidence for an `Alt-Svc` advertising HTTP/3 (h3 or h3-*). An origin advertising h3
-        # may take a browser without --disable-quic onto QUIC/UDP, bypassing the TCP proxy.
+        # An `Alt-Svc` advertising HTTP/3 (h3 or h3-*). An origin advertising h3 may take a
+        # browser without --disable-quic onto QUIC/UDP, bypassing the TCP proxy.
         #
-        # A DELEGATE, and deliberately still here: `Gori::AltSvc` is the one home for the parse
-        # now that the proxy strips what this rule reports (settings `network.strip_alt_svc`).
-        # Two spellings of "advertises h3" would mean a flow flagged for a header gori had
-        # already removed, or a header removed with nothing saying so.
-        def self.alt_svc_h3_evidence(value : String) : String?
-          Gori::AltSvc.h3_evidence(value)
-        end
-
+        # `Gori::AltSvc` is the one home for the parse now that the proxy strips what this rule
+        # reports (settings `network.strip_alt_svc`). Two spellings of "advertises h3" would
+        # mean a flow flagged for a header gori had already removed, or a header removed with
+        # nothing saying so.
         private def check_alt_svc(ctx : Context, acc : Array(Detection)) : Nil
           return unless resp = ctx.raw_response
           return unless resp.headers.has?("Alt-Svc")
           resp.headers.get_all("Alt-Svc").each do |alt_svc|
-            if ev = self.class.alt_svc_h3_evidence(alt_svc)
+            if ev = Gori::AltSvc.h3_evidence(alt_svc)
               acc << tech(ctx, "tech_http3", "HTTP/3 advertised via Alt-Svc", ev)
               break
             end

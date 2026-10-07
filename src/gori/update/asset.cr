@@ -249,9 +249,8 @@ module Gori::Update
     release.assets.find { |a| a.name == want }
   end
 
-  # Parse release JSON and pick the platform asset, or raise a clear Error.
-  def self.resolve_asset_from_json(json_body : String, os : String = current_os, arch : String = current_arch) : Asset
-    release = parse_release(json_body)
+  # Pick the platform asset, or raise a clear Error.
+  def self.resolve_asset(release : Release, os : String = current_os, arch : String = current_arch) : Asset
     if release.assets.empty?
       raise Error.new(
         "latest release #{release.tag_name} has no downloadable assets yet — see #{RELEASES_URL}"
@@ -273,7 +272,7 @@ module Gori::Update
   # is none to try (`asset` already IS the alias, or the release does not list one).
   #
   # A pure lookup on purpose: no URL is ever guessed here. The redirect path puts
-  # the alias into its synthesized list up front (see synthesize_release_json),
+  # the alias into its synthesized list up front (see synthesize_release),
   # with the digest from the same SHA256SUMS fetch that gave the versioned asset
   # its own — so the retry inherits a real URL and a real checksum instead of
   # reaching back out to the host that just failed us.

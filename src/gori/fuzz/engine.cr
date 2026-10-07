@@ -862,7 +862,7 @@ module Gori::Fuzz
   #   coordinator fiber — waits for all workers to finish, emits Done, closes @events.
   # Progress events are droppable (latest wins); Result/Done/Error are not.
   class Engine
-    # Outbound rate limiting (rps / throttle_ms / jitter_ms) over `@last_dispatch`.
+    # Outbound rate limiting (rps / throttle_ms) over `@last_dispatch`.
     include Gori::Pacing
 
     EVENT_BUFFER    =  256

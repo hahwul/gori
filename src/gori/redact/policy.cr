@@ -88,11 +88,7 @@ module Gori
       record Choice,
         matcher : Matcher? = nil,
         error : String? = nil,
-        salt_persisted : Bool = true do
-        def on? : Bool
-          !matcher.nil?
-        end
-      end
+        salt_persisted : Bool = true
 
       # `requested` is the profile named on the invocation (`--redact=NAME`), `on` the tri-state
       # the flags produce: true from `--redact`, false from `--no-redact`, nil when neither was

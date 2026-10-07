@@ -78,10 +78,6 @@ module Gori
         @every == 0
       end
 
-      def per_request? : Bool
-        @every == 1
-      end
-
       # `off` | `request` | a non-negative integer (0 = off, 1 = request). nil for anything
       # else, and for blank — the caller decides what "unset" means (the default is `request`).
       def self.parse?(raw : String?) : Cadence?
@@ -113,10 +109,6 @@ module Gori
         when 1 then "before every request"
         else        "before every #{@every} requests"
         end
-      end
-
-      def ==(other : Cadence) : Bool
-        @every == other.every
       end
     end
 

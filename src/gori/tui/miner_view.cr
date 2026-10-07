@@ -151,8 +151,7 @@ module Gori::Tui
     # finding still echoes on re-send); otherwise a short non-empty probe value.
     def request_with_finding(f : Miner::Finding) : Bytes
       value = f.canary.presence || "1"
-      Miner::Inject.apply(@request, f.location, [{f.name, value}],
-        @config.add_content_length_when_missing?)
+      Miner::Inject.apply(@request, f.location, [{f.name, value}])
     end
 
     # --- focus ring ---

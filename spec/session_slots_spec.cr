@@ -33,11 +33,11 @@ describe Gori::SessionSlots do
     it "shares the Authorize identities row, in both directions" do
       with_store do |store|
         store.set_setting(Gori::Store::AUTHORIZE_IDENTITIES_KEY,
-          Gori::Authorize.serialize([Gori::Authorize::Identity.new("admin", set_headers: [{"Cookie", "s=1"}])]))
+          Gori::SessionSlot.serialize([Gori::Authorize::Identity.new("admin", set_headers: [{"Cookie", "s=1"}])]))
         Gori::SessionSlots.load(store).slots.map(&.name).should eq(["admin"])
 
         Gori::SessionSlots.load(store).save([Slot.new("low-priv", rules: ["SESSION"])]).should be_true
-        Gori::Authorize.parse_json(store.setting(Gori::Store::AUTHORIZE_IDENTITIES_KEY))
+        Gori::SessionSlot.parse_json(store.setting(Gori::Store::AUTHORIZE_IDENTITIES_KEY))
           .map(&.name).should eq(["low-priv"])
         Gori::Store::SESSION_SLOTS_KEY.should eq(Gori::Store::AUTHORIZE_IDENTITIES_KEY)
       end

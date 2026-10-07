@@ -126,8 +126,8 @@ module Gori::Settings
   # Tolerant mcp section: absent/non-object keeps current.
   private def self.parse_mcp(node : JSON::Any?) : Nil
     return unless o = node.try(&.as_h?)
-    # load_bool_h, not `|| mcp_channels?` — a plain `||` resurrects a stored `false`.
-    self.mcp_channels = load_bool_h(o, "channels", mcp_channels?)
+    # load_bool, not `|| mcp_channels?` — a plain `||` resurrects a stored `false`.
+    self.mcp_channels = load_bool(o, "channels", mcp_channels?)
   end
 
   # An object replaces the whole set: the file records only denials, so a key it no longer
@@ -140,25 +140,14 @@ module Gori::Settings
 
   # Factory reset for these sections (dispatched by Settings.reset_to_factory). One assignment
   # per field serialize_mcp / serialize_mcp_permissions write.
-  private def self.reset_mcp : Nil
-    self.mcp_channels = DEFAULT_MCP_CHANNELS
-  end
-
   private def self.reset_mcp_permissions : Nil
     self.mcp_denied_permissions = Set(String).new
   end
 
   # Omitted entirely while every field is at its factory default, so a default install's
   # settings.json stays quiet and the 3-way merge has nothing to reconcile.
-  private def self.serialize_mcp(j : JSON::Builder) : Nil
-    unless mcp_channels? == DEFAULT_MCP_CHANNELS
-      j.field "mcp" do
-        j.object do
-          j.field "channels", mcp_channels?
-        end
-      end
-    end
-  end
+  defaulted_section mcp, "mcp",
+    {"channels", mcp_channels?, DEFAULT_MCP_CHANNELS}
 
   private def self.serialize_mcp_permissions(j : JSON::Builder) : Nil
     return if mcp_denied_permissions.empty?
