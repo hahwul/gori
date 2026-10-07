@@ -93,13 +93,14 @@ describe Gori::Repeater::MessageLines do
     MessageLines.of(head, "café".to_slice, decode: false).none?(&.includes?("UTF-8")).should be_true
   end
 
-  # A Repeater send / fuzz row holds the request as one wire blob; `split_wire` gives its body the
-  # same binary handling as a split source's, where the blob side printed raw NUL-laden text.
+  # A Repeater send / fuzz row holds the request as one wire blob; `Env.split_head_body` gives its
+  # body the same binary handling as a split source's, where the blob side printed raw NUL-laden
+  # text.
   it "projects a binary body inside a split whole-wire blob the same as a split source" do
     head = "POST /u HTTP/1.1\r\nHost: x\r\n\r\n"
     body = "\0\1\2bin"
     split = MessageLines.of(head.to_slice, body.to_slice, decode: false)
-    h, b = MessageLines.split_wire("#{head}#{body}".to_slice)
+    h, b = Gori::Env.split_head_body("#{head}#{body}".to_slice)
     MessageLines.of(h, b, decode: false).should eq(split)
     split.last.should contain("binary body")
   end
