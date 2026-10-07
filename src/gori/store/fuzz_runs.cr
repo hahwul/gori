@@ -159,18 +159,14 @@ module Gori
       committed && eligible
     end
 
-    # Existing full-content page API. List-only callers should use fuzz_result_summaries so
-    # request/response BLOBs never leave SQLite.
-    def fuzz_results(run_id : Int64, limit : Int32 = 200,
-                     offset : Int32 = 0, matched_only : Bool = false) : Array(FuzzResultRecord)
-      read_fuzz_result_page(FUZZ_RESULT_COLS, run_id, limit, offset, matched_only)
-    end
-
-    # Scalar-only page with the same record shape as fuzz_results; all four BLOB fields are nil.
+    # Scalar-only page, collected; all four BLOB fields are nil, so request/response BLOBs never
+    # leave SQLite.
     def fuzz_result_summaries(run_id : Int64, limit : Int32 = 200,
                               offset : Int32 = 0,
                               matched_only : Bool = false) : Array(FuzzResultRecord)
-      read_fuzz_result_page(FUZZ_RESULT_SCALAR_COLS, run_id, limit, offset, matched_only)
+      list = [] of FuzzResultRecord
+      each_fuzz_result_summary_page(run_id, limit, offset.to_i64, matched_only) { |row| list << row }
+      list
     end
 
     # Stream one explicit page without materializing its BLOBs as an Array. This is the safe
@@ -294,12 +290,6 @@ module Gori
       FuzzRunDeleteResult.new(outcome, outcome == FuzzRunDeleteStatus::Deleted ? deleted_results : 0_i64)
     end
 
-    # Compatibility wrapper for existing surfaces. New callers can use delete_fuzz_run_result
-    # to distinguish active/not-found/write-failed and report the committed result count.
-    def delete_fuzz_run(id : Int64, *, allow_active : Bool = false) : Bool
-      delete_fuzz_run_result(id, allow_active: allow_active).deleted?
-    end
-
     # Bounded child cleanup for the private temporary spool. Permanent project deletion above
     # remains atomic; this path deliberately yields one small transaction at a time so deleting
     # one completed spool run cannot starve another tab's live persistence queue.
@@ -375,18 +365,6 @@ module Gori
         args: args)
     end
 
-    private def read_fuzz_result_page(columns : String, run_id : Int64, limit : Int32,
-                                      offset : Int32, matched_only : Bool) : Array(FuzzResultRecord)
-      list = [] of FuzzResultRecord
-      matched = matched_only ? " AND matched = 1" : ""
-      @db.query("SELECT #{columns} FROM fuzz_results WHERE run_id = ?#{matched} " \
-                "ORDER BY idx, id LIMIT ? OFFSET ?",
-        run_id, limit, offset) do |rs|
-        rs.each { list << read_fuzz_result(rs) }
-      end
-      list
-    end
-
     private def each_fuzz_result_page_projection(columns : String, run_id : Int64, limit : Int32,
                                                  offset : Int64, matched_only : Bool,
                                                  &block : FuzzResultRecord ->) : Nil
@@ -410,29 +388,21 @@ module Gori
         count = 0
         last_idx = 0_i64
         last_id = 0_i64
+        keyset = ""
+        args = [run_id] of DB::Any
         if idx = after_idx
-          @db.query("SELECT #{columns} FROM fuzz_results WHERE run_id = ?#{matched} " \
-                    "AND (idx > ? OR (idx = ? AND id > ?)) ORDER BY idx, id LIMIT ?",
-            run_id, idx, idx, after_id, batch_size) do |rs|
-            rs.each do
-              row = read_fuzz_result(rs)
-              count += 1
-              last_idx = row.idx
-              last_id = row.id
-              block.call(row)
-            end
-          end
-        else
-          @db.query("SELECT #{columns} FROM fuzz_results WHERE run_id = ?#{matched} " \
-                    "ORDER BY idx, id LIMIT ?",
-            run_id, batch_size) do |rs|
-            rs.each do
-              row = read_fuzz_result(rs)
-              count += 1
-              last_idx = row.idx
-              last_id = row.id
-              block.call(row)
-            end
+          keyset = "AND (idx > ? OR (idx = ? AND id > ?)) "
+          args << idx << idx << after_id
+        end
+        args << batch_size
+        @db.query("SELECT #{columns} FROM fuzz_results WHERE run_id = ?#{matched} " \
+                  "#{keyset}ORDER BY idx, id LIMIT ?", args: args) do |rs|
+          rs.each do
+            row = read_fuzz_result(rs)
+            count += 1
+            last_idx = row.idx
+            last_id = row.id
+            block.call(row)
           end
         end
         break if count < batch_size

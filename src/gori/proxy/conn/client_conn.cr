@@ -719,6 +719,29 @@ module Gori::Proxy
       {client_head, WS::Handshake.strip_extensions(forward_head), Codec::Http1.parse_request_head(client_head)}
     end
 
+    # The whole request body, for the two paths that must hold it before anything goes upstream
+    # (the intercept hold and a request-body rule) and whether there is one: false after
+    # recording why not. A bodiless request is `{nil, true}`, as `Body.read_complete` has it.
+    # #728: gori answers the client's `Expect: 100-continue` itself rather than blocking on a
+    # body being withheld; see `elicit_request_body` for why these paths cannot ask the origin.
+    # A body the client cut short is not held or forwarded: forwarding it under the original
+    # Content-Length would desync the upstream (mirrors the streaming path's req_complete guard).
+    private def read_whole_request_body(req : Codec::RawRequest, record_req : Codec::RawRequest,
+                                        scheme : String, host : String, port : Int32,
+                                        created_at : Int64, req_framing : Codec::BodyFraming,
+                                        req_len : Int64) : {Bytes?, Bool}
+      unless elicit_request_body(req, req_framing)
+        record_error(record_req, scheme, host, port, created_at,
+          "connection closed while answering Expect: 100-continue")
+        return {nil, false}
+      end
+      buffered, body_complete = Codec::Body.read_complete(@io, req_framing, req_len)
+      unless body_complete
+        record_error(record_req, scheme, host, port, created_at, "client truncated request body")
+      end
+      {buffered, body_complete}
+    end
+
     # The intercept-hold request path: buffer the body, let the human edit/drop
     # it, then forward via the reused upstream (with the same stale-reuse retry).
     #
@@ -733,22 +756,10 @@ module Gori::Proxy
                                     host : String, port : Int32, scheme : String,
                                     created_at : Int64, started : Time::Instant,
                                     req_framing : Codec::BodyFraming, req_len : Int64) : Bool
-      # #728: a held request must be COMPLETE before the human can see it, so gori answers the
-      # client's `Expect: 100-continue` itself rather than blocking on a body being withheld.
-      # See `elicit_request_body` for why this path cannot ask the origin instead.
-      unless elicit_request_body(req, req_framing)
-        record_error(record_req, scheme, host, port, created_at,
-          "connection closed while answering Expect: 100-continue")
-        return false
-      end
-      buffered, body_complete = Codec::Body.read_complete(@io, req_framing, req_len)
-      unless body_complete
-        # The client cut its request body short — there's nothing whole to hold/forward, and
-        # forwarding a short body under the original Content-Length would desync the upstream
-        # (mirrors the non-hold path's req_complete guard). Record + close instead of holding.
-        record_error(record_req, scheme, host, port, created_at, "client truncated request body")
-        return false
-      end
+      # #728: a held request must be COMPLETE before the human can see it.
+      buffered, whole = read_whole_request_body(req, record_req, scheme, host, port, created_at,
+        req_framing, req_len)
+      return false unless whole
       # Match&Replace (request body) BEFORE the human sees it — mirroring the head, which is
       # already M&R'd into `sent_head`. A body rule re-frames to Content-Length, so re-parse
       # the (possibly rewritten) head for the hold metadata + capture.
@@ -1052,20 +1063,10 @@ module Gori::Proxy
                                                host : String, port : Int32, scheme : String,
                                                created_at : Int64, started : Time::Instant,
                                                req_framing : Codec::BodyFraming, req_len : Int64) : Bool
-      # #728: a body rule needs the whole entity before the head can be re-framed and sent, so
-      # (as on the hold path) gori answers the client's `Expect: 100-continue` itself.
-      unless elicit_request_body(req, req_framing)
-        record_error(record_req, scheme, host, port, created_at,
-          "connection closed while answering Expect: 100-continue")
-        return false
-      end
-      buffered, body_complete = Codec::Body.read_complete(@io, req_framing, req_len)
-      unless body_complete
-        # Client cut the body short — forwarding it under the original length would desync
-        # the upstream (mirrors the streaming path's req_complete guard). Record + close.
-        record_error(record_req, scheme, host, port, created_at, "client truncated request body")
-        return false
-      end
+      # #728: a body rule needs the whole entity before the head can be re-framed and sent.
+      buffered, whole = read_whole_request_body(req, record_req, scheme, host, port, created_at,
+        req_framing, req_len)
+      return false unless whole
       rewritten_head, fwd_body, advisory = apply_body_rewrite(sent_head, buffered, req_framing,
         host: host, response: false, live: true) { |e| rw.rewrite_request_body(e, host) }
       record_req = reframed_record(record_req, sent_head, rewritten_head, fwd_body)
@@ -1248,8 +1249,8 @@ module Gori::Proxy
       # declared length exceeds MAX_REWRITE_BODY is likewise left byte-exact (see the constant)
       # so one huge download can't grow the proxy heap while a rule is on.
       if buffer_response_body?(resp, resp_framing, resp_len, host)
-        return forward_response_rewriting_body(upstream, req, sent_req, flow_id, host, port,
-          scheme, resp, sent_resp_head, resp_framing, resp_len, ttfb, started, extract_ref)
+        return forward_response_rewriting_body(upstream, req, sent_req, flow_id, host,
+          resp, sent_resp_head, resp_framing, resp_len, ttfb, started, extract_ref)
       end
 
       relaxed = relax_for_streaming_response(resp, resp_framing, upstream)
@@ -1715,7 +1716,7 @@ module Gori::Proxy
     # so the two surfaces cannot disagree about what a descriptor means.
     private def forward_response_rewriting_body(upstream : IO, req : Codec::RawRequest,
                                                 sent_req : Codec::RawRequest, flow_id : Int64,
-                                                host : String, port : Int32, scheme : String,
+                                                host : String,
                                                 resp : Codec::RawResponse, sent_resp_head : Bytes,
                                                 resp_framing : Codec::BodyFraming, resp_len : Int64,
                                                 ttfb : Int64, started : Time::Instant,
@@ -3439,18 +3440,7 @@ module Gori::Proxy
     # Content-Length, and keep every other header verbatim in order. Preserves the head's
     # own line ending (CRLF or bare LF) so the re-parsed head stays well-formed.
     private def reframe_to_length(head : Bytes, len : Int32) : Bytes
-      text = String.new(head)
-      eol = text.index("\r\n") ? "\r\n" : "\n"
-      section = text.split(eol + eol, 2).first # headers up to the blank line
-      lines = section.split(eol)
-      io = IO::Memory.new(head.size + 32)
-      io << lines.first << eol # request / status line, untouched
-      lines[1..].each do |line|
-        next if header_line_named?(line, "transfer-encoding") || header_line_named?(line, "content-length")
-        io << line << eol
-      end
-      io << "Content-Length: " << len << eol << eol
-      io.to_slice
+      rebuild_without_framing(head) { |io, eol| io << "Content-Length: " << len << eol }
     end
 
     # Force `sent_head`'s body-framing headers (Content-Length / Transfer-Encoding) to match
@@ -3467,17 +3457,25 @@ module Gori::Proxy
       sent_framing = framing_header_lines(sent_head)
       return sent_head if orig_framing == sent_framing # rewrite didn't touch framing → byte-exact
 
-      text = String.new(sent_head)
+      # The framing that matches the streamed body.
+      rebuild_without_framing(sent_head) { |io, eol| orig_framing.each { |line| io << line << eol } }
+    end
+
+    # `head` with its Transfer-Encoding and Content-Length lines dropped, every other line
+    # verbatim in order, the block's framing lines (written with the head's own line ending,
+    # CRLF or bare LF, which it is handed) appended, then the blank line.
+    private def rebuild_without_framing(head : Bytes, &) : Bytes
+      text = String.new(head)
       eol = text.index("\r\n") ? "\r\n" : "\n"
       section = text.split(eol + eol, 2).first # headers up to the blank line
       lines = section.split(eol)
-      io = IO::Memory.new(sent_head.size + 32)
+      io = IO::Memory.new(head.size + 32)
       io << lines.first << eol # request / status line, untouched
       lines[1..].each do |line|
         next if header_line_named?(line, "transfer-encoding") || header_line_named?(line, "content-length")
         io << line << eol
       end
-      orig_framing.each { |line| io << line << eol } # the framing that matches the streamed body
+      yield io, eol
       io << eol
       io.to_slice
     end

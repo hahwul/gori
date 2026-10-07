@@ -474,14 +474,24 @@ module Gori
     # terminating NUL. Written as an escape — a raw NUL in a source literal is invisible.
     SQLITE_MAGIC = "SQLite format 3\u0000".to_slice
 
-    # How many flows a project database holds, WITHOUT opening it as a Store.
+    # What one pass over another project's database is worth reading while it is open: the
+    # flow count below, and the operator's `description`. A LISTING wants both and must not
+    # pay two opens for them — on a host holding a project per worktree that is hundreds of
+    # extra file opens, which is the cost #1085 went to some trouble to remove.
+    #
+    # The description read has its own rescue, deliberately: it is the OPTIONAL half, and a
+    # database old enough to have no `settings` table must still yield its flow count rather
+    # than have the outer rescue turn the whole census into "could not measure".
+    record ProjectCensus, flows : Int64?, description : String?
+
+    # How many flows a project database holds (`.flows`), WITHOUT opening it as a Store.
     #
     # `Store.open` migrates (a WRITE), takes the shared open lock and installs the 64 MiB
     # page cache — none of which a census wants, and the migration alone rewrites the file,
     # so a census of N projects would rewrite N databases. This is the read-only
     # counterpart: one connection, one aggregate, and no pragmas but the busy timeout.
     #
-    # `nil` means "could not tell" — missing, unreadable, not a database, or a schema with
+    # A `nil` count means "could not tell" — missing, unreadable, not a database, or a schema with
     # no `flows` table (a project half-created by an older gori). Every caller must treat
     # that as NOT empty: hiding a project the census failed to measure makes it invisible,
     # and invisible is a worse failure than noisy.
@@ -497,20 +507,6 @@ module Gori
     # it. Putting the db file back to its pre-census value would then make `gori run project
     # list` sort a project by one time and print another, and every later reader (MCP
     # `list_projects`, the TUI picker) would see the older time for good.
-    def self.captured_flows(path : String) : Int64?
-      project_census(path).flows
-    end
-
-    # What one pass over another project's database is worth reading while it is open: the
-    # flow count above, and the operator's `description`. A LISTING wants both and must not
-    # pay two opens for them — on a host holding a project per worktree that is hundreds of
-    # extra file opens, which is the cost #1085 went to some trouble to remove.
-    #
-    # The description read has its own rescue, deliberately: it is the OPTIONAL half, and a
-    # database old enough to have no `settings` table must still yield its flow count rather
-    # than have the outer rescue turn the whole census into "could not measure".
-    record ProjectCensus, flows : Int64?, description : String?
-
     def self.project_census(path : String) : ProjectCensus
       return ProjectCensus.new(nil, nil) unless File.exists?(path)
       # Same pre-flight `Store.open` and `Compact.measure` run, and for the first of their

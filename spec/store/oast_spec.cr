@@ -46,7 +46,7 @@ describe "OAST persistence (V39)" do
 
       store.insert_oast_callback(sid, "uid-1", "dns", "A", "1.2.3.4", "corr20abc.oast.pro",
         "raw".to_slice, nil, 1000_i64)
-      store.oast_callbacks(sid).size.should eq(1)
+      store.oast_callbacks_since(0).count(&.session_id.==(sid)).should eq(1)
     end
   end
 
@@ -57,13 +57,13 @@ describe "OAST persistence (V39)" do
       store.insert_oast_callback(sid, "uid-1", "http", "GET", "10.0.0.1", "x", "a".to_slice, nil, 11_i64) # dup
       store.insert_oast_callback(sid, "uid-2", "http", "POST", "10.0.0.2", "x", "b".to_slice, nil, 12_i64)
 
-      all = store.oast_callbacks(sid)
+      all = store.oast_callbacks_since(0).select(&.session_id.==(sid))
       all.size.should eq(2) # the duplicate uid-1 was ignored
       all.map(&.provider_uid).should eq(["uid-1", "uid-2"])
 
       # incremental watermark: only rows after the first id
       first_id = all.first.id
-      store.oast_callbacks(sid, since_id: first_id).map(&.provider_uid).should eq(["uid-2"])
+      store.oast_callbacks_since(first_id).select(&.session_id.==(sid)).map(&.provider_uid).should eq(["uid-2"])
     end
   end
 

@@ -106,7 +106,7 @@ describe Gori::Fuzz::Persistence do
       saved.append(oversized).should be_true
       saved.append(persistence_result(1_i64, Bytes[0x47])).should be_true
       saved.finish(2_i64, 0_i64, 0_i64, "done").should be_true
-      store.fuzz_results(saved.run_id).map(&.idx).should eq([0_i64, 1_i64])
+      fuzz_result_page(store, saved.run_id).map(&.idx).should eq([0_i64, 1_i64])
     end
   end
 
@@ -165,7 +165,7 @@ describe Gori::Fuzz::Persistence do
       store.fuzz_result_count(saved.run_id).should eq(2_i64)
       saved.written.should eq(2_i64)
       # The idx of a kept row is its real payload position — the dropped row leaves a gap at 0.
-      store.fuzz_results(saved.run_id).map(&.idx).should eq([1_i64, 2_i64])
+      fuzz_result_page(store, saved.run_id).map(&.idx).should eq([1_i64, 2_i64])
       run = store.get_fuzz_run(saved.run_id).not_nil!
       run.sent.should eq(3_i64)
       run.keep.should eq("interesting")

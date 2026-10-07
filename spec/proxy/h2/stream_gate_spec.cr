@@ -56,7 +56,7 @@ private class Rig
     @upstream = IO::Memory.new
     @client = IO::Memory.new
     @enc_out = HPACK::Encoder.new(indexing: indexing)
-    @assembler = Gori::Proxy::H2::Assembler.new(@sink, host, port, 1_i64)
+    @assembler = Gori::Proxy::H2::Assembler.new(@sink, host, port)
     @heads_out = Gori::Proxy::H2::HeadRewrite.new("out", nil, @assembler, host)
     @heads_in = Gori::Proxy::H2::HeadRewrite.new("in", nil, @assembler, host)
     @c2s = Gate.new("out", @upstream, 1_i64, @sink, @assembler, host, port, @ic, @heads_out)

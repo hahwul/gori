@@ -95,7 +95,7 @@ describe "deleting a Fuzz session" do
       counts(store).should eq({1_i64, 1_i64, 2_i64})
       store.fuzz_sessions.map(&.id).should eq([kept])
       store.fuzz_runs(kept).map(&.id).should eq([kept_run])
-      store.fuzz_results(kept_run).size.should eq(2)
+      fuzz_result_page(store, kept_run).size.should eq(2)
     end
   end
 
@@ -112,8 +112,8 @@ describe "deleting a Fuzz session" do
       store.flush
 
       counts(store).should eq({0_i64, 0_i64, 0_i64})
-      store.fuzz_results(stranded_run).size.should eq(0)
-      store.fuzz_results(live_run).size.should eq(0)
+      fuzz_result_page(store, stranded_run).size.should eq(0)
+      fuzz_result_page(store, live_run).size.should eq(0)
     end
   end
 

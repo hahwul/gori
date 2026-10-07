@@ -85,10 +85,7 @@ module Gori::Proxy
 
     private def self.ipv6_bytes(ip : Socket::IPAddress) : Bytes
       addr = ip.to_unsafe.as(Pointer(LibC::SockaddrIn6)).value.sin6_addr
-      ptr = pointerof(addr).as(Pointer(UInt8))
-      out = Bytes.new(16)
-      16.times { |i| out[i] = ptr[i] }
-      out
+      Bytes.new(pointerof(addr).as(Pointer(UInt8)), 16).dup
     end
 
     # What one handshake produced: the target the client asked for, or the sentence explaining
@@ -286,7 +283,7 @@ module Gori::Proxy
         io.write(Bytes[ATYP_IPV4, 0_u8, 0_u8, 0_u8, 0_u8])
       end
       port = bind.try(&.port) || 0
-      io.write(Bytes[(port >> 8).to_u8, (port & 0xFF).to_u8])
+      io.write_bytes(port.to_u16, IO::ByteFormat::BigEndian)
       io.flush
     end
   end

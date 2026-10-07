@@ -103,20 +103,6 @@ module Gori
       }
     end
 
-    # Incremental (watermark) load: callbacks with id > since_id, oldest first. Callbacks are
-    # append-only, so the caller keeps @max_seen_id and never re-selects the whole table.
-    def oast_callbacks(session_id : Int64, since_id : Int64 = 0) : Array(OastCallbackRecord)
-      list = [] of OastCallbackRecord
-      @db.query("SELECT id, session_id, created_at, provider_uid, protocol, method, source_ip, full_id, raw_request, raw_response FROM oast_callbacks WHERE session_id = ? AND id > ? ORDER BY id", session_id, since_id) do |rs|
-        rs.each do
-          list << OastCallbackRecord.new(
-            rs.read(Int64), rs.read(Int64), rs.read(Int64), rs.read(String), rs.read(String),
-            rs.read(String?), rs.read(String?), rs.read(String), rs.read(Bytes), rs.read(Bytes?))
-        end
-      end
-      list
-    end
-
     # Watermark load across ALL sessions: callbacks with id > since_id, oldest first. One
     # rowid-indexed query the OAST controller uses to fold new callbacks in on a soft-sync
     # (reconcile) without re-selecting the whole table per session on every data_version bump.
@@ -134,7 +120,7 @@ module Gori
 
     # How many callbacks a session has on file. Counted in SQL rather than by loading rows:
     # the session LIST (three surfaces render one) wants the number beside every session, and
-    # `oast_callbacks` above reads every raw request/response blob to get it.
+    # `oast_callbacks_since` above reads every raw request/response blob to get it.
     def oast_callback_count(session_id : Int64) : Int32
       @db.query_one("SELECT COUNT(*) FROM oast_callbacks WHERE session_id = ?", session_id, as: Int64).to_i32
     end

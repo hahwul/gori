@@ -22,9 +22,7 @@ module Gori
       list = [] of FuzzSessionRecord
       @db.query("SELECT id, target, #{TEMPLATE_COL}, http2, sni, config, flow_id, position, name FROM fuzz_sessions ORDER BY position, id") do |rs|
         rs.each do
-          list << FuzzSessionRecord.new(
-            rs.read(Int64), rs.read(String), String.new(rs.read(Bytes)), rs.read(Int32) != 0,
-            rs.read(String?), rs.read(String), rs.read(Int64?), rs.read(Int32), rs.read(String?))
+          list << read_fuzz_session(rs)
         end
       end
       list
@@ -34,11 +32,15 @@ module Gori
       @db.query(
         "SELECT id, target, #{TEMPLATE_COL}, http2, sni, config, flow_id, position, name FROM fuzz_sessions WHERE id = ?",
         id) do |rs|
-        return FuzzSessionRecord.new(
-          rs.read(Int64), rs.read(String), String.new(rs.read(Bytes)), rs.read(Int32) != 0,
-          rs.read(String?), rs.read(String), rs.read(Int64?), rs.read(Int32), rs.read(String?)) if rs.move_next
+        return read_fuzz_session(rs) if rs.move_next
       end
       nil
+    end
+
+    private def read_fuzz_session(rs : DB::ResultSet) : FuzzSessionRecord
+      FuzzSessionRecord.new(
+        rs.read(Int64), rs.read(String), String.new(rs.read(Bytes)), rs.read(Int32) != 0,
+        rs.read(String?), rs.read(String), rs.read(Int64?), rs.read(Int32), rs.read(String?))
     end
 
     def insert_fuzz_session(target : String, template : String, http2 : Bool, sni : String?,

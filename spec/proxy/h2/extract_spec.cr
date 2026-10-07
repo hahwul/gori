@@ -32,7 +32,7 @@ private def with_bindings(&)
 end
 
 private def pipeline(bindings : Gori::Bindings) : {Gori::Proxy::H2::Extract, Gori::Proxy::H2::Assembler}
-  assembler = Gori::Proxy::H2::Assembler.new(NullSink.new, "acme.test", 443, 1_i64)
+  assembler = Gori::Proxy::H2::Assembler.new(NullSink.new, "acme.test", 443)
   {Gori::Proxy::H2::Extract.new(bindings, assembler, "acme.test", 443), assembler}
 end
 
@@ -62,7 +62,7 @@ private class GateRig
 
   def initialize(ic : Gori::Interceptor, bindings : Gori::Bindings)
     sink = NullSink.new
-    assembler = Gori::Proxy::H2::Assembler.new(sink, "acme.test", 443, 1_i64)
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "acme.test", 443)
     heads_out = Gori::Proxy::H2::HeadRewrite.new("out", nil, assembler, "acme.test")
     heads_in = Gori::Proxy::H2::HeadRewrite.new("in", nil, assembler, "acme.test")
     @c2s = Gori::Proxy::H2::StreamGate.new("out", IO::Memory.new, 1_i64, sink, assembler,

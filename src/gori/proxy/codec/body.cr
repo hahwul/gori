@@ -404,15 +404,12 @@ module Gori::Proxy::Codec
     # list, a sign, a non-digit, Unicode whitespace, a value too long to be certain of Int64
     # range) goes to the strict path to be parsed or refused there.
     private def self.plain_content_length(value : String) : Int64?
-      bytes = value.to_slice
+      # SP / HTAB / LF / VT / FF / CR — what `String#strip` takes off an ASCII string, which is
+      # what the strict path applies to each token. Anything else at an edge is left in place
+      # so the value fails the digit test below and the strict path decides.
+      bytes = AsciiBytes.trim(value.to_slice)
       from = 0
       to = bytes.size
-      while to > from && ascii_ws?(bytes.unsafe_fetch(to - 1))
-        to -= 1
-      end
-      while from < to && ascii_ws?(bytes.unsafe_fetch(from))
-        from += 1
-      end
       # 18 digits is the widest run that cannot overflow Int64, so the accumulate below needs
       # no overflow guard of its own — and is written with the CHECKED operators anyway, so a
       # wrong bound here would raise rather than hand the framing loop a wrapped length.
@@ -425,13 +422,6 @@ module Gori::Proxy::Codec
         from += 1
       end
       n
-    end
-
-    # SP / HTAB / LF / VT / FF / CR — what `String#strip` takes off an ASCII string, which is
-    # what the strict path applies to each token. Anything else at an edge is left in place so
-    # the value fails the digit test above and the strict path decides.
-    private def self.ascii_ws?(b : UInt8) : Bool
-      b == 0x20_u8 || (b >= 0x09_u8 && b <= 0x0d_u8)
     end
 
     private def self.content_length_strict(headers : HeaderList) : Int64?

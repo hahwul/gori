@@ -196,12 +196,7 @@ module Gori::Proxy
       # port we will ACTUALLY dial — testing the request's port first would let an override
       # pointing at gori's own bind walk straight into the self-proxy loop this exists to stop.
       resolved, target_port = connect_target(host, port, overrides)
-      return false unless target_port == self_addr[1]
-      target = normalize_host(resolved)
-      bind = normalize_host(self_addr[0])
-      return true if target == bind
-      return true if local_host && target == normalize_host(local_host)
-      reaches_self?(target, bind)
+      addresses_self?(resolved, target_port, self_addr, local_host)
     end
 
     # True when the request LITERALLY targets gori's own listener `self_addr` — the
@@ -768,7 +763,7 @@ module Gori::Proxy
     private def self.socks5_connect(sock : TCPSocket, host : String, port : Int32) : Bool
       sock.write(Bytes[Socks5::VERSION, Socks5::CMD_CONNECT, 0_u8])
       return false unless socks5_write_address(sock, host)
-      sock.write(Bytes[(port >> 8).to_u8, (port & 0xFF).to_u8])
+      sock.write_bytes(port.to_u16, IO::ByteFormat::BigEndian)
       sock.flush
 
       return false unless (reply = Socks5.read_exactly(sock, 4)) && reply[0] == Socks5::VERSION

@@ -143,12 +143,12 @@ describe Gori::Proxy::Tls::Fingerprint do
     # misread, judged by someone other than its implementer.
     it "reproduces the published worked example" do
       hello = Fingerprint.parse(ja4_example_hello).should_not be_nil
-      Fingerprint.ja4(hello).should eq("t13d1516h2_8daaf6152771_e5627efa2ab1")
+      Fingerprint.report(hello).ja4.should eq("t13d1516h2_8daaf6152771_e5627efa2ab1")
     end
 
     it "reproduces the published raw (JA4_r) form" do
       hello = Fingerprint.parse(ja4_example_hello).should_not be_nil
-      Fingerprint.ja4_raw(hello).should eq(
+      Fingerprint.report(hello).ja4_r.should eq(
         "t13d1516h2_" \
         "002f,0035,009c,009d,1301,1302,1303,c013,c014,c02b,c02c,c02f,c030,cca8,cca9_" \
         "0005,000a,000b,000d,0012,0015,0017,001b,0023,002b,002d,0033,4469,ff01_" \
@@ -161,26 +161,26 @@ describe Gori::Proxy::Tls::Fingerprint do
     it "ignores GREASE values in ciphers and extensions" do
       plain = Fingerprint.parse(ja4_example_hello).should_not be_nil
       greased = Fingerprint.parse(ja4_example_hello(with_grease: true)).should_not be_nil
-      Fingerprint.ja4(greased).should eq(Fingerprint.ja4(plain))
+      Fingerprint.report(greased).ja4.should eq(Fingerprint.report(plain).ja4)
     end
 
     it "reads the same hello out of a TLS record as out of a bare handshake message" do
       bare = Fingerprint.parse(ja4_example_hello).should_not be_nil
       framed = Fingerprint.parse(as_record(ja4_example_hello)).should_not be_nil
-      Fingerprint.ja4(framed).should eq(Fingerprint.ja4(bare))
+      Fingerprint.report(framed).ja4.should eq(Fingerprint.report(bare).ja4)
     end
 
     # The classic misread: every TLS 1.3 client writes 0x0303 in legacy_version for middlebox
     # compatibility, so a JA4 taken from there reports the whole modern web as TLS 1.2.
     it "takes the version from supported_versions, not from legacy_version" do
       without = client_hello(0x0303, JA4_EXAMPLE_CIPHERS, cat(sni_ext, alpn_ext(["h2"])))
-      Fingerprint.ja4(Fingerprint.parse(without).not_nil!).should start_with("t12d")
-      Fingerprint.ja4(Fingerprint.parse(ja4_example_hello).not_nil!).should start_with("t13d")
+      Fingerprint.report(Fingerprint.parse(without).not_nil!).ja4.should start_with("t12d")
+      Fingerprint.report(Fingerprint.parse(ja4_example_hello).not_nil!).ja4.should start_with("t13d")
     end
 
     it "reports i (IP) when there is no SNI, and 00 when there is no ALPN" do
       hello = Fingerprint.parse(client_hello(0x0303, [0x1301], Bytes.empty)).should_not be_nil
-      Fingerprint.ja4(hello).should start_with("t12i0100")
+      Fingerprint.report(hello).ja4.should start_with("t12i0100")
     end
 
     # The spec's ALPN table, verbatim. Every row is a case that the "just take the first and
@@ -201,7 +201,7 @@ describe Gori::Proxy::Tls::Fingerprint do
       }.each do |value, expected|
         hello = Fingerprint.parse(
           client_hello(0x0303, [0x1301], cat(sni_ext, alpn_ext([value])))).should_not be_nil
-        Fingerprint.ja4(hello)[8, 2].should eq(expected)
+        Fingerprint.report(hello).ja4[8, 2].should eq(expected)
       end
     end
 
@@ -210,7 +210,7 @@ describe Gori::Proxy::Tls::Fingerprint do
     # empty string would look like a real answer.
     it "writes zeros rather than a hash of nothing for an empty list" do
       hello = Fingerprint.parse(client_hello(0x0303, [] of Int32, sni_ext)).should_not be_nil
-      Fingerprint.ja4(hello).should contain("_000000000000_000000000000")
+      Fingerprint.report(hello).ja4.should contain("_000000000000_000000000000")
     end
   end
 
@@ -228,7 +228,7 @@ describe Gori::Proxy::Tls::Fingerprint do
       hello = Fingerprint.parse(client_hello(769, ciphers, extensions)).should_not be_nil
       Fingerprint.ja3_text(hello).should eq(
         "769,47-53-5-10-49161-49162-49171-49172-50-56-19-4,0-10-11,23-24-25,0")
-      Fingerprint.ja3(hello).should eq(Digest::MD5.hexdigest(Fingerprint.ja3_text(hello)))
+      Fingerprint.report(hello).ja3.should eq(Digest::MD5.hexdigest(Fingerprint.ja3_text(hello)))
     end
 
     # "If there are no SSL Extensions in the Client Hello, the fields are left empty" — the

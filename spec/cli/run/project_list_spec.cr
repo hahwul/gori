@@ -90,13 +90,13 @@ private def project_at(dir : String) : Gori::Project
 end
 
 describe Gori::Store do
-  describe ".captured_flows" do
+  describe ".project_census" do
     it "counts a project's flows without opening (and migrating) it as a Store" do
       with_project_root do |registry|
         project = registry.create("spec proj")
-        Gori::Store.captured_flows(project.db_path).should eq(0)
+        Gori::Store.project_census(project.db_path).flows.should eq(0)
         with_project_store(project) { |store| 2.times { seed_project_flow(store) } }
-        Gori::Store.captured_flows(project.db_path).should eq(2)
+        Gori::Store.project_census(project.db_path).flows.should eq(2)
       end
     end
 
@@ -109,7 +109,7 @@ describe Gori::Store do
         # "current project" marker is read off.
         old = Time.utc(2020, 1, 2, 3, 4, 5)
         File.utime(old, old, project.db_path)
-        Gori::Store.captured_flows(project.db_path).should eq(1)
+        Gori::Store.project_census(project.db_path).flows.should eq(1)
         File.info(project.db_path).modification_time.to_unix.should eq(old.to_unix)
       end
     end
@@ -136,7 +136,7 @@ describe Gori::Store do
         File.utime(newer, newer, wal)
         project.last_modified.try(&.to_unix).should eq(newer.to_unix) # the premise
 
-        Gori::Store.captured_flows(project.db_path).should eq(1)
+        Gori::Store.project_census(project.db_path).flows.should eq(1)
         project.last_modified.try(&.to_unix).should eq(newer.to_unix)
       end
     end
@@ -144,10 +144,10 @@ describe Gori::Store do
     it "answers nil — not 0 — for something that is not a readable project db" do
       with_project_root do |registry|
         project = registry.create("spec proj")
-        Gori::Store.captured_flows(File.join(project.dir, "nope.db")).should be_nil
+        Gori::Store.project_census(File.join(project.dir, "nope.db")).flows.should be_nil
         junk = File.join(project.dir, "junk.db")
         File.write(junk, "this is not a database")
-        Gori::Store.captured_flows(junk).should be_nil
+        Gori::Store.project_census(junk).flows.should be_nil
       end
     end
   end

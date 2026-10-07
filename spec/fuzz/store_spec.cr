@@ -115,12 +115,12 @@ describe "Gori::Store fuzz persistence" do
       r.total.should eq(3_i64)
       r.snapshot_version.should eq(1)
 
-      all = store.fuzz_results(run)
+      all = fuzz_result_page(store, run)
       all.map(&.idx).should eq([0_i64, 1, 2])
       all[1].matched?.should be_true
       all[1].extracted.should eq("tok")
 
-      store.fuzz_results(run, limit: 2, offset: 1).map(&.idx).should eq([1_i64, 2])
+      fuzz_result_page(store, run, limit: 2, offset: 1).map(&.idx).should eq([1_i64, 2])
       store.fuzz_result_counts([run, 99_999_i64]).should eq({run => 3_i64})
     end
   end
@@ -217,7 +217,7 @@ describe "Gori::Store fuzz persistence" do
         request: "GET / HTTP/1.1\r\n\r\n".to_slice,
         response_head: "HTTP/1.1 500\r\n\r\n".to_slice,
         response_body: "boom".to_slice)
-      r = store.fuzz_results(run).first
+      r = fuzz_result_page(store, run).first
       r.request.should_not be_nil
       String.new(r.response_body.as(Bytes)).should eq("boom")
     end
@@ -290,7 +290,7 @@ describe "Gori::Store fuzz persistence" do
         "FROM fuzz_results WHERE run_id = ? AND idx = 1", run,
         as: {String, String, String, String}).should eq({"blob", "blob", "blob", "blob"})
 
-      rows = store.fuzz_results(run)
+      rows = fuzz_result_page(store, run)
       {rows[0].request, rows[0].response_head, rows[0].response_body, rows[0].wire}
         .should eq({nil, nil, nil, nil})
       rows[1].request.not_nil!.should be_empty
@@ -387,7 +387,7 @@ describe "Gori::Store fuzz persistence" do
       store.get_fuzz_run(stale).should be_nil
 
       store.finish_fuzz_run(run, 1_i64, 1_i64, 0_i64, "done").should be_true
-      store.delete_fuzz_run(run).should be_true # retained compatibility wrapper
+      store.delete_fuzz_run_result(run).deleted?.should be_true
       store.delete_fuzz_run_result(run).status.should eq(Gori::Store::FuzzRunDeleteStatus::NotFound)
     end
   end

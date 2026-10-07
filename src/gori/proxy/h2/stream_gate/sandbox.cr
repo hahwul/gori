@@ -214,8 +214,7 @@ class Gori::Proxy::H2::StreamGate
   private def promised_stream_id(block : HeadRewrite::Block) : UInt32
     prefix = block.prefix
     return 0_u32 if prefix.size < 4
-    ((prefix[0].to_u32 & 0x7f) << 24) | (prefix[1].to_u32 << 16) |
-      (prefix[2].to_u32 << 8) | prefix[3].to_u32
+    IO::ByteFormat::BigEndian.decode(UInt32, prefix) & 0x7fffffff_u32
   end
 
   # Refuse one stream. The head never goes on the wire, so it is fed to the assembler for the

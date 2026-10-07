@@ -113,7 +113,7 @@ module Gori
     # moment the project was CREATED for the entire time it is open: the Project tab drew
     # `Activity` older than `Created`, and every peer reading a live project (MCP
     # `list_projects`, `gori run project list`, a second TUI's picker) saw the same stale
-    # value. `Store.captured_flows` already guards the OPPOSITE direction (a read-only
+    # value. `Store.project_census` already guards the OPPOSITE direction (a read-only
     # census's close checkpoints and would stamp a project "just active", so it puts the
     # mtime back); this is the direction that was never covered.
     #

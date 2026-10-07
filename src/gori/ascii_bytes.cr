@@ -142,6 +142,13 @@ module Gori
       end
     end
 
+    # `bytes` with `whitespace?` taken off both ends, as a VIEW (no copy). Every octet in the
+    # set is below 0x80, so it never trims a UTF-8 continuation octet.
+    def self.trim(bytes : Bytes) : Bytes
+      a, z = trim(bytes, 0, bytes.size)
+      bytes[a, z - a]
+    end
+
     private def self.trim(bytes : Bytes, a : Int32, z : Int32) : {Int32, Int32}
       while a < z && whitespace?(bytes.unsafe_fetch(a))
         a += 1

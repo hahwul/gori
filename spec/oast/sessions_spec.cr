@@ -439,7 +439,7 @@ describe Gori::Oast::Sessions do
         O::Sessions.record_callback(store, id, i) # a provider that replays its buffer
         store.flush
         store.oast_callback_count(id).should eq(1)
-        row = store.oast_callbacks(id).first
+        row = store.oast_callbacks_since(0).find!(&.session_id.==(id))
         row.created_at.should eq(i.at.to_unix_ms * 1000)
         row.protocol.should eq("http")
         O::Sessions.seen_uids(store, id).should eq(Set{"uid-1"})

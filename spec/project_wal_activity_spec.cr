@@ -12,7 +12,7 @@ require "file_utils"
 #   * `gori run project list` (and MCP `list_projects`) printed the creation time for a project
 #     a peer process was capturing into right then.
 #
-# `Store.captured_flows` already guards the opposite direction — a read-only census closes the
+# `Store.project_census` already guards the opposite direction — a read-only census closes the
 # last connection, that checkpoints, and the project would be stamped "just active", so it puts
 # the mtime back. This is the direction nothing covered.
 private def with_db(&)

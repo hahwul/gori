@@ -50,7 +50,7 @@ end
 private def live_pipe(rewriter : Gori::Proxy::HeadRewriter?,
                       extractor : Gori::Proxy::ResponseExtract? = nil,
                       direction = "out") : {Gori::Proxy::H2::HeadRewrite, Gori::Proxy::H2::Assembler}
-  assembler = Gori::Proxy::H2::Assembler.new(LiveSink.new, CONNECT_HOST, 443, 1_i64)
+  assembler = Gori::Proxy::H2::Assembler.new(LiveSink.new, CONNECT_HOST, 443)
   {Gori::Proxy::H2::HeadRewrite.new(direction, rewriter, assembler, CONNECT_HOST, extractor), assembler}
 end
 

@@ -109,7 +109,7 @@ describe "gori run oast — persisted sessions" do
         store.flush
         store.oast_callback_count(id).should eq(1)
         # The same evidence table the TUI tab reads — a headless resume is not a side channel.
-        store.oast_callbacks(id).first.provider_uid.should eq("hit-1")
+        store.oast_callbacks_since(0).find!(&.session_id.==(id)).provider_uid.should eq("hit-1")
         io.to_s.should contain("oob.example") # the fresh payload, then the hit line
         io.to_s.should contain("203.0.113.7")
         err.to_s.should contain("resumed session ##{id}")
