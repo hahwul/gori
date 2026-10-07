@@ -482,35 +482,25 @@ module Gori
     # that they would immediately re-truncate. Heads stay whole (small). Pass
     # `body_max + 1` when the caller wants to detect "was larger than cap".
     def get_flow(id : Int64, *, body_max : Int32? = nil) : FlowDetail?
+      request_body, response_body = "request_body", "response_body"
+      args = [] of DB::Any
       if max = body_max
-        @db.query(<<-SQL, max, max, id) do |rs|
-          SELECT id, created_at, scheme, method, host, port, target, status,
-                 request_size, response_size, state, duration_us, content_type,
-                 short_circuited, advisory, request_content_type, connect_protocol,
-                 source, source_surface, source_ref, #{INTERCEPT_EDITED},
-                 http_version, request_head,
-                 CASE WHEN request_body IS NULL THEN NULL ELSE substr(request_body, 1, ?) END,
-                 response_head,
-                 CASE WHEN response_body IS NULL THEN NULL ELSE substr(response_body, 1, ?) END,
-                 h2_conn_id, h2_stream_id, request_body_truncated, response_body_truncated, error,
-                 sni
-          FROM flows WHERE id = ?
-          SQL
-          return read_flow_detail(rs)
-        end
-      else
-        @db.query(<<-SQL, id) do |rs|
-          SELECT id, created_at, scheme, method, host, port, target, status,
-                 request_size, response_size, state, duration_us, content_type,
-                 short_circuited, advisory, request_content_type, connect_protocol,
-                 source, source_surface, source_ref, #{INTERCEPT_EDITED},
-                 http_version, request_head, request_body, response_head, response_body,
-                 h2_conn_id, h2_stream_id, request_body_truncated, response_body_truncated, error,
-                 sni
-          FROM flows WHERE id = ?
-          SQL
-          return read_flow_detail(rs)
-        end
+        request_body = "CASE WHEN request_body IS NULL THEN NULL ELSE substr(request_body, 1, ?) END"
+        response_body = "CASE WHEN response_body IS NULL THEN NULL ELSE substr(response_body, 1, ?) END"
+        args << max << max
+      end
+      args << id
+      @db.query(<<-SQL, args: args) do |rs|
+        SELECT id, created_at, scheme, method, host, port, target, status,
+               request_size, response_size, state, duration_us, content_type,
+               short_circuited, advisory, request_content_type, connect_protocol,
+               source, source_surface, source_ref, #{INTERCEPT_EDITED},
+               http_version, request_head, #{request_body}, response_head, #{response_body},
+               h2_conn_id, h2_stream_id, request_body_truncated, response_body_truncated, error,
+               sni
+        FROM flows WHERE id = ?
+        SQL
+        return read_flow_detail(rs)
       end
       nil
     end
