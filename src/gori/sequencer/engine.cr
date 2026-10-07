@@ -18,7 +18,7 @@ module Gori::Sequencer
   # Single-threaded fiber scheduler (no -Dpreview_mt): plain ivar increments never yield
   # mid-op, so the shared counters across dispatcher/worker fibers need no locks.
   class Engine
-    # Outbound rate limiting (rps / throttle_ms / jitter_ms) over `@last_dispatch`.
+    # Outbound rate limiting (rps / throttle_ms) over `@last_dispatch`.
     include Gori::Pacing
 
     MAX_CONCURRENCY = 50

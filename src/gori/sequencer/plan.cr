@@ -54,7 +54,7 @@ module Gori::Sequencer
   #
   # `config` is the live mutable object the caller owns — the TUI's config overlay binds one
   # `Config` instance and edits it in place, so the plan must read that instance, not a copy.
-  # It carries mode / token location / goal / concurrency / rps / throttle / jitter / timeout
+  # It carries mode / token location / goal / concurrency / rps / throttle / timeout
   # / retries / max_requests / manual tokens / notify policy.
   struct PlanOptions
     # The raw request to replay, BEFORE `Env.expand_wire` — the builder owns the expansion

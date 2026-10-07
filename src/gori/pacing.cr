@@ -3,15 +3,12 @@ module Gori
   # Miner and Sequencer.
   #
   # It is one policy, not four. Each engine had carried a byte-identical private copy of both
-  # methods, and the drift that pattern invites had already happened in the comments: the
-  # Fuzzer's copy alone records why the jitter `sleep` sits OUTSIDE the `if interval` guard
-  # (gating it behind a base rate silently dropped jitter unless rps/throttle was also set),
-  # while the other three carried the fixed code with no trace of the lesson. Anyone reading
-  # the Miner's copy would have seen an unexplained line begging to be tidied back into the
-  # branch. Sharing the code shares the reasoning with it.
+  # methods, and the drift that pattern invites had already happened in the comments: one
+  # copy alone recorded a lesson the other three carried with no trace of it. Sharing the
+  # code shares the reasoning with it.
   #
   # The including class supplies three things, which is the whole contract:
-  #   `@config`         — responds to `rps`, `throttle_ms` and `jitter_ms`
+  #   `@config`         — responds to `rps` and `throttle_ms`
   #   `@last_dispatch`  — a `Time::Instant` it also initialises
   #   `stopped?`        — true once the run was asked to stop; ends a wait in progress
   #
@@ -42,7 +39,7 @@ module Gori
       end
     end
 
-    # Wait out the remaining gap before the next request, then apply jitter.
+    # Wait out the remaining gap before the next request.
     #
     # A TICKET, not a "sleep until the last one was long enough ago": each caller claims the
     # next slot by advancing `@last_dispatch` and only then sleeps until its own slot. The
@@ -70,9 +67,6 @@ module Gori
         @last_dispatch = target + interval # claim it before sleeping — no yield in between
         nap(target - now) if now < target
       end
-      # Jitter applies on its own — don't gate it behind a base rate, which silently
-      # dropped jitter unless rps/throttle was also set.
-      nap(rand(@config.jitter_ms).milliseconds) if @config.jitter_ms > 0
       !stopped?
     end
 

@@ -278,7 +278,6 @@ module Gori
       property concurrency : Int32
       property rps : Float64?
       property throttle_ms : Int32?
-      property jitter_ms : Int32
       property timeout : Time::Span?
       property retries : Int32
       property retry_pause : Time::Span
@@ -336,7 +335,7 @@ module Gori
 
       def initialize(@locations = [Location::Query],
                      @bucket_size = DEFAULT_BUCKETS.dup,
-                     @concurrency = 10, @rps = nil, @throttle_ms = nil, @jitter_ms = 0,
+                     @concurrency = 10, @rps = nil, @throttle_ms = nil,
                      @timeout = nil, @retries = 1, @retry_pause = 500.milliseconds,
                      @stability_rounds = 4, @confirm_rounds = 2, @max_requests = nil,
                      @user_wordlist = nil,

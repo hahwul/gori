@@ -506,7 +506,6 @@ module Gori
       property concurrency : Int32
       property rps : Float64?       # requests/sec cap (nil = unlimited)
       property throttle_ms : Int32? # fixed delay between sends (alt. to rps)
-      property jitter_ms : Int32    # random 0..jitter added after each pace
       property retries : Int32      # retries on a network error
       property retry_pause : Time::Span
       property timeout : Time::Span? # per-request connect+read timeout override
@@ -629,7 +628,6 @@ module Gori
                      @concurrency : Int32 = 20,
                      @rps : Float64? = nil,
                      @throttle_ms : Int32? = nil,
-                     @jitter_ms : Int32 = 0,
                      @retries : Int32 = 0,
                      @retry_pause : Time::Span = 1.second,
                      @timeout : Time::Span? = nil,

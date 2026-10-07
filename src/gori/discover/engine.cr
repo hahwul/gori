@@ -517,7 +517,7 @@ module Gori::Discover
   # with zero locks; N worker fibers only do network I/O + CPU (decode/extract/fingerprint)
   # and feed Outcomes back over a channel. Mirrors the Fuzz/Miner lifecycle shape.
   class Engine
-    # Outbound rate limiting (rps / throttle_ms / jitter_ms) over `@last_dispatch`.
+    # Outbound rate limiting (rps / throttle_ms) over `@last_dispatch`.
     include Gori::Pacing
 
     EVENT_BUFFER    = 256
