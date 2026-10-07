@@ -196,12 +196,7 @@ module Gori::Proxy
       # port we will ACTUALLY dial — testing the request's port first would let an override
       # pointing at gori's own bind walk straight into the self-proxy loop this exists to stop.
       resolved, target_port = connect_target(host, port, overrides)
-      return false unless target_port == self_addr[1]
-      target = normalize_host(resolved)
-      bind = normalize_host(self_addr[0])
-      return true if target == bind
-      return true if local_host && target == normalize_host(local_host)
-      reaches_self?(target, bind)
+      addresses_self?(resolved, target_port, self_addr, local_host)
     end
 
     # True when the request LITERALLY targets gori's own listener `self_addr` — the
