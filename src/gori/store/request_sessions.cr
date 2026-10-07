@@ -14,9 +14,7 @@ module Gori
       list = [] of RequestSessionRecord
       @db.query("SELECT id, target, request, http2, sni, config, flow_id, position, name FROM #{kind}_sessions ORDER BY position, id") do |rs|
         rs.each do
-          list << RequestSessionRecord.new(
-            rs.read(Int64), rs.read(String), rs.read(Bytes), rs.read(Int32) != 0,
-            rs.read(String?), rs.read(String), rs.read(Int64?), rs.read(Int32), rs.read(String?))
+          list << read_request_session(rs)
         end
       end
       list
@@ -26,11 +24,15 @@ module Gori
       @db.query(
         "SELECT id, target, request, http2, sni, config, flow_id, position, name FROM #{kind}_sessions WHERE id = ?",
         id) do |rs|
-        return RequestSessionRecord.new(
-          rs.read(Int64), rs.read(String), rs.read(Bytes), rs.read(Int32) != 0,
-          rs.read(String?), rs.read(String), rs.read(Int64?), rs.read(Int32), rs.read(String?)) if rs.move_next
+        return read_request_session(rs) if rs.move_next
       end
       nil
+    end
+
+    private def read_request_session(rs : DB::ResultSet) : RequestSessionRecord
+      RequestSessionRecord.new(
+        rs.read(Int64), rs.read(String), rs.read(Bytes), rs.read(Int32) != 0,
+        rs.read(String?), rs.read(String), rs.read(Int64?), rs.read(Int32), rs.read(String?))
     end
 
     private def insert_request_session(kind : String, target : String, request : Bytes, http2 : Bool, sni : String?,
