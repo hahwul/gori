@@ -84,10 +84,6 @@ module Gori::Tui
       @seed.choices[@target_idx][1]
     end
 
-    def selected_path : String
-      @seed.choices[@target_idx][0]
-    end
-
     # Remember the last confirmed overlay for the next Sitemap/History discovery.
     def save_prefs : Bool
       Settings.save_discover_prefs(CONTAINMENTS[@contain_idx].label, DEPTHS[@depth_idx],

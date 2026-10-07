@@ -56,12 +56,6 @@ module Gori::Tui
       @strip_focus = here ? Verb::Registry::SUBTAB_SECTIONS.includes?(here.section) && here.subtabs : false
     end
 
-    # The focused tab's actions captured at ^P, in registration order — every one a typed
-    # query can find.
-    def tab_actions : Array(Verb::Definition)
-      @tab_all
-    end
-
     # Whether `verb` was listed as one of the focused tab's actions (not a Global row).
     def tab_verb?(verb : Verb::Definition) : Bool
       @tab_all.includes?(verb)

@@ -400,10 +400,6 @@ module Gori::Tui
       nil
     end
 
-    def bypass_total : Int32
-      @entries.sum { |e| (t = e.target) ? t.same_count : 0 }
-    end
-
     # Empty the queue. Deliberately does NOT reset `@next_id` — see `add`.
     def clear : Nil
       touch
@@ -566,11 +562,6 @@ module Gori::Tui
 
     def list_contains?(mx : Int32, my : Int32) : Bool
       r = @list_rows_rect
-      !r.empty? && r.contains?(mx, my)
-    end
-
-    def detail_contains?(mx : Int32, my : Int32) : Bool
-      r = @detail_rect
       !r.empty? && r.contains?(mx, my)
     end
 

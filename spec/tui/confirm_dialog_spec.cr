@@ -280,7 +280,7 @@ describe "ConfirmDialog on a short pane" do
     dlg = ConfirmDialog.new("CLEAR HISTORY", "Delete ALL 143 History flows?", confirm_label: "clear")
     short = Rect.new(0, 0, 76, ConfirmDialog::MIN_H - 1)
     dlg.render(Screen.new(MemoryBackend.new(76, 8)), short)
-    dlg.drawn?.should be_false
+    dlg.@drawn.should be_false
 
     y = Termisu::Event::Key.new(Termisu::Input::Key::LowerY)
     dlg.handle_key(y).should eq(:stay)
@@ -291,7 +291,7 @@ describe "ConfirmDialog on a short pane" do
 
     # A taller window puts the card back, and the same key is then a real answer.
     dlg.render(Screen.new(MemoryBackend.new(76, 24)), Rect.new(0, 0, 76, 18))
-    dlg.drawn?.should be_true
+    dlg.@drawn.should be_true
     dlg.handle_key(y).should eq(:commit)
   end
 

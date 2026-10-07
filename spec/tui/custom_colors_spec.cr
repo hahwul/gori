@@ -85,7 +85,6 @@ describe "ColormarkerView#pane_rects" do
     rules.y.should eq(inner.y)
     colors.y.should eq(rules.bottom)
     (rules.h + colors.h).should eq(inner.h)
-    view.colors_pane_shown?(inner).should be_true
   end
 
   it "keeps the whole body for the policy list when too short for both" do
@@ -93,7 +92,6 @@ describe "ColormarkerView#pane_rects" do
     rules, colors = view.pane_rects(inner)
     colors.empty?.should be_true
     rules.h.should eq(inner.h)
-    view.colors_pane_shown?(inner).should be_false
   end
 end
 

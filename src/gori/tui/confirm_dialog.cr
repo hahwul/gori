@@ -32,7 +32,7 @@ module Gori::Tui
     # …and the fewest it can be drawn in at all: the top border (which carries the heading),
     # the button row at `bottom - 3`, and the bottom border. Under this there is nowhere to put
     # the buttons that is not a border, so `render` declines and `handle_key` refuses to
-    # commit — see `drawn?`.
+    # commit — see `@drawn`.
     MIN_H = 4
 
     # The card's heading (`DELETE ISSUE`), NOT the shell's focus badge — that is `title`
@@ -49,21 +49,18 @@ module Gori::Tui
       # `open`/`run`/`save` on the button and answered ↵ with "no", so the hand that had
       # learnt ↵ = go had to learn `y` for these alone.
       @selected = @danger ? :cancel : :confirm
+      # Did the last frame actually put this card on screen? A terminal too short for even
+      # `MIN_H` gets no card at all, and the only cue left is the shell's `CONFIRM` focus badge
+      # — which names no action, no target and no consequence. ProjectPicker already refuses
+      # to ARM a delete it cannot draw ("a delete you cannot read is a delete you cannot have
+      # confirmed"); this is the same rule one step later, where a RESIZE after arming can also
+      # reach it, and it covers every confirm the Runner raises rather than that one open site.
+      #
       # "The last frame did not REFUSE to draw me" — not "a frame has run". The shell draws
       # before it reads a key, so this is never stale there; starting it false instead would
       # make every non-rendering driver (the spec harness, ProjectPicker's own ladder) unable
       # to answer a card that is in fact on screen.
       @drawn = true
-    end
-
-    # Did the last frame actually put this card on screen? A terminal too short for even
-    # `MIN_H` gets no card at all, and the only cue left is the shell's `CONFIRM` focus badge —
-    # which names no action, no target and no consequence. ProjectPicker already refuses to ARM
-    # a delete it cannot draw ("a delete you cannot read is a delete you cannot have
-    # confirmed"); this is the same rule one step later, where a RESIZE after arming can also
-    # reach it, and it covers every confirm the Runner raises rather than that one open site.
-    def drawn? : Bool
-      @drawn
     end
 
     # --- Overlay contract (see overlay.cr) ---

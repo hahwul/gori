@@ -45,10 +45,6 @@ module Gori::Tui
       {@prefix, @items}
     end
 
-    def prefix_editing? : Bool
-      @prefix_editing
-    end
-
     # --- Overlay contract (see overlay.cr) ---
     def key : OverlayKind
       OverlayKind::Env

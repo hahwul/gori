@@ -3712,11 +3712,6 @@ module Gori::Tui
       line
     end
 
-    # Frozen copies of the open flow (see `@detail_frozen`), for the spec and the crumb.
-    def detail_frozen_count : Int32
-      @detail_frozen
-    end
-
     # Re-count after a freeze made FROM this detail (#1038), so the marker appears without
     # closing and re-opening the flow. A no-op with no detail open.
     def refresh_evidence_marker(store : Store) : Nil

@@ -525,9 +525,9 @@ describe "C5 · EnvOverlay on the Overlay seam" do
       ov = env_editor(saves, toasts)
       h = OverlayHarness.new(ov)
       mnemonic(h, 'p')
-      ov.prefix_editing?.should be_true
+      ov.@prefix_editing.should be_true
       h.press(ESC).should eq(:open) # cancels the SUB-MODE, not the modal
-      ov.prefix_editing?.should be_false
+      ov.@prefix_editing.should be_false
       ov.to_config[0].should eq("$")
 
       mnemonic(h, 'p')

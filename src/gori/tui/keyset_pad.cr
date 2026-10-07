@@ -115,10 +115,6 @@ module Gori::Tui
       @area.text
     end
 
-    def armed? : Bool
-      !@armed.nil?
-    end
-
     # `kind`'s key summary for its offer row, from this pad's keymap inputs (a rebind included).
     # Fixed for the pad's lifetime and drawn every frame, so it is expanded once per keyset.
     def reference(kind : Verb::Keyset::Kind) : String

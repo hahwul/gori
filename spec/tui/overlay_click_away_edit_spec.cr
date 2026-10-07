@@ -139,9 +139,9 @@ describe "EnvOverlay — click-away with an open sub-mode" do
       h = OverlayHarness.new(ov)
       ca_mnemonic(h, 'p')
       h.type("%%")
-      ov.prefix_editing?.should be_true
+      ov.@prefix_editing.should be_true
       h.overlay.handle_click(h.area, 0, 0).should eq(:stay)
-      ov.prefix_editing?.should be_false
+      ov.@prefix_editing.should be_false
       ov.to_config[0].should eq("$") # uncommitted, so the sigil is untouched
     end
   end

@@ -1784,11 +1784,6 @@ module Gori::Tui
       @env_field.set("#{key} #{val}")
     end
 
-    # Whether the open row is an EDIT of an existing var (false for an add, or when closed).
-    def env_editing? : Bool
-      !env_edit_row.nil?
-    end
-
     def cancel_env_add : Nil
       @env_adding = false
       @env_edit_idx = nil

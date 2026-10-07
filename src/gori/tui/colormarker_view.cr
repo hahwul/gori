@@ -30,10 +30,6 @@ module Gori::Tui
        Rect.new(inner.x, inner.y + rules_h, inner.w, colors_h)}
     end
 
-    def colors_pane_shown?(inner : Rect) : Bool
-      !pane_rects(inner)[1].empty?
-    end
-
     # Whether `render` steals the interior's bottom row for the resolution-rule note.
     # Capacity and hit-testing MUST ask this the same way render does, or the two drift:
     # a capacity that counts the note's row scrolls the last rule underneath it, and a

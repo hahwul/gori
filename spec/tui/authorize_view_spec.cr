@@ -195,7 +195,7 @@ describe AuthorizeView do
     v.apply_result(b, target(bypass: false))
     v.entry_by_id(a).not_nil!.verdict.should eq(:bypass)
     v.entry_by_id(b).not_nil!.verdict.should eq(:enforced)
-    v.bypass_total.should eq(1)
+    v.bypasses_in(v.entries.map(&.id).to_set).should eq(1)
     render(v)
   end
 
@@ -211,7 +211,7 @@ describe AuthorizeView do
     v.unanswered_in(Set{a}).should eq(1)
     v.unanswered_reason_in(Set{a}).should eq("connection refused")
     # …and it is not counted as a finding either way.
-    v.bypass_total.should eq(0)
+    v.bypasses_in(v.entries.map(&.id).to_set).should eq(0)
     render(v)
   end
 
@@ -360,7 +360,7 @@ describe AuthorizeView do
       v.bypasses_in(batch).should eq(1)
       # the queue-wide totals still see both
       v.completed_in(v.entries.map(&.id).to_set).should eq(2)
-      v.bypass_total.should eq(2)
+      v.bypasses_in(v.entries.map(&.id).to_set).should eq(2)
     end
 
     it "counts nothing for a batch whose entries never produced a result" do
@@ -643,7 +643,7 @@ describe AuthorizeView do
     only_baseline.uncompared?.should be_true
     v.apply_result(a, only_baseline)
     v.entry_by_id(a).not_nil!.verdict.should eq(:error)
-    v.bypass_total.should eq(0)
+    v.bypasses_in(v.entries.map(&.id).to_set).should eq(0)
     render(v)
   end
 end
@@ -664,8 +664,8 @@ describe AuthorizeView, "mouse geometry" do
     v.list_row_at(5, 4).should eq(2)
     v.list_row_at(5, 5).should be_nil # past the three rows
     v.list_contains?(5, 3).should be_true
-    v.detail_contains?(5, 20).should be_true
-    v.detail_contains?(5, 3).should be_false
+    v.@detail_rect.contains?(5, 20).should be_true
+    v.@detail_rect.contains?(5, 3).should be_false
     v.select_row(2)
     v.selected_entry.not_nil!.host_path.should contain("/three")
   end
