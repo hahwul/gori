@@ -1006,12 +1006,14 @@ module Gori::Proxy::Codec::Http1
   def self.header_name_safe?(name : String) : Bool
     return false if name.empty? || !request_token_safe?(name)
     name.each_byte do |b|
-      next if (b >= 0x41_u8 && b <= 0x5a_u8) || (b >= 0x61_u8 && b <= 0x7a_u8) ||
-              (b >= 0x30_u8 && b <= 0x39_u8) || "!#$%&'*+-.^_`|~".bytes.includes?(b)
+      next if b.unsafe_chr.ascii_alphanumeric? || TCHAR_PUNCT.includes?(b)
       return false
     end
     true
   end
+
+  # The non-alphanumeric tchars (RFC 9110 §5.6.2).
+  private TCHAR_PUNCT = "!#$%&'*+-.^_`|~".to_slice
 
   # Whether rewriting a Content-Length line to a canonical count preserves its meaning. The
   # whole line is replaced by the rewrite, so an indented obs-fold or non-decimal value is an
