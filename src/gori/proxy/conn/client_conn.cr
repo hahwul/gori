@@ -719,6 +719,29 @@ module Gori::Proxy
       {client_head, WS::Handshake.strip_extensions(forward_head), Codec::Http1.parse_request_head(client_head)}
     end
 
+    # The whole request body, for the two paths that must hold it before anything goes upstream
+    # (the intercept hold and a request-body rule) and whether there is one: false after
+    # recording why not. A bodiless request is `{nil, true}`, as `Body.read_complete` has it.
+    # #728: gori answers the client's `Expect: 100-continue` itself rather than blocking on a
+    # body being withheld; see `elicit_request_body` for why these paths cannot ask the origin.
+    # A body the client cut short is not held or forwarded: forwarding it under the original
+    # Content-Length would desync the upstream (mirrors the streaming path's req_complete guard).
+    private def read_whole_request_body(req : Codec::RawRequest, record_req : Codec::RawRequest,
+                                        scheme : String, host : String, port : Int32,
+                                        created_at : Int64, req_framing : Codec::BodyFraming,
+                                        req_len : Int64) : {Bytes?, Bool}
+      unless elicit_request_body(req, req_framing)
+        record_error(record_req, scheme, host, port, created_at,
+          "connection closed while answering Expect: 100-continue")
+        return {nil, false}
+      end
+      buffered, body_complete = Codec::Body.read_complete(@io, req_framing, req_len)
+      unless body_complete
+        record_error(record_req, scheme, host, port, created_at, "client truncated request body")
+      end
+      {buffered, body_complete}
+    end
+
     # The intercept-hold request path: buffer the body, let the human edit/drop
     # it, then forward via the reused upstream (with the same stale-reuse retry).
     #
@@ -733,22 +756,10 @@ module Gori::Proxy
                                     host : String, port : Int32, scheme : String,
                                     created_at : Int64, started : Time::Instant,
                                     req_framing : Codec::BodyFraming, req_len : Int64) : Bool
-      # #728: a held request must be COMPLETE before the human can see it, so gori answers the
-      # client's `Expect: 100-continue` itself rather than blocking on a body being withheld.
-      # See `elicit_request_body` for why this path cannot ask the origin instead.
-      unless elicit_request_body(req, req_framing)
-        record_error(record_req, scheme, host, port, created_at,
-          "connection closed while answering Expect: 100-continue")
-        return false
-      end
-      buffered, body_complete = Codec::Body.read_complete(@io, req_framing, req_len)
-      unless body_complete
-        # The client cut its request body short — there's nothing whole to hold/forward, and
-        # forwarding a short body under the original Content-Length would desync the upstream
-        # (mirrors the non-hold path's req_complete guard). Record + close instead of holding.
-        record_error(record_req, scheme, host, port, created_at, "client truncated request body")
-        return false
-      end
+      # #728: a held request must be COMPLETE before the human can see it.
+      buffered, whole = read_whole_request_body(req, record_req, scheme, host, port, created_at,
+        req_framing, req_len)
+      return false unless whole
       # Match&Replace (request body) BEFORE the human sees it — mirroring the head, which is
       # already M&R'd into `sent_head`. A body rule re-frames to Content-Length, so re-parse
       # the (possibly rewritten) head for the hold metadata + capture.
@@ -1052,20 +1063,10 @@ module Gori::Proxy
                                                host : String, port : Int32, scheme : String,
                                                created_at : Int64, started : Time::Instant,
                                                req_framing : Codec::BodyFraming, req_len : Int64) : Bool
-      # #728: a body rule needs the whole entity before the head can be re-framed and sent, so
-      # (as on the hold path) gori answers the client's `Expect: 100-continue` itself.
-      unless elicit_request_body(req, req_framing)
-        record_error(record_req, scheme, host, port, created_at,
-          "connection closed while answering Expect: 100-continue")
-        return false
-      end
-      buffered, body_complete = Codec::Body.read_complete(@io, req_framing, req_len)
-      unless body_complete
-        # Client cut the body short — forwarding it under the original length would desync
-        # the upstream (mirrors the streaming path's req_complete guard). Record + close.
-        record_error(record_req, scheme, host, port, created_at, "client truncated request body")
-        return false
-      end
+      # #728: a body rule needs the whole entity before the head can be re-framed and sent.
+      buffered, whole = read_whole_request_body(req, record_req, scheme, host, port, created_at,
+        req_framing, req_len)
+      return false unless whole
       rewritten_head, fwd_body, advisory = apply_body_rewrite(sent_head, buffered, req_framing,
         host: host, response: false, live: true) { |e| rw.rewrite_request_body(e, host) }
       record_req = reframed_record(record_req, sent_head, rewritten_head, fwd_body)
