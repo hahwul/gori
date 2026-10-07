@@ -104,26 +104,15 @@ module Gori
     end
 
     # Compile a list of raw patterns, dropping blanks. The caller keeps the result and
-    # matches against it with `matches_any?`.
+    # matches against it with `match`.
     def self.compile(patterns : Enumerable(String)) : Array(Compiled)
       patterns.compact_map { |p| p.strip.presence.try { |s| Compiled.new(s) } }
     end
 
-    # True when `host` matches any compiled pattern. Normalizes the host ONCE for the
-    # whole list (see Compiled#matches_bare?).
-    def self.matches_any?(compiled : Array(Compiled), host : String) : Bool
-      return false if compiled.empty?
-      h = normalize(host)
-      compiled.any?(&.matches_bare?(h))
-    end
-
-    # The FIRST pattern `host` matches, or nil. Same walk as `matches_any?`, but it keeps
-    # the winner — for a caller that has to NAME the rule that fired, not just know one
-    # did (Settings.tls_passthrough? records it so the TUI can point at the rule to remove).
-    #
-    # Deliberately NOT the implementation of `matches_any?`: Scope evaluates that per
-    # captured row and only ever asks the Bool question, so it keeps the predicate that
-    # says exactly what it needs.
+    # The FIRST pattern `host` matches, or nil. Normalizes the host ONCE for the whole list
+    # (see Compiled#matches_bare?), and keeps the winner — for a caller that has to NAME the
+    # rule that fired, not just know one did (Settings.tls_passthrough? records it so the TUI
+    # can point at the rule to remove).
     def self.match(compiled : Array(Compiled), host : String) : Compiled?
       return nil if compiled.empty?
       h = normalize(host)

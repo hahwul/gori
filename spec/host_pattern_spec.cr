@@ -110,11 +110,11 @@ describe Gori::HostPattern do
     end
   end
 
-  describe ".compile / .matches_any? / .match" do
+  describe ".compile / .match" do
     it "drops blank patterns and names the FIRST pattern that fired" do
       compiled = Gori::HostPattern.compile(["  ", "acme.test", "*.evil.test"])
       compiled.map(&.raw).should eq(["acme.test", "*.evil.test"])
-      Gori::HostPattern.matches_any?(compiled, "api.acme.test.").should be_true
+      Gori::HostPattern.match(compiled, "api.acme.test.").try(&.raw).should eq("acme.test")
       Gori::HostPattern.match(compiled, "x.evil.test.").try(&.raw).should eq("*.evil.test")
       Gori::HostPattern.match(compiled, "evil.test").should be_nil
     end

@@ -38,12 +38,12 @@ describe "HostPattern.match" do
     Gori::HostPattern.match([] of Gori::HostPattern::Compiled, "acme.test").should be_nil
   end
 
-  it "agrees with matches_any? — the two must never disagree about whether a host matched" do
+  it "answers whether a host matched at all, normalized as the list is" do
     compiled = Gori::HostPattern.compile(["*.push.acme.test", "updates.acme.test", "[::1]"])
-    ["a.push.acme.test", "updates.acme.test", "eu.updates.acme.test", "::1", "[::1]",
-     "acme.test", "push.acme.test", "other.test", "UPDATES.ACME.TEST"].each do |host|
-      matched = !Gori::HostPattern.match(compiled, host).nil?
-      matched.should eq(Gori::HostPattern.matches_any?(compiled, host)), host
+    {"a.push.acme.test" => true, "updates.acme.test" => true, "eu.updates.acme.test" => true,
+     "::1" => true, "[::1]" => true, "acme.test" => false, "push.acme.test" => false,
+     "other.test" => false, "UPDATES.ACME.TEST" => true}.each do |host, expected|
+      Gori::HostPattern.match(compiled, host).nil?.should eq(!expected), host
     end
   end
 end
