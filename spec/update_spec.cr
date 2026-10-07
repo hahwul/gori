@@ -453,26 +453,26 @@ describe Gori::Update do
     end
 
     it "selects the platform asset URL from fixture JSON" do
-      asset = Gori::Update.resolve_asset_from_json(full_release, "linux", "x86_64")
+      asset = Gori::Update.resolve_asset(Gori::Update.parse_release(full_release), "linux", "x86_64")
       asset.name.should eq("gori-v0.17.0-linux-x86_64")
       asset.browser_download_url.should eq(
         "https://github.com/hahwul/gori/releases/download/v0.17.0/gori-v0.17.0-linux-x86_64"
       )
 
-      mac = Gori::Update.resolve_asset_from_json(full_release, "osx", "arm64")
+      mac = Gori::Update.resolve_asset(Gori::Update.parse_release(full_release), "osx", "arm64")
       mac.name.should eq("gori-v0.17.0-osx-arm64.tar.gz")
       mac.browser_download_url.should contain("gori-v0.17.0-osx-arm64.tar.gz")
     end
 
     it "fails clearly when the release has no assets" do
       expect_raises(Gori::Error, /no downloadable assets/) do
-        Gori::Update.resolve_asset_from_json(empty_assets, "linux", "x86_64")
+        Gori::Update.resolve_asset(Gori::Update.parse_release(empty_assets), "linux", "x86_64")
       end
     end
 
     it "fails clearly when the platform asset is missing" do
       expect_raises(Gori::Error, /no matching asset.*gori-v0.2.0-linux-x86_64/) do
-        Gori::Update.resolve_asset_from_json(no_matching, "linux", "x86_64")
+        Gori::Update.resolve_asset(Gori::Update.parse_release(no_matching), "linux", "x86_64")
       end
     end
 
@@ -1438,10 +1438,9 @@ describe Gori::Update do
     end
   end
 
-  describe ".synthesize_release_json" do
-    it "builds a release the normal parser and asset picker consume" do
-      json = Gori::Update.synthesize_release_json("v9.9.9", "linux", "x86_64")
-      release = Gori::Update.parse_release(json)
+  describe ".synthesize_release" do
+    it "builds a release the asset picker consumes" do
+      release = Gori::Update.synthesize_release("v9.9.9", "linux", "x86_64")
       release.tag_name.should eq("v9.9.9")
       asset = Gori::Update.select_asset(release, "linux", "x86_64").not_nil!
       asset.name.should eq("gori-v9.9.9-linux-x86_64")
@@ -1450,16 +1449,14 @@ describe Gori::Update do
     end
 
     it "advertises no digest when SHA256SUMS gave none, rather than faking one" do
-      release = Gori::Update.parse_release(
-        Gori::Update.synthesize_release_json("v9.9.9", "osx", "arm64"))
+      release = Gori::Update.synthesize_release("v9.9.9", "osx", "arm64")
       release.assets.first.digest.should be_nil
       Gori::Update.parse_sha256_digest(release.assets.first.digest).should be_nil
     end
 
     it "carries a SHA256SUMS digest through so verify_sha256! actually runs" do
       hex = "e" * 64
-      release = Gori::Update.parse_release(
-        Gori::Update.synthesize_release_json("v9.9.9", "linux", "x86_64", digest: hex))
+      release = Gori::Update.synthesize_release("v9.9.9", "linux", "x86_64", digest: hex)
       Gori::Update.parse_sha256_digest(release.assets.first.digest).should eq(hex)
     end
 
@@ -1468,8 +1465,7 @@ describe Gori::Update do
     # no version to get wrong — is the only name left worth trying, so it has to
     # already be in the list download_asset's retry looks through.
     it "lists the version-less alias beside the guessed versioned asset" do
-      release = Gori::Update.parse_release(
-        Gori::Update.synthesize_release_json("v9.9.9", "linux", "x86_64"))
+      release = Gori::Update.synthesize_release("v9.9.9", "linux", "x86_64")
       release.assets.map(&.name).should eq(["gori-v9.9.9-linux-x86_64", "gori-linux-x86_64"])
       release.assets[1].browser_download_url.should eq(
         "https://github.com/hahwul/gori/releases/download/v9.9.9/gori-linux-x86_64")
@@ -1487,16 +1483,14 @@ describe Gori::Update do
       # the retry to no checksum after we said we would verify.
       versioned_hex = "a" * 64
       alias_hex = "b" * 64
-      release = Gori::Update.parse_release(
-        Gori::Update.synthesize_release_json("v9.9.9", "linux", "x86_64",
-          digest: versioned_hex, alias_digest: alias_hex))
+      release = Gori::Update.synthesize_release("v9.9.9", "linux", "x86_64",
+        digest: versioned_hex, alias_digest: alias_hex)
       Gori::Update.parse_sha256_digest(release.assets[0].digest).should eq(versioned_hex)
       Gori::Update.parse_sha256_digest(release.assets[1].digest).should eq(alias_hex)
     end
 
     it "omits the alias entirely when the platform has no naming for it" do
-      release = Gori::Update.parse_release(
-        Gori::Update.synthesize_release_json("v9.9.9", "linux", "x86_64"))
+      release = Gori::Update.synthesize_release("v9.9.9", "linux", "x86_64")
       release.assets.size.should eq(2)
       # asset_name would raise for plan9 before we ever get here; the point is that
       # the alias guard degrades rather than taking the whole synthesis down.
@@ -1681,7 +1675,7 @@ describe Gori::Update do
     end
   end
 
-  describe ".fetch_latest_release_json_with_fallback" do
+  describe ".fetch_latest_release_with_fallback" do
     it "reports HTTP 403 as a rate limit and names the token workaround" do
       with_mock_release_server(api_status: 403) do |server|
         ex = expect_raises(Gori::Error, /rate limit/i) do
@@ -1693,9 +1687,9 @@ describe Gori::Update do
 
     it "passes an API success straight through, with no fallback reason" do
       with_mock_release_server do |server|
-        json, fallback_reason = Gori::Update.fetch_latest_release_json_with_fallback(server.api_url)
+        release, fallback_reason = Gori::Update.fetch_latest_release_with_fallback(server.api_url)
         fallback_reason.should be_nil
-        Gori::Update.parse_release(json).tag_name.should eq("v99.0.0")
+        release.tag_name.should eq("v99.0.0")
       end
     end
 
@@ -1704,7 +1698,7 @@ describe Gori::Update do
       # injected endpoint has to surface, not silently retarget the real repo.
       with_mock_release_server(api_status: 403) do |server|
         expect_raises(Gori::Error, /rate limit/i) do
-          Gori::Update.fetch_latest_release_json_with_fallback(server.api_url)
+          Gori::Update.fetch_latest_release_with_fallback(server.api_url)
         end
       end
     end
@@ -1733,13 +1727,13 @@ describe Gori::Update do
       end
     end
 
-    # fetch_latest_release_json_with_fallback re-raises whatever the API fetch
+    # fetch_latest_release_with_fallback re-raises whatever the API fetch
     # threw once the redirect fallback has nothing to offer (or is not eligible).
     # That re-raise is only as clean as the original exception.
     it "keeps the re-raise from the fallback path a Gori::Error too" do
       url = "http://127.0.0.1:#{dead_port}/repos/hahwul/gori/releases/latest"
       expect_raises(Gori::Error, /could not reach/) do
-        Gori::Update.fetch_latest_release_json_with_fallback(url)
+        Gori::Update.fetch_latest_release_with_fallback(url)
       end
     end
 
