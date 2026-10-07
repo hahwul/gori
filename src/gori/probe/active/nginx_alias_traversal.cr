@@ -56,9 +56,11 @@ module Gori
 
         # The dedup key WITHOUT rebuilding the probe — same gates as `plan`, same key (nil in
         # exactly the same cases). Both funnel through `gate`, so the two paths cannot drift.
+        # The key is rule + host:PORT + METHOD + PATH (no query — alias resolution is per-path,
+        # not per-value), so the same host on another port/service is a distinct surface.
         def dedup_key(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : String?
           g = gate(detail, opts) || return nil
-          key_string(detail, g[0], g[1])
+          endpoint_key(detail, g[0], g[1])
         end
 
         def plan(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : Plan?
@@ -72,7 +74,7 @@ module Gori
           return nil if targets.empty?
           primary = rebuild_target(detail.request_head, detail.request_body, targets[0])
           followups = targets[1..].map { |t| rebuild_target(detail.request_head, detail.request_body, t) }
-          Plan.new(primary, [] of Param, key_string(detail, method_up, path_key), followups: followups)
+          Plan.new(primary, [] of Param, endpoint_key(detail, method_up, path_key), followups: followups)
         end
 
         # One probe per candidate boundary, interpreted independently: the FIRST leg whose body is
@@ -144,12 +146,6 @@ module Gori
           path = path_only(Active.origin_form(target))
           return nil unless first_segment(path) # path must be /<seg>/<more>
           {method_up, path}
-        end
-
-        # rule + host:PORT + METHOD + PATH (no query — alias resolution is per-path, not per-value),
-        # so the same host on another port/service is a distinct surface. One probe per path.
-        private def key_string(detail : Store::FlowDetail, method_upcase : String, path : String) : String
-          endpoint_key(detail, method_upcase, path)
         end
 
         # The leading path segment to fold `..` after, or nil unless the path is `/<seg>/<more>`:
