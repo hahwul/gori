@@ -109,7 +109,7 @@ describe "a zero-length BLOB in a NOT NULL column" do
         "GET / HTTP/1.1\r\n\r\n".to_slice, nil, 2_000_i64)
       store.flush
       # The operator was notified of both hits live; both have to survive a reload.
-      store.oast_callbacks(sid).map(&.provider_uid).sort.should eq(["uid-dns", "uid-http"])
+      store.oast_callbacks_since(0).select(&.session_id.==(sid)).map(&.provider_uid).sort.should eq(["uid-dns", "uid-http"])
     end
   end
 end
