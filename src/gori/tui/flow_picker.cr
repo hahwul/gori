@@ -1,7 +1,7 @@
 require "./screen"
 require "./theme"
 require "./frame"
-require "./url"
+require "../url"
 require "./flow_status"
 require "./picker_overlay"
 require "../store"

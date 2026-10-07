@@ -59,6 +59,133 @@ describe Gori::Url do
       Gori::Url.origin_path("http://example.com#/route").should eq("/#/route")
       Gori::Url.origin_path("http://example.com?a=1").should eq("/?a=1")
     end
+
+    it "treats a single-slash near-miss scheme as a non-URL (identity)" do
+      Gori::Url.origin_path("http:/example").should eq("http:/example")
+    end
+
+    it "slices on char boundaries with a multibyte host and path (no corruption)" do
+      Gori::Url.origin_path("http://éxample.com/한").should eq("/한")
+    end
+
+    it "returns the empty string unchanged" do
+      Gori::Url.origin_path("").should eq("")
+    end
+
+    # --- glue-bug regression: output must never re-embed the authority ---
+
+    it "never glues the host onto the projected path" do
+      out = Gori::Url.origin_path("http://example.com/x")
+      out.should eq("/x")
+      out.should_not contain("example.com")
+      out.should_not contain("http")
+    end
+
+    it "does not carry the host when there is no path" do
+      out = Gori::Url.origin_path("http://example.com")
+      out.should_not contain("example.com")
+      out.starts_with?("/").should be_true
+    end
+
+    # --- scheme boundary / prefix cases ---
+
+    it "handles the https scheme the same as http" do
+      Gori::Url.origin_path("https://example.com/secure").should eq("/secure")
+    end
+
+    it "passes through a scheme-relative URL (no scheme prefix)" do
+      Gori::Url.origin_path("//example.com/x").should eq("//example.com/x")
+    end
+
+    it "passes through a mailto: (non-http) URL unchanged" do
+      Gori::Url.origin_path("mailto:user@example.com").should eq("mailto:user@example.com")
+    end
+
+    # --- boundary: minimal / truncated absolute forms ---
+
+    it "returns '/' for a bare scheme+authority separator (http://)" do
+      Gori::Url.origin_path("http://").should eq("/")
+    end
+
+    it "returns '/' for a bare https:// separator" do
+      Gori::Url.origin_path("https://").should eq("/")
+    end
+
+    it "returns '/' for scheme+host with no trailing slash" do
+      Gori::Url.origin_path("http://h").should eq("/")
+    end
+
+    it "preserves a lone trailing slash as the whole path" do
+      Gori::Url.origin_path("http://example.com/").should eq("/")
+    end
+
+    it "handles an empty authority (triple slash)" do
+      Gori::Url.origin_path("http:///path").should eq("/path")
+    end
+
+    # --- path content preservation ---
+
+    it "keeps every slash of a deep path" do
+      Gori::Url.origin_path("http://h/a/b/c/d/e").should eq("/a/b/c/d/e")
+    end
+
+    it "keeps reserved and encoded characters verbatim in the path" do
+      Gori::Url.origin_path("http://h/p%20a?x=%2F&y=a+b#frag/ment")
+        .should eq("/p%20a?x=%2F&y=a+b#frag/ment")
+    end
+
+    it "keeps a userinfo-bearing authority out of the projection" do
+      out = Gori::Url.origin_path("http://user:pass@host:80/p")
+      out.should eq("/p")
+      out.should_not contain("pass")
+    end
+
+    # --- query/fragment on an empty path ---
+    # These two used to assert the collapse to "/" — explicitly as "asserting actual", i.e.
+    # characterising what the code did rather than what it owed. It owed more: the same
+    # helper feeds `Outbound.scope_url`, so collapsing dropped the query a scope EXCLUDE was
+    # keyed to and the carve-out silently stopped matching. RFC 3986 3.3 makes an empty path
+    # with a query "/" + the rest, which is also the more faithful thing to show in the
+    # History/Comparer/picker columns that read this.
+
+    it "keeps the query of an absolute URL whose only tail is a query" do
+      Gori::Url.origin_path("http://example.com?q=1").should eq("/?q=1")
+    end
+
+    it "keeps the fragment of an absolute URL whose only tail is a fragment" do
+      Gori::Url.origin_path("http://example.com#f").should eq("/#f")
+    end
+
+    # --- multibyte / adversarial ---
+
+    it "handles a CJK-only path segment" do
+      Gori::Url.origin_path("http://호스트/안녕/世界").should eq("/안녕/世界")
+    end
+
+    it "handles an emoji (surrogate/astral) path" do
+      Gori::Url.origin_path("http://h/🚀/x").should eq("/🚀/x")
+    end
+
+    it "handles a combining-mark host without corrupting the following path" do
+      # "e" + U+0301 combining acute accent in the host
+      Gori::Url.origin_path("http://éhost.com/p").should eq("/p")
+    end
+
+    it "completes quickly on a very long path (no pathological scanning)" do
+      long = "http://h/" + ("a/" * 200_000)
+      elapsed = Time.measure { Gori::Url.origin_path(long) }
+      elapsed.should be < 1.second
+      out = Gori::Url.origin_path(long)
+      out.starts_with?("/a/").should be_true
+      out.size.should eq(long.size - 8) # dropped "http://h"
+    end
+
+    it "completes quickly on a long multibyte path" do
+      long = "http://héllo/" + ("한/" * 100_000)
+      out = Gori::Url.origin_path(long)
+      out.starts_with?("/한/").should be_true
+      out.should_not contain("héllo")
+    end
   end
 
   describe ".location" do
@@ -158,7 +285,6 @@ describe Gori::Url do
   # consolidation only moved the drift somewhere else.
   it "answers the same through every name that survived" do
     %w(http://h/x HTTP://h/x /x httpx://h/x 405\ Nope).each do |t|
-      Gori::Tui::Url.origin_path(t).should eq(Gori::Url.origin_path(t))
       Gori::Store::FlowRow.absolute_form?(t).should eq(Gori::Url.absolute_form?(t))
     end
   end

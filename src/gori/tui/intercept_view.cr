@@ -14,7 +14,7 @@ require "./hex_edit"
 # `repeater_view/` uses. This file keeps the state (ivars + `initialize`) the slice reads.
 require "./intercept_view/hex"
 require "./read_pane"
-require "./url"
+require "../url"
 require "../interceptor"
 require "../store"
 require "../fuzz/content_length"
