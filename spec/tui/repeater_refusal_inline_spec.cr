@@ -337,10 +337,10 @@ describe "Gori::Tui::RepeaterController — minimize stop seam wiring" do
     end
   end
 
-  it "close_repeater_tab closes the tab with no minimize running" do
+  it "^W closes the tab with no minimize running" do
     with_refused_tab(PLAIN_REQUEST) do |controller, _|
       controller.count.should eq(1)
-      controller.close_repeater_tab
+      controller.request_close # FakeHost#confirm runs the action straight through
       controller.count.should eq(0)
       controller.empty?.should be_true
     end
@@ -478,7 +478,7 @@ describe "Gori::Tui::RepeaterController — stopping a timing run" do
   it "stops sending when either sub-tab of the pair is closed" do
     with_timing_run(200) do |controller, _, origin|
       controller.jump_subtab(1)
-      controller.close_repeater_tab
+      controller.request_close
       sleep 60.milliseconds
       requests_after(origin).should eq(0)
     end

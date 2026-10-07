@@ -1582,7 +1582,7 @@ module Gori::Tui
 
     # Apply a finished minimize on the UI fiber: install the trimmed request into the editor
     # (only when it actually removed something), finish the job, and notify. A closed tab is
-    # already dropped by the drain, and close_repeater_tab finished its job.
+    # already dropped by the drain, and close_repeater_at finished its job.
     private def apply_minimize_report(tab : RepeaterTab, report : Repeater::Minimize::Report) : Nil
       view = tab.view
       mj = @minimize_job
@@ -1994,8 +1994,8 @@ module Gori::Tui
 
     # Close the sub-tab holding `view` by IDENTITY, or say it is already gone. The index the
     # single ^W confirm captured can name another session by the time the dialog resolves
-    # (a peer delete/reorder in the gap), so `close_repeater_tab`'s index path is unsafe from
-    # a deferred action — this re-finds the tab from the view every time.
+    # (a peer delete/reorder in the gap), so an index is unsafe from a deferred action —
+    # this re-finds the tab from the view every time.
     private def close_repeater_view(view : RepeaterView) : Nil
       idx = @repeaters.index(&.view.same?(view))
       return @host.status("repeater already closed") unless idx
@@ -2009,14 +2009,6 @@ module Gori::Tui
     private def close_marked_repeaters(refs : Array(SubtabRef)) : Nil
       @host.status(close_marked_subtabs(refs))
       @host.resolve_subtab_focus
-    end
-
-    # Close the current repeater sub-tab. Clamps the active index; when the last one
-    # closes the Repeater tab shows its empty hint.
-    def close_repeater_tab : Nil
-      return if @current_repeater_idx < 0 || @current_repeater_idx >= @repeaters.size
-      orphaned = close_repeater_at(@current_repeater_idx)
-      @host.status(TabClose.message(@repeaters.empty? ? "closed repeater — none open (^N new · ^R from History)" : "closed repeater (#{@repeaters.size} open)", orphaned))
     end
 
     # The mark set's teardown hook: close sub-tab `idx` saying nothing, so a batch can loop
@@ -2059,7 +2051,7 @@ module Gori::Tui
     end
 
     # Stop the one running minimize on a project-level exit (leave project / quit), for the
-    # same reasons close_repeater_tab does it per tab. Two distinct halves:
+    # same reasons close_repeater_at does it per tab. Two distinct halves:
     #
     #   * finish the JOB, because the Runner is about to unwind: `drain_results` never runs
     #     again to see the terminal Report, so the job would stay :running forever in a Jobs
@@ -2404,7 +2396,7 @@ module Gori::Tui
       job = @host.jobs.start(:minimize, view.summary, goto: Jobs::Goto.new(:repeater, tab.db_id))
       @minimize_job = {view, job, text} # `text` is the snapshot the run minimizes; see apply_minimize_report
       # Captured as a local for the fiber (which must never read a controller ivar) AND kept on
-      # the controller, so close_repeater_tab / stop_all can reach the run they just ended.
+      # the controller, so close_repeater_at / stop_all can reach the run they just ended.
       stop = @minimize_stop = Repeater::Minimize::Stop.new
       events = @minimize_events
       @host.status("minimizing #{view.summary} in the background — watch the bottom bar / notifications")
