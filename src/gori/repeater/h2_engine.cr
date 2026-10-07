@@ -431,7 +431,7 @@ module Gori
         # thrown away. A 1xx also means the origin already has the whole request (gori writes it
         # up front), so this failure is DELIVERED: re-sending would double a side effect.
         unless reply.final_seen
-          return Result.new(Bytes.new(0), nil, nil, elapsed(started),
+          return Result.new(Bytes.new(0), nil, nil, Engine.elapsed(started),
             no_response(reply, flow, host, port),
             delivered: reply.status != 0, timed_out: reply.timed_out)
         end
@@ -444,7 +444,7 @@ module Gori
         # event entirely. The head and body stay on the Result; the reason rides alongside —
         # and so does the send-side accounting, because a 413 that the origin returned WHILE
         # the body was still going out is a real response to a request gori did not finish.
-        Result.new(head, reply.body, resp, elapsed(started),
+        Result.new(head, reply.body, resp, Engine.elapsed(started),
           error: send_side_reason(reply, flow, host, port),
           incomplete: !reply.clean_eos, delivered: true, timed_out: reply.timed_out)
       end
@@ -1662,7 +1662,7 @@ module Gori
       end
 
       private def self.failure(message : String, started : Time::Instant) : Result
-        Result.new(Bytes.new(0), nil, nil, elapsed(started), message)
+        Result.new(Bytes.new(0), nil, nil, Engine.elapsed(started), message)
       end
 
       # Why an h2 send has no connection.
@@ -1698,10 +1698,6 @@ module Gori
                  "HTTP/1.1 instead, or use h2c (http://) if the origin takes prior-knowledge h2"
         end
         Engine.connect_error(scheme, host, port, verify, failure.try(&.dial_error))
-      end
-
-      private def self.elapsed(started : Time::Instant) : Int64
-        (Time.instant - started).total_microseconds.to_i64
       end
     end
   end

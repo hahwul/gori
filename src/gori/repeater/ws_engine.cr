@@ -244,12 +244,12 @@ module Gori
                           deadline: Proxy::SocketTuning::HEAD_DEADLINE)
                         "#{detail} from #{host}:#{port}"
                       end
-            return Result.new(head_result.bytes, [] of Message, elapsed(started), error: message)
+            return Result.new(head_result.bytes, [] of Message, Engine.elapsed(started), error: message)
           end
 
           resp = Proxy::Codec::Http1.parse_response_head(head)
           unless resp.status == 101
-            return Result.new(head, [] of Message, elapsed(started),
+            return Result.new(head, [] of Message, Engine.elapsed(started),
               error: "server did not upgrade (status #{resp.status})", upgraded: false)
           end
           note = verify_accept(resp, keys)
@@ -328,7 +328,7 @@ module Gori
         note = with_delivery_note(note, sent, messages.size, st.close_code)
         note = with_unsent_note(note, sent, out_messages.size, st)
         note = with_transport_note(note, sent, out_messages.size, st)
-        Result.new(head, messages, elapsed(started), note: note,
+        Result.new(head, messages, Engine.elapsed(started), note: note,
           close_code: st.close_code, upgraded: true, truncated: st.truncated)
       end
 
@@ -373,7 +373,7 @@ module Gori
             # there was one — `answered?` then reports that the origin replied, exactly as a
             # 403 to an h1 upgrade does.
             reason = opened.error || "server did not upgrade (status #{opened.status})"
-            return Result.new(opened.head, [] of Message, elapsed(started),
+            return Result.new(opened.head, [] of Message, Engine.elapsed(started),
               error: reason, note: opened.note, upgraded: false)
           end
           # `keep_key` has no RFC 8441 form to honour: §5.1 drops `Sec-WebSocket-Key` and
@@ -1022,11 +1022,7 @@ module Gori
       end
 
       private def self.err(message : String, started : Time::Instant) : Result
-        Result.new(Bytes.new(0), [] of Message, elapsed(started), error: message)
-      end
-
-      private def self.elapsed(started : Time::Instant) : Int64
-        (Time.instant - started).total_microseconds.to_i64
+        Result.new(Bytes.new(0), [] of Message, Engine.elapsed(started), error: message)
       end
     end
   end
