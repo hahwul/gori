@@ -5,8 +5,7 @@ module Gori
       # The parsed flags, so the parser block and the command body stay small enough for the
       # complexity bar (and so `abort` paths can be decided before the store opens).
       private class SitemapJsArgs
-        property db_path : String? = nil
-        property project_name : String? = nil
+        getter proj = ProjectFlags.new
         property query : String? = nil
         property host : String? = nil
         property path_prefix : String? = nil
@@ -42,7 +41,7 @@ module Gori
 
         # Parse before the open: abort skips ensure, so a bad query must not leave a store open.
         filter = scanning ? sitemap_filter(query) : QL::EMPTY
-        store = open_store(resolve_read_project(o.project_name, o.db_path),
+        store = open_store(resolve_read_project(o.proj.name, o.proj.db),
           read_only: !scanning && !filter.uses_fts?, long_running: scanning)
         filter = sitemap_flow_filter(store, "sitemap js", query, filter, false, "flows out of the scan") if scanning
         report = begin
@@ -65,8 +64,7 @@ module Gori
                      "the project (the newest unscanned JS/HTML responses) and stores what they\n" \
                      "reference. A reference to a host gori never captured is listed only when a scope\n" \
                      "include names it (--all-hosts lists it anyway)."
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| o.project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| o.db_path = v }
+          project_options(p, o.proj, "read")
           p.on("--scan", "First scan the JS/HTML responses not scanned yet (writes derived rows, sends nothing)") { o.scan = true }
           p.on("--rescan", "Like --scan, but read already-scanned responses again") { o.rescan = true }
           p.on("-qQL", "--query=QL", "With --scan: only scan flows matching this QL query") { |v| o.query = v }
