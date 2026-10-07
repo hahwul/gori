@@ -342,12 +342,14 @@ module Gori
     # register its flags, then add `-h` (so `--help` lists it last) and the two refusals whose
     # OptionParser defaults RAISE past `CLI.run` as a backtrace. Returned unparsed, because the
     # callers parse it their own way (`stray_args`) and several print it as their usage.
-    private def self.option_parser(prefix : String, & : OptionParser ->) : OptionParser
+    # `missing_prefix` leads the missing-value refusal: `gori run` names the command there
+    # (`Run.option_parser`), `gori <cmd>` never has.
+    def self.option_parser(prefix : String, missing_prefix : String = "", & : OptionParser ->) : OptionParser
       OptionParser.new do |p|
         yield p
         p.on("-h", "--help", "Show this help") { puts p; exit 0 }
         p.invalid_option { |flag| abort CLI.unknown_option_message(prefix, flag, p) }
-        p.missing_option { |flag| abort "missing value for #{flag}" }
+        p.missing_option { |flag| abort "#{missing_prefix}missing value for #{flag}" }
       end
     end
 

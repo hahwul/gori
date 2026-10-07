@@ -57,7 +57,7 @@ module Gori
       end
 
       private def self.sitemap_js_parser(o : SitemapJsArgs) : OptionParser
-        OptionParser.new do |p|
+        option_parser("gori run sitemap js") do |p|
           p.banner = "Usage: gori run sitemap js [--scan [QL query]] [options]\n\n" \
                      "List the endpoints captured JavaScript references — string literals in JS\n" \
                      "responses and inline <script> blocks, like fetch(\"/api/v1/users\") — that no\n" \
@@ -82,10 +82,7 @@ module Gori
           p.on("--in-scope", "Only references the project scope includes (and, with --scan, only in-scope flows read)") { o.in_scope = true }
           p.on("--lenient", "Don't refuse a query naming an unknown field — search that token as text") { o.lenient = true }
           format_flag(p, [:text, :json, :urls], "Output: text (default) | json | urls (one URL per line, to pipe into other tools)") { |f| o.format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| o.positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run sitemap js", f, p) }
-          p.missing_option { |f| abort "gori run sitemap js: missing value for #{f}" }
         end
       end
 

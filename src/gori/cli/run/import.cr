@@ -28,7 +28,7 @@ module Gori
           :curl     => nil.as(String?),
         }
 
-        parser = OptionParser.new do |p|
+        parser = option_parser("gori run import") do |p|
           p.banner = "Usage: gori run import (--har PATH | --urls PATH | --oas PATH | --postman PATH | --insomnia PATH | --burp PATH | --wsdl PATH | --curl PATH) [options]\n\n" \
                      "Bulk-import flows into the project's History. Exactly one source is required:\n" \
                      "  --har       a browser/proxy HAR (HTTP Archive) export\n" \
@@ -53,13 +53,10 @@ module Gori
           p.on("--project=NAME", "Project to import into (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to import into (created if absent)") { |v| db_path = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args do |before, after|
             rest = before + after
             abort "gori run import: unexpected argument#{rest.size == 1 ? "" : "s"} #{rest.join(" ").inspect} — pass the file via a source flag, e.g. --har PATH" unless rest.empty?
           end
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run import", f, p) }
-          p.missing_option { |f| abort "gori run import: missing value for #{f}" }
         end
         parser.parse(args)
 

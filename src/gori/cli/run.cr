@@ -1901,15 +1901,18 @@ module Gori
       # (spec/cli/run/option_parser_missing_option_spec.cr).
       private def self.parse_args(args : Array(String), prefix : String, & : OptionParser ->) : Array(String)
         positional = [] of String
-        parser = OptionParser.new do |p|
+        option_parser(prefix) do |p|
           yield p
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message(prefix, f, p) }
-          p.missing_option { |f| abort "#{prefix}: missing value for #{f}" }
-        end
-        parser.parse(args)
+        end.parse(args)
         positional
+      end
+
+      # `parse_args`'s parser, unparsed, for a command that keeps it whole (to print as its
+      # usage, or to sink `unknown_args` its own way). `CLI.option_parser`, with the prefix
+      # on the missing-value refusal as every `gori run` message carries it.
+      private def self.option_parser(prefix : String, & : OptionParser ->) : OptionParser
+        CLI.option_parser(prefix, "#{prefix}: ") { |p| yield p }
       end
 
       private def self.parse_format(v : String, allowed : Array(Symbol)) : Symbol

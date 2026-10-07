@@ -295,14 +295,11 @@ module Gori
         format = :text
         overwrite = false
         positional = [] of String
-        parser = OptionParser.new do |p|
+        parser = option_parser("gori run wordlist rename") do |p|
           p.banner = "Usage: gori run wordlist rename <old> <new> [--overwrite] [options]"
           p.on("--overwrite", "Replace a list already named <new>") { overwrite = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run wordlist rename", f, p) }
-          p.missing_option { |f| abort "gori run wordlist rename: missing value for #{f}" }
         end
         parser.parse(args)
         abort "gori run wordlist rename: expected <old> <new>\n#{parser}" unless positional.size == 2

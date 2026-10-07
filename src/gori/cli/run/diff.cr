@@ -26,7 +26,7 @@ module Gori
         unchanged = false
         format = :text
 
-        parser = OptionParser.new do |p|
+        parser = option_parser("gori run diff") do |p|
           p.banner = "Usage: gori run diff --from <project> [--to <project>] [options]\n\n" \
                      "Diff two projects at endpoint scale — what is new, gone, or answering\n" \
                      "differently since the last engagement. Endpoints are keyed by the SAME\n" \
@@ -46,10 +46,7 @@ module Gori
           p.on("--no-issues", "Skip the issue retest (which endpoints the baseline's open issues sit on)") { issues = false }
           # `parse_format` folds "md" onto :markdown, so :md is not a symbol this can hold.
           format_flag(p, [:text, :json, :markdown], "Output: text (default) | json | md (a retest report section)") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| abort_diff_positional(before + after, p) }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run diff", f, p) }
-          p.missing_option { |f| abort "gori run diff: missing value for #{f}" }
         end
         parser.parse(normalize_query_flag(args))
 
