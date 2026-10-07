@@ -56,7 +56,11 @@ module Gori
       record Sendable, headers : Array({String, String}), body : String
 
       def self.sendable(parts : Parts) : Sendable
-        body, remaining_te = unchunk(parts)
+        # A head that declares chunked over bytes that are NOT chunk-framed (a hand-authored
+        # Repeater request, an import that stored the entity) keeps the operator's bytes, and
+        # curl's note about it has no reader here.
+        body, remaining_te = Curl.unchunk(Curl.transfer_codings(parts.headers), parts.body, [] of String)
+        remaining_te ||= ""
         kept = [] of {String, String}
         te_written = false
         parts.headers.each do |(name, value)|
@@ -78,22 +82,6 @@ module Gori
         Sendable.new(kept, body)
       end
 
-      # {entity, the Transfer-Encoding value to keep} — the final `chunked` coding peeled off,
-      # or {body, ""} untouched when nothing declared chunked framing over a non-empty body.
-      # Like `Curl.unchunk`, a head that declares chunked over bytes that are NOT chunk-framed
-      # (a hand-authored Repeater request, an import that stored the entity) keeps the operator's
-      # bytes rather than silently dropping them to nothing.
-      private def self.unchunk(parts : Parts) : {String, String}
-        return {parts.body, ""} if parts.body.empty?
-        codings = transfer_codings(parts.headers)
-        return {parts.body, ""} unless codings.last? == "chunked"
-        wire = parts.body.to_slice
-        entity = String.new(Proxy::Codec::ContentDecode.dechunk(wire))
-        complete = Proxy::Codec::ContentDecode.chunked_complete?(wire)
-        return {parts.body, ""} if !complete && entity.empty?
-        {entity, codings[0, codings.size - 1].join(", ")}
-      end
-
       # The header names (original casing, first-seen order) that appear more than once,
       # case-insensitively. A dict/object literal collapses these to one value, so the Python and
       # fetch serializers use this to either preserve the duplicates (fetch's pair-array form) or
@@ -111,21 +99,6 @@ module Gori
           dups << n
         end
         dups
-      end
-
-      # Every Transfer-Encoding coding across all TE lines, in wire order, lowercased — a
-      # repeated field is one comma-list (RFC 9110 §5.3), so the final coding is the last token
-      # of the last line.
-      private def self.transfer_codings(headers : Array({String, String})) : Array(String)
-        codes = [] of String
-        headers.each do |(name, value)|
-          next unless name.downcase == "transfer-encoding"
-          value.split(',').each do |tok|
-            t = tok.strip.downcase
-            codes << t unless t.empty?
-          end
-        end
-        codes
       end
     end
   end
