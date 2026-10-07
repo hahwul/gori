@@ -46,7 +46,7 @@ describe "OAST persistence (V39)" do
 
       store.insert_oast_callback(sid, "uid-1", "dns", "A", "1.2.3.4", "corr20abc.oast.pro",
         "raw".to_slice, nil, 1000_i64)
-      store.oast_callbacks_since(0).select(&.session_id.==(sid)).size.should eq(1)
+      store.oast_callbacks_since(0).count(&.session_id.==(sid)).should eq(1)
     end
   end
 
