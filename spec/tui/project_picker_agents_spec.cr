@@ -26,7 +26,7 @@ describe "ProjectPicker.meta_segments" do
     segs = ProjectPicker.meta_segments(true, status, 0, "3m ago")
     segs.size.should eq(1)
     segs[0][1].should eq(Theme.green)
-    segs[0][0].should contain(":8070") # format_endpoint renders the host (127.0.0.1 → localhost)
+    segs[0][0].should contain(":8070") # BindAddress.display(terse: true) renders the host (127.0.0.1 → localhost)
   end
 
   it "leads with an accent mcp segment, keeping the right segment unchanged" do

@@ -48,6 +48,7 @@ describe "Gori::Bindings — the proxy response seam (#501 slice 2)" do
         b = Gori::Bindings.load(store)
         b.extracts?.should be_false
         b.extracts_body_for_host?("acme.test").should be_false
+        b.@body_count.get.should eq(0) # the lock-free fast path is down too
       end
     end
 
@@ -59,6 +60,7 @@ describe "Gori::Bindings — the proxy response seam (#501 slice 2)" do
         # The whole point: a `Set-Cookie` descriptor reads the parsed head, so it must not
         # cost a response its streaming (P6) — nor an h2 host its protocol.
         b.extracts_body_for_host?("acme.test").should be_false
+        b.@body_count.get.should eq(0) # the lock-free fast path is down too
       end
     end
 
@@ -101,6 +103,7 @@ describe "Gori::Bindings — the proxy response seam (#501 slice 2)" do
         b.toggle(b.rules.first.id)
         b.extracts?.should be_false
         b.extracts_body_for_host?("acme.test").should be_false
+        b.@body_count.get.should eq(0) # the lock-free fast path is down too
       end
     end
 

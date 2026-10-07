@@ -228,6 +228,7 @@ describe "Gori::Rules — short-circuit op" do
         "/admin", "200 OK\n\nok", op: SC)
       rules.toggle(rules.rules.first.id)
       rules.short_circuits_for_host?("acme.test").should be_false
+      rules.@short_circuit_count.get.should eq(0) # the lock-free fast path is down too
       rules.short_circuit(get("/admin"), "acme.test").should be_nil
     end
   end
@@ -430,6 +431,7 @@ describe "Gori::Rules — short-circuit sub-kind" do
 
       engine = Gori::Rules.load(store)
       engine.short_circuits_for_host?("acme.test").should be_false
+      engine.@short_circuit_count.get.should eq(0) # the lock-free fast path is down too
       engine.short_circuit(get("/a"), "acme.test").should be_nil
       engine.update(label, Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
         "/a", "200 OK", op: SC).should be_false

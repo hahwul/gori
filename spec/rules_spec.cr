@@ -950,6 +950,7 @@ describe Gori::Rules do
         head = "POST /pay HTTP/1.1\r\nHost: api.example.com\r\n\r\n".to_slice
         engine.rewrite_request(head, "api.example.com").should eq(head)
         engine.short_circuits_for_host?("api.example.com").should be_false
+        engine.@short_circuit_count.get.should eq(0) # the lock-free fast path is down too
         engine.short_circuit(head, "api.example.com").should be_nil
 
         engine.set_enabled(unknown_op, true).should be_false
@@ -1032,6 +1033,7 @@ describe Gori::Rules do
 
         engine = Gori::Rules.load(store)
         engine.short_circuits_for_host?("api.example.com").should be_false
+        engine.@short_circuit_count.get.should eq(0) # the lock-free fast path is down too
         head = "GET /pay HTTP/1.1\r\nHost: api.example.com\r\n\r\n".to_slice
         engine.short_circuit(head, "api.example.com").should be_nil
       end
