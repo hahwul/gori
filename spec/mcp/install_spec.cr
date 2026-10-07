@@ -31,6 +31,13 @@ private def hermes_default : String
   {% end %}
 end
 
+# One target through `install_all`, the production path, returning the path written or raising
+# the refusal its Outcome carries — what a single-target install reported.
+private def install_one(target : String, **opts) : String
+  o = Gori::MCP::Install.install_all([target], **opts).first
+  o.path || raise Exception.new(o.error)
+end
+
 describe Gori::MCP::Install do
   describe ".config_path" do
     it "maps pi to ~/.pi/agent/mcp.json and honors PI_CODING_AGENT_DIR" do
@@ -795,7 +802,7 @@ describe Gori::MCP::Install do
       old_pi = ENV["PI_CODING_AGENT_DIR"]?
       ENV["PI_CODING_AGENT_DIR"] = dir
       begin
-        path = Gori::MCP::Install.install("pi", exe_path: "/opt/gori")
+        path = install_one("pi", exe_path: "/opt/gori")
         path.should eq(File.join(dir, "mcp.json"))
         JSON.parse(File.read(path))["mcpServers"]["gori"]["args"].as_a.map(&.as_s).should eq(["mcp"])
 
@@ -817,7 +824,7 @@ describe Gori::MCP::Install do
 
         File.write(path, "not-json{")
         expect_raises(Exception, /Refusing to overwrite/) do
-          Gori::MCP::Install.install("pi", exe_path: "/opt/gori")
+          install_one("pi", exe_path: "/opt/gori")
         end
         File.read(path).should eq("not-json{")
       ensure
@@ -834,7 +841,7 @@ describe Gori::MCP::Install do
         old_home = ENV["HOME"]?
         ENV["HOME"] = home
         begin
-          path = Gori::MCP::Install.install("agy", exe_path: "/opt/gori/bin/gori",
+          path = install_one("agy", exe_path: "/opt/gori/bin/gori",
             project: "demo", read_only: true)
           path.should eq(File.join(home, ".gemini", "antigravity-cli", "mcp_config.json"))
           parsed = JSON.parse(File.read(path))
@@ -858,13 +865,13 @@ describe Gori::MCP::Install do
         old_appdata = ENV["APPDATA"]?
         ENV["HOME"] = home
         # BOTH of the vars that can steer the path off $HOME, kept inside the temp tree:
-        # this spec calls the real `install`, so whichever branch the host takes must land
+        # this spec calls the real `install_all`, so whichever branch the host takes must land
         # in the sandbox. A Windows host reads APPDATA and would otherwise have merged an
         # entry into the developer's own %APPDATA%\Claude\claude_desktop_config.json.
         ENV["XDG_CONFIG_HOME"] = File.join(home, ".config")
         ENV["APPDATA"] = File.join(home, "AppData", "Roaming")
         begin
-          path = Gori::MCP::Install.install("claude", exe_path: "/opt/gori")
+          path = install_one("claude", exe_path: "/opt/gori")
           path.should eq(Gori::MCP::Install.claude_desktop_path(home))
           path.should start_with(home)
           JSON.parse(File.read(path))["mcpServers"]["gori"]["command"].as_s.should eq("/opt/gori")
@@ -886,7 +893,7 @@ describe Gori::MCP::Install do
         ENV["HOME"] = home
         begin
           expect_raises(Exception, /Refusing to overwrite/) do
-            Gori::MCP::Install.install("agy", exe_path: "/opt/gori")
+            install_one("agy", exe_path: "/opt/gori")
           end
           File.read(bad).should eq("not-json{")
         ensure
@@ -908,7 +915,7 @@ describe Gori::MCP::Install do
         old_home = ENV["HOME"]?
         ENV["HOME"] = home
         begin
-          Gori::MCP::Install.install("agy", exe_path: "/opt/gori")
+          install_one("agy", exe_path: "/opt/gori")
           File.info(config).permissions.should eq(File::Permissions.new(0o600)) unless {{ flag?(:win32) }}
           JSON.parse(File.read(config))["other"]["keep"].as_bool.should be_true
           Dir.children(dir).sort.should eq(["mcp_config.json"])
@@ -934,7 +941,7 @@ describe Gori::MCP::Install do
         old_home = ENV["HOME"]?
         ENV["HOME"] = home
         begin
-          Gori::MCP::Install.install("claude-code", exe_path: "/opt/gori")
+          install_one("claude-code", exe_path: "/opt/gori")
           File.symlink?(link).should be_true # still a link, not replaced by a file
           parsed = JSON.parse(File.read(real))
           parsed["other"]["keep"].as_bool.should be_true
@@ -987,7 +994,7 @@ describe Gori::MCP::Install do
         ENV["HOME"] = home
         ENV.delete("CODEX_HOME")
         begin
-          path = Gori::MCP::Install.install("codex", exe_path: "/opt/gori/bin/gori",
+          path = install_one("codex", exe_path: "/opt/gori/bin/gori",
             insecure_upstream: true)
           path.should eq(File.join(codex_home, "config.toml"))
           text = File.read(path)
@@ -1013,10 +1020,10 @@ describe Gori::MCP::Install do
         old_home = ENV["HOME"]?
         ENV["HOME"] = home
         begin
-          path = Gori::MCP::Install.install("grok", exe_path: "/opt/gori")
+          path = install_one("grok", exe_path: "/opt/gori")
           path.should eq(File.join(grok_dir, "config.toml"))
           # Second install updates rather than duplicating.
-          Gori::MCP::Install.install("grok", exe_path: "/opt/gori2", read_only: true)
+          install_one("grok", exe_path: "/opt/gori2", read_only: true)
           text = File.read(path)
           text.should contain("[ui]")
           text.should contain("yolo = true")
@@ -1052,11 +1059,11 @@ describe Gori::MCP::Install do
         ENV["HOME"] = home
         ENV["HERMES_HOME"] = File.join(home, ".hermes")
         begin
-          path = Gori::MCP::Install.install("hermes", exe_path: "/opt/gori/bin/gori",
+          path = install_one("hermes", exe_path: "/opt/gori/bin/gori",
             project: "demo")
           path.should eq(config)
           # Second install updates rather than duplicating.
-          Gori::MCP::Install.install("hermes", exe_path: "/opt/gori2", read_only: true)
+          install_one("hermes", exe_path: "/opt/gori2", read_only: true)
           text = File.read(config)
           text.should contain("# keep me")
           text.scan("  gori:").size.should eq(1)
@@ -1088,7 +1095,7 @@ describe Gori::MCP::Install do
         # and the var is kept inside the temp tree so a regression cannot escape the sandbox.
         ENV["LOCALAPPDATA"] = File.join(home, "AppData", "Local")
         begin
-          path = Gori::MCP::Install.install("hermes", exe_path: "/opt/gori")
+          path = install_one("hermes", exe_path: "/opt/gori")
           path.should eq(File.join(profile, "config.yaml"))
           YAML.parse(File.read(path))["mcp_servers"]["gori"]["command"].as_s.should eq("/opt/gori")
         ensure
@@ -1113,7 +1120,7 @@ describe Gori::MCP::Install do
         ENV["HERMES_HOME"] = File.join(home, ".hermes")
         begin
           expect_raises(Exception, /Refusing to overwrite/) do
-            Gori::MCP::Install.install("hermes", exe_path: "/opt/gori")
+            install_one("hermes", exe_path: "/opt/gori")
           end
           File.read(bad).should eq("model: [unterminated\n")
         ensure
@@ -1135,7 +1142,7 @@ describe Gori::MCP::Install do
         ENV["HERMES_HOME"] = File.join(home, ".hermes")
         begin
           expect_raises(Exception, /isn't a YAML mapping/) do
-            Gori::MCP::Install.install("hermes", exe_path: "/opt/gori")
+            install_one("hermes", exe_path: "/opt/gori")
           end
           File.read(bad).should eq("- a\n- b\n")
         ensure
@@ -1162,7 +1169,7 @@ describe Gori::MCP::Install do
         ENV["HERMES_HOME"] = File.join(home, ".hermes")
         begin
           expect_raises(Exception, /did not read back as written/) do
-            Gori::MCP::Install.install("hermes", exe_path: "/opt/gori")
+            install_one("hermes", exe_path: "/opt/gori")
           end
           File.read(config).should eq(original)
         ensure
@@ -1185,7 +1192,7 @@ describe Gori::MCP::Install do
         ENV["HOME"] = home
         ENV["HERMES_HOME"] = File.join(home, ".hermes")
         begin
-          Gori::MCP::Install.install("hermes", exe_path: "/opt/gori")
+          install_one("hermes", exe_path: "/opt/gori")
           File.info(config).permissions.should eq(File::Permissions.new(0o600)) unless {{ flag?(:win32) }}
           Dir.children(dir).sort.should eq(["config.yaml"])
         ensure
