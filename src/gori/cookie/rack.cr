@@ -83,16 +83,7 @@ module Gori
 
       def crack(cookie : String, secrets) : String?
         p = parse(cookie)
-        secrets.each do |s|
-          return s if Crypto::Subtle.constant_time_compare(compute_sig(p.data, s), p.signature)
-        end
-        nil
-      end
-
-      # Re-sign the SAME data with `secret` — byte-identical to the input when correct.
-      def resign(cookie : String, secret : String) : String
-        p = parse(cookie)
-        "#{wire(p.data, p.escaped)}--#{compute_sig(p.data, secret)}"
+        Cookie.first_signing(secrets, p.signature) { |s| compute_sig(p.data, s) }
       end
 
       # Mint a cookie from an opaque base64 `data` value + secret. `data` is the marshalled

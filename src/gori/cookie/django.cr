@@ -70,39 +70,16 @@ module Gori
                 salt : String = DEFAULT_SALT, algorithm : String = DEFAULT_ALGO) : String?
         p = parse(cookie)
         input = signing_input(p)
-        secrets.each do |s|
-          return s if Crypto::Subtle.constant_time_compare(compute_sig(input, s, salt, algorithm), p.signature)
-        end
-        nil
-      end
-
-      # Re-sign the SAME payload + timestamp — byte-identical when the secret/salt/algo match.
-      def resign(cookie : String, secret : String,
-                 salt : String = DEFAULT_SALT, algorithm : String = DEFAULT_ALGO) : String
-        p = parse(cookie)
-        "#{signing_input(p)}:#{compute_sig(signing_input(p), secret, salt, algorithm)}"
+        Cookie.first_signing(secrets, p.signature) { |s| compute_sig(input, s, salt, algorithm) }
       end
 
       # Mint a fresh cookie from JSON payload + secret (uncompressed; always verifies).
       def forge(payload_json : String, secret : String, timestamp : Int64,
                 salt : String = DEFAULT_SALT, algorithm : String = DEFAULT_ALGO) : String
-        payload_seg = Cookie.b64url(compact_json(payload_json))
+        payload_seg = Cookie.b64url(Cookie.compact_json(payload_json))
         ts_seg = Cookie.base62_encode(timestamp)
         input = "#{payload_seg}:#{ts_seg}"
         "#{input}:#{compute_sig(input, secret, salt, algorithm)}"
-      end
-
-      def payload_pretty(p : Parsed) : String
-        RawJson.reformat(String.new(payload_bytes(p)), "  ")
-      rescue
-        "(undecodable payload)"
-      end
-
-      def payload_bytes(p : Parsed) : Bytes
-        compressed = p.payload_seg.starts_with?('.')
-        seg = compressed ? p.payload_seg[1..] : p.payload_seg
-        raw = Cookie.b64decode(seg)
-        compressed ? Cookie.zlib_inflate(raw) : raw
       end
 
       def decode_text(cookie : String) : String
@@ -111,7 +88,7 @@ module Gori
         String.build do |io|
           io << "// format: django (django.core.signing)\n"
           io << "// payload" << (p.payload_seg.starts_with?('.') ? " (zlib-compressed)\n" : "\n")
-          io << payload_pretty(p) << "\n\n"
+          io << Cookie.payload_pretty(p.payload_seg) << "\n\n"
           io << "// timestamp: " << (ts ? Cookie.unix_to_s(ts) : "(invalid base62 #{p.ts_seg.inspect})") << "\n"
           io << "// signature (not verified): " << p.signature
         end
@@ -122,7 +99,7 @@ module Gori
         JSON.build do |j|
           j.object do
             j.field "format", "django"
-            j.field "payload" { j.raw(payload_json_or_null(p)) }
+            j.field "payload" { j.raw(Cookie.payload_json_or_null(p.payload_seg)) }
             j.field "compressed", p.payload_seg.starts_with?('.')
             j.field "timestamp", Cookie.base62_decode(p.ts_seg)
             j.field "signature", p.signature
@@ -154,18 +131,6 @@ module Gori
         when "sha256" then OpenSSL::Algorithm::SHA256
         else               raise CookieError.new("unsupported algorithm #{algorithm.inspect} (use #{SUPPORTED_ALGOS.join('/')})")
         end
-      end
-
-      private def payload_json_or_null(p : Parsed) : String
-        RawJson.reformat(String.new(payload_bytes(p)))
-      rescue
-        "null"
-      end
-
-      private def compact_json(json : String) : String
-        RawJson.reformat(json) # numbers and duplicate keys as written (#1200, as #1169 for JWT)
-      rescue ex : JSON::ParseException
-        raise CookieError.new("invalid payload JSON: #{ex.message}")
       end
     end
   end
