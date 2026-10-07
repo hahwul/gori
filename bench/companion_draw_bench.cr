@@ -1,9 +1,8 @@
 # Companion.draw micro-benchmark. She is drawn on EVERY frame the Runner paints — not just on
 # the ~1/second where her sprite actually changes — so anything expensive in the draw path
-# is paid per keystroke, per scroll step, per job-spinner tick. This measures the two costs
-# that are recomputed from scratch each call: resolving the mood palette (Theme.paper/soot
-# plus ~7 blends, each converting colours to RGB components) and assembling the three art
-# rows (three String allocations).
+# is paid per keystroke, per scroll step, per job-spinner tick. This measures the cost that
+# is recomputed from scratch each call — resolving the mood palette (Theme.paper/soot plus ~7
+# blends, each converting colours to RGB components) — and the draw itself.
 #
 # Build: crystal build bench/companion_draw_bench.cr -o bin/companion_draw_bench --release
 # Run:   bin/companion_draw_bench
@@ -22,7 +21,6 @@ SCREEN = Screen.new(MemoryBackend.new(120, 34))
 puts "per frame:"
 Benchmark.ips do |x|
   x.report("Mascot.palette (mood -> full ramp)") { Mascot.palette(:info, Theme.bg) }
-  x.report("Mascot.rows (3 String.build)") { Mascot.rows(IDLE) }
   x.report("Companion.draw idle (no bubble)") { Companion.draw(SCREEN, BODY, IDLE) }
   x.report("Companion.draw with bubble") { Companion.draw(SCREEN, BODY, TALK) }
 end
