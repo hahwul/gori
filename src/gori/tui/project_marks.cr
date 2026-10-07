@@ -76,7 +76,7 @@ module Gori::Tui
 
     # End a ⇧arrow range gesture AND hand back everything it marked — what letting go of ⇧
     # and pressing a plain arrow does in a GUI list, where the highlight collapses instead
-    # of being left behind. Only the gesture's own dirs go: Tab marks are deliberate tags,
+    # of being left behind. Only the gesture's own keys go: toggled marks are deliberate tags,
     # and dropping those too would put a discontiguous set out of reach ("this one, skip
     # three, that one"). Returns how many marks it gave back.
     def end_gesture : Int32
@@ -92,13 +92,14 @@ module Gori::Tui
     end
 
     # ⇧↑/⇧↓ — extend a contiguous range from the anchor, the keyboard form of a GUI
-    # shift+click. `cursor` is an index into `dirs`; the new cursor index is returned. The
-    # anchor is seeded from the cursor when it is unset or has fallen out of the filter, so
-    # the first ⇧arrow always starts from where you are.
-    def extend(dirs : Array(K), cursor : Int32, delta : Int32) : Int32
-      return cursor if dirs.empty?
-      moved = (cursor + delta).clamp(0, dirs.size - 1)
-      extend_range(@anchor.try { |a| dirs.index(a) }, cursor, moved) { |i| dirs[i]? }
+    # shift+click, over a list small enough to hand over whole (the ProjectPicker's). `cursor`
+    # is an index into `keys`; the new cursor index is returned. The anchor is seeded from the
+    # cursor when it is unset or has fallen out of the filter, so the first ⇧arrow always
+    # starts from where you are. The views step their own cursor and call `extend_range`.
+    def extend(keys : Array(K), cursor : Int32, delta : Int32) : Int32
+      return cursor if keys.empty?
+      moved = (cursor + delta).clamp(0, keys.size - 1)
+      extend_range(@anchor.try { |a| keys.index(a) }, cursor, moved) { |i| keys[i]? }
       moved
     end
 
@@ -142,46 +143,50 @@ module Gori::Tui
       @anchor = nil unless @anchor.try { |a| live.includes?(a) }
     end
 
-    # Drop specific marks — the post-delete prune, so a deleted project's dir can't linger
-    # in the set and inflate the next count. Only what actually went: a project the delete
-    # REFUSED stays marked, so the operator can close the other gori and press again.
-    def unmark(dirs : Enumerable(K)) : Nil
+    # The four below are the ProjectPicker's rules; the views prune with `delete` / `keep`
+    # under their own anchor rule.
+    #
+    # Drop specific marks — the post-delete prune, so a deleted row's key can't linger in the
+    # set and inflate the next count. Only what actually went: a project the delete REFUSED
+    # stays marked, so the operator can close the other gori and press again.
+    def unmark(keys : Enumerable(K)) : Nil
       # Reset the anchor only when the anchor ITSELF went — an unmarked row that is still on
       # the list is a perfectly good place for the next ⇧arrow to measure from, which is why
       # HistoryView#unmark_ids keeps its anchor too (it asks `index_of(a).nil?`).
       anchor_gone = false
-      dirs.each do |d|
-        @marks.delete(d)
-        @extent.delete(d)
-        anchor_gone = true if d == @anchor
+      keys.each do |k|
+        @marks.delete(k)
+        @extent.delete(k)
+        anchor_gone = true if k == @anchor
       end
       reset_anchor if anchor_gone
     end
 
-    # Keep only marks that still name a live project, called wherever the picker re-lists
-    # the registry. A project a peer deleted out from under us is not a target, and a count
-    # that outlives the directory it points at is the one number here that must not lie.
-    def retain(dirs : Enumerable(K)) : Nil
-      live = dirs.to_set
-      @marks.select! { |d| live.includes?(d) }
-      @extent.select! { |d| live.includes?(d) }
+    # Keep only marks whose key is still live, called wherever the picker re-lists the
+    # registry. A project a peer deleted out from under us is not a target, and a count that
+    # outlives the row it points at is the one number here that must not lie. Ends a gesture
+    # whose anchor went (`keep` does not).
+    def retain(keys : Enumerable(K)) : Nil
+      live = keys.to_set
+      @marks.select! { |k| live.includes?(k) }
+      @extent.select! { |k| live.includes?(k) }
       reset_anchor if (a = @anchor) && !live.includes?(a)
     end
 
     # Marks in DISPLAY order: the ones the filter is showing first, in list order, then the
-    # off-window rest sorted by dir so the order is stable rather than Set-insertion order.
+    # off-window rest sorted by key so the order is stable rather than Set-insertion order.
     def ordered(visible : Array(K)) : Array(K)
-      shown = visible.select { |d| @marks.includes?(d) }
+      shown = visible.select { |k| @marks.includes?(k) }
       hidden = (@marks - shown.to_set).to_a.sort!
       shown + hidden
     end
 
-    # Marks whose project the current filter does NOT show. Surfaced next to the count and
-    # again in the delete confirm, so a set larger than the visible list is never a surprise.
+    # Marks whose row the current filter does NOT show. Surfaced next to the count and again
+    # in the delete confirm, so a set larger than the visible list is never a surprise.
     def hidden_count(visible : Array(K)) : Int32
       return 0 if @marks.empty?
       shown = 0
-      visible.each { |d| shown += 1 if @marks.includes?(d) }
+      visible.each { |k| shown += 1 if @marks.includes?(k) }
       @marks.size - shown
     end
 

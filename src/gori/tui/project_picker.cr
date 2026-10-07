@@ -737,7 +737,7 @@ module Gori::Tui
       return nil if dlg.nil?
       # ctrl-c is the picker's global abort; ConfirmDialog does not answer it. Everything else —
       # the y/⇧Y with its ctrl-guard, the arrow/tab button moves, ↵-on-the-selection AND the
-      # `drawn?` gate that refuses to COMMIT a card a short window is hiding — is
+      # `@drawn` gate that refuses to COMMIT a card a short window is hiding — is
       # ConfirmDialog#handle_key's own ladder. Delegate to it rather than re-spelling it here: the
       # gate (#912) lived only in handle_key, and this second copy of the ladder never got it, so
       # a resize below MIN_H after arming let `y` run `rm_rf` on a project with nothing on screen.
