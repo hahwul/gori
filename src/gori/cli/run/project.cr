@@ -124,7 +124,7 @@ module Gori
         end
 
         # Nothing was ever captured here. `flows == nil` is the census failing to read the
-        # db, which is emphatically NOT the same answer — see `Store.captured_flows`.
+        # db, which is emphatically NOT the same answer — see `Store.project_census`.
         def empty? : Bool
           flows == 0
         end
@@ -181,7 +181,7 @@ module Gori
 
         registry = ProjectRegistry.new(Paths.projects_dir)
         entries = registry.entries
-        # BEFORE the census, and that ordering is the point: `Store.captured_flows` opens
+        # BEFORE the census, and that ordering is the point: `Store.project_census` opens
         # every project's database, while everything `--query` reads is a sidecar file
         # beside it. On a host with a project per worktree, `--query=acme` is now one
         # database open instead of hundreds.
