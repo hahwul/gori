@@ -13,7 +13,7 @@ module Gori::Proxy::Tls
   #
   # Two halves:
   #
-  #   * `parse` + `ja3` / `ja4` — pure functions over ClientHello bytes, from wherever they come.
+  #   * `parse` + `report` — pure functions over ClientHello bytes, from wherever they come.
   #   * `of_context` — the bytes themselves, obtained by letting OpenSSL write ONE ClientHello
   #     from a real `SSL_CTX` into memory (see there for why that is the honest way to ask).
   #
