@@ -35,6 +35,19 @@ module Gori::Tui
     # 500-flow FlowPicker had no other gait than one row at a time — and moved up to the
     # base once the list cards needed the same four keys).
 
+    # The prelude every picker's `handle_key` opens with: esc → :cancel, ↵ → :commit, ↑/↓ and
+    # the page keys move (→ :stay); nil for any other key, which the picker answers itself.
+    private def nav_key(ev : Termisu::Event::Key) : Symbol?
+      key = ev.key
+      case
+      when key.escape?  then :cancel
+      when key.up?      then move(-1); :stay
+      when key.down?    then move(1); :stay
+      when page_key(ev) then :stay
+      when key.enter?   then :commit
+      end
+    end
+
     def set_selected(idx : Int32) : Nil
       n = entry_count
       return if n == 0
@@ -170,22 +183,16 @@ module Gori::Tui
     # esc cancels · ↑/↓ move · ↵ picks · ⌫ edits the filter · anything else printable
     # goes into the filter (query_char drops control chars itself).
     def handle_key(ev : Termisu::Event::Key) : Symbol
-      key = ev.key
-      case
-      when key.escape?  then return :cancel
-      when key.up?      then move(-1)
-      when key.down?    then move(1)
-      when page_key(ev) then nil
-      when key.enter?   then return :commit
-      else
-        # The field refuses a Ctrl/Alt chord itself (`TextField#handle_edit_key` — the
-        # `Event::Key#char` fallback would otherwise type 'p' for ^P into the filter), and
-        # ⇥, which a picker has no use for. Refilter only when the TEXT changed: a caret
-        # motion must not reset the cursor to the top of the list.
-        before = @field.value
-        if @field.handle_edit_key(ev) && @field.value != before
-          refilter
-        end
+      if nav = nav_key(ev)
+        return nav
+      end
+      # The field refuses a Ctrl/Alt chord itself (`TextField#handle_edit_key` — the
+      # `Event::Key#char` fallback would otherwise type 'p' for ^P into the filter), and
+      # ⇥, which a picker has no use for. Refilter only when the TEXT changed: a caret
+      # motion must not reset the cursor to the top of the list.
+      before = @field.value
+      if @field.handle_edit_key(ev) && @field.value != before
+        refilter
       end
       :stay
     end

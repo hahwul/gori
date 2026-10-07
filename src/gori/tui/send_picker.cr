@@ -54,18 +54,12 @@ module Gori::Tui
     # mnemonics now include 'j' (JWT), so a j/k nav fallback both shadowed that mnemonic
     # and was asymmetric (k moved up, j sent). Arrows handle navigation.
     def handle_key(ev : Termisu::Event::Key) : Symbol
-      key = ev.key
-      case
-      when key.escape?  then return :cancel
-      when key.up?      then move(-1)
-      when key.down?    then move(1)
-      when page_key(ev) then nil
-      when key.enter?   then return :commit
-      else
-        if (c = ev.char) && !ev.ctrl? && !ev.alt? && (idx = index_for(c))
-          set_selected(idx)
-          return :commit
-        end
+      if nav = nav_key(ev)
+        return nav
+      end
+      if (c = ev.char) && !ev.ctrl? && !ev.alt? && (idx = index_for(c))
+        set_selected(idx)
+        return :commit
       end
       :stay
     end
