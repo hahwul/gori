@@ -2,9 +2,9 @@
 #
 # codec_bench covers the plain path only, and the plain path is not the one real traffic
 # takes: `ClientConn#read_client_head` and `#safe_read_head` both pass a `deadline` and a
-# `timeout_sock`, so every proxied request head and every response head goes through
-# `read_head_deadlined`. Its extra per-iteration work (re-arming the drip-feed deadline)
-# is invisible from codec_bench, which is why this harness exists.
+# `timeout_sock`, so every proxied request head and every response head goes through the
+# armed-deadline branch of `read_head_result`. Its extra per-iteration work (re-arming the
+# drip-feed deadline) is invisible from codec_bench, which is why this harness exists.
 #
 # `timeout_sock` only ever has `read_timeout=` called on it, so it does NOT have to be the
 # socket `io` reads from: feeding the loop an `IO::Memory` while handing it a real (idle)
