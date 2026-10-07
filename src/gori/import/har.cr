@@ -453,10 +453,7 @@ module Gori
           boundary = m[1]? || m[2]
           return {multipart_body(params, boundary), true}
         end
-        pairs = params.map do |p|
-          "#{URI.encode_www_form(p["name"]?.to_s)}=#{URI.encode_www_form(p["value"]?.to_s)}"
-        end
-        {pairs.join('&').to_slice, true}
+        {URI::Params.build { |f| params.each { |p| f.add(p["name"]?.to_s, p["value"]?.to_s) } }.to_slice, true}
       end
 
       # The part headers are gori's own framing, so a name, filename or type that could forge a

@@ -95,7 +95,9 @@ module Gori
         notes = [] of String
         # The stored body is WIRE bytes. curl frames `--data-raw` itself, so the chunk framing
         # has to come off with the coding that declared it.
-        entity, transfer_encoding = unchunk(header_lines, body, notes)
+        pairs = [] of {String, String}
+        each_header(header_lines) { |n, v| pairs << {n, v} }
+        entity, transfer_encoding = unchunk(transfer_codings(pairs), body, notes)
         parts = ["curl #{shell_quote(Escape.percent_encode_non_ascii(url))}"]
         parts << "--globoff" if globbed?(url)
         parts << "--path-as-is" if dot_segments?(url)
@@ -228,10 +230,12 @@ module Gori
       # `gzip, chunked` is framing over CONTENT the origin still has to inflate, so the gzip
       # layer stays on the command and on the bytes — the same split `ContentDecode` draws
       # between framing and compression, and the same reason `Content-Encoding` is untouched.
-      private def self.unchunk(header_lines : Array(String), body : String,
-                               notes : Array(String)) : {String, String?}
+      #
+      # `codings` is `transfer_codings` of the request's headers. Public for
+      # `Export::RequestParts.sendable`, whose generated clients frame their body the same way.
+      def self.unchunk(codings : Array(String), body : String,
+                       notes : Array(String)) : {String, String?}
         return {body, nil} if body.empty?
-        codings = transfer_codings(header_lines)
         return {body, nil} unless codings.last? == "chunked"
         wire = body.to_slice
         entity = String.new(Proxy::Codec::ContentDecode.dechunk(wire))
@@ -259,9 +263,9 @@ module Gori
       # Every Transfer-Encoding coding on the request, in wire order, lowercased. Across ALL
       # TE lines: a repeated field is one comma-separated list (RFC 9110 §5.3), so the final
       # coding is the last token of the last line, not of whichever line was looked at.
-      private def self.transfer_codings(header_lines : Array(String)) : Array(String)
+      def self.transfer_codings(headers : Array({String, String})) : Array(String)
         out = [] of String
-        each_header(header_lines) do |name, value|
+        headers.each do |(name, value)|
           next unless name.downcase == "transfer-encoding"
           value.split(',').each do |tok|
             t = tok.strip.downcase

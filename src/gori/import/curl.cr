@@ -835,33 +835,20 @@ module Gori
       # --- data encodings -----------------------------------------------------------------------
 
       # curl's --data-urlencode escaping, measured: A-Z a-z 0-9 - . _ ~ as themselves, a space
-      # as `+`, every other byte as `%XX` (upper-case hex).
-      def self.form_escape(bytes : Bytes) : String
-        String.build do |io|
-          bytes.each do |b|
-            if (0x41_u8 <= b <= 0x5a_u8) || (0x61_u8 <= b <= 0x7a_u8) || (0x30_u8 <= b <= 0x39_u8) ||
-               b == 0x2d_u8 || b == 0x2e_u8 || b == 0x5f_u8 || b == 0x7e_u8
-              io.write_byte(b)
-            elsif b == 0x20_u8
-              io << '+'
-            else
-              io << '%' << b.to_s(16, upcase: true).rjust(2, '0')
-            end
-          end
-        end
-      end
-
+      # as `+`, every other byte as `%XX` (upper-case hex) — byte for byte what
+      # `URI.encode_www_form` writes, invalid UTF-8 included.
+      #
       # `--data-urlencode`'s four shapes: `content`, `=content`, `name=content`, and the two
       # that read a file (`@f`, `name@f`), which are refused.
       def self.urlencode_data(v : String, flag : String) : String
-        return form_escape(v.byte_slice(1).to_slice) if v.starts_with?('=')
+        return URI.encode_www_form(v.byte_slice(1)) if v.starts_with?('=')
         if eq = v.byte_index('=')
-          return "#{v.byte_slice(0, eq)}=#{form_escape(v.byte_slice(eq + 1).to_slice)}"
+          return "#{v.byte_slice(0, eq)}=#{URI.encode_www_form(v.byte_slice(eq + 1))}"
         end
         if v.includes?('@')
           raise Gori::Error.new("#{flag} #{v} reads a local file, which the paste does not carry")
         end
-        form_escape(v.to_slice)
+        URI.encode_www_form(v)
       end
 
       # `--url-query`: --data-urlencode's shapes, plus `+content` for "already encoded".

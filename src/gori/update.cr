@@ -245,8 +245,8 @@ module Gori
       nil
     end
 
-    # Stand-in for the API payload, built from a tag alone, so the redirect path
-    # can reuse parse_release/resolve_asset_from_json unchanged. Asset names are
+    # Stand-in for the API's release, built from a tag alone, so the redirect path
+    # can reuse select_asset/resolve_asset unchanged. Asset names are
     # derived exactly as release-binary.yml builds them. Digests come from the
     # release's SHA256SUMS when it has them; without one verify_sha256! no-ops, so
     # the caller warns that the checksum check was skipped (see update_binary).
@@ -256,10 +256,10 @@ module Gori
     # When that guess is wrong the versioned name 404s and the alias — which
     # carries no version to get wrong — is the one name still worth trying, so it
     # has to already be in the list the retry looks through.
-    def self.synthesize_release_json(tag : String, os : String = current_os,
-                                     arch : String = current_arch,
-                                     digest : String? = nil,
-                                     alias_digest : String? = nil) : String
+    def self.synthesize_release(tag : String, os : String = current_os,
+                                arch : String = current_arch,
+                                digest : String? = nil,
+                                alias_digest : String? = nil) : Release
       entries = [] of {String, String?}
       entries << {asset_name(tag, os, arch), digest}
       # Guarded: alias_asset_name shares asset_name's unsupported-OS raise, and
@@ -267,22 +267,9 @@ module Gori
       if alias_name = (alias_asset_name(os, arch) rescue nil)
         entries << {alias_name, alias_digest}
       end
-      JSON.build do |json|
-        json.object do
-          json.field "tag_name", tag
-          json.field "assets" do
-            json.array do
-              entries.each do |(name, hex)|
-                json.object do
-                  json.field "name", name
-                  json.field "browser_download_url", "#{DOWNLOAD_BASE}/#{tag}/#{name}"
-                  json.field "digest", "sha256:#{hex}" if hex
-                end
-              end
-            end
-          end
-        end
-      end
+      Release.new(tag, entries.map do |(name, hex)|
+        Asset.new(name, "#{DOWNLOAD_BASE}/#{tag}/#{name}", digest: hex.try { |h| "sha256:#{h}" })
+      end)
     end
 
     # {asset name => sha256} from the release's SHA256SUMS, empty when the release
@@ -308,28 +295,32 @@ module Gori
       {} of String => String
     end
 
-    # fetch_latest_release_json, but when GitHub refuses (rate limit, outage) it
-    # names the release through the redirect endpoint instead. Returns the JSON
-    # and, when it came from that fallback, why the API was passed over (nil
-    # otherwise), so the caller can say so.
+    # fetch_latest_release_json, parsed, but when GitHub refuses (rate limit,
+    # outage) it names the release through the redirect endpoint instead. Returns
+    # the release and, when it came from that fallback, why the API was passed
+    # over (nil otherwise), so the caller can say so. Only the FETCH falls back:
+    # a body that does not parse is reported as itself.
     #
     # Falls back on any fetch error rather than only 403: resolve_tag_via_redirect
     # validates its own answer, so a genuine "no releases" still surfaces the
     # original error instead of being papered over. Which is also why the reason
     # travels back: a rejected token or a TLS failure is worth knowing about even
     # when the update went through anyway.
-    def self.fetch_latest_release_json_with_fallback(api_url : String? = nil, *,
-                                                     timeout : Time::Span = HTTP_TIMEOUT) : {String, String?}
-      {fetch_latest_release_json(api_url, timeout: timeout), nil}
-    rescue ex
-      raise ex unless default_api?(api_url)
-      tag = resolve_tag_via_redirect(timeout)
-      raise ex unless tag
-      sums = fetch_checksums(tag)
-      alias_name = (alias_asset_name(current_os, current_arch) rescue nil)
-      {synthesize_release_json(tag,
-        digest: sums[asset_name(tag, current_os, current_arch)]?,
-        alias_digest: alias_name.try { |n| sums[n]? }), ex.message.presence || ex.class.to_s}
+    def self.fetch_latest_release_with_fallback(api_url : String? = nil, *,
+                                                timeout : Time::Span = HTTP_TIMEOUT) : {Release, String?}
+      json = begin
+        fetch_latest_release_json(api_url, timeout: timeout)
+      rescue ex
+        raise ex unless default_api?(api_url)
+        tag = resolve_tag_via_redirect(timeout)
+        raise ex unless tag
+        sums = fetch_checksums(tag)
+        alias_name = (alias_asset_name(current_os, current_arch) rescue nil)
+        return {synthesize_release(tag,
+          digest: sums[asset_name(tag, current_os, current_arch)]?,
+          alias_digest: alias_name.try { |n| sums[n]? }), ex.message.presence || ex.class.to_s}
+      end
+      {parse_release(json), nil}
     end
 
     # Maps a non-200 releases-API status onto the error we surface. Split out of
@@ -821,13 +812,12 @@ module Gori
                            release_json : String? = nil,
                            api_url : String? = nil,
                            force_progress : Bool = false) : Nil
-      json, fallback_reason = if provided = release_json
-                                {provided, nil.as(String?)}
-                              else
-                                fetch_latest_release_json_with_fallback(api_url)
-                              end
+      release, fallback_reason = if provided = release_json
+                                   {parse_release(provided), nil.as(String?)}
+                                 else
+                                   fetch_latest_release_with_fallback(api_url)
+                                 end
       via_redirect = !fallback_reason.nil?
-      release = parse_release(json)
       ver = release.version
       local = normalize_version(VERSION)
 
@@ -841,7 +831,7 @@ module Gori
         return
       end
 
-      asset = resolve_asset_from_json(json, current_os, current_arch)
+      asset = resolve_asset(release, current_os, current_arch)
 
       # Fail fast on unsafe macOS layouts before downloading tens of MB.
       if asset_is_archive?(asset.name) && !supports_archive_lib_layout?(target_path)

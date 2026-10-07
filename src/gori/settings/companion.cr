@@ -94,43 +94,19 @@ module Gori::Settings
   # Tolerant companion section: absent/non-object keeps current.
   private def self.parse_companion(node : JSON::Any?) : Nil
     return unless o = node.try(&.as_h?)
-    # load_bool_h, not `|| companion?` — a plain `||` resurrects a stored `false`.
-    self.companion = load_bool_h(o, "enabled", companion?)
-    self.companion_notices = load_bool_h(o, "notices", companion_notices?)
+    # load_bool, not `|| companion?` — a plain `||` resurrects a stored `false`.
+    self.companion = load_bool(o, "enabled", companion?)
+    self.companion_notices = load_bool(o, "notices", companion_notices?)
     o["motion"]?.try(&.as_s?).try { |v| self.companion_motion = normalize_companion_motion(v) }
     o["placement"]?.try(&.as_s?).try { |v| self.companion_placement = normalize_companion_placement(v) }
     o["replies"]?.try(&.as_s?).try { |v| self.companion_replies = normalize_companion_replies(v) }
   end
 
-  # Factory reset for this section (dispatched by Settings.reset_to_factory). One assignment
-  # per field serialize_companion writes. The source-grep guard only checks that this method
-  # EXISTS and is dispatched (see display.cr's block) — keeping the two field lists in step is
-  # a hand job, so add to both in the same edit.
-  private def self.reset_companion : Nil
-    self.companion = DEFAULT_COMPANION
-    self.companion_placement = DEFAULT_COMPANION_PLACEMENT
-    self.companion_motion = DEFAULT_COMPANION_MOTION
-    self.companion_notices = DEFAULT_COMPANION_NOTICES
-    self.companion_replies = DEFAULT_COMPANION_REPLIES
-  end
-
-  # Omitted entirely while every field is at its factory default, so a default install's
-  # settings.json stays quiet and the 3-way merge has nothing to reconcile.
-  private def self.serialize_companion(j : JSON::Builder) : Nil
-    unless companion? == DEFAULT_COMPANION &&
-           companion_motion == DEFAULT_COMPANION_MOTION &&
-           companion_notices? == DEFAULT_COMPANION_NOTICES &&
-           companion_placement == DEFAULT_COMPANION_PLACEMENT &&
-           companion_replies == DEFAULT_COMPANION_REPLIES
-      j.field "companion" do
-        j.object do
-          j.field "enabled", companion?
-          j.field "placement", companion_placement
-          j.field "motion", companion_motion
-          j.field "notices", companion_notices?
-          j.field "replies", companion_replies
-        end
-      end
-    end
-  end
+  # Factory reset + writer for this section (reset dispatched by Settings.reset_to_factory).
+  defaulted_section companion, "companion",
+    {"enabled", companion?, DEFAULT_COMPANION},
+    {"placement", companion_placement, DEFAULT_COMPANION_PLACEMENT},
+    {"motion", companion_motion, DEFAULT_COMPANION_MOTION},
+    {"notices", companion_notices?, DEFAULT_COMPANION_NOTICES},
+    {"replies", companion_replies, DEFAULT_COMPANION_REPLIES}
 end

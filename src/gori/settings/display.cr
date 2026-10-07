@@ -166,17 +166,17 @@ module Gori::Settings
   # Tolerant layout section: absent/non-object keeps current; depth/order clamped to allowed set.
   private def self.parse_layout(node : JSON::Any?) : Nil
     return unless o = node.try(&.as_h?)
-    self.history_preview = load_bool_h(o, "history_preview", history_preview)
-    self.probe_preview = load_bool_h(o, "probe_preview", probe_preview)
-    self.issues_preview = load_bool_h(o, "issues_preview", issues_preview)
+    self.history_preview = load_bool(o, "history_preview", history_preview)
+    self.probe_preview = load_bool(o, "probe_preview", probe_preview)
+    self.issues_preview = load_bool(o, "issues_preview", issues_preview)
     if ord = o["history_list_order"]?.try(&.as_s?)
       self.history_list_order = normalize_history_list_order(ord)
     end
     if d = int_field(o, "sitemap_expand_depth")
       self.sitemap_expand_depth = normalize_sitemap_depth(d)
     end
-    self.tab_numbers = load_bool_h(o, "tab_numbers", tab_numbers?)
-    self.tab_slots = load_bool_h(o, "tab_slots", tab_slots?)
+    self.tab_numbers = load_bool(o, "tab_numbers", tab_numbers?)
+    self.tab_slots = load_bool(o, "tab_slots", tab_slots?)
   end
 
   # Whether the statusline row is actually LIVE — enabled AND given something to run.
@@ -191,7 +191,7 @@ module Gori::Settings
   # Tolerant statusline section: absent/non-object keeps current; interval/timeout floored at 1.
   private def self.parse_statusline(node : JSON::Any?) : Nil
     return unless o = node.try(&.as_h?)
-    self.statusline_enabled = load_bool_h(o, "enabled", statusline_enabled?)
+    self.statusline_enabled = load_bool(o, "enabled", statusline_enabled?)
     if cmd = o["command"]?.try(&.as_s?)
       self.statusline_command = cmd
     end
@@ -213,12 +213,12 @@ module Gori::Settings
     if v = o["history_time_format"]?.try(&.as_s?)
       self.history_time_format = v == "relative" ? "relative" : "absolute"
     end
-    self.show_gutter = load_bool_h(o, "show_gutter", show_gutter)
-    self.wrap_lines = load_bool_h(o, "wrap_lines", wrap_lines?)
+    self.show_gutter = load_bool(o, "show_gutter", show_gutter)
+    self.wrap_lines = load_bool(o, "wrap_lines", wrap_lines?)
     if v = int_field(o, "preview_body_kib")
       self.preview_body_kib = v.clamp(1, MAX_PREVIEW_BODY_KIB)
     end
-    self.resource_meter = load_bool_h(o, "resource_meter", resource_meter?)
+    self.resource_meter = load_bool(o, "resource_meter", resource_meter?)
     if v = o["terminal_title"]?.try(&.as_s?)
       self.terminal_title = normalize_terminal_title(v)
     end
@@ -232,8 +232,8 @@ module Gori::Settings
   # Tolerant notifications section: absent/non-object keeps current; retention floored at 1.
   private def self.parse_notifications(node : JSON::Any?) : Nil
     return unless o = node.try(&.as_h?)
-    self.notify_bell = load_bool_h(o, "bell", notify_bell?)
-    self.notify_toast = load_bool_h(o, "toast", notify_toast?)
+    self.notify_bell = load_bool(o, "bell", notify_bell?)
+    self.notify_toast = load_bool(o, "toast", notify_toast?)
     if v = int_field(o, "retention")
       self.notify_retention = {v, 1}.max
     end
@@ -242,9 +242,9 @@ module Gori::Settings
   # Tolerant general section: absent/non-object keeps current.
   private def self.parse_general(node : JSON::Any?) : Nil
     return unless o = node.try(&.as_h?)
-    self.clipboard_osc52 = load_bool_h(o, "clipboard_osc52", clipboard_osc52?)
-    self.confirm_quit = load_bool_h(o, "confirm_quit", confirm_quit?)
-    self.repeater_record_history = load_bool_h(o, "repeater_record_history", repeater_record_history?)
+    self.clipboard_osc52 = load_bool(o, "clipboard_osc52", clipboard_osc52?)
+    self.confirm_quit = load_bool(o, "confirm_quit", confirm_quit?)
+    self.repeater_record_history = load_bool(o, "repeater_record_history", repeater_record_history?)
   end
 
   # Allowed depths: -1 (all) or 0..3. Anything else falls back to default.
@@ -255,11 +255,11 @@ module Gori::Settings
 
   # --- factory reset (dispatched by Settings.reset_to_factory) ------------------------
   #
-  # One `reset_*` per `serialize_*` below, restoring exactly the fields that method writes.
+  # One `reset_*` per `serialize_*`, restoring exactly the fields that method writes.
   # A source-grep spec (spec/settings/reset_spec.cr) guards the SECTION list — add a
   # `serialize_x` with no `reset_x` and it fails. It cannot see inside these bodies, so a new
-  # FIELD is on you: add it to the `serialize_*` and to the `reset_*` in the same edit, or a
-  # factory reset will leave that one field at whatever the operator set.
+  # FIELD in a hand-written pair is on you: add it to the `serialize_*` and to the `reset_*` in
+  # the same edit. A `defaulted_section` table writes both from one row.
 
   private def self.reset_appearance : Nil
     self.theme = DEFAULT_THEME
@@ -275,135 +275,39 @@ module Gori::Settings
     j.field "pretty_bodies", pretty_bodies_default
   end
 
-  private def self.reset_layout : Nil
-    self.history_preview = DEFAULT_HISTORY_PREVIEW
-    self.probe_preview = DEFAULT_PROBE_PREVIEW
-    self.issues_preview = DEFAULT_ISSUES_PREVIEW
-    self.history_list_order = DEFAULT_HISTORY_LIST_ORDER
-    self.sitemap_expand_depth = DEFAULT_SITEMAP_EXPAND_DEPTH
-    self.tab_numbers = DEFAULT_TAB_NUMBERS
-    self.tab_slots = DEFAULT_TAB_SLOTS
-  end
+  defaulted_section layout, "layout",
+    {"history_preview", history_preview, DEFAULT_HISTORY_PREVIEW},
+    {"probe_preview", probe_preview, DEFAULT_PROBE_PREVIEW},
+    {"issues_preview", issues_preview, DEFAULT_ISSUES_PREVIEW},
+    {"history_list_order", history_list_order, DEFAULT_HISTORY_LIST_ORDER},
+    {"sitemap_expand_depth", sitemap_expand_depth, DEFAULT_SITEMAP_EXPAND_DEPTH},
+    {"tab_numbers", tab_numbers?, DEFAULT_TAB_NUMBERS},
+    {"tab_slots", tab_slots?, DEFAULT_TAB_SLOTS}
 
-  # Omit layout when every pref is factory default (quiet install; merge-safe section).
-  private def self.serialize_layout(j : JSON::Builder) : Nil
-    unless history_preview == DEFAULT_HISTORY_PREVIEW &&
-           probe_preview == DEFAULT_PROBE_PREVIEW &&
-           issues_preview == DEFAULT_ISSUES_PREVIEW &&
-           history_list_order == DEFAULT_HISTORY_LIST_ORDER &&
-           sitemap_expand_depth == DEFAULT_SITEMAP_EXPAND_DEPTH &&
-           tab_numbers? == DEFAULT_TAB_NUMBERS &&
-           tab_slots? == DEFAULT_TAB_SLOTS
-      j.field "layout" do
-        j.object do
-          j.field "history_preview", history_preview
-          j.field "probe_preview", probe_preview
-          j.field "issues_preview", issues_preview
-          j.field "history_list_order", history_list_order
-          j.field "sitemap_expand_depth", sitemap_expand_depth
-          j.field "tab_numbers", tab_numbers?
-          j.field "tab_slots", tab_slots?
-        end
-      end
-    end
-  end
+  defaulted_section statusline, "statusline",
+    {"enabled", statusline_enabled?, DEFAULT_STATUSLINE_ENABLED},
+    {"command", statusline_command, DEFAULT_STATUSLINE_COMMAND},
+    {"interval", statusline_interval, DEFAULT_STATUSLINE_INTERVAL},
+    {"timeout", statusline_timeout, DEFAULT_STATUSLINE_TIMEOUT}
 
-  private def self.reset_statusline : Nil
-    self.statusline_enabled = DEFAULT_STATUSLINE_ENABLED
-    self.statusline_command = DEFAULT_STATUSLINE_COMMAND
-    self.statusline_interval = DEFAULT_STATUSLINE_INTERVAL
-    self.statusline_timeout = DEFAULT_STATUSLINE_TIMEOUT
-  end
+  defaulted_section display, "display",
+    {"detail_pane", default_detail_pane, DEFAULT_DETAIL_PANE},
+    {"history_time_format", history_time_format, DEFAULT_HISTORY_TIME_FORMAT},
+    {"show_gutter", show_gutter, DEFAULT_SHOW_GUTTER},
+    {"wrap_lines", wrap_lines?, DEFAULT_WRAP_LINES},
+    {"preview_body_kib", preview_body_kib, DEFAULT_PREVIEW_BODY_KIB},
+    {"resource_meter", resource_meter?, DEFAULT_RESOURCE_METER},
+    {"terminal_title", terminal_title, DEFAULT_TERMINAL_TITLE}
 
-  # Omit statusline when every field is factory default (quiet install; merge-safe).
-  private def self.serialize_statusline(j : JSON::Builder) : Nil
-    unless statusline_enabled? == DEFAULT_STATUSLINE_ENABLED &&
-           statusline_command == DEFAULT_STATUSLINE_COMMAND &&
-           statusline_interval == DEFAULT_STATUSLINE_INTERVAL &&
-           statusline_timeout == DEFAULT_STATUSLINE_TIMEOUT
-      j.field "statusline" do
-        j.object do
-          j.field "enabled", statusline_enabled?
-          j.field "command", statusline_command
-          j.field "interval", statusline_interval
-          j.field "timeout", statusline_timeout
-        end
-      end
-    end
-  end
+  defaulted_section notifications, "notifications",
+    {"bell", notify_bell?, DEFAULT_NOTIFY_BELL},
+    {"toast", notify_toast?, DEFAULT_NOTIFY_TOAST},
+    {"retention", notify_retention, DEFAULT_NOTIFY_RETENTION}
 
-  private def self.reset_display : Nil
-    self.default_detail_pane = DEFAULT_DETAIL_PANE
-    self.history_time_format = DEFAULT_HISTORY_TIME_FORMAT
-    self.show_gutter = DEFAULT_SHOW_GUTTER
-    self.wrap_lines = DEFAULT_WRAP_LINES
-    self.preview_body_kib = DEFAULT_PREVIEW_BODY_KIB
-    self.resource_meter = DEFAULT_RESOURCE_METER
-    self.terminal_title = DEFAULT_TERMINAL_TITLE
-  end
-
-  # Omit each opt-in section when every field is factory default (quiet install; merge-safe).
-  private def self.serialize_display(j : JSON::Builder) : Nil
-    unless default_detail_pane == DEFAULT_DETAIL_PANE &&
-           history_time_format == DEFAULT_HISTORY_TIME_FORMAT &&
-           show_gutter == DEFAULT_SHOW_GUTTER &&
-           wrap_lines? == DEFAULT_WRAP_LINES &&
-           preview_body_kib == DEFAULT_PREVIEW_BODY_KIB &&
-           resource_meter? == DEFAULT_RESOURCE_METER &&
-           terminal_title == DEFAULT_TERMINAL_TITLE
-      j.field "display" do
-        j.object do
-          j.field "detail_pane", default_detail_pane
-          j.field "history_time_format", history_time_format
-          j.field "show_gutter", show_gutter
-          j.field "wrap_lines", wrap_lines?
-          j.field "preview_body_kib", preview_body_kib
-          j.field "resource_meter", resource_meter?
-          j.field "terminal_title", terminal_title
-        end
-      end
-    end
-  end
-
-  private def self.reset_notifications : Nil
-    self.notify_bell = DEFAULT_NOTIFY_BELL
-    self.notify_toast = DEFAULT_NOTIFY_TOAST
-    self.notify_retention = DEFAULT_NOTIFY_RETENTION
-  end
-
-  private def self.serialize_notifications(j : JSON::Builder) : Nil
-    unless notify_bell? == DEFAULT_NOTIFY_BELL &&
-           notify_toast? == DEFAULT_NOTIFY_TOAST &&
-           notify_retention == DEFAULT_NOTIFY_RETENTION
-      j.field "notifications" do
-        j.object do
-          j.field "bell", notify_bell?
-          j.field "toast", notify_toast?
-          j.field "retention", notify_retention
-        end
-      end
-    end
-  end
-
-  private def self.reset_general : Nil
-    self.clipboard_osc52 = DEFAULT_CLIPBOARD_OSC52
-    self.confirm_quit = DEFAULT_CONFIRM_QUIT
-    self.repeater_record_history = DEFAULT_REPEATER_RECORD_HISTORY
-  end
-
-  private def self.serialize_general(j : JSON::Builder) : Nil
-    unless clipboard_osc52? == DEFAULT_CLIPBOARD_OSC52 &&
-           confirm_quit? == DEFAULT_CONFIRM_QUIT &&
-           repeater_record_history? == DEFAULT_REPEATER_RECORD_HISTORY
-      j.field "general" do
-        j.object do
-          j.field "clipboard_osc52", clipboard_osc52?
-          j.field "confirm_quit", confirm_quit?
-          j.field "repeater_record_history", repeater_record_history?
-        end
-      end
-    end
-  end
+  defaulted_section general, "general",
+    {"clipboard_osc52", clipboard_osc52?, DEFAULT_CLIPBOARD_OSC52},
+    {"confirm_quit", confirm_quit?, DEFAULT_CONFIRM_QUIT},
+    {"repeater_record_history", repeater_record_history?, DEFAULT_REPEATER_RECORD_HISTORY}
 
   private def self.reset_editor : Nil
     self.editor = DEFAULT_EDITOR

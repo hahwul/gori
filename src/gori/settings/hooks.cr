@@ -25,16 +25,8 @@ module Gori::Settings
     int_field(h, "timeout_secs").try { |v| self.hook_timeout_secs = v.clamp(1, MAX_HOOK_TIMEOUT_SECS) }
   end
 
-  private def self.reset_hooks : Nil
-    self.hook_timeout_secs = DEFAULT_HOOK_TIMEOUT_SECS
-  end
-
   # Omitted while it is the default, so an install that has never configured a hook writes no
   # `hooks` block — the same rule every other optional section follows.
-  private def self.serialize_hooks(j : JSON::Builder) : Nil
-    return if hook_timeout_secs == DEFAULT_HOOK_TIMEOUT_SECS
-    j.field "hooks" do
-      j.object { j.field "timeout_secs", hook_timeout_secs }
-    end
-  end
+  defaulted_section hooks, "hooks",
+    {"timeout_secs", hook_timeout_secs, DEFAULT_HOOK_TIMEOUT_SECS}
 end

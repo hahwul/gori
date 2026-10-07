@@ -128,7 +128,7 @@ describe Gori::Tui::MineConfigOverlay do
       ov.set_selected(5)
       ov.adjust(1) # now a step is picked
       spec = ov.build_config.request_macro.not_nil!
-      spec.cadence.per_request?.should be_true # the earlier presses changed nothing
+      spec.cadence.every.should eq(1) # the earlier presses changed nothing
       spec.on_failure.should eq(Gori::RequestMacro::OnFailure::Skip)
     end
 
