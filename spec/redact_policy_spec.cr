@@ -88,7 +88,7 @@ describe Gori::Redact::Policy do
 
   describe "resolve" do
     it "is off when nothing asks for it" do
-      with_global { Gori::Redact::Policy.resolve(nil).on?.should be_false }
+      with_global { Gori::Redact::Policy.resolve(nil).matcher.should be_nil }
     end
 
     it "is on when the global default says so" do
@@ -102,7 +102,7 @@ describe Gori::Redact::Policy do
         with_global(default: true) do
           Gori::Redact::Policy.write_project_scope(store,
             Gori::Redact::Policy::ProjectScope.new(default: false))
-          Gori::Redact::Policy.resolve(store).on?.should be_false
+          Gori::Redact::Policy.resolve(store).matcher.should be_nil
         end
       end
     end
@@ -112,7 +112,7 @@ describe Gori::Redact::Policy do
         with_global do
           Gori::Redact::Policy.write_project_scope(store,
             Gori::Redact::Policy::ProjectScope.new(default: true))
-          Gori::Redact::Policy.resolve(store).on?.should be_true
+          Gori::Redact::Policy.resolve(store).matcher.should_not be_nil
         end
       end
     end
@@ -125,14 +125,14 @@ describe Gori::Redact::Policy do
 
     it "obeys --no-redact over every configured default" do
       with_global([profile("strict")], active: "strict", default: true) do
-        Gori::Redact::Policy.resolve(nil, "strict", false).on?.should be_false
+        Gori::Redact::Policy.resolve(nil, "strict", false).matcher.should be_nil
       end
     end
 
     it "refuses an unknown profile rather than exporting raw" do
       with_global do
         choice = Gori::Redact::Policy.resolve(nil, "nope")
-        choice.on?.should be_false
+        choice.matcher.should be_nil
         choice.error.not_nil!.should contain "no redaction profile named \"nope\""
         choice.error.not_nil!.should contain "have: default"
       end
@@ -157,7 +157,7 @@ describe Gori::Redact::Policy do
     it "arms the engine, so the matcher it hands back can mint a placeholder" do
       with_global(default: true) do
         Gori::Redact.salt = ""
-        Gori::Redact::Policy.resolve(nil).on?.should be_true
+        Gori::Redact::Policy.resolve(nil).matcher.should_not be_nil
         Gori::Redact.salt.should_not be_empty
         Gori::Redact.placeholder("x").should start_with "[REDACTED:"
       end
