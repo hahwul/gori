@@ -435,7 +435,7 @@ describe Gori::Tui::Highlight do
 
     it "line_width counts a tab's named badge width" do
       line = [Highlight::Span.new("a\tb", Theme.text)]
-      Highlight.line_width(line).should eq(7)
+      Highlight.line_width_upto(line, Int32::MAX).should eq(7)
       Highlight.line_width_upto(line, 10).should eq(7)
     end
   end
@@ -451,10 +451,10 @@ describe Gori::Tui::Highlight do
     it "line_width measures a cluster as its DRAWN columns, not its codepoint count" do
       # Under column_width these were 5 and 11, letting the h-scroll clamp run the view
       # 3 (resp. 9) columns past the end of the content.
-      Highlight.line_width([Highlight::Span.new(zwj, Theme.text)]).should eq(2)
-      Highlight.line_width([Highlight::Span.new(family, Theme.text)]).should eq(2)
+      Highlight.line_width_upto([Highlight::Span.new(zwj, Theme.text)], Int32::MAX).should eq(2)
+      Highlight.line_width_upto([Highlight::Span.new(family, Theme.text)], Int32::MAX).should eq(2)
       line = [Highlight::Span.new(zwj, Theme.text), Highlight::Span.new("abc", Theme.text)]
-      Highlight.line_width(line).should eq(5)
+      Highlight.line_width_upto(line, Int32::MAX).should eq(5)
       Highlight.line_width_upto(line, 99).should eq(5)
       Highlight.line_width_upto(line, 3).should be >= 3 # early exit still honoured
     end
@@ -462,7 +462,7 @@ describe Gori::Tui::Highlight do
     it "line_width agrees with what draw actually advances" do
       line = [Highlight::Span.new(zwj, Theme.text), Highlight::Span.new("abc", Theme.text)]
       b = MemoryBackend.new(40, 1)
-      Highlight.draw(Screen.new(b), 0, 0, line, width: 40).should eq(Highlight.line_width(line))
+      Highlight.draw(Screen.new(b), 0, 0, line, width: 40).should eq(Highlight.line_width_upto(line, Int32::MAX))
     end
 
     it "slice_left never emits a partial cluster (no bare ZWJ / orphan modifier)" do

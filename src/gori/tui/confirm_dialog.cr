@@ -154,14 +154,6 @@ module Gori::Tui
       @selected = @selected == :confirm ? :cancel : :confirm
     end
 
-    def select_confirm : Nil
-      @selected = :confirm
-    end
-
-    def select_cancel : Nil
-      @selected = :cancel
-    end
-
     def confirm_selected? : Bool
       @selected == :confirm
     end

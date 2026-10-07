@@ -35,7 +35,7 @@ class Gori::Tui::InterceptView
   # --- hex edit (a held WebSocket BINARY message) ---
   # Delegates from the controller's hex key handler, named exactly as `RepeaterView`'s `^X`
   # ones are: the two panes take the same gestures (`HexEdit#handle_key`). Navigation never
-  # dirties; every edit marks the hold edited, which is what makes `forward_bytes` send the
+  # dirties; every edit marks the hold edited, which is what makes `pending_edit` send the
   # edited buffer instead of the pristine `raw`.
   def hex_key(ev : Termisu::Event::Key) : Nil
     mark_hex_edit if @hex.try(&.handle_key(ev))

@@ -377,7 +377,7 @@ describe Gori::Tui::IssuesView do
       view = IssuesView.new
       view.reload(store)
       view.open_detail(store)
-      view.start_notes_edit
+      view.enter_notes_insert!
       "junk".each_char { |c| view.notes_insert(c) }
       view.cancel_notes_edit
       view.notes_insert_mode?.should be_false
@@ -452,7 +452,7 @@ describe Gori::Tui::IssuesView do
       view.severity_delta(2, store) # medium -> critical
       store.get_issue(id).not_nil!.severity.should eq(Gori::Store::Severity::Critical)
 
-      view.start_notes_edit
+      view.enter_notes_insert!
       view.notes_insert_mode?.should be_true
       "poc".each_char { |c| view.notes_insert(c) }
       view.save_notes(store)

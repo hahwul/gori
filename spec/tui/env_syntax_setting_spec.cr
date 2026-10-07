@@ -175,18 +175,18 @@ describe Gori::Tui::EnvOverlay do
       # key is a file from before namespaces, and flipping a live session off it is exactly the
       # clobbering this seam exists to prevent. `Settings.load` is what settles a pre-namespace file.
       File.write(Gori::Settings.path, %({"theme":"dark"}))
-      Gori::Tui::EnvSyntaxSeam.disk_syntax.should be_nil
+      Gori::EnvMigration.disk_syntax.should be_nil
       Gori::Tui::EnvSyntaxSeam.follow.should be_empty
       Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Namespaced)
       # An unknown value says nothing either — `parse_env` warns and re-spells nothing for the same
       # bytes.
       File.write(Gori::Settings.path, %({"env":{"syntax":"NAMESPACED!"}}))
-      Gori::Tui::EnvSyntaxSeam.disk_syntax.should be_nil
+      Gori::EnvMigration.disk_syntax.should be_nil
       # Nothing to say ⇒ nothing is changed: no file, or bytes that will not parse.
       File.write(Gori::Settings.path, "{not json")
-      Gori::Tui::EnvSyntaxSeam.disk_syntax.should be_nil
+      Gori::EnvMigration.disk_syntax.should be_nil
       File.delete(Gori::Settings.path)
-      Gori::Tui::EnvSyntaxSeam.disk_syntax.should be_nil
+      Gori::EnvMigration.disk_syntax.should be_nil
       Gori::Tui::EnvSyntaxSeam.follow.should be_empty
       Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Namespaced)
     end
@@ -206,7 +206,7 @@ describe "the ENV pane's space menu" do
     # The grammar is not here: a menu row could only write the setting, leaving every token
     # already stored in this project's rows spelled for the grammar it just left.
     menu.entries.map(&.id).should_not contain("env.syntax")
-    menu.verb_for('s').should be_nil
+    menu.entry_for('s').try(&.verb).should be_nil
     menu.entries.all?(&.scope.env?).should be_true
   end
 end

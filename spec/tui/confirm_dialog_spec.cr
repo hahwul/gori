@@ -23,14 +23,6 @@ describe Gori::Tui::ConfirmDialog do
     dlg.confirm_selected?.should be_false
   end
 
-  it "select_confirm / select_cancel set the choice explicitly" do
-    dlg = ConfirmDialog.new("DELETE", "Sure?")
-    dlg.select_confirm
-    dlg.confirm_selected?.should be_true
-    dlg.select_cancel
-    dlg.confirm_selected?.should be_false
-  end
-
   it "renders the heading, every message line, and both buttons" do
     dlg = ConfirmDialog.new("DELETE PROJECT", %(Delete "demo"?\nIrreversible.), confirm_label: "delete")
     backend = render_dialog(dlg)
@@ -292,7 +284,7 @@ describe "ConfirmDialog on a short pane" do
 
     y = Termisu::Event::Key.new(Termisu::Input::Key::LowerY)
     dlg.handle_key(y).should eq(:stay)
-    dlg.select_confirm
+    dlg.move # lights confirm (a danger card opens on cancel)
     dlg.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Enter)).should eq(:cancel)
     # esc still gets the operator out of a modal they cannot read.
     dlg.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Escape)).should eq(:cancel)

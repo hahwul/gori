@@ -48,7 +48,7 @@ describe "Gori::Verbs.register_env" do
     menu = Gori::Tui::SpaceMenu.new(r)
     menu.open(Gori::Verb::Scope::Env, :common, ctx)
     menu.entries.map(&.id).should_not contain("env.syntax")
-    menu.verb_for('s').should be_nil
+    menu.entry_for('s').try(&.verb).should be_nil
   end
 
   it "routes each action to its own intent" do

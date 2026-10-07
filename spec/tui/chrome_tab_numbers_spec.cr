@@ -11,14 +11,14 @@ describe "Chrome tab-bar numbers" do
   rect = Rect.new(0, 0, 260, 1) # wide enough for all twenty tabs, numbered
 
   it "leaves the default layout untouched" do
-    plain = Chrome.menu_segments(rect, :history)
-    numbered_off = Chrome.menu_segments(rect, :history, numbered: false)
+    plain = Chrome.menu_geometry(rect, :history).segments
+    numbered_off = Chrome.menu_geometry(rect, :history, numbered: false).segments
     numbered_off.should eq(plain)
   end
 
   it "prefixes the first nine tabs with N: and widens each by two columns" do
-    plain = Chrome.menu_segments(rect, :history)
-    numbered = Chrome.menu_segments(rect, :history, numbered: true)
+    plain = Chrome.menu_geometry(rect, :history).segments
+    numbered = Chrome.menu_geometry(rect, :history, numbered: true).segments
     numbered.size.should eq(plain.size)
     numbered.first(9).each_with_index do |(sym, seg), i|
       sym.should eq(plain[i][0])

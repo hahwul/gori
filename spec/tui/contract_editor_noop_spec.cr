@@ -13,7 +13,7 @@ include Gori::Tui
 #   * Repeater (#936): `mark_req_edit` also sets `@ws_out_edited`, so one `⌃Z` in READ on an
 #     untouched WebSocket tab took the pane off its seed and dropped every frame it was not
 #     showing — a captured BIN frame vanished between two identical replays.
-#   * Intercept (#513): once dirty, `forward_bytes` recomputes Content-Length and normalizes
+#   * Intercept (#513): once dirty, `pending_edit` recomputes Content-Length and normalizes
 #     line endings, so a held message the operator only LOOKED at forwarded as different bytes
 #     — a P7 violation reached by pressing an idle key.
 #   * Notes (#939): `dirty?` is the lock that holds off a peer's reload, so a stray `⌃Z` in a

@@ -276,7 +276,7 @@ describe AuthorizeView do
       pending.should contain(errored) # no verdict yet ⇒ unfinished work
       pending.should_not contain(finished)
       v.pending_count.should eq(2)
-      v.completed_count.should eq(1)
+      v.completed_in(v.entries.map(&.id).to_set).should eq(1)
     end
 
     it "excludes an in-flight entry from both pending and runnable" do
@@ -359,7 +359,7 @@ describe AuthorizeView do
       v.completed_in(batch).should eq(1)
       v.bypasses_in(batch).should eq(1)
       # the queue-wide totals still see both
-      v.completed_count.should eq(2)
+      v.completed_in(v.entries.map(&.id).to_set).should eq(2)
       v.bypass_total.should eq(2)
     end
 

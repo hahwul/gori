@@ -608,11 +608,6 @@ module Gori::Tui
       @entries.find { |e| e.key == c }
     end
 
-    # The verb `c` runs at this level — nil for an unmapped key and for a family key.
-    def verb_for(c : Char) : Verb::Definition?
-      entry_for(c).try(&.verb)
-    end
-
     # Sets the active entry, clamped to the populated range (for click-select).
     def set_selected(idx : Int32) : Nil
       @selected = idx.clamp(0, {@entries.size - 1, 0}.max)

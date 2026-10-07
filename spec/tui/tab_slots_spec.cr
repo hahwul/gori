@@ -66,8 +66,8 @@ describe "the nine-slot cap as a setting" do
       Gori::Settings.tab_slots = false
       rect = Rect.new(0, 0, 400, 1)
       tabs = Chrome.visible_tabs(prefs_with_visible(15))
-      segs = Chrome.menu_segments(rect, tabs.first[0], tabs: tabs, numbered: true, slots: tabs.size)
-      plain = Chrome.menu_segments(rect, tabs.first[0], tabs: tabs, numbered: false)
+      segs = Chrome.menu_geometry(rect, tabs.first[0], tabs: tabs, numbered: true, slots: tabs.size).segments
+      plain = Chrome.menu_geometry(rect, tabs.first[0], tabs: tabs, numbered: false).segments
       segs.first(9).each_with_index { |(_, seg), i| seg.w.should eq(plain[i][1].w + 2) }
       segs[9][1].w.should eq(plain[9][1].w) # the tenth carries no number
     end

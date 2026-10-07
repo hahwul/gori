@@ -175,7 +175,7 @@ module Gori
       # SpaceMenu). Two non-hidden verbs deriving the same menu_key (an explicit
       # mnemonic, else the first plain single-char chord) that could appear in the
       # SAME view means the later one is silently unreachable by that key —
-      # SpaceMenu#verb_for is a first-match find, so the collision has no other
+      # SpaceMenu#entry_for is a first-match find, so the collision has no other
       # symptom. Two DIFFERENT sections may reuse a key freely (e.g. Repeater's request
       # `i` and response `i`) since they never render together. Cross-scope reuse is
       # likewise fine (the space menu is scoped), mirroring Conflicts' same-scope

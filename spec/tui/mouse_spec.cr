@@ -1,5 +1,6 @@
 require "../spec_helper"
 require "../support/memory_backend"
+require "../support/tui_probes"
 
 include Gori::Tui
 
@@ -21,10 +22,10 @@ private def add_flow(store, method, target)
     head: "#{method} #{target} HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
 end
 
-describe "Chrome.menu_segments" do
+describe "Chrome.menu_geometry segments" do
   it "lays out every tab left-to-right, non-overlapping, on a wide row" do
     rect = Rect.new(2, 1, 220, 1)
-    segs = Chrome.menu_segments(rect, :project)
+    segs = Chrome.menu_geometry(rect, :project).segments
     segs.size.should eq(Chrome::TABS.size) # all tabs fit on a wide row
     segs.map(&.first).should eq(Chrome::TABS.map(&.first))
     segs.each { |(_, r)| r.y.should eq(1) }
@@ -34,7 +35,7 @@ describe "Chrome.menu_segments" do
 
   it "maps a click inside a segment back to that tab" do
     rect = Rect.new(2, 1, 120, 1)
-    segs = Chrome.menu_segments(rect, :history)
+    segs = Chrome.menu_geometry(rect, :history).segments
     hist = segs.find { |(s, _)| s == :history }.not_nil![1]
     hit = segs.find { |(_, r)| r.contains?(hist.x + 1, 1) }
     hit.not_nil![0].should eq(:history)
@@ -43,11 +44,11 @@ describe "Chrome.menu_segments" do
   it "keeps the active tab visible on a narrow row (scroll window)" do
     rect = Rect.new(0, 1, 22, 1)
     # :notes sits near the right end — the windowing must still include it.
-    Chrome.menu_segments(rect, :notes).map(&.first).includes?(:notes).should be_true
+    Chrome.menu_geometry(rect, :notes).segments.map(&.first).includes?(:notes).should be_true
   end
 
   it "returns no segments for an empty rect" do
-    Chrome.menu_segments(Rect.new(0, 0, 0, 0), :project).empty?.should be_true
+    Chrome.menu_geometry(Rect.new(0, 0, 0, 0), :project).segments.empty?.should be_true
   end
 end
 

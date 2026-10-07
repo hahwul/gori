@@ -64,7 +64,7 @@ describe "Send flow to… (#1274 WP9)" do
       menu.open(v.scope, :common, ctx, subtabs: reg.has_section?(v.scope, :subtab))
       menu.activate(menu.entry_for('>')).should be_nil
       menu.level.should eq(family), v.id
-      menu.verb_for('r').try(&.id).should eq(v.id)
+      menu.entry_for('r').try(&.verb).try(&.id).should eq(v.id)
     end
   end
 
@@ -276,12 +276,12 @@ describe "Display… and Protocol… (#1274 WP9)" do
   it "reaches hex with `Z x` in the History detail and both Repeater panes" do
     detail = FakeExecContext.new
     detail.selected = 5_i64
-    family_card(Gori::Verb::Scope::HistoryDetail, :common, detail, display).verb_for('x').try(&.id).should eq("detail.toggle-hex")
+    family_card(Gori::Verb::Scope::HistoryDetail, :common, detail, display).entry_for('x').try(&.verb).try(&.id).should eq("detail.toggle-hex")
     rep = FakeExecContext.new
     rep.current_tab = :repeater
     rep.repeater_tab_count = 1
-    family_card(Gori::Verb::Scope::Repeater, :request, rep, display).verb_for('x').try(&.id).should eq("repeater.toggle-hex")
-    family_card(Gori::Verb::Scope::Repeater, :response, rep, display).verb_for('x').try(&.id).should eq("repeater.toggle-resp-hex")
+    family_card(Gori::Verb::Scope::Repeater, :request, rep, display).entry_for('x').try(&.verb).try(&.id).should eq("repeater.toggle-hex")
+    family_card(Gori::Verb::Scope::Repeater, :response, rep, display).entry_for('x').try(&.verb).try(&.id).should eq("repeater.toggle-resp-hex")
   end
 
   # `^X` toggles the hex of the focused pane, so the response pane's row names it too
@@ -302,8 +302,8 @@ describe "Display… and Protocol… (#1274 WP9)" do
      Gori::Verb::Scope::Fuzzer   => {:fuzzer, :template, "fuzz"}}.each do |scope, (tab, pane, prefix)|
       ctx = FakeExecContext.new
       ctx.current_tab = tab
-      family_card(scope, pane, ctx, protocol).verb_for('2').try(&.id).should eq("#{prefix}.toggle-http2")
-      family_card(scope, :target, ctx, protocol).verb_for('s').try(&.id).should eq("#{prefix}.toggle-sni")
+      family_card(scope, pane, ctx, protocol).entry_for('2').try(&.verb).try(&.id).should eq("#{prefix}.toggle-http2")
+      family_card(scope, :target, ctx, protocol).entry_for('s').try(&.verb).try(&.id).should eq("#{prefix}.toggle-sni")
     end
   end
 
@@ -312,9 +312,9 @@ describe "Display… and Protocol… (#1274 WP9)" do
   it "lists the envelope row only on a tab that splits its request" do
     ctx = FakeExecContext.new
     ctx.current_tab = :repeater
-    family_card(Gori::Verb::Scope::Repeater, :request, ctx, display).verb_for('e').should be_nil
+    family_card(Gori::Verb::Scope::Repeater, :request, ctx, display).entry_for('e').try(&.verb).should be_nil
     ctx.repeater_split_request = true
-    family_card(Gori::Verb::Scope::Repeater, :request, ctx, display).verb_for('e').try(&.id).should eq("repeater.toggle-envelope")
+    family_card(Gori::Verb::Scope::Repeater, :request, ctx, display).entry_for('e').try(&.verb).try(&.id).should eq("repeater.toggle-envelope")
     Gori::Verbs.registry["repeater.toggle-decoded"].menu_key.should be_nil
   end
 

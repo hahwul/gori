@@ -308,20 +308,12 @@ module Gori::Tui
       end
     end
 
-    # The tabs NOT on the bar — taken off in settings:tabs (twelve by default). Mirrors
-    # visible_tabs' force logic in reverse: the active tab is force-SHOWN on the bar, so it's
-    # excluded here even when its stored visibility is false (it would otherwise appear both on
-    # the bar and in the list). The `0` picker lists these AFTER the bar's own, so this is the
-    # tail of that card rather than a drawer of its own.
-    def self.hidden_tabs(prefs : Array({String, Bool}), force : Symbol? = nil) : Array({Symbol, String})
-      reconcile(prefs).reject { |(s, _, v)| v || s == force }.map { |(s, l, _)| {s, l} }
-    end
-
     # The visible strip, the hidden list AND the slot count from ONE reconcile pass —
-    # {visible, hidden, slots}, each identical to what visible_slots / hidden_tabs return
-    # alone (`slots` is `visible_slots`' second element). The render path needs
+    # {visible, hidden, slots}; `visible`/`slots` are what visible_slots returns alone. `hidden`
+    # is the tabs NOT on the bar, minus the force-SHOWN active tab (it would otherwise appear
+    # both on the bar and in the `0` picker's tail). The render path needs
     # both every frame (the menu strip + the off-bar count); calling visible_tabs and
-    # hidden_tabs separately rebuilt reconcile's catalog hashes twice per frame for the same
+    # a hidden-only pass separately rebuilt reconcile's catalog hashes twice per frame for the same
     # output. Pure function of prefs, so folding the two into one pass is byte-identical.
     #
     # Memoized on its two inputs: this runs once per FRAME (`Runner#render`), and `reconcile`
@@ -558,34 +550,6 @@ module Gori::Tui
       {"● OFF · #{listen}", Theme.yellow}
     end
 
-    # The drawn rect of a tagged top-bar chip (or nil if absent) — rebuilds the SAME
-    # chip list + layout render_top_bar uses, so a click on `notify:N` can't drift
-    # from the glyph. Used by the Runner to make the badge clickable.
-    #
-    # `min_x` reproduces render_top_bar's project-name floor WITHOUT a live Screen:
-    # that floor only ever resolves to one of two values — `rect.right -
-    # chips_width - 1` (chips have room; the name gets whatever's left) or `name_x +
-    # 1` (chips are wider than available space, so the name is squeezed to zero
-    # width) — never something in between, since the name's own drawn width is
-    # itself bounded by the same floor. `chip_layout`'s `{A, min_x}.max` picks the
-    # right one either way, so passing `name_x + 1` here matches the real render
-    # exactly regardless of the actual project string or its truncation.
-    def self.top_bar_chip_rect(rect : Rect, tag : Symbol, *, scope : String, probe : String = "",
-                               rules : String = "", intercept : String = "", sandbox : String = "",
-                               listen : String, unread : Int32 = 0, capturing : Bool = true,
-                               write_failures : Int32 = 0, bypass : Int32 = 0,
-                               authorize : String = "", session : String = "",
-                               agents : String = "", asks : Int32 = 0) : Rect?
-      chips = top_bar_chips(scope: scope, probe: probe, rules: rules, intercept: intercept,
-        sandbox: sandbox, listen: listen, unread: unread, capturing: capturing,
-        write_failures: write_failures, bypass: bypass, authorize: authorize, session: session,
-        agents: agents, asks: asks)
-      idx = chips.index { |c| c.tag == tag }
-      return nil unless idx
-      name_x = rect.x + 1 + Screen.display_width(WORDMARK) + 1
-      chip_layout(rect, chips, name_x + 1)[idx]?
-    end
-
     # Which clickable top-bar chip (if any) covers `mx,my` — ONE pass over the same
     # tagged list, replacing the per-tag `top_bar_chip_rect` calls the runner used to
     # make (one full rebuild per candidate tag). Non-clickable chips are skipped so a
@@ -703,15 +667,6 @@ module Gori::Tui
       return MenuGeometry.new([] of {Symbol, Rect}, nil, rect) if rect.empty?
       segs, _, more, trailing = menu_layout(rect, active_tab, tabs, intercept_count, numbered, slots)
       MenuGeometry.new(segs.map { |(sym, _, seg)| {sym, seg} }, more, trailing)
-    end
-
-    # Just the tab segments — the common half of `menu_geometry`.
-    def self.menu_segments(rect : Rect, active_tab : Symbol, *,
-                           tabs : Array({Symbol, String}) = TABS,
-                           intercept_count : Int32 = 0,
-                           numbered : Bool = false, slots : Int32? = nil) : Array({Symbol, Rect})
-      menu_geometry(rect, active_tab, tabs: tabs, intercept_count: intercept_count,
-        numbered: numbered, slots: slots).segments
     end
 
     # The single source of menu-segment geometry: each visible tab's {symbol, label,

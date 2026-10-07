@@ -277,13 +277,9 @@ module Gori::Tui
       end
     end
 
-    # How many entries hold a result — the honest denominator for a run summary. After a stop,
-    # "no identity matched across N requests" would be a claim about requests that never ran.
-    def completed_count : Int32
-      @entries.count { |e| !e.target.nil? }
-    end
-
-    # The same two counts restricted to ONE batch. A run summary says what THIS run did, so it
+    # How many entries of ONE batch hold a result — the honest denominator for a run summary.
+    # After a stop, "no identity matched across N requests" would be a claim about requests
+    # that never ran. A run summary says what THIS run did, so it
     # cannot use the queue-wide totals: after a partial run, "ran 6" over a queue of six when
     # the batch was three describes work done by earlier runs.
     def completed_in(ids : Set(Int32)) : Int32

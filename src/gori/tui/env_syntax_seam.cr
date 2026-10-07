@@ -36,12 +36,6 @@ module Gori::Tui
         session.try(&.project.name))
     end
 
-    # The grammar the FILE states, or nil when it has nothing to say. A delegate, so a TUI-side
-    # reader does not grow a second copy of the four "nothing to say" cases.
-    def self.disk_syntax : Env::Syntax?
-      Gori::EnvMigration.disk_syntax
-    end
-
     # Put the notices in the ring, and answer the one a caller may want as a toast. `:warn`, like
     # the open-time announcement: the bytes in this operator's Repeater tabs changed, and `:info`
     # takes neither the bell nor the toast (`Notifications#push`).

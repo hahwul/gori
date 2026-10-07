@@ -772,7 +772,7 @@ module Gori::Proxy
       end
       # forward the decision bytes BYTE-EXACT (P7): re-parse the sent head for capture.
       # The intercept editor owns the "update Content-Length" decision (it knows what
-      # was edited) — see InterceptView#forward_bytes; the proxy must not rewrite bytes
+      # was edited) — see InterceptView#pending_edit; the proxy must not rewrite bytes
       # the human chose to send (e.g. a deliberately CL-mismatched smuggling probe).
       sent_head, edited_body = split_message(decision.bytes)
       sent_req = Codec::Http1.parse_request_head(sent_head)
@@ -1878,7 +1878,7 @@ module Gori::Proxy
         return false
       end
       # Forward the decision bytes BYTE-EXACT (P7); the editor already synced
-      # Content-Length for an edited body (InterceptView#forward_bytes). Keeping the
+      # Content-Length for an edited body (InterceptView#pending_edit). Keeping the
       # proxy byte-exact also preserves the head verbatim for a HEAD/304/204 response
       # forwarded unedited (whose Content-Length describes the entity, not the bytes).
       out_head, out_body = split_message(decision.bytes, response: true)
