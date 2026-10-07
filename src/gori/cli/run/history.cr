@@ -310,16 +310,12 @@ module Gori
         proj = ProjectFlags.new
         yes = false
 
-        leftover = parse_args(args, "gori run history clear") do |p|
+        parse_no_positionals(args, "gori run history clear",
+          "this deletes ALL flows, not those ids. To delete one flow: `gori run history delete <id>`") do |p|
           p.banner = "Usage: gori run history clear --yes\n\n" \
                      "Delete ALL captured flows in the project. This can't be undone."
           project_options(p, proj, "update")
           p.on("--yes", "Actually do it (required — there is no interactive prompt here)") { yes = true }
-        end
-        unless leftover.empty?
-          abort "gori run history clear: unexpected argument#{leftover.size == 1 ? "" : "s"} " \
-                "#{leftover.join(" ").inspect} — this deletes ALL flows, not those ids. " \
-                "To delete one flow: `gori run history delete <id>`"
         end
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|

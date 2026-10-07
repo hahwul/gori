@@ -42,7 +42,8 @@ module Gori
         allow_drift = false
         format = :text
 
-        leftover = parse_args(args, "gori run evidence freeze") do |p|
+        parse_no_positionals(args, "gori run evidence freeze",
+          "every end is named by a flag (--issue, --ref, --ref-id)") do |p|
           p.banner = "Usage: gori run evidence freeze --issue=N --ref=flow|repeater --ref-id=M [--no-link]\n\n" \
                      "Copy a flow's or a Repeater tab's CURRENT exchange into immutable evidence on\n" \
                      "issue N: request, response, status, timing, protocol, error and truncation\n" \
@@ -58,12 +59,6 @@ module Gori
           p.on("--no-link", "Only copy — do not also file the live link `links add` would") { link = false }
           p.on("--allow-drift", "Freeze a Repeater tab whose request was edited after its stored response") { allow_drift = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-        end
-        # Deferred past `parse` for the reason `cmd_links_mutate` gives: the unknown-args
-        # callback runs before the flag sweep, so aborting inside it misdiagnoses a typo'd flag.
-        unless leftover.empty?
-          abort "gori run evidence freeze: unexpected argument#{leftover.size == 1 ? "" : "s"} " \
-                "#{leftover.join(" ").inspect} — every end is named by a flag (--issue, --ref, --ref-id)"
         end
         iid, kind, rid = resolve_freeze_ends(issue_id, ref_s, ref_id)
 

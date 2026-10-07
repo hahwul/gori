@@ -320,7 +320,7 @@ module Gori
         code : String? = nil
         host : String? = nil
 
-        positional = parse_args(args, "gori run probe dismiss") do |p|
+        positional = one_positional_list(args, "gori run probe dismiss", "<id>") do |p|
           p.banner = "Usage: gori run probe dismiss <id> | --code=CODE | --host=HOST\n\n" \
                      "Mute findings. With <id>, TOGGLES that one finding dismissed ⇄ open; with\n" \
                      "--code/--host, bulk-mutes every OPEN finding sharing it. Reversible —\n" \
@@ -330,7 +330,6 @@ module Gori
           p.on("--host=HOST", "Bulk-dismiss every open finding on this host") { |v| host = v }
         end
 
-        abort "gori run probe dismiss: too many arguments (expected one <id>, got: #{positional.join(" ")})" if positional.size > 1
         id = parse_probe_issue_id(positional.first?, "gori run probe dismiss")
         selectors = [id, code, host].count { |v| !v.nil? }
         if selectors != 1
@@ -358,7 +357,7 @@ module Gori
       private def self.cmd_probe_promote(args : Array(String)) : Nil
         proj = ProjectFlags.new
 
-        positional = parse_args(args, "gori run probe promote") do |p|
+        positional = one_positional_list(args, "gori run probe promote", "<id>") do |p|
           p.banner = "Usage: gori run probe promote <id>\n\n" \
                      "Promote a machine finding to a human-confirmed Issue (see `gori run issues`),\n" \
                      "carrying its severity/host/sample evidence over. Marks the source finding\n" \
@@ -366,7 +365,6 @@ module Gori
           project_options(p, proj, "write")
         end
 
-        abort "gori run probe promote: too many arguments (expected one <id>, got: #{positional.join(" ")})" if positional.size > 1
         id = parse_probe_issue_id(positional.first?, "gori run probe promote")
         abort "gori run probe promote: <id> is required (see `gori run probe issues`)" unless id
 
@@ -390,7 +388,7 @@ module Gori
         all = false
         yes = false
 
-        positional = parse_args(args, "gori run probe delete") do |p|
+        positional = one_positional_list(args, "gori run probe delete", "<id>") do |p|
           p.banner = "Usage: gori run probe delete <id> | --all --yes\n\n" \
                      "Delete <id>: also SUPPRESSES that (code, host) pair so the next scan does not\n" \
                      "immediately re-add it — prefer `probe dismiss` when you only want it out of\n" \
@@ -402,7 +400,6 @@ module Gori
           p.on("--yes", "Required with --all (there is no interactive prompt here)") { yes = true }
         end
 
-        abort "gori run probe delete: too many arguments (expected one <id>, got: #{positional.join(" ")})" if positional.size > 1
         id = parse_probe_issue_id(positional.first?, "gori run probe delete")
         abort "gori run probe delete: pass <id> or --all" if id.nil? && !all
         abort "gori run probe delete: <id> and --all are mutually exclusive" if id && all

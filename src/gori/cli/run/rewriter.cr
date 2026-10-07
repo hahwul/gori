@@ -287,11 +287,10 @@ module Gori
       # The shared `<id> [--project|--db]` parse for rm/enable/disable.
       private def self.extract_target(args : Array(String), verb : String) : {Int64, Store}
         proj = ProjectFlags.new
-        rest = parse_args(args, "gori run rewriter extract #{verb}") do |p|
+        rest = one_positional_list(args, "gori run rewriter extract #{verb}", "<id>") do |p|
           p.banner = "Usage: gori run rewriter extract #{verb} <id> [options]"
           project_options(p, proj, "update")
         end
-        abort "gori run rewriter extract #{verb}: too many arguments (expected one <id>, got: #{rest.join(" ")})" if rest.size > 1
         id = rest.first?.try(&.to_i64?) || abort("gori run rewriter extract #{verb}: expected a rule id")
         {id, open_store(resolve_read_project(proj.name, proj.db))}
       end

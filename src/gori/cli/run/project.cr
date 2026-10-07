@@ -899,14 +899,10 @@ module Gori
         proj = ProjectFlags.new
         action = enable ? "enable" : "disable"
 
-        leftover = parse_args(args, "gori run project scope #{action}") do |p|
+        parse_no_positionals(args, "gori run project scope #{action}",
+          "this #{action}s the whole filter, not a rule id. Per-rule change: `gori run project scope update <id>`") do |p|
           p.banner = "Usage: gori run project scope #{action} [options]"
           project_options(p, proj, "update")
-        end
-        unless leftover.empty?
-          abort "gori run project scope #{action}: unexpected argument#{leftover.size == 1 ? "" : "s"} " \
-                "#{leftover.join(" ").inspect} — this #{action}s the whole filter, not a rule id. " \
-                "Per-rule change: `gori run project scope update <id>`"
         end
 
         project = resolve_read_project(proj.name, proj.db)

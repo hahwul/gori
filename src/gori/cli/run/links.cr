@@ -128,7 +128,20 @@ module Gori
         ref_id : Int64? = nil
         format = :text
 
-        leftover = parse_args(args, "gori run links #{verb}") do |p|
+        # Every end of a link is named by a FLAG, so a positional here is always a mistake — most
+        # likely a `--ref`/`--id` value the operator meant to attach to its flag. Silently dropping
+        # it would file (or fail to remove) a different link than the one written.
+        #
+        # Refused AFTER `parse`, never inside the `unknown_args` block: Crystal's OptionParser runs
+        # that callback BEFORE its `starts_with?('-')` → `invalid_option` sweep, and an unrecognized
+        # flag is still sitting in the leftovers at that point. Aborting from inside therefore
+        # pre-empted `invalid_option` and misdiagnosed a typo — `--refid=3` came back as "unexpected
+        # argument" instead of "unknown option: --refid" plus the help listing the real flag names,
+        # which is the one thing that tells the operator they dropped a dash. Deferring lets the
+        # sweep win for flags and leaves this to catch genuine positionals (which is also why the
+        # twelve `refuse_list_leftovers` sites were never exposed to it — they all defer too).
+        parse_no_positionals(args, "gori run links #{verb}",
+          "every end is named by a flag (--owner, --id, --note-position, --ref, --ref-id)") do |p|
           p.banner = "Usage: gori run links #{verb} --owner=issue|note --id=N|--note-position=N --ref=KIND --ref-id=M\n\n" \
                      "#{action} an evidence pointer. Note --note=N uses the stable id; --note-position=N uses the 1-based position shown by `gori run notes`. --ref is flow|repeater|fuzz|miner.#{tail}"
           project_options(p, proj, "update")
@@ -143,23 +156,6 @@ module Gori
           # `add` only (#1117): it creates the row whose id a script needs back. `delete` has no
           # row left to describe, and a flag it parsed and ignored would be a silent drop.
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f } if add
-        end
-        # Every end of a link is named by a FLAG, so a positional here is always a mistake — most
-        # likely a `--ref`/`--id` value the operator meant to attach to its flag. Silently dropping
-        # it would file (or fail to remove) a different link than the one written.
-        #
-        # Refused AFTER `parse`, never inside the `unknown_args` block: Crystal's OptionParser runs
-        # that callback BEFORE its `starts_with?('-')` → `invalid_option` sweep, and an unrecognized
-        # flag is still sitting in the leftovers at that point. Aborting from inside therefore
-        # pre-empted `invalid_option` and misdiagnosed a typo — `--refid=3` came back as "unexpected
-        # argument" instead of "unknown option: --refid" plus the help listing the real flag names,
-        # which is the one thing that tells the operator they dropped a dash. Deferring lets the
-        # sweep win for flags and leaves this to catch genuine positionals (which is also why the
-        # twelve `refuse_list_leftovers` sites were never exposed to it — they all defer too).
-        unless leftover.empty?
-          abort "gori run links #{verb}: unexpected argument#{leftover.size == 1 ? "" : "s"} " \
-                "#{leftover.join(" ").inspect} — every end is named by a flag " \
-                "(--owner, --id, --note-position, --ref, --ref-id)"
         end
 
         owner_kind = Store::LinkOwnerKind.parse(owner_s) ||

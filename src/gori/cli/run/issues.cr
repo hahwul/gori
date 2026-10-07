@@ -311,7 +311,7 @@ module Gori
         proj = ProjectFlags.new
         yes = false
 
-        positional = parse_args(args, "gori run issues delete") do |p|
+        positional = one_positional_list(args, "gori run issues delete", "<id>") do |p|
           p.banner = "Usage: gori run issues delete <id> --yes\n\n" \
                      "Delete an issue and its links. To keep it in the report but mark it closed,\n" \
                      "use `gori run issues update <id> --status=resolved` instead."
@@ -319,7 +319,6 @@ module Gori
           project_options(p, proj, "update")
         end
 
-        abort "gori run issues delete: too many arguments (expected one <id>, got: #{positional.join(" ")})" if positional.size > 1
         id_s = positional.first? || abort("gori run issues delete: <id> is required")
         id = id_s.to_i64? || abort("gori run issues delete: invalid issue id #{id_s.inspect}")
 

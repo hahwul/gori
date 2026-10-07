@@ -345,11 +345,10 @@ module Gori
         verb = enabled ? "enable" : "disable"
         proj = ProjectFlags.new
 
-        leftover = parse_args(args, "gori run oast providers #{verb}") do |p|
+        leftover = one_positional_list(args, "gori run oast providers #{verb}", "<id>") do |p|
           p.banner = "Usage: gori run oast providers #{verb} <id>"
           project_options(p, proj, "update")
         end
-        abort "gori run oast providers #{verb}: too many arguments (expected one <id>, got: #{leftover.join(" ")})" if leftover.size > 1
         id = leftover.first?
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
@@ -362,11 +361,10 @@ module Gori
       private def self.cmd_oast_provider_delete(args : Array(String)) : Nil
         proj = ProjectFlags.new
 
-        leftover = parse_args(args, "gori run oast providers delete") do |p|
+        leftover = one_positional_list(args, "gori run oast providers delete", "<id>") do |p|
           p.banner = "Usage: gori run oast providers delete <id>"
           project_options(p, proj, "update")
         end
-        abort "gori run oast providers delete: too many arguments (expected one <id>, got: #{leftover.join(" ")})" if leftover.size > 1
         id = leftover.first?
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
@@ -582,13 +580,12 @@ module Gori
       private def self.cmd_oast_session_release(args : Array(String)) : Nil
         proj = ProjectFlags.new
 
-        leftover = parse_args(args, "gori run oast release") do |p|
+        leftover = one_positional_list(args, "gori run oast release", "<id>") do |p|
           p.banner = "Usage: gori run oast release <id>\n\n" \
                      "Deregister the session's server-side state. Its stored callbacks stay,\n" \
                      "but payloads minted from it stop resolving."
           project_options(p, proj, "read")
         end
-        abort "gori run oast release: too many arguments (expected one <id>, got: #{leftover.join(" ")})" if leftover.size > 1
 
         id = oast_session_id(leftover.first?, "release")
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
