@@ -23,14 +23,6 @@ describe Gori::Tui::ConfirmDialog do
     dlg.confirm_selected?.should be_false
   end
 
-  it "select_confirm / select_cancel set the choice explicitly" do
-    dlg = ConfirmDialog.new("DELETE", "Sure?")
-    dlg.select_confirm
-    dlg.confirm_selected?.should be_true
-    dlg.select_cancel
-    dlg.confirm_selected?.should be_false
-  end
-
   it "renders the heading, every message line, and both buttons" do
     dlg = ConfirmDialog.new("DELETE PROJECT", %(Delete "demo"?\nIrreversible.), confirm_label: "delete")
     backend = render_dialog(dlg)
@@ -288,18 +280,18 @@ describe "ConfirmDialog on a short pane" do
     dlg = ConfirmDialog.new("CLEAR HISTORY", "Delete ALL 143 History flows?", confirm_label: "clear")
     short = Rect.new(0, 0, 76, ConfirmDialog::MIN_H - 1)
     dlg.render(Screen.new(MemoryBackend.new(76, 8)), short)
-    dlg.drawn?.should be_false
+    dlg.@drawn.should be_false
 
     y = Termisu::Event::Key.new(Termisu::Input::Key::LowerY)
     dlg.handle_key(y).should eq(:stay)
-    dlg.select_confirm
+    dlg.move # lights confirm (a danger card opens on cancel)
     dlg.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Enter)).should eq(:cancel)
     # esc still gets the operator out of a modal they cannot read.
     dlg.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Escape)).should eq(:cancel)
 
     # A taller window puts the card back, and the same key is then a real answer.
     dlg.render(Screen.new(MemoryBackend.new(76, 24)), Rect.new(0, 0, 76, 18))
-    dlg.drawn?.should be_true
+    dlg.@drawn.should be_true
     dlg.handle_key(y).should eq(:commit)
   end
 

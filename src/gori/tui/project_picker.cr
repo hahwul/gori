@@ -737,7 +737,7 @@ module Gori::Tui
       return nil if dlg.nil?
       # ctrl-c is the picker's global abort; ConfirmDialog does not answer it. Everything else —
       # the y/⇧Y with its ctrl-guard, the arrow/tab button moves, ↵-on-the-selection AND the
-      # `drawn?` gate that refuses to COMMIT a card a short window is hiding — is
+      # `@drawn` gate that refuses to COMMIT a card a short window is hiding — is
       # ConfirmDialog#handle_key's own ladder. Delegate to it rather than re-spelling it here: the
       # gate (#912) lived only in handle_key, and this second copy of the ladder never got it, so
       # a resize below MIN_H after arming let `y` run `rm_rf` on a project with nothing on screen.
@@ -2397,9 +2397,7 @@ module Gori::Tui
       space_entries.each_with_index do |entry, i|
         ry = box.y + 1 + i
         active = i == @space_selected
-        bg = active ? Theme.accent_bg : Theme.panel
-        screen.fill(Rect.new(box.x + 1, ry, box.w - 2, 1), bg)
-        screen.cell(box.x + 1, ry, active ? '▎' : ' ', Theme.accent, bg)
+        bg = Frame.row_band(screen, box, ry, active)
         screen.text(box.x + 2, ry, entry.key.to_s, Theme.accent, bg, Attribute::Bold)
         screen.text(box.x + 4, ry, entry.label, active ? Theme.text_bright : Theme.text, bg,
           width: {box.w - 5, 0}.max)

@@ -1,7 +1,7 @@
 require "./screen"
 require "./theme"
 require "./frame"
-require "./url"
+require "../url"
 require "./flow_status"
 require "./picker_overlay"
 require "../store"
@@ -68,16 +68,7 @@ module Gori::Tui
     end
 
     def render(screen : Screen, area : Rect) : Nil
-      box = overlay_box(area)
-      unless box
-        Overlay.too_small(screen, area, "flow picker needs a larger window")
-        return
-      end
-      Frame.card(screen, box, "PICK FLOW #{@target.to_s.upcase}", border: Theme.border_focus)
-
-      list_top = render_filter(screen, box, IDLE_HINT)
-      list_h = list_height(box)
-      ensure_visible(list_h)
+      box, list_top, list_h = render_card(screen, area, "PICK FLOW #{@target.to_s.upcase}", IDLE_HINT, "flow picker needs a larger window") || return
 
       if @filtered.empty?
         # Same three-way split the Sitemap draws (sitemap_view.cr): a live filter, the lens,
@@ -95,10 +86,8 @@ module Gori::Tui
         return
       end
 
-      (0...list_h).each do |i|
-        ri = @scroll + i
-        break if ri >= @filtered.size
-        draw_row(screen, box, list_top + i, @filtered[ri], ri == @selected)
+      each_visible_row(list_top, list_h, @filtered.size) do |ry, ri|
+        draw_row(screen, box, ry, @filtered[ri], ri == @selected)
       end
     end
 

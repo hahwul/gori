@@ -3,6 +3,11 @@ require "../support/memory_backend"
 
 include Gori::Tui
 
+# The three assembled art rows, from the `glyph` the draw path stamps cell by cell.
+private def mascot_rows(frame : Mascot::Frame) : Array(String)
+  (0..2).map { |row| String.build { |io| Mascot::W.times { |col| io << Mascot.glyph(frame, col, row) } } }
+end
+
 # Runs `block` with Miss Ring forced on/off (and a motion mode), restoring both.
 private def with_companion(enabled : Bool, motion : String = "lively", notices : Bool = true, &)
   prev = {Gori::Settings.companion?, Gori::Settings.companion_motion, Gori::Settings.companion_notices?}
@@ -432,8 +437,8 @@ describe Gori::Tui::Companion do
   # Scoped to the gesture poses on purpose: asserting this across all of POSES would forbid
   # a future pose that differs only by badge or mood.
   it "gives every idle gesture a face of its own" do
-    idle = Mascot.rows(Mascot::Frame.new)[1]
-    rows = Companion::GESTURES.flatten.uniq!.map { |p| Mascot.rows(Mascot::Frame.new(pose: p))[1] }
+    idle = mascot_rows(Mascot::Frame.new)[1]
+    rows = Companion::GESTURES.flatten.uniq!.map { |p| mascot_rows(Mascot::Frame.new(pose: p))[1] }
     rows.each(&.should_not(eq(idle)))
     rows.uniq.size.should eq(rows.size)
   end
@@ -980,7 +985,7 @@ describe Gori::Tui::Companion do
       Mascot::WINKS.each do |wink|
         badges.each do |badge|
           frame = Mascot::Frame.new(pose: pose, wink: wink, badge: badge)
-          Mascot.rows(frame).each do |row|
+          mascot_rows(frame).each do |row|
             row.size.should eq(Mascot::W)               # single codepoint per cell
             Screen.draw_width(row).should eq(Mascot::W) # …and one column each
           end
@@ -993,7 +998,7 @@ describe Gori::Tui::Companion do
   # be six CELLS across or the hoop reads as an oval. That falls out of the half-block
   # walls, and a spec is the only thing that stops a future edit from widening it back.
   it "keeps the equator exactly as wide as the sprite is tall" do
-    row = Mascot.rows(Mascot::Frame.new)[1]
+    row = mascot_rows(Mascot::Frame.new)[1]
     row[0].should eq(Mascot::WALL_L) # ▐ — inks the RIGHT half, x[0.5,1]
     row[6].should eq(Mascot::WALL_R) # ▌ — inks the LEFT half,  x[6,6.5]
     # 6.5 - 0.5 = 6.0 cells wide; 3 rows x 2 units = 6.0 units tall.
@@ -1012,7 +1017,7 @@ describe Gori::Tui::Companion do
         Mascot::POSES.each do |pose|
           frame = Mascot::Frame.new(pose: pose, badge: '!')
           pal = Mascot.palette(:info, Theme.bg)
-          rows = Mascot.rows(frame)
+          rows = mascot_rows(frame)
           Mascot::H.times do |r|
             Mascot::W.times do |c|
               next if rows[r][c] == ' ' # a blank cell is allowed to be plate-on-plate
@@ -1049,7 +1054,7 @@ describe Gori::Tui::Companion do
     Mascot::POSES.each do |pose|
       {nil, '×', '!'}.each do |badge|
         frame = Mascot::Frame.new(pose: pose, badge: badge)
-        rows = Mascot.rows(frame)
+        rows = mascot_rows(frame)
         chip = Mascot.bar_label(frame)
         chip[0, Mascot::W - 1].should eq(rows[1][0, Mascot::W - 1]) # the equator, verbatim
         chip[Mascot::W - 1].should eq(rows[0][Mascot::W - 1])       # …and the badge cell

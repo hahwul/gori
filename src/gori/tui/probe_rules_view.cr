@@ -53,17 +53,7 @@ module Gori::Tui
     # cursor, the draw loop and every hit-test walk — is what survives it, with a section
     # header kept only while something under it does. Nothing here writes: a hidden rule is
     # still enabled, and `reload` rebuilds the source either way.
-    def filter_start : Nil
-      @filter.start
-    end
-
-    def filter_editing? : Bool
-      @filter.editing?
-    end
-
-    def filter_hint : String
-      @filter.hint
-    end
+    getter filter : RowFilter
 
     # Re-anchored by the row's own key, since a narrowing shifts every index.
     def handle_filter_key(ev : Termisu::Event::Key) : Bool
@@ -71,10 +61,6 @@ module Gori::Tui
       @filter.handle_key(ev)
       apply_filter(prev)
       true
-    end
-
-    def set_filter_preedit(text : String) : Bool
-      @filter.set_preedit(text)
     end
 
     private def apply_filter(keep : String? = selected_row.try(&.rule_id)) : Nil

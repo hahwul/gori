@@ -180,28 +180,12 @@ module Gori::Tui
       return :stay if field_nav?(ev)
 
       if cycler_row?(@sel)
-        case
-        when key.left?              then adjust(-1)
-        when key.right?             then adjust(1)
-        when key.enter?, key.space? then move(1)
-        end
-        :stay
+        cycler_key(key)
       elsif @sel == ROW_SAVE
         (key.enter? || key.space?) ? :commit : :stay
       else # text row: title / description / pattern
-        field = text_field_for(@sel)
-        if key.enter?
-          return :commit if @sel == ROW_PATTERN
-          move(1)
-        elsif field
-          field.handle_edit_key(ev)
-        end
-        :stay
+        text_row_key(ev, @sel == ROW_PATTERN)
       end
-    end
-
-    def set_preedit(text : String) : Nil
-      text_field_for(@sel).try(&.set_preedit(text))
     end
 
     def row_count : Int32

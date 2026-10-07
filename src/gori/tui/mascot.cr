@@ -257,16 +257,6 @@ module Gori::Tui
       end
     end
 
-    # The three assembled art rows. Each is exactly W single-codepoint, single-column
-    # glyphs (spec-guarded over every pose x wink). Convenience for specs and debugging;
-    # the draw path uses `glyph` directly and never builds these.
-    def self.rows(frame : Frame) : {String, String, String}
-      build = ->(row : Int32) {
-        String.build { |io| W.times { |col| io << glyph(frame, col, row) } }
-      }
-      {build.call(0), build.call(1), build.call(2)}
-    end
-
     # Mood only shifts the base gold; the whole ramp — highlight, shadow, specular, face,
     # lash — re-derives from it. One hue swap re-tints the entire sprite and she never
     # stops reading as the brand mark.

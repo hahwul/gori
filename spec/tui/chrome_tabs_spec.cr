@@ -148,9 +148,9 @@ describe "Chrome.visible_slots" do
   end
 end
 
-describe "Chrome.hidden_tabs" do
+describe "Chrome.split_tabs hidden list" do
   it "returns the specialised tabs hidden from the bar by default" do
-    hid = Chrome.hidden_tabs([] of {String, Bool}).map(&.first)
+    hid = Chrome.split_tabs([] of {String, Bool})[1].map(&.first)
     # Colormarker joins them: it is a niche display lens, and a fresh install should not
     # spend a tab slot on a list that is empty until someone writes a colour rule. Authorize
     # is the same kind of specialised workbench (seeded on demand), so it starts hidden too.
@@ -173,12 +173,12 @@ describe "Chrome.hidden_tabs" do
   it "excludes the active tab even when its stored visibility is false (it's force-shown)" do
     # Miner is hidden by default but active → force-shown on the bar, so it must NOT
     # also appear in the dropdown list.
-    Chrome.hidden_tabs([] of {String, Bool}, force: :miner).map(&.first).should_not contain(:miner)
+    Chrome.split_tabs([] of {String, Bool}, force: :miner)[1].map(&.first).should_not contain(:miner)
   end
 
   it "lists a user-hidden tab and preserves catalog order" do
     prefs = [{"repeater", false}, {"issues", false}]
-    hid = Chrome.hidden_tabs(prefs).map(&.first)
+    hid = Chrome.split_tabs(prefs)[1].map(&.first)
     hid.includes?(:repeater).should be_true
     hid.includes?(:issues).should be_true
     hid.includes?(:miner).should be_true                                  # still default-hidden
@@ -255,7 +255,7 @@ describe "Chrome.scroll_start" do
   end
 end
 
-# split_tabs folds visible_slots + hidden_tabs into ONE reconcile pass (the render path needs
+# split_tabs folds visible_slots + the hidden list into ONE reconcile pass (the render path needs
 # all three every frame). It MUST return exactly what calling them separately returns — this
 # locks that hand-merged equivalence across the force/all-hidden edge cases.
 describe "Chrome.split_tabs" do
@@ -271,10 +271,10 @@ describe "Chrome.split_tabs" do
     "all-hidden + force"   => {all_hidden, :issues.as(Symbol?)},
   }
   configs.each do |name, (prefs, force)|
-    it "equals {visible_tabs, hidden_tabs, slots} for #{name}" do
+    it "equals {visible_slots, hidden, slots} for #{name}" do
       vis, slots = Chrome.visible_slots(prefs, force: force)
-      Chrome.split_tabs(prefs, force: force).should eq(
-        {vis, Chrome.hidden_tabs(prefs, force: force), slots})
+      hidden = Chrome.reconcile(prefs).reject { |(s, _, v)| v || s == force }.map { |(s, l, _)| {s, l} }
+      Chrome.split_tabs(prefs, force: force).should eq({vis, hidden, slots})
     end
   end
 end

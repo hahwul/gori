@@ -130,9 +130,7 @@ module Gori::Tui
         ry = box.y + OFFER_ROW + i
         picked = kind == @keyset
         band = picked && on_choice
-        bg = band ? Theme.accent_bg : Theme.panel
-        screen.fill(Rect.new(box.x + 1, ry, box.w - 2, 1), bg)
-        screen.cell(box.x + 1, ry, band ? '▎' : ' ', Theme.accent, bg)
+        bg = Frame.row_band(screen, box, ry, band)
         screen.cell(ix, ry, picked ? '◉' : '◯', picked ? Theme.accent : Theme.muted, bg)
         name = Verb::Keyset.name_of(kind)
         screen.text(ix + 2, ry, Hotkeys::KEYSET_LABELS[name]? || name, band ? Theme.text_bright : Theme.text, bg, width: LABEL_W)

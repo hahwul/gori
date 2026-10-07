@@ -2427,7 +2427,7 @@ describe Gori::Proxy::Server do
 
   it "forwards held bytes byte-exact, preserving a deliberately mismatched Content-Length (P7)" do
     # The proxy must NOT rewrite the bytes the human chose to send — Content-Length
-    # sync is the editor's job (InterceptView#forward_bytes). A forwarded smuggling
+    # sync is the editor's job (InterceptView#pending_edit). A forwarded smuggling
     # probe (CL: 3 but a 7-byte body) reaches the origin verbatim.
     done = Channel(Nil).new(1)
     got = Channel(String).new(1)

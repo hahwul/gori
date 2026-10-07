@@ -214,11 +214,8 @@ module Gori::Tui
     # Centered box for `area`, sized to the content (min 6 rows), or nil when it can't
     # fit. Mirrors HostsOverlay#overlay_box so the geometry math is consistent.
     def overlay_box(area : Rect) : Rect?
-      w = {area.w - 4, 60}.min
       rows = {notes.size, 6}.max
-      h = {area.h - 2, rows + 3}.min # title gap + list + bottom border
-      return nil if w < 28 || h < 6
-      area.center(w, h)
+      area.card?(60, rows + 3, 28, 6) # h: title gap + list + bottom border
     end
 
     def render(screen : Screen, area : Rect) : Nil
@@ -253,9 +250,7 @@ module Gori::Tui
     end
 
     private def draw_row(screen : Screen, box : Rect, note : Notifications::Note, sel : Bool, py : Int32) : Nil
-      bg = sel ? Theme.accent_bg : Theme.panel
-      screen.fill(Rect.new(box.x + 1, py, box.w - 2, 1), bg)
-      screen.cell(box.x + 1, py, sel ? '▎' : ' ', Theme.accent, bg)
+      bg = Frame.row_band(screen, box, py, sel)
       g, gc = glyph(note.level)
       screen.cell(box.x + 3, py, g, gc, bg)
       bold = note.read ? Attribute::None : Attribute::Bold

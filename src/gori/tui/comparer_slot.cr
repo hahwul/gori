@@ -1,4 +1,4 @@
-require "./url"
+require "../url"
 require "./theme"
 require "../store/models"
 require "../repeater/message_lines"

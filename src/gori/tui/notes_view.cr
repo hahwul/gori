@@ -538,14 +538,9 @@ module Gori::Tui
       @dirty = true
     end
 
-    # Close the current note. Returns the closed note's id (for link cleanup), or nil
-    # when nothing was removed. Always keeps at least one note open.
-    def close_note : Int64?
-      close_note_at(@current)
-    end
-
-    # Close note `idx` — the index-taking form, so a batch close (#683) can walk the marked
-    # chips instead of switching the active note to each one first. Always keeps ≥1 note.
+    # Close note `idx`. Returns the closed note's id (for link cleanup), or nil when nothing
+    # was removed. Index-taking, so a batch close (#683) can walk the marked chips instead of
+    # switching the active note to each one first. Always keeps ≥1 note open.
     def close_note_at(idx : Int32) : Int64?
       return nil unless 0 <= idx < @notes.size
       closed_id = @notes[idx].id

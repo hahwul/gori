@@ -57,7 +57,7 @@ module Gori::Tui
       # always bound escape here; the one state where the tab has nothing else to say was the
       # one that did not say it.
       return "#{@view.start_hint} · esc sub-tabs" if @view.empty?
-      return @view.filter_hint if querying?
+      return @view.filter.hint if querying?
       if @view.focus == :runs
         keys("↑/↓ runs · ↵/tab findings · {discover.run} run · {discover.stop} stop · {discover.pause} pause · {discover.dismiss} dismiss · space cmds · esc sub-tabs")
       else
@@ -67,7 +67,7 @@ module Gori::Tui
 
     # --- the FINDINGS `/` filter (a text sub-mode the shell claims ahead of the focus ring) ---
     def querying? : Bool
-      @view.filter_editing?
+      @view.filter.editing?
     end
 
     def handle_query_key(ev : Termisu::Event::Key) : Bool
@@ -75,7 +75,7 @@ module Gori::Tui
     end
 
     def set_preedit(text : String) : Bool
-      @view.set_filter_preedit(text)
+      @view.filter.set_preedit(text)
     end
 
     # `/` — narrow the FINDINGS table by status / source / URL. Refused with nothing to filter.

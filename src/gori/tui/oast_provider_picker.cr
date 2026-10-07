@@ -18,20 +18,14 @@ module Gori::Tui
 
     # esc cancels · ↑/↓ (and j/k, as in every sibling picker) move · ↵ picks.
     def handle_key(ev : Termisu::Event::Key) : Symbol
-      key = ev.key
-      case
-      when key.escape?  then return :cancel
-      when key.up?      then move(-1)
-      when key.down?    then move(1)
-      when page_key(ev) then nil
-      when key.enter?   then return :commit
-      else
-        if (c = ev.char) && !ev.ctrl? && !ev.alt?
-          case c
-          when 'j' then move(1)
-          when 'k' then move(-1)
-          else          letter_key(c)
-          end
+      if nav = nav_key(ev)
+        return nav
+      end
+      if (c = ev.char) && !ev.ctrl? && !ev.alt?
+        case c
+        when 'j' then move(1)
+        when 'k' then move(-1)
+        else          letter_key(c)
         end
       end
       :stay

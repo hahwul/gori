@@ -1,5 +1,6 @@
 require "./spec_helper"
 require "./support/memory_backend"
+require "./support/tui_probes"
 require "socket"
 require "base64"
 require "digest/sha1"

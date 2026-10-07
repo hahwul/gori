@@ -390,7 +390,7 @@ describe Gori::Proxy::H2::StreamGate do
       settle
       item = ic.pending.first
       item.head_only?.should be_true
-      # What `InterceptView#forward_bytes` would produce for an edit that adds a body.
+      # What `InterceptView#pending_edit` would produce for an edit that adds a body.
       ic.forward(item.id, "POST /p HTTP/2\r\nHost: api.example.com\r\nContent-Length: 5\r\n\r\nhello".to_slice)
       settle
 

@@ -144,10 +144,7 @@ module Gori::Tui
     # --- geometry / render ---
 
     def overlay_box(area : Rect) : Rect?
-      w = {area.w - 4, 68}.min
-      h = {area.h - 2, {@identities.size + 6, 10}.max}.min
-      return nil if w < 36 || h < 7
-      area.center(w, h)
+      area.card?(68, {@identities.size + 6, 10}.max, 36, 7)
     end
 
     # How many identity rows the card has room for. The card grows to fit the list, so this
@@ -208,9 +205,7 @@ module Gori::Tui
 
     private def draw_row(screen : Screen, box : Rect, id : Authorize::Identity, i : Int32, py : Int32) : Nil
       sel = i == @selected
-      bg = sel ? Theme.accent_bg : Theme.panel
-      screen.fill(Rect.new(box.x + 1, py, box.w - 2, 1), bg)
-      screen.cell(box.x + 1, py, sel ? '▎' : ' ', Theme.accent, bg)
+      bg = Frame.row_band(screen, box, py, sel)
       x = box.x + 3
       screen.cell(x, py, id.baseline? ? '◆' : '·', id.baseline? ? Theme.focus_gold : Theme.muted, bg)
       name_x = x + 2

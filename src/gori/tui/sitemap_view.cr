@@ -14,6 +14,7 @@ require "../sitemap" # the host→path tree model + builder (URI normalisation l
 require "../js_refs"
 require "./viewport"
 require "./params_view"
+require "./project_marks"
 
 module Gori::Tui
   # The Sitemap tab: a host → path tree built from captured flows. The tree is literal —
@@ -159,12 +160,7 @@ module Gori::Tui
       # mark would silently retarget on the next poll. A mark whose node is currently
       # collapsed or filtered out stays marked (marked_hidden_count reports it); a mark whose
       # path is gone simply fails to resolve at the verb. Mirrors History's model (#442).
-      @marks = Set({String, String}).new
-      @mark_anchor = nil.as({String, String}?) # key-anchored range anchor for the ⇧arrow extend
-      # Only the keys the CURRENT ⇧arrow gesture added. A plain arrow hands back exactly
-      # these, so `t` marks outside the range are never disturbed. Cleared by every
-      # non-extend mark action.
-      @mark_extent = Set({String, String}).new
+      @marks = Marks({String, String}).new
       # Root label → origin, for the mark keys (see `origin_for`).
       @origins = {} of String => Sitemap::Origin
     end
@@ -898,7 +894,7 @@ module Gori::Tui
     def marked_hidden_count : Int32
       return 0 if @marks.empty?
       visible = 0
-      visible_rows.each { |r| visible += 1 if (k = mark_key(r)) && @marks.includes?(k) }
+      visible_rows.each { |r| visible += 1 if (k = mark_key(r)) && @marks.marked?(k) }
       @marks.size - visible
     end
 
@@ -911,12 +907,12 @@ module Gori::Tui
       seen = Set({String, String}).new
       each_node do |node, root|
         k = {root.label, node.path}
-        next unless @marks.includes?(k)
+        next unless @marks.marked?(k)
         next if seen.includes?(k) # a path is unique per host, so this is belt-and-braces
         ordered << k
         seen << k
       end
-      ordered.concat((@marks - seen).to_a.sort!)
+      ordered.concat(@marks.reject { |k| seen.includes?(k) }.sort!)
       ordered
     end
 
@@ -945,7 +941,7 @@ module Gori::Tui
 
     # `origin_key` is a root's label (`VisibleRow#key`), not the bare host.
     def marked?(origin_key : String, path : String) : Bool
-      @marks.includes?({origin_key, path})
+      @marks.marked?({origin_key, path})
     end
 
     # `t` — flip the mark on the cursor row, then step DOWN one row so a run of `t` marks
@@ -956,12 +952,10 @@ module Gori::Tui
     def toggle_mark : Bool
       return false unless row = visible_rows[@selected]?
       return false unless key = mark_key(row)
-      @marks.includes?(key) ? @marks.delete(key) : @marks.add(key)
+      @marks.toggle(key)
       # The view's own clamping move, NOT the controller's sitemap_move — that pops focus to
       # the sub-tab strip at the top row, which would eject you mid-gesture.
       move(1)
-      @mark_anchor = key
-      @mark_extent.clear
       true
     end
 
@@ -976,38 +970,23 @@ module Gori::Tui
     # to mark" rather than look like a dropped keystroke.
     def mark_all_visible : Int32
       before = @marks.size
-      visible_rows.each do |row|
-        next if row.node.methods.empty? # a host or a folder is not a path to act on
-        next unless key = mark_key(row)
-        @marks.add(key)
-      end
-      reset_mark_anchor
+      # A host or a folder is not a path to act on. No cursor: the anchor resets.
+      @marks.mark_all(visible_rows.compact_map { |row| mark_key(row) unless row.node.methods.empty? })
       @marks.size - before
     end
 
     def clear_marks : Nil
       @marks.clear
-      reset_mark_anchor
-    end
-
-    # Forget where a range gesture started (and what it had added), so the next ⇧arrow
-    # anchors at the cursor instead of sweeping back to a stale point.
-    private def reset_mark_anchor : Nil
-      @mark_anchor = nil
-      @mark_extent.clear
     end
 
     # End a ⇧arrow range gesture AND hand back everything it marked — what letting go of ⇧
     # and pressing a plain arrow does in a GUI list, where the highlight collapses instead
-    # of being left behind (#442 / af7e561). Only the gesture's own keys go (@mark_extent):
+    # of being left behind (#442 / af7e561). Only the gesture's own keys go:
     # `t` marks are deliberate, and dropping them too would put a discontiguous set out of
     # reach ("mark this one, skip three, mark that one"). Returns how many marks it gave
     # back, so the caller can say so rather than let a range vanish silently.
     def end_mark_gesture : Int32
-      before = @marks.size
-      @mark_extent.each { |k| @marks.delete(k) }
-      reset_mark_anchor
-      before - @marks.size
+      @marks.end_gesture
     end
 
     # ⇧↑/⇧↓ — extend a contiguous range from the anchor, the keyboard form of a GUI
@@ -1017,23 +996,10 @@ module Gori::Tui
     def extend_marks(delta : Int32) : Nil
       rows = visible_rows
       return if rows.empty?
-      anchor_idx = @mark_anchor.try { |a| index_of_mark(rows, a) }
-      unless anchor_idx
-        @mark_anchor = rows[@selected]?.try { |r| mark_key(r) }
-        anchor_idx = @selected
-        @mark_extent.clear
-      end
+      anchor_idx = @marks.anchor.try { |a| index_of_mark(rows, a) }
+      from = @selected
       move(delta)
-      lo, hi = {anchor_idx, @selected}.minmax
-      wanted = Set({String, String}).new
-      (lo..hi).each { |i| rows[i]?.try { |r| mark_key(r).try { |k| wanted.add(k) } } }
-      # Give back what THIS gesture added but the new range no longer covers, so ⇧↑ after
-      # ⇧↓⇧↓ leaves two rows marked rather than three. @mark_extent holds only keys the
-      # gesture itself added, so a `t` mark survives a range sweeping over it and back off.
-      (@mark_extent - wanted).each { |k| @marks.delete(k) }
-      added = wanted - @marks
-      @marks.concat(added)
-      @mark_extent = (@mark_extent & wanted) | added
+      @marks.extend_range(anchor_idx, from, @selected) { |i| rows[i]?.try { |r| mark_key(r) } }
     end
 
     # Row index carrying mark key `key`, or nil when it isn't on screen (collapsed/filtered).
@@ -1201,7 +1167,7 @@ module Gori::Tui
       # A marked row reads as a dim band with a FULLER gutter bar, so it stays
       # distinguishable from the cursor row (accent band) and from a cursor row that is ALSO
       # marked (accent band + full bar). Both glyphs are single-width, so no column moves.
-      marked = mark_key(row).try { |k| @marks.includes?(k) } || false
+      marked = mark_key(row).try { |k| @marks.marked?(k) } || false
       bg = if selected
              focused ? Theme.accent_bg : Theme.selection_dim
            elsif marked

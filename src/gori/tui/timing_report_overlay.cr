@@ -51,10 +51,7 @@ module Gori::Tui
     ROWS = 13 # banner + rationale + 2 meta + order + blank + (label+bars)×2 + hist label
 
     def overlay_box(area : Rect) : Rect?
-      w = {area.w - 4, MAX_W}.min
-      h = {area.h - 2, ROWS + 3}.min
-      return nil if w < MIN_W || h < MIN_H
-      area.center(w, h)
+      area.card?(MAX_W, ROWS + 3, MIN_W, MIN_H)
     end
 
     def render(screen : Screen, area : Rect) : Nil

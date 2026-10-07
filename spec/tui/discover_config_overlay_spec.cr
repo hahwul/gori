@@ -94,7 +94,7 @@ describe Gori::Tui::DiscoverConfigOverlay do
     # The border cell survives: the value is clipped, not drawn over the card edge.
     row[box.right - 1].should eq('│')
     h.press(Termisu::Input::Key::Right).should eq(:open)
-    ov.selected_path.should eq("/login/")
+    ov.selected_target.should eq("http://127.0.0.1:19011/login/")
     row = h.render.row(y)
     row.should contain("/login/")
     row.should_not contain("xxxx")

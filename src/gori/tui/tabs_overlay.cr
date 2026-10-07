@@ -249,10 +249,7 @@ module Gori::Tui
     # the card never becomes an invisible-but-input-capturing modal). The key-hint lives in
     # the status bar (key_hints), so no row is reserved for it here.
     def overlay_box(area : Rect) : Rect?
-      w = {area.w - 4, 48}.min
-      h = {area.h - 2, screen_rows + 3}.min # title + up to screen_rows rows + bottom border
-      return nil if w < 24 || h < 6
-      area.center(w, h)
+      area.card?(48, screen_rows + 3, 24, 6) # h: title + up to screen_rows rows + bottom border
     end
 
     # --- the seam -------------------------------------------------------------
@@ -341,9 +338,7 @@ module Gori::Tui
     private def draw_row(screen : Screen, box : Rect, i : Int32, py : Int32) : Nil
       _, label, vis = @items[i]
       sel = i == @selected
-      bg = sel ? Theme.accent_bg : Theme.panel
-      screen.fill(Rect.new(box.x + 1, py, box.w - 2, 1), bg)
-      screen.cell(box.x + 1, py, sel ? '▎' : ' ', Theme.accent, bg)
+      bg = Frame.row_band(screen, box, py, sel)
       # `1  Project` — the slot number IS the state, because the number is what the operator
       # will press. An off-bar row leaves the column blank; the `✓` appears only for a tab on
       # an UNCAPPED bar past the ninth slot, where being on the bar is true but no digit is

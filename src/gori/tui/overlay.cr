@@ -202,10 +202,7 @@ module Gori::Tui
     # returned nil at every terminal size and the form could not be opened at all.
     def self.rule_form_box(area : Rect, rows : Int32, preview : Bool = false) : Rect?
       natural = rows + (preview ? 5 : 4)
-      w = {area.w - 4, RULE_FORM_W}.min
-      h = {area.h - 2, natural}.min
-      return nil if w < RULE_FORM_MIN_W || h < {RULE_FORM_MIN_H, natural}.min
-      area.center(w, h)
+      area.card?(RULE_FORM_W, natural, RULE_FORM_MIN_W, {RULE_FORM_MIN_H, natural}.min)
     end
 
     # One `label: value` row of such a form: the label in muted, the field's text (or its
@@ -533,6 +530,39 @@ module Gori::Tui
       @sel = idx unless skip_row?(idx)
     end
 
+    # The text field on `row`, or nil when the row is not one (a cycler, the commit row).
+    private def text_field_for(row : Int32) : TextField?
+      nil
+    end
+
+    # Live IME composition goes to the selected row's text field, when it has one.
+    def set_preedit(text : String) : Nil
+      text_field_for(@sel).try(&.set_preedit(text))
+    end
+
+    # A cycler row's keys: ←/→ step its value (the form's `adjust`), ↵/space moves on.
+    private def cycler_key(key : Termisu::Input::Key) : Symbol
+      case
+      when key.left?              then adjust(-1)
+      when key.right?             then adjust(1)
+      when key.enter?, key.space? then move(1)
+      end
+      :stay
+    end
+
+    # A text row's keys: ↵ commits when `commit` (the form's last text row) and moves on
+    # otherwise; anything else edits the row's field.
+    private def text_row_key(ev : Termisu::Event::Key, commit : Bool) : Symbol
+      field = text_field_for(@sel)
+      if ev.key.enter?
+        return :commit if commit
+        move(1)
+      elsif field
+        field.handle_edit_key(ev)
+      end
+      :stay
+    end
+
     # ↑/⇤ and ↓/↹ step between rows. True when `ev` was one of the four, so a key ladder can
     # take it as one arm.
     private def field_nav?(ev : Termisu::Event::Key) : Bool
@@ -612,9 +642,7 @@ module Gori::Tui
 
     private def draw_row(screen : Screen, box : Rect, i : Int32, py : Int32) : Nil
       sel = i == @sel
-      bg = sel ? Theme.accent_bg : Theme.panel
-      screen.fill(Rect.new(box.x + 1, py, box.w - 2, 1), bg)
-      screen.cell(box.x + 1, py, sel ? '▎' : ' ', Theme.accent, bg)
+      bg = Frame.row_band(screen, box, py, sel)
       draw_row_body(screen, box, i, py, box.x + 3, bg, sel ? Theme.text_bright : Theme.text, sel)
     end
 
@@ -791,6 +819,33 @@ module Gori::Tui
     private def list_window(cap : Int32) : Int32
       return 0 if cap <= 0 || entry_count <= cap
       { {@selected - cap + 1, 0}.max, entry_count - cap }.min
+    end
+  end
+
+  # A card whose body is ONE `TextArea` (`@editor`, laid out by the card's `editor_rect(box)`):
+  # a drag and a double-click select in it, a pasted line break is a newline, and IME preedit
+  # lands in it. Included by the class, so these replace `Overlay`'s defaults.
+  module EditorCard
+    def supports_drag? : Bool
+      true
+    end
+
+    def handle_drag(area : Rect, mx : Int32, my : Int32) : Nil
+      return unless box = overlay_box(area)
+      @editor.click_to_cursor(editor_rect(box), mx, my, selecting: true)
+    end
+
+    def handle_double_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      return :pass unless box = overlay_box(area)
+      @editor.select_word_at(editor_rect(box), mx, my) ? :stay : :pass
+    end
+
+    def takes_pasted?(ev : Termisu::Event::Key) : Bool
+      true
+    end
+
+    def set_preedit(text : String) : Nil
+      @editor.set_preedit(text)
     end
   end
 end

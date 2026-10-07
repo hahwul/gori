@@ -2286,9 +2286,7 @@ module Gori::Tui
       end
       Tutorial.held_rows(@m_held).each_with_index do |(method, path, _), i|
         break if yy >= pane.bottom - 1
-        bg = i == 0 ? Theme.accent_bg : Theme.panel
-        screen.fill(Rect.new(pane.x + 1, yy, pane.w - 2, 1), bg)
-        screen.cell(pane.x + 1, yy, i == 0 ? '▎' : ' ', Theme.accent, bg)
+        bg = Frame.row_band(screen, pane, yy, i == 0)
         screen.text(pane.x + 3, yy, method, Theme.method_color(method.strip), bg)
         screen.text(pane.x + 8, yy, "#{path}  · held", i == 0 ? Theme.text_bright : Theme.text, bg,
           width: {pane.w - 10, 1}.max)
@@ -2585,9 +2583,7 @@ module Gori::Tui
       FLOW_ROWS.each_with_index do |(method, path, status), i|
         break if yy >= rect.bottom - 1
         sel = focused && i == flow
-        bg = sel ? Theme.accent_bg : Theme.panel
-        screen.fill(Rect.new(rect.x + 1, yy, rect.w - 2, 1), bg)
-        screen.cell(rect.x + 1, yy, sel ? '▎' : ' ', Theme.accent, bg)
+        bg = Frame.row_band(screen, rect, yy, sel)
         screen.text(rect.x + 3, yy, method, Theme.method_color(method.strip), bg)
         px = rect.x + 8
         pw = {rect.right - 1 - 4 - px, 1}.max
@@ -2711,9 +2707,7 @@ module Gori::Tui
         end
         row = rows[idx]
         s = idx == sel
-        bg = s ? Theme.accent_bg : Theme.panel
-        screen.fill(Rect.new(rect.x + 1, yy, rect.w - 2, 1), bg)
-        screen.cell(rect.x + 1, yy, s ? '▎' : ' ', Theme.accent, bg)
+        bg = Frame.row_band(screen, rect, yy, s)
         screen.text(rect.x + 3, yy, row.sigil, Theme.muted, bg)
         # The hint column is the lesson (the route to the row), so the label gives way to it.
         hx = rect.right - 2 - Screen.draw_width(row.hint)
@@ -2745,9 +2739,7 @@ module Gori::Tui
       yy = rect.y + 1
       rows[top, vis].each_with_index do |row, i|
         s = top + i == sel
-        bg = s ? Theme.accent_bg : Theme.panel
-        screen.fill(Rect.new(rect.x + 1, yy, rect.w - 2, 1), bg)
-        screen.cell(rect.x + 1, yy, s ? '▎' : ' ', Theme.accent, bg)
+        bg = Frame.row_band(screen, rect, yy, s)
         screen.cell(rect.x + 3, yy, row.key, Theme.accent, bg, attr: Attribute::Bold)
         hx = rect.right - 2 - Screen.draw_width(row.hint)
         screen.text(rect.x + 5, yy, row.title, s ? Theme.text_bright : Theme.text, bg,

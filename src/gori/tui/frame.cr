@@ -583,6 +583,16 @@ module Gori::Tui
       screen.cell(x + 6, y, ' ', pal.bg, pal.bg)
     end
 
+    # The selection band on row `y` of a bordered card `box`: the row inside the border filled
+    # with the accent band when `selected` (the panel otherwise) and the `▎` bar in its first
+    # cell. Returns that fill, for the row's own text.
+    def self.row_band(screen : Screen, box : Rect, y : Int32, selected : Bool) : Color
+      bg = selected ? Theme.accent_bg : Theme.panel
+      screen.fill(Rect.new(box.x + 1, y, box.w - 2, 1), bg)
+      screen.cell(box.x + 1, y, selected ? '▎' : ' ', Theme.accent, bg)
+      bg
+    end
+
     # One row of a theme picker `w` cells wide: the selection band and bar, a radio, the name,
     # and the swatch right-aligned — one cell short of the row's end when `gauge_col` leaves
     # its last column to a scroll gauge drawn inside the list.

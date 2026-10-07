@@ -236,10 +236,8 @@ module Gori::Tui
 
     def overlay_box(area : Rect) : Rect?
       longest = @info.max_of { |l| Screen.display_width(l) }
-      w = {area.w - 4, {longest + 6, 54}.max.clamp(30, 64)}.min
-      h = {area.h - 2, @info.size + row_count + 4}.min # title + info + gap + rows + border
-      return nil if w < 30 || h < 6
-      area.center(w, h)
+      # h: title + info + gap + rows + border
+      area.card?({longest + 6, 54}.max.clamp(30, 64), @info.size + row_count + 4, 30, 6)
     end
 
     # First interactive row's y: below the header block + a blank spacer line.

@@ -19,6 +19,8 @@ module Gori::Tui
   # is on screen; where it cannot be drawn, esc closes WITHOUT saving and the degraded line says
   # so, since there is no partial list worth writing.
   class UserAgentsOverlay < Overlay
+    include EditorCard
+
     def initialize
       @opened_with = Settings.user_agents
       @editor = TextArea.new(@opened_with.join("\n"))
@@ -72,25 +74,6 @@ module Gori::Tui
       :stay
     end
 
-    def supports_drag? : Bool
-      true
-    end
-
-    def handle_drag(area : Rect, mx : Int32, my : Int32) : Nil
-      return unless box = overlay_box(area)
-      @editor.click_to_cursor(editor_rect(box), mx, my, selecting: true)
-    end
-
-    def handle_double_click(area : Rect, mx : Int32, my : Int32) : Symbol
-      return :pass unless box = overlay_box(area)
-      @editor.select_word_at(editor_rect(box), mx, my) ? :stay : :pass
-    end
-
-    # The whole card is the editor, so a pasted line break is a newline.
-    def takes_pasted?(ev : Termisu::Event::Key) : Bool
-      true
-    end
-
     def handle_key(ev : Termisu::Event::Key) : Symbol
       return try_commit if ev.key.escape?
       edit(ev)
@@ -109,15 +92,8 @@ module Gori::Tui
       @editor.handle_edit_key(ev)
     end
 
-    def set_preedit(text : String) : Nil
-      @editor.set_preedit(text)
-    end
-
     def overlay_box(area : Rect) : Rect?
-      w = {area.w - 4, 100}.min
-      h = {area.h - 2, 18}.min
-      return nil if w < 34 || h < 8
-      area.center(w, h)
+      area.card?(100, 18, 34, 8)
     end
 
     private def editor_rect(box : Rect) : Rect

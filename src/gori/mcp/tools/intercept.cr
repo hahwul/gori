@@ -99,7 +99,7 @@ module Gori
         # Bytes are LITERAL — no Env.expand_wire, so a remote agent's $SECRET references are
         # never expanded into forwarded traffic; and no smuggling guard, because byte-exact
         # forwarding of arbitrary edits is the whole point of an intercept editor in a security
-        # tool (matches the human forward_bytes contract).
+        # tool (matches the human pending_edit contract).
         #
         # Content-Length sync is now a DECLARED argument, default on. It used to be
         # unconditional, one line under that very comment — which made a CL desync (CL shorter

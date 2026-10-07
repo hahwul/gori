@@ -71,11 +71,7 @@ module Gori::Tui
 
     def overlay_box(area : Rect) : Rect?
       return nil if @rows.empty?
-      w = {area.w - 4, 96}.min
-      h = {@rows.size + 2, 4}.max
-      h = {h, area.h - 2}.min
-      return nil if w < 42 || h < 4
-      area.center(w, h)
+      area.card?(96, {@rows.size + 2, 4}.max, 42, 4)
     end
 
     def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
@@ -104,9 +100,7 @@ module Gori::Tui
 
     private def draw_row(screen : Screen, box : Rect, y : Int32,
                          row : Store::FuzzRunRecord, active : Bool) : Nil
-      bg = active ? Theme.accent_bg : Theme.panel
-      screen.fill(Rect.new(box.x + 1, y, box.w - 2, 1), bg)
-      screen.cell(box.x + 1, y, active ? '▎' : ' ', Theme.accent, bg)
+      bg = Frame.row_band(screen, box, y, active)
       proto = row.proto_label
       # A filtered archive (issue #1240) says so, so a small stored count reads as a policy.
       keep = row.filtered? ? " · keep:#{row.keep}" : ""

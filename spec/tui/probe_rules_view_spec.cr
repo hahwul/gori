@@ -96,8 +96,8 @@ describe Gori::Tui::ProbeRulesView do
       before = all_rows(view).size
       before.should be > 20
 
-      view.filter_start
-      view.filter_editing?.should be_true
+      view.filter.start
+      view.filter.editing?.should be_true
       "cors".each_char { |ch| view.handle_filter_key(TuiContract.plain(ch)) }
       view.@filter.active?.should be_true
 
@@ -133,7 +133,7 @@ describe Gori::Tui::ProbeRulesView do
         view.move(1)
       end
 
-      view.filter_start
+      view.filter.start
       "cors".each_char { |ch| view.handle_filter_key(TuiContract.plain(ch)) }
       view.selected_row.not_nil!.rule_id.should eq(target.rule_id)
     end

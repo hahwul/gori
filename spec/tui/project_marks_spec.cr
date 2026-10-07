@@ -146,6 +146,26 @@ describe Gori::Tui::ProjectMarks do
     m.marked?("/p/gamma").should be_false
   end
 
+  # The Intercept queue's prune: a gone anchor is forgotten but the gesture is NOT ended, so
+  # the next plain arrow still hands back the range's surviving rows (`retain` would keep them).
+  it "keeps the surviving extent when `keep` drops the anchor" do
+    m = Marks(Int64).new
+    keys = [1_i64, 2_i64, 3_i64]
+    m.extend_range(nil, 0, 2) { |i| keys[i]? }
+    m.keep(Set{2_i64, 3_i64})
+    m.anchor.should be_nil
+    m.end_gesture.should eq(2)
+    m.empty?.should be_true
+  end
+
+  # A row with no key (a sitemap fold) inside the range is stepped over, not marked.
+  it "skips a keyless row inside a range" do
+    m = Marks(Int64).new
+    keys = [1_i64, nil, 3_i64]
+    m.extend_range(nil, 0, 2) { |i| keys[i]? }
+    m.to_a.should eq([1_i64, 3_i64])
+  end
+
   describe "marks the filter is hiding" do
     it "counts them" do
       m = ProjectMarks.new

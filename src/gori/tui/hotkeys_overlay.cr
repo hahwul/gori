@@ -512,10 +512,7 @@ module Gori::Tui
 
     # --- geometry (mirrors TabsOverlay; reserves the last interior row for the footer) ---
     def overlay_box(area : Rect) : Rect?
-      w = {area.w - 4, 56}.min
-      h = {area.h - 2, @rows.size + 5}.min # top border + search/divider + list + footer + bottom border
-      return nil if w < 32 || h < 7
-      area.center(w, h)
+      area.card?(56, @rows.size + 5, 32, 7) # h: top border + search/divider + list + footer + bottom border
     end
 
     private def list_capacity(box : Rect) : Int32
@@ -590,9 +587,7 @@ module Gori::Tui
     private def draw_binding(screen : Screen, box : Rect, i : Int32, ry : Int32, *, up : Bool, down : Bool) : Nil
       r = @rows[i]
       sel = i == @selected
-      bg = sel ? Theme.accent_bg : Theme.panel
-      screen.fill(Rect.new(box.x + 1, ry, box.w - 2, 1), bg)
-      screen.cell(box.x + 1, ry, sel ? '▎' : ' ', Theme.accent, bg)
+      bg = Frame.row_band(screen, box, ry, sel)
       ov = overridden?(r.verb_id)
       screen.cell(box.x + 3, ry, ov ? '●' : '·', ov ? Theme.accent : Theme.muted, bg)
 

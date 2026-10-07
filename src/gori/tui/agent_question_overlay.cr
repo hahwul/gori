@@ -195,9 +195,7 @@ module Gori::Tui
 
     private def draw_choice(screen : Screen, box : Rect, py : Int32, i : Int32, choice : String) : Nil
       sel = i == @selected
-      bg = sel ? Theme.accent_bg : Theme.panel
-      screen.fill(Rect.new(box.x + 1, py, box.w - 2, 1), bg)
-      screen.cell(box.x + 1, py, sel ? '▎' : ' ', Theme.accent, bg)
+      bg = Frame.row_band(screen, box, py, sel)
       screen.text(box.x + 2, py, (i + 1).to_s, Theme.accent, bg, Attribute::Bold)
       tag = choice == @question.default ? "default" : ""
       label_w = {box.w - 6 - (tag.empty? ? 0 : tag.size + 1), 1}.max

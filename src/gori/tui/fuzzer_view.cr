@@ -2711,11 +2711,6 @@ module Gori::Tui
       @editor.scroll_view(step)
     end
 
-    # The template editor's viewport offset — what a wheel notch over the TEMPLATE moves.
-    def template_scroll : Int32
-      @editor.scroll
-    end
-
     # One selection model per mode — see RepeaterView#request_copy_text, which this mirrors.
     # Changes together with `pane_selection?`'s :template arm.
     def template_copy_text : String

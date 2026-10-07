@@ -149,12 +149,7 @@ module Gori::Tui
       return :stay if field_nav?(ev)
 
       if cycler_row?(@sel)
-        case
-        when key.left?              then adjust(-1)
-        when key.right?             then adjust(1)
-        when key.enter?, key.space? then move(1)
-        end
-        :stay
+        cycler_key(key)
       elsif @sel == ROW_SAVE
         (key.enter? || key.space?) ? :commit : :stay
       else # name / host / token text fields

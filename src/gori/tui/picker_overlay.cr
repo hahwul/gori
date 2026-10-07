@@ -35,6 +35,19 @@ module Gori::Tui
     # 500-flow FlowPicker had no other gait than one row at a time — and moved up to the
     # base once the list cards needed the same four keys).
 
+    # The prelude every picker's `handle_key` opens with: esc → :cancel, ↵ → :commit, ↑/↓ and
+    # the page keys move (→ :stay); nil for any other key, which the picker answers itself.
+    private def nav_key(ev : Termisu::Event::Key) : Symbol?
+      key = ev.key
+      case
+      when key.escape?  then :cancel
+      when key.up?      then move(-1); :stay
+      when key.down?    then move(1); :stay
+      when page_key(ev) then :stay
+      when key.enter?   then :commit
+      end
+    end
+
     def set_selected(idx : Int32) : Nil
       n = entry_count
       return if n == 0
@@ -126,9 +139,7 @@ module Gori::Tui
         break if ci >= entry_count
         ry = box.y + 1 + i
         active = ci == @selected
-        bg = active ? Theme.accent_bg : Theme.panel
-        screen.fill(Rect.new(box.x + 1, ry, box.w - 2, 1), bg)
-        screen.cell(box.x + 1, ry, active ? '▎' : ' ', Theme.accent, bg)
+        bg = Frame.row_band(screen, box, ry, active)
         draw_row(screen, box, ry, ci, active, bg)
       end
     end
@@ -172,22 +183,16 @@ module Gori::Tui
     # esc cancels · ↑/↓ move · ↵ picks · ⌫ edits the filter · anything else printable
     # goes into the filter (query_char drops control chars itself).
     def handle_key(ev : Termisu::Event::Key) : Symbol
-      key = ev.key
-      case
-      when key.escape?  then return :cancel
-      when key.up?      then move(-1)
-      when key.down?    then move(1)
-      when page_key(ev) then nil
-      when key.enter?   then return :commit
-      else
-        # The field refuses a Ctrl/Alt chord itself (`TextField#handle_edit_key` — the
-        # `Event::Key#char` fallback would otherwise type 'p' for ^P into the filter), and
-        # ⇥, which a picker has no use for. Refilter only when the TEXT changed: a caret
-        # motion must not reset the cursor to the top of the list.
-        before = @field.value
-        if @field.handle_edit_key(ev) && @field.value != before
-          refilter
-        end
+      if nav = nav_key(ev)
+        return nav
+      end
+      # The field refuses a Ctrl/Alt chord itself (`TextField#handle_edit_key` — the
+      # `Event::Key#char` fallback would otherwise type 'p' for ^P into the filter), and
+      # ⇥, which a picker has no use for. Refilter only when the TEXT changed: a caret
+      # motion must not reset the cursor to the top of the list.
+      before = @field.value
+      if @field.handle_edit_key(ev) && @field.value != before
+        refilter
       end
       :stay
     end
@@ -206,6 +211,30 @@ module Gori::Tui
       end
       Frame.tee_divider(screen, box, box.y + 2)
       box.y + LIST_OFFSET
+    end
+
+    # The card, its filter bar and the list window, as every filter picker opens its render:
+    # `{box, list_top, list_h}`, or nil — after the too-small line — when there is no room.
+    private def render_card(screen : Screen, area : Rect, title : String, idle_hint : String,
+                            too_small : String = "picker needs a larger window") : {Rect, Int32, Int32}?
+      unless box = overlay_box(area)
+        Overlay.too_small(screen, area, too_small)
+        return
+      end
+      Frame.card(screen, box, title, border: Theme.border_focus)
+      list_top = render_filter(screen, box, idle_hint)
+      list_h = list_height(box)
+      ensure_visible(list_h)
+      {box, list_top, list_h}
+    end
+
+    # Each visible list row's y and its index into the `count` navigable rows.
+    private def each_visible_row(list_top : Int32, list_h : Int32, count : Int32, &) : Nil
+      (0...list_h).each do |i|
+        ri = @scroll + i
+        break if ri >= count
+        yield list_top + i, ri
+      end
     end
 
     # Rows visible in the list area of `box`.

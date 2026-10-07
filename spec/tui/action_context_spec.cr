@@ -50,10 +50,10 @@ describe Gori::Tui::ActionContext do
         palette = PaletteState.new(reg)
         palette.capture(here, ctx)
         menu.open(here.scope, here.section, ctx, subtabs: here.subtabs)
-        lettered = palette.tab_actions.select(&.menu_key)
+        lettered = palette.@tab_all.select(&.menu_key)
         menu.entries.compact_map(&.verb).map(&.id).sort!.should eq(lettered.map(&.id).sort!)
         families = menu.entries.compact_map(&.family).map(&.id)
-        palette.tab_actions.compact_map(&.family).uniq!.each { |fid| families.should contain(fid) }
+        palette.@tab_all.compact_map(&.family).uniq!.each { |fid| families.should contain(fid) }
       end
     end
   end
@@ -71,7 +71,7 @@ describe Gori::Tui::ActionContext do
         here = ActionContext.new(scope, section, subtabs)
         palette = PaletteState.new(reg)
         palette.capture(here, ctx)
-        placed = palette.tab_actions.select(&.palette_only?).map(&.id)
+        placed = palette.@tab_all.select(&.palette_only?).map(&.id)
         found.concat(placed)
         menu.open(here.scope, here.section, ctx, subtabs: here.subtabs)
         (menu.entries.compact_map(&.verb).map(&.id) & placed).should be_empty

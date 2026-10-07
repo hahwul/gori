@@ -14,7 +14,8 @@ require "./hex_edit"
 # `repeater_view/` uses. This file keeps the state (ivars + `initialize`) the slice reads.
 require "./intercept_view/hex"
 require "./read_pane"
-require "./url"
+require "./project_marks"
+require "../url"
 require "../interceptor"
 require "../store"
 require "../fuzz/content_length"
@@ -159,11 +160,7 @@ module Gori::Tui
       # index-keyed set would silently retarget on the next revision tick. Unlike History there
       # is no hidden-mark case — `pending` returns exactly what the queue renders — so reload
       # prunes ids that have left the queue and marks stay a subset of what's on screen.
-      @marks = Set(Int64).new
-      @mark_anchor = nil.as(Int64?) # id-keyed range anchor for the ⇧arrow extend
-      # Ids THIS ⇧arrow gesture added (vs a deliberate `t`/⇧T mark) — the set a plain arrow
-      # hands back, and the set a shrinking range gives up. Cleared whenever the anchor resets.
-      @mark_extent = Set(Int64).new
+      @marks = Marks(Int64).new
     end
 
     # Fresh snapshot (called on enter AND every frame via the 50ms loop). Gated on the
@@ -250,9 +247,7 @@ module Gori::Tui
       return if @marks.empty?
       live = @items.map(&.id).to_set
       return if @marks.all? { |id| live.includes?(id) }
-      @marks &= live
-      @mark_extent &= live
-      @mark_anchor = nil unless @mark_anchor.try { |a| live.includes?(a) }
+      @marks.keep(live)
     end
 
     def selected_item : Interceptor::Item?
@@ -280,7 +275,7 @@ module Gori::Tui
     def move(delta : Int32) : Nil
       return if @items.empty? || @editing
       @selected = (@selected + delta).clamp(0, @items.size - 1)
-      reset_mark_anchor # a plain move re-seeds the range anchor, like a GUI list
+      @marks.reset_anchor # a plain move re-seeds the range anchor, like a GUI list
     end
 
     # At the first (top) queue item (and not editing) — lets the Runner pop focus
@@ -292,7 +287,7 @@ module Gori::Tui
     # --- marks (multi-select over the hold queue) -----------------------------
 
     def marked?(id : Int64) : Bool
-      @marks.includes?(id)
+      @marks.marked?(id)
     end
 
     def mark_count : Int32
@@ -322,41 +317,26 @@ module Gori::Tui
     # a mark-only variant would leave the bottom hold with no way to un-mark it by key at all.
     def toggle_mark : Nil
       return unless id = selected_id
-      @marks.includes?(id) ? @marks.delete(id) : @marks.add(id)
+      @marks.toggle(id)
       step_cursor(1)
-      @mark_anchor = id
-      @mark_extent.clear
     end
 
     # ⇧T — mark every held message currently queued (the queue's Ctrl+A).
     def mark_all : Nil
-      @items.each { |it| @marks.add(it.id) }
-      @mark_anchor = selected_id
-      @mark_extent.clear
+      @marks.mark_all(@items.map(&.id), selected_id)
     end
 
     def clear_marks : Nil
       @marks.clear
-      reset_mark_anchor
-    end
-
-    # Forget where a range gesture started (and what it had added), so the next ⇧arrow
-    # anchors at the cursor instead of sweeping back to a stale point.
-    private def reset_mark_anchor : Nil
-      @mark_anchor = nil
-      @mark_extent.clear
     end
 
     # End a ⇧arrow range gesture AND hand back everything it marked — what letting go of ⇧
     # and pressing a plain arrow does in a GUI list, where the highlight collapses instead of
-    # being left behind (#442/#457). Only the gesture's own ids go (@mark_extent): `t`/⇧T
-    # marks are deliberate tags, and dropping those too would put a discontiguous set out of
-    # reach. Returns how many marks it gave back, so the caller can say so.
+    # being left behind (#442/#457). Only the gesture's own ids go: `t`/⇧T marks are
+    # deliberate tags, and dropping those too would put a discontiguous set out of reach.
+    # Returns how many marks it gave back, so the caller can say so.
     def end_mark_gesture : Int32
-      before = @marks.size
-      @mark_extent.each { |id| @marks.delete(id) }
-      reset_mark_anchor
-      before - @marks.size
+      @marks.end_gesture
     end
 
     # ⇧↑/⇧↓ — extend a contiguous range from the anchor, the keyboard form of a GUI
@@ -364,23 +344,10 @@ module Gori::Tui
     # move/click clears it), so the first ⇧arrow always starts from where you are.
     def extend_marks(delta : Int32) : Nil
       return if @items.empty?
-      anchor_idx = @mark_anchor.try { |a| @items.index { |it| it.id == a } }
-      unless anchor_idx
-        @mark_anchor = selected_id
-        anchor_idx = @selected
-        @mark_extent.clear
-      end
+      anchor_idx = @marks.anchor.try { |a| @items.index { |it| it.id == a } }
+      from = @selected
       step_cursor(delta)
-      lo, hi = {anchor_idx, @selected}.minmax
-      wanted = Set(Int64).new
-      (lo..hi).each { |i| @items[i]?.try { |it| wanted.add(it.id) } }
-      # Give back what THIS gesture added but the new range no longer covers, so ⇧↑ after
-      # ⇧↓⇧↓ leaves two rows marked rather than three. A mark made earlier by `t`/⇧T survives
-      # a range sweeping over it and back off, since it was never in @mark_extent.
-      (@mark_extent - wanted).each { |id| @marks.delete(id) }
-      added = wanted - @marks
-      @marks.concat(added)
-      @mark_extent = (@mark_extent & wanted) | added
+      @marks.extend_range(anchor_idx, from, @selected) { |i| @items[i]?.try(&.id) }
     end
 
     # Cursor step used by the mark gestures. Deliberately NOT `move` — that no-ops while
@@ -565,24 +532,17 @@ module Gori::Tui
       @editing = false
     end
 
-    # The forward payload. An UNEDITED forward (editor never opened, or opened to view
-    # only) returns the original raw bytes BYTE-EXACT (P7) — so merely inspecting a
-    # held message can't mutate it, and a deliberately CL-mismatched smuggling probe
-    # forwards untouched. Only an ACTUAL edit returns the editor's bytes, with
-    # Content-Length recomputed to match the edited body (Burp's "update
-    # Content-Length", default on; add_when_missing: true so adding a body to a GET
-    # that had none still gets framed). The proxy itself stays byte-exact — the
-    # update-CL decision lives here, in the human's editor, not the wire path. An edit now
-    # keeps every line's ORIGINAL terminator (TextArea#wire_text), so editing the head leaves
-    # the body byte-identical; only the head is normalized to CRLF, which is where CRLF is
-    # required. The one thing an edit still changes on its own is Content-Length, deliberately.
-    def forward_bytes(it : Interceptor::Item) : Bytes
-      edit = pending_edit
-      (edit && edit[0] == it.id) ? edit[1] : it.raw
-    end
-
     # The {id, edited-bytes} of the currently-loaded held item IFF it has an unsaved edit,
-    # else nil. Keyed by @loaded_id (the item the editor holds) rather than the queue
+    # else nil — and nil is what makes an UNEDITED forward (editor never opened, or opened to
+    # view only) send the original raw bytes BYTE-EXACT (P7), so merely inspecting a held
+    # message can't mutate it, and a deliberately CL-mismatched smuggling probe forwards
+    # untouched. Only an ACTUAL edit returns the editor's bytes, with Content-Length recomputed
+    # to match the edited body (Burp's "update Content-Length", default on; add_when_missing:
+    # true so adding a body to a GET that had none still gets framed). The proxy itself stays
+    # byte-exact — the update-CL decision lives here, in the human's editor, not the wire path.
+    # An edit keeps every line's ORIGINAL terminator (TextArea#wire_text), so editing the head
+    # leaves the body byte-identical; only the head is normalized to CRLF, which is where CRLF
+    # is required. The one thing an edit still changes on its own is Content-Length. Keyed by @loaded_id (the item the editor holds) rather than the queue
     # selection, so "forward all" can pick up an in-progress edit for whichever item is
     # loaded even when the cursor has since moved to a different row.
     # A WebSocket message payload is taken VERBATIM, and the kind gate comes before anything
@@ -754,7 +714,7 @@ module Gori::Tui
 
     # backspace/delete/undo are no-ops at buffer start / end-of-buffer / empty undo
     # stack (TextArea returns early without bumping @edits). A no-op here must NOT set
-    # @editor_dirty: once dirty, forward_bytes recomputes Content-Length and normalizes
+    # @editor_dirty: once dirty, pending_edit recomputes Content-Length and normalizes
     # line endings, so a held message the user only *looked* at would forward as
     # different bytes — breaking the byte-exact hold contract (P7). Gate on a real edit.
     def edit_undo : Nil
@@ -809,7 +769,7 @@ module Gori::Tui
     # one where a mistyped header could not be selected and replaced.
     #
     # `mark_editor_edit` only on a real buffer change (⌥⌫), and for the reason spelled out at
-    # `edit_undo`: once dirty, `forward_bytes` recomputes Content-Length and normalizes line
+    # `edit_undo`: once dirty, `pending_edit` recomputes Content-Length and normalizes line
     # endings, so a held message the operator only NAVIGATED must not be marked edited or it
     # forwards as different bytes (P7).
     def edit_motion_key(ev : Termisu::Event::Key) : Bool
@@ -903,7 +863,7 @@ module Gori::Tui
     end
 
     # Replace the held item's editable bytes (e.g. from the external editor); only
-    # while editing — forward_bytes then sends the edited text.
+    # while editing — pending_edit then sends the edited text.
     #
     # `set_text` is the exact inverse of the `wire_text` above (`TextArea#split_wire`
     # round-trips every terminator, including a lone CR), so ^E is a byte-exact round trip
@@ -1016,7 +976,7 @@ module Gori::Tui
     def select_index(idx : Int32) : Nil
       return if @items.empty?
       @selected = idx.clamp(0, @items.size - 1)
-      reset_mark_anchor # same as the keyboard `move`: a plain click re-seeds the anchor
+      @marks.reset_anchor # same as the keyboard `move`: a plain click re-seeds the anchor
     end
 
     # Click the queue list → focus the list (stop editing the detail editor).
@@ -1303,7 +1263,7 @@ module Gori::Tui
         it = @items[idx]
         y = inner.y + i
         selected = idx == @selected
-        marked = @marks.includes?(it.id)
+        marked = @marks.marked?(it.id)
         bg = row_band(screen, inner, y, selected: selected, marked: marked, focused: focused)
         badge, bcolor = kind_badge(it.kind)
         screen.text(inner.x + 1, y, badge, bcolor, bg, Attribute::Bold)
@@ -1524,7 +1484,7 @@ module Gori::Tui
     # fiber on selection (mirrors the History/Repeater windowing).
     private def detail_window_for(it : Interceptor::Item) : Highlight::Windowed
       # When this is the item loaded in the editor AND it was modified, preview the EDITED
-      # bytes (mirrors forward_bytes / effective_method_target) rather than the pristine
+      # bytes (mirrors pending_edit / effective_method_target) rather than the pristine
       # held bytes — so leaving the editor for the QUEUE doesn't snap the body back to the
       # original. edit_rev keys the cache on the editor's change counter for that case.
       edited = @loaded_id == it.id && @editor_dirty

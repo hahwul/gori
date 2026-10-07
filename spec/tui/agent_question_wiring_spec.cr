@@ -1,5 +1,6 @@
 require "../spec_helper"
 require "../support/memory_backend"
+require "../support/tui_probes"
 
 include Gori::Tui
 

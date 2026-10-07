@@ -227,7 +227,8 @@ describe "Project ENV inline edit" do
         x, y = env_cell(ctl, 1)
         ctl.handle_click(RECT, x, y)
         ctl.handle_double_click(RECT, x, y).should be_true
-        ctl.view.env_editing?.should be_true
+        ctl.view.@env_adding.should be_true # open as an EDIT of row 1, not an add
+        ctl.view.@env_edit_idx.should eq(1)
         ctl.view.@env_field.value.should eq("BETA 2")
         TuiContract.render(ctl)
         row_of(ctl, "BETA 2").should eq(beta_row)

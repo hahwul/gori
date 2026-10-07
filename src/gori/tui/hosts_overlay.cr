@@ -471,21 +471,16 @@ module Gori::Tui
     # open) but is capped to the area, so a short terminal scrolls instead of demanding all
     # rows. The key-hint lives in the status bar (key_hints), so no row is reserved here.
     def overlay_box(area : Rect) : Rect?
-      w = {area.w - 4, 56}.min
       # Show a comfortable minimum of 6 list rows even for a short/empty list (so a
       # 1-entry editor isn't a cramped sliver), capped to what the terminal can fit.
       rows = {@items.size + (@adding ? 1 : 0), 6}.max
-      h = {area.h - 2, rows + 3}.min # title gap + list + bottom border
-      return nil if w < 28 || h < 6
-      area.center(w, h)
+      area.card?(56, rows + 3, 28, 6) # h: title gap + list + bottom border
     end
 
     private def draw_row(screen : Screen, box : Rect, i : Int32, py : Int32) : Nil
       host, ip = @items[i]
       sel = i == @selected && !@adding
-      bg = sel ? Theme.accent_bg : Theme.panel
-      screen.fill(Rect.new(box.x + 1, py, box.w - 2, 1), bg)
-      screen.cell(box.x + 1, py, sel ? '▎' : ' ', Theme.accent, bg)
+      bg = Frame.row_band(screen, box, py, sel)
       ipw = {box.w * 2 // 5, 8}.max
       screen.text(box.x + 3, py, ip, Theme.accent, bg, width: ipw)
       ax = box.x + 3 + ipw

@@ -1,4 +1,5 @@
 require "../../support/tui_contract"
+require "../../support/tui_probes"
 
 include Gori::Tui
 

@@ -112,7 +112,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
           push_agent_note(:warn, "intercept edit REFUSED, still held: #{desc}", item)
           return false
         end
-        # Forward the AGENT's edited bytes DIRECTLY — never through view.forward_bytes, which
+        # Forward the AGENT's edited bytes DIRECTLY — never through view.pending_edit, which
         # would pull the human editor buffer and re-expand $VARS (wrong bytes + secret leak).
         unless ic.forward(item_id, bytes)
           store.ack_intercept_command(cmd.id, "error", "already decided by another surface: #{desc}")

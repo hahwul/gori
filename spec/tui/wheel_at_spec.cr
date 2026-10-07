@@ -129,7 +129,7 @@ describe "TabController#handle_wheel_at" do
         mx, my = cell_where(TuiContract::AREA) { |x, y| view.pane_at(body, x, y) == :template }
         controller.handle_wheel_at(4, mx, my, TuiContract::AREA).should be_true
         view.focus.should eq(:target)
-        view.template_scroll.should be > 0
+        view.@editor.scroll.should be > 0
       end
     end
   end

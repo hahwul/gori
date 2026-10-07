@@ -8,7 +8,7 @@ require "./theme"
 require "./frame"
 require "./text_field"
 require "./viewport"
-require "./url"
+require "../url"
 require "./flow_status"
 require "../plural"
 

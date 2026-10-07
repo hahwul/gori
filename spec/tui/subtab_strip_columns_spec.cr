@@ -138,7 +138,7 @@ describe "Chrome tab menu — chip geometry in display columns" do
     # but menu_layout takes `tabs:` from the caller and shares scroll_start with the sub-tab
     # strip, and the two must not measure a label differently.
     tabs = [{:cjk, CJK_LABEL}, {:beta, "beta"}]
-    segs = Chrome.menu_segments(CJK_RECT, :cjk, tabs: tabs)
+    segs = Chrome.menu_geometry(CJK_RECT, :cjk, tabs: tabs).segments
     segs[0][1].w.should eq(Screen.display_width(CJK_LABEL) + 2)
     segs[1][1].x.should be >= segs[0][1].right
   end

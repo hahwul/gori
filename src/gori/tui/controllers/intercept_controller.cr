@@ -1,6 +1,6 @@
 require "../tab_controller"
 require "../intercept_view"
-require "../url"
+require "../../url"
 require "../../interceptor"
 require "../../hotkeys"
 

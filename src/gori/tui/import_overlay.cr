@@ -144,10 +144,7 @@ module Gori::Tui
     # Tall enough (14) that PathComplete's 8-row cap fits under the field instead of
     # being clipped; `area` still wins on a short terminal.
     def overlay_box(area : Rect) : Rect?
-      w = {area.w - 4, 76}.min
-      h = {area.h - 2, 14}.min
-      return nil if w < 40 || h < 8
-      area.center(w, h)
+      area.card?(76, 14, 40, 8)
     end
 
     def render(screen : Screen, area : Rect) : Nil

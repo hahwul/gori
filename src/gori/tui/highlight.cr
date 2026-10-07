@@ -801,15 +801,6 @@ module Gori::Tui
       sliced
     end
 
-    # Total drawn column span of a styled line (sum of its spans) — used to clamp a
-    # horizontal scroll offset against the widest currently-visible row. Uses draw_width,
-    # which is what `draw` below actually advances by: ≥1 per cluster so an embedded tab
-    # keeps its cell, but ONE cluster per glyph so a ZWJ emoji doesn't inflate the line by
-    # its codepoint count and let the view scroll past the end of the content.
-    def self.line_width(line : Line) : Int32
-      line.sum { |span| Screen.draw_width(span.text) }
-    end
-
     # The styled line's own characters, colour dropped. The bridge for a pane whose ONLY source
     # is styled — the windowed message views (`Windowed#line_at` returns a `Line`) — into
     # anything that addresses text: `ReadPane`'s caret and selection, a copy, a search. Spans
@@ -820,7 +811,11 @@ module Gori::Tui
       String.build { |io| line.each { |span| io << span.text } }
     end
 
-    # As `line_width`, but stops summing once the running width reaches `limit` — and
+    # Drawn column span of a styled line — used to clamp a horizontal scroll offset against
+    # the widest currently-visible row. Measures what `draw` actually advances by: ≥1 per
+    # cluster so an embedded tab keeps its cell, but ONE cluster per glyph so a ZWJ emoji
+    # doesn't inflate the line by its codepoint count and let the view scroll past the end of
+    # the content. Stops summing once the running width reaches `limit` — and
     # caps WITHIN a span too (a huge minified body is one plain span > MAX_HL_LINE), so
     # the per-frame h-scroll clamp never fully measures a multi-MB line. See
     # Screen.draw_width_upto. Exact for lines narrower than limit.

@@ -45,10 +45,6 @@ module Gori::Tui
       {@prefix, @items}
     end
 
-    def prefix_editing? : Bool
-      @prefix_editing
-    end
-
     # --- Overlay contract (see overlay.cr) ---
     def key : OverlayKind
       OverlayKind::Env
@@ -168,11 +164,8 @@ module Gori::Tui
     end
 
     def overlay_box(area : Rect) : Rect?
-      w = {area.w - 4, 56}.min
       rows = {@items.size + (@adding ? 1 : 0) + (@prefix_editing ? 1 : 0), 6}.max
-      h = {area.h - 2, rows + 4}.min
-      return nil if w < 28 || h < 8
-      area.center(w, h)
+      area.card?(56, rows + 4, 28, 8)
     end
 
     # `global` in the meta, because this card has a TWIN: the Project tab's Env pane, with the
@@ -225,9 +218,7 @@ module Gori::Tui
     private def draw_row(screen : Screen, box : Rect, i : Int32, py : Int32) : Nil
       key, val = @items[i]
       sel = i == @selected && !row_open?
-      bg = sel ? Theme.accent_bg : Theme.panel
-      screen.fill(Rect.new(box.x + 1, py, box.w - 2, 1), bg)
-      screen.cell(box.x + 1, py, sel ? '▎' : ' ', Theme.accent, bg)
+      bg = Frame.row_band(screen, box, py, sel)
       kw = {box.w * 2 // 5, 8}.max
       screen.text(box.x + 3, py, key, Theme.syn_header, bg, width: kw)
       ax = box.x + 3 + kw

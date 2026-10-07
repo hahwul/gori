@@ -21,6 +21,7 @@ require "./query_suggest"
 require "./suggest_popup"
 require "./issue_presentation"
 require "../plural"
+require "./project_marks"
 
 module Gori::Tui
   # The Issues tab (DESIGN.md §6: the final output — human-confirmed vulns). A
@@ -80,12 +81,7 @@ module Gori::Tui
       # apply_filter), so an index-keyed set would silently retarget. A mark the current
       # filter hides stays marked (marked_hidden_count reports it); a mark whose issue is
       # gone simply fails to resolve at the verb.
-      @marks = Set(Int64).new
-      @mark_anchor = nil.as(Int64?) # id-keyed range anchor for the ⇧arrow extend
-      # Ids the CURRENT ⇧arrow gesture added, so shrinking the range gives them back the way
-      # a GUI shift+click does. Scoped to the gesture, so marks made by `t`/⇧T outside the
-      # range are never disturbed. Cleared whenever the anchor is.
-      @mark_extent = Set(Int64).new
+      @marks = Marks(Int64).new
       @notes_mode = InputMode::Read
       @notes_read = TextReadState.new
       @notes = TextArea.new
@@ -158,7 +154,7 @@ module Gori::Tui
       return if @issues.empty?
       @selected = (@selected + delta).clamp(0, @issues.size - 1)
       @preview_scroll = 0
-      reset_mark_anchor # a plain move re-seeds the range anchor, like a GUI list
+      @marks.reset_anchor # a plain move re-seeds the range anchor, like a GUI list
     end
 
     # The first ISSUE-row screen-y — ONE derivation, so `render_list` and both hit-tests
@@ -235,7 +231,7 @@ module Gori::Tui
       return if @issues.empty?
       @selected = idx.clamp(0, @issues.size - 1)
       @preview_scroll = 0
-      reset_mark_anchor # same as the keyboard `move`: a plain click re-seeds the anchor
+      @marks.reset_anchor # same as the keyboard `move`: a plain click re-seeds the anchor
       @preview_focus = :list
     end
 
@@ -781,7 +777,7 @@ module Gori::Tui
     # --- marks (multi-select) -------------------------------------------------
 
     def marked?(id : Int64) : Bool
-      @marks.includes?(id)
+      @marks.marked?(id)
     end
 
     def mark_count : Int32
@@ -793,7 +789,7 @@ module Gori::Tui
     def marked_hidden_count : Int32
       return 0 if @marks.empty?
       visible = 0
-      @issues.each { |f| visible += 1 if @marks.includes?(f.id) }
+      @issues.each { |f| visible += 1 if @marks.marked?(f.id) }
       @marks.size - visible
     end
 
@@ -814,13 +810,13 @@ module Gori::Tui
     # The rows `y` copies from the LIST: the marks if any, else the cursor row — each as
     # `[severity] title (host)`, one per line.
     def copy_rows_text : String
-      rows = @marks.empty? ? [@issues[@selected]?].compact : @all.select { |f| @marks.includes?(f.id) }
+      rows = @marks.empty? ? [@issues[@selected]?].compact : @all.select { |f| @marks.marked?(f.id) }
       rows.map { |f| "[#{f.severity.label}] #{f.title}#{f.host ? " (#{f.host})" : ""}" }.join("\n")
     end
 
     def marked_ids : Array(Int64)
       return [] of Int64 if @marks.empty?
-      @all.compact_map { |f| f.id if @marks.includes?(f.id) }
+      @all.compact_map { |f| f.id if @marks.marked?(f.id) }
     end
 
     # The effective target set every batch verb acts on: the marks if any are set, else the
@@ -849,50 +845,35 @@ module Gori::Tui
     # lands on the row just toggled, so `t` then ⇧↓ extends from it.
     def toggle_mark : Nil
       return unless id = selected_id
-      @marks.includes?(id) ? @marks.delete(id) : @marks.add(id)
+      @marks.toggle(id)
       step_cursor(1)
-      @mark_anchor = id
-      @mark_extent.clear
     end
 
     # ⇧T — mark every issue the CURRENT filter shows, unioned with what's already marked (so
     # narrowing the filter twice accumulates rather than replaces).
     def mark_all : Nil
-      @issues.each { |f| @marks.add(f.id) }
-      @mark_anchor = selected_id
-      @mark_extent.clear
+      @marks.mark_all(@issues.map(&.id), selected_id)
     end
 
     def clear_marks : Nil
       @marks.clear
-      reset_mark_anchor
-    end
-
-    # Forget where a range gesture started (and what it had added), so the next ⇧arrow
-    # anchors at the cursor instead of sweeping back to a stale point.
-    private def reset_mark_anchor : Nil
-      @mark_anchor = nil
-      @mark_extent.clear
     end
 
     # End a ⇧arrow range gesture AND hand back everything it marked — what letting go of ⇧
     # and pressing a plain arrow does in a GUI list, where the highlight collapses instead of
-    # being left behind. Only the gesture's own ids go (@mark_extent): `t`/⇧T marks are
+    # being left behind. Only the gesture's own ids go: `t`/⇧T marks are
     # deliberate tags, and dropping those too would put a discontiguous set out of reach
     # ("mark this one, skip three, mark that one"). Returns how many marks it gave back, so
     # the caller can say so rather than let a range vanish silently.
     def end_mark_gesture : Int32
-      before = @marks.size
-      @mark_extent.each { |id| @marks.delete(id) }
-      reset_mark_anchor
-      before - @marks.size
+      @marks.end_gesture
     end
 
     # Drop specific marks — the post-batch-delete prune, so a deleted issue's id can't linger
     # in the set and inflate the next count.
     def unmark_ids(ids : Enumerable(Int64)) : Nil
-      ids.each { |id| @marks.delete(id); @mark_extent.delete(id) }
-      reset_mark_anchor if (a = @mark_anchor) && !@marks.includes?(a) && index_of(a).nil?
+      ids.each { |id| @marks.delete(id) }
+      @marks.reset_anchor if (a = @marks.anchor) && !@marks.marked?(a) && index_of(a).nil?
     end
 
     # ⇧↑/⇧↓ — extend a contiguous range from the anchor, the keyboard form of a GUI
@@ -900,23 +881,10 @@ module Gori::Tui
     # plain move/click clears it), so the first ⇧arrow always starts from where you are.
     def extend_marks(delta : Int32) : Nil
       return if @issues.empty?
-      anchor_idx = @mark_anchor.try { |a| index_of(a) }
-      unless anchor_idx
-        @mark_anchor = selected_id
-        anchor_idx = @selected
-        @mark_extent.clear
-      end
+      anchor_idx = @marks.anchor.try { |a| index_of(a) }
+      from = @selected
       step_cursor(delta)
-      lo, hi = {anchor_idx, @selected}.minmax
-      wanted = Set(Int64).new
-      (lo..hi).each { |i| @issues[i]?.try { |f| wanted.add(f.id) } }
-      # Give back what THIS gesture added but the new range no longer covers, so ⇧↑ after
-      # ⇧↓⇧↓ leaves two rows marked rather than three, while a `t`/⇧T mark the range swept
-      # over and back off survives.
-      (@mark_extent - wanted).each { |id| @marks.delete(id) }
-      added = wanted - @marks
-      @marks.concat(added)
-      @mark_extent = (@mark_extent & wanted) | added
+      @marks.extend_range(anchor_idx, from, @selected) { |i| @issues[i]?.try(&.id) }
     end
 
     # Cursor step used by the mark gestures. Deliberately NOT `move` (which redirects to
@@ -975,10 +943,6 @@ module Gori::Tui
     end
 
     # --- notes READ/INS (inline editor) ---
-    def start_notes_edit : Nil
-      enter_notes_insert!
-    end
-
     # The notes buffer READ-mode edits run against (`TabController#editor_text_buffer`).
     def read_edit_buffer : {TextArea, TextReadState}?
       notes_focused? ? {@notes, @notes_read} : nil
@@ -1247,7 +1211,7 @@ module Gori::Tui
         # distinguishable from the cursor row (which keeps the accent band) and from a cursor
         # row that is ALSO marked (accent band + full bar). Both glyphs are single-width, so
         # no column offset moves — the `top` math and list_row_at stay valid.
-        marked = @marks.includes?(f.id)
+        marked = @marks.marked?(f.id)
         bg = row_bg(selected, marked, focused)
         if selected || marked
           screen.fill(Rect.new(rect.x, y, rect.w, 1), bg)

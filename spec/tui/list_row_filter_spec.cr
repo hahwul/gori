@@ -53,7 +53,7 @@ describe "the `/` filter on Discover FINDINGS" do
     view.move(5)
     view.selected_finding.not_nil!.url.should end_with("/beta") # one visible row
     view.handle_filter_key(key(Termisu::Input::Key::Escape))
-    view.filter_editing?.should be_false
+    view.filter.editing?.should be_false
     view.selected_finding.not_nil!.url.should end_with("/beta")
     view.move(5)
     view.selected_finding.not_nil!.url.should end_with("/gamma")
@@ -83,7 +83,7 @@ describe "the `/` filter on Miner RESULTS" do
     view.focus_pane(:results)
     view.filter_start
     type(view, "adm")
-    view.filter_editing?.should be_true
+    view.filter.editing?.should be_true
     render(view).contains?("1/3").should be_true
     view.selected_finding.not_nil!.name.should eq("admin")
     view.append_finding(miner_finding("adm2")) # a live append under the lens
@@ -98,7 +98,7 @@ describe "the `/` filter on Authorize requests" do
   it "narrows the rows, numbers them by source ordinal, and removes the right entry" do
     view = AuthorizeView.new
     %w[/one /two /three].each { |t| view.add(flow(t)) }
-    view.filter_start
+    view.filter.start
     type(view, "two")
     b = render(view)
     b.contains?("1 match").should be_true

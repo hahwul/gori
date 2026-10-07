@@ -343,9 +343,7 @@ module Gori::Tui
 
     private def draw_row(screen : Screen, box : Rect, y : Int32, idx : Int32) : Nil
       active = idx == @selected
-      bg = active ? Theme.accent_bg : Theme.panel
-      screen.fill(Rect.new(box.x + 1, y, box.w - 2, 1), bg)
-      screen.cell(box.x + 1, y, active ? '▎' : ' ', Theme.accent, bg)
+      bg = Frame.row_band(screen, box, y, active)
       x = box.x + 3
       right = box.right - 2
       if @mode == :results

@@ -144,16 +144,7 @@ module Gori::Tui
     end
 
     def render(screen : Screen, area : Rect) : Nil
-      box = overlay_box(area)
-      unless box
-        Overlay.too_small(screen, area, "picker needs a larger window")
-        return
-      end
-      Frame.card(screen, box, @title, border: Theme.border_focus)
-
-      list_top = render_filter(screen, box, idle_hint)
-      list_h = list_height(box)
-      ensure_visible(list_h)
+      box, list_top, list_h = render_card(screen, area, @title, idle_hint) || return
 
       if @filtered.empty?
         # An empty LIBRARY and an empty FILTER are different dead ends, and the way out of
@@ -163,10 +154,8 @@ module Gori::Tui
         return
       end
 
-      (0...list_h).each do |i|
-        ri = @scroll + i
-        break if ri >= @filtered.size
-        draw_row(screen, box, list_top + i, @filtered[ri], ri == @selected)
+      each_visible_row(list_top, list_h, @filtered.size) do |ry, ri|
+        draw_row(screen, box, ry, @filtered[ri], ri == @selected)
       end
     end
 

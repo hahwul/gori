@@ -18,7 +18,6 @@ describe "HistoryView's frozen-evidence marker" do
       view = HistoryView.new
       view.reload(store)
       view.open_detail_id(id, store).should be_true
-      view.detail_frozen_count.should eq(0)
       stats_row(view).should_not contain("frozen")
 
       issue = store.insert_issue("t", Gori::Store::Severity::Low, nil, nil)
@@ -26,14 +25,13 @@ describe "HistoryView's frozen-evidence marker" do
       store.freeze_evidence(issue, snap)
       store.freeze_evidence(issue, snap)
       view.refresh_evidence_marker(store)
-      view.detail_frozen_count.should eq(2)
       stats_row(view).should contain("frozen ×2")
 
       # And a fresh open reads it without being told.
       other = HistoryView.new
       other.reload(store)
       other.open_detail_id(id, store).should be_true
-      other.detail_frozen_count.should eq(2)
+      stats_row(other).should contain("frozen ×2")
     end
   end
 end

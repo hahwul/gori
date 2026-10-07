@@ -53,7 +53,7 @@ describe Gori::Tui::KeysetPad do
     it "deletes the caret's line with dd and pastes it back with p" do
       p = pad(Kind::Vim)
       press(p, "d")
-      p.armed?.should be_true
+      p.@armed.should_not be_nil
       press(p, "d")
       p.text.should eq(LINES[1..].join("\n"))
       press(p, "p")
@@ -71,7 +71,7 @@ describe Gori::Tui::KeysetPad do
     it "spends an armed d on the next key, whatever it is" do
       p = pad(Kind::Vim)
       press(p, "dj")
-      p.armed?.should be_false
+      p.@armed.should be_nil
       p.text.should eq(Gori::Tui::KeysetPad::SAMPLE)
       p.status.should contain("cancelled")
     end
@@ -158,7 +158,7 @@ describe Gori::Tui::KeysetPad do
     press(p, "Vj")
     p.handle_key(esc).should be_true
     press(p, "d") # arms dd now: nothing is selected
-    p.armed?.should be_true
+    p.@armed.should_not be_nil
     p.handle_key(esc).should be_true # …which esc cancels
     p.handle_key(esc).should be_false
     p.text.should eq(Gori::Tui::KeysetPad::SAMPLE)
@@ -168,7 +168,7 @@ describe Gori::Tui::KeysetPad do
     p = pad(Kind::Vim)
     press(p, "d")
     p.handle_key(esc).should be_true
-    p.armed?.should be_false
+    p.@armed.should be_nil
   end
 
   it "never falls through to Global: c does not reach stop-capture" do
@@ -182,7 +182,7 @@ describe Gori::Tui::KeysetPad do
     p = pad(Kind::Vim)
     press(p, "d")
     p.keyset = Kind::Helix
-    p.armed?.should be_false
+    p.@armed.should be_nil
     press(p, "d")
     p.text.should eq(Gori::Tui::KeysetPad::SAMPLE)
   end
@@ -224,7 +224,7 @@ describe Gori::Tui::KeysetPad do
     press(p, "j")
     p.status.should_not contain("cancelled")
     press(p, "d")
-    p.armed?.should be_true # a fresh first press, not the second half of the old one
+    p.@armed.should_not be_nil # a fresh first press, not the second half of the old one
     p.text.should eq(Gori::Tui::KeysetPad::SAMPLE)
   end
 

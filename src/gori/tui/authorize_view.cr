@@ -5,7 +5,7 @@ require "./viewport"
 require "./row_filter"
 require "./theme"
 require "./fmt"
-require "./url"
+require "../url"
 require "./traffic_empty_state"
 require "../authorize/engine"
 require "../authorize/passive"
@@ -277,13 +277,9 @@ module Gori::Tui
       end
     end
 
-    # How many entries hold a result — the honest denominator for a run summary. After a stop,
-    # "no identity matched across N requests" would be a claim about requests that never ran.
-    def completed_count : Int32
-      @entries.count { |e| !e.target.nil? }
-    end
-
-    # The same two counts restricted to ONE batch. A run summary says what THIS run did, so it
+    # How many entries of ONE batch hold a result — the honest denominator for a run summary.
+    # After a stop, "no identity matched across N requests" would be a claim about requests
+    # that never ran. A run summary says what THIS run did, so it
     # cannot use the queue-wide totals: after a partial run, "ran 6" over a queue of six when
     # the batch was three describes work done by earlier runs.
     def completed_in(ids : Set(Int32)) : Int32
@@ -404,10 +400,6 @@ module Gori::Tui
       nil
     end
 
-    def bypass_total : Int32
-      @entries.sum { |e| (t = e.target) ? t.same_count : 0 }
-    end
-
     # Empty the queue. Deliberately does NOT reset `@next_id` — see `add`.
     def clear : Nil
       touch
@@ -471,17 +463,7 @@ module Gori::Tui
     # A lens over `@entries`: `visible` is what the cursor, the list and `selected_entry` walk.
     # It is never a run scope — `pending_entries`, `mark_running`, `runnable` keep reading
     # `@entries`, so a hidden row still runs.
-    def filter_start : Nil
-      @filter.start
-    end
-
-    def filter_editing? : Bool
-      @filter.editing?
-    end
-
-    def filter_hint : String
-      @filter.hint
-    end
+    getter filter : RowFilter
 
     # Re-anchored by entry ID, since removals shift the source indices.
     def handle_filter_key(ev : Termisu::Event::Key) : Bool
@@ -490,10 +472,6 @@ module Gori::Tui
       @sel = (prev && visible.index { |i| @entries[i].id == prev }) || @sel.clamp(0, {visible.size - 1, 0}.max)
       anchor_sel
       true
-    end
-
-    def set_filter_preedit(text : String) : Bool
-      @filter.set_preedit(text)
     end
 
     private def touch : Nil
@@ -584,11 +562,6 @@ module Gori::Tui
 
     def list_contains?(mx : Int32, my : Int32) : Bool
       r = @list_rows_rect
-      !r.empty? && r.contains?(mx, my)
-    end
-
-    def detail_contains?(mx : Int32, my : Int32) : Bool
-      r = @detail_rect
       !r.empty? && r.contains?(mx, my)
     end
 

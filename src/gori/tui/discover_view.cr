@@ -181,17 +181,11 @@ module Gori::Tui
     # --- the FINDINGS `/` filter -------------------------------------------------------------
     # A lens over the selected run's findings: `visible(r)` is the list the cursor, the draw
     # loop and every hit-test walk; the run's own array is untouched.
+    getter filter : RowFilter
+
     def filter_start : Nil
       focus_pane(:findings)
       @filter.start
-    end
-
-    def filter_editing? : Bool
-      @filter.editing?
-    end
-
-    def filter_hint : String
-      @filter.hint
     end
 
     # A key while editing. The cursor is re-anchored to the SOURCE row it was on, so a
@@ -203,10 +197,6 @@ module Gori::Tui
         @fsel = visible(r).index(prev) || @fsel.clamp(0, {visible(r).size - 1, 0}.max)
       end
       true
-    end
-
-    def set_filter_preedit(text : String) : Bool
-      @filter.set_preedit(text)
     end
 
     # Recomputed on every `rev` bump — i.e. per finding while a crawl runs — so it must not
