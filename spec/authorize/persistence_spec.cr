@@ -13,8 +13,8 @@ describe "Authorize identity persistence" do
       Identity.new("anonymous", remove_headers: ["Cookie", "Authorization"]),
     ]
     with_store do |store|
-      store.set_setting(Gori::Store::AUTHORIZE_IDENTITIES_KEY, Gori::Authorize.serialize(ids)).should be_true
-      back = Gori::Authorize.parse_json(store.setting(Gori::Store::AUTHORIZE_IDENTITIES_KEY))
+      store.set_setting(Gori::Store::AUTHORIZE_IDENTITIES_KEY, Gori::SessionSlot.serialize(ids)).should be_true
+      back = Gori::SessionSlot.parse_json(store.setting(Gori::Store::AUTHORIZE_IDENTITIES_KEY))
       back.map(&.name).should eq(["as-captured", "low-priv", "anonymous"])
       back[1].set_headers.should eq([{"Cookie", "session=USER"}])
       back[2].remove_headers.should eq(["Cookie", "Authorization"])
@@ -24,7 +24,7 @@ describe "Authorize identity persistence" do
 
   it "reads back nothing when the key was never written" do
     with_store do |store|
-      Gori::Authorize.parse_json(store.setting(Gori::Store::AUTHORIZE_IDENTITIES_KEY)).should be_empty
+      Gori::SessionSlot.parse_json(store.setting(Gori::Store::AUTHORIZE_IDENTITIES_KEY)).should be_empty
     end
   end
 
@@ -35,7 +35,7 @@ describe "Authorize identity persistence" do
   it "is the same row session slots read, under both key names" do
     Gori::Store::SESSION_SLOTS_KEY.should eq(Gori::Store::AUTHORIZE_IDENTITIES_KEY)
     with_store do |store|
-      store.set_setting(Gori::Store::AUTHORIZE_IDENTITIES_KEY, Gori::Authorize.serialize([
+      store.set_setting(Gori::Store::AUTHORIZE_IDENTITIES_KEY, Gori::SessionSlot.serialize([
         Identity.new("admin", set_headers: [{"Cookie", "session=ADMIN"}]),
       ]))
       Gori::SessionSlots.load(store).slots.map(&.name).should eq(["admin"])
@@ -44,7 +44,7 @@ describe "Authorize identity persistence" do
       Gori::SessionSlots.load(store).save([
         Gori::SessionSlot.new("admin", set_headers: [{"Cookie", "session=ADMIN"}], rules: ["SESSION"]),
       ]).should be_true
-      back = Gori::Authorize.parse_json(store.setting(Gori::Store::AUTHORIZE_IDENTITIES_KEY))
+      back = Gori::SessionSlot.parse_json(store.setting(Gori::Store::AUTHORIZE_IDENTITIES_KEY))
       back.map(&.name).should eq(["admin"])
       back.first.rules.should eq(["SESSION"])
       # An identity is still usable as one: the overlay half is untouched by the rule half.

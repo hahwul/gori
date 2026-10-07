@@ -107,7 +107,7 @@ module Gori::Fuzz
     # to seed the matcher baseline for anomaly diffing.
     def baseline_request : Bytes
       raw = baseline_raw
-      reframed(@config.update_content_length? ? ContentLength.sync(raw, @config.add_content_length_when_missing?) : raw)
+      reframed(@config.update_content_length? ? ContentLength.sync(raw, true) : raw)
     end
 
     # The same request WITHOUT the Content-Length pass. Split out so a surface can ask
@@ -192,7 +192,7 @@ module Gori::Fuzz
         plen = CALIBRATION_BASE_LEN + i * CALIBRATION_STEP
         payloads = Array.new(count) { |k| k < nonced ? random_nonce(plen) : defaults[k] }
         raw, _, _ = render_variation(chained(payloads))
-        bytes = @config.update_content_length? ? ContentLength.sync(raw, @config.add_content_length_when_missing?) : raw
+        bytes = @config.update_content_length? ? ContentLength.sync(raw, true) : raw
         {reframed(bytes), plen * nonced}
       end
     end
@@ -324,7 +324,7 @@ module Gori::Fuzz
       chain_error ||= field_error
       bytes = raw
       if @config.update_content_length?
-        bytes, at, delta = ContentLength.sync_at(raw, @config.add_content_length_when_missing?)
+        bytes, at, delta = ContentLength.sync_at(raw, true)
         spans = shift_spans(spans, at, delta) unless delta == 0
       end
       bytes = reframed(bytes)
@@ -353,7 +353,7 @@ module Gori::Fuzz
       r = script.render_spans(values)
       hs, spans = r.handshake, r.handshake_spans
       if @config.update_content_length?
-        hs, at, delta = ContentLength.sync_at(hs, @config.add_content_length_when_missing?)
+        hs, at, delta = ContentLength.sync_at(hs, true)
         spans = shift_spans(spans, at, delta) unless delta == 0
       end
       Job.new(idx, payloads, pos, hs, spans, chain_error, r.frames)

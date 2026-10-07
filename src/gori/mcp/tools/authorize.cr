@@ -597,7 +597,7 @@ module Gori
         id_list_arg(h, "flow_ids")
       end
 
-      # The explicit identity set as the JSON text `Authorize.parse_json` reads — the SAME
+      # The explicit identity set as the JSON text `SessionSlot.parse_json` reads — the SAME
       # format the TUI's identities pane persists and `gori run authorize --identities FILE`
       # takes, so one shape describes an identity everywhere. An array is accepted inline (the
       # natural tool-call shape) and re-serialized; a string is passed through for a client
@@ -613,7 +613,7 @@ module Gori
         if s = v.as_s?
           text = s.strip
           return nil if text.empty?
-          # Validated HERE rather than left to `Authorize.parse_json`, whose tolerant reader
+          # Validated HERE rather than left to `SessionSlot.parse_json`, whose tolerant reader
           # degrades a malformed blob to an EMPTY list — which would surface as "fewer than two
           # identities" and send the caller looking for a missing identity instead of a typo.
           parsed = (JSON.parse(text) rescue nil)

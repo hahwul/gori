@@ -22,38 +22,38 @@ private def capture_flow(store, *, status = 200, content_type : String? = "text/
 end
 
 describe Gori::Probe::Passive::Tech do
-  describe ".alt_svc_h3_evidence" do
+  describe "Alt-Svc h3 evidence (Gori::AltSvc.h3_evidence)" do
     it "extracts evidence for standard h3" do
-      ev = Gori::Probe::Passive::Tech.alt_svc_h3_evidence(%(h3=":443"; ma=2592000))
+      ev = Gori::AltSvc.h3_evidence(%(h3=":443"; ma=2592000))
       ev.should eq(%(h3=":443"; ma=2592000))
     end
 
     it "extracts evidence for draft version h3-29" do
-      ev = Gori::Probe::Passive::Tech.alt_svc_h3_evidence(%(h3-29=":443"; ma=3600, h3-27=":443"))
+      ev = Gori::AltSvc.h3_evidence(%(h3-29=":443"; ma=3600, h3-27=":443"))
       ev.should eq(%(h3-29=":443"; ma=3600))
     end
 
     it "extracts evidence for draft version h3-Q050" do
-      ev = Gori::Probe::Passive::Tech.alt_svc_h3_evidence(%(h3-Q050=":443"))
+      ev = Gori::AltSvc.h3_evidence(%(h3-Q050=":443"))
       ev.should eq(%(h3-Q050=":443"))
     end
 
     it "finds h3 when preceded by other protocols" do
-      ev = Gori::Probe::Passive::Tech.alt_svc_h3_evidence(%(h2=":443"; ma=86400, h3=":443"; ma=86400))
+      ev = Gori::AltSvc.h3_evidence(%(h2=":443"; ma=86400, h3=":443"; ma=86400))
       ev.should eq(%(h3=":443"; ma=86400))
     end
 
     it "returns nil for clear directive" do
-      Gori::Probe::Passive::Tech.alt_svc_h3_evidence("clear").should be_nil
+      Gori::AltSvc.h3_evidence("clear").should be_nil
     end
 
     it "returns nil for h2 only" do
-      Gori::Probe::Passive::Tech.alt_svc_h3_evidence(%(h2=":443"; ma=86400)).should be_nil
+      Gori::AltSvc.h3_evidence(%(h2=":443"; ma=86400)).should be_nil
     end
 
     it "returns nil for unrelated tokens" do
-      Gori::Probe::Passive::Tech.alt_svc_h3_evidence(%(fooh3=":443")).should be_nil
-      Gori::Probe::Passive::Tech.alt_svc_h3_evidence(%(h32=":443")).should be_nil
+      Gori::AltSvc.h3_evidence(%(fooh3=":443")).should be_nil
+      Gori::AltSvc.h3_evidence(%(h32=":443")).should be_nil
     end
   end
 

@@ -155,7 +155,7 @@ module Gori
 
       # Analyze History flows + Repeater tabs. Returns {detections, repeater_count_scanned}.
       # `progress.call(i, total)` is invoked per flow so a CLI can draw a meter; MCP passes nil.
-      # `active_limit` caps how many flows receive an ACTIVE probe (network volume) WITHOUT
+      # `active_budget` caps how many flows receive an ACTIVE probe (network volume) WITHOUT
       # limiting the request-free PASSIVE scan — nil means no active cap (the CLI).
       # `on_error` (optional) is called once per SKIPPED item — "flow <id>" / "repeater <id>" /
       # a rule id — with the exception that caused it. A scan that hits one keeps going and
@@ -164,16 +164,15 @@ module Gori
       #
       # `stop` (optional — a caller with no way to cancel passes nothing) is polled between
       # items, so a scan the caller abandoned stops reaching the target instead of riding
-      # `active_limit` out. Same spelling and same stance as `Retest.execute`'s own `stop:`
+      # the active budget out. Same spelling and same stance as `Retest.execute`'s own `stop:`
       # and `Repeater::Minimize::Stop`: cooperative, read-only here, and NEVER a surface type
       # — `Probe` does not know an MCP server exists (DESIGN.md §2.1). See `stopped?`.
       def scan_all(store : Store, ids : Array(Int64), *, active : Bool,
                    verify_upstream : Bool = true, scope : Scope? = nil, allow_unscoped : Bool = false,
-                   active_limit : Int32? = nil, opts : Active::Options = Active::Options::DEFAULT,
+                   opts : Active::Options = Active::Options::DEFAULT,
                    rules : RuleConfig? = nil,
                    progress : Proc(Int32, Int32, Nil)? = nil,
                    active_budget : Budget? = nil,
-                   overrides : Gori::HostOverrides? = nil,
                    stop : Proc(Bool)? = nil,
                    on_error : Proc(String, Exception, Nil)? = nil,
                    persist : Persist? = nil) : {Array(Detection), Int32}
@@ -182,10 +181,10 @@ module Gori
         cfg = rules || RuleConfig.load(store)
         # …and the host overrides once too, here rather than in each half, so the two cannot
         # answer "where does this host live" differently within one scan.
-        ov = overrides_for(store, active, overrides)
+        ov = overrides_for(store, active, nil)
         # ONE budget across both halves — see `Budget`. Built here rather than passed down as a
         # number so the repeater half cannot spend the flow half's allowance again.
-        budget = active_budget || Budget.new(active_limit)
+        budget = active_budget || Budget.new(nil)
         if active && cfg.degraded
           on_error.try &.call("probe rules", Gori::Error.new(
             "the disabled-rule list could not be read (store busy or unwritable), so gori does " \
@@ -291,8 +290,7 @@ module Gori
                      active_budget : Budget? = nil,
                      overrides : Gori::HostOverrides? = nil,
                      stop : Proc(Bool)? = nil,
-                     on_error : Proc(String, Exception, Nil)? = nil,
-                     active_seen : Set(String)? = nil) : Array(Detection)
+                     on_error : Proc(String, Exception, Nil)? = nil) : Array(Detection)
         cfg = rules || RuleConfig.load(store)
         outbound = outbound_for(scope, allow_unscoped)
         ov = overrides_for(store, active, overrides)
@@ -303,7 +301,7 @@ module Gori
         # 200 captures of `GET /api/items?page=` sent every rule's probes 200 times, and — worse —
         # spent 200 units of `active_limit` on one surface, so the distinct endpoints after it
         # were never probed at all while the scan reported itself complete.
-        seen = active_seen || Set(String).new
+        seen = Set(String).new
         ids.each_with_index do |id, i|
           # Before the flow is READ, not merely before its active probes: a stop is the caller
           # saying the whole scan is over, so it must cost the store nothing further either.

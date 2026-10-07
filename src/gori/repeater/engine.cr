@@ -591,7 +591,9 @@ module Gori
         "connect failed: #{host}:#{port} — host unreachable (DNS/refused/timeout)"
       end
 
-      private def self.elapsed(started : Time::Instant) : Int64
+      # Microseconds since `started` — the `Result` duration the h1, h2 and WebSocket engines
+      # all report.
+      def self.elapsed(started : Time::Instant) : Int64
         (Time.instant - started).total_microseconds.to_i64
       end
 

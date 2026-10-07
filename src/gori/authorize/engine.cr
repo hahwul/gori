@@ -293,7 +293,7 @@ module Gori
       # why the safe-method gate stays the FIRST thing this method does.
       private def drop_conditional_headers(bytes : Bytes, method : String) : Bytes
         return bytes unless Passive::SAFE_METHODS.includes?(method.upcase)
-        Authorize.overlay_wire(bytes, Identity.new("conditional-headers", remove_headers: CONDITIONAL_HEADERS))
+        SessionSlot.overlay_wire(bytes, Identity.new("conditional-headers", remove_headers: CONDITIONAL_HEADERS))
       end
 
       private def send_one(base_bytes : Bytes, id : Identity,
@@ -313,7 +313,7 @@ module Gori
         # still the verdict — never a reason to log in again and retry.
         SessionRefresh.before_send(id.name)
         gen = Env::Generation.for_dial(origin.host, origin.scheme)
-        bytes = Authorize.overlay_wire(base_bytes, Authorize.resolve(id, gen))
+        bytes = SessionSlot.overlay_wire(base_bytes, Authorize.resolve(id, gen))
         # Whole-buffer verbatim: we supply the identity ourselves, so gori's own session-binding
         # expansion must not ALSO rewrite these bytes (the same reason Probe active marks its
         # probes evidence — see `Fuzz::Backend.all_verbatim`).

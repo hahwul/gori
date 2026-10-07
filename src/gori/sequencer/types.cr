@@ -122,7 +122,6 @@ module Gori
       property concurrency : Int32
       property rps : Float64?
       property throttle_ms : Int32?
-      property jitter_ms : Int32
       property timeout : Time::Span?
       property retries : Int32
       property retry_pause : Time::Span
@@ -157,7 +156,7 @@ module Gori
       def initialize(@mode = Mode::LiveReplay,
                      @token_loc = TokenLoc.new(ExtractKind::Cookie),
                      @goal = 500, @concurrency = 1, @rps = nil, @throttle_ms = nil,
-                     @jitter_ms = 0, @timeout = nil, @retries = 1,
+                     @timeout = nil, @retries = 1,
                      @retry_pause = 500.milliseconds, @max_requests = nil,
                      @manual_tokens = [] of String, @notify = NotifyMode::WhenDone,
                      @keep_alive = true)

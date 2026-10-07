@@ -163,7 +163,7 @@ module Gori
           # on showing `Content-Length: 0abc` while the socket got `Content-Length: 2`. Measured
           # through `gori run repeater create` + `repeater send` against a raw-socket origin.
           # One predicate now, read by both.
-          return bytes unless rewritable_length_header?(lines[idx])
+          return bytes unless Proxy::Codec::Http1.rewritable_length_header?(lines[idx])
           lines[idx] = "Content-Length: #{body.bytesize}"
         elsif add_if_missing && body.bytesize > 0
           # ADD only into a head this function actually parsed. `split("\r\n")` collapses a
@@ -183,28 +183,6 @@ module Gori
           return bytes
         end
         "#{lines.join("\r\n")}\r\n\r\n#{body}".to_slice
-      end
-
-      # May auto-Content-Length rewrite THIS line? Two things have to hold, and the rewrite
-      # replacing the WHOLE line is why both do.
-      #
-      #   * the FIELD NAME starts at column 0. A leading space makes the line an obs-fold
-      #     continuation of the header above it (RFC 9112 §5.2 — a smuggling primitive gori
-      #     stores byte-exact), and the matcher that finds this line deliberately `lstrip`s so
-      #     a bail-out guard cannot be dodged by indenting. Liberal matching is right for a
-      #     REFUSAL and destructive for a REWRITE: `X-Foo: bar\r\n Content-Length: 5` came back
-      #     as an unindented `Content-Length: 2`, i.e. gori un-folding the operator's fold and
-      #     minting a second real header.
-      #   * the VALUE is a plain decimal count and nothing else. Leading zeros and surrounding
-      #     OWS still count as plain — `  0005  ` is an ordinary length gori may keep honest,
-      #     because `strip` runs before the digit test; what is refused is a value with a
-      #     non-digit in it (`0abc`, `+5`, `4GET / HTTP/1.1`) or none at all.
-      #
-      # THE home for that rule: `resync_content_length` above (the wire) and the TUI's
-      # `RepeaterView#plain_numeric_header?` (the visible header) both read it, and they used
-      # to answer differently for the same line.
-      def self.rewritable_length_header?(line : String) : Bool
-        Proxy::Codec::Http1.rewritable_length_header?(line)
       end
 
       # The CAPTURED-FLOW replay policy, as opposed to the repeater's auto-CL toggle above.

@@ -42,7 +42,7 @@ end
 # Two identities: the as-captured baseline plus one that drops the session. Anything less is
 # `NoIdentities` by construction, so most examples need this in place first.
 private def save_identities(store) : Nil
-  store.set_setting(Gori::Store::AUTHORIZE_IDENTITIES_KEY, A.serialize([
+  store.set_setting(Gori::Store::AUTHORIZE_IDENTITIES_KEY, Gori::SessionSlot.serialize([
     A::Identity.as_captured,
     A::Identity.new("anonymous", remove_headers: ["Cookie"]),
   ]))

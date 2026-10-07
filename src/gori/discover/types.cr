@@ -195,7 +195,6 @@ module Gori
       property concurrency : Int32
       property rps : Float64?
       property throttle_ms : Int32?
-      property jitter_ms : Int32
       property timeout : Time::Span?
       property retries : Int32
       property retry_pause : Time::Span
@@ -258,7 +257,7 @@ module Gori
       # the Sender and ignored here (see Discover::Headers).
       property headers : Array({String, String})
 
-      def initialize(@concurrency = 20, @rps = nil, @throttle_ms = nil, @jitter_ms = 0,
+      def initialize(@concurrency = 20, @rps = nil, @throttle_ms = nil,
                      @timeout = nil, @retries = 1, @retry_pause = 500.milliseconds, @max_requests = nil,
                      @keep_alive = true,
                      @spider = true, @bruteforce = true,

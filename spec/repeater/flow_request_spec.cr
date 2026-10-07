@@ -165,23 +165,23 @@ describe Gori::Repeater::FlowRequest do
   end
 
   # ONE predicate, because the editor and the wire were reading two.
-  describe ".rewritable_length_header?" do
+  describe "Proxy::Codec::Http1.rewritable_length_header?" do
     it "accepts a decimal, with or without padding and leading zeros" do
-      Gori::Repeater::FlowRequest.rewritable_length_header?("Content-Length: 5").should be_true
-      Gori::Repeater::FlowRequest.rewritable_length_header?("Content-Length:  0005  ").should be_true
+      Gori::Proxy::Codec::Http1.rewritable_length_header?("Content-Length: 5").should be_true
+      Gori::Proxy::Codec::Http1.rewritable_length_header?("Content-Length:  0005  ").should be_true
     end
 
     it "refuses anything else — those are the operator's deliberate bytes" do
-      Gori::Repeater::FlowRequest.rewritable_length_header?("Content-Length: 0abc").should be_false
-      Gori::Repeater::FlowRequest.rewritable_length_header?("Content-Length: +5").should be_false
-      Gori::Repeater::FlowRequest.rewritable_length_header?("Content-Length:").should be_false
+      Gori::Proxy::Codec::Http1.rewritable_length_header?("Content-Length: 0abc").should be_false
+      Gori::Proxy::Codec::Http1.rewritable_length_header?("Content-Length: +5").should be_false
+      Gori::Proxy::Codec::Http1.rewritable_length_header?("Content-Length:").should be_false
       # The mid-edit clobber shape the editor guard was written for: the next header still
       # glued to this line's tail. Rewriting replaces the WHOLE line, taking it with it.
-      Gori::Repeater::FlowRequest.rewritable_length_header?("Content-Length: 4GET / HTTP/1.1").should be_false
-      Gori::Repeater::FlowRequest.rewritable_length_header?("Content-Length").should be_false
+      Gori::Proxy::Codec::Http1.rewritable_length_header?("Content-Length: 4GET / HTTP/1.1").should be_false
+      Gori::Proxy::Codec::Http1.rewritable_length_header?("Content-Length").should be_false
       # An indented field name is an obs-fold continuation, not a header this may replace.
-      Gori::Repeater::FlowRequest.rewritable_length_header?(" Content-Length: 5").should be_false
-      Gori::Repeater::FlowRequest.rewritable_length_header?("\tContent-Length: 5").should be_false
+      Gori::Proxy::Codec::Http1.rewritable_length_header?(" Content-Length: 5").should be_false
+      Gori::Proxy::Codec::Http1.rewritable_length_header?("\tContent-Length: 5").should be_false
     end
   end
 

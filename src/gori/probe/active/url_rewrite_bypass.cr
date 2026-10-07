@@ -48,7 +48,7 @@ module Gori
 
         def dedup_key(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : String?
           g = gate(detail, opts) || return nil
-          key_string(detail, g[0], g[1])
+          endpoint_key(detail, g[0], g[1])
         end
 
         def plan(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : Plan?
@@ -57,7 +57,7 @@ module Gori
           probe = rebuild_root(detail.request_head, detail.request_body, orig_full)
           control = rebuild_root(detail.request_head, detail.request_body, nil)
           control2 = rebuild_root(detail.request_head, detail.request_body, nil)
-          Plan.new(probe, [] of Param, key_string(detail, method_up, path), [control, control2])
+          Plan.new(probe, [] of Param, endpoint_key(detail, method_up, path), [control, control2])
         end
 
         # results = [probe, control, control2].
@@ -99,10 +99,6 @@ module Gori
           path = path_only(orig_full)
           return nil unless path.starts_with?('/') && path.size > 1
           {method_up, path, orig_full}
-        end
-
-        private def key_string(detail : Store::FlowDetail, method_upcase : String, path : String) : String
-          "url_rewrite_bypass|#{detail.row.host}:#{detail.row.port}|#{method_upcase}|#{path}"
         end
 
         # The plain-root {status, body-size} fingerprint — but only when the root reproduced it on a

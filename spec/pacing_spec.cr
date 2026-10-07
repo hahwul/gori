@@ -3,9 +3,8 @@ require "./spec_helper"
 private class PaceConfig
   getter rps : Float64?
   getter throttle_ms : Int32?
-  getter jitter_ms : Int32
 
-  def initialize(@rps = nil, @throttle_ms = nil, @jitter_ms = 0)
+  def initialize(@rps = nil, @throttle_ms = nil)
   end
 end
 

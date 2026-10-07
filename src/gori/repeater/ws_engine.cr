@@ -62,42 +62,15 @@ module Gori
       # exempt from this: there is at most one, and it is the row that matters.
       MAX_CONTROL_MESSAGES = 64
 
-      # A request head declares a WebSocket upgrade — the single source of truth for "is this
-      # repeater a WebSocket flow?" across the TUI restore paths, the CLI and MCP.
-      #
-      # The predicate lives in `Proxy::WS` (#742) so that `Store::FlowDetail#websocket?` can
-      # ask the same question without requiring this file (→ `flow_request.cr` → `store.cr`,
-      # a cycle). Same bytes, same answer; this is where the REPEATER asks it.
-      #
-      # And note what it therefore means: this predicate is the HTTP/1.1 half ONLY — a head
-      # that opens a socket with an `Upgrade:` handshake answered by a 101. An RFC 8441
-      # extended CONNECT captured over h2 (#733) is a real WebSocket and still answers FALSE
-      # here, because it is opened a different way.
-      #
-      # "Is this a WebSocket gori can re-establish" is `replayable?` below, and it is that
-      # question — not this one — that every seed, every surface gate and `Repeater::Plan`'s
-      # engine choice asks. The distinction used to be moot (there was only one transport) and
-      # keeping the two spellings apart is what stops an h1-only assumption from riding along
-      # into a caller that now has two.
-      def self.upgrade_request?(request : String) : Bool
-        Proxy::WS.upgrade_request?(request)
-      end
-
-      # The RFC 8441 half: `CONNECT` plus the `:protocol websocket` the stored head carries as
-      # its `X-Gori-Protocol` marker. Delegated to the codec for the reason `upgrade_request?`
-      # is — the predicate's home is `Proxy::WS`, and this is where the REPEATER asks it.
-      def self.extended_connect_request?(request : String) : Bool
-        Proxy::WS.extended_connect_request?(request)
-      end
-
       # THE gate: is this a WebSocket `send` can re-open, over either transport?
       #
       # One predicate rather than a two-clause test spelled out at each of the dozen-odd sites
       # that ask (the TUI's three seeds, `gori run repeater`/`fuzz`, four MCP tools, both
       # Minimize surfaces, `Repeater::Plan` and `Fuzz::Plan`). Those sites were written when
-      # `upgrade_request?` WAS the answer, and every one of them would otherwise have had to be
-      # taught the second transport separately — which is exactly how the h1 predicate itself
-      # ended up with three copies (#390, #394, #397).
+      # `Proxy::WS.upgrade_request?` — the HTTP/1.1 `Upgrade:` half ONLY — WAS the answer, and
+      # every one of them would otherwise have had to be taught the second transport
+      # separately — which is exactly how the h1 predicate itself ended up with three copies
+      # (#390, #394, #397).
       def self.replayable?(request : String) : Bool
         Proxy::WS.upgrade_request?(request) || Proxy::WS.extended_connect_request?(request)
       end
@@ -271,12 +244,12 @@ module Gori
                           deadline: Proxy::SocketTuning::HEAD_DEADLINE)
                         "#{detail} from #{host}:#{port}"
                       end
-            return Result.new(head_result.bytes, [] of Message, elapsed(started), error: message)
+            return Result.new(head_result.bytes, [] of Message, Engine.elapsed(started), error: message)
           end
 
           resp = Proxy::Codec::Http1.parse_response_head(head)
           unless resp.status == 101
-            return Result.new(head, [] of Message, elapsed(started),
+            return Result.new(head, [] of Message, Engine.elapsed(started),
               error: "server did not upgrade (status #{resp.status})", upgraded: false)
           end
           note = verify_accept(resp, keys)
@@ -355,7 +328,7 @@ module Gori
         note = with_delivery_note(note, sent, messages.size, st.close_code)
         note = with_unsent_note(note, sent, out_messages.size, st)
         note = with_transport_note(note, sent, out_messages.size, st)
-        Result.new(head, messages, elapsed(started), note: note,
+        Result.new(head, messages, Engine.elapsed(started), note: note,
           close_code: st.close_code, upgraded: true, truncated: st.truncated)
       end
 
@@ -400,7 +373,7 @@ module Gori
             # there was one — `answered?` then reports that the origin replied, exactly as a
             # 403 to an h1 upgrade does.
             reason = opened.error || "server did not upgrade (status #{opened.status})"
-            return Result.new(opened.head, [] of Message, elapsed(started),
+            return Result.new(opened.head, [] of Message, Engine.elapsed(started),
               error: reason, note: opened.note, upgraded: false)
           end
           # `keep_key` has no RFC 8441 form to honour: §5.1 drops `Sec-WebSocket-Key` and
@@ -1049,11 +1022,7 @@ module Gori
       end
 
       private def self.err(message : String, started : Time::Instant) : Result
-        Result.new(Bytes.new(0), [] of Message, elapsed(started), error: message)
-      end
-
-      private def self.elapsed(started : Time::Instant) : Int64
-        (Time.instant - started).total_microseconds.to_i64
+        Result.new(Bytes.new(0), [] of Message, Engine.elapsed(started), error: message)
       end
     end
   end

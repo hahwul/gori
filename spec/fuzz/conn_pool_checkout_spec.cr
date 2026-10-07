@@ -5,7 +5,7 @@ require "openssl"
 
 private alias P = Gori::Repeater::ConnPool
 
-# `ConnPool.checkout_state` is the question asked of every parked socket right before a
+# `Proxy::SocketResidue.state`, asked at `ConnPool` checkout, is the question asked of every parked socket right before a
 # request is written onto it: is anything waiting, and is the peer still there. It answers on
 # two very different paths — an fd-level MSG_PEEK for a plaintext TCPSocket, and a timed read
 # probe for TLS, where OpenSSL hides the fd and residue can sit in its DECRYPTED buffer where
@@ -101,18 +101,18 @@ end
 # (spec_helper's PR #555 note: a bare wait on socket-driven work is how CI hangs).
 private def settle(io, want : P::Checkout, timeout : Time::Span = 3.seconds) : P::Checkout
   deadline = Time.instant + timeout
-  got = P.checkout_state(io)
+  got = Gori::Proxy::SocketResidue.state(io)
   while got != want && Time.instant < deadline
     sleep 10.milliseconds
-    got = P.checkout_state(io)
+    got = Gori::Proxy::SocketResidue.state(io)
   end
   got
 end
 
-describe "ConnPool.checkout_state" do
+describe "ConnPool checkout (Proxy::SocketResidue.state)" do
   describe "plaintext (fd MSG_PEEK)" do
     it "answers Clean on an idle socket with nothing waiting" do
-      tcp_socket { |io| P.checkout_state(io).should eq(P::Checkout::Clean) }
+      tcp_socket { |io| Gori::Proxy::SocketResidue.state(io).should eq(P::Checkout::Clean) }
     end
 
     it "answers Residue when the origin left bytes on the socket" do
@@ -130,7 +130,7 @@ describe "ConnPool.checkout_state" do
 
   describe "TLS (the DRAIN_PROBE path)" do
     it "answers Clean on an idle socket with nothing waiting" do
-      with_ca { |ca| tls_socket(ca) { |io| P.checkout_state(io).should eq(P::Checkout::Clean) } }
+      with_ca { |ca| tls_socket(ca) { |io| Gori::Proxy::SocketResidue.state(io).should eq(P::Checkout::Clean) } }
     end
 
     it "answers Residue for bytes sitting in OpenSSL's DECRYPTED buffer" do
@@ -176,7 +176,7 @@ describe "ConnPool.checkout_state" do
           io.read_fully(buf)
           String.new(buf).should eq(head) # the head, and only the head, was consumed
 
-          P.checkout_state(io).should eq(P::Checkout::Residue)
+          Gori::Proxy::SocketResidue.state(io).should eq(P::Checkout::Residue)
         end
       end
     end
@@ -188,7 +188,7 @@ describe "ConnPool.checkout_state" do
     io = TCPSocket.new("127.0.0.1", TCPServer.new("127.0.0.1", 0).local_address.port) rescue nil
     if io
       io.close
-      P.checkout_state(io).should eq(P::Checkout::Residue)
+      Gori::Proxy::SocketResidue.state(io).should eq(P::Checkout::Residue)
     end
   end
 end

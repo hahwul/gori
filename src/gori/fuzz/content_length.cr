@@ -1,3 +1,5 @@
+require "../ascii_bytes"
+
 module Gori::Fuzz
   # Recomputes a request's Content-Length to match its actual body length after a
   # payload was substituted into the body. Burp's "update Content-Length" option,
@@ -106,7 +108,7 @@ module Gori::Fuzz
       # Skip the rebuild when the line is already exactly the canonical form we'd emit —
       # same early-out as the old `lines[idx] == "Content-Length: #{body_len}"` guard.
       canon = "#{CL_CANON}#{body_len}"
-      return {bytes, 0, 0} if line_eq?(bytes, ls, le, canon)
+      return {bytes, 0, 0} if bytes[ls, le - ls] == canon.to_slice
       # `[ls, le)` is replaced by `canon`, so `le` onwards moves. Offsets INSIDE the old line
       # have no image in the output at all — a payload spliced into the Content-Length VALUE
       # is what this pass overwrites, and the caller is told the region ends at `le`.
@@ -155,7 +157,7 @@ module Gori::Fuzz
       colon = colon_of(bytes, a, le)
       return false unless colon > a
       ns, ne = trim_range(bytes, a, colon)
-      name_eq_ci?(bytes, ns, ne, "content-length")
+      AsciiBytes.range_eq_ci?(bytes, ns, ne, "content-length".to_slice)
     end
 
     # Index of the first `:` in `[a, e)`, or -1 when absent.
@@ -172,41 +174,13 @@ module Gori::Fuzz
     private def self.trim_range(bytes : Bytes, a : Int32, e : Int32) : {Int32, Int32}
       s = a
       t = e
-      while s < t && ws?(bytes[s])
+      while s < t && AsciiBytes.whitespace?(bytes[s])
         s += 1
       end
-      while t > s && ws?(bytes[t - 1])
+      while t > s && AsciiBytes.whitespace?(bytes[t - 1])
         t -= 1
       end
       {s, t}
-    end
-
-    # Case-insensitive ASCII compare of `bytes[s, e)` to `name` (already lowercase).
-    private def self.name_eq_ci?(bytes : Bytes, s : Int32, e : Int32, name : String) : Bool
-      return false unless e - s == name.bytesize
-      k = 0
-      while k < name.bytesize
-        b = bytes[s + k]
-        b |= 0x20_u8 if b >= 0x41_u8 && b <= 0x5a_u8 # A-Z → a-z
-        return false unless b == name.to_unsafe[k]
-        k += 1
-      end
-      true
-    end
-
-    # True when the head line `[ls, le)` equals `canon` byte-for-byte.
-    private def self.line_eq?(bytes : Bytes, ls : Int32, le : Int32, canon : String) : Bool
-      return false unless le - ls == canon.bytesize
-      k = 0
-      while k < canon.bytesize
-        return false unless bytes[ls + k] == canon.to_unsafe[k]
-        k += 1
-      end
-      true
-    end
-
-    private def self.ws?(b : UInt8) : Bool
-      b == 0x20_u8 || b == 0x09_u8 || b == 0x0a_u8 || b == 0x0d_u8 || b == 0x0b_u8 || b == 0x0c_u8
     end
 
     # ── rebuild (only when the value actually changes) ────────────────────────────
@@ -322,7 +296,7 @@ module Gori::Fuzz
         colon = colon_of(bytes, a, e)
         if colon > a
           ns, ne = trim_range(bytes, a, colon)
-          return true if name_eq_ci?(bytes, ns, ne, "transfer-encoding")
+          return true if AsciiBytes.range_eq_ci?(bytes, ns, ne, "transfer-encoding".to_slice)
         end
         a = nl + 1
       end
@@ -336,7 +310,7 @@ module Gori::Fuzz
       colon = colon_of(bytes, a, e)
       return nil unless colon > a
       ns, ne = trim_range(bytes, a, colon)
-      return nil unless name_eq_ci?(bytes, ns, ne, "transfer-encoding")
+      return nil unless AsciiBytes.range_eq_ci?(bytes, ns, ne, "transfer-encoding".to_slice)
       last_ci_token(bytes, colon + 1, e)
     end
 

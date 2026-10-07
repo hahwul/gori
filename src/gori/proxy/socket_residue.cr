@@ -2,7 +2,7 @@ require "socket"
 require "openssl"
 
 # Non-blocking "is there residue in the read buffer?" — the piece Crystal's public IO has no
-# way to ask. `ConnPool#checkout_state` needs it because `read_head` reads byte-by-byte through the
+# way to ask. `ConnPool` checkout needs it because `read_head` reads byte-by-byte through the
 # buffered layer, which pulls a large chunk off the socket into `@in_buffer_rem`; any bytes
 # the origin left past the framed body therefore sit in THAT buffer, not on the kernel socket,
 # where an fd-level `MSG_PEEK` cannot see them. `peek` would find them but calls `fill_buffer`
@@ -50,7 +50,7 @@ end
 
 module Gori::Proxy
   # "Is anything waiting on this socket?", asked without blocking — of a parked keep-alive
-  # socket at checkout (`Repeater::ConnPool.checkout_state`), and of an upstream the proxy is
+  # socket at checkout (`Repeater::ConnPool` checkout), and of an upstream the proxy is
   # retiring after a response it framed off a bare-LF head (`ClientConn#lf_residue_note`).
   # It lives under the proxy because both ask it, and the proxy must not reach into the
   # repeater for it.

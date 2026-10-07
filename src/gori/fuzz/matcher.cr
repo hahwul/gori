@@ -589,7 +589,7 @@ module Gori::Fuzz
       matched = decide(raw, status, grpc_status, length, words, lines, elapsed, text)
       # The SEPARATE stop condition, on the very metrics/text just computed (never a second
       # decode). nil for every run without `stop_on`, so the common path is unchanged.
-      stop_hit = @stop_condition.try(&.matches_precomputed?(raw, status, grpc_status, length, words, lines, elapsed, text)) || false
+      stop_hit = @stop_condition.try(&.decide(raw, status, grpc_status, length, words, lines, elapsed, text)) || false
       # A stop row's bytes are retained even under `keep_bodies: :matched`: it is the row that
       # ended the run, and dropping its request/response would leave the operator the verdict
       # with no evidence for it.
@@ -632,16 +632,6 @@ module Gori::Fuzz
       raw.duration_us // 1000
     end
 
-    # This matcher's verdict on metrics + text a CALLER already decoded — the seam a run's
-    # matcher uses to evaluate its `stop_condition` on the single decode `build` paid for
-    # (a private `decide` cannot be called on another instance). Same answer as if this
-    # matcher had built the row itself; it just does not decode again.
-    def matches_precomputed?(raw : Repeater::Result, status : Int32?, grpc_status : Int32?,
-                             length : Int64, words : Int32, lines : Int32, elapsed_ms : Int64,
-                             text : String) : Bool
-      decide(raw, status, grpc_status, length, words, lines, elapsed_ms, text)
-    end
-
     # Whether any dimension this matcher evaluates reads the decoded body TEXT — the two body
     # regexes and the extract. `build` ORs this with the stop condition's own answer to decide
     # whether to pay the decode, so a `stop_on` regex is not silently never evaluated.
@@ -649,9 +639,13 @@ module Gori::Fuzz
       !@match_regex.nil? || !@filter_regex.nil? || !@extract.nil?
     end
 
-    private def decide(raw : Repeater::Result, status : Int32?, grpc_status : Int32?,
-                       length : Int64, words : Int32, lines : Int32, elapsed_ms : Int64,
-                       text : String) : Bool
+    # This matcher's verdict on metrics + text already decoded. PROTECTED, not private: a run's
+    # matcher also asks it of its `stop_condition` (another instance) on the single decode
+    # `build` paid for — the same answer as if that matcher had built the row itself, without
+    # decoding again.
+    protected def decide(raw : Repeater::Result, status : Int32?, grpc_status : Int32?,
+                         length : Int64, words : Int32, lines : Int32, elapsed_ms : Int64,
+                         text : String) : Bool
       return false unless eligible?(raw)
       return false if calibrated_out?(status, length, words, lines)
       matchers_pass?(raw, status, grpc_status, length, words, lines, elapsed_ms, text) &&

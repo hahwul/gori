@@ -365,7 +365,7 @@ module Gori::Repeater
       return false if head_lines.any? { |l| l.lstrip[0, 18]?.try(&.downcase) == "transfer-encoding:" }
       cl = head_lines.select { |l| l.lstrip.downcase.starts_with?("content-length:") }
       return true if cl.empty?
-      cl.size == 1 && FlowRequest.rewritable_length_header?(cl[0])
+      cl.size == 1 && Proxy::Codec::Http1.rewritable_length_header?(cl[0])
     end
 
     private def self.header_candidate(line : String) : Candidate

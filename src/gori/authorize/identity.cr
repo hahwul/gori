@@ -21,14 +21,6 @@ module Gori
   module Authorize
     alias Identity = ::Gori::SessionSlot
 
-    def self.serialize(identities : Array(Identity)) : String
-      SessionSlot.serialize(identities)
-    end
-
-    def self.parse_json(raw : String?) : Array(Identity)
-      SessionSlot.parse_json(raw)
-    end
-
     # Why an EXPLICIT identity set — a `--identities` file, an MCP `identities` array — cannot
     # be read as written, or nil when it can. `parse_json` is tolerant on purpose (a project
     # row must never fail a project open), so there a known field of the wrong type is simply
@@ -128,18 +120,6 @@ module Gori
     # The caller supplies it, because only the caller knows the dial it will go out on (#1153).
     def self.resolve_without_report(id : Identity, generation : Env::Generation) : Identity
       id.resolve_values { |v| Env.expand_bindings_as(v, id.name, guard_boundary: true, generation: generation) }
-    end
-
-    def self.overlay_request(head : Bytes, body : Bytes?, id : Identity) : Bytes
-      SessionSlot.overlay_request(head, body, id)
-    end
-
-    def self.overlay_wire(wire : Bytes, id : Identity) : Bytes
-      SessionSlot.overlay_wire(wire, id)
-    end
-
-    def self.overlay_head(head : Bytes, id : Identity) : Bytes
-      SessionSlot.overlay_head(head, id)
     end
   end
 end
