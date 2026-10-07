@@ -763,7 +763,7 @@ module Gori::Proxy
     private def self.socks5_connect(sock : TCPSocket, host : String, port : Int32) : Bool
       sock.write(Bytes[Socks5::VERSION, Socks5::CMD_CONNECT, 0_u8])
       return false unless socks5_write_address(sock, host)
-      sock.write(Bytes[(port >> 8).to_u8, (port & 0xFF).to_u8])
+      sock.write_bytes(port.to_u16, IO::ByteFormat::BigEndian)
       sock.flush
 
       return false unless (reply = Socks5.read_exactly(sock, 4)) && reply[0] == Socks5::VERSION
