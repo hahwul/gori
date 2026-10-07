@@ -158,11 +158,7 @@ module Gori
         j.field("failed") do
           j.array do
             ajob.failures.each do |(flow_id, url, msg)|
-              j.object do
-                j.field "flow_id", flow_id
-                j.field "url", Serialize.text(url)
-                j.field "error", Serialize.text(msg)
-              end
+              {flow_id: flow_id, url: Serialize.text(url), error: Serialize.text(msg)}.to_json(j)
             end
           end
         end
@@ -424,13 +420,13 @@ module Gori
         j.field("skipped") do
           j.array do
             skipped.each do |s|
-              j.object do
-                j.field "flow_id", s.flow_id
-                j.field "method", Serialize.text(s.method)
-                j.field "url", Serialize.text(s.url)
-                j.field "reason", s.reason.to_s
-                j.field "reason_label", s.label
-              end
+              {
+                flow_id:      s.flow_id,
+                method:       Serialize.text(s.method),
+                url:          Serialize.text(s.url),
+                reason:       s.reason.to_s,
+                reason_label: s.label,
+              }.to_json(j)
             end
           end
         end
@@ -456,7 +452,7 @@ module Gori
           return unknown
         end
         options = Authorize::PlanOptions.new(store,
-          flow_ids: authorize_flow_ids(h),
+          flow_ids: id_list_arg(h, "flow_ids"),
           query: str(h, "query"),
           limit: bounded_int_arg(h, "limit", AUTHORIZE_QUERY_LIMIT.default.to_i64,
             min: 1_i64, max: AUTHORIZE_QUERY_LIMIT.max.to_i64).to_i,
@@ -590,13 +586,6 @@ module Gori
         end
       end
 
-      # The flow ids to replay, in the order given — through the shared `id_list_arg`, which
-      # is this reader lifted into `tools.cr` so the repeater bulk tools cannot grow a second
-      # grammar for the same shape.
-      private def authorize_flow_ids(h) : Array(Int64)
-        id_list_arg(h, "flow_ids")
-      end
-
       # The explicit identity set as the JSON text `SessionSlot.parse_json` reads — the SAME
       # format the TUI's identities pane persists and `gori run authorize --identities FILE`
       # takes, so one shape describes an identity everywhere. An array is accepted inline (the
@@ -658,7 +647,9 @@ module Gori
           "with authorize_status; read the verdicts with authorize_results; end with authorize_stop). " \
           "ACTIVE: sends flows × identities real requests, on a FRESH connection per identity " \
           "(connection-oriented auth would otherwise fake a bypass). Capped at #{AUTHORIZE_MAX_SENDS} sends." do |s|
-          s.field "flow_ids", authorize_flow_ids_prop
+          s.field "flow_ids", id_list_prop("captured flow ids to replay, in the order given (ids come from list_history). " \
+                                           "An array of integers, a single integer, or a comma list. Combined with 'query' " \
+                                           "when both are passed; at least one of the two is required.")
           s.field "query", strprop("QL query over history whose rows are replayed too (same grammar as " \
                                    "list_history — call ql_reference). Appended after flow_ids")
           s.field "lenient", boolprop("search a `field:` QL does not implement as literal TEXT instead of refusing the query (default false) — a typo free-texts its whole token, selects no rows, and reads as \"nothing matched, widen it\"")
@@ -711,14 +702,6 @@ module Gori
           "partial comparison must not read as \"enforced\")." do |s|
           s.field "job_id", strprop("id from authorize_start"), required: true
         end
-      end
-
-      # The `flow_ids` schema, through the shared `id_list_prop` — the same `oneOf` every
-      # list-of-ids argument advertises, kept beside the reader that honours it.
-      private def authorize_flow_ids_prop : JSON::Any
-        id_list_prop("captured flow ids to replay, in the order given (ids come from list_history). " \
-                     "An array of integers, a single integer, or a comma list. Combined with 'query' " \
-                     "when both are passed; at least one of the two is required.")
       end
 
       # The `identities` schema: an array of identity objects, or the same array as a JSON

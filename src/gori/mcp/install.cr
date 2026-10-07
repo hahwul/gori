@@ -233,19 +233,6 @@ module Gori
         nil
       end
 
-      # Install gori into the target client's config. Returns the path written.
-      # *settings_path* is `gori --config PATH` (the gori settings file the installed server
-      # should read); it is named apart from the local `config_path`, which is the CLIENT's
-      # config file this method writes.
-      def self.install(target : String, *, exe_path : String = executable_path,
-                       db_path : String? = nil, project : String? = nil,
-                       read_only : Bool = false, insecure_upstream : Bool = false,
-                       use_active_project : Bool = false, no_project : Bool = false,
-                       settings_path : String? = nil) : String
-        install_argv(target, exe_path, build_args(db_path, project, read_only, insecure_upstream,
-          use_active_project, no_project, settings_path))
-      end
-
       # Write *args* into *target*'s config file, returning the path written. The argv is
       # passed IN rather than rebuilt, so `install_all` hands the caller the very array it
       # installed and the command gori prints cannot drift from the one it wrote.
@@ -265,13 +252,14 @@ module Gori
 
       # Install into EVERY named target (deduped, order preserved), one Outcome each.
       #
-      # Deliberately does not raise. `install` refuses a config file it cannot parse, and one
+      # Deliberately does not raise. `install_argv` refuses a config file it cannot parse, and one
       # hand-broken `~/.claude.json` must not decide whether the Codex entry beside it gets
       # written: letting that failure out of the loop would stop after some targets were
       # already on disk, so WHICH clients ended up configured would depend on the order the
       # flags happened to be typed in, and the targets never reached would go unmentioned.
       # Every target is attempted and reported by name; the caller sets the exit status
-      # from `ok?`.
+      # from `ok?`. *settings_path* is `gori --config PATH`, the gori settings file the installed
+      # server reads — not the client config file each target writes.
       def self.install_all(targets : Array(String), *, exe_path : String = executable_path,
                            db_path : String? = nil, project : String? = nil,
                            read_only : Bool = false, insecure_upstream : Bool = false,

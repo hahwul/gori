@@ -148,11 +148,11 @@ module Gori
           j.array do
             tags.each do |(hst, path), tag|
               next if host && hst != host
-              j.object do
-                j.field "host", Serialize.text(hst)
-                j.field "path", Serialize.text(path)
-                j.field "tag", Serialize.text(tag)
-              end
+              {
+                host: Serialize.text(hst),
+                path: Serialize.text(path),
+                tag:  Serialize.text(tag),
+              }.to_json(j)
             end
           end
         end)
@@ -258,10 +258,7 @@ module Gori
         j.field "variant_tags" do
           j.array do
             found.each do |(path, tag)|
-              j.object do
-                j.field "path", Serialize.text(path)
-                j.field "tag", Serialize.text(tag)
-              end
+              {path: Serialize.text(path), tag: Serialize.text(tag)}.to_json(j)
             end
           end
         end
@@ -363,11 +360,11 @@ module Gori
             j.field "entries" do
               j.array do
                 entries.each do |(host, method, target)|
-                  j.object do
-                    j.field "host", Serialize.text(host)
-                    j.field "method", Serialize.text(method)
-                    j.field "target", Serialize.text(target)
-                  end
+                  {
+                    host:   Serialize.text(host),
+                    method: Serialize.text(method),
+                    target: Serialize.text(target),
+                  }.to_json(j)
                 end
               end
             end

@@ -160,10 +160,7 @@ module Gori
             j.field("unknown_fields") do
               j.array do
                 unknown.each do |n|
-                  j.object do
-                    j.field "name", n
-                    j.field "did_you_mean", QL.suggest_field(n)
-                  end
+                  {name: n, did_you_mean: QL.suggest_field(n)}.to_json(j)
                 end
               end
             end

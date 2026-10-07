@@ -241,39 +241,33 @@ module Gori
         # Field by field rather than `manifest.to_json`: the archive is untrusted, and its
         # project name may carry bytes that are not UTF-8 (the version and timestamp are
         # validated printable ASCII by the engine).
-        j.field "archive" do
-          j.object do
-            j.field "format_version", manifest.format_version
-            j.field "project_name", Serialize.text(manifest.project_name)
-            j.field "gori_version", manifest.gori_version
-            j.field "schema_version", manifest.schema_version
-            j.field "created_at", manifest.created_at
-            j.field "flow_count", manifest.flow_count
-          end
-        end
-        j.field "inventory" do
-          j.object do
-            j.field "flows", inventory.flows
-            j.field "session_slots", inventory.session_slots
-            j.field "env_vars", inventory.env_vars
-            j.field "upstream_credentials", inventory.upstream_credentials
-            j.field "exec_repeaters", inventory.exec_repeaters
-            j.field "exec_fuzz_templates", inventory.exec_fuzz_templates
-            j.field "exec_env_vars", inventory.exec_env_vars
-          end
-        end
-        j.field "import_safety" do
-          j.object do
-            j.field "disabled_pipe_rules", inventory.disabled_pipe_rules
-            j.field "disabled_exec_probe_rules", inventory.disabled_exec_probe_rules
-            j.field "disabled_body_file_stubs", inventory.disabled_body_file_stubs
-            j.field "reset_network_settings", inventory.reset_network_settings
-            j.field "reset_host_overrides", inventory.reset_host_overrides
-            j.field "reset_global_overrides", inventory.reset_global_overrides
-            j.field "disabled_auto_refresh_slots", inventory.disabled_auto_refresh_slots
-            j.field "reset_probe_mode", inventory.reset_probe_mode.try(&.label)
-          end
-        end
+        j.field "archive", {
+          format_version: manifest.format_version,
+          project_name:   Serialize.text(manifest.project_name),
+          gori_version:   manifest.gori_version,
+          schema_version: manifest.schema_version,
+          created_at:     manifest.created_at,
+          flow_count:     manifest.flow_count,
+        }
+        j.field "inventory", {
+          flows:                inventory.flows,
+          session_slots:        inventory.session_slots,
+          env_vars:             inventory.env_vars,
+          upstream_credentials: inventory.upstream_credentials,
+          exec_repeaters:       inventory.exec_repeaters,
+          exec_fuzz_templates:  inventory.exec_fuzz_templates,
+          exec_env_vars:        inventory.exec_env_vars,
+        }
+        j.field "import_safety", {
+          disabled_pipe_rules:         inventory.disabled_pipe_rules,
+          disabled_exec_probe_rules:   inventory.disabled_exec_probe_rules,
+          disabled_body_file_stubs:    inventory.disabled_body_file_stubs,
+          reset_network_settings:      inventory.reset_network_settings,
+          reset_host_overrides:        inventory.reset_host_overrides,
+          reset_global_overrides:      inventory.reset_global_overrides,
+          disabled_auto_refresh_slots: inventory.disabled_auto_refresh_slots,
+          reset_probe_mode:            inventory.reset_probe_mode.try(&.label),
+        }
         j.field "disclosure", ProjectArchive.disclosure(inventory)
       end
 

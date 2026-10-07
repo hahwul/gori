@@ -98,24 +98,24 @@ module Gori
       end
 
       private def js_endpoint_row(j : JSON::Builder, e : JsRefs::Endpoint) : Nil
-        j.object do
-          j.field "scheme", e.scheme
-          j.field "host", Serialize.text(e.host)
-          j.field "port", e.port
-          j.field "path", Serialize.text(e.path)
-          j.field "target", Serialize.text(e.target)
-          j.field "url", Serialize.text(e.url)
-          j.field "requested", e.requested
-          j.field "flows", e.flows
-          j.field "in_comment", e.in_comment
-          j.field "templated", e.templated
-          j.field "base", e.base.label
-          j.field "flow_id", e.flow_id
-          j.field "offset", e.offset
-          j.field "line", e.line
-          j.field "literal", Serialize.text(e.literal)
-          j.field "source_url", e.source_url.try { |u| Serialize.text(u) }
-        end
+        {
+          scheme:     e.scheme,
+          host:       Serialize.text(e.host),
+          port:       e.port,
+          path:       Serialize.text(e.path),
+          target:     Serialize.text(e.target),
+          url:        Serialize.text(e.url),
+          requested:  e.requested,
+          flows:      e.flows,
+          in_comment: e.in_comment,
+          templated:  e.templated,
+          base:       e.base.label,
+          flow_id:    e.flow_id,
+          offset:     e.offset,
+          line:       e.line,
+          literal:    Serialize.text(e.literal),
+          source_url: e.source_url.try { |u| Serialize.text(u) },
+        }.to_json(j)
       end
 
       # The `unrequested` block `list_sitemap` adds under `include_unrequested` — the same
@@ -128,16 +128,16 @@ module Gori
         j.field "unrequested" do
           j.array do
             rows.first(UNREQUESTED_MAX).each do |e|
-              j.object do
-                j.field "scheme", e.scheme
-                j.field "host", Serialize.text(e.host)
-                j.field "port", e.port
-                j.field "target", Serialize.text(e.target)
-                j.field "flows", e.flows
-                j.field "templated", e.templated
-                j.field "in_comment", e.in_comment
-                j.field "source_flow_id", e.flow_id
-              end
+              {
+                scheme:         e.scheme,
+                host:           Serialize.text(e.host),
+                port:           e.port,
+                target:         Serialize.text(e.target),
+                flows:          e.flows,
+                templated:      e.templated,
+                in_comment:     e.in_comment,
+                source_flow_id: e.flow_id,
+              }.to_json(j)
             end
           end
         end

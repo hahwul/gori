@@ -7,17 +7,7 @@ module Gori
     class Tools
       @[Tool("list_host_overrides")]
       private def list_host_overrides : Result
-        items_result(JSON.build do |j|
-          j.array do
-            HostOverrides.load(store).entries.each do |e|
-              j.object do
-                j.field "id", e.id
-                j.field "host", e.host
-                j.field "ip", e.ip
-              end
-            end
-          end
-        end)
+        items_result(HostOverrides.load(store).entries.map { |e| {id: e.id, host: e.host, ip: e.ip} }.to_json)
       end
 
       @[Tool("add_host_override", gated: true, agent_action: true, permission: "write")]

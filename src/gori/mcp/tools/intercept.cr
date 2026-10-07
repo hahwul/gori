@@ -130,7 +130,7 @@ module Gori
       # `raw` behaves differently depending on WHAT is held, because the two shapes are not the
       # same message:
       #   - An HTTP head+body: lone LFs in the HEADER block become CRLF (a hand-typed message
-      #     still frames) while the BODY is left untouched — `RequestBuilder.normalize_raw`,
+      #     still frames) while the BODY is left untouched — `Repeater::UrlRequest.normalize_raw`,
       #     the same rule `send_request`'s `raw` uses.
       #   - A WebSocket message (`row.ws?`): there IS no header block — no start line, no
       #     headers, no head/body split — so running the HTTP rule on it is not "safe
@@ -181,7 +181,7 @@ module Gori
           end
           return raw.to_slice
         end
-        RequestBuilder.normalize_raw(raw)
+        Repeater::UrlRequest.normalize_raw(raw)
       end
 
       @[Tool("intercept_toggle", gated: true, agent_action: true, permission: "intercept")]

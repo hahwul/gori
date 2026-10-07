@@ -106,16 +106,13 @@ module Gori
       # and marking no row `current`. `$GORI_HOME` through a symlink is the ordinary way to hit
       # this (a dotfiles-managed home, `/tmp` on macOS), and the workspace side of this resolver
       # already normalizes with `realpath` for the same reason.
-      private def self.find_project_for_db(registry : ProjectRegistry, expanded : String) : Project?
-        wanted = canonical_db(expanded)
-        registry.list.find { |candidate| canonical_db(candidate.db_path) == wanted }
-      end
-
+      #
       # `Paths.canonical_file` owns the rule; `OpenLock` keys its lock files by the same one, so
       # a `--db` spelling that resolves to a registry project is matched here AND locked there
       # under one identity.
-      private def self.canonical_db(path : String) : String
-        Paths.canonical_file(path)
+      private def self.find_project_for_db(registry : ProjectRegistry, expanded : String) : Project?
+        wanted = Paths.canonical_file(expanded)
+        registry.list.find { |candidate| Paths.canonical_file(candidate.db_path) == wanted }
       end
 
       private def self.active_fallback(registry : ProjectRegistry) : Selection

@@ -141,12 +141,12 @@ module Gori
                   j.field("fields") do
                     j.array do
                       g.fields.each do |f|
-                        j.object do
-                          j.field "spec", f.spec
-                          j.field "name", f.defn.name
-                          j.field "number", f.defn.number.to_i64
-                          j.field "type", f.defn.type_label
-                        end
+                        {
+                          spec:   f.spec,
+                          name:   f.defn.name,
+                          number: f.defn.number.to_i64,
+                          type:   f.defn.type_label,
+                        }.to_json(j)
                       end
                     end
                   end
@@ -958,36 +958,44 @@ module Gori
       end
 
       private def string_array_arg(h, key : String) : Array(String)
-        raw = h[key]?
-        return [] of String unless raw && !raw.raw.nil?
-        arr =
-          if a = raw.as_a?
-            a
-          elsif s = raw.as_s?
-            return [] of String if s.strip.empty?
-            parsed = JSON.parse(s) rescue raise FuzzArgError.new("'#{key}' must be a JSON array of strings")
-            parsed.as_a? || raise FuzzArgError.new("'#{key}' must be a JSON array")
-          else
-            raise FuzzArgError.new("'#{key}' must be a JSON array of strings (not a bare string/scalar)")
-          end
+        arr = json_array_arg(h[key]?, key, " of strings") || return [] of String
         arr.map { |v| v.as_s? || raise FuzzArgError.new("each '#{key}' entry must be a string") }
+      end
+
+      # `raw` as a JSON array: a real one, or a JSON-encoded string of one (LLM clients vary in
+      # which they send). nil when absent, null or a blank string; `of` names the element kind
+      # in the refusals.
+      private def json_array_arg(raw : JSON::Any?, key : String, of : String = "") : Array(JSON::Any)?
+        return nil unless raw && !raw.raw.nil?
+        if a = raw.as_a?
+          a
+        elsif s = raw.as_s?
+          return nil if s.strip.empty?
+          parsed = JSON.parse(s) rescue raise FuzzArgError.new("'#{key}' must be a JSON array#{of}")
+          parsed.as_a? || raise FuzzArgError.new("'#{key}' must be a JSON array")
+        else
+          raise FuzzArgError.new("'#{key}' must be a JSON array#{of} (not a bare string/scalar)")
+        end
+      end
+
+      # `raw` as a JSON object, read the same two ways as `json_array_arg`. `shape` follows
+      # "must be a JSON object" in the refusal for a string that is not one.
+      private def json_object_arg(raw : JSON::Any?, key : String, shape : String = "") : Hash(String, JSON::Any)?
+        return nil unless raw && !raw.raw.nil?
+        if o = raw.as_h?
+          o
+        elsif s = raw.as_s?
+          return nil if s.strip.empty?
+          (JSON.parse(s).as_h? rescue nil) || raise FuzzArgError.new("'#{key}' must be a JSON object#{shape}")
+        else
+          raise FuzzArgError.new("'#{key}' must be a JSON object (not a bare string/scalar)")
+        end
       end
 
       # The payload SOURCES, in position order. `Fuzz::Plan.build` pairs each with the
       # shared `processors` pipeline — pairing them here too would build the sets twice.
       private def fuzz_sources(h) : Array(Fuzz::PayloadSource)
-        raw = h["payloads"]?
-        return [] of Fuzz::PayloadSource unless raw && !raw.raw.nil?
-        arr =
-          if a = raw.as_a?
-            a
-          elsif s = raw.as_s?
-            return [] of Fuzz::PayloadSource if s.strip.empty?
-            parsed = JSON.parse(s) rescue raise FuzzArgError.new("'payloads' must be a JSON array of sets")
-            parsed.as_a? || raise FuzzArgError.new("'payloads' must be a JSON array")
-          else
-            raise FuzzArgError.new("'payloads' must be a JSON array of sets (not a bare string/scalar)")
-          end
+        arr = json_array_arg(h["payloads"]?, "payloads", " of sets") || return [] of Fuzz::PayloadSource
         arr.map do |spec|
           obj = spec.as_h? || raise FuzzArgError.new("each payload set must be a JSON object")
           fuzz_source_from(obj, spec)
@@ -1000,18 +1008,7 @@ module Gori
       # Mirrors fuzz_marks/fuzz_sets's dual bare-array/JSON-encoded-string acceptance
       # (LLM clients vary in whether they send a real array or a JSON string).
       private def fuzz_processors(h) : Array(Fuzz::Processor)
-        raw = h["processors"]?
-        return [] of Fuzz::Processor unless raw && !raw.raw.nil?
-        arr =
-          if a = raw.as_a?
-            a
-          elsif s = raw.as_s?
-            return [] of Fuzz::Processor if s.strip.empty?
-            parsed = JSON.parse(s) rescue raise FuzzArgError.new("'processors' must be a JSON array")
-            parsed.as_a? || raise FuzzArgError.new("'processors' must be a JSON array")
-          else
-            raise FuzzArgError.new("'processors' must be a JSON array (not a bare string/scalar)")
-          end
+        arr = json_array_arg(h["processors"]?, "processors") || return [] of Fuzz::Processor
         arr.map { |spec| fuzz_processor_from(spec) }
       end
 
@@ -1274,17 +1271,7 @@ module Gori
       # `stop_on` present but empty (no count, no condition) is refused: an agent that passed the
       # key meant a stop, and a silent no-op is the "knob that did nothing" this codebase closes.
       private def fuzz_stop_on(h) : {Int32?, Fuzz::Matcher?}
-        raw = h["stop_on"]?
-        return {nil, nil} unless raw && !raw.raw.nil?
-        obj =
-          if hh = raw.as_h?
-            hh
-          elsif s = raw.as_s?
-            return {nil, nil} if s.strip.empty?
-            (JSON.parse(s).as_h? rescue nil) || raise FuzzArgError.new("'stop_on' must be a JSON object {after_matches, match, filter}")
-          else
-            raise FuzzArgError.new("'stop_on' must be a JSON object (not a bare string/scalar)")
-          end
+        obj = json_object_arg(h["stop_on"]?, "stop_on", " {after_matches, match, filter}") || return {nil, nil}
         if bad = obj.keys.find { |k| !STOP_ON_KEYS.includes?(k) }
           raise FuzzArgError.new("unknown stop_on key #{bad.inspect} (expected #{STOP_ON_KEYS.join(", ")})")
         end
@@ -1365,16 +1352,7 @@ module Gori
       end
 
       private def fuzz_conditions(raw : JSON::Any?, which : String) : FuzzConds?
-        return nil unless raw && !raw.raw.nil?
-        obj =
-          if h = raw.as_h?
-            h
-          elsif s = raw.as_s?
-            return nil if s.strip.empty?
-            (JSON.parse(s).as_h? rescue nil) || raise FuzzArgError.new("'#{which}' must be a JSON object")
-          else
-            raise FuzzArgError.new("'#{which}' must be a JSON object (not a bare string/scalar)")
-          end
+        obj = json_object_arg(raw, which) || return nil
         validate_condition_keys(obj, which)
         {status: jstr(obj, "status"), grpc: jstr(obj, "grpc"), size: jstr(obj, "size"),
          words: jstr(obj, "words"), lines: jstr(obj, "lines"),

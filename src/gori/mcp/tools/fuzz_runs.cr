@@ -59,11 +59,11 @@ module Gori
             preview = store.get_fuzz_result_preview(run_id, idx, message_source_cap,
               head_cap + 1, Serialize::SAVED_SOURCE_BYTES, message_source_cap)
             return not_found("no result #{idx} in saved fuzz run #{run_id}") unless preview
-            return saved_fuzz_result_detail(run, preview, include_sensitive, body_cap, head_cap)
+            return saved_fuzz_result_detail(run) { |j| Serialize.saved_fuzz_result(j, preview, include_sensitive, body_cap, head_cap) }
           end
           row = store.get_fuzz_result_summary(run_id, idx)
           return not_found("no result #{idx} in saved fuzz run #{run_id}") unless row
-          return saved_fuzz_result_detail(run, row)
+          return saved_fuzz_result_detail(run) { |j| Serialize.saved_fuzz_result(j, row) }
         end
 
         # Content rows retain multiple request/response BLOBs and are deliberately capped at
@@ -98,26 +98,12 @@ module Gori
         end)
       end
 
-      private def saved_fuzz_result_detail(run : Store::FuzzRunRecord,
-                                           row : Store::FuzzResultRecord) : Result
+      # One saved result beside its run; the block writes the result.
+      private def saved_fuzz_result_detail(run : Store::FuzzRunRecord, &) : Result
         Result.new(JSON.build do |j|
           j.object do
             j.field("run") { Serialize.saved_fuzz_run(j, run, store.fuzz_result_count(run.id)) }
-            j.field("result") { Serialize.saved_fuzz_result(j, row) }
-          end
-        end)
-      end
-
-      private def saved_fuzz_result_detail(run : Store::FuzzRunRecord,
-                                           preview : Store::FuzzResultPreview,
-                                           include_sensitive : Bool,
-                                           body_cap : Int32, head_cap : Int32) : Result
-        Result.new(JSON.build do |j|
-          j.object do
-            j.field("run") { Serialize.saved_fuzz_run(j, run, store.fuzz_result_count(run.id)) }
-            j.field("result") do
-              Serialize.saved_fuzz_result(j, preview, include_sensitive, body_cap, head_cap)
-            end
+            j.field("result") { yield j }
           end
         end)
       end

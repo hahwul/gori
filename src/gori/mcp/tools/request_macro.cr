@@ -96,17 +96,15 @@ module Gori
       private def emit_request_macro_status(j : JSON::Builder, lane : RequestMacro::Lane?) : Nil
         return unless lane
         t = lane.tally
-        j.field "request_macro" do
-          j.object do
-            j.field "runs", t.runs
-            j.field "failed", t.failed
-            j.field "candidates_not_sent", t.skipped
-            j.field "requests", t.requests
-            j.field "first_error", Serialize.text(t.first_error)
-            j.field "ended_run", lane.aborted?
-            j.field "summary", Serialize.text(t.summary)
-          end
-        end
+        j.field "request_macro", {
+          runs:                t.runs,
+          failed:              t.failed,
+          candidates_not_sent: t.skipped,
+          requests:            t.requests,
+          first_error:         Serialize.text(t.first_error),
+          ended_run:           lane.aborted?,
+          summary:             Serialize.text(t.summary),
+        }
       end
     end
   end

@@ -39,12 +39,7 @@ module Gori
             j.field "rules" do
               j.array do
                 store.scope_rules.each do |(id, kind, match_type, pattern)|
-                  j.object do
-                    j.field "id", id
-                    j.field "kind", kind
-                    j.field "match_type", match_type
-                    j.field "pattern", pattern
-                  end
+                  {id: id, kind: kind, match_type: match_type, pattern: pattern}.to_json(j)
                 end
               end
             end

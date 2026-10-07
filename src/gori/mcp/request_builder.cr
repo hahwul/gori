@@ -199,12 +199,6 @@ module Gori
           raise Gori::Error.new("'#{name}' is not valid base64")
         end
       end
-
-      # The head-only CRLF promotion `raw` gets without `verbatim`. Kept on this module because
-      # `intercept_forward_edit` calls it here; the rule itself is `Repeater::UrlRequest`'s.
-      def self.normalize_raw(raw : String) : Bytes
-        Repeater::UrlRequest.normalize_raw(raw)
-      end
     end
   end
 end

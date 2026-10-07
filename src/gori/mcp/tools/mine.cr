@@ -168,11 +168,7 @@ module Gori
       end
 
       private def mine_skip_row(j : JSON::Builder, loc : Miner::Location, n : Int32, reason : String) : Nil
-        j.object do
-          j.field "location", loc.label
-          j.field "names", n
-          j.field "reason", reason
-        end
+        {location: loc.label, names: n, reason: reason}.to_json(j)
       end
 
       MINE_RESULTS_LIMIT = PageLimit.new(100, 1000)

@@ -105,13 +105,7 @@ module Gori
                 meta_a = Repeater::ExchangeMeta.of(detail_a.row)
                 meta_b = Repeater::ExchangeMeta.of(detail_b.row)
                 {"a" => meta_a, "b" => meta_b}.each do |name, m|
-                  j.field name do
-                    j.object do
-                      j.field "status", m.status
-                      j.field "size", m.size
-                      j.field "duration_us", m.duration_us
-                    end
-                  end
+                  j.field name, {status: m.status, size: m.size, duration_us: m.duration_us}
                 end
                 j.field "delta", Repeater::ExchangeMeta.delta(meta_a, meta_b)
               end

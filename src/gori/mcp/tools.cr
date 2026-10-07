@@ -1925,15 +1925,11 @@ module Gori
       # exists to deliver, and the error named History while naming no way out. Recording is
       # bookkeeping; it must never decide whether a request is sendable.
       #
-      # `Env.head_body_boundary` is the shared answer: first of `\n\n` or `\r\n\r\n`,
-      # whichever comes earlier, and `bytes.size` when there is no terminator — in which
-      # case the whole message is the head, rather than a split landing inside the body.
+      # `Env.split_head_body` is the shared answer: first of `\n\n` or `\r\n\r\n`,
+      # whichever comes earlier, and the whole message as the head when there is no
+      # terminator, rather than a split landing inside the body.
       private def split_wire_request(bytes : Bytes) : {Bytes, Bytes?}
-        boundary = Env.head_body_boundary(bytes)
-        head = bytes[0, boundary]
-        body_size = bytes.size - boundary
-        body = body_size > 0 ? bytes[boundary, body_size] : nil
-        {head, body}
+        Env.split_head_body(bytes)
       end
 
       # Evict the OLDEST terminal (non-:running) jobs from `jobs` so it never grows past
