@@ -1683,14 +1683,6 @@ module Gori::Tui
     rescue
     end
 
-    # Converge local repeater tabs with the project's `repeaters` rows after a peer
-    # committed (or any writer-connection commit that bumps PRAGMA data_version —
-    # including our own update_repeater_response after a successful send; the writer
-    # holds a dedicated pool connection, so own commits ARE visible to the poll).
-    # Keyed by db_id: update changed tabs in place (keeping the RepeaterView object so
-    # an inflight result still matches by identity), append peer-created tabs, drop
-    # peer-deleted ones — but NEVER touch a locked tab (actively edited / inflight /
-    # locally dirty).
     # The persisted outbound frames a restored tab seeds, or nil when `text` is no replayable
     # handshake. A `[gori]` advisory row is gori talking ABOUT the socket; replaying one would
     # put its own sentence on the wire as a client frame (CLI::Run.ws_seed_rows).
@@ -1700,6 +1692,14 @@ module Gori::Tui
         .map { |m| Store::WsOutMessage.new(m.opcode, m.payload, m.shape) }
     end
 
+    # Converge local repeater tabs with the project's `repeaters` rows after a peer
+    # committed (or any writer-connection commit that bumps PRAGMA data_version —
+    # including our own update_repeater_response after a successful send; the writer
+    # holds a dedicated pool connection, so own commits ARE visible to the poll).
+    # Keyed by db_id: update changed tabs in place (keeping the RepeaterView object so
+    # an inflight result still matches by identity), append peer-created tabs, drop
+    # peer-deleted ones — but NEVER touch a locked tab (actively edited / inflight /
+    # locally dirty).
     def reconcile : Nil
       refresh_evidence_marker
       # Metadata only (no response BLOBs): converge the request side. Responses are
