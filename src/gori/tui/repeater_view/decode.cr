@@ -44,29 +44,14 @@ class Gori::Tui::RepeaterView
     @ws_http_only = false # in lockstep with @ws_mode — a decode tab holds no handshake
     @grpc_mode = false
     @http2 = detail.http_version == "HTTP/2"
-    @target = build_target(detail.row.scheme, detail.row.host, detail.row.port)
-    @tcx = @target.size
-    @sni = ""
-    @scx = 0
-    @target_field = :url
+    seed_target(detail)
     @editor.set_text(origin_form_text(detail))
     seed_draft_baselines
     @decoded.set_text(payload)
     @req_pane = :envelope
     @decoded_dirty = false
     @original_lines = [] of String
-    @result = nil
-    @prev_result = nil
-    reset_result_caches
-    @focus = :request
-    @resp_mode = :response
-    @scroll = 0
-    resp_wrap_reset
-    @diffable = false
-    @loaded = true
-    @dirty = false
-    @req_hex_edit = nil
-    @scroll_req = 0
+    fresh_panes(:request, diffable: false)
   end
 
   # The editor the request column's input/cursor targets: the decoded payload when its

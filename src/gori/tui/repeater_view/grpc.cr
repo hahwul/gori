@@ -85,26 +85,11 @@ class Gori::Tui::RepeaterView
     @grpc_field_scroll = 0
     invalidate_grpc_fields
     @grpc_sent_target = "" # no send yet on this tab; the transcript has nothing to describe
-    @target = build_target(detail.row.scheme, detail.row.host, detail.row.port)
-    @tcx = @target.size
-    @sni = ""
-    @scx = 0
-    @target_field = :url
+    seed_target(detail)
     @editor.set_text(origin_head_text(detail))
     seed_draft_baselines
     @original_lines = [] of String
-    @result = nil
-    @prev_result = nil
-    reset_result_caches
-    @focus = :request
-    @resp_mode = :response
-    @scroll = 0
-    resp_wrap_reset
-    @diffable = false
-    @loaded = true
-    @dirty = false
-    @req_hex_edit = nil
-    @scroll_req = 0
+    fresh_panes(:request, diffable: false)
   end
 
   # The replayable request bytes for a gRPC tab: the edited head + the canonical
