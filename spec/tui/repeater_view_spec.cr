@@ -1686,7 +1686,7 @@ describe Gori::Tui::RepeaterView do
     req = "POST /b HTTP/1.1\r\nHost: h\r\nContent-Length: 4\r\n\r\nABCD"
     append_e = ->(view : RepeaterView) do
       view.toggle_request_hex.should be_true
-      view.hex_move(1000, 0) # clamps to the append slot
+      8.times { view.hex_key(hex_ev(Termisu::Input::Key::Down)) } # ↓ clamps at the append slot
       view.hex_key(hex_ev('4'))
       view.hex_key(hex_ev('5')) # 0x45 = 'E'
       view.toggle_request_hex.should be_false

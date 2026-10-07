@@ -364,8 +364,8 @@ describe "Gori::Tui::RepeaterController#save_current_repeater — a frame write 
       view = controller.current_view.should_not be_nil
       view.ws_content?.should be_true # else this drives the plain-HTTP branch, which has no frames
 
-      view.mark_dirty
-      host.session.store.close # the batch carrying this save rolls back
+      view.replace_request(view.request_text) # an edit that leaves the bytes as they were
+      host.session.store.close                # the batch carrying this save rolls back
 
       controller.save_current_repeater
 
@@ -380,7 +380,7 @@ describe "Gori::Tui::RepeaterController#save_current_repeater — a frame write 
     # an editor that could never go clean would re-write on every keystroke's pane change.
     with_refused_tab(WS_REQUEST, target: "ws://127.0.0.1:9/socket") do |controller, _|
       view = controller.current_view.should_not be_nil
-      view.mark_dirty
+      view.replace_request(view.request_text) # an edit that leaves the bytes as they were
       controller.save_current_repeater
       view.dirty?.should be_false
     end

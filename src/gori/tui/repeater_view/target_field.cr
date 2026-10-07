@@ -69,7 +69,7 @@ module Gori::Tui::TargetField
       @tcx = (@tcx + d).clamp(0, @target.size)
     end
     # Cursor navigation is not a content edit — do NOT dirty (caret is never persisted),
-    # mirroring edit_move/goto_request_line/hex_move.
+    # mirroring edit_move/goto_request_line and the hex editor's arrows.
   end
 
   # Home/End on the single-line target/SNI field — pure caret moves, no dirty.

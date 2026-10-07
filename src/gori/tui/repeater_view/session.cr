@@ -139,10 +139,6 @@ class Gori::Tui::RepeaterView
     @flow.try(&.row.id)
   end
 
-  def mark_dirty : Nil
-    @dirty = true
-  end
-
   def clear_dirty : Nil
     @dirty = false
     @decoded_dirty = false

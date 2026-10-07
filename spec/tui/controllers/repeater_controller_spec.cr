@@ -83,7 +83,7 @@ end
 describe "RepeaterController leaving request hex (#1426)" do
   bodied = "POST /b HTTP/1.1\r\nHost: h.test\r\nContent-Length: 4\r\n\r\nABCD"
   grow = ->(v : RepeaterView) do
-    v.hex_move(1000, 0)
+    8.times { v.hex_key(hex_ev(Termisu::Input::Key::Down)) } # ↓ clamps at the append slot
     v.hex_key(hex_ev('4'))
     v.hex_key(hex_ev('5'))
   end
