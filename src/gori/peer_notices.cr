@@ -1,5 +1,6 @@
 require "./probe/mode"
 require "./env"
+require "./plural"
 require "./rule_set_change"
 require "./store"
 
@@ -87,24 +88,18 @@ module Gori
     # have to be remembered twice. Each surface is left with only its emitter.
     def absorb(rules : RuleSetChange?, extract : RuleSetChange?, now : Time::Instant, store : Store) : Nil
       return unless rules || extract
-      by_agent = PeerNotices.agent_wrote?(store, RULE_TOOLS)
-      record_rules(rules, now, by_agent) if rules
-      record_extract(extract, now, by_agent) if extract
+      record(now, PeerNotices.agent_wrote?(store, RULE_TOOLS), rules: rules, extract: extract)
     end
 
-    # A peer changed the Match&Replace rules this session rewrites live traffic with.
-    def record_rules(change : RuleSetChange, now : Time::Instant, by_agent : Bool = false) : Nil
-      @rules = (held = @rules) ? held.merge(change) : change
+    # A peer changed the Match&Replace rules this session rewrites live traffic with (`rules`),
+    # and/or the extract rules that decide what a binding token (`$BIND.NAME`, or bare `$NAME`)
+    # expands to at every send seam (`extract`).
+    def record(now : Time::Instant, by_agent : Bool = false, *,
+               rules : RuleSetChange? = nil, extract : RuleSetChange? = nil) : Nil
+      @rules = (held = @rules) ? held.merge(rules) : rules if rules
+      @extract = (held = @extract) ? held.merge(extract) : extract if extract
       # An agent anywhere in the burst names the burst. The alternative — the LAST writer wins —
       # would let one unattributed peer write erase the one fact worth carrying.
-      @by_agent ||= by_agent
-      @since ||= now
-    end
-
-    # A peer changed the extract rules that decide what a binding token (`$BIND.NAME`, or bare
-    # `$NAME`) expands to at every send seam.
-    def record_extract(change : RuleSetChange, now : Time::Instant, by_agent : Bool = false) : Nil
-      @extract = (held = @extract) ? held.merge(change) : change
       @by_agent ||= by_agent
       @since ||= now
     end
@@ -172,7 +167,7 @@ module Gori
       # the end of this line instead: the pipe fact leads because it is the bigger one.
       also = extract ? " (the extract rules moved too — #{binding_token} may expand to a different value here)" : ""
       Notice.new(:warn,
-        "#{counted(change.executes, "Match&Replace pipe rule")} added or changed by " \
+        "#{Gori.plural(change.executes, "Match&Replace pipe rule")} added or changed by " \
         "#{author(by_agent)} — #{one ? "it runs" : "they run"} a local command " \
         "here, with your privileges, on every message #{one ? "it matches" : "they match"}#{also}",
         :rewriter, by_agent)
@@ -184,7 +179,7 @@ module Gori
       one = change.serves_files == 1
       also = extract ? " (the extract rules moved too — #{binding_token} may expand to a different value here)" : ""
       Notice.new(:warn,
-        "#{counted(change.serves_files, "Match&Replace map-local rule")} added or changed by " \
+        "#{Gori.plural(change.serves_files, "Match&Replace map-local rule")} added or changed by " \
         "#{author(by_agent)} — #{one ? "it answers" : "they answer"} matching requests with " \
         "files from a directory on this machine#{also}",
         :rewriter, by_agent)
@@ -193,7 +188,7 @@ module Gori
     # What moved. A change that added, removed and edited NOTHING can only have moved in ORDER, and
     # a line reading "0 rules changed" would be both wrong and useless.
     private def subject(change : RuleSetChange, noun : String) : String
-      change.changed.zero? ? "#{noun} order" : counted(change.changed, noun)
+      change.changed.zero? ? "#{noun} order" : Gori.plural(change.changed, noun)
     end
 
     # What it means for the wire.
@@ -211,10 +206,6 @@ module Gori
     # everything else, including the peers that write no feed row at all.
     private def author(by_agent : Bool) : String
       by_agent ? "an agent" : "another session"
-    end
-
-    private def counted(n : Int32, noun : String) : String
-      "#{n} #{noun}#{"s" if n != 1}"
     end
 
     # How a binding token is SPELLED on this install — `$BIND.NAME` under the namespaced syntax,
