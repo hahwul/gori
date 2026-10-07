@@ -140,8 +140,8 @@ module Gori::Repeater
 
     # Has the peer sent FIN on this parked connection?
     #
-    # ONE question, and — unlike ConnPool's `SocketResidue.state` checkout, which also has to hunt for residue
-    # and may consume a byte doing it — never consuming one. That difference is load-bearing:
+    # ONE question, and — unlike ConnPool's `SocketResidue.state` checkout, which also has to
+    # hunt for residue and may consume a byte doing it — never consuming one. That difference is load-bearing:
     # bytes waiting on an idle h2 connection are ordinary protocol frames, so a probe that ate
     # one would corrupt the frame stream it was trying to protect. Anything already buffered
     # therefore answers "not closed" outright, and only a connection with nothing waiting
