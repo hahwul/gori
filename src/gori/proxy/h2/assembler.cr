@@ -188,11 +188,9 @@ module Gori::Proxy::H2
       end
     end
 
-    # `connection_created_at` is kept as a positional argument for call-site compatibility
-    # (the connection's own open time) but is deliberately NOT stored or used for a flow's
-    # `created_at` — see `Stream#created_at`, which each request stamps for itself.
-    def initialize(@sink : FlowSink, @host : String, @port : Int32, connection_created_at : Int64,
-                   @conn_id : Int64 = 0_i64)
+    # A flow's `created_at` is not the connection's open time: see `Stream#created_at`, which
+    # each request stamps for itself.
+    def initialize(@sink : FlowSink, @host : String, @port : Int32, @conn_id : Int64 = 0_i64)
       @mutex = Mutex.new
       @streams = {} of UInt32 => Stream
       @req_decoder = HPACK::Decoder.new

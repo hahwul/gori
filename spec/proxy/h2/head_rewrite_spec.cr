@@ -108,7 +108,7 @@ end
 
 private def pipeline(rewriter : Gori::Proxy::HeadRewriter, direction = "out",
                      sink = RecSink.new) : {Gori::Proxy::H2::HeadRewrite, Gori::Proxy::H2::Assembler, RecSink}
-  assembler = Gori::Proxy::H2::Assembler.new(sink, "api.example.com", 443, 1_i64)
+  assembler = Gori::Proxy::H2::Assembler.new(sink, "api.example.com", 443)
   {Gori::Proxy::H2::HeadRewrite.new(direction, rewriter, assembler, "api.example.com"), assembler, sink}
 end
 
@@ -337,7 +337,7 @@ describe Gori::Proxy::H2::HeadRewrite do
 
   it "scopes a coalesced response rewrite to that stream's request authority" do
     sink = RecSink.new
-    assembler = Gori::Proxy::H2::Assembler.new(sink, "api.example.com", 443, 1_i64)
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "api.example.com", 443)
     rewriter = HostSelectiveResponseRewriter.new("other.example.com")
     pipe = Gori::Proxy::H2::HeadRewrite.new("in", rewriter, assembler, "api.example.com")
     api_request = HPACK::Encoder.new.encode([
@@ -373,7 +373,7 @@ describe Gori::Proxy::H2::HeadRewrite do
 
   it "records request authority before forwarding can wake the response pump" do
     sink = RecSink.new
-    assembler = Gori::Proxy::H2::Assembler.new(sink, "api.example.com", 443, 1_i64)
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "api.example.com", 443)
     rewriter = HostSelectiveResponseRewriter.new("other.example.com")
     out = Gori::Proxy::H2::HeadRewrite.new("out", rewriter, assembler, "api.example.com")
     incoming = Gori::Proxy::H2::HeadRewrite.new("in", rewriter, assembler, "api.example.com")
@@ -399,7 +399,7 @@ describe Gori::Proxy::H2::HeadRewrite do
 
   it "falls back to the CONNECT host when no request reference exists" do
     sink = RecSink.new
-    assembler = Gori::Proxy::H2::Assembler.new(sink, "api.example.com", 443, 1_i64)
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "api.example.com", 443)
     rewriter = HostSelectiveResponseRewriter.new("api.example.com")
     pipe = Gori::Proxy::H2::HeadRewrite.new("in", rewriter, assembler, "api.example.com")
     response = HPACK::Encoder.new.encode([{":status", "200"}, {"x-marker", "original"}])
@@ -926,7 +926,7 @@ describe Gori::Proxy::H2::HeadRewrite do
     # erase what the request side already stored — `update_one` writes the column outright.
     it "carries a response-direction advisory without dropping the request-direction one" do
       sink = RecSink.new
-      assembler = Gori::Proxy::H2::Assembler.new(sink, "a.test", 443, 1_i64)
+      assembler = Gori::Proxy::H2::Assembler.new(sink, "a.test", 443)
       out_pipe = Gori::Proxy::H2::HeadRewrite.new("out", SubRewriter.new("/two", "/twoLONGER"), assembler, "a.test")
       in_pipe = Gori::Proxy::H2::HeadRewrite.new("in", SubRewriter.new("x-tag: a", "x-tag: b"), assembler, "a.test")
       evil_req = [{":method", "GET"}, {":scheme", "https"}, {":authority", "a.test"},
@@ -961,7 +961,7 @@ describe Gori::Proxy::H2::HeadRewrite do
     # exactly as h1 forwards the identical edit byte-exact.
     it "honours a declared content-length on an edit, and reverts a synced one" do
       sink = RecSink.new
-      assembler = Gori::Proxy::H2::Assembler.new(sink, "a.test", 443, 1_i64)
+      assembler = Gori::Proxy::H2::Assembler.new(sink, "a.test", 443)
       pipe = Gori::Proxy::H2::HeadRewrite.new("out", nil, assembler, "a.test")
       fields = [HPACK::Field.new(":method", "POST"), HPACK::Field.new(":scheme", "https"),
                 HPACK::Field.new(":authority", "a.test"), HPACK::Field.new(":path", "/cl"),

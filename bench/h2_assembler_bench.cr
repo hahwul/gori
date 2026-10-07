@@ -50,7 +50,7 @@ RESP_HEADERS = Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS,
 RESP_DATA    = Frame::Header.new(Frame::Type::Data.value, Frame::END_STREAM, 1_u32, BODY)
 
 SINK      = NullSink.new
-ASSEMBLER = Assembler.new(SINK, "api.example.com", 443, 0_i64)
+ASSEMBLER = Assembler.new(SINK, "api.example.com", 443)
 
 def exchange : Nil
   ASSEMBLER.feed("out", REQ_HEADERS)

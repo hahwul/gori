@@ -103,7 +103,7 @@ end
 # spec starts here, because a 2xx is what opens the socket (RFC 8441 §5.1).
 private def open_socket(sink : WsSink, protocol : String = "websocket",
                         status : String = "200") : Gori::Proxy::H2::Assembler
-  assembler = Gori::Proxy::H2::Assembler.new(sink, "ws.example.com", 443, 1_i64)
+  assembler = Gori::Proxy::H2::Assembler.new(sink, "ws.example.com", 443)
   assembler.feed("out", headers_frame(1_u32, Frame::END_HEADERS, connect_block(protocol)))
   assembler.feed("in", headers_frame(1_u32, Frame::END_HEADERS, status_block(status)))
   assembler
@@ -322,7 +322,7 @@ describe Gori::Proxy::H2::WsCapture do
   # capture quietly being absent.
   it "bounds concurrent transcripts per connection and names the stream that missed out" do
     sink = WsSink.new
-    a = Gori::Proxy::H2::Assembler.new(sink, "ws.example.com", 443, 1_i64)
+    a = Gori::Proxy::H2::Assembler.new(sink, "ws.example.com", 443)
     max = Gori::Proxy::H2::WsCapture::MAX_STREAMS
     ids = (0..max).map { |i| (i * 2 + 1).to_u32 }
     ids.each do |id|
@@ -345,7 +345,7 @@ describe Gori::Proxy::H2::WsCapture do
   # closes sockets in sequence would run itself out of them.
   it "releases a capture slot when the socket ends" do
     sink = WsSink.new
-    a = Gori::Proxy::H2::Assembler.new(sink, "ws.example.com", 443, 1_i64)
+    a = Gori::Proxy::H2::Assembler.new(sink, "ws.example.com", 443)
     max = Gori::Proxy::H2::WsCapture::MAX_STREAMS
     (0...(max * 3)).each do |i|
       id = (i * 2 + 1).to_u32
@@ -382,7 +382,7 @@ describe Gori::Proxy::H2::WsCapture do
 
   it "leaves an ordinary stream's column NULL" do
     sink = WsSink.new
-    a = Gori::Proxy::H2::Assembler.new(sink, "ws.example.com", 443, 1_i64)
+    a = Gori::Proxy::H2::Assembler.new(sink, "ws.example.com", 443)
     a.feed("out", headers_frame(1_u32, Frame::END_HEADERS | Frame::END_STREAM,
       hpack([{":method", "GET"}, {":scheme", "https"}, {":path", "/"},
              {":authority", "ws.example.com"}])))
@@ -391,7 +391,7 @@ describe Gori::Proxy::H2::WsCapture do
 
   it "leaves an ordinary stream's DATA as a body" do
     sink = WsSink.new
-    a = Gori::Proxy::H2::Assembler.new(sink, "ws.example.com", 443, 1_i64)
+    a = Gori::Proxy::H2::Assembler.new(sink, "ws.example.com", 443)
     a.feed("out", headers_frame(1_u32, Frame::END_HEADERS,
       hpack([{":method", "POST"}, {":scheme", "https"}, {":path", "/"},
              {":authority", "ws.example.com"}])))

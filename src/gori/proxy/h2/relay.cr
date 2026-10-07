@@ -38,7 +38,7 @@ module Gori::Proxy::H2
 
     def run : Nil
       conn_id = @sink.on_h2_open(@host, @port, "h2")
-      assembler = Assembler.new(@sink, @host, @port, now_us, conn_id)
+      assembler = Assembler.new(@sink, @host, @port, conn_id)
       begin
         # The client preface (RFC 7540 §3.5) precedes any frame; forward verbatim.
         @upstream.write(Frame.read_preface(@client))
@@ -172,10 +172,6 @@ module Gori::Proxy::H2
       # `feed` puts nothing on the wire, so moving it after costs the peer nothing.
       extract.try(&.observe(frame, pre))
       assembler.feed(direction, frame, pre)
-    end
-
-    private def now_us : Int64
-      (Time.utc - Time::UNIX_EPOCH).total_microseconds.to_i64
     end
   end
 end
