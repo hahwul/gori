@@ -965,28 +965,6 @@ module Gori::Proxy::Codec::Http1
     line[start, stop - start]
   end
 
-  # `line` with the octets `String#strip` counts as ASCII whitespace taken off both ends, as a
-  # VIEW. Wider than `trim_ows` on purpose: this exists to make `strip` a no-op on the result,
-  # so it has to match `Char#ascii_whitespace?` exactly (VT and FF included), not the RFC's OWS.
-  # Never trims a UTF-8 continuation octet — every byte in the set is below 0x80.
-  private def self.trim_ascii_ws(line : Bytes) : Bytes
-    start = 0
-    stop = line.size
-    while stop > start && ascii_ws?(line.unsafe_fetch(stop - 1))
-      stop -= 1
-    end
-    while start < stop && ascii_ws?(line.unsafe_fetch(start))
-      start += 1
-    end
-    line[start, stop - start]
-  end
-
-  # SP / HTAB / LF / VT / FF / CR — `Char#ascii_whitespace?`, which is what `String#strip`
-  # removes from an ASCII string.
-  private def self.ascii_ws?(b : UInt8) : Bool
-    b == 0x20_u8 || (b >= 0x09_u8 && b <= 0x0d_u8)
-  end
-
   # SP / HTAB / CR / LF — the terminator and the optional whitespace around a field-value.
   private def self.ows?(b : UInt8) : Bool
     b == 0x20_u8 || b == 0x09_u8 || b == 0x0d_u8 || b == 0x0a_u8
@@ -1322,9 +1300,10 @@ module Gori::Proxy::Codec::Http1
     # plus its stripped copy. `strip` still runs, because it
     # also removes the Unicode whitespace a byte scan cannot see, and this projection feeds
     # the framing lookups: answering differently from `strip` there is a desync, not a
-    # rounding error. `trim_ascii_ws` takes exactly the octets `strip` treats as ASCII
-    # whitespace, so what reaches `strip` is what it would have produced anyway.
-    value = String.new(trim_ascii_ws(line[colon + 1, line.size - colon - 1])).strip
+    # rounding error. `AsciiBytes.trim` takes exactly the octets `strip` treats as ASCII
+    # whitespace (`Char#ascii_whitespace?`, VT and FF included — wider than the RFC's OWS on
+    # purpose), so what reaches `strip` is what it would have produced anyway.
+    value = String.new(AsciiBytes.trim(line[colon + 1, line.size - colon - 1])).strip
     list << Header.new(name, value)
   end
 end
