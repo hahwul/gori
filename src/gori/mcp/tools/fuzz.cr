@@ -1306,7 +1306,7 @@ module Gori
       end
 
       # A matcher built from a `stop_on` `match`/`filter` pair, or nil when neither is given.
-      # It never decodes: `Matcher#build` runs it through `matches_precomputed?` on the body it
+      # It never decodes: `Matcher#build` runs it through `decide` on the body it
       # already decoded for the run's own verdict.
       private def fuzz_stop_condition(match_raw : JSON::Any?, filter_raw : JSON::Any?) : Fuzz::Matcher?
         m = Fuzz::Matcher.new
