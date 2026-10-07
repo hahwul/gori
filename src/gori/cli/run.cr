@@ -248,11 +248,8 @@ module Gori
         puts "Usage: gori run <subcommand> [options]"
         puts ""
         puts "Subcommands:"
-        SUBCOMMANDS.each do |name, desc|
-          gap = SUBCMD_COL_W - name.size
-          gap = 1 if gap < 1
-          puts "  #{name}#{" " * gap}#{desc}"
-        end
+        # At least one space after an overlong name.
+        SUBCOMMANDS.each { |name, desc| puts "  #{name.ljust(SUBCMD_COL_W - 1)} #{desc}" }
         puts ""
         puts "Most read subcommands accept --project NAME or --db PATH; with neither they"
         puts "use the most-recently-active project. See 'gori run <subcommand> --help'."
@@ -1220,7 +1217,7 @@ module Gori
 
       # The {scheme, host, target} `guard_outbound` judges a `--bind-from` seed by. Named rather
       # than inlined so the decision is spec-able without a live send, the way
-      # `repeater_out_of_scope?` is for `gori run repeater`. The target comes from
+      # `repeater_scope_verdict` is for `gori run repeater`. The target comes from
       # `Outbound.request_target` — the one home for reading a request-target off raw bytes,
       # which recovers it from an irregular request line instead of gating an empty path.
       private def self.bind_from_scope_parts(built : Repeater::FlowRequest::Built) : {String, String, String, Int32}

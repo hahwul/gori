@@ -519,12 +519,7 @@ module Gori
       # not resend it), which is exactly why the machine-readable half has to carry the answer:
       # a report emitted before the side effect cannot, so both writes now happen before the
       # emit (#1118).
-      struct WriteOutcome
-        getter error : String?
-
-        def initialize(@error : String?)
-        end
-
+      record WriteOutcome, error : String? do
         def ok? : Bool
           @error.nil?
         end
@@ -532,14 +527,7 @@ module Gori
 
       # The post-send writes for `--save-as-repeater`. The id is present once the session row
       # committed, even if the response write that follows it did not.
-      struct SendRepeaterOutcome
-        getter id : Int64?
-        getter save_write : WriteOutcome
-        getter response_write : WriteOutcome?
-
-        def initialize(@id, @save_write, @response_write)
-        end
-      end
+      record SendRepeaterOutcome, id : Int64?, save_write : WriteOutcome, response_write : WriteOutcome?
 
       # Persist a completed one-shot send without turning a project write failure into a retry
       # of a request that already reached its origin.
@@ -969,10 +957,6 @@ module Gori
           return verdict if verdict.blocked?
         end
         first
-      end
-
-      private def self.repeater_out_of_scope?(outbound : Gori::Outbound, plan : Repeater::Plan) : Bool
-        repeater_scope_verdict(outbound, plan).blocked?
       end
 
       # A saved repeater SESSION row IS the option set: its target, http2 toggle, SNI and

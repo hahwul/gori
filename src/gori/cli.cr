@@ -65,7 +65,7 @@ module Gori
         # dispatch and not inside each subcommand: `gori run` has dozens of leaves, and a leaf
         # that forgot would file its writes under whatever ran last.
         FlowSource.surface = FlowSource::Surface::Cli
-        run_run(subargs)
+        Run.dispatch(subargs)
       when "wizard"
         run_wizard(subargs)
       when "tutorial"
@@ -329,13 +329,6 @@ module Gori
       abort "gori settings #{cmd}: #{Settings.path} could not be loaded (see the warning above, " \
             "if any), so every section is at its factory default right now — this would #{cmd} " \
             "those defaults, not your settings.\nFix or remove that file, then re-run."
-    end
-
-    # Handler for `gori run` (the non-interactive CLI mode). Named run_run to match
-    # the run_<subcommand> dispatch convention; the subcommand suite itself lives in
-    # `Gori::CLI::Run` (src/gori/cli/run.cr).
-    private def self.run_run(args : Array(String)) : Nil
-      Run.dispatch(args)
     end
 
     # The `gori <cmd>` twin of `Run.parse_args`'s tail: build the parser, let the command
