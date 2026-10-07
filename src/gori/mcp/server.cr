@@ -855,7 +855,7 @@ module Gori
       private def filter_note : String?
         f = @tools.tool_filter
         return nil unless f
-        # `served_count`, not `f.size`: under `--read-only` the filter's own count is the set
+        # `served_count`, not the filter's size: under `--read-only` the filter's own count is the set
         # it KEPT, and the gate then withholds some of it. One number here, and it is the one
         # the very next `tools/list` will return.
         " This server was started with #{f.flags} and advertises #{@tools.served_count} of " \
