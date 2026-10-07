@@ -3440,18 +3440,7 @@ module Gori::Proxy
     # Content-Length, and keep every other header verbatim in order. Preserves the head's
     # own line ending (CRLF or bare LF) so the re-parsed head stays well-formed.
     private def reframe_to_length(head : Bytes, len : Int32) : Bytes
-      text = String.new(head)
-      eol = text.index("\r\n") ? "\r\n" : "\n"
-      section = text.split(eol + eol, 2).first # headers up to the blank line
-      lines = section.split(eol)
-      io = IO::Memory.new(head.size + 32)
-      io << lines.first << eol # request / status line, untouched
-      lines[1..].each do |line|
-        next if header_line_named?(line, "transfer-encoding") || header_line_named?(line, "content-length")
-        io << line << eol
-      end
-      io << "Content-Length: " << len << eol << eol
-      io.to_slice
+      rebuild_without_framing(head) { |io, eol| io << "Content-Length: " << len << eol }
     end
 
     # Force `sent_head`'s body-framing headers (Content-Length / Transfer-Encoding) to match
@@ -3468,17 +3457,25 @@ module Gori::Proxy
       sent_framing = framing_header_lines(sent_head)
       return sent_head if orig_framing == sent_framing # rewrite didn't touch framing → byte-exact
 
-      text = String.new(sent_head)
+      # The framing that matches the streamed body.
+      rebuild_without_framing(sent_head) { |io, eol| orig_framing.each { |line| io << line << eol } }
+    end
+
+    # `head` with its Transfer-Encoding and Content-Length lines dropped, every other line
+    # verbatim in order, the block's framing lines (written with the head's own line ending,
+    # CRLF or bare LF, which it is handed) appended, then the blank line.
+    private def rebuild_without_framing(head : Bytes, &) : Bytes
+      text = String.new(head)
       eol = text.index("\r\n") ? "\r\n" : "\n"
       section = text.split(eol + eol, 2).first # headers up to the blank line
       lines = section.split(eol)
-      io = IO::Memory.new(sent_head.size + 32)
+      io = IO::Memory.new(head.size + 32)
       io << lines.first << eol # request / status line, untouched
       lines[1..].each do |line|
         next if header_line_named?(line, "transfer-encoding") || header_line_named?(line, "content-length")
         io << line << eol
       end
-      orig_framing.each { |line| io << line << eol } # the framing that matches the streamed body
+      yield io, eol
       io << eol
       io.to_slice
     end
