@@ -1249,8 +1249,8 @@ module Gori::Proxy
       # declared length exceeds MAX_REWRITE_BODY is likewise left byte-exact (see the constant)
       # so one huge download can't grow the proxy heap while a rule is on.
       if buffer_response_body?(resp, resp_framing, resp_len, host)
-        return forward_response_rewriting_body(upstream, req, sent_req, flow_id, host, port,
-          scheme, resp, sent_resp_head, resp_framing, resp_len, ttfb, started, extract_ref)
+        return forward_response_rewriting_body(upstream, req, sent_req, flow_id, host,
+          resp, sent_resp_head, resp_framing, resp_len, ttfb, started, extract_ref)
       end
 
       relaxed = relax_for_streaming_response(resp, resp_framing, upstream)
@@ -1716,7 +1716,7 @@ module Gori::Proxy
     # so the two surfaces cannot disagree about what a descriptor means.
     private def forward_response_rewriting_body(upstream : IO, req : Codec::RawRequest,
                                                 sent_req : Codec::RawRequest, flow_id : Int64,
-                                                host : String, port : Int32, scheme : String,
+                                                host : String,
                                                 resp : Codec::RawResponse, sent_resp_head : Bytes,
                                                 resp_framing : Codec::BodyFraming, resp_len : Int64,
                                                 ttfb : Int64, started : Time::Instant,
