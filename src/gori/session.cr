@@ -199,7 +199,7 @@ module Gori
               "another gori instance already holds this database's capture lock"
             end
           rescue ex
-            # CaptureLock.try itself failed (can't create/open the lock file) — not a
+            # CaptureLock.try_at itself failed (can't create/open the lock file) — not a
             # bind issue; release anything we opened and report it.
             lock.try(&.close) rescue nil
             lock = nil
@@ -578,7 +578,7 @@ module Gori
       # Best-effort: a delete failure here must not skip the lock/probe/store teardown below
       # (which would leak the flock + writer fiber + fibers) or, via a caller's `ensure`,
       # replace the real exception being unwound.
-      (CaptureStatus.clear_at(@project.capture_status_path) if capturing_lock_held?) rescue nil
+      (File.delete?(@project.capture_status_path) if capturing_lock_held?) rescue nil
       # Stop Probe FIRST so its active workers wind down and its passive fiber stops issuing
       # get_flow against a live DB; this also closes the probe_events channel it consumes.
       @probe.stop

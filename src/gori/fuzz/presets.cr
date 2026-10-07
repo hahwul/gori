@@ -70,7 +70,7 @@ module Gori::Fuzz
           end
         end
       end
-      EmbeddedList.dedup(values)
+      values.uniq
     end
 
     private def self.normalize(name : String) : String

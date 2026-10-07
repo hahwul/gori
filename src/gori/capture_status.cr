@@ -20,7 +20,7 @@ module Gori
     # The legacy per-DIRECTORY marker path (`<dir>/.capture.status`), which the canonical
     # registry db keeps — see Project#capture_status_path for why anything else does not.
     #
-    # `path` and `read` take a DIRECTORY because the project picker legitimately has only that:
+    # `path` takes a DIRECTORY because the project picker legitimately has only that:
     # it lists registry projects, whose marker is at the legacy path by definition. The WRITERS
     # are `_at`-only on purpose — a directory-keyed write is the defect this file's history is
     # about (two `--db` databases in one directory sharing one marker), so there is no
@@ -29,8 +29,8 @@ module Gori
       File.join(dir, STATUS_FILE)
     end
 
-    # Write the marker at an explicit PATH. The path-taking trio (`write_at`/`read_at`/
-    # `clear_at`) exists for the same reason `CaptureLock.try_at` does: this marker is the
+    # Write the marker at an explicit PATH. The path-taking pair (`write_at`/`read_at`)
+    # exists for the same reason `CaptureLock.try_at` does: this marker is the
     # companion of a capture lock, and the lock is keyed on the DB FILE, so the marker has to
     # be too or the pair disagrees about which capture it describes. Two `--db` databases in
     # one directory each hold their OWN lock — deliberately, they are separate databases with
@@ -64,16 +64,8 @@ module Gori
       DurableFile.write(marker, payload, perm: File::Permissions.new(0o644))
     end
 
-    def self.read(dir : String) : Status?
-      parse_file(path(dir))
-    end
-
-    def self.read_at(marker : String) : Status?
-      parse_file(marker)
-    end
-
     # Parse a status file; nil on missing, corrupt, or partial writes.
-    private def self.parse_file(p : String) : Status?
+    def self.read_at(p : String) : Status?
       return nil unless File.exists?(p)
       json = JSON.parse(File.read(p))
       Status.new(
@@ -84,17 +76,6 @@ module Gori
       )
     rescue
       nil
-    end
-
-    def self.clear_at(marker : String) : Nil
-      File.delete?(marker)
-    end
-
-    # Human-friendly bind label for the picker. Terse: this rides inside a project row's
-    # chip, so it takes the address without BindAddress's "(all interfaces)" note — the
-    # address itself is identical to every other surface's.
-    def self.format_endpoint(host : String, port : Int32) : String
-      BindAddress.display(host, port, terse: true)
     end
   end
 end

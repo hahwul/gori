@@ -28,7 +28,7 @@ module Gori
         unsafe = bool_arg(h, "unsafe_methods", false)
         if reason = CacheDeception.skip_reason(detail, unsafe)
           # A refusal the caller can act on, named the same way authorize names its skips.
-          return err("flow #{flow_id} cannot be checked: #{CacheDeception.reason_label(reason)}" \
+          return err("flow #{flow_id} cannot be checked: #{Authorize::Passive.reason_label(reason)}" \
                      "#{reason == :unsafe_method ? " (pass unsafe_methods:true to replay it anyway — its side effect can run up to three times)" : ""}",
             "INVALID_ARGUMENT", field: "flow_id")
         end

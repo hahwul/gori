@@ -1140,7 +1140,7 @@ module Gori
       # `authorize_*` through this same method. The repeated failure shape in this repo is a
       # notice fixed on one surface and left to drift on the other two.
       #
-      # An INTERRUPTION and not a refusal, matching the seam it reports (`Env.unbound_in_slot`):
+      # An INTERRUPTION and not a refusal, matching the seam it reports (`Env.slot_literals`):
       # the bytes already went out, `$$NAME` is the escape for an operator who meant the
       # literal, and a guard with no exit costs more than the loss it prevents. What this owes
       # the operator is that the result is not read as evidence about an identity that was

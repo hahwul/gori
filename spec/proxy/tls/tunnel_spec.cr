@@ -493,7 +493,7 @@ describe Gori::Proxy::Tls::Tunnel do
       rules = Gori::Rules.load(store.not_nil!)
       rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
         "/stubbed", "200 OK\n\nFROM-RULE", op: Gori::Store::RuleOp::ShortCircuit)
-      rules.short_circuits?.should be_true
+      rules.short_circuits_for_host?("localhost").should be_true
       # It is NOT a body rule — the pre-#511 gate would have let this reach the h2 relay.
       rules.rewrites_request_body?.should be_false
       rules.rewrites_response_body?.should be_false

@@ -345,7 +345,7 @@ module Gori
     #   * `Slot`: `Env.expand_bindings_as` is the only pass over a slot header value and it
     #     resolves BIND alone. An env-only name there is not a token at all: it shipped as literal
     #     text under bare, and leaving it a bare literal is the same wire. The DECLARED set rather
-    #     than `live`, because a slot header is a reference by construction — `Env.unbound_in_slot`
+    #     than `live`, because a slot header is a reference by construction — `Env.slot_literals`
     #     counts a name the slot merely claims — and `$BIND.X` is the spelling that keeps working
     #     when its rule comes back on.
     #   * `Dial`: one `Env.expand` with `resolve: Owns::Env`. The ENV table alone.

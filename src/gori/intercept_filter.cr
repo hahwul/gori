@@ -439,7 +439,7 @@ module Gori
     end
 
     # Does this condition read a message BODY anywhere in it? Asked by a caller deciding whether
-    # to BUFFER one it would otherwise stream past (`Bindings#extracts_body?`), so this is about
+    # to BUFFER one it would otherwise stream past (`Bindings#extracts_body_for_host?`), so this is about
     # what the evaluation NEEDS, not about what the operator asked for.
     #
     # Which is why it descends into NOT where `mentions_ws?` refuses to. The two look alike and

@@ -430,7 +430,7 @@ module Gori
     #
     # `report_unbound_overlay` FIRST, and it is not a gate: with nothing bound, `$SESSION` in
     # a slot header goes out as five literal bytes and the origin answers 401 — which the
-    # operator reads as the session having been sent and rejected. See `Env.unbound_in_slot`
+    # operator reads as the session having been sent and rejected. See `Env.slot_literals`
     # for why this seam can say so when a request BODY's `$id` cannot.
     # ONE generation for the whole overlay, and the send seam's own when it has one: a slot
     # with `X-Request-Id: $GEN.UUID` and `X-Correlation-Id: $GEN.UUID` sends one id, not two,
@@ -743,13 +743,9 @@ module Gori
 
     # ── Proxy::ResponseExtract (the proxy response path, slice 2) ─────────────
 
-    # Both counts are read per response on the proxy path, so both are lock-free.
+    # Read per response on the proxy path, so lock-free.
     def extracts? : Bool
       @enabled_count.get > 0
-    end
-
-    def extracts_body? : Bool
-      @body_count.get > 0
     end
 
     # Whether a BODY-scoped extract rule that can actually MATCH `host` is live (#526/#531).
@@ -795,8 +791,9 @@ module Gori
     # And the hot-path cost the design was right to ask about is gated in TWO stages, neither
     # of which is a flag:
     #
-    #   1. `extracts_body?` — a lock-free atomic. No body-scoped rule anywhere means ClientConn
-    #      never buffers a response body at all, so nothing is decoded because nothing is held.
+    #   1. `extracts_body_for_host?` — a lock-free atomic first. No body-scoped rule anywhere
+    #      means ClientConn never buffers a response body at all, so nothing is decoded
+    #      because nothing is held.
     #   2. the rule's own host glob and `InterceptFilter` condition, evaluated BEFORE any decode
     #      (see the `candidates` call below). This is the structural difference from a
     #      Match&Replace body rule, whose `gsub` runs on EVERY response for a matching host: an
@@ -860,9 +857,7 @@ module Gori
       end
     end
 
-    # The HOST-and-CONDITION half of `candidates`, without the slot test. Its own method so
-    # `unasked` below asks the same question `candidates` does rather than a second copy of
-    # it that can drift — the difference between the two answers IS the diagnostic.
+    # The HOST-and-CONDITION half of `candidates`, without the slot test.
     private def matched(subject : InterceptFilter::Subject) : Array(Compiled)
       @mutex.synchronize do
         @compiled.select do |c|
@@ -871,43 +866,22 @@ module Gori
       end
     end
 
-    # Rules this message MATCHED — host glob and condition both — that `candidates` did NOT
-    # ask, because a slot claims them and that slot is not the send context. One entry per
-    # rule: `{binding name, the slots claiming it}`.
+    # Every ENABLED rule that cannot be asked in the current send context whatever the
+    # response says, because a slot claims it and that slot is not active. One entry per rule:
+    # `{binding name, the slots claiming it}`.
     #
     # This is the information a caller needs to tell "the rule found nothing" apart from "the
-    # rule was not asked", and until it existed nobody could. `--bind-from` replays a flow,
-    # gets no bound name back and reports "no extract rule matched its response … check the
-    # rule's host glob, condition and selector" — three innocent things, when the actual cause
-    # is that one slot claims the rule and no slot is active. The rule matched; the selection
-    # skipped it. Measured: `session edit idA --rule SESSION` silently broke every existing
-    # `--bind-from` playbook, and `--clear-rules` silently fixed it again.
+    # rule was not asked". `--bind-from` replays a flow, gets no bound name back and reports
+    # "no extract rule matched its response … check the rule's host glob, condition and
+    # selector" — three innocent things, when the actual cause is that one slot claims the rule
+    # and no slot is active. Measured: `session edit idA --rule SESSION` silently broke every
+    # existing `--bind-from` playbook, and `--clear-rules` silently fixed it again.
     #
     # A SELECTION and not a miss, so it is deliberately not written to the `events` feed (see
     # `candidates`): that would be one row per response for every identity the operator is not
     # currently using. It is answered on demand, to the surface that has something to say.
-    def unasked(subject : InterceptFilter::Subject) : Array({String, Array(String)})
-      skipped = [] of {String, Array(String)}
-      slots = @slots
-      return skipped unless slots && slots.scoped?
-      claimed = slots.claimed_names
-      active = slots.active
-      list = slots.slots
-      matched(subject).each do |c|
-        name = c.rule.name
-        next unless claimed.includes?(name)
-        next if active.try(&.claims?(name))
-        next if skipped.any? { |(n, _)| n == name }
-        skipped << {name, list.select(&.claims?(name)).map(&.name)}
-      end
-      skipped
-    end
-
-    # `unasked` with no message in hand: every ENABLED rule that cannot be asked in the
-    # current send context whatever the response says, because a slot claims it and that slot
-    # is not active.
     #
-    # The subject-free half, because the caller that most needs this has no `Subject` to give.
+    # Subject-free, because the caller that most needs this has no `Subject` to give.
     # `gori run … --bind-from` replays a flow through `Repeater::Sender`, which runs the
     # extraction ITSELF; the CLI only ever sees "nothing bound" and has nothing left to build
     # a subject from. `Rules#report_refused`'s shape — a query a surface asks when it is about

@@ -92,7 +92,7 @@ describe Gori::OpenLock do
     with_project do |registry, project|
       # The two guards are separate questions and keep separate wording, so an operator is told
       # which one to act on.
-      lock = Gori::CaptureLock.try(project.dir).not_nil!
+      lock = Gori::CaptureLock.try_at(Gori::CaptureLock.path(project.dir)).not_nil!
       begin
         expect_raises(Gori::Error, /stop its capture first/) { registry.delete(project) }
       ensure

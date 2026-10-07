@@ -767,12 +767,8 @@ module Gori
 
     # --- short circuit (#511) ------------------------------------------------
 
-    def short_circuits? : Bool
-      @short_circuit_count.get > 0
-    end
-
-    # `short_circuits?` narrowed to one host (#526) — the same split, and for the same
-    # reason, as `rewrites_body_for_host?` above. The host filter is exactly the one
+    # Whether a short-circuit rule could fire for one host (#526) — the same split, and for
+    # the same reason, as `rewrites_body_for_host?` above. The host filter is exactly the one
     # `short_circuit` itself applies, so this answers "could `short_circuit` ever return a
     # stub for this host", which is precisely what the downgrade gate is protecting.
     def short_circuits_for_host?(host : String) : Bool
@@ -1388,20 +1384,19 @@ module Gori
     private def substitute(repl : String, prefix : String, snap : SubstSnapshot,
                            regex : Bool, head : Bool = false) : String | Refused
       bytes = repl.to_slice
-      prefix_bytes = prefix.to_slice
       syntax = Settings.env_syntax
       n = bytes.size
-      plen = prefix_bytes.size
+      plen = prefix.bytesize
       buf = IO::Memory.new(n)
       i = 0
       while i < n
-        unless prefix_at?(bytes, prefix_bytes, i)
+        unless Env.prefix_at?(bytes, prefix, i)
           buf.write_byte(bytes[i])
           i += 1
           next
         end
         # `$$` → one literal prefix, consuming both.
-        if prefix_at?(bytes, prefix_bytes, i + plen)
+        if Env.prefix_at?(bytes, prefix, i + plen)
           buf << prefix
           i += 2 * plen
           next
@@ -1535,11 +1530,6 @@ module Gori
       (v = vars[key]?) ? Bindings.boundary_forging?(v) : false
     end
 
-    private def prefix_at?(bytes : Bytes, prefix_bytes : Bytes, at : Int32) : Bool
-      return false if at + prefix_bytes.size > bytes.size
-      prefix_bytes.each_with_index.all? { |b, j| bytes[at + j] == b }
-    end
-
     # Double every backslash so a substituted value cannot be read as a capture reference
     # by `String#gsub(Regex, String)`. `gsub(String, String)` interprets nothing, so this is
     # applied to the regex path alone.
@@ -1619,7 +1609,7 @@ module Gori
       # Whether the BINDING half owns this name at all — an enabled extract rule declares it, the
       # active session slot claims it, or it is bound right now. The claim is the half
       # `bare_spelling_at` was missing: `--identities FILE` and MCP `create_session_slot` write
-      # slots whose `rules` name bindings the project does not have yet, and `Env.unbound_in_slot`
+      # slots whose `rules` name bindings the project does not have yet, and `Env.slot_literals`
       # has always counted such a name as a reference.
       def binds?(name : String) : Bool
         bind.has_key?(name) || declared.includes?(name) || claimed.includes?(name)

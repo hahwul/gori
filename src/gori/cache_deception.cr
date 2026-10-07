@@ -118,6 +118,8 @@ module Gori
     # method, whose replay would run its side effect up to three times (prime, anonymous, control).
     # Plus one rung of its own: a head stored as an h2 field list, which `FlowRequest.build`
     # refuses by raising — screened here so it is a skip, not an error halfway through a run.
+    # Surfaces word it with `Authorize::Passive.reason_label`, so both tools word an identical
+    # refusal identically.
     def self.skip_reason(detail : Store::FlowDetail, unsafe : Bool) : Symbol?
       row = detail.row
       return :incomplete unless row.state.complete?
@@ -125,12 +127,6 @@ module Gori
       return :pseudo_header_head if Repeater::FlowRequest.pseudo_header_head?(detail.request_head)
       return :unsafe_method unless unsafe || Authorize::Passive::SAFE_METHODS.includes?(row.method.upcase)
       nil
-    end
-
-    # A human sentence for a skip reason — delegates to `Authorize::Passive.reason_label`, the one home for
-    # these strings, so the two tools word an identical refusal identically.
-    def self.reason_label(reason : Symbol) : String
-      Authorize::Passive.reason_label(reason)
     end
 
     # Run the check for one flow through the Authorize engine. The cache-busted control is a

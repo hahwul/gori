@@ -43,7 +43,7 @@ describe "capture-status marker keying" do
       Gori::CaptureStatus.read_at(side.capture_status_path).not_nil!.port.should eq(9999)
 
       # And one session closing must not delete a live session's marker.
-      Gori::CaptureStatus.clear_at(side.capture_status_path)
+      File.delete?(side.capture_status_path)
       Gori::CaptureStatus.read_at(canonical.capture_status_path).not_nil!.port.should eq(8070)
       Gori::CaptureStatus.read_at(side.capture_status_path).should be_nil
     end
@@ -51,13 +51,13 @@ describe "capture-status marker keying" do
 
   it "keeps the canonical db on the legacy per-directory path" do
     with_shared_dir do |dir|
-      # No migration and no regression: the picker reads `CaptureStatus.read(project.dir)` for
+      # No migration and no regression: the picker reads `CaptureStatus.path(project.dir)` for
       # every registry project, and every marker already on disk lives at that path.
       project = Gori::Project.new("api", File.join(dir, Gori::Project::DB_FILE))
       project.capture_status_path.should eq(Gori::CaptureStatus.path(dir))
       Gori::CaptureStatus.write_at(project.capture_status_path, "127.0.0.1", 8070, false)
-      Gori::CaptureStatus.read(dir).not_nil!.listening.should be_false
-      Gori::CaptureStatus.read(dir).not_nil!.port.should eq(8070)
+      Gori::CaptureStatus.read_at(Gori::CaptureStatus.path(dir)).not_nil!.listening.should be_false
+      Gori::CaptureStatus.read_at(Gori::CaptureStatus.path(dir)).not_nil!.port.should eq(8070)
     end
   end
 

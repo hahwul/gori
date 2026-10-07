@@ -131,16 +131,16 @@ describe "Gori::Env — namespaced queries" do
     end
   end
 
-  it "unbound_in_slot reports a slot's own literal $BIND.NAME, and the hint offers the escape" do
+  it "slot_literals reports a slot's own literal $BIND.NAME, and the hint offers the escape" do
     with_q(declared: ["SESSION"], bound: {} of String => String) do
       slot = Gori::SessionSlot.new("admin",
         set_headers: [{"Authorization", "Bearer $BIND.SESSION"}, {"X-Env", "$ENV.HOST"}],
         rules: ["SESSION"])
-      Gori::Env.unbound_in_slot(slot).should eq(["SESSION"])
+      Gori::Env.slot_literals(slot).map(&.name).should eq(["SESSION"])
       Gori::Env.spell_escaped("SESSION", Gori::Env::Namespace::Bind).should eq("$$BIND.SESSION")
       # Bound ⇒ nothing to report.
       Gori::Env.layer = QueryLayer.new(["SESSION"], {"SESSION" => "tok"})
-      Gori::Env.unbound_in_slot(slot).should be_empty
+      Gori::Env.slot_literals(slot).map(&.name).should be_empty
     end
   end
 
@@ -153,7 +153,7 @@ describe "Gori::Env — namespaced queries" do
     with_q(declared: ["SESSION"], bound: {} of String => String) do
       slot = Gori::SessionSlot.new("admin",
         set_headers: [{"Authorization", "Bearer $SESSION"}], rules: ["SESSION"])
-      Gori::Env.unbound_in_slot(slot).should eq(["SESSION"])
+      Gori::Env.slot_literals(slot).map(&.name).should eq(["SESSION"])
       lit = Gori::Env.slot_literals(slot)
       lit.map(&.name).should eq(["SESSION"])
       lit[0].bare_spelled.should be_true
@@ -163,7 +163,7 @@ describe "Gori::Env — namespaced queries" do
       # BOUND changes nothing about it, which is the difference from the namespaced half: the
       # reader never looks at those bytes, so they ship literally either way.
       Gori::Env.layer = QueryLayer.new(["SESSION"], {"SESSION" => "tok"})
-      Gori::Env.unbound_in_slot(slot).should eq(["SESSION"])
+      Gori::Env.slot_literals(slot).map(&.name).should eq(["SESSION"])
       Gori::Env.slot_literals(slot)[0].bare_spelled.should be_true
     end
   end
@@ -172,12 +172,12 @@ describe "Gori::Env — namespaced queries" do
     with_q(declared: [] of String, bound: {} of String => String) do
       slot = Gori::SessionSlot.new("admin",
         set_headers: [{"Authorization", "Bearer $SESSION"}], rules: ["SESSION"])
-      Gori::Env.unbound_in_slot(slot).should eq(["SESSION"])
+      Gori::Env.slot_literals(slot).map(&.name).should eq(["SESSION"])
       # A name in NEITHER list is plan-build's business, exactly as the namespaced half states —
       # `$id` in a header value is not a reference gori may speak for.
       other = Gori::SessionSlot.new("admin",
         set_headers: [{"X-A", "$id"}, {"X-B", "$ENV.HOST"}], rules: [] of String)
-      Gori::Env.unbound_in_slot(other).should be_empty
+      Gori::Env.slot_literals(other).map(&.name).should be_empty
     end
   end
 
@@ -188,7 +188,7 @@ describe "Gori::Env — namespaced queries" do
       # what keeps the escape out of the report.
       esc = Gori::SessionSlot.new("admin",
         set_headers: [{"X-A", "$$SESSION"}], rules: ["SESSION"])
-      Gori::Env.unbound_in_slot(esc).should be_empty
+      Gori::Env.slot_literals(esc).map(&.name).should be_empty
     end
   end
 

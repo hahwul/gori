@@ -44,11 +44,6 @@ module Gori
       end
     end
 
-    # Try to acquire the DIRECTORY lock (`<dir>/.capture.lock`) WITHOUT blocking.
-    def self.try(dir : String) : CaptureLock?
-      try_at(path(dir))
-    end
-
     # Try to acquire the lock at an explicit LOCK FILE PATH WITHOUT blocking. Returns a held
     # CaptureLock (the caller MUST keep it alive for the session and `close` it on session
     # end) when this instance is the capturer, or nil when another LIVE instance already holds

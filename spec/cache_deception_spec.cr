@@ -182,7 +182,7 @@ describe Gori::CacheDeception do
         detail = store.get_flow(id).not_nil!
         CD.skip_reason(detail, false).should eq(:unsafe_method)
         CD.skip_reason(detail, true).should be_nil # --unsafe-methods lifts it
-        CD.reason_label(:unsafe_method).should eq("not a safe method to repeat")
+        Gori::Authorize::Passive.reason_label(:unsafe_method).should eq("not a safe method to repeat")
       end
     end
 
@@ -202,7 +202,7 @@ describe Gori::CacheDeception do
         # INTERNAL error, and the CLI moves on to the next flow.
         CD.skip_reason(detail, false).should eq(:pseudo_header_head)
         CD.skip_reason(detail, true).should eq(:pseudo_header_head)
-        CD.reason_label(:pseudo_header_head).should contain("HTTP/2 field list")
+        Gori::Authorize::Passive.reason_label(:pseudo_header_head).should contain("HTTP/2 field list")
       end
     end
   end

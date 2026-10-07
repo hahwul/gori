@@ -249,7 +249,7 @@ module Gori::Settings
   # Also records the bypass — the gori.log notice (once per host) AND the inventory the TUI
   # reads (every CONNECT) — because this is the only place that knows a bypass happened AND
   # which host and pattern it was: a bypassed connection produces no flow, no event, and no
-  # other trace. `match` rather than `matches_any?` so the winning pattern can be named.
+  # other trace. `match`, so the winning pattern can be named.
   def self.tls_passthrough?(host : String) : Bool
     hit = HostPattern.match(@@tls_passthrough_compiled, host)
     return false unless hit

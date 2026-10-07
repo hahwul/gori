@@ -206,7 +206,7 @@ describe "Gori::Store.compact" do
         store.close
       end
 
-      lock = Gori::CaptureLock.try(File.dirname(path)).not_nil!
+      lock = Gori::CaptureLock.try_at(Gori::CaptureLock.path(File.dirname(path))).not_nil!
       begin
         Gori::Store.compact(path, Gori::Store::CompactPlan.new(response_bodies: true)).should be_nil
         # The body is untouched because the run was refused.

@@ -105,7 +105,7 @@ describe "Gori::Rules — short-circuit op" do
       rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
         "/admin", "200 OK\nContent-Type: application/json\n\n{\"isAdmin\": true}", op: SC)
 
-      rules.short_circuits?.should be_true
+      rules.short_circuits_for_host?("acme.test").should be_true
       stub = rules.short_circuit(get("/admin"), "acme.test").not_nil!
       stub.status.should eq(200)
       stub.error.should be_nil
@@ -194,7 +194,7 @@ describe "Gori::Rules — short-circuit op" do
       rules.rewrites_request_body?.should be_false
       rules.rewrites_response_body?.should be_false
       # ...but it IS live for its own seam.
-      rules.short_circuits?.should be_true
+      rules.short_circuits_for_host?("acme.test").should be_true
       rules.active?.should be_true
     end
   end
@@ -227,7 +227,8 @@ describe "Gori::Rules — short-circuit op" do
       rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
         "/admin", "200 OK\n\nok", op: SC)
       rules.toggle(rules.rules.first.id)
-      rules.short_circuits?.should be_false
+      rules.short_circuits_for_host?("acme.test").should be_false
+      rules.@short_circuit_count.get.should eq(0) # the lock-free fast path is down too
       rules.short_circuit(get("/admin"), "acme.test").should be_nil
     end
   end
@@ -429,7 +430,8 @@ describe "Gori::Rules — short-circuit sub-kind" do
       b.inert_reason.not_nil!.should contain("throttle")
 
       engine = Gori::Rules.load(store)
-      engine.short_circuits?.should be_false
+      engine.short_circuits_for_host?("acme.test").should be_false
+      engine.@short_circuit_count.get.should eq(0) # the lock-free fast path is down too
       engine.short_circuit(get("/a"), "acme.test").should be_nil
       engine.update(label, Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
         "/a", "200 OK", op: SC).should be_false

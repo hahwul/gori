@@ -142,7 +142,7 @@ module Gori
                                            unsafe_methods : Bool) : Bool
         reason = CacheDeception.skip_reason(detail, unsafe_methods)
         return false unless reason
-        STDERR.puts "  skip flow #{id}: #{CacheDeception.reason_label(reason)}" \
+        STDERR.puts "  skip flow #{id}: #{Authorize::Passive.reason_label(reason)}" \
                     "#{reason == :unsafe_method ? " (pass --unsafe-methods to check it anyway)" : ""}"
         true
       end

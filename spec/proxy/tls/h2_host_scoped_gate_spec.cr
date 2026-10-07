@@ -183,7 +183,6 @@ describe "h2 downgrade gate, host-scoped (#526)" do
     it "scopes the short-circuit question exactly as `short_circuit` itself is scoped" do
       with_gate_rules do |rules|
         rules.add(SCOPED_REQ, SCOPED_HEAD, "/admin", "403 Forbidden", op: SCOPED_SC, host: "alpha.test")
-        rules.short_circuits?.should be_true
         rules.short_circuits_for_host?("alpha.test").should be_true
         rules.short_circuits_for_host?("127.0.0.1").should be_false
         # ...and that is precisely the reachability `short_circuit` has for those two hosts,

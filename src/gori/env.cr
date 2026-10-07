@@ -675,7 +675,7 @@ module Gori
       #
       # A claim is a declaration by another door: `--identities FILE` and MCP
       # `create_session_slot` both write a slot whose `rules` name bindings the project may not have
-      # yet, and `Env.unbound_in_slot` has always counted such a name as a reference for exactly
+      # yet, and `Env.slot_literals` has always counted such a name as a reference for exactly
       # that reason. It is here so a consumer that judges a SPELLING (`Rules#bare_spelling_at`) can
       # ask the same question the send seam does instead of a narrower one.
       #
@@ -826,11 +826,7 @@ module Gori
     # declares, or one this slot claims (a slot naming a rule that does not exist yet is the
     # same operator mistake, one step earlier). An unknown `$FOO` is plan-build's business,
     # exactly as `unbound` above states; two answers to one syntax is what #525 rules out.
-    def self.unbound_in_slot(slot : SessionSlot) : Array(String)
-      slot_literals(slot).map(&.name)
-    end
-
-    # The same scan, with the CAUSE kept.
+    # Each entry keeps its CAUSE (`SlotLiteral#bare_spelled`).
     #
     # Under the namespaced grammar this also reads the header with the BARE grammar, and that half
     # is the missed bypass this report exists to prevent. A slot is written from two doors no
@@ -2266,7 +2262,7 @@ module Gori
     def self.parse_vars_json(raw : String?) : Array({String, String})
       return [] of {String, String} if raw.nil? || raw.strip.empty?
       # A malformed row degrades to "no vars", matching every sibling reader of a persisted
-      # JSON blob (`Notes.parse`, `CaptureStatus.parse_file`, `Analyzer#load_disabled`). The
+      # JSON blob (`Notes.parse`, `CaptureStatus.read_at`, `Analyzer#load_disabled`). The
       # `.as_a?` below already says that is the intent for a bad SHAPE; without this rescue a
       # bad PARSE escaped instead — out of `load_project`, and so out of `Session.open` and
       # `CLI::Run.open_store`, failing the whole project open on a raw JSON::ParseException.

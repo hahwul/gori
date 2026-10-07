@@ -47,8 +47,8 @@ describe "Gori::Bindings — the proxy response seam (#501 slice 2)" do
       with_store do |store|
         b = Gori::Bindings.load(store)
         b.extracts?.should be_false
-        b.extracts_body?.should be_false
         b.extracts_body_for_host?("acme.test").should be_false
+        b.@body_count.get.should eq(0) # the lock-free fast path is down too
       end
     end
 
@@ -59,8 +59,8 @@ describe "Gori::Bindings — the proxy response seam (#501 slice 2)" do
         b.extracts?.should be_true
         # The whole point: a `Set-Cookie` descriptor reads the parsed head, so it must not
         # cost a response its streaming (P6) — nor an h2 host its protocol.
-        b.extracts_body?.should be_false
         b.extracts_body_for_host?("acme.test").should be_false
+        b.@body_count.get.should eq(0) # the lock-free fast path is down too
       end
     end
 
@@ -68,7 +68,7 @@ describe "Gori::Bindings — the proxy response seam (#501 slice 2)" do
       with_store do |store|
         b = Gori::Bindings.load(store)
         b.add("CSRF", "path:/login", Gori::ExtractKind::Regex, "name=\"csrf\" value=\"([a-f0-9]+)\"").should be_nil
-        b.extracts_body?.should be_true
+        b.extracts_body_for_host?("acme.test").should be_true
       end
     end
 
@@ -81,7 +81,6 @@ describe "Gori::Bindings — the proxy response seam (#501 slice 2)" do
         b = Gori::Bindings.load(store)
         b.add("SESSION", "body:logged-in", Gori::ExtractKind::Cookie, "sid",
           host: "alpha.test").should be_nil
-        b.extracts_body?.should be_true
         b.extracts_body_for_host?("alpha.test").should be_true
         b.extracts_body_for_host?("beta.test").should be_false # still host-scoped
       end
@@ -93,7 +92,7 @@ describe "Gori::Bindings — the proxy response seam (#501 slice 2)" do
       with_store do |store|
         b = Gori::Bindings.load(store)
         b.add("SESSION", "-body:guest", Gori::ExtractKind::Cookie, "sid").should be_nil
-        b.extracts_body?.should be_true
+        b.extracts_body_for_host?("acme.test").should be_true
       end
     end
 
@@ -103,7 +102,8 @@ describe "Gori::Bindings — the proxy response seam (#501 slice 2)" do
         b.add("CSRF", "", Gori::ExtractKind::Regex, "tok=(\\w+)").should be_nil
         b.toggle(b.rules.first.id)
         b.extracts?.should be_false
-        b.extracts_body?.should be_false
+        b.extracts_body_for_host?("acme.test").should be_false
+        b.@body_count.get.should eq(0) # the lock-free fast path is down too
       end
     end
 
