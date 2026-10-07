@@ -12,6 +12,7 @@ require "../env"
 require "../session_refresh/hook"
 require "../proxy/codec/content_decode"
 require "../pacing"
+require "../ascii_bytes"
 require "wait_group"
 
 module Gori::Discover
@@ -1964,31 +1965,10 @@ module Gori::Discover
     private def calibration_probe(dir : String, name : String, & : Bool ->) : Calibrate::Fetched
       raw = send_with_retries("#{dir}#{name}")
       body = decode_body(raw)
-      yield raw.error.nil? && body_contains?(body, name)
+      # A byte search, not `String.new(body).includes?`: no copy of the response, no reckoning
+      # with invalid UTF-8 (the needle is ASCII by construction — hex plus an extension).
+      yield raw.error.nil? && !AsciiBytes.index(body, name.to_slice).nil?
       distill(raw, body)
-    end
-
-    # `body.includes?(needle)` for bytes. `String.new(body).includes?` would copy the whole
-    # response and would have to reckon with invalid UTF-8; the needle here is ASCII by
-    # construction (`bogus_name` is hex, plus a configured extension), so a byte scan answers
-    # the same question without either.
-    private def body_contains?(body : Bytes, needle : String) : Bool
-      n = needle.to_slice
-      return false if n.empty? || body.size < n.size
-      first = n.unsafe_fetch(0)
-      i = 0
-      last = body.size - n.size
-      while i <= last
-        if body.unsafe_fetch(i) == first
-          k = 1
-          while k < n.size && body.unsafe_fetch(i + k) == n.unsafe_fetch(k)
-            k += 1
-          end
-          return true if k == n.size
-        end
-        i += 1
-      end
-      false
     end
 
     private def process_probe(task : Task) : Outcome
