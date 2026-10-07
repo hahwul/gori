@@ -282,7 +282,7 @@ describe "proxy — extraction and the response body buffer (P6)" do
   it "keeps streaming when no extract rule needs the body" do
     with_project do |rules, bindings|
       bindings.add("SESSION", "", Gori::ExtractKind::Cookie, "sid").should be_nil
-      bindings.extracts_body?.should be_false
+      bindings.extracts_body_for_host?("127.0.0.1").should be_false
       head_arrives_before_body?(rules, bindings).should be_true
     end
   end
@@ -298,7 +298,7 @@ describe "proxy — extraction and the response body buffer (P6)" do
   it "buffers — and only then — when a body-scoped extract rule is live" do
     with_project do |rules, bindings|
       bindings.add("CSRF", "", Gori::ExtractKind::Regex, "tok=(\\w+)").should be_nil
-      bindings.extracts_body?.should be_true
+      bindings.extracts_body_for_host?("127.0.0.1").should be_true
       head_arrives_before_body?(rules, bindings).should be_false
     end
   end

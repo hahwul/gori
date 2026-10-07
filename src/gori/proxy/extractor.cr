@@ -22,11 +22,10 @@ module Gori::Proxy
   # `extracts?` is a LOCK-FREE atomic read, checked before anything is allocated: a proxy with
   # no extract rule pays one integer compare per response and nothing else (P6).
   #
-  # `extracts_body?` is the host-blind summary. A head-scoped descriptor (cookie / header) reads
-  # the parsed head, which every response already has; a body-scoped one (regex / position /
-  # jsonpath) needs the entity, which means buffering a response that would otherwise stream.
-  #
-  # `extracts_body_for_host?` is the same question asked ABOUT ONE HOST. ClientConn uses it for
+  # `extracts_body_for_host?` asks whether a body-scoped rule is live for ONE HOST. A head-scoped
+  # descriptor (cookie / header) reads the parsed head, which every response already has; a
+  # body-scoped one (regex / position / jsonpath) needs the entity, which means buffering a
+  # response that would otherwise stream. ClientConn uses it for
   # each response on a multi-host HTTP/1 connection; the h2 downgrade gate uses it for the
   # CONNECT host. A body-scoped extraction needs the entity in hand, so it earns the same
   # downgrade to HTTP/1.1 only for hosts its glob can actually match. Downgrading a host no rule

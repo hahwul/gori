@@ -743,13 +743,9 @@ module Gori
 
     # ── Proxy::ResponseExtract (the proxy response path, slice 2) ─────────────
 
-    # Both counts are read per response on the proxy path, so both are lock-free.
+    # Read per response on the proxy path, so lock-free.
     def extracts? : Bool
       @enabled_count.get > 0
-    end
-
-    def extracts_body? : Bool
-      @body_count.get > 0
     end
 
     # Whether a BODY-scoped extract rule that can actually MATCH `host` is live (#526/#531).
@@ -795,8 +791,9 @@ module Gori
     # And the hot-path cost the design was right to ask about is gated in TWO stages, neither
     # of which is a flag:
     #
-    #   1. `extracts_body?` — a lock-free atomic. No body-scoped rule anywhere means ClientConn
-    #      never buffers a response body at all, so nothing is decoded because nothing is held.
+    #   1. `extracts_body_for_host?` — a lock-free atomic first. No body-scoped rule anywhere
+    #      means ClientConn never buffers a response body at all, so nothing is decoded
+    #      because nothing is held.
     #   2. the rule's own host glob and `InterceptFilter` condition, evaluated BEFORE any decode
     #      (see the `candidates` call below). This is the structural difference from a
     #      Match&Replace body rule, whose `gsub` runs on EVERY response for a matching host: an

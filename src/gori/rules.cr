@@ -767,12 +767,8 @@ module Gori
 
     # --- short circuit (#511) ------------------------------------------------
 
-    def short_circuits? : Bool
-      @short_circuit_count.get > 0
-    end
-
-    # `short_circuits?` narrowed to one host (#526) — the same split, and for the same
-    # reason, as `rewrites_body_for_host?` above. The host filter is exactly the one
+    # Whether a short-circuit rule could fire for one host (#526) — the same split, and for
+    # the same reason, as `rewrites_body_for_host?` above. The host filter is exactly the one
     # `short_circuit` itself applies, so this answers "could `short_circuit` ever return a
     # stub for this host", which is precisely what the downgrade gate is protecting.
     def short_circuits_for_host?(host : String) : Bool
