@@ -57,7 +57,7 @@ describe Gori::Probe::Active do
   it "builds a canary probe from existing query params and detects reflection" do
     with_store do |store|
       detail = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/search?q=hello", content_type: nil)
-      plan = Gori::Probe::Active.plan(detail).not_nil!
+      plan = Gori::Probe::Active::PRIMARY.plan(detail).not_nil!
       plan.params.size.should eq(1)
       plan.params.first.name.should eq("q")
       canary = plan.params.first.canary
@@ -65,12 +65,12 @@ describe Gori::Probe::Active do
 
       reflected = Gori::Repeater::Result.new(
         "HTTP/1.1 200 OK\r\n\r\n".to_slice, "<p>you searched #{canary}</p>".to_slice, nil, 1_i64)
-      dets = Gori::Probe::Active.detections(plan, reflected, detail)
+      dets = Gori::Probe::Active::PRIMARY.detections(plan, reflected, detail)
       dets.size.should eq(1)
       dets.first.code.should eq("reflected_param")
 
       not_reflected = Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, "<p>nothing</p>".to_slice, nil, 1_i64)
-      Gori::Probe::Active.detections(plan, not_reflected, detail).should be_empty
+      Gori::Probe::Active::PRIMARY.detections(plan, not_reflected, detail).should be_empty
     end
   end
 
@@ -112,7 +112,7 @@ describe Gori::Probe::Active do
   it "has no probe for a request without parameters" do
     with_store do |store|
       detail = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/static/app.js", content_type: nil)
-      Gori::Probe::Active.plan(detail).should be_nil
+      Gori::Probe::Active::PRIMARY.plan(detail).should be_nil
     end
   end
 
@@ -122,7 +122,7 @@ describe Gori::Probe::Active do
       # the origin, so its request line must be origin-form (some origins reject absolute-form).
       detail = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", scheme: "http", host: "target.com",
         target: "http://target.com/search?q=hello", content_type: nil)
-      plan = Gori::Probe::Active.plan(detail).not_nil!
+      plan = Gori::Probe::Active::PRIMARY.plan(detail).not_nil!
       line = String.new(plan.request).each_line.first
       line.should start_with("GET /search?q=")
       line.should_not contain("http://target.com")
@@ -251,7 +251,7 @@ describe Gori::Probe::Active do
       # origin_form dropped the query to "/", so plan() found no params and returned nil.
       detail = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", scheme: "http", host: "target.com",
         target: "http://target.com?name=hello", content_type: nil)
-      plan = Gori::Probe::Active.plan(detail).not_nil!
+      plan = Gori::Probe::Active::PRIMARY.plan(detail).not_nil!
       plan.params.map(&.name).should eq(["name"])
       line = String.new(plan.request).each_line.first
       line.should start_with("GET /?name=")
@@ -265,18 +265,18 @@ describe "Gori::Probe::Active (safety + coverage)" do
     with_store do |store|
       post = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/comment", method: "POST",
         req_headers: "Content-Type: application/x-www-form-urlencoded\r\n", req_body: "text=hi", content_type: nil)
-      Gori::Probe::Active.plan(post).should be_nil # automatic pipeline (default opts) never mutates
+      Gori::Probe::Active::PRIMARY.plan(post).should be_nil # automatic pipeline (default opts) never mutates
       # The manual opt-in / AGGRESSIVE mode probes the reflectable form params on the POST.
-      Gori::Probe::Active.plan(post, Gori::Probe::Active::Options.new(allow_unsafe: true)).should_not be_nil
+      Gori::Probe::Active::PRIMARY.plan(post, Gori::Probe::Active::Options.new(allow_unsafe: true)).should_not be_nil
       get = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi", content_type: nil)
-      Gori::Probe::Active.plan(get).should_not be_nil
+      Gori::Probe::Active::PRIMARY.plan(get).should_not be_nil
     end
   end
 
   it "keys the dedup signature by method and parameter location" do
     with_store do |store|
       detail = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi", content_type: nil)
-      key = Gori::Probe::Active.plan(detail).not_nil!.dedup_key
+      key = Gori::Probe::Active::PRIMARY.plan(detail).not_nil!.dedup_key
       key.should contain("GET")
       key.should contain("q@query")
     end
@@ -474,12 +474,12 @@ describe "Gori::Probe::Active (safety + coverage)" do
   it "detects a canary reflected ONLY in a response header (e.g. Location)" do
     with_store do |store|
       detail = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/go?url=here", content_type: nil)
-      plan = Gori::Probe::Active.plan(detail).not_nil!
+      plan = Gori::Probe::Active::PRIMARY.plan(detail).not_nil!
       canary = plan.params.first.canary
       result = Gori::Repeater::Result.new(
         "HTTP/1.1 302 Found\r\nLocation: https://site/?url=#{canary}\r\n\r\n".to_slice,
         Bytes.empty, nil, 1_i64)
-      dets = Gori::Probe::Active.detections(plan, result, detail)
+      dets = Gori::Probe::Active::PRIMARY.detections(plan, result, detail)
       dets.size.should eq(1)
       dets.first.code.should eq("reflected_param")
     end
@@ -490,7 +490,7 @@ describe "Gori::Probe::Active (safety + coverage)" do
   it "grades a reflection by which marker characters survived" do
     with_store do |store|
       detail = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi", content_type: nil)
-      plan = Gori::Probe::Active.plan(detail).not_nil!
+      plan = Gori::Probe::Active::PRIMARY.plan(detail).not_nil!
       canary = plan.params.first.canary
       raw = Gori::Probe::Active::ReflectedParam.probe_value(canary)
       html_head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n"
@@ -499,24 +499,24 @@ describe "Gori::Probe::Active (safety + coverage)" do
       end
 
       # `<` came back raw in HTML → tag injection possible → the historic Medium.
-      d = Gori::Probe::Active.detections(plan, res.call(html_head, "<p>#{raw}</p>"), detail).first
+      d = Gori::Probe::Active::PRIMARY.detections(plan, res.call(html_head, "<p>#{raw}</p>"), detail).first
       d.severity.should eq(Gori::Store::Severity::Medium)
       d.title.should contain("unencoded")
 
       # Same raw echo in a JSON body: not an HTML sink → Low.
       json_head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
-      Gori::Probe::Active.detections(plan, res.call(json_head, %({"q":"#{raw}"})), detail)
+      Gori::Probe::Active::PRIMARY.detections(plan, res.call(json_head, %({"q":"#{raw}"})), detail)
         .first.severity.should eq(Gori::Store::Severity::Low)
 
       # Quotes survived but `<` was escaped → attribute context only → Low.
       attr_echo = %(<a title="#{canary}"'&lt;&gt;">x</a>)
-      d2 = Gori::Probe::Active.detections(plan, res.call(html_head, attr_echo), detail).first
+      d2 = Gori::Probe::Active::PRIMARY.detections(plan, res.call(html_head, attr_echo), detail).first
       d2.severity.should eq(Gori::Store::Severity::Low)
       d2.title.should contain("attribute context")
 
       # Everything escaped → a reflection POINT, not a vulnerability → Info, not Medium.
       escaped = "<p>#{canary}&quot;&#39;&lt;&gt;</p>"
-      d3 = Gori::Probe::Active.detections(plan, res.call(html_head, escaped), detail).first
+      d3 = Gori::Probe::Active::PRIMARY.detections(plan, res.call(html_head, escaped), detail).first
       d3.severity.should eq(Gori::Store::Severity::Info)
       d3.title.should contain("escaped or filtered")
     end
@@ -527,12 +527,12 @@ describe "Gori::Probe::Active (safety + coverage)" do
   it "grades on the weakest sink when the value is reflected more than once" do
     with_store do |store|
       detail = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi", content_type: nil)
-      plan = Gori::Probe::Active.plan(detail).not_nil!
+      plan = Gori::Probe::Active::PRIMARY.plan(detail).not_nil!
       canary = plan.params.first.canary
       raw = Gori::Probe::Active::ReflectedParam.probe_value(canary)
       # Escaped in the page text FIRST, raw inside a later script block.
       body = "<p>#{canary}&quot;&#39;&lt;&gt;</p><script>var q=\"#{raw}\";</script>"
-      d = Gori::Probe::Active.detections(plan,
+      d = Gori::Probe::Active::PRIMARY.detections(plan,
         Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n".to_slice,
           body.to_slice, nil, 1_i64), detail).first
       d.severity.should eq(Gori::Store::Severity::Medium)
@@ -544,11 +544,11 @@ describe "Gori::Probe::Active (safety + coverage)" do
   it "grades on the weakest sink across the response head and body" do
     with_store do |store|
       detail = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi", content_type: nil)
-      plan = Gori::Probe::Active.plan(detail).not_nil!
+      plan = Gori::Probe::Active::PRIMARY.plan(detail).not_nil!
       canary = plan.params.first.canary
       raw = Gori::Probe::Active::ReflectedParam.probe_value(canary)
       head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nX-Echo: #{canary}\r\n\r\n"
-      d = Gori::Probe::Active.detections(plan,
+      d = Gori::Probe::Active::PRIMARY.detections(plan,
         Gori::Repeater::Result.new(head.to_slice, "<p>#{raw}</p>".to_slice, nil, 1_i64), detail).first
       d.severity.should eq(Gori::Store::Severity::Medium)
     end
@@ -558,7 +558,7 @@ describe "Gori::Probe::Active (safety + coverage)" do
   it "sends the marker URL-encoded in the query and JSON-escaped in a body" do
     with_store do |store|
       detail = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi", content_type: nil)
-      plan = Gori::Probe::Active.plan(detail).not_nil!
+      plan = Gori::Probe::Active::PRIMARY.plan(detail).not_nil!
       canary = plan.params.first.canary
       req = String.new(plan.request)
       req.should contain("q=#{canary}%22%27%3C%3E")
