@@ -1619,7 +1619,7 @@ module Gori
       # Whether the BINDING half owns this name at all — an enabled extract rule declares it, the
       # active session slot claims it, or it is bound right now. The claim is the half
       # `bare_spelling_at` was missing: `--identities FILE` and MCP `create_session_slot` write
-      # slots whose `rules` name bindings the project does not have yet, and `Env.unbound_in_slot`
+      # slots whose `rules` name bindings the project does not have yet, and `Env.slot_literals`
       # has always counted such a name as a reference.
       def binds?(name : String) : Bool
         bind.has_key?(name) || declared.includes?(name) || claimed.includes?(name)

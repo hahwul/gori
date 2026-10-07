@@ -279,7 +279,7 @@ module Gori
       #     and letting the byte answer veto the identity one would send that command as the
       #     STORED identity while the operator named another — a silent substitution in the
       #     one direction P4 refuses. The `$NAME` in a slot header is also the one `$NAME` in
-      #     gori that is guaranteed to be a reference and never a payload (`unbound_in_slot`
+      #     gori that is guaranteed to be a reference and never a payload (`slot_literals`
       #     argues it), so resolving it takes nothing literal away from the operator's bytes:
       #     the overlay writes the slot's own line, and every byte the operator typed that
       #     survives it is untouched.
