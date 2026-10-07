@@ -1975,7 +1975,7 @@ describe "Gori::Tui::FuzzerView durable run state" do
 
       view = loaded_fuzzer # its editable session points at https://h
       view.load_saved_run(store.get_fuzz_run(saved.run_id).not_nil!,
-        store.fuzz_results(saved.run_id))
+        fuzz_result_page(store, saved.run_id))
       view.result_target_origin.should eq("https://old.example:8443")
       view.result_http2?.should be_true
       view.result_sni.should eq("edge.old.example")

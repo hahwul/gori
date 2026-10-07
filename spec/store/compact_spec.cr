@@ -158,7 +158,7 @@ describe "Gori::Store.compact" do
 
       store = Gori::Store.open(path)
       begin
-        rows = store.fuzz_results(run, limit: 10)
+        rows = fuzz_result_page(store, run, limit: 10)
         rows.size.should eq(3)
         rows.each do |row|
           {row.request, row.response_head, row.response_body, row.wire}

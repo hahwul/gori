@@ -301,6 +301,15 @@ def with_store(&)
   raise raised if raised
 end
 
+# One page of a saved fuzz run with every column (request/response BLOBs included), in the
+# store's `idx, id` order — collected from the production `Store#each_fuzz_result_page`.
+def fuzz_result_page(store : Gori::Store, run_id : Int64, limit : Int32 = 200,
+                     offset : Int32 = 0) : Array(Gori::Store::FuzzResultRecord)
+  rows = [] of Gori::Store::FuzzResultRecord
+  store.each_fuzz_result_page(run_id, limit, offset.to_i64) { |row| rows << row }
+  rows
+end
+
 # Runs the block and hands back what it raised, so a teardown that switches fibers can run once
 # the exception has finished unwinding (see `with_store`), and re-raise it after.
 def run_capturing(&) : Exception?
