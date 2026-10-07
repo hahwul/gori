@@ -46,14 +46,8 @@ module Gori::Tui
       @repeaters = [] of RepeaterTab
       @host.session.store.repeaters.each do |r|
         view = new_view
-        ws_msgs = nil.as(Array(Store::WsOutMessage)?)
         request_text = String.new(r.request)
-        if Repeater::WsEngine.replayable?(request_text)
-          # A `[gori]` advisory row is gori talking ABOUT the socket; replaying one would
-          # put its own sentence on the wire as a client frame (CLI::Run.ws_seed_rows).
-          ws_msgs = CLI::Run.ws_seed_rows(@host.session.store.ws_messages_for_repeater(r.id))[0]
-            .map { |m| Store::WsOutMessage.new(m.opcode, m.payload, m.shape) }
-        end
+        ws_msgs = persisted_ws_messages(r.id, request_text)
         # `r.flow_id` is the only provenance that survives a restart — `@flow` is not
         # persisted — and nothing but a flow seed ever sets it. Same carrier the Fuzzer and
         # Miner tabs restore from. See `RepeaterView#evidence?`.
@@ -1697,6 +1691,15 @@ module Gori::Tui
     # an inflight result still matches by identity), append peer-created tabs, drop
     # peer-deleted ones — but NEVER touch a locked tab (actively edited / inflight /
     # locally dirty).
+    # The persisted outbound frames a restored tab seeds, or nil when `text` is no replayable
+    # handshake. A `[gori]` advisory row is gori talking ABOUT the socket; replaying one would
+    # put its own sentence on the wire as a client frame (CLI::Run.ws_seed_rows).
+    private def persisted_ws_messages(id : Int64, text : String) : Array(Store::WsOutMessage)?
+      return unless Repeater::WsEngine.replayable?(text)
+      CLI::Run.ws_seed_rows(@host.session.store.ws_messages_for_repeater(id))[0]
+        .map { |m| Store::WsOutMessage.new(m.opcode, m.payload, m.shape) }
+    end
+
     def reconcile : Nil
       refresh_evidence_marker
       # Metadata only (no response BLOBs): converge the request side. Responses are
@@ -1719,12 +1722,8 @@ module Gori::Tui
         # Soft sync: request/target/flags only. Full restore() would reset focus to
         # :target and clear @result (no response BLOBs on this path) — that is the
         # "send then response vanishes / focus jumps to Target" bug.
-        ws_msgs = nil.as(Array(Store::WsOutMessage)?)
         row_request_text = String.new(row.request)
-        if Repeater::WsEngine.replayable?(row_request_text)
-          ws_msgs = CLI::Run.ws_seed_rows(@host.session.store.ws_messages_for_repeater(row.id))[0]
-            .map { |m| Store::WsOutMessage.new(m.opcode, m.payload, m.shape) } # see above
-        end
+        ws_msgs = persisted_ws_messages(row.id, row_request_text)
         v.apply_peer_request(row.target, row_request_text, row.http2?, row.auto_content_length?,
           sni: row.sni || "", ws_messages: ws_msgs, ws_keep_key: row.ws_keep_key?,
           ws_http_only: row.ws_http_only?, tls_preset: row.tls_preset, evidence: !row.flow_id.nil?)
@@ -1735,12 +1734,8 @@ module Gori::Tui
       rows.each do |row|
         next if local_ids.includes?(row.id)
         view = new_view
-        ws_msgs = nil.as(Array(Store::WsOutMessage)?)
         row_request_text = String.new(row.request)
-        if Repeater::WsEngine.replayable?(row_request_text)
-          ws_msgs = CLI::Run.ws_seed_rows(@host.session.store.ws_messages_for_repeater(row.id))[0]
-            .map { |m| Store::WsOutMessage.new(m.opcode, m.payload, m.shape) } # see above
-        end
+        ws_msgs = persisted_ws_messages(row.id, row_request_text)
         view.restore(row.target, row_request_text, row.http2?, row.auto_content_length?,
           sni: row.sni || "", ws_messages: ws_msgs, ws_keep_key: row.ws_keep_key?,
           ws_http_only: row.ws_http_only?, tls_preset: row.tls_preset, evidence: !row.flow_id.nil?)
