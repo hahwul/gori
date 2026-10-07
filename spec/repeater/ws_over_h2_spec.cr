@@ -192,8 +192,8 @@ describe "WebSocket over HTTP/2 (RFC 8441) replay" do
     it "keeps the h1 and h2 halves apart and unites them in replayable?" do
       h2 = String.new(connect_head(443))
       h1 = "GET /ws HTTP/1.1\r\nHost: a\r\nUpgrade: websocket\r\n\r\n"
-      WsEngine.upgrade_request?(h2).should be_false
-      WsEngine.extended_connect_request?(h1).should be_false
+      WS.upgrade_request?(h2).should be_false
+      WS.extended_connect_request?(h1).should be_false
       WsEngine.replayable?(h2).should be_true
       WsEngine.replayable?(h1).should be_true
       WsEngine.replayable?("GET / HTTP/1.1\r\nHost: a\r\n\r\n").should be_false

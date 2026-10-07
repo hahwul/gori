@@ -142,14 +142,14 @@ describe "Store::FlowDetail#websocket? — one predicate, both transports" do
       h2 = h2_ws_flow(store, [{"out", 1, "hi".to_slice}])
       h2.websocket?.should be_true
       Gori::Repeater::WsEngine.replayable?(String.new(h2.request_head)).should be_true
-      Gori::Repeater::WsEngine.upgrade_request?(String.new(h2.request_head)).should be_false
-      Gori::Repeater::WsEngine.extended_connect_request?(String.new(h2.request_head)).should be_true
+      Gori::Proxy::WS.upgrade_request?(String.new(h2.request_head)).should be_false
+      Gori::Proxy::WS.extended_connect_request?(String.new(h2.request_head)).should be_true
 
       h1 = h1_ws_flow(store, [{"out", 1, "hi".to_slice}])
       h1.websocket?.should be_true
       Gori::Repeater::WsEngine.replayable?(String.new(h1.request_head)).should be_true
-      Gori::Repeater::WsEngine.upgrade_request?(String.new(h1.request_head)).should be_true
-      Gori::Repeater::WsEngine.extended_connect_request?(String.new(h1.request_head)).should be_false
+      Gori::Proxy::WS.upgrade_request?(String.new(h1.request_head)).should be_true
+      Gori::Proxy::WS.extended_connect_request?(String.new(h1.request_head)).should be_false
     end
   end
 end

@@ -62,42 +62,15 @@ module Gori
       # exempt from this: there is at most one, and it is the row that matters.
       MAX_CONTROL_MESSAGES = 64
 
-      # A request head declares a WebSocket upgrade — the single source of truth for "is this
-      # repeater a WebSocket flow?" across the TUI restore paths, the CLI and MCP.
-      #
-      # The predicate lives in `Proxy::WS` (#742) so that `Store::FlowDetail#websocket?` can
-      # ask the same question without requiring this file (→ `flow_request.cr` → `store.cr`,
-      # a cycle). Same bytes, same answer; this is where the REPEATER asks it.
-      #
-      # And note what it therefore means: this predicate is the HTTP/1.1 half ONLY — a head
-      # that opens a socket with an `Upgrade:` handshake answered by a 101. An RFC 8441
-      # extended CONNECT captured over h2 (#733) is a real WebSocket and still answers FALSE
-      # here, because it is opened a different way.
-      #
-      # "Is this a WebSocket gori can re-establish" is `replayable?` below, and it is that
-      # question — not this one — that every seed, every surface gate and `Repeater::Plan`'s
-      # engine choice asks. The distinction used to be moot (there was only one transport) and
-      # keeping the two spellings apart is what stops an h1-only assumption from riding along
-      # into a caller that now has two.
-      def self.upgrade_request?(request : String) : Bool
-        Proxy::WS.upgrade_request?(request)
-      end
-
-      # The RFC 8441 half: `CONNECT` plus the `:protocol websocket` the stored head carries as
-      # its `X-Gori-Protocol` marker. Delegated to the codec for the reason `upgrade_request?`
-      # is — the predicate's home is `Proxy::WS`, and this is where the REPEATER asks it.
-      def self.extended_connect_request?(request : String) : Bool
-        Proxy::WS.extended_connect_request?(request)
-      end
-
       # THE gate: is this a WebSocket `send` can re-open, over either transport?
       #
       # One predicate rather than a two-clause test spelled out at each of the dozen-odd sites
       # that ask (the TUI's three seeds, `gori run repeater`/`fuzz`, four MCP tools, both
       # Minimize surfaces, `Repeater::Plan` and `Fuzz::Plan`). Those sites were written when
-      # `upgrade_request?` WAS the answer, and every one of them would otherwise have had to be
-      # taught the second transport separately — which is exactly how the h1 predicate itself
-      # ended up with three copies (#390, #394, #397).
+      # `Proxy::WS.upgrade_request?` — the HTTP/1.1 `Upgrade:` half ONLY — WAS the answer, and
+      # every one of them would otherwise have had to be taught the second transport
+      # separately — which is exactly how the h1 predicate itself ended up with three copies
+      # (#390, #394, #397).
       def self.replayable?(request : String) : Bool
         Proxy::WS.upgrade_request?(request) || Proxy::WS.extended_connect_request?(request)
       end
