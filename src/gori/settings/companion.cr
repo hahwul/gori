@@ -102,35 +102,11 @@ module Gori::Settings
     o["replies"]?.try(&.as_s?).try { |v| self.companion_replies = normalize_companion_replies(v) }
   end
 
-  # Factory reset for this section (dispatched by Settings.reset_to_factory). One assignment
-  # per field serialize_companion writes. The source-grep guard only checks that this method
-  # EXISTS and is dispatched (see display.cr's block) — keeping the two field lists in step is
-  # a hand job, so add to both in the same edit.
-  private def self.reset_companion : Nil
-    self.companion = DEFAULT_COMPANION
-    self.companion_placement = DEFAULT_COMPANION_PLACEMENT
-    self.companion_motion = DEFAULT_COMPANION_MOTION
-    self.companion_notices = DEFAULT_COMPANION_NOTICES
-    self.companion_replies = DEFAULT_COMPANION_REPLIES
-  end
-
-  # Omitted entirely while every field is at its factory default, so a default install's
-  # settings.json stays quiet and the 3-way merge has nothing to reconcile.
-  private def self.serialize_companion(j : JSON::Builder) : Nil
-    unless companion? == DEFAULT_COMPANION &&
-           companion_motion == DEFAULT_COMPANION_MOTION &&
-           companion_notices? == DEFAULT_COMPANION_NOTICES &&
-           companion_placement == DEFAULT_COMPANION_PLACEMENT &&
-           companion_replies == DEFAULT_COMPANION_REPLIES
-      j.field "companion" do
-        j.object do
-          j.field "enabled", companion?
-          j.field "placement", companion_placement
-          j.field "motion", companion_motion
-          j.field "notices", companion_notices?
-          j.field "replies", companion_replies
-        end
-      end
-    end
-  end
+  # Factory reset + writer for this section (reset dispatched by Settings.reset_to_factory).
+  defaulted_section companion, "companion",
+    {"enabled", companion?, DEFAULT_COMPANION},
+    {"placement", companion_placement, DEFAULT_COMPANION_PLACEMENT},
+    {"motion", companion_motion, DEFAULT_COMPANION_MOTION},
+    {"notices", companion_notices?, DEFAULT_COMPANION_NOTICES},
+    {"replies", companion_replies, DEFAULT_COMPANION_REPLIES}
 end

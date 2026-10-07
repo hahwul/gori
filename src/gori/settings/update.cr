@@ -38,28 +38,9 @@ module Gori::Settings
   # Factory reset for this section (dispatched by Settings.reset_to_factory). The three
   # bookkeeping fields go with the toggle: they are this install's memory of what it has
   # already checked and told the operator about, which a factory reset is meant to forget.
-  private def self.reset_update : Nil
-    self.update_check_enabled = DEFAULT_UPDATE_CHECK_ENABLED
-    self.update_notified_version = ""
-    self.update_latest_seen = ""
-    self.update_checked_at = 0_i64
-  end
-
-  # Omit the section entirely on a quiet/default install (merge-safe; mirrors
-  # serialize_display/serialize_layout).
-  private def self.serialize_update(j : JSON::Builder) : Nil
-    unless update_check_enabled? == DEFAULT_UPDATE_CHECK_ENABLED &&
-           update_notified_version.empty? &&
-           update_latest_seen.empty? &&
-           update_checked_at == 0_i64
-      j.field "update" do
-        j.object do
-          j.field "check_enabled", update_check_enabled?
-          j.field "notified_version", update_notified_version
-          j.field "latest_seen", update_latest_seen
-          j.field "checked_at", update_checked_at
-        end
-      end
-    end
-  end
+  defaulted_section update, "update",
+    {"check_enabled", update_check_enabled?, DEFAULT_UPDATE_CHECK_ENABLED},
+    {"notified_version", update_notified_version, ""},
+    {"latest_seen", update_latest_seen, ""},
+    {"checked_at", update_checked_at, 0_i64}
 end

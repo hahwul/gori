@@ -4,6 +4,35 @@ require "./paths"
 # left to `src/gori.cr`: this file NAMES `EnvMigration::GlobalReport`, and the bench harnesses (and
 # other small entry points) require settings.cr directly without the umbrella.
 require "./env_migration/globals"
+
+module Gori::Settings
+  # A section of scalar fields with factory defaults, as one table, so its factory reset and
+  # its writer cannot drift apart. Generates `reset_<name>` (every field back to its default)
+  # and `serialize_<name>` (the `key` object, omitted entirely while every field sits at its
+  # default, so a quiet install writes nothing and the 3-way merge has nothing to reconcile).
+  # Each field is `{"json_key", getter, DEFAULT}`; the setter is the getter less any `?`.
+  # Parsing stays hand-written beside the table: nearly every field clamps or normalizes.
+  # Defined before the section files below, which call it at their top level.
+  private macro defaulted_section(name, key, *fields)
+    private def self.reset_{{ name.id }} : Nil
+      {% for f in fields %}
+        self.{{ f[1].id.gsub(/\?$/, "") }} = {{ f[2] }}
+      {% end %}
+    end
+
+    private def self.serialize_{{ name.id }}(j : JSON::Builder) : Nil
+      return if {{ fields.map { |f| "#{f[1]} == #{f[2]}" }.join(" && ").id }}
+      j.field {{ key }} do
+        j.object do
+          {% for f in fields %}
+            j.field {{ f[0] }}, {{ f[1] }}
+          {% end %}
+        end
+      end
+    end
+  end
+end
+
 require "./settings/network"
 require "./settings/upstream_rules"
 require "./settings/project_network"
