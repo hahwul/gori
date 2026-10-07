@@ -20,11 +20,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # Whether the strip carve includes its hairline (must match framed_body). Repeater
   # returns false so clicks on the filter/divider rows fall through to the body.
   private def subtab_strip_divider? : Bool
-    if t = @tabs[@active_tab]?
-      t.subtab_strip_divider?
-    else
-      true
-    end
+    (t = @tabs[@active_tab]?) ? t.subtab_strip_divider? : true
   end
 
   # The focusable sub-tab strip for Repeater/Fuzzer/Notes/Decoder (@focus == :subtabs). Mirrors the
