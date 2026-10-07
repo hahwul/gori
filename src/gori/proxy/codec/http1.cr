@@ -1016,13 +1016,6 @@ module Gori::Proxy::Codec::Http1
     nil
   end
 
-  # Parse header lines by scanning the raw bytes in place, starting at the
-  # start-line's terminating CRLF (`start_crlf`; nil when the head has no CRLF).
-  # Only the header name/value Strings are allocated — no whole-head String and
-  # no per-line String array (see codec_bench). Byte-for-byte equivalent to the
-  # old `String.new(raw).split(CRLF)` projection: name is bytes-before-colon
-  # (unstripped), value is bytes-after-colon stripped; an empty line ends headers;
-  # a colon-less line is skipped (raw_head still keeps it).
   # RFC 7230 §3.2.4: a field-name must be followed IMMEDIATELY by ':' with NO
   # whitespace, and obs-fold (a header line beginning with SP/HTAB) is obsolete and
   # forbidden in a request. Either form hides a header from parse_headers (whose name
@@ -1243,6 +1236,12 @@ module Gori::Proxy::Codec::Http1
   # LF, and a CR right before that LF is part of the terminator. A lone CR anywhere else stays
   # a byte of its line, exactly as a lone LF does in the CRLF reading — which is what lets
   # `framing_ambiguous?` still catch a CR-hidden Content-Length on an LF head.
+  #
+  # It scans the raw bytes in place: only the header name/value Strings are allocated — no
+  # whole-head String and no per-line String array (see codec_bench). Byte-for-byte
+  # equivalent to the old `String.new(raw).split(CRLF)` projection: name is bytes-before-colon
+  # (unstripped), value is bytes-after-colon stripped; an empty line ends headers; a
+  # colon-less line is skipped (raw_head still keeps it).
   private def self.parse_headers(raw : Bytes, pos : Int32?, lf : Bool = false) : HeaderList
     list = HeaderList.new
     return list if pos.nil?
