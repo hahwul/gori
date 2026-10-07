@@ -6,8 +6,8 @@ module Gori::Tui
   # (`session_events`), `close_wording`, and the store calls that differ per tool:
   # `session_rows`, `restore_tab`, `delete_session_row` and `save_session_name`.
   #
-  # FuzzerController includes it for the strip, filter and wheel; its own render, keys, drain,
-  # reconcile, rename and close shadow the ones here.
+  # FuzzerController includes it for the strip, filter, wheel, render and rename; its own keys,
+  # drain, reconcile and close shadow the ones here.
   module SeededToolTabs
     DRAIN_CAP = 512 # bounded per-tick drain so a fast run can't starve render
 
@@ -200,12 +200,15 @@ module Gori::Tui
     end
 
     # --- rename (orthogonal rename prompt drives this by VIEW identity) ---
+    # Re-found by VIEW identity so a closed/reordered tab is a no-op, never a neighbour.
     def apply_rename(view, name : String) : Nil
       return unless tab = @sessions.find(&.view.same?(view))
       view.name = name.strip.presence
       if id = tab.db_id
-        # See FuzzerController#apply_rename: the view already carries the new label, so a
-        # refused write is a silent no-op unless the store's answer is reported.
+        # The store answers whether the UPDATE committed. The chip already reads the new name,
+        # so a rolled-back batch (another instance holding the project's writer) is otherwise a
+        # SILENT no-op: nothing on screen changes back until the session reloads, and the
+        # operator concludes the rename took. Mirrors RepeaterController#apply_rename.
         unless save_session_name(id, view.name)
           @host.status("rename NOT saved (project busy) — the chip reads the new name until the session reloads")
         end
