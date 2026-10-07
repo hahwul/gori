@@ -179,7 +179,7 @@ describe "RepeaterView gRPC reframe toggle" do
   # the append slot, then four nibbles.
   grown = ->(view : RepeaterView) do
     view.toggle_request_hex.should be_true
-    2.times { view.hex_move(0, 1) } # nib 0 → 2, the append slot past the single byte
+    2.times { view.hex_key(hex_ev(Termisu::Input::Key::Right)) } # nib 0 → 2, the append slot past the single byte
     "4243".each_char { |c| view.hex_key(hex_ev(c)) }
     view
   end

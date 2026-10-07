@@ -342,10 +342,6 @@ module Gori::Tui
       true
     end
 
-    def filter_fields : Array(String)
-      %w[name] # notes have no HTTP context; free-text covers each note's body text
-    end
-
     def filter_subjects : Array(Repeater::SubtabFilter::Subject)
       @notes.filter_rows.map do |(title, body)|
         Repeater::SubtabFilter::Subject.new(title, body, "", "", [] of String)

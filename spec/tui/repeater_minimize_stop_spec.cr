@@ -2,7 +2,7 @@ require "../spec_helper"
 
 # `Repeater::Minimize` had no stop seam.
 #
-# `RepeaterController#stop_all` (leave project / quit) and `#close_repeater_tab` (^W) both did
+# `RepeaterController#stop_all` (leave project / quit) and `#request_close` (^W) both did
 # only `jobs.finish(...)`: the bottom-bar spinner and the run row disappeared and the
 # leave-confirm reported the job stopped, while the background fiber kept issuing probes at the
 # origin up to `Minimize::SEND_CAP` (250). The comment on `stop_all` conceded it —
@@ -161,7 +161,7 @@ describe Gori::Repeater::Minimize::Stop do
     stop.stopped?.should be_false
     stop.stop
     stop.stopped?.should be_true
-    stop.stop # idempotent — close_repeater_tab and stop_all can both fire on one run
+    stop.stop # idempotent — a ^W close and stop_all can both fire on one run
     stop.stopped?.should be_true
   end
 end

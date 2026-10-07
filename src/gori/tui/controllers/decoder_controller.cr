@@ -116,11 +116,8 @@ module Gori::Tui
       DecoderSession.new(view, input, chain, chain.size, :input, result)
     end
 
-    # --- sub-tab strip: `MemorySessionStrip`, plus the filter's fields and search ---
-    def filter_fields : Array(String)
-      %w[name] # a conversion has no HTTP context; free-text covers the chain + input
-    end
-
+    # --- sub-tab strip: `MemorySessionStrip`, plus the filter's search (fields: the default
+    # `name` — a conversion has no HTTP context; free-text covers the chain + input) ---
     def filter_subjects : Array(Repeater::SubtabFilter::Subject)
       @sessions.map do |s|
         Repeater::SubtabFilter::Subject.new(s.view.name, "#{s.chain} #{s.input.text}", "", "", [] of String)

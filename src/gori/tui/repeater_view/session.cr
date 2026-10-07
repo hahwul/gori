@@ -139,10 +139,6 @@ class Gori::Tui::RepeaterView
     @flow.try(&.row.id)
   end
 
-  def mark_dirty : Nil
-    @dirty = true
-  end
-
   def clear_dirty : Nil
     @dirty = false
     @decoded_dirty = false
@@ -154,32 +150,42 @@ class Gori::Tui::RepeaterView
   BLANK_HOST_LINE = "Host: example.com"
   BLANK_REQUEST   = "GET / HTTP/1.1\n#{BLANK_HOST_LINE}\nUser-Agent: gori\nAccept: */*\n\n"
 
-  def load(detail : Store::FlowDetail) : Nil
-    @flow = detail
-    @evidence = true          # a CAPTURED request — see `evidence?`
-    @markers_declared = false # a fresh capture: any § in it is the origin's (see markers_live?)
-    @http2 = detail.http_version == "HTTP/2"
+  # The response/scroll/hex reset every fresh load or restore ends with: no result yet,
+  # the pane caches dropped (`reset_result_caches` also resets the wrap memo), a clean tab.
+  private def fresh_panes(focus : Symbol, diffable : Bool) : Nil
+    @result = nil
+    @prev_result = nil
+    reset_result_caches
+    @focus = focus
+    @resp_mode = :response
+    @scroll = 0
+    @diffable = diffable
+    @loaded = true
+    @dirty = false
+    @req_hex_edit = nil # a fresh load/restore replaces the request → drop any hex buffer
+    @scroll_req = 0
+  end
+
+  # The target field seeded from a captured flow: its origin, no SNI override, caret at the end.
+  private def seed_target(detail : Store::FlowDetail) : Nil
     @target = build_target(detail.row.scheme, detail.row.host, detail.row.port)
     @tcx = @target.size
     @sni = ""
     @scx = 0
     @target_field = :url
+  end
+
+  def load(detail : Store::FlowDetail) : Nil
+    @flow = detail
+    @evidence = true          # a CAPTURED request — see `evidence?`
+    @markers_declared = false # a fresh capture: any § in it is the origin's (see markers_live?)
+    @http2 = detail.http_version == "HTTP/2"
+    seed_target(detail)
     @editor.set_text(origin_form_text(detail))
     seed_draft_baselines
     @original_lines = message_lines(detail.response_head, display_body(detail.response_head, detail.response_body))
 
-    @result = nil
-    @prev_result = nil
-    reset_result_caches
-    @focus = :request
-    @resp_mode = :response
-    @scroll = 0
-    resp_wrap_reset
-    @diffable = true
-    @loaded = true
-    @dirty = false
-    @req_hex_edit = nil # a fresh load/restore replaces the request → drop any hex buffer
-    @scroll_req = 0
+    fresh_panes(:request, diffable: true)
     reflect_content_length_in_editor if @auto_content_length
   end
 
@@ -218,6 +224,7 @@ class Gori::Tui::RepeaterView
       tls_preset)
 
     @original_lines = [] of String
+    fresh_panes(:target, diffable: false)
     # Rebuild the persisted result: a head (success) or an error (failed send)
     # marks a real stored response; both nil → never sent → empty pane.
     @result =
@@ -225,15 +232,6 @@ class Gori::Tui::RepeaterView
         Repeater::Result.new(response_head || Bytes.empty, response_body, nil,
           response_duration_us || 0_i64, response_error)
       end
-    @prev_result = nil
-    reset_result_caches
-    @focus = :target
-    @resp_mode = :response
-    @scroll = 0
-    resp_wrap_reset
-    @diffable = false
-    @req_hex_edit = nil # a fresh load/restore replaces the request → drop any hex buffer
-    @scroll_req = 0
     reflect_content_length_in_editor if @auto_content_length
   end
 
@@ -375,18 +373,7 @@ class Gori::Tui::RepeaterView
     @editor.set_text(BLANK_REQUEST)
     @evidence_pipeline_seps = 0 # a draft: every `%%%` in it is the operator's
     @original_lines = [] of String
-    @result = nil
-    @prev_result = nil
-    reset_result_caches
-    @focus = :target
-    @resp_mode = :response
-    @scroll = 0
-    resp_wrap_reset
-    @diffable = false
-    @loaded = true
-    @dirty = false
-    @req_hex_edit = nil # a fresh load/restore replaces the request → drop any hex buffer
-    @scroll_req = 0
+    fresh_panes(:target, diffable: false)
   end
 
   # Content-only clone for the sub-tab strip "Duplicate" action. Copies the editable

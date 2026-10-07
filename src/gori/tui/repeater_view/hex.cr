@@ -103,8 +103,4 @@ class Gori::Tui::RepeaterView
   def hex_key(ev : Termisu::Event::Key) : Nil
     @dirty = true if @req_hex_edit.try(&.handle_key(ev))
   end
-
-  def hex_move(dr : Int32, dc : Int32) : Nil # navigation does NOT dirty
-    @req_hex_edit.try(&.move(dr, dc))
-  end
 end

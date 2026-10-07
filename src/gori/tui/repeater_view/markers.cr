@@ -344,7 +344,7 @@ class Gori::Tui::RepeaterView
   #
   # Empty while the markers are INERT (see `markers_live?`), which is the one place that
   # decision has to live: every consumer — the send (`request_bytes`), the Content-Length
-  # reflection, the tint/conceal paint, `minimizable?`, the editor's delimiter guards —
+  # reflection, the tint/conceal paint, `minimize_refusal`, the editor's delimiter guards —
   # reads it, and they must not be able to disagree about whether a `§` in this buffer is
   # syntax or data.
   private def marker_regions : Array({Int32, Int32, Int32})

@@ -193,7 +193,6 @@ describe "minimize on a %%% group buffer" do
     reason = view.minimize_refusal
     reason.should_not be_nil
     reason.not_nil!.should contain("%%%")
-    view.minimizable?.should be_false
   end
 
   # The correction to my first pass, which allowed this on the grounds that the visible

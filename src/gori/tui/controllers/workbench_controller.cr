@@ -152,11 +152,7 @@ module Gori::Tui
       @sessions[@idx]
     end
 
-    # --- sub-tab strip: `MemorySessionStrip`, plus the filter's fields ---
-    def filter_fields : Array(String)
-      %w[name]
-    end
-
+    # --- sub-tab strip: `MemorySessionStrip`, plus the filter's subjects ---
     def filter_subjects : Array(Repeater::SubtabFilter::Subject)
       @sessions.map do |s|
         Repeater::SubtabFilter::Subject.new(s.view.name, s.input.text, "", "", [] of String)

@@ -124,27 +124,12 @@ class Gori::Tui::RepeaterView
     @ws_upgrade = detail.request_head
     @ws_result = nil
     @ws_lines_cache = nil
-    @target = build_target(detail.row.scheme, detail.row.host, detail.row.port)
-    @tcx = @target.size
-    @sni = ""
-    @scx = 0
-    @target_field = :url
+    seed_target(detail)
     @editor.set_text(String.new(detail.request_head))
     seed_draft_baselines
     seed_ws_out(out_messages)
     @original_lines = [] of String
-    @result = nil
-    @prev_result = nil
-    reset_result_caches
-    @focus = :request
-    @resp_mode = :response
-    @scroll = 0
-    resp_wrap_reset
-    @diffable = false
-    @loaded = true
-    @dirty = false
-    @req_hex_edit = nil
-    @scroll_req = 0
+    fresh_panes(:request, diffable: false)
     @req_pane = :decoded
   end
 

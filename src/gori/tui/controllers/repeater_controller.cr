@@ -46,14 +46,8 @@ module Gori::Tui
       @repeaters = [] of RepeaterTab
       @host.session.store.repeaters.each do |r|
         view = new_view
-        ws_msgs = nil.as(Array(Store::WsOutMessage)?)
         request_text = String.new(r.request)
-        if Repeater::WsEngine.replayable?(request_text)
-          # A `[gori]` advisory row is gori talking ABOUT the socket; replaying one would
-          # put its own sentence on the wire as a client frame (CLI::Run.ws_seed_rows).
-          ws_msgs = CLI::Run.ws_seed_rows(@host.session.store.ws_messages_for_repeater(r.id))[0]
-            .map { |m| Store::WsOutMessage.new(m.opcode, m.payload, m.shape) }
-        end
+        ws_msgs = persisted_ws_messages(r.id, request_text)
         # `r.flow_id` is the only provenance that survives a restart — `@flow` is not
         # persisted — and nothing but a flow seed ever sets it. Same carrier the Fuzzer and
         # Miner tabs restore from. See `RepeaterView#evidence?`.
@@ -1588,7 +1582,7 @@ module Gori::Tui
 
     # Apply a finished minimize on the UI fiber: install the trimmed request into the editor
     # (only when it actually removed something), finish the job, and notify. A closed tab is
-    # already dropped by the drain, and close_repeater_tab finished its job.
+    # already dropped by the drain, and close_repeater_at finished its job.
     private def apply_minimize_report(tab : RepeaterTab, report : Repeater::Minimize::Report) : Nil
       view = tab.view
       mj = @minimize_job
@@ -1689,6 +1683,15 @@ module Gori::Tui
     rescue
     end
 
+    # The persisted outbound frames a restored tab seeds, or nil when `text` is no replayable
+    # handshake. A `[gori]` advisory row is gori talking ABOUT the socket; replaying one would
+    # put its own sentence on the wire as a client frame (CLI::Run.ws_seed_rows).
+    private def persisted_ws_messages(id : Int64, text : String) : Array(Store::WsOutMessage)?
+      return unless Repeater::WsEngine.replayable?(text)
+      CLI::Run.ws_seed_rows(@host.session.store.ws_messages_for_repeater(id))[0]
+        .map { |m| Store::WsOutMessage.new(m.opcode, m.payload, m.shape) }
+    end
+
     # Converge local repeater tabs with the project's `repeaters` rows after a peer
     # committed (or any writer-connection commit that bumps PRAGMA data_version —
     # including our own update_repeater_response after a successful send; the writer
@@ -1719,12 +1722,8 @@ module Gori::Tui
         # Soft sync: request/target/flags only. Full restore() would reset focus to
         # :target and clear @result (no response BLOBs on this path) — that is the
         # "send then response vanishes / focus jumps to Target" bug.
-        ws_msgs = nil.as(Array(Store::WsOutMessage)?)
         row_request_text = String.new(row.request)
-        if Repeater::WsEngine.replayable?(row_request_text)
-          ws_msgs = CLI::Run.ws_seed_rows(@host.session.store.ws_messages_for_repeater(row.id))[0]
-            .map { |m| Store::WsOutMessage.new(m.opcode, m.payload, m.shape) } # see above
-        end
+        ws_msgs = persisted_ws_messages(row.id, row_request_text)
         v.apply_peer_request(row.target, row_request_text, row.http2?, row.auto_content_length?,
           sni: row.sni || "", ws_messages: ws_msgs, ws_keep_key: row.ws_keep_key?,
           ws_http_only: row.ws_http_only?, tls_preset: row.tls_preset, evidence: !row.flow_id.nil?)
@@ -1735,12 +1734,8 @@ module Gori::Tui
       rows.each do |row|
         next if local_ids.includes?(row.id)
         view = new_view
-        ws_msgs = nil.as(Array(Store::WsOutMessage)?)
         row_request_text = String.new(row.request)
-        if Repeater::WsEngine.replayable?(row_request_text)
-          ws_msgs = CLI::Run.ws_seed_rows(@host.session.store.ws_messages_for_repeater(row.id))[0]
-            .map { |m| Store::WsOutMessage.new(m.opcode, m.payload, m.shape) } # see above
-        end
+        ws_msgs = persisted_ws_messages(row.id, row_request_text)
         view.restore(row.target, row_request_text, row.http2?, row.auto_content_length?,
           sni: row.sni || "", ws_messages: ws_msgs, ws_keep_key: row.ws_keep_key?,
           ws_http_only: row.ws_http_only?, tls_preset: row.tls_preset, evidence: !row.flow_id.nil?)
@@ -1999,8 +1994,8 @@ module Gori::Tui
 
     # Close the sub-tab holding `view` by IDENTITY, or say it is already gone. The index the
     # single ^W confirm captured can name another session by the time the dialog resolves
-    # (a peer delete/reorder in the gap), so `close_repeater_tab`'s index path is unsafe from
-    # a deferred action — this re-finds the tab from the view every time.
+    # (a peer delete/reorder in the gap), so an index is unsafe from a deferred action —
+    # this re-finds the tab from the view every time.
     private def close_repeater_view(view : RepeaterView) : Nil
       idx = @repeaters.index(&.view.same?(view))
       return @host.status("repeater already closed") unless idx
@@ -2014,14 +2009,6 @@ module Gori::Tui
     private def close_marked_repeaters(refs : Array(SubtabRef)) : Nil
       @host.status(close_marked_subtabs(refs))
       @host.resolve_subtab_focus
-    end
-
-    # Close the current repeater sub-tab. Clamps the active index; when the last one
-    # closes the Repeater tab shows its empty hint.
-    def close_repeater_tab : Nil
-      return if @current_repeater_idx < 0 || @current_repeater_idx >= @repeaters.size
-      orphaned = close_repeater_at(@current_repeater_idx)
-      @host.status(TabClose.message(@repeaters.empty? ? "closed repeater — none open (^N new · ^R from History)" : "closed repeater (#{@repeaters.size} open)", orphaned))
     end
 
     # The mark set's teardown hook: close sub-tab `idx` saying nothing, so a batch can loop
@@ -2064,7 +2051,7 @@ module Gori::Tui
     end
 
     # Stop the one running minimize on a project-level exit (leave project / quit), for the
-    # same reasons close_repeater_tab does it per tab. Two distinct halves:
+    # same reasons close_repeater_at does it per tab. Two distinct halves:
     #
     #   * finish the JOB, because the Runner is about to unwind: `drain_results` never runs
     #     again to see the terminal Report, so the job would stay :running forever in a Jobs
@@ -2325,10 +2312,10 @@ module Gori::Tui
     # request back into the editor when done. One minimize at a time, per project.
     def repeater_minimize : Nil
       return unless (tab = current_repeater_tab) && (view = tab.view).loaded?
-      # `minimize_refusal`, not `minimizable?` + a sentence of our own: the view now owns
-      # BOTH the predicate and the wording (`minimizable?` is defined as this being nil), so
-      # the two cannot drift. The old sentence here named hex/gRPC/WS/decode and §markers,
-      # and answered none of the three problems for a `%%%` group document.
+      # `minimize_refusal`, not a predicate + a sentence of our own: the view owns BOTH the
+      # predicate and the wording (nil = minimizable), so the two cannot drift. The old
+      # sentence here named hex/gRPC/WS/decode and §markers, and answered none of the three
+      # problems for a `%%%` group document.
       if reason = view.minimize_refusal
         @host.status("minimize: #{reason}")
         return
@@ -2409,7 +2396,7 @@ module Gori::Tui
       job = @host.jobs.start(:minimize, view.summary, goto: Jobs::Goto.new(:repeater, tab.db_id))
       @minimize_job = {view, job, text} # `text` is the snapshot the run minimizes; see apply_minimize_report
       # Captured as a local for the fiber (which must never read a controller ivar) AND kept on
-      # the controller, so close_repeater_tab / stop_all can reach the run they just ended.
+      # the controller, so close_repeater_at / stop_all can reach the run they just ended.
       stop = @minimize_stop = Repeater::Minimize::Stop.new
       events = @minimize_events
       @host.status("minimizing #{view.summary} in the background — watch the bottom bar / notifications")
@@ -2954,7 +2941,7 @@ module Gori::Tui
     #
     # The condition's home is `RepeaterView#group_sendable?`, whose own comment already
     # names MARK alongside hex / gRPC / WS / decode; it simply never grew the term its
-    # sibling `minimizable?` has. It sits here for now, at the ONE call site of
+    # sibling `minimize_refusal` has. It sits here for now, at the ONE call site of
     # `pipeline_requests`.
     #
     # `self.` and pure for the reason `.literal_bindings` above is: what the operator is

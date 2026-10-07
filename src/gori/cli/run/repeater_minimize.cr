@@ -282,7 +282,7 @@ module Gori
         if Repeater::WsEngine.replayable?(text)
           abort "gori run repeater minimize: session ##{id} is a WebSocket handshake — minimize works on plain HTTP requests"
         end
-        # The TUI refuses this too (repeater_view.cr#minimizable?). A saved request holding
+        # The TUI refuses this too (RepeaterView#minimize_refusal). A saved request holding
         # §fuzz§ markers is a TEMPLATE, not a request: minimizing it would send 250 requests
         # containing literal § bytes (garbage the origin answers uniformly, which then lets
         # real headers look removable) and --apply would overwrite the user's marked-up

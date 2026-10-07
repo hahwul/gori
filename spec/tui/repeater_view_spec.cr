@@ -1210,7 +1210,6 @@ describe Gori::Tui::RepeaterView do
       it "refuses MINIMIZE, whose one keypress carries that framing hundreds of times" do
         view = RepeaterView.new
         view.restore("http://h.test", draft, false, true)
-        view.minimizable?.should be_false # was true
         view.minimize_refusal.not_nil!.should contain("%%% separator")
         view.minimize_refusal.not_nil!.should contain("several requests as one")
       end
@@ -1221,19 +1220,17 @@ describe Gori::Tui::RepeaterView do
         # `Minimize.run` reads base_text STRUCTURALLY as one request, so on a group buffer it
         # strips lines out of the operator's SECOND request whatever the Content-Length says.
         # A whole-buffer `^R` with ^L off is a legitimate byte-exact send; this is not.
-        view.minimizable?.should be_false
+        view.minimize_refusal.should_not be_nil
         String.new(view.request_bytes).should contain("Content-Length: 99") # ^R still allowed
       end
 
       it "COMPLEMENT: minimize still runs on an ordinary request, and names its other refusals" do
         plain = RepeaterView.new
         plain.restore("http://h.test", "GET /a?x=1 HTTP/1.1\nHost: h.test\n\n", false, true)
-        plain.minimizable?.should be_true
         plain.minimize_refusal.should be_nil
 
         marked = RepeaterView.new
         marked.restore("http://h.test", "GET /a?x=§1§ HTTP/1.1\nHost: h.test\n\n", false, true)
-        marked.minimizable?.should be_false
         marked.minimize_refusal.not_nil!.should contain("§…§")
 
         hex = RepeaterView.new
@@ -1246,7 +1243,7 @@ describe Gori::Tui::RepeaterView do
       it "COMPLEMENT: h2 minimizes and sends whole — %%% is not a separator there" do
         view = RepeaterView.new
         view.restore("http://h.test", draft, true, true) # http2: true
-        view.minimizable?.should be_true                 # send_pipeline is an h1 primitive
+        view.minimize_refusal.should be_nil              # send_pipeline is an h1 primitive
         # 61, not the 60 of the auto-CL-ON group: with no chunking the SECOND request's own
         # `Content-Length: 99` is left as body text rather than resynced to 2.
         view.request_text.should contain("Content-Length: 61")              # pane reads whole-buffer
@@ -1265,7 +1262,7 @@ describe Gori::Tui::RepeaterView do
         view = RepeaterView.new
         view.restore("http://h.test", text, false, true)
         view.pipeline_requests.size.should eq(2)
-        view.minimizable?.should be_false
+        view.minimize_refusal.should_not be_nil
       end
 
       it "COMPLEMENT: a CAPTURED %%% is inert, so it reflects and sends WHOLE, unrefused" do
@@ -1689,7 +1686,7 @@ describe Gori::Tui::RepeaterView do
     req = "POST /b HTTP/1.1\r\nHost: h\r\nContent-Length: 4\r\n\r\nABCD"
     append_e = ->(view : RepeaterView) do
       view.toggle_request_hex.should be_true
-      view.hex_move(1000, 0) # clamps to the append slot
+      8.times { view.hex_key(hex_ev(Termisu::Input::Key::Down)) } # ↓ clamps at the append slot
       view.hex_key(hex_ev('4'))
       view.hex_key(hex_ev('5')) # 0x45 = 'E'
       view.toggle_request_hex.should be_false

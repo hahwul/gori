@@ -227,22 +227,7 @@ module Gori::Tui
       end
     end
 
-    # --- rendering ---
-    def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
-      body_focused = focus == :body
-      labels = subtab_strip_shown? ? subtab_labels : nil
-      shell = BodyChrome.shell_focused(focus, multi_pane: !current_view.nil?)
-      subtabs_focused = focus == :subtabs
-      @subtab_start = BodyChrome.framed_body(screen, rect, shell, subtabs_focused, labels, @current_idx, @subtab_start, subtab_hidden, strip_divider: subtab_strip_divider?, find: subtab_find_shown?, find_lit: @host.subtab_find_focused?, marked: marked_chip_set) do |content|
-        render_with_filter(screen, content, subtabs_focused) do |body|
-          if v = current_view
-            v.render(screen, body, focused: body_focused)
-          else
-            TrafficEmptyState.render(screen, body, variant: :fuzzer)
-          end
-        end
-      end
-    end
+    # --- rendering: `SeededToolTabs#render_body` ---
 
     # --- input ---
     # Returns false when the key should fall through to the shell keymap (rebindable
@@ -920,24 +905,11 @@ module Gori::Tui
       select_subtab(idx)
     end
 
-    # --- rename (the shell's orthogonal rename prompt drives this by VIEW identity) ---
-    # Apply the typed name to the captured tab + persist it on its own (set_fuzz_session_name,
-    # separate from save_current so the rename lands even when the session is otherwise clean).
-    # Re-find by VIEW identity so a closed/reordered tab is a no-op, never a neighbour. Blank
-    # clears the custom label (the chip reverts to the template-derived summary).
-    def apply_rename(view : FuzzerView, name : String) : Nil
-      return unless tab = @sessions.find(&.view.same?(view))
-      view.name = name.strip.presence
-      if id = tab.db_id
-        # The store answers whether the UPDATE committed. The chip above already reads the new
-        # name, so a rolled-back batch (another instance holding the project's writer) is
-        # otherwise a SILENT no-op: nothing on screen changes back until the session reloads,
-        # and the operator concludes the rename took. Mirrors close_tab's orphaned refusal
-        # below and RepeaterController#apply_rename.
-        unless @host.session.store.set_fuzz_session_name(id, view.name)
-          @host.status("rename NOT saved (project busy) — the chip reads the new name until the session reloads")
-        end
-      end
+    # --- rename: `SeededToolTabs#apply_rename` persists through this hook ---
+    # Its own UPDATE, separate from save_current, so the rename lands even when the session is
+    # otherwise clean. Blank clears the custom label (the chip reverts to the template summary).
+    private def save_session_name(id : Int64, name : String?) : Bool
+      @host.session.store.set_fuzz_session_name(id, name)
     end
 
     # --- async (run loop) ---
@@ -1981,16 +1953,7 @@ module Gori::Tui
         end
       end
 
-      @current_idx =
-        if cur_db && (idx = @sessions.index { |t| t.db_id == cur_db })
-          idx
-        elsif (cv = cur_view) && (idx = @sessions.index(&.view.same?(cv)))
-          idx
-        elsif @sessions.empty?
-          -1
-        else
-          @current_idx.clamp(0, @sessions.size - 1)
-        end
+      @current_idx = reanchored_index(cur_db, cur_view)
       auto_load_current_saved_run
     end
 
