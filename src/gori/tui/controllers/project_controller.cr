@@ -764,6 +764,17 @@ module Gori::Tui
     # verbs, space opens the action menu, and Global chords (capture/rules/…) work here too
     # (the list is navigable, like History).
     private def handle_project_scope_key(ev : Termisu::Event::Key) : Bool
+      list_pane_key(ev, @project_view.scope_at_top?) do |delta|
+        # ↵ (nil) opens the same popup as 'e'
+        delta ? @project_view.scope_select(delta) : scope_edit_rule
+      end
+    end
+
+    # The browse ladder the SCOPE / HOST OVERRIDES / ENV lists share. The block moves the
+    # selection by its delta, or runs the pane's ↵ action when handed nil. Returns true when
+    # consumed; false defers to the keymap — a/e/d (the pane's verbs), space (action menu),
+    # Global chords.
+    private def list_pane_key(ev : Termisu::Event::Key, at_top : Bool, &) : Bool
       key = ev.key
       if ev.ctrl? && key.lower_p?
         save
@@ -771,16 +782,20 @@ module Gori::Tui
       elsif key.escape?
         leave_to_strip
       elsif key.up? || key.lower_k?
-        @project_view.scope_at_top? ? leave_to_strip : @project_view.scope_select(-1)
+        if at_top
+          leave_to_strip
+        else
+          yield -1
+        end
       elsif key.down? || key.lower_j?
-        @project_view.scope_select(1)
+        yield 1
       elsif key.left? || key.right?
         # Inert: ←/→ belong to the STRIP one tier up, so they must not silently swap cards
         # from inside one. Swallowed rather than deferred so the keymap can't rebind them here.
       elsif key.enter?
-        scope_edit_rule # ↵ opens the same popup as 'e'
+        yield nil
       else
-        return false # a/e/d (scope.*-rule verbs), space (action menu), Global chords
+        return false
       end
       true
     end
@@ -1047,24 +1062,9 @@ module Gori::Tui
     # The add-row sub-mode swallows everything (text).
     private def handle_project_overrides_key(ev : Termisu::Event::Key) : Bool
       return (handle_project_ov_add_key(ev); true) if @project_view.ov_adding?
-      key = ev.key
-      if ev.ctrl? && key.lower_p?
-        save
-        @host.open_palette
-      elsif key.escape?
-        leave_to_strip
-      elsif key.up? || key.lower_k?
-        @project_view.ov_at_top? ? leave_to_strip : @project_view.ov_select(-1)
-      elsif key.down? || key.lower_j?
-        @project_view.ov_select(1)
-      elsif key.left? || key.right?
-        # Inert — ←/→ switch sub-tabs on the strip, not from inside a card.
-      elsif key.enter?
-        @project_view.ov_edit_start
-      else
-        return false # a/e/d (hostoverride.*-entry verbs), space (action menu), Global chords
+      list_pane_key(ev, @project_view.ov_at_top?) do |delta|
+        delta ? @project_view.ov_select(delta) : @project_view.ov_edit_start
       end
-      true
     end
 
     # The inline "add"/"edit" row: type "IP host", ↵ commits, ⌫ on an empty input
@@ -1143,24 +1143,9 @@ module Gori::Tui
     private def handle_project_env_key(ev : Termisu::Event::Key) : Bool
       return (handle_project_env_add_key(ev); true) if @project_view.env_adding?
       return (handle_project_env_prefix_key(ev); true) if @project_view.env_prefix_editing?
-      key = ev.key
-      if ev.ctrl? && key.lower_p?
-        save
-        @host.open_palette
-      elsif key.escape?
-        leave_to_strip
-      elsif key.up? || key.lower_k?
-        @project_view.env_at_top? ? leave_to_strip : @project_view.env_select(-1)
-      elsif key.down? || key.lower_j?
-        @project_view.env_select(1)
-      elsif key.left? || key.right?
-        # Inert — ←/→ switch sub-tabs on the strip, not from inside a card.
-      elsif key.enter?
-        @project_view.env_edit_start
-      else
-        return false # a/e/d (env.*-var verbs), space (action menu), Global chords
+      list_pane_key(ev, @project_view.env_at_top?) do |delta|
+        delta ? @project_view.env_select(delta) : @project_view.env_edit_start
       end
-      true
     end
 
     # --- ENV verbs (a/e/d via the keymap + the Env action menu) ---
