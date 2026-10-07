@@ -169,19 +169,12 @@ module Gori::Tui
     end
 
     def render(screen : Screen, area : Rect) : Nil
-      box = overlay_box(area)
-      return render_too_small(screen, area, "the link picker needs a larger window") unless box
-      Frame.card(screen, box, title, border: Theme.border_focus)
-      list_top = render_filter(screen, box, hint)
-      list_h = list_height(box)
-      ensure_visible(list_h)
-      (0...list_h).each do |i|
-        ri = @scroll + i
-        break if ri >= entry_count
+      box, list_top, list_h = render_card(screen, area, title, hint, "the link picker needs a larger window") || return
+      each_visible_row(list_top, list_h, entry_count) do |ry, ri|
         if ri < create_rows
-          draw_create(screen, box, list_top + i, ri, ri == @selected)
+          draw_create(screen, box, ry, ri, ri == @selected)
         else
-          draw_row(screen, box, list_top + i, @filtered[ri - create_rows], ri == @selected)
+          draw_row(screen, box, ry, @filtered[ri - create_rows], ri == @selected)
         end
       end
     end

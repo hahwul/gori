@@ -213,6 +213,30 @@ module Gori::Tui
       box.y + LIST_OFFSET
     end
 
+    # The card, its filter bar and the list window, as every filter picker opens its render:
+    # `{box, list_top, list_h}`, or nil — after the too-small line — when there is no room.
+    private def render_card(screen : Screen, area : Rect, title : String, idle_hint : String,
+                            too_small : String = "picker needs a larger window") : {Rect, Int32, Int32}?
+      unless box = overlay_box(area)
+        Overlay.too_small(screen, area, too_small)
+        return
+      end
+      Frame.card(screen, box, title, border: Theme.border_focus)
+      list_top = render_filter(screen, box, idle_hint)
+      list_h = list_height(box)
+      ensure_visible(list_h)
+      {box, list_top, list_h}
+    end
+
+    # Each visible list row's y and its index into the `count` navigable rows.
+    private def each_visible_row(list_top : Int32, list_h : Int32, count : Int32, &) : Nil
+      (0...list_h).each do |i|
+        ri = @scroll + i
+        break if ri >= count
+        yield list_top + i, ri
+      end
+    end
+
     # Rows visible in the list area of `box`.
     private def list_height(box : Rect) : Int32
       box.bottom - 1 - (box.y + LIST_OFFSET)
