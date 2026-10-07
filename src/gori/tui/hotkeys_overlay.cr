@@ -512,10 +512,7 @@ module Gori::Tui
 
     # --- geometry (mirrors TabsOverlay; reserves the last interior row for the footer) ---
     def overlay_box(area : Rect) : Rect?
-      w = {area.w - 4, 56}.min
-      h = {area.h - 2, @rows.size + 5}.min # top border + search/divider + list + footer + bottom border
-      return nil if w < 32 || h < 7
-      area.center(w, h)
+      area.card?(56, @rows.size + 5, 32, 7) # h: top border + search/divider + list + footer + bottom border
     end
 
     private def list_capacity(box : Rect) : Int32

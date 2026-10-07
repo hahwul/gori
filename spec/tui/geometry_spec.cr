@@ -34,6 +34,21 @@ describe Gori::Tui::Rect do
     end
   end
 
+  describe "#card?" do
+    it "caps at max inside a 2-column / 1-row margin, centred" do
+      area = Gori::Tui::Rect.new(0, 0, 100, 40)
+      area.card?(60, 20, 30, 8).should eq(Gori::Tui::Rect.new(20, 10, 60, 20))
+      area.card?(200, 200, 30, 8).should eq(Gori::Tui::Rect.new(2, 1, 96, 38))
+    end
+
+    it "declines below the minimum on either axis" do
+      area = Gori::Tui::Rect.new(0, 0, 33, 9)
+      area.card?(60, 20, 29, 7).should eq(Gori::Tui::Rect.new(2, 1, 29, 7))
+      area.card?(60, 20, 30, 7).should be_nil
+      area.card?(60, 20, 29, 8).should be_nil
+    end
+  end
+
   describe "#bottom" do
     it "is y + h (exclusive edge)" do
       Gori::Tui::Rect.new(2, 3, 5, 4).bottom.should eq(7)

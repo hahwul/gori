@@ -313,10 +313,7 @@ module Gori::Tui
 
     # --- rendering ----------------------------------------------------------
     def overlay_box(area : Rect) : Rect?
-      w = {area.w - 4, 60}.min
-      h = {area.h - 2, ROWS.size + 4}.min
-      return nil if w < 30 || h < 8
-      area.center(w, h)
+      area.card?(60, ROWS.size + 4, 30, 8)
     end
 
     # Rows the card can actually draw. The last two interior lines are spoken for — the hint

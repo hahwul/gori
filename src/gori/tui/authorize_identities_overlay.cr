@@ -144,10 +144,7 @@ module Gori::Tui
     # --- geometry / render ---
 
     def overlay_box(area : Rect) : Rect?
-      w = {area.w - 4, 68}.min
-      h = {area.h - 2, {@identities.size + 6, 10}.max}.min
-      return nil if w < 36 || h < 7
-      area.center(w, h)
+      area.card?(68, {@identities.size + 6, 10}.max, 36, 7)
     end
 
     # How many identity rows the card has room for. The card grows to fit the list, so this

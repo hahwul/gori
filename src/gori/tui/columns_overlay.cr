@@ -159,10 +159,7 @@ module Gori::Tui
     # --- geometry / render ---
 
     def overlay_box(area : Rect) : Rect?
-      w = {area.w - 4, 72}.min
-      h = {area.h - 2, {@columns.size + 6, 10}.max}.min
-      return nil if w < 40 || h < 7
-      area.center(w, h)
+      area.card?(72, {@columns.size + 6, 10}.max, 40, 7)
     end
 
     private def visible_rows(box : Rect) : Int32

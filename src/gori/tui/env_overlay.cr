@@ -168,11 +168,8 @@ module Gori::Tui
     end
 
     def overlay_box(area : Rect) : Rect?
-      w = {area.w - 4, 56}.min
       rows = {@items.size + (@adding ? 1 : 0) + (@prefix_editing ? 1 : 0), 6}.max
-      h = {area.h - 2, rows + 4}.min
-      return nil if w < 28 || h < 8
-      area.center(w, h)
+      area.card?(56, rows + 4, 28, 8)
     end
 
     # `global` in the meta, because this card has a TWIN: the Project tab's Env pane, with the

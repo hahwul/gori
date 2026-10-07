@@ -584,10 +584,7 @@ module Gori::Tui
     def overlay_box(area : Rect) : Rect?
       # 76 wide at most: the Type row carries seven labels now (Project joined Preset) and the
       # last of them did not fit in 66 columns, which drops it from the row without a word.
-      w = {area.w - 4, 76}.min
-      h = {area.h - 2, 20}.min
-      return nil if w < 34 || h < 8
-      area.center(w, h)
+      area.card?(76, 20, 34, 8)
     end
 
     def render(screen : Screen, area : Rect) : Nil

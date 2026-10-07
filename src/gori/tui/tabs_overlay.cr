@@ -249,10 +249,7 @@ module Gori::Tui
     # the card never becomes an invisible-but-input-capturing modal). The key-hint lives in
     # the status bar (key_hints), so no row is reserved for it here.
     def overlay_box(area : Rect) : Rect?
-      w = {area.w - 4, 48}.min
-      h = {area.h - 2, screen_rows + 3}.min # title + up to screen_rows rows + bottom border
-      return nil if w < 24 || h < 6
-      area.center(w, h)
+      area.card?(48, screen_rows + 3, 24, 6) # h: title + up to screen_rows rows + bottom border
     end
 
     # --- the seam -------------------------------------------------------------

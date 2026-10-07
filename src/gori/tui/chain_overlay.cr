@@ -65,10 +65,7 @@ module Gori::Tui
     private def self.overlay_box(area : Rect, nsteps : Int32) : Rect?
       preview_rows = 1 + (nsteps == 0 ? 1 : {nsteps, MAX_STEPS}.min)
       rows = 2 + 1 + 1 + preview_rows + 1
-      w = {area.w - 4, 72}.min
-      h = {rows + 2, area.h - 2}.min
-      return nil if w < 28 || h < 9
-      area.center(w, h)
+      area.card?(72, rows + 2, 28, 9)
     end
 
     # Draw the transform: an `in` row (the value), then one row per chain step with its

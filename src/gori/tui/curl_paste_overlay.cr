@@ -114,10 +114,7 @@ module Gori::Tui
     end
 
     def overlay_box(area : Rect) : Rect?
-      w = {area.w - 4, 96}.min
-      h = {area.h - 2, 22}.min
-      return nil if w < 40 || h < 10
-      area.center(w, h)
+      area.card?(96, 22, 40, 10)
     end
 
     # The buffer's rect inside a drawn card — shared by `render` and the pointer entries so a

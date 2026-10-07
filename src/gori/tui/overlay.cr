@@ -202,10 +202,7 @@ module Gori::Tui
     # returned nil at every terminal size and the form could not be opened at all.
     def self.rule_form_box(area : Rect, rows : Int32, preview : Bool = false) : Rect?
       natural = rows + (preview ? 5 : 4)
-      w = {area.w - 4, RULE_FORM_W}.min
-      h = {area.h - 2, natural}.min
-      return nil if w < RULE_FORM_MIN_W || h < {RULE_FORM_MIN_H, natural}.min
-      area.center(w, h)
+      area.card?(RULE_FORM_W, natural, RULE_FORM_MIN_W, {RULE_FORM_MIN_H, natural}.min)
     end
 
     # One `label: value` row of such a form: the label in muted, the field's text (or its

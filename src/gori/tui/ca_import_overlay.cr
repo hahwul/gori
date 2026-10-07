@@ -140,10 +140,7 @@ module Gori::Tui
     LABEL_W = 14 # value column offset (widest label "Private key" + padding)
 
     def overlay_box(area : Rect) : Rect?
-      w = {area.w - 4, 72}.min
-      h = {area.h - 2, 11}.min
-      return nil if w < 40 || h < 8
-      area.center(w, h)
+      area.card?(72, 11, 40, 8)
     end
 
     def render(screen : Screen, area : Rect) : Nil

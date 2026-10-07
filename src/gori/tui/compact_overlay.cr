@@ -116,10 +116,7 @@ module Gori::Tui
     end
 
     def overlay_box(area : Rect) : Rect?
-      w = {area.w - 4, 52}.min
-      h = {area.h - 2, row_count + 5}.min # title + summary + gap + rows + border
-      return nil if w < 34 || h < 6
-      area.center(w, h)
+      area.card?(52, row_count + 5, 34, 6) # h: title + summary + gap + rows + border
     end
 
     def render(screen : Screen, area : Rect) : Nil

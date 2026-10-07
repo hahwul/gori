@@ -114,10 +114,7 @@ module Gori::Tui
     end
 
     def overlay_box(area : Rect) : Rect?
-      w = {area.w - 4, 100}.min
-      h = {area.h - 2, 18}.min
-      return nil if w < 34 || h < 8
-      area.center(w, h)
+      area.card?(100, 18, 34, 8)
     end
 
     private def editor_rect(box : Rect) : Rect

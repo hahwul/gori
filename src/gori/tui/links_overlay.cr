@@ -170,10 +170,7 @@ module Gori::Tui
     end
 
     def overlay_box(area : Rect) : Rect?
-      w = {area.w - 4, 88}.min
-      h = area.h - 2
-      return nil if w < 30 || h < 8
-      area.center(w, h)
+      area.card?(88, area.h - 2, 30, 8)
     end
 
     # Still mode-aware even though `handle_click` no longer reaches it while adding: this is

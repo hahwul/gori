@@ -71,11 +71,7 @@ module Gori::Tui
 
     def overlay_box(area : Rect) : Rect?
       return nil if @rows.empty?
-      w = {area.w - 4, 96}.min
-      h = {@rows.size + 2, 4}.max
-      h = {h, area.h - 2}.min
-      return nil if w < 42 || h < 4
-      area.center(w, h)
+      area.card?(96, {@rows.size + 2, 4}.max, 42, 4)
     end
 
     def row_at(box : Rect, mx : Int32, my : Int32) : Int32?

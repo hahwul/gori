@@ -310,10 +310,7 @@ module Gori::Tui
 
     # --- geometry / render ---
     def overlay_box(area : Rect) : Rect?
-      w = {area.w - 4, 68}.min
-      h = {area.h - 2, 18}.min
-      return nil if w < 40 || h < 12
-      area.center(w, h)
+      area.card?(68, 18, 40, 12)
     end
 
     # The SET-headers buffer, between the two single-line fields and the refusal band. Shared
