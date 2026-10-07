@@ -283,16 +283,6 @@ module Gori
         end
         nil
       end
-
-      def size : Int32
-        @allowed.size
-      end
-
-      # The names kept, sorted — for the startup banner, so the operator can see on stderr
-      # what the client is about to be shown.
-      def names : Array(String)
-        @allowed.to_a.sort!
-      end
     end
   end
 end

@@ -9,12 +9,12 @@ private def names_for(spec : String, known = Gori::MCP::Tools::TOOL_NAMES,
                       dependencies = Gori::MCP::Tools::TOOL_DEPENDENCIES) : Array(String)
   f = Gori::MCP::ToolFilter.parse(spec, known, dependencies)
   fail "expected a filter, got: #{f}" unless f.is_a?(Gori::MCP::ToolFilter)
-  f.names
+  known.to_a.select { |n| f.allows?(n) }.sort!
 end
 
 private def refusal_for(spec : String, known = Gori::MCP::Tools::TOOL_NAMES) : String
   f = Gori::MCP::ToolFilter.parse(spec, known, Gori::MCP::Tools::TOOL_DEPENDENCIES)
-  fail "expected a refusal, got a filter of #{f.size}" if f.is_a?(Gori::MCP::ToolFilter)
+  fail "expected a refusal, got a filter" if f.is_a?(Gori::MCP::ToolFilter)
   f
 end
 
@@ -312,7 +312,7 @@ describe Gori::MCP::ToolFilter do
         Gori::MCP::Tools::TOOL_DEPENDENCIES)
       filter.should be_a(Gori::MCP::ToolFilter)
       filter = filter.as(Gori::MCP::ToolFilter)
-      filter.names.should contain("send_request")
+      filter.allows?("send_request").should be_true
 
       served = Gori::MCP::Tools.served_names(filter, allow_actions: false)
       served.should_not contain("send_request") # withheld, not unknown
