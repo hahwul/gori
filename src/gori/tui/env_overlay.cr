@@ -222,9 +222,7 @@ module Gori::Tui
     private def draw_row(screen : Screen, box : Rect, i : Int32, py : Int32) : Nil
       key, val = @items[i]
       sel = i == @selected && !row_open?
-      bg = sel ? Theme.accent_bg : Theme.panel
-      screen.fill(Rect.new(box.x + 1, py, box.w - 2, 1), bg)
-      screen.cell(box.x + 1, py, sel ? '▎' : ' ', Theme.accent, bg)
+      bg = Frame.row_band(screen, box, py, sel)
       kw = {box.w * 2 // 5, 8}.max
       screen.text(box.x + 3, py, key, Theme.syn_header, bg, width: kw)
       ax = box.x + 3 + kw

@@ -338,9 +338,7 @@ module Gori::Tui
     private def draw_row(screen : Screen, box : Rect, i : Int32, py : Int32) : Nil
       _, label, vis = @items[i]
       sel = i == @selected
-      bg = sel ? Theme.accent_bg : Theme.panel
-      screen.fill(Rect.new(box.x + 1, py, box.w - 2, 1), bg)
-      screen.cell(box.x + 1, py, sel ? '▎' : ' ', Theme.accent, bg)
+      bg = Frame.row_band(screen, box, py, sel)
       # `1  Project` — the slot number IS the state, because the number is what the operator
       # will press. An off-bar row leaves the column blank; the `✓` appears only for a tab on
       # an UNCAPPED bar past the ninth slot, where being on the bar is true but no digit is

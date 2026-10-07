@@ -885,9 +885,7 @@ module Gori::Tui
     end
 
     private def render_field(screen : Screen, box : Rect, ry : Int32, label : String, value : String, focused : Bool) : Nil
-      bg = focused ? Theme.accent_bg : Theme.panel
-      screen.fill(Rect.new(box.x + 1, ry, box.w - 2, 1), bg)
-      screen.cell(box.x + 1, ry, focused ? '▎' : ' ', Theme.accent, bg)
+      bg = Frame.row_band(screen, box, ry, focused)
       screen.text(box.x + 3, ry, label, focused ? Theme.text_bright : Theme.text, bg)
       vx = box.x + 3 + LABEL_W + 2
       vw = {box.right - vx - 1, 1}.max

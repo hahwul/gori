@@ -170,9 +170,7 @@ module Gori::Tui
 
     private def draw_row(screen : Screen, box : Rect, row : Int32, py : Int32) : Nil
       sel = row == @sel
-      bg = sel ? Theme.accent_bg : Theme.panel
-      screen.fill(Rect.new(box.x + 1, py, box.w - 2, 1), bg)
-      screen.cell(box.x + 1, py, sel ? '▎' : ' ', Theme.accent, bg)
+      bg = Frame.row_band(screen, box, py, sel)
       fg = sel ? Theme.text_bright : Theme.text
       case row
       when ROW_STRIP then draw_field(screen, box, py, bg, fg, sel, "strip prefix:", @strip)

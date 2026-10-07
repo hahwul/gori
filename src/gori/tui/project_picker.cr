@@ -2397,9 +2397,7 @@ module Gori::Tui
       space_entries.each_with_index do |entry, i|
         ry = box.y + 1 + i
         active = i == @space_selected
-        bg = active ? Theme.accent_bg : Theme.panel
-        screen.fill(Rect.new(box.x + 1, ry, box.w - 2, 1), bg)
-        screen.cell(box.x + 1, ry, active ? '▎' : ' ', Theme.accent, bg)
+        bg = Frame.row_band(screen, box, ry, active)
         screen.text(box.x + 2, ry, entry.key.to_s, Theme.accent, bg, Attribute::Bold)
         screen.text(box.x + 4, ry, entry.label, active ? Theme.text_bright : Theme.text, bg,
           width: {box.w - 5, 0}.max)

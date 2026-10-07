@@ -100,9 +100,7 @@ module Gori::Tui
 
     private def draw_row(screen : Screen, box : Rect, y : Int32,
                          row : Store::FuzzRunRecord, active : Bool) : Nil
-      bg = active ? Theme.accent_bg : Theme.panel
-      screen.fill(Rect.new(box.x + 1, y, box.w - 2, 1), bg)
-      screen.cell(box.x + 1, y, active ? '▎' : ' ', Theme.accent, bg)
+      bg = Frame.row_band(screen, box, y, active)
       proto = row.proto_label
       # A filtered archive (issue #1240) says so, so a small stored count reads as a policy.
       keep = row.filtered? ? " · keep:#{row.keep}" : ""

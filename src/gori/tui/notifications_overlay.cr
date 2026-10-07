@@ -250,9 +250,7 @@ module Gori::Tui
     end
 
     private def draw_row(screen : Screen, box : Rect, note : Notifications::Note, sel : Bool, py : Int32) : Nil
-      bg = sel ? Theme.accent_bg : Theme.panel
-      screen.fill(Rect.new(box.x + 1, py, box.w - 2, 1), bg)
-      screen.cell(box.x + 1, py, sel ? '▎' : ' ', Theme.accent, bg)
+      bg = Frame.row_band(screen, box, py, sel)
       g, gc = glyph(note.level)
       screen.cell(box.x + 3, py, g, gc, bg)
       bold = note.read ? Attribute::None : Attribute::Bold

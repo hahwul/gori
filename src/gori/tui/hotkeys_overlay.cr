@@ -587,9 +587,7 @@ module Gori::Tui
     private def draw_binding(screen : Screen, box : Rect, i : Int32, ry : Int32, *, up : Bool, down : Bool) : Nil
       r = @rows[i]
       sel = i == @selected
-      bg = sel ? Theme.accent_bg : Theme.panel
-      screen.fill(Rect.new(box.x + 1, ry, box.w - 2, 1), bg)
-      screen.cell(box.x + 1, ry, sel ? '▎' : ' ', Theme.accent, bg)
+      bg = Frame.row_band(screen, box, ry, sel)
       ov = overridden?(r.verb_id)
       screen.cell(box.x + 3, ry, ov ? '●' : '·', ov ? Theme.accent : Theme.muted, bg)
 

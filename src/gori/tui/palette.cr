@@ -210,9 +210,7 @@ module Gori::Tui
                            overrides : Hash(String, Array(Verb::Chord))) : Nil
       verb = @results[idx]
       active = idx == @selected
-      bg = active ? Theme.accent_bg : Theme.panel
-      screen.fill(Rect.new(box.x + 1, ry, box.w - 2, 1), bg)
-      screen.cell(box.x + 1, ry, active ? '▎' : ' ', Theme.accent, bg)
+      bg = Frame.row_band(screen, box, ry, active)
       # Category sigil — a colour-coded glyph grouping the command by kind
       # (navigation »/action ▸/settings ≡/system ×) so the list reads at a glance.
       # Drawn at a fixed column with the title one cell past it, so a width-1 or

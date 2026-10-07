@@ -347,9 +347,7 @@ module Gori::Tui
 
     private def draw_row(screen : Screen, box : Rect, i : Int32, py : Int32) : Nil
       sel = i == @selected
-      bg = sel ? Theme.accent_bg : Theme.panel
-      screen.fill(Rect.new(box.x + 1, py, box.w - 2, 1), bg)
-      screen.cell(box.x + 1, py, sel ? '▎' : ' ', Theme.accent, bg)
+      bg = Frame.row_band(screen, box, py, sel)
       x = box.x + 3
       if i < @seed.applicable.size
         loc = @seed.applicable[i]

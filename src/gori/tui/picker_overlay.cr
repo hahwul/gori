@@ -126,9 +126,7 @@ module Gori::Tui
         break if ci >= entry_count
         ry = box.y + 1 + i
         active = ci == @selected
-        bg = active ? Theme.accent_bg : Theme.panel
-        screen.fill(Rect.new(box.x + 1, ry, box.w - 2, 1), bg)
-        screen.cell(box.x + 1, ry, active ? '▎' : ' ', Theme.accent, bg)
+        bg = Frame.row_band(screen, box, ry, active)
         draw_row(screen, box, ry, ci, active, bg)
       end
     end
