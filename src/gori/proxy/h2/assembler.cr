@@ -595,8 +595,7 @@ module Gori::Proxy::H2
         offset = 1
       end
       return {0_u32, Bytes.empty} if payload.size < offset + 4
-      promised = ((payload[offset].to_u32 & 0x7f) << 24) | (payload[offset + 1].to_u32 << 16) |
-                 (payload[offset + 2].to_u32 << 8) | payload[offset + 3].to_u32
+      promised = IO::ByteFormat::BigEndian.decode(UInt32, payload[offset, 4]) & 0x7fffffff_u32
       offset += 4
       validate_pad(pad, payload.size - offset)
       finish = payload.size - pad

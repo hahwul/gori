@@ -128,11 +128,8 @@ module Gori::Proxy::H2
         buf[2] = (len & 0xff).to_u8
         buf[3] = type
         buf[4] = flags
-        sid = stream_id & 0x7fffffff_u32 # reserved top bit cleared
-        buf[5] = ((sid >> 24) & 0xff).to_u8
-        buf[6] = ((sid >> 16) & 0xff).to_u8
-        buf[7] = ((sid >> 8) & 0xff).to_u8
-        buf[8] = (sid & 0xff).to_u8
+        # Reserved top bit cleared.
+        IO::ByteFormat::BigEndian.encode(stream_id & 0x7fffffff_u32, buf[5, 4])
         payload.copy_to(buf + HEADER_SIZE) if len > 0
         buf
       end
@@ -157,8 +154,7 @@ module Gori::Proxy::H2
       raise Gori::Error.new("h2 frame too large: #{len}") if len > max_payload
       type = header[3]
       flags = header[4]
-      stream_id = ((header[5].to_u32 & 0x7f) << 24) | (header[6].to_u32 << 16) |
-                  (header[7].to_u32 << 8) | header[8].to_u32
+      stream_id = IO::ByteFormat::BigEndian.decode(UInt32, hslice[5, 4]) & 0x7fffffff_u32
 
       # One contiguous buffer holds header + payload so the relay can forward the
       # frame verbatim (wire_bytes) without a second alloc + payload memcpy.
@@ -180,12 +176,7 @@ module Gori::Proxy::H2
     # Fills `buf` completely or raises on EOF mid-frame (a truncated frame is a
     # protocol error, unlike a clean boundary EOF).
     private def self.read_exact(io : IO, buf : Bytes) : Nil
-      read = 0
-      while read < buf.size
-        n = io.read(buf + read)
-        raise Gori::Error.new("h2: unexpected EOF mid-frame") if n == 0
-        read += n
-      end
+      io.read_fully?(buf) || raise Gori::Error.new("h2: unexpected EOF mid-frame")
     end
   end
 end
