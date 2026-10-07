@@ -285,7 +285,6 @@ module Gori
       property stability_rounds : Int32 # baseline resends to learn tolerance
       property confirm_rounds : Int32   # isolate re-tests before Confirmed
       property max_requests : Int64?    # hard cap on total sends
-      property? add_content_length_when_missing : Bool
       property user_wordlist : String?
       # Names to test FIRST, ahead of the built-in list and the user file — the parameter
       # inventory's neighbour names (#1231: seen on this host's other endpoints, absent from
@@ -340,7 +339,7 @@ module Gori
                      @concurrency = 10, @rps = nil, @throttle_ms = nil, @jitter_ms = 0,
                      @timeout = nil, @retries = 1, @retry_pause = 500.milliseconds,
                      @stability_rounds = 4, @confirm_rounds = 2, @max_requests = nil,
-                     @add_content_length_when_missing = false, @user_wordlist = nil,
+                     @user_wordlist = nil,
                      @hook = nil,
                      @notify = NotifyMode::WhenFound, @keep_alive = true,
                      @request_macro = nil)

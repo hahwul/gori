@@ -365,7 +365,7 @@ module Gori::Miner
     # each with its own canary value. nil when the send failed.
     private def control(loc : Location, width : Int32, name_len : Int32) : Probe?
       bogus = bogus_bucket(width, name_len)
-      raw = send_with_retries(Inject.apply(@base, loc, bogus, @config.add_content_length_when_missing?))
+      raw = send_with_retries(Inject.apply(@base, loc, bogus))
       return nil unless raw.error.nil?
       probe = Fingerprint.probe(raw)
       # An endpoint that echoes its input does it at every width, so recording this as each

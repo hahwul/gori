@@ -392,8 +392,7 @@ module Gori::Miner
       # to the live credential and leaves gori for the target, the run reporting `0 errors`.
       # Resolved ONCE for the send: the padding, the byte delta and the decision all need it.
       ref = report.reference_for(task.location)
-      bytes, spans = Inject.apply_with_spans(@base, task.location, pad_pairs(pairs, ref),
-        @config.add_content_length_when_missing?)
+      bytes, spans = Inject.apply_with_spans(@base, task.location, pad_pairs(pairs, ref))
       # Nothing was injected, so this location cannot carry candidates in THIS request — e.g.
       # a request line that is not METHOD SP TARGET SP VERSION, which `inject_query` bails on
       # unmodified rather than rewrite the operator's bytes (P7, and it is right to). Sending
@@ -544,8 +543,7 @@ module Gori::Miner
         break unless pace(interval)
         c = Canary.fresh
         # Same span-protection as the main loop — the confirm re-send injects the same name.
-        bytes, spans = Inject.apply_with_spans(@base, location, pad_pairs([{name, c}], ref),
-          @config.add_content_length_when_missing?)
+        bytes, spans = Inject.apply_with_spans(@base, location, pad_pairs([{name, c}], ref))
         raw = send_with_retries(bytes, spans)
         if err = raw.error
           # A confirm round is a REQUEST like any other, and this was the one send path that

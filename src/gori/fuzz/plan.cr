@@ -330,7 +330,7 @@ module Gori::Fuzz
     # A NOTE and not a refusal, for the reason `ws_ignored_knobs` gives: an unframed request is
     # a legitimate thing to send on purpose, and refusing a run over it would be hostile. What
     # is not legitimate is sending it by accident and being told nothing, which is what happened
-    # while `add_content_length_when_missing` defaulted false (see there). The remedy this one
+    # while `update_content_length` stopped short of adding the header (see there). The remedy this one
     # names is the OPPOSITE of `rewrites_content_length?`'s: turn the knob ON, not off.
     getter? unframed_body : Bool
     # The marked WebSocket script, or nil for an ordinary HTTP sweep. `template` above stays the
@@ -708,10 +708,10 @@ module Gori::Fuzz
     # `\n\r\n`, a `Transfer-Encoding` that only the last coding makes chunked) cannot be judged
     # one way by the framing check and another by the pass that does the framing.
     #
-    # The guard comes first so the healthy default (both knobs on, gori frames it) pays no
+    # The guard comes first so the healthy default (the knob on, gori frames it) pays no
     # render at all — this runs once per plan build, but `baseline_raw` can be a large capture.
     private def self.unframed_body?(config : Config, raw : Bytes) : Bool
-      return false if config.update_content_length? && config.add_content_length_when_missing?
+      return false if config.update_content_length?
       ContentLength.sync(raw, true) != ContentLength.sync(raw, false)
     end
 

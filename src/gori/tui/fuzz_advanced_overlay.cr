@@ -78,7 +78,7 @@ module Gori::Tui
       # body length; OFF sends the header exactly as the template declares it.
       #
       # ON also ADDS the header to a body that declares none, which is what makes this the
-      # Repeater's ^L rather than half of it (`Fuzz::Config#add_content_length_when_missing`).
+      # Repeater's ^L rather than half of it (`Fuzz::Config#update_content_length`).
       # OFF therefore leaves such a body UNFRAMED, and an origin reads it as zero-length —
       # `Plan#unframed_body?` is what says so on the run-start line instead of letting it go
       # quiet.
