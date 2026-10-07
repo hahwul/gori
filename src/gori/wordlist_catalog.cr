@@ -172,7 +172,7 @@ module Gori
       if (path = user_path.try(&.strip)) && !path.empty?
         merge_user_file(resolve_path(path), tool) { |line| names << line }
       end
-      EmbeddedList.dedup(names)
+      names.uniq # first occurrence wins: a built-in keeps its place ahead of a merge file
     end
 
     # The user merge file is operator MATERIAL, not a curated gori asset: a leading or

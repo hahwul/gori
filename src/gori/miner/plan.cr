@@ -438,7 +438,7 @@ module Gori::Miner
                                 project : Array(String) = [] of String) : Array(String)
       names = Wordlist.load(user_wordlist)
       front = (seeds + project).reject(&.strip.empty?)
-      names = EmbeddedList.dedup(front + names) unless front.empty?
+      names = (front + names).uniq unless front.empty?
       raise PlanError.new(PlanError::Reason::NoNames, "the candidate name list is empty") if names.empty?
       names
       # `IO::Error`, not `File::Error`: a missing path raises the latter, but a path that

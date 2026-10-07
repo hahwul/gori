@@ -6,10 +6,6 @@ describe Gori::EmbeddedList do
     Gori::EmbeddedList.parse(raw).should eq(["admin", "login", "backup"])
   end
 
-  it "de-duplicates keeping the first occurrence in place" do
-    Gori::EmbeddedList.dedup(["b", "a", "b", "c", "a"]).should eq(["b", "a", "c"])
-  end
-
   # The three embedded readers share the helper; each built-in must still come out non-empty
   # with no blank or comment line surviving.
   it "backs every built-in list" do

@@ -16,12 +16,5 @@ module Gori
       end
       out
     end
-
-    # De-duplicated, first occurrence wins, so a built-in entry keeps its place ahead of the
-    # same value repeated by a merge file.
-    def self.dedup(list : Array(String)) : Array(String)
-      seen = Set(String).new
-      list.select { |n| seen.add?(n) }
-    end
   end
 end
