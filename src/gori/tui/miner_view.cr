@@ -206,18 +206,12 @@ module Gori::Tui
     # A lens over `@results`: `visible` is the list the cursor, the draw loop and the
     # hit-tests walk; `@results` itself is what the engine appends to and what `found_count`
     # reports.
+    getter filter : RowFilter
+
     def filter_start : Nil
       close_detail if @focus == :detail
       focus_pane(:results)
       @filter.start
-    end
-
-    def filter_editing? : Bool
-      @filter.editing?
-    end
-
-    def filter_hint : String
-      @filter.hint
     end
 
     def handle_filter_key(ev : Termisu::Event::Key) : Bool
@@ -225,10 +219,6 @@ module Gori::Tui
       @filter.handle_key(ev)
       @sel = (prev && visible.index(prev)) || @sel.clamp(0, {visible.size - 1, 0}.max)
       true
-    end
-
-    def set_filter_preedit(text : String) : Bool
-      @filter.set_preedit(text)
     end
 
     private def visible : Array(Int32)

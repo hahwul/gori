@@ -938,7 +938,7 @@ module Gori::Tui
 
     # --- the request-list `/` filter (a text sub-mode the shell claims ahead of the focus ring) ---
     def querying? : Bool
-      @view.filter_editing?
+      @view.filter.editing?
     end
 
     def handle_query_key(ev : Termisu::Event::Key) : Bool
@@ -946,7 +946,7 @@ module Gori::Tui
     end
 
     def set_preedit(text : String) : Bool
-      @view.set_filter_preedit(text)
+      @view.filter.set_preedit(text)
     end
 
     def body_badge : Symbol
@@ -956,7 +956,7 @@ module Gori::Tui
     # `/` — narrow the queue by method / host / path / verdict. Refused with nothing queued.
     def authorize_filter : Nil
       return @host.status("nothing to filter — Send to Authorize from History to begin") unless @view.any_requests?
-      @view.filter_start
+      @view.filter.start
     end
 
     # `y`: the selected request as `METHOD host/path`.
@@ -993,7 +993,7 @@ module Gori::Tui
       unless @view.any_requests?
         return keys("{authorize.identities} identities · {authorize.passive} passive · esc tabs · Send to Authorize from History to begin#{passive}")
       end
-      return @view.filter_hint if querying?
+      return @view.filter.hint if querying?
       return keys("↑/↓ request · ⇥ identity · {authorize.stop} stop#{passive} · space cmds · esc tabs") if running?
       # `⇧X clear` is named here and NOT in the running branch above: that one is deliberately
       # the two keys a run leaves meaningful, and "empty the queue" is not the thing to put in

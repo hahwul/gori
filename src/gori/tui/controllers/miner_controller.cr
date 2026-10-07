@@ -65,7 +65,7 @@ module Gori::Tui
     def body_hint(focus : Symbol) : String
       v = current_view
       return Hotkeys.expand_menu_paths(@host.session.registry, "↹/esc tabs · mine from History/Repeater ({space:history.mine})") unless v
-      return v.filter_hint if v.filter_editing?
+      return v.filter.hint if v.filter.editing?
       # `esc sub-tabs`, not `esc tabs`: `handle_escape` below goes to the strip whenever one
       # is shown, and `subtab_strip_shown?` is `!@sessions.empty?` — every branch under this
       # point has a `current_view`, so the strip is always up and escape never reaches the
@@ -92,7 +92,7 @@ module Gori::Tui
 
     # --- the FINDINGS `/` filter (a text sub-mode the shell claims ahead of the focus ring) ---
     def querying? : Bool
-      current_view.try(&.filter_editing?) || false
+      current_view.try(&.filter.editing?) || false
     end
 
     def handle_query_key(ev : Termisu::Event::Key) : Bool
@@ -100,7 +100,7 @@ module Gori::Tui
     end
 
     def set_preedit(text : String) : Bool
-      current_view.try(&.set_filter_preedit(text)) || false
+      current_view.try(&.filter.set_preedit(text)) || false
     end
 
     # `/` — narrow the FINDINGS table by parameter / location / evidence. Refused with no

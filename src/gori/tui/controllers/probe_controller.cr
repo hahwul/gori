@@ -159,7 +159,7 @@ module Gori::Tui
         #
         # `esc sub-tabs`, not `esc tabs`: escape goes to the strip (handle_body_key), and the
         # strip is always shown here, so `focus_pane` never downgrades it to the tab bar.
-        return @rules.filter_hint if @rules.filter_editing?
+        return @rules.filter.hint if @rules.filter.editing?
         edits = rules_custom_selected? ? " · ↵/e edit · {probe-rules.delete} delete" : ""
         return keys("↑/↓ select · {probe-rules.toggle} on/off · {probe-rules.add} add#{edits} · {probe-rules.filter} filter · space cmds · ↑ sub-tabs · esc sub-tabs")
       elsif @probe.detail_open?
@@ -390,7 +390,7 @@ module Gori::Tui
     end
 
     def set_preedit(text : String) : Bool
-      return @rules.set_filter_preedit(text) if rules_tab?
+      return @rules.filter.set_preedit(text) if rules_tab?
       return false unless @probe.querying?
       @probe.query_set_preedit(text)
       true
@@ -400,7 +400,7 @@ module Gori::Tui
     # Three sections and ~40 rules, and the only way to reach one was to scroll past the other
     # two.
     def list_filter_editing? : Bool
-      rules_tab? && @rules.filter_editing?
+      rules_tab? && @rules.filter.editing?
     end
 
     def handle_list_filter_key(ev : Termisu::Event::Key) : Bool
@@ -408,7 +408,7 @@ module Gori::Tui
     end
 
     def rules_filter : Nil
-      @rules.filter_start
+      @rules.filter.start
     end
 
     def querying? : Bool

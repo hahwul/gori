@@ -467,17 +467,7 @@ module Gori::Tui
     # A lens over `@entries`: `visible` is what the cursor, the list and `selected_entry` walk.
     # It is never a run scope — `pending_entries`, `mark_running`, `runnable` keep reading
     # `@entries`, so a hidden row still runs.
-    def filter_start : Nil
-      @filter.start
-    end
-
-    def filter_editing? : Bool
-      @filter.editing?
-    end
-
-    def filter_hint : String
-      @filter.hint
-    end
+    getter filter : RowFilter
 
     # Re-anchored by entry ID, since removals shift the source indices.
     def handle_filter_key(ev : Termisu::Event::Key) : Bool
@@ -486,10 +476,6 @@ module Gori::Tui
       @sel = (prev && visible.index { |i| @entries[i].id == prev }) || @sel.clamp(0, {visible.size - 1, 0}.max)
       anchor_sel
       true
-    end
-
-    def set_filter_preedit(text : String) : Bool
-      @filter.set_preedit(text)
     end
 
     private def touch : Nil

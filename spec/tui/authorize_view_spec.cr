@@ -65,7 +65,7 @@ describe AuthorizeView do
     v = AuthorizeView.new
     ids = %w[/a /b /c /d].map { |p| v.add(flow(target: p)) }
     ids.each { |id| v.apply_result(id, target(false)) }
-    v.filter_start
+    v.filter.start
     "enforced".each_char { |c| v.handle_filter_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }
     v.move_row(-1) # `add` left the cursor on /d
     v.selected_entry.not_nil!.detail.row.target.should eq("/c")
