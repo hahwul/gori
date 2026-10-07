@@ -22,6 +22,8 @@ module Gori::Tui
   # that ran the first of them would scatter the rest of the paste into whatever the shell
   # restored. `pasting` is how the card knows, injected by the shell that owns the paste state.
   class CurlPasteOverlay < Overlay
+    include EditorCard
+
     # Where the request goes: a new Repeater sub-tab, or History.
     getter mode : Symbol
     property pasting : Proc(Bool) = -> { false }
@@ -53,11 +55,6 @@ module Gori::Tui
       "paste a curl command · ↵ #{verb} (a trailing \\ continues) · esc cancel"
     end
 
-    # The whole card is the editor, so a pasted line break is a newline (see the class note).
-    def takes_pasted?(ev : Termisu::Event::Key) : Bool
-      true
-    end
-
     # A copied command routinely carries a large `--data-raw` body, which is the paste the
     # keystroke path is quadratic in — so the card takes it whole, as one edit.
     def accepts_bulk_paste? : Bool
@@ -87,30 +84,12 @@ module Gori::Tui
       @editor.handle_edit_key(ev)
     end
 
-    def set_preedit(text : String) : Nil
-      @editor.set_preedit(text)
-    end
-
     # A click outside the card cancels (the default); inside, it places the caret.
     def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
       box = overlay_box(area)
       return :cancel if box.nil? || !box.contains?(mx, my)
       @editor.click_to_cursor(editor_rect(box), mx, my)
       :stay
-    end
-
-    def supports_drag? : Bool
-      true
-    end
-
-    def handle_drag(area : Rect, mx : Int32, my : Int32) : Nil
-      return unless box = overlay_box(area)
-      @editor.click_to_cursor(editor_rect(box), mx, my, selecting: true)
-    end
-
-    def handle_double_click(area : Rect, mx : Int32, my : Int32) : Symbol
-      return :pass unless box = overlay_box(area)
-      @editor.select_word_at(editor_rect(box), mx, my) ? :stay : :pass
     end
 
     def overlay_box(area : Rect) : Rect?

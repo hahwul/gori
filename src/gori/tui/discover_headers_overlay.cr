@@ -35,6 +35,8 @@ module Gori::Tui
   # not a guard: where the editor cannot show the line, esc saves and the degraded line
   # says how many lines that drops, so the save is still never silent.
   class DiscoverHeadersOverlay < Overlay
+    include EditorCard
+
     def initialize(headers : Array({String, String}))
       text = headers.map { |name, value| "#{name}: #{value}" }.join("\n")
       @editor = TextArea.new(text)
@@ -106,26 +108,6 @@ module Gori::Tui
       :stay
     end
 
-    # --- pointer selection (see Overlay#supports_drag?) ---
-    def supports_drag? : Bool
-      true
-    end
-
-    def handle_drag(area : Rect, mx : Int32, my : Int32) : Nil
-      return unless box = overlay_box(area)
-      @editor.click_to_cursor(editor_rect(box), mx, my, selecting: true)
-    end
-
-    def handle_double_click(area : Rect, mx : Int32, my : Int32) : Symbol
-      return :pass unless box = overlay_box(area)
-      @editor.select_word_at(editor_rect(box), mx, my) ? :stay : :pass
-    end
-
-    # Which pasted keystrokes reach this card (see `Overlay#takes_pasted?`): the whole card is the editor, so a line break is a newline.
-    def takes_pasted?(ev : Termisu::Event::Key) : Bool
-      true
-    end
-
     # esc = save & close (:commit); every other key edits the buffer (:stay).
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
@@ -159,10 +141,6 @@ module Gori::Tui
     private def edit(ev : Termisu::Event::Key) : Nil
       @refused = nil
       @editor.handle_edit_key(ev)
-    end
-
-    def set_preedit(text : String) : Nil
-      @editor.set_preedit(text)
     end
 
     def overlay_box(area : Rect) : Rect?

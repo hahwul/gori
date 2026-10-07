@@ -788,4 +788,31 @@ module Gori::Tui
       { {@selected - cap + 1, 0}.max, entry_count - cap }.min
     end
   end
+
+  # A card whose body is ONE `TextArea` (`@editor`, laid out by the card's `editor_rect(box)`):
+  # a drag and a double-click select in it, a pasted line break is a newline, and IME preedit
+  # lands in it. Included by the class, so these replace `Overlay`'s defaults.
+  module EditorCard
+    def supports_drag? : Bool
+      true
+    end
+
+    def handle_drag(area : Rect, mx : Int32, my : Int32) : Nil
+      return unless box = overlay_box(area)
+      @editor.click_to_cursor(editor_rect(box), mx, my, selecting: true)
+    end
+
+    def handle_double_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      return :pass unless box = overlay_box(area)
+      @editor.select_word_at(editor_rect(box), mx, my) ? :stay : :pass
+    end
+
+    def takes_pasted?(ev : Termisu::Event::Key) : Bool
+      true
+    end
+
+    def set_preedit(text : String) : Nil
+      @editor.set_preedit(text)
+    end
+  end
 end

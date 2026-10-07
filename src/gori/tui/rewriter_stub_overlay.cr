@@ -17,6 +17,8 @@ module Gori::Tui
   # still inside the rule form — so esc and click-away both commit, and the injected closure
   # writes the buffer back onto the form and re-opens it.
   class RewriterStubOverlay < Overlay
+    include EditorCard
+
     def initialize(text : String)
       @editor = TextArea.new(text)
     end
@@ -58,26 +60,6 @@ module Gori::Tui
       :stay
     end
 
-    # --- pointer selection (see Overlay#supports_drag?) ---
-    def supports_drag? : Bool
-      true
-    end
-
-    def handle_drag(area : Rect, mx : Int32, my : Int32) : Nil
-      return unless box = overlay_box(area)
-      @editor.click_to_cursor(editor_rect(box), mx, my, selecting: true)
-    end
-
-    def handle_double_click(area : Rect, mx : Int32, my : Int32) : Symbol
-      return :pass unless box = overlay_box(area)
-      @editor.select_word_at(editor_rect(box), mx, my) ? :stay : :pass
-    end
-
-    # Which pasted keystrokes reach this card (see `Overlay#takes_pasted?`): the whole card is the editor, so a line break is a newline.
-    def takes_pasted?(ev : Termisu::Event::Key) : Bool
-      true
-    end
-
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
       case
@@ -94,10 +76,6 @@ module Gori::Tui
     # with no way to select a header line and replace it.
     private def edit(ev : Termisu::Event::Key) : Nil
       @editor.handle_edit_key(ev)
-    end
-
-    def set_preedit(text : String) : Nil
-      @editor.set_preedit(text)
     end
 
     def overlay_box(area : Rect) : Rect?
