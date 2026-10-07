@@ -159,35 +159,42 @@ module Gori::Proxy::Codec::Http1
                             deadline : Time::Span? = nil, timeout_sock : ::Socket? = nil,
                             detect_non_http : Bool = false,
                             lf_terminator : Bool = false) : HeadReadResult
-    # Deadline path only when BOTH are provided (proxy client-request and upstream-response
-    # readers); every other caller takes the byte-for-byte original fast path.
-    if (sock = timeout_sock) && (dl = deadline)
-      return read_head_deadlined(io, sock, dl, max_bytes, detect_non_http, lf_terminator)
-    end
+    # The deadline is armed only when BOTH are provided (proxy client-request and
+    # upstream-response readers); every other caller reads on its own baseline timeout, and
+    # ignores `detect_non_http`, which only the deadline path's callers set.
+    sock = timeout_sock if deadline
     buf = IO::Memory.new(512) # presized: covers a typical head without regrowing
+    saved_timeout = sock.try(&.read_timeout)
+    # Non-HTTP detection (#729): a binary-preface protocol (MQTT/AMQP/TLS-in-TLS) never sends
+    # CRLFCRLF, so waiting for one blocks to the deadline with nothing recorded. The decision is
+    # made on the FIRST non-blank byte and never revisited — see `looks_like_http_request?` for
+    # why it is only that byte — so it costs one scan for that byte until it fires, and nothing
+    # after. Gated on `detect_non_http` because the deadline path also reads RESPONSE heads
+    # (`safe_read_head`), where the first byte is the caller's business and not a request line.
+    settled = sock.nil? || !detect_non_http
     begin
-      while buf.bytesize < max_bytes
-        if chunk = io.peek
-          break if chunk.empty? # EOF
-          break if consume_peeked(io, buf, chunk, max_bytes, lf_terminator: lf_terminator)[0]
-        else
-          taken = consume_byte(io, buf, lf_terminator: lf_terminator)
-          break if taken.nil? # EOF
-          break if taken[0]
-        end
-      end
+      fill_head(io, buf, max_bytes, sock, deadline || Time::Span.zero, settled, lf_terminator)
     rescue ex : IO::TimeoutError
-      # `read_head` raises `HeadTimeout` and nothing else, from EITHER path. That uniformity is
-      # what lets `ClientConn#read_client_head` rescue the narrow type without depending on an
+      # `read_head` raises `HeadTimeout` and nothing else, armed or not. That uniformity is what
+      # lets `ClientConn#read_client_head` rescue the narrow type without depending on an
       # unstated invariant about which path it took — and `SocketTuning.underlying_socket`
       # returning nil for a future client-leg wrapper would otherwise silently disable the #755
-      # record. No deadline is armed on this path, so a timeout here is the caller's own baseline
-      # and `buf.bytesize` is still the honest count.
+      # record.
+      #
+      # With a deadline it is the one conversion point for BOTH clocks that can fire in here,
+      # because the caller cannot tell them apart from the exception alone (#755): with zero
+      # bytes in hand the wait was the caller's own baseline `read_timeout`
+      # (`SocketTuning::CLIENT_IO_TIMEOUT`, armed by `ClientConn#run`) and the peer said nothing
+      # at all; after the first byte it was the shrunk remainder of `deadline`, i.e. a partial
+      # head that stalled. `received` is that distinction. Rebuilding the exception costs one
+      # allocation on a path that has just spent 30 s waiting.
       bytes = captured_head(buf)
       timeout = HeadTimeout.new(ex.message || "head read timed out", buf.bytesize, bytes)
       return HeadReadResult.new(HeadReadResult::State::TimedOut, bytes, timeout)
     rescue ex
       return HeadReadResult.new(HeadReadResult::State::Failed, captured_head(buf), ex)
+    ensure
+      sock.read_timeout = saved_timeout if sock # restore the baseline for the following body read
     end
     finalize_head(buf, max_bytes, lf_terminator)
   end
@@ -215,61 +222,32 @@ module Gori::Proxy::Codec::Http1
     read_head_result(io, max_bytes, deadline: deadline, timeout_sock: timeout_sock, lf_terminator: true)
   end
 
-  # As read_head, but bounds the total time to assemble a head AFTER its first byte — the
-  # drip-feed slowloris defense a per-read timeout can't provide (a byte-at-a-time trickle keeps
-  # resetting a per-read timer). `sock`'s read_timeout is shrunk toward `deadline` before each
-  # read and RESTORED on exit, so the body read that follows sees the caller's baseline.
-  private def self.read_head_deadlined(io : IO, sock : ::Socket, deadline : Time::Span, max_bytes : Int32,
-                                       detect_non_http : Bool = false,
-                                       lf_terminator : Bool = false) : HeadReadResult
-    buf = IO::Memory.new(512)
-    saved_timeout = sock.read_timeout
+  # The read loop of `read_head_result`: append head octets from `io` to `buf` until the head
+  # ends, EOF, or `max_bytes`. With `sock` it re-arms the drip-feed bound before each read
+  # that can block, counting from the head's first received byte.
+  private def self.fill_head(io : IO, buf : IO::Memory, max_bytes : Int32, sock : ::Socket?,
+                             deadline : Time::Span, settled : Bool, lf_terminator : Bool) : Nil
     head_started = nil.as(Time::Instant?)
-    # Non-HTTP detection (#729): a binary-preface protocol (MQTT/AMQP/TLS-in-TLS) never sends
-    # CRLFCRLF, so waiting for one blocks to the deadline with nothing recorded. The decision is
-    # made on the FIRST non-blank byte and never revisited — see `looks_like_http_request?` for
-    # why it is only that byte — so it costs one scan for that byte until it fires, and nothing
-    # after. Gated on `detect_non_http` because this same deadline path also reads RESPONSE heads
-    # (`safe_read_head`), where the first byte is the caller's business and not a request line.
-    settled = !detect_non_http
-    begin
-      while buf.bytesize < max_bytes
-        if hs = head_started
-          arm_remaining(sock, deadline - (Time.instant - hs))
-        end
-        if chunk = io.peek
-          break if chunk.empty? # EOF
-          taken = consume_peeked(io, buf, chunk, max_bytes, settled, lf_terminator)
-        else
-          taken = consume_byte(io, buf, settled, lf_terminator)
-          break if taken.nil? # EOF
-        end
-        head_started ||= Time.instant # start the head clock at the first received byte
-        stop, settled = taken
-        break if stop
+    while buf.bytesize < max_bytes
+      if sock && (hs = head_started)
+        arm_remaining(sock, deadline - (Time.instant - hs))
       end
-    rescue ex : IO::TimeoutError
-      # One conversion point for BOTH clocks that can fire in here, because the caller cannot
-      # tell them apart from the exception alone (#755): with zero bytes in hand the wait was
-      # the caller's own baseline `read_timeout` (`SocketTuning::CLIENT_IO_TIMEOUT`, armed by
-      # `ClientConn#run`) and the peer said nothing at all; after the first byte it was the
-      # shrunk remainder of `deadline`, i.e. a partial head that stalled. `received` is that
-      # distinction. Rebuilding the exception costs one allocation on a path that has just
-      # spent 30 s waiting.
-      bytes = captured_head(buf)
-      timeout = HeadTimeout.new(ex.message || "head read timed out", buf.bytesize, bytes)
-      return HeadReadResult.new(HeadReadResult::State::TimedOut, bytes, timeout)
-    rescue ex
-      return HeadReadResult.new(HeadReadResult::State::Failed, captured_head(buf), ex)
-    ensure
-      sock.read_timeout = saved_timeout # restore the baseline for the following body read
+      if chunk = io.peek
+        break if chunk.empty? # EOF
+        taken = consume_peeked(io, buf, chunk, max_bytes, settled, lf_terminator)
+      else
+        taken = consume_byte(io, buf, settled, lf_terminator)
+        break if taken.nil? # EOF
+      end
+      head_started ||= Time.instant if sock # start the head clock at the first received byte
+      stop, settled = taken
+      break if stop
     end
-    finalize_head(buf, max_bytes, lf_terminator)
   end
 
   # Move the bytes of `chunk` (a VIEW into `io`'s own read buffer) that belong to this head
   # into `buf`, consume exactly those from `io`, and say whether the read loop is done with
-  # them. Returns `{stop?, settled?}`; the plain path ignores the second half.
+  # them. Returns `{stop?, settled?}`; `settled` never goes back to false once true.
   #
   # ## Why a chunk at all
   #
@@ -417,7 +395,7 @@ module Gori::Proxy::Codec::Http1
     candidate.write(taken)
     candidate.write(chunk[0, strict])
     raw = candidate.to_slice
-    framing_ambiguous?(raw, parse_headers(raw, index_crlf(raw, 0))) ? strict : head_end
+    framing_ambiguous?(raw, parse_headers(raw, index_crlf(raw, 0).try(&.+(2)))) ? strict : head_end
   end
 
   # `chunk` index one past the first CRLFCRLF that ENDS at or after `from` — it may begin inside
@@ -557,7 +535,7 @@ module Gori::Proxy::Codec::Http1
       method: parts[0]? || "",
       target: parts[1]? || "",
       version: parts[2]? || "",
-      headers: parse_headers(raw, first_crlf),
+      headers: parse_headers(raw, first_crlf.try(&.+(2))),
       malformed: malformed,
     )
   end
@@ -786,10 +764,10 @@ module Gori::Proxy::Codec::Http1
       end
       nl = raw.index(0x0a_u8, first) || raw.size - 1 # an LF-terminated head always has one
       start_end = nl > first && raw.unsafe_fetch(nl - 1) == 0x0d_u8 ? nl - 1 : nl
-      return build_response(raw, start_end, parse_lf_headers(raw, nl + 1), from: first)
+      return build_response(raw, start_end, parse_headers(raw, nl + 1, lf: true), from: first)
     end
     first_crlf = index_crlf(raw, 0)
-    build_response(raw, first_crlf || raw.size, parse_headers(raw, first_crlf))
+    build_response(raw, first_crlf || raw.size, parse_headers(raw, first_crlf.try(&.+(2))))
   end
 
   # The status-line projection over `raw[from, start_end - from]`, shared by both line readings.
@@ -1038,13 +1016,6 @@ module Gori::Proxy::Codec::Http1
     nil
   end
 
-  # Parse header lines by scanning the raw bytes in place, starting at the
-  # start-line's terminating CRLF (`start_crlf`; nil when the head has no CRLF).
-  # Only the header name/value Strings are allocated — no whole-head String and
-  # no per-line String array (see codec_bench). Byte-for-byte equivalent to the
-  # old `String.new(raw).split(CRLF)` projection: name is bytes-before-colon
-  # (unstripped), value is bytes-after-colon stripped; an empty line ends headers;
-  # a colon-less line is skipped (raw_head still keeps it).
   # RFC 7230 §3.2.4: a field-name must be followed IMMEDIATELY by ':' with NO
   # whitespace, and obs-fold (a header line beginning with SP/HTAB) is obsolete and
   # forbidden in a request. Either form hides a header from parse_headers (whose name
@@ -1259,35 +1230,28 @@ module Gori::Proxy::Codec::Http1
      String.new(line[colon + 1, line.size - colon - 1]).strip}
   end
 
-  private def self.parse_headers(raw : Bytes, start_crlf : Int32?) : HeaderList
+  # The header lines from `pos` (the first byte after the start line; nil when the head has no
+  # start-line terminator, so no header block) up to the blank line that ends them. A line
+  # ends at its CRLF; with `lf` (`parse_response_head` on an `lf_terminated_head?`) it ends at
+  # LF, and a CR right before that LF is part of the terminator. A lone CR anywhere else stays
+  # a byte of its line, exactly as a lone LF does in the CRLF reading — which is what lets
+  # `framing_ambiguous?` still catch a CR-hidden Content-Length on an LF head.
+  #
+  # It scans the raw bytes in place: only the header name/value Strings are allocated — no
+  # whole-head String and no per-line String array (see codec_bench). Byte-for-byte
+  # equivalent to the old `String.new(raw).split(CRLF)` projection: name is bytes-before-colon
+  # (unstripped), value is bytes-after-colon stripped; an empty line ends headers; a
+  # colon-less line is skipped (raw_head still keeps it).
+  private def self.parse_headers(raw : Bytes, pos : Int32?, lf : Bool = false) : HeaderList
     list = HeaderList.new
-    return list if start_crlf.nil? # no CRLF → no header block
-    pos = start_crlf + 2           # first byte after the start-line's CRLF
+    return list if pos.nil?
     while pos < raw.size
-      crlf = index_crlf(raw, pos)
-      line_end = crlf || raw.size
+      eol = lf ? index_eol(raw, pos, true) : index_crlf(raw, pos)
+      line_end = eol || raw.size
       break if line_end == pos # empty line → end of headers
       add_header(list, raw[pos, line_end - pos])
-      break if crlf.nil? # last line, no trailing CRLF
-      pos = crlf + 2
-    end
-    list
-  end
-
-  # `parse_headers` for a head read on LF (`parse_response_head` on an `lf_terminated_head?`):
-  # a line ends at LF, and a CR right before that LF is part of the terminator. A lone CR
-  # anywhere else stays a byte of its line, exactly as a lone LF does in the CRLF reading —
-  # which is what lets `framing_ambiguous?` still catch a CR-hidden Content-Length here.
-  private def self.parse_lf_headers(raw : Bytes, pos : Int32) : HeaderList
-    list = HeaderList.new
-    while pos < raw.size
-      nl = raw.index(0x0a_u8, pos)
-      stop = nl || raw.size
-      line_end = stop > pos && raw.unsafe_fetch(stop - 1) == 0x0d_u8 && nl ? stop - 1 : stop
-      break if line_end == pos # empty line → end of headers
-      add_header(list, raw[pos, line_end - pos])
-      break if nl.nil?
-      pos = nl + 1
+      break if eol.nil? # last line, no terminator
+      pos = lf ? after_eol(raw, eol) : eol + 2
     end
     list
   end
