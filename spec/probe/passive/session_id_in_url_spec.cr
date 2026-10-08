@@ -39,4 +39,14 @@ describe Gori::Probe::Passive::SessionIdInUrl do
       probe_codes_of(sid_dets(store, "/x")).should_not contain("session_id_in_url")
     end
   end
+
+  # Servlet URL rewriting carries the id as a `;jsessionid=` path parameter, never in the query.
+  it "flags a session id carried as a path parameter" do
+    with_store do |store|
+      ["/shop/cart;jsessionid=0A1B2C3D", "/a;JSESSIONID=x?y=1", "/a;jsessionid=x/b"].each do |t|
+        probe_codes_of(sid_dets(store, t)).should contain("session_id_in_url")
+      end
+      probe_codes_of(sid_dets(store, "/a;b")).should_not contain("session_id_in_url")
+    end
+  end
 end

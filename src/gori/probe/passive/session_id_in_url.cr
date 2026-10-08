@@ -7,7 +7,7 @@ module Gori
       # A framework session identifier carried in the request URL (category "infoleak"). Unlike a
       # generic `session`/`sid` param (which `secret_in_url` owns), these are the EXACT cookie
       # names a specific stack issues — PHPSESSID, JSESSIONID, ASP.NET_SessionId, … — so their
-      # presence in a query string is a strong session-in-URL / session-fixation signal: the live
+      # presence in a query string (or a `;jsessionid=` path parameter) is a strong session-in-URL / session-fixation signal: the live
       # session token leaks through logs, browser history, and the Referer header, and a link that
       # sets it can fix a victim's session.
       #
@@ -31,15 +31,17 @@ module Gori
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           target = ctx.req.target
-          # '?' (0x3f) is always a standalone byte in UTF-8, so a query-less URL early-outs here
-          # without the full-URL scrub (this rule runs on every flow).
-          return unless target.to_slice.index(0x3f_u8)
+          # '?' (0x3f) and ';' (0x3b) are always standalone bytes in UTF-8, so a URL with neither
+          # early-outs here without the full-URL scrub (this rule runs on every flow).
+          slice = target.to_slice
+          return unless slice.index(0x3f_u8) || slice.index(0x3b_u8)
           scrubbed = target.scrub
           qi = scrubbed.index('?')
-          return unless qi
-          query = scrubbed[(qi + 1)..]
-          return if query.empty?
-          query.split('&').each do |pair|
+          path = qi ? scrubbed[0...qi] : scrubbed
+          query = qi ? scrubbed[(qi + 1)..] : ""
+          # Servlet URL rewriting (`encodeURL`) puts the id in a PATH parameter,
+          # `/cart;jsessionid=0A1B`, never the query — the canonical shape this rule names first.
+          (path.split(';').skip(1) + query.split('&')).each do |pair|
             next if pair.empty?
             eq = pair.index('=')
             raw = eq ? pair[0...eq] : pair
