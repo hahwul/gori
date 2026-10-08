@@ -21,6 +21,7 @@
 - Projects: `.gori` import refuses archives whose tables lost their keys or carry out-of-range interim rows, and its `exec:` notice now counts Decoder tabs and gRPC field specs (#1549)
 - CLI: `gori run shell` also points `NIX_SSL_CERT_FILE` at its CA bundle, so Nix-built tools trust gori (#1549)
 - Proxy: a request naming a port above 65535 is refused instead of looping back into gori's own listener on glibc Linux
+- HTTP/2: a long-lived connection keeps recording requests after many cancelled streams the origin still answered
 - TLS: importing a passphrase-protected CA key says to decrypt it instead of freezing gori on a hidden passphrase prompt, and a host with `_` in its name gets a certificate browsers accept
 
 ## v0.8.0

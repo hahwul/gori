@@ -663,6 +663,31 @@ describe Gori::Proxy::H2::Assembler do
     sink.requests.size.should eq(1)
     sink.requests.first.method.should eq("GET")
   end
+
+  # The origin's answer to a request the client already cancelled (gRPC deadlines, fetch
+  # aborts) arrives after the RST. It used to open an entry nothing ever emitted or deleted,
+  # so a long-lived connection ran out of MAX_LIVE_STREAMS and stopped recording requests.
+  it "does not let late responses on reset streams exhaust the live-stream cap" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443)
+    get = hexb("828684418cf1e3c2e5f23a6ba0ab90f4ff")
+    rst = Bytes[0, 0, 0, 8] # CANCEL
+    rounds = Gori::Proxy::H2::Assembler::MAX_LIVE_STREAMS + 8
+    rounds.times do |i|
+      sid = (i * 2 + 1).to_u32
+      assembler.feed("out", headers_frame(sid, Frame::END_HEADERS | Frame::END_STREAM, get))
+      assembler.feed("out", Frame::Header.new(Frame::Type::RstStream.value, 0_u8, sid, rst))
+      assembler.feed("in", headers_frame(sid, Frame::END_HEADERS | Frame::END_STREAM, Bytes[0x88_u8]))
+      assembler.feed("in", data_frame(sid, Frame::END_STREAM, "late"))
+    end
+    sink.requests.size.should eq(rounds)
+    late = (rounds * 2 + 1).to_u32
+    assembler.feed("out", headers_frame(late, Frame::END_HEADERS | Frame::END_STREAM, get))
+    sink.requests.size.should eq(rounds + 1) # still tracked
+    assembler.feed("in", headers_frame(late, Frame::END_HEADERS | Frame::END_STREAM, Bytes[0x88_u8]))
+    sink.responses.last.status.should eq(200)
+  end
+
   # --- RFC 8441 extended CONNECT (a WebSocket over h2) ----------------------------------
   #
   # The relay works end to end, and that is exactly the problem these cover: the flow it
