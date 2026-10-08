@@ -196,6 +196,45 @@ describe "Repeater::H2Engine.single_packet" do
     ok.error.not_nil!.should contain("HPACK state lost")
   end
 
+  # DATA for a stream the race already closed returned before crediting the CONNECTION window,
+  # so a failed stream's body could drain the shared 65535 bytes and stall every sibling.
+  it "credits the connection window for DATA on a stream it already closed" do
+    port = start_h2_scripted_origin(2, hold: 0.1.seconds) do |io, ended|
+      sids = ended.to_h { |(sid, path)| {path, sid} }
+      status_index = 0x80_u8 | (HPACK::STATIC.index({":status", "200"}).not_nil! + 1).to_u8
+      server_index = 0x80_u8 | (HPACK::STATIC.index({"server", ""}).not_nil! + 1).to_u8
+      # /gone: a header list past the decoder's cap — failed locally, but its body still comes.
+      repeat_count = HPACK::Decoder::MAX_HEADER_LIST // ("server".bytesize + HPACK::Decoder::ENTRY_OVERHEAD) + 1
+      block = Bytes.new(1 + repeat_count) { |i| i == 0 ? status_index : server_index }
+      offset = 0
+      while offset < block.size
+        size = Math.min(16_384, block.size - offset)
+        type = offset == 0 ? Frame::Type::Headers : Frame::Type::Continuation
+        flags = offset + size == block.size ? Frame::END_HEADERS : 0_u8
+        io.write(Frame::Header.new(type.value, flags, sids["/gone"], block[offset, size]).to_bytes)
+        offset += size
+      end
+      {16_384, 16_384, 16_384, 16_383}.each do |n| # exactly the default 65535 connection window
+        io.write(Frame::Header.new(Frame::Type::Data.value, 0_u8, sids["/gone"], Bytes.new(n)).to_bytes)
+      end
+      h2_headers(io, sids["/ok"], [{":status", "200"}], end_stream: false)
+      # A flow-controlled origin sends /ok's body only once the connection window is credited.
+      io.as(TCPSocket).read_timeout = 1.second
+      loop do
+        f = Frame.read(io)
+        break if f && f.frame_type == Frame::Type::WindowUpdate && f.stream_id == 0
+      end
+      h2_data(io, sids["/ok"], "ok", end_stream: true)
+    end
+
+    gone, ok = Gori::Repeater::H2Engine.single_packet(race_wires("/gone", "/ok"),
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false, timeout: 3.seconds)
+
+    gone.ok?.should be_false
+    ok.ok?.should be_true
+    String.new(ok.body.not_nil!).should eq("ok")
+  end
+
   # The read loop used to take its patience and deadline from the global io timeout, so an
   # origin trickling body bytes held a `timeout: 0.5s` race for up to three times the global one.
   it "bounds the read by the caller's timeout" do

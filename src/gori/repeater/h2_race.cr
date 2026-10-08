@@ -85,13 +85,6 @@ module Gori
           done?
         end
 
-        # Whether a DATA frame just fed should be credited back (connection + stream windows), so
-        # a body larger than the default window keeps flowing — the reader half of the same rule
-        # `read_response` applies. The stream window is not credited once the stream is done.
-        def data_payload(frame : Frame::Header) : Int32
-          frame.payload.size
-        end
-
         # Mark the stream closed by a connection-level event (GOAWAY, or the socket dropping)
         # without an END_STREAM of its own — kept incomplete.
         def close_incomplete(started : Time::Instant) : Nil
@@ -385,14 +378,16 @@ module Gori
       # body past the default keeps flowing — the reader half of `read_response`'s rule.
       private def self.route_stream_frame(io : IO, conn : Conn, streams : Hash(UInt32, PacketStream),
                                           frame : Frame::Header, started : Time::Instant) : {Bool, Bool}
+        # Every DATA payload (padding included) counts against the CONNECTION window, even on a
+        # stream already done or never ours (RFC 9113 §6.9): an uncredited one starves siblings.
+        data = frame.frame_type == Frame::Type::Data
+        window_update(io, 0_u32, frame.payload.size) if data
         st = streams[frame.stream_id]?
         return {false, false} unless st # a frame for a stream we do not own
         return {false, false} if st.done?
-        if frame.frame_type == Frame::Type::Data
-          consumed = st.data_payload(frame)
+        if data
           closed = st.feed(frame, conn.decoder, started)
-          window_update(io, 0_u32, consumed) if consumed > 0
-          window_update(io, frame.stream_id, consumed) if consumed > 0 && !closed
+          window_update(io, frame.stream_id, frame.payload.size) unless closed
           {true, closed}
         else
           {true, st.feed(frame, conn.decoder, started)}
