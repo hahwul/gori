@@ -1729,9 +1729,16 @@ module Gori::Proxy
       # `live` is false when only a body-scoped EXTRACT rule brought this response here, or
       # when a rewrite rule exists only for another host: no applicable rewrite lost its
       # chance, so there is nothing to say about one.
-      sent_resp_head, fwd_body, advisory = apply_body_rewrite(sent_resp_head, buf.to_slice, resp_framing,
-        host: host, response: true, live: !!rw.try(&.rewrites_response_body_for_host?(host))) do |e|
-        rw && rw.rewrites_response_body_for_host?(host) ? rw.rewrite_response_body(e, host) : e
+      # A body the origin cut short goes out as received under the origin's framing: a re-frame
+      # to the rewritten length would hand the client a complete-looking response, hiding the
+      # truncation it sees without a rule.
+      fwd_body = buf.to_slice.as(Bytes?)
+      advisory = nil.as(String?)
+      if resp_complete
+        sent_resp_head, fwd_body, advisory = apply_body_rewrite(sent_resp_head, buf.to_slice, resp_framing,
+          host: host, response: true, live: !!rw.try(&.rewrites_response_body_for_host?(host))) do |e|
+          rw && rw.rewrites_response_body_for_host?(host) ? rw.rewrite_response_body(e, host) : e
+        end
       end
       sent_resp = Codec::Http1.parse_response_head(sent_resp_head) # head may have been re-framed
       stored, trunc, size = capped(fwd_body)
@@ -1862,7 +1869,8 @@ module Gori::Proxy
       # re-frames the head to Content-Length; `resp` (status/version/Connection) is
       # untouched by that, so keep it as the origin's framing/keep-alive truth.
       advisory = nil.as(String?)
-      if (rw = @rewriter) && rw.rewrites_response_body_for_host?(host)
+      # Only a complete body: a re-frame would make a truncated one look whole (see the non-hold path).
+      if resp_complete && (rw = @rewriter) && rw.rewrites_response_body_for_host?(host)
         sent_resp_head, body, advisory = apply_body_rewrite(sent_resp_head, body, resp_framing,
           host: host, response: true, live: true) { |e| rw.rewrite_response_body(e, host) }
       end

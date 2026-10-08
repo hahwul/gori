@@ -17,7 +17,7 @@
 - Repeater: a race or timing pair refuses to mix captured and hand-written tabs, and an h2 race no longer stalls or misreads a sibling after one stream's oversized headers or abandoned body, and a WebSocket message stored with a negative length is sent instead of failing (#1549)
 - Fuzzer: results grouped by response shape no longer split on where the payload text happens to appear, matched-only clusters lead with a hit on CLI and MCP, and a capped `js-endpoints` list says it was cut (#1549)
 - Sitemap and Miner: JavaScript endpoints on IPv6 and mixed-case hosts are matched to their traffic, Mine seeds come from the flow's own origin, and YAML OpenAPI quotes values YAML 1.1 tools would misread (#1549)
-- Rewriter: a file stub's path is made absolute and may not contain NUL, and the rule preview matches plain-HTTP proxied flows the way the proxy does; an edited Intercept request's kept original respects the capture cap (#1549)
+- Rewriter: a file stub's path is made absolute and may not contain NUL, and the rule preview matches plain-HTTP proxied flows the way the proxy does; an edited Intercept request's kept original respects the capture cap, and a response body the origin cut short is passed through unrewritten so the client still sees the truncation (#1549)
 - Projects: `.gori` import refuses archives whose tables lost their keys or carry out-of-range interim rows, and its `exec:` notice now counts Decoder tabs and gRPC field specs (#1549)
 - CLI: `gori run shell` also points `NIX_SSL_CERT_FILE` at its CA bundle, so Nix-built tools trust gori (#1549)
 - TLS: importing a passphrase-protected CA key says to decrypt it instead of freezing gori on a hidden passphrase prompt, and a host with `_` in its name gets a certificate browsers accept
