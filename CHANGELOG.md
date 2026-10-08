@@ -35,6 +35,8 @@
 - Sitemap and Miner: JavaScript endpoints on IPv6 and mixed-case hosts are matched to their traffic, Mine seeds come from the flow's own origin, and YAML OpenAPI quotes values YAML 1.1 tools would misread (#1549)
 - Rewriter: a file stub's path is made absolute and may not contain NUL, and the rule preview matches plain-HTTP proxied flows the way the proxy does; an edited Intercept request's kept original respects the capture cap, and a response body the origin cut short is passed through unrewritten so the client still sees the truncation (#1549)
 - Rewriter: a file stub's path is made absolute and may not contain NUL, and the rule preview and a mock drafted from a flow match plain-HTTP proxied flows the way the proxy does; an edited Intercept request's kept original respects the capture cap (#1549)
+- Rewriter: a file stub's path is made absolute and may not contain NUL, and the rule preview matches plain-HTTP proxied flows the way the proxy does; an edited Intercept request's kept original respects the capture cap (#1549)
+- Import: a WSDL with one undeclared namespace prefix still imports the operations that do not use it, instead of nothing (#1549)
 - Projects: `.gori` import refuses archives whose tables lost their keys or carry out-of-range interim rows, and its `exec:` notice now counts Decoder tabs and gRPC field specs (#1549)
 - Projects: exporting a `gori mcp --db` database refuses only the database and its sidecars, so an archive like `capture.db.gori` can sit beside it
 - CLI: `gori run shell` also points `NIX_SSL_CERT_FILE` at its CA bundle, so Nix-built tools trust gori (#1549)

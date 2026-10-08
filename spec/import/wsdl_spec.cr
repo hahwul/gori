@@ -467,6 +467,24 @@ describe Gori::Import::Wsdl do
       result.skipped.should eq(2)
     end
 
+    it "lets an undeclared QName prefix cost only the operations that reach it" do
+      default_messages = %(<wsdl:message name="AddIn"><wsdl:part name="parameters" element="tns:Add"/></wsdl:message>)
+      result = parse(wsdl(
+        messages: default_messages +
+                  %(<wsdl:message name="Unused"><wsdl:part name="z" element="oops:Foo"/></wsdl:message>),
+        ports: %(<wsdl:port name="P" binding="tns:B">) +
+               %(<soap:address location="https://svc.test/endpoint"/></wsdl:port>) +
+               %(<wsdl:port name="Typo" binding="nope:B">) +
+               %(<soap:address location="https://svc.test/other"/></wsdl:port>)))
+      result.flows.size.should eq(1)
+      result.skipped.should eq(0)
+
+      expect_raises(Gori::Error, /"Typo".*undeclared XML namespace prefix "nope"/) do
+        parse(wsdl(ports: %(<wsdl:port name="Typo" binding="nope:B">) +
+                          %(<soap:address location="https://svc.test/other"/></wsdl:port>)))
+      end
+    end
+
     it "raises a clean error on a relative soap:address and names the port" do
       # `Builder.endpoint` only catches the EMPTY-host case, so "./svc" would be stored with
       # host "." — a flow that can never be sent, imported as a success.
