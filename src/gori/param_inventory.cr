@@ -397,25 +397,6 @@ module Gori
       !w.strip.empty? && !w.includes?('\n') && !w.includes?('\r') && !w.lstrip.starts_with?('#')
     end
 
-    # Names seen on the OTHER endpoints of `row`'s origin and not on its own — the Miner seed.
-    # Miner already skips a name the base request carries (`already-in-request`), so seeding an
-    # endpoint's own names would test nothing; its neighbours' names are the guesses worth a
-    # request ("the API takes `tenant` on /orders, does /invoices too?").
-    #
-    # Per ORIGIN, as the rows are (#1371): the same path on another port of the host is another
-    # service, so its names are neither this endpoint's own (which would drop them from the
-    # seed) nor this service's neighbours.
-    def neighbor_names(rows : Enumerable(Row), row : Row) : Array(String)
-      same = rows.select { |r| same_origin?(r, row) }
-      own = Set(String).new
-      same.each { |r| (w = r.word) && own << w if r.path == row.path }
-      wordlist(same.reject(&.path.==(row.path))).reject { |w| own.includes?(w) }
-    end
-
-    private def same_origin?(a : Row, b : Row) : Bool
-      a.host.downcase == b.host.downcase && a.scheme == b.scheme && a.port == b.port
-    end
-
     # A parameter's name as a wordlist entry: a JSON parameter contributes its LEAF member
     # (what Miner's Json location injects), everything else its name. nil for an array leaf.
     def word(location : Miner::Location, name : String) : String?
@@ -426,10 +407,13 @@ module Gori
     # so it reads fewer than the Params sub-tab does.
     SEED_MAX_FLOWS = 2000
 
-    # `neighbor_names` for the endpoint each of `flows` stands on, by flow id, read straight
-    # from the store: what a History mine seeds with, where no Params scan is on screen to
-    # read. One walk per ORIGIN (as `neighbor_names` is, #1371), however many of the flows
-    # share it, over the same newest-first flow set `build` walks — but names only: request
+    # The Miner seed for the endpoint each of `flows` stands on, by flow id: names seen on the
+    # OTHER endpoints of its origin and not on its own. Miner already skips a name the base
+    # request carries (`already-in-request`), so an endpoint's own names would test nothing;
+    # its neighbours' are the guesses worth a request ("the API takes `tenant` on /orders,
+    # does /invoices too?"). What a History or Params mine seeds with, read straight from the
+    # store. One walk per ORIGIN (#1371: another port of the host is another service), however
+    # many of the flows share it, over the same newest-first flow set `build` walks — but names only: request
     # head and body alone (no response BLOB is read), and no rows, samples, sensitivity or
     # reflection. Names come newest sighting first, so a request-capped mine spends its budget
     # on what the origin uses now. An origin `stop` cut short gets no entries.
