@@ -2425,6 +2425,54 @@ describe Gori::Proxy::Server do
     sink.requests.first.intercept_original.should be_nil
   end
 
+  it "caps the kept original of an edited held request at capture_max, like every capture" do
+    prev = Gori::Settings.capture_max_mib
+    Gori::Settings.capture_max_mib = 1
+    seen = Channel(String).new(1)
+    done = Channel(Nil).new(1)
+    origin_port = start_origin("ok", seen)
+
+    store_path = File.tempname("gori-icc", ".db")
+    store = Gori::Store.open(store_path)
+    interceptor = Gori::Interceptor.new(Gori::Scope.load(store))
+    interceptor.toggle
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, interceptor: interceptor)
+    proxy.start
+
+    edited = "GET /held HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n".to_slice
+    spawn do
+      loop do
+        interceptor.pending.each do |it|
+          it.kind.request? ? interceptor.forward(it.id, edited) : interceptor.forward(it.id)
+        end
+        sleep 0.01.seconds
+      end
+    end
+
+    head = "POST /big HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\nContent-Length: #{Gori::Settings.capture_max + 4096}\r\n\r\n"
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client << head
+    client.write(Bytes.new(Gori::Settings.capture_max + 4096, 'a'.ord.to_u8))
+    client.flush
+    client.gets_to_end
+    client.close
+
+    done.receive
+    proxy.stop
+    store.close
+    File.delete?(store_path)
+    File.delete?("#{store_path}-wal")
+    File.delete?("#{store_path}-shm")
+
+    seen.receive.should eq("GET /held HTTP/1.1")
+    original = sink.requests.first.intercept_original.should_not be_nil
+    original.size.should eq(head.bytesize + Gori::Settings.capture_max)
+  ensure
+    Gori::Settings.capture_max_mib = prev if prev
+  end
+
   it "forwards held bytes byte-exact, preserving a deliberately mismatched Content-Length (P7)" do
     # The proxy must NOT rewrite the bytes the human chose to send — Content-Length
     # sync is the editor's job (InterceptView#pending_edit). A forwarded smuggling

@@ -790,7 +790,8 @@ module Gori::Proxy
       # An edit replaces what the client sent, so History keeps the CLIENT'S OWN bytes beside
       # the flow (#1378, V44) — `req.raw_head` and the body before any Match&Replace — and
       # marks it edited. A forward that changed nothing keeps nothing: the flow is the original.
-      original = decision.bytes == held ? nil : build_message(req.raw_head, client_body)
+      # The body is cut to `capture_max` like every other stored body: a held upload can be any size.
+      original = decision.bytes == held ? nil : build_message(req.raw_head, capped(client_body)[0])
       recorded = original ? sent_req : record_req
       # Key repeater-safety on the EDITED request: if the human changed the method (e.g.
       # GET→POST), retryability must follow the method actually being sent, not the
