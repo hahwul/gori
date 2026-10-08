@@ -222,7 +222,7 @@ module Gori
         return StoreReport.new(project, from, to, 0, 0, 0, nil,
           error: ex.message.presence || ex.class.name)
       end
-      apply(plan, db_path, busy_timeout_ms)
+      apply(plan, store, db_path, busy_timeout_ms)
     end
 
     # The three name tables, which `Store` owns the queries for (`store/env_write_guard.cr`) — the
@@ -530,7 +530,11 @@ module Gori
     # either stale or torn. `VACUUM INTO` writes a single consistent database — and it cannot run
     # inside a transaction, which is why it happens first and is deleted again if the marker check
     # says a peer got there.
-    private def self.apply(plan : Plan, db_path : String,
+    #
+    # `plan` is the PRE-scan: it decides whether a backup is needed. The writes come from a second
+    # scan inside the transaction (`apply_writes`), because the pre-scan's bytes are stale by then —
+    # a peer's draft edit committed during the scan or the `VACUUM INTO` was overwritten by them.
+    private def self.apply(plan : Plan, store : Store, db_path : String,
                            busy_timeout_ms : Int32 = Store::SQLITE_BUSY_TIMEOUT_MS) : StoreReport?
       backup =
         begin
@@ -549,10 +553,11 @@ module Gori
             error: ex.message.presence || ex.class.name)
         end
       begin
-        applied = apply_writes(plan, db_path, backup, busy_timeout_ms)
-      rescue ex : ::DB::Error | ::SQLite3::Exception | File::Error
-        # NOTHING was written — `BEGIN IMMEDIATE` failed, or the transaction rolled back — so the
-        # backup is a copy of bytes nobody changed, and it must go with the rest of the attempt.
+        applied = apply_writes(plan, store, db_path, backup, busy_timeout_ms)
+      rescue ex
+        # Any raise, the in-transaction scan's included (a row gori could not read, as in
+        # `reconcile`): this method never raises. NOTHING was written — `BEGIN IMMEDIATE`
+        # failed, or the transaction rolled back — so the backup is a copy of bytes nobody changed, and it must go with the rest of the attempt.
         # A read-only project database (0444, a read-only mount, a `sudo gori` leftover) is opened
         # by every single command, and each open was leaving one more
         # `gori.db.pre-namespaced-<ts>` beside it: a directory filling with copies of a state the
@@ -567,27 +572,37 @@ module Gori
         backup.try { |b| File.delete?(b) }
         return nil
       end
-      StoreReport.new(plan.project, plan.from, plan.to, plan.tokens, plan.rows, plan.left,
-        backup, bare_hints: plan.hints.uniq, global_hint: global_rule_hint(plan))
+      StoreReport.new(applied.project, applied.from, applied.to, applied.tokens, applied.rows,
+        applied.left, backup, bare_hints: applied.hints.uniq, global_hint: global_rule_hint(applied))
     end
 
-    # Every planned `UPDATE`, the marker and the feed row in ONE transaction. Answers whether it
-    # COMMITTED — false means a peer had already done this migration, which is not a failure; a
-    # failure raises and the caller above cleans the backup up.
-    private def self.apply_writes(plan : Plan, db_path : String, backup : String?,
-                                  busy_timeout_ms : Int32) : Bool
-      # The report the ACTIVITY row carries, which is why it is built here: the row goes out on THIS
-      # connection and has to be the same sentence the surfaces print.
-      report = StoreReport.new(plan.project, plan.from, plan.to, plan.tokens, plan.rows, plan.left,
-        backup, bare_hints: plan.hints.uniq)
-      applied = false
+    # Re-scan, then every planned `UPDATE`, the marker and the feed row in ONE transaction. Answers
+    # the plan it COMMITTED — nil means a peer had already done this migration, which is not a
+    # failure; a failure raises and the caller above cleans the backup up.
+    #
+    # The scan runs AFTER `BEGIN IMMEDIATE`: holding the write lock, no peer can commit, so the
+    # rows it reads through `store` are the rows the UPDATEs replace. It reads drafts, rules,
+    # slots, issues and notes — never captured flows — so the window a peer waits on stays short.
+    private def self.apply_writes(pre : Plan, store : Store, db_path : String, backup : String?,
+                                  busy_timeout_ms : Int32) : Plan?
+      applied = nil.as(Plan?)
       ::DB.open("sqlite3:#{db_path}?busy_timeout=#{busy_timeout_ms}") do |db|
         db.using_connection do |conn|
           conn.exec("BEGIN IMMEDIATE")
           begin
-            if marker_syntax(conn) == plan.to
+            done = marker_syntax(conn) == pre.to
+            plan = Plan.new(pre.project, pre.from, pre.to, env_names(store), bind_names(store),
+              enabled_bind_names(store), pre.prefix)
+            scan(store, plan) unless done
+            if done || (backup.nil? && !plan.writes.empty?)
+              # Done by a peer — or a peer added a row to re-spell after the pre-scan found none,
+              # and no backup covers it: leave the marker, and the next open backs up first.
               conn.exec("ROLLBACK")
             else
+              # The report the ACTIVITY row carries, which is why it is built here: the row goes
+              # out on THIS connection and has to be the same sentence the surfaces print.
+              report = StoreReport.new(plan.project, plan.from, plan.to, plan.tokens, plan.rows,
+                plan.left, backup, bare_hints: plan.hints.uniq)
               plan.writes.each { |w| conn.exec(w.sql, args: w.args) }
               conn.exec("INSERT INTO settings (key, value) VALUES (?, ?) " \
                         "ON CONFLICT(key) DO UPDATE SET value = ?",
@@ -599,7 +614,7 @@ module Gori
               # one place this never showed up.
               log_migration(conn, report) unless report.quiet?
               conn.exec("COMMIT")
-              applied = true
+              applied = plan
             end
           rescue ex
             conn.exec("ROLLBACK") rescue nil

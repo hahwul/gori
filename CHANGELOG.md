@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Env: the token re-spelling a project gets on its first open after `gori settings env-syntax` no longer reverts a draft, slot, issue or note another gori instance saved while it ran
 - CLI and MCP: `gori run show --format json` and `get_flow` decode a gzip or chunked MessagePack/CBOR body the way the detail pane does, and their decoded fields are always valid UTF-8
 - Send: when a send-time substitution moves a Content-Length, a zero-padded or `+`-signed value keeps its spelling (`0016` becomes `0024`), and a value obfuscated with other bytes is left as written
 - Settings: a settings file or imported profile with a non-UTF-8 byte in an env var key, an upstream destination or an ALPN list no longer aborts the load (every later section at its default, saves refused) or crashes `gori settings import`
