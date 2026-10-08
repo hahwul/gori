@@ -405,13 +405,13 @@ module Gori
     # The {respond, respond_args, body_file} a rule can actually have (#1237) — `normalize_shape`'s
     # twin for the short-circuit sub-kind. Every other op reads none of the three, so an op
     # changed away from `short_circuit` drops them rather than carrying a dir path or a fault
-    # kind it would silently resurrect if switched back. A `dir` path is made absolute here
-    # (`~` included), once, for every surface: the proxy resolves it at request time from its
-    # own working directory, which is not the directory the operator typed it in.
+    # kind it would silently resurrect if switched back. A `dir` or `file` path is made absolute
+    # here (`~` included), once, for every surface: the proxy resolves it at request time from
+    # its own working directory, which is not the directory the operator typed it in.
     def self.normalize_respond(op : Store::RuleOp, respond : Store::RespondKind, respond_args : String,
                                body_file : String) : {Store::RespondKind, String, String}
       return {Store::RespondKind::Inline, "", ""} unless op.short_circuit?
-      body_file = File.expand_path(body_file, home: true) if respond.dir? && !body_file.empty?
+      body_file = File.expand_path(body_file, home: true) if (respond.dir? || respond.file?) && !body_file.empty?
       {respond, respond_args, body_file}
     end
 

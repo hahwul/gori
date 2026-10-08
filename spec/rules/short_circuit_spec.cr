@@ -400,6 +400,15 @@ describe "Gori::Rules — short-circuit sub-kind" do
     end
   end
 
+  it "makes a file stub's path absolute too: the proxy reads it from its own working directory" do
+    with_store do |store|
+      rules = Gori::Rules.load(store)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "GET /me", "200 OK", op: SC, body_file: "mocks/me.json", respond: RK::File)
+      rules.rules.first.body_file.should eq(File.expand_path("mocks/me.json"))
+    end
+  end
+
   # nil KEEPS the rule's sub-kind: a caller that does not speak of it must not turn a fault
   # rule back into an inline stub by omission.
   it "keeps the sub-kind on an update that does not name it, and drops it with the op" do
