@@ -81,7 +81,7 @@ module Gori
         # delivery row that answers for them is not written until `commit_operator_note` — and
         # write the same line to the session's inbox socket as well. `release_operator_note`
         # gives them back from `Server#handle_tools_call`'s `ensure`, on every exit.
-        fresh = fresh.select { |m| claim_message(m.id) }
+        claimed = fresh = fresh.select { |m| claim_message(m.id) }
         return nil if fresh.empty?
         lines = fresh.map { |m| OperatorNote.frame_message(m, Serialize.text(m.text)) }
         # A full page may be hiding more behind it, and this carrier is the one the model did
@@ -93,6 +93,9 @@ module Gori
         # This rides on someone else's tool call. A store error here costs the note, never the
         # answer the agent asked for — and the message stays in the feed for the poll tool.
         Log.warn(exception: ex) { "mcp: could not read pending operator messages" }
+        # No note means the caller has nothing to release, so give back what this call
+        # claimed here: a held id is a message this process would never carry again.
+        claimed.try &.each { |m| release_message(m.id) }
         nil
       end
 

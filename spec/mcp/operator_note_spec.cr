@@ -55,6 +55,14 @@ describe Gori::MCP::OperatorNote, ".frame_message" do
     line.should_not contain("q" * Note::QUOTE_MAX)
   end
 
+  # The question is the agent's own argument and is stored unscrubbed; the whitespace regex
+  # used to raise on it, which cost the answer on every route.
+  it "quotes a question holding an invalid UTF-8 byte instead of raising" do
+    line = Note.frame_message(answer_msg("expired", question: String.new(Bytes[80, 255, 63])))
+    line.should contain("expired with no answer")
+    line.valid_encoding?.should be_true
+  end
+
   it "frames an ordinary message exactly as frame does" do
     m = Gori::AgentMessage.new(3_i64, "fuzz it", "all", "history", [7_i64], 0_i64)
     Note.frame_message(m).should eq(Note.frame("fuzz it", "history", [7_i64], 3_i64))
