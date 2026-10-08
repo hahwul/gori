@@ -181,6 +181,21 @@ describe "Gori::Rules — short-circuit op" do
     end
   end
 
+  # `File.info` raises ArgumentError, not File::Error, on a NUL: it escaped `short_circuit` and
+  # dropped the connection with no flow. Every surface refuses the path; a row that got in
+  # anyway (an older build, a hand-edited database) still fails closed.
+  it "refuses a NUL in a file stub's path and answers 502 for a row that has one" do
+    path = "/tmp/stub\0.json"
+    Gori::RuleStub.respond_error(RK::File, "200 OK", path, "").should_not be_nil
+    with_store do |store|
+      rule = Gori::Store::MatchRule.new(1_i64, true, Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "GET /x", "200 OK", SC, Gori::Store::MatchKind::Literal, body_file: path, respond: RK::File)
+      stub = Gori::Rules.new(store, [rule]).short_circuit(get("/x"), "acme.test").not_nil!
+      stub.status.should eq(502)
+      stub.error.not_nil!.should contain("unreadable")
+    end
+  end
+
   it "keeps a stub rule OUT of every rewrite path and its hot-path counts" do
     with_store do |store|
       rules = Gori::Rules.load(store)
