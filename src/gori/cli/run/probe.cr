@@ -497,11 +497,7 @@ module Gori
               row_id = probe_custom_row_id(id) || abort("gori run probe rules #{verb}: malformed custom rule id '#{id}'")
               store.set_probe_custom_rule_enabled(row_id, enabled)
             else
-              disabled = store.probe_disabled_rules
-              # `set_rule_enabled` (not a bare delete/add) so a DEFAULT-OFF rule toggles correctly:
-              # for those ids the stored-set membership is INVERTED — see Probe::DEFAULT_DISABLED_RULES.
-              Probe.set_rule_enabled(disabled, id, enabled)
-              store.set_probe_disabled_rules(disabled)
+              store.set_probe_rule_enabled(id, enabled)
             end
           abort "gori run probe rules #{verb}: NOT applied (project busy) — rule '#{id}' is unchanged" unless ok
           puts "Rule '#{id}' is now #{enabled ? "enabled" : "disabled"}."

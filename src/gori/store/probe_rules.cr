@@ -38,19 +38,36 @@ module Gori
     # CLOSED (skip active probing rather than send everything). A malformed-but-readable value
     # is still tolerated per element — a single bad entry should not blind the whole set.
     def probe_disabled_rules_strict : Set(String)
+      parse_probe_disabled(setting(PROBE_DISABLED_KEY))
+    end
+
+    # A truncated/corrupt JSON blob RAISES here (JSON::ParseException) — deliberately not
+    # rescued, so the failure reaches the fail-closed active-send callers.
+    private def parse_probe_disabled(raw : String?) : Set(String)
       out = Set(String).new
-      raw = setting(PROBE_DISABLED_KEY)
       if raw && !raw.strip.empty?
-        # A truncated/corrupt JSON blob RAISES here (JSON::ParseException) — deliberately not
-        # rescued, so the failure reaches the fail-closed active-send callers.
         JSON.parse(raw).as_a?.try &.each { |e| e.as_s?.try { |s| out << s unless s.empty? } }
       end
       out
     end
 
-    # Returns whether the write COMMITTED (false = store busy/locked/closing). Both branches
-    # already had the answer — `set_setting`/`delete_setting` are `exec_task_ok` — and this
-    # threw it away, so every caller that toggles a scan rule had to claim success blind.
+    # Toggle ONE rule, the read taken inside the writer transaction (`mutate_setting`). Every
+    # surface used to read the set, flip the id and write the whole set back: a peer gori's
+    # toggle landing between the two was erased, and a corrupt row (which the strict read fails
+    # CLOSED on) was overwritten with just this id — re-enabling every rule the operator had
+    # disabled. Now a row that does not parse raises inside the block, so nothing is written and
+    # this answers false. Returns whether the toggle COMMITTED.
+    def set_probe_rule_enabled(id : String, enabled : Bool) : Bool
+      mutate_setting(PROBE_DISABLED_KEY) do |raw|
+        set = parse_probe_disabled(raw)
+        Probe.set_rule_enabled(set, id, enabled)
+        set.to_a.to_json
+      end
+    end
+
+    # Replaces the whole set — a seeding/reset path. A toggle goes through
+    # `set_probe_rule_enabled` instead. Returns whether the write COMMITTED (false = store
+    # busy/locked/closing).
     def set_probe_disabled_rules(ids : Set(String)) : Bool
       if ids.empty?
         delete_setting(PROBE_DISABLED_KEY)

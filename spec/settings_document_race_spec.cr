@@ -225,4 +225,47 @@ describe "whole-document settings rows under concurrent writers" do
       end
     end
   end
+
+  # The one set between an ACTIVE rule the operator disabled and a real request.
+  describe "the probe disabled-rule set" do
+    it "keeps every toggle when two connections disable different rules at once" do
+      with_shared_db do |a, b|
+        race(a, b) do |store, tag|
+          10.times do |i|
+            raise "toggle reported a busy store" unless store.set_probe_rule_enabled("#{tag}-#{i}", false)
+          end
+        end
+        a.probe_disabled_rules.size.should eq(20)
+      end
+    end
+
+    it "refuses a toggle over an unreadable row rather than re-enabling what it held" do
+      with_shared_db do |a, _|
+        torn = %(["sqli_time","cmdi")
+        a.set_setting(Gori::Store::PROBE_DISABLED_KEY, torn).should be_true
+        a.set_probe_rule_enabled("cors", false).should be_false
+        a.setting(Gori::Store::PROBE_DISABLED_KEY).should eq(torn)
+      end
+    end
+  end
+
+  # Whether a GLOBAL rewrite or colour rule applies in THIS project.
+  describe "the global rule override maps" do
+    it "keeps every override when two connections toggle different global rules at once" do
+      with_shared_db do |a, b|
+        race(a, b) do |store, tag|
+          base = tag == "A" ? 0_i64 : 100_i64
+          10.times { |i| raise "override reported a busy store" unless store.set_rewriter_override(base + i, false) }
+        end
+        a.rewriter_overrides.size.should eq(20)
+
+        race(a, b) do |store, tag|
+          base = tag == "A" ? 0_i64 : 100_i64
+          10.times { |i| raise "clear reported a busy store" unless store.clear_rewriter_override(base + i) }
+        end
+        a.rewriter_overrides.should be_empty
+        a.setting(Gori::Store::REWRITER_OVERRIDES_KEY).should be_nil # an empty map is no row
+      end
+    end
+  end
 end

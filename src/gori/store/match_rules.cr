@@ -162,8 +162,14 @@ module Gori
     # The one implementation behind both override maps (this one and
     # `COLORMARKER_OVERRIDES_KEY`), which differ only in the settings key they live under.
     private def global_overrides(key : String) : Hash(Int64, Bool)
+      parse_global_overrides(setting(key))
+    rescue
+      {} of Int64 => Bool
+    end
+
+    # Never raises: it also runs on the writer fiber, where a raise rolls back the whole batch.
+    private def parse_global_overrides(raw : String?) : Hash(Int64, Bool)
       map = {} of Int64 => Bool
-      raw = setting(key)
       return map if raw.nil? || raw.strip.empty?
       JSON.parse(raw).as_h?.try &.each do |k, v|
         id = k.to_i64?
@@ -176,21 +182,33 @@ module Gori
     end
 
     private def set_global_override(key : String, id : Int64, enabled : Bool) : Bool
-      write_global_overrides(key, global_overrides(key).merge({id => enabled}))
+      write_global_override(key, id, enabled)
     end
 
     private def clear_global_override(key : String, id : Int64) : Bool
-      map = global_overrides(key)
-      return true unless map.has_key?(id)
-      map.delete(id)
-      write_global_overrides(key, map)
+      write_global_override(key, id, nil)
     end
 
-    # An EMPTY map deletes the key outright rather than storing "{}" — which is what makes
-    # "the override disappeared when the two agreed again" observable from outside.
-    private def write_global_overrides(key : String, map : Hash(Int64, Bool)) : Bool
-      return delete_setting(key) if map.empty?
-      set_setting(key, map.to_h { |id, on| {id.to_s, on} }.to_json)
+    # Set (`enabled`) or drop (nil) ONE entry, with the map read inside the writer transaction.
+    # A pool read followed by a whole-map write let two gori processes toggling DIFFERENT global
+    # rules erase each other's override, both reporting success — the lost update
+    # `mutate_setting` documents. Not that helper, because it cannot delete a row: an EMPTY map
+    # deletes the key outright rather than storing "{}", which is what makes "the override
+    # disappeared when the two agreed again" observable from outside.
+    private def write_global_override(key : String, id : Int64, enabled : Bool?) : Bool
+      exec_task_ok ->(c : DB::Connection) {
+        map = parse_global_overrides(c.query_one?("SELECT value FROM settings WHERE key = ?", key, as: String))
+        unless map[id]? == enabled
+          enabled.nil? ? map.delete(id) : (map[id] = enabled)
+          if map.empty?
+            c.exec("DELETE FROM settings WHERE key = ?", key)
+          else
+            v = map.to_h { |rid, on| {rid.to_s, on} }.to_json
+            c.exec("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?", key, v, v)
+          end
+        end
+        nil
+      }
     end
   end
 end

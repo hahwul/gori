@@ -310,11 +310,7 @@ module Gori
           return err("malformed custom rule id '#{id}'", "INVALID_ARGUMENT", field: "id") unless row_id
           ok = store.set_probe_custom_rule_enabled(row_id, enabled)
         else
-          disabled = store.probe_disabled_rules
-          # `set_rule_enabled` (not a bare delete/add) so a DEFAULT-OFF rule toggles correctly:
-          # for those ids the stored-set membership is INVERTED — see `Probe::DEFAULT_DISABLED_RULES`.
-          Probe.set_rule_enabled(disabled, id, enabled)
-          ok = store.set_probe_disabled_rules(disabled)
+          ok = store.set_probe_rule_enabled(id, enabled)
         end
         # Both writers report whether the toggle COMMITTED. Returning `{enabled: false}` over a
         # rolled-back batch tells an agent a scan rule is muted while it keeps firing on every

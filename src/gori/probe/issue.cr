@@ -63,9 +63,9 @@ module Gori
       !rule_disabled?(id, stored)
     end
 
-    # Apply a Rules sub-tab toggle to `stored` (mutated in place); callers then persist it via
-    # `Store#set_probe_disabled_rules`. Honours the flip: for a default-OFF rule, enabling means
-    # PRESENT and disabling means ABSENT — the mirror of an ordinary rule, so the historic
+    # Apply a Rules sub-tab toggle to `stored` (mutated in place); `Store#set_probe_rule_enabled`
+    # runs it inside the writer transaction, so it must stay pure. Honours the flip: for a
+    # default-OFF rule, enabling means PRESENT and disabling means ABSENT — the mirror of an ordinary rule, so the historic
     # `enabled ? delete : add` shorthand cannot be used directly on these ids.
     def self.set_rule_enabled(stored : Set(String), id : String, enabled : Bool) : Nil
       want_present = DEFAULT_DISABLED_RULES.includes?(id) ? enabled : !enabled
