@@ -300,6 +300,20 @@ describe Gori::Pretty do
       (0...12).each { |i| formatted.should contain("§m#{i}§") }
       formatted.lines.size.should be > 1 # actually reflowed
     end
+
+    it "keeps an XML marker followed by a digit (`§id§0` was restored as marker 10)" do
+      head = "POST /x HTTP/1.1\r\nContent-Type: application/xml"
+      body = "<r><a>§u§</a><b>§id§0</b>#{(0...9).map { |k| "<c>§m#{k}§</c>" }.join}</r>"
+      formatted = Gori::Pretty.format_request(head, body).not_nil!
+      formatted.should contain("§id§0\n")
+      (0...9).each { |k| formatted.should contain("§m#{k}§\n") }
+    end
+
+    it "refuses an XML body with invalid UTF-8 instead of writing back U+FFFD" do
+      head = "POST /x HTTP/1.1\r\nContent-Type: application/xml"
+      body = String.new(Bytes[0x3c, 0x61, 0x3e, 0x3c, 0x62, 0x3e, 0x58, 0xff, 0x59, 0x3c, 0x2f, 0x62, 0x3e, 0x3c, 0x2f, 0x61, 0x3e])
+      Gori::Pretty.format_request(head, body).should be_nil
+    end
   end
 
   # `format_request` is the ONE write-back consumer of `format`: both callers

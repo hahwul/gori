@@ -607,46 +607,11 @@ module Gori
     end
 
     private def format_other_request(head : String, body : String) : String?
-      markers = [] of String
-
-      # 1. Extract and replace all markers with unique safe numeric strings.
-      temp_body = String.build do |io|
-        chars = body.chars
-        n = chars.size
-        i = 0
-        while i < n
-          if chars[i] == '§'
-            if chars[i + 1]? == '§' # escaped §
-              io << "§§"
-              i += 2
-            else
-              start = i
-              i += 1
-              while i < n
-                if chars[i] == '§'
-                  if chars[i + 1]? == '§'
-                    i += 2
-                  else
-                    break
-                  end
-                else
-                  i += 1
-                end
-              end
-              if i < n && chars[i] == '§'
-                markers << chars[start..i].join
-                io << "876543210987600#{markers.size - 1}"
-                i += 1
-              else
-                io << chars[start...i].join
-              end
-            end
-          else
-            io << chars[i]
-            i += 1
-          end
-        end
-      end
+      # 1. Swap markers for placeholders byte-wise, with the JSON path's fixed-width scheme:
+      # `String#chars` scrubbed invalid bytes (then formatted a body `try_xml` refuses), and
+      # a variable-width index let `§id§0` restore as marker 10.
+      marker_prefix = json_marker_prefix(body.to_slice)
+      temp_body, markers = extract_json_markers(body, marker_prefix)
 
       # 2. Format using the standard formatter
       res = format(head.to_slice, temp_body.to_slice)
@@ -660,16 +625,8 @@ module Gori
 
       formatted = String.new(res.bytes)
 
-      # 3. Restore the markers — HIGHEST index first. Placeholders share the
-      # "876543210987600" prefix, so e.g. idx 1's "…6001" is a substring-prefix of idx
-      # 10's "…60010". A proper digit-prefix always has fewer digits (⇒ smaller value),
-      # so its collision partner always carries a larger index; replacing high→low
-      # consumes the longer placeholder before its prefix and avoids corrupting markers.
-      (markers.size - 1).downto(0) do |idx|
-        formatted = formatted.gsub("876543210987600#{idx}", markers[idx])
-      end
-
-      formatted
+      # 3. Restore the markers in one left-to-right pass.
+      restore_json_markers(formatted, marker_prefix, markers)
     end
 
     # Reindent JSON without parsing and rebuilding its values. Template markers are replaced
