@@ -102,6 +102,15 @@ describe "Fuzz::Engine redirect following" do
     wire[1].should match(/\AGET \/next\?ok=1 HTTP\/1\.1\r\nHost: 127\.0\.0\.1:\d+\r\nConnection: close\r\n\r\n\z/)
   end
 
+  it "drops a Location's fragment from the hop's request line" do
+    wire = wire_of([redirect_to("/next?ok=1#top"), OK_RESPONSE]) { |port| run_fuzz(port) }
+
+    request_lines(wire).should eq([
+      "GET /start?q=one HTTP/1.1",
+      "GET /next?ok=1 HTTP/1.1",
+    ])
+  end
+
   it "does not follow a Location carrying a raw space (request-line forgery)" do
     # The exact shape #397 recorded: `Location: /a b HTTP/1.1` survives the response codec
     # verbatim, and interpolating it produced `GET /a b HTTP/1.1 HTTP/1.1` — which a lenient
