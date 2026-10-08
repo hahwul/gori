@@ -162,6 +162,15 @@ describe Gori::JsRefs do
       r.path.should eq("/api/search")
       r.target.should eq("/api/search?q=")
     end
+
+    # A flow stores an IPv6 host bare, so a bracketed one never met its traffic: every
+    # reference on such an origin listed as unrequested.
+    it "stores an IPv6 literal host bare, the spelling a flow stores" do
+      r = JR.resolve(JR::Literal.new("/api/x", 0, 1, false, false), page("http://[::1]:8080/app.js"), JR::Base::Page)
+      r = r.as(Gori::Store::JsRef)
+      r.host.should eq("::1")
+      Gori::Store::FlowRow.url_of(r.scheme, r.host, r.port, r.target).should eq("http://[::1]:8080/api/x")
+    end
   end
 
   describe ".scan" do

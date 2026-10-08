@@ -331,7 +331,9 @@ module Gori
       target = (q = parts.query) ? "#{parts.path}?#{q}" : parts.path
       kind = absolute?(lit.text) ? Base::Absolute : base_kind
       flags = (lit.in_comment ? FLAG_COMMENT : 0) | (lit.templated ? FLAG_TEMPLATED : 0)
-      Store::JsRef.new(parts.scheme, parts.host, parts.port, path, target, clip(lit.text),
+      # `Url.parse` keeps an IPv6 literal bracketed; a flow stores it bare, and `url_of` re-brackets.
+      host = parts.host.starts_with?('[') ? parts.host[1...-1] : parts.host
+      Store::JsRef.new(parts.scheme, host, parts.port, path, target, clip(lit.text),
         lit.offset, lit.line, flags, kind.label)
     end
 
