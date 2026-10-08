@@ -594,6 +594,12 @@ module Gori
           raise Gori::Error.new("project archive database table #{table} is missing required column(s): #{missing.join(", ")}")
         end
       end
+      # `flows.id` must stay the rowid alias every version created: a table rebuilt without it
+      # (CREATE TABLE … AS SELECT) gives every later capture a NULL id.
+      keys = conn.query_all("SELECT name, upper(type) FROM pragma_table_info('flows') WHERE pk > 0", as: {String, String})
+      unless keys == [{"id", "INTEGER"}]
+        raise Gori::Error.new("project archive database table flows has no INTEGER PRIMARY KEY id; refusing to import it")
+      end
     end
 
     private def self.table_columns(conn : DB::Connection, table : String) : Array(String)

@@ -678,6 +678,23 @@ describe Gori::ProjectArchive do
     end
   end
 
+  # The same rebuild drops `flows.id`'s INTEGER PRIMARY KEY: every capture into the imported
+  # project would then get a NULL id instead of the rowid the store hands back.
+  it "refuses an archive whose flows id is no longer the INTEGER PRIMARY KEY" do
+    with_archive_project do |_registry, project, store, root|
+      store.insert_flow(archive_request("/a"))
+      store.flush
+      archive_path = export_archive(project, File.join(root, "pk.gori"))
+      tamper_archive_database(archive_path, root) do |conn|
+        conn.exec("CREATE TABLE flows_x AS SELECT * FROM flows")
+        conn.exec("DROP TABLE flows")
+        conn.exec("ALTER TABLE flows_x RENAME TO flows")
+      end
+      error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
+      error.message.not_nil!.should contain("INTEGER PRIMARY KEY")
+    end
+  end
+
   # An AUTOINCREMENT id counter at the top of int64 fails every insert with SQLITE_FULL, so the
   # imported project would capture nothing under a "database or disk is full". `flows` became
   # AUTOINCREMENT in V39; a row alone is enough, since SQLite no longer falls back to a random id.
