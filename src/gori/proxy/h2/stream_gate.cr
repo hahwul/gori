@@ -251,6 +251,8 @@ module Gori::Proxy::H2
       # Deferred stream-OPENING ids in arrival order (= increasing id order), request direction
       # only. Rule 1 above: releases follow this order, not decision order.
       @opens = [] of UInt32
+      # The highest stream id an opening HEADERS has carried on this leg (request direction).
+      @highest_opened = 0_u32
       # Streams gori refused — by the sandbox, or by an operator drop. Their head never reached
       # the far leg, so every LATER frame on them has to be swallowed too: forwarding a refused
       # request's DATA would both hand over the body the gate just refused and be a connection
@@ -323,6 +325,11 @@ module Gori::Proxy::H2
     # are inside `accept_locked` → `@heads.accept`). Returning true takes ownership of the
     # block's frames.
     def defer?(block : HeadRewrite::Block) : Bool
+      # Whether this block OPENS its stream is stream state, not the presence of `:method`: a
+      # client's stream ids only grow (RFC 9113 §5.1.1), so a HEADERS above the highest id this
+      # leg has seen opens one, whatever fields it carries.
+      opener = @ordered && block.first.frame_type == Frame::Type::Headers && block.stream_id > @highest_opened
+      @highest_opened = block.stream_id if opener
       if slot = @slots[block.stream_id]?
         # A later block on a stream already deferred — h2 trailers behind a held response head.
         # Already re-encoded: the latch engaged when the Slot was created.
@@ -332,17 +339,19 @@ module Gori::Proxy::H2
       # The blocking gate runs before the holding one, and before anything is written. A
       # refused stream is never held: there is no decision to offer a human about a request
       # that is not going anywhere.
-      return true if sandbox_refuses_locked(block)
+      return true if sandbox_refuses_locked(block, opener)
       return true if push_refuses_locked(block)
       held = plan_hold(block)
-      queued = @ordered && !block.head.nil? && !@opens.empty?
+      # Rule 1 orders every request head, and a methodless opener with it (it opens an id too).
+      ordered = opener || (@ordered && !block.head.nil?)
+      queued = ordered && !@opens.empty?
       return false unless held || queued
 
       block = @heads.engage(block) # rule 2 — MUST precede any later block going out
       slot = Slot.new(block.stream_id)
       slot.pending = block
       @slots[block.stream_id] = slot
-      @opens << block.stream_id if @ordered && !block.head.nil?
+      @opens << block.stream_id if ordered
       if held
         start_hold_locked(slot, held, block)
       else

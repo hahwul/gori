@@ -1072,6 +1072,38 @@ describe Gori::Proxy::H2::StreamGate do
     end
   end
 
+  # No `:method` leaves the block without a head, the shape trailers have, and it used to pass
+  # the sandbox untested with its body behind it.
+  it "refuses a stream-opening HEADERS with no :method, and its DATA" do
+    with_ic(intercept: false) do |ic, scope|
+      scope.add("include", "string", "https://api.example.com/api/")
+      scope.enable_sandbox
+      rig = Rig.new(ic)
+      fields = [{":scheme", "https"}, {":authority", "api.example.com"}, {":path", "/admin"}, {"cookie", "s=1"}]
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(fields), Frame::END_HEADERS))
+      rig.c2s.accept(data(1_u32, "secretbody", Frame::END_STREAM))
+
+      rig.to_origin.should be_empty
+      rst = rig.to_client.first # then the WINDOW_UPDATE refunding the swallowed DATA
+      rst.frame_type.should eq(Frame::Type::RstStream)
+      rst.stream_id.should eq(1_u32)
+      IO::ByteFormat::BigEndian.decode(UInt32, rst.payload).should eq(Gate::PROTOCOL_ERROR)
+    end
+  end
+
+  # Rule 1: a methodless opener still opens an id, so it may not overtake a deferred stream.
+  it "keeps a methodless opener behind a held stream" do
+    with_ic do |ic|
+      rig = Rig.new(ic)
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/held"))))
+      settle
+      ic.pending_count.should eq(1)
+      fields = [{":scheme", "https"}, {":authority", "api.example.com"}, {":path", "/x"}]
+      rig.c2s.accept(headers(3_u32, rig.enc_out.encode(fields)))
+      rig.to_origin.should be_empty
+    end
+  end
+
   it "preserves duplicate pseudo-header bytes when the sandbox is off (P7)" do
     with_ic(intercept: false) do |ic, _scope|
       rig = Rig.new(ic)

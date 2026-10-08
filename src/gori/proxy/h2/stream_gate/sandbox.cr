@@ -15,7 +15,7 @@ class Gori::Proxy::H2::StreamGate
   # connection and only refusals count, so reaching it means thousands of refused streams on
   # one connection, i.e. a client that has ignored thousands of RST_STREAMs.
   MAX_REFUSED_STREAMS           = 4096
-  SANDBOX_PROTOCOL_ERROR_REASON = "h2 sandbox: malformed request headers (duplicate pseudo-header or conflicting authority)"
+  SANDBOX_PROTOCOL_ERROR_REASON = "h2 sandbox: malformed request headers (missing :method, duplicate pseudo-header or conflicting authority)"
 
   # The URL test both refusal gates below make, and the only place the stream's own
   # `:authority` and the connection's host are reconciled. Returns the blocked request's
@@ -72,11 +72,16 @@ class Gori::Proxy::H2::StreamGate
   # The hard containment gate, per stream (#492 step 4). True when this head was REFUSED —
   # its frames are then accounted for and nothing is ever written for the stream again. Which
   # URL(s) it tests, and why there are two, is `sandbox_blocked_url` above.
-  private def sandbox_refuses_locked(block : HeadRewrite::Block) : Bool
-    return false unless @ordered   # a response exists only for a request already allowed
-    return false unless block.head # trailers/PUSH_PROMISE carry no request URL to test
+  #
+  # `opener` is `defer?`'s answer to "does this block open the stream", from stream state. A
+  # missing `:method` leaves `block.head` nil, the shape trailers have, so `head` alone let a
+  # methodless opening HEADERS (and its DATA) through untested. Such a request is malformed
+  # (RFC 9113 §8.3.1) and has no URL to test, so it is refused the way a malformed one is.
+  private def sandbox_refuses_locked(block : HeadRewrite::Block, opener : Bool) : Bool
+    return false unless @ordered             # a response exists only for a request already allowed
+    return false unless block.head || opener # trailers carry no request URL to test
     return false unless @interceptor.sandbox_enabled?
-    if sandbox_request_malformed?(block.fields)
+    if block.head.nil? || sandbox_request_malformed?(block.fields)
       refuse_locked(block, SANDBOX_PROTOCOL_ERROR_REASON, PROTOCOL_ERROR)
       return true
     end
