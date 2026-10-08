@@ -138,6 +138,14 @@ module Gori
         repeater_id, repeater_response_saved = persist_send_repeater(h, save, built, http2, result,
           issue_id, recorded_flow_id, plan.h2_fields,
           sni: plan.sni, auto_cl: send_persist_auto_cl(h), tls_preset: plan.tls_preset)
+        # Issue links come from MCP-only arguments, so that relation stays in this adapter; the
+        # shared seam persists the Repeater row and its response evidence. The request already
+        # went out, so the refusal names where its response is.
+        if issue_id && repeater_id && !link_issue_repeater(issue_id, repeater_id)
+          return busy("request sent#{recorded_flow_id ? " (flow #{recorded_flow_id})" : ""} and repeater ##{repeater_id} " \
+                      "saved, but its issue link NOT written (store busy or unwritable); " \
+                      "retry with update_issue(id: #{issue_id}, repeater_id: #{repeater_id})")
+        end
 
         # Chosen before the send, confirmed after it: when neither the History record nor the
         # saved repeater landed there is nowhere to page a cut body from, so it goes out whole.
@@ -798,10 +806,6 @@ module Gori
         repeater_id = persisted.id
         return {nil, false} unless repeater_id
 
-        # Issue links come from MCP-only arguments, so keep that relation in this adapter;
-        # the shared seam persists the Repeater row and its response evidence.
-        store.add_link(Store::LinkOwnerKind::Issue, issue_id,
-          Store::LinkRefKind::Repeater, repeater_id) if issue_id
         if (name = str(h, "name")) && !name.empty?
           # `set_repeater_name` answers whether it committed, and the answer is deliberately
           # not propagated HERE (unlike create_repeater/update_repeater, which echo the name):
@@ -1186,9 +1190,8 @@ module Gori
         end
         return err("request cancelled", "CANCELLED") if cancelled?
         # Scope passed — now it's safe to persist the issue link.
-        if issue_id
-          store.add_link(Store::LinkOwnerKind::Issue, issue_id,
-            Store::LinkRefKind::Repeater, repeater_id)
+        if issue_id && !link_issue_repeater(issue_id, repeater_id)
+          return busy("issue link NOT written (store busy or unwritable); nothing was sent — try again")
         end
         result = plan.send_ws(out_messages, idle, keep_key, cancel_signal)
         return err("request cancelled", "CANCELLED") if cancelled?

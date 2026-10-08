@@ -397,9 +397,9 @@ module Gori
 
         return busy("failed to persist repeater (store busy or unwritable)") if id == 0
 
-        if issue_id
-          store.add_link(Store::LinkOwnerKind::Issue, issue_id,
-            Store::LinkRefKind::Repeater, id)
+        if issue_id && !link_issue_repeater(issue_id, id)
+          return busy("repeater ##{id} created but its issue link NOT written (store busy or unwritable); " \
+                      "retry with update_issue(id: #{issue_id}, repeater_id: #{id})")
         end
 
         # Checked, like the row insert above: the reply names the session's `name` and its

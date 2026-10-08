@@ -538,3 +538,66 @@ describe "MCP add_link over a write that did not commit" do
     end
   end
 end
+
+# Every issue→repeater link write on MCP: a rolled-back link is reported, never success.
+describe "MCP issue-repeater links over a write that did not commit" do
+  it "create_issue names the stored issue and answers PROJECT_BUSY" do
+    with_link_dropping_store do |store|
+      rid = store.insert_repeater("https://ex.test", "GET / HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
+      r = tools_for(store).call("create_issue", JSON.parse(%({"title":"x","repeater_id":#{rid}})))
+      r.error_code.should eq("PROJECT_BUSY")
+      iid = store.issues.first.id
+      r.text.should contain("issue #{iid} created")
+    end
+  end
+
+  it "update_issue answers PROJECT_BUSY" do
+    with_link_dropping_store do |store|
+      rid = store.insert_repeater("https://ex.test", "GET / HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
+      iid = store.insert_issue("x", Gori::Store::Severity::Info, nil, nil)
+      r = tools_for(store).call("update_issue", JSON.parse(%({"id":#{iid},"repeater_id":#{rid}})))
+      r.error_code.should eq("PROJECT_BUSY")
+    end
+  end
+
+  it "create_repeater names the stored repeater and answers PROJECT_BUSY" do
+    with_link_dropping_store do |store|
+      fid = mcp_seed_flow(store)
+      iid = store.insert_issue("x", Gori::Store::Severity::Info, nil, fid)
+      r = tools_for(store).call("create_repeater", JSON.parse(%({"issue_id":#{iid}})))
+      r.error_code.should eq("PROJECT_BUSY")
+      r.text.should contain("repeater ##{store.repeaters.first.id} created")
+    end
+  end
+
+  it "send_request answers PROJECT_BUSY after the saved send" do
+    origin = TCPServer.new("127.0.0.1", 0)
+    port = origin.local_address.port
+    spawn do
+      while conn = origin.accept?
+        Gori::Proxy::Codec::Http1.read_head(conn)
+        conn << "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+        conn.close
+      end
+    end
+    with_link_dropping_store do |store|
+      iid = store.insert_issue("x", Gori::Store::Severity::Info, nil, nil)
+      r = tools_for(store).call("send_request", JSON.parse(%({"url":"http://127.0.0.1:#{port}/","save_as_repeater":true,) +
+                                                           %("issue_id":#{iid},"allow_unscoped":true})))
+      r.error_code.should eq("PROJECT_BUSY")
+      r.text.should contain("issue link NOT written")
+    end
+  ensure
+    origin.try &.close
+  end
+
+  it "send_websocket answers PROJECT_BUSY before sending" do
+    with_link_dropping_store do |store|
+      rid = store.insert_repeater("ws://127.0.0.1:1", "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n".to_slice, false, true, nil, 0)
+      iid = store.insert_issue("x", Gori::Store::Severity::Info, nil, nil)
+      r = tools_for(store).call("send_websocket", JSON.parse(%({"repeater_id":#{rid},"issue_id":#{iid},"messages":["a"],"allow_unscoped":true})))
+      r.error_code.should eq("PROJECT_BUSY")
+      r.text.should contain("nothing was sent")
+    end
+  end
+end
