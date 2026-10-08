@@ -896,6 +896,24 @@ describe Gori::MCP::Server do
       end
     end
 
+    # A schema-filling client sends `"messages":""` / `[]`; that names nothing, so the
+    # session's stored frames go out — it used to send zero frames.
+    it "sends the stored frames when 'messages' is an empty string or array" do
+      [%(""), %([])].each do |empty|
+        with_store do |store|
+          port = start_mcp_ws_origin # serves one connection
+          request = "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
+          repeater_id = store.insert_repeater("ws://127.0.0.1:#{port}", request.to_slice, false, true, nil, 0)
+          store.update_repeater_ws_messages(repeater_id, [Gori::Store::WsOutMessage.text("stored")]).should be_true
+          call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_websocket","arguments":{"repeater_id":#{repeater_id},"messages":#{empty},"idle_ms":100,"allow_unscoped":true}}})
+          resp = mcp_drive(store, call, verify_upstream: false)[0]
+          resp["result"]["isError"].as_bool.should be_false
+          out = mcp_tool_payload(resp)["messages"].as_a.select { |m| m["direction"].as_s == "out" }
+          out.map(&.["payload"].as_s).should eq(["stored"])
+        end
+      end
+    end
+
     it "rejects a non-WebSocket repeater before making a connection" do
       with_store do |store|
         repeater_id = store.insert_repeater("http://127.0.0.1:1", "GET / HTTP/1.1\r\nHost: x\r\n\r\n".to_slice, false, true, nil, 0)

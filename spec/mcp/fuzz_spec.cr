@@ -1247,6 +1247,11 @@ describe "MCP fuzz tools" do
       start = call_json(tools, "fuzz_start",
         base.merge({"messages" => nil, "match" => nil, "filter" => nil, "marks" => nil, "processors" => nil}).to_json)
       start["job_id"].as_s.should start_with("fz_")
+      # Empty filler names nothing either: an HTTP template is not refused as a WS exchange.
+      [%(""), %([])].each do |empty|
+        start = call_json(tools, "fuzz_start", base.merge({"messages" => JSON.parse(empty)}).to_json)
+        start["job_id"].as_s.should start_with("fz_")
+      end
       text, err = call_raw(tools, "fuzz_start", base.merge({"race_warmup" => "GET / HTTP/1.1\r\n\r\n"}).to_json)
       err.should be_true
       text.should contain("race_count")

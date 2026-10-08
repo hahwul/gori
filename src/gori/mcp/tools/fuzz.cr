@@ -868,9 +868,10 @@ module Gori
       # what they mean there. Re-deriving them would reintroduce the defect that comment records
       # (a PING sent as TEXT, a CLOSE as BINARY, with `isError:false`).
       private def fuzz_ws_messages(h, text : String) : Array(Fuzz::WsMessageSource)?
-        # A JSON `null` is ABSENT, as every scalar reader on this surface already holds
-        # (`str`, `present?`, `optional_int_arg`): a `JSON::Any` wrapping nil is truthy.
-        given = h["messages"]?.try { |v| v.raw.nil? ? nil : v }
+        # A JSON `null`, `""` or `[]` is ABSENT (`describes_value?`): a `JSON::Any` wrapping nil
+        # is truthy, and a schema-filling client's empty filler must not override the seed's
+        # frames or refuse an HTTP template.
+        given = h["messages"]?.try { |v| describes_value?(v) ? v : nil }
         # Either handshake (#733): an RFC 6455 `Upgrade:` head or an RFC 8441 extended CONNECT.
         upgrade = Repeater::WsEngine.replayable?(text)
         http_only = bool_arg(h, "ws_http_only", false)

@@ -1101,7 +1101,9 @@ module Gori
         source = [] of Store::WsOutMessage
         field = "repeater_id"
         notice_dropped = 0
-        if present?(h, "messages")
+        # `describes?`, not `present?`: a schema-filling client's `"messages":""` or `[]` is
+        # absent, so the session's stored frames go out instead of none at all.
+        if describes?(h, "messages")
           if arr = h["messages"]?.try(&.as_a?)
             arr.each do |item|
               msg, perr = ws_out_message_item(item)
