@@ -661,20 +661,22 @@ describe Gori::ProjectArchive do
   end
 
   # SQLite gives INTEGER affinity to any declared type containing "INT", and a table rebuilt
-  # with CREATE TABLE … AS SELECT declares its integer columns `INT`, not `INTEGER`.
+  # with CREATE TABLE … AS SELECT declares its integer columns `INT`, not `INTEGER`. A table
+  # with no `id` column, so the primary-key check below does not answer first.
   it "refuses a mistyped cell in a column declared INT rather than INTEGER" do
     with_archive_project do |_registry, project, store, root|
-      store.insert_flow(archive_request("/a"))
+      id = store.insert_flow(archive_request("/a"))
       store.flush
       archive_path = export_archive(project, File.join(root, "int.gori"))
       tamper_archive_database(archive_path, root) do |conn|
-        conn.exec("CREATE TABLE host_overrides_x AS SELECT * FROM host_overrides")
-        conn.exec("DROP TABLE host_overrides")
-        conn.exec("ALTER TABLE host_overrides_x RENAME TO host_overrides")
-        conn.exec("INSERT INTO host_overrides (id, host, ip) VALUES ('zz', 'a.test', '127.0.0.1')")
+        conn.exec("CREATE TABLE flow_interims_x AS SELECT * FROM flow_interims")
+        conn.exec("DROP TABLE flow_interims")
+        conn.exec("ALTER TABLE flow_interims_x RENAME TO flow_interims")
+        conn.exec("INSERT INTO flow_interims (flow_id, seq, status, head, relayed, omitted) " \
+                  "VALUES (?, 0, 'zz', X'41', 1, 0)", id)
       end
       error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
-      error.message.not_nil!.should contain(%(never writes in "host_overrides"))
+      error.message.not_nil!.should contain(%(never writes in "flow_interims"))
     end
   end
 
@@ -692,6 +694,21 @@ describe Gori::ProjectArchive do
       end
       error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
       error.message.not_nil!.should contain("INTEGER PRIMARY KEY")
+    end
+  end
+
+  it "refuses the same rebuild on any other id table" do
+    with_archive_project do |_registry, project, store, root|
+      store.insert_flow(archive_request("/a"))
+      store.flush
+      archive_path = export_archive(project, File.join(root, "pk-notes.gori"))
+      tamper_archive_database(archive_path, root) do |conn|
+        conn.exec("CREATE TABLE issues_x AS SELECT * FROM issues")
+        conn.exec("DROP TABLE issues")
+        conn.exec("ALTER TABLE issues_x RENAME TO issues")
+      end
+      error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
+      error.message.not_nil!.should contain("table issues has no INTEGER PRIMARY KEY")
     end
   end
 
