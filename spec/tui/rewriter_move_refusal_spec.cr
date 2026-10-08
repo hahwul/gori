@@ -275,3 +275,25 @@ describe "Gori::Tui::RewriterController#rewriter_move" do
     end
   end
 end
+
+# The re-home looks the edited rule up again. Against the FILTERED list, an edit that stops
+# matching a standing `/` query dropped its scope change silently after the field edit committed.
+describe "Gori::Tui::RewriterController#apply_rewriter_rule" do
+  it "re-homes an edited rule that no longer matches the `/` filter" do
+    with_globals do
+      with_rewriter_controller do |ctl, host, session|
+        session.rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "A", "red")
+        id = session.rules.rules.first.id
+        ctl.rewriter_filter
+        "red".each_char { |c| ctl.handle_list_filter_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }
+        ctl.handle_list_filter_key(Termisu::Event::Key.new(Termisu::Input::Key::Enter))
+        ctl.selected_rule.try(&.pattern).should eq("A")
+
+        ctl.apply_rewriter_rule(RewriterRuleOverlay.new(pattern: "A", replacement: "blue",
+          scope: "global", edit_id: id, edit_scope: Gori::Store::RuleScope::Project)).should be_true
+        session.rules.rules.map { |r| {r.pattern, r.replacement, r.global?} }.should eq([{"A", "blue", true}])
+        host.statuses.none?(&.includes?("gone")).should be_true
+      end
+    end
+  end
+end

@@ -1047,13 +1047,19 @@ module Gori::Tui
           return true
         end
         if from != ov.scope
-          moved = rule_list.find { |r| r.scope == from && r.id == id }
-          if moved && rules_engine.set_scope(moved, ov.scope)
+          # `rules_engine.rules`, not the filtered `rule_list`: an edit that stops matching a
+          # standing `/` query would otherwise drop its scope change silently.
+          moved = rules_engine.rules.find { |r| r.scope == from && r.id == id }
+          if moved.nil?
+            @host.status("rule is gone (deleted elsewhere) — nothing was saved or moved")
+            return false
+          end
+          if rules_engine.set_scope(moved, ov.scope)
             # The rule left its block for the end of the other one, and `@sel` still named
             # its OLD index — the row that slid into it. `rewriter_scope_toggle` follows the
             # move for the same reason; the form's scope row is the same move, one dialog in.
             @sel = last_index_of_scope(ov.scope)
-          elsif moved
+          else
             @host.status("rule saved, but the scope change did not commit — it is still #{from.label}")
           end
         end
