@@ -98,6 +98,12 @@ module Gori
     # Gori::Error descends straight from Exception, so the errors this module
     # raises on purpose (including AssetNotFound, which the alias retry rescues
     # by type) pass through untouched.
+    # `exit N`, or the signal that ended the child: `Process::Status#exit_code` RAISES a
+    # RuntimeError for a signal death (an OOM kill, a `kill -9`), which no caller rescues.
+    def self.exit_reason(status : Process::Status) : String
+      (code = status.exit_code?) ? "exit #{code}" : "killed by #{status}"
+    end
+
     private def self.io_guard(what : String, &)
       yield
     rescue ex : IO::Error | OpenSSL::Error | HttpTransport::Error
@@ -917,7 +923,7 @@ module Gori
                 Process.run(cmd, shell: true, output: io, error: err)
               end
               unless status.success?
-                raise Error.new("#{cmd} failed (exit #{status.exit_code})")
+                raise Error.new("#{cmd} failed (#{exit_reason(status)})")
               end
             else
               io.puts "(#{tool} not found on PATH — run the command above yourself)"

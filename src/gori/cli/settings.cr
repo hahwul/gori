@@ -64,7 +64,7 @@ module Gori::CLI
       rescue ex
         abort "gori settings --edit: could not run the editor (#{cmd.join(' ')}): #{ex.message}"
       end
-    abort "gori settings: editor (#{cmd.join(' ')}) exited #{status.exit_code}" unless status.success?
+    abort "gori settings: editor (#{cmd.join(' ')}) failed (#{Gori::Update.exit_reason(status)})" unless status.success?
   end
 
   # Run the named sub-verb, if `args` opens with one. Split out of `run_settings` so that
