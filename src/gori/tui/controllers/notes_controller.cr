@@ -85,10 +85,9 @@ module Gori::Tui
       elsif ev.ctrl? && key.lower_w?
         notes_close
       elsif ev.ctrl? && c && '1' <= c <= '9'
-        # Switch note sub-tab (the ctrl check keeps digits literal while editing).
-        save_notes
-        @notes.switch_note(c.to_i - 1)
-        refresh_link_preview
+        # Switch note sub-tab (the ctrl check keeps digits literal while editing), through
+        # `jump_subtab` so a chip the strip filter hides is revealed, as on the strip.
+        jump_subtab(c.to_i - 1)
       elsif key.escape?
         if @notes.insert_mode?
           @notes.exit_insert!

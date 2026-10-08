@@ -59,6 +59,7 @@
 - OAST: disabling a provider in the TUI stops its listener, and a registration whose session could not be saved is released instead of polling unrecoverably
 - Sequencer, Miner and Fuzzer: a session save the project refused leaves the tab dirty and says so, instead of being silently reverted by the next refresh
 - Project: Delete removes the character after the caret in the DESCRIPTION editor
+- Notes: ^1-9 from the editor clears a sub-tab filter that hides the target note, as it does from the strip
 
 ## v0.8.0
 
