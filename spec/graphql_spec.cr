@@ -135,11 +135,11 @@ describe Gori::Graphql do
       GQL.parse_display("{ q }\n# variables\n[1,2,3]").should eq({nil, "{ q }", "[1,2,3]"})
     end
 
-    it "rejects a bare JSON scalar trailing block (tail_first is not '{'/'[')" do
-      # 42 is valid JSON but the tail_first gate only trusts '{'/'[' — stays in the query.
-      _, query, vars = GQL.parse_display("{ q }\n# variables\n42")
-      vars.should be_nil
-      query.should eq("{ q }\n# variables\n42")
+    it "accepts a bare JSON scalar trailing block, since `display` writes one" do
+      # `display` renders a JSON-string or `null` variables as-is, so refusing a scalar here
+      # folded the block into the query (a syntax error on send) and dropped the param.
+      GQL.parse_display("{ q }\n# variables\n42").should eq({nil, "{ q }", "42"})
+      GQL.parse_display("{ q }\n# variables\nnull").should eq({nil, "{ q }", "null"})
     end
 
     it "rejects a '# variables' sentinel with an EMPTY trailing block" do
@@ -216,6 +216,12 @@ describe Gori::Graphql do
       out = GQL.recompose("garbage", GQL.display(GQL::Op.new(nil, "{ me }", nil)))
       out.should eq(%({"query":"{ me }"}))
     end
+
+    it "reads back a JSON-string variables block instead of folding it into the query" do
+      base = %({"query":"{ me }","variables":"{\\"a\\":1}"})
+      decoded = GQL.display(GQL.from_json(base).not_nil!).sub("{ me }", "{ me2 }")
+      GQL.recompose(base, decoded).should eq(%({"query":"{ me2 }","variables":"{\\"a\\":1}"}))
+    end
   end
 
   describe ".parse_display / operationName sentinel" do
@@ -271,6 +277,16 @@ describe Gori::Graphql do
       decoded = GQL.display(GQL::Op.new("Op", "{ new }", %({"x": 1})))
       out = GQL.recompose_query("query=old&apiKey=x", decoded)
       out.should eq("query=%7B+new+%7D&apiKey=x&operationName=Op&variables=%7B%22x%22%3A1%7D")
+    end
+
+    # `display` writes any variables text after the sentinel; its inverse used to accept only
+    # '{'/'[' there, so a scalar or raw value folded into the query and the param was deleted.
+    it "round-trips null and raw non-JSON variables through an edit" do
+      {"variables=null", "variables=notjson", "variables="}.each do |vars|
+        orig = "query=%7Bme%7D&#{vars}"
+        decoded = GQL.display(GQL.from_query("/g?#{orig}").not_nil!).sub("{me}", "{me2}")
+        GQL.recompose_query(orig, decoded).should eq("query=%7Bme2%7D&#{vars}")
+      end
     end
   end
 

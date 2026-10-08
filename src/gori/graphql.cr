@@ -462,14 +462,17 @@ module Gori
       lines = text.split('\n')
       vi = nil.as(Int32?)
       # Scan BACKWARD for the last "# variables" whose remainder parses as JSON, breaking on the
-      # first (from-end) match, and only attempt the parse when the trailing plausibly starts
-      # with '{'/'[' — a forward re-join+parse per candidate is O(n²) on a query full of literal
-      # "# variables" comment lines. `rev` holds the trailing lines in reverse (cheap push).
+      # first (from-end) match, and only attempt the parse when the trailing plausibly starts a
+      # JSON value — a forward re-join+parse per candidate is O(n²) on a query full of literal
+      # "# variables" comment lines. Any value, not only '{'/'[': `display` writes a JSON-string
+      # or `null` variables too, and refusing those folded the block into the query (a syntax
+      # error on send). `rev` holds the trailing lines in reverse (cheap push).
       rev = [] of String
       tail_first = nil.as(Char?) # first non-blank char of the accumulated trailing
       (lines.size - 1).downto(0) do |i|
         line = lines[i]
-        if line.strip == "# variables" && (tail_first == '{' || tail_first == '[')
+        if line.strip == "# variables" && tail_first &&
+           (tail_first.in?('{', '[', '"', '-', 't', 'f', 'n') || tail_first.ascii_number?)
           trailing = rev.reverse.join('\n').strip
           if !trailing.empty? && json?(trailing)
             vi = i
@@ -655,10 +658,22 @@ module Gori
     def recompose_query(orig_query : String, decoded_text : String) : String
       op, query, vars_text = parse_display(decoded_text)
       mini = vars_text.try { |v| (JSON.parse(v).to_json rescue v) }
+      vars_pair = mini.try { |m| "variables=#{URI.encode_www_form(m)}" }
+      # A non-JSON `variables` value is displayed raw, and `parse_display` (rightly) will not
+      # take a non-JSON block for the sentinel, so it came back inside the query and the param
+      # was deleted. When the query still ends with exactly what `display` wrote, lift it back
+      # off and keep the operator's original pair verbatim (P7).
+      if vars_text.nil? && (raw = www_form(strip(orig_query))["variables"]?) && !json?(raw)
+        suffix = "\n\n# variables\n#{raw}".rstrip
+        if query.ends_with?(suffix)
+          query = query[0, query.size - suffix.size].rstrip
+          vars_pair = orig_query.split('&').find { |pair| pair.partition('=')[0] == "variables" }
+        end
+      end
       replacement = {
         "query"         => "query=#{URI.encode_www_form(query)}",
         "operationName" => op.try { |o| "operationName=#{URI.encode_www_form(o)}" },
-        "variables"     => mini.try { |m| "variables=#{URI.encode_www_form(m)}" },
+        "variables"     => vars_pair,
       }
       # Replace the managed params IN PLACE rather than dropping them and appending. Rejecting
       # and re-adding moved them to the end, so `page=2&query=…&sig=abc` came back as
