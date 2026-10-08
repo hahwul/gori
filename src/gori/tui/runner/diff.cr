@@ -76,7 +76,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     controller = target_controller.diff
     row = controller.view.selected_row
     return (@toast = "select an endpoint first") unless row
-    a, b = controller.comparer_slots
+    a, b, failure = controller.comparer_slots
+    return (@toast = "comparer: #{failure}") if failure
     if a && b
       comparer_controller.view.set_pair(a, b)
       goto_tab(:comparer)

@@ -169,10 +169,14 @@ module Gori::Tui
       # capturing into buys nothing and would sit beside the writer's lock, so it is borrowed
       # rather than reopened (and never closed here).
       store_a, owned_a = side_store(a)
-      return unless store_a
+      if store_a.is_a?(String)
+        @diff.error = store_a
+        return
+      end
       store_b, owned_b = side_store(b)
-      unless store_b
+      if store_b.is_a?(String)
         store_a.close if owned_a
+        @diff.error = store_b
         return
       end
       begin
@@ -190,8 +194,8 @@ module Gori::Tui
     end
 
     # {store, ours-to-close}. The session's own store for the open project; a fresh
-    # read-only handle for anything else.
-    private def side_store(p : Project) : {Store?, Bool}
+    # read-only handle for anything else, or the reason it would not open.
+    private def side_store(p : Project) : {Store | String, Bool}
       session = @host.session
       return {session.store, false} if p.db_path == session.project.db_path
       {open_side(p), true}
@@ -204,16 +208,23 @@ module Gori::Tui
     #
     # A slot holds BYTES, so nothing it hands back outlives the connection it was read from
     # — and a store this tab opened is closed again here (the session's is borrowed).
-    def comparer_slots : {ComparerSlot?, ComparerSlot?}
+    #
+    # The third value is why a side would not OPEN, which is not "never captured": the caller
+    # reports it, and the report on screen stays (only `run` replaces it with an error).
+    def comparer_slots : {ComparerSlot?, ComparerSlot?, String?}
       row = @diff.selected_row
-      return {nil, nil} unless row
-      {slot_for(@diff.slot(:a), row.a), slot_for(@diff.slot(:b), row.b)}
+      return {nil, nil, nil} unless row
+      a = slot_for(@diff.slot(:a), row.a)
+      return {nil, nil, a} if a.is_a?(String)
+      b = slot_for(@diff.slot(:b), row.b)
+      return {nil, nil, b} if b.is_a?(String)
+      {a, b, nil}
     end
 
-    private def slot_for(project : Project?, facts : Gori::Diff::Facts?) : ComparerSlot?
+    private def slot_for(project : Project?, facts : Gori::Diff::Facts?) : (ComparerSlot | String)?
       return nil unless project && facts
       store, owned = side_store(project)
-      return nil unless store
+      return store if store.is_a?(String)
       begin
         detail = store.get_flow(facts.sample_flow_id)
         detail ? ComparerSlot.from_flow(detail, source: project.name) : nil
@@ -280,14 +291,13 @@ module Gori::Tui
 
     # A read-only, non-indexing open of a project this TUI is not capturing into. Retention
     # is unlimited because nothing here writes and a prune is the last thing reading another
-    # engagement's database should be able to do. nil (with the reason on the view) when the
-    # database will not open.
-    private def open_side(p : Project) : Store?
+    # engagement's database should be able to do. The reason when the database will not open
+    # — the caller decides where it goes, so a row action cannot wipe the report on screen.
+    private def open_side(p : Project) : Store | String
       Store.open(p.db_path, retention_flows: Store::RETENTION_UNLIMITED,
         read_only: true, background_index: false)
     rescue ex
-      @diff.error = p.open_failure_reason(ex)
-      nil
+      p.open_failure_reason(ex)
     end
   end
 end
