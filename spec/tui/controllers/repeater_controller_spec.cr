@@ -300,4 +300,34 @@ describe "RepeaterController race / timing members" do
       FileUtils.rm_rf(root) if Dir.exists?(root)
     end
   end
+
+  # Two captures carry different `$words` of their own (GraphQL variables); both are captured,
+  # so they race, sent under the union of their literal sets.
+  it "pairs two captured tabs whose own $tokens differ" do
+    with_env_syntax(Gori::Env::Syntax::Bare) do
+      root = File.tempname("gori-repeater-ctl")
+      Dir.mkdir_p(root)
+      project = Gori::ProjectRegistry.new(root).temp("repeater")
+      session = Gori::Session.open(Gori::Config.new(listen: "127.0.0.1", port: 0),
+        Gori::Proxy::Tls::CertAuthority.load_or_create(REPEATER_CTL_CA), Gori::Verbs.registry, project)
+      begin
+        a = %({"query":"mutation($id: ID!){a(id:$id)}"})
+        b = %({"query":"mutation($cart: ID!){b(id:$cart)}"})
+        [a, b].each_with_index do |body, i|
+          req = "POST /graphql HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: #{body.bytesize}\r\n\r\n#{body}".to_slice
+          session.store.insert_repeater("http://127.0.0.1:1/", req, false, true, 1_i64 + i, i)
+        end
+        host = FakeHost.new(session)
+        ctl = RepeaterController.new(host)
+        ctl.toggle_subtab_mark(0)
+        ctl.toggle_subtab_mark(1)
+
+        pair = ctl.prepare_timing_pair.should_not be_nil
+        pair[1].requests.map { |r| String.new(r) }.join.should contain("$id")
+      ensure
+        session.try(&.close)
+        FileUtils.rm_rf(root) if Dir.exists?(root)
+      end
+    end
+  end
 end
