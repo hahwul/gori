@@ -353,6 +353,17 @@ describe F::PayloadSet do
     upper.should eq(["X-AB"])
   end
 
+  it "regex-replaces past a non-UTF-8 wordlist line instead of ending the sweep" do
+    bad = String.new(Bytes[0x61, 0xFF, 0x61])
+    out = [] of String
+    procs = [F::RegexReplace.new(/a/, "b")] of F::Processor
+    F::PayloadSet.new(F::InlineList.new(["ok a", bad, "never"]), procs).each { |v| out << v }
+    out.size.should eq(3)
+    out[0].should eq("ok b")
+    out[1].to_slice.should eq(Bytes[0x62, 0xFF, 0x62])
+    out[2].should eq("never")
+  end
+
   it "stops at an Int64::MAX boundary without overflowing the run" do
     vals = [] of String
     # to == Int64::MAX: the terminal `@cur + @step` used to overflow → OverflowError aborts.
