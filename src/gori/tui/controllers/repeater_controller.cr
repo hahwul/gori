@@ -2595,8 +2595,10 @@ module Gori::Tui
       # The dial SIGNATURE every member must share: the race rides ONE Sender (h2 is literally
       # one connection, and the h1 form is held to the same shape), so a member whose origin,
       # transport, SNI or TLS preset differs would be silently sent under the anchor's — refuse
-      # instead of flattening it.
-      sigs = [] of {String, String, Int32, Bool, String?, String?}
+      # instead of flattening it. Provenance too (P7): the plan takes the anchor's `evidence:` and
+      # literal set, so a captured member raced beside a draft would be `$BIND`-expanded (or a
+      # draft's tokens sent literally). nil for a draft, the capture's literal set for evidence.
+      sigs = [] of {String, String, Int32, Bool, String?, String?, Set(String)?}
       loaded = 0
       tabs.each do |t|
         tv = t.view
@@ -2618,7 +2620,8 @@ module Gori::Tui
         return nil unless probe = repeater_plan(tv, [draft], http2: tv.http2?) # sets its own status on a PlanError
         drafts << draft
         labels << race_member_label(tv, draft)
-        sigs << {probe.scheme, probe.host, probe.port, probe.http2?, tv.sni_override, tv.tls_preset}
+        sigs << {probe.scheme, probe.host, probe.port, probe.http2?, tv.sni_override, tv.tls_preset,
+                 tv.evidence? ? tv.evidence_send_literals : nil}
       end
       if loaded < 2
         @host.status("race needs at least 2 loaded sub-tabs — #{loaded} of #{tabs.size} marked #{loaded == 1 ? "is" : "are"} ready")
@@ -2626,7 +2629,7 @@ module Gori::Tui
       end
       first = sigs.first
       unless sigs.all? { |s| s == first }
-        @host.status("race needs one origin, transport, SNI and TLS preset — the marked sub-tabs differ")
+        @host.status("race needs one origin, transport, SNI, TLS preset and provenance (captured or draft) — the marked sub-tabs differ")
         return nil
       end
       {drafts, labels}

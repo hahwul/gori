@@ -271,3 +271,33 @@ describe "RepeaterController ⌃Home/⌃End on the response (#1425)" do
     end
   end
 end
+
+describe "RepeaterController race / timing members" do
+  # The plan takes the ANCHOR tab's provenance (`evidence:` + literal set), so a captured tab
+  # marked beside a hand-written draft was sent under the other's rules — its capture
+  # `$BIND`-expanded, or the draft's tokens sent literally. A mixed group is refused instead.
+  it "refuses a group that mixes a captured tab with a draft" do
+    root = File.tempname("gori-repeater-ctl")
+    Dir.mkdir_p(root)
+    project = Gori::ProjectRegistry.new(root).temp("repeater")
+    session = Gori::Session.open(Gori::Config.new(listen: "127.0.0.1", port: 0),
+      Gori::Proxy::Tls::CertAuthority.load_or_create(REPEATER_CTL_CA), Gori::Verbs.registry, project)
+    begin
+      req = "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice
+      session.store.insert_repeater("http://127.0.0.1:1/", req, false, true, 1_i64, 0) # captured
+      session.store.insert_repeater("http://127.0.0.1:1/", req, false, true, nil, 1)   # draft
+      host = FakeHost.new(session)
+      ctl = RepeaterController.new(host)
+      ctl.toggle_subtab_mark(0)
+      ctl.toggle_subtab_mark(1)
+
+      ctl.prepare_timing_pair.should be_nil
+      host.statuses.last.should contain("provenance")
+      ctl.repeater_send_race
+      host.statuses.last.should contain("provenance")
+    ensure
+      session.try(&.close)
+      FileUtils.rm_rf(root) if Dir.exists?(root)
+    end
+  end
+end
