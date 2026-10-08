@@ -155,6 +155,47 @@ describe "Repeater::H2Engine.single_packet" do
     String.new(ok.head).should contain("x-sync: yes")
   end
 
+  # A RAW block past MAX_HEADER_BLOCK is never decoded, so the table update inside it never
+  # reached the shared decoder: the sibling then failed on (or silently misread) a dynamic index,
+  # and the oversized stream itself said only "no response". Every live stream now names why.
+  it "fails every live stream when a raw header block passes the 1 MiB cap" do
+    port = start_h2_scripted_origin(2) do |io, ended|
+      sids = ended.to_h { |(sid, path)| {path, sid} }
+      status_index = 0x80_u8 | (HPACK::STATIC.index({":status", "200"}).not_nil! + 1).to_u8
+      server_index = 0x80_u8 | (HPACK::STATIC.index({"server", ""}).not_nil! + 1).to_u8
+      # Literal-with-indexing x-sync: yes FIRST, then > 1 MiB of 1-byte indexed fields.
+      sync_field = Bytes[0x40, 0x06, 'x'.ord.to_u8, '-'.ord.to_u8, 's'.ord.to_u8,
+        'y'.ord.to_u8, 'n'.ord.to_u8, 'c'.ord.to_u8, 0x03, 'y'.ord.to_u8,
+        'e'.ord.to_u8, 's'.ord.to_u8]
+      block = IO::Memory.new
+      block.write_byte(status_index)
+      block.write(sync_field)
+      ((1 << 20) + 10).times { block.write_byte(server_index) }
+      bytes = block.to_slice
+      offset = 0
+      while offset < bytes.size
+        size = Math.min(16_384, bytes.size - offset)
+        type = offset == 0 ? Frame::Type::Headers : Frame::Type::Continuation
+        flags = offset + size == bytes.size ? Frame::END_HEADERS : 0_u8
+        flags |= Frame::END_STREAM if offset == 0
+        io.write(Frame::Header.new(type.value, flags, sids["/large"], bytes[offset, size]).to_bytes)
+        offset += size
+      end
+      ok_block = Bytes[status_index, 0xbe_u8] # :status 200, then the dynamic entry x-sync
+      io.write(Frame::Header.new(Frame::Type::Headers.value,
+        Frame::END_HEADERS | Frame::END_STREAM, sids["/ok"], ok_block).to_bytes)
+      io.flush
+    end
+
+    large, ok = Gori::Repeater::H2Engine.single_packet(race_wires("/large", "/ok"),
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
+
+    large.ok?.should be_false
+    large.error.not_nil!.should contain("HPACK state lost")
+    ok.ok?.should be_false
+    ok.error.not_nil!.should contain("HPACK state lost")
+  end
+
   # The read loop used to take its patience and deadline from the global io timeout, so an
   # origin trickling body bytes held a `timeout: 0.5s` race for up to three times the global one.
   it "bounds the read by the caller's timeout" do
