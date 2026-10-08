@@ -326,23 +326,9 @@ module Gori::Proxy::H2
     # are inside `accept_locked` → `@heads.accept`). Returning true takes ownership of the
     # block's frames.
     def defer?(block : HeadRewrite::Block) : Bool
-      # Whether this block OPENS its stream is stream state, not the presence of `:method`: a
-      # client's stream ids only grow (RFC 9113 §5.1.1), so a HEADERS above the highest id this
-      # leg has seen opens one, whatever fields it carries.
-      opener = @ordered && block.first.frame_type == Frame::Type::Headers && block.stream_id > @highest_opened
-      @highest_opened = block.stream_id if opener
-      # A PUSH_PROMISE rides its associated stream but opens a NEW one, so it is judged before
-      # that stream's slot and never parked behind a held response: its pushed HEADERS would
-      # overtake it (§5.1.1). It is written here, since `accept_locked` parks every frame on a
-      # slotted stream. The latch is already engaged when such a slot exists, so writing it
-      # ahead of the held head costs HPACK nothing, and §8.4 lets a promise precede it.
-      return true if push_refuses_locked(block)
-      if block.first.frame_type == Frame::Type::PushPromise
-        return false unless @slots.has_key?(block.stream_id)
-        last = block.frames.size - 1
-        block.frames.each_with_index { |f, i| write(f, i == last ? block.pre : nil) }
-        return true
-      end
+      opener = note_opener(block)
+      promise = promise_deferred_locked(block)
+      return promise unless promise.nil?
       if slot = @slots[block.stream_id]?
         # A later block on a stream already deferred — h2 trailers behind a held response head.
         # Already re-encoded: the latch engaged when the Slot was created.
@@ -369,6 +355,30 @@ module Gori::Proxy::H2
       else
         slot.ready = true # queued for order only; nothing to decide
       end
+      true
+    end
+
+    # Whether this block OPENS its stream is stream state, not the presence of `:method`: a
+    # client's stream ids only grow (RFC 9113 §5.1.1), so a HEADERS above the highest id this
+    # leg has seen opens one, whatever fields it carries.
+    private def note_opener(block : HeadRewrite::Block) : Bool
+      opener = @ordered && block.first.frame_type == Frame::Type::Headers && block.stream_id > @highest_opened
+      @highest_opened = block.stream_id if opener
+      opener
+    end
+
+    # `defer?`'s answer for a PUSH_PROMISE, or nil for any other block. A promise rides its
+    # associated stream but opens a NEW one, so it is judged before that stream's slot and never
+    # parked behind a held response: its pushed HEADERS would overtake it (§5.1.1). It is written
+    # here, since `accept_locked` parks every frame on a slotted stream. The latch is already
+    # engaged when such a slot exists, so writing it ahead of the held head costs HPACK nothing,
+    # and §8.4 lets a promise precede it.
+    private def promise_deferred_locked(block : HeadRewrite::Block) : Bool?
+      return true if push_refuses_locked(block)
+      return nil unless block.first.frame_type == Frame::Type::PushPromise
+      return false unless @slots.has_key?(block.stream_id)
+      last = block.frames.size - 1
+      block.frames.each_with_index { |f, i| write(f, i == last ? block.pre : nil) }
       true
     end
 
