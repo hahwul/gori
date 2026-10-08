@@ -11,7 +11,7 @@ shot = "decoder"
 **Decoder** 탭은 데이터를 인코드, 디코드, 해시, 변환하는 스크래치 워크벤치입니다. 입력을 붙여넣고, 변환기 체인을 구성하고, 중간 결과와 최종 결과를 읽습니다.
 
 <figure class="tui-shot">
-  <img src="/images/tui/decoder.svg" alt="base64-encode 후 upper 체인을 실행하며 각 단계의 중간 결과를 보여주는 INPUT, CHAIN, PIPELINE, OUTPUT 패널을 갖춘 gori Decoder 탭">
+  <img src="/images/tui/decoder.svg" alt="base64-encode 후 upper 체인을 실행하며 각 단계의 중간 결과를 보여주는 INPUT, CHAIN, PIPELINE, OUTPUT 패널을 갖춘 gori Decoder 탭" width="1206" height="520">
   <figcaption><strong>Decoder</strong> 워크벤치: 입력, 변환기 체인, 단계별 파이프라인, 그리고 아래의 최종 출력.</figcaption>
 </figure>
 

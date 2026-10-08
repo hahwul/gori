@@ -109,7 +109,7 @@ The tab bar is **nine numbered slots**, and the numbers are the primary way to m
 | `⇧0` | **Find sub-tab…** — the same picker `f` opens from the strip |
 
 <figure class="tui-shot">
-  <img src="/images/tui/tab-goto.svg" alt="gori Go to tab card: a filter bar over the whole tab catalog, the nine tabs on the bar wearing the digits 1 to 9 and everything else wearing none, each row followed by a line saying what that tab is for">
+  <img src="/images/tui/tab-goto.svg" alt="gori Go to tab card: a filter bar over the whole tab catalog, the nine tabs on the bar wearing the digits 1 to 9 and everything else wearing none, each row followed by a line saying what that tab is for" width="1206" height="520">
   <figcaption><code>0</code> opens the whole catalog. The nine on the bar wear the digit that reaches them; the rest wear none — that is the only difference being off the bar makes.</figcaption>
 </figure>
 

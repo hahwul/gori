@@ -13,11 +13,11 @@ configure her. This page is about how she is drawn.
 
 <div class="art-gallery">
   <figure>
-    <img src="/images/miss-ring-character.webp" alt="The original Miss Ring character: a gold ring seen face-on, holding a round cream face with large lashed eyes and a small smile">
+    <img src="/images/miss-ring-character.webp" alt="The original Miss Ring character: a gold ring seen face-on, holding a round cream face with large lashed eyes and a small smile" width="512" height="512">
     <figcaption>The character, as first drawn</figcaption>
   </figure>
   <figure>
-    <img src="/images/miss-ring-sprite.webp" alt="The same character reduced to a blocky eight-by-three grid of gold and cream cells, with two round eyes, a small mouth and two lash strokes">
+    <img src="/images/miss-ring-sprite.webp" alt="The same character reduced to a blocky eight-by-three grid of gold and cream cells, with two round eyes, a small mouth and two lash strokes" width="512" height="512" loading="lazy" decoding="async">
     <figcaption>The same ring on an 8 × 3 cell grid</figcaption>
   </figure>
 </div>
@@ -145,7 +145,7 @@ could not fit into a face:
 ## In the terminal {#in-the-terminal}
 
 <figure class="tui-shot">
-  <img src="/images/tui/readme.svg" alt="The gori History tab with Miss Ring sitting in the bottom-right corner of the body, a speech bubble above her reading &quot;hi! ready when you are&quot;">
+  <img src="/images/tui/readme.svg" alt="The gori History tab with Miss Ring sitting in the bottom-right corner of the body, a speech bubble above her reading &quot;hi! ready when you are&quot;" width="1638" height="736" loading="lazy" decoding="async">
   <figcaption>Miss Ring in <code>body</code> placement, saying the one thing she says unprompted: <em>hi! ready when you are</em>.</figcaption>
 </figure>
 

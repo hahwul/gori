@@ -15,21 +15,21 @@ Three variants, each shipped as SVG, PNG and WebP. The raster files are
 
 <div class="art-gallery">
   <figure>
-    <img src="/images/gori.png" alt="The gori mark: two interlocking rings drawn as a single ribbon, in flat brand gold">
+    <img src="/images/gori.png" alt="The gori mark: two interlocking rings drawn as a single ribbon, in flat brand gold" width="512" height="512">
     <figcaption><strong>Mark</strong> — flat <code>#d9c28b</code><br>
       <a href="/images/gori.svg" download="gori-logo.svg">SVG</a> ·
       <a href="/images/gori.png" download="gori-logo.png">PNG</a> ·
       <a href="/images/gori.webp" download="gori-logo.webp">WebP</a></figcaption>
   </figure>
   <figure>
-    <img style="--plate:#faf9f7" src="/images/gori_dark.png" alt="The same gori mark as a solid black silhouette">
+    <img style="--plate:#faf9f7" src="/images/gori_dark.png" alt="The same gori mark as a solid black silhouette" width="512" height="512" loading="lazy" decoding="async">
     <figcaption><strong>Mono</strong> — solid <code>#000000</code><br>
       <a href="/images/gori_dark.svg" download="gori-logo-mono.svg">SVG</a> ·
       <a href="/images/gori_dark.png" download="gori-logo-mono.png">PNG</a> ·
       <a href="/images/gori_dark.webp" download="gori-logo-mono.webp">WebP</a></figcaption>
   </figure>
   <figure>
-    <img src="/images/gori_white.png" alt="The same gori mark filled with a gold-leaf gradient running from pale cream to deep bronze">
+    <img src="/images/gori_white.png" alt="The same gori mark filled with a gold-leaf gradient running from pale cream to deep bronze" width="512" height="512" loading="lazy" decoding="async">
     <figcaption><strong>Gradient</strong> — gold leaf<br>
       <a href="/images/gori_white.svg" download="gori-logo-gradient.svg">SVG</a> ·
       <a href="/images/gori_white.png" download="gori-logo-gradient.png">PNG</a> ·
@@ -87,12 +87,12 @@ sampled from. Two cuts, both at the 1920 × 1080 desktop size.
 
 <div class="art-gallery">
   <figure>
-    <img src="/images/gori-wallpaper.webp" alt="Dark ink-and-gold wallpaper of stylised clouds and waves, with the gold gori mark and wordmark centred">
+    <img src="/images/gori-wallpaper.webp" alt="Dark ink-and-gold wallpaper of stylised clouds and waves, with the gold gori mark and wordmark centred" width="1920" height="1080" loading="lazy" decoding="async">
     <figcaption><strong>With the mark</strong> — 1920 × 1080<br>
       <a href="/images/gori-wallpaper.webp" download="gori-wallpaper.webp">WebP</a></figcaption>
   </figure>
   <figure>
-    <img src="/images/wallpaper.webp" alt="The same ink-and-gold cloud and wave painting without any logo">
+    <img src="/images/wallpaper.webp" alt="The same ink-and-gold cloud and wave painting without any logo" width="1920" height="1080" loading="lazy" decoding="async">
     <figcaption><strong>Plain</strong> — 1920 × 1080<br>
       <a href="/images/wallpaper.webp" download="gori-wallpaper-plain.webp">WebP</a></figcaption>
   </figure>

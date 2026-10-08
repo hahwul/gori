@@ -22,7 +22,7 @@ gori run sitemap
 트리는 캡처 위의 뷰일 뿐 두 번째 사본이 아닙니다. 다음에 둘러보는 것이 도착하는 즉시 나타납니다. `--in-scope`는 스코프 렌즈처럼 in-scope 호스트로 한정하고, `--hide-static`은 이미지, 폰트, 미디어를 뺍니다(TUI에서는 **Display…** 아래 `Space` `Z` `s`, History와 함께 쓰는 렌즈입니다).
 
 <figure class="tui-shot">
-  <img src="/images/tui/sitemap.svg" alt="캡처된 호스트가 method 칩과 호스트별 경로 수와 함께 경로 트리로 펼쳐진 gori Sitemap 탭">
+  <img src="/images/tui/sitemap.svg" alt="캡처된 호스트가 method 칩과 호스트별 경로 수와 함께 경로 트리로 펼쳐진 gori Sitemap 탭" width="1206" height="520">
   <figcaption><strong>Sitemap</strong>은 캡처를 method 칩과 scope 마커가 달린 <code>host → path</code> 트리로 접습니다. 곧 테스트할 공격면의 형태입니다.</figcaption>
 </figure>
 

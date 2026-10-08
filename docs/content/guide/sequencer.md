@@ -11,7 +11,7 @@ shot = "sequencer"
 If a session cookie, CSRF token, password-reset code, or API key is predictable, an attacker can forge or guess it. The **Sequencer** collects a sample of tokens and grades how random they really are, the gori counterpart of Burp Sequencer or the Caido Sequencer.
 
 <figure class="tui-shot">
-  <img src="/images/tui/sequencer.svg" alt="gori Send to Sequencer config card over the History tab, showing an auto-detected session cookie as the token, with rows for sample count, max requests, concurrency and notification">
+  <img src="/images/tui/sequencer.svg" alt="gori Send to Sequencer config card over the History tab, showing an auto-detected session cookie as the token, with rows for sample count, max requests, concurrency and notification" width="1206" height="520">
   <figcaption>Sending a captured flow to the <strong>Sequencer</strong> auto-detects the session cookie and lets you set the sample size and concurrency before collecting.</figcaption>
 </figure>
 

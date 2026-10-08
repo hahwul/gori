@@ -20,7 +20,7 @@ Feed it from a captured flow: in **History**, select the flow whose response set
 You don't need to trim the token's fixed skeleton (a `sess_v1_` prefix, a version byte, padding) out of the extraction. gori finds the positions that never vary across the sample and runs the byte- and bit-level tests on the part that moves, so that structure neither drags the grade down nor counts as randomness (see [Structure Is Not Secret](/guide/sequencer/#structure-is-not-secret)).
 
 <figure class="tui-shot">
-  <img src="/images/tui/sequencer.svg" alt="gori Send to Sequencer config card over the History tab, showing an auto-detected session cookie as the token, with rows for sample count, max requests, concurrency and notification">
+  <img src="/images/tui/sequencer.svg" alt="gori Send to Sequencer config card over the History tab, showing an auto-detected session cookie as the token, with rows for sample count, max requests, concurrency and notification" width="1206" height="520">
   <figcaption>Sending a captured flow to the <strong>Sequencer</strong> auto-detects the session cookie and lets you set the sample size and concurrency before collecting.</figcaption>
 </figure>
 

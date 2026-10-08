@@ -18,7 +18,7 @@ The **JWT** tab is off the bar by default — press **`0`** and type "jwt", or `
 The decode shows what the token *claims*; it never checks the signature, so a token that decodes cleanly is not necessarily one the server trusts. That is the question the rest of this playbook answers.
 
 <figure class="tui-shot">
-  <img src="/images/tui/jwt.svg" alt="gori JWT tab with a decoded HS256 token: the INPUT token under a ^T:→ENCODE lens chip, the decoded header JSON, and an ATTACKS list of generated payloads including alg=none case variants and signature stripping">
+  <img src="/images/tui/jwt.svg" alt="gori JWT tab with a decoded HS256 token: the INPUT token under a ^T:→ENCODE lens chip, the decoded header JSON, and an ATTACKS list of generated payloads including alg=none case variants and signature stripping" width="1206" height="520">
   <figcaption>The <strong>JWT</strong> tab decodes a token live (header, payload, signature) and lists ready-to-send attack payloads: alg:none, weak-secret, and header injection.</figcaption>
 </figure>
 

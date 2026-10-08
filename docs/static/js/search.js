@@ -64,7 +64,11 @@
     var ts = terms(query);
     if (!ts.length) return escapeHtml(text);
     var re = new RegExp('(' + ts.map(escapeRegExp).join('|') + ')', 'gi');
-    return escapeHtml(text).replace(re, '<mark>$1</mark>');
+    /* Split the raw text, not the escaped HTML, so a term like "amp" or "lt"
+       never lands inside an entity and breaks it. Odd parts are the matches. */
+    return text.split(re).map(function (part, i) {
+      return i % 2 ? '<mark>' + escapeHtml(part) + '</mark>' : escapeHtml(part);
+    }).join('');
   }
 
   /* Rank a page for the query, or return -1 when some term is missing.
@@ -183,5 +187,14 @@
         }
       }
     });
+  }
+
+  /* The home page's WebSite SearchAction (JSON-LD) advertises /?q=…, so a
+     query in the URL opens the overlay already searching it. */
+  var q = new URLSearchParams(window.location.search).get('q');
+  if (q && overlay && input) {
+    openSearch();
+    input.value = q;
+    loadSearchData(function () { search(q); });
   }
 })();

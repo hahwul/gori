@@ -11,7 +11,7 @@ shot = "jwt"
 **JWT** 탭은 JSON Web Token을 위한 워크벤치입니다. 토큰을 디코드하고, claim을 편집해 재서명하며, 서버를 상대로 테스트할 고전적인 공격 페이로드를 생성합니다. 파트를 보여주기만 하는 [Decoder](/ko/guide/decoder/)의 읽기 전용 `jwt-decode` 컨버터보다 한 걸음 더 나아갑니다.
 
 <figure class="tui-shot">
-  <img src="/images/tui/jwt.svg" alt="디코드된 HS256 토큰을 보여주는 gori JWT 탭: ^T:→ENCODE 렌즈 칩이 달린 INPUT 토큰, 디코드된 header JSON, 그리고 alg=none 대소문자 변형과 signature 제거를 포함한 23개 공격 페이로드의 ATTACKS 목록">
+  <img src="/images/tui/jwt.svg" alt="디코드된 HS256 토큰을 보여주는 gori JWT 탭: ^T:→ENCODE 렌즈 칩이 달린 INPUT 토큰, 디코드된 header JSON, 그리고 alg=none 대소문자 변형과 signature 제거를 포함한 23개 공격 페이로드의 ATTACKS 목록" width="1206" height="520">
   <figcaption><strong>JWT</strong> 탭은 토큰을 실시간으로 디코드하고(header, payload, signature), 바로 보낼 수 있는 공격 페이로드(alg:none, weak-secret, header injection)를 나열합니다.</figcaption>
 </figure>
 

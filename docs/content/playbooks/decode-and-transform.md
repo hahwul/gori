@@ -37,7 +37,7 @@ echo -n secret | gori run decoder 'sha256 | base64'
 ```
 
 <figure class="tui-shot">
-  <img src="/images/tui/decoder.svg" alt="gori Decoder tab with INPUT, CHAIN, PIPELINE and OUTPUT panes running a base64-decode then jwt-decode chain, showing each step's intermediate result">
+  <img src="/images/tui/decoder.svg" alt="gori Decoder tab with INPUT, CHAIN, PIPELINE and OUTPUT panes running a base64-decode then jwt-decode chain, showing each step's intermediate result" width="1206" height="520">
   <figcaption>The <strong>Decoder</strong> workbench: an input, a chain of converters, and the per-step pipeline with the final output below.</figcaption>
 </figure>
 

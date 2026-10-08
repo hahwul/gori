@@ -19,7 +19,7 @@ Its **active** checks are deliberately *light-touch*: a handful of safe, low-vol
 Re-sending an unsafe method (`POST` / `PUT` / `PATCH` / `DELETE`) can mutate server state, so it is always opt-in. Tick **unsafe methods** in the per-flow *Run active scan* popup for a single deliberate re-send, or switch Probe to **AGGRESSIVE** mode, which also probes unsafe methods automatically and raises the per-rule caps (wider param sets, a wider forbidden-bypass header set, and for the SQL injection rules a numeric-context true/false pair and PostgreSQL and MSSQL delays alongside MySQL's). AGGRESSIVE stays inside your project scope, so its automatic pipeline never touches an out-of-scope host; the per-flow popup is your explicit choice of flow and is not limited to scope-included hosts, but the sandbox and exclude rules still block it.
 
 <figure class="tui-shot">
-  <img src="/images/tui/probe.svg" alt="gori Probe scanner listing passive issues grouped by severity and category: permissive CORS, missing CSP and HSTS, cookie flag issues, and cacheable responses, each with an affected host">
+  <img src="/images/tui/probe.svg" alt="gori Probe scanner listing passive issues grouped by severity and category: permissive CORS, missing CSP and HSTS, cookie flag issues, and cacheable responses, each with an affected host" width="1206" height="520">
   <figcaption><strong>Probe</strong> surfaces passive issues as you browse (CORS, cookie hygiene, missing security headers, info leaks), grouped by severity and category.</figcaption>
 </figure>
 

@@ -91,7 +91,7 @@ The unit is milliseconds. A send that **timed out** counts as a match on `--mt`,
 Timing is noisy (a shared origin, a slow hop, one unlucky pause), so treat a `--mt` row as a lead to re-send by hand, the same as any other match.
 
 <figure class="tui-shot">
-  <img src="/images/tui/fuzzer.svg" alt="gori Fuzzer tab: a captured request template with one value wrapped in marker highlights, the payload set and attack mode in the CONFIG pane, a filling results table, and a status and size distribution sidebar">
+  <img src="/images/tui/fuzzer.svg" alt="gori Fuzzer tab: a captured request template with one value wrapped in marker highlights, the payload set and attack mode in the CONFIG pane, a filling results table, and a status and size distribution sidebar" width="1206" height="664">
   <figcaption>The <strong>Fuzzer</strong>: one marked position in the template, a payload set and <code>sniper</code> mode in the CONFIG pane, and the results table filling as each request lands.</figcaption>
 </figure>
 

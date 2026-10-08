@@ -29,9 +29,9 @@
   <meta property="og:locale" content="{% if page_language == "ko" %}ko_KR{% else %}en_US{% endif %}">
   {% for t in page.translations %}{% if not t.is_current %}<meta property="og:locale:alternate" content="{% if t.code == "ko" %}ko_KR{% else %}en_US{% endif %}">
   {% endif %}{% endfor %}
-  {{ canonical_tag }}
+  {% if page.url != "/404.html" %}{{ canonical_tag }}{% endif %}
   {% if page.section == "" and page.url != "/404.html" %}
-  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"gori","url":"{{ base_url }}/","description":"{{ site.description | e }}","applicationCategory":"SecurityApplication","operatingSystem":"Linux, macOS","isAccessibleForFree":true,"codeRepository":"https://github.com/hahwul/gori","license":"https://www.apache.org/licenses/LICENSE-2.0","offers":{"@type":"Offer","price":0,"priceCurrency":"USD"}}</script>
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"gori","url":"{{ base_url }}/","description":"{{ page.description | default(site.description, true) | e }}","applicationCategory":"SecurityApplication","operatingSystem":"Linux, macOS, Windows","isAccessibleForFree":true,"codeRepository":"https://github.com/hahwul/gori","license":"https://www.apache.org/licenses/LICENSE-2.0","offers":{"@type":"Offer","price":0,"priceCurrency":"USD"}}</script>
   {% endif %}
   {{ jsonld }}
   {{ hreflang_tags }}

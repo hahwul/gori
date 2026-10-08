@@ -101,7 +101,7 @@ Both show each action's shortcut beside it, so opening them is also how you lear
 2. Press `Ctrl-P` and type `send`. The History actions come first under `THIS TAB`, each with the key or menu path that reaches it (`␣ > c` means `Space`, `>`, `c`). Press `Esc`.
 
 <figure class="tui-shot">
-  <img src="/images/tui/command-palette.svg" alt="gori command palette over the History tab with the query send: THIS TAB lists the send actions with their keys or menu paths, then APP lists matching app commands">
+  <img src="/images/tui/command-palette.svg" alt="gori command palette over the History tab with the query send: THIS TAB lists the send actions with their keys or menu paths, then APP lists matching app commands" width="1206" height="520">
   <figcaption>The command palette (<kbd>Ctrl-P</kbd>) with <code>send</code> typed on History: the tab's own actions first, each with the shorter route to it, then app-wide commands.</figcaption>
 </figure>
 
@@ -134,7 +134,7 @@ Mouse works when enabled (Preferences → **Editor & Keys** → **Mouse**): clic
 Make sure History is active (`3`). Every request/response is a *flow*: start line, headers, body (stored up to 2 MiB), plus HTTP/2 frames, WebSocket messages, and decoded JWT / SAML / GraphQL when present.
 
 <figure class="tui-shot">
-  <img src="/images/tui/history.svg" alt="gori History tab listing captured HTTP flows with time, method, protocol, host, path, status, type, size and duration columns">
+  <img src="/images/tui/history.svg" alt="gori History tab listing captured HTTP flows with time, method, protocol, host, path, status, type, size and duration columns" width="1206" height="520" loading="lazy" decoding="async">
   <figcaption>The <strong>History</strong> tab: every captured flow with method, status, size and timing, filterable with the query language.</figcaption>
 </figure>
 
@@ -181,7 +181,7 @@ This is the loop you'll spend most of your time in: take a captured request, cha
 5. The response, its timing, and a diff against the previous reply appear on the right. `Tab` cycles target → request → response.
 
 <figure class="tui-shot">
-  <img src="/images/tui/repeater.svg" alt="gori Repeater tab showing an editable request pane beside the response pane, with a status line reading sent → 200 in 114ms">
+  <img src="/images/tui/repeater.svg" alt="gori Repeater tab showing an editable request pane beside the response pane, with a status line reading sent → 200 in 114ms" width="1206" height="520" loading="lazy" decoding="async">
   <figcaption><strong>Repeater</strong> edits any part of a request and re-sends it; the response, timing, and a diff against the last reply sit side by side.</figcaption>
 </figure>
 
@@ -236,7 +236,7 @@ gori tutorial
 ```
 
 <figure class="tui-shot">
-  <img src="/images/tui/tutorial.svg" alt="gori guided tour welcome card explaining the four core moves: tabs and panes, the action menu, the command palette, and edit mode">
+  <img src="/images/tui/tutorial.svg" alt="gori guided tour welcome card explaining the four core moves: tabs and panes, the action menu, the command palette, and edit mode" width="1206" height="538" loading="lazy" decoding="async">
   <figcaption>The guided tour walks through tabs and panes, the space menu, the palette, and READ / INS edit mode. Try each key, then practice all four in a harmless sandbox.</figcaption>
 </figure>
 

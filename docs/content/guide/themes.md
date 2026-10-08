@@ -22,27 +22,27 @@ The same History view across six of the built-ins:
 
 <div class="tui-gallery">
   <figure>
-    <img src="/images/tui/theme-goridark.svg" alt="gori History tab in the goridark theme: near-black canvas with a subtle gold focus outline">
+    <img src="/images/tui/theme-goridark.svg" alt="gori History tab in the goridark theme: near-black canvas with a subtle gold focus outline" width="1206" height="520">
     <figcaption>goridark (default)</figcaption>
   </figure>
   <figure>
-    <img src="/images/tui/theme-goriday.svg" alt="gori History tab in the goriday light theme: warm off-white canvas with dark text">
+    <img src="/images/tui/theme-goriday.svg" alt="gori History tab in the goriday light theme: warm off-white canvas with dark text" width="1206" height="520" loading="lazy" decoding="async">
     <figcaption>goriday (light)</figcaption>
   </figure>
   <figure>
-    <img src="/images/tui/theme-tokyonight.svg" alt="gori History tab in the tokyonight theme: deep blue canvas with cool accent colours">
+    <img src="/images/tui/theme-tokyonight.svg" alt="gori History tab in the tokyonight theme: deep blue canvas with cool accent colours" width="1206" height="520" loading="lazy" decoding="async">
     <figcaption>tokyonight</figcaption>
   </figure>
   <figure>
-    <img src="/images/tui/theme-gruvbox.svg" alt="gori History tab in the gruvbox theme: warm dark canvas with retro amber and green accents">
+    <img src="/images/tui/theme-gruvbox.svg" alt="gori History tab in the gruvbox theme: warm dark canvas with retro amber and green accents" width="1206" height="520" loading="lazy" decoding="async">
     <figcaption>gruvbox</figcaption>
   </figure>
   <figure>
-    <img src="/images/tui/theme-dancheong.svg" alt="gori History tab in the dancheong theme: green-black lacquer canvas carrying the vivid obangsaek pigments of a painted temple beam, with a gilt focus outline">
+    <img src="/images/tui/theme-dancheong.svg" alt="gori History tab in the dancheong theme: green-black lacquer canvas carrying the vivid obangsaek pigments of a painted temple beam, with a gilt focus outline" width="1206" height="520" loading="lazy" decoding="async">
     <figcaption>dancheong</figcaption>
   </figure>
   <figure>
-    <img src="/images/tui/theme-hanji.svg" alt="gori History tab in the hanji light theme: warm ivory mulberry-paper canvas written in ink, with an indigo focus outline">
+    <img src="/images/tui/theme-hanji.svg" alt="gori History tab in the hanji light theme: warm ivory mulberry-paper canvas written in ink, with an indigo focus outline" width="1206" height="520" loading="lazy" decoding="async">
     <figcaption>hanji (light)</figcaption>
   </figure>
 </div>

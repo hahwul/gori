@@ -101,7 +101,7 @@ gori는 요청 시 루트로부터 호스트별 리프 인증서를 발급하므
 2. `Ctrl-P`를 누르고 `send`를 입력합니다. History의 동작이 `THIS TAB` 아래 먼저 나오고, 각각 닿는 키나 메뉴 경로가 함께 보입니다(`␣ > c`는 `Space`, `>`, `c` 순서). `Esc`를 누릅니다.
 
 <figure class="tui-shot">
-  <img src="/images/tui/command-palette.svg" alt="History 탭 위에서 send를 입력한 gori 커맨드 팔레트. THIS TAB 아래 보내기 동작이 키나 메뉴 경로와 함께 나오고, 이어서 APP 아래 일치하는 앱 명령이 나온다">
+  <img src="/images/tui/command-palette.svg" alt="History 탭 위에서 send를 입력한 gori 커맨드 팔레트. THIS TAB 아래 보내기 동작이 키나 메뉴 경로와 함께 나오고, 이어서 APP 아래 일치하는 앱 명령이 나온다" width="1206" height="520">
   <figcaption>History에서 <code>send</code>를 입력한 커맨드 팔레트(<kbd>Ctrl-P</kbd>): 그 탭의 동작이 더 빠른 길과 함께 먼저 나오고, 앱 전역 명령이 뒤따릅니다.</figcaption>
 </figure>
 
@@ -134,7 +134,7 @@ gori의 화면은 한 줄로 늘어선 탭입니다. 기본 순서는 Project �
 History가 활성화되어 있는지 확인하세요(`3`). 모든 요청/응답은 *플로우*입니다. 시작 줄, 헤더, 본문(최대 2 MiB 저장), 그리고 HTTP/2 프레임, WebSocket 메시지, 존재하면 디코드된 JWT / SAML / GraphQL까지.
 
 <figure class="tui-shot">
-  <img src="/images/tui/history.svg" alt="시간, 메서드, 프로토콜, 호스트, 경로, 상태, 유형, 크기, 소요 시간 열로 캡처된 HTTP 플로우를 나열하는 gori History 탭">
+  <img src="/images/tui/history.svg" alt="시간, 메서드, 프로토콜, 호스트, 경로, 상태, 유형, 크기, 소요 시간 열로 캡처된 HTTP 플로우를 나열하는 gori History 탭" width="1206" height="520" loading="lazy" decoding="async">
   <figcaption><strong>History</strong> 탭: 메서드, 상태, 크기, 타이밍이 담긴 모든 캡처 플로우를 쿼리 언어로 필터할 수 있습니다.</figcaption>
 </figure>
 
@@ -181,7 +181,7 @@ method:POST body:password
 5. 응답과 타이밍, 이전 응답 대비 diff가 오른쪽에 나타납니다. `Tab`으로 target → request → response를 순회합니다.
 
 <figure class="tui-shot">
-  <img src="/images/tui/repeater.svg" alt="편집 가능한 요청 패널이 응답 패널 옆에 있고, sent → 200 in 114ms라는 상태 줄이 보이는 gori Repeater 탭">
+  <img src="/images/tui/repeater.svg" alt="편집 가능한 요청 패널이 응답 패널 옆에 있고, sent → 200 in 114ms라는 상태 줄이 보이는 gori Repeater 탭" width="1206" height="520" loading="lazy" decoding="async">
   <figcaption><strong>Repeater</strong>는 요청의 어느 부분이든 편집해 재전송합니다. 응답, 타이밍, 그리고 마지막 응답 대비 diff가 나란히 놓입니다.</figcaption>
 </figure>
 
@@ -236,7 +236,7 @@ gori tutorial
 ```
 
 <figure class="tui-shot">
-  <img src="/images/tui/tutorial.svg" alt="탭과 패널, 동작 메뉴, 커맨드 팔레트, 편집 모드라는 네 가지 핵심 동작을 설명하는 gori 가이드 투어 환영 카드">
+  <img src="/images/tui/tutorial.svg" alt="탭과 패널, 동작 메뉴, 커맨드 팔레트, 편집 모드라는 네 가지 핵심 동작을 설명하는 gori 가이드 투어 환영 카드" width="1206" height="538" loading="lazy" decoding="async">
   <figcaption>가이드 투어는 탭과 패널, space 메뉴, 팔레트, 그리고 READ / INS 편집 모드를 안내합니다. 각 키를 눌러 본 뒤, 안전한 샌드박스에서 네 가지를 모두 연습하세요.</figcaption>
 </figure>
 

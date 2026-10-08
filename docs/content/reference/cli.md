@@ -1,6 +1,6 @@
 +++
 title = "CLI Reference"
-description = "Every gori subcommand and command-line flag."
+description = "Every gori subcommand and command-line flag: the TUI, the headless gori run suite for scripts and CI, the MCP server, CA and settings."
 weight = 10
 +++
 

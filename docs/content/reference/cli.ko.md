@@ -1,6 +1,6 @@
 +++
 title = "CLI 레퍼런스"
-description = "모든 gori 서브커맨드와 커맨드라인 플래그."
+description = "모든 gori 서브커맨드와 커맨드라인 플래그: TUI, 스크립트와 CI를 위한 헤드리스 gori run, MCP 서버, CA와 설정."
 weight = 10
 +++
 

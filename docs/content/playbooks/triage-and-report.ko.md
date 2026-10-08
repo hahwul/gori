@@ -32,7 +32,7 @@ gori run probe --category cors       # 단일 카테고리
 **Issues**는 결국 리포트에 넘길 트리아지 목록입니다. **History** 플로우에서 `Shift-F`를 눌러 하나를 파일링하고(Repeater 탭에서는 `Space` → **Link…** → `+ New issue…`), **Probe** 발견은 Probe 탭에서 이슈로 승격합니다. 심각도(`info`부터 `critical`까지)와 상태(`open`, `confirmed`, `false-positive`, `resolved`)를 부여하세요. 파일링한 플로우가 증거로 링크되므로 이슈가 스스로 증거를 담습니다. 이슈에서 `Enter`를 누르면 이슈가 열리고, 그 플로우는 **RELATED** 행에 있습니다. 그 행에서 `↵`는 교환을 제자리에서 보여 주고 `s`는 History에서 엽니다.
 
 <figure class="tui-shot">
-  <img src="/images/tui/issues.svg" alt="gori Issues tab listing triaged findings with severity, status, host and title columns, one row selected and its linked evidence flow shown">
+  <img src="/images/tui/issues.svg" alt="gori Issues tab listing triaged findings with severity, status, host and title columns, one row selected and its linked evidence flow shown" width="1206" height="520">
   <figcaption><strong>Issues</strong> 탭: 승격한 모든 발견이 심각도와 상태를 갖고, 그것을 증명하는 증거 플로우로 다시 링크됩니다.</figcaption>
 </figure>
 

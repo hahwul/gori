@@ -37,7 +37,7 @@ echo -n secret | gori run decoder 'sha256 | base64'
 ```
 
 <figure class="tui-shot">
-  <img src="/images/tui/decoder.svg" alt="INPUT, CHAIN, PIPELINE, OUTPUT 패널에서 base64-decode 다음 jwt-decode 체인을 실행하며 각 단계의 중간 결과를 보여 주는 gori Decoder 탭">
+  <img src="/images/tui/decoder.svg" alt="INPUT, CHAIN, PIPELINE, OUTPUT 패널에서 base64-decode 다음 jwt-decode 체인을 실행하며 각 단계의 중간 결과를 보여 주는 gori Decoder 탭" width="1206" height="520">
   <figcaption><strong>Decoder</strong> 워크벤치: 입력, 변환기 체인, 그리고 단계별 파이프라인과 그 아래 최종 출력.</figcaption>
 </figure>
 

@@ -22,27 +22,27 @@ gori는 32개의 내장 컬러 테마를 제공합니다: `goridark`(기본값),
 
 <div class="tui-gallery">
   <figure>
-    <img src="/images/tui/theme-goridark.svg" alt="goridark 테마의 gori History 탭: 은은한 골드 포커스 아웃라인이 있는 거의 검은 캔버스">
+    <img src="/images/tui/theme-goridark.svg" alt="goridark 테마의 gori History 탭: 은은한 골드 포커스 아웃라인이 있는 거의 검은 캔버스" width="1206" height="520">
     <figcaption>goridark (기본값)</figcaption>
   </figure>
   <figure>
-    <img src="/images/tui/theme-goriday.svg" alt="goriday 라이트 테마의 gori History 탭: 어두운 텍스트가 있는 따뜻한 오프화이트 캔버스">
+    <img src="/images/tui/theme-goriday.svg" alt="goriday 라이트 테마의 gori History 탭: 어두운 텍스트가 있는 따뜻한 오프화이트 캔버스" width="1206" height="520" loading="lazy" decoding="async">
     <figcaption>goriday (라이트)</figcaption>
   </figure>
   <figure>
-    <img src="/images/tui/theme-tokyonight.svg" alt="tokyonight 테마의 gori History 탭: 차분한 강조색이 있는 짙은 파란 캔버스">
+    <img src="/images/tui/theme-tokyonight.svg" alt="tokyonight 테마의 gori History 탭: 차분한 강조색이 있는 짙은 파란 캔버스" width="1206" height="520" loading="lazy" decoding="async">
     <figcaption>tokyonight</figcaption>
   </figure>
   <figure>
-    <img src="/images/tui/theme-gruvbox.svg" alt="gruvbox 테마의 gori History 탭: 복고풍 앰버와 그린 강조색이 있는 따뜻한 어두운 캔버스">
+    <img src="/images/tui/theme-gruvbox.svg" alt="gruvbox 테마의 gori History 탭: 복고풍 앰버와 그린 강조색이 있는 따뜻한 어두운 캔버스" width="1206" height="520" loading="lazy" decoding="async">
     <figcaption>gruvbox</figcaption>
   </figure>
   <figure>
-    <img src="/images/tui/theme-dancheong.svg" alt="dancheong 테마의 gori History 탭: 단청 올린 서까래처럼 오방색 안료가 살아 있는 녹흑색 옻칠 캔버스와 금박 포커스 아웃라인">
+    <img src="/images/tui/theme-dancheong.svg" alt="dancheong 테마의 gori History 탭: 단청 올린 서까래처럼 오방색 안료가 살아 있는 녹흑색 옻칠 캔버스와 금박 포커스 아웃라인" width="1206" height="520" loading="lazy" decoding="async">
     <figcaption>dancheong</figcaption>
   </figure>
   <figure>
-    <img src="/images/tui/theme-hanji.svg" alt="hanji 라이트 테마의 gori History 탭: 먹으로 쓴 따뜻한 상아빛 한지 캔버스와 쪽빛 포커스 아웃라인">
+    <img src="/images/tui/theme-hanji.svg" alt="hanji 라이트 테마의 gori History 탭: 먹으로 쓴 따뜻한 상아빛 한지 캔버스와 쪽빛 포커스 아웃라인" width="1206" height="520" loading="lazy" decoding="async">
     <figcaption>hanji (라이트)</figcaption>
   </figure>
 </div>

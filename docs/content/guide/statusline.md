@@ -11,7 +11,7 @@ shot = "statusline"
 The **statusline** is an opt-in row at the very bottom of the TUI. gori runs a shell command on an interval and renders its stdout as that row — a status bar you write yourself, inspired by Claude Code's status line. It ships off, and the `statusline` section stays out of `settings.json` until you change something.
 
 <figure class="tui-shot">
-  <img src="/images/tui/statusline.svg" alt="gori History tab with a statusline row along the very bottom, below the status bar, reading: token 58m left, then 1 times 5xx in red, then todo 2 and the text of the first unchecked task">
+  <img src="/images/tui/statusline.svg" alt="gori History tab with a statusline row along the very bottom, below the status bar, reading: token 58m left, then 1 times 5xx in red, then todo 2 and the text of the first unchecked task" width="1206" height="520">
   <figcaption>The <strong>statusline</strong> is the last row, under the status bar. This one is the <a href="#script">script below</a>: how long the token under test has, that the target has thrown a 5xx, and what is still on the list — none of which the chrome above it can say.</figcaption>
 </figure>
 

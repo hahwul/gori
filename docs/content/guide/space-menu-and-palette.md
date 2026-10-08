@@ -24,7 +24,7 @@ Both show each action's own key beside it, so every visit teaches you the shortc
 Press `Space` in any list or pane. A card opens with the actions for **where you are standing**: a History row, a flow's detail, the Repeater editor, a rule list. The same key on a different pane gives a different card.
 
 <figure class="tui-shot">
-  <img src="/images/tui/space-menu.svg" alt="gori space menu open over the History tab, its rows grouped under VIEW, SEND, TRIAGE, COPY, SCOPE, COMMON, DANGER and WIPE, each with a letter on the left and, for some, a shortcut on the right">
+  <img src="/images/tui/space-menu.svg" alt="gori space menu open over the History tab, its rows grouped under VIEW, SEND, TRIAGE, COPY, SCOPE, COMMON, DANGER and WIPE, each with a letter on the left and, for some, a shortcut on the right" width="1206" height="520">
   <figcaption><kbd>Space</kbd> on a History row. The letter on the left runs the row; the key on the right is the shortcut that does the same without the menu; <code>›</code> opens a second card.</figcaption>
 </figure>
 
@@ -52,7 +52,7 @@ How to read the card:
 Some choices are variations of one intent: *send this flow to some tool*, *change how this pane draws*. Each of those is a single `›` row on the menu that opens its own card, so the first card stays short.
 
 <figure class="tui-shot">
-  <img src="/images/tui/space-menu-send.svg" alt="gori's Send flow to card, titled SPACE › SEND FLOW TO, listing Repeater, Fuzzer, Comparer, Miner, Sequencer, Authorize, Discover and browser, each on one letter">
+  <img src="/images/tui/space-menu-send.svg" alt="gori's Send flow to card, titled SPACE › SEND FLOW TO, listing Repeater, Fuzzer, Comparer, Miner, Sequencer, Authorize, Discover and browser, each on one letter" width="1206" height="520" loading="lazy" decoding="async">
   <figcaption><kbd>Space</kbd> <kbd>&gt;</kbd> on a History row. The title shows where you are, and <kbd>Esc</kbd> steps back to the first card.</figcaption>
 </figure>
 
@@ -96,7 +96,7 @@ A missed `Space` is unlikely to surprise you. gori checks at startup that a menu
 Press `Ctrl-P` on any tab and start typing the name of what you want.
 
 <figure class="tui-shot">
-  <img src="/images/tui/command-palette.svg" alt="gori command palette over the History tab with the query send: THIS TAB lists Send to Comparer, Send to Fuzzer, Send to Sequencer and Send to Authorize with their keys or menu paths on the right, then APP lists matching app commands">
+  <img src="/images/tui/command-palette.svg" alt="gori command palette over the History tab with the query send: THIS TAB lists Send to Comparer, Send to Fuzzer, Send to Sequencer and Send to Authorize with their keys or menu paths on the right, then APP lists matching app commands" width="1206" height="520" loading="lazy" decoding="async">
   <figcaption><kbd>Ctrl-P</kbd>, then <code>send</code>, on History. The tab's own actions come first, each with the key or menu path that reaches it; app-wide commands follow.</figcaption>
 </figure>
 

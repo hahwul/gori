@@ -11,7 +11,7 @@ shot = "jwt"
 The **JWT** tab is a workbench for JSON Web Tokens: decode one, edit its claims and re-sign it, and generate the classic attack payloads to test against the server. It goes further than the [Decoder](/guide/decoder/)'s read-only `jwt-decode` converter, which only shows you the parts.
 
 <figure class="tui-shot">
-  <img src="/images/tui/jwt.svg" alt="gori JWT tab with a decoded HS256 token: the INPUT token under a ^T:→ENCODE lens chip, the decoded header JSON, and an ATTACKS list of 23 generated payloads including alg=none case variants and signature stripping">
+  <img src="/images/tui/jwt.svg" alt="gori JWT tab with a decoded HS256 token: the INPUT token under a ^T:→ENCODE lens chip, the decoded header JSON, and an ATTACKS list of 23 generated payloads including alg=none case variants and signature stripping" width="1206" height="520">
   <figcaption>The <strong>JWT</strong> tab decodes a token live (header, payload, signature) and lists ready-to-send attack payloads: alg:none, weak-secret, and header injection.</figcaption>
 </figure>
 

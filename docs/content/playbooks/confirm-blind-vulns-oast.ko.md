@@ -37,7 +37,7 @@ gori run oast listen --save  # …프로젝트 세션으로 저장
 다시 **OAST** 탭으로 오면, 대상 인프라가 이름을 해석하거나 다시 연결하면서 콜백이 **Callbacks** 표에 도착합니다. 각각 프로토콜(`dns` / `http` / `smtp`), 소스 IP, 타임스탬프, 그리고 어느 페이로드가 발동했는지 알려 주는 하위 식별자를 담습니다. `Ctrl-X`는 폴링을 멈추지만 등록은 유지하므로, 이미 심어 둔 페이로드는 계속 해석됩니다. `Shift-R`을 눌러 나중에 재개하면, 자리를 비운 동안 프로바이더가 버퍼링한 것들을 받아 올 수 있습니다.
 
 <figure class="tui-shot">
-  <img src="/images/tui/oast.svg" alt="interactsh 페이로드에 대한 복호화된 히트 네 건의 Callbacks 표가 있는 gori OAST 탭으로, DNS A 조회 두 건과 HTTP GET 요청 두 건이 각각 소스 IP와 목적지로서의 페이로드와 함께 나열된다">
+  <img src="/images/tui/oast.svg" alt="interactsh 페이로드에 대한 복호화된 히트 네 건의 Callbacks 표가 있는 gori OAST 탭으로, DNS A 조회 두 건과 HTTP GET 요청 두 건이 각각 소스 IP와 목적지로서의 페이로드와 함께 나열된다" width="1206" height="520">
   <figcaption><strong>OAST</strong> 탭은 페이로드를 등록하고, 대상이 그리로 보내는 모든 DNS·HTTP·SMTP 콜백을 복호화하고 타임스탬프를 붙여 나열합니다.</figcaption>
 </figure>
 

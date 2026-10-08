@@ -15,21 +15,21 @@ SVG는 `0 0 512 512` viewBox 위에 그려져 있어 어떤 크기로도 확대�
 
 <div class="art-gallery">
   <figure>
-    <img src="/images/gori.png" alt="gori 마크: 하나의 띠로 그려진 맞물린 두 개의 고리, 단색 브랜드 골드">
+    <img src="/images/gori.png" alt="gori 마크: 하나의 띠로 그려진 맞물린 두 개의 고리, 단색 브랜드 골드" width="512" height="512">
     <figcaption><strong>Mark</strong> — 단색 <code>#d9c28b</code><br>
       <a href="/images/gori.svg" download="gori-logo.svg">SVG</a> ·
       <a href="/images/gori.png" download="gori-logo.png">PNG</a> ·
       <a href="/images/gori.webp" download="gori-logo.webp">WebP</a></figcaption>
   </figure>
   <figure>
-    <img style="--plate:#faf9f7" src="/images/gori_dark.png" alt="같은 gori 마크를 검은 실루엣으로만 채운 형태">
+    <img style="--plate:#faf9f7" src="/images/gori_dark.png" alt="같은 gori 마크를 검은 실루엣으로만 채운 형태" width="512" height="512" loading="lazy" decoding="async">
     <figcaption><strong>Mono</strong> — 단색 <code>#000000</code><br>
       <a href="/images/gori_dark.svg" download="gori-logo-mono.svg">SVG</a> ·
       <a href="/images/gori_dark.png" download="gori-logo-mono.png">PNG</a> ·
       <a href="/images/gori_dark.webp" download="gori-logo-mono.webp">WebP</a></figcaption>
   </figure>
   <figure>
-    <img src="/images/gori_white.png" alt="같은 gori 마크를 옅은 크림에서 짙은 청동으로 흐르는 금박 그러데이션으로 채운 형태">
+    <img src="/images/gori_white.png" alt="같은 gori 마크를 옅은 크림에서 짙은 청동으로 흐르는 금박 그러데이션으로 채운 형태" width="512" height="512" loading="lazy" decoding="async">
     <figcaption><strong>Gradient</strong> — 금박 그러데이션<br>
       <a href="/images/gori_white.svg" download="gori-logo-gradient.svg">SVG</a> ·
       <a href="/images/gori_white.png" download="gori-logo-gradient.png">PNG</a> ·
@@ -86,12 +86,12 @@ TUI에서 기능적인 색을 유지하는 것은 HTTP 상태뿐이며, 그건 �
 
 <div class="art-gallery">
   <figure>
-    <img src="/images/gori-wallpaper.webp" alt="양식화된 구름과 물결을 먹과 금으로 그린 어두운 월페이퍼. 가운데에 금색 gori 마크와 워드마크가 있다">
+    <img src="/images/gori-wallpaper.webp" alt="양식화된 구름과 물결을 먹과 금으로 그린 어두운 월페이퍼. 가운데에 금색 gori 마크와 워드마크가 있다" width="1920" height="1080" loading="lazy" decoding="async">
     <figcaption><strong>마크 포함</strong> — 1920 × 1080<br>
       <a href="/images/gori-wallpaper.webp" download="gori-wallpaper.webp">WebP</a></figcaption>
   </figure>
   <figure>
-    <img src="/images/wallpaper.webp" alt="같은 먹과 금의 구름·물결 그림에서 로고를 뺀 버전">
+    <img src="/images/wallpaper.webp" alt="같은 먹과 금의 구름·물결 그림에서 로고를 뺀 버전" width="1920" height="1080" loading="lazy" decoding="async">
     <figcaption><strong>로고 없음</strong> — 1920 × 1080<br>
       <a href="/images/wallpaper.webp" download="gori-wallpaper-plain.webp">WebP</a></figcaption>
   </figure>
