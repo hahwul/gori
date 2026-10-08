@@ -107,6 +107,13 @@ module Gori::Proxy
                          apply_host_overrides : Bool = true,
                          origin_scheme : String = "http") : {IO?, DialError?}
       target, target_port = apply_host_overrides ? connect_target(host, port, overrides, pin) : {pin || host, port}
+      # Nothing upstream range-checks an h1 Host/absolute-form port, and glibc's getaddrinfo
+      # truncates one to 16 bits: `:73616` dials :8080, gori's own listener, past the self-loop
+      # guard (which compares the untruncated number). One check here covers every route.
+      unless 0 < target_port <= 65_535
+        return {nil, DialError.new(DialErrorKind::Connect,
+          "port #{target_port} is out of range (1-65535) — the origin was never contacted")}
+      end
       # ONE decision point for "how do we reach this host": Settings.upstream_route folds the
       # project pin, the rule table, the legacy scalar, and its environment fallback together.
       # Resolved on the ORIGINAL host, not `target` — a rule is written against the name the
