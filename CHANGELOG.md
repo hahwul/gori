@@ -33,6 +33,7 @@
 - Intercept: an h2 hold waiting on a stalled upload is queued on time even when the client sends nothing more, and an edit that shortens an h2 body gives the sender back the flow-control window it freed
 - TLS: importing a passphrase-protected CA key says to decrypt it instead of freezing gori on a hidden passphrase prompt, and a host with `_` in its name gets a certificate browsers accept
 - Export: the CSRF PoC no longer crashes on a multipart header holding a character like `İ`, strips the framing newline from a non-ASCII multipart value, and a dash run in the URL can no longer close its HTML comment
+- Export: the CSRF PoC no longer crashes on a multipart header holding a character like `İ`, strips the framing newline from a non-ASCII multipart value, and a dash run in the URL can no longer close its HTML comment; Python, fetch, Go, httpie and CSRF output keep a Transfer-Encoding that does not end in `chunked`, as curl does
 
 ## v0.8.0
 
