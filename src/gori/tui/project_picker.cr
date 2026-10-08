@@ -868,8 +868,12 @@ module Gori::Tui
       @new_field = :name
     end
 
-    private def open_temp : Project
+    # Kept up on failure for the reason `safe_create` gives below: nothing above `run` rescues.
+    private def open_temp : Project?
       @registry.temp(Random::Secure.hex(4))
+    rescue ex : Gori::Error | IO::Error
+      set_flash(ProjectPicker.failed_flash("create", "temp", ex), ok: false)
+      nil
     end
 
     # Create a project, keeping the picker up when it cannot be done — an invalid name (a
@@ -1271,7 +1275,14 @@ module Gori::Tui
 
     private def start_archive_export(project : Project) : Nil
       @archive_export_project = project
-      default_path = File.join(Dir.current, "#{@registry.slug_of(project)}.gori")
+      # `Dir.current` raises once the launch directory is deleted, and nothing above `run`
+      # rescues; the home directory is a default the operator can still edit.
+      base = begin
+        Dir.current
+      rescue File::Error
+        Path.home.to_s
+      end
+      default_path = File.join(base, "#{@registry.slug_of(project)}.gori")
       @archive_export_overlay = ExportOverlay.new(:project_archive, default_path)
       @preedit = ""
       @mode = :archive_export_path
