@@ -857,6 +857,20 @@ describe Gori::Discover::Engine do
       end
       findings.map(&.url).sort!.should eq(["http://t/alpha", "http://t/bravo"])
     end
+
+    it "still recurses into a hit released when the sweep ends" do
+      # /bravo is held behind /alpha and released only once the frontier runs dry; releasing
+      # it after the dispatch loop had exited dropped its sub-directory sweep on the floor.
+      cfg = D::Config.new(spider: false, bruteforce: true, calibrate_probes: 3, concurrency: 1,
+        retries: 0, confidence_floor: 0.4, max_depth: 3)
+      sent = [] of String
+      run_discover("http://t/", %w[alpha bravo], cfg) do |t|
+        sent << t
+        t == "/alpha" || t == "/bravo" ? html("ONE SHELL FOR EVERY REAL ROUTE HERE") : notfound
+      end
+      sent.any?(&.starts_with?("/alpha/")).should be_true
+      sent.any?(&.starts_with?("/bravo/")).should be_true
+    end
   end
 
   # The echo test rides on the calibration probes themselves — each searches its own body for

@@ -842,7 +842,13 @@ module Gori::Discover
             @pending -= 1
           end
         else
-          break if @pending == 0 # frontier empty AND nothing in flight ⇒ no more work
+          if @pending == 0 # frontier empty AND nothing in flight ⇒ no more work
+            # …except a held run, which nothing is coming to break now. Its hits recurse and
+            # crawl like any other, so release it while the loop can still dispatch that work.
+            release_held
+            break unless frontier_head
+            next
+          end
           handle(@discovered.receive)
           @pending -= 1
         end
