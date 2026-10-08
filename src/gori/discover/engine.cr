@@ -1340,7 +1340,11 @@ module Gori::Discover
       f = hit.finding
       record_finding(f, hit.exchange)
       s = f.status
-      if s && s >= 200 && s < 300 && f.depth < @config.max_depth
+      # A file-shaped hit (`phpinfo.php`, `swagger.json`, every `word.ext` probe) is not a
+      # container: sweeping `/x.php/` cost a whole wordlist and found only PATH_INFO echoes.
+      # ponytail: the name alone can't tell an extension-less dotfile (`.env`) from `.git`, so
+      # those still recurse; a content-type check would catch them if the cost shows up.
+      if s && s >= 200 && s < 300 && f.depth < @config.max_depth && !StaticAsset.extension(f.url)
         enqueue_dir_from_url(f.url, f.depth + 1)
       end
       expand_probe_links(hit)
