@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Settings: a settings file or imported profile with a non-UTF-8 byte in an env var key, an upstream destination or an ALPN list no longer aborts the load (every later section at its default, saves refused) or crashes `gori settings import`
 - Import: a HAR's WebSocket transcript now commits together with its flow, so an import that collides with a busy project can no longer report a socket as imported while dropping its messages
 - Issues and notes: a link that did not commit on a busy project is reported as not added (MCP `add_link` answers PROJECT_BUSY) instead of "already linked"
 - Projects: toggling a scan rule, or a global Rewriter or Colormarker rule, from two gori instances at once no longer erases the other's change, and a scan-rule toggle over an unreadable disabled list is refused instead of re-enabling every rule it held

@@ -307,6 +307,38 @@ describe "settings profiles" do
     end
   end
 
+  # Crystal's JSON parser passes a raw 0xff through inside a string, and a PCRE2 match on it
+  # RAISES. Three section parsers ran one unguarded: the raise abandoned every later section
+  # (and, on load, latched the refusal of every save), and `gori settings import` printed a
+  # Crystal backtrace instead of a refusal.
+  describe "a profile carrying invalid UTF-8" do
+    it "drops a bad env key and applies the rest" do
+      with_config_home do
+        Gori::Settings.import_document(%({"env":{"vars":[{"key":"A\xFF","value":"x"},) +
+                                       %({"key":"B","value":"y"}]},"theme":"goriday"}))
+        Gori::Settings.env_vars.should eq([{"B", "y"}])
+        Gori::Settings.theme.should eq("goriday")
+      end
+    end
+
+    it "refuses a bad upstream destination with a clean error" do
+      with_config_home do
+        expect_raises(Gori::Error) do
+          Gori::Settings.import_document(%({"upstream_rules":[{"host":"a\xFF.test","kind":"http","addr":"p:1"}]}))
+        end
+      end
+    end
+
+    it "reads a string ALPN list" do
+      with_config_home do
+        Gori::Settings.import_document(%({"outbound_tls":[{"host":"a.test","alpn":"h2,\xFF"}]}))
+        Gori::Settings.outbound_tls.size.should eq(1)
+      ensure
+        Gori::Settings.outbound_tls = [] of Gori::Settings::OutboundTlsRule
+      end
+    end
+  end
+
   # Values that belong to THIS install and decide how its existing data is read: the token
   # prefix (every stored `$ENV.KEY`) and the redaction salt (every placeholder already written).
   # A profile neither carries nor changes them — the grammar's rule, extended.

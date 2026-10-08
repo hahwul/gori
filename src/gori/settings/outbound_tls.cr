@@ -358,7 +358,8 @@ module Gori::Settings
     if arr = node.as_a?
       return arr.compact_map { |e| e.as_s?.try(&.strip.presence) }
     end
-    (node.as_s? || "").split(/[,\s]+/).compact_map(&.strip.presence)
+    # `.scrub` before the regex split, which RAISES on a raw 0xff byte JSON.parse lets through.
+    (node.as_s? || "").scrub.split(/[,\s]+/).compact_map(&.strip.presence)
   end
 
   # Factory reset for this section (dispatched by Settings.reset_to_factory). Through the
