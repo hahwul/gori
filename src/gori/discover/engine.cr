@@ -1344,10 +1344,20 @@ module Gori::Discover
       # container: sweeping `/x.php/` cost a whole wordlist and found only PATH_INFO echoes.
       # ponytail: the name alone can't tell an extension-less dotfile (`.env`) from `.git`, so
       # those still recurse; a content-type check would catch them if the cost shows up.
-      if s && s >= 200 && s < 300 && f.depth < @config.max_depth && !StaticAsset.extension(f.url)
+      if s && s >= 200 && s < 300 && f.depth < @config.max_depth && !file_shaped?(f.url)
         enqueue_dir_from_url(f.url, f.depth + 1)
       end
       expand_probe_links(hit)
+    end
+
+    # Extensions that name a FILE. Any dot is not enough: `/api/v2.0`, `/app.v2` and
+    # `/backup.old` are directories, and skipping them hid everything under them.
+    FILE_EXT = Set{"php", "asp", "aspx", "jsp", "json", "xml", "txt", "html", "htm", "js", "css"} +
+               Url::BINARY_EXT
+
+    private def file_shaped?(url : String) : Bool
+      return false unless ext = StaticAsset.extension(url)
+      FILE_EXT.includes?(ext) || @config.extensions.any? { |e| e.lchop('.').downcase == ext }
     end
 
     # The links a confirmed brute-force hit's body named, fed back into the frontier through

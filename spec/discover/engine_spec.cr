@@ -914,6 +914,18 @@ describe Gori::Discover::Engine do
     sent.any?(&.starts_with?("/admin/")).should be_true
   end
 
+  it "still sweeps a dotted directory that is not a file" do
+    cfg = D::Config.new(spider: false, bruteforce: true, calibrate_probes: 3, concurrency: 1,
+      retries: 0, confidence_floor: 0.4, max_depth: 3)
+    sent = [] of String
+    findings, _ = run_discover("http://t/", %w[v1.0], cfg) do |t|
+      sent << t
+      t == "/v1.0" ? html("<h1>api root, version one</h1>") : notfound
+    end
+    findings.map(&.url).should contain("http://t/v1.0")
+    sent.any?(&.starts_with?("/v1.0/")).should be_true
+  end
+
   it "confines a path-scoped run to the seed subtree" do
     cfg = D::Config.new(spider: true, bruteforce: false, max_depth: 4, concurrency: 1, retries: 0)
     findings, _ = run_discover("http://t/app/", %w(), cfg) do |t|
