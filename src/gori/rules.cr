@@ -1946,7 +1946,7 @@ module Gori
     private def rule_affects?(rule : Store::MatchRule, detail : Store::FlowDetail) : Bool
       return false if rule.inert?
       return false unless host_matches?(rule.host, detail.row.host)
-      return stub_would_claim?(rule, detail.request_head) if rule.op.short_circuit?
+      return stub_would_claim?(rule, live_request_head(detail)) if rule.op.short_circuit?
       return false if rule.op.header? && !rule.part.head?
       return ws_rule_affects?(rule, detail) if rule.part.ws?
       bytes = flow_part_bytes(detail, rule)
@@ -2002,9 +2002,20 @@ module Gori
       end
     end
 
+    # The request head as the proxy matches rules against it: a plain-HTTP forward-proxy flow
+    # is recorded with the client's absolute-form line (`GET http://h/p`), but every rule runs
+    # on the origin-form head the proxy forwards (`GET /p`). A matching copy only; the stored
+    # bytes are untouched (P7). A target the proxy could not parse was refused before any rule
+    # ran, so its recorded head is as good as any.
+    private def live_request_head(detail : Store::FlowDetail) : Bytes
+      Proxy::Codec::Http1.origin_form_head(Proxy::Codec::Http1.parse_request_head(detail.request_head))
+    rescue URI::Error | OverflowError
+      detail.request_head
+    end
+
     private def flow_part_bytes(detail : Store::FlowDetail, rule : Store::MatchRule) : Bytes?
       if rule.target.request?
-        rule.part.head? ? detail.request_head : detail.request_body
+        rule.part.head? ? live_request_head(detail) : detail.request_body
       else
         rule.part.head? ? detail.response_head : detail.response_body
       end
