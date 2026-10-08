@@ -129,6 +129,34 @@ def posix_only!(reason : String, file = __FILE__, line = __LINE__) : Nil
   {% end %}
 end
 
+# A FIFO with `cat` on the read end: `flock` on it fails ENOTSUP on macOS — the errno an NFS
+# `nolocks` or FUSE mount gives — and opening it for writing returns once `cat` has it open.
+# Linux flock(2) accepts a FIFO, so there the lock is simply taken and an example would pass
+# with or without the fix it pins: probe first and mark it pending rather than let it read as
+# coverage. The probe keeps its write end open across the block, or `cat` would see EOF.
+def with_unlockable_lock_file(path : String, file = __FILE__, line = __LINE__, &)
+  File.delete?(path)
+  Process.run("mkfifo", [path]).success?.should be_true
+  reader = Process.new("cat", [path], output: Process::Redirect::Close)
+  probe = File.open(path, "w")
+  begin
+    flock_works = begin
+      probe.flock_exclusive(blocking: false)
+      probe.flock_unlock
+      true
+    rescue ex : IO::Error
+      raise ex if Gori::OpenLock.contention?(ex)
+      false
+    end
+    pending!("flock succeeds on a FIFO here; no non-EAGAIN errno to exercise", file, line) if flock_works
+    yield
+  ensure
+    probe.close rescue nil
+    reader.signal(:kill) rescue nil
+    reader.wait
+  end
+end
+
 module SpecWatchdog
   class_property ticks = 0_i64
   class_property running : {Spec::Example, Int64}? = nil
