@@ -103,6 +103,15 @@ describe Gori::Export::OpenApi do
     end
   end
 
+  # YAML 1.1 readers (PyYAML, SnakeYAML) take a plain `12:30:00` as 45000 and `y` as true.
+  it "double-quotes every string in YAML, so a 1.1 reader cannot retype one" do
+    doc = JSON.parse(%({"y":["12:30:00","1:20","y","n","<<","="],"n":1,"t":true,"z":null}))
+    text = OA.to_yaml(doc)
+    {"y", "12:30:00", "1:20", "n", "<<", "="}.each { |s| text.should contain(%("#{s}")) }
+    text.should contain(%("n": 1))
+    YAML.parse(text).to_json.should eq(doc.to_json)
+  end
+
   it "survives a host and names that are not UTF-8, in both formats" do
     with_store do |store|
       raw = String.new(Bytes[0x61, 0xff])
