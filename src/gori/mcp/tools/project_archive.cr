@@ -256,6 +256,7 @@ module Gori
           upstream_credentials: inventory.upstream_credentials,
           exec_repeaters:       inventory.exec_repeaters,
           exec_fuzz_templates:  inventory.exec_fuzz_templates,
+          exec_decoder_tabs:    inventory.exec_decoder_tabs,
           exec_env_vars:        inventory.exec_env_vars,
         }
         j.field "import_safety", {

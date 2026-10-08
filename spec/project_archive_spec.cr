@@ -854,6 +854,25 @@ describe Gori::ProjectArchive do
     end
   end
 
+  # A Decoder sub-tab runs its chain on the first edit, and a Fuzzer session's gRPC fields
+  # (`role¦exec:…`) run theirs on every send, so both are disclosed with the rest.
+  it "discloses exec: chains in Decoder sub-tabs and Fuzzer gRPC fields" do
+    with_archive_project do |_registry, project, store, root|
+      store.insert_fuzz_session("https://archive.test", "POST / HTTP/1.1\r\n\r\n", false, nil,
+        %({"grpc_fields":"user.name¦EXEC:/usr/bin/id"}), nil, 0)
+      store.set_setting(Gori::Store::DECODER_SESSIONS_KEY, %([{"input":"x","chain":"b64|exec:/usr/bin/id"}]))
+      archive_path = export_archive(project, File.join(root, "exec-elsewhere.gori"))
+
+      prepared = Gori::ProjectArchive.prepare_import(archive_path)
+      begin
+        Gori::ProjectArchive.disclosure(prepared.inventory)
+          .should contain("0 Repeater tabs, 1 Fuzzer template, 1 Decoder tab and 0 project env vars contain exec:")
+      ensure
+        prepared.close
+      end
+    end
+  end
+
   it "discloses stored exec: chain steps without rewriting them" do
     with_archive_project do |registry, project, store, root|
       request = "GET /?q=\u00a7v\u00a6exec:/usr/bin/id\u00a7 HTTP/1.1\r\nHost: archive.test\r\n\r\n"
@@ -870,7 +889,7 @@ describe Gori::ProjectArchive do
         prepared.inventory.exec_fuzz_templates.should eq(1)
         prepared.inventory.exec_env_vars.should eq(1)
         disclosure = Gori::ProjectArchive.disclosure(prepared.inventory)
-        disclosure.should contain("1 Repeater tab, 1 Fuzzer template and 1 project env var contain exec:")
+        disclosure.should contain("1 Repeater tab, 1 Fuzzer template, 0 Decoder tabs and 1 project env var contain exec:")
         imported = prepared.import_into(registry, "Exec copy")
         copied = Gori::Store.open(imported.db_path)
         begin
