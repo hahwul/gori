@@ -14,7 +14,7 @@
 - MCP: `gori mcp --pin-project` keeps a server on the project it starts with, withholding the tools that switch to or read other projects (#1508)
 - CLI: `gori run` help now says when a timed capture stops, how it picks its default project, what `send`'s exit status means, and that `import --urls` sends nothing (#1507)
 - Probe: blind SQL injection no longer reports a Critical when a rate limiter or throttle kicks in mid-scan, and an out-of-band probe whose response timed out still matches its callback (#1549)
-- Repeater: a race or timing pair refuses to mix captured and hand-written tabs, and an h2 race no longer stalls or misreads a sibling after one stream's oversized headers or abandoned body (#1549)
+- Repeater: a race or timing pair refuses to mix captured and hand-written tabs, and an h2 race no longer stalls or misreads a sibling after one stream's oversized headers or abandoned body, and a WebSocket message stored with a negative length is sent instead of failing (#1549)
 - Fuzzer: results grouped by response shape no longer split on where the payload text happens to appear, matched-only clusters lead with a hit on CLI and MCP, and a capped `js-endpoints` list says it was cut (#1549)
 - Sitemap and Miner: JavaScript endpoints on IPv6 and mixed-case hosts are matched to their traffic, Mine seeds come from the flow's own origin, and YAML OpenAPI quotes values YAML 1.1 tools would misread (#1549)
 - Rewriter: a file stub's path is made absolute and may not contain NUL, and the rule preview matches plain-HTTP proxied flows the way the proxy does; an edited Intercept request's kept original respects the capture cap (#1549)

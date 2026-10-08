@@ -522,8 +522,10 @@ module Gori::Proxy::WS
   def self.encode(opcode : UInt8, payload : Bytes, *, mask : Bool = true, fin : Bool = true,
                   rsv : Int32 = 0, mask_key : Bytes? = nil, declared_len : Int32? = nil) : Bytes
     n = payload.size
-    # The header advertises `declared_len`; the body is always the payload as handed in.
-    adv = declared_len || n
+    # The header advertises `declared_len`; the body is always the payload as handed in. A
+    # negative length has no wire form (the authoring grammar refuses one, a stored row may
+    # still hold it), so it falls back to the payload's own length rather than raising.
+    adv = declared_len.try { |d| d < 0 ? nil : d } || n
     io = IO::Memory.new(n + 14)
     io.write_byte((fin ? 0x80_u8 : 0_u8) |
                   ((rsv.to_u8! << RSV_SHIFT) & RSV_MASK) |
