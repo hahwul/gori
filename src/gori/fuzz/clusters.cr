@@ -66,8 +66,8 @@ module Gori
         getter representative : Result
         getter first_matched_index : Int64?
         # The lowest-index MATCHED member, metrics-only — what a matched-only view heads the
-        # cluster with, so it never shows a row the lens would have hidden.
-        getter matched_representative : Result?
+        # cluster with (`head`), so it never shows a row the lens would have hidden.
+        @matched_representative : Result? = nil
         getter length_min : Int64
         getter length_max : Int64
         getter words_min : Int32
@@ -120,6 +120,12 @@ module Gori
         # Every member is in `samples`.
         def sample_complete? : Bool
           @samples.size.to_i64 >= @count
+        end
+
+        # The row a list heads this cluster with: under a matched-only lens its first HIT,
+        # never a row the lens hides. Every surface's cluster list asks this one question.
+        def head(matched_only : Bool) : Result
+          (matched_only ? @matched_representative : nil) || @representative
         end
 
         def status : Int32?
@@ -218,8 +224,11 @@ module Gori
       # One cluster's fields — the one spelling MCP and the CLI emit. `text` is the surface's
       # own sanitizer for captured/operator text (MCP `Serialize.text`, the CLI's scrub); the
       # block writes the representative ROW in the surface's existing row shape, so a caller
-      # reads it exactly as it reads a `fuzz_results` row.
-      def self.emit(j : JSON::Builder, c : Cluster, text : String -> String, & : Result ->) : Nil
+      # reads it exactly as it reads a `fuzz_results` row. `matched_only` heads it with
+      # `Cluster#head`, as the lens's list does.
+      def self.emit(j : JSON::Builder, c : Cluster, text : String -> String, matched_only : Bool = false,
+                    & : Result ->) : Nil
+        rep = c.head(matched_only)
         j.object do
           j.field "id", c.hex
           j.field "count", c.count
@@ -230,7 +239,7 @@ module Gori
           j.field("grpc_status", c.representative.grpc_status) if c.representative.grpc_status
           j.field("ws_close_code", c.representative.ws_close_code) if c.representative.ws_close_code
           j.field("error_class", c.error_class.try(&.label)) if c.error_class
-          j.field "representative_index", c.representative.index
+          j.field "representative_index", rep.index
           j.field "first_matched_index", c.first_matched_index
           j.field("length") { range(j, c.length_min, c.length_max) }
           j.field("words") { range(j, c.words_min, c.words_max) }
@@ -239,8 +248,8 @@ module Gori
           j.field("sample_indices") { j.array { c.samples.each { |i| j.number i } } }
           j.field "sample_complete", c.sample_complete?
           j.field("approximate", true) if c.approximate?
-          j.field("representative_payloads") { j.array { c.representative.payloads.each { |p| j.string text.call(p) } } }
-          j.field("representative") { yield c.representative }
+          j.field("representative_payloads") { j.array { rep.payloads.each { |p| j.string text.call(p) } } }
+          j.field("representative") { yield rep }
         end
       end
 

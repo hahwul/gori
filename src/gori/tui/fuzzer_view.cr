@@ -2506,9 +2506,7 @@ module Gori::Tui
         if first = mem.first?
           out << first
         else
-          # Under the matched-only lens the header is the cluster's first HIT, never a row the
-          # lens hides.
-          rep = (@matched_only ? c.matched_representative : nil) || c.representative
+          rep = c.head(@matched_only)
           out << rep
           outside << rep.index
         end

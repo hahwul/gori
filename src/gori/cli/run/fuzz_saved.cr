@@ -187,7 +187,7 @@ module Gori
             j.object do
               j.field("run") { fuzz_saved_run_json(j, run, store.fuzz_result_count(run.id)) }
               j.field("clusters") do
-                j.array { page.each { |c| Fuzz::Clusters.emit(j, c, scrub) { |rep| MCP::Serialize.fuzz_result(j, rep) } } }
+                j.array { page.each { |c| Fuzz::Clusters.emit(j, c, scrub, matched_only) { |rep| MCP::Serialize.fuzz_result(j, rep) } } }
               end
               j.field "cluster_order", order.label
               j.field "offset", offset
@@ -199,11 +199,11 @@ module Gori
           end)
         when :jsonl
           page.each do |c|
-            io.puts(JSON.build { |j| Fuzz::Clusters.emit(j, c, scrub) { |rep| MCP::Serialize.fuzz_result(j, rep) } })
+            io.puts(JSON.build { |j| Fuzz::Clusters.emit(j, c, scrub, matched_only) { |rep| MCP::Serialize.fuzz_result(j, rep) } })
           end
         else
           io.puts fuzz_saved_run_header(run)
-          page.each { |c| io.puts CLI::Output.fuzz_cluster_text(c) }
+          page.each { |c| io.puts CLI::Output.fuzz_cluster_text(c, matched_only) }
           note = "#{Gori.plural(list.size, "cluster")} over #{Gori.plural(clusters.rows, "result")}"
           note += " (showing #{offset + 1}-#{offset + page.size})" if page.size < list.size && !page.empty?
           note += " · #{clusters.overflow_rows} results past the #{clusters.max_clusters}-cluster cap not grouped" if clusters.truncated?
@@ -227,7 +227,7 @@ module Gori
           io.puts(JSON.build do |j|
             j.object do
               j.field("run") { fuzz_saved_run_json(j, run, store.fuzz_result_count(run.id)) }
-              j.field("cluster") { Fuzz::Clusters.emit(j, cluster, ->(t : String) { t.scrub }) { |rep| MCP::Serialize.fuzz_result(j, rep) } }
+              j.field("cluster") { Fuzz::Clusters.emit(j, cluster, ->(t : String) { t.scrub }, matched_only) { |rep| MCP::Serialize.fuzz_result(j, rep) } }
               j.field("results") { j.array { rows.each { |r| MCP::Serialize.fuzz_result(j, r) } } }
               j.field "offset", offset
               j.field "returned", rows.size
@@ -239,7 +239,7 @@ module Gori
           rows.each { |r| io.puts CLI::Output.fuzz_row_json(r) }
         else
           io.puts fuzz_saved_run_header(run)
-          io.puts CLI::Output.fuzz_cluster_text(cluster)
+          io.puts CLI::Output.fuzz_cluster_text(cluster, matched_only)
           rows.each { |r| io.puts CLI::Output.fuzz_row_text(r) }
           err.puts "showing #{offset + 1}-#{offset + rows.size} of #{seen} in cluster #{cluster.hex}" unless rows.empty?
         end

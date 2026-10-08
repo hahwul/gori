@@ -64,7 +64,7 @@ module Gori
         j.field("clusters") do
           j.array do
             pg.page.each do |c|
-              Fuzz::Clusters.emit(j, c, ->(t : String) { Serialize.text(t) }) { |rep| row.call(rep) }
+              Fuzz::Clusters.emit(j, c, ->(t : String) { Serialize.text(t) }, matched_only) { |rep| row.call(rep) }
             end
           end
         end
@@ -103,7 +103,7 @@ module Gori
           return Result.new(JSON.build do |j|
             j.object do
               j.field("cluster") do
-                Fuzz::Clusters.emit(j, cluster, ->(t : String) { Serialize.text(t) }) do |rep|
+                Fuzz::Clusters.emit(j, cluster, ->(t : String) { Serialize.text(t) }, matched_only) do |rep|
                   Serialize.fuzz_result(j, rep)
                 end
               end
@@ -208,7 +208,7 @@ module Gori
           j.object do
             j.field("run") { Serialize.saved_fuzz_run(j, run, store.fuzz_result_count(run.id)) }
             j.field("cluster") do
-              Fuzz::Clusters.emit(j, cluster, ->(t : String) { Serialize.text(t) }) do |rep|
+              Fuzz::Clusters.emit(j, cluster, ->(t : String) { Serialize.text(t) }, matched_only) do |rep|
                 j.object { Serialize.fuzz_result_fields(j, rep) }
               end
             end
