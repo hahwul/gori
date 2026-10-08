@@ -75,11 +75,12 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   # CROSS-TAB: mine the row's endpoint (its newest carrying flow as the base request), with
-  # the names seen on the host's OTHER endpoints tested first. Its own names are left out on
+  # the names seen on the origin's OTHER endpoints tested first. Its own names are left out on
   # purpose — Miner skips a name the base request already carries (`already-in-request`).
+  # Seeded as a History mine is (`seed_mine_names`): an origin-wide read, since the on-screen
+  # report holds only a narrowed target's subtree (and a prefix `/orders` also `/orders-archive`).
   def params_mine : Nil
-    view = params_controller.view
-    unless row = view.selected_row
+    unless row = params_controller.view.selected_row
       @toast = "select a parameter first"
       return
     end
@@ -88,7 +89,6 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       @toast = PARAMS_GONE
       return
     end
-    names = ParamInventory.neighbor_names(view.host_rows(row.host), row)
-    open_mine_config(seed.copy_with(names: names))
+    seed_mine_names(open_mine_config(seed))
   end
 end

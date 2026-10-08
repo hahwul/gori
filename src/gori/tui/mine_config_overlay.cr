@@ -20,8 +20,7 @@ module Gori::Tui
     applicable : Array(Miner::Location),
     default : Array(Miner::Location),
     # Names tested FIRST (`Miner::Config#seed_names`) — the parameter inventory's neighbour
-    # names (#1231), from the Params sub-tab's scan or, for a History mine, one run for the
-    # popup (`land_seed_names`). Not free text, so the no-text-field rule below still holds.
+    # names (#1231), from one inventory read run for the popup (`land_seed_names`). Not free text, so the no-text-field rule below still holds.
     names : Array(String) = [] of String
 
   # The small config popup shown before a mine starts: adaptive location checkboxes,

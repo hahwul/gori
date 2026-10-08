@@ -70,14 +70,6 @@ describe ParamsView do
     v.rows.map(&.name).should eq(["a", "b", "c"])
   end
 
-  # Miner's neighbour names come from the host's OTHER endpoints, which the node filter hides.
-  it "still hands the whole host's rows to the Miner seed while narrowed" do
-    v = ParamsView.new
-    v.report = pv_report([pv_row("a", "/x"), pv_row("b", "/y")])
-    v.target = ParamsView::Target.new("acme.test", Set{"/x"}, "acme.test/x")
-    v.host_rows("acme.test").map(&.name).should eq(["a", "b"])
-  end
-
   it "keeps the cursor on the same parameter across a rescan" do
     v = ParamsView.new
     v.report = pv_report([pv_row("a"), pv_row("b"), pv_row("c")])
@@ -243,7 +235,6 @@ describe ParamsController do
     v.report = pv_report([pv_row("a", "/a", host: "acme.test")])
     v.target = ParamsView::Target.new("ACME.TEST", nil, "ACME.TEST")
     v.rows.map(&.name).should eq(["a"])
-    v.host_rows("Acme.Test").map(&.name).should eq(["a"])
   end
 end
 
