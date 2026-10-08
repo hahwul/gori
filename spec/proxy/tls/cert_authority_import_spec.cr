@@ -141,4 +141,18 @@ describe "Gori::Proxy::Tls::CertAuthority#import!" do
       end
     end
   end
+
+  # A NULL passphrase argument made OpenSSL prompt on /dev/tty: a blocking C call that froze
+  # the whole single-threaded process behind the TUI. The key must fail to read, and say why.
+  it "refuses a passphrase-protected key with a message instead of prompting" do
+    with_ca_dir do |src|
+      cert_path, key_path = external_pair(src, "enc ca")
+      enc_path = File.join(src, "enc.key.pem")
+      Process.run("openssl", ["pkey", "-in", key_path, "-aes256", "-passout", "pass:secret", "-out", enc_path])
+      File.read(enc_path).should contain("ENCRYPTED PRIVATE KEY")
+      expect_raises(Gori::Error, /passphrase-protected/) do
+        Gori::Proxy::Tls::CertAuthority.validate_pem_pair(cert_path, enc_path)
+      end
+    end
+  end
 end

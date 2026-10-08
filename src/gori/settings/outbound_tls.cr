@@ -4,6 +4,7 @@ require "./tls_presets"
 # The validator for `groups` / `sigalgs` / `ciphersuites` / `alpn` asks the OpenSSL that will
 # consume them, rather than re-implementing four grammars here — see ClientShape.
 require "../proxy/tls/client_shape"
+require "../proxy/tls/key_pair"
 
 # OUTBOUND TLS section (settings.json "outbound_tls"): per-destination TLS policy for the
 # connections gori MAKES — a client certificate to present, and the protocol/cipher floor to
@@ -452,7 +453,7 @@ module Gori::Settings
     # An encrypted key would make OpenSSL prompt for a passphrase on a terminal the TUI owns —
     # the process would appear to hang with no visible prompt. Refuse it here, where the
     # message can say what to do, rather than at the first dial.
-    return "settings: client_key is passphrase-protected; decrypt it first (openssl pkey -in #{key} -out key.pem)" if encrypted_key?(key)
+    return "settings: client_key is passphrase-protected; decrypt it first (openssl pkey -in #{key} -out key.pem)" if Proxy::Tls::KeyPair.encrypted_pem?(key)
     nil
   end
 
@@ -527,18 +528,5 @@ module Gori::Settings
     File.file?(path) && File::Info.readable?(path)
   rescue
     false
-  end
-
-  # A PEM private key that carries a passphrase: either the PKCS#8 "ENCRYPTED PRIVATE KEY"
-  # header, or a traditional-format key with the legacy `Proc-Type: 4,ENCRYPTED` line. Reads
-  # only the head of the file — enough for both markers, and it avoids pulling a key into
-  # memory just to classify it.
-  private def self.encrypted_key?(path : String) : Bool
-    buf = Bytes.new(4096)
-    n = File.open(path, &.read(buf))
-    head = String.new(buf[0, n])
-    head.includes?("ENCRYPTED PRIVATE KEY") || head.includes?("Proc-Type: 4,ENCRYPTED")
-  rescue
-    false # unreadable was already reported above; never fail the save on a classification error
   end
 end

@@ -122,4 +122,10 @@ module Gori::Proxy::Tls
   LEAF_VALIDITY_SECS = 60_i64 * 60 * 24 * 397  # ~13 months (browser leaf cap)
   # How far a minted cert's notBefore sits in the past. See CertBuilder.build.
   CLOCK_SKEW_SECS = 60_i64 * 60 * 24 # 1 day
+
+  # The `u` argument every PEM_read_bio_PrivateKey call passes. With both `cb` and `u` NULL,
+  # OpenSSL's default callback prompts for a passphrase on /dev/tty: a blocking C call that
+  # freezes the single-threaded process (and draws over the TUI). A non-NULL `u` is taken as
+  # the passphrase itself, so an encrypted key just fails to read; a plain key ignores it.
+  NO_PASSPHRASE = "".to_unsafe.as(Void*)
 end
