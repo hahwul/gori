@@ -56,7 +56,7 @@ module Gori
     # Returns whether the write committed (see `update_request_session`).
     def update_fuzz_session(id : Int64, target : String, template : String, http2 : Bool,
                             sni : String?, config : String, name : String? = nil) : Bool
-      exec_task_ok ->(c : DB::Connection) {
+      exec_task_row ->(c : DB::Connection) {
         c.exec("UPDATE fuzz_sessions SET target=?, template=?, http2=?, sni=?, config=?, name=?, updated_at=? WHERE id=?",
           target, template, http2 ? 1 : 0, sni, config, name, now_us, id)
         nil
