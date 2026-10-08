@@ -242,6 +242,13 @@ module Gori
             plan = planned(rule, detail, opts, seen)
             next unless plan
             result = sender.send(plan.request, Fuzz::Backend.all_verbatim(plan.request))
+            # The primary carried whatever payloads this plan planted, and it went out — so the
+            # probes are now OUTSTANDING and must be recorded before anything else can fail.
+            # Recorded here rather than at plan time because a payload that never reached the
+            # target is not outstanding, and a row for it would sit unmatched forever, reading
+            # as "we asked and nothing answered" when in fact nobody was ever asked. A read
+            # timeout DID reach it (the write finished first), so it is outstanding too.
+            plan.oob.each { |c| on_oob.try &.call(rule.info.id, c) } if result.ok? || result.timed_out?
             unless result.ok?
               # A refused or failed send is NOT an exception — `Fuzz::Sender` returns an
               # errored Result for a sandbox block, an unbound binding, a connect failure —
@@ -260,12 +267,6 @@ module Gori
               end
               next
             end
-            # The primary carried whatever payloads this plan planted, and it went out — so the
-            # probes are now OUTSTANDING and must be recorded before anything else can fail.
-            # Recorded here rather than at plan time because a payload that never reached the
-            # target is not outstanding, and a row for it would sit unmatched forever, reading
-            # as "we asked and nothing answered" when in fact nobody was ever asked.
-            plan.oob.each { |c| on_oob.try &.call(rule.info.id, c) }
             results = [result]
             # Same verbatim marking as the primary above — a followup is built by the same
             # rule from the same captured request, so a differential whose baseline resolved

@@ -17,11 +17,14 @@ private class XmlBackend < Gori::Fuzz::Backend
   getter origin : Gori::Fuzz::Origin = Gori::Fuzz::Origin.new("https", "acme.test", 443)
   getter sent = [] of Bytes
 
-  def initialize(@fail = false)
+  def initialize(@fail = false, @timeout = false)
   end
 
   def send(bytes : Bytes) : Gori::Repeater::Result
     @sent << bytes.dup
+    if @timeout # written, then the read timed out: the target has the payload
+      return Gori::Repeater::Engine.error("Read timed out", Time.instant, timed_out: true)
+    end
     Gori::Repeater::Result.new("HTTP/1.1 400 Bad Request\r\n\r\n".to_slice, "XML parse error".to_slice,
       nil, 1_i64, error: @fail ? "connection failed" : nil)
   end
@@ -197,6 +200,19 @@ describe Gori::Probe::Active::XxeOast do
         on_oob: ->(rid : String, _candidate : Gori::Probe::OutOfBand::Candidate) { recorded << rid; nil })
       backend.sent.size.should eq(1)
       recorded.should be_empty
+    end
+  end
+
+  it "records the outstanding probe when the send went out but its response timed out" do
+    with_store do |store|
+      recorded = [] of String
+      disabled = Gori::Probe::Active::RULES.map(&.info.id).to_set - Gori::Probe::DEFAULT_DISABLED_RULES
+      disabled.delete("xxe_oast")
+      Gori::Probe::Active.analyze(xml_flow(store), outbound: ungated_outbound, overrides: nil,
+        backend: XmlBackend.new(timeout: true), disabled: disabled,
+        opts: Gori::Probe::Active::Options.new(allow_unsafe: true, oob: XmlMinter.new),
+        on_oob: ->(rid : String, _candidate : Gori::Probe::OutOfBand::Candidate) { recorded << rid; nil })
+      recorded.should eq(["xxe_oast"])
     end
   end
 end
