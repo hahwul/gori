@@ -60,6 +60,7 @@
 - Sequencer, Miner and Fuzzer: a session save the project refused leaves the tab dirty and says so, instead of being silently reverted by the next refresh
 - Project: Delete removes the character after the caret in the DESCRIPTION editor
 - Notes: ^1-9 from the editor clears a sub-tab filter that hides the target note, as it does from the strip
+- Repeater: duplicating a gRPC tab mid hex edit keeps its request head and the edited payload
 
 ## v0.8.0
 

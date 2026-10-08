@@ -19,7 +19,11 @@ class Gori::Tui::RepeaterView
   # to everything that compares this text to a saved copy: the drift digest called the next
   # response stale against a row nobody changed, and a minimize finishing under the peek
   # refused to install its result (#1427).
+  #
+  # Never in gRPC mode: there the buffer holds the deframed message payload, not the request,
+  # and the head stays in the editor (`enter_request_hex`).
   private def hex_buffer_text : String?
+    return nil if @grpc_mode
     (h = @req_hex_edit) && h.mutated? ? String.new(h.to_bytes) : nil
   end
 
@@ -411,7 +415,8 @@ class Gori::Tui::RepeaterView
     @grpc_reframable = src.@grpc_reframable
     @grpc_reframe = src.@grpc_reframe # a send knob, so the clone sends what the source would
     @grpc_compressed = src.@grpc_compressed
-    @grpc_payload = src.@grpc_payload.dup # carry any hex-edited payload into the clone
+    # Carry any hex-edited payload into the clone, including one still in an open ^X buffer.
+    @grpc_payload = (src.@grpc_mode && (h = src.@req_hex_edit)) ? h.to_bytes.dup : src.@grpc_payload.dup
     # `@grpc_web_text` and the residual decide HOW the body is framed on the wire
     # (`grpc_send_body`): grpc-web-text base64-encodes the 5-byte-prefixed frame, plain gRPC
     # does not. Omitting them left the clone at the `false` default, so a duplicated
