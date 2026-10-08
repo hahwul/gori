@@ -81,9 +81,8 @@ module Gori
     #
     # `host_captured` / `origin_captured` also read `flows`, which that fingerprint does not see.
     # Traffic reaching a referenced host or origin after the scan has to clear its "never
-    # requested" flag, so when flows were only ADDED, just the hosts and origins still flagged
-    # uncaptured are asked again — one indexed probe each (`idx_flows_sitemap` leads with host),
-    # not the aggregate. A DELETE can take a flag the other way (the last flow on an origin
+    # requested" flag, so when flows were only ADDED, just the added flows' origins are read
+    # (a rowid range past the last reading), not the aggregate. A DELETE can take a flag the other way (the last flow on an origin
     # gone), and the only honest answer to that is the aggregate again: flow ids are never
     # reused (V39), so rows were deleted exactly when the count grew by less than the newest id
     # did, or the newest id itself went DOWN (the newest flow deleted: both fall by one) —
@@ -100,16 +99,12 @@ module Gori
       key, result, seen = memo
       return result if seen == flows_now
       nodes, capped = result
-      hosts = nodes.reject(&.host_captured).map(&.host).uniq!
-      now = hosts.select { |h| @db.query_one?("SELECT 1 FROM flows WHERE host = ? LIMIT 1", h, as: Int64) }.to_set
-      origins = nodes.reject(&.origin_captured).map { |n| {n.scheme, n.host, n.port} }.uniq!
-      now_origins = origins.select do |(sc, h, pt)|
-        @db.query_one?("SELECT 1 FROM flows WHERE host = ? AND scheme = ? AND port = ? LIMIT 1", h, sc, pt, as: Int64)
-      end.to_set
-      unless now.empty? && now_origins.empty?
+      added = captured_origins("id > ?", [seen[0]] of DB::Any)
+      unless added.empty?
+        hosts = added.map(&.[1]).to_set
         nodes = nodes.map do |n|
-          n = n.copy_with(host_captured: true) if now.includes?(n.host)
-          n = n.copy_with(origin_captured: true) if now_origins.includes?({n.scheme, n.host, n.port})
+          n = n.copy_with(host_captured: true) if hosts.includes?(n.host)
+          n = n.copy_with(origin_captured: true) if added.includes?({n.scheme, n.host, n.port})
           n
         end
       end
@@ -126,21 +121,33 @@ module Gori
       now[0] < before[0] || (now[1] - before[1]) < (now[0] - before[0])
     end
 
+    # The captured flags are read off one walk of the flows' origins rather than an indexed
+    # `f.host = js_refs.host` probe per node: a reference's host is stored lowercased and a
+    # flow's as captured, so the equality missed `Shop.Test` traffic.
     private def js_ref_aggregate(limit : Int32) : {Array(JsRefNode), Bool}
       out = [] of JsRefNode
-      @db.query("SELECT scheme, host, port, path, COUNT(DISTINCT flow_id), " \
-                "EXISTS (SELECT 1 FROM flows f WHERE f.host = js_refs.host), " \
-                "EXISTS (SELECT 1 FROM flows f WHERE f.host = js_refs.host AND f.scheme = js_refs.scheme " \
-                "AND f.port = js_refs.port) FROM js_refs " \
+      origins = captured_origins("1")
+      hosts = origins.map(&.[1]).to_set
+      @db.query("SELECT scheme, host, port, path, COUNT(DISTINCT flow_id) FROM js_refs " \
                 "GROUP BY host, path, scheme, port ORDER BY host, path, scheme, port LIMIT ?", limit + 1) do |rs|
         rs.each do
-          out << JsRefNode.new(rs.read(String), rs.read(String), rs.read(Int64).to_i32, rs.read(String),
-            rs.read(Int64).to_i32, rs.read(Int64) != 0, rs.read(Int64) != 0)
+          scheme, host, port = rs.read(String), rs.read(String), rs.read(Int64).to_i32
+          out << JsRefNode.new(scheme, host, port, rs.read(String), rs.read(Int64).to_i32,
+            hosts.includes?(host), origins.includes?({scheme, host, port}))
         end
       end
       capped = out.size > limit
       out.pop if capped
       {out, capped}
+    end
+
+    # {scheme, host lowercased, port} of every flow `where` selects — a reference's spelling.
+    private def captured_origins(where : String, args : Array(DB::Any) = [] of DB::Any) : Set({String, String, Int32})
+      out = Set({String, String, Int32}).new
+      @db.query("SELECT DISTINCT scheme, host, port FROM flows WHERE #{where}", args: args) do |rs|
+        rs.each { out << {rs.read(String), rs.read(String).downcase, rs.read(Int64).to_i32} }
+      end
+      out
     end
 
     @js_ref_nodes_memo : { { {Int64, Int64, Int64}, Int32 }, {Array(JsRefNode), Bool}, {Int64, Int64} }? = nil
