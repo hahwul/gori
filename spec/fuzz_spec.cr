@@ -110,6 +110,17 @@ describe F::Template do
     F::Template.auto_mark_payload("{\"h\":0x1F,\"v\":1.2.3}").includes?('§').should be_false
   end
 
+  it "auto-marks a JSON body whose string runs past the PCRE2 JIT stack" do
+    big = "A" * 50_000
+    escaped = "\\\"" * 30_000
+    body = "POST / HTTP/1.1\r\nContent-Type: application/json\r\n\r\n" \
+           "{\"avatar\":\"#{big}\",\"e\":\"#{escaped}\",\"name\":\"bob\",\"n\":1}"
+    marked = F::Template.auto_mark(body)
+    marked.should contain("\"avatar\":\"§#{big}§\"")
+    marked.should contain("\"name\":\"§bob§\"")
+    F::Template.parse(marked).position_count.should eq(4)
+  end
+
   it "toggles a marker around the word at the cursor" do
     # cursor inside "admin"
     F::Template.mark_word("user=admin", 7).should eq("user=§admin§")

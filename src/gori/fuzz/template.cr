@@ -845,21 +845,25 @@ module Gori::Fuzz
     # Wrap JSON string and number values (best-effort; keys are left alone). An
     # EMPTY string value (`"k":""`) is skipped — `§§` would parse as a literal § and
     # inject a stray byte (also producing invalid JSON), so empty values stay inert.
+    #
+    # `[^"\\]++` takes a run of plain bytes as ONE group iteration: one iteration per byte ran
+    # PCRE2 out of JIT stack on a string literal of ~44 KB (a base64 avatar), and the
+    # `Regex::Error` crashed `--auto`.
     private def self.mark_json(body : String) : String
-      out = body.gsub(/("(?:[^"\\]|\\.)*"\s*:\s*")((?:[^"\\]|\\.)*)(")/) do |m|
+      out = body.gsub(/("(?:[^"\\]++|\\.)*"\s*:\s*")((?:[^"\\]++|\\.)*)(")/) do |m|
         $2.empty? ? m : "#{$1}#{MARKER}#{$2}#{MARKER}#{$3}"
       end
       # The WHOLE RFC 8259 §6 number token is the position — sign, fraction and exponent. A
       # mantissa-only match turned `1e5` into `§1§e5`, so every payload went out with a
       # trailing `e5` (#1205). The lookahead refuses a token that runs on into something
       # that is not a number (`0x1F`, `1.2.3`): leaving it unmarked beats a partial position.
-      out = out.gsub(/("(?:[^"\\]|\\.)*"\s*:\s*)(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(?![\w.+\-])/) { "#{$1}#{MARKER}#{$2}#{MARKER}" }
+      out = out.gsub(/("(?:[^"\\]++|\\.)*"\s*:\s*)(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(?![\w.+\-])/) { "#{$1}#{MARKER}#{$2}#{MARKER}" }
       # Also mark boolean/null scalar values so `--auto` exercises flag-style fields
       # (e.g. "admin":true) as documented. (Array-element values are still unmarked.)
-      out.gsub(/("(?:[^"\\]|\\.)*"\s*:\s*)(true|false|null)\b/) { "#{$1}#{MARKER}#{$2}#{MARKER}" }
-    rescue ArgumentError
-      # An invalid-UTF-8 body (e.g. a repeater seeded from a captured non-UTF-8 JSON request) makes
-      # the PCRE gsub raise; leave it unmarked rather than crash the TUI auto-mark — and do NOT
+      out.gsub(/("(?:[^"\\]++|\\.)*"\s*:\s*)(true|false|null)\b/) { "#{$1}#{MARKER}#{$2}#{MARKER}" }
+    rescue ArgumentError | Regex::Error
+      # An invalid-UTF-8 body (e.g. a repeater seeded from a captured non-UTF-8 JSON request), or
+      # one still past the JIT stack limit, makes the PCRE gsub raise; leave it unmarked rather than crash the TUI auto-mark — and do NOT
       # scrub, because this template is re-sent and its bytes must stay exact (P7).
       body
     end
