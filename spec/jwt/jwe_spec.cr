@@ -97,6 +97,16 @@ describe "JWE across the derived projections" do
     Gori::Jwt.attacks(jwe_token).should be_empty
   end
 
+  it "stays a JWE when the header carries a number past Int64" do
+    # Stdlib JSON.parse raised on the oversized member, so `jwe?` said no and every refusal
+    # gate below it was bypassed.
+    header = b64(%({"alg":"RSA-OAEP","enc":"A256GCM","n":99999999999999999999}))
+    t = [header, "AAAA", "BBBB", "CCCC", "DDDD"].join('.')
+    Gori::Jwt::Jwe.jwe?(t).should be_true
+    Gori::Jwt.attacks(t).should be_empty
+    Gori::Jwt.verify(t, "x").code.should eq(Gori::Jwt::VerifyCode::Jwe)
+  end
+
   it "verify says there is no signature, not that the alg is unsupported" do
     v = Gori::Jwt.verify(jwe_token, "any-key")
     v.verified.should be_false
