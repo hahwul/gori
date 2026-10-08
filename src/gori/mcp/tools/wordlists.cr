@@ -133,6 +133,8 @@ module Gori
       private def wordlist_save_source(h) : {Array(String), PayloadFrom::Report?, Int32} | Result
         desc = str(h, "payload_from").try(&.presence)
         values = wordlist_values_arg(h)
+        # An empty array names no values (see `describes?`), so it does not compete with a source.
+        values = nil if desc && values.try(&.empty?)
         if desc && values
           return err("pass 'values' or 'payload_from', not both", "INVALID_ARGUMENT", field: "payload_from")
         end

@@ -384,8 +384,16 @@ module Gori
                            "the line \"Cookie: session=…\" as a string",
                   "INVALID_ARGUMENT", field: "set_headers")
               end
-              v = o["value"]?.try(&.as_s?) || ""
-              lines << "#{n}: #{v}"
+              # A missing, null or container value is refused, never folded to "": that stored
+              # an empty credential the slot then sent as. A scalar is its text, as
+              # `RequestBuilder.header_pairs` reads the same shape; an explicit "" stays allowed.
+              v = o["value"]?
+              if v.nil? || v.raw.nil? || v.as_a? || v.as_h?
+                return err("'set_headers' entry #{entry.to_json} has no string value for #{n.inspect} — an " \
+                           "object entry is {\"name\": \"Cookie\", \"value\": \"session=…\"}",
+                  "INVALID_ARGUMENT", field: "set_headers")
+              end
+              lines << "#{n}: #{v.as_s? || v.to_s}"
             else
               lines << (entry.as_s? || entry.to_s)
             end

@@ -255,6 +255,15 @@ describe "MCP payload_from" do
       end
     end
 
+    it "reads an empty 'values' as absent beside a real payload_from" do
+      with_wordlist_home do
+        with_store do |store|
+          seed(store, "/a?x=1")
+          ok(tools_for(store), "save_wordlist", %({"name":"e.txt","values":[],"payload_from":"param-names"}))["values"].as_i.should eq(1)
+        end
+      end
+    end
+
     it "refuses both sources at once, and payload_from with no project bound" do
       with_wordlist_home do
         with_store do |store|

@@ -74,6 +74,7 @@ describe "MCP argument aliases" do
       # an empty value a client filled in for every property it was shown.
       mcp_ok_json(tools, "get_flow", %({"id":#{a},"flow_id":null}))["id"].as_i64.should eq(a)
       mcp_ok_json(tools, "get_flow", %({"id":#{a},"flow_id":""}))["id"].as_i64.should eq(a)
+      mcp_ok_json(tools, "get_flow", %({"id":"","flow_id":#{a}}))["id"].as_i64.should eq(a)
     end
   end
 

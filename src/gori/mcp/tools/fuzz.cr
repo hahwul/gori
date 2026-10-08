@@ -834,13 +834,24 @@ module Gori
       # `as_bool?` for the `0`/`1` the schema advertises, so a PING went out as TEXT and `fin:0`
       # as FIN=1, with `isError:false`.
       private def fuzz_ws_override(raw : JSON::Any) : Array(Fuzz::WsMessageSource)
-        arr = raw.as_a? || (raw.as_s?.try { |t| JSON.parse(t).as_a? })
-        raise FuzzArgError.new("'messages' must be a JSON array of frames") unless arr
-        arr.map do |item|
-          msg, err = ws_out_message_item(item)
-          raise FuzzArgError.new(ws_entry_error("messages", item, err)) unless msg
-          Fuzz::WsMessageSource.new(msg.opcode, String.new(msg.payload), msg.shape, false)
-        end
+        # A string is a JSON-encoded array when it parses as one, and otherwise the
+        # newline-separated TEXT-frame form the schema advertises — never a parse error, which
+        # used to escape every rescue here as INTERNAL.
+        text = raw.as_s?
+        arr = raw.as_a? || text.try { |t| (JSON.parse(t).as_a? rescue nil) }
+        msgs =
+          if arr
+            arr.map do |item|
+              msg, err = ws_out_message_item(item)
+              raise FuzzArgError.new(ws_entry_error("messages", item, err)) unless msg
+              msg
+            end
+          elsif text
+            ws_text_lines(text)
+          else
+            raise FuzzArgError.new("'messages' must be an array of frames or a newline-separated string")
+          end
+        msgs.map { |msg| Fuzz::WsMessageSource.new(msg.opcode, String.new(msg.payload), msg.shape, false) }
       end
 
       # The outbound WebSocket frame script for this sweep, or nil when it is not a WS run.

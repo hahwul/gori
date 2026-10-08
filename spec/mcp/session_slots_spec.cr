@@ -129,6 +129,21 @@ describe "MCP session slots" do
     end
   end
 
+  # A missing or null value used to become "", so the slot quietly sent an empty credential.
+  it "refuses an object entry with no value, and stores a scalar value as its text" do
+    with_store do |store|
+      t = tools_for(store)
+      [%({"name":"Cookie"}), %({"name":"Cookie","value":null})].each do |entry|
+        text, err = call_raw(t, "create_session_slot", %({"name":"t1","set_headers":[#{entry}]}))
+        err.should be_true
+        text.should contain("no string value")
+      end
+      Gori::SessionSlots.load(store).slots.should be_empty
+      call_json(t, "create_session_slot", %({"name":"t1","set_headers":[{"name":"X-Tenant-Id","value":42}]}))
+      Gori::SessionSlots.load(store).slots[0].set_headers.should eq([{"X-Tenant-Id", "42"}])
+    end
+  end
+
   it "reports a missing slot as NOT_FOUND rather than creating one" do
     with_store do |store|
       t = tools_for(store)
