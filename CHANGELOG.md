@@ -53,6 +53,7 @@
 - Export: the CSRF PoC no longer crashes on a multipart header holding a character like `İ`, strips the framing newline from a non-ASCII multipart value, and a dash run in the URL can no longer close its HTML comment
 - CLI: `gori update --exec` and `gori settings --edit` say a package manager or editor was killed by a signal instead of printing a backtrace
 - Export: the CSRF PoC no longer crashes on a multipart header holding a character like `İ`, strips the framing newline from a non-ASCII multipart value, and a dash run in the URL can no longer close its HTML comment; Python, fetch, Go, httpie and CSRF output keep a Transfer-Encoding that does not end in `chunked`, as curl does
+- Colormarker: editing a rule so it no longer matches the `/` filter while also changing its scope now moves it, instead of reporting it deleted
 
 ## v0.8.0
 

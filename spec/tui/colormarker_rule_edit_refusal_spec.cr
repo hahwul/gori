@@ -337,6 +337,29 @@ describe "Gori::Tui::ColormarkerController#apply_color_rule" do
     end
   end
 
+  # The re-home looks the edited rule up again. Against the FILTERED list, an edit that stops
+  # matching a standing `/` query read as a peer delete after the field edit had committed.
+  it "re-homes an edited rule that no longer matches the `/` filter" do
+    with_globals do
+      with_colormarker_controller do |ctl, host, session|
+        with_own_settings do
+          id = session.store.insert_color_rule("host:a", "red", Gori::Store::MarkerStyle::Full, "a")
+          ctl.on_enter
+          ctl.colormarker_filter
+          "red".each_char { |c| ctl.handle_list_filter_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }
+          ctl.handle_list_filter_key(Termisu::Event::Key.new(Termisu::Input::Key::Enter))
+          ctl.selected_rule.try(&.match_filter).should eq("host:a")
+
+          ctl.apply_color_rule(ColormarkerRuleOverlay.new(name: "a", match_filter: "host:a",
+            color: "blue", style: "full", scope: "global",
+            edit_id: id, edit_scope: Gori::Store::RuleScope::Project)).should be_true
+          host.statuses.last.should eq("colour rule is now GLOBAL — it applies in every project")
+          Gori::Settings.colormarker_rules.map { |r| {r.match_filter, r.color} }.should eq([{"host:a", "blue"}])
+        end
+      end
+    end
+  end
+
   # The other half of the contract: false must mean "refused", not "any of the paths that
   # return", so a committed edit still closes the card.
   it "commits an edited global rule and closes the form" do
