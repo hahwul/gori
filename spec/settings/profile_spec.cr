@@ -329,6 +329,18 @@ describe "settings profiles" do
       end
     end
 
+    it "refuses a bad upstream proxy address with a clean error" do
+      with_config_home do
+        expect_raises(Gori::Error) do
+          Gori::Settings.import_document(%({"upstream_rules":[{"host":"a.test","kind":"http","addr":"a\xFF:80"}]}))
+        end
+      end
+    end
+
+    it "reports a bad listener host instead of raising" do
+      Gori::Settings.bind_host_error("a\xFF").should eq(%(settings: invalid bind address "a\\xFF"))
+    end
+
     it "reads a string ALPN list" do
       with_config_home do
         Gori::Settings.import_document(%({"outbound_tls":[{"host":"a.test","alpn":"h2,\xFF"}]}))
