@@ -1729,3 +1729,40 @@ describe "Gori::Import curl" do
     end
   end
 end
+
+# A store whose generic write closures never commit — the reply a batch rolled back by a peer
+# gori holding the lock gets. An import's WebSocket transcript used to be written through one
+# of those, separately from its flow and with the reply thrown away.
+private class ExecTaskDroppingStore < Gori::Store
+  private def exec_task(run : DB::Connection -> Nil, *, event : Bool = false) : Int64
+    0_i64
+  end
+end
+
+private def with_exec_task_dropping_store(&)
+  path = File.tempname("gori-import-wsdrop", ".db")
+  db = DB.open("sqlite3:#{path}?journal_mode=wal&synchronous=normal&busy_timeout=5000")
+  Gori::SafeRegexp.install(db)
+  Gori::Store::Schema.migrate!(db)
+  store = ExecTaskDroppingStore.new(db)
+  begin
+    yield store
+  ensure
+    store.close
+    File.delete?(path)
+    File.delete?("#{path}-wal")
+    File.delete?("#{path}-shm")
+  end
+end
+
+describe "Gori::Import.insert_chunk" do
+  it "commits a flow's WebSocket transcript with the flow, never the flow alone" do
+    with_exec_task_dropping_store do |store|
+      msg = Gori::Store::ImportedWsMessage.new(1_i64, "out", 1, "ping".to_slice)
+      pair = har_pair(Gori::Import::Builder::Headers.new).copy_with(ws_messages: [msg])
+      Gori::Import.insert_chunk(store, [pair]).should eq(1)
+      id = store.search(Gori::QL::EMPTY, 10).first.id
+      store.ws_messages(id).map { |m| String.new(m.payload) }.should eq(["ping"])
+    end
+  end
+end

@@ -79,8 +79,11 @@ module Gori
       # the writer transaction, and looking them back up by created_at would race any other
       # import writing the same microsecond. `insert_import_batch` still answers a count.
       getter reply : Channel(Array(Int64))
+      # Each pair's imported WebSocket transcript, by index, written in the SAME transaction as
+      # its flow so the two commit or roll back together. nil = no transcripts.
+      getter ws : Array(Array(ImportedWsMessage))?
 
-      def initialize(@pairs, @reply)
+      def initialize(@pairs, @reply, @ws = nil)
       end
     end
 
@@ -834,10 +837,12 @@ module Gori
     end
 
     # Same write, answering with the new flow ids in pair order (empty when the store is
-    # closing or the batch rolled back). Blocks until committed.
-    def insert_import_batch_ids(pairs : Array({CapturedRequest, CapturedResponse?})) : Array(Int64)
+    # closing or the batch rolled back). Blocks until committed. `ws`, when given, is each
+    # pair's WebSocket transcript (see `insert_imported_ws`), committed with its flow.
+    def insert_import_batch_ids(pairs : Array({CapturedRequest, CapturedResponse?}),
+                                ws : Array(Array(ImportedWsMessage))? = nil) : Array(Int64)
       reply = Channel(Array(Int64)).new(1)
-      @writes.send(InsertImportBatch.new(pairs, reply))
+      @writes.send(InsertImportBatch.new(pairs, reply, ws))
       reply.receive
     rescue Channel::ClosedError
       [] of Int64
@@ -892,34 +897,31 @@ module Gori
 
     # Restores a flow's captured WebSocket transcript — the import path, where the messages
     # already happened and their timestamps come out of the file rather than off the clock
-    # (`ImportedWsMessage` says why that distinction is load-bearing). Blocks until committed.
+    # (`ImportedWsMessage` says why that distinction is load-bearing).
     #
-    # ONE transaction for the whole transcript, the way `update_repeater_ws_messages` does it:
-    # a socket's message log is the unit here, and a per-message round trip through the writer
-    # would put a fsync between every frame of an imported capture. Nothing is deleted first —
-    # unlike the repeater case, this only ever runs against a flow that was inserted moments
-    # ago by the same import.
+    # Inside the `InsertImportBatch` transaction that inserted the flow, so the flow and its
+    # transcript commit or roll back together. It used to be a separate writer op per flow
+    # whose reply nobody read: a rolled-back transcript left the flow committed, counted as
+    # imported, with no messages. Nothing is deleted first — the flow was inserted a moment
+    # ago in this very transaction.
     #
     # Rows land in ARRAY order, which is what makes the order survive: `ws_messages` reads back
     # `ORDER BY id`, not by `created_at`, so two messages inside the same microsecond keep the
     # sequence the source recorded.
-    def insert_ws_messages(flow_id : Int64, messages : Array(ImportedWsMessage)) : Nil
-      return if messages.empty?
-      exec_task ->(conn : DB::Connection) {
-        messages.each do |msg|
-          args = [flow_id, nil, msg.created_at, msg.direction, msg.opcode] of DB::Any
-          # See `insert_ws_one`: an empty payload binds SQL NULL and violates the NOT NULL
-          # column, which would roll back the whole transaction — and a zero-length TEXT frame
-          # is legal per RFC 6455 (an empty heartbeat), so it reaches here.
-          slot = Store.blob_slot(args, msg.payload)
-          Store.bind_ws_shape(args, WsShape::DEFAULT)
-          conn.exec(
-            "INSERT INTO ws_messages (flow_id, repeater_id, created_at, direction, opcode, payload, " \
-            "fin, rsv, masked, mask_key, frames, declared_len) " \
-            "VALUES (?,?,?,?,?,#{slot},?,?,?,?,?,?)", args: args)
-        end
-        nil
-      }
+    private def insert_imported_ws(conn : DB::Connection, flow_id : Int64,
+                                   messages : Array(ImportedWsMessage)) : Nil
+      messages.each do |msg|
+        args = [flow_id, nil, msg.created_at, msg.direction, msg.opcode] of DB::Any
+        # See `insert_ws_one`: an empty payload binds SQL NULL and violates the NOT NULL
+        # column, which would roll back the whole transaction — and a zero-length TEXT frame
+        # is legal per RFC 6455 (an empty heartbeat), so it reaches here.
+        slot = Store.blob_slot(args, msg.payload)
+        Store.bind_ws_shape(args, WsShape::DEFAULT)
+        conn.exec(
+          "INSERT INTO ws_messages (flow_id, repeater_id, created_at, direction, opcode, payload, " \
+          "fin, rsv, masked, mask_key, frames, declared_len) " \
+          "VALUES (?,?,?,?,?,#{slot},?,?,?,?,?,?)", args: args)
+      end
     end
 
     # Read-modify-write ONE `settings` row with the READ taken INSIDE the writer's own
@@ -1433,7 +1435,8 @@ module Gori
                 when InsertImportBatch
                   batch_reply = op.reply
                   inserted = [] of {Int64, Bool}
-                  op.pairs.each do |req, resp|
+                  transcripts = op.ws
+                  op.pairs.each_with_index do |(req, resp), i|
                     # A response-less import pair is a reference placeholder that will never be
                     # sent — mark it `unsent` so abandon_pending! never fabricates an error for it (#408).
                     id = insert_one(c, req, unsent: resp.nil?)
@@ -1448,6 +1451,7 @@ module Gori
                         error: r.error, body_truncated: r.body_truncated?,
                         body_size: r.body_size))
                     end
+                    transcripts.try(&.[i]?).try { |msgs| insert_imported_ws(c, id, msgs) }
                     inserted << {id, has_resp}
                   end
                   deferred << -> {
