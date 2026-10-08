@@ -769,6 +769,97 @@ module Gori::Probe
     def spec_release_worker_sender : Nil
       release_worker_sender
     end
+
+    def spec_sweep_oob : Nil
+      sweep_oob
+    end
+  end
+end
+
+private class FixedMinter < Gori::Probe::OutOfBand::Minter
+  def mint : {String, String, Int64}?
+    {"oobrace1234.oast.example", "oobrace1234", 7_i64}
+  end
+end
+
+# An origin that runs `on_request` while the probe's send is still waiting for its answer —
+# the window a target that fetches the planted URL at once, then answers slowly, opens.
+private class SlowFetchOrigin
+  def initialize(@on_request : Proc(Nil))
+    @server = TCPServer.new("127.0.0.1", 0)
+    spawn do
+      while conn = @server.accept?
+        serve(conn)
+      end
+    rescue
+    end
+  end
+
+  def port : Int32
+    @server.local_address.port
+  end
+
+  def close : Nil
+    @server.close rescue nil
+  end
+
+  private def serve(conn : TCPSocket) : Nil
+    spawn do
+      while conn.gets("\r\n", chomp: true)
+        while (line = conn.gets("\r\n", chomp: true)) && !line.empty?
+        end
+        @on_request.call
+        conn << "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\n\r\nok"
+        conn.flush
+      end
+    rescue
+    ensure
+      conn.close rescue nil
+    end
+  end
+end
+
+describe "Probe::Analyzer out-of-band sweep" do
+  # The probe row is written after the send returns; a sweep during the send read the callback,
+  # found no pending probe, and moved the watermark past it for good.
+  it "matches a callback that was swept before its probe row existed" do
+    with_store do |store|
+      a = nil.as(Gori::Probe::Analyzer?)
+      origin = SlowFetchOrigin.new(-> do
+        store.insert_oast_callback(7_i64, "uid-race", "http", "GET", "10.1.2.3",
+          "oobrace1234.oast.example", "GET / HTTP/1.1\r\nHost: oobrace1234.oast.example\r\n\r\n".to_slice, nil, 2_000_i64)
+        a.try &.spec_sweep_oob
+        nil
+      end)
+      begin
+        target = "/fetch?url=https://good.example/x"
+        head = "GET #{target} HTTP/1.1\r\nHost: 127.0.0.1:#{origin.port}\r\n\r\n"
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: origin.port,
+          method: "GET", target: target, http_version: "HTTP/1.1", head: head.to_slice,
+          source: Gori::FlowSource::Kind::Proxy))
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: id, status: 200,
+          head: "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 2\r\n\r\n".to_slice,
+          body: "ok".to_slice, duration_us: 1_i64))
+        detail = store.get_flow(id).not_nil!
+        a = analyzer = Gori::Probe::Analyzer.new(store, Gori::Scope.load(store),
+          Channel(Gori::Store::FlowEvent).new(1), Gori::Probe::Mode::Active, false)
+        rule = Gori::Probe::Active::SsrfOast.new
+        plan = rule.plan(detail, Gori::Probe::Active::Options.new(oob: FixedMinter.new)).not_nil!
+        begin
+          analyzer.spec_worker_task(rule, plan, detail)
+        ensure
+          analyzer.spec_release_worker_sender
+        end
+        analyzer.spec_sweep_oob
+        store.probe_oast_pending.should be_empty
+        store.probe_issues.map(&.code).should contain("ssrf_oast")
+        analyzer.stop
+      ensure
+        origin.close
+      end
+    end
   end
 end
 
