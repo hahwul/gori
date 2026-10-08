@@ -523,6 +523,16 @@ describe Gori::FilterAst do
       Gori::FilterAst.partition("NOT (tag:a NOT tag:b)") { |t| t.text.starts_with?("tag:") }[0]
         .map { |t| {t.text, t.negate?} }.should eq([{"tag:a", true}, {"tag:b", false}])
     end
+
+    it "keeps the outer NOT on the residual half of a MIXED group" do
+      # The run negated only the taken terms, so `host:cdn` came back POSITIVE and the Sitemap
+      # showed only the CDN it was asked to hide.
+      {"NOT (tag:wip OR host:cdn)", "-(tag:wip host:cdn)"}.each do |q|
+        taken, residual = Gori::FilterAst.partition(q, &.text.starts_with?("tag:"))
+        taken.map { |t| {t.text, t.negate?} }.should eq([{"tag:wip", true}])
+        parse(residual).should eq("-host:cdn")
+      end
+    end
   end
 
   describe ".spans" do
@@ -585,6 +595,15 @@ describe Gori::FilterAst do
     # and the count that happened to SURVIVE decided polarity. So one keyword past the cap
     # returned the exact COMPLEMENT of the query — silently, exit 0, "no flows match". On a
     # filter that is worse than an error: it hides the rows the operator was looking for.
+    it "keeps the terms AFTER a group deeper than the cap" do
+      # Each over-deep `(` left its `)` unconsumed, the top level stopped on it, and every
+      # later term was silently dropped (a filter that broadens).
+      n = Gori::FilterAst::MAX_PARSE_DEPTH + 44
+      q = "#{"(" * n}host:a#{")" * n} -host:evil"
+      Gori::FilterAst.terms(Gori::FilterAst.parse(q)).map { |t| {t.text, t.negate?} }
+        .should eq([{"host:a", false}, {"host:evil", true}])
+    end
+
     it "keeps NOT-chain polarity on both sides of the depth cap" do
       cap = Gori::FilterAst::MAX_PARSE_DEPTH
       {2, 4, cap, cap + 1, cap + 2, 400, 401, 8000, 8001}.each do |n|
