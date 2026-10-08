@@ -272,7 +272,9 @@ module Gori
       # line break) or the start of the string counts.
       private def self.disposition_field(head : String, field : String) : String?
         needle = "#{field}=".downcase
-        hay = head.downcase
+        # ASCII-only folding keeps one char per char, so an index into `hay` is an index into
+        # `head`; full Unicode folding grows `İ` into two chars and shifts every later match.
+        hay = head.downcase(Unicode::CaseOptions::ASCII)
         start = 0
         while idx = hay.index(needle, start)
           before = idx == 0 ? ';' : hay[idx - 1]
@@ -298,16 +300,18 @@ module Gori
       # `s` with ONE trailing newline removed — a CRLF taken whole, else a lone LF — and nothing
       # when it ends in neither. The single framing newline before a multipart delimiter.
       private def self.strip_one_trailing_newline(s : String) : String
-        return s[0, s.bytesize - 2] if s.ends_with?("\r\n")
-        return s[0, s.bytesize - 1] if s.ends_with?("\n")
-        s
+        s.ends_with?("\r\n") ? s.rchop("\r\n") : s.rchop('\n')
       end
 
-      # Text safe to sit inside an HTML comment: `--` (which would close the comment early) and a
-      # literal `>` right after it are neutralised. Comments carry only gori's own prose plus
-      # header/param NAMES, so this is a guard, not lossless round-tripping.
+      # Text safe to sit inside an HTML comment: no `--` survives, so neither `-->` nor `--!>`
+      # can close the comment early. One `gsub` pass leaves `--->` as `- -->`, hence the loop.
+      # Comments carry gori's own prose plus the raw URL and header NAMES, so this is a guard,
+      # not lossless round-tripping.
       private def self.html_comment_safe(s : String) : String
-        s.gsub("--", "- -").gsub('\n', ' ').gsub('\r', ' ')
+        while s.includes?("--")
+          s = s.gsub("--", "- -")
+        end
+        s.gsub('\n', ' ').gsub('\r', ' ')
       end
 
       # A JS double-quoted string, byte-safe with `\xNN` — the fetch path's method and its
