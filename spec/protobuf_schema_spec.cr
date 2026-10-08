@@ -100,6 +100,11 @@ describe Gori::Protobuf::Schema do
       msg.should contain("--descriptor_set_out")
     end
 
+    it "still names the SOURCE mistake when byte 512 splits a multibyte character" do
+      src = "// " + "가" * 200 + "\nsyntax = \"proto3\";\n"
+      Schema.parse(src.to_slice).as(String).should contain("looks like a `.proto` SOURCE file")
+    end
+
     it "refuses bytes that are not protobuf at all" do
       Schema.parse(Bytes[0xff, 0xff, 0xff, 0xff]).as(String).should contain("not a FileDescriptorSet")
     end
