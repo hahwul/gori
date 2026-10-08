@@ -214,7 +214,7 @@ module Gori
       compiled, rev = snap
       subject = InterceptFilter::Subject.new(
         method: row.method, host: row.host, target: row.target,
-        scheme: row.scheme, status: row.status, proto: proto)
+        scheme: row.scheme, status: row.status, proto: proto, port: row.port)
       compiled.each_with_index do |c, i|
         if f = c.filter
           return c.rule if f.matches?(subject)
@@ -712,7 +712,7 @@ module Gori
         scanned += 1
         subject = InterceptFilter::Subject.new(
           method: row.method, host: row.host, target: row.target,
-          scheme: row.scheme, status: row.status,
+          scheme: row.scheme, status: row.status, port: row.port,
           proto: Proto.classify(row.status, row.content_type, row.request_content_type, row.connect_protocol))
         next unless candidate.hit?(row, subject)
         matched += 1

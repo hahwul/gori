@@ -551,7 +551,7 @@ module Gori
       body = detail.response_body
       return if (head.nil? || head.empty?) && body.nil? # still pending, or never answered
       subject = InterceptFilter::Subject.new(method: row.method, host: row.host, target: row.target,
-        scheme: row.scheme, status: row.status, head: head, payload: body)
+        scheme: row.scheme, status: row.status, head: head, payload: body, port: row.port)
       extract = ExtractSubject.response(head, body, Params::DECODE_MAX)
       compiled.each do |(rule, cond, re)|
         next unless Rules.host_matches?(rule.host, row.host) && cond.matches?(subject)

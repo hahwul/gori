@@ -805,7 +805,8 @@ module Gori
     # is waiting on, so everything here is caught.
     def observe_response(head : Bytes, body : Bytes?, *,
                          method : String, host : String, target : String,
-                         scheme : String, status : Int32, flow_id : Int64? = nil) : Nil
+                         scheme : String, status : Int32, flow_id : Int64? = nil,
+                         port : Int32? = nil) : Nil
       return unless extracts? # lock-free: nothing configured, nothing allocated
       # `head` and `body` ride along so a rule's CONDITION can read them — this is the one
       # surface handed both, and dropping them here is what used to make `header:`/`body:`
@@ -813,7 +814,7 @@ module Gori
       # at all is `wants_body?`'s business (see there): a condition naming `body:` is itself a
       # reason to buffer one.
       subject = InterceptFilter::Subject.new(method: method, host: host, target: target,
-        scheme: scheme, status: status, head: head, payload: body)
+        scheme: scheme, status: status, head: head, payload: body, port: port)
       picked = candidates(subject)
       return if picked.empty?
       # Parsed only now — after the host glob and the condition have both matched. A response

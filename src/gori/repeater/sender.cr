@@ -524,7 +524,7 @@ module Gori
         parts = String.new(request[0, nl || request.size]).split
         subject = Gori::InterceptFilter::Subject.new(
           method: parts[0]? || "GET", host: @host, target: parts[1]? || "/",
-          scheme: @scheme, status: result.response.try(&.status))
+          scheme: @scheme, status: result.response.try(&.status), port: @port)
         bindings.observe(result, subject, as_slot: @refresh_slot)
       rescue ex
         ::Log.warn { "extract rules skipped: #{ex.message}" }

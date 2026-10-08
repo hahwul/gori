@@ -1240,7 +1240,7 @@ module Gori::Proxy
 
       # What an extract rule's condition needs to know about this exchange (#501 slice 2), or
       # nil when no extract rule is live — one lock-free atomic read on the common path.
-      extract_ref = extract_ref_for(sent_req, host, scheme, sent_resp.status, flow_id)
+      extract_ref = extract_ref_for(sent_req, host, port, scheme, sent_resp.status, flow_id)
 
       # Buffer the response body when a Match&Replace body rule OR a body-scoped extract rule
       # needs the whole entity: a bounded (Length/chunked), non-streaming response. SSE /
@@ -1912,7 +1912,7 @@ module Gori::Proxy
         # received it. `decision.bytes` is a complete message, so its body half is already the
         # entity (the editor synced Content-Length); an empty one is a body we have, not a body
         # gori withheld, hence `Bytes.empty` rather than nil.
-        observe_delivered(extract_ref_for(sent_req, host, scheme, sent_resp.status, flow_id),
+        observe_delivered(extract_ref_for(sent_req, host, port, scheme, sent_resp.status, flow_id),
           out_head, out_body || Bytes.empty)
         @sink.on_response(FlowMapper.response(sent_resp,
           flow_id: flow_id, body: stored, ttfb_us: ttfb, duration_us: duration,
@@ -3262,15 +3262,16 @@ module Gori::Proxy
       target : String,
       scheme : String,
       status : Int32,
-      flow_id : Int64?
+      flow_id : Int64?,
+      port : Int32
 
     # Built once per response, and only when an extract rule is live: `extracts?` is a lock-free
     # atomic read, so a proxy with no extract rule allocates nothing here.
-    private def extract_ref_for(sent_req : Codec::RawRequest, host : String, scheme : String,
+    private def extract_ref_for(sent_req : Codec::RawRequest, host : String, port : Int32, scheme : String,
                                 status : Int32, flow_id : Int64) : ExtractRef?
       ex = @extractor
       return nil unless ex && ex.extracts?
-      ExtractRef.new(sent_req.method, host, sent_req.target, scheme, status, flow_id)
+      ExtractRef.new(sent_req.method, host, sent_req.target, scheme, status, flow_id, port)
     end
 
     # Offer the bytes the client actually received to the extract rules. Called AFTER the head
@@ -3285,7 +3286,7 @@ module Gori::Proxy
       return unless ref
       @extractor.try(&.observe_response(head, entity,
         method: ref.method, host: ref.host, target: ref.target, scheme: ref.scheme,
-        status: status || ref.status, flow_id: ref.flow_id))
+        status: status || ref.status, flow_id: ref.flow_id, port: ref.port))
     end
 
     # Whether the request-body Match&Replace path applies: a body rule is live, there IS a

@@ -569,7 +569,7 @@ module Gori
       return false if dir.response_only?
       return false unless scope_allows?(scheme, host, target, port)
       filter.matches?(Subject.new(method: method, host: host, target: target, scheme: scheme,
-        head: head))
+        head: head, port: port))
     end
 
     # Precise per-RESPONSE gate (same shape as the request gate). Skips when
@@ -581,7 +581,7 @@ module Gori
       return false if dir.request_only?
       return false unless scope_allows?(scheme, host, target, port)
       filter.matches?(Subject.new(method: method, host: host, target: target, scheme: scheme,
-        status: status, head: head))
+        status: status, head: head, port: port))
     end
 
     # Precise per-MESSAGE gate for a reassembled WebSocket message (#500 step 2). `out` is
@@ -606,7 +606,7 @@ module Gori
       return false unless filter.mentions_ws?
       return false unless scope_allows?(scheme, host, target, port)
       filter.matches?(Subject.new(method: method, host: host, target: target, scheme: scheme,
-        proto: Proto::Kind::Ws, payload: payload))
+        proto: Proto::Kind::Ws, payload: payload, port: port))
     end
 
     # Coarse per-SOCKET arming, asked once right after the 101 (`WS::Relay.run`), the way
