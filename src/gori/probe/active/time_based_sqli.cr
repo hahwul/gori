@@ -119,12 +119,14 @@ module Gori
           followups = [InsertionPoints.build(detail, InsertionPoints::NO_CHANGES)]
           params = [] of Param
           slots.each do |slot|
-            # Per param, a (short, long) pair per family, laid out CONTIGUOUSLY (family order = the
+            # Per param, a (long, short) pair per family, laid out CONTIGUOUSLY (family order = the
             # FAMILIES prefix), so detections_all reads a param's legs as a run and recovers each
-            # family's label by index.
+            # family's label by index. LONG goes first: a throttle that slows every later request
+            # then makes the short leg the slower one, which fails the increment check instead of
+            # passing for a delay that scaled with the payload.
             families.each do |f|
-              followups << InsertionPoints.build(detail, [{slot, InsertionPoints::Change.new(suffix: suffix(f, DELAY_SHORT))}])
               followups << InsertionPoints.build(detail, [{slot, InsertionPoints::Change.new(suffix: suffix(f, DELAY_LONG))}])
+              followups << InsertionPoints.build(detail, [{slot, InsertionPoints::Change.new(suffix: suffix(f, DELAY_SHORT))}])
             end
             params << Param.new(slot.loc.label, slot.name, slot.raw_value)
           end
@@ -133,7 +135,7 @@ module Gori
         end
 
         # results[0], results[1] are the two baselines; a param's legs follow contiguously as
-        # (short, long) pairs, one pair per family. Fire a param when ANY family's two delays scale
+        # (long, short) pairs, one pair per family. Fire a param when ANY family's two delays scale
         # with the injection. One grouped Critical Detection per host, naming the confirming DB family.
         def detections_all(plan : Plan, results : Array(Repeater::Result), detail : Store::FlowDetail) : Array(Detection)
           t0 = stable_baseline(results) || return [] of Detection
@@ -167,15 +169,15 @@ module Gori
           {d1, d2}.max
         end
 
-        # The label of the first DB family whose (short, long) delay legs — occupying
+        # The label of the first DB family whose (long, short) delay legs — occupying
         # `results[start, per]` as consecutive pairs — scale with the injection relative to the
         # baseline latency `t0`, or nil if none does. An errored/timed-out leg skips its family.
         private def confirming_family(results : Array(Repeater::Result), start : Int32, per : Int32,
                                       t0 : Int64) : String?
           fam = 0
           while fam * 2 < per
-            short = results[start + fam * 2]?
-            long = results[start + fam * 2 + 1]?
+            long = results[start + fam * 2]?
+            short = results[start + fam * 2 + 1]?
             j = fam
             fam += 1
             next unless short && long && Evidence.complete?(short) && Evidence.complete?(long)
