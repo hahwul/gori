@@ -228,6 +228,39 @@ describe Gori::Probe::Passive::SecurityHeaders do
     end
   end
 
+  # A browser enforces every CSP field, and repeated Permissions-Policy lines are one list:
+  # reading only the last field judged an app+proxy header pair by its weakest half.
+  describe "repeated policy fields" do
+    it "judges CSP and framing across every Content-Security-Policy field" do
+      with_store do |store|
+        head = "HTTP/1.1 200 OK\r\n" \
+               "Content-Security-Policy: default-src 'self'; frame-ancestors 'none'; base-uri 'self'\r\n" \
+               "Content-Security-Policy: upgrade-insecure-requests\r\n\r\n"
+        c = codes(sec(store, resp_head: head))
+        c.should_not contain("weak_csp")
+        c.should_not contain("missing_x_frame_options")
+        c.should_not contain("csp_missing_base_uri")
+      end
+    end
+
+    it "still flags weak_csp when every CSP field is weak" do
+      with_store do |store|
+        head = "HTTP/1.1 200 OK\r\n" \
+               "Content-Security-Policy: script-src 'unsafe-eval'\r\n" \
+               "Content-Security-Policy: upgrade-insecure-requests\r\n\r\n"
+        codes(sec(store, resp_head: head)).should contain("weak_csp")
+      end
+    end
+
+    it "reads a weak feature from any Permissions-Policy field" do
+      with_store do |store|
+        head = "HTTP/1.1 200 OK\r\nPermissions-Policy: camera=*\r\nPermissions-Policy: geolocation=()\r\n\r\n"
+        dets = sec(store, resp_head: head)
+        dets.find(&.code.==("weak_permissions_policy")).not_nil!.evidence.should eq("camera")
+      end
+    end
+  end
+
   it "surfaces both new codes through the registered Passive.analyze pipeline" do
     with_store do |store|
       detail = capture_flow(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Security-Policy: default-src 'self'\r\n\r\n")
