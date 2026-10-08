@@ -57,6 +57,19 @@ describe "Probe exec rule" do
     end
   end
 
+  # A signal-killed hook comes back as status -1 with no other flag set; it is a crash, not
+  # the detector's "no", and must still be reported.
+  it "reports a hook killed by a signal" do
+    with_store do |store|
+      with_hook(%q(kill -9 $$)) do |hook|
+        seen = [] of String
+        r = exec_rule(hook, on_failure: ->(_r : Gori::Probe::CustomRule, reason : String, _k : String) { seen << reason; nil })
+        detections(store, r, "anything").should be_empty
+        seen.size.should eq 1
+      end
+    end
+  end
+
   it "raises nothing on a non-zero exit - that is the detector's own answer" do
     with_store do |store|
       with_hook(%q{grep -q SECRET}) do |hook|
