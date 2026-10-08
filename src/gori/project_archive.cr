@@ -298,7 +298,9 @@ module Gori
                                                loose_database : Bool) : Nil
       source_db = Paths.canonical_file(source.db_path)
       if loose_database
-        if canonical_target.starts_with?(source_db)
+        # The exact set, not a prefix: `capture.db.gori` beside `capture.db` is an ordinary file.
+        if canonical_target == source_db ||
+           {"-wal", "-shm", "-journal", OpenLock::SUFFIX}.any? { |s| canonical_target == source_db + s }
           raise Gori::Error.new("project archives cannot be written over the source database or its sidecar files")
         end
       elsif canonical_target == source_db || Paths.within?(canonical_target, Paths.canonical_file(source.dir))

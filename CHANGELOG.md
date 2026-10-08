@@ -27,6 +27,7 @@
 - Rewriter: a file stub's path is made absolute and may not contain NUL, and the rule preview matches plain-HTTP proxied flows the way the proxy does; an edited Intercept request's kept original respects the capture cap, and a response body the origin cut short is passed through unrewritten so the client still sees the truncation (#1549)
 - Rewriter: a file stub's path is made absolute and may not contain NUL, and the rule preview and a mock drafted from a flow match plain-HTTP proxied flows the way the proxy does; an edited Intercept request's kept original respects the capture cap (#1549)
 - Projects: `.gori` import refuses archives whose tables lost their keys or carry out-of-range interim rows, and its `exec:` notice now counts Decoder tabs and gRPC field specs (#1549)
+- Projects: exporting a `gori mcp --db` database refuses only the database and its sidecars, so an archive like `capture.db.gori` can sit beside it
 - CLI: `gori run shell` also points `NIX_SSL_CERT_FILE` at its CA bundle, so Nix-built tools trust gori (#1549)
 - Proxy: a request naming a port above 65535 is refused instead of looping back into gori's own listener on glibc Linux
 - HTTP/2: the sandbox refuses a request head with no `:method` and judges a server push behind a held response, and a long-lived connection keeps recording requests after many cancelled streams the origin still answered
