@@ -1273,16 +1273,17 @@ module Gori::Tui
 
     # --- project archive import/export --------------------------------------
 
+    # `Dir.current` raises once the launch directory is deleted, and nothing above `run`
+    # rescues; the home directory is a default the operator can still edit.
+    def self.export_base_dir : String
+      Dir.current
+    rescue File::Error
+      Path.home.to_s
+    end
+
     private def start_archive_export(project : Project) : Nil
       @archive_export_project = project
-      # `Dir.current` raises once the launch directory is deleted, and nothing above `run`
-      # rescues; the home directory is a default the operator can still edit.
-      base = begin
-        Dir.current
-      rescue File::Error
-        Path.home.to_s
-      end
-      default_path = File.join(base, "#{@registry.slug_of(project)}.gori")
+      default_path = File.join(ProjectPicker.export_base_dir, "#{@registry.slug_of(project)}.gori")
       @archive_export_overlay = ExportOverlay.new(:project_archive, default_path)
       @preedit = ""
       @mode = :archive_export_path
