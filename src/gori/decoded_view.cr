@@ -36,7 +36,7 @@ module Gori
             j.field "param", doc.param
             j.field "binding", doc.binding.to_s
             j.field "location", doc.location.to_s
-            j.field "relay_state", doc.relay_state
+            j.field "relay_state", doc.relay_state.try(&.scrub)
             emit_text(j, "xml", Saml.pretty_xml(doc.xml).scrub, clip)
           end
         end
@@ -47,9 +47,9 @@ module Gori
           j.array do
             jwts.each do |f|
               j.object do
-                j.field "location", f.location
+                j.field "location", f.location.scrub
                 j.field "token", f.token
-                j.field "brief", f.brief
+                j.field "brief", f.brief.try(&.scrub)
                 emit_text(j, "decoded", f.decoded.scrub, clip)
               end
             end
@@ -64,7 +64,7 @@ module Gori
       if op = Graphql.from_flow(target, req_head, req_body)
         j.field "graphql" do
           j.object do
-            j.field "operation", op.operation
+            j.field "operation", op.operation.try(&.scrub)
             # WHICH GraphQL request shape this is (json/query/batch/persisted/multipart/
             # document). A batch's `query` is a rendering of several operations and a
             # persisted query has no document at all, so a reader that assumed one document
@@ -113,9 +113,9 @@ module Gori
             j.object do
               j.field "frame", f.index
               j.field "direction", f.direction
-              j.field "type", f.type
-              j.field "id", f.id
-              j.field "operation", f.op.operation
+              j.field "type", f.type.try(&.scrub)
+              j.field "id", f.id.try(&.scrub)
+              j.field "operation", f.op.operation.try(&.scrub)
               j.field "form", f.op.form.to_s.downcase
               emit_text(j, "query", f.op.query.scrub, clip)
               j.field "variables", f.op.variables.try(&.scrub)
@@ -150,10 +150,10 @@ module Gori
                   # Only for a frame that arrived inside a wrapper — absent means "not wrapped",
                   # which is the ordinary case and does not deserve a null on every row.
                   j.field "via", f.via if f.via
-                  j.field "kind", f.kind
-                  j.field "name", f.name
-                  j.field "id", f.id
-                  j.field "note", f.note
+                  j.field "kind", f.kind.scrub
+                  j.field "name", f.name.try(&.scrub)
+                  j.field "id", f.id.try(&.scrub)
+                  j.field "note", f.note.try(&.scrub)
                   emit_text(j, "payload", f.payload.try(&.scrub), clip)
                 end
               end
@@ -178,7 +178,10 @@ module Gori
     private def emit_binary_documents(j : JSON::Builder, *, req_head : Bytes?, req_body : Bytes?,
                                       resp_head : Bytes?, resp_body : Bytes?, clip : Int32?) : Nil
       found = [] of {String, String, BinaryDocument::Rendering}
-      { {"request", req_head, req_body}, {"response", resp_head, resp_body} }.each do |(side, head, body)|
+      { {"request", req_head, req_body}, {"response", resp_head, resp_body} }.each do |(side, head, wire)|
+        # The ENTITY, not the stored wire body — the pane renders after `ContentDecode` too, so
+        # a gzip or chunked document would otherwise be shown there and absent here.
+        body = Entity.bytes(head, wire)
         format, r = BinaryDocument.render(body, MediaType.of(head)) || sniff_serialized(body) || next
         found << {side, format, r}
       end
