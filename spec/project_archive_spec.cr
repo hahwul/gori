@@ -639,6 +639,27 @@ describe Gori::ProjectArchive do
     end
   end
 
+  # `Store#interims` narrows status and omitted to Int32, so an out-of-range one raised on
+  # every open of the flow.
+  it "refuses an archive whose interim response row is out of Int32 range" do
+    with_archive_project do |_registry, project, store, root|
+      id = store.insert_flow(archive_request("/a"))
+      store.flush
+      archive_path = export_archive(project, File.join(root, "interims.gori"))
+      original = File.read(archive_path)
+      # {status, omitted}
+      { {1099511627776_i64, 0_i64}, {103_i64, 1099511627776_i64} }.each do |status, omitted|
+        File.write(archive_path, original)
+        tamper_archive_database(archive_path, root) do |conn|
+          conn.exec("INSERT INTO flow_interims (flow_id, seq, status, head, relayed, omitted) " \
+                    "VALUES (?, 0, ?, X'41', 1, ?)", id, status, omitted)
+        end
+        error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
+        error.message.not_nil!.should contain(%(never writes in "flow_interims"))
+      end
+    end
+  end
+
   # An AUTOINCREMENT id counter at the top of int64 fails every insert with SQLITE_FULL, so the
   # imported project would capture nothing under a "database or disk is full". `flows` became
   # AUTOINCREMENT in V39; a row alone is enough, since SQLite no longer falls back to a random id.

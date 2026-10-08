@@ -728,6 +728,7 @@ module Gori
     # listed: one that is not just keeps today's behaviour.
     INT32_COLUMNS = {
       "flows"          => %w[port status state short_circuited],
+      "flow_interims"  => %w[status omitted],
       "issues"         => %w[severity status],
       "issue_evidence" => %w[status],
       "match_rules"    => %w[enabled position],
