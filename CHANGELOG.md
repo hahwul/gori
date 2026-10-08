@@ -17,6 +17,7 @@
 - gRPC: loading a `.proto` source file by mistake still prints the protoc hint when its header comment is in Korean, Japanese or Chinese
 - OAST: one callback carrying the minimum 64-bit timestamp no longer fails the whole poll and loses the interactions beside it
 - JWT: a JWE whose header carries a number too large for 64 bits is still recognised, so attacks and verify refuse it instead of treating it as a JWS
+- CLI: `repeater send -H`/`-b`/`-d`/`--target` on a stored head that ends without a newline no longer glues the added header onto its last line, and `repeater create --flow` beside your own request no longer reports a request-line rewrite it never stored
 - CLI: `gori run show` and `grpc reflect` escape terminal sequences in SSE event and id fields, JWT and SAML headings and server-sent gRPC names, and `authorize --format json` stays valid UTF-8 over a non-UTF-8 method
 - MCP: `timeout_ms: 0`, empty filler arguments and a plain-string `messages` now mean what the tool schemas say, a session slot refuses a header object with no value, and `create_repeater` seeds from `flow_id` beside an issue that has no flow
 - MCP and TUI: a link that did not commit (a busy or unwritable project) is reported as a failure instead of as already linked, including `update_issue`'s `repeater_id`

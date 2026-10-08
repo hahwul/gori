@@ -231,8 +231,14 @@ describe "gori run repeater create — the request source" do
         "repeater.cr"))
       body = src[src.index!("def self.cmd_repeater_create")..]
       body = body[..body.index!("\n      private def self.")]
-      seed = body.lines.find! &.includes?("String.new(built.bytes)")
-      seed.should contain("authored")
+      guard = body.index!("unless authored\n")
+      seed = body[guard..body.index!("\n            end", guard)]
+      seed.should contain("String.new(built.bytes)")
+      # The rewrite note and flag ride with the seed: beside an authored request the stored
+      # bytes are the operator's, and reporting a rewrite of them was false.
+      seed.should contain("warn_request_line_rewrite(built")
+      seed.should contain("rewrote_request_line = built.rewrote_request_line")
+      body.scan("warn_request_line_rewrite(built").size.should eq(1)
       body.scan("request_sources(").size.should eq(1)
       # The re-derivation that was there, in any spelling.
       body.should_not contain("request_file.nil?")

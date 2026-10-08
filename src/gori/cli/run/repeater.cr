@@ -753,15 +753,18 @@ module Gori
             # `--keep-request-line` for the direct replay; this is the same flag on the
             # workbench door, and the rewrite is reported either way (see `Built`).
             built = Repeater::FlowRequest.build(detail, rewrite_absolute_form: !keep_request_line)
-            warn_request_line_rewrite(built, "gori run repeater create", now: true)
-            rewrote_request_line = built.rewrote_request_line
             # Only seed the request from the flow when the user didn't hand one in: --flow
             # doubles as provenance (the flow_id column) for a custom --request-raw/-file/-stdin,
             # so an explicit request must NOT be silently overwritten by the flow's bytes.
             # `authored` and not a hand-written chain of `.nil?`s — the list of sources is one
             # thing, and the gate above and this test have to read the same one or a fourth
-            # source arrives here already overwritten.
-            req_content = String.new(built.bytes) unless authored
+            # source arrives here already overwritten. The rewrite note and flag go with the
+            # seed: beside an authored request nothing was rewritten.
+            unless authored
+              warn_request_line_rewrite(built, "gori run repeater create", now: true)
+              rewrote_request_line = built.rewrote_request_line
+              req_content = String.new(built.bytes)
+            end
             if tgt_str.empty?
               bt = built.target
               tgt_str = bt ? bt : ""
@@ -2227,9 +2230,14 @@ module Gori
         head_str = String.new(head_bytes)
         entries = head_lines(head_str)
         request_line, request_eol = entries.first? || {head_str, "\r\n"}
+        # A line the head just ENDS on carries no terminator, and every line here is followed by
+        # another (at least the head terminator), so it takes the request line's spelling, or
+        # CRLF when the request line is itself unterminated. Left "", the next line was glued
+        # onto it: `Host: h` + `-H 'X: 1'` sent `Host: hX: 1`.
+        request_eol = "\r\n" if request_eol.empty?
         # Header lines between the request line and the terminating blank line, each verbatim
         # and each carrying the terminator IT arrived with.
-        raw_lines = entries[1..]?.try(&.reject { |(l, _)| l.empty? }) || [] of {String, String}
+        raw_lines = entries[1..]?.try(&.reject { |(l, _)| l.empty? }.map { |(l, e)| {l, e.empty? ? request_eol : e} }) || [] of {String, String}
         # The blank line that ends the head, with the terminator it arrived with. Falls back
         # to the request line's spelling for a head that never had one.
         head_terminator = entries.last?.try { |(l, e)| l.empty? ? e : nil } || request_eol
