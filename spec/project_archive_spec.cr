@@ -701,6 +701,23 @@ describe Gori::ProjectArchive do
     end
   end
 
+  # `settings` has no `id`: its key is `key`, which every `set_setting` upserts through. Without
+  # it each upsert fails inside the writer's batch, and the flows batched with it go too.
+  it "refuses an archive whose settings table lost the key gori upserts through" do
+    with_archive_project do |_registry, project, store, root|
+      store.insert_flow(archive_request("/a"))
+      store.flush
+      archive_path = export_archive(project, File.join(root, "keys.gori"))
+      tamper_archive_database(archive_path, root) do |conn|
+        conn.exec("CREATE TABLE settings_x AS SELECT * FROM settings")
+        conn.exec("DROP TABLE settings")
+        conn.exec("ALTER TABLE settings_x RENAME TO settings")
+      end
+      error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
+      error.message.not_nil!.should contain("table settings lacks the keys")
+    end
+  end
+
   # An AUTOINCREMENT id counter at the top of int64 fails every insert with SQLITE_FULL, so the
   # imported project would capture nothing under a "database or disk is full". `flows` became
   # AUTOINCREMENT in V39; a row alone is enough, since SQLite no longer falls back to a random id.

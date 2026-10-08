@@ -355,6 +355,7 @@ module Gori
         version, inventory = inspect_database(database, importing: true)
         validate_manifest_database!(manifest, version, inventory)
         sanitize_import_database(database)
+        refuse_missing_keys!(database)
         prepared = PreparedImport.new(workdir, database, manifest, inventory)
         success = true
         prepared
@@ -627,6 +628,43 @@ module Gori
         keys = conn.query_all("SELECT name, upper(type) FROM pragma_table_info(?) WHERE pk > 0", table, as: {String, String})
         unless keys == [{"id", "INTEGER"}]
           raise Gori::Error.new("project archive database table #{table} has no INTEGER PRIMARY KEY id; refusing to import it")
+        end
+      end
+    end
+
+    # Every key the store writes through — the rowid `id`, and each `ON CONFLICT` target
+    # (`settings.key`, `sitemap_tags (host, path)`, …) — must survive in the copy. A table
+    # rebuilt with CREATE TABLE … AS SELECT keeps its columns and loses them, and every upsert
+    # into it then fails inside the writer's batch, taking the flows batched with it. Judged
+    # after migrating the copy, against a fresh schema, so an older archive is held to the keys
+    # it will have once opened; a table the fresh schema lacks is left to the column checks.
+    private def self.refuse_missing_keys!(path : String) : Nil
+      expected = DB.open("sqlite3::memory:") do |db|
+        Store::Schema.migrate!(db)
+        key_shapes(db)
+      end
+      DB.open("sqlite3:#{path}?busy_timeout=5000") do |db|
+        Store::Schema.migrate!(db)
+        actual = key_shapes(db)
+        expected.each do |table, shape|
+          got = actual[table]?
+          next if got.nil? || got == shape
+          raise Gori::Error.new("project archive database table #{table} lacks the keys gori writes through; refusing to import it")
+        end
+      end
+    end
+
+    # {primary-key columns with their declared type, every UNIQUE index's columns} per table.
+    private def self.key_shapes(db : DB::Database) : Hash(String, {Array({String, String}), Array(Array(String?))})
+      db.using_connection do |conn|
+        tables = conn.query_all("SELECT name FROM sqlite_master WHERE type = 'table' " \
+                                "AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'", as: String)
+        tables.to_h do |table|
+          pk = conn.query_all("SELECT name, upper(type) FROM pragma_table_info(?) WHERE pk > 0 ORDER BY pk",
+            table, as: {String, String})
+          uniques = conn.query_all("SELECT name FROM pragma_index_list(?) WHERE \"unique\" = 1", table, as: String)
+            .map { |index| conn.query_all("SELECT name FROM pragma_index_info(?) ORDER BY seqno", index, as: String?) }
+          {table, {pk, uniques.sort_by(&.join(','))}}
         end
       end
     end
