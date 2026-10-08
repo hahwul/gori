@@ -334,6 +334,9 @@ module Gori
         end
         parser.parse(args)
         abort "gori run redact default: --none is a project-scope answer, not a global one" if clear && global
+        # Refused, as `redact use --none <name>` is: the word was silently dropped and the
+        # project cleared, the opposite of `on` when the global default is off.
+        abort "gori run redact default: --none takes no on/off" if clear && !positional.empty?
         value = if clear
                   nil
                 else
