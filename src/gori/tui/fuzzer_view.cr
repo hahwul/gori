@@ -691,7 +691,9 @@ module Gori::Tui
       @focus == :template ? {@editor, @template_read} : nil
     end
 
-    def enter_template_insert! : Nil
+    # `snap`: see `RepeaterView#enter_request_insert!`.
+    def enter_template_insert!(snap : Int32 = -1) : Nil
+      @editor.snap_out_of_conceal(snap)
       @template_mode = InputMode::Insert
     end
 

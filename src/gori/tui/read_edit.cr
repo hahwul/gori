@@ -152,6 +152,7 @@ module Gori::Tui
         return err
       end
       area.place_cursor(y, x)
+      area.snap_out_of_conceal(1) # after a closing `§`, never into its hidden `¦chain`
       before = area.edits
       deliver(tab, key_in, linewise ? "\n#{text}" : text)
       changed = area.edits != before

@@ -1201,6 +1201,13 @@ module Gori::Tui
       env_complete_close
     end
 
+    # Step the caret off a hidden `¦chain` byte toward `dir`, as every INSERT motion does. READ
+    # stepping walks raw codepoints, so an entry into INSERT from READ calls this first: an
+    # edit there would land in text the operator cannot see.
+    def snap_out_of_conceal(dir : Int32) : Nil
+      snap_cx_out_of_conceal(dir)
+    end
+
     # Place the caret without pushing undo (read-mode navigation / click-to-cursor).
     def place_cursor(cy : Int32, cx : Int32) : Nil
       @cy = cy.clamp(0, @lines.size - 1)

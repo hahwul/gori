@@ -847,11 +847,15 @@ module Gori::Tui
     def editor_append_insert : Bool
       return false unless v = current_view
       case v.focus
-      when :template then v.template_read_move(0, 1)
-      when :target   then v.target_read_move(1)
-      else                return false
+      when :template
+        v.template_read_move(0, 1)
+        v.enter_template_insert!(1)
+        true
+      when :target
+        v.target_read_move(1)
+        editor_enter_insert
+      else false
       end
-      editor_enter_insert
     end
 
     def editor_exit_insert : Bool
