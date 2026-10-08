@@ -13,11 +13,11 @@ Miss Ring이 어떻게 그려지는지에 대한 것입니다.
 
 <div class="art-gallery">
   <figure>
-    <img src="/images/miss-ring-character.webp" alt="처음 그려진 Miss Ring 캐릭터. 정면에서 본 금색 고리가 크고 속눈썹이 있는 눈과 작은 미소를 가진 둥근 크림색 얼굴을 감싸고 있다">
+    <img src="/images/miss-ring-character.webp" alt="처음 그려진 Miss Ring 캐릭터. 정면에서 본 금색 고리가 크고 속눈썹이 있는 눈과 작은 미소를 가진 둥근 크림색 얼굴을 감싸고 있다" width="512" height="512">
     <figcaption>처음 그려진 캐릭터</figcaption>
   </figure>
   <figure>
-    <img src="/images/miss-ring-sprite.webp" alt="같은 캐릭터를 8 × 3 격자의 금색과 크림색 칸으로 줄인 형태. 둥근 눈 두 개, 작은 입, 속눈썹 두 획이 보인다">
+    <img src="/images/miss-ring-sprite.webp" alt="같은 캐릭터를 8 × 3 격자의 금색과 크림색 칸으로 줄인 형태. 둥근 눈 두 개, 작은 입, 속눈썹 두 획이 보인다" width="512" height="512" loading="lazy" decoding="async">
     <figcaption>같은 고리를 8 × 3 칸 격자에 올린 모습</figcaption>
   </figure>
 </div>
@@ -140,7 +140,7 @@ HlemelS.
 ## 터미널에서 {#in-the-terminal}
 
 <figure class="tui-shot">
-  <img src="/images/tui/readme.svg" alt="gori History 탭. 본문 우하단 구석에 Miss Ring이 앉아 있고 머리 위 말풍선에 &quot;hi! ready when you are&quot;라고 적혀 있다">
+  <img src="/images/tui/readme.svg" alt="gori History 탭. 본문 우하단 구석에 Miss Ring이 앉아 있고 머리 위 말풍선에 &quot;hi! ready when you are&quot;라고 적혀 있다" width="1638" height="736" loading="lazy" decoding="async">
   <figcaption><code>body</code> 배치의 Miss Ring이 먼저 꺼내는 유일한 말: <em>hi! ready when you are</em>.</figcaption>
 </figure>
 

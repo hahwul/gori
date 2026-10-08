@@ -18,7 +18,7 @@ JWT는 서버가 서명을 검사하는 만큼만 믿을 수 있습니다. 이 �
 디코드는 토큰이 *주장하는* 바를 보여 줄 뿐, 서명을 검사하지는 않습니다. 그래서 깔끔하게 디코드되는 토큰이라고 서버가 반드시 믿는 토큰은 아닙니다. 그것이 이 플레이북의 나머지가 답하는 질문입니다.
 
 <figure class="tui-shot">
-  <img src="/images/tui/jwt.svg" alt="디코드된 HS256 토큰이 있는 gori JWT 탭: ^T:→ENCODE 렌즈 칩 아래의 INPUT 토큰, 디코드된 header JSON, 그리고 alg=none 대소문자 변형과 서명 제거를 포함한 생성된 페이로드의 ATTACKS 목록">
+  <img src="/images/tui/jwt.svg" alt="디코드된 HS256 토큰이 있는 gori JWT 탭: ^T:→ENCODE 렌즈 칩 아래의 INPUT 토큰, 디코드된 header JSON, 그리고 alg=none 대소문자 변형과 서명 제거를 포함한 생성된 페이로드의 ATTACKS 목록" width="1206" height="520">
   <figcaption><strong>JWT</strong> 탭은 토큰을 라이브로 디코드하고(header, payload, signature) 바로 보낼 수 있는 공격 페이로드를 나열합니다: alg:none, weak-secret, header injection.</figcaption>
 </figure>
 

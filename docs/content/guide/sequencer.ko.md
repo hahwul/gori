@@ -11,7 +11,7 @@ shot = "sequencer"
 session cookie, CSRF token, 비밀번호 리셋 코드, API key가 예측 가능하다면 공격자는 그것을 위조하거나 추측할 수 있습니다. **Sequencer**는 token 샘플을 수집해 실제로 얼마나 무작위한지 등급을 매깁니다. Burp Sequencer나 Caido Sequencer에 대응하는 gori의 도구입니다.
 
 <figure class="tui-shot">
-  <img src="/images/tui/sequencer.svg" alt="History 탭 위에 뜬 gori Send to Sequencer 설정 카드: 자동 감지된 session cookie 토큰과 샘플 수, 최대 요청 수, concurrency, 알림 설정 행">
+  <img src="/images/tui/sequencer.svg" alt="History 탭 위에 뜬 gori Send to Sequencer 설정 카드: 자동 감지된 session cookie 토큰과 샘플 수, 최대 요청 수, concurrency, 알림 설정 행" width="1206" height="520">
   <figcaption>캡처한 플로우를 <strong>Sequencer</strong>로 보내면 session cookie를 자동으로 감지하고, 수집을 시작하기 전에 샘플 크기와 concurrency를 설정할 수 있습니다.</figcaption>
 </figure>
 

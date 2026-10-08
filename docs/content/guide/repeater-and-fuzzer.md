@@ -31,7 +31,7 @@ Three request-pane actions send more than one request at once. `Space` → `G` (
 `Space` → `B` (**Timing analysis (A vs B)**) is a **differential timing** test over exactly two marked sub-tabs: the earlier chip on the strip is A, the later one B. It asks how many pairs to send (30 by default, up to 500), discards 3 warm-up pairs, then releases A and B together each time the way a race does (HTTP/2 single-packet on one connection, HTTP/1.1 last-byte sync on two), so network and server-load noise hits both alike. The verdict is taken on **response order**, not on latency: in how many pairs A arrived after B, with a two-sided sign test that must clear p < 0.01 to name a side. The card reports `A consistently slower`, `B consistently slower`, `no measurable difference`, or `inconclusive` when fewer than 20 pairs had both responses, next to each variant's min/quartiles/max and distribution, never a single number. A pair where either side errored is dropped rather than counted fast or slow. The pair must share one origin and transport, as a race does, and `Esc` cancels a run. Headless it is `gori run repeater timing <idA> <idB>` (`--count`, `--warmup`, `--interleaved` to send A and B one after the other, alternating which goes first, instead of racing them, `--format json`); over MCP, `timing_requests`.
 
 <figure class="tui-shot">
-  <img src="/images/tui/repeater.svg" alt="gori Repeater tab with an editable HTTP/2 request pane, a response pane showing headers and a JSON body, and a sent → 200 status line">
+  <img src="/images/tui/repeater.svg" alt="gori Repeater tab with an editable HTTP/2 request pane, a response pane showing headers and a JSON body, and a sent → 200 status line" width="1206" height="520">
   <figcaption><strong>Repeater</strong>: an editable request on the left, the live response and timing on the right, with a diff against the previous send.</figcaption>
 </figure>
 
@@ -137,7 +137,7 @@ line for MCP).
 The Fuzzer is an Intruder-style engine: mark positions in a request, attach payload sets, and send the matrix of requests while matching on the responses.
 
 <figure class="tui-shot">
-  <img src="/images/tui/fuzzer.svg" alt="gori Fuzzer tab with a request template showing highlighted marker positions, a payload-set config pane, a results table of sent requests, and a distribution sidebar">
+  <img src="/images/tui/fuzzer.svg" alt="gori Fuzzer tab with a request template showing highlighted marker positions, a payload-set config pane, a results table of sent requests, and a distribution sidebar" width="1206" height="664" loading="lazy" decoding="async">
   <figcaption>The <strong>Fuzzer</strong>: <code>§…§</code> markers in the template, payload sets and mode in CONFIG, a live results table, and a status / size distribution sidebar.</figcaption>
 </figure>
 

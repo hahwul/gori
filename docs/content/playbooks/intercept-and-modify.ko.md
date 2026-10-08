@@ -22,7 +22,7 @@ host:api.example.com method:POST
 이제 대상으로 가는 POST만 붙잡히고 나머지는 곧장 통과합니다. History 필터가 쓰는 것과 같은 토큰이 여기서도 동작합니다(`host:`, `path:`, `method:`, `scheme:`, `status:`, 그리고 `AND` / `OR` / `NOT`).
 
 <figure class="tui-shot">
-  <img src="/images/tui/intercept.svg" alt="catch 방향과 쿼리 조건을 위한 필터 바, 그리고 catch가 꺼졌을 때 forward와 drop을 설명하는 카드가 있는 gori Intercept 탭">
+  <img src="/images/tui/intercept.svg" alt="catch 방향과 쿼리 조건을 위한 필터 바, 그리고 catch가 꺼졌을 때 forward와 drop을 설명하는 카드가 있는 gori Intercept 탭" width="1206" height="520">
   <figcaption><strong>Intercept</strong> 탭: <kbd>i</kbd>로 catch를 토글하고, 방향을 고르고, 매칭되는 트래픽만 붙잡아 플로우 중에 forward, drop, 또는 편집합니다.</figcaption>
 </figure>
 

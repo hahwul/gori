@@ -24,7 +24,7 @@ gori에는 수백 가지 동작이 있지만, 그 키를 미리 외울 필요는
 아무 목록이나 패널에서 `Space`를 누르세요. **지금 서 있는 자리**의 동작이 담긴 카드가 열립니다. History 행, 플로우 상세, Repeater 편집기, 규칙 목록마다 카드가 다릅니다.
 
 <figure class="tui-shot">
-  <img src="/images/tui/space-menu.svg" alt="History 탭 위에 열린 gori space 메뉴. VIEW, SEND, TRIAGE, COPY, SCOPE, COMMON, DANGER, WIPE 아래 행이 묶여 있고, 각 행 왼쪽에는 글자가, 일부 행 오른쪽에는 단축키가 있다">
+  <img src="/images/tui/space-menu.svg" alt="History 탭 위에 열린 gori space 메뉴. VIEW, SEND, TRIAGE, COPY, SCOPE, COMMON, DANGER, WIPE 아래 행이 묶여 있고, 각 행 왼쪽에는 글자가, 일부 행 오른쪽에는 단축키가 있다" width="1206" height="520">
   <figcaption>History 행에서 누른 <kbd>Space</kbd>. 왼쪽 글자는 그 행을 실행하고, 오른쪽 키는 메뉴 없이 같은 일을 하는 단축키이며, <code>›</code>는 두 번째 카드를 엽니다.</figcaption>
 </figure>
 
@@ -52,7 +52,7 @@ gori에는 수백 가지 동작이 있지만, 그 키를 미리 외울 필요는
 어떤 선택은 한 가지 의도의 변형입니다. *이 플로우를 어떤 도구로 보내기*, *이 패널을 그리는 방식 바꾸기* 같은 것들입니다. 이런 것은 메뉴에서 `›` 행 하나로 묶이고, 그 행이 자기 카드를 엽니다. 그래서 첫 카드가 짧게 유지됩니다.
 
 <figure class="tui-shot">
-  <img src="/images/tui/space-menu-send.svg" alt="SPACE › SEND FLOW TO 제목의 gori Send flow to 카드. Repeater, Fuzzer, Comparer, Miner, Sequencer, Authorize, Discover, 브라우저가 각각 글자 하나에 놓여 있다">
+  <img src="/images/tui/space-menu-send.svg" alt="SPACE › SEND FLOW TO 제목의 gori Send flow to 카드. Repeater, Fuzzer, Comparer, Miner, Sequencer, Authorize, Discover, 브라우저가 각각 글자 하나에 놓여 있다" width="1206" height="520" loading="lazy" decoding="async">
   <figcaption>History 행에서 누른 <kbd>Space</kbd> <kbd>&gt;</kbd>. 제목이 지금 위치를 알려 주고, <kbd>Esc</kbd>는 첫 카드로 돌아갑니다.</figcaption>
 </figure>
 
@@ -96,7 +96,7 @@ gori에는 수백 가지 동작이 있지만, 그 키를 미리 외울 필요는
 어느 탭에서든 `Ctrl-P`를 누르고 원하는 동작의 이름을 입력하기 시작하세요.
 
 <figure class="tui-shot">
-  <img src="/images/tui/command-palette.svg" alt="History 탭 위에서 send를 입력한 gori 커맨드 팔레트. THIS TAB 아래 Send to Comparer, Send to Fuzzer, Send to Sequencer, Send to Authorize가 오른쪽에 키나 메뉴 경로와 함께 나오고, 이어서 APP 아래 일치하는 앱 명령이 나온다">
+  <img src="/images/tui/command-palette.svg" alt="History 탭 위에서 send를 입력한 gori 커맨드 팔레트. THIS TAB 아래 Send to Comparer, Send to Fuzzer, Send to Sequencer, Send to Authorize가 오른쪽에 키나 메뉴 경로와 함께 나오고, 이어서 APP 아래 일치하는 앱 명령이 나온다" width="1206" height="520" loading="lazy" decoding="async">
   <figcaption>History에서 <kbd>Ctrl-P</kbd> 후 <code>send</code> 입력. 그 탭의 동작이 먼저, 각각 닿는 키나 메뉴 경로와 함께 나오고, 앱 전역 명령이 뒤따릅니다.</figcaption>
 </figure>
 

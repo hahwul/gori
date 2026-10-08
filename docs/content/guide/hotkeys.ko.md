@@ -106,7 +106,7 @@ Ctrl-P  → settings:hotkeys
 | `⇧0` | **Find sub-tab…** — 스트립의 `f`가 여는 것과 같은 피커 |
 
 <figure class="tui-shot">
-  <img src="/images/tui/tab-goto.svg" alt="gori Go to tab 카드: 탭 카탈로그 전체 위에 필터 바가 있고, 바에 올라간 아홉 개는 1부터 9까지 숫자를 달고 나머지는 숫자가 없으며, 각 행 뒤에 그 탭이 무엇을 위한 것인지 한 줄이 붙어 있다">
+  <img src="/images/tui/tab-goto.svg" alt="gori Go to tab 카드: 탭 카탈로그 전체 위에 필터 바가 있고, 바에 올라간 아홉 개는 1부터 9까지 숫자를 달고 나머지는 숫자가 없으며, 각 행 뒤에 그 탭이 무엇을 위한 것인지 한 줄이 붙어 있다" width="1206" height="520">
   <figcaption><code>0</code>은 카탈로그 전체를 엽니다. 바 위의 아홉 개는 자기를 여는 숫자를 달고 있고 나머지는 달고 있지 않습니다 — 바깥에 있다는 것의 차이는 그게 전부입니다.</figcaption>
 </figure>
 

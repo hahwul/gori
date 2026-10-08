@@ -1,5 +1,6 @@
 (function () {
   var searchData = null;
+  var pending = null;
   var activeIndex = -1;
   var overlay = document.getElementById('searchOverlay');
   var input = document.getElementById('searchInput');
@@ -10,10 +11,15 @@
     var link = document.querySelector('link[rel="stylesheet"][href*="/css/"]');
     var path = link ? new URL(link.href, document.baseURI).pathname : '/css/';
     var searchUrl = path.substring(0, path.indexOf('/css/')) + '/search.json';
-    fetch(searchUrl)
-      .then(function (r) { return r.json(); })
-      .then(function (data) { searchData = data; cb(data); })
-      .catch(function () { searchData = []; cb([]); });
+    /* One request however many callers wait on it (keystrokes while the index
+       is still loading, or the ?q= landing below). */
+    if (!pending) {
+      pending = fetch(searchUrl)
+        .then(function (r) { return r.json(); })
+        .catch(function () { return []; })
+        .then(function (data) { searchData = data; return data; });
+    }
+    pending.then(cb);
   }
 
   window.openSearch = function () {
@@ -64,7 +70,11 @@
     var ts = terms(query);
     if (!ts.length) return escapeHtml(text);
     var re = new RegExp('(' + ts.map(escapeRegExp).join('|') + ')', 'gi');
-    return escapeHtml(text).replace(re, '<mark>$1</mark>');
+    /* Split the raw text, not the escaped HTML, so a term like "amp" or "lt"
+       never lands inside an entity and breaks it. Odd parts are the matches. */
+    return text.split(re).map(function (part, i) {
+      return i % 2 ? '<mark>' + escapeHtml(part) + '</mark>' : escapeHtml(part);
+    }).join('');
   }
 
   /* Rank a page for the query, or return -1 when some term is missing.
@@ -183,5 +193,14 @@
         }
       }
     });
+  }
+
+  /* The home page's WebSite SearchAction (JSON-LD) advertises /?q=…, so a
+     query in the URL opens the overlay already searching it. */
+  var q = new URLSearchParams(window.location.search).get('q');
+  if (q && overlay && input) {
+    openSearch();
+    input.value = q;
+    loadSearchData(function () { search(q); });
   }
 })();

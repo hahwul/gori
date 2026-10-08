@@ -31,7 +31,7 @@ Repeater는 요청 워크벤치입니다. 플로우를 보내고, 요청의 어�
 `Space` → `B`(**Timing analysis (A vs B)**)는 마크한 서브탭 정확히 두 개를 비교하는 **차등 타이밍** 테스트입니다. 스트립에서 앞쪽 칩이 A, 뒤쪽 칩이 B입니다. 보낼 쌍의 개수를 묻고(기본 30, 최대 500), 워밍업 쌍 3개를 버린 뒤, 매번 레이스처럼 A와 B를 함께 풀어 보냅니다(HTTP/2는 연결 하나로 single-packet, HTTP/1.1은 연결 둘로 last-byte sync). 그래서 네트워크와 서버 부하의 흔들림이 양쪽에 똑같이 걸립니다. 판정은 지연 시간이 아니라 **응답 순서**로 내립니다. A가 B보다 늦게 도착한 쌍이 몇 개인지를 세고, 양측 부호 검정이 p < 0.01을 넘어야 느린 쪽을 지목합니다. 카드는 `A consistently slower`, `B consistently slower`, `no measurable difference`, 또는 양쪽 응답이 모두 온 쌍이 20개 미만이면 `inconclusive`를 보여 주고, 그 옆에 변형별 최솟값·사분위수·최댓값과 분포를 함께 보여 줍니다. 숫자 하나로 끝나는 법은 없습니다. 어느 한쪽이 오류를 낸 쌍은 빠르거나 느린 것으로 세지 않고 버립니다. 레이스와 마찬가지로 두 탭은 같은 오리진과 전송을 써야 하고, 실행 중에는 `Esc`로 취소합니다. 헤드리스에서는 `gori run repeater timing <idA> <idB>`(`--count`, `--warmup`, 레이스 대신 A와 B를 번갈아 순서를 바꿔 가며 차례로 보내는 `--interleaved`, `--format json`), MCP에서는 `timing_requests`입니다.
 
 <figure class="tui-shot">
-  <img src="/images/tui/repeater.svg" alt="편집 가능한 HTTP/2 요청 패널, 헤더와 JSON 본문을 보여주는 응답 패널, 그리고 sent → 200 상태 줄을 갖춘 gori Repeater 탭">
+  <img src="/images/tui/repeater.svg" alt="편집 가능한 HTTP/2 요청 패널, 헤더와 JSON 본문을 보여주는 응답 패널, 그리고 sent → 200 상태 줄을 갖춘 gori Repeater 탭" width="1206" height="520">
   <figcaption><strong>Repeater</strong>: 왼쪽에 편집 가능한 요청, 오른쪽에 실시간 응답과 소요 시간, 이전 전송과의 diff.</figcaption>
 </figure>
 
@@ -136,7 +136,7 @@ gori settings env-syntax bare   # 옵트아웃
 Fuzzer는 Intruder 스타일 엔진입니다. 요청에서 위치를 표시하고, 페이로드 세트를 붙이고, 응답을 매칭하면서 요청 행렬을 전송합니다.
 
 <figure class="tui-shot">
-  <img src="/images/tui/fuzzer.svg" alt="강조된 마커 위치를 보여주는 요청 템플릿, 페이로드 세트 설정 패널, 전송된 요청 결과 테이블, 분포 사이드바를 갖춘 gori Fuzzer 탭">
+  <img src="/images/tui/fuzzer.svg" alt="강조된 마커 위치를 보여주는 요청 템플릿, 페이로드 세트 설정 패널, 전송된 요청 결과 테이블, 분포 사이드바를 갖춘 gori Fuzzer 탭" width="1206" height="664" loading="lazy" decoding="async">
   <figcaption><strong>Fuzzer</strong>: 템플릿의 <code>§…§</code> 마커, CONFIG의 페이로드 세트와 모드, 실시간 결과 테이블, 상태 / 크기 분포 사이드바.</figcaption>
 </figure>
 

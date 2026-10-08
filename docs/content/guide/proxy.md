@@ -21,7 +21,7 @@ Each flow records the full request and response: start line, headers, and body (
 > **HTTPS & upstream verification.** For HTTPS, gori verifies the origin server's certificate against your system CA trust store, resolved automatically from standard locations (and honouring `SSL_CERT_FILE` / `SSL_CERT_DIR`). If none is found (e.g. a minimal container), verification fails and those flows are recorded as errors; set `SSL_CERT_FILE=/path/to/ca-bundle.crt`, or run with `--insecure-upstream` (Settings → **Network → Verify upstream TLS**). This is separate from trusting gori's own root CA in your *client*, which is what lets gori decrypt the traffic in the first place.
 
 <figure class="tui-shot">
-  <img src="/images/tui/response-detail.svg" alt="gori flow detail view on the RESPONSE sub-tab, showing an HTTP/2 200 status line and syntax-highlighted response headers">
+  <img src="/images/tui/response-detail.svg" alt="gori flow detail view on the RESPONSE sub-tab, showing an HTTP/2 200 status line and syntax-highlighted response headers" width="1206" height="520">
   <figcaption>Open any flow with <kbd>Enter</kbd> to read the full request and response, with sub-tabs for headers, HTTP/2 frames, and raw bytes.</figcaption>
 </figure>
 
@@ -30,7 +30,7 @@ Each flow records the full request and response: start line, headers, and body (
 Press `i` to enable **Intercept**. When on, matching requests are held (responses too, if you choose that direction; a `status:` condition only matches responses) so you can forward, drop, or edit them before they continue. A filter bar at the top of the Intercept tab lets you choose the direction to catch and narrow what gets held with a query-language expression, so you only pause on the traffic you care about. While the `s` scope lens is on, only in-scope traffic is held, whatever the condition says. On this tab `c` cycles the catch direction (requests, the default / responses / all) and `/` edits the condition; the capture toggle is `c` everywhere else. `↵` or `e` on a held row edits it; `⇥` opens it in READ, as the Repeater's editor opens, where `i` or `↵` starts typing and `esc` steps back to READ, then to the queue. Turning intercept **off** releases everything still held with its original bytes, so an edit you had not yet forwarded is discarded.
 
 <figure class="tui-shot">
-  <img src="/images/tui/intercept.svg" alt="gori Intercept tab with a filter bar for catch direction and a query condition, and a card explaining forward and drop while catch is off">
+  <img src="/images/tui/intercept.svg" alt="gori Intercept tab with a filter bar for catch direction and a query condition, and a card explaining forward and drop while catch is off" width="1206" height="520" loading="lazy" decoding="async">
   <figcaption>The <strong>Intercept</strong> tab: toggle catch with <kbd>i</kbd>, pick a direction, and hold only matching traffic to forward, drop, or edit in flight.</figcaption>
 </figure>
 
@@ -103,7 +103,7 @@ The sandbox also stops gori's own sends: a Repeater, Fuzzer, Miner, `gori run` o
 The **Sitemap** tab collapses History into a deduplicated tree of `host → path` endpoints, with method chips and scope markers. It's a quick way to see the shape of a target's attack surface. Each root is an **origin**, `scheme://host:port` with the default port left out (`https://acme.test`, `http://127.0.0.1:19021`), so two services on one host, or its HTTP and HTTPS sides, stay separate trees, and sending, opening, Params, Discover and the export from a row stay on that origin. A path tag belongs to the host and shows under each of its origins. Path-param ids are folded by default, so `/user/1` and `/user/2` share one node and `/user/<uuid>` collapses into a single `{uuid}`; press `g` to show the literal ids. Query strings fold on their own axis: `/search?q=widgets` and `/search?q=<payload>` are one `/search` row, expandable to the variants, and `⇧G` turns that off.
 
 <figure class="tui-shot">
-  <img src="/images/tui/sitemap.svg" alt="gori Sitemap tab showing captured hosts expanded into a tree of paths with method chips and per-host path counts">
+  <img src="/images/tui/sitemap.svg" alt="gori Sitemap tab showing captured hosts expanded into a tree of paths with method chips and per-host path counts" width="1206" height="520" loading="lazy" decoding="async">
   <figcaption>The <strong>Sitemap</strong> folds History into a <code>host → path</code> tree with method chips, so you can read a target's surface at a glance.</figcaption>
 </figure>
 
@@ -843,7 +843,7 @@ detail rather than whole facts.
 
 
 <figure class="tui-shot">
-  <img src="/images/tui/project.svg" alt="gori Project tab with overview, at-a-glance status bars, scope, host overrides, environment variables, description, network, and activity panes">
+  <img src="/images/tui/project.svg" alt="gori Project tab with overview, at-a-glance status bars, scope, host overrides, environment variables, description, network, and activity panes" width="1206" height="520" loading="lazy" decoding="async">
   <figcaption>The <strong>Project</strong> home: overview and status at a glance, plus panes for scope, host overrides, env vars, per-project network settings, and the activity feed.</figcaption>
 </figure>
 

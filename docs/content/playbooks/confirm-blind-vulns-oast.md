@@ -37,7 +37,7 @@ Take that payload URL and put it where the target might dereference it. Send the
 Back on the **OAST** tab, callbacks land in the **Callbacks** table as the target's infrastructure resolves the name or connects back, each with its protocol (`dns` / `http` / `smtp`), source IP, timestamp, and the sub-identifier that tells you which payload fired. `Ctrl-X` stops polling but keeps the registration, so a payload you already planted keeps resolving; press `Shift-R` to resume later and pick up whatever the provider buffered while you were away.
 
 <figure class="tui-shot">
-  <img src="/images/tui/oast.svg" alt="gori OAST tab with a Callbacks table of four decrypted hits on an interactsh payload: two DNS A lookups and two HTTP GET requests, each with a source IP and the payload as destination">
+  <img src="/images/tui/oast.svg" alt="gori OAST tab with a Callbacks table of four decrypted hits on an interactsh payload: two DNS A lookups and two HTTP GET requests, each with a source IP and the payload as destination" width="1206" height="520">
   <figcaption>The <strong>OAST</strong> tab registers a payload and lists every DNS, HTTP, or SMTP callback the target makes to it, decrypted and timestamped.</figcaption>
 </figure>
 

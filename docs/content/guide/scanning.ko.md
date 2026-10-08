@@ -19,7 +19,7 @@ gori에는 수동 테스트와 나란히 돌아가는 자동 분석 기능이 �
 안전하지 않은 메서드(`POST` / `PUT` / `PATCH` / `DELETE`)를 다시 보내면 서버 상태가 변경될 수 있으므로 항상 명시적으로 켜야 합니다. 플로우별 *Run active scan* 팝업에서 **unsafe methods**를 체크해 한 번만 의도적으로 재전송하거나, Probe를 **AGGRESSIVE** 모드로 전환하면 안전하지 않은 메서드도 자동으로 프로브하고 룰별 상한을 높입니다(더 넓은 파라미터 집합, 더 넓은 forbidden-bypass 헤더 집합, 그리고 SQL 인젝션 룰에서는 숫자 문맥의 참/거짓 쌍과 MySQL 외에 PostgreSQL·MSSQL 지연 페이로드). AGGRESSIVE는 프로젝트 스코프 안에서만 동작하므로 자동 파이프라인이 스코프를 벗어난 호스트를 건드리는 일은 없습니다. 플로우별 팝업은 직접 고른 플로우에 대한 명시적 실행이라 스코프에 포함된 호스트로 제한되지 않지만, 샌드박스와 제외 규칙은 여전히 막습니다.
 
 <figure class="tui-shot">
-  <img src="/images/tui/probe.svg" alt="심각도와 범주로 묶인 패시브 이슈를 나열하는 gori Probe 스캐너: 허용적 CORS, 누락된 CSP와 HSTS, 쿠키 플래그 문제, 캐시 가능한 응답, 각각 영향받는 호스트 표시">
+  <img src="/images/tui/probe.svg" alt="심각도와 범주로 묶인 패시브 이슈를 나열하는 gori Probe 스캐너: 허용적 CORS, 누락된 CSP와 HSTS, 쿠키 플래그 문제, 캐시 가능한 응답, 각각 영향받는 호스트 표시" width="1206" height="520">
   <figcaption><strong>Probe</strong>는 브라우징하는 동안 패시브 이슈(CORS, 쿠키 위생, 누락된 보안 헤더, 정보 노출)를 심각도와 범주로 묶어 드러냅니다.</figcaption>
 </figure>
 

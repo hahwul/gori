@@ -91,7 +91,7 @@ gori run fuzz <flow-id> --auto -w sleep-payloads.txt --mt '>=4500' --timeout 15
 타이밍은 원래 노이즈가 많습니다(공유 오리진, 느린 홉, 운 나쁜 일시 정지 한 번). 그러니 `--mt` 행은 다른 매치와 똑같이 손으로 재전송해 볼 실마리로 다루세요.
 
 <figure class="tui-shot">
-  <img src="/images/tui/fuzzer.svg" alt="gori Fuzzer tab: a captured request template with one value wrapped in marker highlights, the payload set and attack mode in the CONFIG pane, a filling results table, and a status and size distribution sidebar">
+  <img src="/images/tui/fuzzer.svg" alt="gori Fuzzer tab: a captured request template with one value wrapped in marker highlights, the payload set and attack mode in the CONFIG pane, a filling results table, and a status and size distribution sidebar" width="1206" height="664">
   <figcaption><strong>Fuzzer</strong>: 템플릿에 표시된 위치 하나, CONFIG 패널의 페이로드 세트와 <code>sniper</code> 모드, 그리고 각 요청이 도착할 때마다 채워지는 결과 표.</figcaption>
 </figure>
 

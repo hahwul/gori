@@ -11,7 +11,7 @@ shot = "decoder"
 The **Decoder** tab is a scratch workbench for encoding, decoding, hashing, and transforming data. Paste input, build a chain of converters, and read the intermediate and final results.
 
 <figure class="tui-shot">
-  <img src="/images/tui/decoder.svg" alt="gori Decoder tab with INPUT, CHAIN, PIPELINE and OUTPUT panes running a base64-encode then upper chain, showing each step's intermediate result">
+  <img src="/images/tui/decoder.svg" alt="gori Decoder tab with INPUT, CHAIN, PIPELINE and OUTPUT panes running a base64-encode then upper chain, showing each step's intermediate result" width="1206" height="520">
   <figcaption>The <strong>Decoder</strong> workbench: an input, a chain of converters, and the per-step pipeline with the final output below.</figcaption>
 </figure>
 

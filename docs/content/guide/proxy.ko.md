@@ -21,7 +21,7 @@ gori를 실행하고 클라이언트를 `127.0.0.1:8070`으로 향하게 하세�
 > **HTTPS와 업스트림 검증.** HTTPS의 경우 gori는 오리진 서버 인증서를 시스템 CA 트러스트 스토어로 검증합니다(표준 위치에서 자동 탐색하며 `SSL_CERT_FILE` / `SSL_CERT_DIR`를 존중). 최소 컨테이너 등에서 스토어를 찾지 못하면 검증이 실패해 해당 플로우는 오류로 기록됩니다. 이때는 `SSL_CERT_FILE=/path/to/ca-bundle.crt`를 지정하거나 `--insecure-upstream`으로 실행하세요(설정 → **Network → Verify upstream TLS**). 이는 gori가 트래픽을 복호화하기 위해 *클라이언트*에서 gori 루트 CA를 신뢰하는 것과는 별개입니다.
 
 <figure class="tui-shot">
-  <img src="/images/tui/response-detail.svg" alt="RESPONSE 서브탭의 gori 플로우 상세 뷰. HTTP/2 200 상태 줄과 구문 강조된 응답 헤더를 보여준다">
+  <img src="/images/tui/response-detail.svg" alt="RESPONSE 서브탭의 gori 플로우 상세 뷰. HTTP/2 200 상태 줄과 구문 강조된 응답 헤더를 보여준다" width="1206" height="520">
   <figcaption><kbd>Enter</kbd>로 아무 플로우나 열어 전체 요청과 응답을 읽습니다. 헤더, HTTP/2 프레임, 원시 바이트를 볼 수 있는 서브탭이 함께 제공됩니다.</figcaption>
 </figure>
 
@@ -30,7 +30,7 @@ gori를 실행하고 클라이언트를 `127.0.0.1:8070`으로 향하게 하세�
 `i`를 눌러 **Intercept**를 켭니다. 켜져 있으면 매칭되는 요청이 붙잡혀(그 방향을 고르면 응답도. `status:` 조건은 응답에만 매칭됩니다), 계속 진행하기 전에 포워드, 드롭, 편집할 수 있습니다. Intercept 탭 상단의 필터 바에서 붙잡을 방향을 고르고 쿼리 언어 표현식으로 붙잡을 대상을 좁힐 수 있어, 관심 있는 트래픽에서만 멈춥니다. `s` 스코프 렌즈가 켜져 있으면 조건과 관계없이 스코프 안의 트래픽만 붙잡습니다. 이 탭에서는 `c`가 붙잡을 방향을 순환하고(요청만(기본값) / 응답만 / 전체) `/`가 조건을 편집합니다. 캡처 토글 `c`는 다른 모든 탭에서 그대로입니다. 대기열에서 `↵`나 `e`는 붙잡힌 메시지를 바로 편집하고, `⇥`는 Repeater 편집기처럼 READ 모드로 엽니다. READ에서는 `i`나 `↵`로 입력을 시작하고, `esc`는 READ로, 한 번 더 누르면 대기열로 돌아갑니다. 인터셉트를 **끄면** 아직 붙잡혀 있던 것이 전부 원래 바이트로 흘러가므로, 포워드하지 않은 편집은 버려집니다.
 
 <figure class="tui-shot">
-  <img src="/images/tui/intercept.svg" alt="붙잡을 방향과 쿼리 조건을 위한 필터 바, 그리고 catch가 꺼졌을 때의 forward/drop을 설명하는 카드를 갖춘 gori Intercept 탭">
+  <img src="/images/tui/intercept.svg" alt="붙잡을 방향과 쿼리 조건을 위한 필터 바, 그리고 catch가 꺼졌을 때의 forward/drop을 설명하는 카드를 갖춘 gori Intercept 탭" width="1206" height="520" loading="lazy" decoding="async">
   <figcaption><strong>Intercept</strong> 탭: <kbd>i</kbd>로 catch를 토글하고, 방향을 고르고, 매칭되는 트래픽만 붙잡아 흘러가기 전에 포워드, 드롭, 편집합니다.</figcaption>
 </figure>
 
@@ -103,7 +103,7 @@ Match & Replace는 홀드보다 **먼저** 돌기 때문에, 편집기에서 보
 **Sitemap** 탭은 History를 중복 제거된 `host → path` 엔드포인트 트리로 접어, 메서드 칩과 스코프 마커를 함께 보여줍니다. 대상의 공격 표면을 한눈에 파악하기 좋습니다. 루트 하나는 **오리진** 하나로, 기본 포트를 뺀 `scheme://host:port` 형태입니다(`https://acme.test`, `http://127.0.0.1:19021`). 그래서 한 호스트의 서로 다른 서비스나 HTTP와 HTTPS 쪽은 서로 다른 트리로 나뉘고, 행에서 보내기·열기·Params·Discover·내보내기를 하면 그 오리진에서만 동작합니다. 경로 태그는 호스트에 붙으므로 그 호스트의 모든 오리진 아래에 보입니다. 경로 파라미터의 id는 기본으로 접혀 있어 `/user/1`과 `/user/2`가 한 노드를 공유하고, `/user/<uuid>`는 `{uuid}` 하나로 모입니다. `g`를 누르면 실제 id를 그대로 보여 줍니다. 쿼리 문자열은 별개의 축으로 접힙니다. `/search?q=widgets`와 `/search?q=<payload>`는 `/search` 한 줄이 되고(펼치면 원래 변형이 보입니다), `⇧G`로 끌 수 있습니다.
 
 <figure class="tui-shot">
-  <img src="/images/tui/sitemap.svg" alt="캡처된 호스트들이 경로 트리로 펼쳐지고 메서드 칩과 호스트별 경로 개수가 표시된 gori Sitemap 탭">
+  <img src="/images/tui/sitemap.svg" alt="캡처된 호스트들이 경로 트리로 펼쳐지고 메서드 칩과 호스트별 경로 개수가 표시된 gori Sitemap 탭" width="1206" height="520" loading="lazy" decoding="async">
   <figcaption><strong>Sitemap</strong>은 History를 메서드 칩이 달린 <code>host → path</code> 트리로 접어, 대상의 표면을 한눈에 보여줍니다.</figcaption>
 </figure>
 
@@ -840,7 +840,7 @@ gori settings tls-fingerprint shop.example.com
 
 
 <figure class="tui-shot">
-  <img src="/images/tui/project.svg" alt="개요, 한눈에 보는 상태 바, 스코프, 호스트 오버라이드, 환경 변수, 설명, 네트워크, 활동 패널을 갖춘 gori Project 탭">
+  <img src="/images/tui/project.svg" alt="개요, 한눈에 보는 상태 바, 스코프, 호스트 오버라이드, 환경 변수, 설명, 네트워크, 활동 패널을 갖춘 gori Project 탭" width="1206" height="520" loading="lazy" decoding="async">
   <figcaption><strong>Project</strong> 홈: 개요와 한눈에 보는 상태, 그리고 스코프, 호스트 오버라이드, 환경 변수, 프로젝트별 네트워크 설정, 활동 피드 패널.</figcaption>
 </figure>
 

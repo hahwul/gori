@@ -13,7 +13,7 @@ Some bugs never show up in the response. A blind SSRF, a blind XXE, an out-of-ba
 The **OAST** tab is off the bar by default: press **`0`** and type "oast", use the command palette (`Ctrl-P` → **Go to OAST**), or give it a slot in Preferences. It has two sub-tabs: **Callbacks** (the hits, default) and **Providers** (the listeners you've configured).
 
 <figure class="tui-shot">
-  <img src="/images/tui/oast.svg" alt="gori OAST tab with a Callbacks table of four decrypted hits on an interactsh payload: two DNS A lookups and two HTTP GET requests, each with a source IP and the payload as destination">
+  <img src="/images/tui/oast.svg" alt="gori OAST tab with a Callbacks table of four decrypted hits on an interactsh payload: two DNS A lookups and two HTTP GET requests, each with a source IP and the payload as destination" width="1206" height="520">
   <figcaption>The <strong>OAST</strong> tab registers a payload and lists every DNS, HTTP, or SMTP callback the target makes to it, decrypted and timestamped.</figcaption>
 </figure>
 

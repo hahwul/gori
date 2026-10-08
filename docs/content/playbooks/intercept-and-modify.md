@@ -22,7 +22,7 @@ host:api.example.com method:POST
 Now only the POSTs to your target are held; the rest pass straight through. The same tokens the History filter speaks work here (`host:`, `path:`, `method:`, `scheme:`, `status:`, plus `AND` / `OR` / `NOT`).
 
 <figure class="tui-shot">
-  <img src="/images/tui/intercept.svg" alt="gori Intercept tab with a filter bar for catch direction and a query condition, and a card explaining forward and drop while catch is off">
+  <img src="/images/tui/intercept.svg" alt="gori Intercept tab with a filter bar for catch direction and a query condition, and a card explaining forward and drop while catch is off" width="1206" height="520">
   <figcaption>The <strong>Intercept</strong> tab: toggle catch with <kbd>i</kbd>, pick a direction, and hold only matching traffic to forward, drop, or edit in flight.</figcaption>
 </figure>
 

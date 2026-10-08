@@ -32,7 +32,7 @@ gori run probe --category cors       # a single category
 **Issues** is the triage list you eventually hand to a report. Press `Shift-F` on a **History** flow to file one (from a Repeater tab, `Space` → **Link…** → `+ New issue…`); promote a **Probe** finding into an issue from the Probe tab. Give it a severity (`info` through `critical`) and a status (`open`, `confirmed`, `false-positive`, `resolved`). The flow you filed it from is linked as evidence, so the issue carries its own proof: `Enter` opens the issue, where the flow is a **RELATED** row. `↵` on it shows the exchange in place and `s` opens it in History.
 
 <figure class="tui-shot">
-  <img src="/images/tui/issues.svg" alt="gori Issues tab listing triaged findings with severity, status, host and title columns, one row selected and its linked evidence flow shown">
+  <img src="/images/tui/issues.svg" alt="gori Issues tab listing triaged findings with severity, status, host and title columns, one row selected and its linked evidence flow shown" width="1206" height="520">
   <figcaption>The <strong>Issues</strong> tab: every finding you promote, each with a severity and a status, linked back to the evidence flow that proves it.</figcaption>
 </figure>
 

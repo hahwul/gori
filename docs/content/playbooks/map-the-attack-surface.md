@@ -22,7 +22,7 @@ gori run sitemap
 The tree is a view over the capture, not a second copy; anything you browse next appears the moment it lands. `--in-scope` limits it to in-scope hosts, matching the scope lens, and `--hide-static` leaves out images, fonts and media (in the TUI, `Space` `Z` `s` under **Display…**, a lens History shares).
 
 <figure class="tui-shot">
-  <img src="/images/tui/sitemap.svg" alt="gori Sitemap tab showing captured hosts expanded into a tree of paths with method chips and per-host path counts">
+  <img src="/images/tui/sitemap.svg" alt="gori Sitemap tab showing captured hosts expanded into a tree of paths with method chips and per-host path counts" width="1206" height="520">
   <figcaption>The <strong>Sitemap</strong> folds your capture into a <code>host → path</code> tree with method chips and scope markers, the shape of the surface you're about to test.</figcaption>
 </figure>
 
