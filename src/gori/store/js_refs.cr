@@ -143,19 +143,19 @@ module Gori
       return memo[0] if memo && memo[1] == flows_now
       origins =
         if memo && !flows_deleted?(memo[1], flows_now)
-          memo[0] | captured_origins(after: memo[1][0])
+          memo[0] | captured_origins(memo[1][0], flows_now[0])
         else
-          captured_origins
+          captured_origins(0_i64, flows_now[0])
         end
       @flow_origins_memo = {origins, flows_now}
       origins
     end
 
-    # `WHERE 1` for the full walk, not `id > 0`, which would steer the planner off the covering index.
-    private def captured_origins(after : Int64? = nil) : Set({String, String, Int32})
+    # Bounded by the reading the memo is keyed on: a row past it, inserted and deleted by a peer
+    # before the next reading, would leave its origin flagged with no MAX/COUNT change to show it.
+    private def captured_origins(after : Int64, upto : Int64) : Set({String, String, Int32})
       out = Set({String, String, Int32}).new
-      where, args = after ? {"id > ?", [after] of DB::Any} : {"1", [] of DB::Any}
-      @db.query("SELECT DISTINCT scheme, host, port FROM flows WHERE #{where}", args: args) do |rs|
+      @db.query("SELECT DISTINCT scheme, host, port FROM flows WHERE id > ? AND id <= ?", after, upto) do |rs|
         rs.each { out << {rs.read(String), rs.read(String).downcase, rs.read(Int64).to_i32} }
       end
       out
