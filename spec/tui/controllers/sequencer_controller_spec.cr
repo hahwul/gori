@@ -152,6 +152,28 @@ describe SequencerController do
       end
     end
 
+    # A tab marked clean over a rolled-back UPDATE is no longer locked against reconcile, which
+    # then restores the stale row over the operator's reconfigure.
+    it "stays dirty when its session UPDATE did not commit" do
+      with_sequencer_controller do |_ctl, session|
+        req = "GET /token HTTP/1.1\r\nHost: shop.test\r\n\r\n".to_slice
+        session.store.insert_sequencer_session("https://shop.test", req, false, nil, "{}", nil, 0).should be > 0
+        host = FakeHost.new(session)
+        ctl = SequencerController.new(host)
+        view = ctl.current_view.not_nil!
+        view.append_manual_tokens(["tok"])
+        session.store.@db.exec("CREATE TRIGGER block_seq_update BEFORE UPDATE ON sequencer_sessions " \
+                               "BEGIN SELECT RAISE(ABORT, 'blocked'); END")
+        ctl.save_current
+        view.dirty?.should be_true
+        host.statuses.last.should contain("NOT saved")
+
+        session.store.@db.exec("DROP TRIGGER block_seq_update")
+        ctl.save_current
+        view.dirty?.should be_false
+      end
+    end
+
     it "closes the active session on ^W and lands on the one left" do
       with_sequencer_controller do |_ctl, session|
         req = "GET /token HTTP/1.1\r\nHost: shop.test\r\n\r\n".to_slice
