@@ -62,6 +62,7 @@
 - Notes: ^1-9 from the editor clears a sub-tab filter that hides the target note, as it does from the strip
 - Repeater: duplicating a gRPC tab mid hex edit keeps its head and edited payload, Copy under ^X takes the hex bytes, and a captured `%%%` line ending in a form feed or non-breaking space is no longer a group separator. Editing a SAML or GraphQL payload, or sending gRPC-Web, leaves a deliberately malformed or duplicated Content-Length as typed, and timing analysis draws a request line that is not valid UTF-8
 - Repeater and Fuzzer: `i`, `a` or `p` from READ with the caret on a marker's hidden `¦chain` edits beside the marker, not inside the chain the screen hides
+- Editors: READ `p` pastes after a glyph made of several codepoints (a decomposed accent, a skin-toned emoji), not before it
 - Projects: the picker stays up and says why when a temp project cannot be created, and its Export no longer exits gori when the launch directory was deleted
 - History: the FRAMES pane names an h2 frame type outside 0..255 from an imported database instead of failing to render
 
