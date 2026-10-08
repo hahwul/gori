@@ -348,6 +348,41 @@ describe "Gori::Tui::OastController — resuming a persisted listener" do
     end
   end
 
+  # A session row that did not commit can never be resumed, and its callbacks would be filed
+  # under session_id 0 — so the fresh registration is released rather than run.
+  it "does not listen on a fresh registration whose session row did not commit" do
+    with_oast_controller do |controller, host, session, _sid, pid|
+      session.store.@db.exec("CREATE TRIGGER block_oast_sessions BEFORE INSERT ON oast_sessions " \
+                             "BEGIN SELECT RAISE(ABORT, 'blocked'); END")
+      engine_session = Gori::Oast::Session.new(0_i64, Gori::Oast::ProviderKind::Interactsh,
+        "https://oast.test", "fresh-corr", "fresh-sec", registered: true)
+      controller.@reg_events.send(OastController::RegOk.new(engine_session, SilentProvider.new,
+        "p_#{pid}", pid, "House interactsh", false))
+      controller.drain_events
+
+      controller.@listeners.should be_empty
+      host.statuses.last.should contain("NOT saved")
+    end
+  end
+
+  # Disabling a provider drops it from every picker, so a listener left running on it could
+  # never be stopped again.
+  it "stops the listener of a provider it disables" do
+    with_oast_controller do |controller, _host, _session, sid, pid|
+      controller.on_enter
+      controller.@providers.first.key.should eq("p_#{pid}")
+      engine_session = Gori::Oast::Session.new(sid, Gori::Oast::ProviderKind::Interactsh,
+        "https://oast.test", "c0rr3lat10n", "s3cret", registered: true)
+      controller.@reg_events.send(resumed_reg(controller, engine_session, "p_#{pid}"))
+      controller.drain_events
+      controller.@listeners.size.should eq(1)
+
+      controller.toggle_provider
+      controller.@providers.first.enabled.should be_false
+      controller.@listeners.should be_empty
+    end
+  end
+
   it "refuses a second listener on a provider that is already listening" do
     with_oast_controller do |controller, host, session, sid, pid|
       engine_session = Gori::Oast::Session.new(sid, Gori::Oast::ProviderKind::Interactsh,
