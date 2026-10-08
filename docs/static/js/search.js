@@ -1,5 +1,6 @@
 (function () {
   var searchData = null;
+  var pending = null;
   var activeIndex = -1;
   var overlay = document.getElementById('searchOverlay');
   var input = document.getElementById('searchInput');
@@ -10,10 +11,15 @@
     var link = document.querySelector('link[rel="stylesheet"][href*="/css/"]');
     var path = link ? new URL(link.href, document.baseURI).pathname : '/css/';
     var searchUrl = path.substring(0, path.indexOf('/css/')) + '/search.json';
-    fetch(searchUrl)
-      .then(function (r) { return r.json(); })
-      .then(function (data) { searchData = data; cb(data); })
-      .catch(function () { searchData = []; cb([]); });
+    /* One request however many callers wait on it (keystrokes while the index
+       is still loading, or the ?q= landing below). */
+    if (!pending) {
+      pending = fetch(searchUrl)
+        .then(function (r) { return r.json(); })
+        .catch(function () { return []; })
+        .then(function (data) { searchData = data; return data; });
+    }
+    pending.then(cb);
   }
 
   window.openSearch = function () {
