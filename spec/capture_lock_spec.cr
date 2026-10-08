@@ -76,3 +76,36 @@ describe Gori::CaptureLock do
     end
   end
 end
+
+# A FIFO with `cat` on the read end: `flock` on it fails ENOTSUP on macOS — the errno an NFS
+# `nolocks` or FUSE mount gives — and opening it for writing returns once `cat` has it open.
+private def with_unlockable_lock_file(path : String, &)
+  File.delete?(path)
+  Process.run("mkfifo", [path]).success?.should be_true
+  reader = Process.new("cat", [path], output: Process::Redirect::Close)
+  begin
+    yield
+  ensure
+    reader.signal(:kill) rescue nil
+    reader.wait
+  end
+end
+
+describe "Gori::CaptureLock on a filesystem without flock" do
+  # Any flock failure used to read as "another instance holds it": every session opened
+  # view-only and the project could not be deleted, with no other gori running.
+  it "captures anyway instead of reporting a holder that does not exist" do
+    posix_only!("mkfifo")
+    dir = File.tempname("gori-lock-nolocks")
+    Dir.mkdir_p(dir)
+    begin
+      with_unlockable_lock_file(Gori::CaptureLock.path(dir)) do
+        lock = Gori::CaptureLock.try_at(Gori::CaptureLock.path(dir))
+        lock.should_not be_nil
+        lock.not_nil!.close
+      end
+    ensure
+      FileUtils.rm_rf(dir)
+    end
+  end
+end

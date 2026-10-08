@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Projects: on a filesystem without flock support (an NFS `nolocks` or FUSE mount) a project now captures and can be deleted, instead of reading as held by another gori instance
 - Docs: the site search opens from a `?q=` link, and screenshots no longer shift the page while they load (#1550)
 - MCP: `gori mcp --pin-project` keeps a server on the project it starts with, withholding the tools that switch to or read other projects (#1508)
 - CLI: `gori run` help now says when a timed capture stops, how it picks its default project, what `send`'s exit status means, and that `import --urls` sends nothing (#1507)

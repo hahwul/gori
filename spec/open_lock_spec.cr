@@ -298,3 +298,32 @@ describe "Gori::OpenLock.guarded?" do
     end
   end
 end
+
+# A FIFO with `cat` on the read end: `flock` on it fails ENOTSUP on macOS — the errno an NFS
+# `nolocks` or FUSE mount gives — and opening it for writing returns once `cat` has it open.
+private def with_unlockable_lock_file(path : String, &)
+  File.delete?(path)
+  Process.run("mkfifo", [path]).success?.should be_true
+  reader = Process.new("cat", [path], output: Process::Redirect::Close)
+  begin
+    yield
+  ensure
+    reader.signal(:kill) rescue nil
+    reader.wait
+  end
+end
+
+describe "Gori::OpenLock.try_exclusive on a filesystem without flock" do
+  # `try_shared` already degraded to "no lock" there; this side read the same errno as
+  # "somebody has it open", so the project could never be deleted.
+  it "degrades to proceeding, like try_shared" do
+    posix_only!("mkfifo")
+    with_project do |_registry, project|
+      with_unlockable_lock_file(Gori::OpenLock.path(project.db_path)) do
+        guard = Gori::OpenLock.try_exclusive(project.db_path)
+        guard.should_not be_nil
+        guard.not_nil!.close
+      end
+    end
+  end
+end
