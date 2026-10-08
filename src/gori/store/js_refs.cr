@@ -79,37 +79,36 @@ module Gori
     # over the per-flow marker table (one row per scanned flow, not per reference) plus two
     # index-end reads, instead of a GROUP BY over every reference per tick (P6).
     #
-    # `host_captured` / `origin_captured` also read `flows`, which that fingerprint does not see.
-    # Traffic reaching a referenced host or origin after the scan has to clear its "never
-    # requested" flag, so when flows were only ADDED, just the added flows' origins are read
-    # (a rowid range past the last reading), not the aggregate. A DELETE can take a flag the other way (the last flow on an origin
-    # gone), and the only honest answer to that is the aggregate again: flow ids are never
-    # reused (V39), so rows were deleted exactly when the count grew by less than the newest id
-    # did, or the newest id itself went DOWN (the newest flow deleted: both fall by one) —
-    # which holds for a peer's delete too, where no in-process counter would.
+    # `host_captured` / `origin_captured` also read `flows`, which that fingerprint does not see,
+    # so they are applied on top from the set of captured origins, memoized on its own key: the
+    # flows' {newest id, row count}. When flows were only ADDED, just the added flows' origins
+    # are read (a rowid range past the last reading) and joined in. A DELETE can take a flag the
+    # other way (the last flow on an origin gone), and the only honest answer to that is a
+    # fresh walk: flow ids are never reused (V39), so rows were deleted exactly when the count
+    # grew by less than the newest id did, or the newest id itself went DOWN (the newest flow
+    # deleted: both fall by one) — which holds for a peer's delete too, where no in-process
+    # counter would. The origins are lowercased because a reference's host is stored that way
+    # and a flow's as captured (`Shop.Test`).
     def js_ref_nodes(limit : Int32 = SITEMAP_MAX) : {Array(JsRefNode), Bool}
       print = js_ref_fingerprint
       flows_now = @db.query_one("SELECT COALESCE(MAX(id), 0), COUNT(*) FROM flows", as: {Int64, Int64})
-      memo = @js_ref_nodes_memo
-      memo = nil if memo && flows_deleted?(memo[2], flows_now)
-      unless memo && memo[0] == {print, limit}
-        memo = { {print, limit}, js_ref_aggregate(limit), flows_now }
-        @js_ref_nodes_memo = memo
+      key = {print, limit, flows_now}
+      if (memo = @js_ref_nodes_memo) && memo[0] == key
+        return memo[1]
       end
-      key, result, seen = memo
-      return result if seen == flows_now
-      nodes, capped = result
-      added = captured_origins("id > ?", [seen[0]] of DB::Any)
-      unless added.empty?
-        hosts = added.map(&.[1]).to_set
-        nodes = nodes.map do |n|
-          n = n.copy_with(host_captured: true) if hosts.includes?(n.host)
-          n = n.copy_with(origin_captured: true) if added.includes?({n.scheme, n.host, n.port})
-          n
-        end
+      rows = @js_ref_rows_memo
+      unless rows && rows[0] == {print, limit}
+        rows = { {print, limit}, js_ref_aggregate(limit) }
+        @js_ref_rows_memo = rows
       end
-      result = {nodes, capped}
-      @js_ref_nodes_memo = {key, result, flows_now}
+      origins = flow_origins(flows_now)
+      hosts = origins.map(&.[1]).to_set
+      nodes, capped = rows[1]
+      result = {nodes.map do |n|
+        n.copy_with(host_captured: hosts.includes?(n.host),
+          origin_captured: origins.includes?({n.scheme, n.host, n.port}))
+      end, capped}
+      @js_ref_nodes_memo = {key, result}
       result
     rescue
       # Never crash a Sitemap poll over a read (mirrors sitemap_tags / sitemap_entries).
@@ -121,19 +120,15 @@ module Gori
       now[0] < before[0] || (now[1] - before[1]) < (now[0] - before[0])
     end
 
-    # The captured flags are read off one walk of the flows' origins rather than an indexed
-    # `f.host = js_refs.host` probe per node: a reference's host is stored lowercased and a
-    # flow's as captured, so the equality missed `Shop.Test` traffic.
+    # The referenced endpoints with their flow counts; the captured flags are left false for
+    # `js_ref_nodes` to apply.
     private def js_ref_aggregate(limit : Int32) : {Array(JsRefNode), Bool}
       out = [] of JsRefNode
-      origins = captured_origins("1")
-      hosts = origins.map(&.[1]).to_set
       @db.query("SELECT scheme, host, port, path, COUNT(DISTINCT flow_id) FROM js_refs " \
                 "GROUP BY host, path, scheme, port ORDER BY host, path, scheme, port LIMIT ?", limit + 1) do |rs|
         rs.each do
-          scheme, host, port = rs.read(String), rs.read(String), rs.read(Int64).to_i32
-          out << JsRefNode.new(scheme, host, port, rs.read(String), rs.read(Int64).to_i32,
-            hosts.includes?(host), origins.includes?({scheme, host, port}))
+          out << JsRefNode.new(rs.read(String), rs.read(String), rs.read(Int64).to_i32, rs.read(String),
+            rs.read(Int64).to_i32, false, false)
         end
       end
       capped = out.size > limit
@@ -141,7 +136,21 @@ module Gori
       {out, capped}
     end
 
-    # {scheme, host lowercased, port} of every flow `where` selects — a reference's spelling.
+    # {scheme, host lowercased, port} of every captured flow at the `flows_now` reading: one
+    # covering-index walk after a delete (or the first call), the added rowid range otherwise.
+    private def flow_origins(flows_now : {Int64, Int64}) : Set({String, String, Int32})
+      memo = @flow_origins_memo
+      return memo[0] if memo && memo[1] == flows_now
+      origins =
+        if memo && !flows_deleted?(memo[1], flows_now)
+          memo[0] | captured_origins("id > ?", [memo[1][0]] of DB::Any)
+        else
+          captured_origins("1")
+        end
+      @flow_origins_memo = {origins, flows_now}
+      origins
+    end
+
     private def captured_origins(where : String, args : Array(DB::Any) = [] of DB::Any) : Set({String, String, Int32})
       out = Set({String, String, Int32}).new
       @db.query("SELECT DISTINCT scheme, host, port FROM flows WHERE #{where}", args: args) do |rs|
@@ -150,7 +159,9 @@ module Gori
       out
     end
 
-    @js_ref_nodes_memo : { { {Int64, Int64, Int64}, Int32 }, {Array(JsRefNode), Bool}, {Int64, Int64} }? = nil
+    @js_ref_rows_memo : { { {Int64, Int64, Int64}, Int32 }, {Array(JsRefNode), Bool} }? = nil
+    @js_ref_nodes_memo : { { {Int64, Int64, Int64}, Int32, {Int64, Int64} }, {Array(JsRefNode), Bool} }? = nil
+    @flow_origins_memo : {Set({String, String, Int32}), {Int64, Int64}}? = nil
 
     private def js_ref_fingerprint : {Int64, Int64, Int64}
       scans = @db.scalar("SELECT COUNT(*) FROM js_ref_scans").as(Int64)
