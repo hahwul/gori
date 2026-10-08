@@ -4610,7 +4610,7 @@ module Gori::Tui
       return ["(no frames)"] if frames.empty?
       frames.map do |f|
         arrow = f.direction == "out" ? "→" : "←"
-        name = Proxy::H2::Frame::Type.from_value?(f.type.to_u8).try(&.to_s) || "TYPE#{f.type}"
+        name = Proxy::H2::Frame::Type.from_value?(f.type).try(&.to_s) || "TYPE#{f.type}"
         mark = f.stream_id == stream_id ? "*" : " "
         "#{arrow}#{mark}#{name.ljust(12)} stream=#{f.stream_id} flags=0x#{f.flags.to_s(16).rjust(2, '0')} #{f.length}b"
       end

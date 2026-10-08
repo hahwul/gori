@@ -2037,6 +2037,33 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  # The column is a bare INTEGER, so an imported or foreign database can hold a type outside
+  # 0..255; the checked `to_u8` raised on render instead of naming it.
+  it "names an out-of-range h2 frame type from a foreign database instead of raising" do
+    with_store do |store|
+      conn = store.insert_h2_connection("h.test", 443, "h2")
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
+        method: "GET", target: "/", http_version: "HTTP/2",
+        head: "GET / HTTP/2\r\n\r\n".to_slice, body: nil,
+        h2_conn_id: conn, h2_stream_id: 1_i64, source: Gori::FlowSource::Kind::Proxy))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 200, head: "HTTP/2 200\r\n\r\n".to_slice))
+      store.insert_h2_frame(conn, "out", 0x1_u8, 0x5_u8, 1_u32, "hdr".to_slice)
+      store.flush
+      store.@db.exec("UPDATE h2_frames SET type = 300")
+
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      view.toggle_pane
+      view.toggle_pane
+      backend = MemoryBackend.new(100, 12)
+      view.render_detail(Screen.new(backend), Rect.new(0, 0, 100, 12))
+      backend.contains?("TYPE300").should be_true
+    end
+  end
+
   it "walks detail panes REQ→RES→FRAMES with ←/→, stopping at the ends" do
     with_store do |store|
       conn = store.insert_h2_connection("h.test", 443, "h2")
