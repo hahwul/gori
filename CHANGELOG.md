@@ -55,6 +55,7 @@
 - Export: the CSRF PoC no longer crashes on a multipart header holding a character like `İ`, strips the framing newline from a non-ASCII multipart value, and a dash run in the URL can no longer close its HTML comment; Python, fetch, Go, httpie and CSRF output keep a Transfer-Encoding that does not end in `chunked`, as curl does
 - Colormarker: editing a rule so it no longer matches the `/` filter while also changing its scope now moves it, instead of reporting it deleted
 - Diff: sending a row to the Comparer when the other project no longer opens says so and keeps the report, instead of wiping it and calling the endpoint one-sided
+- Authorize: switching passive replay off and on after a ^X stop resumes it, as documented
 
 ## v0.8.0
 

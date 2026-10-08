@@ -505,6 +505,19 @@ describe Gori::Tui::AuthorizeController do
     end
   end
 
+  # A ^X stop outlives its batch so passive cannot re-fire it; switching passive off and on is
+  # the documented way to resume, and it has to actually lift the stop.
+  it "lifts a settled stop when passive is switched off and on" do
+    with_authorize_controller do |ctrl, _host, _session|
+      ctrl.toggle_passive    # ON
+      ctrl.view.request_stop # what ^X leaves behind once the batch settled
+      ctrl.toggle_passive    # off
+      ctrl.view.stop_requested?.should be_true
+      ctrl.toggle_passive # on
+      ctrl.view.stop_requested?.should be_false
+    end
+  end
+
   # A batch that compared NOTHING must not summarise as "no identity matched the baseline" —
   # that is the finding this tool exists to give, stated about traffic that produced no
   # response at all. The two ways to end up there are disjoint (the gate refused the send, or

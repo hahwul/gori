@@ -227,6 +227,9 @@ module Gori::Tui
     def toggle_passive : Nil
       @passive = !@passive
       if @passive
+        # Off-then-on is the documented way past a ^X stop (see `maybe_autorun`); a stop asked
+        # of a batch still in flight is left for that batch to honour.
+        @view.reset_stop unless running?
         start_passive_watcher
         # Say it HERE, at the keypress, not later when a flow happens to be skipped. With no
         # scope include rule the allowlist refuses every host, so passive can never do
