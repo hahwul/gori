@@ -394,6 +394,20 @@ describe Gori::PayloadFrom do
       end
     end
 
+    it "reports a cut read when an endpoint inside the read window was withheld" do
+      with_store do |store|
+        jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+        a = pf_flow(store, "/static/a.js", host: "cdn.test")
+        ref = ->(path : String) { Gori::Store::JsRef.new("https", "api.test", 443, path, path, path, 0, 1, 0, "absolute") }
+        paths = ["/api/a", "/api/b/#{jwt}", "/api/c", "/api/d", "/api/e"]
+        store.record_js_scan(a, paths.map { |p| ref.call(p) }, 1).should be_true
+        r = resolve(store, "js-endpoints", PF::Policy.new(max_values: 2))
+        r.values.size.should eq(2)
+        r.report.skipped_sensitive.should eq(1)
+        r.report.capped_by.should eq(PF::Cap::Values)
+      end
+    end
+
     it "honors a stop before it reads, and reports it as a cut read" do
       with_store do |store|
         a = pf_flow(store, "/static/a.js", host: "cdn.test")

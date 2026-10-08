@@ -369,6 +369,12 @@ module Gori
         !@capped_by.nil?
       end
 
+      # The read itself stopped at the value cap, whatever `add` saw (a bounded query whose
+      # one extra row was skipped rather than refused).
+      def cap_values! : Nil
+        @capped_by ||= Cap::Values
+      end
+
       # Already kept? Asked BEFORE the costlier judgements (a sensitivity regex pass), so a value
       # met a hundred times is judged once.
       def seen?(value : String) : Bool
@@ -487,7 +493,8 @@ module Gori
                         stop : -> Bool) : {Int32, Bool, String?}
       return {0, true, nil} if stop.call # a single query: this is the only place to honor a stop
       sens = spec.include_sensitive ? nil : ParamInventory::Sensitivity.new(store)
-      store.js_ref_paths(filter, c.max_values + 1).each do |path|
+      paths = store.js_ref_paths(filter, c.max_values + 1)
+      paths.each do |path|
         next if c.seen?(path)
         if (s = sens) && path.split('/').any? { |seg| !seg.empty? && s.value?(seg) }
           c.skipped_sensitive += 1
@@ -495,6 +502,9 @@ module Gori
         end
         break unless c.add(path)
       end
+      # The `+ 1` row proves there was more only when `add` refuses it; one skipped as sensitive
+      # or oversize inside the window would leave a cut list reported complete.
+      c.cap_values! if paths.size > c.max_values
       flows = store.js_ref_flow_count(filter)
       note = if flows.zero?
                "no JavaScript references are stored for these flows — `gori run sitemap js --scan` reads them"
