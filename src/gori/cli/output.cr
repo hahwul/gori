@@ -820,7 +820,7 @@ module Gori
       # One response-shape cluster (#1351) as a text line: its id (what `--cluster` takes), size,
       # outcome, metric ranges, hit count and the representative row's index and payload. Same
       # term-safety seam as `fuzz_row_text`: the payload is operator bytes.
-      def self.fuzz_cluster_text(c : Fuzz::Clusters::Cluster, matched_only : Bool = false) : String
+      def self.fuzz_cluster_text(c : Fuzz::Clusters::Cluster, matched_only : Bool) : String
         rep = c.head(matched_only)
         String.build do |io|
           io << c.hex << "  ×" << c.count.to_s.ljust(6)

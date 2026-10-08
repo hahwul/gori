@@ -435,8 +435,9 @@ module Gori
       out
     end
 
-    # {endpoint path, word} per distinct sighting on the one origin `origin` names, newest flow first.
-    # Header names are left out (see `wordlist`), as are words the wordlist format cannot carry.
+    # {endpoint path, word} per distinct sighting on the one origin `origin` names, newest flow
+    # first. Header names are left out (see `wordlist`), as are words the wordlist format
+    # cannot carry.
     private def origin_words(store : Store, origin : Options, max_flows : Int32, stop : -> Bool) : Array({String, String})
       seen = Set({String, String}).new
       out = [] of {String, String}

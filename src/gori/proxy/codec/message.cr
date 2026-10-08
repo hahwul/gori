@@ -145,7 +145,7 @@ module Gori::Proxy::Codec
     # `method`/`target`/`version` come from split(' '), which mis-slices a malformed line
     # (an unencoded space ⇒ >3 tokens): target is truncated and version is a garbage token.
     # This returns the honest whole line for the stored projection (FlowMapper), mirroring
-    # the first-line scan in client_conn#rewrite_request_line.
+    # the first-line scan in Codec::Http1.rewrite_request_line.
     def request_line : String
       nl = raw_head.index(0x0a_u8)
       line = nl ? raw_head[0, nl] : raw_head

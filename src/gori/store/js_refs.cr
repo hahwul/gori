@@ -143,16 +143,18 @@ module Gori
       return memo[0] if memo && memo[1] == flows_now
       origins =
         if memo && !flows_deleted?(memo[1], flows_now)
-          memo[0] | captured_origins("id > ?", [memo[1][0]] of DB::Any)
+          memo[0] | captured_origins(after: memo[1][0])
         else
-          captured_origins("1")
+          captured_origins
         end
       @flow_origins_memo = {origins, flows_now}
       origins
     end
 
-    private def captured_origins(where : String, args : Array(DB::Any) = [] of DB::Any) : Set({String, String, Int32})
+    # `WHERE 1` for the full walk, not `id > 0`, which would steer the planner off the covering index.
+    private def captured_origins(after : Int64? = nil) : Set({String, String, Int32})
       out = Set({String, String, Int32}).new
+      where, args = after ? {"id > ?", [after] of DB::Any} : {"1", [] of DB::Any}
       @db.query("SELECT DISTINCT scheme, host, port FROM flows WHERE #{where}", args: args) do |rs|
         rs.each { out << {rs.read(String), rs.read(String).downcase, rs.read(Int64).to_i32} }
       end

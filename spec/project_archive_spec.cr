@@ -680,35 +680,24 @@ describe Gori::ProjectArchive do
     end
   end
 
-  # The same rebuild drops `flows.id`'s INTEGER PRIMARY KEY: every capture into the imported
-  # project would then get a NULL id instead of the rowid the store hands back.
-  it "refuses an archive whose flows id is no longer the INTEGER PRIMARY KEY" do
+  # The same rebuild drops an `id`'s INTEGER PRIMARY KEY: every later row in that table (a
+  # capture, an issue) would get a NULL id instead of the rowid the store hands back.
+  it "refuses an archive whose id table lost its INTEGER PRIMARY KEY" do
     with_archive_project do |_registry, project, store, root|
       store.insert_flow(archive_request("/a"))
       store.flush
       archive_path = export_archive(project, File.join(root, "pk.gori"))
-      tamper_archive_database(archive_path, root) do |conn|
-        conn.exec("CREATE TABLE flows_x AS SELECT * FROM flows")
-        conn.exec("DROP TABLE flows")
-        conn.exec("ALTER TABLE flows_x RENAME TO flows")
+      original = File.read(archive_path)
+      {"flows", "issues"}.each do |table|
+        File.write(archive_path, original)
+        tamper_archive_database(archive_path, root) do |conn|
+          conn.exec("CREATE TABLE #{table}_x AS SELECT * FROM #{table}")
+          conn.exec("DROP TABLE #{table}")
+          conn.exec("ALTER TABLE #{table}_x RENAME TO #{table}")
+        end
+        error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
+        error.message.not_nil!.should contain("table #{table} has no INTEGER PRIMARY KEY")
       end
-      error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
-      error.message.not_nil!.should contain("INTEGER PRIMARY KEY")
-    end
-  end
-
-  it "refuses the same rebuild on any other id table" do
-    with_archive_project do |_registry, project, store, root|
-      store.insert_flow(archive_request("/a"))
-      store.flush
-      archive_path = export_archive(project, File.join(root, "pk-notes.gori"))
-      tamper_archive_database(archive_path, root) do |conn|
-        conn.exec("CREATE TABLE issues_x AS SELECT * FROM issues")
-        conn.exec("DROP TABLE issues")
-        conn.exec("ALTER TABLE issues_x RENAME TO issues")
-      end
-      error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
-      error.message.not_nil!.should contain("table issues has no INTEGER PRIMARY KEY")
     end
   end
 

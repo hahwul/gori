@@ -531,9 +531,9 @@ module Gori
       end
       exec_repeaters = tables.includes?("repeaters") ? count_exec_chains(conn, "repeaters", "request") : 0
       exec_fuzz_templates = tables.includes?("fuzz_sessions") ? count_exec_fuzz_sessions(conn) : 0
-      exec_decoder_tabs = json_array(setting(conn, Store::DECODER_SESSIONS_KEY)).count do |tab|
+      exec_decoder_tabs = json?(setting(conn, Store::DECODER_SESSIONS_KEY)).try(&.as_a?).try(&.count do |tab|
         tab.as_h?.try(&.["chain"]?).try(&.as_s?).try { |chain| exec_text?(chain) }
-      end
+      end) || 0
       exec_env_vars = setting(conn, Env::PROJECT_VARS_KEY).try do |raw|
         Env.parse_vars_json(raw).count { |(_, value)| exec_text?(value) }
       end || 0
@@ -551,22 +551,17 @@ module Gori
       count = 0
       conn.query_each("SELECT CAST(template AS BLOB), CAST(config AS BLOB) FROM fuzz_sessions") do |rs|
         template, config = rs.read(Bytes?), rs.read(Bytes?)
-        grpc = config.try { |bytes| json_object(String.new(bytes))["grpc_fields"]?.try(&.as_s?) }
+        grpc = config.try { |bytes| json?(String.new(bytes)).try(&.as_h?).try(&.["grpc_fields"]?).try(&.as_s?) }
         count += 1 if template.try { |bytes| exec_text?(String.new(bytes)) } || grpc.try { |text| exec_text?(text) }
       end
       count
     end
 
-    private def self.json_object(raw : String) : Hash(String, JSON::Any)
-      JSON.parse(raw).as_h? || {} of String => JSON::Any
+    # Tolerant: a malformed value is nil, never a refused import.
+    private def self.json?(raw : String?) : JSON::Any?
+      raw.try { |text| JSON.parse(text) }
     rescue JSON::ParseException
-      {} of String => JSON::Any
-    end
-
-    private def self.json_array(raw : String?) : Array(JSON::Any)
-      (raw.try { |text| JSON.parse(text).as_a? }) || [] of JSON::Any
-    rescue JSON::ParseException
-      [] of JSON::Any
+      nil
     end
 
     # The entries the store's tolerant reader would honor (`Store#rewriter_overrides`).

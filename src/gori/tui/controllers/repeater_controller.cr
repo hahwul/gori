@@ -2591,13 +2591,13 @@ module Gori::Tui
     # twice is the non-idempotent bug `Sender#send_group` documents.
     #
     # The third element is the literal set the ONE plan sends every member under: the UNION of
-    # the captured members' own (`RepeaterView#evidence_send_literals`), nil for drafts. Each
+    # the captured members' own (`RepeaterView#evidence_send_literals`), empty for drafts. Each
     # capture's `$words` (GraphQL `$id`, Mongo `$ne`) differ, so equality would refuse two
     # ordinary captures; a union only ever holds MORE tokens literal, the verbatim side (P7).
-    private def collect_race_members(tabs : Array(RepeaterTab)) : {Array(Bytes), Array(String), Set(String)?}?
+    private def collect_race_members(tabs : Array(RepeaterTab)) : {Array(Bytes), Array(String), Set(String)}?
       drafts = [] of Bytes
       labels = [] of String
-      literals = nil.as(Set(String)?)
+      literals = Set(String).new
       # The dial SIGNATURE every member must share: the race rides ONE Sender (h2 is literally
       # one connection, and the h1 form is held to the same shape), so a member whose origin,
       # transport, SNI or TLS preset differs would be silently sent under the anchor's — refuse
@@ -2627,7 +2627,7 @@ module Gori::Tui
         drafts << draft
         labels << race_member_label(tv, draft)
         sigs << {probe.scheme, probe.host, probe.port, probe.http2?, tv.sni_override, tv.tls_preset, tv.evidence?}
-        literals = (literals || Set(String).new) | tv.evidence_send_literals if tv.evidence?
+        literals.concat(tv.evidence_send_literals) if tv.evidence?
       end
       if loaded < 2
         @host.status("race needs at least 2 loaded sub-tabs — #{loaded} of #{tabs.size} marked #{loaded == 1 ? "is" : "are"} ready")
