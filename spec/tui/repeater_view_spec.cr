@@ -2871,3 +2871,19 @@ describe "RepeaterView WebSocket frame shapes (V7)" do
     view.ws_keep_key?.should be_false
   end
 end
+
+# While ^X is open the hex buffer owns the bytes and the TextArea is stale, so Copy took the
+# pre-hex text rather than the bytes ^R sends.
+describe "RepeaterView copy under the ^X hex editor" do
+  it "copies the hex buffer, not the stale editor" do
+    view = RepeaterView.new
+    view.restore("http://127.0.0.1", "GET / HTTP/1.1\r\nHost: h\r\n\r\n", false, false)
+    view.focus_pane(:request)
+    view.toggle_request_hex.should be_true
+    "50".each_char { |c| view.hex_key(hex_ev(c)) } # G → P
+    String.new(view.request_bytes).should start_with("PET /")
+    view.pane_selection?.should be_false
+    view.pane_copy_text.should start_with("PET /")
+    view.pane_copy_all_text.should start_with("PET /")
+  end
+end
