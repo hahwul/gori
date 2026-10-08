@@ -60,7 +60,12 @@ describe "Probe exec rule" do
   it "raises nothing on a non-zero exit - that is the detector's own answer" do
     with_store do |store|
       with_hook(%q{grep -q SECRET}) do |hook|
-        detections(store, exec_rule(hook), "nothing here").should be_empty
+        # Silent too: production always passes a reporter, and a clean `exit 1` is not a
+        # failure to run (it was reported as "could not run its hook: … exited 1").
+        seen = [] of String
+        r = exec_rule(hook, on_failure: ->(_r : Gori::Probe::CustomRule, reason : String, _k : String) { seen << reason; nil })
+        detections(store, r, "nothing here").should be_empty
+        seen.should be_empty
       end
     end
   end

@@ -125,7 +125,7 @@ module Gori
         # `ok?` covers every way the hook failed to RUN — spawn error, timeout, oversized
         # stdout, and a stdout pipe left open by something the child started. Only a clean exit
         # gets to be a verdict, and only a non-zero clean exit is silence.
-        if !res.ok? && res.status != 0
+        if res.spawn_error || res.timed_out || res.truncated || res.output_lost
           report_failure(res.failure || "hook failed", key: res.failure_key)
           return {false, nil}
         end
