@@ -60,7 +60,7 @@
 - Sequencer, Miner and Fuzzer: a session save the project refused leaves the tab dirty and says so, instead of being silently reverted by the next refresh
 - Project: Delete removes the character after the caret in the DESCRIPTION editor
 - Notes: ^1-9 from the editor clears a sub-tab filter that hides the target note, as it does from the strip
-- Repeater: duplicating a gRPC tab mid hex edit keeps its head and edited payload, Copy under ^X takes the hex bytes, and a captured `%%%` line ending in a form feed or non-breaking space is no longer a group separator. Editing a SAML or GraphQL payload, or sending gRPC-Web, leaves a deliberately malformed or duplicated Content-Length as typed
+- Repeater: duplicating a gRPC tab mid hex edit keeps its head and edited payload, Copy under ^X takes the hex bytes, and a captured `%%%` line ending in a form feed or non-breaking space is no longer a group separator. Editing a SAML or GraphQL payload, or sending gRPC-Web, leaves a deliberately malformed or duplicated Content-Length as typed, and timing analysis draws a request line that is not valid UTF-8
 - Projects: the picker stays up and says why when a temp project cannot be created, and its Export no longer exits gori when the launch directory was deleted
 - History: the FRAMES pane names an h2 frame type outside 0..255 from an imported database instead of failing to render
 
