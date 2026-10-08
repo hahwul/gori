@@ -58,6 +58,7 @@
 - Authorize: switching passive replay off and on after a ^X stop resumes it, as documented
 - OAST: disabling a provider in the TUI stops its listener, and a registration whose session could not be saved is released instead of polling unrecoverably
 - Sequencer, Miner and Fuzzer: a session save the project refused leaves the tab dirty and says so, instead of being silently reverted by the next refresh
+- Project: Delete removes the character after the caret in the DESCRIPTION editor
 
 ## v0.8.0
 

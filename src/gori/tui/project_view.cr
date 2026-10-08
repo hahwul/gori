@@ -421,7 +421,11 @@ module Gori::Tui
     # change, which in this set is ⌥⌫ alone.
     def desc_motion_key(ev : Termisu::Event::Key) : Bool
       before = @desc_area.edits
-      return false unless @desc_area.handle_motion_key(ev)
+      if ev.key.delete?
+        @desc_area.delete # forward delete, which `handle_motion_key` does not take
+      else
+        return false unless @desc_area.handle_motion_key(ev)
+      end
       @desc_dirty = true if @desc_area.edits != before
       true
     end
