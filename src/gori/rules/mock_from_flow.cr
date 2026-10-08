@@ -109,12 +109,7 @@ module Gori
     # an absolute-form target (a plain-proxy capture) too, because the proxy matches the
     # origin-form head it forwards.
     def request_pattern(method : String, target : String) : String
-      path = target
-      if Url.absolute_form?(path)
-        slash = path.index('/', path.index!("://") + 3)
-        path = slash ? path[slash..] : "/"
-      end
-      path = path.split('?', 2)[0].split('#', 2)[0]
+      path = Url.origin_path(target).split('?', 2)[0].split('#', 2)[0]
       "\\A#{Regex.escape(method)} #{Regex.escape(path)}(\\?| )"
     end
 
