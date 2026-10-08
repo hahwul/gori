@@ -620,6 +620,24 @@ describe Gori::Proxy::H2::StreamGate do
     end
   end
 
+  # The client was charged 5 bytes of connection window; the origin sees 2 and credits back
+  # only those, so gori owes the client the 3 the edit took out.
+  it "refunds the sender the window a shorter edited body freed" do
+    with_ic do |ic|
+      rig = Rig.new(ic)
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(post_len("/up", 5)), Frame::END_HEADERS))
+      rig.c2s.accept(data(1_u32, "hello", Frame::END_STREAM))
+      settle
+      ic.forward(ic.pending.first.id,
+        "POST /up HTTP/2\r\nHost: api.example.com\r\ncontent-length: 2\r\n\r\nhi".to_slice)
+      settle
+
+      data_payloads(rig.to_origin, 1_u32).should eq(["hi"])
+      wu = rig.to_client.select { |f| f.frame_type == Frame::Type::WindowUpdate && f.stream_id == 0 }
+      wu.map { |f| IO::ByteFormat::BigEndian.decode(UInt32, f.payload) }.should eq([3_u32])
+    end
+  end
+
   it "keeps the peer's DATA frames byte-for-byte when the edit changed only the head" do
     with_ic do |ic|
       rig = Rig.new(ic)

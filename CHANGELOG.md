@@ -22,7 +22,7 @@
 - CLI: `gori run shell` also points `NIX_SSL_CERT_FILE` at its CA bundle, so Nix-built tools trust gori (#1549)
 - Proxy: a request naming a port above 65535 is refused instead of looping back into gori's own listener on glibc Linux
 - HTTP/2: the sandbox refuses a request head with no `:method` and judges a server push behind a held response, and a long-lived connection keeps recording requests after many cancelled streams the origin still answered
-- Intercept: an h2 hold waiting on a stalled upload is queued on time even when the client sends nothing more
+- Intercept: an h2 hold waiting on a stalled upload is queued on time even when the client sends nothing more, and an edit that shortens an h2 body gives the sender back the flow-control window it freed
 - TLS: importing a passphrase-protected CA key says to decrypt it instead of freezing gori on a hidden passphrase prompt, and a host with `_` in its name gets a certificate browsers accept
 
 ## v0.8.0

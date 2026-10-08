@@ -99,7 +99,15 @@ class Gori::Proxy::H2::StreamGate
   # WINDOW_UPDATE and PRIORITY stay where the peer put them — and the rebuilt DATA lands at
   # the position of the FIRST buffered DATA frame, or straight after the head when there was
   # none (a bodiless message the operator gave a body to).
+  #
+  # A SHORTER body leaves the sender charged for DATA the far end never sees, so never credits
+  # back: the difference is owed like swallowed DATA (`refund_swallowed`), which the wait fiber
+  # runs after this release.
   private def write_rebuilt(slot : Slot, body : Bytes) : Nil
+    charged = slot.frames.sum { |(f, _)| f.frame_type == Frame::Type::Data ? f.payload.size : 0 }
+    # ponytail: growth past `charged` is sent on the far end's window unaccounted; a per-gate
+    # debt against its connection WINDOW_UPDATEs would close it if grown edits ever wedge one.
+    @swallowed += charged - body.size if charged > body.size
     rebuilt = data_frames(slot.stream_id, body, end_stream_on_body?(slot))
     written = slot.frames.none? { |(f, _)| f.frame_type == Frame::Type::Data }
     rebuilt.each { |f| write(f, nil) } if written
