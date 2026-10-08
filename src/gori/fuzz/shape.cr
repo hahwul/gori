@@ -72,12 +72,12 @@ module Gori
       # Markers folded in place of a masked span, mixed as two bytes behind a 0xff lead. A
       # literal 0xff body byte is mixed as 0xff 0x00, so no body can spell a marker.
       #
-      # A number and an id-like token fold to the SAME `MARK_VALUE`: a random hex id is
-      # sometimes all digits (`1201083555725435` beside `5397ae9c4b977308`), and one marker per
-      # kind split exactly those rows off into their own shape.
-      private MARK_PAYLOAD = 0x01_u8
-      private MARK_VALUE   = 0x02_u8
-      private MARK_SPACE   = 0x04_u8
+      # A number, an id-like token and a masked payload all fold to the SAME `MARK_VALUE`: a
+      # random hex id is sometimes all digits (`1201083555725435` beside `5397ae9c4b977308`),
+      # and an echoed id is masked at `420` but too short to mask at `42`. One marker per kind
+      # split exactly those rows off into their own shape.
+      private MARK_VALUE = 0x02_u8
+      private MARK_SPACE = 0x04_u8
 
       # Header names whose PRESENCE varies per response, per cache state or with body size, and
       # so say nothing about which answer this was. Values of every header are excluded anyway.
@@ -352,7 +352,7 @@ module Gori
           b = bytes.unsafe_fetch(i)
           c = cls[b]
           if any_needle && first.unsafe_fetch(b) && (len = needle_at(bytes, i, limit, needles))
-            sink.mark(MARK_PAYLOAD)
+            sink.mark(MARK_VALUE)
             i += len
           elsif c >= C_DIGIT
             j, kind, word = scan_token(bytes, i, limit, cls)
@@ -490,10 +490,18 @@ module Gori
         {j, 0_u8, t ^ size.to_u64}
       end
 
+      # A needle matches as a whole word only: a payload edge that is a letter or digit must not
+      # run on into one, or `admin` masks inside `administrator` and `100` inside `1000` — the
+      # page's own text, which then hashes differently per payload.
       private def self.needle_at(bytes : Bytes, i : Int32, limit : Int32, needles : Array(Bytes)) : Int32?
+        cls = CLASS.to_unsafe
         needles.each do |nd|
-          next if nd.empty? || i + nd.size > limit
-          return nd.size if bytes[i, nd.size] == nd
+          stop = i + nd.size
+          next if nd.empty? || stop > limit
+          next unless bytes[i, nd.size] == nd
+          next if i > 0 && cls[nd[0]] >= C_DIGIT && cls[bytes[i - 1]] >= C_DIGIT
+          next if stop < bytes.size && cls[nd[-1]] >= C_DIGIT && cls[bytes[stop]] >= C_DIGIT
+          return nd.size
         end
         nil
       end
