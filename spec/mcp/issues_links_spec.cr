@@ -498,3 +498,43 @@ describe "MCP create_issue evidence" do
     end
   end
 end
+
+# A store whose link INSERT never commits — the shape of a batch rolled back because a peer gori
+# held the write lock past busy_timeout. `Store#add_link` answers nil for it, the same nil it
+# gives for a pair that already exists.
+private class LinkDroppingStore < Gori::Store
+  def add_link(owner_kind : Gori::Store::LinkOwnerKind, owner_id : Int64,
+               ref_kind : Gori::Store::LinkRefKind, ref_id : Int64)
+    nil
+  end
+end
+
+private def with_link_dropping_store(&)
+  path = File.tempname("gori-mcp-linkdrop", ".db")
+  db = DB.open("sqlite3:#{path}?journal_mode=wal&synchronous=normal&busy_timeout=5000")
+  Gori::SafeRegexp.install(db)
+  Gori::Store::Schema.migrate!(db)
+  store = LinkDroppingStore.new(db)
+  begin
+    yield store
+  ensure
+    store.close
+    File.delete?(path)
+    File.delete?("#{path}-wal")
+    File.delete?("#{path}-shm")
+  end
+end
+
+describe "MCP add_link over a write that did not commit" do
+  it "answers PROJECT_BUSY instead of success with already_linked" do
+    with_link_dropping_store do |store|
+      fid = mcp_seed_flow(store)
+      iid = store.insert_issue("x", Gori::Store::Severity::Info, nil, nil)
+      r = tools_for(store).call("add_link",
+        JSON.parse(%({"owner_kind":"issue","owner_id":#{iid},"ref_kind":"flow","ref_id":#{fid}})))
+      r.is_error.should be_true
+      r.error_code.should eq("PROJECT_BUSY")
+      r.retryable.should be_true
+    end
+  end
+end

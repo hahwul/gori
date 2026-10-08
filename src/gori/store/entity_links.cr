@@ -4,7 +4,9 @@ module Gori
   class Store
     # --- entity links (V21) --------------------------------------------------
 
-    # Insert a link; returns the row id, or nil when the link already exists.
+    # Insert a link; returns the row id, or nil when no row was inserted: the link already
+    # exists OR the write did not commit (busy/locked/closing). A caller that reports the
+    # difference asks `link_id` — a row means "already linked", none means "not added".
     def add_link(owner_kind : LinkOwnerKind, owner_id : Int64, ref_kind : LinkRefKind, ref_id : Int64) : Int64?
       ts = now_us
       exec_task ->(c : DB::Connection) {

@@ -262,7 +262,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       refresh_link_owners(owner_kind, owner_id)
       true
     else
-      @toast = "already linked"
+      # nil is also a write that did not commit — only an existing row is "already linked".
+      @toast = @session.store.link_id(owner_kind, owner_id, ref_kind, ref_id) ? "already linked" : "link NOT added (project busy)"
       false
     end
   end

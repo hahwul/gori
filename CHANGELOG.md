@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Issues and notes: a link that did not commit on a busy project is reported as not added (MCP `add_link` answers PROJECT_BUSY) instead of "already linked"
 - Projects: toggling a scan rule, or a global Rewriter or Colormarker rule, from two gori instances at once no longer erases the other's change, and a scan-rule toggle over an unreadable disabled list is refused instead of re-enabling every rule it held
 - Projects: on a filesystem without flock support (an NFS `nolocks` or FUSE mount) a project now captures and can be deleted, instead of reading as held by another gori instance
 - Docs: the site search opens from a `?q=` link, and screenshots no longer shift the page while they load (#1550)
