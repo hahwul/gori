@@ -1074,6 +1074,12 @@ module Gori::Proxy
       return if tls.default?
       if tls.client_auth?
         ctx.certificate_chain = tls.client_cert
+        # SSL_CTX_use_PrivateKey_file has no passphrase callback set, so OpenSSL would prompt on
+        # /dev/tty: a blocking C call that freezes the whole proxy. The save-time check does not
+        # cover a hand-edited file or a key replaced since.
+        if Tls::KeyPair.encrypted_pem?(tls.client_key)
+          raise Gori::Error.new("client_key #{tls.client_key} is passphrase-protected; decrypt it first")
+        end
         ctx.private_key = tls.client_key
       end
       apply_tls_floor(ctx, tls.min_version)
