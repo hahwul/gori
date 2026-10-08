@@ -105,6 +105,7 @@ module Gori
     # work, and the proxy fails closed when it is still missing.
     def self.respond_error(respond : Store::RespondKind, replacement : String, body_file : String,
                            respond_args : String) : String?
+      return "the body file path contains a NUL byte" if body_file.includes?('\0')
       args = Store::RespondArgs.parse(respond_args)
       return args if args.is_a?(String)
       args_error(respond, args) || shape_error(respond, replacement, body_file, args)
@@ -286,7 +287,7 @@ module Gori
     def read(path : String) : Bytes
       info = begin
         File.info(path)
-      rescue ex : File::Error
+      rescue ex : File::Error | ArgumentError # ArgumentError: a NUL in the path
         raise ReadError.new("stub body file unreadable: #{path} (#{ex.message})", "stub body file unreadable")
       end
       raise ReadError.new("stub body file is not a regular file: #{path}", "stub body file is not a regular file") unless info.file?

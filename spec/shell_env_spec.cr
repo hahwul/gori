@@ -125,6 +125,16 @@ describe Gori::ShellEnv do
     end
   end
 
+  # Nix's OpenSSL reads NIX_SSL_CERT_FILE first, so leaving the inherited one in place hid gori's root.
+  it "adds gori's root to an inherited NIX_SSL_CERT_FILE" do
+    with_shell_fixture do |root, ca, system|
+      r = build(root, ca, system, {"NIX_SSL_CERT_FILE" => system})
+      own = value(r, "NIX_SSL_CERT_FILE").not_nil!
+      own.should_not eq(system)
+      File.read(own).should contain(squash(File.read(ca).lines[1]))
+    end
+  end
+
   it "keeps a CA variable the terminal set for one tool, instead of handing it the shared bundle" do
     with_shell_fixture do |root, ca, system|
       corp = File.join(root, "requests-corp.pem")

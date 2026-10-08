@@ -6,7 +6,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # like the other session-spawning verbs. Flows with no mineable location are dropped here
   # rather than starting an empty session.
   #
-  # Each flow is seeded with the names its host's OTHER endpoints carry (#1231), as the
+  # Each flow is seeded with the names its origin's OTHER endpoints carry (#1231), as the
   # Params sub-tab's Mine is — scanned while the popup is up (`seed_mine_names`).
   def mine_selected : Nil
     ids = history_target_flow_ids

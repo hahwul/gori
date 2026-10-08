@@ -128,4 +128,19 @@ describe Gori::Fuzz::Clusters do
     cl["error_class"].should eq("timeout")
     cl["sample_indices"].should eq([1, 3])
   end
+
+  # The TUI's matched-only list heads a cluster with its first hit; MCP and the CLI emit
+  # through here, so they must too, never a row the lens hides.
+  it "heads a matched-only cluster with its first hit, on every surface" do
+    c = F::Clusters.new
+    c.add(res(1, 0x0f_i64))
+    c.add(res(3, 0x0f_i64, matched: true))
+    cl = c[0x0f_i64]?.not_nil!
+    json = JSON.parse(JSON.build { |j| F::Clusters.emit(j, cl, ->(t : String) { t }, true) { |rep| j.number rep.index } })
+    json["representative_index"].should eq(3)
+    json["representative_payloads"].should eq(["p3"])
+    json["representative"].should eq(3)
+    Gori::CLI::Output.fuzz_cluster_text(cl, true).should end_with("#3 p3")
+    cl.head(false).index.should eq(1)
+  end
 end

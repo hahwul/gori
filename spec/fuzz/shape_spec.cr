@@ -220,6 +220,15 @@ describe Gori::Fuzz::Shape do
     shape("banana", "a").should eq(shape("banana", "b"))
   end
 
+  it "masks a payload only as a whole word, and an echoed number like any other value" do
+    # `admin` inside `administrator` and `100` inside `1000` are the page's own text.
+    page = "<p>Welcome, administrator</p>"
+    shape(page, "admin").should eq(shape(page, "guest"))
+    shape("<p>Total: 1000 items</p>", "100").should eq(shape("<p>Total: 1000 items</p>", "200"))
+    # `42` is too short to mask and `420` is not: both still read as one answer.
+    shape("<p>Item 42 not found</p>", "42").should eq(shape("<p>Item 420 not found</p>", "420"))
+  end
+
   it "is stable across processes: a fixed input has a fixed id" do
     # FNV-1a over a versioned normalization, never the per-process seeded `#hash`. A change
     # here is a change to every persisted id — bump `Shape::VERSION` with it.

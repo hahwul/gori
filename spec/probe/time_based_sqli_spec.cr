@@ -29,12 +29,12 @@ describe "Gori::Probe::Active::TimeBlindSqli" do
       detail = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?id=42")
       plan = rule.plan(detail).not_nil!
       plan.params.map(&.name).should eq(["id"])
-      plan.followups.size.should eq(5)                                                    # 2nd baseline + 2 families × (short, long)
+      plan.followups.size.should eq(5)                                                    # 2nd baseline + 2 families × (long, short)
       String.new(plan.request).should contain("/s?id=42 ")                                # baseline: no delay
       String.new(plan.followups[0]).should contain("/s?id=42 ")                           # 2nd baseline: no delay
-      String.new(plan.followups[1]).should contain("id=42%20AND%20SLEEP%282%29--%20-")    #  AND SLEEP(2)
-      String.new(plan.followups[2]).should contain("id=42%20AND%20SLEEP%284%29--%20-")    #  AND SLEEP(4)
-      String.new(plan.followups[3]).should contain("id=42%27%20AND%20SLEEP%282%29--%20-") # ' AND SLEEP(2)
+      String.new(plan.followups[1]).should contain("id=42%20AND%20SLEEP%284%29--%20-")    #  AND SLEEP(4)
+      String.new(plan.followups[2]).should contain("id=42%20AND%20SLEEP%282%29--%20-")    #  AND SLEEP(2)
+      String.new(plan.followups[3]).should contain("id=42%27%20AND%20SLEEP%284%29--%20-") # ' AND SLEEP(4)
     end
   end
 
@@ -42,11 +42,11 @@ describe "Gori::Probe::Active::TimeBlindSqli" do
     with_store do |store|
       detail = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?id=42")
       plan = rule.plan(detail).not_nil!
-      # Layout: base1, base2, [mysql-num short, mysql-num long, mysql-str short, mysql-str long].
-      # Numeric legs don't land (no delay); the string family scales: +2.1 s then +4.1 s.
+      # Layout: base1, base2, [mysql-num long, mysql-num short, mysql-str long, mysql-str short].
+      # Numeric legs don't land (no delay); the string family scales: +4.1 s then +2.1 s.
       results = [tresp(T0), tresp(T0),
                  tresp(T0), tresp(T0),                         # mysql-numeric: no delay
-                 tresp(T0 + 2_100_000), tresp(T0 + 4_100_000)] # mysql-string: scales
+                 tresp(T0 + 4_100_000), tresp(T0 + 2_100_000)] # mysql-string: scales
       dets = rule.detections_all(plan, results, detail)
       dets.size.should eq(1)
       dets.first.code.should eq("sqli_time_based")
@@ -75,7 +75,18 @@ describe "Gori::Probe::Active::TimeBlindSqli" do
       plan = rule.plan(detail).not_nil!
       # The short leg answered at baseline speed, so the short-delta floor fails: a one-off spike on
       # the long leg alone is not an injected delay.
-      results = [tresp(T0), tresp(T0), tresp(T0), tresp(T0 + 4_100_000), tresp(T0), tresp(T0 + 4_100_000)]
+      results = [tresp(T0), tresp(T0), tresp(T0 + 4_100_000), tresp(T0), tresp(T0 + 4_100_000), tresp(T0)]
+      rule.detections_all(plan, results, detail).should be_empty
+    end
+  end
+
+  # The long leg goes first, so a throttle adding ~1 s per request makes the short leg slower.
+  it "does NOT fire on a progressive slow-down throttle (latency grows with request count)" do
+    with_store do |store|
+      detail = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?id=42")
+      plan = rule.plan(detail).not_nil!
+      results = [tresp(T0), tresp(T0), tresp(T0 + 1_000_000), tresp(T0 + 2_000_000),
+                 tresp(T0 + 3_000_000), tresp(T0 + 4_000_000)]
       rule.detections_all(plan, results, detail).should be_empty
     end
   end
@@ -88,7 +99,7 @@ describe "Gori::Probe::Active::TimeBlindSqli" do
       # as much as the smallest delay we inject — so even scaling-looking legs are declined.
       results = [tresp(T0), tresp(T0 + 2_000_000),
                  tresp(T0), tresp(T0),
-                 tresp(T0 + 2_100_000), tresp(T0 + 4_100_000)]
+                 tresp(T0 + 4_100_000), tresp(T0 + 2_100_000)]
       rule.detections_all(plan, results, detail).should be_empty
     end
   end
@@ -99,7 +110,7 @@ describe "Gori::Probe::Active::TimeBlindSqli" do
       plan = rule.plan(detail).not_nil!
       results = [tresp(T0), tresp(T0),
                  tresp(0, error: "reset"), tresp(0, error: "reset"), # mysql-numeric: errored legs
-                 tresp(T0 + 2_100_000), tresp(T0 + 4_100_000)]       # mysql-string: scales
+                 tresp(T0 + 4_100_000), tresp(T0 + 2_100_000)]       # mysql-string: scales
       rule.detections_all(plan, results, detail).size.should eq(1)
     end
   end
@@ -110,10 +121,10 @@ describe "Gori::Probe::Active::TimeBlindSqli" do
       plan = rule.plan(detail).not_nil!
       rule.detections_all(plan, [] of Gori::Repeater::Result, detail).should be_empty
       # First baseline errored.
-      b1 = [tresp(0, error: "dns"), tresp(T0), tresp(T0), tresp(T0), tresp(T0 + 2_100_000), tresp(T0 + 4_100_000)]
+      b1 = [tresp(0, error: "dns"), tresp(T0), tresp(T0), tresp(T0), tresp(T0 + 4_100_000), tresp(T0 + 2_100_000)]
       rule.detections_all(plan, b1, detail).should be_empty
       # Second baseline errored.
-      b2 = [tresp(T0), tresp(0, error: "dns"), tresp(T0), tresp(T0), tresp(T0 + 2_100_000), tresp(T0 + 4_100_000)]
+      b2 = [tresp(T0), tresp(0, error: "dns"), tresp(T0), tresp(T0), tresp(T0 + 4_100_000), tresp(T0 + 2_100_000)]
       rule.detections_all(plan, b2, detail).should be_empty
     end
   end
@@ -122,7 +133,7 @@ describe "Gori::Probe::Active::TimeBlindSqli" do
     with_store do |store|
       detail = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?id=42")
       agg = rule.plan(detail, P::Active::Options.new(aggressive: true)).not_nil!
-      agg.followups.size.should eq(13) # 2nd baseline + 6 families × (short, long), one param
+      agg.followups.size.should eq(13) # 2nd baseline + 6 families × (long, short), one param
       joined = agg.followups.map { |b| String.new(b) }.join(" ")
       joined.should contain("PG_SLEEP")
       joined.should contain("WAITFOR")

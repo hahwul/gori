@@ -2562,12 +2562,12 @@ module Gori::Tui
       end
 
       return unless collected = collect_race_members(tabs) # sets its own status on a refusal
-      drafts, labels = collected
+      drafts, labels, literals = collected
 
       # ONE plan over all members, built from the anchor tab's send context (session
       # slot, TLS preset, SNI). Its Sender is origin-bound to the shared origin every member
       # resolved to.
-      return unless plan = repeater_plan(view, drafts, http2: view.http2?)
+      return unless plan = repeater_plan(view, drafts, http2: view.http2?, literals: literals)
       save_current_repeater
       # One blocked member refuses the whole race — a race is one unit (like send-group).
       if reason = plan.refusal
@@ -2589,14 +2589,22 @@ module Gori::Tui
     # plan resolves the origin (and validates the target / env / chains) WITHOUT sending; the
     # DRAFTS, not those plans' wired bytes, are what the race plan wires once — running the seam
     # twice is the non-idempotent bug `Sender#send_group` documents.
-    private def collect_race_members(tabs : Array(RepeaterTab)) : {Array(Bytes), Array(String)}?
+    #
+    # The third element is the literal set the ONE plan sends every member under: the UNION of
+    # the captured members' own (`RepeaterView#evidence_send_literals`), empty for drafts. Each
+    # capture's `$words` (GraphQL `$id`, Mongo `$ne`) differ, so equality would refuse two
+    # ordinary captures; a union only ever holds MORE tokens literal, the verbatim side (P7).
+    private def collect_race_members(tabs : Array(RepeaterTab)) : {Array(Bytes), Array(String), Set(String)}?
       drafts = [] of Bytes
       labels = [] of String
+      literals = Set(String).new
       # The dial SIGNATURE every member must share: the race rides ONE Sender (h2 is literally
       # one connection, and the h1 form is held to the same shape), so a member whose origin,
       # transport, SNI or TLS preset differs would be silently sent under the anchor's — refuse
-      # instead of flattening it.
-      sigs = [] of {String, String, Int32, Bool, String?, String?}
+      # instead of flattening it. Provenance too (P7): the plan has one `evidence:` flag, so a
+      # captured member raced beside a draft would be `$BIND`-expanded (or a draft's tokens sent
+      # literally).
+      sigs = [] of {String, String, Int32, Bool, String?, String?, Bool}
       loaded = 0
       tabs.each do |t|
         tv = t.view
@@ -2618,7 +2626,8 @@ module Gori::Tui
         return nil unless probe = repeater_plan(tv, [draft], http2: tv.http2?) # sets its own status on a PlanError
         drafts << draft
         labels << race_member_label(tv, draft)
-        sigs << {probe.scheme, probe.host, probe.port, probe.http2?, tv.sni_override, tv.tls_preset}
+        sigs << {probe.scheme, probe.host, probe.port, probe.http2?, tv.sni_override, tv.tls_preset, tv.evidence?}
+        literals.concat(tv.evidence_send_literals) if tv.evidence?
       end
       if loaded < 2
         @host.status("race needs at least 2 loaded sub-tabs — #{loaded} of #{tabs.size} marked #{loaded == 1 ? "is" : "are"} ready")
@@ -2626,10 +2635,10 @@ module Gori::Tui
       end
       first = sigs.first
       unless sigs.all? { |s| s == first }
-        @host.status("race needs one origin, transport, SNI and TLS preset — the marked sub-tabs differ")
+        @host.status("race needs one origin, transport, SNI, TLS preset and provenance (all captured or all drafts) — the marked sub-tabs differ")
         return nil
       end
-      {drafts, labels}
+      {drafts, labels, literals}
     end
 
     # Fire the assembled race off the UI fiber and hand each member's result back through
@@ -2704,8 +2713,8 @@ module Gori::Tui
         return nil
       end
       return nil unless collected = collect_race_members(tabs) # sets its own status on a refusal
-      drafts, labels = collected
-      return nil unless plan = repeater_plan(view, drafts, http2: view.http2?)
+      drafts, labels, literals = collected
+      return nil unless plan = repeater_plan(view, drafts, http2: view.http2?, literals: literals)
       # A blocked pair (Sandbox, an exclude) would run every iteration refused and end
       # "inconclusive" without the reason — refuse up front, as the race does.
       if reason = plan.refusal
@@ -2989,8 +2998,9 @@ module Gori::Tui
     # length-synced by `RepeaterView`, whose hex / gRPC / decode / §…§ modes each own their
     # byte semantics — so the builder takes those bytes verbatim (`expand_request: false`)
     # rather than expanding a second time.
+    # `literals` overrides the view's own literal set for a multi-tab plan (`collect_race_members`).
     private def repeater_plan(view : RepeaterView, requests : Array(Bytes), *,
-                              http2 : Bool = false) : Repeater::Plan?
+                              http2 : Bool = false, literals : Set(String)? = nil) : Repeater::Plan?
       # `evidence:` is NOT the same knob as `expand_request: false`, which is why passing
       # only the latter left this tab substituting into a capture. `expand_request` says
       # "these bytes are already final"; the view had already run `Env.expand_wire` over
@@ -3006,7 +3016,7 @@ module Gori::Tui
       # under the caret, and put those bytes in the request line. See `Sender#evidence_literals`.
       Repeater::Plan.build(Repeater::PlanOptions.new(requests,
         expand_request: false, auto_content_length: false, evidence: view.evidence?,
-        evidence_literals: view.evidence? ? view.evidence_send_literals : nil,
+        evidence_literals: view.evidence? ? (literals || view.evidence_send_literals) : nil,
         target: view.target, http2: http2, sni: view.sni_override,
         # This tab's own TLS fingerprint (#844) — the thing that makes two tabs against one
         # host with different values dial two different SSL contexts.

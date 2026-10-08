@@ -790,7 +790,8 @@ module Gori::Proxy
       # An edit replaces what the client sent, so History keeps the CLIENT'S OWN bytes beside
       # the flow (#1378, V44) — `req.raw_head` and the body before any Match&Replace — and
       # marks it edited. A forward that changed nothing keeps nothing: the flow is the original.
-      original = decision.bytes == held ? nil : build_message(req.raw_head, client_body)
+      # The body is cut to `capture_max` like every other stored body: a held upload can be any size.
+      original = decision.bytes == held ? nil : build_message(req.raw_head, capped(client_body)[0])
       recorded = original ? sent_req : record_req
       # Key repeater-safety on the EDITED request: if the human changed the method (e.g.
       # GET→POST), retryability must follow the method actually being sent, not the
@@ -2736,7 +2737,7 @@ module Gori::Proxy
         scheme = uri.scheme || "http"
         host = uri.host || ""
         port = uri.port || (scheme == "https" ? 443 : 80)
-        {host, port, scheme, rewrite_request_line(req, origin_form(uri))}
+        {host, port, scheme, Codec::Http1.rewrite_request_line(req, Codec::Http1.origin_form(uri))}
       else
         host, port = origin_form_destination(req)
         {host, port, @scheme, req.raw_head}
@@ -2762,15 +2763,14 @@ module Gori::Proxy
     #     History lens read was a completely different authority from the one gori dialled —
     #     `http://evil.example.com/` for a connection pinned to `127.0.0.1:19090`.
     #
-    # `Url.absolute_form?` here and in `resolve_forward` above, one predicate on both paths:
-    # RFC 3986 §3.1 makes the scheme case-insensitive, and a `HTTP://` target is the same
-    # instruction to a lenient recipient.
+    # `Codec::Http1.origin_form_head` keeps `Url.absolute_form?` as its predicate, the one
+    # `resolve_forward` above uses: RFC 3986 §3.1 makes the scheme case-insensitive, and a
+    # `HTTP://` target is the same instruction to a lenient recipient.
     private def pinned_origin_head(req : Codec::RawRequest) : Bytes
-      return req.raw_head unless Gori::Url.absolute_form?(req.target)
       # `URI::Error`/`OverflowError` here is the malformed-target case `handle_request` already
       # rescues around this whole call — it records the attempt and answers 502 rather than
       # letting it unwind.
-      rewrite_request_line(req, origin_form(URI.parse(req.target)))
+      Codec::Http1.origin_form_head(req)
     end
 
     # What an ORIGIN-FORM request is ADDRESSED to: the `Host` header, with the kernel's original
@@ -2784,12 +2784,6 @@ module Gori::Proxy
         port = od[1]
       end
       {host, port}
-    end
-
-    private def origin_form(uri : URI) : String
-      path = uri.path
-      path = "/" if path.empty?
-      uri.query ? "#{path}?#{uri.query}" : path
     end
 
     # New request-line + the original header block (everything from the first
@@ -2849,26 +2843,6 @@ module Gori::Proxy
 
     private def bracketed(host : String) : String
       host.includes?(':') && !host.starts_with?('[') ? "[#{host}]" : host
-    end
-
-    # Splices `origin_target` over the request-target's own bytes and copies everything else
-    # verbatim (P7): the method, the version, and whatever the client put after them. Rebuilding
-    # the line as `method SP target SP version CRLF` kept only the first three space-separated
-    # tokens, so `GET http://h/p?a b HTTP/1.1` went upstream as `GET /p?a b` — the space-in-URL
-    # payload lost its version — and `… HTTP/1.1 INJECTED` lost the trailing token, while History
-    # kept the client's bytes and no longer matched what was sent.
-    private def rewrite_request_line(req : Codec::RawRequest, origin_target : String) : Bytes
-      raw = req.raw_head
-      start = req.method.bytesize + 1
-      target = req.target.to_slice
-      # `parse_request_head` split the line on single spaces, so the target sits right after
-      # the method and its separator. Anything else is a head this was not parsed from.
-      return raw unless raw.size >= start + target.size && raw[start, target.size] == target
-      io = IO::Memory.new(raw.size) # origin-form is usually shorter: one allocation
-      io.write(raw[0, start])
-      io << origin_target
-      io.write(raw[(start + target.size)..])
-      io.to_slice
     end
 
     # Held bodies are buffered whole (the human may edit them) and forwarded in

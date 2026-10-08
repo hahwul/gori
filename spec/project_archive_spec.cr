@@ -639,6 +639,85 @@ describe Gori::ProjectArchive do
     end
   end
 
+  # `Store#interims` narrows status and omitted to Int32, so an out-of-range one raised on
+  # every open of the flow.
+  it "refuses an archive whose interim response row is out of Int32 range" do
+    with_archive_project do |_registry, project, store, root|
+      id = store.insert_flow(archive_request("/a"))
+      store.flush
+      archive_path = export_archive(project, File.join(root, "interims.gori"))
+      original = File.read(archive_path)
+      # {status, omitted}
+      { {1099511627776_i64, 0_i64}, {103_i64, 1099511627776_i64} }.each do |status, omitted|
+        File.write(archive_path, original)
+        tamper_archive_database(archive_path, root) do |conn|
+          conn.exec("INSERT INTO flow_interims (flow_id, seq, status, head, relayed, omitted) " \
+                    "VALUES (?, 0, ?, X'41', 1, ?)", id, status, omitted)
+        end
+        error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
+        error.message.not_nil!.should contain(%(never writes in "flow_interims"))
+      end
+    end
+  end
+
+  # SQLite gives INTEGER affinity to any declared type containing "INT", and a table rebuilt
+  # with CREATE TABLE … AS SELECT declares its integer columns `INT`, not `INTEGER`. A table
+  # with no `id` column, so the primary-key check below does not answer first.
+  it "refuses a mistyped cell in a column declared INT rather than INTEGER" do
+    with_archive_project do |_registry, project, store, root|
+      id = store.insert_flow(archive_request("/a"))
+      store.flush
+      archive_path = export_archive(project, File.join(root, "int.gori"))
+      tamper_archive_database(archive_path, root) do |conn|
+        conn.exec("CREATE TABLE flow_interims_x AS SELECT * FROM flow_interims")
+        conn.exec("DROP TABLE flow_interims")
+        conn.exec("ALTER TABLE flow_interims_x RENAME TO flow_interims")
+        conn.exec("INSERT INTO flow_interims (flow_id, seq, status, head, relayed, omitted) " \
+                  "VALUES (?, 0, 'zz', X'41', 1, 0)", id)
+      end
+      error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
+      error.message.not_nil!.should contain(%(never writes in "flow_interims"))
+    end
+  end
+
+  # The same rebuild drops an `id`'s INTEGER PRIMARY KEY: every later row in that table (a
+  # capture, an issue) would get a NULL id instead of the rowid the store hands back.
+  it "refuses an archive whose id table lost its INTEGER PRIMARY KEY" do
+    with_archive_project do |_registry, project, store, root|
+      store.insert_flow(archive_request("/a"))
+      store.flush
+      archive_path = export_archive(project, File.join(root, "pk.gori"))
+      original = File.read(archive_path)
+      {"flows", "issues"}.each do |table|
+        File.write(archive_path, original)
+        tamper_archive_database(archive_path, root) do |conn|
+          conn.exec("CREATE TABLE #{table}_x AS SELECT * FROM #{table}")
+          conn.exec("DROP TABLE #{table}")
+          conn.exec("ALTER TABLE #{table}_x RENAME TO #{table}")
+        end
+        error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
+        error.message.not_nil!.should contain("table #{table} has no INTEGER PRIMARY KEY")
+      end
+    end
+  end
+
+  # `settings` has no `id`: its key is `key`, which every `set_setting` upserts through. Without
+  # it each upsert fails inside the writer's batch, and the flows batched with it go too.
+  it "refuses an archive whose settings table lost the key gori upserts through" do
+    with_archive_project do |_registry, project, store, root|
+      store.insert_flow(archive_request("/a"))
+      store.flush
+      archive_path = export_archive(project, File.join(root, "keys.gori"))
+      tamper_archive_database(archive_path, root) do |conn|
+        conn.exec("CREATE TABLE settings_x AS SELECT * FROM settings")
+        conn.exec("DROP TABLE settings")
+        conn.exec("ALTER TABLE settings_x RENAME TO settings")
+      end
+      error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
+      error.message.not_nil!.should contain("table settings lacks the keys")
+    end
+  end
+
   # An AUTOINCREMENT id counter at the top of int64 fails every insert with SQLITE_FULL, so the
   # imported project would capture nothing under a "database or disk is full". `flows` became
   # AUTOINCREMENT in V39; a row alone is enough, since SQLite no longer falls back to a random id.
@@ -798,6 +877,25 @@ describe Gori::ProjectArchive do
     end
   end
 
+  # A Decoder sub-tab runs its chain on the first edit, and a Fuzzer session's gRPC fields
+  # (`role¦exec:…`) run theirs on every send, so both are disclosed with the rest.
+  it "discloses exec: chains in Decoder sub-tabs and Fuzzer gRPC fields" do
+    with_archive_project do |_registry, project, store, root|
+      store.insert_fuzz_session("https://archive.test", "POST / HTTP/1.1\r\n\r\n", false, nil,
+        %({"grpc_fields":"user.name¦EXEC:/usr/bin/id"}), nil, 0)
+      store.set_setting(Gori::Store::DECODER_SESSIONS_KEY, %([{"input":"x","chain":"b64|exec:/usr/bin/id"}]))
+      archive_path = export_archive(project, File.join(root, "exec-elsewhere.gori"))
+
+      prepared = Gori::ProjectArchive.prepare_import(archive_path)
+      begin
+        Gori::ProjectArchive.disclosure(prepared.inventory)
+          .should contain("0 Repeater tabs, 1 Fuzzer template, 1 Decoder tab and 0 project env vars contain exec:")
+      ensure
+        prepared.close
+      end
+    end
+  end
+
   it "discloses stored exec: chain steps without rewriting them" do
     with_archive_project do |registry, project, store, root|
       request = "GET /?q=\u00a7v\u00a6exec:/usr/bin/id\u00a7 HTTP/1.1\r\nHost: archive.test\r\n\r\n"
@@ -814,7 +912,7 @@ describe Gori::ProjectArchive do
         prepared.inventory.exec_fuzz_templates.should eq(1)
         prepared.inventory.exec_env_vars.should eq(1)
         disclosure = Gori::ProjectArchive.disclosure(prepared.inventory)
-        disclosure.should contain("1 Repeater tab, 1 Fuzzer template and 1 project env var contain exec:")
+        disclosure.should contain("1 Repeater tab, 1 Fuzzer template, 0 Decoder tabs and 1 project env var contain exec:")
         imported = prepared.import_into(registry, "Exec copy")
         copied = Gori::Store.open(imported.db_path)
         begin

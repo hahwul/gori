@@ -162,6 +162,15 @@ describe Gori::JsRefs do
       r.path.should eq("/api/search")
       r.target.should eq("/api/search?q=")
     end
+
+    # A flow stores an IPv6 host bare, so a bracketed one never met its traffic: every
+    # reference on such an origin listed as unrequested.
+    it "stores an IPv6 literal host bare, the spelling a flow stores" do
+      r = JR.resolve(JR::Literal.new("/api/x", 0, 1, false, false), page("http://[::1]:8080/app.js"), JR::Base::Page)
+      r = r.as(Gori::Store::JsRef)
+      r.host.should eq("::1")
+      Gori::Store::FlowRow.url_of(r.scheme, r.host, r.port, r.target).should eq("http://[::1]:8080/api/x")
+    end
   end
 
   describe ".scan" do
@@ -485,6 +494,22 @@ describe Gori::JsRefs do
         store.js_ref_nodes[0].find!(&.host.==("other.test")).host_captured.should be_false
         jr_flow(store, "/logo.png", "png", host: "other.test", ctype: "image/png")
         store.js_ref_nodes[0].find!(&.host.==("other.test")).host_captured.should be_true
+      end
+    end
+
+    # A reference's host is stored lowercased, a flow's as captured: `Shop.Test` traffic is
+    # traffic to `shop.test`, on the scan's read and on the read after new traffic alike.
+    it "judges the captured flags case-insensitively against the flows' host" do
+      with_store do |store|
+        jr_flow(store, "/app.js", %(fetch("/api/q");fetch("https://other.test/x")), host: "Shop.Test")
+        JR.scan(store)
+        nodes, _ = store.js_ref_nodes
+        q = nodes.find!(&.path.==("/api/q"))
+        {q.host, q.host_captured, q.origin_captured}.should eq({"shop.test", true, true})
+        nodes.find!(&.host.==("other.test")).host_captured.should be_false
+        jr_flow(store, "/logo.png", "png", host: "Other.Test", ctype: "image/png")
+        other = store.js_ref_nodes[0].find!(&.host.==("other.test"))
+        {other.host_captured, other.origin_captured}.should eq({true, true})
       end
     end
   end

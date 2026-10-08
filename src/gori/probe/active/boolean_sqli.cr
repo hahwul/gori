@@ -95,7 +95,7 @@ module Gori
             Category::ACTIVE)
         end
 
-        # 2 baselines + a (true, false) pair per param per breakout. Default (one breakout, ≤3
+        # 2 baselines + a (false, true) pair per param per breakout. Default (one breakout, ≤3
         # params) → 4..8; AGGRESSIVE sends more (two breakouts, ≤10 params) but the sub-tab
         # annotation reports the default posture, like the sibling rules.
         def requests_per_flow : Range(Int32, Int32)
@@ -115,12 +115,14 @@ module Gori
           followups = [InsertionPoints.build(detail, InsertionPoints::NO_CHANGES)]
           params = [] of Param
           slots.each do |slot|
-            # Per param, one (true, false) pair per breakout, laid out CONTIGUOUSLY so
+            # Per param, one (false, true) pair per breakout, laid out CONTIGUOUSLY so
             # detections_all can read a param's legs as a run without knowing which breakout set
             # was used (it derives the per-param leg count from the plan; see `legs_per_param`).
+            # FALSE goes first: a rate limiter or WAF that trips mid-sequence can then only make
+            # the LATER leg (TRUE) diverge, which declines, instead of forging the oracle.
             breakouts.each do |b|
-              followups << InsertionPoints.build(detail, [{slot, InsertionPoints::Change.new(suffix: b.truthy)}])
               followups << InsertionPoints.build(detail, [{slot, InsertionPoints::Change.new(suffix: b.falsy)}])
+              followups << InsertionPoints.build(detail, [{slot, InsertionPoints::Change.new(suffix: b.truthy)}])
             end
             params << Param.new(slot.loc.label, slot.name, slot.raw_value)
           end
@@ -129,7 +131,7 @@ module Gori
         end
 
         # results[0], results[1] are the two baselines; a param's legs follow contiguously as
-        # (true, false) pairs — one pair per breakout. Fire a param when ANY of its breakouts shows
+        # (false, true) pairs — one pair per breakout. Fire a param when ANY of its breakouts shows
         # TRUE≈baseline AND FALSE≉baseline. One grouped Critical Detection per host.
         def detections_all(plan : Plan, results : Array(Repeater::Result), detail : Store::FlowDetail) : Array(Detection)
           base = stable_baseline(results) || return [] of Detection
@@ -153,7 +155,7 @@ module Gori
           detections_all(plan, [result], detail)
         end
 
-        # Whether the param whose (true, false) leg pairs occupy `results[start, per]` shows the
+        # Whether the param whose (false, true) leg pairs occupy `results[start, per]` shows the
         # boolean oracle in ANY of its breakouts: a leg pair where TRUE matches the baseline `base`
         # and FALSE does not. A failed/truncated leg makes that breakout's comparison unreliable, so
         # it is skipped, not read.
@@ -161,8 +163,8 @@ module Gori
                             base : {Int32, UInt64}) : Bool
           j = 0
           while j < per
-            truthy = results[start + j]?
-            falsy = results[start + j + 1]?
+            falsy = results[start + j]?
+            truthy = results[start + j + 1]?
             j += 2
             next unless truthy && falsy && Evidence.complete?(truthy) && Evidence.complete?(falsy)
             return true if same?(fingerprint(truthy), base) && !same?(fingerprint(falsy), base)

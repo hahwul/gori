@@ -60,6 +60,26 @@ private def race_wires(*paths : String) : Array(Bytes)
   paths.map { |p| "GET #{p} HTTP/2\r\nHost: 127.0.0.1\r\n\r\n".to_slice }.to_a
 end
 
+private STATUS_200_INDEX = 0x80_u8 | (HPACK::STATIC.index({":status", "200"}).not_nil! + 1).to_u8
+private SERVER_INDEX     = 0x80_u8 | (HPACK::STATIC.index({"server", ""}).not_nil! + 1).to_u8
+# Literal with incremental indexing: `x-sync: yes`, which lands in the dynamic table.
+private SYNC_FIELD = Bytes[0x40, 0x06, 'x'.ord.to_u8, '-'.ord.to_u8, 's'.ord.to_u8,
+  'y'.ord.to_u8, 'n'.ord.to_u8, 'c'.ord.to_u8, 0x03, 'y'.ord.to_u8,
+  'e'.ord.to_u8, 's'.ord.to_u8]
+
+# One header block as HEADERS + CONTINUATION frames of at most 16 KiB.
+private def write_header_block(io : IO, sid : UInt32, block : Bytes, *, end_stream : Bool) : Nil
+  offset = 0
+  while offset < block.size
+    size = Math.min(16_384, block.size - offset)
+    type = offset == 0 ? Frame::Type::Headers : Frame::Type::Continuation
+    flags = offset + size == block.size ? Frame::END_HEADERS : 0_u8
+    flags |= Frame::END_STREAM if end_stream && offset == 0
+    io.write(Frame::Header.new(type.value, flags, sid, block[offset, size]).to_bytes)
+    offset += size
+  end
+end
+
 describe "Repeater::H2Engine.single_packet" do
   # A member whose response ends on HEADERS(END_STREAM) — a 204/304/HEAD answer — used to close
   # without recording a duration, so it read 0µs and the timing verdict called the OTHER member
@@ -110,36 +130,20 @@ describe "Repeater::H2Engine.single_packet" do
   it "keeps other streams alive after an oversized but synchronized header block" do
     port = start_h2_scripted_origin(2) do |io, ended|
       sids = ended.to_h { |(sid, path)| {path, sid} }
-      status_index = 0x80_u8 | (HPACK::STATIC.index({":status", "200"}).not_nil! + 1).to_u8
-      server_index = 0x80_u8 | (HPACK::STATIC.index({"server", ""}).not_nil! + 1).to_u8
       repeat_count = HPACK::Decoder::MAX_HEADER_LIST // ("server".bytesize + HPACK::Decoder::ENTRY_OVERHEAD) + 1
-      sync_field = Bytes[0x40, 0x06, 'x'.ord.to_u8, '-'.ord.to_u8, 's'.ord.to_u8,
-        'y'.ord.to_u8, 'n'.ord.to_u8, 'c'.ord.to_u8, 0x03, 'y'.ord.to_u8,
-        'e'.ord.to_u8, 's'.ord.to_u8]
-      block = Bytes.new(1 + repeat_count + sync_field.size) do |i|
+      block = Bytes.new(1 + repeat_count + SYNC_FIELD.size) do |i|
         if i == 0
-          status_index
+          STATUS_200_INDEX
         elsif i <= repeat_count
-          server_index
+          SERVER_INDEX
         else
-          sync_field[i - repeat_count - 1]
+          SYNC_FIELD[i - repeat_count - 1]
         end
       end
 
-      offset = 0
-      first = true
-      while offset < block.size
-        size = Math.min(16_384, block.size - offset)
-        last = offset + size == block.size
-        type = first ? Frame::Type::Headers : Frame::Type::Continuation
-        flags = last ? Frame::END_HEADERS : 0_u8
-        flags |= Frame::END_STREAM if first
-        io.write(Frame::Header.new(type.value, flags, sids["/large"], block[offset, size]).to_bytes)
-        offset += size
-        first = false
-      end
+      write_header_block(io, sids["/large"], block, end_stream: true)
 
-      ok_block = Bytes[status_index, 0xbe_u8] # :status 200, then the final dynamic entry
+      ok_block = Bytes[STATUS_200_INDEX, 0xbe_u8] # :status 200, then the final dynamic entry
       io.write(Frame::Header.new(Frame::Type::Headers.value,
         Frame::END_HEADERS | Frame::END_STREAM, sids["/ok"], ok_block).to_bytes)
       io.flush
@@ -153,6 +157,63 @@ describe "Repeater::H2Engine.single_packet" do
     ok.ok?.should be_true
     ok.response.not_nil!.status.should eq(200)
     String.new(ok.head).should contain("x-sync: yes")
+  end
+
+  # A RAW block past MAX_HEADER_BLOCK is never decoded, so the table update inside it never
+  # reached the shared decoder: the sibling then failed on (or silently misread) a dynamic index,
+  # and the oversized stream itself said only "no response". Every live stream now names why.
+  it "fails every live stream when a raw header block passes the 1 MiB cap" do
+    port = start_h2_scripted_origin(2) do |io, ended|
+      sids = ended.to_h { |(sid, path)| {path, sid} }
+      # Literal-with-indexing x-sync: yes FIRST, then > 1 MiB of 1-byte indexed fields.
+      block = IO::Memory.new
+      block.write_byte(STATUS_200_INDEX)
+      block.write(SYNC_FIELD)
+      ((1 << 20) + 10).times { block.write_byte(SERVER_INDEX) }
+      write_header_block(io, sids["/large"], block.to_slice, end_stream: true)
+      ok_block = Bytes[STATUS_200_INDEX, 0xbe_u8] # :status 200, then the dynamic entry x-sync
+      io.write(Frame::Header.new(Frame::Type::Headers.value,
+        Frame::END_HEADERS | Frame::END_STREAM, sids["/ok"], ok_block).to_bytes)
+      io.flush
+    end
+
+    large, ok = Gori::Repeater::H2Engine.single_packet(race_wires("/large", "/ok"),
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
+
+    large.ok?.should be_false
+    large.error.not_nil!.should contain("HPACK state lost")
+    ok.ok?.should be_false
+    ok.error.not_nil!.should contain("HPACK state lost")
+  end
+
+  # DATA for a stream the race already closed returned before crediting the CONNECTION window,
+  # so a failed stream's body could drain the shared 65535 bytes and stall every sibling.
+  it "credits the connection window for DATA on a stream it already closed" do
+    port = start_h2_scripted_origin(2, hold: 0.1.seconds) do |io, ended|
+      sids = ended.to_h { |(sid, path)| {path, sid} }
+      # /gone: a header list past the decoder's cap — failed locally, but its body still comes.
+      repeat_count = HPACK::Decoder::MAX_HEADER_LIST // ("server".bytesize + HPACK::Decoder::ENTRY_OVERHEAD) + 1
+      block = Bytes.new(1 + repeat_count) { |i| i == 0 ? STATUS_200_INDEX : SERVER_INDEX }
+      write_header_block(io, sids["/gone"], block, end_stream: false)
+      {16_384, 16_384, 16_384, 16_383}.each do |n| # exactly the default 65535 connection window
+        io.write(Frame::Header.new(Frame::Type::Data.value, 0_u8, sids["/gone"], Bytes.new(n)).to_bytes)
+      end
+      h2_headers(io, sids["/ok"], [{":status", "200"}], end_stream: false)
+      # A flow-controlled origin sends /ok's body only once the connection window is credited.
+      io.as(TCPSocket).read_timeout = 1.second
+      loop do
+        f = Frame.read(io)
+        break if f && f.frame_type == Frame::Type::WindowUpdate && f.stream_id == 0
+      end
+      h2_data(io, sids["/ok"], "ok", end_stream: true)
+    end
+
+    gone, ok = Gori::Repeater::H2Engine.single_packet(race_wires("/gone", "/ok"),
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false, timeout: 3.seconds)
+
+    gone.ok?.should be_false
+    ok.ok?.should be_true
+    String.new(ok.body.not_nil!).should eq("ok")
   end
 
   # The read loop used to take its patience and deadline from the global io timeout, so an

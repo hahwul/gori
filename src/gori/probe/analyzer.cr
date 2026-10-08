@@ -940,6 +940,11 @@ module Gori
         # there). It leaked for months after the headless path was audited precisely because
         # the two are separate loops that look like one, so they call the SAME helper.
         result = sender.send(plan.request, Fuzz::Backend.all_verbatim(plan.request))
+        # Record this plan's out-of-band payloads now that the probe carrying them went out —
+        # the twin of the same line in `Active.analyze`, for the same reason (a payload that
+        # never left is not outstanding). A read timeout still went out: the target had the
+        # payload, and may be slow precisely because it is fetching it. See `Probe::OutOfBand`.
+        record_oob(rule, plan, detail) if result.ok? || result.timed_out?
         # Surface send failures (TLS/DNS/timeout) so Active never fails silently — but
         # only ONCE per host: a flapping origin with many distinct param sets would
         # otherwise flood the notification tray (one event per unique plan.dedup_key).
@@ -951,10 +956,6 @@ module Gori
         # single-probe rule has none, so this sends exactly the one request as before. Only the
         # PRIMARY failure aborts+notifies — a follow-up that errors is passed through as its errored
         # Result so the rule bails on the incomplete comparison without a second tray post.
-        # Record this plan's out-of-band payloads now that the probe carrying them went out —
-        # the twin of the same line in `Active.analyze`, for the same reason (a payload that
-        # never left is not outstanding). See `Probe::OutOfBand` for the plant/promote split.
-        record_oob(rule, plan, detail)
         results = [result]
         # Verbatim here too — a differential whose baseline resolved `$id` and whose followup
         # did not would be measuring the substitution rather than the target.

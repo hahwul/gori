@@ -134,13 +134,6 @@ module Gori::Tui
       {r.scheme, r.host, r.port, r.method, r.path, r.location, r.name}
     end
 
-    # The whole inventory's rows for the target HOST, ignoring the path filter — Miner's
-    # neighbour names come from the host's OTHER endpoints, which the filter hides.
-    def host_rows(host : String) : Array(Row)
-      h = host.downcase
-      (@report.try(&.rows) || [] of Row).select { |r| r.host.downcase == h }
-    end
-
     # ── render ──────────────────────────────────────────────────────────────────
 
     def render(screen : Screen, rect : Rect, focused : Bool) : Nil

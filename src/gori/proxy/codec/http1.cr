@@ -698,6 +698,42 @@ module Gori::Proxy::Codec::Http1
     request_target_line(String.new(req.raw_head))
   end
 
+  # The head a proxy forwards for `req`: the client's own bytes, with an absolute-form
+  # request-target (any scheme case, `Url.absolute_form?`) cut to origin form (RFC 9112
+  # §3.2.2). Raises `URI::Error`/`OverflowError` on a malformed absolute target. The live
+  # forward path and the Rewriter preview both read it, so a rule is previewed against the head
+  # the proxy really matches it on.
+  def self.origin_form_head(req : RawRequest) : Bytes
+    return req.raw_head unless Gori::Url.absolute_form?(req.target)
+    rewrite_request_line(req, origin_form(URI.parse(req.target)))
+  end
+
+  def self.origin_form(uri : URI) : String
+    path = uri.path
+    path = "/" if path.empty?
+    uri.query ? "#{path}?#{uri.query}" : path
+  end
+
+  # Splices `origin_target` over the request-target's own bytes and copies everything else
+  # verbatim (P7): the method, the version, and whatever the client put after them. Rebuilding
+  # the line as `method SP target SP version CRLF` kept only the first three space-separated
+  # tokens, so `GET http://h/p?a b HTTP/1.1` went upstream as `GET /p?a b` — the space-in-URL
+  # payload lost its version — and `… HTTP/1.1 INJECTED` lost the trailing token, while History
+  # kept the client's bytes and no longer matched what was sent.
+  def self.rewrite_request_line(req : RawRequest, origin_target : String) : Bytes
+    raw = req.raw_head
+    start = req.method.bytesize + 1
+    target = req.target.to_slice
+    # `parse_request_head` split the line on single spaces, so the target sits right after
+    # the method and its separator. Anything else is a head this was not parsed from.
+    return raw unless raw.size >= start + target.size && raw[start, target.size] == target
+    io = IO::Memory.new(raw.size) # origin-form is usually shorter: one allocation
+    io.write(raw[0, start])
+    io << origin_target
+    io.write(raw[(start + target.size)..])
+    io.to_slice
+  end
+
   # Read the request-TARGET off the request line — but from the first NON-BLANK line, not
   # blindly the first line. A raw request may arrive with LEADING BLANK LINE(S) (an operator's
   # authored bytes, or a peer that emits an empty line before the request-line, which RFC 9112

@@ -35,9 +35,10 @@ module Gori
     # SSL_CERT_FILE (OpenSSL-linked tools, Ruby, Python `ssl`, Go), CURL_CA_BUNDLE (curl,
     # requests), REQUESTS_CA_BUNDLE (requests, pip), GIT_SSL_CAINFO (git), AWS_CA_BUNDLE (AWS
     # CLI/SDKs), PIP_CERT (pip), CARGO_HTTP_CAINFO (cargo), DENO_CERT (deno — additive there,
-    # so the bundle is merely redundant).
+    # so the bundle is merely redundant), NIX_SSL_CERT_FILE (Nix-built OpenSSL reads it BEFORE
+    # SSL_CERT_FILE, and Nix's profile script sets it in every shell).
     BUNDLE_VARS = %w[SSL_CERT_FILE CURL_CA_BUNDLE REQUESTS_CA_BUNDLE GIT_SSL_CAINFO AWS_CA_BUNDLE
-      PIP_CERT CARGO_HTTP_CAINFO DENO_CERT]
+      PIP_CERT CARGO_HTTP_CAINFO DENO_CERT NIX_SSL_CERT_FILE]
 
     # Node APPENDS these to its bundled roots, so gori's root alone is enough — unless the
     # terminal already set it, in which case the two are combined (Node reads only one file).

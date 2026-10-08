@@ -271,3 +271,45 @@ describe "RepeaterController ⌃Home/⌃End on the response (#1425)" do
     end
   end
 end
+
+describe "RepeaterController race / timing members" do
+  # The plan takes the ANCHOR tab's provenance (`evidence:` + literal set), so a captured tab
+  # marked beside a hand-written draft was sent under the other's rules — its capture
+  # `$BIND`-expanded, or the draft's tokens sent literally. A mixed group is refused instead.
+  it "refuses a group that mixes a captured tab with a draft" do
+    with_repeater_controller do |_, host|
+      req = "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice
+      host.session.store.insert_repeater("http://127.0.0.1:1/", req, false, true, 1_i64, 0) # captured
+      host.session.store.insert_repeater("http://127.0.0.1:1/", req, false, true, nil, 1)   # draft
+      ctl = RepeaterController.new(host)                                                    # the constructor loads the rows just inserted
+      ctl.toggle_subtab_mark(0)
+      ctl.toggle_subtab_mark(1)
+
+      ctl.prepare_timing_pair.should be_nil
+      host.statuses.last.should contain("provenance")
+      ctl.repeater_send_race
+      host.statuses.last.should contain("provenance")
+    end
+  end
+
+  # Two captures carry different `$words` of their own (GraphQL variables); both are captured,
+  # so they race, sent under the union of their literal sets.
+  it "pairs two captured tabs whose own $tokens differ" do
+    with_env_syntax(Gori::Env::Syntax::Bare) do
+      with_repeater_controller do |_, host|
+        a = %({"query":"mutation($id: ID!){a(id:$id)}"})
+        b = %({"query":"mutation($cart: ID!){b(id:$cart)}"})
+        [a, b].each_with_index do |body, i|
+          req = "POST /graphql HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: #{body.bytesize}\r\n\r\n#{body}".to_slice
+          host.session.store.insert_repeater("http://127.0.0.1:1/", req, false, true, 1_i64 + i, i)
+        end
+        ctl = RepeaterController.new(host)
+        ctl.toggle_subtab_mark(0)
+        ctl.toggle_subtab_mark(1)
+
+        pair = ctl.prepare_timing_pair.should_not be_nil
+        pair[1].requests.map { |r| String.new(r) }.join.should contain("$id")
+      end
+    end
+  end
+end

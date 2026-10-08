@@ -90,6 +90,13 @@ describe Gori::Tui::Statusline do
     Statusline.run("printf 'up\\n'; exit 9", "{}", 2.seconds).line.should eq("up")
   end
 
+  # The newline-bearing read used to be written whole, overshooting the cap by up to a buffer.
+  it "caps a long first line at MAX_CAPTURE even when its newline arrives in the last read" do
+    posix_only!("a /bin/sh command line (cmd.exe has no printf or tr)")
+    cmd = "printf '%#{Statusline::MAX_CAPTURE + 3000}s\\n' '' | tr ' ' a"
+    Statusline.run(cmd, "{}", 5.seconds).line.bytesize.should eq(Statusline::MAX_CAPTURE)
+  end
+
   it "does not wait on a command that backgrounds a child holding the pipe" do
     posix_only!("a /bin/sh command line (cmd.exe has no printf, cat or sleep)")
     t0 = Time.instant

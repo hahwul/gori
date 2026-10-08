@@ -316,32 +316,6 @@ describe Gori::ParamInventory do
     end
   end
 
-  describe ".neighbor_names" do
-    # Miner skips a name already in the base request, so the endpoint's own names are no seed.
-    it "is the host's other endpoints' names minus this endpoint's own" do
-      with_store do |store|
-        pi_flow(store, "/orders?tenant=1&page=2")
-        pi_flow(store, "/invoices?page=1")
-        pi_flow(store, "/x?elsewhere=1", host: "other.test")
-        rows = PI.build(store).rows
-        PI.neighbor_names(rows, rows.find!(&.path.==("/invoices"))).should eq(["tenant"])
-      end
-    end
-
-    # #1371: another port of the host is another service — its /invoices is not this one's.
-    it "reads neighbours and own names on the row's origin only" do
-      with_store do |store|
-        pi_flow(store, "/invoices?page=1", host: "h.test", scheme: "http", port: 19021)
-        pi_flow(store, "/orders?tenant=1", host: "h.test", scheme: "http", port: 19021)
-        pi_flow(store, "/invoices?debug=1", host: "h.test", scheme: "http", port: 19022)
-        pi_flow(store, "/orders?other=1", host: "h.test", scheme: "http", port: 19022)
-        rows = PI.build(store).rows
-        mine = rows.find! { |r| r.path == "/invoices" && r.port == 19021 }
-        PI.neighbor_names(rows, mine).should eq(["tenant"])
-      end
-    end
-  end
-
   describe ".seed_names" do
     it "gives each flow its own endpoint's neighbour names, one build per host" do
       with_store do |store|
@@ -360,6 +334,16 @@ describe Gori::ParamInventory do
         pi_flow(store, "/a?q=1", host: "Shop.test", req_headers: "X-Tenant: 1\r\n")
         id = pi_flow(store, "/b", host: "shop.test")
         PI.seed_names(store, store.flow_rows([id]))[id].should eq(["q"])
+      end
+    end
+
+    # Per origin (#1371): another port of the host is another service.
+    it "seeds from the flow's own origin, not every port of its host" do
+      with_store do |store|
+        id = pi_flow(store, "/a?x=1", scheme: "http", port: 8080)
+        pi_flow(store, "/b?y=1", scheme: "http", port: 9090)
+        pi_flow(store, "/c?z=1", scheme: "http", port: 8080)
+        PI.seed_names(store, store.flow_rows([id]))[id].should eq(["z"])
       end
     end
 

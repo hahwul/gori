@@ -24,16 +24,16 @@ private EMPTY_BODY = "<html><body><h1>No matching records</h1>" \
 describe "Gori::Probe::Active::BooleanBlindSqli" do
   rule = Gori::Probe::Active::BooleanBlindSqli.new
 
-  it "plans two baselines + a true/false pair per query param (string breakout by default)" do
+  it "plans two baselines + a false/true pair per query param (string breakout by default)" do
     with_store do |store|
       detail = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?id=42")
       plan = rule.plan(detail).not_nil!
       plan.params.map(&.name).should eq(["id"])
-      plan.followups.size.should eq(3)                                                # 2nd baseline + (true, false)
+      plan.followups.size.should eq(3)                                                # 2nd baseline + (false, true)
       String.new(plan.request).should contain("/s?id=42 ")                            # baseline unchanged
       String.new(plan.followups[0]).should contain("/s?id=42 ")                       # 2nd baseline unchanged
-      String.new(plan.followups[1]).should contain("id=42%27%20AND%20%271%27%3D%271") # ' AND '1'='1
-      String.new(plan.followups[2]).should contain("id=42%27%20AND%20%271%27%3D%272") # ' AND '1'='2
+      String.new(plan.followups[1]).should contain("id=42%27%20AND%20%271%27%3D%272") # ' AND '1'='2
+      String.new(plan.followups[2]).should contain("id=42%27%20AND%20%271%27%3D%271") # ' AND '1'='1
     end
   end
 
@@ -41,8 +41,8 @@ describe "Gori::Probe::Active::BooleanBlindSqli" do
     with_store do |store|
       detail = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?id=42")
       plan = rule.plan(detail).not_nil!
-      # base1, base2, true≈baseline, false=empty-result page.
-      results = [resp(BASELINE_BODY), resp(BASELINE_BODY), resp(BASELINE_BODY), resp(EMPTY_BODY)]
+      # base1, base2, false=empty-result page, true≈baseline.
+      results = [resp(BASELINE_BODY), resp(BASELINE_BODY), resp(EMPTY_BODY), resp(BASELINE_BODY)]
       dets = rule.detections_all(plan, results, detail)
       dets.size.should eq(1)
       dets.first.code.should eq("sqli_boolean_based")
@@ -57,8 +57,18 @@ describe "Gori::Probe::Active::BooleanBlindSqli" do
     with_store do |store|
       detail = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?id=42")
       plan = rule.plan(detail).not_nil!
-      results = [resp(BASELINE_BODY), resp(BASELINE_BODY), resp(BASELINE_BODY), resp(BASELINE_BODY, status: 404)]
+      results = [resp(BASELINE_BODY), resp(BASELINE_BODY), resp(BASELINE_BODY, status: 404), resp(BASELINE_BODY)]
       rule.detections_all(plan, results, detail).size.should eq(1)
+    end
+  end
+
+  # The legs go FALSE then TRUE, so a limiter that starts refusing mid-sequence fails the TRUE leg.
+  it "does NOT fire when a rate limiter trips after the false leg" do
+    with_store do |store|
+      detail = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?id=42")
+      plan = rule.plan(detail).not_nil!
+      results = [resp(BASELINE_BODY), resp(BASELINE_BODY), resp(BASELINE_BODY), resp(EMPTY_BODY, status: 429)]
+      rule.detections_all(plan, results, detail).should be_empty
     end
   end
 
@@ -79,7 +89,7 @@ describe "Gori::Probe::Active::BooleanBlindSqli" do
       # A reflecting endpoint renders the payload, so the always-true leg no longer matches the
       # baseline — the guard that separates injection from reflection. Here the true leg is the
       # empty-shaped body and the false leg matches the baseline: "true≈baseline" is false → decline.
-      results = [resp(BASELINE_BODY), resp(BASELINE_BODY), resp(EMPTY_BODY), resp(BASELINE_BODY)]
+      results = [resp(BASELINE_BODY), resp(BASELINE_BODY), resp(BASELINE_BODY), resp(EMPTY_BODY)]
       rule.detections_all(plan, results, detail).should be_empty
     end
   end
@@ -89,8 +99,8 @@ describe "Gori::Probe::Active::BooleanBlindSqli" do
       detail = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?id=42")
       plan = rule.plan(detail).not_nil!
       # base1 and base2 are already different pages → no stable reference → decline, even though
-      # the true/false legs below would otherwise look like a clean oracle.
-      results = [resp(BASELINE_BODY), resp(EMPTY_BODY), resp(BASELINE_BODY), resp(EMPTY_BODY)]
+      # the false/true legs below would otherwise look like a clean oracle.
+      results = [resp(BASELINE_BODY), resp(EMPTY_BODY), resp(EMPTY_BODY), resp(BASELINE_BODY)]
       rule.detections_all(plan, results, detail).should be_empty
     end
   end
@@ -107,10 +117,10 @@ describe "Gori::Probe::Active::BooleanBlindSqli" do
     with_store do |store|
       detail = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?id=42")
       agg = rule.plan(detail, P::Active::Options.new(aggressive: true)).not_nil!
-      # One param × two breakouts × (true, false) = 4 legs, after the second baseline → 5 followups.
+      # One param × two breakouts × (false, true) = 4 legs, after the second baseline → 5 followups.
       agg.followups.size.should eq(5)
-      String.new(agg.followups[3]).should contain("id=42%20AND%201%3D1") #  AND 1=1 (numeric true)
-      String.new(agg.followups[4]).should contain("id=42%20AND%201%3D2") #  AND 1=2 (numeric false)
+      String.new(agg.followups[3]).should contain("id=42%20AND%201%3D2") #  AND 1=2 (numeric false)
+      String.new(agg.followups[4]).should contain("id=42%20AND%201%3D1") #  AND 1=1 (numeric true)
       # Cap: default 3 params, aggressive 10.
       wide = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?" + (0...6).map { |i| "p#{i}=v" }.join("&"))
       rule.plan(wide).not_nil!.params.size.should eq(P::Active::BooleanBlindSqli::MAX_PROBE_PARAMS)
@@ -122,12 +132,12 @@ describe "Gori::Probe::Active::BooleanBlindSqli" do
     with_store do |store|
       detail = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?id=42")
       plan = rule.plan(detail, P::Active::Options.new(aggressive: true)).not_nil!
-      # Layout: base1, base2, [string-true, string-false, numeric-true, numeric-false].
+      # Layout: base1, base2, [string-false, string-true, numeric-false, numeric-true].
       # String breakout errors in a numeric column (true diverges) → its pair declines; the numeric
       # breakout confirms.
       results = [resp(BASELINE_BODY), resp(BASELINE_BODY),
                  resp(EMPTY_BODY), resp(EMPTY_BODY),    # string legs: both error-shaped, no oracle
-                 resp(BASELINE_BODY), resp(EMPTY_BODY)] # numeric legs: true≈baseline, false diverges
+                 resp(EMPTY_BODY), resp(BASELINE_BODY)] # numeric legs: false diverges, true≈baseline
       rule.detections_all(plan, results, detail).size.should eq(1)
     end
   end

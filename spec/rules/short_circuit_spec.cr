@@ -181,6 +181,21 @@ describe "Gori::Rules — short-circuit op" do
     end
   end
 
+  # `File.info` raises ArgumentError, not File::Error, on a NUL: it escaped `short_circuit` and
+  # dropped the connection with no flow. Every surface refuses the path; a row that got in
+  # anyway (an older build, a hand-edited database) still fails closed.
+  it "refuses a NUL in a file stub's path and answers 502 for a row that has one" do
+    path = "/tmp/stub\0.json"
+    Gori::RuleStub.respond_error(RK::File, "200 OK", path, "").should_not be_nil
+    with_store do |store|
+      rule = Gori::Store::MatchRule.new(1_i64, true, Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "GET /x", "200 OK", SC, Gori::Store::MatchKind::Literal, body_file: path, respond: RK::File)
+      stub = Gori::Rules.new(store, [rule]).short_circuit(get("/x"), "acme.test").not_nil!
+      stub.status.should eq(502)
+      stub.error.not_nil!.should contain("unreadable")
+    end
+  end
+
   it "keeps a stub rule OUT of every rewrite path and its hot-path counts" do
     with_store do |store|
       rules = Gori::Rules.load(store)
@@ -382,6 +397,15 @@ describe "Gori::Rules — short-circuit sub-kind" do
       rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
         "GET /s/", "", op: SC, body_file: "~/mock-root", respond: RK::Dir)
       rules.rules.first.body_file.should eq(File.expand_path("~/mock-root", home: true))
+    end
+  end
+
+  it "makes a file stub's path absolute too: the proxy reads it from its own working directory" do
+    with_store do |store|
+      rules = Gori::Rules.load(store)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "GET /me", "200 OK", op: SC, body_file: "mocks/me.json", respond: RK::File)
+      rules.rules.first.body_file.should eq(File.expand_path("mocks/me.json"))
     end
   end
 

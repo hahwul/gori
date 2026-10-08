@@ -397,49 +397,33 @@ module Gori
       !w.strip.empty? && !w.includes?('\n') && !w.includes?('\r') && !w.lstrip.starts_with?('#')
     end
 
-    # Names seen on the OTHER endpoints of `row`'s origin and not on its own — the Miner seed.
-    # Miner already skips a name the base request carries (`already-in-request`), so seeding an
-    # endpoint's own names would test nothing; its neighbours' names are the guesses worth a
-    # request ("the API takes `tenant` on /orders, does /invoices too?").
-    #
-    # Per ORIGIN, as the rows are (#1371): the same path on another port of the host is another
-    # service, so its names are neither this endpoint's own (which would drop them from the
-    # seed) nor this service's neighbours.
-    def neighbor_names(rows : Enumerable(Row), row : Row) : Array(String)
-      same = rows.select { |r| same_origin?(r, row) }
-      own = Set(String).new
-      same.each { |r| (w = r.word) && own << w if r.path == row.path }
-      wordlist(same.reject(&.path.==(row.path))).reject { |w| own.includes?(w) }
-    end
-
-    private def same_origin?(a : Row, b : Row) : Bool
-      a.host.downcase == b.host.downcase && a.scheme == b.scheme && a.port == b.port
-    end
-
     # A parameter's name as a wordlist entry: a JSON parameter contributes its LEAF member
     # (what Miner's Json location injects), everything else its name. nil for an array leaf.
     def word(location : Miner::Location, name : String) : String?
       location.json? ? Params.json_leaf(name) : name
     end
 
-    # Newest flows `seed_names` reads for one host. A Miner seed is a guess list, not a report,
+    # Newest flows `seed_names` reads for one origin. A Miner seed is a guess list, not a report,
     # so it reads fewer than the Params sub-tab does.
     SEED_MAX_FLOWS = 2000
 
-    # `neighbor_names` for the endpoint each of `flows` stands on, by flow id, read straight
-    # from the store: what a History mine seeds with, where no Params scan is on screen to
-    # read. One walk per HOST, however many of the flows share it, over the same newest-first
-    # flow set `build` walks — but names only: request head and body alone (no response BLOB
-    # is read), and no rows, samples, sensitivity or reflection. Names come newest sighting
-    # first, so a request-capped mine spends its budget on what the host uses now. A host
-    # `stop` cut short gets no entries.
+    # The Miner seed for the endpoint each of `flows` stands on, by flow id: names seen on the
+    # OTHER endpoints of its origin and not on its own. Miner already skips a name the base
+    # request carries (`already-in-request`), so an endpoint's own names would test nothing;
+    # its neighbours' are the guesses worth a request ("the API takes `tenant` on /orders,
+    # does /invoices too?"). What a History or Params mine seeds with, read straight from the
+    # store. One walk per ORIGIN (#1371: another port of the host is another service), however
+    # many of the flows share it, over the same newest-first flow set `build` walks — but names only: request
+    # head and body alone (no response BLOB is read), and no rows, samples, sensitivity or
+    # reflection. Names come newest sighting first, so a request-capped mine spends its budget
+    # on what the origin uses now. An origin `stop` cut short gets no entries.
     def seed_names(store : Store, flows : Enumerable(Store::FlowRow), max_flows : Int32 = SEED_MAX_FLOWS,
                    stop : -> Bool = -> { false }) : Hash(Int64, Array(String))
       out = {} of Int64 => Array(String)
-      flows.group_by(&.host.downcase).each do |host, group|
+      flows.group_by { |f| {f.scheme, f.host.downcase, f.port} }.each do |(scheme, host, port), group|
         break if stop.call
-        sightings = host_words(store, host, max_flows, stop)
-        break if stop.call # a walk `stop` cut short read a partial host
+        sightings = origin_words(store, Options.new(host: host, scheme: scheme, port: port), max_flows, stop)
+        break if stop.call # a walk `stop` cut short read a partial origin
         group.each do |f|
           path = endpoint_path(f.target)
           own = sightings.compact_map { |(p, w)| w if p == path }.to_set
@@ -451,12 +435,13 @@ module Gori
       out
     end
 
-    # {endpoint path, word} per distinct sighting on `host`, newest flow first. Header names
-    # are left out (see `wordlist`), as are words the wordlist format cannot carry.
-    private def host_words(store : Store, host : String, max_flows : Int32, stop : -> Bool) : Array({String, String})
+    # {endpoint path, word} per distinct sighting on the one origin `origin` names, newest flow
+    # first. Header names are left out (see `wordlist`), as are words the wordlist format
+    # cannot carry.
+    private def origin_words(store : Store, origin : Options, max_flows : Int32, stop : -> Bool) : Array({String, String})
       seen = Set({String, String}).new
       out = [] of {String, String}
-      each_flow(store, host_filter(Options.new(host: host)), max_flows, ->(_row : Store::FlowRow) { true },
+      each_flow(store, host_filter(origin), max_flows, ->(_row : Store::FlowRow) { true },
         -> { stop.call || out.size >= ROW_CAP }) do |row|
         next unless parts = store.request_parts(row.id)
         path = endpoint_path(row.target)

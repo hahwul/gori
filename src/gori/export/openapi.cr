@@ -325,8 +325,26 @@ module Gori
         "#{doc.to_pretty_json}\n"
       end
 
+      # Every string double-quoted: the stdlib emitter leaves a plain scalar plain whenever YAML
+      # 1.2 reads it back as a string, but a 1.1 reader (PyYAML, SnakeYAML) reads `12:30:00` as
+      # 45000, `y`/`n` as booleans and `<<` as a merge key.
       def to_yaml(doc : JSON::Any) : String
-        doc.to_yaml
+        YAML.build { |y| yaml_node(y, doc) }
+      end
+
+      private def yaml_node(y : YAML::Builder, v : JSON::Any) : Nil
+        case raw = v.raw
+        when Hash
+          y.mapping { raw.each { |k, x| y.scalar(k, style: :double_quoted); yaml_node(y, x) } }
+        when Array
+          y.sequence { raw.each { |x| yaml_node(y, x) } }
+        when String
+          y.scalar(raw, style: :double_quoted)
+        when Nil
+          y.scalar("null")
+        else
+          y.scalar(raw.to_s) # Bool, Int64, Float64: plain, and the same token in either YAML
+        end
       end
 
       # The document cut to at most `max_bytes` of compact JSON by dropping whole paths from the

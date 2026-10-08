@@ -561,6 +561,29 @@ describe Gori::Rules do
         rules.preview(miss).matched.should eq(0)
       end
     end
+
+    # A plain-HTTP forward-proxy flow is recorded absolute-form, while the proxy matches every
+    # rule on the origin-form head it forwards: a mock drafted from that very flow claimed it
+    # live and previewed 0.
+    it "previews a request-head rule against the origin-form head the proxy matches" do
+      with_store do |store|
+        store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_000_i64, scheme: "http", host: "plain.test", port: 80,
+          method: "GET", target: "http://plain.test/api/me?x=1", http_version: "HTTP/1.1",
+          head: "GET http://plain.test/api/me?x=1 HTTP/1.1\r\nHost: plain.test\r\n\r\n".to_slice,
+          source: Gori::FlowSource::Kind::Proxy))
+        store.flush
+
+        rules = Gori::Rules.load(store)
+        stub = Gori::Store::MatchRule.new(0_i64, true, Gori::Store::RuleTarget::Request,
+          Gori::Store::RulePart::Head, Gori::MockFromFlow.request_pattern("GET", "http://plain.test/api/me?x=1"),
+          "200 OK\n\nhi", Gori::Store::RuleOp::ShortCircuit, Gori::Store::MatchKind::Regex)
+        rules.preview(stub).matched.should eq(1)
+        replace = Gori::Store::MatchRule.new(0_i64, true, Gori::Store::RuleTarget::Request,
+          Gori::Store::RulePart::Head, "GET /api/", "GET /v2/")
+        rules.preview(replace).matched.should eq(1)
+      end
+    end
   end
 
   # --- scope: the global library + this project's overrides ------------------------------

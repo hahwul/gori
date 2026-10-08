@@ -67,6 +67,7 @@ module Gori
       reset_probe_mode : Probe::Mode?,
       exec_repeaters : Int32,
       exec_fuzz_templates : Int32,
+      exec_decoder_tabs : Int32,
       exec_env_vars : Int32 do
       def summary : String
         "#{flows} #{flows == 1 ? "flow" : "flows"}, " \
@@ -91,11 +92,12 @@ module Gori
       # Stored `exec:` chain steps stay as the operator-visible bytes they are; they run a local
       # command only on an explicit send, so they are disclosed rather than rewritten.
       def exec_chains : String?
-        return nil if exec_repeaters + exec_fuzz_templates + exec_env_vars == 0
+        return nil if exec_repeaters + exec_fuzz_templates + exec_decoder_tabs + exec_env_vars == 0
         "#{exec_repeaters} Repeater #{exec_repeaters == 1 ? "tab" : "tabs"}, " \
-        "#{exec_fuzz_templates} Fuzzer #{exec_fuzz_templates == 1 ? "template" : "templates"} and " \
+        "#{exec_fuzz_templates} Fuzzer #{exec_fuzz_templates == 1 ? "template" : "templates"}, " \
+        "#{exec_decoder_tabs} Decoder #{exec_decoder_tabs == 1 ? "tab" : "tabs"} and " \
         "#{exec_env_vars} project #{exec_env_vars == 1 ? "env var" : "env vars"} contain exec:, " \
-        "a chain step that runs a local command when that request is sent."
+        "a chain step that runs a local command when that request is sent or that input is edited."
       end
     end
 
@@ -353,6 +355,7 @@ module Gori
         version, inventory = inspect_database(database, importing: true)
         validate_manifest_database!(manifest, version, inventory)
         sanitize_import_database(database)
+        refuse_missing_keys!(database)
         prepared = PreparedImport.new(workdir, database, manifest, inventory)
         success = true
         prepared
@@ -528,7 +531,10 @@ module Gori
         mode unless mode.passive?
       end
       exec_repeaters = tables.includes?("repeaters") ? count_exec_chains(conn, "repeaters", "request") : 0
-      exec_fuzz_templates = tables.includes?("fuzz_sessions") ? count_exec_chains(conn, "fuzz_sessions", "template") : 0
+      exec_fuzz_templates = tables.includes?("fuzz_sessions") ? count_exec_fuzz_sessions(conn) : 0
+      exec_decoder_tabs = json?(setting(conn, Store::DECODER_SESSIONS_KEY)).try(&.as_a?).try(&.count do |tab|
+        tab.as_h?.try(&.["chain"]?).try(&.as_s?).try { |chain| exec_text?(chain) }
+      end) || 0
       exec_env_vars = setting(conn, Env::PROJECT_VARS_KEY).try do |raw|
         Env.parse_vars_json(raw).count { |(_, value)| exec_text?(value) }
       end || 0
@@ -536,7 +542,27 @@ module Gori
         disabled_pipe_rules, disabled_exec_probe_rules, disabled_body_file_stubs,
         reset_network_settings, reset_host_overrides, reset_global_overrides,
         disabled_auto_refresh_slots, reset_probe_mode,
-        exec_repeaters, exec_fuzz_templates, exec_env_vars)
+        exec_repeaters, exec_fuzz_templates, exec_decoder_tabs, exec_env_vars)
+    end
+
+    # A Fuzzer session's template, or its gRPC field chains (`role¦exec:…`,
+    # `GrpcFieldTemplate#runs_commands?`), which run on every send just as the template's do.
+    # Read as bytes for `count_exec_chains`' reason.
+    private def self.count_exec_fuzz_sessions(conn : DB::Connection) : Int32
+      count = 0
+      conn.query_each("SELECT CAST(template AS BLOB), CAST(config AS BLOB) FROM fuzz_sessions") do |rs|
+        template, config = rs.read(Bytes?), rs.read(Bytes?)
+        grpc = config.try { |bytes| json?(String.new(bytes)).try(&.as_h?).try(&.["grpc_fields"]?).try(&.as_s?) }
+        count += 1 if template.try { |bytes| exec_text?(String.new(bytes)) } || grpc.try { |text| exec_text?(text) }
+      end
+      count
+    end
+
+    # Tolerant: a malformed value is nil, never a refused import.
+    private def self.json?(raw : String?) : JSON::Any?
+      raw.try { |text| JSON.parse(text) }
+    rescue JSON::ParseException
+      nil
     end
 
     # The entries the store's tolerant reader would honor (`Store#rewriter_overrides`).
@@ -592,6 +618,53 @@ module Gori
         missing = columns.reject { |column| table_columns(conn, table).includes?(column) }
         unless missing.empty?
           raise Gori::Error.new("project archive database table #{table} is missing required column(s): #{missing.join(", ")}")
+        end
+      end
+      # Every `id` column every version created is the table's rowid alias: one rebuilt without
+      # it (CREATE TABLE … AS SELECT) gives every later row a NULL id, which the store reads as
+      # a non-nil Int64 and raises on.
+      tables.each do |table|
+        next unless table_columns(conn, table).includes?("id")
+        keys = conn.query_all("SELECT name, upper(type) FROM pragma_table_info(?) WHERE pk > 0", table, as: {String, String})
+        unless keys == [{"id", "INTEGER"}]
+          raise Gori::Error.new("project archive database table #{table} has no INTEGER PRIMARY KEY id; refusing to import it")
+        end
+      end
+    end
+
+    # Every key the store writes through — the rowid `id`, and each `ON CONFLICT` target
+    # (`settings.key`, `sitemap_tags (host, path)`, …) — must survive in the copy. A table
+    # rebuilt with CREATE TABLE … AS SELECT keeps its columns and loses them, and every upsert
+    # into it then fails inside the writer's batch, taking the flows batched with it. Judged
+    # after migrating the copy, against a fresh schema, so an older archive is held to the keys
+    # it will have once opened; a table the fresh schema lacks is left to the column checks.
+    private def self.refuse_missing_keys!(path : String) : Nil
+      expected = DB.open("sqlite3::memory:") do |db|
+        Store::Schema.migrate!(db)
+        key_shapes(db)
+      end
+      DB.open("sqlite3:#{path}?busy_timeout=5000") do |db|
+        Store::Schema.migrate!(db)
+        actual = key_shapes(db)
+        expected.each do |table, shape|
+          got = actual[table]?
+          next if got.nil? || got == shape
+          raise Gori::Error.new("project archive database table #{table} lacks the keys gori writes through; refusing to import it")
+        end
+      end
+    end
+
+    # {primary-key columns with their declared type, every UNIQUE index's columns} per table.
+    private def self.key_shapes(db : DB::Database) : Hash(String, {Array({String, String}), Array(Array(String?))})
+      db.using_connection do |conn|
+        tables = conn.query_all("SELECT name FROM sqlite_master WHERE type = 'table' " \
+                                "AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'", as: String)
+        tables.to_h do |table|
+          pk = conn.query_all("SELECT name, upper(type) FROM pragma_table_info(?) WHERE pk > 0 ORDER BY pk",
+            table, as: {String, String})
+          uniques = conn.query_all("SELECT name FROM pragma_index_list(?) WHERE \"unique\" = 1", table, as: String)
+            .map { |index| conn.query_all("SELECT name FROM pragma_index_info(?) ORDER BY seqno", index, as: String?) }
+          {table, {pk, uniques.sort_by(&.join(','))}}
         end
       end
     end
@@ -728,6 +801,7 @@ module Gori
     # listed: one that is not just keeps today's behaviour.
     INT32_COLUMNS = {
       "flows"          => %w[port status state short_circuited],
+      "flow_interims"  => %w[status omitted],
       "issues"         => %w[severity status],
       "issue_evidence" => %w[status],
       "match_rules"    => %w[enabled position],
@@ -742,7 +816,9 @@ module Gori
     private def self.refuse_mistyped_cells!(conn : DB::Connection, tables : Array(String)) : Nil
       tables.each do |table|
         narrow = INT32_COLUMNS[table]? || [] of String
-        checks = conn.query_all("SELECT name FROM pragma_table_info(?) WHERE upper(type) = 'INTEGER'",
+        # Every column with INTEGER affinity, which is any declared type containing "INT"
+        # (sqlite.org/datatype3.html §3.1): a CREATE TABLE … AS SELECT rebuild declares `INT`.
+        checks = conn.query_all("SELECT name FROM pragma_table_info(?) WHERE instr(upper(type), 'INT') > 0",
           table, as: String).map do |column|
           col = quote_ident(column)
           check = "typeof(#{col}) NOT IN ('integer', 'null')"

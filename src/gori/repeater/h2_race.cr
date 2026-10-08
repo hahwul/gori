@@ -58,19 +58,16 @@ module Gori
 
         # Feed one HEADERS/CONTINUATION/DATA frame belonging to this stream. Returns true when
         # this frame CLOSED the stream (END_STREAM), so the reader can drop it from the live set.
-        # `flooded` is set when a header/body cap trips — the response is kept but flagged
-        # incomplete, exactly as `read_response` does.
+        # The body cap keeps the response but flags it incomplete, as `read_response` does; the
+        # header-block cap raises (see `buffer_header`).
         def feed(frame : Frame::Header, decoder : HPACK::Decoder, started : Time::Instant) : Bool
           case frame.frame_type
           when Frame::Type::Headers
-            chunk = H2Engine.header_block(frame)
-            return finish(started) if @header_buf.bytesize + chunk.size > H2Engine::MAX_HEADER_BLOCK
-            @header_buf.write(chunk)
+            buffer_header(H2Engine.header_block(frame))
             @end_stream_pending = frame.end_stream?
             merge(decoder, started) if frame.end_headers?
           when Frame::Type::Continuation
-            return finish(started) if @header_buf.bytesize + frame.payload.size > H2Engine::MAX_HEADER_BLOCK
-            @header_buf.write(frame.payload)
+            buffer_header(frame.payload)
             merge(decoder, started) if frame.end_headers?
           when Frame::Type::Data
             @body.write(H2Engine.data_block(frame)) if @body.bytesize < H2Engine::MAX_BODY
@@ -86,13 +83,6 @@ module Gori
             # PRIORITY / PUSH_PROMISE / WINDOW_UPDATE for this stream — nothing to reassemble.
           end
           done?
-        end
-
-        # Whether a DATA frame just fed should be credited back (connection + stream windows), so
-        # a body larger than the default window keeps flowing — the reader half of the same rule
-        # `read_response` applies. The stream window is not credited once the stream is done.
-        def data_payload(frame : Frame::Header) : Int32
-          frame.payload.size
         end
 
         # Mark the stream closed by a connection-level event (GOAWAY, or the socket dropping)
@@ -120,6 +110,16 @@ module Gori
           return nil unless @final_seen
           Reply.new(@status, @headers, @body.size == 0 ? nil : @body.to_slice, clean_eos?,
             nil, @rst, @trailers, false, @final_seen, @late_interim, @trailer_pseudo)
+        end
+
+        # A block past `MAX_HEADER_BLOCK` is never decoded, so the table updates it carries never
+        # reach the connection's shared decoder and every sibling's later block would resolve
+        # against the wrong table. Raise: `route_or_fail` fails every live stream with the reason.
+        private def buffer_header(chunk : Bytes) : Nil
+          if @header_buf.bytesize + chunk.size > H2Engine::MAX_HEADER_BLOCK
+            raise Gori::Error.new("h2 header block exceeds #{H2Engine::MAX_HEADER_BLOCK} bytes — HPACK state lost")
+          end
+          @header_buf.write(chunk)
         end
 
         # A block carrying END_STREAM (a body-less 204/304/HEAD answer, or trailers) closes the
@@ -378,14 +378,16 @@ module Gori
       # body past the default keeps flowing — the reader half of `read_response`'s rule.
       private def self.route_stream_frame(io : IO, conn : Conn, streams : Hash(UInt32, PacketStream),
                                           frame : Frame::Header, started : Time::Instant) : {Bool, Bool}
+        # Every DATA payload (padding included) counts against the CONNECTION window, even on a
+        # stream already done or never ours (RFC 9113 §6.9): an uncredited one starves siblings.
+        data = frame.frame_type == Frame::Type::Data
+        window_update(io, 0_u32, frame.payload.size) if data
         st = streams[frame.stream_id]?
         return {false, false} unless st # a frame for a stream we do not own
         return {false, false} if st.done?
-        if frame.frame_type == Frame::Type::Data
-          consumed = st.data_payload(frame)
+        if data
           closed = st.feed(frame, conn.decoder, started)
-          window_update(io, 0_u32, consumed) if consumed > 0
-          window_update(io, frame.stream_id, consumed) if consumed > 0 && !closed
+          window_update(io, frame.stream_id, frame.payload.size) unless closed
           {true, closed}
         else
           {true, st.feed(frame, conn.decoder, started)}
