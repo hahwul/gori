@@ -671,13 +671,16 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       kept <= frozen.size
     end
     live = plain.select { |s| !s.kind.flow? || !@session.store.flow_row(s.id).nil? }
-    linked = frozen.size + @session.store.add_links(Store::LinkOwnerKind::Issue, issue_id, live.map(&.ref))
+    added = @session.store.add_links(Store::LinkOwnerKind::Issue, issue_id, live.map(&.ref))
+    linked = frozen.size + (added || 0)
     refresh_link_owners(Store::LinkOwnerKind::Issue, issue_id)
     refresh_issue_evidence(issue_id, frozen.size == 1 ? frozen[0] : nil)
     refresh_evidence_markers unless frozen.empty?
     bytes = snaps.compact_map(&.snapshot)[0, frozen.size].sum(&.bytes)
     @toast = LinkOutcome.new(owner, snaps.size, linked, plain.size - live.size,
       frozen, bytes, refusal || unfrozen_reason(plain)).toast
+    # A rollback is not "already linked": say the plain links did not land.
+    @toast = "#{frozen.empty? ? "" : "#{frozen.size} frozen · "}links NOT added (project busy)" if added.nil?
   end
 
   # Why the refs that were not frozen were not. The FIRST refusal stands for the set — they

@@ -34,7 +34,9 @@ module Gori
     # marked set would stall the single-threaded render loop for one write-batch round-trip per
     # flow — seconds at typical fsync latency once ⇧T has marked a page. The inserted count comes
     # from `changes()` inside the same transaction, so no follow-up read is needed either.
-    def add_links(owner_kind : LinkOwnerKind, owner_id : Int64, refs : Array({LinkRefKind, Int64})) : Int32
+    #
+    # nil when the batch did not commit, so a caller cannot read a rollback as "all already linked".
+    def add_links(owner_kind : LinkOwnerKind, owner_id : Int64, refs : Array({LinkRefKind, Int64})) : Int32?
       return 0 if refs.empty?
       ts = now_us
       inserted = 0
@@ -52,7 +54,7 @@ module Gori
         end
         nil
       }
-      ok ? inserted : 0
+      ok ? inserted : nil
     end
 
     def link_id(owner_kind : LinkOwnerKind, owner_id : Int64, ref_kind : LinkRefKind, ref_id : Int64) : Int64?

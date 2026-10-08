@@ -51,6 +51,19 @@ describe "entity_links (V21)" do
     end
   end
 
+  # A rollback answered 0, which the TUI batch link read as "N already linked".
+  it "answers nil, not 0, when the batch did not commit" do
+    path = File.tempname("gori-add-links", ".db")
+    store = Gori::Store.open(path)
+    begin
+      issue_id = store.insert_issue("batch", Gori::Store::Severity::Low, nil, nil)
+      store.close # every write from here does not commit
+      store.add_links(Gori::Store::LinkOwnerKind::Issue, issue_id, [{Gori::Store::LinkRefKind::Flow, 1_i64}]).should be_nil
+    ensure
+      delete_db_files(path)
+    end
+  end
+
   it "adds, dedupes, and removes links" do
     with_store do |store|
       issue_id = store.insert_issue("t", Gori::Store::Severity::Info, nil, nil)
