@@ -204,11 +204,11 @@ module Gori::Tui
       buf = Bytes.new(4096)
       while (n = io.read(buf)) > 0
         chunk = buf[0, n]
+        room = MAX_CAPTURE - mem.bytesize
         if idx = chunk.index(0x0a_u8) # newline → first line complete
-          mem.write(chunk[0, idx])
+          mem.write(chunk[0, Math.min(idx, room)])
           break
         end
-        room = MAX_CAPTURE - mem.bytesize
         break if room <= 0
         mem.write(room >= n ? chunk : chunk[0, room])
       end
