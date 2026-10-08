@@ -1362,6 +1362,29 @@ describe Gori::Proxy::H2::StreamGate do
     end
   end
 
+  # A promise travels on its associated stream, and a held response there used to park it
+  # untested, while the pushed HEADERS(2) went straight to a client never told of stream 2.
+  it "judges a PUSH_PROMISE on a held response stream, and relays an allowed one at once" do
+    with_ic do |ic, scope|
+      ic.set_direction(Gori::Interceptor::Direction::ResponseOnly)
+      scope.add("include", "string", "https://api.example.com/api/")
+      scope.enable_sandbox
+      rig = Rig.new(ic)
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/api/ok"))))
+      rig.s2c.accept(headers(1_u32, rig.enc_in.encode(response("200")), Frame::END_HEADERS))
+      settle
+      ic.pending_count.should eq(1)
+
+      rig.s2c.accept(push_promise(1_u32, 2_u32, rig.enc_in.encode(request("/pushed", "evil.test"))))
+      rig.to_origin.select { |f| f.frame_type == Frame::Type::RstStream }.map(&.stream_id).should eq([2_u32])
+      rig.s2c.accept(headers(2_u32, rig.enc_in.encode(response("200")), Frame::END_HEADERS))
+      rig.to_client.should be_empty
+
+      rig.s2c.accept(push_promise(1_u32, 4_u32, rig.enc_in.encode(request("/api/sub"))))
+      rig.to_client.map(&.frame_type).should eq([Frame::Type::PushPromise])
+    end
+  end
+
   it "relays a PUSH_PROMISE whose promised URL IS in scope" do
     with_ic(intercept: false) do |ic, scope|
       scope.add("include", "string", "https://api.example.com/api/")

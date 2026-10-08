@@ -58,7 +58,8 @@ module Gori::Proxy::H2
   #      use of a higher. Forwarding stream 5's opening HEADERS while holding stream 3's makes
   #      the late HEADERS(3) a CONNECTION error, killing every other stream with it. So an
   #      opening HEADERS may not overtake a deferred one. Response HEADERS open nothing, so
-  #      this binds the request direction only.
+  #      this binds the request direction only; the one response-leg frame that opens a
+  #      stream, PUSH_PROMISE, is never deferred at all (`defer?`).
   #   2. **HPACK is one sequential per-direction state** (RFC 7541 §2.2). A passthrough block
   #      delivered ahead of a deferred one resolves its dynamic indices against a table missing
   #      the deferred block's insertions. `HeadRewrite#engage` is the answer and is called on
@@ -330,6 +331,18 @@ module Gori::Proxy::H2
       # leg has seen opens one, whatever fields it carries.
       opener = @ordered && block.first.frame_type == Frame::Type::Headers && block.stream_id > @highest_opened
       @highest_opened = block.stream_id if opener
+      # A PUSH_PROMISE rides its associated stream but opens a NEW one, so it is judged before
+      # that stream's slot and never parked behind a held response: its pushed HEADERS would
+      # overtake it (§5.1.1). It is written here, since `accept_locked` parks every frame on a
+      # slotted stream. The latch is already engaged when such a slot exists, so writing it
+      # ahead of the held head costs HPACK nothing, and §8.4 lets a promise precede it.
+      return true if push_refuses_locked(block)
+      if block.first.frame_type == Frame::Type::PushPromise
+        return false unless @slots.has_key?(block.stream_id)
+        last = block.frames.size - 1
+        block.frames.each_with_index { |f, i| write(f, i == last ? block.pre : nil) }
+        return true
+      end
       if slot = @slots[block.stream_id]?
         # A later block on a stream already deferred — h2 trailers behind a held response head.
         # Already re-encoded: the latch engaged when the Slot was created.
@@ -340,7 +353,6 @@ module Gori::Proxy::H2
       # refused stream is never held: there is no decision to offer a human about a request
       # that is not going anywhere.
       return true if sandbox_refuses_locked(block, opener)
-      return true if push_refuses_locked(block)
       held = plan_hold(block)
       # Rule 1 orders every request head, and a methodless opener with it (it opens an id too).
       ordered = opener || (@ordered && !block.head.nil?)
