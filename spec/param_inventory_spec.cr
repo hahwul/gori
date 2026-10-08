@@ -363,6 +363,16 @@ describe Gori::ParamInventory do
       end
     end
 
+    # Per origin, as `neighbor_names` is (#1371): another port of the host is another service.
+    it "seeds from the flow's own origin, not every port of its host" do
+      with_store do |store|
+        id = pi_flow(store, "/a?x=1", scheme: "http", port: 8080)
+        pi_flow(store, "/b?y=1", scheme: "http", port: 9090)
+        pi_flow(store, "/c?z=1", scheme: "http", port: 8080)
+        PI.seed_names(store, store.flow_rows([id]))[id].should eq(["z"])
+      end
+    end
+
     it "lists the newest sighting first" do
       with_store do |store|
         pi_flow(store, "/a?old=1")
