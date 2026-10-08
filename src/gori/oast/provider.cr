@@ -254,7 +254,7 @@ module Gori::Oast
           else
             Time.unix(n)
           end
-        rescue ArgumentError
+        rescue ArgumentError | OverflowError # Int64::MIN.abs overflows
           Time.utc
         end
       else

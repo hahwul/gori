@@ -15,6 +15,7 @@
 - Repeater and Fuzzer: pretty-printing an XML or HTML request no longer rewrites invalid UTF-8 bytes or swaps a `§` marker that is followed by a digit
 - GraphQL: editing the query in the decoded pane keeps a string, `null` or non-JSON `variables` value instead of folding it into the query or dropping the param
 - gRPC: loading a `.proto` source file by mistake still prints the protoc hint when its header comment is in Korean, Japanese or Chinese
+- OAST: one callback carrying the minimum 64-bit timestamp no longer fails the whole poll and loses the interactions beside it
 - Docs: the site search opens from a `?q=` link, and screenshots no longer shift the page while they load (#1550)
 - MCP: `gori mcp --pin-project` keeps a server on the project it starts with, withholding the tools that switch to or read other projects (#1508)
 - CLI: `gori run` help now says when a timed capture stops, how it picks its default project, what `send`'s exit status means, and that `import --urls` sends nothing (#1507)
