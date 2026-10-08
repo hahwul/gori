@@ -192,7 +192,7 @@ gori run shell --print --shell fish | source
 | `--shell=SYNTAX` | `--print`의 문법: `sh` (기본값; `bash`, `zsh`도 가능) 또는 `fish` |
 | `--keep-no-proxy` | 물려받은 `NO_PROXY`를 지우지 않고 유지 |
 
-설정되는 것: `http_proxy`, `https_proxy`, `HTTP_PROXY`, `HTTPS_PROXY`는 gori를 가리키고, 로컬 대상도 캡처되도록 `NO_PROXY`/`no_proxy`는 지웁니다. `SSL_CERT_FILE`, `CURL_CA_BUNDLE`, `REQUESTS_CA_BUNDLE`, `GIT_SSL_CAINFO`, `AWS_CA_BUNDLE`, `PIP_CERT`, `CARGO_HTTP_CAINFO`, `DENO_CERT`는 `~/.gori/shell/` 아래 번들을 가리킵니다. 이 변수들 대부분은 도구의 신뢰 저장소에 추가하는 게 아니라 교체하기 때문에, 번들에는 터미널이 원래 신뢰하던 저장소(직접 설정한 `SSL_CERT_FILE`, 없으면 시스템 루트)와 gori 루트가 함께 들어 있습니다. 특정 도구에만 설정해 둔 CA 변수(예: `REQUESTS_CA_BUNDLE`)는 공용 번들 대신 그 파일에 gori 루트를 더한 별도 파일을 받습니다. `NODE_EXTRA_CA_CERTS`는 gori 루트를 추가하고, `NODE_USE_ENV_PROXY=1`은 Node의 프록시 지원을 켜고, `GODEBUG=x509sslcertoverrideplatform=1`은 macOS의 Go가 `SSL_CERT_FILE`을 읽게 합니다. `GORI_SHELL=1`과 `GORI_PROXY=HOST:PORT`는 프롬프트에서 쓸 수 있는 표식입니다:
+설정되는 것: `http_proxy`, `https_proxy`, `HTTP_PROXY`, `HTTPS_PROXY`는 gori를 가리키고, 로컬 대상도 캡처되도록 `NO_PROXY`/`no_proxy`는 지웁니다. `SSL_CERT_FILE`, `CURL_CA_BUNDLE`, `REQUESTS_CA_BUNDLE`, `GIT_SSL_CAINFO`, `AWS_CA_BUNDLE`, `PIP_CERT`, `CARGO_HTTP_CAINFO`, `DENO_CERT`, `NIX_SSL_CERT_FILE`는 `~/.gori/shell/` 아래 번들을 가리킵니다. 이 변수들 대부분은 도구의 신뢰 저장소에 추가하는 게 아니라 교체하기 때문에, 번들에는 터미널이 원래 신뢰하던 저장소(직접 설정한 `SSL_CERT_FILE`, 없으면 시스템 루트)와 gori 루트가 함께 들어 있습니다. 특정 도구에만 설정해 둔 CA 변수(예: `REQUESTS_CA_BUNDLE`)는 공용 번들 대신 그 파일에 gori 루트를 더한 별도 파일을 받습니다. `NODE_EXTRA_CA_CERTS`는 gori 루트를 추가하고, `NODE_USE_ENV_PROXY=1`은 Node의 프록시 지원을 켜고, `GODEBUG=x509sslcertoverrideplatform=1`은 macOS의 Go가 `SSL_CERT_FILE`을 읽게 합니다. `GORI_SHELL=1`과 `GORI_PROXY=HOST:PORT`는 프롬프트에서 쓸 수 있는 표식입니다:
 
 ```bash
 # ~/.zshrc 또는 ~/.bashrc
