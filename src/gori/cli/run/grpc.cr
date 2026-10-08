@@ -121,12 +121,13 @@ module Gori
             # The notes go to STDERR alongside the failure, not swallowed: "3 of 4 symbols
             # answered NOT_FOUND" is what turns "returned no descriptors" into something the
             # operator can act on.
-            outcome.notes.each { |n| STDERR.puts "  ! #{n}" }
-            abort "gori run grpc reflect: #{err}"
+            # Service names, notes and errors carry the remote server's own text.
+            outcome.notes.each { |n| STDERR.puts "  ! #{CLI::Output.term_safe(n)}" }
+            abort "gori run grpc reflect: #{CLI::Output.term_safe(err)}"
           end
           puts "#{client.target} · #{outcome.version} · #{outcome.services.size} service(s) · #{outcome.files} descriptor file(s)"
-          outcome.services.each { |s| puts "  #{s}" }
-          outcome.notes.each { |n| puts "  ! #{n}" }
+          outcome.services.each { |s| puts "  #{CLI::Output.term_safe(s)}" }
+          outcome.notes.each { |n| puts "  ! #{CLI::Output.term_safe(n)}" }
           puts "schema: #{Gori::Protobuf::Schemas.status}"
           puts "  ! not saved (project busy); it reverts when you reopen this project" unless committed
         end

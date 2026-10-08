@@ -267,6 +267,14 @@ describe "gori run authorize — output" do
     arr.each(&.["verdict"].as_s.should(eq("bypass")))
   end
 
+  it "json: scrubs a captured method that is not valid UTF-8, so the document stays parseable" do
+    t = A::Target.new(7_i64, String.new(Bytes[71, 0xE9, 84]), "https://acme.test/a",
+      [trial("as-captured", A::Verdict::Baseline, 200, 10_i64, baseline: true)])
+    text = Gori::CLI::Output.authorize_target_json(t)
+    text.valid_encoding?.should be_true
+    JSON.parse(text)["method"].as_s.should eq("G�T")
+  end
+
   it "json: blocked is emitted only when sends were actually refused" do
     Gori::CLI::Output.authorize_target_json(bypass_target).should_not contain("blocked")
     blocked = A::Target.new(11_i64, "GET", "https://acme.test/admin",

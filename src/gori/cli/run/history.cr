@@ -1258,8 +1258,9 @@ module Gori
       private def self.sse_event_text(e : Sse::Event, idx : Int32) : String
         String.build do |io|
           io << "#" << (idx + 1)
-          io << " type=" << e.type if e.type
-          io << " id=" << e.id if e.id
+          # The origin wrote `event:` and `id:` too, so they are escaped like the data.
+          e.type.try { |t| io << " type=" << CLI::Output.term_safe(t) }
+          e.id.try { |i| io << " id=" << CLI::Output.term_safe(i) }
           io << " retry=" << e.retry if e.retry
           e.data.each_line { |l| io << "\n  " << CLI::Output.term_safe_multiline(l.scrub) }
         end
@@ -1277,7 +1278,9 @@ module Gori
         sh, sb = resp ? detail.response_head : nil, resp ? detail.response_body : nil
         if doc = Saml.from_flow(tgt, rh, rb, sh, sb)
           puts ""
-          puts "=== SAML (#{Saml.summary(doc)}) ==="
+          # The summary carries the decoded RelayState, and the JWT heading the token's `alg`:
+          # captured text, escaped like the bodies under them.
+          puts CLI::Output.term_safe("=== SAML (#{Saml.summary(doc)}) ===")
           puts CLI::Output.term_safe_multiline(Saml.pretty_xml(doc.xml).scrub)
         end
         jwts = Jwt.from_flow(tgt, rh, rb, sh, sb)
@@ -1285,7 +1288,7 @@ module Gori
           puts ""
           puts "=== JWT (#{jwts.size}) ==="
           jwts.each do |f|
-            puts "▸ #{f.location}#{(b = f.brief) ? " · #{b}" : ""}"
+            puts CLI::Output.term_safe("▸ #{f.location}#{(b = f.brief) ? " · #{b}" : ""}")
             puts CLI::Output.term_safe_multiline(f.decoded.scrub)
           end
         end

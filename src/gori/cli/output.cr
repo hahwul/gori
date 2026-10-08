@@ -890,8 +890,8 @@ module Gori
       def self.authorize_target_fields(j : JSON::Builder, t : Authorize::Target) : Nil
         j.object do
           j.field "flow_id", t.flow_id
-          j.field "method", t.method
-          # The URL is CAPTURED bytes (see json_captured) — an origin/client chose them.
+          # The method and URL are CAPTURED bytes (see json_captured) — a client chose them.
+          json_captured(j, "method", t.method)
           json_captured(j, "url", t.url)
           j.field "verdict", authorize_verdict(t).to_s
           j.field "same_count", t.same_count
