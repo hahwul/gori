@@ -29,9 +29,9 @@ module Gori
     # cluster reports their RANGE instead.
     #
     # FNV-1a 64 rather than `#hash`: Crystal's hasher is seeded per process, and this id is
-    # persisted (`fuzz_results.shape`) and compared across runs. `VERSION` is folded into every
-    # key, so a change to the normalization changes every id rather than silently merging old
-    # rows with new ones.
+    # persisted (`fuzz_results.shape`) and read back when a saved run is regrouped — always
+    # against ids of the same run, never another's. `VERSION` is folded into every key, so a
+    # bump changes every id rather than silently merging old rows with new ones.
     module Shape
       VERSION = 1_u8
 
