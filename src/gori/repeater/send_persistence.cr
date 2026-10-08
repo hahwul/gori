@@ -2,6 +2,7 @@ require "../store"
 require "../env"
 require "../evidence"
 require "../proxy/h2/head_codec"
+require "./flow_request"
 
 module Gori::Repeater
   # The outcome of saving the exchange from a one-shot send as a Repeater session.
@@ -82,8 +83,9 @@ module Gori::Repeater
                      request : Bytes, http2 : Bool, auto_cl : Bool, flow_id : Int64?,
                      response : Result, h2_fields : Array({String, String})? = nil,
                      *, sni : String? = nil, tls_preset : String? = nil) : SendPersistenceResult
-      port_suffix = ((scheme == "https" && port == 443) || (scheme == "http" && port == 80)) ? "" : ":#{port}"
-      target = "#{scheme}://#{host}#{port_suffix}"
+      # `host` is the bare dial host (IPv6 unbracketed); `build_target` brackets it back so
+      # the row re-parses on the next send.
+      target = FlowRequest.build_target(scheme, host, port)
       saved_request = replayable_request(h2_fields, host, port, request)
       # These are for probe scanning or safe presentation only. Never write them to the row.
       masked_target = Env.mask_secrets(target)

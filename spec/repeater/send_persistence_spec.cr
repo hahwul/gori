@@ -44,4 +44,18 @@ describe Gori::Repeater::SendPersistence do
       row.response_request_sha256.should eq(Gori::Evidence.request_digest(request))
     end
   end
+
+  it "brackets a bare IPv6 dial host so the saved target re-parses" do
+    with_store do |store|
+      response = Gori::Repeater::Result.new(
+        "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".to_slice,
+        Bytes.empty, nil, 1_i64, nil, false)
+
+      saved = Gori::Repeater::SendPersistence.persist(store, "http", "::1", 8080,
+        "GET / HTTP/1.1\r\nHost: [::1]:8080\r\n\r\n".to_slice, false, false, nil, response)
+
+      saved.target.should eq("http://[::1]:8080")
+      Gori::Repeater::FlowRequest.dial_target(saved.target).should eq({"http", "::1", 8080})
+    end
+  end
 end
