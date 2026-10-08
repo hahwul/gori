@@ -88,7 +88,14 @@ module Gori::Repeater
     # `§fuzz§` guard beside each call site already accepts, and a named refusal of a run that
     # would otherwise destroy the session is the cheaper error by a wide margin.
     def self.group_document?(text : String) : Bool
-      text.split('\n').any? { |l| l.strip(" \t\r") == GROUP_SEP }
+      text.split('\n').any? { |l| group_sep?(l) }
+    end
+
+    # One line is a `%%%` separator. The one predicate every surface counts with: a bare
+    # `strip` also drops \v, \f and Unicode spaces, so a capture's `%%%\f` body line counted
+    # as a separator in one place and not another.
+    def self.group_sep?(line : String) : Bool
+      line.strip(" \t\r") == GROUP_SEP
     end
 
     # Cooperative cancel token for one `run`. The caller keeps it, hands a copy to `run`, and

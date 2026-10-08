@@ -1100,6 +1100,24 @@ describe Gori::Tui::RepeaterView do
       end
     end
 
+    # The baseline counted with `strip(" \t\r")` and the live count with a bare `strip`, which
+    # also drops \f, so a captured `%%%\f` line read as an operator's separator.
+    it "counts a `%%%` line with trailing form feed the same at load and live" do
+      repeater_tmp_store do |store|
+        ff_body = "line1\r\n%%%\f\r\nline2"
+        ff_head = "POST /p HTTP/1.1\r\nHost: h.test\r\nContent-Length: #{ff_body.bytesize}\r\n\r\n"
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+          method: "POST", target: "/p", http_version: "HTTP/1.1",
+          head: ff_head.to_slice, body: ff_body.to_slice, source: Gori::FlowSource::Kind::Proxy))
+        view = RepeaterView.new
+        view.load(store.get_flow(id).not_nil!)
+        view.request_text.should contain("Content-Length: #{ff_body.bytesize}")
+        view.pipeline_requests.size.should eq(1)
+        String.new(view.request_bytes).should eq(ff_head + ff_body)
+      end
+    end
+
     it "DOES split once the operator adds a separator of their own" do
       repeater_tmp_store do |store|
         view = RepeaterView.new

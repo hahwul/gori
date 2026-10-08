@@ -114,7 +114,7 @@ class Gori::Tui::RepeaterView
   end
 
   private def pipeline_sep_count(wl : Array({String, String})) : Int32
-    wl.count { |(l, _)| l.strip == PIPELINE_SEP }
+    wl.count { |(l, _)| Repeater::Minimize.group_sep?(l) }
   end
 
   # The reason a WHOLE-BUFFER send is refused, or nil.
@@ -254,7 +254,7 @@ class Gori::Tui::RepeaterView
 
   # The same count over raw text, for seeding the baseline at load/restore.
   private def pipeline_sep_count_in(text : String) : Int32
-    text.split('\n').count { |l| l.strip(" \t\r") == PIPELINE_SEP }
+    text.split('\n').count { |l| Repeater::Minimize.group_sep?(l) }
   end
 
   # EDITOR line ranges of each `%%%` chunk, blank edges trimmed. The one place the group
@@ -277,7 +277,7 @@ class Gori::Tui::RepeaterView
     end
     start = 0
     wl.each_with_index do |(l, _), i|
-      next unless l.strip == PIPELINE_SEP
+      next unless Repeater::Minimize.group_sep?(l)
       push.call(start, i)
       start = i + 1
     end
