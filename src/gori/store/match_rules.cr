@@ -162,23 +162,27 @@ module Gori
     # The one implementation behind both override maps (this one and
     # `COLORMARKER_OVERRIDES_KEY`), which differ only in the settings key they live under.
     private def global_overrides(key : String) : Hash(Int64, Bool)
-      parse_global_overrides(setting(key))
+      parse_global_overrides(setting(key)) || {} of Int64 => Bool
     rescue
       {} of Int64 => Bool
     end
 
-    # Never raises: it also runs on the writer fiber, where a raise rolls back the whole batch.
-    private def parse_global_overrides(raw : String?) : Hash(Int64, Bool)
+    # nil when the stored value is unparsable — distinct from absent/empty, so the writer can
+    # refuse to overwrite a torn row instead of erasing every other override in it. Never
+    # raises: it also runs on the writer fiber, where a raise rolls back the whole batch.
+    private def parse_global_overrides(raw : String?) : Hash(Int64, Bool)?
       map = {} of Int64 => Bool
       return map if raw.nil? || raw.strip.empty?
-      JSON.parse(raw).as_h?.try &.each do |k, v|
+      h = JSON.parse(raw).as_h?
+      return nil unless h
+      h.each do |k, v|
         id = k.to_i64?
         b = v.as_bool?
         map[id] = b if id && !b.nil?
       end
       map
     rescue
-      {} of Int64 => Bool
+      nil
     end
 
     private def set_global_override(key : String, id : Int64, enabled : Bool) : Bool
@@ -195,10 +199,16 @@ module Gori
     # `mutate_setting` documents. Not that helper, because it cannot delete a row: an EMPTY map
     # deletes the key outright rather than storing "{}", which is what makes "the override
     # disappeared when the two agreed again" observable from outside.
+    #
+    # An unparsable row refuses the write (false) rather than replacing it with a one-entry map:
+    # that would silently re-enable every other global rule this project had switched off.
     private def write_global_override(key : String, id : Int64, enabled : Bool?) : Bool
-      exec_task_ok ->(c : DB::Connection) {
+      refused = false
+      ok = exec_task_ok ->(c : DB::Connection) {
         map = parse_global_overrides(c.query_one?("SELECT value FROM settings WHERE key = ?", key, as: String))
-        unless map[id]? == enabled
+        if map.nil?
+          refused = true
+        elsif map[id]? != enabled
           enabled.nil? ? map.delete(id) : (map[id] = enabled)
           if map.empty?
             c.exec("DELETE FROM settings WHERE key = ?", key)
@@ -209,6 +219,7 @@ module Gori
         end
         nil
       }
+      ok && !refused
     end
   end
 end
