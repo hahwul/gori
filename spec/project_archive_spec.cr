@@ -660,6 +660,24 @@ describe Gori::ProjectArchive do
     end
   end
 
+  # SQLite gives INTEGER affinity to any declared type containing "INT", and a table rebuilt
+  # with CREATE TABLE … AS SELECT declares its integer columns `INT`, not `INTEGER`.
+  it "refuses a mistyped cell in a column declared INT rather than INTEGER" do
+    with_archive_project do |_registry, project, store, root|
+      store.insert_flow(archive_request("/a"))
+      store.flush
+      archive_path = export_archive(project, File.join(root, "int.gori"))
+      tamper_archive_database(archive_path, root) do |conn|
+        conn.exec("CREATE TABLE host_overrides_x AS SELECT * FROM host_overrides")
+        conn.exec("DROP TABLE host_overrides")
+        conn.exec("ALTER TABLE host_overrides_x RENAME TO host_overrides")
+        conn.exec("INSERT INTO host_overrides (id, host, ip) VALUES ('zz', 'a.test', '127.0.0.1')")
+      end
+      error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
+      error.message.not_nil!.should contain(%(never writes in "host_overrides"))
+    end
+  end
+
   # An AUTOINCREMENT id counter at the top of int64 fails every insert with SQLITE_FULL, so the
   # imported project would capture nothing under a "database or disk is full". `flows` became
   # AUTOINCREMENT in V39; a row alone is enough, since SQLite no longer falls back to a random id.

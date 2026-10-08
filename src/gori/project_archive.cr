@@ -743,7 +743,9 @@ module Gori
     private def self.refuse_mistyped_cells!(conn : DB::Connection, tables : Array(String)) : Nil
       tables.each do |table|
         narrow = INT32_COLUMNS[table]? || [] of String
-        checks = conn.query_all("SELECT name FROM pragma_table_info(?) WHERE upper(type) = 'INTEGER'",
+        # Every column with INTEGER affinity, which is any declared type containing "INT"
+        # (sqlite.org/datatype3.html §3.1): a CREATE TABLE … AS SELECT rebuild declares `INT`.
+        checks = conn.query_all("SELECT name FROM pragma_table_info(?) WHERE instr(upper(type), 'INT') > 0",
           table, as: String).map do |column|
           col = quote_ident(column)
           check = "typeof(#{col}) NOT IN ('integer', 'null')"
