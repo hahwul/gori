@@ -888,10 +888,9 @@ describe Gori::Proxy::H2::StreamGate do
       ic.pending_count.should eq(0)
       rig.to_origin.should be_empty
 
+      # No further frame: a client waiting on its parked stream 3 has nothing to send, so the
+      # deadline has to fire on its own rather than on the next arrival.
       sleep 60.milliseconds
-      # Any inbound frame notices — here the connection-level WINDOW_UPDATE a real peer keeps
-      # sending. No timer fiber runs on the pump's path to do this (P6).
-      rig.c2s.accept(Frame::Header.new(Frame::Type::WindowUpdate.value, 0_u8, 0_u32, Bytes.new(4)))
       settle
 
       # Intercept is still ON: this is the head-only hold the gate had before #6, not a

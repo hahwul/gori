@@ -21,7 +21,8 @@
 - Projects: `.gori` import refuses archives whose tables lost their keys or carry out-of-range interim rows, and its `exec:` notice now counts Decoder tabs and gRPC field specs (#1549)
 - CLI: `gori run shell` also points `NIX_SSL_CERT_FILE` at its CA bundle, so Nix-built tools trust gori (#1549)
 - Proxy: a request naming a port above 65535 is refused instead of looping back into gori's own listener on glibc Linux
-- HTTP/2: the sandbox refuses a request head with no `:method` instead of forwarding it unexamined and judges a server push on a held response, which no longer lets the pushed response overtake its promise; a long-lived connection keeps recording requests after many cancelled streams the origin still answered
+- HTTP/2: the sandbox refuses a request head with no `:method` and judges a server push behind a held response, and a long-lived connection keeps recording requests after many cancelled streams the origin still answered
+- Intercept: an h2 hold waiting on a stalled upload is queued on time even when the client sends nothing more
 - TLS: importing a passphrase-protected CA key says to decrypt it instead of freezing gori on a hidden passphrase prompt, and a host with `_` in its name gets a certificate browsers accept
 
 ## v0.8.0

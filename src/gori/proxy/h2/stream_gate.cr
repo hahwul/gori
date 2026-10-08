@@ -399,6 +399,23 @@ module Gori::Proxy::H2
       # there is nothing to wait for and its buffered body is zero bytes long.
       slot.complete = true if block.first.end_stream?
       settle_waiting_locked(slot)
+      arm_wait_deadline if slot.waiting
+    end
+
+    # The deadline's timer (see `check_waiting_locked`): one sleeping fiber per buffering hold,
+    # which is a hold a human asked for, never the pump's common path (P6).
+    private def arm_wait_deadline : Nil
+      deadline = hold_wait_deadline
+      spawn do
+        sleep deadline
+        begin
+          run_cross(@mutex.synchronize { @closed ? NO_CROSS : (check_waiting_locked; take_deferred_cross(NO_CROSS)) })
+        rescue
+          # A release that writes to a leg already dead raises here, on a spawned fiber with no
+          # caller to unwind to; `wait_for` guards its own the same way.
+        end
+        refund_swallowed
+      end
     end
 
     # Queue a decided hold and start its wait fiber. `body` nil = the hold covers the HEAD only.
@@ -501,12 +518,10 @@ module Gori::Proxy::H2
     # inside returns nil anyway (`Interceptor#enqueue` tests the same condition), so
     # `queue_hold_locked` takes its own not-held exit and drains the slot instead.
     #
-    # Checked on frame arrival rather than on a timer, and that is sufficient rather than merely
-    # cheap: a waiting slot with nothing behind it blocks nobody, and a stream blocked BEHIND
-    # one only becomes blocked when its own frames arrive HERE — including the HEADERS that
-    # opens it, since `accept_locked` runs this before it defers anything. A timer fiber would
-    # buy only the case where the wait costs nothing, at the price of one more fiber per
-    # buffering hold on the pump's own path (P6). Costs an empty-Hash test on every frame of a
+    # Checked on every frame arrival AND by a one-shot timer per buffering hold
+    # (`arm_wait_deadline`). Arrival alone is not enough: a stream parked behind the wait
+    # arrives inside the deadline, and its client, now waiting on that response, sends nothing
+    # more, so no later frame would ever check it. Costs an empty-Hash test on every frame of a
     # connection holding nothing, which is the common case.
     private def check_waiting_locked : Nil
       return if @slots.empty?
