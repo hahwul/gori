@@ -150,6 +150,21 @@ class Gori::Tui::RepeaterView
     Proxy::Codec::Http1.rewritable_length_header?(line)
   end
 
+  # The ONE Content-Length line in `lines` auto-CL may rewrite, or nil — the guards
+  # `Repeater::FlowRequest.resync_content_length` applies (no Transfer-Encoding, exactly one
+  # Content-Length, a plain numeric value), for the split-decode and gRPC-Web paths that
+  # rewrite a head of their own rather than go through it.
+  private def resyncable_cl_index(lines : Array(String)) : Int32?
+    return nil if lines.any?(&.lstrip.downcase.starts_with?("transfer-encoding:"))
+    found = nil
+    lines.each_with_index do |l, i|
+      next unless l.lstrip.downcase.starts_with?("content-length:")
+      return nil if found
+      found = i
+    end
+    found && plain_numeric_header?(lines[found]) ? found : nil
+  end
+
   # See @link_host_to_target: on the FIRST target edit of a fresh ^N tab, mirror the new
   # host into the Host header (a ^N tab starts on https://example.com / Host: example.com,
   # so without this the user edits both). One-shot — cleared after the first sync, and it
