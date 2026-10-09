@@ -67,6 +67,7 @@ describe Gori::MCP::Server do
         sess = payload["sessions"][0]
         sess["db_id"].as_i64.should eq(id)
         sess["last_status"].as_i64.should eq(400)
+        sess["summary"].as_s.should eq("GET /x") # what create_repeater returns for it (#1561)
         sess.as_h.has_key?("request").should be_false
         sess.as_h.has_key?("last_response_head").should be_false
         payload["content_included"].as_bool.should be_false
@@ -457,6 +458,33 @@ describe "MCP update_repeater" do
         %({"id":#{created["id"]},"request":"GET /a?token=s3cr3t-value HTTP/1.1\\r\\nHost: acme.test\\r\\n\\r\\n"}))
       updated["summary"].as_s.should_not contain "s3cr3t-value"
       updated["summary"].as_s.should contain "$TOKEN"
+    end
+  end
+
+  it "masks an env value holding a space before cutting the summary at the target" do
+    with_store do |store|
+      Gori::Env.save_project(store, [{"COOKIE", "sess=abc123secret; csrf=zz"}])
+      created = mcp_ok_json(tools_for(store), "create_repeater",
+        %({"target":"https://acme.test","request":"GET /x?c=sess=abc123secret; csrf=zz HTTP/1.1\\r\\nHost: acme.test\\r\\n\\r\\n"}))
+      created["summary"].as_s.should eq("GET /x?c=$COOKIE")
+    end
+  end
+
+  it "caps a long summary at 80 characters with an ellipsis" do
+    with_store do |store|
+      created = mcp_ok_json(tools_for(store), "create_repeater",
+        %({"target":"https://acme.test","request":"GET /#{"a" * 100} HTTP/1.1\\r\\nHost: acme.test\\r\\n\\r\\n"}))
+      created["summary"].as_s.size.should eq(80)
+      created["summary"].as_s.should end_with("…")
+    end
+  end
+
+  it "masks a secret in get_repeater_context's session summary" do
+    with_store do |store|
+      Gori::Env.save_project(store, [{"TOKEN", "s3cr3t-value"}])
+      store.insert_repeater("https://acme.test", "GET /a?token=s3cr3t-value HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, false, true, nil, 0)
+      sess = mcp_ok_json(tools_for(store), "get_repeater_context", "{}")["sessions"][0]
+      sess["summary"].as_s.should eq("GET /a?token=$TOKEN")
     end
   end
 end
