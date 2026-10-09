@@ -460,6 +460,33 @@ describe "MCP update_repeater" do
       updated["summary"].as_s.should contain "$TOKEN"
     end
   end
+
+  it "masks an env value holding a space before cutting the summary at the target" do
+    with_store do |store|
+      Gori::Env.save_project(store, [{"COOKIE", "sess=abc123secret; csrf=zz"}])
+      created = mcp_ok_json(tools_for(store), "create_repeater",
+        %({"target":"https://acme.test","request":"GET /x?c=sess=abc123secret; csrf=zz HTTP/1.1\\r\\nHost: acme.test\\r\\n\\r\\n"}))
+      created["summary"].as_s.should eq("GET /x?c=$COOKIE")
+    end
+  end
+
+  it "caps a long summary at 80 characters with an ellipsis" do
+    with_store do |store|
+      created = mcp_ok_json(tools_for(store), "create_repeater",
+        %({"target":"https://acme.test","request":"GET /#{"a" * 100} HTTP/1.1\\r\\nHost: acme.test\\r\\n\\r\\n"}))
+      created["summary"].as_s.size.should eq(80)
+      created["summary"].as_s.should end_with("…")
+    end
+  end
+
+  it "masks a secret in get_repeater_context's session summary" do
+    with_store do |store|
+      Gori::Env.save_project(store, [{"TOKEN", "s3cr3t-value"}])
+      store.insert_repeater("https://acme.test", "GET /a?token=s3cr3t-value HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, false, true, nil, 0)
+      sess = mcp_ok_json(tools_for(store), "get_repeater_context", "{}")["sessions"][0]
+      sess["summary"].as_s.should eq("GET /a?token=$TOKEN")
+    end
+  end
 end
 
 # #1244 — `create_repeater{curl}`: the importer every surface shares builds the request, and the

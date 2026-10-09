@@ -42,6 +42,7 @@ describe "MCP list_sitemap tag stamping" do
       row = row_for(call_json(tools, "list_sitemap", "{}"), "/search")
       row["query_variants"].as_i.should eq(1)
       row.as_h.has_key?("tag").should be_false
+      row["url"].as_s.should eq("http://acme.test/search") # folded: no query, see query_targets
     end
   end
 
