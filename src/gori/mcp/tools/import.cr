@@ -99,6 +99,7 @@ module Gori
           s.field "kind", enumprop("the source format to read", KINDS.keys), required: true
           s.field "path", strprop("filesystem path to the source file (this or 'text')")
           s.field "text", strprop("the source document itself (a HAR, a URL list, a spec, curl commands, …) instead of a file")
+          s.requires_one_of "path", "text"
         end
       end
     end

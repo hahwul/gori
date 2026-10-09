@@ -184,6 +184,7 @@ module Gori
           "A descriptor-set FILE is unloaded by clearing the path in Project settings instead." do |s|
           s.field "target", strprop("scheme://host:port, as grpc_schema reports it")
           s.field "all", boolprop("forget every cached reflection target")
+          s.requires_one_of "target", "all"
         end
       end
     end

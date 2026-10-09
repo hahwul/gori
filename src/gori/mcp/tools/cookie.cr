@@ -207,6 +207,7 @@ module Gori
           s.field "format", enumprop("force a format (default auto-detect)", Cookie::FORMATS)
           s.field "salt", strprop("Flask/Django signing salt")
           s.field "algorithm", enumprop("Django HMAC algorithm (auto-detected from the signature length when unset)", Cookie::Django::SUPPORTED_ALGOS)
+          s.requires_one_of "secrets", "wordlist"
         end
 
         tool j, "cookie_forge",
