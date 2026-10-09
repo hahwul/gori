@@ -45,7 +45,7 @@ gori에 저장되는 모든 환경설정은 하나의 화면, **Preferences** �
 | **선택지** | `←` / `→`로 순환 |
 | **오프너** | `↵`로 해당 섹션의 전용 편집기 열기 |
 
-오프너는 한 줄짜리 필드로는 부족한 섹션에 쓰입니다. 테마 목록, 탭 바, 환경 변수, 단축키, 호스트네임 오버라이드, User-Agent 목록이 여기에 해당합니다.
+오프너는 한 줄짜리 필드로는 부족한 섹션에 쓰입니다. 테마 목록, 탭 바, 환경 변수, 단축키, 키셋 연습장(Keyset playground), 호스트네임 오버라이드, User-Agent 목록이 여기에 해당합니다.
 
 ## 섹션 {#the-sections}
 
@@ -91,7 +91,7 @@ Placement는 *세션에서의* 비용을 결정합니다 (선택 화면에는 �
 |------|------|
 | **Editor** | External editor, Markdown highlight, Pretty-print bodies |
 | **Mouse** | Mouse, Drag release |
-| **Keys** | Command modifier, Editor keyset |
+| **Keys** | Command modifier, Editor keyset, Keyset playground(오프너) |
 | **Env** | 오프너: 아웃바운드 요청에 쓰는 전역 `$ENV.KEY` 변수. 적용 중인 토큰 문법도 함께 보여 주지만, 바꾸는 것은 [`gori settings env-syntax`](/ko/reference/cli/#env-syntax)입니다. 이미 저장된 토큰을 다시 적어 주기 때문입니다 |
 | **User-Agents** | 오프너: `$GEN.USER_AGENT`가 쓰는 직접 만든 목록(한 줄에 하나). 내장 브라우저 목록을 대체하며, 비워 두면 내장 목록을 씁니다 |
 | **Hotkeys** | 오프너: 단축키 재지정, OS 기본 프로파일 선택 |

@@ -12,14 +12,14 @@ Tier 1 platforms can be thought of as "the whole of gori". Each one:
 
 - gets a pre-built binary on every [GitHub Release](https://github.com/hahwul/gori/releases/latest) and is covered by the [curl installer](/getting-started/installation/#quick-install-curl) and [Homebrew](/getting-started/installation/#homebrew),
 - is built from source in CI or at release, and its release binary is run before it is published,
-- is used day to day: macOS is the platform gori is developed on, and the spec suite runs on Linux x86_64 for every pull request,
+- is used day to day: macOS is the platform gori is developed on, and the spec suite runs on Linux x86_64 in CI (the specs mirroring a change on every pull request, the full suite on every push to `main`),
 - has no known platform-specific gaps.
 
 | Target | Release asset | Other channels | Tested by |
 |--------|---------------|----------------|-----------|
 | macOS arm64 (Apple Silicon) | `gori-v*-osx-arm64.tar.gz` | Nix | Day-to-day development; the release build runs `--version` from its packaged tarball |
 | macOS x86_64 (Intel) | `gori-v*-osx-x86_64.tar.gz` | — | The release build runs `--version` from its packaged tarball |
-| Linux x86_64 | `gori-v*-linux-x86_64` (static, musl) | AUR, Snap, Nix, Docker | Full spec suite on every pull request and push to `main`; the release binary is checked to be static and run |
+| Linux x86_64 | `gori-v*-linux-x86_64` (static, musl) | AUR, Snap, Nix, Docker | The specs mirroring a change on every pull request, the full suite on every push to `main`; the release binary is checked to be static and run |
 | Linux arm64 | `gori-v*-linux-arm64` (static, musl) | Nix, Docker | The Docker image is built natively on every push to `main`; the release binary is checked to be static and run |
 
 The spec suite does not run on macOS or Linux arm64 in CI, so a regression specific to one of those targets is found in use, not by CI.

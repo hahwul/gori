@@ -12,14 +12,14 @@ Tier 1은 "gori 전부가 그대로 동작하는" 플랫폼입니다. 각 플랫
 
 - 모든 [GitHub Release](https://github.com/hahwul/gori/releases/latest)에 사전 빌드 바이너리가 올라가고, [curl 설치 스크립트](/ko/getting-started/installation/#quick-install-curl)와 [Homebrew](/ko/getting-started/installation/#homebrew)로 설치할 수 있습니다.
 - CI나 릴리스 과정에서 소스로 빌드되고, 릴리스 바이너리는 게시 전에 실제로 실행해 봅니다.
-- 매일 쓰입니다. gori는 macOS에서 개발되고, 스펙 스위트는 모든 PR마다 Linux x86_64에서 돕니다.
+- 매일 쓰입니다. gori는 macOS에서 개발되고, 스펙 스위트는 CI의 Linux x86_64에서 돕니다(PR마다 변경에 대응하는 스펙, `main` 푸시마다 전체 스위트).
 - 플랫폼 고유의 알려진 한계가 없습니다.
 
 | 대상 | 릴리스 자산 | 그 밖의 채널 | 검증 방식 |
 |------|-------------|--------------|-----------|
 | macOS arm64 (Apple Silicon) | `gori-v*-osx-arm64.tar.gz` | Nix | 일상 개발 환경. 릴리스 빌드가 패키징한 tarball에서 `--version` 실행 |
 | macOS x86_64 (Intel) | `gori-v*-osx-x86_64.tar.gz` | — | 릴리스 빌드가 패키징한 tarball에서 `--version` 실행 |
-| Linux x86_64 | `gori-v*-linux-x86_64` (정적, musl) | AUR, Snap, Nix, Docker | 모든 PR과 `main` 푸시마다 전체 스펙 스위트. 릴리스 바이너리는 정적 링크 여부 확인 후 실행 |
+| Linux x86_64 | `gori-v*-linux-x86_64` (정적, musl) | AUR, Snap, Nix, Docker | PR마다 변경에 대응하는 스펙, `main` 푸시마다 전체 스펙 스위트. 릴리스 바이너리는 정적 링크 여부 확인 후 실행 |
 | Linux arm64 | `gori-v*-linux-arm64` (정적, musl) | Nix, Docker | `main` 푸시마다 Docker 이미지를 네이티브로 빌드. 릴리스 바이너리는 정적 링크 여부 확인 후 실행 |
 
 macOS와 Linux arm64에서는 CI가 스펙 스위트를 돌리지 않습니다. 그래서 이 대상에서만 나타나는 회귀는 CI가 아니라 실사용에서 발견됩니다.

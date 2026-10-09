@@ -149,7 +149,7 @@ Captured text in `text` output shows control and invisible characters by name (`
 | `0` | Success |
 | `1` | Error: a failed send, an unreadable project, a mutation that could not be applied, or a `fuzz` / `mine` / `discover` / `sequence` / `authorize` / `cache-deception` run in which no request got an answer (a dead or refusing target is not a clean "nothing found") |
 | `3` | A verdict gate tripped: `run fuzz --fail-if-no-matches` completed but nothing matched (and no `--stop-on` / `--stop-after-matches` condition was met), or `run probe --fail-on=LEVEL` reported an issue at or above LEVEL |
-| `130` | Interrupted by SIGINT/SIGTERM. `capture` (which exits `0` when `--for` or `--max` ends it), `fuzz`, `mine`, `discover`, `sequence`, `authorize` and `repeater minimize` flush what they collected first, then exit `130` so a scripted `&& next-step` does not treat a truncated run as a finished one |
+| `130` | Interrupted by SIGINT/SIGTERM. `capture` (which exits `0` when `--for` or `--max` ends it), `fuzz`, `mine`, `discover`, `sequence`, `authorize`, `cache-deception` and `repeater minimize` flush what they collected first, then exit `130` so a scripted `&& next-step` does not treat a truncated run as a finished one |
 
 Without `--fail-if-no-matches`, a fuzz run that matched nothing *and* errored on every send still exits `1`, so "no findings" stays distinguishable from "never reached the target". With the flag, `3` wins. A run whose stop condition was met is exempt from both rules: a send that timed out can meet `--stop-on 'time:>=5000'` while it stays an unmatched error row, and that is the result the run was looking for.
 
@@ -192,11 +192,11 @@ The address comes from the gori capturing the project (its live port, even after
 
 | Option | Description |
 | -------- | ------------- |
-| `--project=NAME`; `--db=PATH` | Which live gori to point at (default: the most recently active project) |
+| `--project=NAME`; `--db=PATH` | Which live gori to point at (default: the `GORI_PROJECT` or `project switch` project, else the most recently active one) |
 | `--proxy=HOST:PORT` | Use this proxy address instead of looking up a live capture |
 | `--ca-dir=DIR` | CA directory (default: the capturing gori's, else `~/.gori/ca`) |
 | `--print` | Print `export` lines instead of starting a shell |
-| `--shell=SYNTAX` | Syntax for `--print`: `sh` (default; also `bash`, `zsh`) or `fish` |
+| `--shell=SYNTAX` | Syntax for `--print`: `sh` (default off Windows; also `bash`, `zsh`), `fish`, or `powershell` (also `pwsh`; default on Windows) |
 | `--keep-no-proxy` | Keep the inherited `NO_PROXY` instead of unsetting it |
 
 What gets set: `http_proxy`, `https_proxy`, `HTTP_PROXY` and `HTTPS_PROXY` point at gori, and `NO_PROXY`/`no_proxy` are unset so local targets are captured too. `SSL_CERT_FILE`, `CURL_CA_BUNDLE`, `REQUESTS_CA_BUNDLE`, `GIT_SSL_CAINFO`, `AWS_CA_BUNDLE`, `PIP_CERT`, `CARGO_HTTP_CAINFO`, `DENO_CERT` and `NIX_SSL_CERT_FILE` point at a bundle under `~/.gori/shell/`. That bundle holds the store the terminal already trusted (your own `SSL_CERT_FILE`, else the system roots) plus gori's root, because most of these variables replace a tool's trust store rather than add to it. A CA variable you had set for one tool (say `REQUESTS_CA_BUNDLE`) gets its own file with gori's root added, rather than the shared one. `NODE_EXTRA_CA_CERTS` adds gori's root, `NODE_USE_ENV_PROXY=1` turns on Node's proxy support, and `GODEBUG=x509sslcertoverrideplatform=1` makes Go on macOS read `SSL_CERT_FILE`. `GORI_SHELL=1` and `GORI_PROXY=HOST:PORT` mark the shell for your prompt:
@@ -314,7 +314,7 @@ gori run diff --from q1-audit --to q3-retest --format md
 | Option | Description |
 | -------- | ------------- |
 | `--from=NAME` | Baseline project, the earlier engagement (name, slug, or short id). Required |
-| `--to=NAME` | Newer project (default: the most-recently-active one) |
+| `--to=NAME` | Newer project (default: the `GORI_PROJECT` or `project switch` project, else the most-recently-active one) |
 | `--from-db=PATH` / `--to-db=PATH` | Explicit SQLite files instead of registry projects |
 | `-q`, `--query=QL` | Narrow **both** sides with a [QL query](/reference/query-language/) |
 | `--in-scope` | Only hosts inside each project's own scope rules |
@@ -354,7 +354,7 @@ Both sides' flow count, endpoint count, host count and capture window print abov
 
 ### run intercept
 
-Drive the live intercept queue of a TUI holding the capture lock. Interception is TUI-only: a headless `gori run capture` never holds a message, and every subcommand here refuses when no capturing instance is publishing state.
+Drive the live intercept queue of a TUI holding the capture lock. Interception is TUI-only: a headless `gori run capture` never holds a message, and every subcommand except `list` refuses when no capturing instance is publishing state (`list` says so on STDERR, or prints `{"available": false, …}` under `--format json`, and exits `0`).
 
 ```bash
 gori run intercept                              # held items + intercept state
@@ -443,7 +443,7 @@ and the four that spell stdin `-` (`sequence --tokens -`, `authorize --identitie
 `rewriter --response-file=-`, and `-` on any of the `--…-file` flags) — plus a *path* that
 resolves to a terminal, such as `--request-file /dev/stdin` under a tty. A **wordlist** path is covered too — `fuzz -w`, `mine --wordlist`
 and `discover --wordlist` each refuse `/dev/tty` (and `/dev/stdin` under one) with
-`wordlist error: … is a terminal, not a file` instead of blocking forever.
+`wordlist is a terminal, not a file: …` instead of blocking forever.
 
 It does **not** cover the stdin sources gori falls back to when no flag was given (`fuzz`,
 `mine`, `sequence`, `decoder`, `jwt`, `cookie`, `notes`): there a terminal means "no source was
@@ -488,7 +488,7 @@ gori run repeater send 5 --message '{"op":"subscribe"}' --idle-ms 5000
 | `--message-frame=SPEC` | WebSocket: one frame with an explicit shape. Comma-separated `key=value`: `opcode=text\|bin\|cont\|close\|ping\|pong\|<0-15>`, `fin`, `rsv`, `mask`, `mask_key`, `len`, and one of `hex=`/`b64=`/`text=` |
 | `--idle-ms=N` | WebSocket: server-silence timeout after the first inbound frame (100-60000, default 3000) |
 | `--http` | WebSocket: send the handshake as an ordinary HTTP request for this send only. Selects the engine, not a rewrite |
-| `--record-history` | Also write the outbound request + response to History as a captured flow, and print its flow id on stdout (HTTP only; a Repeater send leaves no flow by default) |
+| `--record-history` | Also write the outbound request + response to History as a captured flow, and print its flow id (on STDERR in text mode; `recorded_flow_id` in `--format json`) (HTTP only; a Repeater send leaves no flow by default) |
 | `--path=TARGET` | Send this request-target (path and query) instead of the stored one, for this send only |
 | `-H`, `--header=HEADER` · `-b`, `--cookie=NAME=VALUE` | Overwrite/add a header, or replace the `Cookie` header, for this send only (as on `repeater <flow-id>`); the session keeps its own. Expanded with the rest of the request, unless `--verbatim` |
 | `--apply-rules` | As on `repeater <flow-id>` |
@@ -869,7 +869,7 @@ gori run wordlist delete api-v2-params.txt --yes
 | `rename <old> <new>` (`mv`) | Rename a list; refuses an existing `<new>` unless `--overwrite` |
 | `delete <name>` (`rm`) | Delete a list (`--yes` is the confirmation; there is no prompt). A symlink is removed, never the file it names |
 
-A name is letters and digits of any script, `_`, `.`, `+`, `-` and inner spaces (at most 200 bytes, not starting with `.` or `-`); anything with a path separator is refused. All verbs take `-h`; a mutating verb that is refused exits `1` and says why.
+A name is letters and digits of any script, `_`, `.`, `+`, `-` and inner spaces (at most 200 bytes, starting with a letter, digit or `_`, and not ending with `.` or a space); anything with a path separator is refused. All verbs take `-h`; a mutating verb that is refused exits `1` and says why.
 
 ### Session bindings from the command line
 
@@ -1438,7 +1438,7 @@ On `update` every field is optional and defaults to the rule's current value, so
 
 **Precedence is the rule set's meaning.** Match & Replace rules *compose*: every enabled rule runs, in order. Colour rules *resolve*: the **first enabled match paints the row** and the rest are never consulted. That is why `move` exists here and not on `rewriter`. Global rules resolve before project ones, so a standing policy outranks a local layer.
 
-`--when` is a **History QL** condition — the same grammar, the same field set and the same answers as the filter bar above the list it paints, `~regex` and `AND` / `OR` / `NOT` / `-negation` / `(grouping)` included. A term the captured row can answer (`host:` `path:` `url:` `method:` `scheme:` `status:` `proto:`) is matched in memory with no query at all; the rest (`body:` `header:` `size:` `dur:` `stub:` `static:` `src:` `scope:`) resolve against the project database in one batched query per repaint. Four caveats, each of which would otherwise fail silently, so gori refuses or warns rather than letting you find out from a list that never turns colour:
+`--when` is a **History QL** condition — the same grammar, the same field set and the same answers as the filter bar above the list it paints, `~regex` and `AND` / `OR` / `NOT` / `-negation` / `(grouping)` included. A term the captured row can answer (`host:` `path:` `url:` `method:` `scheme:` `status:` `proto:`) is matched in memory with no query at all; the rest (`body:` `header:` `size:` `dur:` `stub:` `static:` `src:` `scope:`) resolve against the project database in one batched query per rule per repaint. Four caveats, each of which would otherwise fail silently, so gori refuses or warns rather than letting you find out from a list that never turns colour:
 
 - **`body:` *scans* here, it does not read the text index.** So a colour rule reaches binary bodies the filter bar's `body:` skips — but only the first **64 KiB of each side**, and the bytes are as *captured*, so a match past that bound or inside a compressed body is not painted. (Warned.)
 - **`host:` is a substring, not a DNS-label glob.** `host:alpha.test` also matches `xalpha.test`. (Warned.)
@@ -1653,7 +1653,7 @@ gori run project sandbox off             # stop blocking
 Manage **project** env vars used for `$ENV.KEY` substitution in outbound requests (Repeater, Fuzzer, Miner, CLI, MCP). Global vars live in `settings.json` / the TUI Settings. This command only touches the per-project layer. The name is stored bare; which grammar spells it on the wire is global, and [`gori settings env-syntax`](#env-syntax) decides it.
 
 ```bash
-gori run project env                              # list KEY=value
+gori run project env                              # list KEY=[REDACTED] (--show-values prints values)
 gori run project env --format json
 gori run project env set TOKEN=secret
 gori run project env set HOST api.example.com
@@ -1767,7 +1767,7 @@ MCP stdio server. See the [MCP guide](/guide/mcp/) for tool details.
 | `--project=NAME` | Serve a named project's database |
 | `--use-active-project` | Ignore Git-workspace selection and explicitly serve the active TUI/MRU project |
 | `--no-project` | Start unbound even inside a Git workspace (agent picks via list/create/switch) |
-| `--insecure-upstream` | `send_request`: skip upstream TLS verification |
+| `--insecure-upstream` | Skip upstream TLS verification for every tool that sends (`send_request`, fuzz, `grpc_reflect`, session refresh, OAST, …) |
 | `--read-only` | Disable action tools (`send_request`, create/update issues, fuzz/mine); `switch_project` (and `create_project` when unbound) stay available unless `--pin-project` |
 | `--tools=SPEC` | Advertise only these tools: comma-separated names, globs or profiles (`@minimal`, `@recon`), a leading `-` subtracts (`@recon`, `@minimal,send_request` or `-fuzz_*,-mine_*`). The startup log reports the size of what is served; see [Choosing which tools are exposed](/guide/mcp/#choosing-which-tools-are-exposed) |
 | `--pin-project` | Keep the server on the project it starts with: withhold `list_projects`, `switch_project`, `create_project`, `delete_project`, `import_project`, `export_project` and `diff_projects`. Refused with `--no-project`; a start that ends up unbound aborts |
@@ -1863,7 +1863,7 @@ gori settings env-syntax bare
 # env syntax: bare — $KEY / $NAME
 # Each project is re-spelled the next time it opens: its stored tokens are rewritten from
 # namespaced to bare, a backup is written beside the database, and the run that does it says
-# so. Captured evidence is left exactly as it was.
+# so. Captured evidence is left exactly as it was. Switch back with `gori settings env-syntax namespaced`.
 ```
 
 Namespaced is the grammar for everyone, so the absence of `env.syntax` in `settings.json` means the file predates namespaces: the next start adopts `namespaced`, re-spells the **global** rewrite rules (keeping a `settings.json.pre-namespaced-<timestamp>` copy) and writes the key. Each **project** is re-spelled the first time it opens after the grammar moved — in the TUI, in any `gori run …`, or in a `gori mcp` server — with a `gori.db.pre-<grammar>-<timestamp>` backup beside the database (`VACUUM INTO`, so the WAL is included) and one line per project on stderr saying how many tokens moved. Rewritten: Repeater drafts (request, target, SNI, name) and their WebSocket messages, Fuzzer templates, Miner and Sequencer requests, rewrite-rule replacements, session-slot header values, and the masked tokens in issue titles/notes and note bodies. Left alone: every row whose provenance is a capture (`flow_id` set — a capture expands nothing), any row the target grammar has no equivalent spelling for, and names that are table keys rather than tokens (env vars, extract rules, rule patterns, payload sets).
@@ -1898,10 +1898,14 @@ gori settings import team-profile.json --sections network
 ```
 …
 statusline  (can carry commands)
+…
 network
+…
 editor  (can carry commands)
+…
 env  (holds secrets — excluded unless named; not set — at its default)
 scan_rules  (can carry commands; not set — at its default)
+…
 decoder  (holds secrets — excluded unless named; can carry commands; not set — at its default)
 rewriter  (can carry commands)
 …
@@ -1991,7 +1995,7 @@ shop.example.com  (matched rule "shop.example.com")
   preset          chrome
   groups          X25519:P-256:P-384
   …
-  tunnelled (gori offers h2): ALPN h2, http/1.1
+  tunnelled (gori offers h2) — ALPN h2, http/1.1
     JA3  c99e92e692ba483e2602b38b3c0a5645
          771,4865-4866-…,65281-0-11-10-35-5-16-22-13-43-45-51-21,29-23-24,0
     JA4  t13d1513h2_8daaf6152771_afafd945c4ab

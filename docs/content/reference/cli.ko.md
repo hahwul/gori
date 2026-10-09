@@ -142,7 +142,7 @@ STDOUT은 데이터를 나릅니다. 경고, 개수, 내보내기 확인 메시�
 | `0` | 성공 |
 | `1` | 오류: 전송 실패, 열 수 없는 프로젝트, 적용되지 못한 변경, 또는 어떤 요청도 응답을 받지 못한 `fuzz` / `mine` / `discover` / `sequence` / `authorize` / `cache-deception` 실행(죽었거나 거부하는 대상은 깨끗한 "결과 없음"이 아닙니다) |
 | `3` | 판정 게이트 발동: `run fuzz --fail-if-no-matches`가 완료했지만 매칭이 없음(그리고 `--stop-on` / `--stop-after-matches` 조건도 충족되지 않음), 또는 `run probe --fail-on=LEVEL`이 LEVEL 이상의 이슈를 보고함 |
-| `130` | SIGINT/SIGTERM으로 중단. `capture`(`--for`나 `--max`로 끝나면 `0`), `fuzz`, `mine`, `discover`, `sequence`, `authorize`, `repeater minimize`는 모아 둔 것을 먼저 내보낸 뒤 `130`으로 종료하므로, 스크립트의 `&& next-step`이 잘린 실행을 끝난 실행으로 오해하지 않습니다 |
+| `130` | SIGINT/SIGTERM으로 중단. `capture`(`--for`나 `--max`로 끝나면 `0`), `fuzz`, `mine`, `discover`, `sequence`, `authorize`, `cache-deception`, `repeater minimize`는 모아 둔 것을 먼저 내보낸 뒤 `130`으로 종료하므로, 스크립트의 `&& next-step`이 잘린 실행을 끝난 실행으로 오해하지 않습니다 |
 
 `--fail-if-no-matches` 없이 실행하면, 매칭이 없으면서 *동시에* 모든 전송이 실패한 fuzz는 `1`로 끝납니다. "결과 없음"과 "대상에 닿지도 못함"이 구분됩니다. 플래그를 주면 `3`이 우선합니다. 정지 조건이 충족된 실행은 두 규칙 모두에서 빠집니다. 시간 초과된 전송은 매칭되지 않은 오류 행으로 남으면서도 `--stop-on 'time:>=5000'`을 충족할 수 있고, 그것이 바로 실행이 찾던 결과이기 때문입니다.
 
@@ -185,11 +185,11 @@ gori run shell --print --shell fish | source
 
 | Option | Description |
 |--------|-------------|
-| `--project=NAME`; `--db=PATH` | 가리킬 실행 중인 gori (기본값: 가장 최근에 활동한 프로젝트) |
+| `--project=NAME`; `--db=PATH` | 가리킬 실행 중인 gori (기본값: `GORI_PROJECT`나 `project switch`로 정한 프로젝트, 없으면 가장 최근에 활동한 프로젝트) |
 | `--proxy=HOST:PORT` | 실행 중인 캡처를 찾는 대신 이 프록시 주소 사용 |
 | `--ca-dir=DIR` | CA 디렉터리 (기본값: 캡처 중인 gori의 것, 없으면 `~/.gori/ca`) |
 | `--print` | 셸을 띄우지 않고 `export` 줄을 출력 |
-| `--shell=SYNTAX` | `--print`의 문법: `sh` (기본값; `bash`, `zsh`도 가능) 또는 `fish` |
+| `--shell=SYNTAX` | `--print`의 문법: `sh` (Windows 외 기본값; `bash`, `zsh`도 가능), `fish`, 또는 `powershell` (`pwsh`도 가능; Windows 기본값) |
 | `--keep-no-proxy` | 물려받은 `NO_PROXY`를 지우지 않고 유지 |
 
 설정되는 것: `http_proxy`, `https_proxy`, `HTTP_PROXY`, `HTTPS_PROXY`는 gori를 가리키고, 로컬 대상도 캡처되도록 `NO_PROXY`/`no_proxy`는 지웁니다. `SSL_CERT_FILE`, `CURL_CA_BUNDLE`, `REQUESTS_CA_BUNDLE`, `GIT_SSL_CAINFO`, `AWS_CA_BUNDLE`, `PIP_CERT`, `CARGO_HTTP_CAINFO`, `DENO_CERT`, `NIX_SSL_CERT_FILE`는 `~/.gori/shell/` 아래 번들을 가리킵니다. 이 변수들 대부분은 도구의 신뢰 저장소에 추가하는 게 아니라 교체하기 때문에, 번들에는 터미널이 원래 신뢰하던 저장소(직접 설정한 `SSL_CERT_FILE`, 없으면 시스템 루트)와 gori 루트가 함께 들어 있습니다. 특정 도구에만 설정해 둔 CA 변수(예: `REQUESTS_CA_BUNDLE`)는 공용 번들 대신 그 파일에 gori 루트를 더한 별도 파일을 받습니다. `NODE_EXTRA_CA_CERTS`는 gori 루트를 추가하고, `NODE_USE_ENV_PROXY=1`은 Node의 프록시 지원을 켜고, `GODEBUG=x509sslcertoverrideplatform=1`은 macOS의 Go가 `SSL_CERT_FILE`을 읽게 합니다. `GORI_SHELL=1`과 `GORI_PROXY=HOST:PORT`는 프롬프트에서 쓸 수 있는 표식입니다:
@@ -307,7 +307,7 @@ gori run diff --from q1-audit --to q3-retest --format md
 | Option | Description |
 |--------|-------------|
 | `--from=NAME` | 기준 프로젝트, 즉 이전 엔게이지먼트(이름, slug, 짧은 id). 필수 |
-| `--to=NAME` | 이후 프로젝트 (기본값: 가장 최근에 활성화한 프로젝트) |
+| `--to=NAME` | 이후 프로젝트 (기본값: `GORI_PROJECT`나 `project switch`로 정한 프로젝트, 없으면 가장 최근에 활성화한 프로젝트) |
 | `--from-db=PATH` / `--to-db=PATH` | 레지스트리 프로젝트 대신 SQLite 파일을 직접 지정 |
 | `-q`, `--query=QL` | **양쪽 모두**를 [QL 쿼리](/ko/reference/query-language/)로 좁힘 |
 | `--in-scope` | 각 프로젝트 자신의 스코프 규칙 안에 있는 호스트만 |
@@ -347,7 +347,7 @@ gori run diff --from q1-audit --to q3-retest --format md
 
 ### run intercept {#run-intercept}
 
-캡처 락을 쥔 TUI의 라이브 인터셉트 큐를 조작합니다. 인터셉트는 TUI 전용입니다. 헤드리스 `gori run capture`는 메시지를 붙잡지 않으며, 여기 서브커맨드는 상태를 게시하는 캡처 인스턴스가 없으면 모두 거부합니다.
+캡처 락을 쥔 TUI의 라이브 인터셉트 큐를 조작합니다. 인터셉트는 TUI 전용입니다. 헤드리스 `gori run capture`는 메시지를 붙잡지 않으며, `list`를 뺀 서브커맨드는 상태를 게시하는 캡처 인스턴스가 없으면 거부합니다(`list`는 STDERR로 알리거나 `--format json`에서 `{"available": false, …}`를 내고 `0`으로 끝납니다).
 
 ```bash
 gori run intercept                              # 붙잡힌 항목 + 인터셉트 상태
@@ -436,7 +436,7 @@ pbpaste | gori run repeater create --curl - --name "from devtools"
 `rewriter --response-file=-`, 그리고 `--…-file` 계열 플래그의 `-`) — 여기에 터미널로 해석되는
 **경로**(tty에서의 `--request-file /dev/stdin` 등)까지 포함됩니다. **워드리스트** 경로도 포함됩니다 — `fuzz -w`, `mine --wordlist`,
 `discover --wordlist`는 `/dev/tty`(그리고 tty 상태의 `/dev/stdin`)를 무한 대기 대신
-`wordlist error: … is a terminal, not a file`로 거부합니다.
+`wordlist is a terminal, not a file: …`로 거부합니다.
 
 반대로 플래그 없이 gori가 fallback으로 읽는 stdin 경로(`fuzz`, `mine`, `sequence`, `decoder`,
 `jwt`, `cookie`, `notes`)는 해당하지 않습니다. 거기서 터미널은 "소스를 주지 않았다"는 뜻이고, 각
@@ -480,7 +480,7 @@ gori run repeater send 5 --message '{"op":"subscribe"}' --idle-ms 5000
 | `--message-frame=SPEC` | WebSocket: 형태를 명시한 프레임 하나. 쉼표로 구분한 `key=value`: `opcode=text\|bin\|cont\|close\|ping\|pong\|<0-15>`, `fin`, `rsv`, `mask`, `mask_key`, `len`, 그리고 `hex=`/`b64=`/`text=` 중 하나 |
 | `--idle-ms=N` | WebSocket: 첫 수신 프레임 이후 서버 침묵 타임아웃 (100-60000, 기본값 3000) |
 | `--http` | WebSocket: 이번 전송에 한해 핸드셰이크를 일반 HTTP 요청으로 전송. 바이트를 고치는 게 아니라 엔진을 고르는 것입니다 |
-| `--record-history` | 나가는 요청 + 응답을 History에 캡처 플로우로 기록하고 flow id를 stdout에 출력(HTTP 전용; Repeater 전송은 기본적으로 플로우를 남기지 않음) |
+| `--record-history` | 나가는 요청 + 응답을 History에 캡처 플로우로 기록하고 flow id를 출력(텍스트 모드는 STDERR, `--format json`은 `recorded_flow_id`)(HTTP 전용; Repeater 전송은 기본적으로 플로우를 남기지 않음) |
 | `--path=TARGET` | 이번 전송 한 번만, 저장된 것 대신 이 request-target(경로와 쿼리)을 전송 |
 | `-H`, `--header=HEADER` · `-b`, `--cookie=NAME=VALUE` | 이번 전송 한 번만 헤더를 덮어쓰거나 추가하고, 또는 `Cookie` 헤더를 교체(`repeater <flow-id>`와 같음). 세션은 자신의 헤더를 유지합니다. `--verbatim`이 아니면 요청의 나머지와 함께 확장됩니다 |
 | `--apply-rules` | `repeater <flow-id>`와 동일 |
@@ -861,7 +861,7 @@ gori run wordlist delete api-v2-params.txt --yes
 | `rename <old> <new>` (`mv`) | 목록 이름 변경. `--overwrite`가 아니면 이미 있는 `<new>`는 거부합니다 |
 | `delete <name>` (`rm`) | 목록 삭제(`--yes`가 확인이며 프롬프트는 없습니다). 심볼릭 링크는 링크만 지우고 가리키는 파일은 지우지 않습니다 |
 
-이름은 어느 문자든 글자와 숫자, `_`, `.`, `+`, `-`, 안쪽 공백(최대 200바이트, `.`이나 `-`로 시작할 수 없음)이며 경로 구분자가 든 값은 거부합니다. 모든 verb가 `-h`를 받고, 거부된 변경 verb는 `1`로 종료하며 이유를 알려 줍니다.
+이름은 어느 문자든 글자와 숫자, `_`, `.`, `+`, `-`, 안쪽 공백(최대 200바이트, 글자·숫자·`_`로 시작해야 하고 `.`이나 공백으로 끝날 수 없음)이며 경로 구분자가 든 값은 거부합니다. 모든 verb가 `-h`를 받고, 거부된 변경 verb는 `1`로 종료하며 이유를 알려 줍니다.
 
 ### 명령줄에서 세션 바인딩 쓰기 {#session-bindings-from-the-command-line}
 
@@ -1645,7 +1645,7 @@ gori run project sandbox off             # stop blocking
 아웃바운드 요청의 `$ENV.KEY` 치환에 쓰이는 **프로젝트** env 변수를 관리합니다. 전역 변수는 `settings.json` / TUI Settings에 있고, 이 명령은 프로젝트 레이어만 다룹니다. 이름은 bare로 저장되며, 와이어에서 어떤 문법으로 적히는지는 전역 설정인 [`gori settings env-syntax`](#env-syntax)가 결정합니다.
 
 ```bash
-gori run project env                              # list KEY=value
+gori run project env                              # list KEY=[REDACTED] (--show-values prints values)
 gori run project env --format json
 gori run project env set TOKEN=secret
 gori run project env set HOST api.example.com
@@ -1759,7 +1759,7 @@ MCP stdio 서버입니다. 도구 세부사항은 [MCP 가이드](/ko/guide/mcp/
 | `--project=NAME` | 이름이 지정된 프로젝트의 데이터베이스 제공 |
 | `--use-active-project` | Git 워크스페이스 선택을 무시하고 활성 TUI/MRU 프로젝트를 명시적으로 제공 |
 | `--no-project` | Git 워크스페이스 안에서도 unbound로 시작 (에이전트가 list/create/switch로 선택) |
-| `--insecure-upstream` | `send_request`: 업스트림 TLS 검증 생략 |
+| `--insecure-upstream` | 요청을 보내는 모든 도구(`send_request`, fuzz, `grpc_reflect`, 세션 갱신, OAST 등)에서 업스트림 TLS 검증 생략 |
 | `--read-only` | 액션 도구 비활성화 (`send_request`, 이슈 생성/수정, fuzz/mine); `switch_project`(및 unbound 시 `create_project`)는 `--pin-project`가 아니면 유지 |
 | `--tools=SPEC` | 지정한 도구만 노출: 쉼표로 구분한 이름, 글롭, 프로필(`@minimal`, `@recon`)이며, 앞에 `-`를 붙이면 제외 (`@recon`, `@minimal,send_request` 또는 `-fuzz_*,-mine_*`). 제공하는 카탈로그 크기는 시작 로그에 나옵니다. [노출할 도구 고르기](/ko/guide/mcp/#choosing-which-tools-are-exposed) 참고 |
 | `--pin-project` | 시작한 프로젝트에 서버를 고정: `list_projects`, `switch_project`, `create_project`, `delete_project`, `import_project`, `export_project`, `diff_projects`를 노출하지 않음. `--no-project`와 함께 쓸 수 없고, 바인딩 없이 시작하게 되면 중단 |
@@ -1855,7 +1855,7 @@ gori settings env-syntax bare
 # env syntax: bare — $KEY / $NAME
 # Each project is re-spelled the next time it opens: its stored tokens are rewritten from
 # namespaced to bare, a backup is written beside the database, and the run that does it says
-# so. Captured evidence is left exactly as it was.
+# so. Captured evidence is left exactly as it was. Switch back with `gori settings env-syntax namespaced`.
 ```
 
 문법은 모두에게 namespaced입니다. 그래서 `settings.json`에 `env.syntax`가 없다는 것은 그 파일이 네임스페이스보다 먼저 쓰였다는 뜻입니다. 다음 시작에서 `namespaced`를 채택하고, **전역** 재작성 규칙을 다시 적고(`settings.json.pre-namespaced-<타임스탬프>` 복사본을 남깁니다), 키를 파일에 씁니다. 각 **프로젝트**는 문법이 바뀐 뒤 처음 열릴 때 다시 적힙니다. TUI든, 아무 `gori run …`이든, `gori mcp` 서버든 마찬가지입니다. 데이터베이스 옆에 `gori.db.pre-<grammar>-<타임스탬프>` 백업(`VACUUM INTO`이므로 WAL까지 포함)을 쓰고, 토큰 몇 개가 옮겨졌는지 프로젝트마다 한 줄씩 stderr로 알려 줍니다. 다시 적는 대상: Repeater 초안(request, target, SNI, 이름)과 그 WebSocket 메시지, Fuzzer 템플릿, Miner·Sequencer 요청, 재작성 규칙의 치환 텍스트, 세션 슬롯 헤더 값, 그리고 이슈 제목·메모와 노트 본문에 마스킹된 토큰입니다. 그대로 두는 것: 출처가 캡처인 모든 행(`flow_id`가 있는 행 — 캡처는 확장되지 않습니다), 대상 문법에 같은 바이트를 보내는 표기가 없는 행, 그리고 토큰이 아니라 테이블 키인 이름들(환경 변수, extract 규칙, 규칙 패턴, 페이로드 세트)입니다.
@@ -1890,10 +1890,14 @@ gori settings import team-profile.json --sections network
 ```
 …
 statusline  (can carry commands)
+…
 network
+…
 editor  (can carry commands)
+…
 env  (holds secrets — excluded unless named; not set — at its default)
 scan_rules  (can carry commands; not set — at its default)
+…
 decoder  (holds secrets — excluded unless named; can carry commands; not set — at its default)
 rewriter  (can carry commands)
 …
@@ -1983,7 +1987,7 @@ shop.example.com  (matched rule "shop.example.com")
   preset          chrome
   groups          X25519:P-256:P-384
   …
-  tunnelled (gori offers h2): ALPN h2, http/1.1
+  tunnelled (gori offers h2) — ALPN h2, http/1.1
     JA3  c99e92e692ba483e2602b38b3c0a5645
          771,4865-4866-…,65281-0-11-10-35-5-16-22-13-43-45-51-21,29-23-24,0
     JA4  t13d1513h2_8daaf6152771_afafd945c4ab
