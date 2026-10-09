@@ -905,7 +905,7 @@ gori run import --postman api.postman_collection.json --db ./assessment.db --for
 | `--burp=PATH` | A Burp Suite item export (XML). Request **and** response, byte-exact |
 | `--wsdl=PATH` | A WSDL 1.1 service description (XML). One SOAP request template per operation |
 | `--curl=PATH` | curl commands, one flow per request; `-` reads stdin (`pbpaste \| gori run import --curl -`). Ignored transport flags are named on stderr (`notes` in JSON) |
-| `--project=NAME` | Project to import into (default: most-recently-active) |
+| `--project=NAME` | Project to import into (default: the `GORI_PROJECT` or `project switch` project, else the most recently active one) |
 | `--db=PATH` | Explicit SQLite db file to import into (created if absent) |
 | `--format` | `text` (default) or `json` |
 
@@ -1025,7 +1025,7 @@ gori run oast release 7                                  # deregister it server-
 
 | Option | Description |
 | -------- | ------------- |
-| `--project=NAME` · `--db=PATH` | Which project's sessions (default: most-recently-active) |
+| `--project=NAME` · `--db=PATH` | Which project's sessions (default: the `GORI_PROJECT` or `project switch` project, else the most recently active one) |
 | `--format=FMT` | On `list`: `text` (default) or `json` |
 | `--interval=SEC` | On `resume`: poll interval (default 5) |
 | `--once` | On `resume`: poll once and exit |

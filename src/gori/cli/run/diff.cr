@@ -35,7 +35,7 @@ module Gori
                      "Sends nothing: this diffs captured traffic. Re-confirming a finding is\n" \
                      "still a Repeater send you make deliberately."
           p.on("--from=NAME", "Baseline project — the earlier engagement (name, slug or short id)") { |v| from_name = v }
-          p.on("--to=NAME", "Newer project (default: the most-recently-active one)") { |v| to_name = v }
+          p.on("--to=NAME", "Newer project (#{DEFAULT_PROJECT_HELP})") { |v| to_name = v }
           p.on("--from-db=PATH", "Explicit SQLite db file for the baseline side") { |v| from_db = v }
           p.on("--to-db=PATH", "Explicit SQLite db file for the newer side") { |v| to_db = v }
           p.on("-qQL", "--query=QL", "Narrow BOTH sides with a QL query (host: method: path: status: …)") { |v| query = v }

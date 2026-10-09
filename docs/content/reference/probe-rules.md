@@ -65,7 +65,7 @@ Passive rules read traffic you have already captured (History flows and Repeater
 
 ## Active rules {#active}
 
-Active rules send requests of their own. The automatic pipeline runs them only once the project's scan mode is `active` or `aggressive`. A per-flow **Run active scan** and `gori run probe --active` run them in any mode. By default they re-send only safe methods (`GET` / `HEAD`), and each unique surface is tested once.
+Active rules send requests of their own. The automatic pipeline runs them only once the project's scan mode is `active` or `aggressive`. A per-flow **Run active scan** and `gori run probe --active` run them in any mode. By default they re-send only safe methods (`GET` / `HEAD`), and each unique surface is tested once. Two rules step outside that on purpose: `graphql_introspection_active` keeps a `POST` endpoint a `POST` (a read-only query), and `insecure_http_methods` sends its own `OPTIONS` and `TRACE`.
 
 **Cost** is the number of requests the rule sends for one flow, the same figure the Rules sub-tab shows beside the row. **Notes** marks the rules that do not run on the defaults alone:
 
@@ -75,12 +75,12 @@ Active rules send requests of their own. The automatic pipeline runs them only o
 
 | ID | Name | Category | Cost | Notes | What it checks |
 |----|------|----------|------|-------|----------------|
-| `reflected_param` | Reflected parameter | `active` | 1 |  | Sends a canary in query parameters and flags unencoded reflection (potential XSS). |
+| `reflected_param` | Reflected parameter | `active` | 1 |  | Sends a canary in query, form and JSON parameters and flags unencoded reflection (potential XSS). |
 | `cors_reflection` | CORS arbitrary origin | `cors` | 1 |  | Probes whether the server reflects an arbitrary Origin with Allow-Credentials: true. |
 | `forbidden_bypass` | Access-control bypass (IP headers) | `active` | 2 |  | Re-sends a denied (401/403) request with spoofed client-IP headers and flags a 2xx bypass. |
 | `nginx_alias_traversal` | NGINX alias traversal | `active` | 1–2 |  | Re-fetches a static asset through a folded `..` (/static../static/…) and flags a byte-identical hit. |
-| `backslash_powered` | Backslash-powered scanning | `active` | 4–8 |  | Appends `\` and `\\` to each query parameter; flags a parameter where the lone backslash perturbs the response but the doubled one does not (server-side string interpretation). |
-| `sqli_error_based` | Error-based SQL injection | `active` | 3–5 |  | Appends a SQL-syntax-breaking payload to each query parameter; flags a parameter where a database-error signature appears in the probe response but not in the clean baseline. |
+| `backslash_powered` | Backslash-powered scanning | `active` | 4–8 |  | Appends `\` and `\\` to each query, form or JSON parameter; flags a parameter where the lone backslash perturbs the response but the doubled one does not (server-side string interpretation). |
+| `sqli_error_based` | Error-based SQL injection | `active` | 3–5 |  | Appends a SQL-syntax-breaking payload to each query, form or JSON parameter; flags a parameter where a database-error signature appears in the probe response but not in the clean baseline. |
 | `sqli_boolean_based` | Boolean-based blind SQL injection | `active` | 4–8 |  | Appends an always-true and an always-false SQL predicate to each parameter; flags a parameter whose true leg matches the baseline while its false leg diverges (blind injection with no error and no reflection). |
 | `sqli_time_based` | Time-based blind SQL injection | `active` | 6–10 | off by default | Injects a server-side delay (SLEEP/pg_sleep/WAITFOR) into each parameter and confirms it in the response latency across a baseline and two increasing delays. Ships off by default because it deliberately waits. |
 | `graphql_introspection_active` | GraphQL introspection (active) | `infoleak` | 1 |  | Sends an introspection query to a GraphQL endpoint and confirms the schema is exposed. |
@@ -89,7 +89,7 @@ Active rules send requests of their own. The automatic pipeline runs them only o
 | `host_header_injection` | Host header injection | `active` | 1 |  | Sends a synthetic X-Forwarded-Host and flags it reflected as an absolute-URL authority. |
 | `crlf_injection` | CRLF header injection | `active` | 1 |  | Injects an encoded CRLF + header in request parameters (query/form/JSON) and flags a reflected response header. |
 | `path_normalization_bypass` | Access-control bypass (path normalization) | `active` | 6–7 |  | Re-requests a denied (401/403) path through normalization tricks and flags a 2xx bypass. |
-| `url_rewrite_bypass` | Access-control bypass (URL-rewrite headers) | `active` | 3 |  | Requests / with X-Original-URL/X-Rewrite-URL naming a denied path and flags a served 2xx. |
+| `url_rewrite_bypass` | Access-control bypass (URL-rewrite headers) | `active` | 3 |  | For a path that answered 401/403/404, requests / with X-Original-URL/X-Rewrite-URL naming it and flags a served 2xx. |
 | `ssti` | Server-side template injection | `active` | 2 |  | Injects a template arithmetic polyglot and flags a parameter whose value is evaluated. |
 | `nextjs_action_no_auth` | Next.js server action missing authorization | `active` | 1 | needs unsafe | Re-sends a Next.js server action (Next-Action) with the session cookie/Authorization stripped and flags a still-successful 2xx. |
 | `request_smuggling` | HTTP request smuggling / desync (CL.TE/TE.CL/TE.TE) | `active` | 8–10 | off by default · needs unsafe | Sends incomplete CL.TE/TE.CL/TE.TE framing probes and flags a front-end/back-end desync by a timing hang (differential confirm under aggressive+unsafe). Off by default; sends POST bodies. |

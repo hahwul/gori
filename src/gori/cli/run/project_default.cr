@@ -19,6 +19,9 @@ module Gori
     module Run
       DEFAULT_PROJECT_ENV = "GORI_PROJECT"
 
+      # The parenthetical every `--project` option's --help carries, so the default is named once.
+      DEFAULT_PROJECT_HELP = "default: $#{DEFAULT_PROJECT_ENV}, else the `project switch` pin, else the most-recently-active project"
+
       # Which rule chose the default. `announce_default_project` names it, so a pinned run
       # reads differently from one that fell through to the most recent project.
       enum DefaultSource

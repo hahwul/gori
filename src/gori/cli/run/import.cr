@@ -50,7 +50,7 @@ module Gori
           p.on("--burp=PATH", "Import a Burp Suite item export (XML) (- reads stdin)") { |v| sources[:burp] = v }
           p.on("--wsdl=PATH", "Import a WSDL 1.1 service description (SOAP 1.1/1.2) (- reads stdin)") { |v| sources[:wsdl] = v }
           p.on("--curl=PATH", "Import curl commands from PATH, or from stdin when PATH is -") { |v| sources[:curl] = v }
-          p.on("--project=NAME", "Project to import into (default: most-recently-active)") { |v| project_name = v }
+          p.on("--project=NAME", "Project to import into (#{DEFAULT_PROJECT_HELP})") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to import into (created if absent)") { |v| db_path = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.unknown_args do |before, after|

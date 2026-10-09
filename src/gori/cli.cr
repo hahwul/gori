@@ -192,7 +192,8 @@ module Gori
       puts "  update    Update gori (channel-aware: binary download or package manager)"
       puts ""
       puts "See 'gori <command> --help' for more."
-      puts "Flags like --version and --help work at the top level too."
+      puts "Flags like --version and --help work at the top level too, and so does"
+      puts "--config PATH (a settings file for this run only)."
     end
 
     # Runs the TUI.
@@ -509,8 +510,9 @@ module Gori
           puts "  • pacman/AUR         — print yay/paru/pacman guidance"
           puts "  • deb (dpkg)         — print apt upgrade guidance"
           puts "  • rpm                — print dnf/yum/zypper guidance"
+          puts "  • Nix (store path)   — print nix profile upgrade / flake-update guidance"
           puts ""
-          puts "System paths under /usr/bin are classified by package ownership"
+          puts "System paths under /usr/bin and /bin are classified by package ownership"
           puts "(pacman -Qo / dpkg-query -S / rpm -qf) and /etc/os-release."
           exit 0
         end

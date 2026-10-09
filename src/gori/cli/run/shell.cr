@@ -30,7 +30,7 @@ module Gori
                      "  gori run shell                          # interactive, `exit` to leave\n" \
                      "  gori run shell -- curl https://target/  # one command\n" \
                      "  eval \"$(gori run shell --print)\"        # the shell you are already in\n"
-          p.on("--project=NAME", "Point at the gori capturing project NAME (default: most-recently-active)") { |v| project_name = v }
+          p.on("--project=NAME", "Point at the gori capturing project NAME (#{DEFAULT_PROJECT_HELP})") { |v| project_name = v }
           p.on("--db=PATH", "Point at the gori capturing this SQLite db file") { |v| db_path = v }
           p.on("--proxy=HOST:PORT", "Use this proxy address instead of looking up a live capture") { |v| proxy = v }
           p.on("--ca-dir=DIR", "CA directory (default: the capturing gori's, else ~/.gori/ca)") { |v| ca_dir = v }

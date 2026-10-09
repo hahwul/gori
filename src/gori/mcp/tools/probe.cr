@@ -18,7 +18,7 @@ module Gori
 
       PROBE_SCAN_LIMIT = PageLimit.new(200, 2000)
 
-      # probe_scan — the MCP surface for the Prism scanner (parity with `gori run probe`).
+      # probe_scan — the MCP surface for the Probe scanner (parity with `gori run probe`).
       # PASSIVE by default (zero outbound requests): scans captured History flows (optional
       # QL filter) + Repeater tabs and returns grouped issues. active:true also runs the
       # light-touch active checks that SEND requests — gated on write access AND project scope

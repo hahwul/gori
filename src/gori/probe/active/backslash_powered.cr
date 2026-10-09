@@ -52,7 +52,7 @@ module Gori
 
         def info : RuleInfo
           RuleInfo.new("backslash_powered", "Backslash-powered scanning",
-            "Appends \\ and \\\\ to each query parameter; flags a parameter where the lone backslash " \
+            "Appends \\ and \\\\ to each query, form or JSON parameter; flags a parameter where the lone backslash " \
             "perturbs the response but the doubled one does not (server-side string interpretation).",
             Category::ACTIVE)
         end

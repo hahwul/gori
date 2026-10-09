@@ -65,7 +65,7 @@ gori run probe rules disable sri            # 시끄러운 패시브 체크 하�
 
 ## 액티브 룰 {#active}
 
-액티브 룰은 직접 요청을 보냅니다. 자동 파이프라인은 프로젝트 스캔 모드가 `active`나 `aggressive`일 때만 이 룰을 실행합니다. 플로우별 **Run active scan**과 `gori run probe --active`는 어느 모드에서든 실행합니다. 기본적으로 안전한 메서드(`GET` / `HEAD`)만 다시 보내고, 고유한 표면마다 한 번씩만 테스트합니다.
+액티브 룰은 직접 요청을 보냅니다. 자동 파이프라인은 프로젝트 스캔 모드가 `active`나 `aggressive`일 때만 이 룰을 실행합니다. 플로우별 **Run active scan**과 `gori run probe --active`는 어느 모드에서든 실행합니다. 기본적으로 안전한 메서드(`GET` / `HEAD`)만 다시 보내고, 고유한 표면마다 한 번씩만 테스트합니다. 두 룰은 의도적으로 예외입니다. `graphql_introspection_active`는 `POST` 엔드포인트를 `POST`로 유지하고(읽기 전용 쿼리), `insecure_http_methods`는 자체 `OPTIONS`와 `TRACE`를 보냅니다.
 
 **비용**은 룰이 플로우 하나에 보내는 요청 수이며, Rules 서브탭이 행 옆에 보여 주는 값과 같습니다. **비고**는 기본값만으로는 실행되지 않는 룰을 표시합니다.
 
@@ -75,12 +75,12 @@ gori run probe rules disable sri            # 시끄러운 패시브 체크 하�
 
 | ID | 이름 | 범주 | 비용 | 비고 | 검사 내용 |
 |----|------|----------|------|-------|----------------|
-| `reflected_param` | Reflected parameter | `active` | 1 |  | 쿼리 파라미터에 canary를 보내고, 인코딩되지 않고 반사되면 표시합니다(잠재적 XSS). |
+| `reflected_param` | Reflected parameter | `active` | 1 |  | 쿼리·폼·JSON 파라미터에 canary를 보내고, 인코딩되지 않고 반사되면 표시합니다(잠재적 XSS). |
 | `cors_reflection` | CORS arbitrary origin | `cors` | 1 |  | 서버가 임의의 Origin을 Allow-Credentials: true와 함께 반사하는지 프로브합니다. |
 | `forbidden_bypass` | Access-control bypass (IP headers) | `active` | 2 |  | 거부된(401/403) 요청을 위조한 클라이언트 IP 헤더와 함께 재전송하고, 2xx로 우회되면 표시합니다. |
 | `nginx_alias_traversal` | NGINX alias traversal | `active` | 1–2 |  | 정적 자산을 접힌 `..`(/static../static/…) 경로로 다시 가져와, 바이트 단위로 같은 응답이 오면 표시합니다. |
-| `backslash_powered` | Backslash-powered scanning | `active` | 4–8 |  | 쿼리 파라미터마다 `\`와 `\\`를 덧붙여, 백슬래시 하나는 응답을 흔들지만 둘은 그렇지 않은 파라미터를 표시합니다(서버 측 문자열 해석). |
-| `sqli_error_based` | Error-based SQL injection | `active` | 3–5 |  | 쿼리 파라미터마다 SQL 구문을 깨는 페이로드를 덧붙이고, 깨끗한 baseline에는 없는 데이터베이스 오류 서명이 프로브 응답에 나타나면 표시합니다. |
+| `backslash_powered` | Backslash-powered scanning | `active` | 4–8 |  | 쿼리·폼·JSON 파라미터마다 `\`와 `\\`를 덧붙여, 백슬래시 하나는 응답을 흔들지만 둘은 그렇지 않은 파라미터를 표시합니다(서버 측 문자열 해석). |
+| `sqli_error_based` | Error-based SQL injection | `active` | 3–5 |  | 쿼리·폼·JSON 파라미터마다 SQL 구문을 깨는 페이로드를 덧붙이고, 깨끗한 baseline에는 없는 데이터베이스 오류 서명이 프로브 응답에 나타나면 표시합니다. |
 | `sqli_boolean_based` | Boolean-based blind SQL injection | `active` | 4–8 |  | 파라미터마다 항상 참인 SQL 조건과 항상 거짓인 조건을 덧붙여, 참 쪽은 baseline과 같고 거짓 쪽은 달라지는 파라미터를 표시합니다(오류도 반사도 없는 블라인드 인젝션). |
 | `sqli_time_based` | Time-based blind SQL injection | `active` | 6–10 | 기본 비활성 | 파라미터마다 서버 측 지연(SLEEP/pg_sleep/WAITFOR)을 주입하고, baseline과 점점 늘린 두 번의 지연에 걸쳐 응답 지연 시간으로 확인합니다. 일부러 기다리기 때문에 기본 비활성으로 출하됩니다. |
 | `graphql_introspection_active` | GraphQL introspection (active) | `infoleak` | 1 |  | GraphQL 엔드포인트에 introspection 쿼리를 보내 스키마가 노출되는지 확인합니다. |
@@ -89,7 +89,7 @@ gori run probe rules disable sri            # 시끄러운 패시브 체크 하�
 | `host_header_injection` | Host header injection | `active` | 1 |  | 합성한 X-Forwarded-Host를 보내고, 그 값이 절대 URL의 authority로 반사되면 표시합니다. |
 | `crlf_injection` | CRLF header injection | `active` | 1 |  | 요청 파라미터(쿼리/폼/JSON)에 인코딩된 CRLF와 헤더를 주입하고, 응답 헤더로 반사되면 표시합니다. |
 | `path_normalization_bypass` | Access-control bypass (path normalization) | `active` | 6–7 |  | 거부된(401/403) 경로를 정규화 트릭으로 다시 요청하고, 2xx로 우회되면 표시합니다. |
-| `url_rewrite_bypass` | Access-control bypass (URL-rewrite headers) | `active` | 3 |  | 거부된 경로를 X-Original-URL/X-Rewrite-URL에 담아 /를 요청하고, 2xx로 제공되면 표시합니다. |
+| `url_rewrite_bypass` | Access-control bypass (URL-rewrite headers) | `active` | 3 |  | 401/403/404로 응답한 경로를 X-Original-URL/X-Rewrite-URL에 담아 /를 요청하고, 2xx로 제공되면 표시합니다. |
 | `ssti` | Server-side template injection | `active` | 2 |  | 템플릿 산술 폴리글롯을 주입하고, 값이 평가되는 파라미터를 표시합니다. |
 | `nextjs_action_no_auth` | Next.js server action missing authorization | `active` | 1 | unsafe 필요 | Next.js 서버 액션(Next-Action)을 세션 쿠키/Authorization을 뺀 채 재전송하고, 여전히 2xx로 성공하면 표시합니다. |
 | `request_smuggling` | HTTP request smuggling / desync (CL.TE/TE.CL/TE.TE) | `active` | 8–10 | 기본 비활성 · unsafe 필요 | 불완전한 CL.TE/TE.CL/TE.TE 프레이밍 프로브를 보내고, 타이밍 행으로 프런트엔드/백엔드 디싱크를 표시합니다(aggressive+unsafe에서 차분 확인). 기본 비활성이며 POST 본문을 보냅니다. |

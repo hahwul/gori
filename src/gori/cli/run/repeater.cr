@@ -75,6 +75,7 @@ module Gori
       # bare form takes.
       @[Subcommand("repeater", help: [
         {"repeater", "Re-send a captured flow; list/create/send (replay, incl. WebSocket) repeater sessions"},
+        {"repeater h2", "Send a field-native HTTP/2 request from an ordered HPACK field list (--target URL --fields FILE)"},
         {"repeater race", "Fire several saved sessions as one synchronized race (h1 last-byte, h2 single-packet)"},
         {"repeater timing", "Differential timing analysis of two saved sessions (which is consistently slower, by response order and quartiles)"},
         {"repeater minimize", "Strip noise from a saved request, keeping the response the same"},
@@ -340,7 +341,7 @@ module Gori
             abort "gori run repeater move: pass one of --up or --down" if dir == -1
             dir = 1
           end
-          p.on("--project=NAME", "Project to act on (default: most-recently-active)") { |v| project_name = v }
+          p.on("--project=NAME", "Project to act on (#{DEFAULT_PROJECT_HELP})") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file") { |v| db_path = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           # Through the helper IN the sink, not twenty lines below it: a bare
@@ -413,7 +414,7 @@ module Gori
         parser = option_parser("gori run repeater delete") do |p|
           p.banner = "Usage: gori run repeater delete <repeater-id> [<repeater-id>…] --yes"
           p.on("-y", "--yes", "Confirm the deletion (required)") { yes = true }
-          p.on("--project=NAME", "Project to act on (default: most-recently-active)") { |v| project_name = v }
+          p.on("--project=NAME", "Project to act on (#{DEFAULT_PROJECT_HELP})") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file") { |v| db_path = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.unknown_args { |before, after| positional = before + after }

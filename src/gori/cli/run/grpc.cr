@@ -48,7 +48,7 @@ module Gori
                      "The cache is what every later flow on this target renders through — nothing\n" \
                      "re-fetches on its own.\n\n" \
                      "URL is the target origin: https://api.test:443 (the path is ignored)."
-          p.on("--project=NAME", "Project to use (default: most-recently-active)") { |v| project_name = v }
+          p.on("--project=NAME", "Project to use (#{DEFAULT_PROJECT_HELP})") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file") { |v| db_path = v }
           p.on("--allow-unscoped", "Send even when the target is outside the project scope") { allow_unscoped = true }
           p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
@@ -239,7 +239,7 @@ module Gori
                      "Drop a cached reflection result. TARGET is the value `gori run grpc schema`\n" \
                      "prints (scheme://host:port). Nothing else is touched — a descriptor-set FILE\n" \
                      "is unloaded by clearing the path in Project settings."
-          p.on("--project=NAME", "Project to use (default: most-recently-active)") { |v| project_name = v }
+          p.on("--project=NAME", "Project to use (#{DEFAULT_PROJECT_HELP})") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file") { |v| db_path = v }
           p.on("--all", "Forget every cached reflection target") { all = true }
         end
