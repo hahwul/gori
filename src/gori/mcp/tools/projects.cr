@@ -479,8 +479,9 @@ module Gori
           "unbind:true instead of 'project' to leave the current one, so it can be deleted. Always " \
           "available (including --read-only and when the server started unbound). Refused while a " \
           "background job is running. Verify with project_info afterwards." do |s|
-          s.field "project", strprop("target project display name or directory slug (required unless unbind:true)")
+          s.field "project", strprop("target project display name or directory slug")
           s.field "unbind", boolprop("true leaves the current project and returns the server to the unbound state")
+          s.requires_one_of "project", "unbind"
         end
 
         # Declared unconditionally, including on a `--read-only` server that is already
