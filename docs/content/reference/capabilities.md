@@ -12,8 +12,10 @@ command or an MCP tool.
 ## Protocols and operations
 
 Where support is partial, the cell names the boundary. Replay and fuzz are gori-originated
-requests and pass through the same outbound scope, Sandbox, and explicit-exclude gates on every
-surface.
+requests and pass through the same outbound gate on every surface: the Sandbox stops both, an
+explicit exclude rule stops a fuzz sweep but not a hand-made replay (as on the proxy path), and
+only the up-front scope check differs by surface (MCP refuses an out-of-scope target, `gori run`
+does once the project has a scope, and the TUI does not ask).
 
 | Protocol | Capture | Intercept | Replay | Fuzz |
 |----------|---------|-----------|--------|------|

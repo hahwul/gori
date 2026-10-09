@@ -405,7 +405,7 @@ A line selection stays whole lines while it grows: `⇧↑` / `⇧↓` add a lin
 
 ### Delete and paste in READ {#read-edits}
 
-These work in every text editor pane: the Repeater request, the Fuzzer template, Notes, an issue's notes, the Project description, and the Decoder, JWT and Cookie inputs.
+These work in every text editor pane: the Repeater request, the Fuzzer template, the Intercept editor, Notes, an issue's notes, the Project description, and the Decoder, JWT and Cookie inputs.
 
 - **Delete** (`d` after a selection, `dd` under `vim-ish`) removes the text and keeps it for `p`. A whole-line selection is removed with its line break, so no blank line is left behind.
 - **Paste** (`p`) puts back the last thing you copied or deleted, after the caret. Whole lines go in as new lines below the caret's line; anything else is inserted inside the line.
@@ -455,7 +455,7 @@ A few menu letters are also a `vim-ish` motion in an editor pane: Auto-mark `a` 
 
 ### What still works whatever you pick
 
-`Ctrl-Z` keeps undoing **inside INSERT** under `vim-ish` — that guard runs before the keymap in all nine text editors, which is where a typing hand wants it. `Ctrl-F` likewise still opens the find prompt, INSERT included; `/` is an addition in READ, not a replacement. And `i` is refused with a message on a read-only pane that sits beside an editor (the Repeater response, the Fuzzer results, the Decoder output), under both keysets.
+`Ctrl-Z` keeps undoing **inside INSERT** under `vim-ish` — that guard runs before the keymap in every text editor, which is where a typing hand wants it. `Ctrl-F` likewise still opens the find prompt, INSERT included; `/` is an addition in READ, not a replacement. And `i` is refused with a message on a read-only pane that sits beside an editor (the Repeater response, the Fuzzer results, the Decoder output), under both keysets.
 
 ## Reserved Keys {#reserved-keys}
 
@@ -464,7 +464,7 @@ Some keys can't be rebound because the terminal or gori needs them:
 - **Quit**: `Ctrl-C`, `Ctrl-D`.
 - **Indistinguishable from named keys**: `Ctrl-M` / `Ctrl-J` (Enter), `Ctrl-I` (Tab), `Ctrl-H` (Backspace), `Ctrl-[` (Escape).
 - **Structural**: `Enter`, `Esc`, `Tab`, `Backspace`, `Space` (the space-menu leader), and a bare `:` (the command line).
-- **gori shortcuts claimed before the keymap**: `Ctrl-G` (go to line), `Ctrl-F` (find, then `Tab` for find & replace), `Ctrl-B` (reveal whitespace), `Ctrl-E` (external editor), `Ctrl-P` (command palette), `Ctrl-N` (new repeater/fuzz/note), `Ctrl-W` (close the sub-tab, or every marked one), `Ctrl-Z` (undo, consumed by every text editor: Repeater, Fuzzer, Notes, Issues, Intercept, Decoder, JWT, Rewriter and the Project description), `Ctrl-,` (Preferences), and `Ctrl-1`…`Ctrl-9` (switch sub-tab — the **alias** for `⇧1`–`⇧9`, see [The digit family](#digits)). These are handled by a hardcoded guard before the keymap, so a binding on them would never fire. For the same reason **Command palette**, **Reveal whitespace**, **Quit**, **Back to projects**, each tab's **New …** (Repeater, Fuzzer, Decoder, JWT, Cookie, Notes, Comparer) and its close-sub-tab action aren't listed in the editor. Their key is fixed.
+- **gori shortcuts claimed before the keymap**: `Ctrl-G` (go to line), `Ctrl-F` (find, then `Tab` for find & replace), `Ctrl-B` (reveal whitespace), `Ctrl-E` (external editor), `Ctrl-P` (command palette), `Ctrl-N` (new repeater/fuzz/note), `Ctrl-W` (close the sub-tab, or every marked one), `Ctrl-Z` (undo, consumed by every text editor: Repeater, Fuzzer, Notes, Issues, Intercept, Decoder, JWT, Cookie, Rewriter and the Project description), `Ctrl-,` (Preferences), and `Ctrl-1`…`Ctrl-9` (switch sub-tab — the **alias** for `⇧1`–`⇧9`, see [The digit family](#digits)). These are handled by a hardcoded guard before the keymap, so a binding on them would never fire. For the same reason **Command palette**, **Reveal whitespace**, **Quit**, **Back to projects**, each tab's **New …** (Repeater, Fuzzer, Decoder, JWT, Cookie, Notes, Comparer) and its close-sub-tab action aren't listed in the editor. Their key is fixed.
 
   You can't move an individual key out of that family, but you *can* give the whole family a second modifier; see [Command modifier](#command-modifier) below.
 

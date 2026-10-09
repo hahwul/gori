@@ -391,7 +391,7 @@ gori의 텍스트 패널은 **모달**입니다. `Esc`와 `i`로 READ와 INSERT�
 
 ### READ에서 삭제와 붙여넣기 {#read-edits}
 
-모든 텍스트 에디터 패널에서 동작합니다. Repeater 요청, Fuzzer 템플릿, Notes, 이슈 노트, Project 설명, 그리고 Decoder·JWT·Cookie 입력입니다.
+모든 텍스트 에디터 패널에서 동작합니다. Repeater 요청, Fuzzer 템플릿, Intercept 에디터, Notes, 이슈 노트, Project 설명, 그리고 Decoder·JWT·Cookie 입력입니다.
 
 - **삭제**(선택 뒤 `d`, `vim-ish`에서는 `dd`)는 텍스트를 지우고 `p`를 위해 보관합니다. 줄 전체를 선택했다면 줄바꿈까지 함께 지워 빈 줄이 남지 않습니다.
 - **붙여넣기**(`p`)는 마지막으로 복사하거나 지운 것을 캐럿 뒤에 되돌려 놓습니다. 줄 단위로 가져온 것은 캐럿이 있는 줄 아래에 새 줄로 들어가고, 그 밖의 것은 줄 안에 삽입됩니다.
@@ -441,7 +441,7 @@ gori의 텍스트 패널은 **모달**입니다. `Esc`와 `i`로 READ와 INSERT�
 
 ### 무엇을 고르든 그대로인 것 {#what-still-works-whatever-you-pick}
 
-`vim-ish`에서도 `Ctrl-Z`는 **INSERT 안에서** 계속 실행 취소입니다. 그 가드는 아홉 개 텍스트 에디터 전부에서 키맵보다 먼저 동작하고, 타이핑하는 손이 원하는 자리가 거기입니다. `Ctrl-F`도 마찬가지로 INSERT를 포함해 계속 찾기 프롬프트를 엽니다. `/`는 READ에서의 추가이지 대체가 아닙니다. 그리고 에디터 옆의 읽기 전용 패널(Repeater 응답, Fuzzer 결과, Decoder 출력)에서 `i`는 두 키셋 모두에서 메시지와 함께 거절됩니다.
+`vim-ish`에서도 `Ctrl-Z`는 **INSERT 안에서** 계속 실행 취소입니다. 그 가드는 모든 텍스트 에디터에서 키맵보다 먼저 동작하고, 타이핑하는 손이 원하는 자리가 거기입니다. `Ctrl-F`도 마찬가지로 INSERT를 포함해 계속 찾기 프롬프트를 엽니다. `/`는 READ에서의 추가이지 대체가 아닙니다. 그리고 에디터 옆의 읽기 전용 패널(Repeater 응답, Fuzzer 결과, Decoder 출력)에서 `i`는 두 키셋 모두에서 메시지와 함께 거절됩니다.
 
 ## 예약된 키 {#reserved-keys}
 
@@ -450,11 +450,11 @@ gori의 텍스트 패널은 **모달**입니다. `Esc`와 `i`로 READ와 INSERT�
 - **종료**: `Ctrl-C`, `Ctrl-D`.
 - **명명된 키와 구별 불가**: `Ctrl-M` / `Ctrl-J` (Enter), `Ctrl-I` (Tab), `Ctrl-H` (Backspace), `Ctrl-[` (Escape).
 - **구조적**: `Enter`, `Esc`, `Tab`, `Backspace`, `Space`(space 메뉴 리더), 그리고 맨 `:`(명령줄).
-- **키맵보다 먼저 점유되는 gori 단축키**: `Ctrl-G` (go to line), `Ctrl-F` (find, `Tab`으로 find & replace), `Ctrl-B` (reveal whitespace), `Ctrl-E` (external editor), `Ctrl-P` (command palette), `Ctrl-N` (new repeater/fuzz/note), `Ctrl-W` (서브탭 닫기, 마크가 있으면 전부), `Ctrl-Z` (undo. 모든 텍스트 에디터가 소비합니다: Repeater, Fuzzer, Notes, Issues, Intercept, Decoder, JWT, Rewriter, Project 설명), `Ctrl-,` (Preferences), 그리고 `Ctrl-1`…`Ctrl-9` (switch sub-tab — `⇧1`–`⇧9`의 **별칭**입니다. [숫자 키 패밀리](#digits) 참고). 이들은 키맵보다 먼저 하드코딩된 가드로 처리되므로, 여기에 바인딩해도 절대 발동하지 않습니다. 같은 이유로 **Command palette**, **Reveal whitespace**, **Quit**, **Back to projects**, 각 탭의 **New …**(Repeater, Fuzzer, Decoder, JWT, Cookie, Notes, Comparer)와 서브탭 닫기 동작은 에디터에 나열되지 않습니다. 그 키는 고정입니다.
-
-  `Ctrl-G` / `Ctrl-F`는 포커스가 있는 여러 줄 패널에 적용됩니다. Repeater의 요청/응답, History 상세, Intercept 편집기, Notes, Project 설명, Decoder의 INPUT/OUTPUT, Fuzzer의 템플릿/결과 상세입니다. 편집 가능한 여섯 곳에서는 `Tab`이 find를 find & replace로 바꿉니다. 나머지는 읽기 전용이고, 프롬프트가 할 수 없는 교체를 제안하는 대신 그렇다고 알려줍니다.
+- **키맵보다 먼저 점유되는 gori 단축키**: `Ctrl-G` (go to line), `Ctrl-F` (find, `Tab`으로 find & replace), `Ctrl-B` (reveal whitespace), `Ctrl-E` (external editor), `Ctrl-P` (command palette), `Ctrl-N` (new repeater/fuzz/note), `Ctrl-W` (서브탭 닫기, 마크가 있으면 전부), `Ctrl-Z` (undo. 모든 텍스트 에디터가 소비합니다: Repeater, Fuzzer, Notes, Issues, Intercept, Decoder, JWT, Cookie, Rewriter, Project 설명), `Ctrl-,` (Preferences), 그리고 `Ctrl-1`…`Ctrl-9` (switch sub-tab — `⇧1`–`⇧9`의 **별칭**입니다. [숫자 키 패밀리](#digits) 참고). 이들은 키맵보다 먼저 하드코딩된 가드로 처리되므로, 여기에 바인딩해도 절대 발동하지 않습니다. 같은 이유로 **Command palette**, **Reveal whitespace**, **Quit**, **Back to projects**, 각 탭의 **New …**(Repeater, Fuzzer, Decoder, JWT, Cookie, Notes, Comparer)와 서브탭 닫기 동작은 에디터에 나열되지 않습니다. 그 키는 고정입니다.
 
   이 패밀리에서 개별 키를 옮길 수는 없지만, 패밀리 전체에 **두 번째 모디파이어**를 줄 수는 있습니다. 아래 [커맨드 모디파이어](#command-modifier)를 참고하세요.
+
+  `Ctrl-G` / `Ctrl-F`는 포커스가 있는 여러 줄 패널에 적용됩니다. Repeater의 요청/응답, History 상세, Intercept 편집기, Notes, Project 설명, Decoder의 INPUT/OUTPUT, Fuzzer의 템플릿/결과 상세입니다. 편집 가능한 여섯 곳에서는 `Tab`이 find를 find & replace로 바꿉니다. 나머지는 읽기 전용이고, 프롬프트가 할 수 없는 교체를 제안하는 대신 그렇다고 알려줍니다.
 
 `Ctrl-S` 같은 흐름 제어/시그널 키 조합은 예약되어 있지 **않습니다**. gori는 터미널을 raw 모드로 실행하므로 이들이 앱에 도달합니다(Repeater의 SNI 토글은 `Ctrl-S`로 제공됩니다).
 
