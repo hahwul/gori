@@ -22,6 +22,7 @@
 - CLI: `gori run show` and `grpc reflect` escape terminal sequences in SSE event and id fields, JWT and SAML headings and server-sent gRPC names, and `authorize --format json` stays valid UTF-8 over a non-UTF-8 method
 - MCP: `timeout_ms: 0`, empty filler arguments and a plain-string `messages` now mean what the tool schemas say, a session slot refuses a header object with no value, and `create_repeater` seeds from `flow_id` beside an issue that has no flow
 - MCP: an `ask_operator` answer or expiry still reaches the agent when its question held an invalid UTF-8 byte
+- MCP: `decode` runs a bare format name such as `base64`, `hex`, `url` or `gzip` as its decode half instead of encoding; spell `base64-encode` to encode (#1554)
 - Docs: the site search opens from a `?q=` link, and screenshots no longer shift the page while they load (#1550)
 - MCP: `gori mcp --pin-project` keeps a server on the project it starts with, withholding the tools that switch to or read other projects (#1508)
 - CLI: `gori run` help now says when a timed capture stops, how it picks its default project, what `send`'s exit status means, and that `import --urls` sends nothing (#1507)

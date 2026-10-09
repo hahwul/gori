@@ -12,10 +12,10 @@ describe "MCP decode" do
   it "accepts input_base64 with the whitespace the base64-decode converter tolerates" do
     with_store do |store|
       tools = Gori::MCP::Tools.new(store, allow_actions: false, verify_upstream: false)
-      r = call(tools, %({"input":" aG\\nk= ","spec":"hex","input_base64":true}))
+      r = call(tools, %({"input":" aG\\nk= ","spec":"hex-encode","input_base64":true}))
       r.is_error.should be_false
       JSON.parse(r.text)["output"].as_s.should eq "6869"
-      call(tools, %({"input":"!!","spec":"hex","input_base64":true})).is_error.should be_true
+      call(tools, %({"input":"!!","spec":"hex-encode","input_base64":true})).is_error.should be_true
     end
   end
 
@@ -32,15 +32,15 @@ describe "MCP decode" do
     end
   end
 
-  # The "a bare name ENCODED" note can only warn about a converter it can name the inverse of,
+  # A bare encoder name can only decode when the tool can name the converter that undoes it,
   # and it derives that inverse from a name SUFFIX — which is right for seventeen of the
   # catalog's nineteen encoders and reaches neither of the two named for what they DO
   # (`raw-deflate`, `url-encode-all`). That is what `INVERSE_NAME` is for, and this is the
   # sweep that makes the pair of them a closed set: an encoder added later with a real inverse
-  # and no rule for it fails HERE, rather than going quiet in the note.
+  # and no rule for it fails HERE, rather than quietly encoding under the `decode` name.
   it "can name the inverse of every ENCODE converter the catalog has one for" do
-    # The genuinely one-way transforms: nothing in the catalog undoes them, so the note has
-    # nothing to offer and correctly stays silent.
+    # The genuinely one-way transforms: nothing in the catalog undoes them, so a bare one runs
+    # as typed.
     one_way = %w[
       shell-escape powershell-escape homoglyph typo
       nfc nfd nfkc nfkd codepoint-overflow

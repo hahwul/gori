@@ -210,7 +210,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `list_session_slots` | 프로젝트의 [세션 슬롯](/ko/guide/authorize/#session-slots-one-list-two-readers)(이름 붙은 신원 각각이 헤더 오버레이 하나와 그 값을 묶어 주는 extract 규칙들로 이루어집니다), 그리고 어느 쪽이 ACTIVE인지(헤더 값은 가려짐) |
 | `list_oast_providers` | 설정된 OAST 프로바이더와 현재 활성 프로바이더 |
 | `list_oast_sessions` | 프로젝트에 저장된 OAST 리스닝 세션. 페이로드 호스트, hit 수, 마지막 폴링 시각. `oast_resume`이 다시 살리는 행 |
-| `decode` | `input`에 대해 인코드/디코드/해시/압축 체인을 실행(순수 변환; 네트워크나 상태 없음) |
+| `decode` | `input`에 대해 인코드/디코드/해시/압축 체인을 실행(순수 변환; 네트워크나 상태 없음). `base64`처럼 방향 없는 이름은 여기서 디코드 |
 | `jwt_decode` / `jwt_verify` / `jwt_encode` / `jwt_attacks` | JWT 디코드(JWS 또는 암호화된 JWE의 보호 헤더), 보유한 키로 서명 검증, HMAC이나 PEM 키로 재서명, 공격 페이로드 생성(순수 계산; `--read-only`에서도 사용 가능) |
 | `cookie_decode` / `cookie_verify` / `cookie_crack` / `cookie_forge` | [Cookie 워크벤치](/ko/guide/cookie/)를 순수 오프라인 연산으로: Flask / Rack / Django 서명 세션 쿠키 파싱, 후보 시크릿으로 검증, 워드리스트로 시크릿 브루트포스, 편집한 페이로드 재서명. 네트워크를 쓰지 않으므로 네 개 모두 `--read-only`에서도 살아남습니다 |
 | `sequence_analyze` | 붙여넣은 토큰 목록의 무작위성 / 예측 가능성 평가(순수) |
