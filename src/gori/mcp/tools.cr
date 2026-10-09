@@ -2749,8 +2749,7 @@ module Gori
         # An either-of requirement JSON Schema could only state with a top-level `anyOf`, which
         # several MCP clients refuse (see `ARG_ALIASES`). Left unstated, `required: []` reads as
         # "call me with {}" and a model spent a turn on the refusal (#1553, #1559), so it is
-        # said in the description. A group a profile narrowed to one argument is plain `required`.
-        groups.each { |g| required << g.first if g.size == 1 }
+        # said in the description.
         hints = groups.select { |g| g.size > 1 }.map { |g| "Requires one of: #{g.join(", ")}." }
         description = "#{description} #{hints.join(" ")}" unless hints.empty?
         read_only = READ_ONLY_TOOLS.includes?(name)

@@ -288,6 +288,7 @@ module Gori
           s.field "max_flows", intprop("with payload_from: newest flows read (default #{PayloadFrom::DEFAULT_MAX_FLOWS}, max #{PayloadFrom::MAX_FLOWS})")
           s.field "max_values", intprop("with payload_from: distinct values kept (default #{PayloadFrom::DEFAULT_MAX_VALUES}, max #{PayloadFrom::MAX_VALUES})")
           s.field "overwrite", boolprop("replace a list of that name (default false)")
+          s.requires_one_of "values", "payload_from"
         end
 
         tool j, "rename_wordlist",

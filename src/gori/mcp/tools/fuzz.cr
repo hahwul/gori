@@ -1505,7 +1505,7 @@ module Gori
           s.field "template", strprop("raw HTTP request with §…§ position markers")
           s.field "flow_id", intprop("seed the template from a captured flow id (instead of template)")
           s.field "repeater_id", intprop("seed the template from a saved repeater session id (instead of template/flow_id). A WebSocket session seeds its handshake AND its outbound frames — see 'messages'")
-          s.field "url", strprop("absolute target URL (scheme+host) that sets the origin — a 'template' or 'flow_id' is still REQUIRED; url alone does NOT define the request (unlike send_request)")
+          s.field "url", strprop("absolute target URL (scheme+host) that sets the origin — a 'template', 'flow_id' or 'repeater_id' is still REQUIRED; url alone does NOT define the request (unlike send_request)")
           s.requires_one_of "template", "flow_id", "repeater_id"
           s.field "auto", boolprop("auto-mark every query/cookie/body param when the template has no § markers")
           s.field "marks", strarrprop("literal tokens to wrap as §…§ positions, every occurrence (like CLI --mark) — an alternative to §…§ in template. An occurrence inside or flush against an existing §…§ is skipped (it would merge the two), and a token left with none is named in `marks_warning`")

@@ -368,6 +368,7 @@ module Gori
           s.field "alg", enumprop("signing algorithm (default HS256; none emits an unsigned token)", Gori::Jwt::ALGS)
           s.field "secret", strprop("HMAC secret for an HS algorithm")
           s.field "key", strprop("PEM PRIVATE key for an RS/PS/ES/EdDSA algorithm — inline PEM text, or a path to a .pem file. Mutually exclusive with 'secret'")
+          s.requires_one_of "token", "header", "payload"
         end
 
         tool j, "jwt_attacks",
