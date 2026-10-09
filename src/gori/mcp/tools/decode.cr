@@ -351,6 +351,7 @@ module Gori
           s.field "token", strprop("the JWT to check"), required: true
           s.field "secret", strprop("HMAC secret, for an HS256/384/512 token. \"\" checks the empty secret")
           s.field "key", strprop("PEM key for an RS/PS/ES/EdDSA token — inline PEM text, or a path to a .pem file. A PUBLIC KEY, a CERTIFICATE, or the private key all work. Mutually exclusive with 'secret'")
+          s.requires_one_of "secret", "key"
         end
 
         tool j, "jwt_encode",

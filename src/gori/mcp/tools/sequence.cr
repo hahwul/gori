@@ -346,6 +346,8 @@ module Gori
           s.field "regex", strprop("token location: capture group 1 of this regex over the body")
           s.field "position", strprop("token location: a fixed body byte range 'A:B'")
           s.field "jsonpath", strprop("token location: a JSON body path ($.a.b[0])")
+          s.requires_one_of "template", "flow_id"
+          s.requires_one_of "cookie", "header", "regex", "position", "jsonpath"
           s.field "count", intprop("target tokens to collect (default 500, max #{SEQUENCE_MAX_GOAL})")
           s.field "concurrency", intprop("parallel requests (default 1 — session tokens are often stateful; max #{SEQUENCE_MAX_CONCURRENCY})")
           s.field "rate", numprop("requests/sec cap, fractional allowed (0 = unlimited; 0.5 = one request every two seconds)")

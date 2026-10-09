@@ -1303,8 +1303,9 @@ module Gori
       #
       # An aliased argument is not `required` in the schema: JSON Schema cannot say "one of
       # these two" at the top level in the subset MCP clients accept, and a `required: ["id"]`
-      # would make a validating client reject `{flow_id: 7}`. `call` refuses the call with
-      # neither spelling instead (`missing_aliased`), naming both.
+      # would make a validating client reject `{flow_id: 7}`. The description says "Requires one
+      # of" both spellings instead (`tool`), and `call` refuses the call with neither
+      # (`missing_aliased`), naming both.
       ARG_ALIASES = {
         "get_flow"             => {"flow_id" => "id"},
         "delete_flow"          => {"flow_id" => "id"},
@@ -2727,6 +2728,9 @@ module Gori
           sb.required.reject! { |r| withheld.includes?(r) }
         end
         required = sb.required
+        # Taken before the aliases are added, and after `withheld`, so a hint never names an
+        # argument this server does not take.
+        groups = sb.one_of.map(&.select { |arg| sb.properties.any? { |(pname, _)| pname == arg } })
         if aliases = ARG_ALIASES[name]?
           # Each alias is advertised as its real argument's own schema under a one-line
           # description, and the real argument stops being `required` (see `ARG_ALIASES`).
@@ -2740,7 +2744,15 @@ module Gori
           targets = aliases.values.to_set
           @aliased_required[name] = required.select { |r| targets.includes?(r) }
           required = required.reject { |r| targets.includes?(r) }
+          @aliased_required[name].each { |canonical| groups << [canonical] + aliases.compact_map { |a, c| a if c == canonical } }
         end
+        # An either-of requirement JSON Schema could only state with a top-level `anyOf`, which
+        # several MCP clients refuse (see `ARG_ALIASES`). Left unstated, `required: []` reads as
+        # "call me with {}" and a model spent a turn on the refusal (#1553, #1559), so it is
+        # said in the description. A group a profile narrowed to one argument is plain `required`.
+        groups.each { |g| required << g.first if g.size == 1 }
+        hints = groups.select { |g| g.size > 1 }.map { |g| "Requires one of: #{g.join(", ")}." }
+        description = "#{description} #{hints.join(" ")}" unless hints.empty?
         read_only = READ_ONLY_TOOLS.includes?(name)
         j.object do
           j.field "name", name
@@ -2906,10 +2918,18 @@ module Gori
       class SchemaBuilder
         getter properties = [] of {String, JSON::Any}
         getter required = [] of String
+        getter one_of = [] of Array(String)
 
         def field(name : String, schema : JSON::Any, required : Bool = false) : Nil
           @properties << {name, schema}
           @required << name if required
+        end
+
+        # The handler refuses a call that names none of `names` (see `tool`). Declared after
+        # their fields, so a misspelled name fails the first tools/list.
+        def requires_one_of(*names : String) : Nil
+          names.each { |n| raise "internal: one-of argument '#{n}' is not a declared field" unless @properties.any? { |(pname, _)| pname == n } }
+          @one_of << names.to_a
         end
       end
     end

@@ -20,7 +20,7 @@
 - CLI: `gori settings user-agents --set -` with stdin closed and `gori run redact default on --none` now refuse in one line instead of a backtrace or a silently dropped `on`
 - CLI: `repeater send -H`/`-b`/`-d`/`--target` on a stored head that ends without a newline no longer glues the added header onto its last line, and `repeater create --flow` beside your own request no longer reports a request-line rewrite it never stored
 - CLI: `gori run show` and `grpc reflect` escape terminal sequences in SSE event and id fields, JWT and SAML headings and server-sent gRPC names, and `authorize --format json` stays valid UTF-8 over a non-UTF-8 method
-- MCP: `timeout_ms: 0`, empty filler arguments and a plain-string `messages` now mean what the tool schemas say, a session slot refuses a header object with no value, and `create_repeater` seeds from `flow_id` beside an issue that has no flow
+- MCP: `timeout_ms: 0`, empty filler arguments and a plain-string `messages` now mean what the tool schemas say, a session slot refuses a header object with no value, and `create_repeater` seeds from `flow_id` beside an issue that has no flow; a tool that needs one of several arguments (`id` or `flow_id`, `path` or `text`) now says so in its description instead of looking callable with none (#1553, #1559)
 - MCP: an `ask_operator` answer or expiry still reaches the agent when its question held an invalid UTF-8 byte
 - Docs: the site search opens from a `?q=` link, and screenshots no longer shift the page while they load (#1550)
 - MCP: `gori mcp --pin-project` keeps a server on the project it starts with, withholding the tools that switch to or read other projects (#1508)
