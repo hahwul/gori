@@ -124,7 +124,7 @@ How `gori mcp` delivers a "Tell the agent…" message to an attached agent. The 
 
 ## In the Project Picker
 
-`Ctrl-,` opens the same modal from the project picker, before any project is loaded, so you can set your theme on first launch. Every form section is editable there, and **Theme** is the one opener that works. The sections that need a live project (Tabs, Env, Hotkeys, hostname overrides, and User-Agents) stay hidden or report that you need to open a project first, and so does **Reset**, because a factory reset has to be applied to a running session.
+`Ctrl-,` opens the same modal from the project picker, before any project is loaded, so you can set your theme on first launch. Every form section is editable there, and **Theme** is the one opener that works. The sections that need a live project (Tabs, Env, Hotkeys, the Keyset playground, hostname overrides, and User-Agents) stay hidden or report that you need to open a project first, and so does **Reset**, because a factory reset has to be applied to a running session.
 
 ## Where Settings Live
 

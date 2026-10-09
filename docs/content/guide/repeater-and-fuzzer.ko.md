@@ -16,7 +16,7 @@ Repeater는 요청 워크벤치입니다. 플로우를 보내고, 요청의 어�
 
 **curl 명령을 붙여넣어** 시작할 수도 있습니다. Space → **Paste cURL**(`U`)이나 팔레트에서 붙여넣기 상자를 열고 붙여넣은 뒤 `Enter`를 누르면 요청마다 새 서브탭이 열립니다. 모든 플래그를 curl 자신의 의미로 읽고(`-b`는 쿠키, `-d`는 본문, `-u`는 basic 인증, `-G`는 데이터를 쿼리로 옮김), `-H` 줄은 입력한 그대로 순서도 유지하며, curl 자체의 `User-Agent`/`Accept`는 넣지 않습니다. 그래서 **Copy as → cURL**로 내보낸 요청이 바이트 그대로 돌아옵니다. 셸처럼 `\`로 끝나거나 따옴표가 열린 명령에서는 `Enter`가 다음 줄로 이어집니다. 전송 플래그(`-k`, `-x`, `-L`, `--resolve`, 타임아웃)는 gori가 자체 네트워크 설정으로 보내므로 무시하고 상태줄에 이름을 밝히며, 로컬 파일을 읽는 플래그(`-d @body.json`, `-F f=@a.png`, `-T`)는 이유와 함께 거부합니다. gori는 명령을 해석할 뿐 실행하지 않습니다.
 
-**GraphQL 엔드포인트에 스키마를 물어보는** 쿼리도 직접 칠 필요가 없습니다. 그 엔드포인트로 가는 요청이 담긴 탭에서 `Ctrl-P` → **GraphQL: insert introspection query**를 고르면, 요청이 같은 경로로 표준 introspection 쿼리(GraphiQL이 보내는 그 쿼리)를 `POST`하는 요청으로 바뀝니다. 대상, 활성 세션 슬롯, 그 밖의 모든 헤더는 각자의 줄 끝까지 그대로 남으므로, 쿼리는 지금 테스트 중인 세션으로 나갑니다. 바뀌는 것은 `Content-Type`과 `Content-Length`뿐이고, GET 바인딩의 `query`/`variables`/`operationName` 파라미터는 요청 줄에서 빠집니다. **GraphQL: insert legacy introspection query**는 모르는 필드 하나 때문에 쿼리 전체를 실패시키는 구형 서버를 위해 `subscriptionType`과 directives 블록을 뺍니다. 어느 쪽이든 되돌릴 수 있는 편집 한 번(`Ctrl-Z`)이고, `Ctrl-R`을 누르기 전에는 아무것도 보내지 않습니다. hex·WebSocket·gRPC·SAML 탭이나 `%%%` 그룹을 담은 탭에서는 이유와 함께 거부합니다.
+**GraphQL 엔드포인트에 스키마를 물어보는** 쿼리도 직접 칠 필요가 없습니다. 그 엔드포인트로 가는 요청이 담긴 탭에서 `Ctrl-P` → **GraphQL: insert introspection query**를 고르면, 요청이 같은 경로로 표준 introspection 쿼리(GraphiQL이 보내는 그 쿼리)를 `POST`하는 요청으로 바뀝니다. 대상, 활성 세션 슬롯, 그 밖의 모든 헤더는 각자의 줄 끝까지 그대로 남으므로, 쿼리는 지금 테스트 중인 세션으로 나갑니다. 바뀌는 것은 `Content-Type`과 `Content-Length`뿐이고(새 바디는 평범한 JSON으로 나가므로 `Transfer-Encoding`이나 `Content-Encoding`은 빠집니다), GET 바인딩의 `query`/`variables`/`operationName`/`extensions` 파라미터는 요청 줄에서 빠집니다. **GraphQL: insert legacy introspection query**는 모르는 필드 하나 때문에 쿼리 전체를 실패시키는 구형 서버를 위해 `subscriptionType`과 directives 블록을 뺍니다. 어느 쪽이든 되돌릴 수 있는 편집 한 번(`Ctrl-Z`)이고, `Ctrl-R`을 누르기 전에는 아무것도 보내지 않습니다. hex·WebSocket·gRPC·SAML 탭이나 `%%%` 그룹을 담은 탭에서는 이유와 함께 거부합니다.
 
 세션이 수십 개 쌓이면 칩 스트립이 스크롤되기 시작하고, `←`/`→`로 훑어 찾는 건 더 이상 현실적이지 않습니다. 스트립 위 어느 칩에서든 **`f`**를 누르면 전체 세션 목록이 뜹니다. 타이핑하면 이름·메서드·경로·대상 호스트·`#태그`로 걸러지고, `Enter`로 고른 세션으로 점프합니다. 같은 목록이 스트립 왼쪽 끝의 **`⌕`** 뒤에도 있습니다. 클릭하거나, 첫 칩에서 `←`로 이동하면 됩니다. Fuzzer, Notes, Decoder, JWT, Cookie, Comparer, Miner, Sequencer 등 모든 워크벤치 스트립에 동일하게 있습니다.
 
@@ -155,9 +155,9 @@ Fuzzer는 Intruder 스타일 엔진입니다. 요청에서 위치를 표시하�
 
 요청에서 `§…§` 마커로 위치를 표시하거나, gori가 자동으로 배치하게 하세요. 페이로드 세트는 내장 프리셋(`sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`, `cache-delimiters`. 파일 없이 바로 시작), 워드리스트(파일, 또는 [카탈로그](#wordlist-catalog)에 있는 목록의 이름), 명시적 목록, 숫자 범위, N개의 빈(null) 페이로드, 또는 무차별 대입 문자 세트가 될 수 있습니다. 프리셋은 추가 파일을 병합(내장 우선, 중복 제거)할 수 있고 다른 세트와 조합됩니다. 프로세서를 사용하면 나가는 각 페이로드를 변환할 수 있습니다: prefix/suffix, URL/base64/hex 인코딩, 대소문자 변환, 해싱, 정규식 치환.
 
-마커 하나에 자체 Decoder 체인을 붙일 수도 있습니다. 커서를 마커 안에 두고 `Ctrl-Q`를 누르면 체인 편집기가 열리고, 보내기 전에 마커의 값이 각 단계를 거치는 모습을 미리 보여 줍니다(`exec:` 단계는 미리보기에서 빠지고 전송할 때만 실행됩니다). [Decoder 라이브러리에 저장해 둔 체인](/ko/guide/decoder/#building-a-chain)은 여기서 이름으로 부를 수 있어서, 한 번 만들어 둔 체인이 마커 안에서는 단어 하나가 됩니다: `§admin¦myenc > url-encode§`. Repeater 마커도 TUI 탭에서는 동일하게 동작합니다. 마커는 탭이 전송할 때 렌더링하는 초안 언어이므로 헤드리스 표면은 렌더링하지 않습니다. `gori run repeater send`, MCP `send_request`, 재테스트 단계는 탭이라면 렌더링했을 `§…§`가 든 세션을 리터럴 `§` 바이트로 내보내지 않고 **거부**합니다. 거기서 보내려면 마커를 지우거나, 마크된 요청을 Fuzzer 템플릿으로 스윕하거나(`gori run fuzz --request=FILE`, `fuzz_start{template}`), `--verbatim` / `verbatim:true`로 저장된 바이트가 곧 메시지라고 밝히세요. 캡처 자체에 들어 있던 `§`는 건드리지 않습니다. gori는 그것을 직접 입력한 것과 구분할 수 없으므로 탭은 그대로 두고, 모든 표면이 바이트 그대로 재생합니다.
-
 gRPC 메시지는 마커가 유용하게 쓰이지 않는 유일한 곳입니다. 위치가 바이트 범위가 아니라 스키마가 아는 필드인 [gRPC 필드 스윕](#sweeping-a-grpc-field)을 보세요.
+
+마커 하나에 자체 Decoder 체인을 붙일 수도 있습니다. 커서를 마커 안에 두고 `Ctrl-Q`를 누르면 체인 편집기가 열리고, 보내기 전에 마커의 값이 각 단계를 거치는 모습을 미리 보여 줍니다(`exec:` 단계는 미리보기에서 빠지고 전송할 때만 실행됩니다). [Decoder 라이브러리에 저장해 둔 체인](/ko/guide/decoder/#building-a-chain)은 여기서 이름으로 부를 수 있어서, 한 번 만들어 둔 체인이 마커 안에서는 단어 하나가 됩니다: `§admin¦myenc > url-encode§`. Repeater 마커도 TUI 탭에서는 동일하게 동작합니다. 마커는 탭이 전송할 때 렌더링하는 초안 언어이므로 헤드리스 표면은 렌더링하지 않습니다. `gori run repeater send`, MCP `send_request`, 재테스트 단계는 탭이라면 렌더링했을 `§…§`가 든 세션을 리터럴 `§` 바이트로 내보내지 않고 **거부**합니다. 거기서 보내려면 마커를 지우거나, 마크된 요청을 Fuzzer 템플릿으로 스윕하거나(`gori run fuzz --request=FILE`, `fuzz_start{template}`), `--verbatim` / `verbatim:true`로 저장된 바이트가 곧 메시지라고 밝히세요. 캡처 자체에 들어 있던 `§`는 건드리지 않습니다. gori는 그것을 직접 입력한 것과 구분할 수 없으므로 탭은 그대로 두고, 모든 표면이 바이트 그대로 재생합니다.
 
 ### Wordlist 카탈로그 {#wordlist-catalog}
 
@@ -334,7 +334,7 @@ WebSocket 세션에 대한 `--repeater N`은 핸드셰이크와 **세션에 저�
 
 단계가 보내는 모든 것은 기록에 남고, 실행의 나머지와 같은 한도 안에 있습니다.
 
-- 각 단계는 History에 source `macro`(`src:macro`, SRC `MACRO`, `source_ref` `macro step N`)로 남고 실패마다 이벤트가 하나 기록됩니다. 실행 상태는 실행 횟수, 요청 수, 실패 수를 알려 줄 뿐 값은 알려 주지 않습니다.
+- 각 단계는 History에 source `macro`(`src:macro`, SRC `MACRO`, `source_ref` `macro step N`)로 남고 실패마다 이벤트가 하나 기록됩니다(한 실행에서 처음 20건까지). 실행 상태는 실행 횟수, 요청 수, 실패 수를 알려 줄 뿐 값은 알려 주지 않습니다.
 - 단계는 활성 세션 슬롯으로, 오버레이 포함해서 전송됩니다. 그래서 세션 쿠키가 필요한 페이지는 그 쿠키를 받습니다.
 - 실행을 만들 때, 그리고 단계를 실행할 때마다 표면의 스코프 검사를 통과해야 하며, Sandbox와 명시적 exclude는 후보에게와 똑같이 단계에도 적용됩니다.
 - `--max-requests`에 합산되고 `--rate`에 묶이며, 중지는 두 단계 사이에서 받습니다.

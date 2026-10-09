@@ -158,7 +158,7 @@ gori mcp --install-pi
 gori mcp --install-claude-code --install-codex  # 한 번에 여러 클라이언트
 ```
 
-Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mcp_servers:` 항목이 있는 YAML을 사용합니다(JSON이 아닙니다). 설치 후 클라이언트를 재시작하거나 세션을 다시 열어 MCP 서버를 다시 로드하세요. 기존 설정 파일은 제자리에서 갱신됩니다. 다른 서버·테이블·주석은 그대로 두고, 파일 권한도 유지하며, 교체는 원자적이라 설치가 중간에 끊겨도 파일이 잘려 나가지 않습니다. gori는 이 파일들을 파싱 트리에서 다시 뽑아내지 않고 텍스트로 편집하므로 설정 주변에 적어 둔 메모가 그대로 남습니다. 안전하게 끼워 넣을 수 없는 설정 파일은 고쳐 쓰지 않고 그 사실을 알립니다.
+Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mcp_servers:` 항목이 있는 YAML을 사용합니다(JSON이 아닙니다). 설치 후 클라이언트를 재시작하거나 세션을 다시 열어 MCP 서버를 다시 로드하세요. 기존 설정 파일은 제자리에서 갱신됩니다. 다른 서버·테이블·주석은 그대로 두고, 파일 권한도 유지하며, 교체는 원자적이라 설치가 중간에 끊겨도 파일이 잘려 나가지 않습니다. gori는 TOML과 YAML 파일을 파싱 트리에서 다시 뽑아내지 않고 텍스트로 편집하므로 설정 주변에 적어 둔 메모가 그대로 남습니다(주석이 없는 JSON 설정은 파싱한 뒤 다른 키를 그대로 둔 채 다시 씁니다). 안전하게 끼워 넣을 수 없는 설정 파일은 고쳐 쓰지 않고 그 사실을 알립니다.
 
 클라이언트가 리포지토리 디렉터리 밖에서 MCP를 시작해도 서버는 unbound로 연결되며, 에이전트가 도구로 프로젝트를 고르거나 만들 수 있습니다. 설치 시점에 고정 engagement를 박아 두려면 선택자를 넘기세요. 예: `gori mcp --project my-engagement --install-codex`.
 
@@ -178,7 +178,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `reply_to_operator` | gori의 오퍼레이터에게 답합니다. `summary`는 알림 링과 Miss Ring 말풍선에 보이는 한 줄, `detail`은 링에서 ↵로 여는 긴 본문, `level`은 색, `in_reply_to`는 답하는 오퍼레이터 메시지 id입니다. 여러분의 터미널이 아니라 gori에 있는 사람에게 답이 닿는 방법입니다 — 알림이므로 그 프로젝트에 gori TUI가 열려 있으면 바로 뜨고, 닫혀 있었다면 다음에 열 때 노트 하나로 요약됩니다 |
 | `ask_operator` | gori의 오퍼레이터에게 결정을 선택 카드로 묻습니다. `question`은 한 줄, `choices`는 2~4개의 라벨, `detail`은 선택적인 설명, `default`는 카드가 처음 가리키는 선택지, `expires_in_minutes`는 기다리는 시간(기본 30분)입니다. 질문 `id`를 담아 바로 반환하고, 답은 나중에 `in_reply_to`가 그 id이고 `outcome`이 `answered`, `dismissed`, `expired` 중 하나인 오퍼레이터 메시지로, `operator_messages`가 다루는 모든 경로를 타고 돌아옵니다. 결과에는 `reply_to_operator`처럼 `tui`가 실립니다 |
 | `list_views` | 프로젝트의 History [뷰](/ko/guide/proxy/#views). `list_history{view}`가 렌즈로 적용하는 이름 붙은 QL 쿼리로, `query`를 대체하지 않고 그 위에 AND로 얹힙니다. 기본 뷰 7종(`All`, `History`, `History + Repeater`(기본값), `WebSocket`, `gRPC`, `SSE`, `Errors`) → 글로벌 라이브러리 → 프로젝트 순이며, `active`는 TUI가 보고 있는 뷰를 표시할 뿐 `list_history`에 적용되지 **않습니다**. 그쪽은 넘긴 `view`로만 거릅니다 |
-| `get_flow` | 한 플로우의 전체 요청 + 응답. 본문은 기본적으로 8 KB까지 인라인되고, 더 길면 잘린 자리에 나머지를 읽을 `get_response_body_chunk` 호출을 알려 주는 `more` 필드가 붙습니다(`body_mode:"full"`은 64 KB까지). [리댁션 프로파일](/ko/reference/cli/#run-redact)이 기본 적용된 곳에서는 본문이 정제되어 `body_redaction` 객체와 함께 돌아옵니다. `include_sensitive:true`는 헤더 리댁션과 함께 그것도 끕니다 |
+| `get_flow` | 한 플로우의 전체 요청 + 응답. 본문은 기본적으로 8 KB까지 인라인되고, 더 길면 잘린 자리에 나머지를 읽을 `get_response_body_chunk` 호출을 알려 주는 `more` 필드가 붙습니다(`body_mode:"full"`은 64 KB까지). [리댁션 프로파일](/ko/reference/cli/#run-redact)이 기본 적용된 곳에서는 본문이 정제되어 `body_redaction` 객체와 함께 돌아오며, 이때는 `get_response_body_chunk`가 리댁션되지 않은 저장 바이트를 넘겨주기 때문에 기본값이 `full`로 유지됩니다. `include_sensitive:true`는 헤더 리댁션과 함께 그것도 끕니다 |
 | `get_response_body_chunk` | 인라인 64 KiB 상한을 넘는 디코드(또는 원시) 플로우/Repeater 응답을 페이지 단위로 조회 |
 | `list_sitemap` / `list_sitemap_tags` | 고유 엔드포인트(host, method, path, 기본 한 페이지 50개)와 거기에 달린 태그. `list_sitemap`의 `query`는 TUI 트리처럼 Sitemap의 `tag:`도 받습니다 |
 | `list_js_endpoints` / `scan_js_endpoints` | 캡처된 JavaScript가 참조하지만 요청이 닿지 않은 엔드포인트와, 각각을 읽어 온 플로우, 줄, 문자열. 스캔은 새 JS/HTML 응답을 읽을 뿐 요청은 보내지 않습니다. `list_sitemap`에 `include_unrequested:true`를 주면 `unrequested`로 함께 나옵니다 |
@@ -222,7 +222,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `ql_reference` | 쿼리 언어 레퍼런스 |
 | `ql_explain` | 쿼리를 실행하지 않고 진단. 요청을 쓰기 전에 필터를 점검할 때 사용 |
 
-**액션 도구**(`--read-only`로 비활성화됨. 단, `switch_project`는 `--pin-project`로 빼지 않는 한 동작하고 `create_project`는 서버가 언바운드일 때 동작합니다). 소켓을 여는 도구(`send_request`, `send_websocket`, `fuzz_*`, `mine_*`, `authorize_*`, `cache_deception_check`, `sequence_*`, `discover_*`, `grpc_reflect`, `minimize_repeater`, `race_requests`, `timing_requests`, `run_retest`, `refresh_session_slot`, 그리고 `active:true`를 준 `probe_scan`)는 모두 스코프 게이트를 지납니다. 설정된 스코프 밖의 대상, 또는 스코프가 없는 대상은 호출에 명시적 예외 선언인 `allow_unscoped:true`를 주지 않는 한 `SCOPE_BLOCKED`로 거부되며, 그때도 샌드박스와 명시적 제외 규칙은 그대로 적용됩니다.
+**액션 도구**(`--read-only`로 비활성화됨. 단, `switch_project`는 `--pin-project`로 빼지 않는 한 동작하고 `create_project`는 서버가 언바운드일 때 동작합니다). 소켓을 여는 도구(`send_request`, `send_websocket`, `fuzz_*`, `mine_*`, `authorize_*`, `cache_deception_check`, `sequence_*`, `discover_*`, `grpc_reflect`, `minimize_repeater`, `race_requests`, `timing_requests`, `run_retest`, `refresh_session_slot`, 그리고 `active:true`를 준 `probe_scan`)는 모두 스코프 게이트를 지납니다. 설정된 스코프 밖의 대상, 또는 스코프가 없는 대상은 호출에 명시적 예외 선언인 `allow_unscoped:true`를 주지 않는 한 `SCOPE_BLOCKED`로 거부됩니다. 그때도 샌드박스는 그대로 적용되고, 스윕하는 도구(`fuzz_*`, `mine_*`, `discover_*`, `sequence_*`, `authorize_*`, `minimize_repeater`, `run_retest`, active `probe_scan`)에는 명시적 제외 규칙도 적용됩니다. `send_request`처럼 손으로 작성한 단일 전송은 프록시와 마찬가지로 제외 규칙에 막히지 않습니다.
 
 | 도구 | 용도 |
 |------|---------|
@@ -280,7 +280,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `intercept_forward` / `intercept_forward_edit` / `intercept_drop` | 홀드된 메시지를 바이트 그대로 내보내거나, 수정한 와이어 바이트로 내보내거나, 드롭 |
 | `intercept_toggle` / `intercept_set_filter` / `intercept_set_direction` | 캐치 활성화 및 해제, 조건 쿼리 설정, 홀드할 방향 선택 |
 
-> 액션 도구는 안전을 위해 상한이 있습니다: fuzz, mine, sequence, discover, authorize 작업은 총 요청 수, 동시성, 저장 결과 수가 제한됩니다. authorize의 상한은 `플로우 × 아이덴티티`를 세며, 상한을 넘는 선택은 잘라서 실행하는 대신 시작 전에 거부됩니다. 잘린 실행은 보내지도 않은 플로우를 "enforced"로 보고하게 되기 때문입니다. `create_rule`로 생성된 규칙은 `gori run`과 새로 열린 TUI에 적용됩니다. 이미 실행 중인 TUI는 규칙을 다시 로드한 뒤에만 적용합니다.
+> 액션 도구는 안전을 위해 상한이 있습니다: fuzz, mine, sequence, discover, authorize 작업은 총 요청 수, 동시성, 저장 결과 수가 제한됩니다. authorize의 상한은 `플로우 × 아이덴티티`를 세며, 상한을 넘는 선택은 잘라서 실행하는 대신 시작 전에 거부됩니다. 잘린 실행은 보내지도 않은 플로우를 "enforced"로 보고하게 되기 때문입니다. `create_rule`로 생성된 규칙은 `gori run`과 새로 열린 TUI에 적용됩니다. 이미 실행 중인 해당 프로젝트의 TUI는 다음 스토어 갱신 때 규칙을 다시 로드하므로 재시작할 필요가 없습니다.
 
 ## 스펙에서 Repeater 탭으로 {#from-a-spec-to-repeater-tabs}
 
@@ -304,7 +304,7 @@ create_repeaters{flow_ids: [...], name_prefix: "oas: ", tags: "spec"}
 
 반대 방향도 마찬가지입니다. `intercept_list`가 `operator_editing: true`로 돌려주는 행은 지금 사용자가 편집 중인, 아직 저장하지 않은 내용이 들어 있는 메시지입니다. 에이전트는 포워드·편집·드롭으로 그 작업을 지워버리는 대신 사용자에게 남겨둘 수 있습니다.
 
-에이전트를 켜둔 채 자리를 뜨기 전에 알아둘 안전 규칙이 하나 있습니다. 홀드된 메시지는 원래 사람의 결정을 무한히 기다립니다. 키보드 앞에 사람만 있을 때는 그게 맞는 동작입니다. 하지만 해당 세션에서 에이전트가 인터셉트 큐에 붙고 나면, gori는 아무도 보고 있지 않은 항목에 대해 30초 자동 포워드를 켭니다. 홀드 도중 죽은 클라이언트가 연결을 영영 막아버리지 못하게 하기 위해서입니다. 에이전트가 붙지 않은 세션은 자동 포워드를 하지 않습니다.
+에이전트를 켜둔 채 자리를 뜨기 전에 알아둘 안전 규칙이 하나 있습니다. 홀드된 메시지는 원래 사람의 결정을 무한히 기다립니다. 키보드 앞에 사람만 있을 때는 그게 맞는 동작입니다. 하지만 해당 세션에서 큐를 다룰 수 있는 에이전트(`--read-only`가 아니고 **Intercept control**이 켜진 에이전트)가 큐를 읽거나 명령을 보내고 나면, gori는 아무도 보고 있지 않은 항목에 대해 30초 자동 포워드를 켭니다. 홀드 도중 죽은 클라이언트가 연결을 영영 막아버리지 못하게 하기 위해서입니다. 에이전트가 붙지 않은 세션은 자동 포워드를 하지 않습니다.
 
 ## gori가 보내는 메시지 {#messages-from-gori}
 
@@ -312,7 +312,7 @@ create_repeaters{flow_ids: [...], name_prefix: "oas: ", tags: "spec"}
 
 전달은 다섯 층을 **확인 가능한 순서대로** 시도합니다 — 결과를 되돌려 주는 경로가 그러지 못하는 경로보다 먼저이고, 먼저 답한 층에서 사슬이 끝나므로 한 메시지가 두 번 실려 나가는 일은 없습니다.
 
-1. **Inbox socket** — 대상이 Claude Code라면 `gori mcp`가 그 세션의 inbox socket(`/tmp/cc-socks/<pid>.sock`, 클라이언트 프로세스에서 부모 쪽으로 거슬러 올라가 찾습니다)에 메시지를 씁니다. 이 경로는 GA입니다 — 플래그도, opt-in도 필요 없습니다. 메시지는 다른 세션이 보낸 노트로 프레이밍되어 `[gori] The operator at the gori TUI says:` 접두어를 달고 도착합니다. idle 세션은 그 위에서 turn을 시작하고, 바쁜 세션은 tool call 사이사이에 읽습니다. 받아들일지, 나중으로 보류할지, 아예 거절할지는 Claude Code 자신의 `crossSessionInbound` 설정이 정하며, gori는 어느 쪽이든 socket에 쓸 뿐 셋 중 무엇이 일어났는지는 볼 수 없습니다. 파일은 있는데 연결을 거절하는 소켓은 이미 끝난 세션이 남긴 찌꺼기입니다 — `/tmp/cc-socks/<pid>.sock`은 그것을 만든 프로세스보다 오래 남고 pid는 재사용됩니다 — 그래서 gori는 아무도 없는 문 앞에 멈추는 대신 다음 층으로 넘어갑니다.
+1. **Inbox socket** — 대상이 Claude Code라면 `gori mcp`가 그 세션의 inbox socket(`/tmp/cc-socks/<pid>.sock`, `gori mcp`를 띄운 Claude Code 프로세스의 pid로 이름이 정해집니다)에 메시지를 씁니다. 이 경로는 GA입니다 — 플래그도, opt-in도 필요 없습니다. 메시지는 다른 세션이 보낸 노트로 프레이밍되어 `[gori] The operator at the gori TUI says:` 접두어를 달고 도착합니다. idle 세션은 그 위에서 turn을 시작하고, 바쁜 세션은 tool call 사이사이에 읽습니다. 받아들일지, 나중으로 보류할지, 아예 거절할지는 Claude Code 자신의 `crossSessionInbound` 설정이 정하며, gori는 어느 쪽이든 socket에 쓸 뿐 셋 중 무엇이 일어났는지는 볼 수 없습니다. 파일은 있는데 연결을 거절하는 소켓은 이미 끝난 세션이 남긴 찌꺼기입니다 — `/tmp/cc-socks/<pid>.sock`은 그것을 만든 프로세스보다 오래 남고 pid는 재사용됩니다 — 그래서 gori는 아무도 없는 문 앞에 멈추는 대신 다음 층으로 넘어갑니다.
 2. **Codex queue** — 대상이 Codex라면 `gori mcp`가 그 세션 자신의 thread에 `codex queue --thread <id> --message …`로 한 줄을 건넵니다. 세션은 그 위에서 turn을 돌립니다 — idle이면 즉시, 바쁘면 지금 turn이 끝난 뒤에. Codex는 MCP 서버에게 자기 자신에 대해 아무것도 알려주지 않으므로, gori는 Codex 프로세스가 열어 둔 writer lock(`<CODEX_HOME>/thread-writer-locks/<thread>.lock`)에서 thread를 읽습니다. 이 경로 하나가 thread id와 queue를 넣을 `CODEX_HOME`을 동시에 알려주므로, 자기만의 `CODEX_HOME`으로 띄운 세션에도 닿습니다. GA이고 플래그가 필요 없습니다. 아직 turn을 한 번도 돌리지 않은 thread는 rollout이 없어 `codex queue`가 거절하는데, 그 이유는 delivery 행에 남고 메시지는 4·5번 층으로 계속 읽힙니다.
 3. **Channel** — Settings의 `mcp.channels`가 켜져 있고 *위의 두 문이 모두 답하지 않았을 때* `gori mcp`가 `claude/channel` capability를 선언하고 메시지를 channel event로 push합니다. Claude Code는 이를 `← gori: …`로 보여주고, 세션이 idle이 되는 즉시 그 위에서 turn을 시작합니다 — 그래서 모델은 이것을 그냥 지나가는 메모가 아니라 지시로 읽습니다. 이 경로는 Claude Code를 `claude --dangerously-load-development-channels server:gori`로 띄워야 동작하는데, 이는 research-preview 플래그로 클라이언트 쪽에 한 번짜리 확인 대화상자가 뜨고, 이 플래그가 함께 갖고 오는 `--channels` 허용 목록은 gori가 아니라 Anthropic이 정한 것입니다. **기본은 off**이고, 처음이 아니라 **마지막**으로 시도하는 경로입니다. channel을 등록한 적 없는 세션으로의 push는 조용히 버려지고 gori는 그것을 알 방법이 없습니다. 그래서 이 경로가 먼저였을 때는, 플래그 없이 띄운 Claude Code 세션에서 이 설정이 정작 그 세션을 깨우는 유일한 경로인 inbox socket을 빼앗아 갔습니다. 한 메시지가 두 경로를 타는 일은 없습니다 — 먼저 답한 층에서 사슬이 끝납니다. 대신 push가 치르는 비용은 *두 번 읽힐 수 있다*는 것입니다. 확인된 전달이 아니므로 메시지는 4·5번 층에 계속 남습니다. 실제 테스트에서 Opus 5의 세이프가드가 채널로 주입된 메시지를 내용과 무관하게 플래그해 모델 전환 대화상자에서 세션을 멈추는 것도 확인했습니다. 아래 소켓 경로는 걸리지 않습니다. 시험할 때가 아니면 채널은 꺼 두세요.
 4. **Tool result** — 클라이언트가 무엇이든, 위 층들이 싣지 못한 메시지가 **에이전트가 다음에 부르는 gori 도구의 결과**에 실려 돌아갑니다. 어떤 도구였든 상관없이, 그 도구 자신의 답 옆에 오퍼레이터의 한 줄이 두 번째 content 블록으로 붙습니다. GA이고 플래그도 없으며, 모델이 무언가를 기억할 필요도 없습니다 — 그게 핵심입니다. 위의 세 층은 각각 특정 벤더의 문입니다(inbox socket은 Claude Code, `codex queue`는 Codex, channel은 Claude Code의 프리뷰). grok·Pi·Hermes·Antigravity·Claude Desktop에는 그런 문이 아예 없으므로, 이 층이 "메시지가 피드에 있다"를 "메시지가 모델 눈앞에 있다"로 바꿔 줍니다. 놀고 있는 에이전트를 깨우지는 못하지만(이 층에서 가능한 일이 아닙니다) 그 에이전트가 gori에게 무엇이든 묻는 순간 답 안에 그 줄이 들어 있습니다. socket과 마찬가지로 확인된 전달이라, 클라이언트가 요청한 결과를 실제로 받아 갔으므로 메시지는 5번 층에서 은퇴합니다. `--read-only` 서버는 이를 기록할 writer가 없으므로, 줄은 보내되 행은 계속 읽히도록 남겨 둡니다.
@@ -352,7 +352,7 @@ stateless 리비전에서 따라오는 두 가지는 클라이언트를 만들�
 
 ## 한 번에 한 호출 {#one-call-at-a-time}
 
-도구는 도착한 순서대로 하나씩 실행되므로 퍼즈나 느린 `send_request`가 다음 호출과 겹치지 않습니다. 다만 `ping`은 긴 호출 뒤에 밀려 서버가 죽었다는 판정을 받지 않도록, `notifications/cancelled`는 취소한 요청의 응답을 보내지 않도록 즉시 처리합니다. `send_request`나 `send_websocket`을 취소하면 진행 중인 소켓을 닫으므로 응답하지 않는 대상이 타임아웃까지 워커를 붙잡지 않습니다. 협력적 취소를 지원하는 도구는 다음 취소 확인 지점에서 멈춥니다. 그 밖의 진행 중인 호출은 끝난 뒤 다음 대기 호출을 처리합니다.
+도구는 도착한 순서대로 하나씩 실행되므로 퍼즈나 느린 `send_request`가 다음 호출과 겹치지 않고, 응답도 순서대로 돌아옵니다. 다만 `ping`은 긴 호출 뒤에 밀려 서버가 죽었다는 판정을 받지 않도록, `notifications/cancelled`는 취소한 요청의 응답을 보내지 않도록 즉시 처리합니다. `send_request`나 `send_websocket`을 취소하면 진행 중인 소켓을 닫으므로 응답하지 않는 대상이 타임아웃까지 워커를 붙잡지 않습니다. 협력적 취소를 지원하는 도구는 다음 취소 확인 지점에서 멈춥니다. 그 밖의 진행 중인 호출은 끝난 뒤 다음 대기 호출을 처리합니다.
 
 ## MCP 이음새인 이유 {#why-an-mcp-seam}
 

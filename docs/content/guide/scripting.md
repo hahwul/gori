@@ -29,7 +29,7 @@ Each project is its own SQLite database. Read subcommands resolve one in this or
 | `gori run project switch NAME` | A standing pin, until `project switch --clear` |
 | *(none of these)* | The most-recently-active project |
 
-The last row is the one to avoid in a script: a single write to any other project (`notes create --project demo`) makes that project the most recently active, and every later `--project`-less command follows it. Set `GORI_PROJECT` at the top of the script instead. A `GORI_PROJECT` or pin that names no project is refused, never skipped, and the stderr notice says which rule chose the project (`gori run: using project demo (from GORI_PROJECT)`).
+The last row is the one to avoid in a script: a single write to any other project (`notes create --project demo`) makes that project the most recently active, and every later `--project`-less command follows it. Set `GORI_PROJECT` at the top of the script instead. A `GORI_PROJECT` or pin that names no project is refused, never skipped, and the stderr notice says which rule chose the project (`gori run: using project demo (from GORI_PROJECT) — name another with --project NAME or --db PATH`).
 
 The two selectors are alternatives, not a precedence: passing **both** is a usage error, not a
 silent win for `--db`. The same pair reaches destructive verbs (`history delete`, `history
@@ -45,7 +45,7 @@ slot. A short-lived subcommand gives its SQLite open/writer waits a one-second b
 slot stays busy, the required write exits non-zero and says the project is locked by another gori,
 with the workaround (retry, or read it with a read-only subcommand). A subcommand that keeps the
 project open for a whole run —
-`discover`, `fuzz`, `import`, `probe`, `retest run`, `oast listen`/`resume`, `intercept` — keeps
+`discover`, `fuzz`, `import`, `mine` with a `--macro`, `probe`, `retest run`, `oast listen`/`resume`, `intercept`, `sitemap js --scan` — keeps
 the standard five-second wait, the same one the TUI's capture writer uses. A
 repeater send that already reached the network keeps its completed-send result even when its
 response or History write cannot be persisted: it prints a warning to STDERR, and `--format json`
@@ -81,7 +81,7 @@ Reach for `jsonl` when you want to consume a long sweep while it runs, and `json
 | `0` | Success |
 | `1` | Error: a failed send, an unreadable project, a mutation that could not be applied, or a sweep (`fuzz`, `mine`, `discover`, `sequence`, `authorize`, `cache-deception`) in which no request got an answer |
 | `3` | A verdict gate: `gori run fuzz --fail-if-no-matches` completed cleanly but nothing matched (a `--stop-on` / `--stop-after-matches` that fired exits `0`), or `gori run probe --fail-on=LEVEL` reported an issue at or above LEVEL |
-| `130` | Interrupted by SIGINT/SIGTERM. `fuzz`, `mine`, `discover`, `sequence`, `authorize` and `repeater minimize` flush what they collected first, so `&& next-step` does not treat a truncated run as a finished one |
+| `130` | Interrupted by SIGINT/SIGTERM. `fuzz`, `mine`, `discover`, `sequence`, `authorize`, `cache-deception` and `repeater minimize` flush what they collected first, so `&& next-step` does not treat a truncated run as a finished one |
 
 A fuzz run where nothing matched *and* every send errored (target down, TLS failure, scope-blocked) exits `1`, so a script can tell "no findings" apart from "never reached the target" even without `--fail-if-no-matches` (with the flag, `3` wins).
 

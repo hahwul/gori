@@ -168,7 +168,7 @@ gori run capture --port 8070 --format json --for 5m
 | `--ca-dir=DIR` | 루트 CA 디렉터리, `gori --ca-dir`과 같은 형식 |
 | `--format=FMT` | `text`, `jsonl`(플로우마다 객체 하나, 스트리밍), 또는 `json`(배열 하나, 캡처가 멈출 때 닫힘) |
 | `--for=DURATION` | 예: `30s`, `5m`, `1h` 이후 중지 |
-| `--max=N` | 플로우 N개 이후 중지 |
+| `--max=N` | 완료된 플로우 N개 이후 중지. 업그레이드된 터널은 닫힌 뒤에 셈 |
 
 ### run shell {#run-shell}
 
@@ -786,7 +786,7 @@ gori run probe -a
 
 `--severity`는 `info`\|`low`\|`medium`\|`high`\|`critical` 중 하나입니다. `--fail-on=LEVEL`은 스캔이 보고하는 이슈(`--severity`/`--category`/`--in-scope` 적용 후)가 LEVEL 이상이면 `3`으로 종료하게 하므로, CI 잡의 게이트로 쓸 수 있습니다. `--category`는 `headers`\|`cookies`\|`tech`\|`infoleak`\|`cors`\|`client`\|`active`\|`custom`입니다. `-a`/`--active`는 가벼운(light-touch) 액티브 검사를 포함합니다. `-q`/`--query`로 QL 필터를 겁니다. `--lenient`는 없는 필드 이름을 쓴 쿼리를 거절하지 않고 받아들입니다. `--in-scope`는 프로젝트 스코프 안의 호스트에 대한 이슈만 보고합니다. TUI의 `s` 렌즈로, `--active`/`--allow-unscoped`와 무관하게 옵트인이며 모든 플로우는 여전히 스캔됩니다.
 
-`--active`와 함께: `--unsafe`는 안전하지 않은 메서드(`POST`/`PUT`/`PATCH`/`DELETE`)도 프로브하며, 이 재전송은 서버 데이터를 변경할 수 있습니다. `--aggressive`는 룰별 상한을 높이고 forbidden-bypass 헤더 집합을 넓힙니다(그리고 `--unsafe`를 함의합니다). 둘 다 `--allow-unscoped`를 함께 주지 않는 한 스코프 게이트를 따릅니다. 인가된 대상에만 사용하세요.
+`--active`와 함께: `--unsafe`는 안전하지 않은 메서드(`POST`/`PUT`/`PATCH`/`DELETE`)도 프로브하며, 이 재전송은 서버 데이터를 변경할 수 있습니다. `--aggressive`는 룰별 상한을 높이고 forbidden-bypass 헤더 집합을 넓힙니다(그리고 `--unsafe`를 함의합니다). 둘 다 `--allow-unscoped`를 함께 주지 않는 한 스코프 게이트를 따릅니다. `-k`/`--insecure-upstream`은 액티브 재전송의 업스트림 TLS 검증을 생략합니다. 인가된 대상에만 사용하세요.
 
 `probe`만 쓰면 스캔하고 출력합니다. `--persist`를 주면 찾은 결과를 라이브 스캐너와 같은 방식으로 합쳐 저장된 발견 항목에도 기록하므로, TUI로 연 적 없는 프로젝트에도 판정 목록이 생깁니다. 기록이 실패하면 보고서를 출력한 뒤 그렇다고 알리고 1로 종료합니다. TUI Probe 탭 뒤에 저장되는 발견 항목은 별개의 표면입니다.
 
@@ -955,7 +955,7 @@ gori run sitemap export --in-scope --examples > api.json
 - **파라미터**(query, header, cookie)는 그 operation의 모든 샘플에 있을 때만 `required`입니다. 표준 브라우저 헤더는 빼고, 반복된 쿼리 키는 배열로 씁니다.
 - **본문**: 요청 본문과 상태 코드별 응답에 모든 샘플에서 추론한 스키마가 붙습니다. JSON 스키마는 타입을 합치고(`integer`와 `number`는 `number`로, 정말 다른 타입은 `oneOf`로), 객체 속성은 합집합으로 모으며, 모든 샘플에 있던 멤버만 `required`로 둡니다. 폼은 객체 스키마, 그 밖의 미디어 타입은 문자열이 됩니다.
 - **보안**: `Authorization` 헤더는 `http` bearer, basic, digest 스킴이 됩니다. 다른 자격 증명 헤더(`X-Api-Key`, `X-Auth-Token` 등)와 세션 쿠키는 `apiKey` 스킴이 됩니다. 값은 절대 쓰지 않습니다.
-- **건너뜀**: gori가 직접 보낸 요청(Repeater, Fuzzer, Miner, Discover 등. `--include-gori`를 주면 포함), WebSocket, gRPC, SSE, 응답이 완료되지 않은 플로우, 그리고 OpenAPI에 자리가 없는 메서드(CONNECT, WebDAV)는 건너뛰고 stderr에 개수를 적습니다. 첫 번째 규칙이 없으면 Discover 브루트포스가 추측한 경로가 모두 들어가고, 퍼징이 모든 타입을 문자열로 넓혀 버립니다.
+- **건너뜀**: gori가 직접 보낸 요청(Repeater, Fuzzer, Miner, Discover 등. `--include-gori`를 주면 포함), WebSocket, gRPC, SSE, 응답이 완료되지 않은 플로우, 그리고 OpenAPI에 자리가 없는 메서드(CONNECT, WebDAV)는 건너뛰고 stderr에 개수를 적습니다. 첫 번째 규칙이 없으면 Discover 브루트포스가 추측한 경로가 모두 들어가고, 퍼징이 모든 타입을 느슨하게 만들어 버립니다.
 
 `-q`/`--query=QL`(위치 인자로도 가능), `--in-scope`, `--hide-static`은 `history`처럼 플로우 단위로 읽을 대상을 좁힙니다. `--host`는 정확한 호스트, `--path=PREFIX`는 경로 접두사입니다. 여러 호스트에 걸친 플로우는 문서 하나에 모든 origin을 `servers`로 적고, 경로마다 응답한 origin을 따로 적습니다. API 하나당 문서 하나가 필요하면 `--host`를 쓰세요. `--max-samples=N`(기본값 20)은 operation마다 읽을 플로우 수, `--max-flows=N`(기본값 5000)은 전체 플로우 수, `--max-endpoints=N`(기본값 1000)은 남길 operation 수의 상한입니다. 상한 때문에 문서가 잘리면 stderr에 알려줍니다.
 
@@ -1199,11 +1199,12 @@ gori run links delete --owner=note --id=2 --ref=repeater --ref-id=3
 | Option | Description |
 |--------|-------------|
 | `--owner=KIND` | 소유자 종류: `issue` (기본값) 또는 `note` |
-| `--id=N` | 소유 이슈 / 노트 id. 필수 |
+| `--id=N` | 소유 이슈 / 노트 id. `--note-position`으로 노트를 지목하지 않으면 필수 |
 | `--issue=N` · `--note=N` | `--owner=issue --id=N` / `--owner=note --id=N`의 줄임. `evidence`와 `retest`가 쓰는 철자입니다 |
+| `--note-position=N` | 안정 id 대신 `gori run notes`가 보여 주는 1부터 시작하는 목록 위치로 노트를 지목 |
 | `--ref=KIND` | `add` / `delete`의 대상 종류: `flow`, `repeater`, `fuzz`, `miner` |
 | `--ref-id=M` | `add` / `delete`의 대상 id |
-| `--format=FMT` | `list`에서 `text` (기본값) 또는 `json` |
+| `--format=FMT` | `list`와 `add`에서 `text` (기본값) 또는 `json` |
 
 대상이 정리(prune)된 포인터는 사라지지 않고 `(stale)`로 표시되므로, "증거가 없음"과 "증거가 사라짐"을 구분할 수 있습니다. `add`는 멱등이며, 양쪽 대상이 모두 존재해야 합니다.
 
@@ -1286,7 +1287,7 @@ gori run retest forget 3                                                       #
 | `body:same` | 디코딩된 본문이 직전 `baseline` 단계와 동일 |
 | `body:diff` | 그것과 다름 |
 
-JSON 경로는 `sequence --jsonpath`와 같은 문법입니다: 점 표기(`data.items.0.id`) 또는 괄호 표기(`$.data.items[0]["id"]`). 와일드카드, 필터, `..`, 닫히지 않은 괄호처럼 gori가 읽을 수 없는 경로는 단계를 추가할 때 거부되므로, 경로를 한 번도 읽지 못해서 `json-absent:`가 통과하는 일은 없습니다.
+JSON 경로는 `sequence --jsonpath`와 같은 문법입니다: 점 표기(`data.items.0.id`) 또는 괄호 표기(`$.data.items[0]["id"]`). 와일드카드, 필터, `..`, 닫히지 않은 괄호처럼 gori가 읽을 수 없는 경로는 단계를 추가할 때 거부되므로, 경로를 한 번도 읽지 못해서 `json-absent:`가 통과하는 일은 없습니다. 읽을 수 있는 경로가 없는 필드를 가리키면 평범한 부재입니다.
 
 각 단계는 실행 시점에 Repeater 탭이 들고 있는 요청을 그대로 보냅니다. 그래서 리테스트는 고쳐지는 요청을 따라가고, `gori run evidence`는 당시 모습 그대로를 얼립니다. 모든 전송은 프로젝트 스코프와 Sandbox 게이트를 통과하며 History에 `src:retest`로, 이슈와 단계 번호를 달고 기록됩니다. 그래서 탭이 한참 뒤에 바뀌어도 결과 행은 자기가 보고한 바로 그 응답을 열 수 있습니다. 탭에 저장된 응답은 덮어쓰지 않습니다.
 
@@ -1764,7 +1765,7 @@ MCP stdio 서버입니다. 도구 세부사항은 [MCP 가이드](/ko/guide/mcp/
 | `--tools=SPEC` | 지정한 도구만 노출: 쉼표로 구분한 이름, 글롭, 프로필(`@minimal`, `@recon`)이며, 앞에 `-`를 붙이면 제외 (`@recon`, `@minimal,send_request` 또는 `-fuzz_*,-mine_*`). 제공하는 카탈로그 크기는 시작 로그에 나옵니다. [노출할 도구 고르기](/ko/guide/mcp/#choosing-which-tools-are-exposed) 참고 |
 | `--pin-project` | 시작한 프로젝트에 서버를 고정: `list_projects`, `switch_project`, `create_project`, `delete_project`, `import_project`, `export_project`, `diff_projects`를 노출하지 않음. `--no-project`와 함께 쓸 수 없고, 바인딩 없이 시작하게 되면 중단 |
 | `--install-claude` | Claude Desktop `mcpServers` 설정 기록 |
-| `--install-claude-code` | Claude Code `~/.claude.json` `mcpServers` 항목 기록 |
+| `--install-claude-code` | Claude Code `~/.claude.json` `mcpServers` 항목 기록 (또는 `$CLAUDE_CONFIG_DIR`) |
 | `--install-codex` | OpenAI Codex `~/.codex/config.toml` `[mcp_servers.gori]` 기록 (또는 `$CODEX_HOME`) |
 | `--install-agy` | Antigravity `~/.gemini/antigravity-cli/mcp_config.json` 기록 |
 | `--install-grok` | Grok `~/.grok/config.toml` `[mcp_servers.gori]` 기록 |

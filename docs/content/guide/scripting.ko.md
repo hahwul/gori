@@ -29,7 +29,7 @@ gori run <subcommand> [verb] [options]
 | `gori run project switch NAME` | `project switch --clear` 전까지 유지되는 고정 |
 | *(모두 없음)* | 가장 최근에 사용한 프로젝트 |
 
-스크립트에서 피해야 할 것은 마지막 행입니다. 다른 프로젝트에 쓰기를 한 번만 해도(`notes create --project demo`) 그 프로젝트가 가장 최근에 사용한 프로젝트가 되고, 이후 `--project` 없는 명령은 모두 그쪽을 따라갑니다. 대신 스크립트 맨 위에서 `GORI_PROJECT`를 설정하세요. 존재하지 않는 프로젝트를 가리키는 `GORI_PROJECT`나 고정은 건너뛰지 않고 거부하며, 어느 규칙이 프로젝트를 골랐는지 stderr 안내가 알려 줍니다(`gori run: using project demo (from GORI_PROJECT)`).
+스크립트에서 피해야 할 것은 마지막 행입니다. 다른 프로젝트에 쓰기를 한 번만 해도(`notes create --project demo`) 그 프로젝트가 가장 최근에 사용한 프로젝트가 되고, 이후 `--project` 없는 명령은 모두 그쪽을 따라갑니다. 대신 스크립트 맨 위에서 `GORI_PROJECT`를 설정하세요. 존재하지 않는 프로젝트를 가리키는 `GORI_PROJECT`나 고정은 건너뛰지 않고 거부하며, 어느 규칙이 프로젝트를 골랐는지 stderr 안내가 알려 줍니다(`gori run: using project demo (from GORI_PROJECT) — name another with --project NAME or --db PATH`).
 
 두 선택자는 우선순위가 아니라 택일입니다. **둘 다** 주면 `--db`가 조용히 이기는 게 아니라
 사용법 오류로 거절합니다. 같은 플래그 짝이 파괴적 동사(`history delete`, `history clear`,
@@ -40,7 +40,7 @@ gori run <subcommand> [verb] [options]
 
 읽기 서브커맨드는 스토어를 읽기 전용으로 열고 캡처 락을 잡지 않으므로, 라이브 TUI가 캡처 중인 프로젝트를 대상으로 실행해도 안전합니다. SQLite WAL이 읽는 쪽과 쓰는 쪽을 함께 감당합니다. `body:` 질의는 예외입니다. 검색 인덱스를 비우므로 쓰기입니다.
 
-쓰기 서브커맨드는 TUI·MCP와 같은 WAL 데이터베이스를 사용하며 Store의 writer를 통해 직렬화됩니다. TUI가 열려 있어도 실행할 수 있지만, 캡처 커밋이 SQLite writer 슬롯을 잠시 점유할 수 있습니다. 짧게 끝나는 서브커맨드의 SQLite 열기·쓰기 대기는 최대 1초입니다. 슬롯이 계속 사용 중이면 다른 gori가 프로젝트를 잠그고 있다는 안내(재시도하거나 읽기 전용 서브커맨드로 읽기)를 출력하고 0이 아닌 종료 코드로 끝납니다. 실행 내내 프로젝트를 열어 두는 서브커맨드(`discover`, `fuzz`, `import`, `probe`, `retest run`, `oast listen`/`resume`, `intercept`)는 TUI 캡처 writer와 같은 기본 5초 대기를 유지합니다. 이미 네트워크로 나간 repeater send는 응답이나 History 쓰기를 저장하지 못해도 완료된 전송 결과를 그대로 유지합니다. STDERR에 경고를 출력하고, `--format json`에는 `response_saved` / `history_saved`가 그 이유와 함께 실리므로, 스크립트는 그 쓰기 실패 하나 때문에 범용 셸 재시도로 요청을 다시 보내지 않고도 이를 구분할 수 있습니다.
+쓰기 서브커맨드는 TUI·MCP와 같은 WAL 데이터베이스를 사용하며 Store의 writer를 통해 직렬화됩니다. TUI가 열려 있어도 실행할 수 있지만, 캡처 커밋이 SQLite writer 슬롯을 잠시 점유할 수 있습니다. 짧게 끝나는 서브커맨드의 SQLite 열기·쓰기 대기는 최대 1초입니다. 슬롯이 계속 사용 중이면 다른 gori가 프로젝트를 잠그고 있다는 안내(재시도하거나 읽기 전용 서브커맨드로 읽기)를 출력하고 0이 아닌 종료 코드로 끝납니다. 실행 내내 프로젝트를 열어 두는 서브커맨드(`discover`, `fuzz`, `import`, `--macro`를 준 `mine`, `probe`, `retest run`, `oast listen`/`resume`, `intercept`, `sitemap js --scan`)는 TUI 캡처 writer와 같은 기본 5초 대기를 유지합니다. 이미 네트워크로 나간 repeater send는 응답이나 History 쓰기를 저장하지 못해도 완료된 전송 결과를 그대로 유지합니다. STDERR에 경고를 출력하고, `--format json`에는 `response_saved` / `history_saved`가 그 이유와 함께 실리므로, 스크립트는 그 쓰기 실패 하나 때문에 범용 셸 재시도로 요청을 다시 보내지 않고도 이를 구분할 수 있습니다.
 
 ```bash
 gori run history --project my-engagement -q 'status:5xx'
@@ -71,7 +71,7 @@ gori run issues --db /path/to/project.db --format json
 | `0` | 성공 |
 | `1` | 오류: 전송 실패, 열 수 없는 프로젝트, 적용되지 못한 변경, 또는 어떤 요청도 응답을 받지 못한 스윕(`fuzz`, `mine`, `discover`, `sequence`, `authorize`, `cache-deception`) |
 | `3` | 판정 게이트: `gori run fuzz --fail-if-no-matches`가 정상 완료했지만 매칭이 하나도 없음(`--stop-on` / `--stop-after-matches`가 발동했다면 `0`), 또는 `gori run probe --fail-on=LEVEL`이 LEVEL 이상의 이슈를 보고함 |
-| `130` | SIGINT/SIGTERM으로 중단. `fuzz`, `mine`, `discover`, `sequence`, `authorize`, `repeater minimize`는 모아 둔 것을 먼저 내보내므로, `&& next-step`이 잘린 실행을 끝난 실행으로 오해하지 않습니다 |
+| `130` | SIGINT/SIGTERM으로 중단. `fuzz`, `mine`, `discover`, `sequence`, `authorize`, `cache-deception`, `repeater minimize`는 모아 둔 것을 먼저 내보내므로, `&& next-step`이 잘린 실행을 끝난 실행으로 오해하지 않습니다 |
 
 매칭이 없으면서 *동시에* 모든 전송이 실패한 fuzz 실행(대상 다운, TLS 실패, 스코프 차단)은 `1`로 끝나므로, `--fail-if-no-matches` 없이도 스크립트가 "결과 없음"과 "대상에 닿지도 못함"을 구분할 수 있습니다(플래그를 주면 `3`이 우선합니다).
 

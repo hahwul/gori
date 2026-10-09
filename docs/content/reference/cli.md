@@ -794,7 +794,7 @@ gori run probe -a
 
 `--severity` is `info`\|`low`\|`medium`\|`high`\|`critical`; `--fail-on=LEVEL` makes the scan exit `3` when an issue it reports is at or above LEVEL (after `--severity`/`--category`/`--in-scope`), so it can gate a CI job; `--category` is `headers`\|`cookies`\|`tech`\|`infoleak`\|`cors`\|`client`\|`active`\|`custom`; `-a`/`--active` includes light-touch active checks; `-q`/`--query` filters with QL, and `--lenient` accepts a query that names an unknown field instead of refusing it. `--in-scope` reports only issues on hosts in the project's configured scope (the TUI's `s` lens, opt-in and independent of `--active`/`--allow-unscoped`); every flow is still scanned.
 
-With `--active`: `--unsafe` also probes unsafe methods (`POST`/`PUT`/`PATCH`/`DELETE`), whose re-sends may mutate server data; `--aggressive` raises the per-rule caps and widens the forbidden-bypass header set (and implies `--unsafe`). Both stay scope-gated unless you also pass `--allow-unscoped`. Use them only against authorized targets.
+With `--active`: `--unsafe` also probes unsafe methods (`POST`/`PUT`/`PATCH`/`DELETE`), whose re-sends may mutate server data; `--aggressive` raises the per-rule caps and widens the forbidden-bypass header set (and implies `--unsafe`). Both stay scope-gated unless you also pass `--allow-unscoped`. `-k`/`--insecure-upstream` skips upstream TLS verification for the active re-sends. Use them only against authorized targets.
 
 A bare `probe` scans and prints. `--persist` also writes what it found into the persisted findings, merged the way the live scanner merges them, so a project nobody opened in the TUI has a triage list; a write that does not land is reported and exits 1 after the report. The persisted findings behind the TUI's Probe tab are a separate surface:
 
@@ -1207,11 +1207,12 @@ gori run links delete --owner=note --id=2 --ref=repeater --ref-id=3
 | Option | Description |
 | -------- | ------------- |
 | `--owner=KIND` | Owner kind: `issue` (default) or `note` |
-| `--id=N` | Owner issue / note id. Required |
+| `--id=N` | Owner issue / note id. Required unless `--note-position` names the note |
 | `--issue=N` · `--note=N` | Shorthand for `--owner=issue --id=N` / `--owner=note --id=N`, the spelling `evidence` and `retest` use |
+| `--note-position=N` | A note by the 1-based list position `gori run notes` shows, instead of its stable id |
 | `--ref=KIND` | Target kind for `add` / `delete`: `flow`, `repeater`, `fuzz`, `miner` |
 | `--ref-id=M` | Target id for `add` / `delete` |
-| `--format=FMT` | `text` (default) or `json`, on `list` |
+| `--format=FMT` | `text` (default) or `json`, on `list` and `add` |
 
 A pointer whose target was pruned lists as `(stale)` rather than disappearing, so "no evidence" and "evidence that is gone" stay distinguishable. `add` is idempotent, and both ends must exist.
 
@@ -1772,7 +1773,7 @@ MCP stdio server. See the [MCP guide](/guide/mcp/) for tool details.
 | `--tools=SPEC` | Advertise only these tools: comma-separated names, globs or profiles (`@minimal`, `@recon`), a leading `-` subtracts (`@recon`, `@minimal,send_request` or `-fuzz_*,-mine_*`). The startup log reports the size of what is served; see [Choosing which tools are exposed](/guide/mcp/#choosing-which-tools-are-exposed) |
 | `--pin-project` | Keep the server on the project it starts with: withhold `list_projects`, `switch_project`, `create_project`, `delete_project`, `import_project`, `export_project` and `diff_projects`. Refused with `--no-project`; a start that ends up unbound aborts |
 | `--install-claude` | Write Claude Desktop `mcpServers` config |
-| `--install-claude-code` | Write Claude Code `~/.claude.json` `mcpServers` entry |
+| `--install-claude-code` | Write Claude Code `~/.claude.json` `mcpServers` entry (or `$CLAUDE_CONFIG_DIR`) |
 | `--install-codex` | Write OpenAI Codex `~/.codex/config.toml` `[mcp_servers.gori]` (or `$CODEX_HOME`) |
 | `--install-agy` | Write Antigravity `~/.gemini/antigravity-cli/mcp_config.json` |
 | `--install-grok` | Write Grok `~/.grok/config.toml` `[mcp_servers.gori]` |

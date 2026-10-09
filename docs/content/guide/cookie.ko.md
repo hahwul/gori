@@ -15,7 +15,7 @@ group = "워크벤치"
 
 하나의 세션, 두 개의 뷰이며 `Ctrl-T`로 전환합니다. 각 렌즈의 최상위 카드 테두리에 전환 칩이 있습니다(INPUT에는 ` ^T:→FORGE `, PAYLOAD에는 ` ^T:→DECODE `). 클릭해도 키와 똑같이 동작합니다:
 
-- **Decode**: INPUT에 쿠키를 붙여 넣으면 파트가 DECODED에 실시간으로 디코드됩니다. **OPTIONS**는 읽는 방식을 고정합니다: 포맷(`Ctrl-A`로 `auto` / `flask` / `rack` / `django` 순환, `auto`는 문장 부호로 감지), Django HMAC 알고리즘, 서명 salt. **SECRET**은 후보 키를 담으며, 입력하는 동안 검증 결과(`✓ verified` / `✗ bad key`)가 실시간으로 표시됩니다. 크랙하려면 읽기 패널(READ 모드의 INPUT, DECODED, OUTPUT)에서 `c`를 누르세요. SECRET을 비롯한 편집 패널에서는 `c`가 그냥 글자로 입력됩니다(아래 참고).
+- **Decode**: INPUT에 쿠키를 붙여 넣으면 파트가 DECODED에 실시간으로 디코드됩니다. **OPTIONS**는 읽는 방식을 고정합니다: 포맷(`Ctrl-A`로 `auto` / `flask` / `rack` / `django` 순환, `auto`는 문장 부호로 감지), Django HMAC 알고리즘, 서명 salt. **SECRET**은 후보 키를 담으며, 입력하는 동안 검증 결과(`✓ verified` / `✗ bad key`)가 실시간으로 표시됩니다. 크랙하려면 읽기 패널(READ 모드의 INPUT 또는 DECODED)에서 `c`를 누르세요. SECRET을 비롯한 편집 패널에서는 `c`가 그냥 글자로 입력됩니다(아래 참고).
 - **Forge**: PAYLOAD에서 세션을 편집하고(Flask/Django는 JSON 객체, Rack은 불투명한 base64 값), SECRET을 설정하면 재서명된 쿠키가 OUTPUT에 실시간으로 나타납니다.
 
 `Space` → **Load decoded payload**는 현재 Decode 쪽에서 디코드된 payload를 Forge 편집기로 불러옵니다. 그래서 값 하나를 손보고 두 동작만으로 재서명할 수 있습니다. 결과는 읽기 패널에서는 `y`로, 편집 중에는 `Ctrl-Y`로(위조된 쿠키는 `Space` → **Copy forged cookie**로) 복사하세요.

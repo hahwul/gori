@@ -149,7 +149,7 @@ print("\n".join(names))
 else
   case "$api_code" in
     401)
-      log "GitHub API rejected the token (HTTP 401 — check GITHUB_TOKEN/GH_TOKEN) — trying the release redirect" ;;
+      log "GitHub API rejected the token (HTTP 401 — check GORI_GITHUB_TOKEN/GITHUB_TOKEN/GH_TOKEN) — trying the release redirect" ;;
     403|429)
       log "GitHub API rate limit reached (HTTP ${api_code} — 60 requests/hour per IP unauthenticated) — trying the release redirect" ;;
     000)
