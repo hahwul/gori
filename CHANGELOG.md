@@ -8,7 +8,7 @@
 - Settings: a settings file or imported profile with a non-UTF-8 byte in an env var key, an upstream destination or proxy address, a listener host or an ALPN list no longer aborts the load (every later section at its default, saves refused) or crashes `gori settings import`
 - Import: a HAR's WebSocket transcript now commits together with its flow, so an import that collides with a busy project can no longer report a socket as imported while dropping its messages
 - Issues and notes: a link that did not commit on a busy or unwritable project is reported as not added instead of as already linked, in the TUI (one link or a marked batch) and over MCP, where `add_link` and every `repeater_id` or `issue_id` link argument answer PROJECT_BUSY
-- Projects: toggling a scan rule, or a global Rewriter or Colormarker rule, from two gori instances at once no longer erases the other's change, and a toggle over an unreadable stored list is refused instead of re-enabling every rule it held
+- Projects: toggling a scan rule, or a global Rewriter or Colormarker rule, from two gori instances at once no longer erases the other's change, and a scan-rule toggle over an unreadable stored list is refused instead of re-enabling every rule it held
 - Projects: on a filesystem without flock support (an NFS `nolocks` or FUSE mount) a project now captures and can be deleted, instead of reading as held by another gori instance
 - Intercept, colour and extract rules: a `url:` condition now sees a non-default port and a bracketed IPv6 host, so it matches what the same `url:` matches in History
 - Filters: Sitemap's `NOT (tag:x OR host:y)` keeps the negation on its non-tag terms, and terms after a group nested past the depth cap are no longer silently dropped
