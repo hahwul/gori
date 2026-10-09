@@ -165,7 +165,7 @@ module Gori
       # fibers, parked on @events.send, still finish and exit instead of leaking),
       # and the ensure GUARANTEES a terminal state — a fiber that dies here must
       # never leave the job wedged at :running, which would hang a polling client
-      # forever and keep jobs_running? true (blocking switch_project/delete_project).
+      # forever and keep jobs_busy refusing (blocking switch_project/delete_project).
       private def run_fuzz_job(fjob : FuzzJob, engine : Fuzz::Engine) : Nil
         # CLI (`--ac`) and the TUI both call calibrate_baseline before the sweep.
         # fuzz_config already set Config/Matcher.auto_calibrate from the arg, but nothing

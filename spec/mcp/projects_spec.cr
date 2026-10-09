@@ -706,3 +706,100 @@ describe "Gori::MCP::Tools list_projects narrowing" do
     end
   end
 end
+
+module Gori::MCP
+  class Tools
+    def hold_discover_job_for_projects_spec(djob : DiscoverJob) : Nil
+      @discover_jobs[djob.id] = djob
+    end
+  end
+end
+
+# A discover job sitting at :running — its engine is never started.
+private def running_discover_job(tools : Gori::MCP::Tools) : Gori::MCP::Tools::DiscoverJob
+  engine = Gori::Discover::Engine.new("http://t/", [] of String,
+    Gori::Discover::Sender.new(verify: false), Gori::Discover::Config.new)
+  djob = Gori::MCP::Tools::DiscoverJob.new("dj1", engine,
+    Gori::MCP::Tools::JobAudit.new("http://t/", nil, 1, nil, 0_i64), nil)
+  tools.hold_discover_job_for_projects_spec(djob)
+  djob
+end
+
+private def with_isolated_projects(&)
+  root = File.tempname("gori-projhome")
+  Dir.mkdir_p(root)
+  prev = ENV["GORI_HOME"]?
+  ENV["GORI_HOME"] = root
+  tools = Gori::MCP::Tools.new(nil, allow_actions: true, verify_upstream: false)
+  begin
+    yield tools
+  ensure
+    tools.current_store.try(&.close) rescue nil
+    Gori::Settings.load_project_network(nil, bind: false) # process globals a bind installs
+    prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+    FileUtils.rm_rf(root)
+  end
+end
+
+describe "Gori::MCP::Tools project switch refusals" do
+  # #1556 — the refusal named a hand-typed "fuzz/mine" whatever was running, sending an agent
+  # to look for a job that did not exist.
+  it "names the kind of the job that blocks a switch" do
+    with_isolated_projects do |tools|
+      slug = mcp_ok_json(tools, "create_project", %({"name":"Busy"}))["slug"].as_s
+      djob = running_discover_job(tools)
+      r = tools.call("switch_project", JSON.parse(%({"project":#{slug.to_json}})))
+      r.error_code.should eq("PROJECT_BUSY")
+      r.text.should contain("discover job(s) are running")
+      r.text.should_not contain("fuzz")
+      djob.status = :done
+      mcp_ok_json(tools, "switch_project", %({"project":#{slug.to_json}}))["switched"].as_bool.should be_true
+    end
+  end
+
+  # #1558 — deleting the served project needs a way off it, and a server bound to its one
+  # temporary project had nowhere to switch to.
+  it "unbinds with unbind:true so the project it served can be deleted" do
+    with_isolated_projects do |tools|
+      slug = mcp_ok_json(tools, "create_project", %({"name":"Temp"}))["slug"].as_s
+
+      both = tools.call("switch_project", JSON.parse(%({"project":#{slug.to_json},"unbind":true})))
+      both.error_code.should eq("INVALID_ARGUMENT")
+      both.field.should eq("unbind")
+
+      djob = running_discover_job(tools)
+      busy = tools.call("switch_project", JSON.parse(%({"unbind":true})))
+      busy.error_code.should eq("PROJECT_BUSY")
+      busy.text.should contain("discover job(s) are running")
+      djob.status = :done
+
+      # A project pinned to a jump host: the bind installs it as the process's route.
+      tools.current_store.not_nil!.set_setting(Gori::Settings::PROJECT_UPSTREAM_KEY, "http://jump.internal:3128")
+      mcp_ok_json(tools, "switch_project", %({"project":#{slug.to_json}}))
+      Gori::Settings.upstream_route("collector.example").host.should eq("jump.internal")
+
+      left = mcp_ok_json(tools, "switch_project", %({"unbind":true}))
+      left["switched"].as_bool.should be_true
+      left["project"].raw.should be_nil
+      left["previous_project"].as_s.should eq("Temp")
+      info = mcp_ok_json(tools, "project_info", "{}")
+      info["bound"].as_bool.should be_false
+      info["project"].raw.should be_nil
+      mcp_ok_json(tools, "list_projects", "{}")["bound"].as_bool.should be_false
+      tools.call("list_history", JSON.parse("{}")).error_code.should eq("NO_PROJECT")
+      # …and an unbound OAST dial no longer leaves through the old project's jump host.
+      Gori::Settings.project_upstream_proxy.should be_nil
+      Gori::Settings.upstream_route("collector.example").host.should_not eq("jump.internal")
+
+      # Unbinding an unbound server is a no-op, not an error.
+      mcp_ok_json(tools, "switch_project", %({"unbind":true}))["switched"].as_bool.should be_false
+
+      dry = mcp_ok_json(tools, "delete_project", %({"project":#{slug.to_json}}))
+      dry["deletable"].as_bool.should be_true
+      done = mcp_ok_json(tools, "delete_project",
+        %({"project":#{slug.to_json},"dry_run":false,"confirmation_token":#{dry["confirmation_token"].as_s.to_json}}))
+      done["deleted"].as_bool.should be_true
+      mcp_ok_json(tools, "list_projects", "{}")["total_projects"].as_i.should eq(0)
+    end
+  end
+end

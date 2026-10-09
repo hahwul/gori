@@ -176,7 +176,7 @@ module Gori
       # drain alive on a callback failure (so the engine's worker fibers, parked on
       # @events.send, still finish and exit instead of leaking), and the ensure GUARANTEES a
       # terminal state — a fiber that dies here must never leave the job wedged at :running,
-      # which would hang a polling client forever and keep jobs_running? true (blocking
+      # which would hang a polling client forever and keep jobs_busy refusing (blocking
       # switch_project/delete_project). The discover engine already emits a terminal event on
       # every path, but this net matches the other three jobs so a future change can't regress.
       private def run_discover_job(djob : DiscoverJob, engine : Discover::Engine) : Nil
@@ -205,7 +205,7 @@ module Gori
           # last ProgressEvent happened to carry — it is the number the status below reports.
           djob.queued = ev.progress.queued
           djob.stats = ev.stats
-          # Flush the tail HERE, while the job is still :running. `jobs_running?` is what
+          # Flush the tail HERE, while the job is still :running. `jobs_busy` is what
           # refuses a concurrent `switch_project`, and it keys on that status — so once the
           # terminal status below is assigned, the flush that used to happen after
           # `engine.run` returned was racing a project swap across a fiber yield, and
