@@ -129,6 +129,7 @@ describe "MCP agent ergonomics" do
         %({"spec":"gzip-compress","input":"hi"})    => "gzip-compress",
         %({"spec":"html-escape","input":"<a>"})     => "html-escape",
         %({"spec":"url-encode-all","input":"ab"})   => "url-encode-all",
+        %({"spec":"raw-deflate","input":"hello"})   => "raw-deflate",
         %({"spec":"sha256","input":"hello"})        => "sha256",
         %({"spec":"shell-escape","input":"a b"})    => "shell-escape",
         %({"spec":"homoglyph","input":"ab"})        => "homoglyph",

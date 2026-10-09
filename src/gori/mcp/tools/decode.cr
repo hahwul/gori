@@ -135,8 +135,11 @@ module Gori
         Decoder.parse_spec(spec).map do |tok|
           conv = reg[tok]?
           next tok unless conv && conv.direction.encode?
-          # The token AS TYPED — an alias that already names its direction is not bare.
+          # The token AS TYPED — an alias that already names its direction is not bare, and
+          # neither is a canonical name spelled in full (`raw-deflate` names no direction word
+          # but is the only way to reach raw-deflate compression).
           next tok if DIRECTION_WORDS.any? { |w| tok.downcase.includes?(w) }
+          next tok if Decoder::Registry.normalize(tok) == conv.name
           Tools.inverse_of(reg, conv.name) || tok
         end.join(" > ")
       end
