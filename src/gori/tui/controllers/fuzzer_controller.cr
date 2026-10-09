@@ -1903,7 +1903,7 @@ module Gori::Tui
       v = tab.view
       cfg = v.config_json
       unless @host.session.store.update_fuzz_session(id, v.target, v.template_text, v.http2?, v.sni_override, cfg, v.name)
-        return @host.status("session NOT saved (project busy) — leaving the tab dirty so the next save retries")
+        return @host.status("session NOT saved (project busy, or closed in another gori) — the tab stays dirty")
       end
       v.mark_config_synced(cfg)
       v.clear_dirty

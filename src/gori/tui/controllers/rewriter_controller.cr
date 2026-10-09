@@ -1051,7 +1051,7 @@ module Gori::Tui
           # standing `/` query would otherwise drop its scope change silently.
           moved = rules_engine.rules.find { |r| r.scope == from && r.id == id }
           if moved.nil?
-            @host.status("rule is gone (deleted elsewhere) — nothing was saved or moved")
+            @host.status("rule saved, but it is gone now (deleted elsewhere) — not moved")
             return false
           end
           if rules_engine.set_scope(moved, ov.scope)
