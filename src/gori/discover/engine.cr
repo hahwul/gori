@@ -1350,14 +1350,12 @@ module Gori::Discover
       expand_probe_links(hit)
     end
 
-    # Extensions that name a FILE. Any dot is not enough: `/api/v2.0`, `/app.v2` and
-    # `/backup.old` are directories, and skipping them hid everything under them.
-    FILE_EXT = Set{"php", "asp", "aspx", "jsp", "json", "xml", "txt", "html", "htm", "js", "css"} +
-               Url::BINARY_EXT
-
+    # Any extension names a file, except a version suffix: `/api/v2.0` and `/app.v2` are
+    # directories, and skipping them hid everything under them. An allowlist of file
+    # extensions instead re-swept every `.bak`/`.sql`/`.env`-style hit.
     private def file_shaped?(url : String) : Bool
       return false unless ext = StaticAsset.extension(url)
-      FILE_EXT.includes?(ext) || @config.extensions.any? { |e| e.lchop('.').downcase == ext }
+      !ext.matches?(/\Av?\d+\z/)
     end
 
     # The links a confirmed brute-force hit's body named, fed back into the frontier through

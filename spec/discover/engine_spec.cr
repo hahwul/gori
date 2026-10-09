@@ -901,16 +901,18 @@ describe Gori::Discover::Engine do
     cfg = D::Config.new(spider: false, bruteforce: true, calibrate_probes: 3, concurrency: 1,
       retries: 0, confidence_floor: 0.4, max_depth: 3)
     sent = [] of String
-    findings, _ = run_discover("http://t/", %w[x.php admin], cfg) do |t|
+    findings, _ = run_discover("http://t/", %w[x.php db.bak admin], cfg) do |t|
       sent << t
       case t
-      when "/x.php" then html("phpinfo output for this very server")
-      when "/admin" then html("<h1>the real admin panel</h1>")
-      else               notfound
+      when "/x.php"  then html("phpinfo output for this very server")
+      when "/db.bak" then html("-- MySQL dump of the production database")
+      when "/admin"  then html("<h1>the real admin panel</h1>")
+      else                notfound
       end
     end
-    findings.map(&.url).sort!.should eq(["http://t/admin", "http://t/x.php"])
+    findings.map(&.url).sort!.should eq(["http://t/admin", "http://t/db.bak", "http://t/x.php"])
     sent.any?(&.starts_with?("/x.php/")).should be_false
+    sent.any?(&.starts_with?("/db.bak/")).should be_false
     sent.any?(&.starts_with?("/admin/")).should be_true
   end
 
@@ -918,12 +920,17 @@ describe Gori::Discover::Engine do
     cfg = D::Config.new(spider: false, bruteforce: true, calibrate_probes: 3, concurrency: 1,
       retries: 0, confidence_floor: 0.4, max_depth: 3)
     sent = [] of String
-    findings, _ = run_discover("http://t/", %w[v1.0], cfg) do |t|
+    findings, _ = run_discover("http://t/", %w[v1.0 app.v2], cfg) do |t|
       sent << t
-      t == "/v1.0" ? html("<h1>api root, version one</h1>") : notfound
+      case t
+      when "/v1.0"   then html("<h1>api root, version one</h1>")
+      when "/app.v2" then html("<h1>the second app generation</h1>")
+      else                notfound
+      end
     end
     findings.map(&.url).should contain("http://t/v1.0")
     sent.any?(&.starts_with?("/v1.0/")).should be_true
+    sent.any?(&.starts_with?("/app.v2/")).should be_true
   end
 
   it "confines a path-scoped run to the seed subtree" do
