@@ -25,7 +25,10 @@ class Gori::Tui::RepeaterView
     end
   end
 
-  def enter_request_insert! : Nil
+  # `snap` is the direction off a hidden `¦chain` byte READ may have left the caret on: back to
+  # the value's end (the caret is drawn on the closing `§`), or past the `§` for an append.
+  def enter_request_insert!(snap : Int32 = -1) : Nil
+    req_editor.snap_out_of_conceal(snap)
     @request_mode = InputMode::Insert
   end
 

@@ -283,7 +283,7 @@ module Gori
                          "'issue_id' or 'flow_id', not two different seeds", "INVALID_ARGUMENT", field: "flow_id")
             end
             flow_id = fid
-          elsif target.nil? || target.empty? || request.nil? || request.empty?
+          elsif flow_id.nil? && (target.nil? || target.empty? || request.nil? || request.empty?)
             return Result.new("issue #{issue_id} has no associated flow_id", is_error: true)
           end
         end
@@ -397,9 +397,9 @@ module Gori
 
         return busy("failed to persist repeater (store busy or unwritable)") if id == 0
 
-        if issue_id
-          store.add_link(Store::LinkOwnerKind::Issue, issue_id,
-            Store::LinkRefKind::Repeater, id)
+        if issue_id && !link_issue_repeater(issue_id, id)
+          return busy("repeater ##{id} created but its issue link NOT written (store busy or unwritable); " \
+                      "retry with update_issue(id: #{issue_id}, repeater_id: #{id})")
         end
 
         # Checked, like the row insert above: the reply names the session's `name` and its
@@ -503,7 +503,13 @@ module Gori
           end
         end
         return [] of Store::WsOutMessage unless str_val = str(h, "ws_out_messages")
-        str_val.split('\n').compact_map { |l| l.strip.empty? ? nil : Store::WsOutMessage.text(l) }
+        ws_text_lines(str_val)
+      end
+
+      # The newline-separated STRING form `ws_out_messages_prop` advertises: one plain TEXT
+      # frame per non-blank line. Shared by every argument declared with that schema.
+      private def ws_text_lines(text : String) : Array(Store::WsOutMessage)
+        text.split('\n').compact_map { |l| l.strip.empty? ? nil : Store::WsOutMessage.text(l) }
       end
 
       # The refusal for one bad `ws_out_messages` / `messages` entry. The entry is echoed so a
@@ -980,7 +986,9 @@ module Gori
         end
 
         keep_request_line = bool_arg(h, "keep_request_line", false)
-        name_prefix = str(h, "name_prefix").try { |v| Env.mask_secrets(v) }
+        # An empty affix renames nothing, so it is absent: storing it would freeze the derived
+        # label as a fixed name (a schema-filling client sends "" for what it leaves alone).
+        name_prefix = str(h, "name_prefix").try { |v| v.empty? ? nil : Env.mask_secrets(v) }
         tags = present?(h, "tags") ? repeater_tags_arg(h) : nil
 
         created = [] of {Int64, Int64, String?, Bool, Int32, Array(String)}
@@ -1158,8 +1166,9 @@ module Gori
                      "and the others edit it, and applying both in some order is a rule nobody could predict",
             "INVALID_ARGUMENT", field: "tags_set")
         end
-        prefix = str(h, "name_prefix").try { |v| Env.mask_secrets(v) }
-        suffix = str(h, "name_suffix").try { |v| Env.mask_secrets(v) }
+        # "" is absent, as in create_repeaters: an empty affix would only materialise the label.
+        prefix = str(h, "name_prefix").try { |v| v.empty? ? nil : Env.mask_secrets(v) }
+        suffix = str(h, "name_suffix").try { |v| v.empty? ? nil : Env.mask_secrets(v) }
         renaming = !(prefix.nil? && suffix.nil?)
 
         unless has_set || renaming || !add.empty? || !remove.empty?

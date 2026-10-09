@@ -120,6 +120,16 @@ describe Gori::Proxy::Tls::CertBuilder do
     end
   end
 
+  # Browsers ignore the CN, so a leaf without a SAN fails for that host even under a trusted
+  # root. '_' is not an X509v3 config metacharacter and real hosts (Compose services) carry it.
+  it "gives a host with an underscore its DNS SAN" do
+    with_tmp_dir do |dir|
+      root, root_key = Gori::Proxy::Tls::CertBuilder.build_root("gori test CA")
+      leaf, _ = Gori::Proxy::Tls::CertBuilder.build_leaf("my_app.internal", root, root_key)
+      ext_text(leaf, dir, "subjectAltName").should contain("DNS:my_app.internal")
+    end
+  end
+
   # A root's keyUsage must not stop it serving as a self-signed end-entity certificate, which
   # is what it was before #1168 gave it one (no keyUsage allows every usage): an ECDSA server
   # cert on TLS 1.2 and a TLS client cert both need digitalSignature.

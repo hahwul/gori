@@ -110,6 +110,17 @@ describe F::Template do
     F::Template.auto_mark_payload("{\"h\":0x1F,\"v\":1.2.3}").includes?('§').should be_false
   end
 
+  it "auto-marks a JSON body whose string runs past the PCRE2 JIT stack" do
+    big = "A" * 50_000
+    escaped = "\\\"" * 30_000
+    body = "POST / HTTP/1.1\r\nContent-Type: application/json\r\n\r\n" \
+           "{\"avatar\":\"#{big}\",\"e\":\"#{escaped}\",\"name\":\"bob\",\"n\":1}"
+    marked = F::Template.auto_mark(body)
+    marked.should contain("\"avatar\":\"§#{big}§\"")
+    marked.should contain("\"name\":\"§bob§\"")
+    F::Template.parse(marked).position_count.should eq(4)
+  end
+
   it "toggles a marker around the word at the cursor" do
     # cursor inside "admin"
     F::Template.mark_word("user=admin", 7).should eq("user=§admin§")
@@ -340,6 +351,17 @@ describe F::PayloadSet do
     upper = [] of String
     F::PayloadSet.new(F::InlineList.new(["ab"]), [F::Prefix.new("x-"), F::Case.new(:upper)] of F::Processor).each { |v| upper << v }
     upper.should eq(["X-AB"])
+  end
+
+  it "regex-replaces past a non-UTF-8 wordlist line instead of ending the sweep" do
+    bad = String.new(Bytes[0x61, 0xFF, 0x61])
+    out = [] of String
+    procs = [F::RegexReplace.new(/a/, "b")] of F::Processor
+    F::PayloadSet.new(F::InlineList.new(["ok a", bad, "never"]), procs).each { |v| out << v }
+    out.size.should eq(3)
+    out[0].should eq("ok b")
+    out[1].to_slice.should eq(Bytes[0x62, 0xFF, 0x62])
+    out[2].should eq("never")
   end
 
   it "stops at an Int64::MAX boundary without overflowing the run" do

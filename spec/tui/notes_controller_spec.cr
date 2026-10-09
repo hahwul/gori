@@ -209,6 +209,22 @@ describe "Gori::Tui::NotesController — the link preview row" do
   end
 end
 
+describe "Gori::Tui::NotesController — ^1-9 from the editor" do
+  it "drops the strip filter when it lands on a chip the filter hides" do
+    with_notes_controller do |controller|
+      controller.jump_subtab(0)
+      controller.view.enter_insert!
+      "alpha".each_char { |c| controller.view.insert(c) }
+      controller.start_subtab_filter
+      "alpha".each_char { |c| controller.handle_subtab_filter_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }
+      controller.subtab_hidden.not_nil!.should contain(2)
+      controller.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::Num3, Termisu::Input::Modifier::Ctrl, char: '3')).should be_true
+      controller.subtab_index.should eq(2)
+      controller.subtab_hidden.should be_nil
+    end
+  end
+end
+
 # Bulk paste opt-in (TabController#accepts_bulk_paste?). Notes was the one multi-line editor
 # still taking a paste keystroke by keystroke — the Repeater and Fuzzer opted in when the bulk
 # path landed — and it is the tab a response body or a whole writeup gets pasted into.

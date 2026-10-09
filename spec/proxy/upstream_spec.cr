@@ -194,6 +194,15 @@ describe Gori::Proxy::Upstream do
       sock.try(&.close)
       server.close
     end
+
+    # glibc truncates 73616 to 8080 (gori's own listener) past the self-loop guard; macOS and
+    # musl refuse it as a DNS failure. Neither is the answer: the port itself is invalid.
+    it "refuses a port outside 1-65535 before dialing anything" do
+      sock, err = Gori::Proxy::Upstream.dial_result("127.0.0.1", 65_536 + 8080)
+      sock.should be_nil
+      err.not_nil!.kind.should eq(Gori::Proxy::Upstream::DialErrorKind::Connect)
+      err.not_nil!.detail.not_nil!.should contain("port 73616 is out of range")
+    end
   end
 
   describe "upstream proxy (CONNECT tunnel)" do

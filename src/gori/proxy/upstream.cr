@@ -107,6 +107,13 @@ module Gori::Proxy
                          apply_host_overrides : Bool = true,
                          origin_scheme : String = "http") : {IO?, DialError?}
       target, target_port = apply_host_overrides ? connect_target(host, port, overrides, pin) : {pin || host, port}
+      # Nothing upstream range-checks an h1 Host/absolute-form port, and glibc's getaddrinfo
+      # truncates one to 16 bits: `:73616` dials :8080, gori's own listener, past the self-loop
+      # guard (which compares the untruncated number). One check here covers every route.
+      unless 0 < target_port <= 65_535
+        return {nil, DialError.new(DialErrorKind::Connect,
+          "port #{target_port} is out of range (1-65535) — the origin was never contacted")}
+      end
       # ONE decision point for "how do we reach this host": Settings.upstream_route folds the
       # project pin, the rule table, the legacy scalar, and its environment fallback together.
       # Resolved on the ORIGINAL host, not `target` — a rule is written against the name the
@@ -1067,6 +1074,12 @@ module Gori::Proxy
       return if tls.default?
       if tls.client_auth?
         ctx.certificate_chain = tls.client_cert
+        # SSL_CTX_use_PrivateKey_file has no passphrase callback set, so OpenSSL would prompt on
+        # /dev/tty: a blocking C call that freezes the whole proxy. The save-time check does not
+        # cover a hand-edited file or a key replaced since.
+        if Tls::KeyPair.encrypted_pem?(tls.client_key)
+          raise Gori::Error.new("client_key #{tls.client_key} is passphrase-protected; decrypt it first")
+        end
         ctx.private_key = tls.client_key
       end
       apply_tls_floor(ctx, tls.min_version)

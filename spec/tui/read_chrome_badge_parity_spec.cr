@@ -241,6 +241,33 @@ describe "READ-mode chrome + border badge parity" do
       view.pane_copy_text.should contain("¦b64")
     end
 
+    # READ steps raw codepoints, so its caret can sit inside the hidden `¦chain` (drawn on the
+    # closing `§`). Entering INSERT there typed into bytes the screen does not show.
+    it "starts the Repeater's INSERT outside the hidden chain" do
+      rect = Rect.new(0, 0, 120, 24)
+      {-1 => "§vX¦b64§", 1 => "§v¦b64§X"}.each do |snap, want|
+        view = RepeaterView.new
+        view.restore("https://h.test", marked, false, true)
+        view.focus_pane(:request)
+        view.render(Screen.new(MemoryBackend.new(120, 24)), rect)
+        (marked.index!("v") + 2).times { view.request_read_move(0, 1) } # onto the hidden `b`
+        view.enter_request_insert!(snap)
+        view.edit_insert('X')
+        view.request_text.should contain(want)
+      end
+    end
+
+    it "starts the Fuzzer's INSERT outside the hidden chain" do
+      view = FuzzerView.new
+      view.load_request("https://h", marked, false, "")
+      view.focus_pane(:template)
+      view.render(Screen.new(MemoryBackend.new(120, 30)), Rect.new(0, 0, 120, 30))
+      (marked.index!("v") + 2).times { view.template_read_move(0, 1) }
+      view.enter_template_insert!
+      view.template_insert('X')
+      view.template_text.should contain("§vX¦b64§")
+    end
+
     # A marker-free buffer must be byte-for-byte what it always drew: `conceal_of` returns nil
     # there, so the band and caret take the same path they took before this change.
     it "is unchanged on a buffer with nothing concealed" do

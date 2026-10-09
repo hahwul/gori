@@ -278,6 +278,19 @@ describe "outbound TLS policy" do
     end
   end
 
+  # The save-time check cannot see a hand-edited file or a key swapped since; the dial must
+  # refuse rather than let OpenSSL prompt on /dev/tty and freeze the proxy.
+  describe "a passphrase-protected client key at dial time" do
+    it "raises a clean error instead of prompting" do
+      with_client_cert do |cert, key|
+        File.write(key, "-----BEGIN ENCRYPTED PRIVATE KEY-----\nAAAA\n-----END ENCRYPTED PRIVATE KEY-----\n")
+        expect_raises(Gori::Error, /passphrase-protected/) do
+          Gori::Proxy::Upstream.context_for_policy(tls_rule("a.test", cert: cert, key: key), verify: false)
+        end
+      end
+    end
+  end
+
   describe "protocol floor" do
     # Crystal's Context::Client.new adds NO_TLS_V1 | NO_TLS_V1_1, which is exactly why a
     # legacy appliance was unreachable at ANY setting before this. Asserted against a real

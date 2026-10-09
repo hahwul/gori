@@ -826,6 +826,10 @@ module Gori::Settings
     return "settings: destination host is required (use * for all traffic)" if pattern.empty?
     return "settings: destination host must not include a scheme" if pattern.includes?("://")
     return "settings: destination host must not include a path" if pattern.includes?('/')
+    # Before any regex: a raw 0xff (JSON.parse passes it through) makes a PCRE2 match RAISE,
+    # which aborted the settings load. An error, not a scrub — a repaired pattern would route
+    # different hosts than the operator declared.
+    return "settings: invalid destination host pattern #{pattern.inspect}" unless pattern.valid_encoding?
 
     literal, literal_error = upstream_destination_literal(pattern)
     return literal_error if literal

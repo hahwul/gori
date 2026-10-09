@@ -1411,8 +1411,8 @@ module Gori
         # a raw `0xff` through untouched, so an otherwise-valid profile could put a byte in a
         # chain spec that made `parse_spec` raise `ArgumentError` — out of a CLI that rescues
         # only `Gori::Error`, i.e. a Crystal backtrace at the operator instead of the listing
-        # they ran the command for, and no gate at all. The other sections are safe by
-        # construction (their parses run no regex); this is the only one that does.
+        # they ran the command for, and no gate at all. Every section parse that runs a regex
+        # over a file string guards it the same way (env keys, upstream hosts, ALPN lists).
         Decoder.parse_spec(spec.scrub).each do |token|
           argv = Decoder.exec_spec(token).try(&.presence)
           # "exec", i.e. `Decoder::EXEC_PREFIX` without the colon that makes it a marker: the

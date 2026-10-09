@@ -298,3 +298,18 @@ describe "Gori::OpenLock.guarded?" do
     end
   end
 end
+
+describe "Gori::OpenLock.try_exclusive on a filesystem without flock" do
+  # `try_shared` already degraded to "no lock" there; this side read the same errno as
+  # "somebody has it open", so the project could never be deleted.
+  it "degrades to proceeding, like try_shared" do
+    posix_only!("mkfifo")
+    with_project do |_registry, project|
+      with_unlockable_lock_file(Gori::OpenLock.path(project.db_path)) do
+        guard = Gori::OpenLock.try_exclusive(project.db_path)
+        guard.should_not be_nil
+        guard.not_nil!.close
+      end
+    end
+  end
+end

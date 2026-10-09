@@ -80,9 +80,11 @@ module Gori
         # the cross-process SQLite lock couldn't be acquired (a TUI capturing into
         # the same project) or the disk is full. Don't report a phantom success.
         return busy("failed to persist issue (store busy or unwritable)") if id == 0
-        if repeater_id
-          store.add_link(Store::LinkOwnerKind::Issue, id,
-            Store::LinkRefKind::Repeater, repeater_id)
+        if repeater_id && !link_issue_repeater(id, repeater_id)
+          # The issue IS stored, so the answer names it: a retry of the create would file a
+          # duplicate.
+          return busy("issue #{id} created but its repeater link NOT written (store busy or unwritable); " \
+                      "retry with update_issue(id: #{id}, repeater_id: #{repeater_id})")
         end
         Result.new(JSON.build do |j|
           j.object do
@@ -90,6 +92,15 @@ module Gori
             j.field "repeater_id", repeater_id if repeater_id
           end
         end)
+      end
+
+      # Link the issue to the repeater; false only when no such link exists afterwards. nil from
+      # `add_link` is both "already linked" and "the batch did not commit", so it is looked up.
+      # Every MCP issue→repeater link write goes through here (create_repeater, send_request,
+      # send_websocket too), so none reports a link that did not commit.
+      private def link_issue_repeater(issue_id : Int64, repeater_id : Int64) : Bool
+        owner, ref = Store::LinkOwnerKind::Issue, Store::LinkRefKind::Repeater
+        !(store.add_link(owner, issue_id, ref, repeater_id) || store.link_id(owner, issue_id, ref, repeater_id)).nil?
       end
 
       @[Tool("update_issue", gated: true, agent_action: true, permission: "write")]
@@ -133,9 +144,8 @@ module Gori
         unless title.nil? && severity.nil? && notes.nil? && status.nil? && cvss.nil? && !clear_cvss
           return busy("issue NOT updated (store busy or unwritable); it is unchanged") unless store.update_issue(id, title: title, severity: severity, notes: notes, status: status, cvss: cvss, clear_cvss: clear_cvss)
         end
-        if repeater_id
-          store.add_link(Store::LinkOwnerKind::Issue, id,
-            Store::LinkRefKind::Repeater, repeater_id)
+        if repeater_id && !link_issue_repeater(id, repeater_id)
+          return busy("repeater link NOT written (store busy or unwritable); try again")
         end
         Result.new(JSON.build do |j|
           j.object do

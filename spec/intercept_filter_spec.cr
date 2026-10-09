@@ -61,6 +61,15 @@ describe Gori::InterceptFilter do
     f.matches?(req(host: "acme.test", target: "http://acme.test/admin")).should be_true
   end
 
+  it "builds url: with the port and IPv6 brackets, the way QL's URL_EXPR does" do
+    s = Gori::InterceptFilter::Subject.new(method: "GET", host: "acme.test", target: "/admin",
+      scheme: "https", port: 8443)
+    Gori::InterceptFilter.new("url:acme.test:8443").matches?(s).should be_true
+    Gori::InterceptFilter.new("url~^https://acme\\.test/admin").matches?(s).should be_false
+    v6 = Gori::InterceptFilter::Subject.new(method: "GET", host: "::1", target: "/x", scheme: "https", port: 443)
+    Gori::InterceptFilter.new("url:[::1]/x").matches?(v6).should be_true
+  end
+
   describe "~ regex" do
     # `~` used to be a character with no meaning here, so `host~^api\.` was free text and matched
     # nothing real. It is QL's operator on QL's five fields, so a pattern means the same thing in

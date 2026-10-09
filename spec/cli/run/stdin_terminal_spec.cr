@@ -241,6 +241,10 @@ describe "gori run — stdin doors refuse a terminal" do
       end
       method_body(cli_source("run.cr"), "read_stdin_fallback")
         .should contain("rescue ex : IO::Error")
+      # `gori settings user-agents --set -` is a flag door outside `gori run`, with the same read.
+      settings = cli_source("settings.cr")
+      settings.should contain("read_stdin_fallback(STDIN, \"gori settings user-agents\"")
+      settings.should_not contain("STDIN.gets_to_end")
     end
 
     # A PATH that names a terminal is refused by both wordlist loaders too, each raising

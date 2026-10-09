@@ -64,7 +64,7 @@ module Gori::CLI
       rescue ex
         abort "gori settings --edit: could not run the editor (#{cmd.join(' ')}): #{ex.message}"
       end
-    abort "gori settings: editor (#{cmd.join(' ')}) exited #{status.exit_code}" unless status.success?
+    abort "gori settings: editor (#{cmd.join(' ')}) failed (#{Gori::Update.exit_reason(status)})" unless status.success?
   end
 
   # Run the named sub-verb, if `args` opens with one. Split out of `run_settings` so that
@@ -490,7 +490,8 @@ module Gori::CLI
     text =
       if from == "-"
         # `!STDIN.tty?`, the guard shape spec/cli/run/stdin_terminal_spec.cr sweeps for.
-        !STDIN.tty? ? STDIN.gets_to_end : abort("gori settings user-agents: stdin is a terminal — pipe the list in")
+        # The read is the rescued one: fd 0 closed by cron/systemd raised a backtrace.
+        !STDIN.tty? ? Run.read_stdin_fallback(STDIN, "gori settings user-agents", "User-Agent list") : abort("gori settings user-agents: stdin is a terminal — pipe the list in")
       else
         if Gori::TtyPath.terminal?(from)
           abort "gori settings user-agents: #{from} is a terminal, not a file — pipe the list in with --set -"

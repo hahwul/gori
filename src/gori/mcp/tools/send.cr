@@ -138,6 +138,14 @@ module Gori
         repeater_id, repeater_response_saved = persist_send_repeater(h, save, built, http2, result,
           issue_id, recorded_flow_id, plan.h2_fields,
           sni: plan.sni, auto_cl: send_persist_auto_cl(h), tls_preset: plan.tls_preset)
+        # Issue links come from MCP-only arguments, so that relation stays in this adapter; the
+        # shared seam persists the Repeater row and its response evidence. The request already
+        # went out, so the refusal names where its response is.
+        if issue_id && repeater_id && !link_issue_repeater(issue_id, repeater_id)
+          return busy("request sent#{recorded_flow_id ? " (flow #{recorded_flow_id})" : ""} and repeater ##{repeater_id} " \
+                      "saved, but its issue link NOT written (store busy or unwritable); " \
+                      "retry with update_issue(id: #{issue_id}, repeater_id: #{repeater_id})")
+        end
 
         # Chosen before the send, confirmed after it: when neither the History record nor the
         # saved repeater landed there is nowhere to page a cut body from, so it goes out whole.
@@ -179,7 +187,7 @@ module Gori
         force_http2 = present?(h, "http2") ? bool_arg(h, "http2", false) : nil
         verbatim = bool_arg(h, "verbatim", false)
         insecure = bool_arg(h, "insecure", false)
-        timeout = send_timeout(h)
+        timeout = fuzz_timeout(h)
         ob = outbound(bool_arg(h, "allow_unscoped", false))
 
         built = build_race_plan(members, force_http2, insecure, verbatim, timeout, store, ob)
@@ -337,7 +345,7 @@ module Gori
         force_http2 = present?(h, "http2") ? bool_arg(h, "http2", false) : nil
         verbatim = bool_arg(h, "verbatim", false)
         insecure = bool_arg(h, "insecure", false)
-        timeout = send_timeout(h)
+        timeout = fuzz_timeout(h)
         # The shared bounded reader: an unreadable value is INVALID_ARGUMENT (not the default), and
         # one past Int32 is clamped rather than raising OverflowError as INTERNAL.
         iterations = bounded_int_arg(h, "count", Repeater::Timing::Stats::DEFAULT_ITERATIONS.to_i64,
@@ -684,12 +692,6 @@ module Gori
         stored
       end
 
-      # Per-operation (connect + idle read/write) timeout for a one-shot send, from
-      # timeout_ms; nil = the engine defaults. Mirrors fuzz_timeout's bounds.
-      private def send_timeout(h) : Time::Span?
-        optional_int_arg(h, "timeout_ms").try(&.clamp(1_i64, 600_000_i64).milliseconds)
-      end
-
       # The classifier moved to `Repeater::SendError` when `gori run send --format json` grew the
       # same three fields (#1384); these names stay so MCP's own call sites and the specs that
       # pin the contract keep reading as they did.
@@ -804,10 +806,6 @@ module Gori
         repeater_id = persisted.id
         return {nil, false} unless repeater_id
 
-        # Issue links come from MCP-only arguments, so keep that relation in this adapter;
-        # the shared seam persists the Repeater row and its response evidence.
-        store.add_link(Store::LinkOwnerKind::Issue, issue_id,
-          Store::LinkRefKind::Repeater, repeater_id) if issue_id
         if (name = str(h, "name")) && !name.empty?
           # `set_repeater_name` answers whether it committed, and the answer is deliberately
           # not propagated HERE (unlike create_repeater/update_repeater, which echo the name):
@@ -1107,13 +1105,19 @@ module Gori
         source = [] of Store::WsOutMessage
         field = "repeater_id"
         notice_dropped = 0
-        if present?(h, "messages")
-          arr = h["messages"]?.try(&.as_a?)
-          return Result.new("invalid 'messages' (expected an array of strings or objects)", is_error: true) unless arr
-          arr.each do |item|
-            msg, perr = ws_out_message_item(item)
-            return Result.new(ws_entry_error("messages", item, perr), is_error: true) unless msg
-            source << msg
+        # `describes?`, not `present?`: a schema-filling client's `"messages":""` or `[]` is
+        # absent, so the session's stored frames go out instead of none at all.
+        if describes?(h, "messages")
+          if arr = h["messages"]?.try(&.as_a?)
+            arr.each do |item|
+              msg, perr = ws_out_message_item(item)
+              return Result.new(ws_entry_error("messages", item, perr), is_error: true) unless msg
+              source << msg
+            end
+          elsif text = str(h, "messages")
+            source = ws_text_lines(text)
+          else
+            return Result.new("invalid 'messages' (expected a string or an array of strings or objects)", is_error: true)
           end
           field = "messages"
         else
@@ -1186,9 +1190,8 @@ module Gori
         end
         return err("request cancelled", "CANCELLED") if cancelled?
         # Scope passed — now it's safe to persist the issue link.
-        if issue_id
-          store.add_link(Store::LinkOwnerKind::Issue, issue_id,
-            Store::LinkRefKind::Repeater, repeater_id)
+        if issue_id && !link_issue_repeater(issue_id, repeater_id)
+          return busy("issue link NOT written (store busy or unwritable); nothing was sent — try again")
         end
         result = plan.send_ws(out_messages, idle, keep_key, cancel_signal)
         return err("request cancelled", "CANCELLED") if cancelled?
@@ -1419,7 +1422,7 @@ module Gori
           h2_fields: fields, h2_body: h2_body_arg(h),
           origin: Repeater::Origin.new(scheme, host, port),
           http2: true, verify: !bool_arg(h, "insecure", false) && @verify_upstream,
-          timeout: send_timeout(h), overrides: HostOverrides.load(store),
+          timeout: fuzz_timeout(h), overrides: HostOverrides.load(store),
           tls_preset: send_tls_preset(h))
       end
 
@@ -1432,7 +1435,7 @@ module Gori
       # arbitrates.
       private def send_plan_options(h) : {Repeater::PlanOptions, Bool}
         verify = !bool_arg(h, "insecure", false) && @verify_upstream
-        timeout = send_timeout(h)
+        timeout = fuzz_timeout(h)
         # Read up front, not inside the `flow_id` branch that uses it: an argument validated in
         # one branch and ignored in another is the same silent-substitution trap one level up.
         keep_request_line = bool_arg(h, "keep_request_line", false)

@@ -48,7 +48,11 @@ class Gori::Tui::RepeaterView
   # selected); the `||` keeps the NOR path's caret-line fallback rather than letting insert
   # mode be the one place where a copy with no selection yields nothing.
   def request_copy_text : String
-    if pane_insert?(:request)
+    # While ^X is open the hex buffer owns the bytes and the TextArea is stale, so a copy
+    # takes what the hex pane shows (as `InterceptView#preview_copy_text` does).
+    if h = @req_hex_edit
+      String.new(h.to_bytes).scrub
+    elsif pane_insert?(:request)
       req_editor.selection_text || @req_read.copy_text(req_editor)
     else
       @req_read.copy_text(req_editor)
@@ -56,6 +60,9 @@ class Gori::Tui::RepeaterView
   end
 
   def request_copy_all_text : String
+    if h = @req_hex_edit
+      return String.new(h.to_bytes).scrub
+    end
     @req_read.copy_all(req_editor)
   end
 
@@ -158,7 +165,9 @@ class Gori::Tui::RepeaterView
     # drives `Runner#read_selection_active?`, which gates BOTH the space-menu entry's title
     # and `read_copy`, so claiming a selection here while copy still read `@req_read` would
     # offer "Copy selection" and then copy the caret line.
-    when :request  then pane_insert?(:request) ? req_editor.selection? : @req_read.selection?(req_editor)
+    when :request
+      # No band in hex mode: one left from before ^X would copy the stale TextArea.
+      !request_hex? && (pane_insert?(:request) ? req_editor.selection? : @req_read.selection?(req_editor))
     when :response then @resp_cursor.selection?
     when :target   then !pane_insert?(:target) && @target_read.selection?(target_active_cx)
     else                false

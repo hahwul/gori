@@ -370,22 +370,9 @@ module Gori
         if arr = raw.as_a?
           arr.each do |entry|
             if o = entry.as_h?
-              # An object entry with no `name` is the OTHER object an agent reaches for — the
-              # `{"Cookie": "session=…"}` map, which this surface does not take here. Refused
-              # by its own shape rather than folded into `": "`: that empty pair is then what
-              # the rejection quotes back, and the caller cannot find in its own call an entry
-              # it never wrote.
-              # `presence` closes the same hole the guard opens on: an empty or whitespace-only
-              # name folds to the very `": value"` this refusal exists to stop quoting back.
-              n = o["name"]?.try(&.as_s?).try(&.strip).presence
-              unless n
-                return err("'set_headers' entry #{entry.to_json} names no header — an object " \
-                           "entry is {\"name\": \"Cookie\", \"value\": \"session=…\"}, or pass " \
-                           "the line \"Cookie: session=…\" as a string",
-                  "INVALID_ARGUMENT", field: "set_headers")
-              end
-              v = o["value"]?.try(&.as_s?) || ""
-              lines << "#{n}: #{v}"
+              line = session_header_object_line(entry, o)
+              return line if line.is_a?(Result)
+              lines << line
             else
               lines << (entry.as_s? || entry.to_s)
             end
@@ -401,6 +388,34 @@ module Gori
             "INVALID_ARGUMENT", field: "set_headers")
         end
         pairs
+      end
+
+      # One `{name, value}` object entry of `set_headers` as its header line, or the refusal.
+      private def session_header_object_line(entry : JSON::Any, o : Hash(String, JSON::Any)) : String | Result
+        # An object entry with no `name` is the OTHER object an agent reaches for — the
+        # `{"Cookie": "session=…"}` map, which this surface does not take here. Refused
+        # by its own shape rather than folded into `": "`: that empty pair is then what
+        # the rejection quotes back, and the caller cannot find in its own call an entry
+        # it never wrote.
+        # `presence` closes the same hole the guard opens on: an empty or whitespace-only
+        # name folds to the very `": value"` this refusal exists to stop quoting back.
+        n = o["name"]?.try(&.as_s?).try(&.strip).presence
+        unless n
+          return err("'set_headers' entry #{entry.to_json} names no header — an object " \
+                     "entry is {\"name\": \"Cookie\", \"value\": \"session=…\"}, or pass " \
+                     "the line \"Cookie: session=…\" as a string",
+            "INVALID_ARGUMENT", field: "set_headers")
+        end
+        # A missing, null or container value is refused, never folded to "": that stored
+        # an empty credential the slot then sent as. A scalar is its text, as
+        # `RequestBuilder.header_pairs` reads the same shape; an explicit "" stays allowed.
+        v = o["value"]?
+        if v.nil? || v.raw.nil? || v.as_a? || v.as_h?
+          return err("'set_headers' entry #{entry.to_json} has no string value for #{n.inspect} — an " \
+                     "object entry is {\"name\": \"Cookie\", \"value\": \"session=…\"}",
+            "INVALID_ARGUMENT", field: "set_headers")
+        end
+        "#{n}: #{v.as_s? || v.to_s}"
       end
 
       private def emit_session_slot(j : JSON::Builder, slot : Gori::SessionSlot,

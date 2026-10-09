@@ -57,8 +57,9 @@ module Gori
       # the way to get recording back.
       #
       # The honest version for a real WS run — the handshake as a flow PLUS the transcript
-      # through `Store#insert_ws_messages` — needs `Fuzz::Result` to retain the transcript under
-      # `keep_bodies`, which is a retention-budget change of its own. Refused, not faked.
+      # through the `ws` of `Store#insert_import_batch_ids` — needs `Fuzz::Result` to retain
+      # the transcript under `keep_bodies`, which is a retention-budget change of its own.
+      # Refused, not faked.
       #
       # Every surface also refuses `record_history` + WebSocket up front, before the sweep
       # dials: "swept 10,000 sessions, recorded 0" is a refusal that arrives after the traffic.

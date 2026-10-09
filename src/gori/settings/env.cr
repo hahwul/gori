@@ -320,8 +320,10 @@ module Gori::Settings
     out
   end
 
+  # `Env.valid_key?` checks the encoding first: a raw 0xff that JSON.parse lets through makes a
+  # PCRE2 match RAISE, which aborted the whole settings load.
   private def self.valid_env_key?(key : String) : Bool
-    !key.empty? && key.matches?(/\A[A-Za-z_][A-Za-z0-9_]*\z/)
+    Env.valid_key?(key)
   end
 
   # Tolerant hostname-override parse: a non-array (or absent) node keeps the current

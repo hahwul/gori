@@ -30,7 +30,7 @@ module Gori
         client = Gori::Protobuf::Reflection::Client.new(ob,
           scheme: parts.scheme, host: parts.host, port: parts.port,
           verify: !bool_arg(h, "insecure", false) && @verify_upstream,
-          timeout: reflect_timeout(h),
+          timeout: fuzz_timeout(h),
           overrides: Gori::HostOverrides.load(store))
         # Layer 1, read through the client so this surface and the gate cannot disagree about
         # WHICH paths are asked about (both, see `Client#blocked_verdict`) — and read here so
@@ -151,13 +151,6 @@ module Gori
           persisted: committed,
           schema:    Gori::Protobuf::Schemas.status,
         }.to_json)
-      end
-
-      # Per-operation timeout in milliseconds, or nil for the project's io timeout. Clamped
-      # the way every other MCP timeout is: a caller cannot hold this server's fiber for an
-      # arbitrary span.
-      private def reflect_timeout(h) : Time::Span?
-        optional_int_arg(h, "timeout_ms").try(&.clamp(1_i64, 600_000_i64).milliseconds)
       end
 
       private def list_grpc_tools(j : JSON::Builder) : Nil

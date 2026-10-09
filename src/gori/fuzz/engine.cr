@@ -1628,7 +1628,9 @@ module Gori::Fuzz
       # same-origin check below decides: a cross-origin authority is dropped like any other,
       # while a same-origin `//host:port/next` is still followed, as this method promises.
       loc = "#{o.scheme}:#{loc}" if loc.starts_with?("//")
-      return loc if loc.starts_with?('/')
+      # A fragment is never part of a request-target (RFC 9112 §3.2.1); the `resolve` branch
+      # below drops it via path + query, so this one must too.
+      return loc.partition('#')[0] if loc.starts_with?('/')
       uri = (redirect_base(o, base).resolve(loc) rescue nil)
       return nil unless uri
       # Scheme and host are case-insensitive (RFC 3986 §3.1, §3.2.2); `Location: HTTP://Host/`

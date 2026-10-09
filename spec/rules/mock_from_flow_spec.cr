@@ -76,6 +76,8 @@ describe Gori::MockFromFlow do
   it "takes the path out of an absolute-form target" do
     Gori::MockFromFlow.request_pattern("GET", "http://acme.test/api/me?x=1").should eq("\\AGET /api/me(\\?| )")
     Gori::MockFromFlow.request_pattern("GET", "http://acme.test").should eq("\\AGET /(\\?| )")
+    # The authority ends at '?' too: the query's own slash is not the path.
+    Gori::MockFromFlow.request_pattern("GET", "http://acme.test?next=/admin").should eq("\\AGET /(\\?| )")
   end
 
   it "refuses a flow it cannot honestly snapshot, and says why" do

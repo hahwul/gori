@@ -2,16 +2,58 @@
 
 ## Unreleased
 
+- Env: the token re-spelling a project gets on its first open after `gori settings env-syntax` no longer reverts a draft, slot, issue or note another gori instance saved while it ran
+- CLI and MCP: `gori run show --format json` and `get_flow` decode a gzip or chunked MessagePack/CBOR body the way the detail pane does, and their decoded fields are always valid UTF-8
+- Send: when a send-time substitution moves a Content-Length, a zero-padded or `+`-signed value keeps its spelling (`0016` becomes `0024`), and a value obfuscated with other bytes is left as written
+- Settings: a settings file or imported profile with a non-UTF-8 byte in an env var key, an upstream destination or proxy address, a listener host or an ALPN list no longer aborts the load (every later section at its default, saves refused) or crashes `gori settings import`
+- Import: a HAR's WebSocket transcript now commits together with its flow, so an import that collides with a busy project can no longer report a socket as imported while dropping its messages
+- Issues and notes: a link that did not commit on a busy or unwritable project is reported as not added instead of as already linked, in the TUI (one link or a marked batch) and over MCP, where `add_link` and every `repeater_id` or `issue_id` link argument answer PROJECT_BUSY
+- Projects: toggling a scan rule, or a global Rewriter or Colormarker rule, from two gori instances at once no longer erases the other's change, and a scan-rule toggle over an unreadable stored list is refused instead of re-enabling every rule it held
+- Projects: on a filesystem without flock support (an NFS `nolocks` or FUSE mount) a project now captures and can be deleted, instead of reading as held by another gori instance
+- Intercept, colour and extract rules: a `url:` condition now sees a non-default port and a bracketed IPv6 host, so it matches what the same `url:` matches in History
+- Filters: Sitemap's `NOT (tag:x OR host:y)` keeps the negation on its non-tag terms, and terms after a group nested past the depth cap are no longer silently dropped
+- Repeater and Fuzzer: pretty-printing an XML or HTML request no longer rewrites invalid UTF-8 bytes or swaps a `§` marker that is followed by a digit
+- GraphQL: editing the query in the decoded pane keeps a string, `null` or non-JSON `variables` value instead of folding it into the query or dropping the param
+- gRPC: loading a `.proto` source file by mistake still prints the protoc hint when its header comment is in Korean, Japanese or Chinese
+- OAST: one callback carrying the minimum 64-bit timestamp no longer fails the whole poll and loses the interactions beside it
+- JWT: a JWE whose header carries a number too large for 64 bits is still recognised, so attacks and verify refuse it instead of treating it as a JWS
+- CLI: `gori settings user-agents --set -` with stdin closed and `gori run redact default on --none` now refuse in one line instead of a backtrace or a silently dropped `on`
+- CLI: `repeater send -H`/`-b`/`-d`/`--target` on a stored head that ends without a newline no longer glues the added header onto its last line, and `repeater create --flow` beside your own request no longer reports a request-line rewrite it never stored
+- CLI: `gori run show` and `grpc reflect` escape terminal sequences in SSE event and id fields, JWT and SAML headings and server-sent gRPC names, and `authorize --format json` stays valid UTF-8 over a non-UTF-8 method
+- MCP: `timeout_ms: 0`, empty filler arguments and a plain-string `messages` now mean what the tool schemas say, a session slot refuses a header object with no value, and `create_repeater` seeds from `flow_id` beside an issue that has no flow
+- MCP: an `ask_operator` answer or expiry still reaches the agent when its question held an invalid UTF-8 byte
 - Docs: the site search opens from a `?q=` link, and screenshots no longer shift the page while they load (#1550)
 - MCP: `gori mcp --pin-project` keeps a server on the project it starts with, withholding the tools that switch to or read other projects (#1508)
 - CLI: `gori run` help now says when a timed capture stops, how it picks its default project, what `send`'s exit status means, and that `import --urls` sends nothing (#1507)
-- Probe: blind SQL injection no longer reports a Critical when a rate limiter or throttle kicks in mid-scan, and an out-of-band probe whose response timed out still matches its callback (#1549)
-- Repeater: a race or timing pair refuses to mix captured and hand-written tabs, and an h2 race no longer stalls or misreads a sibling after one stream's oversized headers or abandoned body (#1549)
-- Fuzzer: results grouped by response shape no longer split on where the payload text happens to appear, matched-only clusters lead with a hit on CLI and MCP, and a capped `js-endpoints` list says it was cut (#1549)
+- Probe: blind SQL injection no longer reports a Critical when a rate limiter or throttle kicks in mid-scan, and an out-of-band probe matches its callback even when its response timed out or the callback landed while it was still waiting; passive checks read every Cookie, Content-Security-Policy and Permissions-Policy field rather than only the last, survive a cookie that is not valid UTF-8 or a JSON secret longer than about 60 KB, and report a `;jsessionid=` path parameter as a session id in the URL; an `exec` custom rule that exits non-zero no longer logs a hook failure, while one killed by a signal still does (#1549)
+- Repeater: a race or timing pair refuses to mix captured and hand-written tabs, an h2 race no longer stalls or misreads a sibling after one stream's oversized headers or abandoned body, a WebSocket message stored with a negative length is sent instead of failing, and a session saved from an IPv6 origin can be sent again (#1549)
+- Fuzzer: results grouped by response shape no longer split on where the payload text happens to appear, matched-only clusters lead with a hit on CLI and MCP, a capped `js-endpoints` list says it was cut, auto-mark no longer crashes on a JSON body holding a very long string, a regex-replace processor no longer ends the sweep at a non-UTF-8 wordlist line, and a followed redirect no longer sends the Location's `#fragment` (#1549)
+- Discover: a brute-force hit found at the very end of a directory's sweep is recursed into and crawled like any other, and a file-shaped hit such as `phpinfo.php` is no longer swept as a directory, while a dotted one like `/v1.0` still is (#1549)
 - Sitemap and Miner: JavaScript endpoints on IPv6 and mixed-case hosts are matched to their traffic, Mine seeds come from the flow's own origin, and YAML OpenAPI quotes values YAML 1.1 tools would misread (#1549)
-- Rewriter: a file stub's path is made absolute and may not contain NUL, and the rule preview matches plain-HTTP proxied flows the way the proxy does; an edited Intercept request's kept original respects the capture cap (#1549)
+- Rewriter: a file stub's path is made absolute and may not contain NUL, the rule preview and a mock drafted from a flow match plain-HTTP proxied flows the way the proxy does, and a response body the origin cut short is passed through unrewritten so the client still sees the truncation; an edited Intercept request's kept original respects the capture cap (#1549)
+- Import: a WSDL with one undeclared namespace prefix still imports the operations that do not use it, instead of nothing (#1549)
 - Projects: `.gori` import refuses archives whose tables lost their keys or carry out-of-range interim rows, and its `exec:` notice now counts Decoder tabs and gRPC field specs (#1549)
+- Projects: exporting a `gori mcp --db` database refuses only the database and its sidecars, so an archive like `capture.db.gori` can sit beside it
 - CLI: `gori run shell` also points `NIX_SSL_CERT_FILE` at its CA bundle, so Nix-built tools trust gori (#1549)
+- Proxy: a request naming a port above 65535 is refused instead of looping back into gori's own listener on glibc Linux
+- HTTP/2: the sandbox refuses a request head with no `:method` and judges a server push behind a held response, and a long-lived connection keeps recording requests after many cancelled streams the origin still answered
+- Intercept: an h2 hold waiting on a stalled upload is queued on time even when the client sends nothing more, and an edit that shortens an h2 body gives the sender back the flow-control window it freed
+- TLS: a passphrase-protected CA key on import, or client certificate key at dial time, is refused with a hint to decrypt it instead of freezing gori on a hidden passphrase prompt, and a host with `_` in its name gets a certificate browsers accept
+- CLI: `gori update --exec` and `gori settings --edit` say a package manager or editor was killed by a signal instead of printing a backtrace
+- Export: the CSRF PoC no longer crashes on a multipart header holding a character like `İ`, strips the framing newline from a non-ASCII multipart value, and a dash run in the URL can no longer close its HTML comment; Python, fetch, Go, httpie and CSRF output keep a Transfer-Encoding that does not end in `chunked`, as curl does
+- Rewriter and Colormarker: editing a rule so it no longer matches the `/` filter while also changing its scope now moves it, instead of reporting it deleted or dropping the scope change
+- Diff: sending a row to the Comparer when the other project no longer opens says so and keeps the report, instead of wiping it and calling the endpoint one-sided
+- Authorize: switching passive replay off and on after a ^X stop resumes it, as documented
+- OAST: disabling a provider in the TUI stops its listener, and a registration whose session could not be saved is released instead of polling unrecoverably
+- Sequencer, Miner and Fuzzer: a session save that did not land (a busy project, or a session another gori closed) leaves the tab dirty and says so, instead of being silently reverted by the next refresh
+- Project: Delete removes the character after the caret in the DESCRIPTION editor
+- Notes: ^1-9 from the editor clears a sub-tab filter that hides the target note, as it does from the strip
+- Repeater: duplicating a gRPC tab mid hex edit keeps its head and edited payload, Copy under ^X takes the hex bytes, and a captured `%%%` line ending in a form feed or non-breaking space is no longer a group separator. Editing a SAML or GraphQL payload, or sending gRPC-Web, leaves a deliberately malformed or duplicated Content-Length as typed, and timing analysis draws a request line that is not valid UTF-8
+- Repeater and Fuzzer: `i`, `a` or `p` from READ with the caret on a marker's hidden `¦chain` edits beside the marker, not inside the chain the screen hides
+- Editors: READ `p` pastes after a glyph made of several codepoints (a decomposed accent, a skin-toned emoji), not before it
+- Projects: the picker stays up and says why when a temp project cannot be created, and its Export no longer exits gori when the launch directory was deleted
+- History: the FRAMES pane names an h2 frame type outside 0..255 from an imported database instead of failing to render
+- Redaction: a JSON secret value longer than about 60 KB is still redacted by the text fallback instead of being left in place
 
 ## v0.8.0
 

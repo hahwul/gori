@@ -842,7 +842,13 @@ module Gori::Discover
             @pending -= 1
           end
         else
-          break if @pending == 0 # frontier empty AND nothing in flight ⇒ no more work
+          if @pending == 0 # frontier empty AND nothing in flight ⇒ no more work
+            # …except a held run, which nothing is coming to break now. Its hits recurse and
+            # crawl like any other, so release it while the loop can still dispatch that work.
+            release_held
+            break unless frontier_head
+            next
+          end
           handle(@discovered.receive)
           @pending -= 1
         end
@@ -1334,10 +1340,22 @@ module Gori::Discover
       f = hit.finding
       record_finding(f, hit.exchange)
       s = f.status
-      if s && s >= 200 && s < 300 && f.depth < @config.max_depth
+      # A file-shaped hit (`phpinfo.php`, `swagger.json`, every `word.ext` probe) is not a
+      # container: sweeping `/x.php/` cost a whole wordlist and found only PATH_INFO echoes.
+      # ponytail: the name alone can't tell an extension-less dotfile (`.env`) from `.git`, so
+      # those still recurse; a content-type check would catch them if the cost shows up.
+      if s && s >= 200 && s < 300 && f.depth < @config.max_depth && !file_shaped?(f.url)
         enqueue_dir_from_url(f.url, f.depth + 1)
       end
       expand_probe_links(hit)
+    end
+
+    # Any extension names a file, except a version suffix: `/api/v2.0` and `/app.v2` are
+    # directories, and skipping them hid everything under them. An allowlist of file
+    # extensions instead re-swept every `.bak`/`.sql`/`.env`-style hit.
+    private def file_shaped?(url : String) : Bool
+      return false unless ext = StaticAsset.extension(url)
+      !ext.matches?(/\Av?\d+\z/)
     end
 
     # The links a confirmed brute-force hit's body named, fed back into the frontier through

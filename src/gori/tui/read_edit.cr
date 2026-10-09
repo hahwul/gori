@@ -152,6 +152,7 @@ module Gori::Tui
         return err
       end
       area.place_cursor(y, x)
+      area.snap_out_of_conceal(1) # after a closing `§`, never into its hidden `¦chain`
       before = area.edits
       deliver(tab, key_in, linewise ? "\n#{text}" : text)
       changed = area.edits != before
@@ -175,7 +176,9 @@ module Gori::Tui
       elsif span
         {span[2], span[3]}
       else
-        {area.cy, {area.cx + 1, lines[area.cy].size}.min}
+        # The whole glyph, not one codepoint: `place_cursor` rounds an index inside a cluster
+        # (`é` as e + U+0301, an emoji with a skin tone) DOWN, which pasted before it.
+        {area.cy, Screen.cluster_end(lines[area.cy], area.cx + 1)}
       end
     end
 

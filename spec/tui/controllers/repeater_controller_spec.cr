@@ -313,3 +313,34 @@ describe "RepeaterController race / timing members" do
     end
   end
 end
+
+# A timing label is drawn through regexes that raise on invalid UTF-8, and it is cut from raw
+# request bytes: a 0xff in the request line (kept as-is, P7) or a cut through a multi-byte
+# character at byte 200 made the TIMING ANALYSIS prompt raise on every frame.
+describe "RepeaterController#prepare_timing_pair labels" do
+  it "scrubs a request line that is not valid UTF-8" do
+    root = File.tempname("gori-repeater-ctl-timing")
+    Dir.mkdir_p(root)
+    project = Gori::ProjectRegistry.new(root).temp("timing")
+    session = Gori::Session.open(Gori::Config.new(listen: "127.0.0.1", port: 0),
+      Gori::Proxy::Tls::CertAuthority.load_or_create(REPEATER_CTL_CA), Gori::Verbs.registry, project)
+    begin
+      2.times do |i|
+        io = IO::Memory.new
+        io << "GET /?q=" << i
+        io.write_byte(0xff_u8)
+        io << " HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
+        session.store.insert_repeater("http://127.0.0.1/", io.to_slice, false, true, nil, i)
+      end
+      controller = RepeaterController.new(FakeHost.new(session))
+      controller.toggle_subtab_mark(0)
+      controller.toggle_subtab_mark(1)
+      _, _, labels = controller.prepare_timing_pair.not_nil!
+      labels.size.should eq(2)
+      labels.each(&.valid_encoding?.should(be_true))
+    ensure
+      session.try(&.close)
+      FileUtils.rm_rf(root)
+    end
+  end
+end

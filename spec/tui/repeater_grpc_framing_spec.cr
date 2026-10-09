@@ -197,6 +197,19 @@ describe "RepeaterView gRPC reframe toggle" do
     view
   end
 
+  # In gRPC mode the ^X buffer is the PAYLOAD; the head stays in the editor. A duplicate made
+  # mid-edit put the payload into the clone's head editor and dropped the edit from its body.
+  it "duplicates a tab mid hex edit with the head and the edited payload in place" do
+    grpc_tmp_store do |store|
+      src = grown.call(unary.call(store))
+      src.request_text.should start_with("POST /svc/M HTTP/2")
+      dst = RepeaterView.new
+      dst.duplicate_from(src)
+      dst.request_bytes.should eq(src.request_bytes)
+      String.new(sent_body.call(dst)).should end_with("ABC")
+    end
+  end
+
   it "defaults ON, the opposite of `gori run repeater send` (DESIGN.md §7)" do
     grpc_tmp_store do |store|
       view = unary.call(store)

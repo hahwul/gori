@@ -110,6 +110,24 @@ describe Gori::Probe::Passive::SerializedObject do
     end
   end
 
+  # An h2 capture keeps each cookie crumb as its own line; reading only the last missed the blob.
+  it "flags a serialized cookie in any of several Cookie lines" do
+    with_store do |store|
+      dets = probe_analyze(store, resp_head: html,
+        req_headers: "cookie: session=rO0ABXNyABFqYXZhLnV0aWwuSGFzaE1hcA\r\ncookie: theme=dark\r\n")
+      dets.find(&.code.==("serialized_object")).not_nil!.evidence.should eq("Java serialized object in cookie 'session'")
+    end
+  end
+
+  # A mojibake cookie raised in PCRE and took every other finding for the flow with it.
+  it "keeps its findings when a cookie value is not valid UTF-8" do
+    with_store do |store|
+      dets = probe_analyze(store, resp_head: html,
+        req_headers: "Cookie: JSESSIONSTATE=rO0ABXNyABFqYXZhLnV0aWwuSGFzaE1hcA; pref=caf\xe9\r\n")
+      dets.find(&.code.==("serialized_object")).not_nil!.evidence.should eq("Java serialized object in cookie 'JSESSIONSTATE'")
+    end
+  end
+
   it "flags a .NET BinaryFormatter blob in a query parameter (Medium)" do
     with_store do |store|
       dets = probe_analyze(store, resp_head: html, target: "/p?state=AAEAAAD/////AQAAAAAAAAAM")

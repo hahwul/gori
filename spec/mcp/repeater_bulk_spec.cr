@@ -313,6 +313,16 @@ describe "MCP update_repeaters" do
     end
   end
 
+  it "reads an empty affix as absent, so it never materialises the derived label" do
+    with_store_env do |store|
+      id = call_json(store, "create_repeater",
+        %({"target":"https://n.test","request":"POST /pay HTTP/1.1\\r\\nHost: n.test\\r\\n\\r\\n"}))["id"].as_i64
+      j = call_json(store, "update_repeaters", %({"ids":[#{id}],"tags_add":"auth","name_prefix":"","name_suffix":""}))
+      j["updated"][0]["name_materialised"]?.should be_nil
+      store.get_repeater(id).not_nil!.name.should be_nil
+    end
+  end
+
   it "refuses the whole call when any id is unknown" do
     with_store_env do |store|
       ids = seed_three(store)

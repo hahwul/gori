@@ -193,6 +193,13 @@ module Gori::Proxy::H2
     def initialize(@sink : FlowSink, @host : String, @port : Int32, @conn_id : Int64 = 0_i64)
       @mutex = Mutex.new
       @streams = {} of UInt32 => Stream
+      # Ids this connection already finished (RST, completion, an Intercept drop), most recent
+      # MAX_LIVE_STREAMS of them. A stream id is never reused (RFC 9113 §5.1.1), so a frame on
+      # one is late — routinely the origin's answer to a request the client cancelled — and must
+      # not leave a tracked entry behind: nothing would ever emit or delete it, and enough of
+      # them fill MAX_LIVE_STREAMS and blind capture for the rest of the connection.
+      @closed = Set(UInt32).new
+      @closed_order = Deque(UInt32).new
       @req_decoder = HPACK::Decoder.new
       @resp_decoder = HPACK::Decoder.new
       # Extended CONNECT streams currently being read, against `WsCapture::MAX_STREAMS`.
@@ -224,7 +231,7 @@ module Gori::Proxy::H2
       @mutex.synchronize do
         stream = @streams[stream_id]?
         if stream.nil?
-          next if @streams.size >= MAX_LIVE_STREAMS
+          next if @streams.size >= MAX_LIVE_STREAMS || @closed.includes?(stream_id)
           stream = @streams[stream_id] = Stream.new
         end
         stream.request_authority = authority
@@ -272,7 +279,7 @@ module Gori::Proxy::H2
       @mutex.synchronize do
         stream = @streams[stream_id]?
         if stream.nil?
-          next if @streams.size >= MAX_LIVE_STREAMS
+          next if @streams.size >= MAX_LIVE_STREAMS || @closed.includes?(stream_id)
           stream = @streams[stream_id] = Stream.new
         end
         stream.advise(text)
@@ -285,6 +292,7 @@ module Gori::Proxy::H2
     def drop_stream(stream_id : UInt32, reason : String) : Nil
       @mutex.synchronize do
         if stream = @streams.delete(stream_id)
+          note_closed(stream_id)
           finalize_stream(stream_id, stream, reason)
         end
       end
@@ -298,7 +306,7 @@ module Gori::Proxy::H2
       @mutex.synchronize do
         stream = @streams[stream_id]?
         if stream.nil?
-          next if @streams.size >= MAX_LIVE_STREAMS
+          next if @streams.size >= MAX_LIVE_STREAMS || @closed.includes?(stream_id)
           stream = @streams[stream_id] = Stream.new
         end
         stream.intercept_original = original
@@ -355,6 +363,7 @@ module Gori::Proxy::H2
         # drop its buffers (a connection that cancels many streams must not leak).
         finalize_stream(frame.stream_id, stream, "stream reset (RST_STREAM)")
         @streams.delete(frame.stream_id)
+        note_closed(frame.stream_id)
         return
       when Frame::Type::Headers
         append_header_fragment(side, header_block(frame))
@@ -398,7 +407,19 @@ module Gori::Proxy::H2
         return
       end
 
+      if @closed.includes?(frame.stream_id)
+        # A late HEADERS on a finished stream still had to be decoded (the HPACK table must
+        # track the sender), but it projects nothing: forget it once its block is whole.
+        @streams.delete(frame.stream_id) unless side.awaiting_continuation?
+        return
+      end
       emit_ready(frame.stream_id, stream)
+    end
+
+    private def note_closed(stream_id : UInt32) : Nil
+      return unless @closed.add?(stream_id)
+      @closed_order << stream_id
+      @closed.delete(@closed_order.shift) if @closed_order.size > MAX_LIVE_STREAMS
     end
 
     # After a frame updates a side, emit whichever halves are now ready: the request
@@ -439,7 +460,10 @@ module Gori::Proxy::H2
         # transcript cap left ws nil and no flow row was emitted early. An accepted unarmed
         # tunnel still needs its final completion event, and a refusal must not turn a later
         # request frame into a new flow on the same stream id.
-        @streams.delete(stream_id) if stream.req.ended? || !stream.websocket_candidate?
+        if stream.req.ended? || !stream.websocket_candidate?
+          @streams.delete(stream_id)
+          note_closed(stream_id)
+        end
       end
     end
 

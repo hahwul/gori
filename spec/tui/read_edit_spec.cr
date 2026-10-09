@@ -148,6 +148,17 @@ describe Gori::Tui::ReadEdit do
     end
   end
 
+  it "pastes after a glyph of more than one codepoint, not before it" do
+    TuiContract.with_session("read-edit-notes-cluster") do |session|
+      host = TuiContract::Host.new(session)
+      notes = notes_with(host, "e\u0301z") # a decomposed é, then z
+      Gori::Tui::Register.store("X")
+      caret(notes, 0, 0)
+      Gori::Tui::ReadEdit.paste(notes, sink(notes)).should eq("pasted 1 char")
+      notes.view.current_text.should eq("e\u0301Xz")
+    end
+  end
+
   it "undoes a READ-mode delete in one step" do
     TuiContract.with_session("read-edit-notes-undo") do |session|
       host = TuiContract::Host.new(session)

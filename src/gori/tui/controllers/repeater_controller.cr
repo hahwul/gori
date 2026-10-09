@@ -1382,11 +1382,15 @@ module Gori::Tui
     def editor_append_insert : Bool
       return false unless v = current_view
       case v.focus
-      when :request then v.request_read_move(0, 1)
-      when :target  then v.target_read_move(1)
-      else               return false
+      when :request
+        v.request_read_move(0, 1)
+        v.enter_request_insert!(1)
+        true
+      when :target
+        v.target_read_move(1)
+        editor_enter_insert
+      else false
       end
-      editor_enter_insert
     end
 
     def editor_exit_insert : Bool
@@ -2671,9 +2675,10 @@ module Gori::Tui
     end
 
     # A transcript label for one race member: its request line (the first wire line), which is
-    # what distinguishes the members of a multi-endpoint race.
+    # what distinguishes the members of a multi-endpoint race. Scrubbed: it is drawn through
+    # regexes that raise on a raw 0xff or on a character the 200-byte cut split.
     private def race_member_label(view : RepeaterView, draft : Bytes) : String
-      line = String.new(draft[0, {draft.size, 200}.min]).lines.first?.try(&.strip)
+      line = String.new(draft[0, {draft.size, 200}.min]).scrub.lines.first?.try(&.strip)
       line && !line.empty? ? line : view.label
     end
 

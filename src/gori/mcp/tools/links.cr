@@ -50,8 +50,8 @@ module Gori
         end)
       end
 
-      # add_link — attach an evidence pointer. Idempotent: Store#add_link returns nil when the
-      # exact (owner, ref) pair already exists, which is a success, not a failure.
+      # add_link — attach an evidence pointer. Idempotent: an (owner, ref) pair that already
+      # exists is a success, not a failure.
       @[Tool("add_link", gated: true, agent_action: true, permission: "write")]
       private def add_entity_link(h) : Result
         owner = link_owner(h)
@@ -62,10 +62,12 @@ module Gori
         ref_kind, ref_id = ref
 
         created = store.add_link(owner_kind, owner_id, ref_kind, ref_id)
+        # nil is also a write that did not commit; no row at all is that case, not "already".
+        id = created || store.link_id(owner_kind, owner_id, ref_kind, ref_id)
+        return busy("link NOT added (store busy or unwritable)") unless id
         Result.new({"owner_kind" => owner_kind.label, "owner_id" => owner_id,
                     "ref_kind" => ref_kind.label, "ref_id" => ref_id,
-                    "id" => created || store.link_id(owner_kind, owner_id, ref_kind, ref_id),
-                    "already_linked" => created.nil?}.to_json)
+                    "id" => id, "already_linked" => created.nil?}.to_json)
       end
 
       # remove_link — detach by the (owner, ref) pair, so a caller that knows what it linked

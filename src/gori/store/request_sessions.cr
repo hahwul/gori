@@ -51,9 +51,12 @@ module Gori
       }
     end
 
+    # Returns whether the write committed AND hit the row: a tab that marks itself clean over a
+    # rolled-back batch is reverted to the stale row by its next reconcile, and one whose row a
+    # peer deleted persisted nothing (`exec_task_row`).
     private def update_request_session(kind : String, id : Int64, target : String, request : Bytes, http2 : Bool,
-                                       sni : String?, config : String, name : String?) : Nil
-      exec_task ->(c : DB::Connection) {
+                                       sni : String?, config : String, name : String?) : Bool
+      exec_task_row ->(c : DB::Connection) {
         args = [target] of DB::Any
         slot = Store.blob_slot(args, request) # BLOB NOT NULL — see the insert above
         args << (http2 ? 1 : 0) << sni << config << name << now_us << id
@@ -111,7 +114,7 @@ module Gori
     end
 
     def update_miner_session(id : Int64, target : String, request : Bytes, http2 : Bool,
-                             sni : String?, config : String, name : String? = nil) : Nil
+                             sni : String?, config : String, name : String? = nil) : Bool
       update_request_session("miner", id, target, request, http2, sni, config, name)
     end
 
@@ -133,7 +136,7 @@ module Gori
     end
 
     def update_sequencer_session(id : Int64, target : String, request : Bytes, http2 : Bool,
-                                 sni : String?, config : String, name : String? = nil) : Nil
+                                 sni : String?, config : String, name : String? = nil) : Bool
       update_request_session("sequencer", id, target, request, http2, sni, config, name)
     end
 

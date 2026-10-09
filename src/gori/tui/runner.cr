@@ -2646,8 +2646,11 @@ module Gori::Tui
         # claim 5 flows when two marks had gone stale.
         extra = form.extra_flow_ids.reject { |fid| fid == form.flow_id }
           .select { |fid| @session.store.flow_row(fid) }
-        attached = (form.flow_id ? 1 : 0) + @session.store.add_links(Store::LinkOwnerKind::Issue, new_id,
+        added = @session.store.add_links(Store::LinkOwnerKind::Issue, new_id,
           extra.map { |fid| {Store::LinkRefKind::Flow, fid} })
+        attached = (form.flow_id ? 1 : 0) + (added || 0)
+        # A rolled-back batch is named, not folded into a smaller "attached" count.
+        extra_note = added ? "" : " · #{extra.size} marked flows NOT attached (project busy)"
         refresh_link_owners(Store::LinkOwnerKind::Issue, new_id) unless extra.empty?
         if ref = form.link_ref
           # insert_issue already entity-links flow when form.flow_id matches; other
@@ -2660,7 +2663,7 @@ module Gori::Tui
           # which is exactly where a marked set arrives, so reporting only the picker's own ref
           # would leave the N flows just attached unmentioned.
           msg = attached > 1 ? "issue ##{new_id} created and linked · #{attached} flows attached" : "issue ##{new_id} created and linked"
-          news = msg + write_form_snapshots(new_id, form)
+          news = msg + write_form_snapshots(new_id, form) + extra_note
           # Open it (#F19) rather than asking. TRUE, so the shell drops the form: the issue
           # is on screen behind it and there is no second modal to hand the overlay to.
           @toast = news + open_filed_issue(new_id)
@@ -2674,13 +2677,13 @@ module Gori::Tui
           # the old open/stay modal was, minus the question.
           issues_controller.view.reload(@session.store)
           msg = attached > 0 ? "issue ##{new_id} filed with its capture attached" : "issue ##{new_id} filed"
-          @toast = msg + write_form_snapshots(new_id, form)
+          @toast = msg + write_form_snapshots(new_id, form) + extra_note
         else
           # The other hand-filed path (History's Add issue, and every form with no ref to
           # link). It already landed on the Issues tab; now it lands on the ISSUE, with the
           # way back named — the same act as the link path above, so the same ending.
           msg = attached > 1 ? "issue ##{new_id} created with #{attached} flows attached" : "issue ##{new_id} created"
-          news = msg + write_form_snapshots(new_id, form)
+          news = msg + write_form_snapshots(new_id, form) + extra_note
           @toast = news + open_filed_issue(new_id)
         end
       end

@@ -755,6 +755,11 @@ module Gori::Tui
       return unless p = selected_provider
       on = !p.enabled
       ok = p.global? ? Settings.set_oast_provider_enabled(p.id, on) : @host.session.store.set_oast_provider_enabled(p.project_id.not_nil!, on)
+      # A disabled provider leaves every picker, so its listener could never be stopped again
+      # (mirrors delete_provider). Not released: ⇧R can still resume the session.
+      if ok && !on && (l = @listeners.find { |ls| ls.provider_key == p.key })
+        stop_listener(l)
+      end
       @host.status("provider #{p.name} NOT #{on ? "enabled" : "disabled"} — #{not_saved(p.global?)}") unless ok
       reload
     end
@@ -1665,10 +1670,17 @@ module Gori::Tui
         end
         # A resume already HAS its row (see RegOk#resumed); only a fresh registration inserts.
         unless reg.resumed
-          reg.session.id = @host.session.store.insert_oast_session(reg.db_provider_id,
+          row = @host.session.store.insert_oast_session(reg.db_provider_id,
             reg.session.kind.label, reg.session.server_url, reg.session.correlation_id,
             reg.session.secret, reg.session.private_key_pem, reg.session.token,
             provider_key: Oast::Sessions.recorded_key(reg.provider_key))
+          if row == 0
+            # Same guard as MCP and `gori run oast --save`: an unsaved session could never be
+            # resumed, and its callbacks would land under session_id 0.
+            deregister(reg.provider, reg.session)
+            return @host.status("OAST register for #{reg.provider_label} NOT saved (project busy or unwritable) — released; retry")
+          end
+          reg.session.id = row
         end
         id = reg.session.id
         listener = Listener.new(reg.session, reg.provider, reg.provider_key, reg.provider_label)

@@ -86,7 +86,7 @@ module Gori
         return nil unless t =~ JWE_RE
         parts = t.split('.')
         return nil unless parts.size == 5
-        header = JSON.parse(String.new(Base64.decode(parts[0]))).as_h?
+        header = RawJson.parse(String.new(Base64.decode(parts[0]))).as_h?
         return nil unless header
         enc = header["enc"]?.try(&.as_s?)
         return nil unless enc

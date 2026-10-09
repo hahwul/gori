@@ -585,6 +585,13 @@ describe Gori::Oast do
       provider.poll(StatusHttp.new(204), session).should be_empty
     end
 
+    it "keeps a custom-http batch whose timestamp is Int64::MIN (abs overflows)" do
+      session = O::Session.new(0_i64, O::ProviderKind::CustomHttp, "https://my.log/api", "corr", "")
+      body = %([{"id":"1","timestamp":-9223372036854775808},{"id":"2","timestamp":1700000000}])
+      got = O::CustomHttp.new("https://my.log/api").poll(StatusHttp.new(200, body), session)
+      got.map(&.unique_id).should eq(["1", "2"])
+    end
+
     it "raises for postbin only when the cycle collected nothing (404 still means drained)" do
       session = O::Session.new(0_i64, O::ProviderKind::Postbin, "https://www.postb.in", "bin1", "")
       provider = O::Postbin.new("https://www.postb.in")

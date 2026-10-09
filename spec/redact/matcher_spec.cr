@@ -91,6 +91,18 @@ describe Gori::Redact::Matcher do
       end
     end
 
+    # The text fallback's per-byte value pattern hit PCRE2's JIT stack limit near 60 KB, and
+    # the raise dropped the redaction of exactly the large secret it exists for.
+    it "redacts a ~60 KB field value through the text fallback" do
+      with_salt do
+        prof = Gori::Redact::Profile.new("p", json_fields: ["token"])
+        secret = "s" * 60_000
+        r = Gori::Redact::Matcher.new(prof).body(%([{"token":"#{secret}"}).to_slice, "text/plain")
+        r.count.should eq(1)
+        r.text.should_not contain(secret)
+      end
+    end
+
     it "takes capture group 1 at the right byte offsets after multibyte context" do
       with_salt do
         prof = Gori::Redact::Profile.new("p", patterns: ["계정=(\\d+)"])

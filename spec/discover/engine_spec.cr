@@ -857,6 +857,20 @@ describe Gori::Discover::Engine do
       end
       findings.map(&.url).sort!.should eq(["http://t/alpha", "http://t/bravo"])
     end
+
+    it "still recurses into a hit released when the sweep ends" do
+      # /bravo is held behind /alpha and released only once the frontier runs dry; releasing
+      # it after the dispatch loop had exited dropped its sub-directory sweep on the floor.
+      cfg = D::Config.new(spider: false, bruteforce: true, calibrate_probes: 3, concurrency: 1,
+        retries: 0, confidence_floor: 0.4, max_depth: 3)
+      sent = [] of String
+      run_discover("http://t/", %w[alpha bravo], cfg) do |t|
+        sent << t
+        t == "/alpha" || t == "/bravo" ? html("ONE SHELL FOR EVERY REAL ROUTE HERE") : notfound
+      end
+      sent.any?(&.starts_with?("/alpha/")).should be_true
+      sent.any?(&.starts_with?("/bravo/")).should be_true
+    end
   end
 
   # The echo test rides on the calibration probes themselves — each searches its own body for
@@ -881,6 +895,42 @@ describe Gori::Discover::Engine do
       urls.should_not contain("http://t/api/v2/orders")
       urls.should_not contain("http://t/swagger/v1/swagger.json")
     end
+  end
+
+  it "does not sweep a file-shaped hit as a directory" do
+    cfg = D::Config.new(spider: false, bruteforce: true, calibrate_probes: 3, concurrency: 1,
+      retries: 0, confidence_floor: 0.4, max_depth: 3)
+    sent = [] of String
+    findings, _ = run_discover("http://t/", %w[x.php db.bak admin], cfg) do |t|
+      sent << t
+      case t
+      when "/x.php"  then html("phpinfo output for this very server")
+      when "/db.bak" then html("-- MySQL dump of the production database")
+      when "/admin"  then html("<h1>the real admin panel</h1>")
+      else                notfound
+      end
+    end
+    findings.map(&.url).sort!.should eq(["http://t/admin", "http://t/db.bak", "http://t/x.php"])
+    sent.any?(&.starts_with?("/x.php/")).should be_false
+    sent.any?(&.starts_with?("/db.bak/")).should be_false
+    sent.any?(&.starts_with?("/admin/")).should be_true
+  end
+
+  it "still sweeps a dotted directory that is not a file" do
+    cfg = D::Config.new(spider: false, bruteforce: true, calibrate_probes: 3, concurrency: 1,
+      retries: 0, confidence_floor: 0.4, max_depth: 3)
+    sent = [] of String
+    findings, _ = run_discover("http://t/", %w[v1.0 app.v2], cfg) do |t|
+      sent << t
+      case t
+      when "/v1.0"   then html("<h1>api root, version one</h1>")
+      when "/app.v2" then html("<h1>the second app generation</h1>")
+      else                notfound
+      end
+    end
+    findings.map(&.url).should contain("http://t/v1.0")
+    sent.any?(&.starts_with?("/v1.0/")).should be_true
+    sent.any?(&.starts_with?("/app.v2/")).should be_true
   end
 
   it "confines a path-scoped run to the seed subtree" do

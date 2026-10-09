@@ -25,7 +25,17 @@ module Gori::EnvMigration
     # still scanning. Only the marker is written here; what matters is that the apply refuses.
     store.set_setting(MARKER_KEY, Settings.env_syntax.to_s.downcase)
     store.flush
-    apply(plan, db_path)
+    apply(plan, store, db_path)
+  end
+
+  # A peer's ordinary commit landing in the same gap — during the `VACUUM INTO` on a big project.
+  def self.apply_after_peer_edit_for_spec(store : Store, db_path : String, project : String,
+                                          &peer : ->) : StoreReport?
+    plan = Plan.new(project, stored_syntax(store), Settings.env_syntax,
+      env_names(store), bind_names(store), enabled_bind_names(store), Settings.env_prefix)
+    scan(store, plan)
+    peer.call
+    apply(plan, store, db_path)
   end
 end
 
@@ -752,6 +762,23 @@ describe Gori::EnvMigration do
         Gori::EnvMigration.apply_after_peer_for_spec(store, db_path, "demo").should be_nil
       end
       glob_files("#{db_path}.pre-namespaced-*").should be_empty
+    end
+  end
+
+  # The planned UPDATEs used to carry the bytes the PRE-transaction scan read, so a peer's edit
+  # committed in between (a TUI autosaving a draft while this open ran its backup) was reverted.
+  it "re-spells a peer's edit made after the scan instead of reverting it" do
+    with_migration_home do |db_path|
+      draft_id, _, _, _ = seed_migration_project(db_path)
+      Gori::Settings.env_syntax = NS
+      edited = "GET /peer HTTP/1.1\r\nHost: $API\r\nX-Peer: $id\r\n\r\n"
+      with_open_store(db_path) do |store|
+        Gori::EnvMigration.apply_after_peer_edit_for_spec(store, db_path, "demo") do
+          store.@db.exec("UPDATE repeaters SET request = ? WHERE id = ?", edited.to_slice, draft_id)
+        end.should_not be_nil
+        wire = String.new(store.get_repeater(draft_id).not_nil!.request)
+        wire.should contain("X-Peer: $ENV.id\r\n")
+      end
     end
   end
 

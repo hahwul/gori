@@ -60,9 +60,27 @@ module Gori
 
       # --- the model -----------------------------------------------------------
 
-      record Part, name : String, element : QName?, type : QName?
+      # `Part` and `Op` keep their node and resolve a QName on use, inside `render`'s
+      # per-operation rescue: one undeclared prefix (a generator typo, often in a message no
+      # operation uses) must cost only the operations that reach it, not the whole file.
+      record Part, name : String, node : Node do
+        def element : QName?
+          node.qname_attr?("element")
+        end
+
+        def type : QName?
+          node.qname_attr?("type")
+        end
+      end
+
       record Message, name : String, parts : Array(Part)
-      record Op, name : String, input_name : String?, input : QName?
+
+      record Op, name : String, input_name : String?, input_node : Node? do
+        def input : QName?
+          input_node.try(&.qname_attr?("message"))
+        end
+      end
+
       record PortType, name : String, ops : Array(Op)
       record HeaderRef, message : QName, part : String
 
@@ -76,7 +94,9 @@ module Gori
       record Binding, name : String, version : Version, port_type : QName,
         ops : Array(BindingOp)
 
-      record Port, service : String, name : String, binding : QName, location : String?
+      # `error` is why the port's `binding=` could not be resolved; `port_endpoint` reports it.
+      record Port, service : String, name : String, binding : QName, location : String?,
+        error : String? = nil
 
       class Doc
         getter target_ns : String
@@ -173,7 +193,7 @@ module Gori
       # location comes back rather than being re-read by the caller so there is no second,
       # unchecked read of `port.location` to get wrong.
       private def self.port_endpoint(doc : Doc, port : Port, & : String ->) : String?
-        if why = doc.unusable_bindings[port.binding]?
+        if why = port.error || doc.unusable_bindings[port.binding]?
           yield why
           return nil
         end
@@ -269,7 +289,7 @@ module Gori
           next unless name
           parts = m.elements(WSDL_NS, "part").compact_map do |p|
             pname = p.attr?("name")
-            pname ? Part.new(pname, p.qname_attr?("element"), p.qname_attr?("type")) : nil
+            pname ? Part.new(pname, p) : nil
           end
           messages[{tns, name}] = Message.new(name, parts)
         end
@@ -285,7 +305,7 @@ module Gori
             oname = o.attr?("name")
             next nil unless oname
             inp = o.element?(WSDL_NS, "input")
-            Op.new(oname, inp.try(&.attr?("name")), inp.try(&.qname_attr?("message")))
+            Op.new(oname, inp.try(&.attr?("name")), inp)
           end
           port_types[{tns, name}] = PortType.new(name, ops)
         end
@@ -300,7 +320,12 @@ module Gori
           name = b.attr?("name")
           next unless name
           qn = {tns, name}
-          pt_ref = b.qname_attr?("type")
+          pt_ref = begin
+            b.qname_attr?("type")
+          rescue e : Gori::Error
+            unusable[qn] = %(binding #{name.inspect}: #{e.message})
+            next
+          end
           unless pt_ref
             unusable[qn] = %(binding #{name.inspect} names no portType)
             next
@@ -348,7 +373,12 @@ module Gori
           headers = [] of HeaderRef
           if inp
             inp.elements(soap_ns, "header").each do |h|
-              msg = h.qname_attr?("message")
+              # An unresolvable header message skips that header only, as `header_markup` does.
+              msg = begin
+                h.qname_attr?("message")
+              rescue Gori::Error
+                nil
+              end
               hp = h.attr?("part")
               headers << HeaderRef.new(msg, hp) if msg && hp
             end
@@ -370,11 +400,17 @@ module Gori
           svc.elements(WSDL_NS, "port").each do |p|
             pname = p.attr?("name")
             next unless pname
-            bref = p.qname_attr?("binding")
+            error = nil
+            bref = begin
+              p.qname_attr?("binding")
+            rescue e : Gori::Error
+              error = %(port #{pname.inspect}: #{e.message})
+              {"", ""}
+            end
             next unless bref
             loc = p.element?(SOAP11_NS, "address").try(&.attr?("location")) ||
                   p.element?(SOAP12_NS, "address").try(&.attr?("location"))
-            ports << Port.new(sname, pname, bref, loc)
+            ports << Port.new(sname, pname, bref, loc, error)
           end
         end
         ports

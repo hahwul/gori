@@ -208,7 +208,13 @@ module Gori::Protobuf
     # descriptor set built from it. Cheap to detect — a `.proto` is text and says so — and
     # the answer is one command the operator can copy.
     private def self.proto_source?(data : Bytes) : String?
-      head = String.new(data[0, {data.size, 512}.min])
+      # Back the cut off a split UTF-8 sequence, or a CJK comment straddling byte 512 fails
+      # the validity check below and the hint is lost.
+      n = {data.size, 512}.min
+      while n > 0 && n < data.size && data[n] & 0xC0 == 0x80
+        n -= 1
+      end
+      head = String.new(data[0, n])
       return nil unless head.valid_encoding?
       return nil unless head.matches?(/^\s*(syntax\s*=|package\s|import\s|message\s|service\s|\/\/)/m)
       "this looks like a `.proto` SOURCE file — gori loads descriptor SETS: " \

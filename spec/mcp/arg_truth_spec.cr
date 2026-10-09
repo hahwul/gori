@@ -88,4 +88,13 @@ describe "MCP write tools: arguments and their answers" do
       mcp_ok_json(t, "create_repeater", %({"issue_id":#{iid},"flow_id":#{linked}}))["id"].as_i64.should be > 0
     end
   end
+
+  it "seeds from the caller's flow_id when the issue has no flow of its own" do
+    with_store do |store|
+      fid = mcp_seed_flow(store, "/a")
+      iid = store.insert_issue("x", Gori::Store::Severity::Low, nil, nil)
+      rid = mcp_ok_json(tools_for(store), "create_repeater", %({"issue_id":#{iid},"flow_id":#{fid}}))["id"].as_i64
+      store.link_id(Gori::Store::LinkOwnerKind::Issue, iid, Gori::Store::LinkRefKind::Repeater, rid).should_not be_nil
+    end
+  end
 end

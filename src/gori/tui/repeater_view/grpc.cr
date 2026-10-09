@@ -126,7 +126,7 @@ class Gori::Tui::RepeaterView
   private def sync_cl_head(head : String, size : Int32) : String
     eol = head.includes?("\r\n") ? "\r\n" : "\n"
     lines = head.split(eol)
-    idx = lines.index(&.lstrip.downcase.starts_with?("content-length:")) || return head
+    idx = resyncable_cl_index(lines) || return head
     lines[idx] = "Content-Length: #{size}"
     lines.join(eol)
   end

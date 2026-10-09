@@ -420,6 +420,11 @@ describe Gori::Bindings do
           shift.call("POST /a HTTP/1.1\r\ncontent-length: 2\r\n").should contain("content-length: 10")
           shift.call("POST /a HTTP/1.1\r\nCONTENT-LENGTH: 2\r\n").should contain("CONTENT-LENGTH: 10")
           shift.call("POST /a HTTP/1.1\r\nContent-Length:2\r\n").should contain("Content-Length:10")
+          # A zero-padded or `+`-signed value keeps its spelling; an obfuscated one is not
+          # a number to re-spell, so it is left byte-exact.
+          shift.call("POST /a HTTP/1.1\r\nContent-Length: 0002\r\n").should contain("Content-Length: 0010\r\n")
+          shift.call("POST /a HTTP/1.1\r\nContent-Length: +2\r\n").should contain("Content-Length: +10\r\n")
+          shift.call("POST /a HTTP/1.1\r\nContent-Length: \f2\r\n").should contain("Content-Length: \f2\r\n")
           # An obs-fold continuation belongs to the header ABOVE it and is invisible to a
           # strict parser — promoting or editing it would send a different probe than authored.
           folded = shift.call("POST /a HTTP/1.1\r\nX-Note: see\r\n Content-Length: 2\r\n")

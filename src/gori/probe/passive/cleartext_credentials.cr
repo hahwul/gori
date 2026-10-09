@@ -47,7 +47,7 @@ module Gori
         # a false-positive magnet. An unquoted boolean (`"showPassword": false`) never matches the
         # `"…"` value; quoted UI-state values are screened while the scan CONTINUES, so an earlier
         # `"showPassword":"false"` cannot hide a later real `"password":"…"` member.
-        JSON_CREDENTIAL = Utf8.tolerant(/"([A-Za-z0-9_.\[\]-]*(?:password|passwd|pwd)|pass|passphrase|client[_-]?secret|secret|api[_-]?(?:key|secret))"\s*:\s*"((?:[^"\\]|\\.)+)"/i)
+        JSON_CREDENTIAL = Utf8.tolerant(/"([A-Za-z0-9_.\[\]-]*(?:password|passwd|pwd)|pass|passphrase|client[_-]?secret|secret|api[_-]?(?:key|secret))"\s*:\s*"((?:[^"\\]++|\\.)+)"/i)
 
         # `<input … type=password>`. The negative lookbehind is the same one the neighbouring HTML
         # scans use: without it a `data-type="password"` attribute matches, because `\b` treats the

@@ -163,10 +163,13 @@ module Gori
         end
 
         private def check_doc_headers(ctx : Context, h, acc : Array(Detection)) : Nil
-          csp = h.get?("Content-Security-Policy")
-          if csp
-            dirs = parse_csp(csp)
-            acc << hdr(ctx, "weak_csp", "Weak Content-Security-Policy", Store::Severity::Low, csp[0, 80]) if weak_csp?(dirs)
+          # EVERY enforcing CSP field, not the last: a browser enforces each as its own policy
+          # and a resource must pass all of them (an app's Helmet header plus a proxy's
+          # `add_header` is the common pair), so the policy is weak only when every one is.
+          csps = h.get_all("Content-Security-Policy")
+          if csp = csps.first?
+            policies = csps.map { |c| parse_csp(c) }
+            acc << hdr(ctx, "weak_csp", "Weak Content-Security-Policy", Store::Severity::Low, csp[0, 80]) if policies.all? { |d| weak_csp?(d) }
             # base-uri is one of the few directives with NO fallback to default-src: omit it and
             # the document's base URL stays attacker-controllable. An injected `<base href>` (a
             # single tag, no script execution needed) re-points every RELATIVE script/resource URL
@@ -180,11 +183,11 @@ module Gori
             # (`upgrade-insecure-requests`, `frame-ancestors 'none'`) restricts no script source,
             # so there is nothing for a rebased relative URL to bypass and base-uri is moot;
             # firing there would be pure noise (this is also the only context CSP Evaluator flags).
-            if dirs["base-uri"]?.nil? && (dirs.has_key?("script-src") || dirs.has_key?("default-src") || dirs.has_key?("object-src"))
+            if policies.none?(&.has_key?("base-uri")) &&
+               policies.any? { |d| d.has_key?("script-src") || d.has_key?("default-src") || d.has_key?("object-src") }
               acc << hdr(ctx, "csp_missing_base_uri", "CSP without base-uri (base-tag hijacking)", Store::Severity::Low)
             end
           else
-            dirs = nil
             # Report-Only alone does not enforce — flag that specifically instead of a bare
             # missing_csp so the analyst doesn't misread "has CSP" from the R-O header name.
             if h.get?("Content-Security-Policy-Report-Only")
@@ -196,8 +199,7 @@ module Gori
           # A CSP frame-ancestors directive only substitutes for X-Frame-Options when it is
           # actually restrictive (not '*'). Only the enforcing CSP counts — Report-Only does not
           # block framing.
-          fa = dirs.try(&.["frame-ancestors"]?)
-          framed_ok = fa && !fa.empty? && !fa.includes?("*")
+          framed_ok = policies.try &.any? { |d| (fa = d["frame-ancestors"]?) && !fa.empty? && !fa.includes?("*") }
           # Only DENY / SAMEORIGIN actually restrict framing; the obsolete ALLOW-FROM (and any
           # other value) is ignored by modern browsers, so a present-but-ineffective XFO is no
           # protection — flag it too, not just a missing header (validate the value like XCTO).
@@ -250,14 +252,16 @@ module Gori
 
         private def check_permissions_policy(ctx : Context, h, acc : Array(Detection)) : Nil
           # Prefer modern Permissions-Policy; fall back to legacy Feature-Policy.
-          pp = h.get?("Permissions-Policy")
-          fp = h.get?("Feature-Policy")
-          if pp.nil? && fp.nil?
+          # Every field: repeated lines combine into one list (RFC 8941), so a `camera=*` in an
+          # earlier line is still the policy.
+          pp = h.get_all("Permissions-Policy")
+          fp = h.get_all("Feature-Policy")
+          if pp.empty? && fp.empty?
             acc << hdr(ctx, "missing_permissions_policy", "Missing Permissions-Policy", Store::Severity::Info)
             return
           end
-          policy = pp || fp.not_nil!
-          modern = !pp.nil?
+          modern = !pp.empty?
+          policy = modern ? pp.join(", ") : fp.join("; ")
           weak = modern ? weak_permissions_modern(policy) : weak_permissions_legacy(policy)
           return if weak.empty?
           # Cap evidence so a giant policy doesn't bloat the issue row.

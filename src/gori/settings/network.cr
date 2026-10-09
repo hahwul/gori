@@ -835,6 +835,8 @@ module Gori::Settings
   def self.bind_host_error(host : String) : String?
     h = host.strip
     return nil if h.empty?
+    # A PCRE2 match on invalid UTF-8 raises; a hand-edited file can carry a raw 0xff.
+    return "settings: invalid bind address #{h.inspect}" unless h.valid_encoding?
     return nil if Socket::IPAddress.valid_v4?(h) || Socket::IPAddress.valid_v6?(h)
     # Looks like an IP literal attempt (only digits+dots, or an unbracketed hex+colon
     # v6) yet didn't parse as one → a typo'd address, not a hostname.
@@ -874,20 +876,22 @@ module Gori::Settings
   def self.upstream_proxy_port_error(value : String) : String?
     error = upstream_proxy_error(value)
     return nil unless error
-    bare = value.sub(/\A[A-Za-z][A-Za-z0-9+.-]*:\/\//, "").rstrip('/')
-    segment = nil.as(String?)
-    if bare.starts_with?('[')
-      if close = bare.index(']')
-        rest = bare[(close + 1)..]
-        segment = rest[1..] if rest.starts_with?(':') && rest.size > 1
-      end
-    elsif (i = bare.rindex(':')) && !bare[0...i].includes?(':') && i < bare.size - 1
-      segment = bare[(i + 1)..]
-    end
-    if segment
+    return error unless value.valid_encoding? # the regexes below raise on invalid UTF-8
+    if segment = proxy_port_segment(value.sub(/\A[A-Za-z][A-Za-z0-9+.-]*:\/\//, "").rstrip('/'))
       port = segment.to_i?
       return "settings: invalid upstream proxy port #{segment.inspect}" unless port && 0 <= port <= 65_535
     end
     error
+  end
+
+  # The explicit port segment of a scheme-less proxy authority, or nil when it names none.
+  private def self.proxy_port_segment(bare : String) : String?
+    if bare.starts_with?('[')
+      return nil unless close = bare.index(']')
+      rest = bare[(close + 1)..]
+      rest[1..] if rest.starts_with?(':') && rest.size > 1
+    elsif (i = bare.rindex(':')) && !bare[0...i].includes?(':') && i < bare.size - 1
+      bare[(i + 1)..]
+    end
   end
 end

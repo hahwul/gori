@@ -262,7 +262,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       refresh_link_owners(owner_kind, owner_id)
       true
     else
-      @toast = "already linked"
+      # nil is also a write that did not commit — only an existing row is "already linked".
+      @toast = @session.store.link_id(owner_kind, owner_id, ref_kind, ref_id) ? "already linked" : "link NOT added (project busy)"
       false
     end
   end
@@ -280,7 +281,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     return commit_link_to_owner(owner_kind, owner_id, refs.first[0], refs.first[1]) if refs.size == 1
     live = refs.select { |kind, rid| !kind.flow? || !@session.store.flow_row(rid).nil? }
     gone = refs.size - live.size
-    linked = @session.store.add_links(owner_kind, owner_id, live)
+    unless linked = @session.store.add_links(owner_kind, owner_id, live)
+      @toast = "links NOT added (project busy)"
+      return false
+    end
     refresh_link_owners(owner_kind, owner_id)
     parts = ["linked #{linked}"]
     parts << "#{live.size - linked} already linked" if live.size > linked

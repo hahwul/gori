@@ -425,6 +425,27 @@ describe Gori::MCP::Server do
       end
     end
 
+    it "treats timeout_ms:0 as absent rather than as a 1 ms deadline" do
+      with_store do |store|
+        origin = TCPServer.new("127.0.0.1", 0)
+        port = origin.local_address.port
+        spawn do
+          if conn = origin.accept? # answer late enough that a 1 ms deadline cannot be met
+            conn.gets
+            sleep 50.milliseconds
+            conn << "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+            conn.close rescue nil
+          end
+        rescue
+        end
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:#{port}/","timeout_ms":0,"allow_unscoped":true}}})
+        resp = mcp_drive(store, call, verify_upstream: false)[0]
+        resp["result"]["isError"].as_bool.should be_false
+        mcp_tool_payload(resp)["status"].as_i.should eq(200)
+        origin.close rescue nil
+      end
+    end
+
     it "returns isError on a connection failure (port 1)" do
       with_store do |store|
         call = %({"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:1/","allow_unscoped":true}}})
@@ -859,6 +880,37 @@ describe Gori::MCP::Server do
         # on trust. The default send is still an ordinary masked TEXT frame.
         payload["messages"].as_a[0]["frame"].as_s.should eq("TEXT")
         store.repeaters.find(&.id.==(repeater_id)).not_nil!.response_head.should_not be_nil
+      end
+    end
+
+    it "takes the plain-string 'messages' form its schema advertises as TEXT frames" do
+      with_store do |store|
+        port = start_mcp_ws_origin
+        request = "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
+        repeater_id = store.insert_repeater("ws://127.0.0.1:#{port}", request.to_slice, false, true, nil, 0)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_websocket","arguments":{"repeater_id":#{repeater_id},"messages":"ping","idle_ms":100,"allow_unscoped":true}}})
+        resp = mcp_drive(store, call, verify_upstream: false)[0]
+        resp["result"]["isError"].as_bool.should be_false
+        out = mcp_tool_payload(resp)["messages"].as_a.select { |m| m["direction"].as_s == "out" }
+        out.map { |m| {m["frame"].as_s, m["payload"].as_s} }.should eq([{"TEXT", "ping"}])
+      end
+    end
+
+    # A schema-filling client sends `"messages":""` / `[]`; that names nothing, so the
+    # session's stored frames go out — it used to send zero frames.
+    it "sends the stored frames when 'messages' is an empty string or array" do
+      [%(""), %([])].each do |empty|
+        with_store do |store|
+          port = start_mcp_ws_origin # serves one connection
+          request = "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
+          repeater_id = store.insert_repeater("ws://127.0.0.1:#{port}", request.to_slice, false, true, nil, 0)
+          store.update_repeater_ws_messages(repeater_id, [Gori::Store::WsOutMessage.text("stored")]).should be_true
+          call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_websocket","arguments":{"repeater_id":#{repeater_id},"messages":#{empty},"idle_ms":100,"allow_unscoped":true}}})
+          resp = mcp_drive(store, call, verify_upstream: false)[0]
+          resp["result"]["isError"].as_bool.should be_false
+          out = mcp_tool_payload(resp)["messages"].as_a.select { |m| m["direction"].as_s == "out" }
+          out.map(&.["payload"].as_s).should eq(["stored"])
+        end
       end
     end
 

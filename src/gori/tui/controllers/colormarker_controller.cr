@@ -545,7 +545,9 @@ module Gori::Tui
           return false
         end
         if from != ov.scope
-          moved = rule_list.find { |r| r.scope == from && r.id == id }
+          # `engine.rules`, not the filtered `rule_list`: an edit that stops matching a standing
+          # `/` query would read as a peer delete after the field edit had already committed.
+          moved = engine.rules.find { |r| r.scope == from && r.id == id }
           if moved.nil?
             # The update reported a COMMIT, not a row — `Store#update_color_rule` answers through
             # `exec_task_ok`, so an `UPDATE … WHERE id = ?` against an id a peer deleted while

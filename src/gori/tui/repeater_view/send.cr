@@ -326,7 +326,7 @@ class Gori::Tui::RepeaterView
     at_request_line = true # line 0 starts a request; with `group`, so does the line after a `%%%`
     @editor.lines_snapshot.each_with_index do |line, i|
       stripped = line.strip
-      if group && stripped == PIPELINE_SEP
+      if group && Repeater::Minimize.group_sep?(line)
         at_request_line = true
         next
       end

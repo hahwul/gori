@@ -88,8 +88,11 @@ module Gori
         # Request side is CLIENT-CONTROLLABLE — the operator supplied the bytes, so if a sink
         # deserializes them this is the exploitable direction. Scored Medium.
         private def scan_request(ctx : Context, hits : Hash(String, Store::Severity)) : Nil
-          if cookie = ctx.req.headers.get?("Cookie")
-            each_pair(cookie, ';') do |name, value|
+          # Every Cookie line, not the last: an h2 client splits the jar into one field per crumb
+          # (RFC 9113 §8.2.3), and the capture keeps each as its own line.
+          ctx.req.headers.each do |h|
+            next unless h.name.compare("Cookie", case_insensitive: true) == 0
+            each_pair(h.value, ';') do |name, value|
               if fmt = classify(value)
                 mark(hits, fmt, "cookie '#{name}'", Store::Severity::Medium)
               end
@@ -145,7 +148,11 @@ module Gori
 
         # Classify one VALUE by its serialized magic, trying the raw form and — for the query /
         # body params that arrive percent-encoded — a decoded form. nil when nothing matches.
+        # A header value is captured bytes and may be invalid UTF-8, which PCRE RAISES on (the
+        # whole rule's findings for the flow are then lost); every magic is ASCII, so scrubbing
+        # cannot hide a match.
         private def classify(raw : String) : String?
+          raw = Utf8.subject(raw)
           {raw, percent_decode(raw)}.each do |v|
             v = v.lstrip
             next if v.empty?

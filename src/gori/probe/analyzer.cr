@@ -50,6 +50,7 @@ module Gori
       @warned_degraded : Bool        # one-shot: the "active skipped, list unreadable" warning
       @oob : OutOfBand::Minter?      # OAST payload minter — nil until this project registers one
       @oob_watermark : Int64 = 0_i64 # highest oast_callbacks id already swept
+      @oob_floor : Int64? = nil      # rewind the next sweep to this: see `execute_active`
       # The active worker's keep-alive sender and the dial it was built for. See `worker_sender`.
       @worker_sender : Fuzz::Sender? = nil
       @worker_sender_key : {String, String, Int32, Bool, Bool, String?}? = nil
@@ -939,12 +940,20 @@ module Gori
         # rules, different surface (live TUI here, `gori run probe` / MCP `probe_scan`
         # there). It leaked for months after the headless path was audited precisely because
         # the two are separate loops that look like one, so they call the SAME helper.
+        oob_mark = @oob_watermark
         result = sender.send(plan.request, Fuzz::Backend.all_verbatim(plan.request))
         # Record this plan's out-of-band payloads now that the probe carrying them went out —
         # the twin of the same line in `Active.analyze`, for the same reason (a payload that
         # never left is not outstanding). A read timeout still went out: the target had the
         # payload, and may be slow precisely because it is fetching it. See `Probe::OutOfBand`.
-        record_oob(rule, plan, detail) if result.ok? || result.timed_out?
+        if result.ok? || result.timed_out?
+          record_oob(rule, plan, detail)
+          # The send yields for up to ACTIVE_TIMEOUT, and a target that fetches the payload at
+          # once has its callback stored, and swept past with no pending row to match, before
+          # the row above exists. Rewind the next sweep to where this send started; a re-read
+          # callback cannot promote twice (`mark_probe_oast_matched` is conditional).
+          @oob_floor = {@oob_floor || oob_mark, oob_mark}.min unless plan.oob.empty?
+        end
         # Surface send failures (TLS/DNS/timeout) so Active never fails silently — but
         # only ONCE per host: a flapping origin with many distinct param sets would
         # otherwise flood the notification tray (one event per unique plan.dedup_key).
@@ -1019,7 +1028,14 @@ module Gori
 
       private def sweep_oob : Nil
         return if @stopped
-        detections, @oob_watermark = OutOfBand.sweep(@store, @oob_watermark)
+        since = @oob_watermark
+        # Taken BEFORE the sweep: it yields on a match's write, and a floor set meanwhile stays
+        # in place for the next one.
+        if floor = @oob_floor
+          @oob_floor = nil
+          since = {since, floor}.min
+        end
+        detections, @oob_watermark = OutOfBand.sweep(@store, since)
         return if detections.empty?
         # flow_id rides on each Detection (stamped at plant time from the probed flow), so
         # `persist` is passed 0 and `with_source` keeps the detection's own id. `persist` bumps

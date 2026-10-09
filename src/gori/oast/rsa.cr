@@ -88,7 +88,7 @@ module Gori::Oast
       raise Gori::Error.new("BIO_new_mem_buf failed") if bio.null?
       begin
         pkey = LibCrypto.pem_read_bio_privatekey(bio, Pointer(LibCrypto::EVP_PKEY).null,
-          Pointer(Void).null, Pointer(Void).null)
+          Pointer(Void).null, Gori::Proxy::Tls::NO_PASSPHRASE)
         raise Gori::Error.new("PEM_read_bio_PrivateKey failed") if pkey.null?
         new(pkey)
       ensure

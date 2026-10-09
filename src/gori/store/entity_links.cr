@@ -4,7 +4,9 @@ module Gori
   class Store
     # --- entity links (V21) --------------------------------------------------
 
-    # Insert a link; returns the row id, or nil when the link already exists.
+    # Insert a link; returns the row id, or nil when no row was inserted: the link already
+    # exists OR the write did not commit (busy/locked/closing). A caller that reports the
+    # difference asks `link_id` — a row means "already linked", none means "not added".
     def add_link(owner_kind : LinkOwnerKind, owner_id : Int64, ref_kind : LinkRefKind, ref_id : Int64) : Int64?
       ts = now_us
       exec_task ->(c : DB::Connection) {
@@ -32,7 +34,9 @@ module Gori
     # marked set would stall the single-threaded render loop for one write-batch round-trip per
     # flow — seconds at typical fsync latency once ⇧T has marked a page. The inserted count comes
     # from `changes()` inside the same transaction, so no follow-up read is needed either.
-    def add_links(owner_kind : LinkOwnerKind, owner_id : Int64, refs : Array({LinkRefKind, Int64})) : Int32
+    #
+    # nil when the batch did not commit, so a caller cannot read a rollback as "all already linked".
+    def add_links(owner_kind : LinkOwnerKind, owner_id : Int64, refs : Array({LinkRefKind, Int64})) : Int32?
       return 0 if refs.empty?
       ts = now_us
       inserted = 0
@@ -50,7 +54,7 @@ module Gori
         end
         nil
       }
-      ok ? inserted : 0
+      ok ? inserted : nil
     end
 
     def link_id(owner_kind : LinkOwnerKind, owner_id : Int64, ref_kind : LinkRefKind, ref_id : Int64) : Int64?

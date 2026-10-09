@@ -1955,6 +1955,12 @@ describe "Gori::Proxy::WS.encode frame shapes" do
     f[2, 3].should eq("abc".to_slice)
   end
 
+  it "falls back to the payload length for a negative `declared_len` (a stored row)" do
+    f = Gori::Proxy::WS.encode(Gori::Proxy::WS::OP_TEXT, "abc".to_slice, mask: false,
+      declared_len: -1)
+    f.should eq(Bytes[0x81, 0x03] + "abc".to_slice)
+  end
+
   it "picks the length FORM from the declared length, not the payload's" do
     # An over-declared 200 must take the 16-bit form even though the payload is 1 byte,
     # or the receiver reads a different header than the one that was asked for.

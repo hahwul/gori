@@ -218,7 +218,8 @@ class Gori::Tui::RepeaterView
     "#{rl[0, sp1]} #{path}?#{query} #{rl[(sp2 + 1)..]}"
   end
 
-  # Rewrite the Content-Length header (if present) to the envelope body's byte size. The
+  # Rewrite the Content-Length header (if present and rewritable — `resyncable_cl_index`) to
+  # the envelope body's byte size. The
   # LF-joined body is byte-identical to the wire body: `expand_wire` normalizes the HEAD to
   # CRLF and leaves the body alone, so an `application/graphql` document's own newlines are
   # counted here exactly as they are sent (a form/JSON body has none to begin with).
@@ -226,7 +227,7 @@ class Gori::Tui::RepeaterView
     sep = env.index("\n\n") || return env
     body = env[(sep + 2)..]
     lines = env[0, sep].split('\n')
-    idx = lines.index(&.lstrip.downcase.starts_with?("content-length:")) || return env
+    idx = resyncable_cl_index(lines) || return env
     lines[idx] = "Content-Length: #{body.bytesize}"
     "#{lines.join('\n')}\n\n#{body}"
   end

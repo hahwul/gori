@@ -461,7 +461,7 @@ module Gori
           # runs over bodies that are truncated (a capture cut at the cap, an MCP projection cut
           # at its 64 KB display cap), and requiring the close meant a secret cut mid-value was
           # the one thing the fallback could not see.
-          rules << {Regex.new("\"(?:#{alt})\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)(?:\"|\\z)",
+          rules << {Regex.new("\"(?:#{alt})\"\\s*:\\s*\"((?:[^\"\\\\]++|\\\\.)*)(?:\"|\\z)",
             Regex::Options::IGNORE_CASE), "json_field (text fallback)"}
         end
         unless @form.empty?

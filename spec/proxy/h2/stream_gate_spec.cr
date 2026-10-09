@@ -620,6 +620,24 @@ describe Gori::Proxy::H2::StreamGate do
     end
   end
 
+  # The client was charged 5 bytes of connection window; the origin sees 2 and credits back
+  # only those, so gori owes the client the 3 the edit took out.
+  it "refunds the sender the window a shorter edited body freed" do
+    with_ic do |ic|
+      rig = Rig.new(ic)
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(post_len("/up", 5)), Frame::END_HEADERS))
+      rig.c2s.accept(data(1_u32, "hello", Frame::END_STREAM))
+      settle
+      ic.forward(ic.pending.first.id,
+        "POST /up HTTP/2\r\nHost: api.example.com\r\ncontent-length: 2\r\n\r\nhi".to_slice)
+      settle
+
+      data_payloads(rig.to_origin, 1_u32).should eq(["hi"])
+      wu = rig.to_client.select { |f| f.frame_type == Frame::Type::WindowUpdate && f.stream_id == 0 }
+      wu.map { |f| IO::ByteFormat::BigEndian.decode(UInt32, f.payload) }.should eq([3_u32])
+    end
+  end
+
   it "keeps the peer's DATA frames byte-for-byte when the edit changed only the head" do
     with_ic do |ic|
       rig = Rig.new(ic)
@@ -888,10 +906,9 @@ describe Gori::Proxy::H2::StreamGate do
       ic.pending_count.should eq(0)
       rig.to_origin.should be_empty
 
+      # No further frame: a client waiting on its parked stream 3 has nothing to send, so the
+      # deadline has to fire on its own rather than on the next arrival.
       sleep 60.milliseconds
-      # Any inbound frame notices — here the connection-level WINDOW_UPDATE a real peer keeps
-      # sending. No timer fiber runs on the pump's path to do this (P6).
-      rig.c2s.accept(Frame::Header.new(Frame::Type::WindowUpdate.value, 0_u8, 0_u32, Bytes.new(4)))
       settle
 
       # Intercept is still ON: this is the head-only hold the gate had before #6, not a
@@ -1069,6 +1086,38 @@ describe Gori::Proxy::H2::StreamGate do
         IO::ByteFormat::BigEndian.decode(UInt32, reset.payload).should eq(Gate::PROTOCOL_ERROR)
       end
       rig.sink.responses.map(&.error).should eq(Array.new(cases.size, Gate::SANDBOX_PROTOCOL_ERROR_REASON))
+    end
+  end
+
+  # No `:method` leaves the block without a head, the shape trailers have, and it used to pass
+  # the sandbox untested with its body behind it.
+  it "refuses a stream-opening HEADERS with no :method, and its DATA" do
+    with_ic(intercept: false) do |ic, scope|
+      scope.add("include", "string", "https://api.example.com/api/")
+      scope.enable_sandbox
+      rig = Rig.new(ic)
+      fields = [{":scheme", "https"}, {":authority", "api.example.com"}, {":path", "/admin"}, {"cookie", "s=1"}]
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(fields), Frame::END_HEADERS))
+      rig.c2s.accept(data(1_u32, "secretbody", Frame::END_STREAM))
+
+      rig.to_origin.should be_empty
+      rst = rig.to_client.first # then the WINDOW_UPDATE refunding the swallowed DATA
+      rst.frame_type.should eq(Frame::Type::RstStream)
+      rst.stream_id.should eq(1_u32)
+      IO::ByteFormat::BigEndian.decode(UInt32, rst.payload).should eq(Gate::PROTOCOL_ERROR)
+    end
+  end
+
+  # Rule 1: a methodless opener still opens an id, so it may not overtake a deferred stream.
+  it "keeps a methodless opener behind a held stream" do
+    with_ic do |ic|
+      rig = Rig.new(ic)
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/held"))))
+      settle
+      ic.pending_count.should eq(1)
+      fields = [{":scheme", "https"}, {":authority", "api.example.com"}, {":path", "/x"}]
+      rig.c2s.accept(headers(3_u32, rig.enc_out.encode(fields)))
+      rig.to_origin.should be_empty
     end
   end
 
@@ -1327,6 +1376,29 @@ describe Gori::Proxy::H2::StreamGate do
       # never learned the stream exists.
       rig.s2c.accept(headers(2_u32, rig.enc_in.encode(response("200")), Frame::END_HEADERS))
       rig.to_client.any? { |f| f.stream_id == 2_u32 }.should be_false
+    end
+  end
+
+  # A promise travels on its associated stream, and a held response there used to park it
+  # untested, while the pushed HEADERS(2) went straight to a client never told of stream 2.
+  it "judges a PUSH_PROMISE on a held response stream, and relays an allowed one at once" do
+    with_ic do |ic, scope|
+      ic.set_direction(Gori::Interceptor::Direction::ResponseOnly)
+      scope.add("include", "string", "https://api.example.com/api/")
+      scope.enable_sandbox
+      rig = Rig.new(ic)
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/api/ok"))))
+      rig.s2c.accept(headers(1_u32, rig.enc_in.encode(response("200")), Frame::END_HEADERS))
+      settle
+      ic.pending_count.should eq(1)
+
+      rig.s2c.accept(push_promise(1_u32, 2_u32, rig.enc_in.encode(request("/pushed", "evil.test"))))
+      rig.to_origin.select { |f| f.frame_type == Frame::Type::RstStream }.map(&.stream_id).should eq([2_u32])
+      rig.s2c.accept(headers(2_u32, rig.enc_in.encode(response("200")), Frame::END_HEADERS))
+      rig.to_client.should be_empty
+
+      rig.s2c.accept(push_promise(1_u32, 4_u32, rig.enc_in.encode(request("/api/sub"))))
+      rig.to_client.map(&.frame_type).should eq([Frame::Type::PushPromise])
     end
   end
 

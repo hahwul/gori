@@ -205,9 +205,11 @@ module Gori
       begin
         file.flock_exclusive(blocking: false)
         new(file)
-      rescue IO::Error
+      rescue ex : IO::Error
         file.close rescue nil
-        nil # contended — somebody has it open
+        # Only EAGAIN is "somebody has it open"; any other errno is flock not working here,
+        # which degrades to proceeding exactly as `try_shared` does on the same mount.
+        contention?(ex) ? nil : new(nil)
       rescue
         file.close rescue nil
         new(nil)

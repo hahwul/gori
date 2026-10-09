@@ -1161,7 +1161,14 @@ module Gori
       span = content_length_digits(head)
       return head unless span
       start, stop = span
-      current = String.new(head[start, stop - start]).to_i64?
+      raw = head[start, stop - start]
+      # Only an optional sign and ASCII digits are a number this re-spells. `to_i64?` would
+      # also take `\f5` or `\v5` and drop the byte — an obfuscated value is the probe, so it
+      # stays byte-exact and the caller warns.
+      signed = raw[0] == '+'.ord || raw[0] == '-'.ord
+      digits = signed ? raw[1..] : raw
+      return head if digits.empty? || !digits.all? { |b| 0x30_u8 <= b <= 0x39_u8 }
+      current = String.new(raw).to_i64?
       return head unless current
       # SATURATING, in Int128, because `current` is an operator-authored number: `to_i64?`
       # refuses a literal wider than 64 bits but returns `Int64::MAX` / `Int64::MIN` happily,
@@ -1172,6 +1179,10 @@ module Gori
       # it leaves byte-exact). The lower bound is the `{…, 0_i64}.max` this replaces; delta is
       # an Int32, so the Int128 sum cannot itself overflow.
       shifted = (current.to_i128 + delta).clamp(0_i128, Int64::MAX.to_i128).to_i64.to_s
+      # The operator's spelling of the number moves with it: zero padding keeps its width
+      # (`0016` → `0024`) and a `+` stays — both are framing probes, not noise.
+      shifted = shifted.rjust(digits.size, '0') if digits[0] == '0'.ord
+      shifted = "+#{shifted}" if raw[0] == '+'.ord
       buf = IO::Memory.new(head.size + shifted.bytesize)
       buf.write(head[0, start])
       buf << shifted

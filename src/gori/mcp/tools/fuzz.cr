@@ -834,13 +834,24 @@ module Gori
       # `as_bool?` for the `0`/`1` the schema advertises, so a PING went out as TEXT and `fin:0`
       # as FIN=1, with `isError:false`.
       private def fuzz_ws_override(raw : JSON::Any) : Array(Fuzz::WsMessageSource)
-        arr = raw.as_a? || (raw.as_s?.try { |t| JSON.parse(t).as_a? })
-        raise FuzzArgError.new("'messages' must be a JSON array of frames") unless arr
-        arr.map do |item|
-          msg, err = ws_out_message_item(item)
-          raise FuzzArgError.new(ws_entry_error("messages", item, err)) unless msg
-          Fuzz::WsMessageSource.new(msg.opcode, String.new(msg.payload), msg.shape, false)
-        end
+        # A string is a JSON-encoded array when it parses as one, and otherwise the
+        # newline-separated TEXT-frame form the schema advertises — never a parse error, which
+        # used to escape every rescue here as INTERNAL.
+        text = raw.as_s?
+        arr = raw.as_a? || text.try { |t| (JSON.parse(t).as_a? rescue nil) }
+        msgs =
+          if arr
+            arr.map do |item|
+              msg, err = ws_out_message_item(item)
+              raise FuzzArgError.new(ws_entry_error("messages", item, err)) unless msg
+              msg
+            end
+          elsif text
+            ws_text_lines(text)
+          else
+            raise FuzzArgError.new("'messages' must be an array of frames or a newline-separated string")
+          end
+        msgs.map { |msg| Fuzz::WsMessageSource.new(msg.opcode, String.new(msg.payload), msg.shape, false) }
       end
 
       # The outbound WebSocket frame script for this sweep, or nil when it is not a WS run.
@@ -857,9 +868,10 @@ module Gori
       # what they mean there. Re-deriving them would reintroduce the defect that comment records
       # (a PING sent as TEXT, a CLOSE as BINARY, with `isError:false`).
       private def fuzz_ws_messages(h, text : String) : Array(Fuzz::WsMessageSource)?
-        # A JSON `null` is ABSENT, as every scalar reader on this surface already holds
-        # (`str`, `present?`, `optional_int_arg`): a `JSON::Any` wrapping nil is truthy.
-        given = h["messages"]?.try { |v| v.raw.nil? ? nil : v }
+        # A JSON `null`, `""` or `[]` is ABSENT (`describes_value?`): a `JSON::Any` wrapping nil
+        # is truthy, and a schema-filling client's empty filler must not override the seed's
+        # frames or refuse an HTTP template.
+        given = h["messages"]?.try { |v| describes_value?(v) ? v : nil }
         # Either handshake (#733): an RFC 6455 `Upgrade:` head or an RFC 8441 extended CONNECT.
         upgrade = Repeater::WsEngine.replayable?(text)
         http_only = bool_arg(h, "ws_http_only", false)

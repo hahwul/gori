@@ -76,3 +76,22 @@ describe Gori::CaptureLock do
     end
   end
 end
+
+describe "Gori::CaptureLock on a filesystem without flock" do
+  # Any flock failure used to read as "another instance holds it": every session opened
+  # view-only and the project could not be deleted, with no other gori running.
+  it "captures anyway instead of reporting a holder that does not exist" do
+    posix_only!("mkfifo")
+    dir = File.tempname("gori-lock-nolocks")
+    Dir.mkdir_p(dir)
+    begin
+      with_unlockable_lock_file(Gori::CaptureLock.path(dir)) do
+        lock = Gori::CaptureLock.try_at(Gori::CaptureLock.path(dir))
+        lock.should_not be_nil
+        lock.not_nil!.close
+      end
+    ensure
+      FileUtils.rm_rf(dir)
+    end
+  end
+end

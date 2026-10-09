@@ -683,16 +683,12 @@ module Gori::Tui
       store = @host.session.store
       case row.kind
       when :builtin
-        dis = store.probe_disabled_rules
-        # Toggle to the OPPOSITE of the displayed state via `set_rule_enabled` (not a bare
-        # add/delete): a DEFAULT-OFF rule inverts the stored-set membership — see
-        # Gori::Probe::DEFAULT_DISABLED_RULES.
-        Gori::Probe.set_rule_enabled(dis, row.rule_id, !row.enabled?)
-        # Both scan-rule writers report whether the toggle COMMITTED. Without this the status
-        # bar said `disabled rule "X"` while the very next `reload_rules` re-drew the row as
-        # still enabled — two lines of UI contradicting each other with no way to tell which
-        # was true. Same refusal as the CLI/MCP twins.
-        unless store.set_probe_disabled_rules(dis)
+        # Toggle to the OPPOSITE of the displayed state. Both scan-rule writers report whether
+        # the toggle COMMITTED. Without this the status bar said `disabled rule "X"` while the
+        # very next `reload_rules` re-drew the row as still enabled — two lines of UI
+        # contradicting each other with no way to tell which was true. Same refusal as the
+        # CLI/MCP twins.
+        unless store.set_probe_rule_enabled(row.rule_id, !row.enabled?)
           @host.status("rule \"#{row.title}\" NOT changed (project busy)")
           return
         end

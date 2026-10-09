@@ -74,3 +74,22 @@ describe "project archive modes in ProjectPicker" do
     picker_archive_method(source, "commit_archive_import").should contain("@query = \"\"")
   end
 end
+
+describe "Gori::Tui::ProjectPicker.export_base_dir" do
+  # `Dir.current` raises once the launch directory is gone, and the Export default path read it
+  # unguarded: one keypress exited gori.
+  it "falls back to the home directory when the working directory was deleted" do
+    posix_only!("removing the working directory")
+    here = Dir.current
+    gone = File.tempname("gori-deleted-cwd")
+    Dir.mkdir_p(gone)
+    begin
+      Dir.cd(gone)
+      Dir.delete(gone)
+      Gori::Tui::ProjectPicker.export_base_dir.should eq(Path.home.to_s)
+    ensure
+      Dir.cd(here)
+    end
+    Gori::Tui::ProjectPicker.export_base_dir.should eq(here)
+  end
+end

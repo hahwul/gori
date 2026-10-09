@@ -47,8 +47,9 @@ module Gori
     # Try to acquire the lock at an explicit LOCK FILE PATH WITHOUT blocking. Returns a held
     # CaptureLock (the caller MUST keep it alive for the session and `close` it on session
     # end) when this instance is the capturer, or nil when another LIVE instance already holds
-    # it. A non-contention failure (can't create the dir, open EACCES, …) is RE-RAISED so it
-    # is never mistaken for "someone else holds it".
+    # it. A flock this filesystem does not support yields a lock holding nothing; any other
+    # failure (can't create the dir, open EACCES, …) is RE-RAISED. Neither is ever mistaken
+    # for "someone else holds it".
     def self.try_at(lock_path : String) : CaptureLock?
       dir = File.dirname(lock_path)
       # `Paths.ensure_dir`, not a bare `Dir.mkdir_p` — the same call, with the same argument,
@@ -64,7 +65,12 @@ module Gori
       begin
         file.flock_exclusive(blocking: false) # => Nil on success; RAISES IO::Error if held
         new(file)
-      rescue IO::Error
+      rescue ex : IO::Error
+        # Only EAGAIN is "someone else holds it". Any other flock errno (ENOTSUP/ENOLCK on an
+        # NFS `nolocks` or FUSE mount) means flock does not work here: capture anyway, as the
+        # header says — the port probe is the fallback — rather than open every session
+        # view-only and make the project undeletable with no other gori running.
+        return new(file) unless OpenLock.contention?(ex)
         file.close rescue nil # contended — release our fd, no leak
         nil
       rescue ex

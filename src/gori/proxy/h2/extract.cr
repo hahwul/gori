@@ -59,14 +59,14 @@ module Gori::Proxy::H2
         warn_unscopable(frame.stream_id)
         return
       end
-      host, _ = Upstream.split_host_port(ref.authority, @port)
+      host, port = Upstream.split_host_port(ref.authority, @port)
       # No entity: DATA is untouched on this relay, and a body-scoped rule for this host would
       # have downgraded the connection before it got here (see the class comment). Passing nil
       # rather than an empty slice is what makes the observer say "there was no body" instead
       # of "the selector found nothing".
       @extractor.observe_response(HeadCodec.synth_response(fields), nil,
         method: ref.method, host: host, target: ref.target, scheme: ref.scheme,
-        status: status, flow_id: @assembler.flow_id_of(frame.stream_id))
+        status: status, flow_id: @assembler.flow_id_of(frame.stream_id), port: port)
     rescue ex
       # An extract rule must never be able to break a relayed connection.
       ::Log.warn { "extract rules skipped for an h2 response: #{ex.message}" }

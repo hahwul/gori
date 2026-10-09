@@ -79,11 +79,14 @@ module Gori
       status : Int32? = nil,
       proto : Proto::Kind = Proto::Kind::Http,
       payload : Bytes? = nil,
-      head : Bytes? = nil do
-      # `url:`'s haystack, built the way `QL::URL_EXPR` builds it in SQL. Not memoised: only a
-      # `url:` term asks for it, and a Subject is a struct built fresh per message.
+      head : Bytes? = nil,
+      port : Int32? = nil do
+      # `url:`'s haystack, built the way `QL::URL_EXPR` builds it in SQL — which needs `port`:
+      # without it an origin-form target on :8443 read `https://acme.test/admin` here and
+      # `https://acme.test:8443/admin` in History. Not memoised: only a `url:` term asks for
+      # it, and a Subject is a struct built fresh per message.
       def url : String
-        Url.request_url(scheme, host, target)
+        Url.request_url(scheme, host, target, port)
       end
 
       # `path:`'s haystack, the way `QL::PATH_EXPR` reads it in SQL: an absolute-form target

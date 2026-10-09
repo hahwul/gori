@@ -213,6 +213,10 @@ module Gori::Proxy::Tls
       begin
         yield
       rescue Gori::Error
+        if KeyPair.encrypted_pem?(path)
+          raise Gori::Error.new("#{what} is passphrase-protected; decrypt it first " \
+                                "(openssl pkey -in #{path} -out key.pem)")
+        end
         raise Gori::Error.new("#{path} is not a PEM #{what} gori can read " \
                               "(expecting a -----BEGIN …----- block)")
       end

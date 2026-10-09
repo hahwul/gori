@@ -61,12 +61,24 @@ module Gori::Proxy::Tls
       end
     end
 
+    # Whether a PEM private key file carries a passphrase: the PKCS#8 "ENCRYPTED PRIVATE KEY"
+    # header, or a traditional-format key's legacy `Proc-Type: 4,ENCRYPTED` line. Reads only
+    # the head of the file, enough for both markers.
+    def self.encrypted_pem?(path : String) : Bool
+      buf = Bytes.new(4096)
+      n = File.open(path, &.read(buf))
+      head = String.new(buf[0, n])
+      head.includes?("ENCRYPTED PRIVATE KEY") || head.includes?("Proc-Type: 4,ENCRYPTED")
+    rescue
+      false
+    end
+
     def self.read_pem(path : String) : KeyPair
       bio = LibCrypto.bio_new_file(path, "r")
       raise Gori::Error.new("BIO_new_file(#{path}) failed") if bio.null?
       begin
         pkey = LibCrypto.pem_read_bio_privatekey(bio, Pointer(LibCrypto::EVP_PKEY).null,
-          Pointer(Void).null, Pointer(Void).null)
+          Pointer(Void).null, NO_PASSPHRASE)
         raise Gori::Error.new("PEM_read_bio_PrivateKey failed") if pkey.null?
         new(pkey)
       ensure

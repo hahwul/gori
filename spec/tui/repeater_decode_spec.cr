@@ -204,6 +204,25 @@ describe "RepeaterView split-decode (SAML/GraphQL)" do
     end
   end
 
+  # Auto-CL leaves a deliberate length alone everywhere else (`resync_content_length`); the
+  # split-decode commit rewrote the first Content-Length line whatever it held.
+  describe "a deliberate Content-Length in the envelope" do
+    gql_body = %({"query":"query Q { a }"})
+
+    it "keeps a non-numeric value through a DECODED edit" do
+      head = "POST /graphql HTTP/1.1\r\nHost: api.test\r\nContent-Type: application/json\r\nContent-Length: +5\r\n\r\n"
+      raw = edit_decoded(load_gql(head, gql_body), &.sub("{ a }", "{ a b }"))
+      raw.should contain("Content-Length: +5\r\n")
+    end
+
+    it "keeps a duplicated pair through a DECODED edit" do
+      head = "POST /graphql HTTP/1.1\r\nHost: api.test\r\nContent-Type: application/json\r\n" \
+             "Content-Length: #{gql_body.bytesize}\r\nContent-Length: 7\r\n\r\n"
+      raw = edit_decoded(load_gql(head, gql_body), &.sub("{ a }", "{ a b }"))
+      raw.should contain("Content-Length: #{gql_body.bytesize}\r\nContent-Length: 7\r\n")
+    end
+  end
+
   describe "SAML" do
     xml = %(<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" ID="_x"><saml:Issuer xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">https://idp.test/m</saml:Issuer></samlp:Response>)
     saml_body = "SAMLResponse=#{URI.encode_www_form(Base64.strict_encode(xml))}&RelayState=#{URI.encode_www_form("/dash")}"

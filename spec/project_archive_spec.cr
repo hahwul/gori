@@ -307,6 +307,13 @@ describe Gori::ProjectArchive do
       expect_raises(Gori::Error, /source database or its sidecar/) do
         Gori::ProjectArchive.resolve_destination("#{loose.db_path}-wal", loose, overwrite: true, loose_database: true)
       end
+      expect_raises(Gori::Error, /source database or its sidecar/) do
+        Gori::ProjectArchive.resolve_destination("#{loose.db_path}#{Gori::OpenLock::SUFFIX}", loose, overwrite: true, loose_database: true)
+      end
+      # A sibling that merely shares the stem is not a sidecar.
+      {".gori", ".bak"}.each do |ext|
+        Gori::ProjectArchive.resolve_destination("#{loose.db_path}#{ext}", loose, loose_database: true).should eq("#{loose.db_path}#{ext}")
+      end
     end
   end
 

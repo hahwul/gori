@@ -177,7 +177,8 @@ describe "Gori::Rules — short-circuit op" do
       stub = rules.short_circuit(get("/logo.png"), "acme.test").not_nil!
       String.new(stub.body).should contain("stub body file unreadable")
       String.new(stub.body).should_not contain("secret-home")
-      stub.error.not_nil!.should contain(path)
+      # `add` makes the path absolute, which on Windows also gives it a drive letter.
+      stub.error.not_nil!.should contain(File.expand_path(path, home: true))
     end
   end
 
@@ -256,7 +257,7 @@ describe "Gori::Rules — short-circuit op" do
       reloaded = Gori::Rules.load(store).rules.first
       reloaded.op.should eq(SC)
       reloaded.op.label.should eq("short_circuit")
-      reloaded.body_file.should eq("/tmp/x.json")
+      reloaded.body_file.should eq(File.expand_path("/tmp/x.json", home: true))
       # A persisted stub rule MUST NOT come back as a Replace rule: `from_label`'s else-branch
       # coerces unknown labels to Replace, which would gsub the response text into traffic.
       Gori::Store::RuleOp.from_label("short_circuit").should eq(SC)

@@ -159,20 +159,11 @@ module Gori
       {committed, pairs.size}
     end
 
-    # One chunk, one transaction: the flows, then each flow's WebSocket transcript against the
-    # id it just got. Returns how many of `slice` committed.
+    # One chunk, one transaction: the flows and each flow's WebSocket transcript commit or roll
+    # back together. Returns how many of `slice` committed.
     def self.insert_chunk(store : Store, slice : Array(Builder::FlowPair)) : Int32
-      # `_ids`, not the counting form: a flow's WebSocket transcript is stored against the
-      # flow id, which does not exist until this write commits.
-      ids = store.insert_import_batch_ids(slice.map { |pair| {pair.request, pair.response} })
-      # Ids come back in PAIR ORDER, which is what makes the index the pairing. A short
-      # answer is a rolled-back batch, and walking the ids we actually got is then exactly
-      # right: the pairs past the end have no flow to hang messages on.
-      ids.each_with_index do |id, i|
-        msgs = slice[i].ws_messages
-        store.insert_ws_messages(id, msgs) unless msgs.empty?
-      end
-      ids.size
+      ws = slice.any? { |pair| !pair.ws_messages.empty? } ? slice.map(&.ws_messages) : nil
+      store.insert_import_batch_ids(slice.map { |pair| {pair.request, pair.response} }, ws).size
     end
 
     # A HAR is imported as it is READ: `Har.each_flow` walks the entries off the file one at a

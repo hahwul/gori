@@ -167,7 +167,7 @@ module Gori
         pem = pem_for(key_spec)
         with_bio(pem) do |bio|
           k = LibCrypto.pem_read_bio_privatekey(bio, Pointer(LibCrypto::EVP_PKEY).null,
-            Pointer(Void).null, Pointer(Void).null)
+            Pointer(Void).null, Gori::Proxy::Tls::NO_PASSPHRASE)
           return PKey.new(k) unless k.null?
         end
         raise ForgeError.new("not a readable PEM PRIVATE key " \
@@ -195,7 +195,7 @@ module Gori
         end
         with_bio(pem) do |bio|
           k = LibCrypto.pem_read_bio_privatekey(bio, Pointer(LibCrypto::EVP_PKEY).null,
-            Pointer(Void).null, Pointer(Void).null)
+            Pointer(Void).null, Gori::Proxy::Tls::NO_PASSPHRASE)
           return PKey.new(k) unless k.null?
         end
         raise ForgeError.new("not a readable PEM key (expected a PUBLIC KEY, a CERTIFICATE, or a PRIVATE KEY block)")

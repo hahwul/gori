@@ -1872,6 +1872,40 @@ describe Gori::Proxy::Server do
     resp.error.not_nil!.should contain("upstream closed before")
   end
 
+  it "forwards a cut-short response as received when a body rule would match it" do
+    done = Channel(Nil).new(1)
+    origin = TCPServer.new("127.0.0.1", 0)
+    origin_port = origin.local_address.port
+    spawn do
+      while conn = origin.accept?
+        Gori::Proxy::Codec::Http1.read_head(conn)
+        conn << "HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\na SECRET"
+        conn.flush
+        conn.close
+      end
+    end
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, rewriter: BodyRewriter.new)
+    proxy.start
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client << "GET /truncated HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"
+    client.flush
+    response = client.gets_to_end
+    client.close
+
+    done.receive
+    proxy.stop
+    origin.close
+
+    # A re-frame to the rewritten length would read as a complete response; the client
+    # must see the origin's own Content-Length and the short body it really sent.
+    response.should contain("Content-Length: 100")
+    response.should end_with("a SECRET")
+    sink.responses.first.state.should eq(Gori::Store::FlowState::Aborted)
+  end
+
   it "applies Match&Replace to request/response heads and captures the sent bytes" do
     seen = Channel(String).new(1)
     done = Channel(Nil).new(1)

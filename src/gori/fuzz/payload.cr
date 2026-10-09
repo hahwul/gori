@@ -393,7 +393,13 @@ module Gori::Fuzz
   end
 
   struct RegexReplace < Processor
-    def initialize(@pattern : Regex, @replacement : String)
+    @pattern : Regex
+
+    # Wordlist lines are byte-exact, so a latin-1 line reaches PCRE2 as is; without
+    # MATCH_INVALID_UTF its gsub raised and ended the whole sweep at that line. With it the
+    # invalid bytes are simply never matched and pass through verbatim (P7).
+    def initialize(pattern : Regex, @replacement : String)
+      @pattern = Regex.new(pattern.source, pattern.options | Regex::CompileOptions::MATCH_INVALID_UTF)
     end
 
     def apply(s : String) : String

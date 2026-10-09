@@ -58,9 +58,12 @@ module Gori
       def self.sendable(parts : Parts) : Sendable
         # A head that declares chunked over bytes that are NOT chunk-framed (a hand-authored
         # Repeater request, an import that stored the entity) keeps the operator's bytes, and
-        # curl's note about it has no reader here.
-        body, remaining_te = Curl.unchunk(Curl.transfer_codings(parts.headers), parts.body, [] of String)
-        remaining_te ||= ""
+        # curl's note about it has no reader here. Its `chunked` token still drops, since the
+        # library frames the body; a final coding that is NOT chunked (`gzip`, `xchunked`) is the
+        # request and rides as captured, the way `Curl.command` keeps it.
+        codings = Curl.transfer_codings(parts.headers)
+        body, remaining_te = Curl.unchunk(codings, parts.body, [] of String)
+        remaining_te ||= codings[0, codings.size - 1].join(", ") if codings.last? == "chunked"
         kept = [] of {String, String}
         te_written = false
         parts.headers.each do |(name, value)|
@@ -68,13 +71,13 @@ module Gori
           next if Curl::MARKER_HEADERS.includes?(down) || Curl::PROXY_ONLY_HEADERS.includes?(down)
           next if down == "content-length"
           next if down == "host" && Curl.host_is_url_authority?(value, parts.url)
-          if down == "transfer-encoding"
+          if down == "transfer-encoding" && (te = remaining_te)
             # The peeled coding list is emitted once, at the first TE line, and vanishes
             # entirely when `chunked` was the only coding.
             next if te_written
             te_written = true
-            next if remaining_te.empty?
-            kept << {name, remaining_te}
+            next if te.empty?
+            kept << {name, te}
             next
           end
           kept << {name, value}

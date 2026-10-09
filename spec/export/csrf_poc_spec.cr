@@ -108,6 +108,38 @@ describe Gori::Export::CsrfPoc do
     html.should contain("value=\"line1\nline2\n\">")
   end
 
+  # The framing newline is cut by bytes, not chars: `s[0, bytesize - 2]` kept `안녕\r\n` whole.
+  it "strips the framing newline from a non-ASCII multipart value" do
+    b = "X"
+    body = "--#{b}\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n안녕\r\n--#{b}--\r\n"
+    html = poc("POST /u HTTP/1.1\r\nHost: h.test\r\nContent-Type: multipart/form-data; boundary=#{b}\r\n\r\n#{body}", "https://h.test")
+    html.should contain(%(<input type="hidden" name="a" value="안녕">))
+  end
+
+  # `"İ".downcase` is two chars, so an index found in the folded copy overshot the original:
+  # an IndexError, or a value read from the wrong offset.
+  it "reads a multipart name and boundary past a char whose lowercase form is longer" do
+    b = "----X"
+    body = "--#{b}\r\nContent-Disposition: form-data; x=\"İİİİİİİİİİİİ\"; name=a\r\n\r\nv\r\n" \
+           "--#{b}\r\nContent-Disposition: form-data; x=\"İİ\"; name=abcdef\r\n\r\nw\r\n--#{b}--\r\n"
+    html = poc("POST /u HTTP/1.1\r\nHost: h.test\r\n" \
+               "Content-Type: multipart/form-data; x=#{"İ" * 35}; boundary=#{b}\r\n\r\n#{body}", "https://h.test")
+    html.should contain(%(<input type="hidden" name="a" value="v">))
+    html.should contain(%(<input type="hidden" name="abcdef" value="w">))
+  end
+
+  # One `gsub("--", "- -")` pass leaves `--->` as `- -->`, which closes the comment and makes the
+  # rest of a raw request target live HTML.
+  it "keeps a dash run in the URL or a header name from closing the PoC comment" do
+    html = poc("GET /a---><script>x</script> HTTP/1.1\r\nHost: h.test\r\n\r\n", "https://h.test")
+    html.should_not contain("--><script>")
+    html.scan("-->").size.should eq(html.scan("<!--").size)
+    json = poc("POST /api HTTP/1.1\r\nHost: h.test\r\nContent-Type: application/json\r\n" \
+               "X--->y: v\r\n\r\n{}", "https://h.test")
+    json.should contain("X- - ->y")
+    json.scan("-->").size.should eq(json.scan("<!--").size)
+  end
+
   it "sends a non-UTF-8 fetch-PoC body as a Uint8Array so the endpoint gets the exact bytes" do
     io = IO::Memory.new
     io << "POST /api HTTP/1.1\r\nHost: h.test\r\nContent-Type: application/octet-stream\r\n\r\n"

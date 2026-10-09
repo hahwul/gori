@@ -42,6 +42,16 @@ describe Gori::Probe::Passive::CleartextCredentials do
     end
   end
 
+  # The per-byte `(?:[^"\\]|\\.)+` value pattern hit PCRE2's JIT stack limit near 60 KB,
+  # inside the passive body cap, and the finding was lost to a debug log line.
+  it "flags a JSON password member with a ~60 KB value" do
+    with_store do |store|
+      found = dets(store, req_content_type: "application/json",
+        req_body: %({"password":"#{"a" * 60_000}"}))
+      found.count { |d| d.code == "cleartext_credentials" }.should eq(1)
+    end
+  end
+
   it "normalises punctuated and suffixed parameter names" do
     with_store do |store|
       dets(store, req_body: "user%5Bpassword%5D=hunter2").any?(&.code.== "cleartext_credentials").should be_true

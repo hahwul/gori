@@ -67,6 +67,16 @@ module Gori::CLI::Run
     write_raw(io, detail, req, resp, interims)
     io.to_s
   end
+
+  def self.sse_event_text_for_spec(e : Sse::Event) : String
+    sse_event_text(e, 0)
+  end
+
+  def self.print_decoded_text_for_spec(detail : Store::FlowDetail) : String
+    io = IO::Memory.new
+    print_decoded_text(detail, true, true, io: io)
+    io.to_s
+  end
 end
 
 describe "gori run history — the QL gate" do
@@ -478,6 +488,27 @@ describe "gori run show --format json" do
     # the CLI path stays unclipped (a script can read whole values) — unlike MCP, it
     # does NOT drop events past the cap; `truncated` is a signal, not a clip.
     sse["events"].as_a.size.should eq(n)
+  end
+
+  it "neutralizes escapes in an SSE event's origin-written event: and id: fields" do
+    detail = flow_detail("http", "x", 80, "GET / HTTP/1.1\r\nHost: x\r\n\r\n",
+      response_head: "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n",
+      response_body: "event: \e]52;c;ZXZpbA==\a\nid: \e[2J\ndata: x\n\n")
+    e = Gori::Sse.from_response(detail.response_head, detail.response_body).first
+    txt = Gori::CLI::Run.sse_event_text_for_spec(e)
+    txt.should_not contain('\e')
+    txt.should_not contain('\a')
+    txt.should contain("⟨ESC⟩")
+  end
+
+  it "neutralizes escapes in a decoded JWT heading's alg" do
+    header = Base64.urlsafe_encode(%q({"alg":"\u001b]0;pwned\u0007","typ":"JWT"}), padding: false)
+    token = "#{header}.#{Base64.urlsafe_encode(%({"sub":"1"}), padding: false)}.sig"
+    detail = flow_detail("http", "x", 80, "GET / HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer #{token}\r\n\r\n")
+    out = Gori::CLI::Run.print_decoded_text_for_spec(detail)
+    out.should contain("=== JWT (1) ===")
+    out.should_not contain('\e')
+    out.should contain("⟨ESC⟩")
   end
 
   it "carries a non-UTF-8 head byte-exact beside the scrubbed text, as get_flow does" do

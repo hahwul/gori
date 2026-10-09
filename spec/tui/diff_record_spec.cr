@@ -316,6 +316,28 @@ describe "Gori::Tui::DiffController record exit" do
   end
 end
 
+describe "Gori::Tui::DiffController#comparer_slots" do
+  # A row action only READS. A side that no longer opens (its project was removed after `r`)
+  # is reported as such, not as "captured on one side only", and the report stays on screen.
+  it "reports a side that will not open without wiping the report" do
+    with_diff_controller do |ctrl, _host, session, before|
+      seed_baseline(before) { |s| diff_ctrl_flow(s, "/orders") }
+      diff_ctrl_flow(session.store, "/orders", status: 403)
+      ctrl.set_slot(:a, before)
+      ctrl.set_slot(:b, session.project)
+      ctrl.view.rows.should_not be_empty
+      FileUtils.rm_rf(File.dirname(before.db_path))
+
+      a, b, failure = ctrl.comparer_slots
+      a.should be_nil
+      b.should be_nil
+      failure.should_not be_nil
+      ctrl.view.rows.should_not be_empty
+      ctrl.view.error.should be_nil
+    end
+  end
+end
+
 describe "Gori::Verbs diff record verbs" do
   it "binds the app-wide file gesture, gated on a row being under the cursor" do
     r = Gori::Verbs.registry

@@ -847,11 +847,15 @@ module Gori::Tui
     def editor_append_insert : Bool
       return false unless v = current_view
       case v.focus
-      when :template then v.template_read_move(0, 1)
-      when :target   then v.target_read_move(1)
-      else                return false
+      when :template
+        v.template_read_move(0, 1)
+        v.enter_template_insert!(1)
+        true
+      when :target
+        v.target_read_move(1)
+        editor_enter_insert
+      else false
       end
-      editor_enter_insert
     end
 
     def editor_exit_insert : Bool
@@ -1898,7 +1902,9 @@ module Gori::Tui
       return unless (id = tab.db_id) && tab.view.dirty?
       v = tab.view
       cfg = v.config_json
-      @host.session.store.update_fuzz_session(id, v.target, v.template_text, v.http2?, v.sni_override, cfg, v.name)
+      unless @host.session.store.update_fuzz_session(id, v.target, v.template_text, v.http2?, v.sni_override, cfg, v.name)
+        return @host.status("session NOT saved (project busy, or closed in another gori) — the tab stays dirty")
+      end
       v.mark_config_synced(cfg)
       v.clear_dirty
     end

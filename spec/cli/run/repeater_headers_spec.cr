@@ -161,6 +161,17 @@ describe "gori run repeater — head terminators survive an edit" do
     end
   end
 
+  # An unterminated last line used to swallow whatever an edit appended after it.
+  it "terminates a line the head just ends on before an edit appends after it" do
+    {"GET / HTTP/1.1\r\nHost: h" => "GET / HTTP/1.1\r\nHost: h\r\nX-Test: 1\r\n\r\n",
+     "GET / HTTP/1.1"            => "GET / HTTP/1.1\r\nX-Test: 1\r\n\r\n",
+     "GET / HTTP/1.1\nHost: h"   => "GET / HTTP/1.1\nHost: h\nX-Test: 1\n\n"}.each do |head, want|
+      wire, _ = Gori::CLI::Run.build_single_flow_request_for_spec(
+        head.to_slice, Bytes.empty, ["X-Test: 1"], nil, nil, [] of String)
+      String.new(wire).should eq(want)
+    end
+  end
+
   it "keeps a MIXED head mixed" do
     head = "POST /m HTTP/1.1\r\nHost: h\nX-Old: a\r\n\r\n"
     wire, _ = Gori::CLI::Run.build_single_flow_request_for_spec(

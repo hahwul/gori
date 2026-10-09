@@ -260,8 +260,17 @@ module Gori
     def self.parse(query : String) : Node?
       lexemes = lex(query)
       return nil if lexemes.empty?
-      node, _ = parse_or(lexemes, 0, 0)
-      node
+      node, pos = parse_or(lexemes, 0, 0)
+      # The lexer never emits an unmatched `)`, so a leftover one is the depth cap's: an
+      # over-deep `(` is consumed but its `)` is not. Stopping there silently dropped every
+      # term after the deep group (a filter that BROADENS), so skip it and AND the rest in.
+      parts = node ? [node] : [] of Node
+      while pos < lexemes.size
+        pos += 1 if lexemes[pos].tok.r_paren?
+        more, pos = parse_or(lexemes, pos, 0)
+        parts << more if more
+      end
+      parts.size > 1 ? AndNode.new(parts) : parts.first?
     end
 
     # Deepest paren/NOT nesting the recursive descent will follow before it stops
@@ -460,6 +469,9 @@ module Gori
           # take `tag:done` UNNEGATED; now the run negates it. XOR with a `-` already on the
           # leaf. Non-owned structure stays in the residual (a MIXED group can't round-trip
           # through a flat AND — documented — but a homogeneous all-owned group is exact).
+          # The run negates the residual half too: dropping it ANDed every non-owned term
+          # in POSITIVE, so `NOT (tag:wip OR host:cdn)` showed only cdn. An even run cancels.
+          kept << "NOT" if run.odd?
           j = i + run
           depth = 0
           while j < lexemes.size

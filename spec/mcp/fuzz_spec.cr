@@ -1247,9 +1247,27 @@ describe "MCP fuzz tools" do
       start = call_json(tools, "fuzz_start",
         base.merge({"messages" => nil, "match" => nil, "filter" => nil, "marks" => nil, "processors" => nil}).to_json)
       start["job_id"].as_s.should start_with("fz_")
+      # Empty filler names nothing either: an HTTP template is not refused as a WS exchange.
+      [%(""), %([])].each do |empty|
+        start = call_json(tools, "fuzz_start", base.merge({"messages" => JSON.parse(empty)}).to_json)
+        start["job_id"].as_s.should start_with("fz_")
+      end
       text, err = call_raw(tools, "fuzz_start", base.merge({"race_warmup" => "GET / HTTP/1.1\r\n\r\n"}).to_json)
       err.should be_true
       text.should contain("race_count")
+    end
+  end
+
+  it "takes 'messages' as the plain or newline-separated string its schema advertises" do
+    with_store do |store|
+      tools = tools_for(store)
+      ws = "GET /ws?q=§x§ HTTP/1.1\r\nHost: t\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" \
+           "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+      base = {"template" => ws, "url" => "http://127.0.0.1:9", "payloads" => %([{"list":["a"]}]), "allow_unscoped" => true}
+      {"hello" => 1, "a\nb" => 2, %(["x","y","z"]) => 3}.each do |messages, frames|
+        start = call_json(tools, "fuzz_start", base.merge({"messages" => messages}).to_json)
+        start["ws_frames_out"].as_i.should eq(frames)
+      end
     end
   end
 

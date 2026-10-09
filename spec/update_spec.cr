@@ -269,6 +269,17 @@ describe Gori::Update do
     end
   end
 
+  {% unless flag?(:win32) %}
+    describe ".exit_reason" do
+      # `Process::Status#exit_code` raises for a signal death, so `gori update --exec` printed a
+      # RuntimeError backtrace when brew/snap was killed instead of saying it failed.
+      it "names an exit code, or the signal that killed the child, without raising" do
+        Gori::Update.exit_reason(Process.run("exit 3", shell: true)).should eq("exit 3")
+        Gori::Update.exit_reason(Process.run("kill -9 $$", shell: true)).should eq("killed by KILL")
+      end
+    end
+  {% end %}
+
   describe ".version_cmp" do
     it "orders dotted versions and strips a single leading v" do
       Gori::Update.version_cmp("0.1.0", "0.1.0").should eq(0)

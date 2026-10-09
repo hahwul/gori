@@ -52,7 +52,7 @@ module Gori::MCP
     # own framing). Every outcome says what the agent may NOT conclude, because the failure
     # this guards against is an agent reading silence, or a dismissal, as a yes.
     def self.answer(m : AgentMessage, text : String = m.text) : String
-      q = (m.question || "").gsub(/\s+/, " ").strip
+      q = (m.question || "").scrub.gsub(/\s+/, " ").strip
       q = q[0, QUOTE_MAX - 1] + "…" if q.size > QUOTE_MAX
       subject = "your ask_operator question ##{m.in_reply_to} (#{q.inspect})"
       case m.outcome

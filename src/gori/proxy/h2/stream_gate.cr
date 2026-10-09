@@ -58,7 +58,8 @@ module Gori::Proxy::H2
   #      use of a higher. Forwarding stream 5's opening HEADERS while holding stream 3's makes
   #      the late HEADERS(3) a CONNECTION error, killing every other stream with it. So an
   #      opening HEADERS may not overtake a deferred one. Response HEADERS open nothing, so
-  #      this binds the request direction only.
+  #      this binds the request direction only; the one response-leg frame that opens a
+  #      stream, PUSH_PROMISE, is never deferred at all (`defer?`).
   #   2. **HPACK is one sequential per-direction state** (RFC 7541 §2.2). A passthrough block
   #      delivered ahead of a deferred one resolves its dynamic indices against a table missing
   #      the deferred block's insertions. `HeadRewrite#engage` is the answer and is called on
@@ -251,6 +252,8 @@ module Gori::Proxy::H2
       # Deferred stream-OPENING ids in arrival order (= increasing id order), request direction
       # only. Rule 1 above: releases follow this order, not decision order.
       @opens = [] of UInt32
+      # The highest stream id an opening HEADERS has carried on this leg (request direction).
+      @highest_opened = 0_u32
       # Streams gori refused — by the sandbox, or by an operator drop. Their head never reached
       # the far leg, so every LATER frame on them has to be swallowed too: forwarding a refused
       # request's DATA would both hand over the body the gate just refused and be a connection
@@ -323,6 +326,9 @@ module Gori::Proxy::H2
     # are inside `accept_locked` → `@heads.accept`). Returning true takes ownership of the
     # block's frames.
     def defer?(block : HeadRewrite::Block) : Bool
+      opener = note_opener(block)
+      promise = promise_deferred_locked(block)
+      return promise unless promise.nil?
       if slot = @slots[block.stream_id]?
         # A later block on a stream already deferred — h2 trailers behind a held response head.
         # Already re-encoded: the latch engaged when the Slot was created.
@@ -332,22 +338,47 @@ module Gori::Proxy::H2
       # The blocking gate runs before the holding one, and before anything is written. A
       # refused stream is never held: there is no decision to offer a human about a request
       # that is not going anywhere.
-      return true if sandbox_refuses_locked(block)
-      return true if push_refuses_locked(block)
+      return true if sandbox_refuses_locked(block, opener)
       held = plan_hold(block)
-      queued = @ordered && !block.head.nil? && !@opens.empty?
+      # Rule 1 orders every request head, and a methodless opener with it (it opens an id too).
+      ordered = opener || (@ordered && !block.head.nil?)
+      queued = ordered && !@opens.empty?
       return false unless held || queued
 
       block = @heads.engage(block) # rule 2 — MUST precede any later block going out
       slot = Slot.new(block.stream_id)
       slot.pending = block
       @slots[block.stream_id] = slot
-      @opens << block.stream_id if @ordered && !block.head.nil?
+      @opens << block.stream_id if ordered
       if held
         start_hold_locked(slot, held, block)
       else
         slot.ready = true # queued for order only; nothing to decide
       end
+      true
+    end
+
+    # Whether this block OPENS its stream is stream state, not the presence of `:method`: a
+    # client's stream ids only grow (RFC 9113 §5.1.1), so a HEADERS above the highest id this
+    # leg has seen opens one, whatever fields it carries.
+    private def note_opener(block : HeadRewrite::Block) : Bool
+      opener = @ordered && block.first.frame_type == Frame::Type::Headers && block.stream_id > @highest_opened
+      @highest_opened = block.stream_id if opener
+      opener
+    end
+
+    # `defer?`'s answer for a PUSH_PROMISE, or nil for any other block. A promise rides its
+    # associated stream but opens a NEW one, so it is judged before that stream's slot and never
+    # parked behind a held response: its pushed HEADERS would overtake it (§5.1.1). It is written
+    # here, since `accept_locked` parks every frame on a slotted stream. The latch is already
+    # engaged when such a slot exists, so writing it ahead of the held head costs HPACK nothing,
+    # and §8.4 lets a promise precede it.
+    private def promise_deferred_locked(block : HeadRewrite::Block) : Bool?
+      return true if push_refuses_locked(block)
+      return nil unless block.first.frame_type == Frame::Type::PushPromise
+      return false unless @slots.has_key?(block.stream_id)
+      last = block.frames.size - 1
+      block.frames.each_with_index { |f, i| write(f, i == last ? block.pre : nil) }
       true
     end
 
@@ -378,6 +409,23 @@ module Gori::Proxy::H2
       # there is nothing to wait for and its buffered body is zero bytes long.
       slot.complete = true if block.first.end_stream?
       settle_waiting_locked(slot)
+      arm_wait_deadline if slot.waiting
+    end
+
+    # The deadline's timer (see `check_waiting_locked`): one sleeping fiber per buffering hold,
+    # which is a hold a human asked for, never the pump's common path (P6).
+    private def arm_wait_deadline : Nil
+      deadline = hold_wait_deadline
+      spawn do
+        sleep deadline
+        begin
+          run_cross(@mutex.synchronize { @closed ? NO_CROSS : (check_waiting_locked; take_deferred_cross(NO_CROSS)) })
+        rescue
+          # A release that writes to a leg already dead raises here, on a spawned fiber with no
+          # caller to unwind to; `wait_for` guards its own the same way.
+        end
+        refund_swallowed
+      end
     end
 
     # Queue a decided hold and start its wait fiber. `body` nil = the hold covers the HEAD only.
@@ -480,12 +528,10 @@ module Gori::Proxy::H2
     # inside returns nil anyway (`Interceptor#enqueue` tests the same condition), so
     # `queue_hold_locked` takes its own not-held exit and drains the slot instead.
     #
-    # Checked on frame arrival rather than on a timer, and that is sufficient rather than merely
-    # cheap: a waiting slot with nothing behind it blocks nobody, and a stream blocked BEHIND
-    # one only becomes blocked when its own frames arrive HERE — including the HEADERS that
-    # opens it, since `accept_locked` runs this before it defers anything. A timer fiber would
-    # buy only the case where the wait costs nothing, at the price of one more fiber per
-    # buffering hold on the pump's own path (P6). Costs an empty-Hash test on every frame of a
+    # Checked on every frame arrival AND by a one-shot timer per buffering hold
+    # (`arm_wait_deadline`). Arrival alone is not enough: a stream parked behind the wait
+    # arrives inside the deadline, and its client, now waiting on that response, sends nothing
+    # more, so no later frame would ever check it. Costs an empty-Hash test on every frame of a
     # connection holding nothing, which is the common case.
     private def check_waiting_locked : Nil
       return if @slots.empty?
