@@ -122,4 +122,12 @@ describe "MCP query tools: an unknown QL field" do
       r.text.should contain("list_history's 'ids' argument")
     end
   end
+
+  it "points authorize_start at its own flow_ids argument" do
+    with_store do |store|
+      r = call_tools(store, "authorize_start", q("id:1", allow_unscoped: true))
+      r.error_code.should eq("QUERY_SYNTAX")
+      r.text.should contain("use the 'flow_ids' argument")
+    end
+  end
 end
