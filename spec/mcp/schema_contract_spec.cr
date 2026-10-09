@@ -28,6 +28,7 @@ describe "MCP tools/list schema contract" do
         schema = t["inputSchema"]
         open << t["name"].as_s unless schema["additionalProperties"]?.try(&.as_bool?) == false
         schema["patternProperties"]?.should be_nil, t["name"].as_s
+        %w[anyOf oneOf allOf].each { |k| schema[k]?.should be_nil, "#{t["name"]}: top-level #{k}" }
       end
       open.should be_empty, "#{open.size} tools advertise an open schema: #{open.first(5).join(", ")}"
     end
@@ -46,6 +47,18 @@ describe "MCP tools/list schema contract" do
       # attaches `_meta` to its arguments goes on working.
       ok = tools.call("list_projects", JSON.parse(%({"_meta":{"progressToken":1}})))
       ok.is_error.should be_false
+    end
+  end
+
+  # #1553/#1559: an either-of argument cannot be `required` without a top-level `anyOf`, so
+  # `required: []` alone told the model `{}` was a valid call. The description says it instead.
+  it "states an either-of requirement in the description, aliased or declared" do
+    with_store do |store|
+      catalogue = JSON.parse(JSON.build { |j| Gori::MCP::Tools.new(store, true, false).list(j) }).as_a
+      desc = ->(name : String) { catalogue.find! { |t| t["name"] == name }["description"].as_s }
+      desc.call("get_flow").should end_with("Requires one of: id, flow_id.")
+      desc.call("get_response_body_chunk").should end_with("Requires one of: flow_id, repeater_id.")
+      desc.call("move_repeater").should end_with("Requires one of: to_index, direction. Requires one of: id, repeater_id.")
     end
   end
 end

@@ -1311,6 +1311,7 @@ module Gori
           s.field "id", intprop("repeater DATABASE id of the session to move"), required: true
           s.field "to_index", intprop("the 1-based tab number to move it to (1 = first chip). This is the one argument on this surface that takes a tab NUMBER, and only because it is a destination: getting it wrong misplaces this session, it cannot act on a different one. Out of range is refused, never clamped")
           s.field "direction", enumprop("move one place: up toward tab 1, down toward the end. Refused when the session is already at that end", MOVE_DIRS)
+          s.requires_one_of "to_index", "direction"
         end
 
         tool j, "create_repeaters",
