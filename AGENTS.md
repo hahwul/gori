@@ -31,7 +31,7 @@ canonical; parsed columns and pretty views are derived projections.
   keeps the octets rather than rejecting. `serialize_head` is the identity function.
 - **The axis is provenance, not byte values.** The same octet gets three different answers:
   - **operator bytes** (imported HAR, an MCP `raw` request, a replay) go out verbatim, never
-    sanitized. See the comment at `src/gori/import/builder.cr:31-38` and
+    sanitized. See the comment at `src/gori/import/builder.cr:105-112` and
     `src/gori/repeater/url_request.cr` (`raw` / `normalize_raw`, shared by MCP `send_request`
     and `gori run send`).
   - **page-authored bytes** (a crawled `<a href>`) get percent-encoded where they merely
@@ -61,22 +61,23 @@ parity with it, and every parity gap found so far has been in a surface, not an 
   fallback values are projections for listing, never permission to rewrite. `MatchRule#inert?`
   gates both replacement and short-circuit selection. Surfaces may list and delete such rows,
   but must not enable, edit, duplicate, move or reorder them.
-- The seam is **not** the `Verb` registry. Its 318 verbs are TUI-only by decision: a verb reads
+- The seam is **not** the `Verb` registry. Its 675 verbs are TUI-only by decision: a verb reads
   its target from TUI selection state instead of naming it, and the missing argument schema is
   the blocker, not registry wiring (`src/gori/verb.cr`, DESIGN.md §7). Do not "fix" parity by
   wiring CLI or MCP into the registry.
 - **Layering contract:** core subsystems must not know a surface exists. Enforced by
-  `spec/layering_spec.cr`, which scans the same file set and fails on any hit that is not a
-  comment line. The quick manual form:
+  `spec/layering_spec.cr`, which scans these directories plus `sitemap/` and a few top-level
+  engine files (`bindings`, `session_slot(s)`, `project_search`, `js_refs`) and fails on any hit
+  that is not a comment line. The quick manual form covers the core of that set:
 
   ```sh
   grep -rnE '\b(Tui|CLI|MCP)::' \
     src/gori/{store,proxy,probe,fuzz,miner,discover,sequencer,oast,authorize}/ \
-    src/gori/{store,probe,fuzz,miner,discover,sequencer,oast,authorize}.cr
+    src/gori/{store,probe,fuzz,miner,discover,sequencer,oast}.cr
   ```
 
-  Today that returns hits in `src/gori/store/models.cr`, `src/gori/probe/group.cr`,
-  `src/gori/fuzz/{types,engine}.cr`, all of them comments. A comment may point at a caller;
+  Today every hit it returns is a comment (there is no `src/gori/authorize.cr`, and `proxy` is
+  directory-only). A comment may point at a caller;
   code may not — so the check is "every hit is a comment", not a hit count. (The count drifts
   as those comments are edited; that is fine, and is why it is not the check.)
 - Every gori-originated request goes through the `Gori::Outbound` chokepoint
@@ -92,12 +93,12 @@ parity with it, and every parity gap found so far has been in a surface, not an 
 ### 3. Never stall the data path (P6), and don't crash
 
 The proxy and the Store writer are hot paths. The proxy plus the HTTP/1.1 codec add only
-~25µs per request (`src/gori/store/schema.cr:573-576`); capture, not proxying, has been the
+~25µs per request (`src/gori/store/schema.cr:573-577`); capture, not proxying, has been the
 bottleneck every time.
 
 - gori runs on Crystal's **single-threaded** cooperative fiber scheduler. **Never** build or
   benchmark with `-Dpreview_mt`: `Store`, `Fuzz::Engine`, `Miner::Engine`, and
-  `Store::SafeRegexp` all depend on it.
+  `Gori::SafeRegexp` all depend on it.
 - All writes funnel through one writer fiber fed by a buffered `Channel`, batched into one
   transaction to amortize fsync. Replies and events fire only **after** commit, and a failed
   batch must not kill the writer fiber or every blocked caller deadlocks (`Store#writer_loop`).
@@ -106,9 +107,9 @@ bottleneck every time.
   `bench/proxy_bench.cr` has ±40% run-to-run noise, so use `bench/capture_bench.cr` for
   allocation deltas.
 - Read the comment before touching these; each one is a crash or a DoS that already happened:
-  TLS `sync_close: true` (`src/gori/proxy/tls/tunnel.cr:100`, SIGSEGV under a browser's h2
-  connections), cross-close on tunnel teardown (`src/gori/proxy/pump.cr:13`, fd exhaustion),
-  `TeardownLatch` must stay a reference type (`src/gori/proxy/conn/client_conn.cr:65`), no
+  TLS `sync_close: true` (`src/gori/proxy/tls/tunnel.cr:224`, SIGSEGV under a browser's h2
+  connections), cross-close on tunnel teardown (`src/gori/proxy/pump.cr:28`, fd exhaustion),
+  `TeardownLatch` must stay a reference type (`src/gori/proxy/conn/client_conn.cr:296`), no
   loop-variable capture in `spawn do…end` (`src/gori/proxy/server.cr`).
 
 ## TUI keys: the space menu and its letters
@@ -205,10 +206,11 @@ key grammar, the 2026-09-25 #1274 entries and the 2026-09-26 #1295 entries).
 | Specs mirroring your change | `just test-changed` (`scripts/spec_for_changes.sh`, against `origin/main`; `just test-changed HEAD` for uncommitted edits only) — the 3–9 s pre-flight before the ~35 s suite compile |
 | One file or dir | `just test-file spec/store_spec.cr` |
 | One area | `just test-tui`, `test-store`, `test-proxy`, `test-verb`, `test-repeater`, `test-discover`, `test-miner`, `test-oast`, `test-sequencer`, `test-import`, `test-mcp`, `test-settings` |
-| Format + lint check | `just check` (`crystal tool format --check src spec bench scripts`, then ameba) |
+| Format + lint check | `just check` (`crystal tool format --check src spec bench scripts`, `scripts/nix_shards_check.cr`, then ameba) |
 | Lint diff gate | `just lint-gate` (`scripts/ameba_gate.sh`, fails when a changed file gained ameba findings) |
 | Format + autofix | `just fix` |
 | Type-check `bench/` | `just benchmark-check` (`scripts/bench_check.sh`) |
+| Type-check `scripts/` | `just scripts-check` (`scripts/script_check.sh`) |
 | Proxy benchmark | `just benchmark` |
 | Seed a demo project | `just seed-demo` (`scripts/seed_demo.cr`) |
 | Version consistency | `just vc` |
@@ -217,9 +219,14 @@ key grammar, the 2026-09-25 #1274 entries and the 2026-09-26 #1295 entries).
 What CI gates, and what it does not:
 
 - **Gated:** `shards build`, `crystal spec`, `crystal tool format --check src spec bench scripts`,
-  `scripts/bench_check.sh`, and `scripts/nix_shards_check.cr` (packaging/nix/shards.nix
-  against shard.lock).
-  Format, bench and the shards gate are real gates — `just test` touches none of them, so a green
+  `scripts/bench_check.sh`, `scripts/script_check.sh` (type-checks `scripts/*.cr`; `just
+  scripts-check`), `scripts/nix_shards_check.cr` (packaging/nix/shards.nix against
+  shard.lock), and the native Windows build in `windows.yml`. On a pull request `crystal spec`
+  runs only the specs mirroring your change (`test-scope` → `changed-tests`) unless the change
+  touches the selector, shard machinery, dependency set or a shared file; the full four-shard
+  suite runs on push to `main`. `ci.yml` and `windows.yml` have `paths:` filters, so a
+  docs-only PR may get no checks at all.
+  Format, bench, scripts and the shards gate are real gates — `just test` touches none of them, so a green
   suite is not a green CI.
 - **Gated as a diff, on pull requests:** ameba. The full run is not a gate — it carries a
   large pre-existing backlog, mostly `Metrics/CyclomaticComplexity` in the TUI (the
@@ -227,8 +234,9 @@ What CI gates, and what it does not:
   `scripts/ameba_gate.sh` fails when any file you changed has MORE findings than it had on
   `main`, and a new file starts from zero. `just lint-gate` runs it locally; judge the full
   `just check` output on the files *you* touched.
-- CI tests your branch, **not the merge result** — the `merge_group` trigger is inert until a
-  merge queue is enabled. Re-run the build and the suite after every rebase.
+- On `pull_request` CI checks out `refs/pull/N/merge`, so it tests the merge result (the
+  `merge_group` trigger is what stays inert until a merge queue is enabled). A local run on your
+  branch is not that: re-run the build and the suite after every rebase.
 - ameba runs as the source file in `lib/ameba/bin/ameba.cr`, not a `bin/ameba` binary.
 - Two checkouts compiling at once share `~/.cache/crystal`. In a second worktree, set
   `CRYSTAL_CACHE_DIR` to something local before building.
@@ -302,8 +310,7 @@ type(scope): what changed, imperative (#123)
 ### Before you commit
 
 - `just test-changed` while iterating, then `just check`, `just test` and `just benchmark-check` green. If you touched `scripts/`, also
-  type-check it — nothing else compiles most of it (`crystal build --no-codegen scripts/seed_demo.cr`;
-  `scripts/nix_shards_check.cr` is the exception, since `just check` and CI now run it).
+  run `just scripts-check` (`scripts/script_check.sh`, the same script CI's `benchmarks` job runs).
 - **Format only the files you changed** (`crystal tool format <files>`). A whole-tree format
   rewrites 100+ unrelated files due to Crystal version drift.
 - Add or update specs mirroring the source you touched. `spec/spec_helper.cr` points

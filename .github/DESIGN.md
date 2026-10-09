@@ -237,7 +237,8 @@ and `Tui::SitemapView` and `gori run sitemap` are thin layers over it, which is 
 report and the interactive tab cannot drift apart.
 
 One caveat worth naming: the CLI reaches into `MCP::Serialize` for JSON output
-(`src/gori/cli/run/intercept.cr`, `src/gori/cli/run/history.cr`). That is surface to surface,
+(`src/gori/cli/output.cr` and the `src/gori/cli/run/` verbs that print JSON: history, intercept,
+evidence, colormarker, fuzz_saved, retest, rewriter). That is surface to surface,
 not core to surface, so it does not breach the rule above, but the shared JSON shape should
 move to a neutral module the day a third caller needs it (P0: when the second caller forces
 it, and it now has).
@@ -311,7 +312,7 @@ QL is a Lucene/KQL-style boolean filter over captured flows: bare terms for free
 It compiles to a SQL `WHERE` fragment plus bound params. Values are always parameterised,
 never interpolated, so the projection columns stay injection-safe. Regex terms are evaluated
 by the `Gori::SafeRegexp` function that `Store` installs into the connection
-(`SafeRegexp.install`, `src/gori/store.cr`), so an invalid pattern or a byte-unsafe body
+(`Store.configure_connections` calls `gori_install_safe_regexp`, `src/gori/store.cr`), so an invalid pattern or a byte-unsafe body
 fails closed rather than crashing the scan.
 
 QL is the only way you navigate History, because there is no queue and no ranking (P8). One

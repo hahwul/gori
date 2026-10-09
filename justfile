@@ -203,7 +203,7 @@ fix:
     lib/ameba/bin/ameba.cr --fix
 
 # Check that every version-bearing file agrees: shard.yml, src/gori.cr,
-# snap/snapcraft.yaml, packaging/aur/PKGBUILD and the spec assertion.
+# snap/snapcraft.yaml, packaging/aur/PKGBUILD, flake.nix and the spec assertion.
 [group('version')]
 version-check:
     crystal run scripts/version_check.cr
