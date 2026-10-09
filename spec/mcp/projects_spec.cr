@@ -755,4 +755,42 @@ describe "Gori::MCP::Tools project switch refusals" do
       mcp_ok_json(tools, "switch_project", %({"project":#{slug.to_json}}))["switched"].as_bool.should be_true
     end
   end
+
+  # #1558 — deleting the served project needs a way off it, and a server bound to its one
+  # temporary project had nowhere to switch to.
+  it "unbinds with unbind:true so the project it served can be deleted" do
+    with_isolated_projects do |tools|
+      slug = mcp_ok_json(tools, "create_project", %({"name":"Temp"}))["slug"].as_s
+
+      both = tools.call("switch_project", JSON.parse(%({"project":#{slug.to_json},"unbind":true})))
+      both.error_code.should eq("INVALID_ARGUMENT")
+      both.field.should eq("unbind")
+
+      djob = running_discover_job(tools)
+      busy = tools.call("switch_project", JSON.parse(%({"unbind":true})))
+      busy.error_code.should eq("PROJECT_BUSY")
+      busy.text.should contain("a discover job is running")
+      djob.status = :done
+
+      left = mcp_ok_json(tools, "switch_project", %({"unbind":true}))
+      left["switched"].as_bool.should be_true
+      left["project"].raw.should be_nil
+      left["previous_project"].as_s.should eq("Temp")
+      info = mcp_ok_json(tools, "project_info", "{}")
+      info["bound"].as_bool.should be_false
+      info["project"].raw.should be_nil
+      mcp_ok_json(tools, "list_projects", "{}")["bound"].as_bool.should be_false
+      tools.call("list_history", JSON.parse("{}")).error_code.should eq("NO_PROJECT")
+
+      # Unbinding an unbound server is a no-op, not an error.
+      mcp_ok_json(tools, "switch_project", %({"unbind":true}))["switched"].as_bool.should be_false
+
+      dry = mcp_ok_json(tools, "delete_project", %({"project":#{slug.to_json}}))
+      dry["deletable"].as_bool.should be_true
+      done = mcp_ok_json(tools, "delete_project",
+        %({"project":#{slug.to_json},"dry_run":false,"confirmation_token":#{dry["confirmation_token"].as_s.to_json}}))
+      done["deleted"].as_bool.should be_true
+      mcp_ok_json(tools, "list_projects", "{}")["total_projects"].as_i.should eq(0)
+    end
+  end
 end

@@ -25,9 +25,9 @@ module Gori
         err(ex.message || "ambiguous project name", "INVALID_ARGUMENT", field: field)
       end
 
-      # The kinds of background job still running. Switching or deleting a project mid-job
-      # would repoint @store (and thus record_history writes) out from under the running
-      # fiber, so both refuse until jobs settle — and the refusal names these
+      # The kinds of background job still running. Switching, unbinding or deleting a project
+      # mid-job would repoint @store (and thus record_history writes) out from under the
+      # running fiber, so all three refuse until jobs settle — and the refusal names these
       # kinds, so an agent stops the job that is actually running (#1556).
       private def running_job_kinds : Array(String)
         kinds = [] of String
@@ -181,7 +181,11 @@ module Gori
       @[Tool("switch_project", read_only: false, unbound: true, permission: "projects")]
       private def switch_project(h) : Result
         name = str(h, "project")
-        return err("missing required 'project'", "INVALID_ARGUMENT", field: "project") if name.nil? || name.strip.empty?
+        if bool_arg(h, "unbind", false)
+          return err("pass either 'project' or unbind:true, not both", "INVALID_ARGUMENT", field: "unbind") unless name.nil?
+          return unbind_project
+        end
+        return err("missing required 'project' (or unbind:true to leave the current one)", "INVALID_ARGUMENT", field: "project") if name.nil? || name.strip.empty?
         reg = registry
         proj = find_project(reg, name, "project")
         return proj if proj.is_a?(Result)
@@ -191,6 +195,42 @@ module Gori
         end
 
         bind_project(proj, reg, source: "switch_project")
+      end
+
+      # Back to the state an unbound start is in (#1558): no store, no project identity, no
+      # presence marker, and none of the project's per-process globals — so `delete_project`
+      # can take the project this server was serving, the only way to clean up an engagement's
+      # sole project without inventing a dummy one to switch to. An explicit flag rather than
+      # letting delete_project unbind on its own: its dry run cannot see past this server's own
+      # open handle, so it could not truthfully say whether the delete will go through.
+      private def unbind_project : Result
+        if refusal = jobs_busy("unbind the project")
+          return refusal
+        end
+        previous = @project_name || @project_slug || @db_path
+        # Same teardown order as `Session#close`: the binding layer goes first, so nothing can
+        # resolve a `$SESSION` against a project the server no longer serves.
+        Env.layer = nil if Env.layer.same?(@bindings)
+        @bindings = nil
+        @refresher.try(&.uninstall)
+        @refresher = nil
+        Settings.project_env_vars = [] of {String, String}
+        @store.try(&.close)
+        @store = nil
+        @oast_mcp.reject! { |_, o| !o.store_session_id.nil? } # see `bind_project`
+        @project_name = @project_slug = @project_id = @db_path = @workspace_root = @selection_source = nil
+        @bind_error = nil
+        announce_presence # closes the marker; with no @db_path it lays none
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "switched", !previous.nil?
+            j.field "project", nil
+            j.field "previous_project", previous
+            j.field "note", "This server is now unbound: traffic tools answer NO_PROJECT, and " \
+                            "delete_project can remove the project it was serving. " \
+                            "project_info is the live answer."
+          end
+        end)
       end
 
       # What every bind reports back, because nothing pushes a correction to the handshake
@@ -308,7 +348,8 @@ module Gori
         return not_found("no such project: #{name} (match short id, id prefix, dir slug, or display name)") unless proj
         # Not PROJECT_BUSY: that is retryable, and no retry succeeds while this server serves it.
         if proj.db_path == @db_path
-          return err("cannot delete the project this server is currently serving; switch_project away first",
+          return err("cannot delete the project this server is currently serving; switch_project away " \
+                     "first, or switch_project with unbind:true",
             "INVALID_ARGUMENT", field: "project")
         end
         if refusal = jobs_busy("delete a project")
@@ -436,10 +477,12 @@ module Gori
         end
 
         tool j, "switch_project",
-          "Point this server at a different project for all subsequent tools. Always available " \
-          "(including --read-only and when the server started unbound). Refused while a " \
+          "Point this server at a different project for all subsequent tools, or pass " \
+          "unbind:true instead of 'project' to leave the current one, so it can be deleted. Always " \
+          "available (including --read-only and when the server started unbound). Refused while a " \
           "background job is running. Verify with project_info afterwards." do |s|
-          s.field "project", strprop("target project display name or directory slug"), required: true
+          s.field "project", strprop("target project display name or directory slug (required unless unbind:true)")
+          s.field "unbind", boolprop("true leaves the current project and returns the server to the unbound state")
         end
 
         # Declared unconditionally, including on a `--read-only` server that is already
@@ -465,8 +508,8 @@ module Gori
           "Delete a project's data from disk. TWO-STEP + destructive: first call with " \
           "dry_run:true (default) to get object counts, disk size, capture-lock status, and a " \
           "short-lived confirmation_token; then call again with dry_run:false and that token. " \
-          "Refuses the currently-served project (switch away first) and any project locked by a " \
-          "live capture." do |s|
+          "Refuses the currently-served project (switch away, or switch_project unbind:true, first) " \
+          "and any project locked by a live capture." do |s|
           s.field "project", strprop("target project display name or directory slug"), required: true
           s.field "dry_run", boolprop("true (default) previews and issues a confirmation_token; false performs the delete")
           s.field "confirmation_token", strprop("the token from a dry_run:true call (required when dry_run:false)")
