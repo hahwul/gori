@@ -71,7 +71,7 @@ gori run issues --db /path/to/project.db --format json
 | `0` | 성공 |
 | `1` | 오류: 전송 실패, 열 수 없는 프로젝트, 적용되지 못한 변경, 또는 어떤 요청도 응답을 받지 못한 스윕(`fuzz`, `mine`, `discover`, `sequence`, `authorize`, `cache-deception`) |
 | `3` | 판정 게이트: `gori run fuzz --fail-if-no-matches`가 정상 완료했지만 매칭이 하나도 없음(`--stop-on` / `--stop-after-matches`가 발동했다면 `0`), 또는 `gori run probe --fail-on=LEVEL`이 LEVEL 이상의 이슈를 보고함 |
-| `130` | SIGINT/SIGTERM으로 중단. `fuzz`, `mine`, `discover`, `sequence`, `authorize`, `cache-deception`, `repeater minimize`는 모아 둔 것을 먼저 내보내므로, `&& next-step`이 잘린 실행을 끝난 실행으로 오해하지 않습니다 |
+| `130` | SIGINT/SIGTERM으로 중단. `capture`(`--for`나 `--max`로 끝나면 `0`), `fuzz`, `mine`, `discover`, `sequence`, `authorize`, `cache-deception`, `repeater minimize`는 모아 둔 것을 먼저 내보내므로, `&& next-step`이 잘린 실행을 끝난 실행으로 오해하지 않습니다 |
 
 매칭이 없으면서 *동시에* 모든 전송이 실패한 fuzz 실행(대상 다운, TLS 실패, 스코프 차단)은 `1`로 끝나므로, `--fail-if-no-matches` 없이도 스크립트가 "결과 없음"과 "대상에 닿지도 못함"을 구분할 수 있습니다(플래그를 주면 `3`이 우선합니다).
 
@@ -157,7 +157,8 @@ gori run mine 42 --locations=query --hook './sign.sh'
 **훅은 프록시를 멈추지 못합니다.** 모든 실행에 하드 벽시계 타임아웃(settings.json의
 `hooks.timeout_secs`, 기본 5초, 상한 60초)과 32 MiB stdout 상한이 걸립니다. 명령이 타임아웃되거나,
 0이 아닌 코드로 종료되거나, 실행 자체에 실패하거나, stdout을 넘치게 쏟으면 **원본 바이트가 그대로
-통과**하고 실패는 프로젝트 이벤트 피드에 알림으로 기록됩니다. 멈춘 훅 때문에 플로우를 잃는 일은
+통과**하고 실패는 프로젝트 이벤트 피드에 알림으로 기록됩니다(Probe `exec` 룰의 0이 아닌 종료는
+실패가 아니라 "탐지 없음"이라는 답이며, 시그널로 죽은 경우만 실패로 기록됩니다). 멈춘 훅 때문에 플로우를 잃는 일은
 없습니다. Rewriter에서 타임아웃은 한 번의 재작성에 걸린 모든 pipe 룰과 모든 매치가 나눠 쓰는
 *예산*입니다. 400번 매치되는 패턴도, 한 헤드에 걸린 pipe 룰 4개도 예산 한 번만큼만 듭니다. 메시지
 하나는 헤드와 바디로 두 번 재작성되므로 메시지가 보는 한계는 그 두 배입니다.

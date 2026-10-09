@@ -56,7 +56,7 @@ Each gori project is its own database. After install, `gori mcp` always connects
 
 Have the agent call `project_info` first. When `bound` is false, it should list or create a project (create auto-binds when unbound), then switch if needed. When bound, confirm the name, database path, and selection source before mutating data.
 
-To pin a fixed engagement at install time:
+To fix the engagement at install time (add `--pin-project` as well if the agent must not switch away from it):
 
 ```bash
 gori mcp --project my-engagement --install-codex     # a named project's database

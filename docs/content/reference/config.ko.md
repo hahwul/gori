@@ -649,7 +649,7 @@ Param Miner의 저장된 기본값입니다. mine 옵션을 저장해야 기록�
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `locations` | array | `[]` | 주입 위치: `query`, `form`, `multipart`, `json`, `headers`, `cookies`. 비어 있으면 요청마다 자동 감지 |
+| `locations` | array | `[]` | 주입 위치: `query`, `form`, `multipart`, `json`, `headers`, `cookies`. Mine 오버레이가 열릴 때 체크되는 위치로, 요청별 자동 감지를 대신합니다. 요청에 없는 위치는 건너뜁니다. 섹션이 저장되기 전에는 오버레이가 요청마다 자동 감지합니다 |
 | `concurrency` | integer | `10` | 동시 요청 수 |
 | `notify` | string | `"when-found"` | `"when-found"`, `"always"`, `"off"` |
 | `keep_alive` | bool | `true` | 요청 간에 업스트림 연결을 재사용(Mine 오버레이의 **Keep-alive** 토글). 이 키가 생기기 전에 기록된 파일은 `true`로 읽힘 |

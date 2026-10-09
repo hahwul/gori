@@ -81,7 +81,7 @@ Reach for `jsonl` when you want to consume a long sweep while it runs, and `json
 | `0` | Success |
 | `1` | Error: a failed send, an unreadable project, a mutation that could not be applied, or a sweep (`fuzz`, `mine`, `discover`, `sequence`, `authorize`, `cache-deception`) in which no request got an answer |
 | `3` | A verdict gate: `gori run fuzz --fail-if-no-matches` completed cleanly but nothing matched (a `--stop-on` / `--stop-after-matches` that fired exits `0`), or `gori run probe --fail-on=LEVEL` reported an issue at or above LEVEL |
-| `130` | Interrupted by SIGINT/SIGTERM. `fuzz`, `mine`, `discover`, `sequence`, `authorize`, `cache-deception` and `repeater minimize` flush what they collected first, so `&& next-step` does not treat a truncated run as a finished one |
+| `130` | Interrupted by SIGINT/SIGTERM. `capture` (which exits `0` when `--for` or `--max` ends it), `fuzz`, `mine`, `discover`, `sequence`, `authorize`, `cache-deception` and `repeater minimize` flush what they collected first, so `&& next-step` does not treat a truncated run as a finished one |
 
 A fuzz run where nothing matched *and* every send errored (target down, TLS failure, scope-blocked) exits `1`, so a script can tell "no findings" apart from "never reached the target" even without `--fail-if-no-matches` (with the flag, `3` wins).
 
@@ -168,7 +168,9 @@ inside an `exec:` step's arguments.
 **A hook never stalls the proxy.** Every run has a hard wall-clock timeout (`hooks.timeout_secs`
 in settings.json, 5s by default, 60s ceiling) and a 32 MiB stdout cap. If the command times out,
 exits non-zero, cannot be spawned, or floods stdout, the **original bytes pass through
-unchanged** and the failure is written to the project event feed as a notice. A wedged hook can
+unchanged** and the failure is written to the project event feed as a notice (a Probe `exec`
+rule's non-zero exit is its "no finding" answer, not a failure; one killed by a signal still
+is). A wedged hook can
 never cost you a flow. In the Rewriter the timeout is a *budget* shared by every pipe rule and
 every match in one rewrite, so a pattern matching four hundred times (or four pipe rules on one
 head) still costs that rewrite one timeout. A message is rewritten twice (its head and its

@@ -290,7 +290,7 @@ cannot drift apart on it:
 | `t` · `T` · `N` | Mark · mark all · clear marks (on a rule list, `t` enables/disables) |
 | `o` | Open the selected row (the `↵` alias) |
 | `a` · `e` | Add · edit; on most tabs `a` also files an issue |
-| `r` · `s` | Run, send or reload (the menu echo of `Ctrl-R`) · stop |
+| `r` · `s` | Run, send or reload (the menu echo of `Ctrl-R`) · stop, swap A ⇄ B, the scope lens, set an issue's severity |
 | `E` | Export |
 | `K` | Clear the workbench input (asks first) |
 | `I` | Insert a `§` marker |
@@ -359,7 +359,7 @@ and stays out of both cards.
 | `d` · `e` | Response diff · envelope/decoded | `c` | Auto Content-Length |
 | `s` · `f` · `c` | Static assets · follow · Columns… | `w` | Reuse Sec-WebSocket-Key |
 | `g` · `q` · `J` | Fold ids · fold queries · JS references | `r` · `f` | gRPC reframe · gRPC field editor |
-| `m` · `v` | Fuzzer: matched only · distribution | `t` | TLS fingerprint |
+| `m` · `v` · `G` | Fuzzer: matched only · distribution · group by shape | `t` | TLS fingerprint |
 | `t` · `z` | Comparer: requests/responses · fold unchanged | | |
 | `a` | Show all: Probe's closed issues, the Params tab's standard headers | | |
 
@@ -451,7 +451,7 @@ so the card teaches both halves rather than making you guess which one it means.
 
 That includes `/`, which is a `SUB-TABS` letter *and* `vim-ish`'s find key. They are different tiers — the menu letter acts on the strip while the card is up, the chord searches the text pane you are standing in. The one deliberate pane-key overlap is `u` in the Repeater's read-only response: it toggles display-only JSON Unicode decoding. The request editor is still in the Editor scope, where `u` means undo. `validate_chords!` checks same-scope collisions at boot; the cross-scope exception is pinned in `spec/verb/keyset_spec.cr`.
 
-A few menu letters are also a `vim-ish` motion in an editor pane: Auto-mark `a` (append), `g` on the Repeater, Cookie and issue detail (top), Send race `⇧G` (bottom), Set CVSS `V` (select line), the Notes strip's `/` (find), Close sub-tab `w` (next word), and Insert marker `⇧I` and Probe active `⇧A` (start typing at a line edge). If the `Space` before one of them is lost, the key does what vim would, which moves, selects or starts typing, and never sends, writes or deletes. The editing letters are the other deliberate overlap, under both keysets: inside a text editor `d`, `y` and `p` are the editor's, so a lost `Space` before the menu's `d` (Duplicate, or Delete issue in an issue's notes) or `y` (Copy) edits or copies the text in that pane, says so, and can be undone. A menu letter that lands on anything else in the pane is refused.
+A few menu letters are also a `vim-ish` motion in an editor pane: Auto-mark `a` (append), `g` on the Repeater, Cookie and issue detail (top), Send race `⇧G` (bottom), Set CVSS `V` (select line), and Insert marker `⇧I` and Probe active `⇧A` (start typing at a line edge). If the `Space` before one of them is lost, the key does what vim would, which moves, selects or starts typing, and never sends, writes or deletes. The editing letters are the other deliberate overlap, under both keysets: inside a text editor `d`, `y` and `p` are the editor's, so a lost `Space` before the menu's `d` (Delete issue in an issue's notes) or `y` (Copy) edits or copies the text in that pane, says so, and can be undone. A menu letter that lands on anything else in the pane is refused.
 
 ### What still works whatever you pick
 

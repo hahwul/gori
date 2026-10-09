@@ -204,16 +204,18 @@ only opens a group at the start of a term, and `)` only closes one at the end.
 
 ## Where It Applies
 
-Every filter bar shares the grammar above (fields, comparisons, `~` regex, `AND`/`OR`/`NOT`, parentheses, quoting). What differs is the field set, and only because the surfaces filter different kinds of row.
+Every filter bar shares the boolean grammar above (`AND`/`OR`/`NOT`, `-`, parentheses, quoting). The flow bars (History, Sitemap, colour rules, Intercept) also share the comparisons and `~` regex; the other bars compare only `severity` and `cvss` (below), and have no `~` at all (a `~` term there is free text). Otherwise what differs is the field set, and only because the surfaces filter different kinds of row.
 
 | Surface | Fields |
 |---------|--------|
 | History, `gori run history`, MCP | The full table above |
 | Sitemap, `gori run sitemap`, MCP `list_sitemap` | The same, plus `tag:` for per-node path memos: a case-insensitive substring of the memo, matching the tagged path, everything under it and the paths leading to it; `-tag:` drops that subtree, and every `tag:` term is ANDed with the rest of the query |
 | Colour rules (Colormarker) | The same. A colour rule takes the query the History bar takes |
-| Intercept catch condition, extract-rule condition | `host`, `path`, `url`, `method`, `scheme`, `status`, `proto`, `header`, `body`. **Every other field is refused** (see below) |
+| Intercept catch condition, extract-rule condition | `host`, `path`, `url`, `method`, `scheme`, `status`, `proto`, `header`, `body`. **Every other field is refused** (see below). `proto` answers only `ws` or `http` here: gRPC and SSE are read off a captured response's Content-Type, so `proto:grpc`, `proto:sse` and the TLS spellings never match |
 | Probe | `severity` (`sev`), `status` (`st`), `category` (`cat`), `host`, `code` |
 | Issues | `severity` (`sev`), `status` (`st`), `host`, `title`, `cvss` |
+| Sub-tab strip `/` filter (Repeater and the other tool tabs), MCP `get_repeater_context` `filter` | `tag`, `name`, `host` (`target`), `method` (`verb`), `status`: the last send's outcome as a code matched by prefix (`status:4` is every 4xx), `error` or `unsent` |
+| Evidence tab | `issue`, `host`, `method`, `status`, `confirmation` (`confirm`), `source` (`src`), `date` |
 
 A hold gate and an extract-rule condition evaluate one live message, before it is captured, so
 they refuse every History field that message cannot answer rather than guess: `scope:` (a

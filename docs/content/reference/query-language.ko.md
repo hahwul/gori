@@ -204,16 +204,18 @@ host:"my host"                        공백까지 포함한 하나의 host 값
 
 ## 적용 범위 {#where-it-applies}
 
-모든 필터 바가 위 문법(필드, 비교, `~` 정규식, `AND`/`OR`/`NOT`, 괄호, 따옴표)을 공유합니다. 다른 것은 필드 집합뿐이고, 그것도 각 화면이 서로 다른 종류의 행을 거르기 때문입니다.
+모든 필터 바가 위 불리언 문법(`AND`/`OR`/`NOT`, `-`, 괄호, 따옴표)을 공유합니다. 플로 바(History, Sitemap, 컬러 규칙, Intercept)는 비교와 `~` 정규식도 공유합니다. 나머지 바는 `severity`와 `cvss`(아래)만 비교하고 `~`는 아예 없습니다(거기서 `~` 항목은 자유 텍스트입니다). 그 밖에 다른 것은 필드 집합뿐이고, 그것도 각 화면이 서로 다른 종류의 행을 거르기 때문입니다.
 
 | 화면 | 필드 |
 |------|------|
 | History, `gori run history`, MCP | 위 표 전체 |
 | Sitemap, `gori run sitemap`, MCP `list_sitemap` | 위와 동일, 여기에 노드별 경로 메모용 `tag:` 추가: 대소문자 구분 없이 메모의 일부와 비교하고, 태그가 붙은 경로와 그 아래 전부, 그리고 거기로 이어지는 경로가 매칭됩니다. `-tag:`는 그 하위 트리를 빼고, 모든 `tag:` 항목은 쿼리의 나머지와 AND로 묶입니다 |
 | 컬러 규칙(Colormarker) | 위와 동일. History 필터 바에 쓰는 그 쿼리를 그대로 받습니다 |
-| Intercept 캐치 조건, Extract 규칙 조건 | `host`, `path`, `url`, `method`, `scheme`, `status`, `proto`, `header`, `body`. **나머지 필드는 모두 거부**(아래 참고) |
+| Intercept 캐치 조건, Extract 규칙 조건 | `host`, `path`, `url`, `method`, `scheme`, `status`, `proto`, `header`, `body`. **나머지 필드는 모두 거부**(아래 참고). 여기서 `proto`는 `ws`나 `http`만 답합니다. gRPC와 SSE는 캡처된 응답의 Content-Type으로 판단하므로 `proto:grpc`, `proto:sse`와 TLS 표기는 절대 매칭되지 않습니다 |
 | Probe | `severity`(`sev`), `status`(`st`), `category`(`cat`), `host`, `code` |
 | Issues | `severity`(`sev`), `status`(`st`), `host`, `title`, `cvss` |
+| 하위 탭 스트립 `/` 필터(Repeater와 다른 도구 탭), MCP `get_repeater_context` `filter` | `tag`, `name`, `host`(`target`), `method`(`verb`), `status`: 마지막 전송 결과로, 앞부분 일치로 비교하는 코드(`status:4`는 모든 4xx), `error`, `unsent` 중 하나 |
+| Evidence 탭 | `issue`, `host`, `method`, `status`, `confirmation`(`confirm`), `source`(`src`), `date` |
 
 홀드 게이트와 Extract 규칙 조건은 캡처되기 전의 흐르는 메시지 하나를 평가하므로, 그 메시지가
 답할 수 없는 History 필드는 추측하지 않고 거부합니다. `scope:`(프로젝트의 스코프 규칙은 메시지의
