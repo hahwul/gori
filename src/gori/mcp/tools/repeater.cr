@@ -836,8 +836,11 @@ module Gori
       # The `summary` every repeater tool returns (create/update_repeater, get_repeater_context):
       # the TUI's derived label, MASKED — the stored request may carry a secret in the
       # request-target (e.g. ?token=…) and this field goes to the LLM — and capped at 80.
+      # The whole LINE is masked before the cut: an env value holding a space spans past the
+      # "METHOD target" summary, and masking only that would leave the value's prefix bare.
       private def repeater_summary(request : String) : String
-        s = Env.mask_secrets(Repeater::SubtabFilter::Subject.summary_of(request))
+        sub = Repeater::SubtabFilter::Subject
+        s = sub.summary_of(Env.mask_secrets(sub.first_nonblank_line(request)))
         s.size > 80 ? "#{s[0, 79]}…" : s
       end
 
