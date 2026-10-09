@@ -25,15 +25,23 @@ module Gori
         err(ex.message || "ambiguous project name", "INVALID_ARGUMENT", field: field)
       end
 
-      # True while any fuzz/mine job is still running — switching or deleting a
-      # project mid-job would repoint @store (and thus record_history writes) out
-      # from under the running fiber, so both refuse until jobs settle.
-      private def jobs_running? : Bool
-        @jobs.each_value.any? { |j| j.status == :running } ||
-          @mine_jobs.each_value.any? { |j| j.status == :running } ||
-          @discover_jobs.each_value.any? { |j| j.status == :running } ||
-          @sequence_jobs.each_value.any? { |j| j.status == :running } ||
-          @authorize_jobs.each_value.any? { |j| j.status == :running }
+      # The kinds of background job still running. Switching or deleting a project mid-job
+      # would repoint @store (and thus record_history writes) out from under the running
+      # fiber, so both refuse until jobs settle — and the refusal names these
+      # kinds, so an agent stops the job that is actually running (#1556).
+      private def running_job_kinds : Array(String)
+        kinds = [] of String
+        {fuzz: @jobs, mine: @mine_jobs, discover: @discover_jobs, sequence: @sequence_jobs, authorize: @authorize_jobs}.each do |kind, jobs|
+          kinds << kind.to_s if jobs.each_value.any? { |j| j.status == :running }
+        end
+        kinds
+      end
+
+      # PROJECT_BUSY naming the running kind(s), or nil when no job blocks *action*.
+      private def jobs_busy(action : String) : Result?
+        kinds = running_job_kinds
+        return if kinds.empty?
+        busy("cannot #{action} while a #{kinds.join("/")} job is running; stop it first")
       end
 
       # How many projects one `list_projects` page carries, and the ceiling a caller may raise
@@ -178,7 +186,9 @@ module Gori
         proj = find_project(reg, name, "project")
         return proj if proj.is_a?(Result)
         return not_found("no such project: #{name} (match short id, id prefix, dir slug, or display name)") unless proj
-        return busy("cannot switch project while a fuzz/mine job is running; stop it first") if jobs_running?
+        if refusal = jobs_busy("switch project")
+          return refusal
+        end
 
         bind_project(proj, reg, source: "switch_project")
       end
@@ -301,7 +311,9 @@ module Gori
           return err("cannot delete the project this server is currently serving; switch_project away first",
             "INVALID_ARGUMENT", field: "project")
         end
-        return busy("cannot delete a project while a fuzz/mine job is running") if jobs_running?
+        if refusal = jobs_busy("delete a project")
+          return refusal
+        end
 
         dry_run = bool_arg(h, "dry_run", true)
         return delete_project_dry_run(reg, proj) if dry_run
@@ -426,7 +438,7 @@ module Gori
         tool j, "switch_project",
           "Point this server at a different project for all subsequent tools. Always available " \
           "(including --read-only and when the server started unbound). Refused while a " \
-          "fuzz/mine job is running. Verify with project_info afterwards." do |s|
+          "background job is running. Verify with project_info afterwards." do |s|
           s.field "project", strprop("target project display name or directory slug"), required: true
         end
 

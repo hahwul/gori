@@ -706,3 +706,53 @@ describe "Gori::MCP::Tools list_projects narrowing" do
     end
   end
 end
+
+module Gori::MCP
+  class Tools
+    def hold_discover_job_for_projects_spec(djob : DiscoverJob) : Nil
+      @discover_jobs[djob.id] = djob
+    end
+  end
+end
+
+# A discover job sitting at :running — its engine is never started.
+private def running_discover_job(tools : Gori::MCP::Tools) : Gori::MCP::Tools::DiscoverJob
+  engine = Gori::Discover::Engine.new("http://t/", [] of String,
+    Gori::Discover::Sender.new(verify: false), Gori::Discover::Config.new)
+  djob = Gori::MCP::Tools::DiscoverJob.new("dj1", engine,
+    Gori::MCP::Tools::JobAudit.new("http://t/", nil, 1, nil, 0_i64), nil)
+  tools.hold_discover_job_for_projects_spec(djob)
+  djob
+end
+
+private def with_isolated_projects(&)
+  root = File.tempname("gori-projhome")
+  Dir.mkdir_p(root)
+  prev = ENV["GORI_HOME"]?
+  ENV["GORI_HOME"] = root
+  tools = Gori::MCP::Tools.new(nil, allow_actions: true, verify_upstream: false)
+  begin
+    yield tools
+  ensure
+    tools.current_store.try(&.close) rescue nil
+    prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+    FileUtils.rm_rf(root)
+  end
+end
+
+describe "Gori::MCP::Tools project switch refusals" do
+  # #1556 — the refusal named a hand-typed "fuzz/mine" whatever was running, sending an agent
+  # to look for a job that did not exist.
+  it "names the kind of the job that blocks a switch" do
+    with_isolated_projects do |tools|
+      slug = mcp_ok_json(tools, "create_project", %({"name":"Busy"}))["slug"].as_s
+      djob = running_discover_job(tools)
+      r = tools.call("switch_project", JSON.parse(%({"project":#{slug.to_json}})))
+      r.error_code.should eq("PROJECT_BUSY")
+      r.text.should contain("a discover job is running")
+      r.text.should_not contain("fuzz")
+      djob.status = :done
+      mcp_ok_json(tools, "switch_project", %({"project":#{slug.to_json}}))["switched"].as_bool.should be_true
+    end
+  end
+end

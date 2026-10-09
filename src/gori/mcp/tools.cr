@@ -1950,7 +1950,7 @@ module Gori
       end
 
       # A job's buffered results — and above all the History `flow_id`s recorded alongside
-      # them — only mean anything against the project it ran in. `jobs_running?` stops a
+      # them — only mean anything against the project it ran in. `jobs_busy` stops a
       # switch mid-run, but a FINISHED job outlives one, and after the rebind those ids
       # resolve to unrelated rows in the NEW database. Refuse the read instead of handing
       # back evidence pointers that silently changed meaning; the results are kept, so
@@ -1963,7 +1963,7 @@ module Gori
       end
 
       # A background job's fiber must never exit with the job still :running — that
-      # hangs every poller and permanently trips jobs_running?. Land it terminal.
+      # hangs every poller and permanently trips jobs_busy. Land it terminal.
       private def finalize_job(job : Job) : Nil
         if job.status == :running
           job.status = :error
