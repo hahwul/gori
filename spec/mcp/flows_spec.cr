@@ -127,7 +127,8 @@ describe Gori::MCP::Server do
 
         call = %({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_history","arguments":{}}})
         rows = mcp_tool_payload(mcp_drive(store, call)[0])["flows"].as_a
-        rows.map(&.["id"].as_i64).should eq([c, b, a]) # newest first
+        rows.map(&.["id"].as_i64).should eq([c, b, a])        # newest first
+        rows[0]["url"].as_s.should eq("https://alpha.test/c") # default port dropped (#1560)
 
         q = %({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"list_history","arguments":{"query":"host:beta"}}})
         only = mcp_tool_payload(mcp_drive(store, q)[0])["flows"].as_a
@@ -242,6 +243,7 @@ describe Gori::MCP::Server do
         entries[0]["head"].as_s.should contain("Link: </a.css>; rel=preload")
         entries[0]["head"].as_s.should_not contain("secret")
         payload["interim_omitted"]?.should be_nil
+        payload["url"].as_s.should eq("https://ex.test/page")
         payload["response_head"].as_s.should start_with("HTTP/1.1 200 OK")
 
         call = %({"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"get_flow","arguments":{"id":#{plain}}}})

@@ -67,6 +67,8 @@ module Gori
                     j.field "http_version", Serialize.text(e.http_version)
                     j.field "method", Serialize.text(e.method)
                     j.field "target", Serialize.text(e.target)
+                    # Same builder as a flow's `url` and the TUI tree's copy (#1562).
+                    j.field "url", Serialize.text(Store::FlowRow.url_of(e.scheme, e.host, e.port, e.target))
                     # Present only on a FOLDED row: how many distinct query strings it stands
                     # for, and up to QUERY_SAMPLE_MAX of the raw targets, so a replay still has
                     # a concrete one to send (`target` alone dropped the query).

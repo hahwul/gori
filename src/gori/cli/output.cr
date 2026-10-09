@@ -54,15 +54,12 @@ module Gori
       # Emits the flow-row fields into an open builder (reused by `show`, which
       # nests the row alongside the bodies).
       #
-      # `request_head`, when given, adds the two LISTING fields: the absolute `url` and a
-      # compact `headers` object for the request. They are opt-in and not part of the shared
-      # row shape for two different reasons. `headers` needs bytes the row projection
-      # deliberately does not carry, and MCP's `list_history` must not grow a per-row header
-      # block — a model reading a 200-row feed would pay for it on every row. `url` rides
-      # along with it because the two answer the same question ("what request was this, in
-      # full?") and a script that wants one wants the other; the plain `flow_row_json(row)`
-      # that `gori run capture`'s live stream and MCP's serializer mirror is byte-identical
-      # to what it always was. See spec/cli/run/history_spec.cr, which pins that key set.
+      # `request_head`, when given, adds the LISTING field: a compact `headers` object for the
+      # request. It is opt-in and not part of the shared row shape: it needs bytes the row
+      # projection deliberately does not carry, and MCP's `list_history` must not grow a
+      # per-row header block — a model reading a 200-row feed would pay for it on every row.
+      # `url` used to ride along with it; it is now on every row, because MCP's `flow_row`
+      # carries it (#1560) and spec/cli/run/history_spec.cr pins the two key sets together.
       #
       # `include_sensitive` defaults to FALSE — an inventory row's `headers` block carries
       # Authorization/Cookie VALUES only when the caller asks for them (#1002). The default
@@ -96,6 +93,11 @@ module Gori
           json_captured(j, "host", row.host)
           j.field "port", row.port
           json_captured(j, "target", row.target)
+          # `FlowRow#url` — the ONE definition of a flow's absolute URL (default-port
+          # elision, IPv6 bracketing, an absolute-form target passed through). A script
+          # re-deriving it from scheme/host/port/target gets exactly those three cases
+          # wrong, which is why the field exists at all.
+          json_captured(j, "url", row.url)
           j.field "status", row.status
           j.field "state", row.state.to_s.downcase
           j.field "size", row.size
@@ -130,11 +132,6 @@ module Gori
           end
           redacted = false
           if head = request_head
-            # `FlowRow#url` — the ONE definition of a flow's absolute URL (default-port
-            # elision, IPv6 bracketing, an absolute-form target passed through). A script
-            # re-deriving it from scheme/host/port/target gets exactly those three cases
-            # wrong, which is why the field exists at all.
-            json_captured(j, "url", row.url)
             j.field("headers") { redacted = request_headers_json(j, head, include_sensitive) }
           end
           # `sensitive_headers_redacted` only when a value ACTUALLY was — the same

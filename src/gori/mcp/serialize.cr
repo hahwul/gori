@@ -253,6 +253,10 @@ module Gori
           j.field "host", text(row.host)
           j.field "port", row.port
           j.field "target", text(row.target)
+          # The four columns above joined the way every other surface joins them (History's
+          # url column, `gori run history`, the scope gate): an absolute-form target is kept
+          # verbatim and a default port dropped, so an agent never rebuilds it by hand (#1560).
+          j.field "url", text(row.url)
           j.field "status", row.status
           j.field "state", row.state.to_s.downcase
           j.field "size", row.size
@@ -846,6 +850,7 @@ module Gori
           j.field "host", text(row.host)
           j.field "port", row.port
           j.field "target", text(row.target)
+          j.field "url", text(row.url)
           j.field "http_version", text(detail.http_version)
           j.field "status", row.status
           j.field "state", row.state.to_s.downcase

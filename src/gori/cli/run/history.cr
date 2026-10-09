@@ -569,7 +569,7 @@ module Gori
             # pure stream either way (this is STDERR), so a pipe is unaffected.
             STDERR.puts empty_listing_note(query, view_label, in_scope, hide_static) if rows.empty?
             # One extra read per row for the head the projection does not carry — that is what
-            # buys `url` and `headers` on the row (`Output.flow_row_fields`). Heads are small and
+            # buys `headers` on the row (`Output.flow_row_fields`). Heads are small and
             # this streams row by row, so a large `-n` costs queries, not memory.
             #
             # `json` is ONE array and `jsonl` one object per line (#1386). `json` used to be

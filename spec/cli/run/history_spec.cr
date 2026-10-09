@@ -845,12 +845,12 @@ describe "gori run history --format json — the listing's url and headers" do
       .as_s.should eq("http://plain.test/x")
   end
 
-  # The listing extras are OPT-IN precisely so the shape `gori run capture`'s live JSON-Lines
-  # stream and MCP's `list_history` mirror is untouched — the key-set pin above depends on it.
-  it "emits neither field when no request head is supplied" do
+  # `headers` is OPT-IN so the shape `gori run capture`'s live JSON-Lines stream and MCP's
+  # `list_history` mirror stays header-free; `url` is on every row, as MCP's is (#1560).
+  it "emits url but not headers when no request head is supplied" do
     row = flow_row(target: "/a", host: "h", status: 200, state: Gori::Store::FlowState::Complete)
     keys = JSON.parse(Gori::CLI::Output.flow_row_json(row)).as_h.keys
-    keys.should_not contain("url")
+    keys.should contain("url")
     keys.should_not contain("headers")
   end
 end
