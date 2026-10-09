@@ -150,6 +150,10 @@ describe "MCP diff_projects" do
         payload = drive_diff(newer, store, %({"from":"q1","verdicts":["added"]}))
         payload["endpoints"].as_a.map(&.["path"].as_s).should eq(["/new"])
         payload["counts"]["unchanged"].as_i.should eq(1)
+        drive_diff(newer, store, %({"from":"q1","verdicts":"added,unchanged"}))["endpoints"].as_a.size.should eq(2)
+        # A non-string entry used to be DROPPED, leaving no filter and every verdict (#1563).
+        diff_error(newer, store, %({"from":"q1","verdicts":[123]})).should contain("unknown verdict '123'")
+        diff_error(newer, store, %({"from":"q1","verdicts":[{}]})).should contain("invalid 'verdicts' entry")
       ensure
         store.close
       end
