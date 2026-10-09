@@ -21,6 +21,7 @@
 - CLI: `repeater send -H`/`-b`/`-d`/`--target` on a stored head that ends without a newline no longer glues the added header onto its last line, and `repeater create --flow` beside your own request no longer reports a request-line rewrite it never stored
 - CLI: `gori run show` and `grpc reflect` escape terminal sequences in SSE event and id fields, JWT and SAML headings and server-sent gRPC names, and `authorize --format json` stays valid UTF-8 over a non-UTF-8 method
 - MCP: `timeout_ms: 0`, empty filler arguments and a plain-string `messages` now mean what the tool schemas say, a session slot refuses a header object with no value, `diff_projects` refuses a non-string `verdicts` entry (#1563) instead of returning every verdict, and `create_repeater` seeds from `flow_id` beside an issue that has no flow
+- MCP: a tool that needs one of several arguments now says which in its description, so a model no longer sends `{}` (#1553, #1559)
 - MCP: an `ask_operator` answer or expiry still reaches the agent when its question held an invalid UTF-8 byte
 - MCP: `decode` runs a bare format name such as `base64`, `hex`, `url` or `gzip` as its decode half instead of encoding; spell `base64-encode` to encode (#1554)
 - Docs: the site search opens from a `?q=` link, and screenshots no longer shift the page while they load (#1550)

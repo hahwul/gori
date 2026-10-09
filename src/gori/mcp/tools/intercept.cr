@@ -350,6 +350,7 @@ module Gori
           s.field "item_id", intprop("held item id from intercept_list"), required: true
           s.field "raw", strprop("the full edited HTTP wire message as text (request/status line + headers + body)")
           s.field "raw_base64", strprop("the full edited wire message, base64 — byte-exact; use this for a binary body")
+          s.requires_one_of "raw", "raw_base64"
           s.field "update_content_length", boolprop("recompute Content-Length to match the edited body (default true). Set FALSE to hold your own value — a Content-Length shorter or longer than the body, or Content-Length alongside Transfer-Encoding, is the canonical request-smuggling primitive and the reason to hold a request at all. With it false, `raw_base64` really is byte-exact end to end.")
         end
 

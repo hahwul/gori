@@ -331,6 +331,7 @@ module Gori
           s.field "token", strprop("the JWT to check"), required: true
           s.field "secret", strprop("HMAC secret, for an HS256/384/512 token. \"\" checks the empty secret")
           s.field "key", strprop("PEM key for an RS/PS/ES/EdDSA token — inline PEM text, or a path to a .pem file. A PUBLIC KEY, a CERTIFICATE, or the private key all work. Mutually exclusive with 'secret'")
+          s.requires_one_of "secret", "key"
         end
 
         tool j, "jwt_encode",
@@ -347,6 +348,7 @@ module Gori
           s.field "alg", enumprop("signing algorithm (default HS256; none emits an unsigned token)", Gori::Jwt::ALGS)
           s.field "secret", strprop("HMAC secret for an HS algorithm")
           s.field "key", strprop("PEM PRIVATE key for an RS/PS/ES/EdDSA algorithm — inline PEM text, or a path to a .pem file. Mutually exclusive with 'secret'")
+          s.requires_one_of "token", "header", "payload"
         end
 
         tool j, "jwt_attacks",

@@ -650,6 +650,7 @@ module Gori
           s.field "id", intprop("probe finding id to toggle")
           s.field "code", strprop("bulk-dismiss every open finding with this check code")
           s.field "host", strprop("bulk-dismiss every open finding on this host")
+          s.requires_one_of "id", "code", "host"
         end
 
         tool j, "probe_promote",
@@ -670,6 +671,7 @@ module Gori
           s.field "id", intprop("probe finding id to delete")
           s.field "all", boolprop("delete EVERY probe finding AND every suppression (default false)")
           s.field "confirm", boolprop("required with all:true; without it the call is refused")
+          s.requires_one_of "id", "all"
         end
 
         tool j, "set_probe_rule_enabled",

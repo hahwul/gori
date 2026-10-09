@@ -810,6 +810,7 @@ module Gori
           "request to capture it again rather than paging further." do |s|
           s.field "flow_id", intprop("History flow id")
           s.field "repeater_id", intprop("Repeater workbench database id")
+          s.requires_one_of "flow_id", "repeater_id"
           s.field "part", enumprop("which stored blob to page (default response). \"request\" pages the stored REQUEST bytes: for a repeater that is the exact head+body blob send_request(repeater_id) replays, which is the only way to read past get_repeater_context's inline cap", MESSAGE_SIDES)
           s.field "offset", intprop("zero-based byte offset (default 0)")
           s.field "limit", limitprop("bytes to return", BODY_CHUNK_LIMIT)
