@@ -67,6 +67,7 @@ describe Gori::MCP::Server do
         sess = payload["sessions"][0]
         sess["db_id"].as_i64.should eq(id)
         sess["last_status"].as_i64.should eq(400)
+        sess["summary"].as_s.should eq("GET /x") # what create_repeater returns for it (#1561)
         sess.as_h.has_key?("request").should be_false
         sess.as_h.has_key?("last_response_head").should be_false
         payload["content_included"].as_bool.should be_false

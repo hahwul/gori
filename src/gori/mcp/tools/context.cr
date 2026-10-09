@@ -364,6 +364,9 @@ module Gori
           j.field "auto_content_length", r.auto_content_length?
           j.field "flow_id", r.flow_id if r.flow_id
           j.field "name", Serialize.text(r.name) if r.name
+          r_request_text = String.new(r.request).scrub
+          # What tells two unnamed tabs on one origin apart, without include_content (#1561).
+          j.field "summary", repeater_summary(r_request_text)
           j.field "tags", Serialize.text(r.tags) if r.tags
           j.field "sni", Serialize.text(r.sni) if r.sni
           # The tab's own TLS fingerprint (#844), when it has one. Absent means "the
@@ -377,7 +380,6 @@ module Gori
           # session out before it replays it and reads the origin's bare 400.
           emit_head_unterminated(j, CLI::Run.unterminated_head?(r.request,
             ws_http_only: r.ws_http_only?, http2: r.http2?))
-          r_request_text = String.new(r.request).scrub
           if include_content
             request = String.new(r.request)
             more = %(get_response_body_chunk(repeater_id: #{r.id}, part: "request", offset: …))

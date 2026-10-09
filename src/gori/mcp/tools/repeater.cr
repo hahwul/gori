@@ -430,13 +430,7 @@ module Gori
           end
         end
 
-        # Derive summary from the MASKED request — the raw request may carry a secret
-        # in the request-target (e.g. ?token=…), and this field is returned to the LLM.
-        line = masked_request.each_line.first?.try(&.strip) || ""
-        parts = line.split(' ')
-        s = "#{parts[0]?} #{parts[1]?}".strip
-        s = line if s.empty?
-        summary = s.size > 80 ? "#{s[0, 79]}…" : s
+        summary = repeater_summary(request)
 
         Result.new(JSON.build { |j|
           j.object do
@@ -721,13 +715,7 @@ module Gori
           return busy("request updated, but the WS FRAMES were NOT saved (store busy or unwritable) — the session still holds its previous frames; retry")
         end
 
-        # Derive the summary from the MASKED request, like create_repeater: the raw request may
-        # carry a secret in the request-target (e.g. ?token=…) and this field goes to the LLM.
-        line = masked_request.each_line.first?.try(&.strip) || ""
-        parts = line.split(' ')
-        s = "#{parts[0]?} #{parts[1]?}".strip
-        s = line if s.empty?
-        summary = s.size > 80 ? "#{s[0, 79]}…" : s
+        summary = repeater_summary(request)
 
         Result.new(JSON.build { |j|
           j.object do
@@ -843,6 +831,14 @@ module Gori
       # answer to "what is this tab called".
       private def repeater_derived_name(r : Store::RepeaterRecord) : String
         Repeater::SubtabFilter::Subject.summary_of(String.new(r.request))
+      end
+
+      # The `summary` every repeater tool returns (create/update_repeater, get_repeater_context):
+      # the TUI's derived label, MASKED — the stored request may carry a secret in the
+      # request-target (e.g. ?token=…) and this field goes to the LLM — and capped at 80.
+      private def repeater_summary(request : String) : String
+        s = Env.mask_secrets(Repeater::SubtabFilter::Subject.summary_of(request))
+        s.size > 80 ? "#{s[0, 79]}…" : s
       end
 
       # The ids named in `key`, refused as a set when any of them is unknown.
