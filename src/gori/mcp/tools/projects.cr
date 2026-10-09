@@ -25,23 +25,17 @@ module Gori
         err(ex.message || "ambiguous project name", "INVALID_ARGUMENT", field: field)
       end
 
-      # The kinds of background job still running. Switching, unbinding or deleting a project
-      # mid-job would repoint @store (and thus record_history writes) out from under the
-      # running fiber, so all three refuse until jobs settle — and the refusal names these
-      # kinds, so an agent stops the job that is actually running (#1556).
-      private def running_job_kinds : Array(String)
+      # PROJECT_BUSY while any background job is still running, or nil. Switching, unbinding or
+      # deleting a project mid-job would repoint @store (and thus record_history writes) out
+      # from under the running fiber, so all three refuse until jobs settle — and the refusal
+      # names the running kinds, so an agent stops the job that is actually running (#1556).
+      private def jobs_busy(action : String) : Result?
         kinds = [] of String
         {fuzz: @jobs, mine: @mine_jobs, discover: @discover_jobs, sequence: @sequence_jobs, authorize: @authorize_jobs}.each do |kind, jobs|
           kinds << kind.to_s if jobs.each_value.any? { |j| j.status == :running }
         end
-        kinds
-      end
-
-      # PROJECT_BUSY naming the running kind(s), or nil when no job blocks *action*.
-      private def jobs_busy(action : String) : Result?
-        kinds = running_job_kinds
         return if kinds.empty?
-        busy("cannot #{action} while a #{kinds.join("/")} job is running; stop it first")
+        busy("cannot #{action} while #{kinds.join(", ")} job(s) are running; stop them first")
       end
 
       # How many projects one `list_projects` page carries, and the ceiling a caller may raise
@@ -215,6 +209,10 @@ module Gori
         @refresher.try(&.uninstall)
         @refresher = nil
         Settings.project_env_vars = [] of {String, String}
+        # …and the network layer `bind_project_network` installed: an unbound server still dials
+        # (oast_start/poll), and must not leave through the old project's jump host and creds.
+        Settings.load_project_network(nil, bind: false)
+        Gori::Protobuf::Schemas.clear
         @store.try(&.close)
         @store = nil
         @oast_mcp.reject! { |_, o| !o.store_session_id.nil? } # see `bind_project`

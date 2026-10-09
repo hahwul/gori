@@ -735,6 +735,7 @@ private def with_isolated_projects(&)
     yield tools
   ensure
     tools.current_store.try(&.close) rescue nil
+    Gori::Settings.load_project_network(nil, bind: false) # process globals a bind installs
     prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
     FileUtils.rm_rf(root)
   end
@@ -749,7 +750,7 @@ describe "Gori::MCP::Tools project switch refusals" do
       djob = running_discover_job(tools)
       r = tools.call("switch_project", JSON.parse(%({"project":#{slug.to_json}})))
       r.error_code.should eq("PROJECT_BUSY")
-      r.text.should contain("a discover job is running")
+      r.text.should contain("discover job(s) are running")
       r.text.should_not contain("fuzz")
       djob.status = :done
       mcp_ok_json(tools, "switch_project", %({"project":#{slug.to_json}}))["switched"].as_bool.should be_true
@@ -769,8 +770,13 @@ describe "Gori::MCP::Tools project switch refusals" do
       djob = running_discover_job(tools)
       busy = tools.call("switch_project", JSON.parse(%({"unbind":true})))
       busy.error_code.should eq("PROJECT_BUSY")
-      busy.text.should contain("a discover job is running")
+      busy.text.should contain("discover job(s) are running")
       djob.status = :done
+
+      # A project pinned to a jump host: the bind installs it as the process's route.
+      tools.current_store.not_nil!.set_setting(Gori::Settings::PROJECT_UPSTREAM_KEY, "http://jump.internal:3128")
+      mcp_ok_json(tools, "switch_project", %({"project":#{slug.to_json}}))
+      Gori::Settings.upstream_route("collector.example").host.should eq("jump.internal")
 
       left = mcp_ok_json(tools, "switch_project", %({"unbind":true}))
       left["switched"].as_bool.should be_true
@@ -781,6 +787,9 @@ describe "Gori::MCP::Tools project switch refusals" do
       info["project"].raw.should be_nil
       mcp_ok_json(tools, "list_projects", "{}")["bound"].as_bool.should be_false
       tools.call("list_history", JSON.parse("{}")).error_code.should eq("NO_PROJECT")
+      # …and an unbound OAST dial no longer leaves through the old project's jump host.
+      Gori::Settings.project_upstream_proxy.should be_nil
+      Gori::Settings.upstream_route("collector.example").host.should_not eq("jump.internal")
 
       # Unbinding an unbound server is a no-op, not an error.
       mcp_ok_json(tools, "switch_project", %({"unbind":true}))["switched"].as_bool.should be_false

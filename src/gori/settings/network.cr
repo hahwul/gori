@@ -418,18 +418,21 @@ module Gori::Settings
   # never opened a socket would report a port it is not on. Passing `bind: false` therefore
   # CLEARS the pair rather than skipping it. Named and mandatory so the question is put to
   # each new caller rather than defaulted past.
-  def self.load_project_network(store : Store, *, bind : Bool) : Nil
-    self.project_bind_host = bind ? store.setting(PROJECT_BIND_HOST_KEY) : nil
-    self.project_bind_port = bind ? valid_port(store.setting(PROJECT_BIND_PORT_KEY).try(&.to_i?)) : nil
-    self.project_upstream_proxy = store.setting(PROJECT_UPSTREAM_KEY)
-    self.project_upstream_destination = store.setting(PROJECT_UPSTREAM_DESTINATION_KEY)
-    load_project_upstream_auth(store.setting(PROJECT_UPSTREAM_AUTH_KEY))
+  #
+  # A nil *store* clears every override, for a surface that leaves its project without opening
+  # another (MCP `switch_project unbind:true`, #1558).
+  def self.load_project_network(store : Store?, *, bind : Bool) : Nil
+    self.project_bind_host = bind ? store.try(&.setting(PROJECT_BIND_HOST_KEY)) : nil
+    self.project_bind_port = bind ? valid_port(store.try(&.setting(PROJECT_BIND_PORT_KEY)).try(&.to_i?)) : nil
+    self.project_upstream_proxy = store.try(&.setting(PROJECT_UPSTREAM_KEY))
+    self.project_upstream_destination = store.try(&.setting(PROJECT_UPSTREAM_DESTINATION_KEY))
+    load_project_upstream_auth(store.try(&.setting(PROJECT_UPSTREAM_AUTH_KEY)))
     # Read under the SAME floors the global section's load applies (`apply_sections`), not just
     # the editors': a row written by an older gori or by hand is not validated by anything
     # else, and a 0 here is a zero-second dial timeout on every request this project makes.
-    self.project_connect_timeout_secs = store.setting(PROJECT_CONNECT_TIMEOUT_KEY).try(&.to_i?).try { |v| {v, 1}.max }
-    self.project_io_timeout_secs = store.setting(PROJECT_IO_TIMEOUT_KEY).try(&.to_i?).try { |v| {v, 1}.max }
-    self.project_capture_max_mib = store.setting(PROJECT_CAPTURE_MAX_KEY).try(&.to_i?).try(&.clamp(1, MAX_CAPTURE_MAX_MIB))
+    self.project_connect_timeout_secs = store.try(&.setting(PROJECT_CONNECT_TIMEOUT_KEY)).try(&.to_i?).try { |v| {v, 1}.max }
+    self.project_io_timeout_secs = store.try(&.setting(PROJECT_IO_TIMEOUT_KEY)).try(&.to_i?).try { |v| {v, 1}.max }
+    self.project_capture_max_mib = store.try(&.setting(PROJECT_CAPTURE_MAX_KEY)).try(&.to_i?).try(&.clamp(1, MAX_CAPTURE_MAX_MIB))
   end
 
   # A TCP port, or nil (inherit / keep) for anything outside 0..65535. 0 is a real request —

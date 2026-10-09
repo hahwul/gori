@@ -2464,6 +2464,29 @@ describe Gori::Settings do
       end
     end
 
+    # MCP `switch_project unbind:true` (#1558): an unbound server still dials OAST collectors,
+    # and must not leave through the old project's jump host on its credentials.
+    it "with a nil store clears every override, a stale credential error included" do
+      with_net_store do |store|
+        reset_net
+        store.set_setting(Gori::Settings::PROJECT_UPSTREAM_KEY, "jump:8888")
+        store.set_setting(Gori::Settings::PROJECT_UPSTREAM_AUTH_KEY, "{malformed")
+        store.set_setting(Gori::Settings::PROJECT_CONNECT_TIMEOUT_KEY, "7")
+        Gori::Settings.load_project_network(store, bind: true)
+        Gori::Settings.project_upstream_auth_error.should_not be_nil
+
+        Gori::Settings.load_project_network(nil, bind: false)
+
+        Gori::Settings.project_upstream_proxy.should be_nil
+        Gori::Settings.project_upstream_auth.should be_nil
+        Gori::Settings.project_upstream_auth_error.should be_nil
+        Gori::Settings.project_connect_timeout_secs.should be_nil
+        Gori::Settings.upstream_route("api.example.com").host.should_not eq("jump")
+      ensure
+        reset_net
+      end
+    end
+
     # The whole point of the named flag: a headless command that never opens a socket must
     # not end up holding a bind address, because effective_bind_* is also read for display
     # and for the listeners duplicate check.
