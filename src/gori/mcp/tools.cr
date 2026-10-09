@@ -423,6 +423,9 @@ module Gori
         # Set for the duration of ONE `call` when the surface can answer "has the client
         # cancelled the request I am serving?" — see `call` and `cancel_signal`.
         @cancelled = nil.as(Proc(Bool)?)
+        # The tool that `call` is serving, for a shared helper whose advice depends on which
+        # arguments the caller has (`ql_unknown_field_error`'s `ids` hint).
+        @calling = nil.as(String?)
         # #1090: operator messages a route in THIS process is mid-way through handing over.
         # Three readers share one feed — the courier, the tool-result carry and
         # `operator_messages` — and the delivery ROW that keeps them from repeating each other
@@ -1504,6 +1507,7 @@ module Gori
       #   authorize _start  of what the client asked for.
       def call(name : String, args : JSON::Any, cancelled : Proc(Bool)? = nil) : Result
         @cancelled = cancelled
+        @calling = name
         h = args.as_h? || EMPTY_HASH
         # WHAT the name is, before WHETHER a project is bound. These two answers belong to
         # different layers — `UNKNOWN_TOOL` is a protocol error the transport turns into
@@ -1580,6 +1584,7 @@ module Gori
         # Never outlives its call. The worker fiber serves one request at a time, so a stale
         # predicate would answer the NEXT tool's poll with a previous caller's cancellation.
         @cancelled = nil
+        @calling = nil
       end
 
       # The cancellation predicate for the call in flight, for an engine that polls one

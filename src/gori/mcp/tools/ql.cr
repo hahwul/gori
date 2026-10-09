@@ -84,8 +84,11 @@ module Gori
           if near
             "unknown query field `#{use.name}#{op}` — did you mean `#{near}#{op}`? (#{tail})"
           elsif FilterAst::ID_FIELDS.includes?(use.name.downcase)
+            # Pointed at THIS tool's `ids` only when it has one: probe_scan, export_openapi and
+            # the rest do not, and following the hint there was a second refusal (#1557).
+            by_id = declared_args[@calling]?.try(&.includes?("ids")) ? "use the 'ids' argument to" : "list_history's 'ids' argument can"
             "unknown query field `#{use.name}#{op}` — QL has no `#{use.name}:` field; " \
-            "use the 'ids' argument to select flows by id (#{tail})"
+            "#{by_id} select flows by id (#{tail})"
           else
             "unknown query field `#{use.name}#{op}` — QL has no such field. " \
             "Fields: #{QL::FIELDS.join(' ')} (call ql_reference; #{tail})"
@@ -190,7 +193,7 @@ module Gori
                     if near = QL.suggest_field(n)
                       "`#{n}:` (did you mean `#{near}:`?)"
                     elsif FilterAst::ID_FIELDS.includes?(n.downcase)
-                      "`#{n}:` (use the 'ids' argument to select flows by id)"
+                      "`#{n}:` (list_history's 'ids' argument selects flows by id)"
                     else
                       "`#{n}:`"
                     end

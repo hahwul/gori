@@ -134,7 +134,7 @@ describe "MCP ql_explain verdict" do
       j["unknown_fields"][0]["name"].as_s.should eq("id")
       j["refused_by_query_tools"].as_bool.should be_true
       w = j["warnings"].as_a.map(&.as_s)
-      w.find(&.includes?("no such field")).not_nil!.should contain("use the 'ids' argument")
+      w.find(&.includes?("no such field")).not_nil!.should contain("list_history's 'ids' argument")
     end
   end
 end
