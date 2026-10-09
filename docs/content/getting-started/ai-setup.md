@@ -27,7 +27,7 @@ gori mcp --install-pi            # Pi
 | Flag | Client | Config written |
 |------|--------|----------------|
 | `--install-claude` | Claude Desktop | `claude_desktop_config.json` in the platform's app-config directory (see below) |
-| `--install-claude-code` | Claude Code | `~/.claude.json` (`mcpServers.gori`) |
+| `--install-claude-code` | Claude Code | `~/.claude.json` (`mcpServers.gori`), or `$CLAUDE_CONFIG_DIR` |
 | `--install-codex` | OpenAI Codex | `~/.codex/config.toml` (`[mcp_servers.gori]`), or `$CODEX_HOME` |
 | `--install-agy` | Antigravity CLI | `~/.gemini/antigravity-cli/mcp_config.json` |
 | `--install-grok` | Grok | `~/.grok/config.toml` (`[mcp_servers.gori]`) |

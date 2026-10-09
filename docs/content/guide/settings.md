@@ -45,7 +45,7 @@ Edits are a working copy: nothing is written until you press `↵`, and `Esc` tw
 | **Choice** | `←` / `→` cycles the options |
 | **Opener** | `↵` opens that section's own editor |
 
-Openers exist where a section needs more than a row of fields: the theme list, the tab bar, environment variables, hotkeys, hostname overrides, and the User-Agent list.
+Openers exist where a section needs more than a row of fields: the theme list, the tab bar, environment variables, hotkeys, the keyset playground, hostname overrides, and the User-Agent list.
 
 ## The Sections
 
@@ -91,7 +91,7 @@ Placement decides what she costs *in a session* (the picker has only the one spo
 |---------|--------|
 | **Editor** | External editor, Markdown highlight, Pretty-print bodies |
 | **Mouse** | Mouse, Drag release |
-| **Keys** | Command modifier, Editor keyset |
+| **Keys** | Command modifier, Editor keyset, Keyset playground (opener) |
 | **Env** | Opener: global `$ENV.KEY` variables for outbound requests. It also reports the token grammar in force; switching that is [`gori settings env-syntax`](/reference/cli/#env-syntax), which re-spells the tokens already stored |
 | **User-Agents** | Opener: your own list for `$GEN.USER_AGENT`, one per line. It replaces the built-in browser list; empty means the built-in one |
 | **Hotkeys** | Opener: rebind any shortcut, or pick an OS default profile |
