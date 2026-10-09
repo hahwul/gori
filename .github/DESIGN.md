@@ -4871,3 +4871,14 @@ REVIEW and never writes `editor_keyset`, so re-running `gori wizard` keeps a cho
 Preferences. REVIEW's Editor keys row shows the saved keyset and the palette entry that changes it
 (Settings: Keys, its title read from the registry; no chord, since REVIEW's Shortcuts row can
 change the palette's modifier before finish). MIN_H stays 15: REVIEW was already the tallest step.
+
+### 2026-10-09: MCP `decode` reads a bare format name as its decode half
+
+The catalog registers `base64`, `hex`, `url`, `gzip`, `html` and the other bare names as aliases
+of the ENCODE converter, and the Decoder tab and `gori run decoder` keep that: their names promise
+no direction. The MCP tool is called `decode`, though, so `decode{spec:"base64"}` double-encoded
+its input with `isError:false`, and agents looped on the plausible output; a `note` naming the
+trap did not stop them (#1554). The tool now runs such a token's decode counterpart
+(`Tools.inverse_of`), per token in written order. A spelled direction (`base64-encode`,
+`gzip-compress`), a canonical name (`raw-deflate`), a hash and a one-way transform run as typed.
+The divergence from the other two surfaces is deliberate and stated in the tool description.

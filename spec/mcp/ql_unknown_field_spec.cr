@@ -111,4 +111,23 @@ describe "MCP query tools: an unknown QL field" do
       call_tools(store, "list_history", q("id:1", strict: true)).is_error.should be_true
     end
   end
+
+  # Only list_history has an `ids` argument; elsewhere the hint sent the agent straight into
+  # "unknown argument … ids" (#1557).
+  it "points a tool without an ids argument at list_history instead" do
+    with_store do |store|
+      r = call_tools(store, "list_sitemap", q("id:1"))
+      r.error_code.should eq("QUERY_SYNTAX")
+      r.text.should_not contain("use the 'ids' argument")
+      r.text.should contain("list_history's 'ids' argument")
+    end
+  end
+
+  it "points authorize_start at its own flow_ids argument" do
+    with_store do |store|
+      r = call_tools(store, "authorize_start", q("id:1", allow_unscoped: true))
+      r.error_code.should eq("QUERY_SYNTAX")
+      r.text.should contain("use the 'flow_ids' argument")
+    end
+  end
 end

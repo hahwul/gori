@@ -204,12 +204,12 @@ describe "MCP boolean arguments — refused by name, never silently substituted"
       seed_bool_flow(store)
       tools = bool_tools(store)
       refuses_garbage(tools, "list_sitemap", "collapse_transport", ->(bad : String) { %({"collapse_transport":#{bad}}) })
-      refuses_garbage(tools, "decode", "input_base64", ->(bad : String) { %({"input":"aGk=","spec":"hex","input_base64":#{bad}}) })
+      refuses_garbage(tools, "decode", "input_base64", ->(bad : String) { %({"input":"aGk=","spec":"hex-encode","input_base64":#{bad}}) })
       refuses_garbage(tools, "clear_history", "confirm", ->(bad : String) { %({"confirm":#{bad}}) })
       refuses_garbage(tools, "get_flow", "include_sensitive", ->(bad : String) { %({"id":1,"include_sensitive":#{bad}}) })
       # Complement: the legal forms still do what they say.
-      bool_json(tools, "decode", %({"input":"aGk=","spec":"hex","input_base64":true}))
-      bool_json(tools, "decode", %({"input":"aGk=","spec":"hex","input_base64":false}))
+      bool_json(tools, "decode", %({"input":"aGk=","spec":"hex-encode","input_base64":true}))
+      bool_json(tools, "decode", %({"input":"aGk=","spec":"hex-encode","input_base64":false}))
       bool_json(tools, "list_sitemap", %({"collapse_transport":true}))
       bool_json(tools, "list_sitemap", %({"collapse_transport":false}))
       # clear_history without confirm still refuses with CONFIRM_REQUIRED, not an arg error.

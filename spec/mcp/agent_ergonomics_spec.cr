@@ -99,72 +99,42 @@ describe "MCP agent ergonomics" do
   end
 
   # `base64`/`hex`/`url` are aliases of the ENCODE converters, so the most natural call
-  # anyone makes against a tool named `decode` double-ENCODES its input and reports success.
-  it "decode says so when a bare converter name encoded instead" do
+  # anyone makes against a tool named `decode` double-ENCODED its input and reported success
+  # (#1554). A bare name decodes here instead; a spelled direction still runs as typed.
+  it "decode runs a bare format name as its decode half" do
     with_store do |store|
       tools = tools_for(store)
+      converters = ->(doc : JSON::Any) { doc["steps"].as_a.map(&.["converter"].as_s) }
 
-      trap = erg_json(tools, "decode", %({"spec":"base64","input":"aGVsbG8="}))
-      trap["output"].as_s.should eq("YUdWc2JHOD0=") # the double-encode, unchanged behaviour
-      trap["note"].as_s.should contain("base64 -> base64-encode ENCODED")
-      trap["note"].as_s.should contain("base64-decode")
+      bare = erg_json(tools, "decode", %({"spec":"base64","input":"aGVsbG8="}))
+      bare["output"].as_s.should eq("hello")
+      converters.call(bare).should eq(["base64-decode"])
+      erg_json(tools, "decode", %({"spec":"hex","input":"6869"}))["output"].as_s.should eq("hi")
+      erg_json(tools, "decode", %({"spec":"url","input":"a%20b"}))["output"].as_s.should eq("a b")
+      erg_json(tools, "decode", %({"spec":"html","input":"&lt;a&gt;"}))["output"].as_s.should eq("<a>")
+      erg_json(tools, "decode", %({"spec":"xml","input":"&lt;a&gt;"}))["output"].as_s.should eq("<a>")
 
-      # Nothing to warn about when the caller spelled the direction, either way.
-      erg_json(tools, "decode", %({"spec":"base64-decode","input":"aGVsbG8="}))
-        .as_h.has_key?("note").should be_false
-      erg_json(tools, "decode", %({"spec":"base64-encode","input":"hello"}))
-        .as_h.has_key?("note").should be_false
-      # A hash has only one direction; "encode" is not a surprise there.
-      erg_json(tools, "decode", %({"spec":"sha256","input":"hello"}))
-        .as_h.has_key?("note").should be_false
-    end
-  end
+      # Each token on its own, in the order written: `base64 > gzip` decodes, then decompresses.
+      packed = erg_json(tools, "decode", %({"spec":"gzip-compress > base64-encode","input":"hello"}))["output"].as_s
+      chain = erg_json(tools, "decode", %({"spec":"base64 > gzip","input":#{packed.to_json}}))
+      chain["output"].as_s.should eq("hello")
+      converters.call(chain).should eq(["base64-decode", "gzip-decompress"])
+      converters.call(erg_json(tools, "decode", %({"spec":"deflate","input":"eJzLSM3JyQcABiwCFQ==","input_base64":true})))
+        .should eq(["zlib-decompress"])
 
-  # `-encode` is only ONE of the three spellings the catalog gives that direction, and the
-  # note used to know just that one — so `gzip` COMPRESSED, `deflate` COMPRESSED and `html`
-  # ESCAPED with `isError:false` and nothing said, which is the same trap one family over.
-  it "decode says so for the compress and escape families too, naming the real counterpart" do
-    with_store do |store|
-      tools = tools_for(store)
-
+      # A spelled direction — in any of the three spellings, wherever in the token it sits —
+      # a hash, and a ONE-WAY transform with no counterpart all run as typed.
       {
-        %({"spec":"gzip","input":"hello"})    => {"gzip -> gzip-compress ENCODED", "gzip-decompress"},
-        %({"spec":"deflate","input":"hello"}) => {"deflate -> zlib-compress ENCODED", "zlib-decompress"},
-        %({"spec":"html","input":"<a>"})      => {"html -> html-escape ENCODED", "html-unescape"},
-        %({"spec":"xml","input":"<a>"})       => {"xml -> xml-escape ENCODED", "xml-unescape"},
-      }.each do |args, (went, instead)|
-        note = erg_json(tools, "decode", args)["note"].as_s
-        note.should contain(went), args
-        note.should contain(instead), args
-      end
-
-      # Silent where there is nothing to point at: a direction the caller spelled — in any of
-      # the three spellings, and wherever in the token it sits — and a ONE-WAY transform,
-      # whose "counterpart" would be a name that was never in the catalog.
-      [
-        %({"spec":"gzip-compress","input":"hi"}),
-        %({"spec":"html-escape","input":"<a>"}),
-        %({"spec":"url-encode-all","input":"ab"}),
-        %({"spec":"shell-escape","input":"a b"}),
-        %({"spec":"homoglyph","input":"ab"}),
-      ].each { |args| erg_json(tools, "decode", args).as_h.has_key?("note").should be_false, args }
-    end
-  end
-
-  # An agent reads the note and builds the spec it names, so the names have to be in the
-  # order that spec runs. A chain undoes back to front.
-  it "decode's note names the inverse chain in the order that actually undoes it" do
-    with_store do |store|
-      tools = tools_for(store)
-      note = erg_json(tools, "decode", %({"spec":"gzip > base64","input":"hello"}))["note"].as_s
-      note.should contain("gzip -> gzip-compress, base64 -> base64-encode ENCODED") # step order
-      note.should contain("base64-decode > gzip-decompress")                        # UNDO order
-      # And it is a chain the tool will actually run: listing them forwards handed the agent
-      # `gzip-decompress > base64-decode`, which fails at step 1 on base64 TEXT.
-      round = erg_json(tools, "decode", %({"spec":"gzip > base64","input":"hello"}))["output"].as_s
-      back = erg_json(tools, "decode", %({"spec":"base64-decode > gzip-decompress","input":#{round.to_json}}))
-      back["output"].as_s.should eq("hello")
-      back.as_h.has_key?("note").should be_false
+        %({"spec":"base64-encode","input":"hello"}) => "base64-encode",
+        %({"spec":"gzip-compress","input":"hi"})    => "gzip-compress",
+        %({"spec":"html-escape","input":"<a>"})     => "html-escape",
+        %({"spec":"url-encode-all","input":"ab"})   => "url-encode-all",
+        %({"spec":"raw-deflate","input":"hello"})   => "raw-deflate",
+        %({"spec":"sha256","input":"hello"})        => "sha256",
+        %({"spec":"shell-escape","input":"a b"})    => "shell-escape",
+        %({"spec":"homoglyph","input":"ab"})        => "homoglyph",
+      }.each { |args, conv| converters.call(erg_json(tools, "decode", args)).should eq([conv]), args }
+      erg_json(tools, "decode", %({"spec":"base64-encode","input":"hello"}))["output"].as_s.should eq("aGVsbG8=")
     end
   end
 

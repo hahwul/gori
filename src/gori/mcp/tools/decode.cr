@@ -60,7 +60,7 @@ module Gori
           end
 
         reg = Decoder.shared_registry
-        result = Decoder.run(reg, input, spec)
+        result = Decoder.run(reg, input, bare_tokens_decode(reg, spec))
 
         if idx = result.failed_at
           step = result.steps[idx]
@@ -84,15 +84,6 @@ module Gori
           end
         end
 
-        # The tool is named `decode`, and `base64`/`hex`/`url` are aliases of the ENCODE
-        # converters (catalog.cr registers them on `base64-encode`, `hex-encode`,
-        # `url-encode`). So `decode{spec:"base64", input:"aGVsbG8="}` — the single most
-        # natural call anyone makes here — answers "YUdWc2JHOD0=" with isError:false: a
-        # double-ENCODE of the value, silently, in the shape of a plausible result. `steps`
-        # has always carried the resolved name, but nothing pointed at the discrepancy.
-        # Name it, only when the caller's own token was direction-less and went the way the
-        # tool's name says it would not.
-        surprised = encode_surprise(result)
         Result.new(JSON.build do |j|
           j.object do
             j.field "spec", spec
@@ -100,7 +91,6 @@ module Gori
             j.field "output_encoding", mode.to_s.downcase
             j.field "output_bytes", out_bytes.size
             j.field("output_truncated", true) if truncated
-            j.field "note", surprised if surprised
             j.field "steps" do
               j.array do
                 result.steps.each do |s|
@@ -113,13 +103,9 @@ module Gori
       end
 
       # The three spellings the catalog gives ONE direction, each mapped to the spelling that
-      # undoes it. The note used to know only the first, and the comment that stood here
-      # excused the rest as "a hash/compress step where encode is the only direction there
-      # is" — which is not true of either of the other two: `gunzip` sits beside `gzip` in
-      # the catalog and `html-unescape` beside `html-escape`. So `decode{spec:"gzip"}`
-      # COMPRESSED, `decode{spec:"deflate"}` COMPRESSED, and `decode{spec:"html"}` ESCAPED,
-      # each with `isError:false` and nothing said — the very shape this note exists for,
-      # three families wide.
+      # undoes it. `-encode` is not the only one: `gunzip` sits beside `gzip` in the catalog
+      # and `html-unescape` beside `html-escape`, so `decode{spec:"gzip"}` would otherwise
+      # COMPRESS and `decode{spec:"html"}` ESCAPE — the same trap three families wide.
       INVERSE_SUFFIX = {"-encode" => "-decode", "-compress" => "-decompress", "-escape" => "-unescape"}
 
       # The two encoders in the catalog named for what they DO rather than for which half of
@@ -127,47 +113,41 @@ module Gori
       # field on `Converter` that the other seventeen pairs would leave nil — and swept by a
       # spec (`spec/mcp/decode_tool_spec.cr`) that walks every Encode converter in the
       # registry, so an encoder added later with an inverse and no rule for it fails there
-      # instead of going quiet in the note.
+      # instead of going on encoding.
       INVERSE_NAME = {"raw-deflate" => "raw-inflate", "url-encode-all" => "url-decode"}
 
-      # A token that spells one of these named a DIRECTION, whatever else it says, so what it
-      # did is not a surprise. Substring and not a suffix: `url-encode-all` and `gzip-compress`
+      # A token that spells one of these named a DIRECTION, whatever else it says, so it runs
+      # as typed. Substring and not a suffix: `url-encode-all` and `gzip-compress`
       # both say which way they go without ending in the word.
       DIRECTION_WORDS = %w[encode decode compress decompress escape unescape]
 
-      # The warning for a spec whose direction-less tokens ENCODED. nil when there is nothing
-      # to say: the caller spelled a direction (`base64-encode`, `gzip-compress`), the step
-      # decodes or hashes, or the converter is genuinely ONE-WAY (`shell-escape`, `homoglyph`)
-      # and there is no other way to point them at.
-      private def encode_surprise(result : Decoder::ChainResult) : String?
-        reg = Decoder.shared_registry
-        bare = [] of {String, String, String}
-        result.steps.each do |step|
-          next unless conv = step.converter
-          next unless conv.direction.encode?
-          # The token AS TYPED — an alias that already names its direction is not a surprise,
-          # and neither is a canonical name the caller spelled in full.
-          token = step.token.split(':', 2).first.strip.downcase
-          next if DIRECTION_WORDS.any? { |w| token.includes?(w) }
-          next unless inverse = Tools.inverse_of(reg, conv.name)
-          bare << {token, conv.name, inverse}
-        end
-        return nil if bare.empty?
-        went = bare.map { |(tok, name, _)| "#{tok} -> #{name}" }.join(", ")
-        # REVERSED: a chain undoes back to front, so `gzip > base64` is undone by
-        # `base64-decode > gzip-decompress`. Listing the inverses in step order handed an
-        # agent a spec that fails at step 1 — a new trap in the one message whose whole job
-        # is to keep an agent out of one.
-        instead = bare.map(&.[2]).reverse!.uniq!.join(" > ")
-        "this tool is named `decode`, but #{went} ENCODED — a bare converter name is the " \
-        "encode direction. Pass #{instead} to go the other way."
+      # The tool is named `decode`, but `base64`/`hex`/`url` are aliases of the ENCODE
+      # converters (catalog.cr registers them on `base64-encode`, `hex-encode`, `url-encode`), so
+      # `decode{spec:"base64", input:"aGVsbG8="}` — the most natural call anyone makes here —
+      # double-ENCODED the value with isError:false. A note naming the trap did not help: an
+      # agent read the plausible output and retried (#1554). So HERE a token that names no
+      # direction and resolves to an encoder with a counterpart runs that counterpart instead.
+      # Each token on its own, in the order written: `base64 > gunzip` and `base64 > gzip` both
+      # decode base64 first. A direction the caller spelled (`base64-encode`, `gzip-compress`)
+      # and a one-way transform (`shell-escape`) run as typed. The Decoder tab and `gori run
+      # decoder` keep the catalog's meaning: their names promise no direction.
+      private def bare_tokens_decode(reg : Decoder::Registry, spec : String) : String
+        Decoder.parse_spec(spec).map do |tok|
+          conv = reg[tok]?
+          next tok unless conv && conv.direction.encode?
+          # The token AS TYPED — an alias that already names its direction is not bare, and
+          # neither is a canonical name spelled in full (`raw-deflate` names no direction word
+          # but is the only way to reach raw-deflate compression).
+          next tok if DIRECTION_WORDS.any? { |w| tok.downcase.includes?(w) }
+          next tok if Decoder::Registry.normalize(tok) == conv.name
+          Tools.inverse_of(reg, conv.name) || tok
+        end.join(" > ")
       end
 
       # The converter that undoes `name`, or nil when this build has none. Asked of the
-      # REGISTRY rather than derived from the name alone: the note tells the caller to spell a
-      # converter, so that converter has to exist and has to decode. A one-way transform has
-      # no counterpart and therefore gets no note — telling someone to pass `shell-unescape`
-      # would send them after a name that was never in the catalog.
+      # REGISTRY rather than derived from the name alone: the bare token is about to run as
+      # that converter, so it has to exist and has to decode. A one-way transform has no
+      # counterpart and runs as typed — there is no `shell-unescape` to run instead.
       #
       # A CLASS method, using no instance state: it is what the registry sweep in
       # `spec/mcp/decode_tool_spec.cr` walks the whole catalog through, and building a `Tools`
@@ -302,11 +282,11 @@ module Gori
           "Run a gori Decoder chain (encode/decode/hash/compress) over `input` and return the " \
           "result — the same engine as the TUI Decoder tab. Pure transform: no network, no state. " \
           "`spec` is converter tokens separated by '>', '|' or ',' applied left-to-right, e.g. " \
-          "'base64-decode > gunzip', 'url-encode', 'sha256'. DIRECTION IS PART OF THE NAME, and " \
-          "a bare one is the ENCODE half: `base64` is base64-ENCODE, `hex` is hex-encode, `url` " \
-          "is url-encode, `gzip`/`deflate` COMPRESS and `html`/`xml` ESCAPE — despite this tool " \
-          "being called decode. To DECODE, spell it: base64-decode, hex-decode, url-decode, " \
-          "gunzip, inflate, html-unescape. Common converters: base64-encode, " \
+          "'base64-decode > gunzip', 'url-encode', 'sha256'. A BARE format name DECODES here: " \
+          "`base64` runs base64-decode, `hex` hex-decode, `url` url-decode, `gzip`/`deflate` " \
+          "decompress and `html`/`xml` unescape (the Decoder tab and `gori run decoder` read a " \
+          "bare name as the encode half). To ENCODE, spell it: base64-encode, hex-encode, " \
+          "url-encode, gzip-compress, html-escape. Common converters: base64-encode, " \
           "base64-decode, url-encode, url-encode-all, url-decode, hex-encode, hex-decode, gzip, gunzip, " \
           "deflate, inflate, raw-deflate, raw-inflate, brotli, zstd (both decompress-only), " \
           "msgpack-decode, cbor-decode (binary document -> JSON), " \
@@ -317,7 +297,7 @@ module Gori
           "base62, xml-escape, shell-escape, powershell-escape, c-string-escape, homoglyph, typo. " \
           "An unknown token returns the full list." do |s|
           s.field "input", strprop("the value to transform (UTF-8 text unless input_base64 is set)"), required: true
-          s.field "spec", strprop("converter chain, e.g. 'base64-decode > gunzip'. A token with no -encode/-decode suffix resolves to the ENCODE converter, so pass 'base64-decode' (not 'base64') to decode; the reply's `steps[].converter` reports what each token resolved to, and a `note` appears when a bare token encoded. 'exec:' steps (external commands) are refused here — this tool is pure compute"), required: true
+          s.field "spec", strprop("converter chain, e.g. 'base64-decode > gunzip'. A token that names no direction (base64, hex, url, gzip, html) DECODES; spell 'base64-encode' to encode. The reply's `steps[].converter` reports what each token resolved to. 'exec:' steps (external commands) are refused here — this tool is pure compute"), required: true
           s.field "input_base64", boolprop("treat `input` as base64 and decode it to raw bytes first (for binary input)")
         end
 

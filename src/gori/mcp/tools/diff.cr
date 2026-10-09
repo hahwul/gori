@@ -171,12 +171,11 @@ module Gori
 
       # `verdicts: ["added","changed"]` narrows which endpoint rows come back. The COUNTS
       # always cover all five, so narrowing the list can never make a bucket read as empty.
+      # Through `str_list`, so a non-string entry is refused or read as the verdict it spells:
+      # `compact_map(&.as_s?)` dropped `[123]` to an empty list, which means "no filter", and
+      # answered every verdict (#1563).
       private def diff_verdicts(h) : Array(Gori::Diff::Verdict) | Result
-        raw = h["verdicts"]?
-        return Gori::Diff::Render::ORDER unless raw
-        names = raw.as_a?.try(&.compact_map(&.as_s?)) || raw.as_s?.try(&.split(',')) ||
-                return err("invalid 'verdicts' (expected an array of #{Gori::Diff::Render::ORDER.map(&.label).join("|")})",
-                  "INVALID_ARGUMENT", field: "verdicts")
+        names = str_list(h, "verdicts").flat_map(&.split(','))
         wanted = [] of Gori::Diff::Verdict
         names.each do |n|
           key = n.strip.downcase
