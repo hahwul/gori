@@ -68,6 +68,7 @@ describe "MCP list_sitemap tag stamping" do
       row = row_for(call_json(tools, "list_sitemap", "{}"), "/plain")
       row["query_variants"]?.try(&.as_i).should be_nil
       row["tag"].as_s.should eq("plain-tag")
+      row["url"].as_s.should eq("http://acme.test/plain") # #1562
     end
   end
 
