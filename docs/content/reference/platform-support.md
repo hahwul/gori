@@ -45,6 +45,7 @@ Release binaries for Windows start with v0.8.0.
 | `gori update` | Windows will not overwrite a running `.exe`, so the old one is renamed aside and the new one takes its place; if the old one is still running, the leftover `.gori-update.old.*` file is removed by the next `gori update`. A Chocolatey install is never updated in place: `gori update` prints `choco upgrade gori -y`, to run from an elevated shell with gori closed. |
 | Installer | The curl installer is macOS and Linux only. Use [Chocolatey](/getting-started/installation/#chocolatey-windows) or the [direct download](/getting-started/installation/#windows). |
 | [Messages from gori](/guide/mcp/#messages-from-gori) | Claude Code's inbox socket is a Unix socket, so it is never found on Windows. Operator messages reach Claude Code with the next tool result or through `operator_messages` instead. |
+| Statusline command | `statusline.command` runs through `cmd.exe /d /s /c`, not `/bin/sh -c`, so a POSIX shell script needs a Windows-native equivalent (or an `sh` on `PATH`). |
 | Test coverage | The two legacy-schema migration spec files (`spec/store/*_autoincrement_migration_spec.cr`) are skipped, because on Windows they hang when run back to back in one process. Upgrading a project database from before those migrations is tested on POSIX only. |
 
 ## Not supported {#not-supported}

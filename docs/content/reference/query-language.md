@@ -175,6 +175,7 @@ dropped and reported, the same way a bad numeric value is, rather than searched 
 - `OR` matches either side. `NOT` and a `-` prefix both negate.
 - Parentheses group. Precedence is `NOT` then `AND` then `OR`.
 - A bare word (no `field:`) is free text over method, host, and target.
+- A bare word shaped like a comparison typed without its colon (`status>=400`, `host=api`) stays free text, so it usually matches nothing. The History and Sitemap empty states, `gori run history` and MCP `ql_explain` then name the colon form (`status:>=400`). A quoted or negated word is taken as intended.
 - A `field:` name that does not exist is not free text you meant to write: `gori run history`, `gori run sitemap` (and its `params`, `js` and `export` verbs) and `gori run probe` **refuse** it, name the nearest real field, and exit non-zero. `--lenient` searches the token as text instead (what every surface used to do silently: `methd:GET` matched nothing, which reads as an empty project). The TUI filter bar still accepts a half-typed name as you type it.
 
 ```text

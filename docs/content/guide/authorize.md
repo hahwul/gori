@@ -93,7 +93,7 @@ A run needs at least one identity besides the baseline, and all three surfaces r
 
 Each identity gets its **own connection**. That is deliberate and costs a handshake per trial: connection-oriented authentication (NTLM, Negotiate; ordinary on internal engagements) authenticates the *connection*, not the message, so a reused socket would serve an identity that dropped `Cookie` the baseline's content anyway and manufacture a bypass that does not exist.
 
-`Ctrl-X` stops. The stop is polled between requests *and* between identities, so it takes effect at the next send rather than after the five identities already queued for the request in flight. A request cut short mid-identity yields **no** verdict at all: a partial set of trials must never read as "enforced".
+`Ctrl-X` stops. The stop is polled between requests *and* between identities, so it takes effect at the next send rather than after the five identities already queued for the request in flight. A request cut short mid-identity yields **no** verdict at all: a partial set of trials must never read as "enforced". With [passive replay](#passive-replay) on, a stop also holds passive back: it stays paused until your next explicit `Ctrl-R`, or until you switch passive off and on with `p`.
 
 ## Reading a Verdict
 

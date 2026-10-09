@@ -208,7 +208,7 @@ Rewriter 룰과 같은 신뢰 수준입니다. gori가 훅을 스스로 만들�
 `--sections`로 지정한 `decoder` 체인도 마찬가지입니다. 훅도 다른 룰과 똑같이
 [프로필](/ko/reference/cli/#profiles)에 담겨 이동합니다. 그게 요점입니다. 팀이 같은 재서명 훅을
 표준으로 쓰는 것이야말로 훅이 존재하는 이유니까요. 훅 seam 바깥에도 명령을 실행하는 설정이 둘 있고
-같은 방식으로 이동합니다: `statusline.command`(`/bin/sh -c`로, 타이머마다)와 `editor.command`입니다.
+같은 방식으로 이동합니다: `statusline.command`(`/bin/sh -c`로, Windows에서는 `cmd.exe /d /s /c`로, 타이머마다)와 `editor.command`입니다.
 대신 양쪽 끝에서 말해줍니다. `gori settings export`는 무엇을 실었는지 stderr에 개수로 알리고,
 `gori settings import`는 명령을 담은 항목을 명령줄까지 하나씩 나열한 뒤 **`--allow-commands`를 주기
 전까지 쓰기를 거부합니다**. 남의 프로필을 import하는 것은 남의 스크립트를 실행하는 것과 같은 신뢰

@@ -458,7 +458,7 @@ TUI 맨 아래에 선택적으로 추가되는 행입니다 (Preferences → **G
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `enabled` | bool | `false` | statusline 행 표시 여부 |
-| `command` | string | `""` | `/bin/sh -c`로 실행되는 셸 명령. stdout의 첫 줄이 행이 됨. 비어 있으면 `enabled`여도 행 자체를 잡지 않음 |
+| `command` | string | `""` | `/bin/sh -c`(Windows에서는 `cmd.exe /d /s /c`)로 실행되는 셸 명령. stdout의 첫 줄이 행이 됨. 비어 있으면 `enabled`여도 행 자체를 잡지 않음 |
 | `interval` | integer | `3` | 실행 간격 초 (최소 `1`) |
 | `timeout` | integer | `10` | 한 번의 실행이 종료되기까지 허용되는 초 (최소 `1`). `interval`보다 커도 됨 |
 

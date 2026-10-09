@@ -183,7 +183,7 @@ ctx=$(cat); printf '%s · %s flows' "$(echo "$ctx" | jq -r .project)" "$(echo "$
 
 `timeout`은 `interval`과 의도적으로 분리되어 있습니다. 실행이 겹치지 않기 때문에 `interval`보다 느린 스크립트는 매번 죽는 대신 할 수 있는 한 빨리 갱신되고, 실행을 끝내는 것은 오직 `timeout`입니다.
 
-백그라운드로 일을 넘기는 명령(`curl … &`)은 스스로 뒷정리를 해야 합니다. gori는 자기가 띄운 `/bin/sh`만 죽일 수 있고, 그 셸이 fork한 것에는 손이 닿지 않습니다 — gori 자신의 프로세스 그룹을 공유하므로 그룹에 시그널을 보내면 gori까지 함께 죽습니다. 타임아웃된 실행에는 `SIGKILL` 전에 `SIGTERM`을 먼저 보내므로 `cmd & wait` 주위의 `trap … TERM`은 정리할 기회를 얻습니다. 더 간단한 답은 명령 자체에 한도를 거는 것입니다 (`curl --max-time 2`, `timeout 2 …`).
+백그라운드로 일을 넘기는 명령(`curl … &`)은 스스로 뒷정리를 해야 합니다. gori는 자기가 띄운 셸(`/bin/sh`, Windows에서는 `cmd.exe`)만 죽일 수 있고, 그 셸이 fork한 것에는 손이 닿지 않습니다 — gori 자신의 프로세스 그룹을 공유하므로 그룹에 시그널을 보내면 gori까지 함께 죽습니다. 타임아웃된 실행에는 `SIGKILL` 전에 `SIGTERM`을 먼저 보내므로 `cmd & wait` 주위의 `trap … TERM`은 정리할 기회를 얻습니다. 더 간단한 답은 명령 자체에 한도를 거는 것입니다 (`curl --max-time 2`, `timeout 2 …`).
 
 ## 명령을 실을 수 있는 다른 자리
 

@@ -183,7 +183,7 @@ Every one of these markers is drawn in the caution colour rather than in body te
 
 `timeout` is deliberately separate from `interval`. Because runs never overlap, a script slower than `interval` simply refreshes as fast as it can rather than being killed on every run; only `timeout` ends one.
 
-A command that backgrounds work (`curl … &`) must clean up after itself: gori kills the `/bin/sh` it started, and cannot reach anything that shell forked — it shares gori's own process group, so signalling the group would take gori down with it. A timed-out run is sent `SIGTERM` before `SIGKILL`, so a `trap … TERM` around `cmd & wait` gets to tidy up; the simpler answer is to bound the command itself (`curl --max-time 2`, `timeout 2 …`).
+A command that backgrounds work (`curl … &`) must clean up after itself: gori kills the shell it started (`/bin/sh`, or `cmd.exe` on Windows), and cannot reach anything that shell forked — it shares gori's own process group, so signalling the group would take gori down with it. A timed-out run is sent `SIGTERM` before `SIGKILL`, so a `trap … TERM` around `cmd & wait` gets to tidy up; the simpler answer is to bound the command itself (`curl --max-time 2`, `timeout 2 …`).
 
 ## Where else a command can run
 
