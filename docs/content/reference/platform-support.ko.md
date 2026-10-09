@@ -45,6 +45,7 @@ Windows 릴리스 바이너리는 v0.8.0부터 제공됩니다.
 | `gori update` | Windows는 실행 중인 `.exe`를 덮어쓰지 못하므로, 기존 파일을 옆으로 옮긴 뒤 새 파일을 그 자리에 둡니다. 기존 파일이 아직 실행 중이면 남은 `.gori-update.old.*` 파일은 다음 `gori update`가 지웁니다. Chocolatey로 설치했다면 직접 교체하지 않고 `choco upgrade gori -y`만 출력합니다. gori를 닫고 관리자 셸에서 실행하세요. |
 | 설치 스크립트 | curl 설치 스크립트는 macOS와 Linux 전용입니다. [Chocolatey](/ko/getting-started/installation/#chocolatey)나 [직접 다운로드](/ko/getting-started/installation/#windows)를 쓰세요. |
 | [gori가 보내는 메시지](/ko/guide/mcp/#messages-from-gori) | Claude Code의 인박스 소켓은 Unix 소켓이라 Windows에서는 찾지 못합니다. 운영자 메시지는 대신 다음 도구 결과나 `operator_messages`로 Claude Code에 전달됩니다. |
+| Statusline 명령 | `statusline.command`는 `/bin/sh -c`가 아니라 `cmd.exe /d /s /c`로 실행되므로, POSIX 셸 스크립트는 Windows용으로 바꿔야 합니다(또는 `PATH`에 `sh`가 있어야 합니다). |
 | 테스트 범위 | 레거시 스키마 마이그레이션 스펙 파일 두 개(`spec/store/*_autoincrement_migration_spec.cr`)는 Windows에서 한 프로세스로 연달아 돌리면 멈추기 때문에 건너뜁니다. 그 마이그레이션 이전에 만든 프로젝트 데이터베이스의 업그레이드는 POSIX에서만 검증됩니다. |
 
 ## 지원하지 않는 플랫폼 {#not-supported}

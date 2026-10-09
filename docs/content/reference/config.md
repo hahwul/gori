@@ -460,7 +460,7 @@ An opt-in extra row at the very bottom of the TUI (Preferences â†’ **General** â
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `enabled` | bool | `false` | Whether the statusline row is shown |
-| `command` | string | `""` | Shell command, run via `/bin/sh -c`. Its first line of stdout becomes the row. Blank means no row is reserved at all, even when `enabled` |
+| `command` | string | `""` | Shell command, run via `/bin/sh -c` (`cmd.exe /d /s /c` on Windows). Its first line of stdout becomes the row. Blank means no row is reserved at all, even when `enabled` |
 | `interval` | integer | `3` | Seconds between runs (minimum `1`) |
 | `timeout` | integer | `10` | Seconds one run may take before it is killed (minimum `1`). May exceed `interval` |
 
