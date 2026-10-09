@@ -72,19 +72,10 @@ module Gori::CLI::Run
     sse_event_text(e, 0)
   end
 
-  # `print_decoded_text` writes to STDOUT, so the fd is pointed at a tempfile for the call.
   def self.print_decoded_text_for_spec(detail : Store::FlowDetail) : String
-    path = File.tempname("gori-show-decoded", ".txt")
-    STDOUT.flush
-    saved = LibC.dup(STDOUT.fd)
-    File.open(path, "w") { |f| STDOUT.reopen(f) }
-    begin
-      print_decoded_text(detail, true, true)
-    ensure
-      STDOUT.flush
-      STDOUT.reopen(IO::FileDescriptor.new(saved))
-    end
-    File.read(path).tap { File.delete?(path) }
+    io = IO::Memory.new
+    print_decoded_text(detail, true, true, io: io)
+    io.to_s
   end
 end
 

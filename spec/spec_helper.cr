@@ -135,6 +135,7 @@ end
 # with or without the fix it pins: probe first and mark it pending rather than let it read as
 # coverage. The probe keeps its write end open across the block, or `cat` would see EOF.
 def with_unlockable_lock_file(path : String, file = __FILE__, line = __LINE__, &)
+  posix_only!("mkfifo", file, line)
   File.delete?(path)
   Process.run("mkfifo", [path]).success?.should be_true
   reader = Process.new("cat", [path], output: Process::Redirect::Close)
@@ -152,7 +153,7 @@ def with_unlockable_lock_file(path : String, file = __FILE__, line = __LINE__, &
     yield
   ensure
     probe.close rescue nil
-    reader.signal(:kill) rescue nil
+    reader.terminate(graceful: false) rescue nil
     reader.wait
   end
 end

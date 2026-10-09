@@ -1272,46 +1272,46 @@ module Gori
       # only the side(s) the `req`/`resp` flags include (so --request-only doesn't leak
       # a response-side token); the query is request-side, so it's gated under `req`.
       private def self.print_decoded_text(detail : Store::FlowDetail, req : Bool, resp : Bool,
-                                          ws_msgs : Array(Store::WsMessage) = [] of Store::WsMessage) : Nil
+                                          ws_msgs : Array(Store::WsMessage) = [] of Store::WsMessage, io : IO = STDOUT) : Nil
         tgt = req ? detail.row.target : ""
         rh, rb = req ? detail.request_head : nil, req ? detail.request_body : nil
         sh, sb = resp ? detail.response_head : nil, resp ? detail.response_body : nil
         if doc = Saml.from_flow(tgt, rh, rb, sh, sb)
-          puts ""
+          io.puts ""
           # The summary carries the decoded RelayState, and the JWT heading the token's `alg`:
           # captured text, escaped like the bodies under them.
-          puts CLI::Output.term_safe("=== SAML (#{Saml.summary(doc)}) ===")
-          puts CLI::Output.term_safe_multiline(Saml.pretty_xml(doc.xml).scrub)
+          io.puts CLI::Output.term_safe("=== SAML (#{Saml.summary(doc)}) ===")
+          io.puts CLI::Output.term_safe_multiline(Saml.pretty_xml(doc.xml).scrub)
         end
         jwts = Jwt.from_flow(tgt, rh, rb, sh, sb)
         unless jwts.empty?
-          puts ""
-          puts "=== JWT (#{jwts.size}) ==="
+          io.puts ""
+          io.puts "=== JWT (#{jwts.size}) ==="
           jwts.each do |f|
-            puts CLI::Output.term_safe("▸ #{f.location}#{(b = f.brief) ? " · #{b}" : ""}")
-            puts CLI::Output.term_safe_multiline(f.decoded.scrub)
+            io.puts CLI::Output.term_safe("▸ #{f.location}#{(b = f.brief) ? " · #{b}" : ""}")
+            io.puts CLI::Output.term_safe_multiline(f.decoded.scrub)
           end
         end
         if op = Graphql.from_flow(tgt, rh, rb)
-          puts ""
+          io.puts ""
           # The parse-failure heading also names the capture cap when that is what cut the
           # body — `detail` knows it and `Graphql` (which sees only bytes) cannot.
           if note = op.note
             capped = detail.request_body_truncated? ? "; body truncated at the capture cap" : ""
-            puts CLI::Output.term_safe("=== GRAPHQL (parse failed: #{note}#{capped}) ===")
+            io.puts CLI::Output.term_safe("=== GRAPHQL (parse failed: #{note}#{capped}) ===")
           else
-            puts "=== GRAPHQL ==="
+            io.puts "=== GRAPHQL ==="
           end
-          puts CLI::Output.term_safe_multiline(Graphql.display(op).scrub)
+          io.puts CLI::Output.term_safe_multiline(Graphql.display(op).scrub)
         end
         # A subscription's document travels in a FRAME, not in a body — so the section that
         # names the flow's GraphQL has to be fed from the transcript for a 101 flow, or a
         # WebSocket carrying GraphQL prints exactly what one carrying none prints.
         ws_ops = GraphqlWs.from_messages(ws_msgs)
         unless ws_ops.empty?
-          puts ""
-          puts CLI::Output.term_safe("=== GRAPHQL over WEBSOCKET (#{GraphqlWs.summary(ws_ops)}) ===")
-          puts CLI::Output.term_safe_multiline(GraphqlWs.display(ws_ops).scrub)
+          io.puts ""
+          io.puts CLI::Output.term_safe("=== GRAPHQL over WEBSOCKET (#{GraphqlWs.summary(ws_ops)}) ===")
+          io.puts CLI::Output.term_safe_multiline(GraphqlWs.display(ws_ops).scrub)
         end
         # …and every other real-time framing the transcript carries (Socket.IO / SignalR /
         # STOMP / SockJS / Action Cable). Same reason, same source: the envelope is in the
@@ -1320,14 +1320,14 @@ module Gori
         # included — `--response-only` still decodes, it just decodes without the hint.
         ws_frames = WsProto.from_messages(ws_msgs, WsProto.subprotocols(rh, sh))
         unless ws_frames.empty?
-          puts ""
-          puts CLI::Output.term_safe("=== WEBSOCKET PROTOCOL (#{WsProto.summary(ws_frames)}) ===")
-          puts CLI::Output.term_safe_multiline(WsProto.display(ws_frames).scrub)
+          io.puts ""
+          io.puts CLI::Output.term_safe("=== WEBSOCKET PROTOCOL (#{WsProto.summary(ws_frames)}) ===")
+          io.puts CLI::Output.term_safe_multiline(WsProto.display(ws_frames).scrub)
         end
         if fields = FormData.from_flow(tgt, rh, rb)
-          puts ""
-          puts "=== PARAMS (#{fields.size}) ==="
-          fields.each { |f| puts CLI::Output.term_safe_multiline("#{f.source == :query ? "?" : " "} #{f.name} = #{(n = f.note) ? "(#{n})" : f.value}".scrub) }
+          io.puts ""
+          io.puts "=== PARAMS (#{fields.size}) ==="
+          fields.each { |f| io.puts CLI::Output.term_safe_multiline("#{f.source == :query ? "?" : " "} #{f.name} = #{(n = f.note) ? "(#{n})" : f.value}".scrub) }
         end
       end
 
