@@ -54,7 +54,7 @@ module Gori
                      "  gori run send https://api.example.com/v1/items/42 -H 'Accept: application/json' -b 'sid=abc'\n" \
                      "  gori run send --url https://api.example.com/v1/items -d '{\"a\":1}' -H 'Content-Type: application/json' --record-history\n" \
                      "  gori run send --url https://api.example.com --request-file req.http --headers-only\n"
-          p.on("--project=NAME", "Project whose network settings, scope and History to use (default: most-recently-active)") { |v| project_name = v }
+          p.on("--project=NAME", "Project whose network settings, scope and History to use (#{DEFAULT_PROJECT_HELP})") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file") { |v| db_path = v }
           p.on("--url=URL", "Absolute URL: scheme://host[:port]/path?query. With --request-*, only the origin is used") { |v| url = v }
           p.on("-XMETHOD", "--method=METHOD", "HTTP method (default GET, or POST when there is a body — as curl)") { |v| method = v }

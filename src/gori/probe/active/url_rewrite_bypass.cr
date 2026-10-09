@@ -38,7 +38,7 @@ module Gori
       class UrlRewriteBypass < Rule
         def info : RuleInfo
           RuleInfo.new("url_rewrite_bypass", "Access-control bypass (URL-rewrite headers)",
-            "Requests / with X-Original-URL/X-Rewrite-URL naming a denied path and flags a served 2xx.",
+            "For a path that answered 401/403/404, requests / with X-Original-URL/X-Rewrite-URL naming it and flags a served 2xx.",
             Category::ACTIVE)
         end
 

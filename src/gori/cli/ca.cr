@@ -94,7 +94,7 @@ module Gori::CLI
     ca_dir = Paths.default_ca_dir
     pem = false
     parser = OptionParser.new do |p|
-      p.banner = "Usage: gori ca [options]\n       gori ca regenerate [--yes] [--ca-dir=DIR]"
+      p.banner = "Usage: gori ca [options]\n       gori ca regenerate [--yes] [--ca-dir=DIR]\n       gori ca import --cert FILE --key FILE [--yes] [--ca-dir=DIR]"
       p.on("--ca-dir=DIR", "Directory for the root CA") { |v| ca_dir = v }
       p.on("--pem", "Print the certificate PEM to stdout instead of the path") { pem = true }
       p.on("-h", "--help", "Show this help") { print_ca_usage(STDOUT); exit 0 }

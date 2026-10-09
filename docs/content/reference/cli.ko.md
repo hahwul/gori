@@ -897,7 +897,7 @@ gori run import --postman api.postman_collection.json --db ./assessment.db --for
 | `--burp=PATH` | Burp Suite 항목 익스포트(XML). 요청**과** 응답, 바이트 단위 그대로 |
 | `--wsdl=PATH` | WSDL 1.1 서비스 설명서(XML). 오퍼레이션마다 SOAP 요청 템플릿 하나 |
 | `--curl=PATH` | curl 명령. 요청마다 플로우 하나이며 `-`는 stdin을 읽음(`pbpaste \| gori run import --curl -`). 무시한 전송 플래그는 stderr에 밝힘(JSON에서는 `notes`) |
-| `--project=NAME` | 임포트할 프로젝트(기본값: 가장 최근에 사용한 프로젝트) |
+| `--project=NAME` | 임포트할 프로젝트(기본값: `GORI_PROJECT`나 `project switch`로 정한 프로젝트, 없으면 가장 최근에 활성화한 프로젝트) |
 | `--db=PATH` | 임포트할 SQLite db 파일을 직접 지정(없으면 생성) |
 | `--format` | `text`(기본) 또는 `json` |
 
@@ -1017,7 +1017,7 @@ gori run oast release 7                                  # 서버 측 등록 해
 
 | Option | Description |
 |--------|-------------|
-| `--project=NAME` · `--db=PATH` | 어느 프로젝트의 세션인지(기본값: 가장 최근에 사용한 프로젝트) |
+| `--project=NAME` · `--db=PATH` | 어느 프로젝트의 세션인지(기본값: `GORI_PROJECT`나 `project switch`로 정한 프로젝트, 없으면 가장 최근에 활성화한 프로젝트) |
 | `--format=FMT` | `list`에서: `text`(기본) 또는 `json` |
 | `--interval=SEC` | `resume`에서: 폴링 간격(기본값 5) |
 | `--once` | `resume`에서: 한 번만 폴링하고 종료 |

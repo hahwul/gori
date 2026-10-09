@@ -605,7 +605,7 @@ module Gori
                      "  aggressive  active with raised caps, wider bypass sets, and UNSAFE\n" \
                      "              methods (POST/PUT/PATCH/DELETE) — authorized targets only\n\n" \
                      "This arms the AUTOMATIC pipeline for live captures, not just one scan."
-          p.on("--project=NAME", "Project to read/write (default: most-recently-active)") { |v| project_name = v }
+          p.on("--project=NAME", "Project to read/write (#{DEFAULT_PROJECT_HELP})") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file") { |v| db_path = v }
         end
 

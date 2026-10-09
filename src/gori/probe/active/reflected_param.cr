@@ -50,7 +50,7 @@ module Gori
 
         def info : RuleInfo
           RuleInfo.new("reflected_param", "Reflected parameter",
-            "Sends a canary in query parameters and flags unencoded reflection (potential XSS).",
+            "Sends a canary in query, form and JSON parameters and flags unencoded reflection (potential XSS).",
             Category::ACTIVE)
         end
 

@@ -252,7 +252,8 @@ module Gori
         SUBCOMMANDS.each { |name, desc| puts "  #{name.ljust(SUBCMD_COL_W - 1)} #{desc}" }
         puts ""
         puts "Most read subcommands accept --project NAME or --db PATH; with neither they"
-        puts "use the most-recently-active project. See 'gori run <subcommand> --help'."
+        puts "use $#{DEFAULT_PROJECT_ENV}, else the `project switch` pin, else the most-recently-active"
+        puts "project. See 'gori run <subcommand> --help'."
       end
 
       # --- shared helpers ----------------------------------------------------
@@ -1884,7 +1885,7 @@ module Gori
 
       # Register the pair, worded for what the command does to the project (`read`, `update`).
       private def self.project_options(p : OptionParser, proj : ProjectFlags, verb : String) : Nil
-        p.on("--project=NAME", "Project to #{verb} (default: most-recently-active)") { |v| proj.name = v }
+        p.on("--project=NAME", "Project to #{verb} (#{DEFAULT_PROJECT_HELP})") { |v| proj.name = v }
         p.on("--db=PATH", "Explicit SQLite db file to #{verb}") { |v| proj.db = v }
       end
 

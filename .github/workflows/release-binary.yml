@@ -146,7 +146,7 @@ jobs:
         # first, so a missing alias costs nothing.
         continue-on-error: true
         # Copies of each asset under a name with no version in it, so
-        # https://github.com/hahwul/gori/releases/download/latest/<alias> resolves
+        # https://github.com/hahwul/gori/releases/latest/download/<alias> resolves
         # without first asking api.github.com for the tag — that API is capped at
         # 60 req/h per IP unauthenticated, and a 403 there used to break install.sh
         # outright. install.sh and `gori update` fall back to these.

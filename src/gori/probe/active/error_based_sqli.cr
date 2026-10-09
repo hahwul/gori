@@ -97,7 +97,7 @@ module Gori
 
         def info : RuleInfo
           RuleInfo.new("sqli_error_based", "Error-based SQL injection",
-            "Appends a SQL-syntax-breaking payload to each query parameter; flags a parameter where a " \
+            "Appends a SQL-syntax-breaking payload to each query, form or JSON parameter; flags a parameter where a " \
             "database-error signature appears in the probe response but not in the clean baseline.",
             Category::ACTIVE)
         end

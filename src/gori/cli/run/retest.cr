@@ -323,7 +323,7 @@ module Gori
                      "Once gori REFUSES a send (scope, Sandbox, an exclude rule) the rest of the run\n" \
                      "is skipped — cleanup steps included, unless --allow-cleanup says otherwise.\n\n" \
                      "Exit code: 0 when the verdict is `pass`, 1 otherwise."
-          p.on("--project=NAME", "Project to run in (default: most-recently-active)") { |v| project_name = v }
+          p.on("--project=NAME", "Project to run in (#{DEFAULT_PROJECT_HELP})") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file") { |v| db_path = v }
           p.on("--issue=N", "Issue id (required)") { |v| issue_id = parse_id(v, "gori run retest", "--issue") }
           p.on("-y", "--yes", "Confirm a batch containing state-changing methods") { yes = true }

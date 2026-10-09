@@ -4,6 +4,7 @@ module Gori
     module Run
       @[Subcommand("rewriter", help: [
         {"rewriter", "Manage Match & Replace rules (list, add, rm, enable/disable, preview, extract, bindings)"},
+        {"rewriter preset", "Built-in rule presets: list them, or add one by name"},
       ])]
       private def self.cmd_rewriter(args : Array(String)) : Nil
         case sub = args.first?
