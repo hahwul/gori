@@ -651,7 +651,7 @@ Saved Param Miner defaults, written only once you save the mine options:
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `locations` | array | `[]` | Where to inject: `query`, `form`, `multipart`, `json`, `headers`, `cookies`. Empty means auto-detect per request |
+| `locations` | array | `[]` | Where to inject: `query`, `form`, `multipart`, `json`, `headers`, `cookies`. The locations checked when the Mine overlay opens, replacing its per-request auto-detection; one the request does not have is skipped. Until the section is saved, the overlay auto-detects per request |
 | `concurrency` | integer | `10` | Parallel requests |
 | `notify` | string | `"when-found"` | `"when-found"`, `"always"`, or `"off"` |
 | `keep_alive` | bool | `true` | Reuse upstream connections across requests (the **Keep-alive** toggle in the Mine overlay). A file written before the key existed reads as `true` |

@@ -279,7 +279,7 @@ Repeater/Fuzzer 편집기의 Mark word와 JWT·Cookie의 렌즈 토글(지금은
 | `t` · `T` · `N` | 마크 · 전부 마크 · 마크 해제 (규칙 목록에서 `t`는 켜기/끄기) |
 | `o` | 선택한 행 열기 (`↵`의 별칭) |
 | `a` · `e` | 추가 · 편집. 대부분의 탭에서 `a`는 이슈 등록도 맡습니다 |
-| `r` · `s` | 실행·전송·다시 읽기 (`Ctrl-R`의 메뉴 대응) · 중지 |
+| `r` · `s` | 실행·전송·다시 읽기 (`Ctrl-R`의 메뉴 대응) · 중지, A ⇄ B 맞바꾸기, 스코프 렌즈, 이슈 심각도 지정 |
 | `E` | 내보내기 |
 | `K` | 워크벤치 입력 비우기 (먼저 확인을 묻습니다) |
 | `I` | `§` 마커 삽입 |
@@ -346,7 +346,7 @@ Rewriter와 Colormarker의 **Enable/disable everywhere**가 `T`인 이유가 이
 | `d` · `e` | 응답 diff · envelope/decoded | `c` | Content-Length 자동 계산 |
 | `s` · `f` · `c` | 정적 자산 · follow · Columns… | `w` | Sec-WebSocket-Key 재사용 |
 | `g` · `q` · `J` | id 접기 · 쿼리 접기 · JS 참조 | `r` · `f` | gRPC reframe · gRPC 필드 편집기 |
-| `m` · `v` | Fuzzer: 매치만 · 분포 | `t` | TLS 지문 |
+| `m` · `v` · `G` | Fuzzer: 매치만 · 분포 · 응답 모양별 묶기 | `t` | TLS 지문 |
 | `t` · `z` | Comparer: 요청/응답 · 변경 없는 구간 접기 | | |
 | `a` | 모두 보기: Probe의 닫힌 이슈, Params 탭의 표준 헤더 | | |
 
@@ -437,7 +437,7 @@ gori의 텍스트 패널은 **모달**입니다. `Esc`와 `i`로 READ와 INSERT�
 
 `/`도 마찬가지입니다. `SUB-TABS` 글자이면서 동시에 `vim-ish`의 찾기 키지만, 둘은 다른 계층입니다 — 메뉴 글자는 카드가 떠 있는 동안 스트립에 작용하고, 키 조합은 지금 서 있는 텍스트 패널을 검색합니다. 의도적으로 겹치는 패널 키 하나는 Repeater의 읽기 전용 응답에서 쓰는 `u`입니다. 표시 전용 JSON 유니코드 디코딩을 켜고 끕니다. 요청 편집기는 여전히 Editor 스코프에 있어 `u`가 실행 취소입니다. `validate_chords!`는 부팅 시 같은 스코프 안의 충돌을 검사하며, 이 교차 스코프 예외는 `spec/verb/keyset_spec.cr`에 고정했습니다.
 
-몇몇 메뉴 글자는 편집기 패널에서 `vim-ish` 모션이기도 합니다. Auto-mark `a`(append), Repeater·Cookie·이슈 상세의 `g`(맨 위), Send race `⇧G`(맨 아래), Set CVSS `V`(줄 선택), Notes 스트립의 `/`(찾기), Close sub-tab `w`(다음 단어), Insert marker `⇧I`와 Probe active `⇧A`(줄 끝·처음에서 입력 시작)입니다. 그 앞의 `Space`를 빠뜨리면 키는 vim이 하는 대로 동작하며, 이동하거나 선택하거나 입력을 시작할 뿐 보내거나 쓰거나 지우지 않습니다. 편집 글자가 두 키셋 모두에서 의도한 또 하나의 겹침입니다. 텍스트 에디터 안에서 `d`, `y`, `p`는 에디터의 글자이므로, 메뉴의 `d`(Duplicate, 이슈 노트에서는 Delete issue)나 `y`(Copy) 앞의 `Space`를 빠뜨리면 그 패널의 텍스트를 편집하거나 복사하고, 그렇다고 알려 주며, 실행 취소로 되돌릴 수 있습니다. 패널에서 그 밖의 동작에 걸리는 메뉴 글자는 허용하지 않습니다.
+몇몇 메뉴 글자는 편집기 패널에서 `vim-ish` 모션이기도 합니다. Auto-mark `a`(append), Repeater·Cookie·이슈 상세의 `g`(맨 위), Send race `⇧G`(맨 아래), Set CVSS `V`(줄 선택), Insert marker `⇧I`와 Probe active `⇧A`(줄 끝·처음에서 입력 시작)입니다. 그 앞의 `Space`를 빠뜨리면 키는 vim이 하는 대로 동작하며, 이동하거나 선택하거나 입력을 시작할 뿐 보내거나 쓰거나 지우지 않습니다. 편집 글자가 두 키셋 모두에서 의도한 또 하나의 겹침입니다. 텍스트 에디터 안에서 `d`, `y`, `p`는 에디터의 글자이므로, 메뉴의 `d`(이슈 노트의 Delete issue)나 `y`(Copy) 앞의 `Space`를 빠뜨리면 그 패널의 텍스트를 편집하거나 복사하고, 그렇다고 알려 주며, 실행 취소로 되돌릴 수 있습니다. 패널에서 그 밖의 동작에 걸리는 메뉴 글자는 허용하지 않습니다.
 
 ### 무엇을 고르든 그대로인 것 {#what-still-works-whatever-you-pick}
 

@@ -68,7 +68,7 @@ gori run probe --persist             # also write the findings into the triage l
 
 ## Param Miner {#param-miner}
 
-**Miner**는 서버가 받아들이지만 드러내지 않는 파라미터를 발견합니다. 플로우를 지정하면 쿼리 문자열, 폼 본문, multipart/form-data, JSON(중첩 객체와 배열 루트 포함), 헤더, 쿠키 등 여러 위치에서 후보 이름을 프로브하고, 추측을 효율적으로 버킷으로 묶어 응답을 변화시키는 것들을 보고합니다. multipart도 대상이지만 기본은 꺼져 있습니다(캡처된 파일 파트가 요청마다 다시 전송되기 때문). `--locations multipart` 또는 해당 체크박스로 켜세요. `--wordlist`(MCP `wordlist`)는 파일이거나 [wordlist 카탈로그](/ko/guide/repeater-and-fuzzer/#wordlist-catalog)에 있는 목록의 이름입니다. 이미 아는 이름은 먼저 시험합니다. `--name`(반복 가능, MCP `mine_start`의 `names`)은 워드리스트보다 앞서 그 이름을 시험하고, Target → Params 서브탭의 `m`(**Mine parameters**)은 같은 호스트의 다른 엔드포인트에서 본 이름부터 시험하며 선택한 엔드포인트를 마이닝합니다.
+**Miner**는 서버가 받아들이지만 드러내지 않는 파라미터를 발견합니다. 플로우를 지정하면 쿼리 문자열, 폼 본문, multipart/form-data, JSON(중첩 객체와 배열 루트 포함), 헤더, 쿠키 등 여러 위치에서 후보 이름을 프로브하고, 추측을 효율적으로 버킷으로 묶어 응답을 변화시키는 것들을 보고합니다. multipart도 대상이지만 기본은 꺼져 있습니다(캡처된 파일 파트가 요청마다 다시 전송되기 때문). `--locations multipart` 또는 해당 체크박스로 켜세요. `--wordlist`(MCP `wordlist`)는 파일이거나 [wordlist 카탈로그](/ko/guide/repeater-and-fuzzer/#wordlist-catalog)에 있는 목록의 이름입니다. 이미 아는 이름은 먼저 시험합니다. `--name`(반복 가능, MCP `mine_start`의 `names`)은 워드리스트보다 앞서 그 이름을 시험하고, Target → Params 서브탭의 `m`(**Mine parameters**)은 같은 오리진의 다른 엔드포인트에서 본 이름부터 시험하며 선택한 엔드포인트를 마이닝합니다.
 
 ```bash
 gori run mine <flow-id> \
@@ -157,7 +157,7 @@ History와 같은 방식으로 표시합니다. `t`를 누르면 커서의 이�
 
 분석을 거드는 도구가 두 가지 더 있습니다.
 
-- **Notes**: 자유 형식의 프로젝트별 마크다운 문서(프로젝트당 여러 노트). Notes 탭에서 노트를 생성, 편집, 닫을 수 있고, `gori run notes` / `gori run notes --all`로 헤드리스에서 목록을 보거나 덤프할 수 있습니다. 에이전트는 MCP(`list_notes`, `get_note`, `create_note`, …)로 노트를 관리할 수 있습니다.
+- **Notes**: 자유 형식의 프로젝트별 마크다운 문서(프로젝트당 여러 노트). Notes 탭에서 노트를 생성, 편집, 닫을 수 있고, 헤드리스에서는 `gori run notes` / `gori run notes --all`로 목록을 보거나 덤프하고, `gori run notes create` / `update` / `append` / `delete`로 작성할 수 있습니다. 에이전트는 MCP(`list_notes`, `get_note`, `create_note`, …)로 노트를 관리할 수 있습니다.
 - **Comparer**: 두 메시지를 슬롯 A와 B에 불러와 나란히 diff합니다. 요청 간 응답이 어떻게 바뀌었는지 파악하는 데 유용합니다. 이 탭은 기본적으로 탭 바 밖에 있으니 **`0`**을 누르고 "comparer"를 입력하거나, 플로우를 보내 여세요.
 
   슬롯은 요청과 응답을 쥔 곳이면 어디서든 채울 수 있습니다. History, Sitemap, Repeater 탭(마지막 전송), Fuzzer 결과 행에서 `Space` `>` `c`(**Send flow to…** → **Send to Comparer**), 또는 Comparer 탭에서 `a` / `b`로 캡처된 플로우를 직접 고르면 됩니다. 이 피커는 History·Sitemap과 마찬가지로 활성 Scope 렌즈를 따르므로, 스코프 밖 플로우를 고르려면 렌즈를 꺼야 합니다. Repeater 전송과 퍼즈 결과는 캡처를 남기지 않으므로, 그 둘이 diff로 들어올 수 있는 경로는 이것뿐입니다.

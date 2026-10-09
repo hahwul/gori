@@ -17,7 +17,7 @@ Requires [Crystal](https://crystal-lang.org) `>= 1.21.0` and the native librarie
 for HTTP body decode:
 
 - macOS: `brew install crystal brotli zstd sqlite`
-- Debian/Ubuntu: `apt install crystal libbrotli-dev libzstd-dev libsqlite3-dev`
+- Debian/Ubuntu: `apt install crystal pkg-config libbrotli-dev libzstd-dev libsqlite3-dev`
 - Nix: `nix develop` sets all of it up, pinned to the compiler CI builds with
 
 Then:
@@ -33,9 +33,14 @@ work via stdlib) with `crystal build -Dwithout_native_codecs`.
 
 ## Before you open a PR
 
-- **`just check`** must pass — `crystal tool format --check` and ameba. Format only the
+- **`crystal tool format --check src spec bench scripts`** must pass, and no file you
+  changed may gain ameba findings (`just lint-gate`, the diff gate CI runs; a full ameba
+  run carries a pre-existing backlog). `just check` runs the format check, the
+  `shards.nix` drift check and the full ameba. Format only the
   files you changed (`crystal tool format <files>`); never run a whole-tree format (it
   reformats dozens of unrelated files due to Crystal version drift).
+- CI also type-checks `bench/` and `scripts/`: run `just benchmark-check` and
+  `just scripts-check`.
 - **`just test`** must be green. Add or update specs under `spec/` mirroring the source
   you touched; `just test-<area>` runs a single subdir while iterating.
 - Never build or benchmark with `-Dpreview_mt` — gori assumes the single-threaded fiber

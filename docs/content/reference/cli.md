@@ -95,7 +95,7 @@ gori run <subcommand> [verb] [options]
 | `issues` · `create` · `update` · `delete` | List / export issues, or write and remove issues (`delete` needs `--yes`) |
 | `links` · `add` · `delete` | Evidence pointers from an issue or note to a flow, Repeater session, or job |
 | `evidence` | Freeze, list, show, link, unlink, or delete frozen request+response copies |
-| `retest` · `add` · `run` · `runs` | An issue's retest steps: list and add them, run the retest (exit `1` unless it passes), and list its run history |
+| `retest` · `add` · `update` · `remove` · `move` · `clear` · `run` · `runs` · `show` · `forget` | An issue's retest steps: list, add, edit, reorder and remove them, run the retest (exit `1` unless it passes), and list its run history |
 | `redact` | Manage safe-export redaction profiles (`profiles`, `use`, `default`, `set`, `rm`) |
 | `rewriter` · `add` · `rm` · `enable` · `disable` · `preview` | Manage Match & Replace rules |
 | `rewriter preset list` · `add` | List the response-modification presets, and install one as ordinary Match & Replace rules |
@@ -106,7 +106,7 @@ gori run <subcommand> [verb] [options]
 | `grpc [schema]` · `reflect` · `forget` | The gRPC `.proto` lens: show what is loaded, fetch descriptors by server reflection, drop a cached target |
 | `project [list]` | List known projects |
 | `project create <name>` | Create (or reopen) a project by name |
-| `project switch <name>` · `--clear` | Pin the project every `--project`-less command reads |
+| `project switch <name>` (`use`) · `--clear` | Pin the project every `--project`-less command reads |
 | `project export <name>` | Save a compact, WAL-safe `.gori` project archive |
 | `project import <archive>` | Add a project archive as a new project |
 | `project delete <name>` | Delete a project and everything captured in it (`--yes` to confirm) |
@@ -124,8 +124,8 @@ Write subcommands share that project's WAL database with the TUI and MCP. They s
 the Store writer and can run while the TUI is open, but a capture commit can temporarily own the
 SQLite writer slot. A short-lived subcommand gives its SQLite open/writer waits a one-second budget; if the
 slot is still busy, the required write exits non-zero and says the project is locked by another gori, with the workaround (retry, or read it with a read-only subcommand).
-A subcommand that keeps the project open for a whole run (`discover`, `fuzz`, `import`, `probe`, `retest run`,
-`oast listen`/`resume`, `intercept`) keeps the standard five-second wait instead. A
+A subcommand that keeps the project open for a whole run (`discover`, `fuzz`, `import`, `mine` with a `--macro`, `probe`, `retest run`,
+`oast listen`/`resume`, `intercept`, `sitemap js --scan`) keeps the standard five-second wait instead. A
 repeater send also fails instead of claiming success when its network response could not be saved,
 so a script can distinguish a completed write from a response that needs attention.
 
@@ -149,6 +149,7 @@ Captured text in `text` output shows control and invisible characters by name (`
 | `0` | Success |
 | `1` | Error: a failed send, an unreadable project, a mutation that could not be applied, or a `fuzz` / `mine` / `discover` / `sequence` / `authorize` / `cache-deception` run in which no request got an answer (a dead or refusing target is not a clean "nothing found") |
 | `3` | A verdict gate tripped: `run fuzz --fail-if-no-matches` completed but nothing matched (and no `--stop-on` / `--stop-after-matches` condition was met), or `run probe --fail-on=LEVEL` reported an issue at or above LEVEL |
+| `126` / `127` | `run shell -- CMD` could not run CMD (`126`) or did not find it (`127`). Once CMD runs, the exit status is its own |
 | `130` | Interrupted by SIGINT/SIGTERM. `capture` (which exits `0` when `--for` or `--max` ends it), `fuzz`, `mine`, `discover`, `sequence`, `authorize`, `cache-deception` and `repeater minimize` flush what they collected first, then exit `130` so a scripted `&& next-step` does not treat a truncated run as a finished one |
 
 Without `--fail-if-no-matches`, a fuzz run that matched nothing *and* errored on every send still exits `1`, so "no findings" stays distinguishable from "never reached the target". With the flag, `3` wins. A run whose stop condition was met is exempt from both rules: a send that timed out can meet `--stop-on 'time:>=5000'` while it stays an unmatched error row, and that is the result the run was looking for.
@@ -813,7 +814,7 @@ gori run probe mode passive                      # off | passive | active | aggr
 | `issues` | `-a`/`--all` (include dismissed / confirmed / resolved), `--severity`, `--category`, `--host` |
 | `dismiss <id>` | With an id, toggles that finding dismissed ⇄ open; `--code=CODE` / `--host=HOST` dismiss every open finding sharing it. The code is the finding's (the `probe issues` column, such as `missing_hsts`), not its rule id, and must match exactly. A dismiss the project could not write exits `1` and leaves the finding unchanged |
 | `promote <id>` | Promote a finding to a human-confirmed Issue |
-| `delete <id>` | Or `--all --yes` |
+| `delete <id>` (`rm`) | Or `--all --yes` |
 | `rules [list\|enable\|disable\|add\|delete]` | `list` takes `--kind=passive\|active\|custom`; `enable`/`disable`/`delete` take a `<rule-id>` from that list (the built-ins are in [Probe rules](/reference/probe-rules/)); `add` takes `-t`/`--title` (required), `-p`/`--pattern` (required), `--description`, `--side` (`request`\|`response`, default `response`), `--region` (`whole`\|`header`\|`body`, default `body`), `--regex`, `--exec` (run `--pattern` as a [process hook](/guide/scripting/#process-hooks): exit 0 raises the finding, stdout is the evidence), `-s`/`--severity` (default `info`) |
 | `mode [off\|passive\|active\|aggressive]` | Print the project's scan mode, or set it |
 
@@ -865,7 +866,7 @@ gori run wordlist delete api-v2-params.txt --yes
 | ------ | ------------- |
 | `wordlist` · `list` (`ls`) | Names, sizes and modified times. Never prints a value. `--format text` \| `json` |
 | `show <name>` | Path, size and a line count (over at most 32 MiB; `more than N` when the list is longer). `--head=N` also prints the first N lines (at most 1000): values, which may be sensitive |
-| `save <name>` | Save a list from exactly one source: `--from=FILE` (`-` reads stdin), one or more `--value=V`, a list piped on stdin, or `--payload-from='<QL> <projection>'` with `--project`/`--db` (values read from that project's captured data, with the same `--payload-from-*` policy as `fuzz`; a value with a line break is left out and counted). Bytes are kept as given, so a blank or `#` line stays a line; a `--value` cannot hold a line break. Atomic and owner-only; refuses an existing name unless `--overwrite` |
+| `save <name>` (`add`) | Save a list from exactly one source: `--from=FILE` (`-` reads stdin), one or more `--value=V`, a list piped on stdin, or `--payload-from='<QL> <projection>'` with `--project`/`--db` (values read from that project's captured data, with the same `--payload-from-*` policy as `fuzz`; a value with a line break is left out and counted). Bytes are kept as given, so a blank or `#` line stays a line; a `--value` cannot hold a line break. Atomic and owner-only; refuses an existing name unless `--overwrite` |
 | `rename <old> <new>` (`mv`) | Rename a list; refuses an existing `<new>` unless `--overwrite` |
 | `delete <name>` (`rm`) | Delete a list (`--yes` is the confirmation; there is no prompt). A symlink is removed, never the file it names |
 
@@ -1150,7 +1151,7 @@ report-generator | gori run issues update 7 --status confirmed --notes-stdin
 | `--include-sensitive` | Emit `Authorization` / `Cookie` / `Set-Cookie` / `Proxy-Authorization` / API-key values in `sarif`'s `webRequest`/`webResponse` headers instead of `[REDACTED]`. Inert in the other formats, which say so on STDERR |
 | `create` | `-t`/`--title` (required), `--cvss` (score or vector; auto-derives severity), `-s`/`--severity` (`info`\|`low`\|`medium`\|`high`\|`critical`), `--host`, `--flow=ID`, `-n`/`--notes`, `--notes-file=FILE`, `--notes-stdin` |
 | `update <id>` | `-t`/`--title`, `--cvss` (new score/vector; empty to clear), `-s`/`--severity`, `-n`/`--notes` (empty to clear), `--notes-file=FILE`, `--notes-stdin`, `--status` (`open`\|`confirmed`\|`false-positive`\|`resolved`) |
-| `delete <id>` | Delete the issue and its evidence links. Requires `-y`/`--yes`. To keep it in the report but mark it closed, use `update <id> --status=resolved` instead |
+| `delete <id>` (`rm`) | Delete the issue and its evidence links. Requires `-y`/`--yes`. To keep it in the report but mark it closed, use `update <id> --status=resolved` instead |
 
 `--format sarif` writes a [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) log, the format GitHub code scanning, DefectDojo and Azure DevOps ingest. Each issue becomes one result: its severity maps to a SARIF `level` (with `rank` and the rule's `security-severity` preserving the full five-way scale), a `false-positive` or `resolved` triage status becomes a `suppression` so a dismissed finding does not reappear as open, and a linked flow rides along as `webRequest`/`webResponse` with real headers and (decoded, 64 KiB-capped) bodies.
 
@@ -1257,6 +1258,8 @@ gori run retest add --issue=7 --repeater=6 --role=variant  --assert=status:403
 gori run retest --issue=7                                                      # the plan, with what each step will send
 gori run retest move 9 --to=1                                                  # reorder (ids from --format=json)
 gori run retest update 9 --role=control --assert=body:same
+gori run retest remove 9                                                       # drop one step (`rm` is accepted)
+gori run retest clear --issue=7 --yes                                          # delete every step
 gori run retest run --issue=7                                                  # exit 0 only on `pass`
 gori run retest runs --issue=7                                                 # the bounded run history
 gori run retest show 3                                                         # one run's result table
@@ -1625,7 +1628,7 @@ gori run project scope disable
 | (default) | List rules; `--format` is `text` or `json` |
 | `add` | `--kind=include\|exclude` (default `include`), `--type=host\|string\|regex` (default `host`), `--pattern=…` (required). Prints the new rule's id; `--format json` prints the rule as the listing does (`id`, `kind`, `type`, `pattern`) |
 | `update <rule-id>` (`edit`) | Change a rule's `--kind` / `--type` / `--pattern`; a field you omit keeps its value |
-| `delete <rule-id>` | Remove a rule by id |
+| `delete <rule-id>` (`rm`) | Remove a rule by id |
 | `enable` / `disable` | Toggle whether scope filtering is applied |
 
 The listing prints a second line for the other thing the rules do: `Active-send gate: ON (N rules)` whenever a rule exists, **enabled or not**, because every active send (`send`, `repeater`, `fuzz`, `mine`, `discover`, MCP) refuses a target the rules leave out of scope unless `--allow-unscoped`. `--format json` carries it as `active_send_gate`. With no rules, `gori run` sends are unrestricted and MCP refuses every send.
@@ -1665,7 +1668,7 @@ gori run project env delete TOKEN
 | --------------------- | ------------- |
 | (default) | List project vars; `--format` is `text` or `json` |
 | `set KEY=value` · `set KEY value` | Upsert a project var (KEY must match `[A-Za-z_][A-Za-z0-9_]*`) |
-| `delete KEY` | Remove a project var |
+| `delete KEY` (`rm`) | Remove a project var |
 
 #### project host-override
 
@@ -1686,7 +1689,7 @@ gori run project host-override delete 1
 | (default) | List overrides; `--format` is `text` or `json` |
 | `add` | `--host=…` + `--ip=…`, or positional `IP HOST`. `--format json` prints the new override as the listing does (`id`, `host`, `ip`) |
 | `update <id>` | `--host=…` + `--ip=…` (both required) |
-| `delete <id>` | Remove an override by id |
+| `delete <id>` (`rm`) | Remove an override by id |
 
 #### project network
 
@@ -1716,7 +1719,7 @@ gori run project network unset capture_max_mib
 | (default) / `list` | Every key with the value in effect and its source (`· project`, `· global`); `--format json` carries `value` (the project's own row, `null` when unset), `inherited` and `effective` |
 | `get KEY` | The value in effect: the project's own, else the inherited one (named on STDERR, so `$(…)` captures the value alone). Credentials print the method and username; the password is never printed |
 | `set KEY=VALUE` · `set KEY VALUE` | Pin a value, **even one equal to the global**, which is what keeps a later global edit from reaching the project. (The Project settings card folds a value equal to the global back to inherit when it saves; `set` does not, because it names one key.) |
-| `unset KEY` (`rm`) | Drop the project's value so it inherits again. A key that is not set is not an error |
+| `unset KEY` (`rm`, `delete`) | Drop the project's value so it inherits again. A key that is not set is not an error |
 
 Credentials pin the upstream they were entered for, as they do in the Project settings card: `set upstream_auth` also pins an inherited global upstream to the project, in the same write, so the password can never follow a later global edit or an upstream rule to a different proxy; `set upstream_proxy` moves stored credentials to the new address (re-deriving Basic vs SOCKS5 for it); and `unset upstream_proxy` is refused until `unset upstream_auth`. The multi-row edits are one transaction, so a busy project cannot store a password beside an address it was not validated against. Every edit is recorded in the project's event feed, without the credential.
 
@@ -1735,11 +1738,11 @@ gori run redact default on
 
 | Subcommand | Description |
 | ---------- | ----------- |
-| `profiles` (default) | Every profile available here — the project's first, then `settings.json`'s, then the built-ins — with its scope, its rule counts, a `*` on the one a safe export would use, and whether redaction is on by default. `--format json` for the full rule lists |
+| `profiles` (`list`, default) | Every profile available here — the project's first, then `settings.json`'s, then the built-ins — with its scope, its rule counts, a `*` on the one a safe export would use, and whether redaction is on by default. `--format json` for the full rule lists |
 | `use <name>` \| `use --none` | Pick the profile a safe export uses. Writes this **project** unless `--global` |
 | `default on\|off` \| `default --none` | Whether shareable output is sanitized *without* `--redact`. Project scope unless `--global`; `--none` clears the project's answer so it inherits the global one |
 | `set <name>` | Create or **replace** a profile from repeatable rule flags. Project scope unless `--global` |
-| `rm <name>` | Delete a profile. A built-in cannot be deleted — define one of the same name to replace it |
+| `rm <name>` (`delete`) | Delete a profile. A built-in cannot be deleted — define one of the same name to replace it |
 
 `set` takes four kinds of rule, each repeatable, plus `--description`:
 

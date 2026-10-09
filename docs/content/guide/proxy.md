@@ -134,7 +134,7 @@ The scan reads the flows the Sitemap shows, so the `/` query and the `s` scope l
 | Open flow | `↵` | The newest request that carried the name, in the History detail |
 | Copy | `y` / `⇧Y` | The name, or every listed name one per line |
 | Export wordlist | `w` | The listed names (JSON leaf names, no headers) as a list in the [wordlist catalog](/guide/repeater-and-fuzzer/#wordlist-catalog) (`~/.gori/wordlists/`), owner-only, named `params-HOST-TIMESTAMP.txt` |
-| Mine | `m` | Opens the Miner on this endpoint with the names seen on the host's other endpoints tested first |
+| Mine | `m` | Opens the Miner on this endpoint with the names seen on its origin's (scheme, host and port) other endpoints tested first |
 
 The same inventory is `gori run sitemap params` on the CLI and `list_params` over MCP.
 
@@ -314,8 +314,8 @@ no capture recorded.
 **Repeater sends are recorded by default**, and Settings → General → *Record Repeater sends*
 turns that off. It governs the TUI only; `gori run repeater send` still needs
 `--record-history` (off by default) and MCP `send_request` still takes `record_history` (on by
-default), so no script's behaviour moves under it. WebSocket sends and send-groups are not
-recorded; the status line says so once.
+default), so no script's behaviour moves under it. WebSocket sends, send-groups, races and
+timing runs are not recorded; the status line says so once.
 
 ## Filtering History
 

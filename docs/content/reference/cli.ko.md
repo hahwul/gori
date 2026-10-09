@@ -95,7 +95,7 @@ gori run <subcommand> [verb] [options]
 | `issues` · `create` · `update` · `delete` | 이슈 목록 / 내보내기, 또는 이슈 작성과 삭제 (`delete`는 `--yes` 필요) |
 | `links` · `add` · `delete` | 이슈나 노트에서 플로우, Repeater 세션, 잡으로 이어지는 증거 포인터 |
 | `evidence` | 고정한 요청+응답 사본을 만들고, 나열·조회·연결·연결 해제·삭제 |
-| `retest` · `add` · `run` · `runs` | 이슈의 재테스트 단계: 나열과 추가, 재테스트 실행(통과하지 않으면 종료 코드 `1`), 실행 이력 나열 |
+| `retest` · `add` · `update` · `remove` · `move` · `clear` · `run` · `runs` · `show` · `forget` | 이슈의 재테스트 단계: 나열·추가·수정·재정렬·제거, 재테스트 실행(통과하지 않으면 종료 코드 `1`), 실행 이력 나열 |
 | `redact` | 안전한 내보내기용 리댁션 프로필 관리(`profiles`, `use`, `default`, `set`, `rm`) |
 | `rewriter` · `add` · `rm` · `enable` · `disable` · `preview` | Match & Replace 규칙 관리 |
 | `rewriter preset list` · `add` | 응답 수정 프리셋 목록, 그리고 하나를 평범한 Match & Replace 규칙으로 설치 |
@@ -106,7 +106,7 @@ gori run <subcommand> [verb] [options]
 | `grpc [schema]` · `reflect` · `forget` | gRPC `.proto` 렌즈: 무엇이 로드됐는지 보기, 서버 리플렉션으로 디스크립터 받기, 캐시된 대상 버리기 |
 | `project [list]` | 알려진 프로젝트 목록 |
 | `project create <name>` | 이름으로 프로젝트 생성 (같은 이름이면 다시 열기) |
-| `project switch <name>` · `--clear` | `--project` 없는 모든 명령이 읽을 프로젝트 고정 |
+| `project switch <name>` (`use`) · `--clear` | `--project` 없는 모든 명령이 읽을 프로젝트 고정 |
 | `project export <name>` | 압축된 WAL 안전 `.gori` 프로젝트 아카이브 저장 |
 | `project import <archive>` | 프로젝트 아카이브를 새 프로젝트로 추가 |
 | `project delete <name>` | 프로젝트와 그 안에 캡처된 모든 것 삭제 (`--yes`로 확인) |
@@ -120,7 +120,7 @@ gori run <subcommand> [verb] [options]
 
 읽기 서브커맨드는 스토어를 읽기 전용으로 열고 캡처 락을 잡지 않으므로, 라이브 TUI가 캡처 중인 프로젝트를 대상으로 실행해도 안전합니다. `body:` 질의는 검색 인덱스를 비우므로 쓰기입니다. gori 프로젝트가 아닌 `--db` 파일(다른 도구의 SQLite 데이터베이스나 빈 파일)은 파일에 손대기 전에 거부합니다. 데이터베이스를 만드는 명령(`import --db`, `capture --db`)은 빈 파일은 계속 초기화하지만, 다른 도구의 테이블이 든 파일은 거부합니다.
 
-쓰기 서브커맨드는 그 프로젝트의 WAL 데이터베이스를 TUI, MCP와 공유합니다. Store 라이터를 통해 직렬화되므로 TUI가 열려 있어도 실행할 수 있지만, 캡처 커밋이 SQLite 라이터 슬롯을 잠시 차지할 수 있습니다. 짧게 끝나는 서브커맨드는 SQLite 열기/라이터 대기에 1초 예산을 둡니다. 그때까지 슬롯이 바쁘면 필요한 쓰기는 0이 아닌 코드로 종료하며, 다른 gori가 프로젝트를 잠그고 있다고 알리고 해결책(다시 시도하거나 읽기 전용 서브커맨드로 읽기)을 함께 보여 줍니다. 실행 내내 프로젝트를 열어 두는 서브커맨드(`discover`, `fuzz`, `import`, `probe`, `retest run`, `oast listen`/`resume`, `intercept`)는 표준 5초 대기를 그대로 씁니다. repeater 전송도 네트워크 응답을 저장하지 못했다면 성공이라고 하지 않고 실패하므로, 스크립트가 완료된 쓰기와 확인이 필요한 응답을 구분할 수 있습니다.
+쓰기 서브커맨드는 그 프로젝트의 WAL 데이터베이스를 TUI, MCP와 공유합니다. Store 라이터를 통해 직렬화되므로 TUI가 열려 있어도 실행할 수 있지만, 캡처 커밋이 SQLite 라이터 슬롯을 잠시 차지할 수 있습니다. 짧게 끝나는 서브커맨드는 SQLite 열기/라이터 대기에 1초 예산을 둡니다. 그때까지 슬롯이 바쁘면 필요한 쓰기는 0이 아닌 코드로 종료하며, 다른 gori가 프로젝트를 잠그고 있다고 알리고 해결책(다시 시도하거나 읽기 전용 서브커맨드로 읽기)을 함께 보여 줍니다. 실행 내내 프로젝트를 열어 두는 서브커맨드(`discover`, `fuzz`, `import`, `--macro`를 준 `mine`, `probe`, `retest run`, `oast listen`/`resume`, `intercept`, `sitemap js --scan`)는 표준 5초 대기를 그대로 씁니다. repeater 전송도 네트워크 응답을 저장하지 못했다면 성공이라고 하지 않고 실패하므로, 스크립트가 완료된 쓰기와 확인이 필요한 응답을 구분할 수 있습니다.
 
 #### 출력 계약 {#output-contract}
 
@@ -142,6 +142,7 @@ STDOUT은 데이터를 나릅니다. 경고, 개수, 내보내기 확인 메시�
 | `0` | 성공 |
 | `1` | 오류: 전송 실패, 열 수 없는 프로젝트, 적용되지 못한 변경, 또는 어떤 요청도 응답을 받지 못한 `fuzz` / `mine` / `discover` / `sequence` / `authorize` / `cache-deception` 실행(죽었거나 거부하는 대상은 깨끗한 "결과 없음"이 아닙니다) |
 | `3` | 판정 게이트 발동: `run fuzz --fail-if-no-matches`가 완료했지만 매칭이 없음(그리고 `--stop-on` / `--stop-after-matches` 조건도 충족되지 않음), 또는 `run probe --fail-on=LEVEL`이 LEVEL 이상의 이슈를 보고함 |
+| `126` / `127` | `run shell -- CMD`가 CMD를 실행하지 못함(`126`) 또는 찾지 못함(`127`). CMD가 실행되면 종료 코드는 CMD 자신의 것입니다 |
 | `130` | SIGINT/SIGTERM으로 중단. `capture`(`--for`나 `--max`로 끝나면 `0`), `fuzz`, `mine`, `discover`, `sequence`, `authorize`, `cache-deception`, `repeater minimize`는 모아 둔 것을 먼저 내보낸 뒤 `130`으로 종료하므로, 스크립트의 `&& next-step`이 잘린 실행을 끝난 실행으로 오해하지 않습니다 |
 
 `--fail-if-no-matches` 없이 실행하면, 매칭이 없으면서 *동시에* 모든 전송이 실패한 fuzz는 `1`로 끝납니다. "결과 없음"과 "대상에 닿지도 못함"이 구분됩니다. 플래그를 주면 `3`이 우선합니다. 정지 조건이 충족된 실행은 두 규칙 모두에서 빠집니다. 시간 초과된 전송은 매칭되지 않은 오류 행으로 남으면서도 `--stop-on 'time:>=5000'`을 충족할 수 있고, 그것이 바로 실행이 찾던 결과이기 때문입니다.
@@ -805,7 +806,7 @@ gori run probe mode passive                      # off | passive | active | aggr
 | `issues` | `-a`/`--all`(무시·확정·해결된 항목 포함), `--severity`, `--category`, `--host` |
 | `dismiss <id>` | id를 주면 그 발견 항목을 무시 ⇄ 열림으로 토글하고, `--code=CODE` / `--host=HOST`는 그 값을 공유하는 열린 항목을 모두 무시합니다. 코드는 룰 id가 아니라 발견의 코드(`probe issues`에 나오는 `missing_hsts` 같은 값)이며 정확히 일치해야 합니다. 프로젝트에 쓰지 못한 dismiss는 항목을 바꾸지 않고 `1`로 끝납니다 |
 | `promote <id>` | 발견 항목을 사람이 확인한 Issue로 승격 |
-| `delete <id>` | 또는 `--all --yes` |
+| `delete <id>` (`rm`) | 또는 `--all --yes` |
 | `rules [list\|enable\|disable\|add\|delete]` | `list`는 `--kind=passive\|active\|custom`. `enable`/`disable`/`delete`는 그 목록의 `<rule-id>`를 받습니다(내장 룰은 [Probe 룰](/ko/reference/probe-rules/)에 있습니다). `add`는 `-t`/`--title`(필수), `-p`/`--pattern`(필수), `--description`, `--side`(`request`\|`response`, 기본 `response`), `--region`(`whole`\|`header`\|`body`, 기본 `body`), `--regex`, `--exec`(`--pattern`을 [프로세스 훅](/ko/guide/scripting/#process-hooks)으로 실행: exit 0이면 발견, stdout이 근거), `-s`/`--severity`(기본 `info`) |
 | `mode [off\|passive\|active\|aggressive]` | 프로젝트의 스캔 모드를 출력하거나 설정 |
 
@@ -857,7 +858,7 @@ gori run wordlist delete api-v2-params.txt --yes
 |------|-------------|
 | `wordlist` · `list` (`ls`) | 이름, 크기, 수정 시각. 값은 절대 출력하지 않습니다. `--format text` \| `json` |
 | `show <name>` | 경로, 크기, 줄 수(최대 32 MiB까지 세며, 목록이 더 길면 `more than N`). `--head=N`은 첫 N줄(최대 1000)도 출력합니다. 값이므로 민감할 수 있습니다 |
-| `save <name>` | 소스를 정확히 하나만 골라 목록을 저장: `--from=FILE`(`-`는 stdin), `--value=V` 하나 이상, stdin으로 넘긴 목록, 또는 `--project`/`--db`와 함께 쓰는 `--payload-from='<QL> <projection>'`(그 프로젝트의 캡처 데이터에서 읽은 값. `fuzz`와 같은 `--payload-from-*` 정책이 적용되고, 줄바꿈이 든 값은 빼고 셉니다). 바이트는 준 그대로 유지하므로 빈 줄이나 `#` 줄도 그대로 남고, `--value`에는 줄바꿈을 넣을 수 없습니다. 원자적이고 소유자 전용이며, `--overwrite`가 아니면 이미 있는 이름은 거부합니다 |
+| `save <name>` (`add`) | 소스를 정확히 하나만 골라 목록을 저장: `--from=FILE`(`-`는 stdin), `--value=V` 하나 이상, stdin으로 넘긴 목록, 또는 `--project`/`--db`와 함께 쓰는 `--payload-from='<QL> <projection>'`(그 프로젝트의 캡처 데이터에서 읽은 값. `fuzz`와 같은 `--payload-from-*` 정책이 적용되고, 줄바꿈이 든 값은 빼고 셉니다). 바이트는 준 그대로 유지하므로 빈 줄이나 `#` 줄도 그대로 남고, `--value`에는 줄바꿈을 넣을 수 없습니다. 원자적이고 소유자 전용이며, `--overwrite`가 아니면 이미 있는 이름은 거부합니다 |
 | `rename <old> <new>` (`mv`) | 목록 이름 변경. `--overwrite`가 아니면 이미 있는 `<new>`는 거부합니다 |
 | `delete <name>` (`rm`) | 목록 삭제(`--yes`가 확인이며 프롬프트는 없습니다). 심볼릭 링크는 링크만 지우고 가리키는 파일은 지우지 않습니다 |
 
@@ -1142,7 +1143,7 @@ report-generator | gori run issues update 7 --status confirmed --notes-stdin
 | `--include-sensitive` | `sarif`의 `webRequest`/`webResponse` 헤더에서 `Authorization` / `Cookie` / `Set-Cookie` / `Proxy-Authorization` / API 키 값을 `[REDACTED]` 대신 그대로 씁니다. 다른 형식에서는 효과가 없으며 STDERR로 알려 줍니다 |
 | `create` | `-t`/`--title` (필수), `--cvss` (점수 또는 벡터. 이 값에서 severity를 자동 산정), `-s`/`--severity` (`info`\|`low`\|`medium`\|`high`\|`critical`), `--host`, `--flow=ID`, `-n`/`--notes`, `--notes-file=FILE`, `--notes-stdin` |
 | `update <id>` | `-t`/`--title`, `--cvss` (새 점수/벡터. 빈 문자열로 초기화), `-s`/`--severity`, `-n`/`--notes` (빈 문자열로 초기화), `--notes-file=FILE`, `--notes-stdin`, `--status` (`open`\|`confirmed`\|`false-positive`\|`resolved`) |
-| `delete <id>` | 이슈와 그 증거 링크를 삭제합니다. `-y`/`--yes`가 필요합니다. 보고서에는 남기고 닫힌 상태로만 표시하려면 `update <id> --status=resolved`를 쓰세요 |
+| `delete <id>` (`rm`) | 이슈와 그 증거 링크를 삭제합니다. `-y`/`--yes`가 필요합니다. 보고서에는 남기고 닫힌 상태로만 표시하려면 `update <id> --status=resolved`를 쓰세요 |
 
 `--format sarif`는 [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) 로그를 씁니다. GitHub code scanning, DefectDojo, Azure DevOps가 그대로 읽는 형식입니다. 이슈 하나가 result 하나가 되며, severity는 SARIF `level`로 매핑되고(5단계 원본은 `rank`와 룰의 `security-severity`에 보존), `false-positive`/`resolved` 상태는 `suppression`으로 나가 정리한 이슈가 다시 열린 것으로 보이지 않습니다. 연결된 플로우는 실제 헤더와 (디코딩·64 KiB 상한) 본문을 담은 `webRequest`/`webResponse`로 함께 실립니다.
 
@@ -1249,6 +1250,8 @@ gori run retest add --issue=7 --repeater=6 --role=variant  --assert=status:403
 gori run retest --issue=7                                                      # 각 단계가 무엇을 보낼지 포함한 계획
 gori run retest move 9 --to=1                                                  # 순서 변경(id는 --format=json)
 gori run retest update 9 --role=control --assert=body:same
+gori run retest remove 9                                                       # 단계 하나 제거(`rm`도 됨)
+gori run retest clear --issue=7 --yes                                          # 모든 단계 삭제
 gori run retest run --issue=7                                                  # `pass`일 때만 종료 코드 0
 gori run retest runs --issue=7                                                 # 보존된 실행 기록
 gori run retest show 3                                                         # 한 실행의 결과 표
@@ -1617,7 +1620,7 @@ gori run project scope disable
 | (default) | 규칙 목록; `--format`은 `text` 또는 `json` |
 | `add` | `--kind=include\|exclude` (기본 `include`), `--type=host\|string\|regex` (기본 `host`), `--pattern=…` (필수). 새 규칙의 id를 출력합니다; `--format json`은 목록과 같은 형태(`id`, `kind`, `type`, `pattern`)로 규칙을 출력합니다 |
 | `update <rule-id>` (`edit`) | 규칙의 `--kind` / `--type` / `--pattern` 변경. 생략한 필드는 그대로 유지 |
-| `delete <rule-id>` | id로 규칙 제거 |
+| `delete <rule-id>` (`rm`) | id로 규칙 제거 |
 | `enable` / `disable` | 스코프 필터링 적용 여부 토글 |
 
 목록은 규칙이 하는 또 다른 일을 두 번째 줄로 출력합니다. 규칙이 하나라도 있으면 **활성 여부와 관계없이** `Active-send gate: ON (N rules)`가 찍히는데, 모든 액티브 전송(`send`, `repeater`, `fuzz`, `mine`, `discover`, MCP)이 `--allow-unscoped` 없이는 규칙상 스코프 밖인 대상을 거부하기 때문입니다. `--format json`에서는 `active_send_gate`로 실립니다. 규칙이 없으면 `gori run` 전송은 제한이 없고, MCP는 모든 전송을 거부합니다.
@@ -1657,7 +1660,7 @@ gori run project env delete TOKEN
 |---------------------|-------------|
 | (default) | 프로젝트 변수 목록; `--format`은 `text` 또는 `json` |
 | `set KEY=value` · `set KEY value` | 프로젝트 변수 upsert (KEY는 `[A-Za-z_][A-Za-z0-9_]*`) |
-| `delete KEY` | 프로젝트 변수 제거 |
+| `delete KEY` (`rm`) | 프로젝트 변수 제거 |
 
 #### project host-override {#run-project-host-override}
 
@@ -1678,7 +1681,7 @@ gori run project host-override delete 1
 | (default) | 오버라이드 목록; `--format`은 `text` 또는 `json` |
 | `add` | `--host=…` + `--ip=…`, 또는 positional `IP HOST`. `--format json`은 목록과 같은 형태(`id`, `host`, `ip`)로 새 오버라이드를 출력합니다 |
 | `update <id>` | `--host=…` + `--ip=…` (둘 다 필수) |
-| `delete <id>` | id로 오버라이드 제거 |
+| `delete <id>` (`rm`) | id로 오버라이드 제거 |
 
 #### project network {#project-network}
 
@@ -1708,7 +1711,7 @@ gori run project network unset capture_max_mib
 | (default) / `list` | 모든 키를 적용 중인 값과 출처(`· project`, `· global`)와 함께 표시; `--format json`은 `value`(프로젝트 자신의 행, 설정 안 됐으면 `null`), `inherited`, `effective`를 싣습니다 |
 | `get KEY` | 적용 중인 값: 프로젝트 자신의 값, 없으면 상속된 값(STDERR에 이름이 나오므로 `$(…)`는 값만 담습니다). 자격증명은 방식과 사용자명만 출력하며 비밀번호는 절대 출력하지 않습니다 |
 | `set KEY=VALUE` · `set KEY VALUE` | 값을 고정합니다. **전역 값과 같은 값이라도** 고정되며, 이렇게 해야 이후의 전역 편집이 프로젝트에 닿지 않습니다. (Project settings 카드는 저장할 때 전역과 같은 값을 다시 inherit으로 접지만, `set`은 키 하나만 지목하므로 그렇게 하지 않습니다.) |
-| `unset KEY` (`rm`) | 프로젝트 값을 지워 다시 상속되게 합니다. 설정돼 있지 않은 키를 지워도 오류가 아닙니다 |
+| `unset KEY` (`rm`, `delete`) | 프로젝트 값을 지워 다시 상속되게 합니다. 설정돼 있지 않은 키를 지워도 오류가 아닙니다 |
 
 자격증명은 Project settings 카드에서와 마찬가지로 입력받은 업스트림에 고정됩니다. `set upstream_auth`는 상속된 전역 업스트림도 같은 쓰기 한 번으로 프로젝트에 고정하므로, 이후의 전역 편집이나 업스트림 규칙이 비밀번호를 다른 프록시로 데려가는 일이 없습니다. `set upstream_proxy`는 저장된 자격증명을 새 주소로 옮깁니다(그에 맞춰 Basic인지 SOCKS5인지 다시 판정합니다). 그리고 `unset upstream_proxy`는 `unset upstream_auth`를 먼저 하기 전까지 거부됩니다. 여러 행에 걸친 편집은 하나의 트랜잭션이므로, 바쁜 프로젝트가 검증되지 않은 주소 옆에 비밀번호를 저장하는 일은 없습니다. 모든 편집은 자격증명 없이 프로젝트 이벤트 피드에 기록됩니다.
 
@@ -1727,11 +1730,11 @@ gori run redact default on
 
 | 서브커맨드 | 설명 |
 | ---------- | ---- |
-| `profiles` (기본) | 여기서 쓸 수 있는 모든 프로파일 — 프로젝트, `settings.json`, 내장 순 — 을 범위, 규칙 개수, 안전한 내보내기가 실제로 쓸 하나에 붙는 `*`, 기본 적용 여부와 함께 보여 줍니다. 전체 규칙 목록은 `--format json` |
+| `profiles` (`list`, 기본) | 여기서 쓸 수 있는 모든 프로파일 — 프로젝트, `settings.json`, 내장 순 — 을 범위, 규칙 개수, 안전한 내보내기가 실제로 쓸 하나에 붙는 `*`, 기본 적용 여부와 함께 보여 줍니다. 전체 규칙 목록은 `--format json` |
 | `use <name>` \| `use --none` | 안전한 내보내기가 쓸 프로파일을 고릅니다. `--global`이 없으면 **프로젝트**에 씁니다 |
 | `default on\|off` \| `default --none` | `--redact` 없이도 공유용 출력을 정제할지. `--global`이 없으면 프로젝트 범위이고, `--none`은 프로젝트의 답을 지워 전역 설정을 따르게 합니다 |
 | `set <name>` | 반복 가능한 규칙 플래그로 프로파일을 만들거나 **통째로 교체**합니다. `--global`이 없으면 프로젝트 범위 |
-| `rm <name>` | 프로파일을 지웁니다. 내장 프로파일은 지울 수 없고, 같은 이름으로 정의해 덮어쓰면 됩니다 |
+| `rm <name>` (`delete`) | 프로파일을 지웁니다. 내장 프로파일은 지울 수 없고, 같은 이름으로 정의해 덮어쓰면 됩니다 |
 
 `set`은 네 종류의 규칙(각각 반복 가능)과 `--description`을 받습니다.
 

@@ -68,7 +68,7 @@ gori run probe --persist             # also write the findings into the triage l
 
 ## Param Miner
 
-The **Miner** discovers parameters a server accepts but doesn't advertise. Point it at a flow and it probes candidate names across locations: query string, form body, multipart/form-data, JSON (including nested objects and array roots), headers, and cookies. It buckets guesses efficiently and reports the ones that change the response. Multipart is applicable but off by default (a captured file part would be re-sent on every request); enable it with `--locations multipart` or its checkbox. A `--wordlist` (MCP `wordlist`) is a file, or the name of a list in the [wordlist catalog](/guide/repeater-and-fuzzer/#wordlist-catalog). Names you already have go first: `--name` (repeatable; MCP `mine_start` `names`) tests them ahead of the wordlists, and `m` (**Mine parameters**) on the Target → Params sub-tab mines the selected endpoint with the names seen on the host's other endpoints first.
+The **Miner** discovers parameters a server accepts but doesn't advertise. Point it at a flow and it probes candidate names across locations: query string, form body, multipart/form-data, JSON (including nested objects and array roots), headers, and cookies. It buckets guesses efficiently and reports the ones that change the response. Multipart is applicable but off by default (a captured file part would be re-sent on every request); enable it with `--locations multipart` or its checkbox. A `--wordlist` (MCP `wordlist`) is a file, or the name of a list in the [wordlist catalog](/guide/repeater-and-fuzzer/#wordlist-catalog). Names you already have go first: `--name` (repeatable; MCP `mine_start` `names`) tests them ahead of the wordlists, and `m` (**Mine parameters**) on the Target → Params sub-tab mines the selected endpoint with the names seen on its origin's other endpoints first.
 
 ```bash
 gori run mine <flow-id> \
@@ -157,7 +157,7 @@ Marks survive a filter change, a re-sort (including the one your own severity ed
 
 Two more tools round out analysis:
 
-- **Notes**: free-form, per-project Markdown documents (multiple notes per project). Create, edit, and close notes from the Notes tab; list or dump them headless with `gori run notes` / `gori run notes --all`. Agents can manage notes over MCP (`list_notes`, `get_note`, `create_note`, …).
+- **Notes**: free-form, per-project Markdown documents (multiple notes per project). Create, edit, and close notes from the Notes tab; headless, `gori run notes` / `gori run notes --all` list or dump them and `gori run notes create` / `update` / `append` / `delete` write them. Agents can manage notes over MCP (`list_notes`, `get_note`, `create_note`, …).
 - **Comparer**: load two messages into slots A and B for a side-by-side diff, useful for spotting how a response changed between requests. The tab is off the bar by default: press **`0`** and type "comparer", or send a flow to it.
 
   A slot is filled from anywhere that holds a request and a response: `Space` `>` `c` (**Send flow to…** → **Send to Comparer**) from History, the Sitemap, a Repeater tab (its last send) or a Fuzzer result row, or `a` / `b` on the Comparer tab itself to pick a captured flow. That picker follows the active Scope lens, like History and the Sitemap, so turn the lens off to reach an out-of-scope flow. A Repeater send and a fuzz row leave no capture behind, so this is the only route those two have into a diff.

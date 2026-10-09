@@ -56,7 +56,7 @@ Pi는 [pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter) 같은 MCP 
 
 에이전트가 먼저 `project_info`를 호출하게 하세요. `bound`가 false이면 프로젝트를 나열하거나 생성한 뒤(unbound일 때 create는 자동 바인딩), 필요하면 switch 합니다. bound이면 데이터를 변경하기 전에 이름·데이터베이스 경로·선택 출처를 확인합니다.
 
-설치 시점에 고정 engagement를 박아 두려면:
+설치 시점에 engagement를 정해 두려면(에이전트가 다른 프로젝트로 옮기지 못하게 하려면 `--pin-project`도 더합니다):
 
 ```bash
 gori mcp --project my-engagement --install-codex     # 이름 붙은 프로젝트의 데이터베이스

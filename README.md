@@ -49,13 +49,13 @@ surface limits explicitly.
 - Copy any request as cURL, Python, `fetch`, Go, httpie, or a CSRF PoC
 
 ### Discover & Scan
-- Prism passive & light-touch active vulnerability scanner
+- Probe passive & light-touch active vulnerability scanner
 - Param Miner for hidden-parameter discovery
 - Authorize matrix: replay one request under several identities to find broken access control
 - Sequencer for grading the randomness of session, CSRF, and reset tokens
 - Cookie workbench to verify, crack, and re-sign Flask / Rack / Django session cookies
 - OAST collector for confirming blind SSRF, XXE, and injection out of band
-- Findings triage with Markdown / JSON export
+- Findings triage with Markdown / JSON / SARIF export
 
 ### Keyboard-first Workflow
 - Command palette (`Ctrl-P`) and context space menu (`Space`) reach every action
@@ -182,7 +182,7 @@ full guide, or open the **Help** tab in the app.
 ## Development
 
 ```bash
-shards build          # release binary at bin/gori
+shards build          # debug binary at bin/gori (add --release to optimise)
 shards run gori       # run without installing
 ```
 
