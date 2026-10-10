@@ -163,7 +163,8 @@ module Gori
         @suppressed = @store.probe_suppressions.map { |(code, host)| "#{code}|#{host}" }.to_set
         follow_stored_oob
         key = stored_rule_config_key
-        return if key == @rule_config_key
+        # A degraded load is retried every tick (fail-closed active probing must heal on its own).
+        return if key == @rule_config_key && !@disabled_degraded
         was_key, was_disabled, was_degraded = @rule_config_key, @disabled, @disabled_degraded
         load_rule_config(key)
         return if @disabled_degraded
