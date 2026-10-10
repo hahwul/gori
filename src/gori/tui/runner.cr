@@ -2619,7 +2619,9 @@ module Gori::Tui
 
     # The IssueForm's injected commit. Returns true when the shell should close the form.
     private def create_issue_from_form(form : IssueForm) : Bool
-      title = form.issue_title.strip
+      # Masked as `gori run issues` and MCP mask them: a pasted token stored in an issue is
+      # printed by every export and report.
+      title = Env.mask_secrets(form.issue_title.strip)
       title = "untitled issue" if title.empty?
       cvss_raw = form.cvss.strip
       cvss_val = cvss_raw.presence
@@ -2636,8 +2638,8 @@ module Gori::Tui
         issues_controller.view.resync(@session.store)
         @toast = "issue updated"
       else
-        new_id = @session.store.insert_issue(title, form.severity, form.host, form.flow_id, cvss: cvss_val,
-          notes: form.notes)
+        new_id = @session.store.insert_issue(title, form.severity, form.host.try { |h| Env.mask_secrets(h) },
+          form.flow_id, cvss: cvss_val, notes: Env.mask_secrets(form.notes))
         # `insert_issue` returns 0 — NOT nil — when the write never committed, and 0 is TRUTHY
         # in Crystal: the same trap `Probe::Triage.promote` and `sequencer_promote` both name.
         # Everything below takes `new_id` as an owner id, so swallowing it filed entity_links

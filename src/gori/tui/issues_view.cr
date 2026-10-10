@@ -1111,7 +1111,10 @@ module Gori::Tui
       # one, with no toast and nothing left to retry from. Leaving INS on is what keeps the
       # text on screen and a second `esc` a real retry. Same correction `NotesView#save` and
       # `ProjectView#save` already carry.
-      return false unless store.update_issue(issue.id, notes: @notes.text)
+      # Masked as `gori run issues` and MCP `update_issue` mask it; the buffer then shows what
+      # was stored (`seed_notes` below), so the baseline still matches the column.
+      text = Env.mask_secrets(@notes.text)
+      return false unless store.update_issue(issue.id, notes: text)
       exit_notes_insert!
       # The BASELINE has to move with the committed write, and only this method knows the
       # write landed. Without it the pane stayed `notes_dirty?` forever against a value only
@@ -1123,8 +1126,9 @@ module Gori::Tui
       # adopting real peer writes and `notes_conflict?` answered true for the rest of the
       # session. Routed through `seed_notes` rather than assigning `@notes_base` by hand so the
       # announce latch resets with it — and its guard makes the call free: the buffer already
-      # holds this document, so nothing is replaced and the caret stays where the typing left it.
-      seed_notes(@notes.text)
+      # holds this document, so nothing is replaced and the caret stays where the typing left it
+      # (unless masking changed it, and then the buffer takes the stored text).
+      seed_notes(text)
       # refresh_detail already re-syncs @notes from the re-fetched @detail (now that
       # notes-insert mode is off), and it nil-guards a peer-deleted issue — so no
       # separate (unsafe) set_text here.

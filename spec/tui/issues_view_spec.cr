@@ -233,6 +233,29 @@ describe Gori::Tui::IssuesView do
   # dragged the reading position back to line 0: `i` on the way into INSERT, and the
   # data_version tick, which fires on this session's own captures ~1.3×/s. `notes_copy_text`
   # is the public read of where the caret is standing (it copies the caret's line).
+  # `gori run issues` and MCP mask a recognised secret in the notes they store; the TUI stored
+  # the typed text raw, into a column every export prints.
+  it "masks a recognised secret in the notes it saves, and shows what it stored" do
+    with_store do |store|
+      id = store.insert_issue("XSS", Gori::Store::Severity::Medium, "acme.test", nil)
+      view = IssuesView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      previous = Gori::Settings.project_env_vars
+      Gori::Settings.project_env_vars = [{"CTOK", "TUINOTESECRET99"}]
+      begin
+        view.enter_notes_insert!
+        "Bearer TUINOTESECRET99".each_char { |c| view.notes_insert(c) }
+        view.save_notes(store).should be_true
+      ensure
+        Gori::Settings.project_env_vars = previous
+      end
+      token = Gori::Env.spell("CTOK", Gori::Env::Namespace::Env)
+      store.get_issue(id).not_nil!.notes.should eq("Bearer #{token}")
+      view.notes_copy_all.should eq("Bearer #{token}")
+    end
+  end
+
   it "keeps the notes caret when entering INS over unchanged text (#1123)" do
     with_store do |store|
       id = store.insert_issue("XSS", Gori::Store::Severity::Medium, "acme.test", nil)
