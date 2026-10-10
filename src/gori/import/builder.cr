@@ -647,6 +647,7 @@ module Gori
         stored, trunc, size = capped(body, declared_body_size)
         head = request_head_override || request_head(method, target, http_version, scheme, host, port, headers, body,
           trunc ? size : nil, trunc, frame_body)
+        method, target = request_line_columns(request_head_override, method, target)
         # The `flows.method` COLUMN keeps the source's case too, matching live capture:
         # `FlowMapper.request` passes `req.method` straight through, and the consumers that
         # need a canonical form upcase at the comparison (`Authorize::Passive`, QL's
@@ -661,6 +662,17 @@ module Gori
           head: head, body: stored, body_truncated: trunc, body_size: size,
           source: source, source_surface: source_surface, source_ref: source_ref)
         FlowPair.new(req, nil)
+      end
+
+      # {method, target} columns for a stored head: off a raw override's own request line when
+      # it frames (as `Import::Raw` does), else the given ones. Re-deriving the target from the
+      # URL broke gori's own HAR round trip: an absolute-form `http://legacy.demo.test/status`
+      # came back `/status`, and `OPTIONS *` came back `/*`. A malformed line keeps the URL's:
+      # its split is not a target, and the export wrote the URL from the original column.
+      private def self.request_line_columns(head : Bytes?, method : String, target : String) : {String, String}
+        return {method, target} if head.nil? || head.empty?
+        req = Proxy::Codec::Http1.parse_request_head(head)
+        req.malformed? ? {method, target} : {req.method, req.target}
       end
 
       def self.complete_flow(created_at : Int64, url : String, method : String,
@@ -684,6 +696,7 @@ module Gori
         req_stored, req_trunc, req_size = capped(req_body, declared_req_body_size)
         req_head = request_head_override || request_head(method, target, http_version, scheme, host, port, req_headers, req_body,
           req_trunc ? req_size : nil, req_trunc, frame_body)
+        method, target = request_line_columns(request_head_override, method, target)
         # The RFC 8441 `:protocol` the importer recovered, when it could (V16). Threaded rather
         # than lifted off `req_head` here, so the decision about whether a given format's bytes
         # may be believed stays with the importer that read them — see `Import::Har`.
