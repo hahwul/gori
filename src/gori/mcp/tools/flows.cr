@@ -669,10 +669,14 @@ module Gori
           # read them for every page.
           parts = store.response_parts(id)
           return not_found("no flow with id #{id}") unless parts
+          # No head = no response yet (pending, or the upstream never answered). Paging that as
+          # a 0-byte complete body read exactly like a real empty 204.
+          return not_found("no response captured for flow #{id}") unless parts[0]
           parts
         elsif id = repeater_id
           repeater = store.get_repeater_full(id)
           return not_found("no repeater with id #{id}") unless repeater
+          return not_found("no response captured for repeater #{id} (never sent)") unless repeater.response_head
           # A repeater response is a send this process made and kept whole; nothing capped it
           # on the way in, so there is no capture cut to report.
           {repeater.response_head, repeater.response_body, false}

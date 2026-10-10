@@ -541,6 +541,29 @@ describe Gori::MCP::Server do
       end
     end
 
+    # A pending flow / never-sent repeater paged as total_bytes:0, complete:true — the same
+    # reply as a real empty 204 body.
+    it "refuses a response that was never captured, and still pages a real empty one" do
+      with_store do |store|
+        tools = tools_for(store, allow_actions: false)
+        pending = mcp_seed_flow(store, "h.test", "GET", "/p")
+        r = tools.call("get_response_body_chunk", JSON.parse(%({"flow_id":#{pending}})))
+        r.is_error.should be_true
+        r.text.should contain("no response captured for flow #{pending}")
+        # The request side of the same flow is still there to page.
+        mcp_ok_json(tools, "get_response_body_chunk", %({"flow_id":#{pending},"part":"request"}))["text"].as_s.should start_with("GET /p")
+        rid = store.insert_repeater(target: "https://h.test", request: "GET / HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice,
+          http2: false, auto_cl: true, flow_id: nil, position: 0)
+        r = tools.call("get_response_body_chunk", JSON.parse(%({"repeater_id":#{rid}})))
+        r.is_error.should be_true
+        r.text.should contain("no response captured for repeater #{rid}")
+        empty = mcp_seed_flow(store, "h.test", "GET", "/e", 204, resp_head: "HTTP/1.1 204 No Content\r\n\r\n")
+        p = mcp_ok_json(tools, "get_response_body_chunk", %({"flow_id":#{empty}}))
+        p["total_bytes"].as_i.should eq(0)
+        p["complete"].as_bool.should be_true
+      end
+    end
+
     it "does not flag a legitimate final read at the body end" do
       with_store do |store|
         id = mcp_seed_flow(store, "h.test", "GET", "/b", 200,
