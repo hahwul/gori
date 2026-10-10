@@ -117,6 +117,7 @@ gori run fuzz --repeater 12 --macro 15 --wordlist emails.txt
 
 ## 다음 단계 {#next-steps}
 
+- [권한 우회 찾기](/ko/playbooks/test-access-control/): 캡처한 요청을 슬롯마다 다시 보내 서버가 확인을 빠뜨린 곳 찾기
 - [Authorize](/ko/guide/authorize/): 한 요청을 *모든* 슬롯으로 한꺼번에 재전송해 접근 제어 결함 찾기
 - [디코딩과 변환](/ko/playbooks/decode-and-transform/): 세션이 올라타는 인코딩된 값을 읽고 되쓰기
 - [Session bindings](/ko/guide/proxy/#session-bindings): extract 규칙과 값이 사는 곳의 전체 레퍼런스

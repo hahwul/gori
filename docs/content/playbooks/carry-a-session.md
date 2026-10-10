@@ -117,6 +117,7 @@ The default cadence runs the macro before every candidate, which means the sweep
 
 ## Next Steps
 
+- [Test access control](/playbooks/test-access-control/): replay your captured requests as each slot and find what the server forgets to check
 - [Authorize](/guide/authorize/): replay one request under *every* slot at once to find broken access control
 - [Decode and transform](/playbooks/decode-and-transform/): read and rewrite the encoded values a session rides on
 - [Session bindings](/guide/proxy/#session-bindings): the full reference for extract rules and where a value may live
