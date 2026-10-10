@@ -40,13 +40,16 @@ module Gori
     #
     # A tag is keyed on the host AS CAPTURED (the tree stamps `Node#host`), while a host is
     # case-insensitive: `API.TEST` from an operator is filed under the captured `api.test`,
-    # or it is a row no node ever carries. An exact spelling that was captured wins; a host
-    # nothing captured (a JS-referenced node) is kept as given.
+    # or it is a row no node ever carries. An exact spelling that was captured wins, then its
+    # lowercase form; a host nothing captured (a JS-referenced node) is kept as given. Two
+    # index probes, never a `COLLATE NOCASE` scan: that walks every flow inside the writer's
+    # transaction, on every tag of a node with no traffic.
     def set_sitemap_tag(host : String, path : String, tag : String) : Bool
       exec_task_ok ->(c : DB::Connection) {
         key = host
-        unless c.query_one?("SELECT 1 FROM flows WHERE host = ? LIMIT 1", host, as: Int64)
-          key = c.query_one?("SELECT host FROM flows WHERE host = ? COLLATE NOCASE LIMIT 1", host, as: String) || host
+        lower = host.downcase
+        if lower != host && !c.query_one?("SELECT 1 FROM flows WHERE host = ? LIMIT 1", host, as: Int64)
+          key = lower if c.query_one?("SELECT 1 FROM flows WHERE host = ? LIMIT 1", lower, as: Int64)
         end
         if tag.blank?
           c.exec("DELETE FROM sitemap_tags WHERE host = ? AND path = ?", key, path)
