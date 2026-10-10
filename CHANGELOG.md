@@ -59,6 +59,9 @@
 - TUI: an action refused with a message, such as sending a captured flow whose request head starts with `:` to the Fuzzer, Miner or Sequencer, shows it as a toast instead of ending gori and its proxy
 - Fuzzer: a cluster-bomb run whose later payload set is empty ends at once instead of freezing gori, a multi-GB wordlist no longer stalls gori while it is counted, and a device such as `/dev/zero` is refused as a wordlist instead of exhausting memory
 - Export: OpenAPI YAML no longer fails on a JSON body nested about 30 levels deep
+- Proxy: a chunked response that runs past 16 MiB while a body rule, a body-scoped extract rule or a response hold is live is forwarded byte-exact from that point instead of buffered whole, and an HTTP/2 header list that decompresses past 256 KiB is stored with the fields that fit and an advisory instead of as a head of up to 16 MiB
+- MCP: `switch_project` and `delete_project` wait for a job whose engine is still running after an error, not only one still marked running
+- Fuzzer: quitting or leaving a project while a large run is still being saved no longer risks crashing gori
 - Scope: a regex exclude rule that runs out of PCRE2 stack on a padded URL now still excludes, instead of letting the request through
 - OAST and Diff: an imported project with an out-of-range OAST, retest or agent-reply timestamp, or response size, opens and compares instead of ending gori or failing the diff
 - CLI and MCP: an unsearchable or looping `GORI_HOME`, `--db` or `/tmp/cc-socks`, or a missing home directory, is reported in one line or skipped instead of a backtrace or a failed agent wake-up
