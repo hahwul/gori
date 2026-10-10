@@ -365,17 +365,21 @@ module Gori
         # no rule named it, so this changes nothing about what a profile covers.
         return text unless text.valid_encoding?
         clean = text
+        before = hits.size
         rules = values_only ? @patterns : (@text_rules + @patterns)
-        rules.each { |(rx, rule)| clean = replace_all(clean, rx, rule, path, hits) }
+        begin
+          rules.each { |(rx, rule)| clean = replace_all(clean, rx, rule, path, hits) }
+        rescue Regex::Error
+          # PCRE2 raises rather than declining when a match outgrows its JIT stack — a ~100 KB
+          # run of `\n` escapes after `"token":"` does it to the json_field fallback. A rule that
+          # could not finish scanning may have left a secret in place, so the value is withheld
+          # whole (fail closed) instead of failing the copy, export or MCP read around it — and
+          # the earlier rules' hits go with it, since their placeholders are not in the output.
+          clean = "[REDACTED: #{Gori.plural(text.bytesize, "byte")} withheld — too complex to scan]"
+          hits.truncate(0, before)
+          hits << Hit.new(path, "withheld", clean)
+        end
         clean
-      rescue Regex::Error
-        # PCRE2 raises rather than declining when a match outgrows its JIT stack — a ~100 KB
-        # run of `\n` escapes after `"token":"` does it to the json_field fallback. A rule that
-        # could not finish scanning may have left a secret in place, so the value is withheld
-        # whole (fail closed) instead of failing the copy, export or MCP read around it.
-        note = "[REDACTED: #{Gori.plural(text.bytesize, "byte")} withheld — too complex to scan]"
-        hits << Hit.new(path, "withheld", note)
-        note
       end
 
       # Replace every match of `rx`, taking capture group 1 when the pattern has one and the
