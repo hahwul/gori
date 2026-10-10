@@ -88,14 +88,19 @@ module Gori
       # field-value is VCHAR / obs-text (%x80-FF), so a Latin-1 `Content-Disposition` filename
       # or an h2 pseudo-header is stored as raw octets and `Codec::Http1.parse_headers` keeps
       # them that way on purpose (P7). A HAR is JSON and JSON is UTF-8 (RFC 8259), and unlike a
-      # BODY there is no lossless escape hatch for a head — `emit_body` can fall back to
-      # base64, a header name cannot — so those octets become U+FFFD here. That is a real loss,
-      # so it is named on the entry rather than left silent (#488/#489/#491).
+      # BODY there is no lossless escape hatch for a head field — `emit_body` can fall back to
+      # base64, a header name cannot — so those octets become U+FFFD here. Only gori's own
+      # raw-head extension (RAW_REQUEST_HEAD) keeps them; any other reader sees the loss, so it
+      # is named on the entry rather than left silent (#488/#489/#491).
       SCRUBBED_MARK = "gori: invalid UTF-8 in the captured head replaced with U+FFFD; the store keeps the original bytes"
 
-      # HAR's ordered header array has no representation for a colonless line. Carry a raw
-      # request or response head only when it has one, so gori's export→import round trip can
-      # retain those malformed header probes byte-for-byte.
+      # The stored head, verbatim, on every entry. HAR's header array cannot carry a colonless
+      # line, a missing or doubled space (`X-A:v`, `Content-Length :5`), a bare-LF line end or
+      # the request line's own spacing, and the importer rebuilds a head from the array as
+      # canonical `name: value` lines. Carrying the raw head only for colonless lines let the
+      # rest come back rewritten: an obfuscated `Transfer-Encoding : chunked` probe returned
+      # with a Content-Length synthesized beside it (CL+TE). Detecting "would the rebuild
+      # differ" means re-running the importer per entry, so it is always carried instead.
       RAW_REQUEST_HEAD  = "_goriRawRequestHead"
       RAW_RESPONSE_HEAD = "_goriRawResponseHead"
 
@@ -486,8 +491,7 @@ module Gori
       end
 
       # Wire order, duplicates kept, original casing kept. HAR's `headers` field carries all
-      # parseable lines; the raw-head extension above carries any colonless lines it cannot
-      # represent. `Import::Har` reads the two forms back — `cookies` and `queryString` below
+      # parseable lines; the raw-head extension above carries the exact bytes it cannot. `Import::Har` reads the two forms back — `cookies` and `queryString` below
       # are derived views over the parsed headers.
       private def self.headers(j : JSON::Builder, list : Proxy::Codec::HeaderList) : Nil
         j.array do
@@ -501,41 +505,7 @@ module Gori
       end
 
       private def self.raw_head_extension(j : JSON::Builder, key : String, head : Bytes) : Nil
-        j.field key, Base64.strict_encode(head) if has_colonless_header_line?(head)
-      end
-
-      # Does this raw request header block contain a line the HAR header array cannot express?
-      # Scan bytes rather than constructing Strings so malformed/obs-text heads stay safe.
-      private def self.has_colonless_header_line?(head : Bytes) : Bool
-        line_start = crlf_at(head, 0)
-        return false unless line_start
-        line_start += 2
-        while line_start < head.size
-          line_end = crlf_at(head, line_start)
-          return false unless line_end
-          break if line_end == line_start
-          has_colon = false
-          i = line_start
-          while i < line_end
-            if head.unsafe_fetch(i) == 0x3a_u8
-              has_colon = true
-              break
-            end
-            i += 1
-          end
-          return true unless has_colon
-          line_start = line_end + 2
-        end
-        false
-      end
-
-      private def self.crlf_at(bytes : Bytes, from : Int32) : Int32?
-        i = from
-        while i + 1 < bytes.size
-          return i if bytes.unsafe_fetch(i) == 0x0d_u8 && bytes.unsafe_fetch(i + 1) == 0x0a_u8
-          i += 1
-        end
-        nil
+        j.field key, Base64.strict_encode(head)
       end
 
       # The query as it appeared on the wire, NOT percent-decoded. A gori capture's query is

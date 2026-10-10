@@ -289,6 +289,25 @@ describe Gori::Export::Har do
     end
   end
 
+  # Every line here HAS a colon, so the old colonless-only trigger left the extension out and
+  # the importer rebuilt `name: value` lines: spacing normalized, and the obfuscated TE probe
+  # came back with a Content-Length synthesized beside it (CL+TE).
+  it "round-trips spacing and an obfuscated Transfer-Encoding byte-exact" do
+    with_store do |store|
+      raw_head = "POST  /te HTTP/1.1\r\nHost: shop.test\r\nX-A:nospace\r\nX-B:   padded  \r\n" \
+                 "Transfer-Encoding : chunked\r\n\r\n"
+      raw_response_head = "HTTP/1.1 200 OK\r\nContent-Type:text/plain\r\nContent-Length :9\r\n\r\n"
+      detail = capture_flow(store, req_head: raw_head, resp_head: raw_response_head,
+        req_body: "5\r\nhello\r\n0\r\n\r\n".to_slice,
+        method: "POST", target: "/te", content_type: "text/plain")
+      har = export([detail])[0]
+      back = reimport(har)
+      String.new(back.request_head).should eq(raw_head)
+      String.new(back.response_head.not_nil!).should eq(raw_response_head)
+      export([back])[0].should eq(har)
+    end
+  end
+
   # A chunked message is stored RAW-chunked, so the byte count in the HAR is not the entity
   # length — and re-emitting it as a Content-Length manufactured the CL+TE shape gori's own
   # `Codec::Body.request_framing` REJECTS as illegal, out of a flow that had been captured
@@ -377,10 +396,9 @@ describe Gori::Export::Har do
     end
   end
 
-  it "keeps an absolute-form capture importable, at the cost of the request line's form" do
-    # A plain-HTTP forward-proxy request is captured absolute-form; HAR has only `url`, so
-    # the re-import lands origin-form. Pinned here so the one thing that does NOT survive
-    # the round trip is a known property rather than a surprise.
+  it "keeps an absolute-form capture importable, request line included" do
+    # A plain-HTTP forward-proxy request is captured absolute-form; HAR has only `url`, which
+    # carries the endpoint, and the raw-head extension carries the request line's form.
     with_store do |store|
       detail = capture_flow(store,
         req_head: "GET http://api.test:8080/ping HTTP/1.1\r\nHost: api.test:8080\r\n\r\n",
@@ -392,7 +410,7 @@ describe Gori::Export::Har do
 
       back = reimport(har)
       back.row.url.should eq(detail.row.url)
-      String.new(back.request_head).should eq("GET /ping HTTP/1.1\r\nHost: api.test:8080\r\n\r\n")
+      String.new(back.request_head).should eq("GET http://api.test:8080/ping HTTP/1.1\r\nHost: api.test:8080\r\n\r\n")
     end
   end
 
@@ -530,7 +548,8 @@ describe Gori::Export::Har do
         har, _ = export([capture_flow(store, req_head: obs_req, resp_head: obs_resp)])
         back = reimport(har)
         back.row.status.should eq(200)
-        String.new(back.request_head).should contain("X-Note: caf\uFFFD\r\n")
+        # The headers array is scrubbed; the raw-head extension keeps the octets themselves.
+        back.request_head.should eq(obs_req.to_slice)
       end
     end
 
