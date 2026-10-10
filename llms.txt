@@ -1,0 +1,103 @@
+# gori
+
+> gori is a fast, keyboard-driven HTTP/HTTPS intercepting proxy and web security toolkit for authorized testing in the terminal.
+
+## Pages
+
+- [Gori: HTTP Intercepting Proxy for the Terminal](https://gori.hahwul.com/): gori is a fast, keyboard-driven HTTP/HTTPS intercepting proxy and web security toolkit for authorized testing in the terminal.
+- [Gori: 터미널용 HTTP 인터셉트 프록시](https://gori.hahwul.com/ko/): gori는 허가된 보안 테스트를 위한 빠른 키보드 중심의 HTTP/HTTPS 인터셉트 프록시이자 터미널 웹 보안 툴킷입니다.
+
+## Install gori and Capture Your First Request
+
+- [gori MCP and AI Agent Setup](https://gori.hahwul.com/getting-started/ai-setup/): Connect an AI agent to gori over MCP: install the server into your client, pin the project, and drive your first request.
+- [Configure gori and Its Root CA](https://gori.hahwul.com/getting-started/configuration/): Where gori stores data, how to configure the network, and the root CA.
+- [Install gori](https://gori.hahwul.com/getting-started/installation/): Install gori via curl, Chocolatey, Homebrew, the AUR, Snap, Nix, Docker, a pre-built binary (Linux, macOS, Windows), or from source.
+- [gori Quick Start](https://gori.hahwul.com/getting-started/quick-start/): A hands-on walkthrough: trust the CA, capture a real request, inspect it, and replay it in Repeater.
+- [gori MCP와 AI 에이전트 설정](https://gori.hahwul.com/ko/getting-started/ai-setup/): MCP로 AI 에이전트를 gori에 연결합니다: 클라이언트에 서버 설치, 프로젝트 고정, 첫 요청 보내기.
+- [gori 설정과 루트 CA](https://gori.hahwul.com/ko/getting-started/configuration/): gori가 데이터를 저장하는 위치, 네트워크 설정 방법, 그리고 루트 CA를 다룹니다.
+- [gori 설치](https://gori.hahwul.com/ko/getting-started/installation/): curl, Chocolatey, Homebrew, AUR, Snap, Nix, Docker, 사전 빌드 바이너리(Linux, macOS, Windows), 또는 소스에서 gori를 설치합니다.
+- [gori 빠른 시작](https://gori.hahwul.com/ko/getting-started/quick-start/): 직접 따라 하는 튜토리얼: CA를 신뢰하고, 실제 요청을 캡처해 살펴본 뒤 Repeater에서 재전송합니다.
+
+## HTTP Proxy and Web Security Guides
+
+- [Authorization Testing](https://gori.hahwul.com/guide/authorize/): Replay a captured request under several identities and diff the verdicts to find broken access control.
+- [Session Cookie Security](https://gori.hahwul.com/guide/cookie/): Decode, verify, crack, and re-sign Flask, Rack, and Django signed session cookies.
+- [Decoder: Encode, Decode, and Hash](https://gori.hahwul.com/guide/decoder/): Encode, decode, hash, and transform data in a multi-step pipeline inside the TUI.
+- [Keyboard Shortcuts](https://gori.hahwul.com/guide/hotkeys/): Rebind gori's keyboard shortcuts from the Preferences modal.
+- [JWT Security Testing](https://gori.hahwul.com/guide/jwt/): Decode, verify, edit, and re-sign JSON Web Tokens, then generate alg:none, weak-secret, header-injection, and algorithm-confusion test payloads.
+- [MCP Server](https://gori.hahwul.com/guide/mcp/): Drive gori from an AI agent or script over the Model Context Protocol.
+- [OAST for Blind Vulnerabilities](https://gori.hahwul.com/guide/oast/): Catch out-of-band callbacks (interactsh & friends) to confirm blind SSRF, XXE, injection, and remote file inclusion.
+- [Proxy & History](https://gori.hahwul.com/guide/proxy/): Capture traffic, intercept requests, scope your target, and inspect every protocol.
+- [Repeater & Fuzzer](https://gori.hahwul.com/guide/repeater-and-fuzzer/): The request workbench and the Intruder-style fuzzer, in the TUI and headless.
+- [Web Security Scanning and Issues](https://gori.hahwul.com/guide/scanning/): The Probe scanner, the Param Miner, and triaging results into Issues.
+- [CLI Scripting with gori run](https://gori.hahwul.com/guide/scripting/): Drive gori headless with gori run: the same project and engines as the TUI, shaped for pipelines and CI.
+- [Token Randomness Testing](https://gori.hahwul.com/guide/sequencer/): Grade the randomness of session tokens, CSRF tokens, and reset codes for predictability.
+- [TUI Settings](https://gori.hahwul.com/guide/settings/): The Preferences modal: one place for every gori setting, reachable from anywhere.
+- [Space Menu & Palette](https://gori.hahwul.com/guide/space-menu-and-palette/): Find any action without memorizing keys: the space menu for what you do often, the command palette for everything else.
+- [Custom TUI Statusline](https://gori.hahwul.com/guide/statusline/): An extra row at the bottom of the TUI, filled by a shell command of your own.
+- [TUI Themes](https://gori.hahwul.com/guide/themes/): Switch between gori's built-in colour themes, or drop in your own.
+- [접근 제어 테스트](https://gori.hahwul.com/ko/guide/authorize/): 캡처한 요청을 여러 아이덴티티로 재전송하고 판정을 비교해 접근 제어 결함을 찾습니다.
+- [세션 쿠키 보안](https://gori.hahwul.com/ko/guide/cookie/): Flask, Rack, Django의 서명된 세션 쿠키를 디코드, 검증, 크랙, 재서명합니다.
+- [Decoder: 인코드, 디코드, 해시](https://gori.hahwul.com/ko/guide/decoder/): TUI 안에서 다단계 파이프라인으로 데이터를 인코드, 디코드, 해시, 변환합니다.
+- [키보드 단축키](https://gori.hahwul.com/ko/guide/hotkeys/): Preferences 모달에서 gori의 단축키를 재지정합니다.
+- [JWT 보안 테스트](https://gori.hahwul.com/ko/guide/jwt/): JSON Web Token을 HMAC과 비대칭 알고리즘 전반에서 디코드·검증·편집·재서명하고, alg:none, weak-secret, header-injection, algorithm-confusion 페이로드를 생성합니다.
+- [MCP 서버](https://gori.hahwul.com/ko/guide/mcp/): Model Context Protocol을 통해 AI 에이전트나 스크립트로 gori를 구동합니다.
+- [Blind 취약점 검증을 위한 OAST](https://gori.hahwul.com/ko/guide/oast/): out-of-band 콜백(interactsh 등)을 잡아 blind SSRF, XXE, injection, 원격 파일 포함을 확인하세요.
+- [프록시 & History](https://gori.hahwul.com/ko/guide/proxy/): 트래픽을 캡처하고, 요청을 인터셉트하고, 대상을 스코프로 좁히고, 모든 프로토콜을 살펴봅니다.
+- [Repeater & Fuzzer](https://gori.hahwul.com/ko/guide/repeater-and-fuzzer/): 요청 워크벤치와 Intruder 스타일 Fuzzer를, TUI와 헤드리스에서 다룹니다.
+- [웹 보안 스캐닝과 Issues](https://gori.hahwul.com/ko/guide/scanning/): Probe 스캐너, Param Miner, 그리고 결과를 Issues로 트리아지하기.
+- [gori run 스크립팅](https://gori.hahwul.com/ko/guide/scripting/): gori run으로 gori를 헤드리스로 구동합니다. TUI와 같은 프로젝트·같은 엔진을 파이프라인과 CI에 맞춘 형태로 제공합니다.
+- [토큰 무작위성 테스트](https://gori.hahwul.com/ko/guide/sequencer/): 세션 token, CSRF token, 리셋 코드의 무작위성을 예측 가능성 관점에서 등급 매기기.
+- [TUI 설정](https://gori.hahwul.com/ko/guide/settings/): Preferences 모달: gori의 모든 설정을 한곳에서, 어디서나.
+- [space 메뉴와 팔레트](https://gori.hahwul.com/ko/guide/space-menu-and-palette/): 키를 외우지 않고도 모든 동작을 찾는 법: 자주 쓰는 것은 space 메뉴, 나머지는 커맨드 팔레트.
+- [사용자 지정 TUI Statusline](https://gori.hahwul.com/ko/guide/statusline/): 직접 작성한 셸 명령이 채우는, TUI 맨 아래의 한 줄.
+- [TUI 테마](https://gori.hahwul.com/ko/guide/themes/): gori의 내장 컬러 테마를 전환하거나, 직접 만든 테마를 넣습니다.
+
+## Playbooks
+
+- [JWT 공격](https://gori.hahwul.com/ko/playbooks/attack-a-jwt/): JSON Web Token을 디코드하고, 클레임을 변조하고, 서버가 실제로 서명을 검증하는지 시험합니다.
+- [세션 유지](https://gori.hahwul.com/ko/playbooks/carry-a-session/): 한 번 로그인해 토큰을 캡처하고, 이후의 모든 요청을 인증된 사용자로 재전송합니다. 손으로도, 헤드리스로도.
+- [OAST로 블라인드 취약점 확인](https://gori.hahwul.com/ko/playbooks/confirm-blind-vulns-oast/): 어떤 버그는 응답에 절대 드러나지 않습니다. 서버가 나에게 연결하게 만들어 증명하고, 그 콜백을 잡으세요.
+- [세션 쿠키 크랙과 위조](https://gori.hahwul.com/ko/playbooks/crack-and-forge-cookies/): 서명된 Flask, Rack, Django 쿠키를 읽고, 그것을 서명하는 비밀키를 복구하고, 직접 만들어 냅니다.
+- [데이터 디코드와 변환](https://gori.hahwul.com/ko/playbooks/decode-and-transform/): 변환기를 파이프라인으로 이어 붙여(디코드하고, 또 디코드하고, 해시하고) 각 단계의 출력을 지켜본 뒤, 재사용하도록 저장합니다.
+- [파라미터 퍼징](https://gori.hahwul.com/ko/playbooks/fuzz-a-parameter/): 캡처한 요청의 한 부분을 표시하고, 워드리스트를 던지고, 튀는 응답을 읽어 냅니다.
+- [토큰 랜덤성 평가](https://gori.hahwul.com/ko/playbooks/grade-token-randomness/): 세션 토큰 수백 개를 수집하고 Sequencer가 그것이 얼마나 예측 가능한지 채점하게 합니다.
+- [플로우 중 가로채기 및 수정](https://gori.hahwul.com/ko/playbooks/intercept-and-modify/): 요청을 흐름 중간에 붙잡아 바꾸고 계속 흘려보낸 뒤, 그 변경을 규칙으로 고정합니다.
+- [공격면 매핑](https://gori.hahwul.com/ko/playbooks/map-the-attack-surface/): 스코프가 걸린 캡처를 host→path 트리로 접고, Discover로 한 번도 클릭하지 않은 엔드포인트를 드러냅니다.
+- [AI 코파일럿 세션 실행](https://gori.hahwul.com/ko/playbooks/run-an-ai-co-pilot/): MCP로 같은 프로젝트에 에이전트를 붙이고 중요한 동작을 드러낸 채 사용합니다. 인텔리전스는 설계상 도구 바깥에 있습니다.
+- [엔게이지먼트 준비](https://gori.hahwul.com/ko/playbooks/set-up-an-engagement/): 프로젝트를 만들고, 스코프를 그리고, 테스트를 샌드박스 안에 가둡니다. 모든 액티브 도구가 발동 전에 확인하는 가드레일입니다.
+- [권한 우회 찾기](https://gori.hahwul.com/ko/playbooks/test-access-control/): 캡처한 요청을 다른 사용자로, 또 로그인하지 않은 상태로 다시 보내 서버가 권한 확인을 빠뜨린 곳을 찾습니다.
+- [트리아지와 리포트](https://gori.hahwul.com/ko/playbooks/triage-and-report/): 흩어진 발견들을 이슈로 모으고, diff로 수정을 증명하고, 동료가 읽을 수 있는 리포트로 내보냅니다.
+- [Attack a JWT](https://gori.hahwul.com/playbooks/attack-a-jwt/): Decode a JSON Web Token, tamper with its claims, and test whether the server actually verifies the signature.
+- [Carry a session](https://gori.hahwul.com/playbooks/carry-a-session/): Log in once, capture the token, and replay every later request as an authenticated user, by hand and headless.
+- [Confirm blind vulnerabilities with OAST](https://gori.hahwul.com/playbooks/confirm-blind-vulns-oast/): Some bugs never show in the response. Prove them by making the server call you, and catch the callback.
+- [Crack and forge session cookies](https://gori.hahwul.com/playbooks/crack-and-forge-cookies/): Read a signed Flask, Rack, or Django cookie, recover the secret that signs it, and mint your own.
+- [Decode and transform data](https://gori.hahwul.com/playbooks/decode-and-transform/): Chain converters into a pipeline (decode, decode again, hash) and watch each step's output, then save it for reuse.
+- [Fuzz a parameter](https://gori.hahwul.com/playbooks/fuzz-a-parameter/): Mark one part of a captured request, throw a wordlist at it, and read the responses that stand out.
+- [Grade token randomness](https://gori.hahwul.com/playbooks/grade-token-randomness/): Collect a few hundred session tokens and let the Sequencer score how predictable they are.
+- [Intercept and modify in flight](https://gori.hahwul.com/playbooks/intercept-and-modify/): Hold a request mid-flight, change it, let it continue, then make the change stick as a rule.
+- [Map the attack surface](https://gori.hahwul.com/playbooks/map-the-attack-surface/): Fold a scoped capture into a host→path tree, then let Discover surface the endpoints you never clicked.
+- [Run an AI co-pilot session](https://gori.hahwul.com/playbooks/run-an-ai-co-pilot/): Put an agent on the same project over MCP and keep its consequential actions visible. The intelligence lives outside the tool, by design.
+- [Set up an engagement](https://gori.hahwul.com/playbooks/set-up-an-engagement/): Create a project, draw a scope, and lock the test inside a sandbox: the guardrails every active tool checks before it fires.
+- [Test access control](https://gori.hahwul.com/playbooks/test-access-control/): Replay the requests you captured as another user, and as nobody, to see which ones the server forgets to check.
+- [Triage and report](https://gori.hahwul.com/playbooks/triage-and-report/): Turn scattered findings into issues, prove a fix with a diff, and export a report a teammate can read.
+
+## CLI, Configuration, and Query Reference
+
+- [브랜드 키트](https://gori.hahwul.com/ko/reference/brand/): gori 마크, 그 뒤의 팔레트, 그리고 월페이퍼. 모두 바로 내려받을 수 있습니다.
+- [기능 매트릭스](https://gori.hahwul.com/ko/reference/capabilities/): 프로토콜과 진입점별 캡처, 인터셉트, 재전송, 퍼징 범위.
+- [CLI 레퍼런스](https://gori.hahwul.com/ko/reference/cli/): 모든 gori 서브커맨드와 커맨드라인 플래그: TUI, 스크립트와 CI를 위한 헤드리스 gori run, MCP 서버, CA와 설정.
+- [설정 레퍼런스](https://gori.hahwul.com/ko/reference/config/): settings.json 키와 GORI_HOME 저장소 레이아웃.
+- [Miss Ring](https://gori.hahwul.com/ko/reference/miss-ring/): gori의 컴패니언. 캐릭터가 어디서 왔는지, 그리고 여덟 칸에 어떻게 들어갔는지.
+- [플랫폼 지원](https://gori.hahwul.com/ko/reference/platform-support/): gori가 지원하는 운영체제와 아키텍처, 지원 등급별로 보장하는 것, 그리고 Windows에서 알려진 한계.
+- [Probe 스캔 룰](https://gori.hahwul.com/ko/reference/probe-rules/): Probe 내장 스캔 룰 전체를 id별로: 무엇을 검사하는지, 범주, 액티브 룰의 플로우당 요청 비용.
+- [gori 쿼리 언어](https://gori.hahwul.com/ko/reference/query-language/): History, Sitemap, Probe, Issues, Intercept, MCP 도구 전반에서 쓰는 필터 문법.
+- [Brand Kit](https://gori.hahwul.com/reference/brand/): The gori mark, the palette behind it, and the wallpapers, with direct downloads.
+- [Capability Matrix](https://gori.hahwul.com/reference/capabilities/): What gori can capture, intercept, replay, and fuzz across protocols and entry points.
+- [CLI Reference](https://gori.hahwul.com/reference/cli/): Every gori subcommand and command-line flag: the TUI, the headless gori run suite for scripts and CI, the MCP server, CA and settings.
+- [Configuration Reference](https://gori.hahwul.com/reference/config/): The settings.json keys and the GORI_HOME storage layout.
+- [Miss Ring](https://gori.hahwul.com/reference/miss-ring/): gori's companion: where the character came from, and the eight cells she is drawn on.
+- [Platform Support](https://gori.hahwul.com/reference/platform-support/): Which operating systems and architectures gori supports, what each support tier promises, and the known gaps on Windows.
+- [Probe Scan Rules](https://gori.hahwul.com/reference/probe-rules/): Every built-in Probe scan rule by id: what it checks, its category, and what an active rule costs per flow.
+- [gori Query Language](https://gori.hahwul.com/reference/query-language/): The filter syntax used across History, Sitemap, Probe, Issues, Intercept, and the MCP tools.
+

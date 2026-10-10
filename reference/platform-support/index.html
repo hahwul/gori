@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script>
+    /* Set the color theme before first paint to avoid a flash. Default: dark. */
+    (function () {
+      document.documentElement.classList.add("has-js");
+      try {
+        var t = localStorage.getItem("gori-theme");
+        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Which operating systems and architectures gori supports, what each support tier promises, and the known gaps on Windows.">
+  
+  <title>Platform Support - gori</title>
+  <link rel="icon" type="image/png" href="https://gori.hahwul.com/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="https://gori.hahwul.com/icons/favicon.svg" />
+  <link rel="shortcut icon" href="https://gori.hahwul.com/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="https://gori.hahwul.com/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Gori" />
+  <link rel="manifest" href="https://gori.hahwul.com/icons/site.webmanifest" />
+  <meta property="og:title" content="Platform Support">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gori.hahwul.com/reference/platform-support/">
+  <meta property="og:description" content="Which operating systems and architectures gori supports, what each support tier promises, and the known gaps on Windows.">
+  <meta property="og:image" content="https://gori.hahwul.com/og-images/reference-platform-support.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Platform Support">
+  <meta name="twitter:description" content="Which operating systems and architectures gori supports, what each support tier promises, and the known gaps on Windows.">
+  <meta name="twitter:image" content="https://gori.hahwul.com/og-images/reference-platform-support.png">
+  <meta property="og:site_name" content="gori">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:locale:alternate" content="ko_KR">
+  
+  <link rel="canonical" href="https://gori.hahwul.com/reference/platform-support/">
+  
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Platform Support","url":"https://gori.hahwul.com/reference/platform-support/","description":"Which operating systems and architectures gori supports, what each support tier promises, and the known gaps on Windows.","image":"https://gori.hahwul.com/og-images/reference-platform-support.png"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"gori","item":"https://gori.hahwul.com/"},{"@type":"ListItem","position":2,"name":"CLI, Configuration, and Query Reference","item":"https://gori.hahwul.com/reference/"},{"@type":"ListItem","position":3,"name":"Platform Support"}]}</script>
+  <link rel="alternate" hreflang="en" href="https://gori.hahwul.com/reference/platform-support/">
+<link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/reference/platform-support/">
+  <link rel="alternate" hreflang="x-default" href="https://gori.hahwul.com/reference/platform-support/">
+  
+  
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/style.css">
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/docs.css">
+  
+  
+  
+  
+  
+</head>
+<body class="is-doc" data-section="reference">
+  <a class="skip-link" href="#main">Skip to content</a>
+<header class="docs-header">
+  <a href="https://gori.hahwul.com/" class="logo" aria-label="gori home">
+    <span class="logo-mark" aria-hidden="true" style="--logo-src: url('https://gori.hahwul.com/images/gori.png')" title="Right-click to download logo"></span>
+    <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
+  </a>
+
+  
+  <nav class="top-nav" aria-label="Primary">
+    <a href="https://gori.hahwul.com/getting-started/">Start</a>
+    <a href="https://gori.hahwul.com/playbooks/">Playbooks</a>
+    <a href="https://gori.hahwul.com/guide/">Guide</a>
+    <a href="https://gori.hahwul.com/reference/" class="active" aria-current="true">Reference</a>
+  </nav>
+
+  
+  <details class="nav-compact">
+    <summary class="nav-compact-trigger" aria-label="Primary">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </summary>
+    <div class="nav-compact-panel" role="navigation" aria-label="Primary">
+      <a href="https://gori.hahwul.com/getting-started/">Start</a>
+      <a href="https://gori.hahwul.com/playbooks/">Playbooks</a>
+      <a href="https://gori.hahwul.com/guide/">Guide</a>
+      <a href="https://gori.hahwul.com/reference/" class="active" aria-current="true">Reference</a>
+      <a href="https://gori.hahwul.com/getting-started/installation/">Install</a>
+    </div>
+  </details>
+
+  
+  <div class="header-right">
+    <button class="search-trigger" onclick="openSearch()" aria-label="Search documentation" title="Search documentation (&#8984;K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+    </button>
+    
+    
+    <nav class="lang-switch" aria-label="Language">
+      
+      <a href="https://gori.hahwul.com/reference/platform-support/" hreflang="en" lang="en" aria-label="EN: English" title="English" class="is-current" aria-current="true">EN</a>
+      
+      <a href="https://gori.hahwul.com/ko/reference/platform-support/" hreflang="ko" lang="ko" aria-label="KO: 한국어" title="한국어">KO</a>
+      
+    </nav>
+    
+    <a class="github-link" href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer" aria-label="View on GitHub" title="View on GitHub">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58C20.57 22.29 24 17.79 24 12.5 24 5.87 18.63.5 12 .5z"/></svg>
+    </a>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle color theme" title="Toggle theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2v2.2M12 19.8V22M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2 12h2.2M19.8 12H22M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="logo-menu" id="logo-menu" hidden role="menu" aria-label="Download logo">
+  <div class="logo-menu-sep" aria-hidden="true">PNG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.png" download="gori-logo.png">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.png" download="gori-logo-dark.png">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.png" download="gori-logo-color.png">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">WebP</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.webp" download="gori-logo.webp">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.webp" download="gori-logo-dark.webp">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.webp" download="gori-logo-color.webp">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">SVG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.svg" download="gori-logo.svg">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.svg" download="gori-logo-dark.svg">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.svg" download="gori-logo-color.svg">Color</a>
+  <div class="logo-menu-sep logo-menu-sep--rule" aria-hidden="true"></div>
+  <button type="button" role="menuitem" id="copy-logo-url" data-logo-url="https://gori.hahwul.com/images/gori.svg" data-label="Copy SVG URL" data-copied="Copied">Copy SVG URL</button>
+  <a role="menuitem" href="https://gori.hahwul.com/reference/brand/">Brand kit →</a>
+</div>
+<div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)closeSearch()">
+  <div class="search-modal" role="dialog" aria-modal="true" aria-label="Search documentation">
+    <div class="search-input-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m21 21-4.3-4.3"></path>
+      </svg>
+      <input type="search" id="searchInput" aria-label="Search" placeholder="Search the docs…" autocomplete="off" spellcheck="false">
+      <kbd class="search-esc" onclick="closeSearch()">ESC</kbd>
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+</div>
+
+
+<div class="docs-container">
+  <aside class="docs-sidebar">
+  <details class="docs-navigation" open>
+    <summary class="docs-navigation-toggle">Browse documentation</summary>
+
+    
+    
+    <nav class="manual-nav" aria-label="Documentation">
+      
+      <details class="nav-section">
+        <summary>Start</summary>
+        <ul class="nav-links">
+          <li><a href="https://gori.hahwul.com/getting-started/">Overview</a></li>
+          
+          <li><a href="https://gori.hahwul.com/getting-started/installation/">Install gori</a></li>
+          
+          <li><a href="https://gori.hahwul.com/getting-started/quick-start/">gori Quick Start</a></li>
+          
+          <li><a href="https://gori.hahwul.com/getting-started/ai-setup/">gori MCP and AI Agent Setup</a></li>
+          
+          <li><a href="https://gori.hahwul.com/getting-started/configuration/">Configure gori and Its Root CA</a></li>
+          
+        </ul>
+      </details>
+      
+
+      
+      <details class="nav-section">
+        <summary>Guide</summary>
+        <ul class="nav-links">
+          <li><a href="https://gori.hahwul.com/guide/">Overview</a></li>
+          
+          
+          
+          
+          <li><details class="nav-group">
+            <summary>Core</summary>
+            <ul class="nav-links">
+          
+              <li><a href="https://gori.hahwul.com/guide/space-menu-and-palette/">Space Menu &amp; Palette</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/guide/proxy/">Proxy &amp; History</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/guide/scanning/">Web Security Scanning and Issues</a></li>
+          
+          
+          
+          </ul></details></li>
+          <li><details class="nav-group">
+            <summary>Workbenches</summary>
+            <ul class="nav-links">
+          
+              <li><a href="https://gori.hahwul.com/guide/decoder/">Decoder: Encode, Decode, and Hash</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/guide/jwt/">JWT Security Testing</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/guide/cookie/">Session Cookie Security</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/guide/sequencer/">Token Randomness Testing</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/guide/oast/">OAST for Blind Vulnerabilities</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/guide/authorize/">Authorization Testing</a></li>
+          
+          
+          
+          </ul></details></li>
+          <li><details class="nav-group">
+            <summary>Automation</summary>
+            <ul class="nav-links">
+          
+              <li><a href="https://gori.hahwul.com/guide/scripting/">CLI Scripting with gori run</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/guide/mcp/">MCP Server</a></li>
+          
+          
+          
+          </ul></details></li>
+          <li><details class="nav-group">
+            <summary>Customize</summary>
+            <ul class="nav-links">
+          
+              <li><a href="https://gori.hahwul.com/guide/settings/">TUI Settings</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/guide/themes/">TUI Themes</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/guide/hotkeys/">Keyboard Shortcuts</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/guide/statusline/">Custom TUI Statusline</a></li>
+          </ul></details></li>
+          
+        </ul>
+      </details>
+      
+
+      
+      <details class="nav-section" open>
+        <summary>Reference</summary>
+        <ul class="nav-links">
+          <li><a href="https://gori.hahwul.com/reference/">Overview</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/capabilities/">Capability Matrix</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/platform-support/" class="active" aria-current="page">Platform Support</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/cli/">CLI Reference</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/config/">Configuration Reference</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/query-language/">gori Query Language</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/probe-rules/">Probe Scan Rules</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/brand/">Brand Kit</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/miss-ring/">Miss Ring</a></li>
+          
+        </ul>
+      </details>
+      
+
+      
+      <a class="book-promo" href="https://gori.hahwul.com/playbooks/">
+        <span>The gori field guide</span>
+        <strong>Playbooks →</strong>
+      </a>
+      
+    </nav>
+    
+  </details>
+</aside>
+  <main id="main" class="docs-main">
+    <nav class="document-path" aria-label="You are here">
+      <a href="https://gori.hahwul.com/">gori</a>
+      <span aria-hidden="true">/</span><a href="https://gori.hahwul.com/reference/">CLI, Configuration, and Query Reference</a>
+      
+    </nav>
+    <header class="document-heading">
+      <p class="doc-kicker">Reference</p>
+      <h1>Platform Support</h1>
+    </header>
+    <div class="toc-placeholder" aria-hidden="true"></div>
+    <article class="document-body"><p>gori ships as one binary for macOS, Linux and Windows, but not every platform gets the same guarantees. They are sorted into two tiers. A platform is named by its OS and CPU architecture, the way release assets are named (<code>linux-arm64</code>, <code>osx-x86_64</code>). gori is built with Crystal, so each platform also depends on the compiler's own <a href="https://crystal-lang.org/reference/1.21/syntax_and_semantics/platform_support.html">platform support</a>.</p>
+<h2 id="tier-1">Tier 1</h2>
+<p>Tier 1 platforms can be thought of as &quot;the whole of gori&quot;. Each one:</p>
+<ul>
+<li>gets a pre-built binary on every <a href="https://github.com/hahwul/gori/releases/latest">GitHub Release</a> and is covered by the <a href="/getting-started/installation/#quick-install-curl">curl installer</a> and <a href="/getting-started/installation/#homebrew">Homebrew</a>,</li>
+<li>is built from source in CI or at release, and its release binary is run before it is published,</li>
+<li>is used day to day: macOS is the platform gori is developed on, and the spec suite runs on Linux x86_64 in CI (the specs mirroring a change on every pull request, the full suite on every push to <code>main</code>),</li>
+<li>has no known platform-specific gaps.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Target</th>
+<th>Release asset</th>
+<th>Other channels</th>
+<th>Tested by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>macOS arm64 (Apple Silicon)</td>
+<td><code>gori-v*-osx-arm64.tar.gz</code></td>
+<td>Nix</td>
+<td>Day-to-day development; the release build runs <code>--version</code> from its packaged tarball</td>
+</tr>
+<tr>
+<td>macOS x86_64 (Intel)</td>
+<td><code>gori-v*-osx-x86_64.tar.gz</code></td>
+<td>—</td>
+<td>The release build runs <code>--version</code> from its packaged tarball</td>
+</tr>
+<tr>
+<td>Linux x86_64</td>
+<td><code>gori-v*-linux-x86_64</code> (static, musl)</td>
+<td>AUR, Snap, Nix, Docker</td>
+<td>The specs mirroring a change on every pull request, the full suite on every push to <code>main</code>; the release binary is checked to be static and run</td>
+</tr>
+<tr>
+<td>Linux arm64</td>
+<td><code>gori-v*-linux-arm64</code> (static, musl)</td>
+<td>Nix, Docker</td>
+<td>The Docker image is built natively on every push to <code>main</code>; the release binary is checked to be static and run</td>
+</tr>
+</tbody>
+</table>
+<p>The spec suite does not run on macOS or Linux arm64 in CI, so a regression specific to one of those targets is found in use, not by CI.</p>
+<h2 id="tier-2">Tier 2</h2>
+<p>Tier 2 platforms can be thought of as &quot;works, with known gaps&quot;. Each one builds and passes its own CI, ships release binaries, but may have known gaps, listed below.</p>
+<table>
+<thead>
+<tr>
+<th>Target</th>
+<th>Release asset</th>
+<th>Other channels</th>
+<th>Tested by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Windows x86_64</td>
+<td><code>gori-v*-windows-x86_64.exe</code> (static)</td>
+<td>Chocolatey</td>
+<td>On every pull request that touches Crystal code: a native build, a smoke test that proxies an HTTP and an HTTPS request and reads them back from the project, the TUI driven under a real Windows pseudo-console (ConPTY), and the spec suite, one file at a time</td>
+</tr>
+</tbody>
+</table>
+<p>Release binaries for Windows start with v0.8.0.</p>
+<h3 id="windows-gaps">Windows known gaps</h3>
+<table>
+<thead>
+<tr>
+<th>Area</th>
+<th>On Windows</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Console</td>
+<td>The TUI needs a console that speaks VT sequences: Windows Terminal, or any Windows 10 1809+ console.</td>
+</tr>
+<tr>
+<td>Signals</td>
+<td>There are no POSIX signals. Ctrl-C and Ctrl-Break act as <code>INT</code>; closing the console window, logging off or shutting down act as <code>TERM</code>, but Windows ends the process soon after, so cleanup on those gets little time.</td>
+</tr>
+<tr>
+<td><a href="/reference/cli/#run-shell"><code>gori run shell</code></a></td>
+<td>The CA bundle it writes starts from the system roots, which gori looks for only at Unix paths. On Windows it holds gori&#39;s root alone unless <code>SSL_CERT_FILE</code> already names a bundle, so a tool in that shell fails TLS verification for any host gori does not intercept (a passthrough host, anything in <code>NO_PROXY</code>). Export a full bundle as <code>SSL_CERT_FILE</code> first to avoid it. The default <code>--print</code> syntax there is PowerShell.</td>
+</tr>
+<tr>
+<td>File permissions</td>
+<td>POSIX modes such as <code>0600</code> on the root CA key do not apply. Files under <code>GORI_HOME</code> (<code>%USERPROFILE%\.gori</code>) get whatever access that folder grants.</td>
+</tr>
+<tr>
+<td><code>gori update</code></td>
+<td>Windows will not overwrite a running <code>.exe</code>, so the old one is renamed aside and the new one takes its place; if the old one is still running, the leftover <code>.gori-update.old.*</code> file is removed by the next <code>gori update</code>. A Chocolatey install is never updated in place: <code>gori update</code> prints <code>choco upgrade gori -y</code>, to run from an elevated shell with gori closed.</td>
+</tr>
+<tr>
+<td>Installer</td>
+<td>The curl installer is macOS and Linux only. Use <a href="/getting-started/installation/#chocolatey-windows">Chocolatey</a> or the <a href="/getting-started/installation/#windows">direct download</a>.</td>
+</tr>
+<tr>
+<td><a href="/guide/mcp/#messages-from-gori">Messages from gori</a></td>
+<td>Claude Code&#39;s inbox socket is a Unix socket, so it is never found on Windows. Operator messages reach Claude Code with the next tool result or through <code>operator_messages</code> instead.</td>
+</tr>
+<tr>
+<td>Statusline command</td>
+<td><code>statusline.command</code> runs through <code>cmd.exe /d /s /c</code>, not <code>/bin/sh -c</code>, so a POSIX shell script needs a Windows-native equivalent (or an <code>sh</code> on <code>PATH</code>).</td>
+</tr>
+<tr>
+<td>Test coverage</td>
+<td>The two legacy-schema migration spec files (<code>spec/store/*_autoincrement_migration_spec.cr</code>) are skipped, because on Windows they hang when run back to back in one process. Upgrading a project database from before those migrations is tested on POSIX only.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="not-supported">Not supported</h2>
+<p>No release binary, no package and no CI. Some may <a href="/getting-started/installation/#build-from-source">build from source</a>, but nothing checks that they do.</p>
+<table>
+<thead>
+<tr>
+<th>Platform</th>
+<th>Note</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Windows arm64</td>
+<td>No gori build</td>
+</tr>
+<tr>
+<td>32-bit x86 and ARM Linux</td>
+<td>No gori build</td>
+</tr>
+<tr>
+<td>32-bit Windows</td>
+<td>No gori build</td>
+</tr>
+<tr>
+<td>FreeBSD, OpenBSD</td>
+<td>Untested from source</td>
+</tr>
+<tr>
+<td>Other BSDs, Android, Solaris</td>
+<td>Untested from source</td>
+</tr>
+</tbody>
+</table>
+</article>
+    
+
+
+<nav class="page-navigation" aria-label="Continue reading">
+  
+  <a href="https://gori.hahwul.com/reference/capabilities/" rel="prev"><span>← Previous</span><strong>Capability Matrix</strong></a>
+  
+  
+  <a href="https://gori.hahwul.com/reference/cli/" rel="next"><span>Next →</span><strong>CLI Reference</strong></a>
+  
+</nav>
+
+  </main>
+  <aside class="docs-toc-rail" id="tocRail" aria-label="On this page" data-title="On this page"></aside>
+</div>
+
+
+<footer class="docs-footer">
+  <p class="footer-meta">
+    <a class="footer-sig" href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul, Built with Love">
+      <span class="hahwul-img" aria-hidden="true"></span>
+      <span class="footer-love">Built with Love</span>
+    </a>
+    <span aria-hidden="true">·</span>
+    <span>Apache-2.0 · © HAHWUL</span>
+  </p>
+</footer>
+<script>
+  /* Theme toggle: flip data-theme, remember the choice, and swap the TUI
+     screenshots to the matching light/dark capture. */
+  (function () {
+    /* Point every TUI screenshot at its light or dark capture. The light set
+       lives under images/tui/light/; the theme gallery (theme-*.svg) is left
+       alone, and any shot without a light twin falls back to the dark one. */
+    function syncTuiShots() {
+      var light = document.documentElement.getAttribute("data-theme") === "light";
+      var imgs = document.querySelectorAll('img[src*="/images/tui/"]');
+      for (var i = 0; i < imgs.length; i++) {
+        var img = imgs[i];
+        if (img.dataset.noLight === "1") continue;
+        /* Decide from the ORIGINAL dark src, not the live one (which may already
+           be swapped to the light path from a previous toggle). */
+        var orig = img.dataset.darkSrc || img.getAttribute("src");
+        if (orig.indexOf("/images/tui/light/") !== -1 || /\/images\/tui\/theme-/.test(orig)) continue;
+        if (!img.dataset.darkSrc) img.dataset.darkSrc = orig;
+        var want = light ? orig.replace("/images/tui/", "/images/tui/light/") : orig;
+        if (img.getAttribute("src") === want) continue;
+        if (light) {
+          img.onerror = function () { this.onerror = null; this.dataset.noLight = "1"; this.setAttribute("src", this.dataset.darkSrc); };
+        } else {
+          img.onerror = null;
+        }
+        img.setAttribute("src", want);
+      }
+    }
+
+    var btn = document.getElementById("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("gori-theme", next); } catch (e) {}
+        syncTuiShots();
+      });
+    }
+    syncTuiShots();
+  })();
+
+  /* The search tooltip ships as ⌘K; outside Apple platforms say Ctrl K
+     instead (search.js already answers to both modifiers). */
+  (function () {
+    var st = document.querySelector(".search-trigger");
+    if (st && !/Mac|iPhone|iPad|iPod/.test(navigator.platform || "")) {
+      st.title = st.title.replace("⌘K", "Ctrl K");
+    }
+  })();
+
+  /* Hero install picker: swap the one-liner for the chosen channel, copy it
+     on click. Present only on the home page. */
+  (function () {
+    var root = document.getElementById("heroInstall");
+    if (!root) return;
+    var cmd = document.getElementById("installCmd");
+    var tabs = root.querySelectorAll(".install-tab");
+    function pick() {
+      for (var i = 0; i < tabs.length; i++) tabs[i].setAttribute("aria-pressed", tabs[i] === this ? "true" : "false");
+      cmd.textContent = this.getAttribute("data-cmd");
+    }
+    for (var i = 0; i < tabs.length; i++) tabs[i].addEventListener("click", pick);
+
+    var btn = document.getElementById("installCopy");
+    var timer = null;
+    btn.addEventListener("click", function () {
+      var text = cmd.textContent;
+      function done() {
+        btn.classList.add("copied");
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(function () { btn.classList.remove("copied"); }, 1600);
+      }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      } else {
+        /* http:// preview, or clipboard API rejections (focus/permission) */
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { if (document.execCommand("copy")) done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  })();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+<script src="https://gori.hahwul.com/js/search.js" defer></script>
+<script src="https://gori.hahwul.com/js/toc.js" defer></script>
+<script src="https://gori.hahwul.com/js/docs.js" defer></script>
+<script src="https://gori.hahwul.com/js/codecopy.js" defer></script>
+<script src="https://gori.hahwul.com/js/logo-menu.js" defer></script>
+
+</body>
+</html>

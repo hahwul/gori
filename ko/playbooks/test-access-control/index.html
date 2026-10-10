@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <script>
+    /* Set the color theme before first paint to avoid a flash. Default: dark. */
+    (function () {
+      document.documentElement.classList.add("has-js");
+      try {
+        var t = localStorage.getItem("gori-theme");
+        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="캡처한 요청을 다른 사용자로, 또 로그인하지 않은 상태로 다시 보내 서버가 권한 확인을 빠뜨린 곳을 찾습니다.">
+  
+  <title>권한 우회 찾기 - gori</title>
+  <link rel="icon" type="image/png" href="https://gori.hahwul.com/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="https://gori.hahwul.com/icons/favicon.svg" />
+  <link rel="shortcut icon" href="https://gori.hahwul.com/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="https://gori.hahwul.com/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Gori" />
+  <link rel="manifest" href="https://gori.hahwul.com/icons/site.webmanifest" />
+  <meta property="og:title" content="권한 우회 찾기">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gori.hahwul.com/ko/playbooks/test-access-control/">
+  <meta property="og:description" content="캡처한 요청을 다른 사용자로, 또 로그인하지 않은 상태로 다시 보내 서버가 권한 확인을 빠뜨린 곳을 찾습니다.">
+  <meta property="og:image" content="https://gori.hahwul.com/og-images/ko-playbooks-test-access-control.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="권한 우회 찾기">
+  <meta name="twitter:description" content="캡처한 요청을 다른 사용자로, 또 로그인하지 않은 상태로 다시 보내 서버가 권한 확인을 빠뜨린 곳을 찾습니다.">
+  <meta name="twitter:image" content="https://gori.hahwul.com/og-images/ko-playbooks-test-access-control.png">
+  <meta property="og:site_name" content="gori">
+  <meta property="og:locale" content="ko_KR">
+  <meta property="og:locale:alternate" content="en_US">
+  
+  <link rel="canonical" href="https://gori.hahwul.com/ko/playbooks/test-access-control/">
+  
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"권한 우회 찾기","url":"https://gori.hahwul.com/ko/playbooks/test-access-control/","description":"캡처한 요청을 다른 사용자로, 또 로그인하지 않은 상태로 다시 보내 서버가 권한 확인을 빠뜨린 곳을 찾습니다.","image":"https://gori.hahwul.com/og-images/ko-playbooks-test-access-control.png"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"gori","item":"https://gori.hahwul.com/ko/"},{"@type":"ListItem","position":2,"name":"플레이북","item":"https://gori.hahwul.com/ko/playbooks/"},{"@type":"ListItem","position":3,"name":"권한 우회 찾기"}]}</script>
+  <link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/playbooks/test-access-control/">
+<link rel="alternate" hreflang="en" href="https://gori.hahwul.com/playbooks/test-access-control/">
+  <link rel="alternate" hreflang="x-default" href="https://gori.hahwul.com/playbooks/test-access-control/">
+  
+  
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/style.css">
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/docs.css">
+  
+  <link rel="preload" href="https://gori.hahwul.com/fonts/charis-sil-400.woff2" as="font" type="font/woff2" crossorigin>
+  
+  
+  
+</head>
+<body class="is-doc is-book" data-section="playbooks">
+  <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+<header class="docs-header">
+  <a href="https://gori.hahwul.com/ko/" class="logo" aria-label="gori 홈">
+    <span class="logo-mark" aria-hidden="true" style="--logo-src: url('https://gori.hahwul.com/images/gori.png')" title="우클릭하여 로고 다운로드"></span>
+    <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
+  </a>
+
+  
+  <nav class="top-nav" aria-label="주요 메뉴">
+    <a href="https://gori.hahwul.com/ko/getting-started/">시작하기</a>
+    <a href="https://gori.hahwul.com/ko/playbooks/" class="active" aria-current="true">플레이북</a>
+    <a href="https://gori.hahwul.com/ko/guide/">가이드</a>
+    <a href="https://gori.hahwul.com/ko/reference/">레퍼런스</a>
+  </nav>
+
+  
+  <details class="nav-compact">
+    <summary class="nav-compact-trigger" aria-label="주요 메뉴">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </summary>
+    <div class="nav-compact-panel" role="navigation" aria-label="주요 메뉴">
+      <a href="https://gori.hahwul.com/ko/getting-started/">시작하기</a>
+      <a href="https://gori.hahwul.com/ko/playbooks/" class="active" aria-current="true">플레이북</a>
+      <a href="https://gori.hahwul.com/ko/guide/">가이드</a>
+      <a href="https://gori.hahwul.com/ko/reference/">레퍼런스</a>
+      <a href="https://gori.hahwul.com/ko/getting-started/installation/">설치</a>
+    </div>
+  </details>
+
+  
+  <div class="header-right">
+    <button class="search-trigger" onclick="openSearch()" aria-label="문서 검색" title="문서 검색 (&#8984;K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+    </button>
+    
+    
+    <nav class="lang-switch" aria-label="언어">
+      
+      <a href="https://gori.hahwul.com/playbooks/test-access-control/" hreflang="en" lang="en" aria-label="EN: English" title="English">EN</a>
+      
+      <a href="https://gori.hahwul.com/ko/playbooks/test-access-control/" hreflang="ko" lang="ko" aria-label="KO: 한국어" title="한국어" class="is-current" aria-current="true">KO</a>
+      
+    </nav>
+    
+    <a class="github-link" href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer" aria-label="GitHub에서 보기" title="GitHub에서 보기">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58C20.57 22.29 24 17.79 24 12.5 24 5.87 18.63.5 12 .5z"/></svg>
+    </a>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="색상 테마 전환" title="테마 전환">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2v2.2M12 19.8V22M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2 12h2.2M19.8 12H22M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="logo-menu" id="logo-menu" hidden role="menu" aria-label="로고 다운로드">
+  <div class="logo-menu-sep" aria-hidden="true">PNG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.png" download="gori-logo.png">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.png" download="gori-logo-dark.png">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.png" download="gori-logo-color.png">컬러</a>
+  <div class="logo-menu-sep" aria-hidden="true">WebP</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.webp" download="gori-logo.webp">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.webp" download="gori-logo-dark.webp">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.webp" download="gori-logo-color.webp">컬러</a>
+  <div class="logo-menu-sep" aria-hidden="true">SVG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.svg" download="gori-logo.svg">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.svg" download="gori-logo-dark.svg">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.svg" download="gori-logo-color.svg">컬러</a>
+  <div class="logo-menu-sep logo-menu-sep--rule" aria-hidden="true"></div>
+  <button type="button" role="menuitem" id="copy-logo-url" data-logo-url="https://gori.hahwul.com/images/gori.svg" data-label="SVG URL 복사" data-copied="복사됨">SVG URL 복사</button>
+  <a role="menuitem" href="https://gori.hahwul.com/ko/reference/brand/">브랜드 키트 →</a>
+</div>
+<div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)closeSearch()">
+  <div class="search-modal" role="dialog" aria-modal="true" aria-label="문서 검색">
+    <div class="search-input-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m21 21-4.3-4.3"></path>
+      </svg>
+      <input type="search" id="searchInput" aria-label="검색" placeholder="문서 검색…" autocomplete="off" spellcheck="false">
+      <kbd class="search-esc" onclick="closeSearch()">ESC</kbd>
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+</div>
+
+
+<div class="docs-container book-reader">
+  <aside class="docs-sidebar">
+  <details class="docs-navigation" open>
+    <summary class="docs-navigation-toggle">문서 둘러보기</summary>
+
+    
+    <nav class="manual-nav book-nav" aria-label="gori 실전 가이드">
+      
+      <a class="book-back" href="https://gori.hahwul.com/ko/guide/">← 문서로 돌아가기</a>
+      
+
+      
+      <header class="book-nav-header">
+        <span class="manual-nav-label">gori 실전 가이드</span>
+        <strong>플레이북</strong>
+      </header>
+      <a class="nav-overview" href="https://gori.hahwul.com/ko/playbooks/">개요</a>
+      <p class="book-contents-label">목차</p>
+
+      
+      
+      
+      
+      <details class="nav-group book-part">
+        <summary>기초</summary>
+        <ol class="nav-links book-chapters">
+      
+          <li>
+            <a href="https://gori.hahwul.com/ko/playbooks/set-up-an-engagement/">
+              <span class="chapter-number" aria-hidden="true">1</span>
+              <span>엔게이지먼트 준비</span>
+            </a>
+          </li>
+      
+      
+      
+          <li>
+            <a href="https://gori.hahwul.com/ko/playbooks/map-the-attack-surface/">
+              <span class="chapter-number" aria-hidden="true">2</span>
+              <span>공격면 매핑</span>
+            </a>
+          </li>
+      
+      
+      
+      </ol></details>
+      <details class="nav-group book-part">
+        <summary>수동 루프</summary>
+        <ol class="nav-links book-chapters">
+      
+          <li>
+            <a href="https://gori.hahwul.com/ko/playbooks/intercept-and-modify/">
+              <span class="chapter-number" aria-hidden="true">3</span>
+              <span>플로우 중 가로채기 및 수정</span>
+            </a>
+          </li>
+      
+      
+      
+          <li>
+            <a href="https://gori.hahwul.com/ko/playbooks/fuzz-a-parameter/">
+              <span class="chapter-number" aria-hidden="true">4</span>
+              <span>파라미터 퍼징</span>
+            </a>
+          </li>
+      
+      
+      
+          <li>
+            <a href="https://gori.hahwul.com/ko/playbooks/carry-a-session/">
+              <span class="chapter-number" aria-hidden="true">5</span>
+              <span>세션 유지</span>
+            </a>
+          </li>
+      
+      
+      
+      </ol></details>
+      <details class="nav-group book-part" open>
+        <summary>워크벤치</summary>
+        <ol class="nav-links book-chapters">
+      
+          <li>
+            <a href="https://gori.hahwul.com/ko/playbooks/test-access-control/" class="active" aria-current="page">
+              <span class="chapter-number" aria-hidden="true">6</span>
+              <span>권한 우회 찾기</span>
+            </a>
+          </li>
+      
+      
+      
+          <li>
+            <a href="https://gori.hahwul.com/ko/playbooks/decode-and-transform/">
+              <span class="chapter-number" aria-hidden="true">7</span>
+              <span>데이터 디코드와 변환</span>
+            </a>
+          </li>
+      
+      
+      
+          <li>
+            <a href="https://gori.hahwul.com/ko/playbooks/attack-a-jwt/">
+              <span class="chapter-number" aria-hidden="true">8</span>
+              <span>JWT 공격</span>
+            </a>
+          </li>
+      
+      
+      
+          <li>
+            <a href="https://gori.hahwul.com/ko/playbooks/crack-and-forge-cookies/">
+              <span class="chapter-number" aria-hidden="true">9</span>
+              <span>세션 쿠키 크랙과 위조</span>
+            </a>
+          </li>
+      
+      
+      
+          <li>
+            <a href="https://gori.hahwul.com/ko/playbooks/grade-token-randomness/">
+              <span class="chapter-number" aria-hidden="true">10</span>
+              <span>토큰 랜덤성 평가</span>
+            </a>
+          </li>
+      
+      
+      
+          <li>
+            <a href="https://gori.hahwul.com/ko/playbooks/confirm-blind-vulns-oast/">
+              <span class="chapter-number" aria-hidden="true">11</span>
+              <span>OAST로 블라인드 취약점 확인</span>
+            </a>
+          </li>
+      
+      
+      
+      </ol></details>
+      <details class="nav-group book-part">
+        <summary>마무리</summary>
+        <ol class="nav-links book-chapters">
+      
+          <li>
+            <a href="https://gori.hahwul.com/ko/playbooks/triage-and-report/">
+              <span class="chapter-number" aria-hidden="true">12</span>
+              <span>트리아지와 리포트</span>
+            </a>
+          </li>
+      
+      
+      
+          <li>
+            <a href="https://gori.hahwul.com/ko/playbooks/run-an-ai-co-pilot/">
+              <span class="chapter-number" aria-hidden="true">13</span>
+              <span>AI 코파일럿 세션 실행</span>
+            </a>
+          </li>
+      </ol></details>
+      
+      
+    </nav>
+
+    
+  </details>
+</aside>
+  <main id="main" class="docs-main">
+    <nav class="document-path" aria-label="현재 위치">
+      <a href="https://gori.hahwul.com/ko/playbooks/">gori 실전 가이드</a>
+      
+      <span aria-hidden="true">/</span><span>워크벤치</span>
+    </nav>
+    <header class="document-heading">
+      
+      
+      
+      <p class="chapter-label"> <span>6</span>장 <span class="chapter-total">/ 13</span></p>
+      
+      
+      <h1>권한 우회 찾기</h1>
+    </header>
+    <div class="toc-placeholder" aria-hidden="true"></div>
+    <article class="document-body"><p>한 사용자로 앱을 돌아다녀 보니 모든 페이지가 잘 열렸습니다. 사실 이것만으로는 알 수 있는 게 별로 없습니다. 진짜 궁금한 건 <em>다른</em> 사람이 같은 걸 요청했을 때입니다. 권한이 더 낮은 사용자, 다른 계정의 사용자, 아예 로그인하지 않은 사람이요. 이 플레이북에서는 이런 사람들을 아이덴티티로 만들어 두고, 캡처한 요청을 각각의 아이덴티티로 다시 보낸 뒤, 달라야 하는데 똑같이 돌아온 요청을 찾습니다. 15분 정도 걸립니다.</p>
+<blockquote>
+<p><strong>시작하기 전에.</strong> <a href="/ko/playbooks/set-up-an-engagement/">엔게이지먼트 준비</a>로 대상 스코프를 잡아 두고, 테스트를 승인한 쪽에서 테스트 계정 두 개를 받아 두세요. 하나는 다른 하나보다 권한이 높아야 합니다. 세션 슬롯은 <a href="/ko/playbooks/carry-a-session/">세션 유지</a>에서 더 자세히 다루지만, 먼저 읽지 않아도 됩니다. 테스트 권한이 있는 대상만 테스트하세요. 예시는 <code>api.example.com</code>을 대역으로 씁니다.</p>
+</blockquote>
+<h2 id="1-browse-as-the-stronger-user">1. 권한 높은 사용자로 둘러보기</h2>
+<p>권한이 높은 계정(관리자, 또는 데이터의 주인)으로 로그인해서 gori를 통해 평소처럼 앱을 써 보세요. 페이지를 열고, 목록을 보고, 레코드 하나를 열어 보고, 설정도 바꿔 보세요. 지금 보내는 요청은 하나하나가 나중에 다른 사람으로 다시 보내 볼 수 있는 요청입니다. 앱을 많이 건드릴수록 테스트할 거리도 많아집니다.</p>
+<p>id가 들어 있거나 특정 리소스를 가리키는 요청을 눈여겨보세요. <code>/orders/1042</code>, <code>/api/users/7/profile</code>, <code>?account=acme</code> 같은 것들입니다. 접근 제어 버그는 대개 이런 곳에 있습니다.</p>
+<p><strong>체크포인트.</strong> <strong>History</strong>에 관리자 트래픽이 쌓였고, 그중에 특정 레코드 하나를 가져오는 요청이 몇 개 있습니다.</p>
+<h2 id="2-make-an-identity-for-the-weaker-user">2. 권한 낮은 사용자의 아이덴티티 만들기</h2>
+<p>아이덴티티는 요청을 다시 보내기 전에 gori가 적용하는 헤더 변경 묶음입니다. 새 프로젝트에는 이미 두 개가 있습니다. 캡처한 그대로 보내는 <strong>as-captured</strong>, 그리고 <code>Cookie</code>와 <code>Authorization</code>을 지우는 <strong>anonymous</strong>입니다. 권한 낮은 사용자 하나만 추가하면 됩니다.</p>
+<p>가장 빠른 방법은 gori가 로그인 응답을 읽게 하는 것입니다. 다른 브라우저나 시크릿 창에서 gori를 거쳐 권한 낮은 계정으로 로그인하고, History에서 그 로그인을 찾아 슬롯을 만드세요. 이걸 하려고 관리자를 로그아웃하지는 마세요. 대부분의 앱은 로그아웃하면 세션 쿠키를 무효로 만드는데, 캡처한 요청들이 바로 그 쿠키를 달고 있습니다. 그러면 모든 재전송이 죽은 세션으로 나갑니다.</p>
+<pre><code class="language-bash hljs">gori run history -q 'path:/login status:200'
+gori run session from-flow &lt;login-flow-id&gt; --name low-priv
+</code></pre>
+<p>gori가 로그인 응답에서 쿠키(또는 bearer 토큰)를 꺼내 <code>low-priv</code> 아이덴티티로 저장합니다. TUI에서는 손으로 해도 됩니다. <strong>Authorize</strong> 탭을 열고 <code>i</code>, 이어서 <code>a</code>를 누른 뒤, 이름을 <code>low-priv</code>로 하고 그 사용자의 <code>Cookie:</code> 줄을 set headers 칸에 붙여 넣으세요.</p>
+<p>Authorize 탭은 기본으로는 탭 바에 없습니다. <code>0</code>을 누르고 &quot;auth&quot;를 입력하거나, <code>Ctrl-P</code> → <strong>Go to Authorize</strong>를 쓰세요.</p>
+<p><strong>체크포인트.</strong> <code>gori run session list</code>(또는 Authorize 탭에서 <code>i</code>)에 아이덴티티가 세 개 보입니다: <code>as-captured</code>, <code>anonymous</code>, <code>low-priv</code>.</p>
+<h2 id="3-queue-the-requests-and-run">3. 요청을 큐에 넣고 실행하기</h2>
+<p><strong>History</strong>에서 테스트할 만한 요청을 골라 <code>Space</code> → <code>&gt;</code> → <code>a</code>(<strong>Send flow to…</strong> → <strong>Send to Authorize</strong>)를 누르세요. 비공개 정보를 돌려주는 요청을 고르세요. 레코드, 프로필, 설정 페이지, 관리자용 목록 같은 것들입니다. 누구나 보는 공개 페이지로는 알 수 있는 게 없습니다.</p>
+<p><strong>Authorize</strong> 탭에서 <code>Ctrl-R</code>을 누르세요. gori가 큐에 든 요청을 아이덴티티마다 한 번씩, 각자 따로 연결을 열어 다시 보내고, 돌아온 응답을 as-captured 응답과 비교합니다.</p>
+<p>헤드리스에서는 플로우(또는 쿼리)를 직접 지정합니다:</p>
+<pre><code class="language-bash hljs">gori run authorize 12 13 14
+gori run authorize --query 'host:api.example.com method:GET status:200' --limit 20
+</code></pre>
+<p>헤드리스는 기본으로 <code>GET</code>, <code>HEAD</code>, <code>OPTIONS</code>만 다시 보냅니다. <code>POST</code>나 <code>DELETE</code>를 다시 보내면 그 동작이 아이덴티티 수만큼 또 실행되기 때문에, <code>--unsafe-methods</code>를 주지 않는 한 건너뜁니다. 이 옵션은 동작이 다시 실행돼도 문제없는 테스트 계정에서만 쓰세요. TUI에서 손으로 큐에 넣은 요청은 메서드와 상관없이 다시 보냅니다. 사람이 직접 고른 요청이니까요.</p>
+<p><strong>체크포인트.</strong> 큐의 모든 행에 판정이 붙었고, <code>⇥</code>로 각 아이덴티티가 어떻게 응답받았는지 볼 수 있습니다.</p>
+<h2 id="4-read-the-results">4. 결과 읽기</h2>
+<p>각 아이덴티티의 응답을 기준 응답과 상태 코드, 크기, 내용으로 비교합니다:</p>
+<table>
+<thead>
+<tr>
+<th>판정</th>
+<th>뜻</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>same</code></td>
+<td>이 아이덴티티가 관리자와 같은 걸 받았습니다. 받으면 안 되는 거라면 그게 버그입니다</td>
+</tr>
+<tr>
+<td><code>different</code></td>
+<td><code>403</code>이나 로그인 페이지로의 리다이렉트처럼 다른 종류의 응답입니다. 접근 제어가 제대로 동작했습니다</td>
+</tr>
+<tr>
+<td><code>review</code></td>
+<td>비슷하지만 같지는 않습니다. 직접 확인하세요</td>
+</tr>
+<tr>
+<td><code>error</code></td>
+<td>요청이 실패했습니다. 비교한 게 없습니다</td>
+</tr>
+</tbody>
+</table>
+<p>어느 아이덴티티든 <code>same</code>이 나오면 그 요청 행은 <strong>BYPASS</strong>로 표시됩니다. 아직은 단서일 뿐, 확정된 발견은 아닙니다. <code>/admin/users</code>에서 <code>anonymous</code>가 <code>same</code>이면 진짜 문제입니다. 모든 사용자가 볼 수 있는 페이지에서 <code>low-priv</code>가 <code>same</code>이면 아무 문제 없습니다. gori는 응답을 비교할 수 있을 뿐이고, 누가 무엇을 봐도 되는지는 여러분만 압니다.</p>
+<p>거의 모든 행이 <code>review</code>라면 기준 응답부터 확인하세요. 관리자 자신의 재전송이 <code>401</code>이나 <code>403</code>으로 돌아왔다면 캡처한 세션이 만료된 것이고, 비교할 기준이 없는 상태입니다. 관리자로 다시 로그인해 요청을 새로 캡처하고 다시 돌리세요.</p>
+<p><code>review</code>는 꼼꼼히 봐야 합니다. 어떤 앱은 거부한 요청에 &quot;접근 거부&quot; 안내 페이지를 <code>200</code>으로 돌려주고, 어떤 페이지는 사용자가 누구든 거의 똑같습니다. 행을 열어 두 본문을 직접 읽어 보세요.</p>
+<p>헤드리스 출력은 줄 맨 앞에 <code>[!] BYPASS</code>를 붙여 눈에 잘 띄게 합니다:</p>
+<pre><code>[!] BYPASS    #1     GET    https://api.example.com/admin/users  · 1 of 2 identities matched the baseline
+      as-captured         baseline  200  4.1KB    —
+      anonymous           different 302  0B       Δ status 200 → 302 · …
+      low-priv            same      200  4.1KB    Δ status 200 · size same · …
+</code></pre>
+<p><strong>체크포인트.</strong> <code>BYPASS</code>와 <code>review</code> 행이 몇 개로 추려졌고, 그중 어느 게 진짜인지 압니다.</p>
+<h2 id="5-confirm-one-by-hand">5. 손으로 한 번 확인하기</h2>
+<p>보고서를 쓰기 전에 손으로 한 번 증명해 두세요. 요청을 <strong>Repeater</strong>로 보내고(History에서 <code>Ctrl-R</code>), <code>Ctrl-P</code> → <strong>Session slot</strong>으로 권한 낮은 아이덴티티를 고른 뒤 보내세요. 헤드리스에서는 이렇게 합니다:</p>
+<pre><code class="language-bash hljs">gori run repeater &lt;flow-id&gt; --slot low-priv
+</code></pre>
+<p>응답에 정말 관리자 데이터가 들어 있는지, 빈 껍데기나 캐시된 페이지는 아닌지 확인하세요. 경로에 id가 있다면 다른 사용자의 레코드도 요청해 보세요. A가 자기 주문을 보는 버그보다 A가 B의 주문을 읽는 버그가 훨씬 무겁습니다.</p>
+<p><strong>체크포인트.</strong> <code>low-priv</code>로 보낸 Repeater 요청이 그 사용자가 보면 안 되는 데이터를 돌려줍니다.</p>
+<h2 id="6-file-it">6. 이슈로 남기기</h2>
+<p>확인한 행을 플로우를 첨부한 이슈로 만들어 두면 증거가 함께 남습니다:</p>
+<pre><code class="language-bash hljs">gori run issues create --title &quot;Low-privilege user can list all users&quot; \
+  --severity high --host api.example.com --flow &lt;flow-id&gt;
+</code></pre>
+<p>나머지(심각도, 노트, 내보내기)는 <a href="/ko/playbooks/triage-and-report/">트리아지와 리포트</a>에서 다룹니다.</p>
+<h2 id="when-nothing-comes-back">아무것도 안 나올 때</h2>
+<p>결과가 비었다고 꼭 좋은 소식은 아닙니다. gori는 요청을 조용히 덜 보내는 대신, 무엇을 왜 건너뛰었는지 알려 줍니다:</p>
+<ul>
+<li><strong>no identity changes them</strong>: 어떤 아이덴티티도 바꾸는 헤더가 없어서, 모든 아이덴티티가 같은 바이트를 보내게 됩니다. 그 엔드포인트는 여러분이 다루지 않은 헤더(예: <code>X-Api-Key</code>)로 인증하고 있을 가능성이 큽니다. 그 헤더를 설정하거나 지우는 아이덴티티를 추가하세요.</li>
+<li><strong>not a safe method to repeat</strong>: 3단계를 보세요.</li>
+<li><strong>outside project scope</strong>: 그 호스트를 스코프에 추가하세요.</li>
+</ul>
+<p>모든 전송이 거부되거나 실패했다면, 실행 결과는 아무것도 보내지 않았다고 말합니다. 이걸 &quot;접근 제어가 지켜졌다&quot;고 보고하는 일은 없습니다. 그리고 <code>enforced</code>는 여러분이 시도한 아이덴티티와 요청에 대해서만 하는 말입니다. 한 번도 둘러보지 않은 엔드포인트는 안전한 게 아니라 테스트하지 않은 것입니다.</p>
+<h2 id="next-steps">다음 단계</h2>
+<ul>
+<li><a href="/ko/guide/authorize/">접근 제어 테스트</a>: 판정 규칙 전체, 패시브 재전송, MCP 도구</li>
+<li><a href="/ko/playbooks/carry-a-session/">세션 유지</a>: 바뀌는 토큰, 오래 도는 실행을 위한 refresh 단계</li>
+<li><a href="/ko/playbooks/triage-and-report/">트리아지와 리포트</a>: 우회를 보고서로 만들기</li>
+</ul>
+</article>
+    
+
+
+<nav class="page-navigation" aria-label="이어서 읽기">
+  
+  <a href="https://gori.hahwul.com/ko/playbooks/carry-a-session/" rel="prev"><span>← 이전</span><strong>세션 유지</strong></a>
+  
+  
+  <a href="https://gori.hahwul.com/ko/playbooks/decode-and-transform/" rel="next"><span>다음 →</span><strong>데이터 디코드와 변환</strong></a>
+  
+</nav>
+
+  </main>
+  <aside class="docs-toc-rail" id="tocRail" aria-label="이 페이지에서" data-title="이 페이지에서"></aside>
+</div>
+
+
+<footer class="docs-footer">
+  <p class="footer-meta">
+    <a class="footer-sig" href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul, Built with Love">
+      <span class="hahwul-img" aria-hidden="true"></span>
+      <span class="footer-love">Built with Love</span>
+    </a>
+    <span aria-hidden="true">·</span>
+    <span>Apache-2.0 · © HAHWUL</span>
+  </p>
+</footer>
+<script>
+  /* Theme toggle: flip data-theme, remember the choice, and swap the TUI
+     screenshots to the matching light/dark capture. */
+  (function () {
+    /* Point every TUI screenshot at its light or dark capture. The light set
+       lives under images/tui/light/; the theme gallery (theme-*.svg) is left
+       alone, and any shot without a light twin falls back to the dark one. */
+    function syncTuiShots() {
+      var light = document.documentElement.getAttribute("data-theme") === "light";
+      var imgs = document.querySelectorAll('img[src*="/images/tui/"]');
+      for (var i = 0; i < imgs.length; i++) {
+        var img = imgs[i];
+        if (img.dataset.noLight === "1") continue;
+        /* Decide from the ORIGINAL dark src, not the live one (which may already
+           be swapped to the light path from a previous toggle). */
+        var orig = img.dataset.darkSrc || img.getAttribute("src");
+        if (orig.indexOf("/images/tui/light/") !== -1 || /\/images\/tui\/theme-/.test(orig)) continue;
+        if (!img.dataset.darkSrc) img.dataset.darkSrc = orig;
+        var want = light ? orig.replace("/images/tui/", "/images/tui/light/") : orig;
+        if (img.getAttribute("src") === want) continue;
+        if (light) {
+          img.onerror = function () { this.onerror = null; this.dataset.noLight = "1"; this.setAttribute("src", this.dataset.darkSrc); };
+        } else {
+          img.onerror = null;
+        }
+        img.setAttribute("src", want);
+      }
+    }
+
+    var btn = document.getElementById("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("gori-theme", next); } catch (e) {}
+        syncTuiShots();
+      });
+    }
+    syncTuiShots();
+  })();
+
+  /* The search tooltip ships as ⌘K; outside Apple platforms say Ctrl K
+     instead (search.js already answers to both modifiers). */
+  (function () {
+    var st = document.querySelector(".search-trigger");
+    if (st && !/Mac|iPhone|iPad|iPod/.test(navigator.platform || "")) {
+      st.title = st.title.replace("⌘K", "Ctrl K");
+    }
+  })();
+
+  /* Hero install picker: swap the one-liner for the chosen channel, copy it
+     on click. Present only on the home page. */
+  (function () {
+    var root = document.getElementById("heroInstall");
+    if (!root) return;
+    var cmd = document.getElementById("installCmd");
+    var tabs = root.querySelectorAll(".install-tab");
+    function pick() {
+      for (var i = 0; i < tabs.length; i++) tabs[i].setAttribute("aria-pressed", tabs[i] === this ? "true" : "false");
+      cmd.textContent = this.getAttribute("data-cmd");
+    }
+    for (var i = 0; i < tabs.length; i++) tabs[i].addEventListener("click", pick);
+
+    var btn = document.getElementById("installCopy");
+    var timer = null;
+    btn.addEventListener("click", function () {
+      var text = cmd.textContent;
+      function done() {
+        btn.classList.add("copied");
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(function () { btn.classList.remove("copied"); }, 1600);
+      }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      } else {
+        /* http:// preview, or clipboard API rejections (focus/permission) */
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { if (document.execCommand("copy")) done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  })();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+<script src="https://gori.hahwul.com/js/search.js" defer></script>
+<script src="https://gori.hahwul.com/js/toc.js" defer></script>
+<script src="https://gori.hahwul.com/js/docs.js" defer></script>
+<script src="https://gori.hahwul.com/js/codecopy.js" defer></script>
+<script src="https://gori.hahwul.com/js/logo-menu.js" defer></script>
+
+</body>
+</html>

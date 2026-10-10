@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <script>
+    /* Set the color theme before first paint to avoid a flash. Default: dark. */
+    (function () {
+      document.documentElement.classList.add("has-js");
+      try {
+        var t = localStorage.getItem("gori-theme");
+        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Probe 내장 스캔 룰 전체를 id별로: 무엇을 검사하는지, 범주, 액티브 룰의 플로우당 요청 비용.">
+  
+  <title>Probe 스캔 룰 - gori</title>
+  <link rel="icon" type="image/png" href="https://gori.hahwul.com/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="https://gori.hahwul.com/icons/favicon.svg" />
+  <link rel="shortcut icon" href="https://gori.hahwul.com/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="https://gori.hahwul.com/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Gori" />
+  <link rel="manifest" href="https://gori.hahwul.com/icons/site.webmanifest" />
+  <meta property="og:title" content="Probe 스캔 룰">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gori.hahwul.com/ko/reference/probe-rules/">
+  <meta property="og:description" content="Probe 내장 스캔 룰 전체를 id별로: 무엇을 검사하는지, 범주, 액티브 룰의 플로우당 요청 비용.">
+  <meta property="og:image" content="https://gori.hahwul.com/og-images/ko-reference-probe-rules.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Probe 스캔 룰">
+  <meta name="twitter:description" content="Probe 내장 스캔 룰 전체를 id별로: 무엇을 검사하는지, 범주, 액티브 룰의 플로우당 요청 비용.">
+  <meta name="twitter:image" content="https://gori.hahwul.com/og-images/ko-reference-probe-rules.png">
+  <meta property="og:site_name" content="gori">
+  <meta property="og:locale" content="ko_KR">
+  <meta property="og:locale:alternate" content="en_US">
+  
+  <link rel="canonical" href="https://gori.hahwul.com/ko/reference/probe-rules/">
+  
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Probe 스캔 룰","url":"https://gori.hahwul.com/ko/reference/probe-rules/","description":"Probe 내장 스캔 룰 전체를 id별로: 무엇을 검사하는지, 범주, 액티브 룰의 플로우당 요청 비용.","image":"https://gori.hahwul.com/og-images/ko-reference-probe-rules.png"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"gori","item":"https://gori.hahwul.com/ko/"},{"@type":"ListItem","position":2,"name":"CLI, 설정, 쿼리 레퍼런스","item":"https://gori.hahwul.com/ko/reference/"},{"@type":"ListItem","position":3,"name":"Probe 스캔 룰"}]}</script>
+  <link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/reference/probe-rules/">
+<link rel="alternate" hreflang="en" href="https://gori.hahwul.com/reference/probe-rules/">
+  <link rel="alternate" hreflang="x-default" href="https://gori.hahwul.com/reference/probe-rules/">
+  
+  
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/style.css">
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/docs.css">
+  
+  
+  
+  
+  
+</head>
+<body class="is-doc" data-section="reference">
+  <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+<header class="docs-header">
+  <a href="https://gori.hahwul.com/ko/" class="logo" aria-label="gori 홈">
+    <span class="logo-mark" aria-hidden="true" style="--logo-src: url('https://gori.hahwul.com/images/gori.png')" title="우클릭하여 로고 다운로드"></span>
+    <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
+  </a>
+
+  
+  <nav class="top-nav" aria-label="주요 메뉴">
+    <a href="https://gori.hahwul.com/ko/getting-started/">시작하기</a>
+    <a href="https://gori.hahwul.com/ko/playbooks/">플레이북</a>
+    <a href="https://gori.hahwul.com/ko/guide/">가이드</a>
+    <a href="https://gori.hahwul.com/ko/reference/" class="active" aria-current="true">레퍼런스</a>
+  </nav>
+
+  
+  <details class="nav-compact">
+    <summary class="nav-compact-trigger" aria-label="주요 메뉴">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </summary>
+    <div class="nav-compact-panel" role="navigation" aria-label="주요 메뉴">
+      <a href="https://gori.hahwul.com/ko/getting-started/">시작하기</a>
+      <a href="https://gori.hahwul.com/ko/playbooks/">플레이북</a>
+      <a href="https://gori.hahwul.com/ko/guide/">가이드</a>
+      <a href="https://gori.hahwul.com/ko/reference/" class="active" aria-current="true">레퍼런스</a>
+      <a href="https://gori.hahwul.com/ko/getting-started/installation/">설치</a>
+    </div>
+  </details>
+
+  
+  <div class="header-right">
+    <button class="search-trigger" onclick="openSearch()" aria-label="문서 검색" title="문서 검색 (&#8984;K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+    </button>
+    
+    
+    <nav class="lang-switch" aria-label="언어">
+      
+      <a href="https://gori.hahwul.com/reference/probe-rules/" hreflang="en" lang="en" aria-label="EN: English" title="English">EN</a>
+      
+      <a href="https://gori.hahwul.com/ko/reference/probe-rules/" hreflang="ko" lang="ko" aria-label="KO: 한국어" title="한국어" class="is-current" aria-current="true">KO</a>
+      
+    </nav>
+    
+    <a class="github-link" href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer" aria-label="GitHub에서 보기" title="GitHub에서 보기">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58C20.57 22.29 24 17.79 24 12.5 24 5.87 18.63.5 12 .5z"/></svg>
+    </a>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="색상 테마 전환" title="테마 전환">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2v2.2M12 19.8V22M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2 12h2.2M19.8 12H22M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="logo-menu" id="logo-menu" hidden role="menu" aria-label="로고 다운로드">
+  <div class="logo-menu-sep" aria-hidden="true">PNG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.png" download="gori-logo.png">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.png" download="gori-logo-dark.png">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.png" download="gori-logo-color.png">컬러</a>
+  <div class="logo-menu-sep" aria-hidden="true">WebP</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.webp" download="gori-logo.webp">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.webp" download="gori-logo-dark.webp">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.webp" download="gori-logo-color.webp">컬러</a>
+  <div class="logo-menu-sep" aria-hidden="true">SVG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.svg" download="gori-logo.svg">마크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.svg" download="gori-logo-dark.svg">다크</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.svg" download="gori-logo-color.svg">컬러</a>
+  <div class="logo-menu-sep logo-menu-sep--rule" aria-hidden="true"></div>
+  <button type="button" role="menuitem" id="copy-logo-url" data-logo-url="https://gori.hahwul.com/images/gori.svg" data-label="SVG URL 복사" data-copied="복사됨">SVG URL 복사</button>
+  <a role="menuitem" href="https://gori.hahwul.com/ko/reference/brand/">브랜드 키트 →</a>
+</div>
+<div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)closeSearch()">
+  <div class="search-modal" role="dialog" aria-modal="true" aria-label="문서 검색">
+    <div class="search-input-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m21 21-4.3-4.3"></path>
+      </svg>
+      <input type="search" id="searchInput" aria-label="검색" placeholder="문서 검색…" autocomplete="off" spellcheck="false">
+      <kbd class="search-esc" onclick="closeSearch()">ESC</kbd>
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+</div>
+
+
+<div class="docs-container">
+  <aside class="docs-sidebar">
+  <details class="docs-navigation" open>
+    <summary class="docs-navigation-toggle">문서 둘러보기</summary>
+
+    
+    
+    <nav class="manual-nav" aria-label="문서">
+      
+      <details class="nav-section">
+        <summary>시작하기</summary>
+        <ul class="nav-links">
+          <li><a href="https://gori.hahwul.com/ko/getting-started/">개요</a></li>
+          
+          <li><a href="https://gori.hahwul.com/ko/getting-started/installation/">gori 설치</a></li>
+          
+          <li><a href="https://gori.hahwul.com/ko/getting-started/quick-start/">gori 빠른 시작</a></li>
+          
+          <li><a href="https://gori.hahwul.com/ko/getting-started/ai-setup/">gori MCP와 AI 에이전트 설정</a></li>
+          
+          <li><a href="https://gori.hahwul.com/ko/getting-started/configuration/">gori 설정과 루트 CA</a></li>
+          
+        </ul>
+      </details>
+      
+
+      
+      <details class="nav-section">
+        <summary>가이드</summary>
+        <ul class="nav-links">
+          <li><a href="https://gori.hahwul.com/ko/guide/">개요</a></li>
+          
+          
+          
+          
+          <li><details class="nav-group">
+            <summary>핵심</summary>
+            <ul class="nav-links">
+          
+              <li><a href="https://gori.hahwul.com/ko/guide/space-menu-and-palette/">space 메뉴와 팔레트</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/ko/guide/proxy/">프록시 &amp; History</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/ko/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/ko/guide/scanning/">웹 보안 스캐닝과 Issues</a></li>
+          
+          
+          
+          </ul></details></li>
+          <li><details class="nav-group">
+            <summary>워크벤치</summary>
+            <ul class="nav-links">
+          
+              <li><a href="https://gori.hahwul.com/ko/guide/decoder/">Decoder: 인코드, 디코드, 해시</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/ko/guide/jwt/">JWT 보안 테스트</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/ko/guide/cookie/">세션 쿠키 보안</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/ko/guide/sequencer/">토큰 무작위성 테스트</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/ko/guide/oast/">Blind 취약점 검증을 위한 OAST</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/ko/guide/authorize/">접근 제어 테스트</a></li>
+          
+          
+          
+          </ul></details></li>
+          <li><details class="nav-group">
+            <summary>자동화</summary>
+            <ul class="nav-links">
+          
+              <li><a href="https://gori.hahwul.com/ko/guide/scripting/">gori run 스크립팅</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/ko/guide/mcp/">MCP 서버</a></li>
+          
+          
+          
+          </ul></details></li>
+          <li><details class="nav-group">
+            <summary>커스터마이즈</summary>
+            <ul class="nav-links">
+          
+              <li><a href="https://gori.hahwul.com/ko/guide/settings/">TUI 설정</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/ko/guide/themes/">TUI 테마</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/ko/guide/hotkeys/">키보드 단축키</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/ko/guide/statusline/">사용자 지정 TUI Statusline</a></li>
+          </ul></details></li>
+          
+        </ul>
+      </details>
+      
+
+      
+      <details class="nav-section" open>
+        <summary>레퍼런스</summary>
+        <ul class="nav-links">
+          <li><a href="https://gori.hahwul.com/ko/reference/">개요</a></li>
+          
+          <li><a href="https://gori.hahwul.com/ko/reference/capabilities/">기능 매트릭스</a></li>
+          
+          <li><a href="https://gori.hahwul.com/ko/reference/platform-support/">플랫폼 지원</a></li>
+          
+          <li><a href="https://gori.hahwul.com/ko/reference/cli/">CLI 레퍼런스</a></li>
+          
+          <li><a href="https://gori.hahwul.com/ko/reference/config/">설정 레퍼런스</a></li>
+          
+          <li><a href="https://gori.hahwul.com/ko/reference/query-language/">gori 쿼리 언어</a></li>
+          
+          <li><a href="https://gori.hahwul.com/ko/reference/probe-rules/" class="active" aria-current="page">Probe 스캔 룰</a></li>
+          
+          <li><a href="https://gori.hahwul.com/ko/reference/brand/">브랜드 키트</a></li>
+          
+          <li><a href="https://gori.hahwul.com/ko/reference/miss-ring/">Miss Ring</a></li>
+          
+        </ul>
+      </details>
+      
+
+      
+      <a class="book-promo" href="https://gori.hahwul.com/ko/playbooks/">
+        <span>gori 실전 가이드</span>
+        <strong>플레이북 →</strong>
+      </a>
+      
+    </nav>
+    
+  </details>
+</aside>
+  <main id="main" class="docs-main">
+    <nav class="document-path" aria-label="현재 위치">
+      <a href="https://gori.hahwul.com/ko/">gori</a>
+      <span aria-hidden="true">/</span><a href="https://gori.hahwul.com/ko/reference/">CLI, 설정, 쿼리 레퍼런스</a>
+      
+    </nav>
+    <header class="document-heading">
+      <p class="doc-kicker">레퍼런스</p>
+      <h1>Probe 스캔 룰</h1>
+    </header>
+    <div class="toc-placeholder" aria-hidden="true"></div>
+    <article class="document-body"><p><a href="/ko/guide/scanning/#probe-the-scanner">Probe 스캐너</a>에 내장된 룰을 룰 명령이 받는 id 기준으로 모두 나열합니다. 범주의 뜻과 패시브·액티브 스캔의 차이는 <a href="/ko/guide/scanning/#probe-the-scanner">스캐닝 가이드</a>에서 설명합니다. 룰 하나를 켜거나 끄기 전에 이 페이지에서 찾아보세요.</p>
+<p>여기 있는 목록은 새 프로젝트에서 <code>gori run probe rules</code>가 보여 주는 것과 같습니다. 이 명령, Probe 탭의 <strong>Rules</strong> 서브탭, MCP <code>list_probe_rules</code> 도구는 모두 같은 카탈로그를 읽습니다. 지금 실행 중인 빌드에서는 이쪽이 기준이고, 커스텀 룰과 이 프로젝트에서 꺼 둔 룰도 함께 보여 줍니다.</p>
+<h2 id="managing">룰 켜고 끄기</h2>
+<p>스위치는 프로젝트 단위입니다. 내장 룰을 끄면 새로운 탐지만 멈추고, 이미 만든 발견은 Probe 목록에 그대로 남습니다.</p>
+<table>
+<thead>
+<tr>
+<th>어디서</th>
+<th>방법</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TUI</td>
+<td>Probe 탭 → <strong>Rules</strong> 서브탭: <code>t</code>로 커서 아래 룰을 토글하고, <code>/</code>로 목록을 필터링합니다</td>
+</tr>
+<tr>
+<td>CLI</td>
+<td><code>gori run probe rules enable &lt;id&gt;</code> / <code>disable &lt;id&gt;</code>. <code>gori run probe rules --kind active</code>는 한 종류만 나열합니다</td>
+</tr>
+<tr>
+<td>MCP</td>
+<td><code>set_probe_rule_enabled</code>, 상태를 읽을 때는 <code>list_probe_rules</code></td>
+</tr>
+</tbody>
+</table>
+<pre><code class="language-bash hljs">gori run probe rules --kind active          # 액티브 룰과 켜진 룰
+gori run probe rules enable sqli_time_based # 꺼진 채 출하되는 룰 켜기
+gori run probe rules disable sri            # 시끄러운 패시브 체크 하나 끄기
+</code></pre>
+<p>룰 id는 발견 코드와 다릅니다. 룰 하나가 여러 종류의 발견을 올릴 수 있기 때문입니다. <code>security_headers</code>는 <code>missing_hsts</code>, <code>missing_csp</code> 등을 올립니다. <code>gori run probe issues</code>가 발견마다 코드를 출력하고, <code>gori run probe dismiss --code</code>는 룰 id가 아니라 그 코드를 받습니다.</p>
+<h2 id="passive">패시브 룰</h2>
+<p>패시브 룰은 이미 캡처한 트래픽(History 플로우와 Repeater 전송 결과)을 읽기만 하고 아무것도 보내지 않습니다. 모두 켜진 채 출하됩니다.</p>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>이름</th>
+<th>범주</th>
+<th>검사 내용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>tech</code></td>
+<td>Technology fingerprints</td>
+<td><code>tech</code></td>
+<td>헤더와 본문에서 서버 소프트웨어, 프레임워크, 프로토콜(WebSocket, gRPC, GraphQL, SSE, HTTP/2, HTTP/3)을 식별합니다.</td>
+</tr>
+<tr>
+<td><code>secret_in_url</code></td>
+<td>Secrets in URL</td>
+<td><code>infoleak</code></td>
+<td>요청 URL에 실린 자격 증명, 토큰, JWT를 표시합니다. URL에 있으면 로그, 방문 기록, Referer로 새어 나갑니다.</td>
+</tr>
+<tr>
+<td><code>security_headers</code></td>
+<td>Security headers</td>
+<td><code>headers</code></td>
+<td>HSTS, CSP(report-only만 있는 경우와 base-uri 누락 포함), X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, Cross-Origin-Opener-Policy가 없거나 약한지 확인합니다.</td>
+</tr>
+<tr>
+<td><code>mime_confusion</code></td>
+<td>MIME type confusion</td>
+<td><code>headers</code></td>
+<td>본문 유형이 Content-Type과 어긋나 MIME 스니핑 XSS가 가능한 응답을 표시합니다(nosniff 없이 스니핑 가능한 타입으로 나가는 HTML 본문, text/html로 제공되는 JSON).</td>
+</tr>
+<tr>
+<td><code>cacheable_api</code></td>
+<td>Cacheable API responses</td>
+<td><code>headers</code></td>
+<td>브라우저나 공유 캐시가 저장할 수 있는 JSON/API 응답을 표시합니다. 토큰이나 개인정보가 남을 수 있습니다.</td>
+</tr>
+<tr>
+<td><code>cookies</code></td>
+<td>Cookie flags</td>
+<td><code>cookies</code></td>
+<td>Set-Cookie 플래그, SameSite 값, Partitioned, 보안 접두사(<code>__Http-</code> 포함), 상위 Domain 범위를 확인합니다.</td>
+</tr>
+<tr>
+<td><code>cors</code></td>
+<td>CORS misconfiguration</td>
+<td><code>cors</code></td>
+<td>와일드카드, null origin, 반사된 origin을 돌려주는 CORS 응답을 표시합니다.</td>
+</tr>
+<tr>
+<td><code>body_leaks</code></td>
+<td>Response body leaks</td>
+<td><code>infoleak</code></td>
+<td>응답 본문에서 사설 IP, 스택 트레이스, 비밀 값, 혼합 콘텐츠, 안전하지 않은 폼 action을 찾습니다.</td>
+</tr>
+<tr>
+<td><code>auth</code></td>
+<td>Insecure authentication</td>
+<td><code>headers</code></td>
+<td>평문 http://로 보내는 Basic 인증과 Bearer 토큰을 표시합니다.</td>
+</tr>
+<tr>
+<td><code>graphql_introspection</code></td>
+<td>GraphQL introspection</td>
+<td><code>infoleak</code></td>
+<td>켜져 있는 GraphQL introspection을 탐지합니다. API 스키마 전체가 드러납니다.</td>
+</tr>
+<tr>
+<td><code>jwt</code></td>
+<td>JWT weaknesses</td>
+<td><code>headers</code></td>
+<td>Authorization/Cookie/Set-Cookie에 실린 JWT를 디코드해 alg:none, 비표준 알고리즘, 키 주입 헤더 파라미터(jku/x5u/jwk), 만료 누락, 민감한 클레임 이름을 표시합니다.</td>
+</tr>
+<tr>
+<td><code>sourcemap</code></td>
+<td>Source map exposure</td>
+<td><code>infoleak</code></td>
+<td>소스맵을 가리키는 프로덕션 JavaScript를 표시합니다. 소스맵이 있으면 원본 소스를 복원할 수 있습니다.</td>
+</tr>
+<tr>
+<td><code>sri</code></td>
+<td>Missing Subresource Integrity</td>
+<td><code>headers</code></td>
+<td>지원되는 integrity 메타데이터 없이 불러오는 크로스 오리진 스크립트와 스타일시트를 표시합니다(공급망 노출).</td>
+</tr>
+<tr>
+<td><code>directory_listing</code></td>
+<td>Directory listing</td>
+<td><code>infoleak</code></td>
+<td>Apache/nginx가 자동 생성한 디렉터리 인덱스를 탐지합니다. 누구에게나 파일 목록을 보여 줍니다.</td>
+</tr>
+<tr>
+<td><code>exposed_config</code></td>
+<td>Exposed configuration files</td>
+<td><code>infoleak</code></td>
+<td>클라이언트에 제공되는 서버 설정·진단 파일을 탐지합니다: .env, .git/config, phpinfo(), .htpasswd, wp-config 자격 증명, Spring actuator env.</td>
+</tr>
+<tr>
+<td><code>serialized_object</code></td>
+<td>Serialized object exposure</td>
+<td><code>infoleak</code></td>
+<td>쿠키, 파라미터, hidden 필드에 실린 네이티브 직렬화 블롭(Java, .NET BinaryFormatter/ViewState, PHP)을 탐지합니다. 안전하지 않은 역직렬화의 공격 표면입니다.</td>
+</tr>
+<tr>
+<td><code>debug_mode_exposed</code></td>
+<td>Debug mode exposed</td>
+<td><code>infoleak</code></td>
+<td>프로덕션에서 닿는 프레임워크 디버그 모드, 대화형 디버거, 프로파일러를 탐지합니다(Symfony, Werkzeug/Flask, Django, Laravel, Rails, ASP.NET).</td>
+</tr>
+<tr>
+<td><code>subdomain_takeover</code></td>
+<td>Subdomain takeover (suspected)</td>
+<td><code>infoleak</code></td>
+<td>호스팅 제공자가 백엔드 리소스가 주인 없는 상태라고 말하는 오류 페이지를 표시합니다(S3/GCS 버킷, GitHub Pages, Heroku, Pantheon, Shopify, Fastly, Azure, Zendesk, Vercel, Tumblr). 공격자가 가져갈 수 있는 dangling DNS 형태입니다.</td>
+</tr>
+<tr>
+<td><code>cleartext_credentials</code></td>
+<td>Cleartext credential submission</td>
+<td><code>headers</code></td>
+<td>http://로 요청 본문에 실려 제출된 비밀번호와, http://로 제공된 비밀번호 입력 필드를 표시합니다.</td>
+</tr>
+<tr>
+<td><code>shared_cache</code></td>
+<td>Shared-cache exposure</td>
+<td><code>headers</code></td>
+<td>공개적으로 캐시 가능한 응답의 Set-Cookie와, Vary: Origin 없이 캐시된 반사 CORS origin을 표시합니다.</td>
+</tr>
+<tr>
+<td><code>internal_host_leak</code></td>
+<td>Internal host disclosed in a response header</td>
+<td><code>infoleak</code></td>
+<td>응답 헤더에서 RFC 1918 주소와 내부 전용 호스트명(.local, .internal, .corp 등)을 찾습니다.</td>
+</tr>
+<tr>
+<td><code>ws_payloads</code></td>
+<td>WebSocket payload secrets</td>
+<td><code>infoleak</code></td>
+<td>WebSocket 텍스트·바이너리 프레임에서 노출된 비밀 값을 찾습니다.</td>
+</tr>
+<tr>
+<td><code>dom_xss</code></td>
+<td>DOM-based XSS (suspected)</td>
+<td><code>client</code></td>
+<td>페이지/번들 스크립트의 같은 문장 안에서 DOM taint 소스(location.hash, document.URL, postMessage 데이터 등)가 실행 싱크(innerHTML, document.write, eval 등)로 흘러가는 경우를 표시합니다.</td>
+</tr>
+<tr>
+<td><code>dom_clobbering</code></td>
+<td>DOM clobbering (suspected)</td>
+<td><code>client</code></td>
+<td>클로버링될 수 있는 전역을 신뢰하는 클라이언트 코드를 표시합니다: 이름으로 접근하는 HTMLCollection(document.forms[…], document.all[…])이나 window.X = window.X || … 폴백 관용구.</td>
+</tr>
+<tr>
+<td><code>prototype_pollution</code></td>
+<td>Prototype pollution (suspected)</td>
+<td><code>client</code></td>
+<td><code>__proto__</code>/<code>constructor.prototype</code>에 쓰거나 오염에 취약한 deep-merge API를 쓰는 클라이언트 코드, 그리고 <code>__proto__</code>/<code>constructor[prototype]</code> 파라미터를 실은 요청을 표시합니다.</td>
+</tr>
+<tr>
+<td><code>post_message</code></td>
+<td>Cross-origin messaging (postMessage)</td>
+<td><code>client</code></td>
+<td>origin 검사가 없는 message 핸들러, 와일드카드 대상 origin으로 보내는 postMessage(...), document.domain 완화를 표시합니다.</td>
+</tr>
+<tr>
+<td><code>api_docs_exposed</code></td>
+<td>API documentation exposed</td>
+<td><code>infoleak</code></td>
+<td>프로덕션에서 닿는 Swagger UI, OpenAPI/Swagger 스펙, 대화형 GraphQL IDE(GraphiQL, Playground, ReDoc)를 탐지합니다.</td>
+</tr>
+<tr>
+<td><code>session_id_in_url</code></td>
+<td>Session identifier in URL</td>
+<td><code>infoleak</code></td>
+<td>요청 URL에 실린 알려진 프레임워크 세션 식별자(PHPSESSID, JSESSIONID, ASP.NET_SessionId 등)를 표시합니다. 로그, 방문 기록, Referer로 새어 나갑니다.</td>
+</tr>
+<tr>
+<td><code>open_cross_domain_policy</code></td>
+<td>Permissive cross-domain policy</td>
+<td><code>cors</code></td>
+<td>모든 origin에 접근을 허용하는(<code>domain=&quot;*&quot;</code>) Flash/Silverlight 크로스 도메인 정책을 표시합니다.</td>
+</tr>
+<tr>
+<td><code>bare_lf_response</code></td>
+<td>Bare-LF response head</td>
+<td><code>headers</code></td>
+<td>응답 헤드의 줄 끝이 CRLF가 아닌 단독 LF인 경우를 표시합니다. 파서마다 메시지 프레이밍을 다르게 읽을 수 있습니다(응답 desync / splitting의 전제 조건).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="active">액티브 룰</h2>
+<p>액티브 룰은 직접 요청을 보냅니다. 자동 파이프라인은 프로젝트 스캔 모드가 <code>active</code>나 <code>aggressive</code>일 때만 이 룰을 실행합니다. 플로우별 <strong>Run active scan</strong>과 <code>gori run probe --active</code>는 어느 모드에서든 실행합니다. 기본적으로 안전한 메서드(<code>GET</code> / <code>HEAD</code>)만 다시 보내고, 고유한 표면마다 한 번씩만 테스트합니다. 두 룰은 의도적으로 예외입니다. <code>graphql_introspection_active</code>는 <code>POST</code> 엔드포인트를 <code>POST</code>로 유지하고(읽기 전용 쿼리), <code>insecure_http_methods</code>는 자체 <code>OPTIONS</code>와 <code>TRACE</code>를 보냅니다.</p>
+<p><strong>비용</strong>은 룰이 플로우 하나에 보내는 요청 수이며, Rules 서브탭이 행 옆에 보여 주는 값과 같습니다. <strong>비고</strong>는 기본값만으로는 실행되지 않는 룰을 표시합니다.</p>
+<ul>
+<li><strong>기본 비활성</strong>: 꺼진 채 출하됩니다. 의도적으로 켜세요(<a href="#managing">위</a> 참고).</li>
+<li><strong>unsafe 필요</strong>: 룰이 보내는 프로브가 모두 안전하지 않은 메서드라, unsafe 메서드를 허용하기 전에는(팝업의 <strong>unsafe methods</strong> 체크, <code>--unsafe</code>, AGGRESSIVE 모드) 아무것도 만들지 않습니다.</li>
+<li><strong>OAST 필요</strong>: 켜져 있지만, 프로젝트에 페이로드를 찍어 낼 <a href="/ko/guide/oast/">OAST</a> 리스너가 등록되기 전까지는 작동하지 않습니다. 그때까지 그 비용은 추정치에서 빠집니다.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>이름</th>
+<th>범주</th>
+<th>비용</th>
+<th>비고</th>
+<th>검사 내용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>reflected_param</code></td>
+<td>Reflected parameter</td>
+<td><code>active</code></td>
+<td>1</td>
+<td></td>
+<td>쿼리·폼·JSON 파라미터에 canary를 보내고, 인코딩되지 않고 반사되면 표시합니다(잠재적 XSS).</td>
+</tr>
+<tr>
+<td><code>cors_reflection</code></td>
+<td>CORS arbitrary origin</td>
+<td><code>cors</code></td>
+<td>1</td>
+<td></td>
+<td>서버가 임의의 Origin을 Allow-Credentials: true와 함께 반사하는지 프로브합니다.</td>
+</tr>
+<tr>
+<td><code>forbidden_bypass</code></td>
+<td>Access-control bypass (IP headers)</td>
+<td><code>active</code></td>
+<td>2</td>
+<td></td>
+<td>거부된(401/403) 요청을 위조한 클라이언트 IP 헤더와 함께 재전송하고, 2xx로 우회되면 표시합니다.</td>
+</tr>
+<tr>
+<td><code>nginx_alias_traversal</code></td>
+<td>NGINX alias traversal</td>
+<td><code>active</code></td>
+<td>1-2</td>
+<td></td>
+<td>정적 자산을 접힌 <code>..</code>(/static../static/…) 경로로 다시 가져와, 바이트 단위로 같은 응답이 오면 표시합니다.</td>
+</tr>
+<tr>
+<td><code>backslash_powered</code></td>
+<td>Backslash-powered scanning</td>
+<td><code>active</code></td>
+<td>4-8</td>
+<td></td>
+<td>쿼리·폼·JSON 파라미터마다 <code>\</code>와 <code>\\</code>를 덧붙여, 백슬래시 하나는 응답을 흔들지만 둘은 그렇지 않은 파라미터를 표시합니다(서버 측 문자열 해석).</td>
+</tr>
+<tr>
+<td><code>sqli_error_based</code></td>
+<td>Error-based SQL injection</td>
+<td><code>active</code></td>
+<td>3-5</td>
+<td></td>
+<td>쿼리·폼·JSON 파라미터마다 SQL 구문을 깨는 페이로드를 덧붙이고, 깨끗한 baseline에는 없는 데이터베이스 오류 서명이 프로브 응답에 나타나면 표시합니다.</td>
+</tr>
+<tr>
+<td><code>sqli_boolean_based</code></td>
+<td>Boolean-based blind SQL injection</td>
+<td><code>active</code></td>
+<td>4-8</td>
+<td></td>
+<td>파라미터마다 항상 참인 SQL 조건과 항상 거짓인 조건을 덧붙여, 참 쪽은 baseline과 같고 거짓 쪽은 달라지는 파라미터를 표시합니다(오류도 반사도 없는 블라인드 인젝션).</td>
+</tr>
+<tr>
+<td><code>sqli_time_based</code></td>
+<td>Time-based blind SQL injection</td>
+<td><code>active</code></td>
+<td>6-10</td>
+<td>기본 비활성</td>
+<td>파라미터마다 서버 측 지연(SLEEP/pg_sleep/WAITFOR)을 주입하고, baseline과 점점 늘린 두 번의 지연에 걸쳐 응답 지연 시간으로 확인합니다. 일부러 기다리기 때문에 기본 비활성으로 출하됩니다.</td>
+</tr>
+<tr>
+<td><code>graphql_introspection_active</code></td>
+<td>GraphQL introspection (active)</td>
+<td><code>infoleak</code></td>
+<td>1</td>
+<td></td>
+<td>GraphQL 엔드포인트에 introspection 쿼리를 보내 스키마가 노출되는지 확인합니다.</td>
+</tr>
+<tr>
+<td><code>lfi_param_traversal</code></td>
+<td>Parameter path traversal</td>
+<td><code>active</code></td>
+<td>3</td>
+<td></td>
+<td>파일 파라미터를 접힌 <code>..</code>(file=x/../doc) 경로로 다시 가져와, 바이트 단위로 같은 응답이 오면 표시합니다.</td>
+</tr>
+<tr>
+<td><code>open_redirect</code></td>
+<td>Open redirect</td>
+<td><code>active</code></td>
+<td>1</td>
+<td></td>
+<td>리다이렉트 파라미터를 외부 호스트로 바꾸고, Location이 그대로 따라가면 표시합니다.</td>
+</tr>
+<tr>
+<td><code>host_header_injection</code></td>
+<td>Host header injection</td>
+<td><code>active</code></td>
+<td>1</td>
+<td></td>
+<td>합성한 X-Forwarded-Host를 보내고, 그 값이 절대 URL의 authority로 반사되면 표시합니다.</td>
+</tr>
+<tr>
+<td><code>crlf_injection</code></td>
+<td>CRLF header injection</td>
+<td><code>active</code></td>
+<td>1</td>
+<td></td>
+<td>요청 파라미터(쿼리/폼/JSON)에 인코딩된 CRLF와 헤더를 주입하고, 응답 헤더로 반사되면 표시합니다.</td>
+</tr>
+<tr>
+<td><code>path_normalization_bypass</code></td>
+<td>Access-control bypass (path normalization)</td>
+<td><code>active</code></td>
+<td>6-7</td>
+<td></td>
+<td>거부된(401/403) 경로를 정규화 트릭으로 다시 요청하고, 2xx로 우회되면 표시합니다.</td>
+</tr>
+<tr>
+<td><code>url_rewrite_bypass</code></td>
+<td>Access-control bypass (URL-rewrite headers)</td>
+<td><code>active</code></td>
+<td>3</td>
+<td></td>
+<td>401/403/404로 응답한 경로를 X-Original-URL/X-Rewrite-URL에 담아 /를 요청하고, 2xx로 제공되면 표시합니다.</td>
+</tr>
+<tr>
+<td><code>ssti</code></td>
+<td>Server-side template injection</td>
+<td><code>active</code></td>
+<td>2</td>
+<td></td>
+<td>템플릿 산술 폴리글롯을 주입하고, 값이 평가되는 파라미터를 표시합니다.</td>
+</tr>
+<tr>
+<td><code>nextjs_action_no_auth</code></td>
+<td>Next.js server action missing authorization</td>
+<td><code>active</code></td>
+<td>1</td>
+<td>unsafe 필요</td>
+<td>Next.js 서버 액션(Next-Action)을 세션 쿠키/Authorization을 뺀 채 재전송하고, 여전히 2xx로 성공하면 표시합니다.</td>
+</tr>
+<tr>
+<td><code>request_smuggling</code></td>
+<td>HTTP request smuggling / desync (CL.TE/TE.CL/TE.TE)</td>
+<td><code>active</code></td>
+<td>8-10</td>
+<td>기본 비활성 · unsafe 필요</td>
+<td>불완전한 CL.TE/TE.CL/TE.TE 프레이밍 프로브를 보내고, 타이밍 행으로 프런트엔드/백엔드 디싱크를 표시합니다(aggressive+unsafe에서 차분 확인). 기본 비활성이며 POST 본문을 보냅니다.</td>
+</tr>
+<tr>
+<td><code>ssrf_oast</code></td>
+<td>Blind SSRF (out-of-band)</td>
+<td><code>active</code></td>
+<td>1</td>
+<td>OAST 필요</td>
+<td>쿼리, 폼, JSON의 URL 파라미터 하나를 OAST 페이로드로 향하게 하고, 서버가 콜백을 걸면 발견으로 올립니다.</td>
+</tr>
+<tr>
+<td><code>cmd_injection_oast</code></td>
+<td>Blind OS command injection (out-of-band)</td>
+<td><code>active</code></td>
+<td>1</td>
+<td>OAST 필요</td>
+<td>명령/진단 파라미터에 셸 브레이크아웃 OAST 페이로드를 덧붙이고, 서버의 셸이 콜백을 걸면 발견으로 올립니다.</td>
+</tr>
+<tr>
+<td><code>xxe_oast</code></td>
+<td>XML external entity (out-of-band)</td>
+<td><code>active</code></td>
+<td>1</td>
+<td>OAST 필요 · unsafe 필요</td>
+<td>XML 본문에 외부 파라미터 엔티티 하나를 추가합니다. OAST 콜백이 오면 해석된 것으로 확인합니다. unsafe 옵트인이 필요합니다.</td>
+</tr>
+<tr>
+<td><code>rfi_oast</code></td>
+<td>Remote file inclusion (out-of-band)</td>
+<td><code>active</code></td>
+<td>1</td>
+<td>OAST 필요</td>
+<td>포함형 파라미터 하나를 언어 표식이 담긴 OAST 리소스로 향하게 하고, 서버가 콜백을 걸면 발견으로 올립니다.</td>
+</tr>
+<tr>
+<td><code>ratelimit_bypass</code></td>
+<td>Rate-limit bypass (spoofed client IP)</td>
+<td><code>active</code></td>
+<td>2</td>
+<td></td>
+<td>레이트리밋에 걸린(429) 요청을 위조한 클라이언트 IP 헤더와 함께 재전송하고, 처리되면 표시합니다.</td>
+</tr>
+<tr>
+<td><code>forbidden_method_bypass</code></td>
+<td>Access-control bypass (HTTP method)</td>
+<td><code>active</code></td>
+<td>2-5</td>
+<td></td>
+<td>거부된(401/403) 리소스를 메서드 대소문자 변형으로, unsafe에서는 대체 메서드와 메서드 오버라이드 헤더로도 다시 요청해 2xx로 우회되면 표시합니다.</td>
+</tr>
+<tr>
+<td><code>insecure_http_methods</code></td>
+<td>Insecure HTTP methods</td>
+<td><code>active</code></td>
+<td>2</td>
+<td></td>
+<td>OPTIONS와 TRACE를 보내 Cross-Site Tracing(TRACE)과 Allow 헤더에 광고된 위험한 메서드를 표시합니다.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="custom">커스텀 룰</h2>
+<p>직접 만든 매치 룰은 같은 카탈로그의 <code>custom</code> 범주에 <code>custom_p_7</code> 같은 id로 들어갑니다. 룰마다 문자열, 정규식, 명령 중 하나로 모든 캡처 플로우의 한 영역을 검사합니다. Rules 서브탭(<code>a</code>), <code>gori run probe rules add</code>, MCP <code>create_probe_rule</code> 도구로 추가합니다. 필드는 <a href="/ko/guide/scanning/#probe-the-scanner">Probe: 스캐너</a>를, 명령 형태는 <a href="/ko/guide/scripting/#process-hooks">프로세스 훅</a>을 보세요.</p>
+</article>
+    
+
+
+<nav class="page-navigation" aria-label="이어서 읽기">
+  
+  <a href="https://gori.hahwul.com/ko/reference/query-language/" rel="prev"><span>← 이전</span><strong>gori 쿼리 언어</strong></a>
+  
+  
+  <a href="https://gori.hahwul.com/ko/reference/brand/" rel="next"><span>다음 →</span><strong>브랜드 키트</strong></a>
+  
+</nav>
+
+  </main>
+  <aside class="docs-toc-rail" id="tocRail" aria-label="이 페이지에서" data-title="이 페이지에서"></aside>
+</div>
+
+
+<footer class="docs-footer">
+  <p class="footer-meta">
+    <a class="footer-sig" href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul, Built with Love">
+      <span class="hahwul-img" aria-hidden="true"></span>
+      <span class="footer-love">Built with Love</span>
+    </a>
+    <span aria-hidden="true">·</span>
+    <span>Apache-2.0 · © HAHWUL</span>
+  </p>
+</footer>
+<script>
+  /* Theme toggle: flip data-theme, remember the choice, and swap the TUI
+     screenshots to the matching light/dark capture. */
+  (function () {
+    /* Point every TUI screenshot at its light or dark capture. The light set
+       lives under images/tui/light/; the theme gallery (theme-*.svg) is left
+       alone, and any shot without a light twin falls back to the dark one. */
+    function syncTuiShots() {
+      var light = document.documentElement.getAttribute("data-theme") === "light";
+      var imgs = document.querySelectorAll('img[src*="/images/tui/"]');
+      for (var i = 0; i < imgs.length; i++) {
+        var img = imgs[i];
+        if (img.dataset.noLight === "1") continue;
+        /* Decide from the ORIGINAL dark src, not the live one (which may already
+           be swapped to the light path from a previous toggle). */
+        var orig = img.dataset.darkSrc || img.getAttribute("src");
+        if (orig.indexOf("/images/tui/light/") !== -1 || /\/images\/tui\/theme-/.test(orig)) continue;
+        if (!img.dataset.darkSrc) img.dataset.darkSrc = orig;
+        var want = light ? orig.replace("/images/tui/", "/images/tui/light/") : orig;
+        if (img.getAttribute("src") === want) continue;
+        if (light) {
+          img.onerror = function () { this.onerror = null; this.dataset.noLight = "1"; this.setAttribute("src", this.dataset.darkSrc); };
+        } else {
+          img.onerror = null;
+        }
+        img.setAttribute("src", want);
+      }
+    }
+
+    var btn = document.getElementById("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("gori-theme", next); } catch (e) {}
+        syncTuiShots();
+      });
+    }
+    syncTuiShots();
+  })();
+
+  /* The search tooltip ships as ⌘K; outside Apple platforms say Ctrl K
+     instead (search.js already answers to both modifiers). */
+  (function () {
+    var st = document.querySelector(".search-trigger");
+    if (st && !/Mac|iPhone|iPad|iPod/.test(navigator.platform || "")) {
+      st.title = st.title.replace("⌘K", "Ctrl K");
+    }
+  })();
+
+  /* Hero install picker: swap the one-liner for the chosen channel, copy it
+     on click. Present only on the home page. */
+  (function () {
+    var root = document.getElementById("heroInstall");
+    if (!root) return;
+    var cmd = document.getElementById("installCmd");
+    var tabs = root.querySelectorAll(".install-tab");
+    function pick() {
+      for (var i = 0; i < tabs.length; i++) tabs[i].setAttribute("aria-pressed", tabs[i] === this ? "true" : "false");
+      cmd.textContent = this.getAttribute("data-cmd");
+    }
+    for (var i = 0; i < tabs.length; i++) tabs[i].addEventListener("click", pick);
+
+    var btn = document.getElementById("installCopy");
+    var timer = null;
+    btn.addEventListener("click", function () {
+      var text = cmd.textContent;
+      function done() {
+        btn.classList.add("copied");
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(function () { btn.classList.remove("copied"); }, 1600);
+      }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      } else {
+        /* http:// preview, or clipboard API rejections (focus/permission) */
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { if (document.execCommand("copy")) done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  })();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+<script src="https://gori.hahwul.com/js/search.js" defer></script>
+<script src="https://gori.hahwul.com/js/toc.js" defer></script>
+<script src="https://gori.hahwul.com/js/docs.js" defer></script>
+<script src="https://gori.hahwul.com/js/codecopy.js" defer></script>
+<script src="https://gori.hahwul.com/js/logo-menu.js" defer></script>
+
+</body>
+</html>
