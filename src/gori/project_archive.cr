@@ -723,10 +723,10 @@ module Gori
       end
     end
 
-    # The labels the store maps to behavior, per table. The store reads each through a TEXT
-    # read that stops at the first NUL, while the sanitizer's SQL compares the whole value, so
-    # `pipe\0x` would pass as unknown here and load as an enabled pipe rule. gori never writes
-    # a NUL into one of these, so an archive that has one is refused rather than repaired.
+    # The labels the store maps to behavior, per table. The store's TEXT read stopped at the
+    # first NUL before `store/sqlite_text.cr`, so `pipe\0x` passed the sanitizer's SQL as unknown
+    # and loaded as an enabled pipe rule on such a reader. gori never writes a NUL into one of
+    # these, so an archive that has one is still refused rather than repaired.
     BEHAVIOR_LABELS = {
       "match_rules"        => %w[target part op match_kind respond],
       "probe_custom_rules" => %w[side region kind severity],
