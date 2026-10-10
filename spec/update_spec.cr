@@ -297,6 +297,9 @@ describe Gori::Update do
       Gori::Update.check_cache_fresh?(1_000_i64, 87_400_i64, 86_400).should be_false
       # A clock that ran ahead stamped this; trusting it would pin the cache.
       Gori::Update.check_cache_fresh?(10_000_000_i64, 1_000_i64, 86_400).should be_false
+      # A hand-edited stamp whose age does not fit Int64 is stale, not an OverflowError at launch.
+      Gori::Update.check_cache_fresh?(Int64::MIN, 1_700_000_000_i64, 86_400).should be_false
+      Gori::Update.check_cache_fresh?(Int64::MAX, -2_i64, 86_400).should be_false
     end
   end
 
