@@ -476,7 +476,7 @@ module Gori::Tui
         parsed = locs.compact_map { |x| Miner::Location.parse?(x.as_s? || "") }
         @config.locations = parsed unless parsed.empty?
       end
-      any["concurrency"]?.try(&.as_i?).try { |n| @config.concurrency = n }
+      Settings.int_field(any, "concurrency").try { |n| @config.concurrency = n }
       # Absent (an older row) reads as nil ⇒ uncapped, which is what those runs were.
       @config.max_requests = any["max_requests"]?.try(&.as_i64?)
       any["notify"]?.try(&.as_s?).try { |mode| Miner::NotifyMode.parse?(mode) }.try { |m| @config.notify = m }
@@ -484,12 +484,12 @@ module Gori::Tui
       # `keep_alive` field at all, and reading a missing key as "off" would silently opt an
       # old session out of the default the overlay shows it as having.
       @config.keep_alive = any["keep_alive"]?.try(&.as_bool?) != false
-      any["stability_rounds"]?.try(&.as_i?).try { |n| @config.stability_rounds = n }
-      any["confirm_rounds"]?.try(&.as_i?).try { |n| @config.confirm_rounds = n }
+      Settings.int_field(any, "stability_rounds").try { |n| @config.stability_rounds = n }
+      Settings.int_field(any, "confirm_rounds").try { |n| @config.confirm_rounds = n }
       if buckets = any["buckets"]?.try(&.as_h?)
-        buckets.each do |k, v|
+        buckets.each_key do |k|
           loc = Miner::Location.parse?(k)
-          val = v.as_i?
+          val = Settings.int_field(buckets, k)
           @config.bucket_size[loc] = val if loc && val
         end
       end

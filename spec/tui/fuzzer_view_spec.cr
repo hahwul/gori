@@ -689,6 +689,16 @@ describe Gori::Tui::FuzzerView do
       dst.advanced_snapshot.reframe_grpc.should be_true
     end
 
+    # `as_i?` raises OverflowError past Int32, and the method-wide rescue then skipped every
+    # key after it — an archive's stored config silently replaced by defaults.
+    it "reads an out-of-range int in a stored config as absent, keeping the rest" do
+      view = FuzzerView.new
+      view.restore(Gori::Store::FuzzSessionRecord.new(1_i64, "http://h", "GET / HTTP/1.1\r\n\r\n", false, nil,
+        %({"concurrency":4294967296,"retries":3,"match_words":"42"}), nil, 0, nil))
+      view.config.retries.should eq(3)
+      view.matcher.match_words.should eq("42")
+    end
+
     it "persists match/filter words across a config_json round-trip" do
       src = loaded_fuzzer
       snap = src.advanced_snapshot

@@ -379,14 +379,15 @@ module Gori
     # over the operator's file: `merge_with_disk` short-circuits on `disk == base` and
     # returns `mine`, so the 3-way merge never gets a chance to preserve the lost sections.
     # Out-of-range reads as absent, which is what every caller's `|| default` already means.
-    protected def self.int_field(node : JSON::Any, key : String) : Int32?
+    # Public: the TUI tools restore a persisted (or archive-imported) config blob the same way.
+    def self.int_field(node : JSON::Any, key : String) : Int32?
       node[key]?.try(&.as_i?)
     rescue OverflowError
       nil
     end
 
     # Same guard for the sections that have already unwrapped their node to a Hash.
-    protected def self.int_field(node : Hash(String, JSON::Any), key : String) : Int32?
+    def self.int_field(node : Hash(String, JSON::Any), key : String) : Int32?
       node[key]?.try(&.as_i?)
     rescue OverflowError
       nil

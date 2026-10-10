@@ -2835,15 +2835,15 @@ module Gori::Tui
       obj["mode"]?.try(&.as_s?).try { |m| Fuzz::Mode.parse?(m).try { |mode| @config.mode = mode } }
       @http2 = obj["http2"]?.try(&.as_bool?) || @http2
       @sni = obj["sni"]?.try(&.as_s?) || @sni
-      obj["concurrency"]?.try(&.as_i?).try { |n| @config.concurrency = n }
+      Settings.int_field(obj, "concurrency").try { |n| @config.concurrency = n }
       @config.rps = obj["rps"]?.try(&.as_f?)
-      @config.throttle_ms = obj["throttle_ms"]?.try(&.as_i?)
+      @config.throttle_ms = Settings.int_field(obj, "throttle_ms")
       # Assigned, not guarded: `config_json` writes the key as `null` when there is no
       # timeout, and a guarded read kept the stale one when the peer had CLEARED it.
-      @config.timeout = obj["timeout_s"]?.try(&.as_i?).try(&.seconds)
-      obj["retries"]?.try(&.as_i?).try { |n| @config.retries = n }
+      @config.timeout = Settings.int_field(obj, "timeout_s").try(&.seconds)
+      Settings.int_field(obj, "retries").try { |n| @config.retries = n }
       @config.max_requests = obj["max_requests"]?.try(&.as_i64?)
-      @config.race_count = obj["race_count"]?.try(&.as_i?)
+      @config.race_count = Settings.int_field(obj, "race_count")
       apply_stop_on_json(obj)
       @config.follow_redirects = obj["follow"]?.try(&.as_bool?) || false
       @config.auto_calibrate = obj["calibrate"]?.try(&.as_bool?) || false
@@ -2887,7 +2887,7 @@ module Gori::Tui
     # keys existed) reads as nil / blank / all: no stop condition and an unfiltered archive,
     # which every saved tab was.
     private def apply_stop_on_json(obj : Hash(String, JSON::Any)) : Nil
-      @config.stop_after_matches = obj["stop_after_matches"]?.try(&.as_i?)
+      @config.stop_after_matches = Settings.int_field(obj, "stop_after_matches")
       @s_stop_on = string_knob(obj, "stop_on")
       @config.keep = Fuzz::Keep.parse?(obj["keep"]?.try(&.as_s?)) || Fuzz::Keep::All
     end
