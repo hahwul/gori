@@ -3086,7 +3086,7 @@ ssrf_found = Probe::Detection.new("ssrf_oast", "active", "api.demo.test",
   S::Severity::High,
   evidence: "payload host a1b2c3d4.oast.demo.test drew a DNS lookup then an HTTP GET from 203.0.113.10",
   flow_id: ids[:ssrf])
-store.probe_oast_pending.find { |p| p.token == "a1b2c3d4" }.try { |p| store.promote_probe_oast([{p.id, ssrf_found}]) }
+store.probe_oast_pending.find { |p| p.token == "a1b2c3d4" }.try { |p| store.promote_probe_oast([{p.id, p.token, ssrf_found}]) }
 
 # Triage state, so the Probe tab is not a flat wall of "open": two confirmed by hand, and
 # one low-value header rule muted across the whole project the way an operator would mute
