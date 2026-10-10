@@ -162,6 +162,16 @@ describe Gori::Repeater::FlowRequest do
       wire = "POST /x HTTP/1.1\r\nHost: h\r\nX-Foo: bar\r\n Content-Length: 5\r\n\r\nhi".to_slice
       Gori::Repeater::FlowRequest.resync_content_length(wire).should eq(wire)
     end
+
+    # Whitespace before the colon is the name a lenient origin still reads. Matching on
+    # `name:` saw neither header, so a TE probe grew a Content-Length (TE.CL the operator
+    # never wrote) and a spaced CL got a second, canonical one beside it (CL.CL).
+    it "sees a framing header with whitespace before its colon, and leaves it alone" do
+      te = "POST /x HTTP/1.1\r\nHost: h\r\nTransfer-Encoding : chunked\r\n\r\n0\r\n\r\nGPOST".to_slice
+      Gori::Repeater::FlowRequest.resync_content_length(te).should eq(te)
+      cl = "POST /x HTTP/1.1\r\nHost: h\r\nContent-Length : 5\r\n\r\nhi".to_slice
+      Gori::Repeater::FlowRequest.resync_content_length(cl).should eq(cl)
+    end
   end
 
   # ONE predicate, because the editor and the wire were reading two.
@@ -182,6 +192,7 @@ describe Gori::Repeater::FlowRequest do
       # An indented field name is an obs-fold continuation, not a header this may replace.
       Gori::Proxy::Codec::Http1.rewritable_length_header?(" Content-Length: 5").should be_false
       Gori::Proxy::Codec::Http1.rewritable_length_header?("\tContent-Length: 5").should be_false
+      Gori::Proxy::Codec::Http1.rewritable_length_header?("Content-Length : 5").should be_false
     end
   end
 

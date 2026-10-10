@@ -610,6 +610,17 @@ describe Gori::Repeater::Minimize do
       report.removed.any?(&.kind.param?).should be_false
     end
 
+    # The same refusal for a framing header spelled with whitespace before its colon.
+    it "offers no BODY params under a `Transfer-Encoding :` or `Content-Length :` head" do
+      ["Transfer-Encoding : chunked", "Content-Length : 13"].each do |framing|
+        text = "POST /x HTTP/1.1\nHost: h\nContent-Type: application/json\n#{framing}\n\n" +
+               %({"a":1,"b":2})
+        report = Min.run(text, auto_cl: true, resolve: ->cl_resolve(String),
+          backend: StaticOrigin.new) { }
+        report.removed.any?(&.kind.param?).should be_false
+      end
+    end
+
     # …and the gate is scoped to the BODY: a header, a cookie crumb and a query param do not
     # change the body's length, so refusing them would be a second bug in the other direction.
     it "still offers header / cookie / query candidates" do

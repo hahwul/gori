@@ -140,9 +140,9 @@ module Gori
         head = text[0, sep]
         body = text[(sep + 4)..]
         lines = head.split("\r\n")
-        return bytes if lines.any? { |l| l.lstrip[0, 18]?.try(&.downcase) == "transfer-encoding:" }
+        return bytes if lines.any? { |l| Proxy::Codec::Http1.header_line_named?(l, "transfer-encoding") }
         cl_at = [] of Int32
-        lines.each_with_index { |l, i| cl_at << i if l.lstrip.downcase.starts_with?("content-length:") }
+        lines.each_with_index { |l, i| cl_at << i if Proxy::Codec::Http1.header_line_named?(l, "content-length") }
         if idx = cl_at.first?
           # TWO of them is a CL.CL desync probe: the disagreement IS the test, exactly as it
           # is for the CL+TE pair guarded above. Rewriting only the first (the sole one this
