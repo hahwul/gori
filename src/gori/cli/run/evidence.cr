@@ -302,7 +302,7 @@ module Gori
         tail = notes.empty? ? "" : "  (#{notes.join(", ")} at capture)"
         linked = m.issue_ids.empty? ? "orphaned" : m.issue_ids.map { |id| "##{id}" }.join(",")
         "##{m.id}  #{m.source_label}  #{Gori.iso_micros(m.created_at)}  " \
-        "#{Issues::Export.one_line(Evidence.label(m))} → #{outcome}  #{evidence_bytes_text(m.bytes)}  " \
+        "#{Output.term_line(Evidence.label(m))} → #{outcome}  #{evidence_bytes_text(m.bytes)}  " \
         "sha256 req #{m.request_sha256[0, 12]}… res #{m.response_sha256.try { |h| "#{h[0, 12]}…" } || "—"}  " \
         "issues #{linked}#{tail}"
       end
@@ -322,16 +322,16 @@ module Gori
           end
           io << "source:   " << m.source_label << "\n"
           io << "frozen:   " << Gori.iso_micros(m.created_at) << "\n"
-          io << "exchange: " << Issues::Export.one_line(Evidence.label(m)) << " → "
+          io << "exchange: " << Output.term_line(Evidence.label(m)) << " → "
           if st = m.status
             io << st
-            m.error.try { |e| io << " · error: " << Issues::Export.one_line(e) }
+            m.error.try { |e| io << " · error: " << Output.term_line(e) }
           elsif e = m.error
-            io << "error: " << Issues::Export.one_line(e)
+            io << "error: " << Output.term_line(e)
           else
             io << "no response"
           end
-          io << " · " << (m.protocol.try { |p| Issues::Export.one_line(p) } || "?")
+          io << " · " << (m.protocol.try { |p| Output.term_line(p) } || "?")
           m.duration_us.try { |d| io << " · " << d << "µs" }
           io << " · " << evidence_bytes_text(m.bytes) << "\n"
           io << "sha256:   req " << m.request_sha256 << "\n"

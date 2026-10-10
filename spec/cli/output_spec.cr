@@ -235,3 +235,12 @@ describe "Gori::CLI::Output.discover_row_text" do
     line.should contain("http://d.test/a")
   end
 end
+
+describe "Gori::CLI::Output.term_line" do
+  it "folds control runs and badges the bidi controls one_line leaves alone" do
+    line = Gori::CLI::Output.term_line("a\r\n\e[2Jb\u202Ec")
+    line.should_not contain('\e')
+    line.should_not contain('\n')
+    line.should_not contain('‮')
+  end
+end

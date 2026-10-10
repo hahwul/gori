@@ -354,6 +354,13 @@ module Gori
         UnicodeReveal.visible(s) || s
       end
 
+      # One line of untrusted text for a text listing: `Issues::Export.one_line` folds its
+      # control runs to spaces, and `term_safe` then badges what that leaves alone (bidi and
+      # format controls such as U+202E, which can spoof the line).
+      def self.term_line(s : String) : String
+        term_safe(Issues::Export.one_line(s))
+      end
+
       # Like `term_safe` but preserves line breaks, so a captured multi-line head/body keeps
       # its layout while tabs, ANSI/OSC/CSI escapes and other hidden controls get named badges. Use
       # for captured text written to a live terminal (the `show`/`repeater` text views).

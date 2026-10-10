@@ -495,7 +495,7 @@ module Gori
         step = pl.step
         expect = step.assertion.empty? ? "(no assertion)" : "expect #{step.assertion}"
         line = "#{step.position}  [#{step.id}]  #{step.role.label.ljust(8)}  #{step.ref_label}  " \
-               "#{pl.method} #{Issues::Export.one_line(pl.url)}  #{expect}"
+               "#{pl.method} #{Output.term_line(pl.url)}  #{expect}"
         pl.missing.try { |reason| line += "  — #{reason}" }
         # The method is read off the saved request's own bytes, which may hold anything.
         CLI::Output.term_safe(line)
@@ -514,7 +514,7 @@ module Gori
         expect = assertion.empty? ? "—" : assertion
         flow = flow_id ? "  flow ##{flow_id}" : ""
         "  #{position}  #{role.label.ljust(8)}  #{outcome.label.upcase.ljust(12)}  " \
-        "#{Issues::Export.one_line(label)}  expect #{expect}  → #{Issues::Export.one_line(detail)}#{flow}"
+        "#{Output.term_line(label)}  expect #{expect}  → #{Output.term_line(detail)}#{flow}"
       end
 
       private def self.emit_retest_report(issue_id : Int64, report : Retest::RunReport,

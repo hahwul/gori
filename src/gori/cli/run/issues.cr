@@ -429,9 +429,9 @@ module Gori
             # sprintf, not Float64#to_s: `--cvss 8.85` is accepted, and the TUI, SARIF's
             # security-severity and this listing must not print it three different ways.
             cvss_tag = f.cvss_score.try { |sc| "  [CVSS #{sprintf("%.1f", sc)}]" } || ""
-            io << '#' << f.id << "  [" << f.severity.label << '/' << f.status.label << ']' << cvss_tag << "  " << Issues::Export.one_line(f.title)
+            io << '#' << f.id << "  [" << f.severity.label << '/' << f.status.label << ']' << cvss_tag << "  " << Output.term_line(f.title)
             if h = f.host
-              io << "  (" << Issues::Export.one_line(h) << ')'
+              io << "  (" << Output.term_line(h) << ')'
             end
             # The issue's FIRST related item, in the compact spelling this one-line-per-issue
             # listing has room for. There is no related LIST here to make it the first row of

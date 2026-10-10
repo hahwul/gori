@@ -490,7 +490,7 @@ module Gori
             rescue ex
               # `Provider#resume` raises deliberately: a resume that failed quietly would leave
               # a listener polling a correlation id the server has never heard of.
-              abort "gori run oast resume: session ##{id} could not be resumed: #{ex.message}"
+              abort "gori run oast resume: session ##{id} could not be resumed: #{Output.term_safe(ex.message.to_s)}"
             end
             oast_stream_session(store, bound, http, id, interval, once, json)
           ensure
@@ -833,7 +833,7 @@ module Gori
           prov.register(http)
         rescue ex
           store.try(&.close)
-          STDERR.puts "gori run oast: register failed: #{ex.message}"
+          STDERR.puts "gori run oast: register failed: #{Output.term_safe(ex.message.to_s)}"
           STDERR.puts oast_register_hint(kind, host, ex)
           exit 1
         end
@@ -935,7 +935,7 @@ module Gori
             begin
               prov.deregister(http, session)
             rescue ex
-              STDERR.puts "gori run oast: deregister failed: #{ex.message}"
+              STDERR.puts "gori run oast: deregister failed: #{Output.term_safe(ex.message.to_s)}"
             end
           end
           store.try(&.close)
