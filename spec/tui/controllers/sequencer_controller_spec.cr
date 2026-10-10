@@ -174,6 +174,32 @@ describe SequencerController do
       end
     end
 
+    # The reconcile runs under the open card: a peer's close of the session it was opened on
+    # moves the selection, and Start must not reconfigure (and restart) the neighbour.
+    it "reconfigures the session the card was opened on, not the one current at Start" do
+      with_sequencer_controller do |_ctl, session|
+        req = "GET /token HTTP/1.1\r\nHost: shop.test\r\n\r\n".to_slice
+        session.store.insert_sequencer_session("https://shop.test", req, false, nil, "{}", nil, 0).should be > 0
+        gone = session.store.insert_sequencer_session("https://shop.test", req, false, nil, "{}", nil, 1)
+        host = FakeHost.new(session)
+        ctl = SequencerController.new(host)
+        ctl.jump_subtab(1)
+        opened_on = ctl.current_view.not_nil!
+        neighbour = ctl.view_at(0).not_nil!
+        before = neighbour.config_json
+
+        session.store.delete_sequencer_session(gone).should be_true
+        ctl.reconcile
+        ctl.current_view.should be(neighbour)
+
+        ctl.reconfigure_current(opened_on.config, opened_on)
+
+        host.statuses.last.should eq("that session was closed — nothing reconfigured")
+        neighbour.running?.should be_false
+        neighbour.config_json.should eq(before)
+      end
+    end
+
     it "closes the active session on ^W and lands on the one left" do
       with_sequencer_controller do |_ctl, session|
         req = "GET /token HTTP/1.1\r\nHost: shop.test\r\n\r\n".to_slice

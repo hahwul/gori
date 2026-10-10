@@ -5554,8 +5554,9 @@ module Gori::Tui
       end
       seed = sequencer_controller.build_seed_from_current
       return (@toast = "manual sessions have no token descriptor to configure") unless seed
+      return unless view = sequencer_controller.current_view
       ov = SequenceConfigOverlay.new(seed)
-      ov.on_commit = -> { commit_sequence(ov) { sequencer_controller.reconfigure_current(ov.build_config) } }
+      ov.on_commit = -> { commit_sequence(ov) { sequencer_controller.reconfigure_current(ov.build_config, view) } }
       open_overlay(ov)
     end
 

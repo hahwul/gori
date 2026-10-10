@@ -473,17 +473,22 @@ module Gori::Tui
     # Why a reconfigure cannot proceed, or nil when it can. Asked at the OPEN as well as at
     # Start, so the operator is not invited to fill in a whole card — which now arrives
     # carrying the session's own knobs — only to be refused by the commit.
-    def reconfigure_blocked_reason : String?
-      return nil unless (v = current_view) && v.running?
+    def reconfigure_blocked_reason(v : SequencerView? = current_view) : String?
+      return nil unless v && v.running?
       "stop the collection first (^X) to reconfigure"
     end
 
-    def reconfigure_current(config : Sequencer::Config) : Nil
-      return unless v = current_view
+    # `v` is the session the card was opened on, not whichever is current at Start: the
+    # per-tick reconcile runs under the card, and a peer's close moves the selection.
+    def reconfigure_current(config : Sequencer::Config, v : SequencerView) : Nil
+      unless idx = @sessions.index(&.view.same?(v))
+        return @host.status("that session was closed — nothing reconfigured")
+      end
+      @current_idx = idx
       # Restarting under a live collection would spawn a second engine fiber feeding the same
       # view (interleaved samples → corrupted randomness stats, orphaned job). The open-time
       # check above is the courtesy; this one is what actually guards the engine.
-      if why = reconfigure_blocked_reason
+      if why = reconfigure_blocked_reason(v)
         @host.status(why)
         return
       end
