@@ -68,6 +68,9 @@ module Gori
       def self.each_flow(path : String, prov : Provenance = Provenance.none,
                          cancelled : (-> Bool)? = nil, &block : Builder::FlowPair ->) : Int32
         File.open(path) do |file|
+          # A UTF-8 BOM (Fiddler and other .NET tools write one) is not JSON; the Burp/WSDL
+          # readers already skip it, and so do the other JSON importers.
+          file.skip(3) if file.peek.try(&.[0, 3]?) == Bytes[0xEF, 0xBB, 0xBF]
           pull = JSON::PullParser.new(file)
           raise Gori::Error.new("HAR file is not a JSON object") unless pull.kind.begin_object?
           pull.read_begin_object

@@ -26,7 +26,7 @@ module Gori
 
       def self.parse_file(path : String, prov : Provenance = Provenance.none) : ParseResult
         doc = begin
-          JSON.parse(File.read(path))
+          JSON.parse(File.read(path).lchop('\u{FEFF}'))
         rescue ex : JSON::ParseException
           raise Gori::Error.new("Postman collection is not valid JSON: #{ex.message}")
         end

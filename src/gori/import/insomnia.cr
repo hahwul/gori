@@ -19,7 +19,7 @@ module Gori
       REQUEST_TYPE = "request"
 
       def self.parse_file(path : String, prov : Provenance = Provenance.none) : ParseResult
-        raw = File.read(path)
+        raw = File.read(path).lchop('\u{FEFF}')
         # v5 (Insomnia 9+) exports YAML with a different tree entirely. Detect it by shape
         # AND by extension so a mis-named file still gets the actionable message instead of
         # "not valid JSON".

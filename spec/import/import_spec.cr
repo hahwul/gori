@@ -246,7 +246,8 @@ describe Gori::Import do
   it "imports pending flows from a URL list file" do
     urls = File.tempname("gori", ".txt")
     begin
-      File.write(urls, "https://api.test/v1/ping\n# comment\n\nhttp://legacy.test/\n")
+      # A leading BOM used to cost the first URL (counted as skipped).
+      File.write(urls, "\u{FEFF}https://api.test/v1/ping\n# comment\n\nhttp://legacy.test/\n")
 
       with_store do |store|
         result = Gori::Import.import_file(store, :urls, urls)

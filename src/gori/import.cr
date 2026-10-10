@@ -219,7 +219,7 @@ module Gori
     private def self.import_curl_file(store : Store, path : String, surface : FlowSource::Surface?,
                                       prov : Provenance) : Result
       text = begin
-        File.read(path)
+        File.read(path).lchop('\u{FEFF}')
       rescue ex : File::Error
         raise Gori::Error.new("cannot read #{path}: #{ex.message}")
       end
