@@ -38,17 +38,14 @@ module Gori
         end
       end
 
-      # The file `project switch` writes: the pinned project's short id (its slug for a legacy
-      # project with none), which survives a rename. A dot-name, so `ProjectRegistry#list`
-      # never mistakes it for a project.
+      # The file `project switch` writes (`ProjectRegistry::DEFAULT_PIN_FILE`): the pinned
+      # project's short id (its slug for a legacy project with none), which survives a rename.
       def self.default_pin_path : String
-        File.join(Paths.projects_dir, ".cli-default")
+        ProjectRegistry.new(Paths.projects_dir).default_pin_path
       end
 
       def self.read_default_pin : String?
-        File.read(default_pin_path).strip.presence
-      rescue File::Error
-        nil
+        ProjectRegistry.new(Paths.projects_dir).default_pin
       end
 
       # The default project and the rule that chose it; the refusal sentence for a pin that
@@ -160,15 +157,6 @@ module Gori
           end
         end
         exit 1 if chosen.is_a?(String)
-      end
-
-      # Whether `project` is the one `project switch` pinned. Asked BEFORE a `project delete`,
-      # which then clears the pin once the delete succeeded — so the next command is told there
-      # is no pin, rather than that the pinned project vanished.
-      private def self.default_pinned?(registry : ProjectRegistry, project : Project) : Bool
-        pin = read_default_pin || return false
-        found = registry.find(pin) rescue nil
-        !found.nil? && found.dir == project.dir
       end
     end
   end

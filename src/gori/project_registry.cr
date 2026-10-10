@@ -29,6 +29,12 @@ module Gori
     # stay addressable by slug/name (see #find) — no backfill, no write-on-read.
     # Lives inside the project dir, so it is never itself listed as a project.
     ID_FILE = ".id"
+    # The project `gori run project switch` pinned as the default for a command that names
+    # none (#1387): its short id, or its slug for a legacy project. Beside the projects, not in
+    # one, and a dot-name so `#list` never mistakes it for a project. Owned here because
+    # `#delete` clears it: a project deleted from MCP or the TUI picker otherwise left every
+    # later `gori run` refusing a pin that can never resolve again.
+    DEFAULT_PIN_FILE = ".cli-default"
 
     # Why a name gori will not make a directory out of was refused, in the one sentence the
     # three surfaces print verbatim ("gori run project create: …", MCP's INVALID_ARGUMENT,
@@ -50,6 +56,16 @@ module Gori
     BLANK_NAME = "invalid project name: it cannot be blank"
 
     def initialize(@root : String)
+    end
+
+    def default_pin_path : String
+      File.join(@root, DEFAULT_PIN_FILE)
+    end
+
+    def default_pin : String?
+      File.read(default_pin_path).strip.presence
+    rescue File::Error
+      nil
     end
 
     # Why a name was refused because it addresses MORE THAN ONE project. A `Gori::Error`, so
@@ -541,8 +557,10 @@ module Gori
     # its capture lock: rm_rf would unlink the db out from under the capturer, which
     # would then keep "successfully" writing flows into a now-pathless inode — a
     # silent, total loss of everything captured after the delete.
-    def delete(project : Project) : Nil
-      return unless Dir.exists?(project.dir)
+    #
+    # True when the project was the pinned `gori run` default, whose pin is then cleared.
+    def delete(project : Project) : Bool
+      return false unless Dir.exists?(project.dir)
       # `CaptureLock.try_at` deliberately RE-RAISES a non-contention failure so it is never
       # read as "someone else holds it" (see its comment). That contract is right, and it
       # makes translating the failure this caller's job: on an unwritable or read-only
@@ -568,11 +586,15 @@ module Gori
       unless guard
         raise Gori::Error.new("project is open in another gori instance — close it there first")
       end
+      # Asked before the rm_rf, which takes the `.id` sidecar the pin names.
+      pinned = default_pin.try { |pin| (find(pin) rescue nil).try(&.dir) == project.dir } || false
       begin
         FileUtils.rm_rf(project.dir)
       ensure
         guard.close
       end
+      File.delete?(default_pin_path) rescue nil if pinned
+      pinned
     end
 
     # Rename a project's display name (the `.name` sidecar). The on-disk directory

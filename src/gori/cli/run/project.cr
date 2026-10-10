@@ -491,17 +491,15 @@ module Gori
         # Read the sidecars while they still exist — rm_rf takes them with the directory.
         id = registry.id_of(project)
         slug = registry.slug_of(project)
-        was_default = default_pinned?(registry, project)
-        begin
+        # `delete` clears the pin when it named this project (#1387), so the next command is
+        # told there is no pin rather than that the pinned project vanished.
+        was_default = begin
           registry.delete(project) # refuses while another live instance holds the capture lock
         rescue ex : Gori::Error
           abort "gori run project delete: #{ex.message}"
         rescue ex : File::Error | IO::Error
           abort "gori run project delete: could not remove #{project.dir}: #{ex.message}"
         end
-        # The pin named the project that is now gone (#1387): clear it rather than leave every
-        # later command refusing a pin that can never resolve again.
-        File.delete?(default_pin_path) rescue nil if was_default
 
         if format == :json
           puts(JSON.build do |j|
