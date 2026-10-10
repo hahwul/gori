@@ -714,6 +714,9 @@ describe Gori::Decoder do
       conv("unicode-escape", "aé").should eq "a\\u00e9"
       conv("unicode-unescape", "a\\u00e9").should eq "aé"
       conv("unicode-unescape", conv("unicode-escape", "x🎉y")).should eq "x🎉y"
+      # A literal `\u0041` in the input must not come back as `A`.
+      conv("unicode-escape", "\\u0041 \\x").should eq "\\u005cu0041 \\x"
+      conv("unicode-unescape", conv("unicode-escape", "\\u0041\\")).should eq "\\u0041\\"
     end
 
     it "unicode-unescape passes real multibyte chars through verbatim beside escapes" do
