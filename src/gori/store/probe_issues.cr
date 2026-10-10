@@ -61,56 +61,59 @@ module Gori
       ts = now_us
       wrote = false
       ok = exec_task_ok ->(c : DB::Connection) {
-        ds.each do |d|
-          if c.query_one?("SELECT 1 FROM probe_suppressions WHERE code = ? AND host = ?",
-               d.code, d.host, as: Int64)
-            next
-          end
-          existing = c.query_one?(
-            "SELECT id, affected, severity, evidence, title FROM probe_issues WHERE code = ? AND host = ?",
-            d.code, d.host, as: {Int64, String, Int32, String?, String})
-          if existing
-            id, aff_json, sev, prev_evidence, prev_title = existing
-            new_aff = merged_affected(d.code, d.host, aff_json, d.url)
-            new_sev = sev > d.severity.value ? sev : d.severity.value
-            # Keep the title in sync with the highest-severity observation: a code whose title
-            # is severity-dependent (reflected_param: HTML ⇒ Medium "Reflected parameter" vs
-            # non-HTML ⇒ Low "…(non-HTML context)") must not show an escalated badge next to the
-            # lower-severity title. Adopt the incoming title only when it RAISES severity; for
-            # fixed-title codes (the vast majority) this is a no-op.
-            new_title = d.severity.value > sev ? d.title : prev_title
-            # For the type-labeled infoleak codes, accumulate every distinct type seen
-            # for this (code, host) group so a later flow's different secret/error type
-            # isn't masked by the first-wins COALESCE. Other codes keep their first
-            # representative sample.
-            new_evidence = Store.accumulate_evidence?(d.code) ? Store.merge_evidence(prev_evidence, d.evidence) : (prev_evidence || d.evidence)
-            if new_aff
-              c.exec("UPDATE probe_issues SET hit_count = hit_count + 1, affected = ?, severity = ?, " \
-                     "title = ?, evidence = ?, last_seen = ? WHERE id = ?",
-                new_aff, new_sev, new_title, new_evidence, ts, id)
-            else # `affected` would be written back byte for byte — see `merged_affected`
-              c.exec("UPDATE probe_issues SET hit_count = hit_count + 1, severity = ?, " \
-                     "title = ?, evidence = ?, last_seen = ? WHERE id = ?",
-                new_sev, new_title, new_evidence, ts, id)
-            end
-          else
-            # OR IGNORE: this is a SELECT-then-INSERT across a transaction, so a peer process that
-            # inserted the same (code, host) in between would land on the table\'s UNIQUE — and a
-            # RAISE here does not merely lose this detection, it rolls back the whole writer batch
-            # and poisons the connection (see `update_scope_rule`). Ignoring is the right outcome
-            # anyway: the row exists, and the next detection for it takes the UPDATE branch above.
-            c.exec("INSERT OR IGNORE INTO probe_issues (code, category, host, title, severity, status, hit_count, " \
-                   "affected, sample_flow_id, evidence, first_seen, last_seen, sample_repeater_id) " \
-                   "VALUES (?,?,?,?,?,0,1,?,?,?,?,?,?)",
-              d.code, d.category, d.host, d.title, d.severity.value,
-              [d.url].to_json, d.flow_id, d.evidence, ts, ts, d.repeater_id)
-          end
-          wrote = true
-        end
+        ds.each { |d| wrote = true if upsert_probe_issue_in(c, d, ts) }
         nil
       }
       bump_probe_generation if wrote && ok # after commit (exec_task_ok blocks until the writer replies)
       ok
+    end
+
+    # One detection's group-merge, run INSIDE a writer closure. False when (code, host) is
+    # suppressed, so nothing was written. Shared with `promote_probe_oast`, which has to claim
+    # a probe and write its finding in the same transaction.
+    private def upsert_probe_issue_in(c : DB::Connection, d : Probe::Detection, ts : Int64) : Bool
+      return false if c.query_one?("SELECT 1 FROM probe_suppressions WHERE code = ? AND host = ?",
+                        d.code, d.host, as: Int64)
+      existing = c.query_one?(
+        "SELECT id, affected, severity, evidence, title FROM probe_issues WHERE code = ? AND host = ?",
+        d.code, d.host, as: {Int64, String, Int32, String?, String})
+      if existing
+        id, aff_json, sev, prev_evidence, prev_title = existing
+        new_aff = merged_affected(d.code, d.host, aff_json, d.url)
+        new_sev = sev > d.severity.value ? sev : d.severity.value
+        # Keep the title in sync with the highest-severity observation: a code whose title
+        # is severity-dependent (reflected_param: HTML ⇒ Medium "Reflected parameter" vs
+        # non-HTML ⇒ Low "…(non-HTML context)") must not show an escalated badge next to the
+        # lower-severity title. Adopt the incoming title only when it RAISES severity; for
+        # fixed-title codes (the vast majority) this is a no-op.
+        new_title = d.severity.value > sev ? d.title : prev_title
+        # For the type-labeled infoleak codes, accumulate every distinct type seen
+        # for this (code, host) group so a later flow's different secret/error type
+        # isn't masked by the first-wins COALESCE. Other codes keep their first
+        # representative sample.
+        new_evidence = Store.accumulate_evidence?(d.code) ? Store.merge_evidence(prev_evidence, d.evidence) : (prev_evidence || d.evidence)
+        if new_aff
+          c.exec("UPDATE probe_issues SET hit_count = hit_count + 1, affected = ?, severity = ?, " \
+                 "title = ?, evidence = ?, last_seen = ? WHERE id = ?",
+            new_aff, new_sev, new_title, new_evidence, ts, id)
+        else # `affected` would be written back byte for byte — see `merged_affected`
+          c.exec("UPDATE probe_issues SET hit_count = hit_count + 1, severity = ?, " \
+                 "title = ?, evidence = ?, last_seen = ? WHERE id = ?",
+            new_sev, new_title, new_evidence, ts, id)
+        end
+      else
+        # OR IGNORE: this is a SELECT-then-INSERT across a transaction, so a peer process that
+        # inserted the same (code, host) in between would land on the table\'s UNIQUE — and a
+        # RAISE here does not merely lose this detection, it rolls back the whole writer batch
+        # and poisons the connection (see `update_scope_rule`). Ignoring is the right outcome
+        # anyway: the row exists, and the next detection for it takes the UPDATE branch above.
+        c.exec("INSERT OR IGNORE INTO probe_issues (code, category, host, title, severity, status, hit_count, " \
+               "affected, sample_flow_id, evidence, first_seen, last_seen, sample_repeater_id) " \
+               "VALUES (?,?,?,?,?,0,1,?,?,?,?,?,?)",
+          d.code, d.category, d.host, d.title, d.severity.value,
+          [d.url].to_json, d.flow_id, d.evidence, ts, ts, d.repeater_id)
+      end
+      true
     end
 
     # Codes whose evidence is a TYPE LABEL drawn from a small vocabulary (a secret kind, an

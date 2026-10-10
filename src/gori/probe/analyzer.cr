@@ -951,7 +951,7 @@ module Gori
           # The send yields for up to ACTIVE_TIMEOUT, and a target that fetches the payload at
           # once has its callback stored, and swept past with no pending row to match, before
           # the row above exists. Rewind the next sweep to where this send started; a re-read
-          # callback cannot promote twice (`mark_probe_oast_matched` is conditional).
+          # callback cannot promote twice (`promote_probe_oast` is conditional).
           @oob_floor = {@oob_floor || oob_mark, oob_mark}.min unless plan.oob.empty?
         end
         # Surface send failures (TLS/DNS/timeout) so Active never fails silently — but
@@ -1035,12 +1035,10 @@ module Gori
           @oob_floor = nil
           since = {since, floor}.min
         end
+        # The sweep has already WRITTEN these (claim and upsert are one transaction), so they
+        # are only announced here — never persisted a second time.
         detections, @oob_watermark = OutOfBand.sweep(@store, since)
         return if detections.empty?
-        # flow_id rides on each Detection (stamped at plant time from the probed flow), so
-        # `persist` is passed 0 and `with_source` keeps the detection's own id. `persist` bumps
-        # the generation + emits ONE message-less list-refresh event.
-        persist(detections, flow_id: 0_i64, repeater_id: nil)
         # One tray notification PER confirmed finding. A single sweep can promote several distinct
         # callbacks (two SSRF targets calling home between ticks), and a blind-SSRF confirmation is
         # exactly the moment an operator must not miss — collapsing them to the first would drop a

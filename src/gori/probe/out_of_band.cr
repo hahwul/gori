@@ -150,9 +150,12 @@ module Gori
       # while gori was closed is matched on the next sweep. After that first full pass the
       # watermark makes each tick read only what arrived since.
       #
-      # `mark_probe_oast_matched` is what makes a promotion happen exactly once — it is a
-      # conditional UPDATE, so two surfaces sweeping the same project (the TUI's timer and a
-      # headless `gori run probe`) cannot both emit the issue.
+      # `Store#promote_probe_oast` is what makes a promotion happen exactly once — a conditional
+      # UPDATE, so two surfaces sweeping the same project (the TUI's timer and a headless
+      # `gori run probe`) cannot both emit the issue — and it WRITES the issue in that same
+      # transaction. What this returns is therefore already persisted: a caller reports it and
+      # never upserts it again. A rolled-back promotion returns nothing and keeps `since_id`, so
+      # the next sweep re-reads the same callbacks against probes that are still pending.
       def self.sweep(store : Store, since_id : Int64) : {Array(Detection), Int64}
         out = [] of Detection
         callbacks = store.oast_callbacks_since(since_id)
@@ -166,6 +169,7 @@ module Gori
         # the payload host back in mixed case, and a byte-exact comparison would miss the one
         # protocol an out-of-band check most often lands on.
         haystacks = callbacks.map { |cb| "#{cb.full_id}\n#{String.new(cb.raw_request)}".downcase }
+        matches = [] of {Int64, Detection}
         pending.each do |p|
           # A token is a unique-per-mint nonce, so the only callback that carries it is the one
           # this probe drew. Guard against a pathologically short token (a mis-minted or truncated
@@ -174,10 +178,10 @@ module Gori
           next if p.token.size < TOKEN_MIN
           idx = haystacks.index(&.includes?(p.token))
           next unless idx
-          next unless store.mark_probe_oast_matched(p.id)
-          out << detection_for(p, callbacks[idx])
+          matches << {p.id, detection_for(p, callbacks[idx])}
         end
-        {out, watermark}
+        promoted = store.promote_probe_oast(matches)
+        promoted ? {promoted, watermark} : {out, since_id}
       end
 
       # The promoted finding. Evidence names the protocol and the source the callback came

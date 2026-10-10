@@ -3066,11 +3066,6 @@ store.set_probe_mode(Probe::Mode::Passive)
     S::Severity::High,
     evidence: "Origin: https://evil.example → Access-Control-Allow-Origin: https://evil.example; Allow-Credentials: true",
     flow_id: ids[:cors]),
-  Probe::Detection.new("ssrf_oast", "active", "api.demo.test",
-    "https://api.demo.test/v1/import", "Blind SSRF (server fetched an attacker-controlled URL)",
-    S::Severity::High,
-    evidence: "payload host a1b2c3d4.oast.demo.test drew a DNS lookup then an HTTP GET from 203.0.113.10",
-    flow_id: ids[:ssrf]),
 ].each { |d| store.upsert_probe_issue(d) }
 
 # The durable half of an out-of-band check: what was planted, where, and whether it ever
@@ -3086,7 +3081,12 @@ store.insert_probe_oast_probe("e5f6a7b8", "https://e5f6a7b8.oast.demo.test/hook"
   "Blind SSRF (server fetched an attacker-controlled URL)", S::Severity::High,
   "shop.demo.test", "https://shop.demo.test/go?next=",
   "planted in the query parameter `next` — no callback yet", ids[:redirect])
-store.probe_oast_pending.find { |p| p.token == "a1b2c3d4" }.try { |p| store.mark_probe_oast_matched(p.id) }
+ssrf_found = Probe::Detection.new("ssrf_oast", "active", "api.demo.test",
+  "https://api.demo.test/v1/import", "Blind SSRF (server fetched an attacker-controlled URL)",
+  S::Severity::High,
+  evidence: "payload host a1b2c3d4.oast.demo.test drew a DNS lookup then an HTTP GET from 203.0.113.10",
+  flow_id: ids[:ssrf])
+store.probe_oast_pending.find { |p| p.token == "a1b2c3d4" }.try { |p| store.promote_probe_oast([{p.id, ssrf_found}]) }
 
 # Triage state, so the Probe tab is not a flat wall of "open": two confirmed by hand, and
 # one low-value header rule muted across the whole project the way an operator would mute

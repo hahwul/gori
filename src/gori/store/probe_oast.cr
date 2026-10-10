@@ -73,22 +73,33 @@ module Gori
       list
     end
 
-    # Stamp a probe as promoted. The guard in the WHERE clause makes this idempotent: two sweeps
-    # racing the same callback (the TUI's timer and a headless scan against the same project)
-    # both find the row pending, and only the first UPDATE takes — so the caller can key "did I
-    # already emit this issue?" off the affected-row count rather than off its own memory.
-    def mark_probe_oast_matched(id : Int64) : Bool
-      claimed = false
-      # `rows_affected` is read INSIDE the writer closure (the pattern upsert_probe_issue uses
-      # for its read-modify-write): exec_task's own return is last_insert_rowid, which says
-      # nothing about a conditional UPDATE. The commit flag and the claim flag are separate
-      # questions — a rolled-back batch must not report a claim it did not persist.
+    # Promote matched probes: stamp each one claimed AND write its finding, in ONE writer
+    # transaction. The guard in the WHERE clause makes the claim idempotent: two sweeps racing
+    # the same callback (the TUI's timer and a headless scan against the same project) both find
+    # the row pending, and only the first UPDATE takes. As two writes, a committed claim followed
+    # by a rolled-back upsert (a busy or locked store) left the probe matched with no issue, and
+    # no later sweep looks at a matched probe, so the finding was gone for good.
+    #
+    # Answers the detections that were claimed AND written (a suppressed (code, host) is claimed
+    # but not written), or nil when the batch rolled back, which leaves every probe pending for
+    # the next sweep.
+    def promote_probe_oast(matches : Array({Int64, Probe::Detection})) : Array(Probe::Detection)?
+      promoted = [] of Probe::Detection
+      return promoted if matches.empty?
+      ts = now_us
       ok = exec_task_ok ->(c : DB::Connection) {
-        claimed = c.exec("UPDATE probe_oast_probes SET matched_at = ? WHERE id = ? AND matched_at IS NULL",
-          now_us, id).rows_affected > 0
+        matches.each do |(id, d)|
+          # `rows_affected` read INSIDE the writer closure: exec_task's own return is
+          # last_insert_rowid, which says nothing about a conditional UPDATE.
+          next unless c.exec("UPDATE probe_oast_probes SET matched_at = ? WHERE id = ? AND matched_at IS NULL",
+                        ts, id).rows_affected > 0
+          promoted << d if upsert_probe_issue_in(c, d, ts)
+        end
         nil
       }
-      ok && claimed
+      return nil unless ok
+      bump_probe_generation unless promoted.empty?
+      promoted
     end
 
     private def read_probe_oast(rs : DB::ResultSet) : ProbeOastRecord

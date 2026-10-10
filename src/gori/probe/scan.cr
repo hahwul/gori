@@ -224,12 +224,12 @@ module Gori
 
       # Every callback ever received, matched against everything still outstanding. A headless
       # scan holds no watermark across runs (there is no process to hold it), so it sweeps from
-      # 0; `mark_probe_oast_matched` is the conditional UPDATE that keeps a promotion single,
+      # 0; `promote_probe_oast` is the conditional UPDATE that keeps a promotion single,
       # including against a TUI sweeping the same project at the same time.
       private def sweep_out_of_band(store : Store) : Array(Detection)
-        dets, _ = OutOfBand.sweep(store, 0_i64)
-        store.upsert_probe_issues(dets)
-        dets
+        # Already written: the sweep claims and upserts in one transaction, and returns only
+        # what committed.
+        OutOfBand.sweep(store, 0_i64)[0]
       rescue DB::Error | SQLite3::Exception
         [] of Detection
       end

@@ -49,7 +49,7 @@ module Gori
         # statement until teardown — see `update_scope_rule` for what that cost.
         # Both numbers come off the `DB::ExecResult` the driver already filled in — no follow-up
         # `SELECT changes()` / `SELECT last_insert_rowid()` to prepare and step inside the
-        # writer's batch. Read INSIDE the closure, the pattern `mark_probe_oast_matched` uses.
+        # writer's batch. Read INSIDE the closure, the pattern `promote_probe_oast` uses.
         res = c.exec("INSERT OR IGNORE INTO extract_rules (enabled, name, match_filter, kind, selector, pos_start, pos_end, host) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
           enabled ? 1 : 0, name, match_filter, kind.label, selector, pos_start, pos_end, host)
         changed = res.rows_affected
