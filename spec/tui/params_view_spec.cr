@@ -152,6 +152,19 @@ describe ParamsController do
     end
   end
 
+  # Leaving the project stops a scan in flight, so it does not keep reading a store the
+  # session is about to close, and its answer is dropped.
+  it "stop_all cancels a scan in flight and drops its answer" do
+    with_params_controller do |ctl, _, session|
+      seed_params_flow(session.store, "https://acme.test/a?first=1")
+      ctl.run
+      ctl.stop_all
+      ctl.view.scanning?.should be_false
+      drain_until_landed(ctl)
+      ctl.view.ready?.should be_false
+    end
+  end
+
   # The inventory answers about the Sitemap's flow set; once the tree's query moved, the
   # scan on screen answers about a different one and a revisit rescans.
   it "rescans on entry when the Sitemap query changed since the scan" do
