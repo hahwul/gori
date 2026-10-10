@@ -280,6 +280,7 @@ module Gori::Fuzz
       begin
         level = 0
         loop do
+          fresh = iters[level].nil?
           it = (iters[level] ||= set_for(level).open_iterator)
           if v = it.next_value
             acc[level] = v
@@ -292,7 +293,10 @@ module Gori::Fuzz
           else
             it.close
             iters[level] = nil
-            break if level == 0
+            # A set empty from its first value empties the whole product. Climbing back up
+            # instead walked every value of the sets before it without emitting — and so
+            # without yielding — which froze the single-threaded process on `0-1e18` × `[]`.
+            break if level == 0 || fresh
             level -= 1
           end
         end
