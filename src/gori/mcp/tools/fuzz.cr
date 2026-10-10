@@ -1085,7 +1085,13 @@ module Gori
         end
       end
 
+      PAYLOAD_SOURCE_KEYS = %w[list list_base64 wordlist preset payload_from numbers null brute]
+
       private def fuzz_source_from(obj : Hash(String, JSON::Any), spec : JSON::Any) : Fuzz::PayloadSource
+        # One source per set: the chain below takes the first key it knows, so a set naming two
+        # dropped the second without a word.
+        named = PAYLOAD_SOURCE_KEYS.select { |k| obj.has_key?(k) }
+        raise FuzzArgError.new("payload set #{spec} names #{named.join(" and ")} — one source per set; add another set for the second") if named.size > 1
         if list = obj["list"]?.try(&.as_a?)
           # `x.as_s? || x.to_s` coerced a nested array/object too, and `JSON::Any#to_s`
           # renders those in CRYSTAL syntax (`{"a" => 1}`) — so a mistyped entry became a
@@ -1124,7 +1130,7 @@ module Gori
         elsif br = obj["brute"]?
           fuzz_brute(br)
         else
-          raise FuzzArgError.new("unknown payload set #{spec} (use list/list_base64/wordlist/preset/payload_from/numbers/null/brute)")
+          raise FuzzArgError.new("unknown payload set #{spec} (use #{PAYLOAD_SOURCE_KEYS.join("/")})")
         end
       end
 
