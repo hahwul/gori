@@ -32,7 +32,7 @@ module Gori
       private def jobs_busy(action : String) : Result?
         kinds = [] of String
         {fuzz: @jobs, mine: @mine_jobs, discover: @discover_jobs, sequence: @sequence_jobs, authorize: @authorize_jobs}.each do |kind, jobs|
-          kinds << kind.to_s if jobs.each_value.any? { |j| j.status == :running }
+          kinds << kind.to_s if jobs.each_value.any? { |j| !j.finalized? }
         end
         return if kinds.empty?
         busy("cannot #{action} while #{kinds.join(", ")} job(s) are running; stop them first")

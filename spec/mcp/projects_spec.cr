@@ -752,7 +752,11 @@ describe "Gori::MCP::Tools project switch refusals" do
       r.error_code.should eq("PROJECT_BUSY")
       r.text.should contain("discover job(s) are running")
       r.text.should_not contain("fuzz")
-      djob.status = :done
+      # A drain rescue or a non-terminal ErrorEvent flips status to :error while the engine still
+      # runs against this project; only the runner fiber leaving (`finalize_job`) frees it.
+      djob.status = :error
+      tools.call("switch_project", JSON.parse(%({"project":#{slug.to_json}}))).error_code.should eq("PROJECT_BUSY")
+      djob.finalized = true
       mcp_ok_json(tools, "switch_project", %({"project":#{slug.to_json}}))["switched"].as_bool.should be_true
     end
   end
@@ -772,6 +776,7 @@ describe "Gori::MCP::Tools project switch refusals" do
       busy.error_code.should eq("PROJECT_BUSY")
       busy.text.should contain("discover job(s) are running")
       djob.status = :done
+      djob.finalized = true
 
       # A project pinned to a jump host: the bind installs it as the process's route.
       tools.current_store.not_nil!.set_setting(Gori::Settings::PROJECT_UPSTREAM_KEY, "http://jump.internal:3128")

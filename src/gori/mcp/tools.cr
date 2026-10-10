@@ -961,6 +961,10 @@ module Gori
         property? truncated = false
         property ended_at_ms : Int64? = nil
         property stop_requested_at_ms : Int64? = nil
+        # Set by `finalize_job` once the runner fiber is out. `status` alone is not "still
+        # running": a non-terminal ErrorEvent or a drain rescue flips it to :error while the
+        # engine keeps sending and reading the project, so `jobs_busy` asks this instead.
+        property? finalized = false
         getter audit : JobAudit
         getter db_path : String?
 
@@ -1976,6 +1980,7 @@ module Gori
           job.error_msg ||= "job ended without a terminal event"
         end
         job.ended_at_ms ||= Time.utc.to_unix_ms
+        job.finalized = true
       end
 
       # Terminal status for a finished fuzz/mine/discover job. A non-stopped Done whose
