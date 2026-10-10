@@ -68,9 +68,7 @@ module Gori
       def self.each_flow(path : String, prov : Provenance = Provenance.none,
                          cancelled : (-> Bool)? = nil, &block : Builder::FlowPair ->) : Int32
         File.open(path) do |file|
-          # A UTF-8 BOM (Fiddler and other .NET tools write one) is not JSON; the Burp/WSDL
-          # readers already skip it, and so do the other JSON importers.
-          file.skip(3) if file.peek.try(&.[0, 3]?) == Bytes[0xEF, 0xBB, 0xBF]
+          skip_bom(file)
           pull = JSON::PullParser.new(file)
           raise Gori::Error.new("HAR file is not a JSON object") unless pull.kind.begin_object?
           pull.read_begin_object
@@ -206,8 +204,7 @@ module Gori
         # `"status": 0` with an empty head. Importing that as COMPLETE fabricated an
         # `HTTP/1.1 0` status line; it is a request with no response, like gori's own.
         resp = entry["response"]?
-        resp = nil if resp.try(&.raw).nil? # an explicit JSON `null` response is truthy as JSON::Any — treat it as absent
-        resp = nil if resp && no_status?(resp)
+        resp = nil if no_response?(resp)
         unless resp
           return Builder.pending_request(created_at, url, method, req_headers, req_body,
             http_version, req_declared, frame_body: req_frame,
@@ -361,8 +358,16 @@ module Gori
         n && n > 0 ? n : nil
       end
 
-      # No status a server could have sent, and no raw head of gori's own to say otherwise.
-      private def self.no_status?(resp : JSON::Any) : Bool
+      # A UTF-8 BOM (Fiddler and other .NET tools write one) is not JSON; the Burp/WSDL
+      # readers already skip it, and so do the other JSON importers.
+      private def self.skip_bom(file : IO) : Nil
+        file.skip(3) if file.peek.try(&.[0, 3]?) == Bytes[0xEF, 0xBB, 0xBF]
+      end
+
+      # Absent, an explicit JSON `null` (truthy as JSON::Any), or no status a server could have
+      # sent with no raw head of gori's own to say otherwise.
+      private def self.no_response?(resp : JSON::Any?) : Bool
+        return true if resp.nil? || resp.raw.nil?
         return false if resp["_goriRawResponseHead"]?
         (number_i64(resp["status"]?) || 0_i64) <= 0
       end
