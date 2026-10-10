@@ -4882,3 +4882,16 @@ trap did not stop them (#1554). The tool now runs such a token's decode counterp
 (`Tools.inverse_of`), per token in written order. A spelled direction (`base64-encode`,
 `gzip-compress`), a canonical name (`raw-deflate`), a hash and a one-way transform run as typed.
 The divergence from the other two surfaces is deliberate and stated in the tool description.
+
+### 2026-10-10: the rule tables V40 left alone move to AUTOINCREMENT too (V46)
+
+Overturns the #1344 entry's "Not migrated" line for four of its five tables. It held that where
+an `extract_rules`, `oast_providers`, `color_rules` or `display_columns` id leaves the process,
+the surfaces address the row another way. That was true of saved views and links only: MCP
+`update/delete/set_*_enabled` and `move_color_rule`, `gori run rewriter extract rm` /
+`colormarker rm` / `oast providers`, and the TUI OAST edit form all name these rows by id. A
+peer's delete of the newest row followed by a new one handed its id on, and a stale holder then
+updated or deleted the new row; an OAST token landed on a provider the agent never chose. V46
+moves them the way V41 moved `sequencer_sessions` (`move_to_autoincrement`), and seeds
+`oast_providers` past every session that still names a provider. `saved_views` and
+`entity_links` stay as they were: nothing outside the process holds their ids.
