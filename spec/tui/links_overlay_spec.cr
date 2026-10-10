@@ -399,3 +399,35 @@ describe "LinksOverlay — the add hand-off (Overlay#on_close nested-modal seam)
     end
   end
 end
+
+private def runner_code(file : String) : String
+  File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner", file))
+    .lines.reject(&.lstrip.starts_with?('#')).join('\n')
+end
+
+# The per-tick reconcile runs under an open card, so a peer's delete/move can reorder the
+# sessions between the picker opening and ↵. Both session pickers (link a repeater/fuzz/miner,
+# add a retest step) resolve the row against ids snapshotted WITH the rows, and refuse an id
+# that has since been closed — never `db_id_at(idx)` at commit time.
+describe "session pickers resolve a row against the ids they opened with" do
+  it "links: snapshots ids beside the rows and re-checks them on ↵" do
+    body = runner_code("links.cr")[/private def link_add_subtab_picker.*?\n  end\n/m].not_nil!
+    (body.index("ids = session_picker_ids(rows, ctrl)").not_nil! < body.index("SubtabPicker.new").not_nil!).should be_true
+    body.should contain("picked_session_id(sp, ids, ctrl)")
+    body.should_not contain("db_id_at(idx)")
+  end
+
+  it "retest: the add-step picker does the same" do
+    body = runner_code("retest.cr")[/private def open_retest_session_picker.*?\n  end\n/m].not_nil!
+    (body.index("ids = session_picker_ids(rows, ctrl)").not_nil! < body.index("SubtabPicker.new").not_nil!).should be_true
+    body.should contain("picked = picked_session_id(sp, ids, ctrl)")
+    body.should_not contain("db_id_at(idx)")
+  end
+
+  it "refuses a snapshotted id whose session is gone" do
+    body = runner_code("links.cr")[/private def picked_session_id.*?\n  end\n/m].not_nil!
+    body.should contain("ids[idx]?")
+    body.should contain("ctrl.index_for_db_id(rid)")
+    body.should contain(%(@toast = "that session was closed — nothing picked"))
+  end
+end
