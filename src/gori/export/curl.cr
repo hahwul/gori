@@ -106,7 +106,11 @@ module Gori
         end
         # Emit -X unless it's a plain bodyless GET (curl's default). A GET *with* a body
         # still needs -X GET, else curl silently promotes the request to POST.
-        unless method.empty? || (method == "GET" && entity.empty?)
+        # A bodiless HEAD is `-I`, never `-X HEAD`: under -X curl still expects the body the
+        # response's Content-Length announces, and hangs waiting for it.
+        if method == "HEAD" && entity.empty?
+          parts << "-I"
+        elsif !(method.empty? || (method == "GET" && entity.empty?))
           if note = nul_method_note(method, entity)
             notes << note
           else

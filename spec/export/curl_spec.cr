@@ -75,6 +75,14 @@ describe Gori::Export::Curl do
       cmd.should contain("--data-raw 'q=1'")
     end
 
+    # `-X HEAD` makes curl wait for the body the response's Content-Length announces.
+    it "writes a bodiless HEAD as -I, which reads back as HEAD" do
+      cmd = curl_of("HEAD /a HTTP/1.1\r\nHost: h\r\n\r\n", "http://h")
+      cmd.should contain("-I")
+      cmd.should_not contain("-X")
+      Gori::Import::Curl.parse_one(cmd).method.should eq("HEAD")
+    end
+
     it "sends a JSON body verbatim through --data-raw, quotes and all" do
       cmd = curl_of("POST /api HTTP/1.1\r\nHost: h\r\nContent-Type: application/json\r\n\r\n" \
                     "{\"user\":\"neo\",\"note\":\"it's fine\"}", "https://h")
