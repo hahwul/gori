@@ -303,15 +303,8 @@ module Gori
       end
 
       # Runs the verb. The SAME path is used by keybindings and the palette.
-      #
-      # A `Gori::Error` out of a handler is that action's refusal, worded for the operator, so it
-      # comes back as the toast. Left to rise, the TUI tick re-raises it as its designed exit,
-      # and one keypress — ⇧I on a captured flow whose head starts with `:` — ended the process,
-      # proxy included.
       def call(ctx : ExecContext) : String?
         @handler.call(ctx)
-      rescue ex : Gori::Error
-        ex.message || ex.class.name
       end
     end
   end
