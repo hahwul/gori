@@ -779,15 +779,12 @@ module Gori
     #     braces literally. An include `*.acme.{test,dev}` matched three hosts live and none
     #     in History, and an exclude with braces carved out nothing in SQL — fail-OPEN on the
     #     display lens, the direction that matters.
-    #   · a SURROUNDING bracket pair — `HostPattern::Compiled` peels it for the exact/subdomain
-    #     arm (`@bare`) but globs against the UN-peeled `@down`, so `[2001:db8::*]` is a rule
-    #     that matches NOTHING in Crystal (`File.match?` reads the outer `[…]` as a character
-    #     class). host_cond peels first, so its GLOB would match every host under
-    #     `2001:db8::` — a dead INCLUDE listing its flows as in-scope in History while
-    #     `allowlisted_unlocked?` refuses every request, i.e. Sandbox black-holes the proxy
-    #     with `include_count` non-zero and the "blocks everything" warning quiet. Gated on
-    #     the bracket pair alone rather than "bracketed AND globbed": which of Compiled's two
-    #     arms applies is exactly the thing not worth restating here.
+    #   · a SURROUNDING bracket pair — how `HostPattern::Compiled` peels it (always for the
+    #     exact/subdomain arm, only around an IPv6 `:` for a glob) is its own business, and a
+    #     native GLOB that peeled differently would list flows in History the live gate
+    #     treats otherwise. Gated on the bracket pair alone rather than "bracketed AND
+    #     globbed": which of Compiled's two arms applies is exactly the thing not worth
+    #     restating here.
     #
     # Anything else routes through `gori_host_match`, which IS HostPattern — so the fast path
     # stays native (host matching runs per row of every scope-filtered reload) and the shapes

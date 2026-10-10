@@ -67,7 +67,7 @@ module Gori
     # `matches?` on the hot path only normalizes the HOST.
     struct Compiled
       getter raw : String
-      # The lowercased pattern — also what a glob is matched against.
+      # The lowercased pattern.
       getter down : String
 
       def initialize(@raw : String)
@@ -78,6 +78,11 @@ module Gori
         # against — on the proxy hot path, times every host rule in the scope.
         @dot_bare = ".#{@bare}"
         @glob = @down.includes?('*')
+        # What a glob is matched against. A bracketed IPv6 glob (`[2001:db8::*]`) is peeled like
+        # the exact arm: unpeeled, `File.match?` read the outer `[…]` as a character class and
+        # the rule matched nothing, so as an EXCLUDE it let that whole range through. Only a
+        # pair around something with a `:`, so a real class like `[a-z]*[0-9]` stays a class.
+        @glob_text = @down.starts_with?('[') && @down.ends_with?(']') && @down.includes?(':') ? @bare : @down
       end
 
       # Match `host` in any form (mixed case, bracketed IPv6).
@@ -93,7 +98,7 @@ module Gori
           # typo can never unwind onto the proxy hot path (mirrors SQLite GLOB's tolerance,
           # which is what keeps the live scope lens and the History SQL view consistent).
           begin
-            File.match?(@down, host)
+            File.match?(@glob_text, host)
           rescue File::BadPatternError
             false
           end

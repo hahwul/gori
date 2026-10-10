@@ -428,26 +428,24 @@ describe Gori::Scope do
     end
   end
 
-  # `HostPattern::Compiled` peels a surrounding bracket pair for its exact/subdomain arm but
-  # globs against the UN-peeled pattern, so `[2001:db8::*]` matches NOTHING in Crystal (the
-  # outer `[…]` is read as a character class). A host_cond that peels first would GLOB
-  # `2001:db8::*` and match every host under it: a dead INCLUDE whose flows are listed as
-  # in-scope while the Sandbox refuses every request with include_count non-zero — the
-  # "blocks everything" warning stays quiet because a rule IS configured.
-  it "SQL filter agrees with in_scope_url? on a BRACKETED host glob (a rule that matches nothing)" do
+  # A bracketed IPv6 glob used to be read as a character class by `File.match?` and matched
+  # nothing, so as an EXCLUDE it let the whole range through. It now matches the bare hosts, and
+  # the SQL lens (which routes it through the same `HostPattern::Compiled`) agrees.
+  it "SQL filter agrees with in_scope_url? on a BRACKETED host glob, and the glob matches" do
     with_store do |store|
-      flows = [{"2001:db8::2", "/x"}, {"[2001:db8::1]", "/x"}]
+      flows = [{"2001:db8::2", "/x"}, {"[2001:db8::1]", "/x"}, {"2001:db9::1", "/x"}]
       flows.each { |(h, t)| capture(store, h, t) }
 
       scope = Gori::Scope.load(store)
-      Gori::Scope.valid?("host", "[2001:db8::*]").should be_true # it IS storable
-      scope.add("include", "host", "[2001:db8::*]")
+      Gori::Scope.valid?("host", "[2001:db8::*]").should be_true
+      scope.add("include", "host", "*")
+      scope.add("exclude", "host", "[2001:db8::*]")
       scope.enable
 
       sql = store.search(scope.filter, 50).map(&.host).sort
       mem = flows.select { |(h, t)| scope.in_scope_url?(url_of("http", h, t), h) }.map(&.[0]).sort
       sql.should eq(mem)
-      mem.should be_empty
+      mem.should eq(["2001:db9::1"])
     end
   end
 
