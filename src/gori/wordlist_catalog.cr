@@ -70,7 +70,9 @@ module Gori
     # command line — and it cannot end in a space or a dot, which some filesystems drop.
     # No separator of either kind, no NUL and no control character can occur, so a name can
     # never name a path outside the directory.
-    NAME_PATTERN = /\A[\p{L}\p{N}_][\p{L}\p{N}_.+\- ]*\z/
+    # Combining marks (`\p{M}`) after the first character: Devanagari and Thai vowel signs, and a
+    # decomposed (NFD) `é`, are part of a letter, not punctuation.
+    NAME_PATTERN = /\A[\p{L}\p{N}_][\p{L}\p{M}\p{N}_.+\- ]*\z/
 
     # UTF-8 BYTES, not characters, because the filesystem's limit is on bytes (255) and the
     # staging file adds a `.` prefix and a `.gori<random>.tmp` suffix to the same component.

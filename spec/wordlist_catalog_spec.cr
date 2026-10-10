@@ -52,7 +52,8 @@ end
 describe Gori::WordlistCatalog do
   describe ".valid_name?" do
     it "accepts a filename in any script, with . _ + - and inner spaces" do
-      ["common.txt", "raft-large_words+2", "a", "_x", "사전.txt", "my list.txt", "9lives", "v1.2.3"].each do |n|
+      ["common.txt", "raft-large_words+2", "a", "_x", "사전.txt", "my list.txt", "9lives", "v1.2.3",
+       "cafe\u0301", "हिंदी", "ภาษา"].each do |n|
         Catalog.valid_name?(n).should be_true
       end
     end
