@@ -1146,15 +1146,6 @@ module Gori
       end
       begin
         @db.close
-        # crystal-db's `Pool#close` only empties the pool: the next checkout builds a fresh
-        # connection, so a straggling read (a scan fiber that outlived its project) silently
-        # reopened the file outside the open lock and pinned its WAL for the rest of the
-        # process. Replacing the setup block AFTER the close (it is called on idle connections,
-        # and there are none now) turns that checkout into a DB::Error instead.
-        @db.setup_connection do |conn|
-          conn.close
-          raise DB::Error.new("store is closed")
-        end
       rescue ex
         # The same hazard as the guard above, reached by the other door: the pool walk closes
         # each connection, and a statement whose deferred error only surfaces at
