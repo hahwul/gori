@@ -370,9 +370,25 @@ describe "MCP issue links" do
       links.size.should eq(1)
       links[0]["ref_id"].as_i64.should eq(primary)
       links[0]["stale"].as_bool.should be_false
-      # …while `list_links`, which lists the TABLE, still reports what the table holds.
-      mcp_ok_json(tools_for(store), "list_links",
-        %({"owner_kind":"issue","owner_id":#{iid}}))["total"].as_i.should eq(0)
+      # `list_links` agrees with `get_issue`: the seed is listed even with no table row.
+      listed = mcp_ok_json(tools_for(store), "list_links", %({"owner_kind":"issue","owner_id":#{iid}}))
+      listed["total"].as_i.should eq(1)
+      listed["links"].as_a[0]["ref_id"].as_i64.should eq(primary)
+    end
+  end
+
+  # `remove_link` on the seed used to answer removed:true while every read rebuilt it from
+  # `issues.flow_id`. It is refused instead, like the LINKS overlay skips it.
+  it "refuses to remove an issue's seed flow link" do
+    with_store do |store|
+      primary = mcp_seed_flow(store, "/seed")
+      iid = store.insert_issue("seeded", Gori::Store::Severity::Low, "acme.test", primary)
+      tools = tools_for(store)
+      res = tools.call("remove_link",
+        JSON.parse(%({"owner_kind":"issue","owner_id":#{iid},"ref_kind":"flow","ref_id":#{primary}})))
+      res.is_error.should be_true
+      res.error_code.should eq("INVALID_ARGUMENT")
+      store.list_links(Gori::Store::LinkOwnerKind::Issue, iid).size.should eq(1)
     end
   end
 end
