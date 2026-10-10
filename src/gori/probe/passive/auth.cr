@@ -63,15 +63,17 @@ module Gori
           segs = [] of String
           in_quote = false
           start = 0
-          value.each_char_with_index do |c, i|
-            if c == '"'
+          # By byte offset: `value[start...i]` is a char index, which walks from the start of a
+          # non-ASCII value on every comma — quadratic over a 256 KiB header.
+          value.each_byte.with_index do |b, i|
+            if b == '"'.ord
               in_quote = !in_quote
-            elsif c == ',' && !in_quote
-              segs << value[start...i]
+            elsif b == ','.ord && !in_quote
+              segs << value.byte_slice(start, i - start)
               start = i + 1
             end
           end
-          segs << value[start..]
+          segs << value.byte_slice(start)
           segs
         end
 

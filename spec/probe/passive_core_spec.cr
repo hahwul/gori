@@ -1120,6 +1120,19 @@ describe "Gori::Probe::Passive (Round-1 hardening)" do
     end
   end
 
+  # The challenge splitter sliced by char offset per comma: quadratic once the value held one
+  # non-ASCII byte (51 s at 250 KiB), on the passive fiber the proxy shares.
+  it "splits a long non-ASCII WWW-Authenticate value in linear time" do
+    with_store do |store|
+      value = "Negotiate é" + ",a" * 100_000 + ", Basic realm=\"x\""
+      started = Time.instant
+      dets = probe_analyze(store, scheme: "http", content_type: nil, status: 401,
+        resp_head: "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: #{value}\r\n\r\n")
+      (Time.instant - started).should be < 2.seconds
+      probe_codes_of(dets).should contain("insecure_basic_auth")
+    end
+  end
+
   it "flags PGP and PKCS#8-encrypted private key blocks (not just RSA/EC)" do
     with_store do |store|
       pgp = probe_analyze(store, content_type: "text/html", resp_head: "HTTP/1.1 200 OK\r\n\r\n",
