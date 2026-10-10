@@ -463,6 +463,11 @@ describe Gori::Update do
       rel.assets[1].digest.should be_nil
     end
 
+    it "skips a non-object assets entry instead of raising" do
+      rel = Gori::Update.parse_release(%({"tag_name":"v9.0.0","assets":[1,"x",null]}))
+      rel.assets.should be_empty
+    end
+
     it "selects the platform asset URL from fixture JSON" do
       asset = Gori::Update.resolve_asset(Gori::Update.parse_release(full_release), "linux", "x86_64")
       asset.name.should eq("gori-v0.17.0-linux-x86_64")

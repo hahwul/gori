@@ -84,7 +84,7 @@ module Gori
         if path = export_path
           begin
             File.write(path, content.ends_with?('\n') ? content : "#{content}\n")
-          rescue ex : File::Error
+          rescue ex : IO::Error
             abort "gori run issues: cannot write to #{path}: #{ex.message}"
           end
           STDERR.puts "exported #{Gori.plural(count, "issue")} → #{path}"
