@@ -150,25 +150,39 @@ module Gori
         nil
       end
 
-      # `{attributes, inner}` for the first `<name>` in `src`.
+      # `{attributes, inner}` for the first DIRECT child `<name>` of the item body `src`.
+      # It walks child to child, stepping over each sibling's content (and any CDATA)
+      # whole. A plain search for `<name` found the text in a sibling instead: a `<url>`
+      # CDATA holding `?q=<response>x`, or an inline request body carrying
+      # `<response>1</response>`, became the stored response head.
       private def self.element(src : String, name : String) : {String, String}?
-        needle = "<#{name}"
         pos = 0
-        while open_at = src.byte_index(needle, pos)
-          after = open_at + needle.bytesize
-          unless name_ends_at?(src, after)
-            pos = after
-            next
-          end
-          gt = src.byte_index('>', after)
-          return nil unless gt
-          attrs = src.byte_slice(after, gt - after)
-          return {attrs, ""} if attrs.ends_with?('/')
-          close = close_at(src, name, gt + 1)
-          return nil unless close
-          return {attrs, src.byte_slice(gt + 1, close - gt - 1)}
+        while lt = src.byte_index('<', pos)
+          tag, attrs, from, to, pos = child_at(src, lt) || return nil
+          return {attrs, src.byte_slice(from, to - from)} if tag == name
         end
         nil
+      end
+
+      # The node opening at byte `lt`: `{tag, attributes, content start, content end, offset
+      # past it}`. The tag is "" for a CDATA section, a stray closing tag, a comment or a
+      # processing instruction, which are stepped over and never a child.
+      private def self.child_at(src : String, lt : Int32) : {String, String, Int32, Int32, Int32}?
+        if src.byte_slice?(lt, CDATA_OPEN.size) == "<![CDATA["
+          cdata_end = src.byte_index("]]>", lt + CDATA_OPEN.size) || return nil
+          return {"", "", 0, 0, cdata_end + 3}
+        end
+        gt = src.byte_index('>', lt + 1) || return nil
+        return {"", "", 0, 0, gt + 1} if src.byte_at?(lt + 1).try(&.in?('/'.ord, '!'.ord, '?'.ord))
+        after = lt + 1
+        until after >= gt || name_ends_at?(src, after)
+          after += 1
+        end
+        tag = src.byte_slice(lt + 1, after - lt - 1)
+        attrs = src.byte_slice(after, gt - after)
+        return {tag, attrs, 0, 0, gt + 1} if attrs.ends_with?('/') # <response/>
+        close = close_at(src, tag, gt + 1) || return nil
+        {tag, attrs, gt + 1, close, close + tag.bytesize + 3}
       end
 
       # The byte offset of the `</name>` closing an element whose content starts at `from`,
