@@ -266,8 +266,10 @@ module Gori
         # agent the server was broken instead of its argument. Still a CLAMP and not
         # `bounded_int_arg`: this argument has always been forgiving at both ends, and `0` is
         # the other spelling of "no limit" an agent reaches for — turning that into a hard
-        # INVALID_ARGUMENT would be a second, opposite way to fail the same call.
-        limit = clamp(optional_int_arg(h, "limit"), COLOR_PREVIEW_LIMIT)
+        # INVALID_ARGUMENT would be a second, opposite way to fail the same call. So `0` (or a
+        # negative) is read as the ceiling, not floored to a one-flow scan by the shared clamp.
+        req = optional_int_arg(h, "limit")
+        limit = req && req <= 0 ? COLOR_PREVIEW_LIMIT.max : clamp(req, COLOR_PREVIEW_LIMIT)
         ahead = Gori::Colormarker.rules_ahead(Gori::Colormarker.merged(store), 0_i64, scope)
         pv = Gori::Colormarker.preview(store, filter, ahead, limit)
         Result.new(JSON.build do |j|
