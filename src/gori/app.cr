@@ -595,6 +595,14 @@ module Gori
               Log.error(exception: ex) { "probe mode reload failed" }
             end
             begin
+              # The rest of the analyzer's config, for the same reason: a rule a peer disabled
+              # (an active one, a custom `exec` one) kept firing in this capture, and a
+              # suppression a peer cleared kept muting. See `Analyzer#apply_stored_config`.
+              session.probe.apply_stored_config
+            rescue ex
+              Log.error(exception: ex) { "probe config reload failed" }
+            end
+            begin
               announce_peer_rule_changes(session, peer_notices)
             rescue ex
               Log.error(exception: ex) { "peer change announcement failed" }

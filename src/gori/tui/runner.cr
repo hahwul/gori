@@ -4258,6 +4258,12 @@ module Gori::Tui
       # when the file has not moved; the Env card edits its own working copy, not these.
       Settings.reload_env_from_disk
       Settings.reload_user_agents_from_disk
+      # The Probe analyzer's config, which it read once at open: a rule a peer disabled (an active
+      # one, a custom `exec` one) kept firing here, and a suppression a peer cleared kept muting.
+      # On the bare cadence rather than behind `data_version`, because a GLOBAL scan rule lives in
+      # settings.json and moves no project commit. Cheap: four small reads, and the rules are
+      # rebuilt only when their stored inputs moved.
+      @session.probe.apply_stored_config
       # The rule sets hold their own peer delta rather than returning it, so a re-read cannot eat
       # it — the Rewriter tab's `on_enter` and its `r` key both reload, and a peer's change picked
       # up by one of those is still owed a line. Taking here, on the bare cadence, is what makes
