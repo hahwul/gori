@@ -519,7 +519,7 @@ describe "MCP cancellation stops the work" do
       origin = CountingOrigin.new
       begin
         with_store do |store|
-          id = cancel_flow(store, origin.port, "/account")
+          id = cancel_flow(store, origin.port, "/account", cookie: true)
           tools = tools_for(store)
           args = JSON.parse(%({"flow_id":#{id},"allow_unscoped":true,"verify":false}))
           stopped = tools.call("cache_deception_check", args, cancelled: -> { true })

@@ -73,10 +73,10 @@ end
 describe "gori run cache-deception — per-flow failures" do
   it "reports a flow that raises before any send and keeps checking the rest" do
     with_store do |store|
-      first = cli_cd_flow(store, "ok.test", "GET /account HTTP/1.1\r\nHost: ok.test\r\n\r\n")
-      broken = cli_cd_flow(store, "boom.test", "GET /account HTTP/1.1\r\nHost: boom.test\r\n\r\n")
+      first = cli_cd_flow(store, "ok.test", "GET /account HTTP/1.1\r\nHost: ok.test\r\nCookie: sid=1\r\n\r\n")
+      broken = cli_cd_flow(store, "boom.test", "GET /account HTTP/1.1\r\nHost: boom.test\r\nCookie: sid=1\r\n\r\n")
       pseudo = cli_cd_flow(store, "ok.test", ":method: GET\r\n:path: /account\r\n\r\n")
-      last = cli_cd_flow(store, "ok.test", "GET /account HTTP/1.1\r\nHost: ok.test\r\n\r\n")
+      last = cli_cd_flow(store, "ok.test", "GET /account HTTP/1.1\r\nHost: ok.test\r\nCookie: sid=1\r\n\r\n")
       store.flush
       engine = AZ::Engine.new(->(origin : Gori::Fuzz::Origin, _http2 : Bool) {
         raise Gori::Error.new("backend unavailable") if origin.host == "boom.test"

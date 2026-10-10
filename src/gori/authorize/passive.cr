@@ -120,7 +120,8 @@ module Gori
       end
 
       # A human sentence for a skip reason, for the readout the tab carries. `:pseudo_header_head`
-      # comes only from `CacheDeception.skip_reason`; it is worded here, the one home for these.
+      # and `:nothing_to_strip` come only from `CacheDeception.skip_reason`; they are worded
+      # here, the one home for these.
       def self.reason_label(reason : Symbol) : String
         case reason
         when :no_effect          then "no identity changes them"
@@ -131,6 +132,7 @@ module Gori
         when :out_of_scope       then "outside project scope"
         when :duplicate          then "already queued"
         when :pseudo_header_head then "stored as an HTTP/2 field list, not a replayable request line"
+        when :nothing_to_strip   then "carries no Cookie or Authorization to strip, so the anonymous request is the authenticated one"
         else                          reason.to_s
         end
       end
