@@ -54,8 +54,10 @@ module Gori::MCP
     # sees it. The directory rule is what keeps the entry from being swapped between this look
     # and the connect; Claude Code makes it 0700 and the user's own.
     def self.ours?(path : String, uid : String) : Bool
-      info = File.info?(path, follow_symlinks: false)
-      dir = File.info?(File.dirname(path), follow_symlinks: false)
+      # `File.info?` RAISES on EACCES: another user's 0700 `/tmp/cc-socks` must read as not ours, so
+      # discovery moves on to the per-uid fallback instead of failing the delivery.
+      info = File.info?(path, follow_symlinks: false) rescue nil
+      dir = File.info?(File.dirname(path), follow_symlinks: false) rescue nil
       return false unless info && dir && info.type.socket? && info.owner_id == uid && dir.owner_id == uid
       !dir.permissions.includes?(File::Permissions::GroupWrite) && !dir.permissions.includes?(File::Permissions::OtherWrite)
     end

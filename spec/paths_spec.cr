@@ -30,6 +30,17 @@ describe Gori::Paths do
       end
     end
 
+    # `Dir.exists?` raises on a symlink loop (and an unsearchable parent); that read as a
+    # backtrace from every command instead of the one-line error an unusable home gets.
+    it "refuses a symlink-loop path with a Gori::Error" do
+      posix_only!("symlinks")
+      with_tmp_dir do |dir|
+        loop_path = File.join(dir, "loop")
+        File.symlink(loop_path, loop_path)
+        expect_raises(Gori::Error) { Gori::Paths.ensure_dir(File.join(loop_path, "x")) }
+      end
+    end
+
     it "tightens a pre-existing loose directory by default" do
       posix_only!("POSIX mode bits")
       with_tmp_dir do |dir|

@@ -8,7 +8,15 @@ module Gori
   # workspace tool (and is consistent cross-platform).
   module Paths
     def self.home_dir : String
-      ENV["GORI_HOME"]?.presence || File.join(Path.home.to_s, ".gori")
+      ENV["GORI_HOME"]?.presence || File.join(home, ".gori")
+    end
+
+    # `Path.home` RAISES when HOME is unset and the uid has no passwd entry (`env -i` in a bare
+    # container), which reached the operator as a backtrace from the first settings read.
+    private def self.home : String
+      Path.home.to_s
+    rescue ex : RuntimeError
+      raise Gori::Error.new("cannot find a home directory (#{ex.message}); set GORI_HOME")
     end
 
     def self.default_db : String
@@ -136,7 +144,9 @@ module Gori
     # those is a side effect nobody asked for, and it is not what protects the file anyway:
     # the settings file itself is written 0600 (see Settings.write_private).
     def self.ensure_dir(path : String, *, tighten : Bool = true) : Nil
-      ours = !Dir.exists?(path) # sampled BEFORE the mkdir: only a dir we create is ours to mode
+      # Sampled BEFORE the mkdir: only a dir we create is ours to mode. `Dir.exists?` RAISES on
+      # an unsearchable parent or a symlink loop; mkdir_p then raises the same, as a Gori::Error.
+      ours = !(Dir.exists?(path) rescue true)
       begin
         Dir.mkdir_p(path, DIR_MODE)
       rescue File::AlreadyExistsError
@@ -164,7 +174,7 @@ module Gori
       # first write happens to be — `gori ca --ca-dir notes.txt` reported
       # `BIO_new_file(notes.txt/root.crt.pem) failed`, which names neither the argument the
       # operator typed nor what is wrong with it.
-      raise Gori::Error.new("path exists and is not a directory: #{path}") unless Dir.exists?(path)
+      raise Gori::Error.new("path exists and is not a directory: #{path}") unless (Dir.exists?(path) rescue false)
       # 0700 has no group/other bits for any umask to strip, so a dir we created is already
       # exact; the chmod is for a pre-0700 dir from an older install.
       File.chmod(path, DIR_MODE) rescue nil if ours || tighten

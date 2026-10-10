@@ -73,7 +73,7 @@ module Gori
     def self.try_shared(db_path : String) : OpenLock?
       return nil unless lockable?(db_path)
       lock_path = path(db_path)
-      return nil unless Dir.exists?(File.dirname(lock_path))
+      return nil unless (Dir.exists?(File.dirname(lock_path)) rescue false)
       # `File.open` under its OWN rescue, not one that also covers the flock loop below: an
       # unwritable directory or a lock file owned by a teammate raises `File::Error` here, and
       # that is neither `DB::Error` nor `Gori::Error`, so it would sail past every rescue on the

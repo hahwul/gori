@@ -171,6 +171,11 @@ module Gori::Fuzz
         raise Gori::Error.new("wordlist is a terminal, not a file: #{@path} — pipe the list in " \
                               "(`generator | gori run fuzz … -w /dev/stdin`) or name a real path")
       end
+      # Any other character device (/dev/zero, /dev/urandom) has no newline to end a line on,
+      # so the count pass grew one line until the process ran out of memory. A pipe still works.
+      if File.info?(@path).try(&.type.character_device?)
+        raise Gori::Error.new("wordlist is a device, not a file: #{@path}")
+      end
     end
 
     private class LineIterator < SetIterator
