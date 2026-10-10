@@ -127,9 +127,21 @@ module Gori
         # carrying the same sentence, so the truncation is visible in the transcript on every
         # surface without each serializer having to special-case it; this field is the summary.
         getter truncated : String?
+        # The upgrade request AS WRITTEN to the socket: `build_handshake`'s bytes, which differ
+        # from the caller's (origin-form request line, no Sec-WebSocket-Extensions, a fresh
+        # Sec-WebSocket-Key unless `keep_key`). A seam that records a send's wire reads this,
+        # not the bytes it handed in: the server's Accept answers this key. Nil when nothing was
+        # written, and on the RFC 8441 path, whose head goes out HPACK-encoded.
+        getter sent_head : Bytes?
 
         def initialize(@handshake_head, @messages, @duration_us, @error = nil,
                        @note = nil, @close_code = nil, @upgraded = false, @truncated = nil)
+        end
+
+        # A struct, so this sets the field on the copy it returns.
+        def with_sent_head(bytes : Bytes?) : Result
+          @sent_head = bytes
+          self
         end
 
         def ok? : Bool
@@ -244,20 +256,20 @@ module Gori
                           deadline: Proxy::SocketTuning::HEAD_DEADLINE)
                         "#{detail} from #{host}:#{port}"
                       end
-            return Result.new(head_result.bytes, [] of Message, Engine.elapsed(started), error: message)
+            return Result.new(head_result.bytes, [] of Message, Engine.elapsed(started), error: message).with_sent_head(handshake)
           end
 
           resp = Proxy::Codec::Http1.parse_response_head(head)
           unless resp.status == 101
             return Result.new(head, [] of Message, Engine.elapsed(started),
-              error: "server did not upgrade (status #{resp.status})", upgraded: false)
+              error: "server did not upgrade (status #{resp.status})", upgraded: false).with_sent_head(handshake)
           end
           note = verify_accept(resp, keys)
-          run_session(upstream, head, out_messages, idle, deadline, started, note)
+          run_session(upstream, head, out_messages, idle, deadline, started, note).with_sent_head(handshake)
         rescue ex
           # A failure BEFORE/at the upgrade is a real error; once upgraded, drain swallows
           # mid-exchange IO errors itself, so reaching here means the handshake failed.
-          err(ex.message || "ws repeater error", started)
+          err(ex.message || "ws repeater error", started).with_sent_head(handshake)
         ensure
           watcher.try(&.stop)
           upstream.close rescue nil

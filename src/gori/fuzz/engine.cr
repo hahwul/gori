@@ -506,7 +506,9 @@ module Gori::Fuzz
       # transcript, and reporting `0 frames` would state that the origin answered nothing rather
       # than that nothing was ever asked. See `WsOutcome#frames_in`.
       frames = res.upgraded? ? inbound_count(res) : nil
-      {adapt_ws(res).with_wire(wire), WsOutcome.new(res.close_code, frames, res.note, res.truncated)}
+      # `sent_head` over `wire`: `WsEngine` rewrites the handshake (fresh key, no extensions)
+      # before writing it, and the stored wire is the request the server's Accept answers.
+      {adapt_ws(res).with_wire(res.sent_head || wire), WsOutcome.new(res.close_code, frames, res.note, res.truncated)}
     end
 
     # A `WsEngine::Result` in the shape `Fuzz::Matcher` already reads, so the matcher needs no
