@@ -512,6 +512,7 @@ module Gori
         side = "response"
         region = "body"
         match_kind = "string"
+        regex_flag = exec_flag = false
         sev_s = "info"
         format = :text
 
@@ -526,13 +527,15 @@ module Gori
           p.on("--description=TEXT", "What the rule is for") { |v| description = v }
           p.on("--side=SIDE", "request|response (default response)") { |v| side = v.strip.downcase }
           p.on("--region=REGION", "whole|header|body (default body)") { |v| region = v.strip.downcase }
-          p.on("--regex", "Treat --pattern as a regex instead of a literal string") { match_kind = "regex" }
+          p.on("--regex", "Treat --pattern as a regex instead of a literal string") { match_kind = "regex"; regex_flag = true }
           p.on("--exec", "Treat --pattern as a COMMAND: the region goes to it on stdin, exit 0 = " \
-                         "match, stdout = evidence. Run with no shell and with your own privileges") { match_kind = "exec" }
+                         "match, stdout = evidence. Run with no shell and with your own privileges") { match_kind = "exec"; exec_flag = true }
           p.on("-sSEVERITY", "--severity=SEVERITY", "info|low|medium|high|critical (default info)") { |v| sev_s = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
 
+        # Last-flag-wins would store a regex as a command every scan then runs, or the reverse.
+        abort "gori run probe rules add: --regex and --exec are mutually exclusive" if regex_flag && exec_flag
         t = title
         abort "gori run probe rules add: --title is required" if t.nil? || t.empty?
         pat = pattern
