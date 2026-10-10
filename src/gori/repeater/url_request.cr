@@ -92,7 +92,10 @@ module Gori::Repeater
     # a header value is the payload, and MCP's `send_request{verbatim:true}` passes it the same way.
     def self.structured(target : Target, method : String?, headers : Array({String, String}),
                         body : Bytes?, *, expand : Bool = true) : Built
-      m = method || "GET"
+      # Upper-cased unless `expand: false`: an agent's `"post"` means POST, while `--verbatim` /
+      # `verbatim:true` sends `get` as typed — methods are case-sensitive tokens, and a lowercase
+      # verb slipping past a case-sensitive ACL is a probe.
+      m = expand ? (method || "GET").upcase : method || "GET"
       check_method(m)
       request_target = request_target_of(target)
 

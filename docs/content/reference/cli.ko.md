@@ -553,7 +553,7 @@ gori run send --url https://api.example.com --request-file req.http --headers-on
 | `--body-file=FILE` | 요청 본문을 바이트 그대로 읽음, 절대 확장하지 않음(curl의 `--data-binary @FILE`: 메서드와 `Content-Type` 기본값은 `-d`와 같음) |
 | `-b`, `--cookie=NAME=VALUE` | curl의 `-b`처럼 쿠키 하나: 반복하면 하나의 `Cookie` 헤더로 합칩니다(`a=1;b=2`, curl의 결합 방식). `=`가 없는 값은 거부되며, `-H 'Cookie: …'`와 함께 쓴 `-b`도 거부됩니다 |
 | `-f`, `--request-file=FILE` · `-r`, `--request-raw=RAW` · `--request-stdin` | 요청을 조립하는 대신 이 원시 HTTP 요청을 전송. `-X`/`-H`/`-d`/`-b`/`--body-file`과 함께 쓰면 거부됩니다. 그렇지 않으면 그 값들이 조용히 버려지기 때문입니다. 헤드의 단독 LF는 `--verbatim`이 아닌 한 CRLF로 승격됩니다 |
-| `--verbatim` | `-H`, `-d`, `-b` 또는 원시 요청에서 토큰을 확장하지 않고, 단독 LF도 승격하지 않으며, HTTP/2에서 필드 이름을 소문자화하지 않습니다. URL은 접속할 곳을 정하는 값이므로 여전히 확장됩니다 |
+| `--verbatim` | `-H`, `-d`, `-b` 또는 원시 요청에서 토큰을 확장하지 않고, 단독 LF도 승격하지 않으며, `-X`를 대문자로 바꾸지 않고, HTTP/2에서 필드 이름을 소문자화하지 않습니다. URL은 접속할 곳을 정하는 값이므로 여전히 확장됩니다 |
 | `--apply-rules` | MCP `send_request{apply_rules}`처럼 전송 전에 프로젝트의 활성 Match & Replace 규칙(요청 쪽)을 요청에 적용 |
 | `--http2`, `--sni=HOST`, `--tls-preset=NAME`, `-k`, `--timeout=SEC`, `--slot=NAME`, `--allow-unscoped` | `repeater send`와 같음 |
 | `--record-history` | 요청과 응답을 History에 플로우로도 기록(`source: repeater`, `source_surface: cli`)하고 id를 출력. `repeater send`와 마찬가지로 기본값은 꺼짐 |

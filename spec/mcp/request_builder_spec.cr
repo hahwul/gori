@@ -88,7 +88,7 @@ describe Gori::MCP::RequestBuilder do
   end
 
   it "builds exact request bytes with Host + Content-Length" do
-    args = JSON.parse(%({"url":"https://h.test:8443/a?b=1","method":"POST","headers":{"X-Test":"y"},"body":"hi"})).as_h
+    args = JSON.parse(%({"url":"https://h.test:8443/a?b=1","method":"post","headers":{"X-Test":"y"},"body":"hi"})).as_h
     built = Gori::MCP::RequestBuilder.build(args)
     built.scheme.should eq("https")
     built.host.should eq("h.test")
@@ -96,8 +96,8 @@ describe Gori::MCP::RequestBuilder do
     String.new(built.bytes).should eq("POST /a?b=1 HTTP/1.1\r\nX-Test: y\r\nHost: h.test:8443\r\nContent-Length: 2\r\n\r\nhi")
   end
 
-  it "sends a lowercase method as given, verbatim or not" do
-    args = JSON.parse(%({"url":"http://h.test/","method":"get"})).as_h
+  it "sends a lowercase method as given only under verbatim" do
+    args = JSON.parse(%({"url":"http://h.test/","method":"get","verbatim":true})).as_h
     String.new(Gori::MCP::RequestBuilder.build(args).bytes).should start_with("get / HTTP/1.1\r\n")
   end
 
@@ -259,7 +259,7 @@ describe Gori::MCP::RequestBuilder do
 
     it "still allows a custom method and internal spaces in a header VALUE" do
       args = {"url"     => JSON::Any.new("http://h.test/"),
-              "method"  => JSON::Any.new("PROPFIND"),
+              "method"  => JSON::Any.new("propfind"),
               "headers" => JSON::Any.new({"X-Note" => JSON::Any.new("hello world ok")})}
       out = String.new(Gori::MCP::RequestBuilder.build(args).bytes)
       out.should start_with("PROPFIND / HTTP/1.1\r\n")

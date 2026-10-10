@@ -561,7 +561,7 @@ gori run send --url https://api.example.com --request-file req.http --headers-on
 | `--body-file=FILE` | Request body read byte-for-byte, never expanded (curl's `--data-binary @FILE`: the same method and `Content-Type` defaults as `-d`) |
 | `-b`, `--cookie=NAME=VALUE` | A cookie, as curl's `-b`: repeat to join them into one `Cookie` header (`a=1;b=2`, curl's join). A value with no `=` is refused, and so is `-b` beside a `-H 'Cookie: …'` |
 | `-f`, `--request-file=FILE` · `-r`, `--request-raw=RAW` · `--request-stdin` | Send this raw HTTP request instead of building one. Refused beside `-X`/`-H`/`-d`/`-b`/`--body-file`, which it would otherwise silently drop. The head's bare LFs are promoted to CRLF unless `--verbatim` |
-| `--verbatim` | No token expansion in `-H`, `-d`, `-b` or a raw request, no bare-LF promotion, and on HTTP/2 no field-name lowercasing. The URL is still expanded: it names where to dial |
+| `--verbatim` | No token expansion in `-H`, `-d`, `-b` or a raw request, no bare-LF promotion, no `-X` upper-casing, and on HTTP/2 no field-name lowercasing. The URL is still expanded: it names where to dial |
 | `--apply-rules` | Run the project's enabled Match & Replace rules (request side) over the request before sending, as MCP `send_request{apply_rules}` does |
 | `--http2`, `--sni=HOST`, `--tls-preset=NAME`, `-k`, `--timeout=SEC`, `--slot=NAME`, `--allow-unscoped` | As on `repeater send` |
 | `--record-history` | Also write the request and response to History as a flow (`source: repeater`, `source_surface: cli`) and print its id. Off by default, as on `repeater send` |

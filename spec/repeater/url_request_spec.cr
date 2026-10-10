@@ -7,17 +7,17 @@ describe Gori::Repeater::UrlRequest do
   it "builds the request line from the URL's path and query, with Host and Content-Length" do
     t = Gori::Repeater::UrlRequest.target("https://api.example.test:8443/v1/items/42?lang=en")
     {t.scheme, t.host, t.port}.should eq({"https", "api.example.test", 8443})
-    built = Gori::Repeater::UrlRequest.structured(t, "POST", [{"Accept", "application/json"}], %({"a":1}).to_slice)
+    built = Gori::Repeater::UrlRequest.structured(t, "post", [{"Accept", "application/json"}], %({"a":1}).to_slice)
     String.new(built.bytes).should eq(
       "POST /v1/items/42?lang=en HTTP/1.1\r\nAccept: application/json\r\nHost: api.example.test:8443\r\n" \
       "Content-Length: 7\r\n\r\n{\"a\":1}")
   end
 
-  # Methods are case-sensitive tokens (RFC 9110 §9.1): `get` is an extension method, and a
-  # lowercase verb slipping past a case-sensitive ACL is the probe.
-  it "sends the method as given, not upper-cased" do
+  it "upper-cases the method unless expand is off" do
     t = Gori::Repeater::UrlRequest.target("http://h.test/")
-    String.new(Gori::Repeater::UrlRequest.structured(t, "get", [] of {String, String}, nil).bytes)
+    none = [] of {String, String}
+    String.new(Gori::Repeater::UrlRequest.structured(t, "get", none, nil).bytes).should start_with("GET / HTTP/1.1\r\n")
+    String.new(Gori::Repeater::UrlRequest.structured(t, "get", none, nil, expand: false).bytes)
       .should start_with("get / HTTP/1.1\r\n")
   end
 
