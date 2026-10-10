@@ -112,7 +112,7 @@ module Gori::Oast
     end
 
     private def self.message_of(ex : Exception) : String
-      (ex.message.presence || ex.class.name).gsub(/\s+/, " ").strip
+      (ex.message.presence || ex.class.name).scrub.gsub(/\s+/, " ").strip
     end
   end
 end
