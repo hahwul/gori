@@ -113,7 +113,7 @@ gori run probe --fail-on medium
 
 ## Staying In Scope
 
-Every active subcommand (anything that opens a socket) routes through the same outbound gate the TUI and MCP use. A project with scope rules refuses targets outside them; `--allow-unscoped` is the deliberate waiver, and the sandbox and explicit excludes apply regardless.
+Every active subcommand (anything that opens a socket) routes through the same outbound gate the TUI and MCP use. A project with scope rules refuses targets outside them; `--allow-unscoped` is the deliberate waiver. The sandbox applies regardless; explicit excludes still hold for sweeps (fuzz, mine, discover, retest), while a hand-authored send passes an exclude the way the proxy does.
 
 When you fuzz a raw request with `--request` or STDIN and pass no `--project` / `--db`, there is no scope to consult, so gori prints an explicit unscoped warning to STDERR rather than pretending it checked.
 
