@@ -1574,9 +1574,12 @@ module Gori::Fuzz
       # in the eighth POSITIONAL slot, which `timed_out` had taken in the same round — so every
       # keep-alive re-send in a redirect-following sweep lost its row marker and gained a false
       # `timed_out`. The constructor's tail is keyword-only now, so this cannot recur silently.
+      # `wire` is the FIRST hop's: the row is the payload's request, and the bytes the send seam
+      # actually wrote for it are what History and a saved run record (`HistoryRecord`).
       hops > 0 ? Repeater::Result.new(current.head, current.body, current.response, total_us,
         hop_error || current.error, current.incomplete?,
-        delivered: current.delivered?, timed_out: current.timed_out?, retried: retried) : current
+        delivered: current.delivered?, timed_out: current.timed_out?, retried: retried,
+        wire: raw.wire) : current
     end
 
     # The next hop's request bytes and its request-target, or `{nil, nil}` when the
