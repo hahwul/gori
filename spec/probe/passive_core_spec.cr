@@ -52,6 +52,27 @@ describe Gori::Probe::Passive do
     end
   end
 
+  # The version-context window is cut by BYTE offset: a char offset re-walked a non-ASCII body
+  # from its start per candidate.
+  it "reads private-IP version context by byte window, in linear time, on a non-ASCII body" do
+    with_store do |store|
+      head = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n"
+      unit = "version 10.0.0.1 "
+      ctx = Gori::Probe::Passive::Context.new(probe_capture_flow(store, head,
+        content_type: "text/plain", body: "é" + unit * (256 * 1024 // unit.size)))
+      ctx.body_text
+      acc = [] of Gori::Probe::Detection
+      started = Time.instant
+      Gori::Probe::Passive::BodyLeaks.new.check(ctx, acc)
+      (Time.instant - started).should be < 250.milliseconds
+      acc.map(&.code).should_not contain("private_ip_leak")
+      probe_codes_of(probe_analyze(store, resp_head: head, content_type: "text/plain",
+        body: "café 10.0.0.5")).should contain("private_ip_leak")
+      probe_codes_of(probe_analyze(store, resp_head: head, content_type: "text/plain",
+        body: "éééééééééééééééé build 10.0.0.5")).should_not contain("private_ip_leak")
+    end
+  end
+
   it "flags cleartext Basic auth even behind a later duplicate Authorization header" do
     with_store do |store|
       dets = probe_analyze(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
