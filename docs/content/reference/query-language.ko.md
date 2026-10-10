@@ -10,7 +10,7 @@ gori에는 플로우를 걸러내는 작은 쿼리 언어(QL)가 있습니다. �
 
 `field:value`로 필드를 매칭합니다(필드에 따라 부분 문자열 또는 완전 일치):
 
-| Field | Matches |
+| 필드 | 매칭 대상 |
 |-------|---------|
 | `host` | 요청 호스트 |
 | `path` | 요청 경로와 **쿼리 문자열**. 그래서 `-path:x`는 `?q=x`도 걸러 냅니다 |
@@ -25,7 +25,7 @@ gori에는 플로우를 걸러내는 작은 쿼리 언어(QL)가 있습니다. �
 | `dur` | 응답 시간(밀리초) |
 | `header` | 헤드(요청 + 응답 헤더) 부분 문자열 |
 | `body` | 본문 전문 검색(trigram FTS 인덱스) |
-| `stub` | `true` / `false`. 원본에 닿지 않고 [short-circuit 규칙](/ko/guide/proxy/#short-circuit)이 gori 자신이 답한 플로우 |
+| `stub` | `true` / `false`. 원본 서버를 거치지 않고 gori가 [short-circuit 규칙](/ko/guide/proxy/#short-circuit)으로 직접 답한 플로우 |
 | `static` | `true` / `false`. 이미지, 폰트, 오디오·비디오. 응답 Content-Type으로 판단하고, 없으면 경로 확장자를 봅니다. SVG·CSS·JS와 이미지 프록시(`?url=`)는 제외하고, 성공한 응답(2xx 또는 304)만 해당합니다. `-static:true`가 [정적 에셋 숨기기 렌즈](/ko/guide/proxy/#hide-static)입니다 |
 | `scope` | `in` / `out`. 프로젝트 스코프 규칙([아래](#scope-in-scope-out)) |
 | `cache` | `hit` / `miss` / `dynamic` / `none`: 응답의 캐시 헤더(`Age`, `X-Cache`, `CF-Cache-Status`, `Cache-Status` 등)에서 읽은 캐시 판정. `none`도 실제 값입니다(판정 없음, 대기 중인 플로우 포함). `cache:` 쿼리를 쓰면 History에 CACHE 열이 붙습니다 |
@@ -67,7 +67,7 @@ NOT (req.body:token OR resp.body:token)
 | `repeater` | Repeater 전송(TUI, `gori run repeater send --record-history`, MCP `send_request`) |
 | `fuzzer` | `--record-history` / `record_history`로 기록된 퍼즈 결과 |
 | `discover` | 크롤러가 가져온 것(Discover는 기본으로 저장합니다) |
-| `retest` | Issue 리테스트의 한 단계(`gori run retest run`, MCP `run_retest`, TUI의 RETEST 카드). `repeater`가 아니라 별도 값입니다 — 사람이 직접 보낸 요청과 gori가 실행한 검사의 한 단계는 같은 바이트에 대한 다른 사실이기 때문입니다 |
+| `retest` | Issue 리테스트의 한 단계(`gori run retest run`, MCP `run_retest`, TUI의 RETEST 카드). `repeater`와 별도 값입니다. 사람이 직접 보낸 요청과 gori가 실행한 검사의 한 단계는 같은 바이트에 대한 다른 사실이기 때문입니다 |
 | `refresh` | 세션 슬롯 [갱신](/ko/guide/authorize/#refreshing-a-slot)의 한 단계. 수동이든 전송 직전 자동이든 같습니다(`source_ref`에 `slot NAME step N`). `RFRSH`로 표시됩니다 |
 | `macro` | Fuzzer나 Miner 실행의 [요청 시점 매크로](/ko/guide/repeater-and-fuzzer/#rotating-tokens-with-a-macro)가 후보 앞에서 실행한 한 단계(`source_ref`에 `macro step N`). `MACRO`로 표시됩니다 |
 | `miner`, `sequencer`, `authorize`, `probe` | 예약됨. 아직 플로우를 기록하지 않는 도구들 |
@@ -127,7 +127,7 @@ scope:out -host:cdn                   스코프 밖으로 새어 나간 트래�
   않습니다. `ql_explain`은 `scope_rules_configured: false`와 경고를 함께 돌려주고,
   `gori run history delete`는 답할 스코프가 없는 항목 하나로 프로젝트 히스토리를 지우지 않도록
   스코프 쿼리를 아예 거부합니다.
-- **`scope:`는 플로 단위입니다.** 그래서 Sitemap에서는 `gori run sitemap --in-scope`와 다릅니다.
+- **`scope:`는 플로우 단위입니다.** 그래서 Sitemap에서는 `gori run sitemap --in-scope`와 다릅니다.
   그쪽은 호스트 단위(트래픽 중 하나라도 스코프 안이면 그 호스트를 남김)이므로, `scope:in` 쿼리는
   호스트는 남기면서 그 호스트의 일부 엔드포인트만 떨어뜨릴 수 있습니다.
 
@@ -176,7 +176,7 @@ method~^P(OST|UT|ATCH)$                쓰기 메서드 전부를 한 항목으�
 - 괄호로 묶을 수 있습니다. 우선순위는 `NOT`, `AND`, `OR` 순입니다.
 - `field:`가 없는 단순 단어는 method, host, target을 대상으로 하는 자유 텍스트 검색입니다.
 - 콜론을 빼먹은 비교 모양의 단어(`status>=400`, `host=api`)도 자유 텍스트로 남기 때문에 대개 아무것도 매치하지 않습니다. 이때 History·Sitemap의 빈 화면, `gori run history`, MCP `ql_explain`이 콜론 형태(`status:>=400`)를 알려 줍니다. 따옴표로 묶거나 부정한 단어는 의도한 것으로 봅니다.
-- 존재하지 않는 `field:` 이름은 의도한 자유 텍스트가 아닙니다. `gori run history`, `gori run sitemap`(과 그 `params`, `js`, `export` 동사), `gori run probe`는 이를 **거절**하고 가장 가까운 실제 필드를 알려준 뒤 0이 아닌 코드로 종료합니다. `--lenient`를 주면 그 토큰을 텍스트로 검색합니다(예전에 모든 표면이 조용히 하던 동작으로, `methd:GET`은 아무것도 매칭하지 않아 프로젝트가 비어 보였습니다). TUI 필터 바는 타이핑 중인 이름을 그대로 받습니다.
+- 존재하지 않는 `field:` 이름은 자유 텍스트가 아니라 오타로 봅니다. `gori run history`, `gori run sitemap`(과 그 `params`, `js`, `export` 동사), `gori run probe`는 이를 **거절**하고 가장 가까운 실제 필드를 알려준 뒤 0이 아닌 코드로 종료합니다. `--lenient`를 주면 그 토큰을 텍스트로 검색합니다(예전에 모든 표면이 조용히 하던 동작으로, `methd:GET`은 아무것도 매칭하지 않아 프로젝트가 비어 보였습니다). TUI 필터 바는 타이핑 중인 이름을 그대로 받습니다.
 
 ```text
 host:example.com status:5xx           둘 다 매칭되어야 함
@@ -185,7 +185,7 @@ method:POST -status:200               POST이지만 200은 아님
 host:a.com OR host:b.com              둘 중 하나의 호스트
 (host:a.com OR host:b.com) -path:/js  둘 중 하나의 호스트, /js 제외
 NOT (host:cdn OR host:static)         둘 다 아닌 것
--(host:cdn OR host:static)            같은 뜻 — `-(`와 `NOT(`도 그룹을 부정
+-(host:cdn OR host:static)            같은 뜻. `-(`와 `NOT(`도 그룹을 부정
 login                                 자유 텍스트 검색
 ```
 
@@ -205,7 +205,7 @@ host:"my host"                        공백까지 포함한 하나의 host 값
 
 ## 적용 범위 {#where-it-applies}
 
-모든 필터 바가 위 불리언 문법(`AND`/`OR`/`NOT`, `-`, 괄호, 따옴표)을 공유합니다. 플로 바(History, Sitemap, 컬러 규칙, Intercept)는 비교와 `~` 정규식도 공유합니다. 나머지 바는 `severity`와 `cvss`(아래)만 비교하고 `~`는 아예 없습니다(거기서 `~` 항목은 자유 텍스트입니다). 그 밖에 다른 것은 필드 집합뿐이고, 그것도 각 화면이 서로 다른 종류의 행을 거르기 때문입니다.
+모든 필터 바가 위 불리언 문법(`AND`/`OR`/`NOT`, `-`, 괄호, 따옴표)을 공유합니다. 플로우 바(History, Sitemap, 컬러 규칙, Intercept)는 비교와 `~` 정규식도 공유합니다. 나머지 바는 `severity`와 `cvss`(아래)만 비교하고 `~`는 아예 없습니다(거기서 `~` 항목은 자유 텍스트입니다). 그 밖에 다른 것은 필드 집합뿐이고, 그것도 각 화면이 서로 다른 종류의 행을 거르기 때문입니다.
 
 | 화면 | 필드 |
 |------|------|
@@ -242,7 +242,7 @@ Intercept 바와 컬러 규칙 바 모두 입력하는 동안 필드 이름과 �
 
 `header:`와 `body:`는 메시지의 바이트를 뒤집니다. 따라서 어디서 동작하는지는 필터를 물어보는 그 시점에 **어떤 바이트가 존재하는가**로 정해집니다.
 
-- **History, Sitemap, 컬러 규칙**은 이미 캡처된 플로를 봅니다. 그래서 두 필드 모두 요청·응답 양쪽에서 항상 동작합니다.
+- **History, Sitemap, 컬러 규칙**은 이미 캡처된 플로우를 봅니다. 그래서 두 필드 모두 요청·응답 양쪽에서 항상 동작합니다.
 - **Intercept와 Extract 규칙 조건**은 흐르는 중인 메시지를 봅니다. `header:`는 HTTP 요청·응답 게이트와 Extract 규칙 조건에서 동작하고, 홀드된 WebSocket 메시지에서는 동작하지 않습니다. WebSocket 메시지에는 자기 헤드가 없기 때문입니다. `body:`는 페이로드가 손에 있는 경우(홀드된 **WebSocket 메시지**와 **Extract 규칙** 조건)에서 동작하고, HTTP 홀드 게이트에서는 동작하지 않습니다. 그 게이트가 바로 본문을 버퍼링할지 말지를 결정하는 지점이기 때문입니다.
 
 규칙을 쓰기 전에 알아둘, 의도된 차이가 하나 있습니다.
@@ -254,7 +254,7 @@ Intercept 바와 컬러 규칙 바 모두 입력하는 동안 필드 이름과 �
 
 ## 주의할 점 {#caveats}
 
-쿼리가 실제로는 제대로 보지 않았는데도 깨끗해 보이는 경우가 몇 가지 있습니다.
+쿼리 결과가 멀쩡해 보여도 실제로는 일부 행을 확인하지 않은 경우가 몇 가지 있습니다.
 
 - **대기 중인 플로우**에는 상태, 지속 시간, 응답 크기가 없어 `status:`와 `-status:` 양쪽에서 모두 빠집니다(`dur`, `respsize`도 같습니다).
 - **버려진 항목은 쿼리를 넓힙니다.** gori가 읽을 수 없는 값(`status:>=foo`)은 거부되지 않고 무시되지만, 무시된 사실은 알려 줍니다. `gori run`은 경고를 출력하고, MCP 쿼리 도구는 응답의 `ignored_terms`에 그 항목을 적습니다(`strict:true`를 주면 쿼리를 거절합니다). 무엇이 남았는지는 `ql_explain`으로 확인하세요.

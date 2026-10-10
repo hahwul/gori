@@ -34,7 +34,7 @@ gori --listen 0.0.0.0 --port 8080
 
 ## 2. Trust the CA and capture your first flow
 
-To read HTTPS, the client has to trust gori's root certificate (generated on first run under `~/.gori/ca`). The fastest path is a pre-trusted browser.
+To read HTTPS, the client has to trust gori's root certificate (generated on first run under `~/.gori/ca`). The easiest route is a pre-trusted browser.
 
 ### Option A: Open a pre-trusted browser (recommended)
 
@@ -66,7 +66,7 @@ gori mints per-host leaf certificates from the root on demand, so you trust the 
 
 For command-line tools there is a shortcut: `gori run shell` (or **Open shell** in the palette) starts a shell whose curl, git, Python, Go and Node traffic already goes through the running gori and trusts its CA, without touching OS settings. `gori run shell -- curl https://example.com` runs one command that way. See [`gori run shell`](/reference/cli/#run-shell).
 
-> gori's private key is a machine secret, written with `0600` permissions, and never leaves your machine. Rotate it from the palette (**Regenerate CA certificate**) only when you mean to invalidate every prior trust.
+> gori's private key is a secret for this machine only: it is written with `0600` permissions and never leaves the machine. Rotate it from the palette (**Regenerate CA certificate**) only when you mean to invalidate every prior trust.
 
 ### Option C: Install the CA on a phone or tablet
 
@@ -127,11 +127,11 @@ gori is a row of tabs. The default order starts Project → Target → **History
 | `Esc` | Pop focus back toward the tab bar |
 | `Tab` / `Shift-Tab` | Move focus between the tab bar and panes |
 
-Mouse works when enabled (Preferences → **Editor & Keys** → **Mouse**): click a tab, click a row to select, click again to open. The **Help** tab is a full key cheatsheet inside the app when this page isn't open.
+Mouse works when enabled (Preferences → **Editor & Keys** → **Mouse**): click a tab, click a row to select, click again to open. The **Help** tab (`?`) is the full key cheatsheet inside the app.
 
 ## 5. Read a flow in History
 
-Make sure History is active (`3`). Every request/response is a *flow*: start line, headers, body (stored up to 2 MiB), plus HTTP/2 frames, WebSocket messages, and decoded JWT / SAML / GraphQL when present.
+Make sure History is active (`3`). Every request/response is a *flow*: start line, headers, body (the first 2 MiB by default), plus HTTP/2 frames, WebSocket messages, and decoded JWT / SAML / GraphQL when present.
 
 <figure class="tui-shot">
   <img src="/images/tui/history.svg" alt="gori History tab listing captured HTTP flows with time, method, protocol, host, path, status, type, size and duration columns" width="1206" height="520" loading="lazy" decoding="async">

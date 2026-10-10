@@ -32,17 +32,17 @@ Rules of thumb:
 - Default for new pane actions is L3 (space menu only). Promote to a direct key only after the loop proves it.
 - **Ctrl** is for actions that must work while typing (INS), and for run/stop on a workbench (`Ctrl-R` / `Ctrl-X`). It is not a general upgrade from bare.
 - **Shift** carries the whole-tab wipes. `⇧X` is `Clear` in every tab that has one (History, Probe, Authorize, Issues, and the Project ACTIVITY feed), with `X` as the space-menu letter beside it. The letter is `x` and not `c` because of what sits under the shift: bare `x` is bound in none of those five scopes, while bare `c` is live in all of them (`capture.toggle`, and `dismiss` on the Probe list), and a project wipe does not belong one shift above a key an operator presses all day. A destructive chord must also be **named where it can be read before it is pressed** (the Help sheet and the tab's own body hint, not the space menu alone), and it must ask first.
-- **`d` destroys.** Bare `d` deletes or dismisses the selected row in every scope that binds it — sixteen of them. The Repeater's response diff was the one exception, and it now sits on `⇧D` so the reflex never lands on a display toggle. Its menu row is `Z` `d` (**Display…** → **Response diff**); the first-level `d` is **Duplicate sub-tab**, as on every sub-tab strip (see [the space menu](#space-menu)). A new pane action that is not a delete does not get `d`.
+- **`d` destroys.** Bare `d` deletes or dismisses the selected row in every scope that binds it (sixteen of them). The Repeater's response diff was the one exception, and it now sits on `⇧D` so the reflex never lands on a display toggle. Its menu row is `Z` `d` (**Display…** → **Response diff**); the first-level `d` is **Duplicate sub-tab**, as on every sub-tab strip (see [the space menu](#space-menu)). A new pane action that is not a delete does not get `d`.
 - **A pane's own key answers only in that pane.** The Repeater's `p` (pretty bodies) and `⇧D` (diff) act in the response pane, and the Fuzzer's `m` (matched only) and `v` (distribution sidebar) in RESULTS. In the request and template panes the bare key does nothing: those lenses draw nothing there, and in the Fuzzer template `v` is the menu's **Clear selection**.
 - **Copy is the worked example of that rule.** `y` copies in READ, and `Ctrl-Y` copies in **INS as well**, in every text box. In INS a bare `y` is a literal character, and typing it over a `Shift`+arrows selection *replaces* the selection, so the copy reflex needs a chord that survives typing. Both are the same verb (`*.copy`), so a rebind moves the READ letter and **`Ctrl-Y` stays where it is**: it is pinned, in every scope, including through an explicit unbind. Unbinding `y` is a statement about READ mode, and it must not quietly leave a text pane with no way at all to copy what you just selected.
-- **Every list that holds something worth copying binds `y`.** A pane that shows bytes, a row, or a line of record and answers nothing to `y` is a gap, not a design: the Intercept queue, the Evidence archive, the Project ACTIVITY feed and the OAST callback detail each had one and each now answers the letter. Where two copies live in one place and mean opposite things — OAST's list copies the payload gori *sent*, its detail copies what came *back* — only one can hold the chord (a scope has no focus dimension in the keymap), and the other keeps its space-menu letter.
-- **`/` filters the list you are looking at.** Every list long enough to scroll answers it, including the three rule lists that did not: Colormarker, Match & Replace and the Probe **RULES** sub-tab (~40 built-in rules across three sections). The bar is a **lens** — it hides rows, it never disables one — and `Esc` clears it. The one thing it changes is reordering: on the two lists where order decides which rule wins, a move is refused while a query is held, because a filtered list is not the order the rule engine holds.
-- **`f` has two tiers and one exception.** It is **freeze** in every evidence context (an Issue's RELATED card, the evidence viewer) and **find** on the sub-tab strip — a different tier, which cannot collide. History's follow and the Comparer's fold-unchanged are `Space` menu entries instead; both are session-rare toggles, which is what L3 is for. The exception is the **Intercept queue**, where `f` forwards the held request and `⇧F` forwards them all: that is the tab's own loop key and its `f`/`⇧F` family is internally coherent, so it is documented rather than moved — the same call `Ctrl-R` gets for History → Repeater.
-- **`x` selects a line; `t` flips a row's flag.** `x` means "select this line" in fifteen scopes, and it was "enable/disable this rule" in four (Colormarker, Match & Replace, the Probe **RULES** list and the OAST providers). Those four now answer `t`, which is what `t` already means as **mark** in History, Issues, the Sitemap and the Intercept queue — a rule list has no marks, so nothing collides, and the Rewriter's toggle stops being a hand-rolled controller key and becomes an ordinary rebindable chord.
-- **`s` goes to the source, or flips the scope lens.** Those are its only two meanings. `s` opens the tab a row lives in — the Evidence archive, an Issue's RELATED card, and the Probe list and detail — and everywhere it is not one of those, it is the Global scope lens. What it stopped meaning: swap A ⇄ B on the Comparer and the Diff (now **`w`**), and global ⇄ project on the Colormarker and Match & Replace rule lists (now `Space` menu entries, so the lens is no longer shadowed there). One shadow is left and named: the Project **ACTIVITY** feed's `s` cycles the source chip, because that pane's `/` bar is a free-text query and does not parse `source:` / `level:` / `actor:` to fold the three chips into.
+- **Every list that holds something worth copying binds `y`.** A pane that shows bytes, a row, or a line of record and answers nothing to `y` is a gap, not a design: the Intercept queue, the Evidence archive, the Project ACTIVITY feed and the OAST callback detail each had one and each now answers the letter. Where two copies live in one place and mean opposite things (OAST's list copies the payload gori *sent*, its detail copies what came *back*), only one can hold the chord (a scope has no focus dimension in the keymap), and the other keeps its space-menu letter.
+- **`/` filters the list you are looking at.** Every list long enough to scroll answers it, including the three rule lists that did not: Colormarker, Match & Replace and the Probe **RULES** sub-tab (~40 built-in rules across three sections). The bar is a **lens**: it hides rows and never disables one, and `Esc` clears it. The one thing it changes is reordering: on the two lists where order decides which rule wins, a move is refused while a query is held, because a filtered list is not the order the rule engine holds.
+- **`f` has two tiers and one exception.** It is **freeze** in every evidence context (an Issue's RELATED card, the evidence viewer) and **find** on the sub-tab strip. The two are different tiers, so they cannot collide. History's follow and the Comparer's fold-unchanged are `Space` menu entries instead; both are session-rare toggles, which is what L3 is for. The exception is the **Intercept queue**, where `f` forwards the held request and `⇧F` forwards them all: that is the tab's own loop key and its `f`/`⇧F` family is internally coherent, so it is documented rather than moved, the same call `Ctrl-R` gets for History → Repeater.
+- **`x` selects a line; `t` flips a row's flag.** `x` means "select this line" in fifteen scopes, and it was "enable/disable this rule" in four (Colormarker, Match & Replace, the Probe **RULES** list and the OAST providers). Those four now answer `t`, which is what `t` already means as **mark** in History, Issues, the Sitemap and the Intercept queue. A rule list has no marks, so nothing collides, and the Rewriter's toggle stops being a hand-rolled controller key and becomes an ordinary rebindable chord.
+- **`s` goes to the source, or flips the scope lens.** Those are its only two meanings. On the Evidence archive, an Issue's RELATED card, and the Probe list and detail, `s` opens the tab a row lives in. Everywhere else it is the Global scope lens. What it stopped meaning: swap A ⇄ B on the Comparer and the Diff (now **`w`**), and global ⇄ project on the Colormarker and Match & Replace rule lists (now `Space` menu entries, so the lens is no longer shadowed there). One shadow is left and named: the Project **ACTIVITY** feed's `s` cycles the source chip, because that pane's `/` bar is a free-text query and does not parse `source:` / `level:` / `actor:` to fold the three chips into.
 - The space menu is **not** an INS fallback: text editors swallow keys upstream, so `Space` stays a literal character there. An action that has to be reachable while typing needs a Ctrl chord, and a mnemonic alone is not enough. (This is why `Ctrl-Q`, not the space menu alone, carries the Repeater/Fuzzer decoder-chain editor after it gave `Ctrl-Y` up to Copy.)
 - **History → Repeater** and **Repeater send** stay on **`Ctrl-R`** (same muscle memory). Do not move History→Repeater to bare `r`.
-- **`r` sends to the Repeater; `Ctrl-R` runs.** Bare `r` is "send this row to the Repeater" in the five scopes that have a flow to send, and nothing elsewhere: the Diff's Run moved to `Ctrl-R` (which already owns Run in nine scopes), OAST's Resume listener moved to `Shift-R`, and the Project ACTIVITY feed's Refresh is palette-only (`Ctrl-P` → **Refresh feed**) — a feed with a refresh key probably wants none at all, since it already re-reads on entry, on a peer's write and on the poll. The sub-tab strip renames on `e`, the menu's Rename letter, not `r`.
+- **`r` sends to the Repeater; `Ctrl-R` runs.** Bare `r` is "send this row to the Repeater" in the five scopes that have a flow to send, and nothing elsewhere: the Diff's Run moved to `Ctrl-R` (which already owns Run in nine scopes), OAST's Resume listener moved to `Shift-R`, and the Project ACTIVITY feed's Refresh is palette-only (`Ctrl-P` → **Refresh feed**), since the feed already re-reads on entry, on a peer's write and on the poll. The sub-tab strip renames on `e`, the menu's Rename letter, not `r`.
 - Match & Replace and Notifications ship keyless (palette / badge); rebind them if you want a Global chord.
 
 ## One bare letter, one question {#grammar}
@@ -54,7 +54,7 @@ answers that letter's question; anything else starts at L3 (the space menu).
 |-----|-------|
 | `Enter` | show this row in place |
 | `o` | open this row's own detail (`Enter`'s alias; on the Sitemap `Enter` expands, so `o` is the only one) |
-| `s` | go to the tab this row lives in — else the scope lens |
+| `s` | go to the tab this row lives in, else the scope lens |
 | `d` | delete / dismiss the selected row |
 | `y` | copy |
 | `t` | flip this row's flag (mark, or a rule's on/off) |
@@ -103,55 +103,55 @@ The tab bar is **nine numbered slots**, and the numbers are the primary way to m
 
 | Key | Action |
 |-----|--------|
-| `1`–`9` | Jump to slot N on the tab bar |
-| `0` | **Go to tab…** — a type-to-filter list of all 21 tabs, each with a line on what it is for |
-| `⇧1`–`⇧9` | Jump to sub-tab N of the active tab |
-| `⇧0` | **Find sub-tab…** — the same picker `f` opens from the strip |
+| `1`-`9` | Jump to slot N on the tab bar |
+| `0` | **Go to tab…**: a type-to-filter list of all 21 tabs, each with a line on what it is for |
+| `⇧1`-`⇧9` | Jump to sub-tab N of the active tab |
+| `⇧0` | **Find sub-tab…**: the same picker `f` opens from the strip |
 
 <figure class="tui-shot">
   <img src="/images/tui/tab-goto.svg" alt="gori Go to tab card: a filter bar over the whole tab catalog, the nine tabs on the bar wearing the digits 1 to 9 and everything else wearing none, each row followed by a line saying what that tab is for" width="1206" height="520">
-  <figcaption><code>0</code> opens the whole catalog. The nine on the bar wear the digit that reaches them; the rest wear none — that is the only difference being off the bar makes.</figcaption>
+  <figcaption><code>0</code> opens the whole catalog. The nine on the bar wear the digit that reaches them; the rest wear none. That is the only difference being off the bar makes.</figcaption>
 </figure>
 
-These work from **everywhere** — the tab bar, the sub-tab strip, a list body, a drill-in
-detail, a read-only pane — with one exception: while a field is taking text (an editor in
+These work from **everywhere** (the tab bar, the sub-tab strip, a list body, a drill-in
+detail, a read-only pane) with one exception: while a field is taking text (an editor in
 INS, a `/` query bar or search, a line prompt, a picker's filter, the CVSS scorer, the
 Decoder's CHAIN field), a digit is a character. It is the same rule `Space` follows: where
-`Space` types a space, `3` types a 3 — which is what makes `base64`, `sha256` and `rot13`
+`Space` types a space, `3` types a 3, which is what makes `base64`, `sha256` and `rot13`
 typeable into a conversion chain.
 
 The bar paints the numbers by default (**Preferences → Layout → Tab numbers**, `settings:layout`).
-The pill just past the last tab reads `0:Tabs` — the key, and what it opens. It sits two
+The pill just past the last tab reads `0:Tabs`: the key, and what it opens. It sits two
 columns after the ninth slot rather than pinned to the right edge, so the order `→` walks and
 the order you read are the same one; only when the strip stops fitting beside it does it pin
 right and let the tabs scroll. It is there whatever your layout is: `0` reaches the whole
 catalog, the nine on the bar included, so there is nothing for it to count and no layout that
-makes it disappear. The run to the right of it is left free on purpose — a place for a readout
+makes it disappear. The run to the right of it is left free on purpose, as a place for a readout
 that is not a tab.
 
 ### Nine slots, and the tenth tab
 
-`settings:tabs` refuses a tenth tab and says so — `⇧K` a row up across the seam instead, which
-trades it onto the bar and the last slot off. A layout saved by an older
+`settings:tabs` refuses a tenth tab and says so. Press `⇧K` on a row below the seam instead:
+that trades it onto the bar and the last slot off. A layout saved by an older
 build (the bar used to be unbounded) is truncated to its **first nine, in your own order**,
 and gori names the folded tabs once on the launch that does it.
 
 One tab can still ride past the ninth slot: an off-bar tab you jumped to with `0` sits at the
 far right of the bar, **without a number**, until you leave it. It is where you are standing,
-not a slot you arranged — and no digit points at it.
+not a slot you arranged, and no digit points at it.
 
 If you want the old unbounded bar back, turn off **Preferences → Layout → Tab bar slots**.
-The bar then scrolls with `‹` `›` again, `1`–`9` still reach its first nine tabs, and `0`
+The bar then scrolls with `‹` `›` again, `1`-`9` still reach its first nine tabs, and `0`
 still reaches every tab.
 
 ### Keyboard layouts
 
 A terminal speaking the **kitty keyboard protocol** reports `⇧3` as `3` plus a shift flag,
-and gori binds that. Every other terminal sends the shifted digit as a **character** — `#` on
-a US layout — which gori folds back onto `⇧3`. On a **non-US layout** that character is a
-different one, so `⇧1`–`⇧9` work where your terminal reports the shift modifier and not
+and gori binds that. Every other terminal sends the shifted digit as a **character** (`#` on
+a US layout), which gori folds back onto `⇧3`. On a **non-US layout** that character is a
+different one, so `⇧1`-`⇧9` work where your terminal reports the shift modifier and not
 otherwise. Both fallbacks are always live: **`f`** on the sub-tab strip opens the same picker
-`⇧0` does, and `Ctrl-1`…`Ctrl-9` is the alias for `⇧1`–`⇧9` on terminals that deliver it.
+`⇧0` does, and `Ctrl-1`…`Ctrl-9` is the alias for `⇧1`-`⇧9` on terminals that deliver it.
 
 The rest of the shifted punctuation row goes the other way. A character that only exists with
 Shift (`>`, `?`, `{`, `}`, `~`, `|`, …) already says Shift was held, so gori drops the shift
@@ -162,7 +162,7 @@ flag a terminal reports beside it (kitty's report-all-keys, xterm's `modifyOther
 
 > **Learning the menus?** [Space Menu & Palette](/guide/space-menu-and-palette/) walks through the space menu, its second cards and the palette's search, with a five-minute exercise. This section is the reference: the rules behind every letter and the full tables.
 
-`Space` in a navigable pane opens the action menu for **where you are standing** — the
+`Space` in a navigable pane opens the action menu for **where you are standing**: the
 pane's own verbs, grouped under `COMMON` and the focused area's label, each fronted by one
 mnemonic letter. It is not the palette: there is no typing and no filter, just one keypress
 per row.
@@ -225,13 +225,13 @@ exactly as before, and Help names the route: the key, or `^P → <name>` for an 
 
 ### One menu per tab, whatever has focus
 
-Nine tabs carry a **sub-tab strip** — Repeater, Fuzzer, Miner, Sequencer, Decoder, JWT,
+Nine tabs carry a **sub-tab strip**: Repeater, Fuzzer, Miner, Sequencer, Decoder, JWT,
 Cookie, Comparer and Notes. The strip's own actions used to be a context section like any
 other: they appeared *only* while the strip had focus, so from a body pane you had to walk
 focus up a level before `Space` would even offer "close this sub-tab".
 
 They are now their own `SUB-TABS` bucket, and it is in the menu from **every** level of a tab
-that has a strip — the body panes, the strip itself and the tab bar. With `⇧1`–`⇧9` dropping
+that has a strip: the body panes, the strip itself and the tab bar. With `⇧1`-`⇧9` dropping
 you anywhere, what `Space` offers must not depend on which row the cursor happens to be on.
 
 In a body pane the bucket is **one row**, `T` **Sub-tabs…**, which opens a card with the whole
@@ -253,14 +253,14 @@ the row; it never spends that letter on something else.
 | `d` | Duplicate sub-tab | |
 | `e` | Rename sub-tab | `e` on the strip |
 | `t` | Mark or unmark the active sub-tab | `t` on the strip |
-| `f` | Search sub-tabs — the `⌕` picker | `f` on the strip, `⇧0` anywhere |
+| `f` | Search sub-tabs (the `⌕` picker) | `f` on the strip, `⇧0` anywhere |
 | `/` | Filter the strip (name / host / method / tag) | `/` on the strip |
 | `T` | Mark every sub-tab the filter shows | `⇧T` on the strip |
 | `N` | Clear the sub-tab marks | `Esc` on the strip |
 | `g` | Tag sub-tab (Repeater) | |
 
 `Ctrl-N` and `Ctrl-W` are shown beside their rows, and they work from any pane on all nine
-tabs — the menu teaches the faster key rather than hiding it. (Miner and Sequencer seed
+tabs. The menu teaches the faster key rather than hiding it. (Miner and Sequencer seed
 their sessions from a run, so they have no `n`.)
 
 `T` used to mark every sub-tab from a pane; it is `T` `T` now, so the old reflex lands in the
@@ -416,7 +416,7 @@ These work in every text editor pane: the Repeater request, the Fuzzer template,
 
 ### A keyset is a mapping, not an emulation
 
-It is a named bundle of key **overrides** for a small, fixed set of editor actions — exactly the mechanism the [OS default profiles](#os-default-profiles) are, one layer up. It does not add motions after an operator, counts, text objects, named registers, or any editing operation gori's panes do not already have. A READ-mode pane is a caret, a selection, a copy, a delete and a paste; naming keys for operations that do not exist is how "vim mode" becomes a promise the editor breaks.
+It is a named bundle of key **overrides** for a small, fixed set of editor actions: the same mechanism as the [OS default profiles](#os-default-profiles), one layer up. It does not add motions after an operator, counts, text objects, named registers, or any editing operation gori's panes do not already have. A READ-mode pane is a caret, a selection, a copy, a delete and a paste; naming keys for operations that do not exist is how "vim mode" becomes a promise the editor breaks.
 
 So some vim spellings are deliberately **not** offered, each for a reason you can check:
 
@@ -425,7 +425,7 @@ So some vim spellings are deliberately **not** offered, each for a reason you ca
 - **`:` commands, including `:42`.** A bare `:` is [reserved](#reserved-keys) for gori's own command line, so go-to-line stays `Ctrl-G` under both keysets.
 - **`x`, `D`, `P`, `o`, `J` and the rest of vim's editing keys.** Delete and paste are the READ-mode edits gori has; everything else happens in INSERT.
 - **A rule list's enable/disable** (Colormarker, Probe rules, OAST providers, Rewriter), which is `t` on all four. It turns a rule on and off; it is not a selection, so no keyset moves it.
-- **The Intercept queue's select-line**, which ships keyless on purpose — that pane reaches it from the space menu, and a keyset respells keys rather than handing one to a pane whose author decided against it.
+- **The Intercept queue's select-line**, which ships keyless on purpose. That pane reaches it from the space menu, and a keyset only respells existing keys; it does not give a key to a pane that was designed without one.
 
 ### The override order
 
@@ -441,7 +441,7 @@ Every surface follows the active keyset with no extra step, because they all rea
 
 ### It does not touch the space menu's letters
 
-A keyset moves the key you press **in the pane**, not the letter the [space menu](#space-menu) puts in front of a row — the same rule any per-action rebind follows, and the reason those letters are stable identities. Under `vim-ish` the menu still fronts Select line with `x`, and prints the live chord beside it:
+A keyset moves the key you press **in the pane**, not the letter the [space menu](#space-menu) puts in front of a row. Any per-action rebind follows the same rule, which is why those letters are stable identities. Under `vim-ish` the menu still fronts Select line with `x`, and prints the live chord beside it:
 
 ```text
 │ x Select line   ⇧V │
@@ -449,13 +449,13 @@ A keyset moves the key you press **in the pane**, not the letter the [space menu
 
 so the card teaches both halves rather than making you guess which one it means. The nine `SUB-TABS` letters (`n` `w` `d` `e` `t` `f` `/` `T` `N`, inside **Sub-tabs…** from a pane) likewise mean the same thing on all nine strips whichever keyset you pick. The two namespaces cannot collide: the menu is modal, and a keyset only ever writes to the keymap.
 
-That includes `/`, which is a `SUB-TABS` letter *and* `vim-ish`'s find key. They are different tiers — the menu letter acts on the strip while the card is up, the chord searches the text pane you are standing in. The one deliberate pane-key overlap is `u` in the Repeater's read-only response: it toggles display-only JSON Unicode decoding. The request editor is still in the Editor scope, where `u` means undo. `validate_chords!` checks same-scope collisions at boot; the cross-scope exception is pinned in `spec/verb/keyset_spec.cr`.
+That includes `/`, which is a `SUB-TABS` letter *and* `vim-ish`'s find key. They are different tiers: the menu letter acts on the strip while the card is up, and the chord searches the text pane you are standing in. The one deliberate pane-key overlap is `u` in the Repeater's read-only response: it toggles display-only JSON Unicode decoding. The request editor is still in the Editor scope, where `u` means undo. `validate_chords!` checks same-scope collisions at boot; the cross-scope exception is pinned in `spec/verb/keyset_spec.cr`.
 
 A few menu letters are also a `vim-ish` motion in an editor pane: Auto-mark `a` (append), `g` on the Repeater, Cookie and issue detail (top), Send race `⇧G` (bottom), Set CVSS `V` (select line), and Insert marker `⇧I` and Probe active `⇧A` (start typing at a line edge). If the `Space` before one of them is lost, the key does what vim would, which moves, selects or starts typing, and never sends, writes or deletes. The editing letters are the other deliberate overlap, under both keysets: inside a text editor `d`, `y` and `p` are the editor's, so a lost `Space` before the menu's `d` (Delete issue in an issue's notes) or `y` (Copy) edits or copies the text in that pane, says so, and can be undone. A menu letter that lands on anything else in the pane is refused.
 
 ### What still works whatever you pick
 
-`Ctrl-Z` keeps undoing **inside INSERT** under `vim-ish` — that guard runs before the keymap in every text editor, which is where a typing hand wants it. `Ctrl-F` likewise still opens the find prompt, INSERT included; `/` is an addition in READ, not a replacement. And `i` is refused with a message on a read-only pane that sits beside an editor (the Repeater response, the Fuzzer results, the Decoder output), under both keysets.
+`Ctrl-Z` keeps undoing **inside INSERT** under `vim-ish`: that guard runs before the keymap in every text editor, which is where a typing hand wants it. `Ctrl-F` likewise still opens the find prompt, INSERT included; `/` is an addition in READ, not a replacement. And `i` is refused with a message on a read-only pane that sits beside an editor (the Repeater response, the Fuzzer results, the Decoder output), under both keysets.
 
 ## Reserved Keys {#reserved-keys}
 
@@ -464,7 +464,7 @@ Some keys can't be rebound because the terminal or gori needs them:
 - **Quit**: `Ctrl-C`, `Ctrl-D`.
 - **Indistinguishable from named keys**: `Ctrl-M` / `Ctrl-J` (Enter), `Ctrl-I` (Tab), `Ctrl-H` (Backspace), `Ctrl-[` (Escape).
 - **Structural**: `Enter`, `Esc`, `Tab`, `Backspace`, `Space` (the space-menu leader), and a bare `:` (the command line).
-- **gori shortcuts claimed before the keymap**: `Ctrl-G` (go to line), `Ctrl-F` (find, then `Tab` for find & replace), `Ctrl-B` (reveal whitespace), `Ctrl-E` (external editor), `Ctrl-P` (command palette), `Ctrl-N` (new repeater/fuzz/note), `Ctrl-W` (close the sub-tab, or every marked one), `Ctrl-Z` (undo, consumed by every text editor: Repeater, Fuzzer, Notes, Issues, Intercept, Decoder, JWT, Cookie, Rewriter and the Project description), `Ctrl-,` (Preferences), and `Ctrl-1`…`Ctrl-9` (switch sub-tab — the **alias** for `⇧1`–`⇧9`, see [The digit family](#digits)). These are handled by a hardcoded guard before the keymap, so a binding on them would never fire. For the same reason **Command palette**, **Reveal whitespace**, **Quit**, **Back to projects**, each tab's **New …** (Repeater, Fuzzer, Decoder, JWT, Cookie, Notes, Comparer) and its close-sub-tab action aren't listed in the editor. Their key is fixed.
+- **gori shortcuts claimed before the keymap**: `Ctrl-G` (go to line), `Ctrl-F` (find, then `Tab` for find & replace), `Ctrl-B` (reveal whitespace), `Ctrl-E` (external editor), `Ctrl-P` (command palette), `Ctrl-N` (new repeater/fuzz/note), `Ctrl-W` (close the sub-tab, or every marked one), `Ctrl-Z` (undo, consumed by every text editor: Repeater, Fuzzer, Notes, Issues, Intercept, Decoder, JWT, Cookie, Rewriter and the Project description), `Ctrl-,` (Preferences), and `Ctrl-1`…`Ctrl-9` (switch sub-tab, the **alias** for `⇧1`-`⇧9`; see [The digit family](#digits)). These are handled by a hardcoded guard before the keymap, so a binding on them would never fire. For the same reason **Command palette**, **Reveal whitespace**, **Quit**, **Back to projects**, each tab's **New …** (Repeater, Fuzzer, Decoder, JWT, Cookie, Notes, Comparer) and its close-sub-tab action aren't listed in the editor. Their key is fixed.
 
   You can't move an individual key out of that family, but you *can* give the whole family a second modifier; see [Command modifier](#command-modifier) below.
 
@@ -482,7 +482,7 @@ Today the per-OS defaults are identical: in a terminal, `Ctrl`+letter chords rea
 
 The chord family listed under *Reserved keys* is fixed because a hardcoded guard runs before the keymap. That's a problem when your terminal never delivers the Ctrl form at all:
 
-- **`Ctrl-1`…`Ctrl-9` is undeliverable on many terminals**: there is no control character for it, so the sub-tab jumps simply never arrive. You never need it: **`⇧1`–`⇧9`** is the primary sub-tab jump (see [The digit family](#digits)), and on a sub-tab strip **`f`** lists and searches every open sub-tab, from whichever chip you are standing on. (The **`⌕`** at the strip's left edge opens the same list; click it, or press `←` from the first chip.)
+- **`Ctrl-1`…`Ctrl-9` is undeliverable on many terminals**: there is no control character for it, so the sub-tab jumps simply never arrive. You never need it: **`⇧1`-`⇧9`** is the primary sub-tab jump (see [The digit family](#digits)), and on a sub-tab strip **`f`** lists and searches every open sub-tab, from whichever chip you are standing on. (The **`⌕`** at the strip's left edge opens the same list; click it, or press `←` from the first chip.)
 - **A multiplexer eats the chord first.** tmux's default prefix is `Ctrl-B`, which gori also uses for reveal-whitespace.
 
 **Preferences → Editor & Keys → Keys → Command modifier** (`Ctrl-,`), or **`settings:keys`** in the palette, switches that family between `Ctrl` and `Option (⌥)`. It is an **alias, not a swap**: with Option selected, `⌥P` opens the palette *and* `^P` still does. Only the advertised form changes: status hints, the Help tab and the palette all start showing `⌥P`, `⌥N`, `⌥1-9`.
@@ -519,7 +519,7 @@ Saved to `~/.gori/settings.json` (override the directory with `$GORI_HOME`) unde
 }
 ```
 
-`command_modifier` is `"ctrl"` (the default) or `"alt"`, and `keyset` is `"helix"` (the default) or `"vim"` — see [Editor keysets](#editor-keysets). An unknown value for either falls back to the default rather than to no keys. An untouched install writes no `hotkeys` block at all.
+`command_modifier` is `"ctrl"` (the default) or `"alt"`, and `keyset` is `"helix"` (the default) or `"vim"`; see [Editor keysets](#editor-keysets). An unknown value for either falls back to the default rather than to no keys. An untouched install writes no `hotkeys` block at all.
 
 An absent action uses the profile default. Unknown ids and unparseable chords are ignored on load, so hand-edits and version drift degrade gracefully.
 
@@ -529,7 +529,7 @@ An absent action uses the profile default. Unknown ids and unparseable chords ar
 - Every surface that names a rebindable chord reads it from the effective keymap: the **command palette**, the **space menu**, the **Help** tab and its popup, the status-bar hint strips, and the empty-state cards. What stays literal is not a verb: the claimed `^P` / `^N` / `^W` / `^1-9` family (the sub-tab alias) and structural keys (`esc`, `↵`, arrows, `↹`).
 - Space-menu **mnemonic** letters are stable action identities (Helix-like); rebinding changes the *direct* chord, not the space-menu letter.
 - Where the **sub-tab strip** binds a letter for an action, the menu spells that action with the same letter: `t` marks the sub-tab, `f` lists and searches the sub-tabs, `⇧T` marks the whole strip, and `e` renames. Rename used to be `r` on the strip, but `r` is `Run`/`Send` (the menu echo of `Ctrl-R`) in the Repeater, Fuzzer, Miner and Sequencer, so the strip moved to the menu's `e` rather than the other way round; `r` on the strip now does nothing. See [the space menu](#space-menu) for the whole table.
-- The editor actions are rebindable individually, and as a set via [Editor keysets](#editor-keysets). What the rebind editor will not move is the handful whose chord a hardcoded guard answers first: `Esc` (back to READ), `Ctrl-Z`, `Ctrl-F` and `Ctrl-G`. They are listed in the Help sheet so you can read them, and a keyset can give them a second, bare spelling — which is how `vim-ish` reaches `u` and `/`.
+- The editor actions are rebindable individually, and as a set via [Editor keysets](#editor-keysets). What the rebind editor will not move is the handful whose chord a hardcoded guard answers first: `Esc` (back to READ), `Ctrl-Z`, `Ctrl-F` and `Ctrl-G`. They are listed in the Help sheet so you can read them, and a keyset can give them a second, bare spelling, which is how `vim-ish` reaches `u` and `/`.
 - Press **`?`** from a navigable context to jump to the **Help** tab (mitmproxy-style cheat-sheet).
 
 ## Next Steps

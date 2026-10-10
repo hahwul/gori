@@ -36,7 +36,7 @@ The **SECRET** field doubles as the source for `c` (crack), so there is no separ
 
 - a **path to a file** is read as a wordlist, one candidate per line;
 - a **comma-separated list** (`admin,secret,changeme`) is tried inline;
-- a **lone secret** is a one-element list, the same check as the live verify, said as a crack.
+- a **lone secret** is a one-element list: the crack runs the same check as the live verify.
 
 On a hit the field is replaced with the winning secret and the verdict flips to `✓`, ready to carry straight into the Forge lens.
 
@@ -53,7 +53,7 @@ gori run cookie --forge --type flask --payload '{"admin":true}' --secret s3cret
 cat cookie.txt | gori run cookie                             # cookie from stdin
 ```
 
-The cookie comes from the argument or stdin; there is no project or capture involved (it is pure local compute). `--type` pins the format (default: auto-detect), `--salt` sets the Flask/Django signing salt, `--algorithm` the Django HMAC algorithm (`sha256` or `sha1`; for `--verify`/`--crack` it is read off the cookie's signature length when you leave it unset, so an older SHA-1 app is not misread as a bad key — `--forge` defaults to `sha256`), and `--format` is `text` or `json`. Flask/Django `--forge` takes a `--payload` JSON; Rack takes the opaque `--value`; `--timestamp UNIX` stamps the forged cookie with that second instead of now. See the [CLI Reference](/reference/cli/#run-cookie).
+The cookie comes from the argument or stdin; there is no project or capture involved (it is pure local compute). `--type` pins the format (default: auto-detect), `--salt` sets the Flask/Django signing salt, `--algorithm` the Django HMAC algorithm (`sha256` or `sha1`; `--forge` defaults to `sha256`, while `--verify`/`--crack` read it off the cookie's signature length when you leave it unset, so an older SHA-1 app is not misread as a bad key), and `--format` is `text` or `json`. Flask/Django `--forge` takes a `--payload` JSON; Rack takes the opaque `--value`; `--timestamp UNIX` stamps the forged cookie with that second instead of now. See the [CLI Reference](/reference/cli/#run-cookie).
 
 Over MCP, `cookie_decode` / `cookie_verify` / `cookie_crack` / `cookie_forge` are read tools available even under `--read-only`, since they touch no network or state.
 

@@ -55,7 +55,7 @@ The callbacks that matter most arrive late: a stored payload that only fires whe
 
 Callbacks are durable per-project history. Resume is a deliberate action, not something gori does on startup: reopening a project does not put you back on a third-party provider without asking.
 
-All three surfaces resume the same sessions. `gori run oast list` / `resume` / `release` and the MCP `list_oast_sessions` / `oast_resume` / `oast_release` act on the rows this picker shows, and a resumed headless listener writes its callbacks into the project, so the tab, a script, and an agent are reading one table. `gori run oast listen` and MCP `oast_start` are ad-hoc by default — they register with no project behind them, and those registrations end with the process — but `--save` / `persist: true` writes the same kind of row, so a headless or agent-driven listener lands in this picker too.
+All three surfaces resume the same sessions. `gori run oast list` / `resume` / `release` and the MCP `list_oast_sessions` / `oast_resume` / `oast_release` act on the rows this picker shows, and a resumed headless listener writes its callbacks into the project, so the tab, a script, and an agent are reading one table. `gori run oast listen` and MCP `oast_start` are ad-hoc by default: they register with no project behind them, and those registrations end with the process. `--save` / `persist: true` writes the same kind of row, so a headless or agent-driven listener lands in this picker too.
 
 A resumed session polls with the saved provider it was started with, even when several saved providers point at the same server with different tokens. A session saved by an older gori did not record its provider, so gori matches it by the token it registered with. When that still leaves more than one provider, the tab refuses to pick one and does not resume it (it points at `gori run oast resume ID`), and `gori run oast resume` and `oast_resume` poll with the session's own stored token and say so.
 
@@ -81,7 +81,7 @@ A callback is the strongest evidence this tool produces: the target's own infras
 
 ## Headless
 
-`gori run oast listen` is an ad-hoc, store-free listener by default: it registers a payload, prints it to stdout, then streams callbacks until you stop it. Add `--save` and it becomes a project session instead — its callbacks are written into the project, the registration is kept on exit, and the out-of-band probe rules have something to mint against.
+`gori run oast listen` is an ad-hoc, store-free listener by default: it registers a payload, prints it to stdout, then streams callbacks until you stop it. Add `--save` and it becomes a project session instead: its callbacks are written into the project, the registration is kept on exit, and the out-of-band probe rules have something to mint against.
 
 ```bash
 gori run oast presets                          # list the built-in public providers
@@ -99,12 +99,12 @@ Registration talks to a third-party server over HTTPS, so it can fail four ways 
 | Stage | What it means | What to do |
 |-------|---------------|------------|
 | `dns` | The name never resolved, so nothing was dialed | A restricted or split-horizon resolver. Check whether the other presets resolve |
-| `connect` | TCP connect refused, filtered, or timed out | Egress filtering, or that host is down — try a sibling preset with `--server=URL` |
+| `connect` | TCP connect refused, filtered, or timed out | Egress filtering, or that host is down. Try a sibling preset with `--server=URL` |
 | `proxy` | Your upstream proxy refused before any provider was contacted | `network.upstream_proxy*` in settings.json. Another provider takes the same leg |
 | `tls-verify` | The certificate chain was rejected | Either this machine's trust store (see below) **or** that host's own certificate having expired. `--check` tells them apart |
 | `tls` | The handshake broke before any certificate was judged | Not a trust problem; a CA bundle cannot help |
 | `timeout` | The port accepted the connection and then said nothing | A silent drop (inline IPS, black-holed egress) |
-| `exchange` | Connected fine, then the transfer broke, or the provider refused | A reset or a silent peer; when the provider answered, its own verdict — check `--token` |
+| `exchange` | Connected fine, then the transfer broke, or the provider refused | A reset or a silent peer. If the provider answered, read its verdict and check `--token` |
 | `dial` | The provider URL itself is malformed | Fix `--server` |
 
 `gori run oast presets --check` probes every built-in provider at once and prints that stage per preset, which is what separates the cases: one host failing while its four siblings answer is an outage; **all** of them failing at `tls-verify` is your CA store.
@@ -115,7 +115,7 @@ gori run oast presets --check
 [fail] interactsh    Public Interactsh (oast.fun)   https://oast.fun    dns        DNS lookup for oast.fun failed — …
 ```
 
-It exits non-zero only when **nothing** answered, so it works as a "can this machine do OAST at all" gate in a script. Pass `--project NAME` (or `--db PATH`) to probe the way *that* project dials — through its pinned upstream proxy and timeouts — which is the only way the answer describes the run it is diagnosing.
+It exits non-zero only when **nothing** answered, so it works as a "can this machine do OAST at all" gate in a script. Pass `--project NAME` (or `--db PATH`) to probe the way *that* project dials (through its pinned upstream proxy and timeouts), which is the only way the answer describes the run it is diagnosing.
 
 ### Custom CA Bundles
 
@@ -125,7 +125,7 @@ If you run behind a TLS-inspecting proxy, or against a self-hosted interactsh si
 SSL_CERT_FILE=/path/to/corp-ca-bundle.crt gori run oast listen
 ```
 
-For gori's **own** service traffic — OAST providers and the updater — this is **additive**: the system trust store is still loaded, so a bundle holding only your corporate root does not stop the public presets from working. (Target traffic keeps the usual replace-the-store semantics; see [verify_upstream](/reference/config/).) There is no `--ca-file` flag: the environment variable is one setting for every provider, every surface, and the tools you already run beside gori.
+For gori's **own** service traffic (OAST providers and the updater) this is **additive**: the system trust store is still loaded, so a bundle holding only your corporate root does not stop the public presets from working. (Target traffic keeps the usual replace-the-store semantics; see [verify_upstream](/reference/config/).) There is no `--ca-file` flag: the environment variable is one setting for every provider, every surface, and the tools you already run beside gori.
 
 The project's saved sessions (the ones the picker above resumes) are reachable headlessly too:
 
@@ -140,7 +140,7 @@ gori run oast release 7                        # deregister it; its callbacks st
 
 A saved session is also what arms the **blind** active checks. `ssrf_oast`, `xxe_oast`, `cmd_injection_oast` and `rfi_oast` plant a payload and wait for the target to call home, so they mint against a stored session; with none they plan nothing and send nothing, and `gori run probe --active` (and MCP `probe_scan`, under `out_of_band`) says so rather than letting an empty result read as "no blind vulnerability".
 
-The saved providers (the **Providers** sub-tab's rows) are manageable headless too, with `gori run oast providers add|update|enable|disable|delete|list`, and both `listen` and `resume` take `--interval SEC` (default 5) for the poll cadence; the flags are in the [CLI Reference](/reference/cli/#run-oast).
+The saved providers (the **Providers** sub-tab's rows) are manageable headless too, with `gori run oast providers add|update|enable|disable|delete|list`, and both `listen` and `resume` take `--interval SEC` (default 5) for the poll cadence.
 
 See the [CLI Reference](/reference/cli/#run-oast) for every flag. Over MCP, an agent drives the same engine with `oast_presets` / `oast_payload` / `oast_poll` / `list_oast_sessions` (read; `oast_payload` and `oast_poll` are still withheld under `--read-only`) and `oast_start` / `oast_stop` / `oast_resume` / `oast_release` (action). `oast_start` is the ad-hoc twin of `listen`, and takes `persist: true` for the `--save` behaviour. `oast_resume` returns a `session_id` that `oast_poll` and `oast_payload` take, and its polls are persisted like the CLI's; `oast_stop` on a persisted or resumed session stops polling but keeps it resumable, exactly as `Ctrl-X` does.
 

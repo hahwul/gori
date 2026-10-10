@@ -1,6 +1,6 @@
 +++
 title = "브랜드 키트"
-description = "gori 마크, 그 뒤의 팔레트, 그리고 월페이퍼 — 모두 바로 내려받을 수 있습니다."
+description = "gori 마크, 그 뒤의 팔레트, 그리고 월페이퍼. 모두 바로 내려받을 수 있습니다."
 weight = 40
 +++
 
@@ -16,21 +16,21 @@ SVG는 `0 0 512 512` viewBox 위에 그려져 있어 어떤 크기로도 확대�
 <div class="art-gallery">
   <figure>
     <img src="/images/gori.png" alt="gori 마크: 하나의 띠로 그려진 맞물린 두 개의 고리, 단색 브랜드 골드" width="512" height="512">
-    <figcaption><strong>Mark</strong> — 단색 <code>#d9c28b</code><br>
+    <figcaption><strong>Mark</strong>: 단색 <code>#d9c28b</code><br>
       <a href="/images/gori.svg" download="gori-logo.svg">SVG</a> ·
       <a href="/images/gori.png" download="gori-logo.png">PNG</a> ·
       <a href="/images/gori.webp" download="gori-logo.webp">WebP</a></figcaption>
   </figure>
   <figure>
     <img style="--plate:#faf9f7" src="/images/gori_dark.png" alt="같은 gori 마크를 검은 실루엣으로만 채운 형태" width="512" height="512" loading="lazy" decoding="async">
-    <figcaption><strong>Mono</strong> — 단색 <code>#000000</code><br>
+    <figcaption><strong>Mono</strong>: 단색 <code>#000000</code><br>
       <a href="/images/gori_dark.svg" download="gori-logo-mono.svg">SVG</a> ·
       <a href="/images/gori_dark.png" download="gori-logo-mono.png">PNG</a> ·
       <a href="/images/gori_dark.webp" download="gori-logo-mono.webp">WebP</a></figcaption>
   </figure>
   <figure>
     <img src="/images/gori_white.png" alt="같은 gori 마크를 옅은 크림에서 짙은 청동으로 흐르는 금박 그러데이션으로 채운 형태" width="512" height="512" loading="lazy" decoding="async">
-    <figcaption><strong>Gradient</strong> — 금박 그러데이션<br>
+    <figcaption><strong>Gradient</strong>: 금박 그러데이션<br>
       <a href="/images/gori_white.svg" download="gori-logo-gradient.svg">SVG</a> ·
       <a href="/images/gori_white.png" download="gori-logo-gradient.png">PNG</a> ·
       <a href="/images/gori_white.webp" download="gori-logo-gradient.webp">WebP</a></figcaption>
@@ -44,7 +44,7 @@ SVG는 `0 0 512 512` viewBox 위에 그려져 있어 어떤 크기로도 확대�
 | **Gradient** | 크게 쓸 때만. 표지 슬라이드, 스티커, 히어로 이미지용입니다. 램프는 `#f7ecd0 → #e9d49d → #d9c28b → #8c7458`이고, 96 px 아래로 내려가면 뭉개집니다 |
 
 파일 이름은 각각 `gori`, `gori_dark`, `gori_white`이고, 헤더의 다운로드 메뉴는
-이 셋을 각각 **Mark**, **Dark**, **Color**로 부릅니다.
+이 셋을 각각 **마크**, **다크**, **컬러**로 부릅니다.
 `gori_white`는 흰색 마크가 아니라 *그러데이션*입니다. 파일 이름이 이 라벨보다
 먼저 생겼고 다른 곳들이 이 경로를 참조하고 있어 이름은 그대로 둡니다. 어두운
 배경용으로 뒤집은 흰색 마크는 없습니다. 어두운 배경에는 단색 골드를 쓰세요.
@@ -67,12 +67,12 @@ SVG는 `0 0 512 512` viewBox 위에 그려져 있어 어떤 크기로도 확대�
 
 | 컬러 | Hex | 역할 | 값이 사는 곳 |
 |------|-----|------|--------------|
-| Brand gold | `#d9c28b` | 마크, 그리고 지금 주목받는 것을 감싸는 포커스 테두리 | `gori.svg`의 fill, `goridark` 테마의 `focus_gold`, 사이트 워드마크 그러데이션의 마지막 스톱 — 한 값이 세 곳에 |
+| Brand gold | `#d9c28b` | 마크, 그리고 지금 주목받는 것을 감싸는 포커스 테두리 | `gori.svg`의 fill, `goridark` 테마의 `focus_gold`, 사이트 워드마크 그러데이션의 마지막 스톱. 한 값이 세 곳에 쓰입니다 |
 | Gold highlight | `#f7ecd0` | 그러데이션 마크에서 빛을 받는 모서리 | `gori_white.svg`의 첫 스톱 |
 | Leaf gold | `#c8a860` | 이 사이트의 링크·구분선·강조 | 사이트의 `--accent` |
 | Deep gold | `#8a6a28` | 밝은 캔버스에서 같은 역할을 하되 읽히도록 낮춘 값 | `goriday`의 `focus_gold`. 이 사이트는 `#a8791f`를 씁니다 |
 | Ink | `#0a0a0b` | 터미널 캔버스 | `goridark`의 `bg` |
-| Indigo-black | `#080a11` | 이 사이트의 캔버스 — 같은 밤을 한 톤 푸르게 | 사이트의 `--bg` |
+| Indigo-black | `#080a11` | 이 사이트의 캔버스. 같은 밤을 한 톤 푸르게 | 사이트의 `--bg` |
 | Cloud indigo | `#6c7eb2` | 월페이퍼의 구름·물결 선묘 | 사이트의 `--cloud-rgb` |
 | Paper | `#faf9f7` | 두 표면 모두의 밝은 캔버스 | `goriday`의 `bg`, 사이트의 라이트 `--bg` |
 
@@ -87,19 +87,19 @@ TUI에서 기능적인 색을 유지하는 것은 HTTP 상태뿐이며, 그건 �
 <div class="art-gallery">
   <figure>
     <img src="/images/gori-wallpaper.webp" alt="양식화된 구름과 물결을 먹과 금으로 그린 어두운 월페이퍼. 가운데에 금색 gori 마크와 워드마크가 있다" width="1920" height="1080" loading="lazy" decoding="async">
-    <figcaption><strong>마크 포함</strong> — 1920 × 1080<br>
+    <figcaption><strong>마크 포함</strong>: 1920 × 1080<br>
       <a href="/images/gori-wallpaper.webp" download="gori-wallpaper.webp">WebP</a></figcaption>
   </figure>
   <figure>
     <img src="/images/wallpaper.webp" alt="같은 먹과 금의 구름·물결 그림에서 로고를 뺀 버전" width="1920" height="1080" loading="lazy" decoding="async">
-    <figcaption><strong>로고 없음</strong> — 1920 × 1080<br>
+    <figcaption><strong>로고 없음</strong>: 1920 × 1080<br>
       <a href="/images/wallpaper.webp" download="gori-wallpaper-plain.webp">WebP</a></figcaption>
   </figure>
 </div>
 
 ## 사용 {#usage}
 
-gori는 Apache-2.0이고, 그 라이선스가 덮는 것은 코드지 마크가 아닙니다. 이 파일들은
+gori는 Apache-2.0이고, 그 라이선스는 코드에만 적용되고 마크는 포함하지 않습니다. 이 파일들은
 gori를 가리키는 데 쓰세요. 글, 발표, 비교 표, gori와 연동되는 무언가에 다는 배지
 같은 것들입니다.
 

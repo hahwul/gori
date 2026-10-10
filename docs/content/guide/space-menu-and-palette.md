@@ -108,7 +108,7 @@ Press `Ctrl-P` on any tab and start typing the name of what you want.
 
 ### Actions only the palette lists {#palette-only}
 
-To keep the space menu short, a few kinds of action have no row in it. Some repeat a key you already have, such as Mark word (`Ctrl-K`); others are set once a session, such as **Minimize request** or **Go to line**. Type the name into `Ctrl-P` from the tab it belongs to and it appears under `THIS TAB`. Help names the route for each one: its key, or `^P → <name>`.
+To keep the space menu short, a few kinds of action have no row in it. Some repeat a key you already have, such as Mark word (`Ctrl-K`); others you need only now and then, such as **Minimize request** or **Go to line**. Type the name into `Ctrl-P` from the tab it belongs to and it appears under `THIS TAB`. Help names the route for each one: its key, or `^P → <name>`.
 
 The full list is in [Hotkeys → Actions only the palette lists](/guide/hotkeys/#palette-only).
 

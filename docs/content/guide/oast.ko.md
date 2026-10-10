@@ -19,7 +19,7 @@ shot = "oast"
 
 ## 동작 흐름 {#the-loop}
 
-1. **OAST** 탭에서 `Ctrl-R`를 눌러 리스닝을 시작합니다. gori가 선택한 provider에 등록하고 폴링을 시작합니다. 새 프로젝트에는 provider가 없으므로 먼저 **Providers** 서브탭에서 하나를 추가하세요(`a`, public interactsh가 미리 채워져 있습니다).
+1. **OAST** 탭에서 `Ctrl-R`을 눌러 리스닝을 시작합니다. gori가 선택한 provider에 등록하고 폴링을 시작합니다. 새 프로젝트에는 provider가 없으므로 먼저 **Providers** 서브탭에서 하나를 추가하세요(`a`, public interactsh가 미리 채워져 있습니다).
 2. `g`(get payload)를 누르면 **payload**(고유한 호스트명/URL)를 발급해 복사합니다. 리스너가 없으면 `g`가 직접 시작하고, `y`는 현재 payload를 다시 복사합니다. 또는 **Repeater** / **Fuzzer**에서 요청에 바로 삽입합니다(`Space` → **Insert OAST payload**가 커서 위치에 넣습니다). **History**에서는 `Space` → **Copy OAST payload**입니다.
 3. 대상이 URL을 역참조하거나 호스트명을 resolve할 만한 곳이라면 어디든 심습니다. URL 파라미터, `Host`/`X-Forwarded-For` 헤더, XML 엔티티, webhook 필드 등입니다.
 4. 대상의 인프라가 이름을 resolve하거나 다시 연결해 오면, 콜백이 프로토콜(`dns` / `http` / `smtp`), 소스 IP, 타임스탬프, 그리고 어떤 payload가 발동했는지 알 수 있는 전체 sub-identifier와 함께 **Callbacks**에 도착합니다.
@@ -30,7 +30,7 @@ shot = "oast"
 
 각 리스너가 하나의 **provider**입니다. **Providers** 서브탭에서 추가하세요(`a` 추가, `e` 편집, `t` 활성/비활성, `d` 삭제). public preset은 타입을 고를 때 서버 호스트를 자동으로 채워줍니다.
 
-콜백 테이블 위의 바가 `g`와 `Ctrl-R`가 사용할 provider를 고릅니다. `←` / `→`로 순환하며(바에는 `‹ 이름 ›`으로 표시됩니다), **All**은 모든 provider의 콜백을 한 번에 보여줍니다. payload를 받거나 리스닝을 시작하려면 provider가 하나로 정해져야 하므로, **All** 상태에서 활성화된 provider가 둘 이상이면 `g`와 `Ctrl-R`가 선택 카드를 엽니다. `↵`로 고르면 바도 따라갑니다. 활성화된 provider가 하나뿐이면 물어볼 것이 없으니 바로 실행됩니다.
+콜백 테이블 위의 바가 `g`와 `Ctrl-R`이 사용할 provider를 고릅니다. `←` / `→`로 순환하며(바에는 `‹ 이름 ›`으로 표시됩니다), **All**은 모든 provider의 콜백을 한 번에 보여줍니다. payload를 받거나 리스닝을 시작하려면 provider가 하나로 정해져야 하므로, **All** 상태에서 활성화된 provider가 둘 이상이면 `g`와 `Ctrl-R`이 선택 카드를 엽니다. `↵`로 고르면 바도 따라갑니다. 활성화된 provider가 하나뿐이면 물어볼 것이 없으니 바로 실행됩니다.
 
 | Provider | 설명 |
 |----------|-----------|
@@ -55,7 +55,7 @@ interactsh를 쓰면 gori가 로컬에서 RSA 키 쌍을 생성해 공개 키를
 
 콜백은 프로젝트별로 지속되는 이력입니다. 재개는 의도적인 동작이며 gori가 시작할 때 알아서 하지 않습니다. 프로젝트를 다시 연다고 해서 묻지도 않고 서드파티 provider에 다시 붙지는 않습니다.
 
-세 표면 모두 같은 세션을 재개합니다. `gori run oast list` / `resume` / `release`와 MCP `list_oast_sessions` / `oast_resume` / `oast_release`는 이 피커가 보여주는 것과 동일한 행을 다루고, 헤드리스로 재개한 리스너도 콜백을 프로젝트에 기록합니다. 즉 탭과 스크립트와 에이전트가 하나의 테이블을 봅니다. `gori run oast listen`과 MCP `oast_start`은 기본적으로 임시입니다. 프로젝트 없이 등록하므로 그 등록은 프로세스와 함께 끝납니다. 다만 `--save` / `persist: true`를 주면 같은 행을 쓰기 때문에, 헤드리스나 에이전트가 띄운 리스너도 이 피커에 올라옵니다.
+세 표면 모두 같은 세션을 재개합니다. `gori run oast list` / `resume` / `release`와 MCP `list_oast_sessions` / `oast_resume` / `oast_release`는 이 피커가 보여주는 것과 동일한 행을 다루고, 헤드리스로 재개한 리스너도 콜백을 프로젝트에 기록합니다. 즉 탭과 스크립트와 에이전트가 하나의 테이블을 봅니다. `gori run oast listen`과 MCP `oast_start`는 기본적으로 임시입니다. 프로젝트 없이 등록하므로 그 등록은 프로세스와 함께 끝납니다. 다만 `--save` / `persist: true`를 주면 같은 행을 쓰기 때문에, 헤드리스나 에이전트가 띄운 리스너도 이 피커에 올라옵니다.
 
 재개한 세션은 시작할 때 쓴 저장 프로바이더로 폴링합니다. 저장 프로바이더 여러 개가 같은 서버를 다른 토큰으로 가리켜도 마찬가지입니다. 이전 버전 gori가 저장한 세션은 프로바이더를 기록하지 않았으므로, 등록할 때 쓴 토큰으로 프로바이더를 찾습니다. 그래도 후보가 둘 이상 남으면 탭은 하나를 고르지 않고 재개를 거부하며(`gori run oast resume ID`를 안내합니다), `gori run oast resume`과 `oast_resume`은 세션에 저장된 토큰으로 폴링하고 그 사실을 알립니다.
 
@@ -99,12 +99,12 @@ gori run oast listen --save                    # …프로젝트 세션으로 �
 | 단계 | 의미 | 할 일 |
 |------|------|-------|
 | `dns` | 이름이 해석되지 않아 아무것도 다이얼하지 않음 | 제한된/split-horizon 리졸버. 다른 프리셋은 해석되는지 확인 |
-| `connect` | TCP 연결이 거부·차단·타임아웃 | 이그레스 필터링이거나 그 호스트가 죽음 — `--server=URL`로 형제 프리셋 |
+| `connect` | TCP 연결이 거부·차단·타임아웃 | 이그레스 필터링이거나 그 호스트가 죽음. `--server=URL`로 형제 프리셋 시도 |
 | `proxy` | 업스트림 프록시가 프로바이더에 닿기 전에 거부 | settings.json의 `network.upstream_proxy*`. 다른 프로바이더도 같은 구간을 탐 |
-| `tls-verify` | 인증서 체인이 거부됨 | 이 머신의 트러스트 스토어(아래 참고)이거나 그 호스트 인증서 만료 — `--check`가 둘을 갈라 줌 |
+| `tls-verify` | 인증서 체인이 거부됨 | 이 머신의 트러스트 스토어(아래 참고)이거나 그 호스트 인증서 만료. `--check`가 둘을 갈라 줌 |
 | `tls` | 인증서를 판정하기도 전에 핸드셰이크가 깨짐 | 신뢰 문제가 아니므로 CA 번들로는 해결 불가 |
 | `timeout` | 포트는 연결을 받고 아무 말도 하지 않음 | 조용한 드롭(인라인 IPS, 블랙홀 이그레스) |
-| `exchange` | 연결 후 전송이 깨졌거나 프로바이더가 거부 | 리셋이나 무응답. 프로바이더가 답했다면 그쪽 판정 — `--token` 확인 |
+| `exchange` | 연결 후 전송이 깨졌거나 프로바이더가 거부 | 리셋이나 무응답. 프로바이더가 답했다면 그 판정을 보고 `--token` 확인 |
 | `dial` | 프로바이더 URL 자체가 잘못됨 | `--server` 수정 |
 
 `gori run oast presets --check`는 내장 프로바이더 전부를 한 번에 프로브해 프리셋별 단계를 출력합니다. 이게 경우를 갈라 줍니다. 한 호스트만 실패하고 형제 넷은 응답하면 그 호스트의 장애이고, **전부** `tls-verify`로 실패하면 이 머신의 CA 스토어입니다.
@@ -125,7 +125,7 @@ TLS를 검사하는 프록시 뒤에 있거나, 사설 CA로 서명한 자체 �
 SSL_CERT_FILE=/path/to/corp-ca-bundle.crt gori run oast listen
 ```
 
-gori **자신의** 서비스 트래픽(OAST 프로바이더와 업데이터)에서 이건 **가산적**입니다. 시스템 트러스트 스토어를 그대로 로드하므로, 사내 루트만 든 번들을 지정해도 공개 프리셋이 멈추지 않습니다. (타깃 트래픽은 스토어를 대체하는 통상적 의미를 유지합니다 — [verify_upstream](/ko/reference/config/) 참고.) `--ca-file` 플래그는 없습니다. 환경 변수 하나가 모든 프로바이더, 모든 표면, 그리고 gori 옆에서 이미 쓰는 도구들에 함께 적용되기 때문입니다.
+gori **자신의** 서비스 트래픽(OAST 프로바이더와 업데이터)에서 이건 **가산적**입니다. 시스템 트러스트 스토어를 그대로 로드하므로, 사내 루트만 든 번들을 지정해도 공개 프리셋이 멈추지 않습니다. (타깃 트래픽은 스토어를 대체하는 기존 방식을 유지합니다. [verify_upstream](/ko/reference/config/) 참고.) `--ca-file` 플래그는 없습니다. 환경 변수 하나가 모든 프로바이더, 모든 표면, 그리고 gori 옆에서 이미 쓰는 도구들에 함께 적용되기 때문입니다.
 
 위 피커가 재개하는 프로젝트의 저장된 세션도 헤드리스로 다룰 수 있습니다.
 
@@ -138,9 +138,9 @@ gori run oast release 7                        # deregister it; its callbacks st
 
 `resume`은 종료해도 등록을 유지하고(Ctrl-C는 폴링만 멈춥니다) 받은 콜백을 프로젝트에 저장하므로 OAST 탭에서 같은 hit를 봅니다. `listen --save`도 첫 폴링부터 똑같이 동작합니다. 정리는 둘 다 `release`로 명시적으로 합니다.
 
-저장된 세션은 **블라인드** 액티브 체크를 켜는 스위치이기도 합니다. `ssrf_oast`, `xxe_oast`, `cmd_injection_oast`, `rfi_oast`는 페이로드를 심어두고 대상이 연락해오기를 기다리므로 저장된 세션을 대상으로 페이로드를 만듭니다. 세션이 없으면 아무것도 계획하지 않고 아무것도 보내지 않으며, `gori run probe --active`(그리고 MCP `probe_scan`의 `out_of_band` 필드)가 그 사실을 알려줍니다 — 빈 결과가 "블라인드 취약점 없음"으로 읽히지 않도록.
+저장된 세션은 **블라인드** 액티브 체크를 켜는 스위치이기도 합니다. `ssrf_oast`, `xxe_oast`, `cmd_injection_oast`, `rfi_oast`는 페이로드를 심어두고 대상이 연락해오기를 기다리므로 저장된 세션을 대상으로 페이로드를 만듭니다. 세션이 없으면 아무것도 계획하지 않고 아무것도 보내지 않습니다. 빈 결과가 "블라인드 취약점 없음"으로 읽히지 않도록 `gori run probe --active`(그리고 MCP `probe_scan`의 `out_of_band` 필드)가 그 사실을 알려줍니다.
 
-저장된 provider(**Providers** 서브탭의 행들)도 `gori run oast providers add|update|enable|disable|delete|list`로 헤드리스에서 관리할 수 있고, `listen`과 `resume`은 폴링 주기를 정하는 `--interval SEC`(기본 5)를 받습니다. 플래그는 [CLI Reference](/ko/reference/cli/#run-oast)를 참고하세요.
+저장된 provider(**Providers** 서브탭의 행들)도 `gori run oast providers add|update|enable|disable|delete|list`로 헤드리스에서 관리할 수 있고, `listen`과 `resume`은 폴링 주기를 정하는 `--interval SEC`(기본 5)를 받습니다.
 
 모든 플래그는 [CLI Reference](/ko/reference/cli/#run-oast)를 참고하세요. MCP에서는 에이전트가 `oast_presets` / `oast_payload` / `oast_poll` / `list_oast_sessions`(읽기, 단 `oast_payload`와 `oast_poll`은 `--read-only`에서 제외됩니다)와 `oast_start` / `oast_stop` / `oast_resume` / `oast_release`(동작)로 같은 엔진을 구동합니다. `oast_start`는 `listen`의 임시 쌍둥이이고, `persist: true`로 `--save`와 같이 동작합니다. `oast_resume`은 `oast_poll`과 `oast_payload`가 받는 `session_id`를 돌려주고 그 폴링 결과는 CLI와 마찬가지로 저장됩니다. 저장했거나 재개한 세션에 `oast_stop`을 호출하면 `Ctrl-X`처럼 폴링만 멈추고 세션은 다시 재개할 수 있게 남습니다.
 

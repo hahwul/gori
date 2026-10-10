@@ -55,7 +55,7 @@ gori는 전역 환경설정을 `settings.json`에, 각 프로젝트를 자체 SQ
 | `serve_landing` | bool | `true` | 내장 안내 / CA 다운로드 페이지 제공. 리슨 주소로 직접 접속한 경우와, 이미 프록시를 설정한 클라이언트가 예약 호스트 `http://gori.proxy/`(또는 `http://gori/`)로 접속한 경우 모두 해당 |
 | `connect_timeout_secs` | integer | `30` | 업스트림 연결 타임아웃(초, 최소 `1`) |
 | `io_timeout_secs` | integer | `30` | 업스트림 읽기 / 쓰기 유휴 타임아웃(초, 최소 `1`) |
-| `capture_max_mib` | integer | `2` | 메시지당 저장하는 본문의 최대 크기(MiB, 1–2047). 더 큰 본문도 바이트 그대로 전달되며, 잘리는 것은 저장본뿐이고 실제 전송 크기는 기록됩니다 |
+| `capture_max_mib` | integer | `2` | 메시지당 저장하는 본문의 최대 크기(MiB, 1-2047). 더 큰 본문도 바이트 그대로 전달되며, 잘리는 것은 저장본뿐이고 실제 전송 크기는 기록됩니다 |
 | `http2` | string | `"auto"` | `auto`는 원 서버의 ALPN을 반영하고, `off`는 모든 터널 연결을 HTTP/1.1로 강제합니다. 아래 [http2](#http2)를 참고하세요 |
 | `strip_alt_svc` | bool | `false` | HTTP/3을 광고하는 `Alt-Svc` 응답 필드를 클라이언트에 도달하기 전에 제거하므로, 브라우저가 gori가 나르지 않는 전송으로 넘어갈 수 없습니다. 아래 [strip_alt_svc](#strip-alt-svc)를 참고하세요 |
 | `tls_passthrough` | array | `[]` | 복호화하지 않고 그대로 중계할 호스트 목록. 아래 [tls_passthrough](#tls-passthrough)를 참고하세요 |
@@ -112,7 +112,7 @@ gori는 HTTP/3을 가로채지 않습니다. QUIC은 UDP이고 gori의 리스너
 
 기본값이 꺼짐인 것은 의도한 것입니다. gori가 시키지도 않은 응답 편집을 하는 경우는, 편집하지 *않으면* 자기가 무엇을 캡처했는지에 대해 거짓말을 하게 되는 때뿐입니다. `Sec-WebSocket-Extensions` 제거가 바로 그 경우입니다. `permessage-deflate`가 협상되면 저장된 모든 프레임이 페이로드인 척하는 deflate 스트림이 되어 버립니다. 반면 그대로 둔 `Alt-Svc`는 gori가 기록하는 어떤 것도 망가뜨리지 않고, 클라이언트가 떠날 수 있다는 뜻일 뿐입니다. 그것은 눈앞의 시험에 대한 판단이므로, 사람이 직접 올리는 스위치로 둡니다.
 
-**꺼 두면, 대신 그 사실을 알립니다.** h3를 광고하는 응답이 제거되지 않은 채 클라이언트에 도달하면, 이제 그 플로우에 증거와 설정을 함께 밝히는 안내가 남습니다: *"kept 1 Alt-Svc HTTP/3 advertisement (`h3=":443"`) in this response — gori does not intercept HTTP/3, so a client acting on it leaves the proxy for a transport gori cannot see, and whatever it does there is missing from History rather than absent (settings network.strip_alt_svc is off)."* HTTP/1.1과 HTTP/2 양쪽에서, 제거 안내가 뜨던 바로 그 자리에 똑같이 뜹니다. 와이어 위의 바이트는 하나도 바뀌지 않습니다. 원 서버의 헤드는 그대로 클라이언트에 도달하고, 늘어나는 것은 플로우에 붙는 문장 하나뿐입니다. 호스트당 한 번씩 `gori.log`에도 한 줄이 남고, 패시브 프로브의 기존 `tech_http3` 핑거프린트가 여전히 호스트당 한 번 `Alt-Svc: <host> advertised HTTP/3` 이벤트를 올립니다(Probe 탭으로 바로 이동 가능). 즉 "어떤 호스트가 클라이언트를 데려가고 있나"라는 세션 단위 시야는 원래 있던 자리에 그대로 있습니다. 없던 것은 플로우 단위 기록이고, 이번에 채우는 것이 그것입니다. 아무도 설명해 주지 않는 History의 구멍은 더 할 말이 없던 원 서버와 똑같이 읽히기 때문입니다.
+**꺼 두면, 대신 그 사실을 알립니다.** h3를 광고하는 응답이 제거되지 않은 채 클라이언트에 도달하면, 이제 그 플로우에 증거와 설정을 함께 밝히는 안내가 남습니다: *"kept 1 Alt-Svc HTTP/3 advertisement (`h3=":443"`) in this response — gori does not intercept HTTP/3, so a client acting on it leaves the proxy and what it does there is missing from History (settings network.strip_alt_svc is off)."* HTTP/1.1과 HTTP/2 양쪽에서, 제거 안내가 뜨던 바로 그 자리에 똑같이 뜹니다. 와이어 위의 바이트는 하나도 바뀌지 않습니다. 원 서버의 헤드는 그대로 클라이언트에 도달하고, 늘어나는 것은 플로우에 붙는 문장 하나뿐입니다. 호스트당 한 번씩 `gori.log`에도 한 줄이 남고, 패시브 프로브의 기존 `tech_http3` 핑거프린트가 여전히 호스트당 한 번 `Alt-Svc: <host> advertised HTTP/3` 이벤트를 올립니다(Probe 탭으로 바로 이동 가능). 즉 "어떤 호스트가 클라이언트를 데려가고 있나"라는 세션 단위 시야는 원래 있던 자리에 그대로 있습니다. 없던 것은 플로우 단위 기록이고, 이번에 채우는 것이 그것입니다. 아무도 설명해 주지 않는 History의 구멍은 더 할 말이 없던 원 서버와 똑같이 읽히기 때문입니다.
 
 제거는 **필드 단위**이고, h3를 광고하는 필드에만 적용됩니다. `Alt-Svc: clear`는 절대 제거하지 않습니다. RFC 7838 §3에서 그것은 캐시된 대체 경로를 *잊으라는* 지시이며, 여기서 도움이 되는 유일한 표기입니다. 평범한 `h2=":8443"` 대체 경로도 제거하지 않습니다. 그것은 또 다른 TCP 포트이고, 여전히 gori를 통해 터널링되기 때문입니다.
 
@@ -124,7 +124,7 @@ HTTP/2에서는 대가가 있습니다. 필드를 하나 제거한다는 것은 
 
 메울 수 없는 것이 셋 있습니다. [`tls_passthrough`](#tls-passthrough)에 등록된 호스트는 복호화되지 않으므로 gori가 편집할 응답 자체가 없습니다. 클라이언트는 `Alt-Svc` 없이도 h3 경로를 알아낼 수 있고(DNS `HTTPS` 레코드가 그렇습니다), 응답 쪽 제거로는 거기에 닿지 못합니다. 그리고 콜론 앞에 공백이 있는 필드명(`Alt-Svc : h3=…`)은 이 설정도, gori 자신의 헤더 투영도 인식하지 않습니다. 규격을 지키는 클라이언트도 그 필드는 거부합니다(RFC 9112 §5.1). 이 설정은 Preferences → **Network & Tabs** → **Network** → **Strip HTTP/3 Alt-Svc**에서 켜고 끕니다.
 
-### listeners
+### listeners {#listeners}
 
 기본 `network.bind_host` / `bind_port` 외에 프록시가 추가로 수신할 소켓입니다.
 
@@ -233,13 +233,13 @@ gori가 `succeeded`로 답하기 전에 두 가지를 검사하고, 각각 연�
 
 거부는 **모두** 이유를 담은 플로우로 프로젝트에도 기록됩니다. 잘못된 포트를 가리킨 클라이언트, UDP를 요청한 클라이언트, 애초에 SOCKS가 아닌 것으로 연결을 연 클라이언트, 전부 이유 없이 닫힌 연결로 남지 않고 History에 나타납니다.
 
-### upstream_rules
+### upstream_rules {#upstream-rules}
 
 `network.upstream_proxy`는 catch-all 경로입니다. `host:port`와 `http://…`는 평문 HTTP CONNECT 프록시를 사용합니다(기본 포트 `8080`). `http+tls://…`는 같은 CONNECT 프로토콜을 쓰지만 프록시까지의 홉을 TLS로 감쌉니다(기본 포트 `443`). `socks5://…`는 대상 이름을 **로컬에서** 해석해 주소 리터럴을 보내고, `socks5h://…`는 호스트 이름을 `ATYP DOMAIN`으로 보내 **프록시가** 해석합니다. 두 SOCKS 형식 모두 기본 포트는 1080입니다. URI 자격증명은 거부됩니다. Project 탭에서 직접 자격증명을 설정하거나 `username`과 `password_env`를 가진 `upstream_rules` 항목을 사용하세요.
 
-이 스칼라가 비어 있으면 gori는 dial 시점에 프로세스 환경을 확인합니다. HTTP origin은 `HTTP_PROXY`, `ALL_PROXY` 순서로, HTTPS origin은 `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY` 순서로 선택합니다. 대문자 이름을 우선하고 소문자 표기도 지원합니다. `NO_PROXY` / `no_proxy`는 `*`, 호스트·도메인, 대괄호로 감싼 IPv6 리터럴, 선택적인 포트, IPv4/IPv6 CIDR 블록(`10.0.0.0/8,fd00::/8`, 주소 리터럴 목적지에 대해 판정)을 지원하며 일치하면 직접 연결합니다. `localhost`와 루프백 주소는 `NO_PROXY`와 무관하게 항상 직접 연결합니다 — TLS passthrough와 CONNECT 터널을 포함한 모든 dial에서 그렇고, 이 예외는 목적지 기준이므로 프록시 자체가 `127.0.0.1`에 있어도 원격 목적지에는 그 프록시를 씁니다. 미지정 주소 `0.0.0.0`과 `::`도 여기서는 루프백으로 취급하며, 시스템 리졸버가 받아들이는 숫자 IPv4 표기(`127.1`, `0x7f.0.0.1`, `2130706433`)도 마찬가지입니다. 루프백 판정과 CIDR 항목은 이런 목적지를 리졸버가 해석하는 점 표기 주소로 읽고, dial과 `CONNECT` 라인은 보낸 표기를 그대로 유지합니다. [gori 셸](/ko/reference/cli/#run-shell) 안에서는 그 셸이 내보낸 프록시 변수(셸을 띄운 gori를 가리키는 값)를 건너뛰고, 셸이 대체한 원래 값(사내 `HTTPS_PROXY`와 그 `NO_PROXY`)을 대신 읽습니다. 그래서 그 안에서 시작한 gori가 부모 gori를 거쳐 요청을 이중으로 보내지 않습니다. 명시적인 프로젝트 업스트림, 일치하는 규칙(`direct` 포함), 또는 비어 있지 않은 스칼라가 환경변수보다 우선합니다. 환경변수 convention에서 `http://`는 평문 HTTP CONNECT 프록시(포트를 생략하면 스칼라의 8080이 아니라 80), `https://`는 프록시까지 TLS를 의미하지만, 저장된 `network.upstream_proxy`의 `https://`는 기존 호환성을 위해 평문 의미를 유지합니다.
+이 스칼라가 비어 있으면 gori는 dial 시점에 프로세스 환경을 확인합니다. HTTP origin은 `HTTP_PROXY`, `ALL_PROXY` 순서로, HTTPS origin은 `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY` 순서로 선택합니다. 대문자 이름을 우선하고 소문자 표기도 지원합니다. `NO_PROXY` / `no_proxy`는 `*`, 호스트·도메인, 대괄호로 감싼 IPv6 리터럴, 선택적인 포트, IPv4/IPv6 CIDR 블록(`10.0.0.0/8,fd00::/8`, 주소 리터럴 목적지에 대해 판정)을 지원하며 일치하면 직접 연결합니다. `localhost`와 루프백 주소는 `NO_PROXY`와 무관하게 항상 직접 연결합니다. TLS passthrough와 CONNECT 터널을 포함한 모든 dial에서 그렇습니다. 이 예외는 목적지 기준이므로 프록시 자체가 `127.0.0.1`에 있어도 원격 목적지에는 그 프록시를 씁니다. 미지정 주소 `0.0.0.0`과 `::`도 여기서는 루프백으로 취급하며, 시스템 리졸버가 받아들이는 숫자 IPv4 표기(`127.1`, `0x7f.0.0.1`, `2130706433`)도 마찬가지입니다. 루프백 판정과 CIDR 항목은 이런 목적지를 리졸버가 해석하는 점 표기 주소로 읽고, dial과 `CONNECT` 라인은 보낸 표기를 그대로 유지합니다. [gori 셸](/ko/reference/cli/#run-shell) 안에서는 그 셸이 내보낸 프록시 변수(셸을 띄운 gori를 가리키는 값)를 건너뛰고, 셸이 대체한 원래 값(사내 `HTTPS_PROXY`와 그 `NO_PROXY`)을 대신 읽습니다. 그래서 그 안에서 시작한 gori가 부모 gori를 거쳐 요청을 이중으로 보내지 않습니다. 명시적인 프로젝트 업스트림, 일치하는 규칙(`direct` 포함), 또는 비어 있지 않은 스칼라가 환경변수보다 우선합니다. 환경변수 convention에서 `http://`는 평문 HTTP CONNECT 프록시(포트를 생략하면 스칼라의 8080이 아니라 80), `https://`는 프록시까지 TLS를 의미하지만, 저장된 `network.upstream_proxy`의 `https://`는 기존 호환성을 위해 평문 의미를 유지합니다.
 
-#### `https://`는 TLS가 아니라 평문 프록시입니다
+#### `https://`는 TLS가 아니라 평문 프록시입니다 {#https-means-the-plaintext-proxy-not-tls}
 
 `https://proxy:3128`은 gori가 프록시에 TLS로 말할 수 있게 되기 전부터 *평문 HTTP CONNECT 프록시*를 의미했고, 지금도 그렇습니다. 이 스킴을 되찾지 않았습니다. 이미 `https://`가 적힌 모든 `settings.json`은 평문 형식을 뜻하고, 스킴의 의미를 바꾸면 업그레이드만으로, 아무 편집 없이, 프록시가 제공하지도 않을 핸드셰이크로 그 egress를 옮기게 됩니다. 그래서 이 표기는 **그대로 받아들이고 알려주기만** 하며, 재해석하지 않습니다.
 
@@ -247,7 +247,7 @@ gori가 `succeeded`로 답하기 전에 두 가지를 검사하고, 각각 연�
 - 동작을 그대로 두면서 모호함만 제거하려면 `http://`로, 프록시까지의 홉을 실제로 암호화하려면 `http+tls://`로 쓰세요.
 - **settings:network**(또는 **Project settings** 카드)에서 프록시 필드를 편집해 저장하면 값이 `http://…`로 정규화되어 기록됩니다. 건드리지 않은 값은 적힌 그대로 바이트 단위로 보존됩니다.
 
-#### 프록시까지 TLS (`http+tls`)
+#### 프록시까지 TLS (`http+tls`) {#tls-to-the-proxy-httptls}
 
 도달하려는 origin을 이름으로 적는 `CONNECT` 요청 라인과 `Proxy-Authorization` 헤더는 TLS 세션 **안에서만** 전송되며, 그 앞에서는 절대 나가지 않습니다. 핸드셰이크가 끝나기 전에는 요청의 어떤 부분도 전송되지 않습니다.
 
@@ -306,7 +306,7 @@ gori가 `succeeded`로 답하기 전에 두 가지를 검사하고, 각각 연�
 
 규칙은 [호스트 오버라이드](#hostname-overrides) 적용 **이전의 원래 호스트명**에 대해 매칭됩니다. 오버라이드는 어느 IP로 접속할지만 바꿉니다.
 
-### outbound_tls
+### outbound_tls {#outbound-tls}
 
 gori가 **거는** 연결의 목적지별 TLS 정책입니다: 제시할 클라이언트 인증서, 협상할 프로토콜 범위와 암호군, 그리고 gori가 보내는 ClientHello의 형태([TLS 지문](#tls-fingerprint)). 순서가 있고 첫 일치가 이기며, 호스트 패턴 문법은 동일합니다. 편집은 `gori settings --edit`.
 
@@ -403,7 +403,7 @@ gori settings tls-fingerprint
 잘못된 `groups`·`sigalgs`·`ciphersuites`·`alpn` 값은 실제로 그 문자열을 소비할 바로 그 OpenSSL에게 넘겨서 검사합니다. 이 테이블은 앱 안에 편집기가 없으므로(JSON을 직접 고칩니다) 검사는 **시작 시점**에 돌고, 규칙·설정·결과를 함께 알려 줍니다. origin 탓처럼 보이는 핸드셰이크 실패로 남겨 두지 않습니다:
 
 ```
-⚠ settings: outbound TLS `groups` is not a group list this OpenSSL accepts: X25519:P-257 (the rule for api.internal); TLS dials to that destination will fail
+⚠ settings: outbound TLS `groups` is not a group list this OpenSSL accepts: X25519:P-257 — the rule for api.internal; TLS dials to that destination will fail
 ```
 
 TUI에서는 같은 문장이 알림으로 뜹니다. 잘못된 규칙은 그 목적지에만 영향을 주며, 나머지 규칙과 gori의 다른 기능은 그대로 동작합니다.
@@ -437,7 +437,7 @@ TUI에서는 같은 문장이 알림으로 뜹니다. 잘못된 규칙은 그 �
 | `issues_preview` | bool | `false` | Issues 목록 페이지가 선택한 이슈의 하단 요약을 표시 |
 | `history_list_order` | string | `"newest"` | 목록 정렬: `"newest"`(최신이 위) 또는 `"oldest"`(오래된 것이 위) |
 | `sitemap_expand_depth` | integer | `-1` | 재로딩 후 Sitemap 트리가 열리는 깊이: `-1` = 모두 펼침; `0`-`3` = 이 깊이보다 얕은 노드만 펼침 |
-| `tab_numbers` | bool | `true` | 탭 바의 아홉 개 슬롯 앞에 `1:`…`9:`를 표시 — `1`-`9` 점프 키가 가리키는 위치입니다 |
+| `tab_numbers` | bool | `true` | 탭 바의 아홉 개 슬롯 앞에 `1:`…`9:`를 표시합니다. `1`-`9` 점프 키가 가리키는 위치입니다 |
 | `tab_slots` | bool | `true` | 탭 바를 번호가 매겨진 아홉 슬롯으로 제한: `settings:tabs`가 열 번째를 거부하고, 더 긴 저장 레이아웃은 앞의 아홉 개로 잘립니다(나머지는 `0`으로 계속 접근 가능). `false`면 상한 없이 `‹ ›`로 스크롤하던 예전 바로 돌아갑니다 |
 
 ### statusline {#statusline}

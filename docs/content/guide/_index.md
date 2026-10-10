@@ -34,7 +34,7 @@ gori is organized into tabs; move between them with `[` / `]` or jump with numbe
 | **Issues** | Triage results by severity and status |
 | **Evidence** | Frozen request/response snapshots, project-wide (appears once one exists) |
 | **Notes** | Per-project Markdown notes |
-| **Help** | Key bindings and links (behind `0` — or `?` from anywhere) |
+| **Help** | Key bindings and links (behind `0`, or `?` from anywhere) |
 
 The tab bar is **nine numbered slots**, and a fresh install fills them with the loop you
 actually work in:
@@ -43,18 +43,18 @@ actually work in:
 1:Project  2:Target  3:History  4:Intercept  5:Repeater  6:Fuzzer  7:Probe  8:Issues  9:Notes   0:Tabs
 ```
 
-Press `1`–`9` to jump to a slot and **`0`** to reach any of the other twelve — a type-to-filter
-list of the whole catalog. The tabs behind `0` are the ones you reach *for* rather than live
+Press `1`-`9` to jump to a slot and **`0`** to reach any of the other twelve through a
+type-to-filter list of the whole catalog. The tabs behind `0` are the ones you reach *for* rather than live
 in (OAST, Decoder, JWT, Comparer, Rewriter) plus the specialised workbenches (Miner,
 Sequencer, Cookie, Colormarker, Authorize) and Help, which `?` opens from anywhere.
 **Evidence** is behind `0` as well and is only offered once the project holds its first frozen
-snapshot — there is nothing to archive before that.
+snapshot, since there is nothing to archive before that.
 
 Rearrange the nine in Preferences (`Ctrl-,`) → **Network & Tabs** → **Tabs**, or
 `settings:tabs` in the palette. **The list is the bar**: the rows above the seam are the nine
 slots in order, everything below it is what `0` reaches, and the slot numbers renumber as you
-go. `⇧K`/`⇧J` move a row — up across the seam puts that tab on the bar and pushes the last
-slot off, so rearranging *is* choosing — and `space` sends a row straight across. (If you would rather have the old
+go. `⇧K`/`⇧J` move a row. Moving one up across the seam puts that tab on the bar and pushes the
+last slot off, so rearranging *is* choosing. `space` sends a row straight across. (If you would rather have the old
 unbounded bar, turn off **Layout → Tab bar slots**; `0` keeps working either way.)
 
 Global lenses that are not tabs: **capture** (`c`), **intercept** (`i`), and the **scope

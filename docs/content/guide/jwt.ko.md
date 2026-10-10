@@ -19,7 +19,7 @@ shot = "jwt"
 
 ## 두 개의 렌즈 {#two-lenses}
 
-하나의 세션, 두 개의 뷰이며 `Ctrl-T`로 전환합니다. 각 렌즈의 최상위 카드 테두리에 전환 칩이 있습니다(INPUT에는 ` ^T:→ENCODE `, HEADER에는 ` ^T:→DECODE `). 클릭해도 키와 똑같이 동작합니다:
+세션 하나를 두 가지 뷰로 보며, `Ctrl-T`로 전환합니다. 각 렌즈의 최상위 카드 테두리에 전환 칩이 있습니다(INPUT에는 ` ^T:→ENCODE `, HEADER에는 ` ^T:→DECODE `). 클릭해도 키와 똑같이 동작합니다:
 
 - **Decode**: INPUT에 토큰을 붙여 넣으면 header, payload, signature가 실시간으로 디코드됩니다. 그 아래에는 생성된 **공격 페이로드**를 고를 수 있는 목록이 있습니다.
 - **Encode**: HEADER와 PAYLOAD를 JSON으로 편집하고, 알고리즘을 선택하며(`Ctrl-A`로 HMAC 계열 → `RS`/`PS`/`ES`의 256/384/512 → `EdDSA` → `none` 순환), SECRET을 설정하면 재서명된 토큰이 OUTPUT에 실시간으로 나타납니다. 비대칭 알고리즘에서는 카드가 **KEY**로 바뀌며, 입력한 시크릿 대신 PEM 개인키 경로를 받습니다.
@@ -30,7 +30,7 @@ shot = "jwt"
 
 ## 알고리즘 {#algorithms}
 
-HMAC(`HS256` / `HS384` / `HS512`)은 직접 입력한 시크릿으로 서명합니다. 비대칭 계열은 사용자가 제공한 PEM 키로 서명합니다 — gori는 키를 만들지 않으므로, `RS256` 토큰을 위조하려면 여전히 `RS256` 개인키가 필요합니다:
+HMAC(`HS256` / `HS384` / `HS512`)은 직접 입력한 시크릿으로 서명합니다. 비대칭 계열은 사용자가 제공한 PEM 키로 서명합니다. gori는 키를 만들지 않으므로, `RS256` 토큰을 위조하려면 여전히 `RS256` 개인키가 필요합니다:
 
 | 계열 | 알고리즘 | 키 |
 |--------|------------|-----|
@@ -39,11 +39,11 @@ HMAC(`HS256` / `HS384` / `HS512`)은 직접 입력한 시크릿으로 서명합�
 | **RSA-PSS** | `PS256` `PS384` `PS512` | 같은 RSA 키. salt 길이는 다이제스트 길이(RFC 7518 §3.5) |
 | **ECDSA** | `ES256` `ES384` `ES512` | P-256 / P-384 / P-521 키. 서명은 JOSE가 규정한 고정 폭 `r‖s` 형식이라 `ES512`는 128이 아니라 132바이트입니다 |
 | **EdDSA** | `EdDSA` | Ed25519 키 |
-| **미서명** | `none` | 키 없음 — 의도적으로 제공하는 인증 우회 형태 |
+| **미서명** | `none` | 키 없음: 의도적으로 제공하는 인증 우회 형태 |
 
 키는 PEM 본문을 그대로 넣거나 `.pem` 파일 경로로 지정합니다. 검증에는 X.509 **인증서**(IdP가 `x5c`로 공개하는 것)나 개인키 자체도 받습니다.
 
-## 암호화된 토큰(JWE) {#jwe}
+## 암호화된 토큰(JWE) {#encrypted-tokens-jwe}
 
 `header.encrypted_key.iv.ciphertext.tag` 형태의 5-세그먼트 토큰은 **JWE**, 즉 암호화된 JWT입니다. gori는 JWS를 인식하는 모든 곳(JWT 탭, Decoder, 본문 pretty-printer, `gori run jwt`, MCP `jwt_decode`)에서 JWE도 인식하고 **보호 헤더**를 보여줍니다: 콘텐츠 암호화 키를 감싼 `alg`, 클레임을 암호화한 `enc`, 그리고 `kid`.
 
@@ -78,7 +78,7 @@ cat token.txt | gori run jwt --attacks         # token from stdin
 
 토큰은 인자나 stdin에서 옵니다. 프로젝트나 캡처는 관여하지 않습니다(순수한 로컬 연산입니다). `--format`은 `text` 또는 `json`입니다. `--encode`에서 `--set KEY=VALUE`는 claim 하나를 패치하고(반복 가능. 값이 JSON으로 파싱되면 그 타입을 유지하므로 `admin=true`는 불리언, `role=admin`은 문자열입니다), `--payload JSON`은 claim 객체 전체를 교체합니다. 둘은 상호 배타적입니다. `--secret`과 `--key`는 같은 자리를 채우므로 하나만 넘기세요. `--verify`에는 `--secret`이나 `--key`가 필요하고(빈 secret을 확인하려면 `--secret ''`), `verified: yes|no`와 함께 no일 때는 `reason`을 출력하며, `gori run cookie --verify`처럼 토큰이 검증될 때만 0으로, 그렇지 않으면 1로 종료합니다. `--format json`에서는 no에 분기용 `code`도 붙습니다: 다른 키로 성공할 수 있는 것은 `signature_mismatch`와 `key_mismatch`(토큰의 alg에 맞지 않는 종류의 키)뿐이고, `unsigned`, `alg_unsupported`, `signature_malformed`, `jwe` 등은 어떤 키로도 검증되지 않는다는 뜻입니다. `--secret`과 `--key`를 함께 넘기면 `--secret ''`이라도 거부됩니다. [CLI Reference](/ko/reference/cli/#run-jwt)를 참고하세요.
 
-MCP에서는 `jwt_decode` / `jwt_verify` / `jwt_encode` / `jwt_attacks`가 `--read-only`에서도 사용할 수 있는 read 도구입니다. 네트워크를 건드리지 않고 아무것도 쓰지 않습니다. `jwt_encode`도 같은 `set` / `payload` claim 편집과 같은 `key`를 받고, `jwt_attacks`는 `public_key`를 받습니다. 다만 `key` / `public_key`는 **경로**도 받으므로 이 두 인자는 호출자가 지정한 파일을 읽습니다 — 클라이언트가 파일시스템에 닿지 않아야 한다면 PEM을 인라인으로 넘기세요.
+MCP에서는 `jwt_decode` / `jwt_verify` / `jwt_encode` / `jwt_attacks`가 `--read-only`에서도 사용할 수 있는 read 도구입니다. 네트워크를 건드리지 않고 아무것도 쓰지 않습니다. `jwt_encode`도 같은 `set` / `payload` claim 편집과 같은 `key`를 받고, `jwt_attacks`는 `public_key`를 받습니다. 다만 `key` / `public_key`는 **경로**도 받으므로 이 두 인자는 호출자가 지정한 파일을 읽습니다. 클라이언트가 파일시스템에 닿지 않아야 한다면 PEM을 인라인으로 넘기세요.
 
 ## 다음 단계 {#next-steps}
 
