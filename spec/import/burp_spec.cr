@@ -116,6 +116,16 @@ describe Gori::Import::Burp do
     String.new(pair.request.body.not_nil!).should eq("body")
   end
 
+  it "keeps a lone LF in a CRLF head verbatim instead of promoting it (P7)" do
+    # `X-A: 1\nTransfer-Encoding` is an obfuscated-header smuggling probe; promoting the LF
+    # turned it into a real CL+TE request.
+    head = "POST /s HTTP/1.1\r\nHost: b.test\r\nX-A: 1\nTransfer-Encoding: chunked\r\nContent-Length: 4\r\n\r\n"
+    result = parse(items(item("https://b.test/s", head + "abcd")))
+    pair = result.flows.first
+    String.new(pair.request.head).should eq(head)
+    String.new(pair.request.body.not_nil!).should eq("abcd")
+  end
+
   it "terminates a head that was saved without its trailing blank line" do
     result = parse(items(item("https://target.test/t", "GET /t HTTP/1.1\r\nHost: target.test")))
     String.new(result.flows.first.request.head).should end_with("\r\n\r\n")
