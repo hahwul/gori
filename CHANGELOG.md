@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+- Proxy: turning capture off or leaving a project now ends the connections a client already had open, so they are no longer relayed, recorded or rewritten under the stopped session, and a WebSocket message the operator already forwarded is no longer lost when the socket closes first
+- Fuzzer: auto-mark escapes `¦` inside captured values, so a server-chosen value like `x¦exec:…` can no longer become a Decoder chain that runs on the next send; auto-calibration measures the followed response when redirects are followed, and a redirected row keeps the bytes actually sent
+- Projects: `.gori` import refuses every SQLite trigger or view whatever its name, so a crafted archive can no longer keep a pipe or exec rule enabled behind the disclosure that says it was disabled
+- Settings: `gori settings import` lists an upstream rule's `password_env` and a short-circuit `body_file` stub and requires `--allow-commands` for them, as it does for commands
+- Redaction: an unresolvable active redaction profile now falls back to the default profile instead of emitting raw bytes, and the Markdown issues report and `gori run compare` (with `--redact`, `--no-redact` and `--redact-preview`) apply the project's profile
+- Scope: an exclude written without a port is honoured by the History scope lens on non-default ports, a bracketed IPv6 host glob such as `[2001:db8::*]` matches instead of nothing, and Rewriter host globs match a trailing-dot or bracketed host
+- Discover and Probe: the `<base href>` scan and the passive postMessage and private-IP checks no longer take seconds on large non-ASCII pages, and a Discover run that hits an internal error stops sending its queued requests
+- Probe: a peer's rule disable, finding clear or OAST session change now reaches a running capture, an out-of-band finding is claimed and written in one transaction so a busy project can no longer lose it, and a path-normalization bypass needs a 401/403 control
+- Repeater: auto Content-Length leaves `Transfer-Encoding :` and `Content-Length :` written with a space before the colon as written, and `apply_rules` no longer rewrites a Content-Length when no rule changed the body
+- Import and export: Burp XML keeps items whose inline SOAP or RSS body contains `</request>` or `</item>`, gori's HAR export carries every raw head so obfuscated headers round-trip byte-exact, a browser HAR no longer keeps `Content-Encoding` over a decoded body, Copy as cURL writes HEAD as `-I`, and the CSRF PoC no longer turns a CT-less JSON POST into a form
+- QL: `\"` inside quotes is a literal quote, a `body:` or `header:` value with a control character is reported instead of searched without it, `proto:sse`/`proto:grpc` match a tab-padded Content-Type, `cvss:5` compares a stored score exactly, and a colour rule's negated `status:` term no longer paints in-flight rows
+- Parsing: a multipart part whose name is not UTF-8 no longer hides every other field, a JSON body with an unpaired surrogate escape is treated as JSON, and two heads that differ only in invalid UTF-8 bytes compare as different
+- Cache deception: a control request that fails with 400, 404, 429 or 5xx reads as review instead of cached
+- Sequencer: a UUIDv7 or ULID-shaped token with a large random tail is demoted for its time prefix instead of rated Critical
+- Diff: a retest record no longer says both captures reached an endpoint, or that a finding likely still stands, when a side never got a response
+- TUI: session pickers, Clear note and Sequencer reconfigure act on what the operator picked even if a peer moved things meanwhile, Authorize autorun waits for its confirm and identities card, ^Y/^Q no longer say "chain saved" over a failed save, a Probe dismiss or delete that did not save says so, and issue text is secret-masked as on the CLI and MCP
+- Cookie: cracking against a large wordlist no longer stalls proxied traffic
+- Session: a JWT `exp` too large for a timestamp reads as never due instead of failing the refresh, and a view-only instance closing no longer marks the capturing instance's in-flight flows as errors
+- Projects: deleting the pinned default project from MCP or the TUI clears the `gori run project switch` pin, and Rewriter extract rules, colour rules, display columns and OAST providers no longer reuse a deleted row's id, so a stale id can no longer edit a peer's new row
+- MCP: `get_flow` reads only the WebSocket frames it returns, an oversized rule `delay_ms`/`hang_ms` is an invalid argument instead of an internal error, a whitespace-only issue title is refused (also on `gori run issues create`), and OAST dedup sets are bounded as in the TUI
+- CLI: `--allow-unscoped` help for send, repeater, race and timing says only the Sandbox still applies, and discover rows and OAST callback lines scrub terminal controls
+- Settings: long-lived processes re-read global scan rules, OAST providers and hostname overrides when settings.json changes, and a restored Fuzzer, Miner or Sequencer config with an out-of-range number keeps its other settings
+- Update: a hand-edited out-of-range update-check stamp no longer crashes the TUI at launch
+- Decoder: unicode-escape round-trips input containing a literal `\uXXXX`, and the gRPC bytes-field editor refuses a signed hex byte
+- Store: retention no longer leaves the frames of an idle h2 connection behind until restart
 - Env: the token re-spelling a project gets on its first open after `gori settings env-syntax` no longer reverts a draft, slot, issue or note another gori instance saved while it ran
 - CLI and MCP: `gori run show --format json` and `get_flow` decode a gzip or chunked MessagePack/CBOR body the way the detail pane does, and their decoded fields are always valid UTF-8
 - Send: when a send-time substitution moves a Content-Length, a zero-padded or `+`-signed value keeps its spelling (`0016` becomes `0024`), and a value obfuscated with other bytes is left as written
