@@ -961,7 +961,7 @@ module Gori
           # The count is the whole reason the headline is worth reading twice: which identities,
           # and how many of them, were served what the baseline was served.
           if v == :bypass
-            total = t.trials.count { |tr| !tr.baseline? }
+            total = t.compared.size # a `no_effect` identity was never sent, so it matched nothing
             io << "  · " << t.same_count << " of " << total
             io << " identit" << (total == 1 ? "y" : "ies") << " matched the baseline"
           end
