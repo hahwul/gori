@@ -32,7 +32,7 @@ module Gori
       @[Tool("create_issue", gated: true, agent_action: true, permission: "write")]
       private def create_issue(h) : Result
         title = str(h, "title")
-        return Result.new("missing required 'title'", is_error: true) if title.nil? || title.empty?
+        return Result.new("missing required 'title'", is_error: true) if title.nil? || title.strip.empty?
         # Mask secrets in issue title
         masked_title = Env.mask_secrets(title)
 
@@ -124,7 +124,7 @@ module Gori
         end
 
         title = str(h, "title").try { |t| Env.mask_secrets(t) }
-        return Result.new("title must not be empty", is_error: true) if title && title.empty?
+        return Result.new("title must not be empty", is_error: true) if title && title.strip.empty?
         notes = str(h, "notes").try { |n| Env.mask_secrets(n) }
         severity = severity_from(sev_s) || (cvss ? Gori::Cvss.severity_for(cvss) : nil)
         status = status_from(stat_s)

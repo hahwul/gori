@@ -214,7 +214,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
 
-        abort "gori run issues create: --title is required" if (t = title).nil? || t.empty?
+        abort "gori run issues create: --title is required" if (t = title).nil? || t.strip.empty?
 
         # Refuse a cvss nothing can score, BEFORE the insert. Stored as-is it would sit in a
         # column the Issues list, `cvss:` queries and every export read through a parser that

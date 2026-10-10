@@ -181,6 +181,20 @@ describe Gori::MCP::Server do
       end
     end
 
+    # A whitespace-only title lists as a bare severity tag; `gori run issues update` refused it.
+    it "refuses a whitespace-only title on create and update" do
+      with_store do |store|
+        create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_issue","arguments":{"title":"   "}}})
+        mcp_drive(store, create)[0]["result"]["isError"].as_bool.should be_true
+        store.count_issues.should eq(0)
+
+        id = store.insert_issue("kept", Gori::Store::Severity::Low, nil, nil)
+        update = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"update_issue","arguments":{"id":#{id},"title":" \\t "}}})
+        mcp_drive(store, update)[0]["result"]["isError"].as_bool.should be_true
+        store.get_issue(id).not_nil!.title.should eq("kept")
+      end
+    end
+
     it "declares notes on create_issue in tools/list, beside update_issue's" do
       with_store do |store|
         tools = mcp_drive(store, %({"jsonrpc":"2.0","id":1,"method":"tools/list"}))[0]["result"]["tools"].as_a
