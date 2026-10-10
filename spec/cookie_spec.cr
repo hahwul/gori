@@ -298,6 +298,13 @@ describe Gori::Cookie do
     it "reuses the fuzzer payload-source model (InlineList / WordlistFile)" do
       Gori::Cookie.crack(RACK, Gori::Fuzz::InlineList.new(["x", SECRET])).should eq(SECRET)
     end
+
+    it "yields to other fibers during a long wordlist (the proxy keeps running)" do
+      ran = false
+      spawn { ran = true }
+      Gori::Cookie.crack(FLASK, Array.new(10_000) { |i| "w#{i}" }).should be_nil
+      ran.should be_true
+    end
   end
 
   # The module-level salt/algorithm keywords added for the Cookie tab (a Django SESSION cookie

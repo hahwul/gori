@@ -213,9 +213,12 @@ module Gori
     end
 
     # First of `secrets` whose signature (the block) matches `signature`, compared in
-    # constant time; nil when none does.
+    # constant time; nil when none does. Yields every 4Ki candidates: the TUI cracks on its render
+    # fiber, and a rockyou-sized list otherwise froze every proxied request for tens of seconds.
     def first_signing(secrets, signature : String, & : String -> String) : String?
+      n = 0
       secrets.each do |s|
+        Fiber.yield if (n += 1) % 4096 == 0
         return s if Crypto::Subtle.constant_time_compare(yield(s), signature)
       end
       nil
