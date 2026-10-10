@@ -469,6 +469,23 @@ describe "Gori::Rules — short-circuit sub-kind" do
       respond_args: %({"future":1}))
     rule.inert?.should be_false
   end
+
+  # …and an edit that keeps such a rule off short_circuit writes them back RAW. The enum
+  # fallback for an unknown label is a projection, never permission to rewrite it to `inline`.
+  it "keeps an unknown respond label and its args across an edit of a non-short-circuit rule" do
+    with_store do |store|
+      id = store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "X-A", "b",
+        op: Gori::Store::RuleOp::SetHeader)
+      store.@db.exec(%(UPDATE match_rules SET respond = 'future_resp', respond_args = '{"future":1}' WHERE id = ?), id)
+      rules = Gori::Rules.load(store)
+      rules.update(id, Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "X-A", "c",
+        op: Gori::Store::RuleOp::SetHeader, name: "edited", respond: RK::Inline, respond_args: "").should be_true
+      row = store.match_rules.find! { |r| r.id == id }
+      row.name.should eq("edited")
+      row.respond_label.should eq("future_resp")
+      row.respond_args.should eq(%({"future":1}))
+    end
+  end
 end
 
 private def with_dir_rules(&)

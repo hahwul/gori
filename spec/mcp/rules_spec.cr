@@ -345,6 +345,21 @@ describe Gori::MCP::Server do
       end
     end
 
+    # A non-short-circuit rule's unknown respond label is not rewritten to `inline` by an edit.
+    it "keeps a raw respond label on a non-short-circuit rule it edits" do
+      with_store do |store|
+        id = store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "X-A", "b",
+          op: Gori::Store::RuleOp::SetHeader)
+        store.@db.exec(%(UPDATE match_rules SET respond = 'future_resp', respond_args = '{"future":1}' WHERE id = ?), id)
+        upd = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"update_rule","arguments":{"id":#{id},"name":"edited"}}})
+        mcp_tool_payload(mcp_drive(store, upd)[0])["updated"].as_bool.should be_true
+        rule = store.match_rules.first
+        rule.name.should eq("edited")
+        rule.respond_label.should eq("future_resp")
+        rule.respond_args.should eq(%({"future":1}))
+      end
+    end
+
     # Switching a rule to another answer drops what the new one does not read, as the TUI's
     # `source:` row does — rather than carrying it over for the validator to refuse.
     it "switches an existing rule to another answer" do
