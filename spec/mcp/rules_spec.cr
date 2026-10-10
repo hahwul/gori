@@ -280,6 +280,8 @@ describe Gori::MCP::Server do
           %({"op":"short_circuit","pattern":"/p","fault":"slowloris"}),
           %({"op":"short_circuit","pattern":"/p","replacement":"200 OK","fallthrough":true}),
           %({"op":"short_circuit","pattern":"/p","fault":"close","delay_ms":999999}),
+          %({"op":"short_circuit","pattern":"/p","fault":"close","delay_ms":3000000000}),
+          %({"op":"short_circuit","pattern":"/p","fault":"slowloris","hang_ms":1e30}),
           %({"op":"replace","pattern":"/p","fault":"close"}),
         }.each do |args|
           call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_rule","arguments":#{args}}})

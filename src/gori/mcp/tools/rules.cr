@@ -144,8 +144,15 @@ module Gori
           describes?(h, "strip_prefix") ? (str(h, "strip_prefix") || "") : base.strip_prefix,
           describes?(h, "fallthrough") ? bool_arg(h, "fallthrough", false) : base.fallthrough?,
           fault,
-          describes?(h, "delay_ms") ? (int(h, "delay_ms") || -1).to_i32 : base.delay_ms,
-          describes?(h, "hang_ms") ? (int(h, "hang_ms") || -1).to_i32 : base.hang_ms).to_stored
+          describes?(h, "delay_ms") ? mock_ms(h, "delay_ms") : base.delay_ms,
+          describes?(h, "hang_ms") ? mock_ms(h, "hang_ms") : base.hang_ms).to_stored
+      end
+
+      # Clamped into Int32 before the checked `.to_i32`: 3000000000 or 1e30 raised OverflowError
+      # and came back INTERNAL, where the clamped value is refused by `respond_error` by name.
+      # Unreadable stays -1, which it refuses the same way.
+      private def mock_ms(h, key : String) : Int32
+        (int(h, key) || -1_i64).clamp(Int32::MIN.to_i64, Int32::MAX.to_i64).to_i32
       end
 
       # `respond` as named, or — when it is not — what the other arguments imply: a directory is
