@@ -452,8 +452,9 @@ describe Gori::MCP::Server do
             p = page.call(tools, a, off_a)
             p["representation"].as_s.should eq("decoded")
             p["total_bytes"].as_i64.should eq(text_a.bytesize)
-            # A page boundary can split the 2-byte ã, and such a page comes back as base64.
-            got_a.write(p["encoding"].as_s == "base64" ? Base64.decode(p["base64"].as_s) : p["text"].as_s.to_slice)
+            # A page boundary can split the 2-byte ã: the page ends before it and stays text.
+            p["encoding"].as_s.should eq("text")
+            got_a << p["text"].as_s
             off_a = p["next_offset"].as_i64? || off_a
             done_a = p["complete"].as_bool
           end
@@ -466,6 +467,24 @@ describe Gori::MCP::Server do
         end
         got_a.to_s.should eq(text_a)
         got_b.to_s.should eq(text_b)
+      end
+    end
+
+    it "ends a page before a split codepoint and reports the trimmed byte count" do
+      with_store do |store|
+        body = "한" * 10
+        id = mcp_seed_flow(store, "ex.test", "GET", "/k", 200,
+          resp_head: "HTTP/1.1 200 OK\r\nContent-Length: 30\r\n\r\n", resp_body: body.to_slice)
+        tools = tools_for(store, allow_actions: false)
+        p = mcp_ok_json(tools, "get_response_body_chunk", %({"flow_id":#{id},"offset":0,"limit":4}))
+        p["encoding"].as_s.should eq("text")
+        p["text"].as_s.should eq("한")
+        p["returned_bytes"].as_i.should eq(3)
+        p["next_offset"].as_i.should eq(3)
+        # A limit smaller than one codepoint cannot shrink to zero and stall the pager.
+        tiny = mcp_ok_json(tools, "get_response_body_chunk", %({"flow_id":#{id},"offset":0,"limit":1}))
+        tiny["encoding"].as_s.should eq("base64")
+        tiny["next_offset"].as_i.should eq(1)
       end
     end
 

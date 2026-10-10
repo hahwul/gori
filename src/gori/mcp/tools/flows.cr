@@ -446,8 +446,17 @@ module Gori
         offset_out_of_range = requested > total
         count = Math.min(options.limit, bytes.size - start)
         chunk = count.zero? ? Bytes.new(0) : bytes[start, count]
-        next_offset = start.to_i64 + count
         text = String.new(chunk)
+        # A page boundary through a multibyte codepoint: end this page before it so the page
+        # stays text, and `next_offset` picks the split sequence up — pages still tile the bytes.
+        if !text.valid_encoding? && start + count < bytes.size &&
+           (whole = Serialize.utf8_whole_prefix(chunk)) < count && whole > 0 &&
+           (trimmed = String.new(chunk[0, whole])).valid_encoding?
+          count = whole
+          chunk = chunk[0, whole]
+          text = trimmed
+        end
+        next_offset = start.to_i64 + count
 
         Result.new(JSON.build do |j|
           j.object do

@@ -1528,8 +1528,12 @@ module Gori
         bytes = decoded || body
         cut = bytes.size > inline_cap
         sample = cut ? bytes[0, inline_cap] : bytes
-        # Construct a String only AFTER the byte cap. For a cut through a multibyte codepoint
-        # this prefix is treated as binary rather than allocating/validating the full body.
+        # Construct a String only AFTER the byte cap. A cap that splits a codepoint leaves an
+        # incomplete sequence at the end of an otherwise-text prefix: drop those ≤3 bytes
+        # rather than call the whole body binary (the body continues past the cut anyway).
+        if cut && (whole = utf8_whole_prefix(sample)) < sample.size
+          sample = sample[0, whole] if String.new(sample[0, whole]).valid_encoding?
+        end
         s = String.new(sample)
         valid = s.valid_encoding?
         decoded_applied = !decoded.nil? && !Proxy::Codec::ContentDecode.decode_failed?(note)
@@ -1609,6 +1613,22 @@ module Gori
       end
 
       # Emit bytes that were already capped before String/base64 construction.
+      # The length of `bytes` without the UTF-8 sequence its end cut short — a lead byte
+      # followed by fewer continuation bytes than it announces — else `bytes.size`. Says
+      # nothing about the rest: the caller still validates the prefix.
+      def self.utf8_whole_prefix(bytes : Bytes) : Int32
+        n = bytes.size
+        stop = n - 4
+        i = n - 1
+        while i > stop && i >= 0 && (bytes[i] & 0xC0) == 0x80
+          i -= 1
+        end
+        return n if i <= stop || i < 0
+        lead = bytes[i]
+        width = lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : lead >= 0xC0 ? 2 : 1
+        n - i < width ? i : n
+      end
+
       private def self.emit_body_payload(j : JSON::Builder, s : String, bytes : Bytes,
                                          valid : Bool, truncated : Bool) : Nil
         j.field "truncated", truncated
