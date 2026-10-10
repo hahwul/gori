@@ -23,7 +23,7 @@ module Gori
           # Without this, `notes remove 2` aborted with "too many arguments (expected at most one
           # note number)" — non-zero, so never the silent no-op class, but it never told the
           # operator that notes has verbs and `remove` is not one, unlike its issues/links siblings.
-          if (s = sub) && verb_token?(s) && s.to_i?.nil?
+          if (s = sub) && verb_token?(s) && !s.each_char.all?(&.ascii_number?)
             abort "gori run notes: unknown subcommand '#{s}' (create, update/append, delete/rm, list) — " \
                   "or pass a note number"
           end
@@ -42,6 +42,7 @@ module Gori
                      "or --all to print them all.\n\n" \
                      "Or run with a subcommand:\n" \
                      "  gori run notes create [--text TEXT] [options]\n" \
+                     "  gori run notes update <n> [--text TEXT] [options]   (append <n>: add to it)\n" \
                      "  gori run notes delete <n> --yes [options]"
           project_options(p, proj, "read")
           p.on("--all", "Print every note in full instead of the one-line list") { all = true }
@@ -80,6 +81,8 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
 
+        # Same refusal as `notes update`: `--text x extra words` saved "x" and dropped the rest.
+        abort "gori run notes create: pass the text as --text or as positional words, not both" if text && !positional.empty?
         body = text || (positional.empty? ? nil : positional.join(' '))
         body ||= read_stdin_fallback(STDIN, "gori run notes", "note text") unless STDIN.tty?
         abort "gori run notes create: no note text (use --text, positional args, or pipe via STDIN)" if body.nil? || body.empty?
