@@ -841,10 +841,21 @@ module Gori::Tui
             end
             phase = :render
             render if dirty
-          rescue ex : Gori::Error
-            # gori's own errors keep their designed exit: `CLI.run` rescues these and aborts
-            # with the operator-facing message, which is a deliberate answer, not a crash.
+          rescue ex : TerminalClosed
+            # The one designed exit from inside the loop: `CLI.run` rescues it and aborts with
+            # the operator-facing line, which is a deliberate answer, not a crash.
             raise ex
+          rescue ex : Gori::Error
+            # Any other `Gori::Error` is an action's refusal worded for the operator — a confirm
+            # action, an overlay commit, a verb. Re-raising it ended gori, proxy and held
+            # intercepts included, on one keypress (⇧I on a flow whose head starts with `:`).
+            # Shown as the error toast, no strike; a render that refuses goes the render way.
+            if phase == :render
+              raise ex unless absorb_tick_error(ex, phase)
+            else
+              status(ex.message || ex.class.name, :error)
+              @render_pending = true
+            end
           rescue ex
             raise ex unless absorb_tick_error(ex, phase)
           end
@@ -933,6 +944,9 @@ module Gori::Tui
     TICK_ERROR_LIMIT  = 3
     TICK_ERROR_WINDOW = 10.seconds
 
+    # `flush_screen`'s dead tty: the one `Gori::Error` the loop lets end the process.
+    class TerminalClosed < Gori::Error; end
+
     # Absorb one tick's raise: log the full trace, tell the operator where it went, and say
     # whether the loop may continue. Returns false once the breaker trips, and the caller
     # re-raises — which unwinds through `run`'s ensure and `App#run_tui`'s, so the terminal
@@ -986,7 +1000,7 @@ module Gori::Tui
     # would otherwise trip it before the first frame, which is what this exists to prevent.
     private def startup_step(phase : Symbol, &) : Nil
       yield
-    rescue ex : Gori::Error
+    rescue ex : TerminalClosed
       raise ex
     rescue ex
       if phase == :render
@@ -3116,7 +3130,7 @@ module Gori::Tui
       # unwinds, `CLI.run` prints the one line. Narrow on purpose: only the flush is inside,
       # so a `File::Error` (also an `IO::Error`) from a pane's own file write elsewhere in the
       # tick is still that pane's to report, not a "terminal closed".
-      raise Gori::Error.new("terminal closed: #{ex.message}")
+      raise TerminalClosed.new("terminal closed: #{ex.message}")
     end
 
     private def scope_label : String

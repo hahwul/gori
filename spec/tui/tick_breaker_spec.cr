@@ -44,3 +44,15 @@ describe TickBreaker do
     b.tripped?.should be_false
   end
 end
+
+# The loop re-raised every `Gori::Error` as a designed exit, so a confirm action that refused
+# (⇧I on a marked flow whose head starts with `:`) ended gori, proxy included. Only the dead
+# tty may leave the loop that way now; there is no Runner harness, so the source is the check.
+describe "Runner tick rescue" do
+  it "re-raises only TerminalClosed, not every Gori::Error" do
+    src = File.read(File.join(__DIR__, "../../src/gori/tui/runner.cr"))
+    src.should_not match(/rescue ex : Gori::Error\n\s*(#[^\n]*\n\s*)*raise ex\n/)
+    src.should contain("raise TerminalClosed.new(\"terminal closed:")
+    (Gori::Tui::Runner::TerminalClosed.new("x").is_a?(Gori::Error)).should be_true
+  end
+end
