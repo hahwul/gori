@@ -407,7 +407,7 @@ gori run repeater <flow-id> --target https://staging.example.com --http2 --diff
 | `--apply-rules` | Run the project's enabled Match & Replace rules (request side) over the request first, as the live proxy would. Off by default: a direct send is byte-exact |
 | `--keep-request-line` | Send the stored request line as-is; do not rewrite an absolute-form line (`GET http://h/p`) to origin-form |
 | `--diff` | Diff against the original response |
-| `--allow-unscoped` | Send outside the project scope. Sandbox mode and explicit excludes still refuse each send |
+| `--allow-unscoped` | Send outside the project scope. Sandbox mode still refuses each send; an exclude rule stops a hand-authored send only with the Sandbox on, as on the proxy |
 | `--headers-only` | Print the status line and headers only; the body is replaced by one line naming its size |
 | `--max-body=BYTES` | Print at most BYTES of the decoded response body, then a marker naming the full size |
 | `--format=FMT` | `text` (default) or `json` |

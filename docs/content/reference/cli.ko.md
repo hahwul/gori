@@ -400,7 +400,7 @@ gori run repeater <flow-id> --target https://staging.example.com --http2 --diff
 | `--apply-rules` | 라이브 프록시처럼 프로젝트의 활성 Match & Replace 규칙(요청 쪽)을 먼저 요청에 적용. 기본값은 꺼짐: 직접 전송은 바이트 그대로입니다 |
 | `--keep-request-line` | 저장된 요청 라인을 그대로 전송. 절대 형식(`GET http://h/p`)을 origin 형식으로 고치지 않습니다 |
 | `--diff` | 원본 응답과 비교 |
-| `--allow-unscoped` | 프로젝트 스코프 밖으로도 전송. 샌드박스와 명시적 제외 규칙은 매 전송을 여전히 거부합니다 |
+| `--allow-unscoped` | 프로젝트 스코프 밖으로도 전송. 샌드박스는 매 전송을 여전히 거부합니다. 제외 규칙은 프록시와 마찬가지로 샌드박스가 켜져 있을 때만 직접 작성한 전송을 막습니다 |
 | `--headers-only` | 상태 라인과 헤더만 출력. 본문은 크기를 알려주는 한 줄로 대체 |
 | `--max-body=BYTES` | 디코드된 응답 본문을 최대 BYTES바이트까지 출력한 뒤, 전체 크기를 알려주는 마커를 붙임 |
 | `--format=FMT` | `text` (기본값) 또는 `json` |
