@@ -647,6 +647,32 @@ describe Gori::Scope do
     end
   end
 
+  # The live gate asks an EXCLUDE about the port-free url as well as the ported one, so a
+  # carve-out written without a port still removes the same path on :8443 from the lens.
+  it "SQL filter applies a port-free exclude to a non-default-port flow, like the live gate" do
+    with_store do |store|
+      {"/logout", "/admin"}.each do |target|
+        store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "https", host: "acme.test", port: 8443, method: "GET",
+          target: target, http_version: "HTTP/1.1",
+          head: "GET #{target} HTTP/1.1\r\n\r\n".to_slice, body: nil,
+          source: Gori::FlowSource::Kind::Proxy))
+      end
+      capture(store, "acme.test", "/home", "https")
+
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "acme.test")
+      scope.add("exclude", "string", "acme.test/logout")
+      scope.add("exclude", "regex", "^https://acme\\.test/admin$")
+      scope.enable
+
+      store.search(scope.filter, 50).map(&.target).should eq(["/home"])
+      {"/logout", "/admin"}.each do |target|
+        scope.excluded?(Gori::Scope.request_url("https", "acme.test", target), "acme.test").should be_true
+      end
+    end
+  end
+
   it "SQL filter recognises an UPPERCASE-scheme absolute-form target as absolute-form too" do
     with_store do |store|
       # RFC 3986 §3.1: URI schemes are case-insensitive. A case-SENSITIVE absolute-form

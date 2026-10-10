@@ -926,8 +926,17 @@ module Gori
       # carries the whole argument, and `Interceptor`'s live gate splits the same way. In one
       # line: a carve-out has to be able to name a port (it could not, over TLS, and that
       # failed OPEN), and an allowlist entry never named one, so making it start to would put
-      # every non-default-port origin out of scope.
-      url_expr = rule.include? ? QL::URL_EXPR_NO_PORT : QL::URL_EXPR
+      # every non-default-port origin out of scope. An exclude still ALSO reads the port-free
+      # url, because the live gate asks it of both (`Interceptor#scope_allows?` /
+      # `port_excluded?`, `Outbound#evaluate`): `exclude string "acme.test/logout"` blocks
+      # `https://acme.test:8443/logout` live, so the lens must not list it as in scope.
+      return url_cond(rule, QL::URL_EXPR_NO_PORT) if rule.include? || rule.match_type == "host"
+      a, aa = url_cond(rule, QL::URL_EXPR)
+      b, ba = url_cond(rule, QL::URL_EXPR_NO_PORT)
+      {"(#{a} OR #{b})", aa + ba}
+    end
+
+    private def self.url_cond(rule : Rule, url_expr : String) : {String, Array(DB::Any)}
       case rule.match_type
       when "host"
         host_cond(rule.pattern)
