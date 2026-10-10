@@ -56,7 +56,7 @@ Each gori project is its own database. After install, `gori mcp` always connects
 
 Have the agent call `project_info` first. When `bound` is false, it should list or create a project (create auto-binds when unbound), then switch if needed. When bound, confirm the name, database path, and selection source before mutating data.
 
-To fix the engagement at install time (add `--pin-project` as well if the agent must not switch away from it):
+To fix the project at install time (add `--pin-project` as well if the agent must not switch away from it):
 
 ```bash
 gori mcp --project my-engagement --install-codex     # a named project's database
@@ -90,7 +90,7 @@ A capable agent turns that into a short tool sequence:
 → create_issue   "Auth bypass on /login" severity:high
 ```
 
-Agent actions are not silent. Each one lands in gori's notification center tagged as agent-driven and rendered differently from your own actions, so you can see what a co-pilot did to a project while you were reading another tab.
+Agent actions are not silent. Each one lands in gori's notification center tagged as agent-driven and rendered differently from your own actions, so you can see what an agent did to the project while you were on another tab.
 
 ## Next Steps
 

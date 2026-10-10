@@ -87,7 +87,7 @@ gori run capture --project ci-run --for 5m --format jsonl > flows.jsonl
 # 퍼저가 반사된 마커를 찾으면 CI 잡을 실패시키기
 gori run fuzz 42 --wordlist payloads.txt --mr 'gori-canary' --fail-if-no-matches
 
-# create 계열 명령의 --format json은 새로 생긴 행 그대로이고 id도 포함 — 텍스트를 긁어낼 필요 없음
+# create 계열 명령의 --format json은 id를 포함한 새 행 그대로: 텍스트를 긁어낼 필요 없음
 id=$(gori run repeater create -t https://api.example.com -f req.http --format json | jq .id)
 rule=$(gori run project scope add --pattern=api.example.com --format json | jq .id)
 
@@ -163,7 +163,7 @@ gori run mine 42 --locations=query --hook './sign.sh'
 *예산*입니다. 400번 매치되는 패턴도, 한 헤드에 걸린 pipe 룰 4개도 예산 한 번만큼만 듭니다. 메시지
 하나는 헤드와 바디로 두 번 재작성되므로 메시지가 보는 한계는 그 두 배입니다.
 
-**Miner의 훅은 프로브마다 한 번 실행되며, 서명이 걸린 API의 값을 치릅니다.** 모든 파라미터가 HMAC이나
+**Miner의 훅은 프로브마다 한 번 실행되며, 서명이 걸린 API에는 이것이 필요합니다.** 모든 파라미터가 HMAC이나
 서명된 봉투, 요청마다 다른 nonce를 지녀야 하는 앱은 날것의 후보를 반응하기도 전에 거절하므로, 훅이
 없으면 캘 것이 없습니다. 모든 프로브가 똑같아 보입니다. `--hook`은 조립된 요청 하나하나를(후보가
 주입되고 세션 바인딩이 이미 해소된 상태로) 지정한 명령에 넘기고, 그 stdout이 실제로 나갑니다. 실행할 수

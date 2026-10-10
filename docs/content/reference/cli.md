@@ -104,7 +104,7 @@ gori run <subcommand> [verb] [options]
 | `views` · `add` · `set` · `rename` · `scope` · `rm` | Manage saved History views: named QL queries the list is narrowed by, as a lens |
 | `session` · `add` · `from-flow` · `edit` · `rm` · `baseline` · `show` · `refresh` · `from-request` | Session slots: the named identities a send or an Authorize run goes out as, and the Repeater steps that re-authenticate one |
 | `grpc [schema]` · `reflect` · `forget` | The gRPC `.proto` lens: show what is loaded, fetch descriptors by server reflection, drop a cached target |
-| `project [list]` | List known projects |
+| `project [list]` | List projects holding captured traffic (`--all` for every one) |
 | `project create <name>` | Create (or reopen) a project by name |
 | `project switch <name>` (`use`) · `--clear` | Pin the project every `--project`-less command reads |
 | `project export <name>` | Save a compact, WAL-safe `.gori` project archive |
@@ -228,8 +228,8 @@ gori run history -q 'status:5xx' --limit 100 --format json
 | `--column=SPEC` | Show an extracted value per row (repeatable). `[LABEL=][req\|res:]kind:selector`, e.g. `header:x-request-id`, `RID=req:header:authorization`, `jsonpath:data.id`, `regex:token=(\w+)`, `position:0:32`. Any `--column` **replaces** this project's configured [History columns](/guide/proxy/#columns) |
 | `--no-columns` | Don't draw this project's configured History columns |
 | `--format=FMT` | `text`, `json` (one array), `jsonl` (one object per line), or `har` |
-| `--include-sensitive` | Emit `Authorization` / `Cookie` / `Set-Cookie` / `Proxy-Authorization` / API-key values — in `json`'s per-row `headers` and in a `header:`/`cookie:` column — instead of `[REDACTED]`. Inert in the other formats, which say so on STDERR |
-| `--redact [PROFILE]` | Sanitize request/response **bodies** before writing them, using a [redaction profile](#run-redact). `--format har` only — it is the one listing format that carries a body — and refused on the others rather than ignored |
+| `--include-sensitive` | Emit `Authorization` / `Cookie` / `Set-Cookie` / `Proxy-Authorization` / API-key values instead of `[REDACTED]`, in `json`'s per-row `headers` and in a `header:`/`cookie:` column. Inert in the other formats, which say so on STDERR |
+| `--redact [PROFILE]` | Sanitize request/response **bodies** before writing them, using a [redaction profile](#run-redact). `--format har` only (the one listing format that carries a body); refused on the others rather than ignored |
 | `--no-redact` | Write the captured bodies even where redaction is the configured default |
 | `--redact-preview` | List what `--redact` would replace, one row per value, and write no HAR |
 
@@ -239,9 +239,9 @@ This project's [History columns](/guide/proxy/#columns) are drawn by default, so
 
 Each `json`/`jsonl` row carries the flow's absolute `url` and a compact `headers` object for the request (a repeated header name becomes an array). Bodies are not inlined; that is `run show`.
 
-**Sensitive header values are `[REDACTED]` in that object by default**, and the row is marked `sensitive_headers_redacted: true` when anything was withheld — a listing is an inventory, and one run to answer "what did I capture?" should not put a live session cookie in a terminal log or an agent transcript. `--include-sensitive` returns the exact bytes. Names, wire order and the repeat count survive either way, so the redacted row still says what the request was. An [obs-fold](https://www.rfc-editor.org/rfc/rfc9110#section-5.2) continuation is folded into the field it continues and redacted with it, rather than appearing as a header of its own.
+**Sensitive header values are `[REDACTED]` in that object by default**, and the row is marked `sensitive_headers_redacted: true` when anything was withheld. A listing is an inventory, and one run to answer "what did I capture?" should not put a live session cookie in a terminal log or an agent transcript. `--include-sensitive` returns the exact bytes. Names, wire order and the repeat count survive either way, so the redacted row still says what the request was. An [obs-fold](https://www.rfc-editor.org/rfc/rfc9110#section-5.2) continuation is folded into the field it continues and redacted with it, rather than appearing as a header of its own.
 
-The same redaction covers a `header:` column whose selector names a sensitive header, and every `cookie:` column — a named cookie's value is part of the `Cookie` header the row is already withholding. What it does **not** cover, and cannot: `regex:`, `jsonpath:` and `position:` columns, which can lift a credential out of any byte of the message with nothing in the descriptor to say whether they do; a credential in the query string, which is part of `url` and `target`; and the `text` listing, which is the interactive read rather than the feed a script captures. `--format har` also carries the captured message in full, by design — an interchange document has to be replayable.
+The same redaction covers a `header:` column whose selector names a sensitive header, and every `cookie:` column, since a named cookie's value is part of the `Cookie` header the row is already withholding. What it does **not** cover, and cannot: `regex:`, `jsonpath:` and `position:` columns, which can lift a credential out of any byte of the message with nothing in the descriptor to say whether they do; a credential in the query string, which is part of `url` and `target`; and the `text` listing, which is the interactive read rather than the feed a script captures. `--format har` also carries the captured message in full, by design: an interchange document has to be replayable.
 
 Every row also carries `source`, where the flow came from (`proxy`, `repeater`, `fuzzer`, `discover`, `import`, …; `null` on a flow captured before gori recorded provenance), plus `source_surface` (`tui` / `cli` / `mcp`) and `source_ref` when there is one. The text format prints a `[repeater]`-style chip on anything that is not ordinary captured traffic. Filter on it with [`src:`](/reference/query-language/#src-provenance); the same keys are on MCP `list_history` and `get_flow`.
 
@@ -261,9 +261,9 @@ gori run show <flow-id> --format raw
 
 #### Safe evidence export
 
-`--redact [PROFILE]` writes the **sanitized derivative** of the flow instead of the captured bytes: values a [redaction profile](#run-redact) names are replaced by a keyed placeholder, `[REDACTED:3f1c9ab4]`. Equal values get equal tags, so a reader can still see that the token in the request is the token in the response without seeing either. The tag is an HMAC under a secret minted once per install, not a digest of the value — a truncated hash of a 4-digit PIN or a wordlist password is recovered in milliseconds, which would make the placeholder itself the disclosure.
+`--redact [PROFILE]` writes the **sanitized derivative** of the flow instead of the captured bytes: values a [redaction profile](#run-redact) names are replaced by a keyed placeholder, `[REDACTED:3f1c9ab4]`. Equal values get equal tags, so a reader can still see that the token in the request is the token in the response without seeing either. The tag is an HMAC under a secret minted once per install, not a digest of the value. A truncated hash of a 4-digit PIN or a wordlist password is recovered in milliseconds, which would make the placeholder itself the disclosure.
 
-It applies to **every** `--format`, because the flow is sanitized once before anything renders it: `raw`, `text`, `json`, `har`, and all six request-as-code serializers. `--no-redact` writes the captured bytes even when redaction is this project's or this install's default; `--redact-preview` lists what would go — side, JSON Pointer or form key, the rule that fired, the placeholder — and prints no document.
+It applies to **every** `--format`, because the flow is sanitized once before anything renders it: `raw`, `text`, `json`, `har`, and all six request-as-code serializers. `--no-redact` writes the captured bytes even when redaction is this project's or this install's default; `--redact-preview` lists what would go (side, JSON Pointer or form key, the rule that fired, the placeholder) and prints no document.
 
 What it covers and what it does not:
 
@@ -272,9 +272,9 @@ What it covers and what it does not:
 - **A JSON body is re-serialized**, so a sanitized one carries gori's whitespace and key order rather than the origin's. When the exact framing is the evidence, use `--no-redact`.
 - **The head is repaired to describe the sanitized body**: `Content-Length` is rewritten, and a body gori had to decompress or de-chunk to read loses its `Content-Encoding` / `Transfer-Encoding` (reported on STDERR).
 - **A body gori cannot read is withheld whole**, not partially sanitized: anything that is not valid UTF-8, and any `multipart/*` (gori does not split its parts yet, so it cannot tell an uploaded file from a form field). The placeholder says how many bytes went and why.
-- **A body that does not parse falls back to a conservative text pass** — the profile's own patterns, its field names re-expressed as `"name": "value"` / `name=value` text rules (truncation tolerated), and two built-in shapes that are unambiguous wherever they appear: a JWS/JWE compact serialization and a PEM `PRIVATE KEY` block.
+- **A body that does not parse falls back to a conservative text pass**: the profile's own patterns, its field names re-expressed as `"name": "value"` / `name=value` text rules (truncation tolerated), and two built-in shapes that are unambiguous wherever they appear: a JWS/JWE compact serialization and a PEM `PRIVATE KEY` block.
 
-Every caveat, and the count, go to STDERR — STDOUT stays the document, so `gori run show 42 --format har --redact > evidence.har` is still a pure HAR.
+Every caveat, and the count, go to STDERR. STDOUT stays the document, so `gori run show 42 --format har --redact > evidence.har` is still a pure HAR.
 
 #### HAR export
 
@@ -425,24 +425,24 @@ generate-request | gori run repeater create --target https://api.example.com --r
 pbpaste | gori run repeater create --curl - --name "from devtools"
 ```
 
-The four request sources are mutually exclusive — naming two is refused rather than
-resolved by flag order — and a request that arrives empty (an empty file, `--request-raw ''`,
+The four request sources are mutually exclusive: naming two is refused rather than
+resolved by flag order. A request that arrives empty (an empty file, `--request-raw ''`,
 or a pipe that produced nothing) is refused instead of creating a session that cannot be sent.
 `--flow` is not one of the four: it doubles as provenance, so it pairs with any one of them.
 `--curl` reads one curl command (see [Repeater → Paste cURL](/guide/repeater-and-fuzzer/#repeater))
 and supplies `--target` and `--http2` from it unless you pass them.
 
 `--request-stdin` reads a pipe or a redirect (`--request-stdin < req.http`), and refuses a
-terminal. A terminal echoes every byte back — the whole raw request, `Cookie` and
-`Authorization` with it, into the scrollback and into any captured PTY transcript, which is
+terminal. A terminal echoes every byte back (the whole raw request, `Cookie` and
+`Authorization` with it) into the scrollback and into any captured PTY transcript, which is
 the exposure the flag exists to close for the process listing and the shell history. `^D` also
 flushes the pending line rather than ending the read there, so a request with no trailing
 newline needs two of them and a PTY-driven harness that sends one waits forever.
 
-The same rule covers every stdin road an operator names by **flag** — `issues --notes-stdin`,
+The same rule covers every stdin road an operator names by **flag**: `issues --notes-stdin`,
 and the four that spell stdin `-` (`sequence --tokens -`, `authorize --identities=-`,
-`rewriter --response-file=-`, and `-` on any of the `--…-file` flags) — plus a *path* that
-resolves to a terminal, such as `--request-file /dev/stdin` under a tty. A **wordlist** path is covered too — `fuzz -w`, `mine --wordlist`
+`rewriter --response-file=-`, and `-` on any of the `--…-file` flags), plus a *path* that
+resolves to a terminal, such as `--request-file /dev/stdin` under a tty. A **wordlist** path is covered too: `fuzz -w`, `mine --wordlist`
 and `discover --wordlist` each refuse `/dev/tty` (and `/dev/stdin` under one) with
 `wordlist is a terminal, not a file: …` instead of blocking forever.
 
@@ -549,7 +549,7 @@ gori run send --url https://api.example.com/v1/items -d '{"name":"x"}' -H 'Conte
 gori run send --url https://api.example.com --request-file req.http --headers-only
 ```
 
-`-X`, `-H`, `-d` and `-b` mean what they mean to curl: `-d` is the body (and makes the request a `POST` with a form `Content-Type` unless `-X` or a `-H` says otherwise), `-b` is a cookie. Until #1383 `-b` was the body here; a `-b` value with no `=` is now refused and pointed at `-d`, which is what an old `-b '{"a":1}'` looks like.
+`-X`, `-H`, `-d` and `-b` mean what they mean to curl: `-d` is the body (and makes the request a `POST` with a form `Content-Type` unless `-X` or a `-H` says otherwise), `-b` is a cookie. Before #1383 `-b` was the body here, so a `-b` value with no `=` (an old `-b '{"a":1}'`) is refused with a pointer to `-d`.
 
 | Option | Description |
 | -------- | ------------- |
@@ -567,6 +567,8 @@ gori run send --url https://api.example.com --request-file req.http --headers-on
 | `--save-as-repeater` | Also save the request and response as a new Repeater session and print its id (`saved_repeater_id` in JSON) |
 | `--headers-only`, `--max-body=BYTES`, `--format=FMT` | As on `repeater send` |
 
+The exit status reports the exchange, not the HTTP verdict: a `404` or `500` exits `0` (`ok: true` in JSON), so check `status`. Exit `1` (`ok: false`) means there was no response, or gori could not frame or finish reading it.
+
 A request that is a WebSocket handshake goes out as an ordinary request and its `101` is the answer, which the command says on STDERR. A framed exchange needs a session: `repeater create`, then `repeater send`.
 
 `--format json` on `send`, `repeater <flow-id>` and `repeater send` carries MCP `send_request`'s error contract beside the raw `head`: a failed send adds `error_kind` (`connect`, `timeout`, `protocol`, `no_response`, `truncated_request`, `other`), `error_code`, `retryable` and `delivered`, so a script tells a refused connection from a timeout without matching the `error` sentence; a response adds `reason`, `http_version` and the parsed `headers` (`[{"name","value"}]`, in wire order, with `value_lossy`/`value_base64` for a non-UTF-8 value). `match_replace_applied: true` says `--apply-rules` changed the request.
@@ -582,7 +584,7 @@ Sources: `--flow=ID`, `--repeater=ID`, `--request=FILE`, or stdin. Positions: `�
 | Mode | `--mode=` `sniper` (default), `batteringram`, `pitchfork`, `clusterbomb`. The first two draw from **one** payload set, the last two from one per marked position; a set the mode will never draw from is named before the run starts |
 | gRPC fields | `--field=SPEC` (repeatable) sweeps a **schema-known field** of a unary gRPC request instead of its octets. `SPEC` is a field name, a path into a nested message (`profile.age`), a field number, or `name[i]` for one occurrence of a repeated field; `name¦chain` runs a Decoder chain over the payload **before** the declared type encodes it. The field must already be present on the captured message (gori replaces an occurrence, never adds one), and payloads for a `bytes` field are read as **hex** (`de ad be ef`). Each payload goes through the field's declaration on its way to bytes (`-3` is a different set of octets as `int32`, `sint32`, `bool` or an enum), every other byte of the message is copied from the capture, and the 5-byte length prefix is recomputed. Needs a descriptor set that resolves the rpc (`gori run grpc schema`). Field positions follow the template's own `§…§` positions in the run's index space, so `--mode` and the payload sets keep their meaning. An undeclared field, one whose wire type the declaration contradicts, and a payload the declared type cannot hold are all refused before the first request |
 | Payloads | `-w`/`--wordlist` (a file, or the name of a saved list), `--preset=NAME[:FILE]` (built-in: `sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`, `cache-delimiters`), `--payloads=LIST`, `--numbers=FROM-TO[:STEP]`, `--null=N`, `--brute=CHARSET:MIN-MAX` |
-| Project data | `--payload-from='<QL> <projection>'` (repeatable) is a payload set read from the project's own captured data: `param-names`, `param-values`, `path-segments`, `js-endpoints` or `extracted`. Reads the project, sends nothing, and needs a project you named (`--flow`, `--repeater`, `--project` or `--db`). `--payload-from-sensitive` lets it read credential material (withheld by default; `extracted` needs it), `--payload-from-locations=LIST` adds `headers`/`cookies`, `--payload-from-max-flows=N` (2000) and `--payload-from-max-values=N` (10000) raise the caps; all of them apply to every `--payload-from`. What each source read goes to stderr. See [Payloads from the Project](/guide/repeater-and-fuzzer/#payloads-from-the-project) |
+| Project data | `--payload-from='<QL> <projection>'` (repeatable) is a payload set read from the project's own captured data: `param-names`, `param-values`, `path-segments`, `js-endpoints` or `extracted`. Reads the project, sends nothing, and needs a project you named (`--flow`, `--repeater`, `--project` or `--db`). `--payload-from-sensitive` lets it read credential material (withheld by default; `extracted` needs it), `--payload-from-locations=LIST` adds `headers`/`cookies`, `--payload-from-max-flows=N` (2000, max 20000) and `--payload-from-max-values=N` (10000, max 100000) raise the caps; all of them apply to every `--payload-from`. What each source read goes to stderr. See [Payloads from the Project](/guide/repeater-and-fuzzer/#payloads-from-the-project) |
 | Encoding | A payload spliced into a **query-string** or **form-urlencoded body** value is URL-encoded by default; path segments, JSON/raw bodies, headers and cookies stay raw. `--no-encode` sends the query/form ones raw too. Use it for a payload that is *already* a percent-escape (`%00` would go out as `%2500`, so the `%00` / `%c0%af` / `%2e%2e%2f` probes aimed at the origin's own decoder arrive as text). An explicit `--encode` replaces the default and applies to every position. `--prefix` / `--suffix` / `--case` / `--hash` / `--regex-replace` do not: they say what the payload is, not how the wire spells it, so their output is still encoded for a query/form position |
 | Processors | `--prefix`, `--suffix`, `--encode` (`url`\|`urlall`\|`base64`\|`hex`), `--case` (`upper`\|`lower`), `--hash` (`md5`\|`sha1`\|`sha256`), `--regex-replace=/pat/rep/` |
 | Rate | `--concurrency` (20), `--rate=RPS`, `--throttle=MS`, `--timeout=SEC`, `--retries=N`, `--max-requests=N` (hard cap, retries and redirect hops count), `--follow-redirects`, `--no-keep-alive` |
@@ -590,9 +592,9 @@ Sources: `--flow=ID`, `--repeater=ID`, `--request=FILE`, or stdin. Positions: `�
 | Race | `--race=N` dials N connections, holds each request one byte short, and releases them together (last-byte sync): a race group is N copies of **one** request, so `--mode` and every payload/position flag are bypassed. `--race-warmup=FILE` first sends and reads this raw request on each connection before it holds the race request |
 | Framing | `--verbatim` sends the template's `Content-Length` as written, with no resync after payload substitution and none added to a body that declares none (for CL / CL-TE desync payloads; a body left with no `Content-Length` and no chunked `Transfer-Encoding` is warned about, because an origin reads it as zero-length). `--reframe-grpc` recomputes the gRPC 5-byte length prefix after each payload is spliced into a unary message (off by default: a stale prefix is reported, not repaired) |
 | WebSocket | A template declaring an `Upgrade: websocket` handshake is swept as a framed exchange: **one payload = one full RFC 6455 session**. `--message=TEXT` / `--message-frame=SPEC` author the outbound frames (repeatable, in order; `SPEC` is the `gori run repeater send` grammar: `opcode=`, `fin=`, `rsv=`, `mask=`, `mask_key=`, `len=`, and one of `hex=`\|`b64=`\|`text=`) and replace the frames a `--flow`/`--repeater` seed carried. Mark `§…§` positions in the frames; the handshake is a position space too, and both sweep in one run. `--idle-ms=N` per-session silence timeout (100-60000, default 3000), `--ws-keep-key` sends the template's own `Sec-WebSocket-Key`. `--ws-http-only` sweeps the handshake as an ordinary request instead. Rows carry `ws_close_code` and `ws_frames_in`, because a successful upgrade is `101` on every row. `--race`, `--http2` and `--record-history` are refused on the framed path (all three work under `--ws-http-only`, which is an ordinary HTTP sweep and does record); `--follow-redirects`, `--timeout` and `--ac` are inert and reported once. A WebSocket seed with no outbound frames is swept as plain HTTP rather than as an empty framed session |
-| Matchers | `--mc`/`--fc` status, `--mg`/`--fg` gRPC status from the `grpc-status` trailer — the HTTP/2 trailer, or grpc-web's in-body trailer frame (`7`, `>0`, `1-16`), `--ms`/`--fs` size, `--mw`/`--fw` words, `--ml`/`--fl` lines, `--mt`/`--ft` round-trip time in **ms** (`--mt '>=5000'`; the only dimension a time-based blind payload moves, and a send that times out counts as a match on it), `--mr`/`--fr` body regex, `--mh`/`--fh` a case-insensitive substring of the response HEAD (`--mh 'x-powered-by: php'`; the body regex never sees a header), `--extract=REGEX`, `--ac` auto-calibrate |
-| Stop | `--stop-after-matches=N` ends the run once the matchers have hit N times (`1` = first hit). `--stop-on=DIM:SPEC` (repeatable) ends it when a **separate** condition holds — `DIM` is `status`\|`grpc`\|`size`\|`words`\|`lines`\|`time`\|`header`\|`regex`, and `!DIM` negates it (`--stop-on '!regex:Invalid password'` stops when the body no longer carries it). Either way the run lands the terminal status `condition_met` (not `stopped`), and the CLI exits `0` — the condition was the goal. In-flight requests finish, as on `^C`. The done line names the result that tripped it, and `fuzz save` records it: `fuzz list` shows `stop:#N`, `fuzz show` says `stopped on result N`, and their JSON carries `stop_index` (null when not recorded). Not usable with `--race` |
-| Keep | `--keep=all` (default) \| `interesting` — for `fuzz save`, which result rows the archive stores. `interesting` keeps the matched rows plus the ones carrying an observed fact (an error, a re-send, a truncated capture, the stop row), so a large sweep does not write one archive row per request. The run's `sent`/`matched`/`errors` counts stay whole-run and each row keeps its real payload index; `fuzz list`/`show` say `keep:interesting` and how many of how many were kept |
+| Matchers | `--mc`/`--fc` status, `--mg`/`--fg` gRPC status from the `grpc-status` trailer, HTTP/2 or grpc-web's in-body trailer frame (`7`, `>0`, `1-16`), `--ms`/`--fs` size, `--mw`/`--fw` words, `--ml`/`--fl` lines, `--mt`/`--ft` round-trip time in **ms** (`--mt '>=5000'`; the only dimension a time-based blind payload moves, and a send that times out counts as a match on it), `--mr`/`--fr` body regex, `--mh`/`--fh` a case-insensitive substring of the response HEAD (`--mh 'x-powered-by: php'`; the body regex never sees a header), `--extract=REGEX`, `--ac` auto-calibrate |
+| Stop | `--stop-after-matches=N` ends the run once the matchers have hit N times (`1` = first hit). `--stop-on=DIM:SPEC` (repeatable) ends it when a **separate** condition holds. `DIM` is `status`\|`grpc`\|`size`\|`words`\|`lines`\|`time`\|`header`\|`regex`, and `!DIM` negates it (`--stop-on '!regex:Invalid password'` stops when the body no longer carries it). Either way the run lands the terminal status `condition_met` (not `stopped`), and the CLI exits `0`, because the condition was the goal. In-flight requests finish, as on `^C`. The done line names the result that tripped it, and `fuzz save` records it: `fuzz list` shows `stop:#N`, `fuzz show` says `stopped on result N`, and their JSON carries `stop_index` (null when not recorded). Not usable with `--race` |
+| Keep | `--keep=all` (default) \| `interesting`: for `fuzz save`, which result rows the archive stores. `interesting` keeps the matched rows plus the ones carrying an observed fact (an error, a re-send, a truncated capture, the stop row), so a large sweep does not write one archive row per request. The run's `sent`/`matched`/`errors` counts stay whole-run and each row keeps its real payload index; `fuzz list`/`show` say `keep:interesting` and how many of how many were kept |
 | Session bindings | `--bind-from=FLOW-ID` replays that captured flow first so its response fills the project's `$BIND.NAME` bindings for the rest of the run |
 | Session slot | `--slot=NAME` sends as this [session slot](#run-session): its header overlay, and its binding table for `$BIND.NAME`. Applied before `--bind-from` |
 | Scope | `--allow-unscoped` sends outside the project scope; Sandbox mode and explicit excludes still refuse each send |
@@ -601,7 +603,7 @@ Sources: `--flow=ID`, `--repeater=ID`, `--request=FILE`, or stdin. Positions: `�
 
 #### Permanent fuzz runs
 
-`gori run fuzz …` is still ephemeral. Add the `save` verb before the same source/options to store every result permanently, with its complete rendered request, final wire request, response head, and response body:
+`gori run fuzz …` is ephemeral. Add the `save` verb before the same source/options to store every result permanently, with its complete rendered request, final wire request, response head, and response body:
 
 ```bash
 gori run fuzz save 42 --auto --preset sqli
@@ -614,7 +616,7 @@ A file/stdin save needs `--project` or `--db`; gori will not silently write a pr
 | --------- | ------------- |
 | `fuzz list` | List saved runs newest-first. `--session=ID` narrows to one TUI Fuzzer session; `--offset`, `--limit` (default 50, max 1000), `--format text\|json` page/format the list |
 | `fuzz show RUN_ID` | Show one run's summary and a scalar-only page of result metrics without loading retained BLOBs. Supports `--offset`, `--limit` (default 200, max 5000), `--matched-only`, and `--format text\|json\|jsonl`; live `--format json` streams one valid array instead of buffering full retained rows |
-| `fuzz show RUN_ID --clusters` | Group the run's results by **response shape**: one line per distinct answer (payload echoes, numbers, ids, timestamps and volatile headers normalized away) with its id, size, status or error class, length/word ranges, hit count and a representative result. `--order rare\|common\|first` (default `rare`, smallest first), `--matched-only` keeps the clusters holding a hit, `--limit`/`--offset` page clusters, and `--format json\|jsonl` emits the same cluster fields as MCP `get_fuzz_run{clusters}`. A run saved before shapes were recorded groups by status/error/words/lines and marks those clusters `≈` (`approximate`) |
+| `fuzz show RUN_ID --clusters` | Group the run's results by **response shape**: one line per distinct answer (payload echoes, numbers, ids, timestamps and volatile headers normalized away) with its id, result count, status or error class, length/word ranges, matcher hit count and a representative result. `--order rare\|common\|first` (default `rare`, smallest first), `--matched-only` keeps the clusters holding a hit, `--limit`/`--offset` page clusters, and `--format json\|jsonl` emits the same cluster fields as MCP `get_fuzz_run{clusters}`. A run saved before shapes were recorded groups by status/error/words/lines and marks those clusters `≈` (`approximate`) |
 | `fuzz show RUN_ID --cluster ID` | Page one cluster's results (an id from `--clusters`) in the ordinary `fuzz show` row formats |
 | `fuzz show RUN_ID RESULT_INDEX` | Show one exact result, including retained request/wire/response bytes. Text neutralizes terminal control sequences; JSON emits invalid UTF-8 as base64. Detail supports `text` or `json`; run metadata marks incomplete pre-current snapshots as legacy |
 | `fuzz delete RUN_ID --yes` | Delete one terminal run and all of its stored result rows. An active save is refused; `--force-stale` removes a `running`/`saving` row left by a crashed writer, and must never be used while another gori is saving |
@@ -655,7 +657,7 @@ gori run sequence --tokens tokens.txt          # '-' reads stdin
 | Option | Description |
 | -------- | ------------- |
 | `--flow=ID`, `--request=FILE`, stdin | Request source for live replay (or a bare `<flow-id>`) |
-| `--tokens=FILE` | Analyze a pasted token list (one per line, `-` = stdin — a pipe or a redirect; a terminal is refused); no network |
+| `--tokens=FILE` | Analyze a pasted token list (one per line; `-` = stdin from a pipe or a redirect, a terminal is refused); no network |
 | Token location (pick one) | `--token-cookie=NAME` (`--cookie`), `--token-header=NAME` (`--header`), `--regex=RE`, `--position=A:B`, `--jsonpath=EXPR` |
 | `--count=N` | Target token count (default 500) |
 | `--target`, `--http2`, `--sni`, `-k` | Transport (target required for `--request`/stdin) |
@@ -680,7 +682,7 @@ gori run authorize --query 'host:acme.test method:GET' --identities identities.j
 | `<flow-id>…`, `--flow=ID` | Captured flows to replay, in the order given (repeatable) |
 | `-q`, `--query=QL` | Also replay every flow matching this QL query, appended after the ids |
 | `-n`, `--limit=N` | Max flows `--query` may contribute (default 50). Every row becomes one request *per identity* |
-| `--identities=FILE` | Identity set as JSON (`-` = stdin — a pipe or a redirect; a terminal is refused); default: the project's saved set |
+| `--identities=FILE` | Identity set as JSON (`-` = stdin from a pipe or a redirect, a terminal is refused); default: the project's saved set |
 | `--unsafe-methods` (`--unsafe`) | Also replay `POST`/`PUT`/`PATCH`/`DELETE`; each identity re-runs the side effect |
 | `--allow-unscoped` | Send even when the target is outside the project scope (sandbox and excludes still apply) |
 | `--timeout=SEC`, `-k`/`--insecure-upstream` | Per-request connect + idle timeout; skip upstream TLS verification |
@@ -716,7 +718,7 @@ gori run cache-deception --flow 12 --flow 13 --format json
 | `--project`, `--db` | Project to read |
 | `--format` | `text` (default), `json` (one array at the end), or `jsonl` (streamed) |
 
-Each flow reports one verdict: `cached` (the deception — anonymous served the authenticated response from a cache and the cache-busted control differed), `served` (no cache-hit evidence or a matching control without cache-hit evidence), `review` (similar but not identical, no decisive control, or a matching control that was itself a cache hit), `protected` (anonymous got a different response), `blocked` (gori refused the send), or `errored`. Each trial includes its own cache signal; the top-level `cache` is the anonymous response. Only safe methods (`GET`/`HEAD`/`OPTIONS`) are checked without `--unsafe-methods`. A flow gori cannot replay is reported on STDERR and the run moves on to the next one; the run exits `1` when no flow could be checked at all.
+Each flow reports one verdict: `cached` (the deception: anonymous served the authenticated response from a cache and the cache-busted control differed), `served` (no cache-hit evidence or a matching control without cache-hit evidence), `review` (similar but not identical, no decisive control, or a matching control that was itself a cache hit), `protected` (anonymous got a different response), `blocked` (gori refused the send), or `errored`. Each trial includes its own cache signal; the top-level `cache` is the anonymous response. Only safe methods (`GET`/`HEAD`/`OPTIONS`) are checked without `--unsafe-methods`. A flow gori cannot replay is reported on STDERR and the run moves on to the next one; the run exits `1` when no flow could be checked at all.
 
 ### run session
 
@@ -800,7 +802,7 @@ With `--active`: `--unsafe` also probes unsafe methods (`POST`/`PUT`/`PATCH`/`DE
 A bare `probe` scans and prints. `--persist` also writes what it found into the persisted findings, merged the way the live scanner merges them, so a project nobody opened in the TUI has a triage list; a write that does not land is reported and exits 1 after the report. The persisted findings behind the TUI's Probe tab are a separate surface:
 
 ```bash
-gori run probe issues --severity high            # the triage list, with the ids below take
+gori run probe issues --severity high            # the triage list, with the ids the verbs below take
 gori run probe promote 12                        # confirm one into Issues
 gori run probe dismiss --code missing_hsts       # mute in bulk by finding code or --host
 gori run probe delete --all --yes
@@ -842,7 +844,7 @@ gori run discover --target https://target.example --max-depth 3 --extensions php
 | `--http2`, `--sni=HOST` | Force HTTP/2; TLS SNI override |
 | `--bind-from=FLOW-ID` | Replay that captured flow first so its response fills the project's `$BIND.NAME` session bindings for the rest of the run |
 | `--slot=NAME` | Send as this [session slot](#run-session): its header overlay, and its binding table for `$BIND.NAME`. Applied before `--bind-from`, so the seed fills the slot the run then sends as |
-| `--allow-unscoped` | Run even if the target is outside the project scope. Waives the up-front (Layer 1) check only. Sandbox mode and explicit exclude rules still refuse each send, and the refusal now names which of the two fired. |
+| `--allow-unscoped` | Run even if the target is outside the project scope. Waives the up-front (Layer 1) check only. Sandbox mode and explicit exclude rules still refuse each send, and the refusal names which one fired |
 | `--force` | Bypass the unbounded-run safety gate |
 | `--no-store` | Do not write findings into the project |
 | `--format` | `text`, `json`, or `jsonl` |
@@ -982,7 +984,7 @@ gori run oast listen --provider webhook.site --once --json
 gori run oast listen --save                    # …and keep it as a project session
 ```
 
-`presets` lists the public providers, and `presets --check` PROBES each one over the network and prints the stage it fails at (`dns` / `connect` / `proxy` / `tls-verify` / `tls` / `timeout` / `exchange` / `dial`) — which is what separates a custom trust store or a restricted resolver from a provider outage. It exits non-zero only when nothing answered.
+`presets` lists the public providers, and `presets --check` PROBES each one over the network and prints the stage it fails at (`dns` / `connect` / `proxy` / `tls-verify` / `tls` / `timeout` / `exchange` / `dial`), which is what separates a custom trust store or a restricted resolver from a provider outage. It exits non-zero only when nothing answered.
 
 ```bash
 gori run oast presets --check
@@ -995,7 +997,7 @@ gori run oast presets --check --format json
 | `--format=FMT` | `text` (default) or `json` |
 | `--project=NAME` · `--db=PATH` | With `--check`: probe the way that project dials (its pinned upstream proxy and timeouts) |
 
-A failed `listen` names the same stage. On `tls-verify` the remedy is this machine's trust store, not another provider: run with `SSL_CERT_FILE=/path/to/ca-bundle.crt` (or `SSL_CERT_DIR=/path/to/certs`) so the private or TLS-inspecting CA is trusted. For gori's own service traffic that bundle is **additive** — the system store is still loaded — so the public presets keep working. There is no `--ca-file` flag.
+A failed `listen` names the same stage. On `tls-verify` the remedy is this machine's trust store, not another provider: run with `SSL_CERT_FILE=/path/to/ca-bundle.crt` (or `SSL_CERT_DIR=/path/to/certs`) so the private or TLS-inspecting CA is trusted. For gori's own service traffic that bundle is **additive** (the system store is still loaded), so the public presets keep working. There is no `--ca-file` flag.
 
 `listen` options:
 
@@ -1009,7 +1011,7 @@ A failed `listen` names the same stage. On `tls-verify` the remedy is this machi
 | `--save` | Save the registration as a project OAST session (see `oast list`) |
 | `--json` | Emit each callback as a JSON line (same shape as MCP) |
 
-`--save` is what turns an ad-hoc listener into a project one, and it changes three things: every callback is written into the project (so the TUI OAST tab shows the same hits), the registration is **kept** on exit so `oast resume ID` can pick it up later, and the out-of-band probe rules (`ssrf_oast`, `xxe_oast`, `cmd_injection_oast`, `rfi_oast`) have a session to mint payloads against — without one they plan nothing and `gori run probe --active` says so. It takes `--project` / `--db` like the session verbs; `oast release ID` is the teardown.
+`--save` is what turns an ad-hoc listener into a project one, and it changes three things: every callback is written into the project (so the TUI OAST tab shows the same hits), the registration is **kept** on exit so `oast resume ID` can pick it up later, and the out-of-band probe rules (`ssrf_oast`, `xxe_oast`, `cmd_injection_oast`, `rfi_oast`) have a session to mint payloads against. Without one they plan nothing and `gori run probe --active` says so. It takes `--project` / `--db` like the session verbs; `oast release ID` is the teardown.
 
 **`oast list` / `resume` / `release`**: the project's saved listening SESSIONS, as opposed to the providers below (a provider is where you listen; a session is one live registration on it). A registration outlives the process that minted it, which is what makes a payload planted yesterday still worth watching.
 
@@ -1052,7 +1054,7 @@ gori run oast providers enable p_1
 
 ### run jwt
 
-Decode, verify, re-sign, or generate attack payloads for a JWT. Store-free compute; the token comes from the `<token>` argument or stdin. An encrypted five-part token (JWE) decodes to its protected header — gori reads `alg`/`enc`/`kid` and does not decrypt the claims.
+Decode, verify, re-sign, or generate attack payloads for a JWT. Store-free compute; the token comes from the `<token>` argument or stdin. An encrypted five-part token (JWE) decodes to its protected header: gori reads `alg`/`enc`/`kid` and does not decrypt the claims.
 
 ```bash
 gori run jwt eyJhbGci...                        # decode (default)
@@ -1071,7 +1073,7 @@ gori run jwt eyJhbGci... --attacks --key ./public.pem
 | `--attacks` | Generate testing payloads (alg:none, weak-secret, header injection) |
 | `--alg=ALG` | Signing alg for `--encode`: `HS256` (default) \| `HS384` \| `HS512` \| `RS256/384/512` \| `PS256/384/512` \| `ES256/384/512` \| `EdDSA` \| `none` |
 | `--secret=SECRET` | HMAC secret, for an HS algorithm |
-| `--key=PEM` | PEM key for an RS/PS/ES/EdDSA algorithm — inline PEM text or a path to a `.pem` file. `--encode` needs the PRIVATE key; `--verify` takes a public key, a certificate, or the private key; `--attacks` takes the server's PUBLIC key and adds the algorithm-confusion payloads. Mutually exclusive with `--secret` |
+| `--key=PEM` | PEM key for an RS/PS/ES/EdDSA algorithm: inline PEM text or a path to a `.pem` file. `--encode` needs the PRIVATE key; `--verify` takes a public key, a certificate, or the private key; `--attacks` takes the server's PUBLIC key and adds the algorithm-confusion payloads. Mutually exclusive with `--secret` |
 | `--payload=JSON` | `--encode`: replace the claims wholesale before re-signing (mutually exclusive with `--set`) |
 | `--set=CLAIM` | `--encode`: patch one claim before re-signing, as `key=value`, repeatable; the value is JSON if it parses (`true`/`3`), else a string |
 | `--format` | `text` (default) or `json` |
@@ -1142,7 +1144,7 @@ gori run issues create --title "IDOR on /v1/users/{id}" --severity high --notes-
 report-generator | gori run issues update 7 --status confirmed --notes-stdin
 ```
 
-`--notes`, `--notes-file` and `--notes-stdin` are mutually exclusive, and the body is read byte-for-byte — multiline UTF-8, CRLF and all (the value of a bound project env var is still masked to `$ENV.NAME` on the way in, as it is for every issue field). A long write-up piped in or read from a file stays out of the process listing and the shell history; on `create` it is written with the issue in one transaction, so a script no longer needs a create-then-update pair. `--notes ''` clears the notes on `update`; a file or a pipe that yields nothing is refused instead, so a report generator that dies cannot silently erase a write-up. `--notes-stdin` needs a pipe or a redirect (`--notes-stdin < notes.md`) and refuses a terminal, for the same reason `--request-stdin` does.
+`--notes`, `--notes-file` and `--notes-stdin` are mutually exclusive, and the body is read byte-for-byte, multiline UTF-8 and CRLF included (the value of a bound project env var is still masked to `$ENV.NAME` on the way in, as it is for every issue field). A long write-up piped in or read from a file stays out of the process listing and the shell history; on `create` it is written with the issue in one transaction, so a script does not need a create-then-update pair. `--notes ''` clears the notes on `update`; a file or a pipe that yields nothing is refused instead, so a report generator that dies cannot silently erase a write-up. `--notes-stdin` needs a pipe or a redirect (`--notes-stdin < notes.md`) and refuses a terminal, for the same reason `--request-stdin` does.
 
 | Option | Description |
 | -------- | ------------- |
@@ -1176,7 +1178,7 @@ gori run notes delete 2 --yes
 | `update <n>` (`edit`) · `append <n>` | Replace the note's text, or add to it on a new line (`append`, or `update --append`). The text is `--text`, the words after `<n>`, or STDIN; an empty text is refused. Applied by the note's stable id inside the write, so a peer's edit a moment earlier is appended to rather than overwritten |
 | `delete <n>` (`rm`) | Delete the note at index `n`; `-y`/`--yes` is required |
 
-A note is prose that exists nowhere else — no capture or re-run reproduces one — and the index is a **list position**, so `notes delete 2` names a different note once an earlier one is gone. `delete` therefore refuses without `-y`/`--yes` (there is no interactive prompt), and the refusal quotes the note's first line, when it has one, so a wrong number is visible before it costs anything.
+A note is prose that exists nowhere else (no capture or re-run reproduces one), and the index is a **list position**, so `notes delete 2` names a different note once an earlier one is gone. `delete` therefore refuses without `-y`/`--yes` (there is no interactive prompt), and the refusal quotes the note's first line, when it has one, so a wrong number is visible before it costs anything.
 
 ### run notify
 
@@ -1191,7 +1193,7 @@ gori run fuzz --flow 42 --auto --preset sqli > hits.txt && gori run notify "fuzz
 | -------- | ------------- |
 | `--detail=TEXT` / `--detail-file=PATH` | The long form (≤32 KiB); `-` reads STDIN. Mutually exclusive |
 | `--level=LEVEL` | `info` (default) \| `success` \| `warn` \| `error`; anything else is refused |
-| `--format json` / `--json` | `{ok, id, project, summary, tui}`, where `tui` is `{live, windows}` or `{unknown: true}` — the shape MCP `reply_to_operator` and `get_current_context` use |
+| `--format json` / `--json` | `{ok, id, project, summary, tui}`, where `tui` is `{live, windows}` or `{unknown: true}`, the shape MCP `reply_to_operator` and `get_current_context` use |
 
 The line is written to the project's event feed under the `script` source, so the ring shows it without the `ai` marker an agent's reply carries, and the Activity pane can filter it. It is written whether or not a TUI is open, and `notify` exits `0` either way; the output says whether a window was there to show it. When none was, the next TUI to open on the project sums it up in one note along with any agent replies that also arrived while it was closed.
 
@@ -1236,16 +1238,16 @@ gori run evidence delete 12 --yes
 | Option | Description |
 | -------- | ------------- |
 | `--issue=N` | The Issue to link. Required on `freeze`, `link` and `unlink`; on `list` it narrows to one Issue's copies, and omitting it lists the whole project archive (newest first, orphans included) |
-| `--ref=KIND` | Source kind for `freeze`: `flow` or `repeater` — a fuzz or miner session has no single exchange |
+| `--ref=KIND` | Source kind for `freeze`: `flow` or `repeater` (a fuzz or miner session has no single exchange) |
 | `--ref-id=M` | Source id for `freeze` |
 | `--no-link` | `freeze` only copies; by default it also files the live link `links add` would, in the same transaction |
-| `--allow-drift` | `freeze` a Repeater tab whose request was edited after its stored response arrived. Refused without it — see below |
+| `--allow-drift` | `freeze` a Repeater tab whose request was edited after its stored response arrived. Refused without it (see below) |
 | `--include-sensitive` | `show` prints Authorization / Cookie / Set-Cookie / API-key values verbatim instead of `[REDACTED]`. The SHA-256s cover the stored wire bytes, so verifying them needs this |
 | `--format=FMT` | `text` (default) or `json`, on `freeze`, `list` and `show` |
 
-A Repeater tab that has never been sent is refused rather than frozen request-only, and so is a flow whose response has not landed. A Repeater copy pairs the tab's saved request (bindings unexpanded) with the last response the store holds for it — a successful send's; freeze right after the send that proved the finding.
+A Repeater tab that has never been sent is refused rather than frozen request-only, and so is a flow whose response has not landed. A Repeater copy pairs the tab's saved request (bindings unexpanded) with the last response the store holds for it (a successful send's), so freeze right after the send that proved the finding.
 
-**Request drift.** A Repeater tab holds one request and one response, and editing the request does not change the response beside it: send, edit, freeze, and the copy pairs an edited request with an earlier exchange's response. gori records the SHA-256 of the request each send actually went out with, so it can tell — `freeze` refuses such a tab by name and tells you to send it again, `--allow-drift` writes the mismatched pair anyway, and the TUI asks before it writes. A response persisted by a gori older than this one has no recorded digest; those are treated as unknown, not as drift. A WebSocket copy is the handshake; the frame transcript is not copied. A project's frozen evidence is bounded at 256 MB; past that `freeze` refuses until a copy is deleted. `show` decodes bodies and cuts the text form at 64 KB (the stored copy is complete); the JSON form takes the same shape `get_flow` returns.
+**Request drift.** A Repeater tab holds one request and one response, and editing the request does not change the response beside it: send, edit, freeze, and the copy pairs an edited request with an earlier exchange's response. gori records the SHA-256 of the request each send actually went out with, so it can tell: `freeze` refuses such a tab by name and tells you to send it again, `--allow-drift` writes the mismatched pair anyway, and the TUI asks before it writes. A response persisted by a gori older than this one has no recorded digest; those are treated as unknown, not as drift. A WebSocket copy is the handshake; the frame transcript is not copied. A project's frozen evidence is bounded at 256 MB; past that `freeze` refuses until a copy is deleted. `show` decodes bodies and cuts the text form at 64 KB (the stored copy is complete); the JSON form takes the same shape `get_flow` returns.
 
 ### run retest
 
@@ -1271,38 +1273,38 @@ gori run retest forget 3                                                       #
 | `--issue=N` | The Issue. Required on `steps`, `add`, `clear`, `run` and `runs` |
 | `--repeater=M` | `add`: the Repeater session this step sends (ids from `gori run repeater list`) |
 | `--role=ROLE` | `setup` \| `baseline` \| `variant` (default) \| `control` \| `cleanup` |
-| `--assert=EXPR` | The one expected result (below). Omit — or pass an empty value on `update` — to record the outcome and assert nothing |
+| `--assert=EXPR` | The one expected result (below). Omit it (or pass an empty value on `update`) to record the outcome and assert nothing |
 | `--to=POS` | `move`: the new 1-based position, clamped to the list |
 | `-y`, `--yes` | `run`: confirm a batch that contains a state-changing method. `clear`: confirm the deletion |
 | `--allow-cleanup` | `run`: send the cleanup steps even after gori refused a send |
 | `--allow-unscoped` | `run`: send outside the project scope. Sandbox and explicit excludes still apply |
-| `--no-record-history` | `run`: do not write each send to History (default: record — a retest is evidence) |
+| `--no-record-history` | `run`: do not write each send to History (default: record, since a retest is evidence) |
 | `-k`, `--insecure-upstream` | `run`: do not verify the upstream TLS certificate |
-| `--slot=NAME` | `run`: send every step as this session slot — its header overlay and its `$BIND.NAME` table |
+| `--slot=NAME` | `run`: send every step as this session slot: its header overlay and its `$BIND.NAME` table |
 | `--timeout=SEC` | `run`: per-step connect + idle timeout (default 20) |
-| `--limit=N` | `runs`: how many runs to print |
+| `--limit=N` | `runs`: how many runs to print (default 20, all that is kept) |
 | `--format=FMT` | `text` (default) or `json` |
 
-`forget RUN` drops one run summary and its result rows. The steps that produced it stay, and so do the History flows each send recorded — it removes the report, not the evidence. The history prunes itself to the newest 20, so this is for the run that should not be *on* the record (a batch sent at the wrong target, or under a scope since fixed).
+`forget RUN` drops one run summary and its result rows. The steps that produced it stay, and so do the History flows each send recorded: it removes the report, not the evidence. The history prunes itself to the newest 20, so this is for the run that should not be *on* the record (a batch sent at the wrong target, or under a scope since fixed).
 
-Assertions — one per step:
+Assertions, one per step:
 
 | Expression | Passes when |
 | -------- | ------------- |
 | `status:200` | The response status is exactly 200 |
 | `status:2xx` | The status is in that class |
 | `status:200-299` | The status is in that inclusive range |
-| `json:data.user.id` | The JSON field exists (a field whose value is `null` counts — it is there) |
+| `json:data.user.id` | The JSON field exists (a field whose value is `null` counts: it is there) |
 | `json:data.role=admin` | The JSON field equals the literal. The literal is untyped text, so `n=3` matches the number `3` and the string `"3"` |
 | `json-absent:data.token` | The JSON field is not there |
 | `body:same` | The decoded body is identical to the last `baseline` step's |
 | `body:diff` | It differs from it |
 
-A JSON path is the same one `sequence --jsonpath` takes: dotted (`data.items.0.id`) or bracketed (`$.data.items[0]["id"]`). A path gori cannot read — a wildcard, a filter, `..`, an unclosed bracket — is refused when the step is added, so a `json-absent:` can never pass just because its path was never read. A readable path to a field that is not there is an ordinary absence.
+A JSON path is the same one `sequence --jsonpath` takes: dotted (`data.items.0.id`) or bracketed (`$.data.items[0]["id"]`). A path gori cannot read (a wildcard, a filter, `..`, an unclosed bracket) is refused when the step is added, so a `json-absent:` can never pass just because its path was never read. A readable path to a field that is not there is an ordinary absence.
 
-A step sends whatever its Repeater tab holds when the run happens — that is what makes a retest track a request as it is fixed, where `gori run evidence` freezes one as it was. Each send goes out under the project's scope and Sandbox gates and is recorded in History as `src:retest` with the issue and step on the row, so a result row still opens the exact response it reported long after the tab moved on. The tab's own stored response is never overwritten.
+A step sends whatever its Repeater tab holds when the run happens. That is what makes a retest track a request as it is fixed, where `gori run evidence` freezes one as it was. Each send goes out under the project's scope and Sandbox gates and is recorded in History as `src:retest` with the issue and step on the row, so a result row still opens the exact response it reported long after the tab moved on. The tab's own stored response is never overwritten.
 
-A `setup` step that fails halts the measurement steps (its precondition is what everything after it measures against) but cleanup still runs. Once gori **refuses** a send — scope, Sandbox, an exclude rule — the rest of the run is skipped, cleanup included, unless `--allow-cleanup` says otherwise; every skipped step still gets a row saying why, so a partial run can never read as a pass. A `body:` assertion is `inconclusive`, never a pass, when there is no baseline behind it — and equally when the last `baseline` step **missed its own expected result**: a baseline that did not establish its reading anchors nothing, so comparing a variant against the 403 error page a `status:200` baseline was handed would otherwise report "the body is unchanged" about two error pages.
+A `setup` step that fails halts the measurement steps (its precondition is what everything after it measures against) but cleanup still runs. Once gori **refuses** a send (scope, Sandbox, an exclude rule), the rest of the run is skipped, cleanup included, unless `--allow-cleanup` says otherwise; every skipped step still gets a row saying why, so a partial run can never read as a pass. A `body:` assertion is `inconclusive`, never a pass, when there is no baseline behind it, and equally when the last `baseline` step **missed its own expected result**: a baseline that did not establish its reading anchors nothing, so comparing a variant against the 403 error page a `status:200` baseline was handed would otherwise report "the body is unchanged" about two error pages.
 
 The verdict is `pass` only when every step ran and every assertion was decided; `blocked` outranks `fail`, because a run gori refused to finish is a fact about the scope configuration and not about the target. `run` exits `0` on `pass` and `1` otherwise. The newest 20 runs per Issue are kept.
 
@@ -1335,7 +1337,7 @@ gori run rewriter rm 3
 | `--side=SIDE` (`--target`) | `request` (default) or `response` |
 | `--part=PART` | `head` (default), `body`, or `ws` (a WebSocket message). Only meaningful for `replace` and `pipe` |
 | `--match=MODE` | `literal` (default) or `regex`, for `replace`, `pipe` and `short_circuit`. Regex replacements take `$1`, `$2`; `$$` is a literal `$` |
-| `--response-file=PATH` | `short_circuit`: read the canned response from PATH (`-` = stdin — a pipe or a redirect; a terminal is refused) |
+| `--response-file=PATH` | `short_circuit`: read the canned response from PATH (`-` = stdin from a pipe or a redirect, a terminal is refused) |
 | `--body-file=PATH` | `short_circuit`: serve PATH as the response body, re-read whenever it changes |
 | `--map-dir=DIR` | `short_circuit`: serve the file the request path names from DIR (Map Local). `--value` becomes an optional head template |
 | `--strip-prefix=PATH` | With `--map-dir`: the URL prefix removed before the path is joined under DIR (`/static/`). Without `--find`, the rule matches this prefix on the request line |
@@ -1429,7 +1431,7 @@ gori run colormarker rm 3
 | Option | Description |
 | -------- | ------------- |
 | `-w`, `--when=FILTER` | Required. The condition a flow must match; see below |
-| `--color=NAME` | `red`, `orange`, `yellow` (default), `green`, `blue`, `purple` — resolved through the active theme, so they read correctly on light and dark alike — **or** the name of a custom colour (see below), which carries an absolute hex |
+| `--color=NAME` | `red`, `orange`, `yellow` (default), `green`, `blue`, `purple` (resolved through the active theme, so they read correctly on light and dark alike), **or** the name of a custom colour (see below), which carries an absolute hex |
 | `--style=STYLE` | `full` (default) tints the whole row · `strip` paints one colour cell in a narrow column ahead of `TIME` |
 | `--name=NAME` | Label shown in the rule list |
 | `--disabled` | Create the rule without arming it |
@@ -1442,16 +1444,16 @@ On `update` every field is optional and defaults to the rule's current value, so
 
 **Precedence is the rule set's meaning.** Match & Replace rules *compose*: every enabled rule runs, in order. Colour rules *resolve*: the **first enabled match paints the row** and the rest are never consulted. That is why `move` exists here and not on `rewriter`. Global rules resolve before project ones, so a standing policy outranks a local layer.
 
-`--when` is a **History QL** condition — the same grammar, the same field set and the same answers as the filter bar above the list it paints, `~regex` and `AND` / `OR` / `NOT` / `-negation` / `(grouping)` included. A term the captured row can answer (`host:` `path:` `url:` `method:` `scheme:` `status:` `proto:`) is matched in memory with no query at all; the rest (`body:` `header:` `size:` `dur:` `stub:` `static:` `src:` `scope:`) resolve against the project database in one batched query per rule per repaint. Four caveats, each of which would otherwise fail silently, so gori refuses or warns rather than letting you find out from a list that never turns colour:
+`--when` is a **History QL** condition: the same grammar, the same field set and the same answers as the filter bar above the list it paints, `~regex` and `AND` / `OR` / `NOT` / `-negation` / `(grouping)` included. A term the captured row can answer (`host:` `path:` `url:` `method:` `scheme:` `status:` `proto:`) is matched in memory with no query at all; the rest (`body:` `header:` `size:` `dur:` `stub:` `static:` `src:` `scope:`) resolve against the project database in one batched query per rule per repaint. Four caveats, each of which would otherwise fail silently, so gori refuses or warns rather than letting you find out from a list that never turns colour:
 
-- **`body:` *scans* here, it does not read the text index.** So a colour rule reaches binary bodies the filter bar's `body:` skips — but only the first **64 KiB of each side**, and the bytes are as *captured*, so a match past that bound or inside a compressed body is not painted. (Warned.)
+- **`body:` *scans* here, it does not read the text index.** So a colour rule reaches binary bodies the filter bar's `body:` skips, but only the first **64 KiB of each side**, and the bytes are as *captured*, so a match past that bound or inside a compressed body is not painted. (Warned.)
 - **`host:` is a substring, not a DNS-label glob.** `host:alpha.test` also matches `xalpha.test`. (Warned.)
 - **A flow with no response yet has no status.** A `status:` rule paints the row once the response lands. (Warned.)
-- **`scope:` follows the project's scope rules and ignores the `s` display lens.** With no scope rules configured *nothing* is in scope, so `scope:in` and `scope:out` both paint nothing — while a negated one (`-scope:in`) paints every row. (Warned.)
+- **`scope:` follows the project's scope rules and ignores the `s` display lens.** With no scope rules configured *nothing* is in scope, so `scope:in` and `scope:out` both paint nothing, while a negated one (`-scope:in`) paints every row. (Warned.)
 
-Refused, rather than warned: an unknown field (`hsot:` — left alone it becomes a free-text search and the rule never fires), a `~` pattern that will not compile, a term whose value that field does not take (`size:>bogus`, which would be *dropped* and leave the rule painting more than it says), and a condition that matches *every* flow (empty, or a half-typed `host:`).
+Refused, rather than warned: an unknown field (left alone, `hsot:` becomes a free-text search and the rule never fires), a `~` pattern that will not compile, a term whose value that field does not take (`size:>bogus`, which would be *dropped* and leave the rule painting more than it says), and a condition that matches *every* flow (empty, or a half-typed `host:`).
 
-`preview` reports how many recent flows the condition **matches** and how many it would actually **paint**. The two differ whenever an earlier enabled rule already claims the row — which is why `preview` takes `--scope` as well: every global rule resolves before every project one, so no project rule can claim a row from a `--scope=global` candidate. `update`, `rm` (`delete`), `enable`, `disable` and `move` take a rule id from the list, and `--scope`, because the two stores number their rules independently, so an id alone names two different rules. The list prints the scope as a `G`/`P` prefix (`G*` = this project overrides that global rule's default).
+`preview` reports how many recent flows the condition **matches** and how many it would actually **paint**. The two differ whenever an earlier enabled rule already claims the row, which is why `preview` takes `--scope` as well: every global rule resolves before every project one, so no project rule can claim a row from a `--scope=global` candidate. `update`, `rm` (`delete`), `enable`, `disable` and `move` take a rule id from the list, and `--scope`, because the two stores number their rules independently, so an id alone names two different rules. The list prints the scope as a `G`/`P` prefix (`G*` = this project overrides that global rule's default).
 
 The tab is **off the bar by default**; `0` opens it, or `settings:tabs` gives it a slot next to Rewriter. See [Proxy & History](/guide/proxy/) for the interactive editor.
 
@@ -1521,7 +1523,7 @@ gori run project list --query=acme
 
 `list` hides the **empty** projects (zero captured flows), because a project per worktree or per checkout accumulates into hundreds of them and buries the two or three holding traffic. Emptiness is counted, not inferred from file size: a project created a second ago is the same size as a leftover from March. Two are always listed however empty they are, and marked: `◆` is the project a `--project`-less `gori run` reads, `◇` the one the TUI last opened. In `--format json` those are the `current` and `tui_active` fields, beside a `flows` count and the project `description` (read in the same pass as the count, so it costs no extra open); the count of what was hidden goes to stderr, so a JSON pipe stays a clean array.
 
-`--query` is the other half of that: a **substring** of any spelling that addresses a project, so a half-remembered name finds it — looser than `--project`, which wants an exact name, slug or short id. It is applied **before** the flow census, which opens every listed project's database, so a query is also the fast path on a host holding hundreds. It is orthogonal to `--all`, and it narrows the row source rather than the display, so what it excludes is said on stderr: a query that matched nothing reports how many projects the host actually has, and a query that filtered out the `◆` project names it — unlike the empty-hiding default, `--query` does not pin that row. `--format json` carries the bound `workspace` beside the rest, so a consumer can filter on the same fact the query does. The same narrowing is MCP `list_projects{query}`, over the same predicate.
+`--query` is the other half of that: a **substring** of any spelling that addresses a project, so a half-remembered name finds it. It is looser than `--project`, which wants an exact name, slug or short id. It is applied **before** the flow census, which opens every listed project's database, so a query is also the fast path on a host holding hundreds. It is orthogonal to `--all`, and it narrows the row source rather than the display, so what it excludes is said on stderr: a query that matched nothing reports how many projects the host actually has, and a query that filtered out the `◆` project names it: unlike the empty-hiding default, `--query` does not pin that row. `--format json` carries the bound `workspace` beside the rest, so a consumer can filter on the same fact the query does. The same narrowing is MCP `list_projects{query}`, over the same predicate.
 
 #### project create
 
@@ -1605,7 +1607,7 @@ gori run project rm api-test --yes            # actually delete
 | `--yes` | Perform the delete. Without it the command removes nothing |
 | `--format=FMT` | `text` (default) or `json` |
 
-The preview reports flow and issue counts, on-disk size, and both of the locks the delete honours: whether a capture is live (`capture_lock_held`) and whether any other gori instance has the database open (`open_in_another_instance` — an MCP server takes no capture lock and still writes to it). `deletable` is the verdict those two add up to, and the closing line says whether `--yes` would go through. Deleting a project either one covers is refused: stop that capture, or close it there, first. A `capture_lock_held` of `null` means the lock could not be read at all (an unwritable project directory), which the delete also refuses.
+The preview reports flow and issue counts, on-disk size, and both of the locks the delete honours: whether a capture is live (`capture_lock_held`) and whether any other gori instance has the database open (`open_in_another_instance`; an MCP server takes no capture lock and still writes to it). `deletable` is the verdict those two add up to, and the closing line says whether `--yes` would go through. Deleting a project either one covers is refused: stop that capture, or close it there, first. A `capture_lock_held` of `null` means the lock could not be read at all (an unwritable project directory), which the delete also refuses.
 
 Display names are not unique (two workspaces with the same basename share one). When a name matches more than one project, delete refuses and lists their slugs and short ids, as every `--project` does, since the wrong guess is unrecoverable. Slugs and short ids are unique, so either always resolves.
 
@@ -1738,28 +1740,28 @@ gori run redact default on
 
 | Subcommand | Description |
 | ---------- | ----------- |
-| `profiles` (`list`, default) | Every profile available here — the project's first, then `settings.json`'s, then the built-ins — with its scope, its rule counts, a `*` on the one a safe export would use, and whether redaction is on by default. `--format json` for the full rule lists |
+| `profiles` (`list`, default) | Every profile available here (the project's first, then `settings.json`'s, then the built-ins), with its scope, its rule counts, a `*` on the one a safe export would use, and whether redaction is on by default. `--format json` for the full rule lists |
 | `use <name>` \| `use --none` | Pick the profile a safe export uses. Writes this **project** unless `--global` |
 | `default on\|off` \| `default --none` | Whether shareable output is sanitized *without* `--redact`. Project scope unless `--global`; `--none` clears the project's answer so it inherits the global one |
 | `set <name>` | Create or **replace** a profile from repeatable rule flags. Project scope unless `--global` |
-| `rm <name>` (`delete`) | Delete a profile. A built-in cannot be deleted — define one of the same name to replace it |
+| `rm <name>` (`delete`) | Delete a profile. A built-in cannot be deleted; define one of the same name to replace it |
 
 `set` takes four kinds of rule, each repeatable, plus `--description`:
 
 | Flag | Matches |
 | ---- | ------- |
 | `--json-field NAME` | A JSON object member name, case-insensitively, **at any depth**. The workhorse: "whatever it is nested in, a member called `password` does not leave this machine" |
-| `--json-pointer PTR` | An [RFC 6901](https://www.rfc-editor.org/rfc/rfc6901) pointer, at exactly one location (`/data/user/ssn`) — for the field name too generic to blanket. The array token `-`, which the RFC reserves for "past the last element" and which can never name an element that exists, is read here as **any index**: `/users/-/token` covers the whole array |
+| `--json-pointer PTR` | An [RFC 6901](https://www.rfc-editor.org/rfc/rfc6901) pointer, at exactly one location (`/data/user/ssn`), for a field name too common to redact everywhere. The array token `-`, which the RFC reserves for "past the last element" and which can never name an element that exists, is read here as **any index**: `/users/-/token` covers the whole array |
 | `--form-key KEY` | An `application/x-www-form-urlencoded` key, case-insensitively. The key is percent-decoded before it is matched, and every other segment of the body survives byte-for-byte |
-| `--pattern REGEX` | A regex over body text (also over each JSON string leaf and each decoded form value). With a capture group, **group 1** is what is replaced and the rest is the context you matched on — `account=(\d+)` keeps `account=` and takes the digits; with no group, the whole match goes. Compiled **case-insensitively**, like the three name lists above. A pattern that does not compile is refused here rather than reported on every later export |
+| `--pattern REGEX` | A regex over body text (also over each JSON string leaf and each decoded form value). With a capture group, **group 1** is what is replaced and the rest is the context you matched on: `account=(\d+)` keeps `account=` and takes the digits; with no group, the whole match goes. Compiled **case-insensitively**, like the three name lists above. A pattern that does not compile is refused here rather than reported on every later export |
 
-**Scopes.** A profile lives in the project database or in `settings.json`, and which one is part of what it is. "Never export a `password` field" is the operator's own policy and belongs global; "this target calls it `pwd_hash`, and the account number is at `/data/acct`" is engagement data that must not follow you into the next engagement. Resolution is most-specific-first — project, then global, then built-in — and the first match by name wins, so a project profile shadows a global one and a global one shadows a built-in of the same name.
+**Scopes.** A profile lives in the project database or in `settings.json`, and which one is part of what it is. "Never export a `password` field" is the operator's own policy and belongs global; "this target calls it `pwd_hash`, and the account number is at `/data/acct`" is engagement data that must not follow you into the next engagement. Resolution is most-specific-first (project, then global, then built-in), and the first match by name wins, so a project profile shadows a global one and a global one shadows a built-in of the same name.
 
-**The built-in `default`** covers credentials, tokens and the common government/financial identifiers by field name (`password`, `client_secret`, `access_token`, `api_key`, `session_id`, `otp`, `pin`, `ssn`, `card_number`, `cvv`, `iban`, …) and carries no regexes: a shipped pattern that fires on the wrong thing costs a mangled report with no warning, while a shipped *name* that does costs one value that was probably worth losing. It deliberately says nothing about, say, `email` — a default that redacted those would wreck the evidence for the class of finding where the address *is* the finding. Add what you want to a profile of your own, where you can see it.
+**The built-in `default`** covers credentials, tokens and the common government/financial identifiers by field name (`password`, `client_secret`, `access_token`, `api_key`, `session_id`, `otp`, `pin`, `ssn`, `card_number`, `cvv`, `iban`, …) and carries no regexes: a shipped pattern that fires on the wrong thing costs a mangled report with no warning, while a shipped *name* that does costs one value that was probably worth losing. It deliberately says nothing about, say, `email`: a default that redacted those would wreck the evidence for the class of finding where the address *is* the finding. Add what you want to a profile of your own, where you can see it.
 
-**`default on` is opt-in, once.** Flipping it under an install that already has scripts reading `gori run show --format raw` would silently change what they get, so gori ships it off; from then on `--no-redact` is the explicit path back to the captured bytes, per invocation. With it on, the **TUI's `Space → Y` copy menu** and **MCP `get_flow`** sanitize too — a copy heading reads `COPY REQUEST AS · SANITIZED (3)`, and `get_flow` returns a `body_redaction` object naming the profile, the counts and what it did not look at. MCP's `include_sensitive: true` turns body redaction off along with the header redaction: one flag, both axes.
+**`default on` is opt-in, once.** Flipping it under an install that already has scripts reading `gori run show --format raw` would silently change what they get, so gori ships it off; from then on `--no-redact` is the explicit path back to the captured bytes, per invocation. With it on, the **TUI's `Space → Y` copy menu** and **MCP `get_flow`** sanitize too: a copy heading reads `COPY REQUEST AS · SANITIZED (3)`, and `get_flow` returns a `body_redaction` object naming the profile, the counts and what it did not look at. MCP's `include_sensitive: true` turns body redaction off along with the header redaction: one flag, both axes.
 
-**Placeholder tags** are `[REDACTED:<8 hex>]`, an HMAC of the value under a secret minted once per install and kept in `settings.json`. Equal values share a tag so a report can still correlate them; nothing can be recovered from one, and a tag means nothing outside this install. A factory reset keeps the salt — discarding it would break every placeholder in every artifact already written. `gori settings export --sections redaction` carries the salt as well as the rules; hand somebody `gori run redact profiles --format json` instead when you mean to share only the rules.
+**Placeholder tags** are `[REDACTED:<8 hex>]`, an HMAC of the value under a secret minted once per install and kept in `settings.json`. Equal values share a tag so a report can still correlate them; nothing can be recovered from one, and a tag means nothing outside this install. A factory reset keeps the salt, because discarding it would break every placeholder in every artifact already written. `gori settings export --sections redaction` carries the salt as well as the rules; hand somebody `gori run redact profiles --format json` instead when you mean to share only the rules.
 
 ## gori mcp
 
@@ -1870,7 +1872,7 @@ gori settings env-syntax bare
 # so. Captured evidence is left exactly as it was. Switch back with `gori settings env-syntax namespaced`.
 ```
 
-Namespaced is the grammar for everyone, so the absence of `env.syntax` in `settings.json` means the file predates namespaces: the next start adopts `namespaced`, re-spells the **global** rewrite rules (keeping a `settings.json.pre-namespaced-<timestamp>` copy) and writes the key. Each **project** is re-spelled the first time it opens after the grammar moved — in the TUI, in any `gori run …`, or in a `gori mcp` server — with a `gori.db.pre-<grammar>-<timestamp>` backup beside the database (`VACUUM INTO`, so the WAL is included) and one line per project on stderr saying how many tokens moved. Rewritten: Repeater drafts (request, target, SNI, name) and their WebSocket messages, Fuzzer templates, Miner and Sequencer requests, rewrite-rule replacements, session-slot header values, and the masked tokens in issue titles/notes and note bodies. Left alone: every row whose provenance is a capture (`flow_id` set — a capture expands nothing), any row the target grammar has no equivalent spelling for, and names that are table keys rather than tokens (env vars, extract rules, rule patterns, payload sets).
+Namespaced is the grammar for everyone, so the absence of `env.syntax` in `settings.json` means the file predates namespaces: the next start adopts `namespaced`, re-spells the **global** rewrite rules (keeping a `settings.json.pre-namespaced-<timestamp>` copy) and writes the key. Each **project** is re-spelled the first time it opens after the grammar moved (in the TUI, in any `gori run …`, or in a `gori mcp` server), with a `gori.db.pre-<grammar>-<timestamp>` backup beside the database (`VACUUM INTO`, so the WAL is included) and one line per project on stderr saying how many tokens moved. Rewritten: Repeater drafts (request, target, SNI, name) and their WebSocket messages, Fuzzer templates, Miner and Sequencer requests, rewrite-rule replacements, session-slot header values, and the masked tokens in issue titles/notes and note bodies. Left alone: every row whose provenance is a capture (`flow_id` set; a capture expands nothing), any row the target grammar has no equivalent spelling for, and names that are table keys rather than tokens (env vars, extract rules, rule patterns, payload sets).
 
 `env.syntax = bare` is the opt-out and re-spells each project back on its next open, escaping a literal `$NAME` that would otherwise start resolving. See [Environment Variables](/guide/repeater-and-fuzzer/#environment-variables). `gori settings import` says on stderr when a profile's `env.syntax` differs from this install's: an import never changes the grammar.
 
@@ -1924,6 +1926,7 @@ A section marked *not set* is still a valid name for `--sections`: exporting it 
 | `--dry-run` | import | Print which sections would be applied, then exit without writing |
 | `--allow-commands` | import | Apply rules that run an external command. Required when the profile carries one; without it the import is refused and nothing is written |
 | `--json` | tls-fingerprint | Emit the report as JSON, always including the decomposed JA3 string and `ja4_r` |
+| `--preset NAME` | tls-fingerprint | Report what a per-send `--tls-preset NAME` override would send instead (see below) |
 
 A section you do not select, or that the profile does not carry, is left **exactly as it was**. That is the guarantee `--sections` is choosing between. Within a section the profile *does* carry:
 
@@ -2050,7 +2053,7 @@ gori --config ~/profiles/corp.json          # the TUI, with a different config
 
 Resolution order is `--config` → `$GORI_CONFIG` → `$GORI_HOME/settings.json`.
 
-This is deliberately **orthogonal to `GORI_HOME`**: it changes only which settings file is read and written, leaving the CA, the project databases, the themes and the wordlists where they are. Relocating the whole tree was previously the only way to switch configuration.
+This is deliberately **orthogonal to `GORI_HOME`**: it changes only which settings file is read and written, leaving the CA, the project databases, the themes and the wordlists where they are.
 
 ## gori wizard
 

@@ -96,9 +96,9 @@ Define env vars in two places (project wins on a key collision):
 
 The namespace is uppercase and case-sensitive; the name after the dot is `A-Z a-z _` followed by `A-Z a-z 0-9 _`. The sigil is `$` by default (changeable via **Change prefix**, which the palette finds from the ENV pane, or `env.prefix` in settings); the namespace spelling is not.
 
-Anything else that starts with the sigil is a byte. A GraphQL variable (`$id`), a MongoDB operator (`$ne`), an OData option (`$filter`) and a JSON Schema keyword (`$ref`) are not references and need **no escape** — paste that body and send it as written. To ship the text of a token itself, double the sigil: `$$ENV.KEY` sends `$ENV.KEY`, `$$BIND.NAME` sends `$BIND.NAME`, and a bare `$$` is two literal bytes. Each pass consumes only its own escape, so `$$BIND.NAME` survives env expansion and `$$ENV.KEY` survives the binding pass.
+Anything else that starts with the sigil is a byte. A GraphQL variable (`$id`), a MongoDB operator (`$ne`), an OData option (`$filter`) and a JSON Schema keyword (`$ref`) are not references and need **no escape**: paste that body and send it as written. To ship the text of a token itself, double the sigil: `$$ENV.KEY` sends `$ENV.KEY`, `$$BIND.NAME` sends `$BIND.NAME`, and a bare `$$` is two literal bytes. Each pass consumes only its own escape, so `$$BIND.NAME` survives env expansion and `$$ENV.KEY` survives the binding pass.
 
-That "a bare `$NAME` is just a byte" rule is about **request text** — a body, a header, a payload you pasted. It does not hold in a [Match & Replace](/guide/proxy/#match-replace) **replacement**, which exists only to inject a value: a bare `$NAME` there that names a known env var, extract rule or claimed session binding is a rule the grammar moved out from under, so gori **does not apply that rule** and writes an event naming the re-spelling. Fix it to `$ENV.NAME` / `$BIND.NAME`, or write `$$NAME` if the literal text really is what you meant.
+That "a bare `$NAME` is just a byte" rule is about **request text** (a body, a header, a payload you pasted). It does not hold in a [Match & Replace](/guide/proxy/#match-replace) **replacement**, which exists only to inject a value: a bare `$NAME` there that names a known env var, extract rule or claimed session binding is a rule the grammar moved out from under, so gori **does not apply that rule** and writes an event naming the re-spelling. Fix it to `$ENV.NAME` / `$BIND.NAME`, or write `$$NAME` if the literal text really is what you meant.
 
 An unknown token stays visible as literal text wherever a request is *shown*. The editor keeps what you typed, and the highlighter marks an unregistered token differently from a registered one. It is not sent, though: Repeater, the Fuzzer, the Miner, the Sequencer and Discover each refuse a run whose request line, headers or target still name a variable that resolves to nothing, and say which one, as do minimize, an intercept forward you edited, and a WebSocket message. Set it, or drop the token. The check covers the request head only. A `$` inside a body is treated as a byte, so binary uploads replay unchanged. A WebSocket **text** message has no head, so the whole payload is checked; a **binary** message is never checked, and never expanded.
 
@@ -113,24 +113,24 @@ Values that appear in captured traffic can be masked back to their token when co
 
 ### Bare syntax, and the automatic upgrade
 
-Namespaced is the grammar. A project written before namespaces existed is **re-spelled automatically the first time it opens** — in the TUI, in a `gori run …`, or in a `gori mcp` server, whichever gets there first:
+Namespaced is the grammar. A project written before namespaces existed is **re-spelled automatically the first time it opens**, in the TUI, in a `gori run …`, or in a `gori mcp` server, whichever gets there first:
 
 - Repeater drafts and their WebSocket frames, Fuzzer templates, Miner and Sequencer requests, rewrite-rule replacements, session-slot headers, and the tokens a masking pass wrote into issue titles and notes.
 - **Captured evidence is left exactly as it was.** A capture expands nothing, so its `$id` is a byte the origin sent.
-- A backup of the database is written beside it first — `gori.db.pre-namespaced-<timestamp>` — and the run that does the work prints one line per project saying how many tokens moved and where the backup is. Global rewrite rules live in `settings.json` and are re-spelled by the same start, with a `settings.json.pre-namespaced-<timestamp>` copy; one that names a *project* var or an extract rule is named for you to fix instead, because a rule that rewrites every project cannot be re-spelled from inside one.
+- A backup of the database is written beside it first (`gori.db.pre-namespaced-<timestamp>`), and the run that does the work prints one line per project saying how many tokens moved and where the backup is. Global rewrite rules live in `settings.json` and are re-spelled by the same start, with a `settings.json.pre-namespaced-<timestamp>` copy; one that names a *project* var or an extract rule is named for you to fix instead, because a rule that rewrites every project cannot be re-spelled from inside one.
 
 ```bash
 gori settings env-syntax        # print the grammar in force, and where it came from
 gori settings env-syntax bare   # opt out
 ```
 
-That command is the only switch — no TUI key sets the grammar, because switching it has to
+That command is the only switch. No TUI key sets the grammar, because switching it has to
 re-spell stored tokens, which a setting on its own cannot do. A TUI session or a `gori mcp` server
 that is already running **follows** the switch on its own: it picks up the new grammar, re-spells
 the project it has open, and says what it did (a notification and an ACTIVITY row in the TUI, a log
 line for MCP).
 
-`env.syntax = bare` is the opt-out: bare `$KEY` for an env var, bare `$NAME` for a binding, `$$` for a literal `$`. Each project re-spells itself **back** the next time it opens, escaping a literal `$NAME` that would otherwise start resolving. Note that bare is the ambiguous grammar — a GraphQL `$id` in a body really does collide with an env var named `id`, which is what the escape and `--verbatim` are for. Generators have no bare spelling: `$GEN.UUID` remains literal under the bare grammar. The rest of this documentation spells tokens the namespaced way; on a bare install, read ENV and BIND tokens without the namespace (`$KEY`, `$NAME`).
+`env.syntax = bare` is the opt-out: bare `$KEY` for an env var, bare `$NAME` for a binding, `$$` for a literal `$`. Each project re-spells itself **back** the next time it opens, escaping a literal `$NAME` that would otherwise start resolving. Note that bare is the ambiguous grammar: a GraphQL `$id` in a body really does collide with an env var named `id`, which is what the escape and `--verbatim` are for. Generators have no bare spelling: `$GEN.UUID` remains literal under the bare grammar. The rest of this documentation spells tokens the namespaced way; on a bare install, read ENV and BIND tokens without the namespace (`$KEY`, `$NAME`).
 
 ## Fuzzer
 
@@ -150,7 +150,7 @@ The Fuzzer is an Intruder-style engine: mark positions in a request, attach payl
 | `pitchfork` | Parallel sets: payload *n* from each set together |
 | `clusterbomb` | Every combination across all sets |
 
-The first two take **one** payload set; the last two take one per marked position. Pass more sets than the mode consumes and gori says how many it will not draw from, and how to use them, before the run starts — two wordlists under the default `sniper` sweep the first one into every position.
+The first two take **one** payload set; the last two take one per marked position. Pass more sets than the mode consumes and gori says how many it will not draw from, and how to use them, before the run starts. Two wordlists under the default `sniper` sweep the first one into every position.
 
 ### Positions and Payloads
 
@@ -158,7 +158,7 @@ Mark positions with `§…§` markers in the request, or let gori place them aut
 
 A gRPC message is the one place a marker cannot go usefully; see [Sweeping a gRPC Field](#sweeping-a-grpc-field), where the position is a schema-known field rather than a byte range.
 
-A single marker can also carry a Decoder chain of its own. Put the cursor inside it and press `Ctrl-Q` to open the chain editor, which previews the marker's value through each step before you send (an `exec:` step is withheld from the preview and runs only on send). Anything you [saved in the Decoder library](/guide/decoder/#building-a-chain) can be called there by name, so a chain you built once is one word in a marker: `§admin¦myenc > url-encode§`. Repeater markers work the same way — in the TUI tab. Markers are a drafting language the tab renders on send, so the headless surfaces do not render them: `gori run repeater send`, MCP `send_request` and a retest step **refuse** a session whose `§…§` the tab would render, rather than put the literal `§` bytes on the wire. Remove the markers before sending from there, sweep the marked request as a Fuzzer template (`gori run fuzz --request=FILE`, `fuzz_start{template}`), or pass `--verbatim` / `verbatim:true` to say the stored bytes are the message. A `§` the capture itself carried is untouched: gori cannot tell it from one you typed, so the tab leaves it inert and every surface replays it byte-exact.
+A single marker can also carry a Decoder chain of its own. Put the cursor inside it and press `Ctrl-Q` to open the chain editor, which previews the marker's value through each step before you send (an `exec:` step is withheld from the preview and runs only on send). Anything you [saved in the Decoder library](/guide/decoder/#building-a-chain) can be called there by name, so a chain you built once is one word in a marker: `§admin¦myenc > url-encode§`. Repeater markers work the same way in the TUI tab. Markers are a drafting language the tab renders on send, so the headless surfaces do not render them: `gori run repeater send`, MCP `send_request` and a retest step **refuse** a session whose `§…§` the tab would render, rather than put the literal `§` bytes on the wire. Remove the markers before sending from there, sweep the marked request as a Fuzzer template (`gori run fuzz --request=FILE`, `fuzz_start{template}`), or pass `--verbatim` / `verbatim:true` to say the stored bytes are the message. A `§` the capture itself carried is untouched: gori cannot tell it from one you typed, so the tab leaves it inert and every surface replays it byte-exact.
 
 ### Wordlist Catalog
 

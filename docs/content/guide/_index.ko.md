@@ -10,7 +10,7 @@ gori가 처음이라면 [Quick Start](/ko/getting-started/quick-start/)부터 �
 
 ## 인터페이스 한눈에 보기 {#the-interface-at-a-glance}
 
-gori는 탭으로 구성됩니다. `[` / `]`로 탭 사이를 이동하거나 숫자 키로 바로 점프합니다. 두 개의 키로 모든 동작에 닿습니다. `Space`는 **space 메뉴**(포커스된 패널에서 가장 자주 하는 동작, 동작마다 글자 하나)를 열고, `Ctrl-P`는 **커맨드 팔레트**(아무 동작이나 이름으로 찾기)를 엽니다. 둘 다 [space 메뉴와 팔레트](/ko/guide/space-menu-and-palette/)에서 익힐 수 있고, 첫날에 익힐 키 조합은 [Quick Start](/ko/getting-started/quick-start/)에 있습니다.
+gori는 탭으로 구성됩니다. `[` / `]`로 탭 사이를 이동하거나 숫자 키로 바로 점프합니다. 키 두 개로 모든 동작에 닿습니다. `Space`는 **space 메뉴**(포커스된 패널에서 가장 자주 하는 동작, 동작마다 글자 하나)를 열고, `Ctrl-P`는 **커맨드 팔레트**(아무 동작이나 이름으로 찾기)를 엽니다. 둘 다 [space 메뉴와 팔레트](/ko/guide/space-menu-and-palette/)에서 익힐 수 있고, 첫날에 익힐 키 조합은 [Quick Start](/ko/getting-started/quick-start/)에 있습니다.
 
 | 탭 | 용도 |
 |-----|---------|
@@ -34,7 +34,7 @@ gori는 탭으로 구성됩니다. `[` / `]`로 탭 사이를 이동하거나 �
 | **Issues** | 심각도와 상태로 결과 트리아지 |
 | **Evidence** | 동결된 요청/응답 스냅숏 보관함 (첫 스냅숏이 생기면 나타남) |
 | **Notes** | 프로젝트별 마크다운 노트 |
-| **Help** | 키 바인딩과 링크 (기본은 `0` 뒤 — 어디서든 `?`로도 열림) |
+| **Help** | 키 바인딩과 링크 (기본은 `0` 뒤, 어디서든 `?`로도 열림) |
 
 탭 바는 **번호가 매겨진 아홉 개의 슬롯**이고, 새 설치는 실제로 작업하는 루프로 그 슬롯을 채웁니다.
 
@@ -42,7 +42,7 @@ gori는 탭으로 구성됩니다. `[` / `]`로 탭 사이를 이동하거나 �
 1:Project  2:Target  3:History  4:Intercept  5:Repeater  6:Fuzzer  7:Probe  8:Issues  9:Notes   0:Tabs
 ```
 
-`1`–`9`로 슬롯에 점프하고, 나머지 열두 개는 **`0`**으로 갑니다 — 카탈로그 전체를 타이핑으로
+`1`-`9`로 슬롯에 점프하고, 나머지 열두 개는 **`0`**으로 엽니다. 카탈로그 전체를 타이핑으로
 거르는 목록입니다. `0` 뒤에 있는 탭은 상주하기보다 필요할 때 꺼내 쓰는 것들(OAST, Decoder,
 JWT, Comparer, Rewriter)과 특수 워크벤치(Miner, Sequencer, Cookie, Colormarker, Authorize),
 그리고 어디서든 `?`로 열리는 Help입니다. **Evidence**도 `0` 뒤에 있으며, 프로젝트에 첫 동결
@@ -51,7 +51,7 @@ JWT, Comparer, Rewriter)과 특수 워크벤치(Miner, Sequencer, Cookie, Colorm
 아홉 개의 구성은 Preferences(`Ctrl-,`) → **Network & Tabs** → **Tabs** 또는 팔레트의
 `settings:tabs`에서 바꿉니다. **목록이 곧 바입니다.** 이음선 위의 행들이 순서대로 아홉 슬롯이고
 아래는 `0`으로 닿는 탭들이며, 슬롯 번호는 그 자리에서 다시 매겨집니다. `⇧K`/`⇧J`로 행을 옮기는데
-이음선을 넘겨 위로 올리면 그 탭이 바에 올라가고 마지막 슬롯이 내려갑니다 — 재배치가 곧 선택입니다.
+이음선을 넘겨 위로 올리면 그 탭이 바에 올라가고 마지막 슬롯이 내려갑니다. 재배치가 곧 선택입니다.
 `space`는 행을 곧장 반대편으로 보냅니다. (상한 없는 예전
 바를 원하면 **Layout → Tab bar slots**를 끄세요. `0`은 어느 쪽이든 그대로 동작합니다.)
 

@@ -22,7 +22,7 @@ gori run oast listen         # ad-hoc: the registration dies with the process
 gori run oast listen --save  # …or keep it as a project session
 ```
 
-A bare `listen` is store-free and its registration dies with the process, which for a callback that arrives hours later means the payload is already dead. `--save` writes it into the project instead — `gori run oast list` shows it, `gori run oast resume ID` picks it up in a later process, and `gori run oast release ID` is the teardown. Over MCP the same switch is `oast_start` with `persist: true`. The TUI's `Ctrl-R` has always saved one; resume it with `Shift-R` (`Space` `R`, **Resume listener…**).
+A bare `listen` is store-free and its registration dies with the process, which for a callback that arrives hours later means the payload is already dead. `--save` writes it into the project instead: `gori run oast list` shows it, `gori run oast resume ID` picks it up in a later process, and `gori run oast release ID` is the teardown. Over MCP the same switch is `oast_start` with `persist: true`. The TUI's `Ctrl-R` has always saved one; resume it with `Shift-R` (`Space` `R`, **Resume listener…**).
 
 **Checkpoint.** The OAST tab shows a live payload URL, and the **Callbacks** table is empty and waiting.
 

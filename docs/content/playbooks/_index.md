@@ -1,6 +1,6 @@
 +++
 title = "Playbooks"
-description = "Follow-along lessons that run a full gori workflow end to end — scope, map, intercept, fuzz, and report, one checkpoint at a time."
+description = "Follow-along lessons that run a full gori workflow end to end: scope, map, intercept, fuzz, and report, one checkpoint at a time."
 weight = 15
 +++
 

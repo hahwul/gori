@@ -44,8 +44,8 @@ writer. They may run while the TUI is open, but a capture commit can briefly own
 slot. A short-lived subcommand gives its SQLite open/writer waits a one-second budget; when the
 slot stays busy, the required write exits non-zero and says the project is locked by another gori,
 with the workaround (retry, or read it with a read-only subcommand). A subcommand that keeps the
-project open for a whole run —
-`discover`, `fuzz`, `import`, `mine` with a `--macro`, `probe`, `retest run`, `oast listen`/`resume`, `intercept`, `sitemap js --scan` — keeps
+project open for a whole run
+(`discover`, `fuzz`, `import`, `mine` with a `--macro`, `probe`, `retest run`, `oast listen`/`resume`, `intercept`, `sitemap js --scan`) keeps
 the standard five-second wait, the same one the TUI's capture writer uses. A
 repeater send that already reached the network keeps its completed-send result even when its
 response or History write cannot be persisted: it prints a warning to STDERR, and `--format json`
@@ -97,7 +97,7 @@ gori run capture --project ci-run --for 5m --format jsonl > flows.jsonl
 # Fail a CI job when the fuzzer finds a reflected marker
 gori run fuzz 42 --wordlist payloads.txt --mr 'gori-canary' --fail-if-no-matches
 
-# A create command's --format json is the new row, id included — no scraping prose
+# A create command's --format json is the new row, id included: no scraping prose
 id=$(gori run repeater create -t https://api.example.com -f req.http --format json | jq .id)
 rule=$(gori run project scope add --pattern=api.example.com --format json | jq .id)
 
@@ -176,7 +176,7 @@ every match in one rewrite, so a pattern matching four hundred times (or four pi
 head) still costs that rewrite one timeout. A message is rewritten twice (its head and its
 body), so that is the bound it sees.
 
-**The Miner's hook runs once per probe, and pays for a signed API.** An app that requires every
+**The Miner's hook runs once per probe, which is what a signed API needs.** An app that requires every
 parameter to carry an HMAC, a signed envelope or a per-request nonce rejects a raw candidate
 before it can react to it, so without a hook there is nothing to mine; every probe looks the
 same. `--hook` hands each assembled request (candidate injected, session bindings already
@@ -194,7 +194,7 @@ instead by a [request-time macro](/guide/repeater-and-fuzzer/#rotating-tokens-wi
 step (saved chains included); it is exposed read-only and unbound, and stays pure compute; an
 agent that needs a hook configures a `pipe` rewriter rule or an `exec` probe rule, both gated
 writes the operator can see. And a Probe `exec` rule runs **once per flow** on the passive
-analyzer, so a slow detector is the whole rule set's bottleneck under live capture, so keep its
+analyzer. A slow detector becomes the whole rule set's bottleneck under live capture, so keep its
 command fast.
 
 **Drawing something is not running it.** Every surface that replays a chain in order to *draw*

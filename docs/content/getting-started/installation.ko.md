@@ -16,7 +16,7 @@ curl -fsSL https://gori.hahwul.com/install.sh | bash
 
 `/usr/local`에 쓸 수 있으면 그 아래에, 아니면 `~/.local`에 설치합니다. `GORI_INSTALL_PREFIX`로 재정의할 수 있습니다. 설치 후에는 `gori update`가 바이너리를 스스로 업데이트합니다(설치를 담당하는 채널이 Chocolatey / Homebrew / Snap / AUR인 경우 그쪽으로 안내합니다).
 
-### GitHub rate limit에 걸린 경우 {#rate-limit}
+### GitHub rate limit에 걸린 경우 {#if-you-hit-a-github-rate-limit}
 
 설치 스크립트는 최신 릴리스가 무엇인지 GitHub API에 묻는데, 이 API는 **비인증 요청을 IP당 시간당 60회**만 허용합니다. 공용 CI나 NAT 뒤에서는 `403`이 돌아올 수 있습니다. 설치 스크립트와 `gori update` 모두 rate limit이 없는 릴리스 리다이렉트로 자동 폴백하므로 그대로 동작하며, `resolved v0.8.0 via ... (no API call)` 같은 줄이 보입니다.
 
@@ -29,7 +29,7 @@ curl -fsSL https://gori.hahwul.com/install.sh | bash
 
 `GORI_GITHUB_TOKEN`과 `GH_TOKEN`도 동일하게 동작하며, `gori update`도 같은 변수를 읽습니다. 공개 저장소 읽기 권한만 있으면 됩니다.
 
-### 직접 다운로드 (Dockerfile, CI) {#direct-download}
+### 직접 다운로드 (Dockerfile, CI) {#direct-download-dockerfiles-ci}
 
 모든 릴리스에는 버전이 없는 사본도 함께 올라갑니다. 버전 조회도 API 호출도 없이 고정된 URL로 최신 빌드를 받을 수 있습니다. v0.2.0부터 제공되며, 그 이전 릴리스에는 버전이 붙은 이름만 있습니다:
 
@@ -62,7 +62,7 @@ shasum -a 256 -c --ignore-missing SHA256SUMS   # macOS
 brew install hahwul/gori/gori
 ```
 
-이는 먼저 tap을 추가하는 것의 축약형이며, 다음과 같이 명시적으로 할 수도 있습니다:
+이 명령은 tap을 먼저 추가하는 과정을 줄인 형태이며, 나눠서 실행해도 됩니다:
 
 ```bash
 brew tap hahwul/gori
@@ -71,7 +71,7 @@ brew install gori
 
 macOS 보틀은 링크된 모든 dylib를 바이너리 옆에 함께 번들한 자립형 tarball이고, Linux 보틀은 정적 빌드입니다. 어느 쪽도 추가 Homebrew 의존성을 끌어오지 않습니다.
 
-## Chocolatey (Windows) {#chocolatey}
+## Chocolatey (Windows) {#chocolatey-windows}
 
 [Chocolatey 커뮤니티 저장소](https://community.chocolatey.org/packages/gori)에서 설치합니다:
 
@@ -178,7 +178,7 @@ container run --rm -it \
 
 컨테이너마다 호스트의 `vmnet` 네트워크에서 자기 IP를 받으므로 포트 게시는 선택입니다. `container ls`가 출력하는 주소를 클라이언트 프록시에 `<ip>:8070`으로 바로 지정해도 똑같이 동작합니다.
 
-`container build -f packaging/docker/Dockerfile -t gori:dev .`로 소스에서 이미지를 빌드할 수 있으며, `packaging/docker/Dockerfile.dockerignore`를 읽습니다. Dockerfile 옆의 무시 목록만 찾으므로, BuildKit과 달리 컨텍스트 루트의 `.dockerignore`로 되돌아가지 않습니다. 빌더는 자체 VM에서 동작하므로 호스트의 `HTTP_PROXY`를 상속하지 않으며, 기본값이 CPU 2개에 2 GB입니다(`container builder status`). 그 크기에서는 gori의 `--release` 빌드가 한 시간을 훌쩍 넘기므로, 먼저 늘려 두는 편이 좋습니다:
+`container build -f packaging/docker/Dockerfile -t gori:dev .`로 소스에서 이미지를 빌드할 수 있으며, `packaging/docker/Dockerfile.dockerignore`를 읽습니다. Dockerfile 옆의 무시 목록만 찾으므로 BuildKit과 달리 컨텍스트 루트의 `.dockerignore`로 되돌아가지 않습니다. 빌더는 자체 VM에서 동작하므로 호스트의 `HTTP_PROXY`를 상속하지 않으며, 기본값이 CPU 2개에 2 GB입니다(`container builder status`). 그 크기에서는 gori의 `--release` 빌드가 한 시간을 훌쩍 넘기므로, 먼저 늘려 두는 편이 좋습니다:
 
 ```bash
 container builder stop

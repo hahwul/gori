@@ -13,7 +13,7 @@ A predictable session cookie, CSRF token, or reset code is one an attacker can f
 
 ## 1. Point the Sequencer at a token
 
-The Sequencer tab is off the bar by default. It's a workbench you reach for occasionally, not part of the daily loop — press **`0`** and type "seq", or `Ctrl-P` → **Go to Sequencer**.
+The Sequencer tab is off the bar by default. It's a workbench you reach for occasionally, not part of the daily loop: press **`0`** and type "seq", or `Ctrl-P` → **Go to Sequencer**.
 
 Feed it from a captured flow: in **History**, select the flow whose response sets the token, then `Space` `>` `s` (**Send flow to…** → **Send to Sequencer**). A **SEND TO SEQUENCER** card opens over History with the likely session cookie auto-detected. If the guess is wrong, change the token kind there: pick one of Cookie, Header, Regex, Position, or JSONPath.
 

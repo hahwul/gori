@@ -30,7 +30,7 @@ One session, two views, toggled with `Ctrl-T`. The top card of each lens carries
 
 ## Algorithms
 
-HMAC (`HS256` / `HS384` / `HS512`) signs with a secret you type. The asymmetric families sign with a PEM key you supply — gori generates none, so forging an `RS256` token still requires the `RS256` private key:
+HMAC (`HS256` / `HS384` / `HS512`) signs with a secret you type. The asymmetric families sign with a PEM key you supply. gori generates none, so forging an `RS256` token still requires the `RS256` private key:
 
 | Family | Algorithms | Key |
 |--------|------------|-----|
@@ -39,13 +39,13 @@ HMAC (`HS256` / `HS384` / `HS512`) signs with a secret you type. The asymmetric 
 | **RSA-PSS** | `PS256` `PS384` `PS512` | the same RSA key; salt length is the digest length (RFC 7518 §3.5) |
 | **ECDSA** | `ES256` `ES384` `ES512` | a P-256 / P-384 / P-521 key. The signature is the fixed-width `r‖s` form JOSE mandates, so `ES512` is 132 bytes, not 128 |
 | **EdDSA** | `EdDSA` | an Ed25519 key |
-| **Unsigned** | `none` | none — the auth-bypass shape, offered deliberately |
+| **Unsigned** | `none` | none: the auth-bypass shape, offered deliberately |
 
 A key is either inline PEM text or a path to a `.pem` file. Verification additionally accepts an X.509 **certificate** (what an IdP publishes as `x5c`) or the private key itself.
 
 ## Encrypted Tokens (JWE)
 
-A five-part `header.encrypted_key.iv.ciphertext.tag` token is a **JWE** — an encrypted JWT. gori recognizes it everywhere it recognizes a JWS (the JWT tab, the Decoder, the body pretty-printer, `gori run jwt`, MCP `jwt_decode`) and shows the **protected header**: the `alg` that wrapped the content-encryption key, the `enc` that encrypted the claims, and the `kid`.
+A five-part `header.encrypted_key.iv.ciphertext.tag` token is a **JWE**, an encrypted JWT. gori recognizes it everywhere it recognizes a JWS (the JWT tab, the Decoder, the body pretty-printer, `gori run jwt`, MCP `jwt_decode`) and shows the **protected header**: the `alg` that wrapped the content-encryption key, the `enc` that encrypted the claims, and the `kid`.
 
 gori does **not** decrypt. With no key the claims are marked encrypted and nothing is guessed at in their place, and the projections that only make sense over claims refuse the token outright: `--attacks` generates nothing (there is no claims segment to tamper with and no signature to strip), and `--verify` says so rather than reporting an unsupported algorithm.
 
@@ -78,7 +78,7 @@ cat token.txt | gori run jwt --attacks         # token from stdin
 
 The token comes from the argument or stdin; there is no project or capture involved (it is pure local compute). `--format` is `text` or `json`. On `--encode`, `--set KEY=VALUE` patches one claim (repeatable; the value is JSON when it parses, so `admin=true` is a boolean and `role=admin` a string) and `--payload JSON` replaces the whole claims object; the two are mutually exclusive. `--secret` and `--key` fill the same slot, so pass one. `--verify` needs `--secret` or `--key` (pass `--secret ''` to check the empty secret), prints `verified: yes|no` with a `reason` on a no, and exits 1 unless the token verifies, as `gori run cookie --verify` does. With `--format json` the no also carries a `code` to branch on: only after `signature_mismatch` or `key_mismatch` (a key of the wrong type for the token's alg) might another key succeed, while `unsigned`, `alg_unsupported`, `signature_malformed`, `jwe` and the rest mean no key will. Passing both `--secret` and `--key` is refused, `--secret ''` included. See the [CLI Reference](/reference/cli/#run-jwt).
 
-Over MCP, `jwt_decode` / `jwt_verify` / `jwt_encode` / `jwt_attacks` are read tools available even under `--read-only`: they touch no network and write nothing. `jwt_encode` takes the same `set` / `payload` claim edits and the same `key`; `jwt_attacks` takes `public_key`. Note that `key` / `public_key` accept a **path**, so those two arguments read a file the caller names — pass the PEM inline if the client should not reach the filesystem.
+Over MCP, `jwt_decode` / `jwt_verify` / `jwt_encode` / `jwt_attacks` are read tools available even under `--read-only`: they touch no network and write nothing. `jwt_encode` takes the same `set` / `payload` claim edits and the same `key`; `jwt_attacks` takes `public_key`. Note that `key` / `public_key` accept a **path**, so those two arguments read a file the caller names. Pass the PEM inline if the client should not reach the filesystem.
 
 ## Next Steps
 

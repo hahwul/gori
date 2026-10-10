@@ -13,7 +13,7 @@ A JWT is only as trustworthy as the server's check of its signature. This playbo
 
 ## 1. Send a token to the JWT tab
 
-The **JWT** tab is off the bar by default — press **`0`** and type "jwt", or `Ctrl-P` → **Go to JWT**; give it one of the nine slots in Preferences if you live in tokens. Find the token: open the captured flow in **History**, select the token text after `Bearer ` in the request detail, and `Space` `S` (**Send selection to…**) → `j` **JWT**. That seeds a new JWT sub-tab and decodes the token live into its **header**, **payload**, and **signature** on the Decode lens.
+The **JWT** tab is off the bar by default: press **`0`** and type "jwt", or `Ctrl-P` → **Go to JWT**; give it one of the nine slots in Preferences if you live in tokens. Find the token: open the captured flow in **History**, select the token text after `Bearer ` in the request detail, and `Space` `S` (**Send selection to…**) → `j` **JWT**. That seeds a new JWT sub-tab and decodes the token live into its **header**, **payload**, and **signature** on the Decode lens.
 
 The decode shows what the token *claims*; it never checks the signature, so a token that decodes cleanly is not necessarily one the server trusts. That is the question the rest of this playbook answers.
 
@@ -26,7 +26,7 @@ The decode shows what the token *claims*; it never checks the signature, so a to
 
 ## 2. Tamper a claim
 
-Switch to the Encode lens with `Ctrl-T`, or `Space` → **Load decoded claims** to load the decoded token straight into the Encode editors. Edit the **PAYLOAD** JSON: escalate a `role`, swap a `sub`, extend an `exp`. Pick the algorithm with `Ctrl-A` (it cycles the HMAC family, then `RS`/`PS`/`ES` at 256/384/512, `EdDSA`, and `none`), set a **SECRET** when you're signing with an HMAC algorithm — or, for an asymmetric one, point the **KEY** card at a PEM private key — and the re-signed token appears live in OUTPUT. Copy it with `y`.
+Switch to the Encode lens with `Ctrl-T`, or `Space` → **Load decoded claims** to load the decoded token straight into the Encode editors. Edit the **PAYLOAD** JSON: escalate a `role`, swap a `sub`, extend an `exp`. Pick the algorithm with `Ctrl-A` (it cycles the HMAC family, then `RS`/`PS`/`ES` at 256/384/512, `EdDSA`, and `none`), set a **SECRET** when you're signing with an HMAC algorithm (or, for an asymmetric one, point the **KEY** card at a PEM private key), and the re-signed token appears live in OUTPUT. Copy it with `y`.
 
 The same claim edit runs headless, taking the token from the argument or stdin. `--set KEY=VALUE` patches one claim (repeatable), or `--payload` replaces the claims wholesale:
 
@@ -64,11 +64,11 @@ gori run jwt eyJhbGci... --attacks
 gori run jwt eyJhbGci... --attacks --key ./server-public.pem   # ...plus algorithm confusion
 ```
 
-The public key is whatever the target publishes — a JWKS `x5c` certificate works as well as a bare `PUBLIC KEY` block, and gori reduces either to the SPKI PEM a server would hold.
+The public key is whatever the target publishes: a JWKS `x5c` certificate works as well as a bare `PUBLIC KEY` block, and gori reduces either to the SPKI PEM a server would hold.
 
 Over MCP the `jwt_attacks` tool returns the identical list, taking the same key as `public_key` (and `jwt_decode` / `jwt_verify` / `jwt_encode` cover steps 1 and 2). All of them are read tools available even under `--read-only`: they touch no network and write nothing, though a `key` / `public_key` given as a path is read from disk.
 
-An **encrypted** token — five segments rather than three — is a JWE, and none of this applies to it: gori shows its protected header (`alg`, `enc`, `kid`) so you know what you are looking at, and generates no payloads, because there is no claims segment to tamper with and no signature to strip.
+An **encrypted** token (five segments rather than three) is a JWE, and none of this applies to it: gori shows its protected header (`alg`, `enc`, `kid`) so you know what you are looking at, and generates no payloads, because there is no claims segment to tamper with and no signature to strip.
 
 **Checkpoint.** The ATTACKS list is populated with ready-to-send token variants.
 

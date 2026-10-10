@@ -78,27 +78,27 @@ gori run probe rules disable sri            # 시끄러운 패시브 체크 하�
 | `reflected_param` | Reflected parameter | `active` | 1 |  | 쿼리·폼·JSON 파라미터에 canary를 보내고, 인코딩되지 않고 반사되면 표시합니다(잠재적 XSS). |
 | `cors_reflection` | CORS arbitrary origin | `cors` | 1 |  | 서버가 임의의 Origin을 Allow-Credentials: true와 함께 반사하는지 프로브합니다. |
 | `forbidden_bypass` | Access-control bypass (IP headers) | `active` | 2 |  | 거부된(401/403) 요청을 위조한 클라이언트 IP 헤더와 함께 재전송하고, 2xx로 우회되면 표시합니다. |
-| `nginx_alias_traversal` | NGINX alias traversal | `active` | 1–2 |  | 정적 자산을 접힌 `..`(/static../static/…) 경로로 다시 가져와, 바이트 단위로 같은 응답이 오면 표시합니다. |
-| `backslash_powered` | Backslash-powered scanning | `active` | 4–8 |  | 쿼리·폼·JSON 파라미터마다 `\`와 `\\`를 덧붙여, 백슬래시 하나는 응답을 흔들지만 둘은 그렇지 않은 파라미터를 표시합니다(서버 측 문자열 해석). |
-| `sqli_error_based` | Error-based SQL injection | `active` | 3–5 |  | 쿼리·폼·JSON 파라미터마다 SQL 구문을 깨는 페이로드를 덧붙이고, 깨끗한 baseline에는 없는 데이터베이스 오류 서명이 프로브 응답에 나타나면 표시합니다. |
-| `sqli_boolean_based` | Boolean-based blind SQL injection | `active` | 4–8 |  | 파라미터마다 항상 참인 SQL 조건과 항상 거짓인 조건을 덧붙여, 참 쪽은 baseline과 같고 거짓 쪽은 달라지는 파라미터를 표시합니다(오류도 반사도 없는 블라인드 인젝션). |
-| `sqli_time_based` | Time-based blind SQL injection | `active` | 6–10 | 기본 비활성 | 파라미터마다 서버 측 지연(SLEEP/pg_sleep/WAITFOR)을 주입하고, baseline과 점점 늘린 두 번의 지연에 걸쳐 응답 지연 시간으로 확인합니다. 일부러 기다리기 때문에 기본 비활성으로 출하됩니다. |
+| `nginx_alias_traversal` | NGINX alias traversal | `active` | 1-2 |  | 정적 자산을 접힌 `..`(/static../static/…) 경로로 다시 가져와, 바이트 단위로 같은 응답이 오면 표시합니다. |
+| `backslash_powered` | Backslash-powered scanning | `active` | 4-8 |  | 쿼리·폼·JSON 파라미터마다 `\`와 `\\`를 덧붙여, 백슬래시 하나는 응답을 흔들지만 둘은 그렇지 않은 파라미터를 표시합니다(서버 측 문자열 해석). |
+| `sqli_error_based` | Error-based SQL injection | `active` | 3-5 |  | 쿼리·폼·JSON 파라미터마다 SQL 구문을 깨는 페이로드를 덧붙이고, 깨끗한 baseline에는 없는 데이터베이스 오류 서명이 프로브 응답에 나타나면 표시합니다. |
+| `sqli_boolean_based` | Boolean-based blind SQL injection | `active` | 4-8 |  | 파라미터마다 항상 참인 SQL 조건과 항상 거짓인 조건을 덧붙여, 참 쪽은 baseline과 같고 거짓 쪽은 달라지는 파라미터를 표시합니다(오류도 반사도 없는 블라인드 인젝션). |
+| `sqli_time_based` | Time-based blind SQL injection | `active` | 6-10 | 기본 비활성 | 파라미터마다 서버 측 지연(SLEEP/pg_sleep/WAITFOR)을 주입하고, baseline과 점점 늘린 두 번의 지연에 걸쳐 응답 지연 시간으로 확인합니다. 일부러 기다리기 때문에 기본 비활성으로 출하됩니다. |
 | `graphql_introspection_active` | GraphQL introspection (active) | `infoleak` | 1 |  | GraphQL 엔드포인트에 introspection 쿼리를 보내 스키마가 노출되는지 확인합니다. |
 | `lfi_param_traversal` | Parameter path traversal | `active` | 3 |  | 파일 파라미터를 접힌 `..`(file=x/../doc) 경로로 다시 가져와, 바이트 단위로 같은 응답이 오면 표시합니다. |
 | `open_redirect` | Open redirect | `active` | 1 |  | 리다이렉트 파라미터를 외부 호스트로 바꾸고, Location이 그대로 따라가면 표시합니다. |
 | `host_header_injection` | Host header injection | `active` | 1 |  | 합성한 X-Forwarded-Host를 보내고, 그 값이 절대 URL의 authority로 반사되면 표시합니다. |
 | `crlf_injection` | CRLF header injection | `active` | 1 |  | 요청 파라미터(쿼리/폼/JSON)에 인코딩된 CRLF와 헤더를 주입하고, 응답 헤더로 반사되면 표시합니다. |
-| `path_normalization_bypass` | Access-control bypass (path normalization) | `active` | 6–7 |  | 거부된(401/403) 경로를 정규화 트릭으로 다시 요청하고, 2xx로 우회되면 표시합니다. |
+| `path_normalization_bypass` | Access-control bypass (path normalization) | `active` | 6-7 |  | 거부된(401/403) 경로를 정규화 트릭으로 다시 요청하고, 2xx로 우회되면 표시합니다. |
 | `url_rewrite_bypass` | Access-control bypass (URL-rewrite headers) | `active` | 3 |  | 401/403/404로 응답한 경로를 X-Original-URL/X-Rewrite-URL에 담아 /를 요청하고, 2xx로 제공되면 표시합니다. |
 | `ssti` | Server-side template injection | `active` | 2 |  | 템플릿 산술 폴리글롯을 주입하고, 값이 평가되는 파라미터를 표시합니다. |
 | `nextjs_action_no_auth` | Next.js server action missing authorization | `active` | 1 | unsafe 필요 | Next.js 서버 액션(Next-Action)을 세션 쿠키/Authorization을 뺀 채 재전송하고, 여전히 2xx로 성공하면 표시합니다. |
-| `request_smuggling` | HTTP request smuggling / desync (CL.TE/TE.CL/TE.TE) | `active` | 8–10 | 기본 비활성 · unsafe 필요 | 불완전한 CL.TE/TE.CL/TE.TE 프레이밍 프로브를 보내고, 타이밍 행으로 프런트엔드/백엔드 디싱크를 표시합니다(aggressive+unsafe에서 차분 확인). 기본 비활성이며 POST 본문을 보냅니다. |
+| `request_smuggling` | HTTP request smuggling / desync (CL.TE/TE.CL/TE.TE) | `active` | 8-10 | 기본 비활성 · unsafe 필요 | 불완전한 CL.TE/TE.CL/TE.TE 프레이밍 프로브를 보내고, 타이밍 행으로 프런트엔드/백엔드 디싱크를 표시합니다(aggressive+unsafe에서 차분 확인). 기본 비활성이며 POST 본문을 보냅니다. |
 | `ssrf_oast` | Blind SSRF (out-of-band) | `active` | 1 | OAST 필요 | 쿼리, 폼, JSON의 URL 파라미터 하나를 OAST 페이로드로 향하게 하고, 서버가 콜백을 걸면 발견으로 올립니다. |
 | `cmd_injection_oast` | Blind OS command injection (out-of-band) | `active` | 1 | OAST 필요 | 명령/진단 파라미터에 셸 브레이크아웃 OAST 페이로드를 덧붙이고, 서버의 셸이 콜백을 걸면 발견으로 올립니다. |
 | `xxe_oast` | XML external entity (out-of-band) | `active` | 1 | OAST 필요 · unsafe 필요 | XML 본문에 외부 파라미터 엔티티 하나를 추가합니다. OAST 콜백이 오면 해석된 것으로 확인합니다. unsafe 옵트인이 필요합니다. |
 | `rfi_oast` | Remote file inclusion (out-of-band) | `active` | 1 | OAST 필요 | 포함형 파라미터 하나를 언어 표식이 담긴 OAST 리소스로 향하게 하고, 서버가 콜백을 걸면 발견으로 올립니다. |
 | `ratelimit_bypass` | Rate-limit bypass (spoofed client IP) | `active` | 2 |  | 레이트리밋에 걸린(429) 요청을 위조한 클라이언트 IP 헤더와 함께 재전송하고, 처리되면 표시합니다. |
-| `forbidden_method_bypass` | Access-control bypass (HTTP method) | `active` | 2–5 |  | 거부된(401/403) 리소스를 메서드 대소문자 변형으로, unsafe에서는 대체 메서드와 메서드 오버라이드 헤더로도 다시 요청해 2xx로 우회되면 표시합니다. |
+| `forbidden_method_bypass` | Access-control bypass (HTTP method) | `active` | 2-5 |  | 거부된(401/403) 리소스를 메서드 대소문자 변형으로, unsafe에서는 대체 메서드와 메서드 오버라이드 헤더로도 다시 요청해 2xx로 우회되면 표시합니다. |
 | `insecure_http_methods` | Insecure HTTP methods | `active` | 2 |  | OPTIONS와 TRACE를 보내 Cross-Site Tracing(TRACE)과 Allow 헤더에 광고된 위험한 메서드를 표시합니다. |
 
 ## 커스텀 룰 {#custom}

@@ -34,7 +34,7 @@ gori --listen 0.0.0.0 --port 8080
 
 ## 2. CA 신뢰 후 첫 플로우 캡처 {#2-trust-the-ca-and-capture-your-first-flow}
 
-HTTPS를 읽으려면 클라이언트가 gori의 루트 인증서(첫 실행 시 `~/.gori/ca` 아래에 생성됨)를 신뢰해야 합니다. 가장 빠른 길은 사전 신뢰된 브라우저입니다.
+HTTPS를 읽으려면 클라이언트가 gori의 루트 인증서(첫 실행 시 `~/.gori/ca` 아래에 생성됨)를 신뢰해야 합니다. 가장 쉬운 방법은 사전 신뢰된 브라우저입니다.
 
 ### Option A: 사전 신뢰된 브라우저 열기 (권장) {#option-a-open-a-pre-trusted-browser-recommended}
 
@@ -46,7 +46,7 @@ TUI 안에서:
 
 gori는 이미 CA를 신뢰하고 HTTP/HTTPS를 프록시로 경유하는 일회용 프로파일로 브라우저를 실행합니다. 그 브라우저에서 사이트를 방문하세요(`https://example.com`을 먼저, 그다음 테스트 중인 사이트를).
 
-> **Firefox 참고.** CA 자동 신뢰에는 `PATH`에 있는 `certutil`(NSS)이 필요합니다. 없으면 gori가 프록시는 설정하지만 Firefox가 CA를 신뢰하지 않아 HTTPS 사이트에서 보안 경고가 뜹니다. 먼저 설치하고(`brew install nss` macOS, `apt install libnss3-tools` Debian/Ubuntu, `dnf install nss-tools` Fedora) 브라우저를 다시 열거나, 같은 창에서 직접 신뢰 등록하세요: `about:preferences#privacy`를 열고 **인증서 보기**, **인증기관** 탭으로 가서 `gori ca`가 출력한 파일을 **가져오기** 하면 됩니다.
+> **Firefox 참고.** CA 자동 신뢰에는 `PATH`에 있는 `certutil`(NSS)이 필요합니다. 없으면 gori가 프록시는 설정하지만 Firefox가 CA를 신뢰하지 않아 HTTPS 사이트에서 보안 경고가 뜹니다. 먼저 설치하고(macOS는 `brew install nss`, Debian/Ubuntu는 `apt install libnss3-tools`, Fedora는 `dnf install nss-tools`) 브라우저를 다시 열거나, 같은 창에서 직접 신뢰 등록하세요: `about:preferences#privacy`를 열고 **인증서 보기**, **인증기관** 탭으로 가서 `gori ca`가 출력한 파일을 **가져오기** 하면 됩니다.
 
 ### Option B: 클라이언트를 직접 지정하기 {#option-b-point-any-client-yourself}
 
@@ -62,11 +62,11 @@ gori ca
 curl -x http://127.0.0.1:8070 https://example.com
 ```
 
-gori는 요청 시 루트로부터 호스트별 리프 인증서를 발급하므로, 루트만 한 번 신뢰하면 됩니다.
+gori는 필요할 때 루트로 호스트별 리프 인증서를 발급하므로, 루트만 한 번 신뢰하면 됩니다.
 
 커맨드라인 도구에는 지름길이 있습니다. `gori run shell`(또는 팔레트의 **Open shell**)은 OS 설정을 건드리지 않고, curl, git, Python, Go, Node 트래픽이 실행 중인 gori를 거치며 그 CA를 신뢰하는 셸을 엽니다. `gori run shell -- curl https://example.com`은 명령 하나만 그렇게 실행합니다. [`gori run shell`](/ko/reference/cli/#run-shell)을 참고하세요.
 
-> gori의 개인 키는 머신 비밀입니다. `0600` 권한으로 기록되며 머신을 절대 벗어나지 않습니다. 이전의 모든 신뢰를 무효화할 의도가 있을 때만 팔레트(**Regenerate CA certificate**)에서 교체하세요.
+> gori의 개인 키는 이 머신에만 두는 비밀입니다. `0600` 권한으로 기록되며 머신 밖으로 나가지 않습니다. 이전의 모든 신뢰를 무효화할 의도가 있을 때만 팔레트(**Regenerate CA certificate**)에서 교체하세요.
 
 ### Option C: 휴대폰이나 태블릿에 CA 설치하기 {#option-c-install-the-ca-on-a-phone-or-tablet}
 
@@ -84,11 +84,11 @@ gori는 요청 시 루트로부터 호스트별 리프 인증서를 발급하므
 
 `gori.proxy`는 gori가 스스로 응답하는 예약된 이름입니다. 프록시를 설정한 뒤에만 동작하며 네트워크로 나가지 않습니다. 프록시를 먼저 설정하고 싶지 않다면 `http://<LAN-IP>:8070/`으로 바로 접속해도 같은 페이지가 나옵니다.
 
-**확인.** **History**로 전환하세요(`3`). 최소 한 개의 행이 보여야 합니다. `200` 상태의 `GET https://example.com/` 요청입니다. History가 비어 있다면 캡처가 gori에 도달하지 않는 것입니다. 프록시 설정(Option B)을 다시 확인하거나 **Open browser**(Option A)를 사용하세요.
+**확인.** **History**로 전환하세요(`3`). 최소 한 개의 행이 보여야 합니다. `200` 상태의 `GET https://example.com/` 요청입니다. History가 비어 있다면 트래픽이 gori에 닿지 않는 것입니다. 프록시 설정(Option B)을 다시 확인하거나 **Open browser**(Option A)를 사용하세요.
 
 ## 3. 두 가지 탐색 표면 익히기 {#3-learn-the-two-discovery-surfaces}
 
-탭별 단축키를 외울 필요는 없습니다. 두 개의 키로 모든 동작에 닿습니다.
+탭별 단축키를 외울 필요는 없습니다. 키 두 개로 모든 동작에 닿습니다.
 
 | 표면 | 키 | 용도 |
 |---------|-----|----------------|
@@ -127,11 +127,11 @@ gori의 화면은 한 줄로 늘어선 탭입니다. 기본 순서는 Project �
 | `Esc` | 포커스를 탭 바 쪽으로 되돌림 |
 | `Tab` / `Shift-Tab` | 탭 바와 패널 사이로 포커스 이동 |
 
-마우스는 활성화하면(Preferences → **Editor & Keys** → **Mouse**) 동작합니다. 탭 클릭, 행 클릭으로 선택, 다시 클릭으로 열기. **Help** 탭은 이 페이지가 열려 있지 않을 때 쓸 수 있는 앱 안의 완전한 키 치트시트입니다.
+마우스는 활성화하면(Preferences → **Editor & Keys** → **Mouse**) 동작합니다. 탭을 클릭하고, 행을 클릭해 선택하고, 한 번 더 클릭해 엽니다. **Help** 탭(`?`)은 앱 안에 있는 전체 키 치트시트입니다.
 
 ## 5. History에서 플로우 읽기 {#5-read-a-flow-in-history}
 
-History가 활성화되어 있는지 확인하세요(`3`). 모든 요청/응답은 *플로우*입니다. 시작 줄, 헤더, 본문(최대 2 MiB 저장), 그리고 HTTP/2 프레임, WebSocket 메시지, 존재하면 디코드된 JWT / SAML / GraphQL까지.
+History가 활성화되어 있는지 확인하세요(`3`). 모든 요청/응답은 *플로우*입니다. 플로우에는 시작 줄, 헤더, 본문(기본값으로 앞 2 MiB까지 저장)이 담기고, 해당하면 HTTP/2 프레임, WebSocket 메시지, 디코드된 JWT / SAML / GraphQL도 함께 담깁니다.
 
 <figure class="tui-shot">
   <img src="/images/tui/history.svg" alt="시간, 메서드, 프로토콜, 호스트, 경로, 상태, 유형, 크기, 소요 시간 열로 캡처된 HTTP 플로우를 나열하는 gori History 탭" width="1206" height="520" loading="lazy" decoding="async">
@@ -240,7 +240,7 @@ gori tutorial
   <figcaption>가이드 투어는 탭과 패널, space 메뉴, 팔레트, 그리고 READ / INS 편집 모드를 안내합니다. 각 키를 눌러 본 뒤, 안전한 샌드박스에서 네 가지를 모두 연습하세요.</figcaption>
 </figure>
 
-이 투어는 첫 실행 마법사의 마지막에도 제안되며, 세션 안에서는 팔레트 명령 **Guided tour**(`Ctrl-P`)로 열 수 있습니다. 마지막 카드에는 투어를 마치면 프로젝트 선택 화면, `--db` 세션, 셸, 현재 세션 중 어디로 이어지는지 안내합니다.
+이 투어는 첫 실행 마법사의 마지막에도 제안되며, 세션 안에서는 팔레트 명령 **Guided tour**(`Ctrl-P`)로 열 수 있습니다. 마지막 카드는 투어를 마치면 프로젝트 선택 화면, `--db` 세션, 셸, 현재 세션 중 어디로 이어지는지 안내합니다.
 
 ## 다음 단계 {#next-steps}
 

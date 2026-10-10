@@ -13,7 +13,7 @@ group = "워크벤치"
 
 ## 두 개의 렌즈 {#two-lenses}
 
-하나의 세션, 두 개의 뷰이며 `Ctrl-T`로 전환합니다. 각 렌즈의 최상위 카드 테두리에 전환 칩이 있습니다(INPUT에는 ` ^T:→FORGE `, PAYLOAD에는 ` ^T:→DECODE `). 클릭해도 키와 똑같이 동작합니다:
+세션 하나를 두 가지 뷰로 보며, `Ctrl-T`로 전환합니다. 각 렌즈의 최상위 카드 테두리에 전환 칩이 있습니다(INPUT에는 ` ^T:→FORGE `, PAYLOAD에는 ` ^T:→DECODE `). 클릭해도 키와 똑같이 동작합니다:
 
 - **Decode**: INPUT에 쿠키를 붙여 넣으면 파트가 DECODED에 실시간으로 디코드됩니다. **OPTIONS**는 읽는 방식을 고정합니다: 포맷(`Ctrl-A`로 `auto` / `flask` / `rack` / `django` 순환, `auto`는 문장 부호로 감지), Django HMAC 알고리즘, 서명 salt. **SECRET**은 후보 키를 담으며, 입력하는 동안 검증 결과(`✓ verified` / `✗ bad key`)가 실시간으로 표시됩니다. 크랙하려면 읽기 패널(READ 모드의 INPUT 또는 DECODED)에서 `c`를 누르세요. SECRET을 비롯한 편집 패널에서는 `c`가 그냥 글자로 입력됩니다(아래 참고).
 - **Forge**: PAYLOAD에서 세션을 편집하고(Flask/Django는 JSON 객체, Rack은 불투명한 base64 값), SECRET을 설정하면 재서명된 쿠키가 OUTPUT에 실시간으로 나타납니다.
@@ -36,7 +36,7 @@ group = "워크벤치"
 
 - **파일 경로**는 워드리스트로 읽습니다(한 줄에 후보 하나);
 - **콤마로 구분된 목록**(`admin,secret,changeme`)은 인라인으로 시도합니다;
-- **단일 secret**은 원소가 하나인 목록입니다. 실시간 검증과 같은 검사를 크랙으로 표현한 것입니다.
+- **단일 secret**은 원소가 하나인 목록입니다. 크랙은 실시간 검증과 같은 검사를 합니다.
 
 성공하면 필드가 찾아낸 secret으로 바뀌고 결과가 `✓`로 뒤집혀, 그대로 Forge 렌즈로 이어갈 수 있습니다.
 

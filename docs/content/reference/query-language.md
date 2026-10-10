@@ -176,7 +176,7 @@ dropped and reported, the same way a bad numeric value is, rather than searched 
 - Parentheses group. Precedence is `NOT` then `AND` then `OR`.
 - A bare word (no `field:`) is free text over method, host, and target.
 - A bare word shaped like a comparison typed without its colon (`status>=400`, `host=api`) stays free text, so it usually matches nothing. The History and Sitemap empty states, `gori run history` and MCP `ql_explain` then name the colon form (`status:>=400`). A quoted or negated word is taken as intended.
-- A `field:` name that does not exist is not free text you meant to write: `gori run history`, `gori run sitemap` (and its `params`, `js` and `export` verbs) and `gori run probe` **refuse** it, name the nearest real field, and exit non-zero. `--lenient` searches the token as text instead (what every surface used to do silently: `methd:GET` matched nothing, which reads as an empty project). The TUI filter bar still accepts a half-typed name as you type it.
+- An unknown `field:` name is read as a typo, not as free text: `gori run history`, `gori run sitemap` (and its `params`, `js` and `export` verbs) and `gori run probe` **refuse** it, name the nearest real field, and exit non-zero. `--lenient` searches the token as text instead (what every surface used to do silently: `methd:GET` matched nothing, which reads as an empty project). The TUI filter bar still accepts a half-typed name as you type it.
 
 ```text
 host:example.com status:5xx           both must match
@@ -185,7 +185,7 @@ method:POST -status:200               POST, but not 200
 host:a.com OR host:b.com              either host
 (host:a.com OR host:b.com) -path:/js  either host, no /js
 NOT (host:cdn OR host:static)         neither host
--(host:cdn OR host:static)            the same — `-(` and `NOT(` negate the group
+-(host:cdn OR host:static)            the same: `-(` and `NOT(` negate the group
 login                                 free-text search
 ```
 
@@ -254,7 +254,7 @@ Every `body:` term, on every surface, reads the bytes **as they went over the wi
 
 ## Caveats
 
-A few shapes let a query look clean while it did not look:
+In a few cases a query result looks complete even though some rows were never checked:
 
 - **A pending flow** has no status, duration or response size, so it drops out of both `status:` and `-status:` (and the same for `dur` and `respsize`).
 - **A dropped term widens the query.** A value gori cannot read (`status:>=foo`) is ignored, not refused, but it is named: `gori run` prints a warning, and the MCP query tools list it in the reply's `ignored_terms` (pass `strict:true` to have them refuse the query instead). Check what survived with `ql_explain`.

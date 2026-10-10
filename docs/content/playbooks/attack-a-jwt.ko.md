@@ -13,7 +13,7 @@ JWT는 서버가 서명을 검사하는 만큼만 믿을 수 있습니다. 이 �
 
 ## 1. JWT 탭으로 토큰 보내기 {#1-send-a-token-to-the-jwt-tab}
 
-**JWT** 탭은 기본적으로 바 밖에 있습니다 — **`0`**을 누르고 "jwt"를 입력하거나 `Ctrl-P` → **Go to JWT**를 쓰세요. 토큰을 자주 다룬다면 Preferences에서 아홉 슬롯 중 하나를 내주면 됩니다. 토큰을 찾습니다. 캡처한 플로우를 **History**에서 열고, 요청 상세에서 `Bearer ` 뒤의 토큰 텍스트를 선택한 뒤 `Space` `S`(**Send selection to…**) → `j` **JWT**. 그러면 새 JWT 서브탭이 시드되고, Decode 렌즈에서 토큰이 **header**, **payload**, **signature**로 라이브 디코드됩니다.
+**JWT** 탭은 기본적으로 바 밖에 있습니다. **`0`**을 누르고 "jwt"를 입력하거나 `Ctrl-P` → **Go to JWT**를 쓰세요. 토큰을 자주 다룬다면 Preferences에서 아홉 슬롯 중 하나를 내주면 됩니다. 토큰을 찾습니다. 캡처한 플로우를 **History**에서 열고, 요청 상세에서 `Bearer ` 뒤의 토큰 텍스트를 선택한 뒤 `Space` `S`(**Send selection to…**) → `j` **JWT**. 그러면 새 JWT 서브탭이 시드되고, Decode 렌즈에서 토큰이 **header**, **payload**, **signature**로 라이브 디코드됩니다.
 
 디코드는 토큰이 *주장하는* 바를 보여 줄 뿐, 서명을 검사하지는 않습니다. 그래서 깔끔하게 디코드되는 토큰이라고 서버가 반드시 믿는 토큰은 아닙니다. 그것이 이 플레이북의 나머지가 답하는 질문입니다.
 
@@ -64,11 +64,11 @@ gori run jwt eyJhbGci... --attacks
 gori run jwt eyJhbGci... --attacks --key ./server-public.pem   # ...algorithm confusion까지
 ```
 
-공개키는 대상이 공개하는 것이면 무엇이든 됩니다 — JWKS의 `x5c` 인증서도 순수 `PUBLIC KEY` 블록과 똑같이 동작하며, gori가 어느 쪽이든 서버가 들고 있을 SPKI PEM으로 환원합니다.
+공개키는 대상이 공개하는 것이면 무엇이든 됩니다. JWKS의 `x5c` 인증서도 순수 `PUBLIC KEY` 블록과 똑같이 동작하며, gori가 어느 쪽이든 서버가 들고 있을 SPKI PEM으로 환원합니다.
 
 MCP에서는 `jwt_attacks` 도구가 같은 키를 `public_key`로 받아 동일한 목록을 반환합니다(`jwt_decode` / `jwt_verify` / `jwt_encode`가 1·2단계를 담당). 모두 `--read-only`에서도 쓸 수 있는 읽기 도구로, 네트워크를 건드리지 않고 아무것도 쓰지 않습니다. 다만 `key` / `public_key`를 경로로 주면 디스크에서 파일을 읽습니다.
 
-세그먼트가 셋이 아니라 다섯인 **암호화된** 토큰은 JWE이며, 위 내용은 하나도 적용되지 않습니다. gori는 무엇을 보고 있는지 알 수 있도록 보호 헤더(`alg`, `enc`, `kid`)를 보여주고, 페이로드는 생성하지 않습니다 — 조작할 클레임 세그먼트도, 제거할 서명도 없기 때문입니다.
+세그먼트가 셋이 아니라 다섯인 **암호화된** 토큰은 JWE이며, 위 내용은 하나도 적용되지 않습니다. gori는 무엇을 보고 있는지 알 수 있도록 보호 헤더(`alg`, `enc`, `kid`)를 보여주고, 페이로드는 생성하지 않습니다. 조작할 클레임 세그먼트도, 제거할 서명도 없기 때문입니다.
 
 **체크포인트.** ATTACKS 목록이 바로 보낼 수 있는 토큰 변형들로 채워집니다.
 

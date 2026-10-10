@@ -63,7 +63,7 @@ gori run repeater <flow-id> --target https://staging.example.com --diff
 | 토큰 | 해석 대상 | 시점 |
 |------|-----------|------|
 | `$ENV.KEY` | 전역 또는 프로젝트 환경 변수 | 빌드 시점, 요청을 구성하기 전 |
-| `$BIND.NAME` | extract 규칙이 채운 [세션 바인딩](/ko/guide/proxy/#session-bindings) | 전송 시점, 활성 신원의 테이블에서 |
+| `$BIND.NAME` | extract 규칙이 채운 [세션 바인딩](/ko/guide/proxy/#session-bindings) | 전송 시점, 활성 아이덴티티의 테이블에서 |
 | `$GEN.NAME` | 내장 값 생성기 | 전송 시점, 아웃바운드 요청마다 한 번 |
 
 토큰은 에디터에서 리터럴 텍스트로 남아 있다가 나가는 길에서만 확장됩니다. Repeater, Fuzzer, Miner, Intercept 포워드, `gori run`, MCP `send_request`가 그 지점입니다. 캡처에서 연 Repeater 요청이나 Intercept에 잡힌 메시지에서는 캡처된 바이트에 원래 있던 토큰은 그대로 나가고, 직접 입력한 토큰만 확장됩니다.
@@ -149,7 +149,7 @@ Fuzzer는 Intruder 스타일 엔진입니다. 요청에서 위치를 표시하�
 | `pitchfork` | 병렬 세트: 각 세트의 *n* 번째 페이로드를 함께 |
 | `clusterbomb` | 모든 세트에 걸친 모든 조합 |
 
-앞의 둘은 페이로드 세트를 **하나만**, 뒤의 둘은 표시된 위치마다 하나씩 사용합니다. 모드가 쓰는 것보다 많은 세트를 넘기면 실행 전에 쓰이지 않을 세트가 몇 개인지와 그것을 쓰는 방법을 알려 줍니다 — 기본값 `sniper`에 워드리스트를 둘 주면 첫 번째 것만 모든 위치에 들어갑니다.
+앞의 둘은 페이로드 세트를 **하나만**, 뒤의 둘은 표시된 위치마다 하나씩 사용합니다. 모드가 쓰는 것보다 많은 세트를 넘기면 실행 전에 쓰이지 않을 세트가 몇 개인지와 그것을 쓰는 방법을 알려 줍니다. 기본값 `sniper`에 워드리스트를 둘 주면 첫 번째 것만 모든 위치에 들어갑니다.
 
 ### 위치와 페이로드 {#positions-and-payloads}
 
@@ -258,8 +258,8 @@ gori run fuzz --flow 42 --field role --payloads ROLE_ADMIN,ROLE_USER,99
 ```
 
 `SPEC`은 필드 이름, 중첩 메시지 경로(`profile.age`), 필드 번호, 또는 반복 필드의 특정
-occurrence(`tags[1]`)입니다. 해당 rpc를 해석할 descriptor set이 필요합니다.
-`protoc --descriptor_set_out` 파일이든 `gori run grpc reflect`로 받아온 것이든. 필드 이름은
+occurrence(`tags[1]`)입니다. 해당 rpc를 해석할 descriptor set(`protoc --descriptor_set_out` 파일이나
+`gori run grpc reflect`로 받아온 것)이 필요합니다. 필드 이름은
 같은 플로우에서 Repeater의 `␣Pf:FIELDS` 폼과 History의 protobuf 트리가 이미 보여 주는 그 이름입니다.
 
 스플라이스가 할 수 있는 일에서 두 가지가 따라옵니다. 필드는 **캡처된 메시지에 실제로 있어야**

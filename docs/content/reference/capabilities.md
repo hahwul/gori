@@ -6,8 +6,8 @@ weight = 5
 
 gori has three entry points over shared project data and engine modules: the interactive TUI,
 the headless `gori run` CLI, and the MCP server. Sharing an engine means the same request policy
-and analysis apply where a workflow is exposed; it does **not** mean every UI gesture is a CLI
-command or an MCP tool.
+and analysis apply wherever a workflow is exposed. Not every UI gesture is a CLI command or an
+MCP tool, though.
 
 ## Protocols and operations
 
