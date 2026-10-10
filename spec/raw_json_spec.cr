@@ -40,6 +40,23 @@ describe Gori::RawJson do
     end
   end
 
+  # RFC 8259's grammar allows an unpaired surrogate escape, and `JSON.stringify` emits one
+  # for an emoji cut mid-pair. The stdlib lexer raised on it, so every tool gated on `valid?`
+  # (Miner JSON injection, probe insertion points, minimize, Pretty) treated the body as not JSON.
+  describe ".valid?" do
+    it "accepts an unpaired surrogate escape" do
+      Gori::RawJson.valid?(%({"s":"\\ud83d","t":"\\udc00x"})).should be_true
+      Gori::RawJson.valid?(%("\\ud83d\\u0041")).should be_true
+    end
+
+    it "still refuses anything that is not exactly one JSON value" do
+      ["", %({"a":}), "[1,]", "01", "{} trailing", "1 2", %("\\uABCG"), %("\\x"), "[" * 600 + "]" * 600].each do |source|
+        Gori::RawJson.valid?(source).should be_false
+      end
+      Gori::RawJson.valid?("[" * 300 + "]" * 300).should be_true # the pull parser's nesting cap, kept
+    end
+  end
+
   describe ".members" do
     it "lists an object's members in order with raw values, duplicates kept" do
       Gori::RawJson.members(%({"a":1,"b":{"c":[99999999999999999999]},"a":2})).should eq(

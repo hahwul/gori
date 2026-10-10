@@ -31,15 +31,13 @@ module Gori
     end
 
     # Whether `json` is exactly one JSON value, numbers of any magnitude included — the
-    # question `JSON.parse` answers "no" to for `{"id":18446744073709551615}`. Checks syntax with
-    # the lexer and builds nothing.
+    # question `JSON.parse` answers "no" to for `{"id":18446744073709551615}`. The `reindent`
+    # lexer in check-only mode: it builds nothing, and it accepts an unpaired surrogate escape
+    # (`"\ud83d"`, RFC 8259 grammar, what `JSON.stringify` emits for a cut emoji) that the
+    # stdlib lexer raises on — so such a body is still JSON to every tool that asks. A caller
+    # that then DECODES a string must survive that one shape (`JsonSpans.decode_string`).
     def valid?(json : String) : Bool
-      pull = JSON::PullParser.new(json)
-      pull.skip
-      finish(pull, json)
-      true
-    rescue JSON::ParseException
-      false
+      !Reindenter.new(json, "", nil, check_only: true).run.nil?
     end
 
     # `json` re-emitted — pretty when `indent` is given, compact otherwise — with every number
@@ -76,6 +74,8 @@ module Gori
       ARRAY_VALUE        = 1_u8
       ARRAY_END          = 2_u8
       MAX_DEPTH          =  256
+      # `valid?`'s cap: the stdlib pull parser's default `max_nesting`, which it answered before.
+      CHECK_MAX_DEPTH = 512
 
       @source : Bytes
       @json : String
@@ -87,8 +87,10 @@ module Gori
       @index : Int32
       @root_done : Bool
       @overflow : Bool
+      @check_only : Bool
 
-      def initialize(@json : String, indent : String, @max_output_bytes : Int32?)
+      # `check_only`: validate without writing anything; `run` then returns "" for valid input.
+      def initialize(@json : String, indent : String, @max_output_bytes : Int32?, @check_only : Bool = false)
         @source = @json.to_slice
         @indent = indent.to_slice
         @out = IO::Memory.new
@@ -127,6 +129,7 @@ module Gori
       private def finish_document : String?
         tail = skip_space(@index)
         return nil unless tail == @source.size
+        return "" if @check_only
         return nil unless append_slice(@index, @source.size)
         return nil if @overflow
         String.new(@out.to_slice)
@@ -251,7 +254,7 @@ module Gori
           complete_parent
           return !@overflow
         end
-        return false if @kinds.size >= MAX_DEPTH
+        return false if @kinds.size >= (@check_only ? CHECK_MAX_DEPTH : MAX_DEPTH)
         complete_parent
         @kinds << kind
         @states << initial_state
@@ -394,6 +397,7 @@ module Gori
       end
 
       private def newline_indent(depth : Int32) : Bool
+        return true if @check_only
         return false unless ensure_capacity(1 + depth * @indent.size)
         append_byte(0x0a_u8)
         depth.times { @out.write(@indent) }
@@ -401,12 +405,14 @@ module Gori
       end
 
       private def append_slice(start : Int32, stop : Int32) : Bool
+        return true if @check_only
         return false unless ensure_capacity(stop - start)
         @out.write(@source[start, stop - start]) if stop > start
         !@overflow
       end
 
       private def append_byte(byte : UInt8) : Nil
+        return if @check_only
         return unless ensure_capacity(1)
         @out.write_byte(byte)
       end
