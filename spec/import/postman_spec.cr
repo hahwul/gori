@@ -370,6 +370,20 @@ describe Gori::Import::Postman do
     hs[3].should_not contain("Authorization")
   end
 
+  it "reads \"auth\": null on a folder or request as inherit, the way Postman does" do
+    result = parse(<<-JSON)
+      {"info": {"name": "n"},
+       "auth": {"type": "bearer", "bearer": [{"key": "token", "value": "ROOT"}]},
+       "item": [
+         {"request": {"method": "GET", "url": "https://a.test/req", "auth": null}},
+         {"name": "f", "auth": null,
+          "item": [{"request": {"method": "GET", "url": "https://a.test/folder"}}]}]}
+      JSON
+    hs = heads(result)
+    hs[0].should contain("Bearer ROOT")
+    hs[1].should contain("Bearer ROOT")
+  end
+
   it "replaces the request's own same-named header with the signed one, and signs nothing for an empty token" do
     result = parse(<<-JSON)
       {"info": {"name": "n"},
