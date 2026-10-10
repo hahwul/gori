@@ -406,6 +406,25 @@ describe "MCP probe rules + mode tools" do
     end
   end
 
+  # Partial, like every other update_* tool: an omitted field keeps its stored value instead of
+  # snapping back to create's defaults (string / info / "" / response / body).
+  it "keeps every field an update omits" do
+    with_store do |store|
+      tools = tools_for(store)
+      id = call_json(tools, "create_probe_rule",
+        %({"title":"a","pattern":"A+","match_kind":"regex","severity":"high","description":"d","side":"request","region":"header"}))["id"].as_s
+      call_json(tools, "update_probe_rule", %({"id":"#{id}","title":"renamed"}))
+      row = store.probe_custom_rules.first
+      row.title.should eq("renamed")
+      row.pattern.should eq("A+")
+      row.kind.should eq("regex")
+      row.severity.should eq(Gori::Store::Severity::High)
+      row.description.should eq("d")
+      row.side.should eq("request")
+      row.region.should eq("header")
+    end
+  end
+
   # A custom probe rule IS a detection. Reporting the new title over a rolled-back batch tells
   # the agent the rule now carries its widened pattern while every later scan still runs the OLD
   # one — a false negative it was told not to expect. PROJECT_BUSY/retryable, like the
