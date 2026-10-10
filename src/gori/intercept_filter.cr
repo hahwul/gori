@@ -480,6 +480,36 @@ module Gori
       end
     end
 
+    # `matches?` with SQL's three-valued logic, for a caller matching a STORED row that must
+    # agree with History's SQL (`Colormarker`'s row tier). A `status:` leaf over a pending flow
+    # is UNKNOWN there — `status = 404` is NULL — and NOT of unknown stays unknown, so
+    # `-status:404` must not paint a row the History filter drops (QL::CAVEATS). The hold gate
+    # keeps `matches?`: its request leg has no status by design.
+    def matches_stored?(s : Subject) : Bool
+      tree = @tree
+      return true unless tree
+      eval_stored(tree, s) == true
+    end
+
+    private def eval_stored(tree : FilterAst::Tree(Term), s : Subject) : Bool?
+      case tree.op
+      in .leaf?
+        leaf = tree.leaf
+        leaf.field == :status && s.status.nil? ? nil : leaf.matches?(s)
+      in .not?
+        (v = eval_stored(tree.children.first, s)).nil? ? nil : !v
+      in .and?, .or?
+        decisive = tree.op.or? # the value that settles the group on its own
+        result : Bool? = !decisive
+        tree.children.each do |c|
+          v = eval_stored(c, s)
+          return decisive if v == decisive
+          result = nil if v.nil?
+        end
+        result
+      end
+    end
+
     # Compile one grammar term. nil DROPS it (an empty value, e.g. `host:` mid-type),
     # which folds up to match-all — so the queue doesn't blank out while typing.
     protected def self.parse_term(term : FilterAst::Term) : Term?

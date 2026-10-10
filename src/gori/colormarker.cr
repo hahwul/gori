@@ -217,7 +217,7 @@ module Gori
         scheme: row.scheme, status: row.status, proto: proto, port: row.port)
       compiled.each_with_index do |c, i|
         if f = c.filter
-          return c.rule if f.matches?(subject)
+          return c.rule if f.matches_stored?(subject)
         elsif sql = c.sql
           return c.rule if store_tier_hit?(i, row.id, sql, rev)
         end
@@ -726,7 +726,7 @@ module Gori
     private record Resolved, filter : InterceptFilter?, ids : Set(Int64)? do
       def hit?(row : Store::FlowRow, subject : InterceptFilter::Subject) : Bool
         if f = filter
-          f.matches?(subject)
+          f.matches_stored?(subject)
         elsif s = ids
           s.includes?(row.id)
         else
