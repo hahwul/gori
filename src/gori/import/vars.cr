@@ -96,10 +96,9 @@ module Gori
       # is checked — a brace in the path, query or fragment is the operator's own data and
       # stays verbatim.
       def self.braced_authority?(url : String) : Bool
-        s = url
-        if i = s.index("://")
-          s = s[(i + 3)..]
-        end
+        # Only a LEADING scheme: a scheme-less `{{host}}/login?next=https://x` would otherwise
+        # be cut at the query's `://` and read `x` as the authority.
+        s = url.sub(Builder::LEADING_SCHEME, "")
         cut = [s.index('/'), s.index('?'), s.index('#'), s.size].compact.min
         authority = s[0, cut]
         authority.includes?('{') || authority.includes?('}')

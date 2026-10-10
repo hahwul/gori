@@ -192,6 +192,15 @@ describe Gori::Import::Postman do
     result.flows.map(&.request.target).should eq(["/users/{{userId}}", "/d?t={{$timestamp}}"])
   end
 
+  # Only a LEADING scheme is cut: the query's `://` used to be read as the scheme, the
+  # authority as `x`, and the undefined `{{host}}` went unnamed.
+  it "names an undefined host variable when the query carries a URL" do
+    ex = expect_raises(Gori::Error) do
+      parse(%({"info": {"name": "n"}, "item": [{"request": {"method": "GET", "url": "{{host}}/login?next=https://x"}}]}))
+    end
+    ex.message.not_nil!.should contain("{{host}}")
+  end
+
   it "names the missing variables when EVERY entry was skipped for one" do
     # The generic "all N entries were skipped as malformed" blames the file; a collection
     # whose {{baseUrl}} lives in a separate environment export is not malformed at all.
