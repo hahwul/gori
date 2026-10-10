@@ -103,6 +103,18 @@ describe Gori::Redact::Matcher do
       end
     end
 
+    # An escape-dense value still outruns the JIT stack (the group repeats per escape). The rule
+    # cannot finish, so the value is withheld whole instead of the read raising Regex::Error.
+    it "withholds a value too escape-dense to scan instead of raising" do
+      with_salt do
+        prof = Gori::Redact::Profile.new("p", json_fields: ["token"])
+        body = %({"token":") + "\\n" * 50_000
+        r = Gori::Redact::Matcher.new(prof).body(body.to_slice, "text/html")
+        r.text.should contain("too complex to scan")
+        r.count.should eq(1)
+      end
+    end
+
     it "takes capture group 1 at the right byte offsets after multibyte context" do
       with_salt do
         prof = Gori::Redact::Profile.new("p", patterns: ["계정=(\\d+)"])
