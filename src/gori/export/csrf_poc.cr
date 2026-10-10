@@ -52,12 +52,21 @@ module Gori
       private def self.form_capable?(method : String, ct : String, body : String) : Bool
         return true if method == "GET"
         return false unless method == "POST"
-        return body.empty? || URLENCODED_SHAPE.matches?(body) if ct.empty?
+        return body.empty? || urlencoded_shape?(body) if ct.empty?
         ct == "application/x-www-form-urlencoded" || ct == "multipart/form-data" || body.empty?
       end
 
-      # `name=value` pairs joined by `&`, the names in the characters a form encoder emits.
-      URLENCODED_SHAPE = /\A[\w.~%+*\[\]-]+=[^&\s]*(?:&[\w.~%+*\[\]-]+=[^&\s]*)*\z/
+      # `name=value` pairs joined by `&`, the names in the characters a form encoder emits. A
+      # scan, not a regex: the body is whatever the client sent, and PCRE raises on invalid UTF-8
+      # and runs out of JIT stack on a long run of pairs — Copy-as builds this row eagerly.
+      private def self.urlencoded_shape?(body : String) : Bool
+        body.split('&').all? do |pair|
+          eq = pair.byte_index('=')
+          next false unless eq && eq > 0
+          pair.byte_slice(0, eq).each_byte.all? { |b| b.unsafe_chr.ascii_alphanumeric? || b.unsafe_chr.in?('_', '.', '~', '%', '+', '*', '[', ']', '-') } &&
+            pair.byte_slice(eq + 1).each_byte.none? { |b| b.unsafe_chr.ascii_whitespace? }
+        end
+      end
 
       # --- form path ------------------------------------------------------------------------
 

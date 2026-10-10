@@ -170,3 +170,12 @@ describe Gori::Export::CsrfPoc do
     html.should contain("\\x3c/script\\x3e")
   end
 end
+
+# The no-Content-Type form check runs over whatever the client sent, from Copy-as.
+describe "Gori::Export::CsrfPoc on a raw CT-less POST body" do
+  it "does not raise on invalid UTF-8 or a very long run of pairs" do
+    ["a=\xff\xfe", "a=1&" * 100_000 + "a=1"].each do |body|
+      Gori::Export::CsrfPoc.text("POST /x HTTP/1.1\r\nHost: acme.test\r\n\r\n#{body}", "https://acme.test/x").should_not be_nil
+    end
+  end
+end
