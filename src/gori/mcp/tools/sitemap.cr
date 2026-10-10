@@ -149,7 +149,7 @@ module Gori
         items_result(JSON.build do |j|
           j.array do
             tags.each do |(hst, path), tag|
-              next if host && hst != host
+              next if host && !hst.compare(host, case_insensitive: true).zero?
               {
                 host: Serialize.text(hst),
                 path: Serialize.text(path),
