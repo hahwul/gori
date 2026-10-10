@@ -61,7 +61,6 @@
 - Export: OpenAPI YAML no longer fails on a JSON body nested about 30 levels deep
 - Scope: a regex exclude rule that runs out of PCRE2 stack on a padded URL now still excludes, instead of letting the request through
 - OAST and Diff: an imported project with an out-of-range OAST, retest or agent-reply timestamp, or response size, opens and compares instead of ending gori or failing the diff
-- Projects: a read that outlives its project no longer reopens the database behind the open lock and pins its WAL
 - CLI and MCP: an unsearchable or looping `GORI_HOME`, `--db` or `/tmp/cc-socks`, or a missing home directory, is reported in one line or skipped instead of a backtrace or a failed agent wake-up
 - CLI: `gori update` skips a malformed release asset entry and `gori run issues --export` reports a failed write in one line, instead of a backtrace
 - Redaction: a JSON secret value longer than about 60 KB is still redacted by the text fallback instead of being left in place, and one too dense with escapes to scan is withheld instead of failing the copy, export or read
