@@ -106,17 +106,21 @@ module Gori
       end
 
       # The expanded URL, or a skip naming why it cannot be stored: a variable left
-      # unexpanded (recorded in `missing`, so a file that resolves to nothing can say which),
-      # a braced host, or nothing at all.
+      # unexpanded in the host (recorded in `missing`, so a file that resolves to nothing can
+      # say which), a braced host, or nothing at all. A leftover in the path or query stays
+      # verbatim, like one in a header: `/users/{{userId}}` or `?t={{$timestamp}}` (Postman's
+      # dynamic variables) is routine, and refusing it dropped the whole request. It is kept
+      # as the bare `{{name}}`: Insomnia's `{{ _.name }}` spacing would put a space in the
+      # request line.
       def self.checked_url(url : String, missing : Set(String)) : String
-        left = unresolved(url)
-        unless left.empty?
+        if braced_authority?(url)
+          left = unresolved(url)
+          raise Gori::Error.new("templated host in URL: #{url}") if left.empty?
           left.each { |n| missing << n }
           raise Gori::Error.new("unresolved variable in URL: #{url}")
         end
-        raise Gori::Error.new("templated host in URL: #{url}") if braced_authority?(url)
         raise Gori::Error.new("request has an empty url") if url.empty?
-        url
+        url.includes?("{{") ? url.gsub(PLACEHOLDER) { |_, m| "{{#{m[1]}}}" } : url
       end
 
       # A fixed boundary (not a random one): imports must be reproducible, and two runs over

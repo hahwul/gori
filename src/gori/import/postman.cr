@@ -127,6 +127,7 @@ module Gori
         # `{{baseUrl}}` — a flow that can never be sent, indistinguishable in History from a
         # real one. `Builder::HOST_VALID` now refuses that host as well, but this branch is
         # what records WHICH variables were missing, so keep skipping here. Record and skip.
+        # (Only the host: a leftover in the path or query is kept verbatim — `Vars.checked_url`.)
         Vars.checked_url(Vars.expand(raw.strip, vars), missing)
       end
 
