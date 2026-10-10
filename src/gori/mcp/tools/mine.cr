@@ -279,7 +279,7 @@ module Gori
         in Miner::PlanError::Reason::NoTarget
           "provide a 'url' target (scheme://host) or a flow_id that carries one"
         in Miner::PlanError::Reason::BadTarget
-          "could not parse a host from '#{ex.detail}'"
+          ex.message.to_s # names the host it could not parse, or the scheme it refused
         in Miner::PlanError::Reason::NoLocations
           (why = ex.detail) ? "no requested location applies to this request — #{why}" : "no applicable locations for this request"
         in Miner::PlanError::Reason::Wordlist

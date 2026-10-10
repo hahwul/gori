@@ -72,7 +72,7 @@ module Gori
           unless link_owner_exists?(store, owner_kind, resolved_id)
             abort "gori run links: no #{owner_kind.label} with id #{resolved_id}"
           end
-          {resolved_id, Links.resolve_all(store, store.list_links(owner_kind, resolved_id))}
+          {resolved_id, Links.resolve_all(store, Links.owner_links(store, owner_kind, resolved_id))}
         end
 
         if format == :json
@@ -163,6 +163,9 @@ module Gori
           if add
             puts link_add(store, owner_kind, oid, ref_kind, rid, format)
           else
+            if Links.issue_seed_flow?(store, owner_kind, oid, ref_kind, rid)
+              abort "gori run links delete: flow ##{rid} is issue ##{oid}'s seed flow (its flow_id), not a removable link"
+            end
             unless store.link_id(owner_kind, oid, ref_kind, rid)
               abort "gori run links delete: no link from #{owner_kind.label} ##{oid} to #{ref_kind.label} ##{rid}"
             end

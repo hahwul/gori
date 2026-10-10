@@ -441,7 +441,22 @@ describe Gori::Export::Har do
 
       back = reimport(har)
       back.row.url.should eq(detail.row.url)
+      back.row.target.should eq("http://api.test:8080/ping")
       String.new(back.request_head).should eq("GET http://api.test:8080/ping HTTP/1.1\r\nHost: api.test:8080\r\n\r\n")
+      export([back])[0].should eq(har)
+    end
+  end
+
+  it "takes an asterisk-form target from the raw head, not the URL" do
+    with_store do |store|
+      detail = capture_flow(store,
+        req_head: "OPTIONS * HTTP/1.1\r\nHost: shop.test\r\n\r\n",
+        method: "OPTIONS", target: "*")
+      har, _ = export([detail])
+      back = reimport(har)
+      back.row.method.should eq("OPTIONS")
+      back.row.target.should eq("*")
+      export([back])[0].should eq(har)
     end
   end
 

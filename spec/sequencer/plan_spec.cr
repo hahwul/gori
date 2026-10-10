@@ -448,6 +448,14 @@ describe Gori::Sequencer::Plan do
       ex.detail.should eq("::::")
     end
 
+    it "reports BadTarget for a scheme other than http(s) instead of dialling it as plain HTTP" do
+      ex = expect_raises(Q::PlanError, /unsupported target scheme "ftp"/) do
+        Q::Plan.build(Q::PlanOptions.new(RAW.to_slice, target: "ftp://t.test",
+          config: live_config(cookie, 5)), ungated_outbound)
+      end
+      ex.reason.should eq(Q::PlanError::Reason::BadTarget)
+    end
+
     it "reports NoTokenLoc for a blank selector on a kind that needs one" do
       [Q::ExtractKind::Cookie, Q::ExtractKind::Header, Q::ExtractKind::Regex,
        Q::ExtractKind::JsonPath].each do |kind|

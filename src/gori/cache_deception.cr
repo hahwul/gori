@@ -117,8 +117,9 @@ module Gori
     # a cache-deception check declines exactly what an authorize replay declines, for the same
     # reasons: an incomplete flow, one gori answered itself, and — unless `unsafe` — an unsafe
     # method, whose replay would run its side effect up to three times (prime, anonymous, control).
-    # Plus one rung of its own: a head stored as an h2 field list, which `FlowRequest.build`
-    # refuses by raising — screened here so it is a skip, not an error halfway through a run.
+    # Plus two rungs of its own: a head stored as an h2 field list, which `FlowRequest.build`
+    # refuses by raising — screened here so it is a skip, not an error halfway through a run —
+    # and a request carrying nothing the anonymous identity strips (`:nothing_to_strip`).
     # Surfaces word it with `Authorize::Passive.reason_label`, so both tools word an identical
     # refusal identically.
     def self.skip_reason(detail : Store::FlowDetail, unsafe : Bool) : Symbol?
@@ -127,6 +128,10 @@ module Gori
       return :short_circuited if row.short_circuited?
       return :pseudo_header_head if Repeater::FlowRequest.pseudo_header_head?(detail.request_head)
       return :unsafe_method unless unsafe || Authorize::Passive::SAFE_METHODS.includes?(row.method.upcase)
+      # No Cookie/Authorization to strip (a flow authenticated by `X-Api-Key`, or none at all):
+      # the "anonymous" send would be the authenticated one byte for byte, and its matching
+      # answer would read `served`. Authorize skips such a flow as `:no_effect` for the same reason.
+      return :nothing_to_strip unless Authorize::Passive.any_identity_changes?(detail, identities)
       nil
     end
 
@@ -137,7 +142,7 @@ module Gori
                    stop : Proc(Bool)? = nil) : Report?
       target = engine.run(detail, identities, stop)
       return nil unless target
-      sent = target.trials.size - target.blocked.to_i
+      sent = target.sent_count
       return classify(target, sent_count: sent) if target.fully_blocked?
       return classify(target, sent_count: sent) if unanchored?(target)
 

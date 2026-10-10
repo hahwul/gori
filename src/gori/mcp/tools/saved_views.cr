@@ -184,7 +184,9 @@ module Gori
       # `except` exempts the view being edited from its own name check.
       private def unusable_view_fields(name : String, query : String, scope : String, *,
                                        except : SavedViews::View? = nil) : Result?
-        if reason = SavedViews.unusable_name_reason(name)
+        # An unchanged name is not being chosen, so it is not re-judged: a view saved before a
+        # built-in took its name could otherwise never have its query edited.
+        if except.try(&.name) != name && (reason = SavedViews.unusable_name_reason(name))
           return err(reason, "INVALID_ARGUMENT", field: except ? "new_name" : "name")
         end
         if reason = SavedViews.unusable_query_reason(query)

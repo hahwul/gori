@@ -16,6 +16,35 @@ describe Gori::MCP::Serialize do
     out["body"]["text"].as_s.bytesize.should eq(Gori::MCP::Serialize::MAX_TEXT)
   end
 
+  # A cap through a multibyte codepoint left an incomplete sequence at the end of a text
+  # prefix, and the whole body came back as base64 with binary:true.
+  it "keeps a CJK body text when the cap splits a codepoint" do
+    body = %({"name":"한국어"}).to_slice
+    {9, 10, 11, 12}.each do |cap|
+      out = JSON.parse(JSON.build { |j| j.object { Gori::MCP::Serialize.emit_body(j, "body", nil, body, false, cap) } })
+      out["body"]["encoding"].as_s.should eq("text")
+      out["body"].as_h.has_key?("binary").should be_false
+      out["body"]["truncated"].as_bool.should be_true
+      text = out["body"]["text"].as_s
+      String.new(body).starts_with?(text).should be_true
+    end
+  end
+
+  it "still base64s a binary body the cap cuts" do
+    body = Bytes[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xe2, 0x82]
+    out = JSON.parse(JSON.build { |j| j.object { Gori::MCP::Serialize.emit_body(j, "body", nil, body, false, 4) } })
+    out["body"]["encoding"].as_s.should eq("base64")
+    out["body"]["binary"].as_bool.should be_true
+  end
+
+  it "trims only an incomplete trailing sequence" do
+    Gori::MCP::Serialize.utf8_whole_prefix("a한".to_slice[0, 3]).should eq(1)
+    Gori::MCP::Serialize.utf8_whole_prefix("a한".to_slice).should eq(4)
+    Gori::MCP::Serialize.utf8_whole_prefix("abc".to_slice).should eq(3)
+    Gori::MCP::Serialize.utf8_whole_prefix(Bytes[0x80, 0x80]).should eq(2)
+    Gori::MCP::Serialize.utf8_whole_prefix(Bytes.new(0)).should eq(0)
+  end
+
   it "emits null for an empty body" do
     out = JSON.parse(JSON.build { |j| j.object { Gori::MCP::Serialize.emit_body(j, "body", nil, nil, false) } })
     out["body"].raw.should be_nil

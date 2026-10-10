@@ -162,7 +162,9 @@ module Gori
         conds << "category = ?"; args << c
       end
       if h = host
-        conds << "host = ?"; args << h
+        # Hosts are stored as captured, and a host is case-insensitive (no index leads with
+        # `host` here, so NOCASE costs no index). Same rule in the two dismiss-by-host reads.
+        conds << "host = ? COLLATE NOCASE"; args << h
       end
       if ms = min_severity
         conds << "severity >= ?"; args << ms.value
@@ -265,10 +267,10 @@ module Gori
     end
 
     def dismiss_probe_by_host(host : String) : Bool
-      bulk_dismiss_probe("host = ?", host)
+      bulk_dismiss_probe("host = ? COLLATE NOCASE", host)
     end
 
-    # `clause` is a fixed internal predicate ("code = ?" / "host = ?"), never user text.
+    # `clause` is a fixed internal predicate ("code = ?" / "host = ? COLLATE NOCASE"), never user text.
     private def bulk_dismiss_probe(clause : String, arg : DB::Any) : Bool
       ok = exec_task_ok ->(c : DB::Connection) {
         c.exec("UPDATE probe_issues SET status = ?, last_seen = ? WHERE #{clause} AND status = ?",
@@ -394,7 +396,7 @@ module Gori
         conds << "code = ?"; args << code
       end
       if host
-        conds << "host = ?"; args << host
+        conds << "host = ? COLLATE NOCASE"; args << host
       end
       @db.scalar("SELECT COUNT(*) FROM probe_issues WHERE #{conds.join(" AND ")}", args: args).as(Int64).to_i
     rescue

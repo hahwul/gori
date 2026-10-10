@@ -617,6 +617,11 @@ module Gori::Repeater
       end
       raw = options.target || options.default_target.presence
       raise PlanError.new(PlanError::Reason::NoTarget, "no target origin") unless raw
+      origin_of(raw)
+    end
+
+    # {scheme (ws folded to http), host, port} dialled for target text `raw`.
+    private def self.origin_of(raw : String) : {String, String, Int32}
       begin
         scheme, host, port = FlowRequest.dial_target(raw)
       rescue e : FlowRequest::DialTargetError
@@ -625,6 +630,17 @@ module Gori::Repeater
       end
       bad_target(Env.expand(raw)) if port <= 0
       {normalize_scheme(scheme), host, port}
+    end
+
+    # Why a session target `raw` can never be sent, or nil — the origin + scheme checks `build`
+    # runs, for a surface WRITING a target (MCP create/update_repeater), so `ftp://x` is refused
+    # when stored rather than at its first send. An unresolved `$NAME` is not refused here: it
+    # may be bound by the time the session is sent.
+    def self.target_error(raw : String) : String?
+      scheme = origin_of(raw)[0]
+      scheme.in?("http", "https") ? nil : "unsupported target scheme #{scheme.inspect}"
+    rescue e : PlanError
+      e.reason.unresolved_env? ? nil : e.message
     end
 
     private def self.bad_target(url : String) : NoReturn

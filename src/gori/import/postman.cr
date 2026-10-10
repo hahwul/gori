@@ -64,7 +64,7 @@ module Gori
           h = node.as_h?
           next unless h
           scoped = h["variable"]? ? Vars.merge!(vars.dup, h["variable"]) : vars
-          scoped_auth = h["auth"]? || auth
+          scoped_auth = own_auth(h) || auth
           if kids = h["item"]?.try(&.as_a?)
             skipped += walk(kids, scoped, scoped_auth, depth + 1, now, pairs, missing, prov)
             next
@@ -80,6 +80,12 @@ module Gori
           end
         end
         skipped
+      end
+
+      # A node's own `auth`, nil when absent OR `null`: Postman reads `"auth": null` as
+      # inherit, and a JSON null is a truthy `JSON::Any` that shadowed the ancestor's auth.
+      private def self.own_auth(h : Hash(String, JSON::Any)) : JSON::Any?
+        h["auth"]?.try { |a| a.raw.nil? ? nil : a }
       end
 
       private def self.request_to_flow(now : Int64, req : JSON::Any, vars : Vars::Table,
@@ -99,7 +105,7 @@ module Gori
         if content_type && !headers.any? { |(k, _)| k.compare("content-type", case_insensitive: true) == 0 }
           headers << {"Content-Type", content_type}
         end
-        signed = auth_headers(h["auth"]? || auth, vars)
+        signed = auth_headers(own_auth(h) || auth, vars)
         # Postman's auth signers REPLACE a same-named header (removeHeader, ignoring case)
         # rather than add a second one beside the request's own.
         signed.each { |(name, _)| headers.reject! { |(k, _)| k.compare(name, case_insensitive: true) == 0 } }

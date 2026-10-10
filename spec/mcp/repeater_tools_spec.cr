@@ -28,6 +28,44 @@ describe Gori::MCP::Server do
       end
     end
 
+    # `position` is a 0-based tab index: stored as a raw sort key it tied with the tab already
+    # there, and a negative or past-the-end one was stored verbatim.
+    it "lands an explicit position at that tab index, clamped to the strip" do
+      with_store do |store|
+        create = ->(extra : String) {
+          call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_repeater","arguments":{"target":"https://api.test","request":"GET /x HTTP/1.1\\r\\nHost: api.test\\r\\n\\r\\n"#{extra}}}})
+          mcp_tool_payload(mcp_drive(store, call)[0])
+        }
+        a = create.call("")["id"].as_i64
+        b = create.call("")["id"].as_i64
+        first = create.call(%(,"position":0))
+        first["tui_index"].as_i64.should eq(1)
+        first["position"].as_i64.should eq(0)
+        create.call(%(,"position":-5))["tui_index"].as_i64.should eq(1)
+        last = create.call(%(,"position":1000))
+        last["tui_index"].as_i64.should eq(5)
+        last["position"].as_i64.should eq(4)
+        store.repeaters_mcp.map(&.id)[2, 2].should eq([a, b])
+      end
+    end
+
+    it "refuses a target that can never be sent, on create and on update" do
+      with_store do |store|
+        req = %("request":"GET / HTTP/1.1\\r\\nHost: x\\r\\n\\r\\n")
+        bad = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_repeater","arguments":{"target":"ftp://x",#{req}}}})
+        resp = mcp_drive(store, bad)[0]
+        resp["result"]["isError"].as_bool.should be_true
+        resp["result"]["content"][0]["text"].as_s.should contain(%(unsupported target scheme "ftp"))
+        store.repeaters_mcp.should be_empty
+
+        ok = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"create_repeater","arguments":{"target":"wss://x",#{req}}}})
+        id = mcp_tool_payload(mcp_drive(store, ok)[0])["id"].as_i64
+        upd = %({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"update_repeater","arguments":{"id":#{id},"target":"ftp://x"}}})
+        mcp_drive(store, upd)[0]["result"]["isError"].as_bool.should be_true
+        store.get_repeater(id).not_nil!.target.should eq("wss://x")
+      end
+    end
+
     it "creates a new repeater from a flow_id" do
       with_store do |store|
         flow_id = mcp_seed_flow(store, "ex.test", "GET", "/flow-endpoint", 200)

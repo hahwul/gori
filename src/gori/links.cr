@@ -85,6 +85,24 @@ module Gori
       issue_links(links, issue.id, issue.flow_id)
     end
 
+    # An owner's links as the headless listings (MCP `list_links`, `gori run links`) show them:
+    # an issue's through `issue_links`, so the listing agrees with `get_issue`'s `links` array
+    # instead of reading the bare table and missing a synthesised seed flow.
+    def self.owner_links(store : Store, owner_kind : Store::LinkOwnerKind, owner_id : Int64) : Array(Store::EntityLink)
+      links = store.list_links(owner_kind, owner_id)
+      return links unless owner_kind.issue? && (issue = store.get_issue(owner_id))
+      issue_links(links, issue)
+    end
+
+    # True when (owner, ref) is an issue's SEED flow — `issues.flow_id`. Not removable as a link:
+    # `issue_links` rebuilds it from the column, so deleting the row would report success while
+    # every read still showed it. The LINKS overlay skips it (`dedupe_issue_flow`); the headless
+    # unlink paths refuse it through here.
+    def self.issue_seed_flow?(store : Store, owner_kind : Store::LinkOwnerKind, owner_id : Int64,
+                              ref_kind : Store::LinkRefKind, ref_id : Int64) : Bool
+      owner_kind.issue? && ref_kind.flow? && store.get_issue(owner_id).try(&.flow_id) == ref_id
+    end
+
     private def self.resolve_flow(store : Store, link : Store::EntityLink) : Resolved
       if row = store.flow_row(link.ref_id)
         loc = flow_location(row)

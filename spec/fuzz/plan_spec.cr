@@ -247,6 +247,13 @@ describe Gori::Fuzz::Plan do
       ex.detail.should eq("::::")
     end
 
+    it "reports BadTarget for a scheme other than http(s) instead of dialling it as plain HTTP" do
+      ex = expect_raises(F::PlanError, /unsupported target scheme "ftp"/) do
+        F::Plan.build(F::PlanOptions.new(marked, target: "ftp://t.test", sources: payload), ungated_outbound)
+      end
+      ex.reason.should eq(F::PlanError::Reason::BadTarget)
+    end
+
     it "reports NoPayloads when no set was configured" do
       ex = expect_raises(F::PlanError) do
         F::Plan.build(F::PlanOptions.new(marked, target: "http://t.test"), ungated_outbound)

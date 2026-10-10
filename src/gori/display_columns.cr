@@ -1,6 +1,7 @@
 require "./store"
 require "./token_extract"
 require "./redact/headers"
+require "./redact/wire"
 
 module Gori
   # User-defined History columns (#819) — the model shared by the TUI list, the column editor,
@@ -117,6 +118,18 @@ module Gori
       def body_scoped?(count : Int32 = @columns.size) : Bool
         n = count.clamp(0, @columns.size)
         n > 0 && @body_prefix[n - 1]
+      end
+
+      # One stored flow's values from ONE capped read (none of the body for a head-only set), for
+      # a surface that lists rows rather than drawing them. Under a redaction `matcher` the
+      # values come from the sanitized derivative `get_flow` serves, so a `jsonpath:` or `regex:`
+      # column cannot read back a body secret the profile withholds. A flow deleted since the
+      # search yields blanks: the row matched, and the listing has to say so.
+      def row_values(store : Store, id : Int64, matcher : Redact::Matcher? = nil) : Array(String)
+        detail = store.get_flow(id, body_max: body_scoped? ? BODY_CAP : 0)
+        return Array.new(@columns.size, "") unless detail
+        detail = Redact::Wire.flow(detail, matcher)[0] if matcher
+        values(detail)
       end
 
       # One value per column, in column order, for the first `count` columns. A descriptor that

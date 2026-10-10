@@ -18,7 +18,7 @@ module Gori
         return owner if owner.is_a?(Result)
         owner_kind, owner_id = owner
 
-        links = store.list_links(owner_kind, owner_id)
+        links = Links.owner_links(store, owner_kind, owner_id)
         Result.new(JSON.build do |j|
           j.object do
             j.field "owner_kind", owner_kind.label
@@ -83,6 +83,10 @@ module Gori
         return ref if ref.is_a?(Result)
         ref_kind, ref_id = ref
 
+        if Links.issue_seed_flow?(store, owner_kind, owner_id, ref_kind, ref_id)
+          return err("flow #{ref_id} is issue #{owner_id}'s seed flow (its flow_id), not a removable link",
+            "INVALID_ARGUMENT", field: "ref_id")
+        end
         unless store.link_id(owner_kind, owner_id, ref_kind, ref_id)
           return not_found("no link from #{owner_kind.label} #{owner_id} to #{ref_kind.label} #{ref_id}")
         end
@@ -145,7 +149,8 @@ module Gori
 
         tool j, "remove_link",
           "Detach an evidence pointer, addressed by the same (owner, ref) pair add_link " \
-          "takes — no need to look up the link row's own id first." do |s|
+          "takes — no need to look up the link row's own id first. An issue's seed flow " \
+          "(its flow_id) is not a removable link and is refused." do |s|
           s.field "owner_kind", enumprop("which kind of record owns the link", LINK_OWNERS), required: true
           s.field "owner_id", intprop("the issue or note id"), required: true
           s.field "ref_kind", enumprop("which workbench entity the link points at", LINK_REFS), required: true

@@ -142,6 +142,11 @@ module Gori
       Review    # ambiguous — same status but the body diverged, or a redirect
       Error     # this identity's send failed, so nothing could be compared
       Baseline  # this row IS the baseline
+      # This identity's overlay left the baseline's request byte-for-byte unchanged, so it was
+      # NOT sent: its answer would be the baseline's by construction, and judging it `Same`
+      # reports a bypass manufactured out of an identity that did nothing (an "anonymous" that
+      # strips Cookie/Authorization from a flow authenticated by `X-Api-Key`).
+      NoEffect
 
       def label : String
         case self
@@ -150,6 +155,7 @@ module Gori
         in Review    then "review"
         in Error     then "error"
         in Baseline  then "baseline"
+        in NoEffect  then "no_effect"
         end
       end
     end

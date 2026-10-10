@@ -632,8 +632,7 @@ module Gori
                                    prepared : DisplayColumns::Prepared,
                                    include_sensitive : Bool) : {Array({String, String}), Bool}?
         return nil if prepared.empty?
-        detail = store.get_flow(row.id, body_max: prepared.body_scoped? ? DisplayColumns::BODY_CAP : 0)
-        values = detail ? prepared.values(detail) : Array.new(prepared.size, "")
+        values = prepared.row_values(store, row.id)
         redacted = false
         pairs = prepared.columns.map_with_index do |c, i|
           v = values[i]? || ""

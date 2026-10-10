@@ -876,7 +876,7 @@ module Gori
       # of health for a target that answered nothing). WHY they failed is the run summary's
       # job; per request the answer is the same either way.
       def self.authorize_verdict(t : Authorize::Target) : Symbol
-        non = t.trials.reject(&.baseline?)
+        non = t.compared
         return :error if non.empty? || t.uncompared?
         return :bypass if non.any?(&.verdict.same?)
         return :enforced if non.all?(&.verdict.different?)
@@ -961,7 +961,7 @@ module Gori
           # The count is the whole reason the headline is worth reading twice: which identities,
           # and how many of them, were served what the baseline was served.
           if v == :bypass
-            total = t.trials.count { |tr| !tr.baseline? }
+            total = t.compared.size # a `no_effect` identity was never sent, so it matched nothing
             io << "  · " << t.same_count << " of " << total
             io << " identit" << (total == 1 ? "y" : "ies") << " matched the baseline"
           end

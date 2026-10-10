@@ -707,7 +707,7 @@ module Gori
       # refuses) are the same case: through `Bindings#validate` they came back as `field: "name"` too.
       private def extract_shape_error(kind : Gori::ExtractKind, selector : String, pos_start : Int32,
                                       pos_end : Int32, match_filter : String) : Result?
-        if bad = Gori::InterceptFilter.unsupported_field_reason(match_filter)
+        if bad = Gori::InterceptFilter.refusal(match_filter)
           return err(bad, "INVALID_ARGUMENT", field: "when")
         end
         if bad = Gori::TokenExtract.selector_error(kind, selector)

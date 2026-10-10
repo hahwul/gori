@@ -34,3 +34,25 @@ describe "Gori::Store#sitemap_node_exists?" do
     end
   end
 end
+
+# A host is case-insensitive and stored as captured: `API.TEST` from an operator matched no
+# node and filed a tag the tree never stamped.
+describe "Gori::Store#set_sitemap_tag host spelling" do
+  it "files the tag under the captured spelling" do
+    with_store do |store|
+      seed_sitemap_flow(store, "acme.test", "/api")
+      store.sitemap_node_exists?("ACME.TEST", "/api").should be_true
+      store.set_sitemap_tag("ACME.TEST", "/api", "memo").should be_true
+      store.sitemap_tags.should eq({ {"acme.test", "/api"} => "memo" })
+      store.set_sitemap_tag("Acme.Test", "/api", "").should be_true
+      store.sitemap_tags.should be_empty
+    end
+  end
+
+  it "keeps a host nothing captured as given" do
+    with_store do |store|
+      store.set_sitemap_tag("JS.Only", "/x", "memo").should be_true
+      store.sitemap_tags.should eq({ {"JS.Only", "/x"} => "memo" })
+    end
+  end
+end

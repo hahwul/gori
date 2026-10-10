@@ -2027,6 +2027,9 @@ describe Gori::Settings do
       Gori::Settings.add_colormarker_color("coral", "#000000").should_not be_nil # duplicate
       Gori::Settings.add_colormarker_color("red", "#000000").should_not be_nil   # built-in word
       Gori::Settings.add_colormarker_color("bad", "nothex").should_not be_nil    # unparseable hex
+      # A C0 control or DEL in the name (printed raw by `gori run colormarker colors`).
+      Gori::Settings.add_colormarker_color("esc\e]0;pwned\ax", "#000000").should_not be_nil
+      Gori::Settings.add_colormarker_color("del\u007f", "#000000").should_not be_nil
       Gori::Settings.colormarker_colors.size.should eq(1)
 
       # A colours-only config still writes the section (the guard is not rules-only).

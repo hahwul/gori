@@ -96,6 +96,11 @@ describe Gori::MCP::RequestBuilder do
     String.new(built.bytes).should eq("POST /a?b=1 HTTP/1.1\r\nX-Test: y\r\nHost: h.test:8443\r\nContent-Length: 2\r\n\r\nhi")
   end
 
+  it "sends a lowercase method as given only under verbatim" do
+    args = JSON.parse(%({"url":"http://h.test/","method":"get","verbatim":true})).as_h
+    String.new(Gori::MCP::RequestBuilder.build(args).bytes).should start_with("get / HTTP/1.1\r\n")
+  end
+
   it "omits the port from Host when it is the scheme default" do
     args = JSON.parse(%({"url":"http://h.test/"})).as_h
     built = Gori::MCP::RequestBuilder.build(args)

@@ -56,6 +56,20 @@ private def with_salt(&)
 end
 
 describe Gori::Export::OpenApi do
+  # The paths came from the Sitemap node path, which drops a trailing slash for the tree, so
+  # GET /uploads/ was exported as /uploads — a different resource.
+  it "keeps a trailing slash, as its own path, and still templates under it" do
+    with_store do |store|
+      oa_flow(store, "/uploads/")
+      oa_flow(store, "/uploads")
+      oa_flow(store, "/users/4/?x=1")
+      doc = OA.build(store, OA::Options.new(path_prefix: "/u")).doc
+      doc["paths"].as_h.keys.should eq(["/uploads", "/uploads/", "/users/{userId}/"])
+      op(doc, "/uploads/", "get")["operationId"].should_not eq(op(doc, "/uploads", "get")["operationId"])
+      param(op(doc, "/users/{userId}/", "get"), "userId", "path").should_not be_nil
+    end
+  end
+
   it "templates numeric ids and merges endpoints whose templates collide" do
     with_store do |store|
       oa_flow(store, "/users/1", content_type: "application/json", resp_body: %({"id":1}))

@@ -126,6 +126,7 @@ module Gori
           prepared = Gori::DisplayColumns.prepare(parsed.map_with_index { |sp, i| sp.to_column(i) })
         end
         include_sensitive = bool_arg(h, "include_sensitive", false)
+        matcher = columns_matcher(prepared, include_sensitive)
         # An agent gets one shot at this answer and cannot tell "no match" from "not indexed
         # yet", so drain the off-commit FTS backlog (Store V4) before a query that reads it —
         # or refuse, when this server is read-only and therefore cannot drain (see the helper).
@@ -177,7 +178,7 @@ module Gori
             end
             emit_ignored_terms(j, dropped)
             j.field "flows" do
-              j.array { rows.each { |r| Serialize.flow_row(j, r, row_columns(r, prepared, include_sensitive)) } }
+              j.array { rows.each { |r| Serialize.flow_row(j, r, row_columns(r, prepared, include_sensitive, matcher)) } }
             end
           end
         end)
@@ -205,6 +206,7 @@ module Gori
                                    ignored : Array(String)) : Result
         narrowed = (query && !query.strip.empty?) || lensed || view_filter != QL::EMPTY
         include_sensitive = bool_arg(h, "include_sensitive", false)
+        matcher = columns_matcher(prepared, include_sensitive)
         found = store.flow_rows(ids)
         by_id = {} of Int64 => Store::FlowRow
         found.each { |r| by_id[r.id] = r }
@@ -249,7 +251,7 @@ module Gori
             end
             emit_ignored_terms(j, ignored)
             j.field "flows" do
-              j.array { rows.each { |r| Serialize.flow_row(j, r, row_columns(r, prepared, include_sensitive)) } }
+              j.array { rows.each { |r| Serialize.flow_row(j, r, row_columns(r, prepared, include_sensitive, matcher)) } }
             end
           end
         end)
@@ -273,6 +275,12 @@ module Gori
         {present.select { |id| matched.includes?(id) }, present.reject { |id| matched.includes?(id) }}
       end
 
+      # The project's redaction profile for `columns`, resolved once per call: the same one
+      # `get_flow` applies, under the same `include_sensitive` opt-out (see `redact_flow`).
+      private def columns_matcher(prepared : Gori::DisplayColumns::Prepared, include_sensitive : Bool) : Redact::Matcher?
+        include_sensitive || prepared.empty? ? nil : Redact::Policy.ambient(store)
+      end
+
       # One row's user-column values as `{label, value}` pairs, or nil when none were asked for.
       #
       # ONE capped read per RETURNED row, and none at all for a set that reads only heads — the
@@ -284,10 +292,10 @@ module Gori
       # behind the same flag. An EMPTY value stays empty, so a miss still reads as a miss.
       private def row_columns(row : Store::FlowRow,
                               prepared : Gori::DisplayColumns::Prepared,
-                              include_sensitive : Bool) : Array({String, String})?
+                              include_sensitive : Bool,
+                              matcher : Redact::Matcher?) : Array({String, String})?
         return nil if prepared.empty?
-        detail = store.get_flow(row.id, body_max: prepared.body_scoped? ? Gori::DisplayColumns::BODY_CAP : 0)
-        values = detail ? prepared.values(detail) : Array.new(prepared.size, "")
+        values = prepared.row_values(store, row.id, matcher)
         prepared.columns.map_with_index do |c, i|
           v = values[i]? || ""
           v = "[REDACTED]" if !include_sensitive && !v.empty? && Gori::DisplayColumns.sensitive?(c)
@@ -438,8 +446,17 @@ module Gori
         offset_out_of_range = requested > total
         count = Math.min(options.limit, bytes.size - start)
         chunk = count.zero? ? Bytes.new(0) : bytes[start, count]
-        next_offset = start.to_i64 + count
         text = String.new(chunk)
+        # A page boundary through a multibyte codepoint: end this page before it so the page
+        # stays text, and `next_offset` picks the split sequence up — pages still tile the bytes.
+        if !text.valid_encoding? && start + count < bytes.size &&
+           (whole = Serialize.utf8_whole_prefix(chunk)) < count && whole > 0 &&
+           (trimmed = String.new(chunk[0, whole])).valid_encoding?
+          count = whole
+          chunk = chunk[0, whole]
+          text = trimmed
+        end
+        next_offset = start.to_i64 + count
 
         Result.new(JSON.build do |j|
           j.object do
@@ -652,10 +669,14 @@ module Gori
           # read them for every page.
           parts = store.response_parts(id)
           return not_found("no flow with id #{id}") unless parts
+          # No head = no response yet (pending, or the upstream never answered). Paging that as
+          # a 0-byte complete body read exactly like a real empty 204.
+          return not_found("no response captured for flow #{id}") unless parts[0]
           parts
         elsif id = repeater_id
           repeater = store.get_repeater_full(id)
           return not_found("no repeater with id #{id}") unless repeater
+          return not_found("no response captured for repeater #{id} (never sent)") unless repeater.response_head
           # A repeater response is a send this process made and kept whole; nothing capped it
           # on the way in, so there is no capture cut to report.
           {repeater.response_head, repeater.response_body, false}

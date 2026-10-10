@@ -502,7 +502,7 @@ module Gori
       end
       # AFTER the name checks: an unusable name is the more fundamental complaint, and reporting
       # the condition first made a form with both errors send its author to the wrong row.
-      if bad = InterceptFilter.unsupported_field_reason(match_filter)
+      if bad = InterceptFilter.refusal(match_filter)
         return bad
       end
       if bad = TokenExtract.selector_error(kind, selector)

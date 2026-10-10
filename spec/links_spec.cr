@@ -319,4 +319,24 @@ describe Gori::Links do
       end
     end
   end
+
+  describe ".issue_seed_flow? / .owner_links" do
+    it "names an issue's flow_id as its seed, and lists it even with no link row" do
+      with_store do |store|
+        fid = insert_flow_row(store, host: "a.test", target: "/seed")
+        other = insert_flow_row(store, host: "a.test", target: "/other")
+        iid = store.insert_issue("x", Gori::Store::Severity::Low, "a.test", fid)
+        issue, flow = Gori::Store::LinkOwnerKind::Issue, Gori::Store::LinkRefKind::Flow
+
+        Gori::Links.issue_seed_flow?(store, issue, iid, flow, fid).should be_true
+        Gori::Links.issue_seed_flow?(store, issue, iid, flow, other).should be_false
+        Gori::Links.issue_seed_flow?(store, Gori::Store::LinkOwnerKind::Note, iid, flow, fid).should be_false
+
+        # The table row gone (a pre-migration issue), the listing still shows the seed first.
+        store.remove_link(issue, iid, flow, fid).should be_true
+        store.add_link(issue, iid, flow, other)
+        Gori::Links.owner_links(store, issue, iid).map(&.ref_id).should eq([fid, other])
+      end
+    end
+  end
 end

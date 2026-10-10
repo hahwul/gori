@@ -267,14 +267,22 @@ module Gori
       # speak of it) must not turn a dir or fault rule back into an inline stub by omission.
       respond, respond_args, body_file = Rules.normalize_respond(op, respond || existing.respond,
         respond_args || existing.respond_args, body_file)
+      respond_label = respond.label
+      # A rule that is not a short-circuit before or after never reads its respond fields, so
+      # the edit writes back what is stored, RAW: an unknown label (a newer gori's) has only an
+      # enum fallback here, and a fallback is a projection, never permission to rewrite it.
+      unless op.short_circuit? || existing.op.short_circuit?
+        respond_label = existing.unknown_respond || existing.respond.label
+        respond_args = existing.respond_args
+      end
       ok =
         if scope.global?
           Settings.update_rewriter_rule(id, target.label, part.label, pattern, replacement,
             op.label, match_kind.label, name, host, body_file,
-            respond: respond.label, respond_args: respond_args)
+            respond: respond_label, respond_args: respond_args)
         else
           @store.update_rule(id, target, part, pattern, replacement, op, match_kind, name, host,
-            body_file, respond: respond.label, respond_args: respond_args)
+            body_file, respond: respond_label, respond_args: respond_args)
         end
       refresh
       ConfigLog.record(@store, "rule_update", "#{Rules.scope_word(scope)} rewrite rule changed — #{Rules.rule_phrase(id, name, target, part)}") if ok

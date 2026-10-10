@@ -166,6 +166,15 @@ describe "MCP intercept write verbs" do
     end
   end
 
+  it "refuses a condition whose regex will not compile instead of holding nothing" do
+    with_store do |store|
+      publish_bridge(store)
+      r = tools_for(store).call("intercept_set_filter", JSON.parse({"query" => "-path~(echo"}.to_json))
+      r.error_code.should eq("INVALID_ARGUMENT")
+      r.text.should contain("not a valid regex")
+    end
+  end
+
   # Not refused: the direction can change after the condition is set. The note rides beside the ack.
   it "notes a status: condition, or a requests-only direction under one, without refusing it" do
     with_store do |store|

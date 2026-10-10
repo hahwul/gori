@@ -29,7 +29,7 @@ module Gori
     # tag that was stored and does show.
     def sitemap_node_exists?(host : String, path : String) : Bool?
       entries = sitemap_entries_detailed(QL::EMPTY, SITEMAP_MAX)
-      return true if entries.any? { |e| e.host == host && Sitemap.tag_path(e.target) == path }
+      return true if entries.any? { |e| e.host.compare(host, case_insensitive: true).zero? && Sitemap.tag_path(e.target) == path }
       entries.size >= SITEMAP_MAX ? nil : false
     end
 
@@ -37,13 +37,25 @@ module Gori
     # `exec_task_ok`: the store answers whether the write COMMITTED, and dropping that made
     # every caller report the change for a rolled-back batch. Same conversion as `delete_flows`
     # (`reads.cr`), whose comment states the reasoning once.
+    #
+    # A tag is keyed on the host AS CAPTURED (the tree stamps `Node#host`), while a host is
+    # case-insensitive: `API.TEST` from an operator is filed under the captured `api.test`,
+    # or it is a row no node ever carries. An exact spelling that was captured wins, then its
+    # lowercase form; a host nothing captured (a JS-referenced node) is kept as given. Two
+    # index probes, never a `COLLATE NOCASE` scan: that walks every flow inside the writer's
+    # transaction, on every tag of a node with no traffic.
     def set_sitemap_tag(host : String, path : String, tag : String) : Bool
       exec_task_ok ->(c : DB::Connection) {
+        key = host
+        lower = host.downcase
+        if lower != host && !c.query_one?("SELECT 1 FROM flows WHERE host = ? LIMIT 1", host, as: Int64)
+          key = lower if c.query_one?("SELECT 1 FROM flows WHERE host = ? LIMIT 1", lower, as: Int64)
+        end
         if tag.blank?
-          c.exec("DELETE FROM sitemap_tags WHERE host = ? AND path = ?", host, path)
+          c.exec("DELETE FROM sitemap_tags WHERE host = ? AND path = ?", key, path)
         else
           c.exec("INSERT INTO sitemap_tags (host, path, tag) VALUES (?, ?, ?) " \
-                 "ON CONFLICT(host, path) DO UPDATE SET tag = ?", host, path, tag, tag)
+                 "ON CONFLICT(host, path) DO UPDATE SET tag = ?", key, path, tag, tag)
         end
         nil
       }

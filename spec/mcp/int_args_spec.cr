@@ -62,6 +62,17 @@ describe "MCP integer arguments — bounded before they are narrowed" do
     end
   end
 
+  # …and it reads as "no limit" (the tool's ceiling), not as a one-flow scan.
+  it "preview_color_rule scans up to the ceiling for a 'limit' of 0 or below" do
+    with_store do |store|
+      3.times { seed_int_flow(store, "secret") }
+      tools = int_tools(store)
+      int_json(tools, "preview_color_rule", %({"when":"body:secret","limit":0}))["scanned"].as_i.should eq(3)
+      int_json(tools, "preview_color_rule", %({"when":"body:secret","limit":-5}))["scanned"].as_i.should eq(3)
+      int_json(tools, "preview_color_rule", %({"when":"body:secret","limit":1}))["scanned"].as_i.should eq(1)
+    end
+  end
+
   it "compare_flows bounds a huge 'context' instead of overflowing into INTERNAL" do
     with_store do |store|
       a = seed_int_flow(store, "line1\nline2\nline3")

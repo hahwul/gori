@@ -46,6 +46,18 @@ module Gori::Fuzz
                 else            scheme
                 end
     end
+
+    # The origin a run dials for target text `raw`. A scheme other than http(s) (after the ws
+    # fold) is refused here, before any gate judges it: `ftp://host/x` would otherwise be matched
+    # against scope rules written for `http://` and then sent as plaintext HTTP anyway.
+    def self.dial(raw : String) : Origin
+      origin = new(*Repeater::FlowRequest.dial_target(raw))
+      unless origin.scheme.in?("http", "https")
+        raise Repeater::FlowRequest::DialTargetError.new(
+          "unsupported target scheme #{origin.scheme.inspect} (use http:// or https://)", raw, unresolved: false)
+      end
+      origin
+    end
   end
 
   # The send seam. Swappable so specs (and the baseline calibrator) can drive the

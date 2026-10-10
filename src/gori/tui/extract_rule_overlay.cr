@@ -177,7 +177,7 @@ module Gori::Tui
       # table (`Bindings#validate` refuses the same write, so MCP and the CLI refuse too) because
       # this form greys out its Save row from local shape checks, a keystroke before any commit —
       # and read from the ONE sentence there, so the two can never disagree about what is legal.
-      if bad = Gori::InterceptFilter.unsupported_field_reason(match_filter)
+      if bad = Gori::InterceptFilter.refusal(match_filter)
         return bad
       end
       if position?

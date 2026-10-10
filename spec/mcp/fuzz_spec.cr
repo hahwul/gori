@@ -625,6 +625,34 @@ describe "MCP fuzz tools" do
     end
   end
 
+  it "names the refused scheme of a non-http(s) url" do
+    with_store do |store|
+      args = {
+        "template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        "url"            => "ftp://127.0.0.1:1",
+        "payloads"       => [{"list" => ["a"]}],
+        "allow_unscoped" => true,
+      }.to_json
+      text, bad = call_raw(tools_for(store), "fuzz_start", args)
+      bad.should be_true
+      text.should contain(%(unsupported target scheme "ftp"))
+    end
+  end
+
+  it "refuses a payload set that names two sources instead of dropping one" do
+    with_store do |store|
+      args = {
+        "template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        "url"            => "http://127.0.0.1:1",
+        "payloads"       => [{"list" => ["a"], "wordlist" => "names"}],
+        "allow_unscoped" => true,
+      }.to_json
+      text, bad = call_raw(tools_for(store), "fuzz_start", args)
+      bad.should be_true
+      text.should contain("names list and wordlist")
+    end
+  end
+
   it "accepts structured object payload sets for numbers and brute" do
     port = start_origin
     with_store do |store|

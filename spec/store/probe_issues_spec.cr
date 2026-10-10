@@ -118,3 +118,18 @@ describe "Store#upsert_probe_issues — the affected list" do
     end
   end
 end
+
+# The host filter and the dismiss-by-host pair matched case-sensitively, so `A.TEST` found
+# none of a.test's open findings.
+describe "Store probe issues by host" do
+  it "matches a host case-insensitively" do
+    with_store do |store|
+      store.upsert_probe_issue(detection("https://a.test/0"))
+      store.probe_issues(host: "A.TEST").size.should eq(1)
+      store.probe_issues_page(nil, "A.Test", limit: 10)[1].should eq(1)
+      store.open_probe_issue_count(host: "A.TEST").should eq(1)
+      store.dismiss_probe_by_host("A.TEST").should be_true
+      store.open_probe_issue_count(host: "a.test").should eq(0)
+    end
+  end
+end

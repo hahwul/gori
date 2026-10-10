@@ -280,15 +280,20 @@ describe Gori::SessionSlots do
       end
     end
 
-    it "deactivates when the ACTIVE slot is edited away or deleted" do
+    it "follows the ACTIVE slot through a rename and deactivates when it is deleted" do
       with_store do |store|
         slots = Gori::SessionSlots.load(store)
         slots.add(Slot.new("admin", set_headers: [{"X-Who", "admin"}]))
+        slots.add(Slot.new("anon"))
         slots.activate("admin").should be_true
-        # A rename is a delete as far as the pointer is concerned: the name it holds is gone,
-        # and a dangling pointer is an overlay that silently stops applying.
+        # A rename keeps the slot, so it keeps the send context: the pointer moves to the new
+        # name rather than dangling (an overlay that silently stops applying) or dropping to
+        # as-captured with nothing said.
         slots.update("admin", Slot.new("superuser", set_headers: [{"X-Who", "admin"}]))
-        slots.active_name.should be_nil
+        slots.active_name.should eq("superuser")
+        # Renaming some OTHER slot leaves the pointer where it was.
+        slots.update("anon", Slot.new("guest"))
+        slots.active_name.should eq("superuser")
 
         slots.activate("superuser").should be_true
         slots.remove("superuser")

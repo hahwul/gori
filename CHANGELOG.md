@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- MCP: `list_history` columns are read from the redacted copy under the project's redaction profile, a body cut mid-character stays text, `body_mode:"none"` reports a binary body as binary, and paging a response that was never captured is refused
+- MCP: `create_repeater` puts `position` at that tab index and refuses a target it could never send, `update_probe_rule` keeps the fields it is not given, and a fuzz payload set naming two sources is refused
+- Fuzzer, Miner, Sequencer and Discover: a target or seed with a scheme other than http(s) is refused instead of going out as plain HTTP past scope excludes (or crawling a host named `ftp`), a location named twice is mined once, a missing bare wordlist name says where it was looked for, and a sequence run whose token location matched nothing says so
+- Authorize and cache deception: an identity that changes nothing on a flow reads `no_effect` instead of a false bypass, inline identities refuse unknown keys and unsafe `set` headers, and cache deception skips a flow with no Cookie or Authorization to strip
+- Send: under `verbatim` a request built from a URL (`send_request` with `method`, `gori run send -X`) keeps the method's case as typed instead of upper-casing it
+- Import: Burp XML takes the request and response only from an item's own elements, so `<response>` text in its URL or body no longer replaces the real one, and keeps a lone LF in a CRLF head; a Postman `"auth": null` inherits, and a gori HAR keeps an absolute-form or `*` target
+- Store: History, Sitemap and every listing read a target or other text past an embedded NUL instead of cutting it there
+- Rules and filters: an Intercept or extract-rule condition whose regex will not compile is refused, Probe and sitemap-tag host filters ignore case, custom colour names refuse control characters, editing a rule keeps an unknown respond label, renaming the active session slot keeps it active, unlinking an issue's seed flow is refused, and OpenAPI export keeps a trailing slash
 - Proxy: turning capture off or leaving a project now ends the connections a client already had open, so they are no longer relayed, recorded or rewritten under the stopped session, and a WebSocket message the operator already forwarded is no longer lost when the socket closes first
 - Fuzzer: auto-mark escapes `¦` inside captured values, so a server-chosen value like `x¦exec:…` can no longer become a Decoder chain that runs on the next send; auto-calibration measures the followed response when redirects are followed, and a redirected row keeps the bytes actually sent; a saved WebSocket run's wire is the handshake that went out
 - Projects: `.gori` import refuses every SQLite trigger or view whatever its name, so a crafted archive can no longer keep a pipe or exec rule enabled behind the disclosure that says it was disabled

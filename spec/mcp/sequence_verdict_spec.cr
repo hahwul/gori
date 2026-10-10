@@ -93,10 +93,11 @@ describe "MCP sequence job verdict honesty" do
 
   it "does not blame the target when the responses arrived and the descriptor missed" do
     # The other way to reach an empty sample: the origin answered every replay and the cookie
-    # name is simply wrong. `note_all_refused` decides on the COUNTS for this reason — with no
-    # send error there is nothing to report, and were one flaky timeout to appear among the
-    # four, calling that "every replay failed" and relabelling the job :error would point an
-    # agent at the target when the answer is the descriptor.
+    # name is simply wrong. `note_all_refused` decides on the COUNTS for this reason — were one
+    # flaky timeout to appear among the four, calling that "every replay failed" and relabelling
+    # the job :error would point an agent at the target when the answer is the descriptor. With
+    # no send error at all the note still names the descriptor: a bare `budget_exhausted` read
+    # as "the budget ran out", not "your token location matched nothing".
     with_store do |store|
       tools = tools_for(store)
       port = seq_origin
@@ -114,7 +115,7 @@ describe "MCP sequence job verdict honesty" do
       status["sent"].as_i.should eq(4)   # every replay answered
       status["errors"].as_i.should eq(0) # and none of them failed
       status["status"].as_s.should eq("budget_exhausted")
-      status["error"].raw.should be_nil
+      status["error"].as_s.should eq("no response matched the token location (4 replays, none failed)")
     end
   end
 
@@ -139,7 +140,7 @@ describe "MCP sequence job verdict honesty" do
       status["status"].as_s.should eq("budget_exhausted")
       status["collected"].as_i.should eq(0)
       status["goal"].as_i.should eq(50)
-      status["error"].raw.should be_nil # a budget is not a failure
+      status["error"].as_s.should start_with("no response matched") # a note, not a failure status
       seq_call(tools, "sequence_results", {job_id: job_id}.to_json)["goal"].as_i.should eq(50)
     end
   end

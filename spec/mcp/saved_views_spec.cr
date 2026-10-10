@@ -163,6 +163,19 @@ describe "MCP saved views" do
     end
   end
 
+  # A view saved under a name a built-in later took: editing its query asks for no rename, so
+  # the name is not re-judged.
+  it "edits the query of a view whose unchanged name a built-in now holds" do
+    with_globals do
+      with_store do |store|
+        store.insert_saved_view("errors", "status:>=400")
+        o = call_json(tools_for(store), "update_view", %({"name":"errors","query":"status:500"}))
+        o["name"].as_s.should eq("errors")
+        o["query"].as_s.should eq("status:500")
+      end
+    end
+  end
+
   it "moves and renames in one write, leaving nothing behind under the old name" do
     # The move inserts into the destination; doing the rename as a follow-up EDIT would insert
     # under the old name — checked for availability under one name, written under another.

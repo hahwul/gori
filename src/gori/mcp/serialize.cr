@@ -29,6 +29,7 @@ module Gori
       MAX_TEXT                 = 64 * 1024 # cap on inlined decoded text
       MAX_B64                  = 64 * 1024 # cap on raw bytes base64-encoded for binary bodies
       SAVED_HEAD_PREVIEW_BYTES = 16 * 1024
+      OMIT_SNIFF_BYTES         = 512         # body prefix body_mode:none reads to pick `encoding`
       SAVED_SOURCE_BYTES       = 1024 * 1024 # encoded/chunk-framed input read from SQLite
 
       # Header names whose VALUES carry credentials/session material. Redacted to
@@ -1522,15 +1523,22 @@ module Gori
         # Decode/de-chunk only one byte beyond what can be emitted. That byte is enough to
         # distinguish an exact-cap body from an amplified preview, without inflating a 20 MiB
         # gzip or copying a giant chunked entity before slicing it back to 2 KiB.
-        inline_cap = {cap, 0}.max
+        # `omit` still answers `encoding`, from a short prefix: with nothing sampled, an empty
+        # sample is valid UTF-8 and a PNG read as "text".
+        inline_cap = {cap, omit ? OMIT_SNIFF_BYTES : 0}.max
         preview_cap = inline_cap < Int32::MAX ? inline_cap + 1 : inline_cap
         decoded, note, decode_complete = Proxy::Codec::ContentDecode.decode_full(head, body, preview_cap)
         bytes = decoded || body
         cut = bytes.size > inline_cap
         sample = cut ? bytes[0, inline_cap] : bytes
-        # Construct a String only AFTER the byte cap. For a cut through a multibyte codepoint
-        # this prefix is treated as binary rather than allocating/validating the full body.
+        # Construct a String only AFTER the byte cap. A cap that splits a codepoint leaves an
+        # incomplete sequence at the end of an otherwise-text prefix: drop those ≤3 bytes
+        # rather than call the whole body binary (the body continues past the cut anyway).
         s = String.new(sample)
+        if cut && !s.valid_encoding? && (whole = utf8_whole_prefix(sample)) < sample.size
+          trimmed = String.new(sample[0, whole])
+          sample, s = sample[0, whole], trimmed if trimmed.valid_encoding?
+        end
         valid = s.valid_encoding?
         decoded_applied = !decoded.nil? && !Proxy::Codec::ContentDecode.decode_failed?(note)
         decode_truncated = !decode_complete || (decoded_applied && cut)
@@ -1606,6 +1614,22 @@ module Gori
         return if s.valid_encoding?
         j.field "#{field_name}_base64", Base64.strict_encode(s.to_slice)
         j.field "#{field_name}_lossy", true
+      end
+
+      # The length of `bytes` without the UTF-8 sequence its end cut short — a lead byte
+      # followed by fewer continuation bytes than it announces — else `bytes.size`. Says
+      # nothing about the rest: the caller still validates the prefix.
+      def self.utf8_whole_prefix(bytes : Bytes) : Int32
+        n = bytes.size
+        stop = n - 4
+        i = n - 1
+        while i > stop && i >= 0 && (bytes[i] & 0xC0) == 0x80
+          i -= 1
+        end
+        return n if i <= stop || i < 0
+        lead = bytes[i]
+        width = lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : lead >= 0xC0 ? 2 : 1
+        n - i < width ? i : n
       end
 
       # Emit bytes that were already capped before String/base64 construction.

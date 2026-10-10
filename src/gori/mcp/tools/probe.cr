@@ -343,9 +343,12 @@ module Gori
         row_id = custom_rule_row_id(id)
         return err("'#{id}' is not a project custom rule (only project custom rules are editable)",
           "INVALID_ARGUMENT", field: "id") unless row_id
-        return not_found("no custom rule with id '#{id}'") unless store.probe_custom_rules.any? { |r| r.id == row_id }
+        prev = store.probe_custom_rules.find { |r| r.id == row_id }
+        return not_found("no custom rule with id '#{id}'") unless prev
 
-        fields = custom_rule_fields(h)
+        # Partial, like every other update_* tool: an omitted field keeps its stored value
+        # rather than snapping back to create's default (string / info / response / body).
+        fields = custom_rule_fields(h, prev)
         return fields if fields.is_a?(Result)
         title, description, side, region, kind, pattern, severity = fields
         # The store answers whether the edit COMMITTED, same as the `set_probe_rule_enabled`
@@ -406,12 +409,13 @@ module Gori
         id[9..].to_i64?
       end
 
-      # Validate + normalize the shared create/update field set.
-      private def custom_rule_fields(h) : {String, String, String, String, String, String, Store::Severity} | Result
-        title = required_str(h, "title")
-        pattern = required_str(h, "pattern")
+      # Validate + normalize the shared create/update field set. `prev` (update) supplies every
+      # omitted field; without it (create) title and pattern are required and the rest default.
+      private def custom_rule_fields(h, prev : Store::ProbeCustomRule? = nil) : {String, String, String, String, String, String, Store::Severity} | Result
+        title = prev ? (str(h, "title").try(&.strip).presence || prev.title) : required_str(h, "title")
+        pattern = prev ? (str(h, "pattern").try(&.strip).presence || prev.pattern) : required_str(h, "pattern")
 
-        spec = custom_rule_match_spec(h, pattern)
+        spec = custom_rule_match_spec(h, pattern, prev)
         return spec if spec.is_a?(Result)
         side, region, kind = spec
 
@@ -419,23 +423,23 @@ module Gori
         if e = bad_severity(sev_s)
           return e
         end
-        {title, str(h, "description").try(&.strip) || "", side, region, kind, pattern,
-         severity_from(sev_s) || Store::Severity::Info}
+        {title, str(h, "description").try(&.strip) || prev.try(&.description) || "", side, region, kind, pattern,
+         severity_from(sev_s) || prev.try(&.severity) || Store::Severity::Info}
       end
 
       # The {side, region, match_kind} triple, each defaulted and checked against its allowed
       # set, plus the pattern's own compile check. Split out of custom_rule_fields to stay
       # under the cyclomatic-complexity bar.
-      private def custom_rule_match_spec(h, pattern : String) : {String, String, String} | Result
-        side = (str(h, "side").try(&.strip.downcase).presence || "response")
+      private def custom_rule_match_spec(h, pattern : String, prev : Store::ProbeCustomRule?) : {String, String, String} | Result
+        side = (str(h, "side").try(&.strip.downcase).presence || prev.try(&.side) || "response")
         unless Probe::CustomRule::SIDES.includes?(side)
           return err("invalid side '#{side}' (#{Probe::CustomRule::SIDES.join("|")})", "INVALID_ARGUMENT", field: "side")
         end
-        region = (str(h, "region").try(&.strip.downcase).presence || "body")
+        region = (str(h, "region").try(&.strip.downcase).presence || prev.try(&.region) || "body")
         unless Probe::CustomRule::REGIONS.includes?(region)
           return err("invalid region '#{region}' (#{Probe::CustomRule::REGIONS.join("|")})", "INVALID_ARGUMENT", field: "region")
         end
-        kind = (str(h, "match_kind").try(&.strip.downcase).presence || "string")
+        kind = (str(h, "match_kind").try(&.strip.downcase).presence || prev.try(&.kind) || "string")
         unless Probe::CustomRule::KINDS.includes?(kind)
           return err("invalid match_kind '#{kind}' (#{Probe::CustomRule::KINDS.join("|")})", "INVALID_ARGUMENT", field: "match_kind")
         end
@@ -696,16 +700,16 @@ module Gori
         end
 
         tool j, "update_probe_rule",
-          "Replace a project custom rule's fields (same shape as create_probe_rule). " \
-          "Built-ins are not editable — disable them with set_probe_rule_enabled instead." do |s|
+          "Edit a project custom rule (same fields as create_probe_rule); an omitted field keeps " \
+          "its current value. Built-ins are not editable — disable them with set_probe_rule_enabled instead." do |s|
           s.field "id", strprop("custom rule id from list_probe_rules (custom_p_…)"), required: true
-          s.field "title", strprop("short rule name"), required: true
-          s.field "pattern", strprop("the string or regex to match, or the COMMAND as an argv when match_kind=exec"), required: true
+          s.field "title", strprop("short rule name")
+          s.field "pattern", strprop("the string or regex to match, or the COMMAND as an argv when match_kind=exec")
           s.field "description", strprop("what the rule is for")
-          s.field "side", enumprop("which half of the exchange the rule reads (default response)", Probe::CustomRule::SIDES)
-          s.field "region", enumprop("which part of that half the pattern is matched against (default body)", Probe::CustomRule::REGIONS)
-          s.field "match_kind", enumprop("how `pattern` is read (default string). exec RUNS A LOCAL COMMAND with the operator's own privileges: the selected region goes to it on stdin, exit 0 raises the finding, its first stdout line becomes the evidence. No shell; a spawn failure or timeout raises nothing and writes a warn event", Probe::CustomRule::KINDS)
-          s.field "severity", enumprop("severity the raised finding carries (default info)", SEVERITIES)
+          s.field "side", enumprop("which half of the exchange the rule reads", Probe::CustomRule::SIDES)
+          s.field "region", enumprop("which part of that half the pattern is matched against", Probe::CustomRule::REGIONS)
+          s.field "match_kind", enumprop("how `pattern` is read. exec RUNS A LOCAL COMMAND with the operator's own privileges: the selected region goes to it on stdin, exit 0 raises the finding, its first stdout line becomes the evidence. No shell; a spawn failure or timeout raises nothing and writes a warn event", Probe::CustomRule::KINDS)
+          s.field "severity", enumprop("severity the raised finding carries", SEVERITIES)
         end
 
         tool j, "delete_probe_rule",

@@ -390,6 +390,27 @@ describe Gori::MCP::Server do
       end
     end
 
+    # With nothing sampled, the empty sample was valid UTF-8 and a PNG read as encoding:"text".
+    it "picks body_mode:none's encoding from the body itself" do
+      with_store do |store|
+        png = Bytes[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d]
+        cjk = ("한" * 300).to_slice # 900 bytes; the 512-byte sniff splits a codepoint
+        ids = {png, cjk}.map do |b|
+          mcp_seed_flow(store, "h.test", "GET", "/b", 200,
+            resp_head: "HTTP/1.1 200 OK\r\nContent-Length: #{b.size}\r\n\r\n", resp_body: b)
+        end
+        tools = tools_for(store, allow_actions: false)
+        bin = mcp_ok_json(tools, "get_flow", %({"id":#{ids[0]},"body_mode":"none"}))["response_body"]
+        bin["encoding"].as_s.should eq("base64")
+        bin["binary"].as_bool.should be_true
+        bin.as_h.has_key?("base64").should be_false
+        txt = mcp_ok_json(tools, "get_flow", %({"id":#{ids[1]},"body_mode":"none"}))["response_body"]
+        txt["encoding"].as_s.should eq("text")
+        txt["size"].as_i.should eq(900)
+        txt.as_h.has_key?("text").should be_false
+      end
+    end
+
     it "caps the inlined body with max_body_bytes and flags truncation" do
       with_store do |store|
         id = mcp_seed_flow(store, "h.test", "GET", "/b", 200,
@@ -452,8 +473,9 @@ describe Gori::MCP::Server do
             p = page.call(tools, a, off_a)
             p["representation"].as_s.should eq("decoded")
             p["total_bytes"].as_i64.should eq(text_a.bytesize)
-            # A page boundary can split the 2-byte ã, and such a page comes back as base64.
-            got_a.write(p["encoding"].as_s == "base64" ? Base64.decode(p["base64"].as_s) : p["text"].as_s.to_slice)
+            # A page boundary can split the 2-byte ã: the page ends before it and stays text.
+            p["encoding"].as_s.should eq("text")
+            got_a << p["text"].as_s
             off_a = p["next_offset"].as_i64? || off_a
             done_a = p["complete"].as_bool
           end
@@ -466,6 +488,24 @@ describe Gori::MCP::Server do
         end
         got_a.to_s.should eq(text_a)
         got_b.to_s.should eq(text_b)
+      end
+    end
+
+    it "ends a page before a split codepoint and reports the trimmed byte count" do
+      with_store do |store|
+        body = "한" * 10
+        id = mcp_seed_flow(store, "ex.test", "GET", "/k", 200,
+          resp_head: "HTTP/1.1 200 OK\r\nContent-Length: 30\r\n\r\n", resp_body: body.to_slice)
+        tools = tools_for(store, allow_actions: false)
+        p = mcp_ok_json(tools, "get_response_body_chunk", %({"flow_id":#{id},"offset":0,"limit":4}))
+        p["encoding"].as_s.should eq("text")
+        p["text"].as_s.should eq("한")
+        p["returned_bytes"].as_i.should eq(3)
+        p["next_offset"].as_i.should eq(3)
+        # A limit smaller than one codepoint cannot shrink to zero and stall the pager.
+        tiny = mcp_ok_json(tools, "get_response_body_chunk", %({"flow_id":#{id},"offset":0,"limit":1}))
+        tiny["encoding"].as_s.should eq("base64")
+        tiny["next_offset"].as_i.should eq(1)
       end
     end
 
@@ -497,6 +537,29 @@ describe Gori::MCP::Server do
         p["offset_out_of_range"].as_bool.should be_true
         p["warning"].as_s.should contain("past")
         p["returned_bytes"].as_i.should eq(0)
+        p["complete"].as_bool.should be_true
+      end
+    end
+
+    # A pending flow / never-sent repeater paged as total_bytes:0, complete:true — the same
+    # reply as a real empty 204 body.
+    it "refuses a response that was never captured, and still pages a real empty one" do
+      with_store do |store|
+        tools = tools_for(store, allow_actions: false)
+        pending = mcp_seed_flow(store, "h.test", "GET", "/p")
+        r = tools.call("get_response_body_chunk", JSON.parse(%({"flow_id":#{pending}})))
+        r.is_error.should be_true
+        r.text.should contain("no response captured for flow #{pending}")
+        # The request side of the same flow is still there to page.
+        mcp_ok_json(tools, "get_response_body_chunk", %({"flow_id":#{pending},"part":"request"}))["text"].as_s.should start_with("GET /p")
+        rid = store.insert_repeater(target: "https://h.test", request: "GET / HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice,
+          http2: false, auto_cl: true, flow_id: nil, position: 0)
+        r = tools.call("get_response_body_chunk", JSON.parse(%({"repeater_id":#{rid}})))
+        r.is_error.should be_true
+        r.text.should contain("no response captured for repeater #{rid}")
+        empty = mcp_seed_flow(store, "h.test", "GET", "/e", 204, resp_head: "HTTP/1.1 204 No Content\r\n\r\n")
+        p = mcp_ok_json(tools, "get_response_body_chunk", %({"flow_id":#{empty}}))
+        p["total_bytes"].as_i.should eq(0)
         p["complete"].as_bool.should be_true
       end
     end

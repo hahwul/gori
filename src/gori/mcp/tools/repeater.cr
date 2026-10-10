@@ -335,6 +335,10 @@ module Gori
           return err("missing 'request' (the raw HTTP request) beside 'target' — " \
                      "or seed from flow_id, issue_id or curl instead", "INVALID_ARGUMENT", field: "request")
         end
+        # Refused at write time, as `send_request{url}` refuses it up front — not at the first send.
+        if why = Repeater::Plan.target_error(target)
+          return err("invalid 'target': #{why}", "INVALID_ARGUMENT", field: "target")
+        end
 
         sni = str(h, "sni")
 
@@ -396,6 +400,18 @@ module Gori
         )
 
         return busy("failed to persist repeater (store busy or unwritable)") if id == 0
+
+        # An explicit `position` is a 0-based tab INDEX, not a raw sort key: stored as-is it tied
+        # with the row already there (and a negative or past-the-end one stayed verbatim), so the
+        # tab landed somewhere else. Clamped and renumbered the way `move_repeater` writes it.
+        if present?(h, "position")
+          ids = store.repeaters_mcp.map(&.id).reject { |rid| rid == id }
+          position = position.clamp(0_i64, ids.size.to_i64)
+          ids.insert(position.to_i, id)
+          unless store.set_repeater_positions(ids)
+            return busy("repeater ##{id} created, but NOT moved to position #{position} (store busy or unwritable); move it with move_repeater")
+          end
+        end
 
         if issue_id && !link_issue_repeater(issue_id, id)
           return busy("repeater ##{id} created but its issue link NOT written (store busy or unwritable); " \
@@ -644,6 +660,10 @@ module Gori
         # mirror create_repeater's invariant — a blank target/request can't be sent.
         return Result.new("target must not be empty", is_error: true) if target.empty?
         return Result.new("request must not be empty", is_error: true) if request.empty?
+        # Only a target this call names: a rename must not fail over the row's stored one.
+        if present?(h, "target") && (why = Repeater::Plan.target_error(target))
+          return err("invalid 'target': #{why}", "INVALID_ARGUMENT", field: "target")
+        end
 
         http2 = bool_arg(h, "http2", existing.http2?)
         auto_cl = bool_arg(h, "auto_content_length", existing.auto_content_length?)
@@ -1265,7 +1285,7 @@ module Gori
           s.field "flow_id", intprop("optional original flow id this repeater stems from")
           s.field "keep_request_line", boolprop("flow_id/issue_id seeding only: store the captured request line as-is instead of rewriting an absolute-form line (GET http://h/p) to origin-form (GET /p). Default false. The rewrite is PERMANENT once stored — not even send_request --verbatim can recover the line — so pass true when the absolute form is the payload. `request_line_rewritten:true` comes back whenever it fired")
           s.field "issue_id", intprop("optional issue id to populate target/request/messages from")
-          s.field "position", intprop("tab position order index (optional, defaults to appending at end)")
+          s.field "position", intprop("0-based tab index to insert at, clamped to the strip (optional, defaults to appending at end)")
           s.field "sni", strprop("optional TLS Server Name Indication override")
           s.field "name", strprop("optional custom name for the repeater tab")
           s.field "tags", strprop("free-text tags for grouping tabs (the TUI subtab label). Space- or comma-separated, a leading # optional; stored deduped and space-joined. Filter on them with get_repeater_context{filter:\"tag:idor\"}")

@@ -116,6 +116,16 @@ describe Gori::Import::Burp do
     String.new(pair.request.body.not_nil!).should eq("body")
   end
 
+  it "keeps a lone LF in a CRLF head verbatim instead of promoting it (P7)" do
+    # `X-A: 1\nTransfer-Encoding` is an obfuscated-header smuggling probe; promoting the LF
+    # turned it into a real CL+TE request.
+    head = "POST /s HTTP/1.1\r\nHost: b.test\r\nX-A: 1\nTransfer-Encoding: chunked\r\nContent-Length: 4\r\n\r\n"
+    result = parse(items(item("https://b.test/s", head + "abcd")))
+    pair = result.flows.first
+    String.new(pair.request.head).should eq(head)
+    String.new(pair.request.body.not_nil!).should eq("abcd")
+  end
+
   it "terminates a head that was saved without its trailing blank line" do
     result = parse(items(item("https://target.test/t", "GET /t HTTP/1.1\r\nHost: target.test")))
     String.new(result.flows.first.request.head).should end_with("\r\n\r\n")
@@ -184,6 +194,26 @@ describe Gori::Import::Burp do
     soap = result.flows.first
     String.new(soap.request.body.not_nil!).should eq(body)
     String.new(soap.response.not_nil!.body.not_nil!).should eq(rss)
+  end
+
+  it "reads <request>/<response> as direct children, not text in a sibling" do
+    # `<response>` inside the <url> CDATA and inside an inline request body used to be
+    # read as the item's response, storing XML junk as its head.
+    body = "<response>1</response>"
+    req = "POST /s HTTP/1.1\r\nHost: b.test\r\nContent-Length: #{body.bytesize}\r\n\r\n#{body}"
+    resp = "HTTP/1.1 201 Created\r\n\r\n"
+    xml = items(<<-XML)
+      <item>
+        <url><![CDATA[http://b.test/?q=<response>x<request>y]]></url>
+        <request base64="false"><![CDATA[#{req}]]></request>
+        <response base64="true">#{Base64.strict_encode(resp)}</response>
+      </item>
+      XML
+    result = parse(xml)
+    result.skipped.should eq(0)
+    pair = result.flows.first
+    String.new(pair.request.body.not_nil!).should eq(body)
+    String.new(pair.response.not_nil!.head).should eq(resp)
   end
 
   it "decodes a base64 message wrapped in CDATA, the shape Burp actually writes" do

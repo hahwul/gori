@@ -192,7 +192,7 @@ describe Gori::CacheDeception do
         id = store.insert_flow(Gori::Store::CapturedRequest.new(
           created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
           method: "POST", target: "/x", http_version: "HTTP/1.1",
-          head: "POST /x HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil,
+          head: "POST /x HTTP/1.1\r\nHost: h.test\r\nCookie: sid=1\r\n\r\n".to_slice, body: nil,
           source: Gori::FlowSource::Kind::Proxy))
         store.update_response(Gori::Store::CapturedResponse.new(flow_id: id, status: 200,
           head: "HTTP/1.1 200 OK\r\n\r\n".to_slice))
@@ -201,6 +201,24 @@ describe Gori::CacheDeception do
         CD.skip_reason(detail, false).should eq(:unsafe_method)
         CD.skip_reason(detail, true).should be_nil # --unsafe-methods lifts it
         Gori::Authorize::Passive.reason_label(:unsafe_method).should eq("not a safe method to repeat")
+      end
+    end
+
+    # An `X-Api-Key` credential survives the anonymous strip, so "anonymous" would send the
+    # authenticated bytes and its matching answer read `served`.
+    it "skips a flow with no Cookie or Authorization for the anonymous identity to strip" do
+      with_store do |store|
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+          method: "GET", target: "/x", http_version: "HTTP/1.1",
+          head: "GET /x HTTP/1.1\r\nHost: h.test\r\nX-Api-Key: k\r\n\r\n".to_slice, body: nil,
+          source: Gori::FlowSource::Kind::Proxy))
+        store.update_response(Gori::Store::CapturedResponse.new(flow_id: id, status: 200,
+          head: "HTTP/1.1 200 OK\r\n\r\n".to_slice))
+        store.flush
+        detail = store.get_flow(id).not_nil!
+        CD.skip_reason(detail, false).should eq(:nothing_to_strip)
+        Gori::Authorize::Passive.reason_label(:nothing_to_strip).should contain("no Cookie or Authorization")
       end
     end
 

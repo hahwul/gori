@@ -66,13 +66,17 @@ module Gori
       # 1. The boundary is whichever blank line comes FIRST POSITIONALLY (`\n\n` or
       #    `\r\n\r\n`), not whichever form is checked first — an LF-only head followed by a
       #    body containing CRLFCRLF would otherwise split in the wrong place.
-      # 2. The head is CRLF-normalized. `Http1.parse_headers` scans for CRLF only and
+      # 2. An LF-ONLY head is CRLF-normalized. `Http1.parse_headers` scans for CRLF only and
       #    returns an EMPTY header list for an LF-only head (see probe/from_repeater.cr),
       #    so an editor-authored or Unix-normalized Burp item would import with no headers
-      #    at all. The BODY is never touched — it may be binary.
+      #    at all. A head that carries any CRLF is the wire's own framing, and a lone LF in
+      #    it is the operator's payload (an obfuscated header: `X-A: 1\nTransfer-Encoding:`
+      #    turned into a real CL+TE request when it was promoted), so it stays verbatim (P7).
+      #    The BODY is never touched — it may be binary.
       def self.split(bytes : Bytes) : {Bytes, Bytes?}
         cut, skip = boundary(bytes)
-        head = Env.normalize_crlf(bytes[0, cut])
+        head = bytes[0, cut]
+        head = Env.normalize_crlf(head) unless AsciiBytes.index(head, "\r\n".to_slice)
         head = terminate(head)
         body = skip > 0 && cut + skip < bytes.size ? bytes[(cut + skip)..].dup : nil
         {head, body}
@@ -98,10 +102,13 @@ module Gori
 
       # Every stored head ends in CRLFCRLF (that is what live capture writes and what
       # `Http1.read_head` returns), so a body-less item saved without its trailing blank
-      # line still round-trips through the Repeater unchanged.
+      # line still round-trips through the Repeater unchanged. A CRLF head cut at a bare
+      # `\n\n` ends in the last line's lone LF, which is that blank line's terminator, not a
+      # header's: it is the one LF replaced.
       private def self.terminate(head : Bytes) : Bytes
         return head if head.size >= 4 && head[-4, 4] == "\r\n\r\n".to_slice
         tail = head.size >= 2 && head[-2, 2] == "\r\n".to_slice ? "\r\n" : "\r\n\r\n"
+        head = head[0, head.size - 1] if tail.size == 4 && head.size > 0 && head[-1] == 0x0A_u8
         buf = IO::Memory.new(head.size + tail.bytesize)
         buf.write(head)
         buf << tail

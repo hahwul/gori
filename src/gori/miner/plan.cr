@@ -261,7 +261,7 @@ module Gori::Miner
       # engine could inject nothing there, yet counted its names as tested and clean (#1203).
       # The plan and the engine both keep the list, so every surface can say what was skipped.
       # Refused BEFORE the write-back, so a refusal leaves the TUI's live selection as it was.
-      requested = options.locations || detected.default
+      requested = (options.locations || detected.default).uniq # `query,query` mines once
       inapplicable = requested - detected.applicable
       runnable = requested - inapplicable
       if runnable.empty?
@@ -416,7 +416,7 @@ module Gori::Miner
     private def self.resolve_origin(options : PlanOptions) : Fuzz::Origin
       raw = options.target.presence || options.default_target.presence
       raise PlanError.new(PlanError::Reason::NoTarget, "no target origin") unless raw
-      Fuzz::Origin.new(*Repeater::FlowRequest.dial_target(raw))
+      Fuzz::Origin.dial(raw)
     rescue e : Repeater::FlowRequest::DialTargetError
       raise PlanError.new(e.unresolved? ? PlanError::Reason::UnresolvedEnv : PlanError::Reason::BadTarget, e.message.to_s, e.detail)
     end

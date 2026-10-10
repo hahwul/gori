@@ -164,10 +164,6 @@ module Gori
         note_request_macro("gori run mine", plan.request_macro_info)
         warn_mine_locations(plan)
         origin = plan.origin
-        unless origin.scheme.in?("http", "https")
-          outbound.close
-          abort "gori run mine: unsupported target scheme #{origin.scheme.inspect} (use http:// or https://)"
-        end
         guard_outbound(outbound, origin.scheme, origin.host, plan.request_target, origin.port, "gori run mine")
         # A writable handle for the run when it has a macro: the steps are recorded in History
         # (source `macro`) and their failures logged, and that is traffic nobody typed at the time.
@@ -192,7 +188,7 @@ module Gori
         in Miner::PlanError::Reason::NoTarget
           "--target is required for --request/stdin"
         in Miner::PlanError::Reason::BadTarget
-          "could not determine a target host"
+          ex.message.to_s # names the host it could not parse, or the scheme it refused
         in Miner::PlanError::Reason::NoLocations
           (why = ex.detail) ? "no --locations applies to this request — #{why}" : "no applicable locations for this request"
         in Miner::PlanError::Reason::Wordlist

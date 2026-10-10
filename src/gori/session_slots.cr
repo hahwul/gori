@@ -153,9 +153,14 @@ module Gori
 
     # Publish a list this process has just committed. Split out of `save` so the
     # TRANSACTIONAL edits below reach the same in-memory bookkeeping by the same door.
-    private def install(list : Array(SessionSlot), blob : String) : Nil
+    #
+    # `rename` ({old, new}) carries the active pointer across a rename (`update`): the slot is
+    # still there under its new name, so the send context must not silently fall back to
+    # as-captured.
+    private def install(list : Array(SessionSlot), blob : String, rename : {String, String}? = nil) : Nil
       @mutex.synchronize do
         @slots = list
+        @active = rename[1] if rename && @active == rename[0]
         # This process's own write is not an external edit: remembering the bytes it committed
         # is what keeps the next `reload` from reading them back as somebody else's rotation
         # and pruning the tables this list's slots just bound into.
@@ -186,7 +191,7 @@ module Gori
     # or nil to write nothing (a deterministic "no such slot"). It runs on the WRITER FIBER —
     # so it must not take `@mutex`, which is why every caller below is a pure function of its
     # argument and `install` runs only after the commit.
-    private def mutate(&block : Array(SessionSlot) -> Array(SessionSlot)?) : Bool
+    private def mutate(rename : {String, String}? = nil, &block : Array(SessionSlot) -> Array(SessionSlot)?) : Bool
       applied = nil.as(Array(SessionSlot)?)
       blob = nil.as(String?)
       # The re-speller is built HERE, outside the transaction: `env_write` reads three settings rows
@@ -206,7 +211,7 @@ module Gori
       list = applied
       written = blob
       return false unless list && written
-      install(list, written)
+      install(list, written, rename)
       true
     end
 
@@ -306,7 +311,7 @@ module Gori
     # replays in, so an edit must not move a row. A rename is an ordinary update: `replacement`
     # carries the new name and the caller has checked it is free.
     def update(name : String, replacement : SessionSlot) : Bool
-      mutate do |list|
+      mutate({name, replacement.name}) do |list|
         idx = list.index(&.name.==(name))
         if idx
           list[idx] = replacement

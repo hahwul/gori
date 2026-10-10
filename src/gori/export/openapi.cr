@@ -416,7 +416,7 @@ module Gori
           b.report.skip(reason)
           return nil
         end
-        tpl = Template.of(path)
+        tpl = Template.of(spec_path(row.target, path))
         key = {tpl.path, row.method.downcase}
         if op = b.ops[key]?
           if op.samples >= opts.max_samples
@@ -428,6 +428,14 @@ module Gori
           return nil
         end
         {key, tpl}
+      end
+
+      # The path an operation is templated from: the endpoint path with the trailing slash the
+      # Sitemap tree drops put back, since `/uploads/` and `/uploads` are two resources to a
+      # client. Selection and `path_prefix` still match on the endpoint path.
+      private def spec_path(target : String, path : String) : String
+        return path if path == "/" || !Sitemap.path_part(Sitemap.normalize_path(target)).ends_with?('/')
+        "#{path}/"
       end
 
       # Classified on the ROW (`Proto.classify`, the History PROTO column's own answer), so a

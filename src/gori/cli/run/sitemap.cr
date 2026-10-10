@@ -61,7 +61,9 @@ module Gori
         with_store(resolve_read_project(proj.name, proj.db), read_only: list) do |store|
           if list
             rows = store.sitemap_tags.to_a.sort_by { |(k, _)| k }
-            rows = rows.select { |(k, _)| k[0] == host } if host
+            if want = host
+              rows = rows.select { |(k, _)| k[0].compare(want, case_insensitive: true).zero? }
+            end
             STDERR.puts "no tags" if rows.empty?
             rows.each { |(k, t)| puts sitemap_tag_row(k[0], k[1], t) }
             return

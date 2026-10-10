@@ -148,10 +148,6 @@ module Gori
           abort "gori run sequence: #{sequence_plan_error(ex)}"
         end
         origin = plan.origin!
-        unless origin.scheme.in?("http", "https")
-          outbound.close
-          abort "gori run sequence: unsupported target scheme #{origin.scheme.inspect} (use http:// or https://)"
-        end
         guard_outbound(outbound, origin.scheme, origin.host, plan.request_target, origin.port, "gori run sequence")
         begin
           # See CLI::Run.seed_bindings — a headless process holds no binding from a previous
@@ -213,7 +209,7 @@ module Gori
         in Sequencer::PlanError::Reason::NoTarget
           "--target is required for --request/stdin"
         in Sequencer::PlanError::Reason::BadTarget
-          "could not determine a target host"
+          ex.message.to_s # names the host it could not parse, or the scheme it refused
         in Sequencer::PlanError::Reason::NoTokenLoc
           "token location selector is empty"
         in Sequencer::PlanError::Reason::BadPosition

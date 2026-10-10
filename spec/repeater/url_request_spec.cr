@@ -13,6 +13,14 @@ describe Gori::Repeater::UrlRequest do
       "Content-Length: 7\r\n\r\n{\"a\":1}")
   end
 
+  it "upper-cases the method unless expand is off" do
+    t = Gori::Repeater::UrlRequest.target("http://h.test/")
+    none = [] of {String, String}
+    String.new(Gori::Repeater::UrlRequest.structured(t, "get", none, nil).bytes).should start_with("GET / HTTP/1.1\r\n")
+    String.new(Gori::Repeater::UrlRequest.structured(t, "get", none, nil, expand: false).bytes)
+      .should start_with("get / HTTP/1.1\r\n")
+  end
+
   # `gori run send --verbatim`: a token the operator typed in a header value is the payload.
   it "leaves a header value's $ENV token literal with expand: false" do
     t = Gori::Repeater::UrlRequest.target("http://h.test/")

@@ -450,10 +450,6 @@ module Gori
                       "(last-byte-sync degrades to independent per-connection sends)"
         end
         origin = plan.origin
-        unless origin.scheme.in?("http", "https")
-          outbound.close
-          abort "gori run fuzz: unsupported target scheme #{origin.scheme.inspect} (use http:// or https://)"
-        end
         guard_outbound(outbound, origin.scheme, origin.host, plan.request_target, origin.port, "gori run fuzz")
         # THE SIZE REFUSAL, and it has to be HERE — before the two things below that put real
         # requests on the wire. It used to be the first line of `run_fuzz_stream`, i.e. after
@@ -541,7 +537,7 @@ module Gori
         in Fuzz::PlanError::Reason::NoTarget
           "--target is required for --request/stdin"
         in Fuzz::PlanError::Reason::BadTarget
-          "could not determine a target host"
+          ex.message.to_s # names the host it could not parse, or the scheme it refused
         in Fuzz::PlanError::Reason::NoPayloads
           "no payloads — add -w/--preset/--payloads/--numbers/--null/--brute/--payload-from"
         in Fuzz::PlanError::Reason::UnresolvedEnv

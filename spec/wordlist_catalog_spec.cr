@@ -52,7 +52,8 @@ end
 describe Gori::WordlistCatalog do
   describe ".valid_name?" do
     it "accepts a filename in any script, with . _ + - and inner spaces" do
-      ["common.txt", "raft-large_words+2", "a", "_x", "사전.txt", "my list.txt", "9lives", "v1.2.3"].each do |n|
+      ["common.txt", "raft-large_words+2", "a", "_x", "사전.txt", "my list.txt", "9lives", "v1.2.3",
+       "cafe\u0301", "हिंदी", "ภาษา"].each do |n|
         Catalog.valid_name?(n).should be_true
       end
     end
@@ -120,6 +121,14 @@ describe Gori::WordlistCatalog do
         r.source.should eq(Catalog::Source::Missing)
         Catalog.missing_hint(r).to_s.should contain(Gori::Paths.wordlists_dir)
         Catalog.missing_hint(Catalog.resolve("./nope.txt")).should be_nil
+      end
+    end
+
+    it "names where a missing bare name was looked for when the Miner or Discover loads it" do
+      with_wordlist_home do
+        expect_raises(IO::Error, /wordlist not found: nope\.txt \(a bare name is looked up/) do
+          Catalog.load(["a"], "nope.txt", tool: "mine")
+        end
       end
     end
 
