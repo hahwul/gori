@@ -134,7 +134,7 @@ module Gori::Tui
       String.build do |io|
         rows.each_with_index do |r, i|
           io << "\n\n" if i > 0
-          at = Time.unix_ms(r.created_at // 1000).to_local.to_s("%Y-%m-%d %H:%M")
+          at = LocalTime.format(r.created_at, "%Y-%m-%d %H:%M")
           io << sender(r) << " · " << r.level << " · " << at << '\n'
           io << scrub_line(r.summary)
           if (d = r.detail) && !d.empty?

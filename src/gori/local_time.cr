@@ -58,6 +58,15 @@ module Gori
       at(micros).try(&.to_s(fmt)) || fallback
     end
 
+    # The stored instant as a `Time`, for a caller that keeps one rather than a string (a row
+    # model, an age). One `Time` cannot hold (an imported column past year 9999) reads as the
+    # epoch: raising here ended the TUI while it built the OAST tab, before any rescue.
+    def instant(micros : Int64) : Time
+      Time.unix(micros // 1_000_000)
+    rescue ArgumentError
+      Time::UNIX_EPOCH
+    end
+
     # `format` without the timezone: for the exports that spell a stored instant in UTC.
     def utc(micros : Int64, fmt : String, fallback : String = "—") : String
       Time.unix(micros // 1_000_000).to_s(fmt)

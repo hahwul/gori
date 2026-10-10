@@ -326,7 +326,7 @@ module Gori::Tui
       return @progress.empty? ? "running…" : @progress if @running
       if @mode == :results && (r = @run)
         t = Retest::Tally.new(r.total, r.passed, r.failed, r.inconclusive, r.errored, r.blocked, r.skipped)
-        return "#{r.verdict.label.upcase} · #{Retest.summary_line(t)} · #{Fmt.ago(Time.unix(r.started_at // 1_000_000))}"
+        return "#{r.verdict.label.upcase} · #{Retest.summary_line(t)} · #{Fmt.ago(LocalTime.instant(r.started_at))}"
       end
       # STEPS: the confirm's own sentence, shown BEFORE `r` rather than only in the dialog,
       # so an operator can see what a run costs while they are still building it.

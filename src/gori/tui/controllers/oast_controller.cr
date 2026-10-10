@@ -352,7 +352,7 @@ module Gori::Tui
 
     private def cb_row(cb : Store::OastCallbackRecord, label : String) : CbRow
       CbRow.new(cb.session_id, cb.provider_uid, cb.protocol, cb.method, cb.source_ip,
-        cb.full_id, label, Time.unix((cb.created_at // 1_000_000)),
+        cb.full_id, label, LocalTime.instant(cb.created_at),
         String.new(cb.raw_request), cb.raw_response.try { |b| String.new(b) })
     end
 
@@ -552,7 +552,7 @@ module Gori::Tui
           session_id: s.id,
           provider: @session_label[s.id]? || provider_label_for(s),
           payload_host: payload_host_for(s),
-          started_at: Time.unix(s.created_at // 1_000_000),
+          started_at: LocalTime.instant(s.created_at),
           hits: callbacks_for(s.id),
           live: live.includes?(s.id))
       end
