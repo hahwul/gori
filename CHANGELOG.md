@@ -35,7 +35,7 @@
 - Sitemap and Miner: JavaScript endpoints on IPv6 and mixed-case hosts are matched to their traffic, Mine seeds come from the flow's own origin, and YAML OpenAPI quotes values YAML 1.1 tools would misread (#1549)
 - Rewriter: a file stub's path is made absolute and may not contain NUL, the rule preview and a mock drafted from a flow match plain-HTTP proxied flows the way the proxy does, and a response body the origin cut short is passed through unrewritten so the client still sees the truncation; an edited Intercept request's kept original respects the capture cap (#1549)
 - Import: a WSDL with one undeclared namespace prefix still imports the operations that do not use it, instead of nothing (#1549)
-- Projects: `.gori` import refuses archives whose tables lost their keys or carry out-of-range interim rows, and its `exec:` notice now counts Decoder tabs and gRPC field specs (#1549)
+- Projects: `.gori` import refuses archives whose tables lost their keys or carry out-of-range interim, colour, extract or display-column rows, and its `exec:` notice now counts Decoder tabs and gRPC field specs (#1549)
 - Projects: exporting a `gori mcp --db` database refuses only the database and its sidecars, so an archive like `capture.db.gori` can sit beside it
 - CLI: `gori run shell` also points `NIX_SSL_CERT_FILE` at its CA bundle, so Nix-built tools trust gori (#1549)
 - Proxy: a request naming a port above 65535 is refused instead of looping back into gori's own listener on glibc Linux
@@ -56,7 +56,11 @@
 - Editors: READ `p` pastes after a glyph made of several codepoints (a decomposed accent, a skin-toned emoji), not before it
 - Projects: the picker stays up and says why when a temp project cannot be created, and its Export no longer exits gori when the launch directory was deleted
 - History: the FRAMES pane names an h2 frame type outside 0..255 from an imported database instead of failing to render
-- Redaction: a JSON secret value longer than about 60 KB is still redacted by the text fallback instead of being left in place
+- TUI: an action refused with a message, such as sending a captured flow whose request head starts with `:` to the Fuzzer, Miner or Sequencer, shows it as a toast instead of ending gori and its proxy
+- Fuzzer: a cluster-bomb run whose later payload set is empty ends at once instead of freezing gori
+- Export: OpenAPI YAML no longer fails on a JSON body nested about 30 levels deep
+- CLI: `gori update` skips a malformed release asset entry and `gori run issues --export` reports a failed write in one line, instead of a backtrace
+- Redaction: a JSON secret value longer than about 60 KB is still redacted by the text fallback instead of being left in place, and one too dense with escapes to scan is withheld instead of failing the copy, export or read
 
 ## v0.8.0
 
