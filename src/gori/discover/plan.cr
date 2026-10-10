@@ -192,7 +192,13 @@ module Gori::Discover
       end
       target = Env.expand(stripped)
       raise PlanError.new(PlanError::Reason::NoTarget, "no seed target") if target.empty?
-      target.matches?(/\Ahttps?:\/\//i) ? target : "https://#{target}"
+      return target if target.matches?(/\Ahttps?:\/\//i)
+      # Only scheme-less input gets `https://`: prefixing `ftp://h/` would crawl a host named `ftp`.
+      if m = target.match(/\A([a-z][a-z0-9+.\-]*):\/\//i)
+        raise PlanError.new(PlanError::Reason::BadTarget,
+          "unsupported seed scheme #{m[1].inspect} (use http:// or https://)", target)
+      end
+      "https://#{target}"
     end
 
     # The crawl-time scope gate, derived from the Outbound the surface handed in rather than

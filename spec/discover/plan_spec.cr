@@ -537,6 +537,15 @@ describe Gori::Discover::Plan do
       Gori::Settings.env_vars = [] of {String, String}
     end
 
+    it "refuses a seed with a non-http(s) scheme instead of crawling a host named after it" do
+      ex = expect_raises(D::PlanError, /unsupported seed scheme "ftp"/) do
+        D::Plan.build(D::PlanOptions.new("ftp://127.0.0.1/"), ungated_outbound)
+      end
+      ex.reason.should eq(D::PlanError::Reason::BadTarget)
+      # A scheme-less seed still gets https://, port included.
+      D::Plan.build(D::PlanOptions.new("acme.test:8443/app"), ungated_outbound).seed.should eq("https://acme.test:8443/app")
+    end
+
     it "refuses a seed whose expanded value carries CRLF" do
       # `URI.parse` keeps a raw CR/LF in the path and the seed is spliced into a request line,
       # so this would otherwise inject a second request on every surface.
