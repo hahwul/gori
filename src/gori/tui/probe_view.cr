@@ -785,12 +785,13 @@ module Gori::Tui
     # `c`: one-key dismiss for the targeted issue. open → false-positive (mute), anything
     # already triaged → back to open (un-mute). Dismiss is the high-value triage action for
     # a passive scanner; the full open/confirmed/fp/resolved picker was over-built for
-    # machine-found issues (promote handles "this is real → Issue"). Returns the new state, or
-    # nil when the targeted row no longer exists (the list is re-read so it drops out).
+    # machine-found issues (promote handles "this is real → Issue"). Returns the status it was in
+    # and the one it is in now — equal when the write did not commit (a busy store) — or nil
+    # when the targeted row no longer exists (the list is re-read so it drops out).
     #
     # Toggles from the row's CURRENT status, not the list's copy: a peer that triaged it since
     # the last reload would otherwise have its change undone by a toggle aimed the other way.
-    def toggle_dismiss(store : Store) : Store::Status?
+    def toggle_dismiss(store : Store) : {Store::Status, Store::Status}?
       return nil unless target_issue
       unless issue = fresh_target_issue(store)
         reload(store)
@@ -798,16 +799,18 @@ module Gori::Tui
       end
       next_status = Probe::Triage.toggle_dismiss(store, issue)
       reload(store)
-      next_status
+      {issue.status, next_status}
     end
 
     # Delete a SPECIFIC issue by id. The controller captures the id when the confirm opens, so a
     # background reload that shifts the selection between prompt and confirm can't make the delete
     # (and its paired suppress) target a different issue than the one the user chose.
-    def delete_by_id(store : Store, id : Int64) : Nil
-      store.delete_probe_issue(id)
-      close_detail if @detail.try(&.id) == id
+    # False when the delete did not commit (a busy store): the issue is still there.
+    def delete_by_id(store : Store, id : Int64) : Bool
+      ok = store.delete_probe_issue(id)
+      close_detail if ok && @detail.try(&.id) == id
       reload(store)
+      ok
     end
 
     def clear(store : Store) : Nil

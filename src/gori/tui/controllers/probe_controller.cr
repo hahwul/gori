@@ -573,7 +573,7 @@ module Gori::Tui
         # in-flight Active/passive fiber can re-upsert the same (code, host) in
         # that window if suppress runs after delete.
         @host.session.probe.suppress(code, host)
-        @probe.delete_by_id(@host.session.store, id)
+        @host.status("delete NOT applied (project busy) — the issue is unchanged") unless @probe.delete_by_id(@host.session.store, id)
       end
     end
 
@@ -593,8 +593,10 @@ module Gori::Tui
     # `c`: toggle dismiss (open ↔ false-positive) on the open/selected issue.
     def probe_dismiss : Nil
       return unless @probe.target_issue
-      st = @probe.toggle_dismiss(@host.session.store)
-      return @host.status("issue no longer exists") unless st
+      was_st = @probe.toggle_dismiss(@host.session.store)
+      return @host.status("issue no longer exists") unless was_st
+      was, st = was_st
+      return @host.status("dismiss NOT applied (project busy) — the issue is unchanged") if st == was
       # A synchronous user action → transient toast (the list updates in place too),
       # matching the rest of the app; the notification center is for async events.
       @host.status(st.open? ? "issue re-opened" : "issue dismissed")

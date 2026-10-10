@@ -30,7 +30,48 @@ private def seed(store, code, host)
     Gori::Probe::Detection.new(code, "headers", host, "https://#{host}/", "t", Gori::Store::Severity::Low))
 end
 
+# A writer batch rolled back under a cross-process lock while reads still serve the row — the
+# shape `exec_task_ok` answers false for. No return annotations, so a revert still compiles.
+private class ProbeWriteFailingStore < Gori::Store
+  def update_probe_issue_status(id : Int64, status : Gori::Store::Status)
+    false
+  end
+
+  def delete_probe_issue(id : Int64)
+    false
+  end
+end
+
+private def with_probe_write_failing_store(&)
+  path = File.tempname("gori-probeview-busy", ".db")
+  db = DB.open("sqlite3:#{path}?journal_mode=wal&synchronous=normal&busy_timeout=5000")
+  Gori::SafeRegexp.install(db)
+  Gori::Store::Schema.migrate!(db)
+  store = ProbeWriteFailingStore.new(db)
+  begin
+    yield store
+  ensure
+    store.close
+    File.delete?(path)
+    File.delete?("#{path}-wal")
+    File.delete?("#{path}-shm")
+  end
+end
+
 describe Gori::Tui::ProbeView do
+  # The controller toasts a failure from these answers rather than "issue dismissed"/deleted.
+  it "reports a dismiss or delete that did not commit" do
+    with_probe_write_failing_store do |store|
+      seed(store, "missing_hsts", "a.test")
+      view = Gori::Tui::ProbeView.new
+      view.reload(store)
+      id = view.target_issue.not_nil!.id
+      view.toggle_dismiss(store).should eq({Gori::Store::Status::Open, Gori::Store::Status::Open})
+      view.delete_by_id(store, id).should be_false
+      store.probe_issues.map(&.id).should contain(id)
+    end
+  end
+
   it "defaults to an open-only lens: dismissing empties the visible list but keeps the rows" do
     view_store do |store|
       seed(store, "missing_hsts", "a.test")
@@ -57,11 +98,11 @@ describe Gori::Tui::ProbeView do
       view.reload(store)
       view.target_issue.not_nil!.status.open?.should be_true
 
-      view.toggle_dismiss(store).try(&.false_positive?).should be_true
+      view.toggle_dismiss(store).try(&.[1].false_positive?).should be_true
       view.target_issue.should be_nil # dropped from the open-only lens
 
-      view.toggle_show_closed                                # reveal it
-      view.toggle_dismiss(store).try(&.open?).should be_true # un-dismiss
+      view.toggle_show_closed                                    # reveal it
+      view.toggle_dismiss(store).try(&.[1].open?).should be_true # un-dismiss
     end
   end
 
@@ -567,7 +608,7 @@ describe Gori::Tui::ProbeView do
         view.target_issue.not_nil!.status.open?.should be_true
         view.fresh_target_issue(store).not_nil!.status.false_positive?.should be_true
         # …so `c` re-opens it (the toggle of its CURRENT status) instead of dismissing it again.
-        view.toggle_dismiss(store).try(&.open?).should be_true
+        view.toggle_dismiss(store).try(&.[1].open?).should be_true
 
         store.delete_probe_issue(id)
         view.fresh_target_issue(store).should be_nil
