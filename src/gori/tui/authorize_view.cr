@@ -295,14 +295,14 @@ module Gori::Tui
       @entries.each { |e| e.state = :running if ids.includes?(e.id) }
     end
 
-    def apply_result(id : Int32, target : Authorize::Target) : Nil
+    def apply_result(id : Int32, target : Authorize::Target, rev : Int32 = @identity_rev) : Nil
       touch
       return unless e = entry_by_id(id)
       e.target = target
       e.state = :done
       e.error = nil
       e.skip_reason = nil
-      e.result_rev = @identity_rev
+      e.result_rev = rev
     end
 
     # A run DECLINED to send this request — no identity would change it, the capture never
@@ -335,7 +335,7 @@ module Gori::Tui
     #
     # Re-running it is still one keystroke: ⇧R takes every row, and changing the identity set
     # bumps the revision, which is when a retry could plausibly go differently.
-    def apply_error(id : Int32, message : String) : Nil
+    def apply_error(id : Int32, message : String, rev : Int32 = @identity_rev) : Nil
       touch
       return unless e = entry_by_id(id)
       e.state = :error
@@ -345,7 +345,7 @@ module Gori::Tui
       # it. ⇧R re-runs a row that already had a result, so this is reachable whenever a retry
       # raises — and the stale table said the request had been compared when it had not.
       e.target = nil
-      e.result_rev = @identity_rev
+      e.result_rev = rev
     end
 
     # Total non-baseline identities that matched their baseline across every request — the
