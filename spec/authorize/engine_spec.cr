@@ -208,6 +208,27 @@ describe Gori::Authorize::Engine do
     end
   end
 
+  # The flow carries `Cookie` only, so an identity stripping `Authorization` changes nothing.
+  # Its bytes equal the baseline's, so its answer is the baseline's by construction — `Same`
+  # there read as a BYPASS beside an identity that really was refused.
+  describe "an identity whose overlay changes nothing" do
+    it "is NoEffect, not Same, and is never sent" do
+      fake = FakeBackend.new({"*" => ok_resp(200, "page"), "X-Id: nokey" => ok_resp(401, "no")},
+        Gori::Fuzz::Origin.new("https", "api.example.com", 443))
+      eng = Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool) { fake.as(Gori::Fuzz::Backend) })
+      target = eng.run(detail, [
+        Identity.new("admin", baseline: true),
+        Identity.new("anonymous", remove_headers: ["Authorization"]),
+        Identity.new("nokey", remove_headers: ["Cookie"], set_headers: [{"X-Id", "nokey"}]),
+      ]).not_nil!
+      fake.sent.size.should eq(2)
+      target.trials.find! { |t| t.identity == "anonymous" }.verdict.should eq(Verdict::NoEffect)
+      target.same_count.should eq(0)
+      target.compared.map(&.identity).should eq(["nokey"])
+      Gori::CLI::Output.authorize_verdict(target).should eq(:enforced)
+    end
+  end
+
   # An identity IS a `SessionSlot`, and a run whose set claims no baseline gets one PROMOTED.
   it "promotes the first identity when nothing claims the baseline" do
     responses = {"*" => ok_resp(200, "page")}
@@ -265,7 +286,8 @@ describe Gori::Authorize::Engine do
       fake = FakeBackend.new({"*" => ok_resp(200, "page")}, origin)
       eng = Gori::Authorize::Engine.new(->(_o : Gori::Fuzz::Origin, _h : Bool) { fake.as(Gori::Fuzz::Backend) })
       polls = 0
-      target = eng.run(detail, [Identity.new("a", baseline: true), Identity.new("b")],
+      # "b" must change the request, or it is NoEffect and never sent.
+      target = eng.run(detail, [Identity.new("a", baseline: true), Identity.new("b", remove_headers: ["Cookie"])],
         -> { (polls += 1) > 2 })
       fake.sent.size.should eq(2)
       target.should_not be_nil # every identity ran, so the result stands

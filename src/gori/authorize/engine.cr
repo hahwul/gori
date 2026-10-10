@@ -87,7 +87,7 @@ module Gori
 
       # Nothing in this request actually reached the origin.
       def fully_blocked? : Bool
-        @blocked > 0 && @trials.all?(&.meta.errored?)
+        @blocked > 0 && @trials.reject(&.verdict.no_effect?).all?(&.meta.errored?)
       end
 
       # NOT ONE non-baseline identity produced a comparison: every one of their sends failed —
@@ -112,7 +112,13 @@ module Gori
       # refuses that identity set outright (`MultipleBaselines`) and `order_baseline_first`
       # cannot build one; this is the third layer, and the one that holds for any caller.
       def uncompared? : Bool
-        @trials.reject(&.baseline?).all?(&.verdict.error?)
+        compared.all?(&.verdict.error?)
+      end
+
+      # The non-baseline trials that were actually sent — what an aggregate verdict reads. A
+      # `NoEffect` trial is neither a match nor a difference: it compared nothing.
+      def compared : Array(Trial)
+        @trials.reject { |t| t.baseline? || t.verdict.no_effect? }
       end
 
       # `uncompared?` for the reason a NETWORK gives — the socket-level twin of
@@ -314,6 +320,12 @@ module Gori
         SessionRefresh.before_send(id.name)
         gen = Env::Generation.for_dial(origin.host, origin.scheme)
         bytes = SessionSlot.overlay_wire(base_bytes, Authorize.resolve(id, gen))
+        # Per identity, not only per flow: `Passive.any_identity_changes?` skips a flow when NO
+        # identity changes it, and lets one through when ANY does — so the rest still reach here.
+        if !id.baseline? && (base = baseline_trial) && bytes == base.request
+          return Trial.new(id.name, false, Repeater::ExchangeMeta.of(nil, nil, nil, nil),
+            Verdict::NoEffect, nil, ResponseSummary.new(nil, nil, 0_u64), bytes, nil, nil)
+        end
         # Whole-buffer verbatim: we supply the identity ourselves, so gori's own session-binding
         # expansion must not ALSO rewrite these bytes (the same reason Probe active marks its
         # probes evidence — see `Fuzz::Backend.all_verbatim`).

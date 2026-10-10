@@ -876,7 +876,7 @@ module Gori
       # of health for a target that answered nothing). WHY they failed is the run summary's
       # job; per request the answer is the same either way.
       def self.authorize_verdict(t : Authorize::Target) : Symbol
-        non = t.trials.reject(&.baseline?)
+        non = t.compared
         return :error if non.empty? || t.uncompared?
         return :bypass if non.any?(&.verdict.same?)
         return :enforced if non.all?(&.verdict.different?)

@@ -84,7 +84,7 @@ module Gori::Tui
         return @state unless @state == :done
         t = @target
         return :error unless t
-        non = t.trials.reject(&.baseline?)
+        non = t.compared
         # `uncompared?` covers the empty set too — a `return :review if non.empty?` used to
         # stand in front of it, and it was the tab's half of the three-way disagreement that
         # two baselines produced (CLI `[x] error`, here `review`, MCP `enforced`). `review`
@@ -811,6 +811,7 @@ module Gori::Tui
       in .review?    then "review"
       in .error?     then "error"
       in .baseline?  then "baseline"
+      in .no_effect? then "no effect"
       end
     end
 
@@ -821,6 +822,7 @@ module Gori::Tui
       in .review?    then Theme.yellow
       in .error?     then Theme.muted
       in .baseline?  then Theme.focus_gold
+      in .no_effect? then Theme.muted
       end
     end
 
