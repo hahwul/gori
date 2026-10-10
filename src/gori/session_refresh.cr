@@ -504,8 +504,7 @@ module Gori
           st.cooldown_until = Time.utc + COOLDOWN
           st.auto_off = true if st.failures >= FAILURE_LIMIT
         end
-        @outcomes.shift if @outcomes.size >= OUTCOME_QUEUE
-        @outcomes << outcome
+        adopt_outcome(outcome)
       end
 
       # One `events` row per refresh — `list_events` shows it. Info on success and warn on a
@@ -573,6 +572,17 @@ module Gori
 
       protected def adopt(pending : Array(Proc(Store, Nil))) : Nil
         @deferred.concat(pending)
+      end
+
+      # Finished outcomes move to the runner that replaced this one, so whoever drains the
+      # installed hook still sees them: a CLI send usually opens a second store before it reports.
+      def pass_outcomes(successor : Runner) : Nil
+        take_outcomes.each { |o| successor.adopt_outcome(o) }
+      end
+
+      protected def adopt_outcome(outcome : Outcome) : Nil
+        @outcomes.shift if @outcomes.size >= OUTCOME_QUEUE
+        @outcomes << outcome
       end
 
       private def execute(slot : SessionSlot, outbound : Outbound, manual : Bool) : Outcome

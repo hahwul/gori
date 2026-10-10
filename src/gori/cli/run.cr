@@ -819,9 +819,7 @@ module Gori
         # A refresh that ran on an earlier READ-ONLY open owes History rows and an event; this
         # open writes them if it can, or carries them to the runner it just installed.
         previous.try &.hand_over(store, origin, runner)
-        # …and its finished outcomes, which the replaced runner would otherwise take with it: the
-        # send that triggered a refresh usually opens a writable store before it reports.
-        previous.try { |p| @@refresh_outcomes.concat(p.take_outcomes) }
+        previous.try &.pass_outcomes(runner)
         warn_unwritten_refresh_records
         # …and re-select whatever `--slot` chose, because THIS line just replaced the registry
         # holding the pointer. See `reapply_active_slot`.
@@ -1099,9 +1097,6 @@ module Gori
       # only ever read its project. The refresh itself happened; its record did not.
       @@refresh_exit_note = false
 
-      # Outcomes drained off runners an `open_store` replaced, for `report_unbound_slot_overlay`.
-      @@refresh_outcomes = [] of Gori::SessionRefresh::Outcome
-
       private def self.warn_unwritten_refresh_records : Nil
         return if @@refresh_exit_note
         @@refresh_exit_note = true
@@ -1201,9 +1196,9 @@ module Gori
       # A FAILED automatic refresh is said first, in `session refresh`'s words: it is usually why
       # the value went out literally, and otherwise only an event row (when writable) records it.
       private def self.report_unbound_slot_overlay(cmd : String) : Nil
-        Gori::SessionRefresh.hook.as?(Gori::SessionRefresh::Runner).try { |r| @@refresh_outcomes.concat(r.take_outcomes) }
-        @@refresh_outcomes.each { |o| STDERR.puts "#{cmd}: #{o.message}" unless o.ok || o.manual }
-        @@refresh_outcomes.clear
+        if runner = Gori::SessionRefresh.hook.as?(Gori::SessionRefresh::Runner)
+          runner.take_outcomes.each { |o| STDERR.puts "#{cmd}: #{o.message}" unless o.ok || o.manual }
+        end
         note = unbound_overlay_note(Env.take_unbound_overlay)
         STDERR.puts "#{cmd}: #{note}" if note
       end
