@@ -8,7 +8,7 @@ module Gori
   module CLI
     module Run
       @[Subcommand("import", help: [
-        {"import", "Import flows from a HAR, URL list, or OpenAPI spec into History"},
+        {"import", "Import flows into History from a HAR, URL list, OpenAPI, Postman, Insomnia, Burp or WSDL file, or curl commands"},
       ])]
       private def self.cmd_import(args : Array(String)) : Nil
         db_path : String? = nil
