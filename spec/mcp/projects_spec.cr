@@ -756,6 +756,9 @@ describe "Gori::MCP::Tools project switch refusals" do
       # runs against this project; only the runner fiber leaving (`finalize_job`) frees it.
       djob.status = :error
       tools.call("switch_project", JSON.parse(%({"project":#{slug.to_json}}))).error_code.should eq("PROJECT_BUSY")
+      # …and still `live?`, the predicate `stop_job` asks too: an agent told "stop them first"
+      # must be able to stop it, not hear `already_finished`.
+      djob.live?.should be_true
       djob.finalized = true
       mcp_ok_json(tools, "switch_project", %({"project":#{slug.to_json}}))["switched"].as_bool.should be_true
     end
