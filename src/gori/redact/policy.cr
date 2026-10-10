@@ -126,8 +126,18 @@ module Gori
       # read. `--redact` has no analogue in a keystroke or a tool call, so "is redaction on by
       # default here" is the whole question, and `nil` means the surface hands over the captured
       # bytes exactly as it always has.
+      #
+      # Such a surface also has nowhere to show `resolve`'s refusal, and dropping it would hand
+      # over raw bytes — so an active name that no longer resolves (a typo, a deleted profile)
+      # fails CLOSED onto the built-in profile. A profile the operator defined empty did resolve:
+      # that is their call, and the bytes go out as it says.
       def self.ambient(store : Store?) : Matcher?
-        resolve(store).matcher
+        choice = resolve(store)
+        return choice.matcher unless choice.error
+        name = project_scope(store).active.presence || Settings.redaction_active.presence
+        return nil if name && profile(store, name)
+        Settings.arm_redaction
+        Matcher.new(DEFAULT_PROFILE)
       end
 
       def self.unknown(store : Store?, name : String) : String
