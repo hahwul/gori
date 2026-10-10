@@ -237,6 +237,7 @@ module Gori
       # unlinked the other owner's evidence.
       class LinkOwnerFlags
         property kind = "issue"
+        property owner : String? = nil
         property id : Int64? = nil
         property position : Int32? = nil
         getter flags = [] of String
@@ -244,7 +245,7 @@ module Gori
 
       # The owner flags, registered once for `links`, `links add` and `links delete`.
       private def self.link_owner_options(p : OptionParser, o : LinkOwnerFlags) : Nil
-        p.on("--owner=KIND", "Owner kind: issue (default) | note") { |v| o.kind = v.strip.downcase; o.flags << "--owner" }
+        p.on("--owner=KIND", "Owner kind: issue (default) | note") { |v| o.kind = o.owner = v.strip.downcase }
         p.on("--id=N", "Owner issue/note id (required unless --note-position is used)") { |v| o.id = parse_id(v, "gori run links", "--id"); o.position = nil; o.flags << "--id" }
         # `evidence`/`retest` name the owner as `--issue N` (#1389); the same spelling here.
         p.on("--issue=N", "Same as --owner=issue --id=N") { |v| o.kind = "issue"; o.id = parse_id(v, "gori run links", "--issue"); o.position = nil; o.flags << "--issue" }
@@ -252,12 +253,14 @@ module Gori
         p.on("--note-position=N", "Note's 1-based list position shown by `gori run notes`") { |v| o.kind = "note"; o.id = nil; o.position = parse_link_note_position(v); o.flags << "--note-position" }
       end
 
-      # `--owner` only beside the bare `--id` it qualifies.
+      # `--owner` may restate what `--issue`/`--note`/`--note-position` imply, never contradict it.
       private def self.link_owner_selection(verb : String, o : LinkOwnerFlags) : {Int64?, Int32?}
-        selectors = o.flags.uniq - ["--owner"]
-        if selectors.size > 1 || (o.flags.includes?("--owner") && selectors.any? { |f| f != "--id" })
+        selectors = o.flags.uniq
+        implied = selectors.first?.try { |f| f == "--issue" ? "issue" : f == "--id" ? nil : "note" }
+        if selectors.size > 1 || ((owner = o.owner) && implied && owner != implied)
+          got = (o.owner ? ["--owner=#{o.owner}"] : [] of String) + selectors
           abort "gori run links #{verb}: name the owner once — --issue N, --note N, --note-position N, " \
-                "or --owner KIND --id N (got #{o.flags.uniq.join(", ")})"
+                "or --owner KIND --id N (got #{got.join(", ")})"
         end
         abort "gori run links #{verb}: --id is required (or use --note-position for a note)" if o.id.nil? && o.position.nil?
         {o.id, o.position}
