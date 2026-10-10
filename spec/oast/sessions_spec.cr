@@ -442,7 +442,9 @@ describe Gori::Oast::Sessions do
         row = store.oast_callbacks_since(0).find!(&.session_id.==(id))
         row.created_at.should eq(i.at.to_unix_ms * 1000)
         row.protocol.should eq("http")
-        O::Sessions.seen_uids(store, id).should eq(Set{"uid-1"})
+        seen = O::Sessions.seen_uids(store, id)
+        seen.size.should eq(1)
+        seen.includes?("uid-1").should be_true
       end
     end
 

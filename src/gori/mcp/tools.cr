@@ -244,7 +244,7 @@ module Gori
         getter session : Oast::Session
         getter http : Oast::Http
         getter kind_label : String
-        getter seen = Set(String).new
+        property seen = Oast::SeenWindow(String).new
         # The `oast_sessions` row this handle was RESUMED from (nil for an ad-hoc oast_start).
         # Set means the handle is a project listener: oast_poll persists what it catches and
         # stamps last_poll_at, and oast_stop keeps the registration instead of dropping it.
@@ -1844,8 +1844,7 @@ module Gori
         s = oast_session(h)
         return s if s.is_a?(Result)
         sid = str(h, "session_id")
-        fresh = s.provider.poll(s.http, s.session).reject { |i| s.seen.includes?(i.unique_id) }
-        fresh.each { |i| s.seen << i.unique_id }
+        fresh = s.provider.poll(s.http, s.session).select { |i| s.seen.add?(i.unique_id) }
         # A RESUMED handle is a project listener, so its hits are project evidence: persist
         # them and stamp the liveness signal, exactly as the TUI listener does. An ad-hoc
         # oast_start handle has no row to file them under and stays ephemeral.

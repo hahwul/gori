@@ -88,7 +88,7 @@ module Gori
         s = OastMcpSession.new(bound.provider, bound.session, http, bound.session.kind.label, row)
         # Seed the dedup set from what the row already holds, so a provider that replays its
         # whole buffer on a poll does not re-announce every callback already on file.
-        Oast::Sessions.seen_uids(store, row).each { |uid| s.seen << uid }
+        s.seen = Oast::Sessions.seen_uids(store, row)
         @oast_mcp[sid] = s
         # Mark it live NOW: `OutOfBand::StoreMinter` mints out-of-band probe payloads against
         # the most-recently-POLLED session, and this one is about to be polled.

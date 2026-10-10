@@ -217,8 +217,10 @@ module Gori::Oast
     # The provider uids this session already has on file — the seed for a resumed listener's
     # dedup set. Without it a provider that returns its whole buffer on every poll
     # (webhook.site, postbin) would re-announce every old hit the moment you resumed.
-    def seen_uids(store : Store, session_id : Int64) : Set(String)
-      store.oast_callback_uids(session_id)
+    def seen_uids(store : Store, session_id : Int64) : SeenWindow(String)
+      window = SeenWindow(String).new
+      store.oast_callback_uids(session_id, DEDUP_WINDOW).each { |uid| window.add?(uid) }
+      window
     end
 
     # Rebuild the engine Session from its row. The inverse of what a register persists, and

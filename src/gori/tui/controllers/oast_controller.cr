@@ -135,11 +135,11 @@ module Gori::Tui
       @providers = [] of Oast::ProviderConfig
       @listeners = [] of Listener
       @callbacks = [] of CbRow
-      @seen = Hash(Int64, Set(String)).new     # session_id → seen provider_uids, WINDOWED (dedup)
-      @hits = Hash(Int64, Int32).new           # session_id → TOTAL callbacks folded (survives eviction)
-      @evicted = 0                             # rows dropped off the old end of the window (still in the DB)
-      @evict_announced = false                 # the one-time "the pane is a window now" note has fired
-      @session_label = Hash(Int64, String).new # session_id → provider label for the table
+      @seen = Oast::SeenWindow({Int64, String}).new(CALLBACK_CAP) # {session_id, provider_uid} (dedup)
+      @hits = Hash(Int64, Int32).new                              # session_id → TOTAL callbacks folded (survives eviction)
+      @evicted = 0                                                # rows dropped off the old end of the window (still in the DB)
+      @evict_announced = false                                    # the one-time "the pane is a window now" note has fired
+      @session_label = Hash(Int64, String).new                    # session_id → provider label for the table
       @active_sub = 0
       @cb_sel = 0
       @cb_scroll = 0
@@ -267,7 +267,6 @@ module Gori::Tui
       @max_cb_id = 0_i64
       store.oast_sessions.each do |s|
         @session_label[s.id] = provider_label_for(s)
-        @seen[s.id] ||= Set(String).new
       end
       store.oast_callbacks_since(0_i64).each { |cb| fold_callback(cb) }
       @cb_version += 1
@@ -283,7 +282,6 @@ module Gori::Tui
       @providers = Oast.provider_configs(store)
       store.oast_sessions.each do |s|
         @session_label[s.id] = provider_label_for(s)
-        @seen[s.id] ||= Set(String).new
       end
       inserted = false
       store.oast_callbacks_since(@max_cb_id).each { |cb| inserted = true if fold_callback(cb) }
@@ -298,18 +296,16 @@ module Gori::Tui
     # That same id-ascending order is what makes the windowing below keep the NEWEST rows.
     private def fold_callback(cb : Store::OastCallbackRecord) : Bool
       @max_cb_id = cb.id if cb.id > @max_cb_id
-      seen = (@seen[cb.session_id] ||= Set(String).new)
-      return false if seen.includes?(cb.provider_uid)
-      seen << cb.provider_uid
+      return false unless @seen.add?({cb.session_id, cb.provider_uid})
       @hits[cb.session_id] = (@hits[cb.session_id]? || 0) + 1
       @callbacks << cb_row(cb, @session_label[cb.session_id]? || "oast")
       trim_callbacks
       true
     end
 
-    # Hold @callbacks to CALLBACK_CAP by dropping its OLDEST rows, and drop their uids from
-    # @seen with them — @seen grew one interned uid per row in lockstep, so capping the rows
-    # alone would only slow the same unbounded growth down.
+    # Hold @callbacks to CALLBACK_CAP by dropping its OLDEST rows. @seen is a window of the same
+    # CALLBACK_CAP over the same keys — one per row, added in lockstep — so it drops their uids
+    # itself: capping the rows alone would only slow the same unbounded growth down.
     #
     # Evicting the OLD end is what keeps dedup sound. The one re-announcement that must never
     # double-append is `reconcile` re-reading a row the live drain already appended, and those
@@ -328,8 +324,7 @@ module Gori::Tui
     private def trim_callbacks : Nil
       return if @callbacks.size <= CALLBACK_CAP
       while @callbacks.size > CALLBACK_CAP
-        old = @callbacks.shift
-        @seen[old.session_id]?.try(&.delete(old.uid))
+        @callbacks.shift
         @evicted += 1
       end
     end
@@ -1689,7 +1684,6 @@ module Gori::Tui
         listener.poller = poller
         poller.start
         @listeners << listener
-        @seen[id] ||= Set(String).new
         @session_label[id] = reg.provider_label
         # Mark the session live NOW so a probe scan in the ≤SESSION_HEARTBEAT window before the
         # first heartbeat still mints against it rather than an older polled session.
@@ -1724,10 +1718,8 @@ module Gori::Tui
         @host.status("OAST poll error: #{ev.message}")
       when Oast::CallbackEvent
         sid = ev.session_id
-        seen = (@seen[sid] ||= Set(String).new)
         i = ev.interaction
-        return if seen.includes?(i.unique_id)
-        seen << i.unique_id
+        return unless @seen.add?({sid, i.unique_id})
         @hits[sid] = (@hits[sid]? || 0) + 1
         label = @session_label[sid]? || "oast"
         store = @host.session.store
@@ -1765,7 +1757,7 @@ module Gori::Tui
     end
 
     # The hit count in the job note is the session's TOTAL, so it is counted separately rather
-    # than read off @seen#size: @seen is now windowed (trim_callbacks drops evicted uids), and
+    # than read off @seen#size: @seen is windowed (it drops the uids of evicted rows), and
     # a listener whose counter walked BACKWARDS as it kept receiving would be worse than no
     # counter. One Int32 per session, so it costs nothing the labels don't already cost.
     private def callbacks_for(sid : Int64) : Int32

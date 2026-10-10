@@ -544,8 +544,7 @@ module Gori
           if interactions
             store.touch_oast_session(id)
             interactions.each do |i|
-              next if seen.includes?(i.unique_id)
-              seen << i.unique_id
+              next unless seen.add?(i.unique_id)
               Oast::Sessions.record_callback(store, id, i)
               oast_emit_callback(io, i, label, json)
             end
@@ -864,7 +863,7 @@ module Gori
         STDERR.puts "saved as session ##{session_row} — its registration is KEPT on exit " \
                     "(`gori run oast resume #{session_row}` to pick it up, `release` to drop it)" if store
         STDERR.puts "waiting for callbacks (Ctrl-C to stop)…" unless once
-        seen = Set(String).new
+        seen = Oast::SeenWindow(String).new
         # Ctrl-C used to do nothing here: the poll loop trapped no signals, so despite the
         # "Ctrl-C to stop" hint only SIGTERM/SIGKILL ended the listener. Trap INT+TERM into
         # a buffered channel (matching gori run discover / App#install_signal_traps) and let
@@ -892,8 +891,7 @@ module Gori
             if interactions
               store.try(&.touch_oast_session(session_row))
               interactions.each do |i|
-                next if seen.includes?(i.unique_id)
-                seen << i.unique_id
+                next unless seen.add?(i.unique_id)
                 store.try { |s| Oast::Sessions.record_callback(s, session_row, i) }
                 if json
                   puts Oast::Present.interaction(i, kind.label).to_json
