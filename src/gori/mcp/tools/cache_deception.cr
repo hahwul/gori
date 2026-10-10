@@ -107,7 +107,7 @@ module Gori
         case verdict
         in .cached?
           "the anonymous re-request was served the authenticated response FROM a cache, while the " \
-          "cache-busted anonymous control got different content — a web " \
+          "cache-busted anonymous control was refused (401/403) or redirected elsewhere — a web " \
           "cache deception. Confirm the body carried private data before reporting it; the Fuzzer's " \
           "`cache-delimiters` payload set finds the crafted paths that trigger it."
         in .served?
@@ -115,8 +115,9 @@ module Gori
           "or the cache-busted control matched without a cache-hit signal. A private cached response " \
           "was not confirmed; inspect the trials before ruling out hidden cache behavior."
         in .review?
-          "the anonymous response was similar but not identical, or the matching cache-busted control " \
-          "was itself a cache hit and may not have bypassed the cache — judge it."
+          "the anonymous response was similar but not identical, the matching cache-busted control " \
+          "was itself a cache hit and may not have bypassed the cache, or the control failed with a " \
+          "status that is not a refusal (e.g. 404/5xx: the buster broke the request) — judge it."
         in .protected?
           "the anonymous re-request did NOT get the authenticated response, so no private content " \
           "was served without a session."
@@ -138,6 +139,7 @@ module Gori
           "response was cached under a key an anonymous client hits; an anonymous cache-busted " \
           "query request checks whether matching content is public. If that control is itself a cache " \
           "hit, matching content is inconclusive (`verdict:review`), because the query may be ignored. " \
+          "`cached` needs the control refused (401/403) or redirected; any other differing control is `review`. " \
           "Each trial includes its `cache` signal; the top-level `cache` is the anonymous response. Reads " \
           "the same cache classifier as get_flow's `cache` / QL `cache:`. To find the CRAFTED paths that trigger " \
           "it (`;`, `.css`, `%00`, dot-segments), fuzz the path with the `cache-delimiters` payload " \

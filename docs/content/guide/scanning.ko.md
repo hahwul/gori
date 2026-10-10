@@ -64,7 +64,7 @@ gori run probe --persist             # also write the findings into the triage l
 
 ### 웹 캐시 디셉션 {#web-cache-deception}
 
-`gori run cache-deception <flow-id>…`(MCP `cache_deception_check`)는 비공개 응답이 캐시를 통해 다른 사람에게 제공될 수 있는지 확인합니다. 플로우마다 캡처된 로그인 신원 그대로 요청을 재생해 캐시를 채우고, `Cookie`와 `Authorization`을 뺀 채 같은 URL을 다시 요청하고, 그 익명 응답이 같은 내용을 캐시 히트로 받았을 때만 캐시 버스팅 쿼리를 붙인 익명 대조 요청을 보냅니다. 익명 요청이 캐시 히트로 인증된 내용을 받았고 대조 요청은 달랐다면 `cached`(디셉션 가능성이 높으니 본문이 정말 비공개였는지 확인하세요), 캐시 히트 없이 내용만 같았거나 대조 요청도 캐시 히트 없이 같았다면 `served`(공개 내용으로 보임), 응답이 비슷하기만 하거나 대조 요청도 캐시 히트였다면 `review`(버스터가 무시됐을 수 있음), 익명 요청이 인증된 응답을 받지 못했다면 `protected`입니다. `blocked`와 `errored`는 아무것도 측정하지 못했다는 뜻입니다. `--unsafe-methods`를 주지 않으면 `GET`/`HEAD`/`OPTIONS`만 확인합니다. 확인해 볼 만한 경로는 Fuzzer의 `cache-delimiters` 프리셋으로 경로를 스윕해 찾고, History는 [`cache:` QL 필드](/ko/reference/query-language/#fields)로 거르세요.
+`gori run cache-deception <flow-id>…`(MCP `cache_deception_check`)는 비공개 응답이 캐시를 통해 다른 사람에게 제공될 수 있는지 확인합니다. 플로우마다 캡처된 로그인 신원 그대로 요청을 재생해 캐시를 채우고, `Cookie`와 `Authorization`을 뺀 채 같은 URL을 다시 요청하고, 그 익명 응답이 같은 내용을 캐시 히트로 받았을 때만 캐시 버스팅 쿼리를 붙인 익명 대조 요청을 보냅니다. 익명 요청이 캐시 히트로 인증된 내용을 받았고 대조 요청은 거부(401/403)되거나 리다이렉트됐다면 `cached`(디셉션 가능성이 높으니 본문이 정말 비공개였는지 확인하세요), 캐시 히트 없이 내용만 같았거나 대조 요청도 캐시 히트 없이 같았다면 `served`(공개 내용으로 보임), 응답이 비슷하기만 하거나 대조 요청도 캐시 히트였다면(버스터가 무시됐을 수 있음), 또는 대조 요청이 그 밖의 방식으로 실패했다면(버스터 때문에 생긴 404나 5xx) `review`, 익명 요청이 인증된 응답을 받지 못했다면 `protected`입니다. `blocked`와 `errored`는 아무것도 측정하지 못했다는 뜻입니다. `--unsafe-methods`를 주지 않으면 `GET`/`HEAD`/`OPTIONS`만 확인합니다. 확인해 볼 만한 경로는 Fuzzer의 `cache-delimiters` 프리셋으로 경로를 스윕해 찾고, History는 [`cache:` QL 필드](/ko/reference/query-language/#fields)로 거르세요.
 
 ## Param Miner {#param-miner}
 

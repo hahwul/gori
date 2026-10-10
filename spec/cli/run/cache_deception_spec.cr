@@ -35,7 +35,7 @@ end
 private def cached_report : CD::Report
   authed = cd_trial("as-captured", true, 200, AZ::Verdict::Baseline)
   anon = cd_trial("anonymous", false, 200, AZ::Verdict::Same, ["X-Cache: HIT", "Age: 30"])
-  control = cd_trial("anonymous-cache-busted", false, 404, AZ::Verdict::Different)
+  control = cd_trial("anonymous-cache-busted", false, 403, AZ::Verdict::Different)
   CD.classify(AZ::Target.new(7_i64, "GET", "https://acme.test/account", [authed, anon]), control)
 end
 

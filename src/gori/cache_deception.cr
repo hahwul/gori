@@ -34,14 +34,15 @@ module Gori
     # The headline for one flow's check.
     enum Verdict
       # The anonymous re-request matched the authenticated response with `cache:hit`, and the
-      # cache-busted anonymous control differed. That is a likely cache deception; confirm the
-      # body was actually private before writing it up.
+      # cache-busted anonymous control was refused (401/403) or redirected elsewhere. That is a
+      # likely cache deception; confirm the body was actually private before writing it up.
       Cached
       # The anonymous re-request got matching content but had no cache-hit evidence, or its
       # cache-busted control matched without cache-hit evidence. It is not confirmed deception.
       Served
-      # The anonymous re-request got a SIMILAR-but-not-identical response, or a cache hit on the
-      # control left public content unproven. Authorize's `Review` — the operator judges.
+      # The anonymous re-request got a SIMILAR-but-not-identical response, a cache hit on the
+      # control left public content unproven, or the control failed in a way that is not a
+      # refusal (a 404 or 5xx from the buster itself). Authorize's `Review` — the operator judges.
       Review
       # The anonymous re-request did NOT get the authenticated response (different status class,
       # unrelated content, or a denial). No private content was served anonymously.
@@ -228,10 +229,18 @@ module Gori
         # A matching control can prove public content only if the buster got past the cache. If
         # it is a hit too, the query may not be part of the cache key, so leave the result open.
         CacheStatus.classify(control.response_head).hit? ? Verdict::Review : Verdict::Served
-      when .different? then Verdict::Cached
+      when .different? then refused_anonymously?(control) ? Verdict::Cached : Verdict::Review
       when .review?    then Verdict::Review
       else                  Verdict::Errored
       end
+    end
+
+    # A control that differs proves the content private only when it differs the way a missing
+    # session does: an auth refusal (401/403) or a redirect elsewhere (to a login page). A 400,
+    # 404, 429 or 5xx says the buster broke the request, not that the content needs a session.
+    private def self.refused_anonymously?(control : Authorize::Trial) : Bool
+      status = control.summary.status
+      status.in?(401, 403) || (!status.nil? && status // 100 == 3 && !control.summary.location.nil?)
     end
 
     private def self.unanchored?(target : Authorize::Target) : Bool
