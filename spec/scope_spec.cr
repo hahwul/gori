@@ -208,6 +208,14 @@ describe Gori::Scope do
     end
   end
 
+  # A target padded past PCRE2's JIT stack made the match raise, and the rescue read it as "no
+  # match": an exclude that cannot finish must still exclude (fail closed), an include must not.
+  it "fails closed when a regex rule cannot finish matching" do
+    url = "https://x.test/" + "ab" * 40_000 + "!"
+    Gori::Scope::Rule.new(1_i64, "exclude", "regex", "/(?:a|b)*!").matches?(url, "x.test").should be_true
+    Gori::Scope::Rule.new(2_i64, "include", "regex", "/(?:a|b)*!").matches?(url, "x.test").should be_false
+  end
+
   it "rejects a host pattern carrying a port at add/update (never stored; points at the bare host)" do
     with_store do |store|
       scope = Gori::Scope.load(store)
