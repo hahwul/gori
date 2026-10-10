@@ -46,12 +46,18 @@ module Gori
 
       # Can a real HTML <form> reproduce this request? Only GET and POST are form methods, and a
       # POST body is form-shaped only when it is urlencoded, multipart, or absent. Everything
-      # else (a JSON body, a PUT/DELETE) needs the fetch path.
+      # else (a JSON body, a PUT/DELETE) needs the fetch path. A body sent with NO Content-Type
+      # has to read as `k=v&…` itself: a JSON body without one became one input named after
+      # the whole document.
       private def self.form_capable?(method : String, ct : String, body : String) : Bool
         return true if method == "GET"
         return false unless method == "POST"
-        ct.empty? || ct == "application/x-www-form-urlencoded" || ct == "multipart/form-data" || body.empty?
+        return body.empty? || URLENCODED_SHAPE.matches?(body) if ct.empty?
+        ct == "application/x-www-form-urlencoded" || ct == "multipart/form-data" || body.empty?
       end
+
+      # `name=value` pairs joined by `&`, the names in the characters a form encoder emits.
+      URLENCODED_SHAPE = /\A[\w.~%+*\[\]-]+=[^&\s]*(?:&[\w.~%+*\[\]-]+=[^&\s]*)*\z/
 
       # --- form path ------------------------------------------------------------------------
 

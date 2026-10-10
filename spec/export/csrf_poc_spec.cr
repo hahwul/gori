@@ -55,6 +55,14 @@ describe Gori::Export::CsrfPoc do
     html.should_not contain(%(name="sid")) # the cookie is never smuggled in as an input
   end
 
+  it "takes a POST without a Content-Type down the form path only when its body is k=v shaped" do
+    json = poc("POST /api HTTP/1.1\r\nHost: h.test\r\n\r\n{\"a\":\"b=c\"}", "https://h.test")
+    json.should contain("fetch(")
+    json.should_not contain("<form action")
+    form = poc("POST /t HTTP/1.1\r\nHost: h.test\r\n\r\na=1&b%5B%5D=2", "https://h.test")
+    form.should contain(%(<input type="hidden" name="a" value="1">))
+  end
+
   it "emits a GET form whose action drops the query (inputs carry it)" do
     html = poc("GET /search?q=a%20b&page=2 HTTP/1.1\r\nHost: h.test\r\n\r\n", "https://h.test")
     html.should contain(%(<form action="https://h.test/search" method="GET">))
