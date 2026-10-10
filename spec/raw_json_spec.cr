@@ -66,7 +66,9 @@ describe Gori::RawJson do
       Gori::RawJson.claims(body).not_nil!["bio"].as_s.should eq("cut \uFFFD")
       Gori::RawJson.claims(body).not_nil!["pair"].as_s.should eq("\u{1F600}")
       Gori::RawJson.claims(body).not_nil!["lit"].as_s.should eq("\\ud83d")
-      Gori::RawJson.members(body).not_nil!.map(&.[0]).should eq(%w[token bio pair lit])
+      Gori::RawJson.member(body, "lit").try(&.as_s).should eq("\\ud83d")
+      # `members` re-emits values, so it still refuses rather than respell the escape.
+      expect_raises(JSON::ParseException) { Gori::RawJson.members(body) }
       leaves = [] of String
       Gori::Params.each_json_leaf(body.to_slice) { |path, value, _| leaves << "#{path}=#{value}" }
       leaves.should contain("token=abc123")

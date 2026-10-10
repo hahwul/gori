@@ -501,7 +501,6 @@ module Gori
     # when `json` is valid JSON that is not an object. Raises JSON::ParseException on bad
     # syntax.
     def members(json : String) : Array({String, String})?
-      json = tolerant(json)
       pull = JSON::PullParser.new(json)
       unless pull.kind.begin_object?
         pull.read_raw
@@ -533,7 +532,9 @@ module Gori
     # for a duplicated key. nil when absent or when that one value is itself unrepresentable,
     # so an oversized `uid` no longer hides the `exp` beside it.
     def member(json : String, key : String) : JSON::Any?
-      pair = members(json).try(&.reverse_each.find { |(k, _)| k == key })
+      # `tolerant` here and not in `members`, whose values are re-emitted (a re-signed JWT):
+      # respelling an operator's `\ud83d` there would change the bytes it sends.
+      pair = members(tolerant(json)).try(&.reverse_each.find { |(k, _)| k == key })
       return nil unless pair
       JSON.parse(pair[1])
     rescue JSON::ParseException
