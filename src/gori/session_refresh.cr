@@ -442,10 +442,11 @@ module Gori
         "#{SessionSlot::RefreshBefore::SKEW.total_seconds.to_i}s — the login step may not be rebinding it"
       end
 
-      # A crafted token can carry an `exp` outside Crystal's Time range.
+      # A crafted token can carry an `exp` outside Crystal's Time range: past year 9999 raises
+      # ArgumentError, near Int64::MAX (a real "never expires") OverflowError. Either is never due.
       private def unix_or_nil(exp : Int64) : Time?
         Time.unix(exp)
-      rescue ArgumentError
+      rescue ArgumentError | OverflowError
         nil
       end
 
