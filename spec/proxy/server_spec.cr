@@ -2342,6 +2342,39 @@ describe Gori::Proxy::Server do
     response.bytesize.should be >= big.bytesize # whole body forwarded, not truncated
   end
 
+  # A chunked body declares no size, so the ceiling is met mid-read — here mid-CHUNK, the case
+  # where the decoder state matters: the buffer spills to the client and the stream carries on.
+  it "forwards a chunked response body over MAX_REWRITE_BODY byte-exact, unrewritten" do
+    seen_body = Channel(String).new(1)
+    done = Channel(Nil).new(1)
+    cap = Gori::Proxy::ClientConn::MAX_REWRITE_BODY
+    big = "SECRET" + ("x" * (cap + 1 - 6))
+    origin_port = start_body_origin(big, seen_body, chunked: true)
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, rewriter: BodyRewriter.new)
+    proxy.start
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client << "GET /big HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"
+    client.flush
+    response = read_all_bytes(client)
+    client.close
+
+    done.receive
+    proxy.stop
+    seen_body.receive # drain
+
+    wire = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n" \
+           "#{big.bytesize.to_s(16)}\r\n#{big}\r\n0\r\n\r\n"
+    (response == wire.to_slice).should be_true # exactly what the origin sent, chunk framing and all
+    resp = sink.responses.first
+    resp.state.should eq(Gori::Store::FlowState::Complete)
+    resp.body_size.should eq(wire.bytesize - wire.index!("\r\n\r\n") - 4)
+    resp.body_truncated?.should be_true # the capture cap still applies
+    resp.advisory.not_nil!.should contain("NOT applied")
+  end
+
   it "leaves a request body over MAX_REWRITE_BODY byte-exact (rule no-ops, no unbounded buffer)" do
     seen_body = Channel(String).new(1)
     done = Channel(Nil).new(1)
