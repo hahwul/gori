@@ -2364,3 +2364,14 @@ describe Gori::Verb do
     end
   end
 end
+
+describe Gori::Verb::Definition do
+  # The TUI tick re-raises a Gori::Error as its designed exit, so one refused action ended the
+  # process. A handler's refusal is the operator's toast instead.
+  it "returns a handler's Gori::Error as the toast instead of raising" do
+    verb = Definition.new("demo.refuse", "refuse", "", Gori::Verb::Scope::Global) do |_|
+      raise Gori::Error.new("request head starts with ':'")
+    end
+    verb.call(FakeContext.new).should eq("request head starts with ':'")
+  end
+end
