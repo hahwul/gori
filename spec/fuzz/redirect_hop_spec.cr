@@ -413,3 +413,43 @@ describe "Fuzz::Engine#follow_redirects — the collapsed Result's fields" do
     res.retried?.should be_true
   end
 end
+
+# Answers by request line, so a calibration burst of any size gets the same chain a row gets.
+private class RoutedBackend < F::Backend
+  def initialize(&@route : String -> Gori::Repeater::Result)
+  end
+
+  def origin : F::Origin
+    F::Origin.new("http", "127.0.0.1", 9)
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    @route.call(String.new(bytes).split("\r\n").first)
+  end
+end
+
+describe "Fuzz::Engine#calibrate_baseline — with follow_redirects" do
+  it "measures the followed response, the one every row is measured on" do
+    backend = RoutedBackend.new do |line|
+      if line.includes?("next=https")
+        reply(302, "https://evil.example/") # off-origin: left unfollowed, stays the 302
+      elsif line.includes?("/login")
+        reply(302, "/home")
+      else
+        reply(200)
+      end
+    end
+    cfg = F::Config.new(mode: F::Mode::Sniper, concurrency: 1, follow_redirects: true,
+      max_redirects: 3, auto_calibrate: true)
+    tpl = F::Template.parse("GET /login?next=§a§ HTTP/1.1\r\nHost: h\r\n\r\n")
+    gen = F::Generator.new(tpl, [F::PayloadSet.new(F::InlineList.new(["home", "https://evil.example/"]))], cfg)
+    matcher = F::Matcher.new(auto_calibrate: true)
+    engine = F::Engine.new(gen, matcher, backend, cfg)
+    engine.calibrate_baseline
+    matcher.baseline.map(&.metrics.status).uniq.should eq([200])
+    rows = [] of F::Result
+    engine.run { |ev| rows << ev.result if ev.is_a?(F::ResultEvent) }
+    rows.find!(&.payloads.includes?("home")).matched?.should be_false
+    rows.find!(&.payloads.includes?("https://evil.example/")).matched?.should be_true
+  end
+end

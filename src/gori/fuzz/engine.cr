@@ -1077,6 +1077,10 @@ module Gori::Fuzz
         # response would then differ from it.
         raw = candidate_send { @backend.send(bytes) }
         break unless raw
+        # Measured on the same response `run_one` reports: with redirects followed, a baseline
+        # of the bare 3xx made every followed row look anomalous and the one payload whose
+        # off-origin 302 is left unfollowed (an open redirect) look like the baseline.
+        raw = follow_redirects(raw, bytes) if @config.follow_redirects? && raw.error.nil?
         samples << BaselineSample.new(@matcher.metrics(raw), payload_len) if raw.error.nil?
         note_macro_abort
       end
