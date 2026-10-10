@@ -674,11 +674,19 @@ describe Gori::ProjectArchive do
       store.insert_flow(archive_request("/a"))
       store.flush
       archive_path = export_archive(project, File.join(root, "rules.gori"))
+      original = File.read(archive_path)
       tamper_archive_database(archive_path, root) do |conn|
         conn.exec("INSERT INTO color_rules (enabled, match_filter, color, position) VALUES (4294967296, '', 'red', 0)")
       end
       error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
       error.message.not_nil!.should contain(%(never writes in "color_rules"))
+      File.write(archive_path, original)
+      tamper_archive_database(archive_path, root) do |conn|
+        conn.exec("INSERT INTO js_refs (flow_id, scheme, host, port, path, target, literal, body_offset, line, base, created_at) " \
+                  "VALUES (1, 'https', 'h', 4294967296, '/', '/', '/', 0, 1, '', 1)")
+      end
+      error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
+      error.message.not_nil!.should contain(%(never writes in "js_refs"))
     end
   end
 
