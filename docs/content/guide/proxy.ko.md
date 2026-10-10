@@ -12,7 +12,7 @@ shot = "history"
 
 ## 트래픽 캡처 {#capturing-traffic}
 
-gori를 실행하고 클라이언트를 `127.0.0.1:8070`으로 향하게 하세요(자세한 내용은 [Quick Start](/ko/getting-started/quick-start/) 참고). 커맨드라인 도구라면 [`gori run shell`](/ko/reference/cli/#run-shell)(또는 팔레트의 **Open shell**)이 프록시 변수와 CA 번들이 이미 gori를 가리키는 셸을 엽니다. `c`로 언제든 캡처를 토글할 수 있습니다. 꺼두면 트래픽이 기록 없이 통과하므로 환경을 설정하는 동안 편리합니다.
+gori를 실행하고 클라이언트를 `127.0.0.1:8070`으로 향하게 하세요(자세한 내용은 [Quick Start](/ko/getting-started/quick-start/) 참고). 커맨드라인 도구라면 [`gori run shell`](/ko/reference/cli/#run-shell)(또는 팔레트의 **Open shell**)이 프록시 변수와 CA 번들이 이미 gori를 가리키는 셸을 엽니다. `c`로 언제든 캡처를 토글할 수 있습니다. 끄면 리스너가 멈추고 클라이언트가 이미 열어 둔 연결도 끊기므로, 다시 켤 때까지 아무것도 중계하거나 기록하지 않습니다.
 
 클라이언트가 프록시를 바라보고 있다면 `http://gori.proxy/`에서 gori의 안내 페이지와 CA 다운로드를 받을 수 있습니다. gori가 자체적으로 응답하는 예약된 이름이라 네트워크로 나가지 않습니다. 인증서보다 프록시를 먼저 설정하게 되는 휴대폰에서 특히 유용합니다. 프록시를 설정하지 않은 클라이언트는 리슨 주소로 직접 접속하면 같은 페이지를 받습니다.
 

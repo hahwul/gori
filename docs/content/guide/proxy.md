@@ -12,7 +12,7 @@ The proxy sits between your client and the upstream server, records each exchang
 
 ## Capturing Traffic
 
-Start gori and point your client at `127.0.0.1:8070` (see the [Quick Start](/getting-started/quick-start/)). For command-line tools, [`gori run shell`](/reference/cli/#run-shell) (or **Open shell** in the palette) starts a shell whose proxy variables and CA bundle already point at gori. Toggle capture at any time with `c`. Turning it off lets traffic pass through without being recorded, which is handy while you set up.
+Start gori and point your client at `127.0.0.1:8070` (see the [Quick Start](/getting-started/quick-start/)). For command-line tools, [`gori run shell`](/reference/cli/#run-shell) (or **Open shell** in the palette) starts a shell whose proxy variables and CA bundle already point at gori. Toggle capture at any time with `c`. Turning it off stops the listener and ends the connections a client already has open, so nothing is relayed or recorded until you turn it back on.
 
 Once a client is pointed at the proxy, `http://gori.proxy/` serves gori's info page and CA download. It is a reserved name answered locally, so it never reaches the network. That is useful on a phone, where the proxy usually gets configured before the certificate. A client with no proxy configured gets the same page by browsing to the listen address directly.
 

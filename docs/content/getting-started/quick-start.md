@@ -111,7 +111,7 @@ Three global toggles are worth knowing from the start:
 
 | Key | Action |
 |-----|--------|
-| `c` | Toggle **capture** (off = traffic passes through without being stored) |
+| `c` | Toggle **capture** (off = the proxy stops listening and nothing is recorded) |
 | `i` | Toggle **intercept** (hold matching requests to forward / drop / edit) |
 | `s` | Toggle the **scope lens** (filter views to in-scope traffic) |
 
