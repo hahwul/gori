@@ -505,22 +505,13 @@ module Gori
       if bad = InterceptFilter.unsupported_field_reason(match_filter)
         return bad
       end
-      return "a #{kind.label} descriptor needs a selector" if kind_needs_selector?(kind) && selector.empty?
+      if bad = TokenExtract.selector_error(kind, selector)
+        return bad
+      end
       if kind.position? && pos_end <= pos_start
         return "a position descriptor needs a byte range with an end past its start (got #{pos_start}...#{pos_end})"
       end
-      if kind.regex?
-        begin
-          Regex.new(selector)
-        rescue ex : ArgumentError | Regex::Error
-          return "regex #{selector.inspect} does not compile: #{ex.message}"
-        end
-      end
       nil
-    end
-
-    private def kind_needs_selector?(kind : Gori::ExtractKind) : Bool
-      !kind.position?
     end
 
     # Returned by `add`/`update` when the STORE refused the write rather than the values being

@@ -31,7 +31,7 @@ module Gori
                      "may have been ignored. If the anonymous request gets the authenticated response\n" \
                      "FROM a cache and the control is refused (401/403) or redirected, that private\n" \
                      "response may be cached under a key an anonymous client hits — a web cache\n" \
-                     "deception. The crafted paths that\n" \
+                     "deception. The crafted paths that trigger it\n" \
                      "are the Fuzzer's `cache-delimiters` payload set; check the promising hits here.\n\n" \
                      "Only safe methods (GET/HEAD/OPTIONS) are checked without --unsafe-methods."
           p.on("--flow=ID", "Check this captured flow (repeatable; same as a positional id)") { |v| flow_ids << parse_flow_id(v, "gori run cache-deception") }

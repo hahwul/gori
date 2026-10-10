@@ -118,7 +118,7 @@ module Gori
                      "  gori run evidence show ID [--include-sensitive] [--format=json]\n" \
                      "  gori run evidence link ID --issue=N\n" \
                      "  gori run evidence unlink ID --issue=N\n" \
-                     "  gori run evidence delete ID   (`rm` is accepted)"
+                     "  gori run evidence delete ID --yes   (`rm` is accepted)"
           project_options(p, proj, "read")
           p.on("--issue=N", "Issue id (omit for the whole project archive)") { |v| issue_id = parse_id(v, "gori run evidence", "--issue") }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }

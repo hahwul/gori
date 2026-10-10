@@ -338,7 +338,7 @@ module Gori
                      "rewriter extract` plus `--bind-from FLOW`, or give the slot Repeater refresh\n" \
                      "steps (`session edit NAME --refresh IDS --refresh-before jwt-exp`).\n\n" \
                      "  gori run session from-flow 4211 --name admin\n" \
-                     "  gori run repeater send --flow 900 --slot admin"
+                     "  gori run repeater 900 --slot admin"
           p.on("--name=NAME", "Name for the new slot (required; must not already exist)") { |v| slot_name = v.strip }
           p.on("--baseline", "Make it the Authorize baseline every other slot is judged against") { baseline = true }
           p.on("--show-values", "Print the captured header values instead of [REDACTED]") { show_values = true }

@@ -2916,6 +2916,11 @@ module Gori
               # consumer reading changed_lines: 0 has to be able to tell "identical" from
               # "compared only the first MAX_LINES lines".
               j.field "truncated", diff_capped
+              # The diff itself, in `compare --format json`'s row shape: the text mode prints
+              # it, and the JSON used to carry only the count.
+              j.field "diff" do
+                j.array { d.each { |dl| j.object { j.field "kind", dl.kind.to_s.downcase; j.field "text", dl.text } } }
+              end
             end
           end
         end

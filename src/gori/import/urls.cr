@@ -8,7 +8,7 @@ module Gori
         pairs = [] of Builder::FlowPair
         skipped = 0
         File.each_line(path) do |line|
-          url = line.strip
+          url = line.lchop('\u{FEFF}').strip
           next if url.empty?
           next if url.starts_with?('#')
           # Skip (don't abort on) a line Builder can't turn into an http(s) request —

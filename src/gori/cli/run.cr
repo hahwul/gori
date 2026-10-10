@@ -819,6 +819,7 @@ module Gori
         # A refresh that ran on an earlier READ-ONLY open owes History rows and an event; this
         # open writes them if it can, or carries them to the runner it just installed.
         previous.try &.hand_over(store, origin, runner)
+        previous.try &.pass_outcomes(runner)
         warn_unwritten_refresh_records
         # …and re-select whatever `--slot` chose, because THIS line just replaced the registry
         # holding the pointer. See `reapply_active_slot`.
@@ -1191,7 +1192,13 @@ module Gori
 
       # Drain and SAY it, for a `gori run` surface that has just printed its summary. Silent
       # when nothing was recorded — a run whose slot resolved is a run with no new line.
+      #
+      # A FAILED automatic refresh is said first, in `session refresh`'s words: it is usually why
+      # the value went out literally, and otherwise only an event row (when writable) records it.
       private def self.report_unbound_slot_overlay(cmd : String) : Nil
+        if runner = Gori::SessionRefresh.hook.as?(Gori::SessionRefresh::Runner)
+          runner.take_outcomes.each { |o| STDERR.puts "#{cmd}: #{o.message}" unless o.ok || o.manual }
+        end
         note = unbound_overlay_note(Env.take_unbound_overlay)
         STDERR.puts "#{cmd}: #{note}" if note
       end

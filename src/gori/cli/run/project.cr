@@ -372,6 +372,8 @@ module Gori
         abort "gori run project export: missing <name>" if positional.empty?
         abort "gori run project export: too many arguments (expected one <name>)" if positional.size > 1
         output_path = output.try(&.strip.presence) || abort "gori run project export: missing -o PATH"
+        # `import` reads `-` as stdin, so `-o -` reads as stdout; it wrote a file named `-`.
+        abort "gori run project export: -o - is not supported (the archive is a file); name a path" if output_path == "-"
 
         registry = ProjectRegistry.new(Paths.projects_dir)
         project = begin

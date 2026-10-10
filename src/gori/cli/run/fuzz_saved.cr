@@ -13,7 +13,7 @@ module Gori
         positional = parse_args(args, "gori run fuzz list") do |p|
           p.banner = "Usage: gori run fuzz list [options]"
           project_options(p, proj, "read")
-          p.on("--session=ID", "Only runs saved from this Fuzzer session") { |v| session_id = parse_flow_id(v, "gori run fuzz list") }
+          p.on("--session=ID", "Only runs saved from this Fuzzer session") { |v| session_id = parse_id(v, "gori run fuzz list", "--session") }
           p.on("-nN", "--limit=N", "Runs to return (default 50, max 1000)") { |v| limit = parse_count(v, "--limit").clamp(1, 1000) }
           p.on("--offset=N", "Runs to skip") { |v| offset = parse_nonneg(v, "--offset") }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
@@ -74,8 +74,8 @@ module Gori
           format_flag(p, [:text, :json, :jsonl], "Output: text (default) | json | jsonl") { |f| format = f }
         end
         abort "gori run fuzz show: expected RUN_ID and optional RESULT_INDEX" unless positional.size.in?(1, 2)
-        run_id = parse_flow_id(positional[0], "gori run fuzz show")
-        result_idx = positional[1]?.try { |v| parse_flow_id(v, "gori run fuzz show") }
+        run_id = parse_id(positional[0], "gori run fuzz show", "run id")
+        result_idx = positional[1]?.try { |v| parse_id(v, "gori run fuzz show", "result index") }
         check_fuzz_show_modes(clusters, cluster, result_idx)
 
         with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
@@ -109,7 +109,7 @@ module Gori
           p.on("--force-stale", "Also delete a running/saving row left by a crashed writer") { force_stale = true }
         end
         abort "gori run fuzz delete: expected one RUN_ID" unless positional.size == 1
-        run_id = parse_flow_id(positional[0], "gori run fuzz delete")
+        run_id = parse_id(positional[0], "gori run fuzz delete", "run id")
 
         with_store(resolve_read_project(proj.name, proj.db)) do |store|
           run = store.get_fuzz_run(run_id) || abort "gori run fuzz delete: no saved run ##{run_id}"

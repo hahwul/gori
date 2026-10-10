@@ -26,7 +26,7 @@ module Gori
 
       def self.parse_file(path : String, prov : Provenance = Provenance.none) : ParseResult
         doc = begin
-          JSON.parse(File.read(path))
+          JSON.parse(File.read(path).lchop('\u{FEFF}'))
         rescue ex : JSON::ParseException
           raise Gori::Error.new("Postman collection is not valid JSON: #{ex.message}")
         end
@@ -127,6 +127,7 @@ module Gori
         # `{{baseUrl}}` — a flow that can never be sent, indistinguishable in History from a
         # real one. `Builder::HOST_VALID` now refuses that host as well, but this branch is
         # what records WHICH variables were missing, so keep skipping here. Record and skip.
+        # (Only the host: a leftover in the path or query is kept verbatim — `Vars.checked_url`.)
         Vars.checked_url(Vars.expand(raw.strip, vars), missing)
       end
 

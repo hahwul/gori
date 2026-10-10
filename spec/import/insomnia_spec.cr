@@ -73,8 +73,11 @@ describe Gori::Import::Insomnia do
         {"_id": "req_3", "_type": "request", "parentId": "wrk_1", "method": "GET",
          "url": "https://nested.test/{{ _.api.port }}"}]}
       JSON
-    result.skipped.should eq(1) # the sub-environment replaced `api`, so `api.port` is gone
-    result.flows.map { |f| {f.request.host, f.request.target} }.should eq([{"outer.test", "/inner"}, {"nested.test", "/n"}])
+    # The sub-environment replaced `api`, so `api.port` is gone: left as a bare placeholder in
+    # the path, without the spaces a request line cannot carry.
+    result.skipped.should eq(0)
+    result.flows.map { |f| {f.request.host, f.request.target} }.should eq(
+      [{"outer.test", "/inner"}, {"nested.test", "/n"}, {"nested.test", "/{{api.port}}"}])
   end
 
   it "also expands the legacy brace form without the _. prefix" do

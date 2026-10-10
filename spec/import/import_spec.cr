@@ -243,10 +243,22 @@ describe Gori::Import do
     end
   end
 
+  # The file readers skip a BOM; the text path (MCP `import_flows{text}`) sniffed JSON-vs-YAML
+  # and tokenized curl before any reader saw it.
+  it "skips a leading BOM on imported TEXT, for a curl paste and a JSON Insomnia export" do
+    with_store do |store|
+      Gori::Import.import_text(store, :curl, "\u{FEFF}curl https://bom.test/a").count.should eq(1)
+      insomnia = %({"_type": "export", "__export_format": 4, "resources": [) +
+                 %({"_id": "r", "_type": "request", "method": "GET", "url": "https://bom.test/b"}]})
+      Gori::Import.import_text(store, :insomnia, "\u{FEFF}#{insomnia}").count.should eq(1)
+    end
+  end
+
   it "imports pending flows from a URL list file" do
     urls = File.tempname("gori", ".txt")
     begin
-      File.write(urls, "https://api.test/v1/ping\n# comment\n\nhttp://legacy.test/\n")
+      # A leading BOM used to cost the first URL (counted as skipped).
+      File.write(urls, "\u{FEFF}https://api.test/v1/ping\n# comment\n\nhttp://legacy.test/\n")
 
       with_store do |store|
         result = Gori::Import.import_file(store, :urls, urls)

@@ -105,7 +105,7 @@ describe Gori::Import::Postman do
     expect_raises(Gori::Error, /variables not defined/) do
       parse(<<-JSON)
         {"info": {"name": "n"},
-         "variable": [{"key": "a", "value": "https://{{b}}"}, {"key": "b", "value": "{{a}}"}],
+         "variable": [{"key": "a", "value": "{{b}}"}, {"key": "b", "value": "{{a}}"}],
          "item": [{"request": {"method": "GET", "url": "{{a}}/x"}}]}
         JSON
     end
@@ -176,6 +176,29 @@ describe Gori::Import::Postman do
     result.flows.size.should eq(1)
     result.skipped.should eq(1)
     result.flows.first.request.host.should eq("good.test")
+  end
+
+  # Postman's dynamic variables (`{{$timestamp}}`) and environment-only ids are routine in a
+  # path or query; refusing them dropped the whole request. Only the host has to resolve.
+  it "keeps an unresolved variable in the path or query verbatim" do
+    result = parse(<<-JSON)
+      {"info": {"name": "n"},
+       "variable": [{"key": "ok", "value": "https://good.test"}],
+       "item": [
+         {"request": {"method": "GET", "url": "{{ok}}/users/{{userId}}"}},
+         {"request": {"method": "GET", "url": "{{ok}}/d?t={{$timestamp}}"}}]}
+      JSON
+    result.skipped.should eq(0)
+    result.flows.map(&.request.target).should eq(["/users/{{userId}}", "/d?t={{$timestamp}}"])
+  end
+
+  # Only a LEADING scheme is cut: the query's `://` used to be read as the scheme, the
+  # authority as `x`, and the undefined `{{host}}` went unnamed.
+  it "names an undefined host variable when the query carries a URL" do
+    ex = expect_raises(Gori::Error) do
+      parse(%({"info": {"name": "n"}, "item": [{"request": {"method": "GET", "url": "{{host}}/login?next=https://x"}}]}))
+    end
+    ex.message.not_nil!.should contain("{{host}}")
   end
 
   it "names the missing variables when EVERY entry was skipped for one" do

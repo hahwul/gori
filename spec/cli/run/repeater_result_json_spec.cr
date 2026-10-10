@@ -21,6 +21,10 @@ module Gori::CLI::Run
       repeater_response_write: repeater_response_write)
   end
 
+  def self.repeater_diff_json_for_spec(result : Repeater::Result, diff : Array(Repeater::DiffLine)) : String
+    repeater_json(result, diff)
+  end
+
   def self.ws_result_json_for_spec(id : Int64, result : Repeater::WsEngine::Result,
                                    response_write : WriteOutcome? = nil) : String
     ws_result_json(id, result, response_write)
@@ -261,5 +265,19 @@ describe "gori run repeater --format json — the MCP error and header fields (#
     bad = j["headers"].as_a.find! { |h| h["name"].as_s == "X-Bad" }
     bad["value_lossy"].as_bool.should be_true
     Base64.decode(bad["value_base64"].as_s).to_a.should eq("A".to_slice.to_a + [0xFF_u8])
+  end
+end
+
+describe "gori run repeater --diff --format json" do
+  # The text mode prints the diff; the JSON carried only `changed_lines`.
+  it "carries the diff rows beside the count, in compare's row shape" do
+    diff = [Gori::Repeater::DiffLine.new(Gori::Repeater::DiffKind::Same, "HTTP/1.1 200 OK"),
+            Gori::Repeater::DiffLine.new(Gori::Repeater::DiffKind::Del, "a"),
+            Gori::Repeater::DiffLine.new(Gori::Repeater::DiffKind::Add, "b")]
+    j = JSON.parse(Gori::CLI::Run.repeater_diff_json_for_spec(
+      result_of("HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\n".to_slice, "b".to_slice), diff))
+    j["changed_lines"].as_i.should eq(2)
+    j["diff"].as_a.map { |r| {r["kind"].as_s, r["text"].as_s} }.should eq(
+      [{"same", "HTTP/1.1 200 OK"}, {"del", "a"}, {"add", "b"}])
   end
 end

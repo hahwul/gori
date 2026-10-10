@@ -792,10 +792,11 @@ describe "Gori::Repeater::WsEngine frame shapes" do
     typed = ("GET /ws HTTP/1.1\r\nHost: h\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" \
              "Sec-WebSocket-Key: SHORT\r\nX-After-Key: yes\r\n\r\n").to_slice
     with_recording_origin do |port, head, _rx|
-      Gori::Repeater::WsEngine.send(typed, [] of Gori::Repeater::WsEngine::OutMsg,
+      result = Gori::Repeater::WsEngine.send(typed, [] of Gori::Repeater::WsEngine::OutMsg,
         scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false,
         idle: 100.milliseconds)
       sent = head.receive
+      result.sent_head.should eq(sent.to_slice) # what went out, not what was handed in
       sent.should_not contain("Sec-WebSocket-Key: SHORT")
       # ... and the regenerated line is APPENDED, so header order is not the operator's.
       sent.index("X-After-Key").not_nil!.should be < sent.index("Sec-WebSocket-Key").not_nil!

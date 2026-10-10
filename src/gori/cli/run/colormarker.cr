@@ -225,7 +225,9 @@ module Gori
           p.banner = "Usage: gori run colormarker [list] [options]\n\n" \
                      "Rules are listed in PRECEDENCE order: the global library first, then this\n" \
                      "project's own rows. The FIRST enabled match paints a History row and the\n" \
-                     "rest are never consulted. Display only — a colour rule never modifies traffic."
+                     "rest are never consulted. Display only — a colour rule never modifies traffic.\n\n" \
+                     "Or run with a subcommand: add, update/edit, rm/delete, enable, disable, move,\n" \
+                     "preview, color (each takes -h)"
           project_options(p, proj, "read")
           p.on("--scope=SCOPE", "Show only project | global rules") { |v| scope = parse_color_scope(v) }
           format_flag(p, [:text, :json], "text (default) | json") { |f| format = f }
@@ -525,8 +527,15 @@ module Gori
                      "of a block is a scope change, not a step."
           project_options(p, proj, "update")
           p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_color_scope(v) }
-          p.on("--up", "Give the rule higher precedence") { dir = -1 }
-          p.on("--down", "Give the rule lower precedence") { dir = 1 }
+          # Refused like `repeater move`: last-flag-wins moved the rule the other way.
+          p.on("--up", "Give the rule higher precedence") do
+            abort "gori run colormarker move: pass one of --up or --down" if dir == 1
+            dir = -1
+          end
+          p.on("--down", "Give the rule lower precedence") do
+            abort "gori run colormarker move: pass one of --up or --down" if dir == -1
+            dir = 1
+          end
         end
         id = take_id(positional, "gori run colormarker move", "<id>", "rule id")
         abort "gori run colormarker move: pass --up or --down" if dir == 0

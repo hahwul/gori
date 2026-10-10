@@ -102,6 +102,22 @@ describe "fuzz over WebSocket" do
     end
   end
 
+  # `WsEngine` writes a FRESH Sec-WebSocket-Key, so the template's head is not the wire. The
+  # stored wire must carry the key the origin's Accept answers.
+  it "stores the handshake actually sent as each result's wire" do
+    port, _ = start_ws_sweep_origin(2)
+    plan = ws_plan(port, [Fuzz::WsMessageSource.new(1, "hi §x§")], ["a", "b"])
+    results, _ = run_plan(plan)
+    results.size.should eq(2)
+    results.each do |r|
+      wire = String.new(r.wire.not_nil!)
+      wire.should_not contain("dGhlIHNhbXBsZSBub25jZQ==")
+      key = wire.each_line.find!(&.starts_with?("Sec-WebSocket-Key:")).split(':', 2)[1].strip
+      accept = Base64.strict_encode(Digest::SHA1.digest(key + WsEngine::GUID))
+      String.new(r.head.not_nil!).should contain("Sec-WebSocket-Accept: #{accept}\r\n")
+    end
+  end
+
   # The adapter's whole claim: `Fuzz::Matcher` needs no WebSocket branch, because the inbound
   # frames ARE the body it already reads.
   it "matches on the inbound frames as the response body" do

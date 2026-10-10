@@ -85,7 +85,7 @@ module Gori
       end
 
       private def self.spec_file(path : String) : JSON::Any
-        raw = File.read(path)
+        raw = File.read(path).lchop('\u{FEFF}')
         json_raw = case File.extname(path).downcase
                    when ".yaml", ".yml"
                      begin

@@ -703,28 +703,18 @@ module Gori
       # condition. Merged into ONE helper rather than a second `if` at each caller: both callers
       # are already at the cyclomatic limit, and these are one question — "are the arguments
       # usable" — asked of two of them.
-      # The selector's two refusals (missing, or a regex that does not compile) are the same
-      # case: through `Bindings#validate` they came back as `field: "name"` too.
+      # The selector's refusals (missing, a regex that does not compile, a path `JsonPath`
+      # refuses) are the same case: through `Bindings#validate` they came back as `field: "name"` too.
       private def extract_shape_error(kind : Gori::ExtractKind, selector : String, pos_start : Int32,
                                       pos_end : Int32, match_filter : String) : Result?
         if bad = Gori::InterceptFilter.unsupported_field_reason(match_filter)
           return err(bad, "INVALID_ARGUMENT", field: "when")
         end
-        if bad = extract_selector_error(kind, selector)
+        if bad = Gori::TokenExtract.selector_error(kind, selector)
           return err(bad, "INVALID_ARGUMENT", field: "selector")
         end
         return nil unless kind.position? && pos_end <= pos_start
         err("'pos_end' must be greater than 'pos_start' for kind=position", "INVALID_ARGUMENT", field: "pos_end")
-      end
-
-      private def extract_selector_error(kind : Gori::ExtractKind, selector : String) : String?
-        return nil if kind.position?
-        return "a #{kind.label} descriptor needs a selector" if selector.empty?
-        return nil unless kind.regex?
-        Regex.new(selector)
-        nil
-      rescue ex : ArgumentError | Regex::Error
-        "regex #{selector.inspect} does not compile: #{ex.message}"
       end
 
       @[Tool("create_extract_rule", gated: true, agent_action: true, permission: "write")]

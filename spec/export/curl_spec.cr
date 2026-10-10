@@ -139,6 +139,10 @@ describe Gori::Export::Curl do
       curl_of("GET /a HTTP/1.1\r\nHost: h\r\n\r\n", "http://h").should_not contain("--http")
     end
 
+    it "asserts HTTP/1.0 with --http1.0 — curl would otherwise send 1.1" do
+      curl_of("GET /a HTTP/1.0\r\nHost: h\r\n\r\n", "http://h").should contain("--http1.0")
+    end
+
     # These three lines are gori speaking ABOUT the exchange (which fields arrived in a
     # trailing HEADERS block, that the ORIGIN invented this request in a PUSH_PROMISE, an
     # RFC 8441 `:protocol`). No client put them on a wire, so a reproduction must not send them.

@@ -66,7 +66,8 @@ module Gori
           p.banner = "Usage: gori run views [list] [options]\n\n" \
                      "History views: named QL queries the list narrows to, ANDed over the filter\n" \
                      "bar rather than replacing it. Built-ins come first, then the global library,\n" \
-                     "then this project's own. `gori run history --view NAME` applies one."
+                     "then this project's own. `gori run history --view NAME` applies one.\n\n" \
+                     "Or run with a subcommand: add, rm/delete, rename, set, scope (each takes -h)"
           project_options(p, proj, "read")
           p.on("--scope=SCOPE", "Show only builtin | project | global views") { |v| scope = parse_view_list_scope(v) }
           format_flag(p, [:text, :json], "text (default) | json") { |f| format = f }
