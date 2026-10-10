@@ -86,7 +86,7 @@ TUI에서 기능적인 색을 유지하는 것은 HTTP 상태뿐이며, 그건 �
 
 <div class="art-gallery">
   <figure>
-    <img src="/images/gori-wallpaper.webp" alt="양식화된 구름과 물결을 먹과 금으로 그린 어두운 월페이퍼. 가운데에 금색 gori 마크와 워드마크가 있다" width="1920" height="1080" loading="lazy" decoding="async">
+    <img src="/images/gori-wallpaper.webp" alt="양식화된 구름과 물결을 먹과 금으로 그린 어두운 월페이퍼. 가운데에 금색 gori 마크와 워드마크" width="1920" height="1080" loading="lazy" decoding="async">
     <figcaption><strong>마크 포함</strong>: 1920 × 1080<br>
       <a href="/images/gori-wallpaper.webp" download="gori-wallpaper.webp">WebP</a></figcaption>
   </figure>

@@ -20,7 +20,7 @@ Sequencer 탭은 기본적으로 바 밖에 있습니다. 매일 쓰는 루프�
 토큰의 고정된 골격(`sess_v1_` 접두사, 버전 바이트, 패딩)을 추출에서 잘라 낼 필요는 없습니다. gori가 샘플 전체에서 변하지 않는 위치를 찾아내 바이트·비트 단위 테스트를 실제로 움직이는 부분에만 돌리므로, 그 구조가 등급을 끌어내리지도, 랜덤으로 세어지지도 않습니다([구조는 비밀이 아닙니다](/ko/guide/sequencer/#structure-is-not-secret) 참고).
 
 <figure class="tui-shot">
-  <img src="/images/tui/sequencer.svg" alt="History 탭 위에 열린 gori Send to Sequencer 설정 카드로, 자동 감지된 세션 쿠키를 토큰으로 보여 주고 샘플 수, 최대 요청 수, 동시성, 알림 행이 있다" width="1206" height="520">
+  <img src="/images/tui/sequencer.svg" alt="History 탭 위에 열린 gori Send to Sequencer 설정 카드로, 자동 감지된 세션 쿠키를 토큰으로 보여 주고 샘플 수, 최대 요청 수, 동시성, 알림 행이 있는 모습" width="1206" height="520">
   <figcaption>캡처한 플로우를 <strong>Sequencer</strong>로 보내면 세션 쿠키가 자동 감지되며, 수집 전에 샘플 크기와 동시성을 설정할 수 있습니다.</figcaption>
 </figure>
 

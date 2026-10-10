@@ -11,7 +11,7 @@ shot = "statusline"
 **statusline**은 TUI 맨 아래에 선택적으로 붙는 행입니다. gori가 일정 간격으로 셸 명령을 실행하고 그 stdout을 그 행에 그립니다. 직접 만드는 상태 바이고, Claude Code의 상태 표시줄에서 영감을 받았습니다. 기본적으로 꺼져 있으며, 무언가 바꾸기 전까지 `statusline` 섹션은 `settings.json`에 들어가지 않습니다.
 
 <figure class="tui-shot">
-  <img src="/images/tui/statusline.svg" alt="상태 바 아래 맨 마지막 행에 statusline이 붙은 gori History 탭. token 58m left, 빨간색 1 × 5xx, 그리고 todo 2와 첫 미완료 항목 본문이 차례로 보인다" width="1206" height="520">
+  <img src="/images/tui/statusline.svg" alt="상태 바 아래 맨 마지막 행에 statusline이 붙은 gori History 탭. token 58m left, 빨간색 1 × 5xx, 그리고 todo 2와 첫 미완료 항목 본문이 차례로 보이는 모습" width="1206" height="520">
   <figcaption><strong>statusline</strong>은 상태 바 아래 맨 마지막 행입니다. 이 행은 <a href="#script">아래의 스크립트</a>입니다. 테스트 중인 토큰이 얼마나 남았는지, 타깃이 5xx를 뱉었는지, 할 일이 몇 개 남았는지를 보여 줍니다. 위쪽 바에는 나오지 않는 정보입니다.</figcaption>
 </figure>
 

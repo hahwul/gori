@@ -101,7 +101,7 @@ gori는 필요할 때 루트로 호스트별 리프 인증서를 발급하므로
 2. `Ctrl-P`를 누르고 `send`를 입력합니다. History의 동작이 `THIS TAB` 아래 먼저 나오고, 각각 닿는 키나 메뉴 경로가 함께 보입니다(`␣ > c`는 `Space`, `>`, `c` 순서). `Esc`를 누릅니다.
 
 <figure class="tui-shot">
-  <img src="/images/tui/command-palette.svg" alt="History 탭 위에서 send를 입력한 gori 커맨드 팔레트. THIS TAB 아래 보내기 동작이 키나 메뉴 경로와 함께 나오고, 이어서 APP 아래 일치하는 앱 명령이 나온다" width="1206" height="520">
+  <img src="/images/tui/command-palette.svg" alt="History 탭 위에서 send를 입력한 gori 커맨드 팔레트. THIS TAB 아래 보내기 동작이 키나 메뉴 경로와 함께 나오고, 이어서 APP 아래 일치하는 앱 명령이 나오는 화면" width="1206" height="520">
   <figcaption>History에서 <code>send</code>를 입력한 커맨드 팔레트(<kbd>Ctrl-P</kbd>): 그 탭의 동작이 더 빠른 길과 함께 먼저 나오고, 앱 전역 명령이 뒤따릅니다.</figcaption>
 </figure>
 
