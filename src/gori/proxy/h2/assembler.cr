@@ -58,6 +58,9 @@ module Gori::Proxy::H2
       # can't grow `headers` without bound. Per-block caps (MAX_HEADER_BLOCK, HPACK
       # MAX_HEADER_LIST) only bound ONE block; this bounds the accumulation.
       property header_bytes = 0
+      # A block on this side carried more header list than `Codec::Http1::MAX_HEAD_BYTES`, so
+      # `fit_head` kept only the fields that fit; the flow says so (`note_head_truncated`).
+      property? head_truncated = false
       property? ended = false
       # True between a HEADERS without END_HEADERS and the CONTINUATION that ends the block.
       # A CONTINUATION is only legal while this holds (RFC 9113 §6.10); one arriving otherwise
@@ -76,8 +79,8 @@ module Gori::Proxy::H2
       # Membership index for `trailer_names`, which stays an ordered Array because
       # `HeadCodec::TRAILER_MARKER` joins the names in arrival order. Deduping with
       # `Array#includes?` is a linear scan, so one legal 1 MiB trailer block (~174k
-      # distinct names still under the cumulative MAX_HEADER_LIST cap at
-      # `finish_header_block`) cost O(N^2) String compares — ~40s of uninterruptible
+      # distinct names under the cumulative cap `finish_header_block` then applied, the
+      # 16 MiB MAX_HEADER_LIST) cost O(N^2) String compares — ~40s of uninterruptible
       # CPU inside `@mutex`, which on Crystal's single-threaded scheduler freezes the
       # TUI, every other connection and the Store writer fiber (P6).
       @trailer_seen : Set(String)? = nil
@@ -487,7 +490,6 @@ module Gori::Proxy::H2
                 else
                   decoder.decode(side.header_buf.to_slice)
                 end
-      added = decoded.sum { |(n, v)| n.bytesize + v.bytesize + HPACK::Decoder::ENTRY_OVERHEAD }
       # A block is TRAILERS when a head already exists and either it carries no `:status`,
       # or the head it would replace is already FINAL. The `else` branch below exists for the
       # interim-1xx handover (100/103 then the real response), and that is the ONLY case a
@@ -497,15 +499,14 @@ module Gori::Proxy::H2
       # head: `emit_response` then reported the TRAILER's status and the head's
       # content-type / content-encoding / Set-Cookie were gone from the flow row, with
       # `trailer_names.clear` erasing the marker that would have shown why.
-      if (existing = side.headers) &&
-         (!decoded.any? { |(n, _)| n == ":status" } || !interim_status?(existing))
+      existing = side.headers
+      trailing = existing && (!decoded.any? { |(n, _)| n == ":status" } || !interim_status?(existing))
+      decoded, added = fit_head(side, decoded, trailing ? side.header_bytes : 0)
+      if existing && trailing
         # Trailers (no :status) append to the existing header list — grpc-status et al.
-        # Bound the CUMULATIVE list: the per-decode MAX_HEADER_LIST caps ONE block, but a
-        # flood of repeated non-status HEADERS blocks (fake trailers on a stream held open
-        # past END_STREAM) would otherwise grow `headers` without limit (memory DoS). The
-        # raise unwinds into feed's rescue, which drops the projection and keeps the raw
-        # frame log authoritative; the ensure below still clears header_buf.
-        raise Gori::Error.new("h2 cumulative header list too large") if side.header_bytes + added > HPACK::Decoder::MAX_HEADER_LIST
+        # `fit_head` bounds the CUMULATIVE list: a flood of repeated non-status HEADERS blocks
+        # (fake trailers on a stream held open past END_STREAM) adds nothing once the budget
+        # is spent, so `headers` cannot grow without limit (memory DoS).
         side.header_bytes += added
         record_trailer_names(side, decoded)
         existing.concat(decoded)
@@ -529,6 +530,37 @@ module Gori::Proxy::H2
       # keeps processing the connection) — otherwise the next HEADERS/CONTINUATION
       # fragment would append to a stale block and decode garbage.
       side.header_buf.clear
+    end
+
+    # Keep the prefix of `decoded` whose header list fits h1's head limit, given `used` bytes
+    # already merged on this side. The HPACK decoder caps ONE block at 16 MiB, and indexing
+    # amplifies: one ~4 KB dynamic-table entry referenced by 4096 one-byte `0xBE`s is a ~4 KiB
+    # block that decodes to a ~16 MiB list, which `synth_*_head` turned into one stored String
+    # under `@mutex`. h1 refuses a head past `MAX_HEAD_BYTES`; the h2 relay has already
+    # forwarded the frames, so the projection keeps what fits and the flow says so. Measured as
+    # RFC 7541 §4.1 list size (32 octets per field), which covers each synthesized line's
+    # `: ` + CRLF; `line_safe` escaping can at most double a value, so the stored head stays
+    # within twice the limit. Counted off the decoded sizes before any String is built (P6);
+    # the raw frame log keeps every field (P7).
+    private def fit_head(side : Side, decoded : Array({String, String}),
+                         used : Int32) : {Array({String, String}), Int32}
+      added = 0
+      decoded.each_with_index do |(n, v), i|
+        size = n.bytesize + v.bytesize + HPACK::Decoder::ENTRY_OVERHEAD
+        if used + added + size > Codec::Http1::MAX_HEAD_BYTES
+          side.head_truncated = true
+          return {decoded[0, i], added}
+        end
+        added += size
+      end
+      {decoded, added}
+    end
+
+    private def note_head_truncated(stream : Stream, side : Side, label : String) : Nil
+      return unless side.head_truncated?
+      stream.advise("the #{label} header list exceeded #{Codec::Http1::MAX_HEAD_BYTES // 1024} KiB, " \
+                    "the h1 head limit; the stored head keeps only the fields that fit " \
+                    "(the raw frames carry all of them)")
     end
 
     # Keep an interim head that a later status block is replacing, as the synthesized head every
@@ -667,6 +699,7 @@ module Gori::Proxy::H2
       headers = stream.req.headers.not_nil!
       note_extended_connect(stream, headers)
       note_trailer_pseudo(stream, stream.req, "request")
+      note_head_truncated(stream, stream.req, "request")
       method = pseudo(headers, ":method") || "GET"
       path = pseudo(headers, ":path") || "/"
       scheme = pseudo(headers, ":scheme") || "https"
@@ -700,6 +733,7 @@ module Gori::Proxy::H2
       return unless flow_id # request not yet projected (rare interleaving) — drop
       headers = stream.resp.headers.not_nil!
       note_trailer_pseudo(stream, stream.resp, "response")
+      note_head_truncated(stream, stream.resp, "response")
       status = (pseudo(headers, ":status") || "0").to_i? || 0
       cap = stream.resp.body
       body = cap.total == 0 ? nil : cap.to_slice
