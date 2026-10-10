@@ -802,13 +802,16 @@ module Gori
     # History, Repeater tab or capture start dies on every open. Not every narrow column is
     # listed: one that is not just keeps today's behaviour.
     INT32_COLUMNS = {
-      "flows"          => %w[port status state short_circuited],
-      "flow_interims"  => %w[status omitted],
-      "issues"         => %w[severity status],
-      "issue_evidence" => %w[status],
-      "match_rules"    => %w[enabled position],
-      "repeaters"      => %w[position http2 auto_content_length ws_keep_key ws_http_only],
-      "ws_messages"    => %w[opcode],
+      "color_rules"     => %w[enabled],
+      "display_columns" => %w[position pos_start pos_end width],
+      "extract_rules"   => %w[enabled pos_start pos_end],
+      "flows"           => %w[port status state short_circuited],
+      "flow_interims"   => %w[status omitted],
+      "issues"          => %w[severity status],
+      "issue_evidence"  => %w[status],
+      "match_rules"     => %w[enabled position],
+      "repeaters"       => %w[position http2 auto_content_length ws_keep_key ws_http_only],
+      "ws_messages"     => %w[opcode],
     }
 
     # gori binds only integers (or NULL) into an INTEGER column, and the store reads every one

@@ -667,6 +667,21 @@ describe Gori::ProjectArchive do
     end
   end
 
+  # `Bindings.load` and `Colormarker.load` read these narrow columns on every project open, so an
+  # out-of-range cell left the imported project unopenable rather than refused at import.
+  it "refuses an archive whose open-path rule column is out of Int32 range" do
+    with_archive_project do |_registry, project, store, root|
+      store.insert_flow(archive_request("/a"))
+      store.flush
+      archive_path = export_archive(project, File.join(root, "rules.gori"))
+      tamper_archive_database(archive_path, root) do |conn|
+        conn.exec("INSERT INTO color_rules (enabled, match_filter, color, position) VALUES (4294967296, '', 'red', 0)")
+      end
+      error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
+      error.message.not_nil!.should contain(%(never writes in "color_rules"))
+    end
+  end
+
   # SQLite gives INTEGER affinity to any declared type containing "INT", and a table rebuilt
   # with CREATE TABLE … AS SELECT declares its integer columns `INT`, not `INTEGER`. A table
   # with no `id` column, so the primary-key check below does not answer first.
