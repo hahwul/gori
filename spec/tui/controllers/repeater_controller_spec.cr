@@ -344,3 +344,25 @@ describe "RepeaterController#prepare_timing_pair labels" do
     end
   end
 end
+
+# ^Y's second press saves and says "chain saved" — but only over a committed save: a refused
+# one has already said "NOT saved", and painting success over it hid the lost write.
+describe "RepeaterController#repeater_focus_chain_pane" do
+  it "does not claim the chain saved when the store refused the write" do
+    with_repeater_controller do |_, host|
+      host.session.store.insert_repeater("https://a.test/", "§v§ HTTP/1.1\nHost: a.test\n\n".to_slice, false, true, nil, 0)
+      ctl = RepeaterController.new(host)
+      view = ctl.current_view.not_nil!
+      view.focus_pane(:request)
+      ctl.repeater_focus_chain_pane # in a marker → opens the pane
+      view.chain_pane_active?.should be_true
+      "md5".each_char { |c| view.handle_chain_pane_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }
+      host.session.store.@db.exec("CREATE TRIGGER block_rep_update BEFORE UPDATE ON repeaters " \
+                                  "BEGIN SELECT RAISE(ABORT, 'blocked'); END")
+
+      ctl.repeater_focus_chain_pane
+
+      host.statuses.last.should contain("NOT saved")
+    end
+  end
+end

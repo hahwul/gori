@@ -113,3 +113,26 @@ describe FuzzerController do
     end
   end
 end
+
+# ^Q's second press saves and says "chain saved" — but only over a committed save: a refused
+# one has already said "NOT saved", and painting success over it hid the lost write.
+describe "FuzzerController#fuzz_focus_chain_pane" do
+  it "does not claim the chain saved when the store refused the write" do
+    with_fuzzer_controller do |ctl|
+      host = ctl.@host.as(FakeHost)
+      ctl.fuzz_new
+      view = ctl.current_view.not_nil!
+      view.load_request("https://h", "§x§ HTTP/1.1\r\nHost: h\r\n\r\n", false, "")
+      view.focus_pane(:template)
+      ctl.fuzz_focus_chain_pane # in a marker → opens the pane
+      view.chain_pane_active?.should be_true
+      "rot13".each_char { |c| view.handle_chain_pane_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }
+      host.session.store.@db.exec("CREATE TRIGGER block_fuzz_update BEFORE UPDATE ON fuzz_sessions " \
+                                  "BEGIN SELECT RAISE(ABORT, 'blocked'); END")
+
+      ctl.fuzz_focus_chain_pane
+
+      host.statuses.last.should contain("NOT saved")
+    end
+  end
+end

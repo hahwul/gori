@@ -366,8 +366,8 @@ module Gori::Tui
       return unless view = current_view
       if view.chain_pane_active?
         view.commit_chain_pane
-        save_current
-        @host.status("chain saved")
+        # A refused save already said so; "chain saved" would paint over it.
+        @host.status("chain saved") if save_current
       else
         msg = view.focus_chain_pane
         @host.status(msg || "type the chain · Tab completes · ↵ saves · esc cancels")
@@ -1888,8 +1888,9 @@ module Gori::Tui
     end
 
     # --- persistence ---
-    def save_current : Nil
-      current_tab_obj.try { |tab| save_tab(tab) }
+    # False when the store refused the write (the refusal is already on the status line).
+    def save_current : Bool
+      (tab = current_tab_obj) ? save_tab(tab) : true
     end
 
     # EVERY dirty tab, for the exits that close the whole Runner (quit, leave project): only
@@ -1898,15 +1899,17 @@ module Gori::Tui
       @sessions.each { |tab| save_tab(tab) }
     end
 
-    private def save_tab(tab : FuzzerTab) : Nil
-      return unless (id = tab.db_id) && tab.view.dirty?
+    private def save_tab(tab : FuzzerTab) : Bool
+      return true unless (id = tab.db_id) && tab.view.dirty?
       v = tab.view
       cfg = v.config_json
       unless @host.session.store.update_fuzz_session(id, v.target, v.template_text, v.http2?, v.sni_override, cfg, v.name)
-        return @host.status("session NOT saved (project busy, or closed in another gori) — the tab stays dirty")
+        @host.status("session NOT saved (project busy, or closed in another gori) — the tab stays dirty")
+        return false
       end
       v.mark_config_synced(cfg)
       v.clear_dirty
+      true
     end
 
     # Live converge with fuzz_sessions after a data_version bump (own save or peer).
