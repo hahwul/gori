@@ -200,7 +200,7 @@ module Gori
         # at the two surfaces that submit a COMPLETE condition (here and `gori run intercept
         # filter`), never in `Interceptor#set_filter`: the TUI bar applies the condition on every
         # keystroke, so a refusal there would reject conditions mid-word.
-        if bad = Gori::InterceptFilter.unsupported_field_reason(q)
+        if bad = Gori::InterceptFilter.refusal(q)
           return err(bad, "INVALID_ARGUMENT", field: "query")
         end
         bridge = store.intercept_bridge_state

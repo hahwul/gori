@@ -569,7 +569,7 @@ module Gori
         # Same refusal MCP's `intercept_set_filter` makes, in the same words: a field the gate
         # refuses compiles to a never-match, so this condition would hold nothing — or, negated,
         # hold every in-flight message — with nothing on any surface to say why.
-        if bad = Gori::InterceptFilter.unsupported_field_reason(positional[0])
+        if bad = Gori::InterceptFilter.refusal(positional[0])
           abort "gori run intercept filter: #{bad}"
         end
 

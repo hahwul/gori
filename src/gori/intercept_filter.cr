@@ -229,6 +229,18 @@ module Gori
       "History, colour rules and MCP `query` answer it."
     end
 
+    # Everything a surface that SAVES a complete condition refuses: an unsupported field, or a
+    # `~` pattern that will not compile (`regex_term` turns it into a never-match, so
+    # `path~(echo` held nothing and `-path~(echo` held everything, silently).
+    def self.refusal(source : String) : String?
+      if bad = unsupported_field_reason(source)
+        return bad
+      end
+      if bad = QL.invalid_regex_terms(source).first?
+        "`#{bad}` is not a valid regex — it would match nothing"
+      end
+    end
+
     # WHY the field in hand cannot be answered here, as the middle clause of that one sentence.
     # Each arm reads off the same "what is in hand" table the class header lays out: a gate holds
     # ONE message, mid-flight, before any capture decision — so what it lacks is the finished

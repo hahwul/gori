@@ -425,6 +425,12 @@ describe Gori::InterceptFilter do
         .not_nil!.should contain("cannot gate a request before its response exists")
       Gori::InterceptFilter.unsupported_field_reason("host:acme method:POST").should be_nil
     end
+
+    it "refuses an unsupported field or a regex that will not compile, in that order" do
+      Gori::InterceptFilter.refusal("path~(echo").not_nil!.should contain("`path~(echo` is not a valid regex")
+      Gori::InterceptFilter.refusal("scope:in path~(echo").not_nil!.should contain("scope rules")
+      Gori::InterceptFilter.refusal("host:acme path~^/api").should be_nil
+    end
   end
 
   describe "completion" do
