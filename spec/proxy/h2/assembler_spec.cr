@@ -550,6 +550,24 @@ describe Gori::Proxy::H2::Assembler do
     req.advisory.not_nil!.should contain("request header list exceeded")
   end
 
+  # Cutting at the first field over the limit dropped a 300 KB `:path` (and `:authority` after
+  # it), so the request was stored as `GET /` on the connection host — a different request.
+  it "keeps the leading pseudo-headers whole when they alone pass the limit" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "conn.host", 443)
+    path = "/long?a=" + "a" * 300_000
+    assembler.feed("out", headers_frame(1_u32, Frame::END_HEADERS | Frame::END_STREAM,
+      Gori::Proxy::H2::HPACK::Encoder.new.encode([{":method", "POST"}, {":scheme", "https"},
+                                                  {":path", path}, {":authority", "target.example"}, {"x-extra", "1"}])))
+
+    req = sink.requests.first
+    req.method.should eq("POST")
+    req.host.should eq("target.example")
+    req.target.should eq(path)
+    String.new(req.head).should_not contain("x-extra")
+    req.advisory.not_nil!.should contain("request header list exceeded")
+  end
+
   it "stores a large header list under h1's head limit whole, with no advisory" do
     sink = RecSink.new
     assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443)

@@ -501,6 +501,7 @@ module Gori::Proxy::H2
       # `trailer_names.clear` erasing the marker that would have shown why.
       existing = side.headers
       trailing = existing && (!decoded.any? { |(n, _)| n == ":status" } || !interim_status?(existing))
+      side.head_truncated = false unless trailing # a replaced head takes its flag with it
       decoded, added = fit_head(side, decoded, trailing ? side.header_bytes : 0)
       if existing && trailing
         # Trailers (no :status) append to the existing header list — grpc-status et al.
@@ -542,12 +543,18 @@ module Gori::Proxy::H2
     # `: ` + CRLF; `line_safe` escaping can at most double a value, so the stored head stays
     # within twice the limit. Counted off the decoded sizes before any String is built (P6);
     # the raw frame log keeps every field (P7).
+    #
+    # The leading pseudo-headers are kept whatever their size: cutting a 300 KB `:path` stored
+    # the request as `GET /` on the connection's host, a different request. Only the first
+    # MAX_KEPT_PSEUDO fields of the block (where RFC 9113 §8.3 puts them, and there are at
+    # most six kinds), so one table entry referenced 4096 times cannot ride along.
     private def fit_head(side : Side, decoded : Array({String, String}),
                          used : Int32) : {Array({String, String}), Int32}
       added = 0
       decoded.each_with_index do |(n, v), i|
         size = n.bytesize + v.bytesize + HPACK::Decoder::ENTRY_OVERHEAD
-        if used + added + size > Codec::Http1::MAX_HEAD_BYTES
+        pseudo = i < MAX_KEPT_PSEUDO && n.starts_with?(':')
+        if !pseudo && used + added + size > Codec::Http1::MAX_HEAD_BYTES
           side.head_truncated = true
           return {decoded[0, i], added}
         end
@@ -555,6 +562,8 @@ module Gori::Proxy::H2
       end
       {decoded, added}
     end
+
+    MAX_KEPT_PSEUDO = 6
 
     private def note_head_truncated(stream : Stream, side : Side, label : String) : Nil
       return unless side.head_truncated?
