@@ -143,7 +143,7 @@ module Gori
           gt = src.byte_index('>', after)
           return nil unless gt
           return {"", gt + 1} if src.to_unsafe[gt - 1] == '/'.ord # <response/>
-          close = src.byte_index("</#{name}>", gt + 1)
+          close = close_at(src, name, gt + 1)
           return nil unless close
           return {src.byte_slice(gt + 1, close - gt - 1), close + name.bytesize + 3}
         end
@@ -164,9 +164,39 @@ module Gori
           return nil unless gt
           attrs = src.byte_slice(after, gt - after)
           return {attrs, ""} if attrs.ends_with?('/')
-          close = src.byte_index("</#{name}>", gt + 1)
+          close = close_at(src, name, gt + 1)
           return nil unless close
           return {attrs, src.byte_slice(gt + 1, close - gt - 1)}
+        end
+        nil
+      end
+
+      # The byte offset of the `</name>` closing an element whose content starts at `from`,
+      # stepping over every `<![CDATA[…]]>` on the way: an inline (`base64="false"`) SOAP
+      # request or RSS response carries `</request>` / `</item>` in its CDATA, and the first
+      # literal match there cut the item short.
+      private def self.close_at(src : String, name : String, from : Int32) : Int32?
+        needle = "</#{name}>"
+        pos = from
+        while close = src.byte_index(needle, pos)
+          cdata = cdata_at(src, pos, close)
+          return close unless cdata
+          cdata_end = src.byte_index("]]>", cdata + 9)
+          return nil unless cdata_end
+          pos = cdata_end + 3
+        end
+        nil
+      end
+
+      CDATA_OPEN = "<![CDATA[".to_slice
+
+      # The first `<![CDATA[` in `[from, limit)`. Walked `<` by `<` rather than an unbounded
+      # search, which on an export without CDATA would scan to EOF once per item.
+      private def self.cdata_at(src : String, from : Int32, limit : Int32) : Int32?
+        pos = from
+        while (lt = src.byte_index('<', pos)) && lt < limit
+          return lt if src.to_slice[lt, CDATA_OPEN.size]? == CDATA_OPEN
+          pos = lt + 1
         end
         nil
       end

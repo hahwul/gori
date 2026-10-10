@@ -166,6 +166,26 @@ describe Gori::Import::Burp do
     String.new(result.flows.first.request.head).should eq(req)
   end
 
+  it "does not end an item at a closing tag inside an inline CDATA message" do
+    body = "<x><request>a</request><item>b</item></x>"
+    req = "POST /soap HTTP/1.1\r\nHost: target.test\r\nContent-Length: #{body.bytesize}\r\n\r\n#{body}"
+    rss = "<rss><item>one</item></rss>"
+    resp = "HTTP/1.1 200 OK\r\nContent-Length: #{rss.bytesize}\r\n\r\n#{rss}"
+    xml = items(<<-XML, item("https://target.test/next", "GET /next HTTP/1.1\r\nHost: target.test\r\n\r\n"))
+      <item>
+        <url><![CDATA[https://target.test/soap]]></url>
+        <request base64="false"><![CDATA[#{req}]]></request>
+        <response base64="false"><![CDATA[#{resp}]]></response>
+      </item>
+      XML
+    result = parse(xml)
+    result.skipped.should eq(0)
+    result.flows.size.should eq(2)
+    soap = result.flows.first
+    String.new(soap.request.body.not_nil!).should eq(body)
+    String.new(soap.response.not_nil!.body.not_nil!).should eq(rss)
+  end
+
   it "decodes a base64 message wrapped in CDATA, the shape Burp actually writes" do
     req = "POST /c HTTP/1.1\r\nHost: target.test\r\nContent-Length: 3\r\n\r\n\xFFab"
     resp = "HTTP/1.1 201 Created\r\nContent-Type: text/plain\r\n\r\ncreated"
