@@ -110,7 +110,7 @@ module Gori
           # bare-LF promotion. See `Repeater::UrlRequest.raw`.
           Repeater::UrlRequest.raw(target, raw, verbatim?(args))
         else
-          method = (wire_str(args, "method") || "GET").upcase
+          method = wire_str(args, "method") || "GET"
           # Refused before the body is read, the order this has always reported two mistakes in.
           Repeater::UrlRequest.check_method(method)
           # `body_base64` wins over `body`: it is the byte-exact form, and a caller that sent

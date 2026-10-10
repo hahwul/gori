@@ -92,7 +92,7 @@ module Gori::Repeater
     # a header value is the payload, and MCP's `send_request{verbatim:true}` passes it the same way.
     def self.structured(target : Target, method : String?, headers : Array({String, String}),
                         body : Bytes?, *, expand : Bool = true) : Built
-      m = (method || "GET").upcase
+      m = method || "GET"
       check_method(m)
       request_target = request_target_of(target)
 
