@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-- MCP: `list_history` columns are read from the redacted copy under the project's redaction profile, a text body cut mid-character stays text, `body_mode:"none"` reports a binary body as binary, paging a response that was never captured is refused, `create_repeater` puts `position` at that tab index and refuses a target it could never send, `update_probe_rule` keeps the fields it is not given, and a fuzz payload set naming two sources is refused
+- MCP: `list_history` columns are read from the redacted copy under the project's redaction profile, a body cut mid-character stays text, `body_mode:"none"` reports a binary body as binary, and paging a response that was never captured is refused
+- MCP: `create_repeater` puts `position` at that tab index and refuses a target it could never send, `update_probe_rule` keeps the fields it is not given, and a fuzz payload set naming two sources is refused
 - Fuzzer, Miner, Sequencer and Discover: a target or seed with a scheme other than http(s) is refused instead of going out as plain HTTP past scope excludes (or crawling a host named `ftp`), a location named twice is mined once, a missing bare wordlist name says where it was looked for, and a sequence run whose token location matched nothing says so
 - Authorize and cache deception: an identity that changes nothing on a flow reads `no_effect` instead of a false bypass, inline identities refuse unknown keys and unsafe `set` headers, and cache deception skips a flow with no Cookie or Authorization to strip
 - Send: a request built from a URL (`send_request` with `method`, `gori run send -X`) keeps the method's case as given
