@@ -113,9 +113,19 @@ describe Gori::QL do
     f.args.should eq([%("token")])
   end
 
-  it "strips control/NUL chars from a body: value (FTS phrase safety)" do
-    f = Gori::QL.parse("body:to\u0000ke\u001fn")
-    f.args.should eq([%("token")]) # control bytes removed before the phrase is built
+  # Stripping them (FTS phrase safety) searched a DIFFERENT needle than the one typed —
+  # `"a<TAB>b"` found `ab` — so the term is dropped instead, and `analyze` names it.
+  it "drops a body:/header: value carrying a control/NUL char rather than searching it altered" do
+    {"body:to\u0000ke\u001fn", "body:\"a\tb\"", "header:x\u0001y", "resp.body:to\u0000ken"}.each do |q|
+      f = Gori::QL.parse(q)
+      f.args.should be_empty
+      f.sql.should eq("1")
+      Gori::QL.analyze(q).clean?.should be_false
+    end
+  end
+
+  it "searches a literal quote written as \\\" inside quotes" do
+    Gori::QL.parse(%(body:"\\"role\\":\\"admin\\""), fts: true).args.should eq([%("""role"":""admin""")])
   end
 
   # …and a value made ENTIRELY of control bytes strips to "", which `like("")` turns into

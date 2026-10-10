@@ -351,7 +351,7 @@ module Gori
     private def self.content_or_prefix_reason(raw_field : String, field : String, value : String) : String?
       case field
       when "body", "header", "req.body", "resp.body", "req.header", "resp.header"
-        return "value contains only control characters" if strip_controls(value).empty?
+        return "value contains control characters" if value.each_char.any?(&.control?)
       else
         if prefix = SIDE_PREFIXES.find { |p| raw_field.starts_with?(p) }
           base = raw_field[prefix.size..]
@@ -1147,15 +1147,11 @@ module Gori
 
     private def self.body_cond(value : String, fts : Bool = true,
                                body_max : Int32? = nil, side : Symbol? = nil) : {String, Array(DB::Any)}?
-      value = strip_controls(value) # strip NUL/control chars (FTS/LIKE safety)
-      # `field_cond`'s `return nil if value.empty?` runs BEFORE this strip, so a value made
-      # only of control bytes survived that guard and arrived here as "". `like("")` is
-      # `'%%'`, which matches EVERY flow with a body — and `-body:` then excluded every flow
-      # with one. That is the silent-BROADEN direction, the one `filter_ast.cr` calls the
-      # dangerous one, and `QL.analyze` reported the query clean so `strict:` never saw it.
-      # Dropping the term is what `body:` (genuinely empty) already does; this makes the two
-      # spellings agree.
-      return nil if value.empty?
+      # A control character (NUL, a quoted tab) drops the term, and `analyze` reports it: the FTS
+      # phrase cannot carry one, and STRIPPING it searched a different needle than the one
+      # typed (`a<TAB>b` found `ab`). A value made only of control bytes used to strip to "",
+      # which `like("")` made `'%%'` — every flow with a body — so this keeps that case dropped.
+      return nil if value.each_char.any?(&.control?)
       # Under the trigram minimum the FTS index cannot answer — but the term is still a
       # literal substring search, and `body_literal_cond` IS that search: NUL-transparent
       # (SafeRegexp reads the haystack by its true byte length, so a body of
@@ -1185,7 +1181,7 @@ module Gori
     # in exactly the direction `body_cond`'s short-needle branch above already refused to fail.
     private def self.body_literal_cond(value : String, body_max : Int32? = nil,
                                        side : Symbol? = nil) : {String, Array(DB::Any)}
-      # Control characters are stripped by `body_cond` before this runs, so the escaped literal
+      # A control character drops the term in `body_cond` before this runs, so the escaped literal
       # can never carry a NUL of its own. `(?i)` because `body:` promises case-insensitive
       # matching where `body~` is case-SENSITIVE by default.
       body_regex_cond("(?i)#{Regex.escape(value)}", body_max, side)
@@ -1313,8 +1309,7 @@ module Gori
     # per head column instead — more scans, and a different fold rule at 1-2 characters
     # than at 3, which `body_cond` explains at more length.
     private def self.header_cond(value : String, side : Symbol? = nil) : {String, Array(DB::Any)}?
-      value = strip_controls(value)
-      return nil if value.empty?
+      return nil if value.each_char.any?(&.control?) # see `body_cond`
       pat = "(?i)#{Regex.escape(value)}"
       return {"0", [] of DB::Any} unless valid_regex?(pat)
       header_regex_cond(pat, side)
