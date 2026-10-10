@@ -101,7 +101,12 @@ module Gori
       # nothing and something failed" is the right thing for CI to fail on.)
       private def note_all_refused(sjob : SequenceJob, engine : Sequencer::Engine) : Nil
         return unless sjob.tokens.empty?
-        return unless reason = engine.first_error
+        unless reason = engine.first_error
+          # Every replay came back and none carried a token: the descriptor is wrong, and a bare
+          # `budget_exhausted` (the 2x attempt ceiling) would not say so.
+          sjob.error_msg ||= "no response matched the token location (#{sjob.sent} replays, none failed)" if sjob.sent > 0
+          return
+        end
         if sjob.errors >= sjob.sent
           sjob.error_msg ||= "every replay failed — #{reason}"
           sjob.status = :error if sjob.status == :done || sjob.status == :budget_exhausted
