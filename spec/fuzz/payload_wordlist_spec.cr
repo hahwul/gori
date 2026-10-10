@@ -22,6 +22,12 @@ describe Gori::Fuzz::WordlistFile do
     end
   end
 
+  # /dev/zero has no newline, so the count pass grew one line until the process ran out of memory.
+  it "rejects a character device given as a wordlist" do
+    posix_only!("/dev/zero")
+    expect_raises(Gori::Error, /device/) { Gori::Fuzz::WordlistFile.new("/dev/zero").size }
+  end
+
   it "counts and iterates a real wordlist unchanged" do
     path = File.tempname("gori-wl")
     File.write(path, "alpha\nbeta\ngamma\n")

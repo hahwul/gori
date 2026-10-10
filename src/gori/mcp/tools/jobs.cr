@@ -171,7 +171,7 @@ module Gori
         waited_out = false
         if wait
           deadline = Time.utc.to_unix_ms + budget
-          while job.status == :running
+          while job.live?
             if Time.utc.to_unix_ms >= deadline
               waited_out = true
               break
@@ -201,7 +201,7 @@ module Gori
       # LATER than `stopped_at` — a stop that "happened" after the run it claims to have
       # ended. The reply then says `already_finished` instead (`emit_stop_result`).
       private def request_stop(job : Job) : Bool
-        return false unless job.status == :running
+        return false unless job.live?
         job.stop
         true
       end

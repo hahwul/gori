@@ -161,14 +161,21 @@ module Gori::Diff
       end
     end
 
+    # Far past any real body, and small enough that the midpoint, the band's `(max - min) * 2`
+    # and the two sides' difference stay inside Int64: an imported `response_size` near
+    # Int64::MAX raised OverflowError and failed the whole diff, or its render.
+    SIZE_CEILING = 1_i64 << 52
+
     # Widen the observed size range. SQLite's MIN/MAX skip NULLs, so a group that mixes
     # pending and complete flows still contributes the sizes it does have.
     private def observe_size(o : Store::EndpointObservation) : Nil
       if lo = o.min_size
+        lo = lo.clamp(0_i64, SIZE_CEILING)
         cur = @min_size
         @min_size = (cur.nil? || lo < cur) ? lo : cur
       end
       if hi = o.max_size
+        hi = hi.clamp(0_i64, SIZE_CEILING)
         cur = @max_size
         @max_size = (cur.nil? || hi > cur) ? hi : cur
       end

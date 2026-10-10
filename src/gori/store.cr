@@ -604,7 +604,8 @@ module Gori
     # are both how a new project legitimately starts (sqlite creates/initialises them), and
     # `:memory:` is not a path at all.
     private def self.refuse_non_database(path : String) : Nil
-      info = File.info?(path)
+      # `File.info?` raises on EACCES or a symlink loop, which is unstatable too.
+      info = File.info?(path) rescue nil
       return unless info # missing (a new project) or unstatable — the driver's problem
       raise Gori::Error.new("cannot open #{path}: that is a directory, not a database file") if info.directory?
       # Judged from the TYPE, before any open. A pipe/socket/device is not a database, and

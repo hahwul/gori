@@ -208,6 +208,66 @@ describe Gori::Fuzz::Spool do
     end
   end
 
+  it "keeps the database open while each_result readers are parked inside it" do
+    with_spool_root do |root|
+      spool = Gori::Fuzz::Spool.new(root)
+      runs = Array.new(2) do
+        run = spool.start(Gori::Fuzz::SavedRunMeta.new(nil,
+          "https://reader.test", "sniper", 2_i64))
+        run.append(spool_result(1_i64, Bytes[0x47])).should be_true
+        run.append(spool_result(2_i64, Bytes[0x48])).should be_true
+        run.finish(2_i64, 0_i64, 0_i64, "done").should be_true
+        run
+      end
+      store = spool.@store.not_nil!
+
+      parked = Channel(Nil).new
+      release = Channel(Nil).new
+      done = Channel(Array(Int64) | Exception).new
+      # The TUI save fiber's shape: its block parks on the project's full queue while the
+      # spool's statement is still open, and the project close runs `Spool#close` meanwhile.
+      # Two readers, because crystal-db's pool close skips every other connection: one alone
+      # survived it by luck, the second was finalized under its open statement (SIGSEGV).
+      runs.each do |run|
+        spawn do
+          rows = [] of Int64
+          run.each_result(batch_size: 1) do |row|
+            rows << row.idx
+            if rows.size == 1
+              parked.send(nil)
+              release.receive
+            end
+          end
+          done.send(rows)
+        rescue ex
+          done.send(ex)
+        end
+      end
+
+      2.times { parked.receive }
+      spool.close
+      store.closed?.should be_false
+      2.times { release.send(nil) }
+      2.times { done.receive.should eq([1_i64, 2_i64]) }
+      store.close
+    end
+  end
+
+  it "closes the database once no reader is inside" do
+    with_spool_root do |root|
+      spool = Gori::Fuzz::Spool.new(root)
+      run = spool.start(Gori::Fuzz::SavedRunMeta.new(nil,
+        "https://reader.test", "sniper", 1_i64))
+      run.append(spool_result(1_i64, Bytes[0x47])).should be_true
+      run.finish(1_i64, 0_i64, 0_i64, "done").should be_true
+      store = spool.@store.not_nil!
+      run.each_result { |_| }
+      spool.close
+      store.closed?.should be_true
+      expect_raises(Gori::Error, "fuzz spool is closed") { run.each_result { |_| } }
+    end
+  end
+
   it "closes SQLite before removing the whole directory and is idempotent" do
     with_spool_root do |root|
       spool = Gori::Fuzz::Spool.new(root)

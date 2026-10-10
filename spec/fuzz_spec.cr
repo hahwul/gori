@@ -454,6 +454,11 @@ describe F::Generator do
     count = 0
     F::Generator.new(tmpl, empty, F::Config.new(mode: F::Mode::ClusterBomb)).each { count += 1 }
     count.should eq(0)
+    # An empty LATER set behind an effectively endless one ends at once: walking set 0 to find
+    # nothing to pair it with never yields, and froze the whole process.
+    endless = [F::PayloadSet.new(F::NumberRange.new(0_i64, Int64::MAX - 1, step: 1_i64)), empty[1], sets[2]]
+    F::Generator.new(tmpl, endless, F::Config.new(mode: F::Mode::ClusterBomb)).each { count += 1 }
+    count.should eq(0)
   end
 
   # One stack frame per position overflowed the Engine fiber's stack at ~40k positions: a

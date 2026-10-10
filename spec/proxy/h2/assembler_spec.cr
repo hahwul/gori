@@ -36,7 +36,7 @@ end
 # A trailing HEADERS block of `count` DISTINCT literal-without-indexing fields with empty
 # values — the cheapest legal way for an origin to hand the assembler a big trailer-name list
 # (9 wire bytes each here), and small enough per field that the whole block stays under
-# MAX_HEADER_BLOCK and its decoded size under the cumulative MAX_HEADER_LIST cap.
+# MAX_HEADER_BLOCK and its decoded size under the HPACK decoder's MAX_HEADER_LIST cap.
 private def distinct_trailer_block(count : Int32) : Bytes
   io = IO::Memory.new
   count.times do |i|
@@ -46,6 +46,19 @@ private def distinct_trailer_block(count : Int32) : Bytes
     io << name
     io.write_byte(0x00_u8) # empty value
   end
+  io.to_slice
+end
+
+# HPACK amplification: one literal-with-incremental-indexing field (`x`: 4000 octets) that
+# lands in the dynamic table, then `refs` one-octet references to it (0xBE = index 62, the
+# newest dynamic entry). ~4 KiB plus `refs` on the wire; ~4 KB per reference decoded.
+private def amplified_block(prefix : Bytes, refs : Int32) : Bytes
+  io = IO::Memory.new
+  io.write(prefix)
+  io.write(Bytes[0x40_u8, 0x01_u8, 'x'.ord.to_u8])
+  io.write(Bytes[0x7f_u8, 0xa1_u8, 0x1e_u8]) # length 4000: 127 + 3873 as 7-bit groups
+  io << "v" * 4000
+  refs.times { io.write_byte(0xbe_u8) }
   io.to_slice
 end
 
@@ -474,7 +487,9 @@ describe Gori::Proxy::H2::Assembler do
     assembler.feed("in", data_frame(1_u32, Frame::END_STREAM, ""))
     head = String.new(sink.responses.first.head)
     head.should contain("X-Gori-Trailers: t00000, t00001") # the marker keeps arrival order…
-    head.should contain("t59999")                          # …and still names every one
+    # …up to h1's head limit, which this block is well past (`fit_head`).
+    head.should_not contain("t59999")
+    sink.responses.first.advisory.not_nil!.should contain("response header list exceeded")
   end
 
   # The membership index has to be cleared with the array it indexes. A final status block
@@ -500,6 +515,71 @@ describe Gori::Proxy::H2::Assembler do
     head = String.new(sink.responses.first.head)
     head.should contain("grpc-status: 13")
     head.should contain("X-Gori-Trailers: grpc-status")
+  end
+
+  # A ~8 KiB block that decodes to a ~16 MiB header list used to become a ~16 MiB stored head,
+  # built under the mutex, per response. h1 refuses a head past MAX_HEAD_BYTES; h2 keeps the
+  # fields that fit and says so.
+  it "caps the head an amplified HPACK response block synthesizes at h1's head limit" do
+    cap = Gori::Proxy::Codec::Http1::MAX_HEAD_BYTES
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443)
+    assembler.feed("out", headers_frame(1_u32, Frame::END_HEADERS | Frame::END_STREAM,
+      hexb("828684418cf1e3c2e5f23a6ba0ab90f4ff")))
+    block = amplified_block(Bytes[0x88_u8], 4000)
+    block.size.should be < 10_000
+    assembler.feed("in", headers_frame(1_u32, Frame::END_HEADERS | Frame::END_STREAM, block))
+
+    resp = sink.responses.first
+    resp.status.should eq(200)
+    resp.head.size.should be <= cap
+    String.new(resp.head).should start_with("HTTP/2 200\r\nx: vvv")
+    resp.advisory.not_nil!.should contain("response header list exceeded #{cap // 1024} KiB")
+  end
+
+  it "caps the head an amplified HPACK request block synthesizes at h1's head limit" do
+    cap = Gori::Proxy::Codec::Http1::MAX_HEAD_BYTES
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443)
+    block = amplified_block(hexb("828684418cf1e3c2e5f23a6ba0ab90f4ff"), 4000)
+    assembler.feed("out", headers_frame(1_u32, Frame::END_HEADERS | Frame::END_STREAM, block))
+
+    req = sink.requests.first
+    req.method.should eq("GET")
+    req.head.size.should be <= cap
+    req.advisory.not_nil!.should contain("request header list exceeded")
+  end
+
+  # Cutting at the first field over the limit dropped a 300 KB `:path` (and `:authority` after
+  # it), so the request was stored as `GET /` on the connection host — a different request.
+  it "keeps the leading pseudo-headers whole when they alone pass the limit" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "conn.host", 443)
+    path = "/long?a=" + "a" * 300_000
+    assembler.feed("out", headers_frame(1_u32, Frame::END_HEADERS | Frame::END_STREAM,
+      Gori::Proxy::H2::HPACK::Encoder.new.encode([{":method", "POST"}, {":scheme", "https"},
+                                                  {":path", path}, {":authority", "target.example"}, {"x-extra", "1"}])))
+
+    req = sink.requests.first
+    req.method.should eq("POST")
+    req.host.should eq("target.example")
+    req.target.should eq(path)
+    String.new(req.head).should_not contain("x-extra")
+    req.advisory.not_nil!.should contain("request header list exceeded")
+  end
+
+  it "stores a large header list under h1's head limit whole, with no advisory" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443)
+    assembler.feed("out", headers_frame(1_u32, Frame::END_HEADERS | Frame::END_STREAM,
+      hexb("828684418cf1e3c2e5f23a6ba0ab90f4ff")))
+    big = "c" * (100 * 1024)
+    assembler.feed("in", headers_frame(1_u32, Frame::END_HEADERS | Frame::END_STREAM,
+      Gori::Proxy::H2::HPACK::Encoder.new.encode([{":status", "200"}, {"set-cookie", big}])))
+
+    resp = sink.responses.first
+    String.new(resp.head).should eq("HTTP/2 200\r\nset-cookie: #{big}\r\n\r\n")
+    resp.advisory.should be_nil
   end
 
   it "captures a server push (PUSH_PROMISE → promised-stream flow + response)" do

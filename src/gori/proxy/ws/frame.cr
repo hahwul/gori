@@ -256,7 +256,9 @@ module Gori::Proxy::WS
         @mask_key = mask_key
       end
       @fin = fin
-      @frames += 1
+      # Saturates: 2^31 empty continuations would otherwise raise OverflowError on every later
+      # frame, which the h2 WebSocket reader rescues before it compacts its buffer.
+      @frames += 1 if @frames < Int32::MAX
     end
 
     def note(f : Frame) : Nil

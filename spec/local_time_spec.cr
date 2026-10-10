@@ -46,6 +46,13 @@ describe Gori::LocalTime do
     Gori::LocalTime.format(Int64::MAX, "%Y-%m-%d", "").should eq("")
   end
 
+  # A caller that keeps a `Time` (the OAST rows, built while the TUI starts) gets the epoch
+  # rather than an ArgumentError that ended gori before any rescue.
+  it "reads an unrepresentable instant as the epoch where a Time is required" do
+    Gori::LocalTime.instant(Int64::MAX).should eq(Time::UNIX_EPOCH)
+    Gori::LocalTime.instant(1_700_000_000_000_000_i64).to_unix.should eq(1_700_000_000)
+  end
+
   # `of` takes a Time that already exists (a file mtime, a session's created_at) and answers
   # the same way: localised where that is representable, the instant itself where it is not.
   it "falls back to the instant itself when the local offset would push it out of range" do

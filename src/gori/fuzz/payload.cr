@@ -101,7 +101,9 @@ module Gori::Fuzz
       unless @counted
         ensure_readable
         n = 0_i64
-        File.each_line(@path) { n += 1 }
+        # Yields every 64Ki lines: counting a multi-GB list on the caller's fiber otherwise
+        # froze the single-threaded process (the TUI and every proxied request) for seconds.
+        File.each_line(@path) { Fiber.yield if (n += 1) % 65_536 == 0 }
         @count = n
         @counted = true
       end
@@ -168,6 +170,11 @@ module Gori::Fuzz
       if Gori::TtyPath.terminal?(@path)
         raise Gori::Error.new("wordlist is a terminal, not a file: #{@path} — pipe the list in " \
                               "(`generator | gori run fuzz … -w /dev/stdin`) or name a real path")
+      end
+      # Any other character device (/dev/zero, /dev/urandom) has no newline to end a line on,
+      # so the count pass grew one line until the process ran out of memory. A pipe still works.
+      if File.info?(@path).try(&.type.character_device?)
+        raise Gori::Error.new("wordlist is a device, not a file: #{@path}")
       end
     end
 

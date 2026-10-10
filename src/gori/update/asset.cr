@@ -234,10 +234,12 @@ module Gori::Update
     assets = [] of Asset
     if arr = obj["assets"]?.try(&.as_a?)
       arr.each do |item|
-        name = item["name"]?.try(&.as_s?) || next
-        url = item["browser_download_url"]?.try(&.as_s?) || next
-        size = item["size"]?.try(&.as_i64?) || 0_i64
-        digest = item["digest"]?.try(&.as_s?)
+        # `JSON::Any#[]?` RAISES on a non-object, so `"assets": [1]` was a backtrace.
+        h = item.as_h? || next
+        name = h["name"]?.try(&.as_s?) || next
+        url = h["browser_download_url"]?.try(&.as_s?) || next
+        size = h["size"]?.try(&.as_i64?) || 0_i64
+        digest = h["digest"]?.try(&.as_s?)
         assets << Asset.new(name, url, size, digest)
       end
     end

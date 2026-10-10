@@ -69,8 +69,8 @@ module Gori::Oast
           provider_key: cfg.try(&.key),
           payload_host: session_from_record(rec).host,
           server_url: rec.server_url,
-          created_at: Time.unix(rec.created_at // 1_000_000),
-          last_poll_at: rec.last_poll_at.try { |us| Time.unix(us // 1_000_000) },
+          created_at: LocalTime.instant(rec.created_at),
+          last_poll_at: rec.last_poll_at.try { |us| LocalTime.instant(us) },
           hits: store.oast_callback_count(rec.id))
       end
     end

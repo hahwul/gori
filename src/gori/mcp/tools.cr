@@ -961,6 +961,17 @@ module Gori
         property? truncated = false
         property ended_at_ms : Int64? = nil
         property stop_requested_at_ms : Int64? = nil
+        # Set by `finalize_job` once the runner fiber is out. `status` alone is not "still
+        # running": a non-terminal ErrorEvent or a drain rescue flips it to :error while the
+        # engine keeps sending and reading the project, so `live?` asks this as well.
+        property? finalized = false
+
+        # Still sending: :running, or :error while the runner fiber has not finalized (the
+        # engine outlives a drain error). The one predicate busy, stop, wait and eviction ask.
+        def live? : Bool
+          status == :running || (status == :error && !finalized?)
+        end
+
         getter audit : JobAudit
         getter db_path : String?
 
@@ -1950,7 +1961,7 @@ module Gori
         victims = [] of String
         jobs.each do |key, job|
           break if victims.size >= overflow
-          victims << key if job.status != :running
+          victims << key unless job.live?
         end
         victims.each { |k| jobs.delete(k) }
       end
@@ -1976,6 +1987,7 @@ module Gori
           job.error_msg ||= "job ended without a terminal event"
         end
         job.ended_at_ms ||= Time.utc.to_unix_ms
+        job.finalized = true
       end
 
       # Terminal status for a finished fuzz/mine/discover job. A non-stopped Done whose

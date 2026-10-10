@@ -183,4 +183,40 @@ describe "intercept hold body ceiling" do
       origin.close rescue nil
     end
   end
+
+  # A chunked body declares no size, so this one is only caught once it has run past the
+  # ceiling mid-read: the hold is released and the whole response reaches the client unchanged.
+  it "releases a held chunked response that runs past the ceiling — it streams, and says so" do
+    with_hold_store do |store|
+      ic = Gori::Interceptor.new(Gori::Scope.load(store))
+      ic.toggle
+      ic.set_direction(Gori::Interceptor::Direction::ResponseOnly)
+      seen = Channel(String).new(1)
+      body = "y" * (Gori::Proxy::ClientConn::MAX_REWRITE_BODY + 1)
+      origin_port, origin = start_head_reporting_origin(seen,
+        "HTTP/1.1 200 OK\r\nX-Big: yes\r\nTransfer-Encoding: chunked\r\n\r\n" \
+        "#{body.bytesize.to_s(16)}\r\n#{body}\r\n0\r\n\r\n")
+
+      proxy = Gori::Proxy::Server.new("127.0.0.1", 0, HoldSink.new, interceptor: ic)
+      proxy.start
+
+      client = TCPSocket.new("127.0.0.1", proxy.port)
+      client.read_timeout = 10.seconds
+      client << "GET /download HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"
+      client.flush
+      receive_within(seen, what: "the forwarded request head").should contain("GET /download")
+
+      head = Gori::Proxy::Codec::Http1.read_head(client).not_nil!
+      String.new(head).should contain("X-Big: yes")
+      got, complete = Gori::Proxy::Codec::Body.read_complete(client, Gori::Proxy::Codec::BodyFraming::Chunked, 0_i64)
+      complete.should be_true
+      got.not_nil!.size.should eq(body.bytesize + body.bytesize.to_s(16).size + 4 + 5)
+      ic.pending_count.should eq(0)
+      ic.drain_notices.first.should contain("forwarded UNHELD")
+
+      client.close
+      proxy.stop
+      origin.close rescue nil
+    end
+  end
 end

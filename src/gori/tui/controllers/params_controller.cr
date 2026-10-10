@@ -154,6 +154,14 @@ module Gori::Tui
       run
     end
 
+    # Leaving the project: a scan in flight sees the generation move and returns early, rather
+    # than reading up to MAX_FLOWS flows from a store `Session#close` already closed (which
+    # crystal-db quietly reopens, pinning the WAL past the project's lifetime).
+    def stop_all : Nil
+      @generation += 1
+      @params.scanning = false
+    end
+
     # (Re)scan. Supersedes a scan in flight: its `stop` sees the generation move and it
     # returns early; `drain_build` drops whatever it sends.
     def run : Nil

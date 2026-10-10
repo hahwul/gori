@@ -112,6 +112,12 @@ describe Gori::Export::OpenApi do
     YAML.parse(text).to_json.should eq(doc.to_json)
   end
 
+  # The emitter's default max_nesting (99) failed the whole export on a ~200-byte nested body.
+  it "emits YAML nested past the emitter's default depth" do
+    doc = JSON.parse("[" * 150 + "]" * 150)
+    YAML.parse(OA.to_yaml(doc)).to_json.should eq(doc.to_json)
+  end
+
   it "survives a host and names that are not UTF-8, in both formats" do
     with_store do |store|
       raw = String.new(Bytes[0x61, 0xff])

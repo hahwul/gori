@@ -266,6 +266,19 @@ describe "Gori::Diff no-response sentinel" do
     f.reachable?.should be_false
   end
 
+  # An imported `response_size` near the ends of Int64 raised OverflowError in the midpoint and
+  # the band, failing the whole diff of the project pair.
+  it "compares sizes from an imported row at the ends of Int64 without overflowing" do
+    key = Gori::Diff::Key.new("acme.test", "GET", "/x")
+    a = Gori::Diff::Facts.new(key)
+    a.observe(Gori::Store::EndpointObservation.new(
+      "acme.test", "GET", "/x", 200, nil, 1_i64, Int64::MIN, Int64::MAX, 1_i64, 1_i64, 1_i64))
+    b = record_facts(key, 200, 2_i64)
+    a.size_mid.should_not be_nil
+    # The range itself is the jitter, so its band swallows the other side: no change, no raise.
+    Gori::Diff::Compare.size_changed?(a, b).should be_false
+  end
+
   it "does not report `gone` against a side that never reached the endpoint" do
     diff_store do |a|
       diff_store do |b|

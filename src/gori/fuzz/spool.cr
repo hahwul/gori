@@ -32,6 +32,7 @@ module Gori
         @store = nil.as(Store?)
         @runs = [] of Run
         @cleanup_workers = 0
+        @readers = 0
         @cleanup_cancelled = false
         @closed = false
       end
@@ -42,7 +43,7 @@ module Gori
                 byte_budget : Int64 = BYTE_BUDGET) : Run
         raise Gori::Error.new("fuzz spool is closed") if @closed
         persistence = Persistence.new(store, temporary_meta(meta), initial_status: initial_status)
-        run = Run.new(store, persistence, byte_budget)
+        run = Run.new(self, store, persistence, byte_budget)
         @runs << run
         run
       end
@@ -81,10 +82,13 @@ module Gori
         # reaper batch is still there, and closing SQLite under it raises in a fiber whose
         # only recovery is a log line. The tree is unlinked below either way: POSIX keeps the
         # open files alive until that fiber lets go, and nothing else can reach them.
-        if drained && @cleanup_workers == 0
+        # A reader counts too: `each_result` runs its caller's block inside an open statement,
+        # and a save fiber parks there on the project's queue. Closing SQLite would finalize
+        # that statement under it, and its resume steps a freed one: SIGSEGV, not a raise.
+        if drained && @cleanup_workers == 0 && @readers == 0
           @store.try(&.close)
         else
-          ::Log.warn { "fuzz spool closed while a writer was still running; its database is unlinked, not closed" }
+          ::Log.warn { "fuzz spool closed while a writer or reader was still inside; its database is unlinked, not closed" }
         end
       ensure
         if directory = @directory
@@ -99,7 +103,7 @@ module Gori
         getter accepted_bytes = 0_i64
         getter accepted_rows = 0_i64
 
-        protected def initialize(@store : Store, @persistence : Persistence,
+        protected def initialize(@spool : Spool, @store : Store, @persistence : Persistence,
                                  @byte_budget : Int64 = BYTE_BUDGET)
         end
 
@@ -151,7 +155,19 @@ module Gori
         def each_result(batch_size : Int32 = 1000,
                         &block : Store::FuzzResultRecord ->) : Nil
           raise Gori::Error.new("finish the fuzz spool run before reading it") unless finished?
-          @store.each_fuzz_result(run_id, batch_size, &block)
+          @spool.reading { @store.each_fuzz_result(run_id, batch_size, &block) }
+        end
+      end
+
+      # Held across a whole `each_result`, so `close` sees the reader even after its run has
+      # left `@runs` (`delete`).
+      protected def reading(&) : Nil
+        raise Gori::Error.new("fuzz spool is closed") if @closed
+        @readers += 1
+        begin
+          yield
+        ensure
+          @readers -= 1
         end
       end
 

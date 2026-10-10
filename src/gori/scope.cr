@@ -117,10 +117,13 @@ module Gori
             # below — reporting "no match". On an EXCLUDE rule "no match" means NOT excluded,
             # i.e. the gate fails OPEN, and a peer can dodge a regex exclude by planting one
             # invalid byte in the target. Scrubbing evaluates the rule as written instead.
-            # The rescue stays as defense-in-depth for anything else PCRE2 refuses.
+            # The rescue stays as defense-in-depth for anything else PCRE2 refuses, and fails
+            # CLOSED the same way: a subject long enough to exhaust the JIT stack (a target
+            # padded to tens of KB) must not slip past an exclude, so an exclude that cannot
+            # finish counts as matching, and an include that cannot finish does not.
             r.matches?(url.scrub)
           rescue
-            false
+            exclude?
           end
         else
           false

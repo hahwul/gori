@@ -190,7 +190,7 @@ module Gori
           raw = rs.read(String?)
           next unless raw && raw.includes?("in_reply_to")
           id = begin
-            JSON.parse(raw)["in_reply_to"]?.try(&.as_i64?)
+            JSON.parse(raw).as_h?.try(&.["in_reply_to"]?).try(&.as_i64?)
           rescue JSON::ParseException
             nil
           end

@@ -41,6 +41,13 @@ describe "Gori::ClientHints, against Chromium's unit-test vectors" do
 end
 
 describe "Gori::ClientHints.for_user_agent" do
+  # An unbounded `(?:\.\d+)*` ran out of JIT stack on a version padded to tens of KB and raised
+  # in the sending fiber; a UA no Chrome writes simply gets no hints.
+  it "gives no hints, without raising, for a version padded past any real one" do
+    ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/1" + ".1" * 60_000 + " Safari/537.36"
+    CH.for_user_agent(ua).should be_nil
+  end
+
   it "derives all three from a Chrome UA, seeded and versioned by its own major" do
     CH.for_user_agent(WIN_153).should eq([
       {"sec-ch-ua", ser(153, "Google Chrome", "153")},

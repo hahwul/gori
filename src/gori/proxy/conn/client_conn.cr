@@ -1693,13 +1693,107 @@ module Gori::Proxy
     private def record_streamed_response(sent_resp : Codec::RawResponse, resp_framing : Codec::BodyFraming,
                                          resp_capture : Codec::CaptureBuffer, flow_id : Int64,
                                          ttfb : Int64, started : Time::Instant, *,
-                                         state : Store::FlowState, error : String?) : Nil
+                                         state : Store::FlowState, error : String?,
+                                         advisory : String? = nil) : Nil
       duration = (Time.instant - started).total_microseconds.to_i64
       @sink.on_response(FlowMapper.response(sent_resp,
         flow_id: flow_id, body: resp_framing.none? ? nil : resp_capture.to_slice,
         ttfb_us: ttfb, duration_us: duration,
         body_truncated: resp_capture.truncated?, body_size: resp_capture.total,
-        state: state, error: error, advisory: response_advisory(nil), interims: @interims))
+        state: state, error: error, advisory: response_advisory(advisory), interims: @interims))
+    end
+
+    # Where a response body is buffered for a body rule, a body-scoped extract rule or a hold.
+    # `rewritable_body_size?` turns away a DECLARED length over `MAX_REWRITE_BODY`; a chunked body
+    # declares none, so this catches it mid-read. Up to the ceiling it is an IO::Memory. The write
+    # that would cross it SPILLS instead: the origin's head, the buffered prefix and every later
+    # byte go straight to the client, teed into a capped capture. `Body.stream` keeps running over
+    # the same framing state, so the client gets exactly the bytes the origin sent (P7), as it
+    # would on the streaming path, and gori holds no more than the ceiling (P6).
+    private class SpillBuffer < IO
+      getter? spilled = false
+      property? aborted = false # a raise after the spill (see `buffer_response_body`)
+      getter capture = Codec::CaptureBuffer.new(0)
+
+      def initialize(@mem : IO::Memory, @client : IO, @head : Bytes)
+      end
+
+      def write(slice : Bytes) : Nil
+        unless @spilled
+          return @mem.write(slice) if @mem.bytesize + slice.size <= MAX_REWRITE_BODY
+          @spilled = true
+          prefix = @mem.to_slice
+          @mem = IO::Memory.new(0)
+          @capture = Codec::CaptureBuffer.new(Settings.capture_max)
+          @client.write(@head)
+          @client.write(prefix)
+          @capture.write(prefix)
+        end
+        @client.write(slice)
+        @capture.write(slice)
+      end
+
+      def read(slice : Bytes) : Int32
+        raise IO::Error.new("SpillBuffer is write-only")
+      end
+
+      def flush : Nil
+        @client.flush if @spilled
+      end
+
+      def to_slice : Bytes
+        @mem.to_slice
+      end
+    end
+
+    # Reads a response body into a `SpillBuffer` and says whether it completed. Once it has
+    # spilled, a raise is the client leaving (or the origin resetting) mid-response, which the
+    # streaming path records as Aborted rather than unwinding, so it is reported incomplete here.
+    private def buffer_response_body(upstream : IO, sent_resp_head : Bytes,
+                                     framing : Codec::BodyFraming, len : Int64) : {SpillBuffer, Bool}
+      buf = SpillBuffer.new(Codec::Body.presized_capture(framing, len), @io, sent_resp_head)
+      # tee into a discard sink, not a second IO::Memory — the body is already buffered in
+      # `buf`; a throwaway IO::Memory would hold the whole response a second time.
+      complete = begin
+        stream_body(upstream, buf, framing, len, Codec::DiscardIO.new)
+      rescue ex
+        raise ex unless buf.spilled?
+        buf.aborted = true
+        false
+      end
+      @lf_residue_note = lf_residue_note(upstream) if complete
+      {buf, complete}
+    end
+
+    # The tail of a response whose buffer spilled: it went out under the origin's own head, so
+    # it is recorded and reused exactly as the streaming path would, and a response-body rule
+    # that matched this host says it did not run (the extract rule is told it had no body, as on
+    # the streaming path).
+    private def finish_spilled_response(buf : SpillBuffer, complete : Bool, req : Codec::RawRequest,
+                                        sent_req : Codec::RawRequest, resp : Codec::RawResponse,
+                                        sent_resp_head : Bytes, framing : Codec::BodyFraming,
+                                        flow_id : Int64, host : String, ttfb : Int64,
+                                        started : Time::Instant, extract_ref : ExtractRef?) : Bool
+      sent_resp = Codec::Http1.parse_response_head(sent_resp_head)
+      observe_delivered(extract_ref, sent_resp_head, nil, status: sent_resp.status)
+      advisory = if @rewriter.try(&.rewrites_response_body_for_host?(host))
+                   "Match&Replace was NOT applied to this response body: it ran past the " \
+                   "#{MAX_REWRITE_BODY}-byte ceiling gori buffers a body to rewrite, so it was " \
+                   "forwarded byte-exact as the origin sent it."
+                 end
+      error = if complete
+                nil
+              elsif buf.aborted?
+                "connection closed mid-response"
+              else
+                "upstream closed before response body complete"
+              end
+      record_streamed_response(sent_resp, framing, buf.capture, flow_id, ttfb, started,
+        state: complete ? Store::FlowState::Complete : Store::FlowState::Aborted,
+        error: error, advisory: advisory)
+      update_upstream_reuse(complete && origin_keep_alive?(sent_req, resp, framing))
+      return false unless complete
+      keep_alive?(req, resp, framing)
     end
 
     # The buffered response-body path (no intercept): buffer the whole body, rewrite the entity,
@@ -1722,9 +1816,11 @@ module Gori::Proxy
                                                 resp_framing : Codec::BodyFraming, resp_len : Int64,
                                                 ttfb : Int64, started : Time::Instant,
                                                 extract_ref : ExtractRef? = nil) : Bool
-      buf = Codec::Body.presized_capture(resp_framing, resp_len)
-      resp_complete = stream_body(upstream, buf, resp_framing, resp_len, Codec::DiscardIO.new)
-      @lf_residue_note = lf_residue_note(upstream) if resp_complete
+      buf, resp_complete = buffer_response_body(upstream, sent_resp_head, resp_framing, resp_len)
+      if buf.spilled?
+        return finish_spilled_response(buf, resp_complete, req, sent_req, resp, sent_resp_head,
+          resp_framing, flow_id, host, ttfb, started, extract_ref)
+      end
       rw = @rewriter
       # `live` is false when only a body-scoped EXTRACT rule brought this response here, or
       # when a rewrite rule exists only for another host: no applicable rewrite lost its
@@ -1856,11 +1952,15 @@ module Gori::Proxy
       # Buffer the body, tracking completeness (Codec::Body.read drops it). A
       # truncated/misframed body must NOT leave the upstream parked — its stray
       # unread bytes would become the next reused request's response (desync).
-      buf = Codec::Body.presized_capture(resp_framing, resp_len)
-      # tee into a discard sink, not a second IO::Memory — the body is already buffered in
-      # `buf`; a throwaway IO::Memory would hold the whole response a second time.
-      resp_complete = stream_body(upstream, buf, resp_framing, resp_len, Codec::DiscardIO.new)
-      @lf_residue_note = lf_residue_note(upstream) if resp_complete
+      buf, resp_complete = buffer_response_body(upstream, sent_resp_head, resp_framing, resp_len)
+      if buf.spilled?
+        # Past the hold ceiling mid-read (a chunked body declares no size up front): the hold
+        # fails open exactly as a declared-length one does, and the response already went out.
+        warn_hold_oversize("response", nil)
+        return finish_spilled_response(buf, resp_complete, req, sent_req, resp, sent_resp_head,
+          resp_framing, flow_id, host, ttfb, started,
+          extract_ref_for(sent_req, host, port, scheme, resp.status, flow_id))
+      end
       # `buf` is filled once and never written again, and build_message copies head+body into
       # a fresh buffer, so `buf.to_slice` is a stable view — no defensive dup (which would hold
       # the whole body a second time). Mirrors the non-hold M&R path above.
@@ -3182,16 +3282,17 @@ module Gori::Proxy
     # bound (a per-connection OOM). Above this size the rule no-ops and the body is
     # forwarded byte-exact, exactly as it already does for SSE / compressed / 101 bodies —
     # correctness costs nothing but the rule not applying to a body too big to safely hold.
-    # Only gates KNOWN-length (Content-Length) bodies; a chunked body has no declared size
-    # to check here and still buffers (bounded only by the peer) — capping that streams a
-    # follow-up.
+    # The gate below only sees KNOWN-length (Content-Length) bodies; a chunked RESPONSE body
+    # declares no size, so its buffer spills to the byte-exact stream when it crosses this
+    # mid-read (`SpillBuffer`). A chunked REQUEST body still buffers (bounded only by the
+    # client, the operator's own browser): nothing has gone upstream yet to spill into.
     #
     # The intercept HOLD shares it (`holdable_body_size?`): it buffers a whole entity for the
     # same reason and with the same consequence if it is not bounded.
     MAX_REWRITE_BODY = 16 * 1024 * 1024 # 16 MiB
 
     # Whether a body of this framing/declared-length is small enough to buffer + rewrite.
-    # Chunked/unknown-length has no size to gate on, so it isn't blocked here.
+    # Chunked/unknown-length has no size to gate on, so it isn't blocked here (see above).
     private def rewritable_body_size?(framing : Codec::BodyFraming, len : Int64) : Bool
       !framing.length? || len <= MAX_REWRITE_BODY
     end
@@ -3207,8 +3308,8 @@ module Gori::Proxy
     # the very upload the operator wanted to edit. Reuses the M&R ceiling rather than inventing
     # a second one: both answer "is this entity small enough to hold in memory?".
     #
-    # Only KNOWN-length bodies are gated, exactly as `MAX_REWRITE_BODY` documents — a chunked
-    # body declares no size here and still buffers.
+    # Only KNOWN-length bodies are gated here, exactly as `MAX_REWRITE_BODY` documents — a
+    # chunked response fails open mid-read instead (`SpillBuffer`); a chunked request buffers.
     private def holdable_body_size?(framing : Codec::BodyFraming, len : Int64, direction : String) : Bool
       return true if rewritable_body_size?(framing, len)
       warn_hold_oversize(direction, len)
@@ -3224,10 +3325,12 @@ module Gori::Proxy
     # centre nor stderr — it lands in `~/.gori/gori.log` — so "the operator has to be told" was
     # satisfied by a file nobody watching a hold queue is reading. Same objection
     # `WS::MessageGate#note` already raises for its own two accountings.
-    private def warn_hold_oversize(direction : String, len : Int64) : Nil
+    # `len` is nil for a chunked body caught past the ceiling mid-read (`SpillBuffer`).
+    private def warn_hold_oversize(direction : String, len : Int64?) : Nil
       return if @warned_hold_oversize
       @warned_hold_oversize = true
-      msg = "intercept: a #{direction} body declaring #{len} bytes is over the " \
+      size = len ? "declaring #{len} bytes is over" : "ran past"
+      msg = "intercept: a #{direction} body #{size} the " \
             "#{MAX_REWRITE_BODY}-byte hold ceiling — forwarded UNHELD"
       ::Log.warn { msg }
       @interceptor.try(&.note_unheld(msg))

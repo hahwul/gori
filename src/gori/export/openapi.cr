@@ -329,7 +329,9 @@ module Gori
       # 1.2 reads it back as a string, but a 1.1 reader (PyYAML, SnakeYAML) reads `12:30:00` as
       # 45000, `y`/`n` as booleans and `<<` as a merge key.
       def to_yaml(doc : JSON::Any) : String
-        YAML.build { |y| yaml_node(y, doc) }
+        # The emitter's default `max_nesting` is 99, and a ~170-byte nested JSON body walks
+        # past it (each array level is `oneOf` → branch → `items`); the schema walk caps depth.
+        YAML.build { |y| y.max_nesting = 1024; yaml_node(y, doc) }
       end
 
       private def yaml_node(y : YAML::Builder, v : JSON::Any) : Nil
