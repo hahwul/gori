@@ -531,3 +531,15 @@ describe Gori::Repeater::Plan do
     end
   end
 end
+
+describe "Gori::Repeater::Plan.target_error" do
+  it "refuses a scheme build would refuse, and passes what it dials" do
+    R::Plan.target_error("ftp://x").not_nil!.should contain(%(unsupported target scheme "ftp"))
+    R::Plan.target_error("https://x").should be_nil
+    R::Plan.target_error("wss://x:8443").should be_nil
+  end
+
+  it "leaves an unresolved $NAME to be bound before the send" do
+    R::Plan.target_error("$TARGET_NOT_BOUND_IN_SPEC").should be_nil
+  end
+end

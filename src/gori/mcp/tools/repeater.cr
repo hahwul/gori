@@ -335,6 +335,10 @@ module Gori
           return err("missing 'request' (the raw HTTP request) beside 'target' — " \
                      "or seed from flow_id, issue_id or curl instead", "INVALID_ARGUMENT", field: "request")
         end
+        # Refused at write time, as `send_request{url}` refuses it up front — not at the first send.
+        if why = Repeater::Plan.target_error(target)
+          return err("invalid 'target': #{why}", "INVALID_ARGUMENT", field: "target")
+        end
 
         sni = str(h, "sni")
 
@@ -656,6 +660,10 @@ module Gori
         # mirror create_repeater's invariant — a blank target/request can't be sent.
         return Result.new("target must not be empty", is_error: true) if target.empty?
         return Result.new("request must not be empty", is_error: true) if request.empty?
+        # Only a target this call names: a rename must not fail over the row's stored one.
+        if present?(h, "target") && (why = Repeater::Plan.target_error(target))
+          return err("invalid 'target': #{why}", "INVALID_ARGUMENT", field: "target")
+        end
 
         http2 = bool_arg(h, "http2", existing.http2?)
         auto_cl = bool_arg(h, "auto_content_length", existing.auto_content_length?)
