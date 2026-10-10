@@ -138,4 +138,22 @@ describe "the unattributed-frame reap and retention" do
       store.h2_frames(fresh).size.should eq(0)
     end
   end
+
+  # Retention can reap the row of an idle connection the browser still holds open; the frames it
+  # logs afterwards have no row, so only the unattributed reap reaches them. That reap ran once
+  # per Store and never again.
+  it "reaps frames logged under a connection row a later sweep removed" do
+    h2_store(retention: 2, prune_interval: 1) do |store|
+      idle = store.insert_h2_connection("acme.test", 443, "h2")
+      3.times { |i| store.insert_flow(h2_request("/before#{i}", nil)) }
+      store.flush
+      store.@db.scalar("SELECT COUNT(*) FROM h2_connections WHERE id = ?", idle).as(Int64).should eq(0_i64)
+
+      3.times { |i| store.insert_h2_frame(idle, "out", 1_u8, 0_u8, (i + 1).to_u32, "late#{i}".to_slice) }
+      store.flush
+      2.times { |i| store.insert_flow(h2_request("/after#{i}", nil)) }
+      store.flush
+      store.h2_frames(idle).size.should eq(0)
+    end
+  end
 end

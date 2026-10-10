@@ -1638,7 +1638,11 @@ module Gori
       return unless cutoff = oldest_excess_cutoff(conn, "flows", @retention_flows)
       dropped = 0_i64
       write_transaction(conn) do |c|
-        dropped = Store.delete_flows_through(c, cutoff)
+        dropped, reaped_conns = Store.delete_flows_through(c, cutoff)
+        # A connection row reaped while its browser still holds the socket open (idle, so no
+        # recent frame) keeps logging frames under that id, and nothing selects them but the
+        # unattributed reap. Re-arm it for the next sweep instead of once per Store.
+        @h2_unattributed_reaped = false if reaped_conns
       end
       # Say that history was dropped. A sweep is otherwise completely silent, so a flow the
       # operator looked at an hour ago simply vanishing is indistinguishable from a bug. At most
@@ -1653,8 +1657,9 @@ module Gori
 
     # Delete every flow with `id <= cutoff` (cutoff > 0) and what hangs off it, on `conn` and
     # inside the caller's transaction: the one cascade the retention sweep (`prune`) and
-    # `Compact.prune_old_flows` share. Returns how many flow rows went.
-    protected def self.delete_flows_through(conn : DB::Connection, cutoff : Int64) : Int64
+    # `Compact.prune_old_flows` share. Returns how many flow rows went, and whether any
+    # `h2_connections` row went with them.
+    protected def self.delete_flows_through(conn : DB::Connection, cutoff : Int64) : {Int64, Bool}
       # NOTE (known limitation): a WebSocket flow still streaming frames after `retention_flows`
       # newer flows push its id below the cutoff is reaped here mid-stream, which also stops
       # Probe WS scanning on it. A liveness guard like the h2 one below is the fix, but it must
@@ -1691,7 +1696,7 @@ module Gori
               "AND id NOT IN (SELECT conn_id FROM h2_frames WHERE created_at >= ?)"
       conn.exec("DELETE FROM h2_frames WHERE conn_id IN (SELECT id FROM h2_connections WHERE #{stale})", oldest)
       conn.exec("DELETE FROM h2_connections WHERE #{stale}", oldest)
-      dropped
+      {dropped, conn.scalar("SELECT changes()").as(Int64) > 0}
     end
 
     # Frames whose connection row does not exist at all. The guard in `insert_h2_frame` stops new
