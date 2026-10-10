@@ -731,6 +731,7 @@ module Gori
       @inserts_since_prune = 0
       @events_since_trim = 0
       @h2_unattributed_reaped = false # writer-fiber-only; see `prune`
+      @reaped_h2_conns = [] of Int64  # writer-fiber-only; see `prune`
       # Writer-fiber-only hint: does `flows.fts_dirty = 1` possibly have rows? Starts true so a
       # db reopened with a backlog (a killed process, or a batch dropped under saturation) gets
       # drained without waiting for a capture to hint at it; set false the moment an indexing
@@ -1620,6 +1621,7 @@ module Gori
       # `insert_h2_frame` only refuses id <= 0); `clear_flows` now keeps those rows. Retried on
       # the next sweep if it failed.
       @h2_unattributed_reaped = reap_unattributed_h2_frames(conn) unless @h2_unattributed_reaped
+      reap_watched_h2_frames(conn)
       # Each of the three sweeps below runs on the SAME connection, and the suspect flag is only
       # read back when the loop next asks for one — i.e. after this method returns. So a sweep
       # that has already condemned this connection must stop rather than let the next two burn a
@@ -1640,9 +1642,14 @@ module Gori
       write_transaction(conn) do |c|
         dropped, reaped_conns = Store.delete_flows_through(c, cutoff)
         # A connection row reaped while its browser still holds the socket open (idle, so no
-        # recent frame) keeps logging frames under that id, and nothing selects them but the
-        # unattributed reap. Re-arm it for the next sweep instead of once per Store.
-        @h2_unattributed_reaped = false if reaped_conns
+        # recent frame) keeps logging frames under that id, which nothing else selects. Watched
+        # by id and reaped through the conn_id index on later sweeps — not by re-arming the
+        # full-table unattributed scan, which at the retention cap would run on nearly every
+        # sweep and stall the writer (P6).
+        unless reaped_conns.empty?
+          @reaped_h2_conns.concat(reaped_conns)
+          @reaped_h2_conns.shift(@reaped_h2_conns.size - REAPED_H2_WATCH) if @reaped_h2_conns.size > REAPED_H2_WATCH
+        end
       end
       # Say that history was dropped. A sweep is otherwise completely silent, so a flow the
       # operator looked at an hour ago simply vanishing is indistinguishable from a bug. At most
@@ -1657,9 +1664,9 @@ module Gori
 
     # Delete every flow with `id <= cutoff` (cutoff > 0) and what hangs off it, on `conn` and
     # inside the caller's transaction: the one cascade the retention sweep (`prune`) and
-    # `Compact.prune_old_flows` share. Returns how many flow rows went, and whether any
-    # `h2_connections` row went with them.
-    protected def self.delete_flows_through(conn : DB::Connection, cutoff : Int64) : {Int64, Bool}
+    # `Compact.prune_old_flows` share. Returns how many flow rows went, and the ids of the
+    # `h2_connections` rows that went with them.
+    protected def self.delete_flows_through(conn : DB::Connection, cutoff : Int64) : {Int64, Array(Int64)}
       # NOTE (known limitation): a WebSocket flow still streaming frames after `retention_flows`
       # newer flows push its id below the cutoff is reaped here mid-stream, which also stops
       # Probe WS scanning on it. A liveness guard like the h2 one below is the fix, but it must
@@ -1695,7 +1702,9 @@ module Gori
       stale = "id NOT IN (SELECT h2_conn_id FROM flows WHERE h2_conn_id IS NOT NULL) " \
               "AND id NOT IN (SELECT conn_id FROM h2_frames WHERE created_at >= ?)"
       conn.exec("DELETE FROM h2_frames WHERE conn_id IN (SELECT id FROM h2_connections WHERE #{stale})", oldest)
-      {dropped, conn.exec("DELETE FROM h2_connections WHERE #{stale}", oldest).rows_affected > 0}
+      reaped = conn.query_all("SELECT id FROM h2_connections WHERE #{stale}", oldest, as: Int64)
+      conn.exec("DELETE FROM h2_connections WHERE #{stale}", oldest) unless reaped.empty?
+      {dropped, reaped}
     end
 
     # Frames whose connection row does not exist at all. The guard in `insert_h2_frame` stops new
@@ -1708,6 +1717,19 @@ module Gori
     # rescue, like the sweep it runs ahead of: this must never cost the batch that just committed.
     #
     # Answers whether the reap ran, so a failed one is retried on the next sweep.
+    # How many reaped connection ids `prune` keeps watching for late frames.
+    REAPED_H2_WATCH = 256
+
+    # Frames logged under a connection a retention sweep already reaped (see `prune`). One
+    # indexed DELETE over at most REAPED_H2_WATCH ids; a failure is left for the next sweep.
+    private def reap_watched_h2_frames(conn : DB::Connection) : Nil
+      return if @reaped_h2_conns.empty?
+      conn.exec("DELETE FROM h2_frames WHERE conn_id IN (#{@reaped_h2_conns.join(",")})")
+    rescue ex
+      ::Log.warn { "reaped h2-frame cleanup failed (will retry): #{ex.message}" }
+      mark_writer_conn_suspect
+    end
+
     private def reap_unattributed_h2_frames(conn : DB::Connection) : Bool
       conn.exec("DELETE FROM h2_frames WHERE conn_id NOT IN (SELECT id FROM h2_connections)")
       true
