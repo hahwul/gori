@@ -21,6 +21,24 @@ describe Gori::Export::Curl do
       cmd.should_not contain("Content-Length")
     end
 
+    # curl sends no length at all for a bodiless POST, which some servers answer 411.
+    it "keeps a captured Content-Length: 0 on a bodiless POST" do
+      cmd = curl_of("POST /logout HTTP/1.1\r\nHost: example.com\r\nContent-Length: 0\r\n\r\n", "https://example.com")
+      cmd.should contain("-H 'Content-Length: 0'")
+      curl_of("GET / HTTP/1.1\r\nHost: example.com\r\nContent-Length: 0\r\n\r\n", "https://example.com")
+        .should_not contain("Content-Length")
+    end
+
+    # A raw `#` and the asterisk form survive no URL parser; curl's override sends them as is.
+    it "sends a target no URL can carry through --request-target" do
+      curl_of("GET /admin#/../x.css?a=b HTTP/1.1\r\nHost: example.com\r\n\r\n", "https://example.com")
+        .should contain("--request-target '/admin#/../x.css?a=b'")
+      curl_of("OPTIONS * HTTP/1.1\r\nHost: example.com\r\n\r\n", "https://example.com")
+        .should contain("--request-target '*'")
+      curl_of("GET /a?b=1 HTTP/1.1\r\nHost: example.com\r\n\r\n", "https://example.com")
+        .should_not contain("--request-target")
+    end
+
     it "keeps the query string on the URL and does not re-emit it anywhere else" do
       cmd = curl_of("GET /search?q=a%20b&page=2 HTTP/1.1\r\nHost: h.test\r\n\r\n", "https://h.test")
       cmd.should contain("curl 'https://h.test/search?q=a%20b&page=2'")

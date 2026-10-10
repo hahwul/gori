@@ -35,12 +35,14 @@ module Gori
         # A NUL in the method truncates the positional argument (and a non-UTF-8 byte aborts the
         # whole command); drop it and let httpie infer the method — GET, or POST when a body is
         # present — the way `Curl.nul_method_note` drops -X.
+        # httpie normalizes `/a/../b` away, as curl does without its own `--path-as-is`.
+        http = Curl.dot_segments?(url) ? "http --path-as-is" : "http"
         if carriable?(method)
-          out = ["http #{Curl.shell_quote(method)} #{Curl.shell_quote(url)}"]
+          out = ["#{http} #{Curl.shell_quote(method)} #{Curl.shell_quote(url)}"]
         else
           notes << "# method omitted: it holds #{uncarriable(method)} — httpie will infer " \
                    "#{s.body.empty? ? "GET" : "POST"} instead. Read the request line with --format raw"
-          out = ["http #{Curl.shell_quote(url)}"]
+          out = ["#{http} #{Curl.shell_quote(url)}"]
         end
         s.headers.each do |(n, v)|
           # A NUL truncates a shell argument (zsh silently, bash by refusing the line) and a byte
