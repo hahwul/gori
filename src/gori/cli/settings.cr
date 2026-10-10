@@ -105,6 +105,7 @@ module Gori::CLI
       # The second axis (#842). Says "can", not "does": whether THIS install's section holds a
       # command is a question about its contents, which the export/import ends answer per entry.
       notes << "can carry commands" if Settings::COMMAND_SECTIONS.includes?(k)
+      notes << "gated on import (password_env)" if k == "upstream_rules"
       notes << "not set — at its default" unless present.includes?(k)
       puts notes.empty? ? k : "#{k}  (#{notes.join("; ")})"
     end
@@ -167,7 +168,7 @@ module Gori::CLI
   # stake is the one thing that differs between the two ends of it.
   private def self.exported_commands_note(found : Array(Settings::CommandEntry)) : String
     "#{run_a_command(found)} (#{command_breakdown(found)}) — " \
-    "whoever imports it runs #{found.size == 1 ? "it" : "them"} with their own privileges"
+    "whoever imports it #{found.all?(&.runs?) ? "runs" : "uses"} #{found.size == 1 ? "it" : "them"} with their own privileges"
   end
 
   # "N entries in this profile run(s)", the one clause every surface here opens with. Spelled
