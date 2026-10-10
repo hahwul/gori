@@ -1247,7 +1247,7 @@ module Gori::Tui
       content = case format
                 when :json  then Issues::Export.json(issues, store)
                 when :sarif then Issues::Export.sarif(issues, store, @host.session.project.name)
-                else             Issues::Export.markdown(issues, store, @host.session.project.name)
+                else             Issues::Export.markdown(issues, store, @host.session.project.name, Redact::Policy.ambient(store))
                 end
       File.write(path, content.ends_with?('\n') ? content : "#{content}\n")
       msg = "exported #{Gori.plural(issues.size, "issue")} → #{path}"

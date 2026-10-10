@@ -2,6 +2,7 @@ require "json"
 require "./store"
 require "./links"
 require "./proxy/codec/content_decode"
+require "./redact/wire"
 require "./issues_export/sarif" # Export.sarif — the SARIF 2.1.0 sibling of .markdown/.json
 
 module Gori
@@ -14,12 +15,18 @@ module Gori
       # Per-side cap on evidence bytes embedded in the Markdown report.
       EVIDENCE_CAP = 64 * 1024
 
-      def self.markdown(issues : Array(Store::Issue), store : Store, project_name : String) : String
+      # `matcher` is the project's redaction profile (`Redact::Policy.ambient`): the report embeds
+      # each linked flow's request and response, and a shared report is the export that profile
+      # exists for — `show`, History and MCP already sanitize the same bodies through it.
+      def self.markdown(issues : Array(Store::Issue), store : Store, project_name : String,
+                        matcher : Redact::Matcher? = nil) : String
         String.build do |io|
           io << "# Issues — " << project_name << "\n\n"
           io << "_" << issues.size << " issues · exported " << Time.local.to_s("%Y-%m-%d %H:%M") << "_\n"
           issues.each do |f|
-            append_issue(io, f, f.flow_id.try { |fid| store.get_flow(fid) }, resolve_issue_links(f, store),
+            flow = f.flow_id.try { |fid| store.get_flow(fid) }
+            flow = Redact::Wire.flow(flow, matcher)[0] if flow && matcher
+            append_issue(io, f, flow, resolve_issue_links(f, store),
               frozen: store.issue_evidence(f.id))
           end
         end

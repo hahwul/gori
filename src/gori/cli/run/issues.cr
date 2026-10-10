@@ -71,7 +71,7 @@ module Gori
           content =
             case format
             when :json     then Issues::Export.json(issues, store)
-            when :markdown then Issues::Export.markdown(issues, store, project.name)
+            when :markdown then Issues::Export.markdown(issues, store, project.name, Redact::Policy.ambient(store))
             when :sarif    then Issues::Export.sarif(issues, store, project.name, include_sensitive)
             else                issues_text(issues)
             end

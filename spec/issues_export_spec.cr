@@ -177,6 +177,30 @@ describe Gori::Issues::Export do
       end
     end
 
+    # The project's redaction profile reaches the embedded evidence, as it does `show` and MCP.
+    it "sanitizes the embedded bodies through the redaction matcher it is handed" do
+      with_store do |store|
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+          method: "POST", target: "/login", http_version: "HTTP/1.1",
+          head: "POST /login HTTP/1.1\r\nHost: h.test\r\nContent-Type: application/json\r\n\r\n".to_slice,
+          body: %({"password":"hunter2"}).to_slice, source: Gori::FlowSource::Kind::Proxy))
+        store.insert_issue("weak login", Gori::Store::Severity::High, "h.test", id)
+
+        Gori::Issues::Export.markdown(store.issues, store, "proj").should contain("hunter2")
+        salt = Gori::Redact.salt
+        Gori::Redact.salt = "spec-salt"
+        begin
+          md = Gori::Issues::Export.markdown(store.issues, store, "proj",
+            Gori::Redact::Matcher.new(Gori::Redact::DEFAULT_PROFILE))
+        ensure
+          Gori::Redact.salt = salt
+        end
+        md.should_not contain("hunter2")
+        md.should contain("POST /login HTTP/1.1")
+      end
+    end
+
     it "keeps an attacker-controlled body (``` + headings) inside its code fence" do
       with_store do |store|
         id = store.insert_flow(Gori::Store::CapturedRequest.new(
