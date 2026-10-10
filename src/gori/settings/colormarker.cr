@@ -60,10 +60,13 @@ module Gori::Settings
 
   # Lowercase, whitespace-trimmed identity for a custom colour name. A blank name, or one that
   # collides with a built-in word, is not a legal custom name — the two would be ambiguous in a
-  # rule's `color` field and in the picker.
+  # rule's `color` field and in the picker. Neither is one carrying a C0 control or DEL: the name
+  # is printed raw by `gori run colormarker colors` and the picker, so an ESC in it drove the
+  # operator's terminal (the same refusal as `SavedViews.control_char?`).
   def self.normalize_color_name(s : String) : String?
     n = s.strip.downcase
     return nil if n.empty? || COLORMARKER_COLORS.includes?(n)
+    return nil if n.each_char.any? { |c| c.ord < 0x20 || c.ord == 0x7f }
     n
   end
 
@@ -273,7 +276,7 @@ module Gori::Settings
   def self.add_colormarker_color(name : String, hex : String) : String?
     reload_colormarker_from_disk
     n = normalize_color_name(name)
-    return "name can't be blank or a built-in colour (#{COLORMARKER_COLORS.join(", ")})" unless n
+    return "name can't be blank, hold control characters, or be a built-in colour (#{COLORMARKER_COLORS.join(", ")})" unless n
     return "a colour named “#{n}” already exists" if colormarker_colors.any? { |c| c.name == n }
     h = normalize_hex(hex)
     return "invalid hex — use #rrggbb" unless h
@@ -297,7 +300,7 @@ module Gori::Settings
     old = old_name.strip.downcase
     return "no colour named “#{old}”" unless colormarker_colors.any? { |c| c.name == old }
     n = normalize_color_name(name)
-    return "name can't be blank or a built-in colour (#{COLORMARKER_COLORS.join(", ")})" unless n
+    return "name can't be blank, hold control characters, or be a built-in colour (#{COLORMARKER_COLORS.join(", ")})" unless n
     return "a colour named “#{n}” already exists" if n != old && colormarker_colors.any? { |c| c.name == n }
     h = normalize_hex(hex)
     return "invalid hex — use #rrggbb" unless h
