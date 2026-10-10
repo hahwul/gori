@@ -223,3 +223,15 @@ describe "CLI::Output JSON emitters — no display projection" do
     JSON.parse(doc)
   end
 end
+
+# A crawled href is page-authored; Discover's encoder leaves C1 controls and bidi overrides alone.
+describe "Gori::CLI::Output.discover_row_text" do
+  it "scrubs terminal controls out of a crawled URL" do
+    f = Gori::Discover::Finding.new("http://d.test/a\u202Egpj.exe\u009B2J", "GET", 200, 4_i64, "text/html",
+      Gori::Discover::Source::Crawled, 1, 0.95, nil)
+    line = Gori::CLI::Output.discover_row_text(f)
+    line.should_not contain('‮')
+    line.should_not contain('\u009B')
+    line.should contain("http://d.test/a")
+  end
+end

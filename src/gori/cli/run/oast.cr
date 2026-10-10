@@ -4,6 +4,13 @@
 module Gori
   module CLI
     module Run
+      # One text line per callback. Every field but the timestamp comes from whoever called the
+      # payload (or the OAST server relaying it), so it is scrubbed before it reaches the TTY.
+      private def self.oast_interaction_line(i : Oast::Interaction) : String
+        "#{i.at.to_rfc3339}  #{Output.term_safe(i.protocol)}\t#{Output.term_safe(i.method || "-")}\t" \
+        "#{Output.term_safe(i.source_ip || "-")}\t#{Output.term_safe(i.full_id)}"
+      end
+
       # `gori run oast` — headless out-of-band listener (interactsh & friends). `listen` is
       # store-free and ad-hoc: register a payload, print it, then stream decrypted callbacks.
       # `providers` and the session verbs (`list`/`resume`/`release`) read the project store.
@@ -530,7 +537,7 @@ module Gori
           interactions = begin
             bound.provider.poll(http, bound.session)
           rescue ex
-            err.puts "poll error: #{ex.message}"
+            err.puts "poll error: #{Output.term_safe(ex.message.to_s)}"
             once_failed = true
             nil
           end
@@ -562,7 +569,7 @@ module Gori
         if json
           io.puts Oast::Present.interaction(i, label).to_json
         else
-          io.puts "#{i.at.to_rfc3339}  #{i.protocol}\t#{i.method || "-"}\t#{i.source_ip || "-"}\t#{i.full_id}"
+          io.puts oast_interaction_line(i)
         end
         io.flush
       end
@@ -884,7 +891,7 @@ module Gori
             interactions = begin
               prov.poll(http, session)
             rescue ex
-              STDERR.puts "poll error: #{ex.message}"
+              STDERR.puts "poll error: #{Output.term_safe(ex.message.to_s)}"
               once_failed = true
               nil
             end
@@ -896,7 +903,7 @@ module Gori
                 if json
                   puts Oast::Present.interaction(i, kind.label).to_json
                 else
-                  puts "#{i.at.to_rfc3339}  #{i.protocol}\t#{i.method || "-"}\t#{i.source_ip || "-"}\t#{i.full_id}"
+                  puts oast_interaction_line(i)
                 end
                 STDOUT.flush
               end
