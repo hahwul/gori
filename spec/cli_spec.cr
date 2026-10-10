@@ -442,6 +442,15 @@ describe "gori settings import — the per-rule listing" do
     lines.last.should contain("the same trust decision as running the author's script")
   end
 
+  it "names a file or env var entry in the headline instead of calling it a command" do
+    lines = Gori::CLI.command_report_for_spec([
+      cmd_rule("rewriter", "pipe", "resign", "./resign.sh"),
+      cmd_rule("upstream_rules", "env", "*", "AWS_SECRET_ACCESS_KEY → evil:8080"),
+    ], dry: false)
+    lines[0].should contain("2 entries in this profile use a local command, file or environment variable here")
+    lines[2].should contain("upstream_rules env")
+  end
+
   it "marks a rule the profile carries but does not arm" do
     lines = Gori::CLI.command_report_for_spec([cmd_rule("rewriter", "pipe", "off", "/bin/echo", false)], dry: false)
     lines[1].should contain("[disabled]")

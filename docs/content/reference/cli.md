@@ -1923,7 +1923,7 @@ A section marked *not set* is still a valid name for `--sections`: exporting it 
 | `--sections a,b` | both | Comma-separated section names; at least one. Export defaults to everything except secret-bearing sections; import defaults to every section in the file |
 | `-o`, `--out FILE` | export | Write to a file instead of stdout |
 | `--dry-run` | import | Print which sections would be applied, then exit without writing |
-| `--allow-commands` | import | Apply rules that run an external command. Required when the profile carries one; without it the import is refused and nothing is written |
+| `--allow-commands` | import | Apply rules that run an external command, serve a local file, or send an environment variable to a proxy. Required when the profile carries one; without it the import is refused and nothing is written |
 | `--json` | tls-fingerprint | Emit the report as JSON, always including the decomposed JA3 string and `ja4_r` |
 
 A section you do not select, or that the profile does not carry, is left **exactly as it was**. That is the guarantee `--sections` is choosing between. Within a section the profile *does* carry:
@@ -1958,6 +1958,8 @@ Five sections can hold a **command** rather than data. They export like any othe
 | `editor` | `command` | argv. Runs on `gori settings --edit` and the TUI's `^E` |
 
 The first three are [process hooks](/guide/scripting/#process-hooks). `statusline` is the sharpest of the five: it is a full shell rather than an argv exec, it carries its own `enabled` in the same section so a profile arms it outright, and it fires on a timer with no traffic needed. An `editor` command is only reported when the profile sets one; an empty value means gori falls through to your own `$VISUAL`/`$EDITOR`/`vi`.
+
+Two more shapes run no command but are listed and gated the same way, as `env` and `file` rows: an `upstream_rules` entry with a `password_env` (gori reads that variable on your machine and sends it to the proxy the profile names), and a `rewriter` short-circuit with a `body_file` (it serves a local file, or with `respond: dir` a directory, to pages on the matched host).
 
 `export` counts them on stderr, leaving the profile on stdout clean:
 

@@ -1915,7 +1915,7 @@ rewriter  (can carry commands)
 | `--sections a,b` | 공통 | 쉼표로 구분한 섹션 이름, 최소 하나. export 기본값은 비밀을 담은 섹션을 제외한 전부, import 기본값은 파일에 있는 전부 |
 | `-o`, `--out FILE` | export | stdout 대신 파일로 기록 |
 | `--dry-run` | import | 적용될 섹션만 출력하고 아무것도 쓰지 않고 종료 |
-| `--allow-commands` | import | 외부 명령을 실행하는 룰을 적용합니다. 프로필이 그런 룰을 담고 있으면 필수입니다. 없으면 import는 거부되고 아무것도 쓰이지 않습니다 |
+| `--allow-commands` | import | 외부 명령을 실행하거나, 로컬 파일을 제공하거나, 환경 변수를 프록시로 보내는 룰을 적용합니다. 프로필이 그런 룰을 담고 있으면 필수입니다. 없으면 import는 거부되고 아무것도 쓰이지 않습니다 |
 | `--json` | tls-fingerprint | 리포트를 JSON으로 출력. 분해된 JA3 문자열과 `ja4_r`가 항상 포함됩니다 |
 
 선택하지 않았거나 프로필에 없는 섹션은 **그대로 남습니다**. `--sections`가 고르는 것이 바로 이 경계입니다. 프로필이 실제로 담고 있는 섹션 안에서는:
@@ -1950,6 +1950,8 @@ export가 실제로 그런 섹션을 담게 되면 `-o FILE`은 `0600`으로 생
 | `editor` | `command` | argv. `gori settings --edit`와 TUI의 `^E`에서 실행 |
 
 앞의 셋은 [프로세스 훅](/ko/guide/scripting/#process-hooks)입니다. 다섯 중 가장 날카로운 건 `statusline`입니다. argv exec이 아니라 완전한 셸이고, 같은 섹션에 자기 `enabled`를 들고 있어 프로필 하나로 바로 무장되며, 트래픽 없이 타이머만으로 실행됩니다. `editor`는 프로필이 값을 지정했을 때만 보고합니다. 비어 있으면 gori는 받는 쪽의 `$VISUAL`/`$EDITOR`/`vi`로 넘어갑니다.
+
+명령을 실행하지는 않지만 같은 방식으로 나열되고 막히는 모양이 둘 더 있으며, `env`와 `file` 행으로 표시됩니다. `password_env`가 있는 `upstream_rules` 항목(gori가 내 머신에서 그 변수를 읽어 프로필이 지정한 프록시로 보냅니다)과 `body_file`이 있는 `rewriter` short-circuit(매칭된 호스트의 페이지에 로컬 파일을, `respond: dir`이면 디렉터리를 제공합니다)입니다.
 
 `export`는 개수를 stderr로 알리고, stdout의 프로필은 깨끗하게 둡니다:
 

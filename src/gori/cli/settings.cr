@@ -166,7 +166,7 @@ module Gori::CLI
   # "with your privileges": the profile is leaving this machine, and whose privileges are at
   # stake is the one thing that differs between the two ends of it.
   private def self.exported_commands_note(found : Array(Settings::CommandEntry)) : String
-    "#{run_a_command(found.size)} a local command (#{command_breakdown(found)}) — " \
+    "#{run_a_command(found)} (#{command_breakdown(found)}) — " \
     "whoever imports it runs #{found.size == 1 ? "it" : "them"} with their own privileges"
   end
 
@@ -174,9 +174,17 @@ module Gori::CLI
   # once so a reword does not have to be made in three places and kept in step by three
   # separate assertions. "entries", not "rules": two of the five shapes are scalar settings
   # (`statusline.command`, `editor.command`), not rows in a rule table.
-  private def self.run_a_command(count : Int32) : String
-    one = count == 1
-    "#{count} #{one ? "entry" : "entries"} in this profile #{one ? "runs" : "run"}"
+  private def self.run_a_command(found : Array(Settings::CommandEntry)) : String
+    one = found.size == 1
+    "#{found.size} #{one ? "entry" : "entries"} in this profile #{uses_what(found, one)}"
+  end
+
+  # The verb and its object. A profile whose gated entries all run a command says exactly that;
+  # one carrying a `Settings::LOCAL_READ_KINDS` entry (a `password_env`, a `body_file` stub)
+  # names the wider set, since "runs a local command" would misdescribe the row it heads.
+  private def self.uses_what(found : Array(Settings::CommandEntry), one : Bool) : String
+    return "#{one ? "runs" : "run"} a local command" if found.all?(&.runs?)
+    "#{one ? "uses" : "use"} a local command, file or environment variable"
   end
 
   # "2 rewriter pipe, 1 statusline sh -c". Grouped by {section, kind} and therefore emitted in
@@ -288,7 +296,7 @@ module Gori::CLI
       p.banner = "Usage: gori settings import FILE [--sections a,b] [--dry-run] [--allow-commands]"
       p.on("--sections=LIST", "Comma-separated top-level sections to apply (default: every section in FILE)") { |v| sections = split_sections("import", v) }
       p.on("--dry-run", "Print which sections would be applied, then exit without writing") { dry = true }
-      p.on("--allow-commands", "Apply rules that run an external command (required when the profile carries one)") { allow_commands = true }
+      p.on("--allow-commands", "Apply rules that run an external command, serve a local file or send an env var to a proxy (required when the profile carries one)") { allow_commands = true }
     end
     # Same leftovers as every other verb, read as FILENAMES instead of refused — `--` carries
     # its POSIX meaning here. See `stray_args` for both halves of what dropping its run cost.
@@ -655,7 +663,7 @@ module Gori::CLI
     # steps the command beside it out of line, in a listing read before a command is armed.
     shape_w = rows.max_of { |(shape, _, _, _)| Output.cell_width(shape) }
     name_w = rows.max_of { |(_, name, _, _)| Output.cell_width(name) }
-    lines = ["#{run_a_command(found.size)} a local command here, with your privileges:"]
+    lines = ["#{run_a_command(found)} here, with your privileges:"]
     rows.each do |(shape, name, command, enabled)|
       lines << "  #{Output.pad(shape, shape_w)}  #{Output.pad(name, name_w)}  #{command}#{"  [disabled]" unless enabled}"
     end
@@ -714,7 +722,7 @@ module Gori::CLI
     return if allowed || found.empty?
     one = found.size == 1
     abort "gori settings import: refused — the #{found.size} #{one ? "entry" : "entries"} listed " \
-          "above run#{"s" if one} a local command with your privileges. Read " \
+          "above #{uses_what(found, one)} with your privileges. Read " \
           "#{one ? "it" : "them"}, then pass --allow-commands. Nothing was written."
   end
 

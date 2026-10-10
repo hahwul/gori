@@ -1314,10 +1314,25 @@ module Gori
     # itself. The surfaces render this; they do not each re-derive it.
     record CommandEntry,
       section : String, # the top-level key it lands under — also what `--sections` selects on
-      kind : String,    # HOW it runs: "pipe" | "exec" (argv, no shell) | "sh -c" (a shell)
+      kind : String,    # HOW it runs: "pipe" | "exec" (argv, no shell) | "sh -c" (a shell) | LOCAL_READ_KINDS
       name : String,    # the rule's label, or the field name for a scalar section
       command : String, # the command, VERBATIM as the profile spells it (`$KEY` unexpanded)
-      enabled : Bool    # false = carried, but inert until someone arms it
+      enabled : Bool do # false = carried, but inert until someone arms it
+      # False for an entry that runs nothing but reads this machine for the profile — see
+      # LOCAL_READ_KINDS. It rides the same gate; only the wording names it differently.
+      def runs? : Bool
+        !LOCAL_READ_KINDS.includes?(kind)
+      end
+    end
+
+    # Two shapes run no command but are the same trust decision, so they ride the same gate:
+    #
+    #   env   an `upstream_rules` entry's `password_env` — gori reads that variable from THIS
+    #         machine and sends it as `Proxy-Authorization` to the proxy the profile names
+    #   file  a `rewriter` short-circuit with a `body_file` — it serves a local file (or, with
+    #         `respond: dir`, a whole directory) to any page on the matched host. A project
+    #         archive imports these disabled for the same reason (`disabled_body_file_stubs`).
+    LOCAL_READ_KINDS = {"env", "file"}
 
     # Every command-carrying entry in `root`, over the sections `only` selects (nil = every one
     # present in the document).
@@ -1354,15 +1369,16 @@ module Gori
     def self.command_entries(root : JSON::Any, only : Array(String)? = nil) : Array(CommandEntry)
       acc = [] of CommandEntry
       if doc = root.as_h?
-        COMMAND_SECTIONS.each do |section|
+        (COMMAND_SECTIONS + ["upstream_rules"]).each do |section|
           next unless only.nil? || only.includes?(section)
           next unless node = doc[section]?
           case section
-          when "rewriter"   then rewriter_command_entries(node, acc)
-          when "scan_rules" then scan_command_entries(node, acc)
-          when "decoder"    then decoder_command_entries(node, acc)
-          when "statusline" then statusline_command_entries(node, acc)
-          when "editor"     then editor_command_entries(node, acc)
+          when "upstream_rules" then upstream_password_entries(node, acc)
+          when "rewriter"       then rewriter_command_entries(node, acc)
+          when "scan_rules"     then scan_command_entries(node, acc)
+          when "decoder"        then decoder_command_entries(node, acc)
+          when "statusline"     then statusline_command_entries(node, acc)
+          when "editor"         then editor_command_entries(node, acc)
           end
         end
       end
@@ -1380,6 +1396,18 @@ module Gori
       parse_rewriter_rules(raw).each do |r|
         cmd = r.command.presence
         acc << CommandEntry.new("rewriter", r.op, r.name, cmd, r.enabled) if cmd
+        if Store::RuleOp.from_label?(r.op) == Store::RuleOp::ShortCircuit && !r.body_file.empty?
+          acc << CommandEntry.new("rewriter", "file", r.name, r.body_file, r.enabled)
+        end
+      end
+    end
+
+    # `upstream_rules`: one entry per rule naming a `password_env` (see LOCAL_READ_KINDS). A
+    # rule has no enabled flag — it routes the moment it lands.
+    private def self.upstream_password_entries(node : JSON::Any, acc : Array(CommandEntry)) : Nil
+      parse_upstream_rules(node)[0].try &.each do |r|
+        next if r.password_env.empty?
+        acc << CommandEntry.new("upstream_rules", "env", r.host, "#{r.password_env} → #{r.addr}", true)
       end
     end
 
