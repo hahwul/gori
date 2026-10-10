@@ -372,11 +372,13 @@ module Gori
         Gori::Url.dot_segments?(rest.byte_slice(slash))
       end
 
-      # The protocol flag for a capture whose request line says HTTP/2, else nil. curl
-      # negotiates h2 over TLS through ALPN (`--http2`), but cleartext h2c has no negotiation
-      # to do — it must be asserted up front, and `--http2` alone would send an h1 request to a
-      # server that only speaks h2c. HTTP/1.x needs nothing: it is curl's default.
+      # The protocol flag for a capture whose request line says HTTP/2 or HTTP/1.0, else nil.
+      # curl negotiates h2 over TLS through ALPN (`--http2`), but cleartext h2c has no
+      # negotiation to do — it must be asserted up front, and `--http2` alone would send an h1
+      # request to a server that only speaks h2c. HTTP/1.1 needs nothing: it is curl's
+      # default, and 1.0 is not, so a 1.0 capture replayed as 1.1 without `--http1.0`.
       private def self.version_flag(version : String, url : String) : String?
+        return "--http1.0" if version.upcase == "HTTP/1.0"
         return nil unless version.upcase == "HTTP/2"
         url.starts_with?("https://") ? "--http2" : "--http2-prior-knowledge"
       end
