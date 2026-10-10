@@ -268,13 +268,15 @@ module Gori::Proxy::WS
     # so by the time this runs the queue is normally already empty; what reaches here is the
     # residue of a decision that raced the teardown.
     #
-    # ... unless this direction ended FIRST: its pump's `ensure` runs before `Relay.run` has
+    # ... unless this direction ended FIRST: its pump's teardown runs before `Relay.run` has
     # settled anything. So the bounded `settle` runs here as well, before the latch — a single
     # `fail_open_locked` skips a slot whose decision is already on its channel (its wait fiber
     # owns it), and latching `@closed` straight after lost that decision and every message
     # queued behind it.
-    def close : Nil
-      settle("the socket closed with the message still held")
+    # `settle_first: false` is the raising path: the yield loop must not run while an
+    # exception unwinds (see `Relay.run_direction`).
+    def close(settle_first : Bool = true) : Nil
+      settle("the socket closed with the message still held") if settle_first
       slots = @mutex.synchronize do
         fail_open_locked("the socket closed with the message still held")
         q = @queue
