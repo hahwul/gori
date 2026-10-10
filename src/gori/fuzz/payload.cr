@@ -101,7 +101,9 @@ module Gori::Fuzz
       unless @counted
         ensure_readable
         n = 0_i64
-        File.each_line(@path) { n += 1 }
+        # Yields every 64Ki lines: counting a multi-GB list on the caller's fiber otherwise
+        # froze the single-threaded process (the TUI and every proxied request) for seconds.
+        File.each_line(@path) { Fiber.yield if (n += 1) % 65_536 == 0 }
         @count = n
         @counted = true
       end
