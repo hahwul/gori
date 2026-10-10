@@ -406,6 +406,17 @@ describe Gori::Discover::Extract do
         .should be_nil
     end
 
+    # Offsets are BYTE offsets: `MatchData#begin` is a char index, which on a page with one
+    # non-ASCII char re-walks the string from the start per token — 11.6s on 256 KB of
+    # `<!---->`, remote-chosen, on the single scheduler thread (P6).
+    it "stays linear on a non-ASCII head with many tokens" do
+      body = "<html><head>é#{"<!--ü-->" * (64 * 1024 // 9)}<base href=\"/x/\"></head>"
+      started = Time.instant
+      E.base_href(body.to_slice).should eq("/x/")
+      (Time.instant - started).should be < 1.second
+      E.base_href("<head>é<!-- <base href=\"/no/\"> --><base href=\"/yes/\"></head>".to_slice).should eq("/yes/")
+    end
+
     it "does not read a <base> that comes after the head" do
       E.base_href(%(<head></head><body><base href="/late/"></body>).to_slice).should be_nil
       E.base_href(%(<html><body><base href="/late/">).to_slice).should be_nil

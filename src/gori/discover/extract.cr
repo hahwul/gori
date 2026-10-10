@@ -228,7 +228,7 @@ module Gori::Discover
       cut, masked = head_bounds(text)
       found = nil.as(String?)
       text.scan(BASE) do |m|
-        at = m.begin(0)
+        at = m.byte_begin(0)
         break if at >= cut                                 # past </head> or into <body>
         next if masked.any? { |(a, b)| at >= a && at < b } # inside a comment / <script> / <title>
         found = (m[1]? || m[2]? || m[3]?).presence.try { |v| decode_refs(v) }
@@ -244,25 +244,29 @@ module Gori::Discover
     # inside a comment does not end the head, a `<script>` written inside a comment is not a
     # script, and a `-->` inside a script is just text. An UNCLOSED comment or raw-text element
     # masks everything to the end of what was scanned, which is what a browser does with it too.
+    #
+    # Every offset is a BYTE offset (`byte_begin`), compared only with `base_href`'s, also
+    # bytes: `MatchData#begin` is a char index that re-walks a non-ASCII page from its start
+    # per token, which made a 256 KB page of comments cost seconds (P6).
     private def self.head_bounds(text : String) : {Int32, Array({Int32, Int32})}
       masked = [] of {Int32, Int32}
-      cut = text.size
+      cut = text.bytesize
       open_at = nil.as(Int32?)  # where the current non-markup span started
       raw_tag = nil.as(String?) # the raw-text element we are inside, if any
       in_comment = false
       text.scan(HEAD_TOKEN) do |m|
         tok = m[0]
-        at = m.begin(0)
+        at = m.byte_begin(0)
         if in_comment
           next unless tok == "-->"
           in_comment = false
-          masked << {open_at || at, at + tok.size}
+          masked << {open_at || at, at + tok.bytesize}
           open_at = nil
         elsif tag = raw_tag
           close = m[2]?
           next unless close && close.downcase == tag
           raw_tag = nil
-          masked << {open_at || at, at + tok.size}
+          masked << {open_at || at, at + tok.bytesize}
           open_at = nil
         elsif tok == "<!--"
           in_comment = true
@@ -292,7 +296,7 @@ module Gori::Discover
           break
         end
       end
-      masked << {open_at.not_nil!, text.size} if open_at
+      masked << {open_at.not_nil!, text.bytesize} if open_at
       {cut, masked}
     end
 
