@@ -299,6 +299,7 @@ gori run compare 41 42 --pane response --changes-only
 | `--changes-only` | Print only added / removed lines, omitting unchanged context |
 | `--context=N` | Collapse unchanged runs to `@@ N unchanged lines @@` markers, keeping N lines around each change (mutually exclusive with `--changes-only`) |
 | `--format=FMT` | `text` (default) or `json` |
+| `--redact [PROFILE]`, `--no-redact`, `--redact-preview` | As on [`show`](#run-show): diff the sanitized bodies. The line count and verdict still describe the captured bytes |
 
 Both sides' `status · size · time` and the A→B delta print above the diff, so a status flip or a size shift is visible before the first line is read. `--format=json` carries the same under `meta`, and a collapsed run becomes `{"kind":"fold","hidden":N}` rather than a gap.
 

@@ -14,6 +14,7 @@ module Gori
         context : Int32? = nil
         format = :text
         positional = [] of String
+        redaction = RedactFlags.new
 
         parser = option_parser("gori run compare") do |p|
           p.banner = "Usage: gori run compare <id-a> <id-b> [options]\n\n" \
@@ -33,6 +34,7 @@ module Gori
             context = n
           end
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
+          redact_options(p, redaction)
           p.unknown_args { |before, after| positional = before + after }
         end
         parser.parse(args)
@@ -43,13 +45,19 @@ module Gori
         id_b = positional[1].to_i64? || abort("gori run compare: invalid flow id '#{positional[1]}'")
 
         project = resolve_read_project(proj.name, proj.db)
-        detail_a, detail_b = with_store(project, read_only: true) do |store|
-          {store.get_flow(id_a), store.get_flow(id_b)}
+        detail_a, detail_b, choice = with_store(project, read_only: true) do |store|
+          {store.get_flow(id_a), store.get_flow(id_b), redact_choice(store, redaction)}
         end
         abort "gori run compare: no flow ##{id_a}" unless detail_a
         abort "gori run compare: no flow ##{id_b}" unless detail_b
 
         abort "gori run compare: --changes-only and --context are mutually exclusive" if changes_only && context
+        abort "gori run compare: #{choice.error}" if choice.error
+        shown_a, shown_b, reports = compare_redaction(detail_a, detail_b, choice.matcher)
+        if redaction.preview?
+          print_redact_preview(reports, choice, "compare")
+          return
+        end
 
         lines_a = compare_lines(detail_a, pane)
         lines_b = compare_lines(detail_b, pane)
@@ -61,6 +69,11 @@ module Gori
         line_capped = Repeater::Diff.truncated?(lines_a, lines_b)
         full_diff = Repeater::Diff.lines(lines_a, lines_b)
         change_count = Repeater::Diff.change_count(full_diff)
+        # The count and the verdict describe the captured bytes; the rows shown are the
+        # sanitized copies' diff, as MCP `compare_flows` does.
+        unless reports.empty?
+          full_diff = Repeater::Diff.lines(compare_lines(shown_a, pane), compare_lines(shown_b, pane))
+        end
         folded = if changes_only
                    full_diff.reject { |dl| dl.kind == Repeater::DiffKind::Same }.map { |dl| Repeater::Diff::Folded.new(dl, 0) }
                  elsif n = context
@@ -71,6 +84,17 @@ module Gori
 
         emit_compare_result(id_a, id_b, pane, folded, change_count, line_capped, cut_sides, format,
           Repeater::ExchangeMeta.of(detail_a.row), Repeater::ExchangeMeta.of(detail_b.row))
+        redact_notes(reports, choice, "compare")
+      end
+
+      # Both flows through the profile `show` uses (`--redact`, or the project's default), so a
+      # diff never prints a body value `show` would hide. No matcher, no reports.
+      private def self.compare_redaction(a : Store::FlowDetail, b : Store::FlowDetail,
+                                         matcher : Redact::Matcher?) : {Store::FlowDetail, Store::FlowDetail, Array({Int64?, Redact::Report})}
+        return {a, b, [] of {Int64?, Redact::Report}} unless matcher
+        clean_a, report_a = Redact::Wire.flow(a, matcher)
+        clean_b, report_b = Redact::Wire.flow(b, matcher)
+        {clean_a, clean_b, [{a.row.id.as(Int64?), report_a}, {b.row.id.as(Int64?), report_b}]}
       end
 
       private def self.compare_lines(d : Store::FlowDetail, pane : Symbol) : Array(String)

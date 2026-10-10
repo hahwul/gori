@@ -292,6 +292,7 @@ gori run compare 41 42 --pane response --changes-only
 | `--changes-only` | 변경되지 않은 문맥은 빼고 추가 / 삭제된 줄만 출력 |
 | `--context=N` | 변경 지점 주변 N줄만 남기고 나머지 동일 구간은 `@@ N unchanged lines @@` 마커로 접기 (`--changes-only`와 함께 쓸 수 없음) |
 | `--format=FMT` | `text` (기본값) 또는 `json` |
+| `--redact [PROFILE]`, `--no-redact`, `--redact-preview` | [`show`](#run-show)와 같음: 정제된 본문을 비교합니다. 바뀐 줄 수와 판정은 여전히 캡처된 바이트 기준입니다 |
 
 diff 위에 양쪽의 `status · size · time`과 A→B 델타가 출력됩니다. 상태 코드가 뒤집혔는지, 크기가 얼마나 달라졌는지를 첫 줄을 읽기 전에 알 수 있습니다. `--format=json`에도 같은 값이 `meta`로 들어가고, 접힌 구간은 빈칸이 아니라 `{"kind":"fold","hidden":N}` 행이 됩니다.
 

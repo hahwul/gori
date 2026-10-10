@@ -19,6 +19,11 @@ module Gori::CLI::Run
   def self.compare_lines_for_spec(d : Gori::Store::FlowDetail, pane : Symbol) : Array(String)
     compare_lines(d, pane)
   end
+
+  def self.compare_redaction_for_spec(a : Gori::Store::FlowDetail, b : Gori::Store::FlowDetail,
+                                      matcher : Gori::Redact::Matcher?)
+    compare_redaction(a, b, matcher)
+  end
 end
 
 describe "gori run compare" do
@@ -149,5 +154,25 @@ describe Gori::Repeater::ExchangeMeta do
     diff = Gori::Repeater::Diff.lines(Gori::CLI::Run.compare_lines_for_spec(a, :response),
       Gori::CLI::Run.compare_lines_for_spec(b, :response))
     Gori::Repeater::Diff.change_count(diff).should be > 0
+  end
+
+  # The diff prints bodies, so it takes the profile `show` takes (MCP compare_flows did already).
+  it "runs both flows through the redaction profile before their lines are shown" do
+    head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+    a = flow_detail("GET / HTTP/1.1\r\n\r\n", response_head: head, response_body: %({"token":"aaa-secret"}).to_slice)
+    b = flow_detail("GET / HTTP/1.1\r\n\r\n", response_head: head, response_body: %({"token":"bbb-secret"}).to_slice)
+    _, _, none = Gori::CLI::Run.compare_redaction_for_spec(a, b, nil)
+    none.should be_empty
+    salt = Gori::Redact.salt
+    Gori::Redact.salt = "spec-salt"
+    begin
+      shown_a, shown_b, reports = Gori::CLI::Run.compare_redaction_for_spec(a, b,
+        Gori::Redact::Matcher.new(Gori::Redact::DEFAULT_PROFILE))
+      reports.size.should eq(2)
+      (Gori::CLI::Run.compare_lines_for_spec(shown_a, :response) +
+        Gori::CLI::Run.compare_lines_for_spec(shown_b, :response)).join.should_not contain("secret")
+    ensure
+      Gori::Redact.salt = salt
+    end
   end
 end
