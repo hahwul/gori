@@ -95,8 +95,8 @@ module Gori
           String.new(head).each_line(chomp: false) do |line|
             lname = line.lstrip
             eol = line.ends_with?("\r\n") ? "\r\n" : (line.ends_with?('\n') ? "\n" : "")
-            if lname[0, 15]?.try(&.downcase) == "content-length:" ||
-               lname[0, 18]?.try(&.downcase) == "transfer-encoding:"
+            if Proxy::Codec::Http1.header_line_named?(lname, "content-length") ||
+               Proxy::Codec::Http1.header_line_named?(lname, "transfer-encoding")
               # A truncated body is re-framed with ONE Content-Length. If the capture had
               # BOTH CL and TE (a CL.TE/TE.CL smuggling probe), collapse them into a single
               # Content-Length instead of emitting a duplicate — RFC 7230 forbids TE+CL.
