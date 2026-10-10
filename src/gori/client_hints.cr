@@ -39,7 +39,7 @@ module Gori
     # "Mozilla/5.0 (%s) AppleWebKit/537.36 (KHTML, like Gecko) %s Safari/537.36", where the
     # product is `Chrome/<version>` plus " Mobile" on an Android phone. Anchored at both ends,
     # so a trailing `Edg/…` or `OPR/…` (another browser's brand) does not match.
-    CHROME_UA = /\AMozilla\/5\.0 \(([^()]*)\) AppleWebKit\/537\.36 \(KHTML, like Gecko\) Chrome\/(\d{1,4})(?:\.\d+)* (Mobile )?Safari\/537\.36\z/
+    CHROME_UA = /\AMozilla\/5\.0 \(([^()]*)\) AppleWebKit\/537\.36 \(KHTML, like Gecko\) Chrome\/(\d{1,4})(?:\.\d+){0,8} (Mobile )?Safari\/537\.36\z/
 
     CHROME_TOKEN = "Chrome/".to_slice
 
