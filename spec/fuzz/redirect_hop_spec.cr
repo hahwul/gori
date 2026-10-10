@@ -446,7 +446,7 @@ describe "Fuzz::Engine#calibrate_baseline — with follow_redirects" do
     matcher = F::Matcher.new(auto_calibrate: true)
     engine = F::Engine.new(gen, matcher, backend, cfg)
     engine.calibrate_baseline
-    matcher.baseline.map(&.metrics.status).uniq.should eq([200])
+    matcher.baseline.map(&.metrics.status).uniq!.should eq([200])
     rows = [] of F::Result
     engine.run { |ev| rows << ev.result if ev.is_a?(F::ResultEvent) }
     rows.find!(&.payloads.includes?("home")).matched?.should be_false

