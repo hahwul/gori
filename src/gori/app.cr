@@ -546,6 +546,7 @@ module Gori
               # is edited by the same external surfaces (`gori run project host-override`,
               # MCP add/update/delete_host_override), so it goes stale the same way.
               session.host_overrides.reload
+              Settings.reload_hostname_overrides_from_disk # the global half, from settings.json
             rescue ex
               Log.error(exception: ex) { "host override reload failed" }
             end
@@ -591,16 +592,14 @@ module Gori
                 log_peer_notice(peer_notices.probe_mode(moved[0], moved[1],
                   Gori::PeerNotices.agent_wrote?(session.store, Gori::PeerNotices::PROBE_TOOLS)))
               end
-            rescue ex
-              Log.error(exception: ex) { "probe mode reload failed" }
-            end
-            begin
               # The rest of the analyzer's config, for the same reason: a rule a peer disabled
               # (an active one, a custom `exec` one) kept firing in this capture, and a
               # suppression a peer cleared kept muting. See `Analyzer#apply_stored_config`.
+              # The global scan rules are part of it and live in settings.json.
+              Settings.reload_scan_rules_from_disk
               session.probe.apply_stored_config
             rescue ex
-              Log.error(exception: ex) { "probe config reload failed" }
+              Log.error(exception: ex) { "probe mode/config reload failed" }
             end
             begin
               announce_peer_rule_changes(session, peer_notices)

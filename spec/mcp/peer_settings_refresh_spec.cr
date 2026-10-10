@@ -153,6 +153,24 @@ describe "MCP follows a peer's settings between calls" do
     end
   end
 
+  # A global scan rule runs in every `probe_scan`, an `exec` one as a child process, so a rule a
+  # peer deleted must stop running here too.
+  it "lists a global scan rule a peer added, and drops one it deleted" do
+    with_peer_home do |path|
+      with_store do |store|
+        Gori::Settings.scan_rules = [] of Gori::Settings::ScanRule
+        tools = tools_for(store)
+        tools.call("list_probe_rules", JSON.parse("{}")).text.should_not contain("peer-rule")
+
+        File.write(path, %({"scan_rules":[{"id":"ab12","title":"peer-rule","pattern":"x"}]}))
+        tools.call("list_probe_rules", JSON.parse("{}")).text.should contain("peer-rule")
+
+        File.write(path, %({"env":{"syntax":"bare"}}))
+        tools.call("list_probe_rules", JSON.parse("{}")).text.should_not contain("peer-rule")
+      end
+    end
+  end
+
   it "resolves a global view a peer added (#1215)" do
     with_peer_home do |path|
       with_store do |store|

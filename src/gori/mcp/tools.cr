@@ -676,6 +676,11 @@ module Gori
         Settings.reload_saved_views_from_disk
         Settings.reload_rewriter_from_disk
         Settings.reload_colormarker_from_disk
+        # And the global scan rules (a `probe_scan` runs them, `exec` ones included), OAST
+        # providers and hostname overrides (read at every dial), for the same reason.
+        Settings.reload_scan_rules_from_disk
+        Settings.reload_oast_providers_from_disk
+        Settings.reload_hostname_overrides_from_disk
       end
 
       # THE token-grammar reconcile for this surface (#env.syntax). Both bind sites call it — the
