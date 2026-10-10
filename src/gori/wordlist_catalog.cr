@@ -170,7 +170,12 @@ module Gori
       names = builtin.dup
       # Open the STRIPPED path (the emptiness check used it too).
       if (path = user_path.try(&.strip)) && !path.empty?
-        merge_user_file(resolve_path(path), tool) { |line| names << line }
+        resolution = resolve(path)
+        # Say where a bare name was looked for, as the Fuzzer's not-found error does.
+        if hint = missing_hint(resolution)
+          raise IO::Error.new("wordlist not found: #{path} (#{hint})")
+        end
+        merge_user_file(resolution.path, tool) { |line| names << line }
       end
       names.uniq # first occurrence wins: a built-in keeps its place ahead of a merge file
     end

@@ -123,6 +123,14 @@ describe Gori::WordlistCatalog do
       end
     end
 
+    it "names where a missing bare name was looked for when the Miner or Discover loads it" do
+      with_wordlist_home do
+        expect_raises(IO::Error, /wordlist not found: nope\.txt \(a bare name is looked up/) do
+          Catalog.load(["a"], "nope.txt", tool: "mine")
+        end
+      end
+    end
+
     it "never resolves a name the catalog would not address, nor one holding a NUL" do
       with_wordlist_home do |dir|
         Dir.mkdir_p(dir)
