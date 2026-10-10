@@ -57,6 +57,24 @@ describe Gori::RawJson do
     end
   end
 
+  # `valid?` accepts that body, so the readers behind it must too, or it reads as JSON and then
+  # yields nothing: an extract rule, `list_params`, retest assertions and JWT claims all missed.
+  describe ".tolerant" do
+    it "lets every reader through an unpaired surrogate, and keeps the rest of the body" do
+      body = %({"token":"abc123","bio":"cut \\ud83d","pair":"\\ud83d\\ude00","lit":"\\\\ud83d"})
+      Gori::RawJson.member(body, "token").try(&.as_s).should eq("abc123")
+      Gori::RawJson.claims(body).not_nil!["bio"].as_s.should eq("cut \uFFFD")
+      Gori::RawJson.claims(body).not_nil!["pair"].as_s.should eq("\u{1F600}")
+      Gori::RawJson.claims(body).not_nil!["lit"].as_s.should eq("\\ud83d")
+      Gori::RawJson.members(body).not_nil!.map(&.[0]).should eq(%w[token bio pair lit])
+      leaves = [] of String
+      Gori::Params.each_json_leaf(body.to_slice) { |path, value, _| leaves << "#{path}=#{value}" }
+      leaves.should contain("token=abc123")
+      plain = %({"a":1})
+      Gori::RawJson.tolerant(plain).should be(plain)
+    end
+  end
+
   describe ".members" do
     it "lists an object's members in order with raw values, duplicates kept" do
       Gori::RawJson.members(%({"a":1,"b":{"c":[99999999999999999999]},"a":2})).should eq(

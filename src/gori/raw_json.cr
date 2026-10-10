@@ -24,10 +24,59 @@ module Gori
     # `JSON.parse`. Raises JSON::ParseException when `json` is not exactly one JSON value. For
     # reading only — see the module comment.
     def parse(json : String) : JSON::Any
+      json = tolerant(json)
       pull = JSON::PullParser.new(json)
       value = read_any(pull)
       finish(pull, json)
       value
+    end
+
+    # `json` with every UNPAIRED surrogate escape (`"\ud83d"` alone, what `JSON.stringify` emits
+    # for a cut emoji) respelled `�`, for the stdlib lexer, which raises on one although
+    # the grammar allows it. `valid?` accepts such a body, so every reader here that goes through
+    # the pull parser must too, or the body reads as JSON and then yields nothing. A paired
+    # escape and an escaped backslash (`\\ud83d`, literal text) are left alone. Returns `json`
+    # itself when it has no `\u` at all.
+    def tolerant(json : String) : String
+      return json unless json.includes?("\\u")
+      bytes = json.to_slice
+      fixes = [] of Int32
+      i = 0
+      while i < bytes.size
+        if bytes[i] == '\\'.ord
+          if bytes[i + 1]? == 'u'.ord && (cp = hex4(bytes, i + 2)) && 0xd800 <= cp <= 0xdfff
+            low = bytes[i + 6]? == '\\'.ord && bytes[i + 7]? == 'u'.ord ? hex4(bytes, i + 8) : nil
+            if cp <= 0xdbff && low && 0xdc00 <= low <= 0xdfff
+              i += 12
+              next
+            end
+            fixes << i
+            i += 6
+            next
+          end
+          i += 2
+          next
+        end
+        i += 1
+      end
+      return json if fixes.empty?
+      String.build(json.bytesize) do |io|
+        pos = 0
+        fixes.each do |at|
+          io.write(bytes[pos, at - pos])
+          io << "\\ufffd"
+          pos = at + 6
+        end
+        io.write(bytes[pos..])
+      end
+    end
+
+    private def hex4(bytes : Bytes, at : Int32) : Int32?
+      return nil if at + 4 > bytes.size
+      bytes[at, 4].reduce(0) do |acc, b|
+        d = b.unsafe_chr.to_i?(16) || return nil
+        acc * 16 + d
+      end
     end
 
     # Whether `json` is exactly one JSON value, numbers of any magnitude included — the
@@ -452,6 +501,7 @@ module Gori
     # when `json` is valid JSON that is not an object. Raises JSON::ParseException on bad
     # syntax.
     def members(json : String) : Array({String, String})?
+      json = tolerant(json)
       pull = JSON::PullParser.new(json)
       unless pull.kind.begin_object?
         pull.read_raw
