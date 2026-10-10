@@ -351,7 +351,12 @@ module Gori
         # that asked for the flow. `ws_messages` already returns an empty array for anything
         # that is not a socket, so the guard bought one query on non-WS flows and cost the
         # feature on h2 ones.
-        ws_msgs = store.ws_messages(id)
+        #
+        # Only the frames `emit_ws_messages` shows (the OLDEST WS_MSGS_MAX), and the total from a
+        # COUNT: a frame is up to 16 MiB, and every one past the cap used to be read,
+        # redacted and decoded to be dropped.
+        ws_msgs = store.ws_messages_after(id, 0_i64, Serialize::WS_MSGS_MAX)
+        ws_total = ws_msgs.size < Serialize::WS_MSGS_MAX ? ws_msgs.size : store.count_ws_messages(id)
         include_sensitive = bool_arg(h, "include_sensitive", false)
         detail, ws_msgs, redaction = redact_flow(detail, ws_msgs, include_sensitive)
         # Not under a redaction profile: the chunk tool pages the EXACT stored bytes, which it
@@ -363,7 +368,7 @@ module Gori
         cap, omit = opts
         more = auto ? {body_more_hint("flow_id: #{id}, part: \"request\"", "request, head included"), body_more_hint("flow_id: #{id}")} : nil
         Result.new(Serialize.flow_detail_json(detail, ws_msgs, include_sensitive, cap, omit, redaction, more,
-          interims: store.interims(id)))
+          interims: store.interims(id), ws_total: ws_total))
       end
 
       # Safe evidence export applied to the projection an AGENT reads (#1035).

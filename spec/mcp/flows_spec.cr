@@ -307,6 +307,24 @@ describe Gori::MCP::Server do
       end
     end
 
+    # Reads only the frames it shows (the oldest WS_MSGS_MAX) and takes the total from a COUNT.
+    it "reports the true WebSocket total while reading only the frames it shows" do
+      with_store do |store|
+        id = mcp_seed_flow(store, "ws.test", "GET", "/socket", 101,
+          resp_head: "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n\r\n")
+        max = Gori::MCP::Serialize::WS_MSGS_MAX
+        (max + 2).times { |i| store.insert_ws_message(id, "out", 1, "m#{i}".to_slice) }
+        call = %({"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"get_flow","arguments":{"id":#{id}}}})
+        ws = mcp_tool_payload(mcp_drive(store, call)[0])["ws_messages"]
+        ws["count"].as_i.should eq(max + 2)
+        ws["truncated"].as_bool.should be_true
+        msgs = ws["messages"].as_a
+        msgs.size.should eq(max)
+        msgs.first["text"].as_s.should eq("m0")
+        msgs.last["text"].as_s.should eq("m#{max - 1}")
+      end
+    end
+
     it "includes WebSocket messages for a 101 flow (parity with `gori run show`)" do
       with_store do |store|
         id = mcp_seed_flow(store, "ws.test", "GET", "/socket", 101,

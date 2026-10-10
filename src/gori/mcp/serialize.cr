@@ -828,8 +828,8 @@ module Gori
                                 include_sensitive : Bool = false,
                                 body_cap : Int32 = MAX_TEXT, body_omit : Bool = false,
                                 redaction : RedactionNote? = nil, body_more : {String, String}? = nil,
-                                *, interims : Store::Interims? = nil) : String
-        JSON.build { |j| flow_detail(j, detail, ws_msgs, include_sensitive, body_cap, body_omit, redaction, body_more, interims: interims) }
+                                *, interims : Store::Interims? = nil, ws_total : Int32? = nil) : String
+        JSON.build { |j| flow_detail(j, detail, ws_msgs, include_sensitive, body_cap, body_omit, redaction, body_more, interims: interims, ws_total: ws_total) }
       end
 
       # `body_more` is the {request, response} pointer a display-capped body carries
@@ -839,7 +839,7 @@ module Gori
                            include_sensitive : Bool = false,
                            body_cap : Int32 = MAX_TEXT, body_omit : Bool = false,
                            redaction : RedactionNote? = nil, body_more : {String, String}? = nil,
-                           *, interims : Store::Interims? = nil) : Nil
+                           *, interims : Store::Interims? = nil, ws_total : Int32? = nil) : Nil
         row = detail.row
         j.object do
           j.field "id", row.id
@@ -907,7 +907,7 @@ module Gori
             source_size: detail.response_body_truncated? ? detail.response_wire_body_size : nil,
             more: body_more.try(&.[1]))
           emit_sse_events(j, detail)
-          emit_ws_messages(j, ws_msgs)
+          emit_ws_messages(j, ws_msgs, ws_total || ws_msgs.size)
           emit_grpc_messages(j, "request_grpc_messages", detail.request_head, detail.request_body,
             detail.row.target, request: true)
           emit_grpc_messages(j, "response_grpc_messages", detail.response_head, detail.response_body,
@@ -1054,13 +1054,14 @@ module Gori
       # A WebSocket flow (status 101) carries a separate message log the heads/bodies
       # don't show. Mirror the `gori run show` WS pane, bounded for LLM use: text
       # frames inline their (clipped) payload, binary frames report a size only.
-      # `count` is the true total; `messages` is the first WS_MSGS_MAX of them.
-      def self.emit_ws_messages(j : JSON::Builder, msgs : Array(Store::WsMessage)) : Nil
+      # `count` is the true total — `total`, for a caller that read only the head of the log —
+      # and `messages` is the first WS_MSGS_MAX of them.
+      def self.emit_ws_messages(j : JSON::Builder, msgs : Array(Store::WsMessage), total : Int32 = msgs.size) : Nil
         return if msgs.empty?
         j.field "ws_messages" do
           j.object do
-            j.field "count", msgs.size
-            j.field "truncated", msgs.size > WS_MSGS_MAX
+            j.field "count", total
+            j.field "truncated", total > WS_MSGS_MAX
             j.field "messages" do
               j.array do
                 msgs.first(WS_MSGS_MAX).each do |m|
