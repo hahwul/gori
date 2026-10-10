@@ -2152,9 +2152,77 @@ module Gori
               "AND (state != #{FlowState::Complete.value} OR gori_static_asset(content_type, target, status) = 0)",
       }
 
+      # V46 — the four rule tables V40 left on reusable ids (#1344's "Not migrated"), because
+      # their ids DO leave the process: MCP `update/delete/set_*_enabled` for extract rules,
+      # colour rules and OAST providers (`p_<id>`), `move_color_rule`, `gori run rewriter extract
+      # rm` / `colormarker rm` / `oast providers`, and the TUI OAST edit form all name a row by
+      # id. A peer's delete followed by a new row handed that id on, and the stale holder updated
+      # or deleted the new row: an agent's interactsh token landed on the operator's provider.
+      # Moved as V41 moves its table; `oast_providers` is seeded past every session that names
+      # one, so an old session cannot resolve to a provider created after it.
+      V46_REBUILDS = [
+        TableRebuild.new("extract_rules",
+          %w[id enabled name match_filter kind selector pos_start pos_end host],
+          <<-SQL,
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            enabled      INTEGER NOT NULL DEFAULT 1,
+            name         TEXT    NOT NULL UNIQUE,
+            match_filter TEXT    NOT NULL DEFAULT '',
+            kind         TEXT    NOT NULL,
+            selector     TEXT    NOT NULL DEFAULT '',
+            pos_start    INTEGER NOT NULL DEFAULT 0,
+            pos_end      INTEGER NOT NULL DEFAULT 0,
+            host         TEXT    NOT NULL DEFAULT ''
+            SQL
+          [] of String, [] of String),
+        TableRebuild.new("oast_providers",
+          %w[id created_at updated_at name kind host token enabled position],
+          <<-SQL,
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            name       TEXT    NOT NULL,
+            kind       TEXT    NOT NULL,
+            host       TEXT    NOT NULL,
+            token      TEXT,
+            enabled    INTEGER NOT NULL DEFAULT 1,
+            position   INTEGER NOT NULL DEFAULT 0
+            SQL
+          [] of String, ["SELECT provider_id AS v FROM oast_sessions"]),
+        TableRebuild.new("color_rules",
+          %w[id enabled name match_filter color style position],
+          <<-SQL,
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            enabled      INTEGER NOT NULL DEFAULT 1,
+            name         TEXT    NOT NULL DEFAULT '',
+            match_filter TEXT    NOT NULL DEFAULT '',
+            color        TEXT    NOT NULL DEFAULT 'yellow',
+            style        TEXT    NOT NULL DEFAULT 'full',
+            position     INTEGER NOT NULL DEFAULT 0
+            SQL
+          [] of String, [] of String),
+        TableRebuild.new("display_columns",
+          %w[id position label side kind selector pos_start pos_end width],
+          <<-SQL,
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            position  INTEGER NOT NULL DEFAULT 0,
+            label     TEXT    NOT NULL,
+            side      TEXT    NOT NULL DEFAULT 'response',
+            kind      TEXT    NOT NULL,
+            selector  TEXT    NOT NULL DEFAULT '',
+            pos_start INTEGER NOT NULL DEFAULT 0,
+            pos_end   INTEGER NOT NULL DEFAULT 0,
+            width     INTEGER NOT NULL DEFAULT 0
+            SQL
+          [] of String, [] of String),
+      ]
+
+      V46_AFTER = V46_REBUILDS.flat_map(&.seed)
+      V46       = V46_REBUILDS.flat_map(&.copy) + V46_REBUILDS.flat_map(&.swap) + V46_AFTER
+
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
                     V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31, V32, V33,
-                    V34, V35, V36, V37, V38, V39, V40, V41, V42, V43, V44, V45]
+                    V34, V35, V36, V37, V38, V39, V40, V41, V42, V43, V44, V45, V46]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|
@@ -2224,7 +2292,7 @@ module Gori
         end
       end
 
-      # The statements one MIGRATIONS entry actually runs. V39–V41 do their table move in code
+      # The statements one MIGRATIONS entry actually runs. V39–V41 and V46 do their table move in code
       # first and leave only their seeds; V42 is skipped when its column is already there.
       private def self.run_statements(conn : DB::Connection, statements : Array(String)) : Array(String)
         if statements.same?(V39)
@@ -2236,6 +2304,9 @@ module Gori
         elsif statements.same?(V41)
           move_to_autoincrement(conn.as(SQLite3::Connection), V41_REBUILDS, 41)
           V41_AFTER
+        elsif statements.same?(V46)
+          move_to_autoincrement(conn.as(SQLite3::Connection), V46_REBUILDS, 46)
+          V46_AFTER
         elsif statements.same?(V42) && column?(conn, "fuzz_results", "shape")
           # SQLite has no `ADD COLUMN IF NOT EXISTS`, and every migration since V36 is
           # replay-safe: a project whose `user_version` was wound back (the index specs rebuild
@@ -2264,7 +2335,7 @@ module Gori
         created = MIGRATIONS.flat_map(&.to_a).flat_map do |sql|
           sql.scan(/CREATE TABLE(?: IF NOT EXISTS)?\s+"?(\w+)"?\s*\(([^;]*?\bAUTOINCREMENT\b)/i).map(&.[1].sub(/_(?:v\d+|autoinc)\z/, ""))
         end
-        (created + AUTOINCREMENT_TABLES.to_a + (ID_REBUILDS + V41_REBUILDS).map(&.table)).to_set
+        (created + AUTOINCREMENT_TABLES.to_a + (ID_REBUILDS + V41_REBUILDS + V46_REBUILDS).map(&.table)).to_set
       end
       private ROWID_CLAUSE      = "INTEGER PRIMARY KEY"
       private ROWID_DECLARATION = /\(\s*"?id"?\s+INTEGER PRIMARY KEY\s*,/

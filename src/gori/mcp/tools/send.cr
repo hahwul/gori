@@ -1749,7 +1749,7 @@ module Gori
           s.field "verbatim", boolprop("send each member's bytes EXACTLY: no token expansion, no Content-Length resync (see send_request.verbatim). Default false")
           s.field "timeout_ms", intprop("per-operation connect + idle timeout in milliseconds (1-600000)")
           s.field "insecure", boolprop("skip upstream TLS verification (default false)")
-          s.field "allow_unscoped", boolprop("send even when the shared origin is outside (or without) a configured scope — Sandbox/exclude still apply (default false)")
+          s.field "allow_unscoped", boolprop("send even when the shared origin is outside (or without) a configured scope — the Sandbox still applies (default false)")
         end
 
         tool j, "timing_requests",
@@ -1773,7 +1773,7 @@ module Gori
           s.field "verbatim", boolprop("send each member's bytes EXACTLY: no token expansion, no Content-Length resync (default false)")
           s.field "timeout_ms", intprop("per-operation connect + idle timeout in milliseconds (1-600000)")
           s.field "insecure", boolprop("skip upstream TLS verification (default false)")
-          s.field "allow_unscoped", boolprop("send even when the shared origin is outside (or without) a configured scope — Sandbox/exclude still apply (default false)")
+          s.field "allow_unscoped", boolprop("send even when the shared origin is outside (or without) a configured scope — the Sandbox still applies (default false)")
         end
 
         tool j, "send_websocket",

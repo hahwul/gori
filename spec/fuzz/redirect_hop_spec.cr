@@ -160,7 +160,7 @@ private class ScriptedBackend < F::Backend
 end
 
 private def reply(status : Int32, location : String? = nil, retried : Bool = false,
-                  timed_out : Bool = false) : Gori::Repeater::Result
+                  timed_out : Bool = false, wire : Bytes? = nil) : Gori::Repeater::Result
   head = String.build do |io|
     io << "HTTP/1.1 " << status << (status == 302 ? " Found" : " OK") << "\r\n"
     io << "Location: " << location << "\r\n" if location
@@ -168,7 +168,7 @@ private def reply(status : Int32, location : String? = nil, retried : Bool = fal
   end
   Gori::Repeater::Result.new(head.to_slice, "ok".to_slice,
     Gori::Proxy::Codec::Http1.parse_response_head(head.to_slice), 100_i64,
-    retried: retried, timed_out: timed_out)
+    retried: retried, timed_out: timed_out, wire: wire)
 end
 
 private def follow(replies : Array(Gori::Repeater::Result),
@@ -398,9 +398,58 @@ describe "Fuzz::Engine#follow_redirects — the collapsed Result's fields" do
     r.retried?.should be_false
   end
 
+  # The row is the payload's request, so it keeps the bytes the seam wrote for THAT one —
+  # dropping them made History record the unexpanded template for every redirected row.
+  it "keeps the first hop's wire through the redirect chain" do
+    sent = "GET /start?q=one HTTP/1.1\r\nHost: h\r\nX-Slot: a\r\n\r\n".to_slice
+    res, _ = follow([reply(302, "/next", wire: sent), reply(200, wire: "GET /next".to_slice)])
+    res.status.should eq(200)
+    res.wire.should eq(sent)
+  end
+
   it "leaves a single-hop (no redirect) Result untouched, retried included" do
     res, backend = follow([reply(200, retried: true)])
     backend.sent.size.should eq(1)
     res.retried?.should be_true
+  end
+end
+
+# Answers by request line, so a calibration burst of any size gets the same chain a row gets.
+private class RoutedBackend < F::Backend
+  def initialize(&@route : String -> Gori::Repeater::Result)
+  end
+
+  def origin : F::Origin
+    F::Origin.new("http", "127.0.0.1", 9)
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    @route.call(String.new(bytes).split("\r\n").first)
+  end
+end
+
+describe "Fuzz::Engine#calibrate_baseline — with follow_redirects" do
+  it "measures the followed response, the one every row is measured on" do
+    backend = RoutedBackend.new do |line|
+      if line.includes?("next=https")
+        reply(302, "https://evil.example/") # off-origin: left unfollowed, stays the 302
+      elsif line.includes?("/login")
+        reply(302, "/home")
+      else
+        reply(200)
+      end
+    end
+    cfg = F::Config.new(mode: F::Mode::Sniper, concurrency: 1, follow_redirects: true,
+      max_redirects: 3, auto_calibrate: true)
+    tpl = F::Template.parse("GET /login?next=§a§ HTTP/1.1\r\nHost: h\r\n\r\n")
+    gen = F::Generator.new(tpl, [F::PayloadSet.new(F::InlineList.new(["home", "https://evil.example/"]))], cfg)
+    matcher = F::Matcher.new(auto_calibrate: true)
+    engine = F::Engine.new(gen, matcher, backend, cfg)
+    engine.calibrate_baseline
+    matcher.baseline.map(&.metrics.status).uniq!.should eq([200])
+    rows = [] of F::Result
+    engine.run { |ev| rows << ev.result if ev.is_a?(F::ResultEvent) }
+    rows.find!(&.payloads.includes?("home")).matched?.should be_false
+    rows.find!(&.payloads.includes?("https://evil.example/")).matched?.should be_true
   end
 end

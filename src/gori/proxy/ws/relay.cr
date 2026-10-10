@@ -384,16 +384,22 @@ module Gori::Proxy::WS
                                    sink : FlowSink, assembling : AssemblingPump?,
                                    gate : MessageGate?) : Ending
       return pump(src, dst, direction, flow_id, sink) unless assembling
-      begin
+      # The direction ended (cleanly or not). Hand every still-held message back to the
+      # Interceptor so no ghost queue row survives the socket and no wait fiber leaks —
+      # `H2::StreamGate#close`'s contract. This is also where the CLOSE_TIMEOUT ceiling
+      # lands: when the PEER closes the other direction, `run` gives this one 5 s and then
+      # closes the sockets, which unblocks the read here and reaps whatever was still held.
+      #
+      # Not an `ensure`: `close` settles by yielding, and a fiber switch while an exception
+      # unwinds aborts the process on Windows. The raising path closes without the settle.
+      ending = begin
         assembling.run
-      ensure
-        # The direction ended (cleanly or not). Hand every still-held message back to the
-        # Interceptor so no ghost queue row survives the socket and no wait fiber leaks —
-        # `H2::StreamGate#close`'s contract. This is also where the CLOSE_TIMEOUT ceiling
-        # lands: when the PEER closes the other direction, `run` gives this one 5 s and then
-        # closes the sockets, which unblocks the read here and reaps whatever was still held.
-        gate.try(&.close)
+      rescue ex
+        gate.try(&.close(settle_first: false))
+        raise ex
       end
+      gate.try(&.close)
+      ending
     end
 
     # Chunk size for streaming an oversized frame's payload (see stream_payload).

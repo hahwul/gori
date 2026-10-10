@@ -89,6 +89,15 @@ describe Gori::Rules do
       Gori::Rules.host_matches?("[::1]", "[::1]").should be_true
       Gori::Rules.host_matches?("[::1]", "[::12]").should be_false
     end
+
+    it "folds the trailing root dot and IPv6 brackets like HostPattern.bare" do
+      # `acme.test.` is `acme.test` to every resolver; a block rule must not fail open on it.
+      Gori::Rules.host_matches?("acme.test", "acme.test.").should be_true
+      Gori::Rules.host_matches?("acme.test.", "api.acme.test").should be_true
+      Gori::Rules.host_matches?("*.acme.test", "api.acme.test.").should be_true
+      Gori::Rules.host_matches?("::1", "[::1]").should be_true
+      Gori::Rules.host_matches?("acme.test", "xacme.test.").should be_false
+    end
   end
 
   it "is inactive (and byte-identical) until an enabled rule exists" do

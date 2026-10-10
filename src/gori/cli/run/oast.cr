@@ -4,6 +4,13 @@
 module Gori
   module CLI
     module Run
+      # One text line per callback. Every field but the timestamp comes from whoever called the
+      # payload (or the OAST server relaying it), so it is scrubbed before it reaches the TTY.
+      private def self.oast_interaction_line(i : Oast::Interaction) : String
+        "#{i.at.to_rfc3339}  #{Output.term_safe(i.protocol)}\t#{Output.term_safe(i.method || "-")}\t" \
+        "#{Output.term_safe(i.source_ip || "-")}\t#{Output.term_safe(i.full_id)}"
+      end
+
       # `gori run oast` — headless out-of-band listener (interactsh & friends). `listen` is
       # store-free and ad-hoc: register a payload, print it, then stream decrypted callbacks.
       # `providers` and the session verbs (`list`/`resume`/`release`) read the project store.
@@ -483,7 +490,7 @@ module Gori
             rescue ex
               # `Provider#resume` raises deliberately: a resume that failed quietly would leave
               # a listener polling a correlation id the server has never heard of.
-              abort "gori run oast resume: session ##{id} could not be resumed: #{ex.message}"
+              abort "gori run oast resume: session ##{id} could not be resumed: #{Output.term_safe(ex.message.to_s)}"
             end
             oast_stream_session(store, bound, http, id, interval, once, json)
           ensure
@@ -530,7 +537,7 @@ module Gori
           interactions = begin
             bound.provider.poll(http, bound.session)
           rescue ex
-            err.puts "poll error: #{ex.message}"
+            err.puts "poll error: #{Output.term_safe(ex.message.to_s)}"
             once_failed = true
             nil
           end
@@ -544,8 +551,7 @@ module Gori
           if interactions
             store.touch_oast_session(id)
             interactions.each do |i|
-              next if seen.includes?(i.unique_id)
-              seen << i.unique_id
+              next unless seen.add?(i.unique_id)
               Oast::Sessions.record_callback(store, id, i)
               oast_emit_callback(io, i, label, json)
             end
@@ -563,7 +569,7 @@ module Gori
         if json
           io.puts Oast::Present.interaction(i, label).to_json
         else
-          io.puts "#{i.at.to_rfc3339}  #{i.protocol}\t#{i.method || "-"}\t#{i.source_ip || "-"}\t#{i.full_id}"
+          io.puts oast_interaction_line(i)
         end
         io.flush
       end
@@ -827,7 +833,7 @@ module Gori
           prov.register(http)
         rescue ex
           store.try(&.close)
-          STDERR.puts "gori run oast: register failed: #{ex.message}"
+          STDERR.puts "gori run oast: register failed: #{Output.term_safe(ex.message.to_s)}"
           STDERR.puts oast_register_hint(kind, host, ex)
           exit 1
         end
@@ -864,7 +870,7 @@ module Gori
         STDERR.puts "saved as session ##{session_row} — its registration is KEPT on exit " \
                     "(`gori run oast resume #{session_row}` to pick it up, `release` to drop it)" if store
         STDERR.puts "waiting for callbacks (Ctrl-C to stop)…" unless once
-        seen = Set(String).new
+        seen = Oast::SeenWindow(String).new
         # Ctrl-C used to do nothing here: the poll loop trapped no signals, so despite the
         # "Ctrl-C to stop" hint only SIGTERM/SIGKILL ended the listener. Trap INT+TERM into
         # a buffered channel (matching gori run discover / App#install_signal_traps) and let
@@ -885,20 +891,19 @@ module Gori
             interactions = begin
               prov.poll(http, session)
             rescue ex
-              STDERR.puts "poll error: #{ex.message}"
+              STDERR.puts "poll error: #{Output.term_safe(ex.message.to_s)}"
               once_failed = true
               nil
             end
             if interactions
               store.try(&.touch_oast_session(session_row))
               interactions.each do |i|
-                next if seen.includes?(i.unique_id)
-                seen << i.unique_id
+                next unless seen.add?(i.unique_id)
                 store.try { |s| Oast::Sessions.record_callback(s, session_row, i) }
                 if json
                   puts Oast::Present.interaction(i, kind.label).to_json
                 else
-                  puts "#{i.at.to_rfc3339}  #{i.protocol}\t#{i.method || "-"}\t#{i.source_ip || "-"}\t#{i.full_id}"
+                  puts oast_interaction_line(i)
                 end
                 STDOUT.flush
               end
@@ -930,7 +935,7 @@ module Gori
             begin
               prov.deregister(http, session)
             rescue ex
-              STDERR.puts "gori run oast: deregister failed: #{ex.message}"
+              STDERR.puts "gori run oast: deregister failed: #{Output.term_safe(ex.message.to_s)}"
             end
           end
           store.try(&.close)

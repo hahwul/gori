@@ -29,6 +29,15 @@ describe Gori::Tui::MinerView do
     restored.config.notify.should eq(Gori::Miner::NotifyMode::WhenFound)
   end
 
+  it "reads an out-of-range int in a stored config as absent, keeping the rest" do
+    restored = Gori::Tui::MinerView.new
+    restored.restore(Gori::Store::MinerSessionRecord.new(
+      id: 1, target: "http://h.test", request: Bytes.empty, http2: false, sni: nil,
+      config: %({"concurrency":4294967296,"confirm_rounds":7,"notify":"always"}), flow_id: nil, position: 0, name: nil))
+    restored.config.confirm_rounds.should eq(7)
+    restored.config.notify.should eq(Gori::Miner::NotifyMode::Always)
+  end
+
   it "fronts a custom name on the sub-tab label (the rename path now wired for Miner)" do
     view = Gori::Tui::MinerView.new
     view.load("http://h.test", "GET /a HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, false, nil,

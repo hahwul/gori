@@ -116,16 +116,17 @@ private class AuthorizeFakeHost
   # confirm, not just whether it did the work. `action.call` keeps every existing example's
   # behaviour (the dialog is not the thing under test there).
   getter confirms = [] of {String, String}
+  # Runs while the dialog is "up", before the action.
+  property under_modal : Proc(Nil)? = nil
 
   def confirm(title : String, message : String, *, confirm_label : String, danger : Bool,
               return_to : Symbol = :none, &action : -> Nil) : Nil
     @confirms << {title, message}
+    @under_modal.try(&.call)
     action.call
   end
 
-  def overlay : Symbol
-    :none
-  end
+  property overlay : Symbol = :none
 
   def focus : Symbol
     :body
@@ -502,6 +503,58 @@ describe Gori::Tui::AuthorizeController do
       host.statuses.size.should eq(before) # not one line per tick
       # …and the tab SAYS why, where an operator looking at it can read it.
       ctrl.view.passive_note.not_nil!.should contain("two identities are called")
+    end
+  end
+
+  # The ⇧X confirm and the identities card checked "not while running" when they opened, so an
+  # unattended batch must not start behind them: it would be cleared mid-run, or run under a
+  # set the card is about to replace.
+  it "holds passive autorun while an Authorize modal is up" do
+    with_authorize_controller do |ctrl, host, session|
+      port = unreachable_port
+      session.scope.add("include", "host", "127.0.0.1").should be_true
+      ctrl.seed_flows([seed_dead_capture(session.store, port, "/a")])
+      ctrl.toggle_passive # ON
+
+      {:confirm, :authorize_identities, :authorize_identity}.each do |modal|
+        host.overlay = modal
+        ctrl.drain_events
+        ctrl.running?.should be_false
+      end
+
+      host.overlay = :none
+      ctrl.drain_events
+      ctrl.running?.should be_true
+      ctrl.toggle_passive # off, so the settled batch is not re-fired
+      drain_until_idle(ctrl)
+    end
+  end
+
+  it "does not clear the queue under a run that started while the confirm was up" do
+    with_authorize_controller do |ctrl, host, session|
+      ctrl.seed_flows([seed_dead_capture(session.store, unreachable_port, "/a")])
+      host.under_modal = -> { ctrl.run(:all) }
+
+      ctrl.clear
+
+      ctrl.view.size.should eq(1)
+      host.statuses.last.should contain("a run is in flight")
+      drain_until_idle(ctrl)
+    end
+  end
+
+  it "stamps a result with the identity set its batch was sent under" do
+    with_authorize_controller do |ctrl, _host, session|
+      ctrl.seed_flows([seed_dead_capture(session.store, unreachable_port, "/a")])
+      ctrl.run(:all)
+      # The set changes while the batch is in flight (a peer's slot edit through the same write).
+      ctrl.replace_identities([
+        Gori::Authorize::Identity.as_captured,
+        Gori::Authorize::Identity.new("low-priv", set_headers: [{"Cookie", "session=USER"}]),
+      ]).should be_true
+      drain_until_idle(ctrl)
+
+      ctrl.view.pending_entries.size.should eq(1) # an old-set verdict is not current
     end
   end
 

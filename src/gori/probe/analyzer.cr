@@ -51,6 +51,11 @@ module Gori
       @oob : OutOfBand::Minter?      # OAST payload minter — nil until this project registers one
       @oob_watermark : Int64 = 0_i64 # highest oast_callbacks id already swept
       @oob_floor : Int64? = nil      # rewind the next sweep to this: see `execute_active`
+      # The stored inputs of the Rules config, compared tick to tick by `apply_stored_config`: the
+      # disabled-list row as written, and the ENABLED custom rules of both scopes (a disabled one
+      # matches nothing). nil when it could not be read.
+      alias RuleConfigKey = {String?, Array(Store::ProbeCustomRule), Array(Settings::ScanRule)}
+      @rule_config_key : RuleConfigKey? = nil
       # The active worker's keep-alive sender and the dial it was built for. See `worker_sender`.
       @worker_sender : Fuzz::Sender? = nil
       @worker_sender_key : {String, String, Int32, Bool, Bool, String?}? = nil
@@ -127,6 +132,7 @@ module Gori
         # The mode the ROW still holds after an operator edit this process could not persist —
         # see the write path below. nil whenever memory and disk agree.
         @uncommitted_from = nil.as(Mode?)
+        @rule_config_key = stored_rule_config_key?
       end
 
       # Re-read the Rules sub-tab config (disabled built-ins + custom rules) and force a re-scan of
@@ -134,13 +140,81 @@ module Gori
       # a new custom rule over already-seen traffic. Disabling a rule only stops NEW detections —
       # existing findings persist until dismissed/deleted/cleared.
       def reload_rule_config : Nil
-        rules = Scan::RuleConfig.load(@store)
-        @disabled, @custom, @disabled_degraded = rules.disabled, rules.custom, rules.degraded
-        @warned_degraded = false unless @disabled_degraded # re-arm the warning if the store re-breaks
+        load_rule_config(stored_rule_config_key?)
         # Re-resolve the OAST minter too, so a Rules-tab edit picks up a listener started since
         # construction. The OAST tab arms it directly through `rearm_out_of_band` (starting a
         # listener is not a probe-config edit, so it does not route here).
         @oob = load_oob
+        rescan_recent
+      end
+
+      # Adopt what a PEER (MCP `set_probe_rule_enabled` / `delete_probe_rule` / `probe_delete`,
+      # `gori run probe rules`, a second TUI, a settings.json edit) changed under this analyzer:
+      # the Rules config, the hard-delete suppressions and the OAST session. The twin of
+      # `apply_stored_mode`, polled on the same ticks. `reload_rule_config` is this process's own
+      # edit; without this, a rule disabled elsewhere — an active one, or a custom `exec` rule —
+      # went on firing here for the rest of the session.
+      #
+      # The Rules config is re-read only when its stored inputs moved, and recent traffic is
+      # re-scanned only when the move ENABLED something: a re-scan bumps `hit_count` on every
+      # finding it re-sees, and a disable only has to stop new detections.
+      def apply_stored_config : Nil
+        Settings.reload_scan_rules_from_disk # the global half of the rules lives in settings.json
+        @suppressed = @store.probe_suppressions.map { |(code, host)| "#{code}|#{host}" }.to_set
+        follow_stored_oob
+        key = stored_rule_config_key
+        # A degraded load is retried every tick (fail-closed active probing must heal on its own).
+        return if key == @rule_config_key && !@disabled_degraded
+        was_key, was_disabled, was_degraded = @rule_config_key, @disabled, @disabled_degraded
+        load_rule_config(key)
+        return if @disabled_degraded
+        rescan_recent if was_degraded || !was_disabled.subset_of?(@disabled) || enables_custom?(was_key, key)
+      rescue DB::Error | SQLite3::Exception
+        # Same tolerance as `apply_stored_mode`: an unreadable row leaves the live config alone
+        # and the next tick tries again.
+      end
+
+      private def stored_rule_config_key : RuleConfigKey
+        {@store.setting(Store::PROBE_DISABLED_KEY), @store.probe_custom_rules.select(&.enabled?),
+         Settings.scan_rules.select(&.enabled)}
+      end
+
+      private def stored_rule_config_key? : RuleConfigKey?
+        stored_rule_config_key
+      rescue DB::Error | SQLite3::Exception
+        nil
+      end
+
+      private def load_rule_config(key : RuleConfigKey?) : Nil
+        rules = Scan::RuleConfig.load(@store)
+        @disabled, @custom, @disabled_degraded = rules.disabled, rules.custom, rules.degraded
+        @warned_degraded = false unless @disabled_degraded # re-arm the warning if the store re-breaks
+        @rule_config_key = key
+      end
+
+      # Did the move add or change an enabled custom rule (a new pattern to run)?
+      private def enables_custom?(was : RuleConfigKey?, now : RuleConfigKey) : Bool
+        return true unless was
+        !(now[1] - was[1]).empty? || !(now[2] - was[2]).empty?
+      end
+
+      # Follow the session a peer's listener now polls (`StoreMinter.build` picks it). Arms the
+      # active backfill only when the OAST rules go from inert to armed, as `rearm_out_of_band`
+      # does for this process's own listener.
+      private def follow_stored_oob : Nil
+        fresh = load_oob
+        return if oob_session(fresh) == oob_session(@oob)
+        was = @oob
+        @oob = fresh
+        arm_active_backfill if fresh && was.nil?
+      end
+
+      private def oob_session(m : OutOfBand::Minter?) : Int64?
+        m.as?(OutOfBand::StoreMinter).try(&.session_id)
+      end
+
+      # Clearing @analyzed lets the catch-up sweep re-run the current rules over recent traffic.
+      private def rescan_recent : Nil
         @analyzed.clear
         @retry_flows.clear
         @catchup_seeded = false
@@ -951,7 +1025,7 @@ module Gori
           # The send yields for up to ACTIVE_TIMEOUT, and a target that fetches the payload at
           # once has its callback stored, and swept past with no pending row to match, before
           # the row above exists. Rewind the next sweep to where this send started; a re-read
-          # callback cannot promote twice (`mark_probe_oast_matched` is conditional).
+          # callback cannot promote twice (`promote_probe_oast` is conditional).
           @oob_floor = {@oob_floor || oob_mark, oob_mark}.min unless plan.oob.empty?
         end
         # Surface send failures (TLS/DNS/timeout) so Active never fails silently — but
@@ -1035,12 +1109,10 @@ module Gori
           @oob_floor = nil
           since = {since, floor}.min
         end
+        # The sweep has already WRITTEN these (claim and upsert are one transaction), so they
+        # are only announced here — never persisted a second time.
         detections, @oob_watermark = OutOfBand.sweep(@store, since)
         return if detections.empty?
-        # flow_id rides on each Detection (stamped at plant time from the probed flow), so
-        # `persist` is passed 0 and `with_source` keeps the detection's own id. `persist` bumps
-        # the generation + emits ONE message-less list-refresh event.
-        persist(detections, flow_id: 0_i64, repeater_id: nil)
         # One tray notification PER confirmed finding. A single sweep can promote several distinct
         # callbacks (two SSRF targets calling home between ticks), and a blind-SSRF confirmation is
         # exactly the moment an operator must not miss — collapsing them to the first would drop a

@@ -71,7 +71,7 @@ module Gori
           content =
             case format
             when :json     then Issues::Export.json(issues, store)
-            when :markdown then Issues::Export.markdown(issues, store, project.name)
+            when :markdown then Issues::Export.markdown(issues, store, project.name, Redact::Policy.ambient(store))
             when :sarif    then Issues::Export.sarif(issues, store, project.name, include_sensitive)
             else                issues_text(issues)
             end
@@ -214,7 +214,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
 
-        abort "gori run issues create: --title is required" if (t = title).nil? || t.empty?
+        abort "gori run issues create: --title is required" if (t = title).nil? || t.strip.empty?
 
         # Refuse a cvss nothing can score, BEFORE the insert. Stored as-is it would sit in a
         # column the Issues list, `cvss:` queries and every export read through a parser that
@@ -429,9 +429,9 @@ module Gori
             # sprintf, not Float64#to_s: `--cvss 8.85` is accepted, and the TUI, SARIF's
             # security-severity and this listing must not print it three different ways.
             cvss_tag = f.cvss_score.try { |sc| "  [CVSS #{sprintf("%.1f", sc)}]" } || ""
-            io << '#' << f.id << "  [" << f.severity.label << '/' << f.status.label << ']' << cvss_tag << "  " << Issues::Export.one_line(f.title)
+            io << '#' << f.id << "  [" << f.severity.label << '/' << f.status.label << ']' << cvss_tag << "  " << Output.term_line(f.title)
             if h = f.host
-              io << "  (" << Issues::Export.one_line(h) << ')'
+              io << "  (" << Output.term_line(h) << ')'
             end
             # The issue's FIRST related item, in the compact spelling this one-line-per-issue
             # listing has room for. There is no related LIST here to make it the first row of

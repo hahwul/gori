@@ -1032,12 +1032,24 @@ module Gori::Proxy::Codec::Http1
   # Whether rewriting a Content-Length line to a canonical count preserves its meaning. The
   # whole line is replaced by the rewrite, so an indented obs-fold or non-decimal value is an
   # operator-authored probe and must stay untouched. Shared by Repeater and structured import.
+  # Whitespace before the colon (`Content-Length : 5`) is the same kind of probe as the
+  # obs-fold: the rewrite would drop it.
   def self.rewritable_length_header?(line : String) : Bool
     return false if line.starts_with?(' ') || line.starts_with?('\t')
-    value = line.split(':', 2)[1]?
-    return false unless value
+    name, colon, value = line.partition(':')
+    return false if colon.empty? || name.ends_with?(' ') || name.ends_with?('\t')
     digits = value.strip
     !digits.empty? && digits.each_char.all?(&.ascii_number?)
+  end
+
+  # Whether head `line` is the `lower_name` header, the way a whitespace-lenient origin reads
+  # it: the text before the first `:` with surrounding whitespace trimmed, compared ASCII
+  # case-insensitively. So `Transfer-Encoding : chunked` and an obs-folded ` Content-Length: 5`
+  # both count — the DETECTION half of the auto-CL guards, which must see an obfuscated
+  # framing header to leave it alone (`Fuzz::ContentLength.cl_line?` is the byte-level twin).
+  def self.header_line_named?(line : String, lower_name : String) : Bool
+    colon = line.byte_index(':'.ord)
+    !colon.nil? && line.byte_slice(0, colon).strip.compare(lower_name, case_insensitive: true) == 0
   end
 
   # Index of the CRLF at or after `from`, or nil if none. Scans the raw bytes so

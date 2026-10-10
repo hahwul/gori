@@ -155,14 +155,17 @@ module Gori
         # Every occurrence is examined, not just the first: the same value routinely lands in more
         # than one place in one response, and the first hit is as likely to be the escaped one as
         # the raw one. Returns the longest surviving prefix across them. Occurrences of a 10-char
-        # random canary are few, so the walk is bounded in practice.
+        # random canary are few, but a hostile origin can echo it thousands of times, so offsets
+        # are BYTES: a char-offset `index` walks from the start of a non-ASCII body on every hit.
+        # MARKER is ASCII, so its n-th byte is its n-th char.
         private def survived(hay : String, canary : String) : String?
           from = 0
           best = nil.as(String?)
-          while i = hay.index(canary, from)
-            tail = i + canary.size
+          bytes = hay.to_slice
+          while i = hay.byte_index(canary, from)
+            tail = i + canary.bytesize
             n = 0
-            while n < MARKER.size && (c = hay[tail + n]?) && c == MARKER[n]
+            while n < MARKER.bytesize && (b = bytes[tail + n]?) && b == MARKER.byte_at(n)
               n += 1
             end
             best = MARKER[0, n] if best.nil? || n > best.size

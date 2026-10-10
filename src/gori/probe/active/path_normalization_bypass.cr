@@ -66,9 +66,10 @@ module Gori
           # No usable control ⇒ no attribution. Refuse rather than fall back to the captured status:
           # that fallback IS the false positive this leg exists to remove.
           return [] of Detection unless control && Evidence.complete?(control)
-          # The canonical path serves 2xx now too ⇒ the gate is simply open (a transient/rate-limited
-          # 403 that cleared), and every variant "flip" below is that same clearing, not a bypass.
-          return [] of Detection if (200..299).includes?(probe_status(control))
+          # The canonical path must still be DENIED (401/403, as the sibling bypass rules require).
+          # A 2xx means the gate is simply open (a transient 403 that cleared); a 429/503/404/3xx
+          # says nothing about access control, so neither backs "canonical path still denied".
+          return [] of Detection unless {401, 403}.includes?(probe_status(control))
           orig = detail.row.status
           hits = [] of String
           plan.params.each_with_index do |param, i|

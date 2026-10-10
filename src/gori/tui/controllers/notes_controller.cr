@@ -584,10 +584,17 @@ module Gori::Tui
     # Skip the prompt when the note is already blank (nothing to lose).
     def notes_clear : Nil
       return if @notes.current_blank?
+      # By identity at answer time, as notes_close: a peer reload under the modal can move the
+      # selection, and the note named here is the one to clear.
+      return unless note = @notes.note_at(@notes.current_index)
       @host.confirm("CLEAR NOTE", "Clear this note's text?\nThis can't be undone.",
         confirm_label: "clear", danger: true) do
-        @notes.clear_current
-        @host.status("note cleared")
+        if subtab_index_of(note)
+          @notes.clear_current(note)
+          @host.status("note cleared")
+        else
+          @host.status("already closed")
+        end
       end
     end
 

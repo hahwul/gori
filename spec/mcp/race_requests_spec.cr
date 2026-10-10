@@ -145,5 +145,18 @@ describe Gori::MCP::Server do
         resp["result"]["content"][0]["text"].as_s.should contain("SNI")
       end
     end
+
+    # A race member goes through `Repeater::Sender`, whose Layer 2 is `send_block` (Sandbox
+    # only): an exclude does not stop a hand-authored send, so the waiver must not promise one.
+    it "promises only the Sandbox under allow_unscoped, as send_block enforces" do
+      with_store do |store|
+        listed = mcp_drive(store, %({"jsonrpc":"2.0","id":1,"method":"tools/list"}))[0]["result"]["tools"].as_a
+        %w[race_requests timing_requests].each do |name|
+          desc = listed.find! { |t| t["name"].as_s == name }["inputSchema"]["properties"]["allow_unscoped"]["description"].as_s
+          desc.should contain("Sandbox still applies")
+          desc.should_not contain("exclude")
+        end
+      end
+    end
   end
 end

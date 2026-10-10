@@ -2619,7 +2619,9 @@ module Gori::Tui
 
     # The IssueForm's injected commit. Returns true when the shell should close the form.
     private def create_issue_from_form(form : IssueForm) : Bool
-      title = form.issue_title.strip
+      # Masked as `gori run issues` and MCP mask them: a pasted token stored in an issue is
+      # printed by every export and report.
+      title = Env.mask_secrets(form.issue_title.strip)
       title = "untitled issue" if title.empty?
       cvss_raw = form.cvss.strip
       cvss_val = cvss_raw.presence
@@ -2636,8 +2638,8 @@ module Gori::Tui
         issues_controller.view.resync(@session.store)
         @toast = "issue updated"
       else
-        new_id = @session.store.insert_issue(title, form.severity, form.host, form.flow_id, cvss: cvss_val,
-          notes: form.notes)
+        new_id = @session.store.insert_issue(title, form.severity, form.host.try { |h| Env.mask_secrets(h) },
+          form.flow_id, cvss: cvss_val, notes: Env.mask_secrets(form.notes))
         # `insert_issue` returns 0 — NOT nil — when the write never committed, and 0 is TRUTHY
         # in Crystal: the same trap `Probe::Triage.promote` and `sequencer_promote` both name.
         # Everything below takes `new_id` as an owner id, so swallowing it filed entity_links
@@ -4256,6 +4258,16 @@ module Gori::Tui
       # when the file has not moved; the Env card edits its own working copy, not these.
       Settings.reload_env_from_disk
       Settings.reload_user_agents_from_disk
+      # Likewise the global OAST providers and hostname overrides (read at every dial); the scan
+      # rules are re-read by the analyzer just below.
+      Settings.reload_oast_providers_from_disk
+      Settings.reload_hostname_overrides_from_disk
+      # The Probe analyzer's config, which it read once at open: a rule a peer disabled (an active
+      # one, a custom `exec` one) kept firing here, and a suppression a peer cleared kept muting.
+      # On the bare cadence rather than behind `data_version`, because a GLOBAL scan rule lives in
+      # settings.json and moves no project commit. Cheap: four small reads, and the rules are
+      # rebuilt only when their stored inputs moved.
+      @session.probe.apply_stored_config
       # The rule sets hold their own peer delta rather than returning it, so a re-read cannot eat
       # it — the Rewriter tab's `on_enter` and its `r` key both reload, and a peer's change picked
       # up by one of those is still owed a line. Taking here, on the bare cadence, is what makes
@@ -5552,8 +5564,9 @@ module Gori::Tui
       end
       seed = sequencer_controller.build_seed_from_current
       return (@toast = "manual sessions have no token descriptor to configure") unless seed
+      return unless view = sequencer_controller.current_view
       ov = SequenceConfigOverlay.new(seed)
-      ov.on_commit = -> { commit_sequence(ov) { sequencer_controller.reconfigure_current(ov.build_config) } }
+      ov.on_commit = -> { commit_sequence(ov) { sequencer_controller.reconfigure_current(ov.build_config, view) } }
       open_overlay(ov)
     end
 

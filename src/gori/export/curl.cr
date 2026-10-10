@@ -60,7 +60,10 @@ module Gori
         method, req_target, version = parse_request_line(request_line)
         url = resolve_url(req_target, target, header_lines)
         return nil if url.empty?
-        command(method, url, header_lines, body, version)
+        # A target no URL can carry — a raw `#` (the URL parser cuts the fragment, query and all)
+        # or the asterisk form — goes out verbatim through curl's own override.
+        verbatim = req_target if req_target == "*" || (req_target.includes?('#') && !Gori::Url.absolute_form?(req_target))
+        command(method, url, header_lines, body, version, verbatim)
       end
 
       # A copy-pasteable `curl` invocation reproducing the request. URL first (browser
@@ -81,7 +84,7 @@ module Gori
       # second one IN THE OPERATOR'S SHELL the moment they pasted what gori handed them, which
       # is the one place a hostile capture could aim this command. Quoted like the rest now.
       def self.command(method : String, url : String, header_lines : Array(String),
-                       body : String, version : String = "") : String
+                       body : String, version : String = "", request_target : String? = nil) : String
         # FIRST, and a refusal rather than a note: the URL is the one argument the command IS.
         # There is no curl line without it and no `-X`-style fallback to fall back to, so a NUL
         # in it means there is nothing runnable to hand over — see `nul_url_note`.
@@ -101,12 +104,17 @@ module Gori
         parts = ["curl #{shell_quote(Escape.percent_encode_non_ascii(url))}"]
         parts << "--globoff" if globbed?(url)
         parts << "--path-as-is" if dot_segments?(url)
+        request_target.try { |t| parts << "--request-target #{shell_quote(t)}" }
         if flag = version_flag(version, url)
           parts << flag
         end
         # Emit -X unless it's a plain bodyless GET (curl's default). A GET *with* a body
         # still needs -X GET, else curl silently promotes the request to POST.
-        unless method.empty? || (method == "GET" && entity.empty?)
+        # A bodiless HEAD is `-I`, never `-X HEAD`: under -X curl still expects the body the
+        # response's Content-Length announces, and hangs waiting for it.
+        if method == "HEAD" && entity.empty?
+          parts << "-I"
+        elsif !(method.empty? || (method == "GET" && entity.empty?))
           if note = nul_method_note(method, entity)
             notes << note
           else
@@ -118,7 +126,9 @@ module Gori
         each_header(header_lines) do |name, value|
           down = name.downcase
           content_type = true if down == "content-type"
-          next if down == "content-length"
+          # curl derives the length from `--data-raw`, and sends NONE for a bodiless POST, which
+          # a server that requires one answers 411. A captured `Content-Length: 0` stays.
+          next if down == "content-length" && !(entity.empty? && value.strip == "0" && method != "GET" && method != "HEAD")
           next if MARKER_HEADERS.includes?(down) || PROXY_ONLY_HEADERS.includes?(down)
           # curl derives Host FROM THE URL — which is the captured header only when the capture's
           # Host IS the URL's authority. When it is not, that disagreement is the request (a Host
@@ -356,7 +366,7 @@ module Gori
       # against a raw listener, curl 8.7.1. A captured traversal is exactly the request that
       # must reach the origin as written, so the flag rides along whenever the path has one.
       # The predicate is `Gori::Url.dot_segments?`, shared with the import that reads it back.
-      private def self.dot_segments?(url : String) : Bool
+      def self.dot_segments?(url : String) : Bool
         rest = (sep = url.byte_index("://")) ? url.byte_slice(sep + 3) : url
         slash = rest.byte_index('/') || return false
         Gori::Url.dot_segments?(rest.byte_slice(slash))

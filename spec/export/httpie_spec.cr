@@ -16,6 +16,11 @@ describe Gori::Export::Httpie do
     cmd.should contain(%(--raw '{"a":1}'))
   end
 
+  it "keeps dot segments with --path-as-is, as the curl export does" do
+    httpie("GET /a/../b HTTP/1.1\r\nHost: h.test\r\n\r\n", "https://h.test").should contain("http --path-as-is 'GET'")
+    httpie("GET /a/b HTTP/1.1\r\nHost: h.test\r\n\r\n", "https://h.test").should_not contain("--path-as-is")
+  end
+
   it "single-quotes a header value so a shell metacharacter cannot end the command" do
     cmd = httpie("GET / HTTP/1.1\r\nHost: h.test\r\nX-Evil: ;id\r\n\r\n", "https://h.test")
     cmd.should contain("'X-Evil:;id'")

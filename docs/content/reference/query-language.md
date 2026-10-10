@@ -200,6 +200,9 @@ host:"my host"                        one host value, space and all
 "OR"                                  the literal word, not the operator
 ```
 
+Inside quotes, `\"` is a literal quote: `body:"\"role\":\"admin\""` searches for `"role":"admin"`.
+A `body:` or `header:` value holding a control character (a tab inside quotes, a NUL) is dropped and reported, not searched.
+
 A parenthesis inside a value stays literal, so `path:/a(b)` needs no escaping. A `(`
 only opens a group at the start of a term, and `)` only closes one at the end.
 

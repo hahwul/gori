@@ -243,7 +243,7 @@ describe "Gori::Tui::OastController — the callback buffer is a bounded window"
       controller.@callbacks.size.should eq(OastController::CALLBACK_CAP)
       # @seen interned one uid per row in lockstep — capping the rows alone would have left
       # the same unbounded growth behind, just with a smaller constant.
-      controller.@seen.values.sum(&.size).should eq(OastController::CALLBACK_CAP)
+      controller.@seen.size.should eq(OastController::CALLBACK_CAP)
       controller.@evicted.should eq(over)
 
       # A WINDOW, not a destructive trim: not one interaction left the project DB.
@@ -300,7 +300,7 @@ describe "Gori::Tui::OastController — the callback buffer is a bounded window"
       controller.on_enter # full reload: clears everything and re-folds the WHOLE table
 
       controller.@callbacks.size.should eq(OastController::CALLBACK_CAP)
-      controller.@seen.values.sum(&.size).should eq(OastController::CALLBACK_CAP)
+      controller.@seen.size.should eq(OastController::CALLBACK_CAP)
       # Recomputed from the table, not carried across — a revisit must not inflate the count.
       controller.@evicted.should eq(over)
       callbacks_pane(controller).should contain("#{over} older kept in the project DB")

@@ -71,12 +71,12 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   private def build_link_add_picker(lo : LinksOverlay, kind : Char) : PickerOverlay?
     case kind
     when 'f' then link_add_flow_picker(lo)
-    when 'r' then link_add_subtab_picker(lo, "PICK REPEATER", repeater_controller.subtab_search_rows,
-      Store::LinkRefKind::Repeater, "no repeater sessions to link") { |i| repeater_controller.db_id_at(i) }
-    when 'z' then link_add_subtab_picker(lo, "PICK FUZZ", fuzzer_controller.subtab_search_rows,
-      Store::LinkRefKind::Fuzz, "no fuzz sessions to link") { |i| fuzzer_controller.db_id_at(i) }
-    when 'm' then link_add_subtab_picker(lo, "PICK MINER", miner_controller.subtab_search_rows,
-      Store::LinkRefKind::Miner, "no miner sessions to link") { |i| miner_controller.db_id_at(i) }
+    when 'r' then link_add_subtab_picker(lo, "PICK REPEATER", repeater_controller,
+      Store::LinkRefKind::Repeater, "no repeater sessions to link")
+    when 'z' then link_add_subtab_picker(lo, "PICK FUZZ", fuzzer_controller,
+      Store::LinkRefKind::Fuzz, "no fuzz sessions to link")
+    when 'm' then link_add_subtab_picker(lo, "PICK MINER", miner_controller,
+      Store::LinkRefKind::Miner, "no miner sessions to link")
     end
   end
 
@@ -92,26 +92,45 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   # One builder for the three session pickers (repeater / fuzz / miner): they differ
-  # only by heading, row source, link kind and how a sub-tab index resolves to a DB id.
-  private def link_add_subtab_picker(lo : LinksOverlay, title : String, rows : Array(SubtabPicker::Row),
-                                     ref_kind : Store::LinkRefKind, empty_toast : String,
-                                     &db_id : Int32 -> Int64?) : PickerOverlay?
+  # only by heading, the controller the rows come from, and link kind.
+  private def link_add_subtab_picker(lo : LinksOverlay, title : String, ctrl : SessionPickerSource,
+                                     ref_kind : Store::LinkRefKind, empty_toast : String) : PickerOverlay?
+    rows = ctrl.subtab_search_rows
     if rows.empty?
       @toast = empty_toast
       return nil
     end
+    ids = session_picker_ids(rows, ctrl)
     sp = SubtabPicker.new(title, rows, action: "link")
     sp.on_commit = -> {
-      if idx = sp.selected_index
-        if rid = db_id.call(idx)
-          commit_link_to_owner(lo.owner_kind, lo.owner_id, ref_kind, rid)
-        else
-          @toast = "session not persisted"
-        end
+      if rid = picked_session_id(sp, ids, ctrl)
+        commit_link_to_owner(lo.owner_kind, lo.owner_id, ref_kind, rid)
       end
       true
     }
     sp
+  end
+
+  private alias SessionPickerSource = RepeaterController | FuzzerController | MinerController
+
+  # A session picker's DB ids, snapshotted with its rows. The per-tick reconcile keeps running
+  # under the card, so a peer's delete or move can reorder the sessions before ↵: resolving the
+  # row's index THEN would link (or retest) a session the operator never saw.
+  private def session_picker_ids(rows : Array(SubtabPicker::Row), ctrl : SessionPickerSource) : Hash(Int32, Int64?)
+    rows.to_h { |r| {r.index, ctrl.db_id_at(r.index)} }
+  end
+
+  # The id the highlighted row named when the card opened — nil, with the toast said, when it
+  # was never persisted or has been closed since.
+  private def picked_session_id(sp : SubtabPicker, ids : Hash(Int32, Int64?), ctrl : SessionPickerSource) : Int64?
+    return unless idx = sp.selected_index
+    unless rid = ids[idx]?
+      @toast = "session not persisted"
+      return
+    end
+    return rid if ctrl.index_for_db_id(rid)
+    @toast = "that session was closed — nothing picked"
+    nil
   end
 
   private def remove_selected_link(lo : LinksOverlay) : Nil

@@ -369,8 +369,8 @@ module Gori::Repeater
     # not gori's to rewrite — malformed, duplicated, or obs-folded. A head with NO
     # Content-Length is fine: `resolve` adds one (`add_if_missing` is on for this caller).
     private def self.body_reframable?(head_lines : Array(String)) : Bool
-      return false if head_lines.any? { |l| l.lstrip[0, 18]?.try(&.downcase) == "transfer-encoding:" }
-      cl = head_lines.select { |l| l.lstrip.downcase.starts_with?("content-length:") }
+      return false if head_lines.any? { |l| Proxy::Codec::Http1.header_line_named?(l, "transfer-encoding") }
+      cl = head_lines.select { |l| Proxy::Codec::Http1.header_line_named?(l, "content-length") }
       return true if cl.empty?
       cl.size == 1 && Proxy::Codec::Http1.rewritable_length_header?(cl[0])
     end

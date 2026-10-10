@@ -336,6 +336,9 @@ describe Gori::Protobuf::Encoder do
         .as(String).should contain("even number of digits")
       Encoder.encode(s, defn(1, Schema::FieldType::Bytes), "zz", packed: false)
         .as(String).should contain("not a hex byte")
+      # A sign is not a hex digit: `to_u8?(16)` read `+f+f` as `0f 0f`.
+      Encoder.encode(s, defn(1, Schema::FieldType::Bytes), "+f+f", packed: false)
+        .as(String).should contain("not a hex byte")
       # A float past Float32's range SATURATES on an unchecked cast; the checked one would
       # raise, in a module whose contract is a sentence back.
       Encoder.encode(s, defn(1, Schema::FieldType::Float), "1e60", packed: false)

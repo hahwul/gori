@@ -155,10 +155,10 @@ class Gori::Tui::RepeaterView
   # Content-Length, a plain numeric value), for the split-decode and gRPC-Web paths that
   # rewrite a head of their own rather than go through it.
   private def resyncable_cl_index(lines : Array(String)) : Int32?
-    return nil if lines.any?(&.lstrip.downcase.starts_with?("transfer-encoding:"))
+    return nil if lines.any? { |l| Proxy::Codec::Http1.header_line_named?(l, "transfer-encoding") }
     found = nil
     lines.each_with_index do |l, i|
-      next unless l.lstrip.downcase.starts_with?("content-length:")
+      next unless Proxy::Codec::Http1.header_line_named?(l, "content-length")
       return nil if found
       found = i
     end

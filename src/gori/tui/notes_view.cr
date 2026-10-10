@@ -262,9 +262,9 @@ module Gori::Tui
       @dirty = true
     end
 
-    # Clear the current note's text (the sub-tab stays open).
-    def clear_current : Nil
-      current.area.set_text("")
+    # Clear a note's text — the current one by default (the sub-tab stays open).
+    def clear_current(note : Note = current) : Nil
+      note.area.set_text("")
       @dirty = true
     end
 

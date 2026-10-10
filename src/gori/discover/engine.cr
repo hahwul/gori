@@ -893,10 +893,12 @@ module Gori::Discover
     rescue ex
       # ErrorEvent is terminal (no trailing DoneEvent) so consumers don't mask the error
       # with a success Done — see the setup-error path above.
-      # Close @jobs too (the happy path does this at line ~285): otherwise the worker
-      # fibers stay parked on @jobs.receive? forever — a fiber + socket leak. Closing it
-      # makes each worker's receive? return nil, so they run their `ensure @finished.done`
-      # and exit (their one in-flight outcome fits in @discovered's conc*2 buffer).
+      # Close @jobs too (the happy path does this above): otherwise the worker fibers stay
+      # parked on @jobs.receive? forever — a fiber + socket leak. A closed channel still
+      # delivers what it buffered, though, so the run is also STOPPED: the workers stub the
+      # queued tasks out (the same path an operator's stop takes) instead of sending them for a
+      # run that already ended.
+      @state = State::Stopped
       @jobs.close rescue nil
       # Same reason: the parked sockets are nobody's, and this path does not join the workers,
       # so nothing else will ever close them. A socket a worker still holds is checked OUT and
@@ -904,6 +906,12 @@ module Gori::Discover
       @capped.close rescue nil
       @events.send(ErrorEvent.new(ex.message || "discover error")) rescue nil
       @events.close rescue nil
+      # Each worker still owes an outcome per task it takes, and nothing else receives them:
+      # past @discovered's conc*2 buffer a worker would park on `send` forever. Drain until the
+      # last one has exited.
+      spawn { @finished.wait; @discovered.close }
+      while @discovered.receive?
+      end
     end
 
     # Receive the outcomes of every dispatched-but-unhandled task before closing @jobs, so

@@ -97,21 +97,17 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # The same sub-tab picker the LINKS card adds a repeater with, so "which session" is one
   # list in both places. A project with no sessions is said out loud and pops straight back.
   private def open_retest_session_picker(ov : RetestOverlay) : Nil
-    rows = repeater_controller.subtab_search_rows
+    ctrl = repeater_controller
+    rows = ctrl.subtab_search_rows
     if rows.empty?
       @toast = "no repeater sessions — send a request to the Repeater first"
       return reopen_retest(ov)
     end
+    ids = session_picker_ids(rows, ctrl) # with the rows, not at ↵ (see links.cr)
     sp = SubtabPicker.new("PICK REPEATER FOR RETEST", rows, action: "add")
     picked = nil.as(Int64?)
     sp.on_commit = -> {
-      if idx = sp.selected_index
-        if rid = repeater_controller.db_id_at(idx)
-          picked = rid
-        else
-          @toast = "session not persisted"
-        end
-      end
+      picked = picked_session_id(sp, ids, ctrl)
       true
     }
     sp.on_close = -> {

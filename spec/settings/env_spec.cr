@@ -105,3 +105,20 @@ describe "Settings.reload_user_agents_from_disk" do
     end
   end
 end
+
+# Read at every dial (`host_override_address`), so a long-lived process has to follow a peer's
+# edit — and its removal, which drops the section from the file.
+describe "Settings.reload_hostname_overrides_from_disk" do
+  it "adopts a peer's override, and its removal" do
+    with_env_home do |dir|
+      Gori::Settings.hostname_overrides = [{"acme.test", "10.0.0.1"}]
+      write_settings(dir, %({"env":{"syntax":"bare"},"hostname_overrides":[{"host":"acme.test","ip":"10.0.0.2"}]}))
+      Gori::Settings.reload_hostname_overrides_from_disk
+      Gori::Settings.host_override_address("acme.test").should eq("10.0.0.2")
+
+      write_settings(dir, %({"env":{"syntax":"bare"}}))
+      Gori::Settings.reload_hostname_overrides_from_disk
+      Gori::Settings.host_override_address("acme.test").should be_nil
+    end
+  end
+end

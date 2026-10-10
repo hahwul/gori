@@ -79,8 +79,10 @@ module Gori::Update
   # that ran ahead and was then corrected leaves in settings.json, and a bare
   # `now - checked_at < ttl` read that negative age as fresh, so the probe stayed
   # off — and a newer release went unannounced — until the wall clock caught up.
+  # Wrapping `&-`: a hand-edited `checked_at` of Int64::MIN overflowed the plain `-` and
+  # crashed every launch. An age too large for Int64 wraps negative, which reads as stale.
   def self.check_cache_fresh?(checked_at : Int64, now : Int64, ttl : Int) : Bool
-    age = now - checked_at
+    age = now &- checked_at
     age >= 0 && age < ttl
   end
 

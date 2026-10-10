@@ -971,3 +971,58 @@ describe "Probe::Analyzer active queue admission" do
     end
   end
 end
+
+# A PEER (MCP, `gori run probe`, a second TUI) edits what the live analyzer read at open. The
+# peer tick (`apply_stored_config`) has to bring it across, or a rule disabled elsewhere keeps
+# firing here and a cleared suppression keeps muting.
+describe "Gori::Probe::Analyzer#apply_stored_config" do
+  it "adopts a built-in a peer disabled and a custom rule a peer deleted" do
+    with_store do |store|
+      rid = store.insert_probe_custom_rule("marker", "d", "response", "body", "string", "hello",
+        Gori::Store::Severity::Low)
+      scope = Gori::Scope.load(store)
+      a = Gori::Probe::Analyzer.new(store, scope, Channel(Gori::Store::FlowEvent).new(8),
+        Gori::Probe::Mode::Active, true)
+      a.@custom.size.should eq(1)
+
+      set_probe_rule_enabled(store, "sqli_boolean_based", false)
+      store.delete_probe_custom_rule(rid)
+      a.@disabled.includes?("sqli_boolean_based").should be_false
+
+      a.apply_stored_config
+      a.@disabled.includes?("sqli_boolean_based").should be_true
+      a.@custom.should be_empty
+    end
+  end
+
+  it "stops muting a (code, host) once a peer cleared every suppression" do
+    with_store do |store|
+      resp = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nServer: nginx\r\n\r\n"
+      detail = probe_capture_flow(store, resp, target: "/", body: "<p>hi</p>")
+      scope = Gori::Scope.load(store)
+      a = Gori::Probe::Analyzer.new(store, scope, Channel(Gori::Store::FlowEvent).new(8),
+        Gori::Probe::Mode::Passive, true)
+      a.scan_detail(detail)
+      issue = store.probe_issues.find(&.code.==("tech_server")).not_nil!
+      a.suppress(issue.code, issue.host)
+      store.delete_probe_issue(issue.id)
+
+      store.clear_probe_issues.should be_true # the peer's `probe_delete all`
+      a.apply_stored_config
+      a.scan_detail(probe_capture_flow(store, resp, target: "/again", body: "<p>hi</p>"))
+      store.probe_issues.count(&.code.==("tech_server")).should eq(1)
+    end
+  end
+
+  it "follows an OAST session a peer registered after open" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      a = Gori::Probe::Analyzer.new(store, scope, Channel(Gori::Store::FlowEvent).new(8),
+        Gori::Probe::Mode::Passive, true)
+      a.@oob.should be_nil
+      sid = store.insert_oast_session(nil, "interactsh", "https://oast.pro", "corr", "s", nil, nil)
+      a.apply_stored_config
+      a.@oob.as(Gori::Probe::OutOfBand::StoreMinter).session_id.should eq(sid)
+    end
+  end
+end

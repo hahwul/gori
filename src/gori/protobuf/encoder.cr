@@ -333,7 +333,8 @@ module Gori::Protobuf
       buf = Bytes.new(cleaned.size // 2)
       i = 0
       while i < cleaned.size
-        v = cleaned[i, 2].to_u8?(16)
+        # `hex?` first: `to_u8?(16)` alone takes a sign, so `+f+f` was read as `0f 0f`.
+        v = cleaned[i, 2].to_u8?(16) if cleaned[i].hex? && cleaned[i + 1].hex?
         return "#{cleaned[i, 2].inspect} is not a hex byte" unless v
         buf[i // 2] = v
         i += 2

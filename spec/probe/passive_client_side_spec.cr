@@ -182,6 +182,27 @@ describe Gori::Probe::Passive::PostMessage do
     end
   end
 
+  # The window is cut by BYTE offset: a char offset re-walked a non-ASCII bundle from its start
+  # per handler, ~0.8s on one 256 KiB flow.
+  it "judges handlers in a non-ASCII bundle by byte window, in linear time" do
+    with_store do |store|
+      unit = "addEventListener('message',function(e){if(e.origin)x()});\n"
+      js = "var s='é';" + unit * (256 * 1024 // unit.size)
+      ctx = Gori::Probe::Passive::Context.new(probe_capture_flow(store,
+        "HTTP/1.1 200 OK\r\nContent-Type: application/javascript\r\n\r\n",
+        content_type: "application/javascript", body: js))
+      ctx.client_scripts_nocomment
+      acc = [] of Gori::Probe::Detection
+      started = Time.instant
+      Gori::Probe::Passive::PostMessage.new.check(ctx, acc)
+      (Time.instant - started).should be < 2.seconds
+      acc.map(&.code).should_not contain("postmessage_no_origin")
+      # …and a window that ends mid-character is repaired, not raised on.
+      probe_codes_of(analyze_js(store, %(onmessage = function(e){ ) + "é" * 1500 + %( ok(); };)))
+        .should contain("postmessage_no_origin")
+    end
+  end
+
   it "flags a wildcard target origin and document.domain relaxation" do
     with_store do |store|
       probe_codes_of(analyze_js(store, %(parent.postMessage(payload, "*");))).should contain("postmessage_wildcard")

@@ -210,7 +210,7 @@ module Gori
       return if bytes.empty?
       acc = [] of {String, String, Bool}
       begin
-        pull = JSON::PullParser.new(String.new(bytes))
+        pull = JSON::PullParser.new(RawJson.tolerant(String.new(bytes)))
         walk_json(pull, "", 0, acc) # the parser raises on anything trailing the root value
       rescue ex : JSON::ParseException
         return unless ex.message.try(&.includes?("Nesting"))

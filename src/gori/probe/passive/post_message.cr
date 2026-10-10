@@ -61,13 +61,19 @@ module Gori
         end
 
         # True when `code` registers an INLINE message handler whose body does not consult
-        # `.origin` within HANDLER_WINDOW characters of its opening brace. Scans every handler in
+        # `.origin` within HANDLER_WINDOW bytes of its opening brace. Scans every handler in
         # the fragment: a bundle can register several, and one that checks its sender must not
         # vouch for one that does not.
+        #
+        # BYTE offsets: `m.end(0)` and a char slice each re-walk a non-ASCII script from its
+        # start, per handler (792ms on one 256 KiB flow). `Utf8.text` repairs a window cut
+        # mid-character.
         private def unchecked_handler?(code : String) : Bool
+          bytes = code.to_slice
           code.scan(LISTENER) do |m|
-            body = code[m.end(0), HANDLER_WINDOW]?
-            return true if body.nil? || !ORIGIN_CHECK.matches?(body)
+            at = m.byte_end(0)
+            body = Utf8.text(bytes[at, Math.min(HANDLER_WINDOW, bytes.size - at)])
+            return true unless ORIGIN_CHECK.matches?(body)
           end
           false
         end

@@ -222,11 +222,17 @@ module Gori::Diff
 
   private def self.issue_note(row : Row) : String
     case row.verdict
-    in .added?     then "the endpoint appears only in the newer capture"
-    in .removed?   then "the endpoint was not requested in the newer capture — retest it before closing"
-    in .gone?      then "the endpoint answers 404/410 now"
-    in .changed?   then "the endpoint answers differently: #{row.changes.join("; ")}"
-    in .unchanged? then "the endpoint still answers the same way — the finding likely still stands"
+    in .added?   then "the endpoint appears only in the newer capture"
+    in .removed? then "the endpoint was not requested in the newer capture — retest it before closing"
+    in .gone?    then "the endpoint answers 404/410 now"
+    in .changed? then "the endpoint answers differently: #{row.changes.join("; ")}"
+    in .unchanged?
+      # Unchanged with no answer on either side is nothing to compare, not "the same answer".
+      if row.b.try(&.answered?)
+        "the endpoint still answers the same way — the finding likely still stands"
+      else
+        "neither capture got a response from the endpoint — retest it before closing"
+      end
     end
   end
 end

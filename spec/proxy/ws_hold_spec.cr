@@ -769,6 +769,25 @@ describe Gori::Proxy::WS::MessageGate do
     end
   end
 
+  it "applies a decision already on its channel when #close overtakes the wait fiber" do
+    # The direction that ends FIRST reaches `close` from its pump's `ensure` before
+    # `Relay.run` settles anything. The operator's edit is on the channel, its wait fiber has
+    # not run, and the message queued behind it is ready: a single fail-open pass skips the
+    # decided slot, and latching `@closed` then lost both.
+    dst = IO::Memory.new
+    sink = HoldSink.new
+    with_interceptor("proto:ws body:first") do |ic|
+      gate = WS::MessageGate.new("out", dst, 37_i64, sink, ic, HOLD_CTX, mask: true)
+      gate.submit(WS::OP_TEXT, "first".to_slice, nil)
+      wait_until("the hold") { ic.pending_count == 1 }
+      # Declined by the condition, so it queues for ORDER only, behind the hold.
+      gate.submit(WS::OP_TEXT, "second".to_slice, nil)
+      ic.forward(ic.pending.first.id, "EDITED".to_slice)
+      gate.close # no yield since the forward: the wait fiber has not run
+      data_rows(sink).should eq([{"out", 1, "EDITED"}, {"out", 1, "second"}])
+    end
+  end
+
   # The `@dropped` half of the same accounting, which was equally silent: an operator who
   # dropped a message watched the queue row leave and nothing downstream — History, the WS
   # pane, an export — had any record of the attempt.

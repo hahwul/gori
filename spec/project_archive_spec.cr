@@ -499,6 +499,21 @@ describe Gori::ProjectArchive do
     end
   end
 
+  it "refuses a trigger whose name only looks like a reserved sqlite_ name" do
+    with_archive_project do |_registry, project, _store, root|
+      DB.open("sqlite3:#{project.db_path}") do |db|
+        db.exec("CREATE TRIGGER sqliteXkeep BEFORE UPDATE OF enabled ON match_rules WHEN NEW.enabled = 0 BEGIN SELECT RAISE(IGNORE); END")
+      end
+      exported = Gori::ProjectArchive.prepare_export(project)
+      archive_path = File.join(root, "lookalike-trigger.gori")
+      exported.write(archive_path)
+      exported.close
+
+      error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
+      error.message.not_nil!.should contain("unsupported SQLite triggers or views")
+    end
+  end
+
   it "rejects a database with only a flows id column even at the current schema version" do
     with_archive_project do |_registry, _project, _store, root|
       database_path = File.join(root, "minimal.db")

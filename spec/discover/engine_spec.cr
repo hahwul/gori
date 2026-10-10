@@ -78,6 +78,18 @@ private class RaisingBackend < D::Backend
   end
 end
 
+# Raises out of the orchestrator's loop once a task is in flight — the shape of any unexpected
+# raise in its bookkeeping, which `orchestrate`'s rescue exists for.
+private class MidRunRaisingEngine < D::Engine
+  getter? raised = false
+
+  private def emit_progress : Nil
+    return super unless @pending > 0
+    @raised = true
+    raise "orchestrator boom"
+  end
+end
+
 private def notfound : R
   make(404, "not found here")
 end
@@ -478,6 +490,24 @@ describe Gori::Discover::Engine do
     # ERROR a run in which no send ever succeeded is, naming the raise.
     terminal.should eq([:error])
     findings.should be_empty
+  end
+
+  it "sends none of the queued tasks once the orchestrator has raised" do
+    # The rescue closed @jobs, but a closed channel still delivers its buffer: the workers went
+    # on sending queued tasks for a run that had already ended in an ErrorEvent.
+    engine = nil.as(MidRunRaisingEngine?)
+    late = [] of String
+    backend = RouteBackend.new(->(t : String) {
+      late << t if engine.try(&.raised?)
+      notfound
+    })
+    cfg = D::Config.new(spider: false, bruteforce: true, concurrency: 2, retries: 0, calibrate_probes: 1)
+    engine = e = MidRunRaisingEngine.new("http://t/", (1..50).map { |i| "w#{i}" }, backend, cfg)
+    kinds, messages = terminal_of(e)
+    kinds.should eq([:error])
+    messages.should eq(["orchestrator boom"])
+    10.times { Fiber.yield } # give a worker still holding a queued task every chance to run it
+    late.should be_empty
   end
 
   it "emits a single terminal ErrorEvent (no masking Done) on an invalid seed" do

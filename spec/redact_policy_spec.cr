@@ -163,4 +163,33 @@ describe Gori::Redact::Policy do
       end
     end
   end
+
+  describe "ambient" do
+    it "fails closed onto the built-in when the configured active profile is gone" do
+      # A TUI copy or an MCP read cannot show `resolve`'s refusal; dropping it emitted raw bytes.
+      with_global(active: "deleted", default: true) do
+        Gori::Redact::Policy.ambient(nil).not_nil!.profile.name.should eq "default"
+      end
+    end
+
+    it "fails closed when a project names a profile that does not exist" do
+      with_store do |store|
+        with_global(default: true) do
+          Gori::Redact::Policy.write_project_scope(store,
+            Gori::Redact::Policy::ProjectScope.new(active: "typo"))
+          Gori::Redact::Policy.ambient(store).not_nil!.profile.name.should eq "default"
+        end
+      end
+    end
+
+    it "honors a profile the operator deliberately left empty" do
+      with_global([Gori::Redact::Profile.new("hollow")], active: "hollow", default: true) do
+        Gori::Redact::Policy.ambient(nil).should be_nil
+      end
+    end
+
+    it "stays off when redaction is not on by default" do
+      with_global(active: "deleted") { Gori::Redact::Policy.ambient(nil).should be_nil }
+    end
+  end
 end

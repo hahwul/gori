@@ -218,16 +218,21 @@ module Gori
     # the quote marks removed and each flagged as quoted-or-not, whether the chunk
     # carried any quoting at all (which suppresses keyword recognition), and the chunk's
     # starting character offset in `query`.
+    #
+    # Inside quotes, `\"` is a literal `"` (there was no other way to put one in a needle, so
+    # `body:"\"role\":\"admin\""` searches the JSON). `\\` stays both characters, so a regex's
+    # escaped backslash keeps its meaning and `"a\\"` still closes; any other `\` is literal.
     private def self.each_chunk(query : String, & : String, Array({Char, Bool}), Bool, Int32 ->) : Nil
       raw = String::Builder.new
       chars = [] of {Char, Bool}
       quoted_any = false
       in_quote = false
+      escape = false
       start = 0
       pending = false
 
       query.each_char_with_index do |ch, i|
-        if ch == '"'
+        if ch == '"' && !escape
           start = i unless pending
           in_quote = !in_quote
           quoted_any = true
@@ -244,11 +249,27 @@ module Gori
         else
           start = i unless pending
           raw << ch
-          chars << {ch, in_quote}
+          escape = push_char(chars, ch, in_quote, escape)
           pending = true
         end
       end
+      chars << {'\\', true} if escape
       yield raw.to_s, chars, quoted_any, start if pending
+    end
+
+    # Append `ch` to a chunk's chars, resolving the `\` escape `each_chunk` describes. Returns
+    # whether a quoted `\` is now held back waiting for the char after it.
+    private def self.push_char(chars : Array({Char, Bool}), ch : Char, in_quote : Bool, escape : Bool) : Bool
+      if escape
+        chars << {'\\', true} unless ch == '"'
+        if ch == '"' || ch == '\\'
+          chars << {ch, true}
+          return false
+        end
+      end
+      return true if in_quote && ch == '\\'
+      chars << {ch, in_quote}
+      false
     end
 
     # --- parsing -------------------------------------------------------------

@@ -93,6 +93,14 @@ describe Gori::Repeater::MessageLines do
     MessageLines.of(head, "café".to_slice, decode: false).none?(&.includes?("UTF-8")).should be_true
   end
 
+  it "tells two heads apart that differ only in bytes the scrub maps to U+FFFD" do
+    a = MessageLines.of("GET /x HTTP/1.1\r\nX-Name: caf\xE9\r\n\r\n".to_slice, nil, decode: false)
+    b = MessageLines.of("GET /x HTTP/1.1\r\nX-Name: caf\xE8\r\n\r\n".to_slice, nil, decode: false)
+    Gori::Repeater::Diff.change_count(Gori::Repeater::Diff.lines(a, b)).should be > 0
+    MessageLines.of("GET /x HTTP/1.1\r\nX-Name: café\r\n\r\n".to_slice, nil, decode: false)
+      .none?(&.includes?("UTF-8")).should be_true
+  end
+
   # A Repeater send / fuzz row holds the request as one wire blob; `Env.split_head_body` gives its
   # body the same binary handling as a split source's, where the blob side printed raw NUL-laden
   # text.

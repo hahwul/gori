@@ -457,6 +457,31 @@ describe Gori::Colormarker do
       end
     end
 
+    # History's SQL reads a pending row's status as NULL, and NOT NULL is still NULL, so a
+    # negated status term drops the row there. The row tier must agree (QL::CAVEATS).
+    it "reads a negated status term over a pending row the way History's SQL does" do
+      with_globals do
+        with_store do |store|
+          cm = Gori::Colormarker.load(store)
+          cm.add("-status:404", RED, FULL)
+          cm.add("NOT (status:5xx OR host:nope)", BLUE, FULL)
+          cm.match(row(status: nil)).should be_nil
+          cm.match(row(status: 200)).not_nil!.color.should eq(RED)
+          cm.match(row(status: 404)).not_nil!.color.should eq(BLUE)
+          # An OR settled by another leaf still holds over the unknown status.
+          cm.add("status:404 OR host:acme", RED, FULL)
+          cm.match(row(status: nil)).not_nil!.match_filter.should eq("status:404 OR host:acme")
+
+          pending = store.insert_flow(Gori::Store::CapturedRequest.new(
+            created_at: 1_i64, scheme: "https", host: "acme.test", port: 443, method: "GET",
+            target: "/p", http_version: "HTTP/1.1", head: "GET /p HTTP/1.1\r\n\r\n".to_slice,
+            body: nil, source: Gori::FlowSource::Kind::Proxy))
+          store.search(Gori::QL.parse("-status:404"), 10).map(&.id).should_not contain(pending)
+          Gori::Colormarker.preview(store, "-status:404").matched.should eq(0)
+        end
+      end
+    end
+
     # The Interceptor gates WebSocket subjects behind an explicit un-negated `proto:ws`, because
     # HOLDING a socket carrying tens of messages a second is unrecoverable. PAINTING one is not,
     # so that gate must not be copied over: `host:acme` colours a WS row like any other.

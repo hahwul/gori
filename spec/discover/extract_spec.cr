@@ -406,6 +406,17 @@ describe Gori::Discover::Extract do
         .should be_nil
     end
 
+    # Offsets are BYTE offsets: `MatchData#begin` is a char index, which on a page with one
+    # non-ASCII char re-walks the string from the start per token — 11.6s on 256 KB of
+    # `<!---->`, remote-chosen, on the single scheduler thread (P6).
+    it "stays linear on a non-ASCII head with many tokens" do
+      body = "<html><head>é#{"<!--ü-->" * (64 * 1024 // 9)}<base href=\"/x/\"></head>"
+      started = Time.instant
+      E.base_href(body.to_slice).should eq("/x/")
+      (Time.instant - started).should be < 1.second
+      E.base_href("<head>é<!-- <base href=\"/no/\"> --><base href=\"/yes/\"></head>".to_slice).should eq("/yes/")
+    end
+
     it "does not read a <base> that comes after the head" do
       E.base_href(%(<head></head><body><base href="/late/"></body>).to_slice).should be_nil
       E.base_href(%(<html><body><base href="/late/">).to_slice).should be_nil
@@ -535,6 +546,22 @@ describe Gori::Discover::Extract do
       E.decode_refs("/a?x=&#xD800;").should eq("/a?x=&#xD800;")
       E.decode_refs("/a?x=&#1114112;").should eq("/a?x=&#1114112;")
       E.decode_refs("/a?x=&#zz;").should eq("/a?x=&#zz;")
+    end
+
+    # `to_i?` takes a sign and whitespace; a browser leaves these literal.
+    it "refuses a numeric reference with a sign or a space" do
+      E.decode_refs("/a?x=&#x+41;").should eq("/a?x=&#x+41;")
+      E.decode_refs("/a?x=&# 65;").should eq("/a?x=&# 65;")
+      E.decode_refs("/a?x=&#-65;").should eq("/a?x=&#-65;")
+    end
+
+    # Each `&` used to search the rest of the value for a `;`, by char offset: quadratic on a
+    # hostile href of `&&&…`, minutes at the 2 MiB scan cap, on the single scheduler.
+    it "stays linear over a long run of ampersands, ASCII or not" do
+      long = "é" + "&" * 300_000 + "&amp;"
+      started = Time.instant
+      E.decode_refs(long).should eq("é" + "&" * 300_000 + "&")
+      (Time.instant - started).should be < 1.second
     end
 
     # Decoding cannot manufacture a request, only a refusal: a decoded CR/LF reaches

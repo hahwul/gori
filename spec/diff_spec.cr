@@ -392,6 +392,19 @@ describe "Gori::Diff issue retest" do
     end
   end
 
+  it "does not say the finding still stands when neither side got a response" do
+    diff_store do |a|
+      diff_store do |b|
+        fid = diff_flow(a, "/leak", status: nil) # still pending on both sides
+        diff_flow(b, "/leak", status: nil)
+        a.insert_issue("Data leak", Gori::Store::Severity::Medium, "acme.test", fid)
+        note = report_of(a, b, issues: 10).issues.first.note
+        note.should_not contain("still stands")
+        note.should contain("retest it before closing")
+      end
+    end
+  end
+
   it "tells the operator an unchanged endpoint means the finding likely still stands" do
     diff_store do |a|
       diff_store do |b|
@@ -672,6 +685,33 @@ describe Gori::Diff::Record do
     sentence.should_not contain("was 404, pending")
     sentence.should contain("never got a response at all")
     Gori::Diff::Record.body(row, ctx).should contain(sentence)
+  end
+
+  # A side whose every capture is pending/no-response never reached the endpoint: such a row
+  # must not say "Both captures reached", nor call two non-answers "equivalent".
+  it "does not claim a side without a response reached the endpoint" do
+    key = Gori::Diff::Key.new("acme.test", "GET", "/orders")
+    silent = ->(id : Int64) {
+      f = Gori::Diff::Facts.new(key)
+      f.observe(Gori::Store::EndpointObservation.new(
+        key.host, key.method, key.path, 0, nil, 1_i64, nil, nil, 1_i64, 1_i64, id))
+      f
+    }
+    ctx = Gori::Diff::Record::Context.new("q1", "q3")
+    a, b = silent.call(1_i64), silent.call(2_i64)
+    row = Gori::Diff::Row.new(key, Gori::Diff::Compare.verdict(a, b, Gori::Diff::Compare.changes(a, b)), a, b,
+      Gori::Diff::Compare.changes(a, b))
+    sentence = Gori::Diff::Record.observation(row, ctx)
+    sentence.should_not contain("reached")
+    sentence.should_not contain("equivalent")
+    sentence.should contain("Neither q1 nor q3 got a response")
+
+    a = record_facts(key, 200, 1_i64)
+    ch = Gori::Diff::Compare.changes(a, b)
+    row = Gori::Diff::Row.new(key, Gori::Diff::Compare.verdict(a, b, ch), a, b, ch)
+    sentence = Gori::Diff::Record.observation(row, ctx)
+    sentence.should_not contain("reached")
+    sentence.should contain("q3 got no response")
   end
 
   it "names the endpoint exactly as the Markdown report does" do

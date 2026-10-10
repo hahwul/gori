@@ -292,7 +292,7 @@ module Gori
           root.members.each { |m| last[m.key] = m }
           last.each_value do |m|
             next unless m.string?(body)
-            yield m.key, String.from_json(String.new(body[m.value_start, m.value_end - m.value_start]))
+            yield m.key, JsonSpans.decode_string(String.new(body[m.value_start, m.value_end - m.value_start]))
           end
         end
 

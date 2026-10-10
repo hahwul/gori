@@ -251,6 +251,19 @@ describe Gori::ProjectRegistry do
     end
   end
 
+  it "clears the `gori run` default pin only when it deletes the pinned project" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      kept = reg.create("kept")
+      pinned = reg.create("pinned")
+      File.write(reg.default_pin_path, "#{reg.id_of(pinned)}\n")
+      reg.delete(kept).should be_false
+      reg.default_pin.should eq(reg.id_of(pinned))
+      reg.delete(pinned).should be_true
+      File.exists?(reg.default_pin_path).should be_false
+    end
+  end
+
   it "persists the verbatim display name so list doesn't revert it to the slug" do
     with_root do |root|
       reg = Gori::ProjectRegistry.new(root)

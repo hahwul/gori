@@ -113,9 +113,19 @@ describe Gori::QL do
     f.args.should eq([%("token")])
   end
 
-  it "strips control/NUL chars from a body: value (FTS phrase safety)" do
-    f = Gori::QL.parse("body:to\u0000ke\u001fn")
-    f.args.should eq([%("token")]) # control bytes removed before the phrase is built
+  # Stripping them (FTS phrase safety) searched a DIFFERENT needle than the one typed —
+  # `"a<TAB>b"` found `ab` — so the term is dropped instead, and `analyze` names it.
+  it "drops a body:/header: value carrying a control/NUL char rather than searching it altered" do
+    {"body:to\u0000ke\u001fn", "body:\"a\tb\"", "header:x\u0001y", "resp.body:to\u0000ken"}.each do |q|
+      f = Gori::QL.parse(q)
+      f.args.should be_empty
+      f.sql.should eq("1")
+      Gori::QL.analyze(q).clean?.should be_false
+    end
+  end
+
+  it "searches a literal quote written as \\\" inside quotes" do
+    Gori::QL.parse(%(body:"\\"role\\":\\"admin\\""), fts: true).args.should eq([%("""role"":""admin""")])
   end
 
   # …and a value made ENTIRELY of control bytes strips to "", which `like("")` turns into
@@ -452,11 +462,11 @@ describe Gori::QL do
 "(status IS NOT NULL AND +status >= 200 AND +status < 300 AND " \
 "connect_protocol IS NOT NULL AND lower(connect_protocol) = 'websocket')))")
     Gori::QL.parse("proto:grpc").sql.should eq(
-      "(((content_type IS NOT NULL AND lower(content_type) LIKE 'application/grpc%') OR " \
-      "(request_content_type IS NOT NULL AND lower(request_content_type) LIKE 'application/grpc%')))")
+      "(((content_type IS NOT NULL AND lower(ltrim(content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/grpc%') OR " \
+      "(request_content_type IS NOT NULL AND lower(ltrim(request_content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/grpc%')))")
     Gori::QL.parse("proto:sse").sql.should eq(
       "((content_type IS NOT NULL AND " \
-      "lower(trim(substr(content_type, 1, instr(content_type || ';', ';') - 1))) = 'text/event-stream'))")
+      "lower(trim(substr(content_type, 1, instr(content_type || ';', ';') - 1), char(9, 10, 11, 12, 13, 32))) = 'text/event-stream'))")
     Gori::QL.parse("proto:ws").args.should be_empty
   end
 
@@ -465,10 +475,10 @@ describe Gori::QL do
       "(NOT ((status IS NOT NULL AND status = 101) OR " \
       "(status IS NOT NULL AND +status >= 200 AND +status < 300 AND " \
       "connect_protocol IS NOT NULL AND lower(connect_protocol) = 'websocket')) " \
-      "AND NOT ((content_type IS NOT NULL AND lower(content_type) LIKE 'application/grpc%') OR " \
-      "(request_content_type IS NOT NULL AND lower(request_content_type) LIKE 'application/grpc%')) " \
+      "AND NOT ((content_type IS NOT NULL AND lower(ltrim(content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/grpc%') OR " \
+      "(request_content_type IS NOT NULL AND lower(ltrim(request_content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/grpc%')) " \
       "AND NOT (content_type IS NOT NULL AND " \
-      "lower(trim(substr(content_type, 1, instr(content_type || ';', ';') - 1))) = 'text/event-stream'))")
+      "lower(trim(substr(content_type, 1, instr(content_type || ';', ';') - 1), char(9, 10, 11, 12, 13, 32))) = 'text/event-stream'))")
   end
 
   it "drops an unknown proto: value (match-all EMPTY, not everything)" do
@@ -487,12 +497,12 @@ describe Gori::QL do
       "connect_protocol IS NOT NULL AND lower(connect_protocol) = 'websocket'))) " \
       "AND scheme = 'https')")
     Gori::QL.parse("proto:grpcs").sql.should eq(
-      "((((content_type IS NOT NULL AND lower(content_type) LIKE 'application/grpc%') OR " \
-      "(request_content_type IS NOT NULL AND lower(request_content_type) LIKE 'application/grpc%'))) " \
+      "((((content_type IS NOT NULL AND lower(ltrim(content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/grpc%') OR " \
+      "(request_content_type IS NOT NULL AND lower(ltrim(request_content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/grpc%'))) " \
       "AND scheme = 'https')")
     Gori::QL.parse("proto:sses").sql.should eq(
       "(((content_type IS NOT NULL AND " \
-      "lower(trim(substr(content_type, 1, instr(content_type || ';', ';') - 1))) = 'text/event-stream')) " \
+      "lower(trim(substr(content_type, 1, instr(content_type || ';', ';') - 1), char(9, 10, 11, 12, 13, 32))) = 'text/event-stream')) " \
       "AND scheme = 'https')")
     Gori::QL.parse("proto:wss").args.should be_empty
   end
@@ -564,14 +574,26 @@ describe "Gori::Store#search (QL)" do
       store.update_response(Gori::Store::CapturedResponse.new(
         flow_id: prefix, status: 200, content_type: "text/event-streaming",
         head: "HTTP/1.1 200 OK\r\nContent-Type: text/event-streaming\r\n\r\n".to_slice))
+      # A tab around the type is whitespace to `MediaType.essence` / `Proto.grpc?`, so it is
+      # here too — SQLite's bare trim() strips spaces only.
+      sse_tab = capture(store, "acme.test", "GET", "/events-tab")
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: sse_tab, status: 200, content_type: "text/event-stream\t; charset=utf-8",
+        head: "HTTP/1.1 200 OK\r\n\r\n".to_slice))
+      grpc_tab = capture(store, "acme.test", "POST", "/rpc-tab")
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: grpc_tab, status: 200, content_type: "\tapplication/grpc",
+        head: "HTTP/1.1 200 OK\r\n\r\n".to_slice))
       # Plain HTTP (typed) and a still-pending flow (NULL status + NULL content_type).
       html = capture(store, "acme.test", "GET", "/", 200)
       pending = capture(store, "acme.test", "GET", "/pending")
 
       def_ids = ->(q : String) { store.search(Gori::QL.parse(q), 50).map(&.id).sort }
       def_ids.call("proto:ws").should eq([ws])
-      def_ids.call("proto:grpc").should eq([grpc])
-      def_ids.call("proto:sse").should eq([sse])
+      def_ids.call("proto:grpc").should eq([grpc, grpc_tab])
+      def_ids.call("proto:sse").should eq([sse, sse_tab])
+      Gori::Sse.sse?("text/event-stream\t; charset=utf-8").should be_true
+      Gori::Proto.grpc?("\tapplication/grpc").should be_true
       # http = everything that is NOT ws/grpc/sse — including the NULL-column pending flow.
       def_ids.call("proto:http").should eq([html, pending, prefix].sort)
       # Negation is NULL-safe too: -proto:grpc keeps the pending (NULL content_type) flow.

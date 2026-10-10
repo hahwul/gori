@@ -299,6 +299,7 @@ gori run compare 41 42 --pane response --changes-only
 | `--changes-only` | Print only added / removed lines, omitting unchanged context |
 | `--context=N` | Collapse unchanged runs to `@@ N unchanged lines @@` markers, keeping N lines around each change (mutually exclusive with `--changes-only`) |
 | `--format=FMT` | `text` (default) or `json` |
+| `--redact [PROFILE]`, `--no-redact`, `--redact-preview` | As on [`show`](#run-show): diff the sanitized bodies. The line count and verdict still describe the captured bytes |
 
 Both sides' `status · size · time` and the A→B delta print above the diff, so a status flip or a size shift is visible before the first line is read. `--format=json` carries the same under `meta`, and a collapsed run becomes `{"kind":"fold","hidden":N}` rather than a gap.
 
@@ -407,7 +408,7 @@ gori run repeater <flow-id> --target https://staging.example.com --http2 --diff
 | `--apply-rules` | Run the project's enabled Match & Replace rules (request side) over the request first, as the live proxy would. Off by default: a direct send is byte-exact |
 | `--keep-request-line` | Send the stored request line as-is; do not rewrite an absolute-form line (`GET http://h/p`) to origin-form |
 | `--diff` | Diff against the original response |
-| `--allow-unscoped` | Send outside the project scope. Sandbox mode and explicit excludes still refuse each send |
+| `--allow-unscoped` | Send outside the project scope. Sandbox mode still refuses each send; an exclude rule stops a hand-authored send only with the Sandbox on, as on the proxy |
 | `--headers-only` | Print the status line and headers only; the body is replaced by one line naming its size |
 | `--max-body=BYTES` | Print at most BYTES of the decoded response body, then a marker naming the full size |
 | `--format=FMT` | `text` (default) or `json` |
@@ -1924,7 +1925,7 @@ A section marked *not set* is still a valid name for `--sections`: exporting it 
 | `--sections a,b` | both | Comma-separated section names; at least one. Export defaults to everything except secret-bearing sections; import defaults to every section in the file |
 | `-o`, `--out FILE` | export | Write to a file instead of stdout |
 | `--dry-run` | import | Print which sections would be applied, then exit without writing |
-| `--allow-commands` | import | Apply rules that run an external command. Required when the profile carries one; without it the import is refused and nothing is written |
+| `--allow-commands` | import | Apply rules that run an external command, serve a local file, or send an environment variable to a proxy. Required when the profile carries one; without it the import is refused and nothing is written |
 | `--json` | tls-fingerprint | Emit the report as JSON, always including the decomposed JA3 string and `ja4_r` |
 | `--preset NAME` | tls-fingerprint | Report what a per-send `--tls-preset NAME` override would send instead (see below) |
 
@@ -1960,6 +1961,8 @@ Five sections can hold a **command** rather than data. They export like any othe
 | `editor` | `command` | argv. Runs on `gori settings --edit` and the TUI's `^E` |
 
 The first three are [process hooks](/guide/scripting/#process-hooks). `statusline` is the sharpest of the five: it is a full shell rather than an argv exec, it carries its own `enabled` in the same section so a profile arms it outright, and it fires on a timer with no traffic needed. An `editor` command is only reported when the profile sets one; an empty value means gori falls through to your own `$VISUAL`/`$EDITOR`/`vi`.
+
+Two more shapes run no command but are listed and gated the same way, as `env` and `file` rows: an `upstream_rules` entry with a `password_env` (gori reads that variable on your machine and sends it to the proxy the profile names), and a `rewriter` short-circuit with a `body_file` (it serves a local file, or with `respond: dir` a directory, to pages on the matched host).
 
 `export` counts them on stderr, leaving the profile on stdout clean:
 

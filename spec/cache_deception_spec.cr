@@ -62,6 +62,24 @@ describe Gori::CacheDeception do
     report.cache.should eq(Gori::CacheStatus::Signal::Hit)
   end
 
+  it "reports CACHED when the control is redirected elsewhere (to a login page)" do
+    authed = cd_trial("as-captured", true, 200, AZ::Verdict::Baseline)
+    anon = cd_trial("anonymous", false, 200, AZ::Verdict::Same, ["X-Cache: HIT"])
+    summary = AZ::ResponseSummary.new(302, 0_i64, 0_u64, location: "/login")
+    control = AZ::Trial.new("anonymous-cache-busted", false, Gori::Repeater::ExchangeMeta.of(302, 0_i64, 1_000_i64, nil),
+      AZ::Verdict::Different, "Δ", summary, "req".to_slice, "HTTP/1.1 302 Found\r\nLocation: /login\r\n\r\n".to_slice, nil)
+    CD.classify(target(authed, anon, control)).verdict.should eq(CD::Verdict::Cached)
+  end
+
+  it "reports REVIEW, not CACHED, when the buster itself broke the control (404, 429, 5xx …)" do
+    {400, 404, 429, 500, 502, 503}.each do |status|
+      authed = cd_trial("as-captured", true, 200, AZ::Verdict::Baseline)
+      anon = cd_trial("anonymous", false, 200, AZ::Verdict::Same, ["X-Cache: HIT"])
+      control = cd_trial("anonymous-cache-busted", false, status, AZ::Verdict::Different)
+      CD.classify(target(authed, anon, control)).verdict.should eq(CD::Verdict::Review)
+    end
+  end
+
   it "reports SERVED when a cache-busted anonymous control also gets the same content" do
     authed = cd_trial("as-captured", true, 200, AZ::Verdict::Baseline)
     anon = cd_trial("anonymous", false, 200, AZ::Verdict::Same, ["X-Cache: HIT"])

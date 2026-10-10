@@ -92,6 +92,21 @@ describe F::Template do
     F::Template.auto_mark("q=§hi§").should eq("q=§hi§")
   end
 
+  it "escapes a `¦` inside an auto-marked value, so a remote value never opens a chain" do
+    evil = "x¦exec:/usr/bin/touch /tmp/pwned"
+    [
+      "GET /?a=#{evil}&b=¦¦ HTTP/1.1\r\nCookie: s=#{evil}\r\n\r\n",
+      "POST / HTTP/1.1\r\nContent-Type: application/json\r\n\r\n{\"k\":\"#{evil}\",\"d\":\"¦¦\"}",
+      "POST / HTTP/1.1\r\n\r\nk=#{evil}&d=¦¦",
+    ].each do |raw|
+      marked = F::Template.auto_mark(raw)
+      t = F::Template.parse(marked)
+      t.position_count.should be > 0
+      t.positions.all?(&.chain.empty?).should be_true
+      F::Template.clear_markers(marked).should eq(raw) # byte-for-byte, `¦¦` included
+    end
+  end
+
   it "auto-marks JSON boolean and null values, not only strings/numbers" do
     body = "POST / HTTP/1.1\r\nContent-Type: application/json\r\n\r\n{\"name\":\"bob\",\"admin\":true,\"age\":30,\"gone\":null}"
     marked = F::Template.auto_mark(body)

@@ -483,7 +483,11 @@ module Gori::Sequencer
 
     private def self.rate(effective : Float64, duplicate_count : Int32, seq : Bool,
                           tests : Array(TestRow), small : Bool) : Rating
-      return Rating::Critical if duplicate_count > 0 || seq
+      return Rating::Critical if duplicate_count > 0
+      # Sequential is predictability only when little varies BESIDE the order: a counter or a
+      # bare timestamp. A time-ordered id with a large random tail (UUIDv7, ULID) still carries
+      # its entropy, so there the Sequential FAIL demotes once like any other failed test.
+      return Rating::Critical if seq && effective < 60.0
       base = tier(effective)
       fails = tests.count(&.verdict.fail?)
       r = Rating.from_value((base.value - fails).clamp(0, 3))

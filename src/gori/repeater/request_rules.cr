@@ -23,16 +23,14 @@ module Gori
         # reason apply_rules is opt-in at all — so it is simply not offered here.
         return {plan, false} if plan.h2_fields
         return {plan, false} unless rules.active?
-        # `add_if_missing: false` — this runs AFTER `Plan.build`, so it is past the point where
-        # `auto_content_length` was honoured, and the plan shapes that reach here with that flag
-        # deliberately OFF (a captured flow and a raw/verbatim request) are the ones this must
-        # not re-frame. A capture that carried no Content-Length is evidence — an h2/gRPC
-        # streamed POST is stored exactly that way — and inventing framing for it here would
-        # undo the very thing those call sites turned the flag off for. Rules may still CHANGE
-        # the body, so an EXISTING Content-Length is still re-synced; only the ADD is withheld.
-        rewritten = FlowRequest.resync_content_length(
-          rules.transform_message(String.new(plan.bytes), Store::RuleTarget::Request, plan.host).to_slice,
-          add_if_missing: false)
+        # Re-frame ONLY when a rule changed the body's length, never as a blanket resync: the
+        # plan shapes that reach here were built with `auto_content_length` deliberately OFF (a
+        # captured flow, a raw/verbatim request), so a `Content-Length: 99` over a 2-byte body
+        # is the operator's desync probe, and a rule that matched nothing must not "fix" it and
+        # report a change. Nor is a missing length ADDED (`_if_body_changed` passes
+        # `add_if_missing: false`): a capture without one — an h2/gRPC streamed POST — is evidence.
+        rewritten = FlowRequest.resync_content_length_if_body_changed(plan.bytes,
+          rules.transform_message(String.new(plan.bytes), Store::RuleTarget::Request, plan.host).to_slice)
         return {plan, false} if rewritten == plan.bytes
         {plan.with_requests([rewritten]), true}
       end

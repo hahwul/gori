@@ -379,9 +379,16 @@ module Gori::Decoder
     # ---- unicode \uXXXX (surrogate-pair aware) ----
     def unicode_escape(s : String) : String
       String.build do |io|
-        s.each_char do |c|
+        reader = Char::Reader.new(s)
+        while reader.has_next?
+          c = reader.current_char
           cp = c.ord
-          if cp < 0x80
+          reader.next_char
+          # A literal `\` ahead of a `u` would read back as the start of an escape (`\u0041`
+          # → `A`), and `unicode_unescape` has no `\\`, so it goes out as its own escape.
+          if c == '\\' && reader.current_char == 'u'
+            io << "\\u005c"
+          elsif cp < 0x80
             io << c
           elsif cp <= 0xFFFF
             io << "\\u" << cp.to_s(16).rjust(4, '0')

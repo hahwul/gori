@@ -40,6 +40,43 @@ describe Gori::RawJson do
     end
   end
 
+  # RFC 8259's grammar allows an unpaired surrogate escape, and `JSON.stringify` emits one
+  # for an emoji cut mid-pair. The stdlib lexer raised on it, so every tool gated on `valid?`
+  # (Miner JSON injection, probe insertion points, minimize, Pretty) treated the body as not JSON.
+  describe ".valid?" do
+    it "accepts an unpaired surrogate escape" do
+      Gori::RawJson.valid?(%({"s":"\\ud83d","t":"\\udc00x"})).should be_true
+      Gori::RawJson.valid?(%("\\ud83d\\u0041")).should be_true
+    end
+
+    it "still refuses anything that is not exactly one JSON value" do
+      ["", %({"a":}), "[1,]", "01", "{} trailing", "1 2", %("\\uABCG"), %("\\x"), "[" * 600 + "]" * 600].each do |source|
+        Gori::RawJson.valid?(source).should be_false
+      end
+      Gori::RawJson.valid?("[" * 300 + "]" * 300).should be_true # the pull parser's nesting cap, kept
+    end
+  end
+
+  # `valid?` accepts that body, so the readers behind it must too, or it reads as JSON and then
+  # yields nothing: an extract rule, `list_params`, retest assertions and JWT claims all missed.
+  describe ".tolerant" do
+    it "lets every reader through an unpaired surrogate, and keeps the rest of the body" do
+      body = %({"token":"abc123","bio":"cut \\ud83d","pair":"\\ud83d\\ude00","lit":"\\\\ud83d"})
+      Gori::RawJson.member(body, "token").try(&.as_s).should eq("abc123")
+      Gori::RawJson.claims(body).not_nil!["bio"].as_s.should eq("cut \uFFFD")
+      Gori::RawJson.claims(body).not_nil!["pair"].as_s.should eq("\u{1F600}")
+      Gori::RawJson.claims(body).not_nil!["lit"].as_s.should eq("\\ud83d")
+      Gori::RawJson.member(body, "lit").try(&.as_s).should eq("\\ud83d")
+      # `members` re-emits values, so it still refuses rather than respell the escape.
+      expect_raises(JSON::ParseException) { Gori::RawJson.members(body) }
+      leaves = [] of String
+      Gori::Params.each_json_leaf(body.to_slice) { |path, value, _| leaves << "#{path}=#{value}" }
+      leaves.should contain("token=abc123")
+      plain = %({"a":1})
+      Gori::RawJson.tolerant(plain).should be(plain)
+    end
+  end
+
   describe ".members" do
     it "lists an object's members in order with raw values, duplicates kept" do
       Gori::RawJson.members(%({"a":1,"b":{"c":[99999999999999999999]},"a":2})).should eq(

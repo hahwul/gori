@@ -181,6 +181,53 @@ describe Gori::Probe::OutOfBand do
     end
   end
 
+  # The claim and the finding are ONE write. Split, a committed claim followed by a failed
+  # upsert left the probe matched with no issue, and no later sweep looks at a matched probe.
+  it "writes the finding with the claim, and a rolled-back write leaves the probe pending" do
+    path = File.tempname("gori-oast-promote", ".db")
+    store = Gori::Store.open(path)
+    side = DB.open("sqlite3:#{path}?busy_timeout=5000")
+    begin
+      store.insert_probe_oast_probe("tok-commit", "tok-commit.oast.example", 7_i64, "ssrf_oast",
+        "ssrf_oast", Gori::Probe::Category::ACTIVE, "Blind SSRF", Gori::Store::Severity::High,
+        "acme.test", "https://acme.test/fetch", nil, 42_i64)
+      land_callback(store, 7_i64, "tok-commit")
+
+      side.exec("CREATE TRIGGER no_issue BEFORE INSERT ON probe_issues BEGIN SELECT RAISE(ABORT, 'busy'); END")
+      dets, watermark = Gori::Probe::OutOfBand.sweep(store, 0_i64)
+      dets.should be_empty
+      watermark.should eq(0_i64) # the next sweep re-reads the same callback
+      store.probe_oast_pending.size.should eq(1)
+
+      side.exec("DROP TRIGGER no_issue")
+      dets, _ = Gori::Probe::OutOfBand.sweep(store, 0_i64)
+      dets.map(&.code).should eq(["ssrf_oast"])
+      # persisted by the sweep itself: no caller upsert
+      store.probe_issues.count(&.code.==("ssrf_oast")).should eq(1)
+      store.probe_oast_pending.should be_empty
+    ensure
+      side.close
+      store.close
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
+
+  # A clear restarts probe ids, so a claim read before it must not land on the new row.
+  it "does not claim a probe whose token differs from the one the sweep read" do
+    oob_store do |store|
+      store.insert_probe_oast_probe("tok-new", "tok-new.oast.example", 7_i64, "ssrf_oast",
+        "ssrf_oast", Gori::Probe::Category::ACTIVE, "Blind SSRF", Gori::Store::Severity::High,
+        "acme.test", "https://acme.test/fetch", nil, 42_i64)
+      p = store.probe_oast_pending.first
+      stale = Gori::Probe::Detection.new("ssrf_oast", "active", "acme.test", "https://acme.test/fetch",
+        "Blind SSRF", Gori::Store::Severity::High, nil)
+      store.promote_probe_oast([{p.id, "tok-old", stale}]).should eq([] of Gori::Probe::Detection)
+      store.probe_oast_pending.size.should eq(1)
+    end
+  end
+
   it "leaves an unanswered probe outstanding (no callback ⇒ no finding)" do
     oob_store do |store|
       store.insert_probe_oast_probe("tok-lonely", "tok-lonely.oast.example", 7_i64, "ssrf_oast",

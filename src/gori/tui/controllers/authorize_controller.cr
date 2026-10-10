@@ -52,6 +52,7 @@ module Gori::Tui
       @job_id = nil.as(Int32?)
       @gen = 0
       @active_gen = nil.as(Int32?) # non-nil while a run fiber is alive
+      @active_rev = 0              # the identity revision the live batch was started under
       @batch_ids = Set(Int32).new
       @batch_size = 0
       @batch_declined = 0
@@ -443,9 +444,15 @@ module Gori::Tui
     # flight. Deliberately routed through the SAME `run(:pending)` the operator's ^R uses, so
     # passive inherits the batch's generation stamp, its stop, and its settling rather than
     # growing a second, subtly different send loop.
+    AUTORUN_HELD_BY = {:confirm, :authorize_identities, :authorize_identity}
+
     private def maybe_autorun : Nil
       return unless @passive
       return if running?
+      # Not under a modal: the ⇧X confirm and the identities card both checked "not while
+      # running" when they opened, and a batch started behind them would be cleared mid-run, or
+      # run under a set the card is about to replace. The next tick after it closes picks up.
+      return if AUTORUN_HELD_BY.includes?(@host.overlay)
       # A stop the operator asked for OUTLIVES the batch it stopped. `finish_batch` settles the
       # un-run rows back to :pending, so without this the very next drain tick saw pending work,
       # called `run`, and `run`'s `reset_stop` erased the stop — ^X could not stop anything
@@ -539,6 +546,7 @@ module Gori::Tui
       @view.mark_running(@batch_ids)
       gen = (@gen += 1)
       @active_gen = gen
+      @active_rev = @view.identity_rev
       noun = Gori.plural(batch.size, "request")
       @job_id = @host.jobs.start(:authorize, noun, Jobs::Goto.new(:authorize))
       @host.status("authorize: replaying #{noun} under #{idents.size} identities…")
@@ -741,6 +749,8 @@ module Gori::Tui
 
     # The wipe itself, past the confirm.
     private def clear_now : Nil
+      # Asked again at the answer: `clear` checked when the prompt opened.
+      return @host.status("a run is in flight — ^X to stop it first") if running?
       @view.clear
       # The dedup set and the cap notice go with the queue. The cap's own advice is "clear it to
       # keep going", and leaving the keys behind made that false: every endpoint already seen
@@ -784,9 +794,11 @@ module Gori::Tui
       # A batch-level error (no entry): report it and let the marker close the batch.
       return @host.status("authorize: #{o.error}") if o.entry_id == 0
       if t = o.target
-        @view.apply_result(o.entry_id, t)
+        # Stamped with the set the batch was SENT under, so a result that lands after an edit
+        # counts as pending again rather than as current.
+        @view.apply_result(o.entry_id, t, @active_rev)
       else
-        @view.apply_error(o.entry_id, o.error || "authorize run failed")
+        @view.apply_error(o.entry_id, o.error || "authorize run failed", @active_rev)
       end
     end
 

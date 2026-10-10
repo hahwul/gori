@@ -127,13 +127,12 @@ module Gori
 
     # The provider uids a session already holds — the dedup seed a resumed listener starts
     # from, so a provider that replays its whole buffer on a poll does not re-announce hits
-    # that are already recorded. Uids only, for the same reason as the count above.
-    def oast_callback_uids(session_id : Int64) : Set(String)
-      seen = Set(String).new
-      @db.query("SELECT provider_uid FROM oast_callbacks WHERE session_id = ?", session_id) do |rs|
-        rs.each { seen << rs.read(String) }
-      end
-      seen
+    # that are already recorded. Uids only, for the same reason as the count above. The newest
+    # `limit`, oldest first, so a window seeded from them keeps the newest.
+    def oast_callback_uids(session_id : Int64, limit : Int32) : Array(String)
+      @db.query_all("SELECT provider_uid FROM (SELECT id, provider_uid FROM oast_callbacks " \
+                    "WHERE session_id = ? ORDER BY id DESC LIMIT ?) ORDER BY id",
+        session_id, limit.to_i64, as: String)
     end
 
     # INSERT OR IGNORE on the UNIQUE(session_id, provider_uid) dedup key. The DB enforces

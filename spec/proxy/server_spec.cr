@@ -339,6 +339,16 @@ private def read_all_bytes(io : IO) : Bytes
   buf.to_slice
 end
 
+# True when the proxy hung up on `io` (EOF or reset); false when it answered or kept the leg
+# open past the read timeout.
+private def hung_up?(io : IO) : Bool
+  io.gets.nil?
+rescue IO::TimeoutError
+  false
+rescue IO::Error
+  true
+end
+
 describe Gori::Proxy::Server do
   it "proxies an origin-form request and captures the flow byte-exact (P7)" do
     seen = Channel(String).new(1)
@@ -553,6 +563,66 @@ describe Gori::Proxy::Server do
     response.should contain("Rebound!")
     # old port is no longer listening (skip the rare OS ephemeral-port reuse case)
     tcp_port_accepts?("127.0.0.1", old_port).should be_false if new_port != old_port
+  end
+
+  it "stop ends connections it already accepted, keep-alive and CONNECT tunnel alike" do
+    # Capture-off and a project switch both come here. Stopping only the accept socket left a
+    # browser's open connections proxied and recorded by the stopped session.
+    seen = Channel(String).new(4)
+    done = Channel(Nil).new(4)
+    origin_port = start_keepalive_origin("ok", seen)
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+
+    keep = TCPSocket.new("127.0.0.1", proxy.port)
+    keep.read_timeout = 5.seconds
+    keep << "GET /one HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"
+    keep.flush
+    read_until(keep, "ok").should contain("200 OK")
+    done.receive
+
+    tunnel = TCPSocket.new("127.0.0.1", proxy.port)
+    tunnel.read_timeout = 5.seconds
+    tunnel << "CONNECT 127.0.0.1:#{origin_port} HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"
+    tunnel.flush
+    read_until(tunnel, "\r\n\r\n").should contain("200")
+
+    proxy.stop
+
+    # Both legs see the proxy hang up instead of carrying another request.
+    keep << "GET /two HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n" rescue nil
+    keep.flush rescue nil
+    hung_up?(keep).should be_true
+    hung_up?(tunnel).should be_true
+    sink.requests.map(&.target).should eq(["/one"])
+    seen.receive.should eq("GET /one HTTP/1.1")
+    keep.close
+    tunnel.close
+  end
+
+  it "stop(drop_clients: false) leaves accepted connections running (listener reconcile)" do
+    seen = Channel(String).new(4)
+    done = Channel(Nil).new(4)
+    origin_port = start_keepalive_origin("ok", seen)
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+
+    keep = TCPSocket.new("127.0.0.1", proxy.port)
+    keep.read_timeout = 5.seconds
+    keep << "GET /one HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"
+    keep.flush
+    read_until(keep, "ok")
+    done.receive
+
+    proxy.stop(drop_clients: false)
+    keep << "GET /two HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"
+    keep.flush
+    read_until(keep, "ok").should contain("200 OK")
+    done.receive
+    sink.requests.map(&.target).should eq(["/one", "/two"])
+    keep.close
   end
 
   it "releases its connection slot after each connection (bounded concurrency)" do

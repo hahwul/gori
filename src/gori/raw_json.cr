@@ -24,22 +24,77 @@ module Gori
     # `JSON.parse`. Raises JSON::ParseException when `json` is not exactly one JSON value. For
     # reading only — see the module comment.
     def parse(json : String) : JSON::Any
+      json = tolerant(json)
       pull = JSON::PullParser.new(json)
       value = read_any(pull)
       finish(pull, json)
       value
     end
 
+    # `json` with every UNPAIRED surrogate escape (`"\ud83d"` alone, what `JSON.stringify` emits
+    # for a cut emoji) respelled `�`, for the stdlib lexer, which raises on one although
+    # the grammar allows it. `valid?` accepts such a body, so every reader here that goes through
+    # the pull parser must too, or the body reads as JSON and then yields nothing. A paired
+    # escape and an escaped backslash (`\\ud83d`, literal text) are left alone. Returns `json`
+    # itself when it has no `\u` at all.
+    def tolerant(json : String) : String
+      return json unless json.includes?("\\u")
+      bytes = json.to_slice
+      fixes = unpaired_surrogate_escapes(bytes)
+      return json if fixes.empty?
+      String.build(json.bytesize) do |io|
+        pos = 0
+        fixes.each do |at|
+          io.write(bytes[pos, at - pos])
+          io << "\\ufffd"
+          pos = at + 6
+        end
+        io.write(bytes[pos..])
+      end
+    end
+
+    # Byte offsets of every `\uXXXX` naming a surrogate that is not half of a high+low pair.
+    # Every other escape is stepped over whole, so an escaped backslash never opens one.
+    private def unpaired_surrogate_escapes(bytes : Bytes) : Array(Int32)
+      fixes = [] of Int32
+      i = 0
+      while i < bytes.size
+        unless bytes[i] == '\\'.ord
+          i += 1
+          next
+        end
+        cp = bytes[i + 1]? == 'u'.ord ? hex4(bytes, i + 2) : nil
+        unless cp && 0xd800 <= cp <= 0xdfff
+          i += 2
+          next
+        end
+        low = bytes[i + 6]? == '\\'.ord && bytes[i + 7]? == 'u'.ord ? hex4(bytes, i + 8) : nil
+        if cp <= 0xdbff && low && 0xdc00 <= low <= 0xdfff
+          i += 12
+        else
+          fixes << i
+          i += 6
+        end
+      end
+      fixes
+    end
+
+    private def hex4(bytes : Bytes, at : Int32) : Int32?
+      return nil if at + 4 > bytes.size
+      bytes[at, 4].reduce(0) do |acc, b|
+        d = b.unsafe_chr.to_i?(16) || return nil
+        acc * 16 + d
+      end
+    end
+
     # Whether `json` is exactly one JSON value, numbers of any magnitude included — the
-    # question `JSON.parse` answers "no" to for `{"id":18446744073709551615}`. Checks syntax with
-    # the lexer and builds nothing.
+    # question `JSON.parse` answers "no" to for `{"id":18446744073709551615}`. The `reindent`
+    # lexer in check-only mode: it builds nothing, and it accepts an unpaired surrogate escape
+    # (`"\ud83d"`, RFC 8259 grammar, what `JSON.stringify` emits for a cut emoji) that the
+    # stdlib lexer raises on — so such a body is still JSON to every tool that asks. A caller
+    # that then DECODES a string must survive that one shape (`JsonSpans.decode_string`).
     def valid?(json : String) : Bool
-      pull = JSON::PullParser.new(json)
-      pull.skip
-      finish(pull, json)
-      true
-    rescue JSON::ParseException
-      false
+      !Reindenter.new(json, "", nil, check_only: true).run.nil?
     end
 
     # `json` re-emitted — pretty when `indent` is given, compact otherwise — with every number
@@ -76,6 +131,8 @@ module Gori
       ARRAY_VALUE        = 1_u8
       ARRAY_END          = 2_u8
       MAX_DEPTH          =  256
+      # `valid?`'s cap: the stdlib pull parser's default `max_nesting`, which it answered before.
+      CHECK_MAX_DEPTH = 512
 
       @source : Bytes
       @json : String
@@ -87,8 +144,10 @@ module Gori
       @index : Int32
       @root_done : Bool
       @overflow : Bool
+      @check_only : Bool
 
-      def initialize(@json : String, indent : String, @max_output_bytes : Int32?)
+      # `check_only`: validate without writing anything; `run` then returns "" for valid input.
+      def initialize(@json : String, indent : String, @max_output_bytes : Int32?, @check_only : Bool = false)
         @source = @json.to_slice
         @indent = indent.to_slice
         @out = IO::Memory.new
@@ -127,6 +186,7 @@ module Gori
       private def finish_document : String?
         tail = skip_space(@index)
         return nil unless tail == @source.size
+        return "" if @check_only
         return nil unless append_slice(@index, @source.size)
         return nil if @overflow
         String.new(@out.to_slice)
@@ -251,7 +311,7 @@ module Gori
           complete_parent
           return !@overflow
         end
-        return false if @kinds.size >= MAX_DEPTH
+        return false if @kinds.size >= (@check_only ? CHECK_MAX_DEPTH : MAX_DEPTH)
         complete_parent
         @kinds << kind
         @states << initial_state
@@ -394,6 +454,7 @@ module Gori
       end
 
       private def newline_indent(depth : Int32) : Bool
+        return true if @check_only
         return false unless ensure_capacity(1 + depth * @indent.size)
         append_byte(0x0a_u8)
         depth.times { @out.write(@indent) }
@@ -401,12 +462,14 @@ module Gori
       end
 
       private def append_slice(start : Int32, stop : Int32) : Bool
+        return true if @check_only
         return false unless ensure_capacity(stop - start)
         @out.write(@source[start, stop - start]) if stop > start
         !@overflow
       end
 
       private def append_byte(byte : UInt8) : Nil
+        return if @check_only
         return unless ensure_capacity(1)
         @out.write_byte(byte)
       end
@@ -477,7 +540,9 @@ module Gori
     # for a duplicated key. nil when absent or when that one value is itself unrepresentable,
     # so an oversized `uid` no longer hides the `exp` beside it.
     def member(json : String, key : String) : JSON::Any?
-      pair = members(json).try(&.reverse_each.find { |(k, _)| k == key })
+      # `tolerant` here and not in `members`, whose values are re-emitted (a re-signed JWT):
+      # respelling an operator's `\ud83d` there would change the bytes it sends.
+      pair = members(tolerant(json)).try(&.reverse_each.find { |(k, _)| k == key })
       return nil unless pair
       JSON.parse(pair[1])
     rescue JSON::ParseException

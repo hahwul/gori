@@ -709,8 +709,8 @@ module Gori::Tui
       return unless view = current_view
       if view.chain_pane_active?
         view.commit_chain_pane
-        save_current_repeater
-        @host.status("chain saved")
+        # A refused save already said so; "chain saved" would paint over it.
+        @host.status("chain saved") if save_current_repeater
       else
         msg = view.focus_chain_pane
         @host.status(msg || "type the chain · Tab completes · ↵ saves · esc cancels")
@@ -3051,9 +3051,10 @@ module Gori::Tui
     end
 
     # Persist the current repeater tab's edits (cheap no-op when clean). Sprinkled on
-    # every path that leaves the editor — like Notes save-on-leave.
-    def save_current_repeater : Nil
-      return unless tab = current_repeater_tab
+    # every path that leaves the editor — like Notes save-on-leave. False when the store
+    # refused the write (and the refusal is already on the status line).
+    def save_current_repeater : Bool
+      return true unless tab = current_repeater_tab
       save_repeater_tab(tab)
     end
 
@@ -3063,8 +3064,8 @@ module Gori::Tui
     # a current-tab-only save the batch wrote four responses onto rows still holding their
     # PREVIOUS request bytes — a stored pair that never happened, and one every other surface
     # reads back as fact.
-    def save_repeater_tab(tab : RepeaterTab) : Nil
-      return unless (id = tab.db_id) && tab.view.dirty?
+    def save_repeater_tab(tab : RepeaterTab) : Bool
+      return true unless (id = tab.db_id) && tab.view.dirty?
       v = tab.view
       # `ws_content?`, NOT `ws_mode?`: this asks whether there are frames to write, and a tab
       # sent as plain HTTP (`^V`) still HAS them. Asking the send-side question here meant
@@ -3080,7 +3081,7 @@ module Gori::Tui
                  v.sni_override, ws_keep_key: v.ws_keep_key?, ws_http_only: v.ws_http_only?,
                  tls_preset: v.tls_preset)
           @host.status("request NOT saved (project busy) — leaving the tab dirty so the next save retries")
-          return
+          return false
         end
         # Raw message lines too — the store masks secrets; env tokens re-expand on send.
         # Checked, and BEFORE `ws_out_persisted`/`clear_dirty`: that write opens with
@@ -3090,7 +3091,7 @@ module Gori::Tui
         # LEAVES the editor, so there is no later save to retry from.
         unless @host.session.store.update_repeater_ws_messages(id, v.ws_out_messages_raw)
           @host.status("ws frames NOT saved (project busy) — leaving the tab dirty so the next save retries")
-          return
+          return false
         end
         v.ws_out_persisted
       else
@@ -3109,10 +3110,11 @@ module Gori::Tui
                  v.sni_override, ws_keep_key: v.ws_keep_key?, ws_http_only: v.ws_http_only?,
                  tls_preset: v.tls_preset)
           @host.status("request NOT saved (project busy) — leaving the tab dirty so the next save retries")
-          return
+          return false
         end
       end
       v.clear_dirty
+      true
     end
 
     # A tab a cross-session reload must NOT overwrite/remove: actively edited, mid

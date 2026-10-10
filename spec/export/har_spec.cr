@@ -289,6 +289,25 @@ describe Gori::Export::Har do
     end
   end
 
+  # Every line here HAS a colon, so the old colonless-only trigger left the extension out and
+  # the importer rebuilt `name: value` lines: spacing normalized, and the obfuscated TE probe
+  # came back with a Content-Length synthesized beside it (CL+TE).
+  it "round-trips spacing and an obfuscated Transfer-Encoding byte-exact" do
+    with_store do |store|
+      raw_head = "POST  /te HTTP/1.1\r\nHost: shop.test\r\nX-A:nospace\r\nX-B:   padded  \r\n" \
+                 "Transfer-Encoding : chunked\r\n\r\n"
+      raw_response_head = "HTTP/1.1 200 OK\r\nContent-Type:text/plain\r\nContent-Length :9\r\n\r\n"
+      detail = capture_flow(store, req_head: raw_head, resp_head: raw_response_head,
+        req_body: "5\r\nhello\r\n0\r\n\r\n".to_slice,
+        method: "POST", target: "/te", content_type: "text/plain")
+      har = export([detail])[0]
+      back = reimport(har)
+      String.new(back.request_head).should eq(raw_head)
+      String.new(back.response_head.not_nil!).should eq(raw_response_head)
+      export([back])[0].should eq(har)
+    end
+  end
+
   # A chunked message is stored RAW-chunked, so the byte count in the HAR is not the entity
   # length — and re-emitting it as a Content-Length manufactured the CL+TE shape gori's own
   # `Codec::Body.request_framing` REJECTS as illegal, out of a flow that had been captured
@@ -355,6 +374,37 @@ describe Gori::Export::Har do
     resp.should contain("Content-Length: 11")
   end
 
+  # The same lie for the content coding: Chrome keeps `content-encoding: gzip` and the
+  # compressed `content-length` beside the DECODED `content.text`.
+  it "drops a Content-Encoding a third-party HAR's decoded body does not back" do
+    gz = IO::Memory.new
+    Compress::Gzip::Writer.open(gz, &.print("hello world"))
+    entry = ->(content : Hash(String, String | Int32)) {
+      {"log" => {"version" => "1.2", "entries" => [{
+        "startedDateTime" => "2026-07-31T00:00:00.000Z", "time" => 1.0,
+        "request" => {"method" => "GET", "url" => "https://a.test/x", "httpVersion" => "HTTP/1.1",
+                      "headers" => [] of String, "headersSize" => -1, "bodySize" => -1},
+        "response" => {"status" => 200, "statusText" => "OK", "httpVersion" => "HTTP/1.1",
+                       "headers" => [{"name" => "content-encoding", "value" => "gzip"},
+                                     {"name" => "content-length", "value" => gz.size.to_s}],
+                       "content" => content, "headersSize" => -1, "bodySize" => gz.size},
+      }]}}.to_json
+    }
+
+    decoded = reimport(entry.call({"size" => 11, "mimeType" => "text/plain", "text" => "hello world"}))
+    resp = String.new(decoded.response_head.not_nil!)
+    resp.should_not contain("content-encoding")
+    resp.should_not contain("content-length")
+    resp.should contain("Content-Length: 11")
+    Gori::Proxy::Codec::ContentDecode.decode(decoded.response_head, decoded.response_body).should eq({nil, nil})
+
+    # A body that IS in the stated coding keeps the header and its length.
+    wire = reimport(entry.call({"size" => gz.size, "mimeType" => "text/plain",
+                                "text" => Base64.strict_encode(gz.to_slice), "encoding" => "base64"}))
+    String.new(wire.response_head.not_nil!).should contain("content-encoding: gzip\r\ncontent-length: #{gz.size}\r\n")
+    Gori::Proxy::Codec::ContentDecode.decode(wire.response_head, wire.response_body)[0].should eq("hello world".to_slice)
+  end
+
   it "writes the WIRE body, not the decompressed view, so it stays in sync with Content-Encoding" do
     # Chrome writes the decoded text here. That is fine for a debugging view and wrong for a
     # capture artifact: `Content-Encoding: gzip` stays in `headers` either way, so a decoded
@@ -377,10 +427,9 @@ describe Gori::Export::Har do
     end
   end
 
-  it "keeps an absolute-form capture importable, at the cost of the request line's form" do
-    # A plain-HTTP forward-proxy request is captured absolute-form; HAR has only `url`, so
-    # the re-import lands origin-form. Pinned here so the one thing that does NOT survive
-    # the round trip is a known property rather than a surprise.
+  it "keeps an absolute-form capture importable, request line included" do
+    # A plain-HTTP forward-proxy request is captured absolute-form; HAR has only `url`, which
+    # carries the endpoint, and the raw-head extension carries the request line's form.
     with_store do |store|
       detail = capture_flow(store,
         req_head: "GET http://api.test:8080/ping HTTP/1.1\r\nHost: api.test:8080\r\n\r\n",
@@ -392,7 +441,7 @@ describe Gori::Export::Har do
 
       back = reimport(har)
       back.row.url.should eq(detail.row.url)
-      String.new(back.request_head).should eq("GET /ping HTTP/1.1\r\nHost: api.test:8080\r\n\r\n")
+      String.new(back.request_head).should eq("GET http://api.test:8080/ping HTTP/1.1\r\nHost: api.test:8080\r\n\r\n")
     end
   end
 
@@ -530,7 +579,8 @@ describe Gori::Export::Har do
         har, _ = export([capture_flow(store, req_head: obs_req, resp_head: obs_resp)])
         back = reimport(har)
         back.row.status.should eq(200)
-        String.new(back.request_head).should contain("X-Note: caf\uFFFD\r\n")
+        # The headers array is scrubbed; the raw-head extension keeps the octets themselves.
+        back.request_head.should eq(obs_req.to_slice)
       end
     end
 

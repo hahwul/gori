@@ -677,6 +677,19 @@ describe Gori::Sequencer::Stats do
     report.rating.should eq(S::Rating::Critical)
   end
 
+  # A time-ordered id with a large random tail (UUIDv7, ULID) is sequential by design, but its
+  # 80 random bits are not guessable: the Sequential FAIL demotes it, it does not make it Critical.
+  it "demotes rather than condemns a timestamp-prefixed token with a large random tail" do
+    rng = Random.new(7_u64)
+    t0 = 1_760_000_000_000_i64
+    tokens = Array.new(200) { |i| (t0 + i * 20).to_s(16).rjust(12, '0') + String.build { |io| 20.times { io << "0123456789abcdef"[rng.rand(16)] } } }
+    report = S.analyze(tokens)
+    report.sequential.should be_true
+    report.effective_entropy.should be >= 60.0
+    report.rating.should_not eq(S::Rating::Critical)
+    report.rating.should_not eq(S::Rating::Secure)
+  end
+
   # `symbol_bit_ones` counts per COLUMN above `charset + 1` tokens and asks each token
   # directly below that, because under the threshold the expansion costs more than the direct
   # walk (and the tally would be the report's largest allocation on a corpus of few but very

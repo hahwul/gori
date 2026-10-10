@@ -425,6 +425,28 @@ describe Gori::SessionRefresh do
     end
   end
 
+  # `Time.unix` raises OverflowError (not ArgumentError) for an exp near Int64::MAX, a real
+  # "never expires" value: the refresh was recorded as raised and every send re-raised.
+  it "treats a jwt exp past Time's range as never due" do
+    with_refresh_env do |store|
+      seen = Seen.new
+      header = Base64.urlsafe_encode(%({"alg":"HS256"}), padding: false)
+      payload = Base64.urlsafe_encode(%({"exp":#{Int64::MAX}}), padding: false)
+      server, port = start_login_origin(seen, sid: "#{header}.#{payload}.sig")
+      begin
+        runner, _, _, _, _ = refresh_fixture(store, port, Policy.new(Policy::Kind::JwtExp))
+        Gori::SessionRefresh.before_send("admin")
+        seen.paths.size.should eq(2)
+        runner.status("admin").last.not_nil!.ok.should be_true
+        runner.expire_cooldown_for_spec("admin")
+        Gori::SessionRefresh.before_send("admin")
+        seen.paths.size.should eq(2)
+      ensure
+        server.close
+      end
+    end
+  end
+
   it "counts a ttl from the oldest claimed binding, not one every page rebinds" do
     with_refresh_env do |store|
       seen = Seen.new

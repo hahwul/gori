@@ -2,6 +2,7 @@ require "uri"
 require "mime/multipart"
 require "./media_type"
 require "./entity"
+require "./ascii_bytes"
 
 module Gori
   # Decodes a request's form parameters — an `application/x-www-form-urlencoded` or
@@ -63,13 +64,34 @@ module Gori
       end
     end
 
-    NAME_RE     = /(?:^|[;\s])name=(?:"([^"]*)"|'([^']*)'|([^;\s]+))/i
-    FILENAME_RE = /(?:^|[;\s])filename=(?:"([^"]*)"|'([^']*)'|([^;\s]+))/i
-
-    private def extract_param(cd : String, re : Regex) : String?
-      if m = re.match(cd)
-        m[1]? || m[2]? || m[3]?
+    # The `key=` parameter of a Content-Disposition (`key` lowercase, ending in `=`): quoted
+    # (`"…"` / `'…'`) or a bare token up to `;`/whitespace, at the start or after `;`/whitespace
+    # — so `name=` never matches inside `filename=`. Scanned as BYTES: a Latin-1
+    # `filename="r\xE9sum\xE9.pdf"` made the old regex raise on the invalid UTF-8, and the value
+    # comes back unscrubbed (a surface scrubs where it prints).
+    private def extract_param(cd : String, key : String) : String?
+      b = cd.to_slice
+      i = 0
+      while i + key.bytesize <= b.size
+        if (i == 0 || param_sep?(b[i - 1])) && AsciiBytes.range_eq_ci?(b, i, i + key.bytesize, key.to_slice)
+          v = i + key.bytesize
+          if v < b.size && (b[v] == 0x22_u8 || b[v] == 0x27_u8) && (close = b.index(b[v], v + 1))
+            return String.new(b[v + 1, close - v - 1])
+          end
+          e = v
+          while e < b.size && !param_sep?(b[e])
+            e += 1
+          end
+          return String.new(b[v, e - v]) if e > v
+        end
+        i += 1
       end
+      nil
+    end
+
+    # `;` or ASCII whitespace — the old regex's `[;\s]`.
+    private def param_sep?(byte : UInt8) : Bool
+      byte == 0x3b_u8 || byte.unsafe_chr.ascii_whitespace?
     end
 
     private def multipart(body : Bytes, ct : String) : Array(Field)
@@ -81,7 +103,8 @@ module Gori
         MIME::Multipart.parse(IO::Memory.new(body), boundary) do |headers, io|
           count += 1
           break if count > MAX_PARTS
-          fields << part_field(headers, io.gets_to_end)
+          # Per part: one that will not read must not take the parts around it with it.
+          fields << (part_field(headers, io.gets_to_end) rescue next)
         end
       rescue
         # tolerant: keep whatever parsed before a malformed part
@@ -91,8 +114,8 @@ module Gori
 
     private def part_field(headers : HTTP::Headers, content : String) : Field
       cd = headers["Content-Disposition"]? || ""
-      name = extract_param(cd, NAME_RE) || "(unnamed)"
-      if (filename = extract_param(cd, FILENAME_RE)) && !filename.empty?
+      name = extract_param(cd, "name=") || "(unnamed)"
+      if (filename = extract_param(cd, "filename=")) && !filename.empty?
         Field.new(name, "", :body, "file: #{filename} (#{content.bytesize} bytes)")
       elsif content.valid_encoding? && content.bytesize <= PART_MAX
         Field.new(name, content, :body)

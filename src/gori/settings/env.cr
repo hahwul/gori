@@ -237,6 +237,16 @@ module Gori::Settings
     end
   end
 
+  # Re-read the global hostname overrides, which `host_override_address` reads at every dial: a
+  # long-lived process otherwise dialed the address it started with after a peer edited or
+  # removed the entry. An absent section is the empty map (`serialize_hostname_overrides`
+  # omits it).
+  def self.reload_hostname_overrides_from_disk : Nil
+    reload_section("hostname_overrides", absent: JSON::Any.new([] of JSON::Any), object: false) do |node|
+      self.hostname_overrides = parse_hostname_overrides(node)
+    end
+  end
+
   # Tolerant: a non-array reads as "none" and an unusable entry is dropped — each with a load
   # warning, since a dropped line silently changing which browser gori claims to be is the
   # failure this key exists to avoid. Surrounding whitespace is trimmed (a hand-edited file's

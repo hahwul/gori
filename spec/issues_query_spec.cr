@@ -127,6 +127,10 @@ describe "Issues::Filter — cvss:" do
     legacy.cvss_score.should be_nil
     filtered("cvss:9.9", all).map(&.id).should eq([4_i64])
     filtered("cvss:4.0", all).should be_empty
+    # A numeric operand against a stored bare score compares, never substrings.
+    filtered("cvss:5", all).should be_empty
+    filtered("cvss:.5", all).should be_empty
+    filtered("cvss:7", all).should be_empty
   end
 
   it "leaves an issue with no cvss out of every positive term" do

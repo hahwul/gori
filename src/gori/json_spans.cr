@@ -15,9 +15,9 @@ module Gori
   # `RawJson` keeps members and numbers too, but through the pull parser, which reports
   # values and not their offsets — so it can re-emit a document, not edit one in place.
   #
-  # Validity is decided by the stdlib lexer (`JSON::PullParser#skip`, which checks syntax
-  # without converting numbers), so this accepts exactly what `JSON.parse` does minus the
-  # number-range failures; the walk after it only has to find structure in bytes already known
+  # Validity is decided by `RawJson.valid?` (a byte lexer that checks syntax without converting
+  # numbers), so this accepts what `JSON.parse` does minus the number-range failures and plus an
+  # unpaired surrogate escape (`decode_string`); the walk after it only has to find structure in bytes already known
   # to be one JSON value. Byte-wise throughout: a string value may carry bytes that are not
   # valid UTF-8, and they are never touched.
   module JsonSpans
@@ -146,12 +146,22 @@ module Gori
       j = string_end(bytes, from)
       return j unless top
       if top.object? && top.pending_key.nil?
-        top.pending_key = String.from_json(String.new(bytes[from, j - from]))
+        top.pending_key = decode_string(String.new(bytes[from, j - from]))
         top.pending_key_start = from
       else
         value_at(top, from, j)
       end
       j
+    end
+
+    # A string token (quotes included) of a document `valid?` accepted, decoded. The one valid
+    # token the stdlib decoder raises on is an unpaired surrogate escape (`"\ud83d"`); that one
+    # comes back as its source spelling between the quotes — deterministic, so a key read here
+    # still names the same member at every call.
+    def decode_string(token : String) : String
+      String.from_json(token)
+    rescue JSON::ParseException
+      token.byte_slice(1, token.bytesize - 2)
     end
 
     # A scalar value occupies `start...stop` inside `c`.

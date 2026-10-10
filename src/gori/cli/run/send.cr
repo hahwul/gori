@@ -71,7 +71,7 @@ module Gori
           p.on("--tls-preset=NAME", TLS_PRESET_HELP) { |v| tls_preset = v }
           p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
           p.on("--timeout=SEC", "Per-operation connect + idle timeout (seconds)") { |v| timeout = parse_count(v, "--timeout").seconds }
-          p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
+          p.on("--allow-unscoped", "Send even if the target is outside the project scope (the Sandbox still applies)") { allow_unscoped = true }
           p.on("--verbatim", "Send what you typed EXACTLY: no token expansion ($ENV.KEY, $BIND.NAME, $GEN.*) in -H/-d/-b or a raw request, no bare-LF→CRLF promotion of a raw request's head, and on HTTP/2 no field-name lowercasing. The URL is still expanded: it names where to dial") { verbatim = true }
           p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $BIND.NAME tokens") { |v| slot = v.strip }
           p.on("--record-history", "Also write the request + response to History as a flow, and print its id (default: off)") { record_history = true }

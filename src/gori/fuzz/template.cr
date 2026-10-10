@@ -666,10 +666,10 @@ module Gori::Fuzz
       value, _ = split_raw_interior(chars[(a + 1)...close])
       clean = chain.strip
       # The value is spliced out of `text`, never rebuilt from its chars — see the
-      # BYTE-SAFETY note under `split_raw_interior`. (`escape_chain` runs on the CHAIN,
+      # BYTE-SAFETY note under `split_raw_interior`. (`escape_interior` runs on the CHAIN,
       # which is a converter spec the operator typed, not captured bytes.)
       raw_value = text[a + 1, value.size]
-      interior = clean.empty? ? raw_value : "#{raw_value}#{CHAIN_SEP}#{escape_chain(clean)}"
+      interior = clean.empty? ? raw_value : "#{raw_value}#{CHAIN_SEP}#{escape_interior(clean)}"
       "#{text[0, a + 1]}#{interior}#{text[close..]}"
     end
 
@@ -766,8 +766,18 @@ module Gori::Fuzz
       {interior, nil}
     end
 
-    private def self.escape_chain(s : String) : String
-      s.gsub(MARKER, "#{MARKER}#{MARKER}").gsub(CHAIN_SEP, "#{CHAIN_SEP}#{CHAIN_SEP}")
+    # Double every `§`/`¦` so `scan_interior` folds them back to literals. STRING needles on
+    # purpose: `gsub(String, String)` with a multi-byte needle splices bytes, where the Char
+    # overload walks chars and would turn a non-UTF-8 byte into U+FFFD.
+    private def self.escape_interior(s : String) : String
+      s.gsub(MARKER.to_s, "#{MARKER}#{MARKER}").gsub(CHAIN_SEP.to_s, "#{CHAIN_SEP}#{CHAIN_SEP}")
+    end
+
+    # `§value§` for an auto-marked value. The value is remote-chosen (a Set-Cookie echo, a
+    # JSON field), so a bare `¦` in it must not become the value|chain split: `x¦exec:…`
+    # wrapped raw is a Decoder chain that runs on the next send.
+    private def self.wrap(value : String) : String
+      "#{MARKER}#{escape_interior(value)}#{MARKER}"
     end
 
     private def self.eol_of(text : String) : String
@@ -812,7 +822,7 @@ module Gori::Fuzz
     # auto-marked — wrap them by hand with an explicit default if you want to fuzz them.
     private def self.mark_pairs(s : String, sep : Char) : String
       s.split(sep).map do |pair|
-        (eq = pair.index('=')) && eq + 1 < pair.size ? "#{pair[0..eq]}#{MARKER}#{pair[(eq + 1)..]}#{MARKER}" : pair
+        (eq = pair.index('=')) && eq + 1 < pair.size ? "#{pair[0..eq]}#{wrap(pair[(eq + 1)..])}" : pair
       end.join(sep)
     end
 
@@ -851,16 +861,16 @@ module Gori::Fuzz
     # `Regex::Error` crashed `--auto`.
     private def self.mark_json(body : String) : String
       out = body.gsub(/("(?:[^"\\]++|\\.)*"\s*:\s*")((?:[^"\\]++|\\.)*)(")/) do |m|
-        $2.empty? ? m : "#{$1}#{MARKER}#{$2}#{MARKER}#{$3}"
+        $2.empty? ? m : "#{$1}#{wrap($2)}#{$3}"
       end
       # The WHOLE RFC 8259 §6 number token is the position — sign, fraction and exponent. A
       # mantissa-only match turned `1e5` into `§1§e5`, so every payload went out with a
       # trailing `e5` (#1205). The lookahead refuses a token that runs on into something
       # that is not a number (`0x1F`, `1.2.3`): leaving it unmarked beats a partial position.
-      out = out.gsub(/("(?:[^"\\]++|\\.)*"\s*:\s*)(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(?![\w.+\-])/) { "#{$1}#{MARKER}#{$2}#{MARKER}" }
+      out = out.gsub(/("(?:[^"\\]++|\\.)*"\s*:\s*)(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(?![\w.+\-])/) { "#{$1}#{wrap($2)}" }
       # Also mark boolean/null scalar values so `--auto` exercises flag-style fields
       # (e.g. "admin":true) as documented. (Array-element values are still unmarked.)
-      out.gsub(/("(?:[^"\\]++|\\.)*"\s*:\s*)(true|false|null)\b/) { "#{$1}#{MARKER}#{$2}#{MARKER}" }
+      out.gsub(/("(?:[^"\\]++|\\.)*"\s*:\s*)(true|false|null)\b/) { "#{$1}#{wrap($2)}" }
     rescue ArgumentError | Regex::Error
       # An invalid-UTF-8 body (e.g. a repeater seeded from a captured non-UTF-8 JSON request), or
       # one still past the JIT stack limit, makes the PCRE gsub raise; leave it unmarked rather than crash the TUI auto-mark — and do NOT

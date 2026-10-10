@@ -779,15 +779,12 @@ module Gori
     #     braces literally. An include `*.acme.{test,dev}` matched three hosts live and none
     #     in History, and an exclude with braces carved out nothing in SQL — fail-OPEN on the
     #     display lens, the direction that matters.
-    #   · a SURROUNDING bracket pair — `HostPattern::Compiled` peels it for the exact/subdomain
-    #     arm (`@bare`) but globs against the UN-peeled `@down`, so `[2001:db8::*]` is a rule
-    #     that matches NOTHING in Crystal (`File.match?` reads the outer `[…]` as a character
-    #     class). host_cond peels first, so its GLOB would match every host under
-    #     `2001:db8::` — a dead INCLUDE listing its flows as in-scope in History while
-    #     `allowlisted_unlocked?` refuses every request, i.e. Sandbox black-holes the proxy
-    #     with `include_count` non-zero and the "blocks everything" warning quiet. Gated on
-    #     the bracket pair alone rather than "bracketed AND globbed": which of Compiled's two
-    #     arms applies is exactly the thing not worth restating here.
+    #   · a SURROUNDING bracket pair — how `HostPattern::Compiled` peels it (always for the
+    #     exact/subdomain arm, only around an IPv6 `:` for a glob) is its own business, and a
+    #     native GLOB that peeled differently would list flows in History the live gate
+    #     treats otherwise. Gated on the bracket pair alone rather than "bracketed AND
+    #     globbed": which of Compiled's two arms applies is exactly the thing not worth
+    #     restating here.
     #
     # Anything else routes through `gori_host_match`, which IS HostPattern — so the fast path
     # stays native (host matching runs per row of every scope-filtered reload) and the shapes
@@ -926,8 +923,17 @@ module Gori
       # carries the whole argument, and `Interceptor`'s live gate splits the same way. In one
       # line: a carve-out has to be able to name a port (it could not, over TLS, and that
       # failed OPEN), and an allowlist entry never named one, so making it start to would put
-      # every non-default-port origin out of scope.
-      url_expr = rule.include? ? QL::URL_EXPR_NO_PORT : QL::URL_EXPR
+      # every non-default-port origin out of scope. An exclude still ALSO reads the port-free
+      # url, because the live gate asks it of both (`Interceptor#scope_allows?` /
+      # `port_excluded?`, `Outbound#evaluate`): `exclude string "acme.test/logout"` blocks
+      # `https://acme.test:8443/logout` live, so the lens must not list it as in scope.
+      return url_cond(rule, QL::URL_EXPR_NO_PORT) if rule.include? || rule.match_type == "host"
+      a, aa = url_cond(rule, QL::URL_EXPR)
+      b, ba = url_cond(rule, QL::URL_EXPR_NO_PORT)
+      {"(#{a} OR #{b})", aa + ba}
+    end
+
+    private def self.url_cond(rule : Rule, url_expr : String) : {String, Array(DB::Any)}
       case rule.match_type
       when "host"
         host_cond(rule.pattern)

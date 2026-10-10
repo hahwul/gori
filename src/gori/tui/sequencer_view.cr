@@ -565,13 +565,13 @@ module Gori::Tui
       any["mode"]?.try(&.as_s?).try { |m| Sequencer::Mode.parse?(m) }.try { |m| @config.mode = m }
       kind = any["kind"]?.try(&.as_s?).try { |k| Sequencer::ExtractKind.parse?(k) } || @config.token_loc.kind
       selector = any["selector"]?.try(&.as_s?) || ""
-      pstart = any["pos_start"]?.try(&.as_i?) || 0
-      pend = any["pos_end"]?.try(&.as_i?) || 0
+      pstart = Settings.int_field(any, "pos_start") || 0
+      pend = Settings.int_field(any, "pos_end") || 0
       @config.token_loc = Sequencer::TokenLoc.new(kind, selector, pstart, pend)
-      any["goal"]?.try(&.as_i?).try { |n| @config.goal = n }
+      Settings.int_field(any, "goal").try { |n| @config.goal = n }
       # Absent (an older row) reads as nil => uncapped, which is what those runs were.
       @config.max_requests = any["max_requests"]?.try(&.as_i64?)
-      any["concurrency"]?.try(&.as_i?).try { |n| @config.concurrency = n }
+      Settings.int_field(any, "concurrency").try { |n| @config.concurrency = n }
       any["notify"]?.try(&.as_s?).try { |t| Sequencer::NotifyMode.parse?(t) }.try { |m| @config.notify = m }
     rescue
       # malformed persisted config → keep defaults

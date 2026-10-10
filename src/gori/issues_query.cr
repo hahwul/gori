@@ -187,7 +187,12 @@ module Gori
           else          false
           end
         else
-          return true if target && (score = f.cvss_score) && score == target
+          if target && (score = f.cvss_score)
+            return true if score == target
+            # A stored bare SCORE is only a score: as a substring `cvss:5` matched 7.5. A vector
+            # keeps its substring reading (`cvss:3.1`, the version, as documented).
+            return false if cvss_str.strip.to_f?
+          end
           cvss_str.downcase.includes?(t.text)
         end
       end

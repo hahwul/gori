@@ -108,8 +108,13 @@ private class NotesFakeHost
 
   def confirm(title : String, message : String, *, confirm_label : String, danger : Bool,
               return_to : Symbol = :none, &action : -> Nil) : Nil
-    action.call # no modal in a spec: a confirmed action runs straight through
+    # No modal in a spec: a confirmed action runs straight through, unless a spec holds it
+    # to change the world between the prompt and the answer.
+    hold_confirm? ? (@held_confirm = action) : action.call
   end
+
+  property? hold_confirm = false
+  getter held_confirm : Proc(Nil)? = nil
 
   def overlay : Symbol
     :none
@@ -301,6 +306,30 @@ describe "Gori::Tui::NotesController — a closed note's links" do
       # …and gone once the document that removes the note has committed.
       controller.save_notes.should be_true
       store.list_links(Gori::Store::LinkOwnerKind::Note, id).should be_empty
+    end
+  end
+end
+
+# The clear confirm answers for the note it NAMED: a peer reload under the modal can move the
+# selection to another note, which a "clear whatever is current" answer would wipe.
+describe "Gori::Tui::NotesController — clearing a note" do
+  it "clears the note the prompt named, even after the selection moved" do
+    with_notes_controller do |controller|
+      view = controller.view
+      view.switch_note(0)
+      view.set_current_text("A")
+      view.switch_note(1)
+      view.set_current_text("B")
+      view.switch_note(0)
+      host = controller.@host.as(NotesFakeHost)
+      host.hold_confirm = true
+
+      controller.notes_clear
+      view.switch_note(1) # the selection moves before the answer
+      host.held_confirm.not_nil!.call
+
+      view.note_at(0).not_nil!.area.text.should eq("")
+      view.note_at(1).not_nil!.area.text.should eq("B")
     end
   end
 end

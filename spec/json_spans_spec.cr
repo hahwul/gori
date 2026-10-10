@@ -53,6 +53,15 @@ describe Gori::JsonSpans do
     J.objects(%([1,2]).to_slice, 32).should eq([] of J::Container)
   end
 
+  # `valid?` accepts an unpaired surrogate escape, which `String.from_json` raises on; a key
+  # spelled that way comes back as its source text, and the walk does not raise.
+  it "walks a body carrying an unpaired surrogate escape in a key and a value" do
+    src = %({"\\ud83d":"x","v":"cut \\ud83d"})
+    J.root_object(src.to_slice).not_nil!.members.map(&.key).should eq(["\\ud83d", "v"])
+    append(src).should eq(%({"\\ud83d":"x","v":"cut \\ud83d","p":"v"}))
+    J.decode_string(%("cut \\ud83d")).should eq("cut \\ud83d")
+  end
+
   it "keeps bytes that are not valid UTF-8 inside a string" do
     b = IO::Memory.new
     b << %({"bin":")

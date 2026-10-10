@@ -62,6 +62,10 @@ module Gori
             end
           end
         end
+        # The same identity line for the head: `X-Name: caf\xE9` and `caf\xE8` scrub alike.
+        if head && !Unicode.valid?(head)
+          lines << "— head is not valid UTF-8 (shown with �), sha256 #{short_digest(head)} —"
+        end
         lines
       end
 

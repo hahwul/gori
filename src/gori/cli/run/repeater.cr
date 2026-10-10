@@ -151,7 +151,7 @@ module Gori
           p.on("--fields=FILE", "JSON file with the ordered HPACK field list (and optional body)") { |v| fields_file = v }
           p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
           p.on("--timeout=SEC", "Per-operation connect + idle timeout (seconds)") { |v| timeout = parse_count(v, "--timeout").seconds }
-          p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
+          p.on("--allow-unscoped", "Send even if the target is outside the project scope (the Sandbox still applies)") { allow_unscoped = true }
           p.on("--tls-preset=NAME", TLS_PRESET_HELP) { |v| tls_preset = v }
           p.on("--headers-only", HEADERS_ONLY_HELP) { headers_only = true }
           p.on("--max-body=BYTES", MAX_BODY_HELP) { |v| max_body = parse_count(v, "--max-body") }
@@ -1106,7 +1106,7 @@ module Gori
           p.on("--timeout=SEC", "Per-operation connect + idle timeout (seconds)") { |v| timeout = parse_count(v, "--timeout").seconds }
           p.on("--http2", "Race over HTTP/2 (single-packet attack), overriding the sessions' stored setting") { force_http2 = true }
           p.on("--http1", "Race over HTTP/1.1 (last-byte sync), overriding the sessions' stored setting") { force_http2 = false }
-          p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
+          p.on("--allow-unscoped", "Send even if the target is outside the project scope (the Sandbox still applies)") { allow_unscoped = true }
           p.on("--verbatim", "Send the stored bytes EXACTLY: no token expansion, no Content-Length resync (see `repeater send --verbatim`)") { verbatim = true }
           p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay and $BIND table for every member") { |v| slot = v.strip }
           p.on("--reframe-grpc", "HTTP/2 only: recompute the gRPC length prefix over the body being sent") { reframe_grpc = true }
@@ -1195,7 +1195,7 @@ module Gori
           p.on("--interleaved", "Send A then B sequentially (alternating order) instead of the synchronized race") { interleaved = true }
           p.on("--http2", "Send over HTTP/2 (single-packet), overriding the sessions' stored setting") { force_http2 = true }
           p.on("--http1", "Send over HTTP/1.1 (last-byte sync), overriding the sessions' stored setting") { force_http2 = false }
-          p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
+          p.on("--allow-unscoped", "Send even if the target is outside the project scope (the Sandbox still applies)") { allow_unscoped = true }
           p.on("--verbatim", "Send the stored bytes EXACTLY: no token expansion, no Content-Length resync") { verbatim = true }
           p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay and $BIND table for both variants") { |v| slot = v.strip }
           p.on("--reframe-grpc", "HTTP/2 only: recompute the gRPC length prefix over the body being sent") { reframe_grpc = true }
@@ -1457,7 +1457,7 @@ module Gori
           p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
           p.on("--timeout=SEC", "Per-operation connect + idle timeout (seconds). Ignored on the WebSocket path, which paces itself with --idle-ms") { |v| timeout = parse_count(v, "--timeout").seconds }
           p.on("--diff", "Diff the new response against the session's last stored response") { do_diff = true }
-          p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
+          p.on("--allow-unscoped", "Send even if the target is outside the project scope (the Sandbox still applies)") { allow_unscoped = true }
           p.on("--verbatim", "Send the stored bytes EXACTLY: no token expansion (project env vars, session bindings, or generators — a $ENV.KEY, $BIND.NAME, or $GEN.UUID token stays literal on the wire; bare syntax: $KEY / $NAME), no bare-LF→CRLF promotion, no Content-Length resync, no HTTP/2→1.1 version fix, and on h2 no field-name lowercasing. Nothing interprets the token grammar, so an escape ($$ENV.KEY, or $$name in bare syntax) is not consumed either — write the literal token itself. A token the APP owns ($where, $filter, $IFS) needs this flag only under the bare syntax; namespaced, nothing but $ENV./$BIND./$GEN. is a reference. The active --slot's header overlay still applies: it answers a different question (send this AS WHOM) — pass no --slot to send the stored headers. It also waives the §…§ refusal: a stored § stays literal instead of being refused as an unrendered marker") { verbatim = true }
           p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $BIND.NAME tokens (bare syntax: $NAME)") { |v| slot = v.strip }
           # Opt-in, and off even under --verbatim's opposite: a stale prefix is the operator's
@@ -2567,7 +2567,7 @@ module Gori
           p.on("--apply-rules", APPLY_RULES_HELP) { apply_rules = true }
           p.on("--keep-request-line", "Send the stored request line as-is — do not rewrite an absolute-form line (\"GET http://h/p\") to origin-form") { keep_request_line = true }
           p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $BIND.NAME tokens (bare syntax: $NAME)") { |v| slot = v.strip }
-          p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
+          p.on("--allow-unscoped", "Send even if the target is outside the project scope (the Sandbox still applies)") { allow_unscoped = true }
           p.on("--headers-only", HEADERS_ONLY_HELP) { headers_only = true }
           p.on("--max-body=BYTES", MAX_BODY_HELP) { |v| max_body = parse_count(v, "--max-body") }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }

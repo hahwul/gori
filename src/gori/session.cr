@@ -363,10 +363,11 @@ module Gori
     # touched** — which is what makes an edit to one row incapable of dropping a working socket
     # somewhere else in the array. Stop-all/start-all would have done exactly that.
     #
-    # Fates, all of them defined by `Proxy::Server#stop` closing only the ACCEPT socket:
+    # Fates, all of them defined by `Proxy::Server#stop(drop_clients: false)` closing only the
+    # ACCEPT socket:
     #
     #   - removed from the section → stops accepting; connections already established finish on
-    #     their own fibers. Same fate as capture-off and as a primary rebind.
+    #     their own fibers. Same fate as a primary rebind (capture-off ends them).
     #   - same address, changed config → stopped then rebuilt, in that order, because the new
     #     socket wants the address the old one holds. In-flight connections keep running against
     #     the configuration they were accepted under, which is the only answer that does not
@@ -392,7 +393,7 @@ module Gori
           pending.delete_at(idx)
           keep << e
         else
-          e.server.stop rescue nil
+          e.server.stop(drop_clients: false) rescue nil
         end
       end
 
@@ -574,7 +575,10 @@ module Gori
       @interceptor.release_all # unblock held fibers FIRST so they can write final rows
       @proxy.stop
       stop_extra_listeners
-      @store.abandon_pending!("proxy stopped before response")
+      # Only the capturer owns the Pending rows: they are project-wide, and a view-only instance
+      # closing would turn the capturer's in-flight flows into errors (the open path gates the
+      # orphan sweep the same way).
+      @store.abandon_pending!("proxy stopped before response") if capturing_lock_held?
       # Best-effort: a delete failure here must not skip the lock/probe/store teardown below
       # (which would leak the flock + writer fiber + fibers) or, via a caller's `ensure`,
       # replace the real exception being unwound.
@@ -584,7 +588,7 @@ module Gori
       @probe.stop
       # Second sweep: proxy/intercept fibers released above may still enqueue
       # InsertFlow after the first abandon (right after proxy.stop).
-      @store.abandon_pending!("proxy stopped before response")
+      @store.abandon_pending!("proxy stopped before response") if capturing_lock_held?
       # Drain + stop the store BEFORE closing the events channel: the writer
       # publishes post-commit events while draining, and a closed channel would
       # otherwise make it raise mid-drain. (publish() also tolerates a closed

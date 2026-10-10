@@ -82,7 +82,8 @@ module Gori
     end
 
     # The needle as it will be searched, or nil when there is nothing to search for. Control
-    # characters go the way `body:` drops them (`QL.strip_controls`) — and a needle made ONLY
+    # characters are stripped (`QL.strip_controls`; History's `body:` drops such a term
+    # instead, but a typed search box has no `analyze` to report one) — and a needle made ONLY
     # of them must be nil, not "": an empty LIKE pattern is `%%`, which matches every flow.
     def self.needle(raw : String) : String?
       QL.strip_controls(raw).strip.presence

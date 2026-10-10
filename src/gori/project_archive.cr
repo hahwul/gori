@@ -470,8 +470,10 @@ module Gori
         db.using_connection do |conn|
           conn.exec("PRAGMA query_only = ON")
           version = conn.scalar("PRAGMA user_version").as(Int64).to_i
+          # gori never creates a trigger or view, and SQLite reserves `sqlite_*` names, so
+          # any one is foreign: no name exemption (an unescaped LIKE once let `sqliteXkeep` through).
           unsupported_objects = conn.query_all("SELECT type FROM sqlite_master " \
-                                               "WHERE type IN ('trigger', 'view') AND name NOT LIKE 'sqlite_%'", as: String)
+                                               "WHERE type IN ('trigger', 'view')", as: String)
           if importing && !unsupported_objects.empty?
             raise Gori::Error.new("project archive database contains unsupported SQLite triggers or views")
           end
