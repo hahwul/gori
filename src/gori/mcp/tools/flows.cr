@@ -126,6 +126,7 @@ module Gori
           prepared = Gori::DisplayColumns.prepare(parsed.map_with_index { |sp, i| sp.to_column(i) })
         end
         include_sensitive = bool_arg(h, "include_sensitive", false)
+        matcher = columns_matcher(prepared, include_sensitive)
         # An agent gets one shot at this answer and cannot tell "no match" from "not indexed
         # yet", so drain the off-commit FTS backlog (Store V4) before a query that reads it —
         # or refuse, when this server is read-only and therefore cannot drain (see the helper).
@@ -177,7 +178,7 @@ module Gori
             end
             emit_ignored_terms(j, dropped)
             j.field "flows" do
-              j.array { rows.each { |r| Serialize.flow_row(j, r, row_columns(r, prepared, include_sensitive)) } }
+              j.array { rows.each { |r| Serialize.flow_row(j, r, row_columns(r, prepared, include_sensitive, matcher)) } }
             end
           end
         end)
@@ -205,6 +206,7 @@ module Gori
                                    ignored : Array(String)) : Result
         narrowed = (query && !query.strip.empty?) || lensed || view_filter != QL::EMPTY
         include_sensitive = bool_arg(h, "include_sensitive", false)
+        matcher = columns_matcher(prepared, include_sensitive)
         found = store.flow_rows(ids)
         by_id = {} of Int64 => Store::FlowRow
         found.each { |r| by_id[r.id] = r }
@@ -249,7 +251,7 @@ module Gori
             end
             emit_ignored_terms(j, ignored)
             j.field "flows" do
-              j.array { rows.each { |r| Serialize.flow_row(j, r, row_columns(r, prepared, include_sensitive)) } }
+              j.array { rows.each { |r| Serialize.flow_row(j, r, row_columns(r, prepared, include_sensitive, matcher)) } }
             end
           end
         end)
@@ -282,12 +284,18 @@ module Gori
       # `[REDACTED]` unless `include_sensitive`, as `gori run history` masks the same column: the
       # schema's own example is `req:header:authorization`, and `get_flow` withholds that value
       # behind the same flag. An EMPTY value stays empty, so a miss still reads as a miss.
+      # The project's redaction profile for `columns`, resolved once per call: the same one
+      # `get_flow` applies, under the same `include_sensitive` opt-out (see `redact_flow`).
+      private def columns_matcher(prepared : Gori::DisplayColumns::Prepared, include_sensitive : Bool) : Redact::Matcher?
+        include_sensitive || prepared.empty? ? nil : Redact::Policy.ambient(store)
+      end
+
       private def row_columns(row : Store::FlowRow,
                               prepared : Gori::DisplayColumns::Prepared,
-                              include_sensitive : Bool) : Array({String, String})?
+                              include_sensitive : Bool,
+                              matcher : Redact::Matcher?) : Array({String, String})?
         return nil if prepared.empty?
-        detail = store.get_flow(row.id, body_max: prepared.body_scoped? ? Gori::DisplayColumns::BODY_CAP : 0)
-        values = detail ? prepared.values(detail) : Array.new(prepared.size, "")
+        values = prepared.row_values(store, row.id, matcher)
         prepared.columns.map_with_index do |c, i|
           v = values[i]? || ""
           v = "[REDACTED]" if !include_sensitive && !v.empty? && Gori::DisplayColumns.sensitive?(c)

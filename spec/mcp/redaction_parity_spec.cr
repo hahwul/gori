@@ -68,6 +68,18 @@ describe "MCP read tools redact what get_flow redacts" do
     end
   end
 
+  it "reads list_history body columns from the redacted copy unless include_sensitive" do
+    with_redacting_project do |store|
+      id = authed_flow(store, "A")
+      tools = tools_for(store)
+      args = %({"ids":[#{id}],"columns":["jsonpath:token","res:regex:(body-secret-[A-Z]+)"]})
+      mcp_ok_json(tools, "list_history", args).to_json.should_not contain("body-secret-A")
+      mcp_ok_json(tools, "list_history", %({"columns":["jsonpath:token"]})).to_json.should_not contain("body-secret-A")
+      open = %({"ids":[#{id}],"columns":["jsonpath:token"],"include_sensitive":true})
+      mcp_ok_json(tools, "list_history", open)["flows"][0]["columns"]["token"].as_s.should eq("body-secret-A")
+    end
+  end
+
   it "decides compare_flows' verdict on the captured credentials, not the redacted copy" do
     with_store do |store|
       a = authed_flow(store, "ALICE", "sid=alice")
