@@ -867,8 +867,8 @@ module Gori::Tui
         # anything else) and the engine fibers die with it. `leave_project` / `quit!` are
         # the only exits that hand the terminal back with fibers still able to send.
         #
-        # Only two kinds now reach here: a `Gori::Error` (a deliberate operator-facing abort)
-        # and a raise that tripped the tick breaker. Everything else is absorbed per tick by
+        # Only two kinds now reach here: `TerminalClosed` (the tty went away — the deliberate
+        # operator-facing abort) and a raise that tripped the tick breaker. Everything else is absorbed per tick by
         # `absorb_tick_error`, precisely so one bad frame stops destroying the unsaved buffers
         # and the held intercept queue this loop owns.
         #
