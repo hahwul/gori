@@ -551,6 +551,13 @@ describe Gori::Miner::Plan do
       ex.reason.should eq(M::PlanError::Reason::NoLocations)
     end
 
+    it "mines a location named twice once" do
+      cfg = config
+      M::Plan.build(M::PlanOptions.new(CRLF_RAW, target: "http://t.test",
+        locations: [M::Location::Query, M::Location::Query], config: cfg), ungated_outbound)
+      cfg.locations.should eq([M::Location::Query])
+    end
+
     it "reports Wordlist with the underlying message when the user list is unreadable" do
       cfg = config
       cfg.user_wordlist = File.tempname("gori-miner-missing", ".txt")

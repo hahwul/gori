@@ -261,7 +261,7 @@ module Gori::Miner
       # engine could inject nothing there, yet counted its names as tested and clean (#1203).
       # The plan and the engine both keep the list, so every surface can say what was skipped.
       # Refused BEFORE the write-back, so a refusal leaves the TUI's live selection as it was.
-      requested = options.locations || detected.default
+      requested = (options.locations || detected.default).uniq # `query,query` mines once
       inapplicable = requested - detected.applicable
       runnable = requested - inapplicable
       if runnable.empty?
