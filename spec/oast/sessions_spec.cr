@@ -164,7 +164,6 @@ describe Gori::Oast::Sessions do
         # already hold a reused one, so the row is written back under the old id by hand.
         store.@db.exec("INSERT INTO oast_providers (id, created_at, updated_at, name, kind, host, token, enabled, position) " \
                        "VALUES (?, 0, 0, 'Public webhook.site', 'webhook.site', 'https://webhook.site', 'MY-WEBHOOK-API-KEY', 1, 2)", second)
-        reused = second
         first.should_not eq(second)
 
         # Built from the DB rows only — `Oast.provider_configs` would merge the machine's own

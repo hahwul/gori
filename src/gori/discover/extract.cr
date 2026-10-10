@@ -115,7 +115,7 @@ module Gori::Discover
       String.build(s.bytesize) do |io|
         pos = 0
         while at = amp
-          if (ref = reference_at(s, at))
+          if ref = reference_at(s, at)
             ch, semi = ref
             io.write(s.to_slice[pos, at - pos])
             io << ch

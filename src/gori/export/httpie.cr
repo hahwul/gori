@@ -18,6 +18,11 @@ module Gori
         parts ? command(parts) : nil
       end
 
+      # httpie normalizes `/a/../b` away, as curl does without its own `--path-as-is`.
+      private def self.program(url : String) : String
+        Curl.dot_segments?(url) ? "http --path-as-is" : "http"
+      end
+
       def self.command(parts : RequestParts::Parts) : String
         s = RequestParts.sendable(parts)
         url = Escape.percent_encode_non_ascii(parts.url)
@@ -35,8 +40,7 @@ module Gori
         # A NUL in the method truncates the positional argument (and a non-UTF-8 byte aborts the
         # whole command); drop it and let httpie infer the method — GET, or POST when a body is
         # present — the way `Curl.nul_method_note` drops -X.
-        # httpie normalizes `/a/../b` away, as curl does without its own `--path-as-is`.
-        http = Curl.dot_segments?(url) ? "http --path-as-is" : "http"
+        http = program(url)
         if carriable?(method)
           out = ["#{http} #{Curl.shell_quote(method)} #{Curl.shell_quote(url)}"]
         else

@@ -40,25 +40,7 @@ module Gori
     def tolerant(json : String) : String
       return json unless json.includes?("\\u")
       bytes = json.to_slice
-      fixes = [] of Int32
-      i = 0
-      while i < bytes.size
-        if bytes[i] == '\\'.ord
-          if bytes[i + 1]? == 'u'.ord && (cp = hex4(bytes, i + 2)) && 0xd800 <= cp <= 0xdfff
-            low = bytes[i + 6]? == '\\'.ord && bytes[i + 7]? == 'u'.ord ? hex4(bytes, i + 8) : nil
-            if cp <= 0xdbff && low && 0xdc00 <= low <= 0xdfff
-              i += 12
-              next
-            end
-            fixes << i
-            i += 6
-            next
-          end
-          i += 2
-          next
-        end
-        i += 1
-      end
+      fixes = unpaired_surrogate_escapes(bytes)
       return json if fixes.empty?
       String.build(json.bytesize) do |io|
         pos = 0
@@ -69,6 +51,32 @@ module Gori
         end
         io.write(bytes[pos..])
       end
+    end
+
+    # Byte offsets of every `\uXXXX` naming a surrogate that is not half of a high+low pair.
+    # Every other escape is stepped over whole, so an escaped backslash never opens one.
+    private def unpaired_surrogate_escapes(bytes : Bytes) : Array(Int32)
+      fixes = [] of Int32
+      i = 0
+      while i < bytes.size
+        unless bytes[i] == '\\'.ord
+          i += 1
+          next
+        end
+        cp = bytes[i + 1]? == 'u'.ord ? hex4(bytes, i + 2) : nil
+        unless cp && 0xd800 <= cp <= 0xdfff
+          i += 2
+          next
+        end
+        low = bytes[i + 6]? == '\\'.ord && bytes[i + 7]? == 'u'.ord ? hex4(bytes, i + 8) : nil
+        if cp <= 0xdbff && low && 0xdc00 <= low <= 0xdfff
+          i += 12
+        else
+          fixes << i
+          i += 6
+        end
+      end
+      fixes
     end
 
     private def hex4(bytes : Bytes, at : Int32) : Int32?

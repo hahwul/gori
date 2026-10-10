@@ -64,7 +64,7 @@ module Gori
           eq = pair.byte_index('=')
           next false unless eq && eq > 0
           pair.byte_slice(0, eq).each_byte.all? { |b| b.unsafe_chr.ascii_alphanumeric? || b.unsafe_chr.in?('_', '.', '~', '%', '+', '*', '[', ']', '-') } &&
-            pair.byte_slice(eq + 1).each_byte.none? { |b| b.unsafe_chr.ascii_whitespace? }
+            pair.byte_slice(eq + 1).each_byte.none?(&.unsafe_chr.ascii_whitespace?)
         end
       end
 
