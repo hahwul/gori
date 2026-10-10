@@ -154,16 +154,39 @@ module Gori::Diff
           end
         end
       in .changed?
-        "Both captures reached this endpoint and the answer moved beyond the retest tolerance " \
-        "on #{axes_phrase(row)}. Size is compared against a band and status by CLASS, so an " \
-        "axis that moved inside the tolerance is deliberately not listed above."
+        if silent = unanswered(row, ctx)
+          "#{silent} from this endpoint (every capture is pending or failed), " \
+          "so the move on #{axes_phrase(row)} is a missing answer, not evidence of how the " \
+          "endpoint behaves now."
+        else
+          "Both captures reached this endpoint and the answer moved beyond the retest tolerance " \
+          "on #{axes_phrase(row)}. Size is compared against a band and status by CLASS, so an " \
+          "axis that moved inside the tolerance is deliberately not listed above."
+        end
       in .unchanged?
         # Careful the other way round: this row is not a claim that a finding EXISTS here.
         # It is a claim about what moved, which is nothing this diff can measure.
-        "Both captures reached this endpoint and the answers are equivalent within the retest " \
-        "tolerance — nothing this diff can see moved, so anything filed against it in " \
-        "#{ctx.a_label} is unlikely to have been fixed."
+        if silent = unanswered(row, ctx)
+          # Nothing moved because there was nothing to compare: no answer is not "the same answer".
+          "#{silent} from this endpoint (every capture is pending or failed), " \
+          "so this diff has nothing to compare — it is not evidence the endpoint answers the " \
+          "same way, nor about anything filed against it in #{ctx.a_label}."
+        else
+          "Both captures reached this endpoint and the answers are equivalent within the retest " \
+          "tolerance — nothing this diff can see moved, so anything filed against it in " \
+          "#{ctx.a_label} is unlikely to have been fixed."
+        end
       end
+    end
+
+    # "B got no response" (or A, or neither) when a side captured requests but no response,
+    # nil when both answered. Such a row must not claim the endpoint was reached.
+    private def self.unanswered(row : Row, ctx : Context) : String?
+      a = row.a.try(&.answered?)
+      b = row.b.try(&.answered?)
+      return nil if a && b
+      return "Neither #{ctx.a_label} nor #{ctx.b_label} got a response" unless a || b
+      "#{a ? ctx.b_label : ctx.a_label} got no response"
     end
 
     # The full record: what was compared, what each side answered, what moved, what that is

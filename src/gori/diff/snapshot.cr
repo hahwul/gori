@@ -205,6 +205,12 @@ module Gori::Diff
       !@statuses.empty? && @statuses.all? { |s| s == 404 || s == 410 }
     end
 
+    # ≥1 capture got a response. False when every capture is pending or got none — a side
+    # that then knows nothing about how the endpoint answers.
+    def answered? : Bool
+      !@statuses.empty?
+    end
+
     # This endpoint answered at all — anything that is not a 4xx/5xx refusal or error.
     def reachable? : Bool
       @statuses.any? { |s| s < 400 }
