@@ -575,7 +575,10 @@ module Gori
       @interceptor.release_all # unblock held fibers FIRST so they can write final rows
       @proxy.stop
       stop_extra_listeners
-      @store.abandon_pending!("proxy stopped before response")
+      # Only the capturer owns the Pending rows: they are project-wide, and a view-only instance
+      # closing would turn the capturer's in-flight flows into errors (the open path gates the
+      # orphan sweep the same way).
+      @store.abandon_pending!("proxy stopped before response") if capturing_lock_held?
       # Best-effort: a delete failure here must not skip the lock/probe/store teardown below
       # (which would leak the flock + writer fiber + fibers) or, via a caller's `ensure`,
       # replace the real exception being unwound.
@@ -585,7 +588,7 @@ module Gori
       @probe.stop
       # Second sweep: proxy/intercept fibers released above may still enqueue
       # InsertFlow after the first abandon (right after proxy.stop).
-      @store.abandon_pending!("proxy stopped before response")
+      @store.abandon_pending!("proxy stopped before response") if capturing_lock_held?
       # Drain + stop the store BEFORE closing the events channel: the writer
       # publishes post-commit events while draining, and a closed channel would
       # otherwise make it raise mid-drain. (publish() also tolerates a closed
