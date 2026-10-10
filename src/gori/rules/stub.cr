@@ -146,7 +146,7 @@ module Gori
     # Why a stub's response did not parse — with the format, which is what a CLI or MCP caller
     # has to go on (the TUI's editor shows it live).
     private def self.stub_parse_error(text : String) : String
-      return "write a stub response" if text.blank?
+      return "the stub response is empty — it needs at least a status line such as '200 OK' (a body file supplies only the body)" if text.blank?
       "the stub response does not parse (expected a status line such as '200 OK', then headers, " \
       "then a blank line and the body)"
     end

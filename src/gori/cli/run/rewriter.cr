@@ -612,7 +612,7 @@ module Gori
         end
 
         op = parse_rewriter_op(op_s)
-        target = Store::RuleTarget.parse?(target_s) || abort("gori run rewriter add: invalid --target '#{target_s}'")
+        target = Store::RuleTarget.parse?(target_s) || abort("gori run rewriter add: invalid --target/--side '#{target_s}' (request|response)")
         part = Store::RulePart.parse?(part_s) || abort("gori run rewriter add: invalid --part '#{part_s}'")
         match = Store::MatchKind.parse?(match_s) || abort("gori run rewriter add: invalid --match '#{match_s}' (literal|regex)")
         # The `--from-flow` draft's pattern is a regex; an explicit `--match literal` over it
@@ -839,7 +839,7 @@ module Gori
 
         abort "gori run rewriter preview: --find is required" if (f = find).nil? || f.empty?
         op = parse_rewriter_op(op_s)
-        target = Store::RuleTarget.parse?(target_s) || abort("gori run rewriter preview: invalid --target '#{target_s}'")
+        target = Store::RuleTarget.parse?(target_s) || abort("gori run rewriter preview: invalid --target/--side '#{target_s}' (request|response)")
         part = Store::RulePart.parse?(part_s) || abort("gori run rewriter preview: invalid --part '#{part_s}'")
         match = Store::MatchKind.parse?(match_s) || abort("gori run rewriter preview: invalid --match '#{match_s}' (literal|regex)")
         # Validate the regex up front (like `add` does) — otherwise a bad pattern is
