@@ -641,6 +641,21 @@ describe "Gori::Probe::Active::PathNormalizationBypass" do
     end
   end
 
+  # The evidence says "canonical path still denied", so a control that is not 401/403 (a rate
+  # limit, an outage, a 404) cannot back it, even when a variant answers 2xx.
+  it "does not fire when the control is not an access-control denial" do
+    with_store do |store|
+      detail = probe_capture_flow(store, "HTTP/1.1 403 Forbidden\r\n\r\n", target: "/admin", status: 403)
+      plan = probe.plan(detail).not_nil!
+      [429, 503, 404, 302].each do |st|
+        results = [resp.call(403), resp.call(200), resp.call(403), resp.call(403), resp.call(403), resp.call(st)]
+        probe.detections_all(plan, results, detail).should be_empty
+      end
+      results = [resp.call(403), resp.call(200), resp.call(403), resp.call(403), resp.call(403), resp.call(401)]
+      probe.detections_all(plan, results, detail).size.should eq(1)
+    end
+  end
+
   it "does not fire when every variant stays denied, or a variant is 3xx" do
     with_store do |store|
       detail = probe_capture_flow(store, "HTTP/1.1 403 Forbidden\r\n\r\n", target: "/admin", status: 403)
