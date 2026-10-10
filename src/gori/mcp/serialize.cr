@@ -29,6 +29,7 @@ module Gori
       MAX_TEXT                 = 64 * 1024 # cap on inlined decoded text
       MAX_B64                  = 64 * 1024 # cap on raw bytes base64-encoded for binary bodies
       SAVED_HEAD_PREVIEW_BYTES = 16 * 1024
+      OMIT_SNIFF_BYTES         = 512         # body prefix body_mode:none reads to pick `encoding`
       SAVED_SOURCE_BYTES       = 1024 * 1024 # encoded/chunk-framed input read from SQLite
 
       # Header names whose VALUES carry credentials/session material. Redacted to
@@ -1522,7 +1523,9 @@ module Gori
         # Decode/de-chunk only one byte beyond what can be emitted. That byte is enough to
         # distinguish an exact-cap body from an amplified preview, without inflating a 20 MiB
         # gzip or copying a giant chunked entity before slicing it back to 2 KiB.
-        inline_cap = {cap, 0}.max
+        # `omit` still answers `encoding`, from a short prefix: with nothing sampled, an empty
+        # sample is valid UTF-8 and a PNG read as "text".
+        inline_cap = {cap, omit ? OMIT_SNIFF_BYTES : 0}.max
         preview_cap = inline_cap < Int32::MAX ? inline_cap + 1 : inline_cap
         decoded, note, decode_complete = Proxy::Codec::ContentDecode.decode_full(head, body, preview_cap)
         bytes = decoded || body

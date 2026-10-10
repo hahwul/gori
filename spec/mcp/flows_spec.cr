@@ -390,6 +390,27 @@ describe Gori::MCP::Server do
       end
     end
 
+    # With nothing sampled, the empty sample was valid UTF-8 and a PNG read as encoding:"text".
+    it "picks body_mode:none's encoding from the body itself" do
+      with_store do |store|
+        png = Bytes[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d]
+        cjk = ("한" * 300).to_slice # 900 bytes; the 512-byte sniff splits a codepoint
+        ids = {png, cjk}.map do |b|
+          mcp_seed_flow(store, "h.test", "GET", "/b", 200,
+            resp_head: "HTTP/1.1 200 OK\r\nContent-Length: #{b.size}\r\n\r\n", resp_body: b)
+        end
+        tools = tools_for(store, allow_actions: false)
+        bin = mcp_ok_json(tools, "get_flow", %({"id":#{ids[0]},"body_mode":"none"}))["response_body"]
+        bin["encoding"].as_s.should eq("base64")
+        bin["binary"].as_bool.should be_true
+        bin.as_h.has_key?("base64").should be_false
+        txt = mcp_ok_json(tools, "get_flow", %({"id":#{ids[1]},"body_mode":"none"}))["response_body"]
+        txt["encoding"].as_s.should eq("text")
+        txt["size"].as_i.should eq(900)
+        txt.as_h.has_key?("text").should be_false
+      end
+    end
+
     it "caps the inlined body with max_body_bytes and flags truncation" do
       with_store do |store|
         id = mcp_seed_flow(store, "h.test", "GET", "/b", 200,
