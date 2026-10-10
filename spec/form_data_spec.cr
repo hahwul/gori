@@ -255,6 +255,18 @@ describe Gori::FormData do
       field_named(fields, "a").not_nil!.value.should eq("val")
     end
 
+    # A Latin-1 Content-Disposition (an old browser's `résumé.pdf`) is invalid UTF-8: the name
+    # regex raised on it, and the rescue around the whole parse dropped EVERY field.
+    it "keeps every part when one Content-Disposition carries non-UTF-8 bytes" do
+      raw = "--BND\r\nContent-Disposition: form-data; name=\"caf\xE9\"; filename=\"r\xE9sum\xE9.pdf\"\r\n\r\nPDF\r\n" \
+            "--BND\r\nContent-Disposition: form-data; name=\"second\"\r\n\r\nv2\r\n--BND--\r\n"
+      fields = Gori::FormData.from_flow("/", multipart_head("BND"), raw.to_slice).not_nil!
+      fields.size.should eq(2)
+      fields[0].name.to_slice.should eq("caf\xE9".to_slice) # unscrubbed: a surface scrubs where it prints
+      fields[0].note.not_nil!.to_slice.should eq("file: r\xE9sum\xE9.pdf (3 bytes)".to_slice)
+      field_named(fields, "second").not_nil!.value.should eq("v2")
+    end
+
     it "yields no multipart fields when the boundary is absent" do
       body = multipart_body("BND", %(Content-Disposition: form-data; name="a"\r\n\r\nv))
       Gori::FormData.from_flow("/",
