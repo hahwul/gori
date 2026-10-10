@@ -253,7 +253,7 @@ module Gori::Sequencer
     private def self.resolve_origin(options : PlanOptions) : Fuzz::Origin
       raw = options.target.presence || options.default_target.presence
       raise PlanError.new(PlanError::Reason::NoTarget, "no target origin") unless raw
-      Fuzz::Origin.new(*Repeater::FlowRequest.dial_target(raw))
+      Fuzz::Origin.dial(raw)
     rescue e : Repeater::FlowRequest::DialTargetError
       raise PlanError.new(e.unresolved? ? PlanError::Reason::UnresolvedEnv : PlanError::Reason::BadTarget, e.message.to_s, e.detail)
     end

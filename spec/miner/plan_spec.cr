@@ -533,6 +533,13 @@ describe Gori::Miner::Plan do
       ex.detail.should eq("::::")
     end
 
+    it "reports BadTarget for a scheme other than http(s) instead of dialling it as plain HTTP" do
+      ex = expect_raises(M::PlanError, /unsupported target scheme "ftp"/) do
+        M::Plan.build(M::PlanOptions.new(CRLF_RAW, target: "ftp://t.test", config: config), ungated_outbound)
+      end
+      ex.reason.should eq(M::PlanError::Reason::BadTarget)
+    end
+
     it "reports NoLocations for an explicitly EMPTY location list" do
       # The TUI's config overlay can leave every checkbox unchecked. That is not the same
       # as "the surface named none" (nil), which auto-detects — mining the query string

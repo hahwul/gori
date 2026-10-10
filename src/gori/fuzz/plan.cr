@@ -818,7 +818,7 @@ module Gori::Fuzz
     private def self.resolve_origin(options : PlanOptions) : Origin
       raw = options.target.presence || options.default_target.presence
       raise PlanError.new(PlanError::Reason::NoTarget, "no target origin") unless raw
-      Origin.new(*Repeater::FlowRequest.dial_target(raw))
+      Origin.dial(raw)
     rescue e : Repeater::FlowRequest::DialTargetError
       raise PlanError.new(e.unresolved? ? PlanError::Reason::UnresolvedEnv : PlanError::Reason::BadTarget, e.message.to_s, e.detail)
     end

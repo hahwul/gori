@@ -148,10 +148,6 @@ module Gori
           abort "gori run sequence: #{sequence_plan_error(ex)}"
         end
         origin = plan.origin!
-        unless origin.scheme.in?("http", "https")
-          outbound.close
-          abort "gori run sequence: unsupported target scheme #{origin.scheme.inspect} (use http:// or https://)"
-        end
         guard_outbound(outbound, origin.scheme, origin.host, plan.request_target, origin.port, "gori run sequence")
         begin
           # See CLI::Run.seed_bindings — a headless process holds no binding from a previous

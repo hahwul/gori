@@ -164,10 +164,6 @@ module Gori
         note_request_macro("gori run mine", plan.request_macro_info)
         warn_mine_locations(plan)
         origin = plan.origin
-        unless origin.scheme.in?("http", "https")
-          outbound.close
-          abort "gori run mine: unsupported target scheme #{origin.scheme.inspect} (use http:// or https://)"
-        end
         guard_outbound(outbound, origin.scheme, origin.host, plan.request_target, origin.port, "gori run mine")
         # A writable handle for the run when it has a macro: the steps are recorded in History
         # (source `macro`) and their failures logged, and that is traffic nobody typed at the time.
