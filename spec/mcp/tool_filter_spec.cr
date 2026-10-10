@@ -181,6 +181,10 @@ describe Gori::MCP::ToolFilter do
       names_for("fuzz_start").should contain("get_response_body_chunk")
       names_for("get_flow").should eq(["get_flow", "get_response_body_chunk"])
       names_for("list_history").should contain("ql_reference")
+      # An operator's answer to ask_operator (and the id reply_to_operator answers) is read
+      # only through operator_messages.
+      names_for("ask_operator").should eq(["ask_operator", "operator_messages"])
+      names_for("reply_to_operator").should eq(["operator_messages", "reply_to_operator"])
 
       # OAST start/resume/stop/release are two persisted-session workflows whose descriptions
       # point at one another; the closure handles those cycles and keeps both teardown paths.

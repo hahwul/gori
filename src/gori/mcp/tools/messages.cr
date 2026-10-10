@@ -272,7 +272,7 @@ module Gori
       # #1090: the way back. One line for the ring (and Miss Ring's bubble), an optional long
       # form the ring opens on ↵. Works for every agent — no socket, no channel, just a row —
       # which is why it, and not a Claude-only route, is what closes the loop.
-      @[Tool("reply_to_operator", gated: true)]
+      @[Tool("reply_to_operator", gated: true, requires: ["operator_messages"])]
       private def reply_to_operator(h) : Result
         summary = str(h, "summary").try(&.strip).presence
         return Result.new("reply_to_operator: `summary` is required — one line the operator can read at a glance", is_error: true, error_code: "INVALID_ARGUMENT", field: "summary") unless summary
@@ -340,7 +340,7 @@ module Gori
       # #1324: a decision the agent needs from the operator, put to them as a choice card in
       # the TUI. Returns at once with the question's id; the answer arrives later as an
       # operator message with `in_reply_to` set to it.
-      @[Tool("ask_operator", gated: true)]
+      @[Tool("ask_operator", gated: true, requires: ["operator_messages"])]
       private def ask_operator(h) : Result
         question = str(h, "question").try(&.strip).presence
         return Result.new("ask_operator: `question` is required — one line the operator can answer at a glance", is_error: true, error_code: "INVALID_ARGUMENT", field: "question") unless question
