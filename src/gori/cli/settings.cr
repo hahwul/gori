@@ -176,13 +176,14 @@ module Gori::CLI
   # (`statusline.command`, `editor.command`), not rows in a rule table.
   private def self.run_a_command(found : Array(Settings::CommandEntry)) : String
     one = found.size == 1
-    "#{found.size} #{one ? "entry" : "entries"} in this profile #{uses_what(found, one)}"
+    "#{found.size} #{one ? "entry" : "entries"} in this profile #{uses_what(found)}"
   end
 
   # The verb and its object. A profile whose gated entries all run a command says exactly that;
   # one carrying a `Settings::LOCAL_READ_KINDS` entry (a `password_env`, a `body_file` stub)
   # names the wider set, since "runs a local command" would misdescribe the row it heads.
-  private def self.uses_what(found : Array(Settings::CommandEntry), one : Bool) : String
+  private def self.uses_what(found : Array(Settings::CommandEntry)) : String
+    one = found.size == 1
     return "#{one ? "runs" : "run"} a local command" if found.all?(&.runs?)
     "#{one ? "uses" : "use"} a local command, file or environment variable"
   end
@@ -722,7 +723,7 @@ module Gori::CLI
     return if allowed || found.empty?
     one = found.size == 1
     abort "gori settings import: refused — the #{found.size} #{one ? "entry" : "entries"} listed " \
-          "above #{uses_what(found, one)} with your privileges. Read " \
+          "above #{uses_what(found)} with your privileges. Read " \
           "#{one ? "it" : "them"}, then pass --allow-commands. Nothing was written."
   end
 

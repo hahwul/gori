@@ -592,11 +592,8 @@ module Gori
                 log_peer_notice(peer_notices.probe_mode(moved[0], moved[1],
                   Gori::PeerNotices.agent_wrote?(session.store, Gori::PeerNotices::PROBE_TOOLS)))
               end
-              # The rest of the analyzer's config, for the same reason: a rule a peer disabled
-              # (an active one, a custom `exec` one) kept firing in this capture, and a
-              # suppression a peer cleared kept muting. See `Analyzer#apply_stored_config`.
-              # The global scan rules are part of it and live in settings.json.
-              Settings.reload_scan_rules_from_disk
+              # The rest of the analyzer's config, for the same reason; see
+              # `Analyzer#apply_stored_config`.
               session.probe.apply_stored_config
             rescue ex
               Log.error(exception: ex) { "probe mode/config reload failed" }

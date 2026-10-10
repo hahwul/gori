@@ -1861,8 +1861,8 @@ module Gori
       # Both sides through `HostPattern.bare` first: `acme.test.` is the same name as
       # `acme.test` to every resolver, so without the fold a short_circuit block rule for
       # `acme.test` failed OPEN on the dotted spelling (and `[::1]` missed a `::1` glob).
-      h = HostPattern.bare(host).downcase
-      g = HostPattern.bare(glob).downcase
+      h = HostPattern.normalize(host)
+      g = HostPattern.normalize(glob)
       if g.includes?('*')
         # Compile the glob→regex ONCE per distinct glob, not per proxied head. host_matches?
         # runs on the hot path for EVERY request/response head while any head rule is active

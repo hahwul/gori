@@ -12,30 +12,28 @@ module Gori::Oast
   # backstop.
   class SeenWindow(K)
     def initialize(@cap : Int32 = DEDUP_WINDOW)
-      @set = Set(K).new
-      @order = Deque(K).new
+      @seen = {} of K => Nil # insertion-ordered, so `shift` drops the oldest
     end
 
     # True the first time `key` is offered (it is remembered from then on); false for a key
     # already in the window. The oldest key leaves once the window is over `cap`.
     def add?(key : K) : Bool
-      return false unless @set.add?(key)
-      @order << key
-      @set.delete(@order.shift) if @order.size > @cap
+      return false if @seen.has_key?(key)
+      @seen[key] = nil
+      @seen.shift if @seen.size > @cap
       true
     end
 
     def includes?(key : K) : Bool
-      @set.includes?(key)
+      @seen.has_key?(key)
     end
 
     def size : Int32
-      @set.size
+      @seen.size
     end
 
     def clear : Nil
-      @set.clear
-      @order.clear
+      @seen.clear
     end
   end
 end

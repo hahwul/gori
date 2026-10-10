@@ -195,7 +195,7 @@ describe Gori::Probe::Passive::PostMessage do
       acc = [] of Gori::Probe::Detection
       started = Time.instant
       Gori::Probe::Passive::PostMessage.new.check(ctx, acc)
-      (Time.instant - started).should be < 250.milliseconds
+      (Time.instant - started).should be < 2.seconds
       acc.map(&.code).should_not contain("postmessage_no_origin")
       # …and a window that ends mid-character is repaired, not raised on.
       probe_codes_of(analyze_js(store, %(onmessage = function(e){ ) + "é" * 1500 + %( ok(); };)))

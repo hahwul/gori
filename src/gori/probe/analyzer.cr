@@ -159,6 +159,7 @@ module Gori
       # re-scanned only when the move ENABLED something: a re-scan bumps `hit_count` on every
       # finding it re-sees, and a disable only has to stop new detections.
       def apply_stored_config : Nil
+        Settings.reload_scan_rules_from_disk # the global half of the rules lives in settings.json
         @suppressed = @store.probe_suppressions.map { |(code, host)| "#{code}|#{host}" }.to_set
         follow_stored_oob
         key = stored_rule_config_key

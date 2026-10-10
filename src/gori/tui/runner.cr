@@ -4258,9 +4258,8 @@ module Gori::Tui
       # when the file has not moved; the Env card edits its own working copy, not these.
       Settings.reload_env_from_disk
       Settings.reload_user_agents_from_disk
-      # Likewise the global scan rules (fed to the analyzer just below), OAST providers and
-      # hostname overrides (read at every dial).
-      Settings.reload_scan_rules_from_disk
+      # Likewise the global OAST providers and hostname overrides (read at every dial); the scan
+      # rules are re-read by the analyzer just below.
       Settings.reload_oast_providers_from_disk
       Settings.reload_hostname_overrides_from_disk
       # The Probe analyzer's config, which it read once at open: a rule a peer disabled (an active

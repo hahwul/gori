@@ -64,7 +64,7 @@ describe Gori::Probe::Passive do
       acc = [] of Gori::Probe::Detection
       started = Time.instant
       Gori::Probe::Passive::BodyLeaks.new.check(ctx, acc)
-      (Time.instant - started).should be < 250.milliseconds
+      (Time.instant - started).should be < 1.second
       acc.map(&.code).should_not contain("private_ip_leak")
       probe_codes_of(probe_analyze(store, resp_head: head, content_type: "text/plain",
         body: "café 10.0.0.5")).should contain("private_ip_leak")

@@ -1695,8 +1695,7 @@ module Gori
       stale = "id NOT IN (SELECT h2_conn_id FROM flows WHERE h2_conn_id IS NOT NULL) " \
               "AND id NOT IN (SELECT conn_id FROM h2_frames WHERE created_at >= ?)"
       conn.exec("DELETE FROM h2_frames WHERE conn_id IN (SELECT id FROM h2_connections WHERE #{stale})", oldest)
-      conn.exec("DELETE FROM h2_connections WHERE #{stale}", oldest)
-      {dropped, conn.scalar("SELECT changes()").as(Int64) > 0}
+      {dropped, conn.exec("DELETE FROM h2_connections WHERE #{stale}", oldest).rows_affected > 0}
     end
 
     # Frames whose connection row does not exist at all. The guard in `insert_h2_frame` stops new

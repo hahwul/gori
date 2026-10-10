@@ -179,9 +179,10 @@ module Gori
         needle = "</#{name}>"
         pos = from
         while close = src.byte_index(needle, pos)
-          cdata = cdata_at(src, pos, close)
+          # Bounded by the candidate close, so an export without CDATA never scans to EOF per item.
+          cdata = AsciiBytes.index(src.to_slice[0, close], CDATA_OPEN, pos)
           return close unless cdata
-          cdata_end = src.byte_index("]]>", cdata + 9)
+          cdata_end = src.byte_index("]]>", cdata + CDATA_OPEN.size)
           return nil unless cdata_end
           pos = cdata_end + 3
         end
@@ -189,17 +190,6 @@ module Gori
       end
 
       CDATA_OPEN = "<![CDATA[".to_slice
-
-      # The first `<![CDATA[` in `[from, limit)`. Walked `<` by `<` rather than an unbounded
-      # search, which on an export without CDATA would scan to EOF once per item.
-      private def self.cdata_at(src : String, from : Int32, limit : Int32) : Int32?
-        pos = from
-        while (lt = src.byte_index('<', pos)) && lt < limit
-          return lt if src.to_slice[lt, CDATA_OPEN.size]? == CDATA_OPEN
-          pos = lt + 1
-        end
-        nil
-      end
 
       # Whether the character at byte `at` ends a tag name: whitespace, `>` or `/`. Decoded as
       # a whole character, as the char-offset scanner did, so a non-ASCII space still counts.

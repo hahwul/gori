@@ -157,13 +157,12 @@ module Gori
       # never upserts it again. A rolled-back promotion returns nothing and keeps `since_id`, so
       # the next sweep re-reads the same callbacks against probes that are still pending.
       def self.sweep(store : Store, since_id : Int64) : {Array(Detection), Int64}
-        out = [] of Detection
         callbacks = store.oast_callbacks_since(since_id)
-        return {out, since_id} if callbacks.empty?
+        return {[] of Detection, since_id} if callbacks.empty?
         watermark = since_id
         callbacks.each { |cb| watermark = cb.id if cb.id > watermark }
         pending = store.probe_oast_pending
-        return {out, watermark} if pending.empty?
+        return {[] of Detection, watermark} if pending.empty?
         # Lower-case both sides once. The token is already lower-case (payload_token guarantees
         # it) and the haystack may not be: DNS 0x20 case randomization means the resolver echoes
         # the payload host back in mixed case, and a byte-exact comparison would miss the one
@@ -181,7 +180,7 @@ module Gori
           matches << {p.id, p.token, detection_for(p, callbacks[idx])}
         end
         promoted = store.promote_probe_oast(matches)
-        promoted ? {promoted, watermark} : {out, since_id}
+        promoted ? {promoted, watermark} : {[] of Detection, since_id}
       end
 
       # The promoted finding. Evidence names the protocol and the source the callback came
