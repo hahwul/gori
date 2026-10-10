@@ -80,19 +80,23 @@ module Gori
     # by a rolled-back upsert (a busy or locked store) left the probe matched with no issue, and
     # no later sweep looks at a matched probe, so the finding was gone for good.
     #
+    # The claim also names the probe's token (UNIQUE): a clear empties the table and ids restart,
+    # so a sweep that read its pending rows before the clear must not claim a NEW probe that
+    # happens to reuse the id.
+    #
     # Answers the detections that were claimed AND written (a suppressed (code, host) is claimed
     # but not written), or nil when the batch rolled back, which leaves every probe pending for
     # the next sweep.
-    def promote_probe_oast(matches : Array({Int64, Probe::Detection})) : Array(Probe::Detection)?
+    def promote_probe_oast(matches : Array({Int64, String, Probe::Detection})) : Array(Probe::Detection)?
       promoted = [] of Probe::Detection
       return promoted if matches.empty?
       ts = now_us
       ok = exec_task_ok ->(c : DB::Connection) {
-        matches.each do |(id, d)|
+        matches.each do |(id, token, d)|
           # `rows_affected` read INSIDE the writer closure: exec_task's own return is
           # last_insert_rowid, which says nothing about a conditional UPDATE.
-          next unless c.exec("UPDATE probe_oast_probes SET matched_at = ? WHERE id = ? AND matched_at IS NULL",
-                        ts, id).rows_affected > 0
+          next unless c.exec("UPDATE probe_oast_probes SET matched_at = ? WHERE id = ? AND token = ? AND matched_at IS NULL",
+                        ts, id, token).rows_affected > 0
           promoted << d if upsert_probe_issue_in(c, d, ts)
         end
         nil

@@ -169,7 +169,7 @@ module Gori
         # the payload host back in mixed case, and a byte-exact comparison would miss the one
         # protocol an out-of-band check most often lands on.
         haystacks = callbacks.map { |cb| "#{cb.full_id}\n#{String.new(cb.raw_request)}".downcase }
-        matches = [] of {Int64, Detection}
+        matches = [] of {Int64, String, Detection}
         pending.each do |p|
           # A token is a unique-per-mint nonce, so the only callback that carries it is the one
           # this probe drew. Guard against a pathologically short token (a mis-minted or truncated
@@ -178,7 +178,7 @@ module Gori
           next if p.token.size < TOKEN_MIN
           idx = haystacks.index(&.includes?(p.token))
           next unless idx
-          matches << {p.id, detection_for(p, callbacks[idx])}
+          matches << {p.id, p.token, detection_for(p, callbacks[idx])}
         end
         promoted = store.promote_probe_oast(matches)
         promoted ? {promoted, watermark} : {out, since_id}

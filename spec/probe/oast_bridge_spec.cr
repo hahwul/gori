@@ -214,6 +214,20 @@ describe Gori::Probe::OutOfBand do
     end
   end
 
+  # A clear restarts probe ids, so a claim read before it must not land on the new row.
+  it "does not claim a probe whose token differs from the one the sweep read" do
+    oob_store do |store|
+      store.insert_probe_oast_probe("tok-new", "tok-new.oast.example", 7_i64, "ssrf_oast",
+        "ssrf_oast", Gori::Probe::Category::ACTIVE, "Blind SSRF", Gori::Store::Severity::High,
+        "acme.test", "https://acme.test/fetch", nil, 42_i64)
+      p = store.probe_oast_pending.first
+      stale = Gori::Probe::Detection.new("ssrf_oast", "active", "acme.test", "https://acme.test/fetch",
+        "Blind SSRF", Gori::Store::Severity::High, nil)
+      store.promote_probe_oast([{p.id, "tok-old", stale}]).should eq([] of Gori::Probe::Detection)
+      store.probe_oast_pending.size.should eq(1)
+    end
+  end
+
   it "leaves an unanswered probe outstanding (no callback ⇒ no finding)" do
     oob_store do |store|
       store.insert_probe_oast_probe("tok-lonely", "tok-lonely.oast.example", 7_i64, "ssrf_oast",
