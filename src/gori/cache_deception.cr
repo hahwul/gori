@@ -142,7 +142,7 @@ module Gori
                    stop : Proc(Bool)? = nil) : Report?
       target = engine.run(detail, identities, stop)
       return nil unless target
-      sent = target.trials.size - target.blocked.to_i
+      sent = target.sent_count
       return classify(target, sent_count: sent) if target.fully_blocked?
       return classify(target, sent_count: sent) if unanchored?(target)
 

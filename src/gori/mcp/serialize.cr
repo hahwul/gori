@@ -1534,10 +1534,11 @@ module Gori
         # Construct a String only AFTER the byte cap. A cap that splits a codepoint leaves an
         # incomplete sequence at the end of an otherwise-text prefix: drop those ≤3 bytes
         # rather than call the whole body binary (the body continues past the cut anyway).
-        if cut && (whole = utf8_whole_prefix(sample)) < sample.size
-          sample = sample[0, whole] if String.new(sample[0, whole]).valid_encoding?
-        end
         s = String.new(sample)
+        if cut && !s.valid_encoding? && (whole = utf8_whole_prefix(sample)) < sample.size
+          trimmed = String.new(sample[0, whole])
+          sample, s = sample[0, whole], trimmed if trimmed.valid_encoding?
+        end
         valid = s.valid_encoding?
         decoded_applied = !decoded.nil? && !Proxy::Codec::ContentDecode.decode_failed?(note)
         decode_truncated = !decode_complete || (decoded_applied && cut)
@@ -1615,7 +1616,6 @@ module Gori
         j.field "#{field_name}_lossy", true
       end
 
-      # Emit bytes that were already capped before String/base64 construction.
       # The length of `bytes` without the UTF-8 sequence its end cut short — a lead byte
       # followed by fewer continuation bytes than it announces — else `bytes.size`. Says
       # nothing about the rest: the caller still validates the prefix.
@@ -1632,6 +1632,7 @@ module Gori
         n - i < width ? i : n
       end
 
+      # Emit bytes that were already capped before String/base64 construction.
       private def self.emit_body_payload(j : JSON::Builder, s : String, bytes : Bytes,
                                          valid : Bool, truncated : Bool) : Nil
         j.field "truncated", truncated

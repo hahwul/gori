@@ -62,11 +62,11 @@ module Gori::Settings
   # collides with a built-in word, is not a legal custom name — the two would be ambiguous in a
   # rule's `color` field and in the picker. Neither is one carrying a C0 control or DEL: the name
   # is printed raw by `gori run colormarker colors` and the picker, so an ESC in it drove the
-  # operator's terminal (the same refusal as `SavedViews.control_char?`).
+  # operator's terminal.
   def self.normalize_color_name(s : String) : String?
     n = s.strip.downcase
     return nil if n.empty? || COLORMARKER_COLORS.includes?(n)
-    return nil if n.each_char.any? { |c| c.ord < 0x20 || c.ord == 0x7f }
+    return nil if SavedViews.control_char?(n)
     n
   end
 

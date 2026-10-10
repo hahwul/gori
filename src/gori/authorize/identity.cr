@@ -64,13 +64,9 @@ module Gori
         next unless v = given.call(key)
         return %("#{key}" must be a list of strings) unless v.as_a?.try(&.all?(&.as_s?))
       end
-      if (v = given.call("set")) && !v.as_a?.try(&.all? { |p| set_pair?(p) })
-        return %("set" must be a list of {"name": …, "value": …} objects)
-      end
-      given.call("set").try(&.as_a).try &.each do |p|
-        if why = set_pair_error(p)
-          return why
-        end
+      if v = given.call("set")
+        pairs = v.as_a? || return %("set" must be a list of {"name": …, "value": …} objects)
+        pairs.each { |p| set_pair_error(p).try { |why| return why } }
       end
       nil
     end
@@ -78,14 +74,11 @@ module Gori
     # The rule `create_session_slot` holds `set_headers` to (`Discover::Headers.parse_lines`):
     # a value's CR/LF would split into a second header line on the wire.
     private def self.set_pair_error(p : JSON::Any) : String?
-      n, v = p["name"].as_s, p["value"].as_s
+      n = p.as_h?.try(&.["name"]?).try(&.as_s?)
+      v = p.as_h?.try(&.["value"]?).try(&.as_s?)
+      return %("set" must be a list of {"name": …, "value": …} objects) unless n && v
       return nil if Proxy::Codec::Http1.header_name_safe?(n) && Discover::Headers.safe_value?(v)
       %("set" entry #{n.inspect} is not a header — a name must be an RFC 7230 token and a value may not contain CR or LF)
-    end
-
-    private def self.set_pair?(p : JSON::Any) : Bool
-      h = p.as_h?
-      !h.nil? && !h["name"]?.try(&.as_s?).nil? && !h["value"]?.try(&.as_s?).nil?
     end
 
     # `id` with every `$NAME` in its header VALUES resolved out of THAT identity's own binding

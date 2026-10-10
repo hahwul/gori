@@ -275,6 +275,12 @@ module Gori
         {present.select { |id| matched.includes?(id) }, present.reject { |id| matched.includes?(id) }}
       end
 
+      # The project's redaction profile for `columns`, resolved once per call: the same one
+      # `get_flow` applies, under the same `include_sensitive` opt-out (see `redact_flow`).
+      private def columns_matcher(prepared : Gori::DisplayColumns::Prepared, include_sensitive : Bool) : Redact::Matcher?
+        include_sensitive || prepared.empty? ? nil : Redact::Policy.ambient(store)
+      end
+
       # One row's user-column values as `{label, value}` pairs, or nil when none were asked for.
       #
       # ONE capped read per RETURNED row, and none at all for a set that reads only heads — the
@@ -284,12 +290,6 @@ module Gori
       # `[REDACTED]` unless `include_sensitive`, as `gori run history` masks the same column: the
       # schema's own example is `req:header:authorization`, and `get_flow` withholds that value
       # behind the same flag. An EMPTY value stays empty, so a miss still reads as a miss.
-      # The project's redaction profile for `columns`, resolved once per call: the same one
-      # `get_flow` applies, under the same `include_sensitive` opt-out (see `redact_flow`).
-      private def columns_matcher(prepared : Gori::DisplayColumns::Prepared, include_sensitive : Bool) : Redact::Matcher?
-        include_sensitive || prepared.empty? ? nil : Redact::Policy.ambient(store)
-      end
-
       private def row_columns(row : Store::FlowRow,
                               prepared : Gori::DisplayColumns::Prepared,
                               include_sensitive : Bool,

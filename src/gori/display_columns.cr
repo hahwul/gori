@@ -120,17 +120,6 @@ module Gori
         n > 0 && @body_prefix[n - 1]
       end
 
-      # One value per column, in column order, for the first `count` columns. A descriptor that
-      # matches nothing yields "" — BLANK, never the selector: a cell that echoed its own
-      # descriptor would read as a value the message carried.
-      #
-      # `count` exists because a narrow terminal draws only a PREFIX of the set (see
-      # `HistoryView#granted_columns`), and extracting a column nothing will draw is not free:
-      # the dropped one may be the only body-scoped descriptor, and evaluating it costs the BLOB
-      # read and a full content-decode per row for cells that never reach the screen.
-      #
-      # The two subjects are built at most once each, so N columns over one flow parse the head
-      # once per side rather than once per column.
       # One stored flow's values from ONE capped read (none of the body for a head-only set), for
       # a surface that lists rows rather than drawing them. Under a redaction `matcher` the
       # values come from the sanitized derivative `get_flow` serves, so a `jsonpath:` or `regex:`
@@ -143,6 +132,17 @@ module Gori
         values(detail)
       end
 
+      # One value per column, in column order, for the first `count` columns. A descriptor that
+      # matches nothing yields "" — BLANK, never the selector: a cell that echoed its own
+      # descriptor would read as a value the message carried.
+      #
+      # `count` exists because a narrow terminal draws only a PREFIX of the set (see
+      # `HistoryView#granted_columns`), and extracting a column nothing will draw is not free:
+      # the dropped one may be the only body-scoped descriptor, and evaluating it costs the BLOB
+      # read and a full content-decode per row for cells that never reach the screen.
+      #
+      # The two subjects are built at most once each, so N columns over one flow parse the head
+      # once per side rather than once per column.
       def values(detail : Store::FlowDetail, count : Int32 = @columns.size) : Array(String)
         n = count.clamp(0, @columns.size)
         return [] of String if n == 0

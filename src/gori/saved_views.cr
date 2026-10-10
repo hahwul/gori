@@ -275,7 +275,7 @@ module Gori
     # `gori run views add`, MCP `create_view` and a hand-edited settings.json all can, and a rule
     # only one of the three enforces is not a rule. Existing rows are left alone — the tolerant
     # parsers keep them loadable, so this narrows what can be WRITTEN, not what can be read.
-    private def self.control_char?(s : String) : Bool
+    def self.control_char?(s : String) : Bool
       s.each_char.any? { |c| c.ord < 0x20 || c.ord == 0x7f }
     end
 

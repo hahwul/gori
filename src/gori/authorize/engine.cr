@@ -121,6 +121,12 @@ module Gori
         @trials.reject { |t| t.baseline? || t.verdict.no_effect? }
       end
 
+      # Requests that reached the wire: a `no_effect` trial is never sent, and a gate-refused one
+      # never left gori.
+      def sent_count : Int32
+        @trials.count { |t| !t.verdict.no_effect? } - @blocked.to_i
+      end
+
       # `uncompared?` for the reason a NETWORK gives — the socket-level twin of
       # `fully_blocked?`. The two are split because an operator fixes them differently (a
       # scope rule versus a route), and `fully_blocked?` wins when both apply: gori refusing
