@@ -692,11 +692,10 @@ describe Gori::Store do
       db.exec("INSERT INTO repeaters (created_at, updated_at, target, request, http2, auto_content_length, position) VALUES (?,?,?,?,?,?,?)",
         ts, ts, "https://b.test", normal, 0, 1, 1)
 
-      # Pre-migration: the OLD read shape (untyped `read` dispatches TEXT-storage-class
-      # values through sqlite3_column_text) truncates at the embedded NUL, exactly
-      # reproducing the original bug.
+      # Pre-migration: a TEXT read now carries the embedded NUL too (`store/sqlite_text.cr`
+      # bounds `sqlite3_column_text` by its byte length); the shard's own read stopped at it.
       db.query_one("SELECT request FROM repeaters WHERE target = 'https://a.test'", as: String)
-        .should eq("GET /x HTTP/1.1\r\nHost: h\r\n\r\n")
+        .should eq(String.new(with_nul))
 
       Gori::Store::Schema.migrate!(db)
       # Migrates all the way to the current schema (the V2 UPDATE this test targets runs en route).
