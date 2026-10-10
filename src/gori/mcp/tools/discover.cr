@@ -157,7 +157,7 @@ module Gori
         in Discover::PlanError::Reason::NoTarget
           "provide a 'url' seed target"
         in Discover::PlanError::Reason::BadTarget
-          "could not parse a host from '#{ex.detail}'"
+          ex.message.to_s # names the host it could not parse, or the scheme it refused
         in Discover::PlanError::Reason::NoTechnique
           "at least one of spider/bruteforce must stay enabled"
         in Discover::PlanError::Reason::Wordlist

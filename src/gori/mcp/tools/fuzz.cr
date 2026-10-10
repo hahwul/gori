@@ -723,7 +723,7 @@ module Gori
         in Fuzz::PlanError::Reason::NoTarget
           "provide a 'url' target (scheme://host) or a flow_id that carries one"
         in Fuzz::PlanError::Reason::BadTarget
-          "could not parse a host from '#{ex.detail}'"
+          ex.message.to_s # names the host it could not parse, or the scheme it refused
         in Fuzz::PlanError::Reason::NoPayloads
           %(no payloads — pass 'payloads' as a JSON array of sets, e.g. [{"list":["a","b"]}])
         in Fuzz::PlanError::Reason::UnresolvedEnv

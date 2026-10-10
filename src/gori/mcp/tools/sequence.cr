@@ -257,7 +257,7 @@ module Gori
         in Sequencer::PlanError::Reason::NoTarget
           "provide a 'url' target (scheme://host) or a flow_id that carries one"
         in Sequencer::PlanError::Reason::BadTarget
-          "could not parse a host from '#{ex.detail}'"
+          ex.message.to_s # names the host it could not parse, or the scheme it refused
         in Sequencer::PlanError::Reason::NoTokenLoc
           "provide exactly one token location: cookie|header|regex|position|jsonpath"
         in Sequencer::PlanError::Reason::BadPosition

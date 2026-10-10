@@ -537,7 +537,7 @@ module Gori
         in Fuzz::PlanError::Reason::NoTarget
           "--target is required for --request/stdin"
         in Fuzz::PlanError::Reason::BadTarget
-          "could not determine a target host"
+          ex.message.to_s # names the host it could not parse, or the scheme it refused
         in Fuzz::PlanError::Reason::NoPayloads
           "no payloads — add -w/--preset/--payloads/--numbers/--null/--brute/--payload-from"
         in Fuzz::PlanError::Reason::UnresolvedEnv

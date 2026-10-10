@@ -209,7 +209,7 @@ module Gori
         in Sequencer::PlanError::Reason::NoTarget
           "--target is required for --request/stdin"
         in Sequencer::PlanError::Reason::BadTarget
-          "could not determine a target host"
+          ex.message.to_s # names the host it could not parse, or the scheme it refused
         in Sequencer::PlanError::Reason::NoTokenLoc
           "token location selector is empty"
         in Sequencer::PlanError::Reason::BadPosition

@@ -188,7 +188,7 @@ module Gori
         in Miner::PlanError::Reason::NoTarget
           "--target is required for --request/stdin"
         in Miner::PlanError::Reason::BadTarget
-          "could not determine a target host"
+          ex.message.to_s # names the host it could not parse, or the scheme it refused
         in Miner::PlanError::Reason::NoLocations
           (why = ex.detail) ? "no --locations applies to this request — #{why}" : "no applicable locations for this request"
         in Miner::PlanError::Reason::Wordlist
