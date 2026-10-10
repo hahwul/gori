@@ -1025,10 +1025,14 @@ module Gori
     # `Proto.classify`'s own two-sided test; `request_content_type` is NULL on a row captured
     # before the V14 column, which the NOT-NULL guard makes a clean no-match (so `-proto:grpc`
     # keeps it, as it always did).
-    GRPC_SQL = "((content_type IS NOT NULL AND lower(content_type) LIKE 'application/grpc%') OR " \
-               "(request_content_type IS NOT NULL AND lower(request_content_type) LIKE 'application/grpc%'))"
+    # The trims name every ASCII whitespace byte: SQLite strips only spaces by default, while
+    # `Proto.grpc?` (`lstrip`) and `MediaType.essence` (`strip`) also strip a tab — so
+    # `text/event-stream\t; charset=utf-8` was SSE in the PROTO column and missed by `proto:sse`.
+    private SPACE_BYTES = "char(9, 10, 11, 12, 13, 32)"
+    GRPC_SQL    = "((content_type IS NOT NULL AND lower(ltrim(content_type, #{SPACE_BYTES})) LIKE 'application/grpc%') OR " \
+                  "(request_content_type IS NOT NULL AND lower(ltrim(request_content_type, #{SPACE_BYTES})) LIKE 'application/grpc%'))"
     SSE_SQL = "(content_type IS NOT NULL AND " \
-              "lower(trim(substr(content_type, 1, instr(content_type || ';', ';') - 1))) = 'text/event-stream')"
+              "lower(trim(substr(content_type, 1, instr(content_type || ';', ';') - 1), #{SPACE_BYTES})) = 'text/event-stream')"
     # BOTH transports, because a WebSocket is one protocol and used to be two answers here: an
     # RFC 8441 socket is `CONNECT` answered `200`, so `status = 101` alone silently omitted
     # every h2 one from the filter an operator reaches for to find sockets. The `connect_protocol`
