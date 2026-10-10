@@ -122,12 +122,15 @@ module Gori
         # Does `token` appear as the AUTHORITY host of an absolute/scheme-relative URL in `text`? The
         # token must be immediately preceded by `//` (from `://host` or `//host`) and NOT be a userinfo
         # prefix (`token@realhost`) or the start of a longer hostname (`token.evil.com`).
+        # By byte offset: a char-offset `index` per hit walks from the start of a non-ASCII body,
+        # and a hostile origin can echo the token thousands of times. Every byte compared is ASCII.
         private def authority_reflection?(text : String, token : String) : Bool
+          bytes = text.to_slice
           start = 0
-          while pos = text.index(token, start)
-            start = pos + token.size
-            if pos >= 2 && text[pos - 1]? == '/' && text[pos - 2]? == '/'
-              after = text[pos + token.size]?
+          while pos = text.byte_index(token, start)
+            start = pos + token.bytesize
+            if pos >= 2 && bytes[pos - 1] == '/'.ord && bytes[pos - 2] == '/'.ord
+              after = bytes[pos + token.bytesize]?.try(&.unsafe_chr)
               unless after == '@' || (after && (after.ascii_alphanumeric? || after == '.' || after == '-'))
                 return true
               end
