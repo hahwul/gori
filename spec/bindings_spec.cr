@@ -90,6 +90,18 @@ describe Gori::Bindings do
       end
     end
 
+    # `TokenExtract.json_path` answers a path `JsonPath` refuses as a miss, so the rule saved
+    # fine and then bound nothing forever.
+    it "refuses a jsonpath descriptor JsonPath cannot read" do
+      with_store do |store|
+        b = Gori::Bindings.load(store)
+        b.add("TOKEN", "", Gori::ExtractKind::JsonPath, "$..token").not_nil!.should contain("recursive descent")
+        b.add("TOKEN", "", Gori::ExtractKind::JsonPath, "data[").should_not be_nil
+        b.rules.should be_empty
+        b.add("TOKEN", "", Gori::ExtractKind::JsonPath, "$.data.token").should be_nil
+      end
+    end
+
     # A `when:` condition naming a field this backend REFUSES (`scope:` — its rules are the
     # project's, not the message's) compiles to a never-match, so a saved rule never fires, and a
     # NEGATED one fires on every response. Refused at this chokepoint rather than in one surface's

@@ -169,6 +169,23 @@ module Gori
   # Two consumers: the Sequencer's live-replay collection (`Sequencer::Extract` is an
   # alias for this module) and session-binding extract rules (`Gori::Bindings`).
   module TokenExtract
+    # Why `selector` can never extract anything for `kind`, or nil. Every extractor answers a
+    # miss as nil, so a regex that does not compile or a path `JsonPath` refuses would be saved
+    # fine and then bind nothing forever, with no message anywhere.
+    def self.selector_error(kind : ExtractKind, selector : String) : String?
+      return nil if kind.position?
+      return "a #{kind.label} descriptor needs a selector" if selector.empty?
+      if kind.json_path?
+        steps = JsonPath.parse(selector)
+        return steps.is_a?(String) ? "jsonpath: #{steps}" : nil
+      end
+      return nil unless kind.regex?
+      Regex.new(selector)
+      nil
+    rescue ex : ArgumentError | Regex::Error
+      "regex #{selector.inspect} does not compile: #{ex.message}"
+    end
+
     # `re` is the token regex compiled ONCE by the engine (see Engine#run_live); when given
     # it is reused per response instead of recompiling the pattern every sample.
     def self.extract(raw : Repeater::Result, loc : TokenLoc, re : Regex? = nil) : String?
