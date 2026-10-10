@@ -405,6 +405,7 @@ describe "MCP authorize tools" do
           {"flow_ids" => [flow], "identities" => anon, "allow_unscoped" => true}.to_json)
         status = drain_job(tools, start["job_id"].as_s)
         status["blocked"].as_i.should be > 0
+        status["sent"].as_i.should eq(0) # a refused send was never sent
         status["access_control"].as_s.should eq("nothing_sent")
         status["bypass"].as_bool.should be_false
         status["summary"].as_s.should contain("NOT evidence")

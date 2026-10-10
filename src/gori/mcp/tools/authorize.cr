@@ -112,7 +112,7 @@ module Gori
 
       private def apply_authorize_target(ajob : AuthorizeJob, target : Authorize::Target) : Nil
         ajob.replayed += 1
-        ajob.sent += target.trials.count { |t| !t.verdict.no_effect? }
+        ajob.sent += target.trials.count { |t| !t.verdict.no_effect? } - target.blocked.to_i
         ajob.errors += target.trials.count(&.meta.errored?)
         ajob.blocked += target.blocked
         ajob.blocked_reason ||= target.blocked_reason
