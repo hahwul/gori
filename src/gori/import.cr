@@ -304,6 +304,8 @@ module Gori
     # there with `ref` standing in for the file name, then removed.
     def self.import_text(store : Store, kind : Symbol, text : String,
                          surface : FlowSource::Surface? = nil) : Result
+      # The file readers skip a leading BOM; `text_suffix`'s sniff and the curl tokenizer do not.
+      text = text.lchop('\u{FEFF}')
       return import_curl_text(store, text, surface) if kind == :curl
       raise Gori::Error.new("unknown import kind: #{kind}") unless LABELS.has_key?(kind)
       raise Gori::Error.new("the #{label(kind)} text is empty") if text.strip.empty?
