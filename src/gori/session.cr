@@ -363,10 +363,11 @@ module Gori
     # touched** — which is what makes an edit to one row incapable of dropping a working socket
     # somewhere else in the array. Stop-all/start-all would have done exactly that.
     #
-    # Fates, all of them defined by `Proxy::Server#stop` closing only the ACCEPT socket:
+    # Fates, all of them defined by `Proxy::Server#stop(drop_clients: false)` closing only the
+    # ACCEPT socket:
     #
     #   - removed from the section → stops accepting; connections already established finish on
-    #     their own fibers. Same fate as capture-off and as a primary rebind.
+    #     their own fibers. Same fate as a primary rebind (capture-off ends them).
     #   - same address, changed config → stopped then rebuilt, in that order, because the new
     #     socket wants the address the old one holds. In-flight connections keep running against
     #     the configuration they were accepted under, which is the only answer that does not
@@ -392,7 +393,7 @@ module Gori
           pending.delete_at(idx)
           keep << e
         else
-          e.server.stop rescue nil
+          e.server.stop(drop_clients: false) rescue nil
         end
       end
 

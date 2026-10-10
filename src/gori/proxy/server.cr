@@ -81,6 +81,10 @@ module Gori::Proxy
       # in its own fiber, so anything that is a fact about ONE connection may not live here.
       # This is a fact about the CONFIGURATION, which is why it may.
       @passthrough_noted = Set(String).new
+      # Accepted client sockets whose connection fiber is still running, so `stop` can end
+      # them. Added on the accept fiber BEFORE the spawn (a connection whose fiber has not run
+      # yet is still live), removed in that fiber's `ensure`.
+      @clients = Set(TCPSocket).new
     end
 
     # How many distinct SOCKS5 refusal sentences one listener writes to `gori.log`. Same shape
@@ -141,10 +145,31 @@ module Gori::Proxy
       raise last_err || Gori::Error.new("could not bind #{@host}")
     end
 
-    def stop : Nil
+    # Stops accepting and, unless `drop_clients` is false, ends every connection already
+    # accepted. Without that, a browser's keep-alive / h2 connection kept being proxied,
+    # recorded, rewritten and intercepted after capture-off, and after a project switch it kept
+    # running in the OLD session's fibers — its rules, its scope, its closed store.
+    #
+    # `shutdown(2)` on the raw socket, never `close`. A connection fiber may be inside OpenSSL
+    # on this very socket (the TLS client leg wraps it), and closing the fd under it is the
+    # SIGSEGV shape `tunnel.cr`'s `sync_close` comment records. A shutdown leaves the fd and
+    # OpenSSL's state alone: the parked read sees EOF and the write side raises EPIPE, so each
+    # fiber tears down through its own path (ClientConn's close, the pumps' cross-close). The
+    # stdlib call goes through the socket's fd lock, so a socket the fiber already closed raises
+    # (rescued) instead of shutting a reused fd number down.
+    #
+    # `drop_clients: false` is the listener reconcile's "in-flight connections finish under
+    # the configuration they were accepted with" (`Session#reconcile_listeners!`); `rebind`
+    # never comes here at all.
+    def stop(drop_clients : Bool = true) : Nil
       @running = false
       @server.try(&.close) rescue nil
       @server = nil
+      return unless drop_clients
+      @clients.each do |client|
+        client.close_read rescue nil
+        client.close_write rescue nil
+      end
     end
 
     # Move the listener to a new host:port WITHOUT dropping in-flight connections
@@ -204,6 +229,7 @@ module Gori::Proxy
     end
 
     private def serve_connection(client : TCPSocket) : Nil
+      @clients << client
       # Socket setup + handling run INSIDE the fiber so a hostile peer that RSTs
       # between accept and setsockopt can't raise on the accept loop itself
       # (which would silently stop the whole proxy); the `ensure` frees the slot.
@@ -242,6 +268,7 @@ module Gori::Proxy
         # this only fires for pre-run setup failures.)
         client.close rescue nil
       ensure
+        @clients.delete(client)
         @slots.receive # release the slot (even on error) so a new connection can be accepted
       end
     end
