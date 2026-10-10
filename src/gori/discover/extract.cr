@@ -111,21 +111,22 @@ module Gori::Discover
     # unambiguous `;`-terminated spelling is.
     def self.decode_refs(s : String) : String
       return s unless decodable?(s)
-      amp = s.index('&')
+      amp = s.byte_index('&')
       String.build(s.bytesize) do |io|
         pos = 0
         while at = amp
-          semi = s.index(';', at + 1)
-          if semi && semi - at <= REF_MAX && (ch = reference(s[(at + 1)...semi]))
-            io << s[pos...at] << ch
+          if (ref = reference_at(s, at))
+            ch, semi = ref
+            io.write(s.to_slice[pos, at - pos])
+            io << ch
             pos = semi + 1
           else
-            io << s[pos..at] # the `&` opens nothing — copy it through
+            io.write(s.to_slice[pos, at + 1 - pos]) # the `&` opens nothing — copy it through
             pos = at + 1
           end
-          amp = s.index('&', pos)
+          amp = s.byte_index('&', pos)
         end
-        io << s[pos..]
+        io.write(s.to_slice[pos..])
       end
     end
 
@@ -135,13 +136,26 @@ module Gori::Discover
     # reason. Every `&` is examined here and only a subset is in the builder, so a negative
     # from this is a negative there.
     private def self.decodable?(s : String) : Bool
-      at = s.index('&')
+      at = s.byte_index('&')
       while at
-        semi = s.index(';', at + 1)
-        return true if semi && semi - at <= REF_MAX && reference(s[(at + 1)...semi])
-        at = s.index('&', at + 1)
+        return true if reference_at(s, at)
+        at = s.byte_index('&', at + 1)
       end
       false
+    end
+
+    # The reference opened by the `&` at byte `at`, as {its character, the byte index of its
+    # `;`}, or nil. The `;` is looked for within REF_MAX bytes only, and by byte offset: an
+    # unbounded `index(';')` per `&` rescanned the rest of the value every time, so a page of
+    # `&&&…` (or any non-ASCII text, where a char offset walks from the start) took minutes
+    # on the single scheduler. Every reference spelling is ASCII, so bytes and chars agree here.
+    private def self.reference_at(s : String, at : Int32) : {Char, Int32}?
+      bytes = s.to_slice
+      stop = {at + REF_MAX, bytes.size - 1}.min
+      semi = ((at + 1)..stop).find { |i| bytes[i] == ';'.ord }
+      return nil unless semi
+      ch = reference(String.new(bytes[at + 1, semi - at - 1]))
+      ch ? {ch, semi} : nil
     end
 
     # The character `name` (the run between `&` and `;`) denotes, or nil when it denotes
@@ -152,11 +166,12 @@ module Gori::Discover
       return nil if name.empty?
       return NAMED_REFS[name]? unless name.starts_with?('#')
       digits = name[1..]
-      cp = if digits.starts_with?('x') || digits.starts_with?('X')
-             digits[1..].to_i?(16)
-           else
-             digits.to_i?
-           end
+      hex = digits.starts_with?('x') || digits.starts_with?('X')
+      digits = digits[1..] if hex
+      # Digits only: `to_i?` also takes a sign and surrounding whitespace, so `&#x+41;` and
+      # `&# 65;` decoded to `A` where a browser leaves them literal.
+      return nil unless !digits.empty? && digits.each_char.all? { |c| hex ? c.hex? : c.ascii_number? }
+      cp = hex ? digits.to_i?(16) : digits.to_i?
       return nil unless cp && 0 < cp <= Char::MAX_CODEPOINT
       return nil if 0xd800 <= cp <= 0xdfff
       cp.unsafe_chr

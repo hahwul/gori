@@ -548,6 +548,22 @@ describe Gori::Discover::Extract do
       E.decode_refs("/a?x=&#zz;").should eq("/a?x=&#zz;")
     end
 
+    # `to_i?` takes a sign and whitespace; a browser leaves these literal.
+    it "refuses a numeric reference with a sign or a space" do
+      E.decode_refs("/a?x=&#x+41;").should eq("/a?x=&#x+41;")
+      E.decode_refs("/a?x=&# 65;").should eq("/a?x=&# 65;")
+      E.decode_refs("/a?x=&#-65;").should eq("/a?x=&#-65;")
+    end
+
+    # Each `&` used to search the rest of the value for a `;`, by char offset: quadratic on a
+    # hostile href of `&&&…`, minutes at the 2 MiB scan cap, on the single scheduler.
+    it "stays linear over a long run of ampersands, ASCII or not" do
+      long = "é" + "&" * 300_000 + "&amp;"
+      started = Time.instant
+      E.decode_refs(long).should eq("é" + "&" * 300_000 + "&")
+      (Time.instant - started).should be < 1.second
+    end
+
     # Decoding cannot manufacture a request, only a refusal: a decoded CR/LF reaches
     # `Headers.safe_url?` and `Sender#fetch` exactly as a raw one does (#390).
     it "decodes a framing octet rather than hiding it from the gate" do
