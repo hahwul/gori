@@ -570,24 +570,62 @@ module Gori
           # gives: the pair is the operator's evidence, and a response desync is the same
           # primitive read from the other end.
           both = both_framings?(headers)
-          had_te = false
-          has_cl = false
-          headers.each do |k, v|
-            had_te = true if transfer_encoding?(k)
-            next if !both && !wire_chunked && transfer_encoding?(k)
-            has_cl = true if !has_cl && k.compare("content-length", case_insensitive: true) == 0
-            b << k << ": " << v << "\r\n"
-          end
+          # The same body-decides rule for `Content-Encoding`: a browser HAR keeps
+          # `content-encoding: gzip` and the compressed `content-length` beside a DECODED
+          # `content.text`, so every compressed entry failed to decode on every surface. Only a
+          # body that provably is not in the stated coding loses the header (and the length that
+          # measured the encoded entity); gori's own export ships the wire bytes, which decode.
+          lying_ce = content_coding_lies?(headers, body, truncated, wire_chunked)
+          kept_cl, stripped = response_fields(b, headers, drop_te: !both && !wire_chunked,
+            drop_ce: lying_ce, drop_cl: lying_ce && !both)
           # Invent a Content-Length only when we stripped a lying Transfer-Encoding (decoded
-          # body under a chunked header) so framing still matches the stored bytes. Never
-          # invent one for a source that stated no framing at all — close-delimited, bodyless
-          # 304/204, and HTTP/2 DATA-framed heads must stay without a fabricated CL (P7 /
-          # export→import fixed point). Incoming CL and true chunked bodies are kept above.
-          if body && !has_cl && !wire_chunked && had_te
+          # body under a chunked header) or a length that measured a lying Content-Encoding, so
+          # framing still matches the stored bytes. Never invent one for a source that stated no
+          # framing at all — close-delimited, bodyless 304/204, and HTTP/2 DATA-framed heads
+          # must stay without a fabricated CL (P7 / export→import fixed point). Incoming CL and
+          # true chunked bodies are kept.
+          if body && !kept_cl && !wire_chunked && stripped
             b << "Content-Length: " << body.size << "\r\n"
           end
           b << "\r\n"
         end.to_slice
+      end
+
+      # Write the response's header lines minus the dropped ones. {a Content-Length was kept,
+      # a framing line (Transfer-Encoding or Content-Length) was stated and is not trusted}.
+      private def self.response_fields(b : String::Builder, headers : Headers, drop_te : Bool,
+                                       drop_ce : Bool, drop_cl : Bool) : {Bool, Bool}
+        kept_cl = false
+        stripped = false
+        headers.each do |k, v|
+          te = transfer_encoding?(k)
+          cl = k.compare("content-length", case_insensitive: true) == 0
+          stripped = true if te || (cl && drop_cl)
+          next if (te && drop_te) || (cl && drop_cl) || (drop_ce && content_encoding?(k))
+          kept_cl ||= cl
+          b << k << ": " << v << "\r\n"
+        end
+        {kept_cl, stripped}
+      end
+
+      private def self.content_encoding?(name : String) : Bool
+        name.compare("content-encoding", case_insensitive: true) == 0
+      end
+
+      # Does `body` fail to decode under the `Content-Encoding` the headers state? Only a hard
+      # decode error counts: an unsupported or not-built-in coding, or a stream that merely
+      # stops early, is not proof the body was never encoded. A 1 KiB probe is enough to fail.
+      private def self.content_coding_lies?(headers : Headers, body : Bytes?, truncated : Bool,
+                                            wire_chunked : Bool) : Bool
+        return false if body.nil? || truncated || headers.none? { |(k, _)| content_encoding?(k) }
+        probe = String.build do |b|
+          b << "HTTP/1.1 200\r\n"
+          headers.each { |k, v| b << k << ": " << v << "\r\n" if content_encoding?(k) }
+          b << "Transfer-Encoding: chunked\r\n" if wire_chunked
+          b << "\r\n"
+        end
+        _, note, _ = Proxy::Codec::ContentDecode.decode_full(probe.to_slice, body, 1024)
+        !!note.try(&.split(" · ").last.starts_with?("decode error"))
       end
 
       # `source` defaults to `Import` because that is what this builder is FOR — every parser in
@@ -673,7 +711,8 @@ module Gori
         # the origin really sent one.
         resp_head = response_head_override || response_head(resp_http_version || http_version, status, reason,
           resp_headers, resp_body, resp_trunc)
-        content_encoding = resp_headers.find { |(k, _)| k.compare("content-encoding", case_insensitive: true) == 0 }.try(&.[1])
+        # Read off the head actually stored: `response_head` drops a coding the body disproves.
+        content_encoding = Proxy::Codec::Http1.parse_response_head(resp_head).headers.get?("content-encoding")
         resp = Store::CapturedResponse.new(
           flow_id: 0, status: status, reason: reason.presence, content_type: content_type,
           content_encoding: content_encoding,

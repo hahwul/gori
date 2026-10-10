@@ -374,6 +374,37 @@ describe Gori::Export::Har do
     resp.should contain("Content-Length: 11")
   end
 
+  # The same lie for the content coding: Chrome keeps `content-encoding: gzip` and the
+  # compressed `content-length` beside the DECODED `content.text`.
+  it "drops a Content-Encoding a third-party HAR's decoded body does not back" do
+    gz = IO::Memory.new
+    Compress::Gzip::Writer.open(gz, &.print("hello world"))
+    entry = ->(content : Hash(String, String | Int32)) {
+      {"log" => {"version" => "1.2", "entries" => [{
+        "startedDateTime" => "2026-07-31T00:00:00.000Z", "time" => 1.0,
+        "request" => {"method" => "GET", "url" => "https://a.test/x", "httpVersion" => "HTTP/1.1",
+                      "headers" => [] of String, "headersSize" => -1, "bodySize" => -1},
+        "response" => {"status" => 200, "statusText" => "OK", "httpVersion" => "HTTP/1.1",
+                       "headers" => [{"name" => "content-encoding", "value" => "gzip"},
+                                     {"name" => "content-length", "value" => gz.size.to_s}],
+                       "content" => content, "headersSize" => -1, "bodySize" => gz.size},
+      }]}}.to_json
+    }
+
+    decoded = reimport(entry.call({"size" => 11, "mimeType" => "text/plain", "text" => "hello world"}))
+    resp = String.new(decoded.response_head.not_nil!)
+    resp.should_not contain("content-encoding")
+    resp.should_not contain("content-length")
+    resp.should contain("Content-Length: 11")
+    Gori::Proxy::Codec::ContentDecode.decode(decoded.response_head, decoded.response_body).should eq({nil, nil})
+
+    # A body that IS in the stated coding keeps the header and its length.
+    wire = reimport(entry.call({"size" => gz.size, "mimeType" => "text/plain",
+                                "text" => Base64.strict_encode(gz.to_slice), "encoding" => "base64"}))
+    String.new(wire.response_head.not_nil!).should contain("content-encoding: gzip\r\ncontent-length: #{gz.size}\r\n")
+    Gori::Proxy::Codec::ContentDecode.decode(wire.response_head, wire.response_body)[0].should eq("hello world".to_slice)
+  end
+
   it "writes the WIRE body, not the decompressed view, so it stays in sync with Content-Encoding" do
     # Chrome writes the decoded text here. That is fine for a debugging view and wrong for a
     # capture artifact: `Content-Encoding: gzip` stays in `headers` either way, so a decoded
