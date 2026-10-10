@@ -194,4 +194,18 @@ describe "Gori::Authorize.explicit_json_error" do
     Gori::Authorize.explicit_json_error(%(["anon"])).not_nil!.should contain("entry 1 is not an object")
     Gori::Authorize.explicit_json_error(%({"name":"anon"})).not_nil!.should contain("expected a JSON array")
   end
+
+  # `set_headers` is the session-slot tools' spelling; dropped, the identity was a no-op.
+  it "refuses an unknown key and lists the accepted ones" do
+    why = Gori::Authorize.explicit_json_error(%([{"name":"low","set_headers":[{"name":"X","value":"1"}]}])).not_nil!
+    why.should contain(%(unknown key "set_headers"))
+    why.should contain("name, set, remove")
+  end
+
+  it "refuses a set pair that is not a header, as create_session_slot does" do
+    Gori::Authorize.explicit_json_error(%([{"name":"a","set":[{"name":"Bad Name","value":"v"}]}]))
+      .not_nil!.should contain("RFC 7230 token")
+    Gori::Authorize.explicit_json_error(%([{"name":"a","set":[{"name":"X","value":"v\\r\\nX-Evil: 1"}]}]))
+      .not_nil!.should contain("CR or LF")
+  end
 end

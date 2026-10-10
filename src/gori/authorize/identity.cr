@@ -1,5 +1,7 @@
 require "../env"
 require "../session_slot"
+require "../discover/headers"
+require "../proxy/codec/http1"
 
 module Gori
   # Authorization / access-control testing (Burp Autorize / Auth Analyzer shape): replay a
@@ -45,9 +47,16 @@ module Gori
       nil
     end
 
+    # The keys `SessionSlot.parse_json` reads. Anything else is dropped there, so here it is
+    # refused: `set_headers` (the session-slot TOOLS' spelling) silently became a no-op identity.
+    IDENTITY_KEYS = {"name", "set", "remove", "baseline", "rules", "literal", "refresh", "refresh_before"}
+
     # The first known field of one entry whose type `parse_json` would drop, or nil. A field
     # given as JSON `null` is absent, as `parse_json` reads it.
     private def self.entry_field_error(o : Hash(String, JSON::Any)) : String?
+      if unknown = o.keys.find { |k| !IDENTITY_KEYS.includes?(k) }
+        return "unknown key #{unknown.inspect} — an identity takes #{IDENTITY_KEYS.join(", ")}"
+      end
       given = ->(key : String) { o[key]?.try { |v| v.raw.nil? ? nil : v } }
       return %("name" must be a string) if given.call("name").try(&.as_s?.nil?)
       return %("baseline" must be true or false) if given.call("baseline").try(&.raw.as?(Bool).nil?)
@@ -58,7 +67,20 @@ module Gori
       if (v = given.call("set")) && !v.as_a?.try(&.all? { |p| set_pair?(p) })
         return %("set" must be a list of {"name": …, "value": …} objects)
       end
+      given.call("set").try(&.as_a).try &.each do |p|
+        if why = set_pair_error(p)
+          return why
+        end
+      end
       nil
+    end
+
+    # The rule `create_session_slot` holds `set_headers` to (`Discover::Headers.parse_lines`):
+    # a value's CR/LF would split into a second header line on the wire.
+    private def self.set_pair_error(p : JSON::Any) : String?
+      n, v = p["name"].as_s, p["value"].as_s
+      return nil if Proxy::Codec::Http1.header_name_safe?(n) && Discover::Headers.safe_value?(v)
+      %("set" entry #{n.inspect} is not a header — a name must be an RFC 7230 token and a value may not contain CR or LF)
     end
 
     private def self.set_pair?(p : JSON::Any) : Bool
