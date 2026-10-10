@@ -149,6 +149,27 @@ describe "Import::Har.each_flow" do
       seen.should eq(1)
     end
   end
+
+  # Chrome/Firefox write a request that never got an answer as `"status": 0`; it imported as a
+  # COMPLETE exchange with a fabricated `HTTP/1.1 0` status line.
+  it "imports a status-0 entry as a request with no response" do
+    failed = %({"startedDateTime":"2026-06-01T12:00:00.000Z","time":0,"request":{"method":"GET","url":"https://s.test/blocked","httpVersion":"HTTP/1.1","headers":[]},"response":{"status":0,"statusText":"","httpVersion":"","headers":[],"content":{"size":0,"mimeType":"x-unknown"},"_error":"net::ERR_CONNECTION_REFUSED"}})
+    with_har(%({"log":{"entries":[#{failed},#{har_entry(1)}]}})) do |path|
+      pairs = [] of Gori::Import::Builder::FlowPair
+      Gori::Import::Har.each_flow(path) { |pair| pairs << pair }
+      pairs.map(&.request.target).should eq(["/blocked", "/p/1"])
+      pairs[0].response.should be_nil
+      pairs[1].response.should_not be_nil
+    end
+  end
+
+  it "skips a leading UTF-8 BOM" do
+    with_har("\u{FEFF}" + %({"log":{"entries":[#{har_entry(1)}]}})) do |path|
+      seen = [] of String
+      Gori::Import::Har.each_flow(path) { |pair| seen << pair.request.target }
+      seen.should eq(["/p/1"])
+    end
+  end
 end
 
 describe "Import.import_file streams a HAR" do
