@@ -557,7 +557,7 @@ describe "MCP session slot refresh (#1233)" do
       # …a different one turns it off, and says so.
       changed = call_json(t, "update_session_slot", %({"name":"a","refresh":[#{other}, #{id}]}))
       changed["refresh_before"].as_s.should eq("off")
-      changed["auto_refresh_disarmed"].as_s.should eq("ttl=10m")
+      changed["auto_refresh_disarmed"].as_a.map(&.as_s).should eq(["a"])
       Gori::SessionSlots.load(store).find("a").not_nil!.refresh_before.off?.should be_true
 
       # Rewriting a step's request is the same hole; renaming it is not.

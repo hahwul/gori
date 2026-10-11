@@ -229,7 +229,7 @@ module Gori
         # Re-read: dropping the baseline hands it to another row (see `create_session_slot`).
         Result.new(JSON.build do |j|
           emit_session_slot(j, registry.find(updated.name) || updated, false, registry.active_name,
-            auto_refresh_disarmed: disarmed ? current.refresh_before.to_s : nil)
+            auto_refresh_disarmed: disarmed)
         end)
       end
 
@@ -337,6 +337,14 @@ module Gori
         registry.slots.select { |slot| !slot.refresh_before.off? && slot.refresh.includes?(id) }.compact_map do |slot|
           slot.name if registry.update(slot.name, slot.copy_with(refresh_before: Gori::SessionSlot::RefreshBefore.off))
         end
+      end
+
+      # The reply half of a disarm: which slots stopped refreshing on their own, and who re-arms them.
+      private def emit_auto_refresh_disarmed(j : JSON::Builder, slots : Array(String)) : Nil
+        return if slots.empty?
+        j.field("auto_refresh_disarmed") { j.array { slots.each { |n| j.string n } } }
+        j.field "auto_refresh_note", "a refresh step changed, so automatic refresh was turned off on " \
+                                     "#{slots.join(", ")} — the operator re-arms it from the gori TUI or `gori run session`"
       end
 
       # Run a slot's refresh steps now (#1233). The values it rebinds live in THIS server
@@ -454,7 +462,7 @@ module Gori
                                     include_sensitive : Bool, active : String?,
                                     sources : Array(String) = [] of String,
                                     refresh_status : Bool = false,
-                                    auto_refresh_disarmed : String? = nil) : Nil
+                                    auto_refresh_disarmed : Bool = false) : Nil
         j.object do
           j.field "name", slot.name
           # Where each header came from, when the overlay was READ off a flow rather than
@@ -483,11 +491,7 @@ module Gori
           j.field("refresh") { j.array { slot.refresh.each { |id| j.number id } } }
           j.field("refresh_steps") { j.array { Gori::SessionRefresh.step_labels(store, slot).each { |l| j.string l } } }
           j.field "refresh_before", slot.refresh_before.to_s
-          if was = auto_refresh_disarmed
-            j.field "auto_refresh_disarmed", was
-            j.field "auto_refresh_note", "the refresh steps changed, so automatic refresh (#{was}) was turned " \
-                                         "off — the operator re-arms it from the gori TUI or `gori run session`"
-          end
+          emit_auto_refresh_disarmed(j, [slot.name]) if auto_refresh_disarmed
           emit_refresh_status(j, slot) if refresh_status
         end
       end

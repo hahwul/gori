@@ -747,12 +747,7 @@ module Gori
             j.field "target", masked_target
             j.field "summary", summary
             j.field "position", existing.position
-            unless disarmed.empty?
-              j.field("auto_refresh_disarmed") { j.array { disarmed.each { |n| j.string n } } }
-              j.field "auto_refresh_note", "this session is a refresh step of #{disarmed.join(", ")}; " \
-                                           "automatic refresh was turned off there — the operator re-arms it from the " \
-                                           "gori TUI or `gori run session`"
-            end
+            emit_auto_refresh_disarmed(j, disarmed)
             repeater_tui_index(id).try { |n| j.field "tui_index", n }
             j.field "ws_out_message_count", ws_count if ws_count
             # The write door `create_repeater`'s notice would otherwise leave open: this tool
