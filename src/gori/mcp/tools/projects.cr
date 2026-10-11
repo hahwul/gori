@@ -290,7 +290,7 @@ module Gori
           @feed_generation += 1
           @carried_here.clear
           # Their cards are in the old feed, where no answer will be looked for.
-          @approvals.clear
+          forget_approvals
         end
         @owns_store = true
         # A RESUMED OAST handle is bound to the project it was resumed in: its row id means

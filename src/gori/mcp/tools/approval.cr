@@ -45,14 +45,18 @@ module Gori
       @asked_permissions = Set(String).new
       @approvals = {} of Int64 => PendingApproval
       # Answers waiting for their retry, by (tool, args digest): the groups an "Allow once"
-      # grants that call, and the calls a "Deny" refuses once.
+      # grants that call, the host:port one on a host card grants it (never the whole group:
+      # the same arguments can dial elsewhere next time, through an env var or an edited
+      # repeater), and the calls a "Deny" refuses once. Per project: cleared on a rebind.
       @once_grants = {} of {String, String} => Set(String)
+      @once_hosts = {} of {String, String} => Set(String)
       @deny_once = Set({String, String}).new
       # "Always (this server)": memory only, so it ends with this process.
       @always_groups = Set(String).new
       # For the call in flight: its digest, and the groups an "Allow once" lifted for it.
       @calling_digest = nil.as(String?)
       @call_approved = Set(String).new
+      @call_hosts = Set(String).new
 
       # The groups in `ask` on this server, in Preferences order — for `instructions`.
       def asked_groups : Array(Settings::McpPermission)
@@ -74,6 +78,7 @@ module Gori
         key = {name, digest}
         return approval_denied(name) if @deny_once.delete(key)
         @call_approved = @once_grants.delete(key) || Set(String).new
+        @call_hosts = @once_hosts.delete(key) || Set(String).new
         return nil if APPROVAL_FREE_TOOLS.includes?(name) || READ_ONLY_TOOLS.includes?(name)
         groups = call_approval_groups(name, h)
         groups.empty? ? nil : pending_approval(groups)
@@ -88,7 +93,8 @@ module Gori
         if (g = call_permission(name, h, asks)) && !(g == "send" && per_host)
           groups << g
         end
-        waives = !per_host && declared_args[name]?.try(&.includes?("allow_unscoped")) && bool_arg(h, "allow_unscoped", false)
+        # `unknown_args` already refused the flag on a tool that does not take it.
+        waives = !per_host && bool_arg(h, "allow_unscoped", false)
         groups << "scope" if waives && asks.includes?("scope") && !groups.includes?("scope")
         groups
       end
@@ -111,12 +117,13 @@ module Gori
       # it, and answer APPROVAL_PENDING.
       private def pending_approval(groups : Array(String), host : String? = nil, port : Int32? = nil) : Result
         tool = @calling || ""
-        digest = @calling_digest || call_digest(tool, EMPTY_HASH)
+        digest = @calling_digest || ""
         key = {tool, digest}
         # This call did not run, so what an "Allow once" already lifted for it waits for the
         # retry beside the new answer (a `write` card, then an `exec` one, for one rule).
         (@once_grants[key] ||= Set(String).new).concat(@call_approved) unless @call_approved.empty?
-        titles = groups.compact_map { |g| Settings.mcp_permission(g).try(&.title) }.join(", ")
+        (@once_hosts[key] ||= Set(String).new).concat(@call_hosts) unless @call_hosts.empty?
+        titles = Settings.mcp_permission_groups(groups).join(", ", &.title)
         st = @store
         unless st && @allow_actions && !st.read_only?
           return err("this '#{tool}' call needs the operator's approval (\"#{titles}\" is set to ask in gori " \
@@ -134,16 +141,8 @@ module Gori
       end
 
       private def approval_details(a : PendingApproval) : JSON::Any
-        JSON.parse(JSON.build do |j|
-          j.object do
-            j.field "approval_id", a.id
-            j.field "expires_at", a.expires_at
-            j.field "expires_at_iso", Gori.iso_micros(a.expires_at)
-            j.field "key", a.groups.join(",")
-            j.field "host", a.host if a.host
-            j.field "port", a.port if a.port
-          end
-        end)
+        JSON.parse({"approval_id" => a.id, "expires_at" => a.expires_at, "expires_at_iso" => Gori.iso_micros(a.expires_at),
+                    "key" => a.groups.join(","), "host" => a.host, "port" => a.port}.compact.to_json)
       end
 
       # Write the card for `want` (its id and expiry not yet set) and track it, or the refusal.
@@ -154,13 +153,8 @@ module Gori
         question = "Allow #{tool}#{target}?"
         detail = "#{session_label} asked gori mcp to run #{tool}#{target}. #{titles} is set to ask in " \
                  "Preferences › AI › MCP permissions."
-        choices = if host.nil?
-                    [APPROVAL_ONCE, APPROVAL_ALWAYS, APPROVAL_DENY]
-                  elsif port
-                    [APPROVAL_ONCE, APPROVAL_HOST, APPROVAL_HOST_PORT, APPROVAL_DENY]
-                  else
-                    [APPROVAL_ONCE, APPROVAL_HOST, APPROVAL_DENY]
-                  end
+        # Every per-host tool passes the dialled port, so a host card always offers host:port.
+        choices = host ? [APPROVAL_ONCE, APPROVAL_HOST, APPROVAL_HOST_PORT, APPROVAL_DENY] : [APPROVAL_ONCE, APPROVAL_ALWAYS, APPROVAL_DENY]
         label = session_label
         pid = Process.pid.to_i64
         id = st.record_agent_question(question, detail, choices, APPROVAL_DENY, label, pid, expires_at, approval: true)
@@ -194,12 +188,12 @@ module Gori
           key = {a.tool, a.digest}
           answer = m.outcome == AgentQuestion::OUTCOME_ANSWERED ? m.text : APPROVAL_DENY
           case answer
-          when APPROVAL_ONCE   then (@once_grants[key] ||= Set(String).new).concat(a.groups)
+          when APPROVAL_ONCE   then allow_once(key, a)
           when APPROVAL_ALWAYS then @always_groups.concat(a.groups)
           when APPROVAL_HOST
             grant_host(st, key, a, a.host)
           when APPROVAL_HOST_PORT
-            grant_host(st, key, a, a.host.try { |h| a.port ? "#{h}:#{a.port}" : h })
+            grant_host(st, key, a, a.host.try { |h| "#{h}:#{a.port}" })
           else @deny_once << key
           end
         end
@@ -210,7 +204,23 @@ module Gori
       private def grant_host(st : Store, key : {String, String}, a : PendingApproval, grant : String?) : Nil
         return unless grant
         ok = st.add_mcp_host_grant(grant)
-        (@once_grants[key] ||= Set(String).new).concat(a.groups) unless ok
+        allow_once(key, a) unless ok
+      end
+
+      private def allow_once(key : {String, String}, a : PendingApproval) : Nil
+        if h = a.host
+          (@once_hosts[key] ||= Set(String).new) << "#{h}:#{a.port}"
+        else
+          (@once_grants[key] ||= Set(String).new).concat(a.groups)
+        end
+      end
+
+      # A rebind to another project: an answer given there is not one for this project.
+      def forget_approvals : Nil
+        @approvals.clear
+        @once_grants.clear
+        @once_hosts.clear
+        @deny_once.clear
       end
 
       # The tool and its arguments, with object keys sorted so a retry that spells the same
@@ -241,7 +251,7 @@ module Gori
         waiver = allow_unscoped && asks.includes?("scope")
         every = asks.includes?("send")
         return nil unless waiver || every
-        Outbound::Approval.new(every_send: every, waiver: waiver, hosts: @store.try(&.mcp_host_grants) || [] of String)
+        Outbound::Approval.new(every_send: every, waiver: waiver, hosts: (@store.try(&.mcp_host_grants) || [] of String) + @call_hosts.to_a)
       end
     end
   end

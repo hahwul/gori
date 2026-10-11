@@ -132,7 +132,7 @@ module Gori::Settings
     end
     if root && (h = root.as_h?)
       node = h["mcp_permissions"]?
-      asked = mcp_asks_from(node) || Set(String).new
+      asked = mcp_asks_from(node)
       return {(mcp_denials_from(node) || Set(String).new) - asked, asked, nil}
     end
     {MCP_PERMISSION_KEYS.to_set, Set(String).new, "#{path} could not be read, so every MCP permission group is off until it is fixed"}
@@ -158,8 +158,8 @@ module Gori::Settings
 
   # The keys stored as exactly `"ask"`. An unknown key is kept, like an unknown denial, so a
   # newer gori's group round-trips; it asks for nothing here.
-  private def self.mcp_asks_from(node : JSON::Any?) : Set(String)?
-    return nil unless h = node.try(&.as_h?)
+  private def self.mcp_asks_from(node : JSON::Any?) : Set(String)
+    return Set(String).new unless h = node.try(&.as_h?)
     h.compact_map { |k, v| k if v.as_s? == "ask" }.to_set
   end
 
@@ -174,7 +174,7 @@ module Gori::Settings
   # names is one somebody turned back on. Absent or non-object keeps the current set.
   private def self.parse_mcp_permissions(node : JSON::Any?) : Nil
     if denied = mcp_denials_from(node)
-      asked = mcp_asks_from(node) || Set(String).new
+      asked = mcp_asks_from(node)
       self.mcp_denied_permissions = denied - asked
       self.mcp_asked_permissions = asked
     end

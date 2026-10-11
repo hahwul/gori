@@ -1625,6 +1625,7 @@ module Gori
         @calling = nil
         @calling_digest = nil
         @call_approved = Set(String).new
+        @call_hosts = Set(String).new
       end
 
       # The cancellation predicate for the call in flight, for an engine that polls one

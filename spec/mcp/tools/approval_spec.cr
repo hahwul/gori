@@ -171,6 +171,34 @@ describe "MCP approvals (ask)" do
     end
   end
 
+  # The same arguments can dial another host next time: "Allow once" covers the host:port on
+  # the card, not the call's digest.
+  it "keeps an \"Allow once\" to the host it was given for" do
+    with_origin do |port|
+      with_store do |store|
+        tools = ask_tools(store, "send")
+        call(tools, "set_env_var", %({"key":"T","value":"127.0.0.1:#{port}"})).is_error.should be_false
+        args = %({"url":"http://$T/","allow_unscoped":true})
+        answer(store, approval_id(call(tools, "send_request", args)), Gori::MCP::Tools::APPROVAL_ONCE)
+        call(tools, "set_env_var", %({"key":"T","value":"127.0.0.1:#{port + 1}"})).is_error.should be_false
+        r = call(tools, "send_request", args)
+        approval_id(r)
+        r.details.not_nil!["port"].as_i.should eq(port + 1)
+      end
+    end
+  end
+
+  it "drops the answers waiting for a retry when the server binds another project" do
+    with_store do |store|
+      tools = ask_tools(store, "write")
+      answer(store, approval_id(call(tools, "create_note", %({"text":"moved"}))), Gori::MCP::Tools::APPROVAL_ONCE)
+      name = "approval-#{Random.rand(1_000_000)}"
+      call(tools, "create_project", %({"name":"#{name}"})).is_error.should be_false
+      call(tools, "switch_project", %({"project":"#{name}"})).is_error.should be_false
+      approval_id(call(tools, "create_note", %({"text":"moved"})))
+    end
+  end
+
   it "holds an allow_unscoped waiver under scope: ask until the host is granted" do
     with_origin do |port|
       with_store do |store|

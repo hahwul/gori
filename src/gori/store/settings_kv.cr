@@ -51,7 +51,7 @@ module Gori
     def mcp_host_grants : Array(String)
       raw = setting(MCP_HOST_GRANTS_KEY) || return [] of String
       Array(String).from_json(raw)
-    rescue JSON::ParseException | TypeCastError
+    rescue JSON::ParseException
       [] of String
     end
 
