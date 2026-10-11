@@ -21,7 +21,7 @@ module Gori
   #   body~secret\d+  host~^api\.       # `~` = regex (host path url method scheme header body)
   module QL
     # `:` fields:  see FIELDS below (the list every surface reads).
-    # `~` regex on: REGEX_FIELDS below (host path url method scheme header body, and the
+    # `~` regex on: REGEX_FIELDS below (host path url method scheme header body ws, and the
     #               req./resp. sides of header and body)   (+ bare words = free text).
     # Comparison ops (<= >= < > =) apply to status/size/reqsize/respsize/dur.
     #
@@ -152,7 +152,7 @@ module Gori
       NOT > AND > OR. `-term` and `NOT term` are equivalent.
 
       Fields (use : for value match, ~ for regex):
-        host path method scheme proto status size reqsize respsize dur header body url stub static src scope cache
+        host path method scheme proto status size reqsize respsize dur header body ws url stub static src scope cache
 
       Sides: header: and body: search the REQUEST AND THE RESPONSE. Prefix either with `req.` or
       `resp.` to search one side — req.body:token resp.header:set-cookie resp.body~secret\\d+ —
@@ -210,8 +210,14 @@ module Gori
       cache did — confirm a `hit` with a no-session re-request. An unknown value (cache:yes)
       drops the term.
 
+      WebSocket messages: ws:needle  ws~regex — a flow whose socket carried a TEXT or BINARY
+      message matching, in either direction (ws: is a case-insensitive substring, ws~ a regex).
+      The stored payload bytes are searched as captured, with no index, so a ws: term scans
+      the transcript of every socket. Ping/pong/close frames and gori's own `[gori] ` notice
+      rows never match; -ws:x keeps flows that carried no messages at all.
+
       Regex (~): host~^api\\.  body~secret\\d+  path~/admin  method~^P(OST|UT)$ — on host path url
-      method scheme header body (and req./resp. header/body). Case-sensitive; prefix (?i) to fold.
+      method scheme header body ws (and req./resp. header/body). Case-sensitive; prefix (?i) to fold.
       A `~` on any OTHER field QL has (status size dur proto stub src scope …) is DROPPED and
       reported like a bad numeric, not searched as text; a `~` on a name QL does not have at all
       is free text, the whole token.
@@ -350,7 +356,7 @@ module Gori
 
     private def self.content_or_prefix_reason(raw_field : String, field : String, value : String) : String?
       case field
-      when "body", "header", "req.body", "resp.body", "req.header", "resp.header"
+      when "body", "header", "ws", "req.body", "resp.body", "req.header", "resp.header"
         return "value contains control characters" if value.each_char.any?(&.control?)
       else
         if prefix = SIDE_PREFIXES.find { |p| raw_field.starts_with?(p) }
@@ -472,7 +478,7 @@ module Gori
     # History's and Colormarker's completion pools, Colormarker's unknown-field refusal and the
     # docs all read it, so a field added to `field_cond` becomes offerable everywhere at once
     # instead of in the four hand-kept copies that used to drift.
-    FIELDS = %w[host path url method scheme proto status size reqsize respsize dur header body stub static src scope cache
+    FIELDS = %w[host path url method scheme proto status size reqsize respsize dur header body ws stub static src scope cache
       req.header resp.header req.body resp.body]
 
     # The fields `~` compiles on. `method` and `scheme` are text columns like `host`, so a regex over
@@ -482,7 +488,7 @@ module Gori
     # `regex_cond`) rather than free-texted: `status~5..` used to compile to a literal search for
     # the text `status~5..`, match nothing, and be reported CLEAN — with the bar painting it as a
     # field, because the name is one. Same trap as `resp.status:`, same answer.
-    REGEX_FIELDS = %w[host path url method scheme header body req.header resp.header req.body resp.body]
+    REGEX_FIELDS = %w[host path url method scheme header body ws req.header resp.header req.body resp.body]
 
     # A `req.`/`resp.` prefix picks ONE SIDE of a field that has two. `header:`/`body:` search the
     # request AND the response, which is right for "find this string anywhere" and useless for the
@@ -661,6 +667,7 @@ module Gori
       "dur"         => "latency; ms unless suffixed — dur:>1.5s",
       "header"      => "head bytes, BOTH sides — see req./resp.",
       "body"        => "body via index: 8 KiB/side, no compressed",
+      "ws"          => "WebSocket text/binary messages — ws~ regex",
       "stub"        => "true = gori answered it, origin never saw it",
       "static"      => "2xx image/font/media; not svg/css/js",
       "src"         => "who sent it — proxy repeater fuzzer … or gori",
@@ -847,6 +854,7 @@ module Gori
       when "dur"                                 then duration_cond(value)
       when "header", "req.header", "resp.header" then header_cond(value, side_of(field))
       when "body", "req.body", "resp.body"       then body_cond(value, fts, body_max, side_of(field))
+      when "ws"                                  then ws_cond(value, regex: false)
       when "stub"                                then flag_cond("short_circuited", value)
       when "static"                              then flag_cond("static_asset", value)
       when "src"                                 then src_cond(value)
@@ -1187,6 +1195,70 @@ module Gori
       body_regex_cond("(?i)#{Regex.escape(value)}", body_max, side)
     end
 
+    # `ws:` / `ws~`: a flow whose WebSocket transcript holds a matching MESSAGE. A subquery over
+    # `ws_messages`, with no index (P6): `flows_fts` indexing was moved off the capture commit
+    # because trigram tokenization was the dominant capture cost (Store V4), and a busy socket
+    # writes far more rows than a page does. The term costs only at query time, and only in a
+    # query that uses it. If a measured scan ever proves too slow, the upgrade is a contentless
+    # trigram FTS over `ws_messages` fed by a dirty flag like V4, in a NEW migration.
+    #
+    # Repeater-tab rows carry `flow_id = 0`, so they never join a flow.
+    #
+    # A CORRELATED `EXISTS`, not `id IN (SELECT flow_id …)`: the IN-list is built over every
+    # message in the project before the outer ids are consulted, so a colour rule painting three
+    # visible rows (`Store#ids_matching`) regexed the whole table per frame. Correlated, each flow
+    # is one `idx_ws_messages_flow` probe and History's `LIMIT` can stop early. `flows.id`, never a
+    # bare `id`, which inside the subquery would bind to `ws_messages.id`.
+    private def self.ws_cond(value : String, regex : Bool) : SqlTerm?
+      return nil unless msg = ws_message_cond(value, regex)
+      cond, args = msg
+      {"EXISTS (SELECT 1 FROM ws_messages WHERE ws_messages.flow_id = flows.id AND #{cond})", args}
+    end
+
+    # The per-MESSAGE predicate behind `ws:`/`ws~`, over a `ws_messages` row — public because a
+    # surface narrowing ONE flow's transcript (`Store#ws_messages(match:)`: History's MESSAGES
+    # pane, MCP `get_flow ws_query`, `gori run show --ws-match`) must match exactly what the QL
+    # term matched, not a re-derivation of it. nil when the value cannot be searched: empty, a
+    # control character in a literal (dropped, as `body:` drops one), or a regex that does not
+    # compile (the QL term turns that into a never-match before it reaches here).
+    #
+    # The literal form is built as `body_literal_cond` builds it — `(?i)` + an escaped needle
+    # through the same REGEXP — so `ws:` and `ws~` share one clause, one case rule and one NUL
+    # rule: `Gori::SafeRegexp` reads the haystack by its true byte length, so a NUL before the
+    # needle does not hide it the way a `CAST … LIKE` would.
+    #
+    # TEXT and BINARY payloads are both searched as raw bytes (P7: a binary frame carrying
+    # ASCII is still a hit). Control frames (ping/pong/close) are not messages and are left
+    # out. A row opening with `Proxy::WS::NOTICE_PREFIX` (`[gori] `) is gori's own prose
+    # ABOUT the socket, not traffic, and is left out too.
+    def self.ws_message_cond(value : String, regex : Bool) : SqlTerm?
+      return nil if value.empty?
+      if regex
+        return nil unless valid_regex?(value)
+      else
+        return nil if value.each_char.any?(&.control?)
+        value = "(?i)#{Regex.escape(value)}"
+      end
+      {"(opcode IN (#{Proxy::WS::OP_TEXT}, #{Proxy::WS::OP_BIN}) " \
+       "AND substr(payload, 1, #{Proxy::WS::NOTICE_PREFIX.bytesize}) <> ? AND CAST(payload AS TEXT) REGEXP ?)",
+       [Proxy::WS::NOTICE_PREFIX.to_slice, value] of DB::Any}
+    end
+
+    # Why `ws_match` refused a value — the one sentence both surfaces that take one print.
+    WS_MATCH_REFUSED = "is not a usable ws term — it is empty, holds a control character, or is an invalid regex"
+
+    # A surface's one-transcript match spelled as a QL `ws` term: `ws~regex`, `ws:needle`, or a
+    # bare needle (read as `ws:`). The field name folds case and one pair of surrounding double
+    # quotes is dropped, as the QL grammar reads `WS:"two words"`. nil exactly when
+    # `ws_message_cond` refuses the value.
+    def self.ws_match(spec : String) : SqlTerm?
+      head = spec[0, 3].downcase
+      regex = head == "ws~"
+      value = regex || head == "ws:" ? spec[3..] : spec
+      value = value[1...-1] if value.size >= 2 && value.starts_with?('"') && value.ends_with?('"')
+      ws_message_cond(value, regex)
+    end
+
     # Split a leading comparison operator (<= >= < > =, default =) off a value. Shared
     # by status:, size:, dur: so the operator parsing lives in exactly one place.
     private def self.split_op(value : String) : {String, String}
@@ -1365,6 +1437,7 @@ module Gori
       when "method"                              then {"method REGEXP ?", [value] of DB::Any}
       when "scheme"                              then {"scheme REGEXP ?", [value] of DB::Any}
       when "header", "req.header", "resp.header" then header_regex_cond(value, side_of(field))
+      when "ws"                                  then ws_cond(value, regex: true)
       else # body, req.body, resp.body — the only names left in REGEX_FIELDS
         body_regex_cond(value, body_max, side_of(field))
       end

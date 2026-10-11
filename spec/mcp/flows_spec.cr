@@ -223,6 +223,32 @@ describe Gori::MCP::Server do
   end
 
   describe "get_flow" do
+    # #1588 — `ws_query` narrows before the 500 cap and says how much of the socket it kept.
+    it "narrows ws_messages with ws_query and reports the socket's total" do
+      with_store do |store|
+        id = mcp_seed_flow(store, "ws.test", "GET", "/s", 101)
+        store.insert_ws_message(id, "out", 1, "secret-early".to_slice)
+        (Gori::MCP::Serialize::WS_MSGS_MAX + 5).times { store.insert_ws_message(id, "in", 1, "noise".to_slice) }
+        store.insert_ws_message(id, "in", 1, "SECRET-late".to_slice)
+
+        call = %({"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"get_flow","arguments":{"id":#{id},"ws_query":"ws:secret"}}})
+        ws = mcp_tool_payload(mcp_drive(store, call)[0])["ws_messages"]
+        ws["count"].as_i.should eq(2)
+        ws["ws_total"].as_i.should eq(Gori::MCP::Serialize::WS_MSGS_MAX + 7)
+        ws["messages"].as_a.map(&.["text"].as_s).should eq(["secret-early", "SECRET-late"])
+
+        call = %({"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"get_flow","arguments":{"id":#{id},"ws_query":"ws~nomatch"}}})
+        ws = mcp_tool_payload(mcp_drive(store, call)[0])["ws_messages"]
+        ws["count"].as_i.should eq(0) # a miss still says so
+        ws["messages"].as_a.should be_empty
+
+        call = %({"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"get_flow","arguments":{"id":#{id},"ws_query":"ws~["}}})
+        resp = mcp_drive(store, call)[0]
+        resp["result"]["isError"].as_bool.should be_true
+        resp.to_json.should contain("ws_query")
+      end
+    end
+
     # The same `interim` / `interim_omitted` pair `gori run show --format json` emits; each head
     # redacted like `response_head`, since a 1xx is a header block like any other.
     it "lists the interim 1xx heads that preceded the response, redacted like response_head" do

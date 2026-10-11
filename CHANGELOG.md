@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- QL: `ws:`/`ws~` finds flows by their WebSocket message payloads, and History's MESSAGES pane, `gori run show --ws-match` and MCP `get_flow` `ws_query` narrow one transcript (#1588)
 - CLI: `gori run browser` opens the Open browser profile from a script, with an opt-in loopback DevTools port so Playwright MCP or chrome-devtools-mcp can drive a captured browser (#1594)
 
 ## v0.8.1

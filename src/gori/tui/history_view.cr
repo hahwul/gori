@@ -264,6 +264,13 @@ module Gori::Tui
       @detail_frames = nil.as(Array(Store::H2Frame)?)
       @detail_ws_total = 0 # full message count (≥ loaded; drives the "older not loaded" note)
       @detail_frames_total = 0
+      # The MESSAGES pane narrowed to the messages matching this ^F needle (#1588), or nil for
+      # the whole window. Applied in SQL with the QL `ws:` term's own per-message predicate, so
+      # the narrowed list reaches messages older than DETAIL_LOG_CAP. While narrowed,
+      # @detail_ws_total counts the MATCHES and @ws_narrow_of the whole socket.
+      @ws_narrow = nil.as(String?)
+      @ws_narrow_of = 0
+      @last_search = "" # the last non-empty ^F query — what a narrow takes
       # The request as the client sent it, when the operator edited it at Intercept (#1378) —
       # the ORIGINAL pane. nil for every flow nobody edited, so the pane is not offered.
       @detail_original = nil.as(Bytes?)
@@ -1668,6 +1675,7 @@ module Gori::Tui
     def open_detail_id(id : Int64, store : Store) : Bool
       @detail = store.get_flow(id)
       return false if @detail.nil?
+      @ws_narrow = nil # a narrow belongs to the flow it was made on
       @detail_frozen = store.evidence_count_for(Store::LinkRefKind::Flow, id)
       if idx = index_of(id)
         @selected = idx
@@ -1714,6 +1722,7 @@ module Gori::Tui
       @detail_ws = nil
       @detail_frames_total = 0
       @detail_ws_total = 0
+      @ws_narrow = nil
       @detail_original = nil
       @detail_interims = nil
       @detail_sse = false
@@ -1742,8 +1751,12 @@ module Gori::Tui
       # step now: the row count IS the question, and it is the count this pane needs anyway.
       total = detail ? store.count_ws_messages(detail.row.id) : 0
       if detail && total > 0
-        @detail_ws = store.ws_messages(detail.row.id, DETAIL_LOG_CAP)
-        @detail_ws_total = total
+        # ponytail: a narrowed live socket re-scans its whole transcript on every refresh;
+        # page from a high-water mark if a busy socket ever makes that stall.
+        match = @ws_narrow.try { |q| QL.ws_message_cond(q, regex: false) }
+        @detail_ws = store.ws_messages(detail.row.id, DETAIL_LOG_CAP, match)
+        @detail_ws_total = match ? store.count_ws_messages(detail.row.id, match) : total
+        @ws_narrow_of = total
       else
         @detail_ws = nil
         @detail_ws_total = 0
@@ -1813,7 +1826,9 @@ module Gori::Tui
       # this runs, so the count here is the same window the MESSAGES pane shows.
       ws = @detail_ws || [] of Store::WsMessage
       key = {ws.size, ws.last?.try(&.id) || -1_i64}
-      if @ws_decode_key != key
+      # Not while the MESSAGES pane is narrowed: these panes decode the socket, not the matches,
+      # so they keep the full window they were built from (a narrow always starts from one).
+      if @ws_decode_key != key && @ws_narrow.nil?
         @detail_graphql_ws = GraphqlWs.from_messages(ws)
         @detail_ws_proto = WsProto.from_messages(ws, @ws_subprotocols)
         @ws_decode_key = key
@@ -2495,7 +2510,37 @@ module Gori::Tui
 
     # ^F search: 0-based indices of the detail text lines containing `query` (case-
     # insensitive). Empty in hex mode (the hex view has no text lines).
-    setter search_hl : String
+    def search_hl=(q : String) : Nil
+      @search_hl = q
+      @last_search = q unless q.empty? # the prompt clears to "" on close; a narrow wants the query
+    end
+
+    # Is the open flow's MESSAGES pane on screen? Gates the narrow verb.
+    def messages_pane? : Bool
+      @detail_pane == :messages && !@detail_ws.nil?
+    end
+
+    # Narrow the MESSAGES pane to the last ^F query, or restore the full window. Returns the toast.
+    def toggle_ws_narrow(store : Store) : String
+      return "narrow: open the MESSAGES pane of a WebSocket flow first" unless messages_pane?
+      if @ws_narrow
+        @ws_narrow = nil
+      else
+        return "narrow: search the messages with ^F first" if @last_search.empty?
+        return "narrow: the ^F query holds a control character" unless QL.ws_message_cond(@last_search, regex: false)
+        @ws_narrow = @last_search
+      end
+      load_detail_logs(store)
+      drop_detail_cache
+      @detail_scroll = 0
+      detail_wrap_reset
+      @detail_read.reset
+      if q = @ws_narrow
+        "messages: #{@detail_ws_total} of #{@ws_narrow_of} match “#{q}”"
+      else
+        "messages: showing all #{@detail_ws_total}"
+      end
+    end
 
     # Reveal-whitespace renders on a separate path with a different (usually much
     # shorter) line count than the normal/pretty view, so toggling it must reset
@@ -4308,6 +4353,12 @@ module Gori::Tui
       end
       if @detail_pane == :messages && (msgs = @detail_ws)
         head = log_head(ws_lines(msgs), @detail_ws_total, msgs.size, "messages")
+        if q = @ws_narrow
+          head.unshift(Highlight::Line.new)
+          head.unshift([Highlight::Span.new(Hotkeys.expand_menu_paths(@registry,
+            "— narrowed to messages matching “#{q}”: #{@detail_ws_total} of #{@ws_narrow_of} · " \
+            "{space:detail.narrow-messages} shows all —"), Theme.yellow)] of Highlight::Span)
+        end
         return DetailView.new(head, EMPTY_BODY, :text, EMPTY_LINES)
       end
       if @detail_pane == :events
