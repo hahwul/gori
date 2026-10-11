@@ -193,7 +193,8 @@ module Gori::Tui
         return :stay
       end
 
-      if File.exists?(p) && !@overwrite_armed
+      # Not `File.exists?`, which follows a link: a dangling one would read as absent.
+      if ProjectArchive.destination_exists?(p) && !@overwrite_armed
         @overwrite_armed = true
         @notice = "file exists — ↵ again to overwrite"
         return :stay

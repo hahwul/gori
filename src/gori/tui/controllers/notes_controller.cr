@@ -613,7 +613,7 @@ module Gori::Tui
     # operator captured into the note.
     def notes_export_to(path : String) : Bool
       text = @notes.current_text
-      File.write(path, text.ends_with?('\n') ? text : "#{text}\n")
+      ProjectArchive.write_export_file(path, text.ends_with?('\n') ? text : "#{text}\n")
       @host.status("exported note → #{path}")
       true
     rescue ex

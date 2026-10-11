@@ -141,6 +141,15 @@ describe Gori::Tui::ExportOverlay do
     end
   end
 
+  # `File.exists?` follows a link, so a DANGLING one read as absent and committed unwarned.
+  it "arms on a dangling symlink too" do
+    with_tmpdir do |dir|
+      target = File.join(dir, "issues.md")
+      File.symlink(File.join(dir, "missing"), target)
+      enter(ExportOverlay.new(:note, target)).should eq(:stay)
+    end
+  end
+
   it "DISARMS the overwrite when the path is edited between the two ↵s" do
     # The ↵ that overwrites must be the one right after the warning, for the path that was
     # warned about — otherwise typing a second, also-existing name would write unwarned.

@@ -1249,7 +1249,7 @@ module Gori::Tui
                 when :sarif then Issues::Export.sarif(issues, store, @host.session.project.name, matcher: Redact::Policy.ambient(store))
                 else             Issues::Export.markdown(issues, store, @host.session.project.name, Redact::Policy.ambient(store))
                 end
-      File.write(path, content.ends_with?('\n') ? content : "#{content}\n")
+      ProjectArchive.write_export_file(path, content.ends_with?('\n') ? content : "#{content}\n")
       msg = "exported #{Gori.plural(issues.size, "issue")} → #{path}"
       # Only warn when the report landed INSIDE the ephemeral project dir. The path used to
       # always be in there, so the warning was unconditional; now the operator picks it, and

@@ -755,6 +755,36 @@ describe Gori::ProjectArchive do
 
   # `settings` has no `id`: its key is `key`, which every `set_setting` upserts through. Without
   # it each upsert fails inside the writer's batch, and the flows batched with it go too.
+  # A TUI export lands where the operator points it, often a shared directory: never write
+  # through a link someone else planted there, dangling or live.
+  describe ".write_export_file" do
+    it "creates a new file, rewrites a confirmed regular file, and refuses a symlink" do
+      dir = File.tempname("gori-export-file")
+      Dir.mkdir(dir)
+      begin
+        fresh = File.join(dir, "issues.md")
+        Gori::ProjectArchive.write_export_file(fresh, "one\n")
+        File.read(fresh).should eq("one\n")
+        File.info(fresh).permissions.should eq(File::Permissions.new(0o644))
+        Gori::ProjectArchive.write_export_file(fresh, "two\n")
+        File.read(fresh).should eq("two\n")
+
+        victim = File.join(dir, "victim")
+        File.write(victim, "keep")
+        {victim, File.join(dir, "absent")}.each_with_index do |to, i|
+          link = File.join(dir, "link#{i}.md")
+          File.symlink(to, link)
+          expect_raises(Gori::Error, /symlink/) { Gori::ProjectArchive.write_export_file(link, "x") }
+        end
+        File.read(victim).should eq("keep")
+        File.exists?(File.join(dir, "absent")).should be_false
+        Dir.children(dir).none?(&.ends_with?(".tmp")).should be_true
+      ensure
+        FileUtils.rm_rf(dir)
+      end
+    end
+  end
+
   it "refuses an archive whose settings table lost the key gori upserts through" do
     with_archive_project do |_registry, project, store, root|
       store.insert_flow(archive_request("/a"))

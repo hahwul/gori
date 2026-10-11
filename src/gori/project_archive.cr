@@ -453,6 +453,43 @@ module Gori
       File.exists?(path) || File.symlink?(path)
     end
 
+    # The write behind a TUI export (issues, notes, sequencer report, evidence, OpenAPI), whose
+    # overlay asked before overwriting anything `destination_exists?` saw. It never writes
+    # THROUGH a link: a destination in a shared directory such as /tmp can be a symlink another
+    # local user planted (`issues.md -> ~/.zshenv`), dangling so it read as absent, or live so
+    # the operator confirmed "file exists" for a file that is not theirs.
+    #
+    # * an existing regular file is rewritten in place (the confirmed overwrite; its mode and
+    #   links are kept);
+    # * anything else that exists — a symlink, a FIFO, a device — is refused;
+    # * nothing there: staged in a temp file beside it and hard-linked into place, which fails
+    #   if anything (a link included) appeared meanwhile. A filesystem with no hard links gets
+    #   the same existence check immediately before a rename, as `install_archive_copy` does.
+    def self.write_export_file(path : String, content : String,
+                               perm : File::Permissions = File::Permissions.new(0o644)) : Nil
+      if info = File.info?(path, follow_symlinks: false)
+        raise Gori::Error.new("refusing to write through a symlink or special file: #{path}") unless info.file?
+        File.write(path, content)
+        return
+      end
+      temp = nil.as(String?)
+      File.tempfile(".#{File.basename(path)}", ".tmp", dir: File.dirname(path)) do |file|
+        temp = file.path
+        file.print(content)
+        file.flush
+      end
+      staged = temp || raise Gori::Error.new("could not stage #{path}")
+      File.chmod(staged, perm)
+      begin
+        File.link(staged, path)
+      rescue IO::Error
+        raise DestinationExists.new(path) if destination_exists?(path)
+        File.rename(staged, path)
+      end
+    ensure
+      temp.try { |t| File.delete?(t) }
+    end
+
     private def self.private_tempdir(prefix : String) : String
       10.times do
         path = File.tempname("gori-#{prefix}")

@@ -320,7 +320,7 @@ module Gori::Tui
                 else
                   Sequencer::Present.report_markdown(rep, v.subject, heading: "Token randomness")
                 end
-      File.write(path, content.ends_with?('\n') ? content : "#{content}\n")
+      ProjectArchive.write_export_file(path, content.ends_with?('\n') ? content : "#{content}\n")
       msg = "exported #{rep.rating.label} report · #{rep.usable_count} tokens → #{path}"
       # Only warn when the report landed INSIDE the ephemeral project dir — a file written to
       # the operator's cwd outlives the project just fine (same rule as issues_export_to).

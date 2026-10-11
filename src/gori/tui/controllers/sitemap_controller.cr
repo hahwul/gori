@@ -55,7 +55,7 @@ module Gori::Tui
           # An empty document is not a file anyone asked for; the toast says why it is empty.
           if result.report.operations > 0
             text = yaml ? Export::OpenApi.to_yaml(result.doc) : Export::OpenApi.to_json(result.doc)
-            DurableFile.write(path, text, perm: File::Permissions.new(0o644))
+            ProjectArchive.write_export_file(path, text)
           end
           SitemapController.export_toast(result.report, path)
         rescue ex
