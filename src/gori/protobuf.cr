@@ -52,15 +52,57 @@ module Gori
       # JSON projection used by `gori run show --format json` (and anything else
       # that wants the same tree). Length-delimited fields emit every applicable
       # interpretation as sibling keys — never a single chosen type.
-      def to_json(j : JSON::Builder) : Nil
+      #
+      # `budget` bounds the output (see `JsonBudget`). Pass ONE budget for every message of a
+      # body: a body split into many messages multiplies just as well as one deep message does.
+      # Where it runs out, the remaining fields are left out and this message — and each one
+      # enclosing it — says `"truncated": "max_bytes"`. `complete` stays a fact about the PARSE.
+      def to_json(j : JSON::Builder, budget : JsonBudget = JsonBudget.new) : Nil
         j.object do
           j.field "complete", complete
           j.field "fields" do
-            j.array { fields.each &.to_json(j) }
+            j.array do
+              fields.each do |f|
+                break unless f.to_json(j, budget)
+              end
+            end
           end
+          j.field "truncated", "max_bytes" if budget.exhausted?
         end
       end
     end
+
+    # The JSON projection's output ceiling, charged across a whole body. Every length-delimited
+    # field is emitted as base64 AND (when valid UTF-8) as a string AND (when it parses) as a
+    # nested message whose own fields do the same, down to MAX_DEPTH — so 2 MB of 33 nested
+    # `0x0a <len>` fields rendered ~90 MB of JSON and allocated ~400 MiB per call, on every MCP
+    # `get_flow` and `gori run show` of the flow. 8 MiB is the ceiling `Msgpack`/`Cbor` carry
+    # for the same multiplication, and `Pretty::MAX_OUT_PRETTY`.
+    class JsonBudget
+      def initialize(@left : Int64 = MAX_JSON_BYTES.to_i64)
+      end
+
+      def exhausted? : Bool
+        @left <= 0
+      end
+
+      # Spend `n` bytes if they fit. A charge that does not fit empties the budget, so every
+      # caller after it — and every enclosing message — stops too.
+      def spend?(n : Int64) : Bool
+        if n > @left
+          @left = 0
+          return false
+        end
+        @left -= n
+        true
+      end
+    end
+
+    MAX_JSON_BYTES = 8 * 1024 * 1024
+
+    # A field's JSON envelope (number, wire, size, the keys), charged once per field so a stream
+    # of empty fields still spends the budget.
+    FIELD_OVERHEAD = 64_i64
 
     # One field occurrence on the wire. Scalar fields set `uint` (and for
     # fixed32/fixed64, that value is the raw bits). Length-delimited fields set
@@ -76,7 +118,9 @@ module Gori
       string : String? = nil,
       message : Message? = nil,
       skipped : Bool = false do
-      def to_json(j : JSON::Builder) : Nil
+      # False, writing nothing, when this field does not fit in `budget`; the caller stops there.
+      def to_json(j : JSON::Builder, budget : JsonBudget = JsonBudget.new) : Bool
+        return false unless budget.spend?(json_cost)
         j.object do
           j.field "number", number.to_i64
           j.field "wire", wire_name
@@ -95,10 +139,20 @@ module Gori
           end
           j.field "string", string if string
           if m = message
-            j.field "message" { m.to_json(j) }
+            j.field "message" { m.to_json(j, budget) }
           end
           j.field "skipped", true if skipped
         end
+        true
+      end
+
+      # What this field's OWN keys cost, nested message excluded (it charges itself): base64 is
+      # 4/3 of the bytes, and a string escapes a control byte to six (`\u0001`).
+      private def json_cost : Int64
+        cost = FIELD_OVERHEAD
+        bytes.try { |b| cost += (b.size.to_i64 + 2) // 3 * 4 }
+        string.try { |str| cost += str.bytesize.to_i64 + str.each_byte.count { |c| c < 0x20 }.to_i64 * 5 }
+        cost
       end
 
       # PUBLIC because the schema lens emits it too (`Protobuf::Lens.emit_json`): a field the
@@ -324,8 +378,9 @@ module Gori
     # and often meaningful (e.g. nested protobuf that also happens to be text).
     # Empty payload is a valid empty string.
     private def utf8_string?(payload : Bytes) : String?
-      s = String.new(payload)
-      s.valid_encoding? ? s : nil
+      # Validated on the bytes, so an invalid payload — every level of a nested chain whose
+      # length varints carry a high byte — costs no copy (`Utf8.text`'s reason).
+      Unicode.valid?(payload) ? String.new(payload) : nil
     end
 
     # Skip a group opened by field `number` until its end-group tag. Nested

@@ -253,6 +253,28 @@ describe Gori::Protobuf do
       # Must be a string — a JSON number would round.
       json["fields"].as_a[0]["uint"].as_s.should eq(big.to_s)
     end
+
+    # Every nesting level re-emits its payload as base64 and as a string, so 2 MB of 33 nested
+    # length-delimited fields rendered ~90 MB of JSON (~400 MiB allocated) per call.
+    it "stops at its output budget and says where" do
+      payload = Bytes.new(2_000_000, 'a'.ord.to_u8)
+      33.times { payload = pb_len(1, payload) }
+      json = PB.decode(payload).to_json
+      json.bytesize.should be <= PB::MAX_JSON_BYTES
+      doc = JSON.parse(json)
+      doc["complete"].as_bool.should be_true # the PARSE was whole; only the rendering stopped
+      doc["truncated"].as_s.should eq("max_bytes")
+    end
+
+    it "shares one budget across the messages of a body" do
+      budget = PB::JsonBudget.new
+      m = PB.decode(pb_len(1, Bytes.new(2_000_000, 'a'.ord.to_u8)))
+      first = JSON.build { |j| m.to_json(j, budget) }
+      JSON.parse(first)["truncated"]?.should be_nil
+      second = JSON.parse(JSON.build { |j| m.to_json(j, budget) })
+      second["truncated"].as_s.should eq("max_bytes")
+      second["fields"].as_a.should be_empty
+    end
   end
 
   describe ".message?" do

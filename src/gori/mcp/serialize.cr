@@ -993,6 +993,8 @@ module Gori
               j.field "grpc_message", text(gm) if gm
             end
             j.field "truncated", true if msgs.size > GRPC_MSGS_MAX
+            # One output budget for the whole body, not one per message (`Protobuf::JsonBudget`).
+            budget = Protobuf::JsonBudget.new
             j.field "messages" do
               j.array do
                 msgs.first(GRPC_MSGS_MAX).each_with_index do |m, i|
@@ -1016,7 +1018,7 @@ module Gori
                       emit_grpc_bytes(j, m.data)
                     else
                       decoded = Protobuf.decode(m.data)
-                      j.field "protobuf" { decoded.to_json(j) }
+                      j.field "protobuf" { decoded.to_json(j, budget) }
                       if b = binding
                         j.field("schema") { Protobuf::Lens.emit_json(j, decoded, b.schema, b.type) }
                       end
