@@ -513,8 +513,7 @@ module Gori
         if key = denied_permission(name)
           return key
         end
-        # `exec` is refused per argument too, but inside the handlers (`exec_refusal`): most of
-        # its answers need the store, which is not bound yet here.
+        # `exec` is refused inside the handlers instead: see `exec_refusal`.
         # A read tool whose one argument WRITES a file sits behind `write` for that call.
         if name == "export_openapi" && @denied_permissions.includes?("write") && describes?(h, "output_path")
           return "write"

@@ -110,8 +110,7 @@ module Gori
     #   per call under `send` (`Tools#call_denied_permission`): `probe_scan`'s `active: true`,
     #   and `set_probe_mode` raising the mode to one that probes actively. Likewise under
     #   `write`: `export_openapi`'s `output_path`, the one argument that makes a read tool write.
-    #   `exec` is never a tool's group: it is refused per argument, inside the handlers whose
-    #   one mode runs a local command (`Tools#exec_refusal`), on top of the tool's own group.
+    #   `exec` is never a tool's group: see `Tools#exec_refusal`.
     #   When the project store is writable, the first denial of each tool/group pair in an MCP
     #   server's project binding also leaves a compact warning event; repeated retries add no
     #   rows, and arguments are not recorded.

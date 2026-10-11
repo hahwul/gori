@@ -667,8 +667,7 @@ module Gori
           ws_messages: ws_messages,
           # The bound project, for any `payload_from` set: the plan builder reads it there.
           project: store,
-          # "Run local commands" off: a `¦chain` with an `exec:` step (inline, or inside a saved
-          # chain it names) is refused before the seed rendering runs it (`exec_refusal`).
+          # "Run local commands" off: see `exec_refusal`.
           commands_allowed: !@denied_permissions.includes?("exec"))
         plan = Fuzz::Plan.build(options, ob)
         # `ws_frames` is nil for an HTTP sweep and the OUTBOUND frame count for a WebSocket one,

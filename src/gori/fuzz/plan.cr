@@ -214,11 +214,8 @@ module Gori::Fuzz
     # when it cannot (the default: one-shot CLI and MCP). The live TUI passes false — it must not
     # stall its frame waiting for a writer — and reads the backlog off the report instead.
     property? project_drain_fts : Bool
-    # Whether a `¦chain` may run an external command (an `exec:` step, directly or inside a
-    # saved chain). False is MCP's answer when the operator switched off "Run local commands":
-    # `Plan.build` then raises `CommandsRefused` before anything renders a chain — the seed
-    # rendering (`Generator#baseline_raw`) already runs one, so a check after the build would
-    # be a check after the command ran.
+    # Whether a `¦chain` may run an `exec:` step (false: MCP's `exec` denied, see
+    # `MCP::Tools#exec_refusal`). Checked before the seed rendering, which already runs a chain.
     property? commands_allowed : Bool
 
     def initialize(@template : String = "",
@@ -246,9 +243,7 @@ module Gori::Fuzz
     end
   end
 
-  # Raised by `Plan.build` when `PlanOptions#commands_allowed?` is false and a position's chain
-  # would run a command. Not a `PlanError::Reason`: those are cased exhaustively by every
-  # surface, and only the one surface that can switch commands off ever sees this.
+  # `Plan.build`'s refusal under `commands_allowed? == false`; not a `PlanError::Reason`.
   class CommandsRefused < Exception
   end
 

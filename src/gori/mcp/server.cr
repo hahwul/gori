@@ -843,8 +843,7 @@ module Gori
       # absent from tools/list, and what the agent needs is the reason and who can change it —
       # otherwise a missing send_request reads as a gori that cannot send.
       #
-      # `exec` withholds no tool, only the arguments that would run a command, so it gets its
-      # own sentence: "those tools are not served" about it would hide create_rule and fuzz_start.
+      # `exec` withholds no tool (`Tools#exec_refusal`), so it gets its own sentence.
       private def permissions_note : String
         groups = @tools.denied_groups
         return "" if groups.empty?
