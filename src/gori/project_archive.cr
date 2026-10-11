@@ -643,10 +643,16 @@ module Gori
     # into it then fails inside the writer's batch, taking the flows batched with it. Judged
     # after migrating the copy, against a fresh schema, so an older archive is held to the keys
     # it will have once opened; a table the fresh schema lacks is left to the column checks.
+    #
+    # The converse is held the same way: a table may carry no constraint gori's own schema does
+    # not. A `CHECK (created_at < 1000)` on flows passes every column check and then fails every
+    # capture insert; the same on scope_rules or settings silently refuses an exclude or the
+    # sandbox flag. Compared against the fresh schema rather than a list, so a constraint gori
+    # itself adds later is not refused.
     private def self.refuse_missing_keys!(path : String) : Nil
-      expected = DB.open("sqlite3::memory:") do |db|
+      expected, expected_constraints = DB.open("sqlite3::memory:") do |db|
         Store::Schema.migrate!(db)
-        key_shapes(db)
+        {key_shapes(db), constraint_shapes(db)}
       end
       DB.open("sqlite3:#{path}?busy_timeout=5000") do |db|
         Store::Schema.migrate!(db)
@@ -656,7 +662,53 @@ module Gori
           next if got.nil? || got == shape
           raise Gori::Error.new("project archive database table #{table} lacks the keys gori writes through; refusing to import it")
         end
+        constraint_shapes(db).each do |table, (columns, clauses)|
+          if foreign = foreign_constraint(columns, clauses, expected_constraints[table]?)
+            raise Gori::Error.new("project archive database table #{table} carries a constraint gori's schema " \
+                                  "does not (#{foreign}); refusing to import it")
+          end
+        end
       end
+    end
+
+    # Per table, what can make a write gori issues fail or change: each column's {NOT NULL,
+    # default, generated/hidden} as SQLite parses it, and how often the stored CREATE text
+    # spells a clause no pragma reports. A keyword inside a quoted name or a comment over-counts,
+    # which only ever refuses a crafted file: gori writes none of them into a table.
+    CONSTRAINT_WORDS = {"CHECK" => /\bCHECK\b/i, "COLLATE" => /\bCOLLATE\b/i, "REFERENCES" => /\bREFERENCES\b/i}
+
+    alias ColumnShape = {Bool, String?, Bool}
+    alias ConstraintShape = {Hash(String, ColumnShape), Hash(String, Int32)}
+
+    private def self.constraint_shapes(db : DB::Database) : Hash(String, ConstraintShape)
+      db.using_connection do |conn|
+        conn.query_all("SELECT name, COALESCE(sql, '') FROM sqlite_master WHERE type = 'table' " \
+                       "AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'", as: {String, String}).to_h do |table, sql|
+          columns = conn.query_all("SELECT name, \"notnull\", dflt_value, hidden FROM pragma_table_xinfo(?)",
+            table, as: {String, Int64, String?, Int64}).to_h do |name, notnull, dflt, hidden|
+            {name, {notnull != 0, dflt, hidden != 0}}
+          end
+          {table, {columns, CONSTRAINT_WORDS.transform_values { |rx| sql.scan(rx).size }}}
+        end
+      end
+    end
+
+    # What the archive's table adds over gori's, named for the refusal, or nil. A table gori's
+    # schema lacks is left alone, as the key check leaves it: gori never writes there.
+    private def self.foreign_constraint(columns : Hash(String, ColumnShape), clauses : Hash(String, Int32),
+                                        want : ConstraintShape?) : String?
+      want_columns, want_clauses = want || return nil
+      clauses.each { |word, n| return word if n > (want_clauses[word]? || 0) }
+      columns.each do |name, column|
+        if known = want_columns[name]?
+          return "column #{name}" unless column == known
+        else
+          # An extra column is harmless only while gori's INSERTs can leave it out.
+          notnull, dflt, hidden = column
+          return "column #{name}" if hidden || (notnull && dflt.nil?)
+        end
+      end
+      nil
     end
 
     # {primary-key columns with their declared type, every UNIQUE index's columns} per table.

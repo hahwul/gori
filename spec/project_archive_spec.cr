@@ -770,6 +770,49 @@ describe Gori::ProjectArchive do
     end
   end
 
+  # Every column and key survives this rebuild, so only a constraint comparison sees it — and
+  # without one every capture insert in the imported project fails the CHECK (or, for a
+  # nullable column made NOT NULL, every capture that leaves it NULL).
+  {
+    {"CHECK", ", CHECK (created_at < 5000))"},
+    {"column sni", ")"},
+  }.each do |(named, tail)|
+    it "refuses an archive whose flows table carries a constraint gori's schema does not (#{named})" do
+      with_archive_project do |_registry, project, store, root|
+        store.insert_flow(archive_request("/a"))
+        store.flush
+        archive_path = export_archive(project, File.join(root, "constraint.gori"))
+        tamper_archive_database(archive_path, root) do |conn|
+          sql = conn.scalar("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'flows'").as(String)
+          indexes = conn.query_all("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'flows' " \
+                                   "AND sql IS NOT NULL", as: String)
+          sql = sql.sub(/\bsni(\s+)TEXT,/i, "sni\\1TEXT NOT NULL DEFAULT '',") if named.starts_with?("column")
+          conn.exec("UPDATE flows SET sni = '' WHERE sni IS NULL")
+          conn.exec("ALTER TABLE flows RENAME TO flows_old")
+          conn.exec(sql.rchop(")") + tail)
+          conn.exec("INSERT INTO flows SELECT * FROM flows_old")
+          conn.exec("DROP TABLE flows_old")
+          indexes.each { |index| conn.exec(index) }
+        end
+        error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
+        error.message.not_nil!.should contain("table flows carries a constraint gori's schema does not (#{named})")
+      end
+    end
+  end
+
+  it "imports an archive whose tables carry only gori's own constraints" do
+    with_archive_project do |registry, project, store, root|
+      store.insert_flow(archive_request("/a"))
+      store.flush
+      prepared = Gori::ProjectArchive.prepare_import(export_archive(project, File.join(root, "plain.gori")))
+      begin
+        prepared.import_into(registry, "Plain copy").name.should eq("Plain copy")
+      ensure
+        prepared.close
+      end
+    end
+  end
+
   # An AUTOINCREMENT id counter at the top of int64 fails every insert with SQLITE_FULL, so the
   # imported project would capture nothing under a "database or disk is full". `flows` became
   # AUTOINCREMENT in V39; a row alone is enough, since SQLite no longer falls back to a random id.
