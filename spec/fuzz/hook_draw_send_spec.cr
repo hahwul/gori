@@ -92,6 +92,27 @@ describe "the draw-vs-send hook contract (#852)" do
     end
   end
 
+  # …and with commands switched off (MCP's "Run local commands"), the build refuses before that
+  # one fork: the seed rendering is the first place a chain runs.
+  it "refuses a command chain before the seed rendering when commands are not allowed" do
+    with_counting_hook do |hook, runs|
+      expect_raises(F::CommandsRefused) do
+        F::Plan.build(F::PlanOptions.new(
+          "GET /q?a=§P¦exec:#{hook}§ HTTP/1.1\r\nHost: t.test\r\n\r\n",
+          target: "http://t.test",
+          sources: [F::InlineList.new(["x"])] of F::PayloadSource,
+          commands_allowed: false), ungated_outbound)
+      end
+      runs.call.should eq 0
+      # A pure chain is not a command.
+      F::Plan.build(F::PlanOptions.new(
+        "GET /q?a=§P¦base64-encode§ HTTP/1.1\r\nHost: t.test\r\n\r\n",
+        target: "http://t.test",
+        sources: [F::InlineList.new(["x"])] of F::PayloadSource,
+        commands_allowed: false), ungated_outbound).position_count.should eq 1
+    end
+  end
+
   # Item 4: `WsScript#apply_chains{,_reported}` accept and forward `run_hooks`, so a WS sweep's
   # `¦chain` withholds an `exec:` step on a display replay exactly as an HTTP one does.
   it "forwards run_hooks through WsScript#apply_chains" do

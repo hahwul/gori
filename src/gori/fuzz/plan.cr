@@ -214,6 +214,12 @@ module Gori::Fuzz
     # when it cannot (the default: one-shot CLI and MCP). The live TUI passes false — it must not
     # stall its frame waiting for a writer — and reads the backlog off the report instead.
     property? project_drain_fts : Bool
+    # Whether a `¦chain` may run an external command (an `exec:` step, directly or inside a
+    # saved chain). False is MCP's answer when the operator switched off "Run local commands":
+    # `Plan.build` then raises `CommandsRefused` before anything renders a chain — the seed
+    # rendering (`Generator#baseline_raw`) already runs one, so a check after the build would
+    # be a check after the command ran.
+    property? commands_allowed : Bool
 
     def initialize(@template : String = "",
                    *,
@@ -235,8 +241,15 @@ module Gori::Fuzz
                    @grpc_fields : Array(String) = [] of String,
                    @ws_messages : Array(WsMessageSource)? = nil,
                    @project : Gori::Store? = nil,
-                   @project_drain_fts : Bool = true)
+                   @project_drain_fts : Bool = true,
+                   @commands_allowed : Bool = true)
     end
+  end
+
+  # Raised by `Plan.build` when `PlanOptions#commands_allowed?` is false and a position's chain
+  # would run a command. Not a `PlanError::Reason`: those are cased exhaustively by every
+  # surface, and only the one surface that can switch commands off ever sees this.
+  class CommandsRefused < Exception
   end
 
   # A ready-to-run fuzz job: THE only place a `Fuzz::Engine` is constructed.
@@ -539,6 +552,10 @@ module Gori::Fuzz
       # the wire. See `refuse_unrunnable_chains` (the shared validator the Repeater send path
       # also calls).
       refuse_unrunnable_chains(marked.positions, Decoder.shared_registry)
+      if !options.commands_allowed? &&
+         marked.positions.any? { |pos| !pos.chain.empty? && Decoder.chain_runs_commands?(Decoder.shared_registry, pos.chain) }
+        raise CommandsRefused.new("a §…§ position's ¦chain runs a local command")
+      end
 
       origin = resolve_origin(options)
 

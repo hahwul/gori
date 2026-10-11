@@ -263,10 +263,12 @@ module Gori::Tui
     ]
     # MCP permissions: one row per `Settings::MCP_PERMISSIONS` group, in its order, so a group
     # added there is a row here without a second list to keep in step.
+    # `exec` is the one that withholds no tool, only the arguments that would run a command.
     MCP_PERMISSION_FIELDS = Settings::MCP_PERMISSIONS.map do |perm|
+      off = perm.key == "exec" ? "off refuses the call that would run one (the tools stay listed)" : "off leaves those tools out of gori mcp's tools/list and refuses them"
       Field.new(perm.title,
-        "let an attached agent use #{perm.summary} — off leaves those tools out of gori mcp's tools/list " \
-        "and refuses them; reading the capture is always allowed; applies to agents started after the change — ←/→/space toggles",
+        "let an attached agent use #{perm.summary} — #{off}; " \
+        "reading the capture is always allowed; applies to agents started after the change — ←/→/space toggles",
         bool: true)
     end
     SECTIONS = {

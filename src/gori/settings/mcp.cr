@@ -50,11 +50,18 @@ module Gori::Settings
       "add, edit and delete scope rules, and switch the scope lens and the sandbox on or off"),
     McpPermission.new("projects", "Manage projects",
       "create, switch, delete, import and export projects"),
+    # An ADDITIONAL gate, ANDed with the tool's own group, not a group a tool sits in: the
+    # tools that can run a command (`create_rule`, `mine_start`, `fuzz_start`, …) also do work
+    # that runs nothing, so this refuses the ARGUMENT that would (`Tools#exec_refusal`), never
+    # the tool. Denying `write` or `send` still refuses those tools first, so an install that
+    # shipped before this group existed loses nothing it had denied and needs no migration.
+    McpPermission.new("exec", "Run local commands",
+      "Rewriter pipe rules, Probe exec rules, Miner hooks and Fuzzer exec: chain steps — anything that runs a program on this machine"),
   ]
 
   # The same keys as a literal, for the `@[Tool]` registry macro, which can read a constant
   # only when its value IS a literal. spec/settings/mcp_spec.cr holds the two in step.
-  MCP_PERMISSION_KEYS = %w[send intercept write scope projects]
+  MCP_PERMISSION_KEYS = %w[send intercept write scope projects exec]
 
   # Every group is allowed by default, which is what `gori mcp` did before the switches
   # existed. Stored as the DENIED keys, because that is the only thing the file records: a

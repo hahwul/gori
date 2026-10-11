@@ -213,6 +213,9 @@ module Gori
         ok = rule_op_kind(h, Store::RuleOp::Replace, default_match)
         return ok if ok.is_a?(Result)
         op, match_kind = ok
+        if op.pipe? && (denied = exec_refusal)
+          return denied
+        end
         if draft && !op.short_circuit?
           return err("'from_flow_id' is only valid with op=short_circuit", "INVALID_ARGUMENT", field: "from_flow_id")
         end
@@ -362,6 +365,11 @@ module Gori
         ok = rule_op_kind(h, existing.op, existing.match_kind)
         return ok if ok.is_a?(Result)
         op, match_kind = ok
+        # Any edit that leaves a pipe rule behind, not only a switch TO pipe: its pattern and
+        # host choose which traffic the command is fed, and its replacement IS the command.
+        if op.pipe? && (denied = exec_refusal)
+          return denied
+        end
         if bad = ws_shape_error(op, part)
           return bad
         end
@@ -549,7 +557,7 @@ module Gori
         everywhere = bool_arg(h, "everywhere", false)
         return err("'everywhere' needs scope=global — a project rule has no default", "INVALID_ARGUMENT", field: "everywhere") if everywhere && !scope.global?
         return not_found("no #{scope.label} rule with id #{id}") unless rule_exists?(id, scope)
-        if error = inert_enable_error(id, scope, enabled)
+        if error = enable_error(id, scope, enabled)
           return error
         end
         # Through the model — see `create_rule`. `set_default` is the library's own default;
@@ -568,9 +576,14 @@ module Gori
         end)
       end
 
-      private def inert_enable_error(id : Int64, scope : Store::RuleScope, enabled : Bool) : Result?
+      # Why this rule may not be switched ON from here: it is inert, or it is a pipe rule and
+      # "Run local commands" is off. Switching a rule off is never refused.
+      private def enable_error(id : Int64, scope : Store::RuleScope, enabled : Bool) : Result?
         return nil unless enabled
         rule = Gori::Rules.merged(store).find { |r| r.id == id && r.scope == scope }
+        if rule && rule.op.pipe? && (denied = exec_refusal)
+          return denied
+        end
         return nil unless rule && rule.inert?
         err("#{rule.inert_reason} — cannot enable this rule with this gori; use a newer version or delete it", "INVALID_ARGUMENT", field: "enabled")
       end
@@ -862,7 +875,7 @@ module Gori
           s.field "replacement", strprop("for replace: the replacement (empty = delete; supports $1 capture refs when match=regex); for add/set header: the header VALUE (default empty); for short_circuit: the canned RESPONSE — a status line such as '200 OK', then header lines, then a blank line and the body; for pipe: the COMMAND as an argv ('./sign --key k'), tokenized with quote/backslash rules but NEVER interpreted by a shell")
           s.field "target", enumprop("which message the rule rewrites (default request; short_circuit is always request)", RULE_TARGETS)
           s.field "part", enumprop("head = request/status line + headers, body = entity body, ws = a WebSocket MESSAGE on an upgraded (101) flow with target picking the direction (request = client→server, response = server→client). Default head; ignored by header ops and short_circuit, which are head-only, and rejected for those ops when set to ws (replace and pipe are the two ops that can target ws)", RULE_PARTS)
-          s.field "op", enumprop("what the rule does (default replace). short_circuit ANSWERS the request from the rule and never dials the origin — nothing is sent upstream; use it to stub a response that does not exist. pipe RUNS A LOCAL COMMAND: 'replacement' is an argv, exec'd with no shell and with the operator's own privileges, fed the matched bytes on stdin, its stdout spliced back in — on timeout, non-zero exit or a failed spawn the bytes pass through unchanged and a notice is written (P6)", RULE_OPS)
+          s.field "op", enumprop("what the rule does (default replace). short_circuit ANSWERS the request from the rule and never dials the origin — nothing is sent upstream; use it to stub a response that does not exist. pipe RUNS A LOCAL COMMAND (refused when the operator switched off \"Run local commands\"): 'replacement' is an argv, exec'd with no shell and with the operator's own privileges, fed the matched bytes on stdin, its stdout spliced back in — on timeout, non-zero exit or a failed spawn the bytes pass through unchanged and a notice is written (P6)", RULE_OPS)
           s.field "body_file", strprop("short_circuit only: serve this file's bytes as the response BODY instead of the inline one (re-read when the file changes). Empty = inline")
           mock_rule_props(s)
           s.field "match", enumprop("for replace: how `pattern` is read (default literal). Regex supports $1/\\1 capture groups", RULE_MATCHES)

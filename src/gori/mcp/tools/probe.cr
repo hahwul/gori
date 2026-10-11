@@ -308,6 +308,9 @@ module Gori
           end
           row_id = custom_rule_row_id(id)
           return err("malformed custom rule id '#{id}'", "INVALID_ARGUMENT", field: "id") unless row_id
+          if enabled && (denied = exec_refusal) && store.probe_custom_rules.any? { |r| r.id == row_id && r.kind == "exec" }
+            return denied
+          end
           ok = store.set_probe_custom_rule_enabled(row_id, enabled)
         else
           ok = store.set_probe_rule_enabled(id, enabled)
@@ -328,6 +331,9 @@ module Gori
         fields = custom_rule_fields(h)
         return fields if fields.is_a?(Result)
         title, description, side, region, kind, pattern, severity = fields
+        if kind == "exec" && (denied = exec_refusal)
+          return denied
+        end
         id = store.insert_probe_custom_rule(title, description, side, region, kind, pattern, severity)
         # `busy`, not a bare `err(…, "STORE_ERROR")`: a rolled-back write is transient (a
         # capturing peer holds SQLite's single writer slot), so the refusal has to carry
@@ -351,6 +357,11 @@ module Gori
         fields = custom_rule_fields(h, prev)
         return fields if fields.is_a?(Result)
         title, description, side, region, kind, pattern, severity = fields
+        # ANY edit of an exec rule, not only a switch to one: its side and region choose what
+        # the command is fed, and its pattern is the command. `update_rule`'s twin.
+        if kind == "exec" && (denied = exec_refusal)
+          return denied
+        end
         # The store answers whether the edit COMMITTED, same as the `set_probe_rule_enabled`
         # twin above. Echoing the new title over a rolled-back batch tells an agent the rule
         # now carries its new pattern while every later scan still runs the OLD one — a
@@ -695,7 +706,7 @@ module Gori
           s.field "description", strprop("what the rule is for (default empty)")
           s.field "side", enumprop("which half of the exchange the rule reads (default response)", Probe::CustomRule::SIDES)
           s.field "region", enumprop("which part of that half the pattern is matched against (default body)", Probe::CustomRule::REGIONS)
-          s.field "match_kind", enumprop("how `pattern` is read (default string). exec RUNS A LOCAL COMMAND with the operator's own privileges: the selected region goes to it on stdin, exit 0 raises the finding, its first stdout line becomes the evidence. No shell; a spawn failure or timeout raises nothing and writes a warn event", Probe::CustomRule::KINDS)
+          s.field "match_kind", enumprop("how `pattern` is read (default string). exec RUNS A LOCAL COMMAND with the operator's own privileges (refused when the operator switched off \"Run local commands\"): the selected region goes to it on stdin, exit 0 raises the finding, its first stdout line becomes the evidence. No shell; a spawn failure or timeout raises nothing and writes a warn event", Probe::CustomRule::KINDS)
           s.field "severity", enumprop("severity the raised finding carries (default info)", SEVERITIES)
         end
 
@@ -708,7 +719,7 @@ module Gori
           s.field "description", strprop("what the rule is for")
           s.field "side", enumprop("which half of the exchange the rule reads", Probe::CustomRule::SIDES)
           s.field "region", enumprop("which part of that half the pattern is matched against", Probe::CustomRule::REGIONS)
-          s.field "match_kind", enumprop("how `pattern` is read. exec RUNS A LOCAL COMMAND with the operator's own privileges: the selected region goes to it on stdin, exit 0 raises the finding, its first stdout line becomes the evidence. No shell; a spawn failure or timeout raises nothing and writes a warn event", Probe::CustomRule::KINDS)
+          s.field "match_kind", enumprop("how `pattern` is read. exec RUNS A LOCAL COMMAND with the operator's own privileges (refused when the operator switched off \"Run local commands\"): the selected region goes to it on stdin, exit 0 raises the finding, its first stdout line becomes the evidence. No shell; a spawn failure or timeout raises nothing and writes a warn event", Probe::CustomRule::KINDS)
           s.field "severity", enumprop("severity the raised finding carries", SEVERITIES)
         end
 

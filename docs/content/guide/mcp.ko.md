@@ -78,6 +78,7 @@ gori mcp --read-only
 | **Edit project data** | 그 밖의 프로젝트 쓰기 전부: 이슈, 노트, repeater, 규칙, env, host override, 세션 슬롯, evidence, 링크, 뷰, 저장된 wordlist(`save_wordlist`, `rename_wordlist`, `delete_wordlist`: 프로젝트가 아니라 전역 카탈로그), probe 스캔과 판정(패시브 `probe_scan`도 찾은 결과를 기록합니다), OpenAPI 문서의 파일 쓰기(`export_openapi`의 `output_path`. 인라인 문서는 꺼지지 않습니다), JavaScript 엔드포인트 스캔(`scan_js_endpoints`는 읽은 것을 저장할 뿐 요청은 보내지 않습니다), flow·히스토리 삭제 |
 | **Change scope & sandbox** | `add_scope_rule`, `update_scope_rule`, `delete_scope_rule`, `set_scope_enabled`, `set_sandbox`(`list_scope`는 계속 제공) |
 | **Manage projects** | `create_project`, `switch_project`, `delete_project`, `import_project`, `export_project` |
+| **Run local commands** | 도구가 아니라 gori가 이 머신에서 프로그램을 실행하게 만드는 호출만 막습니다: `pipe` 규칙을 남기는 `create_rule` / `update_rule`, 그런 규칙을 켜는 `set_rule_enabled`, `match_kind: exec`인 `create_probe_rule` / `update_probe_rule`와 그런 규칙을 켜는 `set_probe_rule_enabled`, `hook`을 준 `mine_start`, `¦chain`에 `exec:` 단계가 있는(직접이든 저장된 체인 안이든) `fuzz_start`. 도구 자체의 묶음에 더해지는 조건이라 **Edit project data**나 **Send traffic**을 끄면 그 도구는 여전히 거부됩니다 |
 
 캡처를 읽는 것은 묶음이 아닙니다. 읽기 도구와 `operator_messages` / `reply_to_operator`는 항상 제공됩니다. 꺼진 묶음의 도구는 `tools/list`에서 빠지고, 그래도 호출하면 `TOOL_DISABLED`로 거부되며, 핸드셰이크 instructions가 에이전트에게 어떤 묶음이 꺼졌는지 알려줍니다. 이 스위치는 `--read-only`, `--tools`와 함께 적용되어 셋 모두가 허용한 도구만 제공됩니다. `gori mcp` 프로세스가 시작할 때 읽으므로, 이미 떠 있는 에이전트는 서버를 다시 시작할 때까지 받았던 도구를 그대로 씁니다. 그 시점에 설정 파일을 읽지 못하면 모든 묶음을 켜는 대신 끕니다.
 

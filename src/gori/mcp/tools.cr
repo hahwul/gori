@@ -513,6 +513,8 @@ module Gori
         if key = denied_permission(name)
           return key
         end
+        # `exec` is refused per argument too, but inside the handlers (`exec_refusal`): most of
+        # its answers need the store, which is not bound yet here.
         # A read tool whose one argument WRITES a file sits behind `write` for that call.
         if name == "export_openapi" && @denied_permissions.includes?("write") && describes?(h, "output_path")
           return "write"
@@ -2118,10 +2120,35 @@ module Gori
       private def permission_denied(name : String, key : String) : Result
         log_permission_denial(name, key)
         title = Settings.mcp_permission(key).try(&.title) || key
-        what = TOOL_PERMISSIONS[name]? == key ? "tool '#{name}'" : "this '#{name}' call (it sends traffic)"
+        what = if TOOL_PERMISSIONS[name]? == key
+                 "tool '#{name}'"
+               else
+                 why = case key
+                       when "exec"  then "it runs a local command"
+                       when "write" then "it writes a file"
+                       else              "it sends traffic"
+                       end
+                 "this '#{name}' call (#{why})"
+               end
         err("#{what} is disabled by the operator: \"#{title}\" is switched off in gori " \
             "Preferences › AI › MCP permissions. Ask the operator to allow it; the change applies " \
             "when this MCP server is started again.", "TOOL_DISABLED")
+      end
+
+      # The `exec` group's refusal, for a handler about to accept an argument that makes gori
+      # run a program on this machine — a pipe rule, an exec probe rule, a mine hook, a fuzz
+      # `¦chain` with an `exec:` step. Asked INSIDE the tool rather than in
+      # `call_denied_permission`, because most of these answers need state the call does not
+      # carry (is the rule being enabled a pipe rule? does the saved chain a marker names run a
+      # command?). The same TOOL_DISABLED answer and the same Activity event as a switched-off
+      # tool, so an agent and an operator read both refusals one way.
+      #
+      # It gates what an agent AUTHORS or ARMS, not what the operator armed: a probe_scan still
+      # runs the operator's enabled exec rules, as the capture pipeline already does over every
+      # flow the agent sends.
+      private def exec_refusal : Result?
+        return nil unless @denied_permissions.includes?("exec")
+        permission_denied(@calling || "", "exec")
       end
 
       # A distinct event kind keeps a refused call out of `recent_agent_actions`, which credits

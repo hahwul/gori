@@ -13,6 +13,9 @@ module Gori
       @[Tool("mine_start", gated: true, agent_action: true, env_refresh: true,
         requires: ["mine_status", "mine_results", "mine_stop"], permission: "send")]
       private def mine_start(h) : Result
+        if str(h, "hook").presence && (denied = exec_refusal)
+          return denied
+        end
         ob = outbound(bool_arg(h, "allow_unscoped", false))
         plan = build_mine_job(h, ob)
         engine, origin, total, project_reports = plan.engine, plan.origin, plan.total_names, plan.project_reports
@@ -375,7 +378,7 @@ module Gori
           s.field "throttle_ms", intprop("fixed delay between requests in ms, for a target that limits on the gap between requests rather than throughput (CLI --throttle)")
           s.field "sni", strprop("TLS SNI override, independent of the Host header — the vhost-confusion / domain-fronting test (mirrors CLI --sni)")
           s.field "max_requests", intprop("caller cap on total requests")
-          s.field "hook", strprop("pipe each assembled request through an external command (argv, no shell, e.g. \"./sign.sh\"); its stdout is the request sent. For a signed/HMAC/nonce API that rejects a raw candidate. A hook that fails SKIPS the candidate with a reason (never a clean negative). #{Gori::Settings.hook_timeout_secs}s (settings.hooks.timeout_secs) per request, bounded overall by max_requests.")
+          s.field "hook", strprop("pipe each assembled request through an external command (argv, no shell, e.g. \"./sign.sh\"); its stdout is the request sent. RUNS A LOCAL COMMAND: refused when the operator switched off \"Run local commands\". For a signed/HMAC/nonce API that rejects a raw candidate. A hook that fails SKIPS the candidate with a reason (never a clean negative). #{Gori::Settings.hook_timeout_secs}s (settings.hooks.timeout_secs) per request, bounded overall by max_requests.")
           request_macro_props(s, "request")
           s.field "keep_alive", boolprop("reuse one HTTP/1.1 connection per worker across probes (default true), which saves most of a mine's wall clock. Set false to dial per probe: for connection-scoped rate limits or a load balancer pinning by connection.")
           s.field "allow_unscoped", boolprop("run even when the target host is outside the project's configured scope — REQUIRED to run against an out-of-scope target, or when no scope is configured at all (active requests are refused by default without a matching scope)")

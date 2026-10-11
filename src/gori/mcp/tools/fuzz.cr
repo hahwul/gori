@@ -78,6 +78,9 @@ module Gori
         Result.new(fuzz_start_echo(id, total, fjob, sc, ws_frames, ws_ignored, warn, marks_warn, sets_warn, grpc, payload_reports))
       rescue ex : FuzzArgError
         Result.new(ex.message || "invalid fuzz arguments", is_error: true)
+      rescue Fuzz::CommandsRefused
+        # Raised only when `exec` is denied (`commands_allowed`, below).
+        permission_denied("fuzz_start", "exec")
       end
 
       # `fuzz_start`'s reply object.
@@ -663,7 +666,10 @@ module Gori
           overrides: HostOverrides.load(store),
           ws_messages: ws_messages,
           # The bound project, for any `payload_from` set: the plan builder reads it there.
-          project: store)
+          project: store,
+          # "Run local commands" off: a `¦chain` with an `exec:` step (inline, or inside a saved
+          # chain it names) is refused before the seed rendering runs it (`exec_refusal`).
+          commands_allowed: !@denied_permissions.includes?("exec"))
         plan = Fuzz::Plan.build(options, ob)
         # `ws_frames` is nil for an HTTP sweep and the OUTBOUND frame count for a WebSocket one,
         # so `fuzz_start`'s echo can say which engine the job actually took. An agent that seeded
@@ -1508,7 +1514,7 @@ module Gori
           "auto:true, and give payload sets in `payloads`. OR set `race_count` for a " \
           "last-byte-sync race of one request, no payloads. Capped at #{FUZZ_MAX_REQUESTS} " \
           "requests / #{FUZZ_MAX_CONCURRENCY} concurrency." do |s|
-          s.field "template", strprop("raw HTTP request with §…§ position markers")
+          s.field "template", strprop("raw HTTP request with §…§ position markers; §value¦chain§ runs a Decoder chain over each payload, and a chain with an exec: step (or a saved chain holding one) RUNS A LOCAL COMMAND, refused when the operator switched off \"Run local commands\"")
           s.field "flow_id", intprop("seed the template from a captured flow id (instead of template)")
           s.field "repeater_id", intprop("seed the template from a saved repeater session id (instead of template/flow_id). A WebSocket session seeds its handshake AND its outbound frames — see 'messages'")
           s.field "url", strprop("absolute target URL (scheme+host) that sets the origin — a 'template', 'flow_id' or 'repeater_id' is still REQUIRED; url alone does NOT define the request (unlike send_request)")

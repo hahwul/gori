@@ -318,6 +318,90 @@ describe "MCP tool permissions" do
     end
   end
 
+  # "Run local commands" withholds no tool: the tools that can run a command also do work that
+  # runs nothing, so it refuses the ARGUMENT that would, on top of the tool's own group.
+  describe "Run local commands (exec)" do
+    it "lists every tool and says why the command-running calls are refused" do
+      with_store do |store|
+        listed(denied_tools(store, "exec")).size.should eq(Gori::MCP::Tools::TOOL_NAMES.size)
+        text = instructions_of(store, Set{"exec"})
+        text.should contain("switched off Run local commands")
+        text.should_not contain("those tools are not served")
+      end
+    end
+
+    it "refuses a pipe rule and records the denial, and leaves other rules alone" do
+      with_store do |store|
+        tools = denied_tools(store, "exec")
+        r = tools.call("create_rule", JSON.parse(%({"pattern":"a","op":"pipe","replacement":"/bin/cat"})))
+        r.error_code.should eq("TOOL_DISABLED")
+        r.text.should contain("Run local commands")
+        r.text.should contain("it runs a local command")
+        tools.call("create_rule", JSON.parse(%({"pattern":"a","replacement":"b"}))).is_error.should be_false
+        Gori::Rules.merged(store).none?(&.op.pipe?).should be_true
+        store.events_after(0_i64, 50).count { |e| e.kind == Gori::MCP::Tools::PERMISSION_DENIAL_EVENT_KIND }.should eq(1)
+      end
+    end
+
+    it "refuses editing or enabling a pipe rule an operator wrote, but lets it be switched off" do
+      with_store do |store|
+        id = JSON.parse(tools_for(store).call("create_rule",
+          JSON.parse(%({"pattern":"a","op":"pipe","replacement":"/bin/cat","enabled":false}))).text)["id"].as_i64
+        replace_id = JSON.parse(tools_for(store).call("create_rule", JSON.parse(%({"pattern":"a"}))).text)["id"].as_i64
+        tools = denied_tools(store, "exec")
+        tools.call("update_rule", JSON.parse(%({"id":#{id},"replacement":"/bin/sh"}))).error_code.should eq("TOOL_DISABLED")
+        tools.call("update_rule", JSON.parse(%({"id":#{replace_id},"op":"pipe","replacement":"/bin/cat"})))
+          .error_code.should eq("TOOL_DISABLED")
+        tools.call("set_rule_enabled", JSON.parse(%({"id":#{id},"enabled":true}))).error_code.should eq("TOOL_DISABLED")
+        tools.call("set_rule_enabled", JSON.parse(%({"id":#{id},"enabled":false}))).is_error.should be_false
+        tools.call("set_rule_enabled", JSON.parse(%({"id":#{replace_id},"enabled":true}))).is_error.should be_false
+        rule = Gori::Rules.merged(store).find! { |r| r.id == id }
+        rule.replacement.should eq("/bin/cat")
+        rule.enabled?.should be_false
+      end
+    end
+
+    it "refuses an exec probe rule: create, edit and enable" do
+      with_store do |store|
+        tools = denied_tools(store, "exec")
+        tools.call("create_probe_rule", JSON.parse(%({"title":"t","pattern":"/bin/cat","match_kind":"exec"})))
+          .error_code.should eq("TOOL_DISABLED")
+        tools.call("create_probe_rule", JSON.parse(%({"title":"t","pattern":"AAA"}))).is_error.should be_false
+        row = store.insert_probe_custom_rule("x", "", "response", "body", "exec", "/bin/cat", Gori::Store::Severity::Info)
+        store.set_probe_custom_rule_enabled(row, false).should be_true
+        tools.call("update_probe_rule", JSON.parse(%({"id":"custom_p_#{row}","title":"y"}))).error_code.should eq("TOOL_DISABLED")
+        tools.call("set_probe_rule_enabled", JSON.parse(%({"id":"custom_p_#{row}","enabled":true})))
+          .error_code.should eq("TOOL_DISABLED")
+        store.probe_custom_rules.find! { |r| r.id == row }.enabled?.should be_false
+      end
+    end
+
+    it "refuses a mine hook and a fuzz chain that runs a command, before the command runs" do
+      posix_only!("a #!/bin/sh hook script")
+      with_store do |store|
+        dir = File.tempname("gori-exec-perm")
+        Dir.mkdir_p(dir)
+        hook = File.join(dir, "h.sh")
+        tally = File.join(dir, "tally")
+        File.write(hook, "#!/bin/sh\necho ran >> '#{tally}'\ncat\n")
+        File.chmod(hook, 0o755)
+        begin
+          tools = denied_tools(store, "exec")
+          template = "GET /?q=§P¦exec:#{hook}§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
+          fuzz = tools.call("fuzz_start", JSON.parse({"url" => "http://127.0.0.1:9/", "template" => template,
+                                                      "payloads" => [{"list" => ["x"]}], "allow_unscoped" => true}.to_json))
+          fuzz.error_code.should eq("TOOL_DISABLED")
+          mine = tools.call("mine_start", JSON.parse({"url" => "http://127.0.0.1:9/",
+                                                      "template" => "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n", "hook" => hook, "allow_unscoped" => true}.to_json))
+          mine.error_code.should eq("TOOL_DISABLED")
+          File.exists?(tally).should be_false
+        ensure
+          FileUtils.rm_rf(dir)
+        end
+      end
+    end
+  end
+
   it "points an unbound server at the switch that removed its binders" do
     tools = Gori::MCP::Tools.new(nil, allow_actions: true, verify_upstream: false,
       denied_permissions: Set{"projects"})

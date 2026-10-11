@@ -842,11 +842,23 @@ module Gori
       # The Preferences switches, named by group rather than by tool: the tools are simply
       # absent from tools/list, and what the agent needs is the reason and who can change it —
       # otherwise a missing send_request reads as a gori that cannot send.
+      #
+      # `exec` withholds no tool, only the arguments that would run a command, so it gets its
+      # own sentence: "those tools are not served" about it would hide create_rule and fuzz_start.
       private def permissions_note : String
         groups = @tools.denied_groups
         return "" if groups.empty?
-        " The operator has switched off #{groups.join(", ", &.title)} in gori Preferences " \
-        "(AI › MCP permissions), so those tools are not served; ask the operator if you need them."
+        exec, tool_groups = groups.partition(&.key.==("exec"))
+        note = ""
+        unless tool_groups.empty?
+          note += " The operator has switched off #{tool_groups.join(", ", &.title)} in gori Preferences " \
+                  "(AI › MCP permissions), so those tools are not served; ask the operator if you need them."
+        end
+        unless exec.empty?
+          note += " The operator has switched off Run local commands in gori Preferences (AI › MCP permissions): " \
+                  "a pipe rule, an exec probe rule, a mine hook or a fuzz chain with an exec: step is refused."
+        end
+        note
       end
 
       # Said once, when `--tools` narrowed the catalogue: whatever the prose above named, the
