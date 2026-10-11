@@ -5,6 +5,7 @@ require "../store"
 require "../links"
 require "../proxy/codec/http1"
 require "../redact/headers"
+require "../redact/wire"
 
 module Gori
   module Issues
@@ -124,8 +125,14 @@ module Gori
       # the default `gori run history --format json` and `gori run evidence show` already have,
       # and the same `--include-sensitive` opt-in. Names and the per-field count survive, so
       # the redacted log still says what the exchange carried.
+      #
+      # `matcher` is the project's redaction profile (`Redact::Policy.ambient`), applied to both
+      # sides of each linked flow exactly as `markdown` applies it. The header rule above only
+      # knows credential HEADERS; a token in a JSON body or a query string rode into the
+      # webRequest/webResponse bodies of the one export most likely to leave the machine. A
+      # caller that honours `--include-sensitive` passes nil.
       def self.sarif(issues : Array(Store::Issue), store : Store, project_name : String,
-                     include_sensitive : Bool = false) : String
+                     include_sensitive : Bool = false, matcher : Redact::Matcher? = nil) : String
         # One rule per DISTINCT title, in first-seen order, so `find_rule_index` links each
         # result to its rule and a repeated finding collapses to one entry in a rules list.
         rules = {} of String => String # rule id => the title that first claimed it
@@ -148,7 +155,10 @@ module Gori
         # was previously fetched three times (location, markdown message, webRequest/Response)
         # and its body inflated twice; the links were resolved twice. That ran synchronously on
         # the TUI's UI fiber, so a large issue list stalled the interface.
-        flows = issues.map { |f| f.flow_id.try { |fid| store.get_flow(fid) } }
+        flows = issues.map do |f|
+          flow = f.flow_id.try { |fid| store.get_flow(fid) }
+          flow && matcher ? Redact::Wire.flow(flow, matcher)[0] : flow
+        end
         links = issues.map { |f| Export.resolve_issue_links(f, store) }
 
         log = ::Sarif::Builder.build do |b|

@@ -290,14 +290,18 @@ describe "gori run issues --format markdown" do
 
   # #1191: SARIF redacts credential headers unless opted in. `cmd_issues_list` opens a store
   # and writes to STDOUT, so — like `history --include-sensitive` — the forwarding is asserted
-  # over the source: the flag is declared, and the SARIF emit site passes a fourth argument
-  # (without it the export silently stays redacted whatever the operator asked for).
+  # over the source: the flag is declared, and the SARIF emit site passes it fourth (without it
+  # the export silently stays redacted whatever the operator asked for) and, unless it is set,
+  # the project's redaction profile fifth — the body redaction the Markdown report already had.
   it "declares --include-sensitive and forwards it to the SARIF export" do
     src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "issues.cr"))
     src.should contain("p.on(\"--include-sensitive\"")
-    sites = src.scan(/Export\.sarif\(([^)]*)\)/)
+    sites = src.scan(/Export\.sarif\((.*?\(store\))\)/m)
     sites.size.should eq(1)
-    sites[0][1].split(',').size.should eq(4)
+    args = sites[0][1].split(',').map(&.strip)
+    args.size.should eq(5)
+    args[3].should eq("include_sensitive")
+    args[4].should eq("include_sensitive ? nil : Redact::Policy.ambient(store)")
   end
 
   it "scrubs control bytes on the STDOUT path but keeps a file export verbatim" do

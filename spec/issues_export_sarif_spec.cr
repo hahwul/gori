@@ -277,6 +277,30 @@ describe Gori::Issues::Export do
       end
     end
 
+    # The header rule only knows credential HEADERS; the project's redaction profile reaches
+    # the webRequest/webResponse bodies the way it reaches the Markdown report's evidence.
+    it "sanitizes the exchange bodies through the redaction matcher it is handed" do
+      with_store do |store|
+        fid = seed_flow(store,
+          method: "POST", target: "/login",
+          req_head: "POST /login HTTP/1.1\r\nHost: h.test\r\nContent-Type: application/json\r\n\r\n",
+          req_body: %({"password":"hunter2"}).to_slice)
+        store.insert_issue("weak login", Gori::Store::Severity::High, "h.test", fid)
+
+        export(store).should contain("hunter2")
+        salt = Gori::Redact.salt
+        Gori::Redact.salt = "spec-salt"
+        begin
+          json = Gori::Issues::Export.sarif(store.issues, store, "proj",
+            matcher: Gori::Redact::Matcher.new(Gori::Redact::DEFAULT_PROFILE))
+        ensure
+          Gori::Redact.salt = salt
+        end
+        json.should_not contain("hunter2")
+        JSON.parse(json)["runs"][0]["results"][0]["webRequest"]["method"].as_s.should eq("POST")
+      end
+    end
+
     it "carries the linked flow's exchange as webRequest/webResponse" do
       with_store do |store|
         fid = seed_flow(store,
