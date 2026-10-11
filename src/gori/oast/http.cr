@@ -38,9 +38,10 @@ module Gori::Oast
     # kilobytes — so 16 MiB is orders past legitimate and still safe to hold.
     MAX_BODY = 16 * 1024 * 1024
 
-    def initialize(@verify_tls : Bool = true)
-    end
-
+    # This client takes no `verify_tls` knob, on any surface. `--insecure-upstream` / `-k` is for a TARGET with a
+    # broken certificate (settings/network.cr says it must not relax a hop the operator did
+    # not choose to inspect), and an interaction server is gori's own service traffic, like
+    # the updater. A self-hosted collector on a private CA is what `SSL_CERT_FILE` is for.
     def request(method : String, url : String,
                 headers : Hash(String, String) = {} of String => String,
                 body : String? = nil) : Response
@@ -56,7 +57,7 @@ module Gori::Oast
       end
       host = uri.host
       raise Gori::Error.new("OAST: invalid URL #{url}") unless host
-      client = Gori::HttpTransport.client(uri, verify_tls: @verify_tls,
+      client = Gori::HttpTransport.client(uri, verify_tls: true,
         connect_timeout: TIMEOUT, read_timeout: TIMEOUT)
 
       hdrs = HTTP::Headers.new

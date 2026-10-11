@@ -519,7 +519,7 @@ module Gori::Tui
       kind = Oast::ProviderKind.parse?(prov.kind)
       return @host.status("unknown provider type #{prov.kind}") unless kind
       provider = Oast::Provider.build(kind, prov.host, prov.token)
-      http = Oast::HttpClient.new(verify_tls: !@host.session.config.insecure_upstream?)
+      http = Oast::HttpClient.new
       reg = @reg_events
       label = prov.name
       db_id = prov.project_id
@@ -1765,7 +1765,7 @@ module Gori::Tui
     end
 
     private def poll_http : Oast::Http
-      Oast::HttpClient.new(verify_tls: !@host.session.config.insecure_upstream?)
+      Oast::HttpClient.new
     end
 
     # Notification "jump to result" lands on this tab (no per-row reveal needed).

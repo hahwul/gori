@@ -125,7 +125,7 @@ If you run behind a TLS-inspecting proxy, or against a self-hosted interactsh si
 SSL_CERT_FILE=/path/to/corp-ca-bundle.crt gori run oast listen
 ```
 
-For gori's **own** service traffic (OAST providers and the updater) this is **additive**: the system trust store is still loaded, so a bundle holding only your corporate root does not stop the public presets from working. (Target traffic keeps the usual replace-the-store semantics; see [verify_upstream](/reference/config/).) There is no `--ca-file` flag: the environment variable is one setting for every provider, every surface, and the tools you already run beside gori.
+For gori's **own** service traffic (OAST providers and the updater) this is **additive**: the system trust store is still loaded, so a bundle holding only your corporate root does not stop the public presets from working. (Target traffic keeps the usual replace-the-store semantics; see [verify_upstream](/reference/config/).) There is no `--ca-file` flag: the environment variable is one setting for every provider, every surface, and the tools you already run beside gori. Nor does `--insecure-upstream` (or `-k`) reach an OAST server: it is for a target with a broken certificate, and gori always verifies its own service traffic.
 
 The project's saved sessions (the ones the picker above resumes) are reachable headlessly too:
 

@@ -1774,7 +1774,7 @@ MCP stdio server. See the [MCP guide](/guide/mcp/) for tool details.
 | `--project=NAME` | Serve a named project's database |
 | `--use-active-project` | Ignore Git-workspace selection and explicitly serve the active TUI/MRU project |
 | `--no-project` | Start unbound even inside a Git workspace (agent picks via list/create/switch) |
-| `--insecure-upstream` | Skip upstream TLS verification for every tool that sends (`send_request`, fuzz, `grpc_reflect`, session refresh, OAST, …) |
+| `--insecure-upstream` | Skip upstream TLS verification for every tool that sends to a target (`send_request`, fuzz, `grpc_reflect`, session refresh, …). OAST servers are always verified; see [Custom CA Bundles](/guide/oast/#custom-ca-bundles) |
 | `--read-only` | Disable action tools (`send_request`, create/update issues, fuzz/mine); `switch_project` (and `create_project` when unbound) stay available unless `--pin-project` |
 | `--tools=SPEC` | Advertise only these tools: comma-separated names, globs or profiles (`@minimal`, `@recon`), a leading `-` subtracts (`@recon`, `@minimal,send_request` or `-fuzz_*,-mine_*`). The startup log reports the size of what is served; see [Choosing which tools are exposed](/guide/mcp/#choosing-which-tools-are-exposed) |
 | `--pin-project` | Keep the server on the project it starts with: withhold `list_projects`, `switch_project`, `create_project`, `delete_project`, `import_project`, `export_project` and `diff_projects`. Refused with `--no-project`; a start that ends up unbound aborts |

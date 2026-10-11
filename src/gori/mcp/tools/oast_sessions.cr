@@ -73,7 +73,7 @@ module Gori
         bound = Oast::Sessions.bind(store, row)
         return oast_session_problem(bound, row) if bound.is_a?(Oast::Sessions::Problem)
 
-        http = Oast::HttpClient.new(@verify_upstream)
+        http = Oast::HttpClient.new
         begin
           Oast::Sessions.resume(bound, http)
         rescue ex
@@ -114,7 +114,7 @@ module Gori
         # correlation id live and its payloads resolving, so they are refusals; they carry the
         # SAME sentence `gori run oast release` prints, because "BOAST cannot be released" is
         # actionable where a bare "provider error" reads as a transient network fault.
-        outcome = Oast::Sessions.release_outcome(bound, Oast::HttpClient.new(@verify_upstream))
+        outcome = Oast::Sessions.release_outcome(bound, Oast::HttpClient.new)
         callbacks = store.oast_callback_count(row)
         unless outcome.torn_down?
           return Result.new(Oast::Sessions.release_message(outcome, bound, row, callbacks),

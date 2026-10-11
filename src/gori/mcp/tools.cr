@@ -1741,7 +1741,7 @@ module Gori
           return Result.new("too many active OAST sessions (#{@oast_mcp.size}/#{MAX_OAST_SESSIONS}); call oast_stop on one before starting another", is_error: true)
         end
         prov = Oast::Provider.build(kind, host, token)
-        http = Oast::HttpClient.new(@verify_upstream)
+        http = Oast::HttpClient.new
         session = prov.register(http)
         row = persist ? persist_oast_session(session, saved) : nil
         # Unpredictable session id: a sequential "oast-N" is trivially guessable, so

@@ -40,7 +40,7 @@ module Gori::CLI
       p.on("--project=NAME", "Serve a named project's db") { |v| project = v }
       p.on("--use-active-project", "Ignore the current Git workspace and serve the active TUI/MRU project") { use_active_project = true }
       p.on("--no-project", "Start unbound even inside a Git workspace (agent picks via list/create/switch)") { no_project = true }
-      p.on("--insecure-upstream", "Skip upstream TLS verification for every tool that sends (send_request, fuzz, grpc_reflect, session refresh, OAST, …)") { insecure_upstream = true }
+      p.on("--insecure-upstream", "Skip upstream TLS verification for every tool that sends to a target (send_request, fuzz, grpc_reflect, session refresh, …); OAST servers are always verified") { insecure_upstream = true }
       p.on("--read-only", "Disable action tools (send_request, create/update_issue); serve the project without a writer") { read_only = true }
       p.on("--tools=SPEC", mcp_tools_help) { |v| tools_spec = v }
       p.on("--pin-project", "Keep the server on the project it starts with: withhold #{MCP_PIN_EXCLUDES.join(", ")}") { pin_project = true }
