@@ -1021,6 +1021,7 @@ describe "Gori::Probe::Analyzer#apply_stored_config" do
         Gori::Probe::Mode::Passive, true)
       a.@oob.should be_nil
       sid = store.insert_oast_session(nil, "interactsh", "https://oast.pro", "corr", "s", nil, nil)
+      store.touch_oast_session(sid) # the peer's register stamps it live
       a.apply_stored_config
       a.@oob.as(Gori::Probe::OutOfBand::StoreMinter).session_id.should eq(sid)
     end

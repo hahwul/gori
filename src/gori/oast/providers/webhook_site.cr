@@ -19,6 +19,7 @@ module Gori::Oast
       raise Gori::Error.new("webhook.site register: HTTP #{resp.status} #{snippet(resp.body)}") unless {200, 201}.includes?(resp.status)
       uuid = parse_json(resp.body)["uuid"]?.try(&.as_s?)
       raise Gori::Error.new("webhook.site register: no uuid in response") unless uuid
+      uuid = checked_correlation_id(uuid)
       # correlation_id carries the token uuid (used to build both the payload and poll URLs).
       Session.new(0_i64, ProviderKind::WebhookSite, base_url, uuid, "",
         token: @token, registered: true)

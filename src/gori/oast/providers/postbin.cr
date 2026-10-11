@@ -16,6 +16,7 @@ module Gori::Oast
       raise Gori::Error.new("postbin register: HTTP #{resp.status} #{snippet(resp.body)}") unless {200, 201}.includes?(resp.status)
       bin = parse_json(resp.body)["binId"]?.try(&.as_s?)
       raise Gori::Error.new("postbin register: no binId in response") unless bin
+      bin = checked_correlation_id(bin)
       Session.new(0_i64, ProviderKind::Postbin, base_url, bin, "", token: bin, registered: true)
     end
 

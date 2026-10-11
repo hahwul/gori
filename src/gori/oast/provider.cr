@@ -1,4 +1,5 @@
 require "json"
+require "uri"
 require "digest/sha256"
 require "./types"
 require "./http"
@@ -152,6 +153,42 @@ module Gori::Oast
     def self.normalize_endpoint(url : String) : String
       h = url.strip.rstrip('/')
       Gori::Url.absolute_form?(h) ? h : "https://#{h}"
+    end
+
+    # The correlation id is spliced verbatim into every payload this session mints, and the
+    # active probe rules then place that payload in a request to the operator's TARGET (inside a
+    # DNS label, a URL path, a shell-breakout template). So it must be text that stays one inert
+    # label or path segment wherever it lands. Every real backend fits: interactsh and custom-http
+    # mint `Crypto.random_id`, webhook.site a hex uuid, postbin a `digits-digits` bin id, BOAST a
+    # base32-ish id. It comes from a server's register answer or a stored row, never the operator,
+    # so a value outside the set is refused rather than encoded (P7: the axis is provenance).
+    CORRELATION_ID = /\A[A-Za-z0-9_-]{1,128}\z/
+
+    def self.correlation_id_ok?(id : String) : Bool
+      id.matches?(CORRELATION_ID)
+    end
+
+    # A session's `server_url` is the other half a payload is built from (the payload host, and
+    # for custom-http the whole fetch URL). Held to an http(s) URL with a plain DNS name or IP
+    # literal and only the URL characters that carry no meaning inside a double-quoted shell
+    # word (no `$`, backtick, quote, backslash, whitespace or control byte).
+    SERVER_URL_CHARS = /\A[A-Za-z0-9\-._~:\/?#\[\]@!&()*+,;=%]+\z/
+    PLAIN_HOST       = /\A(?:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?|\[[0-9A-Fa-f:.]+\])\z/
+
+    def self.server_url_ok?(url : String) : Bool
+      return false unless url.matches?(SERVER_URL_CHARS)
+      uri = URI.parse(url)
+      host = uri.host
+      {"http", "https"}.includes?(uri.scheme.try(&.downcase)) && !host.nil? && host.matches?(PLAIN_HOST)
+    rescue URI::Error
+      false
+    end
+
+    # A register answer's id, or a raise naming the provider: the one gate every backend whose
+    # SERVER picks the id goes through.
+    protected def checked_correlation_id(id : String) : String
+      return id if Provider.correlation_id_ok?(id)
+      raise Gori::Error.new("OAST #{kind.label} register: server returned an id outside [A-Za-z0-9_-] (#{snippet(id.inspect)})")
     end
 
     protected def json_headers : Hash(String, String)

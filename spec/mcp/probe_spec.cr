@@ -569,7 +569,8 @@ describe "MCP probe_scan — out-of-band reachability" do
     with_store do |store|
       seed_secret_flow(store)
       store.add_scope_rule("include", "host", "acme.test")
-      store.insert_oast_session(nil, "custom-http", "https://oob.example/hits", "corr", "", nil, nil)
+      # Stamped, as every register path stamps the row it saves.
+      store.touch_oast_session(store.insert_oast_session(nil, "custom-http", "https://oob.example/hits", "corr", "", nil, nil))
       store.flush
       res = call_json(tools_for(store), "probe_scan", %({"active":true,"query":"host:nothing.invalid"}))
       res.as_h.has_key?("out_of_band").should be_false

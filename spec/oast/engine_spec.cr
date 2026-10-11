@@ -766,3 +766,46 @@ describe "Oast providers — dedup key stability" do
     prov.payload_token("https://my.box/log?a=1&oid=abcdef&z=2").should eq("abcdef")
   end
 end
+
+# The id a server hands back at register is spliced into every payload the active probes send to
+# the operator's target, so it is held to an inert charset at the one point it enters.
+describe "OAST register refuses a server-chosen id outside the inert charset" do
+  it "accepts each provider's real id shape" do
+    {"f8a3b2c1-1d2e-4f5a-9b8c-7d6e5f4a3b2c", "1608150286613-9387427063925",
+     "abcdefghij0123456789", "Xy_z-09"}.each do |id|
+      O::Provider.correlation_id_ok?(id).should be_true
+    end
+  end
+
+  it "refuses an id carrying a space, a dot or a slash" do
+    O::Provider.correlation_id_ok?("a b").should be_false
+    O::Provider.correlation_id_ok?("a.b").should be_false
+    O::Provider.correlation_id_ok?("a/b").should be_false
+    O::Provider.correlation_id_ok?("").should be_false
+    expect_raises(Gori::Error, /outside/) do
+      O::WebhookSite.new("https://webhook.site").register(FakeHttp.new("/token", %({"uuid":"a b"})))
+    end
+    expect_raises(Gori::Error, /outside/) do
+      O::Postbin.new("https://www.postb.in").register(FakeHttp.new("/api/bin", %({"binId":"a.b"})))
+    end
+    expect_raises(Gori::Error, /outside/) do
+      O::Boast.new("https://boast.example", "sec").register(FakeHttp.new("GET", %({"id":"a/b"})))
+    end
+  end
+
+  it "still registers a well-formed id" do
+    s = O::WebhookSite.new("https://webhook.site").register(FakeHttp.new("/token", %({"uuid":"f8a3b2c1-1d2e"})))
+    s.correlation_id.should eq("f8a3b2c1-1d2e")
+  end
+
+  it "holds a server URL to http(s) with a plain host and no shell-active characters" do
+    O::Provider.server_url_ok?("https://oast.pro").should be_true
+    O::Provider.server_url_ok?("http://10.0.0.5:8080/log?key=a&x=1").should be_true
+    O::Provider.server_url_ok?("https://[fd00::1]:9000").should be_true
+    O::Provider.server_url_ok?("ftp://oast.pro").should be_false
+    O::Provider.server_url_ok?("https://oast.pro/a b").should be_false
+    O::Provider.server_url_ok?("https://oast.pro/$x").should be_false
+    O::Provider.server_url_ok?("https://oast.pro/\"x").should be_false
+    O::Provider.server_url_ok?("https://oa_st.pro").should be_false
+  end
+end

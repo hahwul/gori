@@ -19,6 +19,7 @@ module Gori::Oast
       json = parse_json(resp.body)
       id = json["id"]?.try(&.as_s?)
       raise Gori::Error.new("BOAST register: no id in response") unless id
+      id = checked_correlation_id(id)
       Session.new(0_i64, ProviderKind::Boast, base_url, id, secret, token: secret, registered: true)
     end
 

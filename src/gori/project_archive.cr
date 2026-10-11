@@ -423,7 +423,8 @@ module Gori
       "Import will #{inventory.import_safety}. #{inventory.exec_chains.try { |text| "#{text} " }}" \
       "The archive is unredacted and may contain " \
       "captured request/response credentials, session and env values, and upstream proxy credentials. " \
-      "OAST sessions and provider tokens, plus Authorize identities, remain in the imported copy. " \
+      "OAST sessions and provider tokens, plus Authorize identities, remain in the imported copy; " \
+      "an imported OAST session is not used for probe payloads until you resume it. " \
       "Keep the archive as carefully as the source project."
     end
 
@@ -713,6 +714,13 @@ module Gori
             end
             if table_exists?(conn, "probe_custom_rules")
               conn.exec("UPDATE probe_custom_rules SET enabled = 0 WHERE lower(kind) = 'exec'")
+            end
+            # The active scan mints its out-of-band payloads against the most-recently-polled
+            # session, so a stamp carried in the archive would choose where this install's probes
+            # call home. Unstamped, an imported session is never a mint target until the operator
+            # resumes it here (`OutOfBand::StoreMinter.pick_session`).
+            if table_exists?(conn, "oast_sessions") && table_columns(conn, "oast_sessions").includes?("last_poll_at")
+              conn.exec("UPDATE oast_sessions SET last_poll_at = NULL")
             end
             conn.exec("COMMIT")
           rescue ex

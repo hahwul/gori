@@ -436,8 +436,10 @@ describe Gori::ProjectArchive do
         Gori::SessionSlot.serialize([Gori::SessionSlot.new("operator",
           [{"Authorization", "Bearer identity-secret"}])]))
       provider_id = store.insert_oast_provider("saved", "interactsh", "https://oast.test", "provider-token", true, 0)
-      store.insert_oast_session(provider_id, "interactsh", "https://oast.test", "correlation",
+      session_id = store.insert_oast_session(provider_id, "interactsh", "https://oast.test", "correlation",
         "session-secret", "private-key", "session-token")
+      store.touch_oast_session(session_id)
+      Gori::Probe::OutOfBand::StoreMinter.build(store).should_not be_nil
 
       exported = Gori::ProjectArchive.prepare_export(project)
       archive_path = File.join(root, "unsafe-config.gori")
@@ -453,6 +455,7 @@ describe Gori::ProjectArchive do
         disclosure.should contain("8 project network settings")
         disclosure.should contain("1 host override")
         disclosure.should contain("OAST sessions")
+        disclosure.should contain("not used for probe payloads until you resume it")
         disclosure.should contain("provider tokens")
         disclosure.should contain("Authorize identities")
 
@@ -474,6 +477,10 @@ describe Gori::ProjectArchive do
           copied.oast_providers.first.token.should eq("provider-token")
           copied.oast_sessions.first.token.should eq("session-token")
           copied.oast_sessions.first.private_key_pem.should eq("private-key")
+          # The archive's liveness stamp is dropped, so its session is no mint target here
+          # until this install resumes (stamps) it.
+          copied.oast_sessions.first.last_poll_at.should be_nil
+          Gori::Probe::OutOfBand::StoreMinter.build(copied).should be_nil
         ensure
           copied.close
         end

@@ -73,9 +73,16 @@ module Gori
         # session wins (see pick_session): sessions accumulate across a project's life, and the one
         # a listener is actively polling is where a callback will be read — not necessarily the
         # newest row, which may have been registered and then stopped.
+        #
+        # The row is DATA, not an instruction: it may have arrived in a shared project archive,
+        # and what it holds is spliced into requests sent to the operator's target. So a row whose
+        # correlation id or server URL fails the provider's own register-time check
+        # (`Provider.correlation_id_ok?` / `server_url_ok?`) is never minted from.
         def self.build(store : Store) : StoreMinter?
           rec = pick_session(store.oast_sessions)
           return nil unless rec
+          return nil unless Oast::Provider.correlation_id_ok?(rec.correlation_id) &&
+                            Oast::Provider.server_url_ok?(rec.server_url)
           kind = Oast::ProviderKind.parse?(rec.kind)
           return nil unless kind
           provider = Oast::Provider.build(kind, rec.server_url, rec.token)
@@ -90,11 +97,17 @@ module Gori
         # A live TUI listener heartbeats `last_poll_at` every cycle, so the most-recently-polled
         # session is the live one — not necessarily the newest row, which may have been registered
         # and then stopped (its correlation id dead, a payload minted against it never calling
-        # home). A session never polled (no listener yet, or a row from before heartbeating) carries
-        # a null last_poll_at and loses to any polled session; among equals the newest id wins.
+        # home). Among equals the newest id wins.
+        #
+        # A session never polled (null `last_poll_at`) is not a candidate at all. Every register
+        # path stamps its row the moment it is saved (TUI, `gori run oast`, MCP `oast_start`) and
+        # every resume stamps it again, so a session gori itself set up is never in that state;
+        # what is, is a row an imported archive brought in (`ProjectArchive` nulls the stamp) or one
+        # from before heartbeating. Neither has a listener in THIS install, so a payload minted
+        # against it would call home to someone the operator never chose — and a stamp copied from
+        # the archive must not outrank the operator's own listener. A resume makes it a candidate.
         private def self.pick_session(sessions : Array(Store::OastSessionRecord)) : Store::OastSessionRecord?
-          return nil if sessions.empty?
-          sessions.max_by { |s| {s.last_poll_at || Int64::MIN, s.id} }
+          sessions.select(&.last_poll_at).max_by? { |s| {s.last_poll_at || Int64::MIN, s.id} }
         end
 
         def initialize(@provider : Oast::Provider, @session : Oast::Session)

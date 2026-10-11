@@ -40,7 +40,8 @@ describe "gori run probe — out-of-band reachability notice" do
 
   it "says nothing once a session exists to mint against" do
     with_store do |store|
-      store.insert_oast_session(nil, "interactsh", "https://oast.test", "corr", "sec", nil, nil)
+      # Stamped, as every register path stamps the row it saves.
+      store.touch_oast_session(store.insert_oast_session(nil, "interactsh", "https://oast.test", "corr", "sec", nil, nil))
       Gori::Probe::OutOfBand.available?(store).should be_true
       Gori::CLI::Run.oob_unreachable_note_for_spec(store, cfg, true).should be_nil
     end

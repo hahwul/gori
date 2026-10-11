@@ -171,13 +171,32 @@ describe Gori::Probe::OutOfBand do
     oob_store do |store|
       old_id = store.insert_oast_session(nil, "interactsh", "https://oast.pro", "corrold", "s", nil, nil)
       new_id = store.insert_oast_session(nil, "interactsh", "https://oast.pro", "corrnew", "s", nil, nil)
-      # With neither session polled yet, the newest row wins (the old default).
+      # With neither session polled there is nothing to mint against: every register path stamps
+      # its row, so an unstamped one has no listener in this install (an imported archive's).
+      Gori::Probe::OutOfBand::StoreMinter.build(store).should be_nil
+      store.touch_oast_session(new_id)
       Gori::Probe::OutOfBand::StoreMinter.build(store).not_nil!.session_id.should eq(new_id)
+      sleep 2.milliseconds # stamps are microseconds; keep the next one strictly later
       # But once the OLDER session is the one being polled (a live listener's heartbeat), the
       # minter follows it — so its payloads land where a callback will actually be read, instead
       # of against the newer row that was started and stopped.
       store.touch_oast_session(old_id)
       Gori::Probe::OutOfBand::StoreMinter.build(store).not_nil!.session_id.should eq(old_id)
+    end
+  end
+
+  # A row is data, never an instruction: it can arrive in a shared archive, and its fields are
+  # spliced into requests sent to the operator's target.
+  it "never mints from a row whose correlation id or server URL fails the register-time check" do
+    oob_store do |store|
+      bad_id = store.insert_oast_session(nil, "webhook.site", "https://webhook.site", "a b", "", nil, nil)
+      store.touch_oast_session(bad_id)
+      Gori::Probe::OutOfBand::StoreMinter.build(store).should be_nil
+    end
+    oob_store do |store|
+      bad_url = store.insert_oast_session(nil, "webhook.site", "https://web hook.site", "abc123", "", nil, nil)
+      store.touch_oast_session(bad_url)
+      Gori::Probe::OutOfBand::StoreMinter.build(store).should be_nil
     end
   end
 
