@@ -570,6 +570,42 @@ describe "MCP session slot refresh (#1233)" do
     end
   end
 
+  it "disarms automatic refresh when minimize_repeater applies a smaller request" do
+    with_store_env do |store|
+      server = TCPServer.new("127.0.0.1", 0)
+      spawn do
+        while conn = server.accept?
+          begin
+            conn.read_timeout = 5.seconds
+            next unless Gori::Proxy::Codec::Http1.read_head(conn)
+            conn << "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+            conn.flush
+          rescue
+          ensure
+            conn.close rescue nil
+          end
+        end
+      end
+      begin
+        port = server.local_address.port
+        t = tools_for(store)
+        id = store.insert_repeater("http://127.0.0.1:#{port}",
+          "GET /login HTTP/1.1\r\nHost: 127.0.0.1\r\nCookie: theme=dark\r\n\r\n".to_slice, false, true, nil, 0)
+        call_json(t, "create_session_slot", %({"name":"a","refresh":[#{id}]}))
+        registry = Gori::SessionSlots.load(store)
+        armed = registry.find("a").not_nil!.copy_with(refresh_before: Slot::RefreshBefore.parse?("ttl=10m").not_nil!)
+        registry.update("a", armed).should be_true
+
+        result = call_json(t, "minimize_repeater", %({"repeater_id":#{id},"apply":true,"allow_unscoped":true}))
+        result["applied"].as_bool.should be_true
+        result["auto_refresh_disarmed"].as_a.map(&.as_s).should eq(["a"])
+        Gori::SessionSlots.load(store).find("a").not_nil!.refresh_before.off?.should be_true
+      ensure
+        server.close
+      end
+    end
+  end
+
   it "runs the steps, reports binding names and never a value, and lists the outcome" do
     with_store_env do |store|
       prev_hook = Gori::SessionRefresh.hook

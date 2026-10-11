@@ -134,6 +134,8 @@ module Gori
             ws_keep_key: rec.ws_keep_key?, ws_http_only: rec.ws_http_only?,
             tls_preset: rec.tls_preset)
         end
+        # The rewritten request is what a slot's refresh step sends, as with `update_repeater`.
+        disarmed = applied ? disarm_slots_refreshing(id) : [] of String
 
         Result.new(JSON.build do |j|
           j.object do
@@ -153,6 +155,7 @@ module Gori
             end
             j.field "removed_count", report.removed.size
             j.field "applied", applied
+            emit_auto_refresh_disarmed(j, disarmed)
             j.field "minimized_request", report.minimized_text
           end
         end)
