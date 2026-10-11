@@ -736,6 +736,9 @@ module Gori
         end
 
         summary = repeater_summary(request)
+        # What the session SENDS changed, so a slot that replays it on its own stops doing so.
+        rewired = ws_msgs || target != existing.target || sni != existing.sni || request != String.new(existing.request)
+        disarmed = rewired ? disarm_slots_refreshing(id) : [] of String
 
         Result.new(JSON.build { |j|
           j.object do
@@ -744,6 +747,12 @@ module Gori
             j.field "target", masked_target
             j.field "summary", summary
             j.field "position", existing.position
+            unless disarmed.empty?
+              j.field("auto_refresh_disarmed") { j.array { disarmed.each { |n| j.string n } } }
+              j.field "auto_refresh_note", "this session is a refresh step of #{disarmed.join(", ")}; " \
+                                           "automatic refresh was turned off there — the operator re-arms it from the " \
+                                           "gori TUI or `gori run session`"
+            end
             repeater_tui_index(id).try { |n| j.field "tui_index", n }
             j.field "ws_out_message_count", ws_count if ws_count
             # The write door `create_repeater`'s notice would otherwise leave open: this tool

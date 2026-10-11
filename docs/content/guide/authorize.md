@@ -72,9 +72,11 @@ A slot is a snapshot, so a long run can outlive its token. Give the slot **refre
 |---------|------------|-------------|--------|
 | TUI | In the Repeater, `Ctrl-P` → **Use as refresh for slot…** on the login sub-tab | `Ctrl-R` on the row in the session slot picker | the **refresh before** field of the identity form (`i` on this tab) |
 | `gori run` | `session edit NAME --refresh 12,14` | `session refresh NAME` | `--refresh-before` |
-| MCP | `update_session_slot{refresh}` | `refresh_session_slot` | `refresh_before` |
+| MCP | `update_session_slot{refresh}` | `refresh_session_slot` | none: only `off` |
 
 A **refresh before** policy runs the refresh on its own, before a send that goes out as the slot: `jwt-exp` when a JWT bound in the slot is within 30 s of its `exp`, or `ttl=10m` when that long has passed since the last successful refresh (or, before one, since the slot's oldest binding). A refresh that leaves the JWT still about to expire counts as a failure. It applies to every identity an Authorize run sends as, not only to the active slot. It acts **before** a send and never reads a response: a `401` in this tab is still the verdict, never a reason to log in again and retry.
+
+Only the operator arms a policy. An automatic refresh in the TUI sends the steps with the slot's live credentials and skips the up-front scope check, so an agent over `gori mcp` can set `refresh_before` only to `off`, and when it changes the steps of an armed slot (its `refresh` list, or the request or target of one of its Repeater sessions) the policy turns off and the reply says so. It can still run the steps by hand with `refresh_session_slot`, which is gated like any agent send.
 
 Refresh traffic is visible: each step lands in History with source `refresh` (`src:refresh`, SRC `RFRSH`), each refresh writes one event, and the `session:NAME` chip shows `⟳` while one runs and `!` after one failed. A failure also raises a notification and leaves the send going out with the value it had; a failed automatic refresh waits 30 s before it tries again, and after 3 failures in a row it switches itself off until a manual refresh succeeds. A step whose Repeater session was deleted stays in the list as `(deleted)` and refuses to run. Values stay per process: a refresh in the TUI does not update a running `gori mcp`.
 

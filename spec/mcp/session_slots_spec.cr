@@ -498,15 +498,19 @@ private def start_refresh_origin : {TCPServer, Int32}
 end
 
 describe "MCP session slot refresh (#1233)" do
-  it "takes refresh steps and a policy on create/update, and refuses an id that names nothing" do
+  it "takes refresh steps on create/update, and refuses an id that names nothing" do
     with_store_env do |store|
       t = tools_for(store)
       id = store.insert_repeater("http://127.0.0.1:1", "GET /login HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
       created = call_json(t, "create_session_slot",
-        %({"name":"admin","rules":["SESSION"],"refresh":[#{id}],"refresh_before":"jwt-exp"}))
+        %({"name":"admin","rules":["SESSION"],"refresh":[#{id}],"refresh_before":"off"}))
       created["refresh"].as_a.map(&.as_i64).should eq([id])
-      created["refresh_before"].as_s.should eq("jwt-exp")
+      created["refresh_before"].as_s.should eq("off")
       Gori::SessionSlots.load(store).find("admin").not_nil!.refresh.should eq([id])
+      # The operator arms it (TUI / `gori run session`).
+      registry = Gori::SessionSlots.load(store)
+      armed = registry.find("admin").not_nil!
+      registry.update("admin", armed.copy_with(refresh_before: Slot::RefreshBefore.parse?("jwt-exp").not_nil!)).should be_true
 
       text, is_err = call_raw(t, "update_session_slot", %({"name":"admin","refresh":[#{id + 99}]}))
       is_err.should be_true
@@ -520,6 +524,49 @@ describe "MCP session slot refresh (#1233)" do
       kept = Gori::SessionSlots.load(store).find("admin").not_nil!
       kept.refresh.should eq([id])
       kept.refresh_before.kind.jwt_exp?.should be_true
+    end
+  end
+
+  # #1233 waives Layer 1 for an AUTOMATIC refresh because the operator chose the steps and the
+  # policy. An agent may write steps and run them by hand, but never arm them, and a step it
+  # changes under an armed policy turns that policy off.
+  it "never lets an agent arm automatic refresh, and disarms it when the agent changes the steps" do
+    with_store_env do |store|
+      t = tools_for(store)
+      id = store.insert_repeater("http://127.0.0.1:1", "GET /login HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
+      other = store.insert_repeater("http://127.0.0.1:1", "GET /csrf HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 1)
+      %w[jwt-exp ttl=10m].each do |policy|
+        text, is_err = call_raw(t, "create_session_slot", %({"name":"a","refresh":[#{id}],"refresh_before":"#{policy}"}))
+        is_err.should be_true
+        text.should contain("only be \"off\" from MCP")
+      end
+      Gori::SessionSlots.load(store).find("a").should be_nil
+      call_json(t, "create_session_slot", %({"name":"a","refresh":[#{id}]}))
+      text, is_err = call_raw(t, "update_session_slot", %({"name":"a","refresh_before":"jwt-exp"}))
+      is_err.should be_true
+      text.should contain("only be \"off\" from MCP")
+
+      arm = -> {
+        registry = Gori::SessionSlots.load(store)
+        slot = registry.find("a").not_nil!
+        registry.update("a", slot.copy_with(refresh_before: Slot::RefreshBefore.parse?("ttl=10m").not_nil!)).should be_true
+      }
+      arm.call
+      # The same list keeps the operator's policy…
+      call_json(t, "update_session_slot", %({"name":"a","refresh":[#{id}]}))["refresh_before"].as_s.should eq("ttl=10m")
+      # …a different one turns it off, and says so.
+      changed = call_json(t, "update_session_slot", %({"name":"a","refresh":[#{other}, #{id}]}))
+      changed["refresh_before"].as_s.should eq("off")
+      changed["auto_refresh_disarmed"].as_s.should eq("ttl=10m")
+      Gori::SessionSlots.load(store).find("a").not_nil!.refresh_before.off?.should be_true
+
+      # Rewriting a step's request is the same hole; renaming it is not.
+      arm.call
+      call_json(t, "update_repeater", %({"id":#{id},"name":"login"}))["auto_refresh_disarmed"]?.should be_nil
+      Gori::SessionSlots.load(store).find("a").not_nil!.refresh_before.off?.should be_false
+      edited = call_json(t, "update_repeater", %({"id":#{id},"target":"http://127.0.0.1:2"}))
+      edited["auto_refresh_disarmed"].as_a.map(&.as_s).should eq(["a"])
+      Gori::SessionSlots.load(store).find("a").not_nil!.refresh_before.off?.should be_true
     end
   end
 

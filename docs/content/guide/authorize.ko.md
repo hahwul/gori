@@ -72,9 +72,11 @@ group = "워크벤치"
 |------|-----------|-----------|------|
 | TUI | Repeater의 로그인 서브탭에서 `Ctrl-P` → **Use as refresh for slot…** | 세션 슬롯 피커의 행에서 `Ctrl-R` | 아이덴티티 폼(이 탭의 `i`)의 **refresh before** 필드 |
 | `gori run` | `session edit NAME --refresh 12,14` | `session refresh NAME` | `--refresh-before` |
-| MCP | `update_session_slot{refresh}` | `refresh_session_slot` | `refresh_before` |
+| MCP | `update_session_slot{refresh}` | `refresh_session_slot` | 없음: `off`만 |
 
 **refresh before** 정책은 슬롯으로 나가는 전송 직전에 갱신을 스스로 실행합니다. `jwt-exp`는 슬롯에 바인딩된 JWT의 `exp`가 30초 이내로 남았을 때, `ttl=10m`은 마지막으로 성공한 갱신(없으면 슬롯에서 가장 오래된 바인딩) 이후 그 시간이 지났을 때입니다. 갱신이 끝났는데도 JWT가 여전히 곧 만료되면 실패로 셉니다. 활성 슬롯뿐 아니라 Authorize 실행이 보내는 모든 아이덴티티에 적용됩니다. 정책은 전송 **전에** 동작하고 응답을 읽지 않습니다. 이 탭에서 `401`은 여전히 판정이며, 다시 로그인해 재시도할 이유가 되지 않습니다.
+
+정책은 운영자만 켭니다. TUI의 자동 갱신은 슬롯의 살아 있는 자격 증명을 실어, 사전 scope 검사 없이 단계를 보냅니다. 그래서 `gori mcp`로 붙은 에이전트는 `refresh_before`를 `off`로만 정할 수 있고, 켜진 슬롯의 단계(`refresh` 목록, 또는 그 Repeater 세션의 요청이나 대상)를 바꾸면 정책이 꺼지며 응답이 그 사실을 알려줍니다. `refresh_session_slot`으로 단계를 직접 실행하는 것은 여전히 가능하고, 다른 에이전트 전송처럼 게이트를 거칩니다.
 
 갱신 트래픽은 보입니다. 각 단계는 source `refresh`(`src:refresh`, SRC `RFRSH`)로 History에 남고, 갱신마다 이벤트가 하나 기록되며, `session:NAME` 칩은 갱신 중에 `⟳`, 실패 후에 `!`를 표시합니다. 실패하면 알림도 뜨고, 전송은 가진 값으로 그대로 나갑니다. 자동 갱신이 실패하면 30초 동안 다시 시도하지 않고, 3번 연속 실패하면 수동 갱신이 성공할 때까지 꺼집니다. Repeater 세션이 삭제된 단계는 `(deleted)`로 목록에 남고 실행을 거부합니다. 값은 프로세스마다 따로 있어서, TUI에서의 갱신이 실행 중인 `gori mcp`를 갱신하지는 않습니다.
 

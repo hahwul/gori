@@ -211,16 +211,26 @@ module Gori
         set_headers, literal_headers = headers
         refresh = slot_refresh_args(h, current.refresh, current.refresh_before)
         return refresh if refresh.is_a?(Result)
+        ids, policy = refresh
+        # New steps under the operator's armed policy would be requests the agent chose, sent
+        # automatically by every process that holds the slot — the TUI's with Layer 1 waived
+        # (`Outbound.interactive`) and with the slot's live `$BIND` values. So the policy goes
+        # back to `off`, and the reply says so; `refresh_session_slot` still runs them by hand.
+        disarmed = ids != current.refresh && !policy.off?
+        policy = Gori::SessionSlot::RefreshBefore.off if disarmed
         updated = current.copy_with(name: target_name, set_headers: set_headers,
           remove_headers: slot_names_arg(h, "remove_headers", current.remove_headers),
           baseline: bool_arg(h, "baseline", current.baseline?),
           rules: slot_names_arg(h, "rules", current.rules), literal_headers: literal_headers,
-          refresh: refresh[0], refresh_before: refresh[1])
+          refresh: ids, refresh_before: policy)
         unless registry.update(name, updated)
           return busy("session slot NOT updated (store busy or unwritable); it is unchanged")
         end
         # Re-read: dropping the baseline hands it to another row (see `create_session_slot`).
-        Result.new(JSON.build { |j| emit_session_slot(j, registry.find(updated.name) || updated, false, registry.active_name) })
+        Result.new(JSON.build do |j|
+          emit_session_slot(j, registry.find(updated.name) || updated, false, registry.active_name,
+            auto_refresh_disarmed: disarmed ? current.refresh_before.to_s : nil)
+        end)
       end
 
       private def update_slot_target(registry : Gori::SessionSlots, name : String, h) : {String} | Result
@@ -280,10 +290,16 @@ module Gori
         end)
       end
 
-      # `refresh` (Repeater session ids, in order) and `refresh_before` (`off` | `jwt-exp` |
-      # `ttl=10m`), each ABSENT-keeps like the name lists above. Every id must name a Repeater
-      # session that exists now: a typo refused here is cheaper than a step that fails at the
-      # first automatic refresh in the middle of a sweep. Deterministic, so INVALID_ARGUMENT.
+      # `refresh` (Repeater session ids, in order) and `refresh_before`, each ABSENT-keeps like
+      # the name lists above. Every id must name a Repeater session that exists now: a typo
+      # refused here is cheaper than a step that fails at the first automatic refresh in the
+      # middle of a sweep. Deterministic, so INVALID_ARGUMENT.
+      #
+      # `refresh_before` takes only `off` here. #1233 waives Layer 1 for an AUTOMATIC refresh
+      # because the operator put the steps in the list and set the policy; a policy an agent
+      # set would make the TUI send agent-chosen requests, with the slot's live credentials,
+      # wherever they point. Arming it is the operator's, from the TUI or `gori run session` —
+      # the same line archive import draws (`ProjectArchive.disable_slot_auto_refresh`).
       private def slot_refresh_args(h, ids : Array(Int64),
                                     policy : Gori::SessionSlot::RefreshBefore) : {Array(Int64), Gori::SessionSlot::RefreshBefore} | Result
         if slot_list_given?(h, "refresh")
@@ -303,8 +319,24 @@ module Gori
                    return err("'refresh_before' #{raw.inspect} is not a policy — use \"off\", " \
                               "\"jwt-exp\" or \"ttl=<n>[s|m|h]\" (e.g. \"ttl=10m\")",
                      "INVALID_ARGUMENT", field: "refresh_before")
+          unless policy.off?
+            return err("'refresh_before' can only be \"off\" from MCP: arming automatic refresh is the " \
+                       "operator's, from the gori TUI or `gori run session`, because an automatic refresh " \
+                       "sends the slot's steps with its live credentials. Run them by hand with refresh_session_slot",
+              "INVALID_ARGUMENT", field: "refresh_before")
+          end
         end
         {ids, policy}
+      end
+
+      # Automatic refresh off on every armed slot whose steps include Repeater session `id`, for
+      # a tool that just rewrote that session: an agent editing an operator's step is the same
+      # hole as an agent writing the list (`update_session_slot`). The names it turned off.
+      private def disarm_slots_refreshing(id : Int64) : Array(String)
+        registry = fresh_slots
+        registry.slots.select { |slot| !slot.refresh_before.off? && slot.refresh.includes?(id) }.compact_map do |slot|
+          slot.name if registry.update(slot.name, slot.copy_with(refresh_before: Gori::SessionSlot::RefreshBefore.off))
+        end
       end
 
       # Run a slot's refresh steps now (#1233). The values it rebinds live in THIS server
@@ -421,7 +453,8 @@ module Gori
       private def emit_session_slot(j : JSON::Builder, slot : Gori::SessionSlot,
                                     include_sensitive : Bool, active : String?,
                                     sources : Array(String) = [] of String,
-                                    refresh_status : Bool = false) : Nil
+                                    refresh_status : Bool = false,
+                                    auto_refresh_disarmed : String? = nil) : Nil
         j.object do
           j.field "name", slot.name
           # Where each header came from, when the overlay was READ off a flow rather than
@@ -450,6 +483,11 @@ module Gori
           j.field("refresh") { j.array { slot.refresh.each { |id| j.number id } } }
           j.field("refresh_steps") { j.array { Gori::SessionRefresh.step_labels(store, slot).each { |l| j.string l } } }
           j.field "refresh_before", slot.refresh_before.to_s
+          if was = auto_refresh_disarmed
+            j.field "auto_refresh_disarmed", was
+            j.field "auto_refresh_note", "the refresh steps changed, so automatic refresh (#{was}) was turned " \
+                                         "off — the operator re-arms it from the gori TUI or `gori run session`"
+          end
           emit_refresh_status(j, slot) if refresh_status
         end
       end
@@ -562,10 +600,9 @@ module Gori
       end
 
       private def refresh_before_prop : JSON::Any
-        strprop("when the slot refreshes on its own before a send: \"off\" (default), \"jwt-exp\" " \
-                "(a JWT bound in the slot is within #{Gori::SessionSlot::RefreshBefore::SKEW.total_seconds.to_i}s " \
-                "of its exp) or \"ttl=10m\" (that long since the last successful refresh, or since its oldest binding). Acts before a " \
-                "send, never on a response: a 401 is never retried")
+        strprop("when the slot refreshes on its own before a send. Only \"off\" is accepted here: the " \
+                "operator arms \"jwt-exp\" or \"ttl=10m\" from the gori TUI or `gori run session`, and " \
+                "changing 'refresh' on an armed slot turns it back off")
       end
 
       private def session_headers_prop : JSON::Any
