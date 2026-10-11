@@ -230,6 +230,14 @@ private class FakeContext < ExecContext
     @calls << :toggle_unicode_escapes
   end
 
+  def detail_messages_pane? : Bool
+    false
+  end
+
+  def toggle_ws_narrow : Nil
+    @calls << :toggle_ws_narrow
+  end
+
   def repeater_selected : Nil
     @calls << :repeater_selected
   end

@@ -823,6 +823,7 @@ module Gori
         redaction = RedactFlags.new
         headers_only = false
         max_body : Int32? = nil
+        ws_spec : String? = nil
 
         positional = parse_args(args, "gori run show") do |p|
           p.banner = "Usage: gori run show <flow-id> [options]"
@@ -832,6 +833,7 @@ module Gori
           p.on("--response-only", "Only the response side") { resp_only = true }
           p.on("--headers-only", "text/json: print the request line/status line and headers only — each body is replaced by a line naming its size, and the sections derived from bodies (decoded views, gRPC messages, WebSocket frames, SSE events) are left out, named with their counts where they have one") { headers_only = true }
           p.on("--max-body=BYTES", "text/json: print at most BYTES of each decoded body, then a marker naming its full size; the sections derived from bodies are left out as with --headers-only") { |v| max_body = parse_count(v, "--max-body") }
+          p.on("--ws-match=QUERY", "Only the WebSocket messages matching QUERY, as the QL ws term matches them: ws:needle (case-insensitive), ws~regex, or a bare needle") { |v| ws_spec = v }
           redact_options(p, redaction)
         end
         if err = show_side_error(format, req_only, resp_only)
@@ -842,6 +844,9 @@ module Gori
           abort "gori run show: #{err}"
         end
         id = take_flow_id(positional, "show")
+        ws_match = ws_spec.try do |spec|
+          QL.ws_match(spec) || abort "gori run show: --ws-match #{spec.inspect} #{QL::WS_MATCH_REFUSED}"
+        end
 
         # Close the store before any abort (abort/exit skip ensure blocks); get_flow
         # has already loaded the BLOBs we need. A WebSocket flow also carries a ws_messages
@@ -850,9 +855,10 @@ module Gori
         # The redaction choice is resolved in here too, and for the same reason: it reads this
         # project's own profiles off the settings row, and its refusal ("no profile named …")
         # has to be reported AFTER the close.
-        detail, ws_msgs, choice, interims = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
+        detail, ws_msgs, choice, interims, ws_total = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
           d = store.get_flow(id)
-          {d, show_ws_messages(store, d), redact_choice(store, redaction), d.try { store.interims(id) }}
+          {d, show_ws_messages(store, d, ws_match), redact_choice(store, redaction), d.try { store.interims(id) },
+           ws_match && d ? store.count_ws_messages(id) : 0}
         end
         abort "gori run show: no flow ##{id}" unless detail
         detail, ws_msgs, redact_report, previewed = show_redaction(detail, ws_msgs, choice, redaction)
@@ -861,6 +867,9 @@ module Gori
         show_request = !resp_only
         show_response = !req_only
         show_format(format, detail, show_request, show_response, ws_msgs, cap, interims)
+        # On STDERR after the document, like the redaction notes, so a narrowed transcript is
+        # never read as the whole socket and `--format json > out.json` stays pure.
+        STDERR.puts "gori run show: --ws-match kept #{ws_msgs.size} of #{Gori.plural(ws_total, "WebSocket message")}" if ws_match
         # After the document, like every other caveat this command reports, and on STDERR so
         # `--format har > evidence.har` still writes a pure HAR.
         redact_notes(redact_one(redact_report), choice, "show")
@@ -1079,8 +1088,11 @@ module Gori
       # exchange and not one of the frames sitting in the table beside it. `ws_messages`
       # already answers with an empty array for a flow that is not a socket, so the gate only
       # ever bought one query — and cost the feature.
-      def self.show_ws_messages(store : Store, detail : Store::FlowDetail?) : Array(Store::WsMessage)
-        detail ? store.ws_messages(detail.row.id) : [] of Store::WsMessage
+      #
+      # `match` is `--ws-match`'s clause (`QL.ws_match`), applied in SQL.
+      def self.show_ws_messages(store : Store, detail : Store::FlowDetail?,
+                                match : QL::SqlTerm? = nil) : Array(Store::WsMessage)
+        detail ? store.ws_messages(detail.row.id, match: match) : [] of Store::WsMessage
       end
 
       # One flow as a one-entry HAR 1.2 log. A flow HAR cannot represent is an ERROR here,

@@ -107,4 +107,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def toggle_unicode_escapes : Nil
     history_controller.toggle_unicode_decoding
   end
+
+  def detail_messages_pane? : Bool
+    @overlay.detail? && history_controller.view.messages_pane?
+  end
+
+  forward toggle_ws_narrow : Nil, to: history_controller
 end

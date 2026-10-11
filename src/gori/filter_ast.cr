@@ -611,7 +611,9 @@ module Gori
     #
     # Tolerance 2 (1 under four characters, where two edits is most of the word) is what makes
     # `hsot` → `host` work at all: a transposition costs two edits and Levenshtein's own default
-    # tolerance refuses it. Wider than that stops being a suggestion.
+    # tolerance refuses it. Wider than that stops being a suggestion — and a ONE-letter name gets
+    # no distance pass at all: one edit from `s` is every one- and two-letter name in the pool
+    # (`ws`, Probe's `st`), so only an unambiguous prefix can say what it meant.
     #
     # `candidates` is the backend's pool, passed rather than looked up: QL's is `FIELDS` plus
     # its aliases, the Issues bar's is five names, and a shared list would suggest a field the
@@ -623,7 +625,11 @@ module Gori
     def self.suggest(name : String, candidates : Array(String)) : String?
       return nil if name.empty?
       prefixed = candidates.select(&.starts_with?(name))
-      near = prefixed.size == 1 ? prefixed.first : Levenshtein.find(name, candidates, name.size < 4 ? 1 : 2)
+      near = if prefixed.size == 1
+               prefixed.first
+             elsif name.size > 1
+               Levenshtein.find(name, candidates, name.size < 4 ? 1 : 2)
+             end
       # Never the name itself. A caller may hold a name the pool contains — the gate's own
       # `status` under `~`, say — and "did you mean `status~`?" about `status~` is noise that
       # reads like a bug, because it is one.

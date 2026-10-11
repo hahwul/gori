@@ -363,8 +363,18 @@ module Gori
         # Only the frames `emit_ws_messages` shows (the OLDEST WS_MSGS_MAX), and the total from a
         # COUNT: a frame is up to 16 MiB, and every one past the cap used to be read,
         # redacted and decoded to be dropped.
-        ws_msgs = store.ws_messages_after(id, 0_i64, Serialize::WS_MSGS_MAX)
-        ws_total = ws_msgs.size < Serialize::WS_MSGS_MAX ? ws_msgs.size : store.count_ws_messages(id)
+        #
+        # `ws_query` narrows the log in SQL BEFORE that cap, with the QL `ws` term's own
+        # per-message predicate (`QL.ws_match`), so a match past the first 500 is reached.
+        ws_match = nil
+        if (wq = str(h, "ws_query")) && !wq.empty?
+          unless ws_match = QL.ws_match(wq)
+            return err("ws_query #{wq.inspect} #{QL::WS_MATCH_REFUSED}", "INVALID_ARGUMENT", field: "ws_query")
+          end
+        end
+        ws_msgs = store.ws_messages_after(id, 0_i64, Serialize::WS_MSGS_MAX, ws_match)
+        ws_total = ws_msgs.size < Serialize::WS_MSGS_MAX ? ws_msgs.size : store.count_ws_messages(id, ws_match)
+        ws_socket_total = ws_match ? store.count_ws_messages(id) : nil
         include_sensitive = bool_arg(h, "include_sensitive", false)
         detail, ws_msgs, redaction = redact_flow(detail, ws_msgs, include_sensitive)
         # Not under a redaction profile: the chunk tool pages the EXACT stored bytes, which it
@@ -376,7 +386,7 @@ module Gori
         cap, omit = opts
         more = auto ? {body_more_hint("flow_id: #{id}, part: \"request\"", "request, head included"), body_more_hint("flow_id: #{id}")} : nil
         Result.new(Serialize.flow_detail_json(detail, ws_msgs, include_sensitive, cap, omit, redaction, more,
-          interims: store.interims(id), ws_total: ws_total))
+          interims: store.interims(id), ws_total: ws_total, ws_socket_total: ws_socket_total))
       end
 
       # Safe evidence export applied to the projection an AGENT reads (#1035).
@@ -820,6 +830,7 @@ module Gori
           s.field "include_sensitive", boolprop("return Authorization/Cookie/Set-Cookie/API-key header values instead of [REDACTED], and the captured bodies instead of the redaction profile's sanitized copy (default false)")
           s.field "body_mode", enumprop("how much of each body to inline. Default: up to #{AUTO_BODY_BYTES} bytes, a longer body cut with a `more` pointer to get_response_body_chunk — except under a redaction profile (see body_redaction), where the default stays full, because the chunk tool pages the unredacted stored bytes; full inlines up to #{Serialize::MAX_TEXT}; preview a small head; none the shape only (encoding/size, omitted:true)", BODY_MODES)
           s.field "max_body_bytes", intprop("cap inlined body bytes (clamped to 65536; page the rest with get_response_body_chunk)")
+          s.field "ws_query", strprop("QL ws term (ws:needle or ws~regex) narrowing ws_messages before the #{Serialize::WS_MSGS_MAX} cap; count is then the matched total, ws_total the socket's")
         end
 
         tool j, "get_response_body_chunk",

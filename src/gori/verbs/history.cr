@@ -647,6 +647,15 @@ module Gori
         "detail.toggle-unicode", "Decode Unicode escapes", "Display JSON \\u escapes as characters (display only)",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("u")], intent: :unicode, group: :view) { |ctx| ctx.toggle_unicode_escapes; nil }
 
+      # Narrow the MESSAGES pane to the ^F query (#1588) — the pane's own find, reused rather
+      # than a second input. ^F jumps within the loaded window; this asks the store, so it
+      # reaches messages older than the window. Again to restore the whole window.
+      r.register Verb::Definition.new(
+        "detail.narrow-messages", "Narrow messages to ^F query",
+        "Show only the WebSocket messages matching the last ^F query, including ones older than the loaded window; again to show all",
+        Verb::Scope::HistoryDetail, available: ->(ctx : Verb::ExecContext) { ctx.detail_messages_pane? },
+        intent: :filter, group: :view) { |ctx| ctx.toggle_ws_narrow; nil }
+
       # The flow actions mirror the History list's "space" menu so the muscle memory
       # carries into the drill-in (the user's goal). Each keeps the list's exact chord
       # + mnemonic; repeater/issue/fuzz close the detail first so it doesn't float over

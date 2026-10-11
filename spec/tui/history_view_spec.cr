@@ -3616,3 +3616,36 @@ describe "HistoryView — Intercept edits and drops" do
     end
   end
 end
+
+# #1588 — the MESSAGES pane narrowed to the ^F query, in SQL, past the loaded window.
+describe "Gori::Tui::HistoryView MESSAGES narrow" do
+  it "shows only the matching messages, including ones older than the window, and restores" do
+    with_store do |store|
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "ws.test", port: 443,
+        method: "GET", target: "/s", http_version: "HTTP/1.1",
+        head: "GET /s HTTP/1.1\r\nHost: ws.test\r\nUpgrade: websocket\r\n\r\n".to_slice, body: nil,
+        source: Gori::FlowSource::Kind::Proxy))
+      store.update_response(Gori::Store::CapturedResponse.new(flow_id: id, status: 101,
+        head: "HTTP/1.1 101 Switching Protocols\r\n\r\n".to_slice, duration_us: 1_i64))
+      store.insert_ws_message(id, "out", 1, "needle-oldest".to_slice)
+      (HistoryView::DETAIL_LOG_CAP + 1).times { store.insert_ws_message(id, "in", 1, "x".to_slice) }
+
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      view.toggle_ws_narrow(store).should contain("MESSAGES pane") # not on the pane yet
+      2.times { view.toggle_pane }                                 # REQUEST → RESPONSE → MESSAGES
+      view.messages_pane?.should be_true
+      view.toggle_ws_narrow(store).should contain("^F first")
+
+      view.search_hl = "NEEDLE"
+      view.search_hl = "" # the prompt closes; the narrow still takes the last query
+      view.toggle_ws_narrow(store).should eq("messages: 1 of #{HistoryView::DETAIL_LOG_CAP + 2} match “NEEDLE”")
+      view.detail_search_lines("needle-oldest").size.should eq(1)
+
+      view.toggle_ws_narrow(store).should eq("messages: showing all #{HistoryView::DETAIL_LOG_CAP + 2}")
+      view.detail_search_lines("needle-oldest").should be_empty # outside the newest window again
+    end
+  end
+end

@@ -25,6 +25,7 @@ gori에는 플로우를 걸러내는 작은 쿼리 언어(QL)가 있습니다. �
 | `dur` | 응답 시간(밀리초) |
 | `header` | 헤드(요청 + 응답 헤더) 부분 문자열 |
 | `body` | 본문 전문 검색(trigram FTS 인덱스) |
+| `ws` | 소켓이 값을 담은 TEXT 또는 BINARY 메시지를 주고받은 WebSocket 플로우, 방향 무관([아래](#websocket-messages)) |
 | `stub` | `true` / `false`. 원본 서버를 거치지 않고 gori가 [short-circuit 규칙](/ko/guide/proxy/#short-circuit)으로 직접 답한 플로우 |
 | `static` | `true` / `false`. 이미지, 폰트, 오디오·비디오. 응답 Content-Type으로 판단하고, 없으면 경로 확장자를 봅니다. SVG·CSS·JS와 이미지 프록시(`?url=`)는 제외하고, 성공한 응답(2xx 또는 304)만 해당합니다. `-static:true`가 [정적 에셋 숨기기 렌즈](/ko/guide/proxy/#hide-static)입니다 |
 | `scope` | `in` / `out`. 프로젝트 스코프 규칙([아래](#scope-in-scope-out)) |
@@ -157,7 +158,7 @@ status:>=4xx        클래스 약어에도 비교 연산자를 붙일 수 있음
 
 ## 정규 표현식 {#regular-expressions}
 
-`host`, `path`, `url`, `method`, `scheme`, `header`, `body`(그리고 뒤의 둘은 `req.`/`resp.` 한쪽)에 정규식 매칭을 하려면 `~`를 씁니다. `~`는 자체적으로 필드/값 구분자 역할을 하므로 앞에 콜론을 붙이지 **마세요**. 매칭은 대소문자를 구분하며, 대소문자를 무시하려면 `(?i)`를 앞에 붙입니다.
+`host`, `path`, `url`, `method`, `scheme`, `header`, `body`, `ws`(그리고 `header`와 `body`는 `req.`/`resp.` 한쪽)에 정규식 매칭을 하려면 `~`를 씁니다. `~`는 자체적으로 필드/값 구분자 역할을 하므로 앞에 콜론을 붙이지 **마세요**. 매칭은 대소문자를 구분하며, 대소문자를 무시하려면 `(?i)`를 앞에 붙입니다.
 
 ```text
 path~/admin/
@@ -168,6 +169,29 @@ method~^P(OST|UT|ATCH)$                쓰기 메서드 전부를 한 항목으�
 
 그 외 필드(`status`, `size`, `dur`, `proto` 등)에는 정규식 형태가 없습니다. 그런 `~` 항목은
 텍스트로 검색되는 대신, 잘못된 숫자 값과 같은 방식으로 버려지고 보고됩니다.
+
+
+## WebSocket 메시지 {#websocket-messages}
+
+`ws:needle`은 소켓이 `needle`을 담은 메시지를 주고받은 플로우와 매칭합니다(대소문자 무시).
+`ws~regex`는 정규식으로 매칭합니다. 양방향 모두, TEXT와 BINARY 페이로드를 가리지 않고 저장된
+바이트 그대로 검색하므로 페이로드 앞쪽의 NUL이 뒤의 히트를 가리지 않습니다. ping·pong·close
+프레임은 메시지가 아니라 매칭되지 않고, gori가 소켓에 대해 남기는 `[gori] ` 알림 행도 마찬가지입니다.
+`-ws:x`는 그런 메시지가 없는 플로우를 모두 남기며, 소켓이 아닌 플로우도 포함됩니다.
+
+```text
+ws:admin                               admin을 언급한 소켓은?
+proto:ws ws~(?i)token=[a-f0-9]{32}     아무 프레임에나 실린 토큰
+```
+
+`ws:` 뒤에는 인덱스가 없어서 프로젝트의 모든 소켓 트랜스크립트를 훑습니다. 캡처 속도는 그대로이고,
+비용은 이 필드를 쓰는 쿼리가 치릅니다.
+
+플로우 **하나**의 트랜스크립트만 좁히려면, History의 MESSAGES 패널에서 `^F`로 검색한 뒤 스페이스
+메뉴의 **Narrow messages to ^F query**를 고르거나(다시 고르면 전체 표시), `gori run show <id>
+--ws-match=QUERY`, 또는 MCP `get_flow`의 `ws_query`를 씁니다. 모두 `ws:needle`, `ws~regex` 또는
+접두어 없는 needle을 받고, QL 필드와 똑같이 매칭하며, 각 표면이 평소 불러오는 범위보다 오래된
+메시지까지 닿습니다.
 
 ## 항목 결합 {#combining-terms}
 
@@ -224,7 +248,8 @@ host:"my host"                        공백까지 포함한 하나의 host 값
 홀드 게이트와 Extract 규칙 조건은 캡처되기 전의 흐르는 메시지 하나를 평가하므로, 그 메시지가
 답할 수 없는 History 필드는 추측하지 않고 거부합니다. `scope:`(프로젝트의 스코프 규칙은 메시지의
 일부가 아님), `size:`·`reqsize:`·`respsize:`·`dur:`(교환이 아직 끝나지 않음), `stub:`·`static:`·
-`src:`·`cache:`, 그리고 한쪽 방향만 보는 `req.`/`resp.` 표기가 그렇습니다. 거부된 필드를 대신
+`src:`·`cache:`·`ws:`(게이트가 쥔 것은 트랜스크립트가 아니라 메시지 하나이고, 그 `body:`가 이미
+그 메시지를 뜻함), 그리고 한쪽 방향만 보는 `req.`/`resp.` 표기가 그렇습니다. 거부된 필드를 대신
 자유 텍스트로 검색하는 일도 없습니다. 입력하는 자리에서 그렇게 알려주고, 그런 필드를
 담은 Extract 규칙은 저장되지 않으며, MCP `intercept_set_filter`와 `gori run intercept filter`는
 그 조건을 거부합니다.

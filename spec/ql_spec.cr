@@ -1490,3 +1490,70 @@ describe "Gori::QL.missing_colon_hint" do
     Gori::QL.parse("status>=400").sql.should_not contain("status >=")
   end
 end
+
+# #1588 — `ws:` / `ws~` find a flow by what its socket carried.
+private def ws_flow(store, target : String, frames : Array({String, Int32, Bytes})) : Int64
+  id = store.insert_flow(Gori::Store::CapturedRequest.new(
+    created_at: 1_i64, scheme: "https", host: "ws.test", port: 443,
+    method: "GET", target: target, http_version: "HTTP/1.1",
+    head: "GET #{target} HTTP/1.1\r\nHost: ws.test\r\nUpgrade: websocket\r\n\r\n".to_slice,
+    body: nil, source: Gori::FlowSource::Kind::Proxy))
+  frames.each { |(dir, opcode, payload)| store.insert_ws_message(id, dir, opcode, payload) }
+  id
+end
+
+describe "Gori::QL ws: term" do
+  it "matches TEXT and BINARY messages in either direction; ws: folds case, ws~ does not" do
+    with_store do |store|
+      text = ws_flow(store, "/a", [{"out", 1, %({"op":"ADMIN"}).to_slice}])
+      binary = ws_flow(store, "/b", [{"in", 2, Bytes[0xff, 0x00] + "admin".to_slice}])
+      other = ws_flow(store, "/c", [{"in", 1, "hello".to_slice}])
+      plain = ws_flow(store, "/d", [] of {String, Int32, Bytes})
+      store.flush
+
+      store.search(Gori::QL.parse("ws:admin"), 50).map(&.id).sort!.should eq([text, binary].sort)
+      store.search(Gori::QL.parse("ws~admin"), 50).map(&.id).should eq([binary])
+      store.search(Gori::QL.parse("ws~(?i)op.:.admin"), 50).map(&.id).should eq([text])
+      # Negation keeps flows with no messages at all.
+      store.search(Gori::QL.parse("-ws:admin"), 50).map(&.id).sort!.should eq([other, plain].sort)
+    end
+  end
+
+  it "never matches a [gori] notice row or a ping/pong/close frame" do
+    with_store do |store|
+      ws_flow(store, "/notice", [{"in", 1, "[gori] secret advisory".to_slice}])
+      ws_flow(store, "/ping", [{"out", 9, "secret".to_slice}, {"in", 10, "secret".to_slice},
+                               {"in", 8, Bytes[0x03, 0xe8] + "secret".to_slice}])
+      hit = ws_flow(store, "/msg", [{"in", 1, "a secret".to_slice}])
+      store.flush
+      store.search(Gori::QL.parse("ws:secret"), 50).map(&.id).should eq([hit])
+    end
+  end
+
+  it "finds a needle that sits after a NUL in the payload" do
+    with_store do |store|
+      id = ws_flow(store, "/nul", [{"in", 2, Bytes[0x61, 0x00] + "NEEDLE".to_slice}])
+      store.flush
+      store.search(Gori::QL.parse("ws:needle"), 50).map(&.id).should eq([id])
+    end
+  end
+
+  it "is listed, regex-capable, explained, and drops a control-character value" do
+    Gori::QL::FIELDS.should contain("ws")
+    Gori::QL::REGEX_FIELDS.should contain("ws")
+    Gori::QL::FIELD_HELP.has_key?("ws").should be_true
+    Gori::QL::REFERENCE.should contain("ws:needle")
+    Gori::QL.parse(%(ws:"a\tb")).should eq(Gori::QL::EMPTY)
+    Gori::QL.dropped_term_reason("ws:a\tb").should eq("value contains control characters")
+    Gori::QL.invalid_regex_terms("ws~[").should eq(["ws~["])
+  end
+
+  it "spells a surface's one-transcript match the way the term does" do
+    Gori::QL.ws_match("token").should eq(Gori::QL.ws_message_cond("token", regex: false))
+    Gori::QL.ws_match("ws:token").should eq(Gori::QL.ws_message_cond("token", regex: false))
+    Gori::QL.ws_match("ws~t.k").should eq(Gori::QL.ws_message_cond("t.k", regex: true))
+    Gori::QL.ws_match("ws~[").should be_nil
+    Gori::QL.ws_match(%(WS:"two words")).should eq(Gori::QL.ws_message_cond("two words", regex: false))
+    Gori::QL.ws_match("").should be_nil
+  end
+end

@@ -15,8 +15,9 @@ class FakeExecContext < Gori::Verb::ExecContext
   getter calls = [] of Call
 
   property selected : Int64? = nil
-  property current_tab : Symbol = :history    # settable so tab-gated verbs (Decoder, …) can be exercised
-  property focused_section : Symbol = :common # settable so pane-gated chords can be exercised
+  property current_tab : Symbol = :history      # settable so tab-gated verbs (Decoder, …) can be exercised
+  property focused_section : Symbol = :common   # settable so pane-gated chords can be exercised
+  property? detail_messages_pane : Bool = false # settable so detail.narrow-messages can be offered
 
   # The recorded method names in dispatch order — the usual assertion target.
   def call_names : Array(Symbol)
