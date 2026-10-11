@@ -195,6 +195,19 @@ describe Gori::HttpTransport do
     reset_http_transport_proxy
   end
 
+  # OAST is gori's own service traffic: `--insecure-upstream` / `-k` relax a TARGET's
+  # certificate, never a collector's, so there is no way to build an unverifying client.
+  it "always verifies an OAST collector's certificate" do
+    with_untrusted_tls_origin do |port|
+      err = expect_raises(Gori::HttpTransport::Error) do
+        Gori::Oast::HttpClient.new.request("GET", "https://localhost:#{port}/poll")
+      end
+      err.kind.should eq(Gori::Proxy::Upstream::DialErrorKind::TlsVerify)
+    end
+  ensure
+    reset_http_transport_proxy
+  end
+
   it "does not offer a CA bundle for a handshake that never judged a certificate" do
     # A plaintext port answered as if it were TLS: no certificate was exchanged, so a trust
     # store cannot be the fix and saying so would send the operator after the wrong thing.
