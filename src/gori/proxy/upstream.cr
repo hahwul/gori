@@ -589,14 +589,8 @@ module Gori::Proxy
       {nil, DialError.new(DialErrorKind::Proxy, "#{proxy_label(route)}: the CONNECT exchange failed")}
     end
 
-    # The TCP leg to an upstream proxy, shared by the CONNECT and SOCKS5 routes.
-    #
-    # Refused when it reached gori's own listener on a dial that must not (`refuse_self`).
-    # Every request gori forwarded through it would arrive back as a new client and be
-    # forwarded through it again — the self-loop with one more hop, and an easy one to
-    # configure: start gori from a shell that already exports `HTTP_PROXY` at it. Asked after
-    # the connect for the reason `dialed_listener?` gives, and only on the proxy path: a
-    # Repeater send through gori's own listener is a client of it, and stops there.
+    # The TCP leg to an upstream proxy, shared by the CONNECT and SOCKS5 routes. `refuse_self`
+    # as in `dial_result` (an `HTTP_PROXY` pointed at gori is the self-loop with one more hop).
     private def self.dial_proxy_leg(route : Settings::UpstreamRoute, connect_timeout : Time::Span,
                                     io_timeout : Time::Span, refuse_self : Bool) : {TCPSocket?, DialError?}
       tcp = direct_dial(route.host, route.port, connect_timeout, io_timeout)
