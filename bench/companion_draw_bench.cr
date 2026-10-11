@@ -1,8 +1,9 @@
 # Companion.draw micro-benchmark. She is drawn on EVERY frame the Runner paints — not just on
 # the ~1/second where her sprite actually changes — so anything expensive in the draw path
-# is paid per keystroke, per scroll step, per job-spinner tick. This measures the cost that
-# is recomputed from scratch each call — resolving the mood palette (Theme.paper/soot plus ~7
-# blends, each converting colours to RGB components) — and the draw itself.
+# is paid per keystroke, per scroll step, per job-spinner tick. This measures resolving the
+# mood palette (Theme.paper/soot plus ~7 blends, each converting colours to RGB components) —
+# uncached, via a bench-only reopen, and through the memo `Mascot.palette` now serves per
+# frame — and the draw itself.
 #
 # Build: crystal build bench/companion_draw_bench.cr -o bin/companion_draw_bench --release
 # Run:   bin/companion_draw_bench
@@ -12,6 +13,12 @@ require "../spec/support/memory_backend"
 
 include Gori::Tui
 
+module Gori::Tui::Mascot
+  def self.bench_build_palette(mood : Symbol, plate : Color) : Palette
+    build_palette(mood, plate)
+  end
+end
+
 BODY = Rect.new(2, 4, 116, 28) # a 120x34 terminal's body
 IDLE = Mascot::Frame.new
 TALK = Mascot::Frame.new(pose: :happy, badge: '·', mood: :happy,
@@ -20,7 +27,8 @@ SCREEN = Screen.new(MemoryBackend.new(120, 34))
 
 puts "per frame:"
 Benchmark.ips do |x|
-  x.report("Mascot.palette (mood -> full ramp)") { Mascot.palette(:info, Theme.bg) }
+  x.report("Mascot build_palette (mood -> full ramp)") { Mascot.bench_build_palette(:info, Theme.bg) }
+  x.report("Mascot.palette (memo hit)") { Mascot.palette(:info, Theme.bg) }
   x.report("Companion.draw idle (no bubble)") { Companion.draw(SCREEN, BODY, IDLE) }
   x.report("Companion.draw with bubble") { Companion.draw(SCREEN, BODY, TALK) }
 end

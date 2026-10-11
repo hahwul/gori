@@ -1,9 +1,9 @@
 # What ONE keystroke costs in a TextArea, as a function of buffer size.
 #
-# `TextArea#highlighted` memoises on {kind, Theme.revision, Env.highlight_rev} with NO
-# content version, and every mutation sets `@styled = nil` — so each typed character
-# re-tokenises the WHOLE buffer. This is the Repeater / Fuzzer / Intercept / Rewriter / JWT
-# editor path, i.e. the one an operator holds a key down in.
+# Every mutation sets `@styled = nil`, so each typed character used to re-tokenise the WHOLE
+# buffer; `TextArea#highlighted` is now windowed (head eager, body styled per visible line),
+# so the cost should stay flat as the buffer grows. This is the Repeater / Fuzzer / Intercept /
+# Rewriter / JWT editor path, i.e. the one an operator holds a key down in.
 #
 # Build: crystal build bench/text_area_keystroke_bench.cr -o bin/text_area_keystroke_bench --release
 # Run:   bin/text_area_keystroke_bench

@@ -1,7 +1,7 @@
 # Cost of the response-shape fingerprint (#1351) on the per-response hot path.
 #
 # `Matcher#build` runs once per response, and `Shape.compute` now runs inside it over the body
-# that call already decoded. This measures it against the build it rides in, on a 216 KB HTML
+# that call already decoded. This measures it against the build it rides in, on a 184 KB HTML
 # body, a 1.2 MB one, and a small JSON answer,
 # with and without a reflected payload to mask. The number that matters is the allocation
 # column: the fingerprint must not add a per-response buffer (P6).

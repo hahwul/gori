@@ -120,7 +120,7 @@ end
 # Ordinary content-heavy pages (a docs page, a product listing, a dashboard with server-rendered
 # rows) land here routinely, and this is the fixture that actually exercises BodyLeaks' HTML sink
 # checks at their real width: they read `client_body_text`, not the 64 KiB `body_text` the leak
-# scans use, so the 40 KiB HTML_BODY above cannot show their cost at all.
+# scans use, so the ~30 KB HTML_BODY above cannot show their cost at all.
 #
 # It carries NO cleartext URL, no `javascript:` and no `_blank` — that is the point. This is the
 # common case, and it measures whether the literal prefilters really keep a clean page off the

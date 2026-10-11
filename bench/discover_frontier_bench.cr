@@ -19,7 +19,8 @@ end
 
 require "../src/gori/discover/engine"
 require "../src/gori/discover/wordlist"
-# See bench/discover_keepalive_bench.cr: a partial build that stops at the engine needs this.
+# `Env.expand_bindings` calls `Bindings.boundary_forging?`, and env.cr cannot require
+# bindings.cr back without a cycle, so a partial build that stops at the engine needs this.
 require "../src/gori/bindings"
 
 alias D = Gori::Discover
@@ -60,8 +61,14 @@ cfg = D::Config.new(concurrency: 1, retries: 0, extensions: EXTS, max_depth: 2,
 backend = GateBackend.new
 engine = D::Engine.new("http://t.test/", WORDS, backend, cfg)
 
+# Live bytes, not heap_size: the heap only grows, so its size also counts freed space.
+def live_bytes : Int64
+  s = GC.stats
+  (s.heap_size - s.free_bytes).to_i64
+end
+
 GC.collect
-before = GC.stats.heap_size
+before = live_bytes
 done = Channel(Nil).new
 spawn do
   engine.run { |_| }
@@ -69,10 +76,10 @@ spawn do
 end
 backend.reached.receive
 GC.collect
-after = GC.stats.heap_size
+after = live_bytes
 probes = (DIRS + 1) * WORDS.size * (1 + EXTS.size)
 puts "#{DIRS + 1} directories × #{WORDS.size} words × #{1 + EXTS.size} spellings = #{probes} candidates"
-puts "heap after fan-out: #{(after - before) // 1024 // 1024} MiB (#{(after - before) // probes} B per candidate)"
+puts "live heap after fan-out: #{(after - before) // 1024 // 1024} MiB (#{(after - before) // probes} B per candidate)"
 engine.stop
 backend.release.close
 done.receive

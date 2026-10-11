@@ -43,6 +43,7 @@ def with_store(&)
     File.delete?(path)
     File.delete?("#{path}-wal")
     File.delete?("#{path}-shm")
+    File.delete?("#{path}.open.lock")
   end
 end
 
@@ -60,8 +61,7 @@ end
 
 # `memoized` reads Context's getter (built once per flow); the other arm rebuilds the
 # concatenation for every rule, which is what `CustomRule#join` did.
-def run_whole(store, n : Int32, memoized : Bool) : Float64
-  d = detail(store)
+def run_whole(d : Store::FlowDetail, n : Int32, memoized : Bool) : Float64
   Benchmark.measure do
     ITERS.times do
       ctx = Probe::Passive::Context.new(d)
@@ -78,9 +78,9 @@ def run_whole(store, n : Int32, memoized : Bool) : Float64
   end.real
 end
 
-def alloc_whole(store, n : Int32, memoized : Bool) : Int64
+def alloc_whole(d : Store::FlowDetail, n : Int32, memoized : Bool) : Int64
   before = GC.stats.total_bytes
-  run_whole(store, n, memoized)
+  run_whole(d, n, memoized)
   (GC.stats.total_bytes - before).to_i64
 end
 
@@ -88,13 +88,17 @@ def mb(bytes : Int64) : String
   "#{(bytes / 1024.0 / 1024.0).round(1)} MB"
 end
 
-puts "custom rules: #{RULES} whole-region rules x #{ITERS} flows, #{BODY.bytesize // 1024} KiB body"
+puts "custom rules: #{RULES} whole-region rules x #{ITERS} flows, #{BODY.bytesize // 1024} KiB body " \
+     "(body_text scans the first #{Probe::Passive::Context::BODY_CAP // 1024} KiB)"
 puts
 
 with_store do |store|
-  per_rule = run_whole(store, RULES, false)
-  memoized = run_whole(store, RULES, true)
-  puts "  rebuilt per rule    #{(per_rule * 1000).round(1)} ms   #{mb(alloc_whole(store, RULES, false))} allocated"
-  puts "  memoized on Context #{(memoized * 1000).round(1)} ms   #{mb(alloc_whole(store, RULES, true))} allocated"
+  d = detail(store)          # built once, so neither timing nor allocation counts the DB round-trip
+  run_whole(d, RULES, false) # warm-up: first-touch page faults and lazy init land here
+  run_whole(d, RULES, true)
+  per_rule = run_whole(d, RULES, false)
+  memoized = run_whole(d, RULES, true)
+  puts "  rebuilt per rule    #{(per_rule * 1000).round(1)} ms   #{mb(alloc_whole(d, RULES, false))} allocated"
+  puts "  memoized on Context #{(memoized * 1000).round(1)} ms   #{mb(alloc_whole(d, RULES, true))} allocated"
   puts "  speedup             #{(per_rule / memoized).round(2)}x"
 end

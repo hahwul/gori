@@ -1,6 +1,6 @@
-# Probe-rule micro-benchmarks. The first isolates Tech's GraphQL pre-gate; the second measures
-# CacheableApi's shared Cache-Control parse + six directive queries, including the old allocation-
-# heavy predicates for a direct comparison.
+# Probe-rule micro-benchmarks. The first isolates Tech's GraphQL pre-gate (String vs raw bytes);
+# the second measures CacheableApi's shared Cache-Control parse + six directive queries, including
+# the old allocation-heavy predicates for a direct comparison.
 #
 # Build: crystal build bench/probe_bench.cr -o bin/probe_bench --release
 # Run:   bin/probe_bench
@@ -8,9 +8,12 @@ require "benchmark"
 require "json"
 require "../src/gori/proxy/codec/message"
 require "../src/gori/probe/passive/cache_control"
+require "../src/gori/utf8"
+require "../src/gori/ascii_bytes"
 
 # A realistic non-GraphQL JSON POST body (an ordinary API request payload — the common shape
-# that used to pay a full JSON.parse just to be classified "not GraphQL").
+# that used to pay a full JSON.parse just to be classified "not GraphQL"), as the raw wire bytes
+# the Tech rule receives.
 NON_GQL = begin
   io = IO::Memory.new
   io << %({"filters":{"status":"active","tags":["a","b","c"]},"items":[)
@@ -19,28 +22,37 @@ NON_GQL = begin
     io << %({"id":) << i << %(,"name":"item) << i << %(","qty":) << (i % 50) << %(,"note":"ordinary text value ) << i << "\"}"
   end
   io << "]}"
-  String.new(io.to_slice).scrub
+  io.to_slice.dup
+end
+QUERY_KEY = %("query").to_slice
+
+# The previous gate: materialise the body as a String (copy + UTF-8 validation), then search it.
+def string_gate?(body : Bytes) : Bool
+  Gori::Utf8.text(body).includes?(%("query"))
 end
 
-# The pre-gate the Tech rule now runs before parsing.
-def has_query_gate?(text : String) : Bool
-  text.includes?(%("query"))
+# The gate tech.cr runs now: scan the raw bytes before any String exists.
+def byte_gate?(body : Bytes) : Bool
+  Gori::AsciiBytes.contains_ci?(body, QUERY_KEY)
 end
 
-# The old path: always parse.
-def parse_for_query(text : String) : String?
-  JSON.parse(text).as_h?.try(&.["query"]?).try(&.as_s?)
+# The oldest path: always parse.
+def parse_for_query(body : Bytes) : String?
+  JSON.parse(Gori::Utf8.text(body)).as_h?.try(&.["query"]?).try(&.as_s?)
 rescue JSON::ParseException
   nil
 end
 
 puts "Tech GraphQL-detection gate bench (non-GraphQL JSON POST = the common shape):"
-puts "body = #{NON_GQL.bytesize} bytes; gate says query? #{has_query_gate?(NON_GQL)}"
+puts "body = #{NON_GQL.size} bytes; gate says query? #{byte_gate?(NON_GQL)}"
 
 Benchmark.ips do |x|
-  x.report("OLD: JSON.parse every JSON body") { parse_for_query(NON_GQL) }
-  x.report("NEW: substring pre-gate then skip") do
-    parse_for_query(NON_GQL) if has_query_gate?(NON_GQL)
+  x.report("OLDEST: JSON.parse every JSON body") { parse_for_query(NON_GQL) }
+  x.report("OLD: Utf8.text + includes? gate") do
+    parse_for_query(NON_GQL) if string_gate?(NON_GQL)
+  end
+  x.report("NEW: contains_ci? on raw bytes") do
+    parse_for_query(NON_GQL) if byte_gate?(NON_GQL)
   end
 end
 
