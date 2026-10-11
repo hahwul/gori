@@ -1205,7 +1205,7 @@ module Gori
           end
           puts "=== RESPONSE ==="
           if err = detail.error
-            puts "error: #{err}"
+            puts "error: #{CLI::Output.term_line(err)}"
           end
           if h = detail.response_head
             print_message_text(h, display_body(h, detail.response_body), detail.response_body, cap)

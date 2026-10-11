@@ -315,7 +315,7 @@ module Gori
         # `first_error` so a run that merely hit --max-requests (a budget, not a failure)
         # still exits 0. Mirrors `gori run fuzz`'s #410 backstop and mine's above.
         if tokens.empty? && (reason = engine.first_error)
-          STDERR.puts "sequence: every replay failed — #{reason}"
+          STDERR.puts "sequence: every replay failed — #{CLI::Output.term_line(reason)}"
           exit 1
         end
         # Replies came back but none carried a token where the locator looked: the CRITICAL

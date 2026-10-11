@@ -101,7 +101,7 @@ module Gori
       # macro was working, and a failure without it is the number that explains the error rows.
       private def self.note_request_macro_result(cmd : String, tally : RequestMacro::Tally?) : Nil
         return unless t = tally
-        STDERR.puts "#{cmd}: macro: #{t.summary}"
+        STDERR.puts "#{cmd}: macro: #{CLI::Output.term_line(t.summary)}"
       end
 
       # Hand the run's macro the writable handle this command holds for the run, so its steps are

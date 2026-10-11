@@ -1997,7 +1997,7 @@ module Gori
           # A server frame's text is the remote's choice of bytes: named, never replayed raw.
           result.messages.each { |m| puts CLI::Output.term_safe(ws_transcript_line(m)) }
         else
-          STDERR.puts "gori run repeater send: send failed: #{result.error}"
+          STDERR.puts "gori run repeater send: send failed: #{CLI::Output.term_line(result.error.to_s)}"
         end
       end
 
@@ -2141,7 +2141,7 @@ module Gori
         else
           # Named after the command that sent it: `gori run send` said "repeater failed:", a
           # surface the operator never invoked (#1389).
-          STDERR.puts "#{prefix}: send failed: #{result.error}"
+          STDERR.puts "#{prefix}: send failed: #{CLI::Output.term_line(result.error.to_s)}"
           # An error and a RESPONSE are not exclusive. The engine deliberately keeps the head
           # for exactly this case (`engine.cr` — "must NOT throw the head away as a bare error
           # string"), and two shapes reach here with both: a framing error over a head gori

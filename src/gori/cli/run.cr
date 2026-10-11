@@ -1197,7 +1197,7 @@ module Gori
       # the value went out literally, and otherwise only an event row (when writable) records it.
       private def self.report_unbound_slot_overlay(cmd : String) : Nil
         if runner = Gori::SessionRefresh.hook.as?(Gori::SessionRefresh::Runner)
-          runner.take_outcomes.each { |o| STDERR.puts "#{cmd}: #{o.message}" unless o.ok || o.manual }
+          runner.take_outcomes.each { |o| STDERR.puts "#{cmd}: #{CLI::Output.term_line(o.message)}" unless o.ok || o.manual }
         end
         note = unbound_overlay_note(Env.take_unbound_overlay)
         STDERR.puts "#{cmd}: #{note}" if note
@@ -1313,7 +1313,7 @@ module Gori
           evidence: true)
         result = sender.send(built.bytes)
         if err = result.error
-          abort "#{cmd}: --bind-from: replaying flow ##{flow_id} failed: #{err}"
+          abort "#{cmd}: --bind-from: replaying flow ##{flow_id} failed: #{CLI::Output.term_line(err)}"
         end
         bound = bindings.values.keys
         if bound.empty?

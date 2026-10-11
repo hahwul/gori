@@ -2222,3 +2222,16 @@ describe Gori::Repeater::H2Engine do
     end
   end
 end
+
+# The GOAWAY debug data is the peer's bytes, and the sentence becomes `Result#error`, which the
+# CLI and MCP's log print as-is: its control bytes are badged at the source.
+describe "Gori::Repeater::H2Engine.goaway_reason" do
+  it "badges control bytes in the peer's debug data" do
+    payload = IO::Memory.new
+    payload.write(Bytes[0, 0, 0, 1, 0, 0, 0, 1])
+    payload << "bad\e]0;PWNED\a frame"
+    frame = Frame::Header.new(Frame::Type::Goaway.value, 0_u8, 0_u32, payload.to_slice)
+    reason = Gori::Repeater::H2Engine.goaway_reason(frame)
+    reason.should eq("h2 GOAWAY PROTOCOL_ERROR (bad⟨ESC⟩]0;PWNED⟨BEL⟩ frame)")
+  end
+end

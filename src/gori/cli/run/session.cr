@@ -609,7 +609,7 @@ module Gori
         if format == :json
           puts(JSON.build { |j| session_refresh_json(j, outcome) })
         else
-          puts outcome.message
+          puts CLI::Output.term_line(outcome.message)
           STDERR.puts "session refresh: the rebound values live in THIS process only and ended with it; " \
                       "a `--slot #{name}` send refreshes in its own process when the slot has a --refresh-before policy"
         end

@@ -311,7 +311,7 @@ module Gori
         reason = engine.first_error
         return false unless reason
         blocked = engine.blocked
-        STDERR.puts "mine: every request failed — #{reason}#{blocked > 0 ? " (#{blocked} refused before the socket)" : ""}"
+        STDERR.puts "mine: every request failed — #{CLI::Output.term_line(reason)}#{blocked > 0 ? " (#{blocked} refused before the socket)" : ""}"
         true
       end
 

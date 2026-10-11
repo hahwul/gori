@@ -254,7 +254,7 @@ module Gori
             end
           when Discover::ProgressEvent then discover_progress(ev)
           when Discover::DoneEvent     then discover_done(ev, engine, pool_stats)
-          when Discover::ErrorEvent    then had_error = true; STDERR.puts "discover error: #{ev.message}"
+          when Discover::ErrorEvent    then had_error = true; STDERR.puts "discover error: #{CLI::Output.term_line(ev.message)}"
           end
         end
         # Flush after the loop (not in the Done branch): an error terminates with an ErrorEvent

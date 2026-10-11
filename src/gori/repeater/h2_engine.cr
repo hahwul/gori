@@ -6,6 +6,7 @@ require "../proxy/h2/grpc"
 require "../proxy/codec/http1"
 require "./engine"
 require "../url"
+require "../unicode_reveal"
 
 module Gori
   module Repeater
@@ -1263,7 +1264,12 @@ module Gori
         return "h2 GOAWAY (no error code)" if payload.size < 8
         code = IO::ByteFormat::BigEndian.decode(UInt32, payload[4, 4]).to_i
         name = ERROR_CODES[code]? || "error code #{code}"
+        # The debug data is the PEER's bytes, and this sentence becomes `Result#error`, which a
+        # dozen `gori run` sites and MCP's log print as-is. `scrub` alone left an ESC sequence
+        # intact for the operator's terminal, so the controls are badged here, once, at the
+        # source (`UnicodeReveal`, the TUI's own rule) — the diagnostic stays readable.
         debug = payload.size > 8 ? String.new(payload[8..]).scrub.strip : ""
+        debug = UnicodeReveal.visible(debug) || debug
         debug.empty? ? "h2 GOAWAY #{name}" : "h2 GOAWAY #{name} (#{debug})"
       end
 
