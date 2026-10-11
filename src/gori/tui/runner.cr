@@ -7283,7 +7283,7 @@ module Gori::Tui
         proxy_port: @session.proxy.port,
         ca_cert_path: @session.ca.ca_cert_path,
         spki_sha256: @session.ca.spki_sha256_base64,
-        profile_root: File.join(Gori::Paths.home_dir, "browser"))
+        profile_root: Browser.default_profile_root)
       @toast = Browser.launch(browser, spec)
     rescue ex
       @toast = "browser launch failed: #{ex.message}"

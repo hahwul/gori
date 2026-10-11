@@ -67,7 +67,7 @@ parity with it, and every parity gap found so far has been in a surface, not an 
   wiring CLI or MCP into the registry.
 - **Layering contract:** core subsystems must not know a surface exists. Enforced by
   `spec/layering_spec.cr`, which scans these directories plus `sitemap/` and a few top-level
-  engine files (`bindings`, `session_slot(s)`, `project_search`, `js_refs`) and fails on any hit
+  engine files (`bindings`, `session_slot(s)`, `project_search`, `js_refs`, `browser`) and fails on any hit
   that is not a comment line. The quick manual form covers the core of that set:
 
   ```sh

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- CLI: `gori run browser` opens the Open browser profile from a script, with an opt-in loopback DevTools port so Playwright MCP or chrome-devtools-mcp can drive a captured browser (#1594)
+
 ## v0.8.1
 
 - MCP: `--pin-project`, `switch_project` with `unbind:true`, a joined `url` on flow and sitemap rows, and a **Run local commands** permission (#1508, #1556, #1558, #1560, #1584)

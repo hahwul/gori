@@ -1,4 +1,5 @@
 require "base64"
+require "digest/sha256"
 require "./ffi"
 
 module Gori::Proxy::Tls
@@ -122,11 +123,26 @@ module Gori::Proxy::Tls
       end
     end
 
+    # Base64(SHA-256(DER SubjectPublicKeyInfo)) — the value a Chromium browser wants in
+    # `--ignore-certificate-errors-spki-list` to trust exactly this certificate's key. On the
+    # cert rather than the CA so a process holding only the cert file (`gori run browser`)
+    # pins the same value the TUI does.
+    def spki_sha256_base64 : String
+      pubkey = LibCrypto.x509_get_x509_pubkey(@handle)
+      raise Gori::Error.new("X509_get_X509_PUBKEY failed") if pubkey.null?
+      len = LibCrypto.i2d_x509_pubkey(pubkey, Pointer(Pointer(UInt8)).null)
+      raise Gori::Error.new("i2d_X509_PUBKEY sizing failed") if len <= 0
+      der = Bytes.new(len)
+      ptr = der.to_unsafe
+      LibCrypto.i2d_x509_pubkey(pubkey, pointerof(ptr)) # writes into der, advances ptr
+      Base64.strict_encode(Digest::SHA256.digest(der))
+    end
+
     # DER (binary ASN.1) encoding of the certificate — the form OS/browser trust
     # stores accept for a double-click install (the self-serve CA download page's
     # .der/.crt route). A null `pp` first sizes the buffer, then i2d writes into it
     # and ADVANCES the pointer (hence a local copy of `der.to_unsafe`), mirroring
-    # CertAuthority#spki_sha256_base64.
+    # #spki_sha256_base64.
     def to_der : Bytes
       len = LibCrypto.i2d_x509(@handle, Pointer(Pointer(UInt8)).null)
       raise Gori::Error.new("i2d_X509 sizing failed") if len <= 0
