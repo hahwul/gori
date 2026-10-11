@@ -122,10 +122,22 @@ describe "MCP export_openapi output_path" do
         r.is_error.should be_true
         r.field.should eq("output_path")
         File.read(path).should eq("keep me")
+        # The agent named the path, so overwrite replaces only an earlier OpenAPI document.
+        r = tools.call("export_openapi", JSON.parse({output_path: path, overwrite: true}.to_json))
+        r.is_error.should be_true
+        r.text.should contain("not an OpenAPI document")
+        File.read(path).should eq("keep me")
+        File.write(path, %({"openapi":"3.0.3","info":{},"paths":{}}))
         mcp_ok_json(tools, "export_openapi", {output_path: path, overwrite: true}.to_json)
         JSON.parse(File.read(path))["openapi"].as_s.should eq("3.0.3")
+        JSON.parse(File.read(path))["paths"].as_h.should_not be_empty
+        # …in either format the tool writes.
+        yaml = path.sub(/\.json$/, ".yaml")
+        mcp_ok_json(tools, "export_openapi", {output_path: yaml}.to_json)
+        mcp_ok_json(tools, "export_openapi", {output_path: yaml, overwrite: true}.to_json)
       ensure
         File.delete?(path)
+        yaml.try { |y| File.delete?(y) }
       end
     end
   end

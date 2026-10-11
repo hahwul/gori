@@ -47,7 +47,7 @@ module Gori
         # for the path it installs to.
         begin
           ProjectArchive.resolve_destination(path, project, overwrite: overwrite,
-            loose_database: !registered, protected_dir: Paths.home_dir)
+            loose_database: !registered, protected_dir: Paths.home_dir, archives_only: true)
         rescue ex : Gori::Error
           return archive_destination_error(ex)
         end
@@ -63,7 +63,7 @@ module Gori
         begin
           replaced = overwrite && ProjectArchive.destination_exists?(Path[path].expand(home: true).to_s)
           destination = begin
-            prepared.write(path, overwrite: overwrite, protected_dir: Paths.home_dir)
+            prepared.write(path, overwrite: overwrite, protected_dir: Paths.home_dir, archives_only: true)
           rescue ex : Gori::Error
             return archive_destination_error(ex)
           rescue ex : File::Error | IO::Error
@@ -85,6 +85,9 @@ module Gori
         message = case ex
                   when ProjectArchive::DestinationExists
                     "destination already exists: #{ex.path} — pass overwrite:true to replace it, or choose another 'path'"
+                  when ProjectArchive::NotAnArchive
+                    "destination exists and is not a gori project archive: #{ex.path} — overwrite:true " \
+                    "replaces only an earlier export; choose another 'path'"
                   when ProjectArchive::ProtectedDestination
                     "refusing to write a project archive inside gori's home (#{ex.dir}): it holds every " \
                     "project's database and gori's settings — choose a 'path' outside it"
@@ -289,7 +292,7 @@ module Gori
           s.field "path", strprop("destination file for the archive (relative paths resolve against " \
                                   "the MCP server's working directory; the result reports the absolute path)"), required: true
           s.field "project", strprop("project to export: short id, dir slug, or display name (default: the bound project)")
-          s.field "overwrite", boolprop("replace an existing file at 'path' (default false)")
+          s.field "overwrite", boolprop("replace an existing file at 'path' (default false); only an earlier gori project archive is ever replaced")
         end
 
         tool j, "import_project",

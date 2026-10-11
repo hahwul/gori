@@ -3,6 +3,7 @@ require "../../ql"
 require "../../sitemap"
 require "../../param_inventory"
 require "../../export/openapi"
+require "../../import/oas"
 require "../../durable_file"
 require "../serialize"
 
@@ -539,14 +540,26 @@ module Gori
             return err("output_path already exists: #{target} — pass overwrite:true to replace it, or choose another path",
               "INVALID_ARGUMENT", field: "output_path")
           end
-          # A loose `--db` project lives anywhere; replacing one a gori has open would unlink a
-          # live database. `export_project` refuses the same target.
-          if OpenLock.in_use?(target)
-            return err("output_path is a database open in a running gori instance: #{target}",
-              "INVALID_ARGUMENT", field: "output_path")
+          if refusal = openapi_replace_refusal(target)
+            return refusal
           end
         end
         target
+      end
+
+      # Why `overwrite:true` may not replace the existing *target*, or nil.
+      private def openapi_replace_refusal(target : String) : Result?
+        # A loose `--db` project lives anywhere; replacing one a gori has open would unlink a
+        # live database. `export_project` refuses the same target.
+        if OpenLock.in_use?(target)
+          return err("output_path is a database open in a running gori instance: #{target}",
+            "INVALID_ARGUMENT", field: "output_path")
+        end
+        # The agent named this path, so `overwrite` replaces only what this tool writes —
+        # never `~/.ssh/id_ed25519` (export_project draws the same line for archives).
+        return nil if Import::Oas.document?(target, OPENAPI_MAX_BYTES)
+        err("output_path exists and is not an OpenAPI document: #{target} — overwrite:true " \
+            "replaces only an earlier export; choose another path", "INVALID_ARGUMENT", field: "output_path")
       end
 
       # The flow set: the QL query, then the per-flow scope and hide-static lenses. Unconfigured
@@ -772,7 +785,7 @@ module Gori
           s.field "path_prefix", strprop("only endpoints whose path starts with this, e.g. /api/v1")
           s.field "format", strprop("json (default) or yaml; with output_path, a .yaml/.yml extension picks yaml")
           s.field "output_path", strprop("write the document to this file instead of returning it (refused under --read-only; the parent directory must exist; not inside gori's home). max_bytes then defaults to its maximum")
-          s.field "overwrite", boolprop("with output_path, replace an existing file (default false: refused)")
+          s.field "overwrite", boolprop("with output_path, replace an existing file (default false: refused); only an existing OpenAPI document is ever replaced")
           s.field "include_gori", boolprop("keep the requests gori itself sent — Repeater, Fuzzer, Miner, Discover… (default false: a brute force or a fuzz run would describe gori's probing, not the API)")
           s.field "examples", boolprop("add example values from one sample each, redacted through the profile (default false)")
           s.field "redact", strprop("redaction profile the examples pass through (default: the project's, else the global one, else `default`); needs examples:true")

@@ -42,6 +42,17 @@ module Gori
       end
     end
 
+    # An export refused because `overwrite` was asked for over a file that is not a project
+    # archive, by a caller that may replace only its own kind of output (MCP: an agent names
+    # the path, and with a bare `overwrite` it could rename an archive over `~/.ssh/id_ed25519`).
+    class NotAnArchive < Gori::Error
+      getter path : String
+
+      def initialize(@path : String)
+        super("destination is not a gori project archive: #{@path}")
+      end
+    end
+
     # An export refused because its destination is inside a directory the caller protected
     # (MCP protects gori's home, which holds every project's database and the settings).
     class ProtectedDestination < Gori::Error
@@ -201,12 +212,14 @@ module Gori
         @closed = false
       end
 
-      # *protected_dir* is refused as a destination along with the source project; see
+      # *protected_dir* is refused as a destination along with the source project, and
+      # *archives_only* limits `overwrite` to an existing archive; see
       # `ProjectArchive.resolve_destination`, which runs again here for the path installed to.
-      def write(path : String, *, overwrite : Bool = false, protected_dir : String? = nil) : String
+      def write(path : String, *, overwrite : Bool = false, protected_dir : String? = nil,
+                archives_only : Bool = false) : String
         raise Gori::Error.new("project archive is already closed") if @closed
         target = ProjectArchive.resolve_destination(path, @project, overwrite: overwrite,
-          loose_database: @loose_database, protected_dir: protected_dir)
+          loose_database: @loose_database, protected_dir: protected_dir, archives_only: archives_only)
         temp = write_temporary_archive(target)
         begin
           install_archive(temp, target, overwrite)
@@ -294,8 +307,11 @@ module Gori
     #
     # Replacing an existing file is refused outright when it is a database a running gori has
     # open: renaming the archive over it would unlink the file that process keeps writing into.
+    # *archives_only* (MCP) also refuses replacing anything that is not already an archive
+    # (`archive?`): the operator who types a CLI path chose it; an agent's path is not a choice.
     def self.resolve_destination(path : String, source : Project, *, overwrite : Bool = false,
-                                 loose_database : Bool = false, protected_dir : String? = nil) : String
+                                 loose_database : Bool = false, protected_dir : String? = nil,
+                                 archives_only : Bool = false) : String
       target = expand_destination(path)
       canonical_target = Paths.canonical_file(target)
       refuse_source_destination(canonical_target, source, loose_database)
@@ -303,7 +319,18 @@ module Gori
         raise ProtectedDestination.new(target, dir) if Paths.within?(canonical_target, Paths.canonical_file(dir))
       end
       refuse_existing_destination(target, overwrite)
+      raise NotAnArchive.new(target) if archives_only && destination_exists?(target) && !archive?(target)
       target
+    end
+
+    # Whether *path* has a project archive's shape: a zip holding exactly `manifest.json` and
+    # `gori.db`, what `write_temporary_archive` writes. Read off the central directory, so a
+    # multi-GiB archive costs a seek, not a decompress; anything unreadable is not one.
+    def self.archive?(path : String) : Bool
+      names = Compress::Zip::File.open(path, &.entries.map(&.filename))
+      names.sort == ["gori.db", "manifest.json"]
+    rescue Compress::Zip::Error | IO::Error
+      false
     end
 
     private def self.expand_destination(path : String) : String

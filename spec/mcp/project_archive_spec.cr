@@ -134,10 +134,24 @@ describe "MCP export_project" do
       refused.text.should_not contain("--force")
       File.read(target).should eq("keep this file")
 
-      replaced = archive_call(tools, "export_project", {"path" => target, "overwrite" => true})
+      # The agent named the path, so overwrite replaces only an earlier archive — never a key
+      # file, a zip of something else, or anything else the operator can write.
+      not_archive = archive_call(tools, "export_project", {"path" => target, "overwrite" => true})
+      not_archive.error_code.should eq("INVALID_ARGUMENT")
+      not_archive.field.should eq("path")
+      not_archive.text.should contain("not a gori project archive")
+      File.read(target).should eq("keep this file")
+      other_zip = File.join(root, "other.zip")
+      File.open(other_zip, "w") { |f| Compress::Zip::Writer.open(f, &.add("gori.db", "x")) }
+      archive_call(tools, "export_project", {"path" => other_zip, "overwrite" => true}).text
+        .should contain("not a gori project archive")
+
+      earlier = File.join(root, "earlier.gori")
+      archive_call(tools, "export_project", {"path" => earlier}).is_error.should be_false
+      replaced = archive_call(tools, "export_project", {"path" => earlier, "overwrite" => true})
       replaced.is_error.should be_false
       JSON.parse(replaced.text)["replaced_existing"].as_bool.should be_true
-      archive_entries(target).keys.sort!.should eq(["gori.db", "manifest.json"])
+      archive_entries(earlier).keys.sort!.should eq(["gori.db", "manifest.json"])
     end
   end
 
