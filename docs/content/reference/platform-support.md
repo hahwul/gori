@@ -38,7 +38,7 @@ Release binaries for Windows start with v0.8.0.
 
 | Area | On Windows |
 |------|------------|
-| Console | The TUI needs a console that speaks VT sequences: Windows Terminal, or any Windows 10 1809+ console. |
+| Console | The TUI needs a console that speaks VT sequences (Windows 10 1809+). Use Windows Terminal: the classic console window, which a double-clicked `.exe` or `cmd.exe` opens, can drop border lines and overlap a few symbols, depending on its font. |
 | Signals | There are no POSIX signals. Ctrl-C and Ctrl-Break act as `INT`; closing the console window, logging off or shutting down act as `TERM`, but Windows ends the process soon after, so cleanup on those gets little time. |
 | [`gori run shell`](/reference/cli/#run-shell) | The CA bundle it writes starts from the system roots, which gori looks for only at Unix paths. On Windows it holds gori's root alone unless `SSL_CERT_FILE` already names a bundle, so a tool in that shell fails TLS verification for any host gori does not intercept (a passthrough host, anything in `NO_PROXY`). Export a full bundle as `SSL_CERT_FILE` first to avoid it. The default `--print` syntax there is PowerShell. |
 | File permissions | POSIX modes such as `0600` on the root CA key do not apply. Files under `GORI_HOME` (`%USERPROFILE%\.gori`) get whatever access that folder grants. |

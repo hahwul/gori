@@ -230,7 +230,7 @@ Move-Item gori-v*-windows-x86_64.exe "$env:LOCALAPPDATA\Programs\gori\gori.exe"
 # then add that folder to your user PATH (Settings → Environment Variables)
 ```
 
-Run the TUI in Windows Terminal (or any console that speaks VT sequences, which every Windows 10 1809+ console does). `gori update` replaces the `.exe` in place. `GORI_HOME` defaults to `%USERPROFILE%\.gori`.
+Run the TUI in Windows Terminal. The classic console window, which opens when you double-click the `.exe` or run it from `cmd.exe`, can drop border lines and overlap a few symbols, depending on its font. `gori update` replaces the `.exe` in place. `GORI_HOME` defaults to `%USERPROFILE%\.gori`.
 
 ## Build from Source
 

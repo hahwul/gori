@@ -38,7 +38,7 @@ Windows 릴리스 바이너리는 v0.8.0부터 제공됩니다.
 
 | 영역 | Windows에서는 |
 |------|---------------|
-| 콘솔 | TUI는 VT 시퀀스를 처리하는 콘솔이 필요합니다. Windows Terminal이나 Windows 10 1809 이상의 콘솔이면 됩니다. |
+| 콘솔 | TUI는 VT 시퀀스를 처리하는 콘솔(Windows 10 1809 이상)이 필요합니다. Windows Terminal을 쓰세요. `.exe`를 더블클릭하거나 `cmd.exe`에서 열리는 기본 콘솔 창에서는 글꼴에 따라 테두리 선이 빠지거나 일부 기호가 겹쳐 보일 수 있습니다. |
 | 시그널 | POSIX 시그널이 없습니다. Ctrl-C와 Ctrl-Break는 `INT`로, 콘솔 창 닫기·로그오프·종료는 `TERM`으로 처리합니다. 다만 후자는 Windows가 곧바로 프로세스를 끝내므로 정리 작업에 쓸 시간이 거의 없습니다. |
 | [`gori run shell`](/ko/reference/cli/#run-shell) | 이 명령이 만드는 CA 번들은 시스템 루트 인증서에서 출발하는데, gori는 그 위치를 Unix 경로에서만 찾습니다. 그래서 Windows에서는 `SSL_CERT_FILE`이 이미 번들을 가리키고 있지 않은 한 gori 루트만 담기고, 그 셸의 도구는 gori가 가로채지 않는 호스트(패스스루 호스트, `NO_PROXY` 대상)에서 TLS 검증에 실패합니다. 전체 번들을 `SSL_CERT_FILE`로 먼저 export해 두면 피할 수 있습니다. 이곳의 기본 `--print` 문법은 PowerShell입니다. |
 | 파일 권한 | 루트 CA 키의 `0600` 같은 POSIX 모드가 적용되지 않습니다. `GORI_HOME`(`%USERPROFILE%\.gori`) 아래 파일의 접근 권한은 그 폴더 설정을 따릅니다. |

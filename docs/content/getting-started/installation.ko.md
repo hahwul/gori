@@ -229,7 +229,7 @@ Move-Item gori-v*-windows-x86_64.exe "$env:LOCALAPPDATA\Programs\gori\gori.exe"
 # 그다음 그 폴더를 사용자 PATH에 추가합니다 (설정 → 환경 변수)
 ```
 
-TUI는 Windows Terminal(또는 VT 시퀀스를 처리하는 콘솔, Windows 10 1809 이상이면 모두 해당)에서 실행하세요. `gori update`는 `.exe`를 제자리에서 교체합니다. `GORI_HOME`의 기본값은 `%USERPROFILE%\.gori`입니다.
+TUI는 Windows Terminal에서 실행하세요. `.exe`를 더블클릭하거나 `cmd.exe`에서 실행할 때 열리는 기본 콘솔 창에서는 글꼴에 따라 테두리 선이 빠지거나 일부 기호가 겹쳐 보일 수 있습니다. `gori update`는 `.exe`를 제자리에서 교체합니다. `GORI_HOME`의 기본값은 `%USERPROFILE%\.gori`입니다.
 
 ## 소스에서 빌드 {#build-from-source}
 
