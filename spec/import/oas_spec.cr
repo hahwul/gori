@@ -15,6 +15,19 @@ private def with_spec(body : String, ext : String, &)
 end
 
 describe Gori::Import::Oas do
+  # `export_openapi{overwrite}` asks `document?` of a path an agent named: a FIFO (or
+  # `/dev/stdin`) must be answered without opening it.
+  it "answers document? false for a non-regular file without opening it" do
+    posix_only!("mkfifo")
+    path = File.tempname("gori-oas-fifo")
+    begin
+      Process.run("mkfifo", [path]).success?.should be_true
+      Gori::Import::Oas.document?(path, 1 << 20).should be_false
+    ensure
+      File.delete?(path)
+    end
+  end
+
   it "imports an ordinary spec" do
     body = <<-YAML
       openapi: 3.0.0

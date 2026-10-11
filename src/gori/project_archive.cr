@@ -327,8 +327,10 @@ module Gori
 
     # Whether *path* has a project archive's shape: a zip holding exactly `manifest.json` and
     # `gori.db`, what `write_temporary_archive` writes. Read off the central directory, so a
-    # multi-GiB archive costs a seek, not a decompress; anything unreadable is not one.
+    # multi-GiB archive costs a seek, not a decompress; anything unreadable is not one. Only a
+    # regular file is opened: a FIFO would block the open, and the MCP server with it.
     def self.archive?(path : String) : Bool
+      return false unless File.info(path, follow_symlinks: false).file?
       names = Compress::Zip::File.open(path, &.entries.map(&.filename))
       names.sort == ["gori.db", "manifest.json"]
     rescue Compress::Zip::Error | IO::Error

@@ -14,9 +14,12 @@ module Gori
 
       # Whether *path* holds an OpenAPI 3 or Swagger 2.0 document, for a surface about to
       # REPLACE it (`export_openapi{overwrite}` over MCP). A file over *max_bytes* is not one
-      # gori wrote; anything unreadable or of another shape answers false, never raises.
+      # gori wrote; anything unreadable or of another shape answers false, never raises. Only a
+      # regular file is opened: a FIFO would block the open (and the single-threaded server with
+      # it), and `/dev/stdin` would read the MCP server's own input.
       def self.document?(path : String, max_bytes : Int) : Bool
-        return false if File.size(path) > max_bytes
+        info = File.info(path, follow_symlinks: false)
+        return false if !info.file? || info.size > max_bytes
         spec = spec_file(path).as_h?
         !!(spec && (spec["openapi"]?.try(&.as_s?) || spec["swagger"]?.try(&.as_s?)) && spec["paths"]?.try(&.as_h?))
       rescue

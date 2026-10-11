@@ -794,6 +794,19 @@ describe Gori::ProjectArchive do
     end
   end
 
+  # `export_project{overwrite}` asks `archive?` of a path an agent named: a FIFO there must be
+  # answered without opening it, or the open blocks the single-threaded MCP server.
+  it "answers archive? false for a FIFO without opening it" do
+    posix_only!("mkfifo")
+    path = File.tempname("gori-archive-fifo")
+    begin
+      Process.run("mkfifo", [path]).success?.should be_true
+      Gori::ProjectArchive.archive?(path).should be_false
+    ensure
+      File.delete?(path)
+    end
+  end
+
   it "refuses an archive whose settings table lost the key gori upserts through" do
     with_archive_project do |_registry, project, store, root|
       store.insert_flow(archive_request("/a"))
