@@ -1067,6 +1067,9 @@ describe Gori::ProjectArchive do
         disclosure = Gori::ProjectArchive.disclosure(prepared.inventory)
         disclosure.should contain(%(2 Fuzzer or Miner wordlist paths read a local file into the requests that tab sends when run: "/home/someone/.aws/credentials", "params.txt".))
         disclosure.should contain("clear the gRPC descriptor-set path")
+        # A path from an archive's JSON need not be valid UTF-8; the disclosure must still render.
+        odd = prepared.inventory.copy_with(local_file_paths: ["a\xffb\e[2J", "x" * 300])
+        Gori::ProjectArchive.disclosure(odd).should contain(%("a\\xffb\\x1b[2J", "#{"x" * 200}…"))
         copied = Gori::Store.open(prepared.import_into(registry, "Files copy").db_path)
         begin
           copied.setting(Gori::Protobuf::Schemas::SETTING_KEY).should be_nil

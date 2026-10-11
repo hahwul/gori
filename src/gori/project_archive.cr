@@ -107,14 +107,16 @@ module Gori
       # Stored Fuzzer `file` sets and Miner wordlists name a path on the AUTHOR's machine that
       # this one opens when that tab runs, and reads into requests sent to the tab's target. Like
       # `exec:`, they act only on an explicit run, so they are disclosed (by path, so the operator
-      # can judge the file) rather than rewritten. A path that is not plain printable text is
-      # named only as such: it is archive-authored and this sentence reaches a terminal.
+      # can judge the file) rather than rewritten. The path is archive-authored, may not be valid
+      # UTF-8, and this sentence reaches a terminal, so it is escaped byte-wise and capped.
       LISTED_PATHS = 5
 
       def local_files : String?
         return nil if local_file_paths.empty?
         shown = local_file_paths.first(LISTED_PATHS).map do |path|
-          path.matches?(/\A[\x20-\x7e]{1,200}\z/) ? path.inspect : "(an unprintable path)"
+          text = Export::Escape.comment(path)
+          text = "#{text[0, 200]}…" if text.size > 200
+          %("#{text}")
         end
         more = local_file_paths.size - shown.size
         "#{local_file_paths.size} Fuzzer or Miner wordlist #{local_file_paths.size == 1 ? "path reads" : "paths read"} " \
