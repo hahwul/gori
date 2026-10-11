@@ -137,3 +137,26 @@ describe Gori::AgentReply, ".cap_detail" do
     cut.should end_with("… (cut)")
   end
 end
+
+describe Gori::Store, "#1585 approval cards" do
+  it "marks a server-written approval, which ask_operator's rows never carry" do
+    with_store do |store|
+      id = store.record_agent_question("Allow send_request?", nil, ["Allow once", "Deny"], "Deny",
+        "claude-code pid 1", 1_i64, Int64::MAX, approval: true)
+      store.open_agent_questions(0_i64, 0_i64).find(&.id.==(id)).not_nil!.approval.should be_true
+      ask(store).approval.should be_false
+    end
+  end
+
+  it "reads only the operator's closing message as an answer" do
+    with_store do |store|
+      answered = ask(store)
+      expired = ask(store, "Second?")
+      store.close_agent_question(answered, Gori::AgentQuestion::OUTCOME_ANSWERED, "yes", "operator", "tui").should be > 0
+      store.close_agent_question(expired, Gori::AgentQuestion::OUTCOME_EXPIRED, nil, "agent", "mcp").should be > 0
+      answers = store.agent_question_answers([answered.id, expired.id])
+      answers.keys.should eq([answered.id])
+      answers[answered.id].text.should eq("yes")
+    end
+  end
+end

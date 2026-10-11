@@ -33,6 +33,7 @@ require "./tools/compare"
 require "./tools/diff"
 require "./tools/context"
 require "./tools/messages"
+require "./tools/approval"
 require "./tools/decode"
 require "./tools/cookie"
 require "./tools/discover"
@@ -369,9 +370,11 @@ module Gori
                      @db_path : String? = nil, @selection_source : String? = nil,
                      @workspace_root : String? = nil, @project_id : String? = nil,
                      @bind_error : String? = nil, @tool_filter : ToolFilter? = nil,
-                     denied_permissions : Set(String)? = nil)
+                     denied_permissions : Set(String)? = nil, asked_permissions : Set(String)? = nil)
         # A copy, never the caller's set: a later mutation there must not reach this server.
         @denied_permissions = denied_permissions.try(&.dup) || Set(String).new
+        # Never both: a group the operator switched off is off, whatever else asked for it.
+        @asked_permissions = (asked_permissions.try(&.dup) || Set(String).new) - @denied_permissions
         @permission_denial_log_db_path = @db_path
         @permission_denials_logged = Set({String, String}).new
         # The binding table (#501) is built ONCE per bound project and kept, not rebuilt per
@@ -508,17 +511,23 @@ module Gori
       # The group that refuses THIS call, or nil. The name decides for almost every tool; the
       # arguments decide for the few whose one mode sends and whose other does not, and they
       # are listed here rather than inside each handler so a new one has one place to go.
+      #
+      # `groups` is the set asked about: the denials here, the asks for `approval_gate`.
       private def call_denied_permission(name : String, h) : String?
-        return nil if @denied_permissions.empty?
-        if key = denied_permission(name)
+        call_permission(name, h, @denied_permissions)
+      end
+
+      private def call_permission(name : String, h, groups : Set(String)) : String?
+        return nil if groups.empty?
+        if (key = TOOL_PERMISSIONS[name]?) && groups.includes?(key)
           return key
         end
         # `exec` is refused inside the handlers instead: see `exec_refusal`.
         # A read tool whose one argument WRITES a file sits behind `write` for that call.
-        if name == "export_openapi" && @denied_permissions.includes?("write") && describes?(h, "output_path")
+        if name == "export_openapi" && groups.includes?("write") && describes?(h, "output_path")
           return "write"
         end
-        return nil unless @denied_permissions.includes?("send")
+        return nil unless groups.includes?("send")
         sends = case name
                 when "probe_scan" then bool_arg(h, "active", false)
                   # Raising the mode arms the capture pipeline's AUTOMATIC active probes, so it
@@ -732,7 +741,7 @@ module Gori
         b = Gori::Bindings.load(s, Gori::SessionSlots.load(s))
         @bindings = b
         Env.layer = b
-        @refresher = Gori::SessionRefresh::Runner.new(s, b, -> { agent_outbound(Scope.load(s), false, waiver: false) },
+        @refresher = Gori::SessionRefresh::Runner.new(s, b, -> { agent_outbound(Scope.load(s), false, waiver: false, approval: false) },
           verify: @verify_upstream).install
       end
 
@@ -928,9 +937,15 @@ module Gori
 
       # `Outbound.agent` spelled for this server's refusals: the ones a core engine phrases
       # (retest, session refresh, gRPC reflection) then offer the agent's own waiver and fix.
-      # `waiver` is left nil for a caller with no allow_unscoped to pass.
-      def agent_outbound(scope : Scope, allow_unscoped : Bool, *, waiver : Bool = true) : Outbound
-        ob = Outbound.agent(scope, allow_unscoped)
+      # `waiver` is left nil for a caller with no allow_unscoped to pass. `approval: false` is a
+      # send no agent call names (a session slot's refresh steps), which a group in `ask` does
+      # not hold — the call that triggered it was the one asked about.
+      def agent_outbound(scope : Scope, allow_unscoped : Bool, *, waiver : Bool = true,
+                         approval : Bool = true) : Outbound
+        held = approval ? outbound_approval(allow_unscoped) : nil
+        # Under an asked-for waiver the allowlist stays on, and the approval decides (#1585).
+        ob = Outbound.agent(scope, allow_unscoped && !held.try(&.waiver))
+        ob.approval = held
         ob.waiver = "allow_unscoped:true" if waiver
         ob.can_add_include = can_add_include?
         ob.can_edit_exclude = can_edit_exclude?
@@ -1576,6 +1591,11 @@ module Gori
         if missing = missing_aliased(name, h)
           return missing
         end
+        # After every argument check, so a call that could never run puts no card in front of
+        # the operator, and on the arguments as they will run.
+        if held = approval_gate(name, h)
+          return held
+        end
         result = begin
           dispatch_tool(name, h) || err("unknown tool: #{name}", "UNKNOWN_TOOL")
         rescue ex : ArgError
@@ -1603,6 +1623,9 @@ module Gori
         # predicate would answer the NEXT tool's poll with a previous caller's cancellation.
         @cancelled = nil
         @calling = nil
+        @calling_digest = nil
+        @call_approved = Set(String).new
+        @call_hosts = Set(String).new
       end
 
       # The cancellation predicate for the call in flight, for an engine that polls one
@@ -2170,8 +2193,8 @@ module Gori
       # runs the operator's enabled exec rules, as the capture pipeline already does over every
       # flow the agent sends.
       private def exec_refusal : Result?
-        return nil unless @denied_permissions.includes?("exec")
-        permission_denied(@calling || "", "exec")
+        return permission_denied(@calling || "", "exec") if @denied_permissions.includes?("exec")
+        exec_approval
       end
 
       # A distinct event kind keeps a refused call out of `recent_agent_actions`, which credits

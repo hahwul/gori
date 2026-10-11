@@ -1,4 +1,5 @@
 require "db"
+require "json"
 
 module Gori
   class Store
@@ -40,6 +41,28 @@ module Gori
     # The half that is the operator's own policy stays in settings.json. `Redact::Policy` folds
     # the two.
     REDACTION_KEY = "redaction"
+
+    # The hosts an operator approved for `gori mcp` sends from the approval card (#1585), as a
+    # JSON array of `host` (any port) and `host:port` strings. Per PROJECT because a target
+    # belongs to one engagement, and dropped on archive import (`ProjectArchive`): an approval
+    # is authorization, never data a snapshot may carry in.
+    MCP_HOST_GRANTS_KEY = "mcp_host_grants"
+
+    def mcp_host_grants : Array(String)
+      raw = setting(MCP_HOST_GRANTS_KEY) || return [] of String
+      Array(String).from_json(raw)
+    rescue JSON::ParseException
+      [] of String
+    end
+
+    # Add one grant; whether it is now stored.
+    # ponytail: read-modify-write, so two servers granting at once can lose one grant (it is
+    # asked again — the closed direction); a table with a unique key if that ever matters.
+    def add_mcp_host_grant(grant : String) : Bool
+      grants = mcp_host_grants
+      return true if grants.includes?(grant)
+      set_setting(MCP_HOST_GRANTS_KEY, (grants << grant).to_json)
+    end
 
     def setting(key : String) : String?
       @db.query_one?("SELECT value FROM settings WHERE key = ?", key, as: String)

@@ -27,12 +27,12 @@ private def listed(tools : Gori::MCP::Tools) : Set(String)
   JSON.parse(JSON.build { |j| tools.list(j) }).as_a.map(&.["name"].as_s).to_set
 end
 
-private def instructions_of(store, denied : Set(String)) : String
+private def instructions_of(store, denied : Set(String), asked = Set(String).new) : String
   input = IO::Memory.new(
     %({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}) + "\n")
   output = IO::Memory.new
   Gori::MCP::Server.new(store, allow_actions: true, verify_upstream: false,
-    denied_permissions: denied, input: input, output: output).run
+    denied_permissions: denied, asked_permissions: asked, input: input, output: output).run
   line = output.to_s.each_line.reject(&.strip.empty?).map { |l| JSON.parse(l) }.find { |l| l["id"]? == 1 }
   line.not_nil!["result"]["instructions"].as_s
 end
@@ -436,6 +436,30 @@ describe "MCP tool permissions" do
       text.should contain("switched off Send traffic, Intercept control")
       text.should_not match(/\bsend_request\b/)
       instructions_of(store, Set(String).new).should_not contain("switched off")
+    end
+  end
+end
+
+# #1585: a group set to ask is served, refused per call with APPROVAL_PENDING
+# (spec/mcp/tools/approval_spec.cr), and named in the handshake so the agent knows to retry.
+describe "MCP tool permissions — ask" do
+  it "keeps an asked group in tools/list and says so in instructions" do
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false, asked_permissions: Set{"send"})
+      listed(tools).size.should eq(Gori::MCP::Tools::TOOL_NAMES.size)
+      text = instructions_of(store, Set(String).new, Set{"send", "scope"})
+      text.should contain("set Send traffic, Change scope & sandbox to ask")
+      text.should contain("(and allow_unscoped:true)")
+      text.should contain("retry the same call after the operator answers")
+    end
+  end
+
+  it "lets a denial win over an ask for the same group" do
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false,
+        denied_permissions: Set{"send"}, asked_permissions: Set{"send"})
+      tools.serves?("send_request").should be_false
+      tools.asked_groups.should be_empty
     end
   end
 end

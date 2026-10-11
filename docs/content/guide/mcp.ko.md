@@ -69,7 +69,7 @@ gori mcp --read-only
 
 ### Preferences에서 권한 정하기 {#permissions-from-preferences}
 
-`--read-only`는 에이전트에 설치할 때 정해집니다. gori 안에서 바로 바꾸는 스위치는 **Settings → AI → MCP permissions**에 있고, 도구 묶음마다 토글이 하나씩 있으며 기본은 모두 켜져 있습니다:
+`--read-only`는 에이전트에 설치할 때 정해집니다. gori 안에서 바로 바꾸는 스위치는 **Settings → AI → MCP permissions**에 있고, 도구 묶음마다 행이 하나씩 있고 각각 **on**, **ask**, **off** 중 하나이며 기본은 모두 켜져 있습니다:
 
 | 묶음 | 끄면 빠지는 도구 |
 |------|------------------|
@@ -82,7 +82,9 @@ gori mcp --read-only
 
 캡처를 읽는 것은 묶음이 아닙니다. 읽기 도구와 `operator_messages` / `reply_to_operator`는 항상 제공됩니다. 꺼진 묶음의 도구는 `tools/list`에서 빠지고, 그래도 호출하면 `TOOL_DISABLED`로 거부되며, 핸드셰이크 instructions가 에이전트에게 어떤 묶음이 꺼졌는지 알려줍니다. 이 스위치는 `--read-only`, `--tools`와 함께 적용되어 셋 모두가 허용한 도구만 제공됩니다. `gori mcp` 프로세스가 시작할 때 읽으므로, 이미 떠 있는 에이전트는 서버를 다시 시작할 때까지 받았던 도구를 그대로 씁니다. 그 시점에 설정 파일을 읽지 못하면 모든 묶음을 켜는 대신 끕니다.
 
-묶음은 목적지가 아니라 능력 단위입니다. **Intercept control**이 켜져 있으면 에이전트는 보류된 요청을 고쳐서 forward할 수 있고, **Send traffic**이 꺼져 있어도 그 바이트는 대상에 도달합니다. 에이전트의 바이트가 대상에 닿지 않게 하려면 둘 다 끄세요. 마찬가지로 **Change scope & sandbox**를 끄면 에이전트가 울타리를 옮기지 못할 뿐 넘지 못하는 것은 아닙니다. `allow_unscoped:true`를 준 요청은 규칙이 덮지 않는 대상에도 닿으므로(sandbox는 그래도 막습니다), 그것까지 막으려면 **Send traffic**도 끄세요. 요청이 닿는 곳을 바꾸는 스위치가 두 개 더 있습니다. host override(**Edit project data**)는 scope 안의 호스트 이름을 다른 주소로 돌리고, **Manage projects**는 scope와 sandbox가 다른 프로젝트로 에이전트가 옮겨 갈 수 있게 합니다.
+**Ask**로 두면 그 묶음의 도구는 목록에 남고, 호출마다 먼저 운영자에게 묻습니다. 호출은 곧바로 `approval_id`가 담긴 `APPROVAL_PENDING`을 돌려주고, gori는 `ask:` 칩에 승인 카드를 띄웁니다. 카드 내용은 에이전트가 쓴 글이 아니라 gori가 아는 사실(도구, 요청이면 실제로 접속하는 호스트와 포트)로 만듭니다. 거기서 답하면 됩니다. **Allow once**는 그 호출(같은 도구, 같은 인자)의 재시도 한 번을 허용하고, **Always (this server)**는 그 `gori mcp` 프로세스가 끝날 때까지 묶음을 열어 두며, **Deny**는 재시도를 `TOOL_DISABLED`로 거부합니다. `send_request`, `send_websocket`, `race_requests`, `timing_requests`, `fuzz_start`, `mine_start`, `sequence_start`, `minimize_repeater`, `cache_deception_check`, `grpc_reflect`의 요청은 대신 호스트 단위로 묻고 **Always this host**와 **Always host:port**를 고를 수 있습니다. 이 허용은 프로젝트에 저장되어 재시작 후에도 남고, 아카이브에서 프로젝트를 가져오면 지워집니다. 허용된 호스트라도 sandbox는, sweep이라면 exclude 규칙도 여전히 막습니다. 폴러와 중지(`fuzz_status`, `stop_job`, `oast_poll` 등)는 묻지 않습니다. 답은 승인 id를 `in_reply_to`에 담은 운영자 메시지로 에이전트에게 가고, 에이전트는 같은 호출을 다시 시도합니다. 아무것도 기다리지 않으므로 그동안 다른 호출은 모두 그대로 동작합니다. 답이 없는 카드는 30분 뒤 만료되고, 다음 재시도가 다시 묻습니다. **Ask**는 서버가 쓸 수 있는 프로젝트가 바인딩되어 있어야 하며, 없으면 호출은 `TOOL_DISABLED`로 거부됩니다.
+
+묶음은 목적지가 아니라 능력 단위입니다. **Intercept control**이 켜져 있으면 에이전트는 보류된 요청을 고쳐서 forward할 수 있고, **Send traffic**이 꺼져 있어도 그 바이트는 대상에 도달합니다. 에이전트의 바이트가 대상에 닿지 않게 하려면 둘 다 끄세요. 마찬가지로 **Change scope & sandbox**를 끄면 에이전트가 울타리를 옮기지 못할 뿐 넘지 못하는 것은 아닙니다. `allow_unscoped:true`를 준 요청은 규칙이 덮지 않는 대상에도 닿으므로(sandbox는 그래도 막습니다), 그것까지 막으려면 **Send traffic**도 끄거나 **Change scope & sandbox**를 ask로 두세요. 그러면 waiver가 스스로 통과시키지 않고 그 호스트에 대한 승인을 기다립니다. 요청이 닿는 곳을 바꾸는 스위치가 두 개 더 있습니다. host override(**Edit project data**)는 scope 안의 호스트 이름을 다른 주소로 돌리고, **Manage projects**는 scope와 sandbox가 다른 프로젝트로 에이전트가 옮겨 갈 수 있게 합니다.
 
 ## 노출할 도구 고르기 {#choosing-which-tools-are-exposed}
 

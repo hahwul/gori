@@ -44,14 +44,14 @@ module Gori
                      db_path : String? = nil, selection_source : String? = nil,
                      workspace_root : String? = nil, project_id : String? = nil,
                      bind_error : String? = nil, tool_filter : ToolFilter? = nil,
-                     denied_permissions : Set(String)? = nil,
+                     denied_permissions : Set(String)? = nil, asked_permissions : Set(String)? = nil,
                      @input : IO = STDIN, @output : IO = STDOUT)
         @allow_actions = allow_actions
         @tools = Tools.new(store, allow_actions, verify_upstream,
           project_name: project_name, project_slug: project_slug, db_path: db_path,
           selection_source: selection_source, workspace_root: workspace_root,
           project_id: project_id, bind_error: bind_error, tool_filter: tool_filter,
-          denied_permissions: denied_permissions)
+          denied_permissions: denied_permissions, asked_permissions: asked_permissions)
         @initialized = false
         # Set when the output pipe breaks (client vanished mid-write): the loop then
         # stops rather than thrashing on a dead stream or raising an unhandled error.
@@ -846,9 +846,9 @@ module Gori
       # `exec` withholds no tool (`Tools#exec_refusal`), so it gets its own sentence.
       private def permissions_note : String
         groups = @tools.denied_groups
-        return "" if groups.empty?
+        note = ask_note
+        return note if groups.empty?
         exec, tool_groups = groups.partition(&.key.==("exec"))
-        note = ""
         unless tool_groups.empty?
           note += " The operator has switched off #{tool_groups.join(", ", &.title)} in gori Preferences " \
                   "(AI › MCP permissions), so those tools are not served; ask the operator if you need them."
@@ -858,6 +858,16 @@ module Gori
                   "a pipe rule, an exec probe rule, a mine hook or a fuzz chain with an exec: step is refused."
         end
         note
+      end
+
+      # #1585: the groups set to ask, which stay listed and answer APPROVAL_PENDING instead.
+      private def ask_note : String
+        asked = @tools.asked_groups
+        return "" if asked.empty?
+        waiver = asked.any?(&.key.==("scope")) ? " (and allow_unscoped:true)" : ""
+        " The operator set #{asked.join(", ", &.title)} to ask: a call in those groups#{waiver} returns " \
+        "APPROVAL_PENDING with an approval_id — do not wait; retry the same call after the operator answers " \
+        "(an operator message with in_reply_to = that id)."
       end
 
       # Said once, when `--tools` narrowed the catalogue: whatever the prose above named, the

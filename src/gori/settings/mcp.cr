@@ -76,6 +76,15 @@ module Gori::Settings
   # reaches an agent whose server is started after it; the Preferences rows say so.
   class_property mcp_denied_permissions : Set(String) = Set(String).new
 
+  # The groups in the third state, `ask` (#1585): served, but each call waits on the operator's
+  # approval in the TUI (`Tools#approval_gate`). Stored beside the denials as `"<key>": "ask"`,
+  # which an older gori reads as off — any non-boolean is a denial there — so a downgrade fails
+  # closed and needs no migration. Never also in `mcp_denied_permissions`.
+  class_property mcp_asked_permissions : Set(String) = Set(String).new
+
+  # The three states a group's Preferences row cycles through, in that order.
+  MCP_PERMISSION_STATES = %w[on ask off]
+
   # The group `key` names, or nil for a key this gori does not know.
   def self.mcp_permission(key : String) : McpPermission?
     MCP_PERMISSIONS.find(&.key.==(key))
@@ -91,29 +100,46 @@ module Gori::Settings
   end
 
   def self.set_mcp_permitted(key : String, allowed : Bool) : Nil
-    denied = mcp_denied_permissions.dup
-    allowed ? denied.delete(key) : denied.add(key)
-    self.mcp_denied_permissions = denied
+    set_mcp_permission_state(key, allowed ? "on" : "off")
   end
 
-  # The denials `gori mcp` enforces. A security switch must not fail OPEN: when the last `load`
-  # left sections at their defaults (`load_degraded?` — a section above this one raised, the
-  # file is not JSON, or it could not be read) the in-memory set says "all allowed" about a
-  # file nobody finished reading. The section is then read on its own from the raw file, and
-  # when even that is impossible every group is denied, with the reason on stderr.
-  def self.mcp_enforced_denials : {Set(String), String?}
-    return {mcp_denied_permissions.dup, nil} unless load_degraded?
+  # "on", "ask" or "off".
+  def self.mcp_permission_state(key : String) : String
+    return "off" if mcp_denied_permissions.includes?(key)
+    mcp_asked_permissions.includes?(key) ? "ask" : "on"
+  end
+
+  def self.set_mcp_permission_state(key : String, state : String) : Nil
+    denied = mcp_denied_permissions.dup
+    asked = mcp_asked_permissions.dup
+    state == "off" ? denied.add(key) : denied.delete(key)
+    state == "ask" ? asked.add(key) : asked.delete(key)
+    self.mcp_denied_permissions = denied
+    self.mcp_asked_permissions = asked
+  end
+
+  # The denials and asks `gori mcp` enforces. A security switch must not fail OPEN: when the
+  # last `load` left sections at their defaults (`load_degraded?` — a section above this one
+  # raised, the file is not JSON, or it could not be read) the in-memory sets say "all allowed"
+  # about a file nobody finished reading. The section is then read on its own from the raw
+  # file, and when even that is impossible every group is denied, with the reason on stderr.
+  def self.mcp_enforced_denials : {Set(String), Set(String), String?}
+    return {mcp_denied_permissions.dup, mcp_asked_permissions.dup, nil} unless load_degraded?
     root = begin
       JSON.parse(File.read(path))
     rescue
       nil
     end
     if root && (h = root.as_h?)
-      return {mcp_denials_from(h["mcp_permissions"]?) || Set(String).new, nil}
+      node = h["mcp_permissions"]?
+      asked = mcp_asks_from(node)
+      return {(mcp_denials_from(node) || Set(String).new) - asked, asked, nil}
     end
-    {MCP_PERMISSION_KEYS.to_set, "#{path} could not be read, so every MCP permission group is off until it is fixed"}
+    {MCP_PERMISSION_KEYS.to_set, Set(String).new, "#{path} could not be read, so every MCP permission group is off until it is fixed"}
   end
 
+  # The rule an older gori applies to the whole section, `"ask"` included, so it stays the
+  # first pass here and the asks are taken back out of it (`mcp_asks_from`).
   private def self.mcp_denials_from(node : JSON::Any?) : Set(String)?
     return nil unless h = node.try(&.as_h?)
     # Only a real `true` allows a known group: `"send": "false"`, `0` or `null` is a switch
@@ -130,6 +156,13 @@ module Gori::Settings
     denied
   end
 
+  # The keys stored as exactly `"ask"`. An unknown key is kept, like an unknown denial, so a
+  # newer gori's group round-trips; it asks for nothing here.
+  private def self.mcp_asks_from(node : JSON::Any?) : Set(String)
+    return Set(String).new unless h = node.try(&.as_h?)
+    h.compact_map { |k, v| k if v.as_s? == "ask" }.to_set
+  end
+
   # Tolerant mcp section: absent/non-object keeps current.
   private def self.parse_mcp(node : JSON::Any?) : Nil
     return unless o = node.try(&.as_h?)
@@ -141,7 +174,9 @@ module Gori::Settings
   # names is one somebody turned back on. Absent or non-object keeps the current set.
   private def self.parse_mcp_permissions(node : JSON::Any?) : Nil
     if denied = mcp_denials_from(node)
-      self.mcp_denied_permissions = denied
+      asked = mcp_asks_from(node)
+      self.mcp_denied_permissions = denied - asked
+      self.mcp_asked_permissions = asked
     end
   end
 
@@ -149,6 +184,7 @@ module Gori::Settings
   # per field serialize_mcp / serialize_mcp_permissions write.
   private def self.reset_mcp_permissions : Nil
     self.mcp_denied_permissions = Set(String).new
+    self.mcp_asked_permissions = Set(String).new
   end
 
   # Omitted entirely while every field is at its factory default, so a default install's
@@ -157,12 +193,14 @@ module Gori::Settings
     {"channels", mcp_channels?, DEFAULT_MCP_CHANNELS}
 
   private def self.serialize_mcp_permissions(j : JSON::Builder) : Nil
-    return if mcp_denied_permissions.empty?
+    return if mcp_denied_permissions.empty? && mcp_asked_permissions.empty?
     j.field "mcp_permissions" do
       j.object do
         mcp_denied_permissions.to_a.sort!.each { |k| j.field k, false }
-        # See `mcp_denials_from`: without it, `write` off and `scope` on reads back as both off.
-        j.field "scope", true if mcp_denied_permissions.includes?("write") && !mcp_denied_permissions.includes?("scope")
+        mcp_asked_permissions.to_a.sort!.each { |k| j.field k, "ask" }
+        # See `mcp_denials_from`: without it, `write` off (or `ask`, which an older reader takes
+        # for off) and `scope` on reads back with `scope` off.
+        j.field "scope", true if mcp_permission_state("write") != "on" && mcp_permission_state("scope") == "on"
       end
     end
   end
