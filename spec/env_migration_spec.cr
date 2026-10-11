@@ -435,6 +435,10 @@ describe Gori::EnvMigration do
       backups = glob_files("#{db_path}.pre-namespaced-*")
       backups.size.should eq(1)
       File.size(backups[0]).should be > 0
+      # Pre-created 0600 and filled by `VACUUM INTO` at that mode, never at the umask.
+      {% unless flag?(:win32) %}
+        File.info(backups[0]).permissions.should eq(File::Permissions.new(0o600))
+      {% end %}
       report.backup.should eq(backups[0])
 
       with_open_store(db_path) do |store|

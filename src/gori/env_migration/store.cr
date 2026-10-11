@@ -1,4 +1,5 @@
 require "db"
+require "file_utils"
 require "json"
 require "sqlite3"
 require "../env_migration"
@@ -681,10 +682,23 @@ module Gori
     # copy of the state before, so an operator who finds two of them knows which way each went.
     private def self.vacuum_into(db_path : String, to : Env::Syntax, busy_timeout_ms : Int32) : String
       dest = unique_path("#{db_path}.pre-#{to.to_s.downcase}-#{stamp}")
-      ::DB.open("sqlite3:#{db_path}?busy_timeout=#{busy_timeout_ms}") do |db|
-        db.using_connection(&.exec("VACUUM INTO ?", dest))
+      # Staged in a private 0700 directory beside the database (same filesystem, so the rename is
+      # atomic) and tightened before it leaves: `VACUUM INTO` creates its file at the umask (0644)
+      # and refuses an existing one, even empty, so written straight to `dest` the copy of every
+      # project secret was readable by any local user for the whole copy, until a chmod after it.
+      # The same shape as `ProjectArchive.prepare_export`.
+      staging = "#{dest}.staging"
+      Dir.mkdir(staging, 0o700)
+      begin
+        staged = File.join(staging, "backup.db")
+        ::DB.open("sqlite3:#{db_path}?busy_timeout=#{busy_timeout_ms}") do |db|
+          db.using_connection(&.exec("VACUUM INTO ?", staged))
+        end
+        File.chmod(staged, 0o600)
+        File.rename(staged, dest)
+      ensure
+        FileUtils.rm_rf(staging)
       end
-      File.chmod(dest, 0o600) rescue nil
       dest
     end
   end
