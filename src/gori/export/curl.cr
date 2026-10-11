@@ -597,8 +597,24 @@ module Gori
       #   after   … 26 62 69 6e 3d ff fe 01 02               intact
       #
       # Scanning and splicing BYTES is the rule `Fuzz::Plan.wrap_token` already writes down.
+      #
+      # CONTROL BYTES — '…' carries them verbatim, which is byte-exact for the shell and hostile
+      # for everything between gori and the shell. The command is printed to a TTY (`gori run
+      # show --format curl`) and pasted from the clipboard, and a target's own JS can set a
+      # header value of `\e[201~\x15; id>/tmp/pwn #` (fetch allows ESC and ^U): the ESC sequence
+      # ends a bracketed paste early, ^U kills the line, and what follows runs. So an argument
+      # holding one is written in ANSI-C quoting, `$'…'` with escapes — byte-exact in bash, zsh
+      # and ksh (checked by round-tripping every escape through each), with no raw control byte
+      # left on the line. Everything
+      # else keeps the plain '…' a reader expects. LF does not switch: a raw newline inside a
+      # quote is inert on paste, and multi-line JSON bodies stay readable. A C1 control spelled
+      # as UTF-8 (U+0080–U+009F, which a terminal may act on as CSI &c.) does switch.
+      #
+      # POSIX shells only, like the rest of this command: fish has no `$'…'` (and already reads
+      # `\\` inside '…' differently), and there is no PowerShell flavour of these exports.
       def self.shell_quote(s : String) : String
         bytes = s.to_slice
+        return ansi_c_quote(bytes) if needs_ansi_c?(bytes)
         io = IO::Memory.new(bytes.size + 2)
         io << '\''
         bytes.each do |b|
@@ -607,6 +623,46 @@ module Gori
           else
             io.write_byte(b)
           end
+        end
+        io << '\''
+        String.new(io.to_slice)
+      end
+
+      # A byte a terminal or a paste would act on: C0 except LF, DEL, or a UTF-8 C1 (0xC2 0x80–0x9F).
+      private def self.needs_ansi_c?(bytes : Bytes) : Bool
+        bytes.each_with_index do |b, i|
+          return true if (b < 0x20_u8 && b != 0x0a_u8) || b == 0x7f_u8 || c1_lead?(bytes, i)
+        end
+        false
+      end
+
+      private def self.c1_lead?(bytes : Bytes, i : Int32) : Bool
+        bytes[i] == 0xc2_u8 && (bytes[i + 1]? || 0_u8).in?(0x80_u8..0x9f_u8)
+      end
+
+      # `$'…'`: `'` and `\` escaped, CR / LF / TAB by name (a CRLF form body reads as Chrome's
+      # "Copy as cURL (bash)" writes it), every other control and both bytes of a UTF-8 C1 as a
+      # three-digit octal `\NNN`, any other byte verbatim — so a non-ASCII body stays readable.
+      # Octal, not `\xNN`: ksh93 lets `\x` swallow every hex digit that follows, so `$'\x7f3'`
+      # is U+07F3 there, where three octal digits are the cap in every shell.
+      CONTROL_NAMES = {0x0d_u8 => "\\r", 0x0a_u8 => "\\n", 0x09_u8 => "\\t"}
+
+      private def self.ansi_c_quote(bytes : Bytes) : String
+        io = IO::Memory.new(bytes.size + 3)
+        io << "$'"
+        c1 = false
+        bytes.each_with_index do |b, i|
+          lead_c1 = c1_lead?(bytes, i)
+          if b == 0x27_u8 || b == 0x5c_u8
+            io << '\\' << b.unsafe_chr
+          elsif name = CONTROL_NAMES[b]?
+            io << name
+          elsif b < 0x20_u8 || b == 0x7f_u8 || lead_c1 || c1
+            io << '\\' << b.to_s(8).rjust(3, '0')
+          else
+            io.write_byte(b)
+          end
+          c1 = lead_c1
         end
         io << '\''
         String.new(io.to_slice)

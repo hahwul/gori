@@ -204,10 +204,15 @@ describe Gori::Tui::CopyMenu do
       body = String.new(b.to_slice)
       req = "POST /p HTTP/1.1\r\nHost: h\r\nContent-Length: #{body.bytesize}\r\n\r\n#{body}"
       curl = CopyMenu.curl_text(req, "http://h").not_nil!.to_slice
-      subseq?(curl, bin).should be_true
+      # 0x01/0x02 put the argument in ANSI-C quoting (`Export::Curl.shell_quote`): the high
+      # bytes stay verbatim, the controls become `\NNN` — what the shell decodes is `bin`.
+      want = IO::Memory.new
+      want << "--data-raw $'a=\\'x\\'&bin="
+      want.write(bin[0, 2])
+      want << "\\001\\002'"
+      subseq?(curl, want.to_slice).should be_true
       subseq?(curl, Bytes[0xef_u8, 0xbf_u8, 0xbd_u8]).should be_false
-      # the ' escaping still happens, on the same bytes
-      subseq?(curl, "--data-raw 'a='\\''x'\\''&bin=".to_slice).should be_true
+      subseq?(curl, Bytes[0x01_u8]).should be_false
     end
 
     it "keeps an obs-text header value byte-exact in -H" do
@@ -217,8 +222,11 @@ describe Gori::Tui::CopyMenu do
       b.write(bin)
       b << "\r\n\r\n"
       curl = CopyMenu.curl_text(String.new(b.to_slice), "http://h").not_nil!.to_slice
-      subseq?(curl, "-H 'X-Ob: ".to_slice).should be_true
-      subseq?(curl, bin).should be_true
+      want = IO::Memory.new
+      want << "-H $'X-Ob: "
+      want.write(bin[0, 2])
+      want << "\\001\\002'"
+      subseq?(curl, want.to_slice).should be_true
       subseq?(curl, Bytes[0xef_u8, 0xbf_u8, 0xbd_u8]).should be_false
     end
 

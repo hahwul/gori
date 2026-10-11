@@ -98,14 +98,14 @@ module Gori
                     (multipart || ct.empty? || ct == "application/x-www-form-urlencoded")
           dropped_headers_comment(b, parts, carried: carried ? "content-type" : nil)
           b << "<body onload=\"document.forms[0].submit()\">\n"
-          b << "  <form action=\"" << HTML.escape(action) << "\" method=\"" << (method == "GET" ? "GET" : "POST") << "\""
+          b << "  <form action=\"" << attr(action) << "\" method=\"" << (method == "GET" ? "GET" : "POST") << "\""
           b << " enctype=\"multipart/form-data\"" if multipart
           b << ">\n"
           fields.each do |(name, value, note)|
             if note
               b << "    <!-- " << html_comment_safe(note) << " -->\n"
             end
-            b << "    <input type=\"hidden\" name=\"" << HTML.escape(name) << "\" value=\"" << HTML.escape(value) << "\">\n"
+            b << "    <input type=\"hidden\" name=\"" << attr(name) << "\" value=\"" << attr(value) << "\">\n"
           end
           b << "    <input type=\"submit\" value=\"Submit\">\n"
           b << "  </form>\n</body>\n</html>\n"
@@ -329,6 +329,25 @@ module Gori
           s = s.gsub("--", "- -")
         end
         s
+      end
+
+      # An attribute value. `HTML.escape` leaves control bytes raw, and a captured field value is
+      # the target's bytes — an ESC sequence went to the operator's terminal with `gori run show
+      # --format csrf`. A numeric reference is also the EXACT spelling: the HTML parser rewrites a
+      # raw CR to LF before it tokenizes, while `&#xd;` decodes to the CR the capture held.
+      private def self.attr(s : String) : String
+        e = HTML.escape(s)
+        return e unless e.to_slice.any? { |b| attr_control?(b) }
+        String.build do |io|
+          e.to_slice.each do |b|
+            attr_control?(b) ? (io << "&#x" << b.to_s(16) << ';') : io.write_byte(b)
+          end
+        end
+      end
+
+      # LF and TAB pass the parser unchanged and keep a multipart value readable.
+      private def self.attr_control?(b : UInt8) : Bool
+        (b < 0x20_u8 && b != 0x0a_u8 && b != 0x09_u8) || b == 0x7f_u8
       end
 
       # A JS double-quoted string, byte-safe with `\xNN` — the fetch path's method and its

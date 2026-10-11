@@ -2000,7 +2000,9 @@ describe Gori::Tui::RepeaterView do
       opts = Gori::Tui::CopyMenu.request_options(
         String.new(view.request_bytes), "https://ws.test", websocket_messages: ws_messages)
       wscat = opts.find! { |o| o.key == 'w' }
-      wscat.text.to_slice.hexstring.should contain(bin.hexstring)
+      # The controls put the argument in ANSI-C quoting (`Export::Curl.shell_quote`): 0xff 0xfe
+      # stay verbatim, 0x01 0x02 are spelled `\001\002`, which the shell decodes back to `bin`.
+      wscat.text.to_slice.hexstring.should contain("fffe" + "\\001\\002".to_slice.hexstring)
       wscat.text.to_slice.hexstring.should_not contain("efbfbd")
     end
   end

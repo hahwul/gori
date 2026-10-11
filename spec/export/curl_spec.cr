@@ -234,7 +234,7 @@ describe Gori::Export::Curl do
 
     it "leaves a body alone when nothing declares chunked framing" do
       cmd = curl_of("POST /a HTTP/1.1\r\nHost: h\r\n\r\n5\r\nhello\r\n0\r\n\r\n", "https://h")
-      cmd.should contain("--data-raw '5")
+      cmd.should contain("--data-raw $'5\\r\\nhello")
       cmd.should_not contain("de-chunked")
     end
   end
@@ -409,5 +409,40 @@ describe "Gori::Export::Curl notes" do
     cmd = Gori::Export::Curl.text("GET /a HTTP/1.1\r\nHost: h\r\nX\e]0;p\a\rY: be\u0000fore\r\n\r\n", "http://h").not_nil!
     cmd.lines.last.should start_with("  # -H omitted for X\\x1b]0;p\\x07\\rY:")
     cmd.should_not contain('\e')
+  end
+end
+
+# A target's JS can set a header value fetch allows — ESC and ^U included — and '…' carried those
+# raw to the TTY that prints the command and the terminal it is pasted into, where `\e[201~`
+# ends a bracketed paste and ^U kills the line. ANSI-C quoting keeps the bytes and drops the raw
+# controls.
+describe "Gori::Export::Curl.shell_quote" do
+  it "keeps plain single quotes for printable text and a newline" do
+    Gori::Export::Curl.shell_quote("it's\nfine").should eq("'it'\\''s\nfine'")
+  end
+
+  it "switches to $'…' with octal escapes for control bytes, escaping ' and \\" do
+    Gori::Export::Curl.shell_quote("X-A: \e[201~\u0015; id>/tmp/pwn #'\\\n")
+      .should eq("$'X-A: \\033[201~\\025; id>/tmp/pwn #\\'\\\\\\n'")
+  end
+
+  it "escapes a UTF-8 C1 control but keeps other non-ASCII verbatim" do
+    Gori::Export::Curl.shell_quote("\u009b2J\u{d55c}\t").should eq("$'\\302\\2332J\u{d55c}\\t'")
+    Gori::Export::Curl.shell_quote("\u{d55c}").should eq("'\u{d55c}'")
+  end
+
+  # gori's own cURL paste (`Import::Shell`) reads the quoting back to the same bytes — and, as
+  # measured against bash, zsh and ksh, so does each shell (ksh93 is why the escapes are octal).
+  it "round-trips every byte but NUL through gori's own shell splitter" do
+    bytes = Bytes.new(255) { |i| (i + 1).to_u8 }
+    s = String.new(bytes)
+    words = Gori::Import::Shell.commands("x #{Gori::Export::Curl.shell_quote(s)}").first.words
+    words[1].to_slice.should eq(bytes)
+  end
+
+  it "leaves no raw control byte in a command for a hostile header value" do
+    cmd = Gori::Export::Curl.text("GET /a HTTP/1.1\r\nHost: h\r\nX-A: \e[201~\u0015; id #\r\n\r\n", "http://h").not_nil!
+    cmd.should contain("-H $'X-A: \\033[201~\\025; id #'")
+    cmd.to_slice.none? { |b| (b < 0x20 && b != 0x0a) || b == 0x7f }.should be_true
   end
 end

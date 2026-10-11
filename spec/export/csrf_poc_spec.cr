@@ -185,4 +185,12 @@ describe "Gori::Export::CsrfPoc on a raw CT-less POST body" do
     html.should_not contain('\e')
     html.should_not contain('\r')
   end
+
+  # `HTML.escape` left control bytes raw in a field value; a numeric reference is both terminal-
+  # safe and exact (the parser rewrites a raw CR to LF, `&#xd;` decodes to the CR).
+  it "writes control bytes in a form field as numeric references" do
+    html = poc("POST /x HTTP/1.1\r\nHost: acme.test\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\na=\e]0;p\a\rb", "https://acme.test")
+    html.should contain(%(name="a" value="&#x1b;]0;p&#x7;&#xd;b"))
+    html.should_not contain('\e')
+  end
 end

@@ -177,4 +177,10 @@ describe Gori::Export::Httpie do
     cmd.should_not contain('\e')
     cmd.should_not contain('\r')
   end
+
+  it "ANSI-C quotes a header value carrying control bytes" do
+    cmd = httpie("GET /x HTTP/1.1\r\nHost: h.test\r\nX-A: \e[201~\u0015 #\r\n\r\n", "https://h.test")
+    cmd.should contain("$'X-A:\\033[201~\\025 #'")
+    cmd.should_not contain('\e')
+  end
 end
