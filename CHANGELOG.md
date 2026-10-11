@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- MCP permissions get a third state, **ask**: each call in that group, or an `allow_unscoped:true` send under **Change scope & sandbox**, waits for the operator's approval on the TUI's `ask:` card (once, always this host or host:port, or deny) (#1585)
+
 ## v0.8.1
 
 - MCP: `--pin-project`, `switch_project` with `unbind:true`, a joined `url` on flow and sitemap rows, and a **Run local commands** permission (#1508, #1556, #1558, #1560, #1584)

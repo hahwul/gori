@@ -980,6 +980,26 @@ describe Gori::ProjectArchive do
     end
   end
 
+  # #1585: an approval is authorization, never something a snapshot carries in.
+  it "drops the hosts approved for agent sends" do
+    with_archive_project do |registry, project, store, root|
+      store.add_mcp_host_grant("acme.test").should be_true
+      archive_path = export_archive(project, File.join(root, "grants.gori"))
+      prepared = Gori::ProjectArchive.prepare_import(archive_path)
+      begin
+        imported = prepared.import_into(registry, "Grants copy")
+        copied = Gori::Store.open(imported.db_path)
+        begin
+          copied.mcp_host_grants.should be_empty
+        ensure
+          copied.close
+        end
+      ensure
+        prepared.close
+      end
+    end
+  end
+
   it "says nothing about Probe mode when the archive was already passive" do
     with_archive_project do |_registry, project, _store, root|
       archive_path = export_archive(project, File.join(root, "passive.gori"))

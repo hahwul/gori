@@ -722,3 +722,48 @@ describe "gori run --bind-from — the seed replay's Layer-2 gate" do
     end
   end
 end
+
+# #1585: an operator's approval on Layer 1, as plain data the surface hands over.
+describe Gori::Outbound::Approval do
+  it "holds every ungranted send, in scope or not, and passes a granted host" do
+    with_scope do |scope, store|
+      store.add_scope_rule("include", "host", "acme.test")
+      scope.reload
+      ob = Gori::Outbound.agent(scope, false)
+      ob.approval = Gori::Outbound::Approval.new(every_send: true, waiver: false, hosts: [] of String)
+      v = ob.check_request("https", "acme.test", "/", 443)
+      v.blocked?.should be_true
+      v.pending.should eq(Gori::Outbound::PENDING_SEND)
+      v.port.should eq(443)
+      ob.approval = Gori::Outbound::Approval.new(every_send: true, waiver: false, hosts: ["acme.test"])
+      ob.check_request("https", "acme.test", "/", 8443).blocked?.should be_false
+      # A grant is not an include: out of scope with no waiver stays an ordinary refusal.
+      out = ob.check_request("https", "other.test", "/", 443)
+      out.blocked?.should be_true
+      out.pending?.should be_false
+    end
+  end
+
+  it "matches a host:port grant on that port only" do
+    a = Gori::Outbound::Approval.new(every_send: true, waiver: false, hosts: ["acme.test:8443"])
+    a.granted?("ACME.test", 8443).should be_true
+    a.granted?("acme.test", 443).should be_false
+    a.granted?("acme.test", nil).should be_false
+  end
+
+  it "holds an asked-for waiver until the host is granted, and never lifts Layer 2" do
+    with_scope do |scope, store|
+      store.add_scope_rule("include", "host", "acme.test")
+      scope.reload
+      scope.enable_sandbox.should be_true
+      ob = Gori::Outbound.agent(scope, false)
+      ob.approval = Gori::Outbound::Approval.new(every_send: false, waiver: true, hosts: [] of String)
+      ob.check_request("https", "other.test", "/", 443).pending.should eq(Gori::Outbound::PENDING_WAIVER)
+      ob.check_request("https", "acme.test", "/", 443).blocked?.should be_false
+      ob.approval = Gori::Outbound::Approval.new(every_send: false, waiver: true, hosts: ["other.test"])
+      ob.check_request("https", "other.test", "/", 443).blocked?.should be_false
+      ob.send_block("https", "other.test", "/", 443).should eq(Gori::Outbound::SANDBOX_ERROR)
+      ob.sweep_block("https", "other.test", "/", 443).should eq(Gori::Outbound::SANDBOX_SWEEP_ERROR)
+    end
+  end
+end

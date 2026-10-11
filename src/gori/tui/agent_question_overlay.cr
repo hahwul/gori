@@ -67,8 +67,9 @@ module Gori::Tui
       OverlayKind::AgentQuestion
     end
 
+    # An approval is gori's own card about the agent's call (#1585), not the agent's question.
     def title : String
-      "AGENT ASKS"
+      @question.approval ? "APPROVE AGENT CALL" : "AGENT ASKS"
     end
 
     def hint : String

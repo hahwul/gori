@@ -29,3 +29,22 @@ describe "Store#setting_is?" do
     end
   end
 end
+
+describe "Store#mcp_host_grants (#1585)" do
+  it "adds a grant once and reads the list back" do
+    with_store do |store|
+      store.mcp_host_grants.should be_empty
+      store.add_mcp_host_grant("acme.test").should be_true
+      store.add_mcp_host_grant("acme.test:8443").should be_true
+      store.add_mcp_host_grant("acme.test").should be_true
+      store.mcp_host_grants.should eq(["acme.test", "acme.test:8443"])
+    end
+  end
+
+  it "reads a row that is not a list of strings as no grants" do
+    with_store do |store|
+      store.set_setting(Gori::Store::MCP_HOST_GRANTS_KEY, %({"acme.test":true})).should be_true
+      store.mcp_host_grants.should be_empty
+    end
+  end
+end

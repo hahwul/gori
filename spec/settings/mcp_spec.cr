@@ -12,12 +12,14 @@ private def with_mcp_home(&)
   prev_cfg = ENV["GORI_CONFIG"]?
   prev_channels = Gori::Settings.mcp_channels?
   prev_denied = Gori::Settings.mcp_denied_permissions
+  prev_asked = Gori::Settings.mcp_asked_permissions
   begin
     ENV["GORI_HOME"] = dir
     ENV.delete("GORI_CONFIG")
     Gori::Settings.path_override = nil
     Gori::Settings.mcp_channels = Gori::Settings::DEFAULT_MCP_CHANNELS
     Gori::Settings.mcp_denied_permissions = Set(String).new
+    Gori::Settings.mcp_asked_permissions = Set(String).new
     yield dir
   ensure
     Gori::Settings.path_override = nil
@@ -25,6 +27,7 @@ private def with_mcp_home(&)
     prev_cfg ? (ENV["GORI_CONFIG"] = prev_cfg) : ENV.delete("GORI_CONFIG")
     Gori::Settings.mcp_channels = prev_channels
     Gori::Settings.mcp_denied_permissions = prev_denied
+    Gori::Settings.mcp_asked_permissions = prev_asked
     FileUtils.rm_rf(dir)
   end
 end
@@ -226,12 +229,60 @@ describe "Settings mcp section" do
       end
     end
 
+    describe "ask (#1585)" do
+      it "round-trips the three states through settings.json" do
+        with_mcp_home do |dir|
+          Gori::Settings.set_mcp_permission_state("send", "ask")
+          Gori::Settings.set_mcp_permission_state("projects", "off")
+          Gori::Settings.save.should be_true
+          JSON.parse(File.read(File.join(dir, "settings.json")))["mcp_permissions"].as_h
+            .should eq({"projects" => JSON::Any.new(false), "send" => JSON::Any.new("ask")})
+          Gori::Settings.mcp_asked_permissions = Set(String).new
+          Gori::Settings.mcp_denied_permissions = Set(String).new
+          Gori::Settings.load
+          Gori::Settings.mcp_permission_state("send").should eq("ask")
+          Gori::Settings.mcp_permission_state("projects").should eq("off")
+          Gori::Settings.mcp_permission_state("write").should eq("on")
+          Gori::Settings.mcp_permitted?("send").should be_true
+        end
+      end
+
+      # An older gori has no "ask": its rule reads every non-boolean as off, so a downgrade
+      # fails closed. `"maybe"` is a string this gori does not know either.
+      it "reads a string it does not know as off, as an older gori reads ask" do
+        with_mcp_home do
+          Gori::Settings.import_document(%({"mcp_permissions":{"send":"maybe","write":"ask"}}))
+          Gori::Settings.mcp_permission_state("send").should eq("off")
+          Gori::Settings.mcp_permission_state("write").should eq("ask")
+        end
+      end
+
+      it "keeps scope on beside an asked write across a save and load" do
+        with_mcp_home do
+          Gori::Settings.set_mcp_permission_state("write", "ask")
+          Gori::Settings.save.should be_true
+          Gori::Settings.mcp_asked_permissions = Set(String).new
+          Gori::Settings.load
+          Gori::Settings.mcp_permission_state("write").should eq("ask")
+          Gori::Settings.mcp_permission_state("scope").should eq("on")
+        end
+      end
+
+      it "enforces the asks read in full, and none from a degraded load" do
+        with_mcp_home do |dir|
+          File.write(File.join(dir, "settings.json"), %({"mcp_permissions":{"exec":"ask"}}))
+          Gori::Settings.load
+          Gori::Settings.mcp_enforced_denials.should eq({Set(String).new, Set{"exec"}, nil})
+        end
+      end
+    end
+
     describe "mcp_enforced_denials" do
       it "is the loaded set when the file was read in full" do
         with_mcp_home do |dir|
           File.write(File.join(dir, "settings.json"), %({"mcp_permissions":{"send":false}}))
           Gori::Settings.load
-          Gori::Settings.mcp_enforced_denials.should eq({Set{"send"}, nil})
+          Gori::Settings.mcp_enforced_denials.should eq({Set{"send"}, Set(String).new, nil})
         end
       end
 
@@ -240,8 +291,9 @@ describe "Settings mcp section" do
         with_mcp_home do |dir|
           File.write(File.join(dir, "settings.json"), %({"mcp_permissions": {"send": false))
           Gori::Settings.load
-          denied, warning = Gori::Settings.mcp_enforced_denials
+          denied, asked, warning = Gori::Settings.mcp_enforced_denials
           denied.should eq(Gori::Settings::MCP_PERMISSION_KEYS.to_set)
+          asked.should be_empty
           warning.not_nil!.should contain("every MCP permission group is off")
         end
       end
