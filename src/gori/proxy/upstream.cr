@@ -88,9 +88,11 @@ module Gori::Proxy
                   *, overrides : Gori::HostOverrides? = nil,
                   pin : String? = nil,
                   apply_host_overrides : Bool = true,
-                  origin_scheme : String = "http") : IO?
+                  origin_scheme : String = "http",
+                  refuse_self : Bool = false) : IO?
       dial_result(host, port, connect_timeout, io_timeout, overrides: overrides, pin: pin,
-        apply_host_overrides: apply_host_overrides, origin_scheme: origin_scheme)[0]
+        apply_host_overrides: apply_host_overrides, origin_scheme: origin_scheme,
+        refuse_self: refuse_self)[0]
     end
 
     # Like `dial`, but also says WHY there is no socket. Every dial failure used to collapse
@@ -99,13 +101,20 @@ module Gori::Proxy
     # printed "host unreachable (DNS/refused/timeout)" and sent the operator to debug DNS and
     # firewall rules on a host that was perfectly fine. A bare `TCPSocket?` cannot carry that;
     # this is the shape that can.
+    #
+    # `refuse_self` is for the PROXY path — every dial a listener makes on a client's behalf.
+    # It refuses a connect that reached one of gori's own listeners (`dialed_listener?`), which
+    # is the loop no name check can see. Off for gori-originated sends (Repeater, fuzz, …): a
+    # send to gori's own listener is just a client of it, and the listener's own dial is the
+    # one that would loop.
     def self.dial_result(host : String, port : Int32,
                          connect_timeout : Time::Span = Settings.connect_timeout,
                          io_timeout : Time::Span = Settings.io_timeout,
                          *, overrides : Gori::HostOverrides? = nil,
                          pin : String? = nil,
                          apply_host_overrides : Bool = true,
-                         origin_scheme : String = "http") : {IO?, DialError?}
+                         origin_scheme : String = "http",
+                         refuse_self : Bool = false) : {IO?, DialError?}
       target, target_port = apply_host_overrides ? connect_target(host, port, overrides, pin) : {pin || host, port}
       # Nothing upstream range-checks an h1 Host/absolute-form port, and glibc's getaddrinfo
       # truncates one to 16 bits: `:73616` dials :8080, gori's own listener, past the self-loop
@@ -122,11 +131,11 @@ module Gori::Proxy
       if err = route.configuration_error
         {nil, DialError.new(DialErrorKind::Proxy, "#{err} — the origin was never contacted")}
       elsif route.direct?
-        direct_dial_result(target, target_port, connect_timeout, io_timeout)
+        direct_dial_result(target, target_port, connect_timeout, io_timeout, refuse_self)
       elsif route.socks5?
-        dial_via_socks5(route, target, target_port, connect_timeout, io_timeout)
+        dial_via_socks5(route, target, target_port, connect_timeout, io_timeout, refuse_self)
       else
-        dial_via_proxy(route, target, target_port, connect_timeout, io_timeout)
+        dial_via_proxy(route, target, target_port, connect_timeout, io_timeout, refuse_self)
       end
     end
 
@@ -196,6 +205,10 @@ module Gori::Proxy
     # IP the client connected through is just as much "self" as loopback is —
     # `self_addr[0]` alone ("0.0.0.0") can't see that. Nothing else can be bound on
     # that IP:port, so matching it never refuses legitimate traffic.
+    #
+    # A NAME is judged as written, never resolved; one that resolves to our own listener is
+    # caught after the connect instead (`dialed_listener?`, on every proxy-path dial). This
+    # check stays because it refuses before any socket is opened.
     def self.loops_to_self?(host : String, port : Int32, overrides : Gori::HostOverrides?,
                             self_addr : {String, Int32}, local_host : String? = nil) : Bool
       # The port gate is asked AFTER the override is resolved, not before. An override may now
@@ -375,6 +388,45 @@ module Gori::Proxy
       direct_dial_result(host, port, connect_timeout, io_timeout)[0]
     end
 
+    # Every accept socket a `Proxy::Server` in this process listens on, for `dialed_listener?`.
+    # Closed ones are pruned on the next registration rather than unregistered by `stop`/`rebind`:
+    # a closed server can never be the socket a later connect reached.
+    @@listeners = [] of TCPServer
+
+    def self.register_listener(server : TCPServer) : Nil
+      @@listeners.reject!(&.closed?)
+      @@listeners << server
+    end
+
+    # True when `sock`, already connected, reached one of gori's own accept sockets. The
+    # post-connect half of the self-loop guard: `loops_to_self?` judges the NAME before the dial
+    # and deliberately does no DNS, so a hostname that resolves to loopback (`foo.localhost`,
+    # or any public A record pointing at 127.0.0.1) walked past it and gori dialled itself,
+    # accepted that as a new client, and dialled again until MAX_CONNECTIONS wedged accept().
+    # Here the kernel has already answered the resolution question, so this costs no lookup —
+    # two getsockname/getpeername calls, and the second only when a listener's port matched.
+    #
+    # Same rule as `addresses_self?`, asked of the peer the connect actually reached: the bind's
+    # own address, or — under a wildcard bind — any address of this host (loopback, or the
+    # source the kernel picked for us, which equals the destination only when we dialled
+    # ourselves). A v4 wildcard does not answer a v6 peer, so that pair is something else.
+    def self.dialed_listener?(sock : TCPSocket) : Bool
+      remote = sock.remote_address
+      peer = normalize_host(remote.address)
+      @@listeners.any? do |srv|
+        next false if srv.closed?
+        bind = (srv.local_address rescue nil)
+        next false unless bind && bind.port == remote.port
+        b = normalize_host(bind.address)
+        next true if b == peer
+        next false unless unspecified?(b)
+        next false if bind.family.inet? && peer.includes?(':')
+        loopback?(peer) || unspecified?(peer) || peer == normalize_host(sock.local_address.address)
+      end
+    rescue ::Socket::Error
+      false
+    end
+
     # Same dial, paired with WHY there is no socket. A name that does not resolve and a port
     # that refuses are both "no socket", but not the same problem: the first is a name /
     # resolver / scope mistake and nothing was dialed at all, the second is a service that is
@@ -383,10 +435,16 @@ module Gori::Proxy
     # sentence that lists three causes and commits to none.
     private def self.direct_dial_result(host : String, port : Int32,
                                         connect_timeout : Time::Span = Settings.connect_timeout,
-                                        io_timeout : Time::Span = Settings.io_timeout) : {TCPSocket?, DialError?}
+                                        io_timeout : Time::Span = Settings.io_timeout,
+                                        refuse_self : Bool = false) : {TCPSocket?, DialError?}
       # Not `TCPSocket.new(host, port)`: on macOS 27 it hands back a REFUSED address as
       # connected (see `tcp_connect`).
       sock = tcp_connect(bare_host(host), port, connect_timeout)
+      if refuse_self && dialed_listener?(sock)
+        sock.close rescue nil
+        return {nil, DialError.new(DialErrorKind::Connect,
+          "refusing to proxy to self (loop): #{host}:#{port} connected to gori's own listener")}
+      end
       begin
         sock.sync = true # flush writes immediately (P6)
         sock.tcp_nodelay = true
@@ -491,7 +549,8 @@ module Gori::Proxy
     private def self.dial_via_proxy(route : Settings::UpstreamRoute,
                                     host : String, port : Int32,
                                     connect_timeout : Time::Span = Settings.connect_timeout,
-                                    io_timeout : Time::Span = Settings.io_timeout) : {IO?, DialError?}
+                                    io_timeout : Time::Span = Settings.io_timeout,
+                                    refuse_self : Bool = false) : {IO?, DialError?}
       # A named-but-unset password variable is a CONFIGURATION error and is refused before the
       # socket. The old code read the variable at dial time, got nil, and sent `user:` — an
       # empty password the proxy answers 407 to, which then arrived at the operator as "host
@@ -500,8 +559,8 @@ module Gori::Proxy
       if err = route.credential_error
         return {nil, DialError.new(DialErrorKind::Proxy, "#{proxy_label(route)}: #{err}")}
       end
-      tcp = direct_dial(route.host, route.port, connect_timeout, io_timeout)
-      return {nil, DialError.new(DialErrorKind::Connect, "#{proxy_label(route)} unreachable (DNS/refused/timeout) — the origin was never contacted")} unless tcp
+      tcp, leg_error = dial_proxy_leg(route, connect_timeout, io_timeout, refuse_self)
+      return {nil, leg_error} unless tcp
       # The TLS leg, when there is one, goes FIRST and everything below is written inside it.
       # That ordering is the whole security property of `http+tls://`: the CONNECT request-target
       # names the origin the operator is reaching for, and Proxy-Authorization carries a
@@ -528,6 +587,25 @@ module Gori::Proxy
     rescue
       close_proxy_leg(sock, tcp)
       {nil, DialError.new(DialErrorKind::Proxy, "#{proxy_label(route)}: the CONNECT exchange failed")}
+    end
+
+    # The TCP leg to an upstream proxy, shared by the CONNECT and SOCKS5 routes.
+    #
+    # Refused when it reached gori's own listener on a dial that must not (`refuse_self`).
+    # Every request gori forwarded through it would arrive back as a new client and be
+    # forwarded through it again — the self-loop with one more hop, and an easy one to
+    # configure: start gori from a shell that already exports `HTTP_PROXY` at it. Asked after
+    # the connect for the reason `dialed_listener?` gives, and only on the proxy path: a
+    # Repeater send through gori's own listener is a client of it, and stops there.
+    private def self.dial_proxy_leg(route : Settings::UpstreamRoute, connect_timeout : Time::Span,
+                                    io_timeout : Time::Span, refuse_self : Bool) : {TCPSocket?, DialError?}
+      tcp = direct_dial(route.host, route.port, connect_timeout, io_timeout)
+      return {nil, DialError.new(DialErrorKind::Connect, "#{proxy_label(route)} unreachable (DNS/refused/timeout) — the origin was never contacted")} unless tcp
+      return {tcp, nil} unless refuse_self && dialed_listener?(tcp)
+      tcp.close rescue nil
+      {nil, DialError.new(DialErrorKind::Proxy,
+        "#{proxy_label(route)} is gori's own listener — forwarding through it would loop; " \
+        "the origin was never contacted")}
     end
 
     # Tear down whichever half of the proxy leg exists. `sock` is either `tcp` itself or a TLS
@@ -682,7 +760,8 @@ module Gori::Proxy
     private def self.dial_via_socks5(route : Settings::UpstreamRoute,
                                      host : String, port : Int32,
                                      connect_timeout : Time::Span = Settings.connect_timeout,
-                                     io_timeout : Time::Span = Settings.io_timeout) : {IO?, DialError?}
+                                     io_timeout : Time::Span = Settings.io_timeout,
+                                     refuse_self : Bool = false) : {IO?, DialError?}
       # Same reasoning as the CONNECT path: a named-but-unset password variable is refused
       # before the socket, naming the variable.
       if err = route.credential_error
@@ -696,8 +775,8 @@ module Gori::Proxy
       handshake_error = false
       targets.each do |target|
         begin
-          sock = direct_dial(route.host, route.port, connect_timeout, io_timeout)
-          return {nil, DialError.new(DialErrorKind::Connect, "#{proxy_label(route)} unreachable (DNS/refused/timeout) — the origin was never contacted")} unless sock
+          sock, leg_error = dial_proxy_leg(route, connect_timeout, io_timeout, refuse_self)
+          return {nil, leg_error} unless sock
           return {sock, nil} if socks5_handshake(sock, route, target, port)
         rescue
           handshake_error = true
@@ -1247,9 +1326,11 @@ module Gori::Proxy
                       io_timeout : Time::Span = Settings.io_timeout,
                       *, overrides : Gori::HostOverrides? = nil,
                       pin : String? = nil, tls_preset : String? = nil,
-                      cancel : Proc(Bool)? = nil) : OpenSSL::SSL::Socket::Client?
+                      cancel : Proc(Bool)? = nil,
+                      refuse_self : Bool = false) : OpenSSL::SSL::Socket::Client?
       dial_tls_result(host, port, verify, alpn, sni, connect_timeout, io_timeout,
-        overrides: overrides, pin: pin, tls_preset: tls_preset, cancel: cancel)[0]
+        overrides: overrides, pin: pin, tls_preset: tls_preset, cancel: cancel,
+        refuse_self: refuse_self)[0]
     end
 
     # Like `dial_tls` but also reports WHY the dial failed (see DialError) as the second
@@ -1261,9 +1342,10 @@ module Gori::Proxy
                              *, overrides : Gori::HostOverrides? = nil,
                              pin : String? = nil,
                              tls_preset : String? = nil,
-                             cancel : Proc(Bool)? = nil) : {OpenSSL::SSL::Socket::Client?, DialError?}
+                             cancel : Proc(Bool)? = nil,
+                             refuse_self : Bool = false) : {OpenSSL::SSL::Socket::Client?, DialError?}
       tcp, dial_err = dial_result(host, port, connect_timeout, io_timeout, overrides: overrides, pin: pin,
-        origin_scheme: "https")
+        origin_scheme: "https", refuse_self: refuse_self)
       return {nil, dial_err || DialError::ORIGIN_UNREACHABLE} unless tcp
       # `hostname:` below is unaffected by `pin` on purpose: SNI and the verified name stay the
       # NAME. A pinned dial reaches the address the client actually connected to and then asks

@@ -275,10 +275,10 @@ module Gori::Settings
   # against a loopback/wildcard bind.
   #
   # Best-effort: NO name resolution and no interface list, so an origin hostname — or a LAN
-  # literal of this machine's own — that reaches the bind escapes this. The
-  # per-connection `Upstream.loops_to_self?` backstop covers the residue for a reverse listener
-  # whose origin names ITS OWN port; a cross-port loop through a hostname is not caught by
-  # either, and would surface as the 2048-connection wedge described in `upstream.cr:100-119`.
+  # literal of this machine's own — that reaches the bind escapes this. The runtime backstop
+  # covers the residue, cross-port loops included: every proxy-path dial asks
+  # `Upstream.dialed_listener?` of the socket it connected, so such a listener answers 502
+  # per request instead of a save-time error.
   private def self.self_target?(host : String, port : Int32, own : Listener,
                                 among : Array(Listener)) : Bool
     return true if port == own.port && dials_bind?(host, own.host)

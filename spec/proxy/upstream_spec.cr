@@ -1236,3 +1236,68 @@ describe Gori::Proxy::Upstream do
     end
   end
 end
+
+private class SelfLoopSink < Gori::Proxy::FlowSink
+  getter errors = [] of String
+  @id = 0_i64
+
+  def on_request(req : Gori::Store::CapturedRequest) : Int64
+    @id += 1
+  end
+
+  def on_response(resp : Gori::Store::CapturedResponse) : Nil
+    resp.error.try { |e| @errors << e }
+  end
+
+  def on_ws_message(flow_id : Int64, direction : String, opcode : Int32, payload : Bytes,
+                    shape : Gori::Proxy::WS::Shape = Gori::Proxy::WS::Shape::DEFAULT) : Nil
+  end
+end
+
+# The post-connect half of the self-loop guard. `loops_to_self?` reads the NAME and does no DNS,
+# so a hostname that RESOLVES to loopback on gori's own port (`*.localhost` does on macOS and
+# with systemd-resolved; any attacker-controlled A record can) walked past it, and one visited
+# page made gori dial itself until MAX_CONNECTIONS wedged accept().
+describe "Gori::Proxy::Upstream.dialed_listener?" do
+  it "refuses a proxied request whose hostname resolves to gori's own listener" do
+    sink = SelfLoopSink.new
+    # A small cap: should the guard regress, the loop wedges this listener, not the suite.
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, max_connections: 8)
+    proxy.start
+    begin
+      port = proxy.port
+      client = TCPSocket.new("127.0.0.1", port)
+      client.read_timeout = 5.seconds
+      client << "GET http://loop.localhost:#{port}/ HTTP/1.1\r\nHost: loop.localhost:#{port}\r\n\r\n"
+      client.flush
+      client.gets.to_s.should start_with("HTTP/1.1 502")
+      client.close
+      sink.errors.should eq(["upstream connect failed: refusing to proxy to self (loop): " \
+                             "loop.localhost:#{port} connected to gori's own listener"])
+    ensure
+      proxy.stop
+    end
+  end
+
+  it "applies only to the proxy path, and never to a listener gori does not own" do
+    own = TCPServer.new("127.0.0.1", 0)
+    other = TCPServer.new("127.0.0.1", 0)
+    Gori::Proxy::Upstream.register_listener(own)
+    begin
+      port = own.local_address.port
+      sock, err = Gori::Proxy::Upstream.dial_result("loop.localhost", port, refuse_self: true)
+      sock.should be_nil
+      err.try(&.detail).to_s.should contain("refusing to proxy to self (loop)")
+      # A Repeater-style send through gori's own listener is a client of it, not a loop.
+      sock, _ = Gori::Proxy::Upstream.dial_result("loop.localhost", port)
+      sock.should_not be_nil
+      sock.try(&.close)
+      sock, _ = Gori::Proxy::Upstream.dial_result("loop.localhost", other.local_address.port, refuse_self: true)
+      sock.should_not be_nil
+      sock.try(&.close)
+    ensure
+      own.close
+      other.close
+    end
+  end
+end

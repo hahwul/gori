@@ -2217,7 +2217,7 @@ module Gori::Proxy
     # we dial it plaintext and run the same h2 relay (no :authority routing / HPACK coupling
     # needed). The origin must speak h2c.
     private def intercept_h2c(host : String, port : Int32, client : IO) : Nil
-      upstream = Upstream.dial(host, port, overrides: @host_overrides, pin: dial_pin)
+      upstream = Upstream.dial(host, port, overrides: @host_overrides, pin: dial_pin, refuse_self: true)
       return unless upstream
       # Long-lived h2c relay: relax both legs so an idle h2 connection isn't reaped by the
       # baseline/io timeouts; keepalive (both legs) handles a dead peer.
@@ -2522,7 +2522,7 @@ module Gori::Proxy
         # default `"http"` picked `HTTP_PROXY`, so an environment exporting only `HTTPS_PROXY`
         # sent this — the one shape that proxy exists to carry — direct instead (#1114).
         upstream, dial_error = Upstream.dial_result(host, port, overrides: @host_overrides,
-          pin: dial_pin, origin_scheme: "https")
+          pin: dial_pin, origin_scheme: "https", refuse_self: true)
         @last_dial_error = dial_error
         unless upstream
           record_error(req, "https", host, port, created_at, upstream_error_message(host, port, nil))
@@ -2761,14 +2761,15 @@ module Gori::Proxy
         # no tunnel (the transparent and h2c listeners), the process-wide setting `-k` moves.
         verify = @tls_upstream ? @verify_upstream : (@tls.try(&.verify_upstream?) || (@tls.nil? && Settings.verify_upstream?))
         sock, err = Upstream.dial_tls_result(host, port, verify: verify,
-          overrides: @host_overrides, pin: dial_pin)
+          overrides: @host_overrides, pin: dial_pin, refuse_self: true)
         @last_dial_error = err
         sock
       else
         # A plaintext forward-proxy dial has no TLS leg to classify, but it DOES go through the
         # upstream proxy (gori CONNECT-tunnels even http:// targets), so it can be refused by
         # one — which is why this branch now asks for the reason too instead of clearing it.
-        sock, err = Upstream.dial_result(host, port, overrides: @host_overrides, pin: dial_pin)
+        sock, err = Upstream.dial_result(host, port, overrides: @host_overrides, pin: dial_pin,
+          refuse_self: true)
         @last_dial_error = err
         sock
       end

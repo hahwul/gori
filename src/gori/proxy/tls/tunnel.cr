@@ -398,7 +398,7 @@ module Gori::Proxy::Tls
       # the h1 fallback re-dials and waits again (never longer than the configured timeout).
       timeout = {Gori::Settings.connect_timeout, H2_PROBE_CONNECT_TIMEOUT}.min
       upstream = Proxy::Upstream.dial_tls(host, port, verify: @verify_upstream, alpn: "h2",
-        connect_timeout: timeout, overrides: @host_overrides, pin: dial_addr)
+        connect_timeout: timeout, overrides: @host_overrides, pin: dial_addr, refuse_self: true)
       return {upstream, Proxy::H2Offer::Offered} if upstream && upstream.alpn_protocol == "h2"
       # Remember a DEFINITIVE h1 negotiation (handshake completed, ALPN != h2) so repeat visits
       # skip the probe. Never cache a nil dial — that's a transient reach/verify failure, not a

@@ -127,6 +127,7 @@ module Gori::Proxy
       server = bind_listener(fallback)
       @port = server.local_address.port # resolve ephemeral (port 0) to the real one
       @server = server
+      Upstream.register_listener(server)
       @running = true
       spawn(name: "gori-proxy-accept") { accept_loop(server) }
     end
@@ -189,6 +190,7 @@ module Gori::Proxy
       @host = host
       @port = new_server.local_address.port
       @server = new_server
+      Upstream.register_listener(new_server)
       spawn(name: "gori-proxy-accept") { accept_loop(new_server) }
     end
 
@@ -998,7 +1000,8 @@ module Gori::Proxy
     # environment was bypassed for exactly the traffic it exists to carry (#1114).
     private def relay_passthrough(host : String, port : Int32, stream : IO,
                                   client : TCPSocket, pin : String? = nil) : Bool
-      upstream = Upstream.dial(host, port, overrides: @host_overrides, pin: pin, origin_scheme: "https")
+      upstream = Upstream.dial(host, port, overrides: @host_overrides, pin: pin, origin_scheme: "https",
+        refuse_self: true)
       return false unless upstream
       begin
         SocketTuning.relax(stream)
