@@ -96,7 +96,7 @@ module Gori
         @regexes = @columns.map do |c|
           next nil unless c.kind.regex?
           begin
-            Regex.new(c.selector)
+            Gori::SafeRegexp.budgeted(c.selector)
           rescue ArgumentError | Regex::Error
             nil
           end

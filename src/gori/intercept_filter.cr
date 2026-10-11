@@ -576,7 +576,7 @@ module Gori
       # such a condition (`Colormarker.unusable_reason`, and the intercept bar's own note)
       # refuse it where it is typed, which is the place it can still be fixed.
       pattern = begin
-        Regex.new(value)
+        Gori::SafeRegexp.budgeted(value)
       rescue
         return Term.new(:never, value, negate)
       end

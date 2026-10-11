@@ -320,7 +320,7 @@ module Gori
 
     def self.regex(subject : ExtractSubject, pattern : String, re : Regex? = nil) : String?
       return nil if pattern.empty?
-      re ||= Regex.new(pattern)
+      re ||= Gori::SafeRegexp.budgeted(pattern)
       text = decoded_text(subject)
       return nil if text.empty?
       md = re.match(text)

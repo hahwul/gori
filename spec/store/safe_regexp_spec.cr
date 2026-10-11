@@ -304,3 +304,55 @@ describe Gori::SafeRegexp do
     end
   end
 end
+
+# The match budget (`SafeRegexp.budgeted`). PCRE2's match_limit resets at every start position,
+# so without it one operator-authored pattern over a peer-shaped body could hold the single
+# scheduler thread for seconds per call.
+describe "Gori::SafeRegexp.budgeted" do
+  # Nested alternation under a failing lookahead: every start position backtracks ~2^n times
+  # and none of them reaches PCRE2's per-start limit, so unbudgeted this runs for minutes.
+  slow = "(?:(?:[\\s\\S]|[\\s\\S]){20}(?!))?[\\x01-\\x02]"
+  subject = ("X-A: " + "a" * 60 + "\r\n") * 1100
+
+  it "stops a pathological scan near its budget and reports it as a regex error" do
+    rx = Gori::SafeRegexp.budgeted(slow)
+    t = Time.instant
+    expect_raises(Regex::Error) { rx.matches?(subject) }
+    (Time.instant - t).should be < 1.second
+  end
+
+  it "bounds a whole gsub, not each of the calls it makes" do
+    rx = Gori::SafeRegexp.budgeted("(?:(?:[\\s\\S]|[\\s\\S]){22}(?!))?[\\s\\S]")
+    t = Time.instant
+    expect_raises(Regex::Error) { subject.gsub(rx, "x") }
+    (Time.instant - t).should be < 1.second
+  end
+
+  it "answers like the bare pattern on ordinary input" do
+    body = String.build { |io| 200.times { |i| io << "{\"id\":#{i},\"email\":\"u#{i}@ex.com\"}\n" } }
+    ["email\":\"([^\"]+)\"", "(?i)ID\":(\\d+)", "a|u1", "^\\{", "(\\d)\\1",
+     "(?x) u 1 \\d # trailing comment", ".*com\"\\}$", "zzz", ""].each do |p|
+      bare = Regex.new(p)
+      rx = Gori::SafeRegexp.budgeted(p)
+      rx.match(body).try(&.to_a).should eq(bare.match(body).try(&.to_a))
+      body.gsub(rx, "_").should eq(body.gsub(bare, "_"))
+    end
+  end
+
+  it "starts a fresh budget for a later scan of the same string" do
+    rx = Gori::SafeRegexp.budgeted("\\{")
+    text = "{" + "a" * 100
+    rx.matches?(text).should be_true
+    sleep Gori::SafeRegexp::BUDGET * 2
+    rx.matches?(text).should be_true
+  end
+
+  it "reports a compile error at the operator's own offset" do
+    bare = expect_raises(ArgumentError) { Regex.new("ab(") }
+    expect_raises(ArgumentError, bare.message) { Gori::SafeRegexp.budgeted("ab(") }
+  end
+
+  it "is what the SQL REGEXP callback compiles" do
+    Gori::SafeRegexp.match_bytes(slow, subject.to_unsafe, subject.bytesize).should be_false
+  end
+end

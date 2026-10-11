@@ -1039,7 +1039,7 @@ module Gori
         re =
           if r.kind.regex? && !r.selector.empty?
             begin
-              Regex.new(r.selector)
+              Gori::SafeRegexp.budgeted(r.selector)
             rescue ArgumentError | Regex::Error
               nil
             end
