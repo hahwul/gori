@@ -657,11 +657,17 @@ module Gori
 
       # Layer 1 (the surface's scope policy) before Layer 2 (Sandbox / explicit excludes) — the
       # order every direct-dial surface asks them in (`Retest::LiveBackend#send`).
+      #
+      # Layer 2 is the SWEEP judgement (sandbox AND explicit excludes) unless the TUI started
+      # the refresh, the rule `Retest::LiveBackend#layer_two_refusal` states: with Layer 1
+      # waived (`refresh_session_slot{allow_unscoped:true}`, `gori run session refresh
+      # --allow-unscoped`), `plan.refusal` alone replayed a step the project explicitly excludes.
       private def step_refusal(plan : Repeater::Plan, outbound : Outbound) : String?
         target = (bytes = plan.scope_requests.first?) ? Outbound.request_target(bytes) : "/"
         verdict = outbound.check_request(plan.scheme, plan.host, target, plan.port)
         return "#{plan.host} is out of the project scope — #{outbound.remedy(verdict)}" if verdict.blocked?
-        plan.refusal
+        sweep = outbound.reason == Outbound::Reason::Interactive ? nil : outbound.sweep_block(plan.scheme, plan.host, target, plan.port)
+        sweep || plan.refusal
       end
 
       # `{binding name => bound_at}` for every live rule the slot claims, unbound as nil.

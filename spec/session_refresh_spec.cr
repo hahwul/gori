@@ -253,6 +253,31 @@ describe Gori::SessionRefresh do
     end
   end
 
+  # `allow_unscoped` waives Layer 1, never an explicit EXCLUDE: the agent's and the CLI's waived
+  # refresh judge Layer 2 as a sweep does (Retest's rule). The TUI's keeps the hand-authored one.
+  it "refuses a waived refresh's step the project excludes, but not the TUI's" do
+    with_refresh_env do |store|
+      seen = Seen.new
+      server, port = start_login_origin(seen)
+      begin
+        runner, _, _, _, _ = refresh_fixture(store, port)
+        scope = Gori::Scope.load(store)
+        scope.add("exclude", "host", "127.0.0.1").should be_true
+        [Gori::Outbound.agent(scope, true), Gori::Outbound.cli(scope, true)].each do |waived|
+          outcome = runner.refresh("admin", waived)
+          outcome.ok.should be_false
+          outcome.message.should contain("scope exclude rule")
+          runner.expire_cooldown_for_spec("admin")
+        end
+        seen.paths.should be_empty
+        runner.refresh("admin", Gori::Outbound.interactive(scope)).ok.should be_true
+        seen.paths.should eq(["/csrf", "/login"])
+      ensure
+        server.close
+      end
+    end
+  end
+
   it "refuses a step whose Repeater session was deleted, even after its id is reused" do
     with_refresh_env do |store|
       seen = Seen.new
