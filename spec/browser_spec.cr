@@ -303,20 +303,22 @@ describe Gori::Browser do
     it "never reports a stale DevToolsActivePort, and closes a browser that writes none" do
       Dir.mkdir_p(File.join(root, "silent"))
       File.write(File.join(root, "silent", "DevToolsActivePort"), "1111\n/devtools/browser/old")
+      silent = bin.call("silent", "sleep 30") # outside expect_raises: posix_only! pends by raising
       expect_raises(Gori::Error, /did not report a DevTools port/) do
-        Gori::Browser.start(bin.call("silent", "sleep 30"), cdp_spec,
-          grace: 100.milliseconds, endpoint_wait: 300.milliseconds)
+        Gori::Browser.start(silent, cdp_spec, grace: 100.milliseconds, endpoint_wait: 300.milliseconds)
       end
     end
 
     # The profile is open in a running instance: the launcher hands the launch to it as a
     # new window and exits 0, so no port was ever opened.
     it "refuses when a running instance took the launch" do
+      handoff = bin.call("handoff", "exit 0")
+      late = bin.call("late", "sleep 0.3; exit 0")
       expect_raises(Gori::Error, /already open/) do
-        Gori::Browser.start(bin.call("handoff", "exit 0"), cdp_spec, grace: 10.seconds)
+        Gori::Browser.start(handoff, cdp_spec, grace: 10.seconds)
       end
       expect_raises(Gori::Error, /already open/) do
-        Gori::Browser.start(bin.call("late", "sleep 0.3; exit 0"), cdp_spec, grace: 50.milliseconds)
+        Gori::Browser.start(late, cdp_spec, grace: 50.milliseconds)
       end
     end
 
