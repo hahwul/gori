@@ -392,6 +392,9 @@ describe Gori::Proxy::Tls::CertAuthority do
       Base64.decode(spki).size.should eq(32) # a SHA-256 digest
       # deterministic across reloads of the same persisted CA
       Gori::Proxy::Tls::CertAuthority.load_or_create(dir).spki_sha256_base64.should eq(spki)
+      # `gori run browser` pins from the cert file alone, and must pin the same key (#1594)
+      Gori::Proxy::Tls::Cert.read_pem(File.join(dir, Gori::Proxy::Tls::CertAuthority::CA_CERT_FILE))
+        .spki_sha256_base64.should eq(spki)
     end
   end
 

@@ -1,4 +1,5 @@
 require "./bind_address"
+require "./paths"
 
 module Gori
   # Detect installed browsers and launch one pre-configured to trust gori's CA
@@ -23,12 +24,20 @@ module Gori
     # `proxy_host` is the RAW bind, exactly as the session holds it — the resolution to
     # something a browser can dial happens here (see `dial_host`) so every launch path
     # gets it, rather than in each caller.
+    #
+    # `remote_debugging_port` opens a Chrome DevTools Protocol port (0: Chromium picks one) so
+    # an automation client can drive the browser (#1594). It hands any local process
+    # unauthenticated control of the profile — cookies, script in every origin — so it is
+    # only ever an explicit per-launch request, never a default or a setting. Chromium binds
+    # it to loopback on its own; `--remote-debugging-address` and `--remote-allow-origins`
+    # are never passed, since the Origin check is what keeps a web page off the socket.
     record LaunchSpec,
       proxy_host : String,
       proxy_port : Int32,
       ca_cert_path : String,
       spki_sha256 : String,
-      profile_root : String do
+      profile_root : String,
+      remote_debugging_port : Int32? = nil do
       # The proxy host to actually WRITE INTO the browser's config. Under a wildcard bind
       # the raw value is "0.0.0.0", and a browser pointed at http://0.0.0.0:port proxies
       # nothing — it opens, captures no traffic, and looks like gori is broken. Bare, so
@@ -42,6 +51,12 @@ module Gori
       def dial_authority : String
         BindAddress.authority(dial_host, proxy_port)
       end
+    end
+
+    # Where launched profiles live, one directory per browser id. Shared by every surface,
+    # so `gori run browser` reopens the profile (and the logins) the TUI's Open browser made.
+    def self.default_profile_root : String
+      File.join(Paths.home_dir, "browser")
     end
 
     # A candidate browser + where to look for it: absolute app binaries on macOS
@@ -127,6 +142,20 @@ module Gori
     # was read by then. Only spent when a launch has already failed.
     private STDERR_SETTLE = 200.milliseconds
 
+    # How long a launch with a DevTools port waits for Chromium to report the port it bound.
+    # A cold start writes it within a second or two; the cap only bounds how long a launch
+    # that never will (see `await_endpoint`) takes to be refused.
+    ENDPOINT_WAIT = 15.seconds
+
+    # A browser still up after the grace window. `exited` yields its exit status once: the
+    # reaping fiber `spawn_detached` started owns the one `Process#wait` a child allows.
+    record Running, process : Process, exited : Channel(Process::Status)
+
+    # What `start` did: the one-line status, whether the browser is up, and — when this
+    # process spawned it and it is still running — the handle on it and its CDP endpoint.
+    # `running` is nil after a launcher handed off to an instance that was already open.
+    record Started, status : String, ok : Bool, running : Running? = nil, endpoint : String? = nil
+
     # Launch `found` pre-trusted; returns a one-line status for the UI. Raises only
     # on a hard spawn failure. Creates the profile dir (and, for Firefox, writes
     # prefs + imports the CA) as a side effect.
@@ -139,8 +168,23 @@ module Gori
     # exit is reported the moment it does, whatever the window, so tests pass a generous
     # one and stay deterministic under any machine load.
     def self.launch(found : Found, spec : LaunchSpec, grace : Time::Span = SPAWN_GRACE) : String
+      start(found, spec, grace).status
+    end
+
+    # `launch` for a caller that keeps hold of the browser (`gori run browser` stays in the
+    # foreground until it exits). Raises `Gori::Error` when a requested DevTools port cannot
+    # be delivered, rather than reporting an endpoint nothing listens on.
+    def self.start(found : Found, spec : LaunchSpec, grace : Time::Span = SPAWN_GRACE,
+                   endpoint_wait : Time::Span = ENDPOINT_WAIT) : Started
+      cdp = spec.remote_debugging_port
+      if cdp && found.kind.firefox?
+        raise Gori::Error.new("#{found.name} has no DevTools Protocol port (Firefox dropped CDP " \
+                              "for WebDriver BiDi) — use a Chromium-based browser")
+      end
       profile = File.join(spec.profile_root, found.id)
       Dir.mkdir_p(profile)
+      # A copy left by an earlier run would hand back a port nothing listens on any more.
+      File.delete?(File.join(profile, ACTIVE_PORT_FILE)) if cdp
       # Firefox's profile has to be written BEFORE it is spawned — hence the setup call
       # sitting here, in the branch that also picks its args.
       args, note =
@@ -148,11 +192,61 @@ module Gori
         in Kind::Chromium then {chromium_args(profile, spec, found.id), "CA trusted, proxy → #{spec.dial_authority}"}
         in Kind::Firefox  then {firefox_args(profile), setup_firefox_profile(profile, spec)}
         end
-      if failure = spawn_detached(found.path, args, grace)
-        "#{found.name} #{failure}"
-      else
-        "opened #{found.name} — #{note}"
+      opened = "opened #{found.name} — #{note}"
+      case child = spawn_detached(found.path, args, grace)
+      in String
+        Started.new("#{found.name} #{child}", ok: false)
+      in Nil
+        raise already_open(found, profile) if cdp
+        Started.new(opened, ok: true)
+      in Running
+        endpoint = cdp ? await_endpoint(found, profile, child, endpoint_wait) : nil
+        Started.new(opened, ok: true, running: child, endpoint: endpoint)
       end
+    end
+
+    # The file Chromium writes into its user-data-dir once the DevTools server is up: the
+    # port on line 1, the browser websocket path on line 2.
+    ACTIVE_PORT_FILE = "DevToolsActivePort"
+
+    # Wait for the port Chromium actually bound, read from its own `DevToolsActivePort` —
+    # never probed over HTTP, which would be a gori-originated request outside Outbound.
+    # A browser that exits first never opened one: exit 0 is a launcher that handed the
+    # launch to an instance already running on this profile, which took it as "open a
+    # window" and ignored the flag. One that never writes it is closed, not left behind
+    # holding a port nobody was told about.
+    private def self.await_endpoint(found : Found, profile : String, child : Running, wait : Time::Span) : String
+      path = File.join(profile, ACTIVE_PORT_FILE)
+      deadline = Time.instant + wait
+      loop do
+        if port = read_active_port(path)
+          return "http://127.0.0.1:#{port}"
+        end
+        select
+        when status = child.exited.receive?
+          raise already_open(found, profile) if status.nil? || status.success?
+          raise Gori::Error.new("#{found.name} quit before opening its DevTools port (#{failure_reason("", status)})")
+        when timeout(50.milliseconds)
+        end
+        next if Time.instant < deadline
+        child.process.terminate rescue nil
+        raise Gori::Error.new("#{found.name} did not report a DevTools port within " \
+                              "#{wait.total_seconds.to_i}s, so it was closed")
+      end
+    end
+
+    private def self.already_open(found : Found, profile : String) : Gori::Error
+      Gori::Error.new("#{found.name} is already open on #{profile} and took this launch as a new " \
+                      "window, without a DevTools port — close that #{found.name} and retry")
+    end
+
+    # Line 1 of `DevToolsActivePort`, or nil until the file holds a whole first line: it is
+    # written in place, so a read can land mid-write.
+    def self.read_active_port(path : String) : Int32?
+      text = File.read(path) rescue return nil
+      first, newline, _ = text.partition('\n')
+      return nil if newline.empty?
+      first.strip.to_i?.try { |port| port if port.in?(1..65_535) }
     end
 
     # Chromium launch flags. Pinning the CA's SPKI trusts exactly gori's CA for the
@@ -185,6 +279,8 @@ module Gori
         "--no-first-run",
         "--no-default-browser-check",
       ]
+      spec.remote_debugging_port.try { |port| args << "--remote-debugging-port=#{port}" }
+      args
     end
 
     def self.firefox_args(profile : String) : Array(String)
@@ -257,10 +353,11 @@ module Gori
     # Start the browser without it touching gori's terminal, and reap it on a
     # detached fiber so a closed browser never becomes a zombie or blocks the UI.
     #
-    # Returns nil once the browser is up, or the reason it isn't. stderr is piped rather
+    # Returns the browser once it is up, nil when a launcher handed off to an instance that
+    # was already running, or the reason it isn't up. stderr is piped rather
     # than closed: closing it threw away the browser's own account of why it quit, which
     # is the one thing that could explain a failed launch to the operator (#700).
-    private def self.spawn_detached(path : String, args : Array(String), grace : Time::Span) : String?
+    private def self.spawn_detached(path : String, args : Array(String), grace : Time::Span) : (Running | String)?
       reader, writer = IO.pipe
       process =
         begin
@@ -288,14 +385,14 @@ module Gori
       # exact, and it returns the moment a browser refuses instead of always burning the
       # full window in the key handler. On timeout the wait fiber stays on to reap it.
       exited = Channel(Process::Status).new(1)
-      spawn { exited.send(process.wait) rescue nil }
+      spawn { exited.send(process.wait) rescue exited.close }
       status = select
-      when s = exited.receive
-        s
+      when s = exited.receive?
+        s # nil: the reaper could not wait on it, so it is not known to have exited
       when timeout(grace)
         nil
       end
-      return nil if status.nil?
+      return Running.new(process, exited) if status.nil?
       # Exiting 0 inside the grace window is a LAUNCHER handing off, not a failure: the
       # `firefox` and packaged-Chrome entry points hand the URL to an already-running
       # instance and return. Only a non-zero exit is a browser that refused to start.

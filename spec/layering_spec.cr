@@ -47,8 +47,9 @@ describe "layering contract" do
     # picker's cross-project search engine (#1229), kept out of `tui/` so a CLI or MCP adapter
     # can reuse it — which only holds while it knows nothing of the surface that calls it.
     # `js_refs` is the JavaScript reference scan behind the Sitemap's unrequested nodes (#1243),
-    # which all three surfaces call.
-    %w[bindings session_slot session_slots project_search js_refs].each do |name|
+    # which all three surfaces call. `browser` launches the TUI's Open browser and `gori run
+    # browser` alike (#1594).
+    %w[bindings session_slot session_slots project_search js_refs browser].each do |name|
       path = File.join(root, "src", "gori", "#{name}.cr")
       paths << path if File.exists?(path)
     end

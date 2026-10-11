@@ -28,8 +28,8 @@ private def capturing(project : Gori::Project, &)
   end
 end
 
-private def target!(result) : Gori::CLI::Run::ShellTarget
-  result.as(Gori::CLI::Run::ShellTarget)
+private def target!(result) : Gori::CLI::Run::CaptureTarget
+  result.as(Gori::CLI::Run::CaptureTarget)
 end
 
 describe "gori run shell — flags" do
@@ -57,14 +57,14 @@ describe "gori run shell — flags" do
   end
 
   it "reads --proxy as a dialable authority, tolerating a copied http:// prefix" do
-    Gori::CLI::Run.shell_proxy_authority("127.0.0.1:8070").should eq("127.0.0.1:8070")
-    Gori::CLI::Run.shell_proxy_authority("http://127.0.0.1:8070/").should eq("127.0.0.1:8070")
-    Gori::CLI::Run.shell_proxy_authority("0.0.0.0:8070").should eq("127.0.0.1:8070")
-    Gori::CLI::Run.shell_proxy_authority("[::1]:8070").should eq("[::1]:8070")
-    Gori::CLI::Run.shell_proxy_authority("localhost:9000").should eq("localhost:9000")
+    Gori::CLI::Run.proxy_address("127.0.0.1:8070").should eq({"127.0.0.1", 8070})
+    Gori::CLI::Run.proxy_address("http://127.0.0.1:8070/").should eq({"127.0.0.1", 8070})
+    Gori::CLI::Run.proxy_address("0.0.0.0:8070").should eq({"127.0.0.1", 8070})
+    Gori::CLI::Run.proxy_address("[::1]:8070").should eq({"::1", 8070})
+    Gori::CLI::Run.proxy_address("localhost:9000").should eq({"localhost", 9000})
     ["", "127.0.0.1", "127.0.0.1:0", "127.0.0.1:70000", "u:p@127.0.0.1:8070",
      "127.0.0.1:8070/path", "127.0.0.1:99999999999", "socks5://127.0.0.1:1080"].each do |bad|
-      Gori::CLI::Run.shell_proxy_authority(bad).should be_nil, bad
+      Gori::CLI::Run.proxy_address(bad).should be_nil, bad
     end
   end
 
@@ -80,7 +80,7 @@ end
 describe "gori run shell — which gori" do
   it "refuses when nothing captures the project, pointing at the way out" do
     with_capture_project do |project, _ca, _root|
-      msg = Gori::CLI::Run.shell_target(project, nil, nil).as(String)
+      msg = Gori::CLI::Run.capture_target(project, nil, nil).as(String)
       msg.should contain("no gori is capturing shellproj")
       msg.should contain("--proxy HOST:PORT")
     end
@@ -89,7 +89,7 @@ describe "gori run shell — which gori" do
   it "does not trust a marker left behind by a gori that is gone" do
     with_capture_project do |project, ca, _root|
       Gori::CaptureStatus.write_at(project.capture_status_path, "127.0.0.1", 8070, true, ca)
-      Gori::CLI::Run.shell_target(project, nil, nil).as(String).should contain("no gori is capturing")
+      Gori::CLI::Run.capture_target(project, nil, nil).as(String).should contain("no gori is capturing")
     end
   end
 
@@ -98,7 +98,7 @@ describe "gori run shell — which gori" do
       # The live port, not the configured one: gori falls back when its port is taken.
       Gori::CaptureStatus.write_at(project.capture_status_path, "0.0.0.0", 18_071, true, ca)
       capturing(project) do
-        t = target!(Gori::CLI::Run.shell_target(project, nil, nil))
+        t = target!(Gori::CLI::Run.capture_target(project, nil, nil))
         t.authority.should eq("127.0.0.1:18071")
         t.ca_cert_path.should eq(ca)
         t.label.should contain("shellproj")
@@ -111,7 +111,7 @@ describe "gori run shell — which gori" do
     with_capture_project do |project, ca, _root|
       Gori::CaptureStatus.write_at(project.capture_status_path, "127.0.0.1", 8070, false, ca)
       capturing(project) do
-        t = target!(Gori::CLI::Run.shell_target(project, nil, nil))
+        t = target!(Gori::CLI::Run.capture_target(project, nil, nil))
         t.warnings.join.should contain("capture is paused")
       end
     end
@@ -120,7 +120,7 @@ describe "gori run shell — which gori" do
   it "refuses when the lock is held but no address was published" do
     with_capture_project do |project, _ca, _root|
       capturing(project) do
-        Gori::CLI::Run.shell_target(project, nil, nil).as(String).should contain("has not published its address")
+        Gori::CLI::Run.capture_target(project, nil, nil).as(String).should contain("has not published its address")
       end
     end
   end
@@ -129,10 +129,10 @@ describe "gori run shell — which gori" do
     with_capture_project do |project, ca, root|
       Gori::CaptureStatus.write_at(project.capture_status_path, "127.0.0.1", 8070, true, ca)
       capturing(project) do
-        Gori::CLI::Run.shell_target(project, nil, File.join(root, "empty")).as(String)
+        Gori::CLI::Run.capture_target(project, nil, File.join(root, "empty")).as(String)
           .should contain("no gori CA certificate")
         other = Gori::Proxy::Tls::CertAuthority.load_or_create(File.join(root, "other"))
-        target!(Gori::CLI::Run.shell_target(project, nil, File.join(root, "other"))).ca_cert_path
+        target!(Gori::CLI::Run.capture_target(project, nil, File.join(root, "other"))).ca_cert_path
           .should eq(other.ca_cert_path)
       end
     end
@@ -140,16 +140,16 @@ describe "gori run shell — which gori" do
 
   it "takes --proxy as given without looking for a capture" do
     with_capture_project do |_project, ca, _root|
-      t = target!(Gori::CLI::Run.shell_target(nil, "0.0.0.0:9999", File.dirname(ca)))
+      t = target!(Gori::CLI::Run.capture_target(nil, "0.0.0.0:9999", File.dirname(ca)))
       t.authority.should eq("127.0.0.1:9999")
       t.ca_cert_path.should eq(ca)
-      Gori::CLI::Run.shell_target(nil, "nope", File.dirname(ca)).as(String).should contain("--proxy expects HOST:PORT")
+      Gori::CLI::Run.capture_target(nil, "nope", File.dirname(ca)).as(String).should contain("--proxy expects HOST:PORT")
     end
   end
 
   it "headers --print with how to apply it and what it cannot reach" do
     with_capture_project do |_project, ca, root|
-      t = target!(Gori::CLI::Run.shell_target(nil, "127.0.0.1:8070", File.dirname(ca)))
+      t = target!(Gori::CLI::Run.capture_target(nil, "127.0.0.1:8070", File.dirname(ca)))
       result = Gori::ShellEnv.build(t.authority, t.ca_cert_path, env: {} of String => String,
         dir: File.join(root, "shell"), system_source: {nil, nil})
       header = Gori::CLI::Run.shell_print_header(result, t).join("\n")
@@ -163,7 +163,7 @@ describe "gori run shell — which gori" do
     posix_only!("evaluates the rendered POSIX script with /bin/sh")
     with_capture_project do |_project, ca, root|
       pwned = File.join(root, "PWNED")
-      hostile_target = Gori::CLI::Run::ShellTarget.new("127.0.0.1:8070", ca,
+      hostile_target = Gori::CLI::Run::CaptureTarget.new("127.0.0.1", 8070, ca,
         "demo\ntouch #{pwned}\n# extra on 127.0.0.1:8070", [] of String)
       result = Gori::ShellEnv.build(hostile_target.authority, hostile_target.ca_cert_path,
         env: {} of String => String, dir: File.join(root, "shell"), system_source: {nil, nil})

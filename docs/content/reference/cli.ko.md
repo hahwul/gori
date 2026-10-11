@@ -204,6 +204,39 @@ gori run shell --print --shell fish | source
 
 다루지 않는 것: 1.27보다 오래된 툴체인으로 빌드한 macOS의 Go 프로그램은 키체인으로 검증합니다. Go는 `localhost`와 루프백 주소를 절대 프록시하지 않습니다. Node는 `NODE_USE_ENV_PROXY`를 지원하는 릴리스(v22.21, v24.10에서 stable)에서만 프록시를 씁니다. Java는 `JAVA_TOOL_OPTIONS`로 truststore가 필요합니다. 자체 신뢰 저장소를 고정한 도구는 다루지 않습니다.
 
+### run browser {#run-browser}
+
+실행 중인 gori를 거치고 gori의 CA만 신뢰하는 브라우저를 엽니다. 팔레트의 **Open browser**를 스크립트에서 쓰는 형태입니다. `~/.gori/browser/<id>`의 같은 프로필을 쓰고, 브라우저가 끝날 때까지 포그라운드에 머물며, Ctrl-C를 누르면 브라우저를 닫습니다.
+
+```bash
+gori run browser                                   # 처음 감지된 브라우저
+gori run browser --browser brave
+gori run browser --remote-debugging-port 9222      # 브라우저 자동화 MCP 서버용
+```
+
+프록시 주소는 [run shell](#run-shell)과 같은 방식으로 찾고, 프로젝트를 캡처 중인 gori가 없으면 같은 문구로 거부합니다.
+
+| 옵션 | 설명 |
+| -------- | ------------- |
+| `--project=NAME`; `--db=PATH` | 가리킬 실행 중인 gori (기본값: `GORI_PROJECT` 또는 `project switch`로 고른 프로젝트, 없으면 가장 최근에 쓴 프로젝트) |
+| `--proxy=HOST:PORT` | 실행 중인 캡처를 찾지 않고 이 프록시 주소를 사용 |
+| `--ca-dir=DIR` | CA 디렉터리 (기본값: 캡처 중인 gori의 것, 없으면 `~/.gori/ca`) |
+| `--browser=ID` | `chrome`, `chromium`, `brave`, `edge`, `vivaldi`, `firefox` (기본값: 처음 감지된 브라우저, `--remote-debugging-port`를 주면 처음 감지된 Chromium 계열) |
+| `--remote-debugging-port=N` | 루프백에 Chrome DevTools Protocol 포트를 엽니다. `0`이면 브라우저가 포트를 고릅니다. Chromium 계열만 지원 |
+
+`--remote-debugging-port`를 주면 브라우저가 알려 준 엔드포인트(`http://127.0.0.1:N`)를 출력합니다. 브라우저 자동화 MCP 서버를 여기에 연결하면 그 서버가 조작하는 페이지가 gori에 캡처됩니다.
+
+```bash
+npx @playwright/mcp@latest --cdp-endpoint http://127.0.0.1:9222
+npx chrome-devtools-mcp@latest --browserUrl http://127.0.0.1:9222
+```
+
+그 프로필이 이미 실행 중인 브라우저에 열려 있으면 실행을 거부합니다. 실행 중인 브라우저는 이를 새 창 요청으로 받아들이고 포트를 열지 않기 때문입니다.
+
+{% alert(type="warning") %}
+DevTools 포트가 열려 있으면 로컬의 어떤 프로세스든 인증 없이 브라우저를 완전히 조작할 수 있습니다. 쿠키를 읽고 모든 사이트에서 스크립트를 실행할 수 있으며, 그 프로필에 로그인된 세션도 포함됩니다. 그래서 요청할 때만, 루프백에만 열리고, 명령이 끝나면 닫힙니다. 브라우저를 조작하는 에이전트는 MCP `send_request`처럼 프로젝트 스코프로 제한되지 않으며, 그 트래픽은 다른 브라우저와 똑같이 캡처됩니다.
+{% end %}
+
 ### run history / ls {#run-history-ls}
 
 ```bash

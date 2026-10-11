@@ -52,7 +52,7 @@ module Gori
         syntax = syntax_name.try { |n| ShellEnv::Syntax.parse?(n) } || ShellEnv::Syntax.default
 
         project = proxy ? nil : resolve_read_project(project_name, db_path)
-        target = shell_target(project, proxy, ca_dir)
+        target = capture_target(project, proxy, ca_dir)
         abort target if target.is_a?(String)
 
         result =
@@ -70,10 +70,15 @@ module Gori
         exec_shell(command, result, target)
       end
 
-      # Where the shell points, resolved: the dialable proxy authority, the root CA the
-      # capturing gori signs with, what to call it, and anything the operator should hear.
-      record ShellTarget, authority : String, ca_cert_path : String, label : String,
-        warnings : Array(String)
+      # Where the shell (or `gori run browser`) points, resolved: the dialable proxy host and
+      # port, the root CA the capturing gori signs with, what to call it, and anything the
+      # operator should hear.
+      record CaptureTarget, host : String, port : Int32, ca_cert_path : String, label : String,
+        warnings : Array(String) do
+        def authority : String
+          BindAddress.authority(host, port)
+        end
+      end
 
       # The flag combinations that cannot mean anything, as one sentence (nil when fine) — split
       # from the abort so a spec can pin it, like `two_targets_error`.
@@ -90,6 +95,12 @@ module Gori
           return "#{prefix}: --shell only applies to --print" unless print
           return "#{prefix}: unknown --shell #{name.inspect} (expected sh, fish or powershell)" unless ShellEnv::Syntax.parse?(name)
         end
+        target_flags_error(prefix, proxy, project_name, db_path)
+      end
+
+      # `--proxy` against `--project`/`--db`, for every command that resolves a `CaptureTarget`.
+      def self.target_flags_error(prefix : String, proxy : String?, project_name : String?,
+                                  db_path : String?) : String?
         if proxy && (project_name.try(&.presence) || db_path.try(&.presence))
           return "#{prefix}: pass --proxy HOST:PORT or --project/--db, not both " \
                  "(--proxy names the address directly, so the project would be ignored)"
@@ -98,13 +109,15 @@ module Gori
       end
 
       # The gori to point at: `--proxy` as given, else the one capturing `project`. A String
-      # is the refusal. `CaptureStatus` is read only while the capture lock is held — the lock is
+      # is the refusal, worded for `gori run <command>` so the commands sharing this refuse
+      # alike. `CaptureStatus` is read only while the capture lock is held — the lock is
       # what makes the marker authoritative (capture_status.cr), and the LIVE port can differ from
       # the configured one when gori fell back to another.
-      def self.shell_target(project : Project?, proxy : String?, ca_dir : String?) : ShellTarget | String
-        prefix = "gori run shell"
+      def self.capture_target(project : Project?, proxy : String?, ca_dir : String?,
+                              command : String = "shell") : CaptureTarget | String
+        prefix = "gori run #{command}"
         default_ca = File.join(ca_dir || Paths.default_ca_dir, Proxy::Tls::CertAuthority::CA_CERT_FILE)
-        return shell_proxy_target(proxy, default_ca, ca_dir) if proxy
+        return proxy_target(prefix, proxy, default_ca, ca_dir) if proxy
         return "#{prefix}: no project to point at — pass --project NAME, --db PATH or --proxy HOST:PORT" unless project
 
         held = begin
@@ -112,7 +125,7 @@ module Gori
         rescue ex
           return "#{prefix}: cannot check whether #{project.name} is being captured: #{ex.message}"
         end
-        return shell_not_live(project) unless held
+        return not_live(prefix, project) unless held
         # The lock is taken before the marker is first written, so a gori still starting holds
         # one without the other; the refusal below says to retry.
         status = CaptureStatus.read_at(project.capture_status_path)
@@ -126,23 +139,24 @@ module Gori
                       "resumes (press c in gori)"
         end
         ca = ca_dir ? default_ca : (status.ca_cert_path || default_ca)
-        return shell_ca_refusal(ca, ca_dir) unless File.file?(ca)
-        ShellTarget.new(ShellEnv.dial_authority(status.host, status.port), ca,
+        return ca_refusal(prefix, ca, ca_dir) unless File.file?(ca)
+        CaptureTarget.new(BindAddress.dial_host(status.host), status.port, ca,
           "#{project.name} on #{BindAddress.display(status.host, status.port, terse: true)}", warnings)
       end
 
       # `--proxy` as given: no capture is looked up, so the CA is `--ca-dir`'s or the default.
-      private def self.shell_proxy_target(raw : String, ca : String, ca_dir : String?) : ShellTarget | String
-        authority = shell_proxy_authority(raw)
-        return "gori run shell: --proxy expects HOST:PORT (e.g. 127.0.0.1:8070), got #{raw.inspect}" unless authority
-        return shell_ca_refusal(ca, ca_dir) unless File.file?(ca)
-        ShellTarget.new(authority, ca, authority, [] of String)
+      private def self.proxy_target(prefix : String, raw : String, ca : String, ca_dir : String?) : CaptureTarget | String
+        address = proxy_address(raw)
+        return "#{prefix}: --proxy expects HOST:PORT (e.g. 127.0.0.1:8070), got #{raw.inspect}" unless address
+        return ca_refusal(prefix, ca, ca_dir) unless File.file?(ca)
+        host, port = address
+        CaptureTarget.new(host, port, ca, BindAddress.authority(host, port), [] of String)
       end
 
-      # `--proxy`'s value as a dialable authority, or nil. `http://` is tolerated because that is
-      # how the address is usually copied out of a proxy variable; a path, a query or credentials
-      # are not an address.
-      def self.shell_proxy_authority(value : String) : String?
+      # `--proxy`'s value as a dialable host and port, or nil. `http://` is tolerated because that
+      # is how the address is usually copied out of a proxy variable; a path, a query or
+      # credentials are not an address.
+      def self.proxy_address(value : String) : {String, Int32}?
         raw = value.strip
         raw = raw[7..] if raw.downcase.starts_with?("http://")
         raw = raw.rchop('/')
@@ -151,19 +165,19 @@ module Gori
         host = uri.host.presence
         port = uri.port
         return nil unless host && port && port.in?(1..65_535)
-        ShellEnv.dial_authority(host, port)
+        {BindAddress.dial_host(host), port}
       rescue URI::Error | ArgumentError | OverflowError
         nil
       end
 
-      private def self.shell_ca_refusal(path : String, ca_dir : String?) : String
-        "gori run shell: no gori CA certificate at #{path} — " +
+      private def self.ca_refusal(prefix : String, path : String, ca_dir : String?) : String
+        "#{prefix}: no gori CA certificate at #{path} — " +
           (ca_dir ? "check --ca-dir" : "start gori once to create it, or pass --ca-dir DIR")
       end
 
       # Nothing captures `project`. Names the projects that ARE live, since the usual cause is a
       # gori open on a different project than the one the default picked.
-      private def self.shell_not_live(project : Project) : String
+      private def self.not_live(prefix : String, project : Project) : String
         live = [] of String
         begin
           ProjectRegistry.new(Paths.projects_dir).list.each do |p|
@@ -175,12 +189,12 @@ module Gori
           # a registry that cannot be listed just loses the hint
         end
         hint = live.empty? ? "" : " (capturing now: #{live.join(", ")} — pass --project NAME)"
-        "gori run shell: no gori is capturing #{project.name} — start gori (or gori run capture) " \
+        "#{prefix}: no gori is capturing #{project.name} — start gori (or gori run capture) " \
         "first, or pass --proxy HOST:PORT#{hint}"
       end
 
       # `--print`'s comment header: what was set, how to apply it, and what it cannot reach.
-      def self.shell_print_header(result : ShellEnv::Result, target : ShellTarget) : Array(String)
+      def self.shell_print_header(result : ShellEnv::Result, target : CaptureTarget) : Array(String)
         lines = [
           "gori shell environment — #{ShellEnv.sanitize_comment(target.label)}",
           "proxy #{ShellEnv.sanitize_comment(result.proxy_url)} · CA bundle #{ShellEnv.sanitize_comment(result.bundle_path)}",
@@ -193,7 +207,7 @@ module Gori
 
       # Replace this process with the shell (or the command), so its exit status, its signals
       # and its job control are simply its own — nothing of gori is left running to relay them.
-      private def self.exec_shell(command : Array(String), result : ShellEnv::Result, target : ShellTarget) : NoReturn
+      private def self.exec_shell(command : Array(String), result : ShellEnv::Result, target : CaptureTarget) : NoReturn
         (target.warnings + result.notes).each { |w| STDERR.puts "gori run shell: #{w}" }
         program, argv =
           if command.empty?

@@ -211,6 +211,39 @@ Whatever the shell replaces or unsets is recorded as `GORI_SHELL_ORIG_<NAME>` (f
 
 Not covered: Go programs built with a toolchain older than 1.27 on macOS verify through the keychain; Go never proxies `localhost` or loopback addresses; Node uses the proxy only in releases that support `NODE_USE_ENV_PROXY` (stable in v22.21 and v24.10); Java needs a truststore via `JAVA_TOOL_OPTIONS`; tools that pin their own trust store are not covered.
 
+### run browser
+
+Open a browser that goes through a live gori and trusts only its CA: the palette's **Open browser**, from a script. It reuses the same profile under `~/.gori/browser/<id>`, stays in the foreground until the browser exits, and closes the browser on Ctrl-C.
+
+```bash
+gori run browser                                   # the first detected browser
+gori run browser --browser brave
+gori run browser --remote-debugging-port 9222      # for a browser-automation MCP server
+```
+
+It finds the proxy the way [run shell](#run-shell) does, and refuses in the same words when nothing is capturing the project.
+
+| Option | Description |
+| -------- | ------------- |
+| `--project=NAME`; `--db=PATH` | Which live gori to point at (default: the `GORI_PROJECT` or `project switch` project, else the most recently active one) |
+| `--proxy=HOST:PORT` | Use this proxy address instead of looking up a live capture |
+| `--ca-dir=DIR` | CA directory (default: the capturing gori's, else `~/.gori/ca`) |
+| `--browser=ID` | `chrome`, `chromium`, `brave`, `edge`, `vivaldi` or `firefox` (default: the first detected; with `--remote-debugging-port`, the first Chromium-based one) |
+| `--remote-debugging-port=N` | Open a Chrome DevTools Protocol port on loopback; `0` lets the browser pick one. Chromium-based browsers only |
+
+With `--remote-debugging-port`, the command prints the endpoint the browser reports (`http://127.0.0.1:N`). Point a browser-automation MCP server at it, and the pages it drives are captured in gori:
+
+```bash
+npx @playwright/mcp@latest --cdp-endpoint http://127.0.0.1:9222
+npx chrome-devtools-mcp@latest --browserUrl http://127.0.0.1:9222
+```
+
+If that profile is already open in a running browser, the launch is refused, since the running browser takes it as a new window and opens no port.
+
+{% alert(type="warning") %}
+A DevTools port gives any local process full control of the browser without authentication: it can read cookies and run script on every site, including the sessions you are logged into in that profile. It is only opened when you ask, only on loopback, and closes with the command. An agent driving the browser is not gated by the project scope the way MCP `send_request` is; its traffic is captured like any other browser's.
+{% end %}
+
 ### run history / ls
 
 ```bash

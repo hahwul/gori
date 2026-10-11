@@ -38,6 +38,33 @@ describe Gori::Browser do
       brave.should contain("--disable-quic")
       brave.should contain("--ignore-certificate-errors-spki-list=PIN123=")
     end
+
+    # #1594: a DevTools port only on request, and never the flags that would widen it past
+    # loopback or past the Origin check that keeps a web page off the socket.
+    it "opens a DevTools port only when asked, loopback-only and origin-checked" do
+      args.any?(&.starts_with?("--remote-debugging")).should be_false
+      cdp = Gori::Browser.chromium_args("/tmp/prof", SPEC_LAUNCH.copy_with(remote_debugging_port: 0))
+      cdp.should contain("--remote-debugging-port=0")
+      cdp.any?(&.starts_with?("--remote-debugging-address")).should be_false
+      cdp.any?(&.starts_with?("--remote-allow-origins")).should be_false
+    end
+  end
+
+  describe ".read_active_port" do
+    it "reads line 1 once the line is whole, nil before" do
+      path = File.tempname("devtools-active-port")
+      begin
+        Gori::Browser.read_active_port(path).should be_nil
+        File.write(path, "92")
+        Gori::Browser.read_active_port(path).should be_nil # mid-write
+        File.write(path, "9222\n/devtools/browser/abc")
+        Gori::Browser.read_active_port(path).should eq(9222)
+        File.write(path, "0\n")
+        Gori::Browser.read_active_port(path).should be_nil
+      ensure
+        File.delete?(path)
+      end
+    end
   end
 
   describe ".firefox_args" do
@@ -241,6 +268,63 @@ describe Gori::Browser do
       File.chmod(path, 0o755)
       found = Gori::Browser::Found.new("brave", "Brave", Gori::Browser::Kind::Chromium, path)
       Gori::Browser.launch(found, spec, grace: 100.milliseconds).should contain("opened Brave")
+    end
+  end
+
+  # #1594: the endpoint printed is the one Chromium reports, or none at all.
+  describe ".start with a DevTools port" do
+    root = File.join(Dir.tempdir, "gori-browser-cdp-spec-#{Process.pid}")
+    cdp_spec = Gori::Browser::LaunchSpec.new(
+      proxy_host: "127.0.0.1", proxy_port: 8070,
+      ca_cert_path: "/tmp/root.crt.pem", spki_sha256: "PIN123=",
+      profile_root: root, remote_debugging_port: 0)
+    # A stand-in Chromium: `body` runs with $DIR set to its --user-data-dir.
+    bin = ->(name : String, body : String) do
+      posix_only!("a #!/bin/sh stand-in browser")
+      Dir.mkdir_p(root)
+      path = File.join(root, "#{name}.sh")
+      File.write(path, "#!/bin/sh\nfor a; do case $a in --user-data-dir=*) DIR=${a#*=};; esac; done\n#{body}\n")
+      File.chmod(path, 0o755)
+      Gori::Browser::Found.new(name, "Chromium", Gori::Browser::Kind::Chromium, path)
+    end
+
+    after_all { FileUtils.rm_rf(root) }
+
+    it "reports the port Chromium wrote, and the browser it is waiting on" do
+      started = Gori::Browser.start(bin.call("writes",
+        "sleep 0.2; printf '9333\\n/devtools/browser/x' > \"$DIR/DevToolsActivePort\"; sleep 30"),
+        cdp_spec, grace: 100.milliseconds)
+      started.endpoint.should eq("http://127.0.0.1:9333")
+      running = started.running.not_nil!
+      running.process.terminate
+      running.exited.receive?.should_not be_nil
+    end
+
+    it "never reports a stale DevToolsActivePort, and closes a browser that writes none" do
+      Dir.mkdir_p(File.join(root, "silent"))
+      File.write(File.join(root, "silent", "DevToolsActivePort"), "1111\n/devtools/browser/old")
+      silent = bin.call("silent", "sleep 30") # outside expect_raises: posix_only! pends by raising
+      expect_raises(Gori::Error, /did not report a DevTools port/) do
+        Gori::Browser.start(silent, cdp_spec, grace: 100.milliseconds, endpoint_wait: 300.milliseconds)
+      end
+    end
+
+    # The profile is open in a running instance: the launcher hands the launch to it as a
+    # new window and exits 0, so no port was ever opened.
+    it "refuses when a running instance took the launch" do
+      handoff = bin.call("handoff", "exit 0")
+      late = bin.call("late", "sleep 0.3; exit 0")
+      expect_raises(Gori::Error, /already open/) do
+        Gori::Browser.start(handoff, cdp_spec, grace: 10.seconds)
+      end
+      expect_raises(Gori::Error, /already open/) do
+        Gori::Browser.start(late, cdp_spec, grace: 50.milliseconds)
+      end
+    end
+
+    it "refuses Firefox, which has no CDP port" do
+      firefox = Gori::Browser::Found.new("firefox", "Firefox", Gori::Browser::Kind::Firefox, "/nonexistent")
+      expect_raises(Gori::Error, /no DevTools Protocol port/) { Gori::Browser.start(firefox, cdp_spec) }
     end
   end
 
