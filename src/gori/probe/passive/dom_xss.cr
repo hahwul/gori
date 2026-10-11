@@ -21,8 +21,8 @@ module Gori
           scripts = ctx.client_code
           return if scripts.empty?
           seen = Set(String).new
-          scripts.each do |code|
-            JsScan.source_sink_pairs(code).each do |(src, sink)|
+          scripts.each_with_index do |code, i|
+            JsScan.source_sink_pairs(code, ctx.client_source_index[i]).each do |(src, sink)|
               # One detection per distinct source->sink shape on the host (grouping is by
               # (code, host); the pair only needs to surface once).
               next unless seen.add?("#{src} #{sink}")

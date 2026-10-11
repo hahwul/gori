@@ -92,7 +92,8 @@ JS_BODY = begin
   while io.bytesize < 256 * 1024
     io << "function f" << i << "(a,b){var c=\"str" << i << "\",d=/*x*/a+b;$(e).html(c);"
     io << "setTimeout(function(){o.innerHTML=d},10);return c+d};"
-    io << "o.innerHTML=location.hash+d;" if i % 200 == 0 # a real source→sink pair to correlate
+    io << "fetch(\"/api/item/\"+c,{body:d});" if i % 20 == 0 # request sinks for the CSPT pass
+    io << "o.innerHTML=location.hash+d;" if i % 200 == 0     # a real source→sink pair to correlate
     i += 1
   end
   io.to_slice.dup

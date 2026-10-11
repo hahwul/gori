@@ -44,6 +44,7 @@ module Gori
         @client_scripts : Array(String)?
         @client_scripts_nocomment : Array(String)?
         @client_code : Array(String)?
+        @client_source_index : Array(JsScan::SourceIndex)?
         @ct_low : String?
         @ct_low_done = false
         @cache_control : Array(String)?
@@ -333,6 +334,12 @@ module Gori
           end
           build_client_views
           @client_code || [] of String
+        end
+
+        # `JsScan.source_spans` of each `client_code` fragment, built once per flow and shared by
+        # DomXss and Cspt: it is the costliest part of either pass (~0.5ms on a 256 KiB bundle).
+        def client_source_index : Array(JsScan::SourceIndex)
+          @client_source_index ||= client_code.map { |c| JsScan.source_spans(c) }
         end
 
         # The fragments with ONLY comments blanked (string/template CONTENTS kept). The

@@ -436,7 +436,7 @@ module Gori
         # DOM-XSS suspects in one STRIPPED script: {source label, sink label} for every sink
         # occurrence that has a taint source in the same statement (bounded by ;{} / newline
         # within WINDOW chars each side). Empty when no sink co-occurs with a source.
-        def self.source_sink_pairs(code : String) : Array({String, String})
+        def self.source_sink_pairs(code : String, sources = source_spans(code)) : Array({String, String})
           pairs = [] of {String, String}
           # Whole-script source INDEX, which is also the prefilter. A sink can only pair with a
           # source that exists SOMEWHERE in the script, so a bundle with no source at all cannot
@@ -451,7 +451,6 @@ module Gori
           # scan: 14 patterns × 2 sides × N hits PCRE calls, plus 2N transient strings. Scanning
           # each source ONCE up front for its match POSITIONS turns every one of those into an
           # allocation-free binary search (see `source_in_window`).
-          sources = source_spans(code)
           return pairs if sources.empty?
           SINKS.each do |(sink_re, sink_label)|
             # `scan`, NOT a `while m = sink_re.match(code, pos)` loop: re-entering `match` with a
@@ -468,6 +467,192 @@ module Gori
           pairs
         end
 
+        # Request-building sinks for client-side path traversal (CSPT): a taint source in the URL
+        # argument re-points a same-origin request with the victim's credentials. Kept apart from
+        # SINKS because DomXss labels everything it pairs as XSS. The third field is which
+        # top-level argument holds the URL (XHR's `open(method, url)` is the one at index 1), and
+        # `window.open` is excluded from `.open(` — it is a navigation sink, and SINKS has it.
+        REQUEST_SINKS = ([
+          {/\bfetch\s*\(/, "fetch", 0},
+          {/(?<!window)\.open\s*\(/, "XMLHttpRequest.open", 1},
+          {/\baxios(?:\.(?:get|post|put|patch|delete|request))?\s*\(/, "axios", 0},
+          {/\$\.(?:ajax|get|post|getJSON)\s*\(/, "jQuery.ajax", 0},
+          {/\bnew\s+Request\s*\(/, "Request", 0},
+        ] of {Regex, String, Int32}).map { |(re, label, arg)| {Utf8.tolerant(re), label, arg} }
+
+        # The `.open(` sink counts only in a script that names XMLHttpRequest. A regex, not
+        # `String#includes?`: PCRE's literal search is ~60× faster on a 256 KiB bundle (5µs vs
+        # 327µs), and this gate runs on every script with no request sink at all.
+        XHR = Utf8.tolerant(/XMLHttpRequest/)
+
+        # SPA router values: a path segment the router hands the component, so as tainted for
+        # CSPT as `location.pathname`. Deliberately NOT in SOURCES — a router param assigned to
+        # innerHTML is a weaker XSS lead than this list's precision for request URLs, and adding
+        # them there would change every dom_xss result. Appended after SOURCES, so a URL argument
+        # that also names a SOURCES entry is labelled by that entry.
+        ROUTER_SOURCES = ([
+          {/\buseParams\s*\(/, "useParams()"},
+          {/\$?\broute\.params\b/, "route.params"},
+          {/\brouter\.query\b/, "router.query"},
+          {/\bsearchParams\.get\s*\(/, "searchParams.get()"},
+        ] of {Regex, String}).map { |(re, label)| {Utf8.tolerant(re), label} }
+
+        # Sources that are the whole current URL. Re-requesting it (`fetch(location.href)`, a
+        # PJAX refresh) goes nowhere the navigation did not already go; it takes an app-chosen
+        # path around it (`+` or a template) to traverse.
+        WHOLE_URL = Set{"location.href", "document.URL", "document.documentURI", "document.baseURI", "document.location"}
+
+        # CSPT suspects in one STRIPPED script: {source label, sink label} for every request sink
+        # whose URL argument holds a taint source not wrapped in `encodeURIComponent(…)`. Only the
+        # URL counts: a source in the options (`{body: location.search}`), or in a config object
+        # outside its `url:` key, is not CSPT. `encodeURI` is NOT a sanitizer here — it leaves `/`
+        # and `.` alone, so `../` survives it. `sources` is the script's `source_spans`, shared
+        # with DomXss through `Context#client_source_index`.
+        def self.request_source_pairs(code : String, sources = source_spans(code)) : Array({String, String})
+          pairs = [] of {String, String}
+          all = nil
+          bytes = code.to_slice
+          REQUEST_SINKS.each do |(sink_re, sink_label, arg)|
+            next if arg == 1 && !XHR.matches?(code)
+            code.scan(sink_re) do |m|
+              # Router sources are scanned on the first sink hit, so a script with no request
+              # sink pays nothing for them, and one with no source at all returns here.
+              all ||= sources + router_spans(code)
+              return pairs if all.empty?
+              lo, hi = argument_span(code, m.byte_end(0), arg)
+              lo, hi = config_url_span(code, lo, hi)
+              all.each do |(spans, label)|
+                next if WHOLE_URL.includes?(label) && !composed?(bytes, lo, hi)
+                if unencoded_within?(code, spans, lo, hi)
+                  pairs << {label, sink_label}
+                  break
+                end
+              end
+            end
+          end
+          pairs
+        end
+
+        # ROUTER_SOURCES occurrences in the same shape as `source_spans`, appended after it so a
+        # SOURCES hit keeps its label.
+        private def self.router_spans(code : String) : SourceIndex
+          index = [] of {Array({Int32, Int32}), String}
+          ROUTER_SOURCES.each do |(re, label)|
+            spans = [] of {Int32, Int32}
+            code.scan(re) { |m| spans << {m.byte_begin(0), m.byte_end(0)} }
+            index << {spans, label} unless spans.empty?
+          end
+          index
+        end
+
+        # Byte span [lo, hi) of top-level argument `arg` of the call whose `(` ends just before
+        # `from`: brackets are tracked so a nested `,` or `)` does not end it, and the walk stops
+        # WINDOW bytes past `from` (the stripped code has no string contents to confuse it).
+        private def self.argument_span(code : String, from : Int32, arg : Int32) : {Int32, Int32}
+          bytes = code.to_slice
+          ceil = {from + WINDOW, bytes.size}.min
+          lo = from
+          depth = 0
+          i = from
+          while i < ceil
+            case bytes[i]
+            when '('.ord, '['.ord, '{'.ord then depth += 1
+            when ')'.ord, ']'.ord, '}'.ord
+              break if depth == 0
+              depth -= 1
+            when ','.ord
+              if depth == 0
+                break if arg == 0
+                arg -= 1
+                lo = i + 1
+              end
+            end
+            i += 1
+          end
+          arg == 0 ? {lo, i} : {i, i}
+        end
+
+        # A config-object URL argument (`$.ajax({url: …, data: …})`, `axios({…})`) narrowed to the
+        # value of its top-level `url:` key, or to nothing when it has none (Backbone's
+        # `coll.fetch({data: …})`). Any other argument is returned as is. Each property is
+        # walked as one top-level "argument" of the object.
+        private def self.config_url_span(code : String, lo : Int32, hi : Int32) : {Int32, Int32}
+          bytes = code.to_slice
+          i = skip_space(bytes, lo, hi)
+          return {lo, hi} unless i < hi && bytes[i] == '{'.ord
+          prop = i + 1
+          while prop < hi
+            _, e = argument_span(code, prop, 0)
+            e = hi if e > hi
+            k = skip_space(bytes, prop, e)
+            if bytes[k, {URL_KEY.size, e - k}.min] == URL_KEY && (c = skip_space(bytes, k + URL_KEY.size, e)) < e && bytes[c] == ':'.ord
+              return {c + 1, e}
+            end
+            break unless e < hi && bytes[e] == ','.ord
+            prop = e + 1
+          end
+          {hi, hi}
+        end
+
+        URL_KEY = "url".to_slice
+
+        private def self.skip_space(bytes : Bytes, i : Int32, hi : Int32) : Int32
+          while i < hi && bytes[i].unsafe_chr.ascii_whitespace?
+            i += 1
+          end
+          i
+        end
+
+        # Is `word` the identifier ending just before `pos` (whitespace skipped), not the tail of
+        # a longer one? Bounded below by `lo`.
+        private def self.word_before?(bytes : Bytes, lo : Int32, pos : Int32, word : Bytes) : Bool
+          j = pos - 1
+          while j >= lo && bytes[j].unsafe_chr.ascii_whitespace?
+            j -= 1
+          end
+          start = j - word.size + 1
+          return false unless start >= lo && bytes[start, word.size] == word
+          start == lo || !(bytes[start - 1].unsafe_chr.ascii_alphanumeric? || bytes[start - 1] == '_'.ord || bytes[start - 1] == '$'.ord)
+        end
+
+        # Does [lo, hi) build a URL around something (a `+` or a template literal)?
+        private def self.composed?(bytes : Bytes, lo : Int32, hi : Int32) : Bool
+          (lo...hi).any? { |i| bytes[i] == '+'.ord || bytes[i] == '`'.ord }
+        end
+
+        # Does `spans` hold an occurrence inside [lo, hi) that no `encodeURIComponent(` call
+        # around it covers? Walks outward from each candidate to its enclosing `(`s, within the
+        # argument, and checks the identifier in front of each.
+        private def self.unencoded_within?(code : String, spans : Array({Int32, Int32}), lo : Int32, hi : Int32) : Bool
+          return false unless first = spans.bsearch_index { |(b, _)| b >= lo }
+          bytes = code.to_slice
+          spans.each(within: first..) do |(b, e)|
+            break if e > hi
+            return true unless encoded_at?(bytes, b, lo)
+          end
+          false
+        end
+
+        ENCODER = "encodeURIComponent".to_slice
+
+        private def self.encoded_at?(bytes : Bytes, pos : Int32, lo : Int32) : Bool
+          depth = 0
+          i = pos - 1
+          while i >= lo
+            case bytes[i]
+            when ')'.ord then depth += 1
+            when '('.ord
+              if depth == 0
+                return true if word_before?(bytes, lo, i, ENCODER)
+              else
+                depth -= 1
+              end
+            end
+            i -= 1
+          end
+          false
+        end
+
         # The bytes that end a statement, hence bound a source↔sink window: ';' '{' '}' '\n'.
         # Held as BYTES, and the window walk below is a direct byte scan outward from the sink —
         # NOT `String#rindex`/`index` over a substring. Two reasons: `String#rindex(Regex)` walks
@@ -476,6 +661,9 @@ module Gori
         # script. The scan stops at the first boundary in each direction, so it touches at most
         # WINDOW bytes per side and allocates nothing — and this runs once per sink occurrence.
         BOUNDS = {0x3Bu8, 0x7Bu8, 0x7Du8, 0x0Au8}
+
+        # {byte spans, label} per source with an occurrence; see `source_spans`.
+        alias SourceIndex = Array({Array({Int32, Int32}), String})
 
         # Every taint SOURCE occurrence in the script, as BYTE spans, in SOURCES order. Scanned
         # once per script — the index `source_in_window` binary-searches instead of re-running
@@ -488,7 +676,7 @@ module Gori
         #
         # `scan` yields NON-OVERLAPPING matches left to right, so within one entry both `begin` and
         # `end` are strictly increasing — the property `span_within?` binary-searches on.
-        private def self.source_spans(code : String) : Array({Array({Int32, Int32}), String})
+        def self.source_spans(code : String) : SourceIndex
           # One bucket per SOURCES entry, filled by the factored scans below and then emitted in
           # SOURCES order. `scan` walks left to right and never overlaps, so appending in scan
           # order leaves every bucket ascending in both begin and end — the property
@@ -539,7 +727,7 @@ module Gori
         # the start, and this runs per sink occurrence — thousands of times in a minified bundle.
         # A single accented char in a regex literal (kept intact by `strip`, by design) is enough:
         # measured 9ms → 1765ms per flow, on the fiber the passive scan shares with the proxy.
-        private def self.source_in_window(code : String, sources : Array({Array({Int32, Int32}), String}),
+        private def self.source_in_window(code : String, sources : SourceIndex,
                                           from : Int32, to : Int32) : String?
           bytes = code.to_slice
           floor = from - WINDOW

@@ -58,10 +58,12 @@ Passive rules read traffic you have already captured (History flows and Repeater
 | `dom_clobbering` | DOM clobbering (suspected) | `client` | Flags client code that trusts a clobberable global: named HTMLCollection access (document.forms[…], document.all[…]) or the window.X = window.X \|\| … fallback idiom. |
 | `prototype_pollution` | Prototype pollution (suspected) | `client` | Flags client code writing to `__proto__`/`constructor.prototype` or using pollution-prone deep-merge APIs, and requests carrying `__proto__`/`constructor[prototype]` parameters. |
 | `post_message` | Cross-origin messaging (postMessage) | `client` | Flags message handlers with no origin check, postMessage(...) to a wildcard target origin, and document.domain relaxation. |
+| `cspt` | Client-side path traversal (suspected) | `client` | Flags a URL-controlled value (location.hash, a router param, …) placed unencoded in the URL argument of a request call (fetch, XMLHttpRequest, axios, jQuery.ajax) in a page/bundle script. |
 | `api_docs_exposed` | API documentation exposed | `infoleak` | Detects Swagger UI, OpenAPI/Swagger specs, and interactive GraphQL IDEs (GraphiQL, Playground, ReDoc) reachable in production. |
 | `session_id_in_url` | Session identifier in URL | `infoleak` | Flags a known framework session identifier (PHPSESSID, JSESSIONID, ASP.NET_SessionId, …) carried in the request URL, where it leaks via logs, history, and Referer. |
 | `open_cross_domain_policy` | Permissive cross-domain policy | `cors` | Flags a Flash/Silverlight cross-domain policy that grants access to all origins (`domain="*"`). |
 | `bare_lf_response` | Bare-LF response head | `headers` | Flags a response head that ends lines with a bare LF instead of CRLF, where parsers can disagree on the message's framing (a response desync / splitting precondition). |
+| `oauth` | Weak OAuth/OIDC authorization request | `headers` | Flags an OAuth 2.0 / OIDC authorization request using the implicit grant, the PKCE plain method, no PKCE, or no CSRF protection at all (no PKCE, state or nonce), per RFC 9700. |
 
 ## Active rules {#active}
 

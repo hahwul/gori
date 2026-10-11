@@ -58,10 +58,12 @@ gori run probe rules disable sri            # 시끄러운 패시브 체크 하�
 | `dom_clobbering` | DOM clobbering (suspected) | `client` | 클로버링될 수 있는 전역을 신뢰하는 클라이언트 코드를 표시합니다: 이름으로 접근하는 HTMLCollection(document.forms[…], document.all[…])이나 window.X = window.X \|\| … 폴백 관용구. |
 | `prototype_pollution` | Prototype pollution (suspected) | `client` | `__proto__`/`constructor.prototype`에 쓰거나 오염에 취약한 deep-merge API를 쓰는 클라이언트 코드, 그리고 `__proto__`/`constructor[prototype]` 파라미터를 실은 요청을 표시합니다. |
 | `post_message` | Cross-origin messaging (postMessage) | `client` | origin 검사가 없는 message 핸들러, 와일드카드 대상 origin으로 보내는 postMessage(...), document.domain 완화를 표시합니다. |
+| `cspt` | Client-side path traversal (suspected) | `client` | 페이지/번들 스크립트에서 URL로 조작 가능한 값(location.hash, 라우터 파라미터 등)이 인코딩 없이 요청 호출(fetch, XMLHttpRequest, axios, jQuery.ajax)의 URL 인자에 들어가는 경우를 표시합니다. |
 | `api_docs_exposed` | API documentation exposed | `infoleak` | 프로덕션에서 닿는 Swagger UI, OpenAPI/Swagger 스펙, 대화형 GraphQL IDE(GraphiQL, Playground, ReDoc)를 탐지합니다. |
 | `session_id_in_url` | Session identifier in URL | `infoleak` | 요청 URL에 실린 알려진 프레임워크 세션 식별자(PHPSESSID, JSESSIONID, ASP.NET_SessionId 등)를 표시합니다. 로그, 방문 기록, Referer로 새어 나갑니다. |
 | `open_cross_domain_policy` | Permissive cross-domain policy | `cors` | 모든 origin에 접근을 허용하는(`domain="*"`) Flash/Silverlight 크로스 도메인 정책을 표시합니다. |
 | `bare_lf_response` | Bare-LF response head | `headers` | 응답 헤드의 줄 끝이 CRLF가 아닌 단독 LF인 경우를 표시합니다. 파서마다 메시지 프레이밍을 다르게 읽을 수 있습니다(응답 desync / splitting의 전제 조건). |
+| `oauth` | Weak OAuth/OIDC authorization request | `headers` | RFC 9700 기준으로 implicit grant, PKCE plain 메서드, PKCE 누락, CSRF 보호 전무(PKCE·state·nonce 모두 없음)인 OAuth 2.0 / OIDC 인가 요청을 표시합니다. |
 
 ## 액티브 룰 {#active}
 

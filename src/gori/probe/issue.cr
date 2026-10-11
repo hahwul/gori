@@ -203,6 +203,11 @@ module Gori
       "forbidden_method_bypass"        => "The access control was bypassed by changing the HTTP method or sending a method-override header. Enforce authorization on the resource for every method (including HEAD/OPTIONS and overrides), not only the verb the client first used, and ignore X-HTTP-Method-Override unless you deliberately support it.",
       "trace_enabled"                  => "HTTP TRACE is enabled and echoes the request back (Cross-Site Tracing), so script that can force a TRACE reads headers and cookies the browser would otherwise withhold. Disable TRACE at the web server / reverse proxy.",
       "dangerous_methods_allowed"      => "The server advertises write or otherwise dangerous methods (PUT/DELETE/CONNECT/PATCH/TRACE) in its Allow response. Disable any method the application does not require, and ensure the remaining ones enforce authorization.",
+      "oauth_implicit_flow"            => "The authorization request uses the implicit grant (response_type includes token), so the access token comes back in the redirect URL, where it leaks through history, logs and Referer and cannot be sender-constrained. RFC 9700 §2.1.2: switch to the authorization code flow with PKCE.",
+      "oauth_pkce_plain"               => "PKCE is used with the plain method (or no code_challenge_method, which means plain), so the challenge IS the verifier and anyone who sees this request can redeem the code. Use code_challenge_method=S256 (RFC 9700 §2.1.1), and have the authorization server refuse plain.",
+      "oauth_no_csrf_protection"       => "The authorization code request carries no PKCE code_challenge, no state and no nonce, so nothing binds the returned code to this browser session: login CSRF and code injection are open. Add PKCE (S256) — it also provides CSRF protection (RFC 9700 §2.1) — or at least a one-time state value checked on the redirect.",
+      "oauth_no_pkce"                  => "Informational: the authorization code request carries no PKCE code_challenge (state/nonce are present, so CSRF is covered). PKCE is required for public clients (SPA, mobile, desktop) and recommended for confidential ones (RFC 9700 §2.1.1): add code_challenge with S256 unless this client authenticates at the token endpoint.",
+      "cspt_suspected"                 => "A URL-controlled value reaches the URL argument of a request call unencoded, so a ../ in it can re-point the request at another same-origin endpoint with the victim's cookies — CSRF that SameSite and anti-CSRF tokens do not stop when the method changes state. Wrap each path segment in encodeURIComponent (and reject . / .. segments), or validate the value against the expected shape (e.g. a numeric id) before building the path. Heuristic; confirm by sending ..%2f variants.",
     } of String => String
 
     TECH_REMEDIATION = "Detected technology — informational; recorded as a project fact."
@@ -334,6 +339,12 @@ module Gori
       "session_id_in_url"        => {598, "Use of GET Request Method With Sensitive Query Strings"},
       "open_cross_domain_policy" => {942, "Permissive Cross-domain Policy with Untrusted Domains"},
       "bare_lf_response"         => {444, "Inconsistent Interpretation of HTTP Requests ('HTTP Request/Response Smuggling')"},
+      # --- OAuth / client-side request building ------------------------------------------
+      "oauth_implicit_flow"      => {522, "Insufficiently Protected Credentials"},
+      "oauth_pkce_plain"         => {327, "Use of a Broken or Risky Cryptographic Algorithm"},
+      "oauth_no_csrf_protection" => {352, "Cross-Site Request Forgery (CSRF)"},
+      "oauth_no_pkce"            => {345, "Insufficient Verification of Data Authenticity"},
+      "cspt_suspected"           => {22, "Improper Limitation of a Pathname to a Restricted Directory ('Path Traversal')"},
     }
 
     # {id, name} for a finding code, or nil when the code is deliberately unmapped (see CWE).

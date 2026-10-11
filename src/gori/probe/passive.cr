@@ -29,10 +29,12 @@ require "./passive/dom_xss"
 require "./passive/dom_clobbering"
 require "./passive/prototype_pollution"
 require "./passive/post_message"
+require "./passive/cspt"
 require "./passive/api_docs_exposed"
 require "./passive/session_id_in_url"
 require "./passive/open_cross_domain_policy"
 require "./passive/bare_lf_response"
+require "./passive/oauth"
 require "./custom_rule"
 
 module Gori
@@ -72,10 +74,12 @@ module Gori
         DomClobbering.new,
         PrototypePollution.new,
         PostMessage.new,
+        Cspt.new,
         ApiDocsExposed.new,
         SessionIdInUrl.new,
         OpenCrossDomainPolicy.new,
         BareLfResponse.new,
+        OAuthAuthorization.new,
       ] of Rule
 
       # WS-only subset used when a flow was already fully analyzed and new WebSocket frames arrive.

@@ -130,4 +130,55 @@ describe Gori::Probe::Passive::JsScan do
       JsScan.source_sink_pairs(code).should eq([{"location.hash", "innerHTML"}])
     end
   end
+
+  describe ".request_source_pairs" do
+    pairs = ->(src : String) { JsScan.request_source_pairs(JsScan.strip(src)) }
+
+    it "pairs a taint source in a request URL argument" do
+      pairs.call(%(fetch("/api/user/" + location.hash.slice(1));)).should eq([{"location.hash", "fetch"}])
+      pairs.call(%(fetch(`/api/note/${new URLSearchParams(location.search).get("id")}`);))
+        .should eq([{"location.search", "fetch"}])
+      pairs.call(%(axios.post(`/api/items/${useParams().id}`, data);)).should eq([{"useParams()", "axios"}])
+      pairs.call(%(const x = new XMLHttpRequest(); xhr.open("GET", "/a/" + location.hash);))
+        .should eq([{"location.hash", "XMLHttpRequest.open"}])
+      pairs.call(%($.ajax("/a/" + this.$route.params.id);)).should eq([{"route.params", "jQuery.ajax"}])
+      pairs.call(%(new Request(url.searchParams.get("p"));)).should eq([{"searchParams.get()", "Request"}])
+    end
+
+    it "does not pair an encodeURIComponent-wrapped source, but does pair encodeURI" do
+      pairs.call(%(fetch("/api/user/" + encodeURIComponent(location.hash));)).should be_empty
+      pairs.call(%(fetch("/api/user/" + encodeURIComponent\t(location.hash));)).should be_empty
+      pairs.call(%(fetch(`/api/${encodeURIComponent(router.query.id)}`);)).should be_empty
+      # encodeURI leaves `/` and `.` alone, so `../` survives it.
+      pairs.call(%(fetch("/api/user/" + encodeURI(location.hash));)).should eq([{"location.hash", "fetch"}])
+      # Only the wrapped occurrence is safe; a second, bare one still pairs.
+      pairs.call(%(fetch("/a/" + encodeURIComponent(location.hash) + "/" + location.hash);))
+        .should eq([{"location.hash", "fetch"}])
+    end
+
+    it "reads only the url: key of a config object" do
+      pairs.call(%($.ajax({url: "/a/" + location.hash, data: x});)).should eq([{"location.hash", "jQuery.ajax"}])
+      pairs.call(%($.ajax({url:"/track",type:"POST",data:{ref:document.referrer}});)).should be_empty
+      pairs.call(%(axios({method:"post",url:"/x",data:{q:location.search}});)).should be_empty
+      pairs.call(%(coll.fetch({data:{q:location.search}});)).should be_empty
+    end
+
+    it "does not pair a bare re-request of the current URL" do
+      pairs.call(%(fetch(window.location.href, {headers: h});)).should be_empty
+      pairs.call(%(fetch(document.URL);)).should be_empty
+      pairs.call(%(fetch(location.pathname + "/data");)).should eq([{"location.href", "fetch"}])
+    end
+
+    it "reads only the URL argument" do
+      pairs.call(%(fetch("/api/x", {body: location.search});)).should be_empty
+      pairs.call(%(fetch(build(a, b), {body: location.search});)).should be_empty
+      pairs.call(%(xhr.open(location.hash, "/fixed"); new XMLHttpRequest();)).should be_empty
+    end
+
+    it "ignores open() without XMLHttpRequest, window.open, and text in strings or comments" do
+      pairs.call(%(dialog.open("/a/" + location.hash);)).should be_empty
+      pairs.call(%(new XMLHttpRequest(); window.open("/a/" + location.hash);)).should be_empty
+      pairs.call(%(// fetch("/a/" + location.hash)\nlog("fetch(location.hash)");)).should be_empty
+    end
+  end
 end
