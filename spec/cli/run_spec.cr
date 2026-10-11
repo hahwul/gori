@@ -1321,4 +1321,21 @@ describe Gori::CLI::StderrLog do
     3.times { backend.write(entry) }
     w.close rescue nil
   end
+
+  # A log message quotes peer bytes (`alt-svc #{host}: #{note}` carries the origin's Alt-Svc
+  # value), so the formatter folds the message onto one line (`term_line`) and badges the
+  # exception rather than handing an OSC to the terminal.
+  it "writes a message and an exception without their raw control bytes" do
+    backend = Gori::CLI::StderrLog.new
+    io = IO::Memory.new
+    backend.io = io
+    ex = Exception.new("boom\e[2J")
+    entry = Log::Entry.new("proxy", Log::Severity::Warn, %(alt-svc h: h3=":443\e]0;PWNED\a"), Log::Metadata.empty, ex)
+    backend.write(entry)
+    backend.close
+    out = io.to_s
+    out.should contain(%(alt-svc h: h3=":443 ]0;PWNED "))
+    out.should contain("boom⟨ESC⟩[2J")
+    out.should_not contain('\e')
+  end
 end

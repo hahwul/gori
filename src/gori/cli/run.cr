@@ -112,14 +112,35 @@ module Gori
     # `2>&-`) made the stdlib backend's write raise EPIPE, which killed the async dispatcher's
     # fiber: about 2k entries later every `Log` call blocked for good, and `gori mcp` stopped
     # answering tools and never exited on stdin EOF. A log line nobody reads is dropped.
+    #
+    # It is also the one place a log line is made terminal-safe. A log message carries peer
+    # bytes as often as not — `alt-svc #{host}: #{note}` quotes the origin's own Alt-Svc value,
+    # so `h3=":443\e]0;PWNED\a"` retitled the operator's terminal from `gori run capture` —
+    # and patching each call site would miss the next one. `TerminalSafeLogFormat` runs the
+    # message through `Output.term_line` and the exception through `term_safe_multiline`.
     class StderrLog < ::Log::IOBackend
       def initialize
-        super(STDERR)
+        super(STDERR, formatter: TerminalSafeLogFormat)
       end
 
       def write(entry : ::Log::Entry) : Nil
         super
       rescue IO::Error
+      end
+    end
+
+    # `::Log::ShortFormat`'s layout, with the two parts that carry runtime text made safe.
+    ::Log.define_formatter TerminalSafeLogFormat, "#{timestamp} #{severity} - #{source(after: ": ")}#{message}" \
+                                                  "#{data(before: " -- ")}#{context(before: " -- ")}#{exception}"
+
+    struct TerminalSafeLogFormat
+      def message : Nil
+        @io << Output.term_line(@entry.message)
+      end
+
+      def exception(*, before = '\n', after = nil) : Nil
+        return unless ex = @entry.exception
+        @io << before << Output.term_safe_multiline(ex.inspect_with_backtrace) << after
       end
     end
 

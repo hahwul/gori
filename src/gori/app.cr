@@ -278,7 +278,7 @@ module Gori
     # Returns true when shutdown came from INT/TERM (caller should exit 130), false
     # when `--for` / `--max` ended the run on purpose.
     def run_capture(project : Project, format : Symbol, max : Int32?, every : Time::Span?) : Bool
-      setup_logging(STDERR)
+      setup_logging
       session =
         begin
           Session.open(@config, @ca, @registry, project)
@@ -660,8 +660,9 @@ module Gori
       CAPTURE_SIGNALS.each { |sig| sig.trap { on_signal.call; @shutdown.send(nil) rescue nil } }
     end
 
-    private def setup_logging(io : IO) : Nil
-      Log.setup(:info, Log::IOBackend.new(io))
+    # The headless surfaces' one STDERR sink — terminal-safe and EPIPE-proof (`CLI::StderrLog`).
+    private def setup_logging : Nil
+      Log.setup(:info, CLI::StderrLog.new)
     end
   end
 end
