@@ -124,6 +124,8 @@ The binary is written to `bin/gori`.
 gori runs one engine and one project behind three entry points. Drive it yourself, hand it to an
 AI agent, or script it, and pick the one that fits who is at the controls.
 
+![One engine, three ways in: you through the TUI, your AI agent through gori mcp, your scripts through gori run](docs/static/images/gori-in-the-loop.webp)
+
 ### For humans: `gori` (TUI)
 
 Start the proxy and open the interactive terminal UI. No subcommand needed:
