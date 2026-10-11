@@ -130,5 +130,6 @@ SIZES.each do |size|
     File.delete?(path)
     File.delete?("#{path}-wal")
     File.delete?("#{path}-shm")
+    File.delete?("#{path}.open.lock")
   end
 end

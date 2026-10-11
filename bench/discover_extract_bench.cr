@@ -1,8 +1,8 @@
 # Discover's per-RESPONSE and per-CANDIDATE CPU — the two paths a run pays on every byte it
 # receives and every brute-force word it enqueues.
 #
-# `discover_url_bench` measures one link's string work in isolation; this measures the two
-# loops that multiply it:
+# One link's string work (`resolve`, `parse`, `visit_key`) is cheap in isolation; this
+# measures the two loops that multiply it:
 #
 #   * `Extract.from_html` / `from_text` run in a WORKER over every crawled body (up to
 #     MAX_SCAN = 2 MB), and their output size is what `consider_link` then pays for. A page's

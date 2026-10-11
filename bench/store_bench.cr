@@ -68,14 +68,16 @@ def make_resp(id : Int64, i : Int32, body : Bytes?) : Store::CapturedResponse
 end
 
 # Insert `count` complete flows concurrently across `conc` fibers (mirrors many
-# proxy connections filling the writer queue so batching actually engages).
-def populate(store : Store, count : Int32, body_size : Int32, conc : Int32 = 64) : Float64
+# proxy connections filling the writer queue so batching actually engages). Row seeds
+# start at `base` so each scale adds distinct bodies. Returns {seconds, rows inserted}:
+# `count // conc` per fiber, so up to conc-1 fewer than asked.
+def populate(store : Store, base : Int32, count : Int32, body_size : Int32, conc : Int32 = 64) : {Float64, Int32}
   per = count // conc
   done = Channel(Nil).new(conc)
   t0 = Time.instant
   conc.times do |w|
     spawn do
-      (w * per...(w + 1) * per).each do |i|
+      (base + w * per...base + (w + 1) * per).each do |i|
         body = body_size > 0 ? text_body(body_size, i) : nil
         # Realistic default: GET-heavy, so requests are bodyless; only responses carry
         # a body (and get FTS-indexed). BENCH_REQBODY=1 puts a body on requests too.
@@ -88,7 +90,7 @@ def populate(store : Store, count : Int32, body_size : Int32, conc : Int32 = 64)
   end
   conc.times { done.receive }
   store.flush
-  (Time.instant - t0).total_seconds
+  {(Time.instant - t0).total_seconds, per * conc}
 end
 
 def time_ms(&) : Float64
@@ -115,17 +117,23 @@ puts "store bench: max=#{MAX} conc=#{CONC} body=#{BODY}B binary=#{BINARY}  db=#{
 # retention off (0) so we can actually grow the table to MAX and see scaling.
 store = Store.open(db_path, retention_flows: 0)
 
+# at_exit, so an aborted run does not leave a multi-GB db and its sidecars behind.
+at_exit do
+  store.close
+  {"", "-wal", "-shm", ".open.lock"}.each { |ext| File.delete?("#{db_path}#{ext}") }
+end
+
 # ---- 1. Insert throughput (the capture funnel) --------------------------
 puts "\n== insert throughput (complete flows: insert + update, #{BODY}B text body) =="
 scales = [10_000, 100_000, 300_000].select { |s| s <= MAX }
 prev = 0
 scales.each do |target|
   chunk = target - prev
-  secs = populate(store, chunk, BODY, CONC)
+  secs, inserted = populate(store, prev, chunk, BODY, CONC)
   prev = target
-  rate = chunk / secs
+  rate = inserted / secs
   dbmb = (File.size(db_path).to_f / (1024*1024))
-  printf("  -> %7d flows total  (+%7d in %6.2fs)  = %8.0f flows/s   (db %.0f MB)\n", target, chunk, secs, rate, dbmb)
+  printf("  -> %7d flows total  (+%7d in %6.2fs)  = %8.0f flows/s   (db %.0f MB)\n", store.count, inserted, secs, rate, dbmb)
 
   # ---- 2. Read query latency at this scale ------------------------------
   n = store.count
@@ -154,6 +162,4 @@ scales.each do |target|
   end
 end
 
-store.close
-File.delete(db_path) rescue nil
 puts "\ndone"

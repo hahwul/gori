@@ -44,22 +44,25 @@ BODY_1M   = len_body(1024 * 1024)
 CHUNK_64K = chunked_wire(64 * 1024, 16 * 1024)
 CHUNK_1M  = chunked_wire(1024 * 1024, 16 * 1024)
 
+# One copy buffer reused across ops, as ClientConn lends a pooled one
+# (CopyBufPool), and a DiscardIO sink, so bytes/op is the capture alone.
+SCRATCH = Bytes.new(Body::BUFSIZE)
+SINK    = DiscardIO.new
+
 # Drive one Content-Length body through Body.stream, teeing into a fresh
 # CaptureBuffer sized by `hint`, and return the captured slice (so DCE can't
 # drop the work).
 def run_length(body : Bytes, hint : Int64) : Bytes
   src = IO::Memory.new(body, writeable: false)
-  dst = IO::Memory.new(body.size)
   cap = CaptureBuffer.new(CAP, hint)
-  Body.stream(src, dst, BodyFraming::Length, body.size.to_i64, cap)
+  Body.stream(src, SINK, BodyFraming::Length, body.size.to_i64, cap, SCRATCH)
   cap.to_slice
 end
 
 def run_chunked(wire : Bytes) : Bytes
   src = IO::Memory.new(wire, writeable: false)
-  dst = IO::Memory.new(wire.size)
   cap = CaptureBuffer.new(CAP)
-  Body.stream(src, dst, BodyFraming::Chunked, 0_i64, cap)
+  Body.stream(src, SINK, BodyFraming::Chunked, 0_i64, cap, SCRATCH)
   cap.to_slice
 end
 

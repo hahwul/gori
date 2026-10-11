@@ -1,7 +1,7 @@
 # HPACK decode micro-benchmark: the per-h2-HEADERS-frame cost. Every h2 request
 # and response header block is HPACK-decoded (and most header strings are
 # Huffman-coded on the wire), so this runs twice per h2 flow on the proxy hot
-# path. Isolates huffman_decode (bit-by-bit tree walk) + the block decode.
+# path. Isolates huffman_decode (nibble-driven FSM) + the block decode.
 #
 # Build: crystal build bench/hpack_bench.cr -o bin/hpack_bench --release
 require "benchmark"

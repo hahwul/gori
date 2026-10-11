@@ -1,6 +1,6 @@
 # `Store.head_markers` micro-benchmark — the {Content-Type, Content-Encoding} read the FTS
-# indexer does per flow to decide whether a body is indexed at all. `legacy_markers` is the
-# `String` scan it still falls back to for a head with a byte >= 0x80;
+# indexer does per flow to decide whether a body is indexed at all. `legacy_markers` calls the
+# `String` scan (`head_markers_string`) it still falls back to for a head with a byte >= 0x80;
 # spec/store/head_markers_spec.cr holds the two paths to one answer.
 #
 # Build: crystal build bench/head_markers_bench.cr -o bin/head_markers_bench --release
@@ -8,20 +8,15 @@
 require "benchmark"
 require "../src/gori"
 
-def legacy_markers(head : Bytes) : {String?, String?}
-  ct = nil.as(String?)
-  ce = nil.as(String?)
-  String.new(head).each_line do |raw|
-    line = raw.chomp
-    break if line.empty?
-    idx = line.index(':')
-    next unless idx
-    case line[0...idx].strip.downcase
-    when "content-type"     then ct = line[(idx + 1)..].strip
-    when "content-encoding" then ce = line[(idx + 1)..].strip
-    end
+# Bench-only reopen: the String fallback is private to Store.
+class Gori::Store
+  def self.bench_head_markers_string(head : Bytes) : {String?, String?}
+    head_markers_string(head)
   end
-  {ct, ce}
+end
+
+def legacy_markers(head : Bytes) : {String?, String?}
+  Gori::Store.bench_head_markers_string(head)
 end
 
 # A 14-header response; the markers are read to the blank line whatever it holds.

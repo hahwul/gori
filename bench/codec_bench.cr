@@ -1,7 +1,7 @@
 # Codec micro-benchmarks: the per-request HTTP/1.1 head parsing costs that run
-# twice per flow (request head + response head) on the proxy hot path. These are
-# hidden under the upstream connect cost today; once upstream reuse removes that,
-# they become the visible per-request overhead.
+# twice per flow (request head + response head) on the proxy hot path. With the
+# upstream reused across a connection's keep-alive requests, there is no per-request
+# connect to hide them: they are the visible per-request overhead.
 #
 # Build: crystal build bench/codec_bench.cr -o bin/codec_bench --release
 require "benchmark"
@@ -84,12 +84,11 @@ Benchmark.ips do |x|
     Http1.parse_response_head(RESP_HEAD)
   end
   x.report("HeaderList#get? x5 (resp)") do
-    resp = Http1.parse_response_head(RESP_HEAD)
-    resp.headers.get?("Connection")
-    resp.headers.get?("Upgrade")
-    resp.headers.get?("Content-Type")
-    resp.headers.get?("Transfer-Encoding")
-    resp.headers.get?("Content-Length")
+    RESP.headers.get?("Connection")
+    RESP.headers.get?("Upgrade")
+    RESP.headers.get?("Content-Type")
+    RESP.headers.get?("Transfer-Encoding")
+    RESP.headers.get?("Content-Length")
   end
   x.report("FULL req parse+lookups") { simulate_request_parse }
   x.report("FULL resp parse+lookups") { simulate_response_parse }

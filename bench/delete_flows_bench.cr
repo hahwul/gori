@@ -6,8 +6,8 @@
 # behind it (P6), so the number that matters is the wall time of one call.
 #
 # Seeds FLOWS flows, EVENTS events and PROBE_ISSUES probe findings (a third of each pointing at
-# a flow), plus a few hundred rows in every other referencing table, then times deleting
-# DELETE_N flows in one call, ROUNDS times over disjoint id sets.
+# a flow), plus a few hundred rows in every other referencing table (entity_links included),
+# then times deleting DELETE_N flows in one call, ROUNDS times over disjoint id sets.
 #
 # Measured on an M-series laptop, release, defaults: a per-id cascade held the writer
 # ~0.85-0.97 s per 500-id call; set-wise per ID_CHUNK, ~7-10 ms.
@@ -21,6 +21,7 @@ EVENTS       = (ENV["BENCH_EVENTS"]? || "50000").to_i
 PROBE_ISSUES = (ENV["BENCH_PROBE_ISSUES"]? || "20000").to_i
 DELETE_N     = (ENV["BENCH_DELETE"]? || "500").to_i
 ROUNDS       = 3
+abort "BENCH_DELETE × #{ROUNDS} rounds (#{DELETE_N * ROUNDS}) exceeds BENCH_FLOWS (#{FLOWS})" if DELETE_N * ROUNDS > FLOWS
 
 # One row in `table` with `col` = `flow_id`; every other NOT NULL column without a default gets
 # a type-appropriate filler (and a unique one, so a UNIQUE constraint never collides).
@@ -63,6 +64,11 @@ raw.using_connection do |conn|
    "issue_retest_run_steps", "intercept_held", "probe_oast_probes"}.each do |t|
     500.times { |i| plant(conn, t, "flow_id", ids[i % FLOWS], i) }
   end
+  # `plant` would fill ref_kind with a filler; delete_flow_set matches ref_kind = 'flow'.
+  500.times do |i|
+    conn.exec("INSERT INTO entity_links (owner_kind, owner_id, ref_kind, ref_id, created_at) VALUES ('issue', ?, 'flow', ?, 0)",
+      i.to_i64, ids[i % FLOWS])
+  end
   conn.exec("COMMIT")
 end
 raw.close
@@ -80,3 +86,4 @@ store.close
 File.delete?(path)
 File.delete?("#{path}-wal")
 File.delete?("#{path}-shm")
+File.delete?("#{path}.open.lock")

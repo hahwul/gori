@@ -256,9 +256,9 @@ end
 
 # ---- run ----------------------------------------------------------------
 
-# Default modest so per-request upstream connect/close (no pooling) doesn't
-# exhaust the ~16K macOS ephemeral ports within one TIME_WAIT window. After
-# pooling lands, high N stays stable — the before/after is the point.
+# Each keep-alive client connection reuses one upstream for its requests
+# (ClientConn#acquire_upstream), so N no longer burns an ephemeral port per
+# request; the default stays modest only to keep a run short. Raise BENCH_N freely.
 REQUESTS = (ENV["BENCH_N"]? || "5000").to_i
 WARMUP   = 500
 

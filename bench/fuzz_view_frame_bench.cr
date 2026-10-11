@@ -52,15 +52,15 @@ DETAIL = begin
   v
 end
 
-# Detail open on a LARGE response with a selection spanning the whole body. This is the shape
-# the per-row span rebuild punished: highlight_spans emits one tuple per selected line, and it
-# used to run once per DRAWN ROW, so the cost was rows x selected-lines per frame.
 POST_CAP_WINDOW = begin
   window = FuzzerResultWindow.new
   RESULT_BENCH_ROWS.times { |i| window.append(result(i, false)) }
   window
 end
 
+# Detail open on a LARGE response with a selection spanning the whole body. This is the shape
+# the per-row span rebuild punished: highlight_spans emits one tuple per selected line, and it
+# used to run once per DRAWN ROW, so the cost was rows x selected-lines per frame.
 BIG_SEL = begin
   v = FuzzerView.new
   v.load_request("https://api.example.com", "GET /big HTTP/1.1\r\nHost: api.example.com\r\n\r\n", false, "")
