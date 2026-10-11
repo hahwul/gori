@@ -17,6 +17,15 @@ module Gori::Proxy::Codec
   module ContentDecode
     MAX_OUT = 32 * 1024 * 1024 # decompression-bomb ceiling for the decoded view
 
+    # Codings undone per body. MAX_OUT bounds each layer, not their number, and a 256 KiB
+    # response head lists ~50 000 `gzip,` tokens: a body gzipped that many times over grows
+    # only ~20 bytes a layer, so every layer decodes and each one re-inflates nearly the whole
+    # remainder — quadratic CPU (thousands of layers is seconds to hours) on every History
+    # view, `show` and `get_flow`. Real traffic stacks at most two (a Content-Encoding under a
+    # compressing Transfer-Encoding); four leaves room for an odd test origin while capping
+    # the work at 4 x MAX_OUT. The rest is reported, not silently dropped.
+    MAX_LAYERS = 4
+
     # The two header NAMES whose presence is the necessary condition for `decode` to do any
     # work. The byte-level gate scans the head for either (case-insensitively) to skip the
     # head String on the dominant no-encoding response. Full names (not just "-encoding") so
@@ -84,12 +93,16 @@ module Gori::Proxy::Codec
       entity, complete, notes = te_chunked ? dechunk_step(body, max_out) : {body, true, [] of String}
       # Both header families list their codings in the order they were APPLIED; decode from
       # the outermost (last-listed) inward.
-      encodings.reverse_each do |enc|
+      encodings.reverse.first(MAX_LAYERS).each do |enc|
         decoded, note, clean = inflate(entity, enc, max_out)
         complete = false unless clean
         notes << note if note
         return {entity, notes.join(" · "), complete} if decoded.nil? # unsupported/failed — stop
         entity = decoded
+      end
+      if encodings.size > MAX_LAYERS
+        notes << "stopped after #{MAX_LAYERS} of #{encodings.size} codings"
+        complete = false
       end
       {entity, notes.empty? ? nil : notes.join(" · "), complete}
     end

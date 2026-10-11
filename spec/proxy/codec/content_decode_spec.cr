@@ -413,6 +413,30 @@ describe Gori::Proxy::Codec::ContentDecode do
     note.should be_nil
   end
 
+  # MAX_OUT bounds each layer, not how many there are: a head listing thousands of `gzip`
+  # tokens over a body gzipped that many times re-inflated nearly the whole remainder per
+  # layer (16 000 layers took 4.5 s per view).
+  describe "a long chain of codings" do
+    it "undoes the outermost MAX_LAYERS and says how many it left" do
+      layers = Gori::Proxy::Codec::ContentDecode::MAX_LAYERS
+      body = "hello".to_slice
+      (layers + 2).times { body = gzip_bytes(body) }
+      decoded, note, complete = decode_full(head("HTTP/1.1 200 OK", "Content-Encoding: #{(["gzip"] * (layers + 2)).join(", ")}"), body)
+      decoded.should_not be_nil
+      decoded.not_nil!.should_not eq("hello".to_slice) # two layers still on
+      note.to_s.should end_with("stopped after #{layers} of #{layers + 2} codings")
+      complete.should be_false
+    end
+
+    it "leaves a chain within the limit as it was" do
+      body = gzip_bytes(gzip_bytes("hello".to_slice))
+      decoded, note, complete = decode_full(head("HTTP/1.1 200 OK", "Content-Encoding: gzip, gzip"), body)
+      String.new(decoded.not_nil!).should eq("hello")
+      note.should eq("decoded: gzip · decoded: gzip")
+      complete.should be_true
+    end
+  end
+
   # The WIRE gate: `ClientConn#apply_body_rewrite` refuses to run a Match&Replace body rule
   # when this says the body carries a compression layer. Compression is never inflated on that
   # path, so a rule that matched would be matching opaque compressed bytes — and the re-frame
