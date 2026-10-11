@@ -510,27 +510,28 @@ module Gori
     # local user planted (`issues.md -> ~/.zshenv`), dangling so it read as absent, or live so
     # the operator confirmed "file exists" for a file that is not theirs.
     #
-    # * an existing regular file is rewritten in place (the confirmed overwrite; its mode and
-    #   links are kept);
+    # The content is staged in a temp file beside it (created under the umask, as `File.write`
+    # would, and fsync'd), then:
+    # * an existing regular file is replaced by a rename (the confirmed overwrite; its mode is
+    #   carried over, and a crash leaves the old file, never a truncated one);
     # * anything else that exists — a symlink, a FIFO, a device — is refused;
-    # * nothing there: staged in a temp file beside it and hard-linked into place, which fails
-    #   if anything (a link included) appeared meanwhile. A filesystem with no hard links gets
-    #   the same existence check immediately before a rename, as `install_archive_copy` does.
-    def self.write_export_file(path : String, content : String,
-                               perm : File::Permissions = File::Permissions.new(0o644)) : Nil
-      if info = File.info?(path, follow_symlinks: false)
-        raise Gori::Error.new("refusing to write through a symlink or special file: #{path}") unless info.file?
-        File.write(path, content)
-        return
-      end
-      temp = nil.as(String?)
-      File.tempfile(".#{File.basename(path)}", ".tmp", dir: File.dirname(path)) do |file|
-        temp = file.path
+    # * nothing there: hard-linked into place, which fails if anything (a link included)
+    #   appeared meanwhile. A filesystem with no hard links gets the same existence check
+    #   immediately before a rename, as `install_archive_copy` does.
+    def self.write_export_file(path : String, content : String) : Nil
+      existing = File.info?(path, follow_symlinks: false)
+      raise Gori::Error.new("refusing to write through a symlink or special file: #{path}") if existing && !existing.file?
+      staged = File.tempname(".#{File.basename(path)}", ".tmp", dir: File.dirname(path))
+      File.open(staged, "w", perm: File::Permissions.new(0o666)) do |file|
         file.print(content)
         file.flush
+        file.fsync
       end
-      staged = temp || raise Gori::Error.new("could not stage #{path}")
-      File.chmod(staged, perm)
+      if existing
+        File.chmod(staged, existing.permissions)
+        File.rename(staged, path)
+        return
+      end
       begin
         File.link(staged, path)
       rescue IO::Error
@@ -538,7 +539,7 @@ module Gori
         File.rename(staged, path)
       end
     ensure
-      temp.try { |t| File.delete?(t) }
+      staged.try { |t| File.delete?(t) }
     end
 
     private def self.private_tempdir(prefix : String) : String

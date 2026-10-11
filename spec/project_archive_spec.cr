@@ -758,16 +758,25 @@ describe Gori::ProjectArchive do
   # A TUI export lands where the operator points it, often a shared directory: never write
   # through a link someone else planted there, dangling or live.
   describe ".write_export_file" do
-    it "creates a new file, rewrites a confirmed regular file, and refuses a symlink" do
+    it "creates a new file, replaces a confirmed regular file, and refuses a symlink" do
       dir = File.tempname("gori-export-file")
       Dir.mkdir(dir)
       begin
         fresh = File.join(dir, "issues.md")
         Gori::ProjectArchive.write_export_file(fresh, "one\n")
         File.read(fresh).should eq("one\n")
-        File.info(fresh).permissions.should eq(File::Permissions.new(0o644))
+        # Created under the umask, the mode `File.write` gives a new file.
+        control = File.join(dir, "control")
+        File.write(control, "")
+        File.info(fresh).permissions.should eq(File.info(control).permissions)
+        File.delete(control)
+        {% unless flag?(:win32) %}
+          File.chmod(fresh, 0o600)
+        {% end %}
+        mode = File.info(fresh).permissions
         Gori::ProjectArchive.write_export_file(fresh, "two\n")
         File.read(fresh).should eq("two\n")
+        File.info(fresh).permissions.should eq(mode)
 
         victim = File.join(dir, "victim")
         File.write(victim, "keep")
