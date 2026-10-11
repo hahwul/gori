@@ -372,9 +372,14 @@ module Gori::Fuzz
     # Through the registry rather than by scanning for the `exec:` marker, for the reason
     # `Decoder.chain_runs_commands?` documents: a saved chain is callable BY NAME and its token
     # says nothing about what is inside it. One home for the question — `RepeaterView`'s
-    # Content-Length reflection and `FuzzerView`'s row reconstruction both ask it here.
+    # Content-Length reflection and `FuzzerView`'s row reconstruction both ask it here, and
+    # `GrpcFieldTemplate` / `WsScript` through the class-method form.
     def runs_commands?(registry : Decoder::Registry) : Bool
-      @positions.any? { |pos| !pos.chain.empty? && Decoder.chain_runs_commands?(registry, pos.chain) }
+      Template.runs_commands?(@positions, registry)
+    end
+
+    def self.runs_commands?(positions : Array(Position), registry : Decoder::Registry) : Bool
+      positions.any? { |pos| !pos.chain.empty? && Decoder.chain_runs_commands?(registry, pos.chain) }
     end
 
     # Like `apply_chains`, but returns `{value, chain_error}` per payload: the transformed

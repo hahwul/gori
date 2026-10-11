@@ -125,6 +125,11 @@ module Gori::Fuzz
       Template.apply_chains_reported(@positions, payloads, registry, run_hooks)
     end
 
+    # Whether any handshake or frame position's `¦chain` would run an external command.
+    def runs_commands?(registry : Decoder::Registry) : Bool
+      Template.runs_commands?(@positions, registry)
+    end
+
     # HANDSHAKE positions only — the global indices of the ones inside its query string or
     # urlencoded body.
     #

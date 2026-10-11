@@ -547,8 +547,7 @@ module Gori::Fuzz
       # the wire. See `refuse_unrunnable_chains` (the shared validator the Repeater send path
       # also calls).
       refuse_unrunnable_chains(marked.positions, Decoder.shared_registry)
-      if !options.commands_allowed? &&
-         marked.positions.any? { |pos| !pos.chain.empty? && Decoder.chain_runs_commands?(Decoder.shared_registry, pos.chain) }
+      if !options.commands_allowed? && marked.runs_commands?(Decoder.shared_registry)
         raise CommandsRefused.new("a §…§ position's ¦chain runs a local command")
       end
 

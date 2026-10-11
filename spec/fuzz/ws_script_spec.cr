@@ -118,4 +118,13 @@ describe Gori::Fuzz::WsScript do
       out.map(&.[1]).should eq([nil, nil, nil])
     end
   end
+
+  # `Plan.build` asks this before it renders anything when MCP's `exec` is denied.
+  describe "#runs_commands?" do
+    it "sees an exec: step in a frame position as well as the handshake" do
+      reg = Gori::Decoder.shared_registry
+      script(HANDSHAKE, [frame("§a¦base64-encode§")]).runs_commands?(reg).should be_false
+      script(HANDSHAKE, [frame("§a¦exec:./tool§")]).runs_commands?(reg).should be_true
+    end
+  end
 end

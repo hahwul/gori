@@ -509,7 +509,7 @@ module Gori::Fuzz
     # Whether any field position's `¦chain` would run an external command — the question a
     # surface asks before replaying for display. Same delegation, same reason as above.
     def runs_commands?(registry : Decoder::Registry) : Bool
-      @positions.any? { |pos| !pos.chain.empty? && Decoder.chain_runs_commands?(registry, pos.chain) }
+      Template.runs_commands?(@positions, registry)
     end
 
     # --- rendering one variation ----------------------------------------------
