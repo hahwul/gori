@@ -1785,7 +1785,31 @@ module Gori
         return Result.new("unknown provider '#{provider}'", is_error: true) unless kind
         host = str(h, "server") || Oast::Presets.all.find { |p| p.kind == kind }.try(&.host)
         return Result.new("'server' is required for #{kind.label}", is_error: true) unless host
+        if refusal = oast_endpoint_refusal(host, "server")
+          return refusal
+        end
         {kind, host, str(h, "token")}
+      end
+
+      # An OAST endpoint an AGENT named (inline on `oast_start`, or a saved provider's host it
+      # writes), refused when the bound project's Sandbox would refuse a send there. `Oast::Http`
+      # sits outside the scope gate because its endpoints are OPERATOR configuration; one the
+      # agent picked is not, and `oast_poll` hands back what the poll fetched (a custom_http
+      # item list, a body snippet in an error), so `server: http://10.0.0.5/api/users` was a
+      # read past the Sandbox. Judged by the same Layer-2 `send_block` a hand-authored send
+      # gets. A built-in preset's host, and a provider the operator saved, stay reachable.
+      private def oast_endpoint_refusal(server : String, field : String) : Result?
+        return nil if unbound?
+        uri = URI.parse(Oast::Provider.normalize_endpoint(server)) rescue return nil
+        # No host to judge is no host to dial: `Oast::HttpClient` refuses it on its own.
+        return nil unless host = uri.host.presence
+        return nil if Oast::Presets.all.any? { |pr| URI.parse(pr.host).host.try(&.downcase) == host.downcase }
+        scheme = uri.scheme.presence || "https"
+        port = uri.port || URI.default_port(scheme) || 443
+        return nil unless why = agent_outbound(Scope.load(store), true).send_block(scheme, host, uri.request_target, port)
+        err("OAST #{field} #{host} is #{why}: with the Sandbox on, an agent may use a built-in preset " \
+            "(oast_presets) or a provider the operator saved (provider_id). Ask the operator to save " \
+            "this one or turn Sandbox off", "SCOPE_BLOCKED", field: field)
       end
 
       # Write a fresh registration into `oast_sessions` and stamp it live, returning the row id

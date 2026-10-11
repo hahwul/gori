@@ -61,6 +61,36 @@ describe "MCP saved OAST providers" do
     end
   end
 
+  # OAST sits outside the scope gate as OPERATOR configuration, and oast_poll returns what the
+  # poll fetched: an endpoint the agent picks is a read past the Sandbox unless it is judged.
+  it "refuses an agent-chosen OAST endpoint the Sandbox blocks, and keeps presets and saved providers" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "in.test").should be_true
+      scope.enable_sandbox.should be_true
+      tools = tools_for(store)
+
+      inline = tools.call("oast_start", JSON.parse(%({"provider":"custom_http","server":"http://10.0.0.5:8080/api/users"})))
+      inline.error_code.should eq("SCOPE_BLOCKED")
+      inline.text.should contain("10.0.0.5")
+      tools.call("create_oast_provider", JSON.parse(%({"name":"x","kind":"custom_http","host":"http://10.0.0.5/api"})))
+        .error_code.should eq("SCOPE_BLOCKED")
+      store.oast_providers.empty?.should be_true
+
+      # A built-in preset is operator configuration by construction.
+      id = mcp_ok_json(tools, "create_oast_provider", %({"name":"pub","host":"https://oast.pro"}))["id"].as_s
+      tools.call("update_oast_provider", JSON.parse(%({"id":"#{id}","host":"http://10.0.0.5"})))
+        .error_code.should eq("SCOPE_BLOCKED")
+      # An in-scope endpoint passes the gate (custom_http registers without dialling).
+      tools.call("oast_start", JSON.parse(%({"provider":"custom_http","server":"http://in.test:1/x"}))).is_error.should be_false
+      # A provider the operator saved stays reachable, wherever it points.
+      row = store.insert_oast_provider("lab", "custom_http", "http://127.0.0.1:1/x", nil, true, 1)
+      tools.call("oast_start", JSON.parse(%({"provider_id":"p_#{row}"}))).is_error.should be_false
+      scope.disable_sandbox.should be_true
+      tools.call("oast_start", JSON.parse(%({"provider":"custom_http","server":"http://10.0.0.5/x"}))).is_error.should be_false
+    end
+  end
+
   it "refuses mutation under --read-only but still lists" do
     with_store do |store|
       store.insert_oast_provider("p", "interactsh", "https://x.test", "T", true, 0)

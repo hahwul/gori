@@ -44,6 +44,11 @@ module Gori
         fields = oast_provider_fields(h)
         return fields if fields.is_a?(Result)
         name, kind, host, token, enabled = fields
+        # A provider the AGENT saves is not the operator's configuration, so it is judged like
+        # an inline `oast_start` server; otherwise saving it first would be the way around that.
+        if refusal = oast_endpoint_refusal(host, "host")
+          return refusal
+        end
         position = store.oast_providers.size
         id = store.insert_oast_provider(name, kind, host, token, enabled, position)
         # `busy`, not `err(…, "STORE_ERROR")`: a rolled-back write is a transient busy store
@@ -78,6 +83,10 @@ module Gori
 
         name = str(h, "name").try(&.strip).presence || existing.name
         host = str(h, "host").try(&.strip).presence || existing.host
+        # Only a host this call names: an operator's saved host stays theirs (see create).
+        if present?(h, "host") && (refusal = oast_endpoint_refusal(host, "host"))
+          return refusal
+        end
         # `presence ||` cannot express "clear it": an explicit `"token": ""` folded into the
         # same nil as an OMITTED field, so the old auth credential stayed on the provider and
         # kept going out. Presence of the KEY decides whether to change it; its value decides
