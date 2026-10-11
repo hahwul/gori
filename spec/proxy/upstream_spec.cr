@@ -1258,8 +1258,17 @@ end
 # so a hostname that RESOLVES to loopback on gori's own port (`*.localhost` does on macOS and
 # with systemd-resolved; any attacker-controlled A record can) walked past it, and one visited
 # page made gori dial itself until MAX_CONNECTIONS wedged accept().
+# Whether `loop.localhost` resolves to loopback here. macOS and systemd-resolved answer it; the
+# Windows resolver does not, and an unresolvable name never dials, so there is no loop to refuse.
+private def loop_name_resolves? : Bool
+  Socket::Addrinfo.resolve("loop.localhost", 80, type: Socket::Type::STREAM).any?(&.ip_address.loopback?)
+rescue Socket::Addrinfo::Error
+  false
+end
+
 describe "Gori::Proxy::Upstream.dialed_listener?" do
   it "refuses a proxied request whose hostname resolves to gori's own listener" do
+    pending! "loop.localhost does not resolve to loopback here" unless loop_name_resolves?
     sink = SelfLoopSink.new
     # A small cap: should the guard regress, the loop wedges this listener, not the suite.
     proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, max_connections: 8)
@@ -1280,6 +1289,7 @@ describe "Gori::Proxy::Upstream.dialed_listener?" do
   end
 
   it "applies only to the proxy path, and never to a listener gori does not own" do
+    pending! "loop.localhost does not resolve to loopback here" unless loop_name_resolves?
     own = TCPServer.new("127.0.0.1", 0)
     other = TCPServer.new("127.0.0.1", 0)
     Gori::Proxy::Upstream.register_listener(own)
