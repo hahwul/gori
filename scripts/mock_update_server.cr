@@ -87,6 +87,7 @@ asset_names = [
   "gori-v#{ver}-linux-arm64",
   "gori-v#{ver}-osx-arm64.tar.gz",
   "gori-v#{ver}-osx-x86_64.tar.gz",
+  "gori-v#{ver}-windows-x86_64.exe",
 ]
 
 base = "http://127.0.0.1:#{port}"
