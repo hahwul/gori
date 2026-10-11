@@ -1,5 +1,6 @@
 require "./proxy/codec/content_decode"
 require "./media_type"
+require "./utf8"
 
 module Gori
   # Parses a Server-Sent Events (`text/event-stream`) body into discrete events.
@@ -19,15 +20,22 @@ module Gori
     # separately). Far above any realistic captured stream.
     MAX_EVENTS = 100_000
 
+    # Ceiling on one event's `data`, the ceiling every body projection already shares
+    # (`Pretty::MAX_OUT_PRETTY`). Data lines past it are dropped and the event says so
+    # (`truncated`); the rest of the stream still parses.
+    MAX_EVENT_DATA = 8 * 1024 * 1024
+
     # One dispatched SSE event. `type` is the `event:` field (nil = the default
     # "message"); `data` is the joined data lines with no trailing newline; `id`
     # is the last-event-id in effect at dispatch; `retry` is the `retry:`
-    # reconnection time (ms) if the block carried one.
+    # reconnection time (ms) if the block carried one. `truncated` marks `data`
+    # cut at MAX_EVENT_DATA.
     record Event,
       type : String?,
       data : String,
       id : String?,
-      retry : Int32?
+      retry : Int32?,
+      truncated : Bool = false
 
     def self.sse?(content_type : String?) : Bool
       MediaType.essence(content_type) == "text/event-stream"
@@ -56,63 +64,108 @@ module Gori
     # Splits an event-stream body into events. Tolerant: a trailing block without
     # its terminating blank line (a capture cut mid-stream) is still emitted, so a
     # truncated stream shows its last partial event rather than dropping it.
+    #
+    # One pass over the bytes, line by line. The body is up to 32 MiB of decoded content the
+    # SERVER chose, and the old shape — `String.new` + `scrub` + two whole-body `gsub`s + one
+    # `split` — copied it five times and then made a String per line: 32 MiB of `a\n` (a 32 KB
+    # gzip) cost ~760 MiB per History view, MCP `get_flow` or `gori run show`. Now only the
+    # values gori keeps become Strings, and a block's data accumulates in one buffer.
     def self.events(body : Bytes) : Array(Event)
       events = [] of Event
       return events if body.empty?
-      # SSE is UTF-8; invalid bytes become U+FFFD (display-only, never re-sent).
-      # Normalise all three line terminators to LF so a single split suffices, and
-      # drop one leading BOM (U+FEFF) — WHATWG preprocessing — so the first field name
-      # isn't mangled (a BOM-prefixed stream would otherwise lose its first event).
-      text = String.new(body).scrub.gsub("\r\n", "\n").gsub('\r', '\n').lchop(0xFEFF.chr)
-
-      last_id = nil.as(String?) # stream-level: persists across blocks (per spec)
-      data = [] of String       # data lines accumulated for the current block
-      type = nil.as(String?)
-      retry = nil.as(Int32?)
-
-      flush = -> do
-        # A block emits an event only if it carried at least one `data` field.
-        events << Event.new(type, data.join('\n'), last_id, retry) unless data.empty?
-        data.clear
-        type = nil
-        retry = nil
-      end
-
-      text.split('\n').each do |line|
+      state = Block.new
+      pos = 0
+      # Drop one leading BOM (U+FEFF) — WHATWG preprocessing — so the first field name isn't
+      # mangled (a BOM-prefixed stream would otherwise lose its first event).
+      pos = 3 if body.size >= 3 && body[0] == 0xEF && body[1] == 0xBB && body[2] == 0xBF
+      while pos < body.size
         break if events.size >= MAX_EVENTS
+        line, pos = next_line(body, pos)
         if line.empty?
-          flush.call
-          next
-        end
-        field, value = field_of(line) || next # nil ⇒ a comment (`:`-prefixed) line
-        case field
-        when "event" then type = value.empty? ? nil : value # empty ⇒ default (nil)
-        when "data"  then data << value
-        when "id"    then last_id = value unless value.includes?(Char::ZERO) # a NUL ⇒ ignore the id
-        when "retry" then retry = retry_ms(value) || retry                   # invalid keeps the prior
+          state.flush(events)
+        else
+          state.field(line)
         end
       end
-
-      flush.call if events.size < MAX_EVENTS # trailing block (no terminating blank line)
+      state.flush(events) if events.size < MAX_EVENTS # trailing block (no terminating blank line)
       events
     end
 
-    # Splits a non-comment field line into {name, value}, stripping the one optional
-    # space after the colon (WHATWG). Returns nil for a comment line; a line with no
-    # colon is a field whose value is empty.
-    private def self.field_of(line : String) : {String, String}?
-      return nil if line.starts_with?(':')
-      colon = line.index(':') || return {line, ""}
-      value = line[(colon + 1)..]
-      value = value[1..] if value.starts_with?(' ')
-      {line[0, colon], value}
+    # The line starting at `pos`, and where the next one starts. CR, LF and CRLF all end a
+    # line; a lone CR is a terminator of its own (WHATWG).
+    private def self.next_line(body : Bytes, pos : Int32) : {Bytes, Int32}
+      stop = pos
+      while stop < body.size && body[stop] != '\n'.ord && body[stop] != '\r'.ord
+        stop += 1
+      end
+      after = stop + 1
+      after += 1 if body[stop]? == '\r'.ord && body[after]? == '\n'.ord
+      {body[pos, stop - pos], after}
+    end
+
+    # One block's fields as they arrive, plus the stream-level last event id.
+    private class Block
+      @last_id = nil.as(String?) # stream-level: persists across blocks (per spec)
+      @data = IO::Memory.new     # the block's data lines, LF-joined, as raw bytes
+      @data_lines = 0
+      @truncated = false
+      @type = nil.as(String?)
+      @retry = nil.as(Int32?)
+
+      def field(line : Bytes) : Nil
+        return if line[0] == ':'.ord # a comment
+        # SSE is UTF-8; invalid bytes become U+FFFD (display-only, never re-sent).
+        name, value = split(line)
+        case name
+        when "event".to_slice
+          @type = value.empty? ? nil : Utf8.text(value) # empty ⇒ default (nil)
+        when "data".to_slice
+          data(value)
+        when "id".to_slice
+          @last_id = Utf8.text(value) unless value.includes?(0_u8) # a NUL ⇒ ignore the id
+        when "retry".to_slice
+          @retry = Sse.retry_ms(value) || @retry # invalid keeps the prior
+        end
+      end
+
+      # {name, value}. A line with no colon is a field whose value is empty, and one optional
+      # space after the colon goes (WHATWG).
+      private def split(line : Bytes) : {Bytes, Bytes}
+        colon = line.index(':'.ord.to_u8) || return {line, Bytes.empty}
+        value = line[(colon + 1)..]
+        value = value[1..] if value[0]? == ' '.ord
+        {line[0, colon], value}
+      end
+
+      private def data(value : Bytes) : Nil
+        sep = @data_lines > 0 ? 1 : 0
+        if @truncated || @data.bytesize + sep + value.size > MAX_EVENT_DATA
+          @truncated = true
+          return
+        end
+        @data.write_byte('\n'.ord.to_u8) if sep == 1
+        @data.write(value)
+        @data_lines += 1
+      end
+
+      # A block emits an event only if it carried at least one `data` field.
+      def flush(events : Array(Event)) : Nil
+        if @data_lines > 0 || @truncated
+          events << Event.new(@type, Utf8.text(@data.to_slice), @last_id, @retry, @truncated)
+        end
+        @data.clear
+        @data_lines = 0
+        @truncated = false
+        @type = nil
+        @retry = nil
+      end
     end
 
     # A `retry` reconnection time (ms): only an all-ASCII-digit value qualifies; one
     # too large for Int32 clamps to MAX rather than being dropped. nil ⇒ not valid.
-    private def self.retry_ms(value : String) : Int32?
-      return nil if value.empty? || !value.each_char.all?(&.ascii_number?)
-      value.to_i? || Int32::MAX
+    protected def self.retry_ms(value : Bytes) : Int32?
+      return nil if value.empty? || !value.all? { |b| '0'.ord <= b <= '9'.ord }
+      String.new(value).to_i? || Int32::MAX
     end
   end
 end

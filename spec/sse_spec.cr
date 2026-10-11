@@ -105,6 +105,32 @@ describe Gori::Sse do
       events[0].data.should start_with("A")
       events[0].data.should end_with("B")
     end
+
+    it "treats a CRLF split from a lone CR exactly as the terminators say" do
+      parse("data: a\r\ndata: b\r\rdata: c\n\r\n").map(&.data).should eq(["a\nb", "c"])
+      parse("data: end\r").map(&.data).should eq(["end"])
+    end
+
+    # The old split made a String per line before looking at any of them: 32 MiB of `a\n` cost
+    # ~930 MiB. A line that is not a kept field now costs nothing at all.
+    it "parses millions of lines without materialising them" do
+      body = ("a\n" * (4 * 1024 * 1024)).to_slice
+      GC.collect
+      before = GC.stats.total_bytes
+      Gori::Sse.events(body).should be_empty
+      (GC.stats.total_bytes - before).should be < 1024 * 1024
+    end
+
+    it "caps one event's data and says so, then keeps parsing" do
+      line = "data: " + "x" * 1023 + "\n"
+      body = line * (Gori::Sse::MAX_EVENT_DATA // 1024 + 8) + "\ndata: next\n\n"
+      events = parse(body)
+      events.size.should eq(2)
+      events[0].truncated.should be_true
+      events[0].data.bytesize.should be <= Gori::Sse::MAX_EVENT_DATA
+      events[1].data.should eq("next")
+      events[1].truncated.should be_false
+    end
   end
 
   describe ".event_stream?" do
