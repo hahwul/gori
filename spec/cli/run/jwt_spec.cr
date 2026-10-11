@@ -65,16 +65,17 @@ describe "gori run jwt" do
     j["extra_segments"]?.should be_nil
   end
 
-  it "verify_json is {alg, verified, code, reason}, with both explanations on every no" do
+  it "verify_json is {alg, verified, code, reason, caveat}, with both explanations on every no" do
     # `--verify --format json` and MCP jwt_verify emit this same object. A script selects on
     # `verified` and branches on `code`. A wrong key used to come back `reason: null`, which
     # read the same as "nothing to explain" (#1370).
     ok = JSON.parse(Gori::Jwt.verify_json(Gori::Jwt.verify(jwt, "k")))
-    ok.as_h.keys.should eq(%w[alg verified code reason])
+    ok.as_h.keys.should eq(%w[alg verified code reason caveat])
     ok["alg"].as_s.should eq("HS256")
     ok["verified"].as_bool.should be_true
     ok["code"].raw.should be_nil
     ok["reason"].raw.should be_nil
+    ok["caveat"].raw.should be_nil
 
     no = JSON.parse(Gori::Jwt.verify_json(Gori::Jwt.verify(jwt, "wrong")))
     no["verified"].as_bool.should be_false
@@ -105,6 +106,24 @@ describe "gori run jwt" do
       Gori::CLI::Run.jwt_key_refusal(action, "", "./pub.pem").not_nil!.should contain("two names for the same key")
       Gori::CLI::Run.jwt_key_refusal(action, "s", "./pub.pem").should_not be_nil
     end
+  end
+
+  # HS256 signed with a public key's PEM text is the algorithm-confusion forgery: it does
+  # verify, and the answer says that only a confused server would take it.
+  it "marks an HS* token verified with a PEM as alg_confusion, still a yes" do
+    forged = Gori::Jwt.encode("{}", %({"s":1}), "HS256", JoseKeys::RSA_PUB)
+    v = Gori::Jwt.verify(forged, JoseKeys::RSA_PUB)
+    j = JSON.parse(Gori::Jwt.verify_json(v))
+    j["verified"].as_bool.should be_true
+    j["code"].raw.should be_nil
+    j["caveat"].as_s.should eq("alg_confusion")
+    j["reason"].as_s.should contain("algorithm confusion")
+    lines = Gori::CLI::Run.jwt_verify_lines(v)
+    lines.first.should eq("verified: yes (alg HS256, caveat alg_confusion)")
+    lines.last.should contain("algorithm confusion")
+    Gori::CLI::Run.jwt_verify_status(v).should eq(0)
+    # An ordinary secret carries no caveat.
+    Gori::Jwt.verify(jwt, "k").caveat.should be_nil
   end
 
   it "exits 1 unless the token verifies, as cookie --verify does" do

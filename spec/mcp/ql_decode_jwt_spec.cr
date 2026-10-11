@@ -359,6 +359,17 @@ describe Gori::MCP::Server do
       end
     end
 
+    it "jwt_verify marks an HS* token verified with a PEM key as alg_confusion" do
+      with_store do |store|
+        forged = Gori::Jwt.encode("{}", %({"sub":"1"}), "HS256", JoseKeys::RSA_PUB)
+        pem = JoseKeys::RSA_PUB.gsub('\n', "\\n")
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_verify","arguments":{"token":"#{forged}","key":"#{pem}"}}})
+        payload = mcp_tool_payload(mcp_drive(store, call, allow_actions: false)[0])
+        payload["verified"].as_bool.should be_true
+        payload["caveat"].as_s.should eq("alg_confusion")
+      end
+    end
+
     it "jwt_verify says why a no is a no, with a code to branch on (#1370)" do
       with_store do |store|
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_verify","arguments":{"token":"#{jwt}","secret":"nope"}}})

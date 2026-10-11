@@ -113,14 +113,20 @@ module Gori
     end
 
     # The answer to "does this token's own signature check out under this key". A "no" always
-    # says why, twice: `code` for a machine, `reason` for a person. Both are nil on a yes. A
+    # says why, twice: `code` for a machine, `reason` for a person. `code` is nil on a yes. A
     # plain wrong key is `signature_mismatch`; the rest tell an agent that trying another key
     # is pointless (an unsigned token, an alg gori cannot check, a mangled signature).
+    #
+    # `caveat` qualifies a YES, and is nil on every no: `alg_confusion` is an HS* token that
+    # verified with a PEM's text as its HMAC secret — the classic forgery, which only a server
+    # that feeds its public key to HMAC (algorithm confusion) would accept. Still `verified`,
+    # because that is the true answer to the question, and the token the attack mints.
     record Verification,
       alg : String,
       verified : Bool,
       reason : String? = nil,
-      code : VerifyCode? = nil
+      code : VerifyCode? = nil,
+      caveat : String? = nil
 
     # Verify a token against `key` — the HMAC secret for HS*, a PEM public key / certificate
     # / private key for the asymmetric algs. Verification uses the alg the TOKEN declares,
@@ -198,10 +204,18 @@ module Gori
       rescue ex : KeyMismatch
         return refused(alg, :key_mismatch, "#{ex.message} — a server holding this key rejects this token")
       end
-      return Verification.new(alg: alg, verified: true) if ok
+      return accepted(alg, !hmac.nil?, key) if ok
       under = key.empty? && hmac ? "the EMPTY secret" : "this key"
       refused(alg, :signature_mismatch,
         "the signature does not verify under #{under} — a different key signed it, or the token was altered")
+    end
+
+    # The yes, with its caveat when the HMAC secret that made it is a PEM's text.
+    private def accepted(alg : String, hmac : Bool, key : String) : Verification
+      return Verification.new(alg: alg, verified: true) unless hmac && key.includes?("-----BEGIN")
+      Verification.new(alg: alg, verified: true, caveat: "alg_confusion",
+        reason: "an #{alg} token verified with a PEM key's text as its HMAC secret — only a server " \
+                "vulnerable to algorithm confusion (one that HMACs with its public key) accepts it")
     end
 
     # A decoded signature of a width no key produces under `alg`, or nil.

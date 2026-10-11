@@ -79,9 +79,10 @@ module Gori
       end
     end
 
-    # {alg, verified, code, reason} for `Jwt.verify`. `verified` is the answer; on a "no",
-    # `code` is the `VerifyCode` label to branch on and `reason` the prose. Both keys are
-    # always present, null on a yes, so a consumer never has to test for their absence.
+    # {alg, verified, code, reason, caveat} for `Jwt.verify`. `verified` is the answer; on a
+    # "no", `code` is the `VerifyCode` label to branch on and `reason` the prose. On a yes
+    # `code` is null and `caveat` may qualify it (`alg_confusion`), with `reason` saying why.
+    # Every key is always present, so a consumer never has to test for its absence.
     def verify_json(v : Verification) : String
       JSON.build do |j|
         j.object do
@@ -89,6 +90,7 @@ module Gori
           j.field "verified", v.verified
           j.field "code", v.code.try(&.label)
           j.field "reason", v.reason
+          j.field "caveat", v.caveat
         end
       end.scrub
     end

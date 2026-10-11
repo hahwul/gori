@@ -319,14 +319,16 @@ module Gori
           "Check whether a JWT's OWN signature verifies under a key you supply — the question " \
           "\"would a server holding this key accept this token\". Verification always uses the alg " \
           "the TOKEN declares, never one you pick, because that is what a vulnerable server does " \
-          "too. Pure compute: no network. Returns {alg, verified, code, reason}. A false " \
+          "too. Pure compute: no network. Returns {alg, verified, code, reason, caveat}. A false " \
           "`verified` is an ANSWER, not an error, and always carries a `code` to branch on plus " \
           "a prose `reason`. Another key may succeed only after signature_mismatch (a " \
           "well-formed signature this key did not make) or key_mismatch (a key of the wrong type " \
           "or size for the token's alg, which a server holding it rejects). No key helps after " \
           "signature_malformed (not base64, or a width no key produces), unsigned (alg=none or " \
           "no signature), alg_unsupported, no_alg, jwe (encrypted, nothing to verify), " \
-          "extra_segments or malformed. Both are null when `verified` is true. Pass 'secret' or " \
+          "extra_segments or malformed. code is null when `verified` is true; caveat alg_confusion " \
+          "(reason says why) marks an HS* token verified with a PEM as secret, which only an " \
+          "algorithm-confusion-vulnerable server accepts. Pass 'secret' or " \
           "'key' — a call with neither is refused rather than checked against an empty secret." do |s|
           s.field "token", strprop("the JWT to check"), required: true
           s.field "secret", strprop("HMAC secret, for an HS256/384/512 token. \"\" checks the empty secret")

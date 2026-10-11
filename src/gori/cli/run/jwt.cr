@@ -164,6 +164,7 @@ module Gori
         bits = [] of String
         bits << "alg #{CLI::Output.term_safe(v.alg)}" unless v.alg.empty?
         bits << "empty secret" if empty_secret && Jwt::HMAC_DIGEST.has_key?(v.alg)
+        bits << "caveat #{v.caveat}" if v.caveat
         detail = bits.empty? ? "" : " (#{bits.join(", ")})"
         lines = ["verified: #{v.verified ? "yes" : "no"}#{detail}"]
         if reason = v.reason
