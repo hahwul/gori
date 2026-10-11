@@ -4895,3 +4895,41 @@ updated or deleted the new row; an OAST token landed on a provider the agent nev
 moves them the way V41 moved `sequencer_sessions` (`move_to_autoincrement`), and seeds
 `oast_providers` past every session that still names a provider. `saved_views` and
 `entity_links` stay as they were: nothing outside the process holds their ids.
+
+### 2026-10-11: an agent may author steps and commands, but not arm them
+
+Refines #1233 and the MCP permission groups. #1233 waives Layer 1 for a slot's automatic refresh
+because the operator chose both the steps and the policy. An MCP `write` agent could set both, and
+the TUI then sent agent-chosen requests carrying live `$BIND` values to any host. From MCP,
+`refresh_before` is now only `off`, and a change to an armed slot's steps (the list, or a step's
+request or target) disarms it — the line archive import already drew. The new `exec` group gates
+what an agent writes or switches on that runs a program (a pipe or exec rule, a Miner hook, a
+fuzz `exec:` chain), checked per argument inside the tool rather than by hiding it; it is ANDed
+with the tool's own group, so no stored denial loosens across the upgrade. It does not stop an
+operator-enabled exec rule that `probe_scan` runs. Likewise an OAST endpoint is "operator
+configuration" only when the operator configured it: an inline or agent-saved server is judged by
+the Sandbox's `send_block`.
+
+### 2026-10-11: OAST always verifies TLS, on every surface
+
+OAST is gori's own service traffic, like the updater, not a target. `--insecure-upstream` / `-k`
+exist for an origin with a broken certificate, and `settings/network.cr` already said they must not
+relax a hop the operator did not choose to inspect, yet the TUI and MCP passed
+`verify_tls: !insecure_upstream` while the CLI always verified. `Oast::HttpClient` now has no verify
+knob, so a surface cannot reintroduce the split. A collector on a private CA uses `SSL_CERT_FILE`.
+
+### 2026-10-11: OAST session rows are data, not instructions
+
+The probe minter uses only a session this install has polled (`last_poll_at` stamped by register,
+resume or heartbeat), whose correlation id is `[A-Za-z0-9_-]` and whose server URL is a plain
+http(s) URL. Archive import clears the stamp, so a shared archive cannot decide where gori sends
+out-of-band payloads; resuming the session is what makes it usable. This is P7's provenance rule
+applied to remote-chosen identifiers: they are refused, not encoded.
+
+### 2026-10-11: operator- and agent-authored regexes are budgeted by time
+
+Not by PCRE2's `match_limit`: it resets at every start position, so it bounds a scan only to
+subject length × limit, and lowering it breaks ordinary backtracking. `SafeRegexp.budgeted`
+prepends a start-of-attempt callout that aborts a scan after 50 ms with a `Regex::Error`, which
+every caller already reads as no match. Scope regex rules are exempt on purpose: a tripped exclude
+would fail open on Layer 2.
