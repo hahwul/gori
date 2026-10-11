@@ -85,9 +85,6 @@ module Gori
         message = case ex
                   when ProjectArchive::DestinationExists
                     "destination already exists: #{ex.path} — pass overwrite:true to replace it, or choose another 'path'"
-                  when ProjectArchive::NotAnArchive
-                    "destination exists and is not a gori project archive: #{ex.path} — overwrite:true " \
-                    "replaces only an earlier export; choose another 'path'"
                   when ProjectArchive::ProtectedDestination
                     "refusing to write a project archive inside gori's home (#{ex.dir}): it holds every " \
                     "project's database and gori's settings — choose a 'path' outside it"

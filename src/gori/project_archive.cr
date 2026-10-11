@@ -42,17 +42,6 @@ module Gori
       end
     end
 
-    # An export refused because `overwrite` was asked for over a file that is not a project
-    # archive, by a caller that may replace only its own kind of output (MCP: an agent names
-    # the path, and with a bare `overwrite` it could rename an archive over `~/.ssh/id_ed25519`).
-    class NotAnArchive < Gori::Error
-      getter path : String
-
-      def initialize(@path : String)
-        super("destination is not a gori project archive: #{@path}")
-      end
-    end
-
     # An export refused because its destination is inside a directory the caller protected
     # (MCP protects gori's home, which holds every project's database and the settings).
     class ProtectedDestination < Gori::Error
@@ -321,7 +310,10 @@ module Gori
         raise ProtectedDestination.new(target, dir) if Paths.within?(canonical_target, Paths.canonical_file(dir))
       end
       refuse_existing_destination(target, overwrite)
-      raise NotAnArchive.new(target) if archives_only && destination_exists?(target) && !archive?(target)
+      if archives_only && destination_exists?(target) && !archive?(target)
+        raise Gori::Error.new("destination exists and is not a gori project archive: #{target} — overwrite:true " \
+                              "replaces only an earlier export; choose another 'path'")
+      end
       target
     end
 
