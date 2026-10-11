@@ -333,7 +333,7 @@ def bind_token(name : String) : String
 end
 
 Paths.ensure_dirs
-Settings.load # after ensure_dirs: a home with no `env.syntax` adopts namespaced and writes it
+Settings.load # after ensure_dirs: a home with no `env.syntax` adopts namespaced (in memory)
 registry = ProjectRegistry.new(Paths.projects_dir)
 
 # Fresh start: drop any existing "demo" project.
@@ -457,7 +457,7 @@ add_flow(store, t.call(41), host: "shop.demo.test", target: "/missing-page",
   resp_body: html.call("Not Found", "<h1>404</h1>"))
 
 # Verbose 500 leaks a stack trace + framework version.
-ids[:err500] = add_flow(store, t.call(44), host: "api.demo.test", target: "/v1/debug",
+ids[:err500] = add_flow(store, t.call(42), host: "api.demo.test", target: "/v1/debug",
   status: 500, reason: "Internal Server Error", ctype: "text/html; charset=utf-8",
   resp_body: "<h1>RuntimeError at /v1/debug</h1><pre>NoMethodError: undefined method 'each' for nil\n  app/controllers/debug_controller.rb:14\n  rack (3.0.8) lib/rack/handler.rb:88\nDemoFramework 4.2.1</pre>")
 
@@ -687,20 +687,19 @@ puts "• inserted protocol showcase: websocket(#{ws_msgs.size} msgs) + grpc + s
 # hosts above, sending one of these from Repeater really goes out over the
 # network and comes back with a live response: good for trying Repeater/Diff/
 # Probe against genuine traffic instead of only synthetic data.
-gh_req_head = ->(method : String, target : String) {
-  String.build do |b|
-    b << method << ' ' << target << " HTTP/2\r\n"
+# GET www.hahwul.com over h2, answered the way GitHub Pages behind Fastly answers it.
+hahwul_get = ->(at : Int64, target : String, status : Int32, reason : String, ctype : String, body : String, etag : String, cache : String, dur_us : Int64) {
+  req_head = String.build do |b|
+    b << "GET " << target << " HTTP/2\r\n"
     b << "host: www.hahwul.com\r\n"
     b << "user-agent: gori-demo/1.0\r\n"
     b << "accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\n\r\n"
   end
-}
-gh_resp_head = ->(status : Int32, reason : String, ctype : String, size : Int32, etag : String, cache : String) {
-  String.build do |b|
+  resp_head = String.build do |b|
     b << "HTTP/2 " << status << ' ' << reason << "\r\n"
     b << "server: GitHub.com\r\n"
     b << "content-type: " << ctype << "\r\n"
-    b << "content-length: " << size << "\r\n"
+    b << "content-length: " << body.bytesize << "\r\n"
     b << "last-modified: Tue, 30 Jun 2026 14:14:45 GMT\r\n"
     b << "etag: \"" << etag << "\"\r\n"
     b << "access-control-allow-origin: *\r\n"
@@ -710,14 +709,14 @@ gh_resp_head = ->(status : Int32, reason : String, ctype : String, size : Int32,
     b << "x-cache: " << cache << "\r\n"
     b << "x-served-by: cache-icn1450039-ICN\r\n\r\n"
   end
+  raw_flow(store, at, host: "www.hahwul.com", method: "GET", target: target, http: "HTTP/2",
+    req_head: req_head, status: status, reason: reason, ctype: ctype,
+    resp_head: resp_head, resp_body: body.to_slice, dur_us: dur_us)
 }
 
 hahwul_robots = "User-agent: *\nAllow: /\n\nSitemap: https://www.hahwul.com/sitemap.xml\n"
-raw_flow(store, t.call(65), host: "www.hahwul.com", method: "GET", target: "/robots.txt",
-  http: "HTTP/2", req_head: gh_req_head.call("GET", "/robots.txt"),
-  status: 200, reason: "OK", ctype: "text/plain; charset=utf-8",
-  resp_head: gh_resp_head.call(200, "OK", "text/plain; charset=utf-8", hahwul_robots.bytesize, "6a43cf48-44", "HIT"),
-  resp_body: hahwul_robots.to_slice, dur_us: 165_000_i64)
+hahwul_get.call(t.call(65), "/robots.txt", 200, "OK", "text/plain; charset=utf-8",
+  hahwul_robots, "6a43cf48-44", "HIT", 165_000_i64)
 
 hahwul_sitemap = <<-XML
   <?xml version="1.0" encoding="UTF-8"?>
@@ -730,20 +729,14 @@ hahwul_sitemap = <<-XML
     <url><loc>https://www.hahwul.com/about/</loc></url>
   </urlset>
   XML
-raw_flow(store, t.call(68), host: "www.hahwul.com", method: "GET", target: "/sitemap.xml",
-  http: "HTTP/2", req_head: gh_req_head.call("GET", "/sitemap.xml"),
-  status: 200, reason: "OK", ctype: "application/xml",
-  resp_head: gh_resp_head.call(200, "OK", "application/xml", hahwul_sitemap.bytesize, "6a43cf50-f19e", "MISS"),
-  resp_body: hahwul_sitemap.to_slice, dur_us: 210_000_i64)
+hahwul_get.call(t.call(68), "/sitemap.xml", 200, "OK", "application/xml",
+  hahwul_sitemap, "6a43cf50-f19e", "MISS", 210_000_i64)
 
 hahwul_home = html.call("Home | HAHWUL",
   "<h1>HAHWUL</h1><p>Offensive Security Engineer, Developer and H4cker.</p>" \
   "<nav><a href=/posts/>Posts</a> <a href=/notes/>Notes</a> <a href=/projects/>Projects</a> <a href=/about/>About</a></nav>")
-ids[:hahwul_home] = raw_flow(store, t.call(71), host: "www.hahwul.com", method: "GET", target: "/",
-  http: "HTTP/2", req_head: gh_req_head.call("GET", "/"),
-  status: 200, reason: "OK", ctype: "text/html; charset=utf-8",
-  resp_head: gh_resp_head.call(200, "OK", "text/html; charset=utf-8", hahwul_home.bytesize, "6a43cf55-3b80", "HIT"),
-  resp_body: hahwul_home.to_slice, dur_us: 145_000_i64)
+ids[:hahwul_home] = hahwul_get.call(t.call(71), "/", 200, "OK", "text/html; charset=utf-8",
+  hahwul_home, "6a43cf55-3b80", "HIT", 145_000_i64)
 
 hahwul_css = <<-CSS
   /* =============================================================================
@@ -756,11 +749,8 @@ hahwul_css = <<-CSS
       --bg-tertiary: #1c1c1f;
   }
   CSS
-raw_flow(store, t.call(74), host: "www.hahwul.com", method: "GET", target: "/assets/css/01-reset.css?v=8e9d1251",
-  http: "HTTP/2", req_head: gh_req_head.call("GET", "/assets/css/01-reset.css?v=8e9d1251"),
-  status: 200, reason: "OK", ctype: "text/css; charset=utf-8",
-  resp_head: gh_resp_head.call(200, "OK", "text/css; charset=utf-8", hahwul_css.bytesize, "6a43cf48-1573", "MISS"),
-  resp_body: hahwul_css.to_slice, dur_us: 98_000_i64)
+hahwul_get.call(t.call(74), "/assets/css/01-reset.css?v=8e9d1251", 200, "OK", "text/css; charset=utf-8",
+  hahwul_css, "6a43cf48-1573", "MISS", 98_000_i64)
 
 hahwul_posts = html.call("Posts | HAHWUL",
   "<h1>Posts</h1><ul>" \
@@ -768,44 +758,29 @@ hahwul_posts = html.call("Posts | HAHWUL",
   "<li><a href=/posts/2026/10years/>10 years</a></li>" \
   "<li><a href=/posts/2026/traveling-with-hermes-in-japan/>Traveling with Hermes in Japan</a></li>" \
   "</ul>")
-raw_flow(store, t.call(77), host: "www.hahwul.com", method: "GET", target: "/posts/",
-  http: "HTTP/2", req_head: gh_req_head.call("GET", "/posts/"),
-  status: 200, reason: "OK", ctype: "text/html; charset=utf-8",
-  resp_head: gh_resp_head.call(200, "OK", "text/html; charset=utf-8", hahwul_posts.bytesize, "6a43cf52-3b64", "HIT"),
-  resp_body: hahwul_posts.to_slice, dur_us: 132_000_i64)
+hahwul_get.call(t.call(77), "/posts/", 200, "OK", "text/html; charset=utf-8",
+  hahwul_posts, "6a43cf52-3b64", "HIT", 132_000_i64)
 
 hahwul_post = html.call("Rust and Crystal: My Two Main Languages | HAHWUL",
   "<h1>Rust and Crystal: My Two Main Languages</h1><p>Balancing Popularity and Quiet Power</p>")
-raw_flow(store, t.call(80), host: "www.hahwul.com", method: "GET", target: "/posts/2026/rust-and-crystal/",
-  http: "HTTP/2", req_head: gh_req_head.call("GET", "/posts/2026/rust-and-crystal/"),
-  status: 200, reason: "OK", ctype: "text/html; charset=utf-8",
-  resp_head: gh_resp_head.call(200, "OK", "text/html; charset=utf-8", hahwul_post.bytesize, "6a43cf55-5069", "HIT"),
-  resp_body: hahwul_post.to_slice, dur_us: 118_000_i64)
+hahwul_get.call(t.call(80), "/posts/2026/rust-and-crystal/", 200, "OK", "text/html; charset=utf-8",
+  hahwul_post, "6a43cf55-5069", "HIT", 118_000_i64)
 
 hahwul_note = html.call("Remove co-authored-by when committing | HAHWUL",
   "<h1>Remove co-authored-by when committing</h1>" \
   "<p>Claude Code에서 커밋 시 co-authored-by를 남기지 않도록 설정하는 방법</p>")
-raw_flow(store, t.call(83), host: "www.hahwul.com", method: "GET", target: "/notes/claude-code/remove-co-authored-by/",
-  http: "HTTP/2", req_head: gh_req_head.call("GET", "/notes/claude-code/remove-co-authored-by/"),
-  status: 200, reason: "OK", ctype: "text/html; charset=utf-8",
-  resp_head: gh_resp_head.call(200, "OK", "text/html; charset=utf-8", hahwul_note.bytesize, "6a43cf57-3e94", "MISS"),
-  resp_body: hahwul_note.to_slice, dur_us: 140_000_i64)
+hahwul_get.call(t.call(83), "/notes/claude-code/remove-co-authored-by/", 200, "OK", "text/html; charset=utf-8",
+  hahwul_note, "6a43cf57-3e94", "MISS", 140_000_i64)
 
 hahwul_about = html.call("About | HAHWUL",
   "<h1>About</h1><p>Offensive Security Engineer, Developer and H4cker.</p>")
-raw_flow(store, t.call(86), host: "www.hahwul.com", method: "GET", target: "/about/",
-  http: "HTTP/2", req_head: gh_req_head.call("GET", "/about/"),
-  status: 200, reason: "OK", ctype: "text/html; charset=utf-8",
-  resp_head: gh_resp_head.call(200, "OK", "text/html; charset=utf-8", hahwul_about.bytesize, "6a43cf55-561b", "HIT"),
-  resp_body: hahwul_about.to_slice, dur_us: 121_000_i64)
+hahwul_get.call(t.call(86), "/about/", 200, "OK", "text/html; charset=utf-8",
+  hahwul_about, "6a43cf55-561b", "HIT", 121_000_i64)
 
 hahwul_404 = html.call("404 Not Found | HAHWUL",
   "<h1>404</h1><p>The page you are looking for does not exist.</p>")
-raw_flow(store, t.call(89), host: "www.hahwul.com", method: "GET", target: "/this-page-does-not-exist",
-  http: "HTTP/2", req_head: gh_req_head.call("GET", "/this-page-does-not-exist"),
-  status: 404, reason: "Not Found", ctype: "text/html; charset=utf-8",
-  resp_head: gh_resp_head.call(404, "Not Found", "text/html; charset=utf-8", hahwul_404.bytesize, "6a43cf47-36ef", "HIT"),
-  resp_body: hahwul_404.to_slice, dur_us: 108_000_i64)
+hahwul_get.call(t.call(89), "/this-page-does-not-exist", 404, "Not Found", "text/html; charset=utf-8",
+  hahwul_404, "6a43cf47-36ef", "HIT", 108_000_i64)
 
 puts "• inserted 9 real, replayable flows against www.hahwul.com"
 
@@ -1754,16 +1729,16 @@ seq_req = replay_req("POST", "shop.demo.test", "/api/login",
   {"Content-Type" => "application/json"}, %({"username":"alice","password":"hunter2"})).to_slice
 ids[:seq_sid] = store.insert_sequencer_session("https://shop.demo.test", seq_req,
   false, nil,
-  %({"mode":"manual","kind":"cookie","selector":"sid","pos_start":0,"pos_end":0,"goal":500,"concurrency":4,"notify":"off"}),
+  %({"mode":"live","kind":"cookie","selector":"sid","pos_start":0,"pos_end":0,"goal":500,"concurrency":4,"notify":"off"}),
   ids[:login], 0, "sid randomness")
 
-# A second one graded on a HEADER instead of a cookie, over a fixed byte range — the
-# OAuth code is minted per authorize call, so its varying region is what to measure.
+# A second one graded on a HEADER instead of a cookie: the OAuth code is minted per
+# authorize call, so the Location it rides in is what varies.
 seq_code = replay_req("GET", "auth.demo.test",
   "/authorize?response_type=code&client_id=shop-web&redirect_uri=https%3A%2F%2Fshop.demo.test%2Fcallback&state=xyz789").to_slice
 ids[:seq_code] = store.insert_sequencer_session("https://auth.demo.test", seq_code,
   false, nil,
-  %({"mode":"manual","kind":"header","selector":"Location","pos_start":49,"pos_end":72,"goal":300,"concurrency":4,"notify":"off"}),
+  %({"mode":"live","kind":"header","selector":"Location","pos_start":0,"pos_end":0,"goal":300,"concurrency":4,"notify":"off"}),
   nil, 1, "oauth code entropy")
 
 puts "• inserted 7 repeater (1 ws, 1 bound) + 3 fuzz + 2 miner + 2 sequencer sessions"
@@ -1802,13 +1777,14 @@ raw_flow(store, t.call(162), host: "api.demo.test", method: "POST", target: "/v1
 # REPEATER, from MCP: the same tool, a different surface — `send_request` records by
 # default, so an agent working beside the operator has been writing into this table all
 # along. The surface column is the only thing that separates the two rows.
+mcp_body = %({"id":2,"email":"bob@demo.test","role":"admin","mfa":false})
 raw_flow(store, t.call(163), host: "api.demo.test", method: "GET", target: "/v1/users/2",
   req_head: "GET /v1/users/2 HTTP/1.1\r\nHost: api.demo.test\r\nUser-Agent: gori-demo/1.0\r\n" \
             "Authorization: Bearer #{jwt}\r\nAccept: application/json\r\n\r\n",
   status: 200, reason: "OK", ctype: "application/json",
   resp_head: "HTTP/1.1 200 OK\r\nServer: nginx/1.25.3\r\nContent-Type: application/json\r\n" \
-             "Content-Length: 58\r\n\r\n",
-  resp_body: %({"id":2,"email":"bob@demo.test","role":"admin","mfa":false}).to_slice,
+             "Content-Length: #{mcp_body.bytesize}\r\n\r\n",
+  resp_body: mcp_body.to_slice,
   dur_us: 37_000_i64,
   source: FS::Kind::Repeater, source_surface: FS::Surface::Mcp,
   source_ref: ids[:repeater_idor].to_s)
@@ -1816,14 +1792,15 @@ raw_flow(store, t.call(163), host: "api.demo.test", method: "GET", target: "/v1/
 # FUZZER: one hit out of the traversal sweep, recorded because the run asked for evidence
 # (`--record-history matched`). The payload is on the wire, which is why reading this row as
 # "the origin serves .env" without noticing the SRC column would be a mistake.
+env_body = "DB_PASSWORD=demo-only-not-real\nSTRIPE_KEY=sk_test_demo_only\n"
 raw_flow(store, t.call(164), host: "shop.demo.test", method: "GET",
   target: "/assets/..%2F..%2F.env",
   req_head: "GET /assets/..%2F..%2F.env HTTP/1.1\r\nHost: shop.demo.test\r\n" \
             "User-Agent: gori-demo/1.0\r\nAccept: */*\r\n\r\n",
   status: 200, reason: "OK", ctype: "text/plain",
   resp_head: "HTTP/1.1 200 OK\r\nServer: nginx/1.25.3\r\nContent-Type: text/plain\r\n" \
-             "Content-Length: 63\r\n\r\n",
-  resp_body: "DB_PASSWORD=demo-only-not-real\nSTRIPE_KEY=sk_test_demo_only\n".to_slice,
+             "Content-Length: #{env_body.bytesize}\r\n\r\n",
+  resp_body: env_body.to_slice,
   dur_us: 22_000_i64,
   source: FS::Kind::Fuzzer, source_surface: FS::Surface::Cli,
   source_ref: ids[:fuzz_traversal].to_s)
@@ -1831,27 +1808,30 @@ raw_flow(store, t.call(164), host: "shop.demo.test", method: "GET",
 # DISCOVER: a crawl finding. These have been persisted by default since the tab shipped —
 # the crawler fetched this URL, no browser ever asked for it, and until the column existed
 # the sitemap could not say so.
+sectxt_body = "Contact: mailto:security@demo.test\nExpires: 2027-01-01\n"
 raw_flow(store, t.call(165), host: "shop.demo.test", method: "GET", target: "/.well-known/security.txt",
   req_head: "GET /.well-known/security.txt HTTP/1.1\r\nHost: shop.demo.test\r\n" \
             "User-Agent: gori-demo/1.0\r\nAccept: */*\r\n\r\n",
   status: 200, reason: "OK", ctype: "text/plain",
   resp_head: "HTTP/1.1 200 OK\r\nServer: nginx/1.25.3\r\nContent-Type: text/plain\r\n" \
-             "Content-Length: 52\r\n\r\n",
-  resp_body: "Contact: mailto:security@demo.test\nExpires: 2027-01-01\n".to_slice,
+             "Content-Length: #{sectxt_body.bytesize}\r\n\r\n",
+  resp_body: sectxt_body.to_slice,
   dur_us: 18_000_i64,
   source: FS::Kind::Discover, source_surface: FS::Surface::Tui)
 
 # IMPORT: read out of somebody else's capture. NOT `sent_by_gori?` — gori never put this on
 # a wire, and `source_ref` names the file it came out of, which is the provenance question
 # an operator actually asks of an imported row.
+hook_req = %({"event":"order.paid","order_id":"9","v":2})
+hook_resp = %({"queued":true})
 raw_flow(store, t.call(166), host: "partner.demo.test", method: "POST", target: "/api/v2/webhook",
   req_head: "POST /api/v2/webhook HTTP/1.1\r\nHost: partner.demo.test\r\n" \
             "User-Agent: PartnerBot/2.1\r\nContent-Type: application/json\r\n" \
-            "X-Signature: sha256=6f1c0e2a\r\nContent-Length: 41\r\n\r\n",
-  req_body: %({"event":"order.paid","order_id":"9","v":2}).to_slice,
+            "X-Signature: sha256=6f1c0e2a\r\nContent-Length: #{hook_req.bytesize}\r\n\r\n",
+  req_body: hook_req.to_slice,
   status: 202, reason: "Accepted", ctype: "application/json",
-  resp_head: "HTTP/1.1 202 Accepted\r\nContent-Type: application/json\r\nContent-Length: 16\r\n\r\n",
-  resp_body: %({"queued":true}).to_slice, dur_us: 58_000_i64,
+  resp_head: "HTTP/1.1 202 Accepted\r\nContent-Type: application/json\r\nContent-Length: #{hook_resp.bytesize}\r\n\r\n",
+  resp_body: hook_resp.to_slice, dur_us: 58_000_i64,
   source: FS::Kind::Import, source_ref: "partner-webhooks.har")
 
 store.flush
@@ -2304,14 +2284,15 @@ add_flow(store, tick.call, host: "api.demo.test", method: "DELETE", target: "/v1
 # 417 answering an `Expect: 100-continue` — the handshake where the client WITHHOLDS its body
 # until the origin agrees (#728). The request head declares 8 MB of body and the flow carries
 # none, because none was ever sent.
+limit_body = "upload exceeds the 4 MiB body limit\n"
 raw_flow(store, tick.call, host: "api.demo.test", method: "PUT", target: "/v1/imports/catalog.csv",
   req_head: "PUT /v1/imports/catalog.csv HTTP/1.1\r\nHost: api.demo.test\r\nUser-Agent: curl/8.6.0\r\n" \
             "Authorization: Bearer #{jwt}\r\nExpect: 100-continue\r\nContent-Type: text/csv\r\n" \
             "Content-Length: 8388608\r\n\r\n",
   status: 417, reason: "Expectation Failed", ctype: "text/plain",
   resp_head: "HTTP/1.1 417 Expectation Failed\r\nServer: nginx/1.25.3\r\nContent-Type: text/plain\r\n" \
-             "Content-Length: 38\r\nConnection: close\r\n\r\n",
-  resp_body: "upload exceeds the 4 MiB body limit\n".to_slice, dur_us: 340_000_i64)
+             "Content-Length: #{limit_body.bytesize}\r\nConnection: close\r\n\r\n",
+  resp_body: limit_body.to_slice, dur_us: 340_000_i64)
 
 # 451, which names the authority in a `Link` header rather than in prose, and 429 already has
 # a row — so this is the compliance-shaped refusal the demo was missing.
@@ -2935,7 +2916,7 @@ Space → `l` (links) on this sub-tab opens the overlay; `↵`/`o` jumps to the 
 - **users path mine** — hidden-parameter probe on /v1/users/
 - **header/cookie mine** — the same idea over headers + cookies
 - **sid randomness** sequencer — grade the /api/login session-cookie entropy
-- **oauth code entropy** sequencer — the same over a byte range of the Location header
+- **oauth code entropy** sequencer — the same over the Location header
 - **WebSocket chat** flow — MESSAGES pane for the 101 upgrade
 - **graphql-ws subscription** flow — a GRAPHQL pane built from the frames, not from a body
 - **hahwul home** repeater — live, replayable traffic against www.hahwul.com
@@ -2960,7 +2941,7 @@ Which tab does what on this demo (send a selection to a tool with Space → the 
 - **OAST** — the out-of-band listener. It holds the DNS + HTTP callbacks the server made
   when it fetched our payload host (proof of the blind SSRF). Polling is paused on load.
 - **Sequencer** — "sid randomness" re-collects the login cookie and grades its entropy;
-  "oauth code entropy" does the same over a byte range of a Location header.
+  "oauth code entropy" does the same over a Location header.
 - **JWT** — two real HS256 tokens to try: the session token and the OIDC `id_token` from
   /oauth/token. Decode the claims, run the weak-secret attack (it recovers the key),
   then re-forge `{"role":"admin"}` or try alg:none.
