@@ -11,8 +11,8 @@
   };
   "db" = {
     url = "https://github.com/crystal-lang/crystal-db.git";
-    rev = "v0.14.0";
-    sha256 = "1s67fs5abzgg2yyjsm2la967mk881i91h8jdnal072fb9qh9wr58";
+    rev = "v0.15.0";
+    sha256 = "1f5rvzbss8dnrk5ilfmipnj7rbzb4k0bpihj4dgnqmmfkaiwvbrn";
   };
   "sarif" = {
     url = "https://github.com/hahwul/sarif.cr.git";
@@ -21,8 +21,8 @@
   };
   "sqlite3" = {
     url = "https://github.com/crystal-lang/crystal-sqlite3.git";
-    rev = "v0.23.0";
-    sha256 = "1adfdw19r5b1dhzs3x410z5s1cgan4ypgmhph3fqsa65svvw83af";
+    rev = "v0.24.0";
+    sha256 = "0kzaxdszkbv5z5fl1zgiamiwjxk3p2v0rhg8w2b1q7wm0sh3b0xh";
   };
   "termisu" = {
     url = "https://github.com/hahwul/termisu.git";
