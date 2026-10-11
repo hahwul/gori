@@ -73,6 +73,50 @@ private def same_as_oracle(profile : Gori::Redact::Profile, text : String) : Gor
 end
 
 describe Gori::Redact::Matcher do
+  # A JSON-shaped body the parser refuses (an integer past Int64, a cut at the capture cap)
+  # drops to the text pass, which used to see only `"name":"string"` — so the default profile
+  # sent numeric and object values out in clear that the parsed path redacts.
+  describe "text fallback on a JSON body that will not parse" do
+    it "redacts named numeric fields, keeping unnamed ones" do
+      with_salt do
+        body = %({"pin":1234,"card_number":4111111111111111,"id":123456789012345678901234})
+        r = Gori::Redact::Matcher.new(Gori::Redact::DEFAULT_PROFILE).body(body.to_slice, "application/json")
+        r.text.should_not contain("1234,")
+        r.text.should_not contain("4111111111111111")
+        r.text.should contain(%("pin":#{Gori::Redact.placeholder("1234")}))
+        r.text.should contain("123456789012345678901234") # `id` is not a named field
+        r.count.should eq(2)
+      end
+    end
+
+    it "redacts a named object value through its matching close" do
+      with_salt do
+        body = %({"credentials":{"user":"a","nested":{"k":"}"},"n":[1,{"x":2}]},"after":1,"big":1e999})
+        r = Gori::Redact::Matcher.new(Gori::Redact::DEFAULT_PROFILE).body(body.to_slice, "application/json")
+        r.text.should_not contain(%("user":"a"))
+        r.text.should_not contain(%("x":2))
+        r.text.should contain(%(,"after":1,"big":1e999}))
+      end
+    end
+
+    it "redacts a named container cut off at the capture cap, to end of subject" do
+      with_salt do
+        body = %({"ok":true,"credentials":{"password":"hunter2","otp":[12,)
+        r = Gori::Redact::Matcher.new(Gori::Redact::DEFAULT_PROFILE).body(body.to_slice, "application/json")
+        r.text.should_not contain("hunter2")
+        r.text.should_not contain("12,")
+        r.text.should start_with(%({"ok":true,"credentials":[REDACTED:))
+      end
+    end
+
+    it "keeps a string value cut mid-way redacted as before" do
+      with_salt do
+        r = Gori::Redact::Matcher.new(Gori::Redact::DEFAULT_PROFILE).body(%({"token":"abc).to_slice, "application/json")
+        r.text.should eq(%({"token":"#{Gori::Redact.placeholder("abc")}))
+      end
+    end
+  end
+
   describe "replace_all over multibyte text" do
     it "redacts a field whose name, value and surroundings are non-ASCII" do
       with_salt do

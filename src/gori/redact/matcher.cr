@@ -475,6 +475,17 @@ module Gori
           # the one thing the fallback could not see.
           rules << {Regex.new("\"(?:#{alt})\"\\s*:\\s*\"((?:[^\"\\\\]++|\\\\.)*)(?:\"|\\z)",
             Regex::Options::IGNORE_CASE), "json_field (text fallback)"}
+          # The same names holding a NON-string value, which the parsed path redacts whole and
+          # the rule above cannot see: a bare scalar (`"pin":1234`, a 24-digit id that is past
+          # Int64 and is itself why the parse failed) and an object or array, taken through its
+          # matching close by recursion (`(?&c)`), or to end of subject when the body was cut
+          # inside it. Strings inside the container are skipped whole so a `}` in one does not
+          # end it early. A container nested past PCRE2's stack raises, which
+          # `apply_text_rules` turns into withholding the value: fail closed.
+          rules << {Regex.new("\"(?:#{alt})\"\\s*:\\s*(" \
+                              "(?<c>[{\\[](?:[^{}\\[\\]\"]++|\"(?:[^\"\\\\]++|\\\\.?)*+(?:\"|\\z)|(?&c))*+(?:[}\\]]|\\z))" \
+                              "|[^\\s,{}\\[\\]\"]++)",
+            Regex::Options::IGNORE_CASE | Regex::Options::DOTALL), "json_field (text fallback)"}
         end
         unless @form.empty?
           alt = @form.keys.map { |k| Regex.escape(k) }.join('|')
