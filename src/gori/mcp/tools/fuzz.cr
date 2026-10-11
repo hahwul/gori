@@ -79,8 +79,8 @@ module Gori
       rescue ex : FuzzArgError
         Result.new(ex.message || "invalid fuzz arguments", is_error: true)
       rescue Fuzz::CommandsRefused
-        # Raised only when `exec` is denied (`commands_allowed`, below).
-        permission_denied("fuzz_start", "exec")
+        # Raised only when `exec` is denied or still asks (`commands_allowed`, below).
+        exec_refusal || permission_denied("fuzz_start", "exec")
       end
 
       # `fuzz_start`'s reply object.
@@ -667,8 +667,8 @@ module Gori
           ws_messages: ws_messages,
           # The bound project, for any `payload_from` set: the plan builder reads it there.
           project: store,
-          # "Run local commands" off: see `exec_refusal`.
-          commands_allowed: !@denied_permissions.includes?("exec"))
+          # "Run local commands" off, or set to ask and not yet approved: see `exec_refusal`.
+          commands_allowed: !@denied_permissions.includes?("exec") && !approval_asks.includes?("exec"))
         plan = Fuzz::Plan.build(options, ob)
         # `ws_frames` is nil for an HTTP sweep and the OUTBOUND frame count for a WebSocket one,
         # so `fuzz_start`'s echo can say which engine the job actually took. An agent that seeded

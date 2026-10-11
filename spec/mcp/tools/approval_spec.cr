@@ -132,6 +132,42 @@ describe "MCP approvals (ask)" do
     end
   end
 
+  it "asks before a fuzz chain runs a command, and the command waits for the answer" do
+    posix_only!("a #!/bin/sh hook script")
+    with_store do |store|
+      dir = File.tempname("gori-exec-ask")
+      Dir.mkdir_p(dir)
+      hook = File.join(dir, "h.sh")
+      tally = File.join(dir, "tally")
+      File.write(hook, "#!/bin/sh\necho ran >> '#{tally}'\ncat\n")
+      File.chmod(hook, 0o755)
+      begin
+        template = "GET /?q=§P¦exec:#{hook}§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
+        args = {"url" => "http://127.0.0.1:9/", "template" => template,
+                "payloads" => [{"list" => ["x"]}], "allow_unscoped" => true}.to_json
+        r = call(ask_tools(store, "exec"), "fuzz_start", args)
+        approval_id(r)
+        r.details.not_nil!["key"].as_s.should eq("exec")
+        File.exists?(tally).should be_false
+      ensure
+        FileUtils.rm_rf(dir)
+      end
+    end
+  end
+
+  it "asks about exec only when the probe rule being enabled is an exec rule" do
+    with_store do |store|
+      tools = ask_tools(store, "exec")
+      plain = store.insert_probe_custom_rule("p", "", "response", "body", "contains", "AAA", Gori::Store::Severity::Info)
+      store.set_probe_custom_rule_enabled(plain, false).should be_true
+      call(tools, "set_probe_rule_enabled", %({"id":"custom_p_#{plain}","enabled":true})).is_error.should be_false
+      store.open_agent_questions(0_i64, Time.utc.to_unix_ms * 1000).should be_empty
+      exec = store.insert_probe_custom_rule("x", "", "response", "body", "exec", "/bin/cat", Gori::Store::Severity::Info)
+      store.set_probe_custom_rule_enabled(exec, false).should be_true
+      approval_id(call(tools, "set_probe_rule_enabled", %({"id":"custom_p_#{exec}","enabled":true})))
+    end
+  end
+
   it "never asks for a poller or a stop" do
     with_store do |store|
       tools = ask_tools(store, "send")
