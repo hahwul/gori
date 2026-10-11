@@ -76,6 +76,13 @@ describe Gori::ExternalOpen do
       Gori::ExternalOpen.suffix_for(resp("image/svg+xml"), "<svg/>".to_slice).should eq(".svg")
     end
 
+    # macOS `open` hands a `.zip` to Archive Utility, which extracts the target's archive
+    # beside the preview, unbounded and without quarantine. An archive is opened as `.bin`.
+    it "never gives an archive an auto-extracting suffix" do
+      zip = Bytes[0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00]
+      Gori::ExternalOpen.suffix_for(resp("application/zip"), zip).should eq(".bin")
+    end
+
     it "gives an unknown text/* type .txt" do
       Gori::ExternalOpen.suffix_for(resp("text/vnd.made-up"), "hello".to_slice).should eq(".txt")
     end
@@ -299,7 +306,10 @@ describe Gori::ExternalOpen do
   describe ".executes?" do
     it "flags the documents a browser runs code out of" do
       with_preview_home do
+        # XML: a browser renders a top-level XML document, and an XHTML-namespaced element in
+        # it runs script — `text/xml`, `application/xml` and the `+xml` family alike.
         {"text/html" => true, "application/xhtml+xml" => true, "image/svg+xml" => true,
+         "application/xml" => true, "text/xml" => true, "application/atom+xml" => true,
          "application/json" => false, "text/plain" => false, "image/png" => false}.each do |ct, expected|
           r = Gori::ExternalOpen.write("flow-1", resp(ct), "x".to_slice)
           Gori::ExternalOpen.executes?(r).should eq(expected)

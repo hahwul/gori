@@ -82,6 +82,10 @@ module Gori
 
     # Media type → suffix. An ALLOWLIST: a type absent here never picks its own extension.
     #
+    # No archive types. `application/zip` used to map to `.zip`, and macOS `open` hands a `.zip`
+    # to Archive Utility, which EXTRACTS it beside the preview — the target's tree, unbounded in
+    # size, written without a quarantine flag. An archive opens as the generic `.bin` instead.
+    #
     # Keyed on `MediaType.essence` (folded, parameters dropped), plus the structured-suffix
     # fallbacks below for the `+json` / `+xml` families, which is how a vendor type
     # (`application/vnd.api+json`) still opens as what it is.
@@ -114,7 +118,6 @@ module Gori
       "image/x-icon"                      => ".ico",
       "image/vnd.microsoft.icon"          => ".ico",
       "application/pdf"                   => ".pdf",
-      "application/zip"                   => ".zip",
       "application/wasm"                  => ".wasm",
       "font/woff2"                        => ".woff2",
       "audio/mpeg"                        => ".mp3",
@@ -210,11 +213,13 @@ module Gori
     # Keyed on the suffix that was actually written (not on the media type), since the suffix
     # is what the desktop dispatches on and therefore what decides whether a script engine is
     # involved at all. SVG is in the list on purpose: it is an XML image that carries
-    # `<script>`, and a browser handed one as a top-level document executes it.
+    # `<script>`, and a browser handed one as a top-level document executes it. `.xml` for the
+    # same reason: a browser renders a top-level XML document, and an element in the XHTML
+    # namespace inside it (`<x:script xmlns:x="http://www.w3.org/1999/xhtml">`) runs.
     def self.executes?(result : Result) : Bool
       case File.extname(result.path)
-      when ".html", ".xhtml", ".svg" then true
-      else                                false
+      when ".html", ".xhtml", ".svg", ".xml" then true
+      else                                        false
       end
     end
 
@@ -242,8 +247,8 @@ module Gori
     # write that triggered the sweep — the operator asked to SEE something, not to tidy up.
     #
     # Every entry, not only the regular files. gori writes files, but the DESKTOP writes back:
-    # hand macOS a `.zip` preview and `open` passes it to Archive Utility, which unpacks the
-    # tree beside it, IN here. A `File.file?` filter dropped those directories out of the sweep
+    # hand macOS an archive preview and `open` passes it to Archive Utility, which unpacks the
+    # tree beside it, IN here (why archives no longer get their own suffix, see `SUFFIXES`). A `File.file?` filter dropped those directories out of the sweep
     # entirely, so they were never counted against `keep` and never deleted — a dir per archive
     # preview, accumulating under GORI_HOME forever, while the doc promises a bounded sweep.
     def self.prune(root : String, keep : Int32 = KEEP) : Nil
