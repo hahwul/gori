@@ -112,3 +112,13 @@ describe "gori run import" do
     text.should contain("10 of 10 did NOT commit (store busy or unwritable)")
   end
 end
+
+# An importer's refusal quotes the file's own bytes (a WSDL `transport`, an XML element name —
+# `&#27;` decodes to ESC), so the CLI prints it and the notes through `term_line`.
+describe "gori run import refusal output" do
+  it "prints the refusal and the notes terminal-safe" do
+    code = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "import.cr"))
+    code.should contain("abort \"gori run import: \#{CLI::Output.term_line(ex.message.to_s)}\"")
+    code.should contain("note: \#{CLI::Output.term_line(n)}")
+  end
+end

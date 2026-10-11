@@ -392,9 +392,16 @@ module Gori
         # appending it here read `minimized: removed 2 cookies, 3 params (8 sends) · 8 sends`.
         # The JSON form keeps its own `sends` field — a script should not have to parse prose.
         STDERR.puts report.note
-        report.removed.each { |r| STDERR.puts "  - [#{r.kind.to_s.downcase}] #{r.label}" }
+        # The labels and the wire are the TARGET's bytes (a cookie name, a header value). On a
+        # live terminal they are badged like every other captured text view; piped, the wire
+        # stays byte-exact — the same split `gori run decoder` draws.
+        report.removed.each { |r| STDERR.puts "  - [#{r.kind.to_s.downcase}] #{CLI::Output.term_line(r.label)}" }
         STDERR.puts "saved back to session ##{id}" if applied
-        CLI::Output.write_value(STDOUT, wire, STDOUT.tty?)
+        if STDOUT.tty?
+          CLI::Output.write_value(STDOUT, CLI::Output.term_safe_multiline(String.new(wire)), true)
+        else
+          CLI::Output.write_value(STDOUT, wire, false)
+        end
       end
     end
   end

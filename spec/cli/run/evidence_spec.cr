@@ -183,3 +183,11 @@ describe "gori run evidence" do
     end
   end
 end
+
+# The label is the captured URL — a target's bytes — and the list/show views already printed it
+# through `term_line`; the freeze confirmation printed it raw.
+describe "gori run evidence label output" do
+  it "never interpolates Evidence.label raw" do
+    freeze_code.should_not contain("\#{Evidence.label(")
+  end
+end

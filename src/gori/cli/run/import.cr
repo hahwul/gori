@@ -89,7 +89,7 @@ module Gori
             Import.import_file(store, kind, path, Gori::FlowSource::Surface::Cli)
           end
         rescue ex : Gori::Error
-          abort "gori run import: #{ex.message}"
+          abort "gori run import: #{CLI::Output.term_line(ex.message.to_s)}"
         ensure
           store.close
           spool.try { |spooled| File.delete?(spooled) }
@@ -190,7 +190,7 @@ module Gori
         # What the source said that the import could not carry (a curl command's ignored
         # flags). On STDERR in text mode so the one result line stays the STDOUT a script
         # reads; inside the object in JSON mode.
-        result.notes.each { |n| STDERR.puts "gori run import: note: #{n}" } unless format == :json
+        result.notes.each { |n| STDERR.puts "gori run import: note: #{CLI::Output.term_line(n)}" } unless format == :json
       end
 
       # Mirrors the TUI Import toast wording (runner.cr#apply_import) so the CLI and TUI

@@ -79,7 +79,7 @@ module Gori
             puts(JSON.build { |j| j.object { MCP::Serialize.evidence_meta(j, meta); j.field "linked", link } })
           else
             puts "Frozen evidence ##{id} on issue ##{iid} from #{meta.source_label}#{link ? " (linked)" : ""}: " \
-                 "#{Evidence.label(meta)} → #{Evidence.outcome(meta)}, #{evidence_bytes_text(meta.bytes)}"
+                 "#{Output.term_line(Evidence.label(meta))} → #{Evidence.outcome(meta)}, #{evidence_bytes_text(meta.bytes)}"
             puts "  sha256 req #{meta.request_sha256}"
             puts "  sha256 res #{meta.response_sha256 || "— (no response)"}"
           end
