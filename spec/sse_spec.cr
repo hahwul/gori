@@ -121,15 +121,14 @@ describe Gori::Sse do
       (GC.stats.total_bytes - before).should be < 1024 * 1024
     end
 
-    it "caps one event's data and says so, then keeps parsing" do
+    it "caps one event's data, then keeps parsing" do
       line = "data: " + "x" * 1023 + "\n"
       body = line * (Gori::Sse::MAX_EVENT_DATA // 1024 + 8) + "\ndata: next\n\n"
       events = parse(body)
       events.size.should eq(2)
-      events[0].truncated.should be_true
       events[0].data.bytesize.should be <= Gori::Sse::MAX_EVENT_DATA
+      events[0].data.bytesize.should be > Gori::Sse::MAX_EVENT_DATA - 1024
       events[1].data.should eq("next")
-      events[1].truncated.should be_false
     end
   end
 

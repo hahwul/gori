@@ -21,21 +21,19 @@ module Gori
     MAX_EVENTS = 100_000
 
     # Ceiling on one event's `data`, the ceiling every body projection already shares
-    # (`Pretty::MAX_OUT_PRETTY`). Data lines past it are dropped and the event says so
-    # (`truncated`); the rest of the stream still parses.
+    # (`Pretty::MAX_OUT_PRETTY`). Data lines past it are dropped; the rest of the stream
+    # still parses.
     MAX_EVENT_DATA = 8 * 1024 * 1024
 
     # One dispatched SSE event. `type` is the `event:` field (nil = the default
     # "message"); `data` is the joined data lines with no trailing newline; `id`
     # is the last-event-id in effect at dispatch; `retry` is the `retry:`
-    # reconnection time (ms) if the block carried one. `truncated` marks `data`
-    # cut at MAX_EVENT_DATA.
+    # reconnection time (ms) if the block carried one.
     record Event,
       type : String?,
       data : String,
       id : String?,
-      retry : Int32?,
-      truncated : Bool = false
+      retry : Int32?
 
     def self.sse?(content_type : String?) : Bool
       MediaType.essence(content_type) == "text/event-stream"
@@ -151,7 +149,7 @@ module Gori
       # A block emits an event only if it carried at least one `data` field.
       def flush(events : Array(Event)) : Nil
         if @data_lines > 0 || @truncated
-          events << Event.new(@type, Utf8.text(@data.to_slice), @last_id, @retry, @truncated)
+          events << Event.new(@type, Utf8.text(@data.to_slice), @last_id, @retry)
         end
         @data.clear
         @data_lines = 0
