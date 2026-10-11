@@ -258,6 +258,7 @@ module Gori
           exec_fuzz_templates:  inventory.exec_fuzz_templates,
           exec_decoder_tabs:    inventory.exec_decoder_tabs,
           exec_env_vars:        inventory.exec_env_vars,
+          local_file_paths:     inventory.local_file_paths,
         }
         j.field "import_safety", {
           disabled_pipe_rules:         inventory.disabled_pipe_rules,
@@ -268,6 +269,7 @@ module Gori
           reset_global_overrides:      inventory.reset_global_overrides,
           disabled_auto_refresh_slots: inventory.disabled_auto_refresh_slots,
           reset_probe_mode:            inventory.reset_probe_mode.try(&.label),
+          reset_grpc_descriptors:      inventory.reset_grpc_descriptors,
         }
         j.field "disclosure", ProjectArchive.disclosure(inventory)
       end

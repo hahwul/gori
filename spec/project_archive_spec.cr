@@ -1050,4 +1050,32 @@ describe Gori::ProjectArchive do
       end
     end
   end
+
+  # A stored wordlist path names a file on the author's machine that this one reads into the
+  # requests a tab sends; the descriptor path is read on every open, so it is cleared.
+  it "names local-file wordlist paths and clears the gRPC descriptor path on import" do
+    with_archive_project do |registry, project, store, root|
+      store.insert_fuzz_session("https://archive.test", "GET /§ HTTP/1.1\r\n\r\n", false, nil,
+        %({"sets":[{"kind":"file","value":"/home/someone/.aws/credentials"},{"kind":"list","value":"a"}]}), nil, 0)
+      store.insert_miner_session("https://archive.test", "GET / HTTP/1.1\r\n\r\n".to_slice, false, nil,
+        %({"user_wordlist":"params.txt"}), nil, 0)
+      store.set_setting(Gori::Protobuf::Schemas::SETTING_KEY, "/home/someone/api.desc")
+      store.flush
+      prepared = Gori::ProjectArchive.prepare_import(export_archive(project, File.join(root, "files.gori")))
+      begin
+        prepared.inventory.local_file_paths.should eq(["/home/someone/.aws/credentials", "params.txt"])
+        disclosure = Gori::ProjectArchive.disclosure(prepared.inventory)
+        disclosure.should contain(%(2 Fuzzer or Miner wordlist paths read a local file into the requests that tab sends when run: "/home/someone/.aws/credentials", "params.txt".))
+        disclosure.should contain("clear the gRPC descriptor-set path")
+        copied = Gori::Store.open(prepared.import_into(registry, "Files copy").db_path)
+        begin
+          copied.setting(Gori::Protobuf::Schemas::SETTING_KEY).should be_nil
+        ensure
+          copied.close
+        end
+      ensure
+        prepared.close
+      end
+    end
+  end
 end

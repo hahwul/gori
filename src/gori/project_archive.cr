@@ -12,6 +12,7 @@ require "./settings/network"
 require "./settings/project_network"
 require "./probe/mode"
 require "./store/schema"
+require "./protobuf/schemas"
 
 module Gori
   # A portable project archive. The archive is a ZIP containing exactly a manifest and a
@@ -68,7 +69,9 @@ module Gori
       exec_repeaters : Int32,
       exec_fuzz_templates : Int32,
       exec_decoder_tabs : Int32,
-      exec_env_vars : Int32 do
+      exec_env_vars : Int32,
+      local_file_paths : Array(String),
+      reset_grpc_descriptors : Bool do
       def summary : String
         "#{flows} #{flows == 1 ? "flow" : "flows"}, " \
         "#{session_slots} #{session_slots == 1 ? "session slot" : "session slots"}, " \
@@ -86,7 +89,25 @@ module Gori
                    "turn off automatic refresh on #{disabled_auto_refresh_slots} session " \
                    "#{disabled_auto_refresh_slots == 1 ? "slot" : "slots"}"
         reset_probe_mode.try { |mode| sentence += "; and reset Probe mode from #{mode.label} to passive" }
+        sentence += "; and clear the gRPC descriptor-set path, a local file read when the project opens" if reset_grpc_descriptors
         sentence
+      end
+
+      # Stored Fuzzer `file` sets and Miner wordlists name a path on the AUTHOR's machine that
+      # this one opens when that tab runs, and reads into requests sent to the tab's target. Like
+      # `exec:`, they act only on an explicit run, so they are disclosed (by path, so the operator
+      # can judge the file) rather than rewritten. A path that is not plain printable text is
+      # named only as such: it is archive-authored and this sentence reaches a terminal.
+      LISTED_PATHS = 5
+
+      def local_files : String?
+        return nil if local_file_paths.empty?
+        shown = local_file_paths.first(LISTED_PATHS).map do |path|
+          path.matches?(/\A[\x20-\x7e]{1,200}\z/) ? path.inspect : "(an unprintable path)"
+        end
+        more = local_file_paths.size - shown.size
+        "#{local_file_paths.size} Fuzzer or Miner wordlist #{local_file_paths.size == 1 ? "path reads" : "paths read"} " \
+        "a local file into the requests that tab sends when run: #{shown.join(", ")}#{more > 0 ? " and #{more} more" : ""}."
       end
 
       # Stored `exec:` chain steps stay as the operator-visible bytes they are; they run a local
@@ -421,6 +442,7 @@ module Gori
     def self.disclosure(inventory : Inventory) : String
       "Contains the complete project database: #{inventory.summary}. " \
       "Import will #{inventory.import_safety}. #{inventory.exec_chains.try { |text| "#{text} " }}" \
+      "#{inventory.local_files.try { |text| "#{text} " }}" \
       "The archive is unredacted and may contain " \
       "captured request/response credentials, session and env values, and upstream proxy credentials. " \
       "OAST sessions and provider tokens, plus Authorize identities, remain in the imported copy; " \
@@ -580,11 +602,37 @@ module Gori
       exec_env_vars = setting(conn, Env::PROJECT_VARS_KEY).try do |raw|
         Env.parse_vars_json(raw).count { |(_, value)| exec_text?(value) }
       end || 0
+      reset_grpc_descriptors = !setting(conn, Protobuf::Schemas::SETTING_KEY).try(&.strip.presence).nil?
       Inventory.new(flows, slots, env_vars, upstream_credentials,
         disabled_pipe_rules, disabled_exec_probe_rules, disabled_body_file_stubs,
         reset_network_settings, reset_host_overrides, reset_global_overrides,
         disabled_auto_refresh_slots, reset_probe_mode,
-        exec_repeaters, exec_fuzz_templates, exec_decoder_tabs, exec_env_vars)
+        exec_repeaters, exec_fuzz_templates, exec_decoder_tabs, exec_env_vars,
+        local_file_paths(conn, tables), reset_grpc_descriptors)
+    end
+
+    # Every stored path a tab opens when run: a Fuzzer payload set of kind `file`
+    # (`FuzzerView#config_json`) and a Miner's `user_wordlist` (`MinerView`). Tolerant, like
+    # the other counts: a config this build cannot parse names nothing.
+    private def self.local_file_paths(conn : DB::Connection, tables : Array(String)) : Array(String)
+      paths = [] of String
+      if tables.includes?("fuzz_sessions")
+        conn.query_each("SELECT CAST(config AS BLOB) FROM fuzz_sessions") do |rs|
+          sets = rs.read(Bytes?).try { |b| json?(String.new(b)).try(&.as_h?).try(&.["sets"]?).try(&.as_a?) }
+          sets.try &.each do |set|
+            o = set.as_h? || next
+            next unless o["kind"]?.try(&.as_s?) == "file"
+            o["value"]?.try(&.as_s?).try(&.presence).try { |path| paths << path }
+          end
+        end
+      end
+      if tables.includes?("miner_sessions")
+        conn.query_each("SELECT CAST(config AS BLOB) FROM miner_sessions") do |rs|
+          rs.read(Bytes?).try { |b| json?(String.new(b)).try(&.as_h?).try(&.["user_wordlist"]?).try(&.as_s?).try(&.presence) }
+            .try { |path| paths << path }
+        end
+      end
+      paths
     end
 
     # A Fuzzer session's template, or its gRPC field chains (`role¦exec:…`,
@@ -792,6 +840,10 @@ module Gori
               # Probe mode is authorization, not configuration: an archive must not arm active
               # probes that fire at the stored flows the moment the copy is opened.
               conn.exec("DELETE FROM settings WHERE key = ?", Probe::MODE_SETTING_KEY)
+              # Read from disk every time the project opens, unasked: a path on the author's
+              # machine names, on this one, whatever file the operator never chose. Machine-local,
+              # like the host overrides; the importer points it at their own descriptors.
+              conn.exec("DELETE FROM settings WHERE key = ?", Protobuf::Schemas::SETTING_KEY)
               disable_slot_auto_refresh(conn)
             end
             conn.exec("DELETE FROM host_overrides") if table_exists?(conn, "host_overrides")
