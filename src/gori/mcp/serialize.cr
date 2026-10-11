@@ -829,8 +829,9 @@ module Gori
                                 include_sensitive : Bool = false,
                                 body_cap : Int32 = MAX_TEXT, body_omit : Bool = false,
                                 redaction : RedactionNote? = nil, body_more : {String, String}? = nil,
-                                *, interims : Store::Interims? = nil, ws_total : Int32? = nil) : String
-        JSON.build { |j| flow_detail(j, detail, ws_msgs, include_sensitive, body_cap, body_omit, redaction, body_more, interims: interims, ws_total: ws_total) }
+                                *, interims : Store::Interims? = nil, ws_total : Int32? = nil,
+                                ws_socket_total : Int32? = nil) : String
+        JSON.build { |j| flow_detail(j, detail, ws_msgs, include_sensitive, body_cap, body_omit, redaction, body_more, interims: interims, ws_total: ws_total, ws_socket_total: ws_socket_total) }
       end
 
       # `body_more` is the {request, response} pointer a display-capped body carries
@@ -840,7 +841,8 @@ module Gori
                            include_sensitive : Bool = false,
                            body_cap : Int32 = MAX_TEXT, body_omit : Bool = false,
                            redaction : RedactionNote? = nil, body_more : {String, String}? = nil,
-                           *, interims : Store::Interims? = nil, ws_total : Int32? = nil) : Nil
+                           *, interims : Store::Interims? = nil, ws_total : Int32? = nil,
+                           ws_socket_total : Int32? = nil) : Nil
         row = detail.row
         j.object do
           j.field "id", row.id
@@ -908,7 +910,7 @@ module Gori
             source_size: detail.response_body_truncated? ? detail.response_wire_body_size : nil,
             more: body_more.try(&.[1]))
           emit_sse_events(j, detail)
-          emit_ws_messages(j, ws_msgs, ws_total || ws_msgs.size)
+          emit_ws_messages(j, ws_msgs, ws_total || ws_msgs.size, ws_socket_total)
           emit_grpc_messages(j, "request_grpc_messages", detail.request_head, detail.request_body,
             detail.row.target, request: true)
           emit_grpc_messages(j, "response_grpc_messages", detail.response_head, detail.response_body,
@@ -1059,11 +1061,18 @@ module Gori
       # frames inline their (clipped) payload, binary frames report a size only.
       # `count` is the true total — `total`, for a caller that read only the head of the log —
       # and `messages` is the first WS_MSGS_MAX of them.
-      def self.emit_ws_messages(j : JSON::Builder, msgs : Array(Store::WsMessage), total : Int32 = msgs.size) : Nil
-        return if msgs.empty?
+      #
+      # `socket_total` is every message on the socket when the caller narrowed the log:
+      # `count` is then the MATCHED total and `ws_total` the socket's, so a short list is never
+      # mistaken for the whole transcript — and a query that matched nothing still says so, even
+      # on a flow with no socket at all (`0 of 0`).
+      def self.emit_ws_messages(j : JSON::Builder, msgs : Array(Store::WsMessage), total : Int32 = msgs.size,
+                                socket_total : Int32? = nil) : Nil
+        return if msgs.empty? && socket_total.nil?
         j.field "ws_messages" do
           j.object do
             j.field "count", total
+            socket_total.try { |n| j.field "ws_total", n }
             j.field "truncated", total > WS_MSGS_MAX
             j.field "messages" do
               j.array do

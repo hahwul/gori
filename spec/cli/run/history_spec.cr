@@ -1480,3 +1480,22 @@ describe "gori run history — the --limit cut" do
     Gori::CLI::Run.limit_probe(Int32::MAX).should eq(Int32::MAX)
   end
 end
+
+# #1588 — `--ws-match` narrows the transcript `show` fetches, with the QL `ws` term's predicate.
+describe "gori run show --ws-match" do
+  it "fetches only the matching messages" do
+    with_store do |store|
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "ws.test", port: 443,
+        method: "GET", target: "/s", http_version: "HTTP/1.1",
+        head: "GET /s HTTP/1.1\r\nHost: ws.test\r\n\r\n".to_slice, body: nil,
+        source: Gori::FlowSource::Kind::Proxy))
+      store.insert_ws_message(id, "out", 1, "login token=abc".to_slice)
+      store.insert_ws_message(id, "in", 1, "welcome".to_slice)
+      detail = store.get_flow(id)
+      Gori::CLI::Run.show_ws_messages(store, detail, Gori::QL.ws_match("ws~token=\\w+"))
+        .map { |m| String.new(m.payload) }.should eq(["login token=abc"])
+      Gori::CLI::Run.show_ws_messages(store, detail).size.should eq(2)
+    end
+  end
+end

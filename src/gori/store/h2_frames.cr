@@ -94,25 +94,37 @@ module Gori
 
     # The flow's captured WS message log. With `limit`, returns the MOST RECENT
     # `limit` messages (ascending for display) to bound the detail view; nil = all.
-    def ws_messages(flow_id : Int64, limit : Int32? = nil) : Array(WsMessage)
+    # `match` (a `QL.ws_message_cond` / `QL.ws_match` clause) narrows the log in SQL, so the
+    # narrowed list reaches messages older than any display window.
+    def ws_messages(flow_id : Int64, limit : Int32? = nil, match : QL::SqlTerm? = nil) : Array(WsMessage)
       cols = WS_MESSAGE_COLS
-      q, args = if lim = limit
-                  {"SELECT * FROM (SELECT #{cols} FROM ws_messages WHERE flow_id = ? ORDER BY id DESC LIMIT ?) ORDER BY id",
-                   [flow_id, lim.to_i64] of DB::Any}
-                else
-                  {"SELECT #{cols} FROM ws_messages WHERE flow_id = ? ORDER BY id", [flow_id] of DB::Any}
-                end
+      where, args = ws_where(flow_id, match)
+      q = if lim = limit
+            args << lim.to_i64
+            "SELECT * FROM (SELECT #{cols} FROM ws_messages WHERE #{where} ORDER BY id DESC LIMIT ?) ORDER BY id"
+          else
+            "SELECT #{cols} FROM ws_messages WHERE #{where} ORDER BY id"
+          end
       read_ws_messages(q, args)
+    end
+
+    # `flow_id = ?`, ANDed with a `match` clause when there is one.
+    private def ws_where(flow_id : Int64, match : QL::SqlTerm?) : {String, Array(DB::Any)}
+      args = [flow_id] of DB::Any
+      return {"flow_id = ?", args} unless match
+      args.concat(match[1])
+      {"flow_id = ? AND #{match[0]}", args}
     end
 
     # Frames on a flow with id AFTER `after_id`, OLDEST-first, up to `limit`. Lets the Probe WS
     # rescan page forward from its per-flow high-water-mark and cover every frame exactly once,
     # even when more than a full window accumulated unscanned (a dropped-event burst) or the flow
     # was evicted from the analyzed-set and re-scanned.
-    def ws_messages_after(flow_id : Int64, after_id : Int64, limit : Int32) : Array(WsMessage)
-      read_ws_messages(
-        "SELECT #{WS_MESSAGE_COLS} FROM ws_messages WHERE flow_id = ? AND id > ? ORDER BY id LIMIT ?",
-        [flow_id, after_id, limit.to_i64] of DB::Any)
+    def ws_messages_after(flow_id : Int64, after_id : Int64, limit : Int32,
+                          match : QL::SqlTerm? = nil) : Array(WsMessage)
+      where, args = ws_where(flow_id, match)
+      args << after_id << limit.to_i64
+      read_ws_messages("SELECT #{WS_MESSAGE_COLS} FROM ws_messages WHERE #{where} AND id > ? ORDER BY id LIMIT ?", args)
     end
 
     # Frames on a REPEATER tab with id AFTER `after_id`, OLDEST-first, up to `limit` — the
@@ -145,8 +157,9 @@ module Gori
       read_ws_messages(q, args)
     end
 
-    def count_ws_messages(flow_id : Int64) : Int32
-      @db.scalar("SELECT COUNT(*) FROM ws_messages WHERE flow_id = ?", flow_id).as(Int64).to_i
+    def count_ws_messages(flow_id : Int64, match : QL::SqlTerm? = nil) : Int32
+      where, args = ws_where(flow_id, match)
+      @db.scalar("SELECT COUNT(*) FROM ws_messages WHERE #{where}", args: args).as(Int64).to_i
     end
   end
 end

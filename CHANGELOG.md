@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- QL: `ws:`/`ws~` finds flows by their WebSocket message payloads, and History's MESSAGES pane, `gori run show --ws-match` and MCP `get_flow` `ws_query` narrow one transcript (#1588)
+
 ## v0.8.1
 
 - MCP: `--pin-project`, `switch_project` with `unbind:true`, a joined `url` on flow and sitemap rows, and a **Run local commands** permission (#1508, #1556, #1558, #1560, #1584)

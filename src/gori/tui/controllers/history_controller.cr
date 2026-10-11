@@ -1136,5 +1136,9 @@ module Gori::Tui
     def toggle_unicode_decoding : Nil
       @history.toggle_unicode_decoding
     end
+
+    def toggle_ws_narrow : Nil
+      @host.status(@history.toggle_ws_narrow(@host.session.store))
+    end
   end
 end

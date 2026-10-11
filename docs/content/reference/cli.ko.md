@@ -252,6 +252,8 @@ gori run show <flow-id> --format raw
 
 `--headers-only`와 `--max-body=BYTES`는 `text`와 `json` 뷰를 간추립니다. `--headers-only`는 각 본문을 크기를 알려주는 한 줄로 바꾸고(`[body omitted by --headers-only: 149504 bytes]`; JSON에서는 body 객체가 `encoding`과 `size`를 유지한 채 `omitted: true`를 얻습니다), `--max-body`는 디코드된 각 본문의 앞쪽 BYTES바이트를 찍은 뒤 `[… truncated by --max-body: showing 2048 of 149504 bytes]`를 붙입니다(JSON에서는 `text`/`base64`가 그 앞부분을 담고, `size`는 전체 크기, `shown_size`는 보여준 부분, `truncated`는 true입니다). 둘 중 하나만 있어도 본문에서 파생되는 섹션(디코드 뷰, gRPC 메시지, WebSocket 프레임, SSE 이벤트)은 빠집니다. 트랜스크립트는 그래도 개수와 함께 이름이 남습니다(`=== SSE EVENTS (40) — not printed under --max-body ===`, 또는 `{"count": 40, "omitted": true}`). 이 둘은 전체 메시지를 그대로 쓰는 다른 형식들과 함께 쓸 수 없고, 서로도 함께 쓸 수 없습니다.
 
+`--ws-match=QUERY`는 트랜스크립트를 싣는 모든 형식에서 매칭되는 WebSocket 메시지만 찍습니다. `ws:needle`(대소문자 무시), `ws~regex`, 또는 접두어 없는 needle을 받고, [`ws:` 쿼리 필드](/ko/reference/query-language/#websocket-messages)와 똑같이 매칭합니다. 소켓의 메시지 중 몇 개를 남겼는지는 STDERR 한 줄로 알려 줍니다.
+
 #### 안전한 증거 내보내기 {#safe-evidence-export}
 
 `--redact [PROFILE]`는 캡처한 바이트 대신 플로우의 **정제된 파생본**을 씁니다. [리댁션 프로파일](#run-redact)이 지목한 값이 키가 붙은 자리표시자 `[REDACTED:3f1c9ab4]`로 바뀝니다. 같은 값은 같은 태그를 받으므로, 읽는 사람은 둘 중 어느 것도 보지 않은 채로 "요청의 토큰이 응답의 토큰과 같다"는 사실만 확인할 수 있습니다. 태그는 값의 해시가 아니라 설치마다 한 번 만들어지는 비밀 키로 계산한 HMAC입니다. 네 자리 PIN이나 워드리스트에 있는 비밀번호의 잘린 해시는 몇 밀리초면 복원되고, 그러면 자리표시자 자체가 유출이 되기 때문입니다.

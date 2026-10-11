@@ -315,6 +315,7 @@ describe Gori::Colormarker do
       Gori::Colormarker.row_answerable?("host:acme status:5xx -method:GET").should be_true
       Gori::Colormarker.row_answerable?("login").should be_true # bare free text names no field
       Gori::Colormarker.row_answerable?("body:secret").should be_false
+      Gori::Colormarker.row_answerable?("ws:secret").should be_false    # a row has no transcript
       Gori::Colormarker.row_answerable?("host~^api\\.").should be_false # only QL implements ~
       Gori::Colormarker.row_answerable?("size:>1k").should be_false
       with_globals do

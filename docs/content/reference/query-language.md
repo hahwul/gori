@@ -25,6 +25,7 @@ Match a field with `field:value` (substring or exact, depending on the field):
 | `dur` | Response time in milliseconds |
 | `header` | Substring over the head (request + response headers) |
 | `body` | Full-text match over bodies (trigram FTS index) |
+| `ws` | A WebSocket flow whose socket carried a TEXT or BINARY message containing the value, in either direction ([below](#websocket-messages)) |
 | `stub` | `true` / `false`. Flows gori answered itself from a [short-circuit rule](/guide/proxy/#short-circuit), with no origin involved |
 | `static` | `true` / `false`. Images, fonts and audio/video, by response Content-Type (by path extension when there is none). Not SVG, CSS, JS or an image proxy (`?url=`), and only a successful fetch (2xx or 304). `-static:true` is the [hide-static lens](/guide/proxy/#hide-static) |
 | `scope` | `in` / `out`. The project's scope rules ([below](#scope-in-scope-out)) |
@@ -157,7 +158,7 @@ status:>=4xx        a class shorthand takes a comparison too
 
 ## Regular Expressions
 
-Use `~` for a regex match on `host`, `path`, `url`, `method`, `scheme`, `header`, or `body` (and the `req.`/`resp.` sides of the last two). The `~` is its own field/value separator. Do **not** put a colon before it. Matching is case-sensitive; prefix `(?i)` for case-insensitive.
+Use `~` for a regex match on `host`, `path`, `url`, `method`, `scheme`, `header`, `body` or `ws` (and the `req.`/`resp.` sides of `header` and `body`). The `~` is its own field/value separator. Do **not** put a colon before it. Matching is case-sensitive; prefix `(?i)` for case-insensitive.
 
 ```text
 path~/admin/
@@ -168,6 +169,28 @@ method~^P(OST|UT|ATCH)$                every write verb in one term
 
 A `~` on any other field (`status`, `size`, `dur`, `proto`, …) has no regex form: the term is
 dropped and reported, the same way a bad numeric value is, rather than searched as text.
+
+## WebSocket Messages {#websocket-messages}
+
+`ws:needle` matches a flow whose socket carried a message containing `needle` (case-insensitive);
+`ws~regex` matches by regex. Both directions are searched, TEXT and BINARY payloads alike, as the
+stored bytes: a NUL earlier in a payload does not hide a later hit. Ping, pong and close frames are
+not messages and never match, and neither do the `[gori] ` notice rows gori writes about a socket.
+`-ws:x` keeps every flow that carried no such message, including flows that are not sockets at all.
+
+```text
+ws:admin                               which socket mentioned admin?
+proto:ws ws~(?i)token=[a-f0-9]{32}     a token in any frame
+```
+
+There is no index behind `ws:`, so it scans the transcript of every socket in the project. Capture
+stays as fast as before; the cost is paid by the query that uses the term.
+
+To narrow **one** flow's transcript instead: in History's MESSAGES pane, search with `^F` and pick
+**Narrow messages to ^F query** from the space menu (again to show all); `gori run show <id>
+--ws-match=QUERY`; or MCP `get_flow` with `ws_query`. Each takes `ws:needle`, `ws~regex` or a bare
+needle, matches exactly as the QL term does, and reaches messages older than the window those
+surfaces otherwise load.
 
 ## Combining Terms
 
@@ -224,7 +247,8 @@ Every filter bar shares the boolean grammar above (`AND`/`OR`/`NOT`, `-`, parent
 A hold gate and an extract-rule condition evaluate one live message, before it is captured, so
 they refuse every History field that message cannot answer rather than guess: `scope:` (a
 project's scope rules are not part of a message), `size:`, `reqsize:`, `respsize:` and `dur:`
-(the exchange has not finished), `stub:`, `static:`, `src:` and `cache:`, and the one-sided
+(the exchange has not finished), `stub:`, `static:`, `src:`, `cache:` and `ws:` (a gate holds
+one message, not a transcript; its `body:` already means that message), and the one-sided
 `req.`/`resp.` spellings. A refused field is never searched as free text instead. The
 condition rows say so where you type them, an extract rule carrying one will not save, and MCP
 `intercept_set_filter` and `gori run intercept filter` refuse the condition.
