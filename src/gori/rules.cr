@@ -820,7 +820,8 @@ module Gori
     private def stub_matches?(rule : Store::MatchRule, text : String) : Bool
       if rule.match_kind.regex?
         begin
-          SafeRegexp.compile(rule.pattern).matches?(text)
+          rx = SafeRegexp.compile(rule.pattern)
+          SafeRegexp.within_budget(rule.pattern, text.bytesize) { rx.matches?(text) }
         rescue
           false
         end
@@ -1118,7 +1119,8 @@ module Gori
       in Store::RuleOp::Replace
         if rule.match_kind.regex?
           begin
-            text.gsub(SafeRegexp.compile(rule.pattern), repl)
+            rx = SafeRegexp.compile(rule.pattern)
+            SafeRegexp.within_budget(rule.pattern, text.bytesize) { text.gsub(rx, repl) }
           rescue
             text
           end
@@ -1215,7 +1217,11 @@ module Gori
       out =
         if rule.match_kind.regex?
           begin
-            text.gsub(SafeRegexp.compile(rule.pattern)) { |m| run.call(m) }
+            # The matches first, under the regex budget; the hooks after, outside it, since a
+            # hook yields the fiber and its run time is not the pattern's.
+            rx = SafeRegexp.compile(rule.pattern)
+            spans = SafeRegexp.within_budget(rule.pattern, text.bytesize) { text.scan(rx) }
+            splice(text, spans) { |m| run.call(m) }
           rescue
             text
           end
@@ -1236,6 +1242,21 @@ module Gori
         end
       end
       out
+    end
+
+    # `text.gsub(regex) { … }` over matches already collected by `String#scan`, which steps past
+    # an empty match the way `gsub` does.
+    private def splice(text : String, spans : Array(Regex::MatchData), & : String -> String) : String
+      return text if spans.empty?
+      String.build(text.bytesize) do |io|
+        last = 0
+        spans.each do |m|
+          io.write(text.unsafe_byte_slice(last, m.byte_begin - last))
+          io << yield m[0]
+          last = m.byte_end
+        end
+        io.write(text.unsafe_byte_slice(last))
+      end
     end
 
     # This rule's command as an ARGV, with `$KEY` resolved INSIDE each element.
@@ -1882,7 +1903,7 @@ module Gori
         # test mean "the whole host", the way the DNS-label branch below already does.
         rx = "\\A#{Regex.escape(g).gsub("\\*", ".*")}\\z"
         begin
-          SafeRegexp.compile(rx).matches?(h)
+          SafeRegexp.within_budget(glob, h.bytesize) { SafeRegexp.compile(rx).matches?(h) }
         rescue
           false
         end
@@ -1984,7 +2005,8 @@ module Gori
     # says so in the pane. A pipe rule is tried on the wire, not in a preview.
     private def pattern_matches?(rule : Store::MatchRule, text : String) : Bool
       if rule.match_kind.regex?
-        !!SafeRegexp.compile(rule.pattern).match(text)
+        rx = SafeRegexp.compile(rule.pattern)
+        SafeRegexp.within_budget(rule.pattern, text.bytesize) { rx.matches?(text) }
       else
         text.includes?(rule.pattern)
       end

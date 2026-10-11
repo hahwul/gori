@@ -4930,6 +4930,13 @@ applied to remote-chosen identifiers: they are refused, not encoded.
 
 Not by PCRE2's `match_limit`: it resets at every start position, so it bounds a scan only to
 subject length × limit, and lowering it breaks ordinary backtracking. `SafeRegexp.budgeted`
-prepends a start-of-attempt callout that aborts a scan after 50 ms with a `Regex::Error`, which
-every caller already reads as no match. Scope regex rules are exempt on purpose: a tripped exclude
-would fail open on Layer 2.
+puts a callout at the start of every attempt (after any leading `(*UTF)`-style option, which
+PCRE2 only reads at the very front), and each call site runs its match inside
+`SafeRegexp.within_budget`, which arms a deadline for the current fiber: 50 ms plus 50 ms per MiB
+of subject, so a legitimate Replace over a 16 MiB body completes while a pathological 64 KiB scan
+still stops near 50 ms. Past the deadline the callout aborts with a `Regex::Error`, which every
+caller already reads as no match. Arming is explicit because inferring scans from callout
+arguments let one scan inherit another's expired deadline and let a pattern's own `(?C)` reset
+it: the callout only reads the deadline, and with nothing armed it continues. A gsub whose block
+yields (a Pipe hook) collects its matches under the budget and runs the block outside it. Scope
+regex rules are exempt on purpose: a tripped exclude would fail open on Layer 2.

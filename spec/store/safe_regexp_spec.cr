@@ -305,9 +305,13 @@ describe Gori::SafeRegexp do
   end
 end
 
-# The match budget (`SafeRegexp.budgeted`). PCRE2's match_limit resets at every start position,
-# so without it one operator-authored pattern over a peer-shaped body could hold the single
-# scheduler thread for seconds per call.
+# The match budget (`SafeRegexp.budgeted` + `within_budget`). PCRE2's match_limit resets at every
+# start position, so without it one operator-authored pattern over a peer-shaped body could hold
+# the single scheduler thread for seconds per call.
+private def budgeted_run(pattern : String, subject : String, &)
+  Gori::SafeRegexp.within_budget(pattern, subject.bytesize) { yield }
+end
+
 describe "Gori::SafeRegexp.budgeted" do
   # Nested alternation under a failing lookahead: every start position backtracks ~2^n times
   # and none of them reaches PCRE2's per-start limit, so unbudgeted this runs for minutes.
@@ -317,14 +321,15 @@ describe "Gori::SafeRegexp.budgeted" do
   it "stops a pathological scan near its budget and reports it as a regex error" do
     rx = Gori::SafeRegexp.budgeted(slow)
     t = Time.instant
-    expect_raises(Regex::Error) { rx.matches?(subject) }
+    expect_raises(Regex::Error) { budgeted_run(slow, subject) { rx.matches?(subject) } }
     (Time.instant - t).should be < 1.second
   end
 
   it "bounds a whole gsub, not each of the calls it makes" do
-    rx = Gori::SafeRegexp.budgeted("(?:(?:[\\s\\S]|[\\s\\S]){22}(?!))?[\\s\\S]")
+    p = "(?:(?:[\\s\\S]|[\\s\\S]){22}(?!))?[\\s\\S]"
+    rx = Gori::SafeRegexp.budgeted(p)
     t = Time.instant
-    expect_raises(Regex::Error) { subject.gsub(rx, "x") }
+    expect_raises(Regex::Error) { budgeted_run(p, subject) { subject.gsub(rx, "x") } }
     (Time.instant - t).should be < 1.second
   end
 
@@ -334,25 +339,131 @@ describe "Gori::SafeRegexp.budgeted" do
      "(?x) u 1 \\d # trailing comment", ".*com\"\\}$", "zzz", ""].each do |p|
       bare = Regex.new(p)
       rx = Gori::SafeRegexp.budgeted(p)
-      rx.match(body).try(&.to_a).should eq(bare.match(body).try(&.to_a))
-      body.gsub(rx, "_").should eq(body.gsub(bare, "_"))
+      budgeted_run(p, body) { rx.match(body) }.try(&.to_a).should eq(bare.match(body).try(&.to_a))
+      budgeted_run(p, body) { body.gsub(rx, "_") }.should eq(body.gsub(bare, "_"))
     end
   end
 
-  it "starts a fresh budget for a later scan of the same string" do
-    rx = Gori::SafeRegexp.budgeted("\\{")
-    text = "{" + "a" * 100
-    rx.matches?(text).should be_true
-    sleep Gori::SafeRegexp::BUDGET * 2
-    rx.matches?(text).should be_true
+  # The review's repro of the scan-inferring design, where a later scan of the same string
+  # inherited a deadline that had just expired. Each armed call has its own now.
+  it "gives every armed call its own deadline, however soon after the last one" do
+    text = "a tok=1 b tok=2 c tok=3 d"
+    first = Gori::SafeRegexp.budgeted("a")
+    budgeted_run("a", text) { first.matches?(text) }.should be_true
+    sleep Gori::SafeRegexp::BUDGET + 10.milliseconds
+    later = Gori::SafeRegexp.budgeted("z")
+    budgeted_run("z", text) { later.matches?(text) }.should be_false
+  end
+
+  # The other half of that repro: a gsub whose block yields (a Pipe hook) between matches.
+  it "never cuts a match that runs with nothing armed, however long the block takes" do
+    rx = Gori::SafeRegexp.budgeted("tok=\\w+")
+    out = "a tok=1 b tok=2 c tok=3 d".gsub(rx) do |m|
+      sleep 30.milliseconds
+      m.upcase
+    end
+    out.should eq("a TOK=1 b TOK=2 c TOK=3 d")
+  end
+
+  it "keeps the outer deadline for a nested call" do
+    rx = Gori::SafeRegexp.budgeted(slow)
+    t = Time.instant
+    expect_raises(Regex::Error) do
+      budgeted_run("outer", "x") do
+        Gori::SafeRegexp.within_budget(slow, 64 * 1024 * 1024) { rx.matches?(subject) }
+      end
+    end
+    (Time.instant - t).should be < 1.second
+  end
+
+  # A pattern's own callout reaches the same callback, which only reads the deadline. The old
+  # one re-armed on it and this ran for minutes; the subject is small so a regression fails the
+  # time assertion (after some seconds) rather than hanging the suite.
+  it "is not extended by a callout the pattern carries itself" do
+    p = "(?:(?:[\\s\\S]|[\\s\\S]){18}(?C)(?!))?[\\x01-\\x02]"
+    rx = Gori::SafeRegexp.budgeted(p)
+    text = "a" * 1024
+    t = Time.instant
+    expect_raises(Regex::Error) { budgeted_run(p, text) { rx.matches?(text) } }
+    (Time.instant - t).should be < 1.second
+  end
+
+  it "scales the budget with the subject, so a legitimate 16 MiB Replace completes" do
+    body = String.build do |io|
+      i = 0
+      while io.bytesize < 16 * 1024 * 1024
+        io << "{\"id\":" << i << ",\"n\":\"x\"}\n"
+        i += 1
+      end
+    end
+    p = "\"id\":(\\d+)"
+    rx = Gori::SafeRegexp.budgeted(p)
+    budgeted_run(p, body) { body.gsub(rx, "\"id\":0") }.should eq(body.gsub(Regex.new(p), "\"id\":0"))
+    Gori::SafeRegexp.budget_for(64 * 1024).should be < 60.milliseconds
+  end
+
+  # Start-of-pattern settings are only recognised at the very front, so the callout goes after
+  # them: each still compiles, answers like the bare pattern, and is budgeted.
+  ["(*UTF)", "(*UCP)", "(*CRLF)", "(*ANYCRLF)", "(*LIMIT_MATCH=100000)", "(*NO_START_OPT)",
+   "(*UTF)(*CRLF)(*NO_START_OPT)"].each do |verbs|
+    it "keeps #{verbs} at the front" do
+      p = "#{verbs}(?m)^b\\d$"
+      text = "a1\r\nb2\r\nb3"
+      rx = Gori::SafeRegexp.budgeted(p)
+      budgeted_run(p, text) { text.scan(rx).map(&.[0]) }.should eq(text.scan(Regex.new(p)).map(&.[0]))
+      slow_v = "#{verbs}#{slow}"
+      slow_rx = Gori::SafeRegexp.budgeted(slow_v)
+      t = Time.instant
+      expect_raises(Regex::Error) { budgeted_run(slow_v, subject) { slow_rx.matches?(subject) } }
+      (Time.instant - t).should be < 1.second
+    end
   end
 
   it "reports a compile error at the operator's own offset" do
-    bare = expect_raises(ArgumentError) { Regex.new("ab(") }
-    expect_raises(ArgumentError, bare.message) { Gori::SafeRegexp.budgeted("ab(") }
+    ["ab(", "(*UTF)ab(", "(*BOGUS)x"].each do |p|
+      bare = expect_raises(ArgumentError) { Regex.new(p) }
+      expect_raises(ArgumentError, bare.message) { Gori::SafeRegexp.budgeted(p) }
+    end
   end
 
-  it "is what the SQL REGEXP callback compiles" do
+  it "is what the SQL REGEXP callback compiles and arms" do
+    t = Time.instant
     Gori::SafeRegexp.match_bytes(slow, subject.to_unsafe, subject.bytesize).should be_false
+    (Time.instant - t).should be < 1.second
+  end
+end
+
+# Every proxy-path site that matches an operator's pattern arms the budget itself. One that did
+# not would run these for minutes instead of answering in tens of milliseconds.
+describe "the regex budget on the proxy path" do
+  slow = "(?:(?:[\\s\\S]|[\\s\\S]){20}(?!))?[\\x01-\\x02]"
+  body = ("X-A: " + "a" * 60 + "\r\n") * 1100
+
+  it "bounds a Replace rule and leaves the body unchanged" do
+    with_store do |store|
+      rule = Gori::Store::MatchRule.new(1_i64, true, Gori::Store::RuleTarget::Request,
+        Gori::Store::RulePart::Body, slow, "x", Gori::Store::RuleOp::Replace,
+        Gori::Store::MatchKind::Regex, "slow", "")
+      rules = Gori::Rules.new(store, [rule])
+      t = Time.instant
+      String.new(rules.rewrite_request_body(body.to_slice, "acme.test")).should eq(body)
+      (Time.instant - t).should be < 1.second
+    end
+  end
+
+  it "bounds an intercept filter's body~ term" do
+    filter = Gori::InterceptFilter.new("body~#{slow}")
+    s = Gori::InterceptFilter::Subject.new(method: "POST", host: "acme.test", target: "/",
+      scheme: "http", payload: body.to_slice)
+    t = Time.instant
+    filter.matches?(s).should be_false
+    (Time.instant - t).should be < 1.second
+  end
+
+  it "bounds an extract rule's regex" do
+    subject = Gori::ExtractSubject.response("HTTP/1.1 200 OK\r\n\r\n".to_slice, body.to_slice)
+    t = Time.instant
+    Gori::TokenExtract.regex(subject, slow).should be_nil
+    (Time.instant - t).should be < 1.second
   end
 end

@@ -122,13 +122,13 @@ module Gori
       private def raw_match?(s : Subject) : Bool
         if rx = pattern
           return case field
-          when :host   then InterceptFilter.regex_hit?(rx, s.host)
-          when :path   then InterceptFilter.regex_hit?(rx, s.path)
-          when :url    then InterceptFilter.regex_hit?(rx, s.url)
-          when :method then InterceptFilter.regex_hit?(rx, s.method)
-          when :scheme then InterceptFilter.regex_hit?(rx, s.scheme)
-          when :header then (h = s.head) ? InterceptFilter.regex_hit?(rx, h) : false
-          when :body   then (p = s.payload) ? InterceptFilter.regex_hit?(rx, p) : false
+          when :host   then InterceptFilter.regex_hit?(rx, value, s.host)
+          when :path   then InterceptFilter.regex_hit?(rx, value, s.path)
+          when :url    then InterceptFilter.regex_hit?(rx, value, s.url)
+          when :method then InterceptFilter.regex_hit?(rx, value, s.method)
+          when :scheme then InterceptFilter.regex_hit?(rx, value, s.scheme)
+          when :header then (h = s.head) ? InterceptFilter.regex_hit?(rx, value, h) : false
+          when :body   then (p = s.payload) ? InterceptFilter.regex_hit?(rx, value, p) : false
           else              false
           end
         end
@@ -646,14 +646,15 @@ module Gori
     # over the raw bytes and hands back the same String. `matches_at_byte_index?` for the twin
     # reason (see `Fuzz::Matcher#regex_pass?`): `matches?` would count the haystack's characters
     # to convert index 0 into byte 0.
-    protected def self.regex_hit?(pattern : Regex, hay : String) : Bool
-      pattern.matches_at_byte_index?(Gori::Utf8.subject(hay), 0)
+    protected def self.regex_hit?(pattern : Regex, source : String, hay : String) : Bool
+      subject = Gori::Utf8.subject(hay)
+      Gori::SafeRegexp.within_budget(source, subject.bytesize) { pattern.matches_at_byte_index?(subject, 0) }
     rescue
       false
     end
 
-    protected def self.regex_hit?(pattern : Regex, hay : Bytes) : Bool
-      regex_hit?(pattern, String.new(hay))
+    protected def self.regex_hit?(pattern : Regex, source : String, hay : Bytes) : Bool
+      regex_hit?(pattern, source, String.new(hay))
     end
 
     # Map a field name to its Term symbol. An unknown field is treated as free text

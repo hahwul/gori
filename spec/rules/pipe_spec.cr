@@ -56,6 +56,33 @@ describe "Rewriter pipe op" do
     end
   end
 
+  # A hook's run time is not the regex's: the matches are collected under the regex budget and
+  # the hooks run after it. Three 30 ms hooks used to exhaust the 50 ms budget mid-gsub, and
+  # the rule silently left the body unchanged.
+  it "does not count hook time against a regex rule's match budget" do
+    with_store do |store|
+      with_hook(%q(sleep 0.03; tr 'a-z' 'A-Z')) do |hook|
+        rules = Gori::Rules.new(store, [pipe_rule(hook, pattern: "tok=\\w+",
+          kind: Gori::Store::MatchKind::Regex)])
+        got = rules.rewrite_request_body("a tok=1 b tok=2 c tok=3 d".to_slice, "acme.test")
+        String.new(got).should eq "a TOK=1 b TOK=2 c TOK=3 d"
+      end
+    end
+  end
+
+  # The splice that replaced `gsub` with a block must step over empty matches as `gsub` does.
+  it "splices every match, empty ones included, where gsub would" do
+    with_store do |store|
+      with_hook(%q(printf '[%s]' "$(cat)")) do |hook|
+        rules = Gori::Rules.new(store, [pipe_rule(hook, pattern: "b*",
+          kind: Gori::Store::MatchKind::Regex)])
+        text = "aébbc"
+        got = rules.rewrite_request_body(text.to_slice, "acme.test")
+        String.new(got).should eq text.gsub(/b*/) { |m| "[#{m}]" }
+      end
+    end
+  end
+
   it "hands the hook its context in the environment" do
     with_store do |store|
       with_hook(%q{printf '%s|%s|%s|%s' "$GORI_HOOK" "$GORI_TARGET" "$GORI_PART" "$GORI_HOST"}) do |hook|

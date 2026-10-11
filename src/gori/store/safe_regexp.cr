@@ -14,30 +14,9 @@ lib LibSQLite3
 end
 
 # The stdlib binds PCRE2 but not its callout interface, which `SafeRegexp.budgeted` uses to put
-# a time bound on a match. `pcre2_callout_block` as of PCRE2 10.30 (version 2); only the fields
-# up to `callout_flags` exist, in this order, and the callout reads `subject`, `start_match`,
-# `subject_length` and `callout_number`.
+# a time bound on a match. The callout reads nothing from its block, so the block stays opaque.
 lib LibPCRE2
-  struct CalloutBlock
-    version : UInt32
-    callout_number : UInt32
-    capture_top : UInt32
-    capture_last : UInt32
-    offset_vector : LibC::SizeT*
-    mark : UInt8*
-    subject : UInt8*
-    subject_length : LibC::SizeT
-    start_match : LibC::SizeT
-    current_position : LibC::SizeT
-    pattern_position : LibC::SizeT
-    next_item_length : LibC::SizeT
-    callout_string_offset : LibC::SizeT
-    callout_string_length : LibC::SizeT
-    callout_string : UInt8*
-    callout_flags : UInt32
-  end
-
-  fun set_callout = pcre2_set_callout_8(mcontext : MatchContext*, callout : (CalloutBlock*, Void*) -> Int32, data : Void*) : Int32
+  fun set_callout = pcre2_set_callout_8(mcontext : MatchContext*, callout : (Void*, Void*) -> Int32, data : Void*) : Int32
 end
 
 module Gori
@@ -93,96 +72,114 @@ module Gori
 
     # --- the match budget ---------------------------------------------------------
     #
-    # An operator- or agent-authored pattern is matched against peer-shaped bytes on the proxy
-    # path, in the SQL scan and in the probe, all on ONE scheduler thread (P6), and PCRE2's own
-    # `match_limit` does not bound a call: it is reset at every start position, so the work is
-    # up to subject length x limit. Measured: `(?:(?:[\s\S]|[\s\S]){20}(?!))?[\x01-\x02]` took
-    # 9.6 s for one match over a 2 KB request head, a `{22}` variant 37.7 s in a Replace gsub
-    # over a 2 KB body, and neither ever raised. Lowering the limit cannot fix that without
-    # also breaking `.*foo` on a long line, which legitimately backtracks tens of thousands of
-    # steps from one start.
+    # PCRE2's `match_limit` resets at every start position, so one operator- or agent-authored
+    # pattern over peer-shaped bytes can hold the single scheduler thread for seconds per call
+    # (P6). Every pattern `budgeted` compiles carries one callout that PCRE2 (JIT included) calls
+    # at each start attempt. A caller runs the match inside `within_budget`, which arms a
+    # deadline for the CURRENT fiber; the callout aborts the match once that deadline has passed,
+    # as a `Regex::Error` every caller already reads as no match. The callout only reads the
+    # deadline, never sets it (a pattern's own `(?C)` reaches the same callback), and with
+    # nothing armed it continues. Why time and not `match_limit`, and the measurements: DESIGN.md
+    # §7 "2026-10-11: operator- and agent-authored regexes are budgeted by time".
     #
-    # So the bound is TIME across the whole scan, checked once per start position: every
-    # pattern compiled here begins with a callout `(?C<n>)`, which PCRE2 (JIT included) calls at
-    # each start attempt it does not optimise away, and `on_callout` aborts the match once the
-    # scan has run BUDGET. The abort surfaces as `Regex::Error`, which every caller already
-    # rescues as "no match" (or, for a Replace, the text unchanged) — the outcome a pattern
-    # that does not compile already gets. The callout changes nothing else about the pattern:
-    # it is not a group (numbering and backreferences are untouched), it precedes the user's
-    # text without wrapping it (an `(?x)` trailing comment cannot swallow a closing paren), and
-    # it returns 0 — continue — on every call inside the budget. Cost on ordinary patterns over
-    # a 64 KiB body: within noise, a few ns per start attempt that reaches it.
-    #
-    # ponytail: the ceiling is BUDGET plus ONE start position's work, which PCRE2's default
-    # per-start match_limit (10M) keeps to ~25 ms under JIT (measured 51 ms total for the 64 KiB
-    # worst case above, from >100 s). It is per scan, so a SQL `body~` over N rows can still
-    # spend N x BUDGET on a pathological pattern; remember tripped patterns and skip them if
-    # that shows up in practice.
+    # ponytail: the ceiling is the budget plus one start position's work (up to STRIDE_MAX of them
+    # on a sharp fast-to-slow turn, see `on_callout`), each kept to ~25 ms under JIT by PCRE2's
+    # default per-start match_limit. It is per armed call, so a SQL `body~` over N rows can still
+    # spend N budgets on a pathological pattern; remember tripped patterns and skip them if that
+    # shows up in practice.
     BUDGET = 50.milliseconds
+    # On top of BUDGET, per MiB of subject, so a legitimate gsub over a large body (a Replace runs
+    # on up to 16 MiB) is not cut short while a pathological 64 KiB one still stops near BUDGET.
+    BUDGET_PER_MIB = 50.milliseconds
 
-    # Callout number → the pattern it was compiled into, for the one warning per pattern.
-    # Numbers are 1..255 (the most a numeric callout takes) and reused round-robin, so the
-    # table is bounded; a reused number names the newer pattern, which only affects a log line.
-    @@callout_patterns = {} of UInt32 => String
-    @@next_callout = 0_u32
+    # The armed deadline per fiber. A match never yields, so the callout always runs on the fiber
+    # that armed it; keyed by fiber because a `within_budget` block is not obliged not to yield.
+    @@deadlines = {} of Fiber => Time::Instant
     @@warned = Set(String).new
 
-    # Which scan the running budget belongs to: the subject pointer and the last start offset
-    # seen. A new subject, a start that did not advance (a fresh scan of the same string), or a
-    # deadline long past (no live scan can be there — it would have been aborted at its first
-    # callout past the deadline) starts a new budget. Successive calls `gsub` makes over one
-    # string share one budget, which is what bounds a Replace rule as a whole.
-    @@scan_subject = Pointer(UInt8).null
-    @@scan_start = LibC::SizeT.new(0)
-    @@deadline = Time.instant
-
-    # `pattern` compiled with the budget callout in front. For every pattern an operator or an
-    # agent writes that gori then matches on its own data path — not for gori's own literals.
-    # A pattern that does not compile raises the error the bare pattern raises, so a reported
-    # offset points into what the operator typed rather than into the prefix.
-    def self.budgeted(pattern : String) : Regex
-      @@next_callout = @@next_callout % 255 + 1
-      rx = Regex.new("(?C#{@@next_callout})#{pattern}")
-      @@callout_patterns[@@next_callout] = pattern
-      rx
-    rescue ex : ArgumentError
-      Regex.new(pattern)
-      raise ex
+    def self.budget_for(subject_bytesize : Int) : Time::Span
+      BUDGET + BUDGET_PER_MIB * (subject_bytesize / 1_048_576)
     end
+
+    # Runs the block — the match of a `budgeted` regex over a `subject_bytesize`-byte subject —
+    # under a deadline for this fiber, and returns its value. A nested call keeps the outer
+    # deadline. A budget trip propagates as the `Regex::Error` it is, after one log warning per
+    # `pattern`. Keep anything that may yield (a hook, a log line) OUT of the block: its time
+    # would count against the regex.
+    def self.within_budget(pattern : String, subject_bytesize : Int, &)
+      fiber = Fiber.current
+      outer = @@deadlines[fiber]?
+      deadline = outer || (@@deadlines[fiber] = Time.instant + budget_for(subject_bytesize))
+      begin
+        yield
+      rescue ex : Regex::Error
+        warn_tripped(pattern, subject_bytesize) if Time.instant > deadline
+        raise ex
+      ensure
+        @@deadlines.delete(fiber) unless outer
+      end
+    end
+
+    # Start-of-pattern option settings — `(*UTF)`, `(*CRLF)`, `(*LIMIT_MATCH=…)` and the rest —
+    # are only recognised at the very front, so the callout goes after them.
+    LEADING_VERBS = /\A(?:\(\*[A-Z_]+(?:=\d+)?\))*/
+
+    # `pattern` compiled with the budget callout at the start of every attempt. For every pattern
+    # an operator or an agent writes that gori then matches on its own data path — not for gori's
+    # own literals. A pattern that does not compile raises the error the bare pattern raises, so a
+    # reported offset points into what the operator typed rather than into the callout.
+    def self.budgeted(pattern : String) : Regex
+      at = LEADING_VERBS.match(pattern).try(&.byte_end(0)) || 0
+      Regex.new("#{pattern.byte_slice(0, at)}(?C)#{pattern.byte_slice(at)}")
+    rescue ArgumentError
+      Regex.new(pattern)
+      # The bare pattern compiles and only the callout broke it: refuse it rather than run it
+      # unbudgeted, and say nothing about an offset the operator never wrote.
+      raise ArgumentError.new("pattern cannot carry gori's match budget")
+    end
+
+    # The clock read is most of the callout's cost on a dense scan (a start attempt per byte:
+    # 4 MiB of `\w` gsub 76 ms bare, 128 ms reading it every call, 92 ms never), so it is read
+    # every `@@stride` calls. The stride doubles up to STRIDE_MAX while the calls between two
+    # reads took under STRIDE_FAST, and drops back to 1 the moment they did not, so a scan whose
+    # starts are each slow is still checked at every one; only a sharp fast-to-slow turn inside
+    # one subject can overshoot, by at most STRIDE_MAX starts.
+    STRIDE_FAST = 10.microseconds
+    STRIDE_MAX  = 16
+    @@stride = 1
+    @@countdown = 1
+    @@last_read = Time.instant
 
     # :nodoc: — the PCRE2 callout. Never raises and never yields: it runs inside pcre2_match.
-    def self.on_callout(block : LibPCRE2::CalloutBlock*) : Int32
-      b = block.value
+    def self.on_callout : Int32
+      return 0 if @@deadlines.empty? || (@@countdown -= 1) > 0
+      deadline = @@deadlines[Fiber.current]? || return 0
       now = Time.instant
-      if b.subject != @@scan_subject || b.start_match <= @@scan_start || now > @@deadline + BUDGET
-        @@scan_subject = b.subject
-        @@deadline = now + BUDGET
-      end
-      @@scan_start = b.start_match
-      return 0 if now <= @@deadline
-      warn_tripped(b.callout_number, b.subject_length)
-      LibPCRE2::Error::CALLOUT.value
+      @@stride = now - @@last_read < STRIDE_FAST ? Math.min(@@stride * 2, STRIDE_MAX) : 1
+      @@countdown = @@stride
+      @@last_read = now
+      now > deadline ? LibPCRE2::Error::CALLOUT.value : 0
     end
 
-    private def self.warn_tripped(number : UInt32, subject_size : LibC::SizeT) : Nil
-      pattern = @@callout_patterns[number]? || return
+    private def self.warn_tripped(pattern : String, subject_size : Int) : Nil
       return if @@warned.size >= CACHE_MAX || !@@warned.add?(pattern)
       # Spawned, not logged in place: a Log backend may switch fibers, which must not happen
-      # inside pcre2_match. Once per pattern, so a rule that trips on every request is one line.
+      # inside a SQLite callback. Once per pattern, so a rule that trips on every request is one
+      # line.
       spawn do
         ::Log.warn do
-          "regex #{pattern.inspect} ran past its #{BUDGET.total_milliseconds.to_i} ms budget on a " \
-          "#{subject_size}-byte subject and was treated as not matching"
+          "regex #{pattern.inspect} ran past its #{budget_for(subject_size).total_milliseconds.to_i} " \
+          "ms budget on a #{subject_size}-byte subject and was treated as not matching"
         end
       rescue Channel::ClosedError
         # The process is exiting and the log backend has shut; the line has nowhere to go.
       end
     end
 
-    CALLOUT = ->(block : LibPCRE2::CalloutBlock*, _data : Void*) { SafeRegexp.on_callout(block) }
+    CALLOUT = ->(_block : Void*, _data : Void*) { SafeRegexp.on_callout }
 
     # Crystal matches every Regex through ONE match context, so the callout is installed there,
-    # once. Only a pattern carrying a callout item ever calls it, which is only `budgeted`'s.
+    # once. Only a pattern carrying a callout item ever calls it.
     LibPCRE2.set_callout(Regex::PCRE2.match_context, CALLOUT, nil)
 
     # --- literal fast path ------------------------------------------------------
@@ -477,7 +474,9 @@ module Gori
       rx = compile(pattern)
       subject = len <= 0 ? "" : Utf8.text(Bytes.new(ptr, len, read_only: true))
       # Valid by construction (`Utf8.text`), so PCRE2's own check would be pure overhead.
-      rx.matches_at_byte_index?(subject, 0, Regex::MatchOptions::NO_UTF_CHECK)
+      within_budget(pattern, subject.bytesize) do
+        rx.matches_at_byte_index?(subject, 0, Regex::MatchOptions::NO_UTF_CHECK)
+      end
     rescue
       # A pattern that will not compile, or a residual engine error: never a raise out of a C
       # callback, which would abort the whole query (see the module comment).

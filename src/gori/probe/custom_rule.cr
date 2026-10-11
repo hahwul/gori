@@ -202,7 +202,8 @@ module Gori
         # do evict operator patterns — but a PCRE2 compile is an order of magnitude cheaper than
         # matching a body, so removing it buys nothing worth a field on this record.
         if kind == "regex"
-          m = SafeRegexp.compile(pattern).match(text)
+          rx = SafeRegexp.compile(pattern)
+          m = SafeRegexp.within_budget(pattern, text.bytesize) { rx.match(text) }
           return {false, nil} unless m
           {true, safe_evidence(m[1]? || m[0])}
         else
