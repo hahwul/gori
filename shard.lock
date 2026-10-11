@@ -10,7 +10,7 @@ shards:
 
   db:
     git: https://github.com/crystal-lang/crystal-db.git
-    version: 0.14.0
+    version: 0.15.0
 
   sarif:
     git: https://github.com/hahwul/sarif.cr.git
@@ -18,7 +18,7 @@ shards:
 
   sqlite3:
     git: https://github.com/crystal-lang/crystal-sqlite3.git
-    version: 0.23.0
+    version: 0.24.0
 
   termisu:
     git: https://github.com/hahwul/termisu.git
