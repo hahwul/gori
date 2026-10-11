@@ -203,25 +203,13 @@ module Gori
       # `X-Nul: be`, so the reproduction sends a header the capture did not. Dropped and named,
       # the way `nul_method_note` drops `-X`.
       #
-      # The note itself is written with the NUL ESCAPED — a raw one would truncate the comment
-      # that is about it.
+      # The name is written through `Escape.comment`: a raw NUL would truncate the comment that
+      # is about it, and a CR / ESC in the name would end it on a paste or drive the terminal.
       private def self.nul_header_note(name : String, value : String) : String?
         return nil unless name.to_slice.includes?(0_u8) || value.to_slice.includes?(0_u8)
-        "# -H omitted for #{nul_escaped(name)}: the captured header holds a NUL, which no shell " \
+        "# -H omitted for #{Escape.comment(name)}: the captured header holds a NUL, which no shell " \
         "argument can carry — a shell truncates it there and curl would send a header the " \
         "capture did not. Read the head with --format raw"
-      end
-
-      # `s` with every NUL byte written as the text `\\0`, for a note ABOUT a NUL. Byte-wise, so
-      # a header name that is not valid UTF-8 is not rewritten into U+FFFD on its way into a
-      # sentence naming it.
-      private def self.nul_escaped(s : String) : String
-        bytes = s.to_slice
-        io = IO::Memory.new(bytes.size)
-        bytes.each do |b|
-          b == 0_u8 ? io << "\\0" : io.write_byte(b)
-        end
-        String.new(io.to_slice)
       end
 
       # The FINAL `chunked` transfer coding peeled off the body, as {the entity, the

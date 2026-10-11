@@ -77,4 +77,18 @@ describe Gori::Export::Escape do
       Gori::Export::Escape.percent_encode_non_ascii(url).should be(url)
     end
   end
+
+  # A comment is not a literal: nothing unescapes it, so it only has to be unable to END. A
+  # bare CR ended Python's `# note:` line and the rest of a captured header name ran as code.
+  describe ".comment" do
+    it "returns printable ASCII unchanged" do
+      s = "X-Dup"
+      Gori::Export::Escape.comment(s).should be(s)
+    end
+
+    it "escapes every control byte and non-ASCII byte so no line terminator survives" do
+      Gori::Export::Escape.comment("X\r__import__('os')#\n\e]0;p\a\u2028\xff")
+        .should eq("X\\r__import__('os')#\\n\\x1b]0;p\\x07\\xe2\\x80\\xa8\\xff")
+    end
+  end
 end

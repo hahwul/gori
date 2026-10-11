@@ -168,4 +168,13 @@ describe Gori::Export::Httpie do
     cmd = httpie("GET /\u{d55c}?q=\u{d55c} HTTP/1.1\r\nHost: h.test\r\n\r\n", "https://h.test")
     cmd.should contain("'https://h.test/%ED%95%9C?q=%ED%95%9C'")
   end
+
+  # The note names the header in a `#` comment printed to a terminal and pasted into a shell, so
+  # its name cannot carry a raw CR / LF / ESC there.
+  it "escapes the header name in an omitted-header note" do
+    cmd = httpie("GET /x HTTP/1.1\r\nHost: h.test\r\nX\e]0;p\a\rY: be\u0000fore\r\n\r\n", "https://h.test")
+    cmd.should contain("# header 'X\\x1b]0;p\\x07\\rY' omitted")
+    cmd.should_not contain('\e')
+    cmd.should_not contain('\r')
+  end
 end

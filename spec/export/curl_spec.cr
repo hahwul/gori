@@ -403,3 +403,11 @@ describe "exports drop the headers a browser addressed to its proxy" do
     code.should contain("X-Keep")
   end
 end
+
+describe "Gori::Export::Curl notes" do
+  it "escapes a control-byte header name in the NUL note" do
+    cmd = Gori::Export::Curl.text("GET /a HTTP/1.1\r\nHost: h\r\nX\e]0;p\a\rY: be\u0000fore\r\n\r\n", "http://h").not_nil!
+    cmd.lines.last.should start_with("  # -H omitted for X\\x1b]0;p\\x07\\rY:")
+    cmd.should_not contain('\e')
+  end
+end

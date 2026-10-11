@@ -54,14 +54,14 @@ module Gori
           # dropped and named rather than sent short. Same hole `Curl.nul_header_note` covers.
           unless carriable?(n) && carriable?(v)
             bad = carriable?(n) ? uncarriable(v) : uncarriable(n)
-            notes << "# header '#{n}' omitted: it holds #{bad} — read the head with --format raw"
+            notes << "# header '#{Escape.comment(n)}' omitted: it holds #{bad} — read the head with --format raw"
             next
           end
           # A backslash the escaping below cannot survive — see `escape_defeated?`. Dropped and
           # named for the same reason a NUL is: the alternative is an item that means something
           # other than this header.
           if escape_defeated?(n) || escape_defeated?(v)
-            notes << "# header '#{n}' omitted: a backslash before one of httpie's item separators (; = @) " \
+            notes << "# header '#{Escape.comment(n)}' omitted: a backslash before one of httpie's item separators (; = @) " \
                      "cannot be escaped, so httpie would eat it — read the head with --format raw"
             next
           end

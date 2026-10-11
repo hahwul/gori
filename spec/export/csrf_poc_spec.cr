@@ -178,4 +178,11 @@ describe "Gori::Export::CsrfPoc on a raw CT-less POST body" do
       Gori::Export::CsrfPoc.text("POST /x HTTP/1.1\r\nHost: acme.test\r\n\r\n#{body}", "https://acme.test/x").should_not be_nil
     end
   end
+
+  it "escapes control bytes in the header names its dropped-headers comment lists" do
+    html = poc("POST /x HTTP/1.1\r\nHost: acme.test\r\nX\e]0;p\a\rY: 1\r\n\r\na=1", "https://acme.test")
+    html.should contain("X\\x1b]0;p\\x07\\rY")
+    html.should_not contain('\e')
+    html.should_not contain('\r')
+  end
 end

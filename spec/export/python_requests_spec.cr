@@ -88,4 +88,14 @@ describe Gori::Export::PythonRequests do
       "https://\u{c1fc}\u{d551}\u{bab0}.\u{d55c}\u{ad6d}")
     code.should contain(%(url = "https://\u{c1fc}\u{d551}\u{bab0}.\u{d55c}\u{ad6d}/api/%EC%A3%BC%EB%AC%B8"))
   end
+
+  # A header name keeps its bytes through a Burp XML / raw-request / archive import (P7), and
+  # the duplicate-name note used to write it raw into a `#` comment. Python ends a comment at a
+  # bare CR, so the rest of the name ran as code when the operator ran the script.
+  it "escapes a duplicate header name in the note so a CR cannot end the comment" do
+    name = "X\r__import__('os').system('id')#"
+    code = py("GET / HTTP/1.1\r\nHost: h.test\r\n#{name}: a\r\n#{name}: b\r\n\r\n", "https://h.test")
+    code.should contain("# note: X\\r__import__('os').system('id')# appeared more than once")
+    code.should_not contain('\r')
+  end
 end

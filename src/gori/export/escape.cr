@@ -21,6 +21,24 @@ module Gori
         end
       end
 
+      # A captured string for a COMMENT or prose note inside generated code — `# note: …` in
+      # Python, `# header '…' omitted` in a shell command, `<!-- … -->` in the CSRF page. A
+      # comment is not a literal, so the language does no unescaping there and nothing has to
+      # round-trip; what matters is that the bytes cannot END the comment. They could: a header
+      # name survives a Burp XML / raw-request / archive import byte-exact (P7), and a bare CR
+      # inside one ended Python's `# note:` line, so `X\r__import__('os').system('…')#` ran as
+      # code the moment the operator ran the snippet. LF, U+2028 (a JS line terminator) and an
+      # ESC on the terminal that prints the snippet are the same shape.
+      #
+      # So every byte outside printable ASCII is written as the `\xNN` (or `\r` / `\n` / `\t`)
+      # the double-quoted table already spells — readable, unambiguous, and byte-wise, so a name
+      # that is not valid UTF-8 is still identifiable. The free common case returns `s` itself.
+      def self.comment(s : String) : String
+        bytes = s.to_slice
+        return s if bytes.all? { |b| 0x20_u8 <= b <= 0x7e_u8 }
+        String.build { |io| bytes.each { |b| double_quoted_byte(io, b) } }
+      end
+
       # Emit one CHARACTER into a `"…"` literal for a JS string the ENGINE re-encodes on its way
       # out — a `fetch` body. ASCII goes through the byte table above; every other codepoint is
       # written VERBATIM, because the generated source is UTF-8 and a `\xNN` per UTF-8 byte is one

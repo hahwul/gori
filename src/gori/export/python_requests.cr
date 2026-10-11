@@ -28,7 +28,7 @@ module Gori
             # so say so rather than silently send a request short a header the capture carried.
             dups = RequestParts.duplicate_header_names(s.headers)
             unless dups.empty?
-              b << "# note: #{dups.join(", ")} appeared more than once; a requests dict keeps only the\n"
+              b << "# note: #{dups.join(", ") { |n| Escape.comment(n) }} appeared more than once; a requests dict keeps only the\n"
               b << "# last value of each. To send the repeated header, build the request with urllib3\n"
               b << "# or see --format curl. --format raw has the exact bytes.\n"
             end
