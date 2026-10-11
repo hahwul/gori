@@ -23,6 +23,11 @@ describe Gori::Tui::AgentQuestionOverlay do
     OverlayHarness.new(card).assert_chrome(OverlayKind::AgentQuestion, "AGENT ASKS")
   end
 
+  # #1585: gori's own approval card about an agent's call is not the agent's question.
+  it "titles a server-written approval as one" do
+    card(question.copy_with(approval: true)).title.should eq("APPROVE AGENT CALL")
+  end
+
   it "draws the question, how long it has waited and has left, the detail and each choice" do
     h = OverlayHarness.new(card)
     box = h.box.not_nil!

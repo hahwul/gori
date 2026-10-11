@@ -126,10 +126,18 @@ module Gori
     # rule", and for a target an EXCLUDE rule matched that advice cannot work — an include
     # never overrides an exclude. The rule to delete is the one to name. Layer 2 already got
     # this right (see `EXCLUDE_SWEEP_ERROR`); this is Layer 1 catching up.
+    #
+    # `pending` is set on a refusal an operator's approval would lift (`Approval`): `WAIVER`
+    # when the waiver was asked for and is waiting on one, `SEND` when only the send is. `port`
+    # is the dialled port when the caller passed it, for a grant that names one.
     record Verdict, decision : String, host : String, rule_id : Int64?, blocked : Bool,
-      excluded : Bool = false do
+      excluded : Bool = false, pending : String? = nil, port : Int32? = nil do
       def blocked? : Bool
         blocked
+      end
+
+      def pending? : Bool
+        !pending.nil?
       end
 
       def excluded? : Bool
@@ -145,6 +153,25 @@ module Gori
         decision == "unscoped"
       end
     end
+
+    # Layer 1 under an operator's approval (#1585): plain data from the surface, which owns
+    # the asking. `every_send` holds every target that `hosts` does not grant, in scope or
+    # not; `waiver` is a waiver that was asked for and must not waive by itself, so a target
+    # the allowlist refuses passes only when granted, like a waived one. `hosts` holds bare
+    # hosts (any port) and `host:port` entries. Layer 2 is untouched: a granted host is still
+    # stopped by the sandbox and, for a sweep, by an exclude.
+    record Approval, every_send : Bool, waiver : Bool, hosts : Array(String) do
+      def granted?(host : String, port : Int32?) : Bool
+        h = host.downcase
+        hosts.includes?(h) || (!port.nil? && hosts.includes?("#{h}:#{port}"))
+      end
+    end
+
+    # `Verdict#pending` values.
+    PENDING_WAIVER = "waiver"
+    PENDING_SEND   = "send"
+
+    property approval : Approval? = nil
 
     IN_SCOPE     = "in_scope"
     OUT_OF_SCOPE = "out_of_scope"
@@ -246,14 +273,27 @@ module Gori
     # for. `port_url` is the same url WITH its port and is read by the EXCLUDE side only; pass
     # nil (the default) when the caller holds a bare URL string and has no port to add. See
     # `Outbound.exclude_url` for why the two sides differ.
-    def check(url : String, host : String, port_url : String? = nil) : Verdict
+    #
+    # `port` is the dialled port, read only by an `approval` grant that names one.
+    def check(url : String, host : String, port_url : String? = nil, port : Int32? = nil) : Verdict
       decision, rule_id, excluded = evaluate(url, host, port_url)
       blocked = case @gate
                 in Gate::Waived     then false
                 in Gate::Allowlist  then decision != IN_SCOPE
                 in Gate::Configured then decision == OUT_OF_SCOPE
                 end
-      Verdict.new(decision, host, rule_id, blocked, excluded)
+      pending = nil
+      if a = @approval
+        granted = a.granted?(host, port)
+        if blocked && a.waiver
+          blocked = !granted
+          pending = PENDING_WAIVER if blocked
+        elsif !blocked && a.every_send && !granted
+          blocked = true
+          pending = PENDING_SEND
+        end
+      end
+      Verdict.new(decision, host, rule_id, blocked, excluded, pending, port)
     end
 
     # `check` for callers that only need the yes/no (Probe's per-flow active filter).
@@ -266,7 +306,7 @@ module Gori
     # actually DIAL, which is the same anchor `scope_url` uses for the host.
     def check_request(scheme : String, host : String, target : String, port : Int32) : Verdict
       check(Outbound.scope_url(scheme, host, target), host,
-        Outbound.exclude_url(scheme, host, target, port))
+        Outbound.exclude_url(scheme, host, target, port), port)
     end
 
     # Re-check a hand-authored send after its bytes have gone through the send seam. A

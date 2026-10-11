@@ -118,8 +118,11 @@ module Gori::CLI
     # Preferences › AI › MCP permissions, latched for this process like `mcp_channels`, and
     # never failing open: a settings file this start could not read in full denies every group
     # rather than serving them all (`mcp_enforced_denials`).
-    denied, denial_warning = Settings.mcp_enforced_denials
+    denied, asked, denial_warning = Settings.mcp_enforced_denials
     Log.warn { "mcp: #{denial_warning}" } if denial_warning
+    unless (ask_groups = Settings.mcp_permission_groups(asked)).empty?
+      Log.info { "mcp: set to ask in Preferences (AI › MCP permissions): #{ask_groups.join(", ", &.title)}" }
+    end
     unless (groups = Settings.mcp_permission_groups(denied)).empty?
       Log.info { "mcp: switched off in Preferences (AI › MCP permissions): #{groups.join(", ", &.title)}" }
       advertised = MCP::Tools.served_names(tool_filter, !read_only, denied)
@@ -160,7 +163,7 @@ module Gori::CLI
       server = MCP::Server.new(nil, allow_actions: !read_only, verify_upstream: !insecure_upstream,
         project_name: nil, project_slug: nil, db_path: nil,
         selection_source: selection.source, workspace_root: nil, project_id: nil,
-        bind_error: bind_error, tool_filter: tool_filter, denied_permissions: denied)
+        bind_error: bind_error, tool_filter: tool_filter, denied_permissions: denied, asked_permissions: asked)
       server.run
       return
     end
@@ -207,7 +210,7 @@ module Gori::CLI
         server = MCP::Server.new(nil, allow_actions: !read_only, verify_upstream: !insecure_upstream,
           project_name: nil, project_slug: nil, db_path: nil,
           selection_source: "unbound", workspace_root: nil, project_id: nil,
-          bind_error: reason, tool_filter: tool_filter, denied_permissions: denied)
+          bind_error: reason, tool_filter: tool_filter, denied_permissions: denied, asked_permissions: asked)
         server.run
         return
       end
@@ -216,7 +219,7 @@ module Gori::CLI
       server = MCP::Server.new(store, allow_actions: !read_only, verify_upstream: !insecure_upstream,
         project_name: project_name, project_slug: project_slug, db_path: resolved,
         selection_source: selection.source, workspace_root: selection.workspace_root,
-        project_id: project_id, tool_filter: tool_filter, denied_permissions: denied)
+        project_id: project_id, tool_filter: tool_filter, denied_permissions: denied, asked_permissions: asked)
       server.run # blocks until STDIN EOF (client closed)
     ensure
       store.close

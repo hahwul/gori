@@ -15,8 +15,13 @@ module Gori
   # also how the answer travels, so every route that carries an operator message — the inbox
   # socket, `codex queue`, the channel, the tool-result carry, the poll — carries it with no
   # route of its own.
+  #
+  # `approval` marks a question `gori mcp` wrote itself to approve an agent's call (#1585),
+  # from its own facts. `ask_operator` cannot set it, and the asking server honours an answer
+  # only to an approval id it issued, so a look-alike question grants nothing.
   record AgentQuestion, id : Int64, question : String, detail : String?, choices : Array(String),
-    default : String?, target_label : String, pid : Int64, expires_at : Int64, created_at : Int64 do
+    default : String?, target_label : String, pid : Int64, expires_at : Int64, created_at : Int64,
+    approval : Bool = false do
     KIND = "agent_question"
 
     # Two to four short labels: enough for a real decision, few enough that each keeps a
@@ -62,9 +67,11 @@ module Gori
     OUTCOMES          = {OUTCOME_ANSWERED, OUTCOME_DISMISSED, OUTCOME_EXPIRED}
 
     def self.payload_json(detail : String?, choices : Array(String), default : String?,
-                          target : String, pid : Int64, expires_at : Int64) : String
+                          target : String, pid : Int64, expires_at : Int64,
+                          approval : Bool = false) : String
       JSON.build do |j|
         j.object do
+          j.field "approval", true if approval
           j.field "target", target
           j.field "pid", pid
           j.field "detail", detail if detail
@@ -86,7 +93,7 @@ module Gori
       expires = h["expires_at"]?.try(&.as_i64?) || return nil
       new(row.id, row.message, h["detail"]?.try(&.as_s?), choices.first(CHOICES_MAX),
         h["default"]?.try(&.as_s?), h["target"]?.try(&.as_s?) || "agent",
-        h["pid"]?.try(&.as_i64?) || 0_i64, expires, row.created_at)
+        h["pid"]?.try(&.as_i64?) || 0_i64, expires, row.created_at, h["approval"]?.try(&.as_bool?) || false)
     rescue JSON::ParseException
       nil
     end
@@ -108,9 +115,26 @@ module Gori
     # choices are the caller's to validate — this writes what it is given.
     def record_agent_question(question : String, detail : String?, choices : Array(String),
                               default : String?, target : String, pid : Int64,
-                              expires_at : Int64) : Int64
+                              expires_at : Int64, approval : Bool = false) : Int64
       insert_event("agent", AgentQuestion::KIND, "info", AgentReply.summary_line(question),
-        payload: AgentQuestion.payload_json(AgentReply.cap_detail(detail), choices, default, target, pid, expires_at), actor: "mcp")
+        payload: AgentQuestion.payload_json(AgentReply.cap_detail(detail), choices, default, target, pid, expires_at, approval), actor: "mcp")
+    end
+
+    # The operator's closing message for each of `ids` that has one, by question id. Only rows
+    # the operator wrote (`source: "operator"`, the TUI's answer or dismissal), so an expiry —
+    # or anything else — is never read as an answer.
+    def agent_question_answers(ids : Enumerable(Int64)) : Hash(Int64, AgentMessage)
+      found = {} of Int64 => AgentMessage
+      return found if ids.empty?
+      @db.query("SELECT #{EVENT_COLS} FROM events WHERE id > ? AND kind = ? AND source = 'operator' ORDER BY id ASC",
+        args: [ids.min, AgentMessage::KIND] of DB::Any) do |rs|
+        rs.each do
+          m = AgentMessage.from_row(read_event(rs))
+          id = m.try(&.in_reply_to)
+          found[id] = m if m && id && ids.includes?(id) && !found.has_key?(id)
+        end
+      end
+      found
     end
 
     # The questions after `since_id` that are still open at `now_us`: not past their expiry,

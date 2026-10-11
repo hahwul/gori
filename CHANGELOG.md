@@ -3,6 +3,7 @@
 ## Unreleased
 
 - QL: `ws:`/`ws~` finds flows by their WebSocket message payloads, and History's MESSAGES pane, `gori run show --ws-match` and MCP `get_flow` `ws_query` narrow one transcript (#1588)
+- MCP permissions get a third state, **ask**: each call in that group, or an `allow_unscoped:true` send under **Change scope & sandbox**, waits for the operator's approval on the TUI's `ask:` card (once, always this host or host:port, or deny) (#1585)
 - Probe: passive rules for weak OAuth/OIDC authorization requests (implicit grant, PKCE plain or missing, no state/nonce) and client-side path traversal in JavaScript request calls (#1597, #1598)
 
 ## v0.8.1

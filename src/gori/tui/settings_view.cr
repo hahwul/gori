@@ -267,9 +267,9 @@ module Gori::Tui
     MCP_PERMISSION_FIELDS = Settings::MCP_PERMISSIONS.map do |perm|
       off = perm.key == "exec" ? "off refuses the call that would run one (the tools stay listed)" : "off leaves those tools out of gori mcp's tools/list and refuses them"
       Field.new(perm.title,
-        "let an attached agent use #{perm.summary} — #{off}; " \
-        "reading the capture is always allowed; applies to agents started after the change — ←/→/space toggles",
-        bool: true)
+        "let an attached agent use #{perm.summary} — #{off}; ask puts each call on the ask: card for you to approve; " \
+        "reading the capture is always allowed; applies to agents started after the change — ←/→/space cycles",
+        choices: Settings::MCP_PERMISSION_STATES)
     end
     SECTIONS = {
       :network         => NETWORK_FIELDS,
@@ -615,7 +615,7 @@ module Gori::Tui
 
     # Positional over `Settings::MCP_PERMISSIONS`, the list MCP_PERMISSION_FIELDS is built from.
     private def mcp_permission_values : Array(String)
-      Settings::MCP_PERMISSIONS.map { |perm| Settings.mcp_permitted?(perm.key) ? "on" : "off" }
+      Settings::MCP_PERMISSIONS.map { |perm| Settings.mcp_permission_state(perm.key) }
     end
 
     # ↑/↓: move between fields — except in the THEME section, whose single field IS a
@@ -902,7 +902,7 @@ module Gori::Tui
         # Per group, never a rebuilt set: a key this gori does not draw (a newer gori's group)
         # stays denied rather than being dropped by a save from here.
         Settings::MCP_PERMISSIONS.each_with_index do |perm, i|
-          Settings.set_mcp_permitted(perm.key, @values[i] == "on")
+          Settings.set_mcp_permission_state(perm.key, @values[i])
         end
         @values = mcp_permission_values
         return persist

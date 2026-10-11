@@ -640,11 +640,11 @@ module Gori
       private def send_gate(ob : Outbound, plan : Repeater::Plan) : ScopeCheck | Result
         requests = plan.scope_requests
         first = requests.first? || plan.bytes
-        sc = ob.check(request_scope_url(plan, first), plan.host, request_exclude_url(plan, first))
+        sc = ob.check(request_scope_url(plan, first), plan.host, request_exclude_url(plan, first), plan.port)
         return scope_blocked(sc) if sc.blocked?
         requests.each_with_index do |req, i|
           next if i == 0
-          member = ob.check(request_scope_url(plan, req), plan.host, request_exclude_url(plan, req))
+          member = ob.check(request_scope_url(plan, req), plan.host, request_exclude_url(plan, req), plan.port)
           return scope_blocked(member, "member #{i + 1}") if member.blocked?
         end
         if reason = plan.refusal
@@ -1182,7 +1182,7 @@ module Gori
         # Checking a bare "/" made a path-scoped include (e.g. string:/chat) refuse the very
         # WS repeater it was written to allow, while the identical send_request passed.
         upgrade = plan.scope_requests.first? || plan.bytes
-        sc = ob.check(request_scope_url(plan, upgrade), host, request_exclude_url(plan, upgrade))
+        sc = ob.check(request_scope_url(plan, upgrade), host, request_exclude_url(plan, upgrade), plan.port)
         return scope_blocked(sc) if sc.blocked?
         # Layer 2 (Sandbox) — allow_unscoped does not lift it; refuse before the link write.
         if reason = plan.refusal
@@ -1619,6 +1619,7 @@ module Gori
       # later race/timing member on a host the first one was allowed, and "target host is outside
       # the scope" would send the agent to add a host include that changes nothing.
       private def scope_blocked(sc : ScopeCheck, what : String? = nil, field : String = "url") : Result
+        return host_approval(sc) if sc.pending?
         reason = if sc.unscoped?
                    "no scope is configured for this project, so active requests are refused by default"
                  elsif what

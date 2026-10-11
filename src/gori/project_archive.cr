@@ -864,6 +864,8 @@ module Gori
               # Probe mode is authorization, not configuration: an archive must not arm active
               # probes that fire at the stored flows the moment the copy is opened.
               conn.exec("DELETE FROM settings WHERE key = ?", Probe::MODE_SETTING_KEY)
+              # The same for the hosts an operator approved for agent sends (#1585).
+              conn.exec("DELETE FROM settings WHERE key = ?", Store::MCP_HOST_GRANTS_KEY)
               # Read from disk every time the project opens, unasked: a path on the author's
               # machine names, on this one, whatever file the operator never chose. Machine-local,
               # like the host overrides; the importer points it at their own descriptors.
