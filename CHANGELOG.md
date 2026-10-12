@@ -7,6 +7,7 @@
 - CLI: `gori run browser` opens the Open browser profile from a script, with an opt-in loopback DevTools port so Playwright MCP or chrome-devtools-mcp can drive a captured browser (#1594)
 - Probe: passive rules for weak OAuth/OIDC authorization requests (implicit grant, PKCE plain or missing, no state/nonce) and client-side path traversal in JavaScript request calls (#1597, #1598)
 - QL: `via:tui|cli|mcp` filters flows by the gori surface that sent them, so `via:mcp` is what an agent sent, and agent events in Activity and MCP `list_events` name the client (`actor_label`) (#1587)
+- Proxy: `GORI_SSLKEYLOGFILE` (or `SSLKEYLOGFILE`) writes TLS session secrets for both legs in the NSS key log format, so Wireshark can decrypt what gori relays (#1593)
 
 ## v0.8.1
 

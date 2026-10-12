@@ -830,6 +830,20 @@ gori settings tls-fingerprint shop.example.com
 
 오버라이드는 목적지 정책을 갈아치우는 게 아니라 *좁힙니다*. ClientHello 모양만 가져가고 목적지의 클라이언트 인증서·프로토콜 범위·`permissive`는 그대로 둡니다. 지문 비교가 조용히 "인증됨 vs 익명" 비교로 바뀌면 안 되니까요. 필드별 표 전체는 [전송 단위 TLS 지문](/ko/reference/cli/#per-send-tls-fingerprints)에 있고, `gori settings tls-fingerprint HOST --preset curl`은 오버라이드가 실제로 무엇을 보낼지 보내기 전에 출력해 줍니다.
 
+## Wireshark로 와이어 복호화하기 {#tls-key-log}
+
+History가 보여 주는 건 gori가 *파싱한* 결과입니다. 그 파싱 자체가 의심스러울 때(클라이언트가 보낸 것과 다르게 중계된 h2 프레임, 쪼개진 TLS 레코드, 예상 밖의 ALPN) 유일한 근거는 와이어인데, gori의 두 구간은 모두 암호화돼 있습니다. 클라이언트 ⇄ gori는 gori의 leaf로, gori ⇄ origin은 origin의 인증서로.
+
+`GORI_SSLKEYLOGFILE`(또는 curl·Firefox·Chromium이 이미 읽는 `SSLKEYLOGFILE`)에 파일 경로를 지정해 gori를 시작하면, 두 구간의 모든 핸드셰이크가 `http+tls://` 업스트림 프록시로 가는 TLS 구간까지 포함해 NSS 키 로그 형식으로 비밀값을 덧붙입니다.
+
+```bash
+GORI_SSLKEYLOGFILE=~/gori-keys.log gori
+```
+
+Wireshark에서 Preferences → Protocols → TLS → **(Pre)-Master-Secret log filename**을 그 파일로 지정하면 어느 구간의 캡처든 복호화됩니다. 둘 다 설정돼 있으면 `GORI_SSLKEYLOGFILE`이 이기므로, 브라우저는 자기 파일을 그대로 쓸 수 있습니다. 빈 값(`GORI_SSLKEYLOGFILE=`)이면 브라우저용 `SSLKEYLOGFILE`이 있어도 gori는 기록하지 않습니다.
+
+**이 파일은 담긴 모든 세션을 복호화합니다.** gori는 파일을 본인만 읽을 수 있게(POSIX에서 `0600`, 브라우저가 먼저 만든 파일도 좁힘) 유지하고, 덮어쓰지 않고 이어 쓰며, 모든 표면에서 시작 시 알립니다(TUI는 경고, `gori run`과 `gori mcp`는 stderr의 `⚠` 줄). 디렉터리·FIFO·장치 경로는 거부하고, 첫 쓰기 오류가 나면 연결은 건드리지 않은 채 기록만 끕니다. 환경 변수로만 켭니다. 설정 항목은 없고, MCP 툴로도 켤 수 없습니다.
+
 ## Project 탭 {#project-tab}
 
 **Project** 탭은 단순한 요약 이상입니다. 개요 아래에 서브탭 스트립이 있습니다. `←`/`→`로 카드를 바꾸고, `↓`/`Enter`로 열려 있는 카드 안으로 들어가며, `Esc`(또는 맨 위에서 `↑`)로 다시 스트립으로 올라옵니다.

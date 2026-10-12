@@ -7,6 +7,7 @@ require "./socket_tuning"
 require "./resolver_cache"
 require "./socks5"
 require "./tls/client_shape"
+require "./tls/key_log"
 
 # OpenSSL's own compiled-in default trust locations — the paths SSL_CTX_set_default_verify_paths
 # consults. Not bound by the stdlib, so declared here to let the no-store warning reflect the
@@ -661,6 +662,7 @@ module Gori::Proxy
         else
           ctx.verify_mode = OpenSSL::SSL::VerifyMode::NONE
         end
+        Tls::KeyLog.install(ctx)
         ctx
       end
     end
@@ -1111,6 +1113,7 @@ module Gori::Proxy
           ctx.verify_mode = OpenSSL::SSL::VerifyMode::NONE
         end
         apply_outbound_tls(ctx, tls, alpn)
+        Tls::KeyLog.install(ctx)
         ctx
       end
     end

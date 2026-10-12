@@ -832,6 +832,20 @@ So a **single send or a single run** can name a fingerprint of its own, resolved
 
 The override *narrows* the destination policy rather than replacing it: it takes the ClientHello shape and leaves the destination's client certificate, protocol range and `permissive` flag exactly where they were, because a fingerprint comparison must not quietly become authenticated-versus-anonymous. The reference has the full field-by-field table under [per-send TLS fingerprints](/reference/cli/#per-send-tls-fingerprints), and `gori settings tls-fingerprint HOST --preset curl` prints what an override will actually send before you send it.
 
+## Decrypting the Wire in Wireshark {#tls-key-log}
+
+History shows what gori *parsed*. When the parsing itself is in doubt (an h2 frame relayed differently from what the client sent, a split TLS record, an ALPN surprise), the only ground truth is the wire, and both of gori's legs are encrypted: client ⇄ gori under gori's leaf, gori ⇄ origin under the origin's certificate.
+
+Start gori with `GORI_SSLKEYLOGFILE` (or the `SSLKEYLOGFILE` curl, Firefox and Chromium already read) pointing at a file, and every handshake on both legs, including the TLS leg to an `http+tls://` upstream proxy, appends its secrets in the NSS key log format:
+
+```bash
+GORI_SSLKEYLOGFILE=~/gori-keys.log gori
+```
+
+In Wireshark, set Preferences → Protocols → TLS → **(Pre)-Master-Secret log filename** to that file, and a capture of either leg decrypts. `GORI_SSLKEYLOGFILE` wins when both are set, so a browser can keep its own file; set it empty (`GORI_SSLKEYLOGFILE=`) and gori logs nothing even when `SSLKEYLOGFILE` is exported for a browser.
+
+**That file decrypts everything it covers.** gori keeps it readable by you only (`0600` on POSIX, tightening an existing file a browser created), appends rather than truncates, and announces it at startup on every surface (a warning in the TUI, a `⚠` line on stderr for `gori run` and `gori mcp`). A path that is a directory, FIFO or device is refused, and the first write error turns logging off without touching the connection. It is read from the environment only: there is no setting, and no MCP tool can turn it on.
+
 ## Project Tab
 
 The **Project** tab is more than a summary. Under the overview sits a sub-tab strip: `←`/`→` switch cards, `↓`/`Enter` drop into the one showing, and `Esc` (or `↑` at the top) comes back up to the strip.
