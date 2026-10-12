@@ -398,6 +398,7 @@ module Gori
         # per-flow error explains each failure, this explains WHY up front — and this table is
         # hand-edited JSON, so there was no save for its validator to run at.
         Settings.outbound_tls_warnings.each { |w| runner.notifications.push(:warn, w) }
+        Proxy::Tls::KeyLog.notice.try { |n| runner.notifications.push(:warn, n) }
         # Upstream ROUTING that is accepted but probably not what was meant: the legacy
         # `https://` spelling (which means a plaintext CONNECT proxy), an unreadable proxy CA,
         # proxy certificate verification switched off. None of them refuses a dial, so without

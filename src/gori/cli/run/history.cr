@@ -1335,6 +1335,16 @@ module Gori
           io.puts CLI::Output.term_safe("=== WEBSOCKET PROTOCOL (#{WsProto.summary(ws_frames)}) ===")
           io.puts CLI::Output.term_safe_multiline(WsProto.display(ws_frames).scrub)
         end
+        if ex = JsonRpc.from_flow(rh, rb, sh, sb)
+          io.puts ""
+          io.puts CLI::Output.term_safe("=== RPC (#{JsonRpc.summary(ex)}) ===")
+          io.puts CLI::Output.term_safe_multiline(JsonRpc.display(ex))
+        end
+        if call = LlmCall.from_flow(rh, rb, sh, sb)
+          io.puts ""
+          io.puts CLI::Output.term_safe("=== LLM (#{LlmCall.summary(call)}) ===")
+          io.puts CLI::Output.term_safe_multiline(LlmCall.display(call))
+        end
         if fields = FormData.from_flow(tgt, rh, rb)
           io.puts ""
           io.puts "=== PARAMS (#{fields.size}) ==="

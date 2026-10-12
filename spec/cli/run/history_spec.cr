@@ -501,6 +501,26 @@ describe "gori run show --format json" do
     txt.should contain("⟨ESC⟩")
   end
 
+  it "prints RPC and LLM sections for JSON-RPC and LLM calls" do
+    row = Gori::Store::FlowRow.new(
+      id: 7_i64, created_at: 0_i64, scheme: "https", method: "POST", host: "x", port: 443,
+      target: "/", status: 200, size: 0_i64, state: Gori::Store::FlowState::Complete)
+    head = "POST / HTTP/1.1\r\nHost: x\r\n\r\n".to_slice
+    ok = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n".to_slice
+    rpc = Gori::Store::FlowDetail.new(row, "HTTP/1.1", head,
+      %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search"}}).to_slice,
+      ok, %({"jsonrpc":"2.0","id":1,"result":{"content":[]}}).to_slice)
+    out = Gori::CLI::Run.print_decoded_text_for_spec(rpc)
+    out.should contain("=== RPC (MCP · 1 call · tools/call search) ===")
+    out.should contain("# → tools/call id=1 · search")
+    llm = Gori::Store::FlowDetail.new(row, "HTTP/1.1", head,
+      %({"model":"claude-x","system":"s","messages":[{"role":"user","content":"hi"}]}).to_slice,
+      ok, %({"type":"message","model":"claude-x","content":[{"type":"text","text":"Hello"}],"stop_reason":"end_turn"}).to_slice)
+    out = Gori::CLI::Run.print_decoded_text_for_spec(llm)
+    out.should contain("=== LLM (anthropic · claude-x · end_turn) ===")
+    out.should contain("Hello")
+  end
+
   it "neutralizes escapes in a decoded JWT heading's alg" do
     header = Base64.urlsafe_encode(%q({"alg":"\u001b]0;pwned\u0007","typ":"JWT"}), padding: false)
     token = "#{header}.#{Base64.urlsafe_encode(%({"sub":"1"}), padding: false)}.sig"

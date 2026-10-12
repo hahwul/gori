@@ -90,5 +90,5 @@ Decoder는 네트워크 트래픽을 보내지 않습니다. 순수한 로컬 �
 ## 다음 단계 {#next-steps}
 
 - [Repeater & Fuzzer](/ko/guide/repeater-and-fuzzer/): 페이로드 프로세서는 비슷한 인코드/해시 단계를 사용합니다
-- [Proxy & History](/ko/guide/proxy/): JWT / SAML / GraphQL은 캡처된 플로우에서도 인라인으로 디코드됩니다
+- [Proxy & History](/ko/guide/proxy/): JWT / SAML / GraphQL / JSON-RPC(MCP) / LLM API 호출은 캡처된 플로우에서도 인라인으로 디코드됩니다
 - [Hotkeys](/ko/guide/hotkeys/): Decoder 범위의 동작을 재지정합니다

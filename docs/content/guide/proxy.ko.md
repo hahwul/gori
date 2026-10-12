@@ -279,6 +279,8 @@ protoc --descriptor_set_out=api.desc --include_imports -I. api.proto
 - **SAML**: `SAMLRequest` / `SAMLResponse`에 대해 base64(그리고 리다이렉트 바인딩의 경우 DEFLATE)를 디코드합니다.
 - **GraphQL**: 실제 API가 노출하는 모든 형태에서 `query`, `operationName`, `variables`를 파싱합니다: POST JSON 본문, GET `?query=`, `query=…&variables=…` urlencoded 본문, 배치 배열, persisted query(`extensions.persistedQuery`. 와이어에 문서 자체가 없습니다), multipart 업로드 뮤테이션, 그리고 `Content-Type: application/graphql` 원문 문서. GraphQL을 실어 나르는데 파싱되지 않는 요청은 패널을 잃는 대신 **이유**를 말합니다. 읽을 가치가 있는 쪽은 보통 그 망가진 요청입니다. **구독(subscription)도 포함됩니다.** 캡처된 소켓의 `graphql-transport-ws` 또는 구형 `subscriptions-transport-ws` 프레임도 같은 GRAPHQL 패널로 디코드되며, 판정 기준은 서브프로토콜이 프레임 `type`을 뭐라고 부르는지가 아니라 payload가 GraphQL 봉투인지입니다.
 - **실시간 프레이밍**: 소켓 *안에* 실려 다니는 봉투(**Socket.IO / Engine.IO** `42["chat",{…}]`, **SignalR** `0x1e`로 구분되는 허브 레코드, **STOMP**, **SockJS**, **Action Cable**)를 프레이밍 이름을 단 패널로 디코드합니다. 프레임 한 줄마다 이벤트 이름, 허브 메서드, destination, 채널이 봉투 밖으로 끌려 나옵니다. 판정은 payload로 합니다. 다른 것일 수 없는 프레임이 트랜스크립트에 하나라도 있어야 그 프로토콜이 열리므로, `2`를 텍스트 프레임으로 보내는 채팅 앱이 Socket.IO로 보고되지 않습니다. 핸드셰이크의 `Sec-WebSocket-Protocol`은 하트비트뿐인 세션에서 디코더를 켜주는 힌트일 뿐, 프레임이 무엇인지에 대한 권위가 아닙니다. SockJS는 다른 프레이밍을 감싸므로 메시지를 벗겨 다른 디코더에 넘깁니다(`stomp via sockjs`). 원본 프레임은 MESSAGES에서 그대로 보이고, 파싱되지 않는 프레임은 추측이 아니라 원문으로 떨어집니다.
+- **JSON-RPC / MCP**: 요청 본문의 JSON-RPC 2.0 호출이나 배치를, 응답이 JSON 본문 하나든 SSE 스트림(MCP Streamable HTTP 전송)이든 `id`로 응답과 짝짓습니다. RPC 패널(MCP 서버라면 이름이 `MCP`)은 호출마다 메서드, params, result 또는 error를 보여주고, MCP 호출이 가리키는 도구·프롬프트·리소스를 이름으로 꺼내며, 답이 없는 호출을 알려주고, 스트림 속 서버 쪽 알림과 요청은 따로 나열합니다. QL `rpc:tools/call`로 호출을 찾습니다.
+- **LLM API 호출**: OpenAI chat completions, OpenAI responses, Anthropic messages 요청을 호스트가 아니라 본문 모양으로 알아보므로 자체 호스팅 게이트웨이도 잡힙니다. LLM 패널은 모델, 요청의 메시지 역할과 선언된 도구, 응답의 텍스트·도구 호출·종료 사유·`usage`를 보여주고, 스트리밍 응답의 델타는 스트리밍하지 않은 응답과 같은 텍스트와 도구 호출로 다시 조립합니다.
 - **Form 파라미터**: `application/x-www-form-urlencoded` 및 `multipart/form-data` 요청 본문과 URL 쿼리 문자열을 PARAMS 패널에서 단순한 key=value 목록으로 디코드합니다(multipart 파일 파트는 요약됩니다).
 
 ## 이 플로우는 어디서 왔나 {#flow-source}
@@ -829,6 +831,20 @@ gori settings tls-fingerprint shop.example.com
 그래서 **전송 하나 또는 실행 하나**가 자기 지문을 지정할 수 있고, dial 시점에 해석되며, 목적지 테이블은 그대로 둡니다. Repeater에서 플로우를 열고 TARGET 밴드가 `␣Pt:chrome`이 될 때까지 `␣Pt`를 눌러 전송하세요. 그다음 탭을 복제해 `curl`로 돌린 뒤 다시 전송합니다. 탭 둘, 호스트 하나, 진짜 핸드셰이크 둘, 응답 둘이 화면에 나란히 남습니다. 헤드리스로는 `gori run repeater 42 --tls-preset chrome`이고, 스윕 전체는 `gori run fuzz --tls-preset chrome`으로 지정합니다.
 
 오버라이드는 목적지 정책을 갈아치우는 게 아니라 *좁힙니다*. ClientHello 모양만 가져가고 목적지의 클라이언트 인증서·프로토콜 범위·`permissive`는 그대로 둡니다. 지문 비교가 조용히 "인증됨 vs 익명" 비교로 바뀌면 안 되니까요. 필드별 표 전체는 [전송 단위 TLS 지문](/ko/reference/cli/#per-send-tls-fingerprints)에 있고, `gori settings tls-fingerprint HOST --preset curl`은 오버라이드가 실제로 무엇을 보낼지 보내기 전에 출력해 줍니다.
+
+## Wireshark로 와이어 복호화하기 {#tls-key-log}
+
+History가 보여 주는 건 gori가 *파싱한* 결과입니다. 그 파싱 자체가 의심스러울 때(클라이언트가 보낸 것과 다르게 중계된 h2 프레임, 쪼개진 TLS 레코드, 예상 밖의 ALPN) 유일한 근거는 와이어인데, gori의 두 구간은 모두 암호화돼 있습니다. 클라이언트 ⇄ gori는 gori의 leaf로, gori ⇄ origin은 origin의 인증서로.
+
+`GORI_SSLKEYLOGFILE`(또는 curl·Firefox·Chromium이 이미 읽는 `SSLKEYLOGFILE`)에 파일 경로를 지정해 gori를 시작하면, 두 구간의 모든 핸드셰이크가 `http+tls://` 업스트림 프록시로 가는 TLS 구간까지 포함해 NSS 키 로그 형식으로 비밀값을 덧붙입니다.
+
+```bash
+GORI_SSLKEYLOGFILE=~/gori-keys.log gori
+```
+
+Wireshark에서 Preferences → Protocols → TLS → **(Pre)-Master-Secret log filename**을 그 파일로 지정하면 어느 구간의 캡처든 복호화됩니다. 둘 다 설정돼 있으면 `GORI_SSLKEYLOGFILE`이 이기므로, 브라우저는 자기 파일을 그대로 쓸 수 있습니다. 빈 값(`GORI_SSLKEYLOGFILE=`)이면 브라우저용 `SSLKEYLOGFILE`이 있어도 gori는 기록하지 않습니다.
+
+**이 파일은 담긴 모든 세션을 복호화합니다.** gori는 파일을 본인만 읽을 수 있게(POSIX에서 `0600`, 브라우저가 먼저 만든 파일도 좁힘) 유지하고, 덮어쓰지 않고 이어 쓰며, 모든 표면에서 시작 시 알립니다(TUI는 경고, `gori run`과 `gori mcp`는 stderr의 `⚠` 줄). 디렉터리·FIFO·장치 경로는 거부하고, 첫 쓰기 오류가 나면 연결은 건드리지 않은 채 기록만 끕니다. 환경 변수로만 켭니다. 설정 항목은 없고, MCP 툴로도 켤 수 없습니다.
 
 ## Project 탭 {#project-tab}
 

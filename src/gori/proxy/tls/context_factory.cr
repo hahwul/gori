@@ -1,4 +1,5 @@
 require "./key_pair"
+require "./key_log"
 
 # `Context::Server.insecure` without the system-root import the Windows stdlib adds to it
 # (`Crystal::System::Crypto.populate_system_root_certificates`, which on POSIX `insecure` never
@@ -39,6 +40,7 @@ module Gori::Proxy::Tls
       # Advertise h2 only when allowed; when unset the stdlib select callback
       # NOACKs and the client falls back to HTTP/1.1 (the interceptable path).
       ctx.alpn_protocol = "h2" if advertise_h2
+      KeyLog.install(ctx)
       ctx
     end
 

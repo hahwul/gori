@@ -279,6 +279,8 @@ On top of the wire protocols, gori decodes common payloads inline:
 - **SAML**: base64 (and DEFLATE for the redirect binding) decoded for `SAMLRequest` / `SAMLResponse`.
 - **GraphQL**: `query`, `operationName`, and `variables` parsed out of every shape a real API exposes: a POST JSON body, a GET `?query=`, a `query=…&variables=…` urlencoded body, a batched array, a persisted query (`extensions.persistedQuery`, which carries no document at all), a multipart upload mutation, and a raw `Content-Type: application/graphql` document. A request that is GraphQL-carrying but does not parse says *why* rather than losing the pane, because the malformed one is usually the one worth reading. **Subscriptions count too**: a `graphql-transport-ws` or legacy `subscriptions-transport-ws` frame on a captured socket is decoded into the same GRAPHQL pane, keyed on the payload being a GraphQL envelope rather than on the subprotocol's spelling of the frame `type`.
 - **Real-time framings**: the envelopes that ride *inside* a socket (**Socket.IO / Engine.IO** `42["chat",{…}]`, **SignalR** `0x1e`-delimited hub records, **STOMP**, **SockJS**, and **Action Cable**) are decoded into a pane named after the framing, one line per frame with the event name, hub method, destination or channel lifted out of the envelope. Detection is on the payload: a protocol is only offered once the transcript carries a frame that could be nothing else, so a chat app sending `2` as a text frame is not reported as Socket.IO. The handshake's `Sec-WebSocket-Protocol` is a hint that can switch a decoder on for an all-heartbeat session, never an authority over what a frame is. SockJS wraps another framing, so its messages are unwrapped and handed to the other decoders (`stomp via sockjs`). Frames stay viewable raw in MESSAGES; a frame that does not parse falls through to raw rather than to a guess.
+- **JSON-RPC / MCP**: a JSON-RPC 2.0 call or batch in the request body is paired by `id` with its reply, whether the response is one JSON body or an SSE stream (MCP's Streamable HTTP transport). The RPC pane, named `MCP` for an MCP server, shows each call's method, params and result or error, names the tool, prompt or resource an MCP call is about, says which call went unanswered, and lists the server's own notifications and requests from the stream separately. Find calls with QL `rpc:tools/call`.
+- **LLM API calls**: an OpenAI chat-completions, OpenAI responses or Anthropic messages request, recognised by its body rather than its host so a self-hosted gateway counts too. The LLM pane shows the model, the request's message roles and declared tools, and the reply's text, tool calls, stop reason and `usage`; a streamed reply's deltas are reassembled into the same text and tool calls the non-streamed one would carry.
 - **Form params**: `application/x-www-form-urlencoded` and `multipart/form-data` request bodies, plus the URL query string, decoded into a flat key=value list in the PARAMS pane (multipart file parts are summarised).
 
 ## Where a flow came from {#flow-source}
@@ -831,6 +833,20 @@ A destination rule answers "always look like Chrome to this origin". The questio
 So a **single send or a single run** can name a fingerprint of its own, resolved at dial time, with the destination table untouched. Open the flow in the Repeater, press `␣Pt` until the TARGET band reads `␣Pt:chrome`, send; duplicate the tab, cycle it to `curl`, send again. Two tabs, one host, two real handshakes, both responses on screen. Headless it is `gori run repeater 42 --tls-preset chrome`, and a whole sweep can take one with `gori run fuzz --tls-preset chrome`.
 
 The override *narrows* the destination policy rather than replacing it: it takes the ClientHello shape and leaves the destination's client certificate, protocol range and `permissive` flag exactly where they were, because a fingerprint comparison must not quietly become authenticated-versus-anonymous. The reference has the full field-by-field table under [per-send TLS fingerprints](/reference/cli/#per-send-tls-fingerprints), and `gori settings tls-fingerprint HOST --preset curl` prints what an override will actually send before you send it.
+
+## Decrypting the Wire in Wireshark {#tls-key-log}
+
+History shows what gori *parsed*. When the parsing itself is in doubt (an h2 frame relayed differently from what the client sent, a split TLS record, an ALPN surprise), the only ground truth is the wire, and both of gori's legs are encrypted: client ⇄ gori under gori's leaf, gori ⇄ origin under the origin's certificate.
+
+Start gori with `GORI_SSLKEYLOGFILE` (or the `SSLKEYLOGFILE` curl, Firefox and Chromium already read) pointing at a file, and every handshake on both legs, including the TLS leg to an `http+tls://` upstream proxy, appends its secrets in the NSS key log format:
+
+```bash
+GORI_SSLKEYLOGFILE=~/gori-keys.log gori
+```
+
+In Wireshark, set Preferences → Protocols → TLS → **(Pre)-Master-Secret log filename** to that file, and a capture of either leg decrypts. `GORI_SSLKEYLOGFILE` wins when both are set, so a browser can keep its own file; set it empty (`GORI_SSLKEYLOGFILE=`) and gori logs nothing even when `SSLKEYLOGFILE` is exported for a browser.
+
+**That file decrypts everything it covers.** gori keeps it readable by you only (`0600` on POSIX, tightening an existing file a browser created), appends rather than truncates, and announces it at startup on every surface (a warning in the TUI, a `⚠` line on stderr for `gori run` and `gori mcp`). A path that is a directory, FIFO or device is refused, and the first write error turns logging off without touching the connection. It is read from the environment only: there is no setting, and no MCP tool can turn it on.
 
 ## Project Tab
 

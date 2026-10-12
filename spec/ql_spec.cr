@@ -1316,6 +1316,25 @@ describe "Gori::Store#search (QL)" do
       Gori::QL.parse("src:browser host:a").sql.should eq("((host) LIKE ? ESCAPE '\\')")
     end
 
+    it "finds JSON-RPC calls by method prefix in the request body only, with rpc:" do
+      with_store do |store|
+        call = capture(store, "m.test", "POST", "/mcp", 200)
+        list = capture(store, "m.test", "POST", "/mcp", 200)
+        echo = capture(store, "m.test", "POST", "/echo", 200)
+        store.@db.exec("UPDATE flows SET request_body = ? WHERE id = ?",
+          %({"jsonrpc":"2.0","id":1,"method" : "tools/call","params":{}}).to_slice, call)
+        store.@db.exec("UPDATE flows SET request_body = ? WHERE id = ?",
+          %({"jsonrpc":"2.0","id":2,"method":"tools/list"}).to_slice, list)
+        store.@db.exec("UPDATE flows SET response_body = ? WHERE id = ?",
+          %({"method":"tools/call"}).to_slice, echo)
+        store.search(Gori::QL.parse("rpc:tools/call"), 10).map(&.id).should eq([call])
+        store.search(Gori::QL.parse("rpc:tools/"), 10).map(&.id).sort!.should eq([call, list].sort)
+        store.search(Gori::QL.parse("rpc:Tools/call"), 10).should be_empty # method names are case-sensitive
+        store.search(Gori::QL.parse("rpc:t.ols"), 10).should be_empty      # the value is literal
+      end
+      Gori::QL.dropped_term_reason("rpc:a\u0001b").should eq("value contains control characters")
+    end
+
     it "compiles via: to the surface column with a NULL guard, and drops an unknown value" do
       f = Gori::QL.parse("via:MCP")
       f.sql.should eq("((source_surface IS NOT NULL AND source_surface = ?))")
