@@ -90,6 +90,10 @@ module Gori::CLI::Run
     check_ws_part(op, part, verb)
   end
 
+  def self.parse_rule_part_for_spec(op : Store::RuleOp, part_s : String?) : Store::RulePart
+    parse_rule_part(op, part_s, "add")
+  end
+
   def self.valid_regex_for_spec?(pattern : String) : Bool
     valid_regex?(pattern)
   end
@@ -147,6 +151,29 @@ describe "gori run rewriter — flag parsing" do
     Gori::CLI::Run.parse_rewriter_op_for_spec("remove_header").should eq(Gori::Store::RuleOp::RemoveHeader)
     Gori::CLI::Run.parse_rewriter_op_for_spec("short_circuit").should eq(Gori::Store::RuleOp::ShortCircuit)
     Gori::CLI::Run.parse_rewriter_op_for_spec("SHORT_CIRCUIT").should eq(Gori::Store::RuleOp::ShortCircuit)
+    Gori::CLI::Run.parse_rewriter_op_for_spec("json_set").should eq(Gori::Store::RuleOp::JsonSet)
+    Gori::CLI::Run.parse_rewriter_op_for_spec("JSON_REMOVE").should eq(Gori::Store::RuleOp::JsonRemove)
+  end
+
+  # #1599: a JSON op's --part defaults to the body, the one part it edits; every other op keeps
+  # the head default, and an explicit --part is read as given (the head is refused afterwards).
+  it "defaults --part to body for a json op, and accepts its shapes" do
+    json_set = Gori::Store::RuleOp::JsonSet
+    Gori::CLI::Run.parse_rule_part_for_spec(json_set, nil).body?.should be_true
+    Gori::CLI::Run.parse_rule_part_for_spec(Gori::Store::RuleOp::Replace, nil).head?.should be_true
+    Gori::CLI::Run.parse_rule_part_for_spec(json_set, "ws").ws?.should be_true
+    Gori::CLI::Run.check_ws_part_for_spec(Gori::Store::RuleOp::JsonRemove, Gori::Store::RulePart::Ws, "add").should be_nil
+  end
+
+  it "lists a json rule by its path" do
+    set = Gori::Store::MatchRule.new(1_i64, true, Gori::Store::RuleTarget::Response, Gori::Store::RulePart::Body,
+      "$.user.role", %("admin"), Gori::Store::RuleOp::JsonSet)
+    remove = Gori::Store::MatchRule.new(2_i64, true, Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Ws,
+      "$.items[0]", "", Gori::Store::RuleOp::JsonRemove)
+    Gori::CLI::Run.rewriter_op_tag_for_spec(set).should eq("~json/B")
+    Gori::CLI::Run.rewriter_rule_body_for_spec(set).should eq(%($.user.role = "admin"))
+    Gori::CLI::Run.rewriter_op_tag_for_spec(remove).should eq("-json/W")
+    Gori::CLI::Run.rewriter_rule_body_for_spec(remove).should eq("$.items[0]")
   end
 
   it "reads an empty --range as 'no range', and A:B as a half-open pair" do

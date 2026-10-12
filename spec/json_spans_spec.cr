@@ -92,4 +92,62 @@ describe "Gori::JsonSpans on a root scalar with trailing data" do
       Gori::RawJson.valid?(body).should be_true
     end
   end
+
+  describe ".edit (#1599)" do
+    edit = ->(json : String, path : String, value : String?) do
+      steps = Gori::JsonPath.parse(path).as(Array(Gori::JsonPath::Step))
+      J.edit(json.to_slice, steps, value).try { |b| String.new(b) }
+    end
+
+    it "replaces only the named value's bytes" do
+      edit.call(%({"user":{"role":"user","id":1}}), "$.user.role", %("admin"))
+        .should eq(%({"user":{"role":"admin","id":1}}))
+      edit.call(%({ "a" : [1, {"b": 2}] }), "$.a[1].b", "true").should eq(%({ "a" : [1, {"b": true}] }))
+      edit.call(%({"a":[1,2,3]}), "$.a[-1]", "9").should eq(%({"a":[1,2,9]}))
+    end
+
+    it "keeps every other byte: duplicates, number spellings, escapes, whitespace" do
+      src = %({"dup":1, "n": 1.0e2,\n "s":"\\u00e9", "é": "x", "dup":2 })
+      edit.call(src, "$.s", %("y")).should eq(%({"dup":1, "n": 1.0e2,\n "s":"y", "é": "x", "dup":2 }))
+      # a duplicated key resolves last-wins, as `JsonPath.resolve` reads it
+      edit.call(src, "$.dup", "3").should eq(%({"dup":1, "n": 1.0e2,\n "s":"\\u00e9", "é": "x", "dup":3 }))
+    end
+
+    it "appends a missing last key, and leaves a missing intermediate alone" do
+      edit.call(%({"user":{"id":1}}), "$.user.role", %("admin")).should eq(%({"user":{"id":1,"role":"admin"}}))
+      edit.call(%({}), "$.k", "1").should eq(%({"k":1}))
+      edit.call(%({"user":{"id":1}}), "$.org.role", "1").should be_nil
+      edit.call(%({"a":[1]}), "$.a[5]", "1").should be_nil # no append into an array
+      edit.call(%({"a":[1]}), "$.a.b", "1").should be_nil  # type mismatch
+      edit.call(%({"a":1}), "$.a.b", "1").should be_nil
+    end
+
+    it "removes a member or element with exactly one adjoining comma" do
+      edit.call(%({"a":1, "b":2, "c":3}), "$.a", nil).should eq(%({"b":2, "c":3}))
+      edit.call(%({"a":1, "b":2, "c":3}), "$.b", nil).should eq(%({"a":1, "c":3}))
+      edit.call(%({"a":1, "b":2, "c":3}), "$.c", nil).should eq(%({"a":1, "b":2}))
+      edit.call(%({ "a" : 1 }), "$.a", nil).should eq(%({  }))
+      edit.call(%({"items":[{"x":1},{"y":2},3]}), "$.items[1]", nil).should eq(%({"items":[{"x":1},3]}))
+      edit.call(%({"items":[1,2,3]}), "$.items[-1]", nil).should eq(%({"items":[1,2]}))
+      edit.call(%({"a":1}), "$.b", nil).should be_nil
+      edit.call(%({"x":{"a":1, "b":0, "a":2}}), "$.x.a", nil).should eq(%({"x":{"b":0}})) # every copy
+    end
+
+    it "is nil on a body that is not one JSON value" do
+      edit.call("not json", "$.a", "1").should be_nil
+      edit.call(%({"a":1} trailing), "$.a", "2").should be_nil
+      edit.call(%([1,2]), "$[0]", "5").should eq(%([5,2]))
+      edit.call("42", "$.a", "1").should be_nil
+    end
+
+    it "every edit leaves one valid JSON value" do
+      src = %({"a":[1,{"b":[2,3]},4],"c":{"d":null}})
+      ["$.a[0]", "$.a[1].b[0]", "$.a[1].b[-1]", "$.a[-1]", "$.c.d", "$.c", "$.a"].each do |path|
+        got = edit.call(src, path, nil).not_nil!
+        J.valid?(got.to_slice).should be_true
+        got = edit.call(src, path, %({"z":[]})).not_nil!
+        J.valid?(got.to_slice).should be_true
+      end
+    end
+  end
 end

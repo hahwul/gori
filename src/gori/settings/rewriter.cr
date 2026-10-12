@@ -138,7 +138,7 @@ module Gori::Settings
 
   RULE_TARGETS = %w[request response]
   RULE_PARTS   = %w[head body ws]
-  RULE_OPS     = %w[replace add_header set_header remove_header short_circuit pipe]
+  RULE_OPS     = Store::RuleOp.values.map(&.label)
   RULE_KINDS   = %w[literal regex]
 
   # Parse the `rewriter` section.
@@ -185,7 +185,8 @@ module Gori::Settings
       next if pattern.nil? || pattern.empty?
       op, raw_op = parse_rule_label(o["op"]?, RULE_OPS, "replace")
       target, raw_target = parse_rule_label(o["target"]?, RULE_TARGETS, "request")
-      part, raw_part = parse_rule_label(o["part"]?, RULE_PARTS, "head")
+      # A JSON op with no `part` edits the body, as `gori run rewriter add` and MCP default it.
+      part, raw_part = parse_rule_label(o["part"]?, RULE_PARTS, default_part(op))
       match_kind, raw_match_kind = parse_rule_label(o["match_kind"]?, RULE_KINDS, "literal")
       next if known_rule_shape?(op, part) && impossible_shape?(op, part)
       extra = unread_rule_keys(o)
@@ -262,7 +263,7 @@ module Gori::Settings
 
   # Whether this op/part pair names a rule that could never rewrite anything: a header op
   # (add/set/remove) on a part that is not the head. A header op acts by header NAME, and only
-  # a head has header lines.
+  # a head has header lines. A JSON op (#1599) on the head is the mirror image: it edits a body.
   #
   # DROPPED, not coerced onto the head, and the distinction is the whole point. The pair cannot
   # arrive through any CRUD surface — the CLI and MCP REFUSE it outright rather than normalize
@@ -275,7 +276,16 @@ module Gori::Settings
   #
   # Same disposition, and the same sentence, as the entry with no pattern above: a rule that
   # can never match, which `Rules#add` refuses anyway.
+  private def self.json_op?(op : String) : Bool
+    Store::RuleOp.from_label?(op).try(&.json?) || false
+  end
+
+  private def self.default_part(op : String) : String
+    json_op?(op) ? "body" : "head"
+  end
+
   private def self.impossible_shape?(op : String, part : String) : Bool
+    return part == "head" if json_op?(op)
     part != "head" && (op == "add_header" || op == "set_header" || op == "remove_header")
   end
 

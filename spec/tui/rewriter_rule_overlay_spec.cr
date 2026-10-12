@@ -92,6 +92,55 @@ describe Gori::Tui::RewriterRuleOverlay do
     ov.handle_key(skey(Termisu::Input::Key::Enter)).should eq(:commit)
   end
 
+  # #1599: the JSON ops edit a body, so choosing one moves a head part onto the body and the
+  # part cycler never lands on the head; `find:` is the path and `value:` a JSON value, both
+  # judged by the validator the CLI and MCP share.
+  it "edits a json rule: body-only part, a path and a JSON value" do
+    ov = RewriterRuleOverlay.adding
+    down(ov, 3)                                                 # op row
+    6.times { ov.handle_key(skey(Termisu::Input::Key::Right)) } # → json_set
+    ov.op.should eq(Gori::Store::RuleOp::JsonSet)
+    ov.part.should eq(Gori::Store::RulePart::Body) # a head part reads as the body
+    ov.handle_key(skey(Termisu::Input::Key::Right))
+    ov.handle_key(skey(Termisu::Input::Key::Right)) # → past json_remove, back to replace
+    ov.part.should eq(Gori::Store::RulePart::Head)  # the head rule kept its part
+    2.times { ov.handle_key(skey(Termisu::Input::Key::Left)) }
+    down(ov, 1)
+    ov.@sel.should eq(RewriterRuleOverlay::ROW_PART) # match skipped
+    ov.handle_key(skey(Termisu::Input::Key::Right))
+    ov.part.should eq(Gori::Store::RulePart::Ws)
+    ov.handle_key(skey(Termisu::Input::Key::Right)) # ws → (head skipped) → body
+    ov.part.should eq(Gori::Store::RulePart::Body)
+    down(ov, 2) # host → path
+    stype(ov, "$.user.role")
+    ov.valid?.should be_false
+    ov.invalid_reason.should contain("one JSON value")
+    down(ov, 1)
+    stype(ov, "admin")
+    ov.valid?.should be_false
+    ov.set_selected(RewriterRuleOverlay::ROW_VALUE)
+    6.times { ov.handle_key(skey(Termisu::Input::Key::Backspace)) }
+    stype(ov, %("admin"))
+    ov.valid?.should be_true
+    ov.candidate_rule.pattern.should eq("$.user.role")
+    ov.candidate_rule.replacement.should eq(%("admin"))
+  end
+
+  it "skips the value row for json_remove and refuses a path it cannot read" do
+    ov = RewriterRuleOverlay.editing(Gori::Store::MatchRule.new(3_i64, true, Gori::Store::RuleTarget::Response,
+      Gori::Store::RulePart::Ws, "$.items[*]", "", Gori::Store::RuleOp::JsonRemove))
+    ov.part.should eq(Gori::Store::RulePart::Ws)
+    ov.valid?.should be_false
+    ov.invalid_reason.should contain("*")
+    ov.set_selected(RewriterRuleOverlay::ROW_FIND)
+    2.times { ov.handle_key(skey(Termisu::Input::Key::Backspace)) }
+    stype(ov, "0]")
+    ov.pattern.should eq("$.items[0]")
+    ov.valid?.should be_true
+    down(ov, 1)
+    ov.@sel.should eq(RewriterRuleOverlay::ROW_SAVE)
+  end
+
   it "requires a pattern, and validates a regex replace" do
     ov = RewriterRuleOverlay.adding
     ov.valid?.should be_false                       # empty pattern

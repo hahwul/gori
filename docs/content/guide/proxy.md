@@ -507,8 +507,12 @@ Each rule has an operation:
 | **Remove header** | Drop a header by name |
 | **Short circuit** (`stub` in the editor) | Answer the request from the rule, without dialing the origin at all |
 | **Pipe** | Run a command (no shell), feed it the matched bytes on stdin, and replace them with its stdout |
+| **Set JSON field** (`json_set`) | Set the value at a JSON path in a body or WebSocket message, adding the key if it is missing |
+| **Remove JSON field** (`json_remove`) | Delete the member or array element at a JSON path |
 
 A **Replace** rule targets the request or response, and the **head** (request/status line + headers), the **body** (the entity), or **ws** (a WebSocket message; see [Match & Replace on WebSocket](#match-replace-websocket) below). Choose literal or regex matching; a regex replacement supports `$1`/`$2` capture-group interpolation (write `$$` for a literal `$`). Header operations always act on the head and match by header name, case-insensitively. An empty value deletes the matched text or removes the header.
+
+The two **JSON** operations edit a JSON body or WebSocket text message by path, so whitespace, key order or a same-named key at another depth cannot make them miss or hit the wrong field. The `path:` row takes `$.user.role`, `$["odd key"]`, `$.items[0]` or `$.items[-1]` (from the end); wildcards, `..` and filters are refused. **Set JSON field** writes its `JSON value:` as JSON text (`"admin"` with the quotes, `true`, `{"a":1}`): anything else is refused on save, and a `$ENV.NAME`/`$BIND.NAME` in it is checked again once resolved. Only that value's bytes change; number spellings, escapes and whitespace elsewhere go out as they arrived. A missing last key is appended; a missing parent, a type mismatch, an index out of range or a body that is not JSON (compressed included) leaves the message alone. A duplicated key is set in its last copy and removed in every copy. They work on **body** or **ws**, never the head: `gori run rewriter add --op=json_set --target=response --find='$.isAdmin' --value=true`, or `op: json_set` on MCP `create_rule`.
 
 Scope any rule to a **host** so it only fires for matching traffic: a plain string means that host and its subdomains (`example.com` matches `example.com` and `api.example.com`, but not `xexample.com` or `example.com.evil.net`), and `*` is the explicit wildcard for anything wider (`*.example.com`). Leave it empty to apply to every host.
 

@@ -873,10 +873,10 @@ salt는 **비밀**이며, `env`의 토큰 값과 같은 조건으로 보관됩�
 | `name` | `--name` | 규칙 목록에 보이는 라벨 |
 | `target` | `--target` | `request` 또는 `response` |
 | `part` | `--part` | `head`, `body`, `ws` |
-| `op` | `--op` | `replace`, `add_header`, `set_header`, `remove_header`, `short_circuit`, `pipe` |
+| `op` | `--op` | `replace`, `add_header`, `set_header`, `remove_header`, `short_circuit`, `pipe`, `json_set`, `json_remove` |
 | `match_kind` | `--match` | `literal` 또는 `regex` |
-| `pattern` | `--find` | 매칭할 대상. `pattern`이 비어 있는 규칙은 파일을 읽을 때 버려집니다 |
-| `replacement` | `--value` | 치환 텍스트, 헤더 값, 미리 정한 응답, 또는 `pipe` 명령 |
+| `pattern` | `--find` | 매칭할 대상, json 동작에서는 JSON 경로. `pattern`이 비어 있는 규칙은 파일을 읽을 때 버려집니다 |
+| `replacement` | `--value` | 치환 텍스트, 헤더 값, 미리 정한 응답, `pipe` 명령, 또는 JSON 텍스트로 쓴 `json_set` 값 |
 | `host` | `--host` | 호스트 glob. 비어 있으면 어디에나 적용됩니다 |
 | `body_file` | `--body-file`, `--map-dir` | `short_circuit` 규칙이 제공하는 파일, 또는 매핑하는 디렉터리 |
 | `respond` | | `short_circuit` 규칙이 답하는 방식: `inline`, `file`, `dir`, `fault`. `body_file`이 암시하는 값(있으면 `file`, 없으면 `inline`)이고 `respond_args`가 없으면 생략됩니다 |

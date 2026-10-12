@@ -1396,9 +1396,9 @@ gori run rewriter rm 3
 
 | Option | Description |
 | -------- | ------------- |
-| `--op=OP` | `replace` (default), `add_header`, `set_header`, `remove_header`, `short_circuit`, `pipe` |
+| `--op=OP` | `replace` (default), `add_header`, `set_header`, `remove_header`, `short_circuit`, `pipe`, `json_set`, `json_remove` |
 | `--side=SIDE` (`--target`) | `request` (default) or `response` |
-| `--part=PART` | `head` (default), `body`, or `ws` (a WebSocket message). Only meaningful for `replace` and `pipe` |
+| `--part=PART` | `head` (default; `body` for the json ops), `body`, or `ws` (a WebSocket message). Only meaningful for `replace`, `pipe` and the json ops, which refuse `head` |
 | `--match=MODE` | `literal` (default) or `regex`, for `replace`, `pipe` and `short_circuit`. Regex replacements take `$1`, `$2`; `$$` is a literal `$` |
 | `--response-file=PATH` | `short_circuit`: read the canned response from PATH (`-` = stdin from a pipe or a redirect, a terminal is refused) |
 | `--body-file=PATH` | `short_circuit`: serve PATH as the response body, re-read whenever it changes |
@@ -1409,8 +1409,8 @@ gori run rewriter rm 3
 | `--hang=MS` | With `--fault=hang`: how long to hold before closing (default 30000) |
 | `--delay=MS` | `short_circuit`: wait before answering (max 120000) |
 | `--from-flow=ID` | `short_circuit`: copy flow ID's captured response into the rule. `--find`, `--host` and `--value` override what it drafts |
-| `-f`, `--find=FIND` | Required, except with `--from-flow` or `--map-dir --strip-prefix`. The literal, pattern, or header name to act on |
-| `-v`, `--value=VALUE` | Replacement text, header value, or (with `--op=pipe`) the COMMAND to run. See [Process hooks](/guide/scripting/#process-hooks) |
+| `-f`, `--find=FIND` | Required, except with `--from-flow` or `--map-dir --strip-prefix`. The literal, pattern, header name, or (json ops) JSON path such as `$.user.role` to act on |
+| `-v`, `--value=VALUE` | Replacement text, header value, the new value as JSON text for `json_set` (`'"admin"'`, `true`), or (with `--op=pipe`) the COMMAND to run. See [Process hooks](/guide/scripting/#process-hooks) |
 | `--host=GLOB` | Limit the rule to a host and its subdomains (`example.com` also matches `api.example.com`, but not `xexample.com`); `*` is the explicit wildcard. Omit to apply everywhere |
 | `--name=NAME` | Label shown in the rule list |
 | `--disabled` | Create the rule without arming it |

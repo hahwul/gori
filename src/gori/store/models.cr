@@ -1222,6 +1222,11 @@ module Gori
       RemoveHeader
       ShortCircuit
       Pipe
+      # Edit a JSON body or WebSocket message by path (#1599): `pattern` is a `JsonPath`,
+      # `replacement` the new value as JSON TEXT. `JsonRemove` ignores `replacement`, the way
+      # `RemoveHeader` does. Both splice bytes (`JsonSpans.edit`) and never re-serialize.
+      JsonSet
+      JsonRemove
 
       def label : String
         case self
@@ -1231,6 +1236,8 @@ module Gori
         in RuleOp::RemoveHeader then "remove_header"
         in RuleOp::ShortCircuit then "short_circuit"
         in RuleOp::Pipe         then "pipe"
+        in RuleOp::JsonSet      then "json_set"
+        in RuleOp::JsonRemove   then "json_remove"
         end
       end
 
@@ -1253,6 +1260,12 @@ module Gori
       # what an op DOES has to name the ops it is true for.
       def header? : Bool
         add_header? || set_header? || remove_header?
+      end
+
+      # A JSON-path op: body or ws only, `pattern` read by `JsonPath`. An explicit list for the
+      # reason `header?` gives.
+      def json? : Bool
+        json_set? || json_remove?
       end
 
       # Does this op run an EXTERNAL COMMAND when it fires? True only for `Pipe`. The trust

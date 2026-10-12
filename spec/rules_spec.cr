@@ -1071,4 +1071,84 @@ describe Gori::Rules do
       end
     end
   end
+
+  describe "json_set / json_remove (#1599)" do
+    body = Gori::Store::RulePart::Body
+    req = Gori::Store::RuleTarget::Request
+    resp = Gori::Store::RuleTarget::Response
+    set = Gori::Store::RuleOp::JsonSet
+    remove = Gori::Store::RuleOp::JsonRemove
+
+    it "sets and removes a body value by path, copying every other byte" do
+      with_store do |store|
+        rules = Gori::Rules.load(store)
+        rules.add(resp, body, "$.user.role", %("admin"), set)
+        rules.add(resp, body, "$.features[1]", "", remove)
+        src = %({"user":{"role":"user","id":1.0e2}, "features":[{"a":1}, {"b":2}],"dup":1,"dup":2})
+        String.new(rules.rewrite_response_body(src.to_slice, "acme.test"))
+          .should eq(%({"user":{"role":"admin","id":1.0e2}, "features":[{"a":1}],"dup":1,"dup":2}))
+      end
+    end
+
+    it "passes a body that is not JSON, or lacks the path, through unchanged and unreported" do
+      with_store do |store|
+        rules = Gori::Rules.load(store)
+        rules.add(req, body, "$.a.b", "1", set)
+        ["a=1&b=2", "\x1f\x8b\b", %({"a":1}), %({"c":{}})].each do |src|
+          String.new(rules.rewrite_request_body(src.to_slice, "")).should eq(src)
+        end
+        store.events_after(0, 50).select(&.level.==("warn")).should be_empty
+      end
+    end
+
+    it "edits a WebSocket text message, and never a head" do
+      with_store do |store|
+        rules = Gori::Rules.load(store)
+        rules.add(req, Gori::Store::RulePart::Ws, "$.op", %("pong"), set)
+        String.new(rules.rewrite_ws_out(%({"op":"ping"}).to_slice, "")).should eq(%({"op":"pong"}))
+
+        # a head json rule (a hand-edited settings.json) is never counted or applied
+        rules.add(req, Gori::Store::RulePart::Head, "$.a", "1", set)
+        rules.rewrite_request(%(GET / HTTP/1.1\r\n\r\n{"a":0}).to_slice, "").should eq(%(GET / HTTP/1.1\r\n\r\n{"a":0}).to_slice)
+      end
+    end
+
+    it "resolves references in the value, and refuses one that stops being JSON" do
+      prev = Gori::Settings.project_env_vars
+      begin
+        with_store do |store|
+          ref = Gori::Env.spell("ROLE", Gori::Env::Namespace::Env)
+          rules = Gori::Rules.load(store)
+          rules.add(req, body, "$.role", ref, set, name: "pin")
+          Gori::Settings.project_env_vars = [{"ROLE", %("admin")}]
+          Gori::Env.bump_highlight_rev
+          String.new(rules.rewrite_request_body(%({"role":"user"}).to_slice, "")).should eq(%({"role":"admin"}))
+
+          Gori::Settings.project_env_vars = [{"ROLE", "admin"}] # bare text: not one JSON value
+          Gori::Env.bump_highlight_rev
+          String.new(rules.rewrite_request_body(%({"role":"user"}).to_slice, "")).should eq(%({"role":"user"}))
+          ev = store.events_after(0, 50).find { |e| e.kind == "json_value_refused" }.not_nil!
+          ev.message.should start_with(%(rewrite rule "pin" not applied))
+        end
+      ensure
+        Gori::Settings.project_env_vars = prev
+        Gori::Env.bump_highlight_rev
+      end
+    end
+
+    it "validates a rule's shape once, for every surface" do
+      err = ->(op : Gori::Store::RuleOp, part : Gori::Store::RulePart, path : String, value : String) do
+        Gori::Rules.json_rule_error(op, part, path, value)
+      end
+      err.call(set, body, "$.a", %("x")).should be_nil
+      err.call(remove, Gori::Store::RulePart::Ws, "$.a[-1]", "ignored").should be_nil
+      err.call(set, Gori::Store::RulePart::Head, "$.a", "1").not_nil!.should contain("not a head")
+      err.call(set, body, "$..a", "1").not_nil!.should contain("recursive descent")
+      err.call(remove, body, "$", "").not_nil!.should contain("whole document")
+      err.call(set, body, "$.a", "admin").not_nil!.should contain("one JSON value")
+      err.call(set, body, "$.a", %("a" "b")).not_nil!.should contain("one JSON value")
+      err.call(set, body, "$.a", Gori::Env.spell("ROLE", Gori::Env::Namespace::Env)).should be_nil # judged once resolved
+      err.call(Gori::Store::RuleOp::Replace, Gori::Store::RulePart::Head, "$..a", "x").should be_nil
+    end
+  end
 end

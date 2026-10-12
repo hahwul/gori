@@ -875,10 +875,10 @@ A `rewriter` rule's fields map onto the `gori run rewriter add` flags:
 | `name` | `--name` | Label in the rule list |
 | `target` | `--target` | `request` or `response` |
 | `part` | `--part` | `head`, `body` or `ws` |
-| `op` | `--op` | `replace`, `add_header`, `set_header`, `remove_header`, `short_circuit` or `pipe` |
+| `op` | `--op` | `replace`, `add_header`, `set_header`, `remove_header`, `short_circuit`, `pipe`, `json_set` or `json_remove` |
 | `match_kind` | `--match` | `literal` or `regex` |
-| `pattern` | `--find` | What to match. A rule with an empty `pattern` is dropped when the file loads |
-| `replacement` | `--value` | Replacement text, header value, canned response, or the `pipe` command |
+| `pattern` | `--find` | What to match, or the JSON path for the json ops. A rule with an empty `pattern` is dropped when the file loads |
+| `replacement` | `--value` | Replacement text, header value, canned response, the `pipe` command, or the `json_set` value as JSON text |
 | `host` | `--host` | Host glob; empty applies everywhere |
 | `body_file` | `--body-file`, `--map-dir` | The file a `short_circuit` rule serves, or the directory it maps |
 | `respond` | | How a `short_circuit` rule answers: `inline`, `file`, `dir` or `fault`. Omitted when it is what `body_file` implies (`file` with one, `inline` without) and there are no `respond_args` |

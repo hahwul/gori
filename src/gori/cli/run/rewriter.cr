@@ -360,15 +360,7 @@ module Gori
       end
 
       private def self.rewriter_op_tag(r : Store::MatchRule) : String
-        return "?" if r.inert?
-        case r.op
-        when .replace?       then "#{r.match_kind.regex? ? "re" : "sub"}/#{r.part.badge}"
-        when .add_header?    then "+hdr"
-        when .set_header?    then "~hdr"
-        when .short_circuit? then "stub"
-        when .pipe?          then "pipe/#{r.part.badge}"
-        else                      "-hdr"
-        end
+        Gori::Rules.op_tag(r)
       end
 
       # `=>` rather than `->` for a stub: it answers instead of forwarding, so the row should
@@ -376,8 +368,9 @@ module Gori
       private def self.rewriter_rule_body(r : Store::MatchRule) : String
         return r.inert_reason || "unknown rule" if r.inert?
         case r.op
-        when .remove_header? then r.pattern
-        when .short_circuit? then "#{r.pattern} => #{RuleStub.summary(r)}"
+        when .remove_header?, .json_remove? then r.pattern
+        when .json_set?                     then "#{r.pattern} = #{r.replacement}"
+        when .short_circuit?                then "#{r.pattern} => #{RuleStub.summary(r)}"
           # `<>` rather than `->`: the text on the right is the COMMAND, not the bytes it puts
           # on the wire. Same distinction `Rules.describe` draws with `⇄` in the TUI.
         when .pipe? then "#{r.pattern} <> #{r.replacement}"
@@ -422,17 +415,11 @@ module Gori
         end
       end
 
+      private OP_CHOICES = Store::RuleOp.values.join('|', &.label)
+
       # Parse the shared rule-shape flags into store enums, aborting on a bad value.
       private def self.parse_rewriter_op(s : String) : Store::RuleOp
-        case s.downcase
-        when "replace"       then Store::RuleOp::Replace
-        when "add_header"    then Store::RuleOp::AddHeader
-        when "set_header"    then Store::RuleOp::SetHeader
-        when "remove_header" then Store::RuleOp::RemoveHeader
-        when "short_circuit" then Store::RuleOp::ShortCircuit
-        when "pipe"          then Store::RuleOp::Pipe
-        else                      abort "gori run rewriter: invalid --op '#{s}' (replace|add_header|set_header|remove_header|short_circuit|pipe)"
-        end
+        Store::RuleOp.from_label?(s.downcase) || abort "gori run rewriter: invalid --op '#{s}' (#{OP_CHOICES})"
       end
 
       # `--value` for a short-circuit rule is the whole canned response, which is multi-line
@@ -530,7 +517,7 @@ module Gori
         if find.try(&.empty?) || (find.nil? && mock.from_flow.nil?)
           abort "gori run rewriter add: --find is required"
         end
-        if find && match.regex? && !op.header? && !valid_regex?(find)
+        if find && match.regex? && !op.header? && !op.json? && !valid_regex?(find)
           abort "gori run rewriter add: invalid regex --find (failed to compile)"
         end
         {find, match}
@@ -554,7 +541,7 @@ module Gori
       private def self.cmd_rewriter_add(args : Array(String)) : Nil
         proj = ProjectFlags.new
         target_s = "request"
-        part_s = "head"
+        part_s = nil.as(String?)
         op_s = "replace"
         match_s = "literal"
         match_given = false
@@ -581,7 +568,10 @@ module Gori
                      "For pipe: --find selects the region and --value is a COMMAND, run with\n" \
                      "no shell, fed the matched bytes on stdin; its stdout replaces them. It\n" \
                      "runs with YOUR privileges. On timeout, non-zero exit or a failed spawn\n" \
-                     "the bytes pass through unchanged and a notice is written.\n\n" \
+                     "the bytes pass through unchanged and a notice is written.\n" \
+                     "For json_set / json_remove: --find is a JSON path ($.user.role,\n" \
+                     "$.items[-1]) and --value the new value as JSON (\"admin\", true, 42);\n" \
+                     "only that value's bytes change. --part defaults to body.\n\n" \
                      "Mocking (short_circuit): --map-dir serves files from a directory by path,\n" \
                      "--fault answers with a close/reset/hang instead of a response, --delay\n" \
                      "waits first, and --from-flow copies a captured response into the rule."
@@ -590,9 +580,9 @@ module Gori
           # `--side` is the name that does not collide (#1389): `--target` is a URL on every
           # other command. Kept, so no script breaks.
           p.on("--target=SIDE", "Alias for --side") { |v| target_s = v }
-          p.on("--op=OP", "replace|add_header|set_header|remove_header|short_circuit|pipe (default replace)") { |v| op_s = v }
+          p.on("--op=OP", "#{OP_CHOICES} (default replace)") { |v| op_s = v }
           p.on("--match=KIND", "literal|regex (default literal; replace/pipe/short_circuit only)") { |v| match_s = v; match_given = true }
-          p.on("--part=PART", "head|body|ws (default head; replace/pipe only; ws = a WebSocket message)") { |v| part_s = v }
+          p.on("--part=PART", "head|body|ws (default head, body for a json op; replace/pipe/json only; ws = a WebSocket message)") { |v| part_s = v }
           p.on("--host=GLOB", "Scope to a host glob ('' = all; '*.example.com')") { |v| host = v }
           p.on("--scope=SCOPE", "project (default) | global — a global rule applies in EVERY project") { |v| scope = parse_rule_scope(v) }
           p.on("--name=NAME", "Optional rule label") { |v| name = v }
@@ -613,7 +603,7 @@ module Gori
 
         op = parse_rewriter_op(op_s)
         target = Store::RuleTarget.parse?(target_s) || abort("gori run rewriter add: invalid --target/--side '#{target_s}' (request|response)")
-        part = Store::RulePart.parse?(part_s) || abort("gori run rewriter add: invalid --part '#{part_s}'")
+        part = parse_rule_part(op, part_s, "add")
         match = Store::MatchKind.parse?(match_s) || abort("gori run rewriter add: invalid --match '#{match_s}' (literal|regex)")
         # The `--from-flow` draft's pattern is a regex; an explicit `--match literal` over it
         # was overridden unsaid. Refused by name, as MCP refuses `match` beside `from_flow_id`.
@@ -633,6 +623,7 @@ module Gori
         # ordering, and same reason, as `repeater create` and `issues create` (#1034).
         check_ws_part(op, part, "add")
         check_pipe_value(op, value_arg || "", "add")
+        check_json_rule(op, part, find_arg, value_arg, "add")
         value_arg = check_short_circuit_args(op, value_arg, response_file, body_file)
         target, part = Gori::Rules.normalize_shape(op, target, part)
 
@@ -703,9 +694,25 @@ module Gori
       # operator asked to rewrite WebSocket frames and would have got a rule rewriting HTTP
       # request heads, with nothing on screen to say so.
       private def self.check_ws_part(op : Store::RuleOp, part : Store::RulePart, verb : String) : Nil
-        return unless part.ws? && !(op.replace? || op.pipe?)
-        abort "gori run rewriter #{verb}: --op=#{op.label} cannot use --part=ws — only replace " \
-              "and pipe rewrite a WebSocket message; use --part=head for an HTTP header or short-circuit rule"
+        return unless part.ws? && !(op.replace? || op.pipe? || op.json?)
+        abort "gori run rewriter #{verb}: --op=#{op.label} cannot use --part=ws — only replace, " \
+              "pipe and the json ops rewrite a WebSocket message; use --part=head for an HTTP header or short-circuit rule"
+      end
+
+      # `--part`, defaulting to the body for a JSON op — the one part it can edit — and the head
+      # for everything else, as it always has.
+      private def self.parse_rule_part(op : Store::RuleOp, part_s : String?, verb : String) : Store::RulePart
+        return (op.json? ? Store::RulePart::Body : Store::RulePart::Head) unless part_s
+        Store::RulePart.parse?(part_s) || abort("gori run rewriter #{verb}: invalid --part '#{part_s}'")
+      end
+
+      # `--find` is a JSON path and `--value` a JSON value for the json ops (#1599); the same
+      # validator the TUI editor and the MCP tools call (`Rules.json_rule_error`).
+      private def self.check_json_rule(op : Store::RuleOp, part : Store::RulePart, find : String?,
+                                       value : String?, verb : String) : Nil
+        if why = Gori::Rules.json_rule_error(op, part, find || "", value || "")
+          abort "gori run rewriter #{verb}: #{why}"
+        end
       end
 
       # A pipe rule's --value is the ARGV, so an unparseable one is a rule that matches live
@@ -810,7 +817,7 @@ module Gori
       private def self.cmd_rewriter_preview(args : Array(String)) : Nil
         proj = ProjectFlags.new
         target_s = "request"
-        part_s = "head"
+        part_s = nil.as(String?)
         op_s = "replace"
         match_s = "literal"
         host = ""
@@ -828,9 +835,9 @@ module Gori
           # `--side` is the name that does not collide (#1389): `--target` is a URL on every
           # other command. Kept, so no script breaks.
           p.on("--target=SIDE", "Alias for --side") { |v| target_s = v }
-          p.on("--op=OP", "replace|add_header|set_header|remove_header|short_circuit|pipe (default replace)") { |v| op_s = v }
+          p.on("--op=OP", "#{OP_CHOICES} (default replace)") { |v| op_s = v }
           p.on("--match=KIND", "literal|regex (default literal)") { |v| match_s = v }
-          p.on("--part=PART", "head|body|ws (default head)") { |v| part_s = v }
+          p.on("--part=PART", "head|body|ws (default head, body for a json op)") { |v| part_s = v }
           p.on("--host=GLOB", "Scope to a host glob") { |v| host = v }
           p.on("-fFIND", "--find=FIND", "Match substring/regex, or header name (required)") { |v| find = v }
           p.on("-vVALUE", "--value=VALUE", "Replacement, or header value") { |v| value = v }
@@ -840,15 +847,16 @@ module Gori
         abort "gori run rewriter preview: --find is required" if (f = find).nil? || f.empty?
         op = parse_rewriter_op(op_s)
         target = Store::RuleTarget.parse?(target_s) || abort("gori run rewriter preview: invalid --target/--side '#{target_s}' (request|response)")
-        part = Store::RulePart.parse?(part_s) || abort("gori run rewriter preview: invalid --part '#{part_s}'")
+        part = parse_rule_part(op, part_s, "preview")
         match = Store::MatchKind.parse?(match_s) || abort("gori run rewriter preview: invalid --match '#{match_s}' (literal|regex)")
         # Validate the regex up front (like `add` does) — otherwise a bad pattern is
         # swallowed and reported as "0 flows", indistinguishable from a valid rule
         # that simply matched nothing.
-        if match.regex? && !op.header? && !valid_regex?(f)
+        if match.regex? && !op.header? && !op.json? && !valid_regex?(f)
           abort "gori run rewriter preview: invalid regex --find (failed to compile)"
         end
         check_pipe_value(op, value, "preview")
+        check_json_rule(op, part, f, value, "preview")
         check_ws_part(op, part, "preview")
         target, part = Gori::Rules.normalize_shape(op, target, part)
 

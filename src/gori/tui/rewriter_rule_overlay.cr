@@ -50,9 +50,10 @@ module Gori::Tui
     SCOPES       = %w[project global]
     SCOPE_LABELS = ["this project", "global (every project)"]
     TARGETS      = %w[request response]
-    OPS          = %w[replace add_header set_header remove_header short_circuit pipe]
-    OP_LABELS    = ["replace", "add header", "set header", "remove header", "stub", "pipe (run a command)"]
-    MATCHES      = %w[literal regex]
+    OPS          = Store::RuleOp.values.map(&.label)
+    OP_LABELS    = ["replace", "add header", "set header", "remove header", "stub", "pipe (run a command)",
+                    "set JSON field", "remove JSON field"]
+    MATCHES = %w[literal regex]
     # `ws` rewrites a WebSocket MESSAGE on an upgraded (101) flow, with `target:` picking
     # the direction (request = client→server, response = server→client). It is its own part
     # rather than a flavour of `body` so that no existing body rule starts touching frames.
@@ -229,12 +230,20 @@ module Gori::Tui
       Store::MatchKind.from_label(MATCHES[@match_i])
     end
 
+    # A JSON op reads a head part as the body, the one part it edits — so cycling `op:` across
+    # the JSON ops never changes the part a head rule keeps.
     def part : Store::RulePart
-      Store::RulePart.from_label(PARTS[@part_i])
+      p = Store::RulePart.from_label(PARTS[@part_i])
+      op.json? && p.head? ? Store::RulePart::Body : p
     end
 
     def header_op? : Bool
       op.header?
+    end
+
+    # What the `find:` row holds: its label, and the noun the prompts ask for it by.
+    private def find_row : {String, String}
+      header_op? ? {"header:", "header name"} : (op.json? ? {"path:", "JSON path"} : {"find:", "pattern"})
     end
 
     def short_circuit_op? : Bool
@@ -247,20 +256,19 @@ module Gori::Tui
     end
 
     # Rows the CURRENT op has no meaning for, skipped by ↑/↓ so the form never parks the
-    # caret on a field that does nothing: the body-file row for the five ops that are not a
-    # stub, target/part for a stub (drawn as what it forces them to), and for a header op
-    # the match and part rows it ignores — plus the value row for `remove header`, which
-    # has nothing to set. The header rows were drawn `n/a` but still landed on: ←/→ there
-    # cycled a value the op never reads, and every notch re-ran the 200-flow preview scan
-    # for a change that changed nothing.
+    # caret on a field that does nothing: the body-file row for every op that is not a
+    # stub, target/part for a stub (drawn as what it forces them to), the match row for a
+    # header or JSON op and the part row for a header op — plus the value row for `remove
+    # header` and `remove JSON field`, which have nothing to set.
     private def skip_row?(row : Int32) : Bool
-      if short_circuit_op?
-        stub_skips?(row)
-      elsif header_op?
-        row == ROW_MATCH || row == ROW_PART || row == ROW_BODY_FILE || stub_only_row?(row) ||
-          (row == ROW_VALUE && op.remove_header?)
-      else
-        row == ROW_BODY_FILE || stub_only_row?(row)
+      return stub_skips?(row) if short_circuit_op?
+      return true if row == ROW_BODY_FILE || stub_only_row?(row)
+      return false unless header_op? || op.json?
+      case row
+      when ROW_MATCH then true
+      when ROW_PART  then header_op?
+      when ROW_VALUE then op.remove_header? || op.json_remove?
+      else                false
       end
     end
 
@@ -290,6 +298,7 @@ module Gori::Tui
       # at all, silently, on every message. Same validator the CLI and MCP call
       # (`Rules.pipe_argv_error`).
       return false if pipe_op? && !Gori::Rules.pipe_argv_error(op, replacement).nil?
+      return Gori::Rules.json_rule_error(op, part, pattern, replacement).nil? if op.json?
       return true unless match_kind.regex? && !op.header?
       SafeRegexp.compile(pattern)
       true
@@ -299,7 +308,7 @@ module Gori::Tui
 
     # What is missing, for the Save row's label.
     def invalid_reason : String
-      return "enter a #{header_op? ? "header name" : "pattern"}" if pattern.empty?
+      return "enter a #{find_row[1]}" if pattern.empty?
       if short_circuit_op? && (why = respond_error)
         # The editor says what is wrong with a response as it is typed; the Save row only has to
         # say where to go.
@@ -308,6 +317,9 @@ module Gori::Tui
       end
       if pipe_op? && (why = Gori::Rules.pipe_argv_error(op, replacement))
         return replacement.strip.empty? ? "enter a command to pipe through" : "fix the command: #{why}"
+      end
+      if why = Gori::Rules.json_rule_error(op, part, pattern, replacement)
+        return why
       end
       "fix the regex"
     end
@@ -335,7 +347,7 @@ module Gori::Tui
       return if sig == @preview_sig
       @preview_sig = sig
       if pattern.empty?
-        @preview = "enter a #{header_op? ? "header name" : "pattern"} to preview"
+        @preview = "enter a #{find_row[1]} to preview"
         return
       end
       if src = @on_preview
@@ -367,11 +379,14 @@ module Gori::Tui
 
     def adjust(d : Int32) : Nil
       case @sel
-      when ROW_SCOPE   then @scope_i = (@scope_i + d) % SCOPES.size
-      when ROW_TARGET  then @target_i = (@target_i + d) % TARGETS.size
-      when ROW_OP      then @op_i = (@op_i + d) % OPS.size
-      when ROW_MATCH   then @match_i = (@match_i + d) % MATCHES.size
-      when ROW_PART    then @part_i = (@part_i + d) % PARTS.size
+      when ROW_SCOPE  then @scope_i = (@scope_i + d) % SCOPES.size
+      when ROW_TARGET then @target_i = (@target_i + d) % TARGETS.size
+      when ROW_OP     then @op_i = (@op_i + d) % OPS.size
+      when ROW_MATCH  then @match_i = (@match_i + d) % MATCHES.size
+      when ROW_PART
+        @part_i = PARTS.index!(part.label) # from what is shown: a JSON op shows a head part as body
+        @part_i = (@part_i + d) % PARTS.size
+        @part_i = (@part_i + d) % PARTS.size if op.json? && PARTS[@part_i] == "head"
       when ROW_RESPOND then @source_i = (@source_i + d) % SOURCES.size
       end
     end
@@ -483,16 +498,21 @@ module Gori::Tui
       when ROW_SCOPE  then Frame.option_cycle(screen, x, py, box.right - 2, bg, "scope:", SCOPE_LABELS, @scope_i, sel)
       when ROW_TARGET then sc ? draw_na(screen, x, py, bg, "target:", "request (a stub answers a request)") : Frame.option_cycle(screen, x, py, box.right - 2, bg, "target:", TARGETS, @target_i, sel)
       when ROW_OP     then Frame.option_cycle(screen, x, py, box.right - 2, bg, "op:", OP_LABELS, @op_i, sel)
-      when ROW_MATCH  then hop ? draw_na(screen, x, py, bg, "match:") : Frame.option_cycle(screen, x, py, box.right - 2, bg, "match:", MATCHES, @match_i, sel)
-      when ROW_PART   then (hop || sc) ? draw_na(screen, x, py, bg, "part:", sc ? "head (matches the request head)" : nil) : Frame.option_cycle(screen, x, py, box.right - 2, bg, "part:", PARTS, @part_i, sel)
-      when ROW_HOST   then draw_field(screen, box, py, bg, fg, sel, "host:", @fields[:host])
-      when ROW_FIND   then draw_field(screen, box, py, bg, fg, sel, hop ? "header:" : "find:", @fields[:pattern])
+      when ROW_MATCH
+        if hop || op.json?
+          draw_na(screen, x, py, bg, "match:", op.json? ? "n/a (JSON path)" : nil)
+        else
+          Frame.option_cycle(screen, x, py, box.right - 2, bg, "match:", MATCHES, @match_i, sel)
+        end
+      when ROW_PART then (hop || sc) ? draw_na(screen, x, py, bg, "part:", sc ? "head (matches the request head)" : nil) : Frame.option_cycle(screen, x, py, box.right - 2, bg, "part:", PARTS, PARTS.index!(part.label), sel)
+      when ROW_HOST then draw_field(screen, box, py, bg, fg, sel, "host:", @fields[:host])
+      when ROW_FIND then draw_field(screen, box, py, bg, fg, sel, find_row[0], @fields[:pattern])
       when ROW_VALUE
         if sc && respond.fault?
           draw_na(screen, x, py, bg, "response:", "none — a fault answers with no response")
         elsif sc
           draw_stub_row(screen, x, py, bg, fg, sel)
-        elsif op.remove_header?
+        elsif op.remove_header? || op.json_remove?
           draw_na(screen, x, py, bg, "value:", "n/a (nothing to set)")
         else
           draw_field(screen, box, py, bg, fg, sel, value_label, @fields[:value])
@@ -560,8 +580,9 @@ module Gori::Tui
         # Not "replace:" — the field holds a COMMAND, and a row labelled "replace" over an
         # argv is the one place this form could make an operator think the text on the right
         # is what lands on the wire.
-      when .pipe? then "run:"
-      else             "replace:"
+      when .pipe?     then "run:"
+      when .json_set? then "JSON value:"
+      else                 "replace:"
       end
     end
 

@@ -43,7 +43,7 @@ module Gori
       # MCP surface rejects a bad pattern instead of persisting a rule that silently never fires.
       private def valid_rule_regex?(op : Store::RuleOp, match_kind : Store::MatchKind, pattern : String) : Bool
         return true unless match_kind.regex?
-        return true if op.header? # a header op matches by NAME; `match` does not apply
+        return true if op.header? || op.json? # matched by header NAME or JSON path; `match` does not apply
         Regex.new(pattern)
         true
       rescue
@@ -213,6 +213,7 @@ module Gori
         ok = rule_op_kind(h, Store::RuleOp::Replace, default_match)
         return ok if ok.is_a?(Result)
         op, match_kind = ok
+        part = json_default_part(h, op, part)
         if op.pipe? && (denied = exec_refusal)
           return denied
         end
@@ -241,6 +242,9 @@ module Gori
           return bad
         end
         if bad = pipe_shape_error(op, replacement)
+          return bad
+        end
+        if bad = json_shape_error(op, part, pattern, replacement)
           return bad
         end
         # Atomic disabled creation: insert already-disabled so there is no window
@@ -365,6 +369,7 @@ module Gori
         ok = rule_op_kind(h, existing.op, existing.match_kind)
         return ok if ok.is_a?(Result)
         op, match_kind = ok
+        part = json_default_part(h, op, part)
         # Any edit that leaves a pipe rule behind, not only a switch TO pipe: its pattern and
         # host choose which traffic the command is fed, and its replacement IS the command.
         if op.pipe? && (denied = exec_refusal)
@@ -402,6 +407,9 @@ module Gori
           return bad
         end
         if bad = pipe_shape_error(op, replacement)
+          return bad
+        end
+        if bad = json_shape_error(op, part, pattern, replacement)
           return bad
         end
         # Read BEFORE the write, as `update_extract_rule` does: read after it, a refused
@@ -446,6 +454,7 @@ module Gori
         ok = rule_op_kind(h, Store::RuleOp::Replace, Store::MatchKind::Literal)
         return ok if ok.is_a?(Result)
         op, match_kind = ok
+        part = json_default_part(h, op, part)
         if bad = ws_shape_error(op, part)
           return bad
         end
@@ -460,6 +469,9 @@ module Gori
         replacement = str(h, "replacement") || ""
         host = str(h, "host") || ""
         if bad = pipe_shape_error(op, replacement)
+          return bad
+        end
+        if bad = json_shape_error(op, part, pattern, replacement)
           return bad
         end
         candidate = Store::MatchRule.new(0_i64, true, target, part, pattern, replacement, op, match_kind, "", host)
@@ -517,6 +529,22 @@ module Gori
           "INVALID_ARGUMENT", field: "replacement")
       end
 
+      # A JSON op (#1599) edits a body, so a `part` left out means the body rather than the
+      # head every other op defaults to — and, on an update, a switch to one off a head rule.
+      private def json_default_part(h, op : Store::RuleOp, part : Store::RulePart) : Store::RulePart
+        op.json? && part.head? && !describes?(h, "part") ? Store::RulePart::Body : part
+      end
+
+      # `Rules.json_rule_error` — the validator the CLI and the TUI editor call — naming the
+      # argument to change.
+      private def json_shape_error(op : Store::RuleOp, part : Store::RulePart, pattern : String,
+                                   replacement : String) : Result?
+        return nil unless why = Gori::Rules.json_rule_error(op, part, pattern, replacement)
+        steps = JsonPath.parse(pattern)
+        field = part.head? ? "part" : (steps.is_a?(String) || steps.empty? ? "pattern" : "replacement")
+        err(why, "INVALID_ARGUMENT", field: field)
+      end
+
       # Only `replace` acts on a WebSocket message: a header op names a header and a WS
       # message has none, and a short-circuit rule answers a request that a WS message is
       # not. Refused rather than normalized — `Rules.normalize_shape` would coerce the part
@@ -524,8 +552,8 @@ module Gori
       # caller asked to rewrite WebSocket frames and would have got one rewriting HTTP heads.
       private def ws_shape_error(op : Store::RuleOp, part : Store::RulePart) : Result?
         return nil unless part.ws?
-        return nil if op.replace? || op.pipe?
-        err("op '#{op.label}' cannot target part 'ws' — only 'replace' and 'pipe' rewrite a WebSocket " \
+        return nil if op.replace? || op.pipe? || op.json?
+        err("op '#{op.label}' cannot target part 'ws' — only 'replace', 'pipe' and the json ops rewrite a WebSocket " \
             "message; use part=head for an HTTP header or short-circuit rule",
           "INVALID_ARGUMENT", field: "part")
       end
@@ -871,11 +899,11 @@ module Gori
           "rules reload (reopen the Rewriter tab or restart); `gori run` and newly opened TUIs " \
           "pick it up immediately." do |s|
           s.field "scope", enumprop("which store the rule lives in (default project). A global rule lives in settings.json and applies in EVERY project", RULE_SCOPES)
-          s.field "pattern", strprop("for replace: the substring/regex to match; for a header op: the HEADER NAME; for short_circuit: the substring/regex matched against the REQUEST head"), required: true
-          s.field "replacement", strprop("for replace: the replacement (empty = delete; supports $1 capture refs when match=regex); for add/set header: the header VALUE (default empty); for short_circuit: the canned RESPONSE — a status line such as '200 OK', then header lines, then a blank line and the body; for pipe: the COMMAND as an argv ('./sign --key k'), tokenized with quote/backslash rules but NEVER interpreted by a shell")
+          s.field "pattern", strprop("for replace: the substring/regex to match; for a header op: the HEADER NAME; for short_circuit: the substring/regex matched against the REQUEST head; for json_set/json_remove: the JSON PATH ($.user.role, $.items[0], $.items[-1]; no wildcards or filters)"), required: true
+          s.field "replacement", strprop("for replace: the replacement (empty = delete; supports $1 capture refs when match=regex); for add/set header: the header VALUE (default empty); for short_circuit: the canned RESPONSE — a status line such as '200 OK', then header lines, then a blank line and the body; for pipe: the COMMAND as an argv ('./sign --key k'), tokenized with quote/backslash rules but NEVER interpreted by a shell; for json_set: the new value as JSON TEXT ('\"admin\"', 'true', '{\"a\":1}'), refused unless it is one JSON value; ignored by json_remove")
           s.field "target", enumprop("which message the rule rewrites (default request; short_circuit is always request)", RULE_TARGETS)
-          s.field "part", enumprop("head = request/status line + headers, body = entity body, ws = a WebSocket MESSAGE on an upgraded (101) flow with target picking the direction (request = client→server, response = server→client). Default head; ignored by header ops and short_circuit, which are head-only, and rejected for those ops when set to ws (replace and pipe are the two ops that can target ws)", RULE_PARTS)
-          s.field "op", enumprop("what the rule does (default replace). short_circuit ANSWERS the request from the rule and never dials the origin — nothing is sent upstream; use it to stub a response that does not exist. pipe RUNS A LOCAL COMMAND (refused when the operator switched off \"Run local commands\"): 'replacement' is an argv, exec'd with no shell and with the operator's own privileges, fed the matched bytes on stdin, its stdout spliced back in — on timeout, non-zero exit or a failed spawn the bytes pass through unchanged and a notice is written (P6)", RULE_OPS)
+          s.field "part", enumprop("head = request/status line + headers, body = entity body, ws = a WebSocket MESSAGE on an upgraded (101) flow with target picking the direction (request = client→server, response = server→client). Default head (body for json_set/json_remove, which edit only body or ws); ignored by header ops and short_circuit, which are head-only, and rejected for those ops when set to ws (replace, pipe and the json ops can target ws)", RULE_PARTS)
+          s.field "op", enumprop("what the rule does (default replace). short_circuit ANSWERS the request from the rule and never dials the origin — nothing is sent upstream; use it to stub a response that does not exist. pipe RUNS A LOCAL COMMAND (refused when the operator switched off \"Run local commands\"): 'replacement' is an argv, exec'd with no shell and with the operator's own privileges, fed the matched bytes on stdin, its stdout spliced back in — on timeout, non-zero exit or a failed spawn the bytes pass through unchanged and a notice is written (P6). json_set sets the value at a JSON path (appending a missing last key) and json_remove deletes that member/element; only those bytes change, and a body that is not JSON or lacks the path passes unchanged", RULE_OPS)
           s.field "body_file", strprop("short_circuit only: serve this file's bytes as the response BODY instead of the inline one (re-read when the file changes). Empty = inline")
           mock_rule_props(s)
           s.field "match", enumprop("for replace: how `pattern` is read (default literal). Regex supports $1/\\1 capture groups", RULE_MATCHES)
@@ -900,10 +928,10 @@ module Gori
           "the library's default — use set_rule_enabled with everywhere=true for that." do |s|
           s.field "id", intprop("rule id from list_rules"), required: true
           s.field "scope", enumprop("which store `id` is in (default project)", RULE_SCOPES)
-          s.field "pattern", strprop("new match substring/regex, or header name")
-          s.field "replacement", strprop("new replacement / header value / canned response")
+          s.field "pattern", strprop("new match substring/regex, header name, or JSON path (json ops)")
+          s.field "replacement", strprop("new replacement / header value / canned response / JSON value (json_set)")
           s.field "target", enumprop("which message the rule rewrites", RULE_TARGETS)
-          s.field "part", enumprop("which part of the message (ws = a WebSocket message; replace only)", RULE_PARTS)
+          s.field "part", enumprop("which part of the message (ws = a WebSocket message; replace, pipe and json ops only)", RULE_PARTS)
           s.field "op", enumprop("what the rule does", RULE_OPS)
           s.field "body_file", strprop("short_circuit only: file served as the response body ('' = inline)")
           mock_rule_props(s)
@@ -917,10 +945,10 @@ module Gori
           "Estimate how many captured flows a rule WOULD affect (by replaying the same transform " \
           "over recent flows) WITHOUT creating it. Use before create_rule to size a rule. " \
           "Approximate: response bodies are scanned as stored wire bytes." do |s|
-          s.field "pattern", strprop("the substring/regex to match, or header name"), required: true
+          s.field "pattern", strprop("the substring/regex to match, header name, or JSON path (json ops)"), required: true
           s.field "replacement", strprop("replacement / header value (matters for header ops, which change the head regardless of match)")
           s.field "target", enumprop("which message the rule rewrites (default request)", RULE_TARGETS)
-          s.field "part", enumprop("which part of the message (default head; ws counts captured WebSocket messages, replace only)", RULE_PARTS)
+          s.field "part", enumprop("which part of the message (default head, body for json ops; ws counts captured WebSocket messages)", RULE_PARTS)
           s.field "op", enumprop("what the rule does (default replace). For short_circuit this counts the flows the rule WOULD have answered instead of sending", RULE_OPS)
           s.field "match", enumprop("how `pattern` is read (default literal)", RULE_MATCHES)
           s.field "host", strprop("host glob ('' = all hosts)")

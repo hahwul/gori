@@ -1388,9 +1388,9 @@ gori run rewriter rm 3
 
 | Option | Description |
 |--------|-------------|
-| `--op=OP` | `replace`(기본값), `add_header`, `set_header`, `remove_header`, `short_circuit`, `pipe` |
+| `--op=OP` | `replace`(기본값), `add_header`, `set_header`, `remove_header`, `short_circuit`, `pipe`, `json_set`, `json_remove` |
 | `--side=SIDE` (`--target`) | `request`(기본값) 또는 `response` |
-| `--part=PART` | `head`(기본값), `body`, 또는 `ws`(WebSocket 메시지). `replace`와 `pipe`에서만 의미가 있음 |
+| `--part=PART` | `head`(기본값, json 동작은 `body`), `body`, 또는 `ws`(WebSocket 메시지). `replace`, `pipe`, json 동작에서만 의미가 있고 json 동작은 `head`를 거부 |
 | `--match=MODE` | `literal`(기본값) 또는 `regex`. `replace`, `pipe`, `short_circuit`에 적용됩니다. 정규식 치환은 `$1`, `$2`를 쓰고 `$$`는 리터럴 `$` |
 | `--response-file=PATH` | `short_circuit`: 미리 준비한 응답을 PATH에서 읽음(`-`는 stdin이며 파이프나 리다이렉트만 받고 터미널은 거부) |
 | `--body-file=PATH` | `short_circuit`: PATH를 응답 본문으로 제공하며, 파일이 바뀌면 다시 읽음 |
@@ -1401,8 +1401,8 @@ gori run rewriter rm 3
 | `--hang=MS` | `--fault=hang`과 함께: 닫기 전까지 붙잡는 시간(기본 30000) |
 | `--delay=MS` | `short_circuit`: 답하기 전에 기다리는 시간(최대 120000) |
 | `--from-flow=ID` | `short_circuit`: flow ID의 캡처된 응답을 규칙에 복사. `--find`, `--host`, `--value`가 초안을 덮어씀 |
-| `-f`, `--find=FIND` | `--from-flow`나 `--map-dir --strip-prefix`가 아니면 필수. 대상이 되는 리터럴, 패턴, 또는 헤더 이름 |
-| `-v`, `--value=VALUE` | 치환할 텍스트, 헤더 값, 또는 `--op=pipe`일 때 실행할 명령. [프로세스 훅](/ko/guide/scripting/#process-hooks) 참고 |
+| `-f`, `--find=FIND` | `--from-flow`나 `--map-dir --strip-prefix`가 아니면 필수. 대상이 되는 리터럴, 패턴, 헤더 이름, 또는 (json 동작) `$.user.role` 같은 JSON 경로 |
+| `-v`, `--value=VALUE` | 치환할 텍스트, 헤더 값, `json_set`의 새 값(JSON 텍스트: `'"admin"'`, `true`), 또는 `--op=pipe`일 때 실행할 명령. [프로세스 훅](/ko/guide/scripting/#process-hooks) 참고 |
 | `--host=GLOB` | 규칙을 그 호스트와 서브도메인으로 한정(`example.com`은 `api.example.com`에도 매칭되지만 `xexample.com`에는 매칭되지 않음). `*`는 명시적 와일드카드. 생략하면 전체 적용 |
 | `--name=NAME` | 규칙 목록에 표시할 라벨 |
 | `--disabled` | 규칙을 만들되 활성화하지 않음 |

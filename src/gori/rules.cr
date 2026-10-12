@@ -9,6 +9,7 @@ require "./rules/mock_from_flow"
 require "./rules/presets"
 require "./store"
 require "./store/safe_regexp"
+require "./json_spans"
 
 module Gori
   # The Match&Replace lens (the "Rewriter" tab): rewrites of request/response messages
@@ -50,6 +51,8 @@ module Gori
       # A BARE `$NAME` under the namespaced grammar, where NAME is an env var, a declared binding
       # or a name a session slot claims. See `bare_spelling_at`.
       BareSpelling
+      # A `json_set` value that is not one JSON value once its `$NAME`s resolved (#1599).
+      NotJson
     end
 
     # The key travels with the reason because the event has to name it: a replacement holding
@@ -125,7 +128,8 @@ module Gori
     private def rewrites?(rule : Store::MatchRule, target : Store::RuleTarget?,
                           part : Store::RulePart) : Bool
       rule.active? && rule.op.rewrite? && !rule.pattern.empty? && rule.part == part &&
-        !(rule.op.header? && !part.head?) && (target.nil? || rule.target == target)
+        !(rule.op.header? && !part.head?) && !(rule.op.json? && part.head?) &&
+        (target.nil? || rule.target == target)
     end
 
     # Count enabled, non-empty-pattern REWRITE rules matching an optional target + a part.
@@ -399,6 +403,23 @@ module Gori
       out.is_a?(String) ? out : nil
     end
 
+    # Why a `json_set`/`json_remove` rule could never apply, or nil — the `pipe_argv_error` of
+    # the JSON ops (#1599), called by all three CRUD surfaces. A head is refused, not coerced:
+    # it would move the rule to a different part than the one asked for. A value carrying a
+    # `$NAME` is judged at apply time, once the name has resolved.
+    def self.json_rule_error(op : Store::RuleOp, part : Store::RulePart, pattern : String,
+                             replacement : String) : String?
+      return nil unless op.json?
+      return "#{op.label} edits a JSON body or WebSocket message, not a head — use part body or ws" if part.head?
+      steps = JsonPath.parse(pattern)
+      return steps if steps.is_a?(String)
+      return "the JSON path must name a member or an element, not the whole document" if steps.empty?
+      return nil if op.json_remove? || JsonSpans.valid?(replacement.to_slice)
+      prefix = Settings.env_prefix
+      return nil if !prefix.empty? && replacement.includes?(prefix)
+      "the value must be one JSON value — quote a string (\"admin\"), or write true, 42, {\"a\":1}"
+    end
+
     def self.normalize_shape(op : Store::RuleOp, target : Store::RuleTarget,
                              part : Store::RulePart) : {Store::RuleTarget, Store::RulePart}
       return {Store::RuleTarget::Request, Store::RulePart::Head} if op.short_circuit?
@@ -650,8 +671,10 @@ module Gori
       when .short_circuit? then "stub"
         # The part badge rides along the way `replace` carries it: a pipe rule's part decides
         # WHAT the command is fed, which is the first thing to know about one.
-      when .pipe? then "pipe/#{rule.part.badge}"
-      else             "?"
+      when .pipe?        then "pipe/#{rule.part.badge}"
+      when .json_set?    then "~json/#{rule.part.badge}"
+      when .json_remove? then "-json/#{rule.part.badge}"
+      else                    "?"
       end
     end
 
@@ -659,8 +682,9 @@ module Gori
     def self.describe(rule : Store::MatchRule) : String
       return rule.inert_reason || "unknown rule" if rule.inert?
       case rule.op
-      when .add_header?, .set_header? then "#{rule.pattern}: #{rule.replacement}"
-      when .remove_header?            then rule.pattern
+      when .add_header?, .set_header?     then "#{rule.pattern}: #{rule.replacement}"
+      when .remove_header?, .json_remove? then rule.pattern
+      when .json_set?                     then "#{rule.pattern} = #{rule.replacement}"
         # `⇥` (not `→`) because a stub does not transform the request into the response — it
         # answers instead of forwarding, and the row should not read like the other four ops.
       when .short_circuit? then "#{rule.pattern} ⇥ #{RuleStub.summary(rule)}"
@@ -1110,6 +1134,7 @@ module Gori
       # $SESSION is not bound yet" event about a name the op never reads. Answered BEFORE the
       # resolve, the way `Pipe` is, rather than inside the `case` below it.
       return head_remove_header(text, rule.pattern) if rule.op.remove_header?
+      return json_apply(text, rule, report) if rule.op.json?
       repl = replacement_for(rule)
       if repl.is_a?(Refused)
         report_refused(rule, repl) if report
@@ -1140,7 +1165,30 @@ module Gori
       in Store::RuleOp::RemoveHeader then text # handled above, before the `$KEY` resolve
       in Store::RuleOp::ShortCircuit then text # answers, never rewrites — `apply` filters it out
       in Store::RuleOp::Pipe         then text # handled above, before the whole-string resolve
+      in Store::RuleOp::JsonSet, Store::RuleOp::JsonRemove
+        text # handled above: the value must be checked as JSON once resolved
       end
+    end
+
+    # `json_set`/`json_remove` (#1599): splice the value at the rule's JSON path and copy every
+    # other byte through (P7) — duplicate keys, number spellings and whitespace included, which
+    # is why this never round-trips through `JSON::Any`. A body that is not JSON (compressed
+    # included), or a path that does not resolve, is the common case and passes unchanged and
+    # unreported; a value that stopped being one JSON value after `$NAME` expansion is refused.
+    private def json_apply(text : String, rule : Store::MatchRule, report : Bool) : String
+      steps = JsonPath.parse(rule.pattern)
+      return text if steps.is_a?(String)
+      value = nil.as(String?)
+      if rule.op.json_set?
+        repl = replacement_for(rule)
+        repl = Refused.new(Refusal::NotJson, "") if repl.is_a?(String) && !JsonSpans.valid?(repl.to_slice)
+        if repl.is_a?(Refused)
+          report_refused(rule, repl) if report
+          return text
+        end
+        value = repl
+      end
+      JsonSpans.edit(text.to_slice, steps, value).try { |b| String.new(b) } || text
     end
 
     # --- pipe (#818): the replacement is COMPUTED by an external command --------------------
@@ -1713,6 +1761,10 @@ module Gori
           "rewrite rule #{label.inspect} not applied: " \
           "#{bare} is the bare spelling and this install reads " \
           "#{EnvMigration.spelling(Env::Syntax::Namespaced)} — #{remedy}")
+      in Refusal::NotJson
+        @store.insert_event("rewriter", "json_value_refused", "warn",
+          "rewrite rule #{label.inspect} not applied: its value is not one JSON value once " \
+          "its references resolve (a bound string goes inside quotes: \"$BIND.NAME\")")
       end
     end
 

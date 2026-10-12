@@ -92,6 +92,29 @@ describe "Gori::Settings rewriter rule shape" do
     end
   end
 
+  # A JSON op (#1599) is the header ops' mirror image: it edits a body or a WS message, so the
+  # head is the part it can never fire on.
+  it "keeps a json rule on body or ws (body when unsaid), round-tripping, and drops one on the head" do
+    with_rewriter_home do
+      write_settings(<<-JSON)
+        {"rewriter": {"rules": [
+          {"id": 1, "enabled": true, "pattern": "$.user.role", "replacement": "\\"admin\\"", "op": "json_set", "part": "body", "target": "response"},
+          {"id": 2, "enabled": true, "pattern": "$.items[-1]", "op": "json_remove", "part": "ws", "target": "request"},
+          {"id": 4, "enabled": true, "pattern": "$.b", "op": "json_remove", "target": "request"},
+          {"id": 3, "enabled": true, "pattern": "$.a", "replacement": "1", "op": "json_set", "part": "head", "target": "request"}
+        ]}}
+        JSON
+      Gori::Settings.load
+      shapes.should eq([{"json_set", "response", "body"}, {"json_remove", "request", "ws"}, {"json_remove", "request", "body"}])
+      Gori::Settings.rewriter_rules.none?(&.inert?).should be_true
+      Gori::Settings.rewriter_rules.first.replacement.should eq(%("admin"))
+      Gori::Settings.save.should be_true
+      Gori::Settings.rewriter_rules = [] of Gori::Settings::RewriterRule
+      Gori::Settings.load
+      shapes.should eq([{"json_set", "response", "body"}, {"json_remove", "request", "ws"}, {"json_remove", "request", "body"}])
+    end
+  end
+
   it "keeps a well-shaped rule's id, pattern, host and enabled state" do
     with_rewriter_home do
       write_settings(<<-JSON)

@@ -251,6 +251,44 @@ describe Gori::MCP::Server do
 
   # #1237: the short-circuit sub-kinds through MCP — the same engine and the same validator the
   # CLI and the TUI use, so an agent cannot build a rule the others would refuse.
+  describe "json ops (#1599)" do
+    it "creates a json rule on the body by default, edits it, and previews it" do
+      with_store do |store|
+        mcp_seed_flow(store, "acme.test", "GET", "/api/me", 200,
+          "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n", %({"isAdmin":false}).to_slice)
+        create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_rule","arguments":{"op":"json_set","target":"response","pattern":"$.isAdmin","replacement":"true"}}})
+        created = mcp_tool_payload(mcp_drive(store, create)[0])
+        created["part"].as_s.should eq("body")
+        created["op"].as_s.should eq("json_set")
+        store.match_rules.first.part.body?.should be_true
+
+        update = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"update_rule","arguments":{"id":#{created["id"]},"op":"json_remove","part":"ws"}}})
+        mcp_tool_payload(mcp_drive(store, update)[0])["part"].as_s.should eq("ws")
+
+        preview = %({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"preview_rule","arguments":{"op":"json_set","target":"response","pattern":"$.isAdmin","replacement":"true"}}})
+        mcp_tool_payload(mcp_drive(store, preview)[0])["would_match"].as_i.should eq(1)
+      end
+    end
+
+    it "refuses a head part, a bad path or a value that is not JSON, naming the argument" do
+      with_store do |store|
+        {
+          { %({"op":"json_set","pattern":"$.a","replacement":"1","part":"head"}), "part" },
+          { %({"op":"json_set","pattern":"$..a","replacement":"1"}), "pattern" },
+          { %({"op":"json_remove","pattern":"$"}), "pattern" },
+          { %({"op":"json_set","pattern":"$.a","replacement":"admin"}), "replacement" },
+        }.each do |(args, field)|
+          call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_rule","arguments":#{args}}})
+          res = mcp_drive(store, call)[0]["result"]
+          res["isError"].as_bool.should be_true
+          res["structuredContent"]["error_code"].as_s.should eq("INVALID_ARGUMENT")
+          res["structuredContent"]["field"].as_s.should eq(field)
+        end
+        store.match_rules.should be_empty
+      end
+    end
+  end
+
   describe "mock rules (#1237)" do
     it "creates a map-local rule and a fault rule, and lists their sub-kind" do
       with_store do |store|

@@ -1,4 +1,5 @@
 require "json"
+require "./json_path"
 
 module Gori
   # WHERE things are in a JSON document, as byte offsets into the bytes it arrived as — so a
@@ -38,6 +39,8 @@ module Gori
       getter open : Int32
       getter children = [] of Container
       getter members = [] of Member
+      # An array's element value spans, in order (an object keeps `members` instead).
+      getter elements = [] of {Int32, Int32}
       property tail : Int32
       property close : Int32 = -1
       # The key a member is still waiting for its value under, and where that value started.
@@ -102,6 +105,76 @@ module Gori
       io.to_slice
     end
 
+    # `bytes` with the value at `steps` replaced by `value` (JSON text) or, when `value` is nil,
+    # that member/element removed with exactly one adjoining comma; setting a missing LAST key
+    # appends it to its object. Every other byte is copied through. nil when nothing changes:
+    # not one JSON value, an empty path, a missing intermediate, a type mismatch or an index
+    # out of range. A duplicated key is set last-wins, as `JsonPath.resolve` reads it, and
+    # removed in every copy.
+    def edit(bytes : Bytes, steps : Array(JsonPath::Step), value : String?) : Bytes?
+      return nil if steps.empty? || !valid?(bytes)
+      node = parent(walk(bytes), steps) || return nil
+      ents = entries(node)
+      unless i = locate(node, ents, steps.last)
+        key = steps.last.key
+        return value && key && node.object? ? append_members(bytes, [node], "#{key.to_json}:#{value}") : nil
+      end
+      return splice(bytes, ents[i][1], ents[i][2], value) if value
+      cut = remove(bytes, ents, i)
+      # A duplicated key goes entirely: removing the last copy alone would let the earlier one
+      # become the value every last-wins reader sees. One more walk per extra copy (rare).
+      dup = node.object? && node.members.count(&.key.==(node.members[i].key)) > 1
+      dup ? edit(cut, steps, nil) || cut : cut
+    end
+
+    # The container the last of `steps` is looked up in, or nil when the path breaks before it.
+    private def parent(root : Container?, steps : Array(JsonPath::Step)) : Container?
+      node = root || return nil
+      steps[...-1].each do |st|
+        ents = entries(node)
+        i = locate(node, ents, st) || return nil
+        node = node.children.find { |c| c.open == ents[i][1] } || return nil
+      end
+      node
+    end
+
+    # Entry `i` out of `ents`, with exactly one adjoining comma.
+    private def remove(bytes : Bytes, ents : Array({Int32, Int32, Int32}), i : Int32) : Bytes
+      from, _, vend = ents[i]
+      if nxt = ents[i + 1]?
+        splice(bytes, from, nxt[0], "") # the entry, its comma and the spacing up to the next
+      elsif i > 0
+        splice(bytes, ents[i - 1][2], vend, "") # the comma before the last entry, and it
+      else
+        splice(bytes, from, vend, "")
+      end
+    end
+
+    # {entry start, value start, value end} per member (the entry starts at its key) or element.
+    private def entries(node : Container) : Array({Int32, Int32, Int32})
+      return node.elements.map { |(s, e)| {s, s, e} } unless node.object?
+      node.members.map { |m| {m.key_start, m.value_start, m.value_end} }
+    end
+
+    private def locate(node : Container, ents : Array({Int32, Int32, Int32}), st : JsonPath::Step) : Int32?
+      if node.object?
+        key = st.key || return nil
+        node.members.rindex { |m| m.key == key }
+      else
+        idx = st.index || return nil
+        idx += ents.size if idx < 0
+        idx if 0 <= idx < ents.size
+      end
+    end
+
+    private def splice(bytes : Bytes, from : Int32, to : Int32, text : String) : Bytes
+      io = IO::Memory.new(bytes.size - (to - from) + text.bytesize)
+      io.write(bytes[0, from])
+      io << text
+      io.write(bytes[to, bytes.size - to])
+      io.to_slice
+    end
+
     # Is `bytes` exactly one JSON value? `RawJson.valid?`: the stdlib lexer without its number
     # conversion, plus the trailing-data check it skips after a root scalar.
     def valid?(bytes : Bytes) : Bool
@@ -146,7 +219,7 @@ module Gori
       j = string_end(bytes, from)
       return j unless top
       if top.object? && top.pending_key.nil?
-        top.pending_key = decode_string(String.new(bytes[from, j - from]))
+        top.pending_key = decode_key(bytes, from, j)
         top.pending_key_start = from
       else
         value_at(top, from, j)
@@ -164,6 +237,13 @@ module Gori
       token.byte_slice(1, token.bytesize - 2)
     end
 
+    # A key token at `from...stop`. One with no escape is its own bytes: the common case, and the
+    # one that keeps a walk over a large body from running the pull parser once per key.
+    private def decode_key(bytes : Bytes, from : Int32, stop : Int32) : String
+      inner = bytes[from + 1, stop - from - 2]
+      inner.includes?('\\'.ord.to_u8) ? decode_string(String.new(bytes[from, stop - from])) : String.new(inner)
+    end
+
     # A scalar value occupies `start...stop` inside `c`.
     private def value_at(c : Container, start : Int32, stop : Int32) : Nil
       c.pending_start = start
@@ -173,7 +253,10 @@ module Gori
     # A member's (or element's) value ended at `stop`.
     private def value_done(c : Container, stop : Int32) : Nil
       c.tail = stop
-      return unless c.object?
+      unless c.object?
+        c.elements << {c.pending_start, stop}
+        return
+      end
       if key = c.pending_key
         c.members << Member.new(key, c.pending_start, stop, c.pending_key_start)
       end
