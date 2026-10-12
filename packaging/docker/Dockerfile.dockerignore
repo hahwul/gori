@@ -54,3 +54,5 @@ home*/
 spec/
 bench/
 docs/
+# …but the playbooks are compiled in as MCP prompts (src/gori/mcp/prompts.cr, #1596).
+!docs/content/playbooks/

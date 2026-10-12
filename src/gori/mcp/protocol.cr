@@ -23,10 +23,10 @@ module Gori
       # Revisions that carry version, identity and capabilities per request.
       MODERN_VERSIONS = {"2026-07-28"}
 
-      # Handshake revisions. gori's surface (initialize / tools.list / tools.call / ping) is
-      # identical across all four — it uses none of the features that separate them
-      # (resources, prompts, sampling, elicitation, tasks) — so each is answered by echoing
-      # it back rather than by negotiating down.
+      # Handshake revisions. gori's surface (initialize / tools / prompts / ping) is identical
+      # across all four — prompts exist unchanged in every one, and it uses none of the
+      # features that separate them (resources, sampling, elicitation, tasks) — so each is
+      # answered by echoing it back rather than by negotiating down.
       LEGACY_VERSIONS = {"2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"}
 
       # Newest first: what `server/discover` advertises, and what an

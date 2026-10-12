@@ -19,8 +19,10 @@ describe "MCP handshake (#1090)" do
       begin
         Gori::Settings.mcp_channels = false
         handshake(store)["capabilities"]["experimental"]?.should be_nil
+        handshake(store)["capabilities"]["prompts"]["listChanged"].as_bool.should be_false
         Gori::Settings.mcp_channels = true
         handshake(store)["capabilities"]["experimental"]["claude/channel"].as_h.should be_empty
+        handshake(store)["capabilities"]["prompts"]["listChanged"].as_bool.should be_false
       ensure
         Gori::Settings.mcp_channels = prev
       end

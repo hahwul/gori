@@ -88,14 +88,21 @@
           # `lib/` and `bin/` are shards' working dirs: buildCrystalPackage populates
           # `lib/` itself from packaging/nix/shards.nix, so a checkout that already ran
           # `shards install` must not leak its copy into the sandbox. `docs/` is the website
-          # and is never compiled — dropping it keeps doc edits from busting the
-          # build's input hash.
+          # and is dropped so doc edits do not bust the build's input hash — except
+          # `docs/content/playbooks/`, which `src/gori/mcp/prompts.cr` embeds at compile
+          # time (#1596): a playbook edit changes the binary, so it busts the hash on purpose.
           src = lib.cleanSourceWith {
             name = "gori-source";
             src = lib.cleanSource ./.;
             filter = path: type:
-              let base = baseNameOf (toString path);
-              in !(type == "directory" && (base == "lib" || base == "bin" || base == "docs"));
+              let
+                base = baseNameOf (toString path);
+                rel = lib.removePrefix (toString ./. + "/") (toString path);
+                inDocs = rel == "docs" || lib.hasPrefix "docs/" rel;
+                playbooks = builtins.elem rel [ "docs" "docs/content" "docs/content/playbooks" ]
+                  || lib.hasPrefix "docs/content/playbooks/" rel;
+              in
+              !(type == "directory" && (base == "lib" || base == "bin")) && (!inDocs || playbooks);
           };
         in
         crystal.buildCrystalPackage {

@@ -24,7 +24,8 @@
 #                         "nothing to run" reads as clean.
 #
 # Deleted files are skipped. scripts/, bench/, docs and lib/ map to nothing, except the MCP
-# guide: `spec/mcp/catalogue_size_spec.cr` reads both guide translations directly.
+# guide (`spec/mcp/catalogue_size_spec.cr` reads both translations directly) and the
+# playbooks (`src/gori/mcp/prompts.cr` embeds them; `spec/mcp/prompts_spec.cr` checks them).
 set -euo pipefail
 
 base=${1:-origin/main}
@@ -75,6 +76,8 @@ while IFS= read -r f; do
       while IFS= read -r c; do add "$c"; done < <(context_specs) ;;
     docs/content/guide/mcp.md|docs/content/guide/mcp.ko.md)
       add spec/mcp/catalogue_size_spec.cr ;;
+    docs/content/playbooks/*.md)
+      add spec/mcp/prompts_spec.cr ;;
     src/gori/*.cr)
       rel=${f#src/gori/}
       if ! mirror "${rel%.cr}"; then

@@ -4,6 +4,7 @@ require "../store"
 require "./protocol"
 require "./tools"
 require "./courier"
+require "./prompts"
 require "../settings"
 
 module Gori
@@ -483,6 +484,8 @@ module Gori
         when "ping"                 then write_result(id, era) { }
         when "tools/list"           then handle_tools_list(id, era, params)
         when "tools/call"           then handle_tools_call(id, era, params)
+        when "prompts/list"         then handle_prompts_list(id, era, params)
+        when "prompts/get"          then handle_prompts_get(id, era, params)
         else                             write_error(id, -32601, "Method not found: #{method}")
         end
       rescue ex
@@ -576,8 +579,9 @@ module Gori
 
       # `subscriptions/listen` — the modern revision's one server-to-client push channel,
       # which replaced the HTTP GET endpoint and `resources/subscribe`. gori has nothing to
-      # push: it declares no `listChanged`, serves no resources or prompts, and its one
-      # vendor notification is now confined to the handshake era (`emit_capabilities`).
+      # push: it declares no `listChanged` (its prompts are compiled in, so the list cannot
+      # change), serves no resources, and its one vendor notification is now confined to the
+      # handshake era (`emit_capabilities`).
       #
       # So the conformant answer is the empty one, and it is a REAL answer rather than
       # `-32601`. The acknowledgement goes out first, as the spec requires, carrying the
@@ -629,6 +633,9 @@ module Gori
       private def emit_capabilities(j : JSON::Builder, *, channel : Bool) : Nil
         j.object do
           j.field("tools") { j.object { } }
+          # The playbooks (#1596). `false` because the list is a compile-time constant: there
+          # is never a `list_changed` to push, so the stateless rule above stays intact.
+          j.field("prompts") { j.object { j.field "listChanged", false } }
           # Declared only when the operator says their Claude is launched with channels: a
           # client that did not register it drops every push silently, and the socket route
           # would then carry the same line.
@@ -962,6 +969,75 @@ module Gori
             j.field "cacheScope", Protocol::CACHE_SCOPE
           end
         end
+      end
+
+      # The docs playbooks (#1596, `Prompts`). One page and no `nextCursor`, so a cursor is
+      # refused for the reason `tools/list` gives. The SAME list under every `--tools` and
+      # `--read-only`: the restriction rides in the prompt text, not in which prompts exist.
+      private def handle_prompts_list(id : JSON::Any, era : String?, params : JSON::Any?) : Nil
+        if (cursor = obj_field(params, "cursor")) && !cursor.raw.nil?
+          return write_error(id, -32602,
+            "prompts/list: unknown cursor #{cursor.to_json} — this server returns every " \
+            "prompt in one page and never issues a nextCursor")
+        end
+        write_result(id, era) do |j|
+          j.field("prompts") do
+            j.array do
+              Prompts.all.each do |pb|
+                j.object do
+                  j.field "name", pb.name
+                  j.field "title", pb.title
+                  j.field "description", pb.description
+                  j.field("arguments") do
+                    j.array { j.object { j.field "name", "focus"; j.field "description", "A host, path or flow id to start from"; j.field "required", false } }
+                  end
+                end
+              end
+            end
+          end
+          if era
+            j.field "ttlMs", Protocol::TOOLS_LIST_TTL_MS # compiled in: moves only on an upgrade
+            j.field "cacheScope", Protocol::CACHE_SCOPE
+          end
+        end
+      end
+
+      private def handle_prompts_get(id : JSON::Any, era : String?, params : JSON::Any?) : Nil
+        name = obj_field(params, "name").try(&.as_s?)
+        return write_error(id, -32602, "prompts/get: missing 'name'") unless name
+        pb = Prompts[name]?
+        return write_error(id, -32602, "prompts/get: unknown prompt #{name.inspect}") unless pb
+        args = obj_field(params, "arguments")
+        if args && !args.raw.nil? && !args.as_h?
+          return write_error(id, -32602, "prompts/get: 'arguments' must be an object")
+        end
+        focus = obj_field(args, "focus")
+        if focus && !focus.raw.nil? && !focus.as_s?
+          return write_error(id, -32602, "prompts/get: argument 'focus' must be a string")
+        end
+        focus = focus.try(&.as_s?).presence
+        text = Prompts.message(pb, ask_operator: @tools.serves?("ask_operator"),
+          restriction: prompt_restriction, focus: focus)
+        write_result(id, era) do |j|
+          j.field "description", pb.description
+          j.field("messages") do
+            j.array do
+              j.object do
+                j.field "role", "user"
+                j.field("content") { j.object { j.field "type", "text"; j.field "text", text } }
+              end
+            end
+          end
+        end
+      end
+
+      # What kind of server the prompt is running on, from the facts `instructions_text`
+      # reads. Names no tool: under `--read-only` the instructions name the disabled ones on
+      # purpose, but a prompt must not send the agent toward a tool it cannot call.
+      private def prompt_restriction : String?
+        read_only = "This server runs with --read-only: it cannot send traffic or change the project, " \
+                    "so a step that does either is one no listed tool can do." unless @allow_actions
+        [read_only, filter_note.try(&.lstrip)].compact.join(' ').presence
       end
 
       private def handle_tools_call(id : JSON::Any, era : String?, params : JSON::Any?) : Nil

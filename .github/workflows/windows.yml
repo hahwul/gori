@@ -11,6 +11,8 @@ on:
       - shard.yml
       - shard.lock
       - "**/*.cr"
+      # Embedded by src/gori/mcp/prompts.cr (#1596): an edit changes the binary.
+      - docs/content/playbooks/*.md
   push:
     branches: [main]
     paths:
@@ -19,6 +21,8 @@ on:
       - shard.yml
       - shard.lock
       - "**/*.cr"
+      # Embedded by src/gori/mcp/prompts.cr (#1596): an edit changes the binary.
+      - docs/content/playbooks/*.md
   workflow_dispatch:
 
 concurrency:

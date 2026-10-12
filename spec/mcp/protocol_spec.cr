@@ -68,6 +68,7 @@ describe "MCP protocol version negotiation" do
       versions.first.should eq(VERSION)
       versions.should contain("2025-06-18")
       result["capabilities"]["tools"].as_h.should be_empty
+      result["capabilities"]["prompts"]["listChanged"].as_bool.should be_false
       result["instructions"].as_s.should contain("gori MCP")
       result["_meta"]["io.modelcontextprotocol/serverInfo"]["name"].as_s.should eq("gori")
     end

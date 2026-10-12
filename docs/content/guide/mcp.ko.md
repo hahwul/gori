@@ -336,14 +336,22 @@ create_repeaters{flow_ids: [...], name_prefix: "oas: ", tags: "spec"}
 - **답장은 우편함이 아니라 알림입니다.** 답장이 도착한 순간 그 프로젝트에 열려 있는 gori TUI에 뜹니다. 그 창에서는 Miss Ring이 다음 키 입력이나 클릭까지 답장을 들고 있지만(Settings → Companion → Agent replies), 링은 TUI를 닫으면 비워집니다. TUI가 닫혀 있는 동안 쓰인 답장은 하나씩 다시 띄우지 않습니다. 다음에 그 프로젝트를 여는 TUI가 링에 노트 하나(`claude-code sent 2 replies while you were away`)를 올리고, 그 detail에 답장들이 나열되며, 전체 본문은 Activity 패널에 남습니다. 도구도 에이전트에게 같은 말을 하고, 결과에 `get_current_context`와 같은 형태의 `tui`를 실어 주므로 `windows: 0`을 받은 에이전트는 자신의 출력으로 말해야 한다는 걸 압니다.
 - **Channel 전달은 research preview입니다.** 아직 출시되지 않은 Claude Code 플래그와 Anthropic이 정한 허용 목록에 의존하며, 둘 다 `mcp.channels`가 모르는 사이 바뀔 수 있습니다. inbox socket과 poll 도구가 따로 존재하는 이유는 그 플래그가 사라지는 날에도 기능이 계속 동작하게 하기 위해서입니다.
 
+## 프롬프트로 제공되는 플레이북 {#playbooks-as-prompts}
+
+[플레이북](/playbooks/)은 MCP 프롬프트로 제공됩니다. 클라이언트는 `prompts/list`로 목록을 받고 `prompts/get`으로 하나를 가져옵니다. Claude Code는 각 플레이북을 `/mcp__gori__test-access-control` 같은 슬래시 명령으로 보여 줍니다. 프롬프트는 고르기 전까지 모델 컨텍스트를 쓰지 않으므로, 플레이북이 `tools/list`의 비용을 늘리지 않습니다.
+
+각 프롬프트의 이름은 플레이북 페이지 이름과 같고, 선택 인자 `focus` 하나를 받습니다. 시작할 호스트, 경로 또는 flow id이며 그대로 전달됩니다. 본문은 영문 플레이북에서 스크린샷을 빼고 링크를 절대 주소로 바꾼 것이고, 앞에 짧은 머리말이 붙습니다. 머리말은 이 플레이북이 TUI와 `gori run`용으로 쓰였으니 각 단계를 `tools/list`의 도구로 수행하라고 에이전트에게 알립니다. 목록의 어떤 도구로도 할 수 없는 단계는 `ask_operator`가 제공되면 그것으로 운영자에게 넘기고, 아니면 이름만 밝히고 건너뜁니다.
+
+모든 서버가 같은 프롬프트를 나열합니다. `--read-only`나 `--tools` 필터가 걸려 있으면 프롬프트를 숨기는 대신 머리말이 그 사실을 알립니다. [AI 코파일럿 세션 실행](/playbooks/run-an-ai-co-pilot/)은 이 서버를 설치하는 내용이라 제공하지 않습니다.
+
 ## 프로토콜 리비전 {#protocol-revisions}
 
 gori는 한 프로세스에서 MCP의 두 시대를 모두 말하며, 어느 쪽으로 답할지는 요청 자체가 정합니다.
 
-- **`2026-07-28`**: stateless 리비전입니다. 요청이 `_meta`에 프로토콜 버전과 클라이언트 capability, (선택적으로) 클라이언트 이름을 싣고 다니므로 열어야 할 핸드셰이크도, 놓칠 핸드셰이크도 없습니다. 결과에는 `resultType`, `_meta["io.modelcontextprotocol/serverInfo"]`의 서버 신원, 그리고 `tools/list`라면 클라이언트가 캐시 기준으로 삼는 `ttlMs` / `cacheScope` 힌트가 함께 옵니다. `server/discover`는 지원 버전·capability·instructions를 한 번의 호출로 답하며, 가장 먼저 보내도 됩니다.
+- **`2026-07-28`**: stateless 리비전입니다. 요청이 `_meta`에 프로토콜 버전과 클라이언트 capability, (선택적으로) 클라이언트 이름을 싣고 다니므로 열어야 할 핸드셰이크도, 놓칠 핸드셰이크도 없습니다. 결과에는 `resultType`, `_meta["io.modelcontextprotocol/serverInfo"]`의 서버 신원, 그리고 `tools/list`와 `prompts/list`라면 클라이언트가 캐시 기준으로 삼는 `ttlMs` / `cacheScope` 힌트가 함께 옵니다. `server/discover`는 지원 버전·capability·instructions를 한 번의 호출로 답하며, 가장 먼저 보내도 됩니다.
 - **`2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-05`**: 핸드셰이크 리비전입니다. `initialize`는 예전 그대로 세션을 열고, 요청한 리비전으로 답합니다. 그 외에는(gori가 모르는 버전이든, stateless 리비전이든) 가장 최신 핸드셰이크 리비전으로 답합니다. `initialize`로 연 세션은 요청별 의미론으로 갈아탈 수 없으므로, stateless 버전을 답하는 것은 gori가 지킬 수 없는 약속이기 때문입니다.
 
-gori가 말하지 않는 버전은 `-32022`와 함께 말할 수 있는 버전 목록으로 거절되므로, 클라이언트는 추측하는 대신 다시 시도할 수 있습니다. 도구 표면은 양쪽이 동일합니다. 시대가 정하는 것은 봉투이지, 도구가 하는 일이 아닙니다.
+gori가 말하지 않는 버전은 `-32022`와 함께 말할 수 있는 버전 목록으로 거절되므로, 클라이언트는 추측하는 대신 다시 시도할 수 있습니다. 도구와 프롬프트 표면은 양쪽이 동일합니다. 시대가 정하는 것은 봉투이지, 도구가 하는 일이 아닙니다. 프롬프트 목록은 바이너리에 컴파일되어 실행 중에 바뀔 수 없으므로, 두 시대 모두 `listChanged: false`로 선언합니다.
 
 stateless 리비전에서 따라오는 두 가지는 클라이언트를 만들기 전에 알아둘 만합니다. `subscriptions/listen`은 응답하지만 빈 필터로 ack한 뒤 곧바로 정상 종료합니다. gori는 푸시할 것이 없으므로 정직한 구독은 빈 구독이고, 대신 함께 받은 `ttlMs`를 쓰면 됩니다. 그리고 `claude/channel` research preview는 핸드셰이크 시대에만 선언합니다. stateless 서버가 stdout에 쓸 수 있는 것은 응답, 진행 중인 요청에 속한 알림, ack된 구독 스트림의 알림뿐인데 channel push는 그 셋 중 어느 것도 아니기 때문입니다. 운영자 메시지는 여전히 소켓, Codex 큐, 다음 tool result, `operator_messages`로 모든 클라이언트에 닿으며, 어느 것도 프로토콜 스트림을 건드리지 않습니다.
 

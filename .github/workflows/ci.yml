@@ -30,6 +30,9 @@ on:
       # would otherwise merge unchecked, and fail the next unrelated `.cr` PR instead.
       - docs/content/guide/mcp.md
       - docs/content/guide/mcp.ko.md
+      # Compiled into the binary as MCP prompts and checked by `spec/mcp/prompts_spec.cr`
+      # (#1596): a playbook edit changes the build, and a new one must be served or skipped.
+      - docs/content/playbooks/*.md
       # `packaging/docker/Dockerfile` is deliberately absent: nothing in this workflow
       # builds the image any more (see the note under `tests`), so listing it
       # would only wake the Crystal build and the spec matrix to test nothing

@@ -237,6 +237,7 @@ describe Gori::MCP::Server do
         res = out[0]["result"]
         res["protocolVersion"].as_s.should eq("2025-06-18")
         res["capabilities"]["tools"].as_h.should be_empty
+        res["capabilities"]["prompts"]["listChanged"].as_bool.should be_false
         res["serverInfo"]["name"].as_s.should eq("gori")
         res["serverInfo"]["version"].as_s.should eq(Gori::VERSION)
         out[0]["id"].as_i.should eq(1)
