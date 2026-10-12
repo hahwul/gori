@@ -184,20 +184,22 @@ describe "Fuzz::Sender#send_race" do
   end
 
   it "reaches the real synchronized path through a CappedBackend wrapper, not the degraded default" do
-    # `race: dial failed` is a string ONLY `Sender#send_race`'s own dial loop produces.
-    # `Backend`'s inherited default (what a MISSING `CappedBackend#send_race` override would
-    # silently fall back to) degrades to N independent `send()` calls, whose error text on a
-    # dial failure carries no such prefix — so this assertion fails loudly if that override
-    # is ever accidentally removed, without depending on any timing measurement.
-    origin = RaceOrigin.new(max_accepts: 3)
+    # `race: warmup failed` is a string ONLY the real race path produces. `Backend`'s inherited
+    # default (what a MISSING `CappedBackend#send_race` override would silently fall back to)
+    # degrades to N independent `send()` calls and never sends the warm-up at all — so this
+    # assertion fails loudly if that override is ever accidentally removed. A dropped warm-up,
+    # not a refused dial: Windows queues a dial to a just-closed listener in its backlog, so a
+    # dial failure is not something this harness can force there.
+    origin = RaceOrigin.new(fail_warmup: true)
     n = 4
     capped = F::CappedBackend.new(race_sender(origin), nil)
-    results = capped.send_race(race_jobs(n))
+    warmup = "GET /warmup HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice
+    results = capped.send_race(race_jobs(n), warmup: warmup)
 
     results.size.should eq(n)
-    # At least the intended dial failure carries the `race:` prefix — present only on the real
-    # Sender path, absent from the degraded default — and the group still raced some connections.
-    results.count { |r| r.error.try(&.starts_with?("race: dial failed")) }.should be >= 1
+    # The dropped warm-up carries the `race:` prefix — present only on the real Sender path,
+    # absent from the degraded default — and the group still raced some connections.
+    results.count { |r| r.error.try(&.starts_with?("race: warmup failed")) }.should be >= 1
     results.count(&.error.nil?).should be >= 1
     capped.sent.should eq(n) # charged per job, network-independent — stays exact
     origin.close
