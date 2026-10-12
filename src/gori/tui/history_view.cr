@@ -303,6 +303,8 @@ module Gori::Tui
       @ws_subprotocols = [] of String                # the handshake's Sec-WebSocket-Protocol — a decode HINT
       @ws_proto_label = nil.as(String?)              # the chip's name for the framing, fixed once per flow
       @detail_form = nil.as(Array(FormData::Field)?) # form/multipart params → PARAMS pane
+      @detail_rpc = nil.as(JsonRpc::Exchange?)       # JSON-RPC / MCP calls → RPC pane
+      @detail_llm = nil.as(LlmCall::Call?)           # an LLM API call → LLM pane
       @decoded_id = nil.as(Int64?)                   # flow the decoded panes above were parsed from (skip re-decode)
       # Scroll anchor: a (logical line, visual sub-row) pair rather than a flat visual-row
       # index — see the header of `Wrap`. @detail_scroll_sub is 0 in hex (which draws its own
@@ -1735,6 +1737,8 @@ module Gori::Tui
       @ws_proto_label = nil
       @ws_decode_key = {-1, -1_i64}
       @detail_form = nil
+      @detail_rpc = nil
+      @detail_llm = nil
       @decoded_id = nil
       @detail_hex_bytes = nil
       @detail_read.reset
@@ -1790,6 +1794,7 @@ module Gori::Tui
     private def decode_protocols(detail : Store::FlowDetail?) : Nil
       unless detail
         @detail_saml, @detail_jwts, @detail_graphql, @detail_form = nil, [] of Jwt::Found, nil, nil
+        @detail_rpc, @detail_llm = nil, nil
         @detail_graphql_ws = [] of GraphqlWs::Frame
         @detail_ws_proto = [] of WsProto::Frame
         @ws_subprotocols = [] of String
@@ -1812,6 +1817,8 @@ module Gori::Tui
         @detail_jwts = Jwt.from_flow(tgt, rh, rb, sh, sb)
         @detail_graphql = Graphql.from_flow(tgt, rh, rb)
         @detail_form = FormData.from_flow(tgt, rh, rb)
+        @detail_rpc = JsonRpc.from_flow(rh, rb, sh, sb)
+        @detail_llm = LlmCall.from_flow(rh, rb, sh, sb)
         # The negotiated subprotocol is a HINT for the transcript decoders and lives in the
         # handshake, which never grows — so it is read here with the other head-derived panes
         # rather than on every transcript rebuild.
@@ -1849,8 +1856,8 @@ module Gori::Tui
     # showing.
     private def log_pane? : Bool
       case @detail_pane
-      when :messages, :frames, :events, :saml, :jwt, :graphql, :ws_proto, :params then true
-      else                                                                             false
+      when :messages, :frames, :events, :saml, :jwt, :graphql, :ws_proto, :rpc, :llm, :params then true
+      else                                                                                         false
       end
     end
 
@@ -2726,13 +2733,23 @@ module Gori::Tui
       # kept printing it under its own heading. Two panes and two labels is what the
       # mislabelling hazard actually asked for; hiding the head was never the fix.
       panes << :messages if @detail_ws
+      panes.concat(decoded_panes)
+      panes << :events if @detail_sse # parsed SSE events (text/event-stream response)
+      panes << :frames if @detail_frames
+      panes
+    end
+
+    # The decoded-protocol panes the opened flow carries, in chip order (each ivar was filled
+    # by decode_protocols; nil/empty means not offered).
+    private def decoded_panes : Array(Symbol)
+      panes = [] of Symbol
       panes << :saml if @detail_saml                                     # decoded SAML XML (request/response)
       panes << :jwt unless @detail_jwts.empty?                           # located + decoded JWT(s)
       panes << :graphql if @detail_graphql || !@detail_graphql_ws.empty? # parsed GraphQL operation (body or WS frames)
       panes << :ws_proto unless @detail_ws_proto.empty?                  # Socket.IO / SignalR / STOMP / SockJS / Action Cable frames
+      panes << :rpc if @detail_rpc                                       # JSON-RPC / MCP calls paired with replies
+      panes << :llm if @detail_llm                                       # an LLM API call, a stream reassembled
       panes << :params if @detail_form                                   # decoded form/multipart params
-      panes << :events if @detail_sse                                    # parsed SSE events (text/event-stream response)
-      panes << :frames if @detail_frames
       panes
     end
 
@@ -2744,7 +2761,8 @@ module Gori::Tui
       when :events then "EVENTS (sse)"
       when :jwt    then @detail_jwts.size > 1 ? "JWT (#{@detail_jwts.size})" : "JWT"
         # The panes whose chip is simply their name.
-      when :saml, :graphql, :params, :original, :interim then pane.to_s.upcase
+      when :saml, :graphql, :params, :original, :interim, :llm then pane.to_s.upcase
+      when :rpc                                                then @detail_rpc.try { |ex| JsonRpc.mcp?(ex) } ? "MCP" : "RPC"
         # Named after the FRAMING, not after gori's module — an operator working a Socket.IO
         # app is looking for a chip that says Socket.IO. Fixed for the life of the opened flow
         # (see decode_protocols); "WS PROTO" only until the first rebuild names one.
@@ -4737,11 +4755,13 @@ module Gori::Tui
     private def decoded_pane_view : DetailView?
       lines =
         case @detail_pane
-        when :saml     then (doc = @detail_saml) ? saml_detail_lines(doc) : nil
+        when :saml     then @detail_saml.try { |doc| saml_detail_lines(doc) }
         when :jwt      then @detail_jwts.empty? ? nil : jwt_detail_lines(@detail_jwts)
         when :graphql  then graphql_pane_lines
         when :ws_proto then @detail_ws_proto.empty? ? nil : ws_proto_pane_lines(@detail_ws_proto)
-        when :params   then (f = @detail_form) ? form_detail_lines(f) : nil
+        when :rpc      then @detail_rpc.try { |ex| summary_pane_lines(JsonRpc.summary(ex), JsonRpc.display(ex)) }
+        when :llm      then @detail_llm.try { |c| summary_pane_lines(LlmCall.summary(c), LlmCall.display(c)) }
+        when :params   then @detail_form.try { |f| form_detail_lines(f) }
         end
       lines ? DetailView.new(lines, EMPTY_BODY, :text, EMPTY_LINES) : nil
     end
@@ -4767,6 +4787,13 @@ module Gori::Tui
         end
         lines << Highlight.body_styled(ln, kind)
       end
+    end
+
+    # A summary header over a decoder's own text, styled as the JSON it mostly is (RPC / LLM).
+    private def summary_pane_lines(summary : String, text : String) : Array(Highlight::Line)
+      lines = [derived_header(summary), Highlight::Line.new]
+      append_styled(lines, text, :json)
+      lines
     end
 
     private def saml_detail_lines(doc : Saml::Doc) : Array(Highlight::Line)

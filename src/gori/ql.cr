@@ -152,7 +152,7 @@ module Gori
       NOT > AND > OR. `-term` and `NOT term` are equivalent.
 
       Fields (use : for value match, ~ for regex):
-        host path method scheme proto status size reqsize respsize dur header body ws url stub static src scope cache
+        host path method scheme proto status size reqsize respsize dur header body ws rpc url stub static src scope cache
 
       Sides: header: and body: search the REQUEST AND THE RESPONSE. Prefix either with `req.` or
       `resp.` to search one side — req.body:token resp.header:set-cookie resp.body~secret\\d+ —
@@ -220,6 +220,10 @@ module Gori
       The stored payload bytes are searched as captured, with no index, so a ws: term scans
       the transcript of every socket. Ping/pong/close frames and gori's own `[gori] ` notice
       rows never match; -ws:x keeps flows that carried no messages at all.
+
+      JSON-RPC / MCP: rpc:tools/call  rpc:initialize  rpc:tools/  — a flow whose REQUEST body is a
+      JSON-RPC call whose method starts with the value (case-sensitive). It scans the stored request
+      bytes like body~, with no index, so a compressed request body is not read.
 
       Regex (~): host~^api\\.  body~secret\\d+  path~/admin  method~^P(OST|UT)$ — on host path url
       method scheme header body ws (and req./resp. header/body). Case-sensitive; prefix (?i) to fold.
@@ -366,7 +370,7 @@ module Gori
 
     private def self.content_or_prefix_reason(raw_field : String, field : String, value : String) : String?
       case field
-      when "body", "header", "ws", "req.body", "resp.body", "req.header", "resp.header"
+      when "body", "header", "ws", "rpc", "req.body", "resp.body", "req.header", "resp.header"
         return "value contains control characters" if value.each_char.any?(&.control?)
       else
         if prefix = SIDE_PREFIXES.find { |p| raw_field.starts_with?(p) }
@@ -488,7 +492,7 @@ module Gori
     # History's and Colormarker's completion pools, Colormarker's unknown-field refusal and the
     # docs all read it, so a field added to `field_cond` becomes offerable everywhere at once
     # instead of in the four hand-kept copies that used to drift.
-    FIELDS = %w[host path url method scheme proto status size reqsize respsize dur header body ws stub static src via scope cache
+    FIELDS = %w[host path url method scheme proto status size reqsize respsize dur header body ws rpc stub static src via scope cache
       req.header resp.header req.body resp.body]
 
     # The fields `~` compiles on. `method` and `scheme` are text columns like `host`, so a regex over
@@ -678,6 +682,7 @@ module Gori
       "header"      => "head bytes, BOTH sides — see req./resp.",
       "body"        => "body via index: 8 KiB/side, no compressed",
       "ws"          => "WebSocket text/binary messages — ws~ regex",
+      "rpc"         => "JSON-RPC/MCP method prefix — rpc:tools/call",
       "stub"        => "true = gori answered it, origin never saw it",
       "static"      => "2xx image/font/media; not svg/css/js",
       "src"         => "who sent it — proxy repeater fuzzer … or gori",
@@ -866,6 +871,7 @@ module Gori
       when "header", "req.header", "resp.header" then header_cond(value, side_of(field))
       when "body", "req.body", "resp.body"       then body_cond(value, fts, body_max, side_of(field))
       when "ws"                                  then ws_cond(value, regex: false)
+      when "rpc"                                 then rpc_cond(value, body_max)
       when "stub"                                then flag_cond("short_circuited", value)
       when "static"                              then flag_cond("static_asset", value)
       when "src"                                 then src_cond(value)
@@ -1219,6 +1225,15 @@ module Gori
       # can never carry a NUL of its own. `(?i)` because `body:` promises case-insensitive
       # matching where `body~` is case-SENSITIVE by default.
       body_regex_cond("(?i)#{Regex.escape(value)}", body_max, side)
+    end
+
+    # `rpc:`: a flow whose request body is a JSON-RPC call naming that method — a PREFIX, so
+    # `rpc:tools/` is every MCP tool method. `body~` over the request with the needle escaped, so
+    # it shares that term's case and NUL rules and its limit: a compressed body is not read. No
+    # capture-time parse and no migration (P6); it costs only in a query that uses it.
+    private def self.rpc_cond(value : String, body_max : Int32?) : SqlTerm?
+      return nil if value.each_char.any?(&.control?)
+      body_regex_cond(%q("method"\s*:\s*") + Regex.escape(value), body_max, :req)
     end
 
     # `ws:` / `ws~`: a flow whose WebSocket transcript holds a matching MESSAGE. A subquery over

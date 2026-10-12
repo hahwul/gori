@@ -55,6 +55,7 @@ module Gori
       case subcmd
       when "tui"
         FlowSource.surface = FlowSource::Surface::Tui
+        Proxy::Tls::KeyLog.configure # announced by the TUI once it is up
         run_tui(subargs)
       when "settings"
         run_settings(subargs)
@@ -65,6 +66,7 @@ module Gori
         # dispatch and not inside each subcommand: `gori run` has dozens of leaves, and a leaf
         # that forgot would file its writes under whatever ran last.
         FlowSource.surface = FlowSource::Surface::Cli
+        announce_key_log
         Run.dispatch(subargs)
       when "wizard"
         run_wizard(subargs)
@@ -72,6 +74,7 @@ module Gori
         run_tutorial(subargs)
       when "mcp"
         FlowSource.surface = FlowSource::Surface::Mcp
+        announce_key_log
         run_mcp(subargs)
       when "update"
         run_update(subargs)
@@ -98,6 +101,12 @@ module Gori
     end
 
     private VERSION_FLAGS = {"-v", "-V", "--version"}
+
+    # The TLS key log (#1593) is read from the environment before any SSL context exists, for the
+    # surfaces that dial. stderr only: stdout is `gori mcp`'s JSON-RPC stream.
+    private def self.announce_key_log : Nil
+      Proxy::Tls::KeyLog.configure.try { |notice| STDERR.puts "gori: ⚠ #{notice}" }
+    end
 
     # The top-level subcommand and the arguments belonging to it. A leading flag — or an empty
     # argv — means none was named, so every token belongs to the default surface (the TUI).

@@ -90,5 +90,5 @@ Decoder does not send network traffic; it's pure local transformation.
 ## Next Steps
 
 - [Repeater & Fuzzer](/guide/repeater-and-fuzzer/): payload processors use similar encode/hash steps
-- [Proxy & History](/guide/proxy/): JWT / SAML / GraphQL are also decoded inline on captured flows
+- [Proxy & History](/guide/proxy/): JWT / SAML / GraphQL / JSON-RPC (MCP) / LLM API calls are also decoded inline on captured flows
 - [Hotkeys](/guide/hotkeys/): rebind Decoder-scoped actions
