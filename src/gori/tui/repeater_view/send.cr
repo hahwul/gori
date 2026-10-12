@@ -395,16 +395,52 @@ class Gori::Tui::RepeaterView
     "inserted the #{legacy ? "legacy " : ""}introspection query — send it with ^R"
   end
 
+  # `repeater.graphql-multiply-{batch,alias}`: grow this tab's one GraphQL operation into N
+  # copies in a single request body — a batched JSON array, or the top-level field repeated
+  # under `aN:` aliases — for a per-request rate-limit / brute-force-bypass test. Like the
+  # introspection rewrite, only the body changes and it is ONE undoable edit; the N-copy body
+  # is operator bytes produced on operator request (P7). Returns the status.
+  def insert_graphql_multiply(count : Int32, form : Graphql::MultiplyForm) : String
+    if refusal = graphql_rewrite_refusal("multiply the operation")
+      return refusal
+    end
+    graphql_split = @decode_kind == :graphql
+    commit_decoded if graphql_split
+    env = @editor.text
+    sep = env.index("\n\n")
+    return "no request body to multiply — add a GraphQL body first" unless sep
+    head = env[0, sep]
+    body = env[(sep + 2)..]
+    begin
+      multiplied = Graphql.multiply(body, MediaType.of(head.to_slice), count, form)
+    rescue ex : Gori::Error
+      return ex.message || "the operation could not be multiplied"
+    end
+    rewritten = "#{head}\n\n#{multiplied}"
+    rewritten = sync_cl_text(rewritten) if @auto_content_length
+    @editor.replace_all(rewritten, 0)
+    refresh_decoded if graphql_split
+    @dirty = true
+    "multiplied into #{count} #{form.batch? ? "batched" : "aliased"} operations — send it with ^R"
+  end
+
   # Why this tab cannot take the introspection query, or nil. `ws_mode?`, not `@ws_mode`: a
   # handshake the operator switched to plain HTTP sends as one, so it rewrites as one.
   private def graphql_introspection_refusal : String?
-    return "hex mode active — leave it to insert the introspection query" if request_hex?
-    return "a WebSocket tab has no HTTP body to put the introspection query in" if ws_mode?
+    graphql_rewrite_refusal("insert the introspection query")
+  end
+
+  # The shared gate for a GraphQL request-pane rewrite (introspection, multiply): the tab
+  # kinds that have no GraphQL HTTP body to rewrite, or whose rewrite would drop siblings.
+  # `action` is the verb phrase so the reason names what was declined.
+  private def graphql_rewrite_refusal(action : String) : String?
+    return "hex mode active — leave it to #{action}" if request_hex?
+    return "a WebSocket tab has no HTTP body to #{action} in" if ws_mode?
     return "a gRPC tab sends protobuf, not a GraphQL query" if @grpc_mode
     return "a SAML tab — open the GraphQL endpoint in a tab of its own" if @decode_kind == :saml
     if group_document?(@editor.wire_lines)
       return "request holds a %%% separator, so the rewrite would drop every request after the " \
-             "first — insert the query in a tab of its own"
+             "first — #{action} in a tab of its own"
     end
     nil
   end

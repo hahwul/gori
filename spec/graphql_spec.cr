@@ -828,4 +828,105 @@ describe Gori::Graphql do
       GQL.from_flow("/api", head, %({"variables":{"a":1},).to_slice).should be_nil
     end
   end
+
+  describe ".multiply" do
+    login = %({"query":"mutation{login(code:\\"0000\\")}"})
+
+    describe "batch form" do
+      it "wraps one envelope in a JSON array of N identical copies" do
+        res = GQL.multiply(login, "application/json", 3, GQL::MultiplyForm::Batch)
+        arr = JSON.parse(res).as_a
+        arr.size.should eq(3)
+        arr.all? { |e| e == arr.first }.should be_true
+        arr.first["query"].as_s.should eq(%(mutation{login(code:"0000")}))
+      end
+
+      it "duplicates the whole envelope, keeping operationName/variables/extensions" do
+        env = %({"operationName":"L","query":"mutation L{login}","variables":{"a":1},"extensions":{"x":2}})
+        res = GQL.multiply(env, "application/json", 2, GQL::MultiplyForm::Batch)
+        arr = JSON.parse(res).as_a
+        arr.size.should eq(2)
+        arr.each do |e|
+          e["operationName"].as_s.should eq("L")
+          e["variables"]["a"].as_i.should eq(1)
+          e["extensions"]["x"].as_i.should eq(2)
+        end
+      end
+
+      it "produces a body that round-trips back through from_batch" do
+        res = GQL.multiply(login, "application/json", 4, GQL::MultiplyForm::Batch)
+        op = GQL.from_json(res).not_nil!
+        op.form.should eq(GQL::Form::Batch)
+        op.lossy.should be_false
+      end
+
+      it "refuses a non-GraphQL / non-parsing body" do
+        expect_raises(Gori::Error, /batch form needs/) do
+          GQL.multiply(%({"foo":1}), "application/json", 2, GQL::MultiplyForm::Batch)
+        end
+        expect_raises(Gori::Error, /batch form needs/) do
+          GQL.multiply("not json", "application/json", 2, GQL::MultiplyForm::Batch)
+        end
+      end
+    end
+
+    describe "alias form" do
+      it "prefixes the one top-level field with a0:..a{n-1}: inside one document" do
+        res = GQL.multiply(login, "application/json", 3, GQL::MultiplyForm::Alias)
+        q = JSON.parse(res)["query"].as_s
+        q.should eq(%(mutation{ a0: login(code:"0000") a1: login(code:"0000") a2: login(code:"0000") }))
+      end
+
+      it "preserves operationName and variables, rewriting only the query" do
+        env = %({"operationName":"L","query":"mutation L($c:String){login(code:$c)}","variables":{"c":"x"}})
+        res = GQL.multiply(env, "application/json", 2, GQL::MultiplyForm::Alias)
+        obj = JSON.parse(res)
+        obj["operationName"].as_s.should eq("L")
+        obj["variables"]["c"].as_s.should eq("x")
+        q = obj["query"].as_s
+        q.should contain("mutation L($c:String){ a0: login(code:$c) a1: login(code:$c) }")
+      end
+
+      it "aliases a raw application/graphql document (no JSON envelope)" do
+        res = GQL.multiply(%(mutation{login(code:"x")}), "application/graphql", 2, GQL::MultiplyForm::Alias)
+        res.should eq(%(mutation{ a0: login(code:"x") a1: login(code:"x") }))
+      end
+
+      it "keeps a nested selection set with the single top-level field" do
+        env = %({"query":"mutation{login(code:\\"x\\"){ token }}"})
+        q = JSON.parse(GQL.multiply(env, "application/json", 2, GQL::MultiplyForm::Alias))["query"].as_s
+        q.should eq(%(mutation{ a0: login(code:"x"){ token } a1: login(code:"x"){ token } }))
+      end
+
+      it "finds the real selection set past a brace in a variable-definition default" do
+        env = %({"query":"query($x:I={a:1}){ hero }"})
+        q = JSON.parse(GQL.multiply(env, "application/json", 2, GQL::MultiplyForm::Alias))["query"].as_s
+        q.should eq(%(query($x:I={a:1}){ a0: hero a1: hero }))
+      end
+
+      it "refuses a multi-field top-level selection set" do
+        expect_raises(Gori::Error, /single-field/) do
+          GQL.multiply(%({"query":"{ a b }"}), "application/json", 2, GQL::MultiplyForm::Alias)
+        end
+      end
+
+      it "refuses a query it cannot brace-match" do
+        expect_raises(Gori::Error, /single-field/) do
+          GQL.multiply(%({"query":"mutation{login"}), "application/json", 2, GQL::MultiplyForm::Alias)
+        end
+      end
+
+      it "refuses a form-encoded body" do
+        expect_raises(Gori::Error, /not a form-encoded one/) do
+          GQL.multiply("query=mutation{login}", "application/x-www-form-urlencoded", 2, GQL::MultiplyForm::Alias)
+        end
+      end
+    end
+
+    it "refuses a count below 1" do
+      expect_raises(Gori::Error, /at least 1/) do
+        GQL.multiply(login, "application/json", 0, GQL::MultiplyForm::Batch)
+      end
+    end
+  end
 end

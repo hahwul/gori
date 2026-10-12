@@ -447,6 +447,14 @@ module Gori
         "repeater.graphql-introspection-legacy", "GraphQL: insert legacy introspection query", "The introspection query without subscriptionType and directives, for a server that rejects the standard one",
         Verb::Scope::Repeater, [] of Verb::Chord,
         available: in_repeater, section: :request, menu: :palette) { |ctx| ctx.repeater_graphql_introspection(legacy: true); nil }
+      r.register Verb::Definition.new(
+        "repeater.graphql-multiply-batch", "GraphQL: multiply operation (batched array)", "Pack copies of this operation into one batched JSON array request, to test per-request rate-limit bypass",
+        Verb::Scope::Repeater, [] of Verb::Chord,
+        available: in_repeater, section: :request, menu: :palette) { |ctx| ctx.repeater_graphql_multiply(alias_form: false); nil }
+      r.register Verb::Definition.new(
+        "repeater.graphql-multiply-alias", "GraphQL: multiply operation (aliased)", "Repeat this operation's top-level field under N aliases in one document, to test per-request rate-limit bypass",
+        Verb::Scope::Repeater, [] of Verb::Chord,
+        available: in_repeater, section: :request, menu: :palette) { |ctx| ctx.repeater_graphql_multiply(alias_form: true); nil }
 
       # Target-pane toggle (SNI override) — tagged :target so it fronts the space menu
       # when the TARGET field has focus (previously ctrl-only ⇒ invisible there).

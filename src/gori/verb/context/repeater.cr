@@ -33,6 +33,8 @@ abstract class Gori::Verb::ExecContext
   abstract def repeater_pretty_request : Nil
   # Rewrite the request as a POST of the (legacy) GraphQL introspection query.
   abstract def repeater_graphql_introspection(legacy : Bool) : Nil
+  # Multiply this operation into N copies in one request body (batched array, or aliased).
+  abstract def repeater_graphql_multiply(alias_form : Bool) : Nil
   abstract def repeater_minimize : Nil      # squash the request (strip cosmetic headers/cookies/params) in the background
   abstract def repeater_auto_mark : Nil     # wrap every request param value in §…§
   abstract def repeater_mark_word : Nil     # toggle a marker around the token at the cursor

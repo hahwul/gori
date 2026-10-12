@@ -124,6 +124,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     repeater_controller.repeater_graphql_introspection(legacy)
   end
 
+  def repeater_graphql_multiply(alias_form : Bool) : Nil
+    repeater_controller.repeater_graphql_multiply(alias_form)
+  end
+
   forward repeater_minimize : Nil,
     repeater_auto_mark : Nil,
     repeater_mark_word : Nil,

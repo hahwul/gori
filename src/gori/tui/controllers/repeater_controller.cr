@@ -934,6 +934,17 @@ module Gori::Tui
       @host.status(view.insert_graphql_introspection(legacy))
     end
 
+    # The default copy count for a GraphQL multiply. ponytail: a fixed count, not a prompt —
+    # the operator trims the N-copy body in the editor, and a count picker lands with the
+    # per-copy substitution follow-up. Below `Graphql::MAX_BODY` for any ordinary operation.
+    GRAPHQL_MULTIPLY_COUNT = 100
+
+    def repeater_graphql_multiply(alias_form : Bool) : Nil
+      return unless view = current_view
+      form = alias_form ? Graphql::MultiplyForm::Alias : Graphql::MultiplyForm::Batch
+      @host.status(view.insert_graphql_multiply(GRAPHQL_MULTIPLY_COUNT, form))
+    end
+
     def repeater_auto_mark : Nil
       return unless view = current_view
       @host.status(view.auto_mark)

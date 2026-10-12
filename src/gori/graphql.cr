@@ -754,6 +754,282 @@ module Gori
       end
     end
 
+    # How `multiply` packs the N copies into one request. `Batch` wraps the JSON envelope in a
+    # JSON array (the shape `from_batch`/`batch_text` already model); `Alias` prefixes the one
+    # top-level selection-set field with `aN:` inside a single document.
+    enum MultiplyForm
+      Batch
+      Alias
+    end
+
+    # Grow one GraphQL operation into `count` copies in a SINGLE request body, for a rate-limit
+    # / brute-force-bypass test: a server that throttles per HTTP request counts N operations
+    # packed into one request as a single tick (PortSwigger "Bypassing rate limiting using
+    # aliases", InQL's batch attack). The operator asked for this rewrite, so the N-copy body is
+    # OPERATOR bytes produced on operator request (P7, invariant #1) — the same provenance as
+    # the introspection rewrite and the decoded-pane recompose. The original request is
+    # untouched; the caller writes the returned body as ONE undoable edit and the operator
+    # reviews and sends it. It is NOT sanitization and is never routed through a page-authored
+    # or remote-chosen path.
+    #
+    # Raises `Gori::Error` with a reason rather than emitting a corrupt body when the chosen
+    # form does not fit: a non-parsing / non-GraphQL body for either form, or (for `Alias`) a
+    # document whose top-level selection set `multiply` cannot brace-match to a single field.
+    def multiply(body : String, content_type : String?, count : Int32, form : MultiplyForm) : String
+      raise Gori::Error.new("the copy count must be at least 1") if count < 1
+      out =
+        case form
+        in MultiplyForm::Batch then multiply_batch(body, count)
+        in MultiplyForm::Alias then multiply_alias(body, content_type, count)
+        end
+      if out.bytesize > MAX_BODY
+        raise Gori::Error.new("#{count} copies would exceed the #{MAX_BODY // (1024 * 1024)} MiB body limit — use fewer")
+      end
+      out
+    end
+
+    # `Batch`: the single JSON envelope wrapped in a JSON array of `count` identical copies —
+    # the exact shape `from_batch` parses and `batch_text` renders, so the result round-trips in
+    # the decoded pane. The WHOLE envelope object is duplicated (not just `query`), so
+    # `variables`, `extensions` and any other field ride along on every copy, and the
+    # Content-Type stays JSON. Refuses a body that is not a single GraphQL envelope object.
+    private def multiply_batch(body : String, count : Int32) : String
+      h = (JSON.parse(strip(body)).as_h? rescue nil)
+      unless h && single_op(h)
+        raise Gori::Error.new(%(the batch form needs one GraphQL JSON operation, {"query":…}, to multiply))
+      end
+      el = JSON::Any.new(h)
+      Array.new(count) { el }.to_json
+    end
+
+    # `Alias`: the operation's one top-level selection-set field, repeated `count` times under
+    # distinct `a0:`…`a{count-1}:` aliases inside a single document — `mutation{login(…)}`
+    # becomes `mutation{ a0: login(…) a1: login(…) … }`. A JSON envelope is rewritten in place
+    # so operationName/variables/extensions survive; an `application/graphql` body (field names
+    # are unquoted, so it never parses as JSON) IS the document. The copies are identical — a
+    # per-copy value (the actual brute force) is the substitution follow-up.
+    #
+    # ponytail: naive top-level brace scan (strings, `#` comments and `()`/`{}` nesting handled,
+    # nothing deeper) over a single top-level field. Upgrade to a real selection-set parser only
+    # if a measured query defeats it or a multi-field top level needs multiplying.
+    private def multiply_alias(body : String, content_type : String?, count : Int32) : String
+      refusal = "the alias form needs a single-field GraphQL operation it can brace-match"
+      if MediaType.essence(content_type) == "application/x-www-form-urlencoded"
+        raise Gori::Error.new("the alias form needs a JSON or application/graphql body, not a form-encoded one")
+      end
+      if h = (JSON.parse(strip(body)).as_h? rescue nil)
+        q = h["query"]?.try(&.as_s?)
+        raise Gori::Error.new(refusal) unless q && q.includes?('{')
+        aliased = alias_single(q, count) || raise Gori::Error.new(refusal)
+        h2 = h.dup
+        h2["query"] = JSON::Any.new(aliased)
+        h2.to_json
+      else
+        doc = strip(body)
+        raise Gori::Error.new(refusal) unless doc.includes?('{')
+        alias_single(doc, count) || raise Gori::Error.new(refusal)
+      end
+    end
+
+    # A GraphQL document rewritten so its one top-level field is repeated `count` times under
+    # `aN:` aliases, or nil when there is no top-level selection set to brace-match or the top
+    # level is not exactly one field (empty, a fragment spread, or two-or-more fields — the
+    # exotic cases refused rather than guessed).
+    private def alias_single(doc : String, count : Int32) : String?
+      open_i, close_i = outer_selection(doc) || return nil
+      inner = doc.byte_slice(open_i + 1, close_i - open_i - 1)
+      core = sole_field_core(inner) || return nil
+      copies = String.build do |io|
+        count.times do |k|
+          io << ' ' if k > 0
+          io << 'a' << k << ": " << core
+        end
+      end
+      "#{doc.byte_slice(0, open_i + 1)} #{copies} #{doc.byte_slice(close_i)}"
+    end
+
+    # The operation's top-level selection set: {byte index of its opening `{`, byte index of
+    # the matching `}`}, or nil when there is none at paren-depth 0 or the braces do not
+    # balance. `match_group` does the brace matching (strings / comments skipped, `{`/`}`
+    # counted); `selection_open` finds the opener past any variable-definition parens.
+    private def outer_selection(doc : String) : {Int32, Int32}?
+      b = doc.to_slice
+      open_i = selection_open(b) || return nil
+      past = match_group(b, open_i) || return nil # index just AFTER the matching `}`
+      {open_i, past - 1}
+    end
+
+    # The byte index of the operation's top-level `{` — the first one at paren-depth 0 outside
+    # a string or comment — or nil when there is none. A `{` inside argument / variable-
+    # definition parens (a default input-object value) is not the selection set, so paren depth
+    # gates the opener; strings (`"…"` / `"""…"""`) and `#` comments are skipped.
+    private def selection_open(b : Bytes) : Int32?
+      i = 0
+      paren = 0
+      while i < b.size
+        case b[i].unsafe_chr
+        when '"'
+          i = skip_string(b, i) || return nil
+          next
+        when '#'
+          i = skip_comment(b, i)
+          next
+        when '(' then paren += 1
+        when ')' then paren -= 1
+        when '{'
+          return i if paren == 0
+        else
+          # not a boundary character
+        end
+        i += 1
+      end
+      nil
+    end
+
+    # The one top-level field of a selection-set body, with any leading `alias:` stripped and
+    # the surrounding whitespace trimmed — or nil when the body is not exactly one top-level
+    # field (empty, a fragment spread `…`, or two or more fields). Reads one field (name, then
+    # its args / directives / selection), then requires the remainder of the body to be blank.
+    private def sole_field_core(inner : String) : String?
+      b = inner.to_slice
+      p = skip_ws(b, 0)
+      return nil if p >= b.size
+      return nil if b[p].unsafe_chr == '.' # a fragment spread / inline fragment, refused
+      name_end = read_name(b, p) || return nil
+      core_start = p
+      q = skip_ws(b, name_end)
+      if q < b.size && b[q].unsafe_chr == ':'
+        # `alias:` — the real field name follows, and the core begins there
+        core_start = skip_ws(b, q + 1)
+        q = read_name(b, core_start) || return nil
+      else
+        q = name_end
+      end
+      field_end = consume_field(b, q) || return nil
+      return nil unless skip_ws(b, field_end) >= b.size # a non-blank remainder = a second field
+      inner.byte_slice(core_start, field_end - core_start).strip
+    end
+
+    # Consume a field's trailing args / directives / selection set starting at `q`, returning
+    # the byte index just past the last of them (`q` when there are none), or nil when a group
+    # does not close. Stops at the next top-level name — a second field is the caller's to reject.
+    private def consume_field(b : Bytes, q : Int32) : Int32?
+      field_end = q
+      loop do
+        q = skip_ws(b, q)
+        break if q >= b.size
+        case b[q].unsafe_chr
+        when '(' then q = match_group(b, q) || return nil
+        when '{' then q = match_group(b, q) || return nil
+        when '@'
+          q = skip_ws(b, q + 1)
+          q = read_name(b, q) || return nil
+        else
+          break # a second field name (or junk) — this field has ended
+        end
+        field_end = q
+      end
+      field_end
+    end
+
+    # Index just past a GraphQL string literal starting at `i` (`b[i]` is `"`), handling the
+    # `"""block"""` form and `\`-escapes; nil on an unterminated string so the caller refuses
+    # rather than scanning off the end. ponytail: a block string treats `\` as escaping the
+    # next byte, which is slightly loose, but a `{`/`}` inside a query string is what matters
+    # and both forms skip it.
+    private def skip_string(b : Bytes, i : Int32) : Int32?
+      if b[i + 1]?.try(&.unsafe_chr) == '"' && b[i + 2]?.try(&.unsafe_chr) == '"'
+        j = i + 3
+        while j < b.size
+          case b[j].unsafe_chr
+          when '\\' then j += 2
+          when '"'
+            return j + 3 if b[j + 1]?.try(&.unsafe_chr) == '"' && b[j + 2]?.try(&.unsafe_chr) == '"'
+            j += 1
+          else j += 1
+          end
+        end
+        return nil
+      end
+      j = i + 1
+      while j < b.size
+        case b[j].unsafe_chr
+        when '\\' then j += 2
+        when '"'  then return j + 1
+        when '\n' then return nil # a single-line string broken by a newline is unterminated
+        else j += 1
+        end
+      end
+      nil
+    end
+
+    # Index of the newline (or the end) that closes a `#` GraphQL line comment starting at `i`.
+    private def skip_comment(b : Bytes, i : Int32) : Int32
+      j = i + 1
+      while j < b.size && b[j].unsafe_chr != '\n'
+        j += 1
+      end
+      j
+    end
+
+    # Index just past the name starting at `p` (`[_A-Za-z][_0-9A-Za-z]*`), or nil when `p` is
+    # not a name-start.
+    private def read_name(b : Bytes, p : Int32) : Int32?
+      return nil if p >= b.size
+      c = b[p].unsafe_chr
+      return nil unless c == '_' || c.ascii_letter?
+      q = p + 1
+      while q < b.size
+        c = b[q].unsafe_chr
+        break unless c == '_' || c.ascii_alphanumeric?
+        q += 1
+      end
+      q
+    end
+
+    # Index past the first non-whitespace, non-comma, non-comment byte at or after `p` (commas
+    # are insignificant in GraphQL; `#` runs a comment to end of line).
+    private def skip_ws(b : Bytes, p : Int32) : Int32
+      while p < b.size
+        c = b[p].unsafe_chr
+        if c == '#'
+          p = skip_comment(b, p)
+        elsif c == ',' || c.ascii_whitespace?
+          p += 1
+        else
+          break
+        end
+      end
+      p
+    end
+
+    # Index just past the `(`…`)` or `{`…`}` group opening at `p` (`b[p]` is the opener),
+    # skipping strings and comments; nil when it does not close. Only the opener's own pair is
+    # counted — valid GraphQL keeps the two kinds balanced within each other.
+    private def match_group(b : Bytes, p : Int32) : Int32?
+      open_c = b[p].unsafe_chr
+      close_c = open_c == '(' ? ')' : '}'
+      depth = 0
+      j = p
+      while j < b.size
+        c = b[j].unsafe_chr
+        if c == '"'
+          j = skip_string(b, j) || return nil
+          next
+        elsif c == '#'
+          j = skip_comment(b, j)
+          next
+        elsif c == open_c
+          depth += 1
+        elsif c == close_c
+          depth -= 1
+          return j + 1 if depth == 0
+        end
+        j += 1
+      end
+      nil
+    end
+
     # `# operationName:` is ALSO a valid GraphQL source comment, so the same disambiguation the
     # `# variables` sentinel already gets is owed to this one — without it a document whose
     # FIRST line is a comment starting with those characters had that line deleted from the

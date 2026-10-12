@@ -2740,6 +2740,59 @@ describe Gori::Tui::RepeaterView do
     end
   end
 
+  # `repeater.graphql-multiply-{batch,alias}`. Shares `graphql_rewrite_refusal` with the
+  # introspection verb, so one refusal case here confirms the wiring; the engine's own
+  # refusals live in spec/graphql_spec.cr.
+  describe "insert_graphql_multiply" do
+    post = "POST /graphql HTTP/1.1\nHost: api.test\nContent-Type: application/json\n" \
+           "Content-Length: 99\n\n" + %({"query":"mutation{login(code:\\"x\\")}"})
+    batch = Gori::Graphql::MultiplyForm::Batch
+    alias_form = Gori::Graphql::MultiplyForm::Alias
+
+    it "rewrites the body into a batched array and re-syncs Content-Length" do
+      view = RepeaterView.new
+      view.restore("https://api.test", post, false, true)
+      view.insert_graphql_multiply(3, batch).should eq("multiplied into 3 batched operations — send it with ^R")
+      head, _, body = view.request_text.partition("\n\n")
+      JSON.parse(body).as_a.size.should eq(3)
+      head.should contain("Content-Length: #{body.bytesize}")
+      view.dirty?.should be_true
+    end
+
+    it "rewrites the body into one aliased document" do
+      view = RepeaterView.new
+      view.restore("https://api.test", post, false, true)
+      view.insert_graphql_multiply(2, alias_form).should eq("multiplied into 2 aliased operations — send it with ^R")
+      q = JSON.parse(view.request_text.partition("\n\n")[2])["query"].as_s
+      q.should eq(%(mutation{ a0: login(code:"x") a1: login(code:"x") }))
+    end
+
+    it "is one undoable edit" do
+      view = RepeaterView.new
+      view.restore("https://api.test", post, false, true)
+      view.insert_graphql_multiply(3, batch)
+      view.focus_pane(:request)
+      view.edit_undo
+      view.request_text.partition("\n\n")[2].should eq(%({"query":"mutation{login(code:\\"x\\")}"}))
+    end
+
+    it "turns an engine refusal into the status line and edits nothing" do
+      multi = "POST /graphql HTTP/1.1\nHost: api.test\nContent-Type: application/json\n\n" + %({"query":"{ a b }"})
+      view = RepeaterView.new
+      view.restore("https://api.test", multi, false, true)
+      view.insert_graphql_multiply(2, alias_form).should contain("single-field")
+      view.request_text.partition("\n\n")[2].should eq(%({"query":"{ a b }"}))
+      view.dirty?.should be_false
+    end
+
+    it "refuses in hex mode without touching the request" do
+      view = RepeaterView.new
+      view.restore("https://api.test", post, false, true)
+      view.toggle_request_hex.should be_true
+      view.insert_graphql_multiply(3, batch).should contain("hex mode")
+    end
+  end
+
   # The single-pane REQUEST column, through the shared hit-test seam
   # (`request_hit`/`request_sub_rect`/`place_request_caret`) the split panes now share. There
   # was no drag or double-click coverage anywhere in the suite before, so the seam's

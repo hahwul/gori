@@ -390,6 +390,10 @@ private class FakeContext < ExecContext
     @calls << (legacy ? :repeater_graphql_introspection_legacy : :repeater_graphql_introspection)
   end
 
+  def repeater_graphql_multiply(alias_form : Bool) : Nil
+    @calls << (alias_form ? :repeater_graphql_multiply_alias : :repeater_graphql_multiply_batch)
+  end
+
   def repeater_minimize : Nil
     @calls << :repeater_minimize
   end
