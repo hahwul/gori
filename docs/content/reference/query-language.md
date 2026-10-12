@@ -27,6 +27,7 @@ Match a field with `field:value` (substring or exact, depending on the field):
 | `header` | Substring over the head (request + response headers) |
 | `body` | Full-text match over bodies (trigram FTS index) |
 | `ws` | A WebSocket flow whose socket carried a TEXT or BINARY message containing the value, in either direction ([below](#websocket-messages)) |
+| `rpc` | A flow whose request body is a JSON-RPC call (MCP included) whose method starts with the value ([below](#json-rpc-methods)) |
 | `stub` | `true` / `false`. Flows gori answered itself from a [short-circuit rule](/guide/proxy/#short-circuit), with no origin involved |
 | `static` | `true` / `false`. Images, fonts and audio/video, by response Content-Type (by path extension when there is none). Not SVG, CSS, JS or an image proxy (`?url=`), and only a successful fetch (2xx or 304). `-static:true` is the [hide-static lens](/guide/proxy/#hide-static) |
 | `scope` | `in` / `out`. The project's scope rules ([below](#scope-in-scope-out)) |
@@ -208,6 +209,21 @@ To narrow **one** flow's transcript instead: in History's MESSAGES pane, search 
 needle, matches exactly as the QL term does, and reaches messages older than the window those
 surfaces otherwise load.
 
+## JSON-RPC Methods {#json-rpc-methods}
+
+`rpc:method` matches a flow whose **request** body is a JSON-RPC call naming that method. The
+value is a case-sensitive prefix, so `rpc:tools/` is every MCP tool method and `rpc:tools/call`
+is just the calls. Like `body~`, it scans the stored request bytes with no index, so a compressed
+request body is not read.
+
+```text
+rpc:tools/call                         every MCP tool call
+rpc:initialize host:mcp.example        an MCP handshake against one server
+```
+
+The decoded call, paired with its reply, is the RPC pane (named `MCP` for an MCP server) in
+History's detail view, a `json_rpc` key in `gori run show --format json` and MCP `get_flow`.
+
 ## Combining Terms
 
 - Terms separated by spaces are **AND**-ed together. `AND` may also be written out.
@@ -263,7 +279,7 @@ Every filter bar shares the boolean grammar above (`AND`/`OR`/`NOT`, `-`, parent
 A hold gate and an extract-rule condition evaluate one live message, before it is captured, so
 they refuse every History field that message cannot answer rather than guess: `scope:` (a
 project's scope rules are not part of a message), `size:`, `reqsize:`, `respsize:` and `dur:`
-(the exchange has not finished), `stub:`, `static:`, `src:`, `via:`, `cache:` and `ws:` (a gate holds
+(the exchange has not finished), `stub:`, `static:`, `src:`, `via:`, `cache:`, `rpc:` and `ws:` (a gate holds
 one message, not a transcript; its `body:` already means that message), and the one-sided
 `req.`/`resp.` spellings. A refused field is never searched as free text instead. The
 condition rows say so where you type them, an extract rule carrying one will not save, and MCP

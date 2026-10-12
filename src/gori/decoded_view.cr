@@ -4,6 +4,8 @@ require "./jwt"
 require "./graphql"
 require "./graphql_ws"
 require "./ws_proto"
+require "./json_rpc"
+require "./llm_call"
 require "./form_data"
 require "./media_type"
 require "./binary_document"
@@ -86,6 +88,8 @@ module Gori
       end
       emit_ws_graphql(j, ws_ops, clip)
       emit_ws_proto(j, ws_frames, clip)
+      JsonRpc.from_flow(req_head, req_body, resp_head, resp_body).try { |ex| emit_json_rpc(j, ex, clip) }
+      LlmCall.from_flow(req_head, req_body, resp_head, resp_body).try { |call| emit_llm(j, call, clip) }
       if fields = FormData.from_flow(target, req_head, req_body)
         j.field "form_params" do
           j.array do
@@ -121,6 +125,77 @@ module Gori
               j.field "variables", f.op.variables.try(&.scrub)
             end
           end
+        end
+      end
+    end
+
+    # A JSON-RPC / MCP exchange as `json_rpc`: the request's calls, each with its paired reply
+    # (`reply_kind` result/error, null while unanswered), and the response's unpaired messages.
+    # `id` is the id as the request spelled it, so `1` and `"1"` stay apart. The engines parse
+    # scrubbed text, so every string here is already valid UTF-8.
+    #
+    # A clipped (LLM-bound) caller also gets at most `MAX_RPC_ITEMS` of each list, and the
+    # totals when that cut: MCP's legacy transport streams EVERY reply down one GET.
+    MAX_RPC_ITEMS = 500
+
+    private def emit_json_rpc(j : JSON::Builder, ex : JsonRpc::Exchange, clip : Int32?) : Nil
+      cap = clip ? MAX_RPC_ITEMS : Int32::MAX
+      j.field "json_rpc" do
+        j.object do
+          j.field "mcp", JsonRpc.mcp?(ex)
+          j.field "calls_total", ex.calls.size if ex.calls.size > cap
+          j.field "calls" do
+            j.array do
+              ex.calls.first(cap).each do |c|
+                j.object do
+                  j.field "method", c.method
+                  j.field "id", c.id
+                  j.field "label", c.label
+                  emit_text(j, "params", c.params, clip)
+                  j.field "reply_kind", c.reply ? (c.error ? "error" : "result") : nil
+                  emit_text(j, "reply", c.reply, clip)
+                end
+              end
+            end
+          end
+          j.field "stream_total", ex.stream.size if ex.stream.size > cap
+          j.field "stream" do
+            j.array do
+              ex.stream.first(cap).each do |m|
+                j.object do
+                  j.field "method", m.method
+                  j.field "id", m.id
+                  emit_text(j, "message", m.body, clip)
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+
+    # An LLM API call as `llm`: the request's shape and the reply, a streamed one reassembled.
+    private def emit_llm(j : JSON::Builder, c : LlmCall::Call, clip : Int32?) : Nil
+      j.field "llm" do
+        j.object do
+          j.field "dialect", c.dialect
+          j.field "model", c.model
+          j.field "messages", c.roles
+          j.field "tools", c.tools
+          j.field "streamed", c.streamed
+          emit_text(j, "text", c.text, clip)
+          j.field "tool_calls" do
+            j.array do
+              c.tool_calls.each do |t|
+                j.object do
+                  j.field "name", t.name
+                  emit_text(j, "arguments", t.arguments, clip)
+                end
+              end
+            end
+          end
+          j.field "stop_reason", c.stop
+          j.field "usage", c.usage
         end
       end
     end

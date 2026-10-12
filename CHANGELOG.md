@@ -6,6 +6,7 @@
 - MCP permissions get a third state, **ask**: each call in that group, or an `allow_unscoped:true` send under **Change scope & sandbox**, waits for the operator's approval on the TUI's `ask:` card (once, always this host or host:port, or deny) (#1585)
 - CLI: `gori run browser` opens the Open browser profile from a script, with an opt-in loopback DevTools port so Playwright MCP or chrome-devtools-mcp can drive a captured browser (#1594)
 - Probe: passive rules for weak OAuth/OIDC authorization requests (implicit grant, PKCE plain or missing, no state/nonce) and client-side path traversal in JavaScript request calls (#1597, #1598)
+- History, `gori run show` and MCP `get_flow` decode JSON-RPC/MCP calls paired with their replies (SSE included) and OpenAI/Anthropic LLM calls with streamed deltas reassembled, in new RPC and LLM panes; QL `rpc:tools/call` finds calls by method (#1590)
 - QL: `via:tui|cli|mcp` filters flows by the gori surface that sent them, so `via:mcp` is what an agent sent, and agent events in Activity and MCP `list_events` name the client (`actor_label`) (#1587)
 
 ## v0.8.1
