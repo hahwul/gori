@@ -67,6 +67,10 @@ lib LibCrypto
   # buffer before encoding.
   fun i2d_x509 = i2d_X509(x : X509, pp : UInt8**) : Int
 
+  # The MD5-based subject hash Android names a system-store CA file by (`<hash>.0`, #1600) —
+  # `openssl x509 -subject_hash_old`.
+  fun x509_subject_name_hash_old = X509_subject_name_hash_old(x : X509) : LibC::ULong
+
   # Memory BIOs — the in-process read/write path for PEM. Shared: OAST reads its own
   # private-key PEM back and writes an SPKI PEM out, the JWT workbench reads the
   # operator's signing/verification key in. `BIO_new` / `BIO_free` come from stdlib.

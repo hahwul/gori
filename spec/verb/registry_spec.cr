@@ -1281,6 +1281,10 @@ private class FakeContext < ExecContext
     @calls << :open_shell_picker
   end
 
+  def open_android_picker : Nil
+    @calls << :open_android_picker
+  end
+
   def authorize_seed_selected : Nil
     @calls << :authorize_seed_selected
   end

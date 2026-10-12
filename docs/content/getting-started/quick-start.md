@@ -84,6 +84,18 @@ A phone can't read the CA off your filesystem, so gori serves it over the networ
 
 `gori.proxy` is a reserved name gori answers for itself, so it works once the proxy is configured and never reaches the network. If you'd rather not configure the proxy first, browse straight to `http://<your-LAN-IP>:8070/` instead and you'll get the same page.
 
+### Option D: Set up an Android emulator over adb
+
+With `adb` on `PATH` (or `ANDROID_HOME` set) and an emulator running or a device plugged in with USB debugging on, gori does the setup for you. The proxy stays on loopback: `adb reverse` carries the device's traffic to it.
+
+```bash
+gori run android setup --dry-run   # print the adb commands first
+gori run android setup --system    # emulator without Play Store, or a rooted device
+gori run android undo              # clear the proxy and the mapping
+```
+
+`--system` puts gori's root in the system store as root, so apps trust it without a network security config. It lasts until the device reboots. It needs root, and Android 14+ (API 34) is not supported yet. The default, `--user`, pushes the certificate to `/sdcard/Download/gori-ca.crt` and opens Security settings to install it as a **CA certificate**. Apps targeting API 24+ only trust a user CA if their network security config opts in. In the TUI, the palette's **Set up Android device** runs the same steps. See [`gori run android`](/reference/cli/#run-android).
+
 **Checkpoint.** Switch to **History** (press `3`). You should see at least one row: your `GET https://example.com/` request with a `200` status. If History is empty, capture isn't reaching gori: recheck the proxy setting (Option B) or use **Open browser** (Option A).
 
 ## 3. Learn the two discovery surfaces

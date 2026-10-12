@@ -138,6 +138,12 @@ module Gori::Proxy::Tls
       Base64.strict_encode(Digest::SHA256.digest(der))
     end
 
+    # The 8-hex-digit `subject_hash_old` Android's system CA store names this cert's file by
+    # (`c317345c.0`), as `openssl x509 -subject_hash_old` prints it.
+    def subject_hash_old : String
+      "%08x" % LibCrypto.x509_subject_name_hash_old(@handle)
+    end
+
     # DER (binary ASN.1) encoding of the certificate — the form OS/browser trust
     # stores accept for a double-click install (the self-serve CA download page's
     # .der/.crt route). A null `pp` first sizes the buffer, then i2d writes into it

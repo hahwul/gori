@@ -97,9 +97,9 @@ module Gori::Tui
     # either — it opens a shell or copies one's env.
     private def hint_action : String
       case @kind
-      when :export_format then "export"
-      when :shell         then "go"
-      else                     "set"
+      when :export_format   then "export"
+      when :shell, :android then "go"
+      else                       "set"
       end
     end
 

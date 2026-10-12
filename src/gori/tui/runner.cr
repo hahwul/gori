@@ -147,6 +147,7 @@ require "./runner/discover"
 require "./runner/activity"
 require "./runner/env"
 require "./runner/external_open"
+require "./runner/android"
 require "./runner/fuzzer"
 require "./runner/history"
 require "./runner/host_overrides"
@@ -799,6 +800,7 @@ module Gori::Tui
             dirty = true if target_controller.params.drain_build
             dirty = true if miner_controller.drain_seed_names
             dirty = true if drain_import_events
+            dirty = true if drain_android_events
             # Tick the top-bar clock: dirty only when the displayed minute changes, so the
             # idle loop wakes once a minute to repaint rather than every second.
             if (clock = clock_minute) != last_clock

@@ -54,6 +54,7 @@ gori run <subcommand> [verb] [options]
 | ------------ | ------------- |
 | `capture` | Run the proxy and stream captured flows to STDOUT |
 | `shell` · `shell --print` | Open `$SHELL` (or run `-- CMD`) proxied through a live gori and trusting its CA, or print the export lines |
+| `android devices` · `setup` · `undo` | Route an Android emulator or rooted device through a live gori over adb and trust its CA, or undo it |
 | `history` (`ls`) | List / query captured flows |
 | `history delete <id>…` · `delete -q QL` · `clear` | Hard-delete flows by id (every id must exist, or nothing is deleted), every flow a query matches (`--yes`), or wipe the project's History (`--yes`) |
 | `show <flow-id>` | Print one flow's request and response |
@@ -243,6 +244,32 @@ If that profile is already open in a running browser, the launch is refused, sin
 {% alert(type="warning") %}
 A DevTools port gives any local process full control of the browser without authentication: it can read cookies and run script on every site, including the sessions you are logged into in that profile. It is only opened when you ask, only on loopback, and closes with the command. An agent driving the browser is not gated by the project scope the way MCP `send_request` is; its traffic is captured like any other browser's.
 {% end %}
+
+### run android
+
+Point an Android emulator or rooted test device at a live gori over `adb`: the palette's **Set up Android device**, from a script. gori keeps its loopback bind; `adb reverse` maps the device's `127.0.0.1:PORT` to it, and the device's global HTTP proxy is set to that address.
+
+```bash
+gori run android devices                 # serial, state, model, api=N,emulator,root
+gori run android setup --dry-run         # print the adb commands, change nothing
+gori run android setup --system          # trust the CA in the system store, as root
+gori run android undo
+```
+
+`setup` finds the gori the way [run shell](#run-shell) does. `--user` (the default) pushes the CA to `/sdcard/Download/gori-ca.crt` and opens Security settings; install it there as a CA certificate. Apps targeting API 24+ trust a user CA only if their network security config opts in. `--system` mounts a tmpfs over `/system/etc/security/cacerts` holding the existing certificates plus gori's root as `<subject_hash_old>.0`. It runs as root (adbd as root, or `su`), shows every command first under `--dry-run`, and is gone when the device reboots. Without root it is refused rather than downgraded to `--user`, and Android 14+ (API 34), which reads system CAs from the Conscrypt APEX, is refused for now.
+
+`undo` sets `http_proxy` to `:0`, removes the reverse mapping (the port is read back from the device's proxy, or `--device-port`), deletes the pushed file and, with root, unmounts the tmpfs. It is safe to run twice. A user CA you installed stays in Settings until you remove it.
+
+| Option | Description |
+| -------- | ------------- |
+| `--serial=S` | The device (default: the only one connected) |
+| `--user`; `--system` | `setup`: how the CA is trusted (default `--user`) |
+| `--device-port=N` | The port the device dials on its loopback (default: gori's port; `undo`: read from the device) |
+| `--project=NAME`; `--db=PATH`; `--proxy=HOST:PORT` | `setup`: which live gori to point at, as for [run shell](#run-shell). The address must be on this machine's loopback |
+| `--ca-dir=DIR` | `setup`: CA directory (default: the capturing gori's, else `~/.gori/ca`) |
+| `--dry-run` | Print the plan without changing anything. The device is still read (API level, root) |
+
+Not covered: certificate pinning, and traffic that ignores the global proxy.
 
 ### run history / ls
 

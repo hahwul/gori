@@ -4,6 +4,7 @@
 
 - QL: `ws:`/`ws~` finds flows by their WebSocket message payloads, and History's MESSAGES pane, `gori run show --ws-match` and MCP `get_flow` `ws_query` narrow one transcript (#1588)
 - MCP permissions get a third state, **ask**: each call in that group, or an `allow_unscoped:true` send under **Change scope & sandbox**, waits for the operator's approval on the TUI's `ask:` card (once, always this host or host:port, or deny) (#1585)
+- Android: `gori run android setup` and the palette's **Set up Android device** route an emulator or rooted device through gori over `adb reverse` and trust its CA, as a user certificate or in the system store until reboot, and `undo` reverts it (#1600)
 - CLI: `gori run browser` opens the Open browser profile from a script, with an opt-in loopback DevTools port so Playwright MCP or chrome-devtools-mcp can drive a captured browser (#1594)
 - Probe: passive rules for weak OAuth/OIDC authorization requests (implicit grant, PKCE plain or missing, no state/nonce) and client-side path traversal in JavaScript request calls (#1597, #1598)
 - History, `gori run show` and MCP `get_flow` decode JSON-RPC/MCP calls paired with their replies (SSE included) and OpenAI/Anthropic LLM calls with streamed deltas reassembled, in new RPC and LLM panes; QL `rpc:tools/call` finds calls by method (#1590)

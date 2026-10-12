@@ -84,6 +84,18 @@ gori는 필요할 때 루트로 호스트별 리프 인증서를 발급하므로
 
 `gori.proxy`는 gori가 스스로 응답하는 예약된 이름입니다. 프록시를 설정한 뒤에만 동작하며 네트워크로 나가지 않습니다. 프록시를 먼저 설정하고 싶지 않다면 `http://<LAN-IP>:8070/`으로 바로 접속해도 같은 페이지가 나옵니다.
 
+### Option D: adb로 Android 에뮬레이터 설정하기 {#option-d-set-up-an-android-emulator-over-adb}
+
+`adb`가 `PATH`에 있고(또는 `ANDROID_HOME`이 설정되어 있고) 에뮬레이터가 실행 중이거나 USB 디버깅을 켠 기기가 연결되어 있으면 gori가 설정을 대신합니다. 프록시는 loopback에 그대로 있고, 기기의 트래픽은 `adb reverse`로 전달됩니다.
+
+```bash
+gori run android setup --dry-run   # adb 명령을 먼저 출력
+gori run android setup --system    # Play Store 없는 에뮬레이터, 또는 루팅된 기기
+gori run android undo              # 프록시와 포트 매핑 해제
+```
+
+`--system`은 root 권한으로 gori의 루트 인증서를 시스템 저장소에 넣으므로, 앱은 network security config 없이도 신뢰합니다. 기기를 재부팅하면 사라집니다. root가 필요하며 Android 14+(API 34)는 아직 지원하지 않습니다. 기본값인 `--user`는 인증서를 `/sdcard/Download/gori-ca.crt`에 올리고 보안 설정을 열어 **CA 인증서**로 설치하게 합니다. API 24 이상을 대상으로 하는 앱은 network security config에서 허용해야만 사용자 CA를 신뢰합니다. TUI에서는 팔레트의 **Set up Android device**가 같은 단계를 실행합니다. [`gori run android`](/reference/cli/#run-android)를 참고하세요.
+
 **확인.** **History**로 전환하세요(`3`). 최소 한 개의 행이 보여야 합니다. `200` 상태의 `GET https://example.com/` 요청입니다. History가 비어 있다면 트래픽이 gori에 닿지 않는 것입니다. 프록시 설정(Option B)을 다시 확인하거나 **Open browser**(Option A)를 사용하세요.
 
 ## 3. 두 가지 탐색 표면 익히기 {#3-learn-the-two-discovery-surfaces}

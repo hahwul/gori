@@ -167,6 +167,9 @@ module Gori
       # shell: a terminal proxied through gori and trusting its CA (#1238)
       abstract def open_shell_picker : Nil
 
+      # android: an emulator or rooted device set up for capture over adb (#1600)
+      abstract def open_android_picker : Nil
+
       # READ editors: line select / selection state (space menu + x/v chords).
       abstract def read_selection_active? : Bool
       abstract def read_select_line : Nil

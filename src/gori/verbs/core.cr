@@ -132,6 +132,12 @@ module Gori
         "shell.open", "Open shell", "Open a terminal proxied through gori and trusting its CA, or copy its env for another pane",
         Verb::Scope::Global) { |ctx| ctx.open_shell_picker; nil }
 
+      # Palette-only, beside them: an Android emulator or rooted device routed through gori and
+      # trusting its CA over adb (#1600). A picker, since the device's settings change.
+      r.register Verb::Definition.new(
+        "android.open", "Set up Android device", "Route an Android emulator or device through gori over adb and trust its CA, or undo it",
+        Verb::Scope::Global) { |ctx| ctx.open_android_picker; nil }
+
       # Settings (config control). The generic entry opens the unified Preferences modal
       # at its group picker (same as Ctrl+, / the ⚙ top-bar chip); the per-section entries
       # below jump straight to one section. Both the palette list and the modal's groups

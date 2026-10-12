@@ -54,6 +54,7 @@ gori run <subcommand> [verb] [options]
 |------------|-------------|
 | `capture` | 프록시를 실행하고 캡처한 플로우를 STDOUT으로 스트리밍 |
 | `shell` · `shell --print` | 실행 중인 gori를 프록시로 쓰고 그 CA를 신뢰하는 `$SHELL`을 열거나(`-- CMD`로 명령 실행), export 줄을 출력 |
+| `android devices` · `setup` · `undo` | adb로 Android 에뮬레이터나 루팅된 기기를 실행 중인 gori로 라우팅하고 CA를 신뢰시키거나, 되돌림 |
 | `history` (`ls`) | 캡처한 플로우 목록 / 쿼리 |
 | `history delete <id>…` · `delete -q QL` · `clear` | id로 플로우를 완전 삭제(모든 id가 존재해야 하며, 아니면 아무것도 삭제하지 않음), 쿼리에 매칭되는 플로우 전부 삭제 (`--yes`), 또는 프로젝트 History 전체 비우기 (`--yes`) |
 | `show <flow-id>` | 플로우 하나의 요청과 응답 출력 |
@@ -236,6 +237,32 @@ npx chrome-devtools-mcp@latest --browserUrl http://127.0.0.1:9222
 {% alert(type="warning") %}
 DevTools 포트가 열려 있으면 로컬의 어떤 프로세스든 인증 없이 브라우저를 완전히 조작할 수 있습니다. 쿠키를 읽고 모든 사이트에서 스크립트를 실행할 수 있으며, 그 프로필에 로그인된 세션도 포함됩니다. 그래서 요청할 때만, 루프백에만 열리고, 명령이 끝나면 닫힙니다. 브라우저를 조작하는 에이전트는 MCP `send_request`처럼 프로젝트 스코프로 제한되지 않으며, 그 트래픽은 다른 브라우저와 똑같이 캡처됩니다.
 {% end %}
+
+### run android {#run-android}
+
+`adb`로 Android 에뮬레이터나 루팅된 테스트 기기를 실행 중인 gori에 연결합니다. 팔레트의 **Set up Android device**를 스크립트에서 쓰는 형태입니다. gori는 loopback 바인드를 유지하고, `adb reverse`가 기기의 `127.0.0.1:PORT`를 gori로 이어 주며, 기기의 전역 HTTP 프록시가 그 주소로 설정됩니다.
+
+```bash
+gori run android devices                 # serial, 상태, 모델, api=N,emulator,root
+gori run android setup --dry-run         # adb 명령만 출력하고 아무것도 바꾸지 않음
+gori run android setup --system          # root로 CA를 시스템 저장소에 신뢰 등록
+gori run android undo
+```
+
+`setup`은 [run shell](#run-shell)과 같은 방식으로 gori를 찾습니다. `--user`(기본값)는 CA를 `/sdcard/Download/gori-ca.crt`에 올리고 보안 설정을 엽니다. 거기서 CA 인증서로 설치하세요. API 24 이상을 대상으로 하는 앱은 network security config에서 허용해야만 사용자 CA를 신뢰합니다. `--system`은 기존 인증서와 gori의 루트(`<subject_hash_old>.0`)를 담은 tmpfs를 `/system/etc/security/cacerts` 위에 마운트합니다. root(root로 실행 중인 adbd, 또는 `su`)로 실행되고, `--dry-run`에서 모든 명령을 먼저 보여 주며, 기기를 재부팅하면 사라집니다. root가 없으면 `--user`로 낮추지 않고 거부하며, 시스템 CA를 Conscrypt APEX에서 읽는 Android 14+(API 34)는 지금은 거부합니다.
+
+`undo`는 `http_proxy`를 `:0`으로 되돌리고, reverse 매핑을 지우고(포트는 기기의 프록시 값에서 읽거나 `--device-port`로 지정), 올린 파일을 삭제하며, root가 있으면 tmpfs를 언마운트합니다. 두 번 실행해도 안전합니다. 직접 설치한 사용자 CA는 설정에서 지울 때까지 남습니다.
+
+| 옵션 | 설명 |
+| -------- | ------------- |
+| `--serial=S` | 대상 기기 (기본값: 연결된 유일한 기기) |
+| `--user`; `--system` | `setup`: CA를 신뢰시키는 방식 (기본값 `--user`) |
+| `--device-port=N` | 기기가 자기 loopback에서 접속할 포트 (기본값: gori의 포트, `undo`: 기기에서 읽음) |
+| `--project=NAME`; `--db=PATH`; `--proxy=HOST:PORT` | `setup`: 연결할 gori, [run shell](#run-shell)과 같음. 주소는 이 머신의 loopback이어야 함 |
+| `--ca-dir=DIR` | `setup`: CA 디렉터리 (기본값: 캡처 중인 gori의 것, 없으면 `~/.gori/ca`) |
+| `--dry-run` | 아무것도 바꾸지 않고 계획만 출력. 기기 정보(API 레벨, root)는 읽음 |
+
+다루지 않는 것: 인증서 피닝, 전역 프록시를 무시하는 트래픽.
 
 ### run history / ls {#run-history-ls}
 

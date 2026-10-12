@@ -346,6 +346,7 @@ private SPAWN_SITES = {
   "src/gori/miner/inject.cr"             => {1, nil}, # a mine RUN's own `hook` argument
   "src/gori/mcp/codex_queue.cr"          => {2, nil}, # lsof, and the codex CLI found on PATH
   "src/gori/cli/run/shell.cr"            => {1, nil}, # Windows: $SHELL/%COMSPEC% or the operator's -- CMD
+  "src/gori/android.cr"                  => {1, nil}, # adb, found on PATH or under $ANDROID_HOME (#1600)
 }
 
 describe "Settings::COMMAND_SECTIONS" do
