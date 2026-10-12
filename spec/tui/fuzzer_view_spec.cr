@@ -2326,6 +2326,14 @@ describe "FuzzerView extractors" do
     view.extractors.should eq([Gori::Fuzz::Extractor.legacy("id=(\\d+)")])
   end
 
+  it "skips a malformed stored extractor entry and keeps the rest of the config" do
+    view = FuzzerView.new
+    view.restore(Gori::Store::FuzzSessionRecord.new(1_i64, "http://h", "GET / HTTP/1.1\r\n\r\n", false, nil,
+      %({"extractors":["header:x",{"spec":"header:y","width":99999999999}],"match_words":"42"}), nil, 0, nil))
+    view.extractor_columns.map(&.label).should eq(["y"])
+    view.matcher.match_words.should eq("42")
+  end
+
   it "draws a reopened run's three extractor columns, labelled by the run" do
     view = loaded_fuzzer
     run = Gori::Store::FuzzRunRecord.new(9_i64, 2_i64, 3_i64, 4_i64, "https://h", "sniper", 1_i64,

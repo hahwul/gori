@@ -2935,9 +2935,12 @@ module Gori::Tui
           Gori::MessageSide::Response, Gori::ExtractKind::Regex, legacy)
       end
       (obj["extractors"]?.try(&.as_a?) || [] of JSON::Any).each do |v|
-        sp = v["spec"]?.try(&.as_s?).try { |raw| Gori::DisplayColumns.parse_spec(raw) }
+        # `as_h?` first: `JSON::Any#[]?` raises on a non-object, and the method-wide rescue
+        # would then drop every key after this one.
+        entry = v.as_h? || next
+        sp = entry["spec"]?.try(&.as_s?).try { |raw| Gori::DisplayColumns.parse_spec(raw) }
         next unless sp.is_a?(Gori::DisplayColumns::Spec)
-        width = v["width"]?.try(&.as_i?) || 0
+        width = entry["width"]?.try(&.as_i64?).try(&.clamp(0, Gori::DisplayColumns::MAX_WIDTH).to_i32) || 0
         cols << Store::DisplayColumn.new(0_i64, cols.size, sp.label, sp.side, sp.kind, sp.selector,
           sp.pos_start, sp.pos_end, width)
       end
