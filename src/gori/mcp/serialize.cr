@@ -331,6 +331,8 @@ module Gori
           # the same field the human's Activity pane renders, so both can tell its OWN writes
           # from the operator's.
           j.field "actor", text(row.actor)
+          # Which MCP client, on an agent action or denial: `"<client> pid <pid>"` (#1587).
+          j.field "actor_label", text(row.actor_label)
         end
       end
 

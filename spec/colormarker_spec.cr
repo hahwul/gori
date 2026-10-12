@@ -521,6 +521,7 @@ describe Gori::Colormarker do
                 when "stub", "static"                               then "true"
                 when "scope"                                        then "in"
                 when "src"                                          then "repeater"
+                when "via"                                          then "mcp"
                 when "cache"                                        then "hit"
                 else                                                     "x"
                 end

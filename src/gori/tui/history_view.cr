@@ -4158,18 +4158,17 @@ module Gori::Tui
     private def suggest_values(field : String, prefix : String) : Array(String)
       p = prefix.downcase
       values = case field
-               when "scheme"         then ["http", "https"]
-               when "proto"          then QL::PROTO_VALUES
-               when "method"         then METHOD_VAL
-               when "status"         then ["2xx", "3xx", "4xx", "5xx", ">=400", ">=500", "200", "301", "302", "401", "403", "404", "500", "502", "503"]
-               when "host"           then host_values_for(prefix)
-               when "size"           then [">10000", ">100000", "<1000"]
-               when "scope"          then QL::SCOPE_VALUES
-               when "src"            then QL::SOURCE_VALUES
-               when "stub", "static" then QL::FLAG_VALUES
-               when "cache"          then QL::CACHE_VALUES
-               when "dur"            then [">500", ">1s", ">=200", "<100"]
-               else                       return [] of String
+               when "scheme"              then ["http", "https"]
+               when "proto"               then QL::PROTO_VALUES
+               when "method"              then METHOD_VAL
+               when "status"              then ["2xx", "3xx", "4xx", "5xx", ">=400", ">=500", "200", "301", "302", "401", "403", "404", "500", "502", "503"]
+               when "host"                then host_values_for(prefix)
+               when "size"                then [">10000", ">100000", "<1000"]
+               when "scope", "src", "via" then QL::CLOSED_VALUES[field]
+               when "stub", "static"      then QL::FLAG_VALUES
+               when "cache"               then QL::CACHE_VALUES
+               when "dur"                 then [">500", ">1s", ">=200", "<100"]
+               else                            return [] of String
                end
       # host_values_for is already prefix-filtered by SQL; still apply starts_with so a
       # stale cache entry can't surface a non-matching host if the key ever drifts.

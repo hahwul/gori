@@ -19,6 +19,7 @@ gori에는 플로우를 걸러내는 작은 쿼리 언어(QL)가 있습니다. �
 | `scheme` | `http` / `https` |
 | `proto` | 프로토콜: `http`, `ws`, `grpc`, `sse`. TLS 쪽은 `s`를 붙입니다(`https`, `wss`, `grpcs`, `sses`). `websocket`은 `ws`의 별칭입니다 |
 | `src` | 이 플로우가 어디서 왔는지([아래](#src-provenance)) |
+| `via` | `tui` / `cli` / `mcp`. 어느 gori 진입점이 보냈는지([아래](#via-surface)) |
 | `status` | 응답 상태 코드 |
 | `size` | 요청 + 응답 전체 바이트 |
 | `reqsize` / `respsize` | 각 방향의 바이트 수 |
@@ -103,6 +104,21 @@ History의 **SRC** 열은 이 값들을 짧은 태그로 찍습니다(`PROXY`, `
 `History`(`src:proxy`)나 `History + Repeater`를 고르면, 다른 필터를 입력하는 동안에도 목록이
 계속 좁혀진 채로 있습니다. 프로젝트는 `History + Repeater`로 열립니다.
 [뷰](/ko/guide/proxy/#views)를 보세요.
+
+## 진입점: `via:` {#via-surface}
+
+`src:`는 어떤 도구가 보냈는지를, `via:`는 어느 gori 진입점이 움직였는지를 말합니다: `tui`, `cli`
+(`gori run`), `mcp`(에이전트). MCP `send_request`는 Repeater 탭에서 보낸 것과 똑같이
+`src:repeater`로 기록되므로, 둘을 가르는 것이 `via:`입니다.
+
+```text
+via:mcp                               에이전트가 보낸 것 전부
+src:repeater via:tui                  내가 손으로 다시 보낸 것만
+-via:mcp                              에이전트가 보내지 않은 것 전부(캡처 포함)
+```
+
+프록시 캡처에는 진입점이 없으므로 어떤 `via:` 값에도 걸리지 않고, 부정형에는 늘 남습니다.
+gori가 진입점을 기록하기 전에 보낸 플로우도 마찬가지입니다.
 
 ## 스코프: `scope:in` / `scope:out` {#scope-in-scope-out}
 
@@ -248,7 +264,7 @@ host:"my host"                        공백까지 포함한 하나의 host 값
 홀드 게이트와 Extract 규칙 조건은 캡처되기 전의 흐르는 메시지 하나를 평가하므로, 그 메시지가
 답할 수 없는 History 필드는 추측하지 않고 거부합니다. `scope:`(프로젝트의 스코프 규칙은 메시지의
 일부가 아님), `size:`·`reqsize:`·`respsize:`·`dur:`(교환이 아직 끝나지 않음), `stub:`·`static:`·
-`src:`·`cache:`·`ws:`(게이트가 쥔 것은 트랜스크립트가 아니라 메시지 하나이고, 그 `body:`가 이미
+`src:`·`via:`·`cache:`·`ws:`(게이트가 쥔 것은 트랜스크립트가 아니라 메시지 하나이고, 그 `body:`가 이미
 그 메시지를 뜻함), 그리고 한쪽 방향만 보는 `req.`/`resp.` 표기가 그렇습니다. 거부된 필드를 대신
 자유 텍스트로 검색하는 일도 없습니다. 입력하는 자리에서 그렇게 알려주고, 그런 필드를
 담은 Extract 규칙은 저장되지 않으며, MCP `intercept_set_filter`와 `gori run intercept filter`는

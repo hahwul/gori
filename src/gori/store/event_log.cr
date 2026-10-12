@@ -51,10 +51,10 @@ module Gori
     def insert_event(source : String, kind : String, level : Symbol, message : String, *,
                      goto_tab : String? = nil, goto_session_id : Int64? = nil,
                      flow_id : Int64? = nil, payload : String? = nil,
-                     actor : String? = nil) : Int64
+                     actor : String? = nil, actor_label : String? = nil) : Int64
       insert_event(source, kind, Store.event_level(level), message,
         goto_tab: goto_tab, goto_session_id: goto_session_id,
-        flow_id: flow_id, payload: payload, actor: actor)
+        flow_id: flow_id, payload: payload, actor: actor, actor_label: actor_label)
     end
 
     # Append one row to the #124 event feed (the AI firehose). Goes through the writer
@@ -76,14 +76,14 @@ module Gori
     def insert_event(source : String, kind : String, level : String, message : String, *,
                      goto_tab : String? = nil, goto_session_id : Int64? = nil,
                      flow_id : Int64? = nil, payload : String? = nil,
-                     actor : String? = nil) : Int64
+                     actor : String? = nil, actor_label : String? = nil) : Int64
       # `event: true` is what puts this write on the `events` retention cadence
       # (`Store::EVENTS_TRIM_INTERVAL`). Without it the cap is enforced only by the FLOW-insert
       # sweep, which never runs in an MCP server or a TUI with capture off — the two surfaces
       # that write most of these rows.
       exec_task ->(c : DB::Connection) {
-        c.exec("INSERT INTO events (created_at, source, kind, level, message, goto_tab, goto_session_id, flow_id, payload, actor) VALUES (?,?,?,?,?,?,?,?,?,?)",
-          now_us, source, kind, level, message, goto_tab, goto_session_id, flow_id, payload, actor)
+        c.exec("INSERT INTO events (created_at, source, kind, level, message, goto_tab, goto_session_id, flow_id, payload, actor, actor_label) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+          now_us, source, kind, level, message, goto_tab, goto_session_id, flow_id, payload, actor, actor_label)
         nil
       }, event: true
     end

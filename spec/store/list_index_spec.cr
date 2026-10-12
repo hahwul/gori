@@ -64,7 +64,7 @@ describe "History list covering index (schema V37)" do
   it "answers the projection filters from the index without a sort" do
     with_store do |store|
       ["host:api", "path:/admin", "url:example.com/api", "method:DELETE", "scheme:https",
-       "src:repeater", "src:gori", "size:>1000", "reqsize:>1000", "respsize:>1mb", "dur:>800ms",
+       "src:repeater", "src:gori", "via:mcp", "-via:mcp", "size:>1000", "reqsize:>1000", "respsize:>1mb", "dur:>800ms",
        "stub:true", "static:false", "-status:200", "proto:grpc", "proto:sse", "host~^cdn",
        "path~/v2/.*/items", "zzqxnomatch",
        # A two-sided status range is spelled `+status` so it does not take idx_flows_status

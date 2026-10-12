@@ -102,7 +102,7 @@ module Gori
       nil
     end
 
-    EVENT_COLS = "id, created_at, source, kind, level, message, goto_tab, goto_session_id, flow_id, payload, actor"
+    EVENT_COLS = "id, created_at, source, kind, level, message, goto_tab, goto_session_id, flow_id, payload, actor, actor_label"
 
     # #124 forward cursor: events with id strictly AFTER `since_id`, OLDEST-first, up to
     # `limit`. Mirrors ws_messages_after — the AI tails the feed exactly-once from a

@@ -255,7 +255,7 @@ module Gori
         "whether a body was stored is a CAPTURE decision, made after this gate"
       when "static"
         "a static asset is judged from the finished response's Content-Type and status"
-      when "src"
+      when "src", "via"
         "a flow's source is recorded when it is captured, not while it is in flight"
       when "cache"
         "cannot gate a request before its response exists"
@@ -387,13 +387,12 @@ module Gori
     # complete this field at all".
     private def self.value_pool(field : String, hosts : Array(String), rows : Bool) : Array(String)?
       case field
-      when "host"   then hosts
-      when "method" then METHOD_VAL
-      when "scheme" then SCHEME_VAL
-      when "status" then STATUS_VAL
-      when "scope"  then QL::SCOPE_VALUES
-      when "src"    then QL::SOURCE_VALUES
-      when "proto"  then rows ? QL::PROTO_VALUES : PROTO_VAL
+      when "host"                then hosts
+      when "method"              then METHOD_VAL
+      when "scheme"              then SCHEME_VAL
+      when "status"              then STATUS_VAL
+      when "scope", "src", "via" then QL::CLOSED_VALUES[field]
+      when "proto"               then rows ? QL::PROTO_VALUES : PROTO_VAL
       when "stub", "static", "cache" # row-backed ONLY (see the note above); a hold gate never reaches them
         return nil unless rows
         field == "cache" ? QL::CACHE_VALUES : QL::FLAG_VALUES

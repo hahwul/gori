@@ -1157,6 +1157,13 @@ module Gori::Tui
       end
     end
 
+    # The actor plus WHICH client, when the row names one (#1587): `agent · claude-code pid 4242`.
+    # Two agents on one project are both `agent`; the label is what tells them apart.
+    def self.act_actor_text(row : Store::EventRow) : String
+      label = act_actor_label(row.actor)
+      (client = row.actor_label) ? "#{label} · #{act_one_line(client)}" : label
+    end
+
     # Cycle order for the `l` chip. From `Store::EVENT_LEVELS` — the list next to the writer —
     # for the reason ACT_SOURCES is: a copy here is a copy that drifts.
     ACT_LEVELS = [nil] + Gori::Store::EVENT_LEVELS
@@ -3075,7 +3082,7 @@ module Gori::Tui
     # rather than a paste that breaks whatever it lands in.
     def self.act_copy_line(row : Store::EventRow) : String
       at = LocalTime.format(row.created_at, "%Y-%m-%d %H:%M:%S")
-      "#{at} · #{row.level} · #{row.source} · #{act_actor_label(row.actor)} · #{act_one_line(row.message)}"
+      "#{at} · #{row.level} · #{row.source} · #{act_actor_text(row)} · #{act_one_line(row.message)}"
     end
 
     # The three-state filter bar, the grammar the OAST callbacks list already uses: the input
@@ -3106,6 +3113,9 @@ module Gori::Tui
       w = inner.w - 1
       return if w <= 0
       text = ProjectView.act_one_line(row.message)
+      if client = row.actor_label
+        text = "#{ProjectView.act_one_line(client)} · #{text}"
+      end
       lay = Wrap.layout(text, w)
       rows = {lay.rows, ACT_DETAIL_H - 1}.min
       rows.times do |i|

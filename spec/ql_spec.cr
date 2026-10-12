@@ -1316,6 +1316,27 @@ describe "Gori::Store#search (QL)" do
       Gori::QL.parse("src:browser host:a").sql.should eq("((host) LIKE ? ESCAPE '\\')")
     end
 
+    it "compiles via: to the surface column with a NULL guard, and drops an unknown value" do
+      f = Gori::QL.parse("via:MCP")
+      f.sql.should eq("((source_surface IS NOT NULL AND source_surface = ?))")
+      f.args.should eq(["mcp"])
+      Gori::QL.analyze("via:zzz").ignored.should_not be_empty
+      Gori::QL.dropped_term_reason("via:zzz").should eq("via expects tui, cli, mcp")
+    end
+
+    it "tells an agent's sends from the operator's, and -via: keeps proxy captures" do
+      with_store do |store|
+        agent = capture(store, "t.test", "GET", "/agent", 200)
+        hand = capture(store, "t.test", "GET", "/hand", 200)
+        proxied = capture(store, "t.test", "GET", "/proxied", 200)
+        store.@db.exec("UPDATE flows SET source = 'repeater', source_surface = 'mcp' WHERE id = ?", agent)
+        store.@db.exec("UPDATE flows SET source = 'repeater', source_surface = 'tui' WHERE id = ?", hand)
+        store.search(Gori::QL.parse("via:mcp"), 10).map(&.id).should eq([agent])
+        store.search(Gori::QL.parse("src:repeater via:tui"), 10).map(&.id).should eq([hand])
+        store.search(Gori::QL.parse("-via:mcp"), 10).map(&.id).sort!.should eq([hand, proxied].sort)
+      end
+    end
+
     it "matches a pre-V17 flow in NEITHER direction" do
       # The column has no default to fall back on, so an unrecorded provenance is SQL NULL and
       # both `source = 'proxy'` and `NOT (source = 'proxy')` are NULL — the same way a Pending

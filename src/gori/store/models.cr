@@ -2213,10 +2213,13 @@ module Gori
       # words `flows.source_surface` uses. nil on a row written before the column existed, and
       # on anything a background engine produced on no surface's behalf.
       getter actor : String?
+      # WHICH client, when `actor` is `mcp`: `"<client> pid <pid>"`, so two agents on one project
+      # read apart. Only agent actions and denials carry it; nil elsewhere and on older rows.
+      getter actor_label : String?
 
       def initialize(@id, @created_at, @source, @kind, @level, @message,
                      @goto_tab = nil, @goto_session_id = nil, @flow_id = nil, @payload = nil,
-                     @actor = nil)
+                     @actor = nil, @actor_label = nil)
       end
     end
 

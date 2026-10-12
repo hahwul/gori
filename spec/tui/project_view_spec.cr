@@ -817,3 +817,14 @@ describe "ProjectView DESCRIPTION READ selection across a document hand-over" do
     end
   end
 end
+
+describe "ProjectView activity actor label" do
+  it "names the client beside the actor, and stays the bare actor without one" do
+    labeled = Gori::Store::EventRow.new(1_i64, 0_i64, "agent", "agent_action", "info", "x",
+      actor: "mcp", actor_label: "claude-code pid 4242")
+    ProjectView.act_actor_text(labeled).should eq("agent · claude-code pid 4242")
+    ProjectView.act_copy_line(labeled).should contain("agent · claude-code pid 4242 · x")
+    bare = Gori::Store::EventRow.new(1_i64, 0_i64, "scope", "edit", "info", "x", actor: "tui")
+    ProjectView.act_actor_text(bare).should eq("tui")
+  end
+end

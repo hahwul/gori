@@ -19,6 +19,7 @@ Match a field with `field:value` (substring or exact, depending on the field):
 | `scheme` | `http` / `https` |
 | `proto` | Protocol: `http`, `ws`, `grpc`, `sse`. Suffix `s` for the TLS one (`https`, `wss`, `grpcs`, `sses`), and `websocket` is an alias of `ws` |
 | `src` | Where the flow came from ([below](#src-provenance)) |
+| `via` | `tui` / `cli` / `mcp`. Which gori surface sent it ([below](#via-surface)) |
 | `status` | Response status code |
 | `size` | Total request + response bytes |
 | `reqsize` / `respsize` | Per-side byte count |
@@ -103,6 +104,21 @@ Two things about it are deliberate:
 The two common `src:` scopings are also **views**; press `v` in History to pick `History`
 (`src:proxy`) or `History + Repeater`, and the list stays narrowed while you type other filters.
 `History + Repeater` is what a project opens on. See [Views](/guide/proxy/#views).
+
+## Surface: `via:` {#via-surface}
+
+`src:` says which tool sent a flow; `via:` says which gori entry point drove it: `tui`, `cli`
+(`gori run`) or `mcp` (an agent). MCP `send_request` records `src:repeater`, the same as a send
+from the Repeater tab, so `via:` is how the two are told apart.
+
+```text
+via:mcp                               everything an agent sent
+src:repeater via:tui                  only the resends you made by hand
+-via:mcp                              everything the agent did not send, captures included
+```
+
+A proxy capture has no surface, so it matches no `via:` value and every negation keeps it. A
+flow gori sent before it recorded the surface behaves the same way.
 
 ## Scope: `scope:in` / `scope:out` {#scope-in-scope-out}
 
@@ -247,7 +263,7 @@ Every filter bar shares the boolean grammar above (`AND`/`OR`/`NOT`, `-`, parent
 A hold gate and an extract-rule condition evaluate one live message, before it is captured, so
 they refuse every History field that message cannot answer rather than guess: `scope:` (a
 project's scope rules are not part of a message), `size:`, `reqsize:`, `respsize:` and `dur:`
-(the exchange has not finished), `stub:`, `static:`, `src:`, `cache:` and `ws:` (a gate holds
+(the exchange has not finished), `stub:`, `static:`, `src:`, `via:`, `cache:` and `ws:` (a gate holds
 one message, not a transcript; its `body:` already means that message), and the one-sided
 `req.`/`resp.` spellings. A refused field is never searched as free text instead. The
 condition rows say so where you type them, an extract rule carrying one will not save, and MCP

@@ -1675,7 +1675,7 @@ module Gori
         outcome = result.is_error ? "failed (#{result.error_code || "error"})" : "ok"
         message = (note = result.event_note) ? "#{name} #{outcome}: #{note}" : "#{name} #{outcome}"
         s.insert_event("agent", "agent_action", level, message, payload: name,
-          flow_id: result.event_flow_id, actor: Gori::FlowSource.surface.try(&.token))
+          flow_id: result.event_flow_id, actor: Gori::FlowSource.surface.try(&.token), actor_label: session_label)
       rescue ex
         Log.warn(exception: ex) { "event feed: failed to log agent action #{name}" }
       end
@@ -2215,7 +2215,7 @@ module Gori
 
         event_id = s.insert_event("agent", PERMISSION_DENIAL_EVENT_KIND, "warn",
           "#{name} denied (TOOL_DISABLED; permission=#{key})",
-          payload: name, actor: Gori::FlowSource.surface.try(&.token))
+          payload: name, actor: Gori::FlowSource.surface.try(&.token), actor_label: session_label)
         # `insert_event` returns 0 when its write is dropped; leave the pair retryable then.
         @permission_denials_logged << logged if event_id > 0
       rescue ex

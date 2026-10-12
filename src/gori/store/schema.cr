@@ -2220,9 +2220,17 @@ module Gori
       V46_AFTER = V46_REBUILDS.flat_map(&.seed)
       V46       = V46_REBUILDS.flat_map(&.copy) + V46_REBUILDS.flat_map(&.swap) + V46_AFTER
 
+      # WHICH AGENT acted (#1587). V23's `actor` is the surface, so two MCP clients on one project
+      # both read `mcp`. The label is the client's handshake name and pid (`claude-code pid 4242`),
+      # written only on agent actions and denials; NULL everywhere else, and on older rows.
+      V47 = [
+        "ALTER TABLE events ADD COLUMN actor_label TEXT",
+      ]
+
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
                     V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31, V32, V33,
-                    V34, V35, V36, V37, V38, V39, V40, V41, V42, V43, V44, V45, V46]
+                    V34, V35, V36, V37, V38, V39, V40, V41, V42, V43, V44, V45, V46,
+                    V47]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|
@@ -2293,7 +2301,7 @@ module Gori
       end
 
       # The statements one MIGRATIONS entry actually runs. V39–V41 and V46 do their table move in code
-      # first and leave only their seeds; V42 is skipped when its column is already there.
+      # first and leave only their seeds; V42 and V47 are skipped when their column is already there.
       private def self.run_statements(conn : DB::Connection, statements : Array(String)) : Array(String)
         if statements.same?(V39)
           rebuild_v39(conn) unless autoincrement_in_place(conn.as(SQLite3::Connection))
@@ -2307,7 +2315,8 @@ module Gori
         elsif statements.same?(V46)
           move_to_autoincrement(conn.as(SQLite3::Connection), V46_REBUILDS, 46)
           V46_AFTER
-        elsif statements.same?(V42) && column?(conn, "fuzz_results", "shape")
+        elsif (statements.same?(V42) && column?(conn, "fuzz_results", "shape")) ||
+              (statements.same?(V47) && column?(conn, "events", "actor_label"))
           # SQLite has no `ADD COLUMN IF NOT EXISTS`, and every migration since V36 is
           # replay-safe: a project whose `user_version` was wound back (the index specs rebuild
           # an older shape that way) already holds the column.

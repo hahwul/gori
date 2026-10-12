@@ -188,6 +188,11 @@ module Gori
       CAUTION: a flow captured before gori recorded provenance matches NEITHER direction — see
       the caveat list.
 
+      Surface: via:tui  via:cli  via:mcp  — which gori entry point sent the flow, where `src:` says
+      which tool did. MCP send_request records `src:repeater`, so `via:mcp` is "what the agent
+      sent" and `src:repeater via:tui` is "what I sent by hand". A proxy capture has no surface:
+      it matches no `via:` value and `-via:mcp` keeps it.
+
       Scope: scope:in  scope:out  — the project's scope rules (the include/exclude boundary the
       TUI's `s` lens and `--in-scope` apply), as an ordinary term: it negates and it groups.
       INDEPENDENT of whether that lens is switched on, because a filter term is a question, not
@@ -339,9 +344,8 @@ module Gori
       when "proto"
         return nil if proto_cond(value)
         "proto expects #{PROTO_VALUES.join(", ")}"
-      when "src"
-        return nil if src_cond(value)
-        "src expects #{SOURCE_VALUES.join(", ")}"
+      when "src", "via"
+        provenance_reason(field, value)
       when "cache"
         return nil if cache_cond(value)
         "cache expects #{CACHE_VALUES.join(", ")}"
@@ -352,6 +356,12 @@ module Gori
         return nil if scope_cond(value, scope || SCOPE_SHAPE_ONLY)
         "scope expects in or out"
       end
+    end
+
+    # `src:` (which tool) and `via:` (which surface): the two "who sent it" vocabularies.
+    private def self.provenance_reason(field : String, value : String) : String?
+      return nil if (field == "src" ? src_cond(value) : via_cond(value))
+      "#{field} expects #{CLOSED_VALUES[field].join(", ")}"
     end
 
     private def self.content_or_prefix_reason(raw_field : String, field : String, value : String) : String?
@@ -478,7 +488,7 @@ module Gori
     # History's and Colormarker's completion pools, Colormarker's unknown-field refusal and the
     # docs all read it, so a field added to `field_cond` becomes offerable everywhere at once
     # instead of in the four hand-kept copies that used to drift.
-    FIELDS = %w[host path url method scheme proto status size reqsize respsize dur header body ws stub static src scope cache
+    FIELDS = %w[host path url method scheme proto status size reqsize respsize dur header body ws stub static src via scope cache
       req.header resp.header req.body resp.body]
 
     # The fields `~` compiles on. `method` and `scheme` are text columns like `host`, so a regex over
@@ -671,6 +681,7 @@ module Gori
       "stub"        => "true = gori answered it, origin never saw it",
       "static"      => "2xx image/font/media; not svg/css/js",
       "src"         => "who sent it — proxy repeater fuzzer … or gori",
+      "via"         => "which gori surface sent it — tui cli mcp",
       "scope"       => "in / out — the project's scope rules",
       "cache"       => "hit / miss / dynamic / none — from headers",
       "req.header"  => "request head bytes only",
@@ -858,6 +869,7 @@ module Gori
       when "stub"                                then flag_cond("short_circuited", value)
       when "static"                              then flag_cond("static_asset", value)
       when "src"                                 then src_cond(value)
+      when "via"                                 then via_cond(value)
       when "scope"                               then scope_cond(value, scope)
       when "cache"                               then cache_cond(value)
       else
@@ -944,6 +956,20 @@ module Gori
     # overlay completes QL's wider field list through), so the two cannot offer different sets.
     # `SCOPE_VALUES`' reasoning, one field over.
     SOURCE_VALUES = FlowSource::Kind.tokens + ["gori"]
+
+    # via: selects flows by the gori SURFACE that sent them (`flows.source_surface`), where src:
+    # names the tool. NULL is a proxy capture (or a pre-V17 row); the guard keeps it out of every
+    # positive match, so `-via:mcp` reads "everything the agent did not send" and keeps captures.
+    private def self.via_cond(value : String) : {String, Array(DB::Any)}?
+      FlowSource::Surface.parse?(value).try { |s| {"(source_surface IS NOT NULL AND source_surface = ?)", [s.token] of DB::Any} }
+    end
+
+    # `via:`'s value vocabulary, for both completion backends (`SOURCE_VALUES`' reasoning).
+    VIA_VALUES = FlowSource::Surface.values.map(&.token)
+
+    # The closed vocabularies both completion backends offer unchanged, by field, so a new one is
+    # one entry here rather than an arm in each pool.
+    CLOSED_VALUES = {"scope" => SCOPE_VALUES, "src" => SOURCE_VALUES, "via" => VIA_VALUES}
 
     # scope: selects flows by the project's SCOPE rules — `scope:in` for the include/exclude
     # boundary, `scope:out` for everything outside it. The same predicate the `s` History lens

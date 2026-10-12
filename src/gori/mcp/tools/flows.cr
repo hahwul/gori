@@ -753,7 +753,8 @@ module Gori
           "and echoes your input on an empty page, so a poll that returns no events keeps your place. " \
           "Optional `source`/`kind`/`actor` filters do NOT affect `next_cursor` (it is the max SCANNED id). " \
           "Every event carries `actor` — the surface that acted (tui | cli | mcp) — so you can tell " \
-          "your own writes from the operator's; the human reads this same feed on the Project tab's " \
+          "your own writes from the operator's, and an agent action names its client in `actor_label` " \
+          "(\"claude-code pid 4242\"); the human reads this same feed on the Project tab's " \
           "Activity pane." do |s|
           s.field "since", intprop("forward cursor: only events with id > this (default 0 = from oldest). Pass back the response's next_cursor to tail.")
           s.field "limit", limitprop("max events scanned", EVENTS_LIMIT)

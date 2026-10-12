@@ -2431,7 +2431,7 @@ module Gori
       EventRow.new(
         rs.read(Int64), rs.read(Int64), rs.read(String), rs.read(String),
         rs.read(String), rs.read(String), rs.read(String?), rs.read(Int64?),
-        rs.read(Int64?), rs.read(String?), rs.read(String?))
+        rs.read(Int64?), rs.read(String?), rs.read(String?), rs.read(String?))
     end
 
     # Non-blocking best-effort publish: if the TUI is behind and the channel is
