@@ -50,3 +50,25 @@ describe Gori::TokenExtract do
     end
   end
 end
+
+# A caller that already decoded the body hands the decode over (#1592): the fuzz matcher's N
+# extractors read ITS bytes, never a second `ContentDecode` of the raw body.
+describe Gori::ExtractSubject do
+  it "reads a supplied decode and text instead of decoding the body itself" do
+    head = "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\n\r\n".to_slice
+    # Not gzip at all: a decode of `body` could never yield what the extractors return.
+    subject = Gori::ExtractSubject.new(head, "raw".to_slice, Gori::MessageSide::Response,
+      decoded: %({"id":"pre"}).to_slice)
+    Gori::TokenExtract.extract(subject, Gori::TokenLoc.new(Gori::ExtractKind::JsonPath, "id")).should eq("pre")
+    Gori::TokenExtract.extract(subject, Gori::TokenLoc.new(Gori::ExtractKind::Position, "", 2, 4)).should eq("id")
+    texted = Gori::ExtractSubject.new(head, "raw".to_slice, Gori::MessageSide::Response,
+      decoded: "a".to_slice, text: "token=t1")
+    Gori::TokenExtract.extract(texted, Gori::TokenLoc.new(Gori::ExtractKind::Regex, "token=(\\w+)")).should eq("t1")
+  end
+
+  it "decodes once and memoises it for every body-scoped descriptor" do
+    subject = Gori::ExtractSubject.response("HTTP/1.1 200 OK\r\n\r\n".to_slice, "body".to_slice)
+    subject.decoded.should be(subject.decoded)
+    subject.text.should be(subject.text)
+  end
+end

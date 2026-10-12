@@ -2,6 +2,7 @@ require "../proxy/ws/frame"     # Proxy::WS::Shape — the frame shape a WS fuzz
 require "../repeater/ws_engine" # WsEngine::DEFAULT_IDLE — the WS transport's own pacing default
 require "../request_macro/lane" # RequestMacro::Spec / Tally — a run's macro and what it reports
 require "./shape"
+require "./extractor"
 
 module Gori
   # The fuzzer / intruder engine: takes a base HTTP request with marked positions,
@@ -168,6 +169,11 @@ module Gori
       # connections line — has to say which payload was duplicated.
       getter? retried : Bool
       getter extracted : String?
+      # Every extractor's value (#1592), nil for a miss, in the order of `extractors` — the
+      # run's own list, shared by reference rather than copied per row. Both nil on a run with
+      # no extractor; `extracted` is `extracts[0]`.
+      getter extracts : Array(String?)?
+      getter extractors : Array(Extractor)?
       getter head : Bytes?
       getter body : Bytes?
       getter request : Bytes?
@@ -268,7 +274,17 @@ module Gori
                      @chain_error = nil, @grpc_status = nil, @grpc_message = nil,
                      @timed_out = false, @resent_count = 0, @wire = nil, *,
                      @ws_close_code : Int32? = nil, @ws_frames_in : Int32? = nil,
-                     @stop_hit : Bool = false, @shape : Int64? = nil)
+                     @stop_hit : Bool = false, @shape : Int64? = nil,
+                     @extracts : Array(String?)? = nil, @extractors : Array(Extractor)? = nil)
+      end
+
+      # `label → value` for each extractor this row carries, nil for a miss. Empty when the row
+      # has no extractor, or no labels (a saved row read back without its run).
+      def extract_pairs : Array({Extractor, String?})
+        values = @extracts
+        list = @extractors
+        return [] of {Extractor, String?} unless values && list
+        list.map_with_index { |e, i| {e, values[i]?} }
       end
 
       # The response-shape fingerprint (`Fuzz::Shape`, issue #1351) — the key
@@ -310,7 +326,8 @@ module Gori
           @head, @body, @request, @retried, @chain_error, @grpc_status, @grpc_message,
           @timed_out, @resent_count, @wire,
           ws_close_code: o.close_code, ws_frames_in: o.frames_in, stop_hit: @stop_hit,
-          shape: Shape.with_ws(@shape, o.close_code, o.frames_in))
+          shape: Shape.with_ws(@shape, o.close_code, o.frames_in),
+          extracts: @extracts, extractors: @extractors)
       end
     end
 

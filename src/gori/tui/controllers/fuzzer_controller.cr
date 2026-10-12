@@ -1547,6 +1547,7 @@ module Gori::Tui
       spawn(name: "gori-fuzz-load") do
         total = store.fuzz_result_count(id)
         offset = {total - FuzzerResultWindow::ROW_CAP, 0_i64}.max
+        extractors = Fuzz::Extractor.of_run(run.extractors)
         window = FuzzerResultWindow.new
         clusters = nil.as(Fuzz::Clusters?)
         seen = 0
@@ -1554,13 +1555,13 @@ module Gori::Tui
         begin
           store.each_fuzz_result_page(id, FuzzerResultWindow::ROW_CAP, offset) do |record|
             raise ResultIoCancelled.new if @closing || @cancelled_views.includes?(view)
-            window.append(Fuzz::Persistence.result(record))
+            window.append(Fuzz::Persistence.result(record, extractors))
             seen += 1
             Fiber.yield if seen % 64 == 0
           end
           # A run the window holds whole is grouped from the window; only a larger one pays
           # the second, whole-run pass.
-          clusters = aggregate_saved_clusters(store, id, view) if window.rows.size.to_i64 < total
+          clusters = aggregate_saved_clusters(store, id, view, extractors) if window.rows.size.to_i64 < total
         rescue ResultIoCancelled
           cancelled = true
         end
@@ -1583,9 +1584,10 @@ module Gori::Tui
 
     # The shape clusters of a reopened run count the WHOLE run (#1351), not the window: one
     # more pass on the loader fiber, over the scalar projection, holding one entry per shape.
-    private def aggregate_saved_clusters(store : Store, id : Int64, view : FuzzerView) : Fuzz::Clusters
+    private def aggregate_saved_clusters(store : Store, id : Int64, view : FuzzerView,
+                                         extractors : Array(Fuzz::Extractor)) : Fuzz::Clusters
       seen = 0
-      Fuzz::Persistence.clusters(store, id) do
+      Fuzz::Persistence.clusters(store, id, extractors) do
         raise ResultIoCancelled.new if @closing || @cancelled_views.includes?(view)
         seen += 1
         Fiber.yield if seen % 256 == 0

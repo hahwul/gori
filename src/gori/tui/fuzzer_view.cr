@@ -85,6 +85,8 @@ module Gori::Tui
     # Results-table payload column, in display COLUMNS (see `payload_cell`). The header
     # string in `render_results` reserves exactly this much between `#` and `status`.
     PAYLOAD_COL_W = 22
+    # The `time` cell's width once extractor columns follow it, so they line up under their header.
+    TIME_COL_W = 7
 
     getter focus : Symbol # :target | :template | :config | :results | :detail
     getter target : String
@@ -101,11 +103,44 @@ module Gori::Tui
     property job_id : Int32 # bottom-bar/notification job handle (0 = no active job)
     getter config : Fuzz::Config
     getter matcher : Fuzz::Matcher
+    # The named extractors (#1592), in column order — History's column model, so the History
+    # `ColumnsOverlay` / `ColumnOverlay` pair edits them. Staged here and handed to the matcher
+    # only when the next run is built (`extractors`), so an edit never reaches a run in flight.
+    getter extractor_columns = [] of Store::DisplayColumn
+    # The list the current or reopened run extracted with, which a save records.
+    @run_extractors = [] of Fuzz::Extractor
     getter run_keep : Fuzz::Keep
     # The index of the result this run's `stop_on` tripped on (issue #1270): the live run's
     # `DoneEvent#stop_index`, or a reopened run's `fuzz_runs.stop_idx`, so both mark the same
     # row. Nil unless the run ended `condition_met`.
     getter run_stop_idx : Int64?
+
+    def extractor_columns=(cols : Array(Store::DisplayColumn)) : Nil
+      @extractor_columns = cols.map_with_index do |c, i|
+        Store::DisplayColumn.new(0_i64, i, c.label, Gori::MessageSide::Response, c.kind,
+          c.selector, c.pos_start, c.pos_end, c.width)
+      end
+      @dirty = true
+    end
+
+    # The staged list as the matcher takes it.
+    def extractors : Array(Fuzz::Extractor)
+      @extractor_columns.map { |c| Fuzz::Extractor.new(c.label, c.token_loc) }
+    end
+
+    # Move extractor `i` one slot along `dir`; false off either end.
+    def move_extractor(i : Int32, dir : Int32) : Bool
+      j = i + dir
+      return false unless 0 <= i < @extractor_columns.size && 0 <= j < @extractor_columns.size
+      self.extractor_columns = @extractor_columns.dup.tap(&.swap(i, j))
+      true
+    end
+
+    def delete_extractor(i : Int32) : Bool
+      return false unless 0 <= i < @extractor_columns.size
+      self.extractor_columns = @extractor_columns.dup.tap(&.delete_at(i))
+      true
+    end
 
     def set_registry(registry : Verb::Registry) : Nil
       @registry = registry
@@ -1048,6 +1083,7 @@ module Gori::Tui
       @run_websocket = @pending_websocket
       @run_max_requests = @config.max_requests
       @run_keep = @config.keep
+      @run_extractors = @matcher.extractors
       @run_stop_idx = nil
       @saved_run_id = nil
       @failed_save_run_id = nil
@@ -1187,7 +1223,8 @@ module Gori::Tui
       Fuzz::SavedRunMeta.new(session_id, @run_target, @run_mode, @run_total,
         created_at: @run_started_at, http2: @run_http2, sni: @run_sni,
         tls_preset: @run_tls_preset, websocket: @run_websocket, surface: "tui",
-        source_ref: "tui:#{session_id}:#{@run_started_at}", keep: @run_keep.label)
+        source_ref: "tui:#{session_id}:#{@run_started_at}", keep: @run_keep.label,
+        extractors: Fuzz::Extractor.to_json(@run_extractors))
     end
 
     def saved_run_counters : {Int64, Int64, Int64, String}
@@ -1206,8 +1243,9 @@ module Gori::Tui
                        records : Array(Store::FuzzResultRecord)) : Nil
       window = FuzzerResultWindow.new
       clusters = Fuzz::Clusters.new
+      extractors = Fuzz::Extractor.of_run(run.extractors)
       records.each do |record|
-        result = Fuzz::Persistence.result(record)
+        result = Fuzz::Persistence.result(record, extractors)
         clusters.add(result)
         window.append(result)
       end
@@ -1255,6 +1293,7 @@ module Gori::Tui
       @run_tls_preset = run.tls_preset
       @run_websocket = run.websocket?
       @run_keep = Fuzz::Keep.parse?(run.keep) || Fuzz::Keep::All
+      @run_extractors = run.extractors ? Fuzz::Extractor.of_run(run.extractors) : [] of Fuzz::Extractor
       @run_stop_idx = run.stop_idx
       @saved_run_id = run.id
       @failed_save_run_id = nil
@@ -1715,6 +1754,7 @@ module Gori::Tui
       # `Plan.build`'s `Env.expand_wire` still promotes the HEAD to CRLF, and it is idempotent
       # on a head that already carries CRLF (`Env.normalize_crlf` only inserts a CR before an
       # LF that has none), so a wire-form template changes nothing downstream.
+      @matcher.extractors = extractors
       options = Fuzz::PlanOptions.new(evidence_template, evidence: @evidence,
         target: @target, http2: @http2,
         sources: @sets.map { |s| build_source(s) }, config: @config, matcher: @matcher,
@@ -2814,7 +2854,11 @@ module Gori::Tui
           j.field "filter_time", @matcher.filter_time
           j.field "match_regex", @matcher.match_regex.try(&.source)
           j.field "filter_regex", @matcher.filter_regex.try(&.source)
-          j.field "extract", @matcher.extract.try(&.source)
+          # The named extractors (#1592) as `--extractor` specs; the old single `extract` regex
+          # is read back as extractor 0 and not written again.
+          j.field("extractors") do
+            j.array { @extractor_columns.each { |c| j.object { j.field "spec", c.spec; j.field "width", c.width } } }
+          end
           # The raw row text, not the parsed list: it is what the operator typed and what the
           # ADVANCED card has to show again, and a spec that no longer resolves (the descriptor
           # set moved) must come back as itself rather than silently vanish on restore.
@@ -2874,12 +2918,30 @@ module Gori::Tui
       @matcher.filter_time = obj["filter_time"]?.try(&.as_s?)
       @matcher.match_regex = obj["match_regex"]?.try(&.as_s?).try { |s| Regex.new(s) rescue nil }
       @matcher.filter_regex = obj["filter_regex"]?.try(&.as_s?).try { |s| Regex.new(s) rescue nil }
-      @matcher.extract = obj["extract"]?.try(&.as_s?).try { |s| Regex.new(s) rescue nil }
+      apply_extractors_json(obj)
       @s_grpc_fields = string_knob(obj, "grpc_fields")
       apply_macro_json(obj)
       sync_buffers # mirror the restored config/matcher into the editable buffers
     rescue
       # tolerate a malformed/older config blob — keep defaults
+    end
+
+    # Each spec on its own, so one that no longer parses is dropped rather than every other one
+    # with it; a pre-#1592 `extract` regex comes back as extractor 0, `extracted`.
+    private def apply_extractors_json(obj : Hash(String, JSON::Any)) : Nil
+      cols = [] of Store::DisplayColumn
+      if (legacy = obj["extract"]?.try(&.as_s?)) && !legacy.empty?
+        cols << Store::DisplayColumn.new(0_i64, 0, Fuzz::Extractor::LEGACY_LABEL,
+          Gori::MessageSide::Response, Gori::ExtractKind::Regex, legacy)
+      end
+      (obj["extractors"]?.try(&.as_a?) || [] of JSON::Any).each do |v|
+        sp = v["spec"]?.try(&.as_s?).try { |raw| Gori::DisplayColumns.parse_spec(raw) }
+        next unless sp.is_a?(Gori::DisplayColumns::Spec)
+        width = v["width"]?.try(&.as_i?) || 0
+        cols << Store::DisplayColumn.new(0_i64, cols.size, sp.label, sp.side, sp.kind, sp.selector,
+          sp.pos_start, sp.pos_end, width)
+      end
+      self.extractor_columns = cols
     end
 
     # The `stop_on` knobs (issue #1240), restored together — split out of `apply_config_json`
@@ -3406,6 +3468,9 @@ module Gori::Tui
       # Grouped, the first column is the cluster's size (`▸×12`, `▾` when open) and a member's
       # index is indented under it, so the column is two cells wider.
       header = @grouped ? "  ×N    payload                 status  len      words   time" : "  #   payload                 status  len      words   time"
+      if (extract_cols = view.first?.try(&.extractors)) && !extract_cols.empty?
+        header = "#{header}#{" " * (TIME_COL_W - 4)}#{extract_cells(extract_cols.map(&.label.upcase))}"
+      end
       screen.text(inner.x, inner.y, header, Theme.muted, Theme.bg, width: inner.w)
       rows_h = {inner.h - 1, 0}.max
       @results_last_h = rows_h
@@ -3490,6 +3555,9 @@ module Gori::Tui
         screen.text(x, y, stop ? "#{STOP_ROW_MARK} · #{note}" : note, Theme.yellow, bg, width: {inner.right - x, 0}.max)
       else
         line = "#{Fmt.size(r.length).ljust(8)} #{r.words.to_s.ljust(7)} #{Fmt.dur(r.duration_us)}"
+        if values = r.extracts
+          line = "#{line.ljust(17 + TIME_COL_W)}#{extract_cells(values.map { |v| Gori::DisplayColumns.display_safe(v) })}"
+        end
         # Compact per-row markers — the detail panes carry the full story; here they flag a SHORT
         # capture (so the size/words to the left aren't read as the whole response) and a
         # `--retries` re-send, so a scan of the list catches both. Built from the row's own flags,
@@ -3507,6 +3575,19 @@ module Gori::Tui
           screen.text(x2, y, gline, gs == 0 ? Theme.green : Theme.red, bg, width: {inner.right - x2, 0}.max)
         else
           screen.text(x, y, line, selected ? Theme.text : Theme.muted, bg, width: {inner.right - x, 0}.max)
+        end
+      end
+    end
+
+    # The extractor cells (#1592) after `time`, one per column, each cut to its width — the
+    # configured column's, else `DisplayColumns::DEFAULT_WIDTH`. A reopened run whose extractors
+    # differ from the tab's current list still lines up: only the WIDTH comes from the tab.
+    private def extract_cells(cells : Array(String)) : String
+      String.build do |io|
+        cells.each_with_index do |cell, i|
+          w = @extractor_columns[i]?.try { |c| Gori::DisplayColumns.width_of(c) } || Gori::DisplayColumns::DEFAULT_WIDTH
+          cut = Screen.fit(cell, w)
+          io << ' ' << cut << " " * {w - Screen.draw_width(cut), 0}.max
         end
       end
     end
@@ -3784,6 +3865,13 @@ module Gori::Tui
       if @detail_pane.in?(:request, :response)
         # Both message panes open on the stop row's note, whichever one the operator left
         # selected: the list marker says WHICH row, this says what it means once opened.
+        # Every extractor's value (#1592), whole rather than cut to its column, above the
+        # response it came out of.
+        if @detail_pane == :response
+          r.extract_pairs.reverse_each do |(e, v)|
+            notes.unshift("(#{e.label}: #{v ? Gori::DisplayColumns.display_safe(v) : "no match"})")
+          end
+        end
         notes.unshift("(the run's stop_on tripped on this result — it ended the run)") if stop_row?(r)
         lines = notes + lines
       end

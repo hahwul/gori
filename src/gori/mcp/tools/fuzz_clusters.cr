@@ -104,11 +104,11 @@ module Gori
             j.object do
               j.field("cluster") do
                 Fuzz::Clusters.emit(j, cluster, ->(t : String) { Serialize.text(t) }, matched_only) do |rep|
-                  Serialize.fuzz_result(j, rep)
+                  Serialize.fuzz_result(j, rep, nil, fjob.include_sensitive?)
                 end
               end
               j.field("results") do
-                j.array { page.each_with_index { |pos, k| Serialize.fuzz_result(j, rows[pos], flow_ids[k]) } }
+                j.array { page.each_with_index { |pos, k| Serialize.fuzz_result(j, rows[pos], flow_ids[k], fjob.include_sensitive?) } }
               end
               j.field "returned", page.size
               j.field "offset", offset
@@ -141,9 +141,9 @@ module Gori
           j.object do
             emit_fuzz_cluster_page(j, fjob.clusters, pg, args, matched_only, req_off, req_lim) do |rep|
               if pos = cached[rep.index]?
-                Serialize.fuzz_result(j, rows[pos], flow_of[pos]?)
+                Serialize.fuzz_result(j, rows[pos], flow_of[pos]?, fjob.include_sensitive?)
               else
-                Serialize.fuzz_result(j, rep)
+                Serialize.fuzz_result(j, rep, nil, fjob.include_sensitive?)
               end
             end
             j.field "job_complete", fjob.status != :running
@@ -163,7 +163,8 @@ module Gori
 
       # The content knobs `get_fuzz_run` already parsed, handed on whole.
       private record SavedFuzzCaps, include_content : Bool, include_sensitive : Bool,
-        body_cap : Int32, head_cap : Int32, message_source_cap : Int32
+        body_cap : Int32, head_cap : Int32, message_source_cap : Int32,
+        extractors : Array(Fuzz::Extractor)
 
       # `get_fuzz_run{clusters|cluster}`. One keyset-paged scalar stream of the run's rows
       # feeds the aggregator (and, for `cluster`, picks the page's members in the same pass),
@@ -180,7 +181,7 @@ module Gori
         if id = args.id
           return saved_fuzz_cluster_members(run, h, id, caps)
         end
-        clusters = Fuzz::Persistence.clusters(store, run.id)
+        clusters = Fuzz::Persistence.clusters(store, run.id, caps.extractors)
         Result.new(JSON.build do |j|
           j.object do
             j.field("run") { Serialize.saved_fuzz_run(j, run, store.fuzz_result_count(run.id)) }
@@ -189,7 +190,7 @@ module Gori
             req_lim = optional_int_arg(h, "limit")
             pg = fuzz_cluster_page(clusters, args, matched_only, req_off, req_lim)
             emit_fuzz_cluster_page(j, clusters, pg, args, matched_only, req_off, req_lim) do |rep|
-              j.object { Serialize.fuzz_result_fields(j, rep) }
+              j.object { Serialize.fuzz_result_fields(j, rep, nil, caps.include_sensitive) }
             end
           end
         end)
@@ -201,7 +202,8 @@ module Gori
                                              caps : SavedFuzzCaps) : Result
         matched_only = bool_arg(h, "matched_only", false)
         pg = page_args(h, caps.include_content ? FUZZ_RUN_CONTENT_ROWS_LIMIT : FUZZ_RUN_ROWS_LIMIT)
-        clusters, page, seen = Fuzz::Persistence.cluster_members(store, run.id, id, matched_only, pg.offset, pg.limit)
+        clusters, page, seen = Fuzz::Persistence.cluster_members(store, run.id, id, matched_only,
+          pg.offset, pg.limit, caps.extractors)
         cluster = clusters[id]?
         return not_found("no cluster #{Fuzz::Shape.hex(id)} in saved fuzz run #{run.id}") unless cluster
         Result.new(JSON.build do |j|
@@ -209,7 +211,7 @@ module Gori
             j.field("run") { Serialize.saved_fuzz_run(j, run, store.fuzz_result_count(run.id)) }
             j.field("cluster") do
               Fuzz::Clusters.emit(j, cluster, ->(t : String) { Serialize.text(t) }, matched_only) do |rep|
-                j.object { Serialize.fuzz_result_fields(j, rep) }
+                j.object { Serialize.fuzz_result_fields(j, rep, nil, caps.include_sensitive) }
               end
             end
             j.field("results") { j.array { page.each { |rec| emit_saved_fuzz_member(j, run, rec, caps) } } }
@@ -227,9 +229,10 @@ module Gori
                       caps.head_cap + 1, Serialize::SAVED_SOURCE_BYTES, caps.message_source_cap)
                   end
         if preview
-          Serialize.saved_fuzz_result(j, preview, caps.include_sensitive, caps.body_cap, caps.head_cap)
+          Serialize.saved_fuzz_result(j, preview, caps.include_sensitive, caps.body_cap, caps.head_cap,
+            caps.extractors)
         else
-          Serialize.saved_fuzz_result(j, rec)
+          Serialize.saved_fuzz_result(j, rec, caps.extractors, caps.include_sensitive)
         end
       end
     end

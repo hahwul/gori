@@ -37,6 +37,9 @@ module Gori::Tui
     property on_delete : Proc(Store::DisplayColumn, Bool)?
     property on_move : Proc(Store::DisplayColumn, Int32, Bool)?
 
+    # The Fuzzer's extractor list (#1592) is this card over another list.
+    property heading = "HISTORY COLUMNS"
+
     def initialize(columns : Array(Store::DisplayColumn), cursor : Int32? = nil)
       @columns = columns.dup
       @selected = (cursor || 0).clamp(0, {columns.size - 1, 0}.max)
@@ -51,7 +54,7 @@ module Gori::Tui
     end
 
     def title : String
-      "HISTORY COLUMNS"
+      @heading
     end
 
     def hint : String

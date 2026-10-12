@@ -530,7 +530,7 @@ describe F::Matcher do
     m.build(job, ok_result(200, "abcdef")).matched?.should be_false # filtered by size 6
 
     m.filter_size = nil
-    m.extract = /id=(\w+)/
+    m.extractors = [F::Extractor.legacy("id=(\\w+)")]
     res = m.build(job, ok_result(200, "<x id=hunter2 />"))
     res.extracted.should eq("hunter2")
   end
@@ -600,7 +600,7 @@ describe F::Matcher do
     f.filter_regex = /(a+)+$/
     f.build(job, ok_result(200, evil)).matched?.should be_true # filter never fires → kept
     e = F::Matcher.new
-    e.extract = /(a+)+$/
+    e.extractors = [F::Extractor.legacy("(a+)+$")]
     e.build(job, ok_result(200, evil)).extracted.should be_nil
   end
 

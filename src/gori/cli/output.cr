@@ -492,8 +492,9 @@ module Gori
 
       # One spelling for both surfaces: the MCP `fuzz_results` row. `flow_id` is the History
       # flow `--record-history` wrote this row to; absent when nothing was recorded.
+      # `include_sensitive`: the operator named every extractor on their own command line.
       def self.fuzz_row_json(r : Fuzz::Result, flow_id : Int64? = nil) : String
-        JSON.build { |j| MCP::Serialize.fuzz_result(j, r, flow_id) }
+        JSON.build { |j| MCP::Serialize.fuzz_result(j, r, flow_id, include_sensitive: true) }
       end
 
       # Incremental `--format json` writer. The opening bracket is emitted immediately and
@@ -794,9 +795,7 @@ module Gori
             end
           end
           fuzz_row_ws(io, r)
-          if extracted = r.extracted
-            io << "  ⟦" << term_safe(extracted) << '⟧'
-          end
+          fuzz_row_extracts(io, r)
           fuzz_row_marks(io, r, flow_id)
           # Before the error text, because it qualifies the SEND rather than the response: this
           # request went out twice (see `Fuzz::Result#retried?`).
@@ -858,6 +857,25 @@ module Gori
       # `200` is — so THIS is what the session actually did. `frames` is the INBOUND count,
       # because `length` is those frames' bytes concatenated and cannot tell one 90-byte answer
       # from thirty 3-byte keepalives. Nothing is written for an HTTP row.
+      # The row's extracted values. The old `--extract` value (`extracted`, extractor 0 when
+      # given) prints as it always has, `⟦value⟧` and only on a hit; each named extractor
+      # (#1592) prints `LABEL=⟦value⟧` on every row, a miss as `⟦⟧`, so rows compare column by
+      # column. A row read back without its run's labels falls back to `extracted` alone.
+      private def self.fuzz_row_extracts(io : IO, r : Fuzz::Result) : Nil
+        pairs = r.extract_pairs
+        if pairs.empty?
+          (extracted = r.extracted) && (io << "  ⟦" << term_safe(extracted) << '⟧')
+          return
+        end
+        pairs.each_with_index do |(e, v), i|
+          if i == 0 && e.label == Fuzz::Extractor::LEGACY_LABEL && e.loc.kind.regex?
+            v && (io << "  ⟦" << term_safe(v) << '⟧')
+          else
+            io << "  " << term_safe(e.label) << "=⟦" << term_safe(v || "") << '⟧'
+          end
+        end
+      end
+
       private def self.fuzz_row_ws(io : IO, r : Fuzz::Result) : Nil
         return unless fi = r.ws_frames_in
         io << "  ws " << fi << (fi == 1 ? " frame" : " frames")

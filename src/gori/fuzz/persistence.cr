@@ -22,7 +22,9 @@ module Gori
       source_ref : String? = nil,
       # The result-capture policy this run is archived under (issue #1240) — `Fuzz::Keep#label`.
       # Recorded on the run row so a filtered archive is legible as one, not a lost run.
-      keep : String = "all"
+      keep : String = "all",
+      # The run's extractors as `Extractor.to_json` writes them (#1592); nil for none.
+      extractors : String? = nil
 
     # Bounded asynchronous writer shared by permanent saves and the temporary result spool.
     # Live Result appends only serialize and offer a batch to this four-slot queue; they never
@@ -88,7 +90,8 @@ module Gori
           @run_id = @store.insert_fuzz_run(meta.session_id, meta.target, meta.mode, meta.total,
             created_at: meta.created_at, status: initial_status, http2: meta.http2,
             sni: meta.sni, tls_preset: meta.tls_preset, websocket: meta.websocket,
-            surface: meta.surface, source_ref: meta.source_ref, keep: meta.keep)
+            surface: meta.surface, source_ref: meta.source_ref, keep: meta.keep,
+            extractors: meta.extractors)
           if @run_id > 0
             @worker_started = true
             @worker_stopped = false
@@ -218,7 +221,26 @@ module Gori
           result.incomplete?, result.extracted, result.request, result.head, result.body,
           result.retried?, result.chain_error, result.grpc_status, result.grpc_message,
           result.timed_out?, result.resent_count, result.wire, result.ws_close_code,
-          result.ws_frames_in, result.shape)
+          result.ws_frames_in, result.shape, extracts_json(result.extracts))
+      end
+
+      # A row's extractor values as the JSON array `fuzz_results.extracts` holds (null = miss).
+      # Scrubbed: the TEXT column has to stay valid JSON, and a value is a display cell.
+      def self.extracts_json(values : Array(String?)?) : String?
+        return nil unless values
+        JSON.build { |j| j.array { values.each { |v| v ? j.string(v.scrub) : j.null } } }
+      end
+
+      # The inverse, for a row read back. A row saved before V48 carries only `extracted`,
+      # which was extractor 0 — so it reads as that one value.
+      def self.extracts_of(record : Store::FuzzResultRecord) : Array(String?)?
+        if json = record.extracts
+          JSON.parse(json).as_a.map(&.as_s?)
+        else
+          record.extracted.try { |v| [v.as(String?)] }
+        end
+      rescue JSON::ParseException | TypeCastError
+        nil
       end
 
       # Record -> write is deliberately field-for-field. This is the spool copy seam: parsing
@@ -230,7 +252,7 @@ module Gori
           record.incomplete?, record.extracted, record.request, record.response_head,
           record.response_body, record.retried?, record.chain_error, record.grpc_status,
           record.grpc_message, record.timed_out?, record.resent_count, record.wire,
-          record.ws_close_code, record.ws_frames_in, record.shape)
+          record.ws_close_code, record.ws_frames_in, record.shape, record.extracts)
       end
 
       # Deterministic transaction budget: every variable-width field plus a fixed allowance for
@@ -246,11 +268,16 @@ module Gori
         bytes += row.chain_error.try(&.bytesize) || 0
         bytes += row.grpc_message.try(&.bytesize) || 0
         bytes += row.wire.try(&.size) || 0
+        bytes += row.extracts.try(&.bytesize) || 0
         bytes.to_i64
       end
 
       # Store record -> the exact engine row the existing TUI/CLI serializers consume.
-      def self.result(record : Store::FuzzResultRecord) : Result
+      # `extractors` are the run's (`Extractor.of_run`): without them the row keeps its values
+      # but no surface can label them, so it draws none.
+      def self.result(record : Store::FuzzResultRecord,
+                      extractors : Array(Extractor)? = nil) : Result
+        values = extracts_of(record)
         payloads = begin
           JSON.parse(record.payloads).as_a.map do |item|
             if text = item.as_s?
@@ -271,36 +298,38 @@ module Gori
           record.request, record.retried?, record.chain_error, record.grpc_status,
           record.grpc_message, record.timed_out?, record.resent_count, record.wire,
           ws_close_code: record.ws_close_code, ws_frames_in: record.ws_frames_in,
-          shape: record.shape)
+          shape: record.shape, extracts: values, extractors: values ? extractors : nil)
       end
 
       # A saved run's response-shape clusters (#1351), from the keyset-paged scalar stream so
       # no retained byte crosses SQLite and one entry per shape is all that is held. The block
       # runs once per row — a surface's cancellation check and fiber yield. The one saved-run
       # aggregation MCP, the CLI and the TUI restore share.
-      def self.clusters(store : Store, run_id : Int64, &each : -> Nil) : Clusters
+      def self.clusters(store : Store, run_id : Int64, extractors : Array(Extractor)? = nil,
+                        &each : -> Nil) : Clusters
         clusters = Clusters.new
         store.each_fuzz_result_summary(run_id) do |record|
           each.call
-          clusters.add(result(record))
+          clusters.add(result(record, extractors))
         end
         clusters
       end
 
-      def self.clusters(store : Store, run_id : Int64) : Clusters
-        clusters(store, run_id) { }
+      def self.clusters(store : Store, run_id : Int64, extractors : Array(Extractor)? = nil) : Clusters
+        clusters(store, run_id, extractors) { }
       end
 
       # One page of one cluster's member rows, in index order, with the run's clusters (for the
       # cluster's own summary) and how many members the filter selects in all. The same pass
       # aggregates and pages, so nothing past one page of rows is held.
       def self.cluster_members(store : Store, run_id : Int64, id : Int64, matched_only : Bool,
-                               offset : Int32, limit : Int32) : {Clusters, Array(Store::FuzzResultRecord), Int32}
+                               offset : Int32, limit : Int32,
+                               extractors : Array(Extractor)? = nil) : {Clusters, Array(Store::FuzzResultRecord), Int32}
         clusters = Clusters.new
         page = [] of Store::FuzzResultRecord
         seen = 0
         store.each_fuzz_result_summary(run_id) do |record|
-          row = result(record)
+          row = result(record, extractors)
           clusters.add(row)
           next unless Clusters.key(row)[0] == id
           next if matched_only && !row.matched?

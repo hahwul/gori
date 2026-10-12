@@ -5,6 +5,7 @@ require "../repeater/engine"
 require "../ascii_bytes"
 require "../utf8"
 require "./shape"
+require "./extractor"
 
 module Gori::Fuzz
   # gRPC facts a fuzz run needs off raw wire bytes: the CALL's outcome (which for gRPC is
@@ -374,7 +375,21 @@ module Gori::Fuzz
     header_spec match_header
     header_spec filter_header
 
-    property extract : Regex?
+    # The run's named extractors (#1592), in column order; the old single `extract` regex is
+    # extractor 0 (`Extractor.legacy`). Their regexes are compiled ONCE here, budgeted, never
+    # per response.
+    getter extractors = [] of Extractor
+    @extract_res = [] of Regex?
+    @extract_text = false
+
+    def extractors=(list : Array(Extractor))
+      @extractors = list
+      # A pattern that will not carry the budget is refused by `Extractor.parse`; nil here is
+      # the backstop, and `TokenExtract.regex` answers it with a nil cell.
+      @extract_res = list.map { |e| e.loc.kind.regex? ? (Gori::SafeRegexp.budgeted(e.loc.selector) rescue nil) : nil }
+      @extract_text = list.any?(&.loc.kind.text_only?)
+    end
+
     # The active calibration set (see Engine#calibrate_baseline). Empty = "no
     # calibration collected" (auto-calibration off, or the calibration sends all
     # failed) — calibrated_out? treats that identically to auto_calibrate being off.
@@ -583,9 +598,10 @@ module Gori::Fuzz
       # `Gori::Utf8.text`, not `String.new(body).scrub`: the scrub is mandatory (PCRE2 raises on
       # an invalid byte rather than not matching) but `String#scrub` charges every VALID body a
       # full character-by-character decode to be told there was nothing to repair — 681µs against
-      # 81µs on a 216 KB body, once per response, on every run that sets `--mr`/`--fr`/`--extract`.
+      # 81µs on a 216 KB body, once per response, on every run that sets `--mr`/`--fr`/`--extract`/`--extractor`.
       text = need_text ? Gori::Utf8.text(body) : ""
-      extracted = extract_value(text)
+      # `text` is "" only when no extractor reads text (`needs_text?` counts the ones that do).
+      extracts = extract_values(raw, body, text)
       matched = decide(raw, status, grpc_status, length, words, lines, elapsed, text)
       # The SEPARATE stop condition, on the very metrics/text just computed (never a second
       # decode). nil for every run without `stop_on`, so the common path is unchanged.
@@ -604,14 +620,14 @@ module Gori::Fuzz
         index: job.index, payloads: job.payloads, position: job.position,
         status: status, length: length, words: words, lines: lines,
         duration_us: raw.duration_us, error: raw.error, matched: matched,
-        incomplete: raw.incomplete?, extracted: extracted,
+        incomplete: raw.incomplete?, extracted: extracts.try(&.first?),
         head: keep ? present(raw.head) : nil, body: keep ? raw.body : nil,
         request: keep ? present(job.bytes) : nil, retried: raw.retried?,
         wire: keep ? raw.wire.try { |w| present(w) } : nil,
         chain_error: job.chain_error,
         grpc_status: grpc_status, grpc_message: grpc_message,
         timed_out: raw.timed_out?, resent_count: resent_count, stop_hit: stop_hit,
-        shape: shape)
+        shape: shape, extracts: extracts, extractors: @extractors)
     end
 
     # Count a rendered request whose gRPC framing a payload broke. Only reached while
@@ -633,10 +649,11 @@ module Gori::Fuzz
     end
 
     # Whether any dimension this matcher evaluates reads the decoded body TEXT — the two body
-    # regexes and the extract. `build` ORs this with the stop condition's own answer to decide
-    # whether to pay the decode, so a `stop_on` regex is not silently never evaluated.
+    # regexes and a regex/jsonpath extractor. `build` ORs this with the stop condition's own
+    # answer to decide whether to pay the decode, so a `stop_on` regex is not silently never
+    # evaluated.
     def needs_text? : Bool
-      !@match_regex.nil? || !@filter_regex.nil? || !@extract.nil?
+      !@match_regex.nil? || !@filter_regex.nil? || @extract_text
     end
 
     # This matcher's verdict on metrics + text already decoded. PROTECTED, not private: a run's
@@ -763,7 +780,7 @@ module Gori::Fuzz
     end
 
     # True when ANY match/filter dimension is set — the run carries a success/rejection
-    # criterion rather than the "everything passes" default. `extract` is deliberately excluded:
+    # criterion rather than the "everything passes" default. Extractors are deliberately excluded:
     # it grabs a value from each response, it is not a pass/reject predicate. Surfaces read this
     # to decide whether to nudge the operator toward `--mc/--fc` (a race run's `matched` count is
     # only meaningful once a predicate names the success response — see `Engine#matcher_constrained?`).
@@ -860,16 +877,18 @@ module Gori::Fuzz
       (c = code) ? compiled.any?(&.matches?(c.to_i64)) : false
     end
 
-    private def extract_value(text : String) : String?
-      re = @extract
-      return nil if re.nil? || text.empty?
-      # `match_at_byte_index`, for the reason `regex_pass?` gives: `Regex#match`'s char-index
-      # conversion is a whole-body character count to turn 0 into 0.
-      md = re.match_at_byte_index(text, 0)
-      return nil unless md
-      md[1]? || md[0]
-    rescue Regex::Error
-      nil # a runaway --extract regex yields no capture rather than a dead worker (see regex_pass?)
+    # One value per extractor, nil for a miss, over ONE subject built from the decode (and the
+    # text) `build` already paid for — N extractors never mean N decodes (P6). A runaway regex
+    # trips its budget inside `TokenExtract.regex` and yields a nil cell, not a dead worker.
+    private def extract_values(raw : Repeater::Result, body : Bytes, text : String) : Array(String?)?
+      return nil if @extractors.empty?
+      subject = Gori::ExtractSubject.new(raw.head, raw.body, Gori::MessageSide::Response,
+        raw.response.try(&.headers), decoded: body, text: text)
+      Array(String?).new(@extractors.size) do |i|
+        e = @extractors[i]
+        v = Gori::TokenExtract.extract(subject, e.loc, @extract_res[i])
+        e.legacy? ? v : Extractor.cap(v)
+      end
     end
 
     # Cap the INFLATE at the same ceiling the capture read already enforces. Left at

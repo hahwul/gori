@@ -69,7 +69,12 @@ module Gori
     # cannot say whether they do. Its home is here, beside the descriptors, because the CLI
     # (`gori run history`) and MCP (`list_history{columns}`) both mask on it.
     def self.sensitive?(c : Store::DisplayColumn) : Bool
-      c.kind.cookie? || (c.kind.header? && Redact.sensitive_header?(c.selector))
+      sensitive?(c.kind, c.selector)
+    end
+
+    # The same rule for a descriptor that is not a stored column (a Fuzzer extractor, #1592).
+    def self.sensitive?(kind : Gori::ExtractKind, selector : String) : Bool
+      kind.cookie? || (kind.header? && Redact.sensitive_header?(selector))
     end
 
     # A column set with its regexes already compiled — the shape every row loop should hold.
@@ -201,8 +206,10 @@ module Gori
       end
       return "enter a #{kind.label} selector" if selector.strip.empty?
       if kind.regex?
+        # `budgeted`, not a bare `Regex.new`: a pattern that compiles but cannot carry the match
+        # budget is never run unbudgeted, so it would be saved here and draw blank forever.
         begin
-          Regex.new(selector)
+          Gori::SafeRegexp.budgeted(selector)
         rescue ex : ArgumentError | Regex::Error
           return "that regex does not compile: #{ex.message}"
         end

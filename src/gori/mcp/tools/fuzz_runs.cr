@@ -50,7 +50,9 @@ module Gori
         head_cap = clamp(optional_int_arg(h, "max_head_bytes"),
           Serialize::SAVED_HEAD_PREVIEW_BYTES, Serialize::MAX_TEXT)
         message_source_cap = head_cap + Serialize::SAVED_SOURCE_BYTES + 4
-        caps = SavedFuzzCaps.new(include_content, include_sensitive, body_cap, head_cap, message_source_cap)
+        extractors = Fuzz::Extractor.of_run(run.extractors)
+        caps = SavedFuzzCaps.new(include_content, include_sensitive, body_cap, head_cap,
+          message_source_cap, extractors)
         # `clusters` / `cluster` (#1351): a cluster page, or that cluster's members.
         get_fuzz_run_clusters(run, h, caps).try { |clustered| return clustered }
         if idx = optional_int_arg(h, "result_index")
@@ -59,11 +61,11 @@ module Gori
             preview = store.get_fuzz_result_preview(run_id, idx, message_source_cap,
               head_cap + 1, Serialize::SAVED_SOURCE_BYTES, message_source_cap)
             return not_found("no result #{idx} in saved fuzz run #{run_id}") unless preview
-            return saved_fuzz_result_detail(run) { |j| Serialize.saved_fuzz_result(j, preview, include_sensitive, body_cap, head_cap) }
+            return saved_fuzz_result_detail(run) { |j| Serialize.saved_fuzz_result(j, preview, include_sensitive, body_cap, head_cap, extractors) }
           end
           row = store.get_fuzz_result_summary(run_id, idx)
           return not_found("no result #{idx} in saved fuzz run #{run_id}") unless row
-          return saved_fuzz_result_detail(run) { |j| Serialize.saved_fuzz_result(j, row) }
+          return saved_fuzz_result_detail(run) { |j| Serialize.saved_fuzz_result(j, row, extractors, include_sensitive) }
         end
 
         # Content rows retain multiple request/response BLOBs and are deliberately capped at
@@ -81,12 +83,12 @@ module Gori
                   store.each_fuzz_result_preview_page(run_id, pg.limit, pg.offset,
                     message_source_cap, head_cap + 1, Serialize::SAVED_SOURCE_BYTES,
                     message_source_cap, matched_only) do |preview|
-                    Serialize.saved_fuzz_result(j, preview, include_sensitive, body_cap, head_cap)
+                    Serialize.saved_fuzz_result(j, preview, include_sensitive, body_cap, head_cap, extractors)
                     returned += 1
                   end
                 else
                   store.each_fuzz_result_summary_page(run_id, pg.limit, pg.offset, matched_only) do |row|
-                    Serialize.saved_fuzz_result(j, row)
+                    Serialize.saved_fuzz_result(j, row, extractors, include_sensitive)
                     returned += 1
                   end
                 end
@@ -156,7 +158,7 @@ module Gori
           s.field "cluster", strprop("a cluster id from clusters:true — page that cluster's member rows (the default row shape; include_content applies)")
           s.field "cluster_order", enumprop("order of clusters:true (default rare = smallest first; common; first)", Fuzz::Clusters::Order.names)
           s.field "include_content", boolprop("include request/wire/response content summaries (default false)")
-          s.field "include_sensitive", boolprop("include unredacted exact raw request/wire/head base64 when content is requested (default false)")
+          s.field "include_sensitive", boolprop("include unredacted exact raw request/wire/head base64 when content is requested, and unmask cookie/credential-header extractor values (default false)")
           s.field "max_body_bytes", intprop("decoded body/raw inline cap (default 2048, max #{Serialize::MAX_TEXT})")
           s.field "max_head_bytes", intprop("request/response head inline cap (default #{Serialize::SAVED_HEAD_PREVIEW_BYTES}, max #{Serialize::MAX_TEXT})")
         end

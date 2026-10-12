@@ -1056,6 +1056,9 @@ module Gori
         # Whether the run asked for `reframe_grpc` — read only to word `grpc_stale_prefix_reason`,
         # since the remedy an agent should act on differs by whether it already passed it.
         property? reframe_grpc = false
+        # `fuzz_start{include_sensitive}`: unmask a cookie / credential-header extractor's
+        # values in this job's rows (#1592). Off by default, as `list_history{columns}`.
+        property? include_sensitive = false
         # The TLS fingerprint override every send in this run presented (#844), or nil for the
         # destination policy's. Held on the JOB so `fuzz_start`, `fuzz_status` and
         # `fuzz_results` can all say WHICH HANDSHAKE produced this result set — the A/B the

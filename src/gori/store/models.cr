@@ -2028,12 +2028,15 @@ module Gori
       # `condition_met` run carries one, and a `condition_met` run from before the column reads
       # nil too: nil is "not recorded", never "no stop row". Defaulted like `keep`.
       getter stop_idx : Int64?
+      # The run's named extractors (V48, #1592): a JSON array of `--extractor` specs, in
+      # column order. NULL on a run saved before them, or with none.
+      getter extractors : String?
 
       def initialize(@id, @session_id, @created_at, @finished_at, @target, @mode,
                      @total, @sent, @matched, @errors, @status, @http2 = false,
                      @sni = nil, @tls_preset = nil, @websocket = false,
                      @surface = nil, @source_ref = nil, @snapshot_version = 0,
-                     @keep = "all", @stop_idx = nil)
+                     @keep = "all", @stop_idx = nil, @extractors = nil)
       end
 
       # Was this run's archive filtered — i.e. not every row was kept? Read by the listings to
@@ -2091,6 +2094,8 @@ module Gori
       getter ws_frames_in : Int32?
       # `Fuzz::Result#shape` (#1351); nil only on a row copied from a pre-V42 record.
       getter shape : Int64?
+      # Every extractor's value as a JSON array (V48, #1592); nil when the run had none.
+      getter extracts : String?
 
       def initialize(@idx, @payloads, @position, @status, @length, @words, @lines,
                      @duration_us, @error, @matched, @incomplete, @extracted,
@@ -2098,7 +2103,7 @@ module Gori
                      @retried = false, @chain_error = nil, @grpc_status = nil,
                      @grpc_message = nil, @timed_out = false, @resent_count = 0,
                      @wire = nil, @ws_close_code = nil, @ws_frames_in = nil,
-                     @shape = nil)
+                     @shape = nil, @extracts = nil)
       end
     end
 
@@ -2134,6 +2139,8 @@ module Gori
       getter ws_frames_in : Int32?
       # The response-shape fingerprint (V42, #1351). NULL on a row saved before it existed.
       getter shape : Int64?
+      # Every extractor's value as a JSON array (V48, #1592). NULL on a row saved before it.
+      getter extracts : String?
 
       def initialize(@id, @run_id, @idx, @payloads, @status, @length, @words, @lines,
                      @duration_us, @error, @matched, @extracted,
@@ -2141,7 +2148,8 @@ module Gori
                      @position = nil, @incomplete = false, @retried = false,
                      @chain_error = nil, @grpc_status = nil, @grpc_message = nil,
                      @timed_out = false, @resent_count = 0, @wire = nil,
-                     @ws_close_code = nil, @ws_frames_in = nil, @shape = nil)
+                     @ws_close_code = nil, @ws_frames_in = nil, @shape = nil,
+                     @extracts = nil)
       end
     end
 

@@ -538,14 +538,18 @@ module Gori
 
       # --- fuzz result (metrics only — no raw bodies; full detail stays behind
       # get_flow/send_request, shrinking the injected-content surface) -----------
-      def self.fuzz_result(j : JSON::Builder, r : Fuzz::Result, flow_id : Int64? = nil) : Nil
-        j.object { fuzz_result_fields(j, r, flow_id) }
+      # `include_sensitive` unmasks a cookie / credential-header extractor (#1592), as
+      # `list_history{columns}` does. Off by default; the CLI passes true, since there the
+      # operator typed the extractor on their own terminal.
+      def self.fuzz_result(j : JSON::Builder, r : Fuzz::Result, flow_id : Int64? = nil,
+                           include_sensitive : Bool = false) : Nil
+        j.object { fuzz_result_fields(j, r, flow_id, include_sensitive) }
       end
 
       # Field-only form so permanent saved rows can add their optional content without
       # duplicating the live-job metric projection.
       def self.fuzz_result_fields(j : JSON::Builder, r : Fuzz::Result,
-                                  flow_id : Int64? = nil) : Nil
+                                  flow_id : Int64? = nil, include_sensitive : Bool = false) : Nil
         j.field "index", r.index
         # Did the MATCHER accept this row? Always emitted, unlike the exception flags below,
         # because the stored set is not matched-only: `store_fuzz_result` also keeps a row
@@ -592,7 +596,7 @@ module Gori
         if cc = r.ws_close_code
           j.field "ws_close_code", cc
         end
-        j.field "extracted", text(r.extracted)
+        emit_extracts(j, r, include_sensitive)
         j.field "stop_hit", true if r.stop_hit?
         # This variation's request reached the origin TWICE: the keep-alive pool found its
         # parked socket closed and re-sent (see `Fuzz::Result#retried?`). Emitted only when
@@ -624,6 +628,26 @@ module Gori
         # Present when record_history recorded this result as a History flow —
         # fetch its full request/response with get_flow (headers redacted).
         j.field "flow_id", flow_id if flow_id
+      end
+
+      # `extracted`, then every named extractor (#1592) as `extracts`: `label → value`, "" for a
+      # miss, label → ARRAY where two share a label — the `columns` shape `list_history` emits.
+      # `extracted` is extractor 0's value, so it is masked exactly when that one is.
+      private def self.emit_extracts(j : JSON::Builder, r : Fuzz::Result, include_sensitive : Bool) : Nil
+        pairs = r.extract_pairs
+        extracted = r.extracted
+        extracted = "[REDACTED]" if (first = pairs.first?) && mask_extract?(first[0], extracted, include_sensitive)
+        j.field "extracted", text(extracted)
+        return if pairs.empty?
+        cells = pairs.map do |(e, v)|
+          {e.label, mask_extract?(e, v, include_sensitive) ? "[REDACTED]" : (v || "")}
+        end
+        j.field("extracts") { columns_object(j, cells) }
+      end
+
+      # An empty value stays empty, so a miss still reads as a miss (see `row_columns`).
+      private def self.mask_extract?(e : Fuzz::Extractor, v : String?, include_sensitive : Bool) : Bool
+        !include_sensitive && e.sensitive? && !v.nil? && !v.empty?
       end
 
       # --- discover / miner findings (MCP `*_results` and `gori run discover|mine --format json`)
@@ -706,23 +730,30 @@ module Gori
           # `result_index` get_fuzz_run takes. Null on every run that did not end
           # `condition_met`, and on one saved before the column: null is "not recorded".
           j.field "stop_index", run.stop_idx
+          # The run's named extractors (#1592), as `--extractor` specs in column order — the
+          # labels each row's `extracts` is keyed by. Absent on a run that had none.
+          if specs = run.extractors
+            j.field("extractors") { j.array { Fuzz::Extractor.specs_of(specs).each { |sp| j.string text(sp) } } }
+          end
         end
       end
 
       # Scalar-only saved result. The Store projection behind this overload never selects a
       # retained BLOB, including the indexed result_index path.
-      def self.saved_fuzz_result(j : JSON::Builder, row : Store::FuzzResultRecord) : Nil
-        j.object { fuzz_result_fields(j, Fuzz::Persistence.result(row)) }
+      def self.saved_fuzz_result(j : JSON::Builder, row : Store::FuzzResultRecord,
+                                 extractors : Array(Fuzz::Extractor)? = nil,
+                                 include_sensitive : Bool = false) : Nil
+        j.object { fuzz_result_fields(j, Fuzz::Persistence.result(row, extractors), nil, include_sensitive) }
       end
 
       # Bounded saved content. Prefix bytes and their full nullable SQL lengths travel together,
       # so output caps never require fetching the remainder and X'' remains distinct from NULL.
       def self.saved_fuzz_result(j : JSON::Builder, preview : Store::FuzzResultPreview,
                                  include_sensitive : Bool, body_cap : Int32,
-                                 head_cap : Int32) : Nil
+                                 head_cap : Int32, extractors : Array(Fuzz::Extractor)? = nil) : Nil
         row = preview.row
         j.object do
-          fuzz_result_fields(j, Fuzz::Persistence.result(row))
+          fuzz_result_fields(j, Fuzz::Persistence.result(row, extractors), nil, include_sensitive)
           emit_saved_message(j, "request", row.request, preview.request_size,
             include_sensitive, body_cap, head_cap)
           emit_saved_message(j, "wire", row.wire, preview.wire_size,

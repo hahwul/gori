@@ -3,11 +3,11 @@ require "db"
 module Gori
   class Store
     FUZZ_RUN_COLS = "id, session_id, created_at, finished_at, target, mode, total, sent, matched, errors, status, " \
-                    "http2, sni, tls_preset, websocket, surface, source_ref, snapshot_version, keep, stop_idx"
+                    "http2, sni, tls_preset, websocket, surface, source_ref, snapshot_version, keep, stop_idx, extractors"
     FUZZ_RESULT_COLS = "id, run_id, idx, payloads, status, length, words, lines, duration_us, error, matched, " \
                        "extracted, request, response_head, response_body, position, incomplete, retried, " \
                        "chain_error, grpc_status, grpc_message, timed_out, resent_count, wire, " \
-                       "ws_close_code, ws_frames_in, shape"
+                       "ws_close_code, ws_frames_in, shape, extracts"
     # Same positional projection as FUZZ_RESULT_COLS, but no captured bytes cross the SQLite
     # boundary. Returning FuzzResultRecord keeps metric-only callers compatible with the full
     # API while the nil byte fields truthfully say this projection did not fetch content.
@@ -15,7 +15,7 @@ module Gori
       "id, run_id, idx, payloads, status, length, words, lines, duration_us, error, matched, " \
       "extracted, NULL AS request, NULL AS response_head, NULL AS response_body, position, " \
       "incomplete, retried, chain_error, grpc_status, grpc_message, timed_out, resent_count, " \
-      "NULL AS wire, ws_close_code, ws_frames_in, shape"
+      "NULL AS wire, ws_close_code, ws_frames_in, shape, extracts"
     # Same positional record projection, but each BLOB is a SQL-capped prefix followed by its
     # full nullable size. The prefix limits are bound parameters in request/head/body/wire order.
     FUZZ_RESULT_PREVIEW_COLS =
@@ -25,7 +25,7 @@ module Gori
       "CASE WHEN response_body IS NULL THEN NULL WHEN LENGTH(response_body) = 0 THEN response_body ELSE substr(response_body, 1, ?) END, " \
       "position, incomplete, retried, chain_error, grpc_status, grpc_message, timed_out, " \
       "resent_count, CASE WHEN wire IS NULL THEN NULL WHEN LENGTH(wire) = 0 THEN wire ELSE substr(wire, 1, ?) END, " \
-      "ws_close_code, ws_frames_in, shape, LENGTH(request), LENGTH(response_head), " \
+      "ws_close_code, ws_frames_in, shape, extracts, LENGTH(request), LENGTH(response_head), " \
       "LENGTH(response_body), LENGTH(wire)"
 
     def insert_fuzz_run(session_id : Int64?, target : String, mode : String, total : Int64?, *,
@@ -33,16 +33,16 @@ module Gori
                         http2 : Bool = false, sni : String? = nil,
                         tls_preset : String? = nil, websocket : Bool = false,
                         surface : String? = nil, source_ref : String? = nil,
-                        keep : String = "all") : Int64
+                        keep : String = "all", extractors : String? = nil) : Int64
       inserted = 0_i64
       committed = exec_task_ok ->(c : DB::Connection) {
         # Checked on the writer connection, inside the transaction that inserts the run. A
         # session deleted by another Store can therefore never gain a new orphan run.
         if session_id.nil? || c.query_one?("SELECT 1 FROM fuzz_sessions WHERE id = ?", session_id,
              as: Int64)
-          c.exec("INSERT INTO fuzz_runs (session_id, created_at, target, mode, total, sent, matched, errors, status, http2, sni, tls_preset, websocket, surface, source_ref, snapshot_version, keep) VALUES (?,?,?,?,?,0,0,0,?,?,?,?,?,?,?,1,?)",
+          c.exec("INSERT INTO fuzz_runs (session_id, created_at, target, mode, total, sent, matched, errors, status, http2, sni, tls_preset, websocket, surface, source_ref, snapshot_version, keep, extractors) VALUES (?,?,?,?,?,0,0,0,?,?,?,?,?,?,?,1,?,?)",
             session_id, created_at, target, mode, total, status, http2 ? 1 : 0, sni,
-            tls_preset, websocket ? 1 : 0, surface, source_ref, keep)
+            tls_preset, websocket ? 1 : 0, surface, source_ref, keep, extractors)
           inserted = c.scalar("SELECT last_insert_rowid()").as(Int64)
         end
         nil
@@ -312,7 +312,8 @@ module Gori
                   "COALESCE(LENGTH(error), 0) + COALESCE(LENGTH(extracted), 0) + " \
                   "COALESCE(LENGTH(request), 0) + COALESCE(LENGTH(response_head), 0) + " \
                   "COALESCE(LENGTH(response_body), 0) + COALESCE(LENGTH(chain_error), 0) + " \
-                  "COALESCE(LENGTH(grpc_message), 0) + COALESCE(LENGTH(wire), 0) " \
+                  "COALESCE(LENGTH(grpc_message), 0) + COALESCE(LENGTH(wire), 0) + " \
+                  "COALESCE(LENGTH(extracts), 0) " \
                   "FROM fuzz_results WHERE run_id = ? ORDER BY id LIMIT ?", id, row_limit) do |rs|
             rs.each do
               row_id = rs.read(Int64)
@@ -359,9 +360,9 @@ module Gori
         row.chain_error << row.grpc_status << row.grpc_message << (row.timed_out? ? 1 : 0) <<
         row.resent_count
       wire_slot = Store.optional_blob_slot(args, row.wire)
-      args << row.ws_close_code << row.ws_frames_in << row.shape
-      c.exec("INSERT INTO fuzz_results (run_id, idx, payloads, status, length, words, lines, duration_us, error, matched, extracted, request, response_head, response_body, position, incomplete, retried, chain_error, grpc_status, grpc_message, timed_out, resent_count, wire, ws_close_code, ws_frames_in, shape) " \
-             "VALUES (?,?,?,?,?,?,?,?,?,?,?,#{request_slot},#{response_head_slot},#{response_body_slot},?,?,?,?,?,?,?,?,#{wire_slot},?,?,?)",
+      args << row.ws_close_code << row.ws_frames_in << row.shape << row.extracts
+      c.exec("INSERT INTO fuzz_results (run_id, idx, payloads, status, length, words, lines, duration_us, error, matched, extracted, request, response_head, response_body, position, incomplete, retried, chain_error, grpc_status, grpc_message, timed_out, resent_count, wire, ws_close_code, ws_frames_in, shape, extracts) " \
+             "VALUES (?,?,?,?,?,?,?,?,?,?,?,#{request_slot},#{response_head_slot},#{response_body_slot},?,?,?,?,?,?,?,?,#{wire_slot},?,?,?,?)",
         args: args)
     end
 
@@ -430,7 +431,7 @@ module Gori
         rs.read(String), rs.read(Int64?), rs.read(Int64), rs.read(Int64), rs.read(Int64),
         rs.read(String), rs.read(Int32) != 0, rs.read(String?), rs.read(String?),
         rs.read(Int32) != 0, rs.read(String?), rs.read(String?), rs.read(Int32), rs.read(String),
-        rs.read(Int64?))
+        rs.read(Int64?), rs.read(String?))
     end
 
     private def read_fuzz_result(rs : DB::ResultSet) : FuzzResultRecord
@@ -440,7 +441,7 @@ module Gori
         rs.read(Int32) != 0, rs.read(String?), rs.read(Bytes?), rs.read(Bytes?), rs.read(Bytes?),
         rs.read(Int32?), rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(String?),
         rs.read(Int32?), rs.read(String?), rs.read(Int32) != 0, rs.read(Int32),
-        rs.read(Bytes?), rs.read(Int32?), rs.read(Int32?), rs.read(Int64?))
+        rs.read(Bytes?), rs.read(Int32?), rs.read(Int32?), rs.read(Int64?), rs.read(String?))
     end
 
     private def read_fuzz_result_preview(rs : DB::ResultSet) : FuzzResultPreview

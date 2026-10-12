@@ -208,7 +208,9 @@ gori run mine 42 --payload-from 'host:api.example.com param-names'
 
 ### 매칭 {#matching}
 
-ffuf 스타일 matcher와 filter로 status, size, words, 왕복 시간(`--mt`/`--ft`, ms 단위. 시간 기반 블라인드 페이로드의 유일한 증거가 되는 차원), 본문 정규식에 대해 결과를 필터링합니다(헤드리스에서는 `--ml`/`--fl`로 줄 수, `--mh`/`--fh`로 응답 헤드 부분 문자열, `--mg`/`--fg`로 gRPC status도). 여기에 시끄러운 기준선을 걸러내는 자동 보정까지 더해집니다. 자동 보정은 스윕 전에 대상을 여러 번 샘플링한 뒤, 각 응답을 모든 샘플 형태와 비교하되 그 샘플들이 스스로 보여 준 흔들림만큼 폭을 넓혀서 비교합니다. 그래서 요청마다 달라지는 id나 타임스탬프를 품은 페이지는 걸러지고, 샘플이 전부 동일했던 대상은 여전히 정확히 비교됩니다. 매칭된 응답은 강조되며, 헤드리스에서는 캡처 정규식으로 각 응답에서 값을 추출할 수 있습니다(`--extract`, MCP `extract`).
+ffuf 스타일 matcher와 filter로 status, size, words, 왕복 시간(`--mt`/`--ft`, ms 단위. 시간 기반 블라인드 페이로드의 유일한 증거가 되는 차원), 본문 정규식에 대해 결과를 필터링합니다(헤드리스에서는 `--ml`/`--fl`로 줄 수, `--mh`/`--fh`로 응답 헤드 부분 문자열, `--mg`/`--fg`로 gRPC status도). 여기에 시끄러운 기준선을 걸러내는 자동 보정까지 더해집니다. 자동 보정은 스윕 전에 대상을 여러 번 샘플링한 뒤, 각 응답을 모든 샘플 형태와 비교하되 그 샘플들이 스스로 보여 준 흔들림만큼 폭을 넓혀서 비교합니다. 그래서 요청마다 달라지는 id나 타임스탬프를 품은 페이지는 걸러지고, 샘플이 전부 동일했던 대상은 여전히 정확히 비교됩니다. 매칭된 응답은 강조됩니다.
+
+모든 응답에서 값을 뽑아 보려면 **추출기**를 추가하세요(RESULTS 패널의 **Display… › Extractors…**). 추출기 하나는 [History 컬럼](/ko/guide/proxy/#columns) 디스크립터 `[LABEL=]kind:selector`(응답의 헤더, 쿠키, JSON 경로, 정규식 캡처, 바이트 범위)이고, `time` 뒤에 자기 결과 컬럼을 하나씩 그립니다. 전체 값은 응답 상세 맨 위에 나옵니다. 저장된 실행은 추출기를 함께 보관하므로 다시 열어도 같은 컬럼이 보입니다. 헤드리스에서는 `--extractor=SPEC`(반복 가능), MCP에서는 `extractors`이며 최대 8개입니다. 기존의 단일 캡처 정규식(`--extract`, MCP `extract`)은 `extracted`라는 이름의 0번 추출기입니다. 요청 쪽(`req:`)은 거부합니다. fuzz 행의 요청은 템플릿에 페이로드를 넣은 것이기 때문입니다. MCP는 쿠키나 자격 증명 헤더 추출기를 `include_sensitive:true`가 없으면 `[REDACTED]`로 보여 줍니다.
 
 ADVANCED 카드에는 실행을 다듬는 행도 있습니다. **Stop after N hits**와 **Stop on (DIM:SPEC)**은 matcher가 N번 히트했거나 응답이 조건 하나를 만족하면 스윕을 일찍 끝내며, 이렇게 멈춘 실행은 `stopped`가 아니라 `condition_met`으로 끝납니다. **Keep interesting only**는 저장한 실행에 매칭된 행과, 문제가 있었던 행(전송 오류, 실패한 마커 체인, 재전송, 잘린 응답), 그리고 실행을 멈춘 행만 남깁니다. **Race (N conns)**는 페이로드 스윕 대신 요청 복사본 N개를 함께 풀어 보내고(last-byte sync), **Max requests**는 실제 와이어 요청 수에 상한을 둡니다. 헤드리스에서는 `--stop-after-matches`, `--stop-on`, `--keep`, `--race`, `--max-requests`입니다. [CLI Reference](/ko/reference/cli/#run-fuzz)를 참고하세요.
 

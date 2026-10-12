@@ -244,3 +244,28 @@ describe "Gori::CLI::Output.term_line" do
     line.should_not contain('‮')
   end
 end
+
+# Named extractors (#1592) on a `gori run fuzz` row: the old `--extract` value keeps its bare
+# `⟦…⟧`, each named one prints `LABEL=⟦…⟧` on every row, and JSON carries `extracts` unmasked.
+describe "CLI fuzz row extracts" do
+  list = Gori::Fuzz::Extractor.parse(["RID=header:x-request-id", "cookie:sid"], "c=(\\d+)").as(Array(Gori::Fuzz::Extractor))
+  row = Gori::Fuzz::Result.new(0_i64, ["p"], nil, 200, 2_i64, 1, 1, 1000_i64, nil, true, false, "9",
+    extracts: ["9", "r\e1", nil], extractors: list)
+
+  it "prints the legacy value bare and every named value labelled, a miss included" do
+    text = Gori::CLI::Output.fuzz_row_text(row)
+    text.should contain("  ⟦9⟧  RID=⟦r")
+    text.should_not contain("\e")
+    text.should contain("  sid=⟦⟧")
+  end
+
+  it "prints `extracted` alone for a row with no extractor labels" do
+    plain = Gori::Fuzz::Result.new(0_i64, ["p"], nil, 200, 2_i64, 1, 1, 1000_i64, nil, true, false, "9")
+    Gori::CLI::Output.fuzz_row_text(plain).should contain("  ⟦9⟧")
+  end
+
+  it "carries `extracts` in JSON, the cookie unmasked on the operator's own terminal" do
+    json = JSON.parse(Gori::CLI::Output.fuzz_row_json(row))
+    json["extracts"].as_h.transform_values(&.as_s).should eq({"extracted" => "9", "RID" => "r\e1", "sid" => ""})
+  end
+end

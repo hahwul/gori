@@ -1775,3 +1775,92 @@ describe "MCP fuzz — a live job's results page in index order (#1432)" do
     end
   end
 end
+
+# Named extractors (#1592): one value per extractor per row, keyed by label, a sensitive one
+# masked unless the caller asked, and the run's specs on the saved record.
+private def start_extract_origin : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    while conn = origin.accept?
+      Gori::Proxy::Codec::Http1.read_head(conn)
+      body = %({"id":7,"code":"E42"})
+      conn << "HTTP/1.1 200 OK\r\nX-Request-Id: r1\r\nSet-Cookie: sid=abc\r\n" \
+              "Content-Length: #{body.bytesize}\r\nConnection: close\r\n\r\n" << body
+      conn.flush
+      conn.close
+    end
+  end
+  port
+end
+
+describe "MCP fuzz_start extractors (#1592)" do
+  it "carries every extractor's value, masks a cookie unless include_sensitive, and saves the specs" do
+    port = start_extract_origin
+    with_store do |store|
+      tools = tools_for(store)
+      base = {
+        "template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        "url"            => "http://127.0.0.1:#{port}",
+        "payloads"       => %([{"list":["a"]}]),
+        "allow_unscoped" => true,
+        "save_results"   => true,
+        "extract"        => %("code":"(\\w+)"),
+        "extractors"     => ["RID=header:x-request-id", "cookie:sid", "jsonpath:id"],
+      }
+      job = call_json(tools, "fuzz_start", base.to_json)["job_id"].as_s
+      wait_fuzz_done(tools, job)
+      row = call_json(tools, "fuzz_results", {job_id: job}.to_json)["results"][0]
+      row["extracted"].as_s.should eq("E42")
+      row["extracts"].as_h.transform_values(&.as_s).should eq({
+        "extracted" => "E42", "RID" => "r1", "sid" => "[REDACTED]", "id" => "7",
+      })
+
+      run_id = store.fuzz_runs.first.id
+      saved = call_json(tools, "get_fuzz_run", {run_id: run_id}.to_json)
+      saved["run"]["extractors"].as_a.map(&.as_s).should eq([%(extracted=regex:"code":"(\\w+)"), "RID=header:x-request-id", "cookie:sid", "jsonpath:id"])
+      saved["results"][0]["extracts"]["sid"].as_s.should eq("[REDACTED]")
+      open = call_json(tools, "get_fuzz_run", {run_id: run_id, include_sensitive: true}.to_json)
+      open["results"][0]["extracts"]["sid"].as_s.should eq("abc")
+
+      job = call_json(tools, "fuzz_start", base.merge({"include_sensitive" => true, "save_results" => false}).to_json)["job_id"].as_s
+      wait_fuzz_done(tools, job)
+      call_json(tools, "fuzz_results", {job_id: job}.to_json)["results"][0]["extracts"]["sid"].as_s.should eq("abc")
+    end
+  end
+
+  it "masks `extracted` too when extractor 0 is a cookie" do
+    port = start_extract_origin
+    with_store do |store|
+      tools = tools_for(store)
+      job = call_json(tools, "fuzz_start", {
+        "template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        "url"            => "http://127.0.0.1:#{port}",
+        "payloads"       => %([{"list":["a"]}]),
+        "allow_unscoped" => true,
+        "extractors"     => ["cookie:sid"],
+      }.to_json)["job_id"].as_s
+      wait_fuzz_done(tools, job)
+      call_json(tools, "fuzz_results", {job_id: job}.to_json)["results"][0]["extracted"].as_s.should eq("[REDACTED]")
+    end
+  end
+
+  it "refuses a request-side, malformed or oversized extractor list before sending" do
+    with_store do |store|
+      tools = tools_for(store)
+      base = {
+        "template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        "url"            => "http://127.0.0.1:1",
+        "payloads"       => %([{"list":["a"]}]),
+        "allow_unscoped" => true,
+      }
+      [["req:header:authorization"], ["bogus:x"], ["regex:x{2,1}"],
+       Array.new(Gori::DisplayColumns::MAX_COLUMNS + 1) { |i| "header:h#{i}" }].each do |specs|
+        r = tools.call("fuzz_start", JSON.parse(base.merge({"extractors" => specs}).to_json))
+        r.is_error.should be_true
+        r.error_code.should eq("INVALID_ARGUMENT")
+      end
+      store.fuzz_runs.should be_empty
+    end
+  end
+end

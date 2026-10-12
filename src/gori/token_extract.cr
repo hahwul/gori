@@ -3,6 +3,7 @@ require "./raw_json"
 require "./json_path"
 require "./repeater/engine"
 require "./proxy/codec/content_decode"
+require "./utf8"
 
 module Gori
   # How a token is pulled out of a response. Enum order is the display order in the
@@ -104,9 +105,14 @@ module Gori
     # which reads one response at a time rather than one per visible row.
     getter decode_max : Int32
 
+    # `decoded` / `text` may be SUPPLIED by a caller that already paid for them: the fuzz
+    # matcher decodes every response once for its own metrics, and N extractors over that
+    # response must not mean N more decodes (#1592). Otherwise both are computed on first use
+    # and memoised, so several body-scoped descriptors over one subject share one decode.
     def initialize(@head : Bytes, @body : Bytes?, @side : MessageSide,
                    @headers : Proxy::Codec::HeaderList? = nil,
-                   @decode_max : Int32 = Proxy::Codec::ContentDecode::MAX_OUT)
+                   @decode_max : Int32 = Proxy::Codec::ContentDecode::MAX_OUT,
+                   *, @decoded : Bytes? = nil, @text : String? = nil)
     end
 
     def self.response(head : Bytes?, body : Bytes?,
@@ -124,6 +130,22 @@ module Gori
     # every miss.
     def headers : Proxy::Codec::HeaderList
       @headers ||= parse_headers
+    end
+
+    # The decoded entity, byte-exact (gzip/br/zstd handled through the same seam
+    # `Fuzz::Matcher` uses, so the two cannot disagree). What every BYTE-scoped reading gets.
+    def decoded : Bytes
+      @decoded ||= begin
+        out, _ = Proxy::Codec::ContentDecode.decode(@head, @body, @decode_max)
+        out || @body || Bytes.empty
+      end
+    end
+
+    # The decoded entity read as TEXT, repaired so `Regex` and `JSON.parse` can run over it.
+    # `Utf8.text`, not `String#scrub`: byte-identical output, without charging every valid
+    # body a char-by-char walk (681µs against 81µs on 216 KB, see `Gori::Utf8`).
+    def text : String
+      @text ||= Gori::Utf8.text(decoded)
     end
 
     private def parse_headers : Proxy::Codec::HeaderList
@@ -321,9 +343,10 @@ module Gori
     def self.regex(subject : ExtractSubject, pattern : String, re : Regex? = nil) : String?
       return nil if pattern.empty?
       re ||= Gori::SafeRegexp.budgeted(pattern)
-      text = decoded_text(subject)
+      text = subject.text
       return nil if text.empty?
-      md = Gori::SafeRegexp.within_budget(pattern, text.bytesize) { re.match(text) }
+      # `match_at_byte_index`: `Regex#match` converts a char index first, a whole-body count.
+      md = Gori::SafeRegexp.within_budget(pattern, text.bytesize) { re.match_at_byte_index(text, 0) }
       return nil unless md
       md[1]? || md[0]
     rescue ArgumentError | Regex::Error
@@ -331,7 +354,7 @@ module Gori
     end
 
     def self.position(subject : ExtractSubject, a : Int32, b : Int32) : String?
-      body = decoded_bytes(subject)
+      body = subject.decoded
       lo = a.clamp(0, body.size)
       hi = b.clamp(0, body.size)
       return nil if hi <= lo
@@ -345,7 +368,7 @@ module Gori
       # and one asked for comes back as its own digits (#1200). A non-string leaf is the
       # value's own text (`raw_at`), never the tree written back out, which would quote such a
       # number inside a container.
-      text = decoded_text(subject)
+      text = subject.text
       node = JsonPath.resolve(RawJson.parse(text), steps)
       return nil unless node
       node.as_s? || (node.raw.nil? ? nil : JsonPath.raw_at(text, steps))
@@ -394,20 +417,6 @@ module Gori
       names
     end
 
-    # The decoded entity, byte-exact (gzip/br/zstd handled through the same seam
-    # `Fuzz::Matcher` uses, so the two cannot disagree). What every BYTE-scoped reading gets.
-    private def self.decoded_bytes(subject : ExtractSubject) : Bytes
-      decoded, _ = Proxy::Codec::ContentDecode.decode(subject.head, subject.body, subject.decode_max)
-      decoded || subject.body || Bytes.empty
-    end
-
-    # The decoded entity read as TEXT, repaired so `Regex` and `JSON.parse` can run over it.
-    # Only `text_only?` kinds come through here; `text_lossy?` is how a caller learns that the
-    # repair happened and that the value it just got is not the origin's bytes.
-    private def self.decoded_text(subject : ExtractSubject) : String
-      String.new(decoded_bytes(subject)).scrub
-    end
-
     # Whether reading this response's body as TEXT changes its bytes — i.e. the decoded entity
     # is not valid UTF-8, so a `text_only?` descriptor necessarily ran over a `#scrub`bed copy
     # in which every invalid byte became U+FFFD. The value such a descriptor returns is then
@@ -421,7 +430,7 @@ module Gori
     end
 
     def self.text_lossy?(subject : ExtractSubject) : Bool
-      !String.new(decoded_bytes(subject)).valid_encoding?
+      !String.new(subject.decoded).valid_encoding?
     end
   end
 end

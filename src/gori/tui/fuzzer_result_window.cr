@@ -120,6 +120,7 @@ module Gori::Tui
       result.payloads.each { |payload| bytes += payload.bytesize }
       bytes += result.error.try(&.bytesize) || 0
       bytes += result.extracted.try(&.bytesize) || 0
+      result.extracts.try &.each { |v| bytes += v.try(&.bytesize) || 0 }
       bytes += result.chain_error.try(&.bytesize) || 0
       bytes += result.grpc_message.try(&.bytesize) || 0
       bytes += result.request.try(&.size) || 0
@@ -131,7 +132,7 @@ module Gori::Tui
 
     def self.metrics_only(result : Fuzz::Result) : Fuzz::Result
       copy_metrics(result, result.payloads, result.error, result.extracted,
-        result.chain_error, result.grpc_message)
+        result.chain_error, result.grpc_message, result.extracts)
     end
 
     # Bound every variable-width scalar as one budget. Payload prefixes have priority because
@@ -152,8 +153,14 @@ module Gori::Tui
       error, remaining = take_optional(result.error, remaining)
       extracted, remaining = take_optional(result.extracted, remaining)
       chain_error, remaining = take_optional(result.chain_error, remaining)
-      grpc_message, _ = take_optional(result.grpc_message, remaining)
-      copy_metrics(result, payloads, error, extracted, chain_error, grpc_message)
+      grpc_message, remaining = take_optional(result.grpc_message, remaining)
+      extracts = result.extracts.try do |values|
+        values.map do |v|
+          cut, remaining = take_optional(v, remaining)
+          cut
+        end
+      end
+      copy_metrics(result, payloads, error, extracted, chain_error, grpc_message, extracts)
     end
 
     private def self.take_optional(value : String?, remaining : Int64) : {String?, Int64}
@@ -176,14 +183,14 @@ module Gori::Tui
 
     private def self.copy_metrics(result : Fuzz::Result, payloads : Array(String),
                                   error : String?, extracted : String?, chain_error : String?,
-                                  grpc_message : String?) : Fuzz::Result
+                                  grpc_message : String?, extracts : Array(String?)?) : Fuzz::Result
       Fuzz::Result.new(result.index, payloads, result.position, result.status,
         result.length, result.words, result.lines, result.duration_us, error,
         result.matched?, result.incomplete?, extracted, nil, nil, nil,
         result.retried?, chain_error, result.grpc_status, grpc_message,
         result.timed_out?, result.resent_count, nil,
         ws_close_code: result.ws_close_code, ws_frames_in: result.ws_frames_in,
-        shape: result.shape)
+        shape: result.shape, extracts: extracts, extractors: result.extractors)
     end
   end
 end

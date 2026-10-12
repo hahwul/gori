@@ -135,7 +135,7 @@ describe "fuzz over WebSocket" do
   it "extracts out of the inbound frames" do
     port, _ = start_ws_sweep_origin(1)
     matcher = Fuzz::Matcher.new(keep_bodies: :all)
-    matcher.extract = /id=(\w+)/
+    matcher.extractors = [Gori::Fuzz::Extractor.legacy("id=(\\w+)")]
     plan = ws_plan(port, [Fuzz::WsMessageSource.new(1, "§v§")], ["id=abc123"], matcher)
     results, _ = run_plan(plan)
     results[0].extracted.should eq("abc123")

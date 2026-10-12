@@ -790,6 +790,11 @@ module Gori
       r.register Verb::Definition.new(
         "fuzz.group", "Group by shape", "RESULTS: one row per distinct response shape (←/→ fold; Cycle sort orders the clusters)",
         Verb::Scope::Fuzzer, available: in_fuzzer, intent: :shape_groups, section: :results) { |ctx| ctx.fuzz_toggle_group; nil }
+      # Named extractors (#1592): History's Columns… list and form over this tab's own list,
+      # and the same Display… member, so one intent has one letter on both tabs.
+      r.register Verb::Definition.new(
+        "fuzz.extractors", "Extractors…", "RESULTS: add, reorder or remove the values pulled out of each response, one column each (a header, a JSON field, a regex capture)",
+        Verb::Scope::Fuzzer, available: in_fuzzer, intent: :columns, section: :results) { |ctx| ctx.fuzz_extractors_edit; nil }
       # Palette-only (#1282), on `⇧E`, the Export chord of Issues, Sitemap, Evidence and the
       # Sequencer; its menu letter was the export `E`, which freed `P` for Protocol… (#1274).
       # It was `⇧S`, which a typed menu `S` (Send selection to…, on every Fuzzer view) also

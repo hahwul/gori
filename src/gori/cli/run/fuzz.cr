@@ -82,6 +82,8 @@ module Gori
         keep = Fuzz::Keep::All
         stop_after_matches : Int32? = nil
         stop_specs = [] of String
+        extract_regex = nil.as(String?)
+        extractor_specs = [] of String
         matcher = Fuzz::Matcher.new(keep_bodies: :none)
         ws_overrides = [] of Fuzz::WsMessageSource
         ws_idle_ms : Int64? = nil
@@ -196,7 +198,8 @@ module Gori
           # ASCII, and `Name: value` is what an operator types.
           p.on("--mh=TEXT", "Match a case-insensitive substring of the response HEAD (e.g. 'x-powered-by: php')") { |v| matcher.match_header = v }
           p.on("--fh=TEXT", "Filter out a case-insensitive substring of the response HEAD") { |v| matcher.filter_header = v }
-          p.on("--extract=REGEX", "Grep-extract a value from each response (capture group 1)") { |v| matcher.extract = parse_regex(v) }
+          p.on("--extract=REGEX", "Grep-extract a value from each response (capture group 1)") { |v| extract_regex = v }
+          p.on("--extractor=SPEC", "Pull a named value out of each response: [LABEL=]kind:selector — e.g. RID=header:x-request-id, jsonpath:data.id, regex:code=(\\d+) (repeatable; one column each)") { |v| extractor_specs << v }
           # Stop the run once the matchers have hit N times — N=1 ends it on the first hit, the
           # shape a credential / IDOR sweep wants. The run lands `condition_met`, not `stopped`,
           # and exits 0: the condition was the goal, and in-flight requests finish (see
@@ -311,6 +314,9 @@ module Gori
         # The separate stop condition, built from every --stop-on and attached to the run's
         # matcher BEFORE spec_error runs — so a stop-condition typo is refused by the same
         # validator, and it is evaluated on the one decode the matcher already pays for.
+        extractors = Fuzz::Extractor.parse(extractor_specs, extract_regex)
+        abort "gori run fuzz: #{extractors}" if extractors.is_a?(String)
+        matcher.extractors = extractors
         unless stop_specs.empty?
           cond = Fuzz::Matcher.new
           stop_specs.each { |spec| parse_stop_on(spec, cond) }
@@ -491,6 +497,7 @@ module Gori
               "#{origin.scheme}://#{origin.host}:#{origin.port}", saved_mode, total,
               http2: http2, sni: sni, tls_preset: plan.tls_preset,
               websocket: plan.websocket?, surface: "cli", keep: keep.label,
+              extractors: Fuzz::Extractor.to_json(extractors),
               source_ref: flow_id.try { |id| "flow:#{id}" } ||
                           repeater_id.try { |id| "repeater:#{id}" }))
           end

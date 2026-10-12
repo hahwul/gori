@@ -136,8 +136,11 @@ module Gori::Tui
       OverlayKind::Column
     end
 
+    # The Fuzzer's extractor form (#1592) is this one under another heading.
+    property heading = "HISTORY COLUMN"
+
     def title : String
-      "HISTORY COLUMN"
+      @heading
     end
 
     def text_fields : Array(TextField)

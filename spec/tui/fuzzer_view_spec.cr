@@ -2284,3 +2284,63 @@ describe "Gori::Tui::FuzzerView detail notes" do
     styled.size.should eq(plain.size)
   end
 end
+
+private F_EX_LIST = Gori::Fuzz::Extractor.parse(["RID=header:x-request-id", "cookie:sid"]).as(Array(Gori::Fuzz::Extractor))
+
+# Named extractors (#1592): the tab's list survives its session config, an old `extract` regex
+# comes back as extractor 0, and a reopened run draws one column per extractor it ran with.
+describe "FuzzerView extractors" do
+  it "round-trips the extractor list through the session config and feeds the matcher" do
+    src = loaded_fuzzer
+    src.extractor_columns = [
+      Gori::Store::DisplayColumn.new(0_i64, 0, "RID", Gori::MessageSide::Response, Gori::ExtractKind::Header, "x-request-id", width: 20),
+      Gori::Store::DisplayColumn.new(0_i64, 1, "data.id", Gori::MessageSide::Response, Gori::ExtractKind::JsonPath, "data.id"),
+    ]
+    dst = FuzzerView.new
+    dst.duplicate_from(src)
+    dst.extractor_columns.map(&.spec).should eq(src.extractor_columns.map(&.spec))
+    dst.extractor_columns[0].width.should eq(20)
+    dst.extractors.map(&.label).should eq(["RID", "data.id"])
+    dst.move_extractor(0, 1).should be_true
+    dst.extractors.map(&.label).should eq(["data.id", "RID"])
+    dst.delete_extractor(0).should be_true
+    dst.extractors.map(&.label).should eq(["RID"])
+    # Staged, not live: the matcher a run in flight holds is untouched until the next build.
+    dst.matcher.extractors.should be_empty
+  end
+
+  it "records the list a run started with on its save, not the one edited since" do
+    view = loaded_fuzzer
+    view.matcher.extractors = F_EX_LIST
+    view.begin_run(1_i64)
+    view.extractor_columns = [] of Gori::Store::DisplayColumn
+    meta = view.saved_run_meta(7_i64)
+    Gori::Fuzz::Extractor.of_run(meta.extractors).should eq(F_EX_LIST)
+  end
+
+  it "restores a pre-#1592 `extract` regex as extractor 0, `extracted`" do
+    view = FuzzerView.new
+    view.restore(Gori::Store::FuzzSessionRecord.new(1_i64, "http://h", "GET / HTTP/1.1\r\n\r\n", false, nil,
+      %({"extract":"id=(\\\\d+)"}), nil, 0, nil))
+    view.extractor_columns.map(&.label).should eq(["extracted"])
+    view.extractors.should eq([Gori::Fuzz::Extractor.legacy("id=(\\d+)")])
+  end
+
+  it "draws a reopened run's three extractor columns, labelled by the run" do
+    view = loaded_fuzzer
+    run = Gori::Store::FuzzRunRecord.new(9_i64, 2_i64, 3_i64, 4_i64, "https://h", "sniper", 1_i64,
+      1_i64, 1_i64, 0_i64, "done", snapshot_version: 1,
+      extractors: %(["RID=header:x-request-id","jsonpath:data.id","regex:code=(\\\\d+)"]))
+    rec = Gori::Store::FuzzResultRecord.new(1_i64, 9_i64, 0_i64, %(["p"]), 200, 10_i64, 1, 1, 1000_i64,
+      nil, true, "r-7", extracts: %(["r-7","42",null]))
+    view.load_saved_run(run, [rec])
+    b = MemoryBackend.new(200, 30)
+    view.render(Screen.new(b), Rect.new(0, 0, 200, 30))
+    grid = (0...30).map { |y| b.row(y) }.join("\n")
+    grid.should contain("RID")
+    grid.should contain("DATA.ID")
+    grid.should contain("CODE=(\\D+)")
+    grid.should contain("r-7")
+    grid.should contain("42")
+  end
+end

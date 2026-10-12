@@ -116,4 +116,71 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     history_controller.reload_columns
     true
   end
+
+  # --- the Fuzzer's named extractors (#1592) ---
+  #
+  # The same list card and form over the focused fuzz session's own list rather than the
+  # project's History columns. An edit lands on the session (saved with its config) and applies
+  # to the NEXT run; rows already on screen keep the extractors they ran with.
+  def fuzz_extractors_edit : Nil
+    open_fuzz_extractors_at(nil)
+  end
+
+  private def open_fuzz_extractors_at(cursor : Int32?) : Nil
+    return unless v = fuzzer_controller.current_view
+    list = ColumnsOverlay.new(v.extractor_columns, cursor)
+    list.heading = "FUZZ EXTRACTORS"
+    # By the card's SELECTED index, which mirrors the view's order: a column's `position` goes
+    # stale in the card's own copy after its first move.
+    list.on_delete = ->(_col : Gori::Store::DisplayColumn) { v.delete_extractor(list.selected) }
+    list.on_move = ->(_col : Gori::Store::DisplayColumn, dir : Int32) { v.move_extractor(list.selected, dir) }
+    list.on_close = -> {
+      if pending = list.pending
+        open_fuzz_extractor_form(v, pending, list.selected)
+      end
+    }
+    open_overlay(list)
+  end
+
+  private def open_fuzz_extractor_form(v : FuzzerView, pending : ColumnsOverlay::Pending, cursor : Int32) : Nil
+    idx = pending.index
+    editing = idx ? v.extractor_columns[idx]? : nil
+    form = editing ? ColumnOverlay.editing(editing) : ColumnOverlay.adding
+    form.heading = "FUZZ EXTRACTOR"
+    form.on_preview = ->(f : ColumnOverlay) { preview_fuzz_extractor(v, f) }
+    form.on_commit = -> { save_fuzz_extractor(v, form, editing && idx) }
+    form.on_close = -> { open_fuzz_extractors_at(cursor) }
+    open_overlay(form)
+  end
+
+  # What the descriptor pulls out of the selected result's retained response, or nil when there
+  # is no row or its bytes were not kept.
+  private def preview_fuzz_extractor(v : FuzzerView, form : ColumnOverlay) : String?
+    r = v.selected_result
+    return nil unless r && (r.head || r.body)
+    loc = Gori::TokenLoc.new(form.kind, form.selector, form.pos_start, form.pos_end)
+    value = Gori::TokenExtract.extract(Gori::ExtractSubject.response(r.head, r.body), loc)
+    (value.nil? || value.empty?) ? "no match in result ##{r.index}" : Gori::DisplayColumns.display_safe(value)
+  end
+
+  private def save_fuzz_extractor(v : FuzzerView, form : ColumnOverlay, idx : Int32?) : Bool
+    if reason = form.invalid_reason
+      @toast = "extractor not saved — #{reason}"
+      return false
+    end
+    col = Gori::Store::DisplayColumn.new(0_i64, 0, form.label, form.side, form.kind, form.selector,
+      form.pos_start, form.pos_end, form.width)
+    cols = v.extractor_columns.dup
+    # The index the form opened on, unless a peer's sync shrank the list meanwhile.
+    (i = idx) && i < cols.size ? (cols[i] = col) : (cols << col)
+    # The CLI's and MCP's parser over the whole list as it would be stored: the same refusal for
+    # the request side, the ceiling, and a label the spec grammar cannot read back.
+    if (reason = Fuzz::Extractor.parse(cols.map(&.spec))).is_a?(String)
+      @toast = "extractor not saved — #{reason}"
+      return false
+    end
+    v.extractor_columns = cols
+    @toast = "#{idx ? "updated" : "added"} extractor #{form.label} — applies to the next run"
+    true
+  end
 end

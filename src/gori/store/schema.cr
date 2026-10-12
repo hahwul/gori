@@ -2227,10 +2227,17 @@ module Gori
         "ALTER TABLE events ADD COLUMN actor_label TEXT",
       ]
 
+      # V48 — the Fuzzer's named extractors (#1592): the run's specs, in column order, and each
+      # result's values, both JSON arrays. `extracted` is still written, as extractor 0.
+      V48 = [
+        "ALTER TABLE fuzz_runs ADD COLUMN extractors TEXT",
+        "ALTER TABLE fuzz_results ADD COLUMN extracts TEXT",
+      ]
+
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
                     V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31, V32, V33,
                     V34, V35, V36, V37, V38, V39, V40, V41, V42, V43, V44, V45, V46,
-                    V47]
+                    V47, V48]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|
@@ -2301,14 +2308,14 @@ module Gori
       end
 
       # The statements one MIGRATIONS entry actually runs. V39–V41 and V46 do their table move in code
-      # first and leave only their seeds; V42 and V47 are skipped when their column is already there.
+      # first and leave only their seeds; V42, V47 and V48 are skipped when their column is already there.
       private def self.run_statements(conn : DB::Connection, statements : Array(String)) : Array(String)
         if statements.same?(V39)
           rebuild_v39(conn) unless autoincrement_in_place(conn.as(SQLite3::Connection))
           V39_SEED
         elsif statements.same?(V40)
           move_to_autoincrement(conn.as(SQLite3::Connection), ID_REBUILDS, 40)
-          V40_AFTER
+          v40_after(conn)
         elsif statements.same?(V41)
           move_to_autoincrement(conn.as(SQLite3::Connection), V41_REBUILDS, 41)
           V41_AFTER
@@ -2316,7 +2323,8 @@ module Gori
           move_to_autoincrement(conn.as(SQLite3::Connection), V46_REBUILDS, 46)
           V46_AFTER
         elsif (statements.same?(V42) && column?(conn, "fuzz_results", "shape")) ||
-              (statements.same?(V47) && column?(conn, "events", "actor_label"))
+              (statements.same?(V47) && column?(conn, "events", "actor_label")) ||
+              (statements.same?(V48) && column?(conn, "fuzz_results", "extracts"))
           # SQLite has no `ADD COLUMN IF NOT EXISTS`, and every migration since V36 is
           # replay-safe: a project whose `user_version` was wound back (the index specs rebuild
           # an older shape that way) already holds the column.
@@ -2411,6 +2419,20 @@ module Gori
       # ROWID tail, where SQLite refuses AUTOINCREMENT outright. ADD COLUMNs
       # append plain declarations, so every table any gori wrote passes; anything else, such as
       # a crafted archive, takes the verified rebuild.
+      # A wound-back project skipped the move and kept its index (see `move_to_autoincrement`).
+      private def self.v40_after(conn : DB::Connection) : Array(String)
+        V40_AFTER.reject { |sql| (name = sql[/\ACREATE INDEX (\w+)/, 1]?) && index?(conn, name) }
+      end
+
+      private def self.index?(conn : DB::Connection, name : String) : Bool
+        !conn.query_one?("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?", name, as: Int64).nil?
+      end
+
+      private def self.autoincrement?(conn : DB::Connection, table : String) : Bool
+        sql = conn.query_one?("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", table, as: String)
+        !sql.nil? && sql.matches?(/\bAUTOINCREMENT\b/i)
+      end
+
       def self.in_place_eligible?(conn : DB::Connection, table : String) : Bool
         sql = conn.query_one?("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", table, as: String)
         return false if sql.nil? || sql.includes?("--") || sql.includes?("/*")
@@ -2424,9 +2446,13 @@ module Gori
       # were rebuilt.
       def self.move_to_autoincrement(conn : SQLite3::Connection, rebuilds : Array(TableRebuild),
                                      version : Int32) : Array(String)
-        eligible = rebuilds.select { |r| in_place_eligible?(conn, r.table) }
+        # A table already on AUTOINCREMENT has nothing to move. It is one a later migration may
+        # have widened (a project whose `user_version` was wound back), so the column-exact
+        # rebuild would refuse it rather than skip it.
+        pending = rebuilds.reject { |r| autoincrement?(conn, r.table) }
+        eligible = pending.select { |r| in_place_eligible?(conn, r.table) }
         eligible.clear unless autoincrement_in_place(conn, eligible.map(&.table))
-        rebuild = rebuilds - eligible
+        rebuild = pending - eligible
         return [] of String if rebuild.empty?
         begin
           rebuild.each { |r| r.copy.each { |sql| conn.exec(sql) } }

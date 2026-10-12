@@ -27,7 +27,7 @@ end
 
 # Every member of the two toggle families answers with a state wherever it is live, except
 # the ones that open something rather than flip it.
-private STATELESS_MEMBERS = {"history.columns"}
+private STATELESS_MEMBERS = {"history.columns", "fuzz.extractors"}
 
 describe "toggle-family row state (#1274 WP9)" do
   it "reads the Repeater's transport and view flags, and nothing for a non-member" do

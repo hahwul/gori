@@ -17,6 +17,13 @@ module Gori
       @[Tool("fuzz_start", gated: true, agent_action: true, env_refresh: true,
         requires: ["fuzz_status", "fuzz_results", "fuzz_stop"], permission: "send")]
       private def fuzz_start(h) : Result
+        # Refused before anything is built or sent, with the code a malformed argument gets.
+        extractors = fuzz_extractors_arg(h)
+        return err(extractors, "INVALID_ARGUMENT", field: "extractors") if extractors.is_a?(String)
+        launch_fuzz(h, extractors)
+      end
+
+      private def launch_fuzz(h, extractors : Array(Fuzz::Extractor)) : Result
         ob = outbound(bool_arg(h, "allow_unscoped", false))
         save_results = bool_arg(h, "save_results", false)
         engine, origin, total, http2, shadowed_marks, ws_frames, ws_ignored, grpc, tls_preset, mode_label, effective_sni, effective_max_requests, sets_warn, payload_reports, request_target =
@@ -42,6 +49,7 @@ module Gori
           effective_max_requests, Time.utc.to_unix_ms)
         fjob = FuzzJob.new(id, total, engine, fuzz_record_policy(h), origin, http2, audit, @db_path)
         fjob.websocket = !ws_frames.nil?
+        fjob.include_sensitive = bool_arg(h, "include_sensitive", false)
         # https only: a plaintext sweep sends no ClientHello, and naming a preset on one would
         # tell an agent its A/B happened when nothing about the handshake changed. Settled
         # BEFORE the saved-run row below reads it, so `get_fuzz_run` cannot report the preset
@@ -52,7 +60,8 @@ module Gori
             Fuzz::SavedRunMeta.new(nil, audit.target, mode_label, total,
               created_at: audit.started_at_ms * 1000_i64, http2: http2,
               sni: effective_sni, tls_preset: fjob.tls_preset, websocket: fjob.websocket?,
-              surface: "mcp", source_ref: id, keep: fuzz_keep(h).label))
+              surface: "mcp", source_ref: id, keep: fuzz_keep(h).label,
+              extractors: Fuzz::Extractor.to_json(extractors)))
         end
         # Re-read rather than plumbed back out of `build_fuzz_job`: it is a REPORTING input
         # (it words `grpc_stale_prefix_reason`), read off the same arg and the same default
@@ -506,7 +515,7 @@ module Gori
           j.object do
             j.field "results" do
               j.array do
-                page.each_with_index { |pos, k| Serialize.fuzz_result(j, rows[pos], page_flow_ids[k]) }
+                page.each_with_index { |pos, k| Serialize.fuzz_result(j, rows[pos], page_flow_ids[k], fjob.include_sensitive?) }
               end
             end
             emit_page(j, pg, returned)
@@ -1282,8 +1291,18 @@ module Gori
           m.filter_header = c[:header]
           m.filter_regex = fuzz_regex(c[:regex], "filter")
         end
-        m.extract = fuzz_regex(str(h, "extract"), "extract")
+        extractors = fuzz_extractors_arg(h)
+        raise FuzzArgError.new(extractors) if extractors.is_a?(String)
+        m.extractors = extractors
         m
+      end
+
+      # `extract` (the old single regex, extractor 0) plus `extractors` (#1592), through the
+      # parser `gori run fuzz` and the TUI share.
+      private def fuzz_extractors_arg(h) : Array(Fuzz::Extractor) | String
+        Fuzz::Extractor.parse(str_list(h, "extractors"), str(h, "extract"))
+      rescue ex : Gori::Error
+        ex.message || "invalid extractors"
       end
 
       # The `stop_on` object (issue #1240): `{after_matches, match:{…}, filter:{…}}`. `match` and
@@ -1527,7 +1546,9 @@ module Gori
           s.field "no_encode", boolprop("send payloads into query-string / form-body positions RAW, turning off their default percent-encoding (other positions are raw either way). For a payload that IS the raw byte (a bare & for parameter pollution, a CRLF probe), or that is ALREADY an escape aimed at the origin's decoder (%00, %c0%af, %2e%2e%2f), which the default would encode again (%00 -> %2500).")
           s.field "match", jsonprop(%(keep only responses matching, e.g. {"status":"200,500-599","size":">1000","regex":"err"} — object or JSON string. "regex" sees only the BODY; "header" is a case-insensitive substring of the response HEAD ("set-cookie"). "time" is the round trip in ms ({"time":">=5000"}), the only evidence of a time-based blind injection; a TIMED-OUT send matches "time" and nothing else. "grpc" matches the grpc-status trailer ("7", ">0", "1-16"; native h2 or grpc-web): a gRPC HTTP status is 200 granted or denied, so "status" cannot tell them apart. Rows carry grpc_status/grpc_status_name/grpc_message.))
           s.field "filter", jsonprop(%(drop responses matching, same shape as match — object or JSON string))
-          s.field "extract", strprop("regex; grep a value (capture group 1) from each response")
+          s.field "extract", strprop("regex; grep a value (capture group 1) from each response, as `extracted`")
+          s.field "extractors", strarrprop(%(named values pulled out of each response, at most #{Gori::DisplayColumns::MAX_COLUMNS}: [LABEL=]kind:selector, kind cookie|header|regex|position|jsonpath, e.g. "RID=header:x-request-id", "jsonpath:data.id", "regex:code=(\\d+)". Response side only. Rows gain extracts {label: value}, "" for a miss))
+          s.field "include_sensitive", boolprop("unmask cookie / credential-header extractor values in this job's rows (default false: [REDACTED])")
           s.field "concurrency", intprop("parallel requests (default 20, max #{FUZZ_MAX_CONCURRENCY})")
           s.field "rate", numprop("requests/sec cap, fractional allowed (0 = unlimited; 0.5 = one request every two seconds)")
           s.field "timeout_ms", intprop("per-request connect + idle (read/write) timeout in milliseconds")

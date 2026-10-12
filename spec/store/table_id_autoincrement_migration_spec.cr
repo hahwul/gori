@@ -95,11 +95,17 @@ end
 
 # Everything a reader can observe of a table, read raw: every column of every row by `quote()` (a
 # BLOB compares byte for byte), the column declarations, and each index with its definition.
+# Columns a LATER migration adds to one of these tables, which the post-upgrade snapshot leaves
+# out: what V40 must keep is the table it was handed.
+private ADDED_AFTER_V40 = {"fuzz_runs" => {"extractors"}} # V48 (#1592)
+
 private def snapshot(c : DB::Connection, table : String) : {Array(String), Array(String), Array(String)}
-  cols = c.query_all("SELECT name FROM pragma_table_info(?) ORDER BY cid", table, as: String)
+  later = ADDED_AFTER_V40[table]?.try(&.to_a) || [] of String
+  cols = c.query_all("SELECT name FROM pragma_table_info(?) ORDER BY cid", table, as: String) - later
   rows = c.query_all("SELECT #{cols.join(" || '|' || ") { |col| "quote(#{col})" }} FROM #{table} ORDER BY id", as: String)
-  decl = c.query_all("SELECT cid || name || type || \"notnull\" || quote(dflt_value) || pk " \
-                     "FROM pragma_table_info(?) ORDER BY cid", table, as: String)
+  decl = c.query_all("SELECT name, cid || name || type || \"notnull\" || quote(dflt_value) || pk " \
+                     "FROM pragma_table_info(?) ORDER BY cid", table, as: {String, String})
+    .reject { |(name, _)| later.includes?(name) }.map(&.[1])
   indexes = c.query_all("SELECT l.name || ' unique=' || l.\"unique\" || ' ' || l.origin || ' ' || " \
                         "COALESCE((SELECT sql FROM sqlite_master m WHERE m.name = l.name), '') || ' (' || " \
                         "(SELECT group_concat(i.name) FROM pragma_index_info(l.name) i) || ')' " \

@@ -458,6 +458,10 @@ private class FakeContext < ExecContext
     @calls << :fuzz_toggle_group
   end
 
+  def fuzz_extractors_edit : Nil
+    @calls << :fuzz_extractors_edit
+  end
+
   def fuzz_save_results : Nil
     @calls << :fuzz_save_results
   end

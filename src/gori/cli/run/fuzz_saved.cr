@@ -140,12 +140,13 @@ module Gori
                                            rows : Array(Store::FuzzResultRecord), offset : Int32,
                                            matched_only : Bool, format : Symbol) : Nil
         total = store.fuzz_result_count(run.id, matched_only)
+        ex = Fuzz::Extractor.of_run(run.extractors)
         case format
         when :json
           output = JSON.build do |j|
             j.object do
               j.field("run") { fuzz_saved_run_json(j, run, store.fuzz_result_count(run.id)) }
-              j.field("results") { j.array { rows.each { |row| MCP::Serialize.fuzz_result(j, Fuzz::Persistence.result(row)) } } }
+              j.field("results") { j.array { rows.each { |row| MCP::Serialize.fuzz_result(j, Fuzz::Persistence.result(row, ex), include_sensitive: true) } } }
               j.field "offset", offset
               j.field "returned", rows.size
               j.field "total_available", total
@@ -154,10 +155,10 @@ module Gori
           end
           puts output
         when :jsonl
-          rows.each { |row| puts CLI::Output.fuzz_row_json(Fuzz::Persistence.result(row)) }
+          rows.each { |row| puts CLI::Output.fuzz_row_json(Fuzz::Persistence.result(row, ex)) }
         else
           puts fuzz_saved_run_header(run)
-          rows.each { |row| puts CLI::Output.fuzz_row_text(Fuzz::Persistence.result(row)) }
+          rows.each { |row| puts CLI::Output.fuzz_row_text(Fuzz::Persistence.result(row, ex)) }
           STDERR.puts "showing #{offset + 1}-#{offset + rows.size} of #{total}" unless rows.empty?
         end
       end
@@ -177,7 +178,7 @@ module Gori
                                                 order : Fuzz::Clusters::Order, matched_only : Bool,
                                                 limit : Int32, offset : Int32, format : Symbol,
                                                 io : IO = STDOUT, err : IO = STDERR) : Nil
-        clusters = Fuzz::Persistence.clusters(store, run.id)
+        clusters = Fuzz::Persistence.clusters(store, run.id, Fuzz::Extractor.of_run(run.extractors))
         list = clusters.sorted(order, matched_only)
         page = list[offset, limit]? || [] of Fuzz::Clusters::Cluster
         scrub = ->(t : String) { t.scrub }
@@ -187,7 +188,7 @@ module Gori
             j.object do
               j.field("run") { fuzz_saved_run_json(j, run, store.fuzz_result_count(run.id)) }
               j.field("clusters") do
-                j.array { page.each { |c| Fuzz::Clusters.emit(j, c, scrub, matched_only) { |rep| MCP::Serialize.fuzz_result(j, rep) } } }
+                j.array { page.each { |c| Fuzz::Clusters.emit(j, c, scrub, matched_only) { |rep| MCP::Serialize.fuzz_result(j, rep, include_sensitive: true) } } }
               end
               j.field "cluster_order", order.label
               j.field "offset", offset
@@ -199,7 +200,7 @@ module Gori
           end)
         when :jsonl
           page.each do |c|
-            io.puts(JSON.build { |j| Fuzz::Clusters.emit(j, c, scrub, matched_only) { |rep| MCP::Serialize.fuzz_result(j, rep) } })
+            io.puts(JSON.build { |j| Fuzz::Clusters.emit(j, c, scrub, matched_only) { |rep| MCP::Serialize.fuzz_result(j, rep, include_sensitive: true) } })
           end
         else
           io.puts fuzz_saved_run_header(run)
@@ -219,16 +220,17 @@ module Gori
       private def self.show_saved_fuzz_cluster_members(store : Store, run : Store::FuzzRunRecord, id : Int64,
                                                        matched_only : Bool, limit : Int32, offset : Int32,
                                                        format : Symbol, io : IO = STDOUT, err : IO = STDERR) : Nil
-        clusters, records, seen = Fuzz::Persistence.cluster_members(store, run.id, id, matched_only, offset, limit)
-        rows = records.map { |rec| Fuzz::Persistence.result(rec) }
+        ex = Fuzz::Extractor.of_run(run.extractors)
+        clusters, records, seen = Fuzz::Persistence.cluster_members(store, run.id, id, matched_only, offset, limit, ex)
+        rows = records.map { |rec| Fuzz::Persistence.result(rec, ex) }
         cluster = clusters[id]? || abort "gori run fuzz show: run ##{run.id} has no cluster #{Fuzz::Shape.hex(id)}"
         case format
         when :json
           io.puts(JSON.build do |j|
             j.object do
               j.field("run") { fuzz_saved_run_json(j, run, store.fuzz_result_count(run.id)) }
-              j.field("cluster") { Fuzz::Clusters.emit(j, cluster, ->(t : String) { t.scrub }, matched_only) { |rep| MCP::Serialize.fuzz_result(j, rep) } }
-              j.field("results") { j.array { rows.each { |r| MCP::Serialize.fuzz_result(j, r) } } }
+              j.field("cluster") { Fuzz::Clusters.emit(j, cluster, ->(t : String) { t.scrub }, matched_only) { |rep| MCP::Serialize.fuzz_result(j, rep, include_sensitive: true) } }
+              j.field("results") { j.array { rows.each { |r| MCP::Serialize.fuzz_result(j, r, include_sensitive: true) } } }
               j.field "offset", offset
               j.field "returned", rows.size
               j.field "total_available", seen
@@ -261,6 +263,7 @@ module Gori
                                                      row : Store::FuzzResultRecord,
                                                      format : Symbol) : Nil
         abort "gori run fuzz show: RESULT_INDEX detail supports text or json" if format == :jsonl
+        ex = Fuzz::Extractor.of_run(run.extractors)
         if format == :json
           output = JSON.build do |j|
             j.object do
@@ -268,7 +271,7 @@ module Gori
               # The run's stop row (issue #1270), so a caller holding one result can tell
               # whether it is the one the run ended on without a second `fuzz show`.
               j.field "stop_index", run.stop_idx
-              j.field("result") { MCP::Serialize.fuzz_result(j, Fuzz::Persistence.result(row)) }
+              j.field("result") { MCP::Serialize.fuzz_result(j, Fuzz::Persistence.result(row, ex), include_sensitive: true) }
               fuzz_saved_bytes_json(j, "request", row.request)
               fuzz_saved_bytes_json(j, "wire", row.wire)
               fuzz_saved_bytes_json(j, "response_head", row.response_head)
@@ -277,7 +280,7 @@ module Gori
           end
           puts output
         else
-          puts CLI::Output.fuzz_row_text(Fuzz::Persistence.result(row))
+          puts CLI::Output.fuzz_row_text(Fuzz::Persistence.result(row, ex))
           puts "(the result run ##{run.id}'s stop_on tripped on)" if run.stop_idx == row.idx
           puts "\n── REQUEST ──"
           puts CLI::Output.term_safe_multiline(row.request.try { |b| String.new(b) } || "(not retained)")
@@ -338,6 +341,10 @@ module Gori
           # The result this run's `stop_on` tripped on (issue #1270), as MCP emits it: the row's
           # `index`, the RESULT_INDEX `fuzz show` takes. Null when not recorded.
           j.field "stop_index", run.stop_idx
+          # The run's named extractors (#1592), as MCP's `saved_fuzz_run` emits them.
+          if specs = run.extractors
+            j.field("extractors") { j.array { Fuzz::Extractor.specs_of(specs).each { |sp| j.string sp.scrub } } }
+          end
         end
       end
 

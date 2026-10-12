@@ -252,7 +252,7 @@ module Gori
         SavedRunMeta.new(nil, meta.target, meta.mode, meta.total,
           created_at: meta.created_at, http2: meta.http2, sni: meta.sni,
           tls_preset: meta.tls_preset, websocket: meta.websocket, surface: meta.surface,
-          source_ref: meta.source_ref, keep: meta.keep)
+          source_ref: meta.source_ref, keep: meta.keep, extractors: meta.extractors)
       end
     end
   end

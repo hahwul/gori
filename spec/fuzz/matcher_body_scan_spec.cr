@@ -85,7 +85,7 @@ describe "Fuzz::Matcher body scan" do
       body = Bytes[0x69, 0x64, 0x3d, 0x37, 0x37, 0x0a, 0xff, 0xfe, 0x0a] # "id=77\n\xff\xfe\n"
       r = build_for(body) do |m|
         m.match_regex = Regex.new("id=[0-9]+")
-        m.extract = Regex.new("id=([0-9]+)")
+        m.extractors = [Gori::Fuzz::Extractor.legacy("id=([0-9]+)")]
       end
       r.matched?.should be_true
       r.extracted.should eq("77")
@@ -99,8 +99,8 @@ describe "Fuzz::Matcher body scan" do
 
     it "extracts group 1, falling back to the whole match when the pattern has no group" do
       body = "token: abc123\n".to_slice
-      build_for(body, &.extract=(Regex.new("token: ([a-z0-9]+)"))).extracted.should eq("abc123")
-      build_for(body, &.extract=(Regex.new("[a-z0-9]{6}"))).extracted.should eq("abc123")
+      build_for(body, &.extractors=([Gori::Fuzz::Extractor.legacy("token: ([a-z0-9]+)")])).extracted.should eq("abc123")
+      build_for(body, &.extractors=([Gori::Fuzz::Extractor.legacy("[a-z0-9]{6}")])).extracted.should eq("abc123")
     end
   end
 end
@@ -117,5 +117,54 @@ describe Gori::Utf8 do
   it "hands back the SAME String object when it is already valid" do
     s = "already fine"
     Gori::Utf8.subject(s).should be(s) # no allocation on the common path
+  end
+end
+
+describe "Fuzz::Matcher named extractors (#1592)" do
+  head = "HTTP/1.1 200 OK\r\nX-Request-Id: r-42\r\nSet-Cookie: sid=s3cr3t\r\nContent-Type: application/json\r\n\r\n"
+
+  it "stores one value per extractor, in order, with `extracted` the first" do
+    list = F::Extractor.parse(["RID=header:x-request-id", "jsonpath:data.id", "regex:code=(\\d+)", "cookie:nope"])
+    m = F::Matcher.new(keep_bodies: :none)
+    m.extractors = list.as(Array(F::Extractor))
+    raw = Gori::Repeater::Result.new(head.to_slice, %({"data":{"id":7},"msg":"code=404"}).to_slice, nil, 1000_i64, nil)
+    r = m.build(F::Job.new(0_i64, ["p"], 0, "GET / HTTP/1.1\r\n\r\n".to_slice), raw)
+    r.extracts.should eq(["r-42", "7", "404", nil])
+    r.extracted.should eq("r-42")
+    r.extract_pairs.map { |(e, v)| {e.label, v} }.should eq([{"RID", "r-42"}, {"data.id", "7"}, {"code=(\\d+)", "404"}, {"nope", nil}])
+  end
+
+  it "answers a runaway regex with a nil cell and leaves the other extractors and the row alone" do
+    list = F::Extractor.parse(["regex:(a+)+$", "header:x-request-id"]).as(Array(F::Extractor))
+    m = F::Matcher.new(keep_bodies: :none)
+    m.extractors = list
+    raw = Gori::Repeater::Result.new(head.to_slice, ("a" * 60 + "!").to_slice, nil, 1000_i64, nil)
+    r = m.build(F::Job.new(0_i64, ["p"], 0, "GET / HTTP/1.1\r\n\r\n".to_slice), raw)
+    r.extracts.should eq([nil, "r-42"])
+    r.length.should eq(61)
+  end
+
+  it "reads the body the matcher decoded instead of decoding again" do
+    gz = IO::Memory.new
+    Compress::Gzip::Writer.open(gz) { |w| w << %({"id":"z9"}) }
+    gz_head = "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\n\r\n"
+    m = F::Matcher.new(keep_bodies: :none)
+    m.extractors = F::Extractor.parse(["jsonpath:id", "regex:\"id\":\"(\\w+)", "position:2:4"]).as(Array(F::Extractor))
+    raw = Gori::Repeater::Result.new(gz_head.to_slice, gz.to_slice, nil, 1000_i64, nil)
+    m.build(F::Job.new(0_i64, ["p"], 0, "GET / HTTP/1.1\r\n\r\n".to_slice), raw).extracts.should eq(["z9", "z9", "id"])
+  end
+
+  it "keeps the legacy `--extract` capture whole and cuts a named one to a cell" do
+    long = "t=#{"x" * 2000}"
+    m = F::Matcher.new(keep_bodies: :none)
+    m.extractors = F::Extractor.parse(["regex:t=(x+)"], "t=(x+)").as(Array(F::Extractor))
+    raw = Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, long.to_slice, nil, 1000_i64, nil)
+    values = m.build(F::Job.new(0_i64, ["p"], 0, "GET / HTTP/1.1\r\n\r\n".to_slice), raw).extracts.not_nil!
+    values[0].not_nil!.size.should eq(2000)
+    values[1].not_nil!.size.should eq(Gori::DisplayColumns::CELL_MAX + 1)
+  end
+
+  it "has no extracts when the run names no extractor" do
+    build_for("x".to_slice) { }.extracts.should be_nil
   end
 end

@@ -33,4 +33,5 @@ abstract class Gori::Verb::ExecContext
   abstract def fuzz_toggle_matched : Nil       # RESULTS: show only the rows the matchers hit
   abstract def fuzz_toggle_dist : Nil          # RESULTS: show/hide the status/length distribution sidebar
   abstract def fuzz_toggle_group : Nil         # RESULTS: group rows by response shape (#1351)
+  abstract def fuzz_extractors_edit : Nil      # open the named-extractor list (#1592)
 end
