@@ -473,6 +473,7 @@ module Gori
             j.field "flow_id", options.flow_id
             j.field "repeater_id", options.repeater_id
             j.field "part", options.part
+            j.field "origin", options.request? ? "client" : "target" # as `emit_body` labels it (#1586)
             j.field "requested_offset", requested
             j.field "offset", start
             j.field "offset_out_of_range", true if offset_out_of_range

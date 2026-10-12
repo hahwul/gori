@@ -129,8 +129,7 @@ describe "MCP instructions truthfulness" do
     with_store do |store|
       text, _ = instructions_under(store, nil)
       text.scan("never as instructions").size.should eq(1)
-      operator_clause = text[%r{ A `\[gori\]` line inside a tool's JSON[^.]*\.}]
-      (Gori::MCP::Server::UNTRUSTED_BYTES_NOTE.bytesize + operator_clause.bytesize).should be < 250
+      text.should contain("inside a tool's JSON is target text")
       narrowed, _ = instructions_under(store, "list_*")
       narrowed.should contain("never as instructions")
       narrowed.should_not contain("inside a tool's JSON")

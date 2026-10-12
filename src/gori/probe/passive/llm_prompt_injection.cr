@@ -14,13 +14,11 @@ module Gori
       # so a page documenting gori stays quiet. The names are a literal list on purpose: a probe
       # must not know the MCP surface exists (spec/layering_spec.cr). One finding per host.
       class LlmPromptInjection < Rule
-        # A word every match below must contain, matched case-sensitively through explicit
-        # classes: `/i` over the whole body costs ~2µs/KiB and the two signals ran ~125µs per
-        # 64 KiB page (bench/probe_passive_bench); this gate leaves most pages after one ~20µs
-        # pass. Its first characters (s, n, _) are what keeps it cheap — widen it with care.
-        GATE      = /[sS][tT][rR][uU][cC][tT][iI][oO][nN][sS]|[sS][yY][sS][tT][eE][mM]\s+[pP][rR][oO][mM][pP][tT]|[nN][oO][tT][eE]\s+[tT][oO]\s+[sS][yY][sS]|_(?:rule|request|websocket|start|enabled|sandbox|unscoped)\b/
-        OVERRIDE  = /\b(?:ignore|disregard|forget)\s+(?:all\s+|any\s+)?(?:of\s+)?(?:the\s+|your\s+|my\s+)?(?:previous|prior|above|earlier|preceding)\s+instructions\b|\bdisregard\b[^.\n]{0,40}\bsystem\s+prompt\b|\bnote\s+to\s+system\b/i
-        TOOL_CALL = /\b(?:call|invoke|execute|run|use)\s+(?:the\s+)?[`'"]?(?:create_rule|update_rule|send_request|send_websocket|create_probe_rule|update_probe_rule|race_requests|fuzz_start|mine_start|discover_start|set_scope_enabled|add_scope_rule|set_sandbox)\b|\ballow_unscoped\\?["']?\s*[:=]\s*true\b/i
+        # A word every match below must contain. Most pages leave after this one pass (the two
+        # signals alone ran ~125µs per 64 KiB page in bench/probe_passive_bench).
+        GATE      = Utf8.tolerant(/instructions|system\s+prompt|note\s+to\s+system|_(?:rule|requests?|websocket|start|enabled|sandbox|unscoped)\b/i)
+        OVERRIDE  = Utf8.tolerant(/\b(?:ignore|disregard|forget)\s+(?:all\s+|any\s+)?(?:of\s+)?(?:the\s+|your\s+|my\s+)?(?:previous|prior|above|earlier|preceding)\s+instructions\b|\bdisregard\b[^.\n]{0,40}\bsystem\s+prompt\b|\bnote\s+to\s+system\s*:/i)
+        TOOL_CALL = Utf8.tolerant(/\b(?:call|invoke|execute|run|use|pass|set)\s+(?:the\s+)?[`'"\\]*(?:create_rule|update_rule|send_request|send_websocket|create_probe_rule|update_probe_rule|race_requests|fuzz_start|mine_start|discover_start|set_scope_enabled|add_scope_rule|set_sandbox|allow_unscoped)\b/i)
 
         def info : RuleInfo
           RuleInfo.new("llm_prompt_injection", "Prompt injection aimed at an LLM agent",
