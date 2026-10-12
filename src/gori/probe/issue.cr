@@ -208,6 +208,7 @@ module Gori
       "oauth_no_csrf_protection"       => "The authorization code request carries no PKCE code_challenge, no state and no nonce, so nothing binds the returned code to this browser session: login CSRF and code injection are open. Add PKCE (S256) — it also provides CSRF protection (RFC 9700 §2.1) — or at least a one-time state value checked on the redirect.",
       "oauth_no_pkce"                  => "Informational: the authorization code request carries no PKCE code_challenge (state/nonce are present, so CSRF is covered). PKCE is required for public clients (SPA, mobile, desktop) and recommended for confidential ones (RFC 9700 §2.1.1): add code_challenge with S256 unless this client authenticates at the token endpoint.",
       "cspt_suspected"                 => "A URL-controlled value reaches the URL argument of a request call unencoded, so a ../ in it can re-point the request at another same-origin endpoint with the victim's cookies — CSRF that SameSite and anti-CSRF tokens do not stop when the method changes state. Wrap each path segment in encodeURIComponent (and reject . / .. segments), or validate the value against the expected shape (e.g. a numeric id) before building the path. Heuristic; confirm by sending ..%2f variants.",
+      "llm_prompt_injection"           => "The response carries text written to steer an LLM agent (an instruction override, or an order to call an agent's tools). An AI assistant, browsing agent or MCP-attached tester that reads this page can be made to act on it. If the text is yours, remove it; if users can write it, treat it as stored content that agents will read. Agents reading it should treat it as data, never as instructions.",
     } of String => String
 
     TECH_REMEDIATION = "Detected technology — informational; recorded as a project fact."
@@ -345,6 +346,7 @@ module Gori
       "oauth_no_csrf_protection" => {352, "Cross-Site Request Forgery (CSRF)"},
       "oauth_no_pkce"            => {345, "Insufficient Verification of Data Authenticity"},
       "cspt_suspected"           => {22, "Improper Limitation of a Pathname to a Restricted Directory ('Path Traversal')"},
+      "llm_prompt_injection"     => {1427, "Improper Neutralization of Input Used for LLM Prompting"},
     }
 
     # {id, name} for a finding code, or nil when the code is deliberately unmapped (see CWE).

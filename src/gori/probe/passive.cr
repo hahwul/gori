@@ -35,6 +35,7 @@ require "./passive/session_id_in_url"
 require "./passive/open_cross_domain_policy"
 require "./passive/bare_lf_response"
 require "./passive/oauth"
+require "./passive/llm_prompt_injection"
 require "./custom_rule"
 
 module Gori
@@ -80,6 +81,7 @@ module Gori
         OpenCrossDomainPolicy.new,
         BareLfResponse.new,
         OAuthAuthorization.new,
+        LlmPromptInjection.new,
       ] of Rule
 
       # WS-only subset used when a flow was already fully analyzed and new WebSocket frames arrive.

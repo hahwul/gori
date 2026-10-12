@@ -64,6 +64,7 @@ Passive rules read traffic you have already captured (History flows and Repeater
 | `open_cross_domain_policy` | Permissive cross-domain policy | `cors` | Flags a Flash/Silverlight cross-domain policy that grants access to all origins (`domain="*"`). |
 | `bare_lf_response` | Bare-LF response head | `headers` | Flags a response head that ends lines with a bare LF instead of CRLF, where parsers can disagree on the message's framing (a response desync / splitting precondition). |
 | `oauth` | Weak OAuth/OIDC authorization request | `headers` | Flags an OAuth 2.0 / OIDC authorization request using the implicit grant, the PKCE plain method, no PKCE, or no CSRF protection at all (no PKCE, state or nonce), per RFC 9700. |
+| `llm_prompt_injection` | Prompt injection aimed at an LLM agent | `client` | Flags a response body carrying instructions aimed at an LLM: an override phrase (ignore previous instructions, NOTE TO SYSTEM) or an imperative naming one of gori's action tools. Detect only; the body is never altered. |
 
 ## Active rules {#active}
 

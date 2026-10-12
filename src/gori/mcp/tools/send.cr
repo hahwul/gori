@@ -1034,7 +1034,7 @@ module Gori
               # named them since round 3; this is the same classifier, not a second one.
               j.field "incomplete_reason", CLI::Run.incomplete_reason(result, result.timed_out?)
             end
-            Serialize.emit_body(j, "body", result.head, result.body, false, body_cap, body_omit, more: body_more)
+            Serialize.emit_body(j, "body", "target", result.head, result.body, false, body_cap, body_omit, more: body_more)
           end
         end
       end

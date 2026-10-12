@@ -69,7 +69,7 @@ private def mcp_saved_body(head : String, body : Bytes, cap : Int32,
                            include_sensitive : Bool = false) : JSON::Any
   JSON.parse(JSON.build do |json|
     json.object do
-      Gori::MCP::Serialize.emit_body(json, "body", head.to_slice, body, false, cap,
+      Gori::MCP::Serialize.emit_body(json, "body", "target", head.to_slice, body, false, cap,
         include_sensitive: include_sensitive)
     end
   end)["body"]

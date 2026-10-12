@@ -64,6 +64,7 @@ gori run probe rules disable sri            # 시끄러운 패시브 체크 하�
 | `open_cross_domain_policy` | Permissive cross-domain policy | `cors` | 모든 origin에 접근을 허용하는(`domain="*"`) Flash/Silverlight 크로스 도메인 정책을 표시합니다. |
 | `bare_lf_response` | Bare-LF response head | `headers` | 응답 헤드의 줄 끝이 CRLF가 아닌 단독 LF인 경우를 표시합니다. 파서마다 메시지 프레이밍을 다르게 읽을 수 있습니다(응답 desync / splitting의 전제 조건). |
 | `oauth` | Weak OAuth/OIDC authorization request | `headers` | RFC 9700 기준으로 implicit grant, PKCE plain 메서드, PKCE 누락, CSRF 보호 전무(PKCE·state·nonce 모두 없음)인 OAuth 2.0 / OIDC 인가 요청을 표시합니다. |
+| `llm_prompt_injection` | Prompt injection aimed at an LLM agent | `client` | LLM을 겨냥한 지시문(ignore previous instructions, NOTE TO SYSTEM 같은 덮어쓰기 문구나 gori 액션 도구를 호출하라는 명령)을 담은 응답 본문을 표시합니다. 탐지만 하며 본문은 바꾸지 않습니다. |
 
 ## 액티브 룰 {#active}
 

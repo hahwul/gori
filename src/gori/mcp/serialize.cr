@@ -732,7 +732,7 @@ module Gori
           # `incomplete` also covers timeout/early close, not only gori's capture cap; the
           # metric projection already names the reason, so do not mislabel every short body
           # as source-truncated here.
-          emit_body(j, "response_body", row.response_head, row.response_body,
+          emit_body(j, "response_body", "target", row.response_head, row.response_body,
             false, body_cap, include_sensitive: include_sensitive,
             source_size: preview.response_body_size,
             source_truncated: preview.response_body_truncated?, preserve_empty: true)
@@ -795,7 +795,7 @@ module Gori
             if head_complete && boundary
               body = boundary < prefix.size ? prefix[boundary, prefix.size - boundary] : Bytes.empty
               body_size = {size - boundary, 0_i64}.max
-              emit_body(j, "body", head, body, false, body_cap,
+              emit_body(j, "body", "client", head, body, false, body_cap,
                 include_sensitive: include_sensitive, source_size: body_size,
                 source_truncated: body.size.to_i64 < body_size, preserve_empty: true)
             else
@@ -898,7 +898,7 @@ module Gori
           # said a cut happened and nothing said how big — the difference between paging the
           # rest (there is none) and re-sending under a larger cap. `FlowDetail` already
           # recovers the wire size by subtracting the head from the row total.
-          emit_body(j, "request_body", detail.request_head, detail.request_body,
+          emit_body(j, "request_body", "client", detail.request_head, detail.request_body,
             detail.request_body_truncated?, body_cap, body_omit, include_sensitive,
             source_size: detail.request_body_truncated? ? detail.request_wire_body_size : nil,
             more: body_more.try(&.[0]))
@@ -907,7 +907,7 @@ module Gori
           emit_head_base64(j, "response_head", detail.response_head, include_sensitive)
           j.field "sensitive_headers_redacted", true unless include_sensitive
           emit_redaction_note(j, redaction)
-          emit_body(j, "response_body", detail.response_head, detail.response_body,
+          emit_body(j, "response_body", "target", detail.response_head, detail.response_body,
             detail.response_body_truncated?, body_cap, body_omit, include_sensitive,
             source_size: detail.response_body_truncated? ? detail.response_wire_body_size : nil,
             more: body_more.try(&.[1]))
@@ -1291,11 +1291,11 @@ module Gori
             emit_redaction_note(j, redaction)
             j.field "request_head", redact_head_opt(head_text(ev.request_head), include_sensitive)
             emit_head_base64(j, "request_head", ev.request_head, include_sensitive)
-            emit_body(j, "request_body", ev.request_head, ev.request_body, m.request_truncated?,
+            emit_body(j, "request_body", "client", ev.request_head, ev.request_body, m.request_truncated?,
               body_cap, body_omit, include_sensitive)
             j.field "response_head", redact_head_opt(head_text(ev.response_head), include_sensitive)
             emit_head_base64(j, "response_head", ev.response_head, include_sensitive)
-            emit_body(j, "response_body", ev.response_head, ev.response_body, m.response_truncated?,
+            emit_body(j, "response_body", "target", ev.response_head, ev.response_body, m.response_truncated?,
               body_cap, body_omit, include_sensitive)
           end
         end
@@ -1524,7 +1524,11 @@ module Gori
       # caller that wants just the shape and will page bytes via
       # get_response_body_chunk. Both default to today's behavior. `include_sensitive`
       # controls trailer credentials just like it controls ordinary head fields.
-      def self.emit_body(j : JSON::Builder, field_name : String, head : Bytes?, body : Bytes?,
+      # `origin` frames the bytes for the agent reading them (#1586): `target` for a response
+      # body, `client` for a request body. It is a label beside the field and never a reason to
+      # alter, withhold or cut what the field carries (P7): a body that reads like an
+      # instruction is still the payload.
+      def self.emit_body(j : JSON::Builder, field_name : String, origin : String, head : Bytes?, body : Bytes?,
                          wire_truncated : Bool, cap : Int32 = MAX_TEXT, omit : Bool = false,
                          include_sensitive : Bool = false, source_size : Int64? = nil,
                          source_truncated : Bool = false, preserve_empty : Bool = false,
@@ -1557,6 +1561,7 @@ module Gori
         decode_truncated = !decode_complete || (decoded_applied && cut)
         j.field field_name do
           j.object do
+            j.field "origin", origin
             j.field "encoding", valid ? "text" : "base64"
             j.field "binary", true unless valid
             j.field "size", bytes.size
