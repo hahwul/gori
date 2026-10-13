@@ -2075,9 +2075,13 @@ module Gori
       return unless rewrite
       write_rule_hits(conn, flow_id, side, rewrite.hits)
       # An empty `Bytes` can bind as NULL, and one NOT NULL failure fails the writer's whole batch.
+      # A NULL body means "the stored one", so an empty original (a 204, an empty upload) is
+      # written as a real zero-length blob, never left to bind as NULL.
       if original && (head = rewrite.head) && !head.empty?
-        conn.exec("INSERT OR REPLACE INTO rewrite_originals (flow_id, side, head, body) VALUES (?, ?, ?, ?)",
-          flow_id, side.label, head, rewrite.body)
+        body = rewrite.body
+        conn.exec("INSERT OR REPLACE INTO rewrite_originals (flow_id, side, head, body) " \
+                  "VALUES (?, ?, ?, CASE WHEN ? THEN zeroblob(0) ELSE ? END)",
+          flow_id, side.label, head, body.try(&.empty?) || false, body)
       end
     end
 

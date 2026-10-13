@@ -51,6 +51,19 @@ describe "Store rewrite originals (V49)" do
     end
   end
 
+  # NULL means "the stored body", so an empty original must not read as one: a 204 whose
+  # response was edited at Intercept to carry a body would show the operator's body as the origin's.
+  it "keeps an empty original body apart from one that matched the stored body" do
+    with_store do |store|
+      id = store.insert_flow(rw_request("/a"))
+      store.update_response(rw_response(id, Gori::Store::Rewrite.new([P4], origin_head, Bytes.empty)))
+
+      store.rewrite_original(id, Gori::Store::RuleTarget::Response).should eq({origin_head, Bytes.empty})
+      d = store.get_flow(id).not_nil!
+      Gori::Interceptor.original(store, d, Gori::Store::RuleTarget::Response).should eq({origin_head, Bytes.empty})
+    end
+  end
+
   it "answers rewritten: — any rule, or one rule by scope and id" do
     with_store do |store|
       a = store.insert_flow(rw_request("/a", Gori::Store::Rewrite.new([P4], client_head)))
