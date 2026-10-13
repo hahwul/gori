@@ -63,6 +63,17 @@ describe Gori::Outbound::Budget do
     end
   end
 
+  it "releases the lease a store's Outbounds took when that store is done" do
+    with_store do |store|
+      set_budget(store, max: "100")
+      Budget.release(store) # nothing built yet: no lease, no write
+      spent(store).should be_nil
+      2.times { Gori::Outbound.cli(Gori::Scope.load(store), true).admit.should be_nil }
+      Budget.release(store)
+      spent(store).should eq("2")
+    end
+  end
+
   it "paces two processes together to the shared rate" do
     with_two_stores do |store, peer|
       set_budget(store, rps: "20")
