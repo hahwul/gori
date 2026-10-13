@@ -129,9 +129,25 @@ module Gori
           @text.clear
           @tools.clear
           LlmCall.obj(r["response"]?).try { |x| responses(x) }
-        elsif type == "response.output_text.delta"
-          @shaped = true
+        elsif type.starts_with?("response.")
+          response_event(type, r)
+        end
+      end
+
+      # Any Responses event shapes the reply, so a stream cut off mid-call still decodes. A
+      # function call is keyed by `output_index`, the slot `response.completed` uses.
+      private def response_event(type : String, r : Obj) : Nil
+        @dialect = RESPONSES
+        @shaped = true
+        i = LlmCall.index(r["output_index"]?, 0)
+        case type
+        when "response.output_text.delta"
           @text << LlmCall.str(r["delta"]?)
+        when "response.output_item.added"
+          item = LlmCall.obj(r["item"]?) || return
+          tool(i, LlmCall.str(item["name"]?), nil) if item["type"]? == "function_call"
+        when "response.function_call_arguments.delta"
+          tool(i, nil, LlmCall.str(r["delta"]?))
         end
       end
 

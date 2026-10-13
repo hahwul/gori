@@ -100,6 +100,19 @@ describe Gori::LlmCall do
     streamed.stop.should eq("completed")
   end
 
+  it "decodes a responses stream cut off mid function call" do
+    req = %({"model":"gpt-5","input":"weather?"})
+    cut = llm(req, sse([
+      %({"type":"response.created","response":{"object":"response","status":"in_progress","output":[]}}),
+      %({"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","name":"get_weather","arguments":""}}),
+      %({"type":"response.function_call_arguments.delta","output_index":1,"delta":"{\\"city\\":"}),
+      %({"type":"response.function_call_arguments.delta","output_index":1,"delta":"\\"Seoul\\"}"}),
+    ]), "text/event-stream").not_nil!
+    cut.dialect.should eq("openai-responses")
+    cut.tool_calls.map(&.name).should eq(["get_weather"])
+    cut.tool_calls[0].arguments.should contain(%("city": "Seoul"))
+  end
+
   it "offers nothing for a plain REST body" do
     llm(%({"name":"shoes","messages":[]}), %({"ok":true})).should be_nil
     llm(%({"model":"x"}), %({"ok":true})).should be_nil
@@ -110,7 +123,8 @@ describe Gori::LlmCall do
     ["[1]", "5", %({"choices":{}}), %({"choices":[5]}), %({"choices":[{"message":5}]}),
      %({"type":"message","content":[1,{"type":"tool_use","input":3}]}),
      %({"type":"content_block_delta","index":3000000000,"delta":{"partial_json":"x"}}),
-     %({"type":"response.completed","response":5})].each do |resp|
+     %({"type":"response.completed","response":5}), %({"type":"response.output_item.added","item":5}),
+     %({"type":"response.function_call_arguments.delta","output_index":"x","delta":3})].each do |resp|
       llm(CHAT_REQ, resp)
       llm(CHAT_REQ, "data: #{resp}\n\n", "text/event-stream")
     end
