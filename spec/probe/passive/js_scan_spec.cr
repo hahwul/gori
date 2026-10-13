@@ -103,6 +103,31 @@ describe Gori::Probe::Passive::JsScan do
     end
   end
 
+  # A regex literal's `\/\/` or `"` used to open a comment or a string and blank the rest of a
+  # one-line minified bundle (axios' isAbsoluteURL, lodash's escape table).
+  describe "regex literals" do
+    it "keeps a regex verbatim and does not let it open a comment or a string" do
+      src = %(function i(e){return/^([a-z][a-z\\d+\\-.]*:)?\\/\\//i.test(e)};el.innerHTML=location.hash)
+      JsScan.strip(src).should eq(src)
+      JsScan.source_sink_pairs(JsScan.strip(src)).should eq([{"location.hash", "innerHTML"}])
+      src = %(var E=/[&<>"']/g;fetch("/a/"+location.hash.slice(1)))
+      JsScan.request_source_pairs(JsScan.strip(src)).should eq([{"location.hash", "fetch"}])
+      # A `/` inside a class does not close it; an escaped one does not either.
+      JsScan.strip(%(x=/[/"]\\/"/;y="z")).should eq(%(x=/[/"]\\/"/;y=" "))
+    end
+
+    it "leaves division as code" do
+      JsScan.strip(%(x=a/b/c;y="//s")).should eq(%(x=a/b/c;y="   "))
+      JsScan.strip(%(x=(a)/2/"q";)).should eq(%(x=(a)/2/" ";))
+      JsScan.strip(%(x=i++/2/"q";)).should eq(%(x=i++/2/" ";))
+      JsScan.strip(%(x=/r/g/"q";)).should eq(%(x=/r/g/" ";))
+    end
+
+    it "stops an unterminated regex at the end of its line" do
+      JsScan.strip(%(x=/abc\ny="q")).should eq(%(x=/abc\ny=" "))
+    end
+  end
+
   # source_in_window works on BYTE offsets: char-index slicing was O(1) only while the script
   # stayed all-ASCII, and one non-ASCII byte turned every window slice into a walk from the
   # start of the string (measured 9ms -> 1765ms per flow). The pairs must be identical either

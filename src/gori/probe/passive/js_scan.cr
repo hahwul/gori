@@ -209,9 +209,9 @@ module Gori
 
         # Blank // line comments, /* */ block comments, and '…' / "…" / `…` string literals,
         # replacing their CONTENTS with spaces so byte/char offsets are preserved. A single
-        # conservative left-to-right pass. Regex literals are intentionally left intact:
-        # telling `/` division from a regex needs a parser, and regex bodies rarely carry our
-        # tokens. Every consumed char emits exactly one char, so indices stay aligned.
+        # conservative left-to-right pass. Regex literals are consumed as one token but kept
+        # verbatim (see `lex_regex`): a `"` or `//` inside one must not open a string or a
+        # comment. Every consumed char emits exactly one char, so indices stay aligned.
         def self.strip(js : String) : String
           return js if js.empty?
           String.build(js.bytesize) { |io| lex(js, Sink.new(io, nil)) }
@@ -263,22 +263,28 @@ module Gori
         private def self.lex(js : String, out_to : Sink) : Nil
           scan_source(js) do |chars, n|
             i = 0
+            last = -1 # index of the last non-space CODE char, for `regex_start?`
             while i < n
               # The token dispatch is spelled out here rather than delegated to a nilable-result
               # helper: the OVERWHELMINGLY common case is an ordinary code character, and deciding
               # it from the char in the loop keeps this hot path on a plain Int32. The branch
-              # order (comment, then string) is what both projections have always used.
+              # order (comment, then string, then regex) is what both projections use.
               c = chars[i]
-              i = if c == '/' && i + 1 < n && chars[i + 1] == '/'
-                    blank_line_comment(chars, i, n, out_to)
-                  elsif c == '/' && i + 1 < n && chars[i + 1] == '*'
-                    blank_block_comment(chars, i, n, out_to)
-                  elsif quote?(c)
-                    lex_string(chars, i, n, out_to, 0)
-                  else
-                    out_to << c
-                    i + 1
-                  end
+              if c == '/' && i + 1 < n && chars[i + 1] == '/'
+                i = blank_line_comment(chars, i, n, out_to)
+              elsif c == '/' && i + 1 < n && chars[i + 1] == '*'
+                i = blank_block_comment(chars, i, n, out_to)
+              elsif quote?(c)
+                i = lex_string(chars, i, n, out_to, 0)
+                last = i - 1 # a literal ends an operand: its closing delimiter makes a `/` division
+              elsif c == '/' && regex_start?(chars, last)
+                i = lex_regex(chars, i, n, out_to)
+                last = i - 1
+              else
+                out_to << c
+                last = i unless c.ascii_whitespace?
+                i += 1
+              end
             end
           end
         end
@@ -296,6 +302,69 @@ module Gori
             chars = js.chars
             yield chars, chars.size
           end
+        end
+
+        # Code chars after which a `/` starts a regex literal rather than a division. A `)` or `]`
+        # is not here (`(a)/b`, `x[0]/2`), and neither is an identifier other than REGEX_KEYWORDS:
+        # the usual heuristic, wrong only on shapes like `if (x) /re/.test(y)`.
+        REGEX_AFTER = "(,=:[!&|?{};+-*%<>~^"
+
+        # Keywords after which a `/` opens a regex (`return/^a/.test(e)`, minified).
+        REGEX_KEYWORDS = %w[return typeof case delete void in of new throw yield await]
+
+        # Can a `/` start a regex here? `last` is the index of the last non-space code char (-1
+        # at the start of the fragment).
+        private def self.regex_start?(chars, last : Int32) : Bool
+          return true if last < 0
+          p = chars[last]
+          if p == '+' || p == '-'
+            # `a++ / b`: a postfix ++/-- ends an operand.
+            !(last > 0 && chars[last - 1] == p)
+          elsif REGEX_AFTER.includes?(p)
+            true
+          elsif ident_char?(p)
+            start = last
+            while start > 0 && ident_char?(chars[start - 1])
+              start -= 1
+            end
+            len = last - start + 1
+            REGEX_KEYWORDS.any? do |kw|
+              kw.bytesize == len && (0...len).all? { |k| chars[start + k] == kw.byte_at(k).unsafe_chr }
+            end
+          else
+            false
+          end
+        end
+
+        private def self.ident_char?(ch : Char) : Bool
+          ch.ascii_alphanumeric? || ch == '_' || ch == '$'
+        end
+
+        # Consume a regex literal: through its closing `/`, honoring `\` escapes and `[…]`
+        # classes (a `/` inside a class does not close it), or up to a newline if unterminated.
+        # Emitted verbatim on both sides — a regex body is code, not string content — so neither
+        # view's offsets move. The flags after it are ordinary identifier chars.
+        private def self.lex_regex(chars, i : Int32, n : Int32, out_to : Sink) : Int32
+          out_to << '/'
+          i += 1
+          in_class = false
+          while i < n
+            ch = chars[i]
+            break if ch == '\n'
+            out_to << ch
+            i += 1
+            if ch == '\\' && i < n && chars[i] != '\n'
+              out_to << chars[i]
+              i += 1
+            elsif ch == '['
+              in_class = true
+            elsif ch == ']'
+              in_class = false
+            elsif ch == '/' && !in_class
+              break
+            end
+          end
+          i
         end
 
         # Template-literal nesting recurses one frame per level (lex_string → lex_interpolation
