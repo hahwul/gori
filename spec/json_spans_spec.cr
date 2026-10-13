@@ -131,6 +131,14 @@ describe "Gori::JsonSpans on a root scalar with trailing data" do
       edit.call(%({"items":[1,2,3]}), "$.items[-1]", nil).should eq(%({"items":[1,2]}))
       edit.call(%({"a":1}), "$.b", nil).should be_nil
       edit.call(%({"x":{"a":1, "b":0, "a":2}}), "$.x.a", nil).should eq(%({"x":{"b":0}})) # every copy
+      edit.call(%({"a":1,"b":0,"a":2,"a":3,"c":4,"a":5}), "$.a", nil).should eq(%({"b":0,"c":4}))
+      edit.call(%({"b":0,"a":1,"a":2}), "$.a", nil).should eq(%({"b":0}))
+      edit.call(%({"a":1,"a":2}), "$.a", nil).should eq(%({}))
+    end
+
+    it "removes thousands of copies of one key in one pass, not one walk each" do
+      src = "{" + Array.new(20_000, %("a":1)).join(',') + %(,"b":2})
+      edit.call(src, "$.a", nil).should eq(%({"b":2}))
     end
 
     it "is nil on a body that is not one JSON value" do

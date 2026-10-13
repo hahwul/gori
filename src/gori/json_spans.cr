@@ -120,11 +120,12 @@ module Gori
         return value && key && node.object? ? append_members(bytes, [node], "#{key.to_json}:#{value}") : nil
       end
       return splice(bytes, ents[i][1], ents[i][2], value) if value
-      cut = remove(bytes, ents, i)
       # A duplicated key goes entirely: removing the last copy alone would let the earlier one
-      # become the value every last-wins reader sees. One more walk per extra copy (rare).
-      dup = node.object? && node.members.count(&.key.==(node.members[i].key)) > 1
-      dup ? edit(cut, steps, nil) || cut : cut
+      # become the value every last-wins reader sees. All copies in one pass: the body is
+      # remote-chosen, and a walk per copy was quadratic (and recursed) on `{"a":1,"a":1,…}`.
+      return remove(bytes, ents, [i]) unless node.object?
+      key = node.members[i].key
+      remove(bytes, ents, (0...ents.size).select { |j| node.members[j].key == key })
     end
 
     # The container the last of `steps` is looked up in, or nil when the path breaks before it.
@@ -138,16 +139,28 @@ module Gori
       node
     end
 
-    # Entry `i` out of `ents`, with exactly one adjoining comma.
-    private def remove(bytes : Bytes, ents : Array({Int32, Int32, Int32}), i : Int32) : Bytes
-      from, _, vend = ents[i]
-      if nxt = ents[i + 1]?
-        splice(bytes, from, nxt[0], "") # the entry, its comma and the spacing up to the next
-      elsif i > 0
-        splice(bytes, ents[i - 1][2], vend, "") # the comma before the last entry, and it
-      else
-        splice(bytes, from, vend, "")
+    # The entries at `drop` (ascending) out of `ents`, each run of adjacent ones with exactly one
+    # adjoining comma.
+    private def remove(bytes : Bytes, ents : Array({Int32, Int32, Int32}), drop : Array(Int32)) : Bytes
+      io = IO::Memory.new(bytes.size)
+      pos = k = 0
+      while k < drop.size
+        a = b = drop[k]
+        while (k += 1) < drop.size && drop[k] == b + 1
+          b = drop[k]
+        end
+        from, to = if nxt = ents[b + 1]?
+                     {ents[a][0], nxt[0]} # the run, its comma and the spacing up to the next
+                   elsif a > 0
+                     {ents[a - 1][2], ents[b][2]} # the comma before a trailing run, and it
+                   else
+                     {ents[a][0], ents[b][2]}
+                   end
+        io.write(bytes[pos, from - pos])
+        pos = to
       end
+      io.write(bytes[pos, bytes.size - pos])
+      io.to_slice
     end
 
     # {entry start, value start, value end} per member (the entry starts at its key) or element.
