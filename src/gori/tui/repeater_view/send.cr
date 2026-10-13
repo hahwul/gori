@@ -349,17 +349,19 @@ class Gori::Tui::RepeaterView
       return "websocket messages editor doesn't support pretty-printing"
     end
 
-    text = @editor.text
-    env_sep = text.index("\n\n")
-    return "no request body" unless env_sep
-
-    head = text[0, env_sep]
-    body = text[env_sep + 2..]
+    # `wire_text`, so the head goes back with the terminators it was written with (a
+    # `X-A: 1\r\r\n` stays one), and `replace_all`, so the reformat is one ^Z away — the same
+    # split as `FuzzerView#pretty_print_template`.
+    text = @editor.wire_text
+    # First blank line wins, whichever form it is.
+    sep = [text.index("\r\n\r\n"), text.index("\n\n")].compact.min? || return "no request body"
+    blank = text[sep] == '\r' ? "\r\n\r\n" : "\n\n"
+    head = text[0, sep]
+    body = text[sep + blank.size..]
     return "request body is empty" if body.strip.empty?
 
     if formatted_body = Pretty.format_request(head, body)
-      new_text = "#{head}\n\n#{formatted_body}"
-      @editor.set_text(new_text)
+      @editor.replace_all("#{head}#{blank}#{formatted_body}", 0)
       @dirty = true
       reflect_content_length_in_editor if @auto_content_length
       nil # success

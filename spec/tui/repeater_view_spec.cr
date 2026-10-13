@@ -2658,6 +2658,18 @@ describe Gori::Tui::RepeaterView do
       view.dirty?.should be_true
       view.request_text.should_not contain("Content-Length: 30")
     end
+
+    it "keeps each head line's terminator and is one undoable edit" do
+      view = RepeaterView.new
+      req = "POST /x HTTP/1.1\r\nHost: api.test\r\nX-A: 1\r\r\nContent-Type: application/json\r\n\r\n{\"a\":1}"
+      view.restore("https://api.test", req, false, false)
+      view.pretty_print_request.should be_nil
+      String.new(view.request_bytes).should start_with(
+        "POST /x HTTP/1.1\r\nHost: api.test\r\nX-A: 1\r\r\nContent-Type: application/json\r\n\r\n{\n")
+      view.focus_pane(:request)
+      view.edit_undo
+      String.new(view.request_bytes).should eq(req)
+    end
   end
 
   # `repeater.graphql-introspection[-legacy]`. The split GraphQL tab (and the SAML refusal) is
