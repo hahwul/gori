@@ -194,6 +194,13 @@ describe Gori::Probe::Passive::JsScan do
       pairs.call(%(fetch(location.pathname + "/data");)).should eq([{"location.href", "fetch"}])
     end
 
+    it "does not pair a whole location.search, which can only land in the query" do
+      pairs.call(%(fetch("/api/items" + location.search);)).should be_empty
+      pairs.call(%(fetch(`/api/items${location.search}`);)).should be_empty
+      pairs.call(%(fetch("/api/items/" + location.search.slice(1));)).should eq([{"location.search", "fetch"}])
+      pairs.call(%(fetch("/a/" + location.search [1]);)).should eq([{"location.search", "fetch"}])
+    end
+
     it "reads only the URL argument" do
       pairs.call(%(fetch("/api/x", {body: location.search});)).should be_empty
       pairs.call(%(fetch(build(a, b), {body: location.search});)).should be_empty

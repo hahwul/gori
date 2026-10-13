@@ -592,7 +592,7 @@ module Gori
               lo, hi = config_url_span(code, lo, hi)
               all.each do |(spans, label)|
                 next if WHOLE_URL.includes?(label) && !composed?(bytes, lo, hi)
-                if unencoded_within?(code, spans, lo, hi)
+                if unencoded_within?(code, spans, lo, hi, label == "location.search")
                   pairs << {label, sink_label}
                   break
                 end
@@ -691,15 +691,32 @@ module Gori
 
         # Does `spans` hold an occurrence inside [lo, hi) that no `encodeURIComponent(` call
         # around it covers? Walks outward from each candidate to its enclosing `(`s, within the
-        # argument, and checks the identifier in front of each.
-        private def self.unencoded_within?(code : String, spans : Array({Int32, Int32}), lo : Int32, hi : Int32) : Bool
+        # argument, and checks the identifier in front of each. With `query`, an occurrence
+        # used whole is skipped too (see `whole_query?`).
+        private def self.unencoded_within?(code : String, spans : Array({Int32, Int32}), lo : Int32, hi : Int32, query = false) : Bool
           return false unless first = spans.bsearch_index { |(b, _)| b >= lo }
           bytes = code.to_slice
           spans.each(within: first..) do |(b, e)|
             break if e > hi
+            next if query && whole_query?(bytes, b, e, lo)
             return true unless encoded_at?(bytes, b, lo)
           end
           false
+        end
+
+        URL_SEARCH_PARAMS = "URLSearchParams".to_slice
+
+        # Is the `location.search` at [b, e) appended whole? It starts with `?`, so it can only
+        # land in the query, never the path. It counts when a value is taken out of it
+        # (`.slice(1)`, `[…]`) or it feeds `URLSearchParams(…)` (whose `.get` is the value).
+        private def self.whole_query?(bytes : Bytes, b : Int32, e : Int32, lo : Int32) : Bool
+          k = skip_space(bytes, e, bytes.size)
+          return false if k < bytes.size && (bytes[k] == '.'.ord || bytes[k] == '['.ord)
+          k = b - 1
+          while k >= lo && bytes[k].unsafe_chr.ascii_whitespace?
+            k -= 1
+          end
+          !(k >= lo && bytes[k] == '('.ord && word_before?(bytes, lo, k, URL_SEARCH_PARAMS))
         end
 
         ENCODER = "encodeURIComponent".to_slice
