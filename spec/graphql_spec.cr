@@ -209,7 +209,7 @@ describe Gori::Graphql do
       base = %({"query":"{ old }","variables":{"a":1},"extensions":{"pq":true}})
       decoded = GQL.display(GQL::Op.new("Op", "{ new }", nil))
       out = GQL.recompose(base, decoded)
-      out.should eq(%({"operationName":"Op","query":"{ new }","variables":{"a":1},"extensions":{"pq":true}}))
+      out.should eq(%({"query":"{ new }","variables":{"a":1},"extensions":{"pq":true},"operationName":"Op"}))
     end
 
     it "works when the original body is not valid JSON (nothing to preserve)" do
@@ -221,6 +221,20 @@ describe Gori::Graphql do
       base = %({"query":"{ me }","variables":"{\\"a\\":1}"})
       decoded = GQL.display(GQL.from_json(base).not_nil!).sub("{ me }", "{ me2 }")
       GQL.recompose(base, decoded).should eq(%({"query":"{ me2 }","variables":"{\\"a\\":1}"}))
+    end
+
+    # The envelope was rebuilt through JSON::Any: keys reordered, `1e2` respelled `100.0`, a
+    # duplicated key folded, whitespace minified. Only the member the operator changed moves.
+    it "splices the edit into the original bytes and leaves every other member as sent" do
+      base = %({"extensions":{"n":1e2,"d":"x","d":"y"}, "query":"{ a }"})
+      GQL.recompose(base, "{ b }").should eq(%({"extensions":{"n":1e2,"d":"x","d":"y"}, "query":"{ b }"}))
+    end
+
+    it "sends edited variables as typed, numbers included" do
+      base = %({"query":"{ a }","variables":{"x":1}})
+      decoded = "{ a }\n\n# variables\n{\"x\": 1e2, \"x\": 18446744073709551615}"
+      GQL.recompose(base, decoded)
+        .should eq(%({"query":"{ a }","variables":{"x": 1e2, "x": 18446744073709551615}}))
     end
   end
 
@@ -575,7 +589,7 @@ describe Gori::Graphql do
       body = %([{"query":"{a}"},{"query":"{b}","operationName":"B"}])
       op = GQL.from_json(body).not_nil!
       GQL.recompose_batch(body, GQL.display(op))
-        .should eq(%([{"query":"{a}"},{"operationName":"B","query":"{b}"}]))
+        .should eq(body)
     end
 
     it "lands an edit in the element it was made in and leaves the siblings alone" do

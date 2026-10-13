@@ -497,41 +497,47 @@ module Gori
       {op.try { |o| o.empty? ? nil : o }, body.join('\n').strip, (vars && !vars.empty?) ? vars : nil}
     end
 
-    # Re-encode the edited DECODED pane back into a JSON request body, overlaying the
-    # operationName/query/variables onto the ORIGINAL body so any other fields (e.g. a
-    # persisted-query `extensions`) survive. Invalid edited variables fall back to the
-    # original. Returns minified JSON (wire form).
+    # Re-encode the edited DECODED pane back into a JSON request body, spliced into the
+    # ORIGINAL body so any other fields (e.g. a persisted-query `extensions`) survive byte for
+    # byte. A body that is not a JSON object has nothing to preserve and starts from `{}`.
     def recompose(envelope_body : String, decoded_text : String) : String
-      base = (JSON.parse(strip(envelope_body)).as_h? rescue nil)
-      overlay(base, *parse_display(decoded_text)).to_json
+      base = {envelope_body, strip(envelope_body)}.find { |b| JsonSpans.root_object(b.to_slice) }
+      splice_op(base, *parse_display(decoded_text))
     end
 
-    # One edited {operationName?, query, variables?} triple laid over the JSON object it came
-    # out of. Extracted so the single envelope and each element of a BATCH cannot drift on the
-    # two rules below — a batch is N of these, and re-deriving them per element is exactly how
-    # "the deleted header means unset" would have come back only on the single-envelope path.
-    private def overlay(base : Hash(String, JSON::Any)?, op : String?, query : String,
-                        vars_text : String?) : Hash(String, JSON::Any)
-      obj = {} of String => JSON::Any
-      obj["operationName"] = JSON::Any.new(op) if op
-      obj["query"] = JSON::Any.new(query)
-      base_vars = base.try(&.["variables"]?)
-      if vars_text
-        obj["variables"] = (JSON.parse(vars_text) rescue base_vars || JSON::Any.new(vars_text))
-      elsif base_vars
-        obj["variables"] = base_vars
+    # One edited {operationName?, query, variables?} triple spliced into the JSON object text it
+    # came out of (`JsonSpans.edit`). Shared by the single envelope and each element of a BATCH
+    # so the two cannot drift on the rules below.
+    #
+    # A member is rewritten only when the pane's value differs from the one `base` renders, so
+    # key order, a duplicated key, `1e2`, a number past Int64 and the whitespace of everything
+    # the operator did not change go out as captured (P7) — a rebuild through `JSON::Any`
+    # respelled all of them. A deleted `# operationName:` header unsets the member: the pane
+    # always renders it, so its absence is a decision. Variables go out as the operator typed
+    # them; a block that is not JSON keeps the base's, or with none goes as a JSON string.
+    private def splice_op(base : String?, op : String?, query : String, vars : String?) : String
+      bytes = (base || "{}").to_slice
+      was_op, was_query, was_vars = base.try { |b| from_json(b) }.try { |o| parse_display(display(o)) } || {nil, nil, nil}
+      bytes = set_member(bytes, "operationName", op.try(&.to_json)) if op != was_op
+      bytes = set_member(bytes, "query", query.to_json) if query != was_query
+      if vars && vars != was_vars
+        if JsonSpans.valid?(vars.to_slice)
+          bytes = set_member(bytes, "variables", vars)
+        elsif !JsonSpans.root_object(bytes).try(&.members.any? { |m| m.key == "variables" })
+          bytes = set_member(bytes, "variables", vars.to_json)
+        end
       end
-      # Keep extensions etc. — but NOT `operationName`: the pane always renders it when it is
-      # set, so an operator who deleted the header meant to unset it, and overlaying the base
-      # back silently ignored the deletion. Absence here is a decision, not "unchanged".
-      base.try &.each { |k, v| obj[k] = v unless obj.has_key?(k) || k == "operationName" }
-      obj
+      String.new(bytes)
+    end
+
+    private def set_member(bytes : Bytes, key : String, value : String?) : Bytes
+      JsonSpans.edit(bytes, [JsonPath::Step.new(key: key)], value) || bytes
     end
 
     # Re-encode the edited DECODED pane of a BATCH back into the JSON array. Each
     # `# --- [i] ---` block is one element, parsed by the same `parse_display` the single
     # envelope uses and laid over the ORIGINAL element at that index, so an element's other
-    # fields survive exactly as they do for a lone envelope. Returns minified JSON.
+    # fields survive exactly as they do for a lone envelope (`splice_op`).
     #
     # The index comes off the MARKER, not from the block's position, because the operator
     # edits the pane freely: deleting `[0]` leaves `[1]` sitting first, and overlaying the
@@ -543,14 +549,18 @@ module Gori
     # blocks are the only structure the pane has, and a pane with none is a single document.
     # A pane that is empty after that keeps the original body — there is no request in it.
     def recompose_batch(orig_body : String, decoded_text : String) : String
-      base = (JSON.parse(strip(orig_body)).as_a? rescue nil)
       segments = batch_segments(decoded_text)
       return orig_body if segments.empty? # verbatim: a fallback must not even re-trim (P7)
+      env = strip(orig_body)
+      # The elements' own bytes. With every element an object, the first `size` objects of the
+      # breadth-first walk are exactly the elements, in order.
+      arr = (RawJson.parse(env).as_a? rescue nil)
+      els = (JsonSpans.objects(env.to_slice, arr.size) if arr && arr.all?(&.as_h?)) || [] of JsonSpans::Container
       elements = segments.map do |(idx, text)|
-        el = idx.try { |i| base.try(&.[i]?).try(&.as_h?) }
-        overlay(el, *parse_display(text))
+        el = idx.try { |i| els[i]? }.try { |c| env.byte_slice(c.open, c.close + 1 - c.open) }
+        splice_op(el, *parse_display(text))
       end
-      elements.to_json
+      "[#{elements.join(',')}]"
     end
 
     # `# --- [i] ---`, the batch element marker `batch_text` writes: the declared index, or nil
@@ -630,19 +640,19 @@ module Gori
 
     # Re-encode the edited DECODED pane of a PERSISTED query. The pane is the JSON envelope
     # itself (`persisted_text`), so the inverse is: drop the leading `#` banner and minify
-    # what is left. Nothing is added — if the operator wants to turn a hash-only request into
+    # what is left, numbers as typed (`RawJson.reformat`). Nothing is added — if the operator wants to turn a hash-only request into
     # a document one (the allowlist bypass), they type the `query` field and gori sends it;
     # if they do not, gori does not invent one.
     #
     # An edit that does not parse as JSON keeps the ORIGINAL body, the same fallback invalid
-    # variables get in `overlay`: a half-typed envelope must not go on the wire as a body the
+    # variables get in `splice_op`: a half-typed envelope must not go on the wire as a body the
     # server reads as something else.
     def recompose_persisted(orig_body : String, decoded_text : String) : String
       lines = strip(decoded_text).split('\n')
       while lines.first?.try(&.lstrip.starts_with?('#'))
         lines.shift
       end
-      (JSON.parse(lines.join('\n')).to_json rescue orig_body) # verbatim on a bad edit (P7)
+      (RawJson.reformat(lines.join('\n')) rescue orig_body) # verbatim on a bad edit (P7)
     end
 
     # Re-encode the edited DECODED pane of an `application/graphql` request: the body IS the
@@ -659,7 +669,7 @@ module Gori
     # Variables are minified. The GET-binding sibling of recompose (which targets the body).
     def recompose_query(orig_query : String, decoded_text : String) : String
       op, query, vars_text = parse_display(decoded_text)
-      mini = vars_text.try { |v| (JSON.parse(v).to_json rescue v) }
+      mini = vars_text.try { |v| (RawJson.reformat(v) rescue v) }
       vars_pair = mini.try { |m| "variables=#{URI.encode_www_form(m)}" }
       # A non-JSON `variables` value is displayed raw, and `parse_display` (rightly) will not
       # take a non-JSON block for the sentinel, so it came back inside the query and the param
@@ -1052,11 +1062,10 @@ module Gori
       nxt.nil? || nxt.strip.empty?
     end
 
+    # `RawJson.valid?`, not a `JSON.parse`: a number past Int64 is still JSON, and refusing it
+    # folded a `# variables` block carrying one into the query.
     private def json?(s : String) : Bool
-      JSON.parse(s)
-      true
-    rescue
-      false
+      RawJson.valid?(s)
     end
 
     private def strip(s : String) : String
