@@ -394,13 +394,11 @@ module Gori
 
     # Take `count` request slots from the project-wide budget (#1601), waiting for the rate, or
     # return the refusal. Asked once per REAL send, right after its Layer-2 gate passed, never
-    # by a preflight; proxied client traffic never reaches it. Nothing configured costs one
-    # throttled `refresh` and a nil check. `halt` defaults to the run's; a single send passes
-    # its own cancel.
+    # by a preflight; proxied client traffic never reaches it. Nothing configured costs the
+    # budget's throttled reload and a nil check. `halt` defaults to the run's; a single send
+    # passes its own cancel.
     def admit(count : Int32 = 1, halt : Proc(Bool)? = @halt) : String?
-      refresh
-      b = @budget
-      return nil unless b && b.configured?
+      return nil unless b = @budget
       count.times { (err = b.admit(halt)) && (return err) }
       nil
     end
@@ -532,7 +530,6 @@ module Gori
       return if now - @last_reload < RELOAD_INTERVAL
       @last_reload = now
       @scope.try(&.reload)
-      @budget.try(&.reload)
     rescue
       # keep the last-known scope on a reload failure
     end

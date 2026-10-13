@@ -49,8 +49,12 @@ module Gori
       @spent = false
       @failed = 0
       @lock = Mutex.new
+      # One reload per `Outbound::RELOAD_INTERVAL` for the whole process: MCP and the TUI build a
+      # fresh Outbound per send, so a throttle kept there would never come due.
+      @last_reload : Time::Instant
 
       def initialize(@store : Store)
+        @last_reload = Time.instant
         reload
       end
 
@@ -58,7 +62,7 @@ module Gori
         @interval_us > 0 || !@max.nil?
       end
 
-      # Re-read the two settings rows. `Outbound#refresh` calls this on its own throttle.
+      # Re-read the two settings rows. `admit` calls this on its own throttle.
       def reload : Nil
         rps = @store.setting(Settings::PROJECT_OUTBOUND_MAX_RPS_KEY).try(&.to_f?)
         @interval_us = if rps && rps.finite? && rps > 0
@@ -76,6 +80,10 @@ module Gori
       # `BUDGET_STOPPED_ERROR` when `halt` turned true during a wait (checked every NAP_SLICE),
       # `BUDGET_UNAVAILABLE_ERROR` when the project DB will not take a lease.
       def admit(halt : Proc(Bool)?) : String?
+        if (now = Time.instant) - @last_reload >= RELOAD_INTERVAL
+          @last_reload = now
+          reload
+        end
         return nil unless configured?
         loop do
           if slot = take(Budget.now_us)

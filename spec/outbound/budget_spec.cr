@@ -100,6 +100,21 @@ describe Gori::Outbound::Budget do
     end
   end
 
+  # MCP and the TUI Repeater build a fresh Outbound per send, so the reload cannot ride on one.
+  it "sees a ceiling set, then cleared, mid-session through per-send Outbounds" do
+    with_store do |store|
+      Gori::Outbound.interactive(Gori::Scope.load(store)).admit.should be_nil
+      set_budget(store, max: "2")
+      sleep Gori::Outbound::RELOAD_INTERVAL + 100.milliseconds
+      sent = 0
+      5.times { sent += 1 if Gori::Outbound.interactive(Gori::Scope.load(store)).admit.nil? }
+      sent.should eq(2)
+      set_budget(store) # the operator unsets the total
+      sleep Gori::Outbound::RELOAD_INTERVAL + 100.milliseconds
+      Gori::Outbound.interactive(Gori::Scope.load(store)).admit.should be_nil
+    end
+  end
+
   # The CLI hands most commands a READ-ONLY store, which has no writer at all.
   it "leases through a read-only store too" do
     with_two_stores(read_only: true) do |store, ro|
