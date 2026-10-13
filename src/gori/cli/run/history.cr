@@ -869,7 +869,7 @@ module Gori
 
         show_request = !resp_only
         show_response = !req_only
-        announce_original(id, original, unchanged, format)
+        announce_original(id, original, unchanged, !detail.row.rewritten_by.nil?, format)
         show_format(format, detail, show_request, show_response, ws_msgs, cap, interims)
         # On STDERR after the document, like the redaction notes, so a narrowed transcript is
         # never read as the whole socket and `--format json > out.json` stays pure.
@@ -896,9 +896,14 @@ module Gori
 
       # `--original` on a flow nothing changed is refused; on one that was, the text view says so
       # above the bytes.
-      private def self.announce_original(id : Int64, original : Bool, unchanged : Bool, format : Symbol) : Nil
+      private def self.announce_original(id : Int64, original : Bool, unchanged : Bool, rewritten : Bool,
+                                         format : Symbol) : Nil
         return unless original
-        abort "gori run show: flow ##{id} has no original — no Match&Replace rule or Intercept edit changed it" if unchanged
+        if unchanged
+          abort "gori run show: flow ##{id} keeps no original — the bytes its Match&Replace rules replaced " \
+                "were not kept (a WebSocket message's never are)" if rewritten
+          abort "gori run show: flow ##{id} has no original — no Match&Replace rule or Intercept edit changed it"
+        end
         puts "=== ORIGINAL (before Match&Replace or an Intercept edit) ===\n\n" if format == :text
       end
 
@@ -1233,7 +1238,7 @@ module Gori
         end
         # Which Match&Replace rules changed what follows (#1589); `--original` prints what they replaced.
         if refs = detail.row.rewritten_by
-          puts "rewritten by Match&Replace #{refs.join(", ")} (--original shows the bytes before)"
+          puts "rewritten by Match&Replace #{refs.join(", ")} (--original shows the bytes before, where kept)"
           puts ""
         end
         if req

@@ -1681,7 +1681,8 @@ module Gori::Tui
     def open_detail_id(id : Int64, store : Store) : Bool
       @detail = store.get_flow(id)
       return false if @detail.nil?
-      @ws_narrow = nil # a narrow belongs to the flow it was made on
+      @ws_narrow = nil # a narrow belongs to the flow it was made on, and so does its query
+      @last_search = ""
       @detail_frozen = store.evidence_count_for(Store::LinkRefKind::Flow, id)
       if idx = index_of(id)
         @selected = idx
@@ -1729,6 +1730,7 @@ module Gori::Tui
       @detail_frames_total = 0
       @detail_ws_total = 0
       @ws_narrow = nil
+      @last_search = ""
       @detail_original = nil
       @detail_original_resp = nil
       @detail_rewrite_note = nil
@@ -1781,7 +1783,8 @@ module Gori::Tui
       # Primary-key reads, and only for a row the list already flags as edited or rewritten.
       @detail_original = detail.try { |d| Gori::Interceptor.original(store, d, Store::RuleTarget::Request) }
       @detail_original_resp = detail.try { |d| Gori::Interceptor.original(store, d, Store::RuleTarget::Response) }
-      @detail_rewrite_note = detail.try(&.row.rewritten_by).try { |refs| rewrite_note(store, refs) }
+      kept = !!(@detail_original || @detail_original_resp)
+      @detail_rewrite_note = detail.try(&.row.rewritten_by).try { |refs| rewrite_note(store, refs, kept) }
       # A primary-key range read that finds nothing for almost every flow.
       @detail_interims = detail.try { |d| store.interims(d.row.id) }
       # SSE events are a derived view (parsed from the stored response body at
@@ -2707,14 +2710,16 @@ module Gori::Tui
 
     # The footer sentence naming the rules that changed this flow, by `Rules.rule_phrase` while
     # the rule still exists; a rule since deleted keeps its scope and id (neither is reused).
-    private def rewrite_note(store : Store, refs : Array(Store::RuleRef)) : String
+    # `kept`: an ORIGINAL pane is offered. A WebSocket rule's messages, and an h2 response the
+    # operator then edited, record the rules but not the bytes before.
+    private def rewrite_note(store : Store, refs : Array(Store::RuleRef), kept : Bool) : String
       rules = Rules.merged(store)
       names = refs.map do |ref|
         word = Rules.scope_word(ref.scope)
         rule = rules.find { |r| r.scope == ref.scope && r.id == ref.id }
         rule ? "#{word} rule #{Rules.rule_phrase(rule)}" : "#{word} rule ##{ref.id} (deleted)"
       end
-      "! rewritten by Match&Replace: #{names.join(", ")} — the bytes before are in ORIGINAL"
+      "! rewritten by Match&Replace: #{names.join(", ")}#{kept ? " — the bytes before are in ORIGINAL" : ""}"
     end
 
     private def combine_bytes(head : Bytes?, body : Bytes?) : Bytes?

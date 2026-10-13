@@ -3646,6 +3646,24 @@ describe "Gori::Tui::HistoryView MESSAGES narrow" do
 
       view.toggle_ws_narrow(store).should eq("messages: showing all #{HistoryView::DETAIL_LOG_CAP + 2}")
       view.detail_search_lines("needle-oldest").should be_empty # outside the newest window again
+
+      # The query belongs to the flow it was typed on: reopened, the narrow asks for a new one.
+      view.close_detail
+      view.open_detail(store).should be_true
+      2.times { view.toggle_pane }
+      view.toggle_ws_narrow(store).should contain("^F first")
+
+      # A WebSocket rule records its hits, not the messages before, so no ORIGINAL is promised.
+      store.record_rule_hits(id, Gori::Store::RuleTarget::Response,
+        [Gori::Store::RuleRef.new(Gori::Store::RuleScope::Project, 7_i64)])
+      store.flush
+      view.close_detail
+      view.reload(store)
+      view.open_detail(store).should be_true
+      screen = MemoryBackend.new(120, 20)
+      view.render_detail(Gori::Tui::Screen.new(screen), Gori::Tui::Rect.new(0, 0, 120, 20))
+      screen.contains?("rewritten by Match&Replace").should be_true
+      screen.contains?("in ORIGINAL").should be_false
     end
   end
 end
