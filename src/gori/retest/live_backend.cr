@@ -99,8 +99,7 @@ module Gori
         target = (bytes = plan.scope_requests.first?) ? Gori::Outbound.request_target(bytes) : "/"
         verdict = @outbound.check_request(plan.scheme, plan.host, target, plan.port)
         if verdict.blocked?
-          return Observation.new(blocked_reason: Retest.clip(
-            "#{plan.host} is out of the project scope — #{@outbound.remedy(verdict)}"))
+          return Observation.new(blocked_reason: Retest.clip(@outbound.refusal(verdict)))
         end
         if reason = layer_two_refusal(plan, target)
           return Observation.new(blocked_reason: Retest.clip(reason))

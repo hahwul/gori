@@ -199,6 +199,13 @@ module Gori
     # an excluded target, which no waiver lifts, the operator is the only fix offered.
     def self.remedy(verdict : Verdict, waiver : String?, *, add_include : Bool = true,
                     edit_exclude : Bool = true) : String
+      # An approval refusal (#1585) is lifted by the operator's answer, not by a scope rule; only
+      # an agent's Outbound carries an Approval, so the card is raised by one call of its own.
+      if verdict.pending?
+        target = verdict.port ? "#{verdict.host}:#{verdict.port}" : verdict.host
+        return "gori's MCP permissions ask the operator before #{target} is reached: send one request there " \
+               "with send_request to raise the approval card (only an \"Always\" answer covers later calls)"
+      end
       if verdict.excluded?
         fix = "delete or narrow the scope EXCLUDE rule that matches it (an include rule cannot override an exclude)"
         return edit_exclude ? fix : "ask the operator to #{fix}"
@@ -217,6 +224,14 @@ module Gori
 
     def remedy(verdict : Verdict) : String
       Outbound.remedy(verdict, @waiver, add_include: @can_add_include, edit_exclude: @can_edit_exclude)
+    end
+
+    # "<host> is out of the project scope — <remedy>", the sentence a core engine reports a
+    # Layer-1 refusal in; a target in scope that only awaits the operator's approval is not
+    # called out of scope.
+    def refusal(verdict : Verdict) : String
+      what = verdict.pending == PENDING_SEND ? "awaits the operator's approval" : "is out of the project scope"
+      "#{verdict.host} #{what} — #{remedy(verdict)}"
     end
 
     getter scope : Scope?

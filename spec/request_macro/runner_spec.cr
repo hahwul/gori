@@ -233,6 +233,24 @@ describe Gori::RequestMacro::Runner do
       end
       origin.close
     end
+
+    it "names an in-scope step host an MCP send approval holds as awaiting approval, not out of scope" do
+      origin = MacroTokenOrigin.new
+      with_macro_project(origin) do |store, _, _|
+        scope = Gori::Scope.load(store)
+        scope.add("include", "host", "127.0.0.1")
+        ob = Gori::Outbound.agent(scope, false)
+        ob.approval = Gori::Outbound::Approval.new(every_send: true, waiver: false, hosts: ["a.test:443"])
+        err = expect_raises(RM::Error) { runner_for(store, ["csrf-fetch"], ob) }
+        msg = err.message.not_nil!
+        msg.should contain("127.0.0.1 awaits the operator's approval")
+        msg.should contain("ask the operator before 127.0.0.1:#{origin.port}")
+        msg.should_not contain("out of the project scope")
+        msg.should_not contain("scope include rule")
+        origin.paths.should be_empty
+      end
+      origin.close
+    end
   end
 
   describe "what it refuses to build" do

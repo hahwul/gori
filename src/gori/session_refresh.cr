@@ -665,7 +665,7 @@ module Gori
       private def step_refusal(plan : Repeater::Plan, outbound : Outbound) : String?
         target = (bytes = plan.scope_requests.first?) ? Outbound.request_target(bytes) : "/"
         verdict = outbound.check_request(plan.scheme, plan.host, target, plan.port)
-        return "#{plan.host} is out of the project scope — #{outbound.remedy(verdict)}" if verdict.blocked?
+        return outbound.refusal(verdict) if verdict.blocked?
         sweep = outbound.reason == Outbound::Reason::Interactive ? nil : outbound.sweep_block(plan.scheme, plan.host, target, plan.port)
         sweep || plan.refusal
       end

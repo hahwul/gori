@@ -81,8 +81,7 @@ module Gori::RequestMacro
         end
         verdict = outbound.check_request(plan.scheme, plan.host, Outbound.request_target(plan.bytes), plan.port)
         if verdict.blocked?
-          raise Error.new("macro step #{n} (#{step.label}) targets #{plan.host}, which is out of the project scope — " \
-                          "#{outbound.remedy(verdict)}")
+          raise Error.new("macro step #{n} (#{step.label}): #{outbound.refusal(verdict)}")
         end
       end
       runner = new(spec, steps, outbound, store, overrides, verify)
@@ -250,7 +249,7 @@ module Gori::RequestMacro
         verdict = @outbound.check_request(plan.scheme, plan.host, target, plan.port)
         if verdict.blocked?
           return failed(total, sent, n, step.label,
-            "#{plan.host} is out of the project scope — #{@outbound.remedy(verdict)}", nil, flows)
+            @outbound.refusal(verdict), nil, flows)
         end
         wire = plan.wire_bytes
         # Layer 2 on the bytes that will go out (a `$BIND` in the request line resolves before
