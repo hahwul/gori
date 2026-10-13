@@ -123,6 +123,11 @@ describe Gori::Probe::Passive::JsScan do
       JsScan.strip(%(x=/r/g/"q";)).should eq(%(x=/r/g/" ";))
     end
 
+    it "reads a raw JSX closing tag as markup, not a regex" do
+      src = "return <div>{x}</div>; // it's fine\nel.innerHTML = location.hash;"
+      JsScan.source_sink_pairs(JsScan.strip(src)).should eq([{"location.hash", "innerHTML"}])
+    end
+
     it "stops an unterminated regex at the end of its line" do
       JsScan.strip(%(x=/abc\ny="q")).should eq(%(x=/abc\ny=" "))
     end

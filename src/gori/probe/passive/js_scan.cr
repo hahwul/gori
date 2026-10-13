@@ -306,8 +306,9 @@ module Gori
 
         # Code chars after which a `/` starts a regex literal rather than a division. A `)` or `]`
         # is not here (`(a)/b`, `x[0]/2`), and neither is an identifier other than REGEX_KEYWORDS:
-        # the usual heuristic, wrong only on shapes like `if (x) /re/.test(y)`.
-        REGEX_AFTER = "(,=:[!&|?{};+-*%<>~^"
+        # the usual heuristic, wrong on shapes like `if (x) /re/.test(y)`. Nor are `<` and `>`:
+        # raw JSX's `</div>` and `<b>/path</b>` are far commoner than `a < /re/`.
+        REGEX_AFTER = "(,=:[!&|?{};+-*%~^"
 
         # Keywords after which a `/` opens a regex (`return/^a/.test(e)`, minified).
         REGEX_KEYWORDS = %w[return typeof case delete void in of new throw yield await]
