@@ -399,7 +399,11 @@ module Gori
     # passes its own cancel.
     def admit(count : Int32 = 1, halt : Proc(Bool)? = @halt) : String?
       return nil unless b = @budget
-      count.times { (err = b.admit(halt)) && (return err) }
+      count.times do |i|
+        next unless err = b.admit(halt)
+        b.refund(i) # the slots already taken go out with nothing: one refusal for the group
+        return err
+      end
       nil
     end
 

@@ -115,6 +115,17 @@ describe Gori::Outbound::Budget do
     end
   end
 
+  it "refunds the slots a multi-slot admit took before it was refused" do
+    with_store do |store|
+      set_budget(store, max: "10")
+      ob = Gori::Outbound.interactive(Gori::Scope.load(store))
+      7.times { ob.admit.should be_nil }
+      ob.admit(5).should eq(Gori::Outbound::BUDGET_SPENT_ERROR) # a 5-member race, 3 left
+      Budget.for(store).release
+      spent(store).should eq("7")
+    end
+  end
+
   # The CLI hands most commands a READ-ONLY store, which has no writer at all.
   it "leases through a read-only store too" do
     with_two_stores(read_only: true) do |store, ro|

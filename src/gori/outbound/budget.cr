@@ -143,6 +143,11 @@ module Gori
         end
       end
 
+      # Count `n` admitted slots that will not be sent back toward the total, on the next lease.
+      def refund(n : Int) : Nil
+        @refund += n
+      end
+
       # Hand the unsent part of the total back, for a process that is done sending.
       def release : Nil
         @lock.synchronize do
