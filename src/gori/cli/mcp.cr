@@ -217,7 +217,6 @@ module Gori::CLI
         return
       end
     Log.warn { "mcp: #{resolved} has no captured flows (empty database)" } if store.count.zero?
-    server = nil
     begin
       server = MCP::Server.new(store, allow_actions: !read_only, verify_upstream: !insecure_upstream,
         project_name: project_name, project_slug: project_slug, db_path: resolved,
