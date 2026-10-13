@@ -167,6 +167,7 @@ describe Gori::Probe::Passive::JsScan do
       pairs.call(%(const x = new XMLHttpRequest(); xhr.open("GET", "/a/" + location.hash);))
         .should eq([{"location.hash", "XMLHttpRequest.open"}])
       pairs.call(%($.ajax("/a/" + this.$route.params.id);)).should eq([{"route.params", "jQuery.ajax"}])
+      pairs.call(%(jQuery.getJSON("/a/" + location.hash);)).should eq([{"location.hash", "jQuery.ajax"}])
       pairs.call(%(new Request(url.searchParams.get("p"));)).should eq([{"searchParams.get()", "Request"}])
     end
 

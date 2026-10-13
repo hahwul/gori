@@ -545,7 +545,7 @@ module Gori
           {/\bfetch\s*\(/, "fetch", 0},
           {/(?<!window)\.open\s*\(/, "XMLHttpRequest.open", 1},
           {/\baxios(?:\.(?:get|post|put|patch|delete|request))?\s*\(/, "axios", 0},
-          {/\$\.(?:ajax|get|post|getJSON)\s*\(/, "jQuery.ajax", 0},
+          {/(?:\$|\bjQuery)\.(?:ajax|get|post|getJSON)\s*\(/, "jQuery.ajax", 0},
           {/\bnew\s+Request\s*\(/, "Request", 0},
         ] of {Regex, String, Int32}).map { |(re, label, arg)| {Utf8.tolerant(re), label, arg} }
 
