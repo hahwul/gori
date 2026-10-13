@@ -206,6 +206,11 @@ describe Gori::Probe::Passive::JsScan do
       pairs.call(%(fetch("/a/"+location.hash);fetch("/b/"+location.hash);fetch("/c/"+location.hash);))
         .should eq([{"location.hash", "fetch"}])
       pairs.call("fetch(location.hash+" * 13_107).should eq([{"location.hash", "fetch"}])
+      # A config with no `url:` moves nothing past; the hit cap bounds the walk instead.
+      hostile = "location.hash;" + "fetch({" * 37_449
+      started = Time.instant
+      pairs.call(hostile).should be_empty
+      (Time.instant - started).should be < 100.milliseconds # ~230 ms uncapped
       # A nested call's own source is still read, as part of the outer argument.
       pairs.call(%(fetch("/a/" + fetch("/b/" + location.hash));)).should eq([{"location.hash", "fetch"}])
       # A call outside the config's URL is its own request, not a nested URL.
