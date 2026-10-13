@@ -580,8 +580,9 @@ module Gori
         # URL counts: a source in the options (`{body: location.search}`), or in a config object
         # outside its `url:` key, is not CSPT. `encodeURI` is NOT a sanitizer here — it leaves `/`
         # and `.` alone, so `../` survives it. `sources` is the script's `source_spans`, shared
-        # with DomXss through `Context#client_source_index`.
-        def self.request_source_pairs(code : String, sources = source_spans(code)) : Array({String, String})
+        # with DomXss through `Context#client_source_index`. `messages` says the script listens
+        # for postMessage; without it `e.data` is far likelier a response (`axios(…).then(e=>…)`).
+        def self.request_source_pairs(code : String, sources = source_spans(code), messages = false) : Array({String, String})
           pairs = [] of {String, String}
           all = nil
           bytes = code.to_slice
@@ -590,7 +591,8 @@ module Gori
             code.scan(sink_re) do |m|
               # Router sources are scanned on the first sink hit, so a script with no request
               # sink pays nothing for them, and one with no source at all returns here.
-              all ||= sources.reject { |(_, label)| NOT_URL.includes?(label) } + router_spans(code)
+              all ||= sources.reject { |(_, label)| NOT_URL.includes?(label) || (!messages && label == "postMessage data") } +
+                      router_spans(code)
               return pairs if all.empty?
               lo, hi = argument_span(code, m.byte_end(0), arg)
               lo, hi = config_url_span(code, lo, hi)

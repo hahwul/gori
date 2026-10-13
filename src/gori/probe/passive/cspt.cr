@@ -18,12 +18,19 @@ module Gori
             Category::CLIENT)
         end
 
+        # A message listener, read from the comment-stripped view (the event name is a string).
+        # Only then does `e.data` count as postMessage data.
+        MESSAGE_LISTENER = Utf8.tolerant(/addEventListener\s*\(\s*["'`]message["'`]|\bonmessage\b/)
+
         def check(ctx : Context, acc : Array(Detection)) : Nil
           scripts = ctx.client_code
           return if scripts.empty? # before the Set: most flows carry no script
           seen = Set({String, String}).new
           scripts.each_with_index do |code, i|
-            JsScan.request_source_pairs(code, ctx.client_source_index[i]).each do |(src, sink)|
+            index = ctx.client_source_index[i]
+            messages = index.any? { |(_, label)| label == "postMessage data" } &&
+                       MESSAGE_LISTENER.matches?(ctx.client_scripts_nocomment[i])
+            JsScan.request_source_pairs(code, index, messages).each do |(src, sink)|
               next unless seen.add?({src, sink})
               acc << Detection.new("cspt_suspected", Category::CLIENT, ctx.host, ctx.url,
                 "Possible client-side path traversal (#{sink})", Store::Severity::Low,

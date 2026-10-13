@@ -22,6 +22,14 @@ describe Gori::Probe::Passive::Cspt do
     end
   end
 
+  it "counts e.data as postMessage data only in a script with a message listener" do
+    with_store do |store|
+      cspt_dets(store, %(axios.get("/api/me").then(e=>fetch("/api/org/"+e.data.orgId));)).should be_empty
+      dets = cspt_dets(store, %(addEventListener("message",function(e){fetch("/api/org/"+e.data.orgId)});))
+      dets.map(&.evidence).should eq(["postMessage data → fetch"])
+    end
+  end
+
   it "stays quiet on a source-free request" do
     with_store do |store|
       cspt_dets(store, %(fetch("/api/user/1");)).should be_empty
