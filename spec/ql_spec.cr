@@ -1396,6 +1396,15 @@ describe "Gori::Store#search (QL)" do
       Gori::QL.analyze("static~true").ignored.should_not be_empty
     end
 
+    it "compiles rewritten: to the rule-hit side table, any rule or one by scope and id (#1589)" do
+      Gori::QL.parse("rewritten:true").sql.should contain("EXISTS (SELECT 1 FROM flow_rule_hits")
+      Gori::QL.parse("rewritten:global/3").args.should eq(["global", 3_i64])
+      # An id without its scope names two rules, so it is not a value — dropped and reported.
+      %w[rewritten:3 rewritten:maybe rewritten:project/0].each do |q|
+        Gori::QL.analyze(q).ignored.should eq([q])
+      end
+    end
+
     it "splits captured flows into static assets and the rest, NULL-free in both directions" do
       with_store do |store|
         png = capture_typed(store, "/logo.png", 200, "image/png")

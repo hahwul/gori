@@ -319,6 +319,8 @@ gori run show <flow-id> --format raw
 
 `--ws-match=QUERY` prints only the WebSocket messages that match, in every format that carries the transcript: `ws:needle` (case-insensitive), `ws~regex`, or a bare needle, matched exactly as the [`ws:` query term](/reference/query-language/#websocket-messages) matches. A line on STDERR names how many of the socket's messages were kept.
 
+`--original` prints a flow as it was before a [Match & Replace rule](/guide/proxy/#match-replace) or an Intercept edit changed it: the client's request and the origin's response, in any `--format`, with a side nothing changed shown as stored. A flow nothing changed is refused.
+
 `--format` is `text`, `json`, `raw` (exact bytes), `har` (a one-entry HAR log), or one of the **request-as-code** serializers: `curl`, `python` (requests), `fetch` (JavaScript), `go` (net/http), `httpie`, and `csrf` (a self-submitting HTML CSRF PoC). Each emits byte-identical text to the TUI's `Space → Y` **Copy as…** row of the same name. `--request-only` / `--response-only` limit the output and do not apply to `har`; every request-as-code format *is* the request, so `--response-only` is refused for all of them. Two caveats go to STDERR rather than into the snippet on STDOUT: a request body cut at the capture cap is carried **short**, and a WebSocket flow serializes as the upgrade handshake with none of its frames. Decoded SAML/JWT/GraphQL/params, WebSocket messages, and SSE events are included where present.
 
 #### Safe evidence export

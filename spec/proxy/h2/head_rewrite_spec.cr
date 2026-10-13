@@ -187,6 +187,24 @@ describe Gori::Proxy::H2::HeadRewrite do
     sink.requests.first.target.should eq("/rewritten")
   end
 
+  it "records the rules that changed a head, and the head they replaced (#1589)" do
+    with_store do |store|
+      rules = Gori::Rules.new(store, store.match_rules)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "/secret", "/rewritten")
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "/never", "/x")
+      pipe, assembler, sink = pipeline(rules)
+      push(pipe, assembler, headers(1_u32, HPACK::Encoder.new.encode(req("/secret"))))
+      push(pipe, assembler, headers(3_u32, HPACK::Encoder.new.encode(req("/public"))))
+
+      fired = rules.rules.first
+      rewrite = sink.requests[0].rewrite.should_not be_nil
+      rewrite.hits.should eq([Gori::Store::RuleRef.new(fired.scope, fired.id)])
+      String.new(rewrite.head.not_nil!).should contain("GET /secret HTTP/2")
+      String.new(sink.requests[0].head).should contain("GET /rewritten HTTP/2")
+      sink.requests[1].rewrite.should be_nil
+    end
+  end
+
   it "keeps re-encoding every later head in the direction — and that is what keeps the peer readable" do
     # The invariant, and the proof that "re-encode only the heads a rule changed" is unsound
     # rather than merely uncompressed. The sender indexes incrementally (§6.2.1), so its second

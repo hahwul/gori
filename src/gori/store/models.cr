@@ -84,6 +84,9 @@ module Gori
       # forwarding (#1378): `head`/`body` above are the edited bytes that went upstream, this is
       # what they replaced. nil for every flow nobody edited. See the V44 migration.
       getter intercept_original : Bytes?
+      # What Match&Replace changed on this request (#1589): `head`/`body` above are what went
+      # upstream. Set by the proxy after the DTO is built, so not a constructor argument.
+      property rewrite : Rewrite? = nil
 
       def initialize(@created_at, @scheme, @host, @port, @method, @target,
                      @http_version, @head, @body = nil,
@@ -122,6 +125,9 @@ module Gori
       # The interim 1xx responses the origin sent before `head`, or nil when it sent none —
       # which is nearly every exchange. See `Interims`.
       getter interims : Interims?
+      # What Match&Replace changed on this response (#1589): `head`/`body` above are what the
+      # client got. Set by the proxy after the DTO is built, like `CapturedRequest#rewrite`.
+      property rewrite : Rewrite? = nil
 
       def initialize(@flow_id, @status, @head, @body = nil, @reason = nil,
                      @content_type = nil, @ttfb_us = nil, @duration_us = nil,
@@ -299,13 +305,20 @@ module Gori
       # The operator edited this request at Intercept, and the client's original is kept
       # (`Store#intercept_original`, V44). Read off the side table, not a `flows` column.
       getter? intercept_edited : Bool
+      # The Match&Replace rules that changed this flow's bytes (V49), or nil when none did — or
+      # when the flow predates the record, which is "not recorded", not "untouched".
+      getter rewritten_by : Array(RuleRef)?
 
       def initialize(@id, @created_at, @scheme, @method, @host, @port, @target,
                      @status, @size, @state, @response_size = nil, @duration_us = nil,
                      @content_type = nil, @short_circuited = false, @advisory = nil,
                      @request_content_type = nil, @connect_protocol = nil,
                      @source = nil, @source_surface = nil, @source_ref = nil,
-                     @intercept_edited = false)
+                     @intercept_edited = false, @rewritten_by = nil)
+      end
+
+      def rewritten? : Bool
+        !@rewritten_by.nil?
       end
 
       # Did gori itself put this request on the wire? nil (`source` not recorded) answers false:
@@ -1473,6 +1486,37 @@ module Gori
       end
     end
     lowercase_label RuleScope
+
+    # A Match&Replace rule by its identity (#1589): `id` alone names two rules (see `RuleScope`).
+    # Spelled `project/4` / `global/3` everywhere a surface prints or parses one.
+    record RuleRef, scope : RuleScope, id : Int64 do
+      # The `rewritten_by` of a flow no rule changed — `[]` on every surface, not `null`.
+      NONE = [] of RuleRef
+
+      def to_s(io : IO) : Nil
+        io << scope.label << '/' << id
+      end
+
+      # `{"scope": "project", "id": 4}` — MCP and `gori run` alike.
+      def to_json(json : JSON::Builder) : Nil
+        json.object do
+          json.field "scope", scope.label
+          json.field "id", id
+        end
+      end
+
+      def self.parse?(text : String) : RuleRef?
+        scope, _, id = text.partition('/')
+        s = RuleScope.from_label?(scope.downcase)
+        n = id.to_i64?
+        s && n && n > 0 ? new(s, n) : nil
+      end
+    end
+
+    # What Match&Replace did to one side of a flow (#1589): the rules that changed its bytes, and
+    # the bytes they replaced (`head` nil keeps hits only). `body` nil means the stored body is
+    # the original.
+    record Rewrite, hits : Array(RuleRef), head : Bytes? = nil, body : Bytes? = nil
 
     # A Match&Replace rule (the "Rewriter" tab): rewrites a request/response HEAD
     # (request line + headers) or BODY (the entity body) in flight. Human-authored (P4),

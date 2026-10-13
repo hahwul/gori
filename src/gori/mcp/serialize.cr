@@ -272,6 +272,9 @@ module Gori
           # The operator edited this request at Intercept (#1378): the stored request is what
           # went upstream, not what the client sent. Every row, for `short_circuited`'s reason.
           j.field "intercept_edited", row.intercept_edited?
+          # The Match&Replace rules that changed this flow (#1589), `[]` when none did. Every
+          # row, for `short_circuited`'s reason.
+          j.field "rewritten_by", row.rewritten_by || Store::RuleRef::NONE
           # Where this flow came from (`Gori::FlowSource`), and on EVERY row for
           # `short_circuited`'s reason: an agent reading this feed has no other way to tell a
           # request gori sent — including one IT sent through `send_request` — from traffic the
@@ -863,8 +866,8 @@ module Gori
                                 body_cap : Int32 = MAX_TEXT, body_omit : Bool = false,
                                 redaction : RedactionNote? = nil, body_more : {String, String}? = nil,
                                 *, interims : Store::Interims? = nil, ws_total : Int32? = nil,
-                                ws_socket_total : Int32? = nil) : String
-        JSON.build { |j| flow_detail(j, detail, ws_msgs, include_sensitive, body_cap, body_omit, redaction, body_more, interims: interims, ws_total: ws_total, ws_socket_total: ws_socket_total) }
+                                ws_socket_total : Int32? = nil, originals : Array(Original) = [] of Original) : String
+        JSON.build { |j| flow_detail(j, detail, ws_msgs, include_sensitive, body_cap, body_omit, redaction, body_more, interims: interims, ws_total: ws_total, ws_socket_total: ws_socket_total, originals: originals) }
       end
 
       # `body_more` is the {request, response} pointer a display-capped body carries
@@ -875,7 +878,7 @@ module Gori
                            body_cap : Int32 = MAX_TEXT, body_omit : Bool = false,
                            redaction : RedactionNote? = nil, body_more : {String, String}? = nil,
                            *, interims : Store::Interims? = nil, ws_total : Int32? = nil,
-                           ws_socket_total : Int32? = nil) : Nil
+                           ws_socket_total : Int32? = nil, originals : Array(Original) = [] of Original) : Nil
         row = detail.row
         j.object do
           j.field "id", row.id
@@ -906,6 +909,7 @@ module Gori
           # projection said so and the detail one dropped it.
           j.field "short_circuited", row.short_circuited?
           j.field "intercept_edited", row.intercept_edited?
+          j.field "rewritten_by", row.rewritten_by || Store::RuleRef::NONE
           # `flow_row`'s provenance, on the DETAIL projection for the same sharpened reason: an
           # agent about to quote these bytes in an issue has to know whether the request was
           # the target's client's or gori's own — including one this very server sent through
@@ -942,6 +946,7 @@ module Gori
             detail.response_body_truncated?, body_cap, body_omit, include_sensitive,
             source_size: detail.response_body_truncated? ? detail.response_wire_body_size : nil,
             more: body_more.try(&.[1]))
+          emit_originals(j, originals, body_cap, body_omit, include_sensitive)
           emit_sse_events(j, detail)
           emit_ws_messages(j, ws_msgs, ws_total || ws_msgs.size, ws_socket_total)
           emit_grpc_messages(j, "request_grpc_messages", detail.request_head, detail.request_body,
@@ -949,6 +954,23 @@ module Gori
           emit_grpc_messages(j, "response_grpc_messages", detail.response_head, detail.response_body,
             detail.row.target, request: false)
           emit_decoded(j, detail, ws_msgs, include_sensitive)
+        end
+      end
+
+      # One side's bytes before Match&Replace changed them (#1589): `request`/`response`, the head,
+      # and the body when a body rule changed it (nil = the stored body is the original).
+      alias Original = {String, Bytes, Bytes?}
+
+      # `request_original_head` / `response_original_body` …, present only for a side a rule
+      # changed, under the same header redaction as the stored heads above.
+      def self.emit_originals(j : JSON::Builder, originals : Array(Original), body_cap : Int32,
+                              body_omit : Bool, include_sensitive : Bool) : Nil
+        originals.each do |side, head, body|
+          j.field "#{side}_original_head", redact_head_opt(head_text(head), include_sensitive)
+          emit_head_base64(j, "#{side}_original_head", head, include_sensitive)
+          next unless body
+          emit_body(j, "#{side}_original_body", side == "request" ? "client" : "target", head, body,
+            false, body_cap, body_omit, include_sensitive)
         end
       end
 

@@ -122,6 +122,9 @@ module Gori::Proxy::H2
       @buf = [] of Frame::Header
       @block_bytes = 0
       @block_stream = 0_u32
+      # The rules that changed the head in hand (#1589), reused per block so a head no rule
+      # changes allocates nothing.
+      @hits = [] of Store::RuleRef
     end
 
     # Whether this direction has begun re-encoding (see the class comment).
@@ -463,7 +466,8 @@ module Gori::Proxy::H2
       # request reads it from its own fields, while a response recovers it from the request mapped
       # to this stream because coalesced h2 connections can carry a different host per stream.
       authority = request ? request_host(fields) : response_host(stream_id)
-      rewritten_head = request ? rw.rewrite_request(head, authority) : rw.rewrite_response(head, authority)
+      @hits.clear
+      rewritten_head = request ? rw.rewrite_request(head, authority, @hits) : rw.rewrite_response(head, authority, @hits)
       return nil if rewritten_head == head # `Rules` returns the same content when nothing matched
 
       parsed = request ? HeadCodec.parse_request(rewritten_head, fields) : HeadCodec.parse_response(rewritten_head, fields)
@@ -476,7 +480,17 @@ module Gori::Proxy::H2
       # token, or a reason phrase, or the casing of a field name, all of which the h2 wire
       # format has no room for. Stay byte-exact and leave the latch alone rather than
       # re-encoding for a change that cannot reach the wire.
-      restored == fields ? nil : restored
+      return nil if restored == fields
+      note_rewrite(stream_id, request, head, fields)
+      restored
+    end
+
+    # The flow keeps which rules fired and the head they replaced (#1589) — in the h1-shaped form
+    # the rules read, as Intercept keeps its held head. A final response only: an interim's
+    # original would stand in for the final head the flow stores.
+    private def note_rewrite(stream_id : UInt32, request : Bool, head : Bytes, fields : Array(HPACK::Field)) : Nil
+      return if @hits.empty? || !(request || final_response_head?(fields))
+      @assembler.note_rewrite(stream_id, request, Store::Rewrite.new(@hits.dup, head))
     end
 
     # The response fields with every h3-advertising `Alt-Svc` removed, or nil when there was

@@ -276,6 +276,20 @@ module Gori
       {bytes[0, idx], idx < bytes.size}
     end
 
+    # One side of a flow as it was before anything changed it: the client's request before an
+    # Intercept edit (V44, kept whole) or a Match&Replace rule, the origin's response before a
+    # rule (#1589). A body the rules left alone is the stored one. nil when nothing changed it.
+    # History's ORIGINAL panes and `gori run show --original` both read it.
+    def self.original(store : Store, d : Store::FlowDetail, side : Store::RuleTarget) : {Bytes, Bytes?}?
+      if side.request? && d.row.intercept_edited? && (raw = store.intercept_original(d.row.id))
+        head, has_body = split_edit(raw)
+        return {head, has_body ? raw[head.size..] : nil}
+      end
+      return unless d.row.rewritten?
+      head, body = store.rewrite_original(d.row.id, side) || return
+      {head, body || (side.request? ? d.request_body : d.response_body)}
+    end
+
     @direction : Direction
     @filter : InterceptFilter
 

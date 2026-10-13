@@ -150,5 +150,35 @@ module Gori::Proxy
     def rewrite_ws_in(payload : Bytes, host : String) : Bytes
       payload
     end
+
+    # --- which rules changed the bytes (#1589) -------------------------------
+    #
+    # The same six rewrites, also appending to `hits` the `{scope, id}` of each rule whose output
+    # differed from its input, so the capture can say which rules fired. `hits` is the CALLER'S
+    # (reused per connection), so a rewrite that changes nothing allocates nothing. The default
+    # reports nothing: a test double's rewrites are not rules.
+    def rewrite_request(head : Bytes, host : String, hits : Array(Store::RuleRef)) : Bytes
+      rewrite_request(head, host)
+    end
+
+    def rewrite_response(head : Bytes, host : String, hits : Array(Store::RuleRef)) : Bytes
+      rewrite_response(head, host)
+    end
+
+    def rewrite_request_body(entity : Bytes, host : String, hits : Array(Store::RuleRef)) : Bytes
+      rewrite_request_body(entity, host)
+    end
+
+    def rewrite_response_body(entity : Bytes, host : String, hits : Array(Store::RuleRef)) : Bytes
+      rewrite_response_body(entity, host)
+    end
+
+    def rewrite_ws_out(payload : Bytes, host : String, hits : Array(Store::RuleRef)) : Bytes
+      rewrite_ws_out(payload, host)
+    end
+
+    def rewrite_ws_in(payload : Bytes, host : String, hits : Array(Store::RuleRef)) : Bytes
+      rewrite_ws_in(payload, host)
+    end
   end
 end

@@ -1686,6 +1686,8 @@ module Gori
       conn.exec("DELETE FROM js_ref_scans WHERE flow_id <= ?", cutoff)
       conn.exec("DELETE FROM intercept_originals WHERE flow_id <= ?", cutoff)
       conn.exec("DELETE FROM flow_interims WHERE flow_id <= ?", cutoff)
+      conn.exec("DELETE FROM flow_rule_hits WHERE flow_id <= ?", cutoff)
+      conn.exec("DELETE FROM rewrite_originals WHERE flow_id <= ?", cutoff)
       conn.exec("DELETE FROM flows WHERE id <= ?", cutoff)
       # Read changes() IMMEDIATELY after the flows delete — it reports the most recent
       # statement, so any query in between (including the h2 reaping below) would replace it.
@@ -2060,7 +2062,37 @@ module Gori
       if orig = req.intercept_original
         conn.exec("INSERT OR REPLACE INTO intercept_originals (flow_id, request) VALUES (?, ?)", id, orig)
       end
+      # An Intercept edit already keeps the client's request (V44): the rules' hits only.
+      write_rewrite(conn, id, RuleTarget::Request, req.rewrite, original: req.intercept_original.nil?)
       id
+    end
+
+    # What Match&Replace did to one side of a flow (V49), in that side's own transaction so a
+    # flow never reads as rewritten without its original, nor the other way round. Nothing at
+    # all for the flow no rule changed.
+    private def write_rewrite(conn : DB::Connection, flow_id : Int64, side : RuleTarget, rewrite : Rewrite?,
+                              *, original : Bool = true) : Nil
+      return unless rewrite
+      write_rule_hits(conn, flow_id, side, rewrite.hits)
+      # An empty `Bytes` can bind as NULL, and one NOT NULL failure fails the writer's whole batch.
+      if original && (head = rewrite.head) && !head.empty?
+        conn.exec("INSERT OR REPLACE INTO rewrite_originals (flow_id, side, head, body) VALUES (?, ?, ?, ?)",
+          flow_id, side.label, head, rewrite.body)
+      end
+    end
+
+    private def write_rule_hits(conn : DB::Connection, flow_id : Int64, side : RuleTarget, hits : Array(RuleRef)) : Nil
+      hits.each do |h|
+        conn.exec("INSERT OR IGNORE INTO flow_rule_hits (flow_id, side, scope, rule_id) VALUES (?, ?, ?, ?)",
+          flow_id, side.label, h.scope.label, h.id)
+      end
+    end
+
+    # Rules that rewrote a WebSocket message on an already-recorded flow (V49). Called once per
+    # rule per socket direction, the first time it changes a message, never per message.
+    def record_rule_hits(flow_id : Int64, side : RuleTarget, hits : Array(RuleRef)) : Nil
+      return if flow_id <= 0 || hits.empty?
+      exec_task ->(c : DB::Connection) { write_rule_hits(c, flow_id, side, hits) }
     end
 
     # `insert_one`'s statement, once per `Store.blob_slot` answer for `request_head` — built at
@@ -2107,6 +2139,7 @@ module Gori
         resp.body_truncated? ? 1 : 0, resp.advisory,
         resp.state == FlowState::Complete ? 1 : 0, resp.content_type, resp.status, resp.flow_id)
       write_interims(conn, resp.flow_id, resp.interims)
+      write_rewrite(conn, resp.flow_id, RuleTarget::Response, resp.rewrite)
       # `fts_dirty = 1` again: the response side just appeared (or changed), so whatever the
       # indexer wrote for this row is stale. Re-dirtying an already-dirty row is a no-op, so
       # the common case — response landing before the indexer ever reached the row — is
@@ -2414,10 +2447,11 @@ module Gori
       source_surface = rs.read(String?).try { |t| FlowSource::Surface.parse?(t) }
       source_ref = rs.read(String?)
       intercept_edited = rs.read(Int64) != 0
+      rewritten_by = rs.read(String?).try(&.split(',').compact_map { |h| RuleRef.parse?(h) }.uniq!)
       FlowRow.new(id, created_at, scheme, method, host, port, target,
         status, total_size(req_size, resp_size), state, resp_size, duration_us, content_type,
         short_circuited, advisory, request_content_type, connect_protocol,
-        source, source_surface, source_ref, intercept_edited)
+        source, source_surface, source_ref, intercept_edited, rewritten_by)
     end
 
     # A row's request + response size. Each column fits Int64 but a foreign or hand-edited row

@@ -65,6 +65,12 @@ private class WsSink < Gori::Proxy::FlowSink
                     shape : Gori::Proxy::WS::Shape = Gori::Proxy::WS::Shape::DEFAULT) : Nil
     @messages << {direction, opcode, String.new(payload)}
   end
+
+  getter hits = [] of {Int64, Gori::Store::RuleTarget, Array(Gori::Store::RuleRef)}
+
+  def on_rule_hits(flow_id : Int64, side : Gori::Store::RuleTarget, hits : Array(Gori::Store::RuleRef)) : Nil
+    @hits << {flow_id, side, hits}
+  end
 end
 
 # Wait for `n` captured WS rows, BOUNDED: a row that never arrives has to fail the example
@@ -531,6 +537,32 @@ describe Gori::Proxy::WS do
       # Capture records what gori WROTE — the bytes the peer actually sees.
       sink.messages.should contain({"out", 1, "HELLO there"})
       sink.messages.should contain({"in", 1, "yo"})
+    end
+
+    it "records the rule that rewrote a message on the flow, once per rule (#1589)" do
+      with_store do |store|
+        rules = Gori::Rules.new(store, store.match_rules)
+        rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Ws, "hi", "HELLO")
+        rule = rules.rules.first
+        cs_r, cs_w = IO.pipe
+        ts_r, ts_w = IO.pipe
+        ss_r, ss_w = IO.pipe
+        tc_r, tc_w = IO.pipe
+        client = IO::Stapled.new(cs_r, tc_w)
+        upstream = IO::Stapled.new(ss_r, ts_w)
+        cs_w.write(masked_op_frame(Gori::Proxy::WS::OP_TEXT, "hi there".to_slice))
+        cs_w.write(masked_op_frame(Gori::Proxy::WS::OP_TEXT, "hi again".to_slice))
+        cs_w.write(masked_op_frame(Gori::Proxy::WS::OP_TEXT, "nothing".to_slice))
+        cs_w.close
+        ss_w.close
+
+        sink = WsSink.new
+        spawn { loop { ts_r.read(Bytes.new(4096)).zero? && break } }
+        spawn { loop { tc_r.read(Bytes.new(4096)).zero? && break } }
+        Gori::Proxy::WS::Relay.run(client, upstream, 7_i64, sink, rules, WS_CTX)
+
+        sink.hits.should eq([{7_i64, Gori::Store::RuleTarget::Request, [Gori::Store::RuleRef.new(rule.scope, rule.id)]}])
+      end
     end
 
     it "rewrites the in direction and emits it UNMASKED (server→client)" do

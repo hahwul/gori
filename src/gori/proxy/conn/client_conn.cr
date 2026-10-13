@@ -258,6 +258,16 @@ module Gori::Proxy
       # Which compressed-body Match&Replace refusals this connection has already written to
       # `gori.log` — see `log_compressed_skip` for the key and the cap.
       @compressed_skips = Set(String).new
+      # Match&Replace on the exchange in hand (#1589): the rules that changed each side, and the
+      # bytes they replaced. Reused across keep-alive requests (reset in `handle_request`), so an
+      # exchange no rule changes allocates nothing here; `capture_request`/`capture_response`
+      # attach a copy to the flow when one did.
+      @req_hits = [] of Store::RuleRef
+      @resp_hits = [] of Store::RuleRef
+      @req_orig_head = nil.as(Bytes?)
+      @req_orig_body = nil.as(Bytes?)
+      @resp_orig_head = nil.as(Bytes?)
+      @resp_orig_body = nil.as(Bytes?)
       # Has `read_client_head` ever come back with bytes on this connection? The narrow half of
       # the server-speaks-first signal (#755): a zero-byte read timeout is only worth recording on
       # a connection that never carried anything. On one that did, the same timeout is an idle
@@ -391,6 +401,9 @@ module Gori::Proxy
 
     # Returns true to keep the connection alive for another request.
     private def handle_request : Bool
+      # Before the read: an oversized head is recorded from inside `read_client_head`.
+      forget_request_rewrite
+      forget_response_rewrite
       head = read_client_head
       # nil = the client closed, a keep-alive connection went idle to its end, or the read timed
       # out (`read_client_head` has already recorded the one shape of that worth recording).
@@ -498,7 +511,8 @@ module Gori::Proxy
       sent_req = req
       sent_head = forward_head
       if rw = @rewriter
-        rewritten = rw.rewrite_request(forward_head, host)
+        @req_orig_head = req.raw_head
+        rewritten = rw.rewrite_request(forward_head, host, @req_hits)
         if rewritten != forward_head
           # A head rule that changed Content-Length/Transfer-Encoding must not desync the
           # streamed body from the head we send (#403): the body streams UNTOUCHED (P6), so
@@ -510,6 +524,9 @@ module Gori::Proxy
           record_head = restore_framing_headers(rw.rewrite_request(client_head, host), client_head)
           record_req = Codec::Http1.parse_request_head(record_head) unless record_head == client_head
         end
+        # Rules that cancelled out, or a framing-only change `restore_framing_headers` undid,
+        # changed nothing on the wire: nothing to record.
+        @req_hits.clear if !@req_hits.empty? && sent_head == forward_head
       end
 
       # The target every SCOPE/INTERCEPT gate below reads, from the ACTUALLY-SENT head (post
@@ -663,12 +680,12 @@ module Gori::Proxy
         return false
       end
       req_body = req_framing.none? ? nil : req_capture.to_slice
-      flow_id = @sink.on_request(FlowMapper.request(record_req,
+      flow_id = capture_request(FlowMapper.request(record_req,
         scheme: scheme, host: host, port: port, created_at: created_at, body: req_body,
         body_truncated: req_capture.truncated?, body_size: req_capture.total, source: FlowSource::Kind::Proxy))
       unless req_complete # client cut the request body short — don't reuse the connection
         release_upstream
-        @sink.on_response(FlowMapper.error_response(flow_id, "client truncated request body",
+        capture_response(FlowMapper.error_response(flow_id, "client truncated request body",
           interims: early_interims.try { |i| i unless i.empty? }))
         return false
       end
@@ -767,7 +784,7 @@ module Gori::Proxy
       client_body = buffered
       if (rw = @rewriter) && rw.rewrites_request_body_for_host?(host)
         rewritten_head, buffered, advisory = apply_body_rewrite(sent_head, buffered, req_framing,
-          host: host, response: false, live: true) { |e| rw.rewrite_request_body(e, host) }
+          host: host, response: false, live: true) { |e| rw.rewrite_request_body(e, host, @req_hits) }
         record_req = reframed_record(record_req, sent_head, rewritten_head, buffered)
         sent_head = rewritten_head
         sent_req = Codec::Http1.parse_request_head(sent_head)
@@ -806,7 +823,7 @@ module Gori::Proxy
         return false
       end
       stored, trunc, size = capped(edited_body)
-      flow_id = @sink.on_request(FlowMapper.request(recorded,
+      flow_id = capture_request(FlowMapper.request(recorded,
         scheme: scheme, host: host, port: port, created_at: created_at,
         body: stored, body_truncated: trunc, body_size: size, advisory: advisory, source: FlowSource::Kind::Proxy,
         intercept_original: original))
@@ -845,7 +862,7 @@ module Gori::Proxy
 
       # Recorded BEFORE the answer, so a request held by a rule's delay shows in History as
       # pending while it waits, the way a fault's does (`serve_fault`).
-      flow_id = @sink.on_request(FlowMapper.request(record_req,
+      flow_id = capture_request(FlowMapper.request(record_req,
         scheme: scheme, host: host, port: port, created_at: created_at,
         body: stored, body_truncated: trunc, body_size: size, short_circuited: true, source: FlowSource::Kind::Proxy,
         # WHICH rule answered (#1237), as text that outlives the rule: `STUB` alone says gori
@@ -888,7 +905,7 @@ module Gori::Proxy
       # predicate excludes 101 because an ORIGIN's 101 is forwarded as an upgrade, and here
       # there is no upgrade to forward.
       non_final = resp.status < 200
-      @sink.on_response(FlowMapper.response(resp,
+      capture_response(FlowMapper.response(resp,
         flow_id: flow_id, body: resp_stored,
         body_truncated: resp_trunc, body_size: resp_size, advisory: delay_note,
         state: written && !non_final ? Store::FlowState::Complete : Store::FlowState::Aborted,
@@ -930,7 +947,7 @@ module Gori::Proxy
         record_error(record_req, scheme, host, port, created_at, "client truncated request body")
         return false
       end
-      flow_id = @sink.on_request(FlowMapper.request(record_req,
+      flow_id = capture_request(FlowMapper.request(record_req,
         scheme: scheme, host: host, port: port, created_at: created_at,
         body: stored, body_truncated: trunc, body_size: size, short_circuited: true,
         source: FlowSource::Kind::Proxy, source_ref: stub.ref.presence))
@@ -949,7 +966,7 @@ module Gori::Proxy
         end
       message = "#{done} by #{stub.ref}"
       message += "; #{notes.join("; ")}" unless notes.empty?
-      @sink.on_response(FlowMapper.aborted_response(flow_id, message))
+      capture_response(FlowMapper.aborted_response(flow_id, message))
       false
     end
 
@@ -1069,7 +1086,7 @@ module Gori::Proxy
         req_framing, req_len)
       return false unless whole
       rewritten_head, fwd_body, advisory = apply_body_rewrite(sent_head, buffered, req_framing,
-        host: host, response: false, live: true) { |e| rw.rewrite_request_body(e, host) }
+        host: host, response: false, live: true) { |e| rw.rewrite_request_body(e, host, @req_hits) }
       record_req = reframed_record(record_req, sent_head, rewritten_head, fwd_body)
       sent_head = rewritten_head
       sent_req = Codec::Http1.parse_request_head(sent_head) # head may have been re-framed
@@ -1081,7 +1098,7 @@ module Gori::Proxy
         return false
       end
       stored, trunc, size = capped(fwd_body)
-      flow_id = @sink.on_request(FlowMapper.request(record_req,
+      flow_id = capture_request(FlowMapper.request(record_req,
         scheme: scheme, host: host, port: port, created_at: created_at,
         body: stored, body_truncated: trunc, body_size: size, advisory: advisory, source: FlowSource::Kind::Proxy))
       handle_response(upstream, req, flow_id, started, host, port, scheme,
@@ -1170,6 +1187,7 @@ module Gori::Proxy
       final = skip_interim_responses(upstream, req, flow_id, resp_head, resp)
       return false unless final
       resp_head, resp = final
+      @resp_orig_head = resp_head # the origin's own head, for a rule's record (#1589)
       # Judged HERE — on the peer's final head, before Match&Replace or the Alt-Svc seam get
       # to it — because it is a fact about what the ORIGIN sent, not about what a rule made.
       @status_line_note = status_line_note(resp)
@@ -1196,6 +1214,8 @@ module Gori::Proxy
           sent_resp = Codec::Http1.parse_response_head(sent_resp_head)
         end
       end
+      # As for the request head: a change that never reached the wire is not recorded.
+      @resp_hits.clear if !@resp_hits.empty? && sent_resp_head == resp_head
       # The OFF half of the h3 `Alt-Svc` seam (#835), and the reason it sits HERE rather than
       # beside the strip: the sentence is about what the CLIENT is being invited onto, so it has
       # to be asked of the head the rules have finished with. An operator's response rule removing
@@ -1356,7 +1376,7 @@ module Gori::Proxy
         # for the next reused request. Refuse it: close the connection (don't parse a
         # body as the next response, don't reuse the upstream).
         if interim_has_body?(resp)
-          @sink.on_response(FlowMapper.error_response(flow_id, "malformed interim 1xx response (declared a body)",
+          capture_response(FlowMapper.error_response(flow_id, "malformed interim 1xx response (declared a body)",
             head: resp.raw_head, interims: @interims))
           release_upstream
           return nil
@@ -1365,7 +1385,7 @@ module Gori::Proxy
         # body-less 103s can't spin this fiber forever / flood the client (per-conn DoS).
         interim_seen += 1
         if interim_seen > MAX_INTERIM
-          @sink.on_response(FlowMapper.error_response(flow_id, "too many interim 1xx responses (>#{MAX_INTERIM})",
+          capture_response(FlowMapper.error_response(flow_id, "too many interim 1xx responses (>#{MAX_INTERIM})",
             interims: @interims))
           release_upstream
           return nil
@@ -1384,7 +1404,7 @@ module Gori::Proxy
             # Client gone mid-1xx (Stop / max-time / RST). Every other exit from this
             # method records on_response; an unguarded raise left the flow Pending forever.
             interims.add(resp.status, resp_head, relayed: false)
-            @sink.on_response(FlowMapper.error_response(flow_id, "connection closed while forwarding interim 1xx response",
+            capture_response(FlowMapper.error_response(flow_id, "connection closed while forwarding interim 1xx response",
               interims: @interims))
             release_upstream
             return nil
@@ -1407,7 +1427,7 @@ module Gori::Proxy
                                              empty_message : String = "no response from upstream") : Nil
       message = result.state == Codec::Http1::HeadReadResult::State::Empty ? empty_message : result.failure_message("response head",
         deadline: SocketTuning::HEAD_DEADLINE)
-      @sink.on_response(FlowMapper.error_response(flow_id, message, head: result.bytes, interims: @interims))
+      capture_response(FlowMapper.error_response(flow_id, message, head: result.bytes, interims: @interims))
     end
 
     # Does this request withhold its body until it is answered? RFC 9110 §10.1.1: `Expect` is a
@@ -1601,7 +1621,7 @@ module Gori::Proxy
                                           flow_id : Int64) : {Codec::BodyFraming, Int64}?
       Codec::Body.response_framing(resp, method)
     rescue ex : Gori::Error
-      @sink.on_response(FlowMapper.error_response(flow_id, "response framing rejected: #{ex.message}",
+      capture_response(FlowMapper.error_response(flow_id, "response framing rejected: #{ex.message}",
         head: resp.raw_head, interims: @interims))
       release_upstream
       nil
@@ -1696,7 +1716,7 @@ module Gori::Proxy
                                          state : Store::FlowState, error : String?,
                                          advisory : String? = nil) : Nil
       duration = (Time.instant - started).total_microseconds.to_i64
-      @sink.on_response(FlowMapper.response(sent_resp,
+      capture_response(FlowMapper.response(sent_resp,
         flow_id: flow_id, body: resp_framing.none? ? nil : resp_capture.to_slice,
         ttfb_us: ttfb, duration_us: duration,
         body_truncated: resp_capture.truncated?, body_size: resp_capture.total,
@@ -1833,7 +1853,7 @@ module Gori::Proxy
       if resp_complete
         sent_resp_head, fwd_body, advisory = apply_body_rewrite(sent_resp_head, buf.to_slice, resp_framing,
           host: host, response: true, live: !!rw.try(&.rewrites_response_body_for_host?(host))) do |e|
-          rw && rw.rewrites_response_body_for_host?(host) ? rw.rewrite_response_body(e, host) : e
+          rw && rw.rewrites_response_body_for_host?(host) ? rw.rewrite_response_body(e, host, @resp_hits) : e
         end
       end
       sent_resp = Codec::Http1.parse_response_head(sent_resp_head) # head may have been re-framed
@@ -1854,7 +1874,7 @@ module Gori::Proxy
         resp_complete = false
       end
       duration = (Time.instant - started).total_microseconds.to_i64
-      @sink.on_response(FlowMapper.response(sent_resp,
+      capture_response(FlowMapper.response(sent_resp,
         flow_id: flow_id, body: stored, ttfb_us: ttfb, duration_us: duration,
         body_truncated: trunc, body_size: size, state: state, error: error,
         advisory: response_advisory(advisory), interims: @interims))
@@ -1904,9 +1924,12 @@ module Gori::Proxy
     private def apply_response_rewrite(resp_head : Bytes, resp : Codec::RawResponse, host : String) : {Bytes, Codec::RawResponse}
       rw = @rewriter
       return {resp_head, resp} unless rw
-      rewritten = rw.rewrite_response(resp_head, host)
+      rewritten = rw.rewrite_response(resp_head, host, @resp_hits)
       return {resp_head, resp} if rewritten == resp_head
-      return lf_rules_skipped({resp_head, resp}) if Codec::Http1.lf_terminated_head?(resp_head)
+      if Codec::Http1.lf_terminated_head?(resp_head)
+        @resp_hits.clear # the rewrite is discarded, so no rule changed what the client got
+        return lf_rules_skipped({resp_head, resp})
+      end
       {rewritten, Codec::Http1.parse_response_head(rewritten)}
     end
 
@@ -1972,16 +1995,19 @@ module Gori::Proxy
       # Only a complete body: a re-frame would make a truncated one look whole (see the non-hold path).
       if resp_complete && (rw = @rewriter) && rw.rewrites_response_body_for_host?(host)
         sent_resp_head, body, advisory = apply_body_rewrite(sent_resp_head, body, resp_framing,
-          host: host, response: true, live: true) { |e| rw.rewrite_response_body(e, host) }
+          host: host, response: true, live: true) { |e| rw.rewrite_response_body(e, host, @resp_hits) }
       end
       # Labelled from `sent_req`, the request the hold gate matched: after an edit at the request
       # hold, the client's `req` names a method that never went out (#1433).
-      decision = ic.hold_response(build_message(sent_resp_head, body),
+      held = build_message(sent_resp_head, body)
+      decision = ic.hold_response(held,
         flow_id: flow_id, method: sent_req.method, target: "#{resp.status} #{resp.reason}",
         host: host, port: port, scheme: scheme)
+      # An edit makes the stored body the operator's, so a rule's original keeps the origin's (#1589).
+      @resp_orig_body ||= buf.to_slice unless decision.bytes == held
       duration = (Time.instant - started).total_microseconds.to_i64
       if decision.action.drop?
-        @sink.on_response(FlowMapper.aborted_response(flow_id, Gori::Interceptor::DROP_RESPONSE_REASON,
+        capture_response(FlowMapper.aborted_response(flow_id, Gori::Interceptor::DROP_RESPONSE_REASON,
           ttfb_us: ttfb, duration_us: duration, interims: @interims))
         write_intercept_drop
         release_upstream
@@ -2014,12 +2040,12 @@ module Gori::Proxy
         # gori withheld, hence `Bytes.empty` rather than nil.
         observe_delivered(extract_ref_for(sent_req, host, port, scheme, sent_resp.status, flow_id),
           out_head, out_body || Bytes.empty)
-        @sink.on_response(FlowMapper.response(sent_resp,
+        capture_response(FlowMapper.response(sent_resp,
           flow_id: flow_id, body: stored, ttfb_us: ttfb, duration_us: duration,
           body_truncated: trunc, body_size: size, advisory: response_advisory(advisory),
           interims: @interims))
       else
-        @sink.on_response(FlowMapper.response(sent_resp,
+        capture_response(FlowMapper.response(sent_resp,
           flow_id: flow_id, body: stored, ttfb_us: ttfb, duration_us: duration,
           body_truncated: trunc, body_size: size, advisory: response_advisory(advisory),
           state: Store::FlowState::Aborted, error: "connection closed while forwarding held response",
@@ -2954,6 +2980,36 @@ module Gori::Proxy
       host.includes?(':') && !host.starts_with?('[') ? "[#{host}]" : host
     end
 
+    # Every flow this connection records goes through these two, so what Match&Replace changed
+    # (#1589) rides on whichever record site the exchange ends at.
+    private def capture_request(req : Store::CapturedRequest) : Int64
+      unless @req_hits.empty?
+        req.rewrite = Store::Rewrite.new(@req_hits.dup, @req_orig_head, capped(@req_orig_body)[0])
+      end
+      forget_request_rewrite
+      @sink.on_request(req)
+    end
+
+    private def capture_response(resp : Store::CapturedResponse) : Nil
+      unless @resp_hits.empty?
+        resp.rewrite = Store::Rewrite.new(@resp_hits.dup, @resp_orig_head, capped(@resp_orig_body)[0])
+      end
+      forget_response_rewrite
+      @sink.on_response(resp)
+    end
+
+    # Recorded (or never needed): drop the references, so an idle keep-alive connection does not
+    # pin a rewritten body, and the next flow cannot inherit them.
+    private def forget_request_rewrite : Nil
+      @req_hits.clear
+      @req_orig_head = @req_orig_body = nil
+    end
+
+    private def forget_response_rewrite : Nil
+      @resp_hits.clear
+      @resp_orig_head = @resp_orig_body = nil
+    end
+
     # Held bodies are buffered whole (the human may edit them) and forwarded in
     # full, but — like the streaming path — only the capture cap is STORED so an
     # in-scope giant body can't bloat its row. Returns {stored, truncated, size}.
@@ -2979,10 +3035,10 @@ module Gori::Proxy
 
     private def record_error(req, scheme, host, port, created_at, message, *,
                              intercept_original : Bytes? = nil, interims : Store::Interims? = nil) : Nil
-      flow_id = @sink.on_request(FlowMapper.request(req,
+      flow_id = capture_request(FlowMapper.request(req,
         scheme: scheme, host: host, port: port, created_at: created_at, body: nil, source: FlowSource::Kind::Proxy,
         intercept_original: intercept_original))
-      @sink.on_response(FlowMapper.error_response(flow_id, message, interims: interims))
+      capture_response(FlowMapper.error_response(flow_id, message, interims: interims))
     end
 
     # The client's head outgrew `MAX_HEAD_BYTES` before its CRLFCRLF: record what arrived, answer
@@ -3201,10 +3257,10 @@ module Gori::Proxy
     # the human sees the attempt + decision (P4/P7).
     private def record_dropped_request(req, scheme, host, port, created_at, body) : Nil
       stored, trunc, size = capped(body)
-      flow_id = @sink.on_request(FlowMapper.request(req,
+      flow_id = capture_request(FlowMapper.request(req,
         scheme: scheme, host: host, port: port, created_at: created_at,
         body: stored, body_truncated: trunc, body_size: size, source: FlowSource::Kind::Proxy))
-      @sink.on_response(FlowMapper.aborted_response(flow_id, Gori::Interceptor::DROP_REQUEST_REASON))
+      capture_response(FlowMapper.aborted_response(flow_id, Gori::Interceptor::DROP_REQUEST_REASON))
     end
 
     private def write_intercept_drop : Nil
@@ -3217,9 +3273,9 @@ module Gori::Proxy
     # (like an intercept drop) so the operator still sees the blocked attempt (P4/P7). Body
     # is nil — we block before reading it and close the connection right after.
     private def record_blocked_request(req, scheme, host, port, created_at) : Nil
-      flow_id = @sink.on_request(FlowMapper.request(req,
+      flow_id = capture_request(FlowMapper.request(req,
         scheme: scheme, host: host, port: port, created_at: created_at, body: nil, source: FlowSource::Kind::Proxy))
-      @sink.on_response(FlowMapper.aborted_response(flow_id, Gori::Outbound::SANDBOX_ERROR))
+      capture_response(FlowMapper.aborted_response(flow_id, Gori::Outbound::SANDBOX_ERROR))
     end
 
     # Tell the client the sandbox refused this request — a distinct 403 + marker header so a
@@ -3444,8 +3500,19 @@ module Gori::Proxy
         return {head, wire_body, compressed_skip_advisory(head, host, response: response, live: live)}
       end
       entity = framing.chunked? ? Codec::ContentDecode.dechunk(wire_body) : wire_body
+      hits = response ? @resp_hits : @req_hits
+      mark = hits.size
       rewritten = yield entity
-      return {head, wire_body, nil} if rewritten == entity # nothing matched → byte-exact (P7)
+      if rewritten == entity   # nothing matched → byte-exact (P7)
+        hits.truncate(0, mark) # rules that cancelled out changed nothing (#1589)
+        return {head, wire_body, nil}
+      end
+      # The body as it arrived, wire framing and all: what the rule replaced (#1589).
+      if response
+        @resp_orig_body = wire_body
+      else
+        @req_orig_body = wire_body
+      end
       {reframe_to_length(head, rewritten.size), rewritten, nil}
     end
 

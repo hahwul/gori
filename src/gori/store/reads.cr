@@ -7,12 +7,17 @@ module Gori
     # Whether the operator edited this request at Intercept (V44): a primary-key probe into the
     # side table, so the list still reads every other column from `idx_flows_list`.
     INTERCEPT_EDITED = "EXISTS (SELECT 1 FROM intercept_originals o WHERE o.flow_id = flows.id)"
+    # The Match&Replace rules that changed this flow (V49), as `scope/id` joined by commas, or
+    # NULL for the flow no rule touched. A primary-key range probe, like `INTERCEPT_EDITED`. Not
+    # DISTINCT, which costs every list read a temp B-tree: `read_row` drops the rare repeat (a
+    # rule whose target was edited mid-flow, recorded on both sides).
+    RULE_HITS = "(SELECT group_concat(h.scope || '/' || h.rule_id) FROM flow_rule_hits h WHERE h.flow_id = flows.id)"
 
     SELECT_ROW = <<-SQL
       SELECT id, created_at, scheme, method, host, port, target, status,
              request_size, response_size, state, duration_us, content_type,
              short_circuited, advisory, request_content_type, connect_protocol,
-             source, source_surface, source_ref, #{INTERCEPT_EDITED}
+             source, source_surface, source_ref, #{INTERCEPT_EDITED}, #{RULE_HITS}
       FROM flows
       SQL
 
@@ -461,6 +466,14 @@ module Gori
       @db.query_one?("SELECT request FROM intercept_originals WHERE flow_id = ?", flow_id, as: Bytes)
     end
 
+    # What Match&Replace replaced on `side` of this flow (V49): the side's head as it arrived and,
+    # when a body rule changed it, its body (nil = the stored body is the original). nil when no
+    # rule changed that side's bytes, or the original is kept elsewhere (an Intercept edit, V44).
+    def rewrite_original(flow_id : Int64, side : RuleTarget) : {Bytes, Bytes?}?
+      @db.query_one?("SELECT head, body FROM rewrite_originals WHERE flow_id = ? AND side = ?",
+        flow_id, side.label, as: {Bytes, Bytes?})
+    end
+
     # The interim 1xx responses the origin sent before this flow's final one (V45), in wire
     # order, or nil when it sent none. A primary-key range read, asked only by the surfaces
     # that show a flow's detail — `get_flow` itself stays one row.
@@ -494,7 +507,7 @@ module Gori
         SELECT id, created_at, scheme, method, host, port, target, status,
                request_size, response_size, state, duration_us, content_type,
                short_circuited, advisory, request_content_type, connect_protocol,
-               source, source_surface, source_ref, #{INTERCEPT_EDITED},
+               source, source_surface, source_ref, #{INTERCEPT_EDITED}, #{RULE_HITS},
                http_version, request_head, #{request_body}, response_head, #{response_body},
                h2_conn_id, h2_stream_id, request_body_truncated, response_body_truncated, error,
                sni
@@ -639,6 +652,8 @@ module Gori
         c.exec("DELETE FROM js_ref_scans")
         c.exec("DELETE FROM intercept_originals")
         c.exec("DELETE FROM flow_interims")
+        c.exec("DELETE FROM flow_rule_hits")
+        c.exec("DELETE FROM rewrite_originals")
         c.exec("DELETE FROM flows")
         c.exec("DELETE FROM h2_frames")
         # The `h2_connections` rows stay, as they do on an explicit delete (`delete_flow_set`):
@@ -667,6 +682,8 @@ module Gori
       conn.exec("DELETE FROM js_ref_scans WHERE flow_id IN (#{marks})", args: args)
       conn.exec("DELETE FROM intercept_originals WHERE flow_id IN (#{marks})", args: args)
       conn.exec("DELETE FROM flow_interims WHERE flow_id IN (#{marks})", args: args)
+      conn.exec("DELETE FROM flow_rule_hits WHERE flow_id IN (#{marks})", args: args)
+      conn.exec("DELETE FROM rewrite_originals WHERE flow_id IN (#{marks})", args: args)
       # The h2 frame log (often the flow's bulk bytes) — capture the conns BEFORE deleting
       # the flow rows so we can reclaim each one this set was the last user of.
       h2_conns = [] of Int64

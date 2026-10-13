@@ -314,6 +314,8 @@ gori run show <flow-id> --format raw
 
 `--ws-match=QUERY`는 트랜스크립트를 싣는 모든 형식에서 매칭되는 WebSocket 메시지만 찍습니다. `ws:needle`(대소문자 무시), `ws~regex`, 또는 접두어 없는 needle을 받고, [`ws:` 쿼리 필드](/ko/reference/query-language/#websocket-messages)와 똑같이 매칭합니다. 소켓의 메시지 중 몇 개를 남겼는지는 STDERR 한 줄로 알려 줍니다.
 
+`--original`은 [Match & Replace 규칙](/ko/guide/proxy/#match-replace)이나 Intercept 편집이 바꾸기 전의 플로우, 곧 클라이언트의 요청과 원본 서버의 응답을 어느 `--format`으로든 찍습니다. 바뀌지 않은 쪽은 저장된 그대로 나옵니다. 아무것도 바뀌지 않은 플로우는 거부합니다.
+
 #### 안전한 증거 내보내기 {#safe-evidence-export}
 
 `--redact [PROFILE]`는 캡처한 바이트 대신 플로우의 **정제된 파생본**을 씁니다. [리댁션 프로파일](#run-redact)이 지목한 값이 키가 붙은 자리표시자 `[REDACTED:3f1c9ab4]`로 바뀝니다. 같은 값은 같은 태그를 받으므로, 읽는 사람은 둘 중 어느 것도 보지 않은 채로 "요청의 토큰이 응답의 토큰과 같다"는 사실만 확인할 수 있습니다. 태그는 값의 해시가 아니라 설치마다 한 번 만들어지는 비밀 키로 계산한 HMAC입니다. 네 자리 PIN이나 워드리스트에 있는 비밀번호의 잘린 해시는 몇 밀리초면 복원되고, 그러면 자리표시자 자체가 유출이 되기 때문입니다.

@@ -829,6 +829,51 @@ describe Gori::Rules do
   # the MCP `create_rule`/`preview_rule` tools. If a surface skipped it, a header op stored
   # with `part: body` would be persisted as a body rule and cost every matching message a
   # buffer-and-reframe on the proxy hot path, to do a header edit that reads the head.
+  describe "which rules changed the bytes (#1589)" do
+    it "collects each rule whose output differed, keeping scope apart from id" do
+      with_globals do
+        with_store do |store|
+          rules = Gori::Rules.load(store)
+          rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+            "X-One: a", "X-One: b", scope: Gori::Store::RuleScope::Global)
+          rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "X-Two: a", "X-Two: b")
+          # Matches, and writes back the same bytes: not a change, so not recorded.
+          rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "Host", "Host")
+          global, project, same = rules.rules
+          global.id.should eq(project.id) # two different rules, one number
+
+          hits = [] of Gori::Store::RuleRef
+          head = "GET / HTTP/1.1\r\nHost: acme.test\r\nX-One: a\r\nX-Two: a\r\n\r\n".to_slice
+          rules.rewrite_request(head, "acme.test", hits)
+          hits.should eq([Gori::Store::RuleRef.new(Gori::Store::RuleScope::Global, global.id),
+                          Gori::Store::RuleRef.new(Gori::Store::RuleScope::Project, project.id)])
+          hits.map(&.to_s).should eq(["global/#{global.id}", "project/#{project.id}"])
+          hits.should_not contain(Gori::Store::RuleRef.new(same.scope, same.id))
+        end
+      end
+    end
+
+    it "collects nothing when no rule changes the bytes" do
+      with_store do |store|
+        rules = Gori::Rules.new(store, store.match_rules)
+        rules.add(Gori::Store::RuleTarget::Response, Gori::Store::RulePart::Body, "absent", "x")
+        hits = [] of Gori::Store::RuleRef
+        body = "hello".to_slice
+        rules.rewrite_response_body(body, "acme.test", hits).should eq(body)
+        rules.rewrite_request(body, "acme.test", hits) # no request rule: the lock-free fast path
+        hits.should be_empty
+      end
+    end
+
+    it "parses the `scope/id` spelling and refuses anything else" do
+      Gori::Store::RuleRef.parse?("project/4").should eq(Gori::Store::RuleRef.new(Gori::Store::RuleScope::Project, 4_i64))
+      Gori::Store::RuleRef.parse?("Global/3").should eq(Gori::Store::RuleRef.new(Gori::Store::RuleScope::Global, 3_i64))
+      %w[true project project/ project/0 project/x other/4 4].each do |v|
+        Gori::Store::RuleRef.parse?(v).should be_nil
+      end
+    end
+  end
+
   describe ".normalize_shape" do
     it "forces a header op onto the head, whatever part was asked for" do
       [Gori::Store::RuleOp::AddHeader, Gori::Store::RuleOp::SetHeader,

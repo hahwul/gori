@@ -386,7 +386,26 @@ module Gori
         cap, omit = opts
         more = auto ? {body_more_hint("flow_id: #{id}, part: \"request\"", "request, head included"), body_more_hint("flow_id: #{id}")} : nil
         Result.new(Serialize.flow_detail_json(detail, ws_msgs, include_sensitive, cap, omit, redaction, more,
-          interims: store.interims(id), ws_total: ws_total, ws_socket_total: ws_socket_total))
+          interims: store.interims(id), ws_total: ws_total, ws_socket_total: ws_socket_total,
+          originals: rewrite_originals(detail.row, include_sensitive)))
+      end
+
+      # What Match&Replace replaced on each side (#1589), under the flow's own body redaction —
+      # the original of a redacted body carries the same secret.
+      private def rewrite_originals(row : Store::FlowRow, include_sensitive : Bool) : Array(Serialize::Original)
+        found = [] of Serialize::Original
+        return found unless row.rewritten?
+        matcher = include_sensitive ? nil : Redact::Policy.ambient(store)
+        Store::RuleTarget.each do |side|
+          next unless orig = store.rewrite_original(row.id, side)
+          head, body = orig
+          if m = matcher
+            clean = Redact::Wire.message(head, body, m)
+            head, body = clean.head, clean.body
+          end
+          found << {side.label, head, body}
+        end
+        found
       end
 
       # Safe evidence export applied to the projection an AGENT reads (#1035).

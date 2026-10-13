@@ -110,6 +110,8 @@ module Gori
           j.field "short_circuited", row.short_circuited?
           # Edited at Intercept (#1378) — the stored request is the operator's, not the client's.
           j.field "intercept_edited", row.intercept_edited?
+          # The Match&Replace rules that changed this flow (#1589), `[]` when none did.
+          j.field "rewritten_by", row.rewritten_by || Store::RuleRef::NONE
           # Where this flow came from (`Gori::FlowSource`). Emitted on EVERY row, `null`
           # included, for `short_circuited`'s reason: a consumer has no other way to tell a
           # request gori sent from traffic the target's client produced, and an absent field
@@ -469,6 +471,7 @@ module Gori
             io << ']'
           end
           io << "  [edited]" if row.intercept_edited?
+          row.rewritten_by.try { |refs| io << "  [rewritten " << refs.join(' ') << ']' }
           # Same reasoning again, one axis over: a row gori itself put on the wire must not
           # scan as traffic the target's client produced. Only when it IS one — a proxy
           # capture is the norm, and a chip on every row teaches nothing. The lowercase token

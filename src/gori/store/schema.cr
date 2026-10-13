@@ -2234,10 +2234,40 @@ module Gori
         "ALTER TABLE fuzz_results ADD COLUMN extracts TEXT",
       ]
 
+      # V49 — which Match&Replace rules changed a flow, and the bytes they replaced (#1589). The
+      # stored request/response stay what was on each wire (P7); these are the evidence beside
+      # them. Side tables for V44's reasons: almost no flow has a value, and a `flows` BLOB would
+      # sit after the body BLOBs. `side` is `request`/`response` (a WebSocket rule records on the
+      # side whose messages it rewrites), `scope` is `project`/`global`: the two rule stores
+      # number independently, and neither ever reuses an id. `head` is the side's head as it
+      # arrived; `body` is NULL unless a body rule changed it ("same as stored"). No backfill:
+      # an older flow has no record, which reads as "not recorded", never as "untouched".
+      V49 = [
+        <<-SQL,
+          CREATE TABLE IF NOT EXISTS flow_rule_hits (
+            flow_id INTEGER NOT NULL,
+            side    TEXT    NOT NULL,
+            scope   TEXT    NOT NULL,
+            rule_id INTEGER NOT NULL,
+            PRIMARY KEY (flow_id, side, scope, rule_id)
+          ) WITHOUT ROWID
+          SQL
+        "CREATE INDEX IF NOT EXISTS idx_flow_rule_hits_rule ON flow_rule_hits (scope, rule_id)",
+        <<-SQL,
+          CREATE TABLE IF NOT EXISTS rewrite_originals (
+            flow_id INTEGER NOT NULL,
+            side    TEXT    NOT NULL,
+            head    BLOB    NOT NULL,
+            body    BLOB,
+            PRIMARY KEY (flow_id, side)
+          ) WITHOUT ROWID
+          SQL
+      ]
+
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
                     V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31, V32, V33,
                     V34, V35, V36, V37, V38, V39, V40, V41, V42, V43, V44, V45, V46,
-                    V47, V48]
+                    V47, V48, V49]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|

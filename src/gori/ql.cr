@@ -152,7 +152,7 @@ module Gori
       NOT > AND > OR. `-term` and `NOT term` are equivalent.
 
       Fields (use : for value match, ~ for regex):
-        host path method scheme proto status size reqsize respsize dur header body ws rpc url stub static src scope cache
+        host path method scheme proto status size reqsize respsize dur header body ws rpc url stub rewritten static src scope cache
 
       Sides: header: and body: search the REQUEST AND THE RESPONSE. Prefix either with `req.` or
       `resp.` to search one side — req.body:token resp.header:set-cookie resp.body~secret\\d+ —
@@ -171,6 +171,13 @@ module Gori
       Short-circuited: stub:true  stub:false  — flows gori answered ITSELF from a Match&Replace
       short-circuit rule, with NO origin involved. Their response bytes came from the rule, not
       from the server, so `stub:false` is what you want before treating History as evidence.
+
+      Rewritten: rewritten:true  rewritten:false  rewritten:project/4  rewritten:global/3  — flows a
+      Match&Replace rule CHANGED, any rule or one by its scope and id (a rule id alone names two
+      rules: the global library and the project number theirs independently). History keeps what
+      went on each wire; the bytes the rule replaced are the flow's ORIGINAL. A rule that matched
+      and left the bytes equal is not recorded. A flow captured before gori recorded rules
+      matches NEITHER `true` nor a rule.
 
       Static assets: static:true  static:false  — images, fonts and audio/video, judged by the
       response Content-Type (image/svg+xml is NOT static: it can carry script) and, when a row has
@@ -353,13 +360,22 @@ module Gori
       when "cache"
         return nil if cache_cond(value)
         "cache expects #{CACHE_VALUES.join(", ")}"
-      when "stub", "static"
-        return nil if flag_cond("col", value)
-        "#{field} expects true or false"
+      when "stub", "static", "rewritten"
+        flag_reason(field, value)
       when "scope"
         return nil if scope_cond(value, scope || SCOPE_SHAPE_ONLY)
         "scope expects in or out"
       end
+    end
+
+    # The boolean fields, and `rewritten:`, which also names one rule.
+    private def self.flag_reason(field : String, value : String) : String?
+      if field == "rewritten"
+        return nil if rewritten_cond(value)
+        return "rewritten expects true, false or a rule as project/<id> or global/<id>"
+      end
+      return nil if flag_cond("col", value)
+      "#{field} expects true or false"
     end
 
     # `src:` (which tool) and `via:` (which surface): the two "who sent it" vocabularies.
@@ -492,7 +508,7 @@ module Gori
     # History's and Colormarker's completion pools, Colormarker's unknown-field refusal and the
     # docs all read it, so a field added to `field_cond` becomes offerable everywhere at once
     # instead of in the four hand-kept copies that used to drift.
-    FIELDS = %w[host path url method scheme proto status size reqsize respsize dur header body ws rpc stub static src via scope cache
+    FIELDS = %w[host path url method scheme proto status size reqsize respsize dur header body ws rpc stub rewritten static src via scope cache
       req.header resp.header req.body resp.body]
 
     # The fields `~` compiles on. `method` and `scheme` are text columns like `host`, so a regex over
@@ -684,6 +700,7 @@ module Gori
       "ws"          => "WebSocket text/binary messages — ws~ regex",
       "rpc"         => "JSON-RPC/MCP method prefix — rpc:tools/call",
       "stub"        => "true = gori answered it, origin never saw it",
+      "rewritten"   => "a rule changed it — true/false or project/4",
       "static"      => "2xx image/font/media; not svg/css/js",
       "src"         => "who sent it — proxy repeater fuzzer … or gori",
       "via"         => "which gori surface sent it — tui cli mcp",
@@ -873,6 +890,7 @@ module Gori
       when "ws"                                  then ws_cond(value, regex: false)
       when "rpc"                                 then rpc_cond(value, body_max)
       when "stub"                                then flag_cond("short_circuited", value)
+      when "rewritten"                           then rewritten_cond(value)
       when "static"                              then flag_cond("static_asset", value)
       when "src"                                 then src_cond(value)
       when "via"                                 then via_cond(value)
@@ -920,6 +938,17 @@ module Gori
       when "true", "yes", "on", "1"  then {"#{column} = 1", [] of DB::Any}
       when "false", "no", "off", "0" then {"#{column} = 0", [] of DB::Any}
       end
+    end
+
+    # rewritten: — flows a Match&Replace rule CHANGED (#1589), read off `flow_rule_hits` (V49):
+    # `true`/`false` for any rule, `project/4` / `global/3` for one. A flow captured before V49
+    # has no record, so it matches neither `true` nor a rule (and `false` keeps it).
+    private def self.rewritten_cond(value : String) : {String, Array(DB::Any)}?
+      if ref = Store::RuleRef.parse?(value)
+        return {"EXISTS (SELECT 1 FROM flow_rule_hits h WHERE h.flow_id = flows.id AND h.scope = ? AND h.rule_id = ?)",
+                [ref.scope.label, ref.id] of DB::Any}
+      end
+      flag_cond("EXISTS (SELECT 1 FROM flow_rule_hits h WHERE h.flow_id = flows.id)", value)
     end
 
     # The hide-static lens — `static:false` as a ready filter. THE spelling every surface ANDs in

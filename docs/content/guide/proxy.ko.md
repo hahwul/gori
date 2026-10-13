@@ -520,6 +520,8 @@ gori run ls --format json --column 'T=regex:tok=(\w+)'
 
 목록 아래에는 편집 가능한 **샘플** 메시지와, 그 옆에 켜져 있는 규칙을 통과시킨 결과가 나란히 놓입니다. 실제로 캡처한 요청을 붙여 넣어 규칙을 풀어놓기 전에 무엇이 바뀌는지 확인하는 자리입니다. 샘플은 그것이 미리 보여 주는 규칙과 마찬가지로 프로젝트에 저장됩니다.
 
+History는 여전히 각 구간에 실제로 오간 바이트를 보관하되, 규칙이 바꿨다면 그렇다고 알려 줍니다. 그런 플로우는 SRC 열에 `RULE`로 표시되고, 상세 화면이 발동한 규칙을 밝히며, 규칙이 바꾸기 전의 바이트는 **ORIGINAL** 창(클라이언트의 요청)과 **ORIGINAL RESP** 창(원본 서버의 응답)에 있습니다. 매칭됐지만 아무것도 바꾸지 않은 규칙은 기록하지 않습니다. `rewritten:true`로 찾고, 규칙 하나는 `rewritten:project/4` / `rewritten:global/3`로 찾습니다(규칙 id만으로는 두 규칙을 가리킵니다). `gori run history --format json`과 MCP에는 `rewritten_by`가, MCP `get_flow`에는 원본이 실리며, `gori run show --original`은 규칙이 돌기 전의 플로우를 출력합니다.
+
 ### 프리셋: 능력이 아니라 출발점 {#rewriter-presets}
 
 거의 모든 엔게이지먼트에서 반복되는 응답 재작성이 일곱 가지 있고, 하나같이 다시 타이핑하기 싫은 정규식입니다. Rewriter에서 `p`(**Add from preset…**)를 눌러 고르세요.

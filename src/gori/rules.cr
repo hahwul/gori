@@ -698,12 +698,12 @@ module Gori
 
     # --- HeadRewriter (called from proxy fibers) -----------------------------
 
-    def rewrite_request(head : Bytes, host : String) : Bytes
-      apply(head, Store::RuleTarget::Request, Store::RulePart::Head, @req_head_count, host)
+    def rewrite_request(head : Bytes, host : String, hits : Array(Store::RuleRef)? = nil) : Bytes
+      apply(head, Store::RuleTarget::Request, Store::RulePart::Head, @req_head_count, host, hits: hits)
     end
 
-    def rewrite_response(head : Bytes, host : String) : Bytes
-      apply(head, Store::RuleTarget::Response, Store::RulePart::Head, @resp_head_count, host)
+    def rewrite_response(head : Bytes, host : String, hits : Array(Store::RuleRef)? = nil) : Bytes
+      apply(head, Store::RuleTarget::Response, Store::RulePart::Head, @resp_head_count, host, hits: hits)
     end
 
     # Host-blind summaries used where only the overall rule-set state matters. ClientConn
@@ -754,12 +754,12 @@ module Gori
       end
     end
 
-    def rewrite_request_body(entity : Bytes, host : String) : Bytes
-      apply(entity, Store::RuleTarget::Request, Store::RulePart::Body, @req_body_count, host)
+    def rewrite_request_body(entity : Bytes, host : String, hits : Array(Store::RuleRef)? = nil) : Bytes
+      apply(entity, Store::RuleTarget::Request, Store::RulePart::Body, @req_body_count, host, hits: hits)
     end
 
-    def rewrite_response_body(entity : Bytes, host : String) : Bytes
-      apply(entity, Store::RuleTarget::Response, Store::RulePart::Body, @resp_body_count, host)
+    def rewrite_response_body(entity : Bytes, host : String, hits : Array(Store::RuleRef)? = nil) : Bytes
+      apply(entity, Store::RuleTarget::Response, Store::RulePart::Body, @resp_body_count, host, hits: hits)
     end
 
     # --- WebSocket messages (#500 step 1) ------------------------------------
@@ -789,12 +789,12 @@ module Gori
       end
     end
 
-    def rewrite_ws_out(payload : Bytes, host : String) : Bytes
-      apply(payload, Store::RuleTarget::Request, Store::RulePart::Ws, @ws_out_count, host)
+    def rewrite_ws_out(payload : Bytes, host : String, hits : Array(Store::RuleRef)? = nil) : Bytes
+      apply(payload, Store::RuleTarget::Request, Store::RulePart::Ws, @ws_out_count, host, hits: hits)
     end
 
-    def rewrite_ws_in(payload : Bytes, host : String) : Bytes
-      apply(payload, Store::RuleTarget::Response, Store::RulePart::Ws, @ws_in_count, host)
+    def rewrite_ws_in(payload : Bytes, host : String, hits : Array(Store::RuleRef)? = nil) : Bytes
+      apply(payload, Store::RuleTarget::Response, Store::RulePart::Ws, @ws_in_count, host, hits: hits)
     end
 
     # --- short circuit (#511) ------------------------------------------------
@@ -1070,9 +1070,13 @@ module Gori
     # fidelity, P7). A no-op replace re-serializes to an equal slice (as it always has for
     # heads) — ClientConn's body path compares content, so an unchanged body still frames
     # byte-exact.
+    #
+    # `hits`, when given, collects the `{scope, id}` of each rule whose output differed from its
+    # input (#1589) — appended only on a change, so a rewrite that changes nothing allocates
+    # nothing there either.
     private def apply(bytes : Bytes, target : Store::RuleTarget, part : Store::RulePart,
                       count : Atomic(Int32), host : String, report : Bool = true,
-                      run_hooks : Bool = true) : Bytes
+                      run_hooks : Bool = true, hits : Array(Store::RuleRef)? = nil) : Bytes
       return bytes if count.get == 0 # lock-free fast path: no rules to apply
       # `@rules` is REPLACED on every edit, never mutated in place (see `refresh`), so a bare
       # reference read under the lock is a consistent snapshot with NO allocation — where the
@@ -1104,9 +1108,17 @@ module Gori
           return bytes if part.ws? && !cur.valid_encoding?
         end
         text = apply_rule(cur, r, target, part, host, report, pipe_deadline)
+        note_hit(hits, r, cur, text)
       end
       t = text
       t ? t.to_slice : bytes # no rule in scope → same bytes, byte-fidelity preserved
+    end
+
+    # `rule` fired on this message if it changed the text (#1589); see `apply`'s `hits`.
+    private def note_hit(hits : Array(Store::RuleRef)?, rule : Store::MatchRule, before : String, after : String) : Nil
+      return unless hits && after != before
+      ref = Store::RuleRef.new(rule.scope, rule.id)
+      hits << ref unless hits.includes?(ref)
     end
 
     # Apply ONE rule to `text` (a head or a body already decoded to a String). Returns a

@@ -271,9 +271,13 @@ module Gori::Tui
       @ws_narrow = nil.as(String?)
       @ws_narrow_of = 0
       @last_search = "" # the last non-empty ^F query — what a narrow takes
-      # The request as the client sent it, when the operator edited it at Intercept (#1378) —
-      # the ORIGINAL pane. nil for every flow nobody edited, so the pane is not offered.
-      @detail_original = nil.as(Bytes?)
+      # The request as the client sent it, when the operator edited it at Intercept (#1378) or a
+      # Match&Replace rule changed it (#1589) — the ORIGINAL pane — and the response as the
+      # origin sent it before a rule changed it, ORIGINAL RESP. {head, body}; nil for every flow
+      # nothing changed, so the pane is not offered. `@detail_rewrite_note` names the rules.
+      @detail_original = nil.as({Bytes, Bytes?}?)
+      @detail_original_resp = nil.as({Bytes, Bytes?}?)
+      @detail_rewrite_note = nil.as(String?)
       # The interim 1xx responses the origin sent before the final one (`Store::Interims`) —
       # the INTERIM pane. nil for every flow that had none, so the pane is not offered.
       @detail_interims = nil.as(Store::Interims?)
@@ -1726,6 +1730,8 @@ module Gori::Tui
       @detail_ws_total = 0
       @ws_narrow = nil
       @detail_original = nil
+      @detail_original_resp = nil
+      @detail_rewrite_note = nil
       @detail_interims = nil
       @detail_sse = false
       @detail_saml = nil
@@ -1772,8 +1778,10 @@ module Gori::Tui
         @detail_frames = nil
         @detail_frames_total = 0
       end
-      # One primary-key read, and only for a row the list already flags as edited.
-      @detail_original = detail.try { |d| store.intercept_original(d.row.id) if d.row.intercept_edited? }
+      # Primary-key reads, and only for a row the list already flags as edited or rewritten.
+      @detail_original = detail.try { |d| Gori::Interceptor.original(store, d, Store::RuleTarget::Request) }
+      @detail_original_resp = detail.try { |d| Gori::Interceptor.original(store, d, Store::RuleTarget::Response) }
+      @detail_rewrite_note = detail.try(&.row.rewritten_by).try { |refs| rewrite_note(store, refs) }
       # A primary-key range read that finds nothing for almost every flow.
       @detail_interims = detail.try { |d| store.interims(d.row.id) }
       # SSE events are a derived view (parsed from the stored response body at
@@ -2668,11 +2676,12 @@ module Gori::Tui
       detail = @detail
       return nil unless detail
       head, body = case @detail_pane
-                   when :response then {detail.response_head, detail.response_body}
-                   when :request  then {detail.request_head, detail.request_body}
-                   when :original then {@detail_original, nil}
-                   when :interim  then {@detail_interims.try(&.wire), nil}
-                   else                {nil, nil} # messages/frames/events: no raw-bytes hex
+                   when :response      then {detail.response_head, detail.response_body}
+                   when :request       then {detail.request_head, detail.request_body}
+                   when :original      then @detail_original || {nil, nil}
+                   when :original_resp then @detail_original_resp || {nil, nil}
+                   when :interim       then {@detail_interims.try(&.wire), nil}
+                   else                     {nil, nil} # messages/frames/events: no raw-bytes hex
                    end
       @detail_hex_bytes = combine_bytes(head, body)
     end
@@ -2696,11 +2705,16 @@ module Gori::Tui
       DetailView.new(lines, EMPTY_BODY, :text, trailer)
     end
 
-    # The stored original message (head + body in one BLOB) back into its two halves, split
-    # where the Intercept editor splits one (`Interceptor.split_edit`).
-    private def split_original(raw : Bytes) : {Bytes, Bytes?}
-      head, has_body = Gori::Interceptor.split_edit(raw)
-      {head, has_body ? raw[head.size..] : nil}
+    # The footer sentence naming the rules that changed this flow, by `Rules.rule_phrase` while
+    # the rule still exists; a rule since deleted keeps its scope and id (neither is reused).
+    private def rewrite_note(store : Store, refs : Array(Store::RuleRef)) : String
+      rules = Rules.merged(store)
+      names = refs.map do |ref|
+        word = Rules.scope_word(ref.scope)
+        rule = rules.find { |r| r.scope == ref.scope && r.id == ref.id }
+        rule ? "#{word} rule #{Rules.rule_phrase(rule)}" : "#{word} rule ##{ref.id} (deleted)"
+      end
+      "! rewritten by Match&Replace: #{names.join(", ")} — the bytes before are in ORIGINAL"
     end
 
     private def combine_bytes(head : Bytes?, body : Bytes?) : Bytes?
@@ -2725,6 +2739,7 @@ module Gori::Tui
       # ORIGINAL: the client's request before the operator's Intercept edit (#1378). REQUEST
       # stays what went upstream; this is what it replaced.
       panes << :original if @detail_original
+      panes << :original_resp if @detail_original_resp
       # MESSAGES: the socket transcript, right after the handshake it belongs to, and a pane
       # of its OWN rather than a relabelling of :response. The handshake response head is
       # where the server says which subprotocol and which extensions (permessage-deflate) it
@@ -2761,8 +2776,8 @@ module Gori::Tui
       when :events then "EVENTS (sse)"
       when :jwt    then @detail_jwts.size > 1 ? "JWT (#{@detail_jwts.size})" : "JWT"
         # The panes whose chip is simply their name.
-      when :saml, :graphql, :params, :original, :interim, :llm then pane.to_s.upcase
-      when :rpc                                                then @detail_rpc.try { |ex| JsonRpc.mcp?(ex) } ? "MCP" : "RPC"
+      when :saml, :graphql, :params, :original, :original_resp, :interim, :llm then pane.to_s.upcase.sub('_', ' ')
+      when :rpc                                                                then @detail_rpc.try { |ex| JsonRpc.mcp?(ex) } ? "MCP" : "RPC"
         # Named after the FRAMING, not after gori's module — an operator working a Socket.IO
         # app is looking for a chip that says Socket.IO. Fixed for the life of the opened flow
         # (see decode_protocols); "WS PROTO" only until the first rebuild names one.
@@ -3195,6 +3210,9 @@ module Gori::Tui
           src = row.source
           if row.intercept_edited?
             screen.text(src_x, y, "EDIT", Theme.yellow, bg, width: 5)
+          elsif row.rewritten?
+            # A Match&Replace rule changed it (#1589): yellow for `EDIT`'s reason.
+            screen.text(src_x, y, "RULE", Theme.yellow, bg, width: 5)
           else
             screen.text(src_x, y, src.try(&.label) || "—",
               src.nil? || src.proxy? ? Theme.muted : Theme.accent, bg, width: 5)
@@ -3733,6 +3751,9 @@ module Gori::Tui
       if detail.row.intercept_edited?
         lines << [Highlight::Span.new("! edited at Intercept — the client's original request is in ORIGINAL", Theme.yellow)]
       end
+      if note = @detail_rewrite_note
+        lines << [Highlight::Span.new(note, Theme.yellow)]
+      end
       # Interim 1xx responses ahead of the final one: a fact about the exchange, not a warning.
       if interims = @detail_interims
         n = interims.heads.size + interims.omitted
@@ -4176,17 +4197,17 @@ module Gori::Tui
     private def suggest_values(field : String, prefix : String) : Array(String)
       p = prefix.downcase
       values = case field
-               when "scheme"              then ["http", "https"]
-               when "proto"               then QL::PROTO_VALUES
-               when "method"              then METHOD_VAL
-               when "status"              then ["2xx", "3xx", "4xx", "5xx", ">=400", ">=500", "200", "301", "302", "401", "403", "404", "500", "502", "503"]
-               when "host"                then host_values_for(prefix)
-               when "size"                then [">10000", ">100000", "<1000"]
-               when "scope", "src", "via" then QL::CLOSED_VALUES[field]
-               when "stub", "static"      then QL::FLAG_VALUES
-               when "cache"               then QL::CACHE_VALUES
-               when "dur"                 then [">500", ">1s", ">=200", "<100"]
-               else                            return [] of String
+               when "scheme"                      then ["http", "https"]
+               when "proto"                       then QL::PROTO_VALUES
+               when "method"                      then METHOD_VAL
+               when "status"                      then ["2xx", "3xx", "4xx", "5xx", ">=400", ">=500", "200", "301", "302", "401", "403", "404", "500", "502", "503"]
+               when "host"                        then host_values_for(prefix)
+               when "size"                        then [">10000", ">100000", "<1000"]
+               when "scope", "src", "via"         then QL::CLOSED_VALUES[field]
+               when "stub", "rewritten", "static" then QL::FLAG_VALUES
+               when "cache"                       then QL::CACHE_VALUES
+               when "dur"                         then [">500", ">1s", ">=200", "<100"]
+               else                                    return [] of String
                end
       # host_values_for is already prefix-filtered by SQL; still apply starts_with so a
       # stale cache entry can't surface a non-matching host if the key ever drifts.
@@ -4395,12 +4416,16 @@ module Gori::Tui
       if @detail_pane == :interim && (interims = @detail_interims)
         return interim_view(interims)
       end
-      # ORIGINAL is a request too, and renders through the same path as REQUEST.
-      original = @detail_pane == :original ? @detail_original : nil
-      request = @detail_pane == :request || !original.nil?
+      # ORIGINAL is a request too, and renders through the same path as REQUEST; ORIGINAL RESP
+      # through RESPONSE's.
+      original = case @detail_pane
+                 when :original      then @detail_original
+                 when :original_resp then @detail_original_resp
+                 end
+      request = @detail_pane == :request || @detail_pane == :original
       # A failed/pending flow has no response bytes — surface WHY (like Repeater does)
       # instead of a blank pane.
-      if !request && ((rh = detail.response_head).nil? || rh.empty?)
+      if !request && original.nil? && ((rh = detail.response_head).nil? || rh.empty?)
         span = if (err = detail.error) && Gori::Interceptor.dropped?(err)
                  # The operator's own decision, not a failure (#1378): say which leg never went on.
                  leg = err == Gori::Interceptor::DROP_REQUEST_REASON ? "the request was never sent upstream" : "the response was not delivered to the client"
@@ -4417,7 +4442,7 @@ module Gori::Tui
         return DetailView.new([[span]], EMPTY_BODY, :text, EMPTY_LINES)
       end
       head, body = if original
-                     split_original(original)
+                     original
                    elsif request
                      {detail.request_head, detail.request_body}
                    else

@@ -629,6 +629,11 @@ module Gori::Proxy::WS
         @scratch = Bytes.new(STREAM_CHUNK)
       end
 
+      # The rules that changed the message in hand, and every rule already recorded on the flow
+      # (#1589). Bounded by the rule set.
+      @hits = [] of Store::RuleRef
+      @recorded = [] of Store::RuleRef
+
       # What `run` does with one frame, once `step` has handled it.
       enum Step
         Continue # keep reading
@@ -1102,10 +1107,20 @@ module Gori::Proxy::WS
 
       # Match & Replace, or the payload untouched when this message is not eligible (binary,
       # or no `part: ws` rule live on this side). `out` is a Crystal keyword, hence the name.
+      #
+      # A rule that changes a message is recorded on the flow the first time it does (#1589) —
+      # per flow, not per message, so the rest of the socket costs a lookup and no write.
       private def rewrite(payload : Bytes) : Bytes
         rw = @rewriter
         return payload unless @rewritable && rw
-        @direction == "out" ? rw.rewrite_ws_out(payload, @ctx.host) : rw.rewrite_ws_in(payload, @ctx.host)
+        hits = @hits.clear
+        result = @direction == "out" ? rw.rewrite_ws_out(payload, @ctx.host, hits) : rw.rewrite_ws_in(payload, @ctx.host, hits)
+        if hits.any? { |h| !@recorded.includes?(h) }
+          fresh = hits - @recorded
+          @recorded.concat(fresh)
+          @sink.on_rule_hits(@flow_id, @direction == "out" ? Store::RuleTarget::Request : Store::RuleTarget::Response, fresh)
+        end
+        result
       end
 
       # Emit everything buffered so far, so the rest of the message can stream byte-exact

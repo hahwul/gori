@@ -164,6 +164,10 @@ module Gori::Proxy::H2
       # The request as held at Intercept, when the operator edited it before release (#1378).
       # nil on every stream nobody edited. See `Store::CapturedRequest#intercept_original`.
       property intercept_original : Bytes? = nil
+      # What Match&Replace changed on each side's head (#1589), nil on every stream no rule
+      # changed. See `Store::Rewrite`.
+      property req_rewrite : Store::Rewrite? = nil
+      property resp_rewrite : Store::Rewrite? = nil
       # The WebSocket transcript of an RFC 8441 extended CONNECT stream (#733), or nil for
       # every other stream — which is all of them on an ordinary connection.
       property ws : WsCapture? = nil
@@ -305,14 +309,38 @@ module Gori::Proxy::H2
     # held. Recorded on the flow `emit_request` projects (V44). Opens the entry the way
     # `note_advisory` does, since the edited head is released — and fed — right after this.
     def note_intercept_original(stream_id : UInt32, original : Bytes) : Nil
-      return if stream_id == 0
+      @mutex.synchronize { open_entry(stream_id).try(&.intercept_original=(original)) }
+    end
+
+    # A Match&Replace rule changed `stream_id`'s head on one side (#1589). Opens the entry the way
+    # `note_intercept_original` does: the rewritten head is fed right after this.
+    def note_rewrite(stream_id : UInt32, request : Bool, rewrite : Store::Rewrite) : Nil
       @mutex.synchronize do
-        stream = @streams[stream_id]?
-        if stream.nil?
-          next if @streams.size >= MAX_LIVE_STREAMS || @closed.includes?(stream_id)
-          stream = @streams[stream_id] = Stream.new
+        next unless stream = open_entry(stream_id)
+        if request
+          stream.req_rewrite = rewrite
+        else
+          stream.resp_rewrite = rewrite
         end
-        stream.intercept_original = original
+      end
+    end
+
+    # The operator edited `stream_id`'s held response, so the stored response is theirs: a rule's
+    # record keeps its hits only, never a head paired with the operator's body (#1589).
+    def note_response_edited(stream_id : UInt32) : Nil
+      @mutex.synchronize do
+        next unless stream = @streams[stream_id]?
+        stream.resp_rewrite = stream.resp_rewrite.try { |r| Store::Rewrite.new(r.hits) }
+      end
+    end
+
+    # `stream_id`'s entry, opened when it has none yet — nil for stream 0, a closed stream, or at
+    # the live-stream cap. Under `@mutex`.
+    private def open_entry(stream_id : UInt32) : Stream?
+      return if stream_id == 0
+      @streams[stream_id]? || begin
+        return if @streams.size >= MAX_LIVE_STREAMS || @closed.includes?(stream_id)
+        @streams[stream_id] = Stream.new
       end
     end
 
@@ -733,6 +761,7 @@ module Gori::Proxy::H2
         h2_conn_id: @conn_id, h2_stream_id: stream_id.to_i64,
         advisory: advisory_of(stream), connect_protocol: protocol,
         source: FlowSource::Kind::Proxy, intercept_original: stream.intercept_original)
+      captured.rewrite = stream.req_rewrite
       stream.flow_id = @sink.on_request(captured)
     end
 
@@ -756,12 +785,14 @@ module Gori::Proxy::H2
       now = Time.instant
       duration_us = (now - stream.started_at).total_microseconds.to_i64
       ttfb_us = stream.resp_first_at.try { |t| (t - stream.started_at).total_microseconds.to_i64 }
-      @sink.on_response(Store::CapturedResponse.new(
+      captured = Store::CapturedResponse.new(
         flow_id: flow_id, status: status, head: head, body: body,
         body_truncated: cap.truncated?, body_size: cap.total,
         content_type: content_type, content_encoding: content_encoding, state: state, error: error,
         ttfb_us: ttfb_us, duration_us: duration_us, advisory: advisory_of(stream),
-        interims: stream.resp.interims))
+        interims: stream.resp.interims)
+      captured.rewrite = stream.resp_rewrite
+      @sink.on_response(captured)
     end
 
     # A trailing header block carried a pseudo-header, which RFC 9113 §8.1 forbids in a

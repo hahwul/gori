@@ -852,8 +852,12 @@ module Gori::Proxy::H2
         # `block`) keeps the request as it was held beside the flow, as h1 does (#1378). The
         # held message is the h1-shaped projection the operator edited: h2 has no client bytes
         # in that form, and its held frames were never logged because they never went out.
-        if @ordered && (decided != block || slot.rebuilt)
-          @assembler.note_intercept_original(block.stream_id, item.raw)
+        if decided != block || slot.rebuilt
+          if @ordered
+            @assembler.note_intercept_original(block.stream_id, item.raw)
+          else
+            @assembler.note_response_edited(block.stream_id)
+          end
         end
       end
       slot.ready = true

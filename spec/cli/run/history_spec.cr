@@ -68,6 +68,10 @@ module Gori::CLI::Run
     io.to_s
   end
 
+  def self.original_detail_for_spec(store : Store, d : Store::FlowDetail) : Store::FlowDetail?
+    original_detail(store, d, true)
+  end
+
   def self.sse_event_text_for_spec(e : Sse::Event) : String
     sse_event_text(e, 0)
   end
@@ -1516,6 +1520,35 @@ describe "gori run show --ws-match" do
       Gori::CLI::Run.show_ws_messages(store, detail, Gori::QL.ws_match("ws~token=\\w+"))
         .map { |m| String.new(m.payload) }.should eq(["login token=abc"])
       Gori::CLI::Run.show_ws_messages(store, detail).size.should eq(2)
+    end
+  end
+end
+
+# `gori run show --original` (#1589): each side swapped for its bytes before Match&Replace (or
+# the Intercept edit, which keeps the whole client request), the rest as stored.
+describe "gori run show --original" do
+  it "swaps in each side's original, keeps a body the rules left alone, and refuses an unchanged flow" do
+    with_store do |store|
+      req = Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "o.test", port: 80, method: "POST", target: "/",
+        http_version: "HTTP/1.1", head: "POST / HTTP/1.1\r\nX-Rule: 1\r\n\r\n".to_slice,
+        body: "sent".to_slice, source: Gori::FlowSource::Kind::Proxy)
+      ref = Gori::Store::RuleRef.new(Gori::Store::RuleScope::Project, 1_i64)
+      req.rewrite = Gori::Store::Rewrite.new([ref], "POST / HTTP/1.1\r\n\r\n".to_slice)
+      id = store.insert_flow(req)
+      resp = Gori::Store::CapturedResponse.new(flow_id: id, status: 200,
+        head: "HTTP/1.1 200 OK\r\n\r\n".to_slice, body: "client-got".to_slice)
+      resp.rewrite = Gori::Store::Rewrite.new([ref], "HTTP/1.1 200 OK\r\n\r\n".to_slice, "origin-sent".to_slice)
+      store.update_response(resp)
+      plain = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "o.test", port: 80, method: "GET", target: "/",
+        http_version: "HTTP/1.1", head: "GET / HTTP/1.1\r\n\r\n".to_slice, source: Gori::FlowSource::Kind::Proxy))
+
+      o = Gori::CLI::Run.original_detail_for_spec(store, store.get_flow(id).not_nil!).not_nil!
+      String.new(o.request_head).should_not contain("X-Rule")
+      String.new(o.request_body.not_nil!).should eq("sent") # no body rule: the stored body
+      String.new(o.response_body.not_nil!).should eq("origin-sent")
+      Gori::CLI::Run.original_detail_for_spec(store, store.get_flow(plain).not_nil!).should be_nil
     end
   end
 end

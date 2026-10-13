@@ -19,6 +19,11 @@ module Gori::Proxy
     abstract def on_ws_message(flow_id : Int64, direction : String, opcode : Int32, payload : Bytes,
                                shape : Gori::Proxy::WS::Shape = Gori::Proxy::WS::Shape::DEFAULT) : Nil
 
+    # Match&Replace rules that rewrote a WebSocket message on `flow_id`, recorded the first time
+    # each one does (#1589). The default keeps sinks that only record HTTP flows source-compatible.
+    def on_rule_hits(flow_id : Int64, side : Store::RuleTarget, hits : Array(Store::RuleRef)) : Nil
+    end
+
     # Called after an upgraded tunnel closes and its captured transcript has been written.
     # The default keeps sinks that only record HTTP flows source-compatible.
     def on_tunnel_complete(flow_id : Int64) : Nil
@@ -56,6 +61,10 @@ module Gori::Proxy
                       shape : Gori::Proxy::WS::Shape = Gori::Proxy::WS::Shape::DEFAULT) : Nil
       return if flow_id <= 0
       @store.insert_ws_message(flow_id, direction, opcode, payload, shape: shape)
+    end
+
+    def on_rule_hits(flow_id : Int64, side : Store::RuleTarget, hits : Array(Store::RuleRef)) : Nil
+      @store.record_rule_hits(flow_id, side, hits)
     end
 
     def on_tunnel_complete(flow_id : Int64) : Nil

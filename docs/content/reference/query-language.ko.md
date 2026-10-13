@@ -29,6 +29,7 @@ gori에는 플로우를 걸러내는 작은 쿼리 언어(QL)가 있습니다. �
 | `ws` | 소켓이 값을 담은 TEXT 또는 BINARY 메시지를 주고받은 WebSocket 플로우, 방향 무관([아래](#websocket-messages)) |
 | `rpc` | 요청 본문이 값으로 시작하는 메서드를 부르는 JSON-RPC 호출(MCP 포함)인 플로우([아래](#json-rpc-methods)) |
 | `stub` | `true` / `false`. 원본 서버를 거치지 않고 gori가 [short-circuit 규칙](/ko/guide/proxy/#short-circuit)으로 직접 답한 플로우 |
+| `rewritten` | `true` / `false`, 또는 규칙 하나를 `project/4` / `global/3`로. [Match & Replace 규칙](/ko/guide/proxy/#match-replace)이 바꾼 플로우. 매칭됐지만 아무것도 바꾸지 않은 규칙은 기록되지 않고, gori가 규칙을 기록하기 전에 캡처한 플로우는 `true`에도 규칙에도 걸리지 않습니다 |
 | `static` | `true` / `false`. 이미지, 폰트, 오디오·비디오. 응답 Content-Type으로 판단하고, 없으면 경로 확장자를 봅니다. SVG·CSS·JS와 이미지 프록시(`?url=`)는 제외하고, 성공한 응답(2xx 또는 304)만 해당합니다. `-static:true`가 [정적 에셋 숨기기 렌즈](/ko/guide/proxy/#hide-static)입니다 |
 | `scope` | `in` / `out`. 프로젝트 스코프 규칙([아래](#scope-in-scope-out)) |
 | `cache` | `hit` / `miss` / `dynamic` / `none`: 응답의 캐시 헤더(`Age`, `X-Cache`, `CF-Cache-Status`, `Cache-Status` 등)에서 읽은 캐시 판정. `none`도 실제 값입니다(판정 없음, 대기 중인 플로우 포함). `cache:` 쿼리를 쓰면 History에 CACHE 열이 붙습니다 |
@@ -278,7 +279,7 @@ host:"my host"                        공백까지 포함한 하나의 host 값
 
 홀드 게이트와 Extract 규칙 조건은 캡처되기 전의 흐르는 메시지 하나를 평가하므로, 그 메시지가
 답할 수 없는 History 필드는 추측하지 않고 거부합니다. `scope:`(프로젝트의 스코프 규칙은 메시지의
-일부가 아님), `size:`·`reqsize:`·`respsize:`·`dur:`(교환이 아직 끝나지 않음), `stub:`·`static:`·
+일부가 아님), `size:`·`reqsize:`·`respsize:`·`dur:`(교환이 아직 끝나지 않음), `stub:`·`rewritten:`·`static:`·
 `src:`·`via:`·`cache:`·`rpc:`·`ws:`(게이트가 쥔 것은 트랜스크립트가 아니라 메시지 하나이고, 그 `body:`가 이미
 그 메시지를 뜻함), 그리고 한쪽 방향만 보는 `req.`/`resp.` 표기가 그렇습니다. 거부된 필드를 대신
 자유 텍스트로 검색하는 일도 없습니다. 입력하는 자리에서 그렇게 알려주고, 그런 필드를

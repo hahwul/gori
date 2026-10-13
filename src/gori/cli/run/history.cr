@@ -824,6 +824,7 @@ module Gori
         headers_only = false
         max_body : Int32? = nil
         ws_spec : String? = nil
+        original = false
 
         positional = parse_args(args, "gori run show") do |p|
           p.banner = "Usage: gori run show <flow-id> [options]"
@@ -833,6 +834,7 @@ module Gori
           p.on("--response-only", "Only the response side") { resp_only = true }
           p.on("--headers-only", "text/json: print the request line/status line and headers only — each body is replaced by a line naming its size, and the sections derived from bodies (decoded views, gRPC messages, WebSocket frames, SSE events) are left out, named with their counts where they have one") { headers_only = true }
           p.on("--max-body=BYTES", "text/json: print at most BYTES of each decoded body, then a marker naming its full size; the sections derived from bodies are left out as with --headers-only") { |v| max_body = parse_count(v, "--max-body") }
+          p.on("--original", "Show each side as it was BEFORE Match&Replace or an Intercept edit changed it (the client's request, the origin's response), in any --format; a side nothing changed is shown as stored") { original = true }
           p.on("--ws-match=QUERY", "Only the WebSocket messages matching QUERY, as the QL ws term matches them: ws:needle (case-insensitive), ws~regex, or a bare needle") { |v| ws_spec = v }
           redact_options(p, redaction)
         end
@@ -855,10 +857,11 @@ module Gori
         # The redaction choice is resolved in here too, and for the same reason: it reads this
         # project's own profiles off the settings row, and its refusal ("no profile named …")
         # has to be reported AFTER the close.
-        detail, ws_msgs, choice, interims, ws_total = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
+        detail, ws_msgs, choice, interims, ws_total, unchanged = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
           d = store.get_flow(id)
-          {d, show_ws_messages(store, d, ws_match), redact_choice(store, redaction), d.try { store.interims(id) },
-           ws_match && d ? store.count_ws_messages(id) : 0}
+          o = original_detail(store, d, original)
+          {o || d, show_ws_messages(store, d, ws_match), redact_choice(store, redaction), d.try { store.interims(id) },
+           ws_match && d ? store.count_ws_messages(id) : 0, original && o.nil?}
         end
         abort "gori run show: no flow ##{id}" unless detail
         detail, ws_msgs, redact_report, previewed = show_redaction(detail, ws_msgs, choice, redaction)
@@ -866,6 +869,7 @@ module Gori
 
         show_request = !resp_only
         show_response = !req_only
+        announce_original(id, original, unchanged, format)
         show_format(format, detail, show_request, show_response, ws_msgs, cap, interims)
         # On STDERR after the document, like the redaction notes, so a narrowed transcript is
         # never read as the whole socket and `--format json > out.json` stays pure.
@@ -873,6 +877,29 @@ module Gori
         # After the document, like every other caveat this command reports, and on STDERR so
         # `--format har > evidence.har` still writes a pure HAR.
         redact_notes(redact_one(redact_report), choice, "show")
+      end
+
+      # `--original` (#1589): the flow with each side swapped for its bytes before Match&Replace or
+      # the operator's Intercept edit (`Interceptor.original`). A flow with no original is nil,
+      # which the caller refuses once the store is closed (`announce_original`).
+      private def self.original_detail(store : Store, d : Store::FlowDetail?, original : Bool) : Store::FlowDetail?
+        return nil unless original && d
+        req = Gori::Interceptor.original(store, d, Store::RuleTarget::Request)
+        resp = Gori::Interceptor.original(store, d, Store::RuleTarget::Response)
+        return nil unless req || resp
+        req_head, req_body = req || {d.request_head, d.request_body}
+        resp_head, resp_body = resp || {d.response_head, d.response_body}
+        Store::FlowDetail.new(d.row, d.http_version, req_head, req_body, resp_head, resp_body,
+          d.h2_conn_id, d.h2_stream_id, d.request_body_truncated?, d.response_body_truncated?,
+          d.error, d.sni)
+      end
+
+      # `--original` on a flow nothing changed is refused; on one that was, the text view says so
+      # above the bytes.
+      private def self.announce_original(id : Int64, original : Bool, unchanged : Bool, format : Symbol) : Nil
+        return unless original
+        abort "gori run show: flow ##{id} has no original — no Match&Replace rule or Intercept edit changed it" if unchanged
+        puts "=== ORIGINAL (before Match&Replace or an Intercept edit) ===\n\n" if format == :text
       end
 
       # `--format` to the writer for it. Split out of `cmd_show` so the command body stays
@@ -1202,6 +1229,11 @@ module Gori
         unless advisories.empty?
           puts "=== GORI ADVISORY ==="
           advisories.each { |a| puts "! #{CLI::Output.term_safe_multiline(a)}" }
+          puts ""
+        end
+        # Which Match&Replace rules changed what follows (#1589); `--original` prints what they replaced.
+        if refs = detail.row.rewritten_by
+          puts "rewritten by Match&Replace #{refs.join(", ")} (--original shows the bytes before)"
           puts ""
         end
         if req
