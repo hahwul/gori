@@ -127,7 +127,7 @@ module Gori
       # "timed out" TLS handshake is a timeout, a "connection refused" one is refused).
       private ERROR_WORDS = [
         {ErrorClass::Blocked, {"blocked by"}},
-        {ErrorClass::Budget, {"cap reached"}},
+        {ErrorClass::Budget, {"cap reached", "request budget"}},
         {ErrorClass::Timeout, {"timed out", "timeout"}},
         {ErrorClass::Refused, {"refused"}},
         {ErrorClass::Dns, {"resolve", "getaddrinfo", "name or service", "nodename", "dns"}},

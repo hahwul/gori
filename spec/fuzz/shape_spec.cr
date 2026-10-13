@@ -108,6 +108,9 @@ describe Gori::Fuzz::Shape do
     F::Shape.error_class(Gori::Outbound::SANDBOX_SWEEP_ERROR).should eq(F::Shape::ErrorClass::Blocked)
     F::Shape.error_class(Gori::Outbound::EXCLUDE_SWEEP_ERROR).should eq(F::Shape::ErrorClass::Blocked)
     F::Shape.error_class(F::CappedBackend::CAP_ERROR).should eq(F::Shape::ErrorClass::Budget)
+    [Gori::Outbound::BUDGET_SPENT_ERROR, Gori::Outbound::BUDGET_STOPPED_ERROR, Gori::Outbound::BUDGET_UNAVAILABLE_ERROR].each do |err|
+      F::Shape.error_class(err).should eq(F::Shape::ErrorClass::Budget)
+    end
     F::Shape.error_class("#{F::REDIRECT_HOP_REFUSED}boom").should eq(F::Shape::ErrorClass::RedirectRefused)
     # An unsent macro row embeds the step's own failure. That wording must not file it under
     # a network class. The prefix is matched as text so `shape.cr` need not require the macro.
