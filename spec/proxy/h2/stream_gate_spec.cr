@@ -32,6 +32,30 @@ private class RecSink < Gori::Proxy::FlowSink
   end
 end
 
+# A request head rule that reports itself as project rule #4 when it fires (#1589).
+private class HitRewriter < Gori::Proxy::HeadRewriter
+  def initialize(@from : String, @to : String)
+  end
+
+  def active? : Bool
+    true
+  end
+
+  def rewrite_request(head : Bytes, host : String) : Bytes
+    String.new(head).gsub(@from, @to).to_slice
+  end
+
+  def rewrite_response(head : Bytes, host : String) : Bytes
+    head
+  end
+
+  def rewrite_request(head : Bytes, host : String, hits : Array(Gori::Store::RuleRef)) : Bytes
+    out = rewrite_request(head, host)
+    hits << Gori::Store::RuleRef.new(Gori::Store::RuleScope::Project, 4_i64) unless out == head
+    out
+  end
+end
+
 # A live client+origin pair of gates over in-memory legs, plus a real Interceptor.
 private class Rig
   getter c2s : Gate # client → origin, writes to `upstream`
@@ -51,13 +75,13 @@ private class Rig
   # insert into its dynamic table, i.e. behave like a browser rather than like gori's own
   # literal-only encoder.
   def initialize(@ic : Gori::Interceptor, host : String = "api.example.com", indexing : Bool = false,
-                 port : Int32 = 443)
+                 port : Int32 = 443, rewriter : Gori::Proxy::HeadRewriter? = nil)
     @sink = RecSink.new
     @upstream = IO::Memory.new
     @client = IO::Memory.new
     @enc_out = HPACK::Encoder.new(indexing: indexing)
     @assembler = Gori::Proxy::H2::Assembler.new(@sink, host, port)
-    @heads_out = Gori::Proxy::H2::HeadRewrite.new("out", nil, @assembler, host)
+    @heads_out = Gori::Proxy::H2::HeadRewrite.new("out", rewriter, @assembler, host)
     @heads_in = Gori::Proxy::H2::HeadRewrite.new("in", nil, @assembler, host)
     @c2s = Gate.new("out", @upstream, 1_i64, @sink, @assembler, host, port, @ic, @heads_out)
     @s2c = Gate.new("in", @client, 1_i64, @sink, @assembler, host, port, @ic, @heads_in)
@@ -497,6 +521,28 @@ describe Gori::Proxy::H2::StreamGate do
       head = head_of(rig.to_origin, 1_u32).not_nil!
       head.find { |(n, _)| n == "content-length" }.not_nil![1].should eq(over_hold_body)
       head.find { |(n, _)| n == "x-probe" }.not_nil![1].should eq("edited")
+    end
+  end
+
+  # The rule ran before the hold, so the held head is the rule's output: the client's own
+  # request is the head the rule replaced, with the held body (#1589).
+  it "keeps the client's pre-rule head as the original when a rule-rewritten request is edited" do
+    with_ic do |ic|
+      rig = Rig.new(ic, rewriter: HitRewriter.new("/secret", "/ruled"))
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(post_len("/secret", 5)), Frame::END_HEADERS))
+      rig.c2s.accept(data(1_u32, "hello", Frame::END_STREAM))
+      settle
+      item = ic.pending.first
+      String.new(item.raw).should contain("POST /ruled HTTP/2")
+      ic.forward(item.id, String.new(item.raw).sub("/ruled", "/edited").to_slice)
+      settle
+
+      req = rig.sink.requests.first
+      req.target.should eq("/edited")
+      original = String.new(req.intercept_original.not_nil!)
+      original.should start_with("POST /secret HTTP/2\r\n")
+      original.should end_with("\r\n\r\nhello")
+      req.rewrite.not_nil!.hits.should eq([Gori::Store::RuleRef.new(Gori::Store::RuleScope::Project, 4_i64)])
     end
   end
 
