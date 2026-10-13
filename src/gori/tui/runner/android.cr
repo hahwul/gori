@@ -65,10 +65,13 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       # The TUI's setup maps gori's own port, so that is the one to remove when the device's
       # proxy no longer names it. The rest is best-effort; only the proxy reset has to land.
       steps = Android.plan_undo(serial, Android.mapped_port(probe.http_proxy) || port, probe.root)
-      cleared = Android.run(adb, steps) { }.first
+      outcomes = Android.run(adb, steps) { }
+      cleared = outcomes.first
       return {"android #{serial}: could not #{cleared.step.what} — #{cleared.detail}", false} unless cleared.ok
+      # Name a best-effort step that failed rather than claim it, as `gori run android undo` lists each.
+      missed = outcomes.reject(&.ok).map { |o| " · could not #{o.step.what}" }.join
       tail = probe.root ? "" : " · no root: a system CA stays until reboot"
-      return {"android #{serial}: proxy cleared, reverse mapping and pushed CA removed#{tail}", true}
+      return {"android #{serial}: proxy cleared#{missed}#{tail} · a user CA you installed stays in Settings", true}
     end
     hash = Proxy::Tls::Cert.read_pem(ca).subject_hash_old
     plan = Android.plan_setup(serial, port, port, ca, hash, mode, probe)
