@@ -765,6 +765,9 @@ describe "MCP WebSocket and gRPC projections in get_flow" do
     json = JSON.build { |j| j.object { Gori::MCP::Serialize.emit_ws_messages(j, [plain]) } }
     json.should_not contain("text_lossy")
     json.should_not contain("\"base64\"")
+    JSON.parse(json)["ws_messages"]["messages"][0]["origin"].as_s.should eq("client")
+    reply = Gori::Store::WsMessage.new(2_i64, 1_i64, nil, 0_i64, "in", 1, "yo".to_slice)
+    JSON.parse(JSON.build { |j| j.object { Gori::MCP::Serialize.emit_ws_messages(j, [reply]) } })["ws_messages"]["messages"][0]["origin"].as_s.should eq("target")
   end
 
   # `Grpc.scan`'s residual is the whole point: `Grpc.messages` throws it away, so a

@@ -62,6 +62,10 @@ describe "JSON-RPC / MCP and LLM decoding — every surface" do
       rpc["calls"][0]["reply_kind"].as_s.should eq("result")
       rpc["calls"][0]["reply"].as_s.should contain("sunny")
       rpc["stream"][0]["method"].as_s.should eq("notifications/progress")
+      # Who wrote each text (#1586): the call's params are the client's, the rest the target's.
+      rpc["calls"][0]["params_origin"].as_s.should eq("client")
+      rpc["calls"][0]["reply_origin"].as_s.should eq("target")
+      rpc["stream"][0]["message_origin"].as_s.should eq("target")
 
       JSON.parse(Gori::MCP::Serialize.flow_detail_json(detail))["json_rpc"]["calls"][0]["label"].as_s.should eq("get_weather")
 
@@ -81,6 +85,7 @@ describe "JSON-RPC / MCP and LLM decoding — every surface" do
       llm["text"].as_s.should eq("Hello")
       llm["streamed"].as_bool.should be_true
       llm["stop_reason"].as_s.should eq("stop")
+      llm["text_origin"].as_s.should eq("target")
 
       JSON.parse(Gori::MCP::Serialize.flow_detail_json(detail))["llm"]["text"].as_s.should eq("Hello")
       pane_text(store).should contain("LLM")

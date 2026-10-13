@@ -1111,6 +1111,11 @@ module Gori
         end
       end
 
+      # Who wrote a WebSocket message, as `emit_body` labels a body (#1586).
+      def self.ws_origin(direction : String) : String
+        direction == "out" ? "client" : "target"
+      end
+
       # A WebSocket flow (status 101) carries a separate message log the heads/bodies
       # don't show. Mirror the `gori run show` WS pane, bounded for LLM use: text
       # frames inline their (clipped) payload, binary frames report a size only.
@@ -1136,6 +1141,7 @@ module Gori
                     j.field "direction", m.direction
                     j.field "opcode", m.opcode
                     j.field "type", ws_frame_type(m.opcode)
+                    j.field "origin", ws_origin(m.direction)
                     j.field "at", m.created_at
                     j.field "at_iso", Gori.iso_micros(m.created_at)
                     # The V7 shape (FIN / RSV / masked / frame count) and a CLOSE's code and
@@ -1230,6 +1236,7 @@ module Gori
                     j.field "type", text(e.type)
                     j.field "id", text(e.id)
                     j.field "retry", e.retry
+                    j.field "origin", "target" # the response's events, as `emit_body` labels it (#1586)
                     data = e.data.scrub
                     cut = data.size > SSE_DATA_MAX
                     j.field "data", cut ? data[0, SSE_DATA_MAX] : data

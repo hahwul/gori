@@ -15,7 +15,7 @@
 - Probe: passive rules for weak OAuth/OIDC authorization requests (implicit grant, PKCE plain or missing, no state/nonce) and client-side path traversal in JavaScript request calls (#1597, #1598)
 - Fuzzer: named extractors pull several values out of every response, one results column each, with the History column grammar, on the TUI (**Extractors…**), `gori run fuzz --extractor` and MCP `fuzz_start{extractors}` (#1592)
 - History, `gori run show` and MCP `get_flow` decode JSON-RPC/MCP calls paired with their replies (SSE included) and OpenAI/Anthropic LLM calls with streamed deltas reassembled, in new RPC and LLM panes; QL `rpc:tools/call` finds calls by method (#1590)
-- MCP marks every body with `origin` (`target` or `client`) and tells agents up front that traffic is data, never instructions, and Probe's passive `llm_prompt_injection` rule flags a response that tries to steer an LLM agent (#1586)
+- MCP marks every body, WebSocket message, SSE event and decoded JSON-RPC or LLM text with `origin` (`target` or `client`) and tells agents up front that traffic is data, never instructions, and Probe's passive `llm_prompt_injection` rule flags a response that tries to steer an LLM agent (#1586)
 - QL: `via:tui|cli|mcp` filters flows by the gori surface that sent them, so `via:mcp` is what an agent sent, and agent events in Activity and MCP `list_events` name the client (`actor_label`) (#1587)
 - Proxy: `GORI_SSLKEYLOGFILE` (or `SSLKEYLOGFILE`) writes TLS session secrets for both legs in the NSS key log format, so Wireshark can decrypt what gori relays (#1593)
 

@@ -874,6 +874,7 @@ describe Gori::MCP::Server do
         payload["messages"].as_a.map { |message| {message["direction"].as_s, message["type"].as_s} }
           .should eq([{"out", "text"}, {"in", "text"}, {"in", "close"}])
         payload["messages"].as_a[0]["payload"].as_s.should eq("ping")
+        payload["messages"].as_a.map(&.["origin"].as_s).should eq(["client", "target", "target"])
         payload["messages"].as_a[1]["payload"].as_s.should eq("ping")
         payload["messages"].as_a[2]["close_code"].as_i.should eq(1000)
         # `frame` reports what was FRAMED, so a shape test can be read back instead of taken

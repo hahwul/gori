@@ -353,6 +353,7 @@ describe Gori::MCP::Server do
         events[1]["type"].as_s.should eq("tick")
         events[1]["id"].as_s.should eq("7")
         events[1]["data"].as_s.should eq("x")
+        events.all? { |e| e["origin"].as_s == "target" }.should be_true
       end
     end
 

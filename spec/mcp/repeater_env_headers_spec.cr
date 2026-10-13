@@ -138,6 +138,7 @@ describe "MCP repeater last_response_body" do
         %({"id":#{id},"include_response_body":true}))["sessions"][0]
       s["last_response_body"].as_s.should eq(%({"error":"boom"}))
       s["last_response_body_representation"].as_s.should eq("raw")
+      s["last_response_body_origin"].as_s.should eq("target")
     end
   end
 

@@ -1266,6 +1266,7 @@ module Gori
                   j.object do
                     j.field "direction", message.direction
                     j.field "opcode", message.opcode
+                    j.field "origin", Serialize.ws_origin(message.direction)
                     j.field "type", Serialize.ws_frame_type(message.opcode)
                     # What was actually FRAMED, not just what was meant. An agent driving a
                     # §5.1/§5.2/§5.4 test has to be able to read back that the unmasked frame,

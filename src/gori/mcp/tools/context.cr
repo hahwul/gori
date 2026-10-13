@@ -505,6 +505,7 @@ module Gori
         emit_capped_text(j, "last_response_body", text,
           raw: bytes, include_sensitive: include_sensitive, read_more: more, cap: cap)
         j.field "last_response_body_representation", decoded ? "decoded" : "raw"
+        j.field "last_response_body_origin", "target" # as `emit_body` labels it (#1586)
         j.field "last_response_body_decode_note", note if note
         # `emit_capped_text` names a cursor only when it CUT. A body that fits but is not
         # UTF-8 was still altered — scrubbed — and the caller needs the same pointer to read

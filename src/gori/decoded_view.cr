@@ -156,9 +156,9 @@ module Gori
                   j.field "method", c.method
                   j.field "id", c.id
                   j.field "label", c.label
-                  emit_text(j, "params", c.params, clip)
+                  emit_text(j, "params", c.params, clip, "client")
                   j.field "reply_kind", c.reply ? (c.error ? "error" : "result") : nil
-                  emit_text(j, "reply", c.reply, clip)
+                  emit_text(j, "reply", c.reply, clip, "target")
                 end
               end
             end
@@ -170,7 +170,7 @@ module Gori
                 j.object do
                   j.field "method", m.method
                   j.field "id", m.id
-                  emit_text(j, "message", m.body, clip)
+                  emit_text(j, "message", m.body, clip, "target")
                 end
               end
             end
@@ -188,13 +188,13 @@ module Gori
           j.field "messages", c.roles
           j.field "tools", c.tools
           j.field "streamed", c.streamed
-          emit_text(j, "text", c.text, clip)
+          emit_text(j, "text", c.text, clip, "target")
           j.field "tool_calls" do
             j.array do
               c.tool_calls.each do |t|
                 j.object do
                   j.field "name", t.name
-                  emit_text(j, "arguments", t.arguments, clip)
+                  emit_text(j, "arguments", t.arguments, clip, "target")
                 end
               end
             end
@@ -294,8 +294,10 @@ module Gori
     end
 
     # Emit a (possibly nil) text field, clipped to `clip` bytes when set; a clip flags
-    # `<name>_truncated` so the value isn't read as whole.
-    private def emit_text(j : JSON::Builder, name : String, text : String?, clip : Int32?) : Nil
+    # `<name>_truncated` so the value isn't read as whole. `origin` labels who wrote a present
+    # value as `<name>_origin` (`target` or `client`, as MCP's body objects do, #1586).
+    private def emit_text(j : JSON::Builder, name : String, text : String?, clip : Int32?, origin : String? = nil) : Nil
+      j.field "#{name}_origin", origin if origin && text
       if text.nil?
         j.field name, nil
       elsif clip && text.bytesize > clip
