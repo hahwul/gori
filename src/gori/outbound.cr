@@ -412,6 +412,11 @@ module Gori
 
     # ── the project request budget ───────────────────────────────────────────────
 
+    # Hand back `n` slots `admit` gave that were never sent.
+    def refund(n : Int32) : Nil
+      @budget.try(&.refund(n))
+    end
+
     # Take `count` request slots from the project-wide budget (#1601), waiting for the rate, or
     # return the refusal. Asked once per REAL send, right after its Layer-2 gate passed, never
     # by a preflight; proxied client traffic never reaches it. Nothing configured costs the

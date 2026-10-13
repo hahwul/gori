@@ -1843,10 +1843,19 @@ end
 
 private class CountingBudgetScope < D::OpenScope
   getter asked = 0
+  getter refunded = 0
+
+  def initialize(@yields = false)
+  end
 
   def admit : String?
     @asked += 1
+    sleep 1.millisecond if @yields # a lease is a writer task: other workers run meanwhile
     nil
+  end
+
+  def refund(n : Int32) : Nil
+    @refunded += n
   end
 end
 
@@ -1858,5 +1867,14 @@ describe "Gori::Discover::Engine project budget under --max-requests" do
     words = (1..50).map { |i| "path#{i}" }
     terminal_of(D::Engine.new("http://t/", words, RouteBackend.new(->(_t : String) { notfound }), cfg, scope))
     scope.asked.should eq(5)
+  end
+
+  it "hands back a slot whose send the cap refused while it waited" do
+    cfg = D::Config.new(spider: false, bruteforce: true, max_requests: 5_i64, calibrate_probes: 2,
+      concurrency: 4, retries: 0)
+    scope = CountingBudgetScope.new(yields: true)
+    words = (1..50).map { |i| "path#{i}" }
+    terminal_of(D::Engine.new("http://t/", words, RouteBackend.new(->(_t : String) { notfound }), cfg, scope))
+    (scope.asked - scope.refunded).should eq(5)
   end
 end

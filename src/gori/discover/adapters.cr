@@ -25,6 +25,10 @@ module Gori::Discover
       @outbound.try(&.admit)
     end
 
+    def refund(n : Int32) : Nil
+      @outbound.try(&.refund(n))
+    end
+
     # Layer 2, and therefore the line that owes DESIGN.md §7's "one reload semantic for the
     # active-traffic scope gate" (#354). Discover's Layer 2 runs through THIS object and not
     # through `Outbound#sweep_block`, because the engine is deliberately Store-free — which is
