@@ -1,6 +1,8 @@
 require "json"
 require "uri"
 require "./media_type"
+require "./json_spans"
+require "./raw_json"
 require "./entity"
 require "./graphql/introspection"
 
@@ -793,13 +795,15 @@ module Gori
     # the decoded pane. The WHOLE envelope object is duplicated (not just `query`), so
     # `variables`, `extensions` and any other field ride along on every copy, and the
     # Content-Type stays JSON. Refuses a body that is not a single GraphQL envelope object.
+    # Each copy is the envelope's own bytes: re-serializing would respell numbers, fold a
+    # duplicated variable and refuse a number past Int64 (P7).
     private def multiply_batch(body : String, count : Int32) : String
-      h = (JSON.parse(strip(body)).as_h? rescue nil)
+      env = strip(body)
+      h = (RawJson.parse(env).as_h? rescue nil)
       unless h && single_op(h)
         raise Gori::Error.new(%(the batch form needs one GraphQL JSON operation, {"query":…}, to multiply))
       end
-      el = JSON::Any.new(h)
-      Array.new(count) { el }.to_json
+      "[#{Array.new(count, env).join(',')}]"
     end
 
     # `Alias`: the operation's one top-level selection-set field, repeated `count` times under
@@ -817,13 +821,14 @@ module Gori
       if MediaType.essence(content_type) == "application/x-www-form-urlencoded"
         raise Gori::Error.new("the alias form needs a JSON or application/graphql body, not a form-encoded one")
       end
-      if h = (JSON.parse(strip(body)).as_h? rescue nil)
+      env = strip(body)
+      if h = (RawJson.parse(env).as_h? rescue nil)
         q = h["query"]?.try(&.as_s?)
         raise Gori::Error.new(refusal) unless q && q.includes?('{')
         aliased = alias_single(q, count) || raise Gori::Error.new(refusal)
-        h2 = h.dup
-        h2["query"] = JSON::Any.new(aliased)
-        h2.to_json
+        # Only the `query` value's bytes change; the rest of the envelope is kept as sent (P7).
+        bytes = JsonSpans.edit(env.to_slice, [JsonPath::Step.new(key: "query")], aliased.to_json)
+        bytes ? String.new(bytes) : raise Gori::Error.new(refusal)
       else
         doc = strip(body)
         raise Gori::Error.new(refusal) unless doc.includes?('{')
@@ -834,9 +839,14 @@ module Gori
     # A GraphQL document rewritten so its one top-level field is repeated `count` times under
     # `aN:` aliases, or nil when there is no top-level selection set to brace-match or the top
     # level is not exactly one field (empty, a fragment spread, or two-or-more fields — the
-    # exotic cases refused rather than guessed).
+    # exotic cases refused rather than guessed). A document of several definitions is refused
+    # too: the first one may be a fragment, or not the operation `operationName` runs.
     private def alias_single(doc : String, count : Int32) : String?
       open_i, close_i = outer_selection(doc) || return nil
+      b = doc.to_slice
+      return nil if skip_ws(b, close_i + 1) < b.size
+      start = skip_ws(b, 0)
+      return nil if read_name(b, start).try { |e| doc.byte_slice(start, e - start) == "fragment" }
       inner = doc.byte_slice(open_i + 1, close_i - open_i - 1)
       core = sole_field_core(inner) || return nil
       copies = String.build do |io|

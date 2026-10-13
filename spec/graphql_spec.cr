@@ -904,6 +904,22 @@ describe Gori::Graphql do
         q.should eq(%(query($x:I={a:1}){ a0: hero a1: hero }))
       end
 
+      it "refuses a document of several definitions rather than multiplying the first" do
+        [%({"operationName":"B","query":"query A { me { id } } query B { login(u:\\"x\\") { ok } }"}),
+         %({"query":"fragment F on User { id }\\nmutation Login { login(p: 1) { ...F } }"})].each do |env|
+          expect_raises(Gori::Error, /single-field/) do
+            GQL.multiply(env, "application/json", 2, GQL::MultiplyForm::Alias)
+          end
+        end
+      end
+
+      it "keeps the rest of the envelope byte-exact" do
+        env = %({"query":"mutation{login}","variables":{"amt":1.10,"d":"x","d":"y","id":12345678901234567890}})
+        GQL.multiply(env, "application/json", 2, GQL::MultiplyForm::Alias)
+          .should eq(%({"query":"mutation{ a0: login a1: login }","variables":{"amt":1.10,"d":"x","d":"y","id":12345678901234567890}}))
+        GQL.multiply(env, "application/json", 2, GQL::MultiplyForm::Batch).should eq("[#{env},#{env}]")
+      end
+
       it "refuses a multi-field top-level selection set" do
         expect_raises(Gori::Error, /single-field/) do
           GQL.multiply(%({"query":"{ a b }"}), "application/json", 2, GQL::MultiplyForm::Alias)
