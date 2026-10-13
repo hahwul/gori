@@ -54,6 +54,8 @@ module Gori
         end)
       rescue ex : FuzzArgError
         Result.new(ex.message || "invalid mine arguments", is_error: true)
+      rescue ex : RequestMacro::Runner::ApprovalPending
+        host_approval(ex.verdict)
       end
 
       # Same robustness contract as run_fuzz_job: contained per-event, terminal-state
@@ -251,6 +253,8 @@ module Gori
         Miner::Plan.build(options, ob)
       rescue ex : Miner::PlanError
         raise FuzzArgError.new(mine_plan_error(ex))
+      rescue ex : RequestMacro::Runner::ApprovalPending
+        raise ex # `mine_start` raises the card for it
       rescue ex : Gori::Error
         # `PayloadFrom::Error` and `RequestMacro::Error` both: each builder writes its own
         # sentence, and it reads the same on every surface.

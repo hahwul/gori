@@ -188,4 +188,24 @@ describe "MCP request-time macro" do
     end
     origin.close
   end
+
+  # #1585: under `send: ask` a macro step's host is asked about like the target's, on a card,
+  # rather than refused as out of scope with "add a scope include rule".
+  it "raises the approval card for a macro step's host under send: ask" do
+    origin = MacroTokenOrigin.new
+    with_macro_project(origin) do |store, _, _|
+      Gori::Scope.load(store).add("include", "host", "127.0.0.1")
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false, asked_permissions: Set{"send"})
+      args = fuzz_args(origin).reject("allow_unscoped")
+      {"fuzz_start" => args, "mine_start" => args.reject("payloads").merge({"locations" => JSON::Any.new("query")})}.each do |tool, a|
+        r = tools.call(tool, JSON.parse(a.to_json))
+        r.error_code.should eq("APPROVAL_PENDING")
+        r.details.not_nil!["host"].as_s.should eq("127.0.0.1")
+        r.details.not_nil!["port"].as_i.should eq(origin.port)
+      end
+      store.add_mcp_host_grant("127.0.0.1").should be_true
+      wait_done(tools, "fuzz_status", call_json(tools, "fuzz_start", args)["job_id"].as_s)["status"].as_s.should eq("done")
+    end
+    origin.close
+  end
 end

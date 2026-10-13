@@ -21,6 +21,8 @@ module Gori
         extractors = fuzz_extractors_arg(h)
         return err(extractors, "INVALID_ARGUMENT", field: "extractors") if extractors.is_a?(String)
         launch_fuzz(h, extractors)
+      rescue ex : RequestMacro::Runner::ApprovalPending
+        host_approval(ex.verdict)
       end
 
       private def launch_fuzz(h, extractors : Array(Fuzz::Extractor)) : Result
@@ -692,6 +694,8 @@ module Gori
         raise FuzzArgError.new(fuzz_plan_error(ex, text))
       rescue ex : File::Error
         raise FuzzArgError.new("wordlist error: #{ex.message}")
+      rescue ex : RequestMacro::Runner::ApprovalPending
+        raise ex # `fuzz_start` raises the card for it
       rescue ex : Gori::Error
         # A payload set's own clean error (a bad wordlist/preset path, an unknown preset
         # reached via size()) — surfaced as a clean arg error, not an internal crash.
