@@ -83,6 +83,10 @@ describe Gori::LlmCall do
     ]), "text/event-stream").not_nil!
     same_reply(streamed, whole)
     Gori::LlmCall.summary(streamed).should eq("anthropic · claude-x-1 · streamed · 1 tool call · tool_use")
+
+    # A tool called with no arguments keeps its `{}` when the message is whole.
+    empty = llm(ANTHROPIC_REQ, %({"type":"message","content":[{"type":"tool_use","name":"now","input":{}}]})).not_nil!
+    empty.tool_calls[0].arguments.should eq("{}")
   end
 
   it "takes an OpenAI responses stream's final event over its deltas" do

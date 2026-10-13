@@ -180,7 +180,7 @@ module Gori
           @model = LlmCall.str(msg["model"]?) || @model
           usage(msg["usage"]?)
         when "content_block_start"
-          LlmCall.obj(r["content_block"]?).try { |b| block(LlmCall.index(r["index"]?, 0), b) }
+          LlmCall.obj(r["content_block"]?).try { |b| block(LlmCall.index(r["index"]?, 0), b, streamed: true) }
         when "content_block_delta"
           d = LlmCall.obj(r["delta"]?) || return
           @text << LlmCall.str(d["text"]?)
@@ -191,14 +191,15 @@ module Gori
         end
       end
 
-      private def block(i : Int32, b : Obj) : Nil
+      private def block(i : Int32, b : Obj, streamed = false) : Nil
         case LlmCall.str(b["type"]?)
         when "text"
           @text << LlmCall.str(b["text"]?)
         when "tool_use"
           input = LlmCall.obj(b["input"]?)
-          # A streamed block opens with `input: {}` and fills it from `input_json_delta`s.
-          tool(i, LlmCall.str(b["name"]?), input.nil? || input.empty? ? nil : input.to_json)
+          # A streamed block opens with `input: {}` and fills it from `input_json_delta`s; in a
+          # whole message `{}` is the real (empty) input.
+          tool(i, LlmCall.str(b["name"]?), streamed && input.try(&.empty?) ? nil : input.try(&.to_json))
         end
       end
 
