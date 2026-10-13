@@ -229,8 +229,9 @@ module Gori
       rows never match; -ws:x keeps flows that carried no messages at all.
 
       JSON-RPC / MCP: rpc:tools/call  rpc:initialize  rpc:tools/  — a flow whose REQUEST body is a
-      JSON-RPC call whose method starts with the value (case-sensitive). It scans the stored request
-      bytes like body~, with no index, so a compressed request body is not read.
+      JSON-RPC 2.0 call whose method starts with the value (case-sensitive). It scans the stored request
+      bytes like body~, with no index, so a compressed request body is not read, and a "method" key
+      nested in params counts too.
 
       Regex (~): host~^api\\.  body~secret\\d+  path~/admin  method~^P(OST|UT)$ — on host path url
       method scheme header body ws (and req./resp. header/body). Case-sensitive; prefix (?i) to fold.
@@ -1260,9 +1261,16 @@ module Gori
     # `rpc:tools/` is every MCP tool method. `body~` over the request with the needle escaped, so
     # it shares that term's case and NUL rules and its limit: a compressed body is not read. No
     # capture-time parse and no migration (P6); it costs only in a query that uses it.
+    #
+    # The body must also say `"jsonrpc":"2.0"`, the line `JsonRpc` draws, so a REST body with a
+    # `method` key does not match. A `/` matches JSON's `\/` too (PHP's default). A `"method"` key
+    # nested in params still matches: no JSON parse here.
     private def self.rpc_cond(value : String, body_max : Int32?) : SqlTerm?
       return nil if value.each_char.any?(&.control?)
-      body_regex_cond(%q("method"\s*:\s*") + Regex.escape(value), body_max, :req)
+      needle = value.split('/').join(%q(\\?/)) { |part| Regex.escape(part) }
+      method, margs = body_regex_cond(%q("method"\s*:\s*") + needle, body_max, :req)
+      version, vargs = body_regex_cond(%q("jsonrpc"\s*:\s*"2\.0"), body_max, :req)
+      {"(#{method} AND #{version})", margs + vargs}
     end
 
     # `ws:` / `ws~`: a flow whose WebSocket transcript holds a matching MESSAGE. A subquery over

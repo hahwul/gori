@@ -215,7 +215,8 @@ surfaces otherwise load.
 `rpc:method` matches a flow whose **request** body is a JSON-RPC call naming that method. The
 value is a case-sensitive prefix, so `rpc:tools/` is every MCP tool method and `rpc:tools/call`
 is just the calls. Like `body~`, it scans the stored request bytes with no index, so a compressed
-request body is not read.
+request body is not read, and a `"method"` key nested inside `params` counts too. The body must
+carry `"jsonrpc":"2.0"`, and a `/` in the value also matches JSON's escaped `\/`.
 
 ```text
 rpc:tools/call                         every MCP tool call

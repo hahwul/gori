@@ -1331,6 +1331,17 @@ describe "Gori::Store#search (QL)" do
         store.search(Gori::QL.parse("rpc:tools/"), 10).map(&.id).sort!.should eq([call, list].sort)
         store.search(Gori::QL.parse("rpc:Tools/call"), 10).should be_empty # method names are case-sensitive
         store.search(Gori::QL.parse("rpc:t.ols"), 10).should be_empty      # the value is literal
+        # Not JSON-RPC 2.0: a REST body with a `method` key, top-level or nested.
+        rest = capture(store, "m.test", "POST", "/pay", 200)
+        store.@db.exec("UPDATE flows SET request_body = ? WHERE id = ?",
+          %({"model":"x","id":1,"method":"tools/call","payment":{"method":"card"}}).to_slice, rest)
+        store.search(Gori::QL.parse("rpc:tools/call"), 10).map(&.id).should eq([call])
+        store.search(Gori::QL.parse("rpc:card"), 10).should be_empty
+        # JSON's `\/` escape (PHP's default) is the same method.
+        php = capture(store, "m.test", "POST", "/php", 200)
+        store.@db.exec("UPDATE flows SET request_body = ? WHERE id = ?",
+          %q({"jsonrpc":"2.0","method":"tools\/call"}).to_slice, php)
+        store.search(Gori::QL.parse("rpc:tools/call"), 10).map(&.id).sort!.should eq([call, php].sort)
       end
       Gori::QL.dropped_term_reason("rpc:a\u0001b").should eq("value contains control characters")
     end
