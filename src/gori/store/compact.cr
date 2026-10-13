@@ -84,6 +84,9 @@ class Gori::Store
       rescue
         {0_i64, 0_i64, 0_i64}
       end
+      # A rewritten flow's pre-rule body (V49) goes with its side's bodies.
+      resp += sum_len(db, "SELECT COALESCE(SUM(LENGTH(body)), 0) FROM rewrite_originals WHERE side = 'response'")
+      req += sum_len(db, "SELECT COALESCE(SUM(LENGTH(body)), 0) FROM rewrite_originals WHERE side = 'request'")
       h2 = sum_len(db, "SELECT COALESCE(SUM(LENGTH(payload)), 0) FROM h2_frames")
       ws = sum_len(db, "SELECT COALESCE(SUM(LENGTH(payload)), 0) FROM ws_messages WHERE repeater_id IS NULL")
       # Keep the V1 columns and V24's `wire` in separate guarded aggregates: measure opens
@@ -187,13 +190,17 @@ class Gori::Store
   # emptied to X'' so their truncation flags still mean "captured but dropped"; nullable
   # fuzz captures become NULL because no equivalent truncation projection exists there.
   private def self.apply_plan(conn : DB::Connection, plan : CompactPlan) : Nil
+    # A rewritten flow's pre-rule body is a second copy of that side's body: NULL reads as "the
+    # stored body", which is the emptied one now.
     if plan.response_bodies
       conn.exec("UPDATE flows SET response_body = X'', response_body_truncated = 1 " \
                 "WHERE response_body IS NOT NULL AND LENGTH(response_body) > 0")
+      conn.exec("UPDATE rewrite_originals SET body = NULL WHERE side = 'response'")
     end
     if plan.request_bodies
       conn.exec("UPDATE flows SET request_body = X'', request_body_truncated = 1 " \
                 "WHERE request_body IS NOT NULL AND LENGTH(request_body) > 0")
+      conn.exec("UPDATE rewrite_originals SET body = NULL WHERE side = 'request'")
     end
     # Dropping a body drops what `body:` searches, so the FTS index has to go with it. Both
     # siblings already maintain it — `delete_flow_set` deletes the row's entry, `clear_flows`

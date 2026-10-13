@@ -105,6 +105,32 @@ describe "Gori::Store.compact" do
     end
   end
 
+  it "measures and drops a rewritten flow's pre-rule body with its side's bodies (#1589)" do
+    with_project do |path|
+      store = Gori::Store.open(path)
+      begin
+        id = store.insert_flow(req_for("/rw"))
+        resp = Gori::Store::CapturedResponse.new(flow_id: id, status: 200,
+          head: "HTTP/1.1 200 OK\r\n\r\n".to_slice, body: "new".to_slice)
+        resp.rewrite = Gori::Store::Rewrite.new([Gori::Store::RuleRef.new(Gori::Store::RuleScope::Project, 1_i64)],
+          "HTTP/1.1 200 OK\r\n\r\n".to_slice, big_body(100_000))
+        store.update_response(resp)
+      ensure
+        store.close
+      end
+
+      Gori::Store.measure(path).response_body_bytes.should be >= 100_000
+      Gori::Store.compact(path, Gori::Store::CompactPlan.new(response_bodies: true)).should_not be_nil
+      store = Gori::Store.open(path)
+      begin
+        store.@db.scalar("SELECT COUNT(*) FROM rewrite_originals WHERE body IS NOT NULL").as(Int64).should eq(0)
+        store.rewrite_original(id, Gori::Store::RuleTarget::Response).should_not be_nil # the head stays
+      ensure
+        store.close
+      end
+    end
+  end
+
   it "keep_flows deletes the oldest flows (cascading), keeping only the newest N" do
     with_project do |path|
       ids = [] of Int64
