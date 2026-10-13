@@ -447,7 +447,7 @@ module Gori::Fuzz
       # blocked attempt never reaches the network. It still costs a request from the
       # engine's budget, exactly as CappedBackend already charges retries and redirect
       # hops — one accounting path, not two.
-      if err = @outbound.sweep_block(@origin.scheme, @origin.host, Gori::Outbound.request_target(bytes), @origin.port)
+      if err = @outbound.sweep_block(@origin.scheme, @origin.host, Gori::Outbound.request_target(bytes), @origin.port) || @outbound.admit
         @blocked += 1
         @blocked_reason ||= err
         return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err)
@@ -494,7 +494,7 @@ module Gori::Fuzz
       # A handshake gets no hints (`ClientHints.apply` says why); called so this seam holds the
       # same pair as every other and a later answer lands here too.
       wire = Gori::Env.client_hints(wire, ws_gen)
-      if err = @outbound.sweep_block(@origin.scheme, @origin.host, Gori::Outbound.request_target(wire), @origin.port)
+      if err = @outbound.sweep_block(@origin.scheme, @origin.host, Gori::Outbound.request_target(wire), @origin.port) || @outbound.admit
         @blocked += 1
         @blocked_reason ||= err
         return {Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err), WsOutcome.failed}
@@ -631,6 +631,11 @@ module Gori::Fuzz
           return requests.map { Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err) }
         end
       end
+      if err = @outbound.admit(reqs.size)
+        @blocked += requests.size
+        @blocked_reason ||= err
+        return requests.map { Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err) }
+      end
       Repeater::Engine.send_pipeline(reqs, scheme: @origin.scheme, host: @origin.host,
         port: @origin.port, verify_upstream: @verify, sni: @sni,
         timeout: timeout || @timeout, overrides: @overrides, tls_preset: @tls_preset)
@@ -688,6 +693,13 @@ module Gori::Fuzz
           @blocked_reason ||= err
           return Array(Repeater::Result).new(jobs.size) { Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err) }
         end
+      end
+      # Every member and every warm-up is a request against the project budget, admitted before
+      # the group is dialled so the race window itself never waits.
+      if err = @outbound.admit(warmup ? jobs.size * 2 : jobs.size)
+        @blocked += jobs.size
+        @blocked_reason ||= err
+        return Array(Repeater::Result).new(jobs.size) { Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err) }
       end
 
       # Every member of a fuzz race writes the SAME post-seam `expanded` bytes — that is what
@@ -842,7 +854,7 @@ module Gori::Fuzz
 
     def send(bytes : Bytes, verbatim : Array({Int32, Int32})?) : Repeater::Result
       o = origin
-      if err = @outbound.sweep_block(o.scheme, o.host, Gori::Outbound.request_target(bytes), o.port)
+      if err = @outbound.sweep_block(o.scheme, o.host, Gori::Outbound.request_target(bytes), o.port) || @outbound.admit
         @blocked += 1
         @blocked_reason ||= err
         return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err)
@@ -856,7 +868,7 @@ module Gori::Fuzz
     def send_ws(handshake : Bytes, frames : Array(WsFrame),
                 verbatim : Array({Int32, Int32})?) : {Repeater::Result, WsOutcome}
       o = origin
-      if err = @outbound.sweep_block(o.scheme, o.host, Gori::Outbound.request_target(handshake), o.port)
+      if err = @outbound.sweep_block(o.scheme, o.host, Gori::Outbound.request_target(handshake), o.port) || @outbound.admit
         @blocked += 1
         @blocked_reason ||= err
         return {Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err), WsOutcome.failed}

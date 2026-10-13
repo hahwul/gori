@@ -4940,3 +4940,16 @@ arguments let one scan inherit another's expired deadline and let a pattern's ow
 it: the callout only reads the deadline, and with nothing armed it continues. A gsub whose block
 yields (a Pipe hook) collects its matches under the budget and runs the block outside it. Scope
 regex rules are exempt on purpose: a tripped exclude would fail open on Layer 2.
+
+### 2026-10-13: a project-wide request budget rides the Outbound chokepoint (#1601)
+
+`net.outbound_max_rps` / `net.outbound_max_requests` hold across every run, surface and process
+on one project DB, which per-run `Pacing` cannot. `Outbound#admit` is a separate call from
+`sweep_block` / `send_block` because those two also answer preflights, and a preflight must not
+spend the budget: it is asked once per real send, after Layer 2 passed (Discover through
+`ScopePolicy#admit`, as its Layer 2 already bypasses `sweep_block`). Processes share the budget
+by leasing slots from two settings rows in one `BEGIN IMMEDIATE` transaction, sized to ~250 ms of
+the rate, so writes stay at a few per second per process (P6); a read-only Store leases on a
+reader connection with `query_only` lifted for that transaction. The refusals are `Outbound`
+constants in `permanent_refusal?`, not `PlanError::Reason` members: a spent budget is a per-send
+result like a sandbox block. Proxied client traffic never reaches `admit`.

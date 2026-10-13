@@ -29,6 +29,11 @@ module Gori::Discover
     abstract def allowed?(url : String, host : String, exclude_url : String?) : Bool
     abstract def boundary?(url : String, host : String) : Bool
     abstract def configured? : Bool
+
+    # The project request budget (`Outbound#admit`, #1601): nil to send, or the refusal.
+    def admit : String?
+      nil
+    end
   end
 
   # Default policy (specs / unconfigured scope): nothing blocked, no include boundary.
@@ -680,6 +685,8 @@ module Gori::Discover
     # consumer reads this and decides. ONE string, not a list — every send in a wholly-blocked
     # run fails for the same reason and the point is to name it, not to tally it.
     getter first_error : String? = nil
+    # The project budget's refusal (`ScopePolicy#admit`), once one arrived.
+    @budget_refusal : String? = nil
     # Sends that reached an origin and came back without an error. `@capped.sent` cannot
     # answer that — it is a BUDGET counter that charges an attempt before the fetch, so a run
     # whose every send failed still has `sent > 0`. Same counter, same name and same purpose
@@ -882,7 +889,8 @@ module Gori::Discover
       # `DoneEvent` with the reason nowhere — `handle_crawl`/`handle_probe` had built the
       # sentence and dropped it. `first_error` is what Miner and Sequencer already carry for
       # exactly this (#491), so a wholly-refused run is terminal here too and NAMES the cause.
-      refusal = @state == State::Stopped ? nil : (@capped.sent == 0 ? NOTHING_TO_SEND : wholly_refused_reason)
+      # A spent project budget refuses before `@capped` charges anything, so it is named first.
+      refusal = @state == State::Stopped ? nil : (@capped.sent == 0 ? @budget_refusal || NOTHING_TO_SEND : wholly_refused_reason)
       if refusal
         @events.send(ErrorEvent.new(refusal))
       else
@@ -1402,7 +1410,8 @@ module Gori::Discover
     # @capped.sent — so `--max-requests 5` at the default concurrency reported dozens of
     # "errors" that were the cap working exactly as designed.
     private def benign_error?(err : String?) : Bool
-      err == CappedBackend::CAP_ERROR || err == SCOPE_REFUSED || err == STOPPED
+      err == CappedBackend::CAP_ERROR || err == SCOPE_REFUSED || err == STOPPED ||
+        (!err.nil? && err == @budget_refusal)
     end
 
     private def record_page(task : Task, fetched : Calibrate::Fetched, ex : Exchange?) : Nil
@@ -2120,6 +2129,13 @@ module Gori::Discover
     # One wire send after its rate slot, or a STOPPED answer when a stop ended the wait.
     private def paced_fetch(p : Url::Parts, target : String, interval : Time::Span?) : Repeater::Result
       return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, STOPPED) unless pace(interval)
+      if err = @scope.admit
+        return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, STOPPED) if stopped?
+        # A spent project budget is permanent: booked once here, never retried (`benign_error?`).
+        @first_error ||= err
+        @budget_refusal = err
+        return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err)
+      end
       @capped.fetch(p.scheme, p.host, p.port, target)
     end
 

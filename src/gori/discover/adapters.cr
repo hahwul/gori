@@ -16,9 +16,13 @@ module Gori::Discover
     @last_reload : Time::Instant
     @configured : Bool
 
-    def initialize(@scope : Gori::Scope)
+    def initialize(@scope : Gori::Scope, @outbound : Gori::Outbound? = nil)
       @last_reload = Time.instant
       @configured = @scope.configured?
+    end
+
+    def admit : String?
+      @outbound.try(&.admit)
     end
 
     # Layer 2, and therefore the line that owes DESIGN.md §7's "one reload semantic for the

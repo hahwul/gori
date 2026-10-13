@@ -145,6 +145,7 @@ module Gori
     end
 
     getter rules : Array(Rule)
+    getter store : Store
     getter? enabled : Bool
     # The sandbox flag. Read on the PROXY hot path (sandbox_blocks?/sandbox_blocks_host?)
     # under @mutex while the TUI toggles it; the bare `sandbox?` getter is read only on

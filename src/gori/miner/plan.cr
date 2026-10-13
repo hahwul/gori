@@ -315,7 +315,9 @@ module Gori::Miner
       # The macro OUTSIDE the hook, so the value it leaves is bound before the hook expands the
       # request and signs it (see `MacroBackend`).
       backend = MacroBackend.new(backend, request_macro) if request_macro
-      new(engine: Engine.new(request, options.http2?, names, backend, config, inapplicable, request_macro),
+      engine = Engine.new(request, options.http2?, names, backend, config, inapplicable, request_macro)
+      outbound.halt = ->engine.stopped?
+      new(engine: engine,
         sender: sender,
         config: config, origin: origin, http2: options.http2?, request: request,
         request_target: request_target, names: names, inapplicable: inapplicable,

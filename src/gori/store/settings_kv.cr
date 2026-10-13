@@ -64,6 +64,83 @@ module Gori
       set_setting(MCP_HOST_GRANTS_KEY, (grants << grant).to_json)
     end
 
+    # The project-wide outbound request budget's shared rows (#1601), written only by
+    # `lease_outbound_slots`: the next free rate slot (unix µs) and the requests counted against
+    # `net.outbound_max_requests`.
+    OUTBOUND_BUDGET_NEXT_KEY  = "outbound.budget.next_slot_us"
+    OUTBOUND_BUDGET_SPENT_KEY = "outbound.budget.spent"
+    # How far ahead of now the shared clock may run before a lease waits instead (one lease's span).
+    OUTBOUND_LEASE_SPAN_US = 250_000_i64
+
+    # Claim up to `want` request slots for `Outbound::Budget` in ONE transaction opened
+    # `BEGIN IMMEDIATE`, so this read-modify-write is atomic against every other gori process on
+    # the same DB, which is what makes the ceiling project-wide.
+    #
+    # Returns `{at_us, granted}`: `granted` slots `interval_us` apart starting at `at_us`; or none
+    # granted and `at_us` the instant to ask again, because the shared clock already runs more
+    # than `OUTBOUND_LEASE_SPAN_US` into the future; or `{0, 0}` when `max` is spent. nil when the
+    # store was busy. `refund` hands back requests an earlier lease counted and never sent. The
+    # count moves only while a `max` is set, so a total set later starts from zero.
+    def lease_outbound_slots(now_us : Int64, interval_us : Int64, want : Int32, max : Int64?,
+                             refund : Int64) : {Int64, Int32}?
+      res = {0_i64, 0}
+      run = ->(c : DB::Connection) { res = lease_outbound_rows(c, now_us, interval_us, want, max, refund); nil }
+      ok = @read_only ? lease_on_reader(run) : exec_task_ok(run)
+      ok ? res : nil
+    end
+
+    # The arithmetic of `lease_outbound_slots`, inside its transaction on `c`.
+    private def lease_outbound_rows(c : DB::Connection, now_us : Int64, interval_us : Int64, want : Int32,
+                                    max : Int64?, refund : Int64) : {Int64, Int32}
+      res = {0_i64, 0}
+      read = ->(k : String) { c.query_one?("SELECT value FROM settings WHERE key = ?", k, as: String).try(&.to_i64?) || 0_i64 }
+      write = ->(k : String, v : Int64) {
+        c.exec("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?", k, v.to_s, v.to_s)
+      }
+      spent = {read.call(OUTBOUND_BUDGET_SPENT_KEY) - refund, 0_i64}.max
+      # A row further ahead than leases at THIS rate can push it was left by a slower rate (or
+      # a wall clock that stepped back) and restarts at now, or it would stall every process.
+      row = read.call(OUTBOUND_BUDGET_NEXT_KEY)
+      reach = now_us + OUTBOUND_LEASE_SPAN_US + {OUTBOUND_LEASE_SPAN_US, interval_us}.max
+      at = interval_us > 0 && row <= reach ? {row, now_us}.max : now_us
+      grant = max ? {want.to_i64, max - spent}.min : want.to_i64
+      if grant <= 0
+        grant = 0_i64
+      elsif interval_us > 0 && at > now_us + OUTBOUND_LEASE_SPAN_US
+        grant = 0_i64
+        res = {at - OUTBOUND_LEASE_SPAN_US, 0}
+      else
+        res = {at, grant.to_i32}
+        write.call(OUTBOUND_BUDGET_NEXT_KEY, at + grant * interval_us) if interval_us > 0
+      end
+      write.call(OUTBOUND_BUDGET_SPENT_KEY, spent + grant) if max && (grant > 0 || refund > 0)
+      res
+    end
+
+    # A read-only store has no writer (#752), yet its sends must still count against the budget
+    # every other process sees: one short transaction on a reader connection, with `query_only`
+    # lifted for its length only. No writer fiber here, so the busy wait cannot block on our own.
+    private def lease_on_reader(run : DB::Connection -> Nil) : Bool
+      @db.using_connection do |c|
+        c.exec("PRAGMA query_only = OFF")
+        begin
+          c.exec("BEGIN IMMEDIATE")
+          begin
+            run.call(c)
+            c.exec("COMMIT")
+            true
+          rescue
+            c.exec("ROLLBACK") rescue nil
+            false
+          end
+        ensure
+          c.exec("PRAGMA query_only = ON")
+        end
+      end
+    rescue
+      false
+    end
+
     def setting(key : String) : String?
       @db.query_one?("SELECT value FROM settings WHERE key = ?", key, as: String)
     end

@@ -637,7 +637,9 @@ module Gori::Fuzz
         # bare hello. `config` — not `options` — is the carrier, because a finished run has to
         # be able to say which handshake produced its results.
         tls_preset: tls_preset)
-      new(engine: Engine.new(generator, matcher, sender, config, request_macro), generator: generator,
+      engine = Engine.new(generator, matcher, sender, config, request_macro)
+      outbound.halt = ->engine.stopped?
+      new(engine: engine, generator: generator,
         matcher: matcher, config: config, origin: origin, template: template,
         http2: options.http2?, request_target: request_target, mark_matches: mark_matches,
         pool: sender.pool,

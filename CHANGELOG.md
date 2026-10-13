@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Rewriter: a flow a Match&Replace rule changed records which rules fired and keeps the bytes they replaced, shown as `RULE` and ORIGINAL / ORIGINAL RESP panes in History, `rewritten_by` in `gori run history` and MCP, `gori run show --original`, and QL `rewritten:true` or `rewritten:project/4` (#1589)
+- Project request budget: `outbound_max_rps` and `outbound_max_requests` (`gori run project network set`) cap gori-originated requests per second and in total across every run, surface and process on a project, so parallel fuzz, discover and agent runs together keep an agreed ceiling (#1601)
 - Repeater: two palette-only transforms grow one GraphQL operation into N copies in a single request — a batched JSON array or the top-level field repeated under `aN:` aliases — to test per-request rate-limit / brute-force bypass, in one undoable edit (#1595)
 - MCP serves the docs playbooks as prompts (`prompts/list`, `prompts/get`), so Claude Code offers each as a `/mcp__gori__<name>` slash command with an optional `focus` (#1596)
 - Rewriter: `json_set` and `json_remove` rules set or delete a JSON body or WebSocket value by path (`$.user.role`, `$.items[-1]`), changing only that value's bytes, on the TUI, `gori run rewriter add --op` and MCP `create_rule`; gori v0.8.0 and later list such a rule as inert, and an older gori reads it as a literal `replace` (#1599)

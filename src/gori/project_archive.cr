@@ -860,6 +860,8 @@ module Gori
               Settings::PROJECT_NETWORK_KEYS.each do |key|
                 conn.exec("DELETE FROM settings WHERE key = ?", key.key)
               end
+              # The request budget's count and clock go with the ceiling they were kept for (#1601).
+              conn.exec("DELETE FROM settings WHERE key IN (?, ?)", Store::OUTBOUND_BUDGET_NEXT_KEY, Store::OUTBOUND_BUDGET_SPENT_KEY)
               GLOBAL_OVERRIDE_KEYS.each { |key| conn.exec("DELETE FROM settings WHERE key = ?", key) }
               # Probe mode is authorization, not configuration: an archive must not arm active
               # probes that fire at the stored flows the moment the copy is opened.

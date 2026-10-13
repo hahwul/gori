@@ -200,11 +200,14 @@ module Gori
       # between preflight and the socket (bindings, WebSocket handshake shaping, and repeated
       # race/timing sends). Never include the request-target in the error: it may contain a
       # live binding value.
-      private def wire_refusal(wire : Bytes) : String?
+      private def wire_refusal(wire : Bytes, cancel : Proc(Bool)? = nil) : String?
         target = Gori::Outbound.request_target(wire)
         verdict = @outbound.check_wire_request(@scheme, @host, target, @port)
         return "#{SCOPE_REFUSAL_PREFIX} — #{@outbound.remedy(verdict)}" if verdict.blocked?
-        refusal_wired(wire)
+        # Every send seam ends here once per request, so this is where it counts against the
+        # project budget (#1601): a hand-authored send waits for the rate, and only a spent
+        # total refuses it.
+        refusal_wired(wire) || @outbound.admit(halt: cancel || @outbound.halt)
       end
 
       # Does the `$NAME` binding pass run at this seam? The two independent reasons it does not
@@ -342,7 +345,7 @@ module Gori
       # `refusal` would run the binding pass over it a SECOND time. That is not the no-op this
       # comment used to claim — see `refusal_wired`.
       def send_wire(wire : Bytes, cancel : Proc(Bool)? = nil) : Result
-        if reason = wire_refusal(wire)
+        if reason = wire_refusal(wire, cancel)
           return Result.new(Bytes.new(0), nil, nil, 0_i64, reason)
         end
         result =
@@ -373,7 +376,7 @@ module Gori
       def send_fields(fields : Array({String, String}), body : Bytes?,
                       cancel : Proc(Bool)? = nil) : Result
         scope = H2Engine.field_scope_line(fields)
-        if reason = wire_refusal(scope)
+        if reason = wire_refusal(scope, cancel)
           return Result.new(Bytes.new(0), nil, nil, 0_i64, reason)
         end
         # No SESSION SLOT overlay here, and this is a limit rather than an omission: a slot's
@@ -454,7 +457,7 @@ module Gori
         # This used to gate the draft and wire separately, so the handshake was passed through
         # the seam twice and the verdict could be taken on a URL the socket never got.
         wired = wire(upgrade)
-        if reason = wire_refusal(wired)
+        if reason = wire_refusal(wired, cancel)
           return WsEngine::Result.new(Bytes.new(0), [] of WsEngine::Message, 0_i64, reason)
         end
         # EXTRACTION is handshake-only — a WS frame is not an HTTP response and `TokenExtract`'s

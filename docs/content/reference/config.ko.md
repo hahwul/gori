@@ -918,7 +918,7 @@ salt는 **비밀**이며, `env`의 토큰 값과 같은 조건으로 보관됩�
 
 프로젝트는 `redaction` 키 아래에 자체 **리댁션** 설정도 가질 수 있습니다. 자체 프로파일, 어떤 것이 활성인지, 그리고 "기본으로 정제할지"에 대한 자체 답(전역 기본값을 이 engagement에서만 끄는 명시적 `false` 포함)입니다. [`gori run redact`](/ko/reference/cli/#run-redact)가 기록하며, 해석 순서는 프로젝트 → 전역 → 내장이고 이름이 같으면 먼저 나온 것이 이깁니다.
 
-프로젝트는 전역 파일을 수정하지 않고도 자체 네트워크 설정을 고정할 수 있습니다. 이 값들은 프로젝트 데이터베이스에 저장되며(키 `net.bind_host`, `net.bind_port`, `net.upstream_proxy`, `net.upstream_destination_host`, `net.upstream_auth`, `net.connect_timeout_secs`, `net.io_timeout_secs`, `net.capture_max_mib`), **Project** 탭의 **Project settings** 서브탭에서, 또는 헤드리스로는 [`gori run project network`](/ko/reference/cli/#project-network)(`list`, `get`, `set`, `unset`)로 편집합니다. `.gori` 아카이브에서 가져온 프로젝트([`gori run project import`](/ko/reference/cli/#project-import))는 이 키들과 프로젝트 호스트 오버라이드를 하나도 가져오지 않으므로, 이 머신의 전역 네트워크 설정으로 시작합니다.
+프로젝트는 전역 파일을 수정하지 않고도 자체 네트워크 설정을 고정할 수 있습니다. 이 값들은 프로젝트 데이터베이스에 저장되며(키 `net.bind_host`, `net.bind_port`, `net.upstream_proxy`, `net.upstream_destination_host`, `net.upstream_auth`, `net.connect_timeout_secs`, `net.io_timeout_secs`, `net.capture_max_mib`, `net.outbound_max_rps`, `net.outbound_max_requests`), **Project** 탭의 **Project settings** 서브탭에서, 또는 헤드리스로는 [`gori run project network`](/ko/reference/cli/#project-network)(`list`, `get`, `set`, `unset`)로 편집합니다. `.gori` 아카이브에서 가져온 프로젝트([`gori run project import`](/ko/reference/cli/#project-import))는 이 키들과 프로젝트 호스트 오버라이드를 하나도 가져오지 않으므로, 이 머신의 전역 네트워크 설정으로 시작합니다.
 
 **Destination host**는 프록시 라우팅을 대소문자를 구분하지 않는 하나의 호스트 패턴으로 제한합니다. 기본값 `*`는 모든 목적지를 프록시 대상으로 허용합니다. `example.com`은 해당 호스트와 서브도메인을 포함하고, `*.example.com`은 서브도메인만 포함합니다. 도메인, IPv4, IPv6 및 `*` 기반 IP 패턴을 사용할 수 있습니다. 일치하지 않는 목적지는 항상 직접 연결되며 `upstream_rules`나 `network.upstream_proxy`로 폴백하지 않습니다. 이 게이트는 프로젝트가 활성화된 동안 캡처, 재생, 스캐너, 업데이터 및 OAST 트래픽을 포함해 gori가 여는 모든 연결에 적용됩니다.
 
@@ -927,6 +927,8 @@ salt는 **비밀**이며, `env`의 토큰 값과 같은 조건으로 보관됩�
 비밀번호는 **Password** 행에 포커스가 있어 편집하는 동안 표시되고, 포커스가 벗어나면 다시 마스킹됩니다. 캡처된 engagement 데이터와 함께 소유자 전용(`0600`) 프로젝트 SQLite 데이터베이스에는 평문으로 저장됩니다. 프로젝트에 비밀을 저장하면 안 되는 경우 `password_env`를 쓰는 전역 `upstream_rules` 항목을 사용하세요. 일치하는 목적지에서는 잘못되거나 업스트림 주소 없이 남은 프로젝트 인증 값이 원 서버 연결 전에 fail-closed 처리됩니다.
 
 타임아웃과 캡처 상한 키는 머신 속성이 아니라 engagement 속성입니다. 느린 내부 장비는 자체 유휴 타임아웃이 필요하고, 아주 큰 응답을 주는 대상은 자체 캡처 상한이 필요합니다. 어느 쪽이든 전역으로 올리면 다른 모든 프로젝트가 비용을 치릅니다.
+
+**요청 예산.** `outbound_max_rps`와 `outbound_max_requests`는 engagement에서 합의한 상한을 프로젝트의 모든 gori 발신 요청에 걸쳐 지킵니다. Fuzzer, Miner, Sequencer, Discover, Repeater, retest, Probe의 능동 검사 등이 모두 포함되며, 같은 프로젝트 데이터베이스를 쓰는 모든 실행과 모든 프로세스(TUI, `gori run`, `gori mcp`)에 함께 적용됩니다. 실행 자체의 `--rate`도 그대로 적용되며 둘 중 느린 쪽이 이깁니다. 송신은 속도 슬롯을 기다리고, 총량이 소진되면 이후 송신은 모두 `project request budget spent`로 거부됩니다. 카운트는 `outbound_max_requests`를 설정한 시점부터 시작하며 `unset`하면 초기화됩니다. 프록시를 거치는 브라우저 트래픽은 세지도 지연시키지도 않습니다. 두 키는 프로젝트 전용(전역 값 없음)이며 [`gori run project network`](/ko/reference/cli/#project-network)로 설정합니다.
 
 **어느 표면에 어느 키가 적용되는가.** bind 키 둘은 gori가 리스닝 소켓을 여는 곳에서만 의미가 있고, 프록시 인증을 포함한 나머지 키는 gori가 밖으로 다이얼하거나 바디를 저장하는 모든 곳에 적용됩니다.
 

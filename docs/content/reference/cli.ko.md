@@ -1762,6 +1762,7 @@ gori run project network get upstream_proxy
 printf %s "$PROXY_PASS" | gori run project network set upstream_auth alice --password-stdin
 gori run project network set capture_max_mib 16
 gori run project network unset capture_max_mib
+gori run project network set outbound_max_rps=10          # 모든 실행, 모든 프로세스 합산
 ```
 
 | Key (`net.` 접두사는 생략 가능) | Value |
@@ -1772,6 +1773,7 @@ gori run project network unset capture_max_mib
 | `upstream_auth` | 프록시 자격증명: 값은 사용자명이고, 비밀번호는 `--password-stdin`으로 stdin에서 읽습니다(프로세스 목록에 남는 인자 벡터에는 절대 두지 않습니다). HTTP 프록시에는 HTTP Basic, SOCKS5에는 RFC 1929 |
 | `connect_timeout_secs` · `io_timeout_secs` | 아웃바운드 연결 및 유휴 타임아웃, 초 단위 (최소 1) |
 | `capture_max_mib` | 메시지마다 캡처해 저장하는 본문 바이트, MiB 단위 (1-2047) |
+| `outbound_max_rps` · `outbound_max_requests` | 프로젝트 요청 예산: gori 발신 요청의 초당 상한(양수, `0.5`도 가능)과 총량 상한으로, 프로젝트의 모든 실행과 모든 프로세스에 함께 적용됩니다. 프록시 트래픽은 세지 않습니다. `unset outbound_max_requests`는 카운트를 초기화합니다. [프로젝트별 오버라이드](/ko/reference/config/#per-project-overrides) 참고 |
 
 | Subcommand | Description |
 | --------------------- | ------------- |

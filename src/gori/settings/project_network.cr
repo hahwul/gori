@@ -63,6 +63,10 @@ module Gori::Settings
       "outbound idle read/write timeout, seconds (min 1)"),
     ProjectNetworkKey.new("capture_max_mib", PROJECT_CAPTURE_MAX_KEY,
       "body bytes captured and stored per message, MiB (1-#{MAX_CAPTURE_MAX_MIB})"),
+    ProjectNetworkKey.new("outbound_max_rps", PROJECT_OUTBOUND_MAX_RPS_KEY,
+      "ceiling on gori-originated requests/sec, across every run and process (not proxied traffic); unset = none"),
+    ProjectNetworkKey.new("outbound_max_requests", PROJECT_OUTBOUND_MAX_REQUESTS_KEY,
+      "total gori-originated requests this project may send, counted from when it is set; unset = none, and resets the count"),
   ]
 
   # The key an operator typed, or nil. Case-insensitive, and the `net.` prefix is optional: the
@@ -124,6 +128,7 @@ module Gori::Settings
     when PROJECT_UPSTREAM_DESTINATION_KEY then plan_destination(current, k, value)
     when PROJECT_UPSTREAM_AUTH_KEY        then plan_auth(current, value, password)
     when PROJECT_CAPTURE_MAX_KEY          then plan_whole_number(k, value, 1, MAX_CAPTURE_MAX_MIB)
+    when PROJECT_OUTBOUND_MAX_RPS_KEY     then plan_rate(k, value)
     else                                       plan_whole_number(k, value, 1, Int32::MAX)
     end
   end
@@ -151,10 +156,15 @@ module Gori::Settings
               "project proxy credentials cleared"
             elsif k.key == PROJECT_UPSTREAM_DESTINATION_KEY
               "project upstream destination cleared — back to *"
+            elsif project_network_inherited(k).nil?
+              "project #{k.key} cleared — no ceiling"
             else
               "project #{k.key} cleared — inherits the global value"
             end
-    {ProjectNetworkEdit.new([{k.key, nil.as(String?)}], notes, audit), nil}
+    rows = [{k.key, nil.as(String?)}]
+    # The count only means something under a total, so dropping the total starts it over.
+    rows << {Store::OUTBOUND_BUDGET_SPENT_KEY, nil.as(String?)} if k.key == PROJECT_OUTBOUND_MAX_REQUESTS_KEY
+    {ProjectNetworkEdit.new(rows, notes, audit), nil}
   end
 
   # Write `edit` in one task and, only once it COMMITTED, record it in the project's config
@@ -191,6 +201,13 @@ module Gori::Settings
       range = max == Int32::MAX ? "at least #{min}" : "#{min}-#{max}"
       return {nil, "invalid #{k.key} #{value.inspect} (a whole number, #{range})"}
     end
+    {single_row(k, n.to_s), nil}
+  end
+
+  # `outbound_max_rps`: a positive, finite number of requests per second (`0.5` = one every 2s).
+  private def self.plan_rate(k : ProjectNetworkKey, value : String) : {ProjectNetworkEdit?, String?}
+    n = value.strip.to_f?
+    return {nil, "invalid #{k.key} #{value.inspect} (requests per second, above 0)"} unless n && n.finite? && n > 0
     {single_row(k, n.to_s), nil}
   end
 

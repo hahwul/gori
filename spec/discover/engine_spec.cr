@@ -1812,3 +1812,31 @@ describe Gori::Discover::Engine do
     end
   end
 end
+
+# #1601 — the project request budget is asked once per wire send, after the run's own pacing,
+# and a spent budget is permanent: never retried, and named as the run's error.
+private class SpentBudgetScope < D::OpenScope
+  getter asked = 0
+
+  def admit : String?
+    @asked += 1
+    Gori::Outbound::BUDGET_SPENT_ERROR
+  end
+end
+
+describe "Gori::Discover::Engine project budget" do
+  it "sends nothing past a spent budget and does not retry it" do
+    asked = [0, 3].map do |retries|
+      cfg = D::Config.new(spider: true, bruteforce: false, max_depth: 1, concurrency: 1,
+        retries: retries, retry_pause: 1.millisecond)
+      fetched = 0
+      backend = RouteBackend.new(->(_t : String) { fetched += 1; make(200, "page") })
+      scope = SpentBudgetScope.new
+      _, messages = terminal_of(D::Engine.new("http://t/", [] of String, backend, cfg, scope))
+      fetched.should eq(0)
+      messages.join.should contain(Gori::Outbound::BUDGET_SPENT_ERROR)
+      scope.asked
+    end
+    asked[1].should eq(asked[0]) # no send was retried
+  end
+end

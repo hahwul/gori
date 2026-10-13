@@ -359,6 +359,11 @@ module Gori::Settings
   PROJECT_CONNECT_TIMEOUT_KEY = "net.connect_timeout_secs"
   PROJECT_IO_TIMEOUT_KEY      = "net.io_timeout_secs"
   PROJECT_CAPTURE_MAX_KEY     = "net.capture_max_mib"
+  # The project-wide ceiling on gori-originated requests (#1601), read by `Outbound::Budget`
+  # straight from the project DB, so they have no runtime layer here and no global fallback: a
+  # ceiling belongs to one engagement.
+  PROJECT_OUTBOUND_MAX_RPS_KEY      = "net.outbound_max_rps"
+  PROJECT_OUTBOUND_MAX_REQUESTS_KEY = "net.outbound_max_requests"
   class_property project_bind_host : String? = nil
   class_property project_bind_port : Int32? = nil
   class_property project_upstream_proxy : String? = nil

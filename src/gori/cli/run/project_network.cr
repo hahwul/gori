@@ -316,8 +316,10 @@ module Gori
           shown = k.key == Settings::PROJECT_UPSTREAM_KEY ? Settings.upstream_display(stored) : stored
           global = inherited && inherited != stored ? "  (global: #{network_display(k, inherited)})" : ""
           {CLI::Output.term_safe(shown), "· project#{CLI::Output.term_safe(global)}"}
+        elsif inherited.nil?
+          {"none", "· default"} # a project-only key with nothing to inherit (the request budget)
         else
-          {CLI::Output.term_safe(network_display(k, inherited || "")), "· #{network_source(k)}"}
+          {CLI::Output.term_safe(network_display(k, inherited)), "· #{network_source(k)}"}
         end
       end
 

@@ -53,7 +53,7 @@ describe "Gori::Settings project network keys (#1115)" do
   it "lists exactly the net.* keys network.cr declares" do
     src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "settings", "network.cr"))
     declared = src.scan(/(?m)^\s*PROJECT_[A-Z_]+_KEY\s*=\s*"(net\.[a-z_]+)"/).map(&.[1]).to_set
-    declared.size.should eq(8)
+    declared.size.should eq(10)
     Gori::Settings::PROJECT_NETWORK_KEYS.map(&.key).to_set.should eq(declared)
     Gori::Settings::PROJECT_NETWORK_KEYS.map { |k| {k.key, "net.#{k.name}"} }.each { |(row, want)| row.should eq(want) }
   end
@@ -266,6 +266,30 @@ describe "Gori::Settings project network keys (#1115)" do
         rows_of(edit).should eq([{Gori::Settings::PROJECT_CAPTURE_MAX_KEY, "2"}])
         edit.not_nil!.notes.join.should contain("unset capture_max_mib")
       end
+    end
+  end
+
+  # #1601 — the project request budget.
+  describe "set outbound_max_rps / outbound_max_requests" do
+    it "takes a positive, finite rate, fractions included" do
+      plan_set({} of String => String, "outbound_max_rps", " 0.5 ")[0].try(&.rows)
+        .should eq([{Gori::Settings::PROJECT_OUTBOUND_MAX_RPS_KEY, "0.5"}])
+      %w[0 -1 nan inf ten].each do |bad|
+        plan_set({} of String => String, "outbound_max_rps", bad)[1].not_nil!.should contain("requests per second")
+      end
+    end
+
+    it "takes a whole positive total" do
+      plan_set({} of String => String, "outbound_max_requests", "100")[0].try(&.rows)
+        .should eq([{Gori::Settings::PROJECT_OUTBOUND_MAX_REQUESTS_KEY, "100"}])
+      plan_set({} of String => String, "outbound_max_requests", "0")[1].should_not be_nil
+    end
+
+    it "resets the count when the total is unset" do
+      edit, _ = Gori::Settings.plan_project_network_unset(
+        {Gori::Settings::PROJECT_OUTBOUND_MAX_REQUESTS_KEY => "100"}, net_key("outbound_max_requests"))
+      rows_of(edit).should eq([{Gori::Settings::PROJECT_OUTBOUND_MAX_REQUESTS_KEY, nil},
+                               {Gori::Store::OUTBOUND_BUDGET_SPENT_KEY, nil}])
     end
   end
 

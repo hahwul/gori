@@ -2,6 +2,7 @@ require "uri"
 require "./scope"
 require "./store"
 require "./proxy/codec/http1"
+require "./outbound/budget"
 
 module Gori
   # THE outbound chokepoint for gori-originated ("active") traffic.
@@ -46,9 +47,14 @@ module Gori
     # The refusal for ONE hand-authored Repeater send. Distinct wording because Sandbox
     # is the only rule that stops these (see `send_block`), and the TUI/CLI show it verbatim.
     SANDBOX_ERROR = "blocked by sandbox (out of scope)"
+    # The project-wide request budget's two refusals (`Budget`, #1601). Not Layer 2 (`admit` is
+    # asked once per real send, never by a preflight), but just as permanent for a retrier.
+    BUDGET_SPENT_ERROR       = "project request budget spent (outbound_max_requests) — raise it, or unset it to reset the count"
+    BUDGET_STOPPED_ERROR     = "stopped while waiting for the project request budget"
+    BUDGET_UNAVAILABLE_ERROR = "project request budget unavailable — the project database would not take a lease"
 
     # True for a Layer-2 refusal — the two strings `sweep_block` returns above and nothing
-    # else does. Such a refusal is PERMANENT for a retrying caller: the scope does not move
+    # else does — or a request-budget one from `admit`. Such a refusal is PERMANENT for a retrying caller: the scope does not move
     # between two attempts a `retry_pause` apart (a reload is throttled to `RELOAD_INTERVAL`),
     # and `CappedBackend#send` charges the request cap BEFORE the gate refuses — so re-asking
     # spends a second request for an answer that is already fixed.
@@ -66,7 +72,8 @@ module Gori
     # (a cap stop is not a `@blocked` payload unit — see `Fuzz::Engine#run_one`), so the cap
     # question stays with the callers that ask it.
     def self.permanent_refusal?(err : String?) : Bool
-      err == SANDBOX_SWEEP_ERROR || err == EXCLUDE_SWEEP_ERROR
+      err == SANDBOX_SWEEP_ERROR || err == EXCLUDE_SWEEP_ERROR ||
+        err == BUDGET_SPENT_ERROR || err == BUDGET_STOPPED_ERROR || err == BUDGET_UNAVAILABLE_ERROR
     end
 
     # Which Layer-2 gate a `sweep_block` refusal came from, as a `scope_decision` names it.
@@ -218,10 +225,17 @@ module Gori
     # someone longer-lived — the MCP server, the TUI session — which must NOT be closed here.
     @owned_store : Store?
 
+    # The project's request budget, shared by every Outbound over the same Store; nil without a
+    # project. `halt` is the run's stop flag, set by the `Plan.build` that owns this Outbound, so
+    # a stop ends a budget wait within `Pacing::NAP_SLICE`.
+    @budget : Budget?
+    property halt : Proc(Bool)? = nil
+
     private def initialize(@scope : Scope?, @gate : Gate, @reason : Reason?, @owned_store : Store? = nil)
       # Seed the throttle clock now: the scope was just loaded, so the first reload is due
       # one interval into the run, not on the first send.
       @last_reload = Time.instant
+      @budget = @scope.try { |s| Budget.for(s.store) }
     end
 
     # ── construction ─────────────────────────────────────────────────────────────
@@ -376,6 +390,21 @@ module Gori
       pu && s.excluded?(pu, host) ? SANDBOX_ERROR : nil
     end
 
+    # ── the project request budget ───────────────────────────────────────────────
+
+    # Take `count` request slots from the project-wide budget (#1601), waiting for the rate, or
+    # return the refusal. Asked once per REAL send, right after its Layer-2 gate passed, never
+    # by a preflight; proxied client traffic never reaches it. Nothing configured costs one
+    # throttled `refresh` and a nil check. `halt` defaults to the run's; a single send passes
+    # its own cancel.
+    def admit(count : Int32 = 1, halt : Proc(Bool)? = @halt) : String?
+      refresh
+      b = @budget
+      return nil unless b && b.configured?
+      count.times { (err = b.admit(halt)) && (return err) }
+      nil
+    end
+
     # ── lifetime ─────────────────────────────────────────────────────────────────
 
     # Release the store this Outbound owns (CLI only — see `.cli`). Idempotent, and a no-op
@@ -383,6 +412,7 @@ module Gori
     def close : Nil
       store = @owned_store
       @owned_store = nil
+      @budget.try(&.release) if store
       store.try(&.close)
     rescue
       # a close failure must never take down a run that already finished its work
@@ -502,6 +532,7 @@ module Gori
       return if now - @last_reload < RELOAD_INTERVAL
       @last_reload = now
       @scope.try(&.reload)
+      @budget.try(&.reload)
     rescue
       # keep the last-known scope on a reload failure
     end

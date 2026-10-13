@@ -203,6 +203,7 @@ module Gori::Protobuf
       getter sni : String?
       getter timeout : Time::Span?
       getter overrides : Gori::HostOverrides?
+      getter outbound : Gori::Outbound
 
       def initialize(@outbound : Gori::Outbound, *, @scheme : String, @host : String,
                      @port : Int32, @verify : Bool = true, @sni : String? = nil,
@@ -518,6 +519,9 @@ module Gori::Protobuf
     def exchange(client : Client, service : String,
                  requests : Array(Bytes)) : {Array(Protobuf::Message), Failure?}
       none = [] of Protobuf::Message
+      if err = client.outbound.admit # the project request budget: a stable answer, not a retry
+        return {none, Failure.new(err, FailureKind::Answered)}
+      end
       body = IO::Memory.new
       requests.each { |r| body.write(Proxy::H2::Grpc.frame(false, r)) }
       result = Repeater::H2Engine.send_fields(fields(client, service), body.to_slice,

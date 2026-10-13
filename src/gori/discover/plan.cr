@@ -172,7 +172,9 @@ module Gori::Discover
         http2: options.http2?, sni: options.sni,
         headers: Headers.expand(config.headers), overrides: options.overrides,
         keep_alive: config.keep_alive?, idle_conns: config.concurrency)
-      new(engine: Engine.new(seed, words, sender, config, policy), seed: seed, host: parts.host,
+      engine = Engine.new(seed, words, sender, config, policy)
+      outbound.halt = ->engine.stopped?
+      new(engine: engine, seed: seed, host: parts.host,
         policy: policy, config: config, word_count: words.size, sender: sender)
     end
 
@@ -243,11 +245,11 @@ module Gori::Discover
       # `allowed?` starts consulting Sandbox and EXCLUDE — both false on an ordinary
       # rule-less project with Sandbox off, so those runs are unaffected.
       return OpenScope.new if scope.nil?
-      return StoreScope.new(scope) if verdict.unscoped?
+      return StoreScope.new(scope, outbound) if verdict.unscoped?
       if outbound.reason == Gori::Outbound::Reason::Operator && !verdict.in_scope?
-        return UnscopedStoreScope.new(scope)
+        return UnscopedStoreScope.new(scope, outbound)
       end
-      StoreScope.new(scope)
+      StoreScope.new(scope, outbound)
     end
 
     # A missing/unreadable/binary wordlist is a user mistake, not a crash: every surface

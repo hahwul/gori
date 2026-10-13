@@ -1770,6 +1770,7 @@ gori run project network get upstream_proxy
 printf %s "$PROXY_PASS" | gori run project network set upstream_auth alice --password-stdin
 gori run project network set capture_max_mib 16
 gori run project network unset capture_max_mib
+gori run project network set outbound_max_rps=10          # every run, every process, together
 ```
 
 | Key (`net.` prefix optional) | Value |
@@ -1780,6 +1781,7 @@ gori run project network unset capture_max_mib
 | `upstream_auth` | Proxy credentials: the value is the username, the password is read from stdin with `--password-stdin` (never the argument vector, which would put it in the process listing). HTTP Basic for an HTTP proxy, RFC 1929 for SOCKS5 |
 | `connect_timeout_secs` · `io_timeout_secs` | Outbound connect and idle timeouts, seconds (min 1) |
 | `capture_max_mib` | Body bytes captured and stored per message, MiB (1-2047) |
+| `outbound_max_rps` · `outbound_max_requests` | The project request budget: a ceiling on gori-originated requests per second (a positive number, `0.5` allowed) and in total, held across every run and every process on the project. Proxied traffic is not counted. `unset outbound_max_requests` resets the count. See [Per-Project Overrides](/reference/config/#per-project-overrides) |
 
 | Subcommand | Description |
 | --------------------- | ------------- |
