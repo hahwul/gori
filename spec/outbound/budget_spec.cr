@@ -52,6 +52,17 @@ describe Gori::Outbound::Budget do
     end
   end
 
+  it "leases at most a quarter of what is left, so an idle process cannot hoard the total" do
+    with_two_stores do |store, peer|
+      set_budget(store, max: "8")
+      Budget.new(store).admit(nil).should be_nil # a lease of 2, one left unsent and never released
+      b = Budget.new(peer)
+      sent = 0
+      20.times { sent += 1 if b.admit(nil).nil? }
+      sent.should eq(6)
+    end
+  end
+
   it "hands the unsent part of a lease back on release" do
     with_store do |store|
       set_budget(store, max: "100")

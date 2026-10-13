@@ -103,7 +103,9 @@ module Gori
       row = read.call(OUTBOUND_BUDGET_NEXT_KEY)
       reach = now_us + OUTBOUND_LEASE_SPAN_US + {OUTBOUND_LEASE_SPAN_US, interval_us}.max
       at = interval_us > 0 && row <= reach ? {row, now_us}.max : now_us
-      grant = max ? {want.to_i64, max - spent}.min : want.to_i64
+      # A quarter of what is left at most: a lease a live process never sends (an idle TUI or
+      # MCP server holds one until it exits) must not lock every other process out of the total.
+      grant = max ? {want.to_i64, max - spent, {(max - spent) // 4, 1_i64}.max}.min : want.to_i64
       if grant <= 0
         grant = 0_i64
       elsif interval_us > 0 && at > now_us + OUTBOUND_LEASE_SPAN_US
