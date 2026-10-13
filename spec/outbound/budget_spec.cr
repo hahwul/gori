@@ -63,6 +63,19 @@ describe Gori::Outbound::Budget do
     end
   end
 
+  it "hands a lease back when its store closes, whoever closes it" do
+    path = File.tempname("gori-spec", ".db")
+    a = Gori::Store.open(path)
+    set_budget(a, max: "100")
+    Gori::Outbound.agent(Gori::Scope.load(a), false).admit.should be_nil # an MCP send, store not owned
+    spent(a).should eq(Budget::COUNT_LEASE.to_s)
+    a.close
+    b = Gori::Store.open(path)
+    spent(b).should eq("1")
+    b.close
+    delete_db_files(path)
+  end
+
   it "hands the unsent part of a lease back on release" do
     with_store do |store|
       set_budget(store, max: "100")

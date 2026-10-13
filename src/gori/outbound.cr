@@ -434,7 +434,6 @@ module Gori
     def close : Nil
       store = @owned_store
       @owned_store = nil
-      store.try { |s| Budget.release(s) }
       store.try(&.close)
     rescue
       # a close failure must never take down a run that already finished its work

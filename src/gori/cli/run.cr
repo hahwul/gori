@@ -787,7 +787,6 @@ module Gori
         begin
           yield store
         ensure
-          Gori::Outbound::Budget.release(store) # an Outbound that does not own the store never does
           store.close
         end
       end

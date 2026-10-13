@@ -165,6 +165,7 @@ module Gori::CLI
         selection_source: selection.source, workspace_root: nil, project_id: nil,
         bind_error: bind_error, tool_filter: tool_filter, denied_permissions: denied, asked_permissions: asked)
       server.run
+      server.current_store.try(&.close) # bound later by create/switch_project
       return
     end
 
@@ -212,9 +213,11 @@ module Gori::CLI
           selection_source: "unbound", workspace_root: nil, project_id: nil,
           bind_error: reason, tool_filter: tool_filter, denied_permissions: denied, asked_permissions: asked)
         server.run
+        server.current_store.try(&.close) # bound later by create/switch_project
         return
       end
     Log.warn { "mcp: #{resolved} has no captured flows (empty database)" } if store.count.zero?
+    server = nil
     begin
       server = MCP::Server.new(store, allow_actions: !read_only, verify_upstream: !insecure_upstream,
         project_name: project_name, project_slug: project_slug, db_path: resolved,
@@ -222,6 +225,8 @@ module Gori::CLI
         project_id: project_id, tool_filter: tool_filter, denied_permissions: denied, asked_permissions: asked)
       server.run # blocks until STDIN EOF (client closed)
     ensure
+      # A `switch_project` left another store live; it closes too (its budget lease goes back).
+      server.try(&.current_store).try(&.close)
       store.close
     end
   end

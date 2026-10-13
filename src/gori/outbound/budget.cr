@@ -24,16 +24,16 @@ module Gori
       # Consecutive failed leases (~5s) before a send is refused rather than left waiting.
       MAX_FAILED_LEASES = 20
 
-      # Evicted by `Budget.release(store)`, which every surface calls as it closes a store.
+      # Evicted by `Budget.release(store)` as the store closes.
       @@budgets = {} of UInt64 => Budget
 
       def self.for(store : Store) : Budget
-        @@budgets[store.object_id] ||= new(store)
+        @@budgets[store.object_id] ||= new(store).tap { store.before_close { release(store) } }
       end
 
       # `release` for whatever this process built over `store`, without building one, and forget
-      # it: a store closing (a CLI command's end, a TUI or MCP project switch) is the end of its
-      # sends whichever Outbound made them. Call it before the store closes.
+      # it: a store closing is the end of its sends whichever Outbound made them. `for` hooks it
+      # onto the store's close, so every surface's close runs it.
       def self.release(store : Store) : Nil
         @@budgets.delete(store.object_id).try(&.release)
       end

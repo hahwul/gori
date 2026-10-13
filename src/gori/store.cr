@@ -727,6 +727,7 @@ module Gori
       @writes = Channel(WriteOp).new(1024) # widened: h2 frames now queue fire-and-forget
       @done = Channel(Nil).new
       @closed = false # see #close: a second drain would park forever on @done
+      @before_close = [] of ->
       @write_failures = Atomic(Int32).new(0)
       @h2_frames_dropped = Atomic(Int32).new(0)
       @inserts_since_prune = 0
@@ -1119,8 +1120,17 @@ module Gori
       @closed
     end
 
+    # Run `block` once as this store closes, while the writer still takes a write: an engine's
+    # last word on the project (the request budget handing back its unsent lease, #1601), so no
+    # surface that closes a store can forget it.
+    def before_close(&block : ->) : Nil
+      @before_close << block
+    end
+
     def close : Nil
       return if @closed
+      hooks, @before_close = @before_close, [] of ->
+      hooks.each { |h| h.call rescue nil }
       @closed = true
       @controlled_reads.each_key(&.cancel)
       until @controlled_reads.empty?

@@ -117,6 +117,12 @@ module Gori
         end
       end
 
+      # The project store the tools are bound to now — after a `switch_project`, not the one
+      # this server was built with.
+      def current_store : Store?
+        @tools.current_store
+      end
+
       # Runs queued requests in arrival order until the reader closes the channel and the
       # backlog is empty. The rescue is the session's structural guarantee: ONE request can
       # never end it.

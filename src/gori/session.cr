@@ -593,7 +593,6 @@ module Gori
       # publishes post-commit events while draining, and a closed channel would
       # otherwise make it raise mid-drain. (publish() also tolerates a closed
       # channel as defense-in-depth — incl. the now-closed probe_events.)
-      Outbound::Budget.release(@store) # its unsent lease goes back to the project's total
       @store.close
       @flow_events.close
       # The third feed closes with them, or the Authorize passive watcher parks in `receive?`
