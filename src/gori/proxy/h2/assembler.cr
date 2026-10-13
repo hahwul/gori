@@ -317,10 +317,7 @@ module Gori::Proxy::H2
         next unless stream = open_entry(stream_id)
         if pre = stream.req_rewrite.try(&.head)
           held_head, _ = Gori::Interceptor.split_edit(original)
-          body = original[held_head.size..]
-          original = Bytes.new(pre.size + body.size)
-          pre.copy_to(original)
-          body.copy_to(original + pre.size)
+          original = pre + original[held_head.size..]
         end
         stream.intercept_original = original
       end

@@ -521,7 +521,7 @@ module Gori
       bytes = set_member(bytes, "operationName", op.try(&.to_json)) if op != was_op
       bytes = set_member(bytes, "query", query.to_json) if query != was_query
       if vars && vars != was_vars
-        if JsonSpans.valid?(vars.to_slice)
+        if json?(vars)
           bytes = set_member(bytes, "variables", vars)
         elsif !JsonSpans.root_object(bytes).try(&.members.any? { |m| m.key == "variables" })
           bytes = set_member(bytes, "variables", vars.to_json)
@@ -1062,8 +1062,7 @@ module Gori
       nxt.nil? || nxt.strip.empty?
     end
 
-    # `RawJson.valid?`, not a `JSON.parse`: a number past Int64 is still JSON, and refusing it
-    # folded a `# variables` block carrying one into the query.
+    # A number past Int64 is still JSON.
     private def json?(s : String) : Bool
       RawJson.valid?(s)
     end

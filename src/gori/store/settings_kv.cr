@@ -67,12 +67,12 @@ module Gori
 
     # Drop every grant for `host` (bare or with any port), compared in `OverrideHost.key` form:
     # a host override repointing that name means an approval given for it named a server it no
-    # longer dials. Whether the grants are gone (true when there were none).
-    def drop_mcp_host_grants(host : String) : Bool
+    # longer dials.
+    def drop_mcp_host_grants(host : String) : Nil
       key = OverrideHost.key(host)
       grants = mcp_host_grants
       kept = grants.reject { |g| OverrideHost.key(Store.grant_host(g)) == key }
-      kept.size == grants.size || set_setting(MCP_HOST_GRANTS_KEY, kept.to_json)
+      set_setting(MCP_HOST_GRANTS_KEY, kept.to_json) unless kept.size == grants.size
     end
 
     # The host half of a grant: `host:port` loses its port, a bare host is itself.

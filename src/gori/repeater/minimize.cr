@@ -260,11 +260,9 @@ module Gori::Repeater
         # its own `@sent += 1`), so a refused call put nothing on the wire and must not be
         # counted here either — counting it made `sends` report SEND_CAP + 1, in the note and
         # in every surface's `sends` field.
-        return Report.new(restore_eol(working, crlf), removed, sends, false, cap_note(removed, sends)) if r.error == Fuzz::CappedBackend::CAP_ERROR
-        # The project budget refuses every variant after this one too: end here, as the cap does.
-        if (err = r.error) && Outbound.budget_refusal?(err)
-          return Report.new(restore_eol(working, crlf), removed, sends, false,
-            "#{err} — kept #{Gori.plural(removed.size, "removal")} so far (partial, #{sends} sends)")
+        # The project budget refuses every variant after this one too: it ends the run as the cap does.
+        if (err = r.error) && (err == Fuzz::CappedBackend::CAP_ERROR || Outbound.budget_refusal?(err))
+          return Report.new(restore_eol(working, crlf), removed, sends, false, cap_note(removed, sends, err))
         end
         # A variant the scope refuses (a removal that moved the path under an exclude) was not
         # sent either; it is kept, since it was never tested.
@@ -672,8 +670,9 @@ module Gori::Repeater
     # omits the count is a surface that cannot state it. It IS redundant here (a capped run
     # spent exactly `SEND_CAP`) and is stated anyway, because the alternative — the CLI
     # appending the count itself — made the other two read `… (11 sends) · 11 sends`.
-    private def self.cap_note(removed : Array(Removed), sends : Int32) : String
-      "send cap reached — kept #{Gori.plural(removed.size, "removal")} " \
+    private def self.cap_note(removed : Array(Removed), sends : Int32, err : String) : String
+      lead = err == Fuzz::CappedBackend::CAP_ERROR ? "send cap reached" : err
+      "#{lead} — kept #{Gori.plural(removed.size, "removal")} " \
       "so far (partial, #{sends} sends)"
     end
 

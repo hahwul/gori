@@ -575,6 +575,10 @@ module Gori
         # value is not something a link can set.
         NOT_URL = Set{"document.cookie", "web storage"}
 
+        # Request calls of one kind read per script: real bundles have tens, and a hostile run of
+        # `fetch({` stalled the proxy's fiber (P6).
+        MAX_SINK_HITS = 512
+
         # CSPT suspects in one STRIPPED script: {source label, sink label} for every request sink
         # whose URL argument holds a taint source not wrapped in `encodeURIComponent(…)`. Only the
         # URL counts: a source in the options (`{body: location.search}`), or in a config object
@@ -582,21 +586,14 @@ module Gori
         # and `.` alone, so `../` survives it. `sources` is the script's `source_spans`, shared
         # with DomXss through `Context#client_source_index`. `messages` says the script listens
         # for postMessage; without it `e.data` is far likelier a response (`axios(…).then(e=>…)`).
-        # Request calls of one kind read per script. Real bundles have tens; a hostile one with
-        # tens of thousands of `fetch({` (a config with no `url:` moves no `past`) made each hit
-        # walk two WINDOWs, ~230 ms on the proxy's fiber (P6).
-        MAX_SINK_HITS = 512
-
         def self.request_source_pairs(code : String, sources = source_spans(code), messages = false) : Array({String, String})
           pairs = [] of {String, String}
           all = nil
           REQUEST_SINKS.each do |(sink_re, sink_label, arg)|
             next if arg == 1 && !XHR.matches?(code)
             found = hits = 0
-            # End of the last URL span read. A hit before it is a call nested in that URL, whose
-            # sources were already read: skipping it keeps the walk linear on a run of unclosed
-            # `fetch(location.hash+fetch(…` (13k hits, each walking WINDOW bytes, before). Only the
-            # URL span: a call in a config's `success:` callback is still its own request.
+            # End of the last URL span read: a call nested in it was already read (keeps the walk
+            # linear). Only the URL span: a call in a config's `success:` callback is its own request.
             past = 0
             code.scan(sink_re) do |m|
               next if m.byte_begin(0) < past
