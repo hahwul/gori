@@ -201,13 +201,23 @@ module Gori
       # race/timing sends). Never include the request-target in the error: it may contain a
       # live binding value.
       private def wire_refusal(wire : Bytes, cancel : Proc(Bool)? = nil) : String?
-        target = Gori::Outbound.request_target(wire)
-        verdict = @outbound.check_wire_request(@scheme, @host, target, @port)
-        return "#{SCOPE_REFUSAL_PREFIX} — #{@outbound.remedy(verdict)}" if verdict.blocked?
         # Every send seam ends here once per request, so this is where it counts against the
         # project budget (#1601): a hand-authored send waits for the rate, and only a spent
         # total refuses it.
-        refusal_wired(wire) || @outbound.admit(halt: cancel || @outbound.halt)
+        scope_refusal(wire) || @outbound.admit(halt: cancel || @outbound.halt)
+      end
+
+      # `wire_refusal` without the budget, so a group gates every member before it takes a slot.
+      private def scope_refusal(wire : Bytes) : String?
+        target = Gori::Outbound.request_target(wire)
+        verdict = @outbound.check_wire_request(@scheme, @host, target, @port)
+        return "#{SCOPE_REFUSAL_PREFIX} — #{@outbound.remedy(verdict)}" if verdict.blocked?
+        refusal_wired(wire)
+      end
+
+      # A group is one unit: every member's gate, then its slots, so a blocked member spends none.
+      private def group_wire_refusal(requests : Array(Bytes)) : String?
+        requests.each.compact_map { |b| scope_refusal(b) }.first? || @outbound.admit(requests.size)
       end
 
       # Does the `$NAME` binding pass run at this seam? The two independent reasons it does not
@@ -412,7 +422,7 @@ module Gori
         # `Plan#refusal` still predicts from the drafts, which is what lets a caller report the
         # block before printing anything.
         requests = requests.map { |b| wire(b) }
-        if reason = requests.each.compact_map { |b| wire_refusal(b) }.first?
+        if reason = group_wire_refusal(requests)
           return requests.map { Result.new(Bytes.new(0), nil, nil, 0_i64, reason) }
         end
         results = Engine.send_pipeline(requests, scheme: @scheme, host: @host, port: @port,
@@ -438,7 +448,7 @@ module Gori
       # Sender's), which the surface enforces before building the plan.
       def send_race(requests : Array(Bytes)) : Array(Result)
         requests = requests.map { |b| wire(b) }
-        if reason = requests.each.compact_map { |b| wire_refusal(b) }.first?
+        if reason = group_wire_refusal(requests)
           return requests.map { Result.new(Bytes.new(0), nil, nil, 0_i64, reason) }
         end
         results =

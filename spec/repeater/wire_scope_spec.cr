@@ -60,4 +60,20 @@ describe "Repeater scope checks at the final wire seam" do
       end
     end
   end
+
+  it "spends no budget on a group one member of which is outside scope" do
+    with_store do |store|
+      store.set_settings([{Gori::Settings::PROJECT_OUTBOUND_MAX_REQUESTS_KEY, "10"}] of {String, String?})
+      scope = Gori::Scope.load(store)
+      scope.add("include", "string", "/ok")
+      plan = Gori::Repeater::Plan.build(
+        Gori::Repeater::PlanOptions.new([
+          "GET /ok HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice,
+          "GET /no HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice,
+        ], target: "http://127.0.0.1:1/", expand_request: false),
+        Gori::Outbound.agent(scope, false))
+      plan.send_race.each { |r| r.error.to_s.should start_with(Gori::Repeater::Sender::SCOPE_REFUSAL_PREFIX) }
+      store.setting(Gori::Store::OUTBOUND_BUDGET_SPENT_KEY).should be_nil # no slot leased
+    end
+  end
 end
