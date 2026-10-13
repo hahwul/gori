@@ -28,10 +28,13 @@ module Gori
     # must hand it over or the `graphql` key is absent for every WebSocket flow, which reads as
     # "this socket carries no GraphQL". nil (an HTTP flow, or a caller with no transcript to
     # give) simply contributes nothing.
+    #
+    # `paired: false` (a side excluded) skips `json_rpc` / `llm`: they pair a request with its
+    # reply, and half a flow would read as an unanswered call.
     def emit_json(j : JSON::Builder, *, target : String,
                   req_head : Bytes?, req_body : Bytes?,
                   resp_head : Bytes?, resp_body : Bytes?, clip : Int32? = nil,
-                  ws_messages : Array(Store::WsMessage)? = nil) : Nil
+                  ws_messages : Array(Store::WsMessage)? = nil, paired : Bool = true) : Nil
       if doc = Saml.from_flow(target, req_head, req_body, resp_head, resp_body)
         j.field "saml" do
           j.object do
@@ -88,8 +91,10 @@ module Gori
       end
       emit_ws_graphql(j, ws_ops, clip)
       emit_ws_proto(j, ws_frames, clip)
-      JsonRpc.from_flow(req_head, req_body, resp_head, resp_body).try { |ex| emit_json_rpc(j, ex, clip) }
-      LlmCall.from_flow(req_head, req_body, resp_head, resp_body).try { |call| emit_llm(j, call, clip) }
+      if paired
+        JsonRpc.from_flow(req_head, req_body, resp_head, resp_body).try { |ex| emit_json_rpc(j, ex, clip) }
+        LlmCall.from_flow(req_head, req_body, resp_head, resp_body).try { |call| emit_llm(j, call, clip) }
+      end
       if fields = FormData.from_flow(target, req_head, req_body)
         j.field "form_params" do
           j.array do

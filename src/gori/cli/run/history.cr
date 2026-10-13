@@ -1367,12 +1367,14 @@ module Gori
           io.puts CLI::Output.term_safe("=== WEBSOCKET PROTOCOL (#{WsProto.summary(ws_frames)}) ===")
           io.puts CLI::Output.term_safe_multiline(WsProto.display(ws_frames).scrub)
         end
-        if ex = JsonRpc.from_flow(rh, rb, sh, sb)
+        # RPC and LLM pair a request with its reply: with a side excluded, a call would read as
+        # unanswered, so neither prints.
+        if req && resp && (ex = JsonRpc.from_flow(rh, rb, sh, sb))
           io.puts ""
           io.puts CLI::Output.term_safe("=== RPC (#{JsonRpc.summary(ex)}) ===")
           io.puts CLI::Output.term_safe_multiline(JsonRpc.display(ex))
         end
-        if call = LlmCall.from_flow(rh, rb, sh, sb)
+        if req && resp && (call = LlmCall.from_flow(rh, rb, sh, sb))
           io.puts ""
           io.puts CLI::Output.term_safe("=== LLM (#{LlmCall.summary(call)}) ===")
           io.puts CLI::Output.term_safe_multiline(LlmCall.display(call))
@@ -1393,7 +1395,7 @@ module Gori
         DecodedView.emit_json(j, target: req ? detail.row.target : "",
           req_head: req ? detail.request_head : nil, req_body: req ? detail.request_body : nil,
           resp_head: resp ? detail.response_head : nil, resp_body: resp ? detail.response_body : nil,
-          ws_messages: ws_msgs)
+          ws_messages: ws_msgs, paired: req && resp)
       end
 
       # Schema-less protobuf tree for an application/grpc body. Framed by

@@ -76,9 +76,9 @@ module Gori::CLI::Run
     sse_event_text(e, 0)
   end
 
-  def self.print_decoded_text_for_spec(detail : Store::FlowDetail) : String
+  def self.print_decoded_text_for_spec(detail : Store::FlowDetail, req = true, resp = true) : String
     io = IO::Memory.new
-    print_decoded_text(detail, true, true, io: io)
+    print_decoded_text(detail, req, resp, io: io)
     io.to_s
   end
 end
@@ -517,12 +517,16 @@ describe "gori run show --format json" do
     out = Gori::CLI::Run.print_decoded_text_for_spec(rpc)
     out.should contain("=== RPC (MCP · 1 call · tools/call search) ===")
     out.should contain("# → tools/call id=1 · search")
+    # One side excluded: the call is answered, so it is not printed as unanswered.
+    Gori::CLI::Run.print_decoded_text_for_spec(rpc, resp: false).should_not contain("=== RPC")
+    Gori::CLI::Run.print_decoded_text_for_spec(rpc, req: false).should_not contain("=== RPC")
     llm = Gori::Store::FlowDetail.new(row, "HTTP/1.1", head,
       %({"model":"claude-x","system":"s","messages":[{"role":"user","content":"hi"}]}).to_slice,
       ok, %({"type":"message","model":"claude-x","content":[{"type":"text","text":"Hello"}],"stop_reason":"end_turn"}).to_slice)
     out = Gori::CLI::Run.print_decoded_text_for_spec(llm)
     out.should contain("=== LLM (anthropic · claude-x · end_turn) ===")
     out.should contain("Hello")
+    Gori::CLI::Run.print_decoded_text_for_spec(llm, resp: false).should_not contain("=== LLM")
   end
 
   it "neutralizes escapes in a decoded JWT heading's alg" do
