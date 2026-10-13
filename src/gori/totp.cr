@@ -28,10 +28,8 @@ module Gori
       counter = Bytes.new(8)
       IO::ByteFormat::BigEndian.encode((at.to_unix // config.period).to_u64, counter)
       mac = OpenSSL::HMAC.digest(config.algorithm, config.key, counter)
-      offset = mac[-1] & 0x0f
-      bin = (mac[offset].to_i64 & 0x7f) << 24 | mac[offset + 1].to_i64 << 16 |
-            mac[offset + 2].to_i64 << 8 | mac[offset + 3].to_i64
-      (bin % 10_i64 ** config.digits).to_s.rjust(config.digits, '0')
+      bin = IO::ByteFormat::BigEndian.decode(UInt32, mac[mac[-1] & 0x0f, 4]) & 0x7fff_ffff
+      (bin.to_i64 % 10_i64 ** config.digits).to_s.rjust(config.digits, '0')
     end
 
     # The secret `value` holds, or why it cannot be one, phrased to follow the name of
@@ -61,7 +59,9 @@ module Gori
       in String then "is an otpauth://totp/ URI whose #{options}"
       in Tuple  then Config.new(bytes, *options)
       end
-    rescue URI::Error
+    rescue
+      # Not only `URI::Error`: a port past Int32 raises `OverflowError`, and this runs at the
+      # send seam, which must never raise.
       "is not a parseable otpauth: URI"
     end
 

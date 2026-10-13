@@ -2548,12 +2548,6 @@ module Gori
       # on a namespaced install, `$SESSION, $TOKEN` on a bare one (`Env.token_list` decides), so
       # the names an agent reads here are already in the spelling it has to write back.
       private def env_unresolved_error(detail : String?) : String
-        # See the CLI's copy. The operator is named first: a second-factor secret is better set in
-        # gori than handed to an agent, and a global env var stays out of project exports.
-        if note = Gori::Env.mint_refusal(detail)
-          return "#{note} — ask the operator to set it (a global env var stays out of project " \
-                 "exports), or set it with set_env_var, or remove the token"
-        end
         refs = (detail || "").split(',').compact_map { |t| Gori::Env.parse_ref?(t) }
         if !refs.empty? && refs.all?(&.ns.gen?)
           # See the CLI's copy: a REGISTERED generator here is refused by POSITION, so pointing

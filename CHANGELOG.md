@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Env: `$GEN.TOTP` mints the current RFC 6238 code from the env var `TOTP_SECRET` (a base32 secret or an `otpauth://totp/` URI), so a session slot's refresh steps and other replayed logins pass a one-time-code prompt; a send whose secret is missing or malformed is refused with a reason that never shows the secret (#1591)
+- Env: `$GEN.TOTP` mints the current RFC 6238 code from the env var `TOTP_SECRET` (a base32 secret or an `otpauth://totp/` URI), so a session slot's refresh steps and other replayed logins pass a one-time-code prompt; a Repeater, `gori run` or MCP send is refused when the secret is missing or malformed (#1591)
 - Rewriter: a flow a Match&Replace rule changed records which rules fired and keeps the bytes they replaced, shown as `RULE` and ORIGINAL / ORIGINAL RESP panes in History, `rewritten_by` in `gori run history` and MCP, `gori run show --original`, and QL `rewritten:true` or `rewritten:project/4` (#1589)
 - Project request budget: `outbound_max_rps` and `outbound_max_requests` (`gori run project network set`) cap gori-originated requests per second and in total across every run, surface and process on a project, so parallel fuzz, discover and agent runs together keep an agreed ceiling (#1601)
 - Repeater: two palette-only transforms grow one GraphQL operation into N copies in a single request — a batched JSON array or the top-level field repeated under `aN:` aliases — to test per-request rate-limit / brute-force bypass, in one undoable edit (#1595)

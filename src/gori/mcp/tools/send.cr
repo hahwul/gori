@@ -1347,8 +1347,12 @@ module Gori
           in Repeater::PlanError::Reason::NoTarget          then "'url' is required"
           in Repeater::PlanError::Reason::BadTarget         then "could not parse a target host from #{detail.inspect}"
           in Repeater::PlanError::Reason::UnsupportedScheme then "unsupported scheme: #{detail} (only http/https)"
-          in Repeater::PlanError::Reason::UnresolvedEnv     then env_unresolved_error(detail)
-          in Repeater::PlanError::Reason::TlsPreset         then ex.message || "unknown tls_preset"
+          in Repeater::PlanError::Reason::UnresolvedEnv
+            # The operator is named first: a second-factor secret is better set in gori than
+            # handed to an agent, and a global env var stays out of project exports.
+            ex.mint_refusal.try { |note| "#{note} — ask the operator to set it (a global env var stays out of project exports), or set it with set_env_var, or remove the token" } ||
+              env_unresolved_error(detail)
+          in Repeater::PlanError::Reason::TlsPreset then ex.message || "unknown tls_preset"
           end
         err(message, "INVALID_ARGUMENT", field: field)
       end

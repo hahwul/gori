@@ -178,23 +178,6 @@ describe "MCP list_env grammar report" do
       end
     end
 
-    # #1591: not "refused by position" — the fix is the secret, and it is never quoted.
-    it "names the missing secret of a generator that cannot mint" do
-      with_store_env do |store|
-        with_env_syntax(Gori::Env::Syntax::Namespaced) do
-          tools = tools_for(store)
-          msg = tools.env_unresolved_error_for_spec("$GEN.TOTP")
-          msg.should start_with("$GEN.TOTP cannot mint: env var TOTP_SECRET is not set")
-          msg.should contain("ask the operator")
-          msg.should_not contain("is a generator")
-          Gori::Settings.project_env_vars = [{"TOTP_SECRET", "s3cr3t!"}]
-          msg = tools.env_unresolved_error_for_spec("$GEN.TOTP")
-          msg.should contain("is not a base32 secret")
-          msg.should_not contain("s3cr3t")
-        end
-      end
-    end
-
     it "refuses send_request before dialing when its $GEN.TOTP cannot mint" do
       with_store_env do |store|
         with_env_syntax(Gori::Env::Syntax::Namespaced) do

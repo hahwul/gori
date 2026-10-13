@@ -1030,6 +1030,7 @@ module Gori
         in Repeater::PlanError::Reason::UnsupportedScheme
           "#{prefix}: unsupported target scheme #{(detail || "").inspect} (use http:// or https://)"
         in Repeater::PlanError::Reason::UnresolvedEnv
+          ex.mint_refusal.try { |note| "#{prefix}: #{note}#{where.empty? ? "" : " (#{where.strip})"} — set it with `gori run project env set KEY value` or as a global env var, or remove the token" } ||
           "#{prefix}: #{env_unresolved_error(detail, where)}"
         in Repeater::PlanError::Reason::TlsPreset
           "#{prefix}: #{ex.message}"

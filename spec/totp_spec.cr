@@ -78,6 +78,7 @@ describe Gori::Totp do
       "otpauth://totp/x?secret=#{SHA1_B32}&digits=eight"  => "digits is not 6 to 10",
       "otpauth://totp/x?secret=#{SHA1_B32}&period=0"      => "period is not a positive",
       "otpauth://totp/x?secret=#{SHA1_B32}&algorithm=MD5" => "algorithm is not SHA1, SHA256, SHA512",
+      "otpauth://totp:4294967296/x?secret=#{SHA1_B32}"    => "is not a parseable otpauth: URI",
       "otpauth://totp/x?secret=%3D%3D%3D%3D%3D%3D%3D%3D"  => "secret is not base32",
     }
     refusals.each do |value, reason|

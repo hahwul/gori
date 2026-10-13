@@ -3051,7 +3051,7 @@ module Gori::Tui
       in Repeater::PlanError::Reason::UnsupportedScheme
         "repeater: unsupported scheme #{(ex.detail || "").inspect} — use http:// or https://"
       in Repeater::PlanError::Reason::UnresolvedEnv
-        Env.mint_refusal(ex.detail).try { |note| "repeater: #{note} — add it in the Project tab's ENV pane" } ||
+        ex.mint_refusal.try { |note| "repeater: #{note} — add it in the Project tab's ENV pane" } ||
         "repeater: unresolved env #{ex.detail} — add it in the Project tab's ENV pane"
       in Repeater::PlanError::Reason::TlsPreset
         # Unreachable from the TUI, where the value is only ever chosen by cycling the

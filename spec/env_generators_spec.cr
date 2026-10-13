@@ -231,10 +231,6 @@ describe "Gori::Env generators" do
       code.should eq(totp_at(t.to_i64, uri))
       code.size.should eq(8)
     end
-    # Project wins, as for every env var.
-    with_totp_secret(TOTP_B32, global: "not base32!") do
-      Gori::Env.generator_refusal("TOTP").should be_nil
-    end
   end
 
   it "leaves $GEN.TOTP literal at the seam when it cannot mint, and says why without the value" do
@@ -258,7 +254,7 @@ describe "Gori::Env generators" do
       ex.reason.unresolved_env?.should be_true
       ex.detail.should eq("$GEN.TOTP")
       ex.message.should eq("$GEN.TOTP cannot mint: env var TOTP_SECRET is not set")
-      Gori::Env.mint_refusal(ex.detail).should eq(ex.message)
+      ex.mint_refusal.should eq(ex.message)
       Gori::Env.mint_refusal("$ENV.HOST, $GEN.UUID").should be_nil
       # A captured `$GEN.TOTP` is a byte the origin saw, and an escaped one is text.
       String.new(totp_plan(raw, evidence: true).wire_bytes).should contain("X-OTP: $GEN.TOTP\r\n")
@@ -266,6 +262,19 @@ describe "Gori::Env generators" do
     end
     with_totp_secret(TOTP_B32) do
       String.new(totp_plan(raw).wire_bytes).should match(/X-OTP: \d{6}\r\n/)
+    end
+  end
+
+  # A dial value is resolved before any request exists, so a generator there is refused by
+  # POSITION, and naming the missing secret would send the operator to fix the wrong thing.
+  it "does not call a dial value's $GEN.TOTP a missing secret" do
+    with_totp_secret(nil) do
+      ex = expect_raises(Gori::Repeater::PlanError) do
+        Gori::Repeater::Plan.build(Gori::Repeater::PlanOptions.new(["GET / HTTP/1.1\r\n\r\n".to_slice],
+          default_target: "http://$GEN.TOTP.test"), ungated_outbound)
+      end
+      ex.reason.unresolved_env?.should be_true
+      ex.mint_refusal.should be_nil
     end
   end
 

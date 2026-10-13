@@ -326,8 +326,8 @@ module Gori
       # #1591. The secret is an env var rather than an argument, for the same reason: the
       # grammar has no argument slot, and an `otpauth://` value carries digits/period/algorithm.
       "TOTP" => Generator.new("RFC 6238 one-time code from env var #{TOTP_SECRET_VAR} · per send",
-        ->(g : Generation) : String? { (config = Env.totp_config).is_a?(Totp::Config) ? Totp.code(config, g.now) : nil },
-        -> : String? { (config = Env.totp_config).is_a?(String) ? config : nil }),
+        ->(g : Generation) : String? { Env.totp_config.as?(Totp::Config).try { |config| Totp.code(config, g.now) } },
+        -> : String? { Env.totp_config.as?(String) }),
     }
 
     # The catalog as the NAME → FORMAT table the surfaces print, derived from the one above so
@@ -344,10 +344,8 @@ module Gori
     # so an edited var applies to the next send, as an `$ENV` edit does.
     def self.totp_config : Totp::Config | String
       raw = effective_vars[TOTP_SECRET_VAR]? || return "env var #{TOTP_SECRET_VAR} is not set"
-      case parsed = Totp.parse(raw)
-      in Totp::Config then parsed
-      in String       then "env var #{TOTP_SECRET_VAR} #{parsed}"
-      end
+      parsed = Totp.parse(raw)
+      parsed.is_a?(String) ? "env var #{TOTP_SECRET_VAR} #{parsed}" : parsed
     end
 
     # Why the registered generator `name` cannot mint now, or nil when it can or is no generator.
@@ -355,36 +353,31 @@ module Gori
       GENERATORS[name]?.try(&.refusal).try(&.call)
     end
 
-    # The first `$GEN` token in `bytes` the send seam would resolve but cannot mint: its spelling
-    # and the sentence saying why, or nil. A name in `literal` is evidence and is never resolved.
-    def self.unmintable(bytes : Bytes, literal : Set(String)? = nil) : {String, String}?
+    # The spelling of the first `$GEN` token in `bytes` the send seam would resolve but cannot
+    # mint, or nil. A name in `literal` is evidence and is never resolved.
+    def self.unmintable(bytes : Bytes, literal : Set(String)? = nil) : String?
       syntax = Settings.env_syntax
-      return nil if syntax.bare?
       prefix = Settings.env_prefix
+      # The probe `generator_in?` uses: most requests carry no `$GEN.`, and a large body should
+      # not cost a token walk per build to learn that.
+      return nil unless syntax.namespaced? && AsciiBytes.index(bytes, "#{prefix}GEN.".to_slice)
       each_token(bytes, prefix, syntax) do |found|
         next unless found.ns.try(&.gen?) && !literal_name?(literal, found)
-        if why = generator_refusal(found.name)
-          token = spell(found.name, Namespace::Gen, syntax, prefix)
-          return {token, cannot_mint(token, why)}
-        end
+        return spell(found.name, Namespace::Gen, syntax, prefix) if generator_refusal(found.name)
       end
       nil
     end
 
-    # The same sentence for a surface holding only a refused build's token list
-    # (`PlanError#detail`), or nil when no token in it is a generator that cannot mint.
+    # Why a token in `detail` (a refused build's comma-joined token list) cannot mint, as a
+    # sentence, or nil when none is a generator that cannot.
     def self.mint_refusal(detail : String?) : String?
       (detail || "").split(',').each do |text|
         ref = parse_ref?(text) || next
         next unless ref.ns.gen?
         why = generator_refusal(ref.name) || next
-        return cannot_mint(text.strip, why)
+        return "#{text.strip} cannot mint: #{why}"
       end
       nil
-    end
-
-    private def self.cannot_mint(token : String, why : String) : String
-      "#{token} cannot mint: #{why}"
     end
 
     # The match order: LONGEST label first, so a future namespace whose label is a prefix of

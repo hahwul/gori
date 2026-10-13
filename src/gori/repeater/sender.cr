@@ -249,10 +249,10 @@ module Gori
         end
       end
 
-      # The first `$GEN` token in `requests` this seam would resolve but cannot mint, as its
-      # spelling and the sentence why (`Env.unmintable`), or nil. Asked by `Plan.build`, because
-      # this seam never raises: here such a token goes out as its literal text.
-      def unmintable(requests : Array(Bytes)) : {String, String}?
+      # The first `$GEN` token in `requests` this seam would resolve but cannot mint
+      # (`Env.unmintable`), or nil. Asked by `Plan.build`, because this seam never raises: here
+      # such a token goes out as its literal text.
+      def unmintable(requests : Array(Bytes)) : String?
         return nil unless resolve_bindings?
         requests.each { |b| (r = Gori::Env.unmintable(b, @evidence_literals)) && (return r) }
         nil
