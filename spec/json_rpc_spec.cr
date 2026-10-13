@@ -56,6 +56,16 @@ describe Gori::JsonRpc do
     text.should contain("notification, no reply expected")
   end
 
+  it "gives calls sharing an id that id's replies in order, and streams the surplus" do
+    req = %([{"jsonrpc":"2.0","id":1,"method":"a"},{"jsonrpc":"2.0","id":1,"method":"b"}])
+    resp = %([{"jsonrpc":"2.0","id":1,"result":"A"},{"jsonrpc":"2.0","id":1,"result":"B"},) +
+           %({"jsonrpc":"2.0","id":1,"result":"C"}])
+    ex = rpc(req, resp).not_nil!
+    ex.calls.map(&.reply).should eq([%("A"), %("B")])
+    ex.stream.size.should eq(1)
+    ex.stream[0].body.should contain(%("C"))
+  end
+
   it "offers nothing for plain JSON, or a stream answering a non-RPC request" do
     rpc(%({"model":"x","id":1,"method":"sum"}), %({"id":1,"result":3})).should be_nil
     rpc(%({"q":"shoes"}), "data: {\"jsonrpc\":\"2.0\",\"method\":\"x\"}\n\n", "text/event-stream").should be_nil

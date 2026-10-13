@@ -51,23 +51,24 @@ module Gori
       exchange.calls.empty? && exchange.stream.empty? ? nil : exchange
     end
 
-    # Replies pair by id, whatever order a batch is answered in; the first reply to an id wins
-    # and any other is listed with the stream.
+    # Replies pair by id, whatever order a batch is answered in. Calls sharing an id (a client
+    # bug, or a probe for one) take that id's replies in order; a reply left over is listed
+    # with the stream.
     private def pair(calls : Array(Obj), resp : Array(Obj)) : Exchange
-      ids = calls.compact_map { |c| c["id"]?.try(&.to_json) }.to_set
-      replies = {} of String => Obj
+      wanted = calls.compact_map { |c| c["id"]?.try(&.to_json) }.tally
+      replies = {} of String => Deque(Obj)
       stream = [] of Message
       resp.each do |m|
         key = m["id"]?.try(&.to_json)
-        if key && !m.has_key?("method") && ids.includes?(key) && !replies.has_key?(key)
-          replies[key] = m
+        if key && !m.has_key?("method") && (q = replies[key] ||= Deque(Obj).new).size < wanted.fetch(key, 0)
+          q << m
         else
           stream << Message.new(m["method"]?.try(&.as_s?), m["id"]?, m.to_pretty_json)
         end
       end
       list = calls.map do |c|
         id = c["id"]?
-        r = id.try { |i| replies[i.to_json]? }
+        r = id.try { |i| replies[i.to_json]?.try(&.shift?) }
         # `"error": null` beside a result is no error.
         err = r.try(&.["error"]?).try { |e| e.raw.nil? ? nil : e }
         reply = r.try { |x| (err || x["result"]?).try(&.to_pretty_json) || "null" }
