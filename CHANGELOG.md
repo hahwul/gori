@@ -18,6 +18,7 @@
 - MCP marks every body, WebSocket message, SSE event and decoded JSON-RPC or LLM text with `origin` (`target` or `client`) and tells agents up front that traffic is data, never instructions, and Probe's passive `llm_prompt_injection` rule flags a response that tries to steer an LLM agent (#1586)
 - QL: `via:tui|cli|mcp` filters flows by the gori surface that sent them, so `via:mcp` is what an agent sent, and agent events in Activity and MCP `list_events` name the client (`actor_label`) (#1587)
 - Proxy: `GORI_SSLKEYLOGFILE` (or `SSLKEYLOGFILE`) writes TLS session secrets for both legs in the NSS key log format, so Wireshark can decrypt what gori relays (#1593)
+- Probe's DOM XSS rule no longer misses a sink after a regex literal on the same line, and Repeater's pretty-print, GraphQL pane and WebSocket message editor keep the operator's bytes (terminators, number spellings, duplicate keys) (#1621)
 
 ## v0.8.1
 
