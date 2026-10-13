@@ -1840,3 +1840,23 @@ describe "Gori::Discover::Engine project budget" do
     asked[1].should eq(asked[0]) # no send was retried
   end
 end
+
+private class CountingBudgetScope < D::OpenScope
+  getter asked = 0
+
+  def admit : String?
+    @asked += 1
+    nil
+  end
+end
+
+describe "Gori::Discover::Engine project budget under --max-requests" do
+  it "takes no budget slot for a send its own cap refuses" do
+    cfg = D::Config.new(spider: false, bruteforce: true, max_requests: 5_i64, calibrate_probes: 2,
+      concurrency: 4, retries: 0)
+    scope = CountingBudgetScope.new
+    words = (1..50).map { |i| "path#{i}" }
+    terminal_of(D::Engine.new("http://t/", words, RouteBackend.new(->(_t : String) { notfound }), cfg, scope))
+    scope.asked.should eq(5)
+  end
+end

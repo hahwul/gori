@@ -2128,6 +2128,8 @@ module Gori::Discover
 
     # One wire send after its rate slot, or a STOPPED answer when a stop ended the wait.
     private def paced_fetch(p : Url::Parts, target : String, interval : Time::Span?) : Repeater::Result
+      # Past the run's own cap the send is refused anyway: answer before taking a budget slot.
+      return @capped.fetch(p.scheme, p.host, p.port, target) if @capped.cap_reached?
       return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, STOPPED) unless pace(interval)
       if err = @scope.admit
         return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, STOPPED) if stopped?
