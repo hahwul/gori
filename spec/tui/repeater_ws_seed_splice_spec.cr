@@ -49,9 +49,23 @@ describe "RepeaterView WebSocket seed splice" do
     view = RepeaterView.new
     view.restore("https://ws.test", ws_head, false, true, ws_messages: seed.call)
     view.focus_pane(:request)
-    # Renderable = plain TEXT, default shape, valid UTF-8, no embedded LF. Two of the seven.
+    # Renderable = plain TEXT, default shape, valid UTF-8, no embedded LF or CR. Two of the seven.
     view.ws_unshown_seed.should eq(
       ["PING", "BIN", "TEXT rsv=4", "TEXT unmasked", "TEXT multiline"])
+  end
+
+  it "keeps a TEXT frame with a CR out of the pane so an edit cannot drop the CR" do
+    view = RepeaterView.new
+    view.restore("https://ws.test", ws_head, false, true, ws_messages: [
+      Gori::Store::WsOutMessage.text("a\r"),
+      Gori::Store::WsOutMessage.text("x\ry"),
+      Gori::Store::WsOutMessage.text("b"),
+    ])
+    view.focus_pane(:request)
+    view.ws_unshown_seed.should eq(["TEXT multiline", "TEXT multiline"])
+    view.edit_end
+    view.edit_insert('X')
+    view.ws_out_messages_raw.map { |m| String.new(m.payload) }.should eq(["a\r", "x\ry", "bX"])
   end
 
   it "splices an edit into the seed by POSITION instead of replacing the whole list" do

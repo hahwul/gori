@@ -198,6 +198,9 @@ class Gori::Tui::RepeaterView
   #     a captured `line1\nline2` into two frames on the wire — a real observed defect, not
   #     a hypothetical (the origin logged `op=1 len=5` twice where the capture had one
   #     `op=1 len=11`).
+  #   * an embedded CR is the same break by another byte: the pane's TextArea files a CR
+  #     that ends a line as that line's terminator, so the LF-split write-back dropped a
+  #     captured `a\r` to `a` on the first edit anywhere in the pane.
   #   * invalid UTF-8 is a binary payload the pane happens to be displaying (RFC 6455 §5.6
   #     makes UTF-8 the definition of a text frame), and a TextArea round-trip would scrub
   #     it — the same reason `Store::WsOutMessage` exists at all.
@@ -206,7 +209,7 @@ class Gori::Tui::RepeaterView
   # out of the pane, and the "+N not shown" badge names them.
   def self.ws_line_renderable?(m : Store::WsOutMessage) : Bool
     return false unless m.text? && m.shape.default?
-    return false if m.payload.includes?(0x0A_u8)
+    return false if ws_line_break?(m.payload)
     String.new(m.payload).valid_encoding?
   end
 
@@ -217,8 +220,12 @@ class Gori::Tui::RepeaterView
   def self.ws_unshown_label(m : Store::WsOutMessage) : String
     base = m.shape_label
     return base unless m.text? && m.shape.default?
-    return "#{base} multiline" if m.payload.includes?(0x0A_u8)
+    return "#{base} multiline" if ws_line_break?(m.payload)
     "#{base} binary"
+  end
+
+  private def self.ws_line_break?(payload : Bytes) : Bool
+    payload.includes?(0x0A_u8) || payload.includes?(0x0D_u8)
   end
 
   # Short labels for the frames the pane is NOT showing, for the badge on the MESSAGES
