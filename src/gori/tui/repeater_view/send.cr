@@ -418,7 +418,8 @@ class Gori::Tui::RepeaterView
     end
     rewritten = "#{head}\n\n#{multiplied}"
     rewritten = sync_cl_text(rewritten) if @auto_content_length
-    @editor.replace_all(rewritten, 0)
+    # Only the body changed: every head line keeps the terminator it was written with (P7).
+    @editor.replace_all_keeping_head_eols(rewritten, 0)
     refresh_decoded if graphql_split
     @dirty = true
     "multiplied into #{count} #{form.batch? ? "batched" : "aliased"} operations — send it with ^R"

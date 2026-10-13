@@ -560,11 +560,20 @@ module Gori::Tui
     # mapping. Same-line transforms continue through `set_text_keeping_eols` above, preserving
     # the body's mixed endings too.
     def set_text_keeping_head_eols(lf_text : String) : Nil
+      set_text(keeping_head_eols(lf_text))
+    end
+
+    # ditto, as ONE undoable edit (a whole-body rewrite such as GraphQL multiply).
+    def replace_all_keeping_head_eols(lf_text : String, caret : Int32) : Nil
+      replace_all(keeping_head_eols(lf_text), caret)
+    end
+
+    private def keeping_head_eols(lf_text : String) : String
       wire = with_wire_eols(lf_text)
       if wire == lf_text && @eols.any? { |e| e != "\n" && !e.empty? }
         wire = with_wire_head_eols(lf_text)
       end
-      set_text(wire)
+      wire
     end
 
     # ditto, for the transforms that must stay ONE undoable edit (marker strip).

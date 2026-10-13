@@ -2776,6 +2776,16 @@ describe Gori::Tui::RepeaterView do
       view.request_text.partition("\n\n")[2].should eq(%({"query":"mutation{login(code:\\"x\\")}"}))
     end
 
+    it "keeps every head line's terminator, a malformed one included (P7)" do
+      req = "POST /graphql HTTP/1.1\r\nHost: a\r\nX-Probe: 1\r\r\nContent-Type: application/json\r\n\r\n{\"query\":\"{me}\"}"
+      view = RepeaterView.new
+      view.restore("https://a", req, false, false)
+      view.insert_graphql_multiply(2, batch)
+      String.new(view.request_bytes).should eq(
+        "POST /graphql HTTP/1.1\r\nHost: a\r\nX-Probe: 1\r\r\nContent-Type: application/json\r\n\r\n" \
+        "[{\"query\":\"{me}\"},{\"query\":\"{me}\"}]")
+    end
+
     it "turns an engine refusal into the status line and edits nothing" do
       multi = "POST /graphql HTTP/1.1\nHost: api.test\nContent-Type: application/json\n\n" + %({"query":"{ a b }"})
       view = RepeaterView.new
