@@ -128,6 +128,19 @@ describe "MCP list_env grammar report" do
     end
   end
 
+  # #1591: the agent mints with `$GEN.TOTP` and never needs the seed, so asking does not hand it over.
+  it "withholds TOTP_SECRET even when asked for the secrets" do
+    with_store_env do |store|
+      seed = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+      mcp_ok_json(tools_for(store), "set_env_var", %({"key":"TOTP_SECRET","value":"#{seed}"}))
+      mcp_ok_json(tools_for(store), "set_env_var", %({"key":"OTHER","value":"shown"}))
+      got = env_result(store, %({"include_sensitive":true}))
+      got.to_json.should_not contain(seed)
+      got["vars"].as_a.to_h { |row| {row["key"].as_s, row["value"].as_s} }
+        .should eq({"TOTP_SECRET" => "[REDACTED]", "OTHER" => "shown"})
+    end
+  end
+
   # The refusal every tool shares when a token resolves to nothing has to name the remedy for THE
   # NAMESPACE it is about. `set_env_var` is the remedy for an env var; a BIND name has no setter at
   # all — it is bound at send time from a response — so telling an agent to `set_env_var` it made it

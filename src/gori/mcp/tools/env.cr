@@ -55,7 +55,9 @@ module Gori
         Settings.project_env_vars.each do |(key, val)|
           j.object do
             j.field "key", key
-            j.field "value", include_sensitive ? val : "[REDACTED]"
+            # `$GEN.TOTP`'s seed stays withheld even then (#1591): it is a long-lived second
+            # factor, and the generator mints from it without the agent ever holding it.
+            j.field "value", include_sensitive && key != Env::TOTP_SECRET_VAR ? val : "[REDACTED]"
             # Two facts about the value that are not the value.
             #
             # `[REDACTED]` alone leaves one question a caller cannot answer without asking
@@ -133,12 +135,12 @@ module Gori
           "'prefix' is the sigil, configurable in both; 'example' is the two applied, so a " \
           "non-default sigil needs no assembling. Values are [REDACTED] by default (a project " \
           "env var is exactly the kind of place a credential/token lives); pass " \
-          "include_sensitive:true to see them. Each var also carries 'length' and, when the " \
+          "include_sensitive:true to see them (TOTP_SECRET stays redacted). Each var also carries 'length' and, when the " \
           "value already begins with one, 'scheme' (Bearer/Basic/…) — enough to tell whether a " \
           "header should read \"Bearer <token>\" or just the token, without the value. To see " \
           "which key a saved request is actually wired to, read " \
           "get_repeater_context{include_content:true}'s env_headers." do |s|
-          s.field "include_sensitive", boolprop("return actual values instead of [REDACTED] (default false)")
+          s.field "include_sensitive", boolprop("return actual values instead of [REDACTED], except TOTP_SECRET (default false)")
         end
 
         return unless @allow_actions
