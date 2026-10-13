@@ -261,6 +261,11 @@ module Gori::Repeater
         # counted here either — counting it made `sends` report SEND_CAP + 1, in the note and
         # in every surface's `sends` field.
         return Report.new(restore_eol(working, crlf), removed, sends, false, cap_note(removed, sends)) if r.error == Fuzz::CappedBackend::CAP_ERROR
+        # The project budget refuses every variant after this one too: end here, as the cap does.
+        if (err = r.error) && Outbound.budget_refusal?(err)
+          return Report.new(restore_eol(working, crlf), removed, sends, false,
+            "#{err} — kept #{Gori.plural(removed.size, "removal")} so far (partial, #{sends} sends)")
+        end
         # A variant the scope refuses (a removal that moved the path under an exclude) was not
         # sent either; it is kept, since it was never tested.
         next if Outbound.permanent_refusal?(r.error)

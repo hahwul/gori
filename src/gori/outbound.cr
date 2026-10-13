@@ -72,8 +72,13 @@ module Gori
     # (a cap stop is not a `@blocked` payload unit — see `Fuzz::Engine#run_one`), so the cap
     # question stays with the callers that ask it.
     def self.permanent_refusal?(err : String?) : Bool
-      err == SANDBOX_SWEEP_ERROR || err == EXCLUDE_SWEEP_ERROR ||
-        err == BUDGET_SPENT_ERROR || err == BUDGET_STOPPED_ERROR || err == BUDGET_UNAVAILABLE_ERROR
+      return false unless err
+      err == SANDBOX_SWEEP_ERROR || err == EXCLUDE_SWEEP_ERROR || budget_refusal?(err)
+    end
+
+    # A refusal from the project request budget (#1601): it holds for every later send too.
+    def self.budget_refusal?(err : String) : Bool
+      err == BUDGET_SPENT_ERROR || err == BUDGET_STOPPED_ERROR || err == BUDGET_UNAVAILABLE_ERROR
     end
 
     # Which Layer-2 gate a `sweep_block` refusal came from, as a `scope_decision` names it.

@@ -116,6 +116,20 @@ private class RefusedOrigin < F::Backend
   end
 end
 
+# Answers like StaticOrigin until the project request budget runs out, then refuses everything.
+private class BudgetedOrigin < F::Backend
+  getter origin : F::Origin = F::Origin.new("http", "h", 80)
+
+  def initialize(@left : Int32)
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    return Gori::Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, Gori::Outbound::BUDGET_SPENT_ERROR) if (@left -= 1) < 0
+    head = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n".to_slice
+    Gori::Repeater::Result.new(head, "ok".to_slice, Gori::Proxy::Codec::Http1.parse_response_head(head), 1000_i64)
+  end
+end
+
 # Answers 200 only when the raw request bytes still carry the FF FE pair — a byte-wise
 # scan, never `String#includes?`, so the check itself can't launder the invalid bytes.
 private class ByteSensitiveOrigin < F::Backend
@@ -440,6 +454,15 @@ describe Gori::Repeater::Minimize do
     report.sends.should eq(0)
     report.note.should start_with("refused: #{Gori::Outbound::EXCLUDE_SWEEP_ERROR}")
     report.minimized_text.should eq(text)
+  end
+
+  # #1601: the budget refuses every later variant too, so the run is partial, not "minimal".
+  it "ends partial when the project request budget runs out" do
+    text = ["GET / HTTP/1.1", "Host: h", "User-Agent: x", "Accept: */*", "X-A: 1", "X-B: 2"].join("\n")
+    report = minimize(BudgetedOrigin.new(4), text)
+    report.aborted.should be_false
+    report.note.should start_with(Gori::Outbound::BUDGET_SPENT_ERROR)
+    report.note.should contain("partial")
   end
 
   it "aborts when the origin is unreachable" do
