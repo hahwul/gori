@@ -323,11 +323,12 @@ describe Gori::Browser do
     end
 
     it "leaves the running instance's DevToolsActivePort in place, and takes a newer write over it" do
+      handoff = bin.call("handoff", "exit 0") # outside expect_raises: posix_only! pends by raising
       live = File.join(root, "handoff", "DevToolsActivePort")
       Dir.mkdir_p(File.dirname(live))
       File.write(live, "1111\n/devtools/browser/live")
       expect_raises(Gori::Error, /already open/) do
-        Gori::Browser.start(bin.call("handoff", "exit 0"), cdp_spec, grace: 10.seconds)
+        Gori::Browser.start(handoff, cdp_spec, grace: 10.seconds)
       end
       File.read(live).should eq("1111\n/devtools/browser/live")
       File.touch(live, Time.utc - 1.minute)
