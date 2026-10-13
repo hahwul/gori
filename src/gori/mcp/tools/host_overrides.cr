@@ -37,6 +37,7 @@ module Gori
           # as success for an override the proxy would never dial.
           return busy("host override NOT added (store busy or unwritable); no override was created")
         end
+        forget_host_approvals(normalized)
         entry = ov.entries.find { |e| e.host == normalized }
         Result.new({id: entry.try(&.id), host: normalized, ip: ip}.to_json)
       end
@@ -45,7 +46,7 @@ module Gori
       private def update_host_override(h) : Result
         id = required_id(h, "id")
         ov = HostOverrides.load(store)
-        return not_found("no host override with id #{id}") unless ov.entries.any? { |e| e.id == id }
+        return not_found("no host override with id #{id}") unless before = ov.entries.find { |e| e.id == id }
         host = str(h, "host").try(&.strip)
         ip = str(h, "ip").try(&.strip)
         return err("'host' and 'ip' are both required", "INVALID_ARGUMENT") if host.nil? || host.empty? || ip.nil? || ip.empty?
@@ -61,6 +62,8 @@ module Gori
         unless ov.update(id, host, ip)
           return busy("host override NOT updated (store busy or unwritable); it is unchanged")
         end
+        forget_host_approvals(before.host)
+        forget_host_approvals(normalized)
         Result.new({id: id, host: normalized, ip: ip}.to_json)
       end
 
@@ -68,8 +71,9 @@ module Gori
       private def delete_host_override(h) : Result
         id = required_id(h, "id")
         ov = HostOverrides.load(store)
-        return not_found("no host override with id #{id}") unless ov.entries.any? { |e| e.id == id }
+        return not_found("no host override with id #{id}") unless gone = ov.entries.find { |e| e.id == id }
         return busy("host override NOT deleted (store busy or unwritable); it is unchanged") unless ov.remove(id)
+        forget_host_approvals(gone.host)
         Result.new({id: id, deleted: true}.to_json)
       end
 

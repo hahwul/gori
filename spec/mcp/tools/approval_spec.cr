@@ -224,6 +224,24 @@ describe "MCP approvals (ask)" do
     end
   end
 
+  # An approval names a host; a host override repoints the name, so what was granted for it
+  # is asked again (#1585): an "Allow once" waiting for its retry, and a card still open.
+  it "asks again for a host a host override repointed" do
+    with_origin do |port|
+      with_store do |store|
+        url = %({"url":"http://127.0.0.1:#{port}/","allow_unscoped":true})
+        tools = ask_tools(store, "send")
+        answer(store, approval_id(call(tools, "send_request", url)), Gori::MCP::Tools::APPROVAL_ONCE)
+        call(tools, "add_host_override", %({"host":"127.0.0.1","ip":"127.0.0.1"})).is_error.should be_false
+        open_card = approval_id(call(tools, "send_request", url))
+        call(tools, "update_host_override", %({"id":#{store.host_overrides.first[0]},"host":"127.0.0.1","ip":"127.0.0.2"})).is_error.should be_false
+        answer(store, open_card, Gori::MCP::Tools::APPROVAL_HOST)
+        approval_id(call(tools, "send_request", url))
+        store.mcp_host_grants.should be_empty
+      end
+    end
+  end
+
   it "drops the answers waiting for a retry when the server binds another project" do
     with_store do |store|
       tools = ask_tools(store, "write")

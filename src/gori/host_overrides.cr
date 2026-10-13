@@ -121,7 +121,10 @@ module Gori
         snapshot.any? { |e| e.host == host && e.ip == ip }
       end
       # A dial map is a redirection of where traffic GOES, so the audit line names both ends.
-      ConfigLog.record(@store, "host_override_add", "host override added — #{host} ──► #{ip}") if added
+      if added
+        ConfigLog.record(@store, "host_override_add", "host override added — #{host} ──► #{ip}")
+        @store.drop_mcp_host_grants(host)
+      end
       added
     end
 
@@ -131,13 +134,18 @@ module Gori
       host = OverrideHost.key(host)
       ip = ip.strip
       return false unless HostOverrides.valid?(host, ip)
+      before = snapshot.find { |e| e.id == id }
       changed = @write_mutex.synchronize do
         next false if snapshot.any? { |e| e.id != id && e.host == host }
         committed = @store.update_host_override(id, host, ip)
         reload
         committed # false also when the store write rolled back (busy/locked), not just on dup
       end
-      ConfigLog.record(@store, "host_override_update", "host override changed — #{host} ──► #{ip}") if changed
+      if changed
+        ConfigLog.record(@store, "host_override_update", "host override changed — #{host} ──► #{ip}")
+        before.try { |e| @store.drop_mcp_host_grants(e.host) }
+        @store.drop_mcp_host_grants(host)
+      end
       changed
     end
 
@@ -152,6 +160,7 @@ module Gori
       end
       if ok && (e = doomed)
         ConfigLog.record(@store, "host_override_remove", "host override removed — #{e.host} ──► #{e.ip}")
+        @store.drop_mcp_host_grants(e.host)
       end
       ok
     end

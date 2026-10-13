@@ -107,6 +107,24 @@ describe Gori::HostOverrides do
     end
   end
 
+  # An MCP approval names a host, not an address: a repointed name must be asked about again
+  # (#1585), whichever surface repointed it.
+  it "drops the MCP approval grants of a host it adds, changes or removes" do
+    with_store do |store|
+      ov = Gori::HostOverrides.load(store)
+      %w[a.test a.test:443 b.test c.test:80 keep.test].each { |g| store.add_mcp_host_grant(g).should be_true }
+      ov.add("A.test.", "169.254.169.254").should be_true
+      store.mcp_host_grants.should eq(["b.test", "c.test:80", "keep.test"])
+      id = ov.entries.first.id
+      ov.update(id, "b.test", "10.0.0.2").should be_true
+      store.mcp_host_grants.should eq(["c.test:80", "keep.test"])
+      ov.add("c.test", "10.0.0.3").should be_true
+      store.add_mcp_host_grant("c.test").should be_true
+      ov.remove(ov.entries.find! { |e| e.host == "c.test" }.id).should be_true
+      store.mcp_host_grants.should eq(["keep.test"])
+    end
+  end
+
   it "persists across a reload (lives in the project store)" do
     with_store do |store|
       Gori::HostOverrides.load(store).add("example.com", "127.0.0.1").should be_true

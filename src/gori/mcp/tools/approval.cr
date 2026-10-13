@@ -215,6 +215,17 @@ module Gori
         end
       end
 
+      # A host override now repoints `host` (#1585): an "Allow once" for it, and a card still
+      # open for it, named the server it dialled before. Its persisted grants are dropped by
+      # `HostOverrides`; these live only here. A dropped card's answer is never read, so the
+      # retry asks again, under the new override.
+      private def forget_host_approvals(host : String) : Nil
+        key = OverrideHost.key(host)
+        names = ->(g : String) { OverrideHost.key(Store.grant_host(g)) == key }
+        @once_hosts.each_value { |set| set.subtract(set.select(&names)) }
+        @approvals.reject! { |_, a| a.host.try(&names) || false }
+      end
+
       # A rebind to another project: an answer given there is not one for this project.
       def forget_approvals : Nil
         @approvals.clear

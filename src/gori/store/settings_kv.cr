@@ -1,5 +1,6 @@
 require "db"
 require "json"
+require "../dial_address"
 
 module Gori
   class Store
@@ -62,6 +63,22 @@ module Gori
       grants = mcp_host_grants
       return true if grants.includes?(grant)
       set_setting(MCP_HOST_GRANTS_KEY, (grants << grant).to_json)
+    end
+
+    # Drop every grant for `host` (bare or with any port), compared in `OverrideHost.key` form:
+    # a host override repointing that name means an approval given for it named a server it no
+    # longer dials. Whether the grants are gone (true when there were none).
+    def drop_mcp_host_grants(host : String) : Bool
+      key = OverrideHost.key(host)
+      grants = mcp_host_grants
+      kept = grants.reject { |g| OverrideHost.key(Store.grant_host(g)) == key }
+      kept.size == grants.size || set_setting(MCP_HOST_GRANTS_KEY, kept.to_json)
+    end
+
+    # The host half of a grant: `host:port` loses its port, a bare host is itself.
+    def self.grant_host(grant : String) : String
+      host, sep, port = grant.rpartition(':')
+      !sep.empty? && !port.empty? && port.each_char.all?(&.ascii_number?) ? host : grant
     end
 
     # The project-wide outbound request budget's shared rows (#1601), written only by

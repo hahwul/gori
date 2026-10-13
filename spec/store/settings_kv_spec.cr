@@ -41,6 +41,16 @@ describe "Store#mcp_host_grants (#1585)" do
     end
   end
 
+  it "drops a host's grants, bare or with any port, in the override key form" do
+    with_store do |store|
+      %w[acme.test ACME.test.:8443 acme.test:443 acme.testx other.test:443].each { |g| store.add_mcp_host_grant(g).should be_true }
+      store.drop_mcp_host_grants("Acme.Test").should be_true
+      store.mcp_host_grants.should eq(["acme.testx", "other.test:443"])
+      store.drop_mcp_host_grants("none.test").should be_true
+      store.mcp_host_grants.should eq(["acme.testx", "other.test:443"])
+    end
+  end
+
   it "reads a row that is not a list of strings as no grants" do
     with_store do |store|
       store.set_setting(Gori::Store::MCP_HOST_GRANTS_KEY, %({"acme.test":true})).should be_true
