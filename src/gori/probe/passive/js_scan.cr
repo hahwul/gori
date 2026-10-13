@@ -585,10 +585,16 @@ module Gori
         def self.request_source_pairs(code : String, sources = source_spans(code), messages = false) : Array({String, String})
           pairs = [] of {String, String}
           all = nil
-          bytes = code.to_slice
           REQUEST_SINKS.each do |(sink_re, sink_label, arg)|
             next if arg == 1 && !XHR.matches?(code)
+            found = 0
+            # End of the last URL span read. A hit before it is a call nested in that URL, whose
+            # sources were already read: skipping it keeps the walk linear on a run of unclosed
+            # `fetch(location.hash+fetch(…` (13k hits, each walking WINDOW bytes, before). Only the
+            # URL span: a call in a config's `success:` callback is still its own request.
+            past = 0
             code.scan(sink_re) do |m|
+              next if m.byte_begin(0) < past
               # Router sources are scanned on the first sink hit, so a script with no request
               # sink pays nothing for them, and one with no source at all returns here.
               all ||= sources.reject { |(_, label)| NOT_URL.includes?(label) || (!messages && label == "postMessage data") } +
@@ -596,16 +602,25 @@ module Gori
               return pairs if all.empty?
               lo, hi = argument_span(code, m.byte_end(0), arg)
               lo, hi = config_url_span(code, lo, hi)
-              all.each do |(spans, label)|
-                next if WHOLE_URL.includes?(label) && !composed?(bytes, lo, hi)
-                if unencoded_within?(code, spans, lo, hi, label == "location.search")
-                  pairs << {label, sink_label}
-                  break
-                end
-              end
+              past = hi if lo < hi
+              next unless label = url_source(code, all, lo, hi)
+              pair = {label, sink_label}
+              next if pairs.includes?(pair)
+              pairs << pair
+              break if (found += 1) == all.size # every label already paired with this sink
             end
           end
           pairs
+        end
+
+        # The first source (in `all`'s order) used unencoded in the URL span [lo, hi), or nil.
+        private def self.url_source(code : String, all : SourceIndex, lo : Int32, hi : Int32) : String?
+          bytes = code.to_slice
+          all.each do |(spans, label)|
+            next if WHOLE_URL.includes?(label) && !composed?(bytes, lo, hi)
+            return label if unencoded_within?(code, spans, lo, hi, label == "location.search")
+          end
+          nil
         end
 
         # ROUTER_SOURCES occurrences in the same shape as `source_spans`, appended after it so a

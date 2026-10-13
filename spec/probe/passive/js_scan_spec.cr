@@ -201,6 +201,17 @@ describe Gori::Probe::Passive::JsScan do
       pairs.call(%(fetch("/a/" + location.search [1]);)).should eq([{"location.search", "fetch"}])
     end
 
+    it "reports each source → sink once, and walks nested calls once" do
+      pairs.call(%(fetch("/a/"+location.hash);fetch("/b/"+location.hash);fetch("/c/"+location.hash);))
+        .should eq([{"location.hash", "fetch"}])
+      pairs.call("fetch(location.hash+" * 13_107).should eq([{"location.hash", "fetch"}])
+      # A nested call's own source is still read, as part of the outer argument.
+      pairs.call(%(fetch("/a/" + fetch("/b/" + location.hash));)).should eq([{"location.hash", "fetch"}])
+      # A call outside the config's URL is its own request, not a nested URL.
+      pairs.call(%($.ajax({url: "/x", success: function(){ $.ajax("/a/" + location.hash) }});))
+        .should eq([{"location.hash", "jQuery.ajax"}])
+    end
+
     it "does not pair a source a URL cannot set" do
       pairs.call(%(fetch("/a/" + localStorage.getItem("id"));)).should be_empty
       pairs.call(%(fetch("/a/" + document.cookie);)).should be_empty
