@@ -82,6 +82,8 @@ describe Gori::Outbound::Budget do
       2.times { Gori::Outbound.cli(Gori::Scope.load(store), true).admit.should be_nil }
       Budget.release(store)
       spent(store).should eq("2")
+      Budget.release(store) # forgotten: a second close hands nothing back twice
+      spent(store).should eq("2")
     end
   end
 

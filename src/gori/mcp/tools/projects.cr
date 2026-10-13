@@ -213,6 +213,7 @@ module Gori
         # (oast_start/poll), and must not leave through the old project's jump host and creds.
         Settings.load_project_network(nil, bind: false)
         Gori::Protobuf::Schemas.clear
+        @store.try { |s| Outbound::Budget.release(s) }
         @store.try(&.close)
         @store = nil
         @oast_mcp.reject! { |_, o| !o.store_session_id.nil? } # see `bind_project`
@@ -279,6 +280,7 @@ module Gori
         # a project this server has SWITCHED AWAY FROM is refused as "open in another gori
         # instance" — by this server, which no longer serves it and offers no way to let go.
         same_feed = !@store.nil? && current_db_path == File.expand_path(proj.db_path)
+        @store.try { |s| Outbound::Budget.release(s) }
         @store.try(&.close)
         @store = new_store
         # A new feed, a new "now" (#1090), and the piggyback reads from the same "now" — but a

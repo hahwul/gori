@@ -17,26 +17,25 @@ module Gori
     class Budget
       LEASE_SPAN_US = Store::OUTBOUND_LEASE_SPAN_US
       # A lease when only the total is set: no rate to size it by.
-      # ponytail: a process that exits without `release` (only the CLI calls it, as its store
-      # closes) keeps at most one lease of the total; release from every surface's shutdown if
-      # that ever matters.
+      # A process killed before its store closes keeps its lease: at most a quarter of what was
+      # left (`Store#lease_outbound_slots`).
       COUNT_LEASE = 8
       NAP_US      = Pacing::NAP_SLICE.total_microseconds.to_i64
       # Consecutive failed leases (~5s) before a send is refused rather than left waiting.
       MAX_FAILED_LEASES = 20
 
-      # ponytail: never evicted, so a process that opens many projects keeps one small Budget
-      # (and its Store reference) per project it ever sent from. Evict on Store close if it matters.
+      # Evicted by `Budget.release(store)`, which every surface calls as it closes a store.
       @@budgets = {} of UInt64 => Budget
 
       def self.for(store : Store) : Budget
         @@budgets[store.object_id] ||= new(store)
       end
 
-      # `release` for whatever this process built over `store`, without building one: a CLI
-      # command's store closing is the end of its sends whichever Outbound made them.
+      # `release` for whatever this process built over `store`, without building one, and forget
+      # it: a store closing (a CLI command's end, a TUI or MCP project switch) is the end of its
+      # sends whichever Outbound made them. Call it before the store closes.
       def self.release(store : Store) : Nil
-        @@budgets[store.object_id]?.try(&.release)
+        @@budgets.delete(store.object_id).try(&.release)
       end
 
       def self.now_us : Int64
