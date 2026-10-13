@@ -84,6 +84,22 @@ describe "gori run — a token declared by a DISABLED extract rule" do
     end
   end
 
+  # #1591: a generator that cannot mint is a missing secret, not a misplaced token.
+  it "names the missing secret of a generator that cannot mint" do
+    with_env_syntax(Gori::Env::Syntax::Namespaced) do
+      previous = Gori::Settings.project_env_vars
+      Gori::Settings.project_env_vars = [] of {String, String}
+      begin
+        msg = Gori::CLI::Run.env_unresolved_error_for_spec("$GEN.TOTP")
+        msg.should start_with("$GEN.TOTP cannot mint: env var TOTP_SECRET is not set")
+        msg.should contain("project env set")
+        msg.should_not contain("is a generator")
+      ensure
+        Gori::Settings.project_env_vars = previous
+      end
+    end
+  end
+
   it "names the rule and its enable command, and does NOT prescribe `project env set`" do
     with_store do |store|
       b = Gori::Bindings.load(store)

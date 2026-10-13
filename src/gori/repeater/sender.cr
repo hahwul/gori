@@ -249,6 +249,15 @@ module Gori
         end
       end
 
+      # The first `$GEN` token in `requests` this seam would resolve but cannot mint, as its
+      # spelling and the sentence why (`Env.unmintable`), or nil. Asked by `Plan.build`, because
+      # this seam never raises: here such a token goes out as its literal text.
+      def unmintable(requests : Array(Bytes)) : {String, String}?
+        return nil unless resolve_bindings?
+        requests.each { |b| (r = Gori::Env.unmintable(b, @evidence_literals)) && (return r) }
+        nil
+      end
+
       # The first refusal across a whole send-group, or nil when every request may proceed.
       # A group is ONE connection carrying a deliberate sequence (smuggling / keep-alive
       # desync probes), so one blocked member refuses the whole batch rather than sending a

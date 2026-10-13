@@ -51,8 +51,15 @@ describe "MCP list_env grammar report" do
         generators = got["generators"].as_a
         generators.map(&.["name"].as_s).should eq(
           ["UUID", "RANDOM", "RANDOM_HEX", "TIMESTAMP", "TIMESTAMP_MS", "ISO8601", "USER_AGENT",
-           "USER_AGENT_CHROME", "USER_AGENT_FIREFOX", "USER_AGENT_SAFARI"])
+           "USER_AGENT_CHROME", "USER_AGENT_FIREFOX", "USER_AGENT_SAFARI", "TOTP"])
         generators.map(&.["token"].as_s).should contain("$GEN.UUID")
+        # #1591: an agent learns that TOTP cannot mint before a send is refused, and why.
+        generators.find! { |row| row["name"].as_s == "TOTP" }["unavailable"].as_s
+          .should eq("env var TOTP_SECRET is not set")
+        generators.find! { |row| row["name"].as_s == "UUID" }["unavailable"]?.should be_nil
+        mcp_ok_json(tools_for(store), "set_env_var", %({"key":"TOTP_SECRET","value":"GEZDGNBVGY3TQOJQ"}))
+        env_result(store)["generators"].as_a.find! { |row| row["name"].as_s == "TOTP" }["unavailable"]?
+          .should be_nil
         generators.find! { |row| row["name"].as_s == "RANDOM_HEX" }["description"].as_s
           .should contain("128-bit hex")
         got["user_agents"]["source"].as_s.should eq("built-in")
@@ -167,6 +174,35 @@ describe "MCP list_env grammar report" do
           msg.should contain("is a generator")
           msg.should contain("before the request is framed")
           msg.should_not contain("list_env.generators")
+        end
+      end
+    end
+
+    # #1591: not "refused by position" — the fix is the secret, and it is never quoted.
+    it "names the missing secret of a generator that cannot mint" do
+      with_store_env do |store|
+        with_env_syntax(Gori::Env::Syntax::Namespaced) do
+          tools = tools_for(store)
+          msg = tools.env_unresolved_error_for_spec("$GEN.TOTP")
+          msg.should start_with("$GEN.TOTP cannot mint: env var TOTP_SECRET is not set")
+          msg.should contain("ask the operator")
+          msg.should_not contain("is a generator")
+          Gori::Settings.project_env_vars = [{"TOTP_SECRET", "s3cr3t!"}]
+          msg = tools.env_unresolved_error_for_spec("$GEN.TOTP")
+          msg.should contain("is not a base32 secret")
+          msg.should_not contain("s3cr3t")
+        end
+      end
+    end
+
+    it "refuses send_request before dialing when its $GEN.TOTP cannot mint" do
+      with_store_env do |store|
+        with_env_syntax(Gori::Env::Syntax::Namespaced) do
+          raw = "POST /login HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\nX-OTP: $GEN.TOTP\\r\\n\\r\\n"
+          r = tools_for(store).call("send_request", JSON.parse(
+            %({"url":"http://127.0.0.1:1/","raw":"#{raw}","allow_unscoped":true})))
+          r.is_error.should be_true
+          r.text.should contain("$GEN.TOTP cannot mint: env var TOTP_SECRET is not set")
         end
       end
     end

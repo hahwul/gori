@@ -66,7 +66,7 @@ There is no cookie jar here. A slot carries the headers you wrote and the values
 
 ## Refreshing a Slot
 
-A slot is a snapshot, so a long run can outlive its token. Give the slot **refresh steps**, the Repeater sessions that log in, in order (for example `csrf-fetch → login`), and the slot re-authenticates itself: each step's response goes through the slot's own extract rules, which rebind it. A step resolves the slot's own `$BIND.NAME` values and carries no slot header overlay, so the login never sends the stale credential it is replacing.
+A slot is a snapshot, so a long run can outlive its token. Give the slot **refresh steps**, the Repeater sessions that log in, in order (for example `csrf-fetch → login`), and the slot re-authenticates itself: each step's response goes through the slot's own extract rules, which rebind it. A step resolves the slot's own `$BIND.NAME` values and carries no slot header overlay, so the login never sends the stale credential it is replacing. A login that asks for a one-time code carries [`$GEN.TOTP`](/guide/repeater-and-fuzzer/#environment-variables), which mints a fresh code on every refresh.
 
 | Surface | Add a step | Refresh now | Policy |
 |---------|------------|-------------|--------|

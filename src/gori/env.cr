@@ -7,6 +7,7 @@ require "./client_hints"
 require "./store"
 require "./plural"
 require "./ascii_bytes"
+require "./totp"
 
 module Gori
   # Namespaced values for outbound requests (Repeater, Fuzzer, Miner, Intercept, CLI, MCP):
@@ -189,7 +190,7 @@ module Gori
         gen = GENERATORS[name]?
         return nil unless gen
         vals = (@values ||= {} of String => String)
-        vals[name]? || (vals[name] = gen.mint.call(self))
+        vals[name]? || gen.mint.call(self).try { |v| vals[name] = v }
       end
 
       # The ONE instant this context pins, so `$GEN.TIMESTAMP` and `$GEN.ISO8601` in one request
@@ -204,7 +205,13 @@ module Gori
     # hint table beside a `case`, because the hint table is what `list_env`, the completer and the
     # deferral scan all read as "the catalog": a name in one and not the other would advertise a
     # token that then raises at the send seam, inside the fiber that was sending.
-    record Generator, hint : String, mint : Proc(Generation, String)
+    #
+    # A minter that depends on operator state (`$GEN.TOTP` reads an env var) can find it missing
+    # at the seam. It answers nil then, and the token goes out as the literal text it was rather
+    # than raising there. `refusal` is that state's check, and it says why: `Repeater::Plan.build`
+    # asks it first (`Env.unmintable`), so the normal answer to a missing secret is a refused
+    # build, and the literal token only covers a secret removed between build and send.
+    record Generator, hint : String, mint : Proc(Generation, String?), refusal : Proc(String?)? = nil
 
     # `$GEN.USER_AGENT`'s corpus (#1112): real browser values, one per line, embedded at compile
     # time so a send stays a pure mint with no fetch; the file's own header says how to refresh
@@ -298,21 +305,29 @@ module Gori
       Settings.user_agents.empty? ? "built-in" : "settings"
     end
 
+    # The env var `$GEN.TOTP` reads its secret from (#1591), global or project like any env var.
+    TOTP_SECRET_VAR = "TOTP_SECRET"
+
     # Built-ins that mint a fresh value at the final send seam. Names encode every format
     # choice the no-argument `$NS.NAME` grammar needs to make explicit.
     GENERATORS = {
-      "UUID"         => Generator.new("UUID v4 · fresh per send", ->(_g : Generation) { UUID.random.to_s }),
-      "RANDOM"       => Generator.new("UInt64 · fresh per send", ->(_g : Generation) { Random::Secure.rand(UInt64).to_s }),
-      "RANDOM_HEX"   => Generator.new("128-bit hex · fresh per send", ->(_g : Generation) { Random::Secure.hex(16) }),
-      "TIMESTAMP"    => Generator.new("Unix seconds · per send", ->(g : Generation) { g.now.to_unix.to_s }),
-      "TIMESTAMP_MS" => Generator.new("Unix milliseconds · per send", ->(g : Generation) { g.now.to_unix_ms.to_s }),
-      "ISO8601"      => Generator.new("UTC RFC 3339 · per send", ->(g : Generation) { g.now.to_rfc3339(fraction_digits: 3) }),
-      "USER_AGENT"   => Generator.new("browser User-Agent · follows the TLS preset", ->(g : Generation) { Env.user_agents_following(g.ua_family).sample }),
+      "UUID"         => Generator.new("UUID v4 · fresh per send", ->(_g : Generation) : String? { UUID.random.to_s }),
+      "RANDOM"       => Generator.new("UInt64 · fresh per send", ->(_g : Generation) : String? { Random::Secure.rand(UInt64).to_s }),
+      "RANDOM_HEX"   => Generator.new("128-bit hex · fresh per send", ->(_g : Generation) : String? { Random::Secure.hex(16) }),
+      "TIMESTAMP"    => Generator.new("Unix seconds · per send", ->(g : Generation) : String? { g.now.to_unix.to_s }),
+      "TIMESTAMP_MS" => Generator.new("Unix milliseconds · per send", ->(g : Generation) : String? { g.now.to_unix_ms.to_s }),
+      "ISO8601"      => Generator.new("UTC RFC 3339 · per send", ->(g : Generation) : String? { g.now.to_rfc3339(fraction_digits: 3) }),
+      "USER_AGENT"   => Generator.new("browser User-Agent · follows the TLS preset", ->(g : Generation) : String? { Env.user_agents_following(g.ua_family).sample }),
       # One per `chrome` / `firefox` / `safari` TLS preset, so a UA can agree with the handshake
       # it rides on (#1152). Named, not parameterised: `$GEN` takes no arguments.
-      "USER_AGENT_CHROME"  => Generator.new("Chrome/Edge User-Agent · pairs with TLS preset chrome", ->(_g : Generation) { Env.user_agents("CHROME").sample }),
-      "USER_AGENT_FIREFOX" => Generator.new("Firefox User-Agent · pairs with TLS preset firefox", ->(_g : Generation) { Env.user_agents("FIREFOX").sample }),
-      "USER_AGENT_SAFARI"  => Generator.new("Safari User-Agent · pairs with TLS preset safari", ->(_g : Generation) { Env.user_agents("SAFARI").sample }),
+      "USER_AGENT_CHROME"  => Generator.new("Chrome/Edge User-Agent · pairs with TLS preset chrome", ->(_g : Generation) : String? { Env.user_agents("CHROME").sample }),
+      "USER_AGENT_FIREFOX" => Generator.new("Firefox User-Agent · pairs with TLS preset firefox", ->(_g : Generation) : String? { Env.user_agents("FIREFOX").sample }),
+      "USER_AGENT_SAFARI"  => Generator.new("Safari User-Agent · pairs with TLS preset safari", ->(_g : Generation) : String? { Env.user_agents("SAFARI").sample }),
+      # #1591. The secret is an env var rather than an argument, for the same reason: the
+      # grammar has no argument slot, and an `otpauth://` value carries digits/period/algorithm.
+      "TOTP" => Generator.new("RFC 6238 one-time code from env var #{TOTP_SECRET_VAR} · per send",
+        ->(g : Generation) : String? { (config = Env.totp_config).is_a?(Totp::Config) ? Totp.code(config, g.now) : nil },
+        -> : String? { (config = Env.totp_config).is_a?(String) ? config : nil }),
     }
 
     # The catalog as the NAME → FORMAT table the surfaces print, derived from the one above so
@@ -323,6 +338,53 @@ module Gori
 
     def self.generator_hint?(name : String) : String?
       GENERATOR_HINTS[name]?
+    end
+
+    # `$GEN.TOTP`'s secret, parsed, or why it cannot mint. Read at every mint rather than cached,
+    # so an edited var applies to the next send, as an `$ENV` edit does.
+    def self.totp_config : Totp::Config | String
+      raw = effective_vars[TOTP_SECRET_VAR]? || return "env var #{TOTP_SECRET_VAR} is not set"
+      case parsed = Totp.parse(raw)
+      in Totp::Config then parsed
+      in String       then "env var #{TOTP_SECRET_VAR} #{parsed}"
+      end
+    end
+
+    # Why the registered generator `name` cannot mint now, or nil when it can or is no generator.
+    def self.generator_refusal(name : String) : String?
+      GENERATORS[name]?.try(&.refusal).try(&.call)
+    end
+
+    # The first `$GEN` token in `bytes` the send seam would resolve but cannot mint: its spelling
+    # and the sentence saying why, or nil. A name in `literal` is evidence and is never resolved.
+    def self.unmintable(bytes : Bytes, literal : Set(String)? = nil) : {String, String}?
+      syntax = Settings.env_syntax
+      return nil if syntax.bare?
+      prefix = Settings.env_prefix
+      each_token(bytes, prefix, syntax) do |found|
+        next unless found.ns.try(&.gen?) && !literal_name?(literal, found)
+        if why = generator_refusal(found.name)
+          token = spell(found.name, Namespace::Gen, syntax, prefix)
+          return {token, cannot_mint(token, why)}
+        end
+      end
+      nil
+    end
+
+    # The same sentence for a surface holding only a refused build's token list
+    # (`PlanError#detail`), or nil when no token in it is a generator that cannot mint.
+    def self.mint_refusal(detail : String?) : String?
+      (detail || "").split(',').each do |text|
+        ref = parse_ref?(text) || next
+        next unless ref.ns.gen?
+        why = generator_refusal(ref.name) || next
+        return cannot_mint(text.strip, why)
+      end
+      nil
+    end
+
+    private def self.cannot_mint(token : String, why : String) : String
+      "#{token} cannot mint: #{why}"
     end
 
     # The match order: LONGEST label first, so a future namespace whose label is a prefix of

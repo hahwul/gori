@@ -63,6 +63,33 @@ private def with_generator_binding_layer(&)
   end
 end
 
+# "12345678901234567890" in base32: the RFC 6238 SHA1 seed.
+private TOTP_B32 = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+
+# `TOTP_SECRET` set in the PROJECT env (`project`) and/or the GLOBAL one (`global`), nil for
+# unset; both tables put back on the way out.
+private def with_totp_secret(project : String?, global : String? = nil, &)
+  prev_global = Gori::Settings.env_vars
+  prev_project = Gori::Settings.project_env_vars
+  Gori::Settings.env_vars = global ? [{"TOTP_SECRET", global}] : [] of {String, String}
+  Gori::Settings.project_env_vars = project ? [{"TOTP_SECRET", project}] : [] of {String, String}
+  begin
+    with_generators { yield }
+  ensure
+    Gori::Settings.env_vars = prev_global
+    Gori::Settings.project_env_vars = prev_project
+  end
+end
+
+private def totp_at(unix : Int64, secret : String = TOTP_B32) : String
+  Gori::Totp.code(Gori::Totp.parse(secret).as(Gori::Totp::Config), Time.unix(unix))
+end
+
+private def totp_plan(raw : String, evidence : Bool = false) : Gori::Repeater::Plan
+  Gori::Repeater::Plan.build(Gori::Repeater::PlanOptions.new([raw.to_slice],
+    default_target: "http://example.test", evidence: evidence), ungated_outbound)
+end
+
 describe "Gori::Env generators" do
   it "generates the security-testing catalog at the send seam" do
     with_generators do
@@ -187,6 +214,58 @@ describe "Gori::Env generators" do
         out.should contain("X-Token: bound")
         out.should contain("Content-Length: 36")
       end
+    end
+  end
+
+  it "mints $GEN.TOTP from TOTP_SECRET at the instant the request's other generators read" do
+    with_totp_secret(TOTP_B32) do
+      a, b, t = generated("$GEN.TOTP/$GEN.TOTP/$GEN.TIMESTAMP").split('/')
+      a.should match(/\A\d{6}\z/)
+      a.should eq(b)
+      a.should eq(totp_at(t.to_i64))
+    end
+    # An otpauth URI's parameters, and a global var when the project has none.
+    uri = "otpauth://totp/x?secret=#{TOTP_B32}&digits=8&period=60"
+    with_totp_secret(nil, global: uri) do
+      code, t = generated("$GEN.TOTP/$GEN.TIMESTAMP").split('/')
+      code.should eq(totp_at(t.to_i64, uri))
+      code.size.should eq(8)
+    end
+    # Project wins, as for every env var.
+    with_totp_secret(TOTP_B32, global: "not base32!") do
+      Gori::Env.generator_refusal("TOTP").should be_nil
+    end
+  end
+
+  it "leaves $GEN.TOTP literal at the seam when it cannot mint, and says why without the value" do
+    with_totp_secret(nil) do
+      generated("x=$GEN.TOTP").should eq("x=$GEN.TOTP")
+      Gori::Env.generator_refusal("TOTP").should eq("env var TOTP_SECRET is not set")
+    end
+    with_totp_secret("s3cr3t-not-b32") do
+      generated("x=$GEN.TOTP").should eq("x=$GEN.TOTP")
+      why = Gori::Env.generator_refusal("TOTP").not_nil!
+      why.should contain("env var TOTP_SECRET is not a base32 secret")
+      why.should_not contain("s3cr3t")
+    end
+    Gori::Env.generator_refusal("UUID").should be_nil
+  end
+
+  it "refuses a Repeater build whose $GEN.TOTP cannot mint, but not evidence or an escape" do
+    raw = "POST /login HTTP/1.1\r\nHost: example.test\r\nX-OTP: $GEN.TOTP\r\nContent-Length: 0\r\n\r\n"
+    with_totp_secret(nil) do
+      ex = expect_raises(Gori::Repeater::PlanError) { totp_plan(raw) }
+      ex.reason.unresolved_env?.should be_true
+      ex.detail.should eq("$GEN.TOTP")
+      ex.message.should eq("$GEN.TOTP cannot mint: env var TOTP_SECRET is not set")
+      Gori::Env.mint_refusal(ex.detail).should eq(ex.message)
+      Gori::Env.mint_refusal("$ENV.HOST, $GEN.UUID").should be_nil
+      # A captured `$GEN.TOTP` is a byte the origin saw, and an escaped one is text.
+      String.new(totp_plan(raw, evidence: true).wire_bytes).should contain("X-OTP: $GEN.TOTP\r\n")
+      String.new(totp_plan(raw.sub("$GEN", "$$GEN")).wire_bytes).should contain("X-OTP: $GEN.TOTP\r\n")
+    end
+    with_totp_secret(TOTP_B32) do
+      String.new(totp_plan(raw).wire_bytes).should match(/X-OTP: \d{6}\r\n/)
     end
   end
 

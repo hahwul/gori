@@ -2893,7 +2893,9 @@ module Gori::Tui
       return nil if env_literal_names.includes?(Env.qualify(ns, name))
       if ns.gen?
         hint = Env.generator_hint?(name) || return nil
-        return {Env.spell(name, ns, syntax, prefix), hint}
+        # A generator that cannot mint says why instead (`$GEN.TOTP` with no secret). Never a
+        # minted value: a peek is not a send.
+        return {Env.spell(name, ns, syntax, prefix), Env.generator_refusal(name) || hint}
       end
       val = Env.vars_for(ns)[name]?
       return nil unless val

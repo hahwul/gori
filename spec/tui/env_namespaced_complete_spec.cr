@@ -162,8 +162,9 @@ describe "TextArea env completion (namespaced)" do
     with_env_fixture do
       with_env_syntax(Gori::Env::Syntax::Namespaced) do
         ta = typed("$TO")
-        # No namespace label starts with TO, so the two token rows are the whole list.
-        labels_of(ta).should eq(["$ENV.TOKEN", "$ENV.TOKEN2"])
+        # No namespace label starts with TO, so the name rows are the whole list: the two env
+        # tokens first, then the one generator that also starts with TO.
+        labels_of(ta).should eq(["$ENV.TOKEN", "$ENV.TOKEN2", "$GEN.TOTP"])
         tab(ta).should be_true
         ta.text.should eq("$ENV.TOKEN")
       end

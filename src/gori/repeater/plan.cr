@@ -538,6 +538,12 @@ module Gori::Repeater
         evidence_literals: options.evidence_literals,
         reframe_grpc: options.reframe_grpc?, tls_preset: tls_preset,
         refresh_slot: options.refresh_slot, refresh_layer: options.refresh_layer)
+      # Unlike an unset `$NAME`, a registered `$GEN` token is unambiguously a reference, so one
+      # that cannot mint (`$GEN.TOTP` with no secret, #1591) is refused here rather than sent
+      # as text the origin would only answer with a failed login.
+      if stuck = sender.unmintable(wires)
+        raise PlanError.new(PlanError::Reason::UnresolvedEnv, stuck[1], stuck[0])
+      end
       new(sender: sender, requests: wires, scheme: scheme, host: host, port: port,
         http2: options.http2?, websocket: websocket, sni: sni,
         preserve_field_case: options.preserve_field_case?,

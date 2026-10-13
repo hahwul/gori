@@ -68,7 +68,7 @@ Outbound requests carry three kinds of token, told apart by their namespace:
 
 Tokens stay as literal text in the editor and expand only on the way out: in Repeater, the Fuzzer, the Miner, Intercept forwards, `gori run`, and MCP `send_request`. In a Repeater request opened from a capture, or a message held at Intercept, a token the captured bytes already carried is sent as it was; only the ones you type expand.
 
-`GEN` provides the values commonly needed while probing a target, without a Decoder chain or a stored secret:
+`GEN` provides the values commonly needed while probing a target, without a Decoder chain:
 
 | Token | Output |
 |-------|--------|
@@ -82,8 +82,11 @@ Tokens stay as literal text in the editor and expand only on the way out: in Rep
 | `$GEN.USER_AGENT_CHROME` | the same, narrowed to Chrome and Edge, to pair with the `chrome` TLS preset |
 | `$GEN.USER_AGENT_FIREFOX` | the same, narrowed to Firefox, to pair with the `firefox` TLS preset |
 | `$GEN.USER_AGENT_SAFARI` | the same, narrowed to Safari, to pair with the `safari` TLS preset |
+| `$GEN.TOTP` | the current RFC 6238 one-time code for the secret in the env var `TOTP_SECRET` |
 
 To draw from your own list instead, open **Settings → Editor & Keys → User-Agents** (or `Ctrl-P` → **Settings: User-Agents**) and enter one User-Agent per line, or run `gori settings user-agents --set FILE` (`-` reads stdin; `--reset` goes back to the built-in list). Your list replaces the built-in one. A family name with none of your lines, for example `$GEN.USER_AGENT_SAFARI` with no Safari line, still uses the built-in family. Under a browser TLS preset, the plain `$GEN.USER_AGENT` uses your lines of that browser, or all of your lines when you listed none of it. `gori settings user-agents` prints the list in use, and MCP `list_env` reports whether it is yours.
+
+`$GEN.TOTP` lets a login that asks for a second factor be replayed, including a [session slot's refresh steps](/guide/authorize/#refreshing-a-slot). Set `TOTP_SECRET` to the test account's secret: the base32 secret an authenticator app shows (letter case, spaces and padding do not matter), which means SHA1, 6 digits and 30 seconds, or the whole `otpauth://totp/…` URI behind the enrollment QR code, whose `digits`, `period` and `algorithm` (SHA1, SHA256 or SHA512) apply. Prefer the global layer, because a project export carries the project's env vars. When the var is unset or does not parse, a Repeater send, `gori run send`/`repeater`, MCP `send_request` and a refresh step are refused before they dial, with a message that names the var and never its value; MCP `list_env` reports the same reason as the generator's `unavailable`. The other tools send the token as text. A code stays the same for its whole period, so a server that rejects a reused code fails a second login inside one period.
 
 The same generator name used more than once in one request has the same value. The next request mints again. Generators run only for operator-authored request text at the final send seam; captured evidence and Fuzzer payload bytes remain literal.
 

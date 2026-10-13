@@ -1468,6 +1468,12 @@ module Gori
       # on the FACT, not after the remedy — "...or remove the token for session #3" reads as
       # if the token were the session's.
       private def self.env_unresolved_error(detail : String?, where : String = "") : String
+        # Ahead of the generator branch below, which would call a `$GEN.TOTP` with no secret
+        # "refused by position" when the fix is to set the var it names.
+        if note = Env.mint_refusal(detail)
+          return "#{note}#{where.empty? ? "" : " (#{where.strip})"} — set it with " \
+                 "`gori run project env set KEY value` or as a global env var, or remove the token"
+        end
         refs = (detail || "").split(',').compact_map { |t| Gori::Env.parse_ref?(t) }
         if !refs.empty? && refs.all?(&.ns.gen?)
           # A REGISTERED generator refused here is not a typo and the catalog is no remedy —

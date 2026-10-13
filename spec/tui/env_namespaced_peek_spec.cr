@@ -83,6 +83,19 @@ describe "TextArea env peek (namespaced)" do
     end
   end
 
+  # #1591: a generator that cannot mint says why, and one that can still mints nothing here.
+  it "names a generator's missing secret, and never peeks a code" do
+    with_env_fixture do
+      with_env_syntax(Gori::Env::Syntax::Namespaced) do
+        peek_row("k=$GEN.TOTP", 9).should contain("env var TOTP_SECRET is not set")
+        Gori::Settings.project_env_vars = [{"TOTP_SECRET", "GEZDGNBVGY3TQOJQ"}]
+        row = peek_row("k=$GEN.TOTP", 9)
+        row.should contain("RFC 6238")
+        row.should_not match(/\d{6}/)
+      end
+    end
+  end
+
   it "says nothing while the caret is still in the namespace run" do
     with_env_fixture do
       with_env_syntax(Gori::Env::Syntax::Namespaced) do

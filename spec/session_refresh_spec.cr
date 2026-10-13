@@ -230,6 +230,49 @@ describe Gori::SessionRefresh do
     end
   end
 
+  # #1591: a login that asks for a one-time code. The code is minted per refresh from the
+  # secret, so a saved step never carries one that expired.
+  it "sends a fresh $GEN.TOTP code from a step, and refuses the step without a secret" do
+    secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+    with_refresh_env do |store|
+      with_env_syntax(Gori::Env::Syntax::Namespaced) do
+        seen = Seen.new
+        server, port = start_login_origin(seen)
+        begin
+          login = store.insert_repeater("http://127.0.0.1:#{port}",
+            "POST /login HTTP/1.1\r\nHost: 127.0.0.1\r\nX-OTP: $GEN.TOTP\r\nContent-Length: 0\r\n\r\n".to_slice,
+            false, true, nil, 0)
+          slots = Gori::SessionSlots.load(store)
+          slots.save([Slot.new("admin", rules: ["SESSION"], refresh: [login])])
+          bindings = Gori::Bindings.load(store, slots)
+          bindings.add("SESSION", "", Gori::ExtractKind::Cookie, "sid").should be_nil
+          Gori::Env.layer = bindings
+          runner = Gori::SessionRefresh::Runner.new(store, bindings, -> { ungated_outbound }).install
+
+          outcome = runner.refresh("admin")
+          outcome.ok.should be_false
+          outcome.message.should contain("$GEN.TOTP cannot mint: env var TOTP_SECRET is not set")
+          seen.paths.should be_empty
+
+          Gori::Settings.project_env_vars = [{"TOTP_SECRET", secret}]
+          config = Gori::Totp.parse(secret).as(Gori::Totp::Config)
+          from = Time.utc.to_unix
+          runner.refresh("admin").ok.should be_true
+          codes = (from..Time.utc.to_unix).map { |t| Gori::Totp.code(config, Time.unix(t)) }
+          code = seen.heads[0].match(/X-OTP: (\d{6})\r\n/).not_nil![1]
+          codes.should contain(code)
+          bindings.slot_values("admin")["SESSION"].should eq("T1")
+          # History records the code that went out, and nothing of the secret.
+          head = String.new(store.get_flow(store.recent_flows(1)[0].id).not_nil!.request_head)
+          head.should contain("X-OTP: #{code}\r\n")
+          head.should_not contain(secret)
+        ensure
+          server.close
+        end
+      end
+    end
+  end
+
   it "names the failing step and leaves the binding alone" do
     with_refresh_env do |store|
       seen = Seen.new
