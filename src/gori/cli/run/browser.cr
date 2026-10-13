@@ -65,7 +65,8 @@ module Gori
         running.try { |r| r.process.terminate rescue nil } if interrupted.call
         status = hold_browser(found, target, started)
         Run.report_interrupted(1, "browser", "closed") if interrupted.call
-        exit(status.try(&.exit_code?) || 0)
+        # A browser killed by a signal has no exit code; that is a failure, not a clean close.
+        exit(status.try { |s| s.exit_code? || 128 + (s.exit_signal?.try(&.value) || 1) } || 0)
       end
 
       private def self.debugging_port(prefix : String, value : String) : Int32

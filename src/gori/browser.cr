@@ -183,8 +183,9 @@ module Gori
       end
       profile = File.join(spec.profile_root, found.id)
       Dir.mkdir_p(profile)
-      # A copy left by an earlier run would hand back a port nothing listens on any more.
-      File.delete?(File.join(profile, ACTIVE_PORT_FILE)) if cdp
+      # A copy left by an earlier run would hand back a port nothing listens on any more, so
+      # only a newer write counts. Not deleted: a browser still open on this profile owns it.
+      stale = File.info?(File.join(profile, ACTIVE_PORT_FILE)).try(&.modification_time) if cdp
       # Firefox's profile has to be written BEFORE it is spawned — hence the setup call
       # sitting here, in the branch that also picks its args.
       args, note =
@@ -200,7 +201,7 @@ module Gori
         raise already_open(found, profile) if cdp
         Started.new(opened, ok: true)
       in Running
-        endpoint = cdp ? await_endpoint(found, profile, child, endpoint_wait) : nil
+        endpoint = cdp ? await_endpoint(found, profile, child, endpoint_wait, stale) : nil
         Started.new(opened, ok: true, running: child, endpoint: endpoint)
       end
     end
@@ -215,11 +216,13 @@ module Gori
     # launch to an instance already running on this profile, which took it as "open a
     # window" and ignored the flag. One that never writes it is closed, not left behind
     # holding a port nobody was told about.
-    private def self.await_endpoint(found : Found, profile : String, child : Running, wait : Time::Span) : String
+    private def self.await_endpoint(found : Found, profile : String, child : Running, wait : Time::Span,
+                                    stale : Time?) : String
       path = File.join(profile, ACTIVE_PORT_FILE)
       deadline = Time.instant + wait
       loop do
-        if port = read_active_port(path)
+        fresh = stale.nil? || File.info?(path).try(&.modification_time.> stale)
+        if fresh && (port = read_active_port(path))
           return "http://127.0.0.1:#{port}"
         end
         select

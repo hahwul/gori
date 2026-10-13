@@ -322,6 +322,22 @@ describe Gori::Browser do
       end
     end
 
+    it "leaves the running instance's DevToolsActivePort in place, and takes a newer write over it" do
+      live = File.join(root, "handoff", "DevToolsActivePort")
+      Dir.mkdir_p(File.dirname(live))
+      File.write(live, "1111\n/devtools/browser/live")
+      expect_raises(Gori::Error, /already open/) do
+        Gori::Browser.start(bin.call("handoff", "exit 0"), cdp_spec, grace: 10.seconds)
+      end
+      File.read(live).should eq("1111\n/devtools/browser/live")
+      File.touch(live, Time.utc - 1.minute)
+      started = Gori::Browser.start(bin.call("handoff",
+        "sleep 0.2; printf '9444\\n/devtools/browser/y' > \"$DIR/DevToolsActivePort\"; sleep 30"),
+        cdp_spec, grace: 100.milliseconds)
+      started.endpoint.should eq("http://127.0.0.1:9444")
+      started.running.not_nil!.process.terminate
+    end
+
     it "refuses Firefox, which has no CDP port" do
       firefox = Gori::Browser::Found.new("firefox", "Firefox", Gori::Browser::Kind::Firefox, "/nonexistent")
       expect_raises(Gori::Error, /no DevTools Protocol port/) { Gori::Browser.start(firefox, cdp_spec) }
