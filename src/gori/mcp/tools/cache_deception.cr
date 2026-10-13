@@ -83,7 +83,7 @@ module Gori
             emit_cache_trial(j, "anonymous", report.anonymous)
             emit_cache_trial(j, "cache_busted", report.control)
             report.blocked_reason.try { |r| j.field "blocked_reason", Serialize.text(r) }
-            j.field "note", cache_deception_note(report.verdict)
+            j.field "note", cache_deception_note(report.verdict, report.blocked_reason)
           end
         end
       end
@@ -103,7 +103,7 @@ module Gori
 
       # One sentence a model reads before deciding what to do next — the same "state the
       # finding, name the next action" shape the other tools' notes have.
-      private def cache_deception_note(verdict : CacheDeception::Verdict) : String
+      private def cache_deception_note(verdict : CacheDeception::Verdict, blocked_reason : String?) : String
         case verdict
         in .cached?
           "the anonymous re-request was served the authenticated response FROM a cache, while the " \
@@ -122,7 +122,7 @@ module Gori
           "the anonymous re-request did NOT get the authenticated response, so no private content " \
           "was served without a session."
         in .blocked?
-          "gori refused the send (Sandbox / an exclude rule) — nothing was measured."
+          "gori refused the send (#{blocked_reason || "Sandbox / an exclude rule"}) — nothing was measured."
         in .errored?
           "a send failed or the authenticated baseline could not anchor — the check proved nothing."
         end
