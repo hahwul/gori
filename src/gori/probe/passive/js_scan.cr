@@ -571,6 +571,10 @@ module Gori
         # path around it (`+` or a template) to traverse.
         WHOLE_URL = Set{"location.href", "document.URL", "document.documentURI", "document.baseURI", "document.location"}
 
+        # SOURCES entries that are not URL-controlled, so not CSPT sources: a cookie or a stored
+        # value is not something a link can set.
+        NOT_URL = Set{"document.cookie", "web storage"}
+
         # CSPT suspects in one STRIPPED script: {source label, sink label} for every request sink
         # whose URL argument holds a taint source not wrapped in `encodeURIComponent(…)`. Only the
         # URL counts: a source in the options (`{body: location.search}`), or in a config object
@@ -586,7 +590,7 @@ module Gori
             code.scan(sink_re) do |m|
               # Router sources are scanned on the first sink hit, so a script with no request
               # sink pays nothing for them, and one with no source at all returns here.
-              all ||= sources + router_spans(code)
+              all ||= sources.reject { |(_, label)| NOT_URL.includes?(label) } + router_spans(code)
               return pairs if all.empty?
               lo, hi = argument_span(code, m.byte_end(0), arg)
               lo, hi = config_url_span(code, lo, hi)

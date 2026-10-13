@@ -201,6 +201,12 @@ describe Gori::Probe::Passive::JsScan do
       pairs.call(%(fetch("/a/" + location.search [1]);)).should eq([{"location.search", "fetch"}])
     end
 
+    it "does not pair a source a URL cannot set" do
+      pairs.call(%(fetch("/a/" + localStorage.getItem("id"));)).should be_empty
+      pairs.call(%(fetch("/a/" + document.cookie);)).should be_empty
+      pairs.call(%(fetch("/a/" + document.referrer);)).should eq([{"document.referrer", "fetch"}])
+    end
+
     it "reads only the URL argument" do
       pairs.call(%(fetch("/api/x", {body: location.search});)).should be_empty
       pairs.call(%(fetch(build(a, b), {body: location.search});)).should be_empty
