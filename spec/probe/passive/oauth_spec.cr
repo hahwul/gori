@@ -48,6 +48,8 @@ describe Gori::Probe::Passive::OAuthAuthorization do
       oauth_codes(store, base + "token").should eq(["oauth_implicit_flow"])
       oauth_codes(store, base + "id_token%20token").should eq(["oauth_implicit_flow"])
       oauth_codes(store, base + "id_token+token").should eq(["oauth_implicit_flow"])
+      oauth_codes(store, base + "token,signed_request").should eq(["oauth_implicit_flow"])
+      oauth_codes(store, base + "token%2Csigned_request").should eq(["oauth_implicit_flow"])
       oauth_codes(store, base + "id_token").should be_empty
     end
   end

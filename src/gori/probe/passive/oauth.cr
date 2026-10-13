@@ -29,7 +29,7 @@ module Gori
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless params = authorization_params(ctx)
           return unless response_type = value(params, "response_type")
-          types = response_type.split(' ', remove_empty: true)
+          types = response_type.tr(",", " ").split(' ', remove_empty: true) # Facebook: `token,signed_request`
           shown = response_type.scrub[0, 64]
 
           if types.includes?("token")
