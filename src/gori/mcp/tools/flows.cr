@@ -387,17 +387,25 @@ module Gori
         more = auto ? {body_more_hint("flow_id: #{id}, part: \"request\"", "request, head included"), body_more_hint("flow_id: #{id}")} : nil
         Result.new(Serialize.flow_detail_json(detail, ws_msgs, include_sensitive, cap, omit, redaction, more,
           interims: store.interims(id), ws_total: ws_total, ws_socket_total: ws_socket_total,
-          originals: rewrite_originals(detail.row, include_sensitive)))
+          originals: rewrite_originals(detail, include_sensitive)))
       end
 
-      # What Match&Replace replaced on each side (#1589), under the flow's own body redaction —
-      # the original of a redacted body carries the same secret.
-      private def rewrite_originals(row : Store::FlowRow, include_sensitive : Bool) : Array(Serialize::Original)
+      # What Match&Replace or an Intercept edit replaced on each side (#1589), under the flow's own
+      # body redaction — the original of a redacted body carries the same secret. An edited request
+      # keeps the client's whole message (`Interceptor.original`), which a rule's record then
+      # lacks, as History and `gori run show --original` read it.
+      private def rewrite_originals(detail : Store::FlowDetail, include_sensitive : Bool) : Array(Serialize::Original)
         found = [] of Serialize::Original
-        return found unless row.rewritten?
+        row = detail.row
+        return found unless row.rewritten? || row.intercept_edited?
         matcher = include_sensitive ? nil : Redact::Policy.ambient(store)
         Store::RuleTarget.each do |side|
-          next unless orig = store.rewrite_original(row.id, side)
+          orig = if side.request? && row.intercept_edited?
+                   Gori::Interceptor.original(store, detail, side)
+                 elsif row.rewritten?
+                   store.rewrite_original(row.id, side)
+                 end
+          next unless orig
           head, body = orig
           if m = matcher
             clean = Redact::Wire.message(head, body, m)

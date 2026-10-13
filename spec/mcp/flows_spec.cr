@@ -277,6 +277,29 @@ describe Gori::MCP::Server do
       end
     end
 
+    # An Intercept edit keeps the client's whole request (V44), so a rule's record beside it is
+    # hits only: the request original comes from the edit, as History and `show --original` read it.
+    it "returns the client's request as the original when a rule-rewritten request was also edited (#1589)" do
+      with_store do |store|
+        client = "POST /a HTTP/1.1\r\nHost: rw.test\r\nCookie: sid=secret\r\n\r\nclient-body"
+        req = Gori::Store::CapturedRequest.new(
+          created_at: 1_000_i64, scheme: "http", host: "rw.test", port: 80, method: "POST",
+          target: "/edited", http_version: "HTTP/1.1",
+          head: "POST /edited HTTP/1.1\r\nHost: rw.test\r\n\r\n".to_slice,
+          source: Gori::FlowSource::Kind::Proxy, intercept_original: client.to_slice)
+        req.rewrite = Gori::Store::Rewrite.new([Gori::Store::RuleRef.new(Gori::Store::RuleScope::Project, 4_i64)],
+          "POST /ruled HTTP/1.1\r\nHost: rw.test\r\n\r\n".to_slice)
+        id = store.insert_flow(req)
+
+        call = %({"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"get_flow","arguments":{"id":#{id}}}})
+        payload = mcp_tool_payload(mcp_drive(store, call)[0])
+        payload["request_original_head"].as_s.should start_with("POST /a HTTP/1.1")
+        payload["request_original_head"].as_s.should_not contain("secret")
+        payload["request_original_body"]["text"].as_s.should eq("client-body")
+        payload["response_original_head"]?.should be_nil
+      end
+    end
+
     it "decodes a gzip response body to text" do
       with_store do |store|
         id = mcp_seed_flow(store, "ex.test", "GET", "/", 200,

@@ -957,12 +957,12 @@ module Gori
         end
       end
 
-      # One side's bytes before Match&Replace changed them (#1589): `request`/`response`, the head,
-      # and the body when a body rule changed it (nil = the stored body is the original).
+      # One side's bytes before Match&Replace or an Intercept edit changed them (#1589):
+      # `request`/`response`, the head, and the body when it changed (nil = the stored body is the original).
       alias Original = {String, Bytes, Bytes?}
 
-      # `request_original_head` / `response_original_body` …, present only for a side a rule
-      # changed, under the same header redaction as the stored heads above.
+      # `request_original_head` / `response_original_body` …, present only for a side a rule or an
+      # Intercept edit changed, under the same header redaction as the stored heads above.
       def self.emit_originals(j : JSON::Builder, originals : Array(Original), body_cap : Int32,
                               body_omit : Bool, include_sensitive : Bool) : Nil
         originals.each do |side, head, body|
