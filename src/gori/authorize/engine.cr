@@ -170,7 +170,8 @@ module Gori
     class Engine
       alias BackendFactory = Proc(Fuzz::Origin, Bool, Fuzz::Backend)
 
-      def initialize(@backend_factory : BackendFactory)
+      # The live engine's Outbound, so a run's `stop` also ends a wait for the project budget.
+      def initialize(@backend_factory : BackendFactory, @outbound : Gori::Outbound? = nil)
       end
 
       # The live engine: sends through `Fuzz::Sender`, scope-gated by `outbound`.
@@ -210,7 +211,7 @@ module Gori
         new(->(origin : Fuzz::Origin, http2 : Bool) {
           Fuzz::Sender.new(origin, outbound, http2, verify_upstream, timeout: timeout,
             slot_overlay: false, overrides: overrides).as(Fuzz::Backend)
-        })
+        }, outbound)
       end
 
       # Replay `detail` under every identity — baseline first, so the others can be judged
@@ -230,6 +231,7 @@ module Gori
       # false positive. The traffic that did go out is reported by the caller's run summary.
       def run(detail : Store::FlowDetail, identities : Array(Identity),
               stop : Proc(Bool)? = nil, *, request_target : String? = nil) : Target?
+        @outbound.try { |o| o.halt = stop } if stop
         row = detail.row
         ordered = order_baseline_first(identities)
         origin = Fuzz::Origin.new(row.scheme, row.host, row.port)

@@ -133,6 +133,7 @@ module Gori
         # see the write path below. nil whenever memory and disk agree.
         @uncommitted_from = nil.as(Mode?)
         @rule_config_key = stored_rule_config_key?
+        @outbound.halt = -> { @stopped } # a stop also ends a wait for the project budget
       end
 
       # Re-read the Rules sub-tab config (disabled built-ins + custom rules) and force a re-scan of

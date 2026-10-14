@@ -107,6 +107,7 @@ module Gori
         # `interrupted_run` guard below for why a destructive write is where this parts company
         # with `discover`.
         stop = Repeater::Minimize::Stop.new
+        outbound.halt = -> { stop.stopped? } # …and a budget wait (#1601)
         interrupted = Run.install_interrupt_trap("minimize-interrupt",
           "interrupted — stopping after the probe in flight; reporting what was removed so far") { stop.stop }
         meter = STDERR.tty?

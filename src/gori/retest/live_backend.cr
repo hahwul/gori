@@ -141,6 +141,11 @@ module Gori
         @outbound.close if @close_outbound
       end
 
+      # The run's stop also ends a wait for the project budget's slot.
+      def halt=(stop : Proc(Bool)?) : Nil
+        @outbound.halt = stop
+      end
+
       # The History row for this send, and the note to put on the result row when there is
       # none. A record failure is NOT an error on the step: the send already happened, and
       # reporting a completed send as failed is the misreport `gori run repeater send` names

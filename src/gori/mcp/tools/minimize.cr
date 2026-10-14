@@ -105,6 +105,7 @@ module Gori
         # origin (#1103). This is the same token the TUI arms on pane close and `gori run
         # repeater minimize` arms on SIGINT — MCP was the third surface and the only one that
         # had no way to reach it.
+        ob.halt = cancel_signal # …and a budget wait (#1601)
         report = begin
           Repeater::Minimize.run(text, auto_cl: auto_cl, resolve: resolve, backend: backend,
             stop: Repeater::Minimize::Stop.new(cancel_signal)) { }

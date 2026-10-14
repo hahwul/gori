@@ -2401,8 +2401,9 @@ module Gori::Tui
       # one. See `Fuzz::Sender#evidence?`.
       # Keep-alive — see the CLI twin in `cli/run/repeater_minimize.cr` for why a sequential
       # bisection is precisely the shape that pays for it. Closed in the fiber's ensure below.
+      ob = outbound
       backend = Fuzz::CappedBackend.new(
-        Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), outbound, view.http2?,
+        Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), ob, view.http2?,
           !@host.session.config.insecure_upstream?,
           view.sni_override.try { |s| Env.expand(s).presence }, timeout: 10.seconds,
           overrides: @host.session.host_overrides, evidence: evidence,
@@ -2420,6 +2421,7 @@ module Gori::Tui
       # Captured as a local for the fiber (which must never read a controller ivar) AND kept on
       # the controller, so close_repeater_at / stop_all can reach the run they just ended.
       stop = @minimize_stop = Repeater::Minimize::Stop.new
+      ob.halt = -> { stop.stopped? } # a stop also ends a wait for the project budget
       events = @minimize_events
       @host.status("minimizing #{view.summary} in the background — watch the bottom bar / notifications")
       spawn(name: "gori-minimize") do

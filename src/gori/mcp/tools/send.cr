@@ -203,6 +203,7 @@ module Gori
         insecure = bool_arg(h, "insecure", false)
         timeout = fuzz_timeout(h)
         ob = outbound(bool_arg(h, "allow_unscoped", false))
+        ob.halt = cancel_signal # a cancel also ends a wait for the project budget
 
         built = build_race_plan(members, force_http2, insecure, verbatim, timeout, store, ob)
         return built if built.is_a?(Result)

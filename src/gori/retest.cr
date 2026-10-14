@@ -343,6 +343,10 @@ module Gori
       # Called once after the last send. The live backend closes its `Outbound` here.
       def finish : Nil
       end
+
+      # The run's stop, set before the first send (the live backend's budget wait reads it).
+      def halt=(stop : Proc(Bool)?) : Nil
+      end
     end
 
     # --- planning ------------------------------------------------------------
@@ -466,6 +470,7 @@ module Gori
       # read the returned array.
       def run(planned : Array(Planned), *, allow_cleanup : Bool = false,
               stop : Proc(Bool)? = nil, on_step : Proc(StepResult, Nil)? = nil) : Array(StepResult)
+        @backend.halt = stop
         results = [] of StepResult
         baseline = nil.as(Observation?)
         # Why the last baseline step cannot anchor, when it cannot. Carried so a comparison
