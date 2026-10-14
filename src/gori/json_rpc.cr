@@ -43,7 +43,7 @@ module Gori
       return nil if calls.empty? && !(sse && (req_body.nil? || req_body.empty?))
       resp =
         if sse
-          Sse.from_response(resp_head, resp_body).flat_map { |e| parse(e.data) }
+          sse_events(resp_head, resp_body).flat_map { |e| parse(e.data) }
         else
           parse(Entity.bytes(resp_head, resp_body, MAX_BODY))
         end
@@ -87,6 +87,13 @@ module Gori
     private def parse(text : String) : Array(Obj)
       any = json?(text, %("jsonrpc")) || return [] of Obj
       (any.as_a? || [any]).compact_map(&.as_h?).select! { |m| m["jsonrpc"]? == "2.0" }
+    end
+
+    # A response's SSE events, under the same MAX_BODY a plain JSON reply is held to: a 32 KB
+    # gzip of 100k events decoded to 500 MiB of pretty JSON on the History fiber. Shared with LlmCall.
+    def sse_events(head : Bytes?, body : Bytes?) : Array(Sse::Event)
+      return [] of Sse::Event unless Sse.event_stream?(head) && (bytes = Entity.bytes(head, body, MAX_BODY))
+      bytes.size > MAX_BODY ? [] of Sse::Event : Sse.events(bytes)
     end
 
     # `text` as JSON, or nil when it is not or cannot hold `needle` — a byte check that keeps

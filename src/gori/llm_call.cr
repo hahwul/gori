@@ -41,7 +41,7 @@ module Gori
       # A guess from the request alone; the reply's own shape overrides it.
       dialect = msgs.nil? ? RESPONSES : (req.has_key?("system") ? ANTHROPIC : CHAT)
       acc = Acc.new(dialect, model)
-      events = Sse.from_response(resp_head, resp_body)
+      events = JsonRpc.sse_events(resp_head, resp_body)
       if events.empty?
         obj(json(Entity.bytes(resp_head, resp_body, MAX_BODY), "{")).try { |r| acc.feed(r) }
       else

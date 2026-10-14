@@ -40,6 +40,14 @@ describe Gori::JsonRpc do
     Gori::JsonRpc.display(ex).should contain("# ⇠ stream notifications/progress")
   end
 
+  it "decodes no stream past MAX_BODY, as it decodes no plain reply past it" do
+    event = "data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\"}\n\n"
+    body = event * (Gori::JsonRpc::MAX_BODY // event.bytesize + 1)
+    ex = rpc(TOOL_CALL, body, "text/event-stream").not_nil!
+    ex.calls[0].reply.should be_nil
+    ex.stream.should be_empty
+  end
+
   it "pairs a batch by id whatever the reply order, and says which call went unanswered" do
     req = %([{"jsonrpc":"2.0","id":1,"method":"a"},{"jsonrpc":"2.0","id":"1","method":"b"},) +
           %({"jsonrpc":"2.0","id":3,"method":"c"},{"jsonrpc":"2.0","method":"notify"}])
