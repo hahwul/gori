@@ -2144,7 +2144,8 @@ module Gori::Discover
       end
       # Another worker may have reached the cap while this one waited for its slot.
       @scope.refund(1) if @capped.cap_reached?
-      @capped.fetch(p.scheme, p.host, p.port, target)
+      # A target the wire seam refuses (`UNSAFE_URL`) never left gori either.
+      @capped.fetch(p.scheme, p.host, p.port, target).tap { |r| @scope.refund(1) if r.error == Sender::UNSAFE_URL }
     end
 
     private def distill(raw : Repeater::Result, body : Bytes) : Calibrate::Fetched
