@@ -180,5 +180,36 @@ module Gori::Proxy
     def rewrite_ws_in(payload : Bytes, host : String, hits : Array(Store::RuleRef)) : Bytes
       rewrite_ws_in(payload, host)
     end
+
+    # Narrows `hits[from..]`, what one rewrite of `before` appended, to the rules whose change
+    # reached the wire. `sent` is what actually went out, and the block maps a rewrite result to
+    # that form (the caller's framing restore, h2's field re-parse). A rule whose change that
+    # mapping undid, or a later rule cancelled, is dropped: History must not name a rule whose
+    # change the client never saw. Free when no rule fired; the replays run only when two or
+    # more fired and the message did change.
+    def settle_hits(hits : Array(Store::RuleRef), from : Int32, before : Bytes, sent, &) : Nil
+      return if hits.size <= from
+      if yield(before) == sent
+        hits.truncate(0, from) # nothing a rule did reached the wire
+        return
+      end
+      return if hits.size - from == 1 # the one rule that fired made the change
+      # Leave-one-out over the fired rules, greedily: one whose absence still yields `sent`
+      # contributed nothing that survived.
+      kept = hits[from..]
+      hits[from..].each do |ref|
+        trial = kept.reject { |k| k == ref }
+        next if trial.empty? # `before` alone was already shown to differ from `sent`
+        result = replay(before, trial) || return
+        kept = trial if yield(result) == sent
+      end
+      hits.truncate(0, from).concat(kept)
+    end
+
+    # `before` rewritten by only the rules named in `refs`, in order, or nil when they cannot be
+    # replayed. A test double's rewrites are not rules, so it never narrows.
+    private def replay(before : Bytes, refs : Array(Store::RuleRef)) : Bytes?
+      nil
+    end
   end
 end

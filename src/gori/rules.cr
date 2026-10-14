@@ -1121,6 +1121,19 @@ module Gori
       hits << ref unless hits.includes?(ref)
     end
 
+    # See `HeadRewriter#settle_hits`. A hook is not run a second time to find out, and a rule
+    # removed since it fired cannot be replayed: either way the hits stand as recorded.
+    private def replay(before : Bytes, refs : Array(Store::RuleRef)) : Bytes?
+      rules = @mutex.synchronize { @rules }
+      text = String.new(before)
+      refs.each do |ref|
+        rule = rules.find { |r| r.scope == ref.scope && r.id == ref.id }
+        return nil if rule.nil? || rule.op.pipe?
+        text = apply_rule(text, rule, rule.target, rule.part, "", report: false)
+      end
+      text.to_slice
+    end
+
     # Apply ONE rule to `text` (a head or a body already decoded to a String). Returns a
     # new String, or the same content when the rule doesn't touch it. A bad regex or a
     # regex over non-UTF-8 bytes is swallowed → the text passes through unchanged.

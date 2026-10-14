@@ -344,6 +344,23 @@ describe Gori::Proxy::H2::HeadRewrite do
       .find { |(n, _)| n == "content-length" }.not_nil![1].should eq("5")
   end
 
+  it "does not record a rule whose content-length change was restored, beside one that went out (#1589)" do
+    with_store do |store|
+      rules = Gori::Rules.new(store, store.match_rules)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "Content-Length", "999",
+        Gori::Store::RuleOp::SetHeader)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "X-B", "1",
+        Gori::Store::RuleOp::AddHeader)
+      _, added = rules.rules
+      pipe, assembler, sink = pipeline(rules)
+      block = HPACK::Encoder.new.encode(req("/x") + [{"content-length", "5"}])
+      sent = HPACK::Decoder.new.decode(push(pipe, assembler, headers(1_u32, block)).first.payload)
+      sent.should contain({"content-length", "5"})
+      sent.should contain({"x-b", "1"})
+      sink.requests.first.rewrite.not_nil!.hits.should eq([Gori::Store::RuleRef.new(added.scope, added.id)])
+    end
+  end
+
   it "rewrites a response head and leaves the request direction alone" do
     pipe, assembler, _ = pipeline(SubRewriter.new("HTTP/2 200", "HTTP/2 503"), direction: "in")
     block = HPACK::Encoder.new.encode([{":status", "200"}, {"content-type", "text/html"}])

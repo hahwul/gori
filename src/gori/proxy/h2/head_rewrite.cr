@@ -481,8 +481,19 @@ module Gori::Proxy::H2
       # format has no room for. Stay byte-exact and leave the latch alone rather than
       # re-encoding for a change that cannot reach the wire.
       return nil if restored == fields
+      # A rule whose change `restore_content_length` undid, or a later rule cancelled, did not
+      # reach the wire and is not recorded. `content-length` is left out of the comparison: it is
+      # always the peer's, and only its position could differ.
+      rw.settle_hits(@hits, 0, head, without_content_length(restored)) do |h|
+        (request ? HeadCodec.parse_request(h, fields) : HeadCodec.parse_response(h, fields))
+          .try { |p| without_content_length(p) }
+      end
       note_rewrite(stream_id, request, head, fields)
       restored
+    end
+
+    private def without_content_length(fields : Array(HPACK::Field)) : Array(HPACK::Field)
+      fields.reject { |f| f.name == "content-length" }
     end
 
     # The flow keeps which rules fired and the head they replaced (#1589) — in the h1-shaped form

@@ -38,8 +38,7 @@ private def start_origin(heads : Channel(String), close : Bool = true) : TCPServ
         end
       end
       heads.send(head)
-      # Content-Length last, where the proxy's framing restore puts it back (a restore that MOVED
-      # it would be a real change on the wire).
+      # Content-Length last, where the proxy's framing restore puts it back.
       conn << "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n#{close ? "Connection: close\r\n" : ""}Content-Length: 11\r\n\r\norigin-body"
       conn.flush
       conn.close
@@ -145,6 +144,47 @@ describe "proxy — Match&Replace rule hits (#1589)" do
       sink, got, _ = through_proxy(rules)
       got.should contain("Content-Length: 11")
       sink.responses.first.rewrite.should be_nil
+    end
+  end
+
+  it "does not name a rule whose framing change was undone, beside one whose change went out" do
+    with_store do |store|
+      rules = Gori::Rules.new(store, store.match_rules)
+      rules.add(Gori::Store::RuleTarget::Response, Gori::Store::RulePart::Head, "Content-Length", "999",
+        Gori::Store::RuleOp::SetHeader)
+      rules.add(Gori::Store::RuleTarget::Response, Gori::Store::RulePart::Head, "X-B", "1",
+        Gori::Store::RuleOp::AddHeader)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "Content-Length", "5",
+        Gori::Store::RuleOp::SetHeader)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "X-C", "1",
+        Gori::Store::RuleOp::AddHeader)
+      _, added, _, req_added = rules.rules
+      sink, got, origin_saw = through_proxy(rules)
+
+      got.should contain("X-B: 1")
+      got.should contain("Content-Length: 11")
+      got.should_not contain("999")
+      sink.responses.first.rewrite.not_nil!.hits.should eq([Gori::Store::RuleRef.new(added.scope, added.id)])
+      origin_saw.should contain("X-C: 1")
+      origin_saw.should_not contain("Content-Length")
+      sink.requests.first.rewrite.not_nil!.hits.should eq([Gori::Store::RuleRef.new(req_added.scope, req_added.id)])
+    end
+  end
+
+  it "does not name a rule a later rule cancelled, beside one whose change went out" do
+    with_store do |store|
+      rules = Gori::Rules.new(store, store.match_rules)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "X-Gone", "1",
+        Gori::Store::RuleOp::AddHeader)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "X-Gone", "",
+        Gori::Store::RuleOp::RemoveHeader)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "X-Token: client", "X-Token: rule")
+      _, _, kept = rules.rules
+      sink, _, origin_saw = through_proxy(rules)
+
+      origin_saw.should_not contain("X-Gone")
+      origin_saw.should contain("X-Token: rule")
+      sink.requests.first.rewrite.not_nil!.hits.should eq([Gori::Store::RuleRef.new(kept.scope, kept.id)])
     end
   end
 end

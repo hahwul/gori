@@ -524,9 +524,9 @@ module Gori::Proxy
           record_head = restore_framing_headers(rw.rewrite_request(client_head, host), client_head)
           record_req = Codec::Http1.parse_request_head(record_head) unless record_head == client_head
         end
-        # Rules that cancelled out, or a framing-only change `restore_framing_headers` undid,
-        # changed nothing on the wire: nothing to record.
-        @req_hits.clear if !@req_hits.empty? && sent_head == forward_head
+        # A rule that a later one cancelled, or whose framing change `restore_framing_headers`
+        # undid, changed nothing on the wire: it is not recorded.
+        rw.settle_hits(@req_hits, 0, forward_head, unframed(sent_head)) { |h| unframed(h) }
       end
 
       # The target every SCOPE/INTERCEPT gate below reads, from the ACTUALLY-SENT head (post
@@ -1215,7 +1215,9 @@ module Gori::Proxy
         end
       end
       # As for the request head: a change that never reached the wire is not recorded.
-      @resp_hits.clear if !@resp_hits.empty? && sent_resp_head == resp_head
+      if rw = @rewriter
+        rw.settle_hits(@resp_hits, 0, resp_head, unframed(sent_resp_head)) { |h| unframed(h) }
+      end
       # The OFF half of the h3 `Alt-Svc` seam (#835), and the reason it sits HERE rather than
       # beside the strip: the sentence is about what the CLIENT is being invited onto, so it has
       # to be asked of the head the rules have finished with. An operator's response rule removing
@@ -3503,10 +3505,9 @@ module Gori::Proxy
       hits = response ? @resp_hits : @req_hits
       mark = hits.size
       rewritten = yield entity
-      if rewritten == entity   # nothing matched → byte-exact (P7)
-        hits.truncate(0, mark) # rules that cancelled out changed nothing (#1589)
-        return {head, wire_body, nil}
-      end
+      # Rules that cancelled out changed nothing (#1589); see `HeadRewriter#settle_hits`.
+      @rewriter.try { |rw| rw.settle_hits(hits, mark, entity, rewritten) { |b| b } }
+      return {head, wire_body, nil} if rewritten == entity # nothing matched → byte-exact (P7)
       # The body as it arrived, wire framing and all: what the rule replaced (#1589).
       if response
         @resp_orig_body = wire_body
@@ -3613,6 +3614,13 @@ module Gori::Proxy
 
       # The framing that matches the streamed body.
       rebuild_without_framing(sent_head) { |io, eol| orig_framing.each { |line| io << line << eol } }
+    end
+
+    # `head` without its framing lines: what `HeadRewriter#settle_hits` compares a head rule's
+    # effect on. The sent head always carries the original framing (`restore_framing_headers`),
+    # so a rule's change there is undone, and only where those lines end up could differ.
+    private def unframed(head : Bytes) : Bytes
+      rebuild_without_framing(head) { }
     end
 
     # `head` with its Transfer-Encoding and Content-Length lines dropped, every other line

@@ -865,6 +865,29 @@ describe Gori::Rules do
       end
     end
 
+    it "settles the hits on the rules whose change survives into what was sent" do
+      with_store do |store|
+        rules = Gori::Rules.new(store, store.match_rules)
+        rules.add(Gori::Store::RuleTarget::Response, Gori::Store::RulePart::Body, "a", "b")
+        rules.add(Gori::Store::RuleTarget::Response, Gori::Store::RulePart::Body, "b", "a") # undoes the first
+        rules.add(Gori::Store::RuleTarget::Response, Gori::Store::RulePart::Body, "x", "y")
+        _, _, kept = rules.rules
+        hits = [] of Gori::Store::RuleRef
+        body = "a x".to_slice
+        sent = rules.rewrite_response_body(body, "acme.test", hits)
+        String.new(sent).should eq("a y")
+        hits.size.should eq(3)
+        rules.settle_hits(hits, 0, body, sent) { |b| b }
+        hits.should eq([Gori::Store::RuleRef.new(kept.scope, kept.id)])
+
+        # Every change cancelled out: nothing is left to name.
+        cancelled = [] of Gori::Store::RuleRef
+        rules.rewrite_response_body("a".to_slice, "acme.test", cancelled).should eq("a".to_slice)
+        rules.settle_hits(cancelled, 0, "a".to_slice, "a".to_slice) { |b| b }
+        cancelled.should be_empty
+      end
+    end
+
     it "parses the `scope/id` spelling and refuses anything else" do
       Gori::Store::RuleRef.parse?("project/4").should eq(Gori::Store::RuleRef.new(Gori::Store::RuleScope::Project, 4_i64))
       Gori::Store::RuleRef.parse?("Global/3").should eq(Gori::Store::RuleRef.new(Gori::Store::RuleScope::Global, 3_i64))
