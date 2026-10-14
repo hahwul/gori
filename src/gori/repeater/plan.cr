@@ -331,6 +331,9 @@ module Gori::Repeater
     # It is only meaningful on an https target — a plaintext leg has no ClientHello.
     getter tls_preset : String?
 
+    # What `apply_rules` changed (`RequestRules.apply`), for the History row's rule provenance.
+    property rewrite : Store::Rewrite? = nil
+
     def initialize(@sender : Sender, @requests : Array(Bytes), @scheme : String,
                    @host : String, @port : Int32, @http2 : Bool,
                    @websocket : Bool, @sni : String?, @preserve_field_case : Bool = false,

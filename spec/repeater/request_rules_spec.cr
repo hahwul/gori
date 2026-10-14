@@ -35,4 +35,30 @@ describe Gori::Repeater::RequestRules do
       String.new(sent.bytes).should eq("POST /x HTTP/1.1\r\nHost: t.test\r\nContent-Length: 4\r\n\r\nabcd")
     end
   end
+
+  # The raw chunked wire form used to go to the body rules: a literal grew a chunk past its
+  # stated size (broken framing on the wire) and a json op never parsed.
+  it "rewrites a chunked body's entity, as the proxy does, and re-chunks it" do
+    with_store do |store|
+      json = Gori::Store::MatchRule.new(0_i64, true, Gori::Store::RuleTarget::Request,
+        Gori::Store::RulePart::Body, "role", %("admin"), Gori::Store::RuleOp::JsonSet)
+      plan = rules_plan("POST /x HTTP/1.1\r\nHost: t.test\r\nTransfer-Encoding: chunked\r\n\r\nE\r\n{\"role\":\"abc\"}\r\n0\r\n\r\n")
+      sent, changed = Gori::Repeater::RequestRules.apply(plan, Gori::Rules.new(store, [json, body_rule("abc", "abcdef")]))
+      changed.should be_true
+      String.new(sent.bytes).should eq("POST /x HTTP/1.1\r\nHost: t.test\r\nTransfer-Encoding: chunked\r\n\r\n" \
+                                       "10\r\n{\"role\":\"admin\"}\r\n0\r\n\r\n")
+      rw = sent.rewrite.not_nil!
+      rw.hits.size.should eq(1) # the json op; the literal then had no `abc` left to match
+      String.new(rw.body.not_nil!).should eq("E\r\n{\"role\":\"abc\"}\r\n0\r\n\r\n")
+    end
+  end
+
+  it "leaves a compressed body alone, as the proxy does" do
+    with_store do |store|
+      plan = rules_plan("POST /x HTTP/1.1\r\nHost: t.test\r\nContent-Encoding: gzip\r\nContent-Length: 2\r\n\r\nab")
+      sent, changed = Gori::Repeater::RequestRules.apply(plan, Gori::Rules.new(store, [body_rule("ab", "abcd")]))
+      changed.should be_false
+      sent.bytes.should eq(plan.bytes)
+    end
+  end
 end
