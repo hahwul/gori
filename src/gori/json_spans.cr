@@ -67,11 +67,11 @@ module Gori
       end
     end
 
-    # The root OBJECT, or nil when `bytes` is not exactly one JSON value or its root is not an
-    # object.
+    # The root OBJECT (its own members only), or nil when `bytes` is not exactly one JSON value
+    # or its root is not an object.
     def root_object(bytes : Bytes) : Container?
       return nil unless valid?(bytes)
-      walk(bytes).try { |r| r if r.object? }
+      container(bytes, root_start(bytes)).try { |r| r if r.object? }
     end
 
     # Object nodes reachable from the root, breadth-first (shallow-first) in document order,
@@ -113,7 +113,7 @@ module Gori
     # removed in every copy.
     def edit(bytes : Bytes, steps : Array(JsonPath::Step), value : String?) : Bytes?
       return nil if steps.empty? || !valid?(bytes)
-      node = parent(walk(bytes), steps) || return nil
+      node = parent(bytes, steps) || return nil
       ents = entries(node)
       unless i = locate(node, ents, steps.last)
         key = steps.last.key
@@ -129,14 +129,68 @@ module Gori
     end
 
     # The container the last of `steps` is looked up in, or nil when the path breaks before it.
-    private def parent(root : Container?, steps : Array(JsonPath::Step)) : Container?
-      node = root || return nil
+    private def parent(bytes : Bytes, steps : Array(JsonPath::Step)) : Container?
+      node = container(bytes, root_start(bytes)) || return nil
       steps[...-1].each do |st|
         ents = entries(node)
         i = locate(node, ents, st) || return nil
-        node = node.children.find { |c| c.open == ents[i][1] } || return nil
+        node = container(bytes, ents[i][1]) || return nil
       end
       node
+    end
+
+    # Where the root value of bytes `valid?` accepted begins.
+    private def root_start(bytes : Bytes) : Int32
+      bytes.index { |b| !whitespace?(b) } || 0
+    end
+
+    # The object or array opening at `open` with only ITS members/elements (no `children`), or
+    # nil when a scalar sits there. A nested value is skipped to its close without being
+    # materialised, so an edit costs the containers on its path rather than the whole body: a
+    # wide `{"x":[{},{},…]}` once allocated over a GiB to edit its first key.
+    private def container(bytes : Bytes, open : Int32) : Container?
+      b = bytes[open]
+      return nil unless b == '{'.ord || b == '['.ord
+      c = Container.new(open, b == '{'.ord)
+      i = open + 1
+      loop do
+        b = bytes[i]
+        if b == '}'.ord || b == ']'.ord
+          c.close = i
+          return c
+        elsif b == '{'.ord || b == '['.ord
+          j = skip_container(bytes, i)
+          value_at(c, i, j)
+          i = j
+        elsif b == '"'.ord
+          i = read_string(bytes, i, c)
+        elsif b == ','.ord || b == ':'.ord || whitespace?(b)
+          i += 1
+        else
+          j = scalar_end(bytes, i)
+          value_at(c, i, j)
+          i = j
+        end
+      end
+    end
+
+    # Index just past the container opening at `from`, strings stepped over whole.
+    private def skip_container(bytes : Bytes, from : Int32) : Int32
+      depth = 0
+      i = from
+      while i < bytes.size
+        case bytes[i]
+        when '"'.ord
+          i = string_end(bytes, i)
+          next
+        when '{'.ord, '['.ord
+          depth += 1
+        when '}'.ord, ']'.ord
+          return i + 1 if (depth -= 1) == 0
+        end
+        i += 1
+      end
+      bytes.size
     end
 
     # The entries at `drop` (ascending) out of `ents`, each run of adjacent ones with exactly one

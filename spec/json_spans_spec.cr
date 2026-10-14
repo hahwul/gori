@@ -157,5 +157,22 @@ describe "Gori::JsonSpans on a root scalar with trailing data" do
         J.valid?(got.to_slice).should be_true
       end
     end
+
+    it "steps over sibling subtrees whose strings carry brackets and quotes" do
+      src = %({"s":[{"x":"]}\\"["}],"a":{"t":"}","b":[0,{"c":1}]},"z":[[]]})
+      edit.call(src, "$.a.b[1].c", "2").should eq(src.sub(%("c":1), %("c":2)))
+      edit.call(src, "$.z[0]", nil).should eq(src.sub(%("z":[[]]), %("z":[])))
+      J.root_object(src.to_slice).not_nil!.members.map(&.key).should eq(%w[s a z])
+    end
+
+    it "edits a wide body without materialising the siblings it skips" do
+      body = %({"role":"u","x":[#{(["{}"] * 200_000).join(',')}]}).to_slice
+      steps = Gori::JsonPath.parse("role").as(Array(Gori::JsonPath::Step))
+      GC.collect
+      before = GC.stats.total_bytes
+      J.edit(body, steps, %("admin")).not_nil!.size.should eq(body.size + 4)
+      # The body copy for `valid?` plus the output: a walk of every `{}` was ~40x the body.
+      (GC.stats.total_bytes - before).should be < body.size * 6
+    end
   end
 end
