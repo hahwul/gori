@@ -38,6 +38,19 @@ describe Gori::Outbound::Budget do
     end
   end
 
+  it "banks no refund for a slot it never handed out" do
+    with_store do |store|
+      b = Budget.new(store)
+      b.admit(nil).should be_nil # unconfigured: no slot taken
+      b.refund(1000)             # what 1000 sandbox-blocked sends hand back
+      # A total set later, and already spent elsewhere, is not un-spent by that refund.
+      store.set_setting(Gori::Settings::PROJECT_OUTBOUND_MAX_REQUESTS_KEY, "10").should be_true
+      store.set_setting(Gori::Store::OUTBOUND_BUDGET_SPENT_KEY, "10").should be_true
+      b.reload
+      b.admit(nil).should eq(Gori::Outbound::BUDGET_SPENT_ERROR)
+    end
+  end
+
   it "refuses the request after the total, and holds it across processes" do
     with_two_stores do |store, peer|
       set_budget(store, max: "10")

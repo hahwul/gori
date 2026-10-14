@@ -2150,8 +2150,9 @@ module Gori
     # it, may well edit it. Such a flow is left out of `scanned` rather than counted a miss.
     private def json_body_cut?(rule : Store::MatchRule, detail : Store::FlowDetail) : Bool
       return false unless rule.op.json? && rule.part.body?
-      body, cut = rule.target.request? ? {detail.request_body, detail.request_body_truncated?} : {detail.response_body, detail.response_body_truncated?}
-      cut || (body.try(&.size) || 0) > RULE_PREVIEW_BODY_MAX
+      side = rule.target.request? ? :request : :response
+      body = side == :request ? detail.request_body : detail.response_body
+      detail.body_truncated?(side) || (body.try(&.size) || 0) > RULE_PREVIEW_BODY_MAX
     end
 
     private def refresh : Nil

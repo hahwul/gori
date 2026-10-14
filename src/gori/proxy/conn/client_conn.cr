@@ -526,7 +526,8 @@ module Gori::Proxy
         end
         # A rule that a later one cancelled, or whose framing change `restore_framing_headers`
         # undid, changed nothing on the wire: it is not recorded.
-        rw.settle_hits(@req_hits, 0, forward_head, unframed(sent_head)) { |h| unframed(h) }
+        # Guarded here, not inside: `unframed` rebuilds a head, and no rule fired on most (P6).
+        rw.settle_hits(@req_hits, 0, forward_head, unframed(sent_head)) { |h| unframed(h) } unless @req_hits.empty?
       end
 
       # The target every SCOPE/INTERCEPT gate below reads, from the ACTUALLY-SENT head (post
@@ -1215,7 +1216,7 @@ module Gori::Proxy
         end
       end
       # As for the request head: a change that never reached the wire is not recorded.
-      if rw = @rewriter
+      if (rw = @rewriter) && !@resp_hits.empty?
         rw.settle_hits(@resp_hits, 0, resp_head, unframed(sent_resp_head)) { |h| unframed(h) }
       end
       # The OFF half of the h3 `Alt-Svc` seam (#835), and the reason it sits HERE rather than

@@ -28,6 +28,8 @@ describe Gori::Env do
     Gori::Env.withhold_totp_secret = true
     Gori::Env.expand("$TOTP_SECRET").should_not contain("GEZDGNBVGY3TQOJQ")
     Gori::Env.totp_config.should be_a(Gori::Totp::Config)
+    # Withheld from resolution, never from masking: a captured enrolment body is still masked.
+    Gori::Env.mask_secrets(%({"secret":"GEZDGNBVGY3TQOJQ"})).should_not contain("GEZDGNBVGY3TQOJQ")
   ensure
     Gori::Env.withhold_totp_secret = false
     Gori::Settings.project_env_vars = [] of {String, String}

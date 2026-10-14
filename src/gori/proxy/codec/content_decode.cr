@@ -415,6 +415,22 @@ module Gori::Proxy::Codec
       nil
     end
 
+    # Is `body` chunked in the plain form a re-chunk can stand in for: bare hex sizes (either
+    # case), no extensions, CRLF, no trailer and nothing after the 0-chunk? Anything else is the
+    # operator's own framing (a smuggling probe's tail, a trailer), which a re-chunk would drop.
+    def self.plain_chunked?(body : Bytes) : Bool
+      canon = IO::Memory.new(body.size)
+      done = scan_chunks(body) do |chunk|
+        canon << chunk.size.to_s(16) << "\r\n"
+        canon.write(chunk)
+        canon << "\r\n"
+        true
+      end
+      return false unless done
+      canon << "0\r\n\r\n"
+      canon.bytesize == body.size && String.new(canon.to_slice).compare(String.new(body), case_insensitive: true) == 0
+    end
+
     # Ceiling on trailer fields lifted into the projection. The wire reader already bounds
     # the trailer section (Body::MAX_TRAILER_BYTES), but a stored/imported body reaches this
     # without passing through it, so the display projection carries its own bound.

@@ -1617,6 +1617,7 @@ module Gori
         # The bytes the socket gets, taken ONCE and sent as-is: `--record-history` writes this
         # exact slice, so the recorded flow is the request that went out — session-slot overlay
         # and send-seam `$NAME` values included — rather than the draft the seam started from.
+        budget = plan.admit # the budget's slot before the mint, so a rate wait cannot age a `$GEN` value
         wire = plan.wire_bytes
         # On the WIRE, not on `rec.request`: the notice must describe the bytes that go out,
         # so a session whose terminator arrives with a `$ENV.X` expansion is not accused, and
@@ -1629,7 +1630,7 @@ module Gori
         if !plan.http2? && !Env.head_terminated?(wire)
           STDERR.puts "gori run repeater send: #{unterminated_head_note}"
         end
-        result = plan.send_wire(wire)
+        result = budget ? Repeater::Engine.error(budget, Time.instant) : plan.send_wire(wire, admitted: true)
         outbound.close
 
         new_body, _ = decode_body(result.head, result.body)
@@ -2755,8 +2756,9 @@ module Gori
         say_request_line_rewrite
         sent_at = Time.utc.to_unix_ms * 1000_i64
         # Taken ONCE and sent as-is, so a `--record-history` flow holds the bytes that went out.
+        budget = plan.admit # the budget's slot before the mint, so a rate wait cannot age a `$GEN` value
         wire_sent = plan.wire_bytes
-        result = plan.send_wire(wire_sent)
+        result = budget ? Repeater::Engine.error(budget, Time.instant) : plan.send_wire(wire_sent, admitted: true)
         outbound.close
 
         # Decode the response body once for TEXT display (--diff / plain print); only

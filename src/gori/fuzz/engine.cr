@@ -824,14 +824,14 @@ module Gori::Fuzz
     def send(bytes : Bytes, verbatim : Array({Int32, Int32})?) : Repeater::Result
       return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, CAP_ERROR) if cap_reached?
       @sent += 1
-      settle(@inner.send(bytes, verbatim), 1)
+      settle(@inner.send(bytes, verbatim))
     end
 
     # A send the project budget refused never left gori: hand back its charge (`sent` is the
-    # wire count) and latch the refusal. `n` is what the call charged.
-    private def settle(r : Repeater::Result, n : Int) : Repeater::Result
+    # wire count) and latch the refusal.
+    private def settle(r : Repeater::Result) : Repeater::Result
       if (e = r.error) && Gori::Outbound.budget_refusal?(e)
-        @sent = Math.max(@sent - n, 0_i64)
+        @sent -= 1
         @budget_refusal ||= e
       end
       r
@@ -860,7 +860,7 @@ module Gori::Fuzz
       end
       @sent += jobs.size
       results = @inner.send_race(jobs, warmup: warmup, timeout: timeout)
-      results.each { |r| settle(r, 1) } # one charge per member, as `@sent` took them
+      results.each { |r| settle(r) } # one charge per member, as `@sent` took them
       results
     end
 
@@ -879,7 +879,7 @@ module Gori::Fuzz
       end
       @sent += 1
       pair = @inner.send_ws(handshake, frames, verbatim)
-      settle(pair[0], 1)
+      settle(pair[0])
       pair
     end
   end

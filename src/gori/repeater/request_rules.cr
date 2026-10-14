@@ -49,11 +49,13 @@ module Gori
       # compressed one is not rewritten, a chunked one is rewritten as its entity. The rewritten
       # entity goes back out chunked, so the operator's own framing header stays true. A head the
       # proxy could not frame (an obfuscated or CL+TE request) would never have reached a rule
-      # there, and its body is left as written.
+      # there, and its body is left as written; so is a chunked body a re-chunk would not
+      # reproduce byte for byte (extensions, trailers, bytes past the 0-chunk) (P7).
       private def self.rewrite_body(rules : Rules, head : Bytes, new_head : Bytes, body : Bytes,
                                     host : String, hits : Array(Store::RuleRef)) : Bytes
         return body if Proxy::Codec::ContentDecode.content_encoded?(new_head)
         chunked = Proxy::Codec::Body.request_framing(Proxy::Codec::Http1.parse_request_head(head))[0].chunked?
+        return body if chunked && !Proxy::Codec::ContentDecode.plain_chunked?(body)
         entity = chunked ? Proxy::Codec::ContentDecode.dechunk(body) : body
         edited = rules.rewrite_request_body(entity, host, hits)
         return body if edited == entity

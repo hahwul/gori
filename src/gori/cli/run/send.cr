@@ -266,11 +266,12 @@ module Gori
                       "(`gori run repeater create … --request-file`) and use `gori run repeater send <id>`"
         end
         sent_at = Time.utc.to_unix_ms * 1000_i64
+        budget = plan.admit # the budget's slot before the mint, so a rate wait cannot age a `$GEN` value
         wire = plan.wire_bytes
         # A raw request's head the operator did not terminate — said before the origin answers,
         # like `repeater send`. A built one is always terminated.
         STDERR.puts "gori run send: #{unterminated_head_note}" if raw && !plan.http2? && !Env.head_terminated?(wire)
-        result = plan.send_wire(wire)
+        result = budget ? Repeater::Engine.error(budget, Time.instant) : plan.send_wire(wire, admitted: true)
         outbound.close
 
         new_body, _ = decode_body(result.head, result.body)

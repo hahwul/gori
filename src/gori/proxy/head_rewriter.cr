@@ -185,8 +185,7 @@ module Gori::Proxy
     # reached the wire. `sent` is what actually went out, and the block maps a rewrite result to
     # that form (the caller's framing restore, h2's field re-parse). A rule whose change that
     # mapping undid, or a later rule cancelled, is dropped: History must not name a rule whose
-    # change the client never saw. Free when no rule fired; the replays run only when two or
-    # more fired and the message did change.
+    # change the client never saw.
     def settle_hits(hits : Array(Store::RuleRef), from : Int32, before : Bytes, sent, &) : Nil
       return if hits.size <= from
       if yield(before) == sent

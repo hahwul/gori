@@ -50,6 +50,9 @@ module Gori
       @left = 0
       # Counted against the total but never sent; handed back on the next lease or `release`.
       @refund = 0_i64
+      # Slots `admit` handed out and `refund` has not taken back: an unconfigured admit hands out
+      # none, so a refund for it must not bank credit a later ceiling would honour.
+      @taken = 0_i64
       # The total was spent at the last lease. Cleared by `reload`, so a refund or a raised total
       # is seen within a reload while a spent run's refusals cost no write each (P6).
       @spent = false
@@ -93,7 +96,10 @@ module Gori
         return nil unless configured?
         loop do
           if slot = take(Budget.now_us)
-            return nil if wait_until(slot, halt)
+            if wait_until(slot, halt)
+              @taken += 1
+              return nil
+            end
             @refund += 1
             return BUDGET_STOPPED_ERROR
           end
@@ -151,6 +157,9 @@ module Gori
 
       # Count `n` admitted slots that will not be sent back toward the total, on the next lease.
       def refund(n : Int) : Nil
+        n = {n.to_i64, @taken}.min
+        return unless n > 0
+        @taken -= n
         @refund += n
       end
 

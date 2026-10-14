@@ -53,6 +53,16 @@ describe Gori::Repeater::RequestRules do
     end
   end
 
+  it "leaves a chunked body alone when a re-chunk would drop its extensions, trailer or tail" do
+    with_store do |store|
+      raw = "POST /x HTTP/1.1\r\nHost: t.test\r\nTransfer-Encoding: chunked\r\n\r\n" \
+            "5;ext=1\r\nhello\r\n0\r\nX-Trailer: t\r\n\r\nGET /admin HTTP/1.1\r\nHost: t.test\r\n\r\n"
+      sent, changed = Gori::Repeater::RequestRules.apply(rules_plan(raw), Gori::Rules.new(store, [body_rule("hello", "HELLO")]))
+      changed.should be_false
+      sent.bytes.should eq(raw.to_slice)
+    end
+  end
+
   it "leaves a compressed body alone, as the proxy does" do
     with_store do |store|
       plan = rules_plan("POST /x HTTP/1.1\r\nHost: t.test\r\nContent-Encoding: gzip\r\nContent-Length: 2\r\n\r\nab")

@@ -637,7 +637,7 @@ module Gori
     # credential sitting in memory. See `masking_vars`.
     def self.masking_for(ns : Namespace) : Hash(String, String)
       case ns
-      in Namespace::Env  then effective_vars
+      in Namespace::Env  then all_vars # a withheld TOTP seed is still a secret to mask
       in Namespace::Bind then (@@layer.try(&.held_values) || {} of String => String)
       in Namespace::Gen  then EMPTY_VARS
       end
@@ -1060,7 +1060,7 @@ module Gori
     # memory, so a redaction that stopped the moment the operator toggled a rule off would
     # print the token into an export, a note or the detail view.
     def self.masking_vars : Hash(String, String)
-      h = effective_vars
+      h = all_vars # a withheld TOTP seed is still a secret to mask
       (@@layer.try(&.held_values) || {} of String => String).each { |(k, v)| h[k] = v }
       h
     end
