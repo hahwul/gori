@@ -18,7 +18,19 @@ describe Gori::Probe::Passive::Cspt do
 
   it "reports one detection per distinct source → sink on the host" do
     with_store do |store|
-      cspt_dets(store, %(fetch("/a/" + location.hash); fetch("/b/" + location.hash);)).size.should eq(1)
+      cspt_dets(store, %(fetch("/a/" + location.hash.slice(1)); fetch("/b/" + location.hash.slice(1));)).size.should eq(1)
+    end
+  end
+
+  it "stays quiet where a ../ cannot reach the path" do
+    with_store do |store|
+      # A whole hash is a fragment, which no request sends.
+      cspt_dets(store, %(fetch("/api/" + window.location.hash);)).should be_empty
+      # After the URL's `?` the value is query, not path.
+      cspt_dets(store, %(fetch("/api/search?q=" + location.hash.slice(1));)).should be_empty
+      cspt_dets(store, %(fetch(`/api/items?page=${location.hash.slice(1)}`);)).should be_empty
+      # An app-chosen prefix before the whole URL still counts.
+      cspt_dets(store, %(fetch("/proxy/" + location.href);)).map(&.evidence).should eq(["location.href → fetch"])
     end
   end
 

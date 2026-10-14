@@ -587,7 +587,10 @@ module Gori
         # and `.` alone, so `../` survives it. `sources` is the script's `source_spans`, shared
         # with DomXss through `Context#client_source_index`. `messages` says the script listens
         # for postMessage; without it `e.data` is far likelier a response (`axios(…).then(e=>…)`).
-        def self.request_source_pairs(code : String, sources = source_spans(code), messages = false) : Array({String, String})
+        # `kept` is the same script with string contents intact (`strip_comments`): a source after
+        # a literal `?` lands in the query, where `../` re-points nothing.
+        def self.request_source_pairs(code : String, sources = source_spans(code), messages = false,
+                                      kept : String? = nil) : Array({String, String})
           pairs = [] of {String, String}
           all = nil
           REQUEST_SINKS.each do |(sink_re, sink_label, arg)|
@@ -607,7 +610,7 @@ module Gori
               lo, hi = argument_span(code, m.byte_end(0), arg)
               lo, hi = config_url_span(code, lo, hi)
               past = hi if lo < hi
-              next unless label = url_source(code, all, lo, hi)
+              next unless label = url_source(code, all, lo, path_end(code, kept, lo, hi))
               pair = {label, sink_label}
               next if pairs.includes?(pair)
               pairs << pair
@@ -622,9 +625,18 @@ module Gori
           bytes = code.to_slice
           all.each do |(spans, label)|
             next if WHOLE_URL.includes?(label) && !composed?(bytes, lo, hi)
-            return label if unencoded_within?(code, spans, lo, hi, label == "location.search")
+            return label if unencoded_within?(code, spans, lo, hi, label.in?("location.search", "location.hash"))
           end
           nil
+        end
+
+        # Where the path part of the URL span [lo, hi) ends: at the first `?` inside a string or
+        # template literal (blank in `code`, kept in `kept`). Offsets line up only when no literal
+        # held a multi-byte char (each is blanked to one space), so otherwise the span is kept.
+        private def self.path_end(code : String, kept : String?, lo : Int32, hi : Int32) : Int32
+          return hi unless kept && kept.bytesize == code.bytesize
+          c, k = code.to_slice, kept.to_slice
+          (lo...hi).find { |i| k[i] == '?'.ord && c[i] == ' '.ord } || hi
         end
 
         # ROUTER_SOURCES occurrences in the same shape as `source_spans`, appended after it so a
@@ -731,8 +743,8 @@ module Gori
 
         URL_SEARCH_PARAMS = "URLSearchParams".to_slice
 
-        # Is the `location.search` at [b, e) appended whole? It starts with `?`, so it can only
-        # land in the query, never the path. It counts when a value is taken out of it
+        # Is the `location.search` (or `.hash`) at [b, e) appended whole? It starts with `?` (`#`),
+        # so it can only land in the query (the fragment, which no request sends), never the path. It counts when a value is taken out of it
         # (`.slice(1)`, `[…]`) or it feeds `URLSearchParams(…)` (whose `.get` is the value).
         private def self.whole_query?(bytes : Bytes, b : Int32, e : Int32, lo : Int32) : Bool
           k = skip_space(bytes, e, bytes.size)

@@ -30,7 +30,7 @@ module Gori
             index = ctx.client_source_index[i]
             messages = index.any? { |(_, label)| label == "postMessage data" } &&
                        MESSAGE_LISTENER.matches?(ctx.client_scripts_nocomment[i])
-            JsScan.request_source_pairs(code, index, messages).each do |(src, sink)|
+            JsScan.request_source_pairs(code, index, messages, ctx.client_scripts_nocomment[i]).each do |(src, sink)|
               next unless seen.add?({src, sink})
               acc << Detection.new("cspt_suspected", Category::CLIENT, ctx.host, ctx.url,
                 "Possible client-side path traversal (#{sink})", Store::Severity::Low,

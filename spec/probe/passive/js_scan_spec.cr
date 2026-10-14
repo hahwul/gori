@@ -169,10 +169,10 @@ describe Gori::Probe::Passive::JsScan do
       pairs.call(%(fetch(`/api/note/${new URLSearchParams(location.search).get("id")}`);))
         .should eq([{"location.search", "fetch"}])
       pairs.call(%(axios.post(`/api/items/${useParams().id}`, data);)).should eq([{"useParams()", "axios"}])
-      pairs.call(%(const x = new XMLHttpRequest(); xhr.open("GET", "/a/" + location.hash);))
+      pairs.call(%(const x = new XMLHttpRequest(); xhr.open("GET", "/a/" + location.hash.slice(1));))
         .should eq([{"location.hash", "XMLHttpRequest.open"}])
       pairs.call(%($.ajax("/a/" + this.$route.params.id);)).should eq([{"route.params", "jQuery.ajax"}])
-      pairs.call(%(jQuery.getJSON("/a/" + location.hash);)).should eq([{"location.hash", "jQuery.ajax"}])
+      pairs.call(%(jQuery.getJSON("/a/" + location.hash.slice(1));)).should eq([{"location.hash", "jQuery.ajax"}])
       pairs.call(%(new Request(url.searchParams.get("p"));)).should eq([{"searchParams.get()", "Request"}])
     end
 
@@ -181,14 +181,14 @@ describe Gori::Probe::Passive::JsScan do
       pairs.call(%(fetch("/api/user/" + encodeURIComponent\t(location.hash));)).should be_empty
       pairs.call(%(fetch(`/api/${encodeURIComponent(router.query.id)}`);)).should be_empty
       # encodeURI leaves `/` and `.` alone, so `../` survives it.
-      pairs.call(%(fetch("/api/user/" + encodeURI(location.hash));)).should eq([{"location.hash", "fetch"}])
+      pairs.call(%(fetch("/api/user/" + encodeURI(location.hash.substr(1)));)).should eq([{"location.hash", "fetch"}])
       # Only the wrapped occurrence is safe; a second, bare one still pairs.
-      pairs.call(%(fetch("/a/" + encodeURIComponent(location.hash) + "/" + location.hash);))
+      pairs.call(%(fetch("/a/" + encodeURIComponent(location.hash) + "/" + location.hash.slice(1));))
         .should eq([{"location.hash", "fetch"}])
     end
 
     it "reads only the url: key of a config object" do
-      pairs.call(%($.ajax({url: "/a/" + location.hash, data: x});)).should eq([{"location.hash", "jQuery.ajax"}])
+      pairs.call(%($.ajax({url: "/a/" + location.hash.slice(1), data: x});)).should eq([{"location.hash", "jQuery.ajax"}])
       pairs.call(%($.ajax({url:"/track",type:"POST",data:{ref:document.referrer}});)).should be_empty
       pairs.call(%(axios({method:"post",url:"/x",data:{q:location.search}});)).should be_empty
       pairs.call(%(coll.fetch({data:{q:location.search}});)).should be_empty
@@ -200,7 +200,8 @@ describe Gori::Probe::Passive::JsScan do
       pairs.call(%(fetch(location.pathname + "/data");)).should eq([{"location.href", "fetch"}])
     end
 
-    it "does not pair a whole location.search, which can only land in the query" do
+    it "does not pair a whole location.search or .hash, which can only land in the query or fragment" do
+      pairs.call(%(fetch("/api/" + location.hash);)).should be_empty
       pairs.call(%(fetch("/api/items" + location.search);)).should be_empty
       pairs.call(%(fetch(`/api/items${location.search}`);)).should be_empty
       pairs.call(%(fetch("/api/items/" + location.search.slice(1));)).should eq([{"location.search", "fetch"}])
@@ -208,18 +209,18 @@ describe Gori::Probe::Passive::JsScan do
     end
 
     it "reports each source → sink once, and walks nested calls once" do
-      pairs.call(%(fetch("/a/"+location.hash);fetch("/b/"+location.hash);fetch("/c/"+location.hash);))
+      pairs.call(%(fetch("/a/"+location.hash[1]);fetch("/b/"+location.hash[1]);fetch("/c/"+location.hash[1]);))
         .should eq([{"location.hash", "fetch"}])
-      pairs.call("fetch(location.hash+" * 13_107).should eq([{"location.hash", "fetch"}])
+      pairs.call("fetch(location.hash[1]+" * 11_397).should eq([{"location.hash", "fetch"}])
       # A config with no `url:` moves nothing past; the hit cap bounds the walk instead.
       hostile = "location.hash;" + "fetch({" * 37_449
       started = Time.instant
       pairs.call(hostile).should be_empty
       (Time.instant - started).should be < 100.milliseconds # ~230 ms uncapped
       # A nested call's own source is still read, as part of the outer argument.
-      pairs.call(%(fetch("/a/" + fetch("/b/" + location.hash));)).should eq([{"location.hash", "fetch"}])
+      pairs.call(%(fetch("/a/" + fetch("/b/" + location.hash.slice(1)));)).should eq([{"location.hash", "fetch"}])
       # A call outside the config's URL is its own request, not a nested URL.
-      pairs.call(%($.ajax({url: "/x", success: function(){ $.ajax("/a/" + location.hash) }});))
+      pairs.call(%($.ajax({url: "/x", success: function(){ $.ajax("/a/" + location.hash.slice(1)) }});))
         .should eq([{"location.hash", "jQuery.ajax"}])
     end
 

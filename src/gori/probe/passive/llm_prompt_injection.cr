@@ -14,11 +14,12 @@ module Gori
       # so a page documenting gori stays quiet. The names are a literal list on purpose: a probe
       # must not know the MCP surface exists (spec/layering_spec.cr). One finding per host.
       class LlmPromptInjection < Rule
-        # A word every match below must contain. Most pages leave after this one pass (the two
+        # A word every match below must contain. The tool name may sit in quotes or markup
+        # (`<code>create_rule</code>`, `**send_request**`, `&quot;create_rule&quot;`). Most pages leave after this one pass (the two
         # signals alone ran ~125µs per 64 KiB page in bench/probe_passive_bench).
         GATE      = Utf8.tolerant(/instructions|system\s+prompt|note\s+to\s+system|_(?:rule|requests?|websocket|start|enabled|sandbox|unscoped)\b/i)
         OVERRIDE  = Utf8.tolerant(/\b(?:ignore|disregard|forget)\s+(?:all\s+|any\s+)?(?:of\s+)?(?:the\s+|your\s+|my\s+)?(?:previous|prior|above|earlier|preceding)\s+instructions\b|\bdisregard\b[^.\n]{0,40}\bsystem\s+prompt\b|\bnote\s+to\s+system\s*:/i)
-        TOOL_CALL = Utf8.tolerant(/\b(?:call|invoke|execute|run|use|pass|set)\s+(?:the\s+)?[`'"\\]*(?:create_rule|update_rule|send_request|send_websocket|create_probe_rule|update_probe_rule|race_requests|fuzz_start|mine_start|discover_start|set_scope_enabled|add_scope_rule|set_sandbox|allow_unscoped)\b/i)
+        TOOL_CALL = Utf8.tolerant(/\b(?:call|invoke|execute|run|use|pass|set)\s+(?:the\s+)?(?:[`'"\\*_]|<\w{1,10}>|&\#?\w{1,6};)*(?:create_rule|update_rule|send_request|send_websocket|create_probe_rule|update_probe_rule|race_requests|fuzz_start|mine_start|discover_start|set_scope_enabled|add_scope_rule|set_sandbox|allow_unscoped)\b/i)
 
         def info : RuleInfo
           RuleInfo.new("llm_prompt_injection", "Prompt injection aimed at an LLM agent",
@@ -27,7 +28,8 @@ module Gori
         end
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
-          return unless (text = ctx.body_text) && GATE.matches?(text)
+          # The client-side cap on a page: padding past 64 KiB must not hide the payload.
+          return unless (text = ctx.client_body_text || ctx.body_text) && GATE.matches?(text)
           return unless m = OVERRIDE.match(text) || TOOL_CALL.match(text)
           acc << Detection.new("llm_prompt_injection", Category::CLIENT, ctx.host, ctx.url,
             "Response carries instructions aimed at an LLM agent", Store::Severity::Low,
