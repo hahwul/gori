@@ -134,7 +134,7 @@ describe "Store rewrite originals (V49)" do
       store.update_response(resp)
       store.record_rule_hits(id, Gori::Store::RuleTarget::Request, [P4])
 
-      %w(flow_rule_hits rewrite_originals flow_interims).each do |table|
+      %w[flow_rule_hits rewrite_originals flow_interims].each do |table|
         store.@db.scalar("SELECT COUNT(*) FROM #{table}").as(Int64).should eq(0)
       end
     end

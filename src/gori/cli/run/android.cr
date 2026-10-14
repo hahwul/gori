@@ -55,7 +55,7 @@ module Gori
 
         picked = android_device(devices, serial)
         abort "gori run android: #{picked}" if picked.is_a?(String)
-        probe = android_or_abort { Android.probe(adb, picked.serial, try_su: system || verb == "undo") }
+        probe = android_or_abort { Android.probe(adb, picked.serial, try_su: system | (verb == "undo")) }
         device_port = port_arg.try(&.to_i)
         ok = if verb == "undo"
                android_undo(adb, picked, probe, device_port, dry_run)
