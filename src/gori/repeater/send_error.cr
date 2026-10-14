@@ -87,7 +87,8 @@ module Gori
       # certificate rejection, a refused handshake and an origin that accepts and then goes
       # silent into their own sentences, which land on "other"/"timeout" as they should),
       # "timeout" (idle read/write, and a TLS handshake that never got an answer), "protocol" (a deterministic
-      # framing/protocol refusal — see PROTOCOL_ERROR_PHRASES), "no_response", else "other".
+      # framing/protocol refusal — see PROTOCOL_ERROR_PHRASES), "no_response", "budget" (the
+      # project request budget refused it), else "other".
       #
       # A pure function of the engine's sentence, so it is `self.` and directly testable: the
       # retry policy an agent applies hangs off it, and the sentences it reads are written in
@@ -95,6 +96,9 @@ module Gori
       # flipping a retryable condition into "stop and report a finding".
       def self.kind(message : String?) : String?
         return nil unless message
+        # gori's own refusal before the socket (#1601): the project budget refuses every later
+        # send too, so it is a stop, not the transient "other" a retry policy loops on.
+        return "budget" if Outbound.budget_refusal?(message)
         m = message.downcase
         return "connect" if m.starts_with?("connect failed")
         return "timeout" if m.includes?("timed out") || m.includes?("timeout")
@@ -120,6 +124,7 @@ module Gori
         case kind
         when "protocol"          then "PROTOCOL_ERROR"
         when "truncated_request" then "REQUEST_TRUNCATED"
+        when "budget"            then "BUDGET_EXHAUSTED"
         else                          "NETWORK_ERROR"
         end
       end

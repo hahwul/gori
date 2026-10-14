@@ -449,4 +449,23 @@ describe Gori::Retest::LiveBackend do
       backend.finish
     end
   end
+
+  # gori declining to send, read like the scope gate: blocked (the run halts), no History row.
+  it "reads a spent project budget as a refusal, not a failed send" do
+    with_store_env do |store|
+      store.set_settings([{Gori::Settings::PROJECT_OUTBOUND_MAX_REQUESTS_KEY, "1"}] of {String, String?})
+      store.set_settings([{Gori::Store::OUTBOUND_BUDGET_SPENT_KEY, "1"}] of {String, String?})
+      rid = store.insert_repeater("http://127.0.0.1:1", "GET / HTTP/1.1\r\nHost: 127.0.0.1:1\r\n\r\n".to_slice,
+        false, true, nil, 0)
+      step = Gori::Store::RetestStep.new(1_i64, 1_i64, 1, Gori::Store::RetestRole::Variant,
+        Gori::Store::LinkRefKind::Repeater, rid, "", 0_i64, 0_i64)
+      planned = Gori::Retest::Planned.new(step, "GET", "http://127.0.0.1:1/", "repeater ##{rid}")
+      backend = Gori::Retest::LiveBackend.new(store, Gori::Outbound.cli(Gori::Scope.load(store), true),
+        issue_id: 1_i64, surface: Gori::FlowSource::Surface::Cli)
+      obs = backend.send(planned)
+      obs.blocked_reason.should eq(Gori::Outbound::BUDGET_SPENT_ERROR)
+      obs.flow_id.should be_nil
+      backend.finish
+    end
+  end
 end

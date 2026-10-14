@@ -111,9 +111,14 @@ module Gori
         # for an unauthenticated client), and silently narrowing a framed session into one
         # would be the failure this note exists to prevent.
         note = plan.websocket? ? "handshake sent as HTTP — a retest step does not exchange frames" : nil
+        # The project budget's slot before the wire pass (a wait must not age a `$GEN` mint). Its
+        # refusal is gori declining to send, read like the scope gate's: blocked, no History row.
+        if reason = plan.admit
+          return Observation.new(blocked_reason: Retest.clip(reason))
+        end
         sent_at = Time.utc.to_unix_ms * 1000_i64
         wire = plan.wire_bytes
-        result = plan.send_wire(wire)
+        result = plan.send_wire(wire, admitted: true)
         flow_id, record_note = record(plan, result, sent_at, wire, p)
         note = [note, record_note].compact.join(" · ").presence
         head = result.head.empty? ? nil : result.head

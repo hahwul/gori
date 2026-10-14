@@ -101,6 +101,14 @@ module Gori
         # flow and `effective_request` — this tool's "what actually went out" — described a
         # request without the identity the socket carried. Sent through `send_wire`, so the
         # bytes reported and the bytes written are the same slice.
+        #
+        # The project budget's slot first (#1601): a wait for the rate must not age what the wire
+        # pass mints (a `$GEN.TOTP`), and a send the budget refuses never left gori, so it gets
+        # no History row. Every return below that does not send hands the slot back.
+        if reason = plan.admit(cancel_signal)
+          return err("request cancelled", "CANCELLED") if cancelled?
+          return err(reason, "BUDGET_EXHAUSTED")
+        end
         h1_wire = plan.wire_bytes
         wire = wire_request(plan, built, h1_wire)
         recorded_flow_id = nil.as(Int64?)
@@ -114,14 +122,20 @@ module Gori
           # retryable is what an agent's error policy can act on. It used to raise `Gori::Error`,
           # which the rescue below coded INVALID_ARGUMENT: "fix your arguments" for a call whose
           # arguments were fine, so the agent rewrote a correct request instead of retrying it.
-          return busy("could not record this request in History — the project's writer is busy " \
-                      "(a gori capturing beside this server holds SQLite's single writer slot). " \
-                      "NOTHING was sent. Retry in a moment, or pass record_history=false only if " \
-                      "an unaudited send is intentional.") if id <= 0
+          if id <= 0
+            ob.refund(1)
+            return busy("could not record this request in History — the project's writer is busy " \
+                        "(a gori capturing beside this server holds SQLite's single writer slot). " \
+                        "NOTHING was sent. Retry in a moment, or pass record_history=false only if " \
+                        "an unaudited send is intentional.")
+          end
           recorded_flow_id = id
         end
-        return err("request cancelled", "CANCELLED") if cancelled?
-        result = plan.send_wire(h1_wire, cancel_signal)
+        if cancelled?
+          ob.refund(1)
+          return err("request cancelled", "CANCELLED")
+        end
+        result = plan.send_wire(h1_wire, cancel_signal, admitted: true)
         return err("request cancelled", "CANCELLED") if cancelled?
         # The active session slot's `$NAME` that `plan.wire_bytes` shipped LITERALLY, drained
         # here because this tool IS the run summary for a synchronous send. Without it the only

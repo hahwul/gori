@@ -2275,17 +2275,24 @@ module Gori::Tui
         # first, and those are network round-trips the event loop must not wait on. The plan
         # was built from the draft on the UI fiber, so the bytes are the ones the operator sent.
         sent_wire = Bytes.empty
+        # The project budget's slot before the wire pass (#1601), so a wait for the rate cannot
+        # age a `$GEN` mint. Its refusal never left gori, so it records no History row.
+        budget_refusal = plan.admit
         result = begin
-          sent_wire = plan.wire_bytes
-          # Marked from the bytes the socket is about to get — the drain cannot recompute it,
-          # because by the time the answer lands the editor may have been typed into. This
-          # branch is already past `ws_mode?`, so a framed handshake (which
-          # `WsEngine.build_handshake` re-terminates on every send) never reaches it and is never
-          # accused; `!plan.http2?` is the other half of the same rule, because an h2 send
-          # re-encodes this text as an HPACK field list that never carried the missing line.
-          # See `CLI::Run.unterminated_head?`. #1075.
-          view.sent_head_unterminated = !plan.http2? && !Env.head_terminated?(sent_wire)
-          plan.send_wire(sent_wire)
+          if budget_refusal
+            Repeater::Engine.error(budget_refusal, started)
+          else
+            sent_wire = plan.wire_bytes
+            # Marked from the bytes the socket is about to get — the drain cannot recompute it,
+            # because by the time the answer lands the editor may have been typed into. This
+            # branch is already past `ws_mode?`, so a framed handshake (which
+            # `WsEngine.build_handshake` re-terminates on every send) never reaches it and is never
+            # accused; `!plan.http2?` is the other half of the same rule, because an h2 send
+            # re-encodes this text as an HPACK field list that never carried the missing line.
+            # See `CLI::Run.unterminated_head?`. #1075.
+            view.sent_head_unterminated = !plan.http2? && !Env.head_terminated?(sent_wire)
+            plan.send_wire(sent_wire, admitted: true)
+          end
         rescue ex
           # `Repeater::Engine.send` rescues its own transport failures, so anything escaping
           # here is a bug — and an unrescued raise in `spawn` kills just this fiber while
@@ -2300,7 +2307,7 @@ module Gori::Tui
         # capture may be holding. Recorded whatever the outcome — an error flow is evidence
         # too, and it is the same call MCP `send_request` makes for a send that failed.
         record_note = record_store.try do |st|
-          RepeaterController.record_send(st, plan, result, sent_at, sent_wire, record_ref)
+          RepeaterController.record_send(st, plan, result, sent_at, sent_wire, record_ref) unless budget_refusal
         end
         # Non-blocking hand-off: if the user already left the project the channel is
         # orphaned, so drop the late result instead of blocking this fiber forever. Sized to
