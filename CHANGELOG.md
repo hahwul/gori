@@ -20,6 +20,7 @@
 - QL: `via:tui|cli|mcp` filters flows by the gori surface that sent them, so `via:mcp` is what an agent sent, and agent events in Activity and MCP `list_events` name the client (`actor_label`) (#1587)
 - Proxy: `GORI_SSLKEYLOGFILE` (or `SSLKEYLOGFILE`) writes TLS session secrets for both legs in the NSS key log format, so Wireshark can decrypt what gori relays, and only into a file private to you (#1593)
 - Probe's DOM XSS rule no longer misses a sink after a regex literal on the same line, and Repeater's pretty-print, GraphQL pane and WebSocket message editor keep the operator's bytes (terminators, number spellings, duplicate keys) (#1621)
+- History: a colour rule repaints a row that updates while a filter is active, instead of keeping the answer it gave the row in flight (#1624)
 
 ## v0.8.1
 
