@@ -79,7 +79,9 @@ module Gori::Repeater::Timing
       a_slower_frac : Float64,
       median_gap_us : Float64, # median(A) − median(B); the verdict is from pair order, so the sign can disagree
       p_value : Float64,
-      verdict : Verdict do
+      verdict : Verdict,
+      # The permanent refusal that ended the run early (`Timing.run`), or nil.
+      refusal : String? = nil do
       # One line for the verdict banner / the CLI summary — the shape `Sequencer::Report#rationale`
       # has, phrased for a differential oracle.
       # The pairs that decided a direction (ties carry none) — the sign test's and the
@@ -89,6 +91,11 @@ module Gori::Repeater::Timing
       end
 
       def rationale : String
+        base = rationale_of_verdict
+        (r = refusal) ? "#{base} · stopped early: #{r}" : base
+      end
+
+      private def rationale_of_verdict : String
         case verdict
         in Verdict::Inconclusive
           pairs_valid == 0 ? "no pair had both responses" : "only #{pairs_valid} usable pair#{pairs_valid == 1 ? "" : "s"} — need ≥ #{SMALL_SAMPLE}"

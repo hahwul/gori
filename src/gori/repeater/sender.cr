@@ -29,6 +29,8 @@ module Gori
       SCOPE_REFUSAL_PREFIX = "blocked by scope"
 
       getter scheme : String
+      # The gate every send here goes through; a run arms its `halt` so a stop ends a budget wait.
+      getter outbound : Gori::Outbound
       getter host : String
       getter port : Int32
       getter? http2 : Bool

@@ -76,4 +76,18 @@ describe Gori::Repeater::Timing do
     rep.iterations.should be < 500
     seen.should be <= 4
   end
+
+  it "stops at a spent project budget and says so" do
+    with_store do |store|
+      store.set_settings([{Gori::Settings::PROJECT_OUTBOUND_MAX_REQUESTS_KEY, "2"}] of {String, String?})
+      port = start_delayed_origin("/slow", 1.milliseconds)
+      wires = ["GET /a HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice, "GET /b HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice]
+      plan = R::Plan.build(R::PlanOptions.new(wires, target: "http://127.0.0.1:#{port}", verify: false),
+        Gori::Outbound.interactive(Gori::Scope.load(store)))
+      rep = Timing.run(plan, iterations: 50, mode: Timing::Mode::Race, warmup: 0)
+      rep.iterations.should eq(1) # the one pair the budget paid for
+      rep.refusal.should eq(Gori::Outbound::BUDGET_SPENT_ERROR)
+      rep.rationale.should contain("stopped early")
+    end
+  end
 end
