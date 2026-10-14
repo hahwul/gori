@@ -46,8 +46,11 @@ module Gori
 
     # JSON walk bounds: a pathological body (a million-element array, a 10k-deep nest) must
     # cost a bounded amount per flow, since the inventory reads thousands of flows.
+    # A leaf keeps its own copy of the path, so the path's length is bounded too: a 500 KB key
+    # over a 2000-element array was 2000 copies of it, a gigabyte from one flow.
     JSON_MAX_DEPTH  =   32
     JSON_MAX_LEAVES = 2000
+    JSON_MAX_PATH   = 4096
 
     # Most a compressed JSON body is inflated to. The inventory reads thousands of flows on
     # the proxy's own scheduler, and the decoder's default ceiling (a 32 MiB bomb guard) is
@@ -219,9 +222,10 @@ module Gori
     end
 
     # Recursive descent collecting into `acc` (a yielding method cannot recurse into itself),
-    # bounded by JSON_MAX_DEPTH and JSON_MAX_LEAVES — past either, the rest is skipped.
+    # bounded by JSON_MAX_DEPTH, JSON_MAX_LEAVES and JSON_MAX_PATH — past any, the rest is skipped.
     private def walk_json(pull : JSON::PullParser, path : String, depth : Int32,
                           acc : Array({String, String, Bool})) : Nil
+      return pull.skip if path.bytesize > JSON_MAX_PATH
       case pull.kind
       when .begin_object?
         return pull.skip if depth >= JSON_MAX_DEPTH
@@ -241,8 +245,9 @@ module Gori
       when .begin_array?
         return pull.skip if depth >= JSON_MAX_DEPTH
         pull.read_begin_array
+        child = "#{path}[]" # one string every element shares
         until pull.kind.end_array?
-          acc.size >= JSON_MAX_LEAVES ? pull.skip : walk_json(pull, "#{path}[]", depth + 1, acc)
+          acc.size >= JSON_MAX_LEAVES ? pull.skip : walk_json(pull, child, depth + 1, acc)
         end
         pull.read_end_array
       else

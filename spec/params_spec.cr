@@ -95,6 +95,11 @@ describe Gori::Params do
     params_of("POST /j HTTP/1.1\r\nContent-Type: application/json\r\n\r\n", deep).should be_empty
   end
 
+  it "skips a JSON member whose path is past the bound and keeps the rest" do
+    body = %({"#{"k" * 5000}":[1,2,3],"id":7})
+    params_of("POST /j HTTP/1.1\r\nContent-Type: application/json\r\n\r\n", body).map(&.[1]).should eq(["id"])
+  end
+
   it "skips standard headers by default, and reads them all on request" do
     head = "GET / HTTP/1.1\r\nHost: h\r\nUser-Agent: ua\r\nSec-Fetch-Mode: cors\r\nAccept-Language: en\r\n" \
            "X-Api-Key: k1\r\nX-Tenant: acme\r\n\r\n"
