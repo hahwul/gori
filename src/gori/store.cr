@@ -2095,10 +2095,12 @@ module Gori
       end
     end
 
+    # Only for a flow that still exists: a WebSocket hit can land after the flow was deleted.
     private def write_rule_hits(conn : DB::Connection, flow_id : Int64, side : RuleTarget, hits : Array(RuleRef)) : Nil
       hits.each do |h|
-        conn.exec("INSERT OR IGNORE INTO flow_rule_hits (flow_id, side, scope, rule_id) VALUES (?, ?, ?, ?)",
-          flow_id, side.label, h.scope.label, h.id)
+        conn.exec("INSERT OR IGNORE INTO flow_rule_hits (flow_id, side, scope, rule_id) " \
+                  "SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM flows WHERE id = ?)",
+          flow_id, side.label, h.scope.label, h.id, flow_id)
       end
     end
 
@@ -2129,7 +2131,7 @@ module Gori
       # nil body): keep response_size NULL so the History SIZE column reads "—", not a
       # misleading "0B" that looks like a real zero-length response.
       response_size = (resp.head.empty? && resp.body.nil?) ? nil : resp.head.size.to_i64 + body_size
-      conn.exec(
+      res = conn.exec(
         <<-SQL,
           UPDATE flows SET
             response_head = ?, response_body = ?, status = ?, reason = ?,
@@ -2152,6 +2154,9 @@ module Gori
         resp.state.value, resp.ttfb_us, resp.duration_us, resp.error,
         resp.body_truncated? ? 1 : 0, resp.advisory,
         resp.state == FlowState::Complete ? 1 : 0, resp.content_type, resp.status, resp.flow_id)
+      # The flow was deleted (clear history, delete_flow) while the request was in flight: its
+      # side rows would be orphans holding pre-rule bytes the operator already deleted.
+      return if res.rows_affected == 0
       write_interims(conn, resp.flow_id, resp.interims)
       write_rewrite(conn, resp.flow_id, RuleTarget::Response, resp.rewrite)
       # `fts_dirty = 1` again: the response side just appeared (or changed), so whatever the

@@ -119,4 +119,24 @@ describe "Store rewrite originals (V49)" do
       store.@db.scalar("SELECT COUNT(*) FROM rewrite_originals").as(Int64).should eq(0)
     end
   end
+
+  # A response or a WebSocket hit landing after the operator deleted the flow must not leave
+  # orphan side rows holding the pre-rule bytes they deleted (a project export ships them).
+  it "writes no side rows for a flow deleted while in flight" do
+    with_store do |store|
+      id = store.insert_flow(rw_request("/a"))
+      store.delete_flow(id).should be_true
+      interims = Gori::Store::Interims.new
+      interims.add(103, "HTTP/1.1 103 Early Hints\r\n\r\n".to_slice)
+      resp = Gori::Store::CapturedResponse.new(flow_id: id, status: 200, head: origin_head,
+        body: "new".to_slice, interims: interims)
+      resp.rewrite = Gori::Store::Rewrite.new([P4], origin_head, "SECRET".to_slice)
+      store.update_response(resp)
+      store.record_rule_hits(id, Gori::Store::RuleTarget::Request, [P4])
+
+      %w(flow_rule_hits rewrite_originals flow_interims).each do |table|
+        store.@db.scalar("SELECT COUNT(*) FROM #{table}").as(Int64).should eq(0)
+      end
+    end
+  end
 end
