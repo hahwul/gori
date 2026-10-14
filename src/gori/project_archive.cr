@@ -875,6 +875,13 @@ module Gori
               disable_slot_auto_refresh(conn)
             end
             conn.exec("DELETE FROM host_overrides") if table_exists?(conn, "host_overrides")
+            # A global rule's id was numbered by the exporting install, like GLOBAL_OVERRIDE_KEYS:
+            # here it would name whatever local global rule holds that id. No install issues id 0
+            # and `RuleRef.parse?` refuses it, so the flow still reads as rewritten (ORIGINAL kept)
+            # but names no rule.
+            if table_exists?(conn, "flow_rule_hits")
+              conn.exec("UPDATE OR REPLACE flow_rule_hits SET rule_id = 0 WHERE lower(scope) = 'global'")
+            end
             if table_exists?(conn, "match_rules")
               conn.exec("UPDATE match_rules SET enabled = 0 WHERE lower(op) = 'pipe'")
               if table_columns(conn, "match_rules").includes?("body_file")

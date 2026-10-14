@@ -2722,7 +2722,8 @@ module Gori::Tui
         rule = rules.find { |r| r.scope == ref.scope && r.id == ref.id }
         rule ? "#{word} rule #{Rules.rule_phrase(rule)}" : "#{word} rule ##{ref.id} (deleted)"
       end
-      "! rewritten by Match&Replace: #{names.join(", ")}#{kept ? " — the bytes before are in ORIGINAL" : ""}"
+      # No names: only rules an imported archive numbered on another install (`ProjectArchive`).
+      "! rewritten by Match&Replace#{": " unless names.empty?}#{names.join(", ")}#{kept ? " — the bytes before are in ORIGINAL" : ""}"
     end
 
     private def combine_bytes(head : Bytes?, body : Bytes?) : Bytes?

@@ -490,6 +490,36 @@ describe Gori::ProjectArchive do
     end
   end
 
+  # A global rule's id is numbered per install (settings.json), so the exporter's `global/3` would
+  # name whatever global rule this install holds as 3, and `rewritten:global/3` would match it.
+  it "keeps an imported flow rewritten without naming the exporter's global rules" do
+    with_archive_project do |registry, project, store, root|
+      g3 = Gori::Store::RuleRef.new(Gori::Store::RuleScope::Global, 3_i64)
+      p4 = Gori::Store::RuleRef.new(Gori::Store::RuleScope::Project, 4_i64)
+      head = "GET /g HTTP/1.1\r\nHost: archive.test\r\nX-Old: 1\r\n\r\n".to_slice
+      global_only = archive_request("/g")
+      global_only.rewrite = Gori::Store::Rewrite.new([g3], head)
+      both = archive_request("/b")
+      both.rewrite = Gori::Store::Rewrite.new([Gori::Store::RuleRef.new(Gori::Store::RuleScope::Global, 5_i64), g3, p4])
+      g = store.insert_flow(global_only)
+      b = store.insert_flow(both)
+      store.flush
+
+      imported = Gori::ProjectArchive.prepare_import(export_archive(project, File.join(root, "g.gori")))
+        .import_into(registry, "Global copy")
+      copied = Gori::Store.open(imported.db_path)
+      begin
+        copied.flow_row(g).not_nil!.rewritten_by.should eq([] of Gori::Store::RuleRef)
+        copied.flow_row(b).not_nil!.rewritten_by.should eq([p4])
+        copied.rewrite_original(g, Gori::Store::RuleTarget::Request).should_not be_nil
+        copied.search(Gori::QL.parse("rewritten:global/3"), 10).should be_empty
+        copied.search(Gori::QL.parse("rewritten:true"), 10).map(&.id).sort!.should eq([g, b])
+      ensure
+        copied.close
+      end
+    end
+  end
+
   it "refuses imported SQLite triggers and views before they can affect sanitization" do
     with_archive_project do |_registry, project, _store, root|
       DB.open("sqlite3:#{project.db_path}") do |db|
