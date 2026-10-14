@@ -153,8 +153,10 @@ module Gori::Protobuf
       # name → octets, in first-seen order (Crystal Hash keeps insertion order), which is the
       # order they are written into the synthesized FileDescriptorSet.
       getter files = {} of String => Bytes
-      # Every `dependency` any held file declares, first-seen order, deduplicated.
-      getter deps = [] of String
+      # Every `dependency` any held file declares, first-seen order (a Set keeps it). A Set and
+      # not an Array: the peer chooses how many there are, and `Array#includes?` per dependency
+      # was quadratic, a CPU loop that froze the whole process on a hostile reflection answer.
+      getter deps = Set(String).new
       getter bytes : Int64 = 0_i64
 
       def size : Int32
@@ -177,7 +179,7 @@ module Gori::Protobuf
         @files[name] = blob
         @bytes += blob.size
         Schema.strings(m, FILE_DEPENDENCY).each do |d|
-          @deps << d unless d.empty? || @deps.includes?(d)
+          @deps << d unless d.empty?
         end
         true
       end

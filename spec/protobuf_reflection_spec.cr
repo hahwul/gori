@@ -256,6 +256,13 @@ describe Gori::Protobuf::Reflection do
       held.missing.should eq(["c.proto"])
     end
 
+    it "keeps each dependency once, in first-seen order, across files" do
+      held = Reflection::Collected.new
+      held.add(file_descriptor("a.proto", "a", ["x.proto", "y.proto"])).should be_true
+      held.add(file_descriptor("b.proto", "b", ["y.proto", "z.proto", "x.proto"])).should be_true
+      held.missing.should eq(["x.proto", "y.proto", "z.proto"])
+    end
+
     it "holds a file once no matter how many services import it" do
       held = Reflection::Collected.new
       blob = file_descriptor("shared.proto", "shared")
