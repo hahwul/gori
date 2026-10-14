@@ -463,6 +463,29 @@ describe Gori::Proxy::H2::HeadRewrite do
   end
 
   describe "the h3 Alt-Svc strip (settings network.strip_alt_svc)" do
+    it "keeps the origin's head, Alt-Svc included, as a rule's original — as HTTP/1.1 does (#1589)" do
+      before = Gori::Settings.strip_alt_svc?
+      begin
+        Gori::Settings.strip_alt_svc = true
+        with_store do |store|
+          rules = Gori::Rules.new(store, store.match_rules)
+          rules.add(Gori::Store::RuleTarget::Response, Gori::Store::RulePart::Head, "X-B", "1",
+            Gori::Store::RuleOp::AddHeader)
+          pipe, assembler, sink = pipeline(rules, direction: "in")
+          assembler.feed("out", headers(1_u32, HPACK::Encoder.new.encode(req("/a"))))
+          block = HPACK::Encoder.new.encode([{":status", "200"}, {"alt-svc", %(h3=":443")}])
+          emitted = [] of Frame::Header
+          pipe.accept(headers(1_u32, block)) { |f, pre| emitted << f; assembler.feed("in", f, pre) }
+          HPACK::Decoder.new.decode(emitted.first.payload).should eq([{":status", "200"}, {"x-b", "1"}])
+          resp = sink.responses.first
+          String.new(resp.rewrite.not_nil!.head.not_nil!).should contain(%(alt-svc: h3=":443"))
+          String.new(resp.head).should_not contain("alt-svc")
+        end
+      ensure
+        Gori::Settings.strip_alt_svc = before
+      end
+    end
+
     it "removes it from what the client receives, and re-encodes the block to do it" do
       with_strip(%(h3=":443"; ma=86400), on: true) do |pipe, emitted, _, sink|
         peer = HPACK::Decoder.new.decode(emitted.first.payload)

@@ -364,6 +364,7 @@ module Gori::Proxy::H2
       # passthrough (the latch below is one-way) on a field nothing reads — and a hostile
       # origin could close that latch at will by putting `alt-svc` in a trailer.
       alt_svc_stripped = false
+      peer_fields = fields # what the origin sent, for a rule's record (#1589), as h1 keeps it
       if !request && final_response_head?(fields) && (pruned = strip_alt_svc(fields, stream_id))
         fields = pruned
         alt_svc_stripped = true
@@ -384,7 +385,9 @@ module Gori::Proxy::H2
       # Never an interim 1xx, as on HTTP/1.1 (`client_conn.cr#skip_interim_responses`: "no
       # rewrite on interim"): the flow keeps only the final head, so a rule's change to a 103 is
       # one nothing could show.
-      rewritten = head && (request || final_response_head?(fields)) ? rewrite(fields, head, request, stream_id) : nil
+      rewritten = if head && (request || final_response_head?(fields))
+                    rewrite(fields, head, request, stream_id, peer_fields)
+                  end
       emit_fields = rewritten || fields
       if request && message_head?(emit_fields, request)
         @assembler.remember_request_authority(stream_id, HeadCodec.pseudo_of(emit_fields, ":authority"))
@@ -450,7 +453,7 @@ module Gori::Proxy::H2
     # Run the Match&Replace rules over this block's h1-equivalent head. nil = unchanged
     # (which is also what a block the rules do not apply to returns).
     private def rewrite(fields : Array(HPACK::Field), head : Bytes, request : Bool,
-                        stream_id : UInt32) : Array(HPACK::Field)?
+                        stream_id : UInt32, peer_fields : Array(HPACK::Field)) : Array(HPACK::Field)?
       rw = @rewriter
       return nil unless rw && rw.active?
       # The peer's own head has no faithful h1-text form, so the round trip that runs the
@@ -491,7 +494,8 @@ module Gori::Proxy::H2
         (request ? HeadCodec.parse_request(h, fields) : HeadCodec.parse_response(h, fields))
           .try { |p| without_content_length(p) }
       end
-      note_rewrite(stream_id, request, head)
+      original = peer_fields.same?(fields) ? head : HeadCodec.synth_response(pairs(peer_fields))
+      note_rewrite(stream_id, request, original)
       restored
     end
 
@@ -500,7 +504,8 @@ module Gori::Proxy::H2
     end
 
     # The flow keeps which rules fired and the head they replaced (#1589) — in the h1-shaped form
-    # the rules read, as Intercept keeps its held head.
+    # the rules read, as Intercept keeps its held head. `head` is the peer's own, before the
+    # `Alt-Svc` strip, as `ClientConn` keeps the origin's.
     private def note_rewrite(stream_id : UInt32, request : Bool, head : Bytes) : Nil
       return if @hits.empty?
       @assembler.note_rewrite(stream_id, request, Store::Rewrite.new(@hits.dup, head))
