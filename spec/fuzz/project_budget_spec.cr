@@ -46,3 +46,48 @@ describe "the project request budget mid-run" do
     F.terminal_verdict(d.progress, d.stopped, nil).should eq(F::Terminal::BudgetExhausted)
   end
 end
+
+# An origin that records how old each request's `t=<unix ms>` was when it arrived.
+private def skew_origin(skews : Array(Int64)) : {TCPServer, Int32}
+  srv = TCPServer.new("127.0.0.1", 0)
+  spawn do
+    while conn = srv.accept?
+      spawn do
+        c = conn
+        if head = Gori::Proxy::Codec::Http1.read_head(c)
+          if m = String.new(head).match(/t=(\d+)/)
+            skews << Time.utc.to_unix_ms - m[1].to_i64
+          end
+          c << "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+          c.flush
+        end
+        c.close rescue nil
+      end
+    end
+  end
+  {srv, srv.local_address.port}
+end
+
+describe "a $GEN value under the project rate" do
+  it "is minted after the wait for the slot, on both send seams" do
+    with_store do |store|
+      store.set_settings([{Gori::Settings::PROJECT_OUTBOUND_MAX_RPS_KEY, "5"}] of {String, String?})
+      skews = [] of Int64
+      srv, port = skew_origin(skews)
+      ob = Gori::Outbound.interactive(Gori::Scope.load(store))
+      fuzz = F::Sender.new(F::Origin.new("http", "127.0.0.1", port), ob, http2: false, verify: false)
+      rep = Gori::Repeater::Sender.new(ob, scheme: "http", host: "127.0.0.1", port: port, verify: false)
+      req = "GET /?t=$GEN.TIMESTAMP_MS HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice
+      with_env_syntax(Gori::Env::Syntax::Namespaced) do
+        done = Channel(Nil).new
+        3.times { spawn { fuzz.send(req, nil); done.send(nil) } }
+        3.times { spawn { rep.send(req); done.send(nil) } }
+        6.times { done.receive }
+      end
+      srv.close
+      skews.size.should eq(6)
+      # Six sends 200ms apart: minted before the wait, the last would be ~1s old.
+      skews.max.should be < 150
+    end
+  end
+end

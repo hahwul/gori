@@ -262,18 +262,25 @@ module Gori::RequestMacro
           return failed(total, sent, n, step.label,
             @outbound.refusal(verdict), nil, flows)
         end
+        # The project budget's slot before the wire pass, so a login's `$GEN.TOTP` is minted
+        # after any wait for the rate; every refusal below hands it back.
+        if reason = plan.admit(cancelled)
+          return failed(total, sent, n, step.label, reason, nil, flows)
+        end
         wire = plan.wire_bytes
         # Layer 2 on the bytes that will go out (a `$BIND` in the request line resolves before
         # the socket), keyed on the host actually dialled.
         if reason = @outbound.sweep_block(plan.scheme, plan.host, Outbound.request_target(wire), plan.port)
+          @outbound.refund(1)
           return failed(total, sent, n, step.label, reason, nil, flows)
         end
         if budget && !budget.reserve(1_i64)
+          @outbound.refund(1)
           return Outcome.new(false, total, sent, n, step.label, nil, BUDGET_ERROR, [] of String, flows,
             budget_exhausted: true)
         end
         sent_at = Time.utc.to_unix_ms * 1000_i64
-        result = plan.send_wire(wire)
+        result = plan.send_wire(wire, admitted: true)
         sent += 1
         record(plan, result, sent_at, wire, n).try { |fid| flows << fid }
         if err = result.error

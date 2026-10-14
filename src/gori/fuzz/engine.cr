@@ -421,6 +421,13 @@ module Gori::Fuzz
       # value a refresh just rebound. Only when this sender wears the active slot at all: an
       # Authorize sender (`slot_overlay: false`) asks per IDENTITY instead, in `send_one`. Cheap
       # when nothing is configured — one atomic read in `SessionSlots#auto_refresh?`.
+      #
+      # The project budget's slot comes before all of it (#1601): a worker queued for the rate
+      # must not carry a refresh or a `$GEN.TOTP` minted before its wait. A gate below that then
+      # refuses hands the slot back.
+      if err = @outbound.admit
+        return refused(err)
+      end
       before_send_refresh
       gen = generation
       bytes = Gori::Env.expand_bindings(bytes, verbatim, generation: gen)
@@ -447,10 +454,9 @@ module Gori::Fuzz
       # blocked attempt never reaches the network. It still costs a request from the
       # engine's budget, exactly as CappedBackend already charges retries and redirect
       # hops — one accounting path, not two.
-      if err = @outbound.sweep_block(@origin.scheme, @origin.host, Gori::Outbound.request_target(bytes), @origin.port) || @outbound.admit
-        @blocked += 1
-        @blocked_reason ||= err
-        return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err)
+      if err = @outbound.sweep_block(@origin.scheme, @origin.host, Gori::Outbound.request_target(bytes), @origin.port)
+        @outbound.refund(1)
+        return refused(err)
       end
       # The POOL first, whichever protocol it pools: it is the only branch that can reuse a
       # connection, and both unpooled engines below dial a fresh one per send.
@@ -474,6 +480,13 @@ module Gori::Fuzz
       result.with_wire(bytes)
     end
 
+    # A send gori refused before the socket: counted, and the first reason kept.
+    private def refused(err : String) : Repeater::Result
+      @blocked += 1
+      @blocked_reason ||= err
+      Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err)
+    end
+
     # One WebSocket variation — see `Backend#send_ws`. Mirrors `send` above pass for pass, and
     # `Repeater::Sender#send_ws` seam for seam; where the two differ, the reason is named.
     def send_ws(handshake : Bytes, frames : Array(WsFrame),
@@ -483,6 +496,9 @@ module Gori::Fuzz
       # The FRAMES carry provenance individually (`WsFrame#evidence`) because the two
       # populations mix in one script — a `--message` override sits beside seeded rows.
       verbatim = Backend.all_verbatim(handshake) if @evidence
+      if err = @outbound.admit # before the refresh and the mint, as in `send`
+        return {refused(err), WsOutcome.failed}
+      end
       before_send_refresh
       ws_gen = generation
       wire = Gori::Env.expand_bindings(handshake, verbatim, generation: ws_gen)
@@ -494,10 +510,9 @@ module Gori::Fuzz
       # A handshake gets no hints (`ClientHints.apply` says why); called so this seam holds the
       # same pair as every other and a later answer lands here too.
       wire = Gori::Env.client_hints(wire, ws_gen)
-      if err = @outbound.sweep_block(@origin.scheme, @origin.host, Gori::Outbound.request_target(wire), @origin.port) || @outbound.admit
-        @blocked += 1
-        @blocked_reason ||= err
-        return {Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err), WsOutcome.failed}
+      if err = @outbound.sweep_block(@origin.scheme, @origin.host, Gori::Outbound.request_target(wire), @origin.port)
+        @outbound.refund(1)
+        return {refused(err), WsOutcome.failed}
       end
       msgs = frames.map do |f|
         payload = f.evidence ? f.payload : Gori::Env.expand_bindings_frame(f.payload, f.payload_spans, generation: generation)
@@ -609,6 +624,12 @@ module Gori::Fuzz
       # `send`, still gated, still one Result per request in order). The rule pre-filters to
       # HTTP/1.1 anyway, so this is a belt-and-braces guard, not a hot path.
       return super if @http2
+      # The budget's slots before the refresh and the mint, as in `send`.
+      if err = @outbound.admit(requests.size)
+        @blocked += requests.size
+        @blocked_reason ||= err
+        return requests.map { Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err) }
+      end
       before_send_refresh
       # WIRED FIRST, then gated — `Repeater::Sender#send_group`'s discipline, and for its
       # reason. This ran the seam once to read each target and AGAIN to build the bytes, which
@@ -626,15 +647,11 @@ module Gori::Fuzz
       reqs.each do |req|
         if err = @outbound.sweep_block(@origin.scheme, @origin.host,
              Gori::Outbound.request_target(req), @origin.port)
+          @outbound.refund(requests.size)
           @blocked += requests.size
           @blocked_reason ||= err
           return requests.map { Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err) }
         end
-      end
-      if err = @outbound.admit(reqs.size)
-        @blocked += requests.size
-        @blocked_reason ||= err
-        return requests.map { Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err) }
       end
       Repeater::Engine.send_pipeline(reqs, scheme: @origin.scheme, host: @origin.host,
         port: @origin.port, verify_upstream: @verify, sni: @sni,
@@ -654,6 +671,16 @@ module Gori::Fuzz
       # real stream multiplexing in H2Engine, a separate, larger change.
       return super if @http2
 
+      # Every member and every warm-up is a request against the project budget, admitted before
+      # the group is dialled so the race window itself never waits — and before the refresh and
+      # the mint, as in `send`. A refusal below hands the slots back.
+      slots = warmup ? jobs.size * 2 : jobs.size
+      if err = @outbound.admit(slots)
+        @blocked += jobs.size
+        @blocked_reason ||= err
+        return Array(Repeater::Result).new(jobs.size) { Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err) }
+      end
+
       # A refresh happens BEFORE the group is dialled, never between warm-up and release: the
       # race's whole premise is that nothing else happens in that window.
       before_send_refresh
@@ -664,9 +691,13 @@ module Gori::Fuzz
       expanded = Gori::Env.client_hints(expanded, race_gen)
       # Nothing to hold back — degrade rather than slice a negative/empty tail. Never hit by a
       # real HTTP request (always well over 2 bytes); a defensive floor for a hand-built Job.
-      return super if expanded.size < 2
+      if expanded.size < 2
+        @outbound.refund(slots) # each member admits its own in the per-member default
+        return super
+      end
 
       if err = @outbound.sweep_block(@origin.scheme, @origin.host, Gori::Outbound.request_target(expanded), @origin.port)
+        @outbound.refund(slots)
         @blocked += jobs.size
         @blocked_reason ||= err
         return jobs.map { Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err) }
@@ -689,17 +720,11 @@ module Gori::Fuzz
       # explicit element type gives the compiler the answer without one.
       if w = warmup
         if err = @outbound.sweep_block(@origin.scheme, @origin.host, Gori::Outbound.request_target(w), @origin.port)
+          @outbound.refund(slots)
           @blocked += jobs.size
           @blocked_reason ||= err
           return Array(Repeater::Result).new(jobs.size) { Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err) }
         end
-      end
-      # Every member and every warm-up is a request against the project budget, admitted before
-      # the group is dialled so the race window itself never waits.
-      if err = @outbound.admit(warmup ? jobs.size * 2 : jobs.size)
-        @blocked += jobs.size
-        @blocked_reason ||= err
-        return Array(Repeater::Result).new(jobs.size) { Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err) }
       end
 
       # Every member of a fuzz race writes the SAME post-seam `expanded` bytes — that is what

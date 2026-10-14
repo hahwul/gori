@@ -200,14 +200,17 @@ module Gori
       # between preflight and the socket (bindings, WebSocket handshake shaping, and repeated
       # race/timing sends). Never include the request-target in the error: it may contain a
       # live binding value.
-      private def wire_refusal(wire : Bytes, cancel : Proc(Bool)? = nil) : String?
+      #
+      # `admitted`: the slot was taken before `wire` (`admit`), and a refusal here hands it back.
+      private def wire_refusal(wire : Bytes, cancel : Proc(Bool)? = nil, admitted : Bool = false) : String?
         # Every send seam ends here once per request, so this is where it counts against the
         # project budget (#1601): a hand-authored send waits for the rate, and only a spent
         # total refuses it.
-        scope_refusal(wire) || @outbound.admit(halt: cancel || @outbound.halt)
+        return scope_refusal(wire) || admit(cancel: cancel) unless admitted
+        scope_refusal(wire).tap { |r| @outbound.refund(1) if r }
       end
 
-      # `wire_refusal` without the budget, so a group gates every member before it takes a slot.
+      # `wire_refusal` without the budget.
       private def scope_refusal(wire : Bytes) : String?
         target = Gori::Outbound.request_target(wire)
         verdict = @outbound.check_wire_request(@scheme, @host, target, @port)
@@ -215,9 +218,18 @@ module Gori
         refusal_wired(wire)
       end
 
-      # A group is one unit: every member's gate, then its slots, so a blocked member spends none.
+      # A group is one unit: one blocked member refuses it, and hands back the slots it took.
       private def group_wire_refusal(requests : Array(Bytes)) : String?
-        requests.each.compact_map { |b| scope_refusal(b) }.first? || @outbound.admit(requests.size)
+        reason = requests.each.compact_map { |b| scope_refusal(b) }.first?
+        @outbound.refund(requests.size) if reason
+        reason
+      end
+
+      # The project budget's slot(s) BEFORE `wire` (#1601): a wait for the rate happens before
+      # the session refresh and the `$GEN` mint, never between them and the socket, so a queued
+      # send does not carry a TOTP minted seconds ago. A gate that then refuses refunds them.
+      def admit(count : Int32 = 1, cancel : Proc(Bool)? = nil) : String?
+        @outbound.admit(count, halt: cancel || @outbound.halt)
       end
 
       # Does the `$NAME` binding pass run at this seam? The two independent reasons it does not
@@ -349,7 +361,10 @@ module Gori
       end
 
       def send(bytes : Bytes) : Result
-        send_wire(wire(bytes))
+        if reason = admit
+          return Result.new(Bytes.new(0), nil, nil, 0_i64, reason)
+        end
+        send_wire(wire(bytes), admitted: true)
       end
 
       # Send bytes that are ALREADY through `wire` — for a surface that has to hold the exact
@@ -363,8 +378,10 @@ module Gori
       # `refusal_wired` and not `refusal`: the argument is already through `wire`, and
       # `refusal` would run the binding pass over it a SECOND time. That is not the no-op this
       # comment used to claim — see `refusal_wired`.
-      def send_wire(wire : Bytes, cancel : Proc(Bool)? = nil) : Result
-        if reason = wire_refusal(wire, cancel)
+      #
+      # `admitted`: the caller already took this send's budget slot (`admit`) before `wire`.
+      def send_wire(wire : Bytes, cancel : Proc(Bool)? = nil, admitted : Bool = false) : Result
+        if reason = wire_refusal(wire, cancel, admitted)
           return Result.new(Bytes.new(0), nil, nil, 0_i64, reason)
         end
         result =
@@ -393,9 +410,9 @@ module Gori
       # Sender with `expand_bindings: false`, or the gate would have decided about
       # `/api?SECRETTOKEN123=1` while `/api?$TOKEN=1` went on the wire.
       def send_fields(fields : Array({String, String}), body : Bytes?,
-                      cancel : Proc(Bool)? = nil) : Result
+                      cancel : Proc(Bool)? = nil, admitted : Bool = false) : Result
         scope = H2Engine.field_scope_line(fields)
-        if reason = wire_refusal(scope, cancel)
+        if reason = wire_refusal(scope, cancel, admitted)
           return Result.new(Bytes.new(0), nil, nil, 0_i64, reason)
         end
         # No SESSION SLOT overlay here, and this is a limit rather than an omission: a slot's
@@ -421,6 +438,9 @@ module Gori
         # pass each, and the verdict is taken on the bytes the pipeline will write.
         # `Plan#refusal` still predicts from the drafts, which is what lets a caller report the
         # block before printing anything.
+        if reason = admit(requests.size)
+          return requests.map { Result.new(Bytes.new(0), nil, nil, 0_i64, reason) }
+        end
         requests = requests.map { |b| wire(b) }
         if reason = group_wire_refusal(requests)
           return requests.map { Result.new(Bytes.new(0), nil, nil, 0_i64, reason) }
@@ -447,6 +467,9 @@ module Gori
       # .single_packet`; the caller has already resolved these members to ONE origin (this
       # Sender's), which the surface enforces before building the plan.
       def send_race(requests : Array(Bytes)) : Array(Result)
+        if reason = admit(requests.size)
+          return requests.map { Result.new(Bytes.new(0), nil, nil, 0_i64, reason) }
+        end
         requests = requests.map { |b| wire(b) }
         if reason = group_wire_refusal(requests)
           return requests.map { Result.new(Bytes.new(0), nil, nil, 0_i64, reason) }
@@ -475,8 +498,11 @@ module Gori
         # Wired once, then gated on that slice — the HTTP path's discipline (see `send_group`).
         # This used to gate the draft and wire separately, so the handshake was passed through
         # the seam twice and the verdict could be taken on a URL the socket never got.
+        if reason = admit(cancel: cancel)
+          return WsEngine::Result.new(Bytes.new(0), [] of WsEngine::Message, 0_i64, reason)
+        end
         wired = wire(upgrade)
-        if reason = wire_refusal(wired, cancel)
+        if reason = wire_refusal(wired, cancel, admitted: true)
           return WsEngine::Result.new(Bytes.new(0), [] of WsEngine::Message, 0_i64, reason)
         end
         # EXTRACTION is handshake-only — a WS frame is not an HTTP response and `TokenExtract`'s

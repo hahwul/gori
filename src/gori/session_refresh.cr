@@ -644,9 +644,11 @@ module Gori
         if reason = step_refusal(plan, outbound)
           return failed(slot, manual, n, label, reason, nil, flows)
         end
+        # The budget slot before the wire pass, so a login's `$GEN.TOTP` is minted after any wait.
+        return failed(slot, manual, n, label, reason, nil, flows) if reason = plan.admit
         sent_at = Time.utc.to_unix_ms * 1000_i64
         wire = plan.wire_bytes
-        result = plan.send_wire(wire)
+        result = plan.send_wire(wire, admitted: true)
         record(plan, result, sent_at, wire, slot.name, n).try { |fid| flows << fid }
         return failed(slot, manual, n, label, result.error.to_s, nil, flows) if result.error
         status = result.response.try(&.status)

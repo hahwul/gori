@@ -73,7 +73,10 @@ describe "Repeater scope checks at the final wire seam" do
         ], target: "http://127.0.0.1:1/", expand_request: false),
         Gori::Outbound.agent(scope, false))
       plan.send_race.each { |r| r.error.to_s.should start_with(Gori::Repeater::Sender::SCOPE_REFUSAL_PREFIX) }
-      store.setting(Gori::Store::OUTBOUND_BUDGET_SPENT_KEY).should be_nil # no slot leased
+      # The slots are taken before the wire pass (so a wait cannot age a `$GEN` mint) and the
+      # refusal hands them all back.
+      Gori::Outbound::Budget.release(store)
+      store.setting(Gori::Store::OUTBOUND_BUDGET_SPENT_KEY).should eq("0")
     end
   end
 end
