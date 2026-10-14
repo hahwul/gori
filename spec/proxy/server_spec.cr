@@ -1426,8 +1426,9 @@ describe Gori::Proxy::Server do
       n = client.read(Bytes.new(64))
       n == 0 ? "closed" : "answered #{n} bytes"
     rescue ex
-      # Windows resets, rather than closes, a socket shut with the follow-up request unread.
-      reset = {{ flag?(:win32) }} && ex.is_a?(IO::Error) && !ex.is_a?(IO::TimeoutError)
+      # A socket shut with the follow-up request unread is reset, not closed: always on
+      # Windows, and on POSIX too whenever the GET lands before gori closes (a loaded machine).
+      reset = ex.is_a?(IO::Error) && !ex.is_a?(IO::TimeoutError)
       reset ? "closed" : "#{ex.class} after #{(Time.instant - t0).total_milliseconds.round.to_i}ms"
     end
     client.close
