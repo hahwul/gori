@@ -593,6 +593,35 @@ describe Gori::Rules do
         rules.preview(replace).matched.should eq(1)
       end
     end
+
+    # The proxy de-chunks before a body rule and refuses a compressed body; the preview read
+    # the stored wire form, so a json op never matched a chunked body the proxy did edit.
+    it "previews a body rule against the entity the proxy rewrites" do
+      with_store do |store|
+        add = ->(head : String, body : String) do
+          id = store.insert_flow(Gori::Store::CapturedRequest.new(
+            created_at: 1_000_i64, scheme: "http", host: "acme.test", port: 80,
+            method: "GET", target: "/x", http_version: "HTTP/1.1",
+            head: "GET /x HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, source: Gori::FlowSource::Kind::Proxy))
+          store.update_response(Gori::Store::CapturedResponse.new(flow_id: id, status: 200,
+            head: "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n#{head}\r\n".to_slice, body: body.to_slice))
+        end
+        add.call("Transfer-Encoding: chunked\r\n", "E\r\n{\"role\":\"usr\"}\r\n0\r\n\r\n")
+        add.call("Content-Encoding: gzip\r\n", %({"role":"usr"}))
+        add.call("", %({"role":"usr","pad":"#{"x" * Gori::Rules::RULE_PREVIEW_BODY_MAX}"}))
+        store.flush
+
+        rules = Gori::Rules.load(store)
+        json = Gori::Store::MatchRule.new(0_i64, true, Gori::Store::RuleTarget::Response,
+          Gori::Store::RulePart::Body, "role", %("admin"), Gori::Store::RuleOp::JsonSet)
+        pv = rules.preview(json)
+        {pv.scanned, pv.matched}.should eq({2, 1}) # the cut body is left out, not a miss
+        literal = Gori::Store::MatchRule.new(0_i64, true, Gori::Store::RuleTarget::Response,
+          Gori::Store::RulePart::Body, "usr", "admin")
+        pv = rules.preview(literal)
+        {pv.scanned, pv.matched}.should eq({3, 2}) # not the gzip one
+      end
+    end
   end
 
   # --- scope: the global library + this project's overrides ------------------------------

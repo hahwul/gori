@@ -2019,18 +2019,21 @@ module Gori
 
     # How many of up to `limit` recent stored flows a candidate rule WOULD affect, by
     # replaying the SAME transform the live proxy uses (so regex / header ops / host-scope
-    # are all reflected). Nothing is written. Approximate: bodies are scanned as STORED
-    # (possibly compressed) wire bytes, so a text pattern mainly reflects head/text hits.
+    # are all reflected). Nothing is written. Approximate: a body is read as the proxy's rule
+    # sees it (de-chunked; a compressed one is refused there and so here), but only its first
+    # RULE_PREVIEW_BODY_MAX bytes.
     def preview(rule : Store::MatchRule, limit : Int32 = RULE_PREVIEW_SCAN) : Preview
       scanned = 0
       matched = 0
       # Head/header rules never touch the body, so fetch head-only; body rules cap the
-      # fetched bytes. Without this the preview pulled every flow's FULL request+response
-      # body into memory per keystroke, stalling proportionally to stored body size.
-      body_max = rule.part.body? ? RULE_PREVIEW_BODY_MAX : 0
+      # fetched bytes (one past the cap, to tell a cut body). Without this the preview pulled
+      # every flow's FULL request+response body into memory per keystroke, stalling
+      # proportionally to stored body size.
+      body_max = rule.part.body? ? RULE_PREVIEW_BODY_MAX + 1 : 0
       @store.recent_flows(limit, nil).each do |row|
         detail = @store.get_flow(row.id, body_max: body_max)
         next unless detail
+        next if json_body_cut?(rule, detail)
         scanned += 1
         matched += 1 if rule_affects?(rule, detail)
       end
@@ -2125,10 +2128,28 @@ module Gori
 
     private def flow_part_bytes(detail : Store::FlowDetail, rule : Store::MatchRule) : Bytes?
       if rule.target.request?
-        rule.part.head? ? live_request_head(detail) : detail.request_body
+        rule.part.head? ? live_request_head(detail) : live_body(detail.request_head, detail.request_body)
       else
-        rule.part.head? ? detail.response_head : detail.response_body
+        rule.part.head? ? detail.response_head : live_body(detail.response_head, detail.response_body)
       end
+    end
+
+    # A stored body as the proxy's body rule sees it (`ClientConn#apply_body_rewrite`): the
+    # entity of a chunked one, and nothing for a compressed one, which the proxy refuses to
+    # rewrite. Read off the stored wire form, it never matched a json op on a chunked body.
+    private def live_body(head : Bytes?, body : Bytes?) : Bytes?
+      return body if head.nil? || body.nil? || body.empty?
+      return nil if Proxy::Codec::ContentDecode.content_encoded?(head)
+      Proxy::Codec::ContentDecode.decode(head, body)[0] || body
+    end
+
+    # A json op answers for the WHOLE body or not at all, so a body cut short (past the
+    # preview's cap, or by the capture's) reads as "no match" where the proxy, holding all of
+    # it, may well edit it. Such a flow is left out of `scanned` rather than counted a miss.
+    private def json_body_cut?(rule : Store::MatchRule, detail : Store::FlowDetail) : Bool
+      return false unless rule.op.json? && rule.part.body?
+      body, cut = rule.target.request? ? {detail.request_body, detail.request_body_truncated?} : {detail.response_body, detail.response_body_truncated?}
+      cut || (body.try(&.size) || 0) > RULE_PREVIEW_BODY_MAX
     end
 
     private def refresh : Nil
