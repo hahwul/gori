@@ -446,6 +446,8 @@ module Gori
       return Terminal::Error if errored
       return Terminal::ConditionMet if stop_reason
       return Terminal::Stopped if stopped
+      # The project request budget (#1601) refused a payload: a partial run, like its own cap.
+      return Terminal::BudgetExhausted if progress.blocked_reason.try { |r| Gori::Outbound.budget_refusal?(r) }
       incomplete = if total = progress.total
                      progress.sent < total
                    else

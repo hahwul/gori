@@ -786,15 +786,30 @@ module Gori::Fuzz
     def initialize(@inner : Backend, @cap : Int64?)
     end
 
+    # The project request budget's refusal (#1601), once one came back: that budget is shared
+    # by every run on the project, so it refuses every later send too, and the run ends here
+    # exactly as it does on its own cap — every engine already halts on `cap_reached?`.
+    getter budget_refusal : String? = nil
+
     def cap_reached? : Bool
-      return true if @reserve_short
+      return true if @reserve_short || @budget_refusal
       (c = @cap) && c > 0 ? @sent >= c : false
     end
 
     def send(bytes : Bytes, verbatim : Array({Int32, Int32})?) : Repeater::Result
       return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, CAP_ERROR) if cap_reached?
       @sent += 1
-      @inner.send(bytes, verbatim)
+      settle(@inner.send(bytes, verbatim), 1)
+    end
+
+    # A send the project budget refused never left gori: hand back its charge (`sent` is the
+    # wire count) and latch the refusal. `n` is what the call charged.
+    private def settle(r : Repeater::Result, n : Int) : Repeater::Result
+      if (e = r.error) && Gori::Outbound.budget_refusal?(e)
+        @sent = Math.max(@sent - n, 0_i64)
+        @budget_refusal ||= e
+      end
+      r
     end
 
     # NOT a default delegation to `send` per-member: `Fuzz::Engine` ALWAYS wraps its backend
@@ -819,7 +834,9 @@ module Gori::Fuzz
         return jobs.map { Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, CAP_ERROR) }
       end
       @sent += jobs.size
-      @inner.send_race(jobs, warmup: warmup, timeout: timeout)
+      results = @inner.send_race(jobs, warmup: warmup, timeout: timeout)
+      results.each { |r| settle(r, 1) } # one charge per member, as `@sent` took them
+      results
     end
 
     # NOT a default delegation, for exactly the reason `send_race` above is not: `Fuzz::Engine`
@@ -836,7 +853,9 @@ module Gori::Fuzz
         return {Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, CAP_ERROR), WsOutcome.failed}
       end
       @sent += 1
-      @inner.send_ws(handshake, frames, verbatim)
+      pair = @inner.send_ws(handshake, frames, verbatim)
+      settle(pair[0], 1)
+      pair
     end
   end
 
@@ -1706,7 +1725,8 @@ module Gori::Fuzz
       # `@blocked`/`@blocked_reason` are the ENGINE's payload-unit tally (see the field comment),
       # NOT `@backend.blocked` — the backend counts every refused call, which double-counts a
       # gate-refused payload's retries and its redirect hops and poisons `all_blocked`.
-      Progress.new(@sent, total, @matched, @errors, @blocked, @blocked_reason,
+      # A budget refusal is the reason named: it is what ended the run (`Fuzz.terminal_verdict`).
+      Progress.new(@sent, total, @matched, @errors, @blocked, @backend.budget_refusal || @blocked_reason,
         @backend.sent + @backend.extra_requests,
         @matcher.grpc_stale, @matcher.grpc_requests, @matcher.grpc_stale_reason,
         @backend.ws_notes, @backend.ws_note_reason, @request_macro.try(&.tally))
