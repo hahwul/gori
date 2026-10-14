@@ -651,6 +651,9 @@ module Gori::Proxy
                                ca : String = Settings.upstream_proxy_ca) : OpenSSL::SSL::Context::Client
       @@proxy_tls_contexts[{verify, ca}] ||= begin
         ctx = OpenSSL::SSL::Context::Client.new
+        {% if OpenSSL.has_constant?(:KTLS) %}
+          ctx.remove_options(OpenSSL::SSL::Options::ENABLE_KTLS) # see ContextFactory.lean_server
+        {% end %}
         if verify
           apply_system_trust(ctx) unless env_ca_override?
           # ADDITIVE (SSL_CTX_load_verify_locations appends), like apply_system_trust: a private
@@ -1107,6 +1110,9 @@ module Gori::Proxy
                                     tls : Settings::OutboundTlsRule = Settings::DEFAULT_OUTBOUND_TLS) : OpenSSL::SSL::Context::Client
       @@tls_contexts[{verify, alpn, tls.cache_key}] ||= begin
         ctx = OpenSSL::SSL::Context::Client.new
+        {% if OpenSSL.has_constant?(:KTLS) %}
+          ctx.remove_options(OpenSSL::SSL::Options::ENABLE_KTLS) # see ContextFactory.lean_server
+        {% end %}
         if verify
           apply_system_trust(ctx) unless env_ca_override?
         else

@@ -16,10 +16,15 @@ describe Gori::Proxy::Tls::ContextFactory do
     # The lean context re-spells what the stdlib's `Server.new` sets, minus the system CA
     # bundle. Compared against a live stdlib context so a Crystal upgrade that changes those
     # defaults fails here instead of quietly diverging.
-    it "matches a stdlib Server.new context in everything but the verify paths" do
+    it "matches a stdlib Server.new context in everything but the verify paths and KTLS" do
       lean = Gori::Proxy::Tls::ContextFactory.lean_server
       stdlib = OpenSSL::SSL::Context::Server.new
-      lean.options.should eq(stdlib.options)
+      # Crystal 1.22 turns KTLS on by default; gori keeps it off (see `lean_server`).
+      ktls = OpenSSL::SSL::Options::ENABLE_KTLS
+      (lean.options & ~ktls).should eq(stdlib.options & ~ktls)
+      {% if OpenSSL.has_constant?(:KTLS) %}
+        lean.options.includes?(ktls).should be_false
+      {% end %}
       lean.modes.should eq(stdlib.modes)
       lean.verify_mode.should eq(stdlib.verify_mode)
       lean.security_level.should eq(stdlib.security_level)

@@ -396,6 +396,7 @@ end
 
 private def trusting_client(raw : IO, ca_dir : String, sni : String) : OpenSSL::SSL::Socket::Client
   ctx = OpenSSL::SSL::Context::Client.new
+  ctx.remove_options(OpenSSL::SSL::Options::ENABLE_KTLS) # `raw` may not be a Socket (Crystal 1.22 KTLS)
   ca_cert = Cert.read_pem(File.join(ca_dir, "root.crt.pem"))
   store = LibSSL.ssl_ctx_get_cert_store(ctx.to_unsafe)
   LibCrypto.x509_store_add_cert(store, ca_cert.handle)

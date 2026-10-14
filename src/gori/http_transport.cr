@@ -115,6 +115,9 @@ module Gori
     private def self.wrap_tls(tcp : IO, host : String, port : Int32, verify : Bool,
                               io_timeout : Time::Span) : OpenSSL::SSL::Socket::Client
       context = OpenSSL::SSL::Context::Client.new
+      {% if OpenSSL.has_constant?(:KTLS) %}
+        context.remove_options(OpenSSL::SSL::Options::ENABLE_KTLS) # see Proxy::Tls::ContextFactory.lean_server
+      {% end %}
       if verify
         Proxy::Upstream.apply_system_trust(context)
       else

@@ -62,6 +62,11 @@ module Gori::Proxy::Tls
         NO_SESSION_RESUMPTION_ON_RENEGOTIATION,
         NO_RENEGOTIATION,
       ))
+      # Kernel TLS stays off on every gori context, even though Crystal 1.22's stdlib turns it
+      # on by default: gori layers TLS over IOs that are not a `Socket` (a peeked client
+      # stream, the TLS socket of an upstream proxy), and 1.22's BIO casts its IO to `Socket`
+      # when OpenSSL enables KTLS after the handshake, raising a TypeCastError. KTLS buys an
+      # inspecting proxy nothing anyway.
       {% if OpenSSL.has_constant?(:KTLS) %}
         ctx.remove_options(OpenSSL::SSL::Options::ENABLE_KTLS)
       {% end %}
