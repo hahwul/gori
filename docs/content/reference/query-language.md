@@ -193,7 +193,7 @@ dropped and reported, the same way a bad numeric value is, rather than searched 
 `ws:needle` matches a flow whose socket carried a message containing `needle` (case-insensitive);
 `ws~regex` matches by regex. Both directions are searched, TEXT and BINARY payloads alike, as the
 stored bytes: a NUL earlier in a payload does not hide a later hit. Ping, pong and close frames are
-not messages and never match, and neither do the `[gori] ` notice rows gori writes about a socket.
+not messages and never match, and neither do the `[gori] ` notice rows gori writes about a socket. Notices are told apart by that prefix, so a peer message that starts with `[gori] ` is skipped too.
 `-ws:x` keeps every flow that carried no such message, including flows that are not sockets at all.
 
 ```text
