@@ -250,7 +250,7 @@ A DevTools port gives any local process full control of the browser without auth
 Point an Android emulator or rooted test device at a live gori over `adb`: the palette's **Set up Android device**, from a script. gori keeps its loopback bind; `adb reverse` maps the device's `127.0.0.1:PORT` to it, and the device's global HTTP proxy is set to that address.
 
 ```bash
-gori run android devices                 # serial, state, model, api=N,emulator,root
+gori run android devices                 # serial, state, model, api=N,emulator,root (adbd as root; listing never asks su)
 gori run android setup --dry-run         # print the adb commands, change nothing
 gori run android setup --system          # trust the CA in the system store, as root
 gori run android undo

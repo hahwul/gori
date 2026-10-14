@@ -60,7 +60,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # Probe, plan and run a setup in `mode` (nil: undo) on the worker fiber; the toast and
   # whether it worked.
   def self.android_task(adb : String, serial : String, mode : Android::Mode?, port : Int32, ca : String) : {String, Bool}
-    probe = Android.probe(adb, serial)
+    probe = Android.probe(adb, serial, try_su: mode.nil? || mode.system?)
     unless mode
       # The TUI's setup maps gori's own port, so that is the one to remove when the device's
       # proxy no longer names it. The rest is best-effort; only the proxy reset has to land.

@@ -100,11 +100,13 @@ module Gori
       Probe.new(sdk.to_i?, qemu1 == "1" || qemu2 == "1", uid == "0" ? Root::Adbd : nil, proxy.presence.try { |p| p unless p == "null" })
     end
 
-    def self.probe(adb : String, serial : String) : Probe
+    # `try_su` only where root is used (a system CA, an undo): on a Magisk phone each su try is
+    # a superuser prompt that blocks up to its timeout.
+    def self.probe(adb : String, serial : String, try_su : Bool = true) : Probe
       ok, text, err = capture(adb, ["-s", serial, "shell", PROBE_SCRIPT])
       raise Gori::Error.new("cannot read #{serial}: #{last_line(err, text)}") unless ok
       found = parse_probe(text)
-      return found if found.root
+      return found if found.root || !try_su
       su = {Root::Su0, Root::SuC}.find do |r|
         got, uid, _ = capture(adb, ["-s", serial, "shell", as_root(r, "id -u")])
         got && last_line(uid) == "0"

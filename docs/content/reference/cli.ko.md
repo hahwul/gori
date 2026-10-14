@@ -243,7 +243,7 @@ DevTools 포트가 열려 있으면 로컬의 어떤 프로세스든 인증 없�
 `adb`로 Android 에뮬레이터나 루팅된 테스트 기기를 실행 중인 gori에 연결합니다. 팔레트의 **Set up Android device**를 스크립트에서 쓰는 형태입니다. gori는 loopback 바인드를 유지하고, `adb reverse`가 기기의 `127.0.0.1:PORT`를 gori로 이어 주며, 기기의 전역 HTTP 프록시가 그 주소로 설정됩니다.
 
 ```bash
-gori run android devices                 # serial, 상태, 모델, api=N,emulator,root
+gori run android devices                 # serial, 상태, 모델, api=N,emulator,root (adbd가 root일 때; 목록은 su를 묻지 않음)
 gori run android setup --dry-run         # adb 명령만 출력하고 아무것도 바꾸지 않음
 gori run android setup --system          # root로 CA를 시스템 저장소에 신뢰 등록
 gori run android undo
