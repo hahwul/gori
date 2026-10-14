@@ -70,6 +70,7 @@ module Gori
           source_surface: surface,
           source_ref: source_ref,
         )
+        captured.rewrite = plan.rewrite
         id = store.insert_flow(captured)
         raise Gori::Error.new("could not record the send in History (project busy) — the send happened, but no flow id was written") if id <= 0
         if resp = result.response

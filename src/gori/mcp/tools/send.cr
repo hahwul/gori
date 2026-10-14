@@ -106,7 +106,7 @@ module Gori
         recorded_flow_id = nil.as(Int64?)
         if record_history
           id = record_outbound_request(built, wire, http2, plan.h2_fields,
-            source_ref: send_seed_ref(h))
+            source_ref: send_seed_ref(h), rewrite: plan.rewrite)
           # BEFORE the send, and it stays that way: `record_history` defaults to true and is an
           # audit promise, so a row that cannot be written means this request must not go out
           # unaudited. `insert_flow` answers 0 rather than blocking when it loses SQLite's single
@@ -837,7 +837,8 @@ module Gori
 
       private def record_outbound_request(built : RequestBuilder::Built, wire : Bytes, http2 : Bool,
                                           h2_fields : Array({String, String})? = nil,
-                                          source_ref : String? = nil) : Int64
+                                          source_ref : String? = nil,
+                                          rewrite : Store::Rewrite? = nil) : Int64
         head, body = split_wire_request(Repeater::SendPersistence.replayable_request(
           h2_fields, built.host, built.port, wire))
         # Field-native: `head` is the h1 PROJECTION, not the pseudo-explicit dump, so the
@@ -873,6 +874,7 @@ module Gori
           source_surface: Gori::FlowSource::Surface::Mcp,
           source_ref: source_ref,
         )
+        captured.rewrite = rewrite
         # 0 (or less) means the row did NOT commit — the caller turns that into PROJECT_BUSY and
         # refuses the send. Answered rather than raised: `send_request`'s `Gori::Error` rescue is
         # for genuine argument mistakes, and a held writer is not one of those.

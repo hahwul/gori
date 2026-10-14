@@ -111,4 +111,22 @@ describe Gori::Repeater::HistoryRecord do
       store.get_flow(id).not_nil!.row.state.error?.should be_true
     end
   end
+
+  # An `--apply-rules` send recorded the rewritten bytes with no trace of the rule, while the
+  # same rule on the proxy path names itself on the flow and keeps what it replaced.
+  it "records which rules rewrote an apply_rules send, and the bytes they replaced" do
+    with_store do |store|
+      rule = Gori::Store::MatchRule.new(7_i64, true, Gori::Store::RuleTarget::Request,
+        Gori::Store::RulePart::Body, "hello", "howdy")
+      plan, _ = Gori::Repeater::RequestRules.apply(
+        plan_for("POST /login HTTP/1.1\r\nHost: t.test\r\nContent-Length: 5\r\n\r\nhello"),
+        Gori::Rules.new(store, [rule]))
+      id = Gori::Repeater::HistoryRecord.record(store, plan, result_for("HTTP/1.1 200 OK\r\n\r\n", nil),
+        created_at: 1_i64, wire: plan.wire_bytes, surface: Gori::FlowSource::Surface::Cli)
+      store.flush
+      store.get_flow(id).not_nil!.row.rewritten_by.not_nil!.map(&.id).should eq([7_i64])
+      _, body = store.rewrite_original(id, Gori::Store::RuleTarget::Request).not_nil!
+      String.new(body.not_nil!).should eq("hello")
+    end
+  end
 end
