@@ -126,6 +126,7 @@ describe Gori::Android do
     Gori::Android.mapped_port("10.0.2.2:8070").should be_nil
     Gori::Android.mapped_port(":0").should be_nil
     Gori::Android.mapped_port(nil).should be_nil
+    Gori::Android.mapped_port("127.0.0.1:٨٠").should be_nil
   end
 
   it "only reverses to a gori on this machine's loopback" do

@@ -48,6 +48,11 @@ describe "Gori::ClientHints.for_user_agent" do
     CH.for_user_agent(ua).should be_nil
   end
 
+  it "gives no hints, without raising, for a major in non-ASCII digits" do
+    ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/١٢٠.0.0.0 Safari/537.36"
+    CH.for_user_agent(ua).should be_nil
+  end
+
   it "derives all three from a Chrome UA, seeded and versioned by its own major" do
     CH.for_user_agent(WIN_153).should eq([
       {"sec-ch-ua", ser(153, "Google Chrome", "153")},

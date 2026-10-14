@@ -101,7 +101,8 @@ module Gori
         v = raw.strip.downcase
         return off if v == "off" || v.empty?
         return new(Kind::JwtExp) if v == "jwt-exp" || v == "jwt_exp"
-        return nil unless m = v.match(/\Attl[=:](\d{1,7})(s|m|h)?\z/)
+        # `[0-9]`, not `\d`: PCRE's `\d` also takes `٣`, which `to_i64` refuses by raising.
+        return nil unless m = v.match(/\Attl[=:]([0-9]{1,7})(s|m|h)?\z/)
         n = m[1].to_i64
         return nil if n <= 0
         span = case m[2]?

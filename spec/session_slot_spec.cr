@@ -78,6 +78,13 @@ describe Gori::SessionSlot do
       Slot.parse_json("").should be_empty
     end
 
+    # `\d` matched a non-ASCII digit that `to_i64` then refused by raising, out of a parse
+    # that an imported archive's settings row reaches before any validation.
+    it "refuses a TTL in non-ASCII digits rather than raising" do
+      Slot::RefreshBefore.parse?("ttl=٣").should be_nil
+      Slot.parse_json(%([{"name":"a","refresh_before":"ttl=٣"}])).map(&.name).should eq(["a"])
+    end
+
     it "skips a malformed entry and keeps the rest" do
       raw = %([{"set":[]},{"name":"ok","rules":["A","",7]}])
       back = Slot.parse_json(raw)

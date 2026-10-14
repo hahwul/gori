@@ -203,7 +203,8 @@ module Gori
 
     # The device port a setup mapped, read back from the proxy it set (`127.0.0.1:N`).
     def self.mapped_port(http_proxy : String?) : Int32?
-      return nil unless http_proxy && (m = http_proxy.match(/\A127\.0\.0\.1:(\d{1,5})\z/))
+      # `[0-9]`, not `\d`: PCRE's `\d` also takes `٨٠`, which `to_i` refuses by raising.
+      return nil unless http_proxy && (m = http_proxy.match(/\A127\.0\.0\.1:([0-9]{1,5})\z/))
       m[1].to_i.try { |p| p if p.in?(1..65_535) }
     end
 

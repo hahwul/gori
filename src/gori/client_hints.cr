@@ -38,8 +38,9 @@ module Gori
     # The exact string Chrome's BuildUserAgentFromOSAndProduct writes —
     # "Mozilla/5.0 (%s) AppleWebKit/537.36 (KHTML, like Gecko) %s Safari/537.36", where the
     # product is `Chrome/<version>` plus " Mobile" on an Android phone. Anchored at both ends,
-    # so a trailing `Edg/…` or `OPR/…` (another browser's brand) does not match.
-    CHROME_UA = /\AMozilla\/5\.0 \(([^()]*)\) AppleWebKit\/537\.36 \(KHTML, like Gecko\) Chrome\/(\d{1,4})(?:\.\d+){0,8} (Mobile )?Safari\/537\.36\z/
+    # so a trailing `Edg/…` or `OPR/…` (another browser's brand) does not match. `[0-9]`, not
+    # `\d`: PCRE's `\d` also takes `١٢٠`, which `String#to_i` refuses by raising.
+    CHROME_UA = /\AMozilla\/5\.0 \(([^()]*)\) AppleWebKit\/537\.36 \(KHTML, like Gecko\) Chrome\/([0-9]{1,4})(?:\.[0-9]+){0,8} (Mobile )?Safari\/537\.36\z/
 
     CHROME_TOKEN = "Chrome/".to_slice
 
