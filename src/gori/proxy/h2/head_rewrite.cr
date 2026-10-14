@@ -381,7 +381,10 @@ module Gori::Proxy::H2
       # `rewrite` put it behind `rw.active?`, so an operator whose only rule is a session-binding
       # extract descriptor — the case #536 is about — got nothing.
       notice_unreachable(fields) if request && head
-      rewritten = head ? rewrite(fields, head, request, stream_id) : nil
+      # Never an interim 1xx, as on HTTP/1.1 (`client_conn.cr#skip_interim_responses`: "no
+      # rewrite on interim"): the flow keeps only the final head, so a rule's change to a 103 is
+      # one nothing could show.
+      rewritten = head && (request || final_response_head?(fields)) ? rewrite(fields, head, request, stream_id) : nil
       emit_fields = rewritten || fields
       if request && message_head?(emit_fields, request)
         @assembler.remember_request_authority(stream_id, HeadCodec.pseudo_of(emit_fields, ":authority"))
@@ -488,7 +491,7 @@ module Gori::Proxy::H2
         (request ? HeadCodec.parse_request(h, fields) : HeadCodec.parse_response(h, fields))
           .try { |p| without_content_length(p) }
       end
-      note_rewrite(stream_id, request, head, fields)
+      note_rewrite(stream_id, request, head)
       restored
     end
 
@@ -497,10 +500,9 @@ module Gori::Proxy::H2
     end
 
     # The flow keeps which rules fired and the head they replaced (#1589) — in the h1-shaped form
-    # the rules read, as Intercept keeps its held head. A final response only: an interim's
-    # original would stand in for the final head the flow stores.
-    private def note_rewrite(stream_id : UInt32, request : Bool, head : Bytes, fields : Array(HPACK::Field)) : Nil
-      return if @hits.empty? || !(request || final_response_head?(fields))
+    # the rules read, as Intercept keeps its held head.
+    private def note_rewrite(stream_id : UInt32, request : Bool, head : Bytes) : Nil
+      return if @hits.empty?
       @assembler.note_rewrite(stream_id, request, Store::Rewrite.new(@hits.dup, head))
     end
 

@@ -370,6 +370,19 @@ describe Gori::Proxy::H2::HeadRewrite do
       .find { |(n, _)| n == ":status" }.not_nil![1].should eq("503")
   end
 
+  it "never rewrites an interim 1xx head, as HTTP/1.1 does not" do
+    pipe, assembler, _ = pipeline(SubRewriter.new("a.css", "evil.css"), direction: "in")
+    sender = HPACK::Encoder.new
+    hints = sender.encode([{":status", "103"}, {"link", "</a.css>; rel=preload"}])
+    final = sender.encode([{":status", "200"}, {"link", "</a.css>; rel=preload"}])
+    emitted = [] of Frame::Header
+    pipe.accept(headers(1_u32, hints, Frame::END_HEADERS)) { |f, pre| emitted << f; assembler.feed("in", f, pre) }
+    emitted.first.payload.should eq(hints)
+    pipe.engaged?.should be_false
+    pipe.accept(headers(1_u32, final)) { |f, pre| emitted << f; assembler.feed("in", f, pre) }
+    HPACK::Decoder.new.decode(emitted.last.payload).should contain({"link", "</evil.css>; rel=preload"})
+  end
+
   it "scopes a coalesced response rewrite to that stream's request authority" do
     sink = RecSink.new
     assembler = Gori::Proxy::H2::Assembler.new(sink, "api.example.com", 443)
