@@ -231,14 +231,7 @@ module Gori
         return pull.skip if depth >= JSON_MAX_DEPTH
         pull.read_begin_object
         until pull.kind.end_object?
-          key = json_key(pull.read_object_key)
-          child = if path.empty?
-                    key
-                  elsif key.starts_with?('[')
-                    "#{path}#{key}"
-                  else
-                    "#{path}.#{key}"
-                  end
+          child = member_path(path, json_key(pull.read_object_key))
           acc.size >= JSON_MAX_LEAVES ? pull.skip : walk_json(pull, child, depth + 1, acc)
         end
         pull.read_end_object
@@ -255,6 +248,11 @@ module Gori
         value = scalar_text(pull)
         acc << {path, value, literal} unless path.empty? # a bare scalar document has no name to report
       end
+    end
+
+    private def member_path(path : String, key : String) : String
+      return key if path.empty?
+      key.starts_with?('[') ? "#{path}#{key}" : "#{path}.#{key}"
     end
 
     private def scalar_text(pull : JSON::PullParser) : String
