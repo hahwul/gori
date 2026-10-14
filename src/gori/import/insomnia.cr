@@ -37,6 +37,9 @@ module Gori
 
         vars = environment_table(resources)
         groups = request_groups(resources)
+        # One layered table per folder, not per request: the export decides how many requests a
+        # folder holds, and re-flattening its environment for each one multiplied that cost.
+        folder_tables = {} of String => Vars::Table
         now = Time.utc.to_unix * 1_000_000
         pairs = [] of Builder::FlowPair
         missing = Set(String).new
@@ -49,7 +52,8 @@ module Gori
           found += 1
           # One bad request skips; the rest of the export still imports.
           begin
-            pairs << Vars.per_entry { resource_to_flow(now, h, folder_vars(h, groups, vars), missing, prov) }
+            table = folder_tables.put_if_absent(h["parentId"]?.to_s) { folder_vars(h, groups, vars) }
+            pairs << Vars.per_entry { resource_to_flow(now, h, table, missing, prov) }
           rescue
             skipped += 1
           end
