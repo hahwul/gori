@@ -986,9 +986,10 @@ module Gori
     # header). Empty host → only unscoped rules match. Order matches the proxy path (head rules
     # then body rules).
     #
-    # TWO callers, and they are not the same kind of act: the Rewriter tab's OUTPUT pane
-    # redraws a sample, and `mcp/tools/send.cr` puts bytes on a socket. The flags below are
-    # where that difference is stated.
+    # The Rewriter tab's OUTPUT pane redraws a sample through this. A real send with
+    # `apply_rules` (`Repeater::RequestRules`, MCP and `gori run`) no longer does: it takes the
+    # proxy's own `rewrite_request` / `rewrite_request_body`, whose body is the de-chunked
+    # entity, with these same defaults. The flags below are where the two acts differ.
     #
     # `run_hooks: false` is for a caller that redraws — the Rewriter tab's OUTPUT pane calls
     # this ONCE PER FRAME. A `pipe` rule there would fork the operator's command sixty times a
