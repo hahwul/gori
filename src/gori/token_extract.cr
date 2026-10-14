@@ -1,4 +1,5 @@
 require "json"
+require "http/common"
 require "./raw_json"
 require "./json_path"
 require "./repeater/engine"
