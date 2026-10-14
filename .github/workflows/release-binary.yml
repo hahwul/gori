@@ -63,7 +63,7 @@ jobs:
         # Store::SafeRegexp rely on the single-threaded fiber scheduler.
         run: |
           mkdir -p build
-          docker run --rm -v $(pwd):/gori -w /gori --entrypoint="" crystallang/crystal:1.21.0-alpine sh -c "
+          docker run --rm -v $(pwd):/gori -w /gori --entrypoint="" crystallang/crystal:1.22.0-alpine sh -c "
             apk add --no-cache git curl pkgconf \
               brotli-dev brotli-static \
               zstd-dev zstd-static \

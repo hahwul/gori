@@ -71,7 +71,7 @@ jobs:
         run: sudo apt-get update
       - uses: crystal-lang/install-crystal@v1
         with:
-          crystal: 1.21.0
+          crystal: 1.22.0
       - name: Check packaging/nix/shards.nix against shard.lock
         # The Nix flake builds from `packaging/nix/shards.nix`, which crystal2nix generates
         # from shard.lock (`just nix-shards`). Nothing forced the regeneration, and skipping
@@ -129,7 +129,7 @@ jobs:
           # runs it, not of this repo — gating on two versions would ask the tree to be
           # a fixed point of two different formatters at once. Pin the one development
           # happens on; bump this line when that moves.
-          crystal: 1.21.0
+          crystal: 1.22.0
       # No `shards install`, and the paths are explicit rather than a bare `--check`:
       # the bare form walks the whole working directory, which after an install means
       # gating on `lib/` — third-party code this repo cannot fix, breaking the build on
@@ -161,7 +161,7 @@ jobs:
           # One version, for the same reason `format` pins one: the harnesses
           # compile against the same `src` that `build-crystal` already builds, so
           # an extra version here would re-test the compiler rather than this repo.
-          crystal: 1.21.0
+          crystal: 1.22.0
       - name: Install native link dependencies
         run: |
           sudo apt-get update
@@ -213,7 +213,7 @@ jobs:
         run: sudo apt-get update
       - uses: crystal-lang/install-crystal@v1
         with:
-          crystal: 1.21.0
+          crystal: 1.22.0
       - name: Install dependencies (with ameba)
         run: shards install
       - name: No changed file may gain ameba findings
@@ -262,7 +262,7 @@ jobs:
         run: sudo apt-get update
       - uses: crystal-lang/install-crystal@v1
         with:
-          crystal: 1.21.0
+          crystal: 1.22.0
       - name: Install native link dependencies
         run: |
           sudo apt-get update
@@ -315,7 +315,7 @@ jobs:
         run: sudo apt-get update
       - uses: crystal-lang/install-crystal@v1
         with:
-          crystal: 1.21.0
+          crystal: 1.22.0
       - name: Install native link dependencies
         run: |
           sudo apt-get update
