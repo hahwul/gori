@@ -985,6 +985,7 @@ module Gori
       "display_columns" => %w[position pos_start pos_end width],
       "extract_rules"   => %w[enabled pos_start pos_end],
       "grpc_reflection" => %w[services files],
+      "h2_frames"       => %w[type flags length],
       "js_refs"         => %w[port],
       "probe_issues"    => %w[severity status],
       "flows"           => %w[port status state short_circuited],

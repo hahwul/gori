@@ -689,6 +689,22 @@ describe Gori::ProjectArchive do
     end
   end
 
+  # `Store#h2_frames` narrows type, flags and length to Int32, so an out-of-range one raised on
+  # every History detail refresh of a flow on that connection until the tick breaker ended the TUI.
+  it "refuses an archive whose h2 frame row is out of Int32 range" do
+    with_archive_project do |_registry, project, store, root|
+      store.insert_flow(archive_request("/a"))
+      store.flush
+      archive_path = export_archive(project, File.join(root, "h2.gori"))
+      tamper_archive_database(archive_path, root) do |conn|
+        conn.exec("INSERT INTO h2_frames (conn_id, created_at, direction, stream_id, type, flags, length, payload) " \
+                  "VALUES (1, 1, 'c2s', 1, 0, 0, 4294967296, X'')")
+      end
+      error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
+      error.message.not_nil!.should contain(%(never writes in "h2_frames"))
+    end
+  end
+
   # `Bindings.load` and `Colormarker.load` read these narrow columns on every project open, so an
   # out-of-range cell left the imported project unopenable rather than refused at import.
   it "refuses an archive whose open-path rule column is out of Int32 range" do
