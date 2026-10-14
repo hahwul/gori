@@ -149,6 +149,22 @@ module Gori
       @text ||= Gori::Utf8.text(decoded)
     end
 
+    # `text` parsed as JSON (`RawJson`), once: N jsonpath extractors over one response were N
+    # full parses (8 over a 200 KB body blocked the scheduler ~33 ms per response). nil when it
+    # is not JSON.
+    def json : JSON::Any?
+      return @json if @json_done
+      @json_done = true
+      @json = begin
+        RawJson.parse(text)
+      rescue JSON::ParseException
+        nil
+      end
+    end
+
+    @json : JSON::Any? = nil
+    @json_done = false
+
     private def parse_headers : Proxy::Codec::HeaderList
       return Proxy::Codec::HeaderList.new if @head.empty?
       if @side.request?
@@ -369,10 +385,8 @@ module Gori
       # and one asked for comes back as its own digits (#1200). A non-string leaf is the
       # value's own text (`raw_at`), never the tree written back out, which would quote such a
       # number inside a container.
-      text = subject.text
-      node = JsonPath.resolve(RawJson.parse(text), steps)
-      return nil unless node
-      node.as_s? || (node.raw.nil? ? nil : JsonPath.raw_at(text, steps))
+      return nil unless (tree = subject.json) && (node = JsonPath.resolve(tree, steps))
+      node.as_s? || (node.raw.nil? ? nil : JsonPath.raw_at(subject.text, steps))
     rescue JSON::ParseException
       nil
     end
