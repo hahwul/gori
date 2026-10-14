@@ -565,6 +565,23 @@ describe Gori::ProjectArchive do
     end
   end
 
+  # A current-version archive is never migrated, so a dropped side table stayed dropped and every
+  # History read of the imported project raised "no such table".
+  it "refuses a current-version archive missing a flow side table" do
+    with_archive_project do |_registry, project, store, root|
+      store.insert_flow(archive_request("/a"))
+      store.flush
+      archive_path = export_archive(project, File.join(root, "side.gori"))
+      original = File.read(archive_path)
+      %w[intercept_originals flow_interims flow_rule_hits rewrite_originals].each do |table|
+        File.write(archive_path, original)
+        tamper_archive_database(archive_path, root) { |conn| conn.exec("DROP TABLE #{table}") }
+        error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
+        error.message.not_nil!.should contain("missing required table #{table}")
+      end
+    end
+  end
+
   it "refuses an escape-laden project name from the archive manifest at registration" do
     with_archive_project do |registry, project, _store, root|
       exported = Gori::ProjectArchive.prepare_export(project)
