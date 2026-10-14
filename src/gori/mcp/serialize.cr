@@ -404,6 +404,11 @@ module Gori
       # `intercept_get` that did NOT ask for sensitive values, in the same object that still
       # reports `raw_redacted: true` — and for any text message under the preview cap this
       # field IS the full raw payload that `raw_base64` is deliberately gated on.
+      # Who wrote a held item's bytes, as `emit_body` labels a body (#1586).
+      def self.held_origin(row : Store::HeldRow) : String
+        row.kind.in?("response", "wsin") ? "target" : "client"
+      end
+
       def self.held_body_preview(row : Store::HeldRow, include_sensitive : Bool) : String?
         return nil unless row.ws? && !row.binary?
         text = redact_message_lines(String.new(row.raw).scrub, include_sensitive)
@@ -462,6 +467,7 @@ module Gori
           # signal; the ack keeps the name its own meaning has always had.
           j.field "operator_editing", row.edited
           emit_edit_warning(j, row)
+          j.field "origin", held_origin(row)
           j.field "body_size", body.size
           if row.ws?
             held_body_preview(row, include_sensitive).try { |t| j.field "body_preview", text(t) }
@@ -520,6 +526,7 @@ module Gori
           j.field "age_seconds", ((now_ms - row.held_at_ms) // 1000)
           j.field "operator_editing", row.edited # see the list projection above
           emit_edit_warning(j, row)
+          j.field "origin", held_origin(row)
           # `head`/`body_preview` split by kind, for the reason `held_head_and_body` states.
           if row.ws?
             held_body_preview(row, include_sensitive).try { |t| j.field "body_preview", text(t) }
@@ -1027,6 +1034,7 @@ module Gori
         binding = Protobuf::Schemas.resolve(target, request: request)
         j.field field_name do
           j.object do
+            j.field "origin", request ? "client" : "target" # as `emit_body` labels it (#1586)
             j.field "count", msgs.size
             if b = binding
               j.field "schema_method", b.method.path

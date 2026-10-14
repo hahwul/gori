@@ -18,6 +18,8 @@ module Gori::Oast
         timestamp:    i.at.to_rfc3339,
         raw_request:  i.raw_request,
         raw_response: i.raw_response,
+        # Whoever reached the listener wrote raw_request: label it as MCP labels a body (#1586).
+        origin: "remote",
       }
     end
 

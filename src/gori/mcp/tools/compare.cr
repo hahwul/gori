@@ -78,6 +78,7 @@ module Gori
             j.field "flow_id_a", id_a
             j.field "flow_id_b", id_b
             j.field "pane", pane.to_s
+            j.field "origin", pane == :request ? "client" : "target" # whose bytes `diff[].text` holds (#1586)
             j.field "changed_lines", change_count
             # `identical` is a stronger claim than `changed_lines: 0` and has to earn it:
             # over a CUT diff the honest answer is "unknown", not "the same". `truncated`
