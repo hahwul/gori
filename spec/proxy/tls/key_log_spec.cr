@@ -106,6 +106,24 @@ describe KeyLog do
     end
   end
 
+  {% if flag?(:darwin) %}
+    # `uappnd` allows the append but refuses the chmod, as another user's file would.
+    it "refuses a file it cannot make private instead of writing secrets into it" do
+      with_tempdir do |dir|
+        path = File.join(dir, "shared.keys")
+        File.write(path, "")
+        File.chmod(path, 0o644)
+        system("chflags", ["uappnd", path])
+        begin
+          KeyLog.configure({"SSLKEYLOGFILE" => path}).to_s.should contain("not private to you")
+          KeyLog.active?.should be_false
+        ensure
+          system("chflags", ["nouappnd", path])
+        end
+      end
+    end
+  {% end %}
+
   it "refuses a path that is not a regular file" do
     with_tempdir do |dir|
       KeyLog.configure({"SSLKEYLOGFILE" => dir}).should eq("TLS key log: #{dir} is not a regular file; not logging")

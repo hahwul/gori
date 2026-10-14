@@ -53,6 +53,15 @@ module Gori::Proxy::Tls
       if file.info.permissions.value & 0o077 != 0
         file.chmod(0o600) rescue nil
       end
+      {% unless flag?(:win32) %}
+        # Another user's file (pre-created in a shared /tmp) refuses the chmod, and its owner can
+        # read or re-open it at any time: never write secrets into it.
+        info = file.info
+        if info.owner_id != LibC.getuid.to_s || info.permissions.value & 0o077 != 0
+          file.close
+          return "TLS key log: #{path} is not private to you (owner or mode); not logging"
+        end
+      {% end %}
       file.sync = true
       @@sink = file
       "TLS key log: writing session secrets to #{path}"
