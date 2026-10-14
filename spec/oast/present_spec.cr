@@ -7,7 +7,7 @@ private alias O = Gori::Oast
 # `--format json` surface and the MCP oast_* tools — the two must never diverge).
 private INTERACTION_KEYS = %w[
   unique_id protocol method source destination provider timestamp
-  raw_request raw_response
+  raw_request raw_response origin
 ]
 
 # Build an Interaction record with sensible HTTP defaults; individual fields are
