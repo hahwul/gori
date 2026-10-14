@@ -89,14 +89,32 @@ module Gori
 
       # Nunjucks resolves `{{ _.api.host }}` through nested objects, so a nested value is also
       # filed under its dotted path. A later environment REPLACES an object wholesale, so the
-      # dotted keys an earlier one filed under that name go first.
-      private def self.flatten_into(table : Vars::Table, data : Hash(String, JSON::Any), prefix : String = "") : Nil
+      # dotted keys an earlier one filed under that name go first: in one pass over the table
+      # per environment, since a pass per key was quadratic in the key count. Every object is
+      # also filed whole, so the walk stops at MAX_DEPTH: each level holds a copy of the
+      # subtree under it, and a 500-deep nest made one 2 MB export cost a gigabyte.
+      MAX_DEPTH = 32
+
+      private def self.flatten_into(table : Vars::Table, data : Hash(String, JSON::Any), prefix : String = "", depth : Int32 = 0) : Nil
+        if prefix.empty? && !table.empty?
+          table.reject! { |name, _| replaced_under?(name, data) }
+        end
         data.each do |k, v|
           key = prefix.empty? ? k : "#{prefix}.#{k}"
-          table.reject! { |name, _| name.starts_with?("#{key}.") }
           table[key] = Vars.value_to_s(v)
-          v.as_h?.try { |nested| flatten_into(table, nested, key) }
+          next if depth >= MAX_DEPTH
+          v.as_h?.try { |nested| flatten_into(table, nested, key, depth + 1) }
         end
+      end
+
+      # Whether `name` is a dotted path under one of `data`'s top-level keys.
+      private def self.replaced_under?(name : String, data : Hash(String, JSON::Any)) : Bool
+        i = 0
+        while i = name.byte_index('.'.ord, i)
+          return true if data.has_key?(name.byte_slice(0, i))
+          i += 1
+        end
+        false
       end
 
       # The `request_group` (folder) resources by id, for `folder_vars` to walk.
