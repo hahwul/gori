@@ -261,6 +261,8 @@ module Gori
         "a flow's source is recorded when it is captured, not while it is in flight"
       when "cache"
         "cannot gate a request before its response exists"
+      when "rpc"
+        "`rpc:` reads a stored flow; match the request in hand with `body:` on its \"method\""
       when "ws"
         "a gate holds ONE message, not a transcript — `body:` already means the WebSocket message in hand"
       when .includes?('.')

@@ -226,7 +226,8 @@ module Gori
       message matching, in either direction (ws: is a case-insensitive substring, ws~ a regex).
       The stored payload bytes are searched as captured, with no index, so a ws: term scans
       the transcript of every socket. Ping/pong/close frames and gori's own `[gori] ` notice
-      rows never match; -ws:x keeps flows that carried no messages at all.
+      rows never match; -ws:x keeps every flow none of whose messages match, a flow with no
+      messages included.
 
       JSON-RPC / MCP: rpc:tools/call  rpc:initialize  rpc:tools/  — a flow whose REQUEST body is a
       JSON-RPC 2.0 call whose method starts with the value (case-sensitive). It scans the stored request

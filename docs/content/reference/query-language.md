@@ -114,9 +114,9 @@ The two common `src:` scopings are also **views**; press `v` in History to pick 
 from the Repeater tab, so `via:` is how the two are told apart.
 
 ```text
-via:mcp                               everything an agent sent
+via:mcp                               everything an agent sent or imported
 src:repeater via:tui                  only the resends you made by hand
--via:mcp                              everything the agent did not send, captures included
+-via:mcp                              everything the agent did not send or import, captures included
 ```
 
 A proxy capture has no surface, so it matches no `via:` value and every negation keeps it. A
