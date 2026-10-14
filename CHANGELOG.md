@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- A hostile gRPC reflection reply, a many-keyed or deeply nested Insomnia environment, or a JSON body with a huge key no longer freezes gori or exhausts its memory, and a crafted project archive or a TTL, Chrome User-Agent or Android proxy setting spelled in non-ASCII digits no longer crashes it (#1623)
 - Env: `$GEN.TOTP` mints the current RFC 6238 code from the env var `TOTP_SECRET` (a base32 secret or an `otpauth://totp/` URI), so a session slot's refresh steps and other replayed logins pass a one-time-code prompt; a Repeater, `gori run` or MCP send is refused when the secret is missing or malformed, and MCP `list_env` never returns it (#1591)
 - Rewriter: a flow a Match&Replace rule changed records which rules fired and keeps the bytes they replaced, shown as `RULE` and ORIGINAL / ORIGINAL RESP panes in History, `rewritten_by` in `gori run history` and MCP, `gori run show --original`, and QL `rewritten:true` or `rewritten:project/4` (#1589)
 - Project request budget: `outbound_max_rps` and `outbound_max_requests` (`gori run project network set`) cap gori-originated requests per second and in total across every run, surface and process on a project, so parallel fuzz, discover and agent runs together keep an agreed ceiling (#1601)
