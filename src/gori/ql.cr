@@ -888,7 +888,7 @@ module Gori
       when "dur"                                 then duration_cond(value)
       when "header", "req.header", "resp.header" then header_cond(value, side_of(field))
       when "body", "req.body", "resp.body"       then body_cond(value, fts, body_max, side_of(field))
-      when "ws"                                  then ws_cond(value, regex: false)
+      when "ws"                                  then ws_cond(value, regex: false, body_max: body_max)
       when "rpc"                                 then rpc_cond(value, body_max)
       when "stub"                                then flag_cond("short_circuited", value)
       when "rewritten"                           then rewritten_cond(value)
@@ -1287,11 +1287,19 @@ module Gori
     # visible rows (`Store#ids_matching`) regexed the whole table per frame. Correlated, each flow
     # is one `idx_ws_messages_flow` probe and History's `LIMIT` can stop early. `flows.id`, never a
     # bare `id`, which inside the subquery would bind to `ws_messages.id`.
-    private def self.ws_cond(value : String, regex : Bool) : SqlTerm?
+    #
+    # `body_max` (a colour rule, re-asked on every frame a chatty socket adds) reads only the
+    # first WS_SCAN_MESSAGES messages, each to `body_max` bytes: a 20k-message transcript cost
+    # ~30 ms per frame on the render path. A match past that bound is missed, as for `body:`.
+    private def self.ws_cond(value : String, regex : Bool, body_max : Int32? = nil) : SqlTerm?
       return nil unless msg = ws_message_cond(value, regex)
       cond, args = msg
-      {"EXISTS (SELECT 1 FROM ws_messages WHERE ws_messages.flow_id = flows.id AND #{cond})", args}
+      return {"EXISTS (SELECT 1 FROM ws_messages WHERE ws_messages.flow_id = flows.id AND #{cond})", args} unless body_max
+      {"EXISTS (SELECT 1 FROM (SELECT opcode, substr(payload, 1, #{body_max.to_i}) AS payload FROM ws_messages " \
+       "WHERE ws_messages.flow_id = flows.id ORDER BY ws_messages.id LIMIT #{WS_SCAN_MESSAGES}) WHERE #{cond})", args}
     end
+
+    WS_SCAN_MESSAGES = 64
 
     # The per-MESSAGE predicate behind `ws:`/`ws~`, over a `ws_messages` row — public because a
     # surface narrowing ONE flow's transcript (`Store#ws_messages(match:)`: History's MESSAGES
@@ -1515,7 +1523,7 @@ module Gori
       when "method"                              then {"method REGEXP ?", [value] of DB::Any}
       when "scheme"                              then {"scheme REGEXP ?", [value] of DB::Any}
       when "header", "req.header", "resp.header" then header_regex_cond(value, side_of(field))
-      when "ws"                                  then ws_cond(value, regex: true)
+      when "ws"                                  then ws_cond(value, regex: true, body_max: body_max)
       else # body, req.body, resp.body — the only names left in REGEX_FIELDS
         body_regex_cond(value, body_max, side_of(field))
       end

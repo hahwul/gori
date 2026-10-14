@@ -640,6 +640,10 @@ module Gori
                  "#{BODY_SCAN_MAX // 1024} KiB of each side, and the bytes are as CAPTURED, so " \
                  "a match past that bound, or inside a compressed body, is not painted."
       end
+      if lower.includes?("ws:") || lower.includes?("ws~")
+        notes << "a ws term reads only a socket's first #{QL::WS_SCAN_MESSAGES} messages here, " \
+                 "#{BODY_SCAN_MAX // 1024} KiB of each, so a later match is not painted."
+      end
       if lower.includes?("host:")
         notes << "`host:` is a substring here, not a DNS-label glob: `host:alpha.test` also matches `xalpha.test`."
       end

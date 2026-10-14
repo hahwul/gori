@@ -1590,6 +1590,18 @@ describe "Gori::QL ws: term" do
     end
   end
 
+  it "reads a bounded head of the transcript under body_max, as a colour rule asks" do
+    with_store do |store|
+      n = Gori::QL::WS_SCAN_MESSAGES
+      early = ws_flow(store, "/early", [{"in", 1, "x admin".to_slice}] + [{"in", 1, "noise".to_slice}] * n)
+      late = ws_flow(store, "/late", [{"in", 1, "noise".to_slice}] * n + [{"in", 1, "x admin".to_slice}])
+      store.flush
+      store.search(Gori::QL.parse("ws:admin"), 50).map(&.id).sort!.should eq([early, late].sort)
+      store.search(Gori::QL.parse("ws:admin", body_max: 64), 50).map(&.id).should eq([early])
+      store.search(Gori::QL.parse("ws~adm.n", body_max: 4), 50).map(&.id).should be_empty
+    end
+  end
+
   it "finds a needle that sits after a NUL in the payload" do
     with_store do |store|
       id = ws_flow(store, "/nul", [{"in", 2, Bytes[0x61, 0x00] + "NEEDLE".to_slice}])
