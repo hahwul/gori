@@ -1102,6 +1102,17 @@ module Gori::Tui
 
     def on_event(event : Store::FlowEvent, store : Store) : Nil
       @host_suggest_dirty = true if event.kind == :inserted
+      # The row's ANSWERS changed, so its colour has to be re-asked. An in-flight row has
+      # `status` and `content_type` nil, so `status:>=500` and `proto:sse` genuinely answer
+      # differently once the response lands — without this the row would keep the colour it
+      # had while pending, for the rest of the session. The engine's own store-tier cache is
+      # dropped for the same id and the same reason: a `body:` rule asked while the flow was
+      # still in flight was asked about a response that had not arrived. Before the filter
+      # return: the filtered reload brings back the same ids, so the caches would survive it.
+      if event.kind == :updated
+        @color_memo.delete(event.id)
+        @colormarker.try(&.forget(event.id))
+      end
       if filtering? || @searching
         @filter_dirty = true # coalesce: the Runner reloads once after draining
         return
@@ -1139,14 +1150,6 @@ module Gori::Tui
       when :updated
         if (idx = index_of(event.id)) && (row = store.flow_row(event.id))
           @rows[idx] = row
-          # The row's ANSWERS changed, so its colour has to be re-asked. An in-flight row has
-          # `status` and `content_type` nil, so `status:>=500` and `proto:sse` genuinely answer
-          # differently once the response lands — without this the row would keep the colour it
-          # had while pending, for the rest of the session. The engine's own store-tier cache is
-          # dropped for the same id and the same reason: a `body:` rule asked while the flow was
-          # still in flight was asked about a response that had not arrived.
-          @color_memo.delete(event.id)
-          @colormarker.try(&.forget(event.id))
         end
       end
     end

@@ -217,6 +217,33 @@ describe "History — Colormarker row marks" do
     end
   end
 
+  # Same fence under a filter: the filtered reload brings back the same ids, so an eviction
+  # skipped by the filter's early return left the pending answer cached for good.
+  it "re-asks a row's colour when its response lands under a filter" do
+    with_globals do
+      with_store do |store|
+        id = add_flow(store, status: nil)
+        add_flow(store)
+        cm = Gori::Colormarker.load(store)
+        cm.add("status:>=500", RED, FULL)
+        view = HistoryView.new
+        view.set_colormarker(cm)
+        view.set_query("host:h.test")
+        view.reload(store)
+        view.render_list(Screen.new(MemoryBackend.new(80, 12)), Rect.new(0, 0, 80, 12))
+
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: id, status: 503, head: "HTTP/1.1 503 X\r\n\r\n".to_slice, body: nil))
+        view.on_event(Gori::Store::FlowEvent.new(id, :updated), store)
+        view.reload(store) # what the Runner's flush does for a filtered list
+
+        after = MemoryBackend.new(80, 12)
+        view.render_list(Screen.new(after), Rect.new(0, 0, 80, 12))
+        after.bg_grid[4][15].should eq(Theme.row_tint(Theme.mark_color("red"), Theme.bg))
+      end
+    end
+  end
+
   # A rule edited on the Colormarker tab (or by an external process, arriving through
   # `Runner#apply_external_change`) repaints History with no cross-tab callback: the engine's
   # revision counter IS the notification.
