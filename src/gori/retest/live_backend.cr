@@ -64,6 +64,12 @@ module Gori
         sweep || plan.refusal
       end
 
+      # Layer 2, then the project budget's slot, taken here — before the wire pass, so a wait
+      # cannot age a `$GEN` mint. Its refusal is gori declining to send too: blocked, no History row.
+      private def send_refusal(plan : Repeater::Plan, target : String) : String?
+        layer_two_refusal(plan, target) || plan.admit
+      end
+
       def send(p : Planned) : Observation
         rec = p.step.detached? ? nil : @store.get_repeater(p.step.ref_id)
         # Re-read, because `Retest.plan` ran before the confirm and a peer may have closed the
@@ -101,7 +107,7 @@ module Gori
         if verdict.blocked?
           return Observation.new(blocked_reason: Retest.clip(@outbound.refusal(verdict)))
         end
-        if reason = layer_two_refusal(plan, target)
+        if reason = send_refusal(plan, target)
           return Observation.new(blocked_reason: Retest.clip(reason))
         end
         # A WebSocket handshake step is sent as an ORDINARY HTTP request and its 101/4xx is
@@ -111,11 +117,6 @@ module Gori
         # for an unauthenticated client), and silently narrowing a framed session into one
         # would be the failure this note exists to prevent.
         note = plan.websocket? ? "handshake sent as HTTP — a retest step does not exchange frames" : nil
-        # The project budget's slot before the wire pass (a wait must not age a `$GEN` mint). Its
-        # refusal is gori declining to send, read like the scope gate's: blocked, no History row.
-        if reason = plan.admit
-          return Observation.new(blocked_reason: Retest.clip(reason))
-        end
         sent_at = Time.utc.to_unix_ms * 1000_i64
         wire = plan.wire_bytes
         result = plan.send_wire(wire, admitted: true)

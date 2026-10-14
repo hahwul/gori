@@ -231,7 +231,7 @@ module Gori
       # false positive. The traffic that did go out is reported by the caller's run summary.
       def run(detail : Store::FlowDetail, identities : Array(Identity),
               stop : Proc(Bool)? = nil, *, request_target : String? = nil) : Target?
-        @outbound.try { |o| o.halt = stop } if stop
+        @outbound.try(&.halt=(stop)) if stop
         row = detail.row
         ordered = order_baseline_first(identities)
         origin = Fuzz::Origin.new(row.scheme, row.host, row.port)
