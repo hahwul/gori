@@ -22,6 +22,17 @@ describe Gori::Env do
     Gori::Settings.project_env_vars = [] of {String, String}
   end
 
+  it "keeps TOTP_SECRET out of an expansion when withheld, and still mints from it" do
+    Gori::Settings.env_vars = [] of {String, String}
+    Gori::Settings.project_env_vars = [{"TOTP_SECRET", "GEZDGNBVGY3TQOJQ"}]
+    Gori::Env.withhold_totp_secret = true
+    Gori::Env.expand("$TOTP_SECRET").should_not contain("GEZDGNBVGY3TQOJQ")
+    Gori::Env.totp_config.should be_a(Gori::Totp::Config)
+  ensure
+    Gori::Env.withhold_totp_secret = false
+    Gori::Settings.project_env_vars = [] of {String, String}
+  end
+
   it "parses KEY VALUE and KEY=value lines" do
     Gori::Env.parse_line("HOST api.example.com").should eq({"HOST", "api.example.com"})
     Gori::Env.parse_line("TOKEN=abc def").should eq({"TOKEN", "abc def"})

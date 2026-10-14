@@ -343,7 +343,7 @@ module Gori
     # `$GEN.TOTP`'s secret, parsed, or why it cannot mint. Read at every mint rather than cached,
     # so an edited var applies to the next send, as an `$ENV` edit does.
     def self.totp_config : Totp::Config | String
-      raw = effective_vars[TOTP_SECRET_VAR]? || return "env var #{TOTP_SECRET_VAR} is not set"
+      raw = all_vars[TOTP_SECRET_VAR]? || return "env var #{TOTP_SECRET_VAR} is not set"
       parsed = Totp.parse(raw)
       parsed.is_a?(String) ? "env var #{TOTP_SECRET_VAR} #{parsed}" : parsed
     end
@@ -491,11 +491,21 @@ module Gori
 
     # Merged vars: global first, then project (project wins on KEY collision).
     def self.effective_vars : Hash(String, String)
+      h = all_vars
+      h.delete(TOTP_SECRET_VAR) if withhold_totp_secret?
+      h
+    end
+
+    private def self.all_vars : Hash(String, String)
       h = {} of String => String
       Settings.env_vars.each { |(k, v)| h[k] = v }
       Settings.project_env_vars.each { |(k, v)| h[k] = v }
       h
     end
+
+    # Set by `gori mcp` (#1591): `$GEN.TOTP` still mints there, but `$ENV.TOTP_SECRET` resolves
+    # to nothing, so an agent cannot read the seed back out of a send it expanded into.
+    class_property? withhold_totp_secret : Bool = false
 
     # ── the formatter family: the ONLY code in the repo that spells a token ────
     #
