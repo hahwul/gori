@@ -68,6 +68,20 @@ private def through_proxy(rules : Gori::Rules) : {RuleHitsSink, String, String}
 end
 
 describe "proxy — Match&Replace rule hits (#1589)" do
+  # Bytes a head rule writes past the blank line (a smuggled prefix) go on the wire, so the
+  # rule is named: the settle check used to rebuild the head without them and drop the hit.
+  it "names a head rule whose change sits past the head's blank line" do
+    with_store do |store|
+      rules = Gori::Rules.new(store, store.match_rules)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "Connection: close\r\n\r\n", "Connection: close\r\n\r\nINJECTED")
+      rules.add(Gori::Store::RuleTarget::Response, Gori::Store::RulePart::Head, "Content-Length: 11\r\n\r\n", "Content-Length: 11\r\n\r\nSPLIT")
+      sink, got, _ = through_proxy(rules)
+      got.should contain("SPLIT")
+      sink.requests.first.rewrite.should_not be_nil
+      sink.responses.first.rewrite.should_not be_nil
+    end
+  end
+
   it "records a request-head rule with the client's head, and a response-body rule with the origin's bytes" do
     with_store do |store|
       rules = Gori::Rules.new(store, store.match_rules)

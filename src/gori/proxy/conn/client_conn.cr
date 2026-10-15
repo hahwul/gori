@@ -3626,11 +3626,12 @@ module Gori::Proxy
 
     # `head` with its Transfer-Encoding and Content-Length lines dropped, every other line
     # verbatim in order, the block's framing lines (written with the head's own line ending,
-    # CRLF or bare LF, which it is handed) appended, then the blank line.
+    # CRLF or bare LF, which it is handed) appended, then the blank line and whatever a rule
+    # wrote past it (a smuggled prefix is the operator's payload, P7).
     private def rebuild_without_framing(head : Bytes, &) : Bytes
       text = String.new(head)
       eol = text.index("\r\n") ? "\r\n" : "\n"
-      section = text.split(eol + eol, 2).first # headers up to the blank line
+      section, rest = text.split(eol + eol, 2).push("")[0, 2] # headers up to the blank line, and past it
       lines = section.split(eol)
       io = IO::Memory.new(head.size + 32)
       io << lines.first << eol # request / status line, untouched
@@ -3639,7 +3640,7 @@ module Gori::Proxy
         io << line << eol
       end
       yield io, eol
-      io << eol
+      io << eol << rest
       io.to_slice
     end
 
