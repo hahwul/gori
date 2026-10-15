@@ -30,6 +30,7 @@ module Gori
         head, body = Env.split_head_body(plan.bytes)
         hits = [] of Store::RuleRef
         new_head = rules.rewrite_request(head, plan.host, hits)
+        rules.settle_hits(hits, 0, head, new_head) { |h| h } # as the proxy names them
         new_body = body.try { |b| rewrite_body(rules, head, new_head, b, plan.host, hits) }
         # Re-frame ONLY when a rule changed the body's length, never as a blanket resync: the
         # plan shapes that reach here were built with `auto_content_length` deliberately OFF (a
@@ -57,7 +58,9 @@ module Gori
         chunked = Proxy::Codec::Body.request_framing(Proxy::Codec::Http1.parse_request_head(head))[0].chunked?
         return body if chunked && !Proxy::Codec::ContentDecode.plain_chunked?(body)
         entity = chunked ? Proxy::Codec::ContentDecode.dechunk(body) : body
+        mark = hits.size
         edited = rules.rewrite_request_body(entity, host, hits)
+        rules.settle_hits(hits, mark, entity, edited) { |b| b }
         return body if edited == entity
         chunked ? Import::Curl.chunk(edited) : edited
       rescue Gori::Error

@@ -63,6 +63,19 @@ describe Gori::Repeater::RequestRules do
     end
   end
 
+  it "names only the rules whose change was sent, as the proxy does" do
+    with_store do |store|
+      plan = rules_plan("POST /x HTTP/1.1\r\nHost: t.test\r\nX-A: 1\r\nContent-Length: 2\r\n\r\nab")
+      rules = Gori::Rules.new(store, store.match_rules)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Body, "ab", "zz")
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Body, "zz", "ab")
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "X-A: 1", "X-A: 2")
+      sent, changed = Gori::Repeater::RequestRules.apply(plan, rules)
+      changed.should be_true
+      sent.rewrite.not_nil!.hits.size.should eq(1) # the head rule; the body rules cancelled out
+    end
+  end
+
   it "leaves a compressed body alone, as the proxy does" do
     with_store do |store|
       plan = rules_plan("POST /x HTTP/1.1\r\nHost: t.test\r\nContent-Encoding: gzip\r\nContent-Length: 2\r\n\r\nab")
