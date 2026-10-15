@@ -175,7 +175,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     (i = idx) && i < cols.size ? (cols[i] = col) : (cols << col)
     # The CLI's and MCP's parser over the whole list as it would be stored: the same refusal for
     # the request side, the ceiling, and a label the spec grammar cannot read back.
-    if (reason = Fuzz::Extractor.parse(cols.map(&.spec))).is_a?(String)
+    if (reason = Fuzz::Extractor.of_columns(cols)).is_a?(String)
       @toast = "extractor not saved — #{reason}"
       return false
     end

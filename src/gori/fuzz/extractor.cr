@@ -65,6 +65,19 @@ module Gori::Fuzz
       out
     end
 
+    # The TUI's list as it will be stored: `parse` over the specs it writes, refusing a label
+    # that would not read back as itself. `LABEL=` splits only before the first `:`, so a label
+    # `header:x` over `jsonpath:a` stores as `header:x=jsonpath:a` and reopens as a header one.
+    def self.of_columns(cols : Array(Store::DisplayColumn)) : Array(Extractor) | String
+      parsed = parse(cols.map(&.spec))
+      return parsed if parsed.is_a?(String)
+      cols.zip(parsed) do |c, e|
+        next if e.label == c.label
+        return "label #{c.label.inspect} would be read back as #{e.label.inspect}; drop its ':' or '='"
+      end
+      parsed
+    end
+
     # A saved run's extractors, from the `fuzz_runs.extractors` JSON its specs were written to.
     # A run saved before #1592 (NULL) had at most the legacy regex, whose values read back as
     # `extracted`, so it gets that one label.

@@ -49,6 +49,12 @@ describe F::Extractor do
     end
   end
 
+  it "refuses a TUI label the stored spec would read back as another extractor" do
+    col = ->(label : String) { Gori::Store::DisplayColumn.new(0_i64, 0, label, Gori::MessageSide::Response, Gori::ExtractKind::JsonPath, "data.id") }
+    F::Extractor.of_columns([col.call("header:x")]).should be_a(String)
+    F::Extractor.of_columns([col.call("RID")]).as(Array).map(&.label).should eq(["RID"])
+  end
+
   it "caps a stored value at a cell, saying so" do
     F::Extractor.cap(nil).should be_nil
     F::Extractor.cap("abc").should eq("abc")
