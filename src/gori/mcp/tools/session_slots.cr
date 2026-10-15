@@ -367,7 +367,9 @@ module Gori
                      "{refresh: [repeater ids, in order]}", "INVALID_ARGUMENT", field: "name")
         end
         runner = @refresher || return err("no project is bound", "INVALID_ARGUMENT")
-        outcome = runner.refresh(name, agent_outbound(Scope.load(store), bool_arg(h, "allow_unscoped", false)))
+        ob = agent_outbound(Scope.load(store), bool_arg(h, "allow_unscoped", false))
+        ob.halt = cancel_signal # a cancel also ends a wait for the project budget
+        outcome = runner.refresh(name, ob)
         Result.new(JSON.build { |j| emit_refresh_outcome(j, outcome) })
       end
 

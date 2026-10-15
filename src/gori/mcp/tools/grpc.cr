@@ -27,6 +27,7 @@ module Gori
         return err("'#{raw}' is not an http(s) URL with a host", "INVALID_ARGUMENT", field: "url") unless parts
 
         ob = outbound(bool_arg(h, "allow_unscoped", false))
+        ob.halt = cancel_signal # a cancel also ends a wait for the project budget
         client = Gori::Protobuf::Reflection::Client.new(ob,
           scheme: parts.scheme, host: parts.host, port: parts.port,
           verify: !bool_arg(h, "insecure", false) && @verify_upstream,
@@ -50,6 +51,11 @@ module Gori
           # which `allow_unscoped` deliberately does not lift, so the remedy must not offer
           # the flag. Same split `send_request` draws.
           return sandbox_blocked(outcome.error || "refused", parts.host, "url")
+        end
+        if (err_text = outcome.error) && Gori::Outbound.budget_refusal?(err_text)
+          # The project budget's refusal reads as `send_request`'s does.
+          code = Gori::Repeater::SendError.code(Gori::Repeater::SendError.kind(err_text))
+          return err(err_text, code, retryable: Gori::Repeater::SendError.retryable?(code, false))
         end
         if err_text = outcome.error
           # Two different failures, and an agent acts on them differently. A CONNECTION that

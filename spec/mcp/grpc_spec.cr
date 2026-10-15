@@ -172,3 +172,15 @@ describe "MCP gRPC tools with unpersisted reflections" do
     end
   end
 end
+
+describe "MCP grpc_reflect and the project request budget" do
+  it "reads a spent budget as BUDGET_EXHAUSTED, as send_request does" do
+    with_store do |store|
+      store.set_setting(Gori::Settings::PROJECT_OUTBOUND_MAX_REQUESTS_KEY, "1").should be_true
+      store.set_setting(Gori::Store::OUTBOUND_BUDGET_SPENT_KEY, "1").should be_true
+      r = tools_for(store).call("grpc_reflect", JSON.parse(%({"url":"https://api.test","allow_unscoped":true})))
+      r.error_code.should eq("BUDGET_EXHAUSTED")
+      r.retryable.should be_false
+    end
+  end
+end
