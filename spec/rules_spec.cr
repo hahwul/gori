@@ -914,6 +914,13 @@ describe Gori::Rules do
         rules.rewrite_response_body("a".to_slice, "acme.test", cancelled).should eq("a".to_slice)
         rules.settle_hits(cancelled, 0, "a".to_slice, "a".to_slice) { |b| b }
         cancelled.should be_empty
+
+        # Past the bound the leave-one-out (k² applications on the proxy fiber) is skipped.
+        rules.add(Gori::Store::RuleTarget::Response, Gori::Store::RulePart::Body, "z", "w")
+        long = [] of Gori::Store::RuleRef
+        sent = rules.rewrite_response_body("a x z".to_slice, "acme.test", long)
+        rules.settle_hits(long, 0, "a x z".to_slice, sent) { |b| b }
+        long.size.should eq(4)
       end
     end
 

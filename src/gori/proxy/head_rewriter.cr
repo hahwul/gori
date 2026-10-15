@@ -181,6 +181,9 @@ module Gori::Proxy
       rewrite_ws_in(payload, host)
     end
 
+    SETTLE_MAX_RULES = 3
+    SETTLE_MAX_BYTES = 16 * 1024
+
     # Narrows `hits[from..]`, what one rewrite of `before` appended, to the rules whose change
     # reached the wire. `sent` is what actually went out, and the block maps a rewrite result to
     # that form (the caller's framing restore, h2's field re-parse). A rule whose change that
@@ -193,6 +196,10 @@ module Gori::Proxy
         return
       end
       return if hits.size - from == 1 # the one rule that fired made the change
+      # ponytail: k fired rules cost ~k² rule applications here, on the proxy fiber (P6): six
+      # header rules added ~54µs a request. Past the bounds the fired set stands as recorded;
+      # replay at read time from rewrite_originals if a long chain must be settled exactly.
+      return if hits.size - from > SETTLE_MAX_RULES || before.bytesize > SETTLE_MAX_BYTES
       # Leave-one-out over the fired rules, greedily: one whose absence still yields `sent`
       # contributed nothing that survived.
       kept = hits[from..]
