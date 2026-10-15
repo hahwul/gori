@@ -139,7 +139,10 @@ module Gori
           # Busy store: fail closed and ask again, never send past the ceiling — but not forever.
           @refund += refund
           @failed += 1
-          return BUDGET_UNAVAILABLE_ERROR if @failed >= MAX_FAILED_LEASES
+          if @failed >= MAX_FAILED_LEASES
+            @failed = 0 # one outage must not make every later admit give up on its first try
+            return BUDGET_UNAVAILABLE_ERROR
+          end
           return Budget.now_us + NAP_US
         end
         @failed = 0

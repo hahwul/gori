@@ -107,7 +107,8 @@ module Gori
         # no History row. Every return below that does not send hands the slot back.
         if reason = plan.admit(cancel_signal)
           return err("request cancelled", "CANCELLED") if cancelled?
-          return err(reason, "BUDGET_EXHAUSTED")
+          code = Repeater::SendError.code(Repeater::SendError.kind(reason)) # a busy database is PROJECT_BUSY
+          return err(reason, code, retryable: Repeater::SendError.retryable?(code, false))
         end
         h1_wire = plan.wire_bytes
         wire = wire_request(plan, built, h1_wire)

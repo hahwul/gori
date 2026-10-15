@@ -129,6 +129,9 @@ describe "Fuzz.terminal_verdict" do
     F.terminal_verdict(F::Progress.new(3_i64, 100_i64, 1_i64, 0_i64, requests: 10_i64), false, 10_i64)
       .should eq(F::Terminal::BudgetExhausted)
     F.terminal_verdict(F::Progress.new(100_i64, 100_i64, 0_i64, 0_i64), false, nil).should eq(F::Terminal::Done)
+    # A busy project database that would not lease a slot spent nothing.
+    busy = F::Progress.new(3_i64, 100_i64, 0_i64, 0_i64, blocked: 1_i64, blocked_reason: Gori::Outbound::BUDGET_UNAVAILABLE_ERROR)
+    F.terminal_verdict(busy, false, nil).should eq(F::Terminal::Error)
   end
 
   it "labels condition_met durably" do
