@@ -472,7 +472,7 @@ module Gori
             io << ']'
           end
           io << "  [edited]" if row.intercept_edited?
-          row.rewritten_by.try { |refs| io << "  [rewritten" << (refs.empty? ? "" : " ") << refs.join(' ') << ']' }
+          row.rewritten_by.try { |refs| io << "  [rewritten"; refs.each { |r| io << ' ' << r }; io << ']' }
           # Same reasoning again, one axis over: a row gori itself put on the wire must not
           # scan as traffic the target's client produced. Only when it IS one — a proxy
           # capture is the norm, and a chip on every row teaches nothing. The lowercase token

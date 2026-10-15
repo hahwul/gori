@@ -636,14 +636,8 @@ module Gori
         private def self.path_end(code : String, twin : Twin?, lo : Int32, hi : Int32) : Int32
           return hi unless twin
           c = code.to_slice
-          k = twin.kept
-          i, j = lo, twin.kept_at(lo)
-          while i < hi && j < k.size
-            return i if k[j] == '?'.ord && c[i] == ' '.ord
-            i += Twin.char_len(c[i])
-            j += Twin.char_len(k[j])
-          end
-          hi
+          # A blank is ASCII, so it starts a char and `kept_at` lands on its twin exactly.
+          (lo...hi).find { |i| c[i] == ' '.ord && twin.kept[twin.kept_at(i)]? == '?'.ord } || hi
         end
 
         # `code` and `kept` hold the same chars (one emitted per consumed char), but not the same
@@ -662,14 +656,14 @@ module Gori
             return off if @code.size == @kept.size # no multi-byte literal char: same offsets
             @c = @k = 0 if off < @c
             while @c < off && @k < @kept.size
-              @c += Twin.char_len(@code[@c])
-              @k += Twin.char_len(@kept[@k])
+              @c += char_len(@code[@c])
+              @k += char_len(@kept[@k])
             end
             @k
           end
 
           # Byte length of the UTF-8 sequence led by `b` (both sides are valid UTF-8).
-          def self.char_len(b : UInt8) : Int32
+          private def char_len(b : UInt8) : Int32
             b < 0xC0 ? 1 : b < 0xE0 ? 2 : b < 0xF0 ? 3 : 4
           end
         end

@@ -52,25 +52,8 @@ module Gori
           # the flag. Same split `send_request` draws.
           return sandbox_blocked(outcome.error || "refused", parts.host, "url")
         end
-        if (err_text = outcome.error) && Gori::Outbound.budget_refusal?(err_text)
-          # The project budget's refusal reads as `send_request`'s does.
-          code = Gori::Repeater::SendError.code(Gori::Repeater::SendError.kind(err_text))
-          return err(err_text, code, retryable: Gori::Repeater::SendError.retryable?(code, false))
-        end
         if err_text = outcome.error
-          # Two different failures, and an agent acts on them differently. A CONNECTION that
-          # did not come up says nothing about the target's reflection service and may well
-          # work on the next try; a service that answered UNIMPLEMENTED (or NOT_FOUND, or
-          # "no descriptors") is a stable answer, and re-asking spends a request for a
-          # sentence that is already fixed.
-          code = outcome.transport? ? "NETWORK_ERROR" : "REFLECTION_FAILED"
-          # The NOTES ride along, as they do on the success path and as `gori run grpc reflect`
-          # prints them to stderr: "3 of 4 symbols answered NOT_FOUND" is what turns "returned
-          # no descriptors" into something an agent can act on, and dropping them left the
-          # sentence with nothing under it.
-          return err(err_text, code, field: "url", retryable: outcome.transport?,
-            details: JSON.parse({"target" => client.target, "service" => outcome.service,
-                                 "notes" => outcome.notes}.to_json))
+          return reflection_failed(err_text, outcome, client.target)
         end
 
         set = outcome.descriptor_set
@@ -94,6 +77,23 @@ module Gori
             emit_scope(j, sc)
           end
         end)
+      end
+
+      # A reflection that did not come back. Two different failures, and an agent acts on them
+      # differently. A CONNECTION that did not come up says nothing about the target's reflection
+      # service and may well work on the next try; a service that answered UNIMPLEMENTED (or
+      # NOT_FOUND, or "no descriptors") is a stable answer, and re-asking spends a request for a
+      # sentence that is already fixed. The project budget's refusal reads as `send_request`'s.
+      private def reflection_failed(err_text : String, outcome, target : String) : Result
+        return budget_refused(err_text) if Gori::Outbound.budget_refusal?(err_text)
+        code = outcome.transport? ? "NETWORK_ERROR" : "REFLECTION_FAILED"
+        # The NOTES ride along, as they do on the success path and as `gori run grpc reflect`
+        # prints them to stderr: "3 of 4 symbols answered NOT_FOUND" is what turns "returned
+        # no descriptors" into something an agent can act on, and dropping them left the
+        # sentence with nothing under it.
+        err(err_text, code, field: "url", retryable: outcome.transport?,
+          details: JSON.parse({"target" => target, "service" => outcome.service,
+                               "notes" => outcome.notes}.to_json))
       end
 
       # Read-only: what schema this project has loaded and where each piece came from.

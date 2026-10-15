@@ -99,8 +99,7 @@ module Gori
         return nil unless message
         # gori's own refusal before the socket (#1601): the project budget refuses every later
         # send too, so it is a stop, not the transient "other" a retry policy loops on.
-        return "busy" if message == Outbound::BUDGET_UNAVAILABLE_ERROR
-        return "budget" if Outbound.budget_refusal?(message)
+        return budget_kind(message) if Outbound.budget_refusal?(message)
         m = message.downcase
         return "connect" if m.starts_with?("connect failed")
         return "timeout" if m.includes?("timed out") || m.includes?("timeout")
@@ -117,6 +116,11 @@ module Gori
         return "truncated_request" if m.includes?(TRUNCATED_REQUEST_PHRASE)
         return "no_response" if m.includes?("closed")
         "other"
+      end
+
+      # A busy project database that would not lease a slot spent nothing: worth a retry.
+      private def self.budget_kind(message : String) : String
+        message == Outbound::BUDGET_UNAVAILABLE_ERROR ? "busy" : "budget"
       end
 
       # Split out and `self.` for the same reason `kind` is: the retry policy an

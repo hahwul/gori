@@ -3631,7 +3631,7 @@ module Gori::Proxy
     private def rebuild_without_framing(head : Bytes, &) : Bytes
       text = String.new(head)
       eol = text.index("\r\n") ? "\r\n" : "\n"
-      section, rest = text.split(eol + eol, 2).push("")[0, 2] # headers up to the blank line, and past it
+      section, _, rest = text.partition(eol + eol) # headers up to the blank line, and past it
       lines = section.split(eol)
       io = IO::Memory.new(head.size + 32)
       io << lines.first << eol # request / status line, untouched

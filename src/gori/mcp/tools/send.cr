@@ -107,8 +107,7 @@ module Gori
         # no History row. Every return below that does not send hands the slot back.
         if reason = plan.admit(cancel_signal)
           return err("request cancelled", "CANCELLED") if cancelled?
-          code = Repeater::SendError.code(Repeater::SendError.kind(reason)) # a busy database is PROJECT_BUSY
-          return err(reason, code, retryable: Repeater::SendError.retryable?(code, false))
+          return budget_refused(reason)
         end
         h1_wire = plan.wire_bytes
         wire = wire_request(plan, built, h1_wire)
@@ -711,6 +710,13 @@ module Gori
       # The classifier moved to `Repeater::SendError` when `gori run send --format json` grew the
       # same three fields (#1384); these names stay so MCP's own call sites and the specs that
       # pin the contract keep reading as they did.
+      # The project budget's refusal (#1601), on every tool that admits: BUDGET_EXHAUSTED, or a
+      # retryable PROJECT_BUSY when the database would not lease a slot.
+      private def budget_refused(reason : String) : Result
+        code = Repeater::SendError.code(Repeater::SendError.kind(reason))
+        err(reason, code, retryable: Repeater::SendError.retryable?(code, false))
+      end
+
       EXCHANGE_BUDGET_PHRASE = Repeater::SendError::EXCHANGE_BUDGET_PHRASE
 
       private def network_error_kind(message : String?) : String?

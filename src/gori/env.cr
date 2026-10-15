@@ -493,9 +493,7 @@ module Gori
     # never a token (#1591): only `$GEN.TOTP` reads it. Withholding it in `gori mcp` alone was
     # not enough, since an agent's Match&Replace rule or session slot resolves in the TUI.
     def self.effective_vars : Hash(String, String)
-      h = all_vars
-      h.delete(TOTP_SECRET_VAR)
-      h
+      all_vars.tap(&.delete(TOTP_SECRET_VAR))
     end
 
     private def self.all_vars : Hash(String, String)
