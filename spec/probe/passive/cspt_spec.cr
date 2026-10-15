@@ -29,6 +29,10 @@ describe Gori::Probe::Passive::Cspt do
       # After the URL's `?` the value is query, not path.
       cspt_dets(store, %(fetch("/api/search?q=" + location.hash.slice(1));)).should be_empty
       cspt_dets(store, %(fetch(`/api/items?page=${location.hash.slice(1)}`);)).should be_empty
+      # A multi-byte char in any literal of the script used to switch that cut off.
+      cspt_dets(store, %(var m="café";fetch("/api/search?q=" + location.hash.slice(1));)).should be_empty
+      cspt_dets(store, %(fetch(`/api/items?page=${location.hash.slice(1)}`); t("日本");)).should be_empty
+      cspt_dets(store, %(var m="café";fetch("/api/" + location.hash.slice(1) + "?q=1");)).size.should eq(1)
       # An app-chosen prefix before the whole URL still counts.
       cspt_dets(store, %(fetch("/proxy/" + location.href);)).map(&.evidence).should eq(["location.href → fetch"])
     end

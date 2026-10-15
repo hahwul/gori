@@ -593,6 +593,7 @@ module Gori
                                       kept : String? = nil) : Array({String, String})
           pairs = [] of {String, String}
           all = nil
+          twin = kept.try { |k| Twin.new(code.to_slice, k.to_slice) }
           REQUEST_SINKS.each do |(sink_re, sink_label, arg)|
             next if arg == 1 && !XHR.matches?(code)
             found = hits = 0
@@ -610,7 +611,7 @@ module Gori
               lo, hi = argument_span(code, m.byte_end(0), arg)
               lo, hi = config_url_span(code, lo, hi)
               past = hi if lo < hi
-              next unless label = url_source(code, all, lo, path_end(code, kept, lo, hi))
+              next unless label = url_source(code, all, lo, path_end(code, twin, lo, hi))
               pair = {label, sink_label}
               next if pairs.includes?(pair)
               pairs << pair
@@ -631,12 +632,46 @@ module Gori
         end
 
         # Where the path part of the URL span [lo, hi) ends: at the first `?` inside a string or
-        # template literal (blank in `code`, kept in `kept`). Offsets line up only when no literal
-        # held a multi-byte char (each is blanked to one space), so otherwise the span is kept.
-        private def self.path_end(code : String, kept : String?, lo : Int32, hi : Int32) : Int32
-          return hi unless kept && kept.bytesize == code.bytesize
-          c, k = code.to_slice, kept.to_slice
-          (lo...hi).find { |i| k[i] == '?'.ord && c[i] == ' '.ord } || hi
+        # template literal (blank in `code`, kept in `kept`), or `hi`.
+        private def self.path_end(code : String, twin : Twin?, lo : Int32, hi : Int32) : Int32
+          return hi unless twin
+          c = code.to_slice
+          k = twin.kept
+          i, j = lo, twin.kept_at(lo)
+          while i < hi && j < k.size
+            return i if k[j] == '?'.ord && c[i] == ' '.ord
+            i += Twin.char_len(c[i])
+            j += Twin.char_len(k[j])
+          end
+          hi
+        end
+
+        # `code` and `kept` hold the same chars (one emitted per consumed char), but not the same
+        # bytes: a multi-byte char inside a literal is ONE blank in `code`. This walks both in
+        # step to find a `code` byte offset's twin in `kept`. Sink hits arrive in order, so the
+        # cursor moves forward and a script costs one walk; an earlier offset restarts it.
+        private class Twin
+          getter kept : Bytes
+          @c = 0
+          @k = 0
+
+          def initialize(@code : Bytes, @kept : Bytes)
+          end
+
+          def kept_at(off : Int32) : Int32
+            return off if @code.size == @kept.size # no multi-byte literal char: same offsets
+            @c = @k = 0 if off < @c
+            while @c < off && @k < @kept.size
+              @c += Twin.char_len(@code[@c])
+              @k += Twin.char_len(@kept[@k])
+            end
+            @k
+          end
+
+          # Byte length of the UTF-8 sequence led by `b` (both sides are valid UTF-8).
+          def self.char_len(b : UInt8) : Int32
+            b < 0xC0 ? 1 : b < 0xE0 ? 2 : b < 0xF0 ? 3 : 4
+          end
         end
 
         # ROUTER_SOURCES occurrences in the same shape as `source_spans`, appended after it so a
