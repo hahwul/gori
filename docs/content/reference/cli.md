@@ -636,7 +636,7 @@ The exit status reports the exchange, not the HTTP verdict: a `404` or `500` exi
 
 A request that is a WebSocket handshake goes out as an ordinary request and its `101` is the answer, which the command says on STDERR. A framed exchange needs a session: `repeater create`, then `repeater send`.
 
-`--format json` on `send`, `repeater <flow-id>` and `repeater send` carries MCP `send_request`'s error contract beside the raw `head`: a failed send adds `error_kind` (`connect`, `timeout`, `protocol`, `no_response`, `truncated_request`, `budget`, `other`), `error_code`, `retryable` and `delivered`, so a script tells a refused connection from a timeout without matching the `error` sentence; a response adds `reason`, `http_version` and the parsed `headers` (`[{"name","value"}]`, in wire order, with `value_lossy`/`value_base64` for a non-UTF-8 value). `match_replace_applied: true` says `--apply-rules` changed the request.
+`--format json` on `send`, `repeater <flow-id>` and `repeater send` carries MCP `send_request`'s error contract beside the raw `head`: a failed send adds `error_kind` (`connect`, `timeout`, `protocol`, `no_response`, `truncated_request`, `budget`, `busy`, `other`), `error_code`, `retryable` and `delivered`, so a script tells a refused connection from a timeout without matching the `error` sentence; a response adds `reason`, `http_version` and the parsed `headers` (`[{"name","value"}]`, in wire order, with `value_lossy`/`value_base64` for a non-UTF-8 value). `match_replace_applied: true` says `--apply-rules` changed the request.
 
 ### run fuzz
 

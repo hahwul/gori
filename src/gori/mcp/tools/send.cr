@@ -707,9 +707,6 @@ module Gori
         stored
       end
 
-      # The classifier moved to `Repeater::SendError` when `gori run send --format json` grew the
-      # same three fields (#1384); these names stay so MCP's own call sites and the specs that
-      # pin the contract keep reading as they did.
       # The project budget's refusal (#1601), on every tool that admits: BUDGET_EXHAUSTED, or a
       # retryable PROJECT_BUSY when the database would not lease a slot.
       private def budget_refused(reason : String) : Result
@@ -717,6 +714,9 @@ module Gori
         err(reason, code, retryable: Repeater::SendError.retryable?(code, false))
       end
 
+      # The classifier moved to `Repeater::SendError` when `gori run send --format json` grew the
+      # same three fields (#1384); these names stay so MCP's own call sites and the specs that
+      # pin the contract keep reading as they did.
       EXCHANGE_BUDGET_PHRASE = Repeater::SendError::EXCHANGE_BUDGET_PHRASE
 
       private def network_error_kind(message : String?) : String?
