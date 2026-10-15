@@ -14,7 +14,6 @@ module Gori::CLI
   # else (logs, the resolved-db banner, errors) goes to STDERR.
 
   private def self.run_mcp(args : Array(String)) : Nil
-    Env.withhold_totp_secret = true
     db_path = nil.as(String?)
     project = nil.as(String?)
     insecure_upstream = false

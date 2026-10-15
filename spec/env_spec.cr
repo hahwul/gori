@@ -22,16 +22,20 @@ describe Gori::Env do
     Gori::Settings.project_env_vars = [] of {String, String}
   end
 
-  it "keeps TOTP_SECRET out of an expansion when withheld, and still mints from it" do
+  it "keeps TOTP_SECRET out of every expansion, and still mints from it" do
     Gori::Settings.env_vars = [] of {String, String}
     Gori::Settings.project_env_vars = [{"TOTP_SECRET", "GEZDGNBVGY3TQOJQ"}]
-    Gori::Env.withhold_totp_secret = true
     Gori::Env.expand("$TOTP_SECRET").should_not contain("GEZDGNBVGY3TQOJQ")
+    # A Match&Replace rule an agent wrote resolves in the capturing process, not in `gori mcp`.
+    with_store do |store|
+      rules = Gori::Rules.new(store, store.match_rules)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "Host: a", "Host: a\r\nX-Leak: $TOTP_SECRET")
+      String.new(rules.rewrite_request("GET / HTTP/1.1\r\nHost: a\r\n\r\n".to_slice, "a")).should_not contain("GEZDGNBVGY3TQOJQ")
+    end
     Gori::Env.totp_config.should be_a(Gori::Totp::Config)
     # Withheld from resolution, never from masking: a captured enrolment body is still masked.
     Gori::Env.mask_secrets(%({"secret":"GEZDGNBVGY3TQOJQ"})).should_not contain("GEZDGNBVGY3TQOJQ")
   ensure
-    Gori::Env.withhold_totp_secret = false
     Gori::Settings.project_env_vars = [] of {String, String}
   end
 

@@ -489,10 +489,12 @@ module Gori
       @@highlight_rev += 1
     end
 
-    # Merged vars: global first, then project (project wins on KEY collision).
+    # Merged vars: global first, then project (project wins on KEY collision). TOTP_SECRET is
+    # never a token (#1591): only `$GEN.TOTP` reads it. Withholding it in `gori mcp` alone was
+    # not enough, since an agent's Match&Replace rule or session slot resolves in the TUI.
     def self.effective_vars : Hash(String, String)
       h = all_vars
-      h.delete(TOTP_SECRET_VAR) if withhold_totp_secret?
+      h.delete(TOTP_SECRET_VAR)
       h
     end
 
@@ -502,10 +504,6 @@ module Gori
       Settings.project_env_vars.each { |(k, v)| h[k] = v }
       h
     end
-
-    # Set by `gori mcp` (#1591): `$GEN.TOTP` still mints there, but `$ENV.TOTP_SECRET` resolves
-    # to nothing, so an agent cannot read the seed back out of a send it expanded into.
-    class_property? withhold_totp_secret : Bool = false
 
     # ── the formatter family: the ONLY code in the repo that spells a token ────
     #
