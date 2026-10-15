@@ -274,6 +274,7 @@ module Gori
           j.field "intercept_edited", row.intercept_edited?
           # The Match&Replace rules that changed this flow (#1589), `[]` when none did. Every
           # row, for `short_circuited`'s reason.
+          j.field "rewritten", row.rewritten? # an imported global rule is unnamed: [] then
           j.field "rewritten_by", row.rewritten_by || Store::RuleRef::NONE
           # Where this flow came from (`Gori::FlowSource`), and on EVERY row for
           # `short_circuited`'s reason: an agent reading this feed has no other way to tell a
@@ -916,6 +917,7 @@ module Gori
           # projection said so and the detail one dropped it.
           j.field "short_circuited", row.short_circuited?
           j.field "intercept_edited", row.intercept_edited?
+          j.field "rewritten", row.rewritten? # an imported global rule is unnamed: [] then
           j.field "rewritten_by", row.rewritten_by || Store::RuleRef::NONE
           # `flow_row`'s provenance, on the DETAIL projection for the same sharpened reason: an
           # agent about to quote these bytes in an issue has to know whether the request was

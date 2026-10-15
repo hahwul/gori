@@ -297,6 +297,24 @@ describe Gori::MCP::Server do
         payload["request_original_head"].as_s.should_not contain("secret")
         payload["request_original_body"]["text"].as_s.should eq("client-body")
         payload["response_original_head"]?.should be_nil
+        payload["rewritten"].as_bool.should be_true
+      end
+    end
+
+    # An imported archive's global rule cannot be named here (`rule_id` 0), but the flow was
+    # still rewritten: `rewritten_by: []` alone reads as "no rule changed it".
+    it "says a flow was rewritten when no rule that did it can be named" do
+      with_store do |store|
+        req = Gori::Store::CapturedRequest.new(
+          created_at: 1_000_i64, scheme: "http", host: "rw.test", port: 80, method: "GET",
+          target: "/", http_version: "HTTP/1.1", head: "GET / HTTP/1.1\r\nHost: rw.test\r\n\r\n".to_slice,
+          source: Gori::FlowSource::Kind::Proxy)
+        req.rewrite = Gori::Store::Rewrite.new([Gori::Store::RuleRef.new(Gori::Store::RuleScope::Global, 0_i64)])
+        id = store.insert_flow(req)
+        call = %({"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"get_flow","arguments":{"id":#{id}}}})
+        payload = mcp_tool_payload(mcp_drive(store, call)[0])
+        payload["rewritten"].as_bool.should be_true
+        payload["rewritten_by"].as_a.should be_empty
       end
     end
 
