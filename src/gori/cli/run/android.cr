@@ -103,7 +103,9 @@ module Gori
 
         STDERR.puts "gori android setup · #{android_label(picked, probe)} → #{target.label} · #{mode.to_s.downcase} CA"
         ok = android_run(adb, plan, dry_run)
-        STDERR.puts "  gori run android undo reverts the steps that ran" unless ok
+        # The port spelled out: a setup that failed before the proxy step left a reverse mapping
+        # that a plain undo, reading the port off the device's proxy, cannot find.
+        STDERR.puts "  gori run android undo --serial #{picked.serial} --device-port #{device_port || target.port} reverts the steps that ran" unless ok
         return ok unless ok && !dry_run
         if mode.system?
           STDERR.puts "  gori's CA (#{hash}.0) is a system CA until the device reboots · undo: gori run android undo"
