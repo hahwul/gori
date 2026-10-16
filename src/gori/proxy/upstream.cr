@@ -719,6 +719,20 @@ module Gori::Proxy
       route.direct? ? nil : proxy_label(route)
     end
 
+    # The egress a dial to `host` takes and the setting that chose it, credential-free:
+    # `direct (NO_PROXY)`, `upstream HTTP proxy corp:3128 (environment HTTPS_PROXY)` (#1625).
+    def self.via(host : String, origin_scheme : String? = nil, origin_port : Int32? = nil) : String
+      route, what, name = Settings.upstream_route_sourced(host, origin_scheme, origin_port)
+      # Not the configuration error itself: it can quote a proxy value with its userinfo.
+      # The send's own failure line says why; this only says where.
+      path = if route.invalid?
+               "refused — invalid upstream configuration"
+             else
+               route.direct? ? "direct" : proxy_label(route)
+             end
+      "#{path} (#{what}#{name ? " #{name}" : ""})"
+    end
+
     # The clause to append when a failure happened on a socket that reached this far via an
     # upstream proxy tunnel and produced no origin bytes at all: a proxy that answers `200
     # Connection Established` and then closes is, on the bare socket, indistinguishable from the

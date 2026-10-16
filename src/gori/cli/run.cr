@@ -157,7 +157,41 @@ module Gori
       # A broken STDOUT pipe (`gori run … | head`) is answered once, in `CLI.run`.
       def self.dispatch(args : Array(String)) : Nil
         route_logs_to_stderr
+        args = hoist_target_flags(args)
         dispatch_subcommand(args)
+      end
+
+      # `--project`/`--db` anywhere among the leading words — before the subcommand
+      # (`gori run --project=X history`) or between its verbs (`gori run project --project=X
+      # scope add`) — moved past those words, where every subcommand's parser reads them
+      # (#1625). Each dispatcher routes on the words alone, so a target flag in front of a
+      # verb made it "unknown subcommand", an unknown option, or a silent default read.
+      #
+      # Only the leading run, ended by the first OTHER flag or `--`: past it, a token that
+      # merely looks like `--db` can be another flag's value, and the parser already takes
+      # flags in any order there. In the run nothing else takes a value, so `--project X`
+      # takes `X` unambiguously.
+      def self.hoist_target_flags(args : Array(String)) : Array(String)
+        words = [] of String
+        flags = [] of String
+        i = 0
+        while i < args.size
+          arg = args[i]
+          if arg.in?("--project", "--db")
+            flags << arg
+            flags << args[i + 1] if i + 1 < args.size
+            i += 2
+          elsif arg.starts_with?("--project=") || arg.starts_with?("--db=")
+            flags << arg
+            i += 1
+          elsif arg.starts_with?('-')
+            break
+          else
+            words << arg
+            i += 1
+          end
+        end
+        words + flags + (args[i..]? || [] of String)
       end
 
       # STDOUT on these commands is DATA — a flow listing, a sitemap tree, `--format json` being
@@ -275,9 +309,9 @@ module Gori
         # At least one space after an overlong name.
         SUBCOMMANDS.each { |name, desc| puts "  #{name.ljust(SUBCMD_COL_W - 1)} #{desc}" }
         puts ""
-        puts "Most read subcommands accept --project NAME or --db PATH; with neither they"
-        puts "use $#{DEFAULT_PROJECT_ENV}, else the `project switch` pin, else the most-recently-active"
-        puts "project. See 'gori run <subcommand> --help'."
+        puts "Most read subcommands accept --project NAME or --db PATH, before or after the"
+        puts "subcommand; with neither they use $#{DEFAULT_PROJECT_ENV}, else the `project switch` pin,"
+        puts "else the most-recently-active project. See 'gori run <subcommand> --help'."
       end
 
       # --- shared helpers ----------------------------------------------------
@@ -1779,7 +1813,8 @@ module Gori
       # `cmd_issues_list(["--project=X", "list"])`, leftover `["list"]`). The message was
       # self-refuting too: it called `list` an unknown subcommand while listing `list` among the
       # verbs. `gori run project sandbox` passes "status" — the only one of the twelve whose read
-      # verb is not spelled `list`.
+      # verb is not spelled `list`. (A leading `--project`/`--db` is now moved past the verbs by
+      # `hoist_target_flags`; any other leading flag, `--format=json list`, still takes this route.)
       #
       # Exactly one token, and exactly that word: `issues --project=X list rm 3` still names `list`
       # as the discarded-verb position, because there a real second verb followed it.

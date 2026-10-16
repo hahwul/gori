@@ -271,6 +271,7 @@ module Gori
         # A raw request's head the operator did not terminate — said before the origin answers,
         # like `repeater send`. A built one is always terminated.
         STDERR.puts "gori run send: #{unterminated_head_note}" if raw && !plan.http2? && !Env.head_terminated?(wire)
+        via = announce_send_via(plan, refused: !budget.nil?, format: format)
         result = budget ? Repeater::Engine.error(budget, Time.instant) : plan.send_wire(wire, admitted: true)
         outbound.close
 
@@ -289,7 +290,7 @@ module Gori
         end
         emit_repeater_result(result, new_body, nil, format, recorded_flow_id: recorded_flow_id,
           tls_preset: sent_tls_preset(plan), history_write: history_write, cap: cap,
-          prefix: "gori run send", applied_rules: applied_rules,
+          prefix: "gori run send", applied_rules: applied_rules, via: via,
           saved_repeater_id: saved_repeater_id, repeater_write: repeater_write,
           repeater_response_write: repeater_response_write)
         if why = history_write.try(&.error)
@@ -297,6 +298,16 @@ module Gori
         end
         report_unbound_slot_overlay("gori run send")
         exit 1 unless result.ok?
+      end
+
+      # Which egress this send takes — upstream proxy, environment proxy or direct (#1625).
+      # Said before the send, so a proxy that never answers is already named; nil for a send
+      # the budget refused, which never dials.
+      private def self.announce_send_via(plan : Repeater::Plan, *, refused : Bool, format : Symbol) : String?
+        return nil if refused
+        via = Proxy::Upstream.via(plan.host, plan.scheme, plan.port)
+        STDERR.puts "via: #{CLI::Output.term_line(via)}" unless format == :json
+        via
       end
 
       # A `gori run send` argument mistake, as a value rather than an `abort`, so the argument

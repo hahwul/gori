@@ -21,6 +21,7 @@
 - Proxy: `GORI_SSLKEYLOGFILE` (or `SSLKEYLOGFILE`) writes TLS session secrets for both legs in the NSS key log format, so Wireshark can decrypt what gori relays, and only into a file private to you (#1593)
 - Probe's DOM XSS rule no longer misses a sink after a regex literal on the same line, and Repeater's pretty-print, GraphQL pane and WebSocket message editor keep the operator's bytes (terminators, number spellings, duplicate keys) (#1621)
 - History: a colour rule repaints a row that updates while a filter is active, instead of keeping the answer it gave the row in flight (#1624)
+- CLI: `--project` and `--db` work before the subcommand or between its verbs (`gori run --project X project scope add …`), `gori run history ls` lists instead of searching for "ls", and `gori run send` and MCP `send_request` say which egress a request took — upstream proxy, environment proxy or direct — as `via` (#1625)
 
 ## v0.8.1
 

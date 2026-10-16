@@ -186,36 +186,47 @@ module Gori::Settings
   # pattern makes every non-match direct before the table/scalar can claim it.
   def self.upstream_route(dest_host : String, origin_scheme : String? = nil,
                           origin_port : Int32? = nil) : UpstreamRoute
+    upstream_route_sourced(dest_host, origin_scheme, origin_port)[0]
+  end
+
+  # `upstream_route` plus the setting that decided it, as `{what, name}` (`{"upstream rule",
+  # "*.corp"}`, `{"environment", "HTTPS_PROXY"}`, `{"NO_PROXY", nil}`), for a surface that says
+  # which path a request took (#1625). The same walk, so the label can never name a different
+  # arm than the dial takes. Two parts rather than one sentence so the dial path, which drops
+  # them, builds no string. No credentials: a rule is named by its host pattern and the
+  # environment by its variable.
+  def self.upstream_route_sourced(dest_host : String, origin_scheme : String? = nil,
+                                  origin_port : Int32? = nil) : {UpstreamRoute, String, String?}
     destination_match, destination_error = project_upstream_destination_match(dest_host)
     if destination_error
-      return invalid_upstream_route("#{destination_error} — the destination proxy filter is invalid")
+      return {invalid_upstream_route("#{destination_error} — the destination proxy filter is invalid"), "project destination filter", nil}
     end
-    return UpstreamRoute::DIRECT unless destination_match
+    return {UpstreamRoute::DIRECT, "project destination filter", nil} unless destination_match
 
     if pinned = project_upstream_proxy
       # An explicit project "" means direct and must beat a non-blank global (the same
       # nil-vs-empty distinction effective_upstream_proxy relies on).
-      return project_upstream_route(pinned)
+      return {project_upstream_route(pinned), "project upstream_proxy", nil}
     end
     if err = project_upstream_auth_error
-      return invalid_upstream_route(err)
+      return {invalid_upstream_route(err), "project upstream_auth", nil}
     end
     if project_upstream_auth
-      return invalid_upstream_route(
+      return {invalid_upstream_route(
         "project proxy authentication has no project upstream proxy"
-      )
+      ), "project upstream_auth", nil}
     end
     if err = @@upstream_rules_load_error
-      return invalid_upstream_route(err)
+      return {invalid_upstream_route(err), "upstream_rules", nil}
     end
     if rule = upstream_rule_for(dest_host)
-      return rule_route(rule)
+      return {rule_route(rule), "upstream rule", rule.host}
     end
     if err = @@upstream_proxy_load_error
-      return invalid_upstream_route(err)
+      return {invalid_upstream_route(err), "network.upstream_proxy", nil}
     end
     return environment_upstream_route(dest_host, origin_scheme, origin_port) if upstream_proxy.strip.empty?
-    parse_upstream_proxy(upstream_proxy)
+    {parse_upstream_proxy(upstream_proxy), "network.upstream_proxy", nil}
   end
 
   # Environment proxy variables are the last catch-all, not a replacement for gori's own
@@ -224,12 +235,13 @@ module Gori::Settings
   # resolution time also matches the existing live-settings behaviour and keeps headless
   # commands/tests that set them after startup predictable.
   private def self.environment_upstream_route(dest_host : String, origin_scheme : String?,
-                                              origin_port : Int32?) : UpstreamRoute
-    return UpstreamRoute::DIRECT if environment_loopback_host?(dest_host)
-    return UpstreamRoute::DIRECT if environment_no_proxy?(dest_host, origin_port)
-    value = environment_proxy_value(origin_scheme)
-    return UpstreamRoute::DIRECT unless value
-    parse_environment_upstream_proxy(value)
+                                              origin_port : Int32?) : {UpstreamRoute, String, String?}
+    return {UpstreamRoute::DIRECT, "loopback", nil} if environment_loopback_host?(dest_host)
+    return {UpstreamRoute::DIRECT, "NO_PROXY", nil} if environment_no_proxy?(dest_host, origin_port)
+    selection = environment_proxy_selection(origin_scheme)
+    return {UpstreamRoute::DIRECT, "no upstream configured", nil} unless selection
+    name, value = selection
+    {parse_environment_upstream_proxy(value), "environment", name}
   end
 
   # `localhost` and any loopback or unspecified address literal are direct BEFORE `NO_PROXY` is

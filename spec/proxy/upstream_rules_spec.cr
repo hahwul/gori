@@ -664,6 +664,37 @@ describe "upstream rules" do
     end
   end
 
+  # `gori run send`'s `via:` line (#1625): which egress and which setting chose it, with no
+  # credential anywhere in the sentence.
+  describe "Upstream.via" do
+    it "names the arm that decided, the way the dial resolves it" do
+      with_proxy_environment({"HTTPS_PROXY" => "http://user:s3cret@env-proxy.test:3128",
+                              "NO_PROXY"    => "skip.test"}) do
+        via = Gori::Proxy::Upstream.via("example.test", "https", 443)
+        via.should eq("upstream HTTP proxy env-proxy.test:3128 (environment HTTPS_PROXY)")
+        via.should_not contain("s3cret")
+        Gori::Proxy::Upstream.via("skip.test", "https", 443).should eq("direct (NO_PROXY)")
+        Gori::Proxy::Upstream.via("127.0.0.1", "https", 443).should eq("direct (loopback)")
+        Gori::Settings.upstream_rules = [rule("*.corp.test", "http", "jump.test:8080"), rule("*", "direct")]
+        Gori::Proxy::Upstream.via("a.corp.test", "https", 443).should eq("upstream HTTP proxy jump.test:8080 (upstream rule *.corp.test)")
+        Gori::Proxy::Upstream.via("example.test", "https", 443).should eq("direct (upstream rule *)")
+      end
+    ensure
+      reset_upstream
+    end
+
+    it "says direct with nothing configured, and never quotes a broken value" do
+      with_proxy_environment({} of String => String) do
+        Gori::Proxy::Upstream.via("example.test", "http", 80).should eq("direct (no upstream configured)")
+        Gori::Settings.project_upstream_proxy = "http://user:s3cret@[bad"
+        Gori::Proxy::Upstream.via("example.test", "http", 80)
+          .should eq("refused — invalid upstream configuration (project upstream_proxy)")
+      end
+    ensure
+      reset_upstream
+    end
+  end
+
   describe "environment proxy dialing" do
     it "uses the origin scheme when reporting the selected environment proxy" do
       with_proxy_environment({

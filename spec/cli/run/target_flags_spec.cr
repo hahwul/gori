@@ -246,3 +246,22 @@ private def with_tempdir(&)
     FileUtils.rm_rf(dir)
   end
 end
+
+# `--project`/`--db` in front of a verb (#1625): every dispatcher routes on the words, so the
+# flag is moved past them rather than taught to each one.
+describe "gori run — a target flag before the verbs" do
+  it "moves --project/--db past the leading words, in either spelling" do
+    Gori::CLI::Run.hoist_target_flags(%w[--project=X project scope add --host=a])
+      .should eq(%w[project scope add --project=X --host=a])
+    Gori::CLI::Run.hoist_target_flags(%w[project --project X scope list])
+      .should eq(%w[project scope list --project X])
+    Gori::CLI::Run.hoist_target_flags(%w[--db /t/g.db history ls])
+      .should eq(%w[history ls --db /t/g.db])
+  end
+
+  it "leaves everything from the first other flag or `--` alone" do
+    Gori::CLI::Run.hoist_target_flags(%w[send -d --db=x http://a]).should eq(%w[send -d --db=x http://a])
+    Gori::CLI::Run.hoist_target_flags(%w[shell --project p -- curl --db q]).should eq(%w[shell --project p -- curl --db q])
+    Gori::CLI::Run.hoist_target_flags(%w[history --project]).should eq(%w[history --project])
+  end
+end

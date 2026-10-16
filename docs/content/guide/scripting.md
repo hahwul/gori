@@ -31,6 +31,8 @@ Each project is its own SQLite database. Read subcommands resolve one in this or
 
 The last row is the one to avoid in a script: a single write to any other project (`notes create --project demo`) makes that project the most recently active, and every later `--project`-less command follows it. Set `GORI_PROJECT` at the top of the script instead. A `GORI_PROJECT` or pin that names no project is refused, never skipped, and the stderr notice says which rule chose the project (`gori run: using project demo (from GORI_PROJECT) — name another with --project NAME or --db PATH`).
 
+Either selector can sit before the subcommand or anywhere after it: `gori run --project demo history`, `gori run project --project demo scope list` and `gori run history --project demo` read the same project.
+
 The two selectors are alternatives, not a precedence: passing **both** is a usage error, not a
 silent win for `--db`. The same pair reaches destructive verbs (`history delete`, `history
 clear`, `project delete`), and there an invisible winner decides which project gets emptied.

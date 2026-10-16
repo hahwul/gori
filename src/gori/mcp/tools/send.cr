@@ -180,7 +180,7 @@ module Gori
           # https only: a plaintext leg sends no ClientHello, so naming a preset there would
           # report a handshake that did not happen.
           tls_preset: plan.scheme == "https" ? plan.tls_preset : nil,
-          body_more: body_more),
+          body_more: body_more, via: Proxy::Upstream.via(plan.host, plan.scheme, plan.port)),
           is_error: !result.ok?, event_flow_id: recorded_flow_id, event_note: send_event_note(built, result))
       rescue ex : Gori::Error
         # Bad input (missing/invalid url, illegal header, …) — return a clean
@@ -964,10 +964,14 @@ module Gori
                                    websocket_handshake : Bool = false,
                                    unbound_overlay : String? = nil,
                                    head_unterminated : Bool = false,
-                                   tls_preset : String? = nil, body_more : String? = nil) : String
+                                   tls_preset : String? = nil, body_more : String? = nil,
+                                   via : String? = nil) : String
         JSON.build do |j|
           j.object do
             emit_scope(j, sc)
+            # The egress this send took — upstream proxy, environment proxy or direct, and the
+            # setting that chose it (`Proxy::Upstream.via`, `gori run send`'s `via:`, #1625).
+            j.field "via", via if via
             emit_effective_request(j, built, wire, http2, h2_fields)
             emit_sent_h2_fields(j, h2_fields)
             # Only when it FIRED: gori changed the operator's stored bytes, so the surface

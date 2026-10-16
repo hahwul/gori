@@ -100,8 +100,8 @@ module Gori
         # `split_ql_negations` reclassified it out of argv on their behalf.
         query, dropped = Run.compose_history_query(query, positional, neg_terms)
         Run.warn_dropped_query_terms("probe", dropped)
-        # `--project=X delete 5` lands here because reserved verbs are recognised only
-        # as args.first?. `delete 5` is not a QL filter; it is the discarded mutation.
+        # `--format=json delete 5` lands here because reserved verbs are recognised only
+        # as args.first? (a leading `--project`/`--db` is moved past them first). `delete 5` is not a QL filter; it is the discarded mutation.
         if err = Run.reserved_query_verb_error(positional, "probe",
              PROBE_SUBCOMMANDS.keys.to_a, "issues, dismiss, promote, delete/rm, rules, mode")
           abort err

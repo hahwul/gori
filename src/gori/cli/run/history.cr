@@ -3,8 +3,9 @@
 module Gori
   module CLI
     module Run
-      # `delete`/`clear`/`show` are reserved as the first positional (same convention as
-      # `gori run probe`); a QL query starting with one goes through --query. `history show
+      # `delete`/`clear`/`show`/`ls`/`list` are reserved as the first positional (same convention
+      # as `gori run probe`); a QL query starting with one goes through --query. `ls`/`list`
+      # name the default listing (#1625), as `issues list` and the top-level `ls` do. `history show
       # <id>` is the top-level `gori run show <id>`, spelled the way the History tab reads.
       @[Subcommand("history", "ls", help: [
         {"history (ls)", "List / QL-query captured flows"},
@@ -361,13 +362,16 @@ module Gori
           p.on("--include-sensitive", "Emit Authorization/Cookie/Set-Cookie/API-key values in --format json's per-row headers instead of [REDACTED]") { include_sensitive = true }
           redact_options(p, redaction)
         end
-        # `--project=X delete 42` lands here because the dispatcher keys on args.first?.
+        # `--format=json delete 42` lands here because the dispatcher keys on args.first?
+        # (a leading `--project`/`--db` no longer does: `Run.hoist_target_flags`).
         # `delete` is not QL; it is the discarded verb. Refuse it rather than search
         # for the free-text "delete 42" and exit 0 with the flow still on disk.
         if err = Run.reserved_query_verb_error(positional, "history",
              ["delete", "rm", "clear", "show"], "delete/rm, clear, show")
           abort err
         end
+        # `history ls` / `history list` is the listing itself (#1625), not a search for "ls".
+        positional.shift if positional[0]?.in?("ls", "list")
         # Accept a positional QL too ("gori run history status:404" / "-status:404"),
         # mirroring the TUI's `/` bar — otherwise a positional query was silently dropped
         # and EVERY flow dumped.

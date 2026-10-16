@@ -31,6 +31,8 @@ gori run <subcommand> [verb] [options]
 
 스크립트에서 피해야 할 것은 마지막 행입니다. 다른 프로젝트에 쓰기를 한 번만 해도(`notes create --project demo`) 그 프로젝트가 가장 최근에 사용한 프로젝트가 되고, 이후 `--project` 없는 명령은 모두 그쪽을 따라갑니다. 대신 스크립트 맨 위에서 `GORI_PROJECT`를 설정하세요. 존재하지 않는 프로젝트를 가리키는 `GORI_PROJECT`나 고정은 건너뛰지 않고 거부하며, 어느 규칙이 프로젝트를 골랐는지 stderr 안내가 알려 줍니다(`gori run: using project demo (from GORI_PROJECT) — name another with --project NAME or --db PATH`).
 
+두 선택자는 서브커맨드 앞에 두어도, 뒤 어디에 두어도 됩니다. `gori run --project demo history`, `gori run project --project demo scope list`, `gori run history --project demo`는 모두 같은 프로젝트를 읽습니다.
+
 두 선택자는 우선순위가 아니라 택일입니다. **둘 다** 주면 `--db`가 조용히 이기는 게 아니라
 사용법 오류로 거절합니다. 같은 플래그 짝이 파괴적 동사(`history delete`, `history clear`,
 `project delete`)에도 그대로 닿는데, 거기서는 보이지 않는 승자가 어느 프로젝트를 비울지

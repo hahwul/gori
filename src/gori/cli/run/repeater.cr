@@ -2111,7 +2111,8 @@ module Gori
                                             applied_rules : Bool = false,
                                             saved_repeater_id : Int64? = nil,
                                             repeater_write : WriteOutcome? = nil,
-                                            repeater_response_write : WriteOutcome? = nil) : Nil
+                                            repeater_response_write : WriteOutcome? = nil,
+                                            via : String? = nil) : Nil
         # Text mode: the id goes to STDERR beside the other status lines, so a `> resp.txt`
         # redirect still captures exactly the response and nothing else.
         STDERR.puts "recorded to History as flow ##{recorded_flow_id}" if recorded_flow_id && format != :json
@@ -2124,7 +2125,7 @@ module Gori
             response_write: response_write, history_write: history_write, cap: cap,
             request_target: request_target, applied_rules: applied_rules,
             saved_repeater_id: saved_repeater_id, repeater_write: repeater_write,
-            repeater_response_write: repeater_response_write)
+            repeater_response_write: repeater_response_write, via: via)
         elsif result.ok?
           STDERR.puts "→ #{result.response.try(&.status) || "?"} in #{CLI::Output.human_us(result.duration_us)}#{at}#{result.incomplete? ? " (#{incomplete_reason(result, result.timed_out?)})" : ""}"
           if d = diff
@@ -2848,10 +2849,13 @@ module Gori
                                      applied_rules : Bool = false,
                                      saved_repeater_id : Int64? = nil,
                                      repeater_write : WriteOutcome? = nil,
-                                     repeater_response_write : WriteOutcome? = nil) : String
+                                     repeater_response_write : WriteOutcome? = nil,
+                                     via : String? = nil) : String
         JSON.build do |j|
           j.object do
             j.field "ok", result.ok?
+            # `gori run send` only: the egress the request took (`Proxy::Upstream.via`, #1625).
+            j.field("via", via) if via
             # `--path` only: the request-target this send put on the wire (expanded), so a
             # script looping over paths can key each object by the one it reached.
             j.field("path", request_target) if request_target
