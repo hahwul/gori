@@ -567,6 +567,7 @@ module Gori::Proxy::H2
     # connection holding nothing, which is the common case.
     private def check_waiting_locked : Nil
       return if @slots.empty?
+      expire_owned_heads_locked
       waiting = @slots.each_value.select(&.waiting).to_a
       return if waiting.empty?
       if @interceptor.holding?
@@ -1062,8 +1063,10 @@ module Gori::Proxy::H2
     private def write(frame : Frame::Header, pre : Assembler::HeadBlock?) : Nil
       @dst.write(frame.wire_bytes)
       @dst.flush
-      if (fc = @flow) && frame.frame_type == Frame::Type::Data
-        fc.window -= frame.payload.size
+      if fc = @flow
+        fc.window -= frame.payload.size if frame.frame_type == Frame::Type::Data
+        # The response is over, and with it any credit the client gave before gori owned it.
+        fc.pre_credit.delete(frame.stream_id) if !@ordered && frame.end_stream? && !fc.pre_credit.empty?
       end
       @sink.on_h2_frame(@conn_id, @direction, frame.type, frame.flags, frame.stream_id, frame.payload)
       # Session-binding extraction (#501 slice 2), on the frames that were actually WRITTEN.

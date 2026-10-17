@@ -42,7 +42,15 @@ private class Peer
   getter bodies = Hash(UInt32, IO::Memory).new { |h, k| h[k] = IO::Memory.new }
   getter data_frames = Hash(UInt32, Array(Int32)).new { |h, k| h[k] = [] of Int32 }
   getter done = [] of UInt32
+  # RST_STREAMs and GOAWAYs received — expected in some examples, so kept apart from `errors`.
+  getter resets = [] of UInt32
+  getter goaways = 0
   property on_complete : Proc(UInt32, Nil)? = nil
+  # Called (on its own fiber) when a stream's first head arrives.
+  property on_open : Proc(UInt32, Nil)? = nil
+  # Stream credit is held back until this much is owed, the way curl/nghttp2 and Firefox ack a
+  # wide per-stream window: late. 0 = every frame.
+  property stream_ack = 0_i64
 
   # Both connection windows, readable once the exchange is at rest: the sender's view of the
   # receiver's window has to equal the receiver's own, or credit was stranded or invented.
@@ -62,6 +70,38 @@ private class Peer
     @block_stream = 0_u32
     @block_end = false
     @closing = false
+    @unacked = Hash(UInt32, Int64).new(0_i64)
+  end
+
+  # Widen one stream's receive window by `n` up front.
+  def bump(stream : UInt32, n : Int32) : Nil
+    @recv_streams[stream] = recv_window(stream) + n
+    window_update(stream, n)
+  end
+
+  # Announce a new SETTINGS_INITIAL_WINDOW_SIZE; every open stream's window moves with it.
+  def change_initial(value : Int64) : Nil
+    delta = value - @recv_initial
+    @recv_initial = value
+    @recv_streams.each_key { |k| @recv_streams[k] += delta }
+    payload = Bytes.new(6)
+    IO::ByteFormat::BigEndian.encode(0x4_u16, payload[0, 2])
+    IO::ByteFormat::BigEndian.encode(value.to_u32, payload[2, 4])
+    frame(Frame::Type::Settings, 0_u8, 0_u32, payload)
+  end
+
+  def send_rst(stream : UInt32) : Nil
+    frame(Frame::Type::RstStream, 0_u8, stream, Bytes[0, 0, 0, 8])
+  end
+
+  def send_goaway(last : UInt32) : Nil
+    payload = Bytes.new(8)
+    IO::ByteFormat::BigEndian.encode(last, payload[0, 4])
+    frame(Frame::Type::Goaway, 0_u8, 0_u32, payload)
+  end
+
+  private def recv_window(stream : UInt32) : Int64
+    @recv_streams[stream]? || @recv_initial
   end
 
   def start : Nil
@@ -187,8 +227,8 @@ private class Peer
     when Frame::Type::Headers, Frame::Type::Continuation
       on_headers(f)
     when Frame::Type::Data      then on_data(f)
-    when Frame::Type::RstStream then @errors << "RST_STREAM on #{f.stream_id}"
-    when Frame::Type::Goaway    then @errors << "GOAWAY"
+    when Frame::Type::RstStream then @resets << f.stream_id
+    when Frame::Type::Goaway    then @goaways += 1
     end
   end
 
@@ -230,6 +270,8 @@ private class Peer
       trailers[@block_stream] = fields
     else
       heads[@block_stream] = fields
+      stream = @block_stream
+      @on_open.try { |cb| spawn { cb.call(stream) } }
     end
     complete(@block_stream) if @block_end
   end
@@ -237,7 +279,7 @@ private class Peer
   private def on_data(f : Frame::Header) : Nil
     n = f.payload.size
     @recv_conn -= n
-    left = (@recv_streams[f.stream_id]? || @recv_initial) - n
+    left = recv_window(f.stream_id) - n
     @recv_streams[f.stream_id] = left
     @errors << "FLOW_CONTROL_ERROR (connection, #{@recv_conn})" if @recv_conn < 0
     @errors << "FLOW_CONTROL_ERROR (stream #{f.stream_id}, #{left})" if left < 0
@@ -263,8 +305,11 @@ private class Peer
     @recv_conn += n
     window_update(0_u32, n)
     return if ended
-    @recv_streams[stream] = @recv_streams[stream] + n
-    window_update(stream, n)
+    @unacked[stream] += n
+    return if @unacked[stream] < @stream_ack
+    owed = @unacked.delete(stream).not_nil!.to_i32
+    @recv_streams[stream] = recv_window(stream) + owed
+    window_update(stream, owed)
   end
 
   private def complete(stream : UInt32) : Nil
@@ -276,7 +321,8 @@ private class Peer
 end
 
 # What the origin answers a finished request with: {head, body, trailers}.
-private alias Answer = {Array({String, String}), Bytes, Array({String, String})?}
+# nil = the answer block sent (or withheld) the response itself.
+private alias Answer = {Array({String, String}), Bytes, Array({String, String})?}?
 
 private class BodyRig
   getter sink = BodySink.new
@@ -285,7 +331,9 @@ private class BodyRig
   @servers : Array(TCPServer)
 
   def initialize(rules : Gori::Rules, ic : Gori::Interceptor, host : String = "127.0.0.1",
-                 origin_window : Int64 = 65_535_i64, lag : Time::Span? = nil, &answer : UInt32, Peer -> Answer)
+                 origin_window : Int64 = 65_535_i64, lag : Time::Span? = nil,
+                 client_window : Int64 = 65_535_i64, opened : Proc(UInt32, Peer, Nil)? = nil,
+                 &answer : UInt32, Peer -> Answer)
     origin_srv = TCPServer.new("127.0.0.1", 0)
     front = TCPServer.new("127.0.0.1", 0)
     @servers = [origin_srv, front]
@@ -296,10 +344,13 @@ private class BodyRig
       conn.read_timeout = 15.seconds
       peer = Peer.new(conn, true, origin_window, lag)
       peer.on_complete = ->(stream : UInt32) do
-        head, body, trailer = answer.call(stream, peer)
-        peer.send(stream, head, body, trailer)
+        if reply = answer.call(stream, peer)
+          head, body, trailer = reply
+          peer.send(stream, head, body, trailer)
+        end
         nil
       end
+      opened.try { |cb| peer.on_open = ->(stream : UInt32) { cb.call(stream, peer) } }
       @origin = peer
       peer.start
     end
@@ -310,7 +361,7 @@ private class BodyRig
     end
     socket = TCPSocket.new("127.0.0.1", front.local_address.port)
     socket.read_timeout = 15.seconds
-    @client = Peer.new(socket, false)
+    @client = Peer.new(socket, false, client_window)
     @client.start
   end
 
@@ -332,6 +383,10 @@ private def post(path : String, length : Int32? = nil, authority = "127.0.0.1",
           {"content-type", type}]
   head << {"content-length", length.to_s} if length
   head
+end
+
+private def get(path : String, authority = "127.0.0.1") : Array({String, String})
+  [{":method", "GET"}, {":scheme", "https"}, {":authority", authority}, {":path", path}]
 end
 
 private def ok(length : Int32? = nil, type = "text/plain") : Array({String, String})
@@ -486,25 +541,33 @@ describe "H2::StreamGate body rules (#1628)" do
     end
   end
 
-  # Stream 1 is a body rule's and is still uploading; stream 3 is for a host no rule matches
-  # (RFC 9113 §9.1.1 coalescing) and finishes its whole exchange in the meantime.
+  # Stream 1's response is a body rule's and is still arriving; stream 3's is for a host no rule
+  # matches (RFC 9113 §9.1.1 coalescing) and finishes its whole exchange in the meantime.
   it "does not hold up a concurrent stream the rule does not match" do
     with_rules do |rules, ic|
-      rules.add(REQ, BODY, "half", "HALF", host: "127.0.0.1")
-      rig = BodyRig.new(rules, ic) { |s, p| echo(s, p) }
+      rules.add(RESP, BODY, "half", "HALF", host: "127.0.0.1")
+      release = Channel(Nil).new
+      rig = BodyRig.new(rules, ic) do |s, p|
+        next {ok, "half".to_slice, nil} unless s == 1_u32
+        p.send_head(1_u32, ok, false)
+        p.send_body(1_u32, "first half,".to_slice, false)
+        release.receive
+        p.send_body(1_u32, " second half".to_slice, true)
+        nil
+      end
       begin
-        rig.client.send_head(1_u32, post("/slow"), false)
-        rig.client.send_body(1_u32, "first half,".to_slice, false)
-        rig.client.send(3_u32, post("/fast", 4, authority: "other.test"), "half".to_slice)
+        rig.client.send_head(1_u32, get("/slow"), true)
+        sleep 50.milliseconds
+        rig.client.send_head(3_u32, get("/fast", "other.test"), true)
         rig.client.wait_done(3_u32).should be_true
-        origin = rig.wait_origin
-        origin.body_of(3_u32).should eq("half")
-        origin.bodies.has_key?(1_u32).should be_false # still buffered by gori
+        rig.client.body_of(3_u32).should eq("half")
+        rig.client.heads.has_key?(1_u32).should be_true   # no declared length: the head went out
+        rig.client.bodies.has_key?(1_u32).should be_false # its body is still with gori
 
-        rig.client.send_body(1_u32, " second half".to_slice, true)
+        release.send(nil)
         rig.client.wait_done(1_u32).should be_true
-        origin.body_of(1_u32).should eq("first HALF, second HALF")
-        (rig.client.errors + origin.errors).should be_empty
+        rig.client.body_of(1_u32).should eq("first HALF, second HALF")
+        (rig.client.errors + rig.wait_origin.errors).should be_empty
       ensure
         rig.close
       end
@@ -544,7 +607,7 @@ describe "H2::StreamGate body rules (#1628)" do
       rules.add(REQ, BODY, "cat", "dog", host: "127.0.0.1")
       rig = BodyRig.new(rules, ic) { |s, p| echo(s, p) }
       begin
-        rig.client.send(1_u32, post("/t", type: "text/plain"), "a cat".to_slice, [{"x-checksum", "1"}])
+        rig.client.send(1_u32, post("/t", 5, type: "text/plain"), "a cat".to_slice, [{"x-checksum", "1"}])
         rig.client.wait_done(1_u32).should be_true
         origin = rig.wait_origin
         origin.body_of(1_u32).should eq("a dog")
@@ -563,7 +626,7 @@ describe "H2::StreamGate body rules (#1628)" do
       rules.add(REQ, BODY, "abc", "xyz", host: "127.0.0.1")
       rig = BodyRig.new(rules, ic) { |s, p| echo(s, p) }
       begin
-        rig.client.send_head(1_u32, post("/p"), false)
+        rig.client.send_head(1_u32, post("/p", 3), false)
         padded = Bytes[2] + "abc".to_slice + Bytes[0, 0]
         rig.client.send_raw_data(1_u32, padded, Frame::END_STREAM | Frame::PADDED)
         rig.client.wait_done(1_u32).should be_true
@@ -582,18 +645,16 @@ describe "H2::StreamGate body rules (#1628)" do
   # buffered goes out as it arrived and the rest streams after it, credit following the bytes.
   it "spills a body that runs past the buffering ceiling and forwards it unmodified" do
     with_rules do |rules, ic|
-      rules.add(REQ, BODY, "z", "Z", host: "127.0.0.1")
-      rig = BodyRig.new(rules, ic) { |s, p| echo(s, p) }
+      rules.add(RESP, BODY, "z", "Z", host: "127.0.0.1")
+      body = Bytes.new(Gori::Proxy::H2::StreamGate::MAX_RULE_BODY + 100_000, 'z'.ord.to_u8)
+      rig = BodyRig.new(rules, ic) { |_, _| {ok, body, nil} }
       begin
-        body = Bytes.new(Gori::Proxy::H2::StreamGate::MAX_RULE_BODY + 100_000, 'z'.ord.to_u8)
-        rig.client.send(1_u32, post("/big"), body)
+        rig.client.send_head(1_u32, get("/big"), true)
         rig.client.wait_done(1_u32, 30.seconds).should be_true
-        origin = rig.wait_origin
-        origin.bodies[1_u32].size.should eq(body.size)
-        origin.bodies[1_u32].to_slice.should eq(body)
-        rig.sink.requests.first.advisory.not_nil!.should contain("ceiling")
-        (rig.client.errors + origin.errors).should be_empty
-        settled(rig.client, origin)
+        rig.client.bodies[1_u32].to_slice.should eq(body)
+        rig.sink.responses.first.advisory.not_nil!.should contain("ceiling")
+        (rig.client.errors + rig.wait_origin.errors).should be_empty
+        settled(rig.wait_origin, rig.client)
       ensure
         rig.close
       end
@@ -679,6 +740,291 @@ describe "H2::StreamGate body rules (#1628)" do
       ensure
         rig.close
       end
+    end
+  end
+
+  # Review #1: curl/nghttp2 and Firefox widen a stream's window right after the request and ack
+  # late. That credit reached the origin before gori owned the response, so it is gori's to
+  # spend: seeding the owned stream at the initial window alone stalled it at 65,535 bytes.
+  it "spends stream credit the client granted before the response arrived" do
+    with_rules do |rules, ic|
+      rules.add(RESP, BODY, "b", "c", host: "127.0.0.1")
+      body = "b" * 300_000
+      rig = BodyRig.new(rules, ic) { |_, _| {ok, body.to_slice, nil} }
+      begin
+        rig.client.stream_ack = 500_000_i64
+        rig.client.send_head(1_u32, get("/x"), true)
+        rig.client.bump(1_u32, 1_000_000)
+        rig.client.wait_done(1_u32).should be_true
+        rig.client.body_of(1_u32).should eq("c" * 300_000)
+        (rig.client.errors + rig.wait_origin.errors).should be_empty
+      ensure
+        rig.close
+      end
+    end
+  end
+
+  # Review #4: a request with no declared length may be full duplex, so it is never buffered —
+  # here the origin answers before the request ends, as a Connect or ndjson stream would.
+  it "leaves a request with no declared length streaming, full duplex included" do
+    with_rules do |rules, ic|
+      rules.add(REQ, BODY, "ping", "PONG", host: "127.0.0.1")
+      opened = ->(stream : UInt32, origin : Peer) do
+        origin.send(stream, ok, "pong".to_slice)
+        nil
+      end
+      rig = BodyRig.new(rules, ic, opened: opened) { |_, _| nil }
+      begin
+        rig.client.send_head(1_u32, post("/duplex"), false)
+        rig.client.send_body(1_u32, "ping,".to_slice, false)
+        rig.client.wait_done(1_u32).should be_true # the reply arrived while the request is open
+        rig.client.send_body(1_u32, "ping".to_slice, true)
+        origin = rig.wait_origin
+        origin.wait_done(1_u32).should be_true
+        origin.body_of(1_u32).should eq("ping,ping")
+        (rig.client.errors + origin.errors).should be_empty
+      ensure
+        rig.close
+      end
+    end
+  end
+
+  # Review #4: a response held for its declared length must not hold the origin's stream credit
+  # for the REQUEST with it, or an origin that finishes its reply only after the whole upload
+  # waits on an upload that waits on that credit.
+  it "keeps the request's stream credit moving while its response head is held" do
+    with_rules do |rules, ic|
+      rules.add(RESP, BODY, "hello", "HELLO", host: "127.0.0.1")
+      opened = ->(stream : UInt32, origin : Peer) do
+        origin.send_head(stream, ok(10), false)
+        origin.send_body(stream, "hello".to_slice, false)
+        origin.wait_done(stream)
+        origin.send_body(stream, "world".to_slice, true)
+        nil
+      end
+      rig = BodyRig.new(rules, ic, opened: opened) { |_, _| nil }
+      begin
+        upload = "u" * 200_000
+        rig.client.send_head(1_u32, post("/up", type: "text/plain"), false)
+        rig.client.send_body(1_u32, upload.to_slice, true)
+        rig.client.wait_done(1_u32).should be_true
+        rig.client.body_of(1_u32).should eq("HELLOworld")
+        rig.wait_origin.body_of(1_u32).should eq(upload)
+        (rig.client.errors + rig.wait_origin.errors).should be_empty
+      ensure
+        rig.close
+      end
+    end
+  end
+
+  # Review #2: the origin would answer 100 Continue to a head gori was holding for the very body
+  # the client will not send until it does.
+  it "does not hold a request head that asks for 100-continue" do
+    with_rules do |rules, ic|
+      rules.add(REQ, BODY, "abc", "xyz", host: "127.0.0.1")
+      rig = BodyRig.new(rules, ic) { |s, p| echo(s, p) }
+      begin
+        rig.client.send_head(1_u32, post("/c", 3) << {"expect", "100-continue"}, false)
+        origin = rig.wait_origin
+        10.times { break if origin.heads.has_key?(1_u32); sleep 20.milliseconds }
+        origin.heads.has_key?(1_u32).should be_true
+        rig.client.send_body(1_u32, "abc".to_slice, true)
+        rig.client.wait_done(1_u32).should be_true
+        origin.body_of(1_u32).should eq("abc")
+        rig.sink.requests.first.advisory.not_nil!.should contain("100-continue")
+      ensure
+        rig.close
+      end
+    end
+  end
+
+  # Review #3: each owned stream is credited as it arrives, so without a budget across streams
+  # two 9 MiB responses would sit in memory at once. The one that crosses it spills.
+  it "spills the stream that crosses the connection's buffering budget" do
+    with_rules do |rules, ic|
+      rules.add(RESP, BODY, "b", "c", host: "127.0.0.1")
+      body = Bytes.new(9 * 1024 * 1024, 'b'.ord.to_u8)
+      # Both bodies are sent before either ends, so both are buffering at once.
+      sent = Channel(Nil).new(2)
+      go = Channel(Nil).new(2)
+      rig = BodyRig.new(rules, ic) do |s, p|
+        p.send_head(s, ok, false)
+        p.send_body(s, body, false)
+        sent.send(nil)
+        go.receive
+        p.send_raw_data(s, Bytes.empty, Frame::END_STREAM)
+        nil
+      end
+      begin
+        rig.client.send_head(1_u32, get("/one"), true)
+        rig.client.send_head(3_u32, get("/two"), true)
+        2.times { sent.receive }
+        2.times { go.send(nil) }
+        rig.client.wait_done(1_u32, 30.seconds).should be_true
+        rig.client.wait_done(3_u32, 30.seconds).should be_true
+        got = [1_u32, 3_u32].map { |id| rig.client.bodies[id].to_slice }
+        got.each(&.size.should(eq(body.size)))
+        got.count(&.==(body)).should eq(1) # one spilled unmodified, the other was rewritten
+        advisories = rig.sink.responses.compact_map(&.advisory)
+        advisories.any?(&.includes?("buffered on this connection")).should be_true
+        (rig.client.errors + rig.wait_origin.errors).should be_empty
+        settled(rig.wait_origin, rig.client)
+      ensure
+        rig.close
+      end
+    end
+  end
+
+  # Review #5: h1 runs no rule over an empty body, so a `^` pattern does not invent one.
+  it "runs no rule over an empty body" do
+    with_rules do |rules, ic|
+      rules.add(RESP, BODY, "^", "X", match_kind: Gori::Store::MatchKind::Regex, host: "127.0.0.1")
+      rig = BodyRig.new(rules, ic) do |s, p|
+        p.send_head(s, ok, false)
+        p.send_raw_data(s, Bytes.empty, Frame::END_STREAM)
+        nil
+      end
+      begin
+        rig.client.send_head(1_u32, get("/empty"), true)
+        rig.client.wait_done(1_u32).should be_true
+        rig.client.body_of(1_u32).should eq("")
+      ensure
+        rig.close
+      end
+    end
+  end
+
+  it "survives a reset from either side mid-buffer, and the connection carries on" do
+    with_rules do |rules, ic|
+      rules.add(REQ, BODY, "q", "Q", host: "127.0.0.1")
+      rules.add(RESP, BODY, "r", "R", host: "127.0.0.1")
+      rig = BodyRig.new(rules, ic) do |s, p|
+        case s
+        when 3_u32 # the origin resets a response it was sending
+          p.send_head(s, ok(10), false)
+          p.send_body(s, "rrr".to_slice, false)
+          p.send_rst(s)
+          nil
+        when 5_u32 # a response the client will reset
+          p.send_head(s, ok, false)
+          p.send_body(s, "rrr".to_slice, false)
+          nil
+        else
+          {ok, "rr".to_slice, nil}
+        end
+      end
+      begin
+        # The client resets a request whose head gori is still holding for its body.
+        rig.client.send_head(1_u32, post("/a", 10), false)
+        rig.client.send_body(1_u32, "qqq".to_slice, false)
+        rig.client.send_rst(1_u32)
+
+        rig.client.send(3_u32, post("/b", 1), "q".to_slice)
+        10.times { break if rig.client.resets.includes?(3_u32); sleep 20.milliseconds }
+        rig.client.resets.should contain(3_u32)
+        rig.client.heads.has_key?(3_u32).should be_false # its head was held for the body
+
+        rig.client.send(5_u32, post("/c", 1), "q".to_slice)
+        sleep 50.milliseconds
+        rig.client.send_rst(5_u32)
+
+        rig.client.send(7_u32, post("/d", 2), "qq".to_slice)
+        rig.client.wait_done(7_u32).should be_true
+        rig.client.body_of(7_u32).should eq("RR")
+        origin = rig.wait_origin
+        origin.heads.has_key?(1_u32).should be_false # never opened on the origin
+        origin.body_of(7_u32).should eq("QQ")
+        origin.resets.should contain(5_u32)
+        (rig.client.errors + origin.errors).should be_empty
+        settled(rig.client, origin)
+        settled(origin, rig.client)
+      ensure
+        rig.close
+      end
+    end
+  end
+
+  # The client widens SETTINGS_INITIAL_WINDOW_SIZE while gori owns its response and never acks
+  # the stream itself, so the only room past 20,000 bytes is the setting's change (§6.9.2).
+  it "follows a SETTINGS_INITIAL_WINDOW_SIZE change on an owned stream" do
+    with_rules do |rules, ic|
+      rules.add(RESP, BODY, "b", "c", host: "127.0.0.1")
+      body = "b" * 60_000
+      rig = BodyRig.new(rules, ic, client_window: 20_000_i64) { |_, _| {ok, body.to_slice, nil} }
+      begin
+        rig.client.stream_ack = 10_000_000_i64
+        rig.client.send_head(1_u32, get("/x"), true)
+        sleep 100.milliseconds
+        rig.client.bodies[1_u32].size.should eq(20_000)
+        rig.client.change_initial(100_000_i64)
+        rig.client.wait_done(1_u32).should be_true
+        rig.client.body_of(1_u32).should eq("c" * 60_000)
+        (rig.client.errors + rig.wait_origin.errors).should be_empty
+      ensure
+        rig.close
+      end
+    end
+  end
+
+  # GOAWAY names the last stream the origin will process; an owned one below it still finishes.
+  it "finishes an owned stream across a GOAWAY" do
+    with_rules do |rules, ic|
+      rules.add(RESP, BODY, "b", "c", host: "127.0.0.1")
+      rig = BodyRig.new(rules, ic) do |s, p|
+        p.send_goaway(s)
+        {ok(5), "bbbbb".to_slice, nil}
+      end
+      begin
+        rig.client.send_head(1_u32, get("/x"), true)
+        rig.client.wait_done(1_u32).should be_true
+        rig.client.body_of(1_u32).should eq("ccccc")
+        rig.client.goaways.should eq(1)
+        (rig.client.errors + rig.wait_origin.errors).should be_empty
+      ensure
+        rig.close
+      end
+    end
+  end
+end
+
+# Review #2, against the gates directly so the deadline can be short: a request head held for a
+# declared length whose body stalls goes out by `hold_wait_deadline`, and the stream opened
+# behind it goes out after it.
+describe "H2::StreamGate body rules: a stalled body" do
+  it "releases a held request head at the deadline, and the stream behind it" do
+    with_rules do |rules, ic|
+      rules.add(REQ, BODY, "one", "ONE", host: "api.example.com")
+      sink = BodySink.new
+      assembler = Gori::Proxy::H2::Assembler.new(sink, "api.example.com", 443)
+      up = IO::Memory.new
+      down = IO::Memory.new
+      out_gate = Gori::Proxy::H2::StreamGate.new("out", up, 1_i64, sink, assembler, "api.example.com", 443, ic,
+        Gori::Proxy::H2::HeadRewrite.new("out", rules, assembler, "api.example.com", nil, true), body_rewriter: rules)
+      in_gate = Gori::Proxy::H2::StreamGate.new("in", down, 1_i64, sink, assembler, "api.example.com", 443, ic,
+        Gori::Proxy::H2::HeadRewrite.new("in", rules, assembler, "api.example.com", nil, true), nil, rules)
+      out_gate.peer = in_gate
+      in_gate.peer = out_gate
+      out_gate.hold_wait_deadline = 50.milliseconds
+      enc = HPACK::Encoder.new
+      head = enc.encode(post("/first", 10, authority: "api.example.com"))
+      out_gate.accept(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS, 1_u32, head))
+      out_gate.accept(Frame::Header.new(Frame::Type::Data.value, 0_u8, 1_u32, "one".to_slice))
+      later = enc.encode(get("/second", "api.example.com"))
+      out_gate.accept(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS | Frame::END_STREAM, 3_u32, later))
+      up.size.should eq(0) # stream 1 waits for its body, stream 3 waits for stream 1
+
+      sleep 150.milliseconds
+      frames = [] of Frame::Header
+      reader = IO::Memory.new(up.to_slice)
+      while f = Frame.read(reader)
+        frames << f
+      end
+      frames.map { |w| {w.frame_type, w.stream_id} }.should eq([
+        {Frame::Type::Headers, 1_u32}, {Frame::Type::Data, 1_u32}, {Frame::Type::Headers, 3_u32},
+      ])
+      String.new(frames[1].payload).should eq("one") # the partial body, unmodified
+      out_gate.close
+      in_gate.close
     end
   end
 end
