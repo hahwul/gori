@@ -17,7 +17,9 @@ module Gori
       if awaits_tunnel?(row)
         event.kind == :tunnel_completed
       else
-        event.kind == :updated
+        # Not while Pending: an event stream publishes `:updated` when its head lands, long
+        # before the response is finished (#1631).
+        event.kind == :updated && !row.state.pending?
       end
     end
   end

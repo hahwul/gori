@@ -182,6 +182,8 @@ Sitemap 행에서 `⇧E`(또는 `Space` → `E`)를 누르면 OpenAPI 3.0.3 문�
 
 **중간 응답도 플로우와 함께 남습니다.** 원 서버는 실제 응답 앞에 `1xx` 헤드를 하나 이상 보낼 수 있습니다. `103 Early Hints`나, `Expect: 100-continue` 업로드에 답하는 `100 Continue`가 그렇습니다. gori는 각 헤드를 바꾸지 않고 클라이언트에 전달하고(읽을 수 없는 HTTP/1.0 클라이언트는 제외), HTTP/1.1과 HTTP/2 모두에서 플로우와 함께 기록합니다. 상세 뷰의 `RESPONSE` 옆에 `INTERIM` 칩이 붙고, `gori run show --format raw`는 클라이언트가 받은 것들을 최종 응답 앞에 와이어 순서대로 출력하며, `--format json`과 MCP `get_flow`는 모두를 `interim`(`{status, relayed, head}`)으로 나열합니다. 클라이언트가 받지 못한 헤드는 `relayed: false`로 표시되고, raw는 그것을 출력하는 대신 stderr에 알립니다. `RESPONSE`는 최종 응답만 담습니다. 몇 개를 보낼지는 원 서버가 정하므로, gori는 처음 16개(64 KiB 이내)를 남기고 기록하지 않은 나머지 개수를 알려 줍니다(`interim_omitted`).
 
+**이벤트 스트림은 열려 있는 동안에도 이벤트를 보여 줍니다.** `text/event-stream` 응답은 HTTP/1.1과 HTTP/2 모두에서 흘러가는 동안 기록됩니다. 헤드가 도착하면 플로우에 상태 코드와 콘텐츠 타입이 나타나고, 플로우가 아직 Pending인 동안에도 `EVENTS (sse)` 패널, `gori run show`, MCP `get_flow`가 지금까지 받은 이벤트를 읽습니다. gori는 이벤트마다 쓰지 않고 모아서 씁니다. 16 KiB가 쌓였을 때, 또는 이벤트가 끝났을 때 초당 최대 네 번입니다. 본문은 여전히 캡처 상한을 넘지 않습니다. 직전 쓰기 직후에 도착하고 그 뒤로 조용한 이벤트는 스트림의 다음 바이트(보통 하트비트)와 함께 나타납니다. `body:` 필터와 검색은 스트림이 닫힌 뒤에야 본문을 봅니다. 스트림 도중 gori가 멈춰도 플로우는 그때까지 전달한 이벤트를 간직합니다.
+
 ### HTTP/2 위의 WebSocket {#websocket-http2}
 
 오리진이 `SETTINGS_ENABLE_CONNECT_PROTOCOL`을 광고하면 요즘 브라우저는 HTTP/1.1 `Upgrade:` 핸드셰이크 대신 RFC 8441의 확장 `CONNECT`로 WebSocket을 엽니다. gori는 그 광고를 그대로 중계하므로 클라이언트는 이 경로를 쓸 자격이 있고, 실제로 쓰면 gori가 그 소켓을 읽습니다. RFC 8441은 핸드셰이크만 대체하고 나머지는 그대로이므로 프레임은 동일한 RFC 6455 프레임이며 동일한 코덱이 읽습니다. 어떤 핸드셰이크로 열린 소켓인지에 따라 분석 결과가 달라지지 않습니다.

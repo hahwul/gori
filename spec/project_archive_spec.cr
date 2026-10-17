@@ -573,11 +573,30 @@ describe Gori::ProjectArchive do
       store.flush
       archive_path = export_archive(project, File.join(root, "side.gori"))
       original = File.read(archive_path)
-      %w[intercept_originals flow_interims flow_rule_hits rewrite_originals].each do |table|
+      %w[intercept_originals flow_interims flow_live_chunks flow_rule_hits rewrite_originals].each do |table|
         File.write(archive_path, original)
         tamper_archive_database(archive_path, root) { |conn| conn.exec("DROP TABLE #{table}") }
         error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
         error.message.not_nil!.should contain("missing required table #{table}")
+      end
+    end
+  end
+
+  # A stream's live chunks (#1631) are in-flight state: the copy keeps its flows, not them.
+  it "imports a project without the live chunks of a stream it was relaying" do
+    with_archive_project do |registry, project, store, root|
+      id = store.insert_flow(archive_request("/events"))
+      store.append_live(id, 0_i64, "data: one\n\n".to_slice, nil)
+      store.flush
+      store.@db.scalar("SELECT COUNT(*) FROM flow_live_chunks").should eq(1)
+      archive_path = export_archive(project, File.join(root, "live.gori"))
+      imported = Gori::ProjectArchive.prepare_import(archive_path).import_into(registry, "Live copy")
+      copied = Gori::Store.open(imported.db_path)
+      begin
+        copied.@db.scalar("SELECT COUNT(*) FROM flow_live_chunks").should eq(0)
+        copied.get_flow(id).should_not be_nil
+      ensure
+        copied.close
       end
     end
   end

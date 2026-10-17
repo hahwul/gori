@@ -37,6 +37,14 @@ describe Gori::CaptureCompletion do
     completion.ready?(Gori::Store::FlowEvent.new(2_i64, :tunnel_completed), ordinary).should be_false
   end
 
+  # An event stream publishes `:updated` when its head lands, while still Pending (#1631).
+  it "does not count a flow on an update that leaves it Pending" do
+    completion = Gori::CaptureCompletion.new
+    row = capture_row(200, Gori::Store::FlowState::Pending)
+
+    completion.ready?(Gori::Store::FlowEvent.new(5_i64, :updated), row).should be_false
+  end
+
   it "waits for an accepted h2 WebSocket even when the stream ends as aborted" do
     completion = Gori::CaptureCompletion.new
     row = capture_row(200, Gori::Store::FlowState::Aborted, "websocket")
