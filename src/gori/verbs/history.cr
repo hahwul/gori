@@ -502,6 +502,18 @@ module Gori
         "repeater.toggle-grpc-fields", "Toggle gRPC field editor",
         "gRPC: edit the request message BY FIELD through the loaded .proto — pick a schema-known field, type a value, and the message is re-encoded with every other byte copied from the capture. Needs a descriptor set that declares this rpc (Project → Proto schema) and a unary call; a field the schema does not declare, or one whose wire type it contradicts, stays read-only and is edited with ^X",
         Verb::Scope::Repeater, available: in_repeater, intent: :grpc_fields, section: :request) { |ctx| ctx.repeater_toggle_grpc_fields; nil }
+      # The whole message as proto3 JSON in `$EDITOR`, and one `path=value` field (#1632) — the
+      # routes to a field the capture never carried. Palette-only: the lexicon's `:edit` letter
+      # is the strip's reserved rename here, and both are reached for once per finding rather
+      # than every session. The FIELDS footer names them (`{space:…}` prints `^P → title`).
+      r.register Verb::Definition.new(
+        "repeater.grpc-json-edit", "Edit gRPC message as JSON",
+        "gRPC: open the request message as proto3 JSON in $EDITOR and re-encode it through the loaded .proto. A key the capture lacks ADDS that field (a proto3 field at its default, like is_admin, is never on the wire otherwise), a deleted key removes it, and every field left as it was keeps its captured bytes. An unknown key or a value its type cannot hold is refused, never dropped. A compressed message is re-compressed. Unary calls with a descriptor set",
+        Verb::Scope::Repeater, available: in_repeater, section: :request, menu: :palette) { |ctx| ctx.repeater_grpc_json_edit; nil }
+      r.register Verb::Definition.new(
+        "repeater.grpc-add-field", "Add gRPC field",
+        "gRPC: set or ADD one field on the request message from path=value — declared names with a loaded .proto (is_admin=true, profile.role=ADMIN), field numbers with or without one (7:varint=1; types varint, i32, i64, string, bytes, or a .proto scalar). The spec `gori run repeater send --grpc-field` and MCP grpc_fields take. Unary calls",
+        Verb::Scope::Repeater, available: in_repeater, section: :request, menu: :palette) { |ctx| ctx.repeater_grpc_add_field; nil }
       r.register Verb::Definition.new(
         "repeater.send-group", "Send group (one connection)",
         "Pipeline every request (split on a lone %%% line) over ONE keep-alive connection — active request-smuggling / keep-alive reuse — and show each response",

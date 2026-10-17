@@ -19,6 +19,7 @@ module Gori
       case kind
       when :request, :intercept then ".http"
       when :notes, :desc        then ".md"
+      when :json                then ".json"
       else                           ".txt"
       end
     end

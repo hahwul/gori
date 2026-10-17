@@ -302,6 +302,12 @@ module Gori::Tui
       # Bumped every time @grpc_payload is REPLACED (a hex-edit commit, a field apply, a
       # fresh load). The rows cache keys on it because `Bytes` has no identity to compare.
       @grpc_payload_rev = 0
+      # The JSON edit (#1632): the binding its text was projected through, the payload revision
+      # it was projected from, and the text of a refused apply — reopened instead of a fresh
+      # projection, so one typo does not cost the operator the rest of the edit.
+      @grpc_json_binding = nil.as(Gori::Protobuf::Schemas::Binding?)
+      @grpc_json_rev = -1
+      @grpc_json_draft = nil.as(String?)
       # "Send group" mode (space → g): the editor holds several requests separated by a lone
       # `%%%` line; a group send pipelines them on ONE keep-alive connection (active smuggling
       # / keep-alive-reuse), and the response pane shows a TRANSCRIPT of every response. Set

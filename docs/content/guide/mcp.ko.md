@@ -231,7 +231,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 
 | 도구 | 용도 |
 |------|---------|
-| `send_request` | HTTP 요청 전송 / 재전송(액티브; 기본적으로 History에 기록, `$ENV.KEY` 환경 토큰과 `$BIND.NAME` 바인딩을 확장, 명시적으로 요청하지 않는 한 민감한 응답 헤더 값을 가림). `reframe_grpc: true`는 실제 전송되는 본문에 맞춰 단항 gRPC 메시지의 5바이트 길이 접두사를 다시 계산합니다. 기본값은 꺼짐이므로 편집된 메시지도 캡처 당시의 접두사 그대로 나갑니다 |
+| `send_request` | HTTP 요청 전송 / 재전송(액티브; 기본적으로 History에 기록, `$ENV.KEY` 환경 토큰과 `$BIND.NAME` 바인딩을 확장, 명시적으로 요청하지 않는 한 민감한 응답 헤더 값을 가림). `reframe_grpc: true`는 실제 전송되는 본문에 맞춰 단항 gRPC 메시지의 5바이트 길이 접두사를 다시 계산합니다. 기본값은 꺼짐이므로 편집된 메시지도 캡처 당시의 접두사 그대로 나갑니다. `grpc_fields: ["role=ROLE_ADMIN", "7:varint=1"]`는 이번 전송에서만 그 메시지에 필드를 설정하거나 추가하고(`.proto`가 있으면 선언된 이름, 없으면 필드 번호) 접두사를 다시 계산합니다([필드 추가](/ko/guide/proxy/#proto-schema)) |
 | `send_websocket` | 저장된 WebSocket Repeater 세션을 실행하고 응답을 수집 |
 | `race_requests` | 저장된 HTTP Repeater 세션 둘 이상(`repeater_ids`)을 하나의 동기화된 레이스로 발사: HTTP/1.1 last-byte sync, 또는 `http2:true`로 HTTP/2 single-packet 공격. 모든 멤버는 같은 오리진과 전송을 공유해야 하며, 결과에 멤버별 타이밍이 담깁니다 |
 | `timing_requests` | 저장된 HTTP Repeater 세션 정확히 두 개(`repeater_ids`)의 차등 타이밍 분석: A/B 쌍을 `count`번 보내(동기화된 single-packet/last-byte 레이스, 또는 `interleaved:true`) 판정(`a_slower` / `b_slower` / `no_difference` / `inconclusive`)과 순서 편향 비율, 이항 p-값, 변형별 사분위수를 돌려줍니다. 단일 숫자가 아닙니다 |

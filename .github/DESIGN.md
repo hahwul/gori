@@ -4997,6 +4997,22 @@ zero-buffer frame path with no added window bookkeeping. Short-circuit rules and
 extract rules keep the HTTP/1.1 downgrade: neither falls out of this, since one has to answer
 without dialling and the other reads an entity the relay buffers only for a rewrite.
 
+### 2026-10-18: a gRPC field edit may ADD a field, and keeps every untouched octet (#1632)
+
+`Encoder.replace` could only swap an occurrence the capture carried, so a proto3 field at its
+default (`is_admin`) could never be sent. `Protobuf::Edit` adds the missing half without a
+serializer: `set` (`path=value`, by declared name or by number with a `:type`) rebuilds only the
+field it names and the containers on its path, and appends a field the message lacks before any
+truncated tail. `from_json` keeps a field verbatim when its JSON value still encodes to what the
+capture's own projection encodes to, so a padded varint or a `2` for `true` survives an
+unrelated edit; a field the JSON cannot show (undeclared, a contradicting wire type) is copied,
+and only a key the operator deleted removes one. An unknown key or ill-typed value is refused,
+never dropped. Headless, `gori run repeater send --grpc-field` and MCP `grpc_fields` reach the
+same `set` through `Repeater::GrpcFields.apply`, which reframes the edited message whatever
+`reframe_grpc` says: the edit is gori's, so a stale prefix would be a bug, not the operator's
+test. Both TUI verbs are palette-only: the lexicon's `:edit` letter is the strip's reserved
+rename on the Repeater tab.
+
 ### 2026-10-18: an open event stream is appended in batches, beside the flow (#1631)
 
 An SSE response used to reach the store once, at its end, so History showed nothing while the

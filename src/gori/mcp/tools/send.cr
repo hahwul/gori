@@ -411,7 +411,7 @@ module Gori
 
       # The arguments that DEFINE the request bytes. A stored source carries every one of them
       # already, so naming one beside a source describes a second, different request.
-      # `verbatim`, `http2`, `sni`, `tls_preset`, `reframe_grpc`, `timeout_ms`, `insecure` and
+      # `verbatim`, `http2`, `sni`, `tls_preset`, `reframe_grpc`, `grpc_fields`, `timeout_ms`, `insecure` and
       # `keep_request_line` are deliberately NOT here: each one modifies how the stored request
       # is sent, which is exactly what a per-send override is for. (`keep_request_line` is read
       # only by the `flow_id` branch, as its own schema text says — it combines with a source
@@ -1360,6 +1360,19 @@ module Gori
       # argument parsing.
       private def build_send_plan(h, ob : Outbound) : {Repeater::Plan, Bool} | Result
         opts, rewrote = present?(h, "h2_fields") ? {field_native_plan_options(h), false} : send_plan_options(h)
+        # After the source is resolved, so a flow, a saved session and a `raw` request all take
+        # it — through the same `Protobuf::Edit.set` as `gori run repeater send --grpc-field`.
+        unless (specs = str_list(h, "grpc_fields")).empty?
+          if present?(h, "h2_fields")
+            return err("'grpc_fields' edits a framed gRPC body and cannot combine with h2_fields", "INVALID_ARGUMENT", field: "grpc_fields")
+          end
+          edited = opts.requests.map do |r|
+            e = Repeater::GrpcFields.apply(r, specs)
+            return err("grpc_fields #{e}", "INVALID_ARGUMENT", field: "grpc_fields") if e.is_a?(String)
+            e
+          end
+          opts.requests = edited
+        end
         {Repeater::Plan.build(opts, ob), rewrote}
       rescue ex : Repeater::PlanError
         send_plan_error(ex, "url")
@@ -1730,7 +1743,7 @@ module Gori
           "(`details.conflicting_fields`) and nothing is sent; to edit one, read it with " \
           "get_flow/get_repeater_context and send it back through url/raw. Per-send modifiers " \
           "(http2, sni, tls_preset, verbatim, timeout_ms, sse_max_events, sse_max_ms, insecure, " \
-          "reframe_grpc) combine with a " \
+          "reframe_grpc, grpc_fields) combine with a " \
           "source, keep_request_line with flow_id. The result includes `effective_request` (what " \
           "was actually sent). The url path adds Host + Content-Length when omitted. Match & " \
           "Replace rules apply only with apply_rules:true. On a failed send, branch on " \
@@ -1749,6 +1762,7 @@ module Gori
           s.field "raw_base64", strprop("the whole raw HTTP/1.1 request as base64: the byte-exact form, and the only way to send a latin-1/invalid-UTF-8 header or a binary body ('é' in a JSON string goes out as 2 bytes). Implies verbatim")
           s.field "verbatim", boolprop("send the bytes EXACTLY as stored/given (default false): no token expansion ($ENV.KEY, $BIND.NAME, $GEN.UUID, bare $KEY/$NAME stay literal, and a $$ escape is not consumed either), no bare-LF→CRLF promotion, no Content-Length resync, no h2 field-name lowercasing, no method upper-casing. The active session slot's header overlay still applies. Applies to 'raw', to a structured url send's headers and body (the URL itself still expands), and to a repeater_id replay (like `gori run repeater send --verbatim`), where it also sends a stored § literally instead of refusing it; a flow_id replay is byte-exact anyway. For desync/smuggling tests where a bare LF IS the payload, or a literal token in the stored request is")
           s.field "reframe_grpc", boolprop("HTTP/2 only: recompute the gRPC 5-byte length prefix over the body being sent (default FALSE). By default an edited body keeps its captured/authored prefix: a byte-exact replay, and the test when a wrong prefix is the point. Set TRUE after editing a unary message the origin should accept. Single messages only; client-streaming and grpc-web-text bodies are left alone. Reflected in effective_request")
+          s.field "grpc_fields", strarrprop("gRPC: set or add fields on the unary message, each \"path=value\": a declared name with a .proto (role=ROLE_ADMIN) or number:type (7:varint=1). Reframed")
           s.field "h2_fields", h2fieldsprop
           s.field "http2", boolprop("use real HTTP/2; defaults to the flow's version when flow_id is set)")
           s.field "timeout_ms", intprop("per-operation connect + idle (read/write) timeout in milliseconds; a timeout surfaces as a network-error result with error_kind (1-600000)")

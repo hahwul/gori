@@ -543,6 +543,7 @@ gori run repeater send 5 --message '{"op":"subscribe"}' --idle-ms 5000
 | `--diff` | 세션에 마지막으로 저장된 응답과 비교 |
 | `--verbatim` | 저장된 바이트를 정확히 그대로 전송: 토큰 확장(프로젝트 env 변수, 세션 바인딩, 제너레이터 **모두**. `$ENV.KEY`, `$BIND.NAME`, `$GEN.UUID`가 와이어에 리터럴로 나감), 단독 LF 승격, `Content-Length` 재계산, HTTP/2→1.1 버전 보정, h2 필드명 소문자화를 모두 하지 않음. 시길 문법을 아예 해석하지 않으므로 `$$ENV.KEY` 이스케이프도 소비되지 않으니 `$ENV.KEY`로 쓰세요. 저장된 `§…§` 마커도 거부되지 않고 리터럴 바이트로 나갑니다. 활성 `--slot`의 헤더 오버레이는 계속 적용됩니다. *어떤 바이트*가 아니라 *누구로서* 보낼지에 답하는 옵션이기 때문입니다. 저장된 헤더 그대로 보내려면 `--slot`을 주지 마세요 |
 | `--reframe-grpc` | HTTP/2 전용: 실제로 전송되는 본문에 맞춰 gRPC 5바이트 길이 접두사를 다시 계산합니다(길이가 바뀐 단항 메시지용). 기본값은 꺼짐입니다. 페이로드와 어긋나는 접두사는 표준적인 파서 테스트이므로 쓴 그대로 나갑니다 |
+| `--grpc-field=PATH=VALUE` | gRPC: 이번 전송에서만 세션의 단항 메시지에 필드를 설정하거나 추가합니다(반복 가능, 순서대로 적용). `PATH`는 `.proto`가 rpc를 해석하면 선언된 이름(`role=ROLE_ADMIN`, `profile.age=30`), 아니면 필드 번호(`4.1=30`)입니다. 메시지에 없고 선언되지도 않은 필드는 타입을 붙입니다(`7:varint=1`; `varint`, `i32`, `i64`, `string`, hex로 쓰는 `bytes`, 또는 `.proto` 스칼라). 압축된 메시지는 다시 압축되고 길이 접두사는 다시 계산됩니다 |
 | `--message=TEXT` | WebSocket: 보낼 텍스트 메시지 (반복 가능; 세션에 저장된 메시지를 대체) |
 | `--message-frame=SPEC` | WebSocket: 형태를 명시한 프레임 하나. 쉼표로 구분한 `key=value`: `opcode=text\|bin\|cont\|close\|ping\|pong\|<0-15>`, `fin`, `rsv`, `mask`, `mask_key`, `len`, 그리고 `hex=`/`b64=`/`text=` 중 하나 |
 | `--idle-ms=N` | WebSocket: 첫 수신 프레임 이후 서버 침묵 타임아웃 (100-60000, 기본값 3000) |

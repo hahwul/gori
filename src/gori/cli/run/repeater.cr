@@ -1449,6 +1449,7 @@ module Gori
         path_override : String? = nil
         headers = [] of String
         cookies = [] of String
+        grpc_fields = [] of String
         apply_rules = false
         headers_only = false
         max_body : Int32? = nil
@@ -1479,6 +1480,7 @@ module Gori
           p.on("--path=TARGET", PATH_OVERRIDE_HELP) { |v| path_override = v }
           p.on("-HHEADER", "--header=HEADER", "Overwrite/add a header for THIS send (repeat a name for duplicate lines); the session keeps its own. $ENV.KEY tokens expand with the rest of the request (see --verbatim)") { |v| headers << v }
           p.on("-bCOOKIE", "--cookie=COOKIE", "Cookie 'name=value' for THIS send (curl's -b), replacing the stored Cookie header; repeat to join them into one. A value with no '=' is refused") { |v| cookies << v }
+          p.on("--grpc-field=PATH=VALUE", "gRPC: set or ADD a field on the session's unary message for THIS send (repeatable, applied in order). PATH is declared names with a loaded .proto (profile.role=ADMIN) or field numbers (4.1=30); an undeclared field the message lacks names its type (7:varint=1 — #{Protobuf::Edit::TYPE_HINT}). Re-compressed and reframed") { |v| grpc_fields << v }
           p.on("--apply-rules", APPLY_RULES_HELP) { apply_rules = true }
           p.on("--headers-only", HEADERS_ONLY_HELP) { headers_only = true }
           p.on("--max-body=BYTES", MAX_BODY_HELP) { |v| max_body = parse_count(v, "--max-body") }
@@ -1529,7 +1531,9 @@ module Gori
           r = store.get_repeater_full(id)
           req = r.try { |row| (p = path_override) ? Repeater::FlowRequest.replace_request_target(row.request, p) : row.request }
           if bytes = req
-            req, pinned_cl = session_header_overrides(bytes, headers)
+            built = per_send_request(bytes, headers, grpc_fields)
+            abort "gori run repeater send: --grpc-field #{built}" if built.is_a?(String)
+            req, pinned_cl = built
           end
           {r, Gori::HostOverrides.load(store), r && req ? Repeater::DraftMarkers.live?(store, r, req) : false, req}
         ensure
@@ -1540,6 +1544,7 @@ module Gori
           abort "gori run repeater send: session ##{id}'s stored request has no request line target to " \
                 "replace (#{request_line_preview(rec.request)}) — edit the session instead"
         end
+        per_send_edits << "--grpc-field" unless grpc_fields.empty?
         # After `open_store` (which installs `Env.layer`) and before the plan: `Repeater::Sender`
         # reads the active slot at the seam, so this has to be set before anything builds bytes.
         activate_slot(slot, "gori run repeater send")
@@ -2507,6 +2512,21 @@ module Gori
       # and `Plan` expands the whole request once (or not at all under `--verbatim`), so an
       # expansion here would run twice over a value that itself looks like a token.
       # Answers whether one of the edits pinned Content-Length, which the plan then leaves alone.
+      # The request one `repeater send` carries, and whether `-H` pinned its Content-Length:
+      # `--grpc-field` first, then `-H`. The field set resyncs a Content-Length the edit outdated,
+      # so running it after `-H` overwrote a deliberately-wrong `-H "Content-Length: 999"` (P7).
+      # Called with the store open: it published the `.proto` schema the field names resolve by.
+      # The same `Protobuf::Edit.set` the TUI's add-field prompt and MCP `grpc_fields` call.
+      def self.per_send_request(request : Bytes, headers : Array(String),
+                                grpc_fields : Array(String)) : {Bytes, Bool} | String
+        unless grpc_fields.empty?
+          edited = Repeater::GrpcFields.apply(request, grpc_fields)
+          return edited if edited.is_a?(String)
+          request = edited
+        end
+        session_header_overrides(request, headers)
+      end
+
       private def self.session_header_overrides(request : Bytes, headers : Array(String)) : {Bytes, Bool}
         return {request, false} if headers.empty?
         boundary = Env.head_body_boundary(request)

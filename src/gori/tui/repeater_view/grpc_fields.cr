@@ -255,6 +255,82 @@ class Gori::Tui::RepeaterView
     Proxy::H2::Grpc.compress(enc, rebuilt) || "gori cannot re-compress with grpc-encoding #{enc.inspect}"
   end
 
+  # --- whole-message edits: JSON and add-field (#1632) ------------------------
+
+  # Get the payload ready for an edit of the WHOLE message, or say why there is none. Commits
+  # a hex buffer first — hex and these editors work on the same bytes — and closes an open
+  # FIELDS value, whose snapshot the edit would outdate. `schema`: the JSON edit needs a
+  # descriptor set; adding a field by number does not.
+  def grpc_edit_begin(*, schema : Bool) : String?
+    return "not a gRPC tab — the message editors apply to an application/grpc request" unless @grpc_mode
+    unless @grpc_reframable
+      return "this call has #{@grpc_msg_count} messages — the message editors need a single-message (unary) body"
+    end
+    exit_request_hex if @req_hex_edit
+    close_grpc_field_input
+    plain = grpc_plain_payload
+    return "the compressed payload did not inflate: #{plain}" if plain.is_a?(String)
+    if schema && grpc_field_binding.nil?
+      return "no .proto for #{grpc_method_target} — #{Protobuf::Schemas.status} · Project → Proto schema"
+    end
+    nil
+  end
+
+  # The message as proto3 JSON (`Protobuf::Edit.to_json`) — or the draft a refused apply left.
+  # Call after `grpc_edit_begin(schema: true)` answered nil.
+  def grpc_json_text : String?
+    b = grpc_field_binding || return
+    @grpc_json_binding = b
+    draft = @grpc_json_draft
+    return draft if draft && @grpc_json_rev == @grpc_payload_rev
+    @grpc_json_rev = @grpc_payload_rev
+    Protobuf::Edit.to_json(grpc_plain_payload.as(Bytes), b.schema, b.type)
+  end
+
+  # Apply edited JSON: re-encoded into the payload (every field it left as it was keeps the
+  # capture's own octets), re-compressed and reframed on send. The refusal sentence, or nil.
+  def grpc_json_apply(text : String) : String?
+    b = @grpc_json_binding || return "no JSON edit is open"
+    if @grpc_json_rev != @grpc_payload_rev
+      return "the message changed while the editor was open — reopen the JSON edit"
+    end
+    plain = grpc_plain_payload
+    return "the compressed payload did not inflate: #{plain}" if plain.is_a?(String)
+    edited = Protobuf::Edit.from_json(plain, b.schema, b.type, text)
+    if edited.is_a?(String)
+      @grpc_json_draft = text
+      return "JSON edit refused: #{edited} — reopen it to fix (your text is kept)"
+    end
+    @grpc_json_draft = nil
+    edited == plain ? nil : store_grpc_plain(edited)
+  end
+
+  # Set or ADD one field from a `path=value` spec — the same `Protobuf::Edit.set` that
+  # `gori run repeater send --grpc-field` and MCP `grpc_fields` call. Names resolve through the
+  # loaded `.proto` when there is one; numbers always do. The refusal sentence, or nil.
+  def grpc_add_field(spec : String) : String?
+    plain = grpc_plain_payload
+    return "the compressed payload did not inflate: #{plain}" if plain.is_a?(String)
+    b = grpc_field_binding
+    edited = Protobuf::Edit.set(plain, b.try(&.schema), b.try(&.type), spec)
+    return edited if edited.is_a?(String)
+    edited == plain ? nil : store_grpc_plain(edited)
+  end
+
+  # An edited PLAIN message becomes the payload — re-compressed with the head's codec when the
+  # frame is compressed (#1629).
+  private def store_grpc_plain(plain : Bytes) : String?
+    if @grpc_compressed
+      enc = grpc_head_encoding
+      plain = Proxy::H2::Grpc.compress(enc, plain) || return "gori cannot re-compress with grpc-encoding #{enc.inspect}"
+    end
+    @grpc_payload = plain
+    note_grpc_recompressed
+    @dirty = true
+    invalidate_grpc_fields
+    nil
+  end
+
   # A spliced compressed payload is now in the head's codec, and the transcript says it was
   # re-compressed.
   private def note_grpc_recompressed : Nil

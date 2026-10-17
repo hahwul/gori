@@ -374,7 +374,9 @@ module Gori::Protobuf
       io.write_byte(v.to_u8)
     end
 
-    private def varint_bytes(value : UInt64) : Bytes
+    # PUBLIC for `Protobuf::Edit`, which re-emits a nested field's original tag in front of a
+    # freshly measured length — the same reason `length_delimited` is public.
+    def varint_bytes(value : UInt64) : Bytes
       io = IO::Memory.new(10)
       write_varint(io, value)
       io.to_slice

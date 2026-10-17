@@ -358,6 +358,14 @@ private class FakeContext < ExecContext
     @calls << :repeater_toggle_grpc_fields
   end
 
+  def repeater_grpc_json_edit : Nil
+    @calls << :repeater_grpc_json_edit
+  end
+
+  def repeater_grpc_add_field : Nil
+    @calls << :repeater_grpc_add_field
+  end
+
   def repeater_cycle_tls_preset : Nil
     @calls << :repeater_cycle_tls_preset
   end
