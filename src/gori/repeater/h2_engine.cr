@@ -196,7 +196,8 @@ module Gori
         timed_out : Bool,
         final_seen : Bool,
         late_interim : Int32? = nil,
-        trailer_pseudo : Array(String)? = nil
+        trailer_pseudo : Array(String)? = nil,
+        bounded : String? = nil
 
       # One h2 CONNECTION and the state that outlives a single request on it.
       #
@@ -315,9 +316,10 @@ module Gori
                                 port : Int32, started : Time::Instant,
                                 timeout : Time::Span? = nil,
                                 preserve_field_case : Bool = false,
-                                reframe_grpc : Bool = false) : Result
+                                reframe_grpc : Bool = false,
+                                sse : StreamBound? = nil) : Result
         headers, body = parse_request(request, scheme, host, port, preserve_field_case, reframe_grpc)
-        exchange(conn, headers, body, host, port, started, timeout)
+        exchange(conn, headers, body, host, port, started, timeout, sse)
       rescue ex
         # The connection is in an unknown state after a raise mid-exchange; make sure the pool
         # retires it rather than parking it on the strength of an error Result alone.
@@ -332,7 +334,8 @@ module Gori
                     preserve_field_case : Bool = false,
                     reframe_grpc : Bool = false,
                     tls_preset : String? = nil,
-                    cancel : Proc(Bool)? = nil) : Result
+                    cancel : Proc(Bool)? = nil,
+                    sse : StreamBound? = nil) : Result
         started = Time.instant
         upstream, dial_failure = open(scheme, host, port, verify_upstream, sni, timeout,
           overrides, tls_preset, cancel)
@@ -342,7 +345,7 @@ module Gori
         begin
           headers, body = parse_request(request, scheme, host, port, preserve_field_case, reframe_grpc)
           Proxy::Upstream.with_cancel(upstream, cancel) do
-            exchange(Conn.new(upstream), headers, body, host, port, started, timeout)
+            exchange(Conn.new(upstream), headers, body, host, port, started, timeout, sse, cancel)
           end
         rescue ex
           failure(ex.message || "h2 repeater error", started)
@@ -371,7 +374,8 @@ module Gori
                            host : String, port : Int32, verify_upstream : Bool, sni : String? = nil,
                            timeout : Time::Span? = nil, overrides : Gori::HostOverrides? = nil,
                            tls_preset : String? = nil,
-                           cancel : Proc(Bool)? = nil) : Result
+                           cancel : Proc(Bool)? = nil,
+                           sse : StreamBound? = nil) : Result
         started = Time.instant
         upstream, dial_failure = open(scheme, host, port, verify_upstream, sni, timeout,
           overrides, tls_preset, cancel)
@@ -380,7 +384,7 @@ module Gori
         end
         begin
           Proxy::Upstream.with_cancel(upstream, cancel) do
-            exchange(Conn.new(upstream), fields, body, host, port, started, timeout)
+            exchange(Conn.new(upstream), fields, body, host, port, started, timeout, sse, cancel)
           end
         rescue ex
           failure(ex.message || "h2 repeater error", started)
@@ -398,7 +402,8 @@ module Gori
       # fibers in here on one connection would eat each other's frames.
       def self.exchange(conn : Conn, headers : Array({String, String}), body : Bytes?,
                         host : String, port : Int32, started : Time::Instant,
-                        timeout : Time::Span? = nil) : Result
+                        timeout : Time::Span? = nil, sse : StreamBound? = nil,
+                        cancel : Proc(Bool)? = nil) : Result
         upstream = conn.io
         flow = SendFlow.new
         # Everything the CONNECTION knows, handed to this stream: its own id, the send-side
@@ -423,7 +428,7 @@ module Gori
         flow.budget = budget
         flow.expires_at = Time.instant + budget
         write_request(upstream, headers, body, flow)
-        reply = read_response(upstream, flow, conn.decoder)
+        reply = read_response(upstream, flow, conn.decoder, sse, cancel)
         carry_over(conn, flow, reply)
         # "Did a FINAL response arrive", not "is the status zero". An origin that answered
         # `HEADERS(:status 100)` and then went silent used to come back `ok:true, status:100,
@@ -447,7 +452,8 @@ module Gori
         # the body was still going out is a real response to a request gori did not finish.
         Result.new(head, reply.body, resp, Engine.elapsed(started),
           error: send_side_reason(reply, flow, host, port),
-          incomplete: !reply.clean_eos, delivered: true, timed_out: reply.timed_out)
+          incomplete: !reply.clean_eos, delivered: true, timed_out: reply.timed_out,
+          bounded: reply.bounded)
       end
 
       # Fold one finished exchange back into the CONNECTION: the state the next request on it
@@ -943,7 +949,8 @@ module Gori
       # Starts by draining `flow.pending` — the frames the WRITE side had to read off the
       # socket while waiting for flow-control window. They arrived before anything read here
       # and must be processed in that order.
-      private def self.read_response(io : IO, flow : SendFlow, decoder : HPACK::Decoder) : Reply
+      private def self.read_response(io : IO, flow : SendFlow, decoder : HPACK::Decoder,
+                                     sse : StreamBound? = nil, cancel : Proc(Bool)? = nil) : Reply
         # A stall that produced NO frames at all has already spent the whole patience budget
         # on this socket; going back to it would only spend a second idle timeout to learn
         # the same thing, doubling the operator's wall clock for the commonest failure
@@ -981,6 +988,12 @@ module Gori
           floor = Time.instant + flow.patience
           floor > h ? floor : h
         end
+        # The event-stream bound, once the final head says `text/event-stream` (see
+        # `StreamBound`). Its time axis shrinks the socket's read timeout the way `BoundedRead`
+        # does on h1, and `ensure` puts the idle one back for a connection a pool may park.
+        run = nil.as(StreamRun?)
+        sock = Proxy::SocketTuning.underlying_socket(io)
+        idle = sock.try(&.read_timeout)
 
         until done
           if at < pending.size
@@ -996,6 +1009,10 @@ module Gori
             # what makes the caller's `timeout` a ceiling for the exchange rather than a gap
             # between frames. Both land on `timed_out`: from the socket's point of view the
             # origin was still holding it open with nothing more to say.
+            if run && (left = run.remaining)
+              break if left <= Time::Span.zero
+              sock.try(&.read_timeout = idle && idle < left ? idle : left)
+            end
             now = Time.instant
             if now - progress >= flow.patience || (read_hard && now >= read_hard)
               timed_out = true
@@ -1033,9 +1050,11 @@ module Gori
             frame = begin
               Frame.read(io)
             rescue IO::TimeoutError
-              timed_out = true
+              # The bound's own deadline is a stop, not the origin going silent.
+              timed_out = true unless run.try(&.stop_on_error)
               nil
             rescue IO::Error | Gori::Error | OpenSSL::Error
+              run.try(&.stop_on_error)
               nil
             end
             break if frame.nil?
@@ -1091,6 +1110,7 @@ module Gori
               status, final_seen, trailers, late_interim, trailer_pseudo =
                 merge_block(header_buf, decoder, headers, status, final_seen, trailers,
                   late_interim, trailer_pseudo, end_stream_pending)
+              run ||= start_bound(sse, headers, cancel) if final_seen
               done = clean_eos = true if end_stream_pending
             end
           when Frame::Type::Continuation
@@ -1102,13 +1122,17 @@ module Gori
               status, final_seen, trailers, late_interim, trailer_pseudo =
                 merge_block(header_buf, decoder, headers, status, final_seen, trailers,
                   late_interim, trailer_pseudo, end_stream_pending)
+              run ||= start_bound(sse, headers, cancel) if final_seen
               done = clean_eos = true if end_stream_pending
             end
           when Frame::Type::Data
             next unless frame.stream_id == flow.id
             progress = Time.instant
             consumed = frame.payload.size # flow control counts the WHOLE DATA payload (incl. padding)
-            body.write(data_block(frame)) if body.bytesize < MAX_BODY
+            data = data_block(frame)
+            data = data[0, run.take(data)] if run
+            body.write(data) if body.bytesize < MAX_BODY
+            break if run.try(&.stopped?) # the events read so far are the body
             done = clean_eos = true if frame.end_stream?
             break if body.bytesize >= MAX_BODY # over-large/streaming body — truncate
             # Replenish the connection (stream 0) AND stream flow-control windows by
@@ -1150,7 +1174,17 @@ module Gori
         end
 
         Reply.new(status, headers, body.size == 0 ? nil : body.to_slice, clean_eos,
-          goaway, rst, trailers, timed_out, final_seen, late_interim, trailer_pseudo)
+          goaway, rst, trailers, timed_out, final_seen, late_interim, trailer_pseudo,
+          run.try(&.reason))
+      ensure
+        sock.try(&.read_timeout = idle) if run
+      end
+
+      # The bound for this stream, read off the final head's fields (h2 names are lowercase).
+      private def self.start_bound(sse : StreamBound?, headers : Array({String, String}),
+                                   cancel : Proc(Bool)?) : StreamRun?
+        return nil unless sse && Sse.sse?(headers.find { |(n, _)| n == "content-type" }.try(&.[1]))
+        sse.start(headers.find { |(n, _)| n == "content-encoding" }.try(&.[1]), false, cancel)
       end
 
       # Fold one COMPLETED header block into the response being assembled, and decide what the

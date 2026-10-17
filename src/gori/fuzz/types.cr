@@ -265,6 +265,11 @@ module Gori
       getter ws_close_code : Int32?
       getter ws_frames_in : Int32?
 
+      # The event-stream bound that stopped this row's read (`Repeater::Result#bounded`, #1631),
+      # so `incomplete_reason` names gori's stop instead of blaming the origin. Not persisted:
+      # a reopened run's rows read nil.
+      getter bounded : String?
+
       # KEYWORD-ONLY, for the reason `Repeater::Result`'s tail is (see its comment): three
       # same-typed nilable scalars appended by three different fixers is exactly how `retried`
       # and `timed_out` got written into each other's field twice.
@@ -275,7 +280,8 @@ module Gori
                      @timed_out = false, @resent_count = 0, @wire = nil, *,
                      @ws_close_code : Int32? = nil, @ws_frames_in : Int32? = nil,
                      @stop_hit : Bool = false, @shape : Int64? = nil,
-                     @extracts : Array(String?)? = nil, @extractors : Array(Extractor)? = nil)
+                     @extracts : Array(String?)? = nil, @extractors : Array(Extractor)? = nil,
+                     @bounded : String? = nil)
       end
 
       # `label → value` for each extractor this row carries, nil for a miss. Empty when the row
@@ -327,7 +333,7 @@ module Gori
           @timed_out, @resent_count, @wire,
           ws_close_code: o.close_code, ws_frames_in: o.frames_in, stop_hit: @stop_hit,
           shape: Shape.with_ws(@shape, o.close_code, o.frames_in),
-          extracts: @extracts, extractors: @extractors)
+          extracts: @extracts, extractors: @extractors, bounded: @bounded)
       end
     end
 
@@ -532,6 +538,8 @@ module Gori
       property retries : Int32      # retries on a network error
       property retry_pause : Time::Span
       property timeout : Time::Span? # per-request connect+read timeout override
+      # When to stop reading an event-stream response (#1631); nil reads it to the idle timeout.
+      property sse : Repeater::StreamBound?
       property? follow_redirects : Bool
       property max_redirects : Int32
       property? update_content_length : Bool # recompute CL after body substitution
@@ -669,7 +677,8 @@ module Gori
                      @ws_idle : Time::Span = Repeater::WsEngine::DEFAULT_IDLE,
                      @ws_keep_key : Bool = false,
                      @tls_preset : String? = nil,
-                     @request_macro : Gori::RequestMacro::Spec? = nil)
+                     @request_macro : Gori::RequestMacro::Spec? = nil,
+                     @sse : Repeater::StreamBound? = Repeater::StreamBound::SWEEP)
       end
     end
   end

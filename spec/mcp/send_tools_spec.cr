@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "../support/sse_origin"
 require "../support/mcp_harness"
 
 # An origin that reads the upgrade and REFUSES it with a real HTTP response. The handshake
@@ -138,6 +139,32 @@ describe Gori::MCP::Server do
         detail.row.target.should eq("/audit")
         detail.row.status.should eq(200)
         String.new(detail.response_body.not_nil!).should eq("hello")
+      end
+    end
+
+    # #1631: an event stream used to be read to the idle timeout and come back "incomplete".
+    it "stops an event stream at sse_max_events as a bounded success" do
+      with_store do |store|
+        port = start_sse_origin
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:#{port}/events","allow_unscoped":true,"sse_max_events":2}}})
+        resp = mcp_drive(store, call, verify_upstream: false)[0]
+        resp["result"]["isError"].as_bool.should be_false
+        payload = mcp_tool_payload(resp)
+        payload["bounded"].as_s.should eq("events")
+        payload["incomplete_reason"].as_s.should contain("event bound")
+        # A stop gori chose is not a failed response on the History row either.
+        store.get_flow(payload["recorded_flow_id"].as_i64).not_nil!.row.state.complete?.should be_true
+      end
+    end
+
+    it "lists sse_max_events and sse_max_ms on every tool that reads an event stream" do
+      with_store do |store|
+        listed = JSON.parse(JSON.build { |j| tools_for(store).list(j) }).as_a
+        {"send_request", "fuzz_start", "mine_start"}.each do |name|
+          props = listed.find { |t| t["name"].as_s == name }.not_nil!["inputSchema"]["properties"]
+          props["sse_max_events"]?.should_not be_nil
+          props["sse_max_ms"]?.should_not be_nil
+        end
       end
     end
 

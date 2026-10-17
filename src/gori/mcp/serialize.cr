@@ -634,7 +634,8 @@ module Gori
         if r.incomplete?
           j.field "incomplete", true
           j.field "incomplete_reason",
-            CLI::Run.incomplete_reason(Repeater::Result.new(Bytes.new(0), r.body, nil, r.duration_us), r.timed_out?)
+            CLI::Run.incomplete_reason(Repeater::Result.new(Bytes.new(0), r.body, nil, r.duration_us,
+              bounded: r.bounded), r.timed_out?)
         end
         # Present when record_history recorded this result as a History flow —
         # fetch its full request/response with get_flow (headers redacted).

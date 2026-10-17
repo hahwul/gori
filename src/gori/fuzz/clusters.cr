@@ -218,7 +218,8 @@ module Gori
           r.duration_us, r.error, r.matched?, r.incomplete?, r.extracted, nil, nil, nil,
           r.retried?, r.chain_error, r.grpc_status, r.grpc_message, r.timed_out?,
           r.resent_count, nil, ws_close_code: r.ws_close_code, ws_frames_in: r.ws_frames_in,
-          stop_hit: r.stop_hit?, shape: r.shape, extracts: r.extracts, extractors: r.extractors)
+          stop_hit: r.stop_hit?, shape: r.shape, extracts: r.extracts, extractors: r.extractors,
+          bounded: r.bounded)
       end
 
       # One cluster's fields — the one spelling MCP and the CLI emit. `text` is the surface's

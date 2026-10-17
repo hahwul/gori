@@ -355,7 +355,8 @@ module Gori::Fuzz
                    keep_alive : Bool = false, idle_conns : Int32 = 0,
                    @evidence : Bool = false, @slot_overlay : Bool = true,
                    @ws_idle : Time::Span = Repeater::WsEngine::DEFAULT_IDLE,
-                   @ws_keep_key : Bool = false, tls_preset : String? = nil)
+                   @ws_keep_key : Bool = false, tls_preset : String? = nil,
+                   @sse : Repeater::StreamBound? = nil)
       @sni = sni.presence
       @tls_preset = Settings.tls_preset_normalize(tls_preset)
       # h2 used to be excluded here, on the ground that "H2Engine frames its own connection
@@ -371,10 +372,10 @@ module Gori::Fuzz
           nil
         elsif @http2
           H2Pool.new(@origin.scheme, @origin.host, @origin.port, @verify, @sni, @timeout,
-            @overrides, idle, @tls_preset)
+            @overrides, idle, @tls_preset, @sse)
         else
           ConnPool.new(@origin.scheme, @origin.host, @origin.port, @verify, @sni, @timeout,
-            @overrides, idle, @tls_preset)
+            @overrides, idle, @tls_preset, @sse)
         end
     end
 
@@ -466,11 +467,11 @@ module Gori::Fuzz
         elsif @http2
           Repeater::H2Engine.send(bytes, scheme: @origin.scheme, host: @origin.host,
             port: @origin.port, verify_upstream: @verify, sni: @sni, timeout: @timeout,
-            overrides: @overrides, tls_preset: @tls_preset)
+            overrides: @overrides, tls_preset: @tls_preset, sse: @sse)
         else
           Repeater::Engine.send(bytes, scheme: @origin.scheme, host: @origin.host,
             port: @origin.port, verify_upstream: @verify, sni: @sni, timeout: @timeout,
-            overrides: @overrides, tls_preset: @tls_preset)
+            overrides: @overrides, tls_preset: @tls_preset, sse: @sse)
         end
       # `bytes` here is the message, not the template `Job` carried: the two passes above
       # changed it. `Fuzz::Result#request` — the row a surface prints and the Repeater seeds

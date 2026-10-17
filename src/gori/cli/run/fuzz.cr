@@ -63,6 +63,7 @@ module Gori
         rate : Float64? = nil
         throttle : Int32? = nil
         timeout : Time::Span? = nil
+        sse = SseFlags.new
         retries = 0
         max_requests : Int64? = nil
         race : Int32? = nil
@@ -147,6 +148,7 @@ module Gori
           p.on("--rate=RPS", "Cap requests/sec (0 = unlimited)") { |v| rate = parse_rate(v) }
           p.on("--throttle=MS", "Fixed delay between requests (ms)") { |v| throttle = parse_nonneg(v, "--throttle") }
           p.on("--timeout=SEC", "Per-request connect + idle timeout (seconds)") { |v| timeout = parse_count(v, "--timeout").seconds }
+          sse_options(p, sse, Repeater::StreamBound::SWEEP)
           p.on("--retries=N", "Retries on a network error") { |v| retries = parse_nonneg(v, "--retries") }
           # Counted against REAL sends, not payloads: retries, redirect hops and baseline
           # calibration all charge it (Fuzz::CappedBackend), matching mine/discover/sequence
@@ -392,7 +394,8 @@ module Gori
           auto_mark: auto, marks: marks, grpc_fields: grpc_fields, http2: http2,
           sources: sources, processors: processors, auto_encode: auto_encode,
           config: Fuzz::Config.new(mode: mode, concurrency: concurrency, rps: rate, throttle_ms: throttle,
-            retries: retries, timeout: timeout, follow_redirects: follow, auto_calibrate: auto_cal,
+            retries: retries, timeout: timeout, sse: sse.bound(Repeater::StreamBound::SWEEP),
+            follow_redirects: follow, auto_calibrate: auto_cal,
             keep_bodies: (save_results ? :all : record_policy), keep_alive: keep_alive, max_requests: max_requests,
             stop_after_matches: stop_after_matches, keep: keep,
             update_content_length: update_cl, reframe_grpc: reframe_grpc, race_count: race,

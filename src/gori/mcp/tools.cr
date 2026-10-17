@@ -2117,6 +2117,19 @@ module Gori
         optional_int_arg(h, "timeout_ms").try { |ms| ms <= 0 ? nil : ms.clamp(1_i64, 600_000_i64).milliseconds }
       end
 
+      # `sse_max_events` / `sse_max_ms` over the tool's default (#1631): an absent argument takes
+      # the default's axis and 0 switches it off — the CLI's `--sse-events` / `--sse-time`.
+      private def sse_bound(h, default : Repeater::StreamBound) : Repeater::StreamBound?
+        Repeater::StreamBound.resolve(optional_int_arg(h, "sse_max_events"),
+          optional_int_arg(h, "sse_max_ms").try(&.clamp(0_i64, 3_600_000_i64).milliseconds), default)
+      end
+
+      # The two arguments' schema, worded with the tool's default.
+      private def sse_props(s : SchemaBuilder, default : Repeater::StreamBound) : Nil
+        s.field "sse_max_events", intprop("text/event-stream responses only: stop reading after this many events (default #{default.max_events}; 0 = no limit). A stop is a success: the events so far are the body, with `bounded`")
+        s.field "sse_max_ms", intprop("text/event-stream responses only: stop reading after this many ms of streaming (default #{default.max_time.try(&.total_milliseconds.to_i)}; 0 = no limit)")
+      end
+
       private def clamp_nonneg(n : Int64?) : Int32
         return 0 unless n
         n.clamp(0_i64, Int32::MAX.to_i64).to_i

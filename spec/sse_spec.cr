@@ -145,4 +145,30 @@ describe Gori::Sse do
       Gori::Sse.event_stream?(nil).should be_false
     end
   end
+
+  describe Gori::Sse::Counter do
+    # The counter must agree with `events` however the bytes arrive: every split point, so a
+    # CRLF, a BOM or a field name torn across two reads is still read once.
+    it "counts what .events dispatches, at every split of the stream" do
+      body = "\uFEFFdata: a\r\n\r\n: comment\n\nevent: x\ndata\n\n" \
+             "id: 7\n\ndataset: no\n\ndata: b\rdata: c\r\rretry: 5\n\ndata: tail\n\n"
+      bytes = body.to_slice
+      expected = Gori::Sse.events(bytes).size
+      expected.should eq(4)
+      (0..bytes.size).each do |cut|
+        c = Gori::Sse::Counter.new
+        c.feed(bytes[0, cut], Int32::MAX)
+        c.feed(bytes[cut..], Int32::MAX)
+        c.count.should eq(expected)
+      end
+    end
+
+    it "says where the limit-th event ended, so the rest is left unread" do
+      bytes = "data: 1\n\ndata: 2\r\n\r\ndata: 3\n\n".to_slice
+      c = Gori::Sse::Counter.new
+      at = c.feed(bytes, 2).should_not be_nil
+      String.new(bytes[0, at]).should eq("data: 1\n\ndata: 2\r\n\r\n")
+      c.feed(Bytes.empty, 2).should be_nil
+    end
+  end
 end

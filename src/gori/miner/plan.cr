@@ -305,7 +305,7 @@ module Gori::Miner
       sender = Fuzz::Sender.new(origin, outbound, http2: options.http2?, verify: options.verify?,
         sni: options.sni, timeout: config.timeout, overrides: options.overrides,
         keep_alive: config.keep_alive?, idle_conns: config.concurrency,
-        evidence: options.evidence?, slot_overlay: hook_argv.nil?)
+        evidence: options.evidence?, slot_overlay: hook_argv.nil?, sse: config.sse)
       # The per-request transform hook (#846), when the run has one. Wrapped OUTSIDE the raw
       # sender and INSIDE the engine's `CappedBackend`, so the cap refuses a send before the
       # hook forks once the budget is spent — see `HookBackend`. The raw `sender` is still what

@@ -636,7 +636,7 @@ module Gori::Fuzz
         # refused before the first dial rather than applying nothing and dialling with gori's
         # bare hello. `config` — not `options` — is the carrier, because a finished run has to
         # be able to say which handshake produced its results.
-        tls_preset: tls_preset)
+        tls_preset: tls_preset, sse: config.sse)
       engine = Engine.new(generator, matcher, sender, config, request_macro)
       outbound.halt = ->engine.stopped?
       new(engine: engine, generator: generator,

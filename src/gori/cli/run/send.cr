@@ -30,6 +30,7 @@ module Gori
         tls_preset : String? = nil
         insecure = false
         timeout : Time::Span? = nil
+        sse = SseFlags.new
         allow_unscoped = false
         verbatim = false
         slot : String? = nil
@@ -71,6 +72,7 @@ module Gori
           p.on("--tls-preset=NAME", TLS_PRESET_HELP) { |v| tls_preset = v }
           p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
           p.on("--timeout=SEC", "Per-operation connect + idle timeout (seconds)") { |v| timeout = parse_count(v, "--timeout").seconds }
+          sse_options(p, sse, Repeater::StreamBound::SEND)
           p.on("--allow-unscoped", "Send even if the target is outside the project scope (the Sandbox still applies)") { allow_unscoped = true }
           p.on("--verbatim", "Send what you typed EXACTLY: no token expansion ($ENV.KEY, $BIND.NAME, $GEN.*) in -H/-d/-b or a raw request, no bare-LF→CRLF promotion of a raw request's head, no -X upper-casing, and on HTTP/2 no field-name lowercasing. The URL is still expanded: it names where to dial") { verbatim = true }
           p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $BIND.NAME tokens") { |v| slot = v.strip }
@@ -127,7 +129,7 @@ module Gori
             preserve_field_case: verbatim,
             origin: Repeater::Origin.new(built.scheme, built.host, built.port),
             sni: sni, tls_preset: tls_preset, http2: http2, verify: !insecure,
-            timeout: timeout, overrides: host_overrides), outbound)
+            timeout: timeout, overrides: host_overrides, sse: sse.bound(Repeater::StreamBound::SEND)), outbound)
         rescue ex : Repeater::PlanError
           repeater_plan_abort("gori run send", ex)
         end

@@ -2,6 +2,7 @@ require "../proxy/upstream"
 require "../proxy/codec/http1"
 require "../proxy/codec/body"
 require "../proxy/socket_tuning"
+require "./stream_bound"
 require "wait_group"
 
 module Gori
@@ -71,8 +72,14 @@ module Gori
       def initialize(@head, @body, @response, @duration_us, @error = nil, @incomplete = false, *,
                      @delivered = false, @timed_out = false, @retried = false,
                      @wire : Bytes? = nil, @retryable_stale = false, @cut_short = false,
-                     @lf_framed = false)
+                     @lf_framed = false, @bounded : String? = nil)
       end
+
+      # A `StreamBound` ended this event stream: "events" or "time", or "cancelled" when the
+      # send's cancel did. The body holds the events read before the stop, and the result is a
+      # success; `incomplete?` is also set, because the socket still carries the rest of the
+      # stream. Never `timed_out?`: a Fuzz matcher reads that as a time-based hit.
+      getter bounded : String?
 
       # A head of this exchange — the final one or an interim 1xx before it — ended on a
       # bare-LF blank line, so gori framed it off the lenient reading and the socket must not
@@ -92,7 +99,8 @@ module Gori
       def with_wire(wire : Bytes) : Result
         Result.new(@head, @body, @response, @duration_us, @error, @incomplete,
           delivered: @delivered, timed_out: @timed_out, retried: @retried, wire: wire,
-          retryable_stale: @retryable_stale, cut_short: @cut_short, lf_framed: @lf_framed)
+          retryable_stale: @retryable_stale, cut_short: @cut_short, lf_framed: @lf_framed,
+          bounded: @bounded)
       end
 
       def ok? : Bool
@@ -110,7 +118,7 @@ module Gori
         # so this shape is the only one that compiles.
         Result.new(@head, @body, @response, @duration_us, @error, @incomplete,
           delivered: @delivered, timed_out: @timed_out, retried: true, wire: @wire,
-          retryable_stale: @retryable_stale, lf_framed: @lf_framed)
+          retryable_stale: @retryable_stale, lf_framed: @lf_framed, bounded: @bounded)
       end
     end
 
@@ -124,7 +132,8 @@ module Gori
                     timeout : Time::Span? = nil,
                     overrides : Gori::HostOverrides? = nil,
                     tls_preset : String? = nil,
-                    cancel : Proc(Bool)? = nil) : Result
+                    cancel : Proc(Bool)? = nil,
+                    sse : StreamBound? = nil) : Result
         started = Time.instant
         # `timeout` is a PER-OPERATION bound (connect, and idle between reads/writes),
         # not a total request deadline — same model as the proxy's `Settings.io_timeout`. A true
@@ -135,7 +144,7 @@ module Gori
 
         begin
           Proxy::Upstream.with_cancel(upstream, cancel) do
-            exchange(upstream, request, host, port, started, origin_scheme: scheme)
+            exchange(upstream, request, host, port, started, origin_scheme: scheme, sse: sse, cancel: cancel)
           end
         ensure
           upstream.close rescue nil
@@ -362,10 +371,12 @@ module Gori
       # any more: `Fuzz::ConnPool` reuses one socket across a sweep's requests. Both apply
       # the SAME retirement rule to the socket afterwards (error or incomplete ⇒ unusable).
       def self.exchange(upstream : IO, request : Bytes, host : String, port : Int32,
-                        started : Time::Instant, *, origin_scheme : String = "http") : Result
+                        started : Time::Instant, *, origin_scheme : String = "http",
+                        sse : StreamBound? = nil, cancel : Proc(Bool)? = nil) : Result
         upstream.write(request)
         upstream.flush
-        read_response(upstream, request, host, port, started, origin_scheme: origin_scheme)
+        read_response(upstream, request, host, port, started, origin_scheme: origin_scheme,
+          sse: sse, cancel: cancel)
       rescue ex
         # A write/flush failure — no response byte was ever attempted, so this is always the
         # pre-delivery case (see `read_response`'s own rescue for the post-head-read one).
@@ -380,7 +391,8 @@ module Gori
       # releases them together, and only reads responses afterwards (reading is no longer
       # time-critical once every byte has been written).
       def self.read_response(upstream : IO, request : Bytes, host : String, port : Int32,
-                             started : Time::Instant, *, origin_scheme : String = "http") : Result
+                             started : Time::Instant, *, origin_scheme : String = "http",
+                             sse : StreamBound? = nil, cancel : Proc(Bool)? = nil) : Result
         head_result = read_response_head(upstream)
         head = head_result.head?
         return response_head_error(head_result, host, port, started, origin_scheme) unless head
@@ -431,7 +443,21 @@ module Gori
           # Cap the capture read at CAPTURE_READ_MAX (parity with the h2 engine's MAX_BODY):
           # without it a streaming origin (SSE/heartbeat) or a multi-GB body hangs or OOMs
           # this single-threaded send. A capped body comes back complete:false → incomplete.
-          body, complete = Proxy::Codec::Body.read_complete(upstream, framing, len, Proxy::Codec::Body::CAPTURE_READ_MAX)
+          # An event stream under a bound reads through `BoundedRead`, whose stop is an EOF, so
+          # the capture keeps what arrived before it.
+          run = if sse && Sse.sse?(resp.headers.get?("Content-Type"))
+                  sse.start(resp.headers.get?("Content-Encoding"), framing.chunked?, cancel)
+                end
+          src = run ? BoundedRead.new(upstream, run) : upstream
+          body, complete = begin
+            Proxy::Codec::Body.read_complete(src, framing, len, Proxy::Codec::Body::CAPTURE_READ_MAX)
+          ensure
+            src.restore if src.is_a?(BoundedRead)
+          end
+          if why = run.try(&.reason)
+            return Result.new(head, body, resp, elapsed(started), incomplete: true,
+              lf_framed: lf_framed, bounded: why)
+          end
           Result.new(head, body, resp, elapsed(started), incomplete: !complete, lf_framed: lf_framed)
         rescue ex
           # The head was already read + parsed. A framing rejection (CL+TE — precisely the

@@ -819,7 +819,8 @@ module Gori
           # not read as the whole response. Body-keyed ceiling detection is exact only when the
           # body was kept (keep_bodies); a body-dropped row still names closed vs. timeout.
           if r.incomplete?
-            io << "  " << Run.incomplete_reason(Repeater::Result.new(Bytes.new(0), r.body, nil, r.duration_us), r.timed_out?)
+            io << "  " << Run.incomplete_reason(Repeater::Result.new(Bytes.new(0), r.body, nil, r.duration_us,
+              bounded: r.bounded), r.timed_out?)
           end
         end
       end

@@ -26,6 +26,7 @@
 - History: a colour rule repaints a row that updates while a filter is active, instead of keeping the answer it gave the row in flight (#1624)
 - CLI: `--project` and `--db` work before the subcommand or between its verbs (`gori run --project X project scope add …`), `gori run history ls` lists instead of searching for "ls", and `gori run send` and MCP `send_request` say which egress a request took — upstream proxy, environment proxy or direct — as `via` (#1625)
 - Rewriter: a Match&Replace body rule now rewrites HTTP/2 bodies on the h2 relay instead of forcing matching hosts down to HTTP/1.1, so gRPC and other h2-only clients keep connecting while one is enabled; gRPC, SSE and other streaming bodies, and requests with no declared length, go through unrewritten (#1628)
+- `gori run` sends, MCP `send_request`, the Fuzzer and the Miner stop reading an SSE response after a number of events or seconds (100 / 10 s for a send, 50 / 5 s per sweep payload) instead of waiting out the idle timeout, and return the events so far as a success marked `bounded`; `--sse-events` / `--sse-time` or MCP `sse_max_events` / `sse_max_ms` change the limits (#1631)
 
 ## v0.8.1
 

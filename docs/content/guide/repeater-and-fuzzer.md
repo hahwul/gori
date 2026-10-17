@@ -367,6 +367,12 @@ The macro is refused, before anything is sent, when a step is a session that sti
 
 The Miner's macro runs before **every request it sends**, the baseline calibration included: an application that rotates a token per request answers an un-tokened calibration probe with the same `403` as a candidate, and a baseline of `403`s makes every real response look like a finding. Its TUI popup takes one session; several steps and `--macro-expect` are on the CLI and MCP.
 
+### Event Streams
+
+A `text/event-stream` (SSE) response stays open by design, so reading it to the end would cost every payload the whole idle timeout. The Fuzzer and the Miner stop reading one after **50 events or 5 seconds** of streaming, whichever comes first; `gori run repeater`, `gori run send` and MCP `send_request` stop after **100 events or 10 seconds**. The events read so far are the response body. The send is still a success (`ok: true`), and `bounded` (`events` or `time`) says which limit stopped it. `--sse-events=N` / `--sse-time=SEC` on the CLI, and `sse_max_events` / `sse_max_ms` on MCP `send_request`, `fuzz_start` and `mine_start`, set the limits; `0` turns one off. A compressed stream is stopped by time only. Other responses are not affected, and the TUI Repeater still reads a stream to the end.
+
+The TUI Fuzzer and Miner apply the same 50-event / 5-second limit and have no control for it yet; run the sweep from `gori run` or MCP and pass `0` to read a stream to its end. A timing matcher at or under the time limit (for example `--mt '>=4000'`) matches every SSE row the limit stopped, since each one took about 5 seconds; raise `--sse-time` well past the threshold for a time-based test against an event stream.
+
 ### Connection Reuse
 
 A sweep reuses one connection across many requests, so a run pays one TCP (and, on `https`, one TLS) handshake per worker instead of one per request. Against a remote origin that is usually the largest single cost of a run.

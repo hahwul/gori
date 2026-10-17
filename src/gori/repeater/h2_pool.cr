@@ -67,7 +67,7 @@ module Gori::Repeater
     def initialize(@scheme : String, @host : String, @port : Int32, @verify : Bool,
                    @sni : String?, @timeout : Time::Span?,
                    @overrides : Gori::HostOverrides?, @max_idle : Int32,
-                   @tls_preset : String? = nil)
+                   @tls_preset : String? = nil, @sse : StreamBound? = nil)
       @idle = [] of H2Engine::Conn
       @consecutive_stale = 0
     end
@@ -92,7 +92,7 @@ module Gori::Repeater
         end
         started = Time.instant
         result = H2Engine.exchange_request(conn, bytes, scheme: @scheme, host: @host,
-          port: @port, started: started, timeout: @timeout)
+          port: @port, started: started, timeout: @timeout, sse: @sse)
         if stale?(result, conn)
           conn.close
           note_stale
@@ -212,7 +212,7 @@ module Gori::Repeater
       end
       @dialed += 1
       result = H2Engine.exchange_request(conn, bytes, scheme: @scheme, host: @host,
-        port: @port, started: started, timeout: @timeout)
+        port: @port, started: started, timeout: @timeout, sse: @sse)
       recycle(conn, result, keepable)
       retried ? result.as_retried : result
     end

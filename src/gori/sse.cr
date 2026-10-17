@@ -126,13 +126,8 @@ module Gori
         end
       end
 
-      # {name, value}. A line with no colon is a field whose value is empty, and one optional
-      # space after the colon goes (WHATWG).
       private def split(line : Bytes) : {Bytes, Bytes}
-        colon = line.index(':'.ord.to_u8) || return {line, Bytes.empty}
-        value = line[(colon + 1)..]
-        value = value[1..] if value[0]? == ' '.ord
-        {line[0, colon], value}
+        Sse.split(line)
       end
 
       private def data(value : Bytes) : Nil
@@ -156,6 +151,66 @@ module Gori
         @truncated = false
         @type = nil
         @retry = nil
+      end
+    end
+
+    # {name, value}. A line with no colon is a field whose value is empty, and one optional
+    # space after the colon goes (WHATWG).
+    protected def self.split(line : Bytes) : {Bytes, Bytes}
+      colon = line.index(':'.ord.to_u8) || return {line, Bytes.empty}
+      value = line[(colon + 1)..]
+      value = value[1..] if value[0]? == ' '.ord
+      {line[0, colon], value}
+    end
+
+    # Counts the events `events` would dispatch, fed the body as it arrives, for a sender that
+    # stops after N events (`Repeater::StreamBound`) and must not re-parse the whole stream on
+    # every read. The same rules: CR, LF or CRLF end a line (a CRLF split across two feeds is
+    # one terminator), a leading BOM is dropped, and a blank line dispatches only a block that
+    # carried a `data` field. It keeps the first bytes of each line, enough for `split` to tell
+    # a `data` field from any other.
+    class Counter
+      getter count = 0
+      @head = Bytes.new(8) # a BOM plus `data:`
+      @len = 0
+      @data = false
+      @cr = false
+      @first = true
+
+      # Feeds `bytes`. Returns how many of them it took to dispatch the `limit`th event, or nil
+      # when the limit was not reached in them.
+      def feed(bytes : Bytes, limit : Int32) : Int32?
+        bytes.each_with_index do |b, i|
+          lf = b == '\n'.ord
+          if @cr && lf # the LF of a CRLF
+            @cr = false
+            next
+          end
+          @cr = b == '\r'.ord
+          if lf || @cr
+            line_end
+            if @count >= limit
+              return bytes[i + 1]? == '\n'.ord && @cr ? i + 2 : i + 1
+            end
+          else
+            @head[@len] = b if @len < @head.size
+            @len += 1
+          end
+        end
+        nil
+      end
+
+      private def line_end : Nil
+        if @len == 0
+          @count += 1 if @data
+          @data = false
+        else
+          line = @head[0, Math.min(@len, @head.size)]
+          line = line[3..] if @first && line.size >= 3 && line[0] == 0xEF && line[1] == 0xBB && line[2] == 0xBF
+          @data = true if Sse.split(line)[0] == "data".to_slice
+        end
+        @first = false
+        @len = 0
       end
     end
 

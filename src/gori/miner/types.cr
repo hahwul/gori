@@ -279,6 +279,8 @@ module Gori
       property rps : Float64?
       property throttle_ms : Int32?
       property timeout : Time::Span?
+      # When to stop reading an event-stream response (#1631); nil reads it to the idle timeout.
+      property sse : Repeater::StreamBound?
       property retries : Int32
       property retry_pause : Time::Span
       property stability_rounds : Int32 # baseline resends to learn tolerance
@@ -341,7 +343,7 @@ module Gori
                      @user_wordlist = nil,
                      @hook = nil,
                      @notify = NotifyMode::WhenFound, @keep_alive = true,
-                     @request_macro = nil)
+                     @request_macro = nil, @sse = Repeater::StreamBound::SWEEP)
       end
 
       def bucket_for(loc : Location) : Int32
