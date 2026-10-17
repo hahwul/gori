@@ -462,8 +462,10 @@ describe Gori::QL do
 "(status IS NOT NULL AND +status >= 200 AND +status < 300 AND " \
 "connect_protocol IS NOT NULL AND lower(connect_protocol) = 'websocket')))")
     Gori::QL.parse("proto:grpc").sql.should eq(
-      "(((content_type IS NOT NULL AND lower(ltrim(content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/grpc%') OR " \
-      "(request_content_type IS NOT NULL AND lower(ltrim(request_content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/grpc%')))")
+      "(((content_type IS NOT NULL AND (lower(ltrim(content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/grpc%' OR " \
+      "lower(ltrim(content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/connect+%')) OR " \
+      "(request_content_type IS NOT NULL AND (lower(ltrim(request_content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/grpc%' OR " \
+      "lower(ltrim(request_content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/connect+%'))))")
     Gori::QL.parse("proto:sse").sql.should eq(
       "((content_type IS NOT NULL AND " \
       "lower(trim(substr(content_type, 1, instr(content_type || ';', ';') - 1), char(9, 10, 11, 12, 13, 32))) = 'text/event-stream'))")
@@ -475,8 +477,10 @@ describe Gori::QL do
       "(NOT ((status IS NOT NULL AND status = 101) OR " \
       "(status IS NOT NULL AND +status >= 200 AND +status < 300 AND " \
       "connect_protocol IS NOT NULL AND lower(connect_protocol) = 'websocket')) " \
-      "AND NOT ((content_type IS NOT NULL AND lower(ltrim(content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/grpc%') OR " \
-      "(request_content_type IS NOT NULL AND lower(ltrim(request_content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/grpc%')) " \
+      "AND NOT ((content_type IS NOT NULL AND (lower(ltrim(content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/grpc%' OR " \
+      "lower(ltrim(content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/connect+%')) OR " \
+      "(request_content_type IS NOT NULL AND (lower(ltrim(request_content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/grpc%' OR " \
+      "lower(ltrim(request_content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/connect+%'))) " \
       "AND NOT (content_type IS NOT NULL AND " \
       "lower(trim(substr(content_type, 1, instr(content_type || ';', ';') - 1), char(9, 10, 11, 12, 13, 32))) = 'text/event-stream'))")
   end
@@ -497,8 +501,10 @@ describe Gori::QL do
       "connect_protocol IS NOT NULL AND lower(connect_protocol) = 'websocket'))) " \
       "AND scheme = 'https')")
     Gori::QL.parse("proto:grpcs").sql.should eq(
-      "((((content_type IS NOT NULL AND lower(ltrim(content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/grpc%') OR " \
-      "(request_content_type IS NOT NULL AND lower(ltrim(request_content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/grpc%'))) " \
+      "((((content_type IS NOT NULL AND (lower(ltrim(content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/grpc%' OR " \
+      "lower(ltrim(content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/connect+%')) OR " \
+      "(request_content_type IS NOT NULL AND (lower(ltrim(request_content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/grpc%' OR " \
+      "lower(ltrim(request_content_type, char(9, 10, 11, 12, 13, 32))) LIKE 'application/connect+%')))) " \
       "AND scheme = 'https')")
     Gori::QL.parse("proto:sses").sql.should eq(
       "(((content_type IS NOT NULL AND " \
@@ -584,13 +590,18 @@ describe "Gori::Store#search (QL)" do
       store.update_response(Gori::Store::CapturedResponse.new(
         flow_id: grpc_tab, status: 200, content_type: "\tapplication/grpc",
         head: "HTTP/1.1 200 OK\r\n\r\n".to_slice))
+      # A Connect stream is in the gRPC family (#1632).
+      connect = capture(store, "acme.test", "POST", "/connect-stream")
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: connect, status: 200, content_type: "application/connect+proto",
+        head: "HTTP/1.1 200 OK\r\n\r\n".to_slice))
       # Plain HTTP (typed) and a still-pending flow (NULL status + NULL content_type).
       html = capture(store, "acme.test", "GET", "/", 200)
       pending = capture(store, "acme.test", "GET", "/pending")
 
       def_ids = ->(q : String) { store.search(Gori::QL.parse(q), 50).map(&.id).sort }
       def_ids.call("proto:ws").should eq([ws])
-      def_ids.call("proto:grpc").should eq([grpc, grpc_tab])
+      def_ids.call("proto:grpc").should eq([grpc, grpc_tab, connect])
       def_ids.call("proto:sse").should eq([sse, sse_tab])
       Gori::Sse.sse?("text/event-stream\t; charset=utf-8").should be_true
       Gori::Proto.grpc?("\tapplication/grpc").should be_true

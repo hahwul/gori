@@ -777,7 +777,7 @@ describe "MCP WebSocket and gRPC projections in get_flow" do
   it "reports a gRPC framing failure rather than deleting the view" do
     head = "HTTP/2 200\r\ncontent-type: application/grpc\r\n\r\n".to_slice
     body = Bytes[0x00, 0x00, 0x00, 0x27, 0x0f] + "hello".to_slice # claims 9999, 5 arrive
-    json = JSON.build { |j| j.object { Gori::MCP::Serialize.emit_grpc_messages(j, "response_grpc_messages", head, body) } }
+    json = JSON.build { |j| j.object { Gori::MCP::Serialize.emit_grpc_messages(j, "response_grpc_messages", nil, head, body) } }
     g = JSON.parse(json)["response_grpc_messages"]
     g["count"].as_i.should eq(0)
     g["residual_bytes"].as_i.should eq(10)
@@ -788,7 +788,7 @@ describe "MCP WebSocket and gRPC projections in get_flow" do
     head = "HTTP/2 200\r\ncontent-type: application/grpc-web\r\n\r\n".to_slice
     body = Bytes[0x00, 0, 0, 0, 5] + "hello".to_slice +
            Bytes[0x80, 0, 0, 0, 22] + "grpc-status:3\r\nx-a:b\r\n".to_slice
-    g = JSON.parse(JSON.build { |j| j.object { Gori::MCP::Serialize.emit_grpc_messages(j, "response_grpc_messages", head, body) } })["response_grpc_messages"]
+    g = JSON.parse(JSON.build { |j| j.object { Gori::MCP::Serialize.emit_grpc_messages(j, "response_grpc_messages", nil, head, body) } })["response_grpc_messages"]
     g["count"].as_i.should eq(2)
     g.as_h.has_key?("framing_error").should be_false
     g["messages"][1]["trailer"].as_bool.should be_true
@@ -809,7 +809,7 @@ describe "MCP WebSocket and gRPC projections in get_flow" do
                Bytes[0x80, 0, 0, 0, 15] + "grpc-status:7\r\n".to_slice)
     end
     head = "HTTP/1.1 200 OK\r\ncontent-type: application/grpc-web\r\ncontent-encoding: gzip\r\n\r\n".to_slice
-    g = JSON.parse(JSON.build { |j| j.object { Gori::MCP::Serialize.emit_grpc_messages(j, "response_grpc_messages", head, io.to_slice) } })["response_grpc_messages"]
+    g = JSON.parse(JSON.build { |j| j.object { Gori::MCP::Serialize.emit_grpc_messages(j, "response_grpc_messages", nil, head, io.to_slice) } })["response_grpc_messages"]
     g["count"].as_i.should eq(2)
     g.as_h.has_key?("framing_error").should be_false
     g["grpc_status"].as_i.should eq(7)
@@ -828,7 +828,7 @@ describe "MCP WebSocket and gRPC projections in get_flow" do
     body = Bytes[0x00, 0, 0, 0, payload.size.to_u8] + payload
     g = JSON.parse(JSON.build { |j|
       j.object {
-        Gori::MCP::Serialize.emit_grpc_messages(j, "response_grpc_messages", head, body,
+        Gori::MCP::Serialize.emit_grpc_messages(j, "response_grpc_messages", nil, head, body,
           "/demo.Users/GetUser", request: false)
       }
     })["response_grpc_messages"]
@@ -848,7 +848,7 @@ describe "MCP WebSocket and gRPC projections in get_flow" do
     body = Bytes[0x00, 0, 0, 0, payload.size.to_u8] + payload
     g = JSON.parse(JSON.build { |j|
       j.object {
-        Gori::MCP::Serialize.emit_grpc_messages(j, "response_grpc_messages", head, body,
+        Gori::MCP::Serialize.emit_grpc_messages(j, "response_grpc_messages", nil, head, body,
           "/demo.Users/GetUser", request: false)
       }
     })["response_grpc_messages"]
@@ -858,7 +858,7 @@ describe "MCP WebSocket and gRPC projections in get_flow" do
 
   it "emits nothing for a body that is not gRPC" do
     head = "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\r\n".to_slice
-    JSON.build { |j| j.object { Gori::MCP::Serialize.emit_grpc_messages(j, "response_grpc_messages", head, %({"a":1}).to_slice) } }
+    JSON.build { |j| j.object { Gori::MCP::Serialize.emit_grpc_messages(j, "response_grpc_messages", nil, head, %({"a":1}).to_slice) } }
       .should eq("{}")
   end
 end

@@ -230,6 +230,49 @@ describe "HistoryView gRPC detail" do
   end
 end
 
+# #1632: a Connect call takes the same pane — a unary protobuf body as its one message (named
+# by the request's connect-protocol-version), and a stream's end-stream message as JSON text.
+describe "HistoryView Connect detail" do
+  seed = ->(store : Gori::Store, head : String, body : Bytes) do
+    store.insert_flow(Gori::Store::CapturedRequest.new(
+      created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
+      method: "POST", target: "/svc/M", http_version: "HTTP/1.1",
+      head: head.to_slice, body: body, source: Gori::FlowSource::Kind::Proxy))
+    view = HistoryView.new
+    view.reload(store)
+    view.open_detail(store).should be_true
+    view.pretty = true
+    backend = MemoryBackend.new(160, 24)
+    view.render_detail(Screen.new(backend), Rect.new(0, 0, 160, 24))
+    backend
+  end
+
+  it "decodes a unary proto body with no envelope" do
+    pb_tmp_store do |store|
+      backend = seed.call(store, "POST /svc/M HTTP/1.1\r\nHost: api.test\r\ncontent-type: application/proto\r\n" \
+                                 "connect-protocol-version: 1\r\n\r\n", PB_BODY)
+      backend.contains?("▸ message #1").should be_true
+      backend.contains?("1  varint   150").should be_true
+    end
+  end
+
+  it "shows a +json stream's messages and its end-stream as JSON, with no protobuf legend" do
+    pb_tmp_store do |store|
+      io = IO::Memory.new
+      io.write(grpc_frame(%({"id":7}).to_slice))
+      io.write_byte(2_u8)
+      io.write_bytes(%({"error":{"code":"internal"}}).bytesize.to_u32, IO::ByteFormat::BigEndian)
+      io << %({"error":{"code":"internal"}})
+      backend = seed.call(store, "POST /svc/M HTTP/1.1\r\nHost: api.test\r\ncontent-type: application/connect+json\r\n\r\n",
+        io.to_slice)
+      backend.contains?(%({"id":7})).should be_true
+      backend.contains?("▸ end-stream").should be_true
+      backend.contains?(%({"error":{"code":"internal"}})).should be_true
+      backend.contains?("none is authoritative").should be_false
+    end
+  end
+end
+
 # --- sites 2 & 3: the Repeater GRPC RESPONSE transcript --------------------------------
 
 describe "RepeaterView gRPC protobuf transcript" do

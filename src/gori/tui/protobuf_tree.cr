@@ -60,9 +60,10 @@ module Gori::Tui
     # TUI sites cannot answer them differently: a TRAILER frame is ASCII headers, not
     # protobuf, and a COMPRESSED payload is protobuf only once `Grpc.payload` has inflated it
     # under the stream's `grpc-encoding` (#1629). `plain` is that call's answer, asked once
-    # per message by the caller; a String (an unknown codec, a bomb) takes the hex exit.
+    # per message by the caller; a String (an unknown codec, a bomb) takes the hex exit. A
+    # Connect `json` payload (a `+json` stream, an end-stream message) is JSON text.
     def self.decode?(m : Proxy::H2::Grpc::Message, plain : Bytes | String, tree : Bool) : Bool
-      tree && !m.trailer && plain.is_a?(Bytes)
+      tree && !m.trailer && !m.json && plain.is_a?(Bytes)
     end
 
     # Whether `NOTE` belongs above `msgs`: only when a tree will actually be drawn. A body of

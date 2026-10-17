@@ -244,6 +244,17 @@ protoc --descriptor_set_out=api.desc --include_imports -I. api.proto
 
 이것은 **아웃바운드 요청**이고, 그렇게 다뤄집니다. 물었을 때만 실행되고 캡처·플로우 열기·프로젝트 열기에서는 절대 실행되지 않습니다(P4). 다른 모든 능동 전송과 같은 스코프 관문을 지나므로, 스코프 밖이거나 스코프가 없는 대상은 연결이 열리기 전에 거절됩니다(`--allow-unscoped` / `allow_unscoped:true`는 사전 검사만 면제하고, Sandbox는 면제하지 않습니다). 스스로 다시 가져오는 일도 없습니다. `gori run grpc schema`가 캐시된 것을 보여주고, `gori run grpc forget <target>`이 하나를 지웁니다. 그리고 이렇게 얻은 스키마도 여전히 렌즈입니다. 무엇을 받는지에 대한 대상의 말일 뿐, 진실은 여전히 바이트입니다.
 
+### Connect {#connect}
+
+[Connect](https://connectrpc.com/docs/protocol)는 gRPC의 스키마·상태 모델을 HTTP/1.1이나 HTTP/2 위의 평범한 HTTP로 옮긴 프로토콜이고, gori는 gRPC를 읽는 곳이라면 어디서든 이것도 읽습니다.
+
+- **스트림**(`application/connect+proto` 또는 `+json`)은 gRPC와 같은 5바이트 봉투를 쓰므로 같은 방식으로 프레임이 풀립니다. `0x01` 플래그가 붙은 메시지는 스트림의 `connect-content-encoding`으로 압축이 풀립니다. `0x02` end-stream 메시지는 실제로 JSON이므로 JSON으로 보여 줍니다(TUI에서는 `end-stream`, JSON에서는 `end_stream: true`와 `json` 문자열). PROTO 컬럼은 `GRPC`로 읽고 `proto:grpc`가 찾아냅니다.
+- **유니어리 호출**(`application/proto` 또는 `application/json`, 평범한 본문)은 요청의 `connect-protocol-version` 헤더로만 Connect임을 알 수 있습니다. protobuf 본문은 `content-encoding`을 푼 뒤 봉투 없이 메시지 하나로 디코딩되고, `.proto` 렌즈도 gRPC와 똑같이 적용됩니다. JSON 본문은 이미 읽을 수 있으므로 protobuf 뷰를 만들지 않습니다. 헤더가 없는 평범한 `application/json` 요청은 Connect가 아닙니다. 이 헤더를 기록하는 행 컬럼이 없어서, PROTO 컬럼은 유니어리 호출을 `HTTP`로 표시합니다.
+
+**결과를 보여 줍니다.** Connect 오류는 JSON 본문이 `{code, message, details}`인 200이 아닌 응답(유니어리)이거나, end-stream 메시지의 `error`(스트리밍)입니다. `gori run history show --format json`과 MCP `get_flow`는 둘 다 Connect 플로우에 `connect` 객체를 붙입니다. `streaming`이 들어가고, 호출이 실패했다면 `code`(`permission_denied`처럼 원본이 쓴 그대로)와 `message`도 들어갑니다. Probe는 Connect 서비스를 `tech_grpc`로 지문 채취합니다.
+
+아직 안 되는 것: Repeater의 gRPC 탭과 필드 편집기, gRPC 필드 퍼징과 리프레이밍은 여전히 gRPC 프레이밍이 필요하므로, Connect 플로우는 Repeater에서 평범한 HTTP 요청으로 열립니다.
+
 ### MessagePack과 CBOR {#binary-documents}
 
 `Content-Type`이 `application/msgpack` 또는 `application/cbor`(그리고 `+msgpack` / `+cbor` 접미사)인 본문은 상세 패널에서 JSON으로 렌더됩니다. 다른 본문을 정렬할 때 쓰는 그 `p` 토글 그대로입니다. 이게 없으면 이런 본문은 바이너리 자리표시자와 hex 뷰로 떨어집니다. 두 형식 모두 정수 `0`을 NUL 바이트로 인코딩하기 때문에, 실제 본문은 거의 전부 바이너리 감지에 먼저 걸립니다.

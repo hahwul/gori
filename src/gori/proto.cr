@@ -86,9 +86,15 @@ module Gori
     end
 
     # gRPC content types: application/grpc, application/grpc+proto, and the
-    # browser-facing application/grpc-web[+proto] — all share the prefix.
+    # browser-facing application/grpc-web[+proto] — all share the prefix. A Connect stream
+    # (`application/connect+proto|json`, #1632) is the same family. A unary Connect call is
+    # not: its `application/proto|json` is named Connect only by a request header, which no
+    # row column records.
     def self.grpc?(content_type : String?) : Bool
-      !!content_type.try { |ct| ct.lstrip.downcase.starts_with?("application/grpc") }
+      !!content_type.try do |ct|
+        t = ct.lstrip.downcase
+        t.starts_with?("application/grpc") || t.starts_with?("application/connect+")
+      end
     end
 
     # A WebSocket carried by an RFC 8441 extended CONNECT — the HTTP/2 handshake, which has no

@@ -112,6 +112,22 @@ describe Gori::Probe::Passive do
     end
   end
 
+  # #1632: a unary Connect call is named by its request's connect-protocol-version — and a
+  # plain JSON API without it is not one.
+  it "fingerprints a unary Connect call as tech_grpc, and not a plain JSON request" do
+    with_store do |store|
+      head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+      detail = probe_capture_flow(store, head, content_type: "application/json", method: "POST",
+        target: "/demo.Users/GetUser",
+        req_headers: "Content-Type: application/json\r\nConnect-Protocol-Version: 1\r\n")
+      found = Gori::Probe::Passive.analyze(detail).find { |d| d.code == "tech_grpc" }
+      found.not_nil!.title.should eq("Connect RPC service")
+      plain = probe_capture_flow(store, head, content_type: "application/json", method: "POST",
+        target: "/api/users", req_headers: "Content-Type: application/json\r\n")
+      Gori::Probe::Passive.analyze(plain).any? { |d| d.code == "tech_grpc" }.should be_false
+    end
+  end
+
   it "fingerprints framework/version-disclosure headers and surfaces them as project tech" do
     with_store do |store|
       head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nX-AspNet-Version: 4.0.30319\r\n" \
