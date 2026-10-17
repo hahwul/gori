@@ -205,6 +205,35 @@ module Gori
                                     tls_preset : String? = nil,
                                     cancel : Proc(Bool)? = nil) : Result
         started = Time.instant
+        opened = open_h1(upgrade_request, scheme: scheme, host: host, port: port,
+          verify_upstream: verify_upstream, sni: sni, overrides: overrides, keep_key: keep_key,
+          tls_preset: tls_preset, cancel: cancel, started: started)
+        return opened if opened.is_a?(Result)
+        begin
+          run_session(opened.io, opened.head, out_messages, idle, deadline, started, opened.note).with_sent_head(opened.sent_head)
+        rescue ex
+          # Once upgraded, drain swallows mid-exchange IO errors itself, so reaching here is
+          # the same "ws repeater error" the handshake's own rescue in `open_h1` reports.
+          err(ex.message || "ws repeater error", started).with_sent_head(opened.sent_head)
+        ensure
+          opened.watcher.try(&.stop)
+          opened.io.close rescue nil
+        end
+      end
+
+      # An upgraded HTTP/1.1 socket, handed over by `open_h1`. The caller owns `io` (it closes
+      # it) and `watcher` (the cancel watch armed before the handshake; it stops it).
+      record H1Open, io : IO, head : Bytes, note : String?, sent_head : Bytes,
+        watcher : Proxy::Upstream::CancelWatch?
+
+      # The dial and the 101, and nothing after it: the half of `send_over_h1` that the
+      # scripted exchange and the persistent `WsSession` share. Every failure comes back as the
+      # same `Result` `send` has always reported it as, with the socket already closed.
+      def self.open_h1(upgrade_request : Bytes, *, scheme : String, host : String, port : Int32,
+                       verify_upstream : Bool, sni : String? = nil,
+                       overrides : Gori::HostOverrides? = nil, keep_key : Bool = false,
+                       tls_preset : String? = nil, cancel : Proc(Bool)? = nil,
+                       started : Time::Instant = Time.instant) : H1Open | Result
         # The connect + handshake reads get a generous io_timeout so a slow-but-valid
         # upgrade (cold start / auth / slow proxy) isn't mistaken for a dead origin;
         # the read_timeout is narrowed to `idle` only once we enter the drain, where a
@@ -226,6 +255,7 @@ module Gori
         return err(Engine.connect_error(scheme, host, port, verify_upstream, dial_error), started) unless upstream
 
         watcher = Proxy::Upstream.watch_cancel(upstream, cancel)
+        upgraded = false
         begin
           handshake, keys = build_handshake(upgrade_request, keep_key)
           upstream.write(handshake)
@@ -264,15 +294,17 @@ module Gori
             return Result.new(head, [] of Message, Engine.elapsed(started),
               error: "server did not upgrade (status #{resp.status})", upgraded: false).with_sent_head(handshake)
           end
-          note = verify_accept(resp, keys)
-          run_session(upstream, head, out_messages, idle, deadline, started, note).with_sent_head(handshake)
+          opened = H1Open.new(upstream, head, verify_accept(resp, keys), handshake, watcher)
+          upgraded = true # only now: a raise above must still close the socket and the watcher
+          opened
         rescue ex
-          # A failure BEFORE/at the upgrade is a real error; once upgraded, drain swallows
-          # mid-exchange IO errors itself, so reaching here means the handshake failed.
+          # A failure BEFORE/at the upgrade is a real error.
           err(ex.message || "ws repeater error", started).with_sent_head(handshake)
         ensure
-          watcher.try(&.stop)
-          upstream.close rescue nil
+          unless upgraded
+            watcher.try(&.stop)
+            upstream.close rescue nil
+          end
         end
       end
 
@@ -902,7 +934,7 @@ module Gori
       end
 
       # 2-byte big-endian status code at the start of a Close payload, if present.
-      private def self.close_status(payload : Bytes) : Int32?
+      def self.close_status(payload : Bytes) : Int32?
         return nil if payload.size < 2
         (payload[0].to_i << 8) | payload[1].to_i
       end

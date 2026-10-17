@@ -9,6 +9,7 @@ require "./engine"
 require "./h2_engine"
 require "./h2_race"
 require "./ws_engine"
+require "./ws_session"
 
 module Gori
   module Repeater
@@ -528,6 +529,34 @@ module Gori
           scheme: @scheme, host: @host, port: @port, verify_upstream: @verify, sni: @sni,
           idle: idle, overrides: @overrides, keep_key: keep_key, tls_preset: @tls_preset,
           cancel: cancel)
+      end
+
+      # A persistent session (#1630) through the same refusal/admit sequence as `send_ws`, taken
+      # ONCE, at connect: the session's later messages ride the socket this verdict admitted.
+      # The h2 refusal reads the WIRED bytes (what the session would dial) and hands the budget
+      # slot back like the scope refusal does. Operator messages get `expand_messages` per
+      # send, as `send_ws` gives a script.
+      def open_ws(upgrade : Bytes, keep_key : Bool = false,
+                  auto_replies : Array(WsSession::AutoReply) = [] of WsSession::AutoReply,
+                  cancel : Proc(Bool)? = nil) : WsSession::Opened
+        refused = ->(reason : String) {
+          WsSession::Opened.new(nil, WsEngine::Result.new(Bytes.new(0), [] of WsEngine::Message, 0_i64, reason))
+        }
+        if reason = admit(cancel: cancel)
+          return refused.call(reason)
+        end
+        wired = wire(upgrade)
+        if reason = wire_refusal(wired, cancel, admitted: true)
+          return refused.call(reason)
+        end
+        if reason = WsSession.refusal(wired)
+          @outbound.refund(1)
+          return refused.call(reason)
+        end
+        WsSession.open(wired, scheme: @scheme, host: @host, port: @port, verify_upstream: @verify,
+          sni: @sni, overrides: @overrides, keep_key: keep_key, tls_preset: @tls_preset,
+          cancel: cancel, auto_replies: auto_replies,
+          expand: ->(m : WsEngine::OutMsg) { expand_messages([m]).first })
       end
 
       # Whole payload, not `expand_bindings`' head/body split: a WS frame has no head to take,

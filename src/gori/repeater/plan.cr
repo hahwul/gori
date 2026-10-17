@@ -429,6 +429,14 @@ module Gori::Repeater
       @sender.send_ws(bytes, messages, idle, keep_key, cancel)
     end
 
+    # The persistent counterpart of `send_ws` (#1630): one gated connect, then a `WsSession`
+    # the surface sends on and closes. `keep_key` is send-time for the reason above.
+    def open_ws(keep_key : Bool = false,
+                auto_replies : Array(WsSession::AutoReply) = [] of WsSession::AutoReply,
+                cancel : Proc(Bool)? = nil) : WsSession::Opened
+      @sender.open_ws(bytes, keep_key, auto_replies, cancel)
+    end
+
     # The same target and gated dialer carrying different wire bytes — for a surface that
     # rewrites the request AFTER assembly: MCP's opt-in Match&Replace parity, whose rules key off
     # the dialed host (not known until the plan resolved it, so the rewrite cannot happen before
