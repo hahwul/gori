@@ -138,8 +138,8 @@ private def with_sandbox_scope(&)
   end
 end
 
-# A rewriter whose only claim is the one `h2c_refusal` asks about.
-private class BodyRuleRewriter < Gori::Proxy::HeadRewriter
+# A rewriter whose only claim is one `h2c_refusal` asks about.
+private class StubRuleRewriter < Gori::Proxy::HeadRewriter
   def rewrite_request(head : Bytes, host : String) : Bytes
     head
   end
@@ -148,7 +148,7 @@ private class BodyRuleRewriter < Gori::Proxy::HeadRewriter
     head
   end
 
-  def rewrites_body_for_host?(host : String) : Bool
+  def short_circuits_for_host?(host : String) : Bool
     true
   end
 
@@ -337,7 +337,7 @@ describe "h2c via CONNECT (cleartext HTTP/2)" do
     origin = MultiH2cOrigin.new
     origin.start
     sink = RecSink.new
-    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, tls: tunnel, rewriter: BodyRuleRewriter.new)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, tls: tunnel, rewriter: StubRuleRewriter.new)
     proxy.start
 
     client = connect_tunnel(proxy.port, "127.0.0.1:#{origin.port}")
@@ -353,7 +353,7 @@ describe "h2c via CONNECT (cleartext HTTP/2)" do
     sink.responses.should_not be_empty # the refusal is RECORDED, not silent
     err = sink.responses.last.error.not_nil!
     err.should contain("h2c CONNECT tunnel refused")
-    err.should contain("Match&Replace BODY rule")
+    err.should contain("Match&Replace short-circuit rule")
   ensure
     origin.try(&.stop)
     FileUtils.rm_rf(ca_dir) if ca_dir

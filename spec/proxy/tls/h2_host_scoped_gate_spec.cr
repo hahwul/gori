@@ -213,32 +213,17 @@ describe "h2 downgrade gate, host-scoped (#526)" do
 
   # End to end against a real Tunnel: what the client is actually offered.
   describe "through the proxy" do
-    it "keeps h2 for a host a BODY rule cannot match, and downgrades the host it can" do
-      with_gate_rules do |rules|
-        rules.add(SCOPED_REQ, SCOPED_BODY, "secret", "REDACTED", host: "alpha.test")
-        # The fix: `localhost` is not `alpha.test`, so the rule costs it nothing.
-        alpn_through_proxy(rules, "body-scoped-away") do |negotiated, accepts|
-          negotiated.should eq("h2")
-          accepts.should eq(1) # the ALPN reflection probe ran, i.e. the gate let it through
-        end
-      end
-
-      # The control: the SAME rule, re-scoped to the host being reached, still downgrades.
-      with_gate_rules do |rules|
-        rules.add(SCOPED_REQ, SCOPED_BODY, "secret", "REDACTED", host: "localhost")
-        alpn_through_proxy(rules, "body-scoped-here") do |negotiated, accepts|
-          negotiated.should_not eq("h2")
-          accepts.should eq(0) # a downgrade short-circuits before reflect_origin_h2 dials
-        end
-      end
-    end
-
-    it "still downgrades EVERY host for an unscoped body rule (the regression guard)" do
-      with_gate_rules do |rules|
-        rules.add(SCOPED_REQ, SCOPED_BODY, "secret", "REDACTED") # empty glob = every host
-        alpn_through_proxy(rules, "body-unscoped") do |negotiated, accepts|
-          negotiated.should_not eq("h2")
-          accepts.should eq(0)
+    # A BODY rule no longer downgrades anything (#1628): the relay rewrites bodies itself, and
+    # the host-scoped question now decides only whether a connection runs that path
+    # (`H2::Relay#gates`). Scoped here, scoped away, or unscoped — the client keeps h2.
+    it "keeps h2 for every host a BODY rule could match (#1628)" do
+      {"alpha.test", "localhost", ""}.each do |glob|
+        with_gate_rules do |rules|
+          rules.add(SCOPED_REQ, SCOPED_BODY, "secret", "REDACTED", host: glob)
+          alpn_through_proxy(rules, "body-#{glob.empty? ? "unscoped" : glob}") do |negotiated, accepts|
+            negotiated.should eq("h2")
+            accepts.should eq(1) # the ALPN reflection probe ran, i.e. the gate let it through
+          end
         end
       end
     end

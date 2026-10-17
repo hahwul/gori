@@ -1,8 +1,9 @@
 require "../../spec_helper"
 require "log/spec"
 
-# #730: the three gates that force a host off HTTP/2 so a body / short-circuit / body-scoped
-# extract rule can run are evaluated ONCE, inside CONNECT (`tls/tunnel.cr#h2_downgrade_reason`).
+# #730: the gates that let a body / short-circuit / body-scoped extract rule run on a host are
+# evaluated ONCE per connection — the HTTP/1.1 downgrade inside CONNECT
+# (`tls/tunnel.cr#h2_downgrade_reason`), and since #1628 the body-rule path (`H2::Relay#gates`).
 # The tables they read are live-mutated in place and nothing tears down an open relay when they
 # change, so a rule enabled while an h2 connection is already open applies to nothing on that
 # connection — and before this it said nothing at all.
@@ -49,9 +50,9 @@ end
 
 private def live_pipe(rewriter : Gori::Proxy::HeadRewriter?,
                       extractor : Gori::Proxy::ResponseExtract? = nil,
-                      direction = "out") : {Gori::Proxy::H2::HeadRewrite, Gori::Proxy::H2::Assembler}
+                      direction = "out", body_rules = false) : {Gori::Proxy::H2::HeadRewrite, Gori::Proxy::H2::Assembler}
   assembler = Gori::Proxy::H2::Assembler.new(LiveSink.new, CONNECT_HOST, 443)
-  {Gori::Proxy::H2::HeadRewrite.new(direction, rewriter, assembler, CONNECT_HOST, extractor), assembler}
+  {Gori::Proxy::H2::HeadRewrite.new(direction, rewriter, assembler, CONNECT_HOST, extractor, body_rules), assembler}
 end
 
 private def feed_request(pipe : Gori::Proxy::H2::HeadRewrite,
@@ -93,6 +94,20 @@ describe "h2 live-rule window (#730)" do
         # Once per connection, not once per request head.
         feed_request(pipe, assembler, stream: 5_u32)
         feed_request(pipe, assembler, stream: 7_u32)
+        logs.empty
+      end
+    end
+  end
+
+  # #1628: a connection built with the body-rule path runs a body rule per stream, on the stream's
+  # own host, so one going live — here or on a coalesced authority — is not a seam it misses.
+  it "says nothing for a BODY rule on a connection that runs the body-rule path" do
+    with_live_tables do |rules, _|
+      pipe, assembler = live_pipe(rules, body_rules: true)
+      Log.capture(level: :warn) do |logs|
+        rules.add(LIVE_REQ, LIVE_BODY, "secret", "REDACTED")
+        feed_request(pipe, assembler)
+        feed_request(pipe, assembler, authority: "alpha.test", stream: 3_u32)
         logs.empty
       end
     end

@@ -310,8 +310,9 @@ module Gori::Proxy::H2
     # `note_advisory` does, since the edited head is released — and fed — right after this.
     #
     # A rule that rewrote the head ran BEFORE the hold (#1589), so the held head is the rule's
-    # output: the client's own head is the one the rule replaced, kept with the held body (h2
-    # has no body rules). Store keeps only the rule's hits beside an Intercept original.
+    # output: the client's own head is the one the rule replaced, kept with the held body (a held
+    # stream's body is the hold's, never a body rule's). Store keeps only the rule's hits beside
+    # an Intercept original.
     def note_intercept_original(stream_id : UInt32, original : Bytes) : Nil
       @mutex.synchronize do
         next unless stream = open_entry(stream_id)
@@ -332,6 +333,24 @@ module Gori::Proxy::H2
           stream.req_rewrite = rewrite
         else
           stream.resp_rewrite = rewrite
+        end
+      end
+    end
+
+    # A Match&Replace BODY rule changed `stream_id`'s body on one side (#1628): its hits join any
+    # head rule's, and the original keeps the head the rules read (the peer's own when a head
+    # rule fired first) with the body as it arrived, capped as h1 caps it.
+    def note_body_rewrite(stream_id : UInt32, request : Bool, hits : Array(Store::RuleRef),
+                          head : Bytes?, body : Bytes) : Nil
+      body = body[0, Settings.capture_max].dup if body.size > Settings.capture_max
+      @mutex.synchronize do
+        next unless stream = open_entry(stream_id)
+        prior = request ? stream.req_rewrite : stream.resp_rewrite
+        merged = Store::Rewrite.new(prior ? prior.hits + hits : hits, prior.try(&.head) || head, body)
+        if request
+          stream.req_rewrite = merged
+        else
+          stream.resp_rewrite = merged
         end
       end
     end

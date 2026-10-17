@@ -158,7 +158,7 @@ describe "the reason an h2 preface is refused on the HTTP/1.1 path" do
     end
 
     it "mentions gori.log only where a line was actually written" do
-      writes = [Gori::Proxy::H2Offer::DisabledBySetting, Gori::Proxy::H2Offer::BodyRule,
+      writes = [Gori::Proxy::H2Offer::DisabledBySetting,
                 Gori::Proxy::H2Offer::ShortCircuitRule, Gori::Proxy::H2Offer::ExtractRule]
       Gori::Proxy::H2Offer.values.each do |offer|
         offer.refusal_reason.includes?("gori.log").should eq(writes.includes?(offer))
