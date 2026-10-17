@@ -360,6 +360,10 @@ WebSocket 세션에 대한 `--repeater N`은 핸드셰이크와 **세션에 저�
 
 Miner의 매크로는 보정 기준선을 포함해 **보내는 모든 요청 앞에서** 실행됩니다. 요청마다 토큰을 바꾸는 애플리케이션은 토큰 없는 보정 프로브에도 후보와 똑같이 `403`으로 답하고, `403`뿐인 기준선에서는 모든 정상 응답이 발견으로 보입니다. TUI 팝업은 세션 하나만 받고, 여러 단계와 `--macro-expect`는 CLI와 MCP에서 씁니다.
 
+### 이벤트 스트림 {#event-streams}
+
+`text/event-stream`(SSE) 응답은 원래 열린 채로 유지되므로, 끝까지 읽으면 페이로드마다 유휴 타임아웃을 통째로 기다리게 됩니다. Fuzzer와 Miner는 스트리밍이 **이벤트 50개나 5초** 중 먼저 닿는 쪽에서 읽기를 멈추고, `gori run repeater`, `gori run send`, MCP `send_request`는 **이벤트 100개나 10초**에서 멈춥니다. 그때까지 읽은 이벤트가 응답 본문이 됩니다. 전송은 여전히 성공(`ok: true`)이고, `bounded`(`events` 또는 `time`)가 어느 한도에서 멈췄는지 알려 줍니다. 한도는 CLI의 `--sse-events=N` / `--sse-time=SEC`, MCP `send_request`, `fuzz_start`, `mine_start`의 `sse_max_events` / `sse_max_ms`로 정하고, `0`은 그 한도를 끕니다. 압축된 스트림은 시간 한도로만 멈춥니다. 다른 응답에는 영향이 없고, TUI Repeater는 지금처럼 스트림을 끝까지 읽습니다.
+
 ### 연결 재사용 {#connection-reuse}
 
 스윕은 하나의 연결을 여러 요청에 재사용합니다. 요청마다가 아니라 워커마다 TCP 핸드셰이크를(그리고 `https`라면 TLS 핸드셰이크까지) 한 번만 치릅니다. 원격 오리진을 대상으로 할 때 대개 이것이 실행 시간의 가장 큰 비용입니다.

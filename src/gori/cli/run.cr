@@ -1955,6 +1955,25 @@ module Gori
         p.on("--db=PATH", "Explicit SQLite db file to #{verb}") { |v| proj.db = v }
       end
 
+      # `--sse-events=N` / `--sse-time=SEC` (#1631): when to stop reading an event-stream
+      # response. An absent flag takes the command's default, and 0 switches that axis off —
+      # the same reading as MCP `sse_max_events` / `sse_max_ms` (`Repeater::StreamBound.resolve`).
+      class SseFlags
+        property events : Int64? = nil
+        property time : Time::Span? = nil
+
+        def bound(default : Repeater::StreamBound) : Repeater::StreamBound?
+          Repeater::StreamBound.resolve(events, time, default)
+        end
+      end
+
+      private def self.sse_options(p : OptionParser, sse : SseFlags, default : Repeater::StreamBound) : Nil
+        p.on("--sse-events=N", "Event stream (text/event-stream): stop reading after N events " \
+                               "(default #{default.max_events}; 0 = no limit)") { |v| sse.events = parse_nonneg(v, "--sse-events").to_i64 }
+        p.on("--sse-time=SEC", "Event stream: stop reading after SEC seconds of streaming " \
+                               "(default #{default.max_time.try(&.total_seconds.to_i)}; 0 = no limit)") { |v| sse.time = parse_nonneg(v, "--sse-time").seconds }
+      end
+
       # Build a parser, let the command register its flags, then add the tail every command
       # shares and parse `args`. Returns the positionals, BOTH halves of `unknown_args`: a word
       # after `--` arrives in the second, and dropping it was a bug here once. `-h` is added

@@ -136,6 +136,7 @@ module Gori
         allow_unscoped = false
         format = :text
         timeout : Time::Span? = nil
+        sse = SseFlags.new
         tls_preset : String? = nil
         headers_only = false
         max_body : Int32? = nil
@@ -151,6 +152,7 @@ module Gori
           p.on("--fields=FILE", "JSON file with the ordered HPACK field list (and optional body)") { |v| fields_file = v }
           p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
           p.on("--timeout=SEC", "Per-operation connect + idle timeout (seconds)") { |v| timeout = parse_count(v, "--timeout").seconds }
+          sse_options(p, sse, Repeater::StreamBound::SEND)
           p.on("--allow-unscoped", "Send even if the target is outside the project scope (the Sandbox still applies)") { allow_unscoped = true }
           p.on("--tls-preset=NAME", TLS_PRESET_HELP) { |v| tls_preset = v }
           p.on("--headers-only", HEADERS_ONLY_HELP) { headers_only = true }
@@ -175,7 +177,7 @@ module Gori
           Repeater::Plan.build(Repeater::PlanOptions.new(
             h2_fields: fields, h2_body: body, target: tgt,
             http2: true, verify: !insecure, timeout: timeout, overrides: overrides,
-            tls_preset: tls_preset), outbound)
+            tls_preset: tls_preset, sse: sse.bound(Repeater::StreamBound::SEND)), outbound)
         rescue ex : Repeater::PlanError
           repeater_plan_abort("gori run repeater h2", ex)
         end
@@ -983,11 +985,12 @@ module Gori
                                             reframe_grpc : Bool = false,
                                             tls_preset : String? = nil,
                                             request : Bytes = rec.request,
-                                            pinned_cl : Bool = false) : Repeater::PlanOptions
+                                            pinned_cl : Bool = false,
+                                            sse : Repeater::StreamBound? = nil) : Repeater::PlanOptions
         Repeater::PlanOptions.new([request],
           reframe_grpc: reframe_grpc,
           default_target: rec.target, http2: rec.http2?, sni: rec.sni,
-          timeout: timeout,
+          timeout: timeout, sse: sse,
           expand_request: !verbatim,
           # The SEND-seam half of the same flag. `expand_request` stops the BUILDER's project
           # env var pass; a DECLARED session binding is deliberately deferred past the builder
@@ -1426,6 +1429,7 @@ module Gori
         do_diff = false
         format = :text
         timeout : Time::Span? = nil
+        sse = SseFlags.new
         # `--message` and `--message-frame` share ONE list so their relative ORDER is the send
         # order. A WebSocket exchange is a sequence, and two lists merged afterwards would
         # silently reorder a fragment ahead of the CONT that finishes it.
@@ -1457,6 +1461,7 @@ module Gori
           project_options(p, proj, "read")
           p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
           p.on("--timeout=SEC", "Per-operation connect + idle timeout (seconds). Ignored on the WebSocket path, which paces itself with --idle-ms") { |v| timeout = parse_count(v, "--timeout").seconds }
+          sse_options(p, sse, Repeater::StreamBound::SEND)
           p.on("--diff", "Diff the new response against the session's last stored response") { do_diff = true }
           p.on("--allow-unscoped", "Send even if the target is outside the project scope (the Sandbox still applies)") { allow_unscoped = true }
           p.on("--verbatim", "Send the stored bytes EXACTLY: no token expansion (project env vars, session bindings, or generators — a $ENV.KEY, $BIND.NAME, or $GEN.UUID token stays literal on the wire; bare syntax: $KEY / $NAME), no bare-LF→CRLF promotion, no Content-Length resync, no HTTP/2→1.1 version fix, and on h2 no field-name lowercasing. Nothing interprets the token grammar, so an escape ($$ENV.KEY, or $$name in bare syntax) is not consumed either — write the literal token itself. A token the APP owns ($where, $filter, $IFS) needs this flag only under the bare syntax; namespaced, nothing but $ENV./$BIND./$GEN. is a reference. The active --slot's header overlay still applies: it answers a different question (send this AS WHOM) — pass no --slot to send the stored headers. It also waives the §…§ refusal: a stored § stays literal instead of being refused as an unrendered marker") { verbatim = true }
@@ -1545,7 +1550,7 @@ module Gori
 
         plan = begin
           Repeater::Plan.build(session_plan_options(rec, insecure, host_overrides, verbatim, timeout, reframe_grpc,
-            tls_preset, request: request, pinned_cl: pinned_cl), outbound)
+            tls_preset, request: request, pinned_cl: pinned_cl, sse: sse.bound(Repeater::StreamBound::SEND)), outbound)
         rescue ex : Repeater::PlanError
           repeater_plan_abort("gori run repeater send", ex, "session ##{id}")
         end
@@ -2160,6 +2165,15 @@ module Gori
         end
       end
 
+      # `incomplete`, its reason, and which event-stream bound stopped the read (#1631) — one
+      # emitter for `--format json` and MCP `send_request`, so the keys stay in lockstep.
+      def self.emit_incomplete_json(j : JSON::Builder, result : Repeater::Result) : Nil
+        return unless result.incomplete?
+        j.field "incomplete", true
+        j.field "incomplete_reason", incomplete_reason(result, result.timed_out?)
+        j.field("bounded", result.bounded) if result.bounded
+      end
+
       # WHY the captured response is short. `Result#incomplete?` conflates THREE causes and
       # this sentence used to name only one of them, so gori blamed the target for something
       # gori did:
@@ -2171,10 +2185,21 @@ module Gori
       #     wire and at the wrong fix (the fix is a longer deadline).
       #   * the origin really did close before the framed body finished.
       #
+      # An event stream gori stopped at its bound (#1631) is named before all three: the read
+      # ended on gori's choice, and its body is short of no limit above.
+      #
       # `self.` and public so MCP renders the identical three sentences: two copies of a
       # three-way classification is how two surfaces come to disagree about one flow.
       def self.incomplete_reason(result : Repeater::Result, timed_out : Bool = false) : String
         cap = Proxy::Codec::Body::CAPTURE_READ_MAX
+        case result.bounded
+        when "events"
+          return "incomplete — gori stopped the event stream at its event bound (--sse-events / sse_max_events)"
+        when "time"
+          return "incomplete — gori stopped the event stream at its time bound (--sse-time / sse_max_ms)"
+        when "cancelled"
+          return "incomplete — the send was cancelled while the event stream was open"
+        end
         if (b = result.body) && b.size >= cap
           "incomplete — gori stopped reading at its #{cap // (1024 * 1024)} MiB capture ceiling"
         elsif timed_out
@@ -2533,6 +2558,7 @@ module Gori
         keep_request_line = false
         slot : String? = nil
         timeout : Time::Span? = nil
+        sse = SseFlags.new
         tls_preset : String? = nil
         path_override : String? = nil
         headers_only = false
@@ -2556,6 +2582,7 @@ module Gori
           p.on("--sni=HOST", "TLS SNI override") { |v| sni_override = v }
           p.on("--tls-preset=NAME", TLS_PRESET_HELP) { |v| tls_preset = v }
           p.on("--timeout=SEC", "Per-operation connect + idle timeout (seconds)") { |v| timeout = parse_count(v, "--timeout").seconds }
+          sse_options(p, sse, Repeater::StreamBound::SEND)
           p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
           p.on("--diff", "Diff the new response against the captured one") { do_diff = true }
           p.on("-XMETHOD", "--method=METHOD", "Replace the captured request's method (the rest of the request line is kept)") { |v| method_override = v }
@@ -2744,7 +2771,7 @@ module Gori
             # `--verbatim`: the h2 encoder keeps the field-name case the operator typed.
             preserve_field_case: verbatim,
             verify: !insecure, timeout: timeout, overrides: host_overrides,
-            tls_preset: tls_preset), outbound)
+            tls_preset: tls_preset, sse: sse.bound(Repeater::StreamBound::SEND)), outbound)
         rescue ex : Repeater::PlanError
           repeater_plan_abort("gori run repeater", ex)
         end
@@ -2902,10 +2929,7 @@ module Gori
             # …and WHY it is incomplete. `incomplete` alone conflates an origin that closed
             # early with gori's own capture ceiling; a reader that assumed the first blamed
             # the target for something gori did.
-            if result.incomplete?
-              j.field "incomplete", true
-              j.field "incomplete_reason", incomplete_reason(result, result.timed_out?)
-            end
+            emit_incomplete_json(j, result)
             # The head is REMOTE bytes: an 8-bit octet in a header value (the standard
             # header-parsing probe) does not survive `scrub`, which replaces it with U+FFFD.
             # `gori run repeater` writes no History row and has no `--format raw`, so those

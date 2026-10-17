@@ -918,7 +918,8 @@ module Gori
       private def write_outbound_response(flow_id : Int64, result : Repeater::Result) : Nil
         if response = result.response
           error = result.error
-          error ||= "upstream response body was incomplete" if result.incomplete?
+          # A bound gori chose to stop at is not a failed response (#1631).
+          error ||= "upstream response body was incomplete" if result.incomplete? && !result.bounded
           state = error ? Store::FlowState::Error : Store::FlowState::Complete
           store.update_response(FlowMapper.response(response,
             flow_id: flow_id,
@@ -1054,14 +1055,12 @@ module Gori
               j.field "sensitive_headers_redacted", redacted
             end
             j.field "duration_us", result.duration_us
-            if result.incomplete?
-              j.field "incomplete", true
-              # `incomplete: true` alone said only THAT the body was short, never why, so an
-              # agent could not tell gori's own capture ceiling from an origin that closed
-              # from a read deadline that expired — three different next moves. The CLI has
-              # named them since round 3; this is the same classifier, not a second one.
-              j.field "incomplete_reason", CLI::Run.incomplete_reason(result, result.timed_out?)
-            end
+            # `incomplete: true` alone said only THAT the body was short, never why, so an
+            # agent could not tell gori's own capture ceiling from an origin that closed
+            # from a read deadline that expired — three different next moves. The CLI has
+            # named them since round 3; this is the same classifier, not a second one — and,
+            # with `bounded` (#1631), the same emitter.
+            CLI::Run.emit_incomplete_json(j, result)
             Serialize.emit_body(j, "body", "target", result.head, result.body, false, body_cap, body_omit, more: body_more)
           end
         end
@@ -1456,7 +1455,7 @@ module Gori
           origin: Repeater::Origin.new(scheme, host, port),
           http2: true, verify: !bool_arg(h, "insecure", false) && @verify_upstream,
           timeout: fuzz_timeout(h), overrides: HostOverrides.load(store),
-          tls_preset: send_tls_preset(h))
+          tls_preset: send_tls_preset(h), sse: sse_bound(h, Repeater::StreamBound::SEND))
       end
 
       # The option set plus "did gori rewrite the stored request line?" — the second half is
@@ -1469,6 +1468,7 @@ module Gori
       private def send_plan_options(h) : {Repeater::PlanOptions, Bool}
         verify = !bool_arg(h, "insecure", false) && @verify_upstream
         timeout = fuzz_timeout(h)
+        sse = sse_bound(h, Repeater::StreamBound::SEND)
         # Read up front, not inside the `flow_id` branch that uses it: an argument validated in
         # one branch and ignored in another is the same silent-substitution trap one level up.
         keep_request_line = bool_arg(h, "keep_request_line", false)
@@ -1528,7 +1528,7 @@ module Gori
             preserve_field_case: verbatim,
             auto_content_length: !verbatim && rec.auto_content_length?, verify: verify,
             reframe_grpc: reframe_grpc, tls_preset: send_tls_preset(h, rec.tls_preset),
-            timeout: timeout, overrides: overrides), false}
+            timeout: timeout, overrides: overrides, sse: sse), false}
         end
         if present?(h, "flow_id")
           id = int(h, "flow_id")
@@ -1597,7 +1597,7 @@ module Gori
             auto_content_length: false, reframe_grpc: reframe_grpc,
             http2: bool_arg(h, "http2", flow.http2), sni: send_sni(h, flow.sni), verify: verify,
             tls_preset: send_tls_preset(h),
-            timeout: timeout, overrides: overrides), flow.rewrote_request_line}
+            timeout: timeout, overrides: overrides, sse: sse), flow.rewrote_request_line}
         else
           # `RequestBuilder` already expanded, framed and range-checked this one, with
           # sharper messages than a re-parse could give — so the origin is handed over
@@ -1625,7 +1625,7 @@ module Gori
             sni: send_sni(h),
             tls_preset: send_tls_preset(h),
             http2: bool_arg(h, "http2", false), verify: verify,
-            timeout: timeout, overrides: overrides), false}
+            timeout: timeout, overrides: overrides, sse: sse), false}
         end
       end
 
@@ -1729,7 +1729,8 @@ module Gori
           "raw_base64/h2_fields (or each other) it is REFUSED as INVALID_ARGUMENT " \
           "(`details.conflicting_fields`) and nothing is sent; to edit one, read it with " \
           "get_flow/get_repeater_context and send it back through url/raw. Per-send modifiers " \
-          "(http2, sni, tls_preset, verbatim, timeout_ms, insecure, reframe_grpc) combine with a " \
+          "(http2, sni, tls_preset, verbatim, timeout_ms, sse_max_events, sse_max_ms, insecure, " \
+          "reframe_grpc) combine with a " \
           "source, keep_request_line with flow_id. The result includes `effective_request` (what " \
           "was actually sent). The url path adds Host + Content-Length when omitted. Match & " \
           "Replace rules apply only with apply_rules:true. On a failed send, branch on " \
@@ -1751,6 +1752,7 @@ module Gori
           s.field "h2_fields", h2fieldsprop
           s.field "http2", boolprop("use real HTTP/2; defaults to the flow's version when flow_id is set)")
           s.field "timeout_ms", intprop("per-operation connect + idle (read/write) timeout in milliseconds; a timeout surfaces as a network-error result with error_kind (1-600000)")
+          sse_props(s, Repeater::StreamBound::SEND)
           s.field "sni", strprop("TLS SNI override, independent of the Host header (vhost confusion / domain fronting). OVERRIDES a flow_id/repeater_id source's SNI; omit to keep it.")
           s.field "tls_preset", strprop("TLS fingerprint for THIS send: shape the ClientHello like #{Settings::TLS_PRESET_NAMES.join(" | ")} instead of gori's own (settings.json untouched) — to ask whether an origin answers differently by handshake. The destination's client certificate, protocol range and permissive flag still apply. OVERRIDES a repeater_id source's preset (\"\" drops it). An approximation, NOT a byte-exact JA3; `gori settings tls-fingerprint HOST --preset NAME` prints what goes out. https only")
           s.field "insecure", boolprop("skip upstream TLS verification (default false)")

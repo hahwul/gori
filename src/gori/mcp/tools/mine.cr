@@ -213,6 +213,7 @@ module Gori
         config.concurrency = clamp(optional_int_arg(h, "concurrency"), 10, MINE_MAX_CONCURRENCY)
         config.rps = optional_float_arg(h, "rate")
         config.timeout = fuzz_timeout(h)
+        config.sse = sse_bound(h, Repeater::StreamBound::SWEEP)
         config.retries = (optional_int_arg(h, "retries") || 1_i64).clamp(0_i64, 1000_i64).to_i # clamp before .to_i (Int32) so a huge value can't OverflowError past the clean-error handler
         # A non-positive cap is ignored, as `fuzz_config` does: `CappedBackend` reads 0 / -1 as
         # "no cap", so `{cap, MAX}.min` turned `max_requests: 0` into an UNBOUNDED run.
@@ -376,6 +377,7 @@ module Gori
           s.field "concurrency", intprop("parallel requests (default 10, max #{MINE_MAX_CONCURRENCY})")
           s.field "rate", numprop("requests/sec cap, fractional allowed (0 = unlimited; 0.5 = one request every two seconds)")
           s.field "timeout_ms", intprop("per-request connect + idle timeout in milliseconds")
+          sse_props(s, Repeater::StreamBound::SWEEP)
           s.field "retries", intprop("retries per request on a network error")
           s.field "http2", boolprop("use real HTTP/2 (default false)")
           s.field "insecure", boolprop("skip upstream TLS verification (default false)")

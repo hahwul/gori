@@ -532,6 +532,8 @@ module Gori
       property retries : Int32      # retries on a network error
       property retry_pause : Time::Span
       property timeout : Time::Span? # per-request connect+read timeout override
+      # When to stop reading an event-stream response (#1631); nil reads it to the idle timeout.
+      property sse : Repeater::StreamBound?
       property? follow_redirects : Bool
       property max_redirects : Int32
       property? update_content_length : Bool # recompute CL after body substitution
@@ -669,7 +671,8 @@ module Gori
                      @ws_idle : Time::Span = Repeater::WsEngine::DEFAULT_IDLE,
                      @ws_keep_key : Bool = false,
                      @tls_preset : String? = nil,
-                     @request_macro : Gori::RequestMacro::Spec? = nil)
+                     @request_macro : Gori::RequestMacro::Spec? = nil,
+                     @sse : Repeater::StreamBound? = Repeater::StreamBound::SWEEP)
       end
     end
   end

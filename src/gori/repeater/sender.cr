@@ -141,7 +141,8 @@ module Gori
                      @preserve_field_case : Bool = false, @evidence : Bool = false,
                      @expand_bindings : Bool = true, @evidence_literals : Set(String)? = nil,
                      @reframe_grpc : Bool = false, tls_preset : String? = nil,
-                     @refresh_slot : String? = nil, @refresh_layer : Gori::Bindings? = nil)
+                     @refresh_slot : String? = nil, @refresh_layer : Gori::Bindings? = nil,
+                     @sse : StreamBound? = nil)
         @tls_preset = Settings.tls_preset_normalize(tls_preset)
       end
 
@@ -391,11 +392,11 @@ module Gori
             H2Engine.send(wire, scheme: @scheme, host: @host, port: @port,
               verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides,
               preserve_field_case: @preserve_field_case, reframe_grpc: @reframe_grpc,
-              tls_preset: @tls_preset, cancel: cancel)
+              tls_preset: @tls_preset, cancel: cancel, sse: @sse)
           else
             Engine.send(wire, scheme: @scheme, host: @host, port: @port,
               verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides,
-              tls_preset: @tls_preset, cancel: cancel)
+              tls_preset: @tls_preset, cancel: cancel, sse: @sse)
           end
         extract(wire, result)
         result
@@ -425,7 +426,7 @@ module Gori
         # about. An operator who wants an identity on these bytes writes the field.
         result = H2Engine.send_fields(fields, body, scheme: @scheme, host: @host, port: @port,
           verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides,
-          tls_preset: @tls_preset, cancel: cancel)
+          tls_preset: @tls_preset, cancel: cancel, sse: @sse)
         extract(scope, result)
         result
       end

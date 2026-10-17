@@ -281,3 +281,19 @@ describe "gori run repeater --diff --format json" do
       [{"same", "HTTP/1.1 200 OK"}, {"del", "a"}, {"add", "b"}])
   end
 end
+
+# #1631: a stream gori stopped at its bound is a success that says which bound, in the same
+# `bounded` field MCP `send_request` uses.
+describe "gori run repeater --format json — an event stream stopped at its bound" do
+  it "reports ok, the bound, and a reason that names it" do
+    head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n".to_slice
+    {"events" => "event bound", "time" => "time bound"}.each do |bound, words|
+      result = Gori::Repeater::Result.new(head, "data: 1\n\n".to_slice, nil, 1000_i64,
+        incomplete: true, bounded: bound)
+      j = JSON.parse(Gori::CLI::Run.repeater_json_for_spec(result))
+      j["ok"].as_bool.should be_true
+      j["bounded"].as_s.should eq(bound)
+      j["incomplete_reason"].as_s.should contain(words)
+    end
+  end
+end

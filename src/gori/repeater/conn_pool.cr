@@ -135,7 +135,7 @@ module Gori::Repeater
     def initialize(@scheme : String, @host : String, @port : Int32, @verify : Bool,
                    @sni : String?, @timeout : Time::Span?,
                    @overrides : Gori::HostOverrides?, @max_idle : Int32,
-                   @tls_preset : String? = nil)
+                   @tls_preset : String? = nil, @sse : StreamBound? = nil)
       @idle = [] of IO
       @consecutive_stale = 0
     end
@@ -182,7 +182,7 @@ module Gori::Repeater
           return dial_and_send(bytes, keepable, method)
         end
         started = Time.instant
-        result = Repeater::Engine.exchange(io, bytes, @host, @port, started, origin_scheme: @scheme)
+        result = Repeater::Engine.exchange(io, bytes, @host, @port, started, origin_scheme: @scheme, sse: @sse)
         if stale?(result)
           close(io)
           # Counted for BOTH outcomes below: an origin that always closes parked sockets is the
@@ -295,7 +295,7 @@ module Gori::Repeater
         return retried ? err.as_retried : err
       end
       @dialed += 1
-      result = Repeater::Engine.exchange(io, bytes, @host, @port, started, origin_scheme: @scheme)
+      result = Repeater::Engine.exchange(io, bytes, @host, @port, started, origin_scheme: @scheme, sse: @sse)
       recycle(io, result, keepable, method)
       retried ? result.as_retried : result
     end

@@ -454,6 +454,7 @@ gori run repeater <flow-id> --target https://staging.example.com --http2 --diff
 | `--slot=NAME` | 이 [세션 슬롯](#run-session)으로 전송: 그 헤더 오버레이와 `$BIND` 테이블 |
 | `-k`, `--insecure-upstream` | 업스트림 TLS 검증 생략 |
 | `--timeout=SEC` | 작업당 연결 + 유휴 타임아웃 |
+| `--sse-events=N` · `--sse-time=SEC` | `text/event-stream` 응답: 이벤트 N개나 스트리밍 SEC초 뒤에 읽기를 멈춥니다(기본 100 / 10, `0`은 그 한도를 끕니다). 그때까지의 이벤트가 본문이고, `bounded`가 어느 한도에서 멈췄는지 알려 줍니다. [이벤트 스트림](/guide/repeater-and-fuzzer/#event-streams) 참고 |
 | `-H`, `--header=HEADER` | 요청 헤더 덮어쓰기/추가 (반복 가능). 같은 이름을 반복하면 중복 헤더 줄을 보냅니다. 명시한 `Content-Length`는 그대로 존중되어 CL 불일치 테스트에 쓸 수 있습니다 |
 | `--rm-header=NAME` | 해당 이름의 헤더를 모두 삭제 (반복 가능). `Content-Length`를 지우면 자동 재계산이, `Host`를 지우면 `--target` 동기화가 꺼집니다 |
 | `-X`, `--method=METHOD` | 캡처된 메서드를 교체. 요청 라인의 나머지는 바이트 그대로 유지됩니다 |
@@ -551,7 +552,7 @@ gori run repeater send 5 --message '{"op":"subscribe"}' --idle-ms 5000
 | `-H`, `--header=HEADER` · `-b`, `--cookie=NAME=VALUE` | 이번 전송 한 번만 헤더를 덮어쓰거나 추가하고, 또는 `Cookie` 헤더를 교체(`repeater <flow-id>`와 같음). 세션은 자신의 헤더를 유지합니다. `--verbatim`이 아니면 요청의 나머지와 함께 확장됩니다 |
 | `--apply-rules` | `repeater <flow-id>`와 동일 |
 | `--slot=NAME`, `--tls-preset=NAME` | `repeater <flow-id>`와 동일 |
-| `--ws-keep-key`, `-k`, `--timeout`, `--allow-unscoped`, `--headers-only`, `--max-body`, `--format` | 위와 동일 (`--headers-only` / `--max-body`는 HTTP 전용입니다: WebSocket 교환은 트랜스크립트를 출력합니다) |
+| `--ws-keep-key`, `-k`, `--timeout`, `--sse-events`, `--sse-time`, `--allow-unscoped`, `--headers-only`, `--max-body`, `--format` | 위와 동일 (`--headers-only` / `--max-body`는 HTTP 전용입니다: WebSocket 교환은 트랜스크립트를 출력합니다) |
 
 `--path`는 경로만 다른 엔드포인트들에 걸쳐 세션 하나의 요청을 스윕합니다. 경로마다 세션을 만들 필요가 없습니다.
 
@@ -594,7 +595,7 @@ gori run repeater timing 3 4 --count 100
 gori run repeater h2 --target https://api.example.com --fields fields.json
 ```
 
-`--fields=FILE`은 `[[name, value], …]` 배열이거나 `{"fields": [[name, value], …], "body": "…"}` 형태의 JSON 파일입니다(바이너리는 `body_base64`). 목록의 어떤 것도 정규화하지 않습니다. 앞의 콜론, 앞 공백이 붙은 값, 대문자 이름이 곧 페이로드입니다. `--target`은 접속할 오리진을 정하므로, `:authority`와 `:scheme` 필드는 의도적으로 그와 어긋나게 둘 수 있습니다. `-k`/`--insecure-upstream`, `--timeout=SEC`, `--allow-unscoped`, `--tls-preset=NAME`, `--headers-only`, `--max-body`, `--format text|json`은 `repeater send`와 같습니다.
+`--fields=FILE`은 `[[name, value], …]` 배열이거나 `{"fields": [[name, value], …], "body": "…"}` 형태의 JSON 파일입니다(바이너리는 `body_base64`). 목록의 어떤 것도 정규화하지 않습니다. 앞의 콜론, 앞 공백이 붙은 값, 대문자 이름이 곧 페이로드입니다. `--target`은 접속할 오리진을 정하므로, `:authority`와 `:scheme` 필드는 의도적으로 그와 어긋나게 둘 수 있습니다. `-k`/`--insecure-upstream`, `--timeout=SEC`, `--sse-events`/`--sse-time`, `--allow-unscoped`, `--tls-preset=NAME`, `--headers-only`, `--max-body`, `--format text|json`은 `repeater send`와 같습니다.
 
 ### run send {#run-send}
 
@@ -619,7 +620,7 @@ gori run send --url https://api.example.com --request-file req.http --headers-on
 | `-f`, `--request-file=FILE` · `-r`, `--request-raw=RAW` · `--request-stdin` | 요청을 조립하는 대신 이 원시 HTTP 요청을 전송. `-X`/`-H`/`-d`/`-b`/`--body-file`과 함께 쓰면 거부됩니다. 그렇지 않으면 그 값들이 조용히 버려지기 때문입니다. 헤드의 단독 LF는 `--verbatim`이 아닌 한 CRLF로 승격됩니다 |
 | `--verbatim` | `-H`, `-d`, `-b` 또는 원시 요청에서 토큰을 확장하지 않고, 단독 LF도 승격하지 않으며, `-X`를 대문자로 바꾸지 않고, HTTP/2에서 필드 이름을 소문자화하지 않습니다. URL은 접속할 곳을 정하는 값이므로 여전히 확장됩니다 |
 | `--apply-rules` | MCP `send_request{apply_rules}`처럼 전송 전에 프로젝트의 활성 Match & Replace 규칙(요청 쪽)을 요청에 적용 |
-| `--http2`, `--sni=HOST`, `--tls-preset=NAME`, `-k`, `--timeout=SEC`, `--slot=NAME`, `--allow-unscoped` | `repeater send`와 같음 |
+| `--http2`, `--sni=HOST`, `--tls-preset=NAME`, `-k`, `--timeout=SEC`, `--sse-events`, `--sse-time`, `--slot=NAME`, `--allow-unscoped` | `repeater send`와 같음 |
 | `--record-history` | 요청과 응답을 History에 플로우로도 기록(`source: repeater`, `source_surface: cli`)하고 id를 출력. `repeater send`와 마찬가지로 기본값은 꺼짐 |
 | `--save-as-repeater` | 요청과 응답을 새 Repeater 세션으로 저장하고 id 출력 (`--format json`에서는 `saved_repeater_id`) |
 | `--headers-only`, `--max-body=BYTES`, `--format=FMT` | `repeater send`와 같음 |
@@ -628,7 +629,7 @@ gori run send --url https://api.example.com --request-file req.http --headers-on
 
 WebSocket 핸드셰이크인 요청은 평범한 요청으로 나가고 그 `101`이 응답이 되며, 명령은 이를 STDERR에 알립니다. 프레임을 주고받는 교환에는 세션이 필요합니다: `repeater create` 다음 `repeater send`를 쓰세요.
 
-`send`, `repeater <flow-id>`, `repeater send`의 `--format json`은 원시 `head` 옆에 MCP `send_request`의 오류 계약을 싣습니다. 실패한 전송에는 `error_kind`(`connect`, `timeout`, `protocol`, `no_response`, `truncated_request`, `budget`, `busy`, `other`), `error_code`, `retryable`, `delivered`가 붙으므로, 스크립트는 `error` 문장을 매칭하지 않고도 거부된 연결과 타임아웃을 구분할 수 있습니다. 응답에는 `reason`, `http_version`, 파싱된 `headers`(`[{"name","value"}]`, 와이어 순서, UTF-8이 아닌 값에는 `value_lossy`/`value_base64`)가 붙습니다. `match_replace_applied: true`는 `--apply-rules`가 요청을 바꿨다는 뜻입니다.
+`send`, `repeater <flow-id>`, `repeater send`의 `--format json`은 원시 `head` 옆에 MCP `send_request`의 오류 계약을 싣습니다. 실패한 전송에는 `error_kind`(`connect`, `timeout`, `protocol`, `no_response`, `truncated_request`, `budget`, `busy`, `other`), `error_code`, `retryable`, `delivered`가 붙으므로, 스크립트는 `error` 문장을 매칭하지 않고도 거부된 연결과 타임아웃을 구분할 수 있습니다. 응답에는 `reason`, `http_version`, 파싱된 `headers`(`[{"name","value"}]`, 와이어 순서, UTF-8이 아닌 값에는 `value_lossy`/`value_base64`)가 붙습니다. `match_replace_applied: true`는 `--apply-rules`가 요청을 바꿨다는 뜻이고, `bounded`(`events` 또는 `time`)는 이벤트 스트림이 `--sse-events` / `--sse-time` 한도에서 멈췄다는 뜻입니다.
 
 ### run fuzz {#run-fuzz}
 
@@ -644,7 +645,7 @@ WebSocket 핸드셰이크인 요청은 평범한 요청으로 나가고 그 `101
 | Project data | `--payload-from='<QL> <projection>'`(반복 가능)은 프로젝트가 이미 캡처한 데이터에서 읽은 페이로드 세트입니다: `param-names`, `param-values`, `path-segments`, `js-endpoints`, `extracted`. 프로젝트를 읽기만 하고 아무것도 보내지 않으며, 직접 지정한 프로젝트(`--flow`, `--repeater`, `--project`, `--db`)가 필요합니다. `--payload-from-sensitive`는 자격 증명 값을 읽게 하고(기본은 제외, `extracted`는 필수), `--payload-from-locations=LIST`는 `headers`/`cookies`를 더하며, `--payload-from-max-flows=N`(2000, 최대 20000)과 `--payload-from-max-values=N`(10000, 최대 100000)은 한도를 올립니다. 모두 모든 `--payload-from`에 적용됩니다. 각 소스가 무엇을 읽었는지는 stderr에 나옵니다. [프로젝트에서 가져오는 페이로드](/ko/guide/repeater-and-fuzzer/#payloads-from-the-project) 참고 |
 | Encoding | **쿼리 문자열**이나 **form-urlencoded 본문** 값에 치환되는 페이로드는 기본으로 URL 인코딩됩니다. 경로 세그먼트·JSON/원시 본문·헤더·쿠키는 그대로 나갑니다. `--no-encode`는 쿼리/폼 위치도 원시로 보냅니다. 페이로드 자체가 이미 퍼센트 이스케이프인 경우에 쓰세요(`%00`이 `%2500`으로 나가므로, origin의 디코더 자체를 겨눈 `%00` / `%c0%af` / `%2e%2e%2f` 탐침은 그냥 텍스트로 도착합니다). `--encode`를 명시하면 기본 인코딩을 대체하며, 그 파이프라인이 모든 위치에 적용됩니다. `--prefix` / `--suffix` / `--case` / `--hash` / `--regex-replace`는 대체하지 않습니다: 페이로드가 무엇인지를 말할 뿐 와이어가 그것을 어떻게 적는지는 말하지 않으므로, 그 출력도 쿼리/폼 위치에서는 인코딩됩니다 |
 | Processors | `--prefix`, `--suffix`, `--encode` (`url`\|`urlall`\|`base64`\|`hex`), `--case` (`upper`\|`lower`), `--hash` (`md5`\|`sha1`\|`sha256`), `--regex-replace=/pat/rep/` |
-| Rate | `--concurrency` (20), `--rate=RPS`, `--throttle=MS`, `--timeout=SEC`, `--retries=N`, `--max-requests=N` (총 요청 상한. 재시도와 리다이렉트 홉도 포함), `--follow-redirects`, `--no-keep-alive` |
+| Rate | `--concurrency` (20), `--rate=RPS`, `--throttle=MS`, `--timeout=SEC`, `--retries=N`, `--max-requests=N` (총 요청 상한. 재시도와 리다이렉트 홉도 포함), `--follow-redirects`, `--no-keep-alive`, `--sse-events=N` / `--sse-time=SEC` (이벤트 스트림 응답은 기본적으로 이벤트 50개 / 5초에서 멈춥니다. `0`은 그 한도를 끕니다) |
 | Macro | `--macro=STEPS`는 후보 **앞에서** 저장된 Repeater 세션(`repeater list`의 id 또는 탭 이름, 쉼표 구분, 반복 가능)을 다시 실행해서, 회전하는 CSRF 토큰이나 nonce가 후보가 `$BIND.NAME`을 풀 때 항상 새 값이 되게 합니다. `--macro-every=request\|N\|off`(기본 `request`: 후보마다 새 값을 받고 그래서 스윕은 후보를 한 번에 하나씩 보냅니다. `N`은 값 하나를 N개의 후보가 공유하며 최대 N개까지 동시에 나갑니다). `--macro-expect=NAME`(반복 가능)은 그 바인딩을 다시 바인딩하지 못하면 매크로를 실패로 처리합니다. `--macro-on-failure=skip\|stop`(기본 `skip`: 후보를 보내지 않고, 연속 세 번 실패하면 실행을 끝냅니다). 단계는 활성 `--slot`으로 실행되고 History에 `src:macro`로 기록되며 `--max-requests`에 합산되고 `--rate`에 묶입니다. 이름을 지정한 프로젝트가 필요합니다. `--race=N`과 함께 쓰면 `--macro-every`는 N 이상이어야 합니다. [매크로로 회전하는 토큰 다루기](/ko/guide/repeater-and-fuzzer/#rotating-tokens-with-a-macro) 참고 |
 | Race | `--race=N`은 연결 N개를 열어 각 요청을 마지막 1바이트 직전까지 보낸 뒤 동시에 풀어 놓습니다(last-byte sync). 레이스 그룹은 **요청 하나**의 복사본 N개이므로 `--mode`와 모든 페이로드/위치 플래그는 무시됩니다. `--race-warmup=FILE`은 레이스 요청을 붙잡기 전에 각 연결에서 이 원시 요청을 먼저 보내고 읽습니다 |
 | Framing | `--verbatim`은 템플릿의 `Content-Length`를 쓰인 그대로 전송합니다. 페이로드 치환 후에도 재계산하지 않고, 길이 선언이 없는 본문에 추가하지도 않습니다 (CL / CL-TE 디싱크 페이로드용. `Content-Length`도 청크 `Transfer-Encoding`도 없는 본문은 오리진이 길이 0으로 읽으므로 경고합니다). `--reframe-grpc`는 페이로드가 단항 gRPC 메시지에 삽입된 뒤 5바이트 길이 접두사를 다시 계산합니다(기본값은 꺼짐: 오래된 접두사는 고치지 않고 보고만 합니다) |
@@ -693,6 +694,7 @@ gori run mine <flow-id> --locations query,headers --wordlist params.txt
 | `--name=NAME` | 워드리스트보다 먼저 시험할 이름(여러 번 지정하거나 쉼표로 구분). 예: `sitemap params`가 다른 엔드포인트에서 찾은 이름 |
 | `--payload-from='<QL> param-names'` | 프로젝트의 캡처 데이터에서 읽은 후보 이름. `--name` 다음, 내장 목록과 `--wordlist`보다 **앞서** 시험합니다(반복 가능, `--flow`/`--project`/`--db` 필요). `--payload-from-sensitive`, `--payload-from-locations`, `--payload-from-max-flows`, `--payload-from-max-values`는 `fuzz`와 똑같이 적용됩니다 |
 | `--concurrency` (10), `--rate`, `--throttle`, `--timeout`, `--retries` (1), `--max-requests=N` | 속도 제어 |
+| `--sse-events=N` · `--sse-time=SEC` | 이벤트 스트림 응답은 이벤트 N개나 SEC초 뒤에 멈춥니다(기본 50 / 5, `0`은 그 한도를 끕니다) |
 | `--no-keep-alive` | 연결 재사용 대신 프로브마다 새로 연결 |
 | `--hook=ARGV` | 조립된 각 요청을 보내기 전에 외부 명령(argv, 셸 없음)으로 변환합니다. 서명 / HMAC이 붙는 API용. [프로세스 훅](/ko/guide/scripting/#process-hooks) 참고 |
 | `--macro=STEPS`, `--macro-every`, `--macro-expect`, `--macro-on-failure` | `fuzz`와 같은 요청 시점 매크로를, 마이닝이 보내는 **모든 요청** 앞에서(기준선 포함) 실행합니다. 회전하는 CSRF 토큰이나 nonce에 대한 기본 해법이며, 값을 명령이 계산해야 할 때는 `--hook`이 같은 일을 합니다. 이름을 지정한 프로젝트가 필요합니다. [매크로로 회전하는 토큰 다루기](/ko/guide/repeater-and-fuzzer/#rotating-tokens-with-a-macro) 참고 |

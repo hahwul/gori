@@ -27,6 +27,7 @@ module Gori
         rate : Float64? = nil
         throttle : Int32? = nil
         timeout : Time::Span? = nil
+        sse = SseFlags.new
         retries = 1
         max_requests : Int64? = nil
         hook : String? = nil
@@ -61,6 +62,7 @@ module Gori
           p.on("--rate=RPS", "Cap requests/sec (0 = unlimited)") { |v| rate = parse_rate(v) }
           p.on("--throttle=MS", "Fixed delay between requests (ms)") { |v| throttle = parse_nonneg(v, "--throttle") }
           p.on("--timeout=SEC", "Per-request connect + idle timeout (seconds)") { |v| timeout = parse_count(v, "--timeout").seconds }
+          sse_options(p, sse, Repeater::StreamBound::SWEEP)
           p.on("--retries=N", "Retries on a network error") { |v| retries = parse_nonneg(v, "--retries") }
           p.on("--max-requests=N", "Hard cap on total requests sent") { |v| max_requests = parse_count(v, "--max-requests").to_i64 }
           p.on("--hook=ARGV", "Transform each assembled request through an external command (argv, no shell) before it is sent — for signed/HMAC'd APIs") { |v| hook = v }
@@ -105,6 +107,7 @@ module Gori
         config.rps = rate
         config.throttle_ms = throttle
         config.timeout = timeout
+        config.sse = sse.bound(Repeater::StreamBound::SWEEP)
         config.retries = retries
         config.max_requests = max_requests
         config.user_wordlist = wordlist

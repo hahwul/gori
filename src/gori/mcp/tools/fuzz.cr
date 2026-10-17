@@ -1454,7 +1454,7 @@ module Gori
           concurrency: clamp(optional_int_arg(h, "concurrency"), 20, FUZZ_MAX_CONCURRENCY),
           rps: (rate && rate > 0 ? rate : nil),
           retries: (optional_int_arg(h, "retries") || 0_i64).clamp(0_i64, 1000_i64).to_i,
-          timeout: fuzz_timeout(h),
+          timeout: fuzz_timeout(h), sse: sse_bound(h, Repeater::StreamBound::SWEEP),
           keep_bodies: fuzz_record_policy(h),
           max_requests: cap,
           # Absent ⇒ the Config default (on); only an explicit `false` opts out.
@@ -1559,6 +1559,7 @@ module Gori
           s.field "concurrency", intprop("parallel requests (default 20, max #{FUZZ_MAX_CONCURRENCY})")
           s.field "rate", numprop("requests/sec cap, fractional allowed (0 = unlimited; 0.5 = one request every two seconds)")
           s.field "timeout_ms", intprop("per-request connect + idle (read/write) timeout in milliseconds")
+          sse_props(s, Repeater::StreamBound::SWEEP)
           s.field "retries", intprop("retries per request on a network error")
           s.field "follow_redirects", boolprop("follow 3xx responses (default false). Without it, against an endpoint that 302s every matcher reads the redirect STUB and the run looks uniform. Mirrors CLI --follow.")
           s.field "max_redirects", intprop("hop limit when follow_redirects is on")

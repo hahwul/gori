@@ -138,6 +138,10 @@ module Gori::Repeater
     property? verify : Bool
     # Per-operation connect/read/write timeout, or nil for the engine defaults.
     property timeout : Time::Span?
+    # When to stop reading an event-stream response (#1631), or nil to read it to the capture
+    # ceiling or the idle timeout. A single send (`send_wire` / `send_fields`) honours it; a
+    # group or a race does not. The surface picks the default (`StreamBound.resolve`).
+    property sse : StreamBound?
     # The project's hostname overrides, or nil when the surface has no project to load them
     # from. Only a surface can reach a Store (or the live `Session#host_overrides`), so this
     # is passed in rather than loaded.
@@ -270,7 +274,8 @@ module Gori::Repeater
                    @overrides : Gori::HostOverrides? = nil,
                    @tls_preset : String? = nil,
                    @refresh_slot : String? = nil,
-                   @refresh_layer : Gori::Bindings? = nil)
+                   @refresh_layer : Gori::Bindings? = nil,
+                   @sse : StreamBound? = nil)
     end
   end
 
@@ -556,7 +561,8 @@ module Gori::Repeater
         expand_bindings: options.expand_bindings?,
         evidence_literals: options.evidence_literals,
         reframe_grpc: options.reframe_grpc?, tls_preset: tls_preset,
-        refresh_slot: options.refresh_slot, refresh_layer: options.refresh_layer)
+        refresh_slot: options.refresh_slot, refresh_layer: options.refresh_layer,
+        sse: options.sse)
       # Unlike an unset `$NAME`, a registered `$GEN` token is unambiguously a reference, so one
       # that cannot mint (`$GEN.TOTP` with no secret, #1591) is refused here rather than sent
       # as text the origin would only answer with a failed login.
@@ -617,7 +623,8 @@ module Gori::Repeater
       # URL this send cannot produce. See `Sender#send_fields`.
       sender = Sender.new(outbound, scheme: scheme, host: host, port: port,
         verify: options.verify?, http2: true, sni: sni, expand_bindings: false,
-        timeout: options.timeout, overrides: options.overrides, tls_preset: tls_preset)
+        timeout: options.timeout, overrides: options.overrides, tls_preset: tls_preset,
+        sse: options.sse)
       new(sender: sender, requests: [H2Engine.field_scope_line(fields)], scheme: scheme,
         host: host, port: port, http2: true, websocket: false, sni: sni,
         h2_fields: fields, h2_body: options.h2_body, tls_preset: tls_preset)
