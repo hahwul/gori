@@ -128,6 +128,10 @@ module Gori
       # What Match&Replace changed on this response (#1589): `head`/`body` above are what the
       # client got. Set by the proxy after the DTO is built, like `CapturedRequest#rewrite`.
       property rewrite : Rewrite? = nil
+      # The proxy appended this body to `flow_live_chunks` while it streamed (#1631), so the
+      # write that finalizes the flow also deletes those chunks. False on every other response,
+      # which then never runs the extra statement.
+      property? live : Bool = false
 
       def initialize(@flow_id, @status, @head, @body = nil, @reason = nil,
                      @content_type = nil, @ttfb_us = nil, @duration_us = nil,

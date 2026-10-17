@@ -5,7 +5,9 @@ require "./ws_capture"
 require "../codec/body"
 require "../upstream"
 require "../sink"
+require "../live_capture"
 require "../../flow_mapper"
+require "../../sse"
 require "../../store/models"
 
 module Gori::Proxy::H2
@@ -51,7 +53,8 @@ module Gori::Proxy::H2
       getter header_buf = IO::Memory.new
       # DATA frames accumulate here, capped (like h1) so a huge streamed body
       # can't grow per-connection memory without bound. Raw frames stay the truth.
-      getter body = Codec::CaptureBuffer.new(Settings.capture_max)
+      # A `LiveCapture` once the response head says event-stream (see `arm_live_capture`).
+      property body : Codec::CaptureBuffer = Codec::CaptureBuffer.new(Settings.capture_max)
       property headers : Array({String, String})? = nil
       # Cumulative decoded-header bytesize across all merged blocks on this side, so a
       # flood of repeated non-status HEADERS blocks (fake trailers, never END_STREAM)
@@ -428,6 +431,9 @@ module Gori::Proxy::H2
         return
       when Frame::Type::Headers
         append_header_fragment(side, header_block(frame))
+        # Before `head_complete`, as it already is when a CONTINUATION completes the block: a
+        # head that ends the stream is not one to arm a live capture on (`arm_live_capture`).
+        side.ended = true if frame.end_stream?
         if frame.end_headers?
           side.awaiting_continuation = false
           finish_header_block(side, decoder, pre)
@@ -435,7 +441,6 @@ module Gori::Proxy::H2
         else
           side.awaiting_continuation = true # a CONTINUATION may now legally follow
         end
-        side.ended = true if frame.end_stream?
       when Frame::Type::Continuation
         # A CONTINUATION with no open (un-terminated) header block is a protocol violation
         # (RFC 9113 §6.10) — a hostile peer uses one to complete a fabricated flow on a
@@ -822,6 +827,7 @@ module Gori::Proxy::H2
         ttfb_us: ttfb_us, duration_us: duration_us, advisory: advisory_of(stream),
         interims: stream.resp.interims)
       captured.rewrite = stream.resp_rewrite
+      captured.live = cap.is_a?(LiveCapture)
       @sink.on_response(captured)
     end
 
@@ -907,7 +913,31 @@ module Gori::Proxy::H2
     # and only for one: the request head is where the socket is RECOGNISED, and the response
     # head is where the origin's answer decides whether there is a socket at all.
     private def head_complete(stream_id : UInt32, stream : Stream, request : Bool) : Nil
-      request ? open_ws_capture(stream_id, stream) : answer_ws_capture(stream)
+      return open_ws_capture(stream_id, stream) if request
+      answer_ws_capture(stream)
+      arm_live_capture(stream)
+    end
+
+    # An event-stream response's DATA goes to a `LiveCapture` (#1631), which appends it to the
+    # flow while the stream is open, as the h1 path does. Swapped in at the final head, before
+    # any DATA: not for an interim or a trailing block, an extended CONNECT, a head that ended
+    # the stream, or a request not projected yet (no row to append to).
+    private def arm_live_capture(stream : Stream) : Nil
+      side = stream.resp
+      return if side.ended? || side.body.total > 0 || side.body.is_a?(LiveCapture)
+      return if stream.websocket_candidate?
+      flow_id = stream.flow_id || return
+      headers = side.headers || return
+      status = final_response_status(stream) || return
+      content_type = header_value(headers, "content-type")
+      return unless Sse.sse?(content_type)
+      head = Store::CapturedResponse.new(
+        flow_id: flow_id, status: status, head: synth_response_head(headers, side.trailer_names),
+        content_type: content_type,
+        content_encoding: header_value(headers, "content-encoding"),
+        ttfb_us: stream.resp_first_at.try { |t| (t - stream.started_at).total_microseconds.to_i64 },
+        state: Store::FlowState::Pending)
+      side.body = LiveCapture.new(Settings.capture_max, 0_i64, @sink, head)
     end
 
     # Recognize an extended CONNECT whose `:protocol` is `websocket`, then arm its transcript

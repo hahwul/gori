@@ -725,6 +725,7 @@ module Gori
             # Flow reads, deletes and clears touch these: one missing raises "no such table" there.
             "intercept_originals" => %w[flow_id request],
             "flow_interims"       => %w[flow_id seq status head relayed omitted],
+            "flow_live_chunks"    => %w[flow_id off bytes],
             "flow_rule_hits"      => %w[flow_id side scope rule_id],
             "rewrite_originals"   => %w[flow_id side head body],
           })
@@ -880,6 +881,10 @@ module Gori
               disable_slot_auto_refresh(conn)
             end
             conn.exec("DELETE FROM host_overrides") if table_exists?(conn, "host_overrides")
+            # Live chunks (#1631) are the exporting process's in-flight stream state, not a
+            # stored body: the copy keeps only what the store finalized, and its Pending flows
+            # read as they would have a moment before the first event arrived.
+            conn.exec("DELETE FROM flow_live_chunks") if table_exists?(conn, "flow_live_chunks")
             # A global rule's id was numbered by the exporting install, like GLOBAL_OVERRIDE_KEYS:
             # here it would name whatever local global rule holds that id. No install issues id 0
             # and `RuleRef.parse?` refuses it, so the flow still reads as rewritten (ORIGINAL kept)

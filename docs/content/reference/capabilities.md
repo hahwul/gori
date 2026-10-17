@@ -24,7 +24,7 @@ does once the project has a scope, and the TUI does not ask).
 | **WebSocket over HTTP/1.1** | Handshake and message transcript | Messages when the filter explicitly contains `proto:ws` | Yes, message scripts | Yes, handshake and message positions |
 | **WebSocket over HTTP/2 (RFC 8441)** | Handshake, h2 frames, and message transcript | Handshake only; messages are not held | Yes, message scripts; the socket is reopened with the capture's own extended `CONNECT` | Yes, handshake and message positions |
 | **gRPC over HTTP/2** | Framed messages, trailers, and protobuf projections | Unary/small declared bodies can be edited; streaming bodies are head-only | Yes; unary calls can be schema-aware | Yes; schema-known unary fields or raw request positions |
-| **Server-Sent Events** | The response is captured and projected as events | The request can be held; the streaming response cannot | As an HTTP request | As an HTTP request |
+| **Server-Sent Events** | The response is captured and projected as events, live while the stream is open | The request can be held; the streaming response cannot | As an HTTP request | As an HTTP request |
 | **HTTP/3** | No | No | No | No |
 
 The [Proxy & History guide](/guide/proxy/) explains the buffering, WebSocket, gRPC, and HTTP/3

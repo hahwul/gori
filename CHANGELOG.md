@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- History shows an SSE stream's events while it is still open, over HTTP/1.1 and HTTP/2: the flow gets its status as soon as the head arrives, and the EVENTS pane, `gori run history show` and MCP `get_flow` read the events captured so far; a stream cut off by a crash or shutdown keeps them (#1631)
 - gRPC: Connect calls are recognised — a `connect+proto`/`+json` stream is deframed with its end-stream message shown as JSON, a unary `application/proto` body named by `connect-protocol-version` is decoded as protobuf, and a failed call's code and message appear as `connect` in `gori run history show` and MCP `get_flow`; Probe fingerprints it as `tech_grpc` (#1632)
 - gRPC: the Repeater edits a whole request message as proto3 JSON in `$EDITOR` and sets or adds one field from `path=value` (by field number with no `.proto` loaded), so a proto3 field left at its default such as `is_admin` can be injected; `gori run repeater send --grpc-field` and MCP `send_request{grpc_fields}` do the same headless (#1632)
 - gRPC: a compressed message (`grpc-encoding: gzip`, `deflate` or `identity`) is inflated and decoded in History, the Repeater, `gori run history show`, MCP `get_flow` and server reflection, and the Repeater field editor and gRPC field fuzzing re-compress an edited message with the same codec; an unknown codec, a message that inflates past 4 MiB or a body past 16 MiB inflated stays hex with the reason (#1629)

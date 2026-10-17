@@ -426,7 +426,7 @@ module Gori
       loop do
         event = session.flow_events.receive
         next unless row = session.store.flow_row(event.id)
-        next unless completion.ready?(event, row)
+        next unless completion.count?(event, row)
         # An upgraded flow emits an :updated event for its handshake and another :updated event
         # for each captured message. Count it only on the one completion event after the tunnel
         # closes; ordinary flows still count on their response update.

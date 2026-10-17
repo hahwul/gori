@@ -5012,3 +5012,28 @@ same `set` through `Repeater::GrpcFields.apply`, which reframes the edited messa
 `reframe_grpc` says: the edit is gori's, so a stale prefix would be a bug, not the operator's
 test. Both TUI verbs are palette-only: the lexicon's `:edit` letter is the strip's reserved
 rename on the Repeater tab.
+
+### 2026-10-18: an open event stream is appended in batches, beside the flow (#1631)
+
+An SSE response used to reach the store once, at its end, so History showed nothing while the
+stream was open. It now appends while it streams, and P6 decides the shape:
+
+- **Beside the flow, not in it.** The bytes go to `flow_live_chunks` (V50), one row per append.
+  Re-updating `flows.response_body` would rewrite the BLOB and its overflow chain every time and
+  re-dirty FTS. `get_flow` and `response_parts` join the chunks while the flow is Pending; QL and
+  FTS read the column, so they see the body at close. The final write deletes the chunks in its
+  own transaction, and `abandon_all_pending` folds them into the body.
+- **Fire-and-forget, gap-free.** `AppendLive` is queued like `InsertH2Frame` and dropped when the
+  writer is saturated. The tee's offset advances only on a queued append, so a drop makes the
+  next chunk bigger instead of leaving a hole. Only the first append, which carries the head,
+  publishes `:updated`; chunks move `data_version`, which an open History detail re-reads on.
+- **Batched inside `write`, no timer fiber.** An append goes out at 16 KiB pending, or on a write
+  that ends an event once 250 ms have passed since the last one. "Ends an event" is the
+  refinement the plain time rule needed: the codec tees a chunked body in pieces, and a timed
+  append on a chunk-size line held the event behind it until the next event. The known
+  ceiling is an event that lands inside the 250 ms window and is followed by silence: it waits
+  for the stream's next write, usually a heartbeat. A per-stream timer is the upgrade if that
+  ever matters.
+- **Off the SSE path nothing changes.** The extra decision is one `Sse.sse?` per streamed
+  response, and `sse?` now rejects any value without the bytes `event-stream` before it parses
+  (0 B/op, from 160).

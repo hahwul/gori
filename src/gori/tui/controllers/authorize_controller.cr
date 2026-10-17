@@ -300,6 +300,9 @@ module Gori::Tui
       return unless ev.kind == :updated # the response side exists only on the second event
       detail = store.get_flow(ev.id)
       return unless detail
+      # An event stream's head publishes `:updated` while it is still Pending (#1631); its
+      # final write publishes again. The catch-up sweep skips the same rows (`complete?`).
+      return if detail.row.state.pending?
       return unless proxy_origin?(detail.row)
       # NO filtering here. The decision needs the identity set and its outcome needs to be
       # COUNTED, and both live on the main fiber — a flow silently dropped on this side is
