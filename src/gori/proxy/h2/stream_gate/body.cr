@@ -110,15 +110,15 @@ class Gori::Proxy::H2::StreamGate
     @swallowed += charged - body.size if charged > body.size
     rebuilt = data_frames(slot.stream_id, body, end_stream_on_body?(slot))
     written = slot.frames.none? { |(f, _)| f.frame_type == Frame::Type::Data }
-    rebuilt.each { |f| write(f, nil) } if written
+    rebuilt.each { |f| deliver(f, nil) } if written
     slot.frames.each do |(f, pre)|
       if f.frame_type == Frame::Type::Data
         next if written
         written = true
-        rebuilt.each { |d| write(d, nil) }
+        rebuilt.each { |d| deliver(d, nil) }
         next
       end
-      write(f, pre)
+      deliver(f, pre)
     end
   end
 
