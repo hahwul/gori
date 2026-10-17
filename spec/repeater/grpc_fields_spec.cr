@@ -64,6 +64,10 @@ describe Gori::Repeater::GrpcFields do
     Gori::Repeater::GrpcFields.apply(get_user, [] of String).should eq(get_user)
     plain = "POST / HTTP/1.1\r\nHost: a\r\ncontent-type: application/json\r\n\r\n{}".to_slice
     Gori::Repeater::GrpcFields.apply(plain, ["1=x"]).as(String).should contain("needs a gRPC request")
+    # A Connect call (#1636) is not gRPC framing: its unary body has no envelope at all, and its
+    # streams carry an end-stream flag, so the field set refuses it rather than misread it.
+    connect = "POST /demo.Users/GetUser HTTP/1.1\r\nHost: a\r\ncontent-type: application/proto\r\n\r\n\x0a\x03bob".to_slice
+    Gori::Repeater::GrpcFields.apply(connect, ["1=x"]).as(String).should contain("needs a gRPC request")
     Gori::Protobuf::Schemas.clear
     Gori::Repeater::GrpcFields.apply(get_user, ["name=x"]).as(String).should contain("no .proto schema")
   end
