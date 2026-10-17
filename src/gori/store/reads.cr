@@ -308,7 +308,7 @@ module Gori
       end
       head, body, truncated, pending = parts || return nil
       # A still-open event stream pages what `get_flow` shows (see `with_live_body`).
-      body = live_body(id) if body.nil? && pending
+      body = Store.live_body(@db, id) if body.nil? && pending
       {head, body, truncated}
     end
 
@@ -530,20 +530,29 @@ module Gori
     # column, so they see the body only once the stream closes.
     private def with_live_body(detail : FlowDetail?, body_max : Int32?) : FlowDetail?
       return detail unless detail && detail.row.state.pending? && detail.response_body.nil?
-      body = live_body(detail.row.id) || return detail
-      body = body[0, body_max] if body_max && body.size > body_max
+      body = Store.live_body(@db, detail.row.id, body_max) || return detail
       FlowDetail.new(detail.row, detail.http_version, detail.request_head, detail.request_body,
         detail.response_head, body, detail.h2_conn_id, detail.h2_stream_id,
         detail.request_body_truncated?, detail.response_body_truncated?, detail.error, detail.sni)
     end
 
-    # The live chunks of `flow_id` joined in offset order, or nil when it has none.
-    private def live_body(flow_id : Int64) : Bytes?
+    # The live chunks of `flow_id` joined in offset order, at most `max` bytes, or nil when it
+    # has none. Read only up to `max` (the History preview asks every poll of a Pending flow),
+    # and stopped at the first gap: a rolled-back writer batch takes its appends with it while
+    # the proxy's offset has moved on, and joining across that hole would splice two runs of the
+    # stream together as if nothing came between them.
+    protected def self.live_body(db : DB::Database | DB::Connection, flow_id : Int64, max : Int32? = nil) : Bytes?
       io = IO::Memory.new
-      @db.query_each("SELECT bytes FROM flow_live_chunks WHERE flow_id = ? ORDER BY off", flow_id) do |rs|
+      limit = (max || Int32::MAX).to_i64
+      db.query_each("SELECT off, bytes FROM flow_live_chunks WHERE flow_id = ? AND off < ? ORDER BY off",
+        flow_id, limit) do |rs|
+        break unless rs.read(Int64) == io.size
         io.write(rs.read(Bytes))
+        break if io.size >= limit
       end
-      io.empty? ? nil : io.to_slice
+      return nil if io.empty?
+      body = io.to_slice
+      body.size > limit ? body[0, limit] : body
     end
 
     private def read_flow_detail(rs : DB::ResultSet) : FlowDetail?

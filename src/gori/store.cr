@@ -1517,9 +1517,8 @@ module Gori
                 when AppendLive
                   # No reply. Only the head publishes `:updated` (the row's status appeared); a
                   # chunk moves `data_version`, which is what an open History detail re-reads on.
-                  if head = op.head
+                  if (head = op.head) && write_live_head(c, head)
                     live_fid = op.flow_id
-                    update_one(c, head)
                     deferred << -> { publish(FlowEvent.new(live_fid, :updated)) }
                   end
                   append_live_one(c, op) unless op.bytes.empty?
@@ -1884,12 +1883,10 @@ module Gori
       live = conn.query_all("SELECT DISTINCT flow_id FROM flow_live_chunks", as: Int64)
       return if live.empty?
       (live & ids).each do |id|
-        body = IO::Memory.new
-        conn.query_each("SELECT bytes FROM flow_live_chunks WHERE flow_id = ? ORDER BY off", id) do |rs|
-          body.write(rs.read(Bytes))
+        if body = Store.live_body(conn, id) # the contiguous prefix: see `live_body`
+          conn.exec("UPDATE flows SET response_body = ?, response_size = COALESCE(LENGTH(response_head), 0) + ?, " \
+                    "fts_dirty = 1 WHERE id = ?", body, body.size.to_i64, id)
         end
-        conn.exec("UPDATE flows SET response_body = ?, response_size = COALESCE(LENGTH(response_head), 0) + ?, " \
-                  "fts_dirty = 1 WHERE id = ?", body.to_slice, body.size.to_i64, id)
         conn.exec("DELETE FROM flow_live_chunks WHERE flow_id = ?", id)
       end
     end
@@ -2437,6 +2434,19 @@ module Gori
     private def append_live_one(conn : DB::Connection, op : AppendLive) : Nil
       conn.exec(SQL_APPEND_LIVE, op.flow_id, op.off, op.bytes, op.flow_id)
     end
+
+    # The head a live stream shows while it is open: status, content type, latency, and its size
+    # so far. Not `update_one`, whose row write is a response LANDING: this one must leave alone
+    # a flow that is no longer Pending (abandoned at shutdown, or already finalized), and the
+    # body columns it does not have yet. False when no Pending row took it.
+    private def write_live_head(conn : DB::Connection, head : CapturedResponse) : Bool
+      conn.exec(SQL_LIVE_HEAD, head.head, head.status, head.reason, head.content_type, head.head.size.to_i64,
+        head.ttfb_us, head.flow_id).rows_affected > 0
+    end
+
+    private SQL_LIVE_HEAD =
+      "UPDATE flows SET response_head = ?, status = ?, reason = ?, content_type = ?, response_size = ?, " \
+      "ttfb_us = ?, fts_dirty = 1 WHERE id = ? AND state = #{FlowState::Pending.value}"
 
     private SQL_APPEND_LIVE =
       "INSERT OR REPLACE INTO flow_live_chunks (flow_id, off, bytes) SELECT ?, ?, ? " \

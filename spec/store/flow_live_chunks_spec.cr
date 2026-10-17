@@ -119,6 +119,43 @@ describe "Store live chunks (V50)" do
     end
   end
 
+  # A rolled-back batch takes its appends with it while the proxy's offset moved on.
+  it "joins only the contiguous prefix when a chunk went missing" do
+    with_store do |store|
+      id = store.insert_flow(lc_request)
+      store.append_live(id, 0_i64, "data: one\n\n".to_slice, lc_head(id))
+      store.append_live(id, 22_i64, "data: three\n\n".to_slice, nil) # 11..22 never landed
+      store.flush
+      lc_body(store, id).should eq("data: one\n\n")
+      store.abandon_pending!("orphaned by a previous session")
+      lc_body(store, id).should eq("data: one\n\n")
+      lc_chunks(store).should eq(0)
+    end
+  end
+
+  it "never moves an abandoned flow back to Pending with a late head" do
+    events = Channel(Gori::Store::FlowEvent).new(16)
+    path = File.tempname("gori-spec", ".db")
+    store = Gori::Store.open(path, events: events)
+    begin
+      id = store.insert_flow(lc_request)
+      store.abandon_pending!("proxy stopped before response")
+      2.times { events.receive } # :inserted, the abandon's :updated
+      store.append_live(id, 0_i64, "data: one\n\n".to_slice, lc_head(id))
+      store.flush
+      store.get_flow(id).not_nil!.row.state.should eq(Gori::Store::FlowState::Error)
+      lc_chunks(store).should eq(0)
+      select
+      when ev = events.receive
+        fail "unexpected #{ev}"
+      else
+      end
+    ensure
+      store.close
+      delete_db_files(path)
+    end
+  end
+
   it "never touches the chunk table for a response that was not live" do
     with_store do |store|
       id = store.insert_flow(lc_request)

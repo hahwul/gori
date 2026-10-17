@@ -254,4 +254,21 @@ describe "live SSE capture through the proxy (#1631)" do
       sink.live.should eq([true])
     end
   end
+
+  it "does not go live on an HTTP/2 event-stream head that ends the stream" do
+    with_store do |store|
+      sink = FlagSink.new(store)
+      assembler = Gori::Proxy::H2::Assembler.new(sink, "h2.test", 443)
+      request = Gori::Proxy::H2::HPACK::Encoder.new.encode([{":method", "GET"}, {":scheme", "https"},
+                                                            {":path", "/events"}, {":authority", "h2.test"}])
+      assembler.feed("out", Gori::Proxy::H2::Frame::Header.new(Gori::Proxy::H2::Frame::Type::Headers.value,
+        Gori::Proxy::H2::Frame::END_HEADERS | Gori::Proxy::H2::Frame::END_STREAM, 1_u32, request))
+      response = Gori::Proxy::H2::HPACK::Encoder.new.encode([{":status", "204"},
+                                                             {"content-type", "text/event-stream"}])
+      assembler.feed("in", Gori::Proxy::H2::Frame::Header.new(Gori::Proxy::H2::Frame::Type::Headers.value,
+        Gori::Proxy::H2::Frame::END_HEADERS | Gori::Proxy::H2::Frame::END_STREAM, 1_u32, response))
+      store.flush
+      sink.live.should eq([false])
+    end
+  end
 end

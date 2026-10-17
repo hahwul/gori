@@ -431,6 +431,9 @@ module Gori::Proxy::H2
         return
       when Frame::Type::Headers
         append_header_fragment(side, header_block(frame))
+        # Before `head_complete`, as it already is when a CONTINUATION completes the block: a
+        # head that ends the stream is not one to arm a live capture on (`arm_live_capture`).
+        side.ended = true if frame.end_stream?
         if frame.end_headers?
           side.awaiting_continuation = false
           finish_header_block(side, decoder, pre)
@@ -438,7 +441,6 @@ module Gori::Proxy::H2
         else
           side.awaiting_continuation = true # a CONTINUATION may now legally follow
         end
-        side.ended = true if frame.end_stream?
       when Frame::Type::Continuation
         # A CONTINUATION with no open (un-terminated) header block is a protocol violation
         # (RFC 9113 §6.10) — a hostile peer uses one to complete a fabricated flow on a
