@@ -958,10 +958,11 @@ module Gori
           emit_originals(j, originals, body_cap, body_omit, include_sensitive)
           emit_sse_events(j, detail)
           emit_ws_messages(j, ws_msgs, ws_total || ws_msgs.size, ws_socket_total)
-          emit_grpc_messages(j, "request_grpc_messages", detail.request_head, detail.request_body,
-            detail.row.target, request: true)
-          emit_grpc_messages(j, "response_grpc_messages", detail.response_head, detail.response_body,
-            detail.row.target, request: false)
+          emit_grpc_messages(j, "request_grpc_messages", detail.request_head, detail.request_head,
+            detail.request_body, detail.row.target, request: true)
+          emit_grpc_messages(j, "response_grpc_messages", detail.request_head, detail.response_head,
+            detail.response_body, detail.row.target, request: false)
+          emit_connect(j, detail)
           emit_decoded(j, detail, ws_msgs, include_sensitive)
         end
       end
@@ -1022,16 +1023,19 @@ module Gori
       # and each payload carries a `schema` object BESIDE its raw `protobuf` tree. An agent
       # reading this gets `user.role = "ROLE_ADMIN"` and the octets that back it, in one
       # object — and with no schema loaded, exactly what it got before.
-      def self.emit_grpc_messages(j : JSON::Builder, field_name : String,
+      #
+      # A Connect call (#1632) is deframed here too: a stream's envelope, or a unary protobuf
+      # body as its one message — `request_head` is what names a unary call.
+      def self.emit_grpc_messages(j : JSON::Builder, field_name : String, request_head : Bytes?,
                                   head : Bytes?, body : Bytes?,
                                   target : String? = nil, request : Bool = true) : Nil
         return if head.nil? || body.nil? || body.empty?
         ct = MediaType.of(head)
-        return unless Proxy::H2::Grpc.grpc?(ct)
-        # `scan_wire`: grpc-web-text carries the frames base64-encoded, and any body may sit
-        # under a `Content-Encoding` — scanning the raw bytes finds a length prefix built out
-        # of base64 or gzip octets, and an agent would be told a gRPC call had no messages.
-        msgs, residual = Proxy::H2::Grpc.scan_wire(head, body)
+        # `scan_wire` underneath: grpc-web-text carries the frames base64-encoded, and any body
+        # may sit under a `Content-Encoding` — scanning the raw bytes finds a length prefix
+        # built out of base64 or gzip octets, and an agent would be told a gRPC call had no
+        # messages.
+        msgs, residual = Proxy::H2::Grpc.scan_call(request_head, head, body) || return
         return if msgs.empty? && residual == 0
         binding = Protobuf::Schemas.resolve(target, request: request)
         j.field field_name do
@@ -1073,6 +1077,7 @@ module Gori
                     j.field "compressed", m.compressed
                     j.field "trailer", m.trailer
                     j.field "size", m.data.size
+                    j.field "end_stream", true if m.end_stream
                     # The codec a compressed message was inflated with, and what it inflated to
                     # (#1629) — the same projection the TUI and `gori run history show` make.
                     if m.compressed && !m.trailer
@@ -1092,6 +1097,9 @@ module Gori
                       # unknown codec, a corrupt stream, a bomb) is not a protobuf message.
                       j.field "note", "compressed payload — not decoded as protobuf: #{plain}"
                       emit_grpc_bytes(j, m.data)
+                    elsif m.json
+                      # A Connect `+json` payload or end-stream message: JSON text, not protobuf.
+                      j.field "json", text(String.new(plain))
                     else
                       decoded = Protobuf.decode(plain)
                       j.field "protobuf" { decoded.to_json(j, budget) }
@@ -1102,6 +1110,30 @@ module Gori
                   end
                 end
               end
+            end
+          end
+        end
+      end
+
+      # A Connect call (#1632) and its outcome: `code`/`message` when it failed, from a unary
+      # error body or a stream's end-stream message. Like grpc-web's in-body status, it is the
+      # one fact that separates a denied call from a granted one — and for unary Connect,
+      # only the request's `connect-protocol-version` says the flow is an RPC at all.
+      def self.emit_connect(j : JSON::Builder, detail : Store::FlowDetail) : Nil
+        return unless Proxy::H2::Connect.call?(detail.request_head)
+        j.field "connect" do
+          j.object do
+            streaming = Proxy::H2::Connect.streaming?(MediaType.of(detail.request_head))
+            j.field "streaming", streaming
+            # A stream cut before its end-stream message has no outcome — and must not read as
+            # one that ended cleanly. false too for one answered with no stream at all.
+            if streaming
+              j.field "end_stream", !!Proxy::H2::Connect.end_stream?(detail.response_head, detail.response_body)
+            end
+            if o = Proxy::H2::Connect.outcome(detail.request_head, detail.row.status,
+                 detail.response_head, detail.response_body)
+              j.field "code", text(o.code)
+              j.field "message", text(o.message) if o.message
             end
           end
         end

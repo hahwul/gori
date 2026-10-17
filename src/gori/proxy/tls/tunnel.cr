@@ -411,9 +411,8 @@ module Gori::Proxy::Tls
     end
 
     # Whether this host may take the fast h2 relay at all. FALSE — forcing HTTP/1.1, the
-    # ClientConn path — when HTTP/2 is switched off, or a Match&Replace BODY or SHORT-CIRCUIT
-    # rule is live FOR THIS HOST, or a session-binding extract rule reads the response BODY for
-    # it. Anything else is a candidate, subject to the origin actually speaking h2 (see
+    # ClientConn path — when HTTP/2 is switched off, or a Match&Replace SHORT-CIRCUIT rule is
+    # live FOR THIS HOST, or a session-binding extract rule reads the response BODY for it. Anything else is a candidate, subject to the origin actually speaking h2 (see
     # reflect_origin_h2). Placing the check here also means a downgrade skips the origin ALPN
     # probe entirely: reflect_origin_h2 consults this before dialing.
     #
@@ -431,16 +430,16 @@ module Gori::Proxy::Tls
     # BODY-only rule set too (`rules.cr:48-50` counts any enabled rule regardless of part), and
     # a body rule works today PRECISELY because this gate downgrades — the h1 path is where the
     # buffered-body rewrite lives. Dropping it outright would have regressed body rules from
-    # working to silently not working. Body rewriting on h2 is #492 step 5; until then a body
-    # rule still earns the downgrade, and only that.
+    # working to silently not working. #1628 then took the body term out: the relay rewrites a
+    # body itself now (`H2::StreamGate`'s `body_rule.cr`), and `Relay#gates` asks this same
+    # host-scoped question to decide whether a connection runs that path at all.
     #
     # The INTERCEPT gate came out in step 3, which made the hold reachable per stream
     # (`H2::StreamGate`). `intercepts_host?` is not consulted by
     # `intercepts_request?`/`intercepts_response?` (`interceptor.cr` — they take their own
     # snapshot), so removing it weakened no gate. What it DID change is that a held h2 message
     # was the head only, because DATA streamed past untouched. PR #6 narrowed that to the
-    # bodies the gate cannot buffer (`H2::StreamGate::MAX_HOLD_BODY`); a Match&Replace BODY
-    # rule still earns the downgrade, which is what this gate is left deciding.
+    # bodies the gate cannot buffer (`H2::StreamGate::MAX_HOLD_BODY`).
     #
     # The SANDBOX gate came out in step 4, and it is the one removal that had to answer a
     # different question, because the sandbox is not a seam: an unreachable seam silently does
@@ -482,14 +481,8 @@ module Gori::Proxy::Tls
                                "\"auto\" to keep h2)")
         return Proxy::H2Offer::DisabledBySetting
       end
-      if @rewriter.try(&.rewrites_body_for_host?(host))
-        notice_downgrade(host, "a Match&Replace BODY rule is live and body rewriting on HTTP/2 " \
-                               "is not implemented yet (disable the body rule to keep h2)")
-        return Proxy::H2Offer::BodyRule
-      end
-      # A SHORT-CIRCUIT rule (#511) earns the downgrade for the same reason a body rule does:
-      # `HeadRewriter#short_circuit` is consulted in `ClientConn#handle_request`, and the h2
-      # relay never asks. Unlike the sandbox this IS a seam, so an unreachable one lets traffic
+      # A SHORT-CIRCUIT rule (#511) earns the downgrade: `HeadRewriter#short_circuit` is
+      # consulted in `ClientConn#handle_request`, and the h2 relay never asks. Unlike the sandbox this IS a seam, so an unreachable one lets traffic
       # through rather than blocking it — but that is precisely the failure, because the rule's
       # whole purpose is that the request must NOT reach the origin. Left ungated, an operator
       # who stubbed an endpoint would watch an h2 host send the request anyway, with nothing
@@ -499,9 +492,9 @@ module Gori::Proxy::Tls
                                "cannot answer a request locally (disable the stub rule to keep h2)")
         return Proxy::H2Offer::ShortCircuitRule
       end
-      # A BODY-scoped session-binding extract rule (#501 slice 2) earns the downgrade for
-      # exactly the reason a body rewrite rule does: it needs the response ENTITY, and DATA
-      # frames stream past this relay untouched. Head-scoped extraction (cookie / header) does
+      # A BODY-scoped session-binding extract rule (#501 slice 2) earns the downgrade because it
+      # needs the response ENTITY, and the relay buffers a body only for a Match&Replace body
+      # rule (#1628), which an extract rule is not. Head-scoped extraction (cookie / header) does
       # NOT appear here — it reads the response head, which `H2::Extract` reaches on the relay,
       # so a `$SESSION` bound off a `Set-Cookie` costs an h2 host nothing.
       #

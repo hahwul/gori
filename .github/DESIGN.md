@@ -4953,3 +4953,46 @@ the rate, so writes stay at a few per second per process (P6); a read-only Store
 reader connection with `query_only` lifted for that transaction. The refusals are `Outbound`
 constants in `permanent_refusal?`, not `PlanError::Reason` members: a spent budget is a per-send
 result like a sandbox block. Proxied client traffic never reaches `admit`.
+
+### 2026-10-17: a body rule runs on the h2 relay, and gori becomes the sender of that stream (#1628)
+
+Refines: [P6](#p6), [P7](#p7). Reverses "body rewriting on HTTP/2 is not planned".
+
+The old position was that a body rewrite on h2 either fails (a grown body overruns the
+receiver's window) or deadlocks (a shrunk one strands the sender's credit). Both are true of a
+relay that keeps the windows end to end, and neither is true once gori stops relaying that
+stream's DATA and sends it itself. So for a stream a body rule could apply to (decided per stream
+on its own host, the h1 tests: not compressed, not a message stream such as SSE, gRPC, Connect or
+ndjson, a declared length under `MAX_REWRITE_BODY`), `H2::StreamGate` buffers the body, runs the
+same rule engine h1 does, and re-emits:
+
+- **Stream windows are terminated at gori.** Each arriving byte is credited back to the sender;
+  the receiver's stream WINDOW_UPDATEs stop at gori, which spends that window itself.
+- **The connection window is shared, so it is kept as a debt.** Every byte gori writes on an owned
+  stream is credit the receiver will return to gori, so the receiver's connection
+  WINDOW_UPDATEs pay that first and only the rest reaches the sender. Until it is paid the sender
+  believes it has more window than the receiver gave, so passthrough DATA that would overrun the
+  receiver waits in the gate. gori never writes past the receiver's window, so the debt is
+  bounded by that window, and the waiting queue by the window the sender believes in.
+- **Credit the receiver gave before gori owned the stream** (a client widening its window right
+  after the request) was forwarded at the time, so it seeds the owned stream's window.
+- **A declared `content-length` holds the head** until the body is in, then goes out true. On a
+  request that holds later stream opens behind it (§5.1.1), the same price an intercept hold
+  pays. `HOLD_WAIT_DEADLINE` bounds a STALL there — no DATA for that long — and past it the head
+  goes out as it arrived and the body follows unmodified. A held response head blocks no other
+  stream, so it has no deadline: a slow body is still rewritten, as it was on the h1 path. Stripping the field instead was rejected: it would change every buffered
+  request's head, matched or not, which is the protocol-under-test drift the downgrade was
+  criticised for.
+- **A request is buffered only when it declares its length** (and does not ask for
+  `100-continue`). Nothing on the wire tells a finite upload from a full-duplex stream whose
+  client waits for the reply before ending the request, and buffering that one deadlocks it. A
+  response has no such peer, so a response with no declared length is buffered to its end.
+- **Memory is bounded per stream and per direction.** Each stream is credited as it arrives, so
+  the per-stream ceiling alone would let many concurrent streams each hold it; the stream whose
+  DATA would take a direction's rule buffers past the ceiling spills unmodified instead.
+
+Only connections whose CONNECT host a body rule matches when the relay starts get the path
+(`Relay#gates`, the question the downgrade used to ask), so every other connection keeps the
+zero-buffer frame path with no added window bookkeeping. Short-circuit rules and body-scoped
+extract rules keep the HTTP/1.1 downgrade: neither falls out of this, since one has to answer
+without dialling and the other reads an entity the relay buffers only for a rewrite.

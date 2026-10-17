@@ -423,26 +423,24 @@ describe Gori::Proxy::Tls::Tunnel do
     end
   end
 
-  it "still downgrades an h2 client when a BODY rule is live (body rewrite is #492 step 5)" do
-    # The gate narrowed from `active?` to a body-rule test rather than being removed. A body
-    # rule works TODAY precisely because it downgrades — the buffered-body rewrite lives on the
-    # ClientConn path — and `Rules#active?` is true for a body-only rule set, so dropping the
-    # gate outright would have regressed body rules from working to silently not working.
+  it "keeps h2 for an h2 client when a BODY rule is live (#1628)" do
+    # This used to downgrade: the buffered-body rewrite lived only on the ClientConn path, so a
+    # body rule cost every matching host its protocol and locked out h2-only clients (gRPC). The
+    # relay rewrites a body itself now (`H2::StreamGate`'s `body_rule.cr`); the rewrite is
+    # covered end to end in `spec/proxy/h2/stream_gate/body_rule_spec.cr`.
     dir = File.tempname("gori-ca-mr")
     dbpath = File.tempname("gori-mr", ".db")
     seen = Channel(String).new(1)
-    done = Channel(Nil).new(1)
     store : Gori::Store? = nil
     begin
       origin_port = start_tls_origin("OK", seen)
       ca = CertAuthority.load_or_create(dir)
       store = Gori::Store.open(dbpath)
       rules = Gori::Rules.load(store.not_nil!)
-      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "/secret", "/rewritten")
       rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Body, "aaa", "bbb")
-      rules.rewrites_request_body?.should be_true
+      rules.rewrites_body_for_host?("localhost").should be_true
 
-      sink = RecordingSink.new(done)
+      sink = RecordingSink.new(Channel(Nil).new(1))
       proxy = Server.new("127.0.0.1", 0, sink, tls: Tunnel.new(ca, verify_upstream: false, rewriter: rules))
       proxy.start
 
@@ -458,15 +456,9 @@ describe Gori::Proxy::Tls::Tunnel do
       LibCrypto.x509_store_add_cert(st, ca_cert.handle)
 
       tls = OpenSSL::SSL::Socket::Client.new(raw, context: client_ctx, sync_close: true, hostname: "localhost")
-      tls.alpn_protocol.should_not eq("h2") # a live BODY rule still refuses h2 → the h1 path
-      tls << "GET /secret HTTP/1.1\r\nHost: localhost\r\n\r\n"
-      tls.flush
-      tls.gets_to_end
+      tls.alpn_protocol.should eq("h2") # a live BODY rule no longer refuses h2
       tls.close
-
-      done.receive
       proxy.stop
-      seen.receive.should eq("GET /rewritten HTTP/1.1") # the rule applied (was silently skipped on h2)
     ensure
       store.try(&.close)
       FileUtils.rm_rf(dir) if Dir.exists?(dir)

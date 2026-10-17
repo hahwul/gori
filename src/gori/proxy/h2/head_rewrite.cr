@@ -24,8 +24,8 @@ module Gori::Proxy::H2
   #   2. An h2 receiver cannot act on a partial header block; END_HEADERS is when it could
   #      have started anyway. Holding fragments until then delays the peer by zero.
   #
-  # DATA keeps the forward-first path untouched — the body rewrite (#492 step 5) is where
-  # that trade actually gets made.
+  # DATA keeps the forward-first path untouched. A Match&Replace body rule is where that trade
+  # actually gets made, per stream (`StreamGate`'s `body_rule.cr`, #1628).
   #
   # ## The one-way latch, and why "re-encode only the heads a rule changed" is unsound
   #
@@ -109,9 +109,12 @@ module Gori::Proxy::H2
     # The "in" direction therefore never touches it, and extraction itself happens in
     # `H2::Extract` on the response side — this seam only has to be able to ASK whether a
     # body-scoped extract rule would have wanted a stream the connection gate could not see.
+    #
+    # `body_rules` says this connection runs the body-rule path (`Relay#gates`), so a body rule
+    # is no longer a seam it cannot reach.
     def initialize(@direction : String, @rewriter : Proxy::HeadRewriter?,
                    @assembler : Assembler, @host : String,
-                   @extractor : Proxy::ResponseExtract? = nil)
+                   @extractor : Proxy::ResponseExtract? = nil, @body_rules : Bool = false)
       @encoder = HPACK::Encoder.new
       @engaged = false
       @warned = false
@@ -200,6 +203,19 @@ module Gori::Proxy::H2
       @engaged = true
       Block.new(reframe(block.first, block.prefix, @encoder.encode(fields)),
         Assembler::HeadBlock.new(pairs(fields)), fields, head, block.first, block.prefix, block.request)
+    end
+
+    # Re-encode a held block with `fields` in place of its own, and latch — `StreamGate` making a
+    # held head's `content-length` describe the body a rule rewrote (#1628).
+    def reencode(block : Block, fields : Array(HPACK::Field)) : Block
+      latch
+      Block.new(reframe(block.first, block.prefix, @encoder.encode(fields)),
+        Assembler::HeadBlock.new(pairs(fields)), fields, block.head, block.first, block.prefix, block.request)
+    end
+
+    # The bare host a rule's glob is matched against for this block's stream.
+    def host_of(block : Block) : String
+      block.request ? request_host(block.fields) : response_host(block.stream_id)
     end
 
     # Feed one frame; yields the frames to forward, in arrival order, each with the
@@ -763,10 +779,11 @@ module Gori::Proxy::H2
       @warned_live_rule = true
       ::Log.warn do
         "h2 #{@direction}: #{kinds.join(", ")} now matches #{host.inspect}, but this HTTP/2 " \
-        "connection was already open when it went live. The HTTP/1.1 downgrade that lets such a " \
-        "rule run is decided once per CONNECT, so it fires on nothing carried by this " \
-        "connection. Open a new connection to this host to have it apply. (Match&Replace HEAD " \
-        "rules are not affected — they run on this relay from the next request head.)"
+        "connection was already open when it went live. What lets such a rule run (the body-rule " \
+        "path, or the HTTP/1.1 downgrade) is decided once per CONNECT, so it fires on nothing " \
+        "carried by this connection. Open a new connection to this host to have it apply. " \
+        "(Match&Replace HEAD rules are not affected — they run on this relay from the next " \
+        "request head.)"
       end
     end
 
@@ -777,7 +794,7 @@ module Gori::Proxy::H2
     private def unreachable_kinds(host : String) : Array(String)
       kinds = [] of String
       if rw = @rewriter
-        kinds << "a Match&Replace BODY rule" if rw.rewrites_body_for_host?(host)
+        kinds << "a Match&Replace BODY rule" if !@body_rules && rw.rewrites_body_for_host?(host)
         kinds << "a Match&Replace SHORT-CIRCUIT rule" if rw.short_circuits_for_host?(host)
       end
       # Head-scoped extraction is deliberately absent: `H2::Extract` reads the response head on

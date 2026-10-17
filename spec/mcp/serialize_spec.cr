@@ -156,7 +156,7 @@ describe "Gori::MCP::Serialize.emit_grpc_messages (compressed)" do
   it "inflates a gzip unary message and decodes its fields" do
     head = "POST /S/M HTTP/2\r\ncontent-type: application/grpc\r\ngrpc-encoding: gzip\r\n\r\n".to_slice
     body = Gori::Proxy::H2::Grpc.frame(true, Gori::Proxy::H2::Grpc.compress("gzip", hello).not_nil!)
-    g = JSON.parse(JSON.build { |j| j.object { Gori::MCP::Serialize.emit_grpc_messages(j, "grpc", head, body) } })["grpc"]
+    g = JSON.parse(JSON.build { |j| j.object { Gori::MCP::Serialize.emit_grpc_messages(j, "grpc", nil, head, body) } })["grpc"]
     m = g["messages"][0]
     m["compressed"].as_bool.should be_true
     m["encoding"].as_s.should eq("gzip")
@@ -167,7 +167,7 @@ describe "Gori::MCP::Serialize.emit_grpc_messages (compressed)" do
   it "keeps the bytes and says why for a codec gori does not inflate" do
     head = "POST /S/M HTTP/2\r\ncontent-type: application/grpc\r\ngrpc-encoding: snappy\r\n\r\n".to_slice
     body = Gori::Proxy::H2::Grpc.frame(true, Bytes[0xab, 0xcd])
-    m = JSON.parse(JSON.build { |j| j.object { Gori::MCP::Serialize.emit_grpc_messages(j, "grpc", head, body) } })["grpc"]["messages"][0]
+    m = JSON.parse(JSON.build { |j| j.object { Gori::MCP::Serialize.emit_grpc_messages(j, "grpc", nil, head, body) } })["grpc"]["messages"][0]
     m["encoding"].as_s.should eq("snappy")
     m["protobuf"]?.should be_nil
     m["note"].as_s.should contain("snappy")

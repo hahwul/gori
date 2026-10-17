@@ -1421,7 +1421,7 @@ gori run rewriter rm 3
 
 `preview` takes the same rule flags and reports how many stored flows the rule would have changed, without writing it. `rm` (`delete`), `enable` and `disable` take a rule id from the list, plus `--scope`, because the two stores number their rules independently, so an id alone names two different rules. The list prints the scope as a `G`/`P` prefix (`G*` = this project overrides that global rule's default) and shows global rules first, the order the proxy applies them in. See [Global and project rules](/guide/proxy/#global-and-project-rules).
 
-Body rules re-sync `Content-Length` and de-chunk as needed, and an enabled rule forces HTTP/1.1 on hosts it matches. See [Proxy & History](/guide/proxy/) for the interactive editor.
+Body rules re-sync `Content-Length` and de-chunk as needed, on HTTP/1.1 and HTTP/2 alike. See [Proxy & History](/guide/proxy/) for the interactive editor.
 
 **`rewriter preset`**: install a [response-modification preset](/guide/proxy/#rewriter-presets), a named starting point that writes ordinary Match & Replace rules. Verbs: `list` and `add <name>`.
 

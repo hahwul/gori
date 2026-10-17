@@ -541,6 +541,9 @@ module Gori::Tui
       # protobuf tree and a hex preview. Without this flag the mode strip would suppress the
       # very toggle that drives the pane.
       grpc : Bool = false,
+      # A Connect `+json` stream on that pane: every payload is JSON text, so PRETTY shows
+      # JSON, not a protobuf tree, and the mode strip says so.
+      grpc_json : Bool = false,
       decoded_ranges : Array(Highlight::DecodedRange) = [] of Highlight::DecodedRange,
       unicode_escape_count : Int32 = 0,
       unicode_decoded : Bool = false do
@@ -1797,7 +1800,7 @@ module Gori::Tui
     end
 
     # The response is a Server-Sent Events stream (drives the EVENTS pane). Scans
-    # the response head like grpc_body? — content-type may carry a charset param.
+    # the response head's content-type, which may carry a charset param.
     private def sse_response?(detail : Store::FlowDetail) : Bool
       Sse.event_stream?(detail.response_head)
     end
@@ -3594,7 +3597,7 @@ module Gori::Tui
       return "RAW" if ws
       # Checked before `binary`: a gRPC pane is both, and what the operator needs named is
       # which reading of each message payload is on screen.
-      return dv.pretty ? "PROTOBUF" : "BYTES" if dv.grpc
+      return dv.pretty ? (dv.grpc_json ? "JSON" : "PROTOBUF") : "BYTES" if dv.grpc
       return "BINARY" if dv.binary
       dv.pretty ? "PRETTY" : "RAW"
     end
@@ -3629,7 +3632,7 @@ module Gori::Tui
         # state it is in.
         [
           {:hex, " #{key_label("detail.toggle-hex", "^X")}:hex ", false},
-          {:pretty, " #{key_label("detail.toggle-pretty", "p")}:#{dv.pretty ? "bytes" : "tree"} ", dv.pretty},
+          {:pretty, " #{key_label("detail.toggle-pretty", "p")}:#{dv.pretty ? "bytes" : (dv.grpc_json ? "json" : "tree")} ", dv.pretty},
         ] of {Symbol, String, Bool}
       elsif dv.binary
         [{:hex, " #{key_label("detail.toggle-hex", "^X")}:hex ", false}] of {Symbol, String, Bool}
@@ -4489,7 +4492,9 @@ module Gori::Tui
       # down, so there is no new step in the BODY → PRETTY → HEX → SSE → FRAMES chain and no
       # new key to learn. `grpc: true` tells the mode strip to offer it here, which `binary`
       # alone suppresses.
-      if (body && !body.empty?) && grpc_body?(head)
+      # `scan_call`: a Connect stream or unary protobuf body takes this pane too — and the
+      # REQUEST head is what names a unary Connect call on either pane.
+      if body && !body.empty? && (deframed = Proxy::H2::Grpc.scan_call(detail.request_head, head, body))
         ls = Highlight.message(head, nil, request)
         ls << Highlight::Line.new
         # The `.proto` lens, when the project has one: the flow's own path IS the binding
@@ -4497,8 +4502,10 @@ module Gori::Tui
         # RESPONSE picks which end of the rpc this pane is showing. nil — no descriptor set
         # loaded, a non-gRPC path, an rpc the set does not declare — renders as it always did.
         binding = Protobuf::Schemas.resolve(detail.row.target, request: request)
-        ls.concat(wrap(grpc_lines(head, body, @pretty, binding)))
-        return DetailView.new(ls, EMPTY_BODY, :text, trailer, pretty: @pretty, binary: true, grpc: true)
+        ls.concat(wrap(grpc_lines(head, deframed, @pretty, binding)))
+        msgs = deframed[0]
+        return DetailView.new(ls, EMPTY_BODY, :text, trailer, pretty: @pretty, binary: true, grpc: true,
+          grpc_json: !msgs.empty? && msgs.all?(&.json))
       end
 
       # Plain body → WINDOWED. Decode compressed/chunked bodies for display
@@ -4628,14 +4635,6 @@ module Gori::Tui
       head
     end
 
-    # A gRPC message by its own Content-Type — the same question `Proto`'s PROTO column, the
-    # QL `proto:` filter and the Repeater all ask, asked the same way. The substring search it
-    # replaces missed the (legal) `Content-Type:application/grpc` with no space after the
-    # colon, and could match the text inside another header's value.
-    private def grpc_body?(head : Bytes?) : Bool
-      Proxy::H2::Grpc.grpc?(MediaType.of(head))
-    end
-
     # Renders a gRPC body as framed messages, each payload shown as the schema-less protobuf
     # wire-format tree (`tree: true`, which is what PRETTY means on this pane) or as a hex
     # preview (PRETTY off). Protobuf stopped being opaque without a `.proto` when the decoder
@@ -4649,12 +4648,13 @@ module Gori::Tui
     # than arrived rendered here as "(no complete gRPC messages)" with no byte count —
     # indistinguishable from a body that simply is not gRPC, while `gori run show
     # --format json` reported it in full.
-    private def grpc_lines(head : Bytes?, body : Bytes, tree : Bool,
+    #
+    # `frames` is `Grpc.scan_call`'s: through `scan_wire`, a grpc-web-text body's frames are
+    # base64-decoded and any `Content-Encoding` undone first — scanning the raw bytes finds a
+    # length prefix made of base64 or gzip octets and reports nothing.
+    private def grpc_lines(head : Bytes?, frames : {Array(Proxy::H2::Grpc::Message), Int32}, tree : Bool,
                            binding : Protobuf::Schemas::Binding? = nil) : Array(String)
-      # `scan_wire`: a grpc-web-text body carries its frames base64-encoded, and any body may
-      # sit under a `Content-Encoding` — scanning the raw bytes finds a length prefix made of
-      # base64 or gzip octets and reports nothing.
-      msgs, residual = Proxy::H2::Grpc.scan_wire(head, body)
+      msgs, residual = frames
       note = Proxy::H2::Grpc.framing_error(residual)
       return ["(no complete gRPC messages — streaming or partial)"] if msgs.empty? && note.nil?
       # Each compressed message inflated ONCE (#1629), shared by the legend and the rows.
@@ -4679,7 +4679,9 @@ module Gori::Tui
             lines << "  #{k}: #{k == "grpc-status" ? Proxy::H2::Grpc.status_label(v) : v}"
           end
         else
-          lines << "▸ message ##{i + 1}  #{m.data.size}b  #{ProtobufTree.compression_note(m, plains[i], encoding)}".rstrip
+          # A Connect end-stream message carries the call's outcome, as JSON text.
+          label = m.end_stream ? "end-stream" : "message ##{i + 1}"
+          lines << "▸ #{label}  #{m.data.size}b  #{ProtobufTree.compression_note(m, plains[i], encoding)}".rstrip
           lines.concat(grpc_payload_lines(m, plains[i], tree, binding))
         end
       end
@@ -4695,6 +4697,15 @@ module Gori::Tui
     # octets either way, and a compressed one that did not inflate says why above them.
     private def grpc_payload_lines(m : Proxy::H2::Grpc::Message, plain : Bytes | String, tree : Bool,
                                    binding : Protobuf::Schemas::Binding? = nil) : Array(String)
+      if m.json && plain.is_a?(Bytes) && tree
+        # The same ceiling as a protobuf tree (`ProtobufTree::MAX_LINES`): a payload is the
+        # origin's size, and the pane is styled eagerly.
+        text = String.new(plain).scrub.lines
+        cut = text.size > ProtobufTree::MAX_LINES
+        lines = text.first(ProtobufTree::MAX_LINES).map { |l| "  #{l}" }
+        lines << "  … (render cut at #{ProtobufTree::MAX_LINES} lines)" if cut
+        return lines
+      end
       unless plain.is_a?(Bytes) && ProtobufTree.decode?(m, plain, tree)
         return plain.is_a?(String) && tree ? ["  ⚠ #{plain}"] + hex_preview(m.data) : hex_preview(m.data)
       end

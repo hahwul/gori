@@ -25,6 +25,11 @@ describe Gori::Proto do
       Gori::Proto.classify(200, "application/grpc", nil, nil).should eq(Gori::Proto::Kind::Grpc)
       Gori::Proto.classify(200, "application/grpc+proto", nil, nil).should eq(Gori::Proto::Kind::Grpc)
       Gori::Proto.classify(200, "application/grpc-web+proto", nil, nil).should eq(Gori::Proto::Kind::Grpc)
+      # A Connect stream is the same family (#1632); a unary Connect call's `application/proto`
+      # is named only by a request header no row column records, so it stays HTTP here.
+      Gori::Proto.classify(200, "application/connect+proto", nil, nil).should eq(Gori::Proto::Kind::Grpc)
+      Gori::Proto.classify(200, nil, "application/connect+json", nil).should eq(Gori::Proto::Kind::Grpc)
+      Gori::Proto.classify(200, "application/json", "application/json", nil).should eq(Gori::Proto::Kind::Http)
       Gori::Proto.classify(200, "APPLICATION/GRPC", nil, nil).should eq(Gori::Proto::Kind::Grpc)
     end
 

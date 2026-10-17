@@ -5,6 +5,7 @@ require "compress/deflate"
 require "../../ascii_bytes"
 require "../../media_type"
 require "../../plural"
+require "./connect"
 
 module Gori::Proxy::H2
   # gRPC framing over HTTP/2 (https://grpc.io). A gRPC call is an h2 stream whose
@@ -20,7 +21,12 @@ module Gori::Proxy::H2
     # frame whose payload is ASCII HTTP/1-style header text (grpc-status /
     # grpc-message), NOT protobuf. Followed by a 4-byte big-endian length + the
     # payload octets.
-    record Message, compressed : Bool, data : Bytes, trailer : Bool = false
+    #
+    # A Connect stream (`Connect`) shares the envelope: there `end_stream` is its 0x02 flag
+    # (the JSON message that ends the call) and `json` marks a payload that is JSON text, not
+    # protobuf — every message of a `+json` stream, and the end-stream message of any.
+    record Message, compressed : Bool, data : Bytes, trailer : Bool = false,
+      end_stream : Bool = false, json : Bool = false
 
     def self.grpc?(content_type : String?) : Bool
       !!MediaType.essence(content_type).try(&.starts_with?("application/grpc"))
@@ -55,7 +61,26 @@ module Gori::Proxy::H2
 
     # `scan` over `framed_bytes` — for a body whose HTTP content-coding is already undone.
     def self.scan_body(content_type : String?, body : Bytes) : {Array(Message), Int32}
-      scan(framed_bytes(content_type, body))
+      scan(framed_bytes(content_type, body), Connect.streaming?(content_type),
+        Connect.json_stream?(content_type))
+    end
+
+    # The messages of ANY body gori deframes, or nil for one it does not: gRPC, a Connect
+    # stream, or a Connect unary protobuf body — ONE message with no envelope, whose
+    # `content-encoding` is undone like any body's. `request_head` is what names a unary
+    # Connect call (`Connect.unary?`); for the request side it is `head` itself.
+    #
+    # A unary body whose `content-encoding` did not come off cleanly (a codec gori cannot
+    # undo, a corrupt or cut stream) is nil, not a message: those octets are still coded, and
+    # a tree drawn over them would read as the payload. The plain body view takes it, with
+    # the decode note that says why.
+    def self.scan_call(request_head : Bytes?, head : Bytes?, body : Bytes) : {Array(Message), Int32}?
+      ct = MediaType.of(head)
+      return scan_wire(head, body) if grpc?(ct) || Connect.streaming?(ct)
+      return nil unless Connect.unary_proto?(request_head, ct)
+      decoded, note, clean = Codec::ContentDecode.decode_full(head, body, Codec::Body::CAPTURE_READ_MAX)
+      return nil if !clean || Codec::ContentDecode.decode_failed?(note)
+      {[Message.new(false, decoded || body)], 0}
     end
 
     # `scan_body` over a WIRE body — what every surface deframing a stored flow or a replay
@@ -285,13 +310,17 @@ module Gori::Proxy::H2
     # prefix is a lie". A deliberately-wrong prefix is one of the standard gRPC parser tests,
     # so the count has to be reachable — the raw body was always stored correctly (P7), it
     # was only invisible in the views.
-    def self.scan(body : Bytes) : {Array(Message), Int32}
+    #
+    # `connect` reads the flag byte as Connect's (0x02 end-stream, no 0x80 trailer); `json`
+    # marks every payload as JSON text (`application/connect+json`).
+    def self.scan(body : Bytes, connect : Bool = false, json : Bool = false) : {Array(Message), Int32}
       msgs = [] of Message
       pos = 0
       while pos + 5 <= body.size
         flag = body[pos]
         compressed = (flag & 0x01) != 0
-        trailer = (flag & 0x80) != 0
+        trailer = !connect && (flag & 0x80) != 0
+        end_stream = connect && (flag & 0x02) != 0
         len = (body[pos + 1].to_u32 << 24) | (body[pos + 2].to_u32 << 16) |
               (body[pos + 3].to_u32 << 8) | body[pos + 4].to_u32
         msg_start = pos + 5
@@ -299,7 +328,7 @@ module Gori::Proxy::H2
         # raises) when len is near UInt32::MAX on a truncated/hostile frame.
         break if msg_start.to_i64 + len.to_i64 > body.size # truncated / mid-stream
         count = len.to_i
-        msgs << Message.new(compressed, body[msg_start, count], trailer)
+        msgs << Message.new(compressed, body[msg_start, count], trailer, end_stream, json || end_stream)
         pos = msg_start + count
       end
       {msgs, body.size - pos}
@@ -317,17 +346,20 @@ module Gori::Proxy::H2
 
     # The stream's `grpc-encoding` off a message head, lowercased — nil when it names none.
     # A native call's trailers are already merged into a captured or replayed head, so a
-    # codec named only there is read too.
+    # codec named only there is read too. A Connect stream names its per-message codec
+    # `connect-content-encoding` instead; the two never share a head.
     def self.encoding(head : Bytes?) : String?
       h = head || return nil
       AsciiBytes.each_head_field(h) do |na, nz, va, vz|
-        next unless AsciiBytes.range_eq_ci?(h, na, nz, ENCODING_HEADER)
+        next unless AsciiBytes.range_eq_ci?(h, na, nz, ENCODING_HEADER) ||
+                    AsciiBytes.range_eq_ci?(h, na, nz, CONNECT_ENCODING_HEADER)
         return String.new(h[va, vz - va]).scrub.downcase.presence
       end
       nil
     end
 
-    private ENCODING_HEADER = "grpc-encoding".to_slice
+    private ENCODING_HEADER         = "grpc-encoding".to_slice
+    private CONNECT_ENCODING_HEADER = "connect-content-encoding".to_slice
 
     # A COMPRESSED message's payload inflated under `encoding` — or the sentence saying why
     # not. A derived projection only (P7): the captured frame is never rewritten. `identity`

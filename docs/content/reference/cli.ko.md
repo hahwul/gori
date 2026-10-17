@@ -1413,7 +1413,7 @@ gori run rewriter rm 3
 
 `preview`는 같은 규칙 플래그를 받아, 규칙을 저장하지 않고 저장된 플로우 중 몇 개가 바뀌었을지 보고합니다. `rm`(`delete`), `enable`, `disable`은 목록의 규칙 id와 함께 `--scope`도 받습니다. 두 저장소가 규칙 번호를 각자 매기므로 id 하나가 서로 다른 두 규칙을 가리키기 때문입니다. 목록은 범위를 `G`/`P` 접두어로 출력하고(`G*`는 이 프로젝트가 해당 전역 규칙의 기본값을 오버라이드했다는 뜻), 프록시가 적용하는 순서 그대로 전역 규칙을 먼저 보여 줍니다. [전역 규칙과 프로젝트 규칙](/ko/guide/proxy/#global-and-project-rules)을 참고하세요.
 
-본문 규칙은 필요에 따라 `Content-Length`를 다시 맞추고 청크를 해제하며, 활성화된 규칙은 매칭되는 호스트에서 HTTP/1.1을 강제합니다. 대화형 편집기는 [Proxy & History](/ko/guide/proxy/)를 참고하세요.
+본문 규칙은 HTTP/1.1과 HTTP/2 모두에서 필요에 따라 `Content-Length`를 다시 맞추고 청크를 해제합니다. 대화형 편집기는 [Proxy & History](/ko/guide/proxy/)를 참고하세요.
 
 **`rewriter preset`**: [응답 수정 프리셋](/ko/guide/proxy/#rewriter-presets) 설치. 평범한 Match & Replace 규칙을 써 주는 이름 붙은 출발점입니다. 동사: `list`, `add <name>`.
 
