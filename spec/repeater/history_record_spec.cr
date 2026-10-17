@@ -112,6 +112,23 @@ describe Gori::Repeater::HistoryRecord do
     end
   end
 
+  # #1631: `gori run send --record-history` files a stream gori stopped at its bound the way
+  # MCP `send_request` does — a Complete flow — while a body the origin cut short stays an Error.
+  it "records a bounded event stream as Complete and a cut-short body as Error" do
+    with_store do |store|
+      plan = plan_for("GET /events HTTP/1.1\r\nHost: t.test\r\n\r\n")
+      head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n".to_slice
+      resp = Gori::Proxy::Codec::Http1.parse_response_head(head)
+      {"events" => true, nil => false}.each do |bounded, complete|
+        result = Gori::Repeater::Result.new(head, "data: 1\n\n".to_slice, resp, 100_i64,
+          incomplete: true, bounded: bounded)
+        id = Gori::Repeater::HistoryRecord.record(store, plan, result, created_at: 1_i64,
+          wire: plan.wire_bytes, surface: Gori::FlowSource::Surface::Cli)
+        store.get_flow(id).not_nil!.row.state.complete?.should eq(complete)
+      end
+    end
+  end
+
   # An `--apply-rules` send recorded the rewritten bytes with no trace of the rule, while the
   # same rule on the proxy path names itself on the flow and keeps what it replaced.
   it "records which rules rewrote an apply_rules send, and the bytes they replaced" do

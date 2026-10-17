@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "../support/sse_origin"
 require "socket"
 
 private alias Frame = Gori::Proxy::H2::Frame
@@ -153,6 +154,18 @@ describe Gori::Repeater::StreamBound do
       end
       (Time.instant - started).should be < 5.seconds
       sender.pool.not_nil!.dialed.should eq(2)
+    end
+
+    # A bounded row must not read "origin closed" on either surface's fuzz row.
+    it "carries the bound onto the fuzz row both surfaces word it from" do
+      port = start_sse_origin
+      sender = Gori::Fuzz::Sender.new(Gori::Fuzz::Origin.new("http", "127.0.0.1", port),
+        ungated_outbound, false, false, timeout: 20.seconds, sse: StreamBound.new(2, 5.seconds))
+      row = Gori::Fuzz::Matcher.new.build(Gori::Fuzz::Job.new(0_i64, ["p"], nil, GET), sender.send(GET))
+      row.bounded.should eq("events")
+      Gori::CLI::Output.fuzz_row_text(row).should contain("event bound")
+      json = JSON.parse(JSON.build { |j| Gori::MCP::Serialize.fuzz_result(j, row) })
+      json["incomplete_reason"].as_s.should contain("event bound")
     end
 
     it "is bounded by default on a Fuzzer and a Miner run" do

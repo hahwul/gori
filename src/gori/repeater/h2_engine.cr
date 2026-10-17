@@ -1183,8 +1183,8 @@ module Gori
       # The bound for this stream, read off the final head's fields (h2 names are lowercase).
       private def self.start_bound(sse : StreamBound?, headers : Array({String, String}),
                                    cancel : Proc(Bool)?) : StreamRun?
-        sse.try(&.start(headers.find { |(n, _)| n == "content-type" }.try(&.[1]),
-          headers.find { |(n, _)| n == "content-encoding" }.try(&.[1]), false, cancel))
+        return nil unless sse && Sse.sse?(headers.find { |(n, _)| n == "content-type" }.try(&.[1]))
+        sse.start(headers.find { |(n, _)| n == "content-encoding" }.try(&.[1]), false, cancel)
       end
 
       # Fold one COMPLETED header block into the response being assembled, and decide what the

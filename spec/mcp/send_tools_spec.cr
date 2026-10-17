@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "../support/sse_origin"
 require "../support/mcp_harness"
 
 # An origin that reads the upgrade and REFUSES it with a real HTTP response. The handshake

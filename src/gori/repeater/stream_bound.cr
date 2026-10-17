@@ -25,12 +25,11 @@ module Gori
         e || t ? new(e, t) : nil
       end
 
-      # The bounded read of one response, or nil when the head is not an event stream.
+      # The bounded read of a response the caller has already found to be an event stream
+      # (`Sse.sse?` on its Content-Type, checked first because every swept response asks).
       # `encoding` is the response's Content-Encoding: the events of a compressed stream can't
       # be counted as they arrive, so only the time axis applies to one.
-      def start(content_type : String?, encoding : String?, chunked : Bool,
-                cancel : Proc(Bool)? = nil) : StreamRun?
-        return nil unless Sse.sse?(content_type)
+      def start(encoding : String?, chunked : Bool, cancel : Proc(Bool)? = nil) : StreamRun
         countable = encoding.nil? || encoding.strip.empty? || encoding.strip.compare("identity", case_insensitive: true) == 0
         StreamRun.new(countable ? max_events : nil, max_time, chunked, cancel)
       end

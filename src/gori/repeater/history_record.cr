@@ -75,7 +75,8 @@ module Gori
         raise Gori::Error.new("could not record the send in History (project busy) — the send happened, but no flow id was written") if id <= 0
         if resp = result.response
           error = result.error
-          error ||= "upstream response body was incomplete" if result.incomplete?
+          # A bound gori chose to stop an event stream at is not a failed response (#1631).
+          error ||= "upstream response body was incomplete" if result.incomplete? && !result.bounded
           state = error ? Store::FlowState::Error : Store::FlowState::Complete
           store.update_response(FlowMapper.response(resp,
             flow_id: id,

@@ -445,8 +445,9 @@ module Gori
           # this single-threaded send. A capped body comes back complete:false → incomplete.
           # An event stream under a bound reads through `BoundedRead`, whose stop is an EOF, so
           # the capture keeps what arrived before it.
-          run = sse.try(&.start(MediaType.of(head), resp.headers.get?("Content-Encoding"),
-            framing.chunked?, cancel))
+          run = if sse && Sse.sse?(resp.headers.get?("Content-Type"))
+                  sse.start(resp.headers.get?("Content-Encoding"), framing.chunked?, cancel)
+                end
           src = run ? BoundedRead.new(upstream, run) : upstream
           body, complete = begin
             Proxy::Codec::Body.read_complete(src, framing, len, Proxy::Codec::Body::CAPTURE_READ_MAX)
