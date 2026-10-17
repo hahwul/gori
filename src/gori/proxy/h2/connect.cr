@@ -52,6 +52,15 @@ module Gori::Proxy::H2
     # A Connect error: the code as the origin spelled it (`permission_denied`) and its message.
     record Outcome, code : String, message : String?
 
+    # Did a captured Connect STREAM response reach its end-stream message? A stream cut before
+    # it (an aborted call, a capture that stopped) has no outcome either, and must not read
+    # as a clean success. nil for a body that is not a Connect stream.
+    def self.end_stream?(head : Bytes?, body : Bytes?) : Bool?
+      return nil unless streaming?(MediaType.of(head))
+      b = body || return false
+      Grpc.scan_wire(head, b)[0].any?(&.end_stream)
+    end
+
     # The call's outcome off a captured or replayed RESPONSE, or nil when it is not a Connect
     # call or did not fail. Streaming reads the last end-stream message; unary reads a non-200
     # JSON body. Success carries no code on the wire, so it is nil too.

@@ -74,6 +74,21 @@ describe Gori::Proxy::H2::Connect do
       msgs[0].data.should eq(body)
     end
 
+    # A codec gori cannot undo leaves the octets coded: no tree over them, the plain body view
+    # (with its decode note) takes the body instead.
+    it "is nil for a unary body whose content-encoding did not come off" do
+      body = Bytes[0x0a, 0x01, 0x61]
+      %w[x-custom gzip].each do |enc|
+        resp = head("HTTP/1.1 200 OK\nContent-Type: application/proto\nContent-Encoding: #{enc}\n\n")
+        Grpc.scan_call(UNARY_PROTO, resp, body).should be_nil # not a gzip stream either
+      end
+      io = IO::Memory.new
+      Compress::Gzip::Writer.open(io, &.write(Bytes.new(64, 0x41_u8)))
+      cut = io.to_slice[0, io.size - 12] # a gzip stream cut before its end
+      resp = head("HTTP/1.1 200 OK\nContent-Type: application/proto\nContent-Encoding: gzip\n\n")
+      Grpc.scan_call(UNARY_PROTO, resp, cut).should be_nil
+    end
+
     it "flags a stream's end-stream message (0x02) as JSON, and never as a trailer" do
       resp = head("HTTP/2 200 OK\nContent-Type: application/connect+proto\n\n")
       body = envelope(Bytes[0x0a, 0x01, 0x61]) + envelope(%({"metadata":{}}), 0x82_u8)
@@ -135,6 +150,13 @@ describe Gori::Proxy::H2::Connect do
       o = Connect.outcome(STREAM_PROTO, 200, resp, envelope(io.to_slice, 0x03_u8)).not_nil!
       o.code.should eq("internal")
       o.message.should be_nil
+    end
+
+    it "says whether a stream reached its end-stream message" do
+      resp = head("HTTP/2 200 OK\nContent-Type: application/connect+proto\n\n")
+      Connect.end_stream?(resp, envelope(Bytes[0x0a, 0x01, 0x61])).should be_false
+      Connect.end_stream?(resp, envelope(%({}), 0x02_u8)).should be_true
+      Connect.end_stream?(head("HTTP/1.1 200 OK\nContent-Type: application/proto\n\n"), nil).should be_nil
     end
 
     it "has none for a stream that ended cleanly" do

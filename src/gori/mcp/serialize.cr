@@ -1123,7 +1123,13 @@ module Gori
         return unless Proxy::H2::Connect.call?(detail.request_head)
         j.field "connect" do
           j.object do
-            j.field "streaming", Proxy::H2::Connect.streaming?(MediaType.of(detail.request_head))
+            streaming = Proxy::H2::Connect.streaming?(MediaType.of(detail.request_head))
+            j.field "streaming", streaming
+            # A stream cut before its end-stream message has no outcome — and must not read as
+            # one that ended cleanly. false too for one answered with no stream at all.
+            if streaming
+              j.field "end_stream", !!Proxy::H2::Connect.end_stream?(detail.response_head, detail.response_body)
+            end
             if o = Proxy::H2::Connect.outcome(detail.request_head, detail.row.status,
                  detail.response_head, detail.response_body)
               j.field "code", text(o.code)

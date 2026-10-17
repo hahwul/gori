@@ -541,6 +541,9 @@ module Gori::Tui
       # protobuf tree and a hex preview. Without this flag the mode strip would suppress the
       # very toggle that drives the pane.
       grpc : Bool = false,
+      # A Connect `+json` stream on that pane: every payload is JSON text, so PRETTY shows
+      # JSON, not a protobuf tree, and the mode strip says so.
+      grpc_json : Bool = false,
       decoded_ranges : Array(Highlight::DecodedRange) = [] of Highlight::DecodedRange,
       unicode_escape_count : Int32 = 0,
       unicode_decoded : Bool = false do
@@ -3594,7 +3597,7 @@ module Gori::Tui
       return "RAW" if ws
       # Checked before `binary`: a gRPC pane is both, and what the operator needs named is
       # which reading of each message payload is on screen.
-      return dv.pretty ? "PROTOBUF" : "BYTES" if dv.grpc
+      return dv.pretty ? (dv.grpc_json ? "JSON" : "PROTOBUF") : "BYTES" if dv.grpc
       return "BINARY" if dv.binary
       dv.pretty ? "PRETTY" : "RAW"
     end
@@ -3629,7 +3632,7 @@ module Gori::Tui
         # state it is in.
         [
           {:hex, " #{key_label("detail.toggle-hex", "^X")}:hex ", false},
-          {:pretty, " #{key_label("detail.toggle-pretty", "p")}:#{dv.pretty ? "bytes" : "tree"} ", dv.pretty},
+          {:pretty, " #{key_label("detail.toggle-pretty", "p")}:#{dv.pretty ? "bytes" : (dv.grpc_json ? "json" : "tree")} ", dv.pretty},
         ] of {Symbol, String, Bool}
       elsif dv.binary
         [{:hex, " #{key_label("detail.toggle-hex", "^X")}:hex ", false}] of {Symbol, String, Bool}
@@ -4500,7 +4503,9 @@ module Gori::Tui
         # loaded, a non-gRPC path, an rpc the set does not declare — renders as it always did.
         binding = Protobuf::Schemas.resolve(detail.row.target, request: request)
         ls.concat(wrap(grpc_lines(head, deframed, @pretty, binding)))
-        return DetailView.new(ls, EMPTY_BODY, :text, trailer, pretty: @pretty, binary: true, grpc: true)
+        msgs = deframed[0]
+        return DetailView.new(ls, EMPTY_BODY, :text, trailer, pretty: @pretty, binary: true, grpc: true,
+          grpc_json: !msgs.empty? && msgs.all?(&.json))
       end
 
       # Plain body → WINDOWED. Decode compressed/chunked bodies for display
@@ -4693,7 +4698,13 @@ module Gori::Tui
     private def grpc_payload_lines(m : Proxy::H2::Grpc::Message, plain : Bytes | String, tree : Bool,
                                    binding : Protobuf::Schemas::Binding? = nil) : Array(String)
       if m.json && plain.is_a?(Bytes) && tree
-        return String.new(plain).scrub.lines.map { |l| "  #{l}" }
+        # The same ceiling as a protobuf tree (`ProtobufTree::MAX_LINES`): a payload is the
+        # origin's size, and the pane is styled eagerly.
+        text = String.new(plain).scrub.lines
+        cut = text.size > ProtobufTree::MAX_LINES
+        lines = text.first(ProtobufTree::MAX_LINES).map { |l| "  #{l}" }
+        lines << "  … (render cut at #{ProtobufTree::MAX_LINES} lines)" if cut
+        return lines
       end
       unless plain.is_a?(Bytes) && ProtobufTree.decode?(m, plain, tree)
         return plain.is_a?(String) && tree ? ["  ⚠ #{plain}"] + hex_preview(m.data) : hex_preview(m.data)

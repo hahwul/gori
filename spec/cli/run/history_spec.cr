@@ -817,7 +817,7 @@ describe "gori run show --format json" do
         "POST /demo.Users/Watch HTTP/1.1\r\nHost: api.test\r\ncontent-type: application/connect+proto\r\n\r\n",
         200, "HTTP/1.1 200 OK\r\ncontent-type: application/connect+proto\r\n\r\n", body, nil)
       json = JSON.parse(Gori::CLI::Run.show_json_for_spec(d, true, true))
-      json["connect"].should eq(JSON.parse(%({"streaming":true,"code":"unauthenticated","message":"token expired"})))
+      json["connect"].should eq(JSON.parse(%({"streaming":true,"end_stream":true,"code":"unauthenticated","message":"token expired"})))
       json["connect"].should eq(mcp_connect.call(d))
       msgs = json["response"]["grpc_messages"]["messages"].as_a
       msgs[0]["protobuf"]["fields"][0]["string"].as_s.should eq("a")
@@ -827,6 +827,20 @@ describe "gori run show --format json" do
       msgs[1].as_h.has_key?("protobuf").should be_false
       mcp_msgs = JSON.parse(Gori::MCP::Serialize.flow_detail_json(d))["response_grpc_messages"]["messages"]
       mcp_msgs[1]["json"].as_s.should eq(end_stream)
+    end
+
+    it "tells a stream cut before its end-stream message from one that ended cleanly" do
+      req = "POST /demo.Users/Watch HTTP/1.1\r\nHost: api.test\r\ncontent-type: application/connect+proto\r\n\r\n"
+      resp = "HTTP/1.1 200 OK\r\ncontent-type: application/connect+proto\r\n\r\n"
+      cut = connect_detail.call(req, 200, resp, grpc_frame_for_spec(Bytes[0x0a, 0x01, 0x61]), nil)
+      json = JSON.parse(Gori::CLI::Run.show_json_for_spec(cut, true, true))
+      json["connect"].should eq(JSON.parse(%({"streaming":true,"end_stream":false})))
+      json["connect"].should eq(mcp_connect.call(cut))
+      clean = connect_detail.call(req, 200, resp,
+        grpc_frame_for_spec(Bytes[0x0a, 0x01, 0x61]) + grpc_frame_for_spec(%({}).to_slice, 0x02_u8), nil)
+      json = JSON.parse(Gori::CLI::Run.show_json_for_spec(clean, true, true))
+      json["connect"].should eq(JSON.parse(%({"streaming":true,"end_stream":true})))
+      json["connect"].should eq(mcp_connect.call(clean))
     end
 
     it "omits connect on a plain JSON flow without connect-protocol-version" do

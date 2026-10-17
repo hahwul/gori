@@ -251,9 +251,9 @@ protoc --descriptor_set_out=api.desc --include_imports -I. api.proto
 - **스트림**(`application/connect+proto` 또는 `+json`)은 gRPC와 같은 5바이트 봉투를 쓰므로 같은 방식으로 프레임이 풀립니다. `0x01` 플래그가 붙은 메시지는 스트림의 `connect-content-encoding`으로 압축이 풀립니다. `0x02` end-stream 메시지는 실제로 JSON이므로 JSON으로 보여 줍니다(TUI에서는 `end-stream`, JSON에서는 `end_stream: true`와 `json` 문자열). PROTO 컬럼은 `GRPC`로 읽고 `proto:grpc`가 찾아냅니다.
 - **유니어리 호출**(`application/proto` 또는 `application/json`, 평범한 본문)은 요청의 `connect-protocol-version` 헤더로만 Connect임을 알 수 있습니다. protobuf 본문은 `content-encoding`을 푼 뒤 봉투 없이 메시지 하나로 디코딩되고, `.proto` 렌즈도 gRPC와 똑같이 적용됩니다. JSON 본문은 이미 읽을 수 있으므로 protobuf 뷰를 만들지 않습니다. 헤더가 없는 평범한 `application/json` 요청은 Connect가 아닙니다. 이 헤더를 기록하는 행 컬럼이 없어서, PROTO 컬럼은 유니어리 호출을 `HTTP`로 표시합니다.
 
-**결과를 보여 줍니다.** Connect 오류는 JSON 본문이 `{code, message, details}`인 200이 아닌 응답(유니어리)이거나, end-stream 메시지의 `error`(스트리밍)입니다. `gori run history show --format json`과 MCP `get_flow`는 둘 다 Connect 플로우에 `connect` 객체를 붙입니다. `streaming`이 들어가고, 호출이 실패했다면 `code`(`permission_denied`처럼 원본이 쓴 그대로)와 `message`도 들어갑니다. Probe는 Connect 서비스를 `tech_grpc`로 지문 채취합니다.
+**결과를 보여 줍니다.** Connect 오류는 JSON 본문이 `{code, message, details}`인 200이 아닌 응답(유니어리)이거나, end-stream 메시지의 `error`(스트리밍)입니다. `gori run history show --format json`과 MCP `get_flow`는 둘 다 Connect 플로우에 `connect` 객체를 붙입니다. `streaming`이 들어가고, 스트림이면 `end_stream`도 들어가며(캡처가 end-stream 메시지까지 닿지 못했다면 `false`라서, 끊긴 스트림이 깨끗이 끝난 것처럼 읽히지 않습니다), 호출이 실패했다면 `code`(`permission_denied`처럼 원본이 쓴 그대로)와 `message`도 들어갑니다. Probe는 Connect 서비스를 `tech_grpc`로 지문 채취합니다.
 
-아직 안 되는 것: Repeater의 gRPC 탭과 필드 편집기, gRPC 필드 퍼징과 리프레이밍은 여전히 gRPC 프레이밍이 필요하므로, Connect 플로우는 Repeater에서 평범한 HTTP 요청으로 열립니다.
+아직 안 되는 것: Repeater의 gRPC 탭과 필드 편집기, gRPC 필드 퍼징과 리프레이밍은 여전히 gRPC 프레이밍이 필요하므로, Connect 플로우는 Repeater에서 평범한 HTTP 요청으로 열립니다. 메시지를 쿼리 문자열에 담아 `GET`으로 보내는 유니어리 호출(`?connect=v1&encoding=…&message=…`)도 아직 인식하지 않습니다.
 
 ### MessagePack과 CBOR {#binary-documents}
 

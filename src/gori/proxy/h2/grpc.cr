@@ -69,11 +69,17 @@ module Gori::Proxy::H2
     # stream, or a Connect unary protobuf body — ONE message with no envelope, whose
     # `content-encoding` is undone like any body's. `request_head` is what names a unary
     # Connect call (`Connect.unary?`); for the request side it is `head` itself.
+    #
+    # A unary body whose `content-encoding` did not come off cleanly (a codec gori cannot
+    # undo, a corrupt or cut stream) is nil, not a message: those octets are still coded, and
+    # a tree drawn over them would read as the payload. The plain body view takes it, with
+    # the decode note that says why.
     def self.scan_call(request_head : Bytes?, head : Bytes?, body : Bytes) : {Array(Message), Int32}?
       ct = MediaType.of(head)
       return scan_wire(head, body) if grpc?(ct) || Connect.streaming?(ct)
       return nil unless Connect.unary_proto?(request_head, ct)
-      decoded, _ = Codec::ContentDecode.decode(head, body, Codec::Body::CAPTURE_READ_MAX)
+      decoded, note, clean = Codec::ContentDecode.decode_full(head, body, Codec::Body::CAPTURE_READ_MAX)
+      return nil if !clean || Codec::ContentDecode.decode_failed?(note)
       {[Message.new(false, decoded || body)], 0}
     end
 
