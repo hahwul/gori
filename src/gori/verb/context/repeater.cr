@@ -27,6 +27,8 @@ abstract class Gori::Verb::ExecContext
   abstract def repeater_cycle_tls_preset : Nil           # cycle this tab's per-send TLS fingerprint override (#844)
   abstract def repeater_toggle_grpc_reframe : Nil        # gRPC: recompute the 5-byte length prefix over the payload on send
   abstract def repeater_toggle_grpc_fields : Nil         # gRPC: edit the request message by field through the loaded .proto
+  abstract def repeater_grpc_json_edit : Nil             # gRPC: edit the whole request message as proto3 JSON in $EDITOR
+  abstract def repeater_grpc_add_field : Nil             # gRPC: set or add one field from a path=value spec
   abstract def repeater_toggle_resp_diff : Nil           # switch the response pane between raw and diff-vs-previous
   abstract def repeater_toggle_resp_hex : Nil            # toggle a raw hex dump of the response bytes
   abstract def repeater_toggle_unicode_escapes : Nil     # decode JSON Unicode escapes in the response display
