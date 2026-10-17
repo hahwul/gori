@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script>
+    /* Set the color theme before first paint to avoid a flash. Default: dark. */
+    (function () {
+      document.documentElement.classList.add("has-js");
+      try {
+        var t = localStorage.getItem("gori-theme");
+        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Find any action without memorizing keys: the space menu for what you do often, the command palette for everything else.">
+  
+  <title>Space Menu &amp; Palette - gori</title>
+  <link rel="icon" type="image/png" href="https://gori.hahwul.com/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="https://gori.hahwul.com/icons/favicon.svg" />
+  <link rel="shortcut icon" href="https://gori.hahwul.com/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="https://gori.hahwul.com/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Gori" />
+  <link rel="manifest" href="https://gori.hahwul.com/icons/site.webmanifest" />
+  <meta property="og:title" content="Space Menu &amp; Palette">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gori.hahwul.com/guide/space-menu-and-palette/">
+  <meta property="og:description" content="Find any action without memorizing keys: the space menu for what you do often, the command palette for everything else.">
+  <meta property="og:image" content="https://gori.hahwul.com/og-images/guide-space-menu-and-palette.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Space Menu &amp; Palette">
+  <meta name="twitter:description" content="Find any action without memorizing keys: the space menu for what you do often, the command palette for everything else.">
+  <meta name="twitter:image" content="https://gori.hahwul.com/og-images/guide-space-menu-and-palette.png">
+  <meta property="og:site_name" content="gori">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:locale:alternate" content="ko_KR">
+  
+  <link rel="canonical" href="https://gori.hahwul.com/guide/space-menu-and-palette/">
+  
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Space Menu \u0026 Palette","url":"https://gori.hahwul.com/guide/space-menu-and-palette/","description":"Find any action without memorizing keys: the space menu for what you do often, the command palette for everything else.","image":"https://gori.hahwul.com/og-images/guide-space-menu-and-palette.png"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"gori","item":"https://gori.hahwul.com/"},{"@type":"ListItem","position":2,"name":"HTTP Proxy and Web Security Guides","item":"https://gori.hahwul.com/guide/"},{"@type":"ListItem","position":3,"name":"Space Menu \u0026 Palette"}]}</script>
+  <link rel="alternate" hreflang="en" href="https://gori.hahwul.com/guide/space-menu-and-palette/">
+<link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/guide/space-menu-and-palette/">
+  <link rel="alternate" hreflang="x-default" href="https://gori.hahwul.com/guide/space-menu-and-palette/">
+  
+  
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/style.css">
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/docs.css">
+  
+  
+  
+  
+  
+</head>
+<body class="is-doc" data-section="guide">
+  <a class="skip-link" href="#main">Skip to content</a>
+<header class="docs-header">
+  <a href="https://gori.hahwul.com/" class="logo" aria-label="gori home">
+    <span class="logo-mark" aria-hidden="true" style="--logo-src: url('https://gori.hahwul.com/images/gori.png')" title="Right-click to download logo"></span>
+    <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
+  </a>
+
+  
+  <nav class="top-nav" aria-label="Primary">
+    <a href="https://gori.hahwul.com/getting-started/">Start</a>
+    <a href="https://gori.hahwul.com/playbooks/">Playbooks</a>
+    <a href="https://gori.hahwul.com/guide/" class="active" aria-current="true">Guide</a>
+    <a href="https://gori.hahwul.com/reference/">Reference</a>
+  </nav>
+
+  
+  <details class="nav-compact">
+    <summary class="nav-compact-trigger" aria-label="Primary">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </summary>
+    <div class="nav-compact-panel" role="navigation" aria-label="Primary">
+      <a href="https://gori.hahwul.com/getting-started/">Start</a>
+      <a href="https://gori.hahwul.com/playbooks/">Playbooks</a>
+      <a href="https://gori.hahwul.com/guide/" class="active" aria-current="true">Guide</a>
+      <a href="https://gori.hahwul.com/reference/">Reference</a>
+      <a href="https://gori.hahwul.com/getting-started/installation/">Install</a>
+    </div>
+  </details>
+
+  
+  <div class="header-right">
+    <button class="search-trigger" onclick="openSearch()" aria-label="Search documentation" title="Search documentation (&#8984;K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+    </button>
+    
+    
+    <nav class="lang-switch" aria-label="Language">
+      
+      <a href="https://gori.hahwul.com/guide/space-menu-and-palette/" hreflang="en" lang="en" aria-label="EN: English" title="English" class="is-current" aria-current="true">EN</a>
+      
+      <a href="https://gori.hahwul.com/ko/guide/space-menu-and-palette/" hreflang="ko" lang="ko" aria-label="KO: 한국어" title="한국어">KO</a>
+      
+    </nav>
+    
+    <a class="github-link" href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer" aria-label="View on GitHub" title="View on GitHub">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58C20.57 22.29 24 17.79 24 12.5 24 5.87 18.63.5 12 .5z"/></svg>
+    </a>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle color theme" title="Toggle theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2v2.2M12 19.8V22M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2 12h2.2M19.8 12H22M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="logo-menu" id="logo-menu" hidden role="menu" aria-label="Download logo">
+  <div class="logo-menu-sep" aria-hidden="true">PNG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.png" download="gori-logo.png">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.png" download="gori-logo-dark.png">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.png" download="gori-logo-color.png">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">WebP</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.webp" download="gori-logo.webp">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.webp" download="gori-logo-dark.webp">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.webp" download="gori-logo-color.webp">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">SVG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.svg" download="gori-logo.svg">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.svg" download="gori-logo-dark.svg">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.svg" download="gori-logo-color.svg">Color</a>
+  <div class="logo-menu-sep logo-menu-sep--rule" aria-hidden="true"></div>
+  <button type="button" role="menuitem" id="copy-logo-url" data-logo-url="https://gori.hahwul.com/images/gori.svg" data-label="Copy SVG URL" data-copied="Copied">Copy SVG URL</button>
+  <a role="menuitem" href="https://gori.hahwul.com/reference/brand/">Brand kit →</a>
+</div>
+<div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)closeSearch()">
+  <div class="search-modal" role="dialog" aria-modal="true" aria-label="Search documentation">
+    <div class="search-input-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m21 21-4.3-4.3"></path>
+      </svg>
+      <input type="search" id="searchInput" aria-label="Search" placeholder="Search the docs…" autocomplete="off" spellcheck="false">
+      <kbd class="search-esc" onclick="closeSearch()">ESC</kbd>
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+</div>
+
+
+<div class="docs-container">
+  <aside class="docs-sidebar">
+  <details class="docs-navigation" open>
+    <summary class="docs-navigation-toggle">Browse documentation</summary>
+
+    
+    
+    <nav class="manual-nav" aria-label="Documentation">
+      
+      <details class="nav-section">
+        <summary>Start</summary>
+        <ul class="nav-links">
+          <li><a href="https://gori.hahwul.com/getting-started/">Overview</a></li>
+          
+          <li><a href="https://gori.hahwul.com/getting-started/installation/">Install gori</a></li>
+          
+          <li><a href="https://gori.hahwul.com/getting-started/quick-start/">gori Quick Start</a></li>
+          
+          <li><a href="https://gori.hahwul.com/getting-started/ai-setup/">gori MCP and AI Agent Setup</a></li>
+          
+          <li><a href="https://gori.hahwul.com/getting-started/configuration/">Configure gori and Its Root CA</a></li>
+          
+        </ul>
+      </details>
+      
+
+      
+      <details class="nav-section" open>
+        <summary>Guide</summary>
+        <ul class="nav-links">
+          <li><a href="https://gori.hahwul.com/guide/">Overview</a></li>
+          
+          
+          
+          
+          <li><details class="nav-group" open>
+            <summary>Core</summary>
+            <ul class="nav-links">
+          
+              <li><a href="https://gori.hahwul.com/guide/space-menu-and-palette/" class="active" aria-current="page">Space Menu &amp; Palette</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/guide/proxy/">Proxy &amp; History</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/guide/repeater-and-fuzzer/">Repeater &amp; Fuzzer</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/guide/scanning/">Web Security Scanning and Issues</a></li>
+          
+          
+          
+          </ul></details></li>
+          <li><details class="nav-group">
+            <summary>Workbenches</summary>
+            <ul class="nav-links">
+          
+              <li><a href="https://gori.hahwul.com/guide/decoder/">Decoder: Encode, Decode, and Hash</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/guide/jwt/">JWT Security Testing</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/guide/cookie/">Session Cookie Security</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/guide/sequencer/">Token Randomness Testing</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/guide/oast/">OAST for Blind Vulnerabilities</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/guide/authorize/">Authorization Testing</a></li>
+          
+          
+          
+          </ul></details></li>
+          <li><details class="nav-group">
+            <summary>Automation</summary>
+            <ul class="nav-links">
+          
+              <li><a href="https://gori.hahwul.com/guide/scripting/">CLI Scripting with gori run</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/guide/mcp/">MCP Server</a></li>
+          
+          
+          
+          </ul></details></li>
+          <li><details class="nav-group">
+            <summary>Customize</summary>
+            <ul class="nav-links">
+          
+              <li><a href="https://gori.hahwul.com/guide/settings/">TUI Settings</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/guide/themes/">TUI Themes</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/guide/hotkeys/">Keyboard Shortcuts</a></li>
+          
+          
+          
+              <li><a href="https://gori.hahwul.com/guide/statusline/">Custom TUI Statusline</a></li>
+          </ul></details></li>
+          
+        </ul>
+      </details>
+      
+
+      
+      <details class="nav-section">
+        <summary>Reference</summary>
+        <ul class="nav-links">
+          <li><a href="https://gori.hahwul.com/reference/">Overview</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/capabilities/">Capability Matrix</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/platform-support/">Platform Support</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/cli/">CLI Reference</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/config/">Configuration Reference</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/query-language/">gori Query Language</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/probe-rules/">Probe Scan Rules</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/brand/">Brand Kit</a></li>
+          
+          <li><a href="https://gori.hahwul.com/reference/miss-ring/">Miss Ring</a></li>
+          
+        </ul>
+      </details>
+      
+
+      
+      <a class="book-promo" href="https://gori.hahwul.com/playbooks/">
+        <span>The gori field guide</span>
+        <strong>Playbooks →</strong>
+      </a>
+      
+    </nav>
+    
+  </details>
+</aside>
+  <main id="main" class="docs-main">
+    <nav class="document-path" aria-label="You are here">
+      <a href="https://gori.hahwul.com/">gori</a>
+      <span aria-hidden="true">/</span><a href="https://gori.hahwul.com/guide/">HTTP Proxy and Web Security Guides</a>
+      <span aria-hidden="true">/</span><span>Core</span>
+    </nav>
+    <header class="document-heading">
+      <p class="doc-kicker">Guide</p>
+      <h1>Space Menu &amp; Palette</h1>
+    </header>
+    <div class="toc-placeholder" aria-hidden="true"></div>
+    <article class="document-body"><p>gori has hundreds of actions, and you do not need to learn their keys up front. Two keys reach all of them:</p>
+<table>
+<thead>
+<tr>
+<th>Press</th>
+<th>You get</th>
+<th>Reach for it when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Space</code></td>
+<td>The <strong>space menu</strong>: what you do most in the pane you are in, one letter per action</td>
+<td>You know roughly what you want to do <em>here</em></td>
+</tr>
+<tr>
+<td><code>Ctrl-P</code></td>
+<td>The <strong>command palette</strong>: every action, found by typing its name</td>
+<td>You don&#39;t know where something lives, or you rarely need it</td>
+</tr>
+</tbody>
+</table>
+<p>Both show each action's own key beside it, so every visit teaches you the shortcut, and you need them less the more you use them. <code>?</code> opens the <strong>Help</strong> tab, the full key sheet.</p>
+<blockquote>
+<p><strong>Learn it hands-on.</strong> <code>gori tutorial</code> (or <code>Ctrl-P</code> → <strong>Guided tour</strong> from inside a session) has a lesson on each, on a mock UI where nothing you press is real.</p>
+</blockquote>
+<h2 id="space-menu">The space menu</h2>
+<p>Press <code>Space</code> in any list or pane. A card opens with the actions for <strong>where you are standing</strong>: a History row, a flow's detail, the Repeater editor, a rule list. The same key on a different pane gives a different card.</p>
+<figure class="tui-shot">
+  <img src="/images/tui/space-menu.svg" alt="gori space menu open over the History tab, its rows grouped under VIEW, SEND, TRIAGE, COPY, SCOPE, COMMON, DANGER and WIPE, each with a letter on the left and, for some, a shortcut on the right" width="1206" height="520">
+  <figcaption><kbd>Space</kbd> on a History row. The letter on the left runs the row; the key on the right is the shortcut that does the same without the menu; <code>›</code> opens a second card.</figcaption>
+</figure>
+<p>How to read the card:</p>
+<ul>
+<li><strong>The letter on the left runs the row.</strong> Press <code>y</code> and the flow is copied; the menu closes.</li>
+<li><strong>The key on the right is the row's shortcut.</strong> <code>r Repeater flow ^R</code> means <code>Ctrl-R</code> sends to the Repeater from the list, with no menu at all. A row without one is reached through the menu (or the palette).</li>
+<li><strong>A <code>›</code> row opens a second card</strong> instead of running. See <a href="#cards">Second cards</a>.</li>
+<li><strong>Rows are grouped by purpose</strong>: VIEW, SEND, TRIAGE, COPY, and so on. Delete sits under DANGER and a whole-tab wipe under WIPE, always last, and a wipe asks before it acts.</li>
+</ul>
+<h3 id="menu-keys">Moving inside the menu</h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>a row&#39;s letter</td>
+<td>run that row</td>
+</tr>
+<tr>
+<td><code>↑</code> / <code>↓</code> or <code>j</code> / <code>k</code></td>
+<td>move the selection</td>
+</tr>
+<tr>
+<td><code>←</code> / <code>→</code> or <code>h</code> / <code>l</code></td>
+<td>change column</td>
+</tr>
+<tr>
+<td><code>↵</code></td>
+<td>run the selected row</td>
+</tr>
+<tr>
+<td><code>Esc</code></td>
+<td>close the menu, or go back one level from a second card</td>
+</tr>
+</tbody>
+</table>
+<p><code>h</code>, <code>j</code>, <code>k</code> and <code>l</code> are never a row's letter, so they always move and a reflex <code>j</code> never runs anything. Any key the card does not list closes it.</p>
+<h2 id="cards">Second cards</h2>
+<p>Some choices are variations of one intent: <em>send this flow to some tool</em>, <em>change how this pane draws</em>. Each of those is a single <code>›</code> row on the menu that opens its own card, so the first card stays short.</p>
+<figure class="tui-shot">
+  <img src="/images/tui/space-menu-send.svg" alt="gori's Send flow to card, titled SPACE › SEND FLOW TO, listing Repeater, Fuzzer, Comparer, Miner, Sequencer, Authorize, Discover and browser, each on one letter" width="1206" height="520" loading="lazy" decoding="async">
+  <figcaption><kbd>Space</kbd> <kbd>&gt;</kbd> on a History row. The title shows where you are, and <kbd>Esc</kbd> steps back to the first card.</figcaption>
+</figure>
+<table>
+<thead>
+<tr>
+<th>Row</th>
+<th>Holds</th>
+<th>Found on</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&gt;</code> <strong>Send flow to…</strong></td>
+<td>Hand the selected flow to another tool: <code>r</code> Repeater, <code>f</code> Fuzzer, <code>c</code> Comparer, <code>m</code> Miner, <code>s</code> Sequencer, <code>a</code> Authorize, <code>D</code> Discover, <code>b</code> open the response in a browser</td>
+<td>tabs where a flow is selected: History, the flow detail, the Sitemap, the Repeater, Fuzzer results, …</td>
+</tr>
+<tr>
+<td><code>Z</code> <strong>Display…</strong></td>
+<td>Toggles for how the pane draws: hex, pretty, diff, follow, columns, folds, …</td>
+<td>lists and request/response panes</td>
+</tr>
+<tr>
+<td><code>P</code> <strong>Protocol…</strong></td>
+<td>What a request sends: HTTP/2, SNI, auto Content-Length, gRPC, TLS fingerprint</td>
+<td>Repeater, Fuzzer</td>
+</tr>
+<tr>
+<td><code>T</code> <strong>Sub-tabs…</strong></td>
+<td>New, close, duplicate, rename, mark and find sub-tabs</td>
+<td>a pane on the nine tabs with a sub-tab strip (Repeater, Fuzzer, Notes, …)</td>
+</tr>
+</tbody>
+</table>
+<p>Three things make them quick:</p>
+<ul>
+<li><strong>Same letters on every tab.</strong> Inside a card, a tool or a toggle keeps its letter wherever the card appears: <code>Space</code> <code>&gt;</code> <code>c</code> sends to the Comparer from History, the Sitemap or a Repeater tab alike.</li>
+<li><strong><code>&gt;</code>, <code>⇧Z</code> and <code>⇧P</code> open their card directly</strong>, without <code>Space</code>: <code>&gt;</code> <code>f</code> sends the selected flow to the Fuzzer.</li>
+<li><strong>Display… and Protocol… stay open.</strong> After you flip a toggle the card comes back at the same row, so you can flip two or three in one visit, and each row shows its state: <code>●</code> on, <code>○</code> off, or a value such as the TLS preset's name. <code>Esc</code> closes it.</li>
+</ul>
+<p>On a tab with a sub-tab strip, focus the strip itself (or the tab bar) and <code>Space</code> lists the sub-tab actions directly, with no <code>T</code> in front. <code>Ctrl-N</code> and <code>Ctrl-W</code> (new and close sub-tab) work from any pane.</p>
+<h2 id="letters">Letters you can guess</h2>
+<p>An action that appears on many tabs has <strong>the same letter on all of them</strong>, so a letter you learn on one tab works on the next. The ones worth knowing first:</p>
+<table>
+<thead>
+<tr>
+<th>Letter</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/</code></td>
+<td>filter this list</td>
+</tr>
+<tr>
+<td><code>y</code> · <code>Y</code></td>
+<td>copy · copy as…</td>
+</tr>
+<tr>
+<td><code>t</code> · <code>T</code></td>
+<td>mark · mark all</td>
+</tr>
+<tr>
+<td><code>a</code> · <code>e</code></td>
+<td>add (on most tabs, file an issue) · edit</td>
+</tr>
+<tr>
+<td><code>d</code></td>
+<td>delete the selected row</td>
+</tr>
+<tr>
+<td><code>r</code></td>
+<td>send to the Repeater, or run (the menu twin of <code>Ctrl-R</code>)</td>
+</tr>
+<tr>
+<td><code>E</code></td>
+<td>export</td>
+</tr>
+<tr>
+<td><code>L</code></td>
+<td>link to an issue or a note</td>
+</tr>
+<tr>
+<td><code>X</code></td>
+<td>wipe the tab (asks first)</td>
+</tr>
+</tbody>
+</table>
+<p>The whole table, with the reasoning behind it, is in <a href="/guide/hotkeys/#one-intent-one-letter">Hotkeys → One intent, one letter</a>.</p>
+<p>A missed <code>Space</code> is unlikely to surprise you. gori checks at startup that a menu letter does not mean a different action as a bare key in the same pane, apart from a few documented cases, and it keeps <code>c</code> (capture) and <code>i</code> (intercept) off the menu on every tab that does not use those letters itself.</p>
+<h2 id="palette">The command palette</h2>
+<p>Press <code>Ctrl-P</code> on any tab and start typing the name of what you want.</p>
+<figure class="tui-shot">
+  <img src="/images/tui/command-palette.svg" alt="gori command palette over the History tab with the query send: THIS TAB lists Send to Comparer, Send to Fuzzer, Send to Sequencer and Send to Authorize with their keys or menu paths on the right, then APP lists matching app commands" width="1206" height="520" loading="lazy" decoding="async">
+  <figcaption><kbd>Ctrl-P</kbd>, then <code>send</code>, on History. The tab's own actions come first, each with the key or menu path that reaches it; app-wide commands follow.</figcaption>
+</figure>
+<ul>
+<li><strong>With nothing typed</strong>, the palette lists the app-wide commands: settings, <strong>Open browser</strong>, <strong>Go to</strong> a tab, <strong>Guided tour</strong>, and the like.</li>
+<li><strong>Once you type</strong>, it also searches the actions of the pane you opened it from. Those come first under <code>THIS TAB</code>, and app-wide matches follow under <code>APP</code>.</li>
+<li><strong>The right-hand column tells you the short route for next time.</strong> <code>shift-i</code> is a key; <code>␣ &gt; c</code> is a menu path: <code>Space</code>, then <code>&gt;</code>, then <code>c</code>.</li>
+<li><code>↑</code> / <code>↓</code> select, <code>↵</code> runs, <code>Esc</code> closes. Opened over a flow's detail, it searches the detail's actions, and <code>Esc</code> returns you to it.</li>
+<li>If you have rows marked, the title reads <code>COMMANDS · 3 MARKED</code>: an action you pick will apply to all of them.</li>
+</ul>
+<h3 id="palette-only">Actions only the palette lists</h3>
+<p>To keep the space menu short, a few kinds of action have no row in it. Some repeat a key you already have, such as Mark word (<code>Ctrl-K</code>); others you need only now and then, such as <strong>Minimize request</strong> or <strong>Go to line</strong>. Type the name into <code>Ctrl-P</code> from the tab it belongs to and it appears under <code>THIS TAB</code>. Help names the route for each one: its key, or <code>^P → &lt;name&gt;</code>.</p>
+<p>The full list is in <a href="/guide/hotkeys/#palette-only">Hotkeys → Actions only the palette lists</a>.</p>
+<h2 id="try-it">Try it: five minutes</h2>
+<p>You need a project with a few captured flows. The <a href="/getting-started/quick-start/">Quick Start</a> gets you there.</p>
+<ol>
+<li>
+<p>Press <code>3</code> for <strong>History</strong> and <code>↓</code> to select a flow. Press <code>Space</code> and read the card: find the <code>›</code> rows, and the <code>^R</code> beside <strong>Repeater flow</strong>. Press <code>Esc</code>.</p>
+<p><strong>Checkpoint.</strong> You can say, without opening the menu, which key sends the selected flow to the Repeater.</p>
+</li>
+<li>
+<p>Press <code>Space</code>, then <code>&gt;</code>. The card title reads <code>SPACE › SEND FLOW TO</code>. Press <code>Esc</code> once, and you are back on the first card; press it again, and the menu closes.</p>
+</li>
+<li>
+<p>Press <code>Space</code>, then <code>Z</code>. The <strong>Display…</strong> card shows <code>●</code> or <code>○</code> beside each toggle. Press <code>f</code> to flip <strong>follow</strong>: the card stays open and the dot changes. Press <code>f</code> again to put it back, then <code>Esc</code>.</p>
+<p><strong>Checkpoint.</strong> You have used a second card, stepped back out of one, and flipped a toggle without the card closing.</p>
+</li>
+<li>
+<p>Press <code>Ctrl-P</code> and type <code>send</code>. Under <code>THIS TAB</code>, find a row whose right-hand column is a key and one whose column is a menu path. Press <code>Esc</code>.</p>
+</li>
+<li>
+<p>Press <code>Ctrl-P</code>, type <code>tour</code>, and press <code>↵</code> to run the guided tour, or <code>Esc</code> if you have already taken it.</p>
+<p><strong>Checkpoint.</strong> You can find an action by name, and read off the shorter way to reach it.</p>
+</li>
+</ol>
+<h2 id="troubleshooting">When a key does nothing</h2>
+<ul>
+<li><strong><code>Space</code> typed a space.</strong> You are editing text (the pane's badge reads <code>INS</code>). Press <code>Esc</code> to go back to <code>READ</code>, then <code>Space</code>.</li>
+<li><strong>A letter from a guide does nothing.</strong> Menu letters belong to the pane you are in. Open the menu to see what this pane offers, or search the action's name with <code>Ctrl-P</code>: it may be one of the <a href="#palette-only">palette-only actions</a>.</li>
+<li><strong>You rebound a shortcut.</strong> A rebind changes the key on the right of a row, never the row's letter. The menu and the palette both show your new key.</li>
+<li><strong>You picked the vim keyset.</strong> The keyset changes how you move and select in editors; it leaves every menu letter where it was. See <a href="/guide/hotkeys/#editor-keysets">Editor keysets</a>.</li>
+</ul>
+<h2 id="next-steps">Next Steps</h2>
+<ul>
+<li><a href="/guide/hotkeys/">Hotkeys</a>: rebind any shortcut, and the complete letter tables</li>
+<li><a href="/getting-started/quick-start/">Quick Start</a>: capture a request and replay it</li>
+<li><a href="/guide/proxy/">Proxy &amp; History</a>: what the History tab's actions do</li>
+</ul>
+</article>
+    
+
+
+<nav class="page-navigation" aria-label="Continue reading">
+  <a href="https://gori.hahwul.com/guide/"><span>← Contents</span><strong>HTTP Proxy and Web Security Guides</strong></a>
+  
+  <a href="https://gori.hahwul.com/guide/proxy/" rel="next"><span>Next →</span><strong>Proxy &amp; History</strong></a>
+  
+</nav>
+
+  </main>
+  <aside class="docs-toc-rail" id="tocRail" aria-label="On this page" data-title="On this page"></aside>
+</div>
+
+
+<footer class="docs-footer">
+  <p class="footer-meta">
+    <a class="footer-sig" href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul, Built with Love">
+      <span class="hahwul-img" aria-hidden="true"></span>
+      <span class="footer-love">Built with Love</span>
+    </a>
+    <span aria-hidden="true">·</span>
+    <span>Apache-2.0 · © HAHWUL</span>
+  </p>
+</footer>
+<script>
+  /* Theme toggle: flip data-theme, remember the choice, and swap the TUI
+     screenshots to the matching light/dark capture. */
+  (function () {
+    /* Point every TUI screenshot at its light or dark capture. The light set
+       lives under images/tui/light/; the theme gallery (theme-*.svg) is left
+       alone, and any shot without a light twin falls back to the dark one. */
+    function syncTuiShots() {
+      var light = document.documentElement.getAttribute("data-theme") === "light";
+      var imgs = document.querySelectorAll('img[src*="/images/tui/"]');
+      for (var i = 0; i < imgs.length; i++) {
+        var img = imgs[i];
+        if (img.dataset.noLight === "1") continue;
+        /* Decide from the ORIGINAL dark src, not the live one (which may already
+           be swapped to the light path from a previous toggle). */
+        var orig = img.dataset.darkSrc || img.getAttribute("src");
+        if (orig.indexOf("/images/tui/light/") !== -1 || /\/images\/tui\/theme-/.test(orig)) continue;
+        if (!img.dataset.darkSrc) img.dataset.darkSrc = orig;
+        var want = light ? orig.replace("/images/tui/", "/images/tui/light/") : orig;
+        if (img.getAttribute("src") === want) continue;
+        if (light) {
+          img.onerror = function () { this.onerror = null; this.dataset.noLight = "1"; this.setAttribute("src", this.dataset.darkSrc); };
+        } else {
+          img.onerror = null;
+        }
+        img.setAttribute("src", want);
+      }
+    }
+
+    var btn = document.getElementById("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("gori-theme", next); } catch (e) {}
+        syncTuiShots();
+      });
+    }
+    syncTuiShots();
+  })();
+
+  /* The search tooltip ships as ⌘K; outside Apple platforms say Ctrl K
+     instead (search.js already answers to both modifiers). */
+  (function () {
+    var st = document.querySelector(".search-trigger");
+    if (st && !/Mac|iPhone|iPad|iPod/.test(navigator.platform || "")) {
+      st.title = st.title.replace("⌘K", "Ctrl K");
+    }
+  })();
+
+  /* Hero install picker: swap the one-liner for the chosen channel, copy it
+     on click. Present only on the home page. */
+  (function () {
+    var root = document.getElementById("heroInstall");
+    if (!root) return;
+    var cmd = document.getElementById("installCmd");
+    var tabs = root.querySelectorAll(".install-tab");
+    function pick() {
+      for (var i = 0; i < tabs.length; i++) tabs[i].setAttribute("aria-pressed", tabs[i] === this ? "true" : "false");
+      cmd.textContent = this.getAttribute("data-cmd");
+    }
+    for (var i = 0; i < tabs.length; i++) tabs[i].addEventListener("click", pick);
+
+    var btn = document.getElementById("installCopy");
+    var timer = null;
+    btn.addEventListener("click", function () {
+      var text = cmd.textContent;
+      function done() {
+        btn.classList.add("copied");
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(function () { btn.classList.remove("copied"); }, 1600);
+      }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      } else {
+        /* http:// preview, or clipboard API rejections (focus/permission) */
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { if (document.execCommand("copy")) done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  })();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+<script src="https://gori.hahwul.com/js/search.js" defer></script>
+<script src="https://gori.hahwul.com/js/toc.js" defer></script>
+<script src="https://gori.hahwul.com/js/docs.js" defer></script>
+<script src="https://gori.hahwul.com/js/codecopy.js" defer></script>
+<script src="https://gori.hahwul.com/js/logo-menu.js" defer></script>
+
+</body>
+</html>
