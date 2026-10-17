@@ -1351,7 +1351,9 @@ module Gori
         def status : Symbol
           if @status == :running && (stop_requested_at_ms || @session.closed?)
             @status = stop_requested_at_ms ? :stopped : :done
-            @ended_at_ms ||= Time.utc.to_unix_ms
+            # The moment the socket ended (`WsSession#closed_at`), not when a poll first saw
+            # it — a `get_job` right after a peer close reports the real end time, not now.
+            @ended_at_ms ||= @session.closed_at.try(&.to_unix_ms) || Time.utc.to_unix_ms
           end
           @status
         end
@@ -2045,9 +2047,9 @@ module Gori
       # age order, so the first removable entries are the oldest. :running jobs are kept
       # (a fiber still writes them and a poller may still read them) even past the cap.
       # Called by each *_start just before it inserts the new job.
-      private def evict_finished_jobs(jobs : Hash(String, T)) : Nil forall T
-        return if jobs.size < MAX_JOBS_RETAINED
-        overflow = jobs.size - MAX_JOBS_RETAINED + 1 # +1 to make room for the incoming job
+      private def evict_finished_jobs(jobs : Hash(String, T), cap : Int32 = MAX_JOBS_RETAINED) : Nil forall T
+        return if jobs.size < cap
+        overflow = jobs.size - cap + 1 # +1 to make room for the incoming job
         # Collect victims first, then delete — mutating a Hash mid-iteration is unsafe.
         victims = [] of String
         jobs.each do |key, job|

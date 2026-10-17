@@ -114,11 +114,21 @@ module Gori
       private def job_not_found(id : String, kind : String, verb : String) : Result
         other = job_kind_of(id)
         if other && other != kind
-          return err("no #{kind} job #{id} — #{id} is a #{other} job: use #{other}_#{verb} " \
+          return err("no #{kind} job #{id} — #{id} is a #{other} job: use #{suggest_job_tool(other, verb)} " \
                      "(or get_job / stop_job, which take any kind)", "NOT_FOUND",
             field: "job_id", details: JSON.parse({"job_kind" => other}.to_json))
         end
         not_found("no #{kind} job #{id}")
+      end
+
+      # The tool that reads `verb` for `kind`. The five async kinds share `_status`/`_results`/
+      # `_stop` suffixes, but a WebSocket session has none of those — it is read with `get_job`
+      # and written with `ws_session_send` — and `send` is a ws-only verb no other kind has. So
+      # `#{kind}_#{verb}` would name a tool that does not exist (`ws_session_status`,
+      # `fuzz_send`); this maps to one that does (#1630).
+      private def suggest_job_tool(kind : String, verb : String) : String
+        return verb == "send" ? "ws_session_send" : "get_job" if kind == "ws_session"
+        {"status", "results", "stop"}.includes?(verb) ? "#{kind}_#{verb}" : "get_job"
       end
 
       # The `kind` job `job_id` names in `jobs`, or the error Result the caller returns as-is.

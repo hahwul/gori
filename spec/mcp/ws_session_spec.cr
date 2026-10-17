@@ -214,4 +214,69 @@ describe "MCP ws_session tools" do
       origin.close
     end
   end
+
+  it "re-checks Layer 2 before each send: a mid-session Sandbox refuses and closes it" do
+    origin = echo_origin
+    begin
+      with_store do |store|
+        tools = tools_for(store)
+        rid = seed_ws_repeater(store, origin.port)
+        # Open with no scope (allow_unscoped), so enabling the Sandbox — which does not
+        # allowlist the host — is what newly blocks it.
+        opened = call_json(tools, "ws_session_open", %({"repeater_id":#{rid},"allow_unscoped":true}))
+        job_id = opened["job_id"].as_s
+        session = tools.@ws_jobs[job_id].session
+
+        tools.call("set_sandbox", JSON.parse(%({"enabled":true})))
+        # The scope reload behind the gate is throttled to RELOAD_INTERVAL (1 s); wait past it.
+        sleep 1.2.seconds
+
+        refused = tools.call("ws_session_send", JSON.parse(%({"job_id":"#{job_id}","messages":["blocked"]})))
+        refused.is_error.should be_true
+        refused.text.should contain("refused")
+        eventually { session.closed? }
+      end
+    ensure
+      origin.close
+    end
+  end
+
+  it "stamps ended_at on the first get_job after a peer close" do
+    # The origin ends the socket at once; the first poll must carry the real end time.
+    origin = WsOrigin.new do |conn|
+      conn.write(WS.encode(WS::OP_CLOSE, Bytes[0x03, 0xe8], mask: false))
+      conn.flush
+      sleep 200.milliseconds
+    end
+    begin
+      with_store do |store|
+        store.add_scope_rule("include", "host", "127.0.0.1")
+        tools = tools_for(store)
+        rid = seed_ws_repeater(store, origin.port)
+        job_id = call_json(tools, "ws_session_open", %({"repeater_id":#{rid}}))["job_id"].as_s
+        session = tools.@ws_jobs[job_id].session
+        eventually { session.closed? }
+
+        first = call_json(tools, "get_job", %({"job_id":"#{job_id}"}))
+        first["status"].as_s.should eq("done")
+        first["ended_at"].as_i64.should eq(session.closed_at.not_nil!.to_unix_ms)
+      end
+    ensure
+      origin.close
+    end
+  end
+
+  it "points a wrong-kind id at a tool that exists" do
+    with_store do |store|
+      tools = tools_for(store)
+      # A fuzz-looking id to a ws tool, and a ws-looking id to a fuzz tool: both route to
+      # get_job, never the nonexistent `fuzz_send` / `ws_session_status`.
+      to_ws = tools.call("ws_session_send", JSON.parse(%({"job_id":"fz_9","messages":["x"]})))
+      to_ws.text.should contain("use get_job")
+      to_ws.text.should_not contain("fuzz_send")
+      to_fuzz = tools.call("fuzz_status", JSON.parse(%({"job_id":"ws_9"})))
+      to_fuzz.text.should contain("use get_job")
+      to_fuzz.text.should_not contain("ws_session_status")
+    end
+  end
 end

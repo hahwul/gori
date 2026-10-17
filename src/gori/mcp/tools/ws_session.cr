@@ -21,9 +21,17 @@ module Gori
       # `WsSession::MAX_ENTRIES`; a page keeps one result inside a client's tool-result budget.
       WS_SESSION_PAGE = 200
 
+      # Finished sessions retained before the oldest terminal ones are evicted. Far below the
+      # 100 the other kinds keep (`MAX_JOBS_RETAINED`): a terminal session still pins its ring
+      # (up to `WsSession::MAX_BYTES`, 8 MiB), so 100 of them could hold ~800 MiB (#1630).
+      MAX_WS_JOBS_RETAINED = 16
+
       # The longest `ws_session_send{wait_ms}`: the server runs one call at a time, so a wait
       # holds every other call behind it.
       WS_SESSION_MAX_WAIT_MS = 30_000_i64
+
+      # The `wait_ms` slice between cancellation checks.
+      WS_WAIT_SLICE = 250.milliseconds
 
       # Close every open session: on a rebind (`bind_project` / `unbind_project`) and at
       # shutdown (`Server#run`). The CLOSE handshakes finish in the background.
@@ -59,7 +67,10 @@ module Gori
         return gated if gated.is_a?(Result)
         plan, sc = gated
         return err("request cancelled", "CANCELLED") if cancelled?
-        opened = plan.open_ws(keep_key, auto_replies, cancel_signal)
+        # The per-send Layer-2 re-check: `plan.refusal` is `Outbound#send_block` (Sandbox,
+        # with its throttled scope reload), with no budget side effect, so the session can ask
+        # it before every frame and honour a Sandbox the operator turns on after the open.
+        opened = plan.open_ws(keep_key, auto_replies, cancel_signal, gate: -> { plan.refusal })
         result = opened.result
         target = "#{plan.scheme}://#{plan.host}:#{plan.port}"
         Log.info { "ws_session_open #{target} repeater_id=#{repeater_id} -> #{opened.session ? "open" : result.error}" }
@@ -72,7 +83,7 @@ module Gori
           end
           @job_seq += 1
           id = "ws_#{@job_seq}"
-          evict_finished_jobs(@ws_jobs)
+          evict_finished_jobs(@ws_jobs, MAX_WS_JOBS_RETAINED)
           job = @ws_jobs[id] = WsSessionJob.new(id, JobAudit.new(target, nil, 1, nil, Time.utc.to_unix_ms),
             @db_path, session, repeater_id, verbatim)
         end
@@ -142,12 +153,15 @@ module Gori
       end
 
       # Wait up to `wait_ms` for the first server message after `before`, or until the session
-      # ends. One waiter per session (`WsSession#wait`), so the server call is serialized anyway.
+      # ends. Waited in ≤WS_WAIT_SLICE slices so `notifications/cancelled` is honoured within
+      # one slice — the single MCP worker is held here, so an uncancellable 30 s wait would
+      # wedge every other call behind it (#1630). One waiter per session (`WsSession#wait`).
       private def ws_wait_for_reply(session : Repeater::WsSession, before : Int64, wait_ms : Int64) : Nil
         deadline = Time.instant + wait_ms.milliseconds
-        until session.closed? || session.transcript(before).any? { |e| e.message.direction == "in" }
+        until cancelled? || session.closed? || session.transcript(before).any? { |e| e.message.direction == "in" }
           left = deadline - Time.instant
-          break if left <= Time::Span.zero || !session.wait(left)
+          break if left <= Time::Span.zero
+          session.wait(left < WS_WAIT_SLICE ? left : WS_WAIT_SLICE)
         end
       end
 
@@ -156,6 +170,10 @@ module Gori
         job = lookup_job(h, @ws_jobs, "ws_session", "status")
         return job if job.is_a?(Result)
         after = optional_int_arg(h, "after") || 0_i64
+        # `status` first: reading it is what lazily stamps `ended_at_ms` off the session's
+        # close time, so a peer close is reported WITH its end time on the very first poll,
+        # before `ended_at` below reads it.
+        job.status
         Result.new(JSON.build do |j|
           j.object do
             j.field "job_id", job.id
