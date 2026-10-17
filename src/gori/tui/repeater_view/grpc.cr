@@ -234,7 +234,7 @@ class Gori::Tui::RepeaterView
     else
       # Each compressed message inflated ONCE under the response's `grpc-encoding` (#1629).
       encoding = Proxy::H2::Grpc.encoding(result.head)
-      plains = msgs.map { |m| m.trailer ? m.data : Proxy::H2::Grpc.payload(m, encoding) }
+      plains = Proxy::H2::Grpc.payloads(msgs, encoding)
       # One legend above the messages, and only when a tree will actually be drawn — see
       # ProtobufTree::NOTE. Same rule as the History framing pane, from the same predicate.
       if ProtobufTree.legend?(msgs, plains, @pretty)

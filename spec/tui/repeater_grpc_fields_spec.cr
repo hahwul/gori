@@ -373,6 +373,30 @@ describe "RepeaterView gRPC FIELDS editor (#828)" do
       end
     end
 
+    # The codec is the head's CURRENT one: an operator who rewrites `grpc-encoding` before
+    # editing a field gets the payload re-compressed in the codec the request now declares.
+    it "re-compresses with the grpc-encoding the head declares at edit time" do
+      with_demo_schema do
+        grpc_tmp_store do |store|
+          head = "POST /demo.Users/GetUser HTTP/2\r\nHost: api.test\r\ncontent-type: application/grpc\r\ngrpc-encoding: gzip\r\n\r\n"
+          id = store.insert_flow(Gori::Store::CapturedRequest.new(
+            created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
+            method: "POST", target: "/demo.Users/GetUser", http_version: "HTTP/2",
+            head: head.to_slice,
+            body: Gori::Proxy::H2::Grpc.frame(true, Gori::Proxy::H2::Grpc.compress("gzip", get_user_request("hahwul")).not_nil!),
+            source: Gori::FlowSource::Kind::Proxy))
+          view = RepeaterView.new
+          view.load_grpc(store.get_flow(id).not_nil!)
+          view.@editor.set_text(view.@editor.wire_text.sub("grpc-encoding: gzip", "grpc-encoding: deflate"))
+          view.toggle_grpc_fields.should be_true
+          view.grpc_field_begin.should be_nil
+          type_into(view, "admin")
+          view.grpc_field_apply.should be_nil
+          Gori::Proxy::H2::Grpc.inflate("deflate", sent_payload(view)).should eq(get_user_request("admin"))
+        end
+      end
+    end
+
     it "names every row it does not draw — a cut, and a truncated parse" do
       s = demo_schema
       user = s.message?("demo.User").not_nil!

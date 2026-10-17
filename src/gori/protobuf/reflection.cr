@@ -558,13 +558,14 @@ module Gori::Protobuf
         return {none, Failure.new(text, FailureKind::Answered)}
       end
       out = [] of Protobuf::Message
-      encoding = resp.headers.get?("grpc-encoding")
-      messages.each do |msg|
+      # gori advertises `grpc-accept-encoding: identity`, so a compressed reply is the server
+      # ignoring it — inflated under its `grpc-encoding` (#1629), within one budget for the
+      # whole reply. One that does not inflate is said out loud rather than decoded as
+      # protobuf, which would be a tree of nonsense.
+      plains = Proxy::H2::Grpc.payloads(messages, resp.headers.get?("grpc-encoding"))
+      messages.each_with_index do |msg, i|
         next if msg.trailer # grpc-web carries its trailers in-band; not a response message
-        # gori advertises `grpc-accept-encoding: identity`, so a compressed reply is the server
-        # ignoring it — inflated under its `grpc-encoding` (#1629). One that does not inflate is
-        # said out loud rather than decoded as protobuf, which would be a tree of nonsense.
-        plain = Proxy::H2::Grpc.payload(msg, encoding)
+        plain = plains[i]
         if plain.is_a?(String)
           return {none, Failure.new("#{service} returned a COMPRESSED message: #{plain}", FailureKind::Answered)}
         end

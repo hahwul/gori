@@ -281,7 +281,7 @@ module Gori::Fuzz
                                   baseline : Bytes) : {Proxy::H2::Grpc::Message, String?}
       return {msg, nil} unless msg.compressed
       encoding = Proxy::H2::Grpc.encoding(baseline)
-      plain = Proxy::H2::Grpc.payload(msg, encoding)
+      plain = Proxy::H2::Grpc.payloads([msg], encoding)[0]
       if plain.is_a?(String)
         raise GrpcFieldError.new(
           "this message's frame flag says the payload is COMPRESSED, and it did not inflate: " \

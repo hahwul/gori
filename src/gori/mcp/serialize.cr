@@ -1063,10 +1063,11 @@ module Gori
             # One output budget for the whole body, not one per message (`Protobuf::JsonBudget`).
             budget = Protobuf::JsonBudget.new
             encoding = Proxy::H2::Grpc.encoding(head)
+            plains = Proxy::H2::Grpc.payloads(msgs.first(GRPC_MSGS_MAX), encoding)
             j.field "messages" do
               j.array do
                 msgs.first(GRPC_MSGS_MAX).each_with_index do |m, i|
-                  plain = m.trailer ? m.data : Proxy::H2::Grpc.payload(m, encoding)
+                  plain = plains[i]
                   j.object do
                     j.field "index", i
                     j.field "compressed", m.compressed

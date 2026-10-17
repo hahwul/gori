@@ -203,7 +203,7 @@ gori decodes gRPC payloads from the protobuf wire format itself. There is no sch
 
 **Ambiguity is reported, not resolved.** Without a schema a length-delimited field is genuinely several things at once: it is always raw bytes, it is a string when the payload is valid UTF-8, and it is a nested message when the payload parses cleanly as one. gori lists every reading that fits and shows each of them, under a one-line note saying none is authoritative. Picking a winner is the failure this decoder is written to avoid: a guess that reads as a fact is worse than the bytes.
 
-**A compressed message is inflated first.** The gRPC frame's `0x01` flag says the payload is compressed, and the stream's `grpc-encoding` names the codec. For `gzip`, `deflate` and `identity` gori inflates the message and decodes it like any other; the message header says so (`(gzip, inflated 120b)`, and `encoding` / `inflated_size` in the JSON). The inflation is a view only: the captured bytes are what is stored and resent. A message that would inflate past 4 MiB is refused as a decompression bomb rather than inflated.
+**A compressed message is inflated first.** The gRPC frame's `0x01` flag says the payload is compressed, and the stream's `grpc-encoding` names the codec. For `gzip`, `deflate` and `identity` gori inflates the message and decodes it like any other; the message header says so (`(gzip, inflated 120b)`, and `encoding` / `inflated_size` in the JSON). The inflation is a view only: the captured bytes are what is stored and resent. A message that would inflate past 4 MiB is refused as a decompression bomb rather than inflated, and one body inflates to at most 16 MiB across all its messages; the rest stay bytes.
 
 Two payloads deliberately stay hex, on every surface:
 

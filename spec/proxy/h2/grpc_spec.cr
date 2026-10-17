@@ -379,10 +379,22 @@ describe "Grpc.inflate / compress" do
     Grpc.inflate("gzip", Grpc.compress("gzip", Bytes.new(1024)).not_nil!, max_out: 1024).should be_a(Bytes)
   end
 
-  it "inflates only a compressed message (payload)" do
+  it "inflates only compressed, non-trailer messages (payloads)" do
     gz = Grpc.compress("gzip", data).not_nil!
-    Grpc.payload(Grpc::Message.new(true, gz), "gzip").should eq(data)
-    Grpc.payload(Grpc::Message.new(false, data), "snappy").should eq(data)
+    plains = Grpc.payloads([Grpc::Message.new(true, gz), Grpc::Message.new(false, data),
+                            Grpc::Message.new(true, gz, trailer: true)], "gzip")
+    plains.should eq([data, data, gz])
+  end
+
+  # One cap per BODY, not per frame: many small bombs must not add up to hundreds of MiB.
+  it "keeps a body of many bomb frames within one inflate budget" do
+    bomb = Grpc.compress("gzip", Bytes.new(1024)).not_nil!
+    msgs = Array.new(10) { Grpc::Message.new(true, bomb) }
+    plains = Grpc.payloads(msgs, "gzip", budget: 3000)
+    inflated = plains.select(Bytes)
+    inflated.size.should eq(2)
+    inflated.sum(&.size).should be <= 3000
+    plains[2..].each { |p| p.as(String).should contain("budget") }
   end
 
   it "reads grpc-encoding off a head, case-insensitively" do

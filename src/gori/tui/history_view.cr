@@ -4659,7 +4659,7 @@ module Gori::Tui
       return ["(no complete gRPC messages — streaming or partial)"] if msgs.empty? && note.nil?
       # Each compressed message inflated ONCE (#1629), shared by the legend and the rows.
       encoding = Proxy::H2::Grpc.encoding(head)
-      plains = msgs.map { |m| m.trailer ? m.data : Proxy::H2::Grpc.payload(m, encoding) }
+      plains = Proxy::H2::Grpc.payloads(msgs, encoding)
       lines = [] of String
       # The legend belongs above the messages and exactly once — see ProtobufTree::NOTE.
       if ProtobufTree.legend?(msgs, plains, tree)
