@@ -50,6 +50,7 @@ require "./tools/import"
 require "./tools/intercept"
 require "./tools/issues"
 require "./tools/jobs"
+require "./tools/ws_session"
 require "./tools/links"
 require "./tools/evidence"
 require "./tools/retest"
@@ -413,6 +414,7 @@ module Gori
         @sequence_jobs = {} of String => SequenceJob
         @discover_jobs = {} of String => DiscoverJob
         @authorize_jobs = {} of String => AuthorizeJob
+        @ws_jobs = {} of String => WsSessionJob
         @oast_mcp = {} of String => OastMcpSession
         @job_seq = 0
         # switch_project reopens @store; @owns_store tracks whether WE opened the
@@ -1328,6 +1330,39 @@ module Gori
         end
       end
 
+      # A persistent WebSocket session (#1630). Unlike its five siblings there is no runner
+      # fiber: the session owns its OWN reader, so `status` is read off the socket rather than
+      # landed by `finalize_job`, and `finalized` is set true at birth.
+      class WsSessionJob < Job
+        getter session : Repeater::WsSession
+        getter repeater_id : Int64
+        # The open was `verbatim`: later TEXT messages skip `Env.expand` too (the session's
+        # sender already skips the binding pass under the same flag).
+        getter? verbatim : Bool
+
+        def initialize(id : String, audit : JobAudit, db_path : String?, @session, @repeater_id, @verbatim)
+          super(id, audit, db_path)
+          self.finalized = true
+        end
+
+        # :running while the socket is open; :stopped once a stop was asked, else :done when
+        # the server or the network ended it. Read off the session, so a server-side CLOSE
+        # between polls shows without a poller fiber to land it.
+        def status : Symbol
+          if @status == :running && (stop_requested_at_ms || @session.closed?)
+            @status = stop_requested_at_ms ? :stopped : :done
+            @ended_at_ms ||= Time.utc.to_unix_ms
+          end
+          @status
+        end
+
+        # `WsSession#close` BLOCKS for its CLOSE grace, so it never runs on the MCP worker.
+        private def halt : Nil
+          session = @session
+          spawn(name: "gori-mcp-ws-close") { session.close }
+        end
+      end
+
       # Second spellings of one argument, per tool: alias → the name the handler reads (#1393).
       #
       # The same object is `flow_id` on nine tools and `id` on get_flow/delete_flow; a repeater
@@ -1506,6 +1541,7 @@ module Gori
           list_authorize_tools j
           list_cache_deception_tools j
           list_jobs_tools j
+          list_ws_session_tools j
         end
       end
 

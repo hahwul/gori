@@ -113,6 +113,7 @@ module Gori
           drained.receive
           # After the worker has drained, so a still-running switch_project cannot re-announce
           # behind us. The store is closed by the caller (cli/mcp.cr); the marker is ours (#815).
+          @tools.close_ws_sessions # live WS sessions must not outlive the process (#1630)
           @tools.release_presence
         end
       end

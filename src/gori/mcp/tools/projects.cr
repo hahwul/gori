@@ -213,6 +213,10 @@ module Gori
         # (oast_start/poll), and must not leave through the old project's jump host and creds.
         Settings.load_project_network(nil, bind: false)
         Gori::Protobuf::Schemas.clear
+        # A live WebSocket session is bound to the project it was opened in: it must not
+        # outlive the binding (#1630). Its CLOSE handshake runs in the background.
+        close_ws_sessions
+        @ws_jobs.clear
         @store.try(&.close)
         @store = nil
         @oast_mcp.reject! { |_, o| !o.store_session_id.nil? } # see `bind_project`
@@ -298,6 +302,9 @@ module Gori
         # session. Drop those handles — the sessions themselves are persisted and resumable in
         # their own project. Ad-hoc oast_start handles carry no row and stay pollable.
         @oast_mcp.reject! { |_, o| !o.store_session_id.nil? }
+        # And every live WebSocket session: it dialled the old project's origin (#1630).
+        close_ws_sessions
+        @ws_jobs.clear
         @project_name = proj.name
         @project_slug = reg.slug_of(proj)
         @project_id = reg.id_of(proj)

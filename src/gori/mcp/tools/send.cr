@@ -1095,23 +1095,9 @@ module Gori
       @[Tool("send_websocket", gated: true, agent_action: true, env_refresh: true, permission: "send")]
       private def send_websocket(h) : Result
         return err("request cancelled", "CANCELLED") if cancelled?
-        repeater_id = int(h, "repeater_id")
-        return Result.new(id_error(h, "repeater_id"), is_error: true) unless repeater_id
-        repeater = store.get_repeater(repeater_id)
-        return not_found("no repeater with id #{repeater_id}") unless repeater
-        repeater_request_text = String.new(repeater.request)
-        # `replayable?`: both handshakes qualify — an RFC 6455 `Upgrade:` head and an RFC 8441
-        # extended CONNECT over h2 (#733). `WsEngine` reads the transport off these same bytes.
-        unless Repeater::WsEngine.replayable?(repeater_request_text)
-          return Result.new("repeater #{repeater_id} is not a WebSocket handshake (neither an " \
-                            "RFC 6455 `Upgrade:` request nor an RFC 8441 extended CONNECT)",
-            is_error: true)
-        end
-        if repeater.ws_http_only?
-          return err("repeater #{repeater_id} is stored as HTTP-only (ws_http_only): its handshake is sent " \
-                     "as an ordinary request — use send_request{repeater_id}, or update_repeater " \
-                     "{ws_http_only:false} for the framed exchange", "INVALID_ARGUMENT", field: "repeater_id")
-        end
+        found = ws_repeater(h)
+        return found if found.is_a?(Result)
+        repeater_id, repeater = found
 
         issue_id = int(h, "issue_id")
         return Result.new(id_error(h, "issue_id"), is_error: true) if issue_id.nil? && present?(h, "issue_id")
@@ -1135,17 +1121,9 @@ module Gori
         # `describes?`, not `present?`: a schema-filling client's `"messages":""` or `[]` is
         # absent, so the session's stored frames go out instead of none at all.
         if describes?(h, "messages")
-          if arr = h["messages"]?.try(&.as_a?)
-            arr.each do |item|
-              msg, perr = ws_out_message_item(item)
-              return Result.new(ws_entry_error("messages", item, perr), is_error: true) unless msg
-              source << msg
-            end
-          elsif text = str(h, "messages")
-            source = ws_text_lines(text)
-          else
-            return Result.new("invalid 'messages' (expected a string or an array of strings or objects)", is_error: true)
-          end
+          parsed = ws_call_messages(h)
+          return parsed if parsed.is_a?(Result)
+          source = parsed
           field = "messages"
         else
           # A `[gori]` advisory captured on the out direction is gori talking about the
@@ -1165,56 +1143,16 @@ module Gori
         # token through unchanged, so an invalid-UTF-8 TEXT payload — the §8.1/§5.6 validation
         # test case — reaches the wire as the operator captured it. Scrubbing rewrote it to
         # U+FFFD, changing 9 bytes into 13, and sent that with no warning.
-        out_messages = source.map do |m|
-          payload = m.text? && !seeded && !verbatim ? Env.expand(String.new(m.payload)).to_slice : m.payload
-          Repeater::WsEngine::OutMsg.new(m.opcode, payload, m.shape, seeded)
-        end
+        out_messages = ws_out_msgs(source, seeded || verbatim, seeded)
 
-        # Scope gate before the outbound handshake (same policy as send_request).
-        ob = outbound(bool_arg(h, "allow_unscoped", false))
-        verify = !bool_arg(h, "insecure", false) && @verify_upstream
         # The session's stored setting, overridable per call — a handshake test wants to run
         # it both ways against the same session without editing the session. Read up here with
         # the other flags so an unintelligible value refuses before the issue link is written.
         keep_key = bool_arg(h, "keep_sec_websocket_key", repeater.ws_keep_key?)
-        plan = begin
-          Repeater::Plan.build(Repeater::PlanOptions.new([repeater.request],
-            default_target: repeater.target, sni: repeater.sni, verify: verify,
-            # `verbatim` reaches the handshake HEAD, exactly as `gori run repeater send`
-            # threads it through `session_plan_options`. (The head deliberately does NOT take
-            # the `seeded` provenance the MESSAGES take: `repeaters.request` is rewritable by
-            # `update_repeater` while `flow_id` persists, so a flow id is not evidence that
-            # THOSE bytes are still the capture's — while nothing but a flow seed ever writes
-            # a captured `ws_messages` row's payload.)
-            expand_request: !verbatim,
-            # …and its send-seam half, which the head needs for the same reason the MESSAGES
-            # above needed `!verbatim`: `expand_request` stops the builder's env var pass, and
-            # a DECLARED session binding resolves one layer further down, inside
-            # `Repeater::Sender`. Without this a `verbatim` handshake carrying `$TOKEN` — a
-            # captured `Sec-WebSocket-Protocol`, an operator's own probe — went out with the
-            # live value spliced in. `expand_messages` reads the same flag off the Sender, so
-            # the handshake and the frames of one exchange answer alike.
-            expand_bindings: !verbatim,
-            # The session's stored fingerprint (#844), overridable per call the way `sni` and
-            # `keep_sec_websocket_key` are. WS is a real TLS dial on `wss://`, so a session
-            # saved as `chrome` has to hand its handshake to `WsEngine` too — leaving it out
-            # here would make this the one send surface that ignored the tab's own choice.
-            tls_preset: send_tls_preset(h, repeater.tls_preset),
-            overrides: HostOverrides.load(store)), ob)
-        rescue ex : Repeater::PlanError
-          return send_plan_error(ex, "repeater_id")
-        end
+        gated = ws_gated_plan(h, repeater, verbatim)
+        return gated if gated.is_a?(Result)
+        plan, sc = gated
         host = plan.host
-        # Anchor on the same scheme://host/TARGET url send_request uses (Outbound.scope_url).
-        # Checking a bare "/" made a path-scoped include (e.g. string:/chat) refuse the very
-        # WS repeater it was written to allow, while the identical send_request passed.
-        upgrade = plan.scope_requests.first? || plan.bytes
-        sc = ob.check(request_scope_url(plan, upgrade), host, request_exclude_url(plan, upgrade), plan.port)
-        return scope_blocked(sc) if sc.blocked?
-        # Layer 2 (Sandbox) — allow_unscoped does not lift it; refuse before the link write.
-        if reason = plan.refusal
-          return sandbox_blocked(reason, host, "repeater_id")
-        end
         return err("request cancelled", "CANCELLED") if cancelled?
         # Scope passed — now it's safe to persist the issue link.
         if issue_id && !link_issue_repeater(issue_id, repeater_id)
@@ -1290,55 +1228,7 @@ module Gori
                                out_seen += 1
                                src
                              end
-                  j.object do
-                    j.field "direction", message.direction
-                    j.field "opcode", message.opcode
-                    j.field "origin", Serialize.ws_origin(message.direction)
-                    j.field "type", Serialize.ws_frame_type(message.opcode)
-                    # What was actually FRAMED, not just what was meant. An agent driving a
-                    # §5.1/§5.2/§5.4 test has to be able to read back that the unmasked frame,
-                    # the RSV1 bit or the lying length header really went out — a transcript
-                    # that only echoes the payload is asking to be taken on trust.
-                    j.field "frame", Store::WsOutMessage.new(message.opcode, message.payload, message.shape).shape_label(message.direction == "out")
-                    if code = ws_close_code(message)
-                      j.field "close_code", code
-                      reason = message.payload[2, message.payload.size - 2]
-                      j.field "close_reason", Serialize.text(String.new(reason).scrub) unless reason.empty?
-                    end
-                    # ONE masked buffer feeds both renderings, so they cannot disagree.
-                    # They did: `payload` ran through `mask_secrets` while `payload_base64`
-                    # beside it was a bare encode of the raw bytes — and since masking is
-                    # the exact inverse of the expansion, the same object reported the
-                    # STORED spelling in one field and printed the substituted value in the
-                    # clear in the next (`bad\xff\xfeWHEREVAL`, base64, unmasked). Masking a
-                    # value in one rendering and not another is not masking it.
-                    masked = Env.mask_secrets(String.new(message.payload)).to_slice
-                    if message.opcode == 1
-                      j.field "payload", String.new(masked).scrub
-                      # JSON-RPC has no way to carry a byte that is not valid UTF-8, so
-                      # `payload` above is U+FFFD-substituted for exactly the payload an
-                      # §8.1/§5.6 test is about. The real bytes go beside it instead of
-                      # being unreadable on every surface (they are in the BLOB column).
-                      unless String.new(masked).valid_encoding?
-                        j.field "payload_base64", Base64.strict_encode(masked)
-                      end
-                    else
-                      j.field "binary", true
-                      j.field "payload_base64", Base64.strict_encode(masked)
-                    end
-                    # Only when it FIRED — the same rule `request_line_rewritten` follows
-                    # (`send_request`): gori changed the operator's bytes, so the surface
-                    # reporting the send has to say so. Masking makes the change invisible
-                    # in `payload` on its own, because it maps the substituted value back to
-                    # the `$NAME` that produced it, and the result then reads exactly like a
-                    # byte-exact replay. The AUTHORED form goes beside it so an agent can see
-                    # both ends of the substitution rather than infer one.
-                    if authored && authored.payload != message.payload
-                      j.field "payload_expanded", true
-                      j.field "payload_authored",
-                        Serialize.text(Env.mask_secrets(String.new(authored.payload)).scrub)
-                    end
-                  end
+                  emit_ws_message(j, message, authored)
                 end
               end
             end
@@ -1347,6 +1237,163 @@ module Gori
         Result.new(payload, is_error: !result.ok?)
       rescue ex : Gori::Error
         Result.new(ex.message || "invalid WebSocket request arguments", is_error: true)
+      end
+
+      # The WebSocket repeater `repeater_id` names, or the refusal to return as-is. Shared by
+      # `send_websocket` and `ws_session_open`, so the two refuse the same rows alike.
+      private def ws_repeater(h) : {Int64, Store::RepeaterRecord} | Result
+        repeater_id = int(h, "repeater_id")
+        return Result.new(id_error(h, "repeater_id"), is_error: true) unless repeater_id
+        repeater = store.get_repeater(repeater_id)
+        return not_found("no repeater with id #{repeater_id}") unless repeater
+        repeater_request_text = String.new(repeater.request)
+        # `replayable?`: both handshakes qualify — an RFC 6455 `Upgrade:` head and an RFC 8441
+        # extended CONNECT over h2 (#733). `WsEngine` reads the transport off these same bytes.
+        unless Repeater::WsEngine.replayable?(repeater_request_text)
+          return Result.new("repeater #{repeater_id} is not a WebSocket handshake (neither an " \
+                            "RFC 6455 `Upgrade:` request nor an RFC 8441 extended CONNECT)",
+            is_error: true)
+        end
+        if repeater.ws_http_only?
+          return err("repeater #{repeater_id} is stored as HTTP-only (ws_http_only): its handshake is sent " \
+                     "as an ordinary request — use send_request{repeater_id}, or update_repeater " \
+                     "{ws_http_only:false} for the framed exchange", "INVALID_ARGUMENT", field: "repeater_id")
+        end
+        {repeater_id, repeater}
+      end
+
+      # A call's `messages` argument: an array of `ws_out_message_item` entries, or a string
+      # of TEXT lines. Shared by `send_websocket` and `ws_session_send`.
+      private def ws_call_messages(h) : Array(Store::WsOutMessage) | Result
+        if arr = h["messages"]?.try(&.as_a?)
+          arr.map do |item|
+            msg, perr = ws_out_message_item(item)
+            return Result.new(ws_entry_error("messages", item, perr), is_error: true) unless msg
+            msg
+          end
+        elsif text = str(h, "messages")
+          ws_text_lines(text)
+        else
+          Result.new("invalid 'messages' (expected a string or an array of strings or objects)", is_error: true)
+        end
+      end
+
+      # The frames to hand the engine: TEXT payloads take `Env.expand` unless `literal`.
+      # `evidence` marks captured bytes, which the send seam's binding pass leaves alone.
+      private def ws_out_msgs(source : Array(Store::WsOutMessage), literal : Bool,
+                              evidence : Bool = false) : Array(Repeater::WsEngine::OutMsg)
+        source.map do |m|
+          payload = m.text? && !literal ? Env.expand(String.new(m.payload)).to_slice : m.payload
+          Repeater::WsEngine::OutMsg.new(m.opcode, payload, m.shape, evidence)
+        end
+      end
+
+      # The repeater's handshake as a plan, through Layer 1 (scope) and Layer 2 (sandbox), or
+      # the refusal. Shared by `send_websocket` and `ws_session_open`: a session's later
+      # messages ride the socket this one verdict admitted.
+      private def ws_gated_plan(h, repeater : Store::RepeaterRecord, verbatim : Bool) : {Repeater::Plan, ScopeCheck} | Result
+        # Scope gate before the outbound handshake (same policy as send_request).
+        ob = outbound(bool_arg(h, "allow_unscoped", false))
+        verify = !bool_arg(h, "insecure", false) && @verify_upstream
+        plan = begin
+          Repeater::Plan.build(Repeater::PlanOptions.new([repeater.request],
+            default_target: repeater.target, sni: repeater.sni, verify: verify,
+            # `verbatim` reaches the handshake HEAD, exactly as `gori run repeater send`
+            # threads it through `session_plan_options`. (The head deliberately does NOT take
+            # the `seeded` provenance the MESSAGES take: `repeaters.request` is rewritable by
+            # `update_repeater` while `flow_id` persists, so a flow id is not evidence that
+            # THOSE bytes are still the capture's — while nothing but a flow seed ever writes
+            # a captured `ws_messages` row's payload.)
+            expand_request: !verbatim,
+            # …and its send-seam half, which the head needs for the same reason the MESSAGES
+            # above needed `!verbatim`: `expand_request` stops the builder's env var pass, and
+            # a DECLARED session binding resolves one layer further down, inside
+            # `Repeater::Sender`. Without this a `verbatim` handshake carrying `$TOKEN` — a
+            # captured `Sec-WebSocket-Protocol`, an operator's own probe — went out with the
+            # live value spliced in. `expand_messages` reads the same flag off the Sender, so
+            # the handshake and the frames of one exchange answer alike.
+            expand_bindings: !verbatim,
+            # The session's stored fingerprint (#844), overridable per call the way `sni` and
+            # `keep_sec_websocket_key` are. WS is a real TLS dial on `wss://`, so a session
+            # saved as `chrome` has to hand its handshake to `WsEngine` too — leaving it out
+            # here would make this the one send surface that ignored the tab's own choice.
+            tls_preset: send_tls_preset(h, repeater.tls_preset),
+            overrides: HostOverrides.load(store)), ob)
+        rescue ex : Repeater::PlanError
+          return send_plan_error(ex, "repeater_id")
+        end
+        host = plan.host
+        # Anchor on the same scheme://host/TARGET url send_request uses (Outbound.scope_url).
+        # Checking a bare "/" made a path-scoped include (e.g. string:/chat) refuse the very
+        # WS repeater it was written to allow, while the identical send_request passed.
+        upgrade = plan.scope_requests.first? || plan.bytes
+        sc = ob.check(request_scope_url(plan, upgrade), host, request_exclude_url(plan, upgrade), plan.port)
+        return scope_blocked(sc) if sc.blocked?
+        # Layer 2 (Sandbox) — allow_unscoped does not lift it; refuse before the link write.
+        if reason = plan.refusal
+          return sandbox_blocked(reason, host, "repeater_id")
+        end
+        {plan, sc}
+      end
+
+      # One transcript row of a WebSocket exchange. `authored` is the operator's frame before
+      # expansion, for an "out" row whose source is known; `seq` / `auto` are a live session's
+      # (`WsSession::Entry`).
+      private def emit_ws_message(j : JSON::Builder, message : Repeater::WsEngine::Message,
+                                  authored : Store::WsOutMessage? = nil, *, seq : Int64? = nil,
+                                  auto : Bool = false) : Nil
+        j.object do
+          j.field "seq", seq if seq
+          # A heartbeat reply the session wrote by itself, not the agent.
+          j.field "auto_reply", true if auto
+          j.field "direction", message.direction
+          j.field "opcode", message.opcode
+          j.field "origin", Serialize.ws_origin(message.direction)
+          j.field "type", Serialize.ws_frame_type(message.opcode)
+          # What was actually FRAMED, not just what was meant. An agent driving a
+          # §5.1/§5.2/§5.4 test has to be able to read back that the unmasked frame,
+          # the RSV1 bit or the lying length header really went out — a transcript
+          # that only echoes the payload is asking to be taken on trust.
+          j.field "frame", Store::WsOutMessage.new(message.opcode, message.payload, message.shape).shape_label(message.direction == "out")
+          if code = ws_close_code(message)
+            j.field "close_code", code
+            reason = message.payload[2, message.payload.size - 2]
+            j.field "close_reason", Serialize.text(String.new(reason).scrub) unless reason.empty?
+          end
+          # ONE masked buffer feeds both renderings, so they cannot disagree.
+          # They did: `payload` ran through `mask_secrets` while `payload_base64`
+          # beside it was a bare encode of the raw bytes — and since masking is
+          # the exact inverse of the expansion, the same object reported the
+          # STORED spelling in one field and printed the substituted value in the
+          # clear in the next (`bad\xff\xfeWHEREVAL`, base64, unmasked). Masking a
+          # value in one rendering and not another is not masking it.
+          masked = Env.mask_secrets(String.new(message.payload)).to_slice
+          if message.opcode == 1
+            j.field "payload", String.new(masked).scrub
+            # JSON-RPC has no way to carry a byte that is not valid UTF-8, so
+            # `payload` above is U+FFFD-substituted for exactly the payload an
+            # §8.1/§5.6 test is about. The real bytes go beside it instead of
+            # being unreadable on every surface (they are in the BLOB column).
+            unless String.new(masked).valid_encoding?
+              j.field "payload_base64", Base64.strict_encode(masked)
+            end
+          else
+            j.field "binary", true
+            j.field "payload_base64", Base64.strict_encode(masked)
+          end
+          # Only when it FIRED — the same rule `request_line_rewritten` follows
+          # (`send_request`): gori changed the operator's bytes, so the surface
+          # reporting the send has to say so. Masking makes the change invisible
+          # in `payload` on its own, because it maps the substituted value back to
+          # the `$NAME` that produced it, and the result then reads exactly like a
+          # byte-exact replay. The AUTHORED form goes beside it so an agent can see
+          # both ends of the substitution rather than infer one.
+          if authored && authored.payload != message.payload
+            j.field "payload_expanded", true
+            j.field "payload_authored",
+              Serialize.text(Env.mask_secrets(String.new(authored.payload)).scrub)
+          end
+        end
       end
 
       # The refusal for a `send_websocket` whose TEXT payloads still name a var that resolves

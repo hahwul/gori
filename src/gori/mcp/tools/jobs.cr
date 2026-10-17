@@ -9,7 +9,7 @@ module Gori
       private def list_jobs : Result
         Result.new(JSON.build do |j|
           j.object do
-            j.field "count", @jobs.size + @mine_jobs.size + @discover_jobs.size + @sequence_jobs.size + @authorize_jobs.size
+            j.field "count", @jobs.size + @mine_jobs.size + @discover_jobs.size + @sequence_jobs.size + @authorize_jobs.size + @ws_jobs.size
             j.field("jobs") do
               j.array do
                 @jobs.each_value do |f|
@@ -74,6 +74,17 @@ module Gori
                     emit_job_project(j, a)
                   end
                 end
+                @ws_jobs.each_value do |w|
+                  j.object do
+                    j.field "job_id", w.id
+                    j.field "kind", "ws_session"
+                    j.field "status", w.status.to_s
+                    j.field "open", !w.session.closed?
+                    j.field "messages", w.session.transcript.size
+                    j.field "target", Serialize.text(w.audit.target)
+                    emit_job_project(j, w)
+                  end
+                end
               end
             end
           end
@@ -83,7 +94,7 @@ module Gori
       # Each async kind's id prefix (`fuzz_start` mints `fz_1`, `mine_start` `mn_2`, …) — the
       # same dispatch `get_job` does on the maps, spelled for an id no map holds any more.
       JOB_ID_PREFIXES = {"fz_" => "fuzz", "mn_" => "mine", "ds_" => "discover",
-                         "sq_" => "sequence", "az_" => "authorize"}
+                         "sq_" => "sequence", "az_" => "authorize", "ws_" => "ws_session"}
 
       # The kind of job `id` names: the map that holds it, else its prefix, else nil.
       private def job_kind_of(id : String) : String?
@@ -92,6 +103,7 @@ module Gori
         return "discover" if @discover_jobs.has_key?(id)
         return "sequence" if @sequence_jobs.has_key?(id)
         return "authorize" if @authorize_jobs.has_key?(id)
+        return "ws_session" if @ws_jobs.has_key?(id)
         JOB_ID_PREFIXES.find { |prefix, _| id.starts_with?(prefix) }.try(&.[1])
       end
 
@@ -145,6 +157,8 @@ module Gori
           sequence_status(h)
         elsif @authorize_jobs.has_key?(id)
           authorize_status(h)
+        elsif @ws_jobs.has_key?(id)
+          ws_session_status(h)
         else
           not_found("no job #{id}")
         end
@@ -157,7 +171,7 @@ module Gori
       private def stop_job(h) : Result
         id = str(h, "job_id")
         return err("missing required 'job_id'", "INVALID_ARGUMENT", field: "job_id") if id.nil? || id.empty?
-        job = @jobs[id]? || @mine_jobs[id]? || @discover_jobs[id]? || @sequence_jobs[id]? || @authorize_jobs[id]?
+        job = @jobs[id]? || @mine_jobs[id]? || @discover_jobs[id]? || @sequence_jobs[id]? || @authorize_jobs[id]? || @ws_jobs[id]?
         return not_found("no job #{id}") unless job
         if mismatch = job_project_mismatch(job)
           return mismatch
@@ -244,9 +258,12 @@ module Gori
           "An authorize row carries bypass_count, so an access-control finding is visible here." { }
 
         tool j, "get_job",
-          "Full status of a fuzz, mine, discover, sequence, or authorize job by id (dispatches " \
-          "by the id prefix), so you can poll any job with one tool." do |s|
-          s.field "job_id", strprop("a fuzz (fz_*), mine (mn_*), discover (ds_*), sequence (sq_*), or authorize (az_*) job id"), required: true
+          "Full status of a fuzz, mine, discover, sequence, authorize, or WebSocket-session " \
+          "(ws_*) job by id (dispatches by the id prefix), so you can poll any job with one " \
+          "tool. For a ws_* session this returns the live transcript; pass 'after' to read " \
+          "only the rows past a cursor from the previous read." do |s|
+          s.field "job_id", strprop("a fuzz (fz_*), mine (mn_*), discover (ds_*), sequence (sq_*), authorize (az_*), or WebSocket-session (ws_*) job id"), required: true
+          s.field "after", intprop("ws_* sessions only: return only transcript rows with seq greater than this cursor (from a previous read's 'cursor'); default 0, the whole transcript")
         end
 
         tool j, "stop_job",
