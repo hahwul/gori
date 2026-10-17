@@ -4978,8 +4978,9 @@ same rule engine h1 does, and re-emits:
   after the request) was forwarded at the time, so it seeds the owned stream's window.
 - **A declared `content-length` holds the head** until the body is in, then goes out true. On a
   request that holds later stream opens behind it (§5.1.1), the same price an intercept hold
-  pays, under the same `HOLD_WAIT_DEADLINE`: past it the head goes out as it arrived and the body
-  follows unmodified. Stripping the field instead was rejected: it would change every buffered
+  pays. `HOLD_WAIT_DEADLINE` bounds a STALL there — no DATA for that long — and past it the head
+  goes out as it arrived and the body follows unmodified. A held response head blocks no other
+  stream, so it has no deadline: a slow body is still rewritten, as it was on the h1 path. Stripping the field instead was rejected: it would change every buffered
   request's head, matched or not, which is the protocol-under-test drift the downgrade was
   criticised for.
 - **A request is buffered only when it declares its length** (and does not ask for

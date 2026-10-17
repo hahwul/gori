@@ -966,6 +966,66 @@ describe "H2::StreamGate body rules (#1628)" do
     end
   end
 
+  # Review r2 #1: credit a client gives a stream AFTER its response ended (a slow reader acking
+  # what it consumed) used to stay recorded for good, and past 1,024 such streams the stall the
+  # pre-response credit fixes came back for every new one.
+  it "keeps spending pre-response credit after many streams were credited late" do
+    with_rules do |rules, ic|
+      rules.add(RESP, BODY, "b", "c", host: "127.0.0.1")
+      body = "b" * 300_000
+      rig = BodyRig.new(rules, ic) { |s, _| s < 2_049_u32 ? {ok, "ok".to_slice, nil} : {ok, body.to_slice, nil} }
+      begin
+        stream = 1_u32
+        1_024.times do
+          rig.client.send_head(stream, get("/x"), true)
+          rig.client.wait_done(stream).should be_true
+          rig.client.bump(stream, 1_000)
+          stream += 2
+        end
+        rig.client.stream_ack = 500_000_i64
+        rig.client.send_head(stream, get("/x"), true)
+        rig.client.bump(stream, 1_000_000)
+        rig.client.wait_done(stream).should be_true
+        rig.client.body_of(stream).should eq("c" * 300_000)
+        (rig.client.errors + rig.wait_origin.errors).should be_empty
+      ensure
+        rig.close
+      end
+    end
+  end
+
+  # The same, through the other exit: the client credits a stream up front and the ORIGIN resets
+  # it before any response, which only the response gate's own write of the RST sees.
+  it "keeps spending pre-response credit after many origin resets" do
+    with_rules do |rules, ic|
+      rules.add(RESP, BODY, "b", "c", host: "127.0.0.1")
+      body = "b" * 300_000
+      rig = BodyRig.new(rules, ic) do |s, p|
+        next {ok, body.to_slice, nil} if s >= 2_049_u32
+        p.send_rst(s)
+        nil
+      end
+      begin
+        stream = 1_u32
+        1_024.times do
+          rig.client.send_head(stream, get("/x"), true)
+          rig.client.bump(stream, 1_000)
+          stream += 2
+        end
+        50.times { break if rig.client.resets.size == 1_024; sleep 20.milliseconds }
+        rig.client.resets.size.should eq(1_024)
+        rig.client.stream_ack = 500_000_i64
+        rig.client.send_head(stream, get("/x"), true)
+        rig.client.bump(stream, 1_000_000)
+        rig.client.wait_done(stream).should be_true
+        rig.client.body_of(stream).should eq("c" * 300_000)
+        (rig.client.errors + rig.wait_origin.errors).should be_empty
+      ensure
+        rig.close
+      end
+    end
+  end
+
   # GOAWAY names the last stream the origin will process; an owned one below it still finishes.
   it "finishes an owned stream across a GOAWAY" do
     with_rules do |rules, ic|
@@ -987,44 +1047,140 @@ describe "H2::StreamGate body rules (#1628)" do
   end
 end
 
-# Review #2, against the gates directly so the deadline can be short: a request head held for a
-# declared length whose body stalls goes out by `hold_wait_deadline`, and the stream opened
-# behind it goes out after it.
-describe "H2::StreamGate body rules: a stalled body" do
-  it "releases a held request head at the deadline, and the stream behind it" do
+# Against the gates directly, so the deadline can be short.
+private class GatePair
+  getter sink = BodySink.new
+  getter up = IO::Memory.new   # what the origin was sent
+  getter down = IO::Memory.new # what the client was sent
+  getter out_gate : Gori::Proxy::H2::StreamGate
+  getter in_gate : Gori::Proxy::H2::StreamGate
+  @enc_out = HPACK::Encoder.new
+  @enc_in = HPACK::Encoder.new
+
+  def initialize(rules : Gori::Rules, ic : Gori::Interceptor, deadline : Time::Span)
+    host = "api.example.com"
+    assembler = Gori::Proxy::H2::Assembler.new(@sink, host, 443)
+    @out_gate = Gori::Proxy::H2::StreamGate.new("out", @up, 1_i64, @sink, assembler, host, 443, ic,
+      Gori::Proxy::H2::HeadRewrite.new("out", rules, assembler, host, nil, true), body_rewriter: rules)
+    @in_gate = Gori::Proxy::H2::StreamGate.new("in", @down, 1_i64, @sink, assembler, host, 443, ic,
+      Gori::Proxy::H2::HeadRewrite.new("in", rules, assembler, host, nil, true), nil, rules)
+    @out_gate.peer = @in_gate
+    @in_gate.peer = @out_gate
+    @out_gate.hold_wait_deadline = deadline
+    @in_gate.hold_wait_deadline = deadline
+  end
+
+  def request(stream : UInt32, fields : Array({String, String}), end_stream = false) : Nil
+    flags = Frame::END_HEADERS | (end_stream ? Frame::END_STREAM : 0_u8)
+    @out_gate.accept(Frame::Header.new(Frame::Type::Headers.value, flags, stream, @enc_out.encode(fields)))
+  end
+
+  def response(stream : UInt32, fields : Array({String, String})) : Nil
+    @in_gate.accept(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS, stream, @enc_in.encode(fields)))
+  end
+
+  def data(gate : Gori::Proxy::H2::StreamGate, stream : UInt32, body : String, last = false) : Nil
+    gate.accept(Frame::Header.new(Frame::Type::Data.value, last ? Frame::END_STREAM : 0_u8, stream, body.to_slice))
+  end
+
+  def frames(io : IO::Memory) : Array(Frame::Header)
+    frames = [] of Frame::Header
+    reader = IO::Memory.new(io.to_slice)
+    while f = Frame.read(reader)
+      frames << f
+    end
+    frames
+  end
+
+  def close : Nil
+    @out_gate.close
+    @in_gate.close
+  end
+end
+
+private def shape(frames : Array(Frame::Header)) : Array({Frame::Type?, UInt32})
+  frames.map { |w| {w.frame_type, w.stream_id} }
+end
+
+private API = "api.example.com"
+
+describe "H2::StreamGate body rules: the stall deadline" do
+  # Review #2: a request head held for a declared length whose body stalls goes out by the
+  # deadline, and the stream opened behind it goes out after it.
+  it "releases a stalled request head, and the stream behind it" do
     with_rules do |rules, ic|
-      rules.add(REQ, BODY, "one", "ONE", host: "api.example.com")
-      sink = BodySink.new
-      assembler = Gori::Proxy::H2::Assembler.new(sink, "api.example.com", 443)
-      up = IO::Memory.new
-      down = IO::Memory.new
-      out_gate = Gori::Proxy::H2::StreamGate.new("out", up, 1_i64, sink, assembler, "api.example.com", 443, ic,
-        Gori::Proxy::H2::HeadRewrite.new("out", rules, assembler, "api.example.com", nil, true), body_rewriter: rules)
-      in_gate = Gori::Proxy::H2::StreamGate.new("in", down, 1_i64, sink, assembler, "api.example.com", 443, ic,
-        Gori::Proxy::H2::HeadRewrite.new("in", rules, assembler, "api.example.com", nil, true), nil, rules)
-      out_gate.peer = in_gate
-      in_gate.peer = out_gate
-      out_gate.hold_wait_deadline = 50.milliseconds
-      enc = HPACK::Encoder.new
-      head = enc.encode(post("/first", 10, authority: "api.example.com"))
-      out_gate.accept(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS, 1_u32, head))
-      out_gate.accept(Frame::Header.new(Frame::Type::Data.value, 0_u8, 1_u32, "one".to_slice))
-      later = enc.encode(get("/second", "api.example.com"))
-      out_gate.accept(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS | Frame::END_STREAM, 3_u32, later))
-      up.size.should eq(0) # stream 1 waits for its body, stream 3 waits for stream 1
+      rules.add(REQ, BODY, "one", "ONE", host: API)
+      g = GatePair.new(rules, ic, 50.milliseconds)
+      g.request(1_u32, post("/first", 10, authority: API))
+      g.data(g.out_gate, 1_u32, "one")
+      g.request(3_u32, get("/second", API), true)
+      g.up.size.should eq(0) # stream 1 waits for its body, stream 3 waits for stream 1
 
       sleep 150.milliseconds
-      frames = [] of Frame::Header
-      reader = IO::Memory.new(up.to_slice)
-      while f = Frame.read(reader)
-        frames << f
-      end
-      frames.map { |w| {w.frame_type, w.stream_id} }.should eq([
-        {Frame::Type::Headers, 1_u32}, {Frame::Type::Data, 1_u32}, {Frame::Type::Headers, 3_u32},
-      ])
+      frames = g.frames(g.up)
+      shape(frames).should eq([{Frame::Type::Headers, 1_u32}, {Frame::Type::Data, 1_u32}, {Frame::Type::Headers, 3_u32}])
       String.new(frames[1].payload).should eq("one") # the partial body, unmodified
-      out_gate.close
-      in_gate.close
+      g.close
+    end
+  end
+
+  # Review r2 #2: the deadline measures a STALL. A body still arriving is waited for, however
+  # long it takes in total.
+  it "waits for a request body that is slow but still arriving" do
+    with_rules do |rules, ic|
+      rules.add(REQ, BODY, "a", "b", host: API)
+      g = GatePair.new(rules, ic, 80.milliseconds)
+      g.request(1_u32, post("/slow", 6, authority: API))
+      6.times do |i|
+        sleep 40.milliseconds
+        g.data(g.out_gate, 1_u32, "a", i == 5)
+      end
+      frames = g.frames(g.up)
+      shape(frames).should eq([{Frame::Type::Headers, 1_u32}, {Frame::Type::Data, 1_u32}])
+      String.new(frames[1].payload).should eq("bbbbbb") # rewritten: 240 ms in all, never 80 idle
+      g.close
+    end
+  end
+
+  # Review r2 #2: a held RESPONSE head blocks no other stream, so it has no deadline at all.
+  it "waits for a response body however slowly it arrives" do
+    with_rules do |rules, ic|
+      rules.add(RESP, BODY, "one", "ONE", host: API)
+      g = GatePair.new(rules, ic, 30.milliseconds)
+      g.request(1_u32, get("/x", API), true)
+      g.response(1_u32, ok(6))
+      g.data(g.in_gate, 1_u32, "one")
+      sleep 120.milliseconds
+      g.down.size.should eq(0)
+      g.data(g.in_gate, 1_u32, "two", true)
+      frames = g.frames(g.down)
+      shape(frames).should eq([{Frame::Type::Headers, 1_u32}, {Frame::Type::Data, 1_u32}])
+      String.new(frames[1].payload).should eq("ONEtwo")
+      g.close
+    end
+  end
+
+  # Review r2 #3: a request that finished and was rewritten, then waited behind a slower lower
+  # stream, is not stalled. Stream 3 finishes at once; stream 1 keeps trickling, so if stream 3
+  # still counted as held it would be the first judged late, and spilled with a false advisory.
+  it "does not skip a finished request that waited behind a slower one" do
+    with_rules do |rules, ic|
+      rules.add(REQ, BODY, "one", "ONE", host: API)
+      g = GatePair.new(rules, ic, 80.milliseconds)
+      g.request(1_u32, post("/slow", 10, authority: API))
+      g.data(g.out_gate, 1_u32, "o")
+      g.request(3_u32, post("/done", 3, authority: API))
+      g.data(g.out_gate, 3_u32, "one", true)
+      sleep 50.milliseconds
+      g.data(g.out_gate, 1_u32, "n") # stream 1 is still arriving: its stall clock restarts
+      sleep 200.milliseconds         # ...then it stalls, and goes out at the deadline
+      frames = g.frames(g.up)
+      shape(frames).should eq([{Frame::Type::Headers, 1_u32}, {Frame::Type::Data, 1_u32}, {Frame::Type::Data, 1_u32},
+                               {Frame::Type::Headers, 3_u32}, {Frame::Type::Data, 3_u32}])
+      String.new(frames[4].payload).should eq("ONE")
+      done = g.sink.requests.find! { |r| r.target == "/done" }
+      done.advisory.should be_nil
+      g.close
     end
   end
 end

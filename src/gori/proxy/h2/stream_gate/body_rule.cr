@@ -37,9 +37,9 @@
 # A head that declares `content-length` is held (a Slot, the hold machinery's own) until the
 # body is in and the rules have run, then goes out with the length the body actually has. In
 # the request direction that holds later stream OPENS behind it (rule 1 in the class comment);
-# streams already open keep moving, and `HOLD_WAIT_DEADLINE` bounds the wait exactly as it
-# bounds an intercept hold's. A response with no declared length goes out at once and only the
-# DATA waits. Either way a body no rule changed goes out as the peer's own DATA frames.
+# streams already open keep moving, and a body that STALLS for `HOLD_WAIT_DEADLINE` gives the
+# wait up. A held response head blocks no other stream, so it waits however long its body
+# takes. A response with no declared length goes out at once and only the DATA waits. Either way a body no rule changed goes out as the peer's own DATA frames.
 #
 # A REQUEST with no declared length is never buffered. Nothing on the wire tells a finite
 # upload from a full-duplex stream (Connect, ndjson, a hand-rolled RPC) whose client waits for
@@ -81,9 +81,14 @@ class Gori::Proxy::H2::StreamGate
     # Stream credit the receiver granted before gori owned the stream — a client widening its
     # window right after the request, before any response — forwarded at the time, and owed to
     # the stream's window once gori becomes its sender. Response direction only; taken by the
-    # response head, dropped at RST_STREAM and at the end of the response, and capped at
-    # `Assembler::MAX_LIVE_STREAMS` entries.
+    # response head, dropped at RST_STREAM (either side's) and at the end of the response, and
+    # capped at `Assembler::MAX_LIVE_STREAMS` entries by evicting the lowest stream id: an entry
+    # a late WINDOW_UPDATE leaves behind is never read again, and ids only grow, so the lowest
+    # is the stalest — refusing new entries instead would bring back the stall it exists for.
     getter pre_credit = Hash(UInt32, Int64).new(0_i64)
+    # Streams whose response head has passed and whose response has not ended: credit for them
+    # is not "before ownership", so it is not recorded.
+    getter headed = Set(UInt32).new
     # Bytes held in rule buffers across this direction's streams (`MAX_RULE_BUFFERED`).
     property buffered = 0_i64
   end
@@ -211,35 +216,94 @@ class Gori::Proxy::H2::StreamGate
     return 0_i64 unless fc && !@ordered && block.head
     status = HeadCodec.pseudo_of(block.fields, ":status").try(&.to_i?)
     return 0_i64 if status && status < 200
+    fc.headed << block.stream_id unless block.first.end_stream?
     fc.pre_credit.delete(block.stream_id) || 0_i64
   end
 
-  # Take a stream on, after `defer?` has decided whether its head waits. A head that waits for a
-  # declared length gets `HOLD_WAIT_DEADLINE`, the bound an intercept hold's body wait has.
+  # `write`'s bookkeeping on a body-rule connection: the receiver's connection window, and the
+  # end of a response — END_STREAM or a reset, whoever sent it — for `pre_credit`.
+  private def note_written(fc : Flow, frame : Frame::Header) : Nil
+    data = frame.frame_type == Frame::Type::Data
+    fc.window -= frame.payload.size if data
+    return if @ordered
+    reset = frame.frame_type == Frame::Type::RstStream
+    return unless reset || (frame.end_stream? && (data || frame.frame_type == Frame::Type::Headers))
+    forget_response(fc, frame.stream_id)
+  end
+
+  private def forget_response(fc : Flow, stream_id : UInt32) : Nil
+    fc.pre_credit.delete(stream_id) unless fc.pre_credit.empty?
+    fc.headed.delete(stream_id) unless fc.headed.empty?
+  end
+
+  # Take a stream on, after `defer?` has decided whether its head waits. A REQUEST head that
+  # waits for a declared length gets `HOLD_WAIT_DEADLINE` as a stall bound (`held_since`), since
+  # every later stream open waits behind it. A held response head blocks no other stream, so it
+  # waits for its body however slowly the body comes, as it did on the h1 path.
   private def adopt_locked(own : Owned?, slot : Slot?) : Nil
     fc = @flow
     return unless own && fc
     own.slot = slot
     own.head_out = slot.nil?
     fc.owned[own.stream_id] = own
-    return unless slot && own.declares_length?
+    return unless slot && own.declares_length? && @ordered
     own.held_since = Time.instant
-    arm_wait_deadline
+    arm_stall_timer
   end
 
-  # A held head whose body has not finished arriving by the deadline goes out as it arrived and
-  # its body follows unmodified: a declared length says how big the body is, not that it is
-  # coming, and in the request direction every later stream open waits behind it. Run on every
-  # frame and by the deadline's timer, beside `check_waiting_locked`'s identical question.
+  # Whether this gate's stall timer is running (`arm_stall_timer`).
+  @stall_timer = false
+
+  # One timer per gate, not per held head: it sleeps until the earliest held head could have
+  # stalled, checks, and stops once no request head is held. Only a body-rule connection with a
+  # request head held for its declared length ever starts it (P6).
+  private def arm_stall_timer : Nil
+    return if @stall_timer
+    @stall_timer = true
+    spawn do
+      while wait = @mutex.synchronize { next_stall_check }
+        sleep wait
+        begin
+          run_cross(@mutex.synchronize { @closed ? NO_CROSS : (expire_owned_heads_locked; take_deferred_cross(NO_CROSS)) })
+        rescue
+          # A release that writes to a leg already dead raises here, on a spawned fiber with no
+          # caller to unwind to; `arm_wait_deadline` guards its own the same way.
+        end
+        refund_swallowed
+      end
+    end
+  end
+
+  # How long until the earliest held request head could be late, or nil (stopping the timer)
+  # when none is held.
+  private def next_stall_check : Time::Span?
+    fc = @flow
+    earliest = nil.as(Time::Instant?)
+    unless @closed || fc.nil?
+      fc.owned.each_value do |own|
+        since = own.held_since
+        earliest = since if since && own.slot && (earliest.nil? || since < earliest)
+      end
+    end
+    unless earliest
+      @stall_timer = false
+      return nil
+    end
+    {earliest + hold_wait_deadline - Time.instant, 1.millisecond}.max
+  end
+
+  # A held request head whose body has STALLED — no DATA for the deadline — goes out as it
+  # arrived and its body follows unmodified: a declared length says how big the body is, not
+  # that it is coming, and every later stream open waits behind it. Run on every frame and by
+  # the stall timer, beside `check_waiting_locked`'s identical question.
   private def expire_owned_heads_locked : Nil
     fc = @flow
     return unless fc && !fc.owned.empty?
     now = Time.instant
     return unless fc.owned.each_value.any? { |own| late?(own, now) }
     fc.owned.values.select { |own| late?(own, now) }.each do |own|
-      own.held_since = nil
-      spill_locked(fc, own, "its body had not finished arriving after #{hold_wait_deadline.total_seconds.round(1)} s, " \
-                            "so its head went out with the length it declared")
+      spill_locked(fc, own, "its body stopped arriving for #{hold_wait_deadline.total_seconds.round(1)} s " \
+                            "while later requests waited behind it, so its head went out with the length it declared")
     end
   end
 
@@ -304,6 +368,7 @@ class Gori::Proxy::H2::StreamGate
     own.arrived << f
     own.size += f.payload.size
     fc.buffered += f.payload.size
+    own.held_since = Time.instant if own.held_since # a body still arriving has not stalled
     refund_locked(fc, own.stream_id, f.payload.size, f.end_stream?)
     # A PADDED frame carries bytes only `Assembler#data_block` knows how to strip, so the body
     # is one gori will not rewrite — the same call `note_body_frame` makes for a hold.
@@ -321,6 +386,7 @@ class Gori::Proxy::H2::StreamGate
 
   # Give the buffer up: what arrived goes out as it arrived, and the rest follows as it comes.
   private def spill_locked(fc : Flow, own : Owned, why : String) : Nil
+    own.held_since = nil
     skip_body(own.stream_id, why)
     own.spilled = true
     own.complete = true if own.arrived.last?.try(&.end_stream?)
@@ -339,6 +405,8 @@ class Gori::Proxy::H2::StreamGate
   # changed (P7), re-framed DATA when something did, with the held head's length made true.
   private def finish_owned_locked(fc : Flow, own : Owned) : Nil
     own.complete = true
+    # Done arriving: it may still wait behind a lower stream, but it has not stalled.
+    own.held_since = nil
     rw = @body_rewriter
     return unless rw
     entity = Bytes.new(own.size)
@@ -563,7 +631,7 @@ class Gori::Proxy::H2::StreamGate
       when Frame::Type::WindowUpdate then credit_locked(fc, f)
       when Frame::Type::Settings     then settings_locked(fc, f)
       when Frame::Type::RstStream
-        fc.pre_credit.delete(f.stream_id)
+        forget_response(fc, f.stream_id) unless @ordered
         fc.owned[f.stream_id]?.try { |own| reset_owned_locked(fc, own) }
       end
     end
@@ -597,7 +665,10 @@ class Gori::Proxy::H2::StreamGate
   end
 
   private def note_pre_credit(fc : Flow, stream_id : UInt32, n : Int64) : Nil
-    return if fc.pre_credit.size >= Assembler::MAX_LIVE_STREAMS && !fc.pre_credit.has_key?(stream_id)
+    return if fc.headed.includes?(stream_id)
+    if fc.pre_credit.size >= Assembler::MAX_LIVE_STREAMS && !fc.pre_credit.has_key?(stream_id)
+      fc.pre_credit.delete(fc.pre_credit.keys.min)
+    end
     fc.pre_credit[stream_id] += n
   end
 

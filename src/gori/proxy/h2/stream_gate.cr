@@ -1063,11 +1063,7 @@ module Gori::Proxy::H2
     private def write(frame : Frame::Header, pre : Assembler::HeadBlock?) : Nil
       @dst.write(frame.wire_bytes)
       @dst.flush
-      if fc = @flow
-        fc.window -= frame.payload.size if frame.frame_type == Frame::Type::Data
-        # The response is over, and with it any credit the client gave before gori owned it.
-        fc.pre_credit.delete(frame.stream_id) if !@ordered && frame.end_stream? && !fc.pre_credit.empty?
-      end
+      @flow.try { |fc| note_written(fc, frame) }
       @sink.on_h2_frame(@conn_id, @direction, frame.type, frame.flags, frame.stream_id, frame.payload)
       # Session-binding extraction (#501 slice 2), on the frames that were actually WRITTEN.
       # A head the sandbox suppressed or the operator dropped goes to `project`, not here, so
