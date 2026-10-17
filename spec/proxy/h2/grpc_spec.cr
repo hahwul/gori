@@ -335,3 +335,59 @@ describe Gori::Proxy::H2::Grpc do
     Grpc.grpc?("text/plain").should be_false
   end
 end
+
+# #1629: a compressed message is inflated for display, editing and fuzzing — a derived
+# projection, capped so a bomb is refused rather than allocated.
+describe "Grpc.inflate / compress" do
+  data = "hello, inflated world".to_slice
+
+  it "round-trips gzip and deflate" do
+    %w[gzip deflate].each do |enc|
+      packed = Grpc.compress(enc, data).not_nil!
+      packed.should_not eq(data)
+      Grpc.inflate(enc, packed).should eq(data)
+    end
+  end
+
+  it "reads a raw (unwrapped) deflate stream under `deflate`" do
+    io = IO::Memory.new
+    Compress::Deflate::Writer.open(io, &.write(data))
+    Grpc.inflate("deflate", io.to_slice).should eq(data)
+  end
+
+  it "gives identity bytes back and refuses a codec it cannot write" do
+    Grpc.inflate("identity", data).should eq(data)
+    Grpc.compress("snappy", data).should be_nil
+  end
+
+  it "names an unknown or missing encoding instead of raising" do
+    gz = Grpc.compress("gzip", data).not_nil!
+    Grpc.inflate("snappy", gz).as(String).should contain("snappy")
+    Grpc.inflate(nil, gz).as(String).should contain("no grpc-encoding")
+  end
+
+  it "refuses a corrupt or truncated stream" do
+    gz = Grpc.compress("gzip", data).not_nil!
+    Grpc.inflate("gzip", gz[0, gz.size - 4]).should be_a(String)
+    Grpc.inflate("gzip", "not gzip".to_slice).should be_a(String)
+  end
+
+  it "refuses a bomb at the cap instead of inflating it in full" do
+    bomb = Grpc.compress("gzip", Bytes.new(1_000_000)).not_nil!
+    bomb.size.should be < 2_000
+    Grpc.inflate("gzip", bomb, max_out: 1024).as(String).should contain("cap")
+    Grpc.inflate("gzip", Grpc.compress("gzip", Bytes.new(1024)).not_nil!, max_out: 1024).should be_a(Bytes)
+  end
+
+  it "inflates only a compressed message (payload)" do
+    gz = Grpc.compress("gzip", data).not_nil!
+    Grpc.payload(Grpc::Message.new(true, gz), "gzip").should eq(data)
+    Grpc.payload(Grpc::Message.new(false, data), "snappy").should eq(data)
+  end
+
+  it "reads grpc-encoding off a head, case-insensitively" do
+    Grpc.encoding("POST / HTTP/2\r\nGRPC-Encoding: GZip \r\n\r\n".to_slice).should eq("gzip")
+    Grpc.encoding("POST / HTTP/2\r\nhost: x\r\n\r\n".to_slice).should be_nil
+    Grpc.encoding(nil).should be_nil
+  end
+end

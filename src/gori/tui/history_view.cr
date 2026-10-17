@@ -4657,9 +4657,12 @@ module Gori::Tui
       msgs, residual = Proxy::H2::Grpc.scan_wire(head, body)
       note = Proxy::H2::Grpc.framing_error(residual)
       return ["(no complete gRPC messages — streaming or partial)"] if msgs.empty? && note.nil?
+      # Each compressed message inflated ONCE (#1629), shared by the legend and the rows.
+      encoding = Proxy::H2::Grpc.encoding(head)
+      plains = msgs.map { |m| m.trailer ? m.data : Proxy::H2::Grpc.payload(m, encoding) }
       lines = [] of String
       # The legend belongs above the messages and exactly once — see ProtobufTree::NOTE.
-      if ProtobufTree.legend?(msgs, tree)
+      if ProtobufTree.legend?(msgs, plains, tree)
         # With a schema resolved the `|` legend is no longer true of what is drawn, so the
         # line that explains the tree is swapped for the one that names the schema — same
         # slot, same "exactly once" rule.
@@ -4676,8 +4679,8 @@ module Gori::Tui
             lines << "  #{k}: #{k == "grpc-status" ? Proxy::H2::Grpc.status_label(v) : v}"
           end
         else
-          lines << "▸ message ##{i + 1}  #{m.data.size}b#{m.compressed ? "  (compressed)" : ""}"
-          lines.concat(grpc_payload_lines(m, tree, binding))
+          lines << "▸ message ##{i + 1}  #{m.data.size}b  #{ProtobufTree.compression_note(m, plains[i], encoding)}".rstrip
+          lines.concat(grpc_payload_lines(m, plains[i], tree, binding))
         end
       end
       lines << "⚠ #{note}" if note
@@ -4687,10 +4690,15 @@ module Gori::Tui
     # One gRPC message's payload, under its header line. `ProtobufTree.decode?` owns the
     # carve-outs (compressed / trailer), shared with the Repeater transcript so the two panes
     # cannot disagree about which payloads are protobuf.
-    private def grpc_payload_lines(m : Proxy::H2::Grpc::Message, tree : Bool,
+    #
+    # `plain` is the message's inflated payload, or why it has none — the hex keeps the WIRE
+    # octets either way, and a compressed one that did not inflate says why above them.
+    private def grpc_payload_lines(m : Proxy::H2::Grpc::Message, plain : Bytes | String, tree : Bool,
                                    binding : Protobuf::Schemas::Binding? = nil) : Array(String)
-      return hex_preview(m.data) unless ProtobufTree.decode?(m, tree)
-      ProtobufTree.lines(Protobuf.decode(m.data), indent: "  ",
+      unless plain.is_a?(Bytes) && ProtobufTree.decode?(m, plain, tree)
+        return plain.is_a?(String) && tree ? ["  ⚠ #{plain}"] + hex_preview(m.data) : hex_preview(m.data)
+      end
+      ProtobufTree.lines(Protobuf.decode(plain), indent: "  ",
         schema: binding.try(&.schema), type: binding.try(&.type))
     end
 

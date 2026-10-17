@@ -641,7 +641,7 @@ module Gori
         STDERR.puts "gori run fuzz: note: gRPC field position#{g.fields.size == 1 ? "" : "s"} " \
                     "#{named} — through #{g.method_path} → #{g.message_type}. Every other byte of " \
                     "the message is copied from the capture and the 5-byte length prefix follows " \
-                    "the message it now describes"
+                    "the message it now describes#{g.encoding.try { |e| " (the compressed seed is inflated, and each changed message re-compressed as #{e})" }}"
         # …and the OTHER length declaration, when the operator turned its resync off. A
         # re-encoded message is a different size, so `--verbatim` here means every request in
         # the sweep declares the CAPTURE's body length and is rejected at the HTTP framing layer

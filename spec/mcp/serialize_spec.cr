@@ -147,3 +147,30 @@ describe "Gori::MCP::Serialize.extract_rule" do
     out["host"].as_s.should eq("*.acme.test")
   end
 end
+
+# #1629: a compressed gRPC message is inflated under the stream's `grpc-encoding` and decoded
+# like any other — the same projection `gori run history show` and the TUI make.
+describe "Gori::MCP::Serialize.emit_grpc_messages (compressed)" do
+  hello = Bytes[0x0a, 0x05, 0x61, 0x6c, 0x69, 0x63, 0x65] # field 1 = "alice"
+
+  it "inflates a gzip unary message and decodes its fields" do
+    head = "POST /S/M HTTP/2\r\ncontent-type: application/grpc\r\ngrpc-encoding: gzip\r\n\r\n".to_slice
+    body = Gori::Proxy::H2::Grpc.frame(true, Gori::Proxy::H2::Grpc.compress("gzip", hello).not_nil!)
+    g = JSON.parse(JSON.build { |j| j.object { Gori::MCP::Serialize.emit_grpc_messages(j, "grpc", head, body) } })["grpc"]
+    m = g["messages"][0]
+    m["compressed"].as_bool.should be_true
+    m["encoding"].as_s.should eq("gzip")
+    m["inflated_size"].as_i.should eq(hello.size)
+    m["protobuf"]["fields"][0]["string"].as_s.should eq("alice")
+  end
+
+  it "keeps the bytes and says why for a codec gori does not inflate" do
+    head = "POST /S/M HTTP/2\r\ncontent-type: application/grpc\r\ngrpc-encoding: snappy\r\n\r\n".to_slice
+    body = Gori::Proxy::H2::Grpc.frame(true, Bytes[0xab, 0xcd])
+    m = JSON.parse(JSON.build { |j| j.object { Gori::MCP::Serialize.emit_grpc_messages(j, "grpc", head, body) } })["grpc"]["messages"][0]
+    m["encoding"].as_s.should eq("snappy")
+    m["protobuf"]?.should be_nil
+    m["note"].as_s.should contain("snappy")
+    Base64.decode(m["bytes"].as_s).should eq(Bytes[0xab, 0xcd])
+  end
+end

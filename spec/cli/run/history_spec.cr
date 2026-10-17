@@ -684,6 +684,23 @@ describe "gori run show --format json" do
       Base64.decode(m["bytes"].as_s).should eq(Bytes[0xab, 0xcd])
     end
 
+    # #1629: the same projection MCP `get_flow` makes — inflated, then decoded.
+    it "inflates a gzip-compressed unary message and decodes its fields" do
+      hello = Bytes[0x0a, 0x05, 0x61, 0x6c, 0x69, 0x63, 0x65]
+      body = grpc_frame_for_spec(Gori::Proxy::H2::Grpc.compress("gzip", hello).not_nil!, flag: 0x01_u8)
+      req_head = "POST /S/M HTTP/2\r\nHost: api.test\r\ncontent-type: application/grpc\r\ngrpc-encoding: gzip\r\n\r\n"
+      row = Gori::Store::FlowRow.new(
+        id: 1_i64, created_at: 0_i64, scheme: "https", method: "POST", host: "api.test", port: 443,
+        target: "/S/M", status: nil, size: 0_i64, state: Gori::Store::FlowState::Pending)
+      detail = Gori::Store::FlowDetail.new(row, "HTTP/2", req_head.to_slice, body, nil, nil)
+      m = JSON.parse(Gori::CLI::Run.show_json_for_spec(detail, true, false))["request"]["grpc_messages"]["messages"].as_a[0]
+      m["compressed"].as_bool.should be_true
+      m["encoding"].as_s.should eq("gzip")
+      m["inflated_size"].as_i.should eq(hello.size)
+      m["protobuf"]["fields"].as_a[0]["string"].as_s.should eq("alice")
+      m["note"]?.should be_nil
+    end
+
     it "parses a grpc-web trailer frame as headers, not protobuf" do
       trailer_payload = "grpc-status: 5\r\ngrpc-message: not found\r\n"
       body = grpc_frame_for_spec(trailer_payload.to_slice, flag: 0x80_u8)

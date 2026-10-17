@@ -1460,14 +1460,22 @@ module Gori
             end
             # One output budget for the whole body, not one per message (`Protobuf::JsonBudget`).
             budget = Protobuf::JsonBudget.new
+            encoding = Proxy::H2::Grpc.encoding(head)
             j.field "messages" do
               j.array do
                 msgs.each_with_index do |m, i|
+                  plain = m.trailer ? m.data : Proxy::H2::Grpc.payload(m, encoding)
                   j.object do
                     j.field "index", i
                     j.field "compressed", m.compressed
                     j.field "trailer", m.trailer
                     j.field "size", m.data.size
+                    # The codec a compressed message was inflated with, and what it inflated to
+                    # (#1629) — the same projection the TUI and MCP `get_flow` make.
+                    if m.compressed && !m.trailer
+                      j.field "encoding", encoding if encoding
+                      j.field "inflated_size", plain.size if plain.is_a?(Bytes)
+                    end
                     if m.trailer
                       # grpc-web TRAILER frame: ASCII headers, not protobuf.
                       j.field "headers" do
@@ -1477,14 +1485,13 @@ module Gori
                           end
                         end
                       end
-                    elsif m.compressed
-                      # Honour the 0x01 flag: compressed bytes are not a protobuf
-                      # message until the caller inflates them (encoding is named
-                      # by grpc-encoding, not by us).
-                      j.field "note", "compressed payload — not decoded as protobuf"
+                    elsif plain.is_a?(String)
+                      # Honour the 0x01 flag: a compressed payload that did not inflate (an
+                      # unknown codec, a corrupt stream, a bomb) is not a protobuf message.
+                      j.field "note", "compressed payload — not decoded as protobuf: #{plain}"
                       j.field "bytes", Base64.strict_encode(m.data)
                     else
-                      decoded = Protobuf.decode(m.data)
+                      decoded = Protobuf.decode(plain)
                       j.field "protobuf" do
                         decoded.to_json(j, budget)
                       end

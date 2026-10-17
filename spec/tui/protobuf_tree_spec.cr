@@ -192,8 +192,29 @@ describe "HistoryView gRPC detail" do
     end
   end
 
-  # The 0x01 flag says these bytes are not protobuf until something inflates them, and the
-  # encoding is named by `grpc-encoding`, not by gori. The CLI and MCP make the same carve-out.
+  # #1629: a gzip message is inflated under the stream's `grpc-encoding` and drawn as the same
+  # tree, its header naming the codec — the CLI and MCP make the same projection.
+  it "inflates a gzip-compressed payload and draws its tree" do
+    pb_tmp_store do |store|
+      store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
+        method: "POST", target: "/svc/M", http_version: "HTTP/2",
+        head: GRPC_HEAD.sub("\r\n\r\n", "\r\ngrpc-encoding: gzip\r\n\r\n").to_slice,
+        body: grpc_frame(Gori::Proxy::H2::Grpc.compress("gzip", PB_BODY).not_nil!, compressed: true),
+        source: Gori::FlowSource::Kind::Proxy))
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      view.pretty = true
+      backend = MemoryBackend.new(160, 24)
+      view.render_detail(Screen.new(backend), Rect.new(0, 0, 160, 24))
+      backend.contains?("(gzip, inflated #{PB_BODY.size}b)").should be_true
+      backend.contains?("varint   150").should be_true
+    end
+  end
+
+  # The 0x01 flag with no `grpc-encoding` to name the codec: nothing to inflate with, so the
+  # hex exit, with the reason above it. The CLI and MCP make the same carve-out.
   it "does not decode a compressed payload as protobuf" do
     pb_tmp_store do |store|
       view = seed.call(store, grpc_frame(PB_BODY, compressed: true))
@@ -202,6 +223,7 @@ describe "HistoryView gRPC detail" do
       view.render_detail(Screen.new(backend), Rect.new(0, 0, 160, 24))
       backend.contains?("(compressed)").should be_true
       backend.contains?("08 96 01 12 05").should be_true # hex, not a tree
+      backend.contains?("no grpc-encoding").should be_true
       backend.contains?("varint   150").should be_false
       backend.contains?("none is authoritative").should be_false # no tree ⇒ no legend for one
     end

@@ -58,16 +58,27 @@ module Gori::Tui
     # Whether a framed gRPC message's payload gets the tree. The two carve-outs the headless
     # surfaces make (`cli/run/history.cr`, `mcp/serialize.cr`) are made ONCE, here, so the two
     # TUI sites cannot answer them differently: a TRAILER frame is ASCII headers, not
-    # protobuf, and a COMPRESSED payload is not protobuf until something inflates it — the
-    # 0x01 flag says so, and `grpc-encoding` names the codec, not gori. Both take the hex exit.
-    def self.decode?(m : Proxy::H2::Grpc::Message, tree : Bool) : Bool
-      tree && !m.trailer && !m.compressed
+    # protobuf, and a COMPRESSED payload is protobuf only once `Grpc.payload` has inflated it
+    # under the stream's `grpc-encoding` (#1629). `plain` is that call's answer, asked once
+    # per message by the caller; a String (an unknown codec, a bomb) takes the hex exit.
+    def self.decode?(m : Proxy::H2::Grpc::Message, plain : Bytes | String, tree : Bool) : Bool
+      tree && !m.trailer && plain.is_a?(Bytes)
     end
 
     # Whether `NOTE` belongs above `msgs`: only when a tree will actually be drawn. A body of
-    # nothing but trailers and compressed frames gets no tree, so it gets no explanation of one.
-    def self.legend?(msgs : Array(Proxy::H2::Grpc::Message), tree : Bool) : Bool
-      msgs.any? { |m| decode?(m, tree) }
+    # nothing but trailers and undecodable compressed frames gets no tree, so it gets no
+    # explanation of one.
+    def self.legend?(msgs : Array(Proxy::H2::Grpc::Message), plains : Array(Bytes | String),
+                     tree : Bool) : Bool
+      msgs.each_with_index.any? { |m, i| decode?(m, plains[i], tree) }
+    end
+
+    # What a compressed message's header line says about it: the codec and the size it
+    # inflated to, or just `compressed` when it did not. Empty for an uncompressed one.
+    def self.compression_note(m : Proxy::H2::Grpc::Message, plain : Bytes | String,
+                              encoding : String?) : String
+      return "" unless m.compressed
+      plain.is_a?(Bytes) ? "(#{encoding}, inflated #{plain.size}b)" : "(compressed)"
     end
 
     # Render `msg` as indented rows. `indent` prefixes every row, so a caller can nest the

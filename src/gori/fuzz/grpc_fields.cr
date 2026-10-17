@@ -124,10 +124,18 @@ module Gori::Fuzz
   # stale, and is documented as opt-in because a deliberately-wrong prefix is one of the standard
   # gRPC parser tests. Here the message was re-encoded THROUGH the schema at the operator's
   # request, so a prefix that measured the old one would make every request in the sweep a
-  # framing-layer rejection and nothing else. The flag byte is the reason `build` refuses a
-  # non-zero one: `Grpc.frame` composes the flag out of the compressed and trailer bits, so a
-  # frame carrying anything else could not be re-emitted verbatim, and gori refuses rather than
-  # normalizes.
+  # framing-layer rejection and nothing else. The flag byte is the reason `build` refuses
+  # anything but 0x00 or 0x01: `Grpc.frame` composes the flag out of the compressed and trailer
+  # bits, so a frame carrying anything else could not be re-emitted verbatim, and gori refuses
+  # rather than normalizes.
+  #
+  # ## Compression (#1629)
+  #
+  # A COMPRESSED seed (flag 0x01) is inflated under the template's `grpc-encoding`, the fields
+  # are resolved and spliced in the inflated message, and each variation that changed it is
+  # re-compressed with the same codec behind the same flag. A variation that changed nothing
+  # sends the capture's own compressed octets — re-compressing them would not give the same
+  # deflate stream back.
   struct GrpcFieldTemplate
     # Segments one `--field` spec may carry. A `.proto` message nests, but a spec this deep is
     # a typo long before it is a field.
@@ -163,11 +171,14 @@ module Gori::Fuzz
     # body), so the body of any rendering is this many bytes and the head is everything before
     # it — which is exact, and immune to a header payload that itself carries a CRLFCRLF.
     getter body_size : Int32
+    # The codec a COMPRESSED seed was inflated with, and every changed variation is
+    # re-compressed with (#1629). nil for an uncompressed seed.
+    getter encoding : String?
 
     def initialize(@base : Template, @fields : Array(GrpcFieldPosition),
                    @positions : Array(Template::Position), @schema : Protobuf::Schema,
                    @method_path : String, @message_type : String, @message : Bytes,
-                   @body_size : Int32)
+                   @body_size : Int32, @encoding : String? = nil)
     end
 
     # --- building -------------------------------------------------------------
@@ -184,7 +195,7 @@ module Gori::Fuzz
                    baseline_spans : Array({Int32, Int32}), specs : Array(String),
                    request_target : String) : GrpcFieldTemplate?
       return nil if specs.empty?
-      msg, body_size = unary_message(baseline, baseline_spans)
+      msg, body_size, encoding = unary_message(baseline, baseline_spans)
       binding = Protobuf::Schemas.resolve(request_target, request: true)
       unless binding
         raise GrpcFieldError.new(
@@ -192,7 +203,7 @@ module Gori::Fuzz
           "request message — #{Protobuf::Schemas.status}. Point the project at one " \
           "(Project → Project settings → Proto schema) or fetch it with `gori run grpc reflect URL`")
       end
-      assemble(base, specs, binding, msg, body_size)
+      assemble(base, specs, binding, msg, body_size, encoding)
     end
 
     # `build`, against a binding the caller already holds — the GENERAL form, which the
@@ -208,15 +219,16 @@ module Gori::Fuzz
     def self.build(base : Template, baseline : Bytes,
                    baseline_spans : Array({Int32, Int32}), specs : Array(String),
                    binding : Protobuf::Schemas::Binding) : GrpcFieldTemplate
-      msg, body_size = unary_message(baseline, baseline_spans)
-      assemble(base, specs, binding, msg, body_size)
+      msg, body_size, encoding = unary_message(baseline, baseline_spans)
+      assemble(base, specs, binding, msg, body_size, encoding)
     end
 
     # Every way the TEMPLATE can fail to carry one editable unary gRPC message, answered before
     # a schema is even looked up — these are facts about the bytes, and they read the same
-    # whether or not a descriptor set is loaded. Returns `{the message, the body's size}`.
+    # whether or not a descriptor set is loaded. Returns `{the message (inflated, when the frame
+    # is compressed), the body's size, the codec it was inflated with}`.
     private def self.unary_message(baseline : Bytes,
-                                   baseline_spans : Array({Int32, Int32})) : {Proxy::H2::Grpc::Message, Int32}
+                                   baseline_spans : Array({Int32, Int32})) : {Proxy::H2::Grpc::Message, Int32, String?}
       unless GrpcVerdict.grpc_request?(baseline)
         raise GrpcFieldError.new(
           "a gRPC field position needs a gRPC request: this template declares " \
@@ -247,30 +259,43 @@ module Gori::Fuzz
           "body, so gori refuses rather than picks one")
       end
       msg = msgs[0]
-      if msg.compressed
-        raise GrpcFieldError.new(
-          "this message's frame flag says the payload is COMPRESSED, and compressed bytes are " \
-          "not a protobuf message until something inflates them — which gori does not. " \
-          "The same carve-out the Repeater's gRPC field editor and every other gRPC pane make")
-      end
       if msg.trailer
         raise GrpcFieldError.new("this frame is a grpc-web TRAILER frame (header text), not a protobuf message")
       end
-      unless body[0] == 0_u8
+      unless body[0] == (msg.compressed ? 1_u8 : 0_u8)
         raise GrpcFieldError.new(
           "this message's frame flag byte is 0x#{body[0].to_s(16).rjust(2, '0')}, and the two bits " \
           "`Grpc.frame` composes a flag out of — compressed (0x01) and grpc-web trailer (0x80) — " \
-          "are both refused above. What is left is a bit gori cannot re-emit, and it will not " \
+          "are both accounted for above. What is left is a bit gori cannot re-emit, and it will not " \
           "silently normalize a byte the producer meant (P7). Sweep it with §…§ byte positions instead")
       end
       refuse_body_positions(baseline, baseline_spans, body.size)
-      {msg, body.size}
+      msg, encoding = inflate_seed(msg, baseline)
+      {msg, body.size, encoding}
+    end
+
+    # A COMPRESSED seed inflated under the template's `grpc-encoding`, plus that codec — or the
+    # message as it is and nil. One that does not inflate is refused: compressed bytes are not
+    # a protobuf message.
+    private def self.inflate_seed(msg : Proxy::H2::Grpc::Message,
+                                  baseline : Bytes) : {Proxy::H2::Grpc::Message, String?}
+      return {msg, nil} unless msg.compressed
+      encoding = Proxy::H2::Grpc.encoding(baseline)
+      plain = Proxy::H2::Grpc.payload(msg, encoding)
+      if plain.is_a?(String)
+        raise GrpcFieldError.new(
+          "this message's frame flag says the payload is COMPRESSED, and it did not inflate: " \
+          "#{plain}. Compressed bytes are not a protobuf message — sweep them with §…§ byte " \
+          "positions instead")
+      end
+      {Proxy::H2::Grpc::Message.new(true, plain), encoding}
     end
 
     # The specs resolved against the seed message, and the composite around them.
     private def self.assemble(base : Template, specs : Array(String),
                               binding : Protobuf::Schemas::Binding,
-                              msg : Proxy::H2::Grpc::Message, body_size : Int32) : GrpcFieldTemplate
+                              msg : Proxy::H2::Grpc::Message, body_size : Int32,
+                              encoding : String?) : GrpcFieldTemplate
       decoded = Protobuf.decode(msg.data)
       fields = specs.map { |raw| resolve(binding.schema, binding.type, decoded, raw) }
       refuse_duplicate_paths(fields)
@@ -289,7 +314,7 @@ module Gori::Fuzz
         cursor += 1
       end
       new(base, fields, positions, binding.schema, binding.method.path,
-        binding.type.full_name, msg.data.dup, body_size)
+        binding.type.full_name, msg.data.dup, body_size, encoding)
     end
 
     # A `§…§` position whose splice point lands in the gRPC BODY cannot combine with a field
@@ -583,14 +608,26 @@ module Gori::Fuzz
 
     # `{the request, the framed message's `[start, end)` in it}`. The head as rendered, then the
     # message re-framed by `Proxy::H2::Grpc.frame` — the framer the Repeater's `␣Pr:FRAME` path
-    # is built on, whose flag byte is `0x00` here because `build` refuses any other one.
+    # is built on. A compressed seed (`@encoding`) keeps its flag: a changed message is
+    # re-compressed with the same codec, an unchanged one is the capture's own body (P7).
     private def splice(raw : Bytes, msg : Bytes) : {Bytes, {Int32, Int32}}
       # The body is byte-constant in SIZE across variations of the BASE template (every `§…§` is
       # in the head), so the head is everything before the last `@body_size` bytes. Exact, and
       # immune to a header payload that itself carries a CRLFCRLF — which re-finding the
       # head/body boundary per render would not be.
       head_size = {raw.size - @body_size, 0}.max
-      framed = Proxy::H2::Grpc.frame(false, msg)
+      framed = if enc = @encoding
+                 if msg == @message
+                   raw[head_size, raw.size - head_size]
+                 else
+                   # `build` inflated the seed under this codec, so `compress` knows it.
+                   packed = Proxy::H2::Grpc.compress(enc, msg) ||
+                            raise GrpcFieldError.new("gori cannot re-compress with grpc-encoding #{enc.inspect}")
+                   Proxy::H2::Grpc.frame(true, packed)
+                 end
+               else
+                 Proxy::H2::Grpc.frame(false, msg)
+               end
       io = IO::Memory.new(head_size + framed.size)
       io.write(raw[0, head_size])
       io.write(framed)

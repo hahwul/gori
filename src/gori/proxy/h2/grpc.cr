@@ -1,4 +1,8 @@
 require "base64"
+require "compress/gzip"
+require "compress/zlib"
+require "compress/deflate"
+require "../../ascii_bytes"
 require "../../media_type"
 require "../../plural"
 
@@ -299,6 +303,76 @@ module Gori::Proxy::H2
         pos = msg_start + count
       end
       {msgs, body.size - pos}
+    end
+
+    # Ceiling on one inflated message: gRPC's own default max receive size (4 MiB, every
+    # mainstream implementation). A frame that inflates past it is refused, not decoded in
+    # part, so a small decompression bomb costs one capped read and nothing more (P6).
+    INFLATE_MAX = 4 * 1024 * 1024
+
+    # The stream's `grpc-encoding` off a message head, lowercased — nil when it names none.
+    # A native call's trailers are already merged into a captured or replayed head, so a
+    # codec named only there is read too.
+    def self.encoding(head : Bytes?) : String?
+      h = head || return nil
+      AsciiBytes.each_head_field(h) do |na, nz, va, vz|
+        next unless AsciiBytes.range_eq_ci?(h, na, nz, ENCODING_HEADER)
+        return String.new(h[va, vz - va]).scrub.downcase.presence
+      end
+      nil
+    end
+
+    private ENCODING_HEADER = "grpc-encoding".to_slice
+
+    # A COMPRESSED message's payload inflated under `encoding` — or the sentence saying why
+    # not. A derived projection only (P7): the captured frame is never rewritten. `identity`
+    # gives the bytes back (a flag the codec contradicts is shown, not hidden); an unknown
+    # codec, a corrupt or truncated stream, and output past `max_out` are refused.
+    def self.inflate(encoding : String?, data : Bytes, max_out : Int32 = INFLATE_MAX) : Bytes | String
+      case enc = encoding.try(&.strip.downcase)
+      when "identity" then data
+      when "gzip"     then drain(Compress::Gzip::Reader.new(IO::Memory.new(data)), max_out)
+      when "deflate"
+        # gRPC's `deflate` is zlib-wrapped (RFC 1950), but some producers write a raw RFC 1951
+        # stream under the same name. The 2-byte zlib header (CM 8, check bits ≡ 0 mod 31)
+        # says which, so neither reading is tried and thrown away.
+        io = IO::Memory.new(data)
+        zlib = data.size >= 2 && data[0] & 0x0f == 8 && ((data[0].to_u16 << 8) | data[1]) % 31 == 0
+        drain(zlib ? Compress::Zlib::Reader.new(io) : Compress::Deflate::Reader.new(io), max_out)
+      when nil
+        "the frame says compressed but no grpc-encoding header names the codec"
+      else
+        "compressed with grpc-encoding #{enc.inspect}, which gori does not inflate (gzip, deflate)"
+      end
+    rescue ex # a corrupt or truncated stream — refused, never a partial decode
+      "#{encoding} inflate failed: #{ex.message}"
+    end
+
+    # The protobuf bytes a framed message carries: its payload, or a compressed one inflated
+    # under the stream's `encoding`. A String is why there are none to decode.
+    def self.payload(m : Message, encoding : String?) : Bytes | String
+      m.compressed ? inflate(encoding, m.data) : m.data
+    end
+
+    # `inflate`'s inverse for an edited message: re-compressed with the SAME codec, so the
+    # 0x01 flag stays true. nil for a codec gori cannot write. The octets will not match the
+    # original deflate stream — a surface that sends this says so.
+    def self.compress(encoding : String?, data : Bytes) : Bytes?
+      io = IO::Memory.new
+      case encoding.try(&.strip.downcase)
+      when "identity" then return data
+      when "gzip"     then Compress::Gzip::Writer.open(io, &.write(data))
+      when "deflate"  then Compress::Zlib::Writer.open(io, &.write(data))
+      else                 return nil
+      end
+      io.to_slice
+    end
+
+    private def self.drain(reader : IO, max_out : Int32) : Bytes | String
+      sink = IO::Memory.new
+      IO.copy(reader, sink, max_out.to_i64 + 1)
+      return "inflates past the #{max_out}-byte cap — refused as a decompression bomb" if sink.bytesize > max_out
+      sink.to_slice
     end
 
     # `scan`'s residual as the sentence every surface should show, or nil when the body

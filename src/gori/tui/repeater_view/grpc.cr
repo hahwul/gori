@@ -77,6 +77,8 @@ class Gori::Tui::RepeaterView
       @grpc_compressed = false
       @grpc_payload = Bytes.empty
     end
+    @grpc_encoding = Proxy::H2::Grpc.encoding(detail.request_head)
+    @grpc_recompressed = false
     @grpc_lines_cache = nil
     # A fresh flow: the FIELDS form starts closed and its rows start stale, like the hex
     # buffer below. `@grpc_payload_rev` is what the rows cache keys on — see grpc_fields.cr.
@@ -189,7 +191,10 @@ class Gori::Tui::RepeaterView
         reqn = @grpc_msg_count # already deframed once in load_grpc
         # Report the bytes actually put on the wire — a reframed (edited) unary payload
         # differs from the captured @grpc_body.
-        rows << {"→ sent #{reqn} request message#{reqn == 1 ? "" : "s"} (#{grpc_send_body.size}b)", Theme.muted}
+        # A FIELDS edit of a compressed payload re-compressed it (#1629): the octets are gori's
+        # deflate stream now, not the capture's, and the line that reports the send says so.
+        recompressed = @grpc_recompressed && @grpc_reframable ? ", re-compressed #{@grpc_encoding}" : ""
+        rows << {"→ sent #{reqn} request message#{reqn == 1 ? "" : "s"} (#{grpc_send_body.size}b#{recompressed})", Theme.muted}
         rows << {"⚠ #{Proxy::H2::Grpc.framing_error(@grpc_req_residual)}", Theme.yellow} if @grpc_req_residual > 0
         st = result.response.try(&.status) || 0
         # `status_color`, not a local `>= 400 ? red`. This line painted a 404 RED while
@@ -227,9 +232,12 @@ class Gori::Tui::RepeaterView
     if msgs.empty? && residual == 0
       rows << {"← (no complete gRPC messages)", Theme.muted}
     else
+      # Each compressed message inflated ONCE under the response's `grpc-encoding` (#1629).
+      encoding = Proxy::H2::Grpc.encoding(result.head)
+      plains = msgs.map { |m| m.trailer ? m.data : Proxy::H2::Grpc.payload(m, encoding) }
       # One legend above the messages, and only when a tree will actually be drawn — see
       # ProtobufTree::NOTE. Same rule as the History framing pane, from the same predicate.
-      if ProtobufTree.legend?(msgs, @pretty)
+      if ProtobufTree.legend?(msgs, plains, @pretty)
         rows << {binding ? ProtobufTree.schema_note(binding) : ProtobufTree::NOTE, Theme.muted}
       end
       msgs.each_with_index do |m, i|
@@ -244,8 +252,8 @@ class Gori::Tui::RepeaterView
             end
           end
         else
-          rows << {"← message ##{i + 1}  #{m.data.size}b#{m.compressed ? " (compressed)" : ""}", Theme.green}
-          grpc_payload_rows(m, binding).each { |r| rows << r }
+          rows << {"← message ##{i + 1}  #{m.data.size}b #{ProtobufTree.compression_note(m, plains[i], encoding)}".rstrip, Theme.green}
+          grpc_payload_rows(m, plains[i], binding).each { |r| rows << r }
         end
       end
     end
@@ -289,12 +297,13 @@ class Gori::Tui::RepeaterView
   #
   # `ProtobufTree.decode?` owns the compressed/trailer carve-outs the CLI and MCP make, so
   # this pane and the History framing pane cannot disagree about which payloads are protobuf.
-  private def grpc_payload_rows(m : Proxy::H2::Grpc::Message,
+  private def grpc_payload_rows(m : Proxy::H2::Grpc::Message, plain : Bytes | String,
                                 binding : Protobuf::Schemas::Binding? = nil) : Array({String, Color})
-    unless ProtobufTree.decode?(m, @pretty)
-      return grpc_hex_preview(m.data).map { |h| {h, Theme.muted} }
+    unless plain.is_a?(Bytes) && ProtobufTree.decode?(m, plain, @pretty)
+      hex = grpc_hex_preview(m.data).map { |h| {h, Theme.muted} }
+      return plain.is_a?(String) && @pretty ? [{"    ⚠ #{plain}", Theme.yellow}] + hex : hex
     end
-    ProtobufTree.lines(Protobuf.decode(m.data), indent: "    ",
+    ProtobufTree.lines(Protobuf.decode(plain), indent: "    ",
       schema: binding.try(&.schema), type: binding.try(&.type)).map { |l| {l, Theme.text} }
   end
 

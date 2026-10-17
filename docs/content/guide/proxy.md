@@ -203,9 +203,11 @@ gori decodes gRPC payloads from the protobuf wire format itself. There is no sch
 
 **Ambiguity is reported, not resolved.** Without a schema a length-delimited field is genuinely several things at once: it is always raw bytes, it is a string when the payload is valid UTF-8, and it is a nested message when the payload parses cleanly as one. gori lists every reading that fits and shows each of them, under a one-line note saying none is authoritative. Picking a winner is the failure this decoder is written to avoid: a guess that reads as a fact is worse than the bytes.
 
+**A compressed message is inflated first.** The gRPC frame's `0x01` flag says the payload is compressed, and the stream's `grpc-encoding` names the codec. For `gzip`, `deflate` and `identity` gori inflates the message and decodes it like any other; the message header says so (`(gzip, inflated 120b)`, and `encoding` / `inflated_size` in the JSON). The inflation is a view only: the captured bytes are what is stored and resent. A message that would inflate past 4 MiB is refused as a decompression bomb rather than inflated.
+
 Two payloads deliberately stay hex, on every surface:
 
-- **A compressed message.** The gRPC frame's `0x01` flag says the payload is compressed, and `grpc-encoding` names the codec. Compressed bytes are not a protobuf message until something inflates them, and gori does not, so the frame is shown as bytes with a note saying why.
+- **A compressed message gori cannot inflate**: an unknown codec (`snappy`, `zstd`, …), no `grpc-encoding` at all, or a corrupt or oversized stream. The frame is shown as bytes with a note saying why.
 - **A grpc-web trailer frame.** Its payload is ASCII header lines, not protobuf.
 
 The tree is on every surface: the TUI's History and Repeater panes (`p` toggles between the tree and the byte preview; `^X` still gives the byte-exact dump), `gori run history show --format json` (as `grpc_messages[].protobuf`) and the MCP `get_flow` tool (as `request_grpc_messages` / `response_grpc_messages`). A truncated or hostile message decodes as far as it parses and is marked `complete: false` rather than being rejected; the octets stay reachable either way.

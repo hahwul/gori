@@ -558,17 +558,17 @@ module Gori::Protobuf
         return {none, Failure.new(text, FailureKind::Answered)}
       end
       out = [] of Protobuf::Message
+      encoding = resp.headers.get?("grpc-encoding")
       messages.each do |msg|
-        # gori advertises `grpc-accept-encoding: identity` and sends no `grpc-encoding`, so
-        # a compressed reply is the server ignoring both. Said out loud rather than decoded
-        # as protobuf, which would produce a tree of nonsense fields.
-        if msg.compressed
-          return {none, Failure.new(
-            "#{service} returned a COMPRESSED message; gori asked for identity encoding and cannot inflate it",
-            FailureKind::Answered)}
-        end
         next if msg.trailer # grpc-web carries its trailers in-band; not a response message
-        out << Protobuf.decode(msg.data, max_depth: Schema::MAX_DEPTH)
+        # gori advertises `grpc-accept-encoding: identity`, so a compressed reply is the server
+        # ignoring it — inflated under its `grpc-encoding` (#1629). One that does not inflate is
+        # said out loud rather than decoded as protobuf, which would be a tree of nonsense.
+        plain = Proxy::H2::Grpc.payload(msg, encoding)
+        if plain.is_a?(String)
+          return {none, Failure.new("#{service} returned a COMPRESSED message: #{plain}", FailureKind::Answered)}
+        end
+        out << Protobuf.decode(plain, max_depth: Schema::MAX_DEPTH)
       end
       {out, nil}
     end
@@ -585,7 +585,8 @@ module Gori::Protobuf
         {":path", path(service)},
         {"content-type", "application/grpc+proto"},
         {"te", "trailers"},
-        # gori has no gRPC decompressor on this path, so it must not advertise one.
+        # identity keeps the reply cheap to read; a server that compresses anyway is still
+        # inflated (`Grpc.payload`), but gori does not ASK for it.
         {"grpc-accept-encoding", "identity"},
         {"user-agent", "gori/#{Gori::VERSION} grpc-reflection"},
       ]

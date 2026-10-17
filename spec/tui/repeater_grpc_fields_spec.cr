@@ -339,6 +339,40 @@ describe "RepeaterView gRPC FIELDS editor (#828)" do
       end
     end
 
+    # #1629: inflated to edit, re-compressed with the same codec behind the same flag, and the
+    # tab says the octets are gori's deflate stream now.
+    it "edits a gzip-COMPRESSED payload and re-compresses it on send" do
+      with_demo_schema do
+        grpc_tmp_store do |store|
+          head = "POST /demo.Users/GetUser HTTP/2\r\nHost: api.test\r\ncontent-type: application/grpc\r\ngrpc-encoding: gzip\r\n\r\n"
+          id = store.insert_flow(Gori::Store::CapturedRequest.new(
+            created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
+            method: "POST", target: "/demo.Users/GetUser", http_version: "HTTP/2",
+            head: head.to_slice,
+            body: Gori::Proxy::H2::Grpc.frame(true, Gori::Proxy::H2::Grpc.compress("gzip", get_user_request("hahwul")).not_nil!),
+            source: Gori::FlowSource::Kind::Proxy))
+          view = RepeaterView.new
+          view.load_grpc(store.get_flow(id).not_nil!)
+          view.grpc_fields_available?.should be_true
+          view.toggle_grpc_fields.should be_true
+          view.grpc_field_begin.should be_nil
+          type_into(view, "admin")
+          view.grpc_field_apply.should be_nil
+          bytes = view.request_bytes
+          bytes[bytes.size - sent_payload(view).size - 5].should eq(0x01_u8) # flag kept
+          Gori::Proxy::H2::Grpc.inflate("gzip", sent_payload(view)).should eq(get_user_request("admin"))
+          # …and the transcript of that send says the octets were re-compressed.
+          view.toggle_grpc_fields
+          resp_head = "HTTP/2 200 OK\r\ncontent-type: application/grpc\r\ngrpc-status: 0\r\n\r\n"
+          view.apply(Gori::Repeater::Result.new(resp_head.to_slice, Bytes.empty,
+            Gori::Proxy::Codec::Http1.parse_response_head(resp_head.to_slice), 5000_i64))
+          backend = MemoryBackend.new(160, 24)
+          view.render(Screen.new(backend), Rect.new(0, 0, 160, 24))
+          backend.contains?("re-compressed gzip").should be_true
+        end
+      end
+    end
+
     it "names every row it does not draw — a cut, and a truncated parse" do
       s = demo_schema
       user = s.message?("demo.User").not_nil!

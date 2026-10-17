@@ -152,6 +152,9 @@ module Gori
                 j.object do
                   j.field "method", g.method_path
                   j.field "message", g.message_type
+                  # A compressed seed: inflated to resolve the fields, each changed message
+                  # re-compressed with this codec (#1629).
+                  j.field "encoding", g.encoding if g.encoding
                   j.field("fields") do
                     j.array do
                       g.fields.each do |f|

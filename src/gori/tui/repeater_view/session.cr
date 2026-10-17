@@ -415,6 +415,8 @@ class Gori::Tui::RepeaterView
     @grpc_reframable = src.@grpc_reframable
     @grpc_reframe = src.@grpc_reframe # a send knob, so the clone sends what the source would
     @grpc_compressed = src.@grpc_compressed
+    @grpc_encoding = src.@grpc_encoding
+    @grpc_recompressed = src.@grpc_recompressed
     # Carry any hex-edited payload into the clone, including one still in an open ^X buffer.
     @grpc_payload = (src.@grpc_mode && (h = src.@req_hex_edit)) ? h.to_bytes.dup : src.@grpc_payload.dup
     # `@grpc_web_text` and the residual decide HOW the body is framed on the wire

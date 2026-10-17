@@ -1062,14 +1062,22 @@ module Gori
             j.field "truncated", true if msgs.size > GRPC_MSGS_MAX
             # One output budget for the whole body, not one per message (`Protobuf::JsonBudget`).
             budget = Protobuf::JsonBudget.new
+            encoding = Proxy::H2::Grpc.encoding(head)
             j.field "messages" do
               j.array do
                 msgs.first(GRPC_MSGS_MAX).each_with_index do |m, i|
+                  plain = m.trailer ? m.data : Proxy::H2::Grpc.payload(m, encoding)
                   j.object do
                     j.field "index", i
                     j.field "compressed", m.compressed
                     j.field "trailer", m.trailer
                     j.field "size", m.data.size
+                    # The codec a compressed message was inflated with, and what it inflated to
+                    # (#1629) — the same projection the TUI and `gori run history show` make.
+                    if m.compressed && !m.trailer
+                      j.field "encoding", encoding if encoding
+                      j.field "inflated_size", plain.size if plain.is_a?(Bytes)
+                    end
                     if m.trailer
                       # grpc-web TRAILER frame: ASCII headers, not protobuf — and for gRPC the
                       # trailer IS the call's real status.
@@ -1078,13 +1086,13 @@ module Gori
                           Proxy::H2::Grpc.trailer_headers(m.data).each { |k, v| j.field k, text(v) }
                         end
                       end
-                    elsif m.compressed
-                      # Honour the 0x01 flag: compressed bytes are not a protobuf message until
-                      # the caller inflates them (the encoding is named by grpc-encoding, not us).
-                      j.field "note", "compressed payload — not decoded as protobuf"
+                    elsif plain.is_a?(String)
+                      # Honour the 0x01 flag: a compressed payload that did not inflate (an
+                      # unknown codec, a corrupt stream, a bomb) is not a protobuf message.
+                      j.field "note", "compressed payload — not decoded as protobuf: #{plain}"
                       emit_grpc_bytes(j, m.data)
                     else
-                      decoded = Protobuf.decode(m.data)
+                      decoded = Protobuf.decode(plain)
                       j.field "protobuf" { decoded.to_json(j, budget) }
                       if b = binding
                         j.field("schema") { Protobuf::Lens.emit_json(j, decoded, b.schema, b.type) }

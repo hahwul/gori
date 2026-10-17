@@ -3358,6 +3358,11 @@ module Gori::Tui
     private def run_summary_framing(text : String) : String
       text += "#{text.empty? ? "↳" : " ·"} body UNFRAMED" if unframed_body?
       text += "#{text.empty? ? "↳" : " ·"} CL recomputed" if rewrites_content_length?
+      # A compressed gRPC seed: every changed message goes out re-compressed (#1629), so its
+      # octets are gori's deflate stream rather than the capture's.
+      if enc = @pending_grpc_fields.try(&.encoding)
+        text += "#{text.empty? ? "↳" : " ·"} gRPC re-compressed #{enc}"
+      end
       text
     end
 

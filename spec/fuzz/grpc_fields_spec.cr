@@ -291,6 +291,30 @@ describe Fuzz::GrpcFieldTemplate do
       end
     end
 
+    # #1629: inflated to resolve the field, each changed variation re-compressed with the
+    # same codec behind the same flag, and an untouched one is the capture's own octets.
+    it "sweeps a gzip-COMPRESSED message and re-compresses each variation" do
+      with_demo_schema do
+        frame = Grpc.frame(true, Grpc.compress("gzip", demo_request_bytes).not_nil!)
+        head = "POST /demo.Users/GetUser HTTP/1.1\r\nHost: api.test\r\ncontent-type: application/grpc\r\n" \
+               "grpc-encoding: gzip\r\ncontent-length: #{frame.size}\r\n\r\n"
+        text = String.new(head.to_slice + frame)
+        tmpl = build_template(text, ["name"])
+        tmpl.encoding.should eq("gzip")
+        seed, _, err = tmpl.render_spans(tmpl.default_payloads)
+        err.should be_nil
+        seed.should eq(text.to_slice)
+
+        swept, _, err = tmpl.render_spans(["root"])
+        err.should be_nil
+        body = Fuzz::GrpcVerdict.body(swept).not_nil!
+        body[0].should eq(0x01_u8) # the compressed flag is kept
+        msgs, residual = Grpc.scan(body)
+        residual.should eq(0)
+        Grpc.inflate("gzip", msgs[0].data).should eq(Protobuf::Encoder.length_delimited(1_u32, "root".to_slice))
+      end
+    end
+
     it "refuses when no descriptor set resolves the rpc" do
       text = grpc_request(demo_request_bytes)
       Protobuf::Schemas.clear
