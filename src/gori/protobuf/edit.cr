@@ -325,15 +325,26 @@ module Gori::Protobuf
       # Untouched — the value still encodes to what the capture's own reading does — so the
       # capture's octets go out, whatever spelling (a padded varint, a 2 for true) they used.
       return nil if shown && encode_value(schema, d, shown, packed, depth) == enc
-      # One nested message edited in place: merged into its own bytes, so what the JSON could
-      # not show inside it survives too.
-      s = on_wire.first?
-      if s && on_wire.size == 1 && s.wire.length_delimited? && d.type.message? && !d.repeated &&
-         (o = v.as_h?) && (t = d.type_name.try { |tn| schema.message?(tn) })
-        inner = merge(data[s.body, s.body_size], schema, t, o, depth + 1)
-        return inner.is_a?(String) ? inner : retag(data, s, inner)
+      nested_edit(data, on_wire, schema, d, v, depth) || enc
+    end
+
+    # A singular message edited where it stands, or nil when the field is not one. Merged into
+    # its own bytes, so what the JSON could not show inside it survives too.
+    private def nested_edit(data : Bytes, on_wire : Array(Span), schema : Schema, d : Schema::FieldDef,
+                            v : JSON::Any, depth : Int32) : (Bytes | String)?
+      return nil unless d.type.message? && !d.repeated && !v.raw.nil?
+      # One that occurs twice is ONE message to a parser, which merges the occurrences; the JSON
+      # showed only the last, so re-encoding it would drop the others.
+      if on_wire.size > 1
+        return "occurs #{on_wire.size} times on the wire, which a parser merges into one message, " \
+               "and the JSON shows only the last — edit its bytes with ^X instead"
       end
-      enc
+      s = on_wire.first? || return nil
+      o = v.as_h?
+      t = d.type_name.try { |tn| schema.message?(tn) }
+      return nil unless o && t && s.wire.length_delimited?
+      inner = merge(data[s.body, s.body_size], schema, t, o, depth + 1)
+      inner.is_a?(String) ? inner : retag(data, s, inner)
     end
 
     private def write_merged(data : Bytes, spans : Array(Span), shown : Set(UInt32),
@@ -418,9 +429,18 @@ module Gori::Protobuf
              when .string? then v.as_s?
              when .bool?   then v.as_bool?.try(&.to_s)
              when .enum?   then v.as_s? || v.as_i64?.try(&.to_s)
-             else               v.as_s? || v.as_i64?.try(&.to_s) || v.as_f?.try(&.to_s)
+             else               v.as_s? || v.as_i64?.try(&.to_s) || v.as_f?.try { |f| float_text(d, f) }
              end
       text ? {true, text} : {false, "#{d.name} is #{d.type_label} — #{kind(v)} does not fit it"}
+    end
+
+    # A JSON number with a fraction or exponent. proto3 JSON lets an integer field take an
+    # integral one (`30.0`, `1e2`); anything else keeps its float spelling for `Encoder` to refuse.
+    private def float_text(d : Schema::FieldDef, f : Float64) : String
+      return f.to_s if d.type.float? || d.type.double? || !f.finite? || f != f.trunc
+      return f.to_u64.to_s if 0 <= f < 18_446_744_073_709_551_616.0
+      return f.to_i64.to_s if -9_223_372_036_854_775_808.0 <= f < 0
+      f.to_s
     end
 
     # proto3's `json_name`: `is_admin` → `isAdmin`.

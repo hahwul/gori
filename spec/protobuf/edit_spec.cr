@@ -112,6 +112,21 @@ describe Gori::Protobuf::Edit do
         .as(String).should contain("not valid JSON")
     end
 
+    it "refuses to re-encode a singular message that occurs twice, which a parser merges" do
+      data = Bytes[0x12, 0x03, 0x62, 0x6f, 0x62, 0x22, 0x02, 0x08, 0x1e, 0x22, 0x02, 0x08, 0x1f]
+      json = Gori::Protobuf::Edit.to_json(data, demo_schema, user_type)
+      Gori::Protobuf::Edit.from_json(data, demo_schema, user_type, json).should eq(data) # untouched: copied
+      Gori::Protobuf::Edit.from_json(data, demo_schema, user_type, json.sub(%("age": 31), %("age": 40)))
+        .as(String).should contain("occurs 2 times")
+    end
+
+    it "takes an integral float for an integer field, as proto3 JSON does" do
+      Gori::Protobuf::Edit.from_json(Bytes.empty, demo_schema, user_type, %({"id": 30.0, "delta": 1e2}))
+        .should eq(Bytes[0x08, 0x1e, 0x50, 0xc8, 0x01])
+      Gori::Protobuf::Edit.from_json(Bytes.empty, demo_schema, user_type, %({"id": 1.5}))
+        .as(String).should contain("not an integer")
+    end
+
     it "edits inside a nested message in place" do
       data = Base64.decode(DEMO_USER_B64)
       edited = Gori::Protobuf::Edit.from_json(data, demo_schema, user_type,

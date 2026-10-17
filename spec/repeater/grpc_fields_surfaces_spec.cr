@@ -121,6 +121,29 @@ describe "the gRPC field set reaches every headless send surface" do
       end
     end
 
+    it "puts the same message on the wire as `gori run repeater send --grpc-field`" do
+      origin = BodyOrigin.new
+      begin
+        cli_body = nil.as(Bytes?)
+        with_set_store do |store|
+          tools = tools_for(store)
+          with_demo_schema do
+            specs = ["name=administrator", "7:varint=1"]
+            args = {"url" => "http://127.0.0.1:#{origin.port}", "raw" => get_user_raw,
+                    "grpc_fields" => specs, "allow_unscoped" => true, "record_history" => false}
+            r = tools.call("send_request", JSON.parse(args.to_json))
+            fail r.text if r.is_error
+            built = Gori::CLI::Run.per_send_request(get_user_raw.to_slice, [] of String, specs)
+            cli_body = Gori::Fuzz::GrpcVerdict.body(built.as({Bytes, Bool})[0])
+          end
+        end
+        origin.bodies.size.should eq(1)
+        cli_body.should eq(origin.bodies[0])
+      ensure
+        origin.close
+      end
+    end
+
     it "refuses a spec it cannot apply before anything dials" do
       origin = BodyOrigin.new
       begin

@@ -1526,7 +1526,9 @@ module Gori
           r = store.get_repeater_full(id)
           req = r.try { |row| (p = path_override) ? Repeater::FlowRequest.replace_request_target(row.request, p) : row.request }
           if bytes = req
-            req, pinned_cl = session_header_overrides(bytes, headers)
+            built = per_send_request(bytes, headers, grpc_fields)
+            abort "gori run repeater send: --grpc-field #{built}" if built.is_a?(String)
+            req, pinned_cl = built
           end
           {r, Gori::HostOverrides.load(store), r && req ? Repeater::DraftMarkers.live?(store, r, req) : false, req}
         ensure
@@ -1537,14 +1539,7 @@ module Gori
           abort "gori run repeater send: session ##{id}'s stored request has no request line target to " \
                 "replace (#{request_line_preview(rec.request)}) — edit the session instead"
         end
-        # After `open_store`, which published the project's `.proto` schema the field names
-        # resolve through. The same `Protobuf::Edit.set` the TUI's add-field prompt calls.
-        unless grpc_fields.empty?
-          edited = Repeater::GrpcFields.apply(request, grpc_fields)
-          abort "gori run repeater send: --grpc-field #{edited}" if edited.is_a?(String)
-          request = edited
-          per_send_edits << "--grpc-field"
-        end
+        per_send_edits << "--grpc-field" unless grpc_fields.empty?
         # After `open_store` (which installs `Env.layer`) and before the plan: `Repeater::Sender`
         # reads the active slot at the seam, so this has to be set before anything builds bytes.
         activate_slot(slot, "gori run repeater send")
@@ -2492,6 +2487,21 @@ module Gori
       # and `Plan` expands the whole request once (or not at all under `--verbatim`), so an
       # expansion here would run twice over a value that itself looks like a token.
       # Answers whether one of the edits pinned Content-Length, which the plan then leaves alone.
+      # The request one `repeater send` carries, and whether `-H` pinned its Content-Length:
+      # `--grpc-field` first, then `-H`. The field set resyncs a Content-Length the edit outdated,
+      # so running it after `-H` overwrote a deliberately-wrong `-H "Content-Length: 999"` (P7).
+      # Called with the store open: it published the `.proto` schema the field names resolve by.
+      # The same `Protobuf::Edit.set` the TUI's add-field prompt and MCP `grpc_fields` call.
+      def self.per_send_request(request : Bytes, headers : Array(String),
+                                grpc_fields : Array(String)) : {Bytes, Bool} | String
+        unless grpc_fields.empty?
+          edited = Repeater::GrpcFields.apply(request, grpc_fields)
+          return edited if edited.is_a?(String)
+          request = edited
+        end
+        session_header_overrides(request, headers)
+      end
+
       private def self.session_header_overrides(request : Bytes, headers : Array(String)) : {Bytes, Bool}
         return {request, false} if headers.empty?
         boundary = Env.head_body_boundary(request)
