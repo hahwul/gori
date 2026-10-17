@@ -782,6 +782,76 @@ describe "gori run show --format json" do
       json["response"].as_h.has_key?("grpc_messages").should be_false
     end
   end
+
+  # #1632: a Connect call's outcome, and its messages, the way a gRPC call's are surfaced —
+  # with the `connect` object in lockstep with MCP `get_flow`.
+  describe "connect" do
+    connect_detail = ->(req_head : String, status : Int32, resp_head : String, resp_body : Bytes, req_body : Bytes?) do
+      row = Gori::Store::FlowRow.new(
+        id: 21_i64, created_at: 0_i64, scheme: "https", method: "POST", host: "api.test", port: 443,
+        target: "/demo.Users/GetUser", status: status, size: 0_i64, state: Gori::Store::FlowState::Complete)
+      Gori::Store::FlowDetail.new(row, "HTTP/1.1", req_head.to_slice, req_body, resp_head.to_slice, resp_body)
+    end
+    mcp_connect = ->(d : Gori::Store::FlowDetail) { JSON.parse(Gori::MCP::Serialize.flow_detail_json(d))["connect"]? }
+
+    it "surfaces a unary error's code and message, and decodes its proto request" do
+      d = connect_detail.call(
+        "POST /demo.Users/GetUser HTTP/1.1\r\nHost: api.test\r\ncontent-type: application/proto\r\nconnect-protocol-version: 1\r\n\r\n",
+        403, "HTTP/1.1 403 Forbidden\r\ncontent-type: application/json\r\n\r\n",
+        %({"code":"permission_denied","message":"not yours"}).to_slice,
+        Bytes[0x0a, 0x05, 0x61, 0x6c, 0x69, 0x63, 0x65])
+      json = JSON.parse(Gori::CLI::Run.show_json_for_spec(d, true, true))
+      json["connect"].should eq(JSON.parse(%({"streaming":false,"code":"permission_denied","message":"not yours"})))
+      json["connect"].should eq(mcp_connect.call(d))
+      req = json["request"]["grpc_messages"]
+      req["count"].as_i.should eq(1)
+      req["messages"][0]["protobuf"]["fields"][0]["string"].as_s.should eq("alice")
+      # The JSON error body is readable as JSON already: no framed view is invented for it.
+      json["response"].as_h.has_key?("grpc_messages").should be_false
+    end
+
+    it "surfaces a stream's end-stream error, and shows that message as JSON" do
+      end_stream = %({"error":{"code":"unauthenticated","message":"token expired"}})
+      body = grpc_frame_for_spec(Bytes[0x0a, 0x01, 0x61]) + grpc_frame_for_spec(end_stream.to_slice, 0x02_u8)
+      d = connect_detail.call(
+        "POST /demo.Users/Watch HTTP/1.1\r\nHost: api.test\r\ncontent-type: application/connect+proto\r\n\r\n",
+        200, "HTTP/1.1 200 OK\r\ncontent-type: application/connect+proto\r\n\r\n", body, nil)
+      json = JSON.parse(Gori::CLI::Run.show_json_for_spec(d, true, true))
+      json["connect"].should eq(JSON.parse(%({"streaming":true,"end_stream":true,"code":"unauthenticated","message":"token expired"})))
+      json["connect"].should eq(mcp_connect.call(d))
+      msgs = json["response"]["grpc_messages"]["messages"].as_a
+      msgs[0]["protobuf"]["fields"][0]["string"].as_s.should eq("a")
+      msgs[0].as_h.has_key?("end_stream").should be_false
+      msgs[1]["end_stream"].as_bool.should be_true
+      msgs[1]["json"].as_s.should eq(end_stream)
+      msgs[1].as_h.has_key?("protobuf").should be_false
+      mcp_msgs = JSON.parse(Gori::MCP::Serialize.flow_detail_json(d))["response_grpc_messages"]["messages"]
+      mcp_msgs[1]["json"].as_s.should eq(end_stream)
+    end
+
+    it "tells a stream cut before its end-stream message from one that ended cleanly" do
+      req = "POST /demo.Users/Watch HTTP/1.1\r\nHost: api.test\r\ncontent-type: application/connect+proto\r\n\r\n"
+      resp = "HTTP/1.1 200 OK\r\ncontent-type: application/connect+proto\r\n\r\n"
+      cut = connect_detail.call(req, 200, resp, grpc_frame_for_spec(Bytes[0x0a, 0x01, 0x61]), nil)
+      json = JSON.parse(Gori::CLI::Run.show_json_for_spec(cut, true, true))
+      json["connect"].should eq(JSON.parse(%({"streaming":true,"end_stream":false})))
+      json["connect"].should eq(mcp_connect.call(cut))
+      clean = connect_detail.call(req, 200, resp,
+        grpc_frame_for_spec(Bytes[0x0a, 0x01, 0x61]) + grpc_frame_for_spec(%({}).to_slice, 0x02_u8), nil)
+      json = JSON.parse(Gori::CLI::Run.show_json_for_spec(clean, true, true))
+      json["connect"].should eq(JSON.parse(%({"streaming":true,"end_stream":true})))
+      json["connect"].should eq(mcp_connect.call(clean))
+    end
+
+    it "omits connect on a plain JSON flow without connect-protocol-version" do
+      d = connect_detail.call(
+        "POST /api/users HTTP/1.1\r\nHost: api.test\r\ncontent-type: application/json\r\n\r\n",
+        403, "HTTP/1.1 403 Forbidden\r\ncontent-type: application/json\r\n\r\n",
+        %({"code":"permission_denied"}).to_slice, nil)
+      JSON.parse(Gori::CLI::Run.show_json_for_spec(d, true, true)).as_h.has_key?("connect").should be_false
+      mcp_connect.call(d).should be_nil
+    end
+  end
 end
 
 # --- `gori run history --format json/jsonl`'s listing extras, and `history delete` ----------

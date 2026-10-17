@@ -166,7 +166,7 @@ module Gori
       Status class shorthand: status:5xx  status:4xx
 
       Protocol: proto:ws  proto:grpc  proto:sse  proto:http  (ws = the 101 upgrade or an accepted
-      RFC 8441 extended CONNECT; grpc/sse by Content-Type)
+      RFC 8441 extended CONNECT; grpc/sse by Content-Type, grpc including a Connect stream)
 
       Short-circuited: stub:true  stub:false  — flows gori answered ITSELF from a Match&Replace
       short-circuit rule, with NO origin involved. Their response bytes came from the rule, not
@@ -1100,8 +1100,11 @@ module Gori
     # `Proto.grpc?` (`lstrip`) and `MediaType.essence` (`strip`) also strip a tab — so
     # `text/event-stream\t; charset=utf-8` was SSE in the PROTO column and missed by `proto:sse`.
     private SPACE_BYTES = "char(9, 10, 11, 12, 13, 32)"
-    GRPC_SQL    = "((content_type IS NOT NULL AND lower(ltrim(content_type, #{SPACE_BYTES})) LIKE 'application/grpc%') OR " \
-                  "(request_content_type IS NOT NULL AND lower(ltrim(request_content_type, #{SPACE_BYTES})) LIKE 'application/grpc%'))"
+    # A Connect stream (`application/connect+…`, #1632) is in the gRPC family, as in `Proto.grpc?`.
+    GRPC_SQL = "((content_type IS NOT NULL AND (lower(ltrim(content_type, #{SPACE_BYTES})) LIKE 'application/grpc%' OR " \
+               "lower(ltrim(content_type, #{SPACE_BYTES})) LIKE 'application/connect+%')) OR " \
+               "(request_content_type IS NOT NULL AND (lower(ltrim(request_content_type, #{SPACE_BYTES})) LIKE 'application/grpc%' OR " \
+               "lower(ltrim(request_content_type, #{SPACE_BYTES})) LIKE 'application/connect+%')))"
     SSE_SQL = "(content_type IS NOT NULL AND " \
               "lower(trim(substr(content_type, 1, instr(content_type || ';', ';') - 1), #{SPACE_BYTES})) = 'text/event-stream')"
     # BOTH transports, because a WebSocket is one protocol and used to be two answers here: an

@@ -246,6 +246,17 @@ The result is the same lens: one `Schema`, one `/package.Service/Method` binding
 
 It is an **outbound request**, and it is treated as one. It runs when you ask and never on capture, on opening a flow, or on project open (P4); it goes through the same scope chokepoint as every other active send, so a target outside a configured scope, or without one, is refused before the connection is opened (`--allow-unscoped` / `allow_unscoped:true` waives the up-front check, Sandbox mode does not lift). Nothing re-fetches on its own: `gori run grpc schema` lists what is cached, `gori run grpc forget <target>` drops one. And the schema it produces is still a lens: the target's word about what it accepts, over bytes that remain the truth.
 
+### Connect {#connect}
+
+[Connect](https://connectrpc.com/docs/protocol) is gRPC's schema and status model over plain HTTP, on HTTP/1.1 or HTTP/2, and gori reads it wherever it reads gRPC:
+
+- **A stream** (`application/connect+proto` or `+json`) uses gRPC's 5-byte envelope, so it is deframed the same way. A message flagged `0x01` is inflated under the stream's `connect-content-encoding`. The `0x02` end-stream message is shown as JSON (`end-stream` in the TUI, `end_stream: true` with a `json` string in the JSON), because that is what it is. The PROTO column reads `GRPC` and `proto:grpc` finds it.
+- **A unary call** (`application/proto` or `application/json`, with a plain body) is named Connect only by the request's `connect-protocol-version` header. A protobuf body is decoded as one message, with no envelope, after its `content-encoding` is undone, and the `.proto` lens applies as it does to gRPC. A JSON body is already readable and gets no protobuf view. A plain `application/json` request without the header is not Connect. No row column records that header, so the PROTO column calls a unary call `HTTP`.
+
+**The outcome is surfaced.** A Connect error is a non-200 response whose JSON body is `{code, message, details}` (unary), or the `error` in the end-stream message (streaming). `gori run history show --format json` and MCP `get_flow` both add a `connect` object to a Connect flow: `streaming`, `end_stream` on a stream (`false` when the capture never reached the end-stream message, so a cut stream does not read as a clean one), plus `code` (`permission_denied`, as the origin spelled it) and `message` when the call failed. Probe fingerprints a Connect service as `tech_grpc`.
+
+Not yet: the Repeater's gRPC tab and field editor, gRPC field fuzzing and reframing all still need gRPC framing, so a Connect flow opens in the Repeater as an ordinary HTTP request. A unary call sent as a `GET` (`?connect=v1&encoding=…&message=…`, the message in the query string) is not recognised yet either.
+
 ### MessagePack and CBOR {#binary-documents}
 
 A body whose `Content-Type` says `application/msgpack` or `application/cbor` (including the `+msgpack` / `+cbor` suffixes) is rendered as JSON in the detail pane, under the same `p` toggle everything else reflows with. Without it these bodies hit the binary placeholder and the hex view, because both formats encode the integer `0` as a NUL byte and essentially every real one trips the binary sniff.

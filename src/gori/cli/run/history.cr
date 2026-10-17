@@ -1423,14 +1423,17 @@ module Gori
       # set loaded: the flow's `/package.Service/Method` names the message type, and each
       # payload then carries a `schema` object ALONGSIDE its raw `protobuf` tree — never
       # instead of it. With no schema loaded the output is byte-identical to before.
-      private def self.emit_grpc_messages_json(j : JSON::Builder, head : Bytes?, body : Bytes?,
+      #
+      # A Connect call (#1632) is deframed here too: a stream's envelope, or a unary protobuf
+      # body as its one message — `request_head` is what names a unary call.
+      private def self.emit_grpc_messages_json(j : JSON::Builder, request_head : Bytes?,
+                                               head : Bytes?, body : Bytes?,
                                                target : String? = nil, request : Bool = true) : Nil
         return if head.nil? || body.nil? || body.empty?
         ct = MediaType.of(head)
-        return unless Proxy::H2::Grpc.grpc?(ct)
-        # `scan_wire`: grpc-web-text carries the frames base64-encoded on the wire, and any
-        # body may sit under a `Content-Encoding`.
-        msgs, residual = Proxy::H2::Grpc.scan_wire(head, body)
+        # `scan_wire` underneath: grpc-web-text carries the frames base64-encoded on the wire,
+        # and any body may sit under a `Content-Encoding`.
+        msgs, residual = Proxy::H2::Grpc.scan_call(request_head, head, body) || return
         return if msgs.empty? && residual == 0
         binding = Protobuf::Schemas.resolve(target, request: request)
         j.field "grpc_messages" do
@@ -1471,6 +1474,7 @@ module Gori
                     j.field "compressed", m.compressed
                     j.field "trailer", m.trailer
                     j.field "size", m.data.size
+                    j.field "end_stream", true if m.end_stream
                     # The codec a compressed message was inflated with, and what it inflated to
                     # (#1629) — the same projection the TUI and MCP `get_flow` make.
                     if m.compressed && !m.trailer
@@ -1491,6 +1495,9 @@ module Gori
                       # unknown codec, a corrupt stream, a bomb) is not a protobuf message.
                       j.field "note", "compressed payload — not decoded as protobuf: #{plain}"
                       j.field "bytes", Base64.strict_encode(m.data)
+                    elsif m.json
+                      # A Connect `+json` payload or end-stream message: JSON text, not protobuf.
+                      j.field "json", String.new(plain).scrub
                     else
                       decoded = Protobuf.decode(plain)
                       j.field "protobuf" do
@@ -1508,6 +1515,30 @@ module Gori
                   end
                 end
               end
+            end
+          end
+        end
+      end
+
+      # A Connect call (#1632) and its outcome — the same `connect` object as MCP `get_flow`:
+      # `code`/`message` when it failed, from a unary error body or a stream's end-stream
+      # message. For unary Connect, only the request's `connect-protocol-version` says the flow
+      # is an RPC at all.
+      private def self.emit_connect_json(j : JSON::Builder, detail : Store::FlowDetail) : Nil
+        return unless Proxy::H2::Connect.call?(detail.request_head)
+        j.field "connect" do
+          j.object do
+            streaming = Proxy::H2::Connect.streaming?(MediaType.of(detail.request_head))
+            j.field "streaming", streaming
+            # A stream cut before its end-stream message has no outcome — and must not read as
+            # one that ended cleanly. false too for one answered with no stream at all.
+            if streaming
+              j.field "end_stream", !!Proxy::H2::Connect.end_stream?(detail.response_head, detail.response_body)
+            end
+            if o = Proxy::H2::Connect.outcome(detail.request_head, detail.row.status,
+                 detail.response_head, detail.response_body)
+              j.field "code", o.code.scrub
+              j.field "message", o.message.try(&.scrub) if o.message
             end
           end
         end
@@ -1552,6 +1583,7 @@ module Gori
             # capture failure's text quotes bytes the origin sent (a malformed status line, a
             # header the codec refused), so it is captured data — see `Output.json_captured`.
             CLI::Output.json_captured(j, "error", detail.error)
+            emit_connect_json(j, detail)
             emit_decoded_json(j, detail, req, resp, ws_msgs) if cap.whole?
             if req
               j.field "request" do
@@ -1561,7 +1593,7 @@ module Gori
                   emit_body_json(j, "body", detail.request_head, detail.request_body, detail.request_body_truncated?, cap,
                     source_size: detail.request_body_truncated? ? detail.request_wire_body_size : nil)
                   if cap.whole?
-                    emit_grpc_messages_json(j, detail.request_head, detail.request_body,
+                    emit_grpc_messages_json(j, detail.request_head, detail.request_head, detail.request_body,
                       detail.row.target, request: true)
                   end
                 end
@@ -1576,7 +1608,7 @@ module Gori
                   emit_body_json(j, "body", detail.response_head, detail.response_body, detail.response_body_truncated?, cap,
                     source_size: detail.response_body_truncated? ? detail.response_wire_body_size : nil)
                   if cap.whole?
-                    emit_grpc_messages_json(j, detail.response_head, detail.response_body,
+                    emit_grpc_messages_json(j, detail.request_head, detail.response_head, detail.response_body,
                       detail.row.target, request: false)
                   end
                 end

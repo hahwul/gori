@@ -230,138 +230,68 @@ describe "HistoryView gRPC detail" do
   end
 end
 
-# --- sites 2 & 3: the Repeater GRPC RESPONSE transcript --------------------------------
-
-describe "RepeaterView gRPC protobuf transcript" do
-  resp_head = "HTTP/2 200 OK\r\ncontent-type: application/grpc\r\ngrpc-status: 0\r\n\r\n"
-
-  loaded = ->(store : Gori::Store) do
-    id = store.insert_flow(Gori::Store::CapturedRequest.new(
+# #1632: a Connect call takes the same pane — a unary protobuf body as its one message (named
+# by the request's connect-protocol-version), and a stream's end-stream message as JSON text.
+describe "HistoryView Connect detail" do
+  seed = ->(store : Gori::Store, head : String, body : Bytes) do
+    store.insert_flow(Gori::Store::CapturedRequest.new(
       created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
-      method: "POST", target: "/svc/M", http_version: "HTTP/2",
-      head: GRPC_HEAD.to_slice, body: grpc_frame(PB_BODY), source: Gori::FlowSource::Kind::Proxy))
-    view = RepeaterView.new
-    view.load_grpc(store.get_flow(id).not_nil!)
-    view
+      method: "POST", target: "/svc/M", http_version: "HTTP/1.1",
+      head: head.to_slice, body: body, source: Gori::FlowSource::Kind::Proxy))
+    view = HistoryView.new
+    view.reload(store)
+    view.open_detail(store).should be_true
+    view.pretty = true
+    backend = MemoryBackend.new(160, 24)
+    view.render_detail(Screen.new(backend), Rect.new(0, 0, 160, 24))
+    backend
   end
 
-  answered = ->(view : RepeaterView, body : Bytes) do
-    resp = Gori::Proxy::Codec::Http1.parse_response_head(resp_head.to_slice)
-    view.apply(Gori::Repeater::Result.new(resp_head.to_slice, body, resp, 5000_i64))
-    view
-  end
-
-  it "decodes each response message into the same tree the History pane draws" do
+  it "decodes a unary proto body with no envelope" do
     pb_tmp_store do |store|
-      view = answered.call(loaded.call(store), grpc_frame(PB_BODY))
-      view.pretty = true
-      backend = MemoryBackend.new(160, 24)
-      view.render(Screen.new(backend), Rect.new(0, 0, 160, 24))
-      backend.contains?("← message #1").should be_true
+      backend = seed.call(store, "POST /svc/M HTTP/1.1\r\nHost: api.test\r\ncontent-type: application/proto\r\n" \
+                                 "connect-protocol-version: 1\r\n\r\n", PB_BODY)
+      backend.contains?("▸ message #1").should be_true
       backend.contains?("1  varint   150").should be_true
-      backend.contains?("message | string | bytes").should be_true
     end
   end
 
-  # `pretty=` drops the response-view cache; the transcript has a cache of its OWN, and
-  # missing it would leave hex on screen under a lit ` p:bytes ` chip saying otherwise.
-  it "re-renders the transcript when PRETTY flips (its cache is dropped too)" do
+  it "shows a +json stream's messages and its end-stream as JSON, with no protobuf legend" do
     pb_tmp_store do |store|
-      view = answered.call(loaded.call(store), grpc_frame(PB_BODY))
-      view.pretty = true
-      view.render(Screen.new(MemoryBackend.new(160, 24)), Rect.new(0, 0, 160, 24))
-
-      view.pretty = false
-      off = MemoryBackend.new(160, 24)
-      view.render(Screen.new(off), Rect.new(0, 0, 160, 24))
-      off.contains?("varint   150").should be_false
-      off.contains?("08 96 01 12 05").should be_true
-
-      view.pretty = true
-      on = MemoryBackend.new(160, 24)
-      view.render(Screen.new(on), Rect.new(0, 0, 160, 24))
-      on.contains?("varint   150").should be_true
+      io = IO::Memory.new
+      io.write(grpc_frame(%({"id":7}).to_slice))
+      io.write_byte(2_u8)
+      io.write_bytes(%({"error":{"code":"internal"}}).bytesize.to_u32, IO::ByteFormat::BigEndian)
+      io << %({"error":{"code":"internal"}})
+      backend = seed.call(store, "POST /svc/M HTTP/1.1\r\nHost: api.test\r\ncontent-type: application/connect+json\r\n\r\n",
+        io.to_slice)
+      backend.contains?(%({"id":7})).should be_true
+      backend.contains?("▸ end-stream").should be_true
+      backend.contains?(%({"error":{"code":"internal"}})).should be_true
+      backend.contains?("none is authoritative").should be_false
+      backend.contains?("JSON").should be_true # the mode strip names what PRETTY shows
+      backend.contains?("PROTOBUF").should be_false
     end
   end
 
-  # The transcript was the one response pane with no chrome at all. `p` is live on it now, so
-  # it carries a chip — drawn and hit-testable off one shared geometry (`grpc_chip_x`).
-  it "draws a clickable p: chip on the transcript border" do
+  it "cuts a long JSON payload at the protobuf tree's line ceiling" do
     pb_tmp_store do |store|
-      view = answered.call(loaded.call(store), grpc_frame(PB_BODY))
-      view.focus_pane(:response)
+      max = Gori::Tui::ProtobufTree::MAX_LINES
+      long = (1..(max + 50)).map { |i| %("k#{i}") }.join("\n")
+      store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
+        method: "POST", target: "/svc/M", http_version: "HTTP/1.1",
+        head: "POST /svc/M HTTP/1.1\r\nHost: api.test\r\ncontent-type: application/connect+json\r\n\r\n".to_slice,
+        body: grpc_frame(long.to_slice), source: Gori::FlowSource::Kind::Proxy))
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
       view.pretty = true
-      rect = Rect.new(0, 0, 160, 24)
-      b = MemoryBackend.new(160, 24)
-      view.render(Screen.new(b), rect)
-
-      # The RESPONSE column is the right half, below the 3-row TARGET band.
-      row = b.row(rect.y + 3)
-      row.should contain("GRPC RESPONSE")
-      row.should contain("p:bytes")
-      col = row.index("p:bytes").not_nil!
-      view.chrome_hit(rect, col, rect.y + 3).should eq(:pretty)
-    end
-  end
-
-  # …and the inverse, which the shared geometry only half covered (#741 review). The draw's
-  # stop is the LATENCY meta's left edge, not the card's '╮'; the hit-test passed its own
-  # `right - 1`. At 60 columns the RESPONSE half is 30 wide, ` p:bytes ` no longer clears the
-  # ` 5ms ` on that border, and the draw paints NOTHING — while the hit test kept nine live
-  # cells there, two of them on the duration text itself. Clicking the send you just made and
-  # having the pane silently swap readings is exactly the dead/ghost-cell class `␣Pw:KEY` had.
-  it "does not light the p: chip over the duration meta it could not clear" do
-    pb_tmp_store do |store|
-      view = answered.call(loaded.call(store), grpc_frame(PB_BODY))
-      view.focus_pane(:response)
-      view.pretty = true
-      rect = Rect.new(0, 0, 60, 24)
-      b = MemoryBackend.new(60, 24)
-      view.render(Screen.new(b), rect)
-
-      row = b.row(rect.y + 3)
-      row.should contain("GRPC RESPONSE")
-      row.should_not contain("p:bytes") # the draw refused — it would have overpainted the meta
-      meta = Fmt.dur(5000_i64)
-      col = row.index(meta).not_nil!
-      # Every cell the duration occupies.
-      meta.size.times { |i| view.chrome_hit(rect, col + i, rect.y + 3).should be_nil }
-    end
-  end
-
-  # The other half of the same split: a chip the draw refused paints no cell ANYWHERE, so no
-  # cell on that border may answer for it — not the duration's, and not the bare border left
-  # of it where the chip would have started.
-  it "leaves the whole transcript border dead when the chip was not painted" do
-    pb_tmp_store do |store|
-      view = answered.call(loaded.call(store), grpc_frame(PB_BODY))
-      view.focus_pane(:response)
-      view.pretty = true
-      # 60 cols: the chip fits under the card's corner but not under the meta (the draw is the
-      # authority). 44: too narrow for it on any reading — a guard that the tightened stop
-      # never re-opens a cell as the pane shrinks further.
-      {60, 44}.each do |w|
-        rect = Rect.new(0, 0, w, 24)
-        b = MemoryBackend.new(w, 24)
-        view.render(Screen.new(b), rect)
-        b.row(rect.y + 3).should_not contain("p:bytes")
-        # The RESPONSE half is everything right of the divider.
-        half = (w - 1) // 2
-        (half + 1).upto(w - 1) do |mx|
-          view.chrome_hit(rect, mx, rect.y + 3).should be_nil
-        end
-      end
-    end
-  end
-
-  it "keeps the hex preview for a compressed response message" do
-    pb_tmp_store do |store|
-      view = answered.call(loaded.call(store), grpc_frame(PB_BODY, compressed: true))
-      view.pretty = true
-      backend = MemoryBackend.new(160, 24)
-      view.render(Screen.new(backend), Rect.new(0, 0, 160, 24))
-      backend.contains?("(compressed)").should be_true
-      backend.contains?("varint   150").should be_false
+      backend = MemoryBackend.new(160, max + 40)
+      view.render_detail(Screen.new(backend), Rect.new(0, 0, 160, max + 40))
+      backend.contains?(%("k#{max}")).should be_true
+      backend.contains?("render cut at #{max} lines").should be_true
+      backend.contains?(%("k#{max + 1}")).should be_false
     end
   end
 end

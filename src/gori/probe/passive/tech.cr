@@ -76,6 +76,9 @@ module Gori
           end
           if Proxy::H2::Grpc.grpc?(req_ct) || Proxy::H2::Grpc.grpc?(resp_ct)
             acc << tech(ctx, "tech_grpc", "gRPC service")
+          elsif connect?(ctx, req_ct, resp_ct)
+            # Connect (#1632) is gRPC's schema and status model over plain HTTP: the same finding.
+            acc << tech(ctx, "tech_grpc", "Connect RPC service", "Connect")
           end
           acc << tech(ctx, "tech_graphql", "GraphQL endpoint") if graphql?(ctx, req_ct)
           # `resp_ct` is the response Content-Type the capture already parsed out of the head
@@ -235,6 +238,13 @@ module Gori
             title = ver ? "#{label} #{ver}" : label
             acc << tech(ctx, code, title, ver)
           end
+        end
+
+        # A Connect stream by either side's content type, or a unary call by the request's
+        # `connect-protocol-version` — a plain `application/json` request is not one.
+        private def connect?(ctx : Context, req_ct : String?, resp_ct : String?) : Bool
+          Proxy::H2::Connect.streaming?(req_ct) || Proxy::H2::Connect.streaming?(resp_ct) ||
+            !ctx.req.headers.get?("Connect-Protocol-Version").nil?
         end
 
         private def tech(ctx : Context, code : String, title : String, evidence : String? = nil) : Detection
