@@ -58,15 +58,16 @@ module Gori::Proxy
       nil
     end
 
-    # The same questions, narrowed to one host. The h2 downgrade gate asks whether either
-    # direction has a body rule for the CONNECT host. HTTP/1's forward-proxy path asks the
+    # The same questions, narrowed to one host. The h2 relay asks whether either direction has
+    # a body rule for the CONNECT host, which decides whether it runs the body-rule path
+    # (`H2::Relay#gates`); the TLS tunnel asks `short_circuits_for_host?` for its downgrade. HTTP/1's forward-proxy path asks the
     # directional predicates below for each request because one client connection can carry
     # requests for different hosts.
     #
     # An UNSCOPED rule (empty glob) matches every host, so it still answers true everywhere
     # — the pre-#526 behaviour for the rule set most operators have, unchanged.
     #
-    # Called at the h2 CONNECT gate, not per frame.
+    # Called once per h2 connection, not per frame.
     # Default false, matching the host-blind pair — a no-op stub rewrites nothing anywhere.
     def rewrites_body_for_host?(host : String) : Bool
       false

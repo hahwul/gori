@@ -24,6 +24,7 @@ module Gori::Proxy::H2
   #
   # An `interceptor` adds a `StreamGate` per direction, which holds streams INDIVIDUALLY: the
   # pump never blocks on a human, so a held stream does not freeze the connection (#492 step 3).
+  # The same gates carry Match&Replace BODY rules (#1628) when one is live for this host.
   class Relay
     def self.run(client : IO, upstream : IO, host : String, port : Int32, sink : FlowSink,
                  rewriter : Proxy::HeadRewriter? = nil, interceptor : Gori::Interceptor? = nil,
@@ -62,13 +63,21 @@ module Gori::Proxy::H2
     # The two gates, PAIRED — a drop has to reset the opposite leg, and each gate reaches the
     # other only through `peer`. {nil, nil} when intercept is off, so a relay without it keeps
     # exactly the frame path (and the zero locking) it has today.
+    #
+    # A body rule live for this host turns on the gates' body-rule path (`body_rule.cr`). Asked
+    # ONCE, here, on the CONNECT host — the question the HTTP/1.1 downgrade used to ask
+    # (`Tls::Tunnel#h2_downgrade_reason`) — so a connection no body rule matched keeps the frame
+    # path it always had, and a rule enabled later reaches the next connection (`HeadRewrite`
+    # says so). Every `Session` wires an Interceptor; a relay built without one has no gates
+    # to carry the path, and a body rule does not reach it.
     private def gates(conn_id : Int64, assembler : Assembler) : {StreamGate?, StreamGate?}
       ic = @interceptor
       return {nil, nil} unless ic
+      body = @rewriter if @rewriter.try(&.rewrites_body_for_host?(@host))
       out_gate = StreamGate.new("out", @upstream, conn_id, @sink, assembler, @host, @port, ic,
-        HeadRewrite.new("out", @rewriter, assembler, @host, @extractor))
+        HeadRewrite.new("out", @rewriter, assembler, @host, @extractor, !body.nil?), body_rewriter: body)
       in_gate = StreamGate.new("in", @client, conn_id, @sink, assembler, @host, @port, ic,
-        HeadRewrite.new("in", @rewriter, assembler, @host, @extractor), extract_for(assembler))
+        HeadRewrite.new("in", @rewriter, assembler, @host, @extractor, !body.nil?), extract_for(assembler), body)
       out_gate.peer = in_gate
       in_gate.peer = out_gate
       {out_gate, in_gate}

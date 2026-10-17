@@ -10,9 +10,11 @@ require "../../outbound"
 # The class body continues in `stream_gate/` — one class-reopen file per slice, the same shape
 # `repeater_view/` and `runner/` use. This file keeps the state (ivars + `initialize`), the pump
 # and hold paths, and the lock invariant they are all bound by; the slices are the blocking
-# sandbox gate (`sandbox.cr`) and the body buffer + DATA re-framer (`body.cr`).
+# sandbox gate (`sandbox.cr`), the body buffer + DATA re-framer (`body.cr`), and Match&Replace
+# body rules with the flow-control accounting they need (`body_rule.cr`).
 require "./stream_gate/sandbox"
 require "./stream_gate/body"
+require "./stream_gate/body_rule"
 
 module Gori::Proxy::H2
   # One direction's writer, and the intercept + sandbox gates in front of it (#492 steps 3-4).
@@ -93,9 +95,10 @@ module Gori::Proxy::H2
   # `POST` and then stalls would otherwise wait forever with no queue row and every later
   # stream parked behind it. Past the deadline the hold falls back to the same head-only shape.
   #
-  # Match&Replace over a BODY is a different question and still forces the h1 downgrade
-  # (`Tls::Tunnel#h2_candidate?`): a rule rewrites every matching message on the connection,
-  # unbuffered and unattended, where a hold buffers one message a human is already waiting on.
+  # Match&Replace over a BODY is a different question (#1628, `body_rule.cr`): a rule rewrites
+  # every matching message on the connection, unattended, so gori becomes the SENDER of that
+  # stream's DATA and keeps both legs' flow control itself. A stream an intercept hold owns is
+  # the hold's, and a body rule does not touch it.
   #
   # ## The lock invariant (deadlock guard)
   #
@@ -246,7 +249,7 @@ module Gori::Proxy::H2
     def initialize(@direction : String, @dst : IO, @conn_id : Int64, @sink : FlowSink,
                    @assembler : Assembler, @host : String, @port : Int32,
                    @interceptor : Gori::Interceptor, @heads : HeadRewrite,
-                   @extract : Extract? = nil)
+                   @extract : Extract? = nil, @body_rewriter : Proxy::HeadRewriter? = nil)
       @mutex = Mutex.new
       @slots = {} of UInt32 => Slot
       # Deferred stream-OPENING ids in arrival order (= increasing id order), request direction
@@ -279,12 +282,17 @@ module Gori::Proxy::H2
       # The request direction is the one that opens streams, and the one whose deferred streams
       # the FAR leg has therefore never seen.
       @ordered = @direction == "out"
+      # This leg's receiver as gori the sender sees it, for Match&Replace body rules. nil — and
+      # every frame on the path it has always had — unless `Relay#gates` found a body rule live
+      # for this connection's host.
+      @flow = @body_rewriter ? Flow.new : nil
       @heads.deferrer = self
     end
 
     # Feed one frame off the wire. Never blocks on a human.
     def accept(frame : Frame::Header) : Nil
       run_cross(@mutex.synchronize { accept_locked(frame) })
+      run_flow
       refund_swallowed
     end
 
@@ -311,7 +319,8 @@ module Gori::Proxy::H2
       slots.each do |slot|
         if b = slot.pending
           project(b)
-          @assembler.drop_stream(slot.stream_id, "held at intercept when the h2 connection closed")
+          owned = @flow.try(&.owned.has_key?(slot.stream_id))
+          @assembler.drop_stream(slot.stream_id, owned ? "its body was still buffered for a Match&Replace body rule when the h2 connection closed" : "held at intercept when the h2 connection closed")
         end
         # Resolves the queue row, bumps the revision so the TUI redraws, and unblocks the wait
         # fiber — which then finds `@closed` and discards the decision. The Decision value is
@@ -329,12 +338,7 @@ module Gori::Proxy::H2
       opener = note_opener(block)
       promise = promise_deferred_locked(block)
       return promise unless promise.nil?
-      if slot = @slots[block.stream_id]?
-        # A later block on a stream already deferred — h2 trailers behind a held response head.
-        # Already re-encoded: the latch engaged when the Slot was created.
-        park_block(slot, block)
-        return true
-      end
+      return true if follow_locked(block)
       # The blocking gate runs before the holding one, and before anything is written. A
       # refused stream is never held: there is no decision to offer a human about a request
       # that is not going anywhere.
@@ -343,7 +347,14 @@ module Gori::Proxy::H2
       # Rule 1 orders every request head, and a methodless opener with it (it opens an id too).
       ordered = opener || (@ordered && !block.head.nil?)
       queued = ordered && !@opens.empty?
-      return false unless held || queued
+      # A body rule's stream (#1628). A declared length has to describe the body that goes out,
+      # so that head waits for it.
+      own = body_for(block, !held.nil?)
+      waits = !!own.try(&.declares_length?)
+      unless held || queued || waits
+        adopt_locked(own, nil)
+        return false
+      end
 
       block = @heads.engage(block) # rule 2 — MUST precede any later block going out
       slot = Slot.new(block.stream_id)
@@ -353,8 +364,23 @@ module Gori::Proxy::H2
       if held
         start_hold_locked(slot, held, block)
       else
-        slot.ready = true # queued for order only; nothing to decide
+        # Queued for order only, or a body rule's head waiting for its body (`finish_owned_locked`
+        # readies it).
+        slot.ready = !waits
+        adopt_locked(own, slot)
       end
+      true
+    end
+
+    # A later block on a stream already deferred or owned. Owned first: a body rule's trailers
+    # follow its body, not its held head.
+    private def follow_locked(block : HeadRewrite::Block) : Bool
+      return true if follow_body_locked(block)
+      slot = @slots[block.stream_id]?
+      return false unless slot
+      # h2 trailers behind a held response head. Already re-encoded: the latch engaged when the
+      # Slot was created.
+      park_block(slot, block)
       true
     end
 
@@ -475,7 +501,11 @@ module Gori::Proxy::H2
       # and be decoded later out of sequence. That holds for a REFUSED stream too — its later
       # blocks (trailers) still carry the peer's HPACK insertions, so they must be decoded even
       # though nothing is written.
+      fc = @flow
       @heads.accept(frame) do |f, pre|
+        # A body-rule connection hands the far end's flow-control frames to the peer gate,
+        # whose sends they account for (`run_flow`).
+        next if fc && heard_locked(fc, f)
         if f.stream_id == 0
           # Connection-level frames are NEVER deferred (#492 step 3, D1 rule 1): parking a
           # SETTINGS ACK, a PING or the SHARED connection window behind a held stream kills the
@@ -497,8 +527,10 @@ module Gori::Proxy::H2
           # downstream will ever credit them back, so they are counted here and refunded once
           # `accept` is out of the lock. See `refund_swallowed`.
           @swallowed += f.payload.size if f.frame_type == Frame::Type::Data
+        elsif fc && own_frame_locked(f)
+          # an owned stream's DATA or reset, or a reset behind DATA waiting for the window
         elsif slot.nil?
-          write(f, pre)
+          deliver(f, pre)
         elsif f.frame_type == Frame::Type::RstStream
           cross = cross + abandon_locked(slot, f)
         else
@@ -535,6 +567,7 @@ module Gori::Proxy::H2
     # connection holding nothing, which is the common case.
     private def check_waiting_locked : Nil
       return if @slots.empty?
+      expire_owned_heads_locked
       waiting = @slots.each_value.select(&.waiting).to_a
       return if waiting.empty?
       if @interceptor.holding?
@@ -985,8 +1018,9 @@ module Gori::Proxy::H2
       if body
         write_rebuilt(slot, body)
       else
-        slot.frames.each { |(f, pre)| write(f, pre) }
+        slot.frames.each { |(f, pre)| deliver(f, pre) }
       end
+      release_owned_locked(slot)
       NO_CROSS
     end
 
@@ -1029,6 +1063,7 @@ module Gori::Proxy::H2
     private def write(frame : Frame::Header, pre : Assembler::HeadBlock?) : Nil
       @dst.write(frame.wire_bytes)
       @dst.flush
+      @flow.try { |fc| note_written(fc, frame) }
       @sink.on_h2_frame(@conn_id, @direction, frame.type, frame.flags, frame.stream_id, frame.payload)
       # Session-binding extraction (#501 slice 2), on the frames that were actually WRITTEN.
       # A head the sandbox suppressed or the operator dropped goes to `project`, not here, so
@@ -1120,25 +1155,30 @@ module Gori::Proxy::H2
     # the client can send DATA on NO stream — in-scope ones included.
     #
     # Connection level only (stream 0). The stream itself is refused or dropped and its own
-    # window dies with it; it is the shared one that wedges the connection.
+    # window dies with it; it is the shared one that wedges the connection. A body rule's
+    # stream (`body_rule.cr`) is the exception: it lives on, so its stream credit goes back too.
     #
     # Written on the PEER's leg, because that is the one facing the sender — the same
     # `@peer` seam `write_cross_rst` uses, and with `@mutex` released for the same reason.
-    private def refund_swallowed : Nil
-      n = @mutex.synchronize do
+    protected def refund_swallowed : Nil
+      n, streams = @mutex.synchronize do
         v = @swallowed
         @swallowed = 0
-        v
+        taken = @flow.try { |fc| fc.refunds.empty? ? nil : fc.refunds.dup.tap { fc.refunds.clear } }
+        {v, taken}
       end
-      return if n <= 0
-      @peer.try(&.write_cross_window_update(n))
+      peer = @peer
+      return unless peer
+      peer.write_cross_window_update(n) if n > 0
+      streams.try &.each { |id, credit| peer.write_cross_window_update(credit, id) }
     end
 
     # Called by the OPPOSITE direction's gate. Takes this gate's lock and nothing else — the
     # caller has already released its own, exactly as `write_cross_rst` requires.
-    def write_cross_window_update(increment : Int32) : Nil
+    def write_cross_window_update(increment : Int32, stream_id : UInt32 = 0_u32) : Nil
       @mutex.synchronize do
-        return if @closed
+        # A zero increment is a PROTOCOL_ERROR (RFC 9113 §6.9).
+        return if @closed || increment <= 0
         payload = Bytes.new(4)
         IO::ByteFormat::BigEndian.encode(increment.to_u32 & 0x7fff_ffff_u32, payload)
         # Through `write`, exactly as `write_cross_rst` does — so this frame lands in the raw
@@ -1149,7 +1189,7 @@ module Gori::Proxy::H2
         # ways: it justifies not logging a frame gori swallowed, and requires logging one gori
         # synthesized. Safe on this frame: `feed` returns immediately for stream 0 and
         # `@extract.observe` needs a `pre`, which a WINDOW_UPDATE never has.
-        write(Frame::Header.new(Frame::Type::WindowUpdate.value, 0_u8, 0_u32, payload), nil)
+        write(Frame::Header.new(Frame::Type::WindowUpdate.value, 0_u8, stream_id, payload), nil)
       end
     rescue
       # The leg is gone; there is nobody left to credit.
