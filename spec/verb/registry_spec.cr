@@ -430,6 +430,10 @@ private class FakeContext < ExecContext
     false
   end
 
+  def repeater_stoppable? : Bool
+    false
+  end
+
   def repeater_split_request? : Bool
     false
   end

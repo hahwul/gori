@@ -4415,9 +4415,8 @@ module Gori::Tui
         # Derived view: content-decode + split into SSE events at render time — no
         # table, like the gRPC framing pane (shared with `gori run show` / MCP).
         events = Sse.from_response(detail.response_head, detail.response_body)
-        dropped = {events.size - DETAIL_LOG_CAP, 0}.max # older events not shown (windowed)
-        shown = dropped > 0 ? events[dropped..] : events
-        head = log_head(Sse.display_lines(shown, dropped), events.size, shown.size, "events")
+        lines, shown = Sse.latest_lines(events, DETAIL_LOG_CAP) # older events not shown (windowed)
+        head = log_head(lines, events.size, shown, "events")
         return DetailView.new(head, EMPTY_BODY, :text, EMPTY_LINES)
       end
       # Decoded-protocol panes (SAML/JWT/GRAPHQL/PARAMS) — derived projections styled

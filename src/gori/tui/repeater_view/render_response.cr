@@ -244,7 +244,7 @@ class Gori::Tui::RepeaterView
   private def render_resp_hex(screen : Screen, body : Rect) : Nil
     if b = resp_hex_bytes
       HexView.render(screen, body, b, @scroll)
-    elsif result = @result
+    elsif result = shown_result
       msg = result.error ? "repeater error: #{result.error}" : "— no response —"
       color = result.error ? Theme.red : Theme.muted
       screen.text(body.x, body.y, msg, color)

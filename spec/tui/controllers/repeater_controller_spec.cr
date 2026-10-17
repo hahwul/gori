@@ -376,9 +376,10 @@ describe "RepeaterController on an event stream" do
       ctl.repeater_from_request("http://127.0.0.1:#{port}", "GET /events HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n", false, nil)
       v = ctl.current_view.not_nil!
       v.pretty = true
+      host.active_tab = :repeater
       ctl.repeater_send
       v.inflight?.should be_true
-      host.statuses.last.should contain("→ s stops") # the way to end it, named while it is open
+      ctl.stoppable?.should be_true
       events = -> { resp_lines(v).count(&.starts_with?("▸ event")) }
       deadline = Time.instant + 10.seconds
       until events.call >= 3 || Time.instant > deadline
@@ -387,6 +388,7 @@ describe "RepeaterController on an event stream" do
       end
       events.call.should be >= 3
       v.inflight?.should be_true # still open: these came from the live sink
+      host.statuses.should contain("event stream open · space → s stops it and keeps the events")
 
       ctl.repeater_stop
       until !v.inflight? || Time.instant > deadline
@@ -397,6 +399,58 @@ describe "RepeaterController on an event stream" do
       events.call.should be >= 3
       host.statuses.last.should contain("(stopped)")
     end
+  end
+
+  it "does not render the stream while another tab is on screen, and catches up on return" do
+    with_repeater_controller do |ctl, host|
+      port = start_sse_origin(every: 20.milliseconds)
+      ctl.repeater_from_request("http://127.0.0.1:#{port}", "GET /events HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n", false, nil)
+      v = ctl.current_view.not_nil!
+      v.pretty = true
+      host.active_tab = :history
+      ctl.repeater_send
+      live = v.live.not_nil!
+      deadline = Time.instant + 10.seconds
+      until live.size > 0 || Time.instant > deadline
+        sleep 20.milliseconds
+        ctl.drain_results
+      end
+      live.size.should be > 0
+      v.live_renders.should eq(0) # the stream grew, but History was on screen
+      host.active_tab = :repeater
+      ctl.drain_results.should be_true
+      v.live_renders.should eq(1)
+      ctl.repeater_stop
+    end
+  end
+
+  it "stops the stream of a sub-tab it closes, and every stream on a project exit" do
+    with_repeater_controller do |ctl, _|
+      port = start_sse_origin(every: 20.milliseconds)
+      req = "GET /events HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
+      ctl.repeater_from_request("http://127.0.0.1:#{port}", req, false, nil)
+      closing = ctl.current_view.not_nil!
+      ctl.repeater_send
+      live = closing.live.not_nil!
+      ctl.request_close
+      live.stopped?.should be_true
+
+      ctl.repeater_from_request("http://127.0.0.1:#{port}", req, false, nil)
+      left = ctl.current_view.not_nil!
+      ctl.repeater_send
+      other = left.live.not_nil!
+      ctl.stop_all
+      other.stopped?.should be_true
+    end
+  end
+
+  it "offers Stop only while a send is in flight" do
+    reg = Gori::Verbs.registry
+    ctx = FakeExecContext.new
+    ctx.current_tab = :repeater
+    reg["repeater.stop"].available?(ctx).should be_false
+    ctx.repeater_stoppable = true
+    reg["repeater.stop"].available?(ctx).should be_true
   end
 
   it "has nothing to stop when no send is in flight" do

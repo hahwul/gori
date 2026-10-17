@@ -254,7 +254,8 @@ module Gori
       # which the Repeater spends on the hex lenses.
       r.register Verb::Definition.new(
         "repeater.stop", "Stop send", "End the send in flight; an event stream keeps the events received so far",
-        Verb::Scope::Repeater, available: in_repeater, intent: :stop) { |ctx| ctx.repeater_stop; nil }
+        Verb::Scope::Repeater, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater && ctx.repeater_stoppable? },
+        intent: :stop) { |ctx| ctx.repeater_stop; nil }
       # `↵` on the RESPONSE sends too. That arm moved to `register_editor` (verbs/editor.cr)
       # as `repeater.send-enter` — it is a Scope::Repeater verb, but it exists BECAUSE of the
       # Editor/tab scope split and reads with the rest of that story.

@@ -241,6 +241,13 @@ module Gori
 
     EVENT_DATA_LINE_CAP = 1000 # max rendered data lines per event
 
+    # `display_lines` over the latest `cap` events, numbered past the older ones it leaves
+    # out, and how many it showed. The window History's EVENTS pane and the Repeater share.
+    def self.latest_lines(events : Array(Event), cap : Int32) : {Array(String), Int32}
+      dropped = {events.size - cap, 0}.max
+      {display_lines(dropped > 0 ? events[dropped..] : events, dropped), events.size - dropped}
+    end
+
     # A `retry` reconnection time (ms): only an all-ASCII-digit value qualifies; one
     # too large for Int32 clamps to MAX rather than being dropped. nil ⇒ not valid.
     protected def self.retry_ms(value : Bytes) : Int32?

@@ -1593,7 +1593,14 @@ module Gori::Tui
         applied = true
       end
       applied = true if drain_timing
-      applied = true if current_view.try(&.live_tick)
+      # Only while the Repeater is on screen: a tick re-parses the stream, and another tab draws
+      # none of it. Its next tick there catches up in one render.
+      if @host.active_tab == :repeater && (v = current_view) && v.live_tick
+        applied = true
+        # The first render is where the send became an open stream, so it names the way out.
+        @host.status(Hotkeys.expand_menu_paths(@host.session.registry,
+          "event stream open · {space:repeater.stop} stops it and keeps the events"), :busy) if v.live_renders == 1
+      end
       applied
     end
 
@@ -2055,6 +2062,8 @@ module Gori::Tui
       end
       # A timing run against the tab being closed — either half of its pair — stops too.
       @timing_stop.try(&.stop) if timing_running? && @timing_members.any?(&.same?(closing))
+      # …and so does an open event stream (#1631), which would otherwise read on unbounded.
+      closing.live.try(&.stop) if closing.inflight?
       # `delete_repeater` has always reported whether the DELETE committed (it is `exec_task_ok`)
       # and this was the last caller ignoring it; MCP's `delete_repeater` already surfaces it.
       orphaned = (id = @repeaters[idx].db_id) ? !@host.session.store.delete_repeater(id) : false # also propagates the close to peer sessions
@@ -2081,9 +2090,10 @@ module Gori::Tui
     #     (Repeater::Minimize::Stop), on the shape of DiscoverRun#request_stop.
     #
     # A timing run is a bounded probe run as well — up to MAX_ITERATIONS pairs — so it is stopped
-    # here too; it has no job row to finish.
+    # here too; it has no job row to finish. An open event stream (#1631) is not bounded at all.
     def stop_all : Nil
       @timing_stop.try(&.stop)
+      @repeaters.each { |t| t.view.live.try(&.stop) if t.view.inflight? }
       return unless mj = @minimize_job
       @minimize_stop.try(&.stop)
       @host.jobs.finish(mj[1], :stopped, "project closed")
@@ -2247,9 +2257,7 @@ module Gori::Tui
       view.inflight = true
       view.live_begin(live)
       sni = plan.sni # custom TLS SNI host (nil → present the dialed host)
-      # Stays up while an event stream is open, so it names the way to end one.
-      stop = Hotkeys.expand_menu_paths(@host.session.registry, " · {space:repeater.stop} stops")
-      @host.status("sending#{sending_as} → #{plan.host}:#{plan.port}#{sni ? " (SNI #{sni})" : ""}…#{stop}", :busy) unless quiet
+      @host.status("sending#{sending_as} → #{plan.host}:#{plan.port}#{sni ? " (SNI #{sni})" : ""}…", :busy) unless quiet
       # Read live so a toggle in Settings takes on the very next ^R, and read on the UI fiber
       # so the send fiber captures a decision rather than racing one.
       record_store = history_record_store
@@ -2266,14 +2274,18 @@ module Gori::Tui
     # read so far and lands as a success through `drain_results`; any other response is cut
     # off like a dropped connection.
     def repeater_stop : Nil
-      view = current_view
-      live = view.try(&.live)
-      unless view && live && view.inflight?
+      unless stoppable?
         @host.status("nothing to stop — no send in flight on this sub-tab")
         return
       end
-      live.stop
+      current_view.try(&.live).try(&.stop)
       @host.status("stopping…", :busy)
+    end
+
+    # A single HTTP send is in flight on the front sub-tab: the one `repeater_stop` can end. A
+    # tab's sink outlives nothing but its own send (`RepeaterView#apply` drops it).
+    def stoppable? : Bool
+      !!(v = current_view) && v.inflight? && !v.live.nil?
     end
 
     # The flight half of a send, split from the decide half above so each reads as one

@@ -101,7 +101,7 @@ class Gori::Tui::RepeaterView
   # desktop preview (`Gori::ExternalOpen`) decodes the body against this head, which the plain
   # lines `resp_copy_all_text` produces could not be reconstructed from.
   def response_wire : {Bytes, Bytes?}?
-    result = @result
+    result = shown_result
     return nil unless result && (result.ok? || !result.head.empty?)
     {result.head, result.body}
   end
@@ -110,7 +110,7 @@ class Gori::Tui::RepeaterView
   # or no bytes were received. Invalidated when a new result is applied (reset_result_caches).
   private def resp_hex_bytes : Bytes?
     return @resp_hex_bytes if @resp_hex_bytes
-    result = @result
+    result = shown_result
     return nil unless result
     body = result.body
     return nil if result.head.empty? && (body.nil? || body.empty?)

@@ -79,4 +79,39 @@ describe "Gori::Tui::RepeaterView — an event stream while it is open" do
     resp_lines(view).should contain("data: one")
     event_rows(view).should be_empty
   end
+
+  it "shows the latest events in History's window, numbered past the older ones" do
+    view, live = live_view
+    live.open(SSE_HEAD)
+    cap = HistoryView::DETAIL_LOG_CAP
+    live.append(String.build { |io| (cap + 5).times { |i| io << "data: " << i << "\n\n" } }.to_slice)
+    view.live_tick.should be_true
+    lines = resp_lines(view)
+    lines.should contain("— showing the latest #{cap} of #{cap + 5} events; 5 older not shown —")
+    event_rows(view).size.should eq(cap)
+    event_rows(view).first.should eq("▸ event #6")
+  end
+
+  it "waits longer between renders as the stream grows" do
+    view, live = live_view
+    live.open(SSE_HEAD)
+    live.append(Bytes.new(RepeaterView::LIVE_STRETCH * 2, 'x'.ord.to_u8))
+    t = Time.instant
+    view.live_tick(t).should be_true
+    live.append("data: one\n\n".to_slice)
+    view.live_tick(t + RepeaterView::LIVE_EVERY * 2).should be_false
+    view.live_tick(t + RepeaterView::LIVE_EVERY * 3).should be_true
+  end
+
+  it "copies and dumps the stream on screen, not the last send's response" do
+    view, live = live_view
+    view.apply(Gori::Repeater::Result.new(TEXT_HEAD, "old".to_slice, nil, 1000_i64))
+    view.inflight = true
+    view.live_begin(live)
+    live.open(SSE_HEAD)
+    live.append("data: one\n\n".to_slice)
+    view.live_tick.should be_true
+    view.response_parts.not_nil![1].should eq("data: one\n\n")
+    view.response_wire.not_nil![1].should eq("data: one\n\n".to_slice)
+  end
 end
