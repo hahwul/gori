@@ -254,6 +254,10 @@ private class FakeContext < ExecContext
     @calls << :repeater_send
   end
 
+  def repeater_stop : Nil
+    @calls << :repeater_stop
+  end
+
   def repeater_send_group : Nil
     @calls << :repeater_send_group
   end

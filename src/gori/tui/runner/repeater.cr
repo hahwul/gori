@@ -31,6 +31,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   forward repeater_send : Nil,
+    repeater_stop : Nil,
     repeater_send_group : Nil,
     repeater_send_race : Nil,
     to: repeater_controller

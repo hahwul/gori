@@ -2,6 +2,7 @@ require "../../spec_helper"
 require "../../support/fake_host"
 require "../../support/fake_context"
 require "../../support/memory_backend"
+require "../../support/sse_origin"
 
 include Gori::Tui
 
@@ -363,6 +364,46 @@ describe "RepeaterController#repeater_focus_chain_pane" do
       ctl.repeater_focus_chain_pane
 
       host.statuses.last.should contain("NOT saved")
+    end
+  end
+end
+
+# #1631: a send to an event stream follows it live, and Stop keeps what arrived.
+describe "RepeaterController on an event stream" do
+  it "shows events while the stream is open and keeps them on Stop" do
+    with_repeater_controller do |ctl, host|
+      port = start_sse_origin(every: 20.milliseconds)
+      ctl.repeater_from_request("http://127.0.0.1:#{port}", "GET /events HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n", false, nil)
+      v = ctl.current_view.not_nil!
+      v.pretty = true
+      ctl.repeater_send
+      v.inflight?.should be_true
+      host.statuses.last.should contain("→ s stops") # the way to end it, named while it is open
+      events = -> { resp_lines(v).count(&.starts_with?("▸ event")) }
+      deadline = Time.instant + 10.seconds
+      until events.call >= 3 || Time.instant > deadline
+        sleep 20.milliseconds
+        ctl.drain_results
+      end
+      events.call.should be >= 3
+      v.inflight?.should be_true # still open: these came from the live sink
+
+      ctl.repeater_stop
+      until !v.inflight? || Time.instant > deadline
+        sleep 20.milliseconds
+      end
+      ctl.drain_results.should be_true
+      v.live.should be_nil
+      events.call.should be >= 3
+      host.statuses.last.should contain("(stopped)")
+    end
+  end
+
+  it "has nothing to stop when no send is in flight" do
+    with_repeater_controller do |ctl, host|
+      ctl.repeater_from_request("https://h.test", HTTP_REQ, false, nil)
+      ctl.repeater_stop
+      host.statuses.last.should contain("nothing to stop")
     end
   end
 end

@@ -450,6 +450,7 @@ class Gori::Tui::RepeaterView
     # back to the captured original (when loaded from History).
     @prev_result = @result
     @result = result
+    live_end
     @group_results = nil # a single ^R send takes the pane back from a group transcript
     # The rpc path this result belongs to, frozen at send time so the gRPC transcript's `.proto`
     # lens describes the response it is drawing rather than whatever the editor says later (#823).

@@ -214,6 +214,33 @@ module Gori
       end
     end
 
+    # Renders parsed events as text: a header line per event (type/id/retry when set) then its
+    # data, indented. The whole stream is server→client, so no arrows. `base` is the count of
+    # older events a window dropped, so the visible numbers stay continuous with a "showing
+    # latest N of M" note (no restart at #1). The one rendering History's EVENTS pane and the
+    # Repeater's response share.
+    def self.display_lines(events : Array(Event), base : Int32 = 0) : Array(String)
+      return ["(no events)"] if events.empty?
+      lines = [] of String
+      events.each_with_index do |e, i|
+        meta = String.build do |io|
+          io << "▸ event #" << base + i + 1
+          io << "  type=" << e.type if e.type
+          io << "  id=" << e.id if e.id
+          io << "  retry=" << e.retry if e.retry
+        end
+        lines << meta
+        # Cap a single event's data lines so one pathological multi-MB event can't
+        # materialise a giant row array (the event COUNT is windowed separately).
+        dls = e.data.split('\n')
+        dls.first(EVENT_DATA_LINE_CAP).each { |dl| lines << "    #{dl}" }
+        lines << "    … (#{dls.size - EVENT_DATA_LINE_CAP} more lines)" if dls.size > EVENT_DATA_LINE_CAP
+      end
+      lines
+    end
+
+    EVENT_DATA_LINE_CAP = 1000 # max rendered data lines per event
+
     # A `retry` reconnection time (ms): only an all-ASCII-digit value qualifies; one
     # too large for Int32 clamps to MAX rather than being dropped. nil ⇒ not valid.
     protected def self.retry_ms(value : Bytes) : Int32?

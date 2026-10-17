@@ -171,4 +171,13 @@ describe Gori::Sse do
       c.feed(Bytes.empty, 2).should be_nil
     end
   end
+
+  # The one rendering History's EVENTS pane and the Repeater's response share (#1631).
+  describe ".display_lines" do
+    it "heads each event with its fields and indents its data, numbered past a dropped window" do
+      events = Gori::Sse.events("id: 9\nevent: tick\nretry: 5\ndata: a\ndata: b\n\n".to_slice)
+      Gori::Sse.display_lines(events, base: 4).should eq(["▸ event #5  type=tick  id=9  retry=5", "    a", "    b"])
+      Gori::Sse.display_lines([] of Gori::Sse::Event).should eq(["(no events)"])
+    end
+  end
 end

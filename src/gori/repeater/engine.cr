@@ -446,7 +446,7 @@ module Gori
           # An event stream under a bound reads through `BoundedRead`, whose stop is an EOF, so
           # the capture keeps what arrived before it.
           run = if sse && Sse.sse?(resp.headers.get?("Content-Type"))
-                  sse.start(resp.headers.get?("Content-Encoding"), framing.chunked?, cancel)
+                  sse.start(resp.headers.get?("Content-Encoding"), framing.chunked?, cancel, head)
                 end
           src = run ? BoundedRead.new(upstream, run) : upstream
           body, complete = begin

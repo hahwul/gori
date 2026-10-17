@@ -21,7 +21,7 @@ class Gori::Tui::RepeaterView
     end
     # The right-anchored read-outs chain leftwards from the corner: latency·size, then the
     # ⚠ for a cut-short body, then the frozen-copy marker.
-    right = (result = @result) ? draw_response_meta(screen, rect, result, chips_end) : rect.right - 1
+    right = (result = shown_result) ? draw_response_meta(screen, rect, result, chips_end) : rect.right - 1
     draw_frozen_marker(screen, rect, right, chips_end)
   end
 

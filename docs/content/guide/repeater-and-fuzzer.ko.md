@@ -362,7 +362,9 @@ Miner의 매크로는 보정 기준선을 포함해 **보내는 모든 요청 �
 
 ### 이벤트 스트림 {#event-streams}
 
-`text/event-stream`(SSE) 응답은 원래 열린 채로 유지되므로, 끝까지 읽으면 페이로드마다 유휴 타임아웃을 통째로 기다리게 됩니다. Fuzzer와 Miner는 스트리밍이 **이벤트 50개나 5초** 중 먼저 닿는 쪽에서 읽기를 멈추고, `gori run repeater`, `gori run send`, MCP `send_request`는 **이벤트 100개나 10초**에서 멈춥니다. 그때까지 읽은 이벤트가 응답 본문이 됩니다. 전송은 여전히 성공(`ok: true`)이고, `bounded`(`events` 또는 `time`)가 어느 한도에서 멈췄는지 알려 줍니다. 한도는 CLI의 `--sse-events=N` / `--sse-time=SEC`, MCP `send_request`, `fuzz_start`, `mine_start`의 `sse_max_events` / `sse_max_ms`로 정하고, `0`은 그 한도를 끕니다. 압축된 스트림은 시간 한도로만 멈춥니다. 다른 응답에는 영향이 없고, TUI Repeater는 지금처럼 스트림을 끝까지 읽습니다.
+`text/event-stream`(SSE) 응답은 원래 열린 채로 유지되므로, 끝까지 읽으면 페이로드마다 유휴 타임아웃을 통째로 기다리게 됩니다. Fuzzer와 Miner는 스트리밍이 **이벤트 50개나 5초** 중 먼저 닿는 쪽에서 읽기를 멈추고, `gori run repeater`, `gori run send`, MCP `send_request`는 **이벤트 100개나 10초**에서 멈춥니다. 그때까지 읽은 이벤트가 응답 본문이 됩니다. 전송은 여전히 성공(`ok: true`)이고, `bounded`(`events` 또는 `time`)가 어느 한도에서 멈췄는지 알려 줍니다. 한도는 CLI의 `--sse-events=N` / `--sse-time=SEC`, MCP `send_request`, `fuzz_start`, `mine_start`의 `sse_max_events` / `sse_max_ms`로 정하고, `0`은 그 한도를 끕니다. 압축된 스트림은 시간 한도로만 멈춥니다. 다른 응답에는 영향이 없습니다.
+
+TUI Repeater에는 한도가 없습니다. 스트림이 열려 있는 동안 응답을 보여 주며 초당 최대 네 번 다시 그리고, PRETTY(`p`)를 켜면 History의 EVENTS 패널처럼 이벤트마다 `event`, `id`, `data`를 나열합니다. `Space` → `s`(**Stop send**)는 스트림을 끝내고 그때까지 받은 이벤트를 모두 남깁니다. 전송은 `(stopped)` 표시가 붙은 성공으로 끝나고, 탭은 그 응답을 보관합니다. 다른 응답을 기다리는 전송도 Stop으로 끝낼 수 있으며, 이때는 연결이 끊긴 것처럼 실패합니다.
 
 TUI Fuzzer와 Miner도 같은 이벤트 50개 / 5초 한도를 적용하며, 아직 이를 바꾸는 컨트롤은 없습니다. 스트림을 끝까지 읽으려면 `gori run`이나 MCP로 스윕을 실행하고 `0`을 넘기세요. 시간 한도 이하의 타이밍 매처(예: `--mt '>=4000'`)는 한도에서 멈춘 모든 SSE 행에 매치됩니다. 각 행이 약 5초가 걸리기 때문입니다. 이벤트 스트림을 대상으로 시간 기반 테스트를 할 때는 `--sse-time`을 임계값보다 넉넉히 크게 잡으세요.
 
