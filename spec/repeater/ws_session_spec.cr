@@ -2,6 +2,7 @@ require "../spec_helper"
 require "socket"
 require "digest/sha1"
 require "base64"
+require "openssl"
 
 private alias WS = Gori::Proxy::WS
 private alias WsEngine = Gori::Repeater::WsEngine
@@ -12,13 +13,13 @@ private UPGRADE = ("GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\n" \
                    "Sec-WebSocket-Key: dGhlIHNhbXBsZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n").to_slice
 
 # A local WS origin on 127.0.0.1 that counts handshakes and records every frame it reads.
-# `handler` runs after the 101 with the connection; the default is `echo`.
+# `handler` runs after the 101 with the connection, over TLS when `tls` is given.
 private class SessionOrigin
   getter port : Int32
   getter accepts = 0
   getter frames = [] of WS::Frame
 
-  def initialize(&@handler : TCPSocket, SessionOrigin -> Nil)
+  def initialize(@tls : OpenSSL::SSL::Context::Server? = nil, &@handler : IO, SessionOrigin -> Nil)
     @server = TCPServer.new("127.0.0.1", 0)
     @port = @server.local_address.port
     spawn do
@@ -30,11 +31,11 @@ private class SessionOrigin
   end
 
   # Read one frame and remember it; nil at EOF.
-  def read(conn : TCPSocket) : WS::Frame?
+  def read(conn : IO) : WS::Frame?
     WS.read_frame(conn).tap { |f| @frames << f if f }
   end
 
-  def text(conn : TCPSocket, s : String) : Nil
+  def text(conn : IO, s : String) : Nil
     conn.write(WS.encode(WS::OP_TEXT, s.to_slice, mask: false))
     conn.flush
   end
@@ -43,8 +44,9 @@ private class SessionOrigin
     @server.close
   end
 
-  private def serve(conn : TCPSocket) : Nil
-    conn.read_timeout = 5.seconds
+  private def serve(tcp : TCPSocket) : Nil
+    tcp.read_timeout = 5.seconds
+    conn = (ctx = @tls) ? OpenSSL::SSL::Socket::Server.new(tcp, ctx, sync_close: false) : tcp
     head = Gori::Proxy::Codec::Http1.read_head(conn).not_nil!
     key = String.new(head).each_line
       .find(&.downcase.starts_with?("sec-websocket-key:"))
@@ -56,7 +58,7 @@ private class SessionOrigin
     @handler.call(conn, self)
   rescue
   ensure
-    conn.close rescue nil
+    tcp.close rescue nil
   end
 end
 
@@ -86,8 +88,9 @@ private def echo_origin : SessionOrigin
   end
 end
 
-private def open_session(port : Int32, auto_replies = [] of WsSession::AutoReply) : WsSession
-  opened = WsSession.open(UPGRADE, scheme: "http", host: "127.0.0.1", port: port,
+private def open_session(port : Int32, auto_replies = [] of WsSession::AutoReply,
+                         scheme : String = "http") : WsSession
+  opened = WsSession.open(UPGRADE, scheme: scheme, host: "127.0.0.1", port: port,
     verify_upstream: false, auto_replies: auto_replies)
   opened.result.error.should be_nil
   opened.result.upgraded?.should be_true
@@ -102,6 +105,39 @@ private def eventually(timeout : Time::Span = 3.seconds, &) : Nil
   end
 end
 
+# A transport whose write stops part-way through and raises, the shape of a write timeout
+# against a peer that stopped reading. Reads block until `close`.
+private class StallingIO < IO
+  getter written = IO::Memory.new
+
+  def initialize
+    @r, @w = IO.pipe
+  end
+
+  def read(slice : Bytes) : Int32
+    @r.read(slice)
+  end
+
+  def write(slice : Bytes) : Nil
+    @written.write(slice[0, slice.size // 2])
+    raise IO::TimeoutError.new("Write timed out")
+  end
+
+  def close : Nil
+    @r.close rescue nil
+    @w.close rescue nil
+  end
+end
+
+private def tls_context : OpenSSL::SSL::Context::Server
+  cert, key = Gori::Proxy::Tls::CertBuilder.build_root("origin.test")
+  Gori::Proxy::Tls::ContextFactory.server_context(cert, key, advertise_h2: false)
+end
+
+private def txt(s : String) : WsEngine::OutMsg
+  WsEngine::OutMsg.new(WS::OP_TEXT.to_i, s.to_slice)
+end
+
 private def inbound(s : WsSession) : Array(String)
   s.transcript.select { |e| e.message.direction == "in" && e.message.opcode == 1 }
     .map { |e| String.new(e.message.payload) }
@@ -111,9 +147,9 @@ describe Gori::Repeater::WsSession do
   it "sends several messages over one held-open socket and one handshake" do
     origin = echo_origin
     s = open_session(origin.port)
-    s.send("a".to_slice).should be_nil
+    s.send(txt("a")).should be_nil
     eventually { inbound(s).includes?("re:a") }
-    s.send("b".to_slice).should be_nil
+    s.send(txt("b")).should be_nil
     eventually { inbound(s).includes?("re:b") }
     s.closed?.should be_false
     origin.accepts.should eq(1)
@@ -129,10 +165,10 @@ describe Gori::Repeater::WsSession do
   it "receives server pushes that arrive between sends, with seq and timestamps" do
     origin = echo_origin
     s = open_session(origin.port)
-    s.send("push".to_slice)
+    s.send(txt("push"))
     eventually { inbound(s) == ["p1", "p2"] }
     after = s.transcript.last.seq
-    s.send("x".to_slice)
+    s.send(txt("x"))
     eventually { inbound(s).includes?("re:x") }
     s.transcript(after: after).map { |e| String.new(e.message.payload) }.should eq(["x", "re:x"])
     s.transcript.each_cons_pair { |a, b| (b.at >= a.at).should be_true }
@@ -158,7 +194,7 @@ describe Gori::Repeater::WsSession do
     pong = origin.frames.find! { |f| f.opcode == WS::OP_PONG }
     String.new(pong.payload).should eq("srv")
     pong.masked?.should be_true
-    s.ping("cli".to_slice).should be_nil
+    s.send(WsEngine::OutMsg.new(WS::OP_PING.to_i, "cli".to_slice)).should be_nil
     eventually { s.transcript.any? { |e| e.message.direction == "in" && e.message.opcode == WS::OP_PONG.to_i } }
     s.close
   ensure
@@ -174,7 +210,7 @@ describe Gori::Repeater::WsSession do
       end
     end
     off = open_session(origin.port)
-    off.send("again".to_slice)
+    off.send(txt("again"))
     eventually { inbound(off).size == 2 }
     sleep 50.milliseconds
     origin.frames.map { |f| String.new(f.payload) }.should eq(["again"])
@@ -204,7 +240,7 @@ describe Gori::Repeater::WsSession do
     inbound(s).should eq(["bye"])
     eventually { origin.frames.any?(&.close?) }
     origin.frames.find!(&.close?).payload.should eq(Bytes[0x03, 0xE9])
-    s.send("late".to_slice).to_s.should contain("session is closed")
+    s.send(txt("late")).to_s.should contain("session is closed")
     s.close # idempotent after the server's close
   ensure
     origin.try(&.close)
@@ -306,7 +342,7 @@ describe Gori::Repeater::WsSession do
         expand_request: false),
       ungated_outbound)
     s = plan.open_ws.session.not_nil!
-    s.send("via-plan".to_slice)
+    s.send(txt("via-plan"))
     eventually { inbound(s).includes?("re:via-plan") }
     s.close
   ensure
@@ -326,5 +362,80 @@ describe Gori::Repeater::WsSession do
       .should eq([{"out", "one"}, {"in", "re:one"}, {"out", "two"}, {"in", "re:two"}])
   ensure
     origin.try(&.close)
+  end
+
+  it "ends the session when a write fails part-way through a frame" do
+    io = StallingIO.new
+    s = WsSession.new(io, [] of WsSession::AutoReply, nil)
+    s.send(txt("big")).to_s.should contain("Write timed out")
+    s.closed?.should be_true
+    s.close_reason.to_s.should contain("the write failed")
+    written = io.written.size
+    s.send(txt("next")).to_s.should contain("session is closed")
+    io.written.size.should eq(written) # nothing more went into the torn frame
+    s.close                            # returns: the reader has exited
+  end
+
+  it "answers wait at once once the session has ended" do
+    origin = SessionOrigin.new { |_, _| }
+    s = open_session(origin.port)
+    eventually { s.closed? }
+    started = Time.instant
+    s.wait(2.seconds).should be_true
+    (Time.instant - started).should be < 500.milliseconds
+  ensure
+    origin.try(&.close)
+  end
+
+  it "records a stray continuation frame as opcode 0, not the previous message's opcode" do
+    origin = SessionOrigin.new do |conn, o|
+      o.text(conn, "t")
+      conn.write(Bytes[0x80, 0x02, 'z'.ord.to_u8, 'z'.ord.to_u8]) # CONT fin=1, nothing open
+      conn.flush
+      o.read(conn)
+    end
+    s = open_session(origin.port)
+    eventually { s.transcript.size == 2 }
+    s.transcript.map { |e| {e.message.opcode, String.new(e.message.payload)} }.should eq([{1, "t"}, {0, "zz"}])
+    s.close
+  ensure
+    origin.try(&.close)
+  end
+
+  it "holds a wss session open and hangs up while the reader is parked in a TLS read" do
+    origin = SessionOrigin.new(tls_context) do |conn, o|
+      while frame = o.read(conn)
+        break if frame.close? # no CLOSE back: the session must hang up on its own
+        o.text(conn, "re:#{String.new(frame.payload)}")
+      end
+      sleep 3.seconds
+    end
+    s = open_session(origin.port, scheme: "wss")
+    s.send(txt("a")).should be_nil
+    eventually { inbound(s).includes?("re:a") }
+    s.send(txt("b")).should be_nil
+    eventually { inbound(s).includes?("re:b") }
+    origin.accepts.should eq(1)
+    s.close
+    s.closed?.should be_true
+    s.close_reason.to_s.should contain("closed by the operator")
+  ensure
+    origin.try(&.close)
+  end
+
+  it "refuses an h2 handshake through Plan#open_ws and hands the budget slot back" do
+    with_store do |store|
+      store.set_settings([{Gori::Settings::PROJECT_OUTBOUND_MAX_REQUESTS_KEY, "10"}] of {String, String?})
+      head = "CONNECT /chat HTTP/2\r\nHost: 127.0.0.1:1\r\nSec-WebSocket-Version: 13\r\n" \
+             "X-Gori-Protocol: websocket\r\n\r\n".to_slice
+      plan = Gori::Repeater::Plan.build(
+        Gori::Repeater::PlanOptions.new([head], target: "https://127.0.0.1:1/", expand_request: false),
+        Gori::Outbound.cli(Gori::Scope.load(store), true))
+      opened = plan.open_ws
+      opened.session.should be_nil
+      opened.result.error.to_s.should contain("HTTP/1.1 only")
+      Gori::Outbound::Budget.release(store)
+      store.setting(Gori::Store::OUTBOUND_BUDGET_SPENT_KEY).should eq("0")
+    end
   end
 end

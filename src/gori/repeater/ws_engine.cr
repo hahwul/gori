@@ -294,8 +294,9 @@ module Gori
             return Result.new(head, [] of Message, Engine.elapsed(started),
               error: "server did not upgrade (status #{resp.status})", upgraded: false).with_sent_head(handshake)
           end
-          upgraded = true
-          H1Open.new(upstream, head, verify_accept(resp, keys), handshake, watcher)
+          opened = H1Open.new(upstream, head, verify_accept(resp, keys), handshake, watcher)
+          upgraded = true # only now: a raise above must still close the socket and the watcher
+          opened
         rescue ex
           # A failure BEFORE/at the upgrade is a real error.
           err(ex.message || "ws repeater error", started).with_sent_head(handshake)

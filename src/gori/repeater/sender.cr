@@ -532,19 +532,24 @@ module Gori
 
       # A persistent session (#1630) through the same refusal/admit sequence as `send_ws`, taken
       # ONCE, at connect: the session's later messages ride the socket this verdict admitted.
-      # The h2 refusal comes first so a handshake that cannot become a session spends no
-      # budget. Operator messages get `expand_messages` per send, as `send_ws` gives a script.
+      # The h2 refusal reads the WIRED bytes (what the session would dial) and hands the budget
+      # slot back like the scope refusal does. Operator messages get `expand_messages` per
+      # send, as `send_ws` gives a script.
       def open_ws(upgrade : Bytes, keep_key : Bool = false,
                   auto_replies : Array(WsSession::AutoReply) = [] of WsSession::AutoReply,
                   cancel : Proc(Bool)? = nil) : WsSession::Opened
         refused = ->(reason : String) {
           WsSession::Opened.new(nil, WsEngine::Result.new(Bytes.new(0), [] of WsEngine::Message, 0_i64, reason))
         }
-        if reason = WsSession.refusal(upgrade) || admit(cancel: cancel)
+        if reason = admit(cancel: cancel)
           return refused.call(reason)
         end
         wired = wire(upgrade)
         if reason = wire_refusal(wired, cancel, admitted: true)
+          return refused.call(reason)
+        end
+        if reason = WsSession.refusal(wired)
+          @outbound.refund(1)
           return refused.call(reason)
         end
         WsSession.open(wired, scheme: @scheme, host: @host, port: @port, verify_upstream: @verify,

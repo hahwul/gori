@@ -42,7 +42,6 @@ module Gori
       # handshake rendering.
       record Opened, session : WsSession?, result : WsEngine::Result
 
-      getter handshake_head : Bytes
       # The server's CLOSE status, once it sent one.
       getter close_code : Int32?
       # Why the session ended; nil while open.
@@ -94,10 +93,10 @@ module Gori
         opened.watcher.try(&.stop)
         result = WsEngine::Result.new(opened.head, [] of WsEngine::Message, Engine.elapsed(started),
           note: opened.note, upgraded: true).with_sent_head(opened.sent_head)
-        Opened.new(new(opened.io, opened.head, auto_replies, expand), result)
+        Opened.new(new(opened.io, auto_replies, expand), result)
       end
 
-      def initialize(@io : IO, @handshake_head : Bytes, @auto_replies : Array(AutoReply),
+      def initialize(@io : IO, @auto_replies : Array(AutoReply),
                      @expand : Proc(WsEngine::OutMsg, WsEngine::OutMsg)?)
         # Silence is normal on an open session, so no read bound. Cleared before the reader
         # parks: a timeout armed after a fiber has parked does not fire.
@@ -116,10 +115,12 @@ module Gori
       end
 
       # Block until a row is appended or the session ends, at most `timeout`. True when woken.
-      # One waiter per session: the signal has a single slot.
+      # One waiter per session: the signal has a single slot. An ended session answers at
+      # once, through `@done`, rather than sleeping out the timeout.
       def wait(timeout : Time::Span) : Bool
         select
         when @signal.receive then true
+        when @done.receive? then true
         when timeout(timeout) then false
         end
       end
@@ -142,17 +143,13 @@ module Gori
         nil
       end
 
-      def send(payload : Bytes, opcode : UInt8 = Proxy::WS::OP_TEXT) : String?
-        send(WsEngine::OutMsg.new(opcode.to_i, payload))
-      end
-
-      def ping(payload : Bytes = Bytes.empty) : String?
-        send(payload, Proxy::WS::OP_PING)
-      end
-
       # Send CLOSE, give the server CLOSE_GRACE to answer with its own, then hang up and wait
       # for the reader to exit. Idempotent, and a no-op beyond the hang-up once the server
       # has already ended the session.
+      #
+      # BLOCKS: CLOSE_GRACE at least, and up to the dial's write timeout more when another
+      # write holds the lock or the peer has stopped reading. Never call it on a UI loop; a
+      # surface spawns it.
       def close(code : Int32 = 1000, reason : String = "") : Nil
         return if @closing
         @closing = true
@@ -176,6 +173,10 @@ module Gori
       end
 
       # Every writer goes through here: the lock covers write+flush and nothing else.
+      #
+      # A failed write ENDS the session. It may have stopped part-way through a frame (a write
+      # timeout against a peer that stopped reading), and the next frame's bytes would then
+      # land inside that frame's declared payload. Closing `@io` also ends the reader.
       private def write(bytes : Bytes) : String?
         @write_lock.synchronize do
           @io.write(bytes)
@@ -183,7 +184,10 @@ module Gori
         end
         nil
       rescue ex : IO::Error | OpenSSL::Error
-        "the write failed (#{ex.message.presence || ex.class.name})"
+        reason = "the write failed (#{ex.message.presence || ex.class.name})"
+        end_with("#{reason}; the session was closed")
+        @io.close rescue nil
+        reason
       end
 
       # Append a row, evicting the oldest past MAX_ENTRIES / MAX_BYTES (the newest row is
@@ -271,6 +275,10 @@ module Gori
           # `fin: false` row rather than being merged into this one.
           flush_pending
           @msg_opcode = frame.opcode
+        elsif @shape.frames == 0
+          # A CONT with no message to continue (§5.4 violation): recorded as opcode 0, never
+          # as the previous message's opcode, so the row shows what the server sent.
+          @msg_opcode = Proxy::WS::OP_CONT
         end
         @shape.note(frame)
         @assembling.write(frame.payload)
