@@ -46,6 +46,9 @@ module Gori
       getter close_code : Int32?
       # Why the session ended; nil while open.
       getter close_reason : String?
+      # WHEN the session ended — the moment `end_with` first ran, not when a surface first
+      # noticed (#1630). Set with `close_reason`, so a reader that sees `closed?` has it too.
+      getter closed_at : Time?
       # Rows evicted from the ring to stay inside MAX_ENTRIES / MAX_BYTES.
       getter dropped = 0_i64
 
@@ -73,14 +76,19 @@ module Gori
       end
 
       # Dial, upgrade, start the reader. `expand` runs over each operator message before it is
-      # framed (the send seam's binding pass, which `Sender#open_ws` supplies). Ungated by
-      # itself: `Sender#open_ws` is the gated door.
+      # framed (the send seam's binding pass, which `Sender#open_ws` supplies). `gate` is the
+      # per-send Layer-2 re-check (#1630): the open is gated once, but a session lasts hours,
+      # so every operator `send` asks it again — the operator may enable the Sandbox or add an
+      # exclude mid-session, and the throttled scope reload behind it (`Outbound#send_block`)
+      # is how that change reaches an already-open socket. Ungated by itself otherwise:
+      # `Sender#open_ws` is the gated door for the handshake.
       def self.open(upgrade_request : Bytes, *, scheme : String, host : String, port : Int32,
                     verify_upstream : Bool, sni : String? = nil,
                     overrides : Gori::HostOverrides? = nil, keep_key : Bool = false,
                     tls_preset : String? = nil, cancel : Proc(Bool)? = nil,
                     auto_replies : Array(AutoReply) = [] of AutoReply,
-                    expand : Proc(WsEngine::OutMsg, WsEngine::OutMsg)? = nil) : Opened
+                    expand : Proc(WsEngine::OutMsg, WsEngine::OutMsg)? = nil,
+                    gate : Proc(String?)? = nil) : Opened
         if reason = refusal(upgrade_request)
           return Opened.new(nil, WsEngine::Result.new(Bytes.new(0), [] of WsEngine::Message, 0_i64, reason))
         end
@@ -93,11 +101,12 @@ module Gori
         opened.watcher.try(&.stop)
         result = WsEngine::Result.new(opened.head, [] of WsEngine::Message, Engine.elapsed(started),
           note: opened.note, upgraded: true).with_sent_head(opened.sent_head)
-        Opened.new(new(opened.io, auto_replies, expand), result)
+        Opened.new(new(opened.io, auto_replies, expand, gate), result)
       end
 
       def initialize(@io : IO, @auto_replies : Array(AutoReply),
-                     @expand : Proc(WsEngine::OutMsg, WsEngine::OutMsg)?)
+                     @expand : Proc(WsEngine::OutMsg, WsEngine::OutMsg)?,
+                     @gate : Proc(String?)? = nil)
         # Silence is normal on an open session, so no read bound. Cleared before the reader
         # parks: a timeout armed after a fiber has parked does not fire.
         io = @io
@@ -132,6 +141,19 @@ module Gori
         if reason = @close_reason
           return "the session is closed: #{reason}"
         end
+        # Layer 2, re-checked per send (#1630). A refusal ends the session: a scope or Sandbox
+        # change that now blocks this host is not a "skip one frame" — the operator has
+        # decided the target is off-limits, so the socket must not stay open for the next send.
+        # Torn down WITHOUT the CLOSE grace (unlike `close`), since this runs on the caller's
+        # fiber (the MCP worker) and must not block; the reader exits when `@io` closes.
+        if gate = @gate
+          if reason = gate.call
+            end_with("a scope or Sandbox change refused a mid-session send (#{reason}); the session was closed")
+            @io.close rescue nil
+            notify
+            return "the send was refused: #{reason}; the session was closed"
+          end
+        end
         message = @expand.try(&.call(message)) || message
         op = (message.opcode & 0x0f).to_u8
         bytes = Proxy::WS.encode(op, message.payload, message.shape, mask: true)
@@ -154,7 +176,7 @@ module Gori
         return if @closing
         @closing = true
         was_open = !closed?
-        @close_reason ||= "closed by the operator (#{code})"
+        end_with("closed by the operator (#{code})")
         if was_open && !@sent_close
           payload = IO::Memory.new
           payload.write_bytes(code.to_u16!, IO::ByteFormat::BigEndian)
@@ -240,7 +262,9 @@ module Gori
       # The first reason wins: an operator's close or a server CLOSE is not overwritten by the
       # EOF that follows it.
       private def end_with(reason : String) : Nil
-        @close_reason ||= reason
+        return if @close_reason
+        @close_reason = reason
+        @closed_at = Time.utc
       end
 
       # One inbound frame; false ends the session.
