@@ -419,7 +419,7 @@ module Gori::Tui
       if v.grpc_fields_editing?
         keys("type the value · ↵ apply · esc cancel · {repeater.send} send")
       elsif v.grpc_fields?
-        keys("↑/↓ pick a field · i/↵ edit · #{chip("repeater.toggle-grpc-fields")}/esc head · {repeater.toggle-hex} hex · {repeater.send} send")
+        keys("↑/↓ pick a field · i/↵ edit · {space:repeater.grpc-json-edit} JSON · {space:repeater.grpc-add-field} add field · #{chip("repeater.toggle-grpc-fields")}/esc head · {repeater.toggle-hex} hex · {repeater.send} send")
       elsif v.request_hex?
         keys("gRPC payload hex — overtype 0-9a-f · Ins/Del length · {repeater.toggle-hex}/esc exit · {repeater.send} send")
       elsif v.request_insert?

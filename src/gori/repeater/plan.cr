@@ -3,6 +3,7 @@ require "../host_overrides"
 require "../outbound"
 require "./engine"
 require "./flow_request"
+require "./grpc_fields"
 require "./sender"
 require "./ws_engine"
 

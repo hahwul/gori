@@ -7101,8 +7101,9 @@ module Gori::Tui
       reclaim_terminal
       case result.outcome
       in ExternalEditor::Outcome::Changed
-        yield result.text.not_nil!
-        @toast = "applied external edit"
+        # A String back from the block is a refusal (the gRPC JSON edit's), shown instead.
+        refusal = yield result.text.not_nil!
+        @toast = refusal.is_a?(String) ? refusal : "applied external edit"
       in ExternalEditor::Outcome::Unchanged
         @toast = "no changes"
       in ExternalEditor::Outcome::Failed

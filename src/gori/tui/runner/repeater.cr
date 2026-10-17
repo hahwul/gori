@@ -53,6 +53,42 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     open_overlay(np)
   end
 
+  # The request message as proto3 JSON in `$EDITOR` (#1632). A refused apply keeps its text
+  # for the next open, and its sentence is the toast.
+  def repeater_grpc_json_edit : Nil
+    view = repeater_controller.current_view || return
+    if why = view.grpc_edit_begin(schema: true)
+      return @toast = "JSON edit: #{why}"
+    end
+    text = view.grpc_json_text || return
+    run_external_editor(text, :json) { |t| view.grpc_json_apply(t) }
+  end
+
+  # One `path=value` set or added on the request message (#1632). The card stays up on a
+  # refusal, with the spec in it to correct.
+  def repeater_grpc_add_field : Nil
+    view = repeater_controller.current_view || return
+    if why = view.grpc_edit_begin(schema: false)
+      return @toast = "add gRPC field: #{why}"
+    end
+    subject = if b = view.grpc_field_binding
+                "#{b.type.full_name}: name=value (role=ROLE_ADMIN, profile.age=30) or number:type=value"
+              else
+                "no .proto loaded — number:type=value, type #{Gori::Protobuf::Edit::TYPE_HINT}"
+              end
+    np = NamePromptOverlay.new("ADD gRPC FIELD", subject, "", action: "set", noun: "path=value")
+    np.on_commit = -> {
+      if err = view.grpc_add_field(np.name)
+        @toast = err
+        false
+      else
+        @toast = "gRPC field set: #{np.name}"
+        true
+      end
+    }
+    open_overlay(np)
+  end
+
   # Open the Repeater sub-tab search picker (`repeater.find-subtab`, space → f). Snapshots
   # the open sessions; the picker filters them in memory and jumps on ↵.
   def repeater_find_subtab : Nil

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- gRPC: the Repeater edits a whole request message as proto3 JSON in `$EDITOR` and sets or adds one field from `path=value` (by field number with no `.proto` loaded), so a proto3 field left at its default such as `is_admin` can be injected; `gori run repeater send --grpc-field` and MCP `send_request{grpc_fields}` do the same headless (#1632)
 - gRPC: a compressed message (`grpc-encoding: gzip`, `deflate` or `identity`) is inflated and decoded in History, the Repeater, `gori run history show`, MCP `get_flow` and server reflection, and the Repeater field editor and gRPC field fuzzing re-compress an edited message with the same codec; an unknown codec, a message that inflates past 4 MiB or a body past 16 MiB inflated stays hex with the reason (#1629)
 - A hostile gRPC reflection reply, a many-keyed or deeply nested Insomnia environment, or a JSON body with a huge key no longer freezes gori or exhausts its memory, and a crafted project archive or a TTL, Chrome User-Agent or Android proxy setting spelled in non-ASCII digits no longer crashes it (#1623)
 - Env: `$GEN.TOTP` mints the current RFC 6238 code from the env var `TOTP_SECRET` (a base32 secret or an `otpauth://totp/` URI), so a session slot's refresh steps and other replayed logins pass a one-time-code prompt; a Repeater, `gori run` or MCP send is refused when the secret is missing or malformed, the secret itself never expands as `$ENV.TOTP_SECRET`, and MCP `list_env` never returns it (#1591)

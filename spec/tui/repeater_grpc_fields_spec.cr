@@ -484,6 +484,66 @@ describe "RepeaterView gRPC FIELDS editor (#828)" do
   end
 end
 
+describe "RepeaterView gRPC whole-message edits (#1632)" do
+  it "adds a field the capture never carried through the JSON edit" do
+    with_demo_schema do
+      grpc_tmp_store do |store|
+        view = grpc_view(store, Bytes.empty) # every field at its proto3 default
+        view.grpc_edit_begin(schema: true).should be_nil
+        JSON.parse(view.grpc_json_text.not_nil!).as_h.should be_empty
+        view.grpc_json_apply(%({"name": "admin"})).should be_nil
+        sent_payload(view).should eq(get_user_request("admin"))
+        view.dirty?.should be_true
+      end
+    end
+  end
+
+  it "refuses an unknown key without touching the payload, and reopens the refused text" do
+    with_demo_schema do
+      grpc_tmp_store do |store|
+        view = grpc_view(store, get_user_request("hahwul"))
+        view.grpc_edit_begin(schema: true).should be_nil
+        view.grpc_json_text
+        view.grpc_json_apply(%({"is_admin": true})).not_nil!.should contain("has no field \"is_admin\"")
+        sent_payload(view).should eq(get_user_request("hahwul"))
+        view.grpc_json_text.should eq(%({"is_admin": true}))
+      end
+    end
+  end
+
+  it "needs a descriptor set for JSON, but adds a field by number without one" do
+    Schemas.clear
+    grpc_tmp_store do |store|
+      view = grpc_view(store, get_user_request("bob"))
+      view.grpc_edit_begin(schema: true).not_nil!.should contain("no .proto")
+      view.grpc_edit_begin(schema: false).should be_nil
+      view.grpc_add_field("7:varint").not_nil!.should contain("not path=value")
+      view.grpc_add_field("7:varint=1").should be_nil
+      sent_payload(view).should eq(Bytes[0x0A, 0x03, 0x62, 0x6f, 0x62, 0x38, 0x01])
+    end
+  end
+
+  it "re-compresses an added field into a compressed frame" do
+    Schemas.clear
+    grpc_tmp_store do |store|
+      head = "POST /demo.Users/GetUser HTTP/2\r\nHost: api.test\r\ncontent-type: application/grpc\r\ngrpc-encoding: gzip\r\n\r\n"
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
+        method: "POST", target: "/demo.Users/GetUser", http_version: "HTTP/2",
+        head: head.to_slice,
+        body: Gori::Proxy::H2::Grpc.frame(true, Gori::Proxy::H2::Grpc.compress("gzip", get_user_request("bob")).not_nil!),
+        source: Gori::FlowSource::Kind::Proxy))
+      view = RepeaterView.new
+      view.load_grpc(store.get_flow(id).not_nil!)
+      view.grpc_edit_begin(schema: false).should be_nil
+      view.grpc_add_field("7:bool=true").should be_nil
+      bytes = view.request_bytes
+      bytes[bytes.size - sent_payload(view).size - 5].should eq(0x01_u8) # flag kept
+      Gori::Proxy::H2::Grpc.inflate("gzip", sent_payload(view)).should eq(Bytes[0x0A, 0x03, 0x62, 0x6f, 0x62, 0x38, 0x01])
+    end
+  end
+end
+
 # Shrink the payload out from under an open value field, the way a `^X` hex edit does —
 # the one route by which the row a value was opened on can stop existing.
 private def empty_the_payload_under_the_form(view : RepeaterView) : Nil
