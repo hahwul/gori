@@ -148,7 +148,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   forward repeater_read_mode? : Bool, to: repeater_controller
 
   def repeater_stoppable? : Bool
-    repeater_controller.stoppable?
+    current_tab == :repeater && repeater_controller.stoppable?
   end
 
   def repeater_split_request? : Bool
