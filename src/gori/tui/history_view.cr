@@ -124,6 +124,9 @@ module Gori::Tui
     getter query : String
     property reload_handler : Proc(Store, Nil)? = nil
     property host_suggest_handler : Proc(String, Nil)? = nil
+    # Whether this process still relays the flow's WebSocket (#1630): `Proxy::WS::Live`, a hash
+    # lookup, asked only for a WS row on screen and the open drill-in. Injected by the shell.
+    property ws_open : Proc(Int64, Bool) = ->(_id : Int64) { false }
     getter? searching : Bool = false
     # `searching?` is the controller's truth (it guards the capture flush and the deferred
     # click); `searching_shown?` is what the bar and the empty list PAINT. A search that
@@ -3196,7 +3199,8 @@ module Gori::Tui
         stub = row.short_circuited?
         proto_label = stub ? "STUB" : kind.label(row.scheme)
         proto_color = stub ? Theme.yellow : (kind.http? ? Theme.muted : Theme.accent)
-        screen.text(proto_x, y, proto_label, proto_color, bg)
+        px = screen.text(proto_x, y, proto_label, proto_color, bg)
+        screen.cell(px + 1, y, '●', Theme.green, bg) if kind.ws? && px + 1 < host_x - 1 && @ws_open.call(row.id)
         screen.text(host_x, y, host_cell(row, host_w), fg, bg, width: host_w) if host_w > 0
         screen.text(path_x, y, origin_path_memo(row), fg, bg, width: path_w) if path_w > 0
         # Failed flows store status 0 — FlowStatus shows the STATE (ERR/ABT) instead of
@@ -3751,6 +3755,14 @@ module Gori::Tui
       detail = @detail
       return EMPTY_LINES unless detail
       lines = [detail_stats_line(detail)]
+      # Down here rather than on the MESSAGES chip: a label that ticks would move every chip
+      # to its right (see `detail_pane_label`).
+      if @ws_open.call(detail.row.id)
+        open = Fmt.ago((Time.utc.to_unix_ms * 1000 - detail.row.created_at) // 1_000_000)
+        lines << [Highlight::Span.new("● open #{open}", Theme.green),
+                  Highlight::Span.new(Hotkeys.expand_menu_paths(@registry,
+                    " · {space:detail.inject-frame} injects a frame into the socket"), Theme.muted)]
+      end
       # Where this request came from, spelled out — the SRC column has five cells and has to
       # abbreviate. Only when gori itself produced it: a proxy capture is the norm and needs
       # no sentence, and a pre-provenance row has nothing true to say (the column's `—` is the
@@ -4402,7 +4414,7 @@ module Gori::Tui
         return DetailView.new(head, EMPTY_BODY, :text, EMPTY_LINES)
       end
       if @detail_pane == :messages && (msgs = @detail_ws)
-        head = log_head(ws_lines(msgs), @detail_ws_total, msgs.size, "messages")
+        head = ws_pane_lines(msgs)
         if q = @ws_narrow
           head.unshift(Highlight::Line.new)
           head.unshift([Highlight::Span.new(Hotkeys.expand_menu_paths(@registry,
@@ -4758,20 +4770,34 @@ module Gori::Tui
       return ["(no websocket messages)"] if msgs.empty?
       msgs.map do |m|
         arrow = m.direction == "out" ? "→" : "←"
+        arrow = m.direction == "out" ? "⇢" : "⇠" if m.injected? # gori wrote it (#1630)
         note = m.shape_note
         prefix = note.empty? ? arrow : "#{arrow} #{note}"
-        if m.control?
-          "#{prefix} #{m.control_detail}"
-        elsif m.text?
-          # NOT scrubbed here, deliberately: a text-opcode frame is text because the peer SAID
-          # so, and a captured one may hold invalid UTF-8 — but `wrap`, the one seam every
-          # line in this pane passes through, already scrubs. Doing it twice would put the
-          # invariant in two places and leave the next reader unsure which one owns it.
-          "#{prefix} #{String.new(m.payload)}"
-        else
-          "#{prefix} «binary #{m.payload.size}b»"
-        end
+        line = if m.control?
+                 "#{prefix} #{m.control_detail}"
+               elsif m.text?
+                 # NOT scrubbed here, deliberately: a text-opcode frame is text because the peer SAID
+                 # so, and a captured one may hold invalid UTF-8 — but `wrap`, the one seam every
+                 # line in this pane passes through, already scrubs. Doing it twice would put the
+                 # invariant in two places and leave the next reader unsure which one owns it.
+                 "#{prefix} #{String.new(m.payload)}"
+               else
+                 "#{prefix} «binary #{m.payload.size}b»"
+               end
+        m.injected? ? "#{line}  [injected]" : line
       end
+    end
+
+    # The MESSAGES pane's lines, an injected row in the accent colour (#1630). `ws_lines` is one
+    # line per message, so the rows are the last `msgs.size` lines under `log_head`'s note.
+    private def ws_pane_lines(msgs : Array(Store::WsMessage)) : Array(Highlight::Line)
+      head = log_head(ws_lines(msgs), @detail_ws_total, msgs.size, "messages")
+      base = head.size - msgs.size
+      msgs.each_with_index do |m, i|
+        next unless m.injected?
+        head[base + i] = head[base + i].map(&.copy_with(fg: Theme.accent))
+      end
+      head
     end
 
     # --- decoded-protocol panes (SAML / JWT / GRAPHQL / PARAMS) --------------

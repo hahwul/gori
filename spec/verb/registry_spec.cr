@@ -238,6 +238,14 @@ private class FakeContext < ExecContext
     @calls << :toggle_ws_narrow
   end
 
+  def detail_ws_injectable? : Bool
+    false
+  end
+
+  def detail_inject_frame : Nil
+    @calls << :detail_inject_frame
+  end
+
   def repeater_selected : Nil
     @calls << :repeater_selected
   end

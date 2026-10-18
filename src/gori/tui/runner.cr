@@ -78,6 +78,7 @@ require "./settings_view"
 require "./tabs_overlay"
 require "./hosts_overlay"
 require "./keyset_playground_overlay"
+require "./ws_inject_overlay"
 require "./env_overlay"
 require "./user_agents_overlay"
 require "./env_syntax_seam"
@@ -761,6 +762,8 @@ module Gori::Tui
             dirty = true if drain_passthrough_notices
             # …and what intercept could not hold. Same placement, same reason.
             dirty = true if drain_intercept_notices
+            # …and an Inject frame outcome (#1630).
+            dirty = true if drain_ws_inject_outcomes
             # …and a client that refused gori's certificate. Same placement, same reason.
             dirty = true if drain_untrusted_handshakes
             # Session-slot refreshes (#1233): a finished one raises its toast, and a start or

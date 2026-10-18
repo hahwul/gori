@@ -1144,6 +1144,58 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  # #1630: a frame gori injected is real traffic, so it is shown, marked: `⇢`/`⇠` and
+  # `[injected]` in the accent colour. A peer's row keeps its plain arrow and colour.
+  it "marks an injected WebSocket message and leaves a peer's alone" do
+    with_store do |store|
+      id = add_flow(store, "GET", "/ws", 101)
+      store.insert_ws_message(id, "out", 1, "hello".to_slice)
+      store.insert_ws_message(id, "out", 1, "kick".to_slice, origin: Gori::Store::WsMessage::ORIGIN_GORI)
+      store.insert_ws_message(id, "in", 1, "fake".to_slice, origin: Gori::Store::WsMessage::ORIGIN_GORI)
+
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      2.times { view.toggle_pane } # REQUEST -> RESPONSE -> MESSAGES
+
+      backend = MemoryBackend.new(80, 14)
+      view.render_detail(Screen.new(backend), Rect.new(0, 0, 80, 14))
+      rows = (0...14).map { |y| backend.row(y) }
+      peer = rows.index!(&.includes?("→ hello"))
+      rows[peer].should_not contain("[injected]")
+      backend.fg_at(rows[peer].index!("hello"), peer).should_not eq(Theme.accent)
+      mine = rows.index!(&.includes?("⇢ kick  [injected]"))
+      backend.fg_at(rows[mine].index!("kick"), mine).should eq(Theme.accent)
+      rows.any?(&.includes?("⇠ fake  [injected]")).should be_true
+    end
+  end
+
+  # The socket's open marker (#1630) is asked of the injected predicate, which the shell points at
+  # `Proxy::WS::Live`: the FLOWS row gets `●` beside WS, the drill-in footer `● open`.
+  it "marks a socket the proxy still holds open, and only that one" do
+    with_store do |store|
+      open_id = add_flow(store, "GET", "/live", 101)
+      add_flow(store, "GET", "/gone", 101)
+      [open_id, open_id + 1].each { |id| store.insert_ws_message(id, "out", 1, "x".to_slice) }
+
+      view = HistoryView.new
+      view.ws_open = ->(id : Int64) { id == open_id }
+      view.reload(store)
+      backend = MemoryBackend.new(100, 10)
+      view.render_list(Screen.new(backend), Rect.new(0, 0, 100, 10))
+      rows = (0...10).map { |y| backend.row(y) }
+      rows.find!(&.includes?("/live")).should contain("WS ●")
+      rows.find!(&.includes?("/gone")).should_not contain("●")
+
+      {open_id => true, open_id + 1 => false}.each do |id, shown|
+        view.open_detail_id(id, store).should be_true
+        backend = MemoryBackend.new(100, 16)
+        view.render_detail(Screen.new(backend), Rect.new(0, 0, 100, 16))
+        backend.contains?("● open").should eq(shown)
+      end
+    end
+  end
+
   # The socket transcript used to be RENDERED IN the :response slot, relabelled MESSAGES — so
   # the handshake response head had no pane at all and the server's half of the negotiation
   # (Sec-WebSocket-Protocol, Sec-WebSocket-Extensions: permessage-deflate, a Set-Cookie issued

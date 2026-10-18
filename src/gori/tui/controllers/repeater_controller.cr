@@ -2694,7 +2694,7 @@ module Gori::Tui
     def repeater_ws_send_binary : Nil
       return unless (tab = current_repeater_tab) && (s = tab.view.ws_session) && !s.closed?
       idx, line = tab.view.ws_cursor_message
-      decoded = line.gsub(/[\s:]/, "").hexbytes?
+      decoded = RepeaterView.ws_hex(line)
       unless decoded
         @host.status("not valid hex — a binary WS frame takes hex bytes on the cursor line (e.g. 48656c6c6f)")
         return

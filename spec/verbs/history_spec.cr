@@ -24,6 +24,16 @@ end
 describe "Gori::Verbs.register_history" do
   r = Gori::Verbs.registry
 
+  # #1630: offered only while the proxy still relays the open flow's h1 WebSocket (the Runner
+  # asks `Proxy::WS::Live`); an h2 socket and a closed one are never in it.
+  it "offers Inject frame only for a socket the proxy still holds open" do
+    ctx = FakeExecContext.new
+    r["detail.inject-frame"].available?(ctx).should be_false
+    ctx.detail_ws_injectable = true
+    r["detail.inject-frame"].available?(ctx).should be_true
+    verb_intents(r, "detail.inject-frame", ctx).should eq([:detail_inject_frame])
+  end
+
   describe "History list (Body)" do
     it "moves the selection with a signed delta" do
       ctx = FakeExecContext.new

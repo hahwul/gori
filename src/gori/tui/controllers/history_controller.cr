@@ -37,6 +37,8 @@ module Gori::Tui
       @lost_view_key = resolve_active_view.as(String?)
       @history.reload_handler = ->request_search(Store)
       @history.host_suggest_handler = ->request_host_suggestions(String)
+      sink = @host.session.proxy.sink
+      @history.ws_open = ->(id : Int64) { !Proxy::WS::Live.find(sink, id).nil? }
     end
 
     # Read the project's persisted active view (#776) into the list.

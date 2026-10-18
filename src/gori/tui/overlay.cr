@@ -129,6 +129,8 @@ module Gori::Tui
     # Preferences → Keys → Keyset playground: the practice pad plus each keyset's key
     # list, born on the seam.
     KeysetPlayground
+    # History drill-in → Inject frame… (#1630): one frame into a live proxied WebSocket.
+    WsInject
 
     def to_sym : Symbol
       {% begin %}

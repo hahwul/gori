@@ -62,6 +62,10 @@ abstract class Gori::Verb::ExecContext
   # Narrow the MESSAGES pane to the last ^F query (in SQL, past the display window), or
   # restore the full window.
   abstract def toggle_ws_narrow : Nil
+  # Does this process still relay the open flow's h1 WebSocket? Gates `detail.inject-frame`.
+  abstract def detail_ws_injectable? : Bool
+  # Open the Inject frame form over the drill-in (#1630).
+  abstract def detail_inject_frame : Nil
   # Toggle pretty-print of req/res bodies (display only; `p` in History detail).
   abstract def toggle_pretty : Nil
 

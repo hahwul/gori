@@ -34,7 +34,7 @@ private EXPECTED_OVERLAY_SYMS = {
   :oast_provider_pick, :oast_session,
   :probe_rule, :rewriter_rule, :colormarker_rule, :colormarker_color, :extract_rule, :rewriter_stub, :rewriter_respond, :authorize_identities, :authorize_identity, :ca_import, :import, :curl_paste, :export, :scope_rule, :sequence_config,
   :mine_config, :name_prompt, :columns, :column, :library_pick, :cvss_calculator, :copy_as, :send_to,
-  :evidence, :retest, :retest_assert, :timing_report, :agent_question, :keyset_playground,
+  :evidence, :retest, :retest_assert, :timing_report, :agent_question, :keyset_playground, :ws_inject,
 }
 
 # The migration ledger — THE one line a Phase 1 batch edits in this file. Each batch
@@ -148,6 +148,8 @@ private MIGRATED_KINDS = [
   OverlayKind::AgentQuestion,
   # KeysetPlayground — Preferences → Keys' practice pad, born on the seam.
   OverlayKind::KeysetPlayground,
+  # WsInject (#1630) — History drill-in → Inject frame…, born on the seam.
+  OverlayKind::WsInject,
 ]
 
 # Never in MODAL_OVERLAYS by design, migrated or not. `None` is "no modal at all" and

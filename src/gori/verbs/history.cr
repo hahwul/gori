@@ -703,6 +703,14 @@ module Gori
         Verb::Scope::HistoryDetail, available: ->(ctx : Verb::ExecContext) { ctx.detail_messages_pane? },
         intent: :filter, group: :view) { |ctx| ctx.toggle_ws_narrow; nil }
 
+      # One frame into the socket the running proxy still relays for this flow (#1630). Offered
+      # only while `Proxy::WS::Live` holds it: an h2 socket and a closed one are never there.
+      r.register Verb::Definition.new(
+        "detail.inject-frame", "Inject frame…",
+        "Write one text, binary or ping frame into this open WebSocket, client→server or server→client (no Match & Replace)",
+        Verb::Scope::HistoryDetail, available: ->(ctx : Verb::ExecContext) { ctx.detail_ws_injectable? },
+        mnemonic: 'W', group: :send) { |ctx| ctx.detail_inject_frame; nil }
+
       # The flow actions mirror the History list's "space" menu so the muscle memory
       # carries into the drill-in (the user's goal). Each keeps the list's exact chord
       # + mnemonic; repeater/issue/fuzz close the detail first so it doesn't float over

@@ -113,4 +113,54 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   forward toggle_ws_narrow : Nil, to: history_controller
+
+  # --- Inject frame (#1630): the TUI's door to `Proxy::WS::Live.inject` ---------------------
+
+  # The open drill-in's flow, while this process still relays its WebSocket (`HistoryView#ws_open`
+  # asks `Proxy::WS::Live`, which holds only h1 relays): an h2 socket and a closed one are never
+  # offered.
+  def detail_ws_injectable? : Bool
+    return false unless @overlay.detail?
+    view = history_controller.view
+    !!view.detail_flow_id.try { |id| view.ws_open.call(id) }
+  end
+
+  def detail_inject_frame : Nil
+    return unless detail_ws_injectable? && (id = history_controller.view.detail_flow_id)
+    ov = WsInjectOverlay.new(id)
+    ov.on_commit = -> { inject_ws_frame(ov) }
+    open_overlay(ov)
+  end
+
+  # Outcomes the inject fiber hands back, raised on the UI fiber (`drain_ws_inject_outcomes`).
+  @ws_inject_outcomes = [] of {String, Symbol}
+
+  # The drain's own call, gated the same way: Layer 2 on the socket's host inside
+  # `Live.inject`, no Layer 1 up front (`Outbound.interactive`), one budget slot. Off the UI
+  # fiber, since a data frame can wait up to 5 s for a message boundary. A payload that is
+  # not hex keeps the card open (false), so a fix is an edit.
+  private def inject_ws_frame(ov : WsInjectOverlay) : Bool
+    unless payload = ov.payload
+      status("inject: a binary frame takes hex bytes (e.g. 48656c6c6f)", :error)
+      return false
+    end
+    sink = @session.proxy.sink
+    outbound = Outbound.interactive(@session.scope)
+    out = @ws_inject_outcomes
+    status("inject: waiting for a message boundary on flow ##{ov.flow_id}…", :busy)
+    spawn(name: "gori-ws-inject") do
+      out << ov.inject(sink, outbound, payload)
+    rescue ex
+      out << {"inject failed: #{ex.message}", :error}
+    end
+    true
+  end
+
+  # Raise what the inject fiber reported. True when anything arrived (→ a frame).
+  private def drain_ws_inject_outcomes : Bool
+    return false if @ws_inject_outcomes.empty?
+    @ws_inject_outcomes.each { |(msg, kind)| status(msg, kind) }
+    @ws_inject_outcomes.clear
+    true
+  end
 end

@@ -224,6 +224,12 @@ class Gori::Tui::RepeaterView
     "#{base} binary"
   end
 
+  # A line sent as a BINARY frame, read as hex (`:` and whitespace between octets allowed), or
+  # nil when it is not hex. The live session's binary send and History's Inject frame (#1630).
+  def self.ws_hex(line : String) : Bytes?
+    line.gsub(/[\s:]/, "").hexbytes?
+  end
+
   private def self.ws_line_break?(payload : Bytes) : Bool
     payload.includes?(0x0A_u8) || payload.includes?(0x0D_u8)
   end
