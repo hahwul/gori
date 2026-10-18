@@ -87,17 +87,23 @@ module Gori::Tui
       return :cancel if key.escape?
       return :commit if key.enter?
       return :stay if field_nav?(ev)
-      if @sel == 2
-        @payload.handle_edit_key(ev)
-      elsif key.left? || key.right?
-        adjust(key.left? ? -1 : 1)
+      @sel == 2 ? @payload.handle_edit_key(ev) : off_payload_key(ev)
+      :stay
+    end
+
+    # A key on the direction, opcode or Inject row.
+    private def off_payload_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      if key.left? || key.right? || key.space?
+        # Space cycles here as on every option row: falling through to the payload below put a
+        # ' ' the operator never typed on the wire (P7).
+        adjust(key.left? ? -1 : 1) if @sel < 2
       elsif (ch = ev.char) && ch.printable? && !ev.ctrl? && !ev.alt?
         # The form opens on direction, and the footer says "type payload": a printable typed
         # on another row lands in the payload instead of being dropped.
         @sel = 2
         @payload.insert(ch)
       end
-      :stay
     end
 
     private def text_field_for(row : Int32) : TextField?

@@ -147,7 +147,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     sink = @session.proxy.sink
     outbound = Outbound.interactive(@session.scope)
     out = @ws_inject_outcomes
-    status("inject: waiting for a message boundary on flow ##{ov.flow_id}…", :busy)
+    # Only a data frame waits for a boundary; a control frame goes in at once.
+    wait = ov.opcode >= 0x8_u8 ? "injecting" : "waiting for a message boundary"
+    status("inject: #{wait} on flow ##{ov.flow_id}…", :busy)
     spawn(name: "gori-ws-inject") do
       out << ov.inject(sink, outbound, payload)
     rescue ex

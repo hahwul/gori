@@ -69,6 +69,16 @@ describe Gori::Tui::WsInjectOverlay do
     ov.handle_key(ikey(Termisu::Input::Key::Escape)).should eq(:cancel)
   end
 
+  # Space has `char: ' '`: on an option row it cycles, and never leaks a byte into the payload.
+  it "cycles on space and leaves the payload empty on an option row" do
+    ov = WsInjectOverlay.new(1_i64)
+    ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Space, char: ' '))
+    String.new(ov.payload.not_nil!).should eq("")
+    ov.direction.should eq("in")
+    ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Space))
+    String.new(ov.payload.not_nil!).should eq("")
+  end
+
   it "reads a binary payload as hex, the way the Repeater's binary send does" do
     ov = WsInjectOverlay.new(7_i64)
     ov.handle_key(ikey(Termisu::Input::Key::Down))
@@ -111,6 +121,32 @@ describe Gori::Tui::WsInjectOverlay do
       backend = MemoryBackend.new(80, 14)
       view.render_detail(Screen.new(backend), Rect.new(0, 0, 80, 14))
       backend.contains?("⇢ kick  [injected]").should be_true
+    end
+  end
+
+  # The TUI waives Layer 1 (`Outbound.interactive`); the sandbox still refuses, on the
+  # socket's own host, and nothing reaches the origin.
+  it "refuses through the sandbox with the TUI's outbound and writes nothing" do
+    with_store do |store|
+      flow_id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "echo.test", port: 80, method: "GET", target: "/ws",
+        http_version: "HTTP/1.1", head: "GET /ws HTTP/1.1\r\nHost: echo.test\r\n\r\n".to_slice,
+        body: nil, source: Gori::FlowSource::Kind::Proxy))
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "other.test")
+      scope.add("exclude", "host", "echo.test")
+      scope.enable_sandbox
+      sink = Gori::Proxy::StoreSink.new(store)
+      with_inject_relay(sink, flow_id) do |origin|
+        ov = WsInjectOverlay.new(flow_id)
+        itype(ov, "kick")
+        ov.inject(sink, Gori::Outbound.interactive(scope), ov.payload.not_nil!)
+          .should eq({"inject refused: #{Gori::Outbound::SANDBOX_ERROR}", :error})
+        # Nothing reached the origin: the next frame it reads is one written after the refusal.
+        WS::Live.find(sink, flow_id).not_nil!.out_leg.write(WS.encode(WS::OP_TEXT, "next".to_slice, mask: true))
+        String.new(WS.read_body(origin, WS.read_header(origin).not_nil!).not_nil!.payload).should eq("next")
+      end
+      store.ws_messages(flow_id, 10).none?(&.injected?).should be_true
     end
   end
 
