@@ -110,6 +110,8 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   property? repeater_stoppable : Bool = false # settable so a spec can reach repeater.stop
 
+  property? repeater_ws_session_connected : Bool = false # settable so a spec can reach repeater.ws-send-binary
+
   property? repeater_split_request : Bool = false # a SAML/GraphQL/WS tab: Display…'s envelope row
 
   property fuzzer_results_saveable : Bool = false

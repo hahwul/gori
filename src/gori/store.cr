@@ -106,9 +106,10 @@ module Gori
       getter payload : Bytes
       getter reply : Channel(Nil)
       getter shape : WsShape
+      getter origin : String?
 
       def initialize(@flow_id, @repeater_id, @created_at, @direction, @opcode, @payload, @reply,
-                     @shape : WsShape = WsShape::DEFAULT)
+                     @shape : WsShape = WsShape::DEFAULT, @origin : String? = nil)
       end
     end
 
@@ -134,7 +135,7 @@ module Gori
     # InsertH2Frame and for the same reason: the proxy relays first and never waits on the DB.
     # `head`, when set, is the response head with state Pending, so History shows the status
     # while the stream is open; it rides only the first append that gets queued. `times` are
-    # the packed arrivals of the events numbered from `first` on (`flow_event_times`, V51).
+    # the packed arrivals of the events numbered from `first` on (`flow_event_times`, V52).
     struct AppendLive < WriteOp
       getter flow_id : Int64
       getter off : Int64
@@ -906,12 +907,13 @@ module Gori
     end
 
     # Records one captured WebSocket message for a flow. Blocks until committed
-    # (the forward already happened, so the peer is not delayed).
+    # (the forward already happened, so the peer is not delayed). `origin` is nil for a peer's
+    # frame and names gori for one it injected (V51).
     def insert_ws_message(flow_id : Int64, direction : String, opcode : Int32, payload : Bytes,
                           repeater_id : Int64? = nil,
-                          shape : WsShape = WsShape::DEFAULT) : Nil
+                          shape : WsShape = WsShape::DEFAULT, origin : String? = nil) : Nil
       reply = Channel(Nil).new(1) # buffered: the writer must never block sending a reply
-      @writes.send(InsertWs.new(flow_id, repeater_id, now_us, direction, opcode, payload, reply, shape))
+      @writes.send(InsertWs.new(flow_id, repeater_id, now_us, direction, opcode, payload, reply, shape, origin))
       reply.receive
     rescue Channel::ClosedError
       nil
@@ -954,10 +956,11 @@ module Gori
         # is legal per RFC 6455 (an empty heartbeat), so it reaches here.
         slot = Store.blob_slot(args, msg.payload)
         Store.bind_ws_shape(args, WsShape::DEFAULT)
+        args << msg.origin
         conn.exec(
           "INSERT INTO ws_messages (flow_id, repeater_id, created_at, direction, opcode, payload, " \
-          "fin, rsv, masked, mask_key, frames, declared_len) " \
-          "VALUES (?,?,?,?,?,#{slot},?,?,?,?,?,?)", args: args)
+          "fin, rsv, masked, mask_key, frames, declared_len, origin) " \
+          "VALUES (?,?,?,?,?,#{slot},?,?,?,?,?,?,?)", args: args)
       end
     end
 
@@ -2336,17 +2339,18 @@ module Gori
       # owns it, so the rule has a single implementation rather than this copy plus that one.
       slot = Store.blob_slot(args, op.payload)
       Store.bind_ws_shape(args, op.shape)
+      args << op.origin
       conn.exec(slot == "?" ? SQL_INSERT_WS : SQL_INSERT_WS_EMPTY_PAYLOAD, args: args)
     end
 
     private SQL_INSERT_WS =
       "INSERT INTO ws_messages (flow_id, repeater_id, created_at, direction, opcode, payload, " \
-      "fin, rsv, masked, mask_key, frames, declared_len) " \
-      "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
+      "fin, rsv, masked, mask_key, frames, declared_len, origin) " \
+      "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"
     private SQL_INSERT_WS_EMPTY_PAYLOAD =
       "INSERT INTO ws_messages (flow_id, repeater_id, created_at, direction, opcode, payload, " \
-      "fin, rsv, masked, mask_key, frames, declared_len) " \
-      "VALUES (?,?,?,?,?,X'',?,?,?,?,?,?)"
+      "fin, rsv, masked, mask_key, frames, declared_len, origin) " \
+      "VALUES (?,?,?,?,?,X'',?,?,?,?,?,?,?)"
 
     # Append `value` to `args` and answer the placeholder to write in its slot — `X''` for an
     # EMPTY slice, `?` otherwise.

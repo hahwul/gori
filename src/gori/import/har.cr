@@ -328,9 +328,13 @@ module Gori
           # is a malformed entry, and a counted skip beats storing bytes that are not the ones
           # the message had. An absent or empty `data` is a legal zero-length frame.
           payload = encoded_body(h["data"]?.try(&.as_s?) || "", h["encoding"]?.try(&.as_s?)) || Bytes.empty
+          # `_origin` is gori's own extension (`Export::Har`, #1630). Only the one value gori
+          # writes is kept: any other string is a foreign file's, and the column means "gori".
+          injected = h["_origin"]?.try(&.as_s?) == Store::WsMessage::ORIGIN_GORI
           acc << Store::ImportedWsMessage.new(
             created_at: ws_time(h["time"]?) || fallback_time,
-            direction: direction, opcode: opcode, payload: payload)
+            direction: direction, opcode: opcode, payload: payload,
+            origin: injected ? Store::WsMessage::ORIGIN_GORI : nil)
         end
         acc
       end

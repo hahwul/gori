@@ -462,6 +462,9 @@ module Gori
               j.field "type", m.direction == "out" ? "send" : "receive"
               j.field "time", epoch_seconds(m.created_at)
               j.field "opcode", m.opcode
+              # A frame the operator injected into the live socket (#1630), not the peer's. An
+              # underscore field, HAR's convention for an extension; absent on a peer's frame.
+              j.field "_origin", m.origin if m.injected?
               emit_ws_data(j, m.payload)
             end
           end

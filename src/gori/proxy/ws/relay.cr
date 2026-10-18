@@ -1,5 +1,6 @@
 require "./frame"
 require "./message_gate"
+require "./live"
 require "../sink"
 require "../socket_tuning"
 require "../head_rewriter"
@@ -65,8 +66,11 @@ module Gori::Proxy::WS
     end
 
     # One direction's outcome, tagged with WHICH direction it was — `run` needs the pairing
-    # to decide which gate's destination socket the ending is about.
-    record DirectionEnd, direction : String, ending : Ending do
+    # to decide which gate's destination socket the ending is about. `echo` is set when gori
+    # had already closed one of the two sockets under an injected frame (`Leg#killed?`, #1630)
+    # by the time this direction ended: every pump reads one socket and writes the other, so
+    # its raise is then gori's own close coming back, not a peer's reset.
+    record DirectionEnd, direction : String, ending : Ending, echo : Bool = false do
       def clean? : Bool
         ending.close?
       end
@@ -180,6 +184,13 @@ module Gori::Proxy::WS
                  rewriter : HeadRewriter? = nil, ctx : Context = Context::NONE,
                  interceptor : Gori::Interceptor? = nil, notice : String? = nil) : Nil
       record_notice(sink, flow_id, notice)
+      # Every write to a socket goes through its direction's leg, which is what lets a frame be
+      # injected between two relayed ones (`Leg`, #1630). client→server's destination is the
+      # upstream socket.
+      out_leg = Leg.new("out", upstream, mask: true)
+      in_leg = Leg.new("in", client, mask: false)
+      live = flow_id > 0 ? Live::Entry.new(sink, flow_id, ctx, out_leg, in_leg) : nil
+      live.try { |e| Live.register(e) }
       # Asked ONCE per socket, not per message: a rule or the catch condition can change
       # mid-connection, but re-deciding per message would put a lock on the hot path for an
       # answer that is "no" for every socket in the common case. The next handshake picks up
@@ -190,20 +201,26 @@ module Gori::Proxy::WS
       # One gate per DIRECTION: a direction is one ordering domain, and the gate writes to
       # that direction's destination socket. client→server is "out", so its destination is
       # the upstream leg.
-      out_gate = ws_gate(interceptor, upstream, flow_id, sink, ctx, "out", mask: true)
-      in_gate = ws_gate(interceptor, client, flow_id, sink, ctx, "in", mask: false)
+      out_gate = ws_gate(interceptor, out_leg, flow_id, sink, ctx, "out", mask: true)
+      in_gate = ws_gate(interceptor, in_leg, flow_id, sink, ctx, "in", mask: false)
       # Built HERE and not inside the pump fiber, for the same reason `settle` is called from
       # this method: what a pump is WITHHOLDING can only reach the peer while the sockets are
       # still open, and on a gated socket the pump's own `ensure` is reached only AFTER the
       # two `close` calls below. See `AssemblingPump#flush_at_teardown`.
-      out_pump = assembling_pump(client, upstream, "out", flow_id, sink, out_rw, ctx, out_gate, mask: true)
-      in_pump = assembling_pump(upstream, client, "in", flow_id, sink, in_rw, ctx, in_gate, mask: false)
+      out_pump = assembling_pump(client, out_leg, "out", flow_id, sink, out_rw, ctx, out_gate, mask: true)
+      in_pump = assembling_pump(upstream, in_leg, "in", flow_id, sink, in_rw, ctx, in_gate, mask: false)
 
       done = Channel(DirectionEnd).new(2) # each pump's payload: HOW that direction ended
       # client→server: RFC 6455 §5.3 requires every such frame to be masked, so a re-emitted
       # one carries a fresh key of gori's.
-      spawn { done.send(DirectionEnd.new("out", run_direction(client, upstream, "out", flow_id, sink, out_pump, out_gate))) }
-      spawn { done.send(DirectionEnd.new("in", run_direction(upstream, client, "in", flow_id, sink, in_pump, in_gate))) }
+      spawn do
+        e = run_direction(client, out_leg, "out", flow_id, sink, out_pump, out_gate)
+        done.send(DirectionEnd.new("out", e, echo: out_leg.killed? || in_leg.killed?))
+      end
+      spawn do
+        e = run_direction(upstream, in_leg, "in", flow_id, sink, in_pump, in_gate)
+        done.send(DirectionEnd.new("in", e, echo: out_leg.killed? || in_leg.killed?))
+      end
 
       # The first direction to end tells us how to tear down:
       #   - abnormal end (EOF / reset / truncated frame): the peer is gone — close both
@@ -248,6 +265,10 @@ module Gori::Proxy::WS
       # `Reset` that never happened.
       SocketTuning.arm(client, CLOSE_TIMEOUT)
       SocketTuning.arm(upstream, CLOSE_TIMEOUT)
+      # ... and a write already parked before that arm (a pump's, or an injected frame's, #1630)
+      # never sees it, so the writes below must not queue on its leg without a bound either.
+      out_leg.teardown!
+      in_leg.teardown!
       # Resolve both hold queues BEFORE the sockets go. `MessageGate#close` runs from the
       # pump's `ensure`, which is only reached because the two lines below unblocked its
       # read — so a message released there is written to a socket that is already gone. This
@@ -263,7 +284,7 @@ module Gori::Proxy::WS
       # withholding, and it goes second because those bytes arrived after everything queued.
       out_pump.try(&.flush_at_teardown)
       in_pump.try(&.flush_at_teardown)
-      record_teardown(sink, flow_id, observed)
+      record_teardown(sink, flow_id, observed, {out_leg, in_leg}.find(&.killed?))
       client.close rescue nil
       upstream.close rescue nil
       # Every path above consumes exactly one of the two `done` sends before this point
@@ -271,6 +292,8 @@ module Gori::Proxy::WS
       # sockets just unblocked its pending read) — `run` must never return with a pump
       # fiber still alive.
       done.receive if second_pending
+    ensure
+      live.try { |e| Live.unregister(e) }
     end
 
     # The handshake's advisory as a `ws_messages` row, ahead of any frame. What it reports is
@@ -316,13 +339,23 @@ module Gori::Proxy::WS
     # Only endings observed BEFORE `run` closes the sockets are considered, so gori's own
     # teardown is never reported as a peer's. Best-effort, and on `NOTICE_DIRECTION` for the
     # reason stated there.
+    #
+    # A leg gori `killed` (an injected frame's write timed out, #1630) gets a row saying what
+    # gori did. Its close ends whichever pump touches that socket next with a RESET's shape
+    # (`DirectionEnd#echo`), and that is skipped; a peer's reset observed before it is not.
     private def self.record_teardown(sink : FlowSink, flow_id : Int64,
-                                     observed : Array(DirectionEnd)) : Nil
-      reset = observed.find(&.ending.reset?) || return
-      note = teardown_sentence(reset)
-      ::Log.info { "ws #{reset.direction}: #{note}" }
-      sink.on_ws_message(flow_id, NOTICE_DIRECTION, OP_TEXT.to_i,
-        "#{NOTICE_PREFIX}#{note}".to_slice)
+                                     observed : Array(DirectionEnd), killed : Leg?) : Nil
+      if leg = killed
+        record_teardown_note(sink, flow_id, "gori closed this socket: an injected frame could not " \
+                                            "finish writing #{Live.side(leg.direction)}")
+      end
+      reset = observed.find { |e| e.ending.reset? && !e.echo } || return
+      record_teardown_note(sink, flow_id, teardown_sentence(reset))
+    end
+
+    private def self.record_teardown_note(sink : FlowSink, flow_id : Int64, note : String) : Nil
+      ::Log.info { "ws: #{note}" }
+      sink.on_ws_message(flow_id, NOTICE_DIRECTION, OP_TEXT.to_i, "#{NOTICE_PREFIX}#{note}".to_slice)
     rescue
       nil
     end
@@ -361,7 +394,7 @@ module Gori::Proxy::WS
     end
 
     # This direction's hold gate, or nil when the catch condition does not arm one.
-    private def self.ws_gate(interceptor : Gori::Interceptor?, dst : IO, flow_id : Int64,
+    private def self.ws_gate(interceptor : Gori::Interceptor?, dst : Leg, flow_id : Int64,
                              sink : FlowSink, ctx : Context, direction : String,
                              mask : Bool) : MessageGate?
       return nil unless ic = interceptor
@@ -372,7 +405,7 @@ module Gori::Proxy::WS
     # This direction's assembling pump, or nil when neither a `part: ws` rule nor a hold is
     # live on it — `pump`, the pre-existing byte-exact loop, is what every other socket runs
     # and it carries no state across frames, so it needs no object.
-    private def self.assembling_pump(src : IO, dst : IO, direction : String, flow_id : Int64,
+    private def self.assembling_pump(src : IO, dst : Leg, direction : String, flow_id : Int64,
                                      sink : FlowSink, rewriter : HeadRewriter?, ctx : Context,
                                      gate : MessageGate?, mask : Bool) : AssemblingPump?
       return nil unless rewriter || gate
@@ -380,7 +413,7 @@ module Gori::Proxy::WS
     end
 
     # One direction's loop, on whichever pump `assembling_pump` chose.
-    private def self.run_direction(src : IO, dst : IO, direction : String, flow_id : Int64,
+    private def self.run_direction(src : IO, dst : Leg, direction : String, flow_id : Int64,
                                    sink : FlowSink, assembling : AssemblingPump?,
                                    gate : MessageGate?) : Ending
       return pump(src, dst, direction, flow_id, sink) unless assembling
@@ -415,7 +448,7 @@ module Gori::Proxy::WS
     # bounded window on it instead of tearing the tunnel down the instant either direction
     # stops. The two abnormal ends are kept apart rather than collapsed, because gori reads
     # them differently and the operator needs the difference.
-    private def self.pump(src : IO, dst : IO, direction : String, flow_id : Int64, sink : FlowSink) : Ending
+    private def self.pump(src : IO, dst : Leg, direction : String, flow_id : Int64, sink : FlowSink) : Ending
       assembling = IO::Memory.new
       message_opcode = OP_TEXT
       scratch = Bytes.new(STREAM_CHUNK)
@@ -450,8 +483,7 @@ module Gori::Proxy::WS
         end
 
         frame = WS.read_body(src, h) || break
-        dst.write(frame.raw)
-        dst.flush
+        dst.write(frame.raw, frame.data? ? frame.fin? : nil)
         # A CLOSE ends the message being reassembled: §5.5.1 forbids data frames after one, so
         # the FIN this fragment is owed is never coming. Its bytes arrived BEFORE the CLOSE, so
         # its row goes in first — the `ensure` below would otherwise emit it AFTER, putting the
@@ -623,7 +655,7 @@ module Gori::Proxy::WS
       @shape = MessageShape.new
       @controls = 0
 
-      def initialize(@src : IO, @dst : IO, @direction : String, @flow_id : Int64,
+      def initialize(@src : IO, @dst : Leg, @direction : String, @flow_id : Int64,
                      @sink : FlowSink, @rewriter : HeadRewriter?, @ctx : Context,
                      @gate : MessageGate?, @mask : Bool)
         @scratch = Bytes.new(STREAM_CHUNK)
@@ -811,14 +843,14 @@ module Gori::Proxy::WS
           # while the byte-exact pump forwards those bytes.
           bypass("the peer closed this direction") do
             flush_withheld
-            write_direct(ctl.raw)
+            write_direct(ctl.raw, nil)
           end
         elsif park_control?(ctl)
           # Nothing on the wire yet: it leaves with the message it is interleaved with.
         elsif gate = @gate
           gate.write_control(ctl.raw)
         else
-          write_direct(ctl.raw)
+          write_direct(ctl.raw, nil)
         end
         # After the forward, exactly like `Relay.pump` — the two pumps must record the same
         # control frames or the CLOSE code would depend on whether a rule was live.
@@ -864,7 +896,7 @@ module Gori::Proxy::WS
         if (gate = @gate) && !@in_bypass
           gate.write_control(bytes)
         else
-          write_direct(bytes)
+          write_direct(bytes, nil)
         end
       end
 
@@ -1007,7 +1039,7 @@ module Gori::Proxy::WS
       private def handle_data(frame : WS::Frame) : Nil
         @shape.note(frame)
         if @passthrough
-          write_direct(frame.raw)
+          write_direct(frame.raw, frame.fin?)
           @buffer = Relay.capture_frame(frame, @buffer, @direction, @flow_id, @sink, @opcode, @shape)
           return
         end
@@ -1018,7 +1050,7 @@ module Gori::Proxy::WS
         if @buffer.size + frame.payload.size > MAX_MESSAGE
           bypass("a message outgrew the #{MAX_MESSAGE}-byte assembly buffer") do
             flush_buffered
-            write_direct(frame.raw)
+            write_direct(frame.raw, frame.fin?)
           end
           @passthrough = true
           @rewritable = false
@@ -1091,7 +1123,7 @@ module Gori::Proxy::WS
               data_only: @raw.to_slice.dup, controls: parked_bytes) : nil,
             emitted)
         else
-          write_direct(reusable ? interleaved_raw : WS.encode(@opcode, rewritten, mask: @mask, fin: true))
+          write_direct(reusable ? interleaved_raw : WS.encode(@opcode, rewritten, mask: @mask, fin: true), true)
           # Record what gori WROTE rather than what arrived, the way #513 keeps P7 on h2: the
           # capture has to be the bytes the peer actually sees.
           @sink.on_ws_message(@flow_id, @direction, @opcode.to_i, rewritten.dup, emitted)
@@ -1138,12 +1170,14 @@ module Gori::Proxy::WS
           # every caller goes on to `reset_raw` — so a socket with a `part: ws` rule armed and
           # matching nothing silently dropped a frame the byte-exact pump forwards, which is
           # the one invariant this pump exists to keep.
-          write_direct(interleaved_raw)
+          # Everything held of a message that has not ended (its FIN fragment would have emitted
+          # it), so the peer is left mid-message.
+          write_direct(interleaved_raw, false)
           @parked.clear
           @parked_bytes = 0
         elsif @buffer.size > 0
           flush_parked # re-framed: nowhere to put them but in front
-          write_direct(WS.encode(@opcode, @buffer.to_slice, mask: @mask, fin: false))
+          write_direct(WS.encode(@opcode, @buffer.to_slice, mask: @mask, fin: false), false)
         else
           # Nothing of this message's own is owed (passthrough, or past the raw cap with an
           # empty buffer), but a control frame parked between its fragments still is.
@@ -1184,10 +1218,10 @@ module Gori::Proxy::WS
 
       # A write that goes STRAIGHT to the socket, bypassing the queue. Every caller either
       # runs with no gate at all, or is already inside `bypass` (which has emptied the queue
-      # and holds the gate's lock), so this can never interleave with a release.
-      private def write_direct(bytes : Bytes) : Nil
-        @dst.write(bytes)
-        @dst.flush
+      # and holds the gate's lock), so this can never interleave with a release. `fin` is the
+      # FIN of the data frame the bytes end with, nil for control frames (see `Leg#write`).
+      private def write_direct(bytes : Bytes, fin : Bool?) : Nil
+        @dst.write(bytes, fin)
       end
 
       # Run `block` after the gate's queue has been forced out in arrival order. A no-op
@@ -1300,12 +1334,19 @@ module Gori::Proxy::WS
     #
     # Not `private` for the same reason as `capture_frame`: `RewritingPump` is a nested type
     # and shares it, so an oversized frame is forwarded identically on both pumps.
-    def self.forward_oversized_frame(src : IO, dst : IO, h : WS::Header, direction : String,
+    def self.forward_oversized_frame(src : IO, dst : Leg, h : WS::Header, direction : String,
                                      flow_id : Int64, sink : FlowSink, message_opcode : UInt8,
                                      scratch : Bytes) : Bool
-      dst.write(h.bytes)
-      forwarded = WS.stream_payload(src, dst, h.len, scratch)
-      dst.flush
+      # The leg is held for the whole frame, payload reads included: nothing may land between a
+      # header and its body. An injector sees it busy and waits (bounded) instead.
+      forwarded = dst.hold do |io|
+        io.write(h.bytes)
+        ok = WS.stream_payload(src, io, h.len, scratch)
+        io.flush
+        dst.fin = h.fin? if ok && h.data?
+        dst.close_sent! if ok && h.close?
+        ok
+      end
       return false unless forwarded # peer died mid-payload
       if h.data?
         # Stands in for a real frame at that frame's own position, so it keeps the message's

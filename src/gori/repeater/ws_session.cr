@@ -51,9 +51,11 @@ module Gori
       getter closed_at : Time?
       # Rows evicted from the ring to stay inside MAX_ENTRIES / MAX_BYTES.
       getter dropped = 0_i64
+      # Payload bytes currently held in the ring — a surface stretches its render throttle by
+      # this, so a big transcript re-renders less often (#1630).
+      getter ring_bytes = 0_i64
 
       @ring = Deque(Entry).new
-      @ring_bytes = 0_i64
       @seq = 0_i64
       @write_lock = Mutex.new
       # Closed by the reader when it exits.
@@ -121,6 +123,22 @@ module Gori
       # Rows with `seq > after`, oldest first.
       def transcript(after : Int64 = 0_i64) : Array(Entry)
         @ring.select { |e| e.seq > after }
+      end
+
+      # The seq of the newest row ever appended (0 before the first). A surface polls this to
+      # decide whether to re-render WITHOUT copying the ring (#1630). It counts evicted rows
+      # too, so it only ever grows.
+      def last_seq : Int64
+        @seq
+      end
+
+      # `{sent, received}` counted over the live ring, in one pass — for a surface's `↑ ↓`
+      # read-out, without the two extra ring copies `transcript.count` would take. An evicted
+      # row is not counted; `dropped` says how many.
+      def counts : {Int32, Int32}
+        out = recv = 0
+        @ring.each { |e| e.message.direction == "out" ? (out += 1) : (recv += 1) }
+        {out, recv}
       end
 
       # Block until a row is appended or the session ends, at most `timeout`. True when woken.

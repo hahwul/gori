@@ -493,6 +493,26 @@ module Gori
         "repeater.toggle-ws-key", "Toggle Sec-WebSocket-Key reuse",
         "WebSocket: send the handshake's OWN Sec-WebSocket-Key instead of a fresh one — the only way to test an absent, short, duplicated or non-base64 key (off by default: a fresh key avoids a server's replay guard)",
         Verb::Scope::Repeater, available: in_repeater, intent: :ws_key, section: :request) { |ctx| ctx.repeater_toggle_ws_key; nil }
+      # A persistent WebSocket session (#1630): connect once (dial off the UI fiber), then `^R`
+      # sends the MESSAGES cursor line on the open socket and this toggle disconnects. A
+      # Protocol… member, so its letter comes from the family table and the card shows ●/○. No
+      # chord: it is a per-session decision, and connect blocks the dial behind a status line.
+      r.register Verb::Definition.new(
+        "repeater.toggle-ws-session", "Live session (keep open)",
+        "WebSocket: keep one socket open instead of the scripted one-shot send — ^R connects once and holds it, then ↵ sends the MESSAGES cursor line and ^R sends every line in order on the SAME socket, and the server's frames stream into the TRANSCRIPT pane; toggle off to disconnect. Nothing is written to History",
+        Verb::Scope::Repeater, available: in_repeater, intent: :ws_session, section: :request) { |ctx| ctx.repeater_toggle_ws_session; nil }
+      r.register Verb::Definition.new(
+        "repeater.toggle-ws-heartbeat", "Engine.IO heartbeat",
+        "WebSocket live session: answer the server's Engine.IO ping (`2`) with a pong (`3`) for the operator, so a long session is not timed out by a missed app-level heartbeat. Off by default (it writes into the socket unasked); takes effect at the next connect",
+        Verb::Scope::Repeater, available: in_repeater, intent: :ws_heartbeat, section: :request) { |ctx| ctx.repeater_toggle_ws_heartbeat; nil }
+      # Binary (hex) send on the open socket — the other half of `^R`'s text send (#1630).
+      # Palette-only: binary WS testing is the rarer case, and a letter-free palette verb keeps
+      # the dense Repeater space menu clear. The TRANSCRIPT footer names the live keys.
+      r.register Verb::Definition.new(
+        "repeater.ws-send-binary", "Send WS message as binary (hex)",
+        "WebSocket live session: send the MESSAGES cursor line as a BINARY frame, the line read as hex bytes (e.g. 48656c6c6f). ^R sends the same line as TEXT. Connect a live session first",
+        Verb::Scope::Repeater, available: ->(ctx : Verb::ExecContext) { ctx.repeater_ws_session_connected? },
+        section: :request, menu: :palette) { |ctx| ctx.repeater_ws_send_binary; nil }
       # gRPC tab only, and no chord for the same reason `␣Pw` has none: the ctrl- space in
       # Repeater is dense, this is a per-tab decision rather than a mid-edit key, and the
       # GRPC REQUEST pane carries a `␣Pr:FRAME` badge either way — so the state is on screen

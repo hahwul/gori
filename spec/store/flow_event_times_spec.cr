@@ -23,9 +23,9 @@ private def et_rows(store : Gori::Store) : Int64
   store.@db.scalar("SELECT COUNT(*) FROM flow_event_times").as(Int64)
 end
 
-# When each event of an event stream arrived (V51, #1631): the live appends carry the times,
+# When each event of an event stream arrived (V52, #1631): the live appends carry the times,
 # `get_flow` reads them, and the final write keeps them all after the stream closes.
-describe "Store event times (V51)" do
+describe "Store event times (V52)" do
   it "reads the times the appends carried, and keeps them all after the final write" do
     with_store do |store|
       id = store.insert_flow(et_request)

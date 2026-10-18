@@ -56,6 +56,10 @@ module Gori::Proxy
     # carries one mode string, and `serve_connection` branches on the four in order.
     getter? socks5 : Bool
 
+    # Where this listener captures to. Also the key its live WebSocket relays are registered
+    # under (`WS::Live`), so an injector names the project's sockets and no other's.
+    getter sink : FlowSink
+
     def initialize(@host : String, @port : Int32, @sink : FlowSink, @tls : Tls::Tunnel? = nil,
                    @rewriter : HeadRewriter? = nil, @interceptor : Gori::Interceptor? = nil,
                    @host_overrides : Gori::HostOverrides? = nil,

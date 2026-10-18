@@ -253,7 +253,7 @@ module Gori
           next m unless result.redacted?
           hits.concat(result.hits)
           Store::WsMessage.new(m.id, m.flow_id, m.repeater_id, m.created_at, m.direction,
-            m.opcode, result.bytes, m.shape)
+            m.opcode, result.bytes, m.shape, m.origin)
         end
         {clean, hits}
       end

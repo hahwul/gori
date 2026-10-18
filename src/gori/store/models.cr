@@ -520,9 +520,20 @@ module Gori
       getter opcode : Int32
       getter payload : Bytes
       getter shape : WsShape
+      # Who put this message on the wire (V51): nil for the peer, `ORIGIN_GORI` for a frame the
+      # operator injected into the live socket.
+      getter origin : String?
 
       def initialize(@id, @flow_id, @repeater_id, @created_at, @direction, @opcode, @payload,
-                     @shape : WsShape = WsShape::DEFAULT)
+                     @shape : WsShape = WsShape::DEFAULT, @origin : String? = nil)
+      end
+
+      ORIGIN_GORI = "gori"
+
+      # A frame gori injected (#1630). It is real traffic, unlike `notice?`: the peer received
+      # it, so readers mark it rather than refuse it.
+      def injected? : Bool
+        @origin == ORIGIN_GORI
       end
 
       def text? : Bool
@@ -685,8 +696,9 @@ module Gori
     # field for FIN/RSV/mask, so an imported message takes `WsShape::DEFAULT` rather than a
     # fabricated one. `direction` is the stored "out"/"in", not HAR's send/receive — the
     # translation belongs to the format reader, so every store row means one thing.
+    # `origin` is `WsMessage#origin` (#1630): gori's own HAR marks an injected frame.
     record ImportedWsMessage, created_at : Int64, direction : String, opcode : Int32,
-      payload : Bytes
+      payload : Bytes, origin : String? = nil
 
     # One outbound message to persist on a repeater SESSION. Carries the OPCODE and raw
     # BYTES, because `update_repeater_ws_messages` used to take `Array(String)` and write a

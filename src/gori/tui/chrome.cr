@@ -990,12 +990,12 @@ module Gori::Tui
     # toggle, not a status chip.)
     def self.render_status(screen : Screen, rect : Rect, *, focus : String, hints : String,
                            activity : {String, Color}? = nil, resource : String? = nil,
-                           time : String? = nil, companion : Mascot::Frame? = nil) : Nil
+                           time : String? = nil, companion : Mascot::Frame? = nil, live : Bool = false) : Nil
       screen.fill(rect, Theme.panel)
       screen.text(rect.x, rect.y, " #{focus} ", Theme.text_bright, Theme.elevated, Attribute::Bold)
       hint_x = status_hint_x(rect, focus)
 
-      chips = status_chips(activity: activity, resource: resource, time: time, companion: companion)
+      chips = status_chips(activity: activity, resource: resource, time: time, companion: companion, live: live)
       chips = yield_chips(chips, hints, rect, hint_x)
       hint_w = status_hint_room(rect, hint_x, chips)
       screen.text(hint_x, rect.y, fit_hints(hints, hint_w), Theme.muted, Theme.panel, width: hint_w)
@@ -1069,10 +1069,10 @@ module Gori::Tui
     # overflowing hint makes the readouts yield (yield_chips), which changes the run.
     def self.status_bar_chip_at(rect : Rect, mx : Int32, my : Int32, *, focus : String, hints : String,
                                 activity : {String, Color}? = nil, resource : String? = nil,
-                                time : String? = nil, companion : Mascot::Frame? = nil) : Symbol?
+                                time : String? = nil, companion : Mascot::Frame? = nil, live : Bool = false) : Symbol?
       return nil unless rect.contains?(mx, my)
       hint_x = status_hint_x(rect, focus)
-      chips = status_chips(activity: activity, resource: resource, time: time, companion: companion)
+      chips = status_chips(activity: activity, resource: resource, time: time, companion: companion, live: live)
       chips = yield_chips(chips, hints, rect, hint_x)
       rects = chip_layout(rect, chips, hint_x)
       chips.each_with_index do |chip, i|
@@ -1119,8 +1119,12 @@ module Gori::Tui
     # anchor; it sits left of the clock. Activity and resource render in `muted`: passive
     # readouts, not states the operator must act on.
     private def self.status_chips(*, activity : {String, Color}?, resource : String? = nil,
-                                  time : String? = nil, companion : Mascot::Frame? = nil) : Array(Chip)
+                                  time : String? = nil, companion : Mascot::Frame? = nil,
+                                  live : Bool = false) : Array(Chip)
       chips = [] of Chip
+      # A live WebSocket session on the focused Repeater tab. Leftmost and transient (comes and
+      # goes with the socket), so its appearance shifts only itself, never the anchored chips.
+      chips << Chip.new(:ws_live, "● LIVE", Theme.green) if live
       chips << Chip.new(:activity, activity[0], activity[1]) if activity
       chips << Chip.new(:resource, resource, Theme.muted) if resource
       # The clock moved off the top bar so that row can be read as "everything here is

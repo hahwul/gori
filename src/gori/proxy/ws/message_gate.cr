@@ -1,4 +1,5 @@
 require "./frame"
+require "./live"
 require "../sink"
 require "../../interceptor"
 
@@ -54,7 +55,8 @@ module Gori::Proxy::WS
   # ## The lock
   #
   # One Mutex guards the queue AND the writes, so the order messages are decided in is the
-  # order they are written in with no window between. Every writer takes it — the pump
+  # order they are written in with no window between. Each write then takes `@dst`'s own lock
+  # too (`Leg`, #1630) — gate first, then leg, never the reverse. Every writer takes it — the pump
   # (control frames, bypasses), and each wait fiber's release. `Interceptor#enqueue_ws` and
   # `#forward` are called under it, which is safe because the Interceptor never calls back
   # into a gate; `item.reply.receive` is the one thing that must never happen under it, and
@@ -103,7 +105,7 @@ module Gori::Proxy::WS
       end
     end
 
-    def initialize(@direction : String, @dst : IO, @flow_id : Int64, @sink : FlowSink,
+    def initialize(@direction : String, @dst : Leg, @flow_id : Int64, @sink : FlowSink,
                    @interceptor : Gori::Interceptor, @ctx : Context, @mask : Bool)
       @mutex = Mutex.new
       @queue = [] of Slot
@@ -194,7 +196,6 @@ module Gori::Proxy::WS
       @mutex.synchronize do
         return if @closed
         @dst.write(bytes)
-        @dst.flush
       end
     end
 
@@ -370,7 +371,6 @@ module Gori::Proxy::WS
     # second row would claim gori saw them twice.
     private def write_raw(bytes : Bytes) : Nil
       @dst.write(bytes)
-      @dst.flush
     rescue
       # The peer is gone. The pump's next read ends this direction, which is where a dead
       # socket is reported; inventing a failure for a keepalive frame here says nothing new.
@@ -389,8 +389,7 @@ module Gori::Proxy::WS
     # deliver) and the claim is withheld. See `settle`.
     private def write_message(opcode : UInt8, payload : Bytes, raw : Bytes?,
                               shape : WS::Shape = WS::Shape::DEFAULT) : Bool
-      @dst.write(raw || WS.encode(opcode, payload, mask: @mask, fin: true))
-      @dst.flush
+      @dst.write(raw || WS.encode(opcode, payload, mask: @mask, fin: true), true) # a whole message
       return false if @dst_dead
       # Record what gori WROTE, not what arrived — the same way step 1's rewrite path keeps
       # P7. The capture has to be the bytes the peer actually sees, framing included.

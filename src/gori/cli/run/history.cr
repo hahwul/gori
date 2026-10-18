@@ -1553,6 +1553,7 @@ module Gori
       # (scrubbed) payload; binary frames print a size + short hex preview.
       private def self.ws_message_text(m : Store::WsMessage) : String
         arrow = m.direction == "out" ? "→" : "←"
+        arrow += " [injected]" if m.injected? # gori wrote it into the live socket (#1630)
         # `Store::WsMessage#shape_note` / `#control_detail`, not a local copy: the TUI's History
         # pane reads the same two, and a helper it calls cannot live under `CLI::`. `term_safe`
         # stays HERE because it is this surface's question — these bytes are about to be written
@@ -1662,6 +1663,7 @@ module Gori
                   j.object do
                     j.field "direction", m.direction
                     j.field "opcode", m.opcode
+                    j.field "injected", true if m.injected? # present only when gori wrote it (#1630)
                     m.emit_shape_json(j)
                     if m.text?
                       j.field "text", String.new(m.payload).scrub

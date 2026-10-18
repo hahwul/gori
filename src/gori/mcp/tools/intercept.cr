@@ -229,6 +229,79 @@ module Gori
         enqueue_intercept("set_direction", arg: dir.arg, extra: direction_note_extra(filter, dir))
       end
 
+      # --- #1630 inject a frame into a live proxied WebSocket ----------------------
+      #
+      # The capturing TUI holds the socket, so the frame crosses the same bridge the intercept
+      # verbs use and the TUI writes it (`Proxy::WS::Live.inject`). Layer 1 is decided HERE,
+      # strictly, against the flow's own host; Layer 2 (Sandbox) runs there, on the socket.
+      @[Tool("ws_inject", gated: true, agent_action: true, permission: "send")]
+      private def ws_inject(h) : Result
+        flow_id = required_id(h, "flow_id")
+        direction = str(h, "direction").try(&.strip).presence || "out"
+        unless direction.in?("out", "in")
+          return err("invalid 'direction' #{direction.inspect} (expected out | in)", "INVALID_ARGUMENT", field: "direction")
+        end
+        kind = str(h, "opcode").try(&.strip.downcase).presence || "text"
+        opcode = Proxy::WS::Live::OPCODES[kind]?
+        unless opcode
+          return err("invalid 'opcode' #{kind.inspect} (expected #{Proxy::WS::Live::OPCODES.keys.join(" | ")})",
+            "INVALID_ARGUMENT", field: "opcode")
+        end
+        payload = ws_inject_payload(h)
+        return payload if payload.is_a?(Result)
+        flow = store.get_flow(flow_id)
+        return not_found("flow #{flow_id} not found") unless flow
+        if refusal = Proxy::WS::Live.flow_refusal(String.new(flow.request_head))
+          return err(refusal, "INVALID_ARGUMENT", field: "flow_id")
+        end
+        row = flow.row
+        sc = outbound(bool_arg(h, "allow_unscoped", false)).check_request(row.scheme, row.host, row.target, row.port)
+        return scope_blocked(sc, field: "flow_id") if sc.blocked?
+        ws_inject_result(store.send_ws_inject(flow_id, direction, opcode, payload), row.host)
+      end
+
+      # Exactly one of `payload` (literal text, no token expansion) or `payload_base64`
+      # (byte-exact); neither is an empty payload, which a ping or a close may well want.
+      private def ws_inject_payload(h) : Bytes | Result
+        b64 = strict_str(h, "payload_base64")
+        text = strict_str(h, "payload", expected: "a JSON string; use payload_base64 for exact octets")
+        return err("pass only one of 'payload' or 'payload_base64'", "INVALID_ARGUMENT", field: "payload_base64") if b64 && text
+        return (text || "").to_slice unless b64
+        begin
+          Base64.decode(b64)
+        rescue
+          err("invalid 'payload_base64' (not valid base64)", "INVALID_ARGUMENT", field: "payload_base64")
+        end
+      end
+
+      private def ws_inject_result(outcome : Store::InterceptAck | Store::InterceptSendFailure, host : String) : Result
+        if outcome.is_a?(Store::InterceptAck)
+          detail = outcome.detail || ""
+          case outcome.status
+          when "injected"
+            return Result.new({status: "injected", detail: detail}.to_json)
+          when "refused"
+            return sandbox_blocked(detail, host, "flow_id") if detail == Outbound::SANDBOX_ERROR
+            return budget_refused(detail) if Outbound.budget_refusal?(detail)
+            return err(detail, "REFUSED", field: "flow_id")
+          when "stale"
+            return err(detail, "SESSION_CHANGED")
+          else
+            return err("ws_inject #{outcome.status}: #{detail}", "INTERNAL")
+          end
+        end
+        case outcome
+        in .not_live?
+          busy("no live capturing gori instance holds this socket — injection needs the project's TUI " \
+               "capturing (a headless capture cannot inject)")
+        in .not_enqueued?
+          busy("could not enqueue the inject (store write dropped); retry")
+        in .not_confirmed?
+          err("inject not confirmed within #{Store.ws_inject_ack_budget_ms}ms — the capturing instance may be busy; " \
+              "check the flow's messages before retrying, it may still have gone out", "NOT_CONFIRMED", retryable: true)
+        end
+      end
+
       # Send one command to the live capturing instance and wait for its ack
       # (`Store#send_intercept_command`), so the agent gets a real outcome
       # (forwarded/dropped/no_such_item/…) rather than assuming success on a write that may have
@@ -366,6 +439,25 @@ module Gori
           "in-flight messages are held (e.g. 'host:api.example.com method:POST'). Empty " \
           "clears it (hold everything in scope). Applied by the capturing instance." do |s|
           s.field "query", strprop("filter query; empty string clears the filter"), required: true
+        end
+
+        tool j, "ws_inject",
+          "Inject ONE frame into a still-open WebSocket the proxy is relaying (a captured " \
+          "HTTP/1.1 Upgrade flow), in either direction, on the socket the app already has — its " \
+          "session and server-side state included. ACTIVE and scope-gated against the flow's " \
+          "host like send_request. The bytes go out verbatim: no token expansion, no Match & " \
+          "Replace, and ahead of any message Intercept is holding. A text/binary frame waits up " \
+          "to 5 s for a fragmented message on that side to finish, then is REFUSED; a " \
+          "ping/pong/close goes in at once. Applied by the capturing TUI (a headless capture " \
+          "cannot inject); the frame is recorded on the flow with origin:\"gori\". HTTP/2 " \
+          "(RFC 8441) WebSockets are refused. Returns injected | REFUSED (closed, mid-message, " \
+          "sandbox) | not_confirmed." do |s|
+          s.field "flow_id", intprop("the WebSocket flow id (from list_history)"), required: true
+          s.field "direction", enumprop("out = client→server (masked with a fresh key), in = server→client (default out)", %w[out in])
+          s.field "opcode", enumprop("frame type (default text)", Proxy::WS::Live::OPCODES.keys)
+          s.field "payload", strprop("the payload as text, taken literally (default empty)")
+          s.field "payload_base64", strprop("the payload, base64 — byte-exact; use this for a binary frame")
+          s.field "allow_unscoped", boolprop("inject even when the flow's host is outside (or without) a configured scope (default false)")
         end
 
         tool j, "intercept_set_direction",

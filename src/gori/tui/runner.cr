@@ -3024,7 +3024,7 @@ module Gori::Tui
       Chrome.render_status(screen, layout.status, focus: focus_label,
         hints: Hotkeys.retag(status_line || key_hints),
         activity: activity_chip, resource: @resource.label, time: clock_label,
-        companion: companion_bar_frame)
+        companion: companion_bar_frame, live: ws_live_chip?)
       unless layout.statusline.empty?
         Chrome.render_statusline(screen, layout.statusline, @statusline.segments, failed: @statusline.failed?)
       end
@@ -3213,6 +3213,12 @@ module Gori::Tui
     private def activity_chip : {String, Color}?
       return nil unless label = @jobs.activity_label
       {"#{SPINNER[@spinner_frame % SPINNER.size]} #{label}", Theme.accent}
+    end
+
+    # The green `● LIVE` status chip (#1630): drawn while the focused Repeater tab holds an open
+    # WebSocket session. Gated on the active tab so it costs nothing elsewhere.
+    private def ws_live_chip? : Bool
+      @active_tab == :repeater && repeater_controller.ws_session_connected?
     end
 
     private def intercept_label : String

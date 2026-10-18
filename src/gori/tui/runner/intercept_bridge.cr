@@ -127,6 +127,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
         push_agent_note(:success, "forwarded (edited) #{edited_desc}", item)
       end
       true
+    when Store::WS_INJECT_VERB
+      apply_ws_inject(store, cmd)
     when "toggle"
       apply_intercept_toggle(ic, store, cmd)
     when "set_filter"
@@ -147,6 +149,17 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     else
       store.ack_intercept_command(cmd.id, "error", "unknown verb #{cmd.verb}")
       false
+    end
+  end
+
+  # One frame for a live proxied WebSocket (#1630), from `gori mcp` or `gori run intercept
+  # inject`: only this process holds the socket. `Live.apply_command` spawns the boundary wait,
+  # so the drain never stalls. Layer 1 was the sender's; Layer 2 (Sandbox) is asked on the
+  # socket, against the handshake's host.
+  private def apply_ws_inject(store : Store, cmd : Store::CommandRow) : Bool
+    flow_id = cmd.item_id || 0_i64
+    Proxy::WS::Live.apply_command(store, @session.proxy.sink, Outbound.interactive(@session.scope), cmd) do |receipt|
+      @notifications.push(:info, "injected #{receipt}", Jobs::Goto.new(:history, flow_id), source: "agent")
     end
   end
 

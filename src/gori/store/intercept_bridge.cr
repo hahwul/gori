@@ -272,6 +272,38 @@ module Gori
     # toggled, filter_set, direction_set, no_such_item, stale, …) and its detail line.
     record InterceptAck, status : String, detail : String?
 
+    # `ws_inject` (#1630): one frame for a live proxied WebSocket, applied by the capturing
+    # instance because only it holds the socket. The flow id rides as `item_id`, the payload as
+    # `bytes`, and "<direction> <opcode>" as `arg`.
+    WS_INJECT_VERB = "ws_inject"
+
+    # A data frame may wait up to 5 s for a message boundary before the capturing instance
+    # answers (`Proxy::WS::Live::BOUNDARY_WAIT`), after up to one drain cadence, so the sender
+    # outwaits both rather than reporting an inject that is still pending as unconfirmed.
+    WS_INJECT_ACK_POLLS = 80
+
+    def self.ws_inject_ack_budget_ms : Int32
+      (WS_INJECT_ACK_POLLS * INTERCEPT_ACK_SLEEP.total_milliseconds).to_i
+    end
+
+    def self.ws_inject_arg(direction : String, opcode : UInt8) : String
+      "#{direction} #{opcode}"
+    end
+
+    # `{direction, opcode}` from a `ws_inject` row's `arg`, or nil when it is not one.
+    def self.parse_ws_inject_arg(arg : String?) : {String, UInt8}?
+      dir, _, op = (arg || "").partition(' ')
+      return nil unless dir.in?("out", "in")
+      opcode = op.to_u8? || return nil
+      {dir, opcode}
+    end
+
+    def send_ws_inject(flow_id : Int64, direction : String, opcode : UInt8,
+                       payload : Bytes) : InterceptAck | InterceptSendFailure
+      send_intercept_command(WS_INJECT_VERB, item_id: flow_id, bytes: payload,
+        arg: Store.ws_inject_arg(direction, opcode), polls: WS_INJECT_ACK_POLLS)
+    end
+
     # Enqueue one command for the live capturing instance, then bounded-poll its ack, so the
     # sender gets a real outcome rather than assuming success on a write that may have been
     # dropped or never drained. `polls` exists for specs; every sender takes the default.

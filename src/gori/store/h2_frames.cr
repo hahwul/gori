@@ -74,19 +74,19 @@ module Gori
       @db.scalar("SELECT COUNT(*) FROM h2_frames WHERE conn_id = ?", conn_id).as(Int64).to_i
     end
 
-    # The column list every `ws_messages` read shares, ending with the six V7 shape columns
-    # in `Store.read_ws_shape`'s order. It was spelled out three times, and a fourth omission
-    # here is how a reader silently starts handing back `Shape::DEFAULT` for a frame that had
-    # RSV1 set.
+    # The column list every `ws_messages` read shares: the six V7 shape columns in
+    # `Store.read_ws_shape`'s order, then V51's `origin`. It was spelled out three times, and a
+    # fourth omission here is how a reader silently starts handing back `Shape::DEFAULT` for a
+    # frame that had RSV1 set.
     WS_MESSAGE_COLS = "id, flow_id, repeater_id, created_at, direction, opcode, payload, " \
-                      "fin, rsv, masked, mask_key, frames, declared_len"
+                      "fin, rsv, masked, mask_key, frames, declared_len, origin"
 
     private def read_ws_messages(q : String, args : Array(DB::Any)) : Array(WsMessage)
       msgs = [] of WsMessage
       @db.query(q, args: args) do |rs|
         rs.each do
           msgs << WsMessage.new(rs.read(Int64), rs.read(Int64), rs.read(Int64?), rs.read(Int64),
-            rs.read(String), rs.read(Int32), rs.read(Bytes), Store.read_ws_shape(rs))
+            rs.read(String), rs.read(Int32), rs.read(Bytes), Store.read_ws_shape(rs), rs.read(String?))
         end
       end
       msgs
