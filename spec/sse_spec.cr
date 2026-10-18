@@ -14,6 +14,15 @@ describe Gori::Sse do
       Gori::Sse.sse?("application/json").should be_false
       Gori::Sse.sse?(nil).should be_false
     end
+
+    # The allocation-free pre-check in front of the parse (#1631) only ever rejects what the
+    # parse would: every casing and padding the parse accepts still gets through it.
+    it "answers exactly as the media-type parse does" do
+      ["TEXT/EVENT-STREAM", "\ttext/event-stream ;q=1", "text/Event-Stream\r", "text/event-stream;",
+       "event-stream", "text/event_stream", "text/eventstream", "", "a/b; x=text/event-stream"].each do |v|
+        Gori::Sse.sse?(v).should eq(Gori::MediaType.essence(v) == "text/event-stream")
+      end
+    end
   end
 
   describe ".events" do

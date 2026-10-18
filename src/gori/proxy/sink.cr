@@ -24,6 +24,13 @@ module Gori::Proxy
     def on_rule_hits(flow_id : Int64, side : Store::RuleTarget, hits : Array(Store::RuleRef)) : Nil
     end
 
+    # Append part of a still-streaming event-stream body at offset `off` (#1631), with the
+    # Pending response `head` on the first append. Must not block; true when it was taken. The
+    # default discards it, so a sink that records only finished flows needs nothing.
+    def on_live_body(flow_id : Int64, off : Int64, bytes : Bytes, head : Store::CapturedResponse?) : Bool
+      true
+    end
+
     # Called after an upgraded tunnel closes and its captured transcript has been written.
     # The default keeps sinks that only record HTTP flows source-compatible.
     def on_tunnel_complete(flow_id : Int64) : Nil
@@ -65,6 +72,11 @@ module Gori::Proxy
 
     def on_rule_hits(flow_id : Int64, side : Store::RuleTarget, hits : Array(Store::RuleRef)) : Nil
       @store.record_rule_hits(flow_id, side, hits)
+    end
+
+    def on_live_body(flow_id : Int64, off : Int64, bytes : Bytes, head : Store::CapturedResponse?) : Bool
+      return true if flow_id <= 0 # no row to append to
+      @store.append_live(flow_id, off, bytes, head)
     end
 
     def on_tunnel_complete(flow_id : Int64) : Nil

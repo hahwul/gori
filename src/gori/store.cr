@@ -129,6 +129,20 @@ module Gori
       end
     end
 
+    # Fire-and-forget append of a still-streaming event-stream body (#1631), shaped like
+    # InsertH2Frame and for the same reason: the proxy relays first and never waits on the DB.
+    # `head`, when set, is the response head with state Pending, so History shows the status
+    # while the stream is open; it rides only the first append that gets queued.
+    struct AppendLive < WriteOp
+      getter flow_id : Int64
+      getter off : Int64
+      getter bytes : Bytes
+      getter head : CapturedResponse?
+
+      def initialize(@flow_id, @off, @bytes, @head)
+      end
+    end
+
     # Generic write (scope rules / settings / issues) run on the writer
     # connection; reply carries last_insert_rowid (meaningful for INSERTs).
     #
@@ -861,6 +875,20 @@ module Gori
       nil
     end
 
+    # Queues one live append (see AppendLive) WITHOUT blocking: true when it was queued, false
+    # when the writer is saturated or closing and it was dropped. The caller advances its
+    # offset only on true, so a drop makes the next chunk bigger and never leaves a gap.
+    def append_live(flow_id : Int64, off : Int64, bytes : Bytes, head : CapturedResponse?) : Bool
+      select
+      when @writes.send(AppendLive.new(flow_id, off, bytes, head))
+        true
+      else
+        false
+      end
+    rescue Channel::ClosedError
+      false
+    end
+
     # Finalizes every still-Pending flow as Error. Called on proxy shutdown so
     # in-flight captures don't linger as orphan Pending rows. Returns the count
     # abandoned. No-op (0) when the store is already closing.
@@ -1486,6 +1514,14 @@ module Gori
                   deferred << -> { ws_reply.send(nil); publish(FlowEvent.new(ws_fid, :updated)) }
                 when InsertH2Frame
                   insert_h2_frame_one(c, op) # fire-and-forget: no reply, no event
+                when AppendLive
+                  # No reply. Only the head publishes `:updated` (the row's status appeared); a
+                  # chunk moves `data_version`, which is what an open History detail re-reads on.
+                  if (head = op.head) && write_live_head(c, head)
+                    live_fid = op.flow_id
+                    deferred << -> { publish(FlowEvent.new(live_fid, :updated)) }
+                  end
+                  append_live_one(c, op) unless op.bytes.empty?
                 when ExecTask
                   task_reply = op.reply
                   op.run.call(c)
@@ -1696,6 +1732,7 @@ module Gori
       conn.exec("DELETE FROM js_ref_scans WHERE flow_id <= ?", cutoff)
       conn.exec("DELETE FROM intercept_originals WHERE flow_id <= ?", cutoff)
       conn.exec("DELETE FROM flow_interims WHERE flow_id <= ?", cutoff)
+      conn.exec("DELETE FROM flow_live_chunks WHERE flow_id <= ?", cutoff)
       conn.exec("DELETE FROM flow_rule_hits WHERE flow_id <= ?", cutoff)
       conn.exec("DELETE FROM rewrite_originals WHERE flow_id <= ?", cutoff)
       conn.exec("DELETE FROM flows WHERE id <= ?", cutoff)
@@ -1808,8 +1845,8 @@ module Gori
         # `IndexBatch` is answered unconditionally on the happy path (outside the rollback), so
         # this branch was never needed while `fail_reply` ran only from the per-batch rescue.
         # `writer_loop`'s drain-on-death now calls it for whatever is in the queue, and an
-        # `index_pending!` caller in that queue would otherwise park forever. `InsertH2Frame` is
-        # deliberately absent: it is the one WriteOp with no reply channel.
+        # `index_pending!` caller in that queue would otherwise park forever. `InsertH2Frame` and
+        # `AppendLive` are deliberately absent: they are the WriteOps with no reply channel.
       when IndexBatch then op.reply.send(0)
       end
     rescue
@@ -1835,7 +1872,23 @@ module Gori
         conn.exec("UPDATE flows SET state = ?, error = ?, status = 0, static_asset = 0 " \
                   "WHERE id IN (#{Array.new(slice.size, "?").join(", ")})", args: args)
       end
+      fold_live_chunks(conn, ids)
       ids
+    end
+
+    # An event stream cut off by a crash or a shutdown keeps the events it relayed (#1631): its
+    # live chunks become the stored body, and the row is re-dirtied so FTS indexes it. The
+    # table only ever holds open streams' bytes, so reading its keys is cheap.
+    private def fold_live_chunks(conn : DB::Connection, ids : Array(Int64)) : Nil
+      live = conn.query_all("SELECT DISTINCT flow_id FROM flow_live_chunks", as: Int64)
+      return if live.empty?
+      (live & ids).each do |id|
+        if body = Store.live_body(conn, id) # the contiguous prefix: see `live_body`
+          conn.exec("UPDATE flows SET response_body = ?, response_size = COALESCE(LENGTH(response_head), 0) + ?, " \
+                    "fts_dirty = 1 WHERE id = ?", body, body.size.to_i64, id)
+        end
+        conn.exec("DELETE FROM flow_live_chunks WHERE flow_id = ?", id)
+      end
     end
 
     # The rows `abandon_all_pending` finalises, spelled exactly as `idx_flows_pending`'s WHERE:
@@ -2154,6 +2207,9 @@ module Gori
         resp.state.value, resp.ttfb_us, resp.duration_us, resp.error,
         resp.body_truncated? ? 1 : 0, resp.advisory,
         resp.state == FlowState::Complete ? 1 : 0, resp.content_type, resp.status, resp.flow_id)
+      # The live chunks (#1631) are superseded by the body just written, and go even when the
+      # flow itself was deleted mid-stream, so they sit above the return below.
+      conn.exec("DELETE FROM flow_live_chunks WHERE flow_id = ?", resp.flow_id) if resp.live?
       # The flow was deleted (clear history, delete_flow) while the request was in flight: its
       # side rows would be orphans holding pre-rule bytes the operator already deleted.
       return if res.rows_affected == 0
@@ -2370,6 +2426,31 @@ module Gori
       # fiber, so string-interpolating the statement every call was pure churn on the shared core.
       conn.exec(data ? SQL_INSERT_H2_FRAME_DATA : SQL_INSERT_H2_FRAME_PAYLOAD, args: args)
     end
+
+    # Only onto a flow that is still Pending: one deleted mid-stream (clear history,
+    # delete_flow) or already abandoned would keep the chunk as an orphan nothing reads.
+    # OR REPLACE: a chunk at an offset already stored is the same bytes or a longer run of them,
+    # and a key conflict must never fail the writer's whole batch.
+    private def append_live_one(conn : DB::Connection, op : AppendLive) : Nil
+      conn.exec(SQL_APPEND_LIVE, op.flow_id, op.off, op.bytes, op.flow_id)
+    end
+
+    # The head a live stream shows while it is open: status, content type, latency, and its size
+    # so far. Not `update_one`, whose row write is a response LANDING: this one must leave alone
+    # a flow that is no longer Pending (abandoned at shutdown, or already finalized), and the
+    # body columns it does not have yet. False when no Pending row took it.
+    private def write_live_head(conn : DB::Connection, head : CapturedResponse) : Bool
+      conn.exec(SQL_LIVE_HEAD, head.head, head.status, head.reason, head.content_type, head.head.size.to_i64,
+        head.ttfb_us, head.flow_id).rows_affected > 0
+    end
+
+    private SQL_LIVE_HEAD =
+      "UPDATE flows SET response_head = ?, status = ?, reason = ?, content_type = ?, response_size = ?, " \
+      "ttfb_us = ?, fts_dirty = 1 WHERE id = ? AND state = #{FlowState::Pending.value}"
+
+    private SQL_APPEND_LIVE =
+      "INSERT OR REPLACE INTO flow_live_chunks (flow_id, off, bytes) SELECT ?, ?, ? " \
+      "WHERE EXISTS (SELECT 1 FROM flows WHERE id = ? AND state = #{FlowState::Pending.value})"
 
     private SQL_INSERT_H2_FRAME_DATA =
       "INSERT INTO h2_frames (conn_id, created_at, direction, stream_id, type, flags, length, payload) " \

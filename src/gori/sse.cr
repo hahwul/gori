@@ -36,7 +36,21 @@ module Gori
       retry : Int32?
 
     def self.sse?(content_type : String?) : Bool
+      return false unless content_type && names_event_stream?(content_type)
       MediaType.essence(content_type) == "text/event-stream"
+    end
+
+    # Whether `value` holds the bytes `event-stream` in any ASCII letter case. Every value whose
+    # essence is text/event-stream does (`downcase` maps no other character onto these letters),
+    # so `sse?` answers the rest without the three strings `essence` builds. The proxy asks it
+    # of every response head it streams (#1631), and that path must not allocate (P6).
+    private def self.names_event_stream?(value : String) : Bool
+      bytes = value.to_slice
+      needle = "event-stream".to_slice
+      last = bytes.size - needle.size
+      (0..last).any? do |i|
+        (0...needle.size).all? { |j| bytes[i + j] | 0x20_u8 == needle[j] }
+      end
     end
 
     # True when a response head declares a text/event-stream body. Resolves the

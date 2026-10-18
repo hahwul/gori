@@ -4,6 +4,7 @@ require "../codec/body"
 require "./copy_buf_pool"
 require "../codec/content_decode"
 require "../sink"
+require "../live_capture"
 require "../head_rewriter"
 require "../extractor"
 require "../../interceptor"
@@ -1281,7 +1282,7 @@ module Gori::Proxy
       # flow. `completed` is true only when the whole body was delivered cleanly; a
       # client abort or upstream truncation is recorded Aborted (see the helper).
       # `relaxed` streams also run a concurrent client-abort watcher (see the helper).
-      resp_capture = Codec::CaptureBuffer.new(Settings.capture_max, capture_hint(resp_framing, resp_len))
+      resp_capture = response_capture(sent_resp, resp, resp_framing, resp_len, flow_id, ttfb)
       completed = stream_nonhold_response(upstream, sent_resp, sent_resp_head,
         resp_framing, resp_len, resp_capture, flow_id, ttfb, started, relaxed: relaxed,
         extract_ref: extract_ref)
@@ -1717,11 +1718,29 @@ module Gori::Proxy
                                          state : Store::FlowState, error : String?,
                                          advisory : String? = nil) : Nil
       duration = (Time.instant - started).total_microseconds.to_i64
-      capture_response(FlowMapper.response(sent_resp,
+      captured = FlowMapper.response(sent_resp,
         flow_id: flow_id, body: resp_framing.none? ? nil : resp_capture.to_slice,
         ttfb_us: ttfb, duration_us: duration,
         body_truncated: resp_capture.truncated?, body_size: resp_capture.total,
-        state: state, error: error, advisory: response_advisory(advisory), interims: @interims))
+        state: state, error: error, advisory: response_advisory(advisory), interims: @interims)
+      captured.live = resp_capture.is_a?(LiveCapture)
+      capture_response(captured)
+    end
+
+    # The streaming path's capture. An event stream gets the live one (#1631), which appends
+    # its events to the flow while it is still open; everything else keeps the plain buffer,
+    # untouched (P6). `resp` is what the origin sent, as the other `sse?` gates read it; the
+    # head the flow shows meanwhile is `sent_resp`, as `record_streamed_response` writes it.
+    private def response_capture(sent_resp : Codec::RawResponse, resp : Codec::RawResponse,
+                                 resp_framing : Codec::BodyFraming, resp_len : Int64,
+                                 flow_id : Int64, ttfb : Int64) : Codec::CaptureBuffer
+      hint = capture_hint(resp_framing, resp_len)
+      if !resp_framing.none? && resp.status != 101 && sse?(resp)
+        head = FlowMapper.response(sent_resp, flow_id: flow_id, ttfb_us: ttfb, state: Store::FlowState::Pending)
+        LiveCapture.new(Settings.capture_max, hint, @sink, head)
+      else
+        Codec::CaptureBuffer.new(Settings.capture_max, hint)
+      end
     end
 
     # Where a response body is buffered for a body rule, a body-scoped extract rule or a hold.

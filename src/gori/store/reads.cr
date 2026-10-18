@@ -301,10 +301,15 @@ module Gori
     # where `get_flow` would also materialize the request body only to drop it. The outer nil
     # is "no such flow"; a flow with no response yet has a nil head and body.
     def response_parts(id : Int64) : {Bytes?, Bytes?, Bool}?
-      @db.query("SELECT response_head, response_body, response_body_truncated FROM flows WHERE id = ?", id) do |rs|
-        return {rs.read(Bytes?), rs.read(Bytes?), rs.read(Int64) != 0} if rs.move_next
+      parts = nil.as({Bytes?, Bytes?, Bool, Bool}?)
+      @db.query("SELECT response_head, response_body, response_body_truncated, state = ? FROM flows WHERE id = ?",
+        FlowState::Pending.value, id) do |rs|
+        parts = {rs.read(Bytes?), rs.read(Bytes?), rs.read(Int64) != 0, rs.read(Int64) != 0} if rs.move_next
       end
-      nil
+      head, body, truncated, pending = parts || return nil
+      # A still-open event stream pages what `get_flow` shows (see `with_live_body`).
+      body = Store.live_body(@db, id) if body.nil? && pending
+      {head, body, truncated}
     end
 
     # Single-row projection, e.g. to refresh a row after an :inserted/:updated
@@ -503,6 +508,7 @@ module Gori
         args << max << max
       end
       args << id
+      detail = nil.as(FlowDetail?)
       @db.query(<<-SQL, args: args) do |rs|
         SELECT id, created_at, scheme, method, host, port, target, status,
                request_size, response_size, state, duration_us, content_type,
@@ -513,9 +519,40 @@ module Gori
                sni
         FROM flows WHERE id = ?
         SQL
-        return read_flow_detail(rs)
+        detail = read_flow_detail(rs)
       end
-      nil
+      with_live_body(detail, body_max)
+    end
+
+    # An event stream the proxy is still relaying has no `response_body` yet: its bytes so far
+    # are in `flow_live_chunks` (V50, #1631), and every `get_flow` reader — History's detail and
+    # EVENTS pane, MCP `get_flow`, `gori run history show` — sees them here. QL and FTS read the
+    # column, so they see the body only once the stream closes.
+    private def with_live_body(detail : FlowDetail?, body_max : Int32?) : FlowDetail?
+      return detail unless detail && detail.row.state.pending? && detail.response_body.nil?
+      body = Store.live_body(@db, detail.row.id, body_max) || return detail
+      FlowDetail.new(detail.row, detail.http_version, detail.request_head, detail.request_body,
+        detail.response_head, body, detail.h2_conn_id, detail.h2_stream_id,
+        detail.request_body_truncated?, detail.response_body_truncated?, detail.error, detail.sni)
+    end
+
+    # The live chunks of `flow_id` joined in offset order, at most `max` bytes, or nil when it
+    # has none. Read only up to `max` (the History preview asks every poll of a Pending flow),
+    # and stopped at the first gap: a rolled-back writer batch takes its appends with it while
+    # the proxy's offset has moved on, and joining across that hole would splice two runs of the
+    # stream together as if nothing came between them.
+    protected def self.live_body(db : DB::Database | DB::Connection, flow_id : Int64, max : Int32? = nil) : Bytes?
+      io = IO::Memory.new
+      limit = (max || Int32::MAX).to_i64
+      db.query_each("SELECT off, bytes FROM flow_live_chunks WHERE flow_id = ? AND off < ? ORDER BY off",
+        flow_id, limit) do |rs|
+        break unless rs.read(Int64) == io.size
+        io.write(rs.read(Bytes))
+        break if io.size >= limit
+      end
+      return nil if io.empty?
+      body = io.to_slice
+      body.size > limit ? body[0, limit] : body
     end
 
     private def read_flow_detail(rs : DB::ResultSet) : FlowDetail?
@@ -652,6 +689,7 @@ module Gori
         c.exec("DELETE FROM js_ref_scans")
         c.exec("DELETE FROM intercept_originals")
         c.exec("DELETE FROM flow_interims")
+        c.exec("DELETE FROM flow_live_chunks")
         c.exec("DELETE FROM flow_rule_hits")
         c.exec("DELETE FROM rewrite_originals")
         c.exec("DELETE FROM flows")
@@ -682,6 +720,7 @@ module Gori
       conn.exec("DELETE FROM js_ref_scans WHERE flow_id IN (#{marks})", args: args)
       conn.exec("DELETE FROM intercept_originals WHERE flow_id IN (#{marks})", args: args)
       conn.exec("DELETE FROM flow_interims WHERE flow_id IN (#{marks})", args: args)
+      conn.exec("DELETE FROM flow_live_chunks WHERE flow_id IN (#{marks})", args: args)
       conn.exec("DELETE FROM flow_rule_hits WHERE flow_id IN (#{marks})", args: args)
       conn.exec("DELETE FROM rewrite_originals WHERE flow_id IN (#{marks})", args: args)
       # The h2 frame log (often the flow's bulk bytes) — capture the conns BEFORE deleting

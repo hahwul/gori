@@ -14,6 +14,8 @@ module Gori
 end
 
 require "../src/gori/proxy/codec/body"
+require "../src/gori/proxy/live_capture"
+require "../src/gori/sse"
 
 include Gori::Proxy::Codec
 
@@ -74,6 +76,45 @@ def run_none : Int32
   cap.to_slice.size
 end
 
+# A chunked event stream: 256 events of ~250 bytes, one chunk each, as an SSE origin sends them.
+SSE_EVENT = "data: #{"x" * 240}\n\n"
+SSE_WIRE  = String.build do |io|
+  256.times { io << SSE_EVENT.bytesize.to_s(16) << "\r\n" << SSE_EVENT << "\r\n" }
+  io << "0\r\n\r\n"
+end.to_slice
+
+# Takes every live append and drops it, so bytes/op is the tee's own batching and copying.
+class NullLiveSink < Gori::Proxy::FlowSink
+  def on_request(req : Gori::Store::CapturedRequest) : Int64
+    1_i64
+  end
+
+  def on_response(resp : Gori::Store::CapturedResponse) : Nil
+  end
+
+  def on_ws_message(flow_id : Int64, direction : String, opcode : Int32, payload : Bytes,
+                    shape : Gori::Proxy::WS::Shape = Gori::Proxy::WS::Shape::DEFAULT) : Nil
+  end
+
+  def on_live_body(flow_id : Int64, off : Int64, bytes : Bytes, head : Gori::Store::CapturedResponse?) : Bool
+    true
+  end
+end
+
+LIVE_SINK = NullLiveSink.new
+LIVE_HEAD = Gori::Store::CapturedResponse.new(flow_id: 1_i64, status: 200,
+  head: "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n".to_slice,
+  state: Gori::Store::FlowState::Pending)
+
+# The SSE path (#1631): the same chunked copy, teed into a LiveCapture. In one burst the clock
+# never passes FLUSH_EVERY, so this is the first-event append plus the 16 KiB size trigger.
+def run_sse_live(wire : Bytes) : Bytes
+  src = IO::Memory.new(wire, writeable: false)
+  cap = Gori::Proxy::LiveCapture.new(CAP, 0_i64, LIVE_SINK, LIVE_HEAD)
+  Body.stream(src, SINK, BodyFraming::Chunked, 0_i64, cap, SCRATCH)
+  cap.to_slice
+end
+
 puts "CaptureBuffer / Body.stream isolated (ips):"
 puts "(hint) = presized to Content-Length; (nohint) = old default-growth path"
 Benchmark.ips do |x|
@@ -84,4 +125,8 @@ Benchmark.ips do |x|
   x.report("length 1M  (nohint)") { run_length(BODY_1M, 0_i64) }
   x.report("chunked 64K") { run_chunked(CHUNK_64K) }
   x.report("chunked 1M") { run_chunked(CHUNK_1M) }
+  # The streaming path's SSE decision, asked of every streamed response (#1631).
+  x.report("sse? (text/html)") { Gori::Sse.sse?("text/html; charset=utf-8") }
+  x.report("chunked SSE 64K (plain)") { run_chunked(SSE_WIRE) }
+  x.report("chunked SSE 64K (live)") { run_sse_live(SSE_WIRE) }
 end
