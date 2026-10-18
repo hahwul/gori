@@ -267,7 +267,7 @@ describe "Display… and Protocol… (#1274 WP9)" do
     members_of(protocol).should eq(%w[
       fuzz.toggle-http2 fuzz.toggle-sni repeater.cycle-tls-preset repeater.toggle-auto-content-length
       repeater.toggle-grpc-fields repeater.toggle-grpc-reframe repeater.toggle-http2
-      repeater.toggle-sni repeater.toggle-ws-key
+      repeater.toggle-sni repeater.toggle-ws-heartbeat repeater.toggle-ws-key repeater.toggle-ws-session
     ])
     # Save results left `P` for the family; it is palette-only now (#1282), on its `⇧E` (#1295).
     Gori::Verbs.registry["fuzz.save-results"].palette_only?.should be_true

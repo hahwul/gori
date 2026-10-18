@@ -211,7 +211,14 @@ class Gori::Tui::RepeaterView
       handshake_rect, transcript_rect = ws_resp_split(rect)
       on_handshake = @resp_pane == :handshake
       render_ws_handshake(screen, handshake_rect, focused, active: on_handshake)
-      render_transcript(screen, transcript_rect, focused, "TRANSCRIPT", ws_transcript_lines,
+      # A live session (#1630) names its state in the card title; a scripted transcript keeps
+      # the plain one.
+      title = if ws_session_active?
+                ws_connected? ? "TRANSCRIPT  ● open #{ws_open_duration_label}" : "TRANSCRIPT  ✗ closed"
+              else
+                "TRANSCRIPT"
+              end
+      render_transcript(screen, transcript_rect, focused, title, ws_transcript_lines,
         @ws_result.try(&.duration_us), active: !on_handshake)
       return
     end

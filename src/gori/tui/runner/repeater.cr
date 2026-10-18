@@ -32,6 +32,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   forward repeater_send : Nil,
     repeater_stop : Nil,
+    repeater_toggle_ws_session : Nil,
+    repeater_toggle_ws_heartbeat : Nil,
+    repeater_ws_send_binary : Nil,
     repeater_send_group : Nil,
     repeater_send_race : Nil,
     to: repeater_controller
@@ -185,6 +188,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   def repeater_stoppable? : Bool
     current_tab == :repeater && repeater_controller.stoppable?
+  end
+
+  def repeater_ws_session_connected? : Bool
+    current_tab == :repeater && repeater_controller.ws_session_connected?
   end
 
   def repeater_split_request? : Bool

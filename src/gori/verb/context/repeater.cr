@@ -9,6 +9,10 @@ abstract class Gori::Verb::ExecContext
   abstract def repeater_send : Nil                       # resend the (edited) request to the target
   abstract def repeater_stop : Nil                       # end the send in flight (an event stream keeps what arrived)
   abstract def repeater_stoppable? : Bool                # the Repeater is in front with an HTTP send in flight
+  abstract def repeater_toggle_ws_session : Nil          # open/close a persistent WebSocket session (#1630)
+  abstract def repeater_toggle_ws_heartbeat : Nil        # answer Engine.IO heartbeats on the live session
+  abstract def repeater_ws_send_binary : Nil             # send the MESSAGES cursor line as a binary (hex) frame
+  abstract def repeater_ws_session_connected? : Bool     # a live WebSocket session is open on the active tab
   abstract def repeater_send_group : Nil                 # pipeline %%%-split requests on one connection
   abstract def repeater_send_race : Nil                  # race the marked sub-tabs together (h1 last-byte / h2 single-packet)
   abstract def repeater_timing_analysis : Nil            # differential timing of the two marked sub-tabs (order + quartiles, #1246)

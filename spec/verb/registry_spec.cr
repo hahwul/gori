@@ -258,6 +258,18 @@ private class FakeContext < ExecContext
     @calls << :repeater_stop
   end
 
+  def repeater_toggle_ws_session : Nil
+    @calls << :repeater_toggle_ws_session
+  end
+
+  def repeater_toggle_ws_heartbeat : Nil
+    @calls << :repeater_toggle_ws_heartbeat
+  end
+
+  def repeater_ws_send_binary : Nil
+    @calls << :repeater_ws_send_binary
+  end
+
   def repeater_send_group : Nil
     @calls << :repeater_send_group
   end
@@ -439,6 +451,10 @@ private class FakeContext < ExecContext
   end
 
   def repeater_stoppable? : Bool
+    false
+  end
+
+  def repeater_ws_session_connected? : Bool
     false
   end
 
