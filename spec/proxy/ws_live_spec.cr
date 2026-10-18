@@ -266,17 +266,28 @@ describe Gori::Proxy::WS::Live do
 
   it "bounds its own write on a peer that stopped reading, so teardown is not pinned" do
     sink = LiveSink.new
+    landed = 0
     with_socket_relay(sink, 414_i64) do |_browser, origin|
       result = Channel(String?).new(1)
       big = "x" * (32 * 1024 * 1024)
-      spawn { result.send(inject(sink, 414_i64, "in", WS::OP_BIN, big, wait: 300.milliseconds)) }
-      sleep 50.milliseconds
+      # One frame parks on a POSIX socket. Windows takes the whole first send into the kernel
+      # however large, and parks the NEXT one once more than SO_SNDBUF is queued, so the frame
+      # that parks is the second there (measured on the CI runner: 32 MiB completes in 9 ms).
+      spawn do
+        outcome = nil
+        3.times do
+          break if outcome = inject(sink, 414_i64, "in", WS::OP_BIN, big, wait: 300.milliseconds)
+          landed += 1
+        end
+        result.send(outcome)
+      end
+      sleep 150.milliseconds
       # The origin closes while the inject is parked: the relay's CLOSE forward and teardown
       # writes queue on the same leg and must get through once the inject gives up.
       origin.write(WS.encode(WS::OP_CLOSE, Bytes.empty, mask: false))
       receive_within(result, 5, "the inject to give up").not_nil!.should contain("stopped reading")
     end
-    sink.rows.none?(&.[3]).should be_true
+    sink.rows.count(&.[3]).should eq(landed) # the frame that parked left no row
     # gori closed the socket, so the peer is not blamed with a RESET row; gori says it did.
     sink.rows.none?(&.[2].includes?("RESET")).should be_true
     sink.rows.map(&.[2]).should contain(
@@ -289,7 +300,9 @@ describe Gori::Proxy::WS::Live do
     sock = server.accept
     begin
       leg = WS::Leg.new("in", sock, mask: false)
-      spawn { leg.write(Bytes.new(32 * 1024 * 1024)) rescue nil } # parks: the peer never reads
+      # Chunks, not one big write: Windows completes a single send of any size into the kernel
+      # and parks only a later one, so keep writing until one parks (the peer never reads).
+      spawn { loop { leg.write(Bytes.new(64 * 1024)) } rescue nil }
       sleep 50.milliseconds
       leg.teardown!(100.milliseconds)
       expect_raises(IO::TimeoutError) { leg.write("late".to_slice) }
