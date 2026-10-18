@@ -134,7 +134,7 @@ module Gori
     # InsertH2Frame and for the same reason: the proxy relays first and never waits on the DB.
     # `head`, when set, is the response head with state Pending, so History shows the status
     # while the stream is open; it rides only the first append that gets queued. `times` are
-    # the packed arrivals of the events numbered from `first` on (`flow_event_times`, V52).
+    # the packed arrivals of the events numbered from `first` on (`flow_event_times`, V51).
     struct AppendLive < WriteOp
       getter flow_id : Int64
       getter off : Int64

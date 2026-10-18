@@ -2281,12 +2281,11 @@ module Gori
           SQL
       ]
 
-      # V52 — when each event of an event stream arrived (#1631), so History and `get_flow` show
+      # V51 — when each event of an event stream arrived (#1631), so History and `get_flow` show
       # `+0.412s` per event after the stream closes. One row per live append, the packed times
       # (8 bytes LE, µs from the response head) of the events numbered from `first`; the final
       # response write replaces them with one row holding all. Beside the flow for V50's reason.
-      # (V51 is taken by a parallel change.)
-      V52 = [
+      V51 = [
         <<-SQL,
           CREATE TABLE IF NOT EXISTS flow_event_times (
             flow_id INTEGER NOT NULL,
@@ -2300,7 +2299,7 @@ module Gori
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
                     V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31, V32, V33,
                     V34, V35, V36, V37, V38, V39, V40, V41, V42, V43, V44, V45, V46,
-                    V47, V48, V49, V50, V52]
+                    V47, V48, V49, V50, V51]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|

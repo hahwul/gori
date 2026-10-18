@@ -215,10 +215,16 @@ describe Gori::Sse do
       Gori::Sse.events("data: one\n\ndata: two\n\n".to_slice).size.should eq(a.times.size)
     end
 
-    it "is not made for a compressed stream" do
-      Gori::Sse::Arrivals.for("gzip", false).should be_nil
-      Gori::Sse::Arrivals.for(" Identity ", false).should_not be_nil
-      Gori::Sse::Arrivals.for(nil, true).should_not be_nil
+    it "is not made for a stream the head leaves compressed, at any layer" do
+      head = ->(fields : String) { "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n#{fields}\r\n".to_slice }
+      Gori::Sse::Arrivals.for(head.call(""), false).should_not be_nil
+      Gori::Sse::Arrivals.for(head.call("Transfer-Encoding: chunked\r\n"), true).should_not be_nil
+      Gori::Sse::Arrivals.for(head.call("Content-Encoding: identity\r\n"), false).should_not be_nil
+      Gori::Sse::Arrivals.for(head.call("Content-Encoding: gzip\r\n"), false).should be_nil
+      # A coding under the final `chunked` is still a layer on the body.
+      Gori::Sse::Arrivals.for(head.call("Transfer-Encoding: gzip, chunked\r\n"), true).should be_nil
+      # Duplicated Content-Encoding: the first field is a layer even when the last says identity.
+      Gori::Sse::Arrivals.for(head.call("Content-Encoding: gzip\r\nContent-Encoding: identity\r\n"), false).should be_nil
     end
 
     it "packs to eight bytes per time and back" do

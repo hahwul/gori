@@ -1181,12 +1181,11 @@ module Gori
       end
 
       # The bound for this stream, read off the final head's fields (h2 names are lowercase).
-      # The head a live sink opens on is the one `synth_head` will give the Result.
+      # The head it reads (and a live sink opens on) is the one `synth_head` will give the Result.
       private def self.start_bound(sse : StreamBound?, status : Int32, headers : Array({String, String}),
                                    cancel : Proc(Bool)?) : StreamRun?
         return nil unless sse && Sse.sse?(headers.find { |(n, _)| n == "content-type" }.try(&.[1]))
-        head = sse.live ? HeadCodec.synth_response([{":status", status.to_s}] + headers, nil) : Bytes.empty
-        sse.start(headers.find { |(n, _)| n == "content-encoding" }.try(&.[1]), false, cancel, head)
+        sse.start(HeadCodec.synth_response([{":status", status.to_s}] + headers, nil), false, cancel)
       end
 
       # Fold one COMPLETED header block into the response being assembled, and decide what the

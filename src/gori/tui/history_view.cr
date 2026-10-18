@@ -701,15 +701,6 @@ module Gori::Tui
       values
     end
 
-    # The CACHE column's signal for one row, computed once and remembered (#1247).
-    #
-    # Only rows ON SCREEN reach here — the same P8 bound `column_values` documents — so a
-    # 5000-row window costs the head reads of its ~50 visible rows and nothing more. When a
-    # user-defined column already read this row (`column_values`), that read populated the memo
-    # and this is a hit with NO second fetch; otherwise it fetches `body_max: 0` (a cache status
-    # is read from the response HEAD, so a body BLOB is never pulled). A row with no head yet
-    # (Pending) or an unreadable one is `None`, exactly what `gori_cache_status` answers for the
-    # same row in a `cache:` query.
     private def open_stream?(row : Store::FlowRow) : Bool
       row.state.pending? && Sse.sse?(row.content_type)
     end
@@ -725,6 +716,15 @@ module Gori::Tui
       count >= 10_000 ? "● #{count // 1000}k" : "● #{count}"
     end
 
+    # The CACHE column's signal for one row, computed once and remembered (#1247).
+    #
+    # Only rows ON SCREEN reach here — the same P8 bound `column_values` documents — so a
+    # 5000-row window costs the head reads of its ~50 visible rows and nothing more. When a
+    # user-defined column already read this row (`column_values`), that read populated the memo
+    # and this is a hit with NO second fetch; otherwise it fetches `body_max: 0` (a cache status
+    # is read from the response HEAD, so a body BLOB is never pulled). A row with no head yet
+    # (Pending) or an unreadable one is `None`, exactly what `gori_cache_status` answers for the
+    # same row in a `cache:` query.
     private def cache_status_for(row : Store::FlowRow) : Gori::CacheStatus::Signal
       key = {row.id, row.created_at, row.state}
       if cached = @cache_memo[key]?

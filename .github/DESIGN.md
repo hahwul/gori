@@ -5048,7 +5048,7 @@ and kept after the stream closes, when `flow_live_chunks` is gone.
   `StreamRun`), and stamps each event the read that ended it. The index pairs with `Sse.events`
   of the same body, which a byte offset could not: the capture keeps the chunk framing, and the
   events are parsed after it is removed. A compressed stream gets no times.
-- **Beside the flow, batched, survives close.** `flow_event_times` (V52) holds one row per live
+- **Beside the flow, batched, survives close.** `flow_event_times` (V51) holds one row per live
   append, the packed times from index `first`; they ride the `AppendLive` the chunk does, so a
   dropped append drops both and the retry carries both. The final response write replaces them
   with one row holding every time. Reads stop at the first index gap, as the live body does at

@@ -857,6 +857,18 @@ module Gori
 
     # A snapshot is imported as data, never as executable or local-machine configuration. Keep
     # this in the shared archive engine so the picker and CLI make exactly the same copy.
+    # Live chunks (#1631) are the exporting process's in-flight stream state, not a stored body:
+    # the copy keeps only what the store finalized, and its Pending flows read as they would
+    # have a moment before the first event arrived. Their arrival times go with them, or the
+    # row would count events EVENTS cannot show; a finalized stream's times are flow data and
+    # stay.
+    private def self.drop_live_streams(conn : DB::Connection) : Nil
+      conn.exec("DELETE FROM flow_live_chunks") if table_exists?(conn, "flow_live_chunks")
+      return unless table_exists?(conn, "flow_event_times")
+      conn.exec("DELETE FROM flow_event_times WHERE flow_id IN " \
+                "(SELECT id FROM flows WHERE state = #{Store::FlowState::Pending.value})")
+    end
+
     private def self.sanitize_import_database(path : String) : Nil
       DB.open("sqlite3:#{path}?busy_timeout=5000") do |db|
         db.using_connection do |conn|
@@ -882,10 +894,7 @@ module Gori
               disable_slot_auto_refresh(conn)
             end
             conn.exec("DELETE FROM host_overrides") if table_exists?(conn, "host_overrides")
-            # Live chunks (#1631) are the exporting process's in-flight stream state, not a
-            # stored body: the copy keeps only what the store finalized, and its Pending flows
-            # read as they would have a moment before the first event arrived.
-            conn.exec("DELETE FROM flow_live_chunks") if table_exists?(conn, "flow_live_chunks")
+            drop_live_streams(conn)
             # A global rule's id was numbered by the exporting install, like GLOBAL_OVERRIDE_KEYS:
             # here it would name whatever local global rule holds that id. No install issues id 0
             # and `RuleRef.parse?` refuses it, so the flow still reads as rewritten (ORIGINAL kept)

@@ -32,12 +32,11 @@ module Gori
 
       # The bounded read of a response the caller has already found to be an event stream
       # (`Sse.sse?` on its Content-Type, checked first because every swept response asks).
-      # `encoding` is the response's Content-Encoding: the events of a compressed stream can't
-      # be counted as they arrive, so only the time axis applies to one. `head` opens `live`.
-      def start(encoding : String?, chunked : Bool, cancel : Proc(Bool)? = nil,
-                head : Bytes = Bytes.empty) : StreamRun
-        countable = Sse.identity?(encoding)
-        live.try(&.open(head, Sse::Arrivals.for(encoding, chunked)))
+      # `head` is the response head: the events of a body it leaves compressed can't be
+      # counted as they arrive, so only the time axis applies to one. It also opens `live`.
+      def start(head : Bytes, chunked : Bool, cancel : Proc(Bool)? = nil) : StreamRun
+        countable = !Proxy::Codec::ContentDecode.content_encoded?(head)
+        live.try(&.open(head, countable ? Sse::Arrivals.new(chunked) : nil))
         StreamRun.new(countable ? max_events : nil, max_time, chunked, cancel, live)
       end
     end

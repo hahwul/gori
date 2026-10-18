@@ -158,6 +158,7 @@ class Gori::Tui::RepeaterView
   # the pane caches dropped (`reset_result_caches` also resets the wrap memo), a clean tab.
   private def fresh_panes(focus : Symbol, diffable : Bool) : Nil
     @result = nil
+    @result_times = nil
     @prev_result = nil
     reset_result_caches
     @focus = focus
@@ -454,6 +455,7 @@ class Gori::Tui::RepeaterView
     else
       @result = nil
     end
+    @result_times = src.@result_times.try(&.dup)
     @prev_result = nil
     @original_lines = [] of String
     @diffable = false

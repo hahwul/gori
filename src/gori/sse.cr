@@ -293,9 +293,11 @@ module Gori
     class Arrivals
       getter times = [] of Int64
 
-      # nil for a compressed stream: its events can't be counted as they arrive.
-      def self.for(encoding : String?, chunked : Bool) : Arrivals?
-        new(chunked) if Sse.identity?(encoding)
+      # nil when `head` leaves a coding on the body (any Content-Encoding layer, a
+      # Transfer-Encoding layer under the final `chunked`, or a folded header that could hide
+      # one): its events can't be counted as they arrive.
+      def self.for(head : Bytes, chunked : Bool) : Arrivals?
+        new(chunked) unless Proxy::Codec::ContentDecode.content_encoded?(head)
       end
 
       def initialize(chunked : Bool, @started : Time::Instant = Time.instant)
@@ -322,12 +324,6 @@ module Gori
         (bytes.size // 8).times { |i| into << IO::ByteFormat::LittleEndian.decode(Int64, bytes[i * 8, 8]) }
         into
       end
-    end
-
-    # Whether a Content-Encoding leaves the body as sent, so its events can be counted as
-    # they arrive.
-    def self.identity?(encoding : String?) : Bool
-      encoding.nil? || encoding.strip.empty? || encoding.strip.compare("identity", case_insensitive: true) == 0
     end
 
     # Renders parsed events as text: a header line per event (type/id/retry when set) then its

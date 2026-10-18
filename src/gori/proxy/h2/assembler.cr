@@ -940,7 +940,7 @@ module Gori::Proxy::H2
         content_encoding: header_value(headers, "content-encoding"),
         ttfb_us: stream.resp_first_at.try { |t| (t - stream.started_at).total_microseconds.to_i64 },
         state: Store::FlowState::Pending)
-      arrivals = Sse::Arrivals.for(head.content_encoding, false)
+      arrivals = Sse::Arrivals.for(head.head, false)
       side.body = LiveCapture.new(Settings.capture_max, 0_i64, @sink, head, arrivals)
     end
 

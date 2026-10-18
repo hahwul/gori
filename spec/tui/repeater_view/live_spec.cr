@@ -129,6 +129,11 @@ describe "Gori::Tui::RepeaterView — an event stream while it is open" do
 
     view.apply(Gori::Repeater::Result.new(SSE_HEAD, "data: one\n\ndata: two\n\n".to_slice, nil, 1000_i64))
     event_rows(view).should eq(rows)
+    # A duplicated tab shows the same stream with the same times.
+    copy = RepeaterView.new
+    copy.duplicate_from(view)
+    copy.pretty = true
+    event_rows(copy).should eq(rows)
     # A later send that did not stream leaves no stale times behind.
     view.apply(Gori::Repeater::Result.new(SSE_HEAD, "data: one\n\n".to_slice, nil, 1000_i64))
     event_rows(view).should eq(["▸ event #1"])

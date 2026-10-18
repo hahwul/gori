@@ -586,14 +586,23 @@ describe Gori::ProjectArchive do
   it "imports a project without the live chunks of a stream it was relaying" do
     with_archive_project do |registry, project, store, root|
       id = store.insert_flow(archive_request("/events"))
-      store.append_live(id, 0_i64, "data: one\n\n".to_slice, nil)
+      store.append_live(id, 0_i64, "data: one\n\n".to_slice, nil, 0, Gori::Sse::Arrivals.pack([1_i64]))
+      # A finalized stream's arrival times are flow data, and travel with it.
+      done = store.insert_flow(archive_request("/done"))
+      store.@db.exec("UPDATE flows SET state = ? WHERE id = ?", Gori::Store::FlowState::Complete.value, done)
+      store.@db.exec("INSERT INTO flow_event_times (flow_id, first, times) VALUES (?, 0, ?)", done,
+        Gori::Sse::Arrivals.pack([1_i64, 2_i64]))
       store.flush
       store.@db.scalar("SELECT COUNT(*) FROM flow_live_chunks").should eq(1)
+      store.@db.scalar("SELECT COUNT(*) FROM flow_event_times").should eq(2)
       archive_path = export_archive(project, File.join(root, "live.gori"))
       imported = Gori::ProjectArchive.prepare_import(archive_path).import_into(registry, "Live copy")
       copied = Gori::Store.open(imported.db_path)
       begin
         copied.@db.scalar("SELECT COUNT(*) FROM flow_live_chunks").should eq(0)
+        # The in-flight stream's times go with its chunks, so its row counts nothing EVENTS lacks.
+        copied.live_event_count(id).should be_nil
+        copied.@db.scalar("SELECT COUNT(*) FROM flow_event_times WHERE flow_id = ?", done).should eq(1)
         copied.get_flow(id).should_not be_nil
       ensure
         copied.close

@@ -326,6 +326,7 @@ class Gori::Tui::RepeaterView
   # pane). `labeled` pairs each request's label with its Result, in send order.
   def apply_group(labeled : Array({String, Repeater::Result})) : Nil
     @result = nil # the group transcript takes over the response pane
+    @result_times = nil
     @prev_result = nil
     @group_results = labeled
     reset_result_caches

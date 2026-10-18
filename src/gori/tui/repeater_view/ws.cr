@@ -393,6 +393,7 @@ class Gori::Tui::RepeaterView
     resp_wrap_reset
     # Seed @result so the HTTP response tab can render the handshake response
     @result = Repeater::Result.new(result.handshake_head, Bytes.empty, nil, result.duration_us, result.error)
+    @result_times = nil
     reset_result_caches
   end
 
