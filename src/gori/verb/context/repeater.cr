@@ -7,6 +7,8 @@ abstract class Gori::Verb::ExecContext
   abstract def repeater_new : Nil                        # open a blank, hand-authored repeater request
   abstract def repeater_paste_curl : Nil                 # open the curl paste box; each request becomes a sub-tab
   abstract def repeater_send : Nil                       # resend the (edited) request to the target
+  abstract def repeater_stop : Nil                       # end the send in flight (an event stream keeps what arrived)
+  abstract def repeater_stoppable? : Bool                # the Repeater is in front with an HTTP send in flight
   abstract def repeater_send_group : Nil                 # pipeline %%%-split requests on one connection
   abstract def repeater_send_race : Nil                  # race the marked sub-tabs together (h1 last-byte / h2 single-packet)
   abstract def repeater_timing_analysis : Nil            # differential timing of the two marked sub-tabs (order + quartiles, #1246)

@@ -174,3 +174,51 @@ describe Gori::Repeater::StreamBound do
     end
   end
 end
+
+# The TUI's sink (#1631): no axis, a `LiveBody`, and the send's cancel as the only bound.
+describe Gori::Repeater::LiveBody do
+  # Stops the stream once `n` events have arrived, the way the Repeater's Stop does.
+  stop_after = ->(live : Gori::Repeater::LiveBody, n : Int32) do
+    spawn do
+      until (head = live.head) && Gori::Sse.from_response(head, live.result(Time.instant).try(&.body)).size >= n
+        sleep 10.milliseconds
+      end
+      live.stop
+    end
+  end
+
+  it "follows an h1 stream and keeps it whole when stopped" do
+    live = Gori::Repeater::LiveBody.new
+    stop_after.call(live, 3)
+    result = Gori::Repeater::Engine.send(GET, scheme: "http", host: "127.0.0.1", port: start_sse_origin,
+      verify_upstream: false, timeout: 20.seconds, cancel: -> { live.stopped? },
+      sse: StreamBound.new(live: live))
+    result.ok?.should be_true
+    result.bounded.should eq("cancelled")
+    events_in(result).should be >= 3
+    live.head.should eq(result.head)
+    live.result(Time.instant).not_nil!.body.should eq(result.body)
+  end
+
+  it "follows an h2 stream and keeps it whole when stopped" do
+    live = Gori::Repeater::LiveBody.new
+    stop_after.call(live, 3)
+    result = Gori::Repeater::H2Engine.send(GET, scheme: "http", host: "127.0.0.1",
+      port: start_h2_sse_origin(10.milliseconds), verify_upstream: false, timeout: 20.seconds,
+      cancel: -> { live.stopped? }, sse: StreamBound.new(live: live))
+    result.ok?.should be_true
+    result.bounded.should eq("cancelled")
+    events_in(result).should be >= 3
+    live.head.should eq(result.head)
+    live.result(Time.instant).not_nil!.body.should eq(result.body)
+  end
+
+  it "stays closed on a response that is not an event stream" do
+    live = Gori::Repeater::LiveBody.new
+    result = h1_send(start_sse_origin(content_type: "text/plain", events: 2), StreamBound.new(live: live))
+    result.ok?.should be_true
+    live.head.should be_nil
+    live.size.should eq(0)
+    live.result(Time.instant).should be_nil
+  end
+end

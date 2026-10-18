@@ -538,7 +538,7 @@ module Gori
       # send, as `send_ws` gives a script.
       def open_ws(upgrade : Bytes, keep_key : Bool = false,
                   auto_replies : Array(WsSession::AutoReply) = [] of WsSession::AutoReply,
-                  cancel : Proc(Bool)? = nil) : WsSession::Opened
+                  cancel : Proc(Bool)? = nil, gate : Proc(String?)? = nil) : WsSession::Opened
         refused = ->(reason : String) {
           WsSession::Opened.new(nil, WsEngine::Result.new(Bytes.new(0), [] of WsEngine::Message, 0_i64, reason))
         }
@@ -556,7 +556,7 @@ module Gori
         WsSession.open(wired, scheme: @scheme, host: @host, port: @port, verify_upstream: @verify,
           sni: @sni, overrides: @overrides, keep_key: keep_key, tls_preset: @tls_preset,
           cancel: cancel, auto_replies: auto_replies,
-          expand: ->(m : WsEngine::OutMsg) { expand_messages([m]).first })
+          expand: ->(m : WsEngine::OutMsg) { expand_messages([m]).first }, gate: gate)
       end
 
       # Whole payload, not `expand_bindings`' head/body split: a WS frame has no head to take,

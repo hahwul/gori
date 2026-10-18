@@ -21,7 +21,7 @@ class Gori::Tui::RepeaterView
     end
     # The right-anchored read-outs chain leftwards from the corner: latency·size, then the
     # ⚠ for a cut-short body, then the frozen-copy marker.
-    right = (result = @result) ? draw_response_meta(screen, rect, result, chips_end) : rect.right - 1
+    right = (result = shown_result) ? draw_response_meta(screen, rect, result, chips_end) : rect.right - 1
     draw_frozen_marker(screen, rect, right, chips_end)
   end
 
@@ -244,7 +244,7 @@ class Gori::Tui::RepeaterView
   private def render_resp_hex(screen : Screen, body : Rect) : Nil
     if b = resp_hex_bytes
       HexView.render(screen, body, b, @scroll)
-    elsif result = @result
+    elsif result = shown_result
       msg = result.error ? "repeater error: #{result.error}" : "— no response —"
       color = result.error ? Theme.red : Theme.muted
       screen.text(body.x, body.y, msg, color)

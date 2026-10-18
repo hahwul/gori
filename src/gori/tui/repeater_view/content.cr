@@ -100,7 +100,7 @@ class Gori::Tui::RepeaterView
     drop_resp_view_cache if @resp_view_rev != Theme.revision # theme switched → rebuild with new colours
     @resp_view_rev = Theme.revision
     @resp_view_cache ||= begin
-      result = @result
+      result = shown_result
       @resp_pretty_applied = false
       if !result
         RespView.new([[Highlight::Span.new(not_sent_hint, Theme.muted)]], Highlight::BodyLines.empty, :text)
@@ -134,7 +134,7 @@ class Gori::Tui::RepeaterView
 
   private def formatted_resp_body(head : Bytes, src : Bytes?) : Pretty::Result?
     if @pretty
-      Pretty.format(head, src, decode_unicode: @decode_unicode)
+      sse_pretty(head, src) || Pretty.format(head, src, decode_unicode: @decode_unicode)
     elsif @decode_unicode
       Pretty.decode_unicode_json(head, src)
     end

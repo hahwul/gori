@@ -1528,7 +1528,8 @@ module Gori::Tui
         head = view.sent_head_unterminated? ? " · #{CLI::Run.unterminated_head_chip}" : ""
         where = result_origin(view)
         if result.ok?
-          @host.status("sent → #{result.response.try(&.status)} in #{Fmt.dur(result.duration_us)}#{result.incomplete? ? " (incomplete)" : ""}#{evidence_literal_note(view)}#{head}#{note}#{where}", :done)
+          cut = result.bounded ? " (stopped)" : result.incomplete? ? " (incomplete)" : ""
+          @host.status("sent → #{result.response.try(&.status)} in #{Fmt.dur(result.duration_us)}#{cut}#{evidence_literal_note(view)}#{head}#{note}#{where}", :done)
         else
           @host.status("repeater error: #{result.error}#{head}#{note}#{where}", :error)
         end
@@ -1592,6 +1593,14 @@ module Gori::Tui
         applied = true
       end
       applied = true if drain_timing
+      # Only while the Repeater is on screen: a tick re-parses the stream, and another tab draws
+      # none of it. Its next tick there catches up in one render.
+      if @host.active_tab == :repeater && (v = current_view) && v.live_tick
+        applied = true
+        # The first render is where the send became an open stream, so it names the way out.
+        @host.status(Hotkeys.expand_menu_paths(@host.session.registry,
+          "event stream open · {space:repeater.stop} stops it and keeps the events"), :busy) if v.live_renders == 1
+      end
       applied
     end
 
@@ -2053,6 +2062,8 @@ module Gori::Tui
       end
       # A timing run against the tab being closed — either half of its pair — stops too.
       @timing_stop.try(&.stop) if timing_running? && @timing_members.any?(&.same?(closing))
+      # …and so does an open event stream (#1631), which would otherwise read on unbounded.
+      closing.live.try(&.stop) if closing.inflight?
       # `delete_repeater` has always reported whether the DELETE committed (it is `exec_task_ok`)
       # and this was the last caller ignoring it; MCP's `delete_repeater` already surfaces it.
       orphaned = (id = @repeaters[idx].db_id) ? !@host.session.store.delete_repeater(id) : false # also propagates the close to peer sessions
@@ -2079,9 +2090,10 @@ module Gori::Tui
     #     (Repeater::Minimize::Stop), on the shape of DiscoverRun#request_stop.
     #
     # A timing run is a bounded probe run as well — up to MAX_ITERATIONS pairs — so it is stopped
-    # here too; it has no job row to finish.
+    # here too; it has no job row to finish. An open event stream (#1631) is not bounded at all.
     def stop_all : Nil
       @timing_stop.try(&.stop)
+      @repeaters.each { |t| t.view.live.try(&.stop) if t.view.inflight? }
       return unless mj = @minimize_job
       @minimize_stop.try(&.stop)
       @host.jobs.finish(mj[1], :stopped, "project closed")
@@ -2227,7 +2239,10 @@ module Gori::Tui
         @host.status("repeater: #{chain_refusal(ex)}")
         return false
       end
-      return false unless plan = repeater_plan(view, [wire], http2: view.http2?)
+      # The event-stream sink (#1631): a bound with no axis, so the stream reads until it ends
+      # or `repeater_stop`, and the pane follows it meanwhile (`RepeaterView#live_tick`).
+      live = Repeater::LiveBody.new
+      return false unless plan = repeater_plan(view, [wire], http2: view.http2?, sse: Repeater::StreamBound.new(live: live))
       save_repeater_tab(tab) # persist the request we're about to send (before it goes inflight)
       # The request half of the pair the drain is about to complete, digested HERE because the
       # drain runs a round-trip later and the tab may have been typed into since — which is
@@ -2240,6 +2255,7 @@ module Gori::Tui
         return false
       end
       view.inflight = true
+      view.live_begin(live)
       sni = plan.sni # custom TLS SNI host (nil → present the dialed host)
       @host.status("sending#{sending_as} → #{plan.host}:#{plan.port}#{sni ? " (SNI #{sni})" : ""}…", :busy) unless quiet
       # Read live so a toggle in Settings takes on the very next ^R, and read on the UI fiber
@@ -2250,8 +2266,26 @@ module Gori::Tui
       # Off the UI fiber: a round-trip can block up to 30s. The fiber touches only these
       # captured locals + the inflight flag — and hands the Result back through the
       # channel; the run loop applies it (see #drain_results).
-      launch_send_fiber(view, plan, results, record_store, record_ref, sent_at, sent_digest)
+      launch_send_fiber(view, plan, results, record_store, record_ref, sent_at, sent_digest, live)
       true
+    end
+
+    # Stop (#1631): end the active sub-tab's send in flight. An event stream keeps the events
+    # read so far and lands as a success through `drain_results`; any other response is cut
+    # off like a dropped connection.
+    def repeater_stop : Nil
+      unless stoppable?
+        @host.status("nothing to stop — no send in flight on this sub-tab")
+        return
+      end
+      current_view.try(&.live).try(&.stop)
+      @host.status("stopping…", :busy)
+    end
+
+    # A single HTTP send is in flight on the front sub-tab: the one `repeater_stop` can end. A
+    # tab's sink outlives nothing but its own send (`RepeaterView#apply` drops it).
+    def stoppable? : Bool
+      !!(v = current_view) && v.inflight? && !v.live.nil?
     end
 
     # The flight half of a send, split from the decide half above so each reads as one
@@ -2261,8 +2295,9 @@ module Gori::Tui
     private def launch_send_fiber(view : RepeaterView, plan : Repeater::Plan,
                                   results : Channel({RepeaterView, Repeater::Result, String?, String?}),
                                   record_store : Store?, record_ref : String?, sent_at : Int64,
-                                  sent_digest : String) : Nil
+                                  sent_digest : String, live : Repeater::LiveBody) : Nil
       started = Time.instant
+      cancel = -> { live.stopped? }
       spawn(name: "gori-repeater") do
         # The bytes the socket gets, taken ONCE and sent as-is. `view.request_bytes` is the
         # assembled DRAFT; this is the message, with the send seam's passes applied (the
@@ -2277,7 +2312,7 @@ module Gori::Tui
         sent_wire = Bytes.empty
         # The project budget's slot before the wire pass (#1601), so a wait for the rate cannot
         # age a `$GEN` mint. Its refusal never left gori, so it records no History row.
-        budget_refusal = plan.admit
+        budget_refusal = plan.admit(cancel)
         result = begin
           if budget_refusal
             Repeater::Engine.error(budget_refusal, started)
@@ -2291,7 +2326,7 @@ module Gori::Tui
             # re-encodes this text as an HPACK field list that never carried the missing line.
             # See `CLI::Run.unterminated_head?`. #1075.
             view.sent_head_unterminated = !plan.http2? && !Env.head_terminated?(sent_wire)
-            plan.send_wire(sent_wire, admitted: true)
+            plan.send_wire(sent_wire, cancel, admitted: true)
           end
         rescue ex
           # `Repeater::Engine.send` rescues its own transport failures, so anything escaping
@@ -3025,7 +3060,8 @@ module Gori::Tui
     # rather than expanding a second time.
     # `literals` overrides the view's own literal set for a multi-tab plan (`collect_race_members`).
     private def repeater_plan(view : RepeaterView, requests : Array(Bytes), *,
-                              http2 : Bool = false, literals : Set(String)? = nil) : Repeater::Plan?
+                              http2 : Bool = false, literals : Set(String)? = nil,
+                              sse : Repeater::StreamBound? = nil) : Repeater::Plan?
       # `evidence:` is NOT the same knob as `expand_request: false`, which is why passing
       # only the latter left this tab substituting into a capture. `expand_request` says
       # "these bytes are already final"; the view had already run `Env.expand_wire` over
@@ -3050,7 +3086,7 @@ module Gori::Tui
         # The session's LIVE instance, not a fresh `HostOverrides.load` — the proxy reads
         # this one and the Project tab's HOST OVERRIDES pane edits it under a Mutex, so a
         # copy taken here would miss every edit made after the tab opened (#367).
-        overrides: @host.session.host_overrides), outbound)
+        overrides: @host.session.host_overrides, sse: sse), outbound)
     rescue ex : Repeater::PlanError
       @host.status(case ex.reason
       in Repeater::PlanError::Reason::NoRequest

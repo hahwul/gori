@@ -4415,9 +4415,8 @@ module Gori::Tui
         # Derived view: content-decode + split into SSE events at render time — no
         # table, like the gRPC framing pane (shared with `gori run show` / MCP).
         events = Sse.from_response(detail.response_head, detail.response_body)
-        dropped = {events.size - DETAIL_LOG_CAP, 0}.max # older events not shown (windowed)
-        shown = dropped > 0 ? events[dropped..] : events
-        head = log_head(sse_lines(shown, dropped), events.size, shown.size, "events")
+        lines, shown = Sse.latest_lines(events, DETAIL_LOG_CAP) # older events not shown (windowed)
+        head = log_head(lines, events.size, shown, "events")
         return DetailView.new(head, EMPTY_BODY, :text, EMPTY_LINES)
       end
       # Decoded-protocol panes (SAML/JWT/GRAPHQL/PARAMS) — derived projections styled
@@ -4774,32 +4773,6 @@ module Gori::Tui
         end
       end
     end
-
-    # Renders parsed SSE events: a header line per event (type/id/retry when set)
-    # then its data, indented. The whole stream is server→client, so no arrows.
-    # `base` is the count of older events the window dropped, so the visible numbers
-    # stay continuous with the "showing latest N of M" note (no restart at #1).
-    private def sse_lines(events : Array(Sse::Event), base : Int32 = 0) : Array(String)
-      return ["(no events)"] if events.empty?
-      lines = [] of String
-      events.each_with_index do |e, i|
-        meta = String.build do |io|
-          io << "▸ event ##{base + i + 1}"
-          io << "  type=" << e.type if e.type
-          io << "  id=" << e.id if e.id
-          io << "  retry=" << e.retry if e.retry
-        end
-        lines << meta
-        # Cap a single event's data lines so one pathological multi-MB event can't
-        # materialise a giant row array (the event COUNT is windowed separately).
-        dls = e.data.split('\n')
-        dls.first(EVENT_DATA_LINE_CAP).each { |dl| lines << "    #{dl}" }
-        lines << "    … (#{dls.size - EVENT_DATA_LINE_CAP} more lines)" if dls.size > EVENT_DATA_LINE_CAP
-      end
-      lines
-    end
-
-    EVENT_DATA_LINE_CAP = 1000 # max rendered data lines per SSE event
 
     # --- decoded-protocol panes (SAML / JWT / GRAPHQL / PARAMS) --------------
 

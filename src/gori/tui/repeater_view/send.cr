@@ -14,7 +14,7 @@ class Gori::Tui::RepeaterView
   def response_parts : {String, String}?
     return nil if @grpc_mode
     return nil if ws_mode? && !resp_handshake_active?
-    res = @result
+    res = shown_result
     return nil unless res
     {String.new(res.head), (b = res.body) ? String.new(b) : ""}
   end
@@ -24,7 +24,7 @@ class Gori::Tui::RepeaterView
   # lands (a response head is required), or in WS/gRPC mode where the active rules don't apply.
   def last_http_response : {Bytes, Bytes?}?
     return nil if ws_mode? || @grpc_mode
-    res = @result
+    res = shown_result
     return nil unless res
     return nil if res.head.empty?
     {res.head, res.body}
@@ -43,7 +43,7 @@ class Gori::Tui::RepeaterView
   # statement about SENDING, not about reading: fall back to the response half alone rather
   # than withholding the whole slot.
   def comparer_slot : ComparerSlot?
-    res = @result
+    res = shown_result
     return nil unless res
     req = begin
       request_bytes
@@ -450,6 +450,7 @@ class Gori::Tui::RepeaterView
     # back to the captured original (when loaded from History).
     @prev_result = @result
     @result = result
+    live_end
     @group_results = nil # a single ^R send takes the pane back from a group transcript
     # The rpc path this result belongs to, frozen at send time so the gRPC transcript's `.proto`
     # lens describes the response it is drawing rather than whatever the editor says later (#823).

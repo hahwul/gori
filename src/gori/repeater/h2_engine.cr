@@ -1110,7 +1110,7 @@ module Gori
               status, final_seen, trailers, late_interim, trailer_pseudo =
                 merge_block(header_buf, decoder, headers, status, final_seen, trailers,
                   late_interim, trailer_pseudo, end_stream_pending)
-              run ||= start_bound(sse, headers, cancel) if final_seen
+              run ||= start_bound(sse, status, headers, cancel) if final_seen
               done = clean_eos = true if end_stream_pending
             end
           when Frame::Type::Continuation
@@ -1122,7 +1122,7 @@ module Gori
               status, final_seen, trailers, late_interim, trailer_pseudo =
                 merge_block(header_buf, decoder, headers, status, final_seen, trailers,
                   late_interim, trailer_pseudo, end_stream_pending)
-              run ||= start_bound(sse, headers, cancel) if final_seen
+              run ||= start_bound(sse, status, headers, cancel) if final_seen
               done = clean_eos = true if end_stream_pending
             end
           when Frame::Type::Data
@@ -1181,10 +1181,12 @@ module Gori
       end
 
       # The bound for this stream, read off the final head's fields (h2 names are lowercase).
-      private def self.start_bound(sse : StreamBound?, headers : Array({String, String}),
+      # The head a live sink opens on is the one `synth_head` will give the Result.
+      private def self.start_bound(sse : StreamBound?, status : Int32, headers : Array({String, String}),
                                    cancel : Proc(Bool)?) : StreamRun?
         return nil unless sse && Sse.sse?(headers.find { |(n, _)| n == "content-type" }.try(&.[1]))
-        sse.start(headers.find { |(n, _)| n == "content-encoding" }.try(&.[1]), false, cancel)
+        head = sse.live ? HeadCodec.synth_response([{":status", status.to_s}] + headers, nil) : Bytes.empty
+        sse.start(headers.find { |(n, _)| n == "content-encoding" }.try(&.[1]), false, cancel, head)
       end
 
       # Fold one COMPLETED header block into the response being assembled, and decide what the

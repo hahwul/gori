@@ -1,5 +1,6 @@
 require "../sse"
 require "../proxy/socket_tuning"
+require "./live_body"
 
 module Gori
   module Repeater
@@ -11,7 +12,11 @@ module Gori
     # exactly as before. A bounded stop is a SUCCESS with the events read so far as the body,
     # reported through `Result#bounded`; the stream's socket is not reused (`incomplete?`).
     # nil on either axis leaves that axis unbounded.
-    record StreamBound, max_events : Int32? = nil, max_time : Time::Span? = nil do
+    #
+    # `live` is the TUI's sink: the stream's bytes as they arrive, for a view that renders the
+    # events before the send returns. The TUI passes a bound with no axis and a sink, so its
+    # Stop (the send's cancel) keeps the events read so far.
+    record StreamBound, max_events : Int32? = nil, max_time : Time::Span? = nil, live : LiveBody? = nil do
       # The Fuzzer's and the Miner's default: one payload must not wait out an open stream.
       SWEEP = new(50, 5.seconds)
       # MCP `send_request` and `gori run repeater`: one send, so a longer look.
@@ -28,10 +33,12 @@ module Gori
       # The bounded read of a response the caller has already found to be an event stream
       # (`Sse.sse?` on its Content-Type, checked first because every swept response asks).
       # `encoding` is the response's Content-Encoding: the events of a compressed stream can't
-      # be counted as they arrive, so only the time axis applies to one.
-      def start(encoding : String?, chunked : Bool, cancel : Proc(Bool)? = nil) : StreamRun
+      # be counted as they arrive, so only the time axis applies to one. `head` opens `live`.
+      def start(encoding : String?, chunked : Bool, cancel : Proc(Bool)? = nil,
+                head : Bytes = Bytes.empty) : StreamRun
         countable = encoding.nil? || encoding.strip.empty? || encoding.strip.compare("identity", case_insensitive: true) == 0
-        StreamRun.new(countable ? max_events : nil, max_time, chunked, cancel)
+        live.try(&.open(head))
+        StreamRun.new(countable ? max_events : nil, max_time, chunked, cancel, live)
       end
     end
 
@@ -51,7 +58,7 @@ module Gori
       @chunk_ext = false
 
       def initialize(@max_events : Int32?, max_time : Time::Span?, @chunked : Bool,
-                     @cancel : Proc(Bool)? = nil)
+                     @cancel : Proc(Bool)? = nil, @live : LiveBody? = nil)
         @counter = Sse::Counter.new if @max_events
         @deadline = max_time.try { |t| Time.instant + t }
       end
@@ -77,8 +84,15 @@ module Gori
       end
 
       # Counts the wire bytes just read and returns how many of them the capture keeps: all of
-      # them, or only those up to the end of the `max_events`th event.
+      # them, or only those up to the end of the `max_events`th event. The kept ones go to
+      # `live` too.
       def take(bytes : Bytes) : Int32
+        n = keep(bytes)
+        @live.try(&.append(bytes[0, n]))
+        n
+      end
+
+      private def keep(bytes : Bytes) : Int32
         counter = @counter
         limit = @max_events
         return bytes.size unless counter && limit && !stopped?

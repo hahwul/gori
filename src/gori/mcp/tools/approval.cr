@@ -27,8 +27,11 @@ module Gori
       # asks per call, so a tool missing here still asks, only without a host to grant.
       # `discover_start` is per call on purpose: a crawl reaches more than its seed, and its
       # plan reads a waiver off `Outbound#reason`, which a held waiver does not set.
+      # `ws_session_open` dials and comes back through `scope_blocked`, so its grant names the
+      # host like `send_websocket`. `ws_session_send` is NOT here: it rides the socket the open
+      # already admitted and runs no scope check, so it asks per call under `send` (if asked).
       HOST_APPROVED_TOOLS = Set{"send_request", "race_requests", "timing_requests", "send_websocket",
-                                "fuzz_start", "mine_start", "sequence_start",
+                                "ws_session_open", "fuzz_start", "mine_start", "sequence_start",
                                 "minimize_repeater", "cache_deception_check", "grpc_reflect"}
 
       # Calls that follow up on something an approval already started, and never ask: the

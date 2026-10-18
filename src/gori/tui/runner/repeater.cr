@@ -31,6 +31,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   forward repeater_send : Nil,
+    repeater_stop : Nil,
     repeater_send_group : Nil,
     repeater_send_race : Nil,
     to: repeater_controller
@@ -181,6 +182,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   forward repeater_read_mode? : Bool, to: repeater_controller
+
+  def repeater_stoppable? : Bool
+    current_tab == :repeater && repeater_controller.stoppable?
+  end
 
   def repeater_split_request? : Bool
     return false unless current_tab == :repeater && (v = repeater_controller.current_view)

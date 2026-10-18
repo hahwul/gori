@@ -175,9 +175,7 @@ class FakeHost
     :none
   end
 
-  def active_tab : Symbol
-    :project
-  end
+  property active_tab : Symbol = :project
 
   def focus : Symbol
     :body
