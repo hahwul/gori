@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- History: `gori run history --count` and MCP `list_history{count_only: true}` report how many flows match the same filters as the listing, without reading the rows (#1648)
 - History shows an SSE stream's events while it is still open, over HTTP/1.1 and HTTP/2: the flow gets its status as soon as the head arrives, and the EVENTS pane, `gori run history show` and MCP `get_flow` read the events captured so far; a stream cut off by a crash or shutdown keeps them. The History row shows `●` and the event count while the stream is open, and each event carries its arrival time relative to the first (`+0.412s` in History and the Repeater, `t_ms` in `gori run history show` and MCP `get_flow`), kept after close (#1631)
 - MCP: a persistent WebSocket session kept open across calls — `ws_session_open` connects a saved repeater, `ws_session_send` sends frames one at a time (with optional heartbeat auto-replies, an Engine.IO flag among them), `get_job{job_id, after}` reads the server's pushes past a cursor, and `stop_job` closes it. Scope-gated like `send_websocket` on every send, HTTP/1.1 only, capped at 8, and closed on shutdown or a project switch (#1630)
 - WebSocket: `gori run intercept inject`, MCP `ws_inject` and History's **Inject frame…** push a frame into a socket the proxy is still relaying, in either direction, on the app's own connection, and the frame is recorded on the flow as injected (`⇢ … [injected]` in the MESSAGES pane, with `●` marking a socket that is still open); HTTP/1.1 sockets with a capturing TUI only (#1630)

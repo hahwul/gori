@@ -220,6 +220,49 @@ describe Gori::MCP::Server do
         mcp_tool_payload(mcp_drive(store, call)[0])["flows"].as_a.should be_empty
       end
     end
+
+    # #1648: a number without the rows, from the same filter the rows come from.
+    it "count_only counts every match past the page cap, through query and lenses, with no rows" do
+      with_store do |store|
+        3.times { |i| mcp_seed_flow(store, "a.test", "GET", "/x#{i}", 500) }
+        mcp_seed_flow(store, "a.test", "GET", "/ok", 200)
+        mcp_seed_flow(store, "b.test", "GET", "/y", 500)
+
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"query":"host:a.test status:500","count_only":true,"limit":1}}})
+        reply = mcp_tool_payload(mcp_drive(store, call)[0])
+        reply["count"].as_i64.should eq(3)
+        reply["limit_ignored"].as_bool.should be_true
+        reply["flows"]?.should be_nil
+
+        all = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_history","arguments":{"count_only":true}}})
+        mcp_tool_payload(mcp_drive(store, all)[0])["count"].as_i64.should eq(5)
+
+        store.add_scope_rule("include", "host", "b.test")
+        scoped = %({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_history","arguments":{"count_only":true,"in_scope":true}}})
+        mcp_tool_payload(mcp_drive(store, scoped)[0])["count"].as_i64.should eq(1)
+      end
+    end
+
+    it "count_only says when in_scope has no rules to apply, and refuses row-shaping arguments" do
+      with_store do |store|
+        id = mcp_seed_flow(store, "a.test", "GET", "/a", 200)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"count_only":true,"in_scope":true}}})
+        reply = mcp_tool_payload(mcp_drive(store, call)[0])
+        reply["count"].as_i64.should eq(0)
+        reply["scope_configured"].as_bool.should be_false
+
+        # A client that fills every declared property sends `columns: []`: that names nothing.
+        empty = %({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_history","arguments":{"count_only":true,"columns":[]}}})
+        mcp_tool_payload(mcp_drive(store, empty)[0])["count"].as_i64.should eq(1)
+
+        [%("ids":[#{id}]), %("before_id":#{id + 1}), %("since":0), %("columns":["header:x"])].each do |arg|
+          bad = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_history","arguments":{"count_only":true,#{arg}}}})
+          resp = mcp_drive(store, bad)[0]
+          resp["result"]["isError"].as_bool.should be_true
+          resp["result"]["content"][0]["text"].as_s.should contain("'count_only'")
+        end
+      end
+    end
   end
 
   describe "get_flow" do

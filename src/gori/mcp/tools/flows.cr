@@ -54,6 +54,17 @@ module Gori
           return err("pass only one of 'since' (tail newer, oldest-first) or 'before_id' (page older, newest-first)",
             "INVALID_ARGUMENT", field: "since")
         end
+        # `count_only` answers with a number and no rows (#1648). Everything that shapes ROWS
+        # contradicts it and is refused, not ignored, so the number never silently means
+        # something other than "all flows the filters match". Above the FTS drain, as `ids` is.
+        count_only = bool_arg(h, "count_only", false)
+        if count_only
+          clash = ids ? "ids" : before_id ? "before_id" : since_id ? "since" : describes?(h, "columns") ? "columns" : nil
+          if clash
+            return err("'count_only' counts every flow the filters match and returns no rows, so '#{clash}' " \
+                       "does not apply — drop it", "INVALID_ARGUMENT", field: clash)
+          end
+        end
         # A forward cursor is judged against the highest id this project has EVER issued, not
         # the newest surviving flow. Since V39 an id is never reissued, so a cursor at a deleted
         # newest flow, or one held across a clear, still sees the next capture: refusing it (as
@@ -133,6 +144,7 @@ module Gori
         if fts_error = drain_fts_or_error(filter.uses_fts?)
           return fts_error
         end
+        return emit_history_count(filter, scope_unconfigured, h, dropped) if count_only
         # A named set is not a page: it has no cursor, no `limit` and no `has_more`, and its
         # short answers have to name themselves. Branches here rather than earlier so `query`,
         # `view` and `in_scope` are already compiled — they still narrow WITHIN the set.
@@ -180,6 +192,29 @@ module Gori
             j.field "flows" do
               j.array { rows.each { |r| Serialize.flow_row(j, r, row_columns(r, prepared, include_sensitive, matcher)) } }
             end
+          end
+        end)
+      end
+
+      # The `count_only` path (#1648): the number of flows the compiled filter matches, from the
+      # same filter the row path pages through. `in_scope` with no scope rules is 0, as the row
+      # path is empty, and says why, since a bare 0 reads as "nothing captured".
+      private def emit_history_count(filter : QL::Filter, scope_unconfigured : Bool, h,
+                                     ignored : Array(String)) : Result
+        count =
+          begin
+            scope_unconfigured ? 0_i64 : store.count_matching(filter)
+          rescue ex
+            ::Log.warn { "list_history count failed: #{ex.message}" }
+            return err("could not count the matching flows — see gori.log; retry, or simplify the query",
+              "INTERNAL", field: "query")
+          end
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "count", count
+            j.field "scope_configured", false if scope_unconfigured
+            j.field "limit_ignored", true if present?(h, "limit")
+            emit_ignored_terms(j, ignored)
           end
         end)
       end
@@ -744,6 +779,7 @@ module Gori
           "Pass `ids` to fetch an EXACT set in one call — the rows the operator marked in the " \
           "TUI, which get_current_context hands back as `selection.ids`; it replaces the " \
           "cursors rather than paging. " \
+          "To ask HOW MANY flows match, pass `count_only` instead of paging through them. " \
           "Call ql_reference for full QL syntax." do |s|
           s.field "query", strprop("gori QL filter; empty = most recent")
           s.field "ids", id_list_prop(
@@ -768,6 +804,7 @@ module Gori
           s.field "lenient", boolprop("search a `field:` QL does not implement as literal TEXT instead of refusing the query (default false). A typo like `methd:GET` free-texts its whole token and therefore matches nothing, which is indistinguishable from an empty project — so it is refused by default, the way `gori run history --lenient` spells the same escape hatch. `strict` is the other half and covers dropped terms, not unknown fields")
           s.field "columns", strarrprop("extract a value out of each returned flow and carry it on the row under `columns` — what QL can FILTER on but never shows. Each spec is [LABEL=][req|res:]kind:selector, kind being cookie|header|regex|position|jsonpath: e.g. \"header:x-request-id\", \"req:header:authorization\", \"RID=jsonpath:data.id\", \"regex:token=(\\w+)\", \"position:0:32\". Side defaults to the RESPONSE; a label defaults to the selector. A descriptor that matches nothing yields \"\" — an empty string is a MISS, not an empty value. A header:/cookie: column naming Authorization/Cookie/Set-Cookie/API-key material reads \"[REDACTED]\" unless include_sensitive. Costs one extra read per row (and, for the three body-scoped kinds, up to 512 KiB of body each), so ask only for what you will read")
           s.field "include_sensitive", boolprop("`columns` only: return the value of a column that extracts a sensitive header or a cookie instead of [REDACTED] (default false)")
+          s.field "count_only", boolprop("return {count} — how many flows `query`/`view`/`in_scope`/`hide_static` match — and no rows (default false). The same filter the rows come from, so the count and the pages agree. `ids`, `before_id`, `since` and `columns` are refused beside it; `limit` does not apply")
         end
 
         tool j, "list_events",

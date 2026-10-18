@@ -79,6 +79,14 @@ module Gori
       [] of FlowRow
     end
 
+    # How many flows match `filter`: `search` without the rows, for a caller whose question is a
+    # number (#1648). The same WHERE clause `search` runs, so a count and a page cannot disagree
+    # about what matched. Raises on a failed query rather than degrading like `search`: a 0 that
+    # means "the query did not run" is a wrong answer wearing a right one's clothes.
+    def count_matching(filter : QL::Filter) : Int64
+      @db.scalar("SELECT COUNT(*) FROM flows WHERE #{filter.sql}", args: filter.args).as(Int64)
+    end
+
     # Which of `ids` satisfy `filter` — the id-scoped form of `search`, for a caller that already
     # HAS its rows and needs an answer the row projection cannot give (Colormarker asking
     # `body:`/`header:`/`size:` of a screenful of History rows). Bounded by the caller's window,

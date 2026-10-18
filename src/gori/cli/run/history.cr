@@ -342,6 +342,8 @@ module Gori
         view_name : String? = nil
         column_specs = [] of String
         no_columns = false
+        count_only = false
+        limit_given = false
         redaction = RedactFlags.new
 
         args = normalize_query_flag(args)
@@ -351,7 +353,8 @@ module Gori
                      "Subcommands: history show <id> · history delete <id> · history clear --yes"
           project_options(p, proj, "read")
           p.on("-qQL", "--query=QL", "Filter with a QL query (host: status:>=500 size:>10000 dur:>500 header: body~rx …)") { |v| query = v }
-          p.on("-nN", "--limit=N", "Max rows, newest first (default 50)") { |v| limit = parse_count(v, "--limit") }
+          p.on("-nN", "--limit=N", "Max rows, newest first (default 50)") { |v| limit = parse_count(v, "--limit"); limit_given = true }
+          p.on("--count", "Print how many flows match (the same filters as the listing) instead of listing them") { count_only = true }
           p.on("--view=NAME", "Apply a saved History view — ANDed with -q, like the TUI's `v` picker (see `gori run views`)") { |v| view_name = v }
           p.on("--in-scope", "Only flows in the project's configured scope (the TUI's `s` lens; capture still records everything)") { in_scope = true }
           p.on("--hide-static", "Leave out static assets — images, fonts, media (the TUI's hide-static lens; same as -q -static:true)") { hide_static = true }
@@ -389,6 +392,14 @@ module Gori
         if !column_specs.empty? && no_columns
           abort "gori run history: --column and --no-columns contradict each other — pass one"
         end
+        # `--count` prints a number (#1648); the flags that shape ROWS contradict it. Before the
+        # `--redact` refusal below, which would otherwise send `--count --redact` to `--format har`.
+        if count_only
+          if err = history_count_clash(column_specs, no_columns, format, !redaction.mode.nil?)
+            abort err
+          end
+          STDERR.puts "gori run history: --limit does not apply to --count" if limit_given
+        end
         ad_hoc = DisplayColumns.parse_specs(column_specs)
         abort "gori run history: #{ad_hoc}" if ad_hoc.is_a?(String)
         # A flag that does nothing says so, keyed off the FLAG and not off derived state — the
@@ -401,8 +412,8 @@ module Gori
         # value on the text row too, and the configured set is drawn by default. `--format har`
         # is untouched on purpose (an interchange document has to carry the message in full to
         # be replayable), but that is a paragraph for the docs, not a claim to make here.
-        if include_sensitive && !format.in?(:json, :jsonl)
-          STDERR.puts "gori run history: --include-sensitive only changes --format json/jsonl"
+        if include_sensitive && (count_only || !format.in?(:json, :jsonl))
+          STDERR.puts "gori run history: --include-sensitive only changes a --format json/jsonl listing"
         end
         # Refused rather than ignored. A profile redacts BODIES, and `--format har` is the only
         # listing format that carries one — so `--redact` on the text/json listing would hand
@@ -471,61 +482,70 @@ module Gori
               scope_unconfigured = true
             end
           end
+          # The filter every branch below compiles, and what to call it when it fails to run: the
+          # listing and `--count` read the SAME one, so the number and the rows cannot disagree.
+          # nil with no lens and no query: `recent_flows`, and every flow for the count.
+          combined = nil.as(QL::Filter?)
+          failed = "listing"
+          if scope_unconfigured
+          elsif q = query
+            filter = QL.parse(q, scope: lens)
+            Run.warn_query_terms("history", q)
+            # Two states where a `scope:` query runs CLEAN and lists nothing; an empty listing
+            # cannot say which. Worded once, in `Run`, so the next surface to want them cannot
+            # word them differently.
+            Run.scope_query_notes(q, lens, in_scope).each { |n| STDERR.puts "gori run history: #{n}" }
+            # A query that fails to compile to ANY clause (e.g. `status:>=foo`)
+            # yields the match-all EMPTY filter — silently dumping every flow,
+            # the opposite of what the user asked. Refuse it instead.
+            if !q.strip.empty? && filter == QL::EMPTY
+              abort_closing(store, "gori run history: query #{q.inspect} did not match any field (check syntax, e.g. status:>=500 host:example.com method:POST)")
+            end
+            # The hide-static lens LAST, after the operator's own terms, the way the TUI and MCP
+            # order it: a cheap `host LIKE` rejects a row before the lens is consulted.
+            combined = QL.and(QL.and(QL.and(scope_filter, view_filter), filter), static_filter)
+            failed = "query #{q.inspect}"
+            # Trigram indexing is off-commit (Store V4), so a `body:`/free-text query run
+            # right after a capture — or against a db a killed process left behind — would
+            # under-report until the backlog drains. A one-shot answer must be exact, so
+            # wait for it here rather than silently returning fewer rows.
+            #
+            # And a drain that did not FINISH is a refusal, not a short listing: see
+            # `fts_backlog_error`. Refused rather than warned, because this listing IS the
+            # answer — a caveat on STDERR is gone the moment the rows are piped to a file.
+            if err = fts_backlog_error(store, combined,
+                 "#{q.inspect} would silently omit them. Nothing was #{count_only ? "counted" : "listed"};")
+              abort_closing(store, "gori run history: #{err}")
+            end
+          elsif in_scope || view_filter != QL::EMPTY || hide_static
+            # `view_filter` belongs in this condition and not only in the AND above: without
+            # it a `--view` with no `-q` and no `--in-scope` falls through to `recent_flows`,
+            # which takes no filter at all — the command would accept the view and list
+            # everything.
+            combined = QL.and(QL.and(scope_filter, view_filter), static_filter)
+            failed = "view #{view_name.inspect}" if view_name
+            # Same drain-or-refuse the query branch runs, for the same reason: a view is free
+            # to use `body:`, and this listing IS the answer.
+            if err = fts_backlog_error(store, combined,
+                 "the #{view_name.inspect} view would silently omit them. Nothing was #{count_only ? "counted" : "listed"};")
+              abort_closing(store, "gori run history: #{err}")
+            end
+          end
+          if count_only
+            emit_history_count(store, scope_unconfigured, combined, failed, format)
+            next
+          end
+          # The rescue covers a query or view that PARSES but SQLite still refuses to run (a
+          # hand-edited settings.json, a peer's write): a raw Crystal backtrace is not an answer
+          # an operator can act on.
           rows =
             if scope_unconfigured
               [] of Store::FlowRow
-            elsif q = query
-              filter = QL.parse(q, scope: lens)
-              Run.warn_query_terms("history", q)
-              # Two states where a `scope:` query runs CLEAN and lists nothing; an empty listing
-              # cannot say which. Worded once, in `Run`, so the next surface to want them cannot
-              # word them differently.
-              Run.scope_query_notes(q, lens, in_scope).each { |n| STDERR.puts "gori run history: #{n}" }
-              # A query that fails to compile to ANY clause (e.g. `status:>=foo`)
-              # yields the match-all EMPTY filter — silently dumping every flow,
-              # the opposite of what the user asked. Refuse it instead.
-              if !q.strip.empty? && filter == QL::EMPTY
-                abort_closing(store, "gori run history: query #{q.inspect} did not match any field (check syntax, e.g. status:>=500 host:example.com method:POST)")
-              end
-              # The hide-static lens LAST, after the operator's own terms, the way the TUI and MCP
-              # order it: a cheap `host LIKE` rejects a row before the lens is consulted.
-              combined = QL.and(QL.and(QL.and(scope_filter, view_filter), filter), static_filter)
-              # Trigram indexing is off-commit (Store V4), so a `body:`/free-text query run
-              # right after a capture — or against a db a killed process left behind — would
-              # under-report until the backlog drains. A one-shot answer must be exact, so
-              # wait for it here rather than silently returning fewer rows.
-              #
-              # And a drain that did not FINISH is a refusal, not a short listing: see
-              # `fts_backlog_error`. Refused rather than warned, because this listing IS the
-              # answer — a caveat on STDERR is gone the moment the rows are piped to a file.
-              if err = fts_backlog_error(store, combined,
-                   "#{q.inspect} would silently omit them. Nothing was listed;")
-                abort_closing(store, "gori run history: #{err}")
-              end
+            elsif c = combined
               begin
-                store.search(combined, limit_probe(limit), raise_on_error: true)
+                store.search(c, limit_probe(limit), raise_on_error: true)
               rescue ex
-                abort_closing(store, "gori run history: query #{q.inspect} failed: #{ex.message}")
-              end
-            elsif in_scope || view_filter != QL::EMPTY || hide_static
-              # `view_filter` belongs in this condition and not only in the AND above: without
-              # it a `--view` with no `-q` and no `--in-scope` falls through to `recent_flows`,
-              # which takes no filter at all — the command would accept the view and list
-              # everything.
-              combined = QL.and(QL.and(scope_filter, view_filter), static_filter)
-              # Same drain-or-refuse the query branch runs, for the same reason: a view is free
-              # to use `body:`, and this listing IS the answer.
-              if err = fts_backlog_error(store, combined,
-                   "the #{view_name.inspect} view would silently omit them. Nothing was listed;")
-                abort_closing(store, "gori run history: #{err}")
-              end
-              # Same rescue the query branch has: a view can hold a regex or an OR chain that
-              # PARSES but SQLite still refuses to run (hand-edited settings.json, a peer's
-              # write), and a raw Crystal backtrace is not an answer an operator can act on.
-              begin
-                store.search(combined, limit_probe(limit), raise_on_error: true)
-              rescue ex
-                abort_closing(store, "gori run history: #{view_name ? "view #{view_name.inspect}" : "listing"} failed: #{ex.message}")
+                abort_closing(store, "gori run history: #{failed} failed: #{ex.message}")
               end
             else
               store.recent_flows(limit_probe(limit))
@@ -611,6 +631,37 @@ module Gori
             rows.each { |r| puts CLI::Output.flow_row_text(r, row_columns(store, r, prepared, include_sensitive: true).try(&.[0])) }
           end
         end
+      end
+
+      # Why `--count` cannot run beside these flags, or nil (#1648). Split out of
+      # `cmd_history_list` because `abort` is not spec-able. Every flag here shapes the ROWS a
+      # listing prints, which a number does not have.
+      def self.history_count_clash(column_specs : Array(String), no_columns : Bool, format : Symbol,
+                                   redact : Bool) : String?
+        clash = if !column_specs.empty?
+                  "--column"
+                elsif no_columns
+                  "--no-columns"
+                elsif format == :har
+                  "--format har"
+                elsif redact
+                  "--redact/--no-redact"
+                end
+        clash && "gori run history: --count prints a number, so #{clash} does not apply — drop it"
+      end
+
+      # `--count` (#1648): the number of flows `combined` matches — every flow when nil — as a bare
+      # number, or `{"count": N}` under --format json/jsonl. `--in-scope` with no rules is 0, as
+      # the listing is empty; the note saying so was already printed.
+      private def self.emit_history_count(store : Store, scope_unconfigured : Bool,
+                                          combined : QL::Filter?, failed : String, format : Symbol) : Nil
+        n =
+          begin
+            scope_unconfigured ? 0_i64 : store.count_matching(combined || QL::EMPTY)
+          rescue ex
+            abort_closing(store, "gori run history: #{failed} failed: #{ex.message}")
+          end
+        puts format.in?(:json, :jsonl) ? {count: n}.to_json : n
       end
 
       # One row's user-column values as `{label, value}` pairs plus whether any value was

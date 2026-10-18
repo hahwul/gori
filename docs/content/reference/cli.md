@@ -281,7 +281,8 @@ gori run history -q 'status:5xx' --limit 100 --format json
 | -------- | ------------- |
 | `-q`, `--query=QL` | Query-language filter (also accepted positionally) |
 | `-n`, `--limit=N` | Max rows (default 50) |
-| `--view=NAME` | Apply a saved [view](#run-views). Its query is **ANDed with** `-q`, never replacing it, exactly as the TUI's `v` picker layers over the filter bar. An unknown name is refused (and names the ones that exist) rather than ignored. Listing only |
+| `--count` | Print how many flows match instead of listing them: a bare number, or `{"count": N}` under `--format json`/`jsonl`. Same filters as the listing (`-q`, `--view`, `--in-scope`, `--hide-static`), so the number and the rows agree; `--column`, `--no-columns`, `--format har` and `--redact` are refused beside it, and `-n` does not apply |
+| `--view=NAME` | Apply a saved [view](#run-views). Its query is **ANDed with** `-q`, never replacing it, exactly as the TUI's `v` picker layers over the filter bar. An unknown name is refused (and names the ones that exist) rather than ignored. Listing and `--count` only |
 | `--in-scope` | Only flows in the project's configured scope: the TUI's `s` lens, opt-in and independent of whether that lens is enabled. Capture still records everything; empty when no scope rules exist |
 | `--hide-static` | Leave out images, fonts and audio/video: the TUI's [hide-static lens](/guide/proxy/#hide-static), the same as `-q -static:true`, and independent of whether that lens is on |
 | `--lenient` | Don't refuse a query naming an unknown field; search that token as text |

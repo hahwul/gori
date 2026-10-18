@@ -1649,3 +1649,22 @@ describe "gori run show --original" do
     end
   end
 end
+
+# #1648: `--count` prints a number, so every flag that shapes the listing's ROWS is refused
+# beside it — `--redact` included, or it would send the operator to `--format har`, which is
+# refused here too.
+describe "gori run history --count — the clashes" do
+  it "runs beside the filters and refuses each row-shaping flag by name" do
+    Gori::CLI::Run.history_count_clash([] of String, false, :text, false).should be_nil
+    Gori::CLI::Run.history_count_clash([] of String, false, :json, false).should be_nil
+    {
+      {["header:x"], false, :text, false, "--column"},
+      {[] of String, true, :text, false, "--no-columns"},
+      {[] of String, false, :har, false, "--format har"},
+      {[] of String, false, :text, true, "--redact/--no-redact"},
+    }.each do |cols, no_cols, fmt, redact, flag|
+      msg = Gori::CLI::Run.history_count_clash(cols, no_cols, fmt, redact).not_nil!
+      msg.should contain("--count prints a number, so #{flag} does not apply")
+    end
+  end
+end
