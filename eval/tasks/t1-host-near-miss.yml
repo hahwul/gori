@@ -1,0 +1,7 @@
+fixture: events
+tier: 1
+grade: set
+prompt: |
+  Which captured flows went to the host admin.shop.test exactly (not a
+  subdomain of it, not a different host containing it)? Answer with the flow
+  ids; an empty array if there are none.

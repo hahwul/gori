@@ -1,0 +1,6 @@
+fixture: events
+tier: 1
+grade: exact
+prompt: |
+  How many captured flows were POSTs to a path under /v1/events/ on
+  telemetry.shop.test? Answer with the exact number.

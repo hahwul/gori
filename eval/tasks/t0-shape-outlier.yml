@@ -1,0 +1,7 @@
+fixture: events
+tier: 0
+grade: set
+prompt: |
+  The responses to GET https://api.shop.test/api/v1/profile normally share one
+  JSON shape. Which of them has a different shape (extra fields)? Answer with
+  the flow ids.

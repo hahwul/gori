@@ -15,3 +15,4 @@
 # siblings (a second cache for a parallel build, e.g. `.crystal-cache-bench/`).
 .crystal-cache/
 .crystal-cache-*/
+/eval/out/

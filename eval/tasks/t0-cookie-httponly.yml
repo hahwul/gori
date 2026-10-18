@@ -1,0 +1,6 @@
+fixture: shop
+tier: 0
+grade: set
+prompt: |
+  In this capture, which flows have a response that sets at least one cookie
+  WITHOUT the HttpOnly attribute? Answer with their flow ids.

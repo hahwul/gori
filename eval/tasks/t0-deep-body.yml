@@ -1,0 +1,6 @@
+fixture: shop
+tier: 0
+grade: exact
+prompt: |
+  What is the value of the "build_id" field in the response to
+  GET https://api.shop.test/api/v1/config? Answer with the string.

@@ -246,6 +246,16 @@ scripts-check:
 seed-demo:
     crystal run scripts/seed_demo.cr
 
+# Build the agent-eval fixture databases and answer keys (eval/out/fixtures/).
+[group('eval')]
+eval-fixtures:
+    GORI_HOME="$(mktemp -d)" crystal run eval/fixtures.cr
+
+# Run the agent eval: `claude -p` + gori MCP per catalogue profile (see eval/README.md).
+[group('eval')]
+eval *ARGS: build
+    crystal run eval/run.cr -- {{ARGS}}
+
 # Local mock GitHub releases server for testing `gori update` download progress.
 # In another terminal:
 #   GORI_UPDATE_API_URL=http://127.0.0.1:8765/repos/hahwul/gori/releases/latest ./bin/gori update

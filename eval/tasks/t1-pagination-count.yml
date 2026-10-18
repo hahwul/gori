@@ -1,0 +1,6 @@
+fixture: shop
+tier: 1
+grade: exact
+prompt: |
+  How many captured flows requested a path under /api/v1/orders/ ?
+  Answer with the number.
