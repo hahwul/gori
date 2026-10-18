@@ -213,6 +213,85 @@ describe "RepeaterController WebSocket live session (#1630)" do
     end
   end
 
+  it "closes every live session on a project-level exit (stop_all)" do
+    origin = echo_origin
+    begin
+      with_ws_controller do |ctl, _host|
+        v = open_ws_tab(ctl, origin.port, ["x"])
+        connect!(ctl, v)
+        s = v.ws_session.not_nil!
+
+        ctl.stop_all
+        wait_until { s.closed? }.should be_true
+        v.ws_session.should be_nil # the reference is dropped — the tab is being torn down
+      end
+    ensure
+      origin.close
+    end
+  end
+
+  it "goes back to the scripted send after a live session (keeps nothing stale)" do
+    origin = echo_origin
+    begin
+      with_ws_controller do |ctl, _host|
+        v = open_ws_tab(ctl, origin.port, ["hello"])
+        connect!(ctl, v)
+        ctl.repeater_ws_send_cursor
+        wait_until { ctl.drain_results; origin.client_text == ["hello"] }.should be_true
+
+        ctl.repeater_toggle_ws_session # o OFF → disconnect
+        v.ws_keep_open?.should be_false
+        wait_until { v.ws_session.not_nil!.closed? }.should be_true
+
+        # ^R now takes the scripted one-shot path, which clears the stale live session (so the
+        # scripted transcript is what shows) and re-dials → origin.accepts == 2.
+        ctl.repeater_send
+        wait_until(5.seconds) { ctl.drain_results; origin.accepts == 2 && !v.ws_session_active? }.should be_true
+        v.ws_session.should be_nil
+      end
+    ensure
+      origin.close
+    end
+  end
+
+  it "closes the live session when the transport is switched off WebSocket (^V)" do
+    origin = echo_origin
+    begin
+      with_ws_controller do |ctl, _host|
+        v = open_ws_tab(ctl, origin.port, ["x"])
+        connect!(ctl, v)
+        s = v.ws_session.not_nil!
+
+        ctl.repeater_toggle_http2 # ^V: WS → HTTP/1.1, leaves WS mode
+        v.ws_mode?.should be_false
+        v.ws_keep_open?.should be_false # disarmed, so the tick stops overwriting the status
+        wait_until { s.closed? }.should be_true
+      end
+    ensure
+      origin.close
+    end
+  end
+
+  it "does not install a session when keep-open is turned off mid-connect" do
+    origin = echo_origin
+    begin
+      with_ws_controller do |ctl, _host|
+        v = open_ws_tab(ctl, origin.port, ["x"])
+        ctl.repeater_toggle_ws_session # arm keep-open
+        ctl.repeater_send              # ^R → spawn the connect
+        v.toggle_ws_keep_open          # turn it OFF before the drain installs the session
+        v.ws_keep_open?.should be_false
+
+        # The dial completes, the drain sees keep-open off and closes it instead of installing.
+        wait_until(5.seconds) { ctl.drain_results; !v.inflight? }.should be_true
+        v.ws_session.should be_nil
+        v.ws_connected?.should be_false
+      end
+    ensure
+      origin.close
+    end
+  end
+
   it "renders only on the active tab and throttles the live tick" do
     origin = echo_origin
     begin

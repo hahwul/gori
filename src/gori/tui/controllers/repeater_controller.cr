@@ -92,7 +92,7 @@ module Gori::Tui
       # A persistent WS session's connect runs off the UI fiber (the dial blocks), and hands
       # back the opened session + handshake here (#1630). One tab connects at a time; the
       # small buffer just avoids a parked connect fiber if the drain is a tick behind.
-      @ws_open_results = Channel({RepeaterView, Repeater::WsSession::Opened}).new(4)
+      @ws_open_results = Channel({RepeaterView, Repeater::WsSession::Opened, Array(Bool)}).new(4)
       # "Send group" pipelines several requests on one connection and delivers the
       # labelled per-request results here (distinct type again — an ordered array).
       @group_results = Channel({RepeaterView, Array({String, Repeater::Result})}).new(8)
@@ -106,6 +106,10 @@ module Gori::Tui
       @minimize_events = Channel({RepeaterView, Repeater::Minimize::Progress | Repeater::Minimize::Report}).new(256)
       # {view, Jobs id, start-of-run request snapshot} of a running minimize. The snapshot
       # guards the writeback: if the user edited the request mid-run we must not overwrite it.
+      # One 1-element `[cancelled]` cell per in-flight WS connect (#1630): the connect fiber
+      # reads it as its dial cancel, and a project-level exit flips them so a dial completing
+      # after the leave closes its own socket. The drain drops a cell once its connect lands.
+      @ws_connect_flags = [] of Array(Bool)
       @minimize_job = nil.as({RepeaterView, Int32, String}?)
       # The running minimize's cancel token, held beside @minimize_job rather than inside it so
       # the tuple keeps meaning exactly what its comment says. Set together with @minimize_job,
@@ -865,6 +869,13 @@ module Gori::Tui
       if view.grpc_mode?
         @host.status("transport is fixed for gRPC flows (h2 by specification)")
       elsif view.ws_content?
+        # A transport flip can leave WS mode (WS → HTTP/1.1 / h2), after which a live session's
+        # socket no longer matches the tab and the Live session toggle can no longer reach it
+        # (#1630). Close it and disarm keep-open so the status stops being overwritten.
+        if view.ws_connected?
+          view.toggle_ws_keep_open if view.ws_keep_open?
+          ws_session_disconnect(view)
+        end
         @host.status(view.cycle_ws_transport)
       else
         h2 = view.toggle_http2
@@ -1575,18 +1586,31 @@ module Gori::Tui
         applied = true
       end
       while pair = poll(@ws_open_results)
-        view, opened = pair
-        next unless @repeaters.find(&.view.same?(view)) # sub-tab closed mid-connect
+        view, opened, flag = pair
+        @ws_connect_flags.delete(flag) # this connect is done; stop tracking its cancel flag
+        applied = true
+        # The sub-tab was closed mid-connect: close the socket we opened rather than leak it.
+        unless @repeaters.find(&.view.same?(view))
+          opened.session.try { |s| spawn(name: "gori-ws-close") { s.close rescue nil } }
+          next
+        end
         view.inflight = false
         if session = opened.session
-          view.begin_ws_session(session, opened.result)
-          ws_emit_live_status(view)
+          if view.ws_keep_open?
+            view.begin_ws_session(session, opened.result)
+            ws_emit_live_status(view)
+          else
+            # Keep-open was turned off while the dial was in flight (#1630): don't install it.
+            # `sess` (not `session`) goes into the closure so `session` stays narrowed above.
+            sess = session
+            spawn(name: "gori-ws-close") { sess.close rescue nil }
+            @host.status("connected, but the live session was turned off — disconnected")
+          end
         else
           # The handshake failed or the gate refused it — show it like a scripted WS error.
           view.apply_ws(opened.result)
           @host.status("ws session: #{opened.result.error}#{result_origin(view)}", :error)
         end
-        applied = true
       end
       while pair = poll(@group_results)
         view, labeled = pair
@@ -2135,6 +2159,13 @@ module Gori::Tui
       # Close every live WebSocket session on a project-level exit (#1630). `close` blocks, so
       # spawn each — the Runner is unwinding and must not stall on a CLOSE grace.
       @repeaters.each { |t| close_live_ws(t.view) }
+      # Abort every in-flight connect: a still-dialing one returns a refusal, and one that
+      # completes after this closes its own socket (it reads the flag). Then drain any opened
+      # session already sitting in the channel the leaving drain will not consume.
+      @ws_connect_flags.each { |f| f[0] = true }
+      while pair = poll(@ws_open_results)
+        pair[1].session.try { |s| spawn(name: "gori-ws-close") { s.close rescue nil } }
+      end
       return unless mj = @minimize_job
       @minimize_stop.try(&.stop)
       @host.jobs.finish(mj[1], :stopped, "project closed")
@@ -2521,16 +2552,20 @@ module Gori::Tui
     # an open socket (spawned close) and `^R` goes back to the scripted one-shot send.
     def repeater_toggle_ws_session : Nil
       return unless (tab = current_repeater_tab) && (view = tab.view).loaded?
+      # Disconnect is always reachable while a socket is open, even after a `^V` transport flip
+      # left WS mode (#1630): close it and disarm keep-open.
+      if view.ws_connected?
+        view.toggle_ws_keep_open if view.ws_keep_open? && view.ws_mode?
+        ws_session_disconnect(view)
+        return
+      end
       unless view.ws_mode?
         @host.status("a live session is for WebSocket tabs — switch transport to WebSocket first")
         return
       end
-      on = view.toggle_ws_keep_open
-      if on
+      if view.toggle_ws_keep_open
         @host.status(Hotkeys.expand_menu_paths(@host.session.registry,
           "live session on — {space:repeater.send} connects and keeps the socket open; toggle off to disconnect"), :done)
-      elsif view.ws_connected?
-        ws_session_disconnect(view)
       else
         @host.status("live session off — ^R sends the scripted one-shot again")
       end
@@ -2563,18 +2598,28 @@ module Gori::Tui
       auto_replies = view.ws_auto_replies
       results = @ws_open_results
       view.inflight = true
+      # The dial's cancel cell, captured by the fiber and tracked so a project-level exit can
+      # flip it (#1630). The fiber reads it as a local, never a controller ivar.
+      flag = [false]
+      @ws_connect_flags << flag
       @host.status("connecting → #{plan.host}:#{plan.port} (#{view.ws_heartbeat? ? "Engine.IO heartbeat on" : "no heartbeat"})…#{unrecorded_note("WebSocket")}", :busy)
       spawn(name: "gori-ws-connect") do
         # The per-send Layer-2 re-check the session runs before every operator frame (#1630),
         # wired exactly as MCP's `ws_session_open` does it: `plan.refusal` is `Outbound#send_block`
         # (Sandbox + its throttled scope reload), with no budget side effect, so an already-open
-        # socket honours a Sandbox or exclude the operator adds mid-session.
-        opened = plan.open_ws(keep_key, auto_replies, nil, gate: -> { plan.refusal })
+        # socket honours a Sandbox or exclude the operator adds mid-session. `cancel` bounds the
+        # dial and lets a project exit abort it.
+        opened = plan.open_ws(keep_key, auto_replies, -> { flag[0] }, gate: -> { plan.refusal })
+        # The exit flipped the cell after the dial finished: close the socket here rather than
+        # hand back a session nothing will drain.
+        if flag[0]
+          opened.session.try { |s| s.close rescue nil }
+          next
+        end
         select
-        when results.send({view, opened})
+        when results.send({view, opened, flag})
         else
-          # The drain never took it (the tab was closed mid-connect): close what we opened and
-          # let the flag go, so a reopened tab is not wedged.
+          # The buffer was full (the drain is far behind): close what we opened, so it does not leak.
           opened.session.try { |s| spawn(name: "gori-ws-orphan-close") { s.close rescue nil } }
           view.inflight = false
         end
@@ -2657,8 +2702,11 @@ module Gori::Tui
       tab.view.mark_ws_sent(idx)
       @host.status("sending on the socket (binary #{decoded.size}b)…", :busy)
       spawn(name: "gori-ws-send") do
+        # A refused send ENDS the session inside `WsSession#send`; the live tick then draws the
+        # close reason, so this fiber touches neither host nor view (the rule at #apply_refusal)
+        # — it only logs for a trace.
         if reason = s.send(Repeater::WsEngine::OutMsg.new(Proxy::WS::OP_BIN.to_i, decoded))
-          @host.status("ws send refused: #{reason}", :error)
+          ::Log.info { "ws binary send refused: #{reason}" }
         end
       rescue ex
         ::Log.error(exception: ex) { "ws binary send fiber died" }
@@ -2680,9 +2728,12 @@ module Gori::Tui
       texts = lines.map(&.[1])
       @host.status(texts.size == 1 ? "sending on the socket…" : "sending #{texts.size} lines on the socket…", :busy)
       spawn(name: "gori-ws-send") do
+        # A refused send ENDS the session inside `WsSession#send`; the live tick then draws the
+        # close reason, so this fiber touches neither host nor view (the rule at #apply_refusal)
+        # — it only logs for a trace.
         texts.each do |text|
           if reason = s.send(Repeater::WsEngine::OutMsg.new(Proxy::WS::OP_TEXT.to_i, text.to_slice))
-            @host.status("ws send refused: #{reason}", :error)
+            ::Log.info { "ws text send refused: #{reason}" }
             break
           end
         end
@@ -2697,20 +2748,22 @@ module Gori::Tui
       !!current_view.try(&.ws_connected?)
     end
 
-    # The LIVE status bar (#1630): state · URL · ↑sent ↓recv · duration · the live-key hints,
-    # the Protocol toggles through `{space:…}` tokens (never literal letters, the R1 rule). `↵`
-    # is a fixed key, spelled as its glyph. Refreshed on connect and on every live tick.
+    # The LIVE status bar (#1630): a `LIVE` chip · URL · ↑sent ↓recv · duration · the live-key
+    # hints. The Protocol toggles read as chips (`␣Po`, `␣Pb`) via `Hotkeys.menu_chip`, the
+    # tight-hint spelling AGENTS.md requires — never a literal letter. `↵` is a fixed key, its
+    # glyph. Refreshed on connect and on every live tick.
     private def ws_emit_live_status(view : RepeaterView) : Nil
       s = view.ws_session || return
       out, recv = view.ws_counts
-      dropped = s.dropped > 0 ? " · +#{s.dropped} dropped" : ""
       if reason = s.close_reason
         @host.status("closed#{s.close_code.try { |c| " #{c}" }} · #{reason} · ↑#{out} ↓#{recv}", :error)
         return
       end
-      @host.status(Hotkeys.expand_menu_paths(@host.session.registry,
-        "LIVE #{view.target} · ↑#{out} ↓#{recv} · open #{view.ws_open_duration_label}#{dropped} · " \
-        "⏎ send line · {space:repeater.toggle-ws-session} disconnect · {space:repeater.toggle-ws-heartbeat} heartbeat"), :busy)
+      reg = @host.session.registry
+      dropped = s.dropped > 0 ? " · +#{s.dropped} dropped" : ""
+      hints = "⏎ send line · #{Hotkeys.menu_chip(reg, "repeater.toggle-ws-session")} disconnect · " \
+              "#{Hotkeys.menu_chip(reg, "repeater.toggle-ws-heartbeat")} heartbeat"
+      @host.status("LIVE #{view.target} · ↑#{out} ↓#{recv} · open #{view.ws_open_duration_label}#{dropped} · #{hints}", :busy)
     end
 
     # WebSocket repeater: re-do the handshake and fire the editor's messages off the UI
@@ -2718,6 +2771,11 @@ module Gori::Tui
     # back through @ws_results. Mirrors repeater_send's fiber/inflight discipline.
     private def ws_repeater_send(tab : RepeaterTab) : Nil
       view = tab.view
+      # Drop any prior live session (#1630): it may be a closed one still referenced, and
+      # `ws_transcript_lines` prefers the live ring over the scripted result — so without this
+      # the scripted transcript (or a reconnect error) is applied but never shown, and the pane
+      # keeps the old "✗ closed" transcript. Scripted and live are mutually exclusive.
+      view.end_ws_session
       results = @ws_results
       return unless plan = repeater_plan(view, [view.ws_upgrade_bytes])
       if reason = plan.refusal

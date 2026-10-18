@@ -12,8 +12,11 @@ require "../../repeater/ws_session"
 # controller spawns that. Nothing here is written to History, as every Repeater WS send is.
 class Gori::Tui::RepeaterView
   # The fastest the open transcript re-renders, like the SSE live view (#1641): each tick
-  # re-derives the rows from the ring, so this bounds the UI fiber's cost, not the frame rate.
-  WS_LIVE_EVERY = 100.milliseconds
+  # re-derives the rows from the ring (scrub + split), so this bounds the UI fiber's cost, not
+  # the frame rate. The pause grows by one WS_LIVE_EVERY per WS_LIVE_STRETCH of buffered
+  # payload, the same shape `live.cr` uses, so a big transcript re-renders less often.
+  WS_LIVE_EVERY   = 100.milliseconds
+  WS_LIVE_STRETCH = 1024 * 1024
 
   @ws_session : Repeater::WsSession? = nil
   @ws_keep_open = false     # the Protocol… "Live session" toggle: ^R connects and keeps the socket open
@@ -86,13 +89,10 @@ class Gori::Tui::RepeaterView
     @ws_sent_marks[idx]?.try { |t| "✓ #{t}" }
   end
 
-  # `↑sent ↓recv`, counted over the ring (an evicted frame is not counted — the status says
-  # `+N dropped` when that happens, and the transcript shows it).
+  # `↑sent ↓recv`, counted over the ring in one pass by the engine (an evicted frame is not
+  # counted — the status says `+N dropped` when that happens, and the transcript shows it).
   def ws_counts : {Int32, Int32}
-    s = @ws_session || return {0, 0}
-    out = recv = 0
-    s.transcript.each { |e| e.message.direction == "out" ? (out += 1) : (recv += 1) }
-    {out, recv}
+    @ws_session.try(&.counts) || {0, 0}
   end
 
   # How long the socket has been open, for the TRANSCRIPT title (`● open 12s`).
@@ -119,6 +119,7 @@ class Gori::Tui::RepeaterView
     @ws_live_seq = 0_i64
     @ws_live_start = Time.utc
     @ws_live_at = nil
+    @ws_closed_shown = false # a reconnected session that dies before any frame still shows its close
     @ws_sent_marks.clear
     # Seed @result so the HANDSHAKE RESPONSE card renders the 101, the seed `apply_ws` makes.
     @result = Repeater::Result.new(result.handshake_head, Bytes.empty, nil, result.duration_us, result.error)
@@ -139,11 +140,11 @@ class Gori::Tui::RepeaterView
   # session, so this is false for it.
   def ws_live_tick(now : Time::Instant = Time.instant) : Bool
     s = @ws_session || return false
-    latest = s.transcript.last?.try(&.seq) || 0_i64
+    latest = s.last_seq # the newest seq, without copying the ring
     grew = latest > @ws_live_seq
     closing = s.closed? && !@ws_closed_shown
     return false unless grew || closing
-    return false if (at = @ws_live_at) && now - at < WS_LIVE_EVERY
+    return false if (at = @ws_live_at) && now - at < WS_LIVE_EVERY * (1 + s.ring_bytes // WS_LIVE_STRETCH)
     @ws_live_seq = latest
     @ws_live_at = now
     @ws_closed_shown = s.closed?

@@ -498,8 +498,8 @@ module Gori
       # Protocol… member, so its letter comes from the family table and the card shows ●/○. No
       # chord: it is a per-session decision, and connect blocks the dial behind a status line.
       r.register Verb::Definition.new(
-        "repeater.toggle-ws-session", "Live session (connect)",
-        "WebSocket: open a persistent session instead of the scripted one-shot send — connect once, then ^R sends the MESSAGES cursor line on the SAME socket (text) and the server's frames stream into the TRANSCRIPT pane; toggle again to disconnect. Nothing is written to History",
+        "repeater.toggle-ws-session", "Live session (keep open)",
+        "WebSocket: keep one socket open instead of the scripted one-shot send — ^R connects once and holds it, then ↵ sends the MESSAGES cursor line and ^R sends every line in order on the SAME socket, and the server's frames stream into the TRANSCRIPT pane; toggle off to disconnect. Nothing is written to History",
         Verb::Scope::Repeater, available: in_repeater, intent: :ws_session, section: :request) { |ctx| ctx.repeater_toggle_ws_session; nil }
       r.register Verb::Definition.new(
         "repeater.toggle-ws-heartbeat", "Engine.IO heartbeat",
