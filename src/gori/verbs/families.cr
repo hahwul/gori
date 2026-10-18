@@ -71,6 +71,8 @@ module Gori
       {:grpc_reframe, 'r'},
       {:grpc_fields, 'f'},
       {:tls_fingerprint, 't'},
+      {:ws_session, 'o'},   # a persistent WebSocket session: connect/disconnect (#1630)
+      {:ws_heartbeat, 'b'}, # answer Engine.IO 2→3 heartbeats on the open session (#1630)
     ], sticky: true)
 
     # The gate of every strip's Mark sub-tab row (#1274): on its own tab, with a second chip to

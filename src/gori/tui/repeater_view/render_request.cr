@@ -7,7 +7,7 @@ class Gori::Tui::RepeaterView
   private def render_decoded(screen : Screen, rect : Rect, focused : Bool) : Nil
     return if rect.w < 2 || rect.h < 2
     label = if ws_mode?
-              "MESSAGES"
+              ws_connected? ? "MESSAGES  ● LIVE" : "MESSAGES"
             elsif @decode_kind == :saml
               "DECODED · SAML XML"
             else
@@ -43,6 +43,21 @@ class Gori::Tui::RepeaterView
     ins = focused && request_insert?
     @decoded.render(screen, inner, cursor: ins, highlight: nil, peek: focused, gauge: true, gauge_focused: focused)
     paint_request_read_chrome(screen, inner, @decoded, focused && !ins)
+    draw_ws_sent_marks(screen, inner) if ws_connected?
+  end
+
+  # The `✓ ss.mmm` marker at the right edge of each MESSAGES line that was sent this session
+  # (#1630). Drawn over the pane after it renders, keyed to the first visual row of each line
+  # (`@decoded.last_rows`, set by the render above).
+  private def draw_ws_sent_marks(screen : Screen, inner : Rect) : Nil
+    @decoded.last_rows.each_with_index do |vr, i|
+      next unless vr.a == 0 # the line's first visual row carries the mark
+      mark = ws_sent_mark(vr.li) || next
+      y = inner.y + i
+      next unless inner.y <= y < inner.y + inner.h
+      x = inner.x + inner.w - mark.size
+      screen.text(x, y, mark, Theme.green) if x > inner.x
+    end
   end
 
   # The request card's title says WHAT this card is in the pane it sits in. WHICH transport

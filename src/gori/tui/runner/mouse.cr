@@ -301,7 +301,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       return false unless Chrome.status_bar_chip_at(layout.status, mx, my, focus: focus_label,
                             hints: Hotkeys.retag(status_line || key_hints),
                             activity: activity_chip, resource: @resource.label,
-                            time: clock_label, companion: frame) == :companion
+                            time: clock_label, companion: frame, live: ws_live_chip?) == :companion
     else
       # The same gate render_companion uses: under an overlay or a body editor she is not
       # drawn, and a hit rect over a widget the operator can see would be a trap.

@@ -52,6 +52,12 @@ That one-at-a-time order is the point on WebSocket. A socket carries a conversat
 
 The WebSocket Repeater does not negotiate `permessage-deflate`, and the capture proxy disables it by default. A Match & Replace head rule can deliberately restore the extension offer; a session captured that way holds the extension-encoded bytes and cannot be replayed. Re-capture it without that rule (or with compression disabled in the client).
 
+#### A live session {#websocket-live-session}
+
+The scripted replay above re-dials for every message. To keep ONE socket open and talk on it the way Burp's WebSocket Repeater does, turn on **Live session (keep open)** — `Space` → `P` **Protocol…**, then **Live session** (`o`). It is a sticky toggle on the handshake: with it on, `^R` connects once and holds the socket open instead of running the script. The MESSAGES list on the left is the composer — `↵` sends the line under the cursor, and `^R` sends every line in order — and each line it sends is marked `✓ ss.mmm` at its right edge. The right-hand TRANSCRIPT streams both directions as the frames arrive, each row `ss.mmm → …` for what you sent and `← …` for what the server pushed, with `↺` on a heartbeat gori answered for you. The MESSAGES title shows `● LIVE` and the TRANSCRIPT title `● open <duration>` while the socket is up, and the status bar carries the URL, `↑sent ↓recv` and the duration. `Ctrl-P` → **Send WS message as binary (hex)** sends the cursor line as a binary frame, the line read as hex.
+
+Toggle **Live session** off to disconnect (gori sends a `CLOSE` and hangs up), and closing the sub-tab, leaving the project or quitting all close the socket too. **Engine.IO heartbeat** (`Space` → `P`, then `b`) answers the server's Engine.IO ping (`2`) with a pong (`3`) for the duration of the session, so a long-lived socket is not timed out by a missed app-level heartbeat; it is off by default and takes effect at the next connect. The transcript is held in memory only and capped — a long session drops its oldest rows, and the transcript says how many — and, like every Repeater WebSocket send, nothing of it is written to History.
+
 Replay from the command line, optionally against a new target:
 
 ```bash

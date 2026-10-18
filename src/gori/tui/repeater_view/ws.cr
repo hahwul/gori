@@ -400,6 +400,11 @@ class Gori::Tui::RepeaterView
   # is applied). Multi-line payloads are split so each wire line is one row.
   private def ws_transcript_lines : Array({String, Color})
     drop_transcript_cache_on_theme_change
+    # A live session (#1630) renders from its ring, not from `@ws_result`: the scripted
+    # transcript below is a finished exchange, this one is still arriving.
+    if s = @ws_session
+      return @ws_lines_cache ||= ws_live_lines(s)
+    end
     @ws_lines_cache ||= begin
       rows = [] of {String, Color}
       if r = @ws_result

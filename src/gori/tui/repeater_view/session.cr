@@ -400,6 +400,9 @@ class Gori::Tui::RepeaterView
     @target_field = :url
     @auto_content_length = src.@auto_content_length
     @ws_keep_key = src.@ws_keep_key
+    @ws_heartbeat = src.@ws_heartbeat # a connect knob, so the clone opens the session its source would
+    # A clone never inherits the live socket: one session per tab (#1630). `@ws_session`
+    # stays at its `nil` default here, so a duplicate (or re-send) opens a fresh one.
     @tls_preset = src.@tls_preset # a send knob, so the clone sends the handshake its source would
     @name = SubtabClone.copy_name(src.@name)
 

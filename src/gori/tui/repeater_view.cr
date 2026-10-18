@@ -59,6 +59,7 @@ require "./repeater_view/send"
 require "./repeater_view/session"
 require "./repeater_view/target_field"
 require "./repeater_view/ws"
+require "./repeater_view/ws_live"
 require "./subtab_marks"
 require "../plural"
 
