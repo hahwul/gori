@@ -275,7 +275,7 @@ module Gori::Proxy::WS
       # withholding, and it goes second because those bytes arrived after everything queued.
       out_pump.try(&.flush_at_teardown)
       in_pump.try(&.flush_at_teardown)
-      record_teardown(sink, flow_id, observed)
+      record_teardown(sink, flow_id, observed, {out_leg, in_leg}.find(&.killed?))
       client.close rescue nil
       upstream.close rescue nil
       # Every path above consumes exactly one of the two `done` sends before this point
@@ -330,11 +330,19 @@ module Gori::Proxy::WS
     # Only endings observed BEFORE `run` closes the sockets are considered, so gori's own
     # teardown is never reported as a peer's. Best-effort, and on `NOTICE_DIRECTION` for the
     # reason stated there.
+    #
+    # A leg gori `killed` (an injected frame that could not finish writing, #1630) ends a pump
+    # with exactly a peer RESET's shape, so that case says what gori did instead.
     private def self.record_teardown(sink : FlowSink, flow_id : Int64,
-                                     observed : Array(DirectionEnd)) : Nil
-      reset = observed.find(&.ending.reset?) || return
-      note = teardown_sentence(reset)
-      ::Log.info { "ws #{reset.direction}: #{note}" }
+                                     observed : Array(DirectionEnd), killed : Leg?) : Nil
+      if leg = killed
+        note = "gori closed this socket: an injected frame could not finish writing " \
+               "#{Live.side(leg.direction)}"
+      else
+        reset = observed.find(&.ending.reset?) || return
+        note = teardown_sentence(reset)
+      end
+      ::Log.info { "ws: #{note}" }
       sink.on_ws_message(flow_id, NOTICE_DIRECTION, OP_TEXT.to_i,
         "#{NOTICE_PREFIX}#{note}".to_slice)
     rescue

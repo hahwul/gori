@@ -275,7 +275,28 @@ describe Gori::Proxy::WS::Live do
       # writes queue on the same leg and must get through once the inject gives up.
       origin.write(WS.encode(WS::OP_CLOSE, Bytes.empty, mask: false))
       receive_within(result, 5, "the inject to give up").not_nil!.should contain("stopped reading")
-      sink.rows.none?(&.[3]).should be_true
+    end
+    sink.rows.none?(&.[3]).should be_true
+    # gori closed the socket, so the peer is not blamed with a RESET row; gori says it did.
+    sink.rows.none?(&.[2].includes?("RESET")).should be_true
+    sink.rows.map(&.[2]).should contain(
+      "#{WS::NOTICE_PREFIX}gori closed this socket: an injected frame could not finish writing server→client")
+  end
+
+  it "bounds a teardown write queued behind a parked one" do
+    server = TCPServer.new("127.0.0.1", 0)
+    peer = TCPSocket.new("127.0.0.1", server.local_address.port)
+    sock = server.accept
+    begin
+      leg = WS::Leg.new("in", sock, mask: false)
+      spawn { leg.write(Bytes.new(32 * 1024 * 1024)) rescue nil } # parks: the peer never reads
+      sleep 50.milliseconds
+      leg.teardown!(100.milliseconds)
+      expect_raises(IO::TimeoutError) { leg.write("late".to_slice) }
+    ensure
+      sock.close rescue nil
+      peer.close
+      server.close
     end
   end
 
