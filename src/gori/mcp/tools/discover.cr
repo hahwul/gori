@@ -372,12 +372,13 @@ module Gori
         return djob if djob.is_a?(Result)
         pg = page_args(h, DISCOVER_RESULTS_LIMIT)
         page = djob.results[pg.offset, pg.limit]? || [] of Discover::Finding
+        parts = fit_rows(page) { |rj, f, i| Serialize.discover_finding(rj, f, djob.flow_ids[pg.offset + i]?) }
+        cut = parts.size < page.size
+        page = page.first(parts.size)
         Result.new(JSON.build do |j|
           j.object do
-            j.field("findings") do
-              j.array { page.each_with_index { |f, i| Serialize.discover_finding(j, f, djob.flow_ids[pg.offset + i]?) } }
-            end
-            emit_page(j, pg, page.size)
+            j.field("findings") { raw_rows(j, parts) }
+            emit_page(j, pg, page.size, cut: cut)
             j.field "total_available", djob.results.size
             j.field "job_complete", djob.status != :running
             # `has_more` is about this PAGE. A budget-capped run has no more stored findings

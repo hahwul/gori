@@ -171,7 +171,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 
 **읽기 도구**(`--read-only`에서도 사용 가능. 단, 다음 다섯 가지 `scan_js_endpoints`, `oast_payload`, `oast_poll`, `reply_to_operator`, `ask_operator`는 제외):
 
-두 도구가 같은 대상을 다르게 부르는 곳에서는 두 이름을 모두 받습니다. `get_flow` / `delete_flow`의 `id` 대신 `flow_id`, repeater 도구의 `id` 대신 `repeater_id`(그리고 `minimize_repeater`의 `repeater_id` 대신 `id`), `intercept_toggle`의 `enable` 대신 `enabled`. 모든 `limit`은 기본값과 최댓값을 스키마(`default`, `minimum`, `maximum`)에 싣습니다.
+두 도구가 같은 대상을 다르게 부르는 곳에서는 두 이름을 모두 받습니다. `get_flow` / `delete_flow`의 `id` 대신 `flow_id`, repeater 도구의 `id` 대신 `repeater_id`(그리고 `minimize_repeater`의 `repeater_id` 대신 `id`), `intercept_toggle`의 `enable` 대신 `enabled`. 모든 `limit`은 기본값과 최댓값을 스키마(`default`, `minimum`, `maximum`)에 싣습니다. 행 개수로는 응답 크기가 제한되지 않으므로 목록 응답은 행 약 64 KB로도 제한됩니다. 페이지가 `limit`보다 먼저 `cut_by: "bytes"`, `has_more: true`로 끝날 수 있고, 평소의 커서(`next_before_id`, `next_since`, `next_cursor`, 또는 `offset`에 `returned`·`scanned`를 더한 값)로 멈춘 곳부터 이어집니다. 다 담지 못한 `ids` 집합은 나머지를 `remaining_ids`로 돌려주고, 바이너리 `get_response_body_chunk` 페이지는 base64가 들어가도록 48 KB에서 멈춥니다.
 
 | 도구 | 용도 |
 |------|---------|

@@ -27,10 +27,13 @@ module Gori
                  end
         rows = report.endpoints
         page = rows[pg.offset, pg.limit]? || [] of JsRefs::Endpoint
+        parts = fit_rows(page) { |rj, e, _| js_endpoint_row(rj, e) }
+        cut = parts.size < page.size
+        page = page.first(parts.size)
         Result.new(JSON.build do |j|
           j.object do
-            j.field("endpoints") { j.array { page.each { |e| js_endpoint_row(j, e) } } }
-            emit_page(j, pg, page.size, rows.size)
+            j.field("endpoints") { raw_rows(j, parts) }
+            emit_page(j, pg, page.size, rows.size, cut: cut)
             j.field "scanned_flows", report.scanned_flows
             j.field "hidden_hosts", report.hidden_hosts
             j.field "requested_unknown", report.requested_unknown

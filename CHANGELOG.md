@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- MCP: list replies are held to about 64 KB, so a page at the advertised `limit` no longer exceeds a client's tool-result cap; a cut page says `cut_by: "bytes"` with `has_more` and its usual cursor, an `ids` set returns the rest as `remaining_ids`, and `get_response_body_chunk` pages at most 64 KB (#1649)
 - History: `gori run history --count` and MCP `list_history{count_only: true}` report how many flows match the same filters as the listing, without reading the rows (#1648)
 - History shows an SSE stream's events while it is still open, over HTTP/1.1 and HTTP/2: the flow gets its status as soon as the head arrives, and the EVENTS pane, `gori run history show` and MCP `get_flow` read the events captured so far; a stream cut off by a crash or shutdown keeps them. The History row shows `●` and the event count while the stream is open, and each event carries its arrival time relative to the first (`+0.412s` in History and the Repeater, `t_ms` in `gori run history show` and MCP `get_flow`), kept after close (#1631)
 - MCP: a persistent WebSocket session kept open across calls — `ws_session_open` connects a saved repeater, `ws_session_send` sends frames one at a time (with optional heartbeat auto-replies, an Engine.IO flag among them), `get_job{job_id, after}` reads the server's pushes past a cursor, and `stop_job` closes it. Scope-gated like `send_websocket` on every send, HTTP/1.1 only, capped at 8, and closed on shutdown or a project switch (#1630)

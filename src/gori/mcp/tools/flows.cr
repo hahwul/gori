@@ -10,9 +10,10 @@ module Gori
     class Tools
       # Cap on `list_history{ids}` — one deliberate named set per call, not a table scan by
       # another name. Above `TabController::SELECTION_ID_CAP` (200) ON PURPOSE: a selection
-      # relayed by `get_current_context` must always be fetchable in ONE call, and the two
+      # relayed by `get_current_context` must always be ACCEPTED in one call, and the two
       # constants drifting the other way would quietly break that promise
-      # (`spec/mcp/flows_spec.cr` asserts the ordering).
+      # (`spec/mcp/flows_spec.cr` asserts the ordering). Accepted, not always returned: a set
+      # past REPLY_ROWS_BUDGET comes back in parts, the rest named in `remaining_ids` (#1649).
       MCP_HISTORY_IDS_MAX = 500
 
       # --- read tools ---------------------------------------------------------
@@ -145,8 +146,9 @@ module Gori
           return fts_error
         end
         return emit_history_count(filter, scope_unconfigured, h, dropped) if count_only
-        # A named set is not a page: it has no cursor, no `limit` and no `has_more`, and its
-        # short answers have to name themselves. Branches here rather than earlier so `query`,
+        # A named set is not a page: it has no cursor and no `limit` (`has_more` is true only
+        # when the reply budget cut it, beside `remaining_ids`), and its short answers have to
+        # name themselves. Branches here rather than earlier so `query`,
         # `view` and `in_scope` are already compiled — they still narrow WITHIN the set.
         return emit_history_ids(ids, filter, query, view_filter, in_scope || hide_static,
           scope_unconfigured, prepared, h, dropped) if ids
@@ -173,6 +175,14 @@ module Gori
         # `since` tails OLDEST-first, so the extra row is the NEWEST one — dropping from the
         # end is right in both directions, since each read returns its own order already.
         rows = rows.first(limit) if has_more
+        # Under REPLY_ROWS_BUDGET (#1649): a cut page is a short page with `has_more`, and its
+        # cursor is the last row it carried, so paging resumes exactly there.
+        parts = fit_rows(rows) { |rj, r, _| Serialize.flow_row(rj, r, row_columns(r, prepared, include_sensitive, matcher)) }
+        cut = parts.size < rows.size
+        if cut
+          rows = rows.first(parts.size)
+          has_more = true
+        end
         tailing = !since_id.nil?
         Result.new(JSON.build do |j|
           j.object do
@@ -188,10 +198,9 @@ module Gori
             if last = rows.last?
               j.field(tailing ? "next_since" : "next_before_id", last.id)
             end
+            emit_cut(j, cut)
             emit_ignored_terms(j, dropped)
-            j.field "flows" do
-              j.array { rows.each { |r| Serialize.flow_row(j, r, row_columns(r, prepared, include_sensitive, matcher)) } }
-            end
+            j.field("flows") { raw_rows(j, parts) }
           end
         end)
       end
@@ -257,19 +266,27 @@ module Gori
         # and `missing_ids` follows the caller's order too, so a third list in rowid order
         # would silently misalign an agent zipping it against its own marked list.
         filtered_out = ids.select { |id| drop.includes?(id) }
+        # Under REPLY_ROWS_BUDGET (#1649). A set has no cursor, so a cut names the rows it did
+        # not carry, in the order asked: passing `remaining_ids` back as `ids` fetches the rest.
+        parts = fit_rows(rows) { |rj, r, _| Serialize.flow_row(rj, r, row_columns(r, prepared, include_sensitive, matcher)) }
+        remaining = rows[parts.size..].map(&.id)
 
         Result.new(JSON.build do |j|
           j.object do
-            j.field "returned", rows.size
+            j.field "returned", parts.size
             j.field "requested_ids", ids.size
             # Not "newest_first": these come back the way they were asked for, so a caller can
             # zip them against the id list it holds without re-sorting.
             j.field "order", "as_requested"
-            j.field "has_more", false
+            j.field "has_more", !remaining.empty?
+            unless remaining.empty?
+              emit_cut(j, true)
+              j.field "remaining_ids", remaining
+            end
             if present?(h, "limit")
               j.field "limit_ignored", true
               j.field "limit_ignored_note",
-                "'ids' names the whole page, so 'limit' was not applied — all #{rows.size} matching rows are here"
+                "'ids' names the whole page, so 'limit' was not applied#{remaining.empty? ? " — all #{rows.size} matching rows are here" : ""}"
             end
             unless missing.empty?
               j.field "missing_ids", missing
@@ -285,9 +302,7 @@ module Gori
                                                                                                                                                      "drop the narrowing to see them"
             end
             emit_ignored_terms(j, ignored)
-            j.field "flows" do
-              j.array { rows.each { |r| Serialize.flow_row(j, r, row_columns(r, prepared, include_sensitive, matcher)) } }
-            end
+            j.field("flows") { raw_rows(j, parts) }
           end
         end)
       end
@@ -343,7 +358,8 @@ module Gori
       # #124 AI event feed. Forward-cursored (id > since, oldest-first). next_cursor is the
       # max id SCANNED this page (NOT the max matched id), so source/kind filters never make
       # the agent re-scan or skip; on an empty page it echoes the input `since` (never 0,
-      # never max-of-empty) so a no-new-events poll keeps the caller's place.
+      # never max-of-empty) so a no-new-events poll keeps the caller's place. A page the reply
+      # budget cut (#1649) is the exception: the cursor is the last event it carried.
       @[Tool("list_events")]
       private def list_events(h) : Result
         since = optional_int_arg(h, "since") || 0_i64
@@ -371,10 +387,15 @@ module Gori
         rows = rows.select { |r| r.source == source } if source
         rows = rows.select { |r| r.kind == kind } if kind && !kind.empty?
         rows = rows.select { |r| r.actor == actor } if actor
+        # Under REPLY_ROWS_BUDGET (#1649): a cut page resumes after the last event it carried.
+        parts = fit_rows(rows) { |rj, r, _| Serialize.event_row(rj, r) }
+        cut = parts.size < rows.size
+        next_cursor = rows[parts.size - 1].id if cut
         Result.new(JSON.build do |j|
           j.object do
-            j.field("events") { j.array { rows.each { |r| Serialize.event_row(j, r) } } }
+            j.field("events") { raw_rows(j, parts) }
             j.field "next_cursor", next_cursor
+            emit_cut(j, cut)
           end
         end)
       end
@@ -480,7 +501,12 @@ module Gori
       # of a 2.5 GB transfer paged to its end and reported `complete:true`.
       alias ChunkSource = {Bytes?, Bytes?, Bool}
 
-      BODY_CHUNK_LIMIT = PageLimit.new(65_536, 262_144)
+      # The ceiling is the default (#1649): a 256 KiB page JSON-encoded past the size a client
+      # hands a model, and a larger request is clamped rather than refused.
+      BODY_CHUNK_LIMIT = PageLimit.new(65_536, 65_536)
+      # A binary page goes out as base64, a third larger than its bytes, so it is held to the
+      # reply budget ENCODED.
+      BASE64_CHUNK_MAX = REPLY_ROWS_BUDGET * 3 // 4
 
       @[Tool("get_response_body_chunk")]
       private def get_response_body_chunk(h) : Result
@@ -528,6 +554,15 @@ module Gori
           chunk = chunk[0, whole]
           text = trimmed
         end
+        # Valid UTF-8 can still JSON-escape to six bytes a byte (NUL padding is valid UTF-8), so
+        # text that escapes past the budget goes out as budgeted base64 instead.
+        force_base64 = text.valid_encoding? && text.to_json.bytesize > REPLY_ROWS_BUDGET
+        base64_cut = (force_base64 || !text.valid_encoding?) && count > BASE64_CHUNK_MAX
+        if base64_cut
+          count = BASE64_CHUNK_MAX
+          chunk = chunk[0, count]
+          text = String.new(chunk)
+        end
         next_offset = start.to_i64 + count
 
         Result.new(JSON.build do |j|
@@ -542,6 +577,7 @@ module Gori
             j.field "warning", "requested offset #{requested} is past the #{total}-byte body; clamped to the end" if offset_out_of_range
             j.field "returned_bytes", count
             j.field "total_bytes", total
+            emit_cut(j, base64_cut)
             if head_omitted
               j.field "head_omitted", true
               j.field "head_omitted_note",
@@ -577,7 +613,7 @@ module Gori
                 "Paging to the end of this range is NOT the whole body, which is why `complete` stays false. " \
                 "Re-send the request (send_request) to capture it again under a larger cap"
             end
-            if text.valid_encoding?
+            if text.valid_encoding? && !force_base64
               j.field "encoding", "text"
               j.field "text", text
             else
@@ -793,7 +829,7 @@ module Gori
             "from get_current_context rather than replaying a remembered one. `query`/`view`/`in_scope`/`hide_static` " \
             "still narrow WITHIN the set, and what they removed comes back as `filtered_out_ids` — " \
             "so a short answer always says which kind of short it is. " \
-            "At most #{MCP_HISTORY_IDS_MAX} ids per call")
+            "At most #{MCP_HISTORY_IDS_MAX} ids per call; a reply past the size budget lists the rest in `remaining_ids` to pass back")
           s.field "limit", limitprop("max rows", HISTORY_LIMIT)
           s.field "before_id", intprop("cursor: page OLDER — only flows with id < this (newest-first; works with query too)")
           s.field "since", intprop("forward cursor: tail NEWER — only flows with id > this, oldest-first (mutually exclusive with before_id)")
@@ -816,7 +852,7 @@ module Gori
           "`since` = the last cursor you saw (0 or omitted starts from the oldest); the response " \
           "carries `next_cursor` — pass it as the next `since`. `next_cursor` never moves backward " \
           "and echoes your input on an empty page, so a poll that returns no events keeps your place. " \
-          "Optional `source`/`kind`/`actor` filters do NOT affect `next_cursor` (it is the max SCANNED id). " \
+          "Optional `source`/`kind`/`actor` filters do NOT affect `next_cursor` (it is the max SCANNED id, or the last event returned when `cut_by` says the page was cut). " \
           "Every event carries `actor` — the surface that acted (tui | cli | mcp) — so you can tell " \
           "your own writes from the operator's, and an agent action names its client in `actor_label` " \
           "(\"claude-code pid 4242\"); the human reads this same feed on the Project tab's " \

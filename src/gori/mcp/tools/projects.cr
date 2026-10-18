@@ -60,6 +60,24 @@ module Gori
         matched = needle ? entries.select(&.matches?(needle)) : entries
         page = pg.offset < matched.size ? matched[pg.offset, Math.min(pg.limit, matched.size - pg.offset)] : matched[0, 0]
         current = @db_path
+        parts = fit_rows(page) do |rj, e, _|
+          p = e.project
+          rj.object do
+            rj.field "name", p.name
+            rj.field "id", e.id
+            rj.field "slug", e.slug
+            rj.field "db_path", p.db_path
+            rj.field "db_size", p.db_size
+            rj.field "current", !current.nil? && p.db_path == current
+            rj.field "workspace", e.workspace
+            if lm = p.last_modified
+              rj.field "last_modified", lm.to_unix
+              rj.field "last_modified_iso", lm.to_rfc3339
+            end
+          end
+        end
+        cut = parts.size < page.size
+        page = page.first(parts.size)
         Result.new(JSON.build do |j|
           j.object do
             j.field "bound", !unbound?
@@ -75,7 +93,7 @@ module Gori
             j.field "current_project_id", @project_id
             j.field "projects_root", Paths.projects_dir
             j.field "query", query if query
-            emit_page(j, pg, page.size)
+            emit_page(j, pg, page.size, cut: cut)
             j.field "total", matched.size
             # The host's whole count beside the matched one, ALWAYS: an empty page under a
             # query otherwise reads as "this host has no projects", which is the answer that
@@ -85,26 +103,7 @@ module Gori
             if note = projects_listing_note(query, matched.size, entries.size, pg.offset, page.size)
               j.field "note", note
             end
-            j.field("projects") do
-              j.array do
-                page.each do |e|
-                  p = e.project
-                  j.object do
-                    j.field "name", p.name
-                    j.field "id", e.id
-                    j.field "slug", e.slug
-                    j.field "db_path", p.db_path
-                    j.field "db_size", p.db_size
-                    j.field "current", !current.nil? && p.db_path == current
-                    j.field "workspace", e.workspace
-                    if lm = p.last_modified
-                      j.field "last_modified", lm.to_unix
-                      j.field "last_modified_iso", lm.to_rfc3339
-                    end
-                  end
-                end
-              end
-            end
+            j.field("projects") { raw_rows(j, parts) }
           end
         end)
       end

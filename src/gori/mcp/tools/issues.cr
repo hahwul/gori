@@ -13,10 +13,13 @@ module Gori
         pg = page_args(h, ISSUES_LIMIT)
         all = store.issues
         page = all[pg.offset, pg.limit]? || [] of Store::Issue
+        parts = fit_rows(page) { |rj, f, _| Serialize.issue(rj, f, store) }
+        cut = parts.size < page.size
+        page = page.first(parts.size)
         Result.new(JSON.build do |j|
           j.object do
-            j.field("issues") { j.array { page.each { |f| Serialize.issue(j, f, store) } } }
-            emit_page(j, pg, page.size, all.size)
+            j.field("issues") { raw_rows(j, parts) }
+            emit_page(j, pg, page.size, all.size, cut: cut)
           end
         end)
       end

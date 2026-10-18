@@ -516,14 +516,17 @@ module Gori
         returned = last - pg.offset
         page = picked[pg.offset...last]? || [] of Int32
         page_flow_ids = validated_fuzz_flow_ids(fjob, page)
+        parts = fit_rows(page) { |rj, pos, k| Serialize.fuzz_result(rj, rows[pos], page_flow_ids[k], fjob.include_sensitive?) }
+        cut = parts.size < page.size
+        if cut
+          returned = parts.size
+          last = pg.offset + returned
+          page = page.first(returned)
+        end
         Result.new(JSON.build do |j|
           j.object do
-            j.field "results" do
-              j.array do
-                page.each_with_index { |pos, k| Serialize.fuzz_result(j, rows[pos], page_flow_ids[k], fjob.include_sensitive?) }
-              end
-            end
-            emit_page(j, pg, returned)
+            j.field("results") { raw_rows(j, parts) }
+            emit_page(j, pg, returned, cut: cut)
             j.field "total_available", picked.size
             j.field "matched_only", matched_only
             # What the filter is selecting FROM, so a caller that passed matched_only can see

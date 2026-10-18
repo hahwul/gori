@@ -209,18 +209,21 @@ module Gori
         return ajob if ajob.is_a?(Result)
         pg = page_args(h, AUTHORIZE_RESULTS_LIMIT)
         page = ajob.results[pg.offset, pg.limit]? || [] of Authorize::Target
+        parts = fit_rows(page) { |rj, t, _| authorize_target_json(rj, t) }
+        cut = parts.size < page.size
+        page = page.first(parts.size)
         Result.new(JSON.build do |j|
           j.object do
             emit_authorize_headline(j, ajob)
             emit_authorize_identities(j, ajob)
             j.field("bypasses") { j.array { ajob.bypassed.each { |t| authorize_bypass_json(j, t) } } }
-            j.field("results") { j.array { page.each { |t| authorize_target_json(j, t) } } }
+            j.field("results") { raw_rows(j, parts) }
             # The send-level failure total, here as well as in `authorize_status`: a caller
             # that jumps straight to the verdicts should not have to make a second call to
             # learn how many of the sends behind them never got an answer.
             j.field "errors", ajob.errors
             j.field "blocked", ajob.blocked
-            emit_page(j, pg, page.size)
+            emit_page(j, pg, page.size, cut: cut)
             j.field "total_available", ajob.results.size
             j.field "page_complete", pg.offset + page.size >= ajob.results.size
             j.field "has_more", pg.offset + page.size < ajob.results.size

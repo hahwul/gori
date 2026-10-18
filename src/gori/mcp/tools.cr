@@ -2816,6 +2816,55 @@ module Gori
       # served, so `emit_page` can echo a request that was coerced rather than honoured.
       record Page, req_off : Int64?, req_lim : Int64?, offset : Int32, limit : Int32
 
+      # The most serialized row bytes one list reply carries (#1649). A row COUNT does not bound
+      # a reply: a list_history row is ~450 bytes and a sitemap entry more, so the advertised
+      # `limit` maximums produced 190–230 KB replies that Claude Code turned into a "result
+      # exceeds maximum allowed tokens" error. Kept well under that client's cap (25k tokens),
+      # the tightest one known.
+      # ponytail: one constant for every client; a `gori mcp` flag if a roomier client wants it.
+      REPLY_ROWS_BUDGET = 64 * 1024
+
+      # Each of `rows` serialized on its own, as many as fit REPLY_ROWS_BUDGET, in order. Always
+      # at least one, so a page whose first row alone is larger still moves the cursor. The
+      # caller emits the parts with `raw_rows` and treats `parts.size < rows.size` as a cut:
+      # `has_more` stays true and the reply says `cut_by: "bytes"`, so a short page is never
+      # read as the end of the data.
+      private def fit_rows(rows : Array(T), & : JSON::Builder, T, Int32 ->) : Array(String) forall T
+        budget = RowBudget.new
+        rows.each_with_index do |r, i|
+          break unless budget.add(JSON.build { |rj| yield rj, r, i })
+        end
+        budget.parts
+      end
+
+      # REPLY_ROWS_BUDGET for a page collected one serialized row at a time, for the callers
+      # `fit_rows` cannot serve (a streamed store read, a serializer with side effects). `add`
+      # keeps a row while it fits, the first one always, and refuses it and every row after.
+      private class RowBudget
+        getter parts = [] of String
+        getter? cut = false
+        @used = 0
+
+        def add(part : String) : Bool
+          return false if @cut
+          if !@parts.empty? && @used + part.bytesize > REPLY_ROWS_BUDGET
+            @cut = true
+            return false
+          end
+          @parts << part
+          @used += part.bytesize
+          true
+        end
+      end
+
+      private def raw_rows(j : JSON::Builder, parts : Array(String)) : Nil
+        j.array { parts.each { |p| j.raw(p) } }
+      end
+
+      private def emit_cut(j : JSON::Builder, cut : Bool) : Nil
+        j.field "cut_by", "bytes" if cut
+      end
+
       private def page_args(h, limit : PageLimit) : Page
         req_off = optional_int_arg(h, "offset")
         req_lim = optional_int_arg(h, "limit")
@@ -2823,14 +2872,16 @@ module Gori
       end
 
       # The pagination fields of an object-returning list tool, in the order they all use:
-      # returned/offset/limit and the clamp echo, then — given a `total` — that total under
-      # `total_key` and `has_more`.
+      # returned/offset/limit and the clamp echo, `cut_by` when REPLY_ROWS_BUDGET ended the page
+      # before `limit` did (`fit_rows`), then — given a `total` — that total under `total_key`
+      # and `has_more`. A caller with no `total` that was cut says `has_more` itself.
       private def emit_page(j : JSON::Builder, pg : Page, returned : Int32,
-                            total : Int? = nil, total_key : String = "total") : Nil
+                            total : Int? = nil, total_key : String = "total", cut : Bool = false) : Nil
         j.field "returned", returned
         j.field "offset", pg.offset
         j.field "limit", pg.limit
         emit_clamp(j, pg.req_off, pg.offset, pg.req_lim, pg.limit)
+        emit_cut(j, cut)
         return unless total
         j.field total_key, total
         j.field "has_more", pg.offset.to_i64 + returned < total

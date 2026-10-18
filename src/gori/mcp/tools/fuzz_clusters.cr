@@ -206,6 +206,7 @@ module Gori
           pg.offset, pg.limit, caps.extractors)
         cluster = clusters[id]?
         return not_found("no cluster #{Fuzz::Shape.hex(id)} in saved fuzz run #{run.id}") unless cluster
+        parts = fit_rows(page) { |rj, rec, _| emit_saved_fuzz_member(rj, run, rec, caps) }
         Result.new(JSON.build do |j|
           j.object do
             j.field("run") { Serialize.saved_fuzz_run(j, run, store.fuzz_result_count(run.id)) }
@@ -214,8 +215,8 @@ module Gori
                 j.object { Serialize.fuzz_result_fields(j, rep, nil, caps.include_sensitive) }
               end
             end
-            j.field("results") { j.array { page.each { |rec| emit_saved_fuzz_member(j, run, rec, caps) } } }
-            emit_page(j, pg, page.size, seen, "total_available")
+            j.field("results") { raw_rows(j, parts) }
+            emit_page(j, pg, parts.size, seen, "total_available", cut: parts.size < page.size)
             j.field "matched_only", matched_only
           end
         end)

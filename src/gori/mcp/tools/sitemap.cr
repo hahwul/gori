@@ -44,7 +44,20 @@ module Gori
         # Folded by DEFAULT, matching `gori run sitemap` and the TUI tree: an agent mapping a
         # surface should not read one entry per fuzz payload. `fold_query:false` is the twin
         # of the CLI's --no-fold-query.
-        entries = fold_query_entries(rows, bool_arg(h, "fold_query", true))
+        fold = bool_arg(h, "fold_query", true)
+        entries = fold_query_entries(rows, fold)
+        parts = fit_rows(entries) { |rj, e, _| sitemap_entry_json(rj, e, tags) }
+        # Under REPLY_ROWS_BUDGET (#1649). The cut is made in RAW rows, because `offset` pages
+        # raw rows and a folded entry stands for several: the page shrinks until its entries fit,
+        # and `scanned` — what the caller advances `offset` by — shrinks with it. Each pass keeps
+        # fewer rows, and one row always fits, so this ends.
+        cut = false
+        while parts.size < entries.size
+          cut = has_more = true
+          rows = rows.first((rows.size * parts.size // entries.size).clamp(1, rows.size - 1))
+          entries = fold_query_entries(rows, fold)
+          parts = fit_rows(entries) { |rj, e, _| sitemap_entry_json(rj, e, tags) }
+        end
         Result.new(JSON.build do |j|
           j.object do
             j.field "returned", entries.size
@@ -52,61 +65,62 @@ module Gori
             j.field "offset", offset
             j.field "limit", limit
             j.field "has_more", has_more
+            emit_cut(j, cut)
             emit_ignored_terms(j, dropped)
             emit_tag_capped(j, tag_capped)
             # Endpoints captured JavaScript references and no request reached (#1243). NOT
             # entries: an entry is a captured transport key with counts, and these have none —
             # mixing them in would also make `has_more`/`offset` page two different things.
             emit_unrequested(j) if unrequested
-            j.field "entries" do
-              j.array do
-                entries.each do |e|
-                  j.object do
-                    j.field "scheme", Serialize.text(e.scheme)
-                    j.field "host", Serialize.text(e.host)
-                    j.field "port", e.port
-                    j.field "http_version", Serialize.text(e.http_version)
-                    j.field "method", Serialize.text(e.method)
-                    j.field "target", Serialize.text(e.target)
-                    # Same builder as a flow's `url` and the TUI tree's copy (#1562).
-                    j.field "url", Serialize.text(Store::FlowRow.url_of(e.scheme, e.host, e.port, e.target))
-                    # Present only on a FOLDED row: how many distinct query strings it stands
-                    # for, and up to QUERY_SAMPLE_MAX of the raw targets, so a replay still has
-                    # a concrete one to send (`target` alone dropped the query).
-                    if e.query_variants > 0
-                      j.field "query_variants", e.query_variants
-                      j.field "query_targets" do
-                        j.array { e.query_targets.first(QUERY_SAMPLE_MAX).each { |t| j.string Serialize.text(t) } }
-                      end
-                      emit_variant_tags(j, e, tags)
-                    end
-                    j.field "statuses", e.statuses
-                    j.field "count", e.count
-                    j.field "success_count", e.ok
-                    j.field "error_count", e.errors
-                    j.field "first_seen", e.first_seen
-                    j.field "first_seen_iso", Gori.iso_micros(e.first_seen)
-                    j.field "last_seen", e.last_seen
-                    j.field "last_seen_iso", Gori.iso_micros(e.last_seen)
-                    # The operator's free-text memo for this endpoint, when one is pinned. The key
-                    # is the tree's node path, which includes any query string.
-                    # NOT on a folded row, which is synthetic: `Sitemap.stamp_tags!` bars a tag on
-                    # a `grouped` node ("the tag key is the path WITH the query", fold_queries_node!),
-                    # so the TUI tree and `gori run sitemap` both leave it bare — and this stamped
-                    # one anyway, which made set_sitemap_tag's "will not show in list_sitemap or
-                    # the TUI" warning a lie about half of itself. The tags on a fold's variants
-                    # are keyed by the path WITH the query and ride `variant_tags` above, exactly
-                    # as a `{uuid}` fold's children keep their own; list_sitemap_tags (or
-                    # fold_query:false) is where the rest show.
-                    if e.query_variants == 0 && (tag = tags[{e.host, Sitemap.tag_path(e.target)}]?)
-                      j.field "tag", Serialize.text(tag)
-                    end
-                  end
-                end
-              end
-            end
+            j.field("entries") { raw_rows(j, parts) }
           end
         end)
+      end
+
+      # One `list_sitemap` entry: the transport key, the fold's variants, counts, seen window
+      # and the operator's memo.
+      private def sitemap_entry_json(j : JSON::Builder, e : SitemapRow, tags : Hash({String, String}, String)) : Nil
+        j.object do
+          j.field "scheme", Serialize.text(e.scheme)
+          j.field "host", Serialize.text(e.host)
+          j.field "port", e.port
+          j.field "http_version", Serialize.text(e.http_version)
+          j.field "method", Serialize.text(e.method)
+          j.field "target", Serialize.text(e.target)
+          # Same builder as a flow's `url` and the TUI tree's copy (#1562).
+          j.field "url", Serialize.text(Store::FlowRow.url_of(e.scheme, e.host, e.port, e.target))
+          # Present only on a FOLDED row: how many distinct query strings it stands
+          # for, and up to QUERY_SAMPLE_MAX of the raw targets, so a replay still has
+          # a concrete one to send (`target` alone dropped the query).
+          if e.query_variants > 0
+            j.field "query_variants", e.query_variants
+            j.field "query_targets" do
+              j.array { e.query_targets.first(QUERY_SAMPLE_MAX).each { |t| j.string Serialize.text(t) } }
+            end
+            emit_variant_tags(j, e, tags)
+          end
+          j.field "statuses", e.statuses
+          j.field "count", e.count
+          j.field "success_count", e.ok
+          j.field "error_count", e.errors
+          j.field "first_seen", e.first_seen
+          j.field "first_seen_iso", Gori.iso_micros(e.first_seen)
+          j.field "last_seen", e.last_seen
+          j.field "last_seen_iso", Gori.iso_micros(e.last_seen)
+          # The operator's free-text memo for this endpoint, when one is pinned. The key
+          # is the tree's node path, which includes any query string.
+          # NOT on a folded row, which is synthetic: `Sitemap.stamp_tags!` bars a tag on
+          # a `grouped` node ("the tag key is the path WITH the query", fold_queries_node!),
+          # so the TUI tree and `gori run sitemap` both leave it bare — and this stamped
+          # one anyway, which made set_sitemap_tag's "will not show in list_sitemap or
+          # the TUI" warning a lie about half of itself. The tags on a fold's variants
+          # are keyed by the path WITH the query and ride `variant_tags` above, exactly
+          # as a `{uuid}` fold's children keep their own; list_sitemap_tags (or
+          # fold_query:false) is where the rest show.
+          if e.query_variants == 0 && (tag = tags[{e.host, Sitemap.tag_path(e.target)}]?)
+            j.field "tag", Serialize.text(tag)
+          end
+        end
       end
 
       # Pin (or clear) a free-text memo on one sitemap endpoint — the TUI Sitemap tab's `t`.
@@ -352,25 +366,21 @@ module Gori
           has_more = entries.size > limit
           entries = entries.first(limit) if has_more
         end
+        parts = fit_rows(entries) do |rj, (host, method, target), _|
+          {host: Serialize.text(host), method: Serialize.text(method), target: Serialize.text(target)}.to_json(rj)
+        end
+        cut = parts.size < entries.size
+        has_more ||= cut
         Result.new(JSON.build do |j|
           j.object do
-            j.field "returned", entries.size
+            j.field "returned", parts.size
             j.field "offset", offset
             j.field "limit", limit
             j.field "has_more", has_more
+            emit_cut(j, cut)
             emit_ignored_terms(j, dropped)
             emit_tag_capped(j, tag_capped)
-            j.field "entries" do
-              j.array do
-                entries.each do |(host, method, target)|
-                  {
-                    host:   Serialize.text(host),
-                    method: Serialize.text(method),
-                    target: Serialize.text(target),
-                  }.to_json(j)
-                end
-              end
-            end
+            j.field("entries") { raw_rows(j, parts) }
           end
         end)
       end
@@ -425,10 +435,13 @@ module Gori
                  end
         rows = report.rows
         page = rows[pg.offset, pg.limit]? || [] of ParamInventory::Row
+        parts = fit_rows(page) { |rj, r, _| param_row(rj, r, include_sensitive) }
+        cut = parts.size < page.size
+        page = page.first(parts.size)
         Result.new(JSON.build do |j|
           j.object do
-            j.field("params") { j.array { page.each { |r| param_row(j, r, include_sensitive) } } }
-            emit_page(j, pg, page.size, rows.size)
+            j.field("params") { raw_rows(j, parts) }
+            emit_page(j, pg, page.size, rows.size, cut: cut)
             emit_ignored_terms(j, dropped)
             j.field "flows_scanned", report.flows_scanned
             # The flow cap, not the page: parameters on OLDER flows are absent from `total`.

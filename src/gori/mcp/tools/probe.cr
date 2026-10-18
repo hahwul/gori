@@ -168,10 +168,13 @@ module Gori
           category.as(String?), str(h, "host").try(&.strip).presence,
           severity_from(str(h, "severity")),
           open_only: !include_closed, limit: pg.limit, offset: pg.offset)
+        parts = fit_rows(page) { |rj, i, _| Probe.issue_json(rj, i) }
+        cut = parts.size < page.size
+        page = page.first(parts.size)
         Result.new(JSON.build do |j|
           j.object do
-            j.field("issues") { j.array { page.each { |i| Probe.issue_json(j, i) } } }
-            emit_page(j, pg, page.size, total)
+            j.field("issues") { raw_rows(j, parts) }
+            emit_page(j, pg, page.size, total, cut: cut)
             j.field "include_closed", include_closed
           end
         end)

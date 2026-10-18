@@ -18,16 +18,11 @@ module Gori
         runs = store.fuzz_runs(session_id, pg.limit, pg.offset)
         counts = store.fuzz_result_counts(runs.map(&.id))
         total = store.fuzz_run_count(session_id)
+        parts = fit_rows(runs) { |rj, run, _| Serialize.saved_fuzz_run(rj, run, counts[run.id]? || 0_i64) }
         Result.new(JSON.build do |j|
           j.object do
-            j.field("runs") do
-              j.array do
-                runs.each do |run|
-                  Serialize.saved_fuzz_run(j, run, counts[run.id]? || 0_i64)
-                end
-              end
-            end
-            emit_page(j, pg, runs.size, total, "total_available")
+            j.field("runs") { raw_rows(j, parts) }
+            emit_page(j, pg, parts.size, total, "total_available", cut: parts.size < runs.size)
           end
         end)
       end
@@ -73,31 +68,36 @@ module Gori
         pg = page_args(h, include_content ? FUZZ_RUN_CONTENT_ROWS_LIMIT : FUZZ_RUN_ROWS_LIMIT)
         matched_only = bool_arg(h, "matched_only", false)
         total = store.fuzz_result_count(run_id, matched_only)
-        returned = 0
+        page = saved_fuzz_page(run_id, pg, matched_only, caps)
         Result.new(JSON.build do |j|
           j.object do
             j.field("run") { Serialize.saved_fuzz_run(j, run, store.fuzz_result_count(run_id)) }
-            j.field("results") do
-              j.array do
-                if include_content
-                  store.each_fuzz_result_preview_page(run_id, pg.limit, pg.offset,
-                    message_source_cap, head_cap + 1, Serialize::SAVED_SOURCE_BYTES,
-                    message_source_cap, matched_only) do |preview|
-                    Serialize.saved_fuzz_result(j, preview, include_sensitive, body_cap, head_cap, extractors)
-                    returned += 1
-                  end
-                else
-                  store.each_fuzz_result_summary_page(run_id, pg.limit, pg.offset, matched_only) do |row|
-                    Serialize.saved_fuzz_result(j, row, extractors, include_sensitive)
-                    returned += 1
-                  end
-                end
-              end
-            end
-            emit_page(j, pg, returned, total, "total_available")
+            j.field("results") { raw_rows(j, page.parts) }
+            emit_page(j, pg, page.parts.size, total, "total_available", cut: page.cut?)
             j.field "matched_only", matched_only
           end
         end)
+      end
+
+      # One page of a saved run's rows, streamed from the store and collected under
+      # REPLY_ROWS_BUDGET (#1649): once a row does not fit, the rest of the page is read and
+      # skipped.
+      private def saved_fuzz_page(run_id : Int64, pg : Page, matched_only : Bool, caps : SavedFuzzCaps) : RowBudget
+        budget = RowBudget.new
+        if caps.include_content
+          store.each_fuzz_result_preview_page(run_id, pg.limit, pg.offset,
+            caps.message_source_cap, caps.head_cap + 1, Serialize::SAVED_SOURCE_BYTES,
+            caps.message_source_cap, matched_only) do |preview|
+            next if budget.cut?
+            budget.add(JSON.build { |rj| Serialize.saved_fuzz_result(rj, preview, caps.include_sensitive, caps.body_cap, caps.head_cap, caps.extractors) })
+          end
+        else
+          store.each_fuzz_result_summary_page(run_id, pg.limit, pg.offset, matched_only) do |row|
+            next if budget.cut?
+            budget.add(JSON.build { |rj| Serialize.saved_fuzz_result(rj, row, caps.extractors, caps.include_sensitive) })
+          end
+        end
+        budget
       end
 
       # One saved result beside its run; the block writes the result.

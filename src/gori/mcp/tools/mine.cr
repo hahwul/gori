@@ -184,10 +184,13 @@ module Gori
         return mjob if mjob.is_a?(Result)
         pg = page_args(h, MINE_RESULTS_LIMIT)
         page = mjob.results[pg.offset, pg.limit]? || [] of Miner::Finding
+        parts = fit_rows(page) { |rj, f, _| Serialize.mine_finding(rj, f) }
+        cut = parts.size < page.size
+        page = page.first(parts.size)
         Result.new(JSON.build do |j|
           j.object do
-            j.field("findings") { j.array { page.each { |f| Serialize.mine_finding(j, f) } } }
-            emit_page(j, pg, page.size)
+            j.field("findings") { raw_rows(j, parts) }
+            emit_page(j, pg, page.size, cut: cut)
             j.field "total_available", mjob.results.size
             j.field "job_complete", mjob.status != :running
             j.field "page_complete", pg.offset + page.size >= mjob.results.size

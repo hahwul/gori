@@ -171,7 +171,7 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 
 **Read tools** (available under `--read-only`, except these five: `scan_js_endpoints`, `oast_payload`, `oast_poll`, `reply_to_operator`, and `ask_operator`):
 
-Where two tools name one object differently, both spellings are accepted: `flow_id` for `id` on `get_flow` / `delete_flow`, `repeater_id` for `id` on the repeater tools (and `id` for `repeater_id` on `minimize_repeater`), `enabled` for `enable` on `intercept_toggle`. Each `limit` states its default and maximum in the schema (`default`, `minimum`, `maximum`).
+Where two tools name one object differently, both spellings are accepted: `flow_id` for `id` on `get_flow` / `delete_flow`, `repeater_id` for `id` on the repeater tools (and `id` for `repeater_id` on `minimize_repeater`), `enabled` for `enable` on `intercept_toggle`. Each `limit` states its default and maximum in the schema (`default`, `minimum`, `maximum`). A list reply is also held to about 64 KB of rows, because a row count does not bound its size: a page can end before `limit` with `cut_by: "bytes"` and `has_more: true`, and its usual cursor (`next_before_id`, `next_since`, `next_cursor`, or `offset` plus `returned` / `scanned`) picks up where it stopped. An `ids` set that does not fit returns the rest as `remaining_ids`, and a binary `get_response_body_chunk` page stops at 48 KB so its base64 fits.
 
 | Tool | Purpose |
 | ------ | --------- |

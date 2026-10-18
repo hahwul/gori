@@ -273,6 +273,25 @@ module Gori
                      Set(Int64).new
                    end
 
+        # The page under REPLY_ROWS_BUDGET (#1649), by hand rather than through `fit_rows`: a
+        # session's serializer counts its redactions into `tally`, and the one row rendered past
+        # the budget is dropped, so its counts are rolled back with it.
+        budget = RowBudget.new
+        paginated_repeaters.each do |r|
+          saved = tally.try(&.snapshot)
+          part = JSON.build do |rj|
+            emit_repeater_session(rj, r, include_content, include_sensitive,
+              tui_index: tui_index[r.id]?,
+              response_body_cap: body_ids.includes?(r.id) ? body_cap : nil, tally: tally)
+          end
+          next if budget.add(part)
+          tally.try { |t| saved.try { |s| t.restore(s) } }
+          break
+        end
+        sessions = budget.parts
+        cut = budget.cut?
+        paginated_repeaters = paginated_repeaters.first(sessions.size)
+
         Result.new(JSON.build do |j|
           j.object do
             j.field "project", @project_name
@@ -305,6 +324,7 @@ module Gori
             j.field "offset", pg.offset
             j.field "limit", pg.limit
             emit_clamp(j, pg.req_off, pg.offset, pg.req_lim, pg.limit)
+            emit_cut(j, cut)
             # A filter string whose every term was dropped narrows NOTHING, and a listing that
             # answered "here is everything" while the caller believed it had filtered is the
             # shape `ql_explain` was fixed for. Named, not silently applied.
@@ -321,15 +341,7 @@ module Gori
                 "(each is a separate BLOB read) — narrow with id/filter, or page, to read the rest"
             end
             j.field "has_more", pg.offset + paginated_repeaters.size < total_count
-            j.field "sessions" do
-              j.array do
-                paginated_repeaters.each do |r|
-                  emit_repeater_session(j, r, include_content, include_sensitive,
-                    tui_index: tui_index[r.id]?,
-                    response_body_cap: body_ids.includes?(r.id) ? body_cap : nil, tally: tally)
-                end
-              end
-            end
+            j.field("sessions") { raw_rows(j, sessions) }
             Serialize.emit_redaction_note(j, tally.try(&.note)) if include_content || include_response_body
             unless on_repeater
               j.field "note", "TUI is not on the Repeater tab — `tui_repeater` may be stale; use `sessions` for persisted tabs."
@@ -550,6 +562,16 @@ module Gori
 
         def note : Serialize::RedactionNote
           Serialize::RedactionNote.new(@matcher.profile.name, @bodies, @ws_frames, decoded?)
+        end
+
+        # The counts as they stand, and putting them back: a row rendered and then dropped
+        # must not be counted (#1649).
+        def snapshot : {Int32, Int32, Bool}
+          {@bodies, @ws_frames, @decoded}
+        end
+
+        def restore(s : {Int32, Int32, Bool}) : Nil
+          @bodies, @ws_frames, @decoded = s
         end
       end
 
