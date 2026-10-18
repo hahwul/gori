@@ -1587,7 +1587,7 @@ module Gori::Tui
       end
       while pair = poll(@ws_open_results)
         view, opened, flag = pair
-        @ws_connect_flags.delete(flag) # this connect is done; stop tracking its cancel flag
+        @ws_connect_flags.reject!(&.same?(flag)) # drop by identity: two cells both [false] are ==
         applied = true
         # The sub-tab was closed mid-connect: close the socket we opened rather than leak it.
         unless @repeaters.find(&.view.same?(view))
@@ -1596,11 +1596,11 @@ module Gori::Tui
         end
         view.inflight = false
         if session = opened.session
-          if view.ws_keep_open?
+          if view.ws_keep_open? && view.ws_mode?
             view.begin_ws_session(session, opened.result)
             ws_emit_live_status(view)
           else
-            # Keep-open was turned off while the dial was in flight (#1630): don't install it.
+            # Keep-open was turned off (or WS mode left) while the dial was in flight (#1630): don't install it.
             # `sess` (not `session`) goes into the closure so `session` stays narrowed above.
             sess = session
             spawn(name: "gori-ws-close") { sess.close rescue nil }
@@ -2746,6 +2746,12 @@ module Gori::Tui
     # `repeater.ws-send-binary`'s `available?` gate read.
     def ws_session_connected? : Bool
       !!current_view.try(&.ws_connected?)
+    end
+
+    # Number of in-flight dials still tracked for cancellation (#1630). Test seam: the drain must
+    # drop each connect's cell by identity, so concurrent dials don't under-track one another.
+    def ws_pending_connects : Int32
+      @ws_connect_flags.size
     end
 
     # The LIVE status bar (#1630): a `LIVE` chip · URL · ↑sent ↓recv · duration · the live-key

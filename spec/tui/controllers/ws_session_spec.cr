@@ -292,6 +292,28 @@ describe "RepeaterController WebSocket live session (#1630)" do
     end
   end
 
+  it "tracks two concurrent connects and drops both cancel cells by identity" do
+    origin = echo_origin
+    begin
+      with_ws_controller do |ctl, _host|
+        va = open_ws_tab(ctl, origin.port, ["a"]) # tab A is current
+        ctl.repeater_toggle_ws_session            # arm keep-open on A
+        ctl.repeater_send                         # ^R → spawn connect A (in flight)
+
+        vb = open_ws_tab(ctl, origin.port, ["b"]) # tab B becomes current
+        ctl.repeater_toggle_ws_session            # arm keep-open on B
+        ctl.repeater_send                         # ^R → spawn connect B (in flight)
+
+        ctl.ws_pending_connects.should eq(2) # both cells tracked before any drain
+
+        wait_until(5.seconds) { ctl.drain_results; va.ws_connected? && vb.ws_connected? }.should be_true
+        ctl.ws_pending_connects.should eq(0) # both dropped — neither removed the other's cell
+      end
+    ensure
+      origin.close
+    end
+  end
+
   it "renders only on the active tab and throttles the live tick" do
     origin = echo_origin
     begin
