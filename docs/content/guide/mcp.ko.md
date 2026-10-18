@@ -100,6 +100,8 @@ gori mcp --read-only
 
 토큰은 바이트 ÷ 4로 잡은 JSON 어림값이며, 실제 값은 클라이언트의 토크나이저가 정합니다.
 
+**어디서 시작할까.** [`eval/`](https://github.com/hahwul/gori/tree/main/eval)의 에이전트 평가가 캡처 분석 과제(캡처한 플로우를 읽고, 거르고, 세고, 연결하기)로 프로필별 차이를 측정합니다. Sonnet과 Haiku 모두 프로필에 따라 과제 성공 여부가 눈에 띄게 달라지지는 않았지만, 비용은 크게 달랐습니다. 같은 답에 전체 카탈로그는 `@minimal`보다 입력 토큰을 중앙값 3.5~4배 썼습니다(과제별로는 1.7~5.5배, `--read-only`는 약 1.6배, `@recon`은 약 1.4배). 카탈로그는 턴마다 다시 전송되므로 호출할 때마다 절대 차이가 벌어지고, 작은 모델일수록 호출이 많습니다. 캡처를 읽고 파악하는 에이전트라면 `--tools=@recon --read-only`부터, History와 플로우만 읽는다면 `@minimal`부터 시작하세요. `@recon`을 그대로 쓰면 요청 재전송과 이슈·노트 기록이 더해집니다. 전체 카탈로그는 워크벤치(fuzz, discover, authorize, sequence)를 직접 돌리는 에이전트에 두세요. 이 경우는 아직 평가에서 측정하지 않습니다.
+
 | 프로필 | 도구 |
 | --- | --- |
 | `@minimal` | `project_info`, `list_projects`, `switch_project`, `create_project`, `ql_reference`, `ql_explain`, `list_history`, `get_flow`, `get_response_body_chunk`, `get_current_context`, `get_repeater_context`, `get_issue`, `list_sitemap`, `intercept_get`, `intercept_list`, `operator_messages`, `reply_to_operator`, `ask_operator` |

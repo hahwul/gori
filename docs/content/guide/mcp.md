@@ -100,6 +100,8 @@ By default `gori mcp` advertises every tool, so an agent can reach the whole wor
 
 Tokens are bytes ÷ 4, a rough rule for JSON; your client's tokenizer has the final word.
 
+**Which one to start from.** The agent eval in [`eval/`](https://github.com/hahwul/gori/tree/main/eval) measures the profiles against each other on capture-analysis tasks: read, filter, count and correlate captured flows. Across Sonnet and Haiku the profile did not measurably change whether a task was answered, but it set the cost: the full catalogue took a median 3.5–4× the input tokens of `@minimal` for the same answer (1.7–5.5× by task; `--read-only` about 1.6×, `@recon` about 1.4×). The catalogue is re-sent on every turn, so the absolute gap grows with every call, and a smaller model makes more of them. For an agent that reads and maps a capture, start from `--tools=@recon --read-only`, or `@minimal` when it only reads History and flows; `@recon` alone adds a replay and issue and note writes. Keep the full catalogue for an agent that drives the workbench (fuzz, discover, authorize, sequence), which the eval does not measure yet.
+
 | Profile | Tools |
 | --- | --- |
 | `@minimal` | `project_info`, `list_projects`, `switch_project`, `create_project`, `ql_reference`, `ql_explain`, `list_history`, `get_flow`, `get_response_body_chunk`, `get_current_context`, `get_repeater_context`, `get_issue`, `list_sitemap`, `intercept_get`, `intercept_list`, `operator_messages`, `reply_to_operator`, `ask_operator` |
