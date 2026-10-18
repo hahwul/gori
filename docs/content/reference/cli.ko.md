@@ -421,6 +421,7 @@ gori run intercept get 3 --format json
 gori run intercept forward 3
 gori run intercept edit 3 --raw-file edited.txt
 gori run intercept direction request
+gori run intercept inject 42 --direction in --data '{"role":"admin"}'
 ```
 
 | Subcommand | Description |
@@ -433,6 +434,7 @@ gori run intercept direction request
 | `enable` / `disable` | 라이브 캐치 켜기 / 끄기 |
 | `filter <query>` | 조건부 인터셉트 쿼리 설정. `""`를 넘기면 해제 |
 | `direction <both\|request\|response>` | 캐치가 붙잡을 구간 선택 (기본값 `request`) |
+| `inject <flow-id>` | TUI가 아직 중계 중인 WebSocket에 프레임 하나를 밀어 넣음(HTTP/1.1 전용): `--direction out\|in`(기본값 `out`, 클라이언트 → 서버), `--opcode text\|binary\|ping\|pong\|close`(기본값 `text`), `--data=TEXT` 또는 정확한 바이트는 `--file=PATH`. 그대로 보내며 붙잡힌 메시지보다 먼저 나감. 데이터 프레임은 그 방향의 조각난 메시지가 끝나기를 최대 5초 기다림. 플로우의 호스트에 스코프 게이트(`--allow-unscoped`로 면제). [프레임 주입](/ko/guide/proxy/#websocket-inject) 참고 |
 
 `list`와 `get`은 `--include-sensitive`를 주지 않으면 민감한 헤더 값을 가립니다. 쓰기 서브커맨드는 프로젝트 데이터베이스를 거쳐 TUI의 ack를 폴링합니다.
 

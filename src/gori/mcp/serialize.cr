@@ -1178,6 +1178,13 @@ module Gori
       # `count` is then the MATCHED total and `ws_total` the socket's, so a short list is never
       # mistaken for the whole transcript — and a query that matched nothing still says so, even
       # on a flow with no socket at all (`0 of 0`).
+      # An injected frame's bytes are the operator's, not the client's (#1630).
+      private def self.emit_ws_origin(j : JSON::Builder, m : Store::WsMessage) : Nil
+        return j.field("origin", ws_origin(m.direction)) unless m.injected?
+        j.field "origin", Store::WsMessage::ORIGIN_GORI
+        j.field "injected", true
+      end
+
       def self.emit_ws_messages(j : JSON::Builder, msgs : Array(Store::WsMessage), total : Int32 = msgs.size,
                                 socket_total : Int32? = nil) : Nil
         return if msgs.empty? && socket_total.nil?
@@ -1193,7 +1200,7 @@ module Gori
                     j.field "direction", m.direction
                     j.field "opcode", m.opcode
                     j.field "type", ws_frame_type(m.opcode)
-                    j.field "origin", ws_origin(m.direction)
+                    emit_ws_origin(j, m)
                     j.field "at", m.created_at
                     j.field "at_iso", Gori.iso_micros(m.created_at)
                     # The V7 shape (FIN / RSV / masked / frame count) and a CLOSE's code and

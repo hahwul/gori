@@ -30,8 +30,9 @@ module Gori
       # `ws_session_open` dials and comes back through `scope_blocked`, so its grant names the
       # host like `send_websocket`. `ws_session_send` is NOT here: it rides the socket the open
       # already admitted and runs no scope check, so it asks per call under `send` (if asked).
+      # `ws_inject` checks the flow's host through `scope_blocked`, so it names the host too.
       HOST_APPROVED_TOOLS = Set{"send_request", "race_requests", "timing_requests", "send_websocket",
-                                "ws_session_open", "fuzz_start", "mine_start", "sequence_start",
+                                "ws_session_open", "ws_inject", "fuzz_start", "mine_start", "sequence_start",
                                 "minimize_repeater", "cache_deception_check", "grpc_reflect"}
 
       # Calls that follow up on something an approval already started, and never ask: the

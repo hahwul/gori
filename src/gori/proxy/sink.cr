@@ -19,6 +19,14 @@ module Gori::Proxy
     abstract def on_ws_message(flow_id : Int64, direction : String, opcode : Int32, payload : Bytes,
                                shape : Gori::Proxy::WS::Shape = Gori::Proxy::WS::Shape::DEFAULT) : Nil
 
+    # A frame gori INJECTED into the live socket (#1630), recorded as a message of its own so
+    # readers can mark it. The default records it as an ordinary message, so a sink that does
+    # not keep the origin (a bench or test double) still compiles and still sees it.
+    def on_ws_injected(flow_id : Int64, direction : String, opcode : Int32, payload : Bytes,
+                       shape : Gori::Proxy::WS::Shape = Gori::Proxy::WS::Shape::DEFAULT) : Nil
+      on_ws_message(flow_id, direction, opcode, payload, shape)
+    end
+
     # Match&Replace rules that rewrote a WebSocket message on `flow_id`, recorded the first time
     # each one does (#1589). The default keeps sinks that only record HTTP flows source-compatible.
     def on_rule_hits(flow_id : Int64, side : Store::RuleTarget, hits : Array(Store::RuleRef)) : Nil
@@ -68,6 +76,13 @@ module Gori::Proxy
                       shape : Gori::Proxy::WS::Shape = Gori::Proxy::WS::Shape::DEFAULT) : Nil
       return if flow_id <= 0
       @store.insert_ws_message(flow_id, direction, opcode, payload, shape: shape)
+    end
+
+    def on_ws_injected(flow_id : Int64, direction : String, opcode : Int32, payload : Bytes,
+                       shape : Gori::Proxy::WS::Shape = Gori::Proxy::WS::Shape::DEFAULT) : Nil
+      return if flow_id <= 0
+      @store.insert_ws_message(flow_id, direction, opcode, payload, shape: shape,
+        origin: Store::WsMessage::ORIGIN_GORI)
     end
 
     def on_rule_hits(flow_id : Int64, side : Store::RuleTarget, hits : Array(Store::RuleRef)) : Nil

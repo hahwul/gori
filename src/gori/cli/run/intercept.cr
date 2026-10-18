@@ -35,12 +35,13 @@ module Gori
         when "disable"   then cmd_intercept_toggle(false, args[1..])
         when "filter"    then cmd_intercept_set_filter(args[1..])
         when "direction" then cmd_intercept_set_direction(args[1..])
+        when "inject"    then cmd_intercept_inject(args[1..])
         else
           if (s = sub) && s.starts_with?('-')
             cmd_intercept_list(args)
           else
             abort unknown_verb_message("gori run intercept", s || "",
-              %w[list get forward drop edit enable disable filter direction])
+              %w[list get forward drop edit enable disable filter direction inject])
           end
         end
       end
@@ -65,6 +66,7 @@ module Gori
             disable                              Turn off live intercept catch
             filter <query>                       Set the conditional-intercept filter ("" clears)
             direction <both|request|response>    Set which leg(s) intercept holds (default: request)
+            inject <flow-id> [--data=… | --file=PATH]    Inject a frame into an open WebSocket flow
 
           Examples:
             gori run intercept
@@ -73,6 +75,7 @@ module Gori
             gori run intercept edit 3 --raw-file edited.txt
             gori run intercept edit 3 --raw-file desync.txt --no-update-content-length
             gori run intercept direction request
+            gori run intercept inject 42 --direction in --data '{"admin":true}'
 
           See 'gori run intercept <subcommand> --help' for more.
           HELP
@@ -363,7 +366,7 @@ module Gori
 
       private def self.emit_intercept_ack(status : String, detail : String?, format : Symbol,
                                           note : String? = nil) : Nil
-        ok = !status.in?("no_such_item", "stale", "error")
+        ok = !status.in?("no_such_item", "stale", "error", "refused")
         if format == :json
           puts(JSON.build { |j| j.object { j.field "status", status; j.field "ok", ok; j.field "detail", detail; j.field "note", note if note } })
         else
@@ -535,6 +538,73 @@ module Gori
         buf.write(head)
         buf.write(body)
         buf.to_slice
+      end
+
+      # One frame into a live proxied WebSocket (#1630), written by the capturing TUI because
+      # only it holds the socket. Mirrors MCP `ws_inject`: Layer 1 is this command's (permissive
+      # on an unconfigured project, `--allow-unscoped` past a configured one), and the TUI asks
+      # Layer 2 (Sandbox) on the socket. The payload is the operator's: no token expansion.
+      private def self.cmd_intercept_inject(args : Array(String)) : Nil
+        proj = ProjectFlags.new
+        format = :text
+        direction = "out"
+        kind = "text"
+        data : String? = nil
+        file : String? = nil
+        allow_unscoped = false
+        positional = parse_args(args, "gori run intercept inject") do |p|
+          p.banner = "Usage: gori run intercept inject <flow-id> [--direction out|in] [--opcode KIND] " \
+                     "(--data=TEXT | --file=PATH) [options]\n\n" \
+                     "Inject ONE frame into a WebSocket the TUI is still relaying (an HTTP/1.1\n" \
+                     "Upgrade flow), on the socket the app already has. The payload goes out\n" \
+                     "verbatim: no token expansion, no Match & Replace, ahead of any held message.\n" \
+                     "A text/binary frame waits up to 5s for a fragmented message on that side to\n" \
+                     "finish, then is refused; a ping/pong/close goes in at once. --file is the\n" \
+                     "byte-exact channel for a binary frame. Needs the project's TUI capturing."
+          project_options(p, proj, "update")
+          p.on("--direction=DIR", "out = client→server (default), in = server→client") { |v| direction = v }
+          p.on("--opcode=KIND", "Frame type: #{Proxy::WS::Live::OPCODES.keys.join(" | ")} (default text)") { |v| kind = v }
+          p.on("--data=TEXT", "The payload, as text") { |v| data = v }
+          p.on("--file=PATH", "Read the payload's exact bytes from FILE") { |v| file = v }
+          p.on("--allow-unscoped", "Inject even when the flow's host is outside the configured scope") { allow_unscoped = true }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
+        end
+        cmd = "gori run intercept inject"
+        flow_id = take_id(positional, cmd, "<flow-id>", "flow id")
+        abort "#{cmd}: --direction must be out or in" unless direction.in?("out", "in")
+        opcode = Proxy::WS::Live::OPCODES[kind.downcase]? ||
+                 abort "#{cmd}: --opcode must be one of #{Proxy::WS::Live::OPCODES.keys.join(", ")}"
+        abort "#{cmd}: pass --data or --file, not both" if data && file
+        payload = (file.try { |f| read_input_file(f, "#{cmd}: --file") } || data || "").to_slice
+        project = resolve_read_project(proj.name, proj.db)
+        status, detail = with_store(project, long_running: true) do |store|
+          flow = store.get_flow(flow_id) || abort "#{cmd}: flow #{flow_id} not found"
+          if refusal = Proxy::WS::Live.flow_refusal(String.new(flow.request_head))
+            abort "#{cmd}: #{refusal}"
+          end
+          row = flow.row
+          outbound = project_outbound(project, allow_unscoped)
+          guard_outbound(outbound, row.scheme, row.host, row.target, row.port, cmd)
+          outbound.close
+          outcome = store.send_ws_inject(flow_id, direction, opcode, payload)
+          next {outcome.status, outcome.detail} if outcome.is_a?(Store::InterceptAck)
+          abort "#{cmd}: #{intercept_inject_refusal(outcome)}"
+        end
+        emit_intercept_ack(status, detail, format)
+      end
+
+      # `intercept_send_refusal` with the inject's own budget and the headless case named.
+      def self.intercept_inject_refusal(failure : Store::InterceptSendFailure) : String
+        case failure
+        in .not_live?
+          "no live capturing gori instance holds this socket — injection needs the project's TUI capturing " \
+          "(a headless `gori run capture` cannot inject)"
+        in .not_enqueued?
+          "could not enqueue the inject (store write dropped); retry"
+        in .not_confirmed?
+          "inject not confirmed within #{Store.ws_inject_ack_budget_ms}ms — check the flow's messages before " \
+          "retrying, it may still have gone out"
+        end
       end
 
       private def self.cmd_intercept_toggle(enable : Bool, args : Array(String)) : Nil

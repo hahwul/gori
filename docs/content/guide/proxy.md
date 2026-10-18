@@ -184,13 +184,32 @@ behind those boundaries.
 
 **An event stream shows its events while it is still open.** A `text/event-stream` response is recorded as it streams, over HTTP/1.1 and HTTP/2. The flow shows its status and content type once the head arrives, and while it is still Pending, the `EVENTS (sse)` pane, `gori run show` and MCP `get_flow` all read the events received so far. gori writes them in batches: at 16 KiB, or at the end of an event at most four times a second, never one write per event. The capture cap still bounds the body. An event that arrives soon after a batch, followed by silence, appears with the stream's next bytes (usually its heartbeat). `body:` filters and search see the body only once the stream closes. If gori stops mid-stream, the flow keeps the events it had relayed.
 
+### Injecting a frame into a live WebSocket {#websocket-inject}
+
+**A frame can be pushed into a socket the proxy is still relaying, in either direction, on the connection the app already has.** That keeps everything a replay loses: the authenticated session, the subscriptions the client made, and whatever state the server built for that socket. It is the way to answer "what does the client do when the server sends this", or to send the server a message the client's UI never would, mid-conversation.
+
+```bash
+gori run intercept inject 42 --direction in --data '{"role":"admin"}'
+gori run intercept inject 42 --opcode binary --file frame.bin
+gori run intercept inject 42 --opcode ping
+```
+
+MCP's `ws_inject` takes the same `flow_id`, `direction`, `opcode` and payload (`payload`, or `payload_base64` for exact bytes). Both go through the TUI that is capturing the project, because only that process holds the socket; a headless `gori run capture` cannot inject, and the command says so.
+
+- **`out` is client → server** (the default) and is masked with a fresh key, **`in` is server → client** and is not, as RFC 6455 requires. The frame is one complete frame (FIN set) of the type you name: `text`, `binary`, `ping`, `pong` or `close`.
+- **The bytes are yours.** No `$ENV` or `$BIND` expansion, no Match & Replace, and the frame goes out **ahead of** a message Intercept is holding on that side, since it does not pass the hold.
+- **A data frame waits for a message boundary.** If the peer on that side is in the middle of a fragmented message, the frame waits up to 5 seconds for its last fragment, because a data frame inside another message breaks the stream. Past that it is refused and nothing is written. `ping`, `pong` and `close` go in at once, since the protocol allows them between fragments.
+- **It is recorded.** The frame joins the flow's messages marked as injected: `[injected]` in `gori run history show`, `origin: "gori"` and `injected: true` from MCP `get_flow`, and `_origin` in HAR export.
+- **It is an active request.** Scope applies to the flow's host (`--allow-unscoped` / `allow_unscoped:true` waives it), the sandbox still refuses, and each frame counts against the project's request budget.
+- **HTTP/1.1 sockets only.** An RFC 8441 socket over HTTP/2 is refused by name, and so is a flow whose socket has already closed.
+
 ### WebSocket over HTTP/2 {#websocket-http2}
 
 Modern browsers open a WebSocket over HTTP/2 when the origin advertises `SETTINGS_ENABLE_CONNECT_PROTOCOL`, using the extended `CONNECT` of RFC 8441 instead of the HTTP/1.1 `Upgrade:` handshake. gori relays that advertisement verbatim, so a client is entitled to take the path, and gori reads the socket when it does. RFC 8441 replaces the handshake and nothing else, so the frames are the same RFC 6455 frames, read by the same codec: a finding does not depend on which handshake opened the socket.
 
 **Capture and replay are the same. Live editing is not.** The transcript shows up in History's MESSAGES pane, `gori run history show`, the MCP `get_flow` tool and HAR export, exactly as an HTTP/1.1 socket's does. `^R` in the Repeater, `gori run repeater send`, MCP `send_websocket` and a Fuzzer sweep all re-open the socket and exchange frames over it. Two things are HTTP/1.1-only:
 
-- **Per-message intercept and Match & Replace on messages.** Both would have to rewrite a DATA frame to a *different length*, and on HTTP/2 that deadlocks against the peer's flow-control window. gori reads the frames from a copy, after they are already on the wire, so nothing here resizes a frame or writes to a socket. The flow carries a `[gori]` advisory saying which half of the support it got, rather than leaving you to infer it from an empty result.
+- **Per-message intercept, Match & Replace on messages, and [injecting a frame](#websocket-inject).** Both would have to rewrite a DATA frame to a *different length*, and on HTTP/2 that deadlocks against the peer's flow-control window. gori reads the frames from a copy, after they are already on the wire, so nothing here resizes a frame or writes to a socket. The flow carries a `[gori]` advisory saying which half of the support it got, rather than leaving you to infer it from an empty result.
 - **A per-connection ceiling.** gori reads at most 8 extended `CONNECT` streams concurrently on one HTTP/2 connection. Past that a stream is relayed byte-for-byte with no transcript at all, and its advisory says that is what happened. A browser opens a handful of sockets per origin, so this is a bound on pathological cases rather than a limit you meet by working normally.
 
 **Replay re-opens the socket the way the capture did.** Seed a Repeater from an RFC 8441 flow and you get the WebSocket tab, not an HTTP one: gori dials HTTP/2 (ALPN `h2`, or h2c prior knowledge on a plaintext target), waits for the origin's `SETTINGS_ENABLE_CONNECT_PROTOCOL`, sends `:method CONNECT` with `:protocol websocket` and the capture's own `:path`, `:authority` and headers, and treats the `2xx` (not a `101`, which has no meaning on HTTP/2) as the socket opening. From there it is the same engine as the HTTP/1.1 path: the same message script, masking, frame shapes, caps and transcript. The handshake is the capture's, byte for byte; nothing is invented, and the `X-Gori-Protocol: websocket` line you see in the request pane *is* the `:protocol` pseudo-header, editable like any other.

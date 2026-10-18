@@ -514,9 +514,20 @@ module Gori
       getter opcode : Int32
       getter payload : Bytes
       getter shape : WsShape
+      # Who put this message on the wire (V51): nil for the peer, `ORIGIN_GORI` for a frame the
+      # operator injected into the live socket.
+      getter origin : String?
 
       def initialize(@id, @flow_id, @repeater_id, @created_at, @direction, @opcode, @payload,
-                     @shape : WsShape = WsShape::DEFAULT)
+                     @shape : WsShape = WsShape::DEFAULT, @origin : String? = nil)
+      end
+
+      ORIGIN_GORI = "gori"
+
+      # A frame gori injected (#1630). It is real traffic, unlike `notice?`: the peer received
+      # it, so readers mark it rather than refuse it.
+      def injected? : Bool
+        @origin == ORIGIN_GORI
       end
 
       def text? : Bool

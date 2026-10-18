@@ -73,7 +73,7 @@ gori mcp --read-only
 
 | 묶음 | 끄면 빠지는 도구 |
 |------|------------------|
-| **Send traffic** | 대상이나 OAST 서버로 요청을 보내는 모든 도구와, 그 도구가 시작한 작업의 폴러: `send_request`, `send_websocket`, `ws_session_*`, `race_requests`, `timing_requests`, `fuzz_*`, `mine_*`, `discover_*`, `authorize_*`, `sequence_*`(`sequence_analyze` 제외), `run_retest`, `minimize_repeater`, `cache_deception_check`, `grpc_reflect`, `refresh_session_slot`, `oast_*`(`oast_presets` 제외), `list_jobs` / `get_job` / `stop_job`, `active:true`인 `probe_scan`, `active`나 `aggressive`로 올리는 `set_probe_mode` |
+| **Send traffic** | 대상이나 OAST 서버로 요청을 보내는 모든 도구와, 그 도구가 시작한 작업의 폴러: `send_request`, `send_websocket`, `ws_session_*`, `ws_inject`, `race_requests`, `timing_requests`, `fuzz_*`, `mine_*`, `discover_*`, `authorize_*`, `sequence_*`(`sequence_analyze` 제외), `run_retest`, `minimize_repeater`, `cache_deception_check`, `grpc_reflect`, `refresh_session_slot`, `oast_*`(`oast_presets` 제외), `list_jobs` / `get_job` / `stop_job`, `active:true`인 `probe_scan`, `active`나 `aggressive`로 올리는 `set_probe_mode` |
 | **Intercept control** | `intercept_forward`, `intercept_forward_edit`, `intercept_drop`, `intercept_toggle`, `intercept_set_filter`, `intercept_set_direction` |
 | **Edit project data** | 그 밖의 프로젝트 쓰기 전부: 이슈, 노트, repeater, 규칙, env, host override, 세션 슬롯, evidence, 링크, 뷰, 저장된 wordlist(`save_wordlist`, `rename_wordlist`, `delete_wordlist`: 프로젝트가 아니라 전역 카탈로그), probe 스캔과 판정(패시브 `probe_scan`도 찾은 결과를 기록합니다), OpenAPI 문서의 파일 쓰기(`export_openapi`의 `output_path`. 인라인 문서는 꺼지지 않습니다), JavaScript 엔드포인트 스캔(`scan_js_endpoints`는 읽은 것을 저장할 뿐 요청은 보내지 않습니다), flow·히스토리 삭제 |
 | **Change scope & sandbox** | `add_scope_rule`, `update_scope_rule`, `delete_scope_rule`, `set_scope_enabled`, `set_sandbox`(`list_scope`는 계속 제공) |
@@ -82,7 +82,7 @@ gori mcp --read-only
 
 캡처를 읽는 것은 묶음이 아닙니다. 읽기 도구와 `operator_messages` / `reply_to_operator`는 항상 제공됩니다. 꺼진 묶음의 도구는 `tools/list`에서 빠지고, 그래도 호출하면 `TOOL_DISABLED`로 거부되며, 핸드셰이크 instructions가 에이전트에게 어떤 묶음이 꺼졌는지 알려줍니다. 이 스위치는 `--read-only`, `--tools`와 함께 적용되어 셋 모두가 허용한 도구만 제공됩니다. `gori mcp` 프로세스가 시작할 때 읽으므로, 이미 떠 있는 에이전트는 서버를 다시 시작할 때까지 받았던 도구를 그대로 씁니다. 그 시점에 설정 파일을 읽지 못하면 모든 묶음을 켜는 대신 끕니다.
 
-**Ask**로 두면 그 묶음의 도구는 목록에 남고, 호출마다 먼저 운영자에게 묻습니다. 호출은 곧바로 `approval_id`가 담긴 `APPROVAL_PENDING`을 돌려주고, gori는 `ask:` 칩에 승인 카드를 띄웁니다. 카드 내용은 에이전트가 쓴 글이 아니라 gori가 아는 사실(도구, 요청이면 실제로 접속하는 호스트와 포트)로 만듭니다. 거기서 답하면 됩니다. **Allow once**는 그 호출(같은 도구, 같은 인자)의 재시도 한 번을 허용하고, **Always (this server)**는 그 `gori mcp` 프로세스가 끝날 때까지 묶음을 열어 두며, **Deny**는 재시도를 `TOOL_DISABLED`로 거부합니다. `send_request`, `send_websocket`, `ws_session_*`, `race_requests`, `timing_requests`, `fuzz_start`, `mine_start`, `sequence_start`, `minimize_repeater`, `cache_deception_check`, `grpc_reflect`의 요청은 대신 호스트 단위로 묻고 **Always this host**와 **Always host:port**를 고를 수 있습니다. 이 허용은 프로젝트에 저장되어 재시작 후에도 남고, 아카이브에서 프로젝트를 가져오면 지워집니다. 허용은 그 이름이 접속하던 서버를 가리킨 것이므로, 어떤 호스트의 host override를 추가·변경·삭제하면 그 호스트의 허용도 지워집니다. 허용된 호스트라도 sandbox는, sweep이라면 exclude 규칙도 여전히 막습니다. 폴러와 중지(`fuzz_status`, `stop_job`, `oast_poll` 등)는 묻지 않습니다. 답은 승인 id를 `in_reply_to`에 담은 운영자 메시지로 에이전트에게 가고, 에이전트는 같은 호출을 다시 시도합니다. 아무것도 기다리지 않으므로 그동안 다른 호출은 모두 그대로 동작합니다. 답이 없는 카드는 30분 뒤 만료되고, 다음 재시도가 다시 묻습니다. **Ask**는 서버가 쓸 수 있는 프로젝트가 바인딩되어 있어야 하며, 없으면 호출은 `TOOL_DISABLED`로 거부됩니다.
+**Ask**로 두면 그 묶음의 도구는 목록에 남고, 호출마다 먼저 운영자에게 묻습니다. 호출은 곧바로 `approval_id`가 담긴 `APPROVAL_PENDING`을 돌려주고, gori는 `ask:` 칩에 승인 카드를 띄웁니다. 카드 내용은 에이전트가 쓴 글이 아니라 gori가 아는 사실(도구, 요청이면 실제로 접속하는 호스트와 포트)로 만듭니다. 거기서 답하면 됩니다. **Allow once**는 그 호출(같은 도구, 같은 인자)의 재시도 한 번을 허용하고, **Always (this server)**는 그 `gori mcp` 프로세스가 끝날 때까지 묶음을 열어 두며, **Deny**는 재시도를 `TOOL_DISABLED`로 거부합니다. `send_request`, `send_websocket`, `ws_session_*`, `ws_inject`, `race_requests`, `timing_requests`, `fuzz_start`, `mine_start`, `sequence_start`, `minimize_repeater`, `cache_deception_check`, `grpc_reflect`의 요청은 대신 호스트 단위로 묻고 **Always this host**와 **Always host:port**를 고를 수 있습니다. 이 허용은 프로젝트에 저장되어 재시작 후에도 남고, 아카이브에서 프로젝트를 가져오면 지워집니다. 허용은 그 이름이 접속하던 서버를 가리킨 것이므로, 어떤 호스트의 host override를 추가·변경·삭제하면 그 호스트의 허용도 지워집니다. 허용된 호스트라도 sandbox는, sweep이라면 exclude 규칙도 여전히 막습니다. 폴러와 중지(`fuzz_status`, `stop_job`, `oast_poll` 등)는 묻지 않습니다. 답은 승인 id를 `in_reply_to`에 담은 운영자 메시지로 에이전트에게 가고, 에이전트는 같은 호출을 다시 시도합니다. 아무것도 기다리지 않으므로 그동안 다른 호출은 모두 그대로 동작합니다. 답이 없는 카드는 30분 뒤 만료되고, 다음 재시도가 다시 묻습니다. **Ask**는 서버가 쓸 수 있는 프로젝트가 바인딩되어 있어야 하며, 없으면 호출은 `TOOL_DISABLED`로 거부됩니다.
 
 묶음은 목적지가 아니라 능력 단위입니다. **Intercept control**이 켜져 있으면 에이전트는 보류된 요청을 고쳐서 forward할 수 있고, **Send traffic**이 꺼져 있어도 그 바이트는 대상에 도달합니다. 에이전트의 바이트가 대상에 닿지 않게 하려면 둘 다 끄세요. 마찬가지로 **Change scope & sandbox**를 끄면 에이전트가 울타리를 옮기지 못할 뿐 넘지 못하는 것은 아닙니다. `allow_unscoped:true`를 준 요청은 규칙이 덮지 않는 대상에도 닿으므로(sandbox는 그래도 막습니다), 그것까지 막으려면 **Send traffic**도 끄거나 **Change scope & sandbox**를 ask로 두세요. 그러면 waiver가 스스로 통과시키지 않고 그 호스트에 대한 승인을 기다립니다. 요청이 닿는 곳을 바꾸는 스위치가 두 개 더 있습니다. host override(**Edit project data**)는 scope 안의 호스트 이름을 다른 주소로 돌리고, **Manage projects**는 scope와 sandbox가 다른 프로젝트로 에이전트가 옮겨 갈 수 있게 합니다.
 
@@ -92,7 +92,7 @@ gori mcp --read-only
 
 | 시작 방법 | 도구 | `tools/list` | 토큰 | 용도 |
 | --- | ---: | ---: | ---: | --- |
-| `gori mcp` | 197 | ~246 KB | ~63k | 전부 (기본값) |
+| `gori mcp` | 198 | ~248 KB | ~64k | 전부 (기본값) |
 | `--read-only` | 64 | ~75 KB | ~19k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
 | `--tools=@recon` | 39 | ~58 KB | ~15k | 캡처를 읽고 파악, 패시브 스캔, 요청 재전송, 이슈·노트 기록 |
 | `--tools=@recon --read-only` | 29 | ~42 KB | ~11k | `--read-only`가 끄는 도구를 뺀 `@recon` |
@@ -225,7 +225,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `ql_reference` | 쿼리 언어 레퍼런스 |
 | `ql_explain` | 쿼리를 실행하지 않고 진단. 요청을 쓰기 전에 필터를 점검할 때 사용 |
 
-**액션 도구**(`--read-only`로 비활성화됨. 단, `switch_project`는 `--pin-project`로 빼지 않는 한 동작하고 `create_project`는 서버가 언바운드일 때 동작합니다). 소켓을 여는 도구(`send_request`, `send_websocket`, `ws_session_open`, `fuzz_*`, `mine_*`, `authorize_*`, `cache_deception_check`, `sequence_*`, `discover_*`, `grpc_reflect`, `minimize_repeater`, `race_requests`, `timing_requests`, `run_retest`, `refresh_session_slot`, 그리고 `active:true`를 준 `probe_scan`)는 모두 스코프 게이트를 지납니다. 설정된 스코프 밖의 대상, 또는 스코프가 없는 대상은 호출에 명시적 예외 선언인 `allow_unscoped:true`를 주지 않는 한 `SCOPE_BLOCKED`로 거부됩니다. 그때도 샌드박스는 그대로 적용되고, 스윕하는 도구(`fuzz_*`, `mine_*`, `discover_*`, `sequence_*`, `authorize_*`, `minimize_repeater`, `run_retest`, active `probe_scan`)에는 명시적 제외 규칙도 적용됩니다. `send_request`처럼 손으로 작성한 단일 전송은 프록시와 마찬가지로 제외 규칙에 막히지 않습니다. 프로젝트 [요청 예산](/ko/reference/config/#per-project-overrides)은 이 모두에 상한을 둡니다. 예산이 거부한 전송은 `BUDGET_EXHAUSTED`(재시도 불가)로, 프로젝트 데이터베이스가 슬롯을 내주지 못했으면 `PROJECT_BUSY`(재시도 가능)로 실패하고, 총량을 다 쓴 실행은 `budget_exhausted`로 끝납니다.
+**액션 도구**(`--read-only`로 비활성화됨. 단, `switch_project`는 `--pin-project`로 빼지 않는 한 동작하고 `create_project`는 서버가 언바운드일 때 동작합니다). 소켓을 여는 도구(`send_request`, `send_websocket`, `ws_session_open`, `ws_inject`, `fuzz_*`, `mine_*`, `authorize_*`, `cache_deception_check`, `sequence_*`, `discover_*`, `grpc_reflect`, `minimize_repeater`, `race_requests`, `timing_requests`, `run_retest`, `refresh_session_slot`, 그리고 `active:true`를 준 `probe_scan`)는 모두 스코프 게이트를 지납니다. 설정된 스코프 밖의 대상, 또는 스코프가 없는 대상은 호출에 명시적 예외 선언인 `allow_unscoped:true`를 주지 않는 한 `SCOPE_BLOCKED`로 거부됩니다. 그때도 샌드박스는 그대로 적용되고, 스윕하는 도구(`fuzz_*`, `mine_*`, `discover_*`, `sequence_*`, `authorize_*`, `minimize_repeater`, `run_retest`, active `probe_scan`)에는 명시적 제외 규칙도 적용됩니다. `send_request`처럼 손으로 작성한 단일 전송은 프록시와 마찬가지로 제외 규칙에 막히지 않습니다. 프로젝트 [요청 예산](/ko/reference/config/#per-project-overrides)은 이 모두에 상한을 둡니다. 예산이 거부한 전송은 `BUDGET_EXHAUSTED`(재시도 불가)로, 프로젝트 데이터베이스가 슬롯을 내주지 못했으면 `PROJECT_BUSY`(재시도 가능)로 실패하고, 총량을 다 쓴 실행은 `budget_exhausted`로 끝납니다.
 
 캡처한 바이트는 데이터이지 지시가 아닙니다. 결과에 담긴 본문, WebSocket 메시지, SSE 이벤트, 보류된 intercept 항목, gRPC 메시지, OAST 히트, 디코딩한 JSON-RPC·LLM 텍스트에는 모두 `origin`이 붙습니다. `target`(테스트 대상 서버가 쓴 것), `client`(브라우저나 앱이 쓴 것), `remote`(OAST 콜백 같은 외부 당사자)입니다. `list_params`와 `export_openapi`의 `origin` 인자(scheme, host, port)와는 다른 것입니다.
 
@@ -284,6 +284,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `oast_resume` / `oast_release` | 저장된 세션을 다시 살려 이전에 심어둔 페이로드가 계속 resolve되게 하고(폴링 결과는 프로젝트에 저장됩니다), 끝난 engagement는 등록 해제합니다. 콜백은 남습니다 |
 | `list_jobs` / `get_job` / `stop_job` | 작업 종류를 가로질러 처리: 이번 세션이 시작한 모든 fuzz, mine, discover, sequence, authorize, WebSocket 세션 작업 나열, 또는 id로 하나를 조회하고 중지. 이미 끝난 작업을 중지하면 아무것도 바꾸지 않고 `already_finished:true`로 답하며, 종류별 도구에 다른 종류의 id를 주면(`fuzz_results{job_id:"mn_2"}`) 그 id를 읽는 도구를 알려 줍니다 |
 | `intercept_forward` / `intercept_forward_edit` / `intercept_drop` | 홀드된 메시지를 바이트 그대로 내보내거나, 수정한 와이어 바이트로 내보내거나, 드롭 |
+| `ws_inject` | 프록시가 아직 중계 중인 WebSocket에, 앱 자신의 소켓 위로 어느 방향이든 프레임 하나(`text`, `binary`, `ping`, `pong`, `close`)를 밀어 넣습니다. 액티브이며 플로우의 호스트에 스코프 게이트가 걸리고, 캡처 중인 TUI가 적용합니다. [라이브 인터셉트](#live-intercept) 참고 |
 | `intercept_toggle` / `intercept_set_filter` / `intercept_set_direction` | 캐치 활성화 및 해제, 조건 쿼리 설정, 홀드할 방향 선택 |
 
 > 액션 도구는 안전을 위해 상한이 있습니다: fuzz, mine, sequence, discover, authorize 작업은 총 요청 수, 동시성, 저장 결과 수가 제한됩니다. authorize의 상한은 `플로우 × 아이덴티티`를 세며, 상한을 넘는 선택은 잘라서 실행하는 대신 시작 전에 거부됩니다. 잘린 실행은 보내지도 않은 플로우를 "enforced"로 보고하게 되기 때문입니다. `create_rule`로 생성된 규칙은 `gori run`과 새로 열린 TUI에 적용됩니다. 이미 실행 중인 해당 프로젝트의 TUI는 다음 스토어 갱신 때 규칙을 다시 로드하므로 재시작할 필요가 없습니다.
@@ -305,6 +306,8 @@ create_repeaters{flow_ids: [...], name_prefix: "oas: ", tags: "spec"}
 에이전트가 나중에 History를 읽는 대신, 인터셉트 루프 안에 나란히 앉을 수 있습니다. 캡처 락을 쥔 TUI 세션이 홀드된 메시지를 에이전트 쪽으로 미러링하고 에이전트가 보낸 명령을 받아 처리하므로, `intercept_list` → `intercept_get` → `intercept_forward_edit`은 직접 손으로 도는 것과 같은 루프입니다.
 
 변경을 일으키는 쪽(`intercept_forward`, `intercept_forward_edit`, `intercept_drop`, `intercept_toggle`, `intercept_set_filter`, `intercept_set_direction`)은 `--read-only`에서 비활성화되며, 라이브 캡처 세션이 락을 쥐고 있지 않으면 모두 거부합니다. 프록시가 실제로 트래픽을 홀드하고 있지 않으면 내보낼 것 자체가 없기 때문입니다.
+
+`ws_inject`도 같은 브리지를 타므로 캡처 중인 TUI가 있어야 합니다. 프록시가 중계 중인 소켓을 쥔 것은 그 프로세스뿐이기 때문입니다. 열린 HTTP/1.1 WebSocket 플로우에 프레임 하나를 클라이언트 → 서버(`direction:"out"`, 기본값)나 서버 → 클라이언트(`"in"`)로 쓰며, `payload`는 글자 그대로의 텍스트, `payload_base64`는 정확한 바이트입니다. 인터셉트 동사가 아니라 전송이므로 **Send traffic**에 속하고, 플로우의 호스트에 스코프 게이트가 걸리며 호스트 단위로 승인을 묻습니다. text나 binary 프레임은 그 방향의 조각난 메시지가 끝나기를 최대 5초 기다리고, 그 뒤에는 `REFUSED`입니다. 프레임은 `origin: "gori"`로 플로우의 `ws_messages`에 남습니다. 자세한 내용은 [프록시 가이드](/ko/guide/proxy/#websocket-inject)에 있고, 스크립트에서는 `gori run intercept inject`가 같은 경로입니다.
 
 에이전트의 행동은 조용히 지나가지 않고 드러납니다. 각 행동은 에이전트에서 온 것으로 표시되어 알림 센터에 남고 사용자 본인의 행동과 다르게 렌더링되므로, 다른 탭을 보는 동안 코파일럿이 트래픽에 무엇을 했는지 확인할 수 있습니다.
 

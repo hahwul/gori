@@ -752,7 +752,7 @@ describe Gori::Proxy::WS::MessageGate do
     dst = IO::Memory.new
     sink = HoldSink.new
     with_interceptor("proto:ws") do |ic|
-      gate = WS::MessageGate.new("out", dst, 36_i64, sink, ic, HOLD_CTX, mask: true)
+      gate = WS::MessageGate.new("out", WS::Leg.new("out", dst, mask: true), 36_i64, sink, ic, HOLD_CTX, mask: true)
       gate.submit(WS::OP_TEXT, "held".to_slice, nil)
       wait_until("the hold") { ic.pending_count == 1 }
       gate.close
@@ -777,7 +777,7 @@ describe Gori::Proxy::WS::MessageGate do
     dst = IO::Memory.new
     sink = HoldSink.new
     with_interceptor("proto:ws body:first") do |ic|
-      gate = WS::MessageGate.new("out", dst, 37_i64, sink, ic, HOLD_CTX, mask: true)
+      gate = WS::MessageGate.new("out", WS::Leg.new("out", dst, mask: true), 37_i64, sink, ic, HOLD_CTX, mask: true)
       gate.submit(WS::OP_TEXT, "first".to_slice, nil)
       wait_until("the hold") { ic.pending_count == 1 }
       # Declined by the condition, so it queues for ORDER only, behind the hold.
@@ -795,7 +795,7 @@ describe Gori::Proxy::WS::MessageGate do
     dst = IO::Memory.new
     sink = HoldSink.new
     with_interceptor("proto:ws") do |ic|
-      gate = WS::MessageGate.new("out", dst, 39_i64, sink, ic, HOLD_CTX, mask: true)
+      gate = WS::MessageGate.new("out", WS::Leg.new("out", dst, mask: true), 39_i64, sink, ic, HOLD_CTX, mask: true)
       gate.submit(WS::OP_TEXT, "secret".to_slice, nil)
       wait_until("the hold") { ic.pending_count == 1 }
       ic.drop(ic.pending.first.id)

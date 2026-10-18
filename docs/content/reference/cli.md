@@ -428,6 +428,7 @@ gori run intercept get 3 --format json
 gori run intercept forward 3
 gori run intercept edit 3 --raw-file edited.txt
 gori run intercept direction request
+gori run intercept inject 42 --direction in --data '{"role":"admin"}'
 ```
 
 | Subcommand | Description |
@@ -440,6 +441,7 @@ gori run intercept direction request
 | `enable` / `disable` | Arm or disarm the live catch |
 | `filter <query>` | Set the conditional-intercept query. Pass `""` to clear it |
 | `direction <both\|request\|response>` | Which leg(s) the catch holds (default `request`) |
+| `inject <flow-id>` | Push one frame into a WebSocket the TUI is still relaying (HTTP/1.1 only): `--direction out\|in` (default `out`, client → server), `--opcode text\|binary\|ping\|pong\|close` (default `text`), and `--data=TEXT` or `--file=PATH` for exact bytes. Sent verbatim, ahead of any held message; a data frame waits up to 5s for a fragmented message on that side to end. Scope-gated against the flow's host (`--allow-unscoped` waives it). See [Injecting a frame](/guide/proxy/#websocket-inject) |
 
 `list` and `get` redact sensitive header values unless `--include-sensitive` is passed. Write subcommands round-trip through the project database and poll for the TUI's ack.
 

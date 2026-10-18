@@ -2281,10 +2281,18 @@ module Gori
           SQL
       ]
 
+      # V51 — who put a WebSocket message on the wire (#1630). NULL is the peer, which every
+      # captured row before this was; `gori` is a frame the operator injected into a live
+      # proxied socket. A column rather than a NOTICE row, because an injected frame IS traffic
+      # (it reached the peer, and a seed may replay it), so readers must mark it, not refuse it.
+      V51 = [
+        "ALTER TABLE ws_messages ADD COLUMN origin TEXT",
+      ]
+
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
                     V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31, V32, V33,
                     V34, V35, V36, V37, V38, V39, V40, V41, V42, V43, V44, V45, V46,
-                    V47, V48, V49, V50]
+                    V47, V48, V49, V50, V51]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|
@@ -2355,7 +2363,7 @@ module Gori
       end
 
       # The statements one MIGRATIONS entry actually runs. V39–V41 and V46 do their table move in code
-      # first and leave only their seeds; V42, V47 and V48 are skipped when their column is already there.
+      # first and leave only their seeds; V42, V47, V48 and V51 are skipped when their column is already there.
       private def self.run_statements(conn : DB::Connection, statements : Array(String)) : Array(String)
         if statements.same?(V39)
           rebuild_v39(conn) unless autoincrement_in_place(conn.as(SQLite3::Connection))
@@ -2369,9 +2377,7 @@ module Gori
         elsif statements.same?(V46)
           move_to_autoincrement(conn.as(SQLite3::Connection), V46_REBUILDS, 46)
           V46_AFTER
-        elsif (statements.same?(V42) && column?(conn, "fuzz_results", "shape")) ||
-              (statements.same?(V47) && column?(conn, "events", "actor_label")) ||
-              (statements.same?(V48) && column?(conn, "fuzz_results", "extracts"))
+        elsif ADDED_COLUMNS.any? { |(m, table, column)| statements.same?(m) && column?(conn, table, column) }
           # SQLite has no `ADD COLUMN IF NOT EXISTS`, and every migration since V36 is
           # replay-safe: a project whose `user_version` was wound back (the index specs rebuild
           # an older shape that way) already holds the column.
@@ -2380,6 +2386,10 @@ module Gori
           statements
         end
       end
+
+      # The replay-safe ADD COLUMN migrations, by the column each one adds.
+      private ADDED_COLUMNS = { {V42, "fuzz_results", "shape"}, {V47, "events", "actor_label"},
+                               {V48, "fuzz_results", "extracts"}, {V51, "ws_messages", "origin"} }
 
       private def self.column?(conn : DB::Connection, table : String, column : String) : Bool
         !conn.query_one?("SELECT 1 FROM pragma_table_info(?) WHERE name = ?", table, column,
