@@ -294,6 +294,34 @@ describe Gori::Proxy::WS::Live do
       "#{WS::NOTICE_PREFIX}gori closed this socket: an injected frame could not finish writing server→client")
   end
 
+  it "leaves a client's reset under a parked inject to the client, not to gori" do
+    sink = LiveSink.new
+    outcome = nil
+    with_socket_relay(sink, 415_i64) do |browser, _origin|
+      result = Channel(String?).new(1)
+      big = "x" * (32 * 1024 * 1024)
+      spawn do
+        r = nil
+        # The default wait, so the reset comes long before the write could time out. Up to
+        # three frames for the same reason as above: Windows parks only a later send.
+        3.times { break if r = inject(sink, 415_i64, "in", WS::OP_BIN, big) }
+        result.send(r)
+      end
+      sleep 150.milliseconds
+      browser.linger = 0 # an RST, not a FIN
+      browser.close
+      outcome = receive_within(result, 5, "the inject to fail")
+    end
+    outcome.not_nil!.should contain("failed while writing")
+    notes = sink.rows.map(&.[2]).select(&.starts_with?(WS::NOTICE_PREFIX))
+    notes.none?(&.includes?("gori closed this socket")).should be_true
+    # Crystal's IOCP read path returns an RST as end of stream, so a Windows relay sees a FIN
+    # there and, correctly for what it can see, writes no reset row at all.
+    {% unless flag?(:win32) %}
+      notes.any?(&.includes?("the client ended this WebSocket with a transport-level RESET")).should be_true
+    {% end %}
+  end
+
   it "bounds a teardown write queued behind a parked one" do
     server = TCPServer.new("127.0.0.1", 0)
     peer = TCPSocket.new("127.0.0.1", server.local_address.port)

@@ -24,8 +24,9 @@ module Gori::Proxy::WS
     getter? closed = false
     # A CLOSE frame has gone out on this side, after which RFC 6455 §5.5.1 allows no data frame.
     getter? close_sent = false
-    # gori closed this socket itself, because an injected frame could not finish writing:
-    # the relay's teardown must not report the resulting end as the peer's RESET.
+    # gori closed this socket itself, because an injected frame's write timed out: the relay's
+    # teardown must not report the resulting end as the peer's RESET. A write that failed
+    # for any other reason (EPIPE, a reset) failed because the PEER ended it, so it is not set.
     getter? killed = false
 
     def initialize(@direction : String, @io : IO, @mask : Bool)
@@ -154,7 +155,8 @@ module Gori::Proxy::WS
         # Part of the frame may be on the wire, and no byte after it on this side parses, so
         # the socket ends here. The RAW socket: closing a TLS layer would SSL_shutdown, writing
         # close_notify to the very peer that stopped reading.
-        @closed = @killed = true
+        @closed = true
+        @killed = ex.is_a?(IO::TimeoutError)
         (sock || @io).close rescue nil
         Live::Spent.new(spent_reason(ex, limit))
       ensure

@@ -66,8 +66,11 @@ module Gori::Proxy::WS
     end
 
     # One direction's outcome, tagged with WHICH direction it was — `run` needs the pairing
-    # to decide which gate's destination socket the ending is about.
-    record DirectionEnd, direction : String, ending : Ending do
+    # to decide which gate's destination socket the ending is about. `echo` is set when gori
+    # had already closed one of the two sockets under an injected frame (`Leg#killed?`, #1630)
+    # by the time this direction ended: every pump reads one socket and writes the other, so
+    # its raise is then gori's own close coming back, not a peer's reset.
+    record DirectionEnd, direction : String, ending : Ending, echo : Bool = false do
       def clean? : Bool
         ending.close?
       end
@@ -210,8 +213,14 @@ module Gori::Proxy::WS
       done = Channel(DirectionEnd).new(2) # each pump's payload: HOW that direction ended
       # client→server: RFC 6455 §5.3 requires every such frame to be masked, so a re-emitted
       # one carries a fresh key of gori's.
-      spawn { done.send(DirectionEnd.new("out", run_direction(client, out_leg, "out", flow_id, sink, out_pump, out_gate))) }
-      spawn { done.send(DirectionEnd.new("in", run_direction(upstream, in_leg, "in", flow_id, sink, in_pump, in_gate))) }
+      spawn do
+        e = run_direction(client, out_leg, "out", flow_id, sink, out_pump, out_gate)
+        done.send(DirectionEnd.new("out", e, echo: out_leg.killed? || in_leg.killed?))
+      end
+      spawn do
+        e = run_direction(upstream, in_leg, "in", flow_id, sink, in_pump, in_gate)
+        done.send(DirectionEnd.new("in", e, echo: out_leg.killed? || in_leg.killed?))
+      end
 
       # The first direction to end tells us how to tear down:
       #   - abnormal end (EOF / reset / truncated frame): the peer is gone — close both
@@ -331,20 +340,22 @@ module Gori::Proxy::WS
     # teardown is never reported as a peer's. Best-effort, and on `NOTICE_DIRECTION` for the
     # reason stated there.
     #
-    # A leg gori `killed` (an injected frame that could not finish writing, #1630) ends a pump
-    # with exactly a peer RESET's shape, so that case says what gori did instead.
+    # A leg gori `killed` (an injected frame's write timed out, #1630) gets a row saying what
+    # gori did. Its close ends whichever pump touches that socket next with a RESET's shape
+    # (`DirectionEnd#echo`), and that is skipped; a peer's reset observed before it is not.
     private def self.record_teardown(sink : FlowSink, flow_id : Int64,
                                      observed : Array(DirectionEnd), killed : Leg?) : Nil
       if leg = killed
-        note = "gori closed this socket: an injected frame could not finish writing " \
-               "#{Live.side(leg.direction)}"
-      else
-        reset = observed.find(&.ending.reset?) || return
-        note = teardown_sentence(reset)
+        record_teardown_note(sink, flow_id, "gori closed this socket: an injected frame could not " \
+                                            "finish writing #{Live.side(leg.direction)}")
       end
+      reset = observed.find { |e| e.ending.reset? && !e.echo } || return
+      record_teardown_note(sink, flow_id, teardown_sentence(reset))
+    end
+
+    private def self.record_teardown_note(sink : FlowSink, flow_id : Int64, note : String) : Nil
       ::Log.info { "ws: #{note}" }
-      sink.on_ws_message(flow_id, NOTICE_DIRECTION, OP_TEXT.to_i,
-        "#{NOTICE_PREFIX}#{note}".to_slice)
+      sink.on_ws_message(flow_id, NOTICE_DIRECTION, OP_TEXT.to_i, "#{NOTICE_PREFIX}#{note}".to_slice)
     rescue
       nil
     end
