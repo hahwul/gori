@@ -72,8 +72,8 @@ module Gori::CLI::Run
     original_detail(store, d, true)
   end
 
-  def self.sse_event_text_for_spec(e : Sse::Event) : String
-    sse_event_text(e, 0)
+  def self.sse_event_text_for_spec(e : Sse::Event, idx : Int32 = 0, times : Array(Int64)? = nil) : String
+    sse_event_text(e, idx, times)
   end
 
   def self.print_decoded_text_for_spec(detail : Store::FlowDetail, req = true, resp = true) : String
@@ -503,6 +503,12 @@ describe "gori run show --format json" do
     txt.should_not contain('\e')
     txt.should_not contain('\a')
     txt.should contain("⟨ESC⟩")
+  end
+
+  it "prints an SSE event's arrival after the first one when the capture timed it (#1631)" do
+    e = Gori::Sse.events("event: message\ndata: x\n\n".to_slice).first
+    Gori::CLI::Run.sse_event_text_for_spec(e, 1, [5_000_i64, 417_900_i64]).lines.first.should eq("#2 +0.412s type=message")
+    Gori::CLI::Run.sse_event_text_for_spec(e, 1).lines.first.should eq("#2 type=message")
   end
 
   it "prints RPC and LLM sections for JSON-RPC and LLM calls" do

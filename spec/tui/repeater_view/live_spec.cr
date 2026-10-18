@@ -114,4 +114,23 @@ describe "Gori::Tui::RepeaterView — an event stream while it is open" do
     view.response_parts.not_nil![1].should eq("data: one\n\n")
     view.response_wire.not_nil![1].should eq("data: one\n\n".to_slice)
   end
+
+  it "shows each event's arrival after the first, live and once the result lands" do
+    view, live = live_view
+    live.open(SSE_HEAD, Gori::Sse::Arrivals.new(chunked: false))
+    live.append("data: one\n\n".to_slice)
+    sleep 40.milliseconds
+    live.append("data: two\n\n".to_slice)
+    view.live_tick.should be_true
+    rows = event_rows(view)
+    rows[0].should eq("▸ event #1  +0.000s")
+    offset = rows[1].match(/^▸ event #2  \+(\d+\.\d{3})s$/).not_nil![1].to_f
+    offset.should be >= 0.04
+
+    view.apply(Gori::Repeater::Result.new(SSE_HEAD, "data: one\n\ndata: two\n\n".to_slice, nil, 1000_i64))
+    event_rows(view).should eq(rows)
+    # A later send that did not stream leaves no stale times behind.
+    view.apply(Gori::Repeater::Result.new(SSE_HEAD, "data: one\n\n".to_slice, nil, 1000_i64))
+    event_rows(view).should eq(["▸ event #1"])
+  end
 end

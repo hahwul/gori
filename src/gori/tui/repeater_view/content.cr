@@ -63,6 +63,8 @@ class Gori::Tui::RepeaterView
   # Memoized + dropped only when a new result is applied (reset_result_caches), so
   # a held Repeater tab isn't re-parsed / re-highlighted / re-diffed 20×/sec.
   private def reset_result_caches : Nil
+    # A new result: `apply` restores the arrival times of a stream it ends.
+    @result_times = nil
     resp_wrap_reset # the wrap memo describes the OLD rows; a new result replaces them
     drop_resp_view_cache
     @diff_lines_cache = nil

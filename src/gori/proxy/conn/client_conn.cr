@@ -1723,7 +1723,10 @@ module Gori::Proxy
         ttfb_us: ttfb, duration_us: duration,
         body_truncated: resp_capture.truncated?, body_size: resp_capture.total,
         state: state, error: error, advisory: response_advisory(advisory), interims: @interims)
-      captured.live = resp_capture.is_a?(LiveCapture)
+      if resp_capture.is_a?(LiveCapture)
+        captured.live = true
+        captured.event_times = resp_capture.event_times
+      end
       capture_response(captured)
     end
 
@@ -1737,7 +1740,8 @@ module Gori::Proxy
       hint = capture_hint(resp_framing, resp_len)
       if !resp_framing.none? && resp.status != 101 && sse?(resp)
         head = FlowMapper.response(sent_resp, flow_id: flow_id, ttfb_us: ttfb, state: Store::FlowState::Pending)
-        LiveCapture.new(Settings.capture_max, hint, @sink, head)
+        arrivals = Gori::Sse::Arrivals.for(resp.headers.get?("Content-Encoding"), resp_framing.chunked?)
+        LiveCapture.new(Settings.capture_max, hint, @sink, head, arrivals)
       else
         Codec::CaptureBuffer.new(Settings.capture_max, hint)
       end

@@ -726,6 +726,7 @@ module Gori
             "intercept_originals" => %w[flow_id request],
             "flow_interims"       => %w[flow_id seq status head relayed omitted],
             "flow_live_chunks"    => %w[flow_id off bytes],
+            "flow_event_times"    => %w[flow_id first times],
             "flow_rule_hits"      => %w[flow_id side scope rule_id],
             "rewrite_originals"   => %w[flow_id side head body],
           })

@@ -3,6 +3,7 @@ require "sqlite3"
 require "log"
 require "json"
 require "./media_type"
+require "./sse"
 require "./store/models"
 require "./store/sqlite_text"
 require "./store/safe_regexp"
@@ -132,14 +133,17 @@ module Gori
     # Fire-and-forget append of a still-streaming event-stream body (#1631), shaped like
     # InsertH2Frame and for the same reason: the proxy relays first and never waits on the DB.
     # `head`, when set, is the response head with state Pending, so History shows the status
-    # while the stream is open; it rides only the first append that gets queued.
+    # while the stream is open; it rides only the first append that gets queued. `times` are
+    # the packed arrivals of the events numbered from `first` on (`flow_event_times`, V52).
     struct AppendLive < WriteOp
       getter flow_id : Int64
       getter off : Int64
       getter bytes : Bytes
       getter head : CapturedResponse?
+      getter first : Int32
+      getter times : Bytes
 
-      def initialize(@flow_id, @off, @bytes, @head)
+      def initialize(@flow_id, @off, @bytes, @head, @first = 0, @times = Bytes.empty)
       end
     end
 
@@ -878,9 +882,10 @@ module Gori
     # Queues one live append (see AppendLive) WITHOUT blocking: true when it was queued, false
     # when the writer is saturated or closing and it was dropped. The caller advances its
     # offset only on true, so a drop makes the next chunk bigger and never leaves a gap.
-    def append_live(flow_id : Int64, off : Int64, bytes : Bytes, head : CapturedResponse?) : Bool
+    def append_live(flow_id : Int64, off : Int64, bytes : Bytes, head : CapturedResponse?,
+                    first : Int32 = 0, times : Bytes = Bytes.empty) : Bool
       select
-      when @writes.send(AppendLive.new(flow_id, off, bytes, head))
+      when @writes.send(AppendLive.new(flow_id, off, bytes, head, first, times))
         true
       else
         false
@@ -1522,6 +1527,7 @@ module Gori
                     deferred << -> { publish(FlowEvent.new(live_fid, :updated)) }
                   end
                   append_live_one(c, op) unless op.bytes.empty?
+                  append_times_one(c, op) unless op.times.empty?
                 when ExecTask
                   task_reply = op.reply
                   op.run.call(c)
@@ -1733,6 +1739,7 @@ module Gori
       conn.exec("DELETE FROM intercept_originals WHERE flow_id <= ?", cutoff)
       conn.exec("DELETE FROM flow_interims WHERE flow_id <= ?", cutoff)
       conn.exec("DELETE FROM flow_live_chunks WHERE flow_id <= ?", cutoff)
+      conn.exec("DELETE FROM flow_event_times WHERE flow_id <= ?", cutoff)
       conn.exec("DELETE FROM flow_rule_hits WHERE flow_id <= ?", cutoff)
       conn.exec("DELETE FROM rewrite_originals WHERE flow_id <= ?", cutoff)
       conn.exec("DELETE FROM flows WHERE id <= ?", cutoff)
@@ -2209,10 +2216,17 @@ module Gori
         resp.state == FlowState::Complete ? 1 : 0, resp.content_type, resp.status, resp.flow_id)
       # The live chunks (#1631) are superseded by the body just written, and go even when the
       # flow itself was deleted mid-stream, so they sit above the return below.
-      conn.exec("DELETE FROM flow_live_chunks WHERE flow_id = ?", resp.flow_id) if resp.live?
+      # The times the appends carried go too: the final write holds them all, below.
+      if resp.live?
+        conn.exec("DELETE FROM flow_live_chunks WHERE flow_id = ?", resp.flow_id)
+        conn.exec("DELETE FROM flow_event_times WHERE flow_id = ?", resp.flow_id)
+      end
       # The flow was deleted (clear history, delete_flow) while the request was in flight: its
       # side rows would be orphans holding pre-rule bytes the operator already deleted.
       return if res.rows_affected == 0
+      if (times = resp.event_times) && !times.empty?
+        conn.exec("INSERT INTO flow_event_times (flow_id, first, times) VALUES (?, 0, ?)", resp.flow_id, times)
+      end
       write_interims(conn, resp.flow_id, resp.interims)
       write_rewrite(conn, resp.flow_id, RuleTarget::Response, resp.rewrite)
       # `fts_dirty = 1` again: the response side just appeared (or changed), so whatever the
@@ -2435,6 +2449,11 @@ module Gori
       conn.exec(SQL_APPEND_LIVE, op.flow_id, op.off, op.bytes, op.flow_id)
     end
 
+    # Same guard and same OR REPLACE as `append_live_one`, for the same reasons.
+    private def append_times_one(conn : DB::Connection, op : AppendLive) : Nil
+      conn.exec(SQL_APPEND_TIMES, op.flow_id, op.first, op.times, op.flow_id)
+    end
+
     # The head a live stream shows while it is open: status, content type, latency, and its size
     # so far. Not `update_one`, whose row write is a response LANDING: this one must leave alone
     # a flow that is no longer Pending (abandoned at shutdown, or already finalized), and the
@@ -2450,6 +2469,10 @@ module Gori
 
     private SQL_APPEND_LIVE =
       "INSERT OR REPLACE INTO flow_live_chunks (flow_id, off, bytes) SELECT ?, ?, ? " \
+      "WHERE EXISTS (SELECT 1 FROM flows WHERE id = ? AND state = #{FlowState::Pending.value})"
+
+    private SQL_APPEND_TIMES =
+      "INSERT OR REPLACE INTO flow_event_times (flow_id, first, times) SELECT ?, ?, ? " \
       "WHERE EXISTS (SELECT 1 FROM flows WHERE id = ? AND state = #{FlowState::Pending.value})"
 
     private SQL_INSERT_H2_FRAME_DATA =

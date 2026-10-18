@@ -3,6 +3,7 @@ require "../spec_helper"
 # Records each live append; refuses the next `refuse` of them, as a saturated writer would.
 private class LiveSink < Gori::Proxy::FlowSink
   getter appends = [] of {Int64, String, Bool}
+  getter times = [] of {Int32, Array(Int64)}
   property refuse = 0
 
   def on_request(req : Gori::Store::CapturedRequest) : Int64
@@ -16,12 +17,14 @@ private class LiveSink < Gori::Proxy::FlowSink
                     shape : Gori::Proxy::WS::Shape = Gori::Proxy::WS::Shape::DEFAULT) : Nil
   end
 
-  def on_live_body(flow_id : Int64, off : Int64, bytes : Bytes, head : Gori::Store::CapturedResponse?) : Bool
+  def on_live_body(flow_id : Int64, off : Int64, bytes : Bytes, head : Gori::Store::CapturedResponse?,
+                   first : Int32, times : Bytes) : Bool
     if @refuse > 0
       @refuse -= 1
       return false
     end
     @appends << {off, String.new(bytes), !head.nil?}
+    @times << {first, Gori::Sse::Arrivals.unpack(times)} unless times.empty?
     true
   end
 
@@ -37,8 +40,9 @@ private def live_head : Gori::Store::CapturedResponse
     state: Gori::Store::FlowState::Pending)
 end
 
-private def live_capture(sink : LiveSink, limit : Int32 = 1 << 20) : Gori::Proxy::LiveCapture
-  Gori::Proxy::LiveCapture.new(limit, 0_i64, sink, live_head)
+private def live_capture(sink : LiveSink, limit : Int32 = 1 << 20,
+                         arrivals : Gori::Sse::Arrivals? = nil) : Gori::Proxy::LiveCapture
+  Gori::Proxy::LiveCapture.new(limit, 0_i64, sink, live_head, arrivals)
 end
 
 describe Gori::Proxy::LiveCapture do
@@ -116,6 +120,38 @@ describe Gori::Proxy::LiveCapture do
     off.should eq(0)
     head.should be_true # the head rides the first append that was taken
     sink.body.should eq(String.new(cap.to_slice))
+  end
+
+  # #1631: the arrivals ride the appends, numbered so the store can join them.
+  it "carries each event's arrival with the append that holds it, and all of them at the end" do
+    sink = LiveSink.new
+    cap = live_capture(sink, arrivals: Gori::Sse::Arrivals.new(chunked: false))
+    cap.write("data: one\n\n".to_slice)
+    sink.times.size.should eq(1)
+    sink.times[0][0].should eq(0)
+    sink.refuse = 1 # a saturated writer drops the next append, times and all
+    sleep Gori::Proxy::LiveCapture::FLUSH_EVERY + 20.milliseconds
+    cap.write("data: two\n\n".to_slice)
+    sleep Gori::Proxy::LiveCapture::FLUSH_EVERY + 20.milliseconds
+    cap.write("data: three\n\n".to_slice)
+    first, times = sink.times.last
+    first.should eq(1)
+    times.size.should eq(2) # two and three, resent together
+    all = Gori::Sse::Arrivals.unpack(cap.event_times.not_nil!)
+    all.size.should eq(3)
+    (all[1] - all[0]).should be >= Gori::Proxy::LiveCapture::FLUSH_EVERY.total_microseconds.to_i64
+  end
+
+  it "times only the events the capture cap kept" do
+    sink = LiveSink.new
+    cap = live_capture(sink, limit: 20, arrivals: Gori::Sse::Arrivals.new(chunked: false))
+    cap.write("data: aaaaaaaaaa\n\n".to_slice) # 18 bytes
+    cap.write("data: bbbbbbbbbb\n\n".to_slice) # cut at 20
+    Gori::Sse::Arrivals.unpack(cap.event_times.not_nil!).size.should eq(1)
+  end
+
+  it "has no times for an untimed stream" do
+    live_capture(LiveSink.new).event_times.should be_nil
   end
 end
 
@@ -221,6 +257,19 @@ describe "live SSE capture through the proxy (#1631)" do
     end
   end
 
+  it "times an HTTP/1.1 event stream's events while it is open, and keeps the times after close" do
+    with_store do |store|
+      id = proxy_slow_stream(store, Gori::Proxy::StoreSink.new(store), "text/event-stream") do |open_id|
+        wait_for { store.live_event_count(open_id) == 1 }.should be_true
+        sleep 150.milliseconds # the origin's second event comes after this
+      end
+      live_rows(store).should eq(0)
+      times = store.get_flow(id).not_nil!.event_times.should_not be_nil
+      times.size.should eq(2)
+      (times[1] - times[0]).should be >= 150_000
+    end
+  end
+
   it "shows an HTTP/2 event stream's events while it is open, and the canonical body after" do
     with_store do |store|
       sink = FlagSink.new(store)
@@ -252,6 +301,32 @@ describe "live SSE capture through the proxy (#1631)" do
       detail.row.state.should eq(Gori::Store::FlowState::Complete)
       String.new(detail.response_body.not_nil!).should eq("data: one\n\ndata: two\n\n")
       sink.live.should eq([true])
+    end
+  end
+
+  it "times an HTTP/2 event stream's events while it is open, and keeps the times after close" do
+    with_store do |store|
+      assembler = Gori::Proxy::H2::Assembler.new(Gori::Proxy::StoreSink.new(store), "h2.test", 443)
+      request = Gori::Proxy::H2::HPACK::Encoder.new.encode([{":method", "GET"}, {":scheme", "https"},
+                                                            {":path", "/events"}, {":authority", "h2.test"}])
+      assembler.feed("out", Gori::Proxy::H2::Frame::Header.new(Gori::Proxy::H2::Frame::Type::Headers.value,
+        Gori::Proxy::H2::Frame::END_HEADERS | Gori::Proxy::H2::Frame::END_STREAM, 1_u32, request))
+      response = Gori::Proxy::H2::HPACK::Encoder.new.encode([{":status", "200"},
+                                                             {"content-type", "text/event-stream"}])
+      assembler.feed("in", Gori::Proxy::H2::Frame::Header.new(Gori::Proxy::H2::Frame::Type::Headers.value,
+        Gori::Proxy::H2::Frame::END_HEADERS, 1_u32, response))
+      assembler.feed("in", Gori::Proxy::H2::Frame::Header.new(Gori::Proxy::H2::Frame::Type::Data.value,
+        0_u8, 1_u32, "data: one\n\n".to_slice))
+      store.flush
+      id = store.@db.scalar("SELECT MAX(id) FROM flows").as(Int64)
+      store.live_event_count(id).should eq(1)
+      sleep 60.milliseconds
+      assembler.feed("in", Gori::Proxy::H2::Frame::Header.new(Gori::Proxy::H2::Frame::Type::Data.value,
+        Gori::Proxy::H2::Frame::END_STREAM, 1_u32, "data: two\n\n".to_slice))
+      store.flush
+      times = store.get_flow(id).not_nil!.event_times.should_not be_nil
+      times.size.should eq(2)
+      (times[1] - times[0]).should be >= 60_000
     end
   end
 

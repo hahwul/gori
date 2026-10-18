@@ -521,7 +521,37 @@ module Gori
         SQL
         detail = read_flow_detail(rs)
       end
-      with_live_body(detail, body_max)
+      with_event_times(with_live_body(detail, body_max))
+    end
+
+    # An event stream's arrival times (#1631), on every `get_flow` reader as the live body is.
+    # Only for an event-stream row, so every other flow pays no read.
+    private def with_event_times(detail : FlowDetail?) : FlowDetail?
+      return detail unless detail && Sse.sse?(detail.row.content_type)
+      detail.event_times = event_times(detail.row.id)
+      detail
+    end
+
+    # When each event of `flow_id`'s event stream arrived, in µs from its head, or nil when none
+    # were recorded. Stopped at the first gap, as `live_body` is: a rolled-back writer batch
+    # takes its appends with it, and the times after a hole would be paired with the wrong events.
+    def event_times(flow_id : Int64) : Array(Int64)?
+      times = [] of Int64
+      @db.query_each("SELECT first, times FROM flow_event_times WHERE flow_id = ? ORDER BY first", flow_id) do |rs|
+        break unless rs.read(Int64) == times.size
+        Sse::Arrivals.unpack(rs.read(Bytes), times)
+      end
+      times.empty? ? nil : times
+    end
+
+    # How many events an open event stream has delivered so far (#1631), for History's row: the
+    # last append's first index plus its times. nil when none were recorded.
+    def live_event_count(flow_id : Int64) : Int32?
+      @db.query_each("SELECT first + length(times) / 8 FROM flow_event_times WHERE flow_id = ? " \
+                     "ORDER BY first DESC LIMIT 1", flow_id) do |rs|
+        return rs.read(Int64).to_i32!
+      end
+      nil
     end
 
     # An event stream the proxy is still relaying has no `response_body` yet: its bytes so far
@@ -690,6 +720,7 @@ module Gori
         c.exec("DELETE FROM intercept_originals")
         c.exec("DELETE FROM flow_interims")
         c.exec("DELETE FROM flow_live_chunks")
+        c.exec("DELETE FROM flow_event_times")
         c.exec("DELETE FROM flow_rule_hits")
         c.exec("DELETE FROM rewrite_originals")
         c.exec("DELETE FROM flows")
@@ -721,6 +752,7 @@ module Gori
       conn.exec("DELETE FROM intercept_originals WHERE flow_id IN (#{marks})", args: args)
       conn.exec("DELETE FROM flow_interims WHERE flow_id IN (#{marks})", args: args)
       conn.exec("DELETE FROM flow_live_chunks WHERE flow_id IN (#{marks})", args: args)
+      conn.exec("DELETE FROM flow_event_times WHERE flow_id IN (#{marks})", args: args)
       conn.exec("DELETE FROM flow_rule_hits WHERE flow_id IN (#{marks})", args: args)
       conn.exec("DELETE FROM rewrite_originals WHERE flow_id IN (#{marks})", args: args)
       # The h2 frame log (often the flow's bulk bytes) — capture the conns BEFORE deleting

@@ -228,17 +228,126 @@ module Gori
       end
     end
 
+    # A `Counter` fed the body as it crosses the wire: a chunked body is de-framed first, so
+    # the chunk-size lines are not read as event fields. `Proxy::Codec::Body` stays the framing
+    # authority; a size line this cannot read just stops the count.
+    class WireCounter
+      @counter = Counter.new
+      @chunk = :size
+      @chunk_left = 0_i64
+      @chunk_ext = false
+
+      def initialize(@chunked : Bool)
+      end
+
+      def count : Int32
+        @counter.count
+      end
+
+      # As `Counter#feed`: how many of `bytes` it took to dispatch the `limit`th event, or nil.
+      def feed(bytes : Bytes, limit : Int32 = Int32::MAX) : Int32?
+        return @counter.feed(bytes, limit) unless @chunked
+        i = 0
+        while i < bytes.size
+          case @chunk
+          when :data
+            n = Math.min(@chunk_left, (bytes.size - i).to_i64).to_i
+            if at = @counter.feed(bytes[i, n], limit)
+              return i + at
+            end
+            i += n
+            @chunk_left -= n
+            @chunk = :crlf if @chunk_left == 0
+          when :size
+            size_byte(bytes[i])
+            i += 1
+          when :crlf
+            @chunk = :size if bytes[i] == '\n'.ord
+            i += 1
+          else
+            return nil # past the last chunk: trailers, or a size line this could not read
+          end
+        end
+        nil
+      end
+
+      # One byte of a chunk-size line.
+      private def size_byte(b : UInt8) : Nil
+        if b == '\n'.ord
+          @chunk = @chunk_left == 0 ? :done : :data
+          @chunk_ext = false
+        elsif !@chunk_ext && (d = b.chr.to_i?(16))
+          return @chunk = :done if @chunk_left >= Int64::MAX >> 4 # past any real size
+          @chunk_left = @chunk_left * 16 + d
+        else
+          @chunk_ext = true # `;ext`, CR, whitespace
+        end
+      end
+    end
+
+    # When each event of a stream arrived (#1631): one time per event `events` would dispatch,
+    # in microseconds from `started` (the response head) to the read that ended the event. Fed
+    # the wire bytes as they arrive, so it costs one byte scan and never a re-parse. Times are
+    # keyed by event index, which is what lets a surface pair them with `events` of the same
+    # body.
+    class Arrivals
+      getter times = [] of Int64
+
+      # nil for a compressed stream: its events can't be counted as they arrive.
+      def self.for(encoding : String?, chunked : Bool) : Arrivals?
+        new(chunked) if Sse.identity?(encoding)
+      end
+
+      def initialize(chunked : Bool, @started : Time::Instant = Time.instant)
+        @wire = WireCounter.new(chunked)
+      end
+
+      def feed(bytes : Bytes, now : Time::Instant = Time.instant) : Nil
+        return if @times.size >= MAX_EVENTS
+        @wire.feed(bytes)
+        return if @wire.count == @times.size
+        us = (now - @started).total_microseconds.to_i64
+        ({@wire.count, MAX_EVENTS}.min - @times.size).times { @times << us }
+      end
+
+      # The stored form: 8 bytes, little-endian, per time.
+      def self.pack(times : Array(Int64), from : Int32 = 0) : Bytes
+        io = IO::Memory.new((times.size - from) * 8)
+        (from...times.size).each { |i| io.write_bytes(times[i], IO::ByteFormat::LittleEndian) }
+        io.to_slice
+      end
+
+      # `pack`'s inverse into `into`. A trailing partial time (a crafted row) is ignored.
+      def self.unpack(bytes : Bytes, into : Array(Int64) = [] of Int64) : Array(Int64)
+        (bytes.size // 8).times { |i| into << IO::ByteFormat::LittleEndian.decode(Int64, bytes[i * 8, 8]) }
+        into
+      end
+    end
+
+    # Whether a Content-Encoding leaves the body as sent, so its events can be counted as
+    # they arrive.
+    def self.identity?(encoding : String?) : Bool
+      encoding.nil? || encoding.strip.empty? || encoding.strip.compare("identity", case_insensitive: true) == 0
+    end
+
     # Renders parsed events as text: a header line per event (type/id/retry when set) then its
     # data, indented. The whole stream is server→client, so no arrows. `base` is the count of
     # older events a window dropped, so the visible numbers stay continuous with a "showing
-    # latest N of M" note (no restart at #1). The one rendering History's EVENTS pane and the
-    # Repeater's response share.
-    def self.display_lines(events : Array(Event), base : Int32 = 0) : Array(String)
+    # latest N of M" note (no restart at #1). `times` are the stream's `Arrivals`, shown
+    # relative to the first event; an event without one (a flow captured before they were
+    # recorded) shows none. The one rendering History's EVENTS pane and the Repeater's
+    # response share.
+    def self.display_lines(events : Array(Event), base : Int32 = 0, times : Array(Int64)? = nil) : Array(String)
       return ["(no events)"] if events.empty?
       lines = [] of String
       events.each_with_index do |e, i|
         meta = String.build do |io|
           io << "▸ event #" << base + i + 1
+          if offset = offset_ms(times, base + i)
+            io << "  +"
+            io.printf("%.3f", offset / 1000.0)
+            io << 's'
+          end
           io << "  type=" << e.type if e.type
           io << "  id=" << e.id if e.id
           io << "  retry=" << e.retry if e.retry
@@ -257,9 +366,16 @@ module Gori
 
     # `display_lines` over the latest `cap` events, numbered past the older ones it leaves
     # out, and how many it showed. The window History's EVENTS pane and the Repeater share.
-    def self.latest_lines(events : Array(Event), cap : Int32) : {Array(String), Int32}
+    def self.latest_lines(events : Array(Event), cap : Int32, times : Array(Int64)? = nil) : {Array(String), Int32}
       dropped = {events.size - cap, 0}.max
-      {display_lines(dropped > 0 ? events[dropped..] : events, dropped), events.size - dropped}
+      {display_lines(dropped > 0 ? events[dropped..] : events, dropped, times), events.size - dropped}
+    end
+
+    # Event `i`'s arrival in milliseconds after the first event's, or nil when it has no time.
+    # MCP and `gori run` report this as `t_ms`.
+    def self.offset_ms(times : Array(Int64)?, i : Int32) : Int64?
+      return nil unless times && (t = times[i]?)
+      (t - times[0]) // 1000
     end
 
     # A `retry` reconnection time (ms): only an all-ASCII-digit value qualifies; one

@@ -25,9 +25,12 @@ module Gori::Proxy
     end
 
     # Append part of a still-streaming event-stream body at offset `off` (#1631), with the
-    # Pending response `head` on the first append. Must not block; true when it was taken. The
-    # default discards it, so a sink that records only finished flows needs nothing.
-    def on_live_body(flow_id : Int64, off : Int64, bytes : Bytes, head : Store::CapturedResponse?) : Bool
+    # Pending response `head` on the first append, and `times`, the packed arrivals of the
+    # events numbered from `first` on that completed since the last taken append. Must not
+    # block; true when it was taken. The default discards it, so a sink that records only
+    # finished flows needs nothing.
+    def on_live_body(flow_id : Int64, off : Int64, bytes : Bytes, head : Store::CapturedResponse?,
+                     first : Int32, times : Bytes) : Bool
       true
     end
 
@@ -74,9 +77,10 @@ module Gori::Proxy
       @store.record_rule_hits(flow_id, side, hits)
     end
 
-    def on_live_body(flow_id : Int64, off : Int64, bytes : Bytes, head : Store::CapturedResponse?) : Bool
+    def on_live_body(flow_id : Int64, off : Int64, bytes : Bytes, head : Store::CapturedResponse?,
+                     first : Int32, times : Bytes) : Bool
       return true if flow_id <= 0 # no row to append to
-      @store.append_live(flow_id, off, bytes, head)
+      @store.append_live(flow_id, off, bytes, head, first, times)
     end
 
     def on_tunnel_complete(flow_id : Int64) : Nil

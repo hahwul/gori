@@ -206,6 +206,7 @@ module Gori::Tui
       # The store the row bytes are read from. Set by HistoryController on the render path,
       # beside `refresh_preview` — the list itself never opens one.
       @col_store = nil.as(Store?)
+      @live_counts = {} of Int64 => Int32?
       @scope = nil.as(Scope?)
       # The active VIEW (#776) — a named QL query ANDed over the bar, the way the `s` scope lens
       # is. Nil until `set_view`, exactly like @scope: every construction site outside
@@ -652,6 +653,7 @@ module Gori::Tui
     # did not perform itself. Drop the same bare-id answers as the local delete paths before
     # reloading rows; the next render repopulates only the visible window.
     def forget_all_row_memos : Nil
+      @live_counts.clear # a live append moves data_version, which is what calls this
       @color_memo.clear
       @path_memo.clear
       @colormarker.try(&.forget_all)
@@ -708,6 +710,21 @@ module Gori::Tui
     # is read from the response HEAD, so a body BLOB is never pulled). A row with no head yet
     # (Pending) or an unreadable one is `None`, exactly what `gori_cache_status` answers for the
     # same row in a `cache:` query.
+    private def open_stream?(row : Store::FlowRow) : Bool
+      row.state.pending? && Sse.sse?(row.content_type)
+    end
+
+    # `● 42`: an open event stream and the events it has delivered so far, or a bare `●` when
+    # none were counted (none yet, or a compressed stream). Read for on-screen rows only, once
+    # per change, off the times the live appends carry (`Store#live_event_count`).
+    private def live_cell(row : Store::FlowRow) : String
+      count = @live_counts.fetch(row.id) do
+        @live_counts[row.id] = @col_store.try(&.live_event_count(row.id))
+      end
+      return "●" unless count
+      count >= 10_000 ? "● #{count // 1000}k" : "● #{count}"
+    end
+
     private def cache_status_for(row : Store::FlowRow) : Gori::CacheStatus::Signal
       key = {row.id, row.created_at, row.state}
       if cached = @cache_memo[key]?
@@ -3232,7 +3249,15 @@ module Gori::Tui
         end
         screen.text(type_x, y, fmt_mime_memo(row.content_type), Theme.muted, bg, width: 6) if show_type
         screen.text(size_x, y, fmt_size(row.response_size), Theme.muted, bg, width: 6) if show_size
-        screen.text(dur_x, y, fmt_dur(row.duration_us), Theme.muted, bg, width: 6) if show_dur
+        if show_dur
+          if open_stream?(row)
+            # An event stream still open (#1631): `●` and its events so far, where its
+            # duration will land once it closes.
+            screen.text(dur_x, y, live_cell(row), Theme.green, bg, width: 6)
+          else
+            screen.text(dur_x, y, fmt_dur(row.duration_us), Theme.muted, bg, width: 6)
+          end
+        end
         # User columns FIRST, so a row they read for their own values also settles the CACHE
         # memo below (one SQLite read feeds both — see `column_values`). Position is unaffected:
         # each cell draws at its own absolute x.
@@ -4415,7 +4440,7 @@ module Gori::Tui
         # Derived view: content-decode + split into SSE events at render time — no
         # table, like the gRPC framing pane (shared with `gori run show` / MCP).
         events = Sse.from_response(detail.response_head, detail.response_body)
-        lines, shown = Sse.latest_lines(events, DETAIL_LOG_CAP) # older events not shown (windowed)
+        lines, shown = Sse.latest_lines(events, DETAIL_LOG_CAP, detail.event_times) # older events not shown (windowed)
         head = log_head(lines, events.size, shown, "events")
         return DetailView.new(head, EMPTY_BODY, :text, EMPTY_LINES)
       end

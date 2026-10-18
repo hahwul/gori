@@ -49,4 +49,41 @@ describe "live SSE body parity across MCP get_flow and gori run show (#1631)" do
       delete_db_files(path)
     end
   end
+
+  it "reports each event's arrival as t_ms on both surfaces, open and after close" do
+    path = File.tempname("gori-spec", ".db")
+    store = Gori::Store.open(path)
+    begin
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_000_i64, scheme: "http", host: "live.test", port: 80, method: "GET",
+        target: "/events", http_version: "HTTP/1.1",
+        head: "GET /events HTTP/1.1\r\nHost: live.test\r\n\r\n".to_slice,
+        source: Gori::FlowSource::Kind::Proxy))
+      head_bytes = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n".to_slice
+      head = Gori::Store::CapturedResponse.new(flow_id: id, status: 200, head: head_bytes,
+        content_type: "text/event-stream", state: Gori::Store::FlowState::Pending)
+      store.append_live(id, 0_i64, "data: one\n\ndata: two\n\n".to_slice, head, 0,
+        Gori::Sse::Arrivals.pack([3_000_i64, 415_000_i64]))
+      store.flush
+      t_ms = ->(events : JSON::Any) { events["events"].as_a.map { |e| e["t_ms"]?.try(&.as_i64) } }
+      expect = [0_i64, 412_i64]
+
+      mcp = mcp_ok_json(tools_for(store), "get_flow", %({"id":#{id}}))
+      t_ms.call(mcp["sse_events"]).should eq(expect)
+      cli = Gori::CLI::Run.live_show_json_for_spec(store.get_flow(id).not_nil!)
+      t_ms.call(cli["sse_events"]).should eq(expect)
+
+      final = Gori::Store::CapturedResponse.new(flow_id: id, status: 200, head: head_bytes,
+        body: "data: one\n\ndata: two\n\ndata: three\n\n".to_slice, content_type: "text/event-stream")
+      final.live = true
+      final.event_times = Gori::Sse::Arrivals.pack([3_000_i64, 415_000_i64, 1_003_000_i64])
+      store.update_response(final)
+      expect << 1000_i64
+      t_ms.call(mcp_ok_json(tools_for(store), "get_flow", %({"id":#{id}}))["sse_events"]).should eq(expect)
+      t_ms.call(Gori::CLI::Run.live_show_json_for_spec(store.get_flow(id).not_nil!)["sse_events"]).should eq(expect)
+    ensure
+      store.close
+      delete_db_files(path)
+    end
+  end
 end

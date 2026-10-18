@@ -36,8 +36,8 @@ module Gori
       # be counted as they arrive, so only the time axis applies to one. `head` opens `live`.
       def start(encoding : String?, chunked : Bool, cancel : Proc(Bool)? = nil,
                 head : Bytes = Bytes.empty) : StreamRun
-        countable = encoding.nil? || encoding.strip.empty? || encoding.strip.compare("identity", case_insensitive: true) == 0
-        live.try(&.open(head))
+        countable = Sse.identity?(encoding)
+        live.try(&.open(head, Sse::Arrivals.for(encoding, chunked)))
         StreamRun.new(countable ? max_events : nil, max_time, chunked, cancel, live)
       end
     end
@@ -49,17 +49,14 @@ module Gori
       # did. Becomes `Result#bounded`.
       getter reason : String?
 
-      @counter : Sse::Counter?
+      # De-chunks for the COUNT only: a size line it cannot read stops the count, and the time
+      # axis still holds.
+      @counter : Sse::WireCounter?
       @deadline : Time::Instant?
-      # De-chunking for the COUNT only: `Body.read_complete` stays the framing authority, and a
-      # size line this cannot read just stops the count (the time axis still holds).
-      @chunk = :size
-      @chunk_left = 0_i64
-      @chunk_ext = false
 
       def initialize(@max_events : Int32?, max_time : Time::Span?, @chunked : Bool,
                      @cancel : Proc(Bool)? = nil, @live : LiveBody? = nil)
-        @counter = Sse::Counter.new if @max_events
+        @counter = Sse::WireCounter.new(@chunked) if @max_events
         @deadline = max_time.try { |t| Time.instant + t }
       end
 
@@ -96,48 +93,10 @@ module Gori
         counter = @counter
         limit = @max_events
         return bytes.size unless counter && limit && !stopped?
-        at = @chunked ? feed_chunked(counter, limit, bytes) : counter.feed(bytes, limit)
+        at = counter.feed(bytes, limit)
         return bytes.size unless at
         @reason = "events"
         at
-      end
-
-      private def feed_chunked(counter : Sse::Counter, limit : Int32, bytes : Bytes) : Int32?
-        i = 0
-        while i < bytes.size
-          case @chunk
-          when :data
-            n = Math.min(@chunk_left, (bytes.size - i).to_i64).to_i
-            if at = counter.feed(bytes[i, n], limit)
-              return i + at
-            end
-            i += n
-            @chunk_left -= n
-            @chunk = :crlf if @chunk_left == 0
-          when :size
-            size_byte(bytes[i])
-            i += 1
-          when :crlf
-            @chunk = :size if bytes[i] == '\n'.ord
-            i += 1
-          else
-            return nil # past the last chunk: trailers, or a size line this could not read
-          end
-        end
-        nil
-      end
-
-      # One byte of a chunk-size line.
-      private def size_byte(b : UInt8) : Nil
-        if b == '\n'.ord
-          @chunk = @chunk_left == 0 ? :done : :data
-          @chunk_ext = false
-        elsif !@chunk_ext && (d = b.chr.to_i?(16))
-          return @chunk = :done if @chunk_left >= Int64::MAX >> 4 # past any real size
-          @chunk_left = @chunk_left * 16 + d
-        else
-          @chunk_ext = true # `;ext`, CR, whitespace
-        end
       end
     end
 

@@ -1279,7 +1279,7 @@ module Gori
             puts ""
             if cap.whole?
               puts "=== SSE EVENTS (#{events.size}) ==="
-              events.each_with_index { |e, i| puts sse_event_text(e, i) }
+              events.each_with_index { |e, i| puts sse_event_text(e, i, detail.event_times) }
             else
               puts "=== SSE EVENTS (#{events.size}) — not printed under #{cap.flag} ==="
             end
@@ -1307,9 +1307,14 @@ module Gori
         Sse.from_response(detail.response_head, detail.response_body)
       end
 
-      private def self.sse_event_text(e : Sse::Event, idx : Int32) : String
+      private def self.sse_event_text(e : Sse::Event, idx : Int32, times : Array(Int64)? = nil) : String
         String.build do |io|
           io << "#" << (idx + 1)
+          if ms = Sse.offset_ms(times, idx)
+            io << " +"
+            io.printf("%.3f", ms / 1000.0)
+            io << 's'
+          end
           # The origin wrote `event:` and `id:` too, so they are escaped like the data.
           e.type.try { |t| io << " type=" << CLI::Output.term_safe(t) }
           e.id.try { |i| io << " id=" << CLI::Output.term_safe(i) }
@@ -1704,11 +1709,13 @@ module Gori
             j.field "truncated", events.size > MCP::Serialize::SSE_EVENTS_MAX
             j.field "events" do
               j.array do
-                events.each do |e|
+                events.each_with_index do |e, i|
                   j.object do
                     j.field "type", e.type
                     j.field "id", e.id
                     j.field "retry", e.retry
+                    # As MCP `get_flow` reports it (mcp/serialize.cr `emit_sse_events`).
+                    Sse.offset_ms(detail.event_times, i).try { |ms| j.field "t_ms", ms }
                     j.field "data", e.data.scrub
                   end
                 end

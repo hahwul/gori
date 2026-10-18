@@ -1283,11 +1283,13 @@ module Gori
             j.field "truncated", events.size > SSE_EVENTS_MAX
             j.field "events" do
               j.array do
-                events.first(SSE_EVENTS_MAX).each do |e|
+                events.first(SSE_EVENTS_MAX).each_with_index do |e, i|
                   j.object do
                     j.field "type", text(e.type)
                     j.field "id", text(e.id)
                     j.field "retry", e.retry
+                    # Arrival after the first event, when the capture timed it (#1631).
+                    Sse.offset_ms(detail.event_times, i).try { |ms| j.field "t_ms", ms }
                     j.field "origin", "target" # the response's events, as `emit_body` labels it (#1586)
                     data = e.data.scrub
                     cut = data.size > SSE_DATA_MAX

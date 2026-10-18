@@ -188,5 +188,43 @@ describe Gori::Sse do
       Gori::Sse.display_lines(events, base: 4).should eq(["▸ event #5  type=tick  id=9  retry=5", "    a", "    b"])
       Gori::Sse.display_lines([] of Gori::Sse::Event).should eq(["(no events)"])
     end
+
+    it "shows each event's arrival relative to the first, and nothing for an untimed one" do
+      events = Gori::Sse.events("data: a\n\nid: 2\nevent: message\ndata: b\n\ndata: c\n\n".to_slice)
+      times = [5_000_i64, 417_900_i64] # the third event has no time (a stream cut mid-event)
+      Gori::Sse.display_lines(events, times: times).select(&.starts_with?("▸")).should eq([
+        "▸ event #1  +0.000s", "▸ event #2  +0.412s  type=message  id=2", "▸ event #3  id=2", # the id carries over
+      ])
+      # A window keeps the first event as the origin, and the event numbers past it.
+      lines, _ = Gori::Sse.latest_lines(events, 1, times)
+      lines.first.should eq("▸ event #3  id=2")
+      Gori::Sse.latest_lines(events[0, 2], 1, times)[0].first.should eq("▸ event #2  +0.412s  type=message  id=2")
+    end
+  end
+
+  # When each event arrived (#1631): counted off the wire bytes, chunked or not, so the times
+  # pair with `.events` by index.
+  describe Gori::Sse::Arrivals do
+    it "times each event the read that ends it, through chunk framing" do
+      t0 = Time.instant
+      a = Gori::Sse::Arrivals.new(chunked: true, started: t0)
+      a.feed("b\r\ndata: one\n\n\r\n".to_slice, t0 + 10.milliseconds)
+      a.feed("5\r\ndata:\r\n".to_slice, t0 + 20.milliseconds) # a chunk split mid-event
+      a.feed("6\r\n two\n\n\r\n".to_slice, t0 + 30.milliseconds)
+      a.times.should eq([10_000_i64, 30_000_i64])
+      Gori::Sse.events("data: one\n\ndata: two\n\n".to_slice).size.should eq(a.times.size)
+    end
+
+    it "is not made for a compressed stream" do
+      Gori::Sse::Arrivals.for("gzip", false).should be_nil
+      Gori::Sse::Arrivals.for(" Identity ", false).should_not be_nil
+      Gori::Sse::Arrivals.for(nil, true).should_not be_nil
+    end
+
+    it "packs to eight bytes per time and back" do
+      packed = Gori::Sse::Arrivals.pack([1_i64, 2_i64, 300_000_i64], from: 1)
+      packed.size.should eq(16)
+      Gori::Sse::Arrivals.unpack(packed).should eq([2_i64, 300_000_i64])
+    end
   end
 end

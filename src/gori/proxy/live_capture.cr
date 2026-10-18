@@ -1,5 +1,6 @@
 require "./codec/body"
 require "./sink"
+require "../sse"
 
 module Gori::Proxy
   # The capture an event-stream response is teed into (#1631): a `Codec::CaptureBuffer` that
@@ -19,18 +20,25 @@ module Gori::Proxy
   # ponytail: an event that lands within FLUSH_EVERY of an append and is followed by silence,
   # or whose blank line is split across two writes, waits for the stream's next write (an SSE
   # heartbeat, usually); a timer fiber per stream is the upgrade if that wait matters.
+  #
+  # `arrivals` times each event the stored bytes complete (`Sse::Arrivals`), so History shows
+  # when each one landed; the times ride the same appends, and the final write carries all of
+  # them (`event_times`). nil for a compressed stream, which is relayed untimed.
   class LiveCapture < Codec::CaptureBuffer
     FLUSH_BYTES = 16 * 1024
     FLUSH_EVERY = 250.milliseconds
+    NO_TIMES    = [] of Int64
 
     @head : Store::CapturedResponse?
     @flushed = 0
     @flushed_at : Time::Instant? = nil
     @backoff = false
+    @timed = 0 # the arrivals the sink has taken
 
     # `head` is the response with state Pending and no body. It is sent at once, alone, so
     # the status and content type show before the first event does.
-    def initialize(limit : Int32, hint : Int64, @sink : FlowSink, head : Store::CapturedResponse)
+    def initialize(limit : Int32, hint : Int64, @sink : FlowSink, head : Store::CapturedResponse,
+                   @arrivals : Sse::Arrivals? = nil)
       super(limit, hint)
       @flow_id = head.flow_id
       @head = head
@@ -38,7 +46,12 @@ module Gori::Proxy
     end
 
     def write(slice : Bytes) : Nil
+      before = stored
       super
+      # Only what was stored: an event past the capture cap is not in the body to pair with.
+      if (arrivals = @arrivals) && (mem = @mem) && stored > before
+        arrivals.feed(mem.to_slice[before, stored - before])
+      end
       pending = stored - @flushed
       return if pending == 0
       at = @flushed_at
@@ -65,6 +78,11 @@ module Gori::Proxy
       @mem.try(&.bytesize) || 0
     end
 
+    # Every event's arrival, for the write that finalizes the flow. nil when untimed.
+    def event_times : Bytes?
+      @arrivals.try { |a| Sse::Arrivals.pack(a.times) }
+    end
+
     # The offset advances only when the sink took the append. A dropped one (the writer was
     # saturated) is resent inside the next, bigger chunk, so the stored chunks never have a gap,
     # and the retry waits out FLUSH_EVERY whatever is pending, so a saturated writer does not
@@ -74,8 +92,10 @@ module Gori::Proxy
       mem = @mem
       bytes = mem && size > 0 ? mem.to_slice[@flushed, size].dup : Bytes.empty
       @flushed_at = Time.instant unless bytes.empty?
-      if @sink.on_live_body(@flow_id, @flushed.to_i64, bytes, @head)
+      times = @arrivals.try(&.times) || NO_TIMES
+      if @sink.on_live_body(@flow_id, @flushed.to_i64, bytes, @head, @timed, Sse::Arrivals.pack(times, @timed))
         @flushed += size
+        @timed = times.size
         @head = nil
         @backoff = false
       else

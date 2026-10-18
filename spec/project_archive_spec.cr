@@ -573,7 +573,7 @@ describe Gori::ProjectArchive do
       store.flush
       archive_path = export_archive(project, File.join(root, "side.gori"))
       original = File.read(archive_path)
-      %w[intercept_originals flow_interims flow_live_chunks flow_rule_hits rewrite_originals].each do |table|
+      %w[intercept_originals flow_interims flow_live_chunks flow_event_times flow_rule_hits rewrite_originals].each do |table|
         File.write(archive_path, original)
         tamper_archive_database(archive_path, root) { |conn| conn.exec("DROP TABLE #{table}") }
         error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }

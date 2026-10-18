@@ -14,6 +14,8 @@ class Gori::Tui::RepeaterView
   @live_started = Time.instant
   @live_shown = -1
   @live_at : Time::Instant? = nil
+  # The arrival times of the stream `@result` holds, kept after it closes (#1631).
+  @result_times : Array(Int64)? = nil
 
   # How many times the open stream has rendered (the first one is when it opened).
   getter live_renders = 0
@@ -65,7 +67,8 @@ class Gori::Tui::RepeaterView
   private def sse_pretty(head : Bytes, src : Bytes?) : Pretty::Result?
     return nil unless Sse.event_stream?(head)
     events = Sse.events(src || Bytes.empty)
-    lines, shown = Sse.latest_lines(events, HistoryView::DETAIL_LOG_CAP)
+    times = @live_result ? @live.try(&.times) : @result_times
+    lines, shown = Sse.latest_lines(events, HistoryView::DETAIL_LOG_CAP, times)
     if shown < events.size
       lines.unshift("")
       lines.unshift("— showing the latest #{shown} of #{events.size} events; #{events.size - shown} older not shown —")

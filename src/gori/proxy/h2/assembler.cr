@@ -827,7 +827,10 @@ module Gori::Proxy::H2
         ttfb_us: ttfb_us, duration_us: duration_us, advisory: advisory_of(stream),
         interims: stream.resp.interims)
       captured.rewrite = stream.resp_rewrite
-      captured.live = cap.is_a?(LiveCapture)
+      if cap.is_a?(LiveCapture)
+        captured.live = true
+        captured.event_times = cap.event_times
+      end
       @sink.on_response(captured)
     end
 
@@ -937,7 +940,8 @@ module Gori::Proxy::H2
         content_encoding: header_value(headers, "content-encoding"),
         ttfb_us: stream.resp_first_at.try { |t| (t - stream.started_at).total_microseconds.to_i64 },
         state: Store::FlowState::Pending)
-      side.body = LiveCapture.new(Settings.capture_max, 0_i64, @sink, head)
+      arrivals = Sse::Arrivals.for(head.content_encoding, false)
+      side.body = LiveCapture.new(Settings.capture_max, 0_i64, @sink, head, arrivals)
     end
 
     # Recognize an extended CONNECT whose `:protocol` is `websocket`, then arm its transcript

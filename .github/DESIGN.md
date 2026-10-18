@@ -5037,3 +5037,25 @@ stream was open. It now appends while it streams, and P6 decides the shape:
 - **Off the SSE path nothing changes.** The extra decision is one `Sse.sse?` per streamed
   response, and `sse?` now rejects any value without the bytes `event-stream` before it parses
   (0 B/op, from 160).
+
+### 2026-10-18: an event stream's arrival times live beside the flow, keyed by event index (#1631)
+
+History and the Repeater show `+0.412s` per SSE event, which needs a time recorded on arrival
+and kept after the stream closes, when `flow_live_chunks` is gone.
+
+- **Counted on the wire, keyed by index.** `Sse::Arrivals` feeds the stored bytes through the
+  same `Sse::Counter` a bounded send uses, de-chunking first (`Sse::WireCounter`, moved out of
+  `StreamRun`), and stamps each event the read that ended it. The index pairs with `Sse.events`
+  of the same body, which a byte offset could not: the capture keeps the chunk framing, and the
+  events are parsed after it is removed. A compressed stream gets no times.
+- **Beside the flow, batched, survives close.** `flow_event_times` (V52) holds one row per live
+  append, the packed times from index `first`; they ride the `AppendLive` the chunk does, so a
+  dropped append drops both and the retry carries both. The final response write replaces them
+  with one row holding every time. Reads stop at the first index gap, as the live body does at
+  its first offset gap.
+- **The row's count is the times' count.** History's `● 42` reads the last row's
+  `first + length(times) / 8` for on-screen Pending event streams, once per `data_version` change.
+  No `UPDATE flows` per append, which is what V50 exists to avoid. A stream with no times shows
+  `●` alone.
+- Cost: about 1 ns per stored byte on the SSE path only (`bench/capture_bench.cr`, 64 KiB of
+  248-byte events: 77 → 148 µs).

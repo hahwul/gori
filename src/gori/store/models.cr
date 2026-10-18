@@ -132,6 +132,9 @@ module Gori
       # write that finalizes the flow also deletes those chunks. False on every other response,
       # which then never runs the extra statement.
       property? live : Bool = false
+      # A live stream's event arrivals, packed (`Sse::Arrivals.pack`): the final write replaces
+      # the rows the appends left with these, so the times survive close. nil when untimed.
+      property event_times : Bytes? = nil
 
       def initialize(@flow_id, @status, @head, @body = nil, @reason = nil,
                      @content_type = nil, @ttfb_us = nil, @duration_us = nil,
@@ -398,6 +401,9 @@ module Gori
       getter h2_stream_id : Int64?
       getter error : String? # upstream/parse/tls failure message for Error/Aborted flows (response side is empty)
       getter sni : String?
+      # When each SSE event of the response arrived, in µs from its head (`flow_event_times`,
+      # #1631), keyed by event index. nil for any other response, or one captured untimed.
+      property event_times : Array(Int64)? = nil
 
       def initialize(@row, @http_version, @request_head, @request_body,
                      @response_head, @response_body, @h2_conn_id = nil, @h2_stream_id = nil,

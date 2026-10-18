@@ -96,7 +96,8 @@ class NullLiveSink < Gori::Proxy::FlowSink
                     shape : Gori::Proxy::WS::Shape = Gori::Proxy::WS::Shape::DEFAULT) : Nil
   end
 
-  def on_live_body(flow_id : Int64, off : Int64, bytes : Bytes, head : Gori::Store::CapturedResponse?) : Bool
+  def on_live_body(flow_id : Int64, off : Int64, bytes : Bytes, head : Gori::Store::CapturedResponse?,
+                   first : Int32, times : Bytes) : Bool
     true
   end
 end
@@ -108,9 +109,11 @@ LIVE_HEAD = Gori::Store::CapturedResponse.new(flow_id: 1_i64, status: 200,
 
 # The SSE path (#1631): the same chunked copy, teed into a LiveCapture. In one burst the clock
 # never passes FLUSH_EVERY, so this is the first-event append plus the 16 KiB size trigger.
-def run_sse_live(wire : Bytes) : Bytes
+# `timed` adds the per-event arrival times the proxy records (#1631 PR4).
+def run_sse_live(wire : Bytes, timed : Bool = false) : Bytes
   src = IO::Memory.new(wire, writeable: false)
-  cap = Gori::Proxy::LiveCapture.new(CAP, 0_i64, LIVE_SINK, LIVE_HEAD)
+  arrivals = Gori::Sse::Arrivals.new(chunked: true) if timed
+  cap = Gori::Proxy::LiveCapture.new(CAP, 0_i64, LIVE_SINK, LIVE_HEAD, arrivals)
   Body.stream(src, SINK, BodyFraming::Chunked, 0_i64, cap, SCRATCH)
   cap.to_slice
 end
@@ -129,4 +132,5 @@ Benchmark.ips do |x|
   x.report("sse? (text/html)") { Gori::Sse.sse?("text/html; charset=utf-8") }
   x.report("chunked SSE 64K (plain)") { run_chunked(SSE_WIRE) }
   x.report("chunked SSE 64K (live)") { run_sse_live(SSE_WIRE) }
+  x.report("chunked SSE 64K (live, timed)") { run_sse_live(SSE_WIRE, timed: true) }
 end

@@ -1,4 +1,5 @@
 require "../proxy/codec/http1"
+require "../sse"
 
 module Gori
   module Repeater
@@ -15,13 +16,23 @@ module Gori
       getter head : Bytes?
       getter? stopped = false
       @body = IO::Memory.new
+      @arrivals : Sse::Arrivals?
 
-      def open(head : Bytes) : Nil
+      # `arrivals` times each event as it lands; nil for a stream whose events can't be counted
+      # as they arrive (a compressed one).
+      def open(head : Bytes, arrivals : Sse::Arrivals? = nil) : Nil
         @head = head
+        @arrivals = arrivals
       end
 
       def append(bytes : Bytes) : Nil
         @body.write(bytes)
+        @arrivals.try(&.feed(bytes))
+      end
+
+      # When each event so far arrived (`Sse::Arrivals`); nil when untimed.
+      def times : Array(Int64)?
+        @arrivals.try(&.times)
       end
 
       def size : Int32
