@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Type-checks every program in scripts/ and reports the ones that no longer compile.
+# Type-checks every program in scripts/ and eval/ and reports the ones that no longer compile.
 #
 # Usage: scripts/script_check.sh   (just scripts-check, and the CI `benchmarks` job)
 #
@@ -12,13 +12,16 @@
 # `--no-codegen`, and nothing is RUN: `seed_demo.cr` writes a project database and
 # `mock_update_server.cr` binds a port. The question here is only whether each still
 # describes the API it calls.
+#
+# eval/ rides along for the same reason: `eval/fixtures.cr` requires `src` and inserts flows
+# through the Store API, and nothing else compiles it either (`just eval` is run by hand).
 set -uo pipefail
 
 cd "$(dirname "$0")/.."
 
 fail=0
 broken=()
-for f in scripts/*.cr; do
+for f in scripts/*.cr eval/*.cr; do
   if ! crystal build "$f" -o /dev/null --no-codegen 2>/dev/null; then
     broken+=("$f")
     fail=1
@@ -35,4 +38,4 @@ if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 
-echo "all scripts build ($(ls scripts/*.cr | wc -l | tr -d ' ') programs)"
+echo "all scripts build ($(ls scripts/*.cr eval/*.cr | wc -l | tr -d ' ') programs)"

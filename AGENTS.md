@@ -206,20 +206,21 @@ key grammar, the 2026-09-25 #1274 entries and the 2026-09-26 #1295 entries).
 | Specs mirroring your change | `just test-changed` (`scripts/spec_for_changes.sh`, against `origin/main`; `just test-changed HEAD` for uncommitted edits only) — the 3–9 s pre-flight before the ~35 s suite compile |
 | One file or dir | `just test-file spec/store_spec.cr` |
 | One area | `just test-tui`, `test-store`, `test-proxy`, `test-verb`, `test-repeater`, `test-discover`, `test-miner`, `test-oast`, `test-sequencer`, `test-import`, `test-mcp`, `test-settings` |
-| Format + lint check | `just check` (`crystal tool format --check src spec bench scripts`, `scripts/nix_shards_check.cr`, then ameba) |
+| Format + lint check | `just check` (`crystal tool format --check src spec bench scripts eval`, `scripts/nix_shards_check.cr`, then ameba) |
 | Lint diff gate | `just lint-gate` (`scripts/ameba_gate.sh`, fails when a changed file gained ameba findings) |
 | Format + autofix | `just fix` |
 | Type-check `bench/` | `just benchmark-check` (`scripts/bench_check.sh`) |
-| Type-check `scripts/` | `just scripts-check` (`scripts/script_check.sh`) |
+| Type-check `scripts/` and `eval/` | `just scripts-check` (`scripts/script_check.sh`) |
 | Proxy benchmark | `just benchmark` |
 | Seed a demo project | `just seed-demo` (`scripts/seed_demo.cr`) |
+| Agent eval (by hand, costs money) | `just eval-fixtures`, then `just eval` (`eval/README.md`) |
 | Version consistency | `just vc` |
 | packaging/nix/shards.nix drift | `just nix-shards-check` (`scripts/nix_shards_check.cr`) |
 
 What CI gates, and what it does not:
 
-- **Gated:** `shards build`, `crystal spec`, `crystal tool format --check src spec bench scripts`,
-  `scripts/bench_check.sh`, `scripts/script_check.sh` (type-checks `scripts/*.cr`; `just
+- **Gated:** `shards build`, `crystal spec`, `crystal tool format --check src spec bench scripts eval`,
+  `scripts/bench_check.sh`, `scripts/script_check.sh` (type-checks `scripts/*.cr` and `eval/*.cr`; `just
   scripts-check`), `scripts/nix_shards_check.cr` (packaging/nix/shards.nix against
   shard.lock), and the native Windows build in `windows.yml`. On a pull request `crystal spec`
   runs only the specs mirroring your change (`test-scope` → `changed-tests`) unless the change

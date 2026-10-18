@@ -186,7 +186,7 @@ test-settings:
 # has run it reformats `lib/` too — third-party code that is not ours to change.
 [group('development')]
 check:
-    crystal tool format --check src spec bench scripts
+    crystal tool format --check src spec bench scripts eval
     crystal run scripts/nix_shards_check.cr
     lib/ameba/bin/ameba.cr
 
@@ -199,7 +199,7 @@ lint-gate base="origin/main":
 # Auto-format code and fix lint issues.
 [group('development')]
 fix:
-    crystal tool format src spec bench scripts
+    crystal tool format src spec bench scripts eval
     lib/ameba/bin/ameba.cr --fix
 
 # Check that every version-bearing file agrees: shard.yml, src/gori.cr,
@@ -231,7 +231,7 @@ benchmark:
     crystal build bench/proxy_bench.cr -o bin/proxy_bench --release
     ./bin/proxy_bench
 
-# Type-check every program in scripts/ without generating code.
+# Type-check every program in scripts/ and eval/ without generating code.
 #
 # The sibling of `benchmark-check`, against the same silent rot: nothing else compiles
 # these, and `seed_demo.cr` — the demo database every manual TUI pass starts from — sat

@@ -33,13 +33,13 @@ work via stdlib) with `crystal build -Dwithout_native_codecs`.
 
 ## Before you open a PR
 
-- **`crystal tool format --check src spec bench scripts`** must pass, and no file you
+- **`crystal tool format --check src spec bench scripts eval`** must pass, and no file you
   changed may gain ameba findings (`just lint-gate`, the diff gate CI runs; a full ameba
   run carries a pre-existing backlog). `just check` runs the format check, the
   `shards.nix` drift check and the full ameba. Format only the
   files you changed (`crystal tool format <files>`); never run a whole-tree format (it
   reformats dozens of unrelated files due to Crystal version drift).
-- CI also type-checks `bench/` and `scripts/`: run `just benchmark-check` and
+- CI also type-checks `bench/`, `scripts/` and `eval/`: run `just benchmark-check` and
   `just scripts-check`.
 - **`just test`** must be green. Add or update specs under `spec/` mirroring the source
   you touched; `just test-<area>` runs a single subdir while iterating.

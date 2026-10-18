@@ -3,7 +3,8 @@
 Measures whether an agent with gori MCP attached gets capture-analysis tasks right, and at
 what cost, per catalogue profile (`@minimal`, `@recon`, full, full `--read-only`). It exists
 to decide the default catalogue and how long tool descriptions should be — not to gate CI:
-runs are nondeterministic and cost money.
+runs are nondeterministic and cost money. CI only format-checks and type-checks `eval/*.cr`
+(`scripts/script_check.sh`), so the harness cannot rot against the Store API unnoticed.
 
 ```sh
 just build

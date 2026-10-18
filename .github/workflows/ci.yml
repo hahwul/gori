@@ -135,9 +135,9 @@ jobs:
       # gating on `lib/` — third-party code this repo cannot fix, breaking the build on
       # a dependency bump for a formatting change nobody here made.
       - name: Check formatting
-        run: crystal tool format --check src spec bench scripts
+        run: crystal tool format --check src spec bench scripts eval
   benchmarks:
-    # Type-checks every harness in `bench/`, and (second step) every program in `scripts/`.
+    # Type-checks every harness in `bench/`, and (second step) every program in `scripts/` and `eval/`.
     # Nothing ran them before: `format` above only
     # FORMATS bench/, and the other jobs build `src` and run `spec` — so a harness could rot
     # for months and the first sign would be someone reaching for it mid-investigation.
@@ -174,13 +174,14 @@ jobs:
         # The same script `just benchmark-check` runs, so local and CI cannot drift apart
         # (and this job needs no `just` on the runner).
         run: scripts/bench_check.sh
-      - name: Type-check scripts/
+      - name: Type-check scripts/ and eval/
         # Same failure mode, one directory over, and it had already happened: nothing in CI
         # compiled `scripts/*.cr`, so `seed_demo.cr` — the demo database every manual TUI
         # pass starts from — sat broken on main against an argument #1047 added, with
         # nothing red to say so. Rides this job rather than its own because the harnesses
         # and the scripts want the identical runner (native link deps + `shards install`)
-        # and neither costs more than half a minute.
+        # and neither costs more than half a minute. `eval/` (the agent eval, run by hand)
+        # is in the same position, so the same script covers it.
         run: scripts/script_check.sh
   lint-gate:
     # ameba, as a DIFF gate: `scripts/ameba_gate.sh` counts findings per changed file at
