@@ -91,7 +91,7 @@ end
 
 # A captured WebSocket flow: the real 101 handshake plus a transcript written through the real
 # Store writer, so the export reads back exactly what capture stored (`created_at` included).
-private def ws_flow(store, messages : Array({String, Int32, Bytes})) : Gori::Store::FlowDetail
+private def ws_flow(store, messages : Array({String, Int32, Bytes}), origins : Array(String?) = [] of String?) : Gori::Store::FlowDetail
   detail = capture_flow(store,
     req_head: "GET /chat HTTP/1.1\r\nHost: shop.test\r\nUpgrade: websocket\r\n" \
               "Connection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" \
@@ -100,8 +100,8 @@ private def ws_flow(store, messages : Array({String, Int32, Bytes})) : Gori::Sto
                "Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n",
     resp_body: nil, status: 101, reason: "Switching Protocols", content_type: nil,
     target: "/chat")
-  messages.each do |(direction, opcode, payload)|
-    store.insert_ws_message(detail.row.id, direction, opcode, payload)
+  messages.each_with_index do |(direction, opcode, payload), i|
+    store.insert_ws_message(detail.row.id, direction, opcode, payload, origin: origins[i]?)
   end
   store.get_flow(detail.row.id).not_nil!
 end
@@ -678,6 +678,23 @@ describe Gori::Export::Har do
 
         # …and the fixed point: exporting the re-imported flow reproduces the identical bytes.
         export([back], ->(_id : Int64) { restored })[0].should eq(har)
+      end
+    end
+
+    it "round-trips an injected frame's origin, and keeps a foreign _origin out" do
+      with_store do |store|
+        detail = ws_flow(store, [{"in", 1, "peer".to_slice}, {"in", 1, "mine".to_slice}],
+          [nil, Gori::Store::WsMessage::ORIGIN_GORI])
+        har, _ = export([detail], ws_lookup(store))
+        msgs = JSON.parse(har)["log"]["entries"][0]["_webSocketMessages"].as_a
+        msgs.map(&.["_origin"]?.try(&.as_s)).should eq([nil, "gori"])
+
+        back, restored = reimport_ws(har)
+        restored.map(&.origin).should eq([nil, "gori"])
+        export([back], ->(_id : Int64) { restored })[0].should eq(har)
+
+        _, foreign = reimport_ws(har.sub(/"_origin":\s*"gori"/, %("_origin": "someone")))
+        foreign.map(&.origin).should eq([nil, nil])
       end
     end
 

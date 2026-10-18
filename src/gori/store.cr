@@ -951,10 +951,11 @@ module Gori
         # is legal per RFC 6455 (an empty heartbeat), so it reaches here.
         slot = Store.blob_slot(args, msg.payload)
         Store.bind_ws_shape(args, WsShape::DEFAULT)
+        args << msg.origin
         conn.exec(
           "INSERT INTO ws_messages (flow_id, repeater_id, created_at, direction, opcode, payload, " \
-          "fin, rsv, masked, mask_key, frames, declared_len) " \
-          "VALUES (?,?,?,?,?,#{slot},?,?,?,?,?,?)", args: args)
+          "fin, rsv, masked, mask_key, frames, declared_len, origin) " \
+          "VALUES (?,?,?,?,?,#{slot},?,?,?,?,?,?,?)", args: args)
       end
     end
 

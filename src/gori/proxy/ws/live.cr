@@ -14,34 +14,48 @@ module Gori::Proxy::WS
   # and its final fragment has not. A data frame may not be injected there (RFC 6455 §5.4
   # forbids interleaving data messages); a control frame may.
   #
-  # P6: per relayed frame this is one uncontended Mutex and two Bool writes. On the
+  # P6: per relayed frame this is one uncontended Mutex, a byte compare and a few Bool
+  # writes (the teardown bound below costs a Bool read until `teardown!`). On the
   # single-threaded scheduler `@busy` is exact: it is set and cleared under the lock with no
   # yield between taking the lock and setting it, so "not busy" means `lock` will not block.
   class Leg
     getter direction : String
     getter? mid_message = false
     getter? closed = false
+    # A CLOSE frame has gone out on this side, after which RFC 6455 §5.5.1 allows no data frame.
+    getter? close_sent = false
 
     def initialize(@direction : String, @io : IO, @mask : Bool)
       @lock = Mutex.new
       @busy = false
+      @teardown = false
+      @waiting = false # a data inject is polling for a boundary; one at a time per side
     end
 
     # Write `bytes` and flush. `fin` is the FIN bit of the data frame the bytes END with, and
     # nil when they end with a control frame (or carry no data frame), which leaves the
-    # message state alone.
+    # message state alone. A CLOSE always goes out as a write of its own (both pumps forward
+    # it alone, and an inject is one frame), so its first header byte is enough to see it.
     def write(bytes : Bytes, fin : Bool? = nil) : Nil
       hold do |io|
         io.write(bytes)
         io.flush
         @mid_message = !fin unless fin.nil?
+        @close_sent = true if fin.nil? && !bytes.empty? && bytes[0] & 0x0f_u8 == OP_CLOSE
       end
     end
 
     # Run `block` with this socket held: for a write that is more than one `write` call
     # (`Relay.forward_oversized_frame` streams a frame's payload through). The block sets
-    # the message state itself via `fin`.
+    # the message state itself via `fin=` / `close_sent!`.
+    #
+    # Once `teardown!` has run, a writer waits at most `Live::BOUNDARY_WAIT` for a write in
+    # progress and then raises instead of queueing on the lock. The socket timeouts were
+    # relaxed for the tunnel, and one armed after a fiber parked does not fire, so a writer
+    # parked on a peer that stopped reading would otherwise keep `Relay.run`'s teardown
+    # writes (and the two `close` calls after them) waiting forever.
     def hold(& : IO -> T) : T forall T
+      wait_idle if @teardown
       @lock.synchronize do
         @busy = true
         begin
@@ -57,6 +71,16 @@ module Gori::Proxy::WS
       @mid_message = !fin
     end
 
+    # Record a CLOSE frame written inside `hold`.
+    def close_sent! : Nil
+      @close_sent = true
+    end
+
+    # `Relay.run` has reached its teardown writes: bound every later write's wait (`hold`).
+    def teardown! : Nil
+      @teardown = true
+    end
+
     # The relay is tearing down: no inject may start after this.
     def close : Nil
       @closed = true
@@ -64,30 +88,90 @@ module Gori::Proxy::WS
 
     # Write one frame of gori's own: FIN=1, RSV=0, a fresh mask key client→server and none
     # server→client (§5.3). A data frame waits for a message boundary, up to `wait`; a
-    # control frame waits only for a write already in progress. Answers nil once the frame is
-    # on the wire, else why it is not.
-    def inject(opcode : UInt8, payload : Bytes, wait : Time::Span) : String?
-      frame = WS.encode(opcode, payload, mask: @mask, fin: true)
+    # control frame waits only for a write already in progress. Answers the Shape of what
+    # went out (the mask key included, so the capture is the bytes the peer saw, P7), else
+    # why nothing did.
+    def inject(opcode : UInt8, payload : Bytes, wait : Time::Span) : Shape | String
+      shape = Shape.new(masked: @mask, mask_key: @mask ? Random::Secure.random_bytes(4) : nil)
+      frame = WS.encode(opcode, payload, shape, mask: @mask)
       control = opcode >= 0x8_u8
+      if refusal = await_turn(control, wait)
+        return refusal
+      end
+      write_bounded(frame, control ? nil : true, wait)
+      shape
+    rescue IO::TimeoutError
+      "the #{Live.side(@direction)} peer stopped reading: the frame did not finish writing within " \
+      "#{wait.total_seconds.to_i}s, and gori closed the socket, since a partly written frame " \
+      "leaves the stream unreadable"
+    rescue ex
+      "the socket failed while writing the frame: #{ex.message}"
+    end
+
+    # Poll until a frame may go out: nil then, with no yield before the caller's write, else
+    # why it may not. Only one data frame per side waits at a time.
+    private def await_turn(control : Bool, wait : Time::Span) : String?
       deadline = Time.instant + wait
+      waiter = false
       loop do
         return Live::CLOSED if @closed
-        if !@busy && (control || !@mid_message)
-          write(frame, control ? nil : true)
-          return nil
-        end
-        if Time.instant >= deadline
-          return "the #{Live.side(@direction)} side stayed mid-message (a fragmented message " \
-                 "has not sent its final frame) for #{wait.total_seconds.to_i}s, so a data " \
-                 "frame cannot go in without splitting it; nothing was written. A ping, pong " \
-                 "or close may be injected mid-message" if @mid_message
-          return "a write on the #{Live.side(@direction)} side did not finish within " \
-                 "#{wait.total_seconds.to_i}s; nothing was written"
+        return close_sent_refusal if @close_sent && !control
+        return nil if !@busy && (control || !@mid_message)
+        return wait_refusal(wait) if Time.instant >= deadline
+        unless control || waiter
+          return Live::ANOTHER_WAITING if @waiting
+          @waiting = waiter = true
         end
         sleep Live::POLL
       end
-    rescue ex
-      "the socket failed while writing the frame: #{ex.message}"
+    ensure
+      @waiting = false if waiter
+    end
+
+    # A write of gori's own carries its own deadline. The relay's sockets have none (an idle
+    # WebSocket must not be reaped), so a peer that stopped reading would park this write, and
+    # with it the leg, for good. A timed-out write may have put part of the frame on the wire,
+    # after which no byte on this side parses, so the socket is closed rather than relayed into.
+    private def write_bounded(frame : Bytes, fin : Bool?, limit : Time::Span) : Nil
+      sock = SocketTuning.underlying_socket(@io)
+      before = sock.try(&.write_timeout)
+      sock.try(&.write_timeout = limit)
+      begin
+        write(frame, fin)
+      rescue ex
+        @closed = true
+        @io.close rescue nil # still under `limit`, so a TLS close_notify cannot park either
+        raise ex
+      ensure
+        (sock.try(&.write_timeout = before)) rescue nil
+      end
+    end
+
+    private def wait_idle : Nil
+      deadline = Time.instant + Live::BOUNDARY_WAIT
+      while @busy
+        if Time.instant >= deadline
+          raise IO::TimeoutError.new("a write on the #{Live.side(@direction)} side did not finish " \
+                                     "within #{Live::BOUNDARY_WAIT.total_seconds.to_i}s")
+        end
+        sleep Live::POLL
+      end
+    end
+
+    private def close_sent_refusal : String
+      "a CLOSE has already gone out #{Live.side(@direction)}, and no data frame may follow it " \
+      "(RFC 6455 §5.5.1); nothing was written. A ping, pong or close may still be injected"
+    end
+
+    private def wait_refusal(wait : Time::Span) : String
+      if @mid_message
+        return "the #{Live.side(@direction)} side stayed mid-message (a fragmented message " \
+               "has not sent its final frame) for #{wait.total_seconds.to_i}s, so a data " \
+               "frame cannot go in without splitting it; nothing was written. A ping, pong " \
+               "or close may be injected mid-message"
+      end
+      "a write on the #{Live.side(@direction)} side did not finish within " \
+      "#{wait.total_seconds.to_i}s; nothing was written"
     end
   end
 
@@ -104,6 +188,9 @@ module Gori::Proxy::WS
 
     CLOSED = "the WebSocket is no longer open (it closed, or this gori did not relay it); " \
              "nothing was written"
+
+    ANOTHER_WAITING = "another injected data frame is already waiting for a message boundary on " \
+                      "this side; nothing was written. Retry once it has gone out or been refused"
 
     # How long a data frame waits for the message in flight to end. The relay's own CLOSE
     # window: a peer that keeps a message open longer is not going to end it on cue.
@@ -164,14 +251,13 @@ module Gori::Proxy::WS
       if refusal = outbound.admit
         return refusal
       end
-      leg = entry.leg(direction)
-      if refusal = leg.inject(opcode, payload, wait)
+      shape = entry.leg(direction).inject(opcode, payload, wait)
+      if shape.is_a?(String)
         outbound.refund(1)
-        return refusal
+        return shape
       end
       begin
-        sink.on_ws_injected(flow_id, direction, opcode.to_i, payload.dup,
-          Shape.new(masked: direction == "out"))
+        sink.on_ws_injected(flow_id, direction, opcode.to_i, payload.dup, shape)
       rescue
         # The frame is on the wire; a capture write that fails must not report it as unsent.
       end

@@ -256,6 +256,10 @@ module Gori::Proxy::WS
       # `Reset` that never happened.
       SocketTuning.arm(client, CLOSE_TIMEOUT)
       SocketTuning.arm(upstream, CLOSE_TIMEOUT)
+      # ... and a write already parked before that arm (a pump's, or an injected frame's, #1630)
+      # never sees it, so the writes below must not queue on its leg without a bound either.
+      out_leg.teardown!
+      in_leg.teardown!
       # Resolve both hold queues BEFORE the sockets go. `MessageGate#close` runs from the
       # pump's `ensure`, which is only reached because the two lines below unblocked its
       # read — so a message released there is written to a socket that is already gone. This
@@ -1321,6 +1325,7 @@ module Gori::Proxy::WS
         ok = WS.stream_payload(src, io, h.len, scratch)
         io.flush
         dst.fin = h.fin? if ok && h.data?
+        dst.close_sent! if ok && h.close?
         ok
       end
       return false unless forwarded # peer died mid-payload

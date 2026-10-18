@@ -34,6 +34,7 @@ end
 # Records every row, and whether the relay called the injected-frame hook for it.
 private class LiveSink < Gori::Proxy::FlowSink
   getter rows = [] of {String, Int32, String, Bool}
+  getter shapes = [] of Gori::Proxy::WS::Shape
 
   def on_request(req : Gori::Store::CapturedRequest) : Int64
     1_i64
@@ -50,6 +51,7 @@ private class LiveSink < Gori::Proxy::FlowSink
   def on_ws_injected(flow_id : Int64, direction : String, opcode : Int32, payload : Bytes,
                      shape : Gori::Proxy::WS::Shape = Gori::Proxy::WS::Shape::DEFAULT) : Nil
     @rows << {direction, opcode, String.new(payload), true}
+    @shapes << shape
   end
 end
 
@@ -135,6 +137,31 @@ private def with_relay(sink : Gori::Proxy::FlowSink, flow_id : Int64,
   end
 end
 
+# A relay whose CLIENT side is a real 127.0.0.1 socket: the peer behind it is `browser`, which
+# the block may simply never read. The origin side stays a pipe.
+private def with_socket_relay(sink : Gori::Proxy::FlowSink, flow_id : Int64, & : TCPSocket, IO -> Nil)
+  server = TCPServer.new("127.0.0.1", 0)
+  browser = TCPSocket.new("127.0.0.1", server.local_address.port)
+  client = server.accept
+  ss_r, ss_w = IO.pipe
+  ts_r, ts_w = IO.pipe
+  done = Channel(Nil).new(1)
+  spawn do
+    WS::Relay.run(client, IO::Stapled.new(ss_r, ts_w, sync_close: true), flow_id, sink, nil, LIVE_CTX)
+    done.send(nil)
+  end
+  await_live(sink, flow_id)
+  begin
+    yield browser, ss_w
+  ensure
+    browser.close rescue nil
+    ss_w.close rescue nil
+    receive_within(done, 10, "the relay to end")
+    ts_r.close rescue nil
+    server.close
+  end
+end
+
 private def inject(sink, flow_id, direction, opcode, payload : String, wait = WS::Live::BOUNDARY_WAIT,
                    outbound = ungated_outbound) : String?
   WS::Live.inject(sink, flow_id, direction, opcode, payload.to_slice, outbound, wait)
@@ -188,6 +215,67 @@ describe Gori::Proxy::WS::Live do
       # The next thing the origin reads is the message's own final fragment.
       r.cs_w.write(masked_frame(WS::OP_CONT, "end", fin: true))
       String.new(read_frame(r.ts_r).payload).should eq("end")
+    end
+  end
+
+  it "records the mask key it put on the wire, so the capture is the peer's bytes" do
+    sink = LiveSink.new
+    with_relay(sink, 411_i64) do |r|
+      inject(sink, 411_i64, "out", WS::OP_TEXT, "keyed").should be_nil
+      f = read_frame(r.ts_r)
+      key = sink.shapes[0].mask_key.not_nil!
+      {key.size, key}.should eq({4, f.mask_key})
+      inject(sink, 411_i64, "in", WS::OP_TEXT, "plain").should be_nil
+      read_frame(r.tc_r)
+      {sink.shapes[1].masked, sink.shapes[1].mask_key}.should eq({false, nil})
+    end
+  end
+
+  it "refuses a data frame after a CLOSE went out on that side, and still lets a control frame in" do
+    sink = LiveSink.new
+    with_relay(sink, 412_i64) do |r|
+      r.cs_w.write(masked_frame(WS::OP_CLOSE, ""))
+      read_frame(r.ts_r).opcode.should eq(WS::OP_CLOSE)
+      inject(sink, 412_i64, "out", WS::OP_TEXT, "after").not_nil!.should contain("RFC 6455 §5.5.1")
+      inject(sink, 412_i64, "out", WS::OP_PING, "hb").should be_nil
+      read_frame(r.ts_r).opcode.should eq(WS::OP_PING)
+      # An injected CLOSE counts too.
+      inject(sink, 412_i64, "in", WS::OP_CLOSE, "").should be_nil
+      inject(sink, 412_i64, "in", WS::OP_TEXT, "after").not_nil!.should contain("RFC 6455 §5.5.1")
+      sink.rows.select(&.[3]).map(&.[1]).should eq([9, 8])
+    end
+  end
+
+  it "lets one data frame wait for a boundary per side and refuses a second at once" do
+    sink = LiveSink.new
+    with_relay(sink, 413_i64) do |r|
+      r.cs_w.write(masked_frame(WS::OP_TEXT, "open", fin: false))
+      read_frame(r.ts_r)
+      first = Channel(String?).new(1)
+      spawn { first.send(inject(sink, 413_i64, "out", WS::OP_TEXT, "one")) }
+      sleep 30.milliseconds
+      inject(sink, 413_i64, "out", WS::OP_TEXT, "two").should eq(WS::Live::ANOTHER_WAITING)
+      inject(sink, 413_i64, "out", WS::OP_PING, "hb").should be_nil
+      read_frame(r.ts_r).opcode.should eq(WS::OP_PING)
+      r.cs_w.write(masked_frame(WS::OP_CONT, "end", fin: true))
+      receive_within(first, 5, "the waiting inject").should be_nil
+      read_frame(r.ts_r)
+      String.new(read_frame(r.ts_r).payload).should eq("one")
+    end
+  end
+
+  it "bounds its own write on a peer that stopped reading, so teardown is not pinned" do
+    sink = LiveSink.new
+    with_socket_relay(sink, 414_i64) do |_browser, origin|
+      result = Channel(String?).new(1)
+      big = "x" * (32 * 1024 * 1024)
+      spawn { result.send(inject(sink, 414_i64, "in", WS::OP_BIN, big, wait: 300.milliseconds)) }
+      sleep 50.milliseconds
+      # The origin closes while the inject is parked: the relay's CLOSE forward and teardown
+      # writes queue on the same leg and must get through once the inject gives up.
+      origin.write(WS.encode(WS::OP_CLOSE, Bytes.empty, mask: false))
+      receive_within(result, 5, "the inject to give up").not_nil!.should contain("stopped reading")
+      sink.rows.none?(&.[3]).should be_true
     end
   end
 
