@@ -1,0 +1,6 @@
+fixture: ops
+tier: 0
+grade: exact
+prompt: |
+  Among the endpoints on api.ops.test that received at least 10 requests,
+  which path has the highest share of 5xx responses? Answer with the path.

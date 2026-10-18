@@ -1,0 +1,6 @@
+fixture: ops
+tier: 0
+grade: exact
+prompt: |
+  What is the median response duration, in milliseconds, of the GET requests
+  to https://api.ops.test/api/v1/search? Answer with the number.

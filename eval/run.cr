@@ -70,10 +70,17 @@ def grade(task : Task, answer : JSON::Any?, truth : JSON::Any) : Bool
   return false unless answer
   case task.grade
   when "set"
-    got = answer.as_a?.try(&.map { |v| v.as_i64? || v.as_s?.try(&.to_i64?) }) || return false
+    # A lone id answers a one-element set: "answer with the id" reads as a scalar.
+    items = answer.as_a? || [answer]
+    got = items.map { |v| v.as_i64? || v.as_s?.try(&.to_i64?) }
     return false if got.any?(Nil)
     got.compact.sort! == truth.as_a.map(&.as_i64).sort!
   else
+    # A number compares as a number, so 73, 73.0 and "73" are the same answer.
+    num = ->(v : JSON::Any) { v.as_f? || v.as_i64?.try(&.to_f) || v.as_s?.try(&.strip.to_f?) }
+    if (want = num.call(truth)) && (got = num.call(answer))
+      return got == want
+    end
     norm = ->(v : JSON::Any) { v.as_s? || v.to_json }
     norm.call(answer).strip == norm.call(truth).strip
   end

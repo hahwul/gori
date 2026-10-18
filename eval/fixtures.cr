@@ -18,7 +18,7 @@ OUT = File.join(__DIR__, "out", "fixtures")
 
 def add_flow(store : S, at : Int64, *, host : String, target : String, method = "GET",
              status = 200, ctype = "application/json", body = "{}",
-             resp_headers = [] of {String, String}) : Int64
+             resp_headers = [] of {String, String}, dur_ms = 20) : Int64
   req_head = "#{method} #{target} HTTP/1.1\r\nHost: #{host}\r\nUser-Agent: eval/1.0\r\nAccept: */*\r\n\r\n"
   fid = store.insert_flow(S::CapturedRequest.new(
     created_at: at, scheme: "https", host: host, port: 443, method: method, target: target,
@@ -34,7 +34,7 @@ def add_flow(store : S, at : Int64, *, host : String, target : String, method = 
   store.update_response(S::CapturedResponse.new(
     flow_id: fid, status: status, reason: "OK", content_type: ctype,
     head: resp_head.to_slice, body: body.to_slice, body_size: body.bytesize.to_i64,
-    ttfb_us: 10_000_i64, duration_us: 20_000_i64, state: S::FlowState::Complete))
+    ttfb_us: dur_ms * 500_i64, duration_us: dur_ms * 1000_i64, state: S::FlowState::Complete))
   fid
 end
 
@@ -132,8 +132,58 @@ def build_events(path : String) : Hash(String, JSON::Any)
   }
 end
 
+# An API's operational traffic, for multi-step questions no single filter answers: each needs
+# rows gathered across many flows and then grouped, ranked or joined.
+def build_ops(path : String) : Hash(String, JSON::Any)
+  store = S.open(path)
+  t = 1_780_000_000_000_000_i64
+  tick = -> { t += 1_000_000_i64 }
+  api = "api.ops.test"
+  rid = 0
+  next_rid = -> { rid += 1; "req-#{(rid * 7919).to_s(16).rjust(5, '0')}" }
+  rid_flow = {} of String => Int64
+
+  # t0-error-rate: per-endpoint 5xx share. /api/v1/upload has the highest share but only four
+  # requests, under the task's floor of ten, so the answer is /api/v1/cart.
+  plan = {
+    "/api/v1/search"   => {41, 6},
+    "/api/v1/cart"     => {12, 3},
+    "/api/v1/upload"   => {4, 2},
+    "/api/v1/products" => {30, 0},
+    "/health"          => {20, 1},
+  }
+  # t0-median-duration: the 41 search durations, so the median is one of them.
+  search_ms = (0...41).map { |i| (i * 37) % 97 + 20 }
+  plan.each do |target, (n, errors)|
+    stride = errors.zero? ? 1 : n // errors
+    n.times do |i|
+      status = errors > 0 && i % stride == 0 && i // stride < errors ? 503 : 200
+      r = next_rid.call
+      dur = target == "/api/v1/search" ? search_ms[i] : 30
+      rid_flow[r] = add_flow(store, tick.call, host: api, target: target, status: status,
+        body: %({"ok":#{status == 200}}), resp_headers: [{"X-Request-Id", r}], dur_ms: dur)
+    end
+  end
+
+  # t0-request-ref: one support response cites an earlier request by its X-Request-Id; the
+  # other reference in it names no captured request.
+  cited = rid_flow.keys[57]
+  add_flow(store, tick.call, host: api, target: "/api/v1/support/tickets/88",
+    body: %({"ticket":88,"refs":["#{cited}","req-00000"],"note":"customer reported a failed checkout"}),
+    resp_headers: [{"X-Request-Id", next_rid.call}])
+
+  store.close
+  errors = plan.compact_map { |k, (n, e)| n >= 10 ? {k, e / n} : nil }
+  sorted = search_ms.sort
+  {
+    "t0-error-rate"      => JSON::Any.new(errors.max_by(&.[1])[0]),
+    "t0-median-duration" => JSON::Any.new(sorted[sorted.size // 2].to_i64),
+    "t0-request-ref"     => JSON::Any.new([JSON::Any.new(rid_flow[cited])]),
+  }
+end
+
 FileUtils.mkdir_p(OUT)
-{"shop" => ->build_shop(String), "events" => ->build_events(String)}.each do |name, build|
+{"shop" => ->build_shop(String), "events" => ->build_events(String), "ops" => ->build_ops(String)}.each do |name, build|
   db = File.join(OUT, "#{name}.db")
   Dir.glob("#{db}*").each { |f| File.delete(f) }
   truth = build.call(db)

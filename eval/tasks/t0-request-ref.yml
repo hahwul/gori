@@ -1,0 +1,7 @@
+fixture: ops
+tier: 0
+grade: set
+prompt: |
+  Every response from api.ops.test carries an X-Request-Id header. One response
+  body cites an earlier request by that id. Which flow's X-Request-Id is cited?
+  Answer with that flow's numeric gori flow id, not the X-Request-Id value.
