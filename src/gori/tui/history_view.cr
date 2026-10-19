@@ -4746,16 +4746,16 @@ module Gori::Tui
       lines
     end
 
+    # A JSON payload's render ceiling in bytes, beside `ProtobufTree::MAX_LINES`: about what
+    # those lines hold when wrapped, so a minified multi-MiB message is not styled whole.
+    JSON_RENDER_BYTES = 16 * 1024
+
     # One gRPC message's payload, under its header line. `ProtobufTree.decode?` owns the
     # carve-outs (compressed / trailer), shared with the Repeater transcript so the two panes
     # cannot disagree about which payloads are protobuf.
     #
     # `plain` is the message's inflated payload, or why it has none — the hex keeps the WIRE
     # octets either way, and a compressed one that did not inflate says why above them.
-    # A JSON payload's render ceiling in bytes, beside `ProtobufTree::MAX_LINES`: about what
-    # those lines hold when wrapped, so a minified multi-MiB message is not styled whole.
-    JSON_RENDER_BYTES = 16 * 1024
-
     private def grpc_payload_lines(m : Proxy::H2::Grpc::Message, plain : Bytes | String, tree : Bool,
                                    binding : Protobuf::Schemas::Binding? = nil) : Array(String)
       if m.json && plain.is_a?(Bytes) && tree
