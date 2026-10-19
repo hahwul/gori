@@ -225,7 +225,9 @@ What CI gates, and what it does not:
   shard.lock), and the native Windows build in `windows.yml`. On a pull request `crystal spec`
   runs only the specs mirroring your change (`test-scope` → `changed-tests`) unless the change
   touches the selector, shard machinery, dependency set or a shared file; the full four-shard
-  suite runs on push to `main`. `ci.yml` and `windows.yml` have `paths:` filters, so a
+  suite runs on push to `main`. `windows.yml` scopes its specs the same way (plus its own
+  workflow and scripts), and runs a full suite as four shards over one prebuilt runner.
+  `ci.yml` and `windows.yml` have `paths:` filters, so a
   docs-only PR may get no checks at all.
   Format, bench, scripts and the shards gate are real gates — `just test` touches none of them, so a green
   suite is not a green CI.
