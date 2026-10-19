@@ -2626,6 +2626,8 @@ module Gori::Tui
         results.send({view, opened, flag})
       rescue ex
         ::Log.error(exception: ex) { "ws session connect fiber died" }
+        # A session the dial already opened is handed to no one: close it here.
+        opened.try(&.session).try { |s| s.close rescue nil }
         # Hand a nil-session refusal to the drain so it reaps `flag` and clears inflight; a
         # blocked send here means the controller is tearing down, where the cell goes with it.
         begin

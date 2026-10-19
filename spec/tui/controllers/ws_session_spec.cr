@@ -466,6 +466,33 @@ describe "RepeaterController WebSocket live session (#1630)" do
     end
   end
 
+  # Six dials into a four-slot buffer park two senders, each holding an open session. The
+  # project exit's drain must free them too, or those sockets outlive the project.
+  it "closes every dialled session on a project exit, past a full result buffer" do
+    ended = 0
+    origin = LiveOrigin.new do |conn, o|
+      while o.read(conn)
+      end
+    ensure
+      ended += 1
+    end
+    begin
+      with_ws_controller do |ctl, _host|
+        6.times do |i|
+          open_ws_tab(ctl, origin.port, ["m#{i}"])
+          ctl.repeater_toggle_ws_session
+          ctl.repeater_send
+        end
+        wait_until(5.seconds) { origin.accepts >= 6 }.should be_true
+        sleep 100.milliseconds # every dial is back: four results buffered, two senders parked
+        ctl.stop_all
+        wait_until(8.seconds) { ended == 6 }.should be_true
+      end
+    ensure
+      origin.close
+    end
+  end
+
   it "reaps every connect's cancel cell even when the result buffer fills" do
     origin = echo_origin
     begin
