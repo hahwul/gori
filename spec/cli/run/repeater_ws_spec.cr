@@ -216,14 +216,19 @@ describe "gori run repeater ws (#1660)" do
     end
 
     it "keeps the session open past stdin EOF when --for is set and prints a server push sent ~1s later" do
+      close_elapsed : Time::Span? = nil
       origin = CliWsTestOrigin.new do |conn, o|
+        started = Time.instant
         if frame = o.read(conn)
           o.text(conn, "ack:#{String.new(frame.payload)}")
         end
-        sleep 900.milliseconds
-        o.text(conn, "late-push")
+        spawn do
+          sleep 900.milliseconds
+          o.text(conn, "late-push") rescue nil
+        end
         while frame = o.read(conn)
           if frame.close?
+            close_elapsed = Time.instant - started
             conn.write(WS.encode(WS::OP_CLOSE, frame.payload, mask: false))
             conn.flush
             break
@@ -237,9 +242,11 @@ describe "gori run repeater ws (#1660)" do
           stdout = IO::Memory.new
           stderr = IO::Memory.new
 
+          started = Time.instant
           ok, err = Gori::CLI::Run.open_and_run_ws_session(id, project,
             allow_unscoped: true, duration: 2.seconds,
             stdin: stdin, stdout: stdout, stderr: stderr)
+          elapsed = Time.instant - started
           err.should be_nil
           ok.should be_true
           out = stdout.to_s
@@ -247,6 +254,8 @@ describe "gori run repeater ws (#1660)" do
           out.should contain("← ack:sub")
           out.should contain("← late-push")
           origin.frames.any?(&.close?).should be_true
+          close_elapsed.not_nil!.should be >= 1.5.seconds
+          elapsed.should be >= 1.8.seconds
         end
       ensure
         origin.close

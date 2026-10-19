@@ -575,7 +575,7 @@ done
 **`repeater ws <repeater-id>`**: 저장된 repeater로 지속 HTTP/1.1 WebSocket 세션을 엽니다(TUI의 **Live session** 및 MCP의 `ws_session_open` / `ws_session_send` / `get_job` / `stop_job`에 대응하는 `gori run` 표면). stdin에서 읽은 각 줄은 TEXT 메시지로 프레이밍해 보내고(`--binary`를 주면 헥스로 디코드한 BINARY 메시지), 보낸 프레임과 받은 프레임 모두 도착하는 즉시 stdout에 찍습니다. stdin EOF(`--for`가 없을 때), `--for=DURATION`, 또는 `Ctrl-C`가 오면 `CLOSE` 프레임을 보내고 깨끗하게 종료합니다. Windows에서는 파이프로 연결한 stdin 읽기가 블로킹되므로 서버 프레임은 다음 줄이 들어올 때 찍힙니다(콘솔 stdin은 괜찮습니다).
 
 ```bash
-printf '{"op":"ping"}\n' | gori run repeater ws 5 --engine-io
+printf '{"op":"ping"}\n' | gori run repeater ws 5 --engine-io --for 30s
 gori run repeater ws 5 --for 30s --format json
 ```
 

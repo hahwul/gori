@@ -583,7 +583,7 @@ A send that reached the origin exits `0` even when the writes after it fail, so 
 **`repeater ws <repeater-id>`**: open a persistent HTTP/1.1 WebSocket session on a saved repeater (the `gori run` counterpart of the TUI's **Live session** and MCP's `ws_session_open` / `ws_session_send` / `get_job` / `stop_job`). Each line read from stdin is framed and sent as a TEXT message (or hex-decoded as a BINARY message under `--binary`), and every sent and received frame is printed to stdout as it arrives. EOF on stdin (without `--for`), `--for=DURATION`, or `Ctrl-C` sends a `CLOSE` frame and exits cleanly. On Windows a piped stdin blocks while reading, so server frames print when the next line arrives (a console stdin is fine).
 
 ```bash
-printf '{"op":"ping"}\n' | gori run repeater ws 5 --engine-io
+printf '{"op":"ping"}\n' | gori run repeater ws 5 --engine-io --for 30s
 gori run repeater ws 5 --for 30s --format json
 ```
 

@@ -84,11 +84,16 @@ module Gori
                                  auto : Bool = false, mask_secrets : Bool = false) : Nil
         j.object do
           j.field "seq", seq if seq
+          # A heartbeat reply the session wrote by itself, not the agent.
           j.field "auto_reply", true if auto
           j.field "direction", message.direction
           j.field "opcode", message.opcode
           j.field "origin", origin(message.direction)
           j.field "type", frame_type(message.opcode)
+          # What was actually FRAMED, not just what was meant. An agent driving a
+          # §5.1/§5.2/§5.4 test has to be able to read back that the unmasked frame,
+          # the RSV1 bit or the lying length header really went out — a transcript
+          # that only echoes the payload is asking to be taken on trust.
           j.field "frame", Store::WsOutMessage.new(message.opcode, message.payload, message.shape).shape_label(message.direction == "out")
           if message.opcode == Proxy::WS::OP_CLOSE.to_i && (code = WsEngine.close_status(message.payload))
             j.field "close_code", code
@@ -101,15 +106,33 @@ module Gori
 
       private def self.emit_payload_json(j : JSON::Builder, message : WsEngine::Message,
                                          authored : Store::WsOutMessage?, mask_secrets : Bool) : Nil
+        # ONE masked buffer feeds both renderings, so they cannot disagree.
+        # They did: `payload` ran through `mask_secrets` while `payload_base64`
+        # beside it was a bare encode of the raw bytes — and since masking is
+        # the exact inverse of the expansion, the same object reported the
+        # STORED spelling in one field and printed the substituted value in the
+        # clear in the next (`bad\xff\xfeWHEREVAL`, base64, unmasked). Masking a
+        # value in one rendering and not another is not masking it.
         bytes = mask_secrets ? Env.mask_secrets(String.new(message.payload)).to_slice : message.payload
         if message.opcode == Proxy::WS::OP_TEXT.to_i
           s = String.new(bytes)
           j.field "payload", s.scrub
+          # JSON-RPC has no way to carry a byte that is not valid UTF-8, so
+          # `payload` above is U+FFFD-substituted for exactly the payload an
+          # §8.1/§5.6 test is about. The real bytes go beside it instead of
+          # being unreadable on every surface (they are in the BLOB column).
           j.field "payload_base64", Base64.strict_encode(bytes) unless s.valid_encoding?
         else
           j.field "binary", true
           j.field "payload_base64", Base64.strict_encode(bytes)
         end
+        # Only when it FIRED — the same rule `request_line_rewritten` follows
+        # (`send_request`): gori changed the operator's bytes, so the surface
+        # reporting the send has to say so. Masking makes the change invisible
+        # in `payload` on its own, because it maps the substituted value back to
+        # the `$NAME` that produced it, and the result then reads exactly like a
+        # byte-exact replay. The AUTHORED form goes beside it so an agent can see
+        # both ends of the substitution rather than infer one.
         return unless authored && authored.payload != message.payload
         j.field "payload_expanded", true
         raw = String.new(authored.payload)

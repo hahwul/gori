@@ -1934,10 +1934,7 @@ module Gori
           stderr.puts "note: #{CLI::Output.term_line(note)}"
           stderr.flush
         end
-        status = unless result.handshake_head.empty?
-          (Proxy::Codec::Http1.parse_response_head(result.handshake_head) rescue nil).try(&.status)
-        end
-        msg = result.error || "the handshake was not upgraded#{status ? " (status #{status})" : ""}; no session was opened"
+        msg = result.error || "the handshake was not upgraded; no session was opened"
         "gori run repeater ws: #{CLI::Output.term_line(msg)}"
       end
 
