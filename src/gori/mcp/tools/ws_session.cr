@@ -148,25 +148,33 @@ module Gori
         wait_ms = optional_int_arg(h, "wait_ms").try(&.clamp(0_i64, WS_SESSION_MAX_WAIT_MS)) || 0_i64
         session = job.session
         before = session.transcript.last?.try(&.seq) || 0_i64
-        sent = 0
-        error = nil.as(String?)
-        # Checked between messages: each write can block for the dial's write timeout on a
-        # peer that stopped reading, and this is the single MCP worker.
-        ws_out_msgs(source, job.verbatim?).each do |m|
-          return err("request cancelled", "CANCELLED") if cancelled?
-          break if error = session.send(m, cancel_signal)
-          sent += 1
-        end
-        ws_wait_for_reply(session, before, wait_ms) if wait_ms > 0 && error.nil?
+        sent, error, stopped = ws_send_each(session, ws_out_msgs(source, job.verbatim?))
+        ws_wait_for_reply(session, before, wait_ms) if wait_ms > 0 && error.nil? && !stopped
         payload = JSON.build do |j|
           j.object do
             j.field "job_id", job.id
             j.field "sent", sent
+            j.field "cancelled", true if stopped
             j.field "error", Env.mask_secrets(error) if error
             emit_ws_transcript(j, job, before)
           end
         end
         Result.new(payload, is_error: !error.nil?)
+      end
+
+      # Send `msgs` in order: {how many went out, why the next did not, whether a cancel stopped
+      # it}. Checked between messages: each write can block for the dial's write timeout on a
+      # peer that stopped reading, and this is the single MCP worker. A cancel still answers
+      # with what went out, so a retry does not send those messages again.
+      private def ws_send_each(session : Repeater::WsSession,
+                               msgs : Array(Repeater::WsEngine::OutMsg)) : {Int32, String?, Bool}
+        msgs.each_with_index do |m, i|
+          return {i, nil, true} if cancelled?
+          if error = session.send(m, cancel_signal)
+            return {i, error, false}
+          end
+        end
+        {msgs.size, nil, false}
       end
 
       # Wait up to `wait_ms` for the first server message after `before` that is not a

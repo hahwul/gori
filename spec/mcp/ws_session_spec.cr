@@ -86,6 +86,30 @@ private def eventually(timeout : Time::Span = 3.seconds, &) : Nil
 end
 
 describe "MCP ws_session tools" do
+  # A cancel between messages answers with what already went out, so a retry does not resend it.
+  it "reports the messages a cancelled send already wrote" do
+    origin = echo_origin
+    begin
+      with_store do |store|
+        store.add_scope_rule("include", "host", "127.0.0.1")
+        tools = tools_for(store)
+        rid = seed_ws_repeater(store, origin.port)
+        job_id = call_json(tools, "ws_session_open", %({"repeater_id":#{rid}}))["job_id"].as_s
+        checks = 0
+        res = tools.call("ws_session_send", JSON.parse(%({"job_id":"#{job_id}","messages":["a","b","c"]})),
+          cancelled: -> { (checks += 1) > 1 })
+        res.is_error.should be_false
+        sent = JSON.parse(res.text)
+        sent["sent"].as_i.should eq(1)
+        sent["cancelled"].as_bool.should be_true
+        sent["messages"].as_a.select { |m| m["direction"].as_s == "out" }.map(&.["payload"].as_s).should eq(["a"])
+        call_json(tools, "stop_job", %({"job_id":"#{job_id}","wait":true}))
+      end
+    ensure
+      origin.close
+    end
+  end
+
   it "opens, sends, reads server push through a get_job cursor, and stops" do
     origin = echo_origin
     begin
