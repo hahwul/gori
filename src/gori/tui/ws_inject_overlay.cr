@@ -14,7 +14,11 @@ module Gori::Tui
   #   ↵    injects from any row · esc cancels
   class WsInjectOverlay < FormOverlay
     DIRECTIONS = ["client → server", "server → client"]
-    KINDS      = ["text", "binary", "ping"]
+    # Every kind MCP `ws_inject` and `gori run intercept inject` take, from the one table.
+    KINDS = Proxy::WS::Live::OPCODES.keys
+    # The kinds whose payload is typed as hex: a binary frame's, and a close's, whose payload
+    # opens with a 2-byte status code (`03e8` is 1000, RFC 6455 §5.5.1) that text cannot spell.
+    HEX_KINDS = {"binary", "close"}
 
     getter flow_id : Int64
 
@@ -32,11 +36,16 @@ module Gori::Tui
       Proxy::WS::Live::OPCODES[KINDS[@kind_idx]]
     end
 
-    # The bytes to send, or nil when a binary payload is not hex: a binary frame takes hex,
-    # the way the Repeater's live session reads a line it sends as binary.
+    # The bytes to send, or nil when a hex payload is not hex: a binary or close frame takes
+    # hex, the way the Repeater's live session reads a line it sends as binary. Taken as typed
+    # (P7): a close code gori would not send itself, or a 1-byte payload, still goes out.
     def payload : Bytes?
       text = @payload.value
-      KINDS[@kind_idx] == "binary" ? RepeaterView.ws_hex(text) : text.to_slice
+      hex? ? RepeaterView.ws_hex(text) : text.to_slice
+    end
+
+    private def hex? : Bool
+      HEX_KINDS.includes?(KINDS[@kind_idx])
     end
 
     # Send the frame through the engine the bridge drain uses (`Live.inject`: Layer 2 on the
@@ -129,9 +138,22 @@ module Gori::Tui
         @payload.render(screen, x + 11, py, {right - x - 11, 3}.max, sel, fg, bg)
       else
         ok = !payload.nil?
-        label = ok ? "[ ↵ inject ]" : "[ binary takes hex bytes, e.g. 48656c6c6f ]"
+        label = ok ? inject_label : "[ #{hex_hint} ]"
         screen.text(x, py, label, ok ? Theme.accent : Theme.muted, bg, Attribute::Bold, width: {right - x, 0}.max)
       end
+    end
+
+    # The close code the hex spells, beside the button: `1000` typed as hex is 4096.
+    private def inject_label : String
+      bytes = payload
+      return "[ ↵ inject ]" unless KINDS[@kind_idx] == "close" && bytes && bytes.size >= 2
+      "[ ↵ inject · close code #{(bytes[0].to_i << 8) | bytes[1].to_i} ]"
+    end
+
+    # Why `payload` is nil: the form's button row and the shell's refusal both say it.
+    def hex_hint : String
+      return "a close frame takes hex bytes: a status code, then a reason (e.g. 03e8)" if KINDS[@kind_idx] == "close"
+      "a binary frame takes hex bytes (e.g. 48656c6c6f)"
     end
 
     private def draw_tail(screen : Screen, box : Rect, first : Int32) : Nil

@@ -141,7 +141,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # not hex keeps the card open (false), so a fix is an edit.
   private def inject_ws_frame(ov : WsInjectOverlay) : Bool
     unless payload = ov.payload
-      status("inject: a binary frame takes hex bytes (e.g. 48656c6c6f)", :error)
+      status("inject: #{ov.hex_hint}", :error)
       return false
     end
     sink = @session.proxy.sink

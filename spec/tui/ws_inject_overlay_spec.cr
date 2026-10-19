@@ -58,7 +58,33 @@ describe Gori::Tui::WsInjectOverlay do
     ov.handle_key(ikey(Termisu::Input::Key::Right))
     ov.opcode.should eq(WS::OP_PING)
     ov.handle_key(ikey(Termisu::Input::Key::Right))
+    ov.opcode.should eq(WS::OP_PONG)
+    ov.handle_key(ikey(Termisu::Input::Key::Right))
+    ov.opcode.should eq(WS::OP_CLOSE)
+    ov.handle_key(ikey(Termisu::Input::Key::Right))
     ov.opcode.should eq(WS::OP_TEXT)
+  end
+
+  # Parity with MCP `ws_inject` and `gori run intercept inject`, which take every kind in
+  # `Live::OPCODES`: the form offered three of the five.
+  it "offers every kind the other surfaces inject" do
+    WsInjectOverlay::KINDS.should eq(WS::Live::OPCODES.keys)
+  end
+
+  it "reads a close payload as hex, so its status code can be typed, and names the code" do
+    ov = WsInjectOverlay.new(7_i64)
+    ov.handle_key(ikey(Termisu::Input::Key::Down))
+    ov.handle_key(ikey(Termisu::Input::Key::Left)) # wraps to close
+    ov.opcode.should eq(WS::OP_CLOSE)
+    ov.payload.should eq(Bytes.empty) # a bare CLOSE
+    itype(ov, "03e8 6279 65")
+    ov.payload.should eq(Bytes[0x03, 0xe8, 0x62, 0x79, 0x65]) # 1000 "bye"
+    backend = MemoryBackend.new(100, 24)
+    ov.render(Screen.new(backend), Rect.new(0, 0, 100, 24))
+    backend.contains?("close code 1000").should be_true
+    itype(ov, "z")
+    ov.payload.should be_nil
+    ov.hex_hint.should contain("status code")
   end
 
   it "types into the payload from any row, and ↵ injects from any row" do
