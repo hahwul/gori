@@ -119,6 +119,35 @@ private class NoopWsRewriter < Gori::Proxy::HeadRewriter
   end
 end
 
+# An upstream whose FIRST write runs `on_write` before it: with nothing relayed to the origin
+# yet, that write is the relay's own teardown flush.
+private class TeardownTap < IO
+  @fired = false
+
+  def initialize(@io : IO, &@on_write : ->)
+  end
+
+  def read(slice : Bytes) : Int32
+    @io.read(slice)
+  end
+
+  def write(slice : Bytes) : Nil
+    unless @fired
+      @fired = true
+      @on_write.call
+    end
+    @io.write(slice)
+  end
+
+  def flush : Nil
+    @io.flush
+  end
+
+  def close : Nil
+    @io.close
+  end
+end
+
 # Run a relay for `flow_id`, hand the rig to the block, then shut it down and reap the relay.
 private def with_relay(sink : Gori::Proxy::FlowSink, flow_id : Int64,
                        rewriter : Gori::Proxy::HeadRewriter? = nil, interceptor : Gori::Interceptor? = nil, &)
@@ -339,6 +368,52 @@ describe Gori::Proxy::WS::Live do
       peer.close
       server.close
     end
+  end
+
+  # `Live.unregister` closed the legs only after teardown's yields (settle, the flush, the
+  # teardown rows), and an inject in that window was written and acked into a closing socket.
+  it "refuses an inject once the relay has begun tearing down" do
+    sink = LiveSink.new
+    cs_r, cs_w = IO.pipe
+    ts_r, ts_w = IO.pipe
+    ss_r, ss_w = IO.pipe
+    tc_r, tc_w = IO.pipe
+    during = "not reached"
+    upstream = TeardownTap.new(IO::Stapled.new(ss_r, ts_w, sync_close: true)) do
+      during = inject(sink, 416_i64, "in", WS::OP_TEXT, "late") || "injected"
+    end
+    done = Channel(Nil).new(1)
+    spawn do
+      WS::Relay.run(IO::Stapled.new(cs_r, tc_w, sync_close: true), upstream, 416_i64, sink,
+        NoopWsRewriter.new, LIVE_CTX)
+      done.send(nil)
+    end
+    await_live(sink, 416_i64)
+    # Half a message the assembling pump withholds, so the teardown has a write to make.
+    cs_w.write(masked_frame(WS::OP_TEXT, "half", fin: false))
+    sleep 20.milliseconds
+    ss_w.close # the origin hangs up: the relay tears down
+    receive_within(done, 5, "the relay to end")
+    cs_w.close rescue nil
+    during.should eq(WS::Live::CLOSED)
+    sink.rows.none?(&.[3]).should be_true
+    {ts_r, tc_r}.each { |io| io.close rescue nil }
+  end
+
+  # A header and part of its payload went out: the next byte on that side would be read as
+  # the rest of the payload, so an inject there corrupted the stream and reported success.
+  it "closes a leg it could only half forward an oversized frame on" do
+    src = IO::Memory.new
+    src.write(Bytes[0x82, 127])
+    IO::ByteFormat::BigEndian.encode(WS::MAX_FRAME + 1, src)
+    src.write(Bytes.new(10)) # ... and then the peer is gone
+    src.rewind
+    h = WS.read_header(src).not_nil!
+    leg = WS::Leg.new("in", IO::Memory.new, mask: false)
+    WS::Relay.forward_oversized_frame(src, leg, h, "in", 1_i64, LiveSink.new, WS::OP_BIN,
+      Bytes.new(4096)).should be_false
+    leg.closed?.should be_true
+    leg.inject(WS::OP_TEXT, "x".to_slice, 100.milliseconds).should eq(WS::Live::CLOSED)
   end
 
   it "lets a control frame in mid-message" do

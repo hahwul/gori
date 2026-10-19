@@ -269,6 +269,12 @@ module Gori::Proxy::WS
       # never sees it, so the writes below must not queue on its leg without a bound either.
       out_leg.teardown!
       in_leg.teardown!
+      # No inject starts from here on. `Live.unregister` closes the legs too, but only after the
+      # yields below, and an inject in that window wrote into a peer already gone and was
+      # acked, or failed past its start and kept its budget slot. The teardown writes go
+      # through `Leg#hold`, which `close` does not gate.
+      out_leg.close
+      in_leg.close
       # Resolve both hold queues BEFORE the sockets go. `MessageGate#close` runs from the
       # pump's `ensure`, which is only reached because the two lines below unblocked its
       # read — so a message released there is written to a socket that is already gone. This
@@ -1340,9 +1346,19 @@ module Gori::Proxy::WS
       # The leg is held for the whole frame, payload reads included: nothing may land between a
       # header and its body. An injector sees it busy and waits (bounded) instead.
       forwarded = dst.hold do |io|
-        io.write(h.bytes)
-        ok = WS.stream_payload(src, io, h.len, scratch)
-        io.flush
+        ok = begin
+          io.write(h.bytes)
+          streamed = WS.stream_payload(src, io, h.len, scratch)
+          io.flush
+          streamed
+        rescue ex
+          dst.close
+          raise ex
+        end
+        # A header with part of its payload is on the wire: the next byte this side writes is
+        # read as the rest of that payload, so no inject may follow it (`mid_message` cannot
+        # say "mid-frame"). Closed under the lock, before an injector can see the leg idle.
+        dst.close unless ok
         dst.fin = h.fin? if ok && h.data?
         dst.close_sent! if ok && h.close?
         ok
