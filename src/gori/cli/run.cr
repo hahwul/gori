@@ -157,6 +157,7 @@ module Gori
       # A broken STDOUT pipe (`gori run … | head`) is answered once, in `CLI.run`.
       def self.dispatch(args : Array(String)) : Nil
         route_logs_to_stderr
+        repeated_target_flag_error(args).try { |err| abort err }
         args = hoist_target_flags(args)
         dispatch_subcommand(args)
       end
@@ -172,17 +173,39 @@ module Gori
       # flags in any order there. In the run nothing else takes a value, so `--project X`
       # takes `X` unambiguously.
       def self.hoist_target_flags(args : Array(String)) : Array(String)
+        words, flags, _, rest = split_target_run(args)
+        words + flags + rest
+      end
+
+      # A target flag the leading run names twice, or names and the argv after it names again:
+      # the parser keeps the LAST one in silence, and the hoist made `gori run --project A
+      # history --project B` a command that reads B. Refused, as `--db` beside `--project` is
+      # (`two_targets_error`). Past `--` is another program's argv and is not looked at; before
+      # it, a value spelled exactly like the flag is refused too, the price of not parsing it.
+      def self.repeated_target_flag_error(args : Array(String)) : String?
+        _, _, names, rest = split_target_run(args)
+        return nil if names.empty?
+        rest = rest.take_while { |a| a != "--" }
+        repeated = names.find { |n| names.count(n) > 1 || rest.any? { |a| target_flag_name(a) == n } }
+        "gori run: #{repeated} is given twice — pass it once" if repeated
+      end
+
+      # `{the leading words, the target flags among them (with values), those flags' names,
+      # everything from the first other flag on}`.
+      private def self.split_target_run(args : Array(String)) : {Array(String), Array(String), Array(String), Array(String)}
         words = [] of String
         flags = [] of String
+        names = [] of String
         i = 0
         while i < args.size
           arg = args[i]
-          if arg.in?("--project", "--db")
+          if name = target_flag_name(arg)
+            names << name
             flags << arg
-            flags << args[i + 1] if i + 1 < args.size
-            i += 2
-          elsif arg.starts_with?("--project=") || arg.starts_with?("--db=")
-            flags << arg
+            if arg == name
+              flags << args[i + 1] if i + 1 < args.size
+              i += 1
+            end
             i += 1
           elsif arg.starts_with?('-')
             break
@@ -191,7 +214,11 @@ module Gori
             i += 1
           end
         end
-        words + flags + (args[i..]? || [] of String)
+        {words, flags, names, args[i..]? || [] of String}
+      end
+
+      private def self.target_flag_name(arg : String) : String?
+        {"--project", "--db"}.find { |f| arg == f || arg.starts_with?("#{f}=") }
       end
 
       # STDOUT on these commands is DATA — a flow listing, a sitemap tree, `--format json` being

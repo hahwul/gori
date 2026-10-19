@@ -264,4 +264,20 @@ describe "gori run — a target flag before the verbs" do
     Gori::CLI::Run.hoist_target_flags(%w[shell --project p -- curl --db q]).should eq(%w[shell --project p -- curl --db q])
     Gori::CLI::Run.hoist_target_flags(%w[history --project]).should eq(%w[history --project])
   end
+
+  # The parser keeps the LAST of a repeated flag, and the hoist put the leading one first.
+  it "refuses a hoisted target flag the argv names again, in either spelling" do
+    Gori::CLI::Run.repeated_target_flag_error(%w[--project A history --project B])
+      .should eq("gori run: --project is given twice — pass it once")
+    Gori::CLI::Run.repeated_target_flag_error(%w[--project=A history --project=B]).should_not be_nil
+    Gori::CLI::Run.repeated_target_flag_error(%w[--db x history --db=y]).should_not be_nil
+    Gori::CLI::Run.repeated_target_flag_error(%w[--project A --project B history]).should_not be_nil
+    Gori::CLI::Run.repeated_target_flag_error(%w[history --project A ls --format=json --project B]).should_not be_nil
+  end
+
+  it "stays out of the way of one target flag, one of each, and another program's argv" do
+    Gori::CLI::Run.repeated_target_flag_error(%w[--project A history ls]).should be_nil
+    Gori::CLI::Run.repeated_target_flag_error(%w[history --project A --db b]).should be_nil
+    Gori::CLI::Run.repeated_target_flag_error(%w[shell --project p -- curl --project q]).should be_nil
+  end
 end
