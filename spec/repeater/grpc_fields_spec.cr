@@ -60,6 +60,24 @@ describe Gori::Repeater::GrpcFields do
     end
   end
 
+  it "sends the captured octets when the specs leave the message as it was" do
+    with_demo_schema do
+      # A gzip stream gori would not write itself (it names a file), so a re-compress shows.
+      io = IO::Memory.new
+      gz = Compress::Gzip::Writer.new(io)
+      gz.header.name = "origin"
+      gz.write(Gori::Protobuf::Encoder.length_delimited(1_u32, "bob".to_slice))
+      gz.close
+      frame = Grpc.frame(true, io.to_slice)
+      head = "POST /demo.Users/GetUser HTTP/1.1\r\nHost: api.test\r\ncontent-type: application/grpc\r\n" \
+             "grpc-encoding: gzip\r\ncontent-length: #{frame.size}\r\n\r\n"
+      request = IO::Memory.new
+      request.write(head.to_slice)
+      request.write(frame)
+      Gori::Repeater::GrpcFields.apply(request.to_slice, ["name=bob"]).should eq(request.to_slice)
+    end
+  end
+
   it "leaves the request alone with no specs, and refuses what it cannot edit" do
     Gori::Repeater::GrpcFields.apply(get_user, [] of String).should eq(get_user)
     plain = "POST / HTTP/1.1\r\nHost: a\r\ncontent-type: application/json\r\n\r\n{}".to_slice
