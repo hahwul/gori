@@ -91,11 +91,11 @@ describe "MCP wordlist catalog" do
       end
     end
 
-    # #1649: a name runs to 200 bytes, so a full catalog outgrows the reply budget; `offset`
-    # pages the rest, each list exactly once.
+    # #1649: 600 names of ~100 bytes outgrow the reply budget; `offset` pages the rest, each
+    # list exactly once. Not longer names: on Windows the temp path + name must fit MAX_PATH.
     it "holds the listing to the reply budget and pages it by offset" do
       with_wordlist_home do
-        names = (0...600).map { |i| "#{i.to_s.rjust(3, '0')}#{"n" * 190}.txt" }
+        names = (0...600).map { |i| "#{i.to_s.rjust(3, '0')}#{"n" * 100}.txt" }
         names.each { |n| Catalog.save_values(n, ["x"]) }
         t = unbound_tools
         first = ok(t, "list_wordlists", %({"limit":1000}))
