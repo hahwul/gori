@@ -414,9 +414,7 @@ module Gori::Proxy::H2
     # blocks that arrived before them, and those reach the far end first.
     private def overtakes_verbatim_locked(block : HeadRewrite::Block) : Bool
       return false if @slots.empty? || @heads.engaged? || !@slots.each_value.any?(&.verbatim?)
-      block = @heads.engage(block)
-      last = block.frames.size - 1
-      block.frames.each_with_index { |f, i| write(f, i == last ? block.pre : nil) }
+      write_block(@heads.engage(block))
       true
     end
 
@@ -457,8 +455,7 @@ module Gori::Proxy::H2
       return true if push_refuses_locked(block)
       return nil unless block.first.frame_type == Frame::Type::PushPromise
       return false unless @slots.has_key?(block.stream_id)
-      last = block.frames.size - 1
-      block.frames.each_with_index { |f, i| write(f, i == last ? block.pre : nil) }
+      write_block(block)
       true
     end
 
@@ -1135,6 +1132,12 @@ module Gori::Proxy::H2
       # exchange inside `feed`, which deletes the stream the extractor needs to scope on.
       @extract.try(&.observe(frame, pre))
       @assembler.feed(@direction, frame, pre)
+    end
+
+    # One header block's frames, its projection riding the last.
+    private def write_block(block : HeadRewrite::Block) : Nil
+      last = block.frames.size - 1
+      block.frames.each_with_index { |f, i| write(f, i == last ? block.pre : nil) }
     end
 
     # Feed a held head to the assembler for the DECODED projection only, without logging it as
