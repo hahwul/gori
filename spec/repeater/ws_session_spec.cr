@@ -152,6 +152,11 @@ private class SlowWriteIO < IO
     @w.flush
   end
 
+  # The server hangs up: the reader sees EOF.
+  def hang_up : Nil
+    @w.close rescue nil
+  end
+
   def close : Nil
     @r.close rescue nil
     @w.close rescue nil
@@ -487,6 +492,26 @@ describe Gori::Repeater::WsSession do
     end
   ensure
     origin.try(&.close)
+  end
+
+  # The session ends after a send was admitted but before its frame went out: nothing was
+  # sent, so the budget slot goes back.
+  it "hands the budget slot back when the session ends before an admitted send is written" do
+    with_store do |store|
+      store.set_settings([{Gori::Settings::PROJECT_OUTBOUND_MAX_REQUESTS_KEY, "1"}] of {String, String?})
+      io = SlowWriteIO.new
+      expand = ->(m : WsEngine::OutMsg) do
+        io.hang_up
+        sleep 50.milliseconds # the reader takes the EOF
+        m
+      end
+      s = WsSession.new(io, [] of WsSession::AutoReply, expand, nil, Gori::Outbound.cli(Gori::Scope.load(store), true))
+      s.send(txt("late")).to_s.should contain("session is closed")
+      io.written.size.should eq(0)
+      s.close
+      Gori::Outbound::Budget.release(store)
+      store.setting(Gori::Store::OUTBOUND_BUDGET_SPENT_KEY).should eq("0")
+    end
   end
 
   it "sends one CLOSE when the server's CLOSE crosses the operator's" do

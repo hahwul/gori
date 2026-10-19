@@ -201,7 +201,7 @@ module Gori
         bytes = Proxy::WS.encode(op, message.payload, message.shape, mask: true)
         # Before the write, so a server CLOSE the reader handles meanwhile is not answered twice.
         @sent_close = true if op == Proxy::WS::OP_CLOSE
-        if reason = write(bytes)
+        if reason = write(bytes, admitted: true)
           return reason
         end
         append(WsEngine::Message.new("out", op.to_i, message.payload, message.shape))
@@ -258,8 +258,15 @@ module Gori
       # A failed write ENDS the session. It may have stopped part-way through a frame (a write
       # timeout against a peer that stopped reading), and the next frame's bytes would then
       # land inside that frame's declared payload. Closing `@io` also ends the reader.
-      private def write(bytes : Bytes) : String?
+      #
+      # An `admitted` operator send that finds the session already ended writes nothing, so
+      # it hands its budget slot back, as `admit` does for a close during the wait.
+      private def write(bytes : Bytes, admitted : Bool = false) : String?
         @write_lock.synchronize do
+          if admitted && (reason = @close_reason)
+            @outbound.try(&.refund(1))
+            return "the session is closed: #{reason}"
+          end
           @io.write(bytes)
           @io.flush
         end
