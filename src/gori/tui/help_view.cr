@@ -143,7 +143,7 @@ module Gori::Tui
         Item.new("{space:repeater.toggle-grpc-reframe}", "gRPC: reframe the message on send (on by default; off sends the captured 5-byte length prefix)", "repeater.toggle-grpc-reframe"),
         Item.new("{space:repeater.toggle-grpc-fields}", "gRPC: edit the request message field by field through the loaded .proto (unary calls)", "repeater.toggle-grpc-fields"),
         Item.new("{space:repeater.grpc-json-edit}", "gRPC: edit the whole request message as proto3 JSON in $EDITOR — a new key adds that field", "repeater.grpc-json-edit"),
-        Item.new("{space:repeater.grpc-add-field}", "gRPC: set or add one field from path=value (by number without a .proto)", "repeater.grpc-add-field"),
+        Item.new("{space:repeater.grpc-add-field}", "gRPC: set or add one field from path=value, or remove one with -path (by number without a .proto)", "repeater.grpc-add-field"),
         Item.new("^V", "transport HTTP/1.1 ↔ HTTP/2 · WebSocket tab: WS → HTTP/1.1 → HTTP/2 (handshake as plain HTTP)", "repeater.toggle-http2"),
         Item.new("{space:repeater.cycle-tls-preset}", "TLS: cycle the handshake fingerprint (default → chrome / firefox / safari / curl)", "repeater.cycle-tls-preset"),
         Item.new("{space:repeater.send-group}", "send group: %%%-split requests on one connection", "repeater.send-group"),

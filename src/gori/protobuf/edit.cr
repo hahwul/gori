@@ -10,7 +10,8 @@ module Gori::Protobuf
   # the wire, so `is_admin`, `role` or `tenant_id` had no occurrence to replace and could not
   # be injected at all. Two shapes, one module, shared by every surface:
   #
-  #   * `set` — one `path=value` (`is_admin=true`, `profile.role=ADMIN`, `7:varint=1`). The
+  #   * `set` — one `path=value` (`is_admin=true`, `profile.role=ADMIN`, `7:varint=1`), or
+  #     `-path` to remove a field (`-profile.role`, `-7`) so "field omitted" is a test too. The
   #     Repeater's add-field prompt, `gori run repeater send --grpc-field` and MCP
   #     `send_request{grpc_fields}` all call it, so a spec means the same bytes everywhere.
   #   * `to_json` / `from_json` — the whole message as proto3 JSON (the TUI's JSON edit).
@@ -18,7 +19,8 @@ module Gori::Protobuf
   # ## What is copied, and what is re-encoded (P7)
   #
   # Both splice into the captured octets rather than serialize a message from scratch. `set`
-  # rebuilds only the field it names (and the containers on its path). `from_json` keeps every
+  # rebuilds only the field it names (and the containers on its path); a removal copies every
+  # other field, rebuilding only the containers it descends. `from_json` keeps every
   # field whose JSON value still encodes to what the wire held, byte for byte, and every field
   # the JSON cannot show — an undeclared number, a wire type the schema contradicts, the tail
   # of a truncated capture — inside each element of a repeated message too, which is merged
@@ -54,14 +56,58 @@ module Gori::Protobuf
     # an undeclared number the message does not already carry, and an override of the
     # declaration otherwise (sending a value as a type the schema did not declare is a test).
     # A path into a nested message the capture lacks creates it.
+    #
+    # A spec with no `=` that starts with `-` REMOVES the field instead: every occurrence of it,
+    # inside every occurrence of each message on its path (a parser merges those into one, so
+    # one left behind would still be read). A field the message does not carry is refused.
     def set(data : Bytes, schema : Schema?, type : Schema::MessageType?, spec : String) : Bytes | String
-      eq = spec.index('=') || return "#{spec.inspect} is not path=value"
-      path = spec[0, eq].strip
-      return "#{spec.inspect} names no field before the `=`" if path.empty?
+      eq = spec.index('=')
+      remove = eq.nil? && spec.lstrip.starts_with?('-')
+      return "#{spec.inspect} is not path=value (or -path to remove a field)" unless eq || remove
+      path = (eq ? spec[0, eq] : spec.lstrip[1..]).strip
+      return "#{spec.inspect} names no field" if path.empty?
       segs = path.split('.').map(&.strip)
       return "#{path.inspect} has an empty path segment" if segs.any?(&.empty?)
       return "#{path.inspect} nests #{segs.size} deep — past the #{MAX_PATH} a path takes" if segs.size > MAX_PATH
-      set_at(data, schema, type, segs, spec[(eq + 1)..])
+      return set_at(data, schema, type, segs, spec[(eq + 1)..]) if eq
+      remove_at(data, schema, type, segs) || "#{path} is not on this message — there is nothing to remove"
+    end
+
+    # `data` without the field `segs` names, or nil when no occurrence of it was found.
+    private def remove_at(data : Bytes, schema : Schema?, type : Schema::MessageType?,
+                          segs : Array(String)) : (Bytes | String)?
+      return "a removal takes no :type (#{segs[0].inspect})" if segs[0].includes?(':')
+      resolved = resolve_key(segs[0], type)
+      return resolved if resolved.is_a?(String)
+      number, defn = resolved
+      spans = Protobuf.field_spans(data)
+      hits = (0...spans.size).select { |i| spans[i].number == number }
+      return nil if hits.empty?
+      return rewrite(data, spans, hits.to_h { |i| {i, Bytes.empty} }) if segs.size == 1
+      inner_type = nil.as(Schema::MessageType?)
+      if d = defn
+        return "#{d.name} is a proto2 group — gori does not encode groups" if d.type.group?
+        return "#{d.name} is declared #{d.type_label}, not a message — there is nothing to remove inside it" unless d.type.message?
+        inner_type = d.type_name.try { |tn| schema.try(&.message?(tn)) }
+      end
+      edits = {} of Int32 => Bytes
+      hits.each do |i|
+        s = spans[i]
+        return "field #{number} is a #{s.wire.to_s.underscore} on the wire, not a message — there is nothing to remove inside it" unless s.wire.length_delimited?
+        inner = remove_at(data[s.body, s.body_size], schema, inner_type, segs[1..])
+        return inner if inner.is_a?(String)
+        edits[i] = retag(data, s, inner) if inner
+      end
+      edits.empty? ? nil : rewrite(data, spans, edits)
+    end
+
+    # `data` with the spans in `edits` replaced by their bytes; every other byte is copied.
+    private def rewrite(data : Bytes, spans : Array(Span), edits : Hash(Int32, Bytes)) : Bytes
+      io = IO::Memory.new(data.size)
+      spans.each_with_index { |s, i| io.write(edits[i]? || data[s.start, s.size]) }
+      tail = spans.last?.try(&.finish) || 0
+      io.write(data[tail, data.size - tail])
+      io.to_slice
     end
 
     private def set_at(data : Bytes, schema : Schema?, type : Schema::MessageType?,

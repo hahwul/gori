@@ -84,6 +84,48 @@ describe Gori::Protobuf::Edit do
     end
   end
 
+  describe ".set with -path (remove)" do
+    it "removes a top-level field, copying every other byte" do
+      data = Base64.decode(DEMO_USER_B64)
+      role = Gori::Protobuf.field_spans(data).find(&.number.==(3)).not_nil!
+      want = IO::Memory.new
+      want.write(data[0, role.start])
+      want.write(data[role.finish, data.size - role.finish])
+      set(data, "-role").should eq(want.to_slice)
+      set(data, "-3", schema: false).should eq(want.to_slice)
+    end
+
+    it "removes inside a nested message, re-measuring only the containers on its path" do
+      # profile (4) { age (1) = 30, tags (2) = "red", "blue" }: both tags go, age stays
+      profile = Bytes[0x22, 0x0d, 0x08, 0x1e, 0x12, 0x03, 0x72, 0x65, 0x64, 0x12, 0x04, 0x62, 0x6c, 0x75, 0x65]
+      set(BOB + profile, "-profile.tags").should eq(BOB + Bytes[0x22, 0x02, 0x08, 0x1e])
+      set(BOB + profile, "-4.2", schema: false).should eq(BOB + Bytes[0x22, 0x02, 0x08, 0x1e])
+    end
+
+    it "removes every occurrence, inside every occurrence of a message on the path" do
+      # 7 = 1 twice, and profile { age = 30 } twice (a parser merges them into one)
+      twice = Bytes[0x38, 0x01] + BOB + Bytes[0x38, 0x01]
+      set(twice, "-active").should eq(BOB)
+      profiles = Bytes[0x22, 0x02, 0x08, 0x1e] + BOB + Bytes[0x22, 0x02, 0x08, 0x1f]
+      set(profiles, "-profile.age").should eq(Bytes[0x22, 0x00] + BOB + Bytes[0x22, 0x00])
+    end
+
+    it "refuses a field the message does not carry, and a malformed spec" do
+      set(BOB, "-role").as(String).should contain("not on this message")
+      set(BOB, "-profile.age").as(String).should contain("not on this message")
+      set(BOB, "-is_admin").as(String).should contain("declares no field \"is_admin\"")
+      set(BOB, "-7:varint").as(String).should contain("takes no :type")
+      set(BOB, "-").as(String).should contain("names no field")
+      set(BOB, "-name..x").as(String).should contain("empty path segment")
+      set(BOB, "-name.x").as(String).should contain("not a message")
+    end
+
+    it "keeps an undecodable tail after the fields it keeps" do
+      truncated = Bytes[0x38, 0x01, 0x12, 0x03, 0x62, 0x6f, 0x62, 0x1a, 0x09, 0x61]
+      set(truncated, "-active").should eq(Bytes[0x12, 0x03, 0x62, 0x6f, 0x62, 0x1a, 0x09, 0x61])
+    end
+  end
+
   describe ".to_json / .from_json" do
     it "round-trips the capture byte for byte when nothing is edited" do
       data = Base64.decode(DEMO_USER_B64)

@@ -306,9 +306,10 @@ class Gori::Tui::RepeaterView
     @grpc_json_draft = nil
   end
 
-  # Set or ADD one field from a `path=value` spec — the same `Protobuf::Edit.set` that
-  # `gori run repeater send --grpc-field` and MCP `grpc_fields` call. Names resolve through the
-  # loaded `.proto` when there is one; numbers always do. The refusal sentence, or nil.
+  # Set or ADD one field from a `path=value` spec, or remove one with `-path` — the same
+  # `Protobuf::Edit.set` that `gori run repeater send --grpc-field` and MCP `grpc_fields` call.
+  # Names resolve through the loaded `.proto` when there is one; numbers always do. The refusal
+  # sentence, or nil.
   def grpc_add_field(spec : String) : String?
     plain = grpc_plain_payload
     return "the compressed payload did not inflate: #{plain}" if plain.is_a?(String)

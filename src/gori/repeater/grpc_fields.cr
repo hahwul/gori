@@ -6,8 +6,9 @@ require "./flow_request"
 
 module Gori::Repeater
   # The headless half of the Repeater's gRPC field edits (#1632): `gori run repeater send
-  # --grpc-field` and MCP `send_request{grpc_fields}` set or add fields on a request's single
-  # unary message through `Protobuf::Edit.set`, the function the TUI's add-field prompt calls.
+  # --grpc-field` and MCP `send_request{grpc_fields}` set, add or remove fields on a request's
+  # single unary message through `Protobuf::Edit.set`, the function the TUI's add-field prompt
+  # calls.
   #
   # The message is inflated when its frame is compressed and re-compressed with the request's
   # own `grpc-encoding` (#1629), then reframed with a length prefix that matches it — the edit

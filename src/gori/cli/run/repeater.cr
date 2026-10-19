@@ -1480,7 +1480,7 @@ module Gori
           p.on("--path=TARGET", PATH_OVERRIDE_HELP) { |v| path_override = v }
           p.on("-HHEADER", "--header=HEADER", "Overwrite/add a header for THIS send (repeat a name for duplicate lines); the session keeps its own. $ENV.KEY tokens expand with the rest of the request (see --verbatim)") { |v| headers << v }
           p.on("-bCOOKIE", "--cookie=COOKIE", "Cookie 'name=value' for THIS send (curl's -b), replacing the stored Cookie header; repeat to join them into one. A value with no '=' is refused") { |v| cookies << v }
-          p.on("--grpc-field=PATH=VALUE", "gRPC: set or ADD a field on the session's unary message for THIS send (repeatable, applied in order). PATH is declared names with a loaded .proto (profile.role=ADMIN) or field numbers (4.1=30); an undeclared field the message lacks names its type (7:varint=1 — #{Protobuf::Edit::TYPE_HINT}). Re-compressed and reframed") { |v| grpc_fields << v }
+          p.on("--grpc-field=PATH=VALUE", "gRPC: set or ADD a field on the session's unary message for THIS send (repeatable, applied in order). PATH is declared names with a loaded .proto (profile.role=ADMIN) or field numbers (4.1=30); an undeclared field the message lacks names its type (7:varint=1 — #{Protobuf::Edit::TYPE_HINT}). -PATH alone removes every occurrence (-profile.role, -7). Re-compressed and reframed") { |v| grpc_fields << v }
           p.on("--apply-rules", APPLY_RULES_HELP) { apply_rules = true }
           p.on("--headers-only", HEADERS_ONLY_HELP) { headers_only = true }
           p.on("--max-body=BYTES", MAX_BODY_HELP) { |v| max_body = parse_count(v, "--max-body") }
@@ -2527,8 +2527,8 @@ module Gori
         session_header_overrides(request, headers)
       end
 
-      GRPC_FIELD_HELP = "gRPC: set or ADD a field on the unary request message for this send (repeatable, applied in order; " \
-                        "PATH=VALUE as `repeater send --grpc-field` takes it). Re-compressed and reframed"
+      GRPC_FIELD_HELP = "gRPC: set or ADD a field on the unary request message for this send, or remove one with -PATH (repeatable, applied in order; " \
+                        "the spec `repeater send --grpc-field` takes). Re-compressed and reframed"
 
       # `--grpc-field` on a one-shot send (`gori run send`, `gori run repeater <flow-id>`): the
       # same `Repeater::GrpcFields.apply` as `repeater send` and MCP `send_request{grpc_fields}`.

@@ -144,6 +144,30 @@ describe "the gRPC field set reaches every headless send surface" do
       end
     end
 
+    it "removes a field with -path, and refuses one the message lacks before anything dials" do
+      origin = BodyOrigin.new
+      begin
+        with_set_store do |store|
+          tools = tools_for(store)
+          Gori::Protobuf::Schemas.clear
+          base = {"url" => "http://127.0.0.1:#{origin.port}", "raw" => get_user_raw,
+                  "allow_unscoped" => true, "record_history" => false}
+          r = tools.call("send_request", JSON.parse(base.merge({"grpc_fields" => ["-2"]}).to_json))
+          r.is_error.should be_true
+          r.text.should contain("not on this message")
+          origin.bodies.should be_empty
+          r = tools.call("send_request", JSON.parse(base.merge({"grpc_fields" => ["-1"]}).to_json))
+          fail r.text if r.is_error
+        end
+        origin.bodies.size.should eq(1)
+        msgs, residual = Grpc.scan(origin.bodies[0])
+        residual.should eq(0)
+        msgs[0].data.should be_empty
+      ensure
+        origin.close
+      end
+    end
+
     it "refuses a spec it cannot apply before anything dials" do
       origin = BodyOrigin.new
       begin
