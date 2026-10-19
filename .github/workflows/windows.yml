@@ -8,6 +8,7 @@ on:
     paths:
       - .github/workflows/windows.yml
       - scripts/build-windows.sh
+      - scripts/windows_specs.sh
       - shard.yml
       - shard.lock
       - "**/*.cr"
@@ -18,6 +19,7 @@ on:
     paths:
       - .github/workflows/windows.yml
       - scripts/build-windows.sh
+      - scripts/windows_specs.sh
       - shard.yml
       - shard.lock
       - "**/*.cr"
