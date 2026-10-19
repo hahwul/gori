@@ -84,12 +84,8 @@ module Gori::Protobuf
       hits = (0...spans.size).select { |i| spans[i].number == number }
       return nil if hits.empty?
       return rewrite(data, spans, hits.to_h { |i| {i, Bytes.empty} }) if segs.size == 1
-      inner_type = nil.as(Schema::MessageType?)
-      if d = defn
-        return "#{d.name} is a proto2 group — gori does not encode groups" if d.type.group?
-        return "#{d.name} is declared #{d.type_label}, not a message — there is nothing to remove inside it" unless d.type.message?
-        inner_type = d.type_name.try { |tn| schema.try(&.message?(tn)) }
-      end
+      inner_type = inner_type_of(defn, schema, "remove")
+      return inner_type if inner_type.is_a?(String)
       edits = {} of Int32 => Bytes
       hits.each do |i|
         s = spans[i]
@@ -132,12 +128,8 @@ module Gori::Protobuf
     private def set_inside(data : Bytes, spans : Array(Span), hits : Array(Int32), number : UInt32,
                            defn : Schema::FieldDef?, schema : Schema?, rest : Array(String),
                            value : String) : Bytes | String
-      inner_type = nil.as(Schema::MessageType?)
-      if d = defn
-        return "#{d.name} is a proto2 group — gori does not encode groups" if d.type.group?
-        return "#{d.name} is declared #{d.type_label}, not a message — there is nothing to set inside it" unless d.type.message?
-        inner_type = d.type_name.try { |tn| schema.try(&.message?(tn)) }
-      end
+      inner_type = inner_type_of(defn, schema, "set")
+      return inner_type if inner_type.is_a?(String)
       unless i = hits.last?
         inner = set_at(Bytes.empty, schema, inner_type, rest, value)
         return inner.is_a?(String) ? inner : splice(data, spans, hits, Encoder.length_delimited(number, inner))
@@ -146,6 +138,15 @@ module Gori::Protobuf
       return "field #{number} is a #{s.wire.to_s.underscore} on the wire, not a message — there is nothing to set inside it" unless s.wire.length_delimited?
       inner = set_at(data[s.body, s.body_size], schema, inner_type, rest, value)
       inner.is_a?(String) ? inner : splice(data, spans, [i], retag(data, s, inner))
+    end
+
+    # The message type a path descends into through `defn` (nil when undeclared, schemaless, or
+    # not in the loaded set), or why it cannot `verb` inside one: a group, or not a message.
+    private def inner_type_of(defn : Schema::FieldDef?, schema : Schema?, verb : String) : Schema::MessageType? | String
+      return nil unless d = defn
+      return "#{d.name} is a proto2 group — gori does not encode groups" if d.type.group?
+      return "#{d.name} is declared #{d.type_label}, not a message — there is nothing to #{verb} inside it" unless d.type.message?
+      d.type_name.try { |tn| schema.try(&.message?(tn)) }
     end
 
     # A length-delimited field rebuilt around new contents: its tag exactly as it arrived, then
