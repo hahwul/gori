@@ -119,6 +119,8 @@ class Gori::Proxy::H2::StreamGate
     # DATA to send, each with the credit its sending returns to the sender (0 when that credit
     # was already returned on arrival, which keeps it in `Flow#buffered` until written).
     getter sends = [] of {Frame::Header, Int32}
+    # The credits in `sends`: what gori will still return the sender as it writes them.
+    property owed = 0_i64
     # Trailers, written once `sends` has drained.
     getter after = [] of {Frame::Header, Assembler::HeadBlock?}
 
@@ -397,6 +399,7 @@ class Gori::Proxy::H2::StreamGate
     own.sender -= f.payload.size
     if own.spilled?
       own.sends << {f, f.payload.size}
+      own.owed += f.payload.size
       own.complete = true if f.end_stream?
       pump_owned_locked(fc, own)
       return
@@ -530,6 +533,7 @@ class Gori::Proxy::H2::StreamGate
       own.window -= f.payload.size
       fc.debt += f.payload.size
       fc.buffered -= f.payload.size if credit == 0
+      own.owed -= credit
       refund_locked(fc, own, credit, f.end_stream?) if credit > 0
     end
     return unless own.sends.empty? && own.complete?
@@ -698,8 +702,9 @@ class Gori::Proxy::H2::StreamGate
       own.window += n
       pump_owned_locked(fc, own)
       # Refunds keep a sender going only once it has a window to send in. One opened at zero
-      # (SETTINGS_INITIAL_WINDOW_SIZE 0, credit granted only after the head) gets this credit.
-      return nil if own.sender > 0
+      # (SETTINGS_INITIAL_WINDOW_SIZE 0, credit granted only after the head) gets this credit —
+      # but not while frames it sent wait in `sends`: their refunds are its window already.
+      return nil if own.sender + own.owed > 0
       own.sender += n
       f
     else

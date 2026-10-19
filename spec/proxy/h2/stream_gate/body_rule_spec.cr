@@ -51,6 +51,9 @@ private class Peer
   # Stream credit is held back until this much is owed, the way curl/nghttp2 and Firefox ack a
   # wide per-stream window: late. 0 = every frame.
   property stream_ack = 0_i64
+  # While set, connection credit is held back until `release_conn`: a reader that stopped.
+  property? hold_conn = false
+  @held_conn = 0
 
   # Both connection windows, readable once the exchange is at rest: the sender's view of the
   # receiver's window has to equal the receiver's own, or credit was stranded or invented.
@@ -181,8 +184,15 @@ private class Peer
     String.new(bodies[stream].to_slice)
   end
 
-  private def send_window(stream : UInt32) : Int64
+  def send_window(stream : UInt32) : Int64
     @send_streams[stream]? || @send_initial
+  end
+
+  def release_conn : Nil
+    @hold_conn = false
+    @recv_conn += @held_conn
+    window_update(0_u32, @held_conn) if @held_conn > 0
+    @held_conn = 0
   end
 
   private def wait_window(stream : UInt32) : Int32?
@@ -302,8 +312,12 @@ private class Peer
   end
 
   private def grant(stream : UInt32, n : Int32, ended : Bool) : Nil
-    @recv_conn += n
-    window_update(0_u32, n)
+    if @hold_conn
+      @held_conn += n
+    else
+      @recv_conn += n
+      window_update(0_u32, n)
+    end
     return if ended
     @unacked[stream] += n
     return if @unacked[stream] < @stream_ack
@@ -1007,6 +1021,39 @@ describe "H2::StreamGate body rules (#1628)" do
         rig.client.wait_done(1_u32, 3.seconds).should be_true
         rig.client.body_of(1_u32).should eq("cccc")
         (rig.client.errors + rig.wait_origin.errors).should be_empty
+      ensure
+        rig.close
+      end
+    end
+  end
+
+  # A spilled stream whose sender has used its whole window while the receiver's connection
+  # window is spent: gori owes the sender the credit of every frame it still queues, so stream
+  # credit the receiver grants then is not the sender's as well, or it is paid twice.
+  it "passes no stream credit to a sender that queued frames gori still owes it for" do
+    with_rules do |rules, ic|
+      rules.add(RESP, BODY, "b", "c", host: "127.0.0.1")
+      rig = BodyRig.new(rules, ic) do |s, p|
+        p.send_head(s, ok, false)
+        p.send_raw_data(s, Bytes[2] + "aaaaaaa".to_slice + Bytes[0, 0], Frame::PADDED) # spills it
+        p.send_body(s, Bytes.new(200_000, 'a'.ord.to_u8), true)
+        nil
+      end
+      begin
+        rig.client.hold_conn = true
+        rig.client.stream_ack = 1_000_000_000_i64
+        rig.client.send_head(1_u32, get("/x"), true)
+        origin = rig.wait_origin
+        100.times { break if origin.send_conn == 0 && origin.send_window(1_u32) == 0; sleep 20.milliseconds }
+        origin.send_window(1_u32).should eq(0)
+        rig.client.bump(1_u32, 1_000)
+        sleep 100.milliseconds
+        origin.send_window(1_u32).should eq(0)
+        rig.client.release_conn
+        rig.client.bump(1_u32, 200_000)
+        rig.client.wait_done(1_u32).should be_true
+        rig.client.bodies[1_u32].size.should eq(200_010)
+        (rig.client.errors + origin.errors).should be_empty
       ensure
         rig.close
       end
