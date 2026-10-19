@@ -16,7 +16,7 @@ private NAMEABLE = %w[
   send_request send_websocket create_issue update_issue create_rule delete_rule
   set_rule_enabled switch_project create_project delete_project list_projects
   operator_messages reply_to_operator ql_reference list_history list_sitemap
-  project_info decode jwt_decode cache_deception_check
+  project_info decode jwt_decode cache_deception_check compare_flows export_openapi
 ]
 
 private def instructions_under(store, spec : String?, allow_actions = true) : {String, Set(String)}

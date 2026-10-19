@@ -154,7 +154,7 @@ module Gori
       # The flows a run reached and could not replay. Always emitted (an empty array when there
       # were none), the same contract `emit_authorize_skipped` states for the same reason, and
       # held to the reply budget the same way (`failed_unshown_ids`).
-      private def emit_authorize_failures(j : JSON::Builder, ajob : AuthorizeJob, used : Int32 = 0) : Nil
+      private def emit_authorize_failures(j : JSON::Builder, ajob : AuthorizeJob, used : Int32) : Nil
         j.field "failed_count", ajob.failed
         parts = fit_rows(ajob.failures, used) do |rj, (flow_id, url, msg), _|
           {flow_id: flow_id, url: Serialize.text(url), error: Serialize.text(msg)}.to_json(rj)

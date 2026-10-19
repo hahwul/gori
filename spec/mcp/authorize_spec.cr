@@ -301,6 +301,23 @@ describe "MCP authorize tools" do
       end
     end
 
+    # #1659: `authorize_start` names its skips through the same budgeted list.
+    it "holds authorize_start's skipped list to the reply budget" do
+      port = start_authz_origin(enforce: false)
+      with_store do |store|
+        ids = [seed_authz_flow(store, port)]
+        80.times { |i| ids << seed_authz_flow(store, port, method: "POST", target: "/#{i}/#{"x" * 1000}") }
+        tools = tools_for(store)
+        start = call_json(tools, "authorize_start", {"flow_ids" => ids, "identities" => anon, "allow_unscoped" => true}.to_json)
+        start.to_json.bytesize.should be < Gori::MCP::Tools::REPLY_ROWS_BUDGET + 8192
+        start["skipped_count"].as_i.should eq(80)
+        shown = start["skipped"].as_a.size
+        shown.should be > 0
+        (shown + start["skipped_unshown_ids"].as_a.size).should eq(80)
+        drain_job(tools, start["job_id"].as_s)
+      end
+    end
+
     # #1659: `skipped[]` and `failed[]` run to AUTHORIZE_MAX_FLOWS rows each. They share the
     # reply's one budget, the rest named by flow id, and the counts still cover every row.
     it "holds skipped and failed to the reply budget and names the rest by flow id" do

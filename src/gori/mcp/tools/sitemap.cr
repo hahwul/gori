@@ -659,7 +659,7 @@ module Gori
             j.field("skipped") { j.object { report.skipped.each { |k, v| j.field k.key, v } } }
             notes = openapi_notes(report, choice)
             if !written && report.paths_dropped > 0
-              notes << "pass output_path to write the whole document to a file (max_bytes up to #{OPENAPI_MAX_BYTES})"
+              notes << "raise max_bytes (up to #{OPENAPI_MAX_BYTES}) or pass output_path for the whole document"
             end
             j.field "notes", notes
             j.field "examples_redacted", report.redacted if choice

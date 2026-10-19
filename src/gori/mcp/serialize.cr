@@ -1761,9 +1761,14 @@ module Gori
       # `gori run history show`, so the two surfaces cap one message the same way.
       def self.emit_connect_json(j : JSON::Builder, plain : Bytes) : Nil
         cut = plain.size > MAX_TEXT
-        shown = cut ? plain[0, utf8_whole_prefix(plain[0, MAX_TEXT])] : plain
+        shown = cut ? max_text_prefix(plain) : plain
         j.field "json", text(String.new(shown))
         j.field "json_truncated", true if cut
+      end
+
+      # The first MAX_TEXT bytes of `bytes`, less a UTF-8 sequence the cut split.
+      def self.max_text_prefix(bytes : Bytes) : Bytes
+        bytes[0, utf8_whole_prefix(bytes[0, MAX_TEXT])]
       end
 
       # The length of `bytes` without the UTF-8 sequence its end cut short — a lead byte
