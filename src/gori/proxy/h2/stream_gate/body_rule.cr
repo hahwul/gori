@@ -192,13 +192,37 @@ class Gori::Proxy::H2::StreamGate
     true
   end
 
-  # `plan_body`'s answer for a head `defer?` is about to place, or nil. A held stream is the
-  # hold's: the operator edits that body, so the rule says it stood aside.
-  private def body_for(block : HeadRewrite::Block, held : Bool) : Owned?
-    own = plan_body(block, take_pre_credit(block))
-    return own unless own && held
-    skip_body(block.stream_id, "it was held at intercept, and the hold owns its body")
-    nil
+  # Whether a body rule's head waits for its body: it declares the length the rewrite must keep
+  # true, and no intercept hold owns the stream (that one runs the rule itself).
+  private def waits_for_body?(own : Owned?, held : Held?) : Bool
+    !held && !!own.try(&.declares_length?)
+  end
+
+  # A held stream's body, once the hold has buffered it whole, with the body rule run over it
+  # first — h1's order (`ClientConn#handle_held_request`), so the operator sees and forwards
+  # the rewrite. The hold sends it as an edit's body (`write_rebuilt`), within the windows the
+  # SENDER was given, so a rewrite that grows past what the receiver is sure to allow is not
+  # applied: the receiver's stream window is the request's initial one, and for a response
+  # only what the sender itself was granted is known.
+  private def rule_held_body_locked(slot : Slot) : Bytes
+    body = body_of(slot)
+    own = slot.rule
+    rw = @body_rewriter
+    return body unless own && rw && !body.empty?
+    hits = [] of Store::RuleRef
+    rewritten = own.request? ? rw.rewrite_request_body(body, own.host, hits) : rw.rewrite_response_body(body, own.host, hits)
+    rw.settle_hits(hits, 0, body, rewritten) { |b| b }
+    return body if rewritten == body
+    room = own.request? ? @flow.try(&.initial) || DEFAULT_WINDOW : body.size.to_i64
+    if rewritten.size > body.size && rewritten.size > room
+      skip_body(own.stream_id, "it was held at intercept, and the rewrite would have grown it past the #{room}-byte window its receiver is known to allow")
+      return body
+    end
+    @assembler.note_body_rewrite(own.stream_id, own.request?, hits, own.head, body)
+    if pending = slot.pending
+      slot.decided = @heads.reencode(pending, with_length(pending.fields, rewritten.size))
+    end
+    slot.rebuilt = rewritten
   end
 
   # SSE and gRPC never end on a schedule gori can wait for: a body rule leaves them streaming,

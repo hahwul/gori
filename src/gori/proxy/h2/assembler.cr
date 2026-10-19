@@ -312,16 +312,15 @@ module Gori::Proxy::H2
     # held. Recorded on the flow `emit_request` projects (V44). Opens the entry the way
     # `note_advisory` does, since the edited head is released — and fed — right after this.
     #
-    # A rule that rewrote the head ran BEFORE the hold (#1589), so the held head is the rule's
-    # output: the client's own head is the one the rule replaced, kept with the held body (a held
-    # stream's body is the hold's, never a body rule's). Store keeps only the rule's hits beside
-    # an Intercept original.
+    # A rule that rewrote the head or body ran BEFORE the hold (#1589), so the held message is the
+    # rule's output: the client's own head and body are the ones the rule replaced, and a body no
+    # rule touched is the held one. Store keeps only the rule's hits beside an Intercept original.
     def note_intercept_original(stream_id : UInt32, original : Bytes) : Nil
       @mutex.synchronize do
         next unless stream = open_entry(stream_id)
-        if pre = stream.req_rewrite.try(&.head)
+        if (rewrite = stream.req_rewrite) && (pre = rewrite.head)
           held_head, _ = Gori::Interceptor.split_edit(original)
-          original = pre + original[held_head.size..]
+          original = pre + (rewrite.body || original[held_head.size..])
         end
         stream.intercept_original = original
       end

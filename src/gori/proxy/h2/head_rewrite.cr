@@ -209,8 +209,9 @@ module Gori::Proxy::H2
     # held head's `content-length` describe the body a rule rewrote (#1628).
     def reencode(block : Block, fields : Array(HPACK::Field)) : Block
       latch
+      head = block.head && head_text(fields, block.first, block.request)
       Block.new(reframe(block.first, block.prefix, @encoder.encode(fields)),
-        Assembler::HeadBlock.new(pairs(fields)), fields, block.head, block.first, block.prefix, block.request)
+        Assembler::HeadBlock.new(pairs(fields)), fields, head, block.first, block.prefix, block.request)
     end
 
     # The bare host a rule's glob is matched against for this block's stream.

@@ -1255,3 +1255,81 @@ describe "H2::StreamGate body rules: the stall deadline" do
     end
   end
 end
+
+# Every header block in `frames` for `stream`, decoded in wire order (one HPACK context).
+private def heads_of(frames : Array(Frame::Header), stream : UInt32) : Array(Array({String, String}))
+  dec = HPACK::Decoder.new
+  frames.select(&.frame_type.==(Frame::Type::Headers)).compact_map do |f|
+    fields = dec.decode(f.payload)
+    f.stream_id == stream ? fields : nil
+  end
+end
+
+private def data_of(frames : Array(Frame::Header), stream : UInt32) : String
+  String.build { |io| frames.each { |f| io.write(f.payload) if f.frame_type == Frame::Type::Data && f.stream_id == stream } }
+end
+
+# h1 rewrites a held body before the operator sees it (`ClientConn#handle_held_request`).
+describe "H2::StreamGate body rules: an intercept hold" do
+  it "shows and forwards the rule's rewrite of a held request body" do
+    with_rules do |rules, ic|
+      rules.add(REQ, BODY, "hunter2", "x", host: API)
+      ic.toggle
+      g = GatePair.new(rules, ic, 5.seconds)
+      g.request(1_u32, post("/login", 16, authority: API))
+      g.data(g.out_gate, 1_u32, "password=hunter2", true)
+      item = ic.pending.first
+      String.new(item.raw).should contain("content-length: 10")
+      String.new(item.raw).should end_with("password=x")
+      ic.forward(item.id)
+      sleep 50.milliseconds
+
+      frames = g.frames(g.up)
+      field(heads_of(frames, 1_u32).first, "content-length").should eq("10")
+      data_of(frames, 1_u32).should eq("password=x")
+      captured = g.sink.requests.first
+      String.new(captured.body.not_nil!).should eq("password=x")
+      captured.rewrite.not_nil!.hits.size.should eq(1)
+      captured.intercept_original.should be_nil
+      g.close
+    end
+  end
+
+  it "keeps the client's own request beside an edit of the rewrite" do
+    with_rules do |rules, ic|
+      rules.add(REQ, BODY, "hunter2", "x", host: API)
+      ic.toggle
+      g = GatePair.new(rules, ic, 5.seconds)
+      g.request(1_u32, post("/login", 16, authority: API))
+      g.data(g.out_gate, 1_u32, "password=hunter2", true)
+      item = ic.pending.first
+      ic.forward(item.id, String.new(item.raw).sub("password=x", "password=y").to_slice)
+      sleep 50.milliseconds
+
+      data_of(g.frames(g.up), 1_u32).should eq("password=y")
+      original = String.new(g.sink.requests.first.intercept_original.not_nil!)
+      original.should contain("content-length: 16")
+      original.should end_with("password=hunter2")
+      g.close
+    end
+  end
+
+  # A held response's receiver window is known only as far as its sender was granted it.
+  it "does not grow a held response past what its sender was allowed" do
+    with_rules do |rules, ic|
+      rules.add(RESP, BODY, "a", "aaaa", host: API)
+      ic.toggle
+      ic.set_direction(Gori::Interceptor::Direction::ResponseOnly)
+      g = GatePair.new(rules, ic, 5.seconds)
+      g.request(1_u32, get("/x", API), true)
+      g.response(1_u32, ok(3))
+      g.data(g.in_gate, 1_u32, "aaa", true)
+      ic.forward(ic.pending.first.id)
+      sleep 50.milliseconds
+
+      data_of(g.frames(g.down), 1_u32).should eq("aaa")
+      g.sink.responses.first.advisory.not_nil!.should contain("held at intercept")
+      g.close
+    end
+  end
+end

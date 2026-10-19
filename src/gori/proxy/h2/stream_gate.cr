@@ -98,7 +98,7 @@ module Gori::Proxy::H2
   # Match&Replace over a BODY is a different question (#1628, `body_rule.cr`): a rule rewrites
   # every matching message on the connection, unattended, so gori becomes the SENDER of that
   # stream's DATA and keeps both legs' flow control itself. A stream an intercept hold owns is
-  # the hold's, and a body rule does not touch it.
+  # the hold's: the rule runs over the body the hold buffered, before the operator sees it.
   #
   # ## The lock invariant (deadlock guard)
   #
@@ -220,8 +220,12 @@ module Gori::Proxy::H2
       property? padded_body = false
       # The queued hold covers head+body, so an edit's body is the operator's and goes out.
       property? holds_body = false
-      # The body an edit replaced the buffered one with. nil = write the DATA that arrived.
+      # The body an edit — or a body rule, before the operator sees it — replaced the buffered
+      # one with. nil = write the DATA that arrived.
       property rebuilt : Bytes?
+      # A body rule's plan for this held stream (`body_rule.cr`): run over the buffered body
+      # before the hold is queued, as h1 rewrites a held body before the operator sees it.
+      property rule : Owned?
 
       def initialize(@stream_id : UInt32)
       end
@@ -348,9 +352,9 @@ module Gori::Proxy::H2
       ordered = opener || (@ordered && !block.head.nil?)
       queued = ordered && !@opens.empty?
       # A body rule's stream (#1628). A declared length has to describe the body that goes out,
-      # so that head waits for it.
-      own = body_for(block, !held.nil?)
-      waits = !!own.try(&.declares_length?)
+      # so that head waits for it. A held stream's rule runs inside the hold instead.
+      own = plan_body(block, take_pre_credit(block))
+      waits = waits_for_body?(own, held)
       unless held || queued || waits
         adopt_locked(own, nil)
         return false
@@ -362,7 +366,7 @@ module Gori::Proxy::H2
       @slots[block.stream_id] = slot
       @opens << block.stream_id if ordered
       if held
-        start_hold_locked(slot, held, block)
+        start_hold_locked(slot, held, block, own)
       else
         # Queued for order only, or a body rule's head waiting for its body (`finish_owned_locked`
         # readies it).
@@ -422,7 +426,8 @@ module Gori::Proxy::H2
     # ever waits for an end it can predict), `check_ceiling`, which fails the whole run of slots
     # open past the ceiling, and `HOLD_WAIT_DEADLINE` — the one that answers the peer sending
     # NOTHING, which the other two cannot see because they both measure bytes that arrived.
-    private def start_hold_locked(slot : Slot, held : Held, block : HeadRewrite::Block) : Nil
+    private def start_hold_locked(slot : Slot, held : Held, block : HeadRewrite::Block, own : Owned?) : Nil
+      slot.rule = own
       budget = holdable_body(block)
       unless budget
         queue_hold_locked(slot, held, nil)
@@ -457,8 +462,10 @@ module Gori::Proxy::H2
     # Queue a decided hold and start its wait fiber. `body` nil = the hold covers the HEAD only.
     private def queue_hold_locked(slot : Slot, held : Held, body : Bytes?) : Nil
       slot.waiting = nil
+      skip_body(slot.stream_id, "it was held at intercept without its body") if body.nil? && slot.rule
       block = slot.pending
-      head = block.try(&.head)
+      # A body rule's rewrite is what the operator sees, its length made true (`decided`).
+      head = (slot.decided || block).try(&.head)
       item = block && head ? enqueue_hold(held, head, body) : nil
       if block && item
         slot.holds_body = !body.nil?
@@ -662,7 +669,7 @@ module Gori::Proxy::H2
       held = slot.waiting
       return unless held
       return unless slot.complete? || slot.padded_body?
-      queue_hold_locked(slot, held, slot.padded_body? ? nil : body_of(slot))
+      queue_hold_locked(slot, held, slot.padded_body? ? nil : rule_held_body_locked(slot))
     end
 
     # `body_budget` is the entity this slot PROMISED to buffer (0 for a head-only hold), so the
@@ -880,12 +887,14 @@ module Gori::Proxy::H2
         # `item.raw` rather than `block.head`: what the operator was SHOWN is the whole hold,
         # and on a head+body hold that is head + entity. The two are the same bytes on a
         # head-only hold, so this is one test for both shapes rather than a second one.
-        slot.decided = decided = decision.bytes == item.raw ? block : edited(slot, block, decision)
+        # Unedited, a body rule's rewrite (`decided` + `rebuilt`, already set) goes out as shown.
+        edit = decision.bytes != item.raw
+        slot.decided = decided = edit ? edited(slot, block, decision) : (slot.decided || block)
         # An edit that actually changed what goes out (a refused one forwards the peer's own
         # `block`) keeps the request as it was held beside the flow, as h1 does (#1378). The
         # held message is the h1-shaped projection the operator edited: h2 has no client bytes
         # in that form, and its held frames were never logged because they never went out.
-        if decided != block || slot.rebuilt
+        if edit && (decided != block || slot.rebuilt)
           if @ordered
             @assembler.note_intercept_original(block.stream_id, item.raw)
           else
@@ -942,11 +951,12 @@ module Gori::Proxy::H2
       encoded = @heads.encode_edited(block, head, false)
       unless encoded
         warn_edit_refused(block.stream_id, body.size)
-        return block
+        # What was shown goes instead: the peer's message, or a body rule's rewrite of it.
+        return slot.decided || block
       end
       # Only a CHANGED body is re-framed. An operator who edited the head alone keeps the
       # peer's own DATA frames byte-for-byte, boundaries included.
-      slot.rebuilt = body unless body == body_of(slot)
+      slot.rebuilt = body == body_of(slot) ? nil : body
       encoded
     end
 
