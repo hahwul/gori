@@ -167,7 +167,14 @@ module Gori
             # `view` with no `query` and no `in_scope` falls through to `recent_flows`, which
             # takes no filter at all — the call would accept the view and return everything.
             # `hide_static` likewise.
-            store.search(filter, fetch, before_id, since_id)
+            #
+            # Raising, as the count does: a failed query degraded to `[]` with has_more:false,
+            # the reply for "nothing matched" (#1648 made the two paths disagree about one query).
+            begin
+              store.search(filter, fetch, before_id, since_id, raise_on_error: true, control: history_control)
+            rescue ex
+              return history_read_failed(ex, "list")
+            end
           else
             store.recent_flows(fetch, before_id, since_id)
           end
@@ -212,11 +219,9 @@ module Gori
                                      ignored : Array(String)) : Result
         count =
           begin
-            scope_unconfigured ? 0_i64 : store.count_matching(filter)
+            scope_unconfigured ? 0_i64 : store.count_matching(filter, history_control)
           rescue ex
-            ::Log.warn { "list_history count failed: #{ex.message}" }
-            return err("could not count the matching flows — see gori.log; retry, or simplify the query",
-              "INTERNAL", field: "query")
+            return history_read_failed(ex, "count")
           end
         Result.new(JSON.build do |j|
           j.object do
@@ -226,6 +231,22 @@ module Gori
             emit_ignored_terms(j, ignored)
           end
         end)
+      end
+
+      # A History read that yields to the reader fiber and stops when the client cancels the
+      # call (`notifications/cancelled`): a full scan of a big project is seconds of the one
+      # thread `gori mcp` has (P6).
+      private def history_control : Store::QueryControl
+        Store::QueryControl.new(cancel_signal)
+      end
+
+      # One answer for a History query that did not run, whichever path ran it: a 0 or an empty
+      # page here would be a wrong answer wearing a right one's clothes.
+      private def history_read_failed(ex : Exception, what : String) : Result
+        return err("request cancelled", "CANCELLED") if ex.is_a?(Store::QueryCancelled)
+        ::Log.warn { "list_history #{what} failed: #{ex.message}" }
+        err("could not #{what} the matching flows — see gori.log; retry, or simplify the query",
+          "INTERNAL", field: "query")
       end
 
       # The `ids` path: an exact named set, returned IN THE ORDER IT WAS ASKED FOR (#1091).

@@ -19,11 +19,17 @@ module Gori
       getter? cancelled = false
       @last_yield = Time.instant
 
+      # `cancelled_by`: a caller's own cancellation question (an MCP call's), asked once per
+      # yield slice so a query reads it without the caller having to hold this token.
+      def initialize(@cancelled_by : Proc(Bool)? = nil)
+      end
+
       def cancel : Nil
         @cancelled = true
       end
 
       def check! : Nil
+        cancel if @cancelled_by.try(&.call)
         raise QueryCancelled.new("query cancelled") if @cancelled
       end
 
@@ -32,6 +38,7 @@ module Gori
         if Time.instant - @last_yield >= SLICE
           Fiber.yield
           @last_yield = Time.instant
+          cancel if @cancelled_by.try(&.call)
         end
         @cancelled ? 1 : 0
       end

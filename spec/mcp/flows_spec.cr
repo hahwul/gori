@@ -263,6 +263,29 @@ describe Gori::MCP::Server do
         end
       end
     end
+
+    # A query SQLite cannot run is one answer on both paths, never a page that reads as
+    # "nothing matched" beside a count that says it failed.
+    it "answers a query that did not run as INTERNAL on the row path, as count_only does" do
+      with_store do |store|
+        mcp_seed_flow(store, "a.test", "GET", "/a", 200)
+        deep = (0...1200).map { |i| "host:h#{i}.test" }.join(" OR ")
+        tools = tools_for(store)
+        [%({"query":#{deep.to_json}}), %({"query":#{deep.to_json},"count_only":true})].each do |args|
+          tools.call("list_history", JSON.parse(args)).error_code.should eq("INTERNAL")
+        end
+      end
+    end
+
+    it "stops a History read the client cancelled, on both paths" do
+      with_store do |store|
+        mcp_seed_flow(store, "a.test", "GET", "/a", 200)
+        tools = tools_for(store)
+        [%({"query":"host:a.test"}), %({"query":"host:a.test","count_only":true})].each do |args|
+          tools.call("list_history", JSON.parse(args), cancelled: -> { true }).error_code.should eq("CANCELLED")
+        end
+      end
+    end
   end
 
   describe "get_flow" do

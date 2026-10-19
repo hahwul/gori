@@ -46,6 +46,27 @@ describe Gori::Store::QueryControl do
     end
   end
 
+  # #1648's count is the same full scan as a search, so it takes the same control: it yields,
+  # and a caller's own cancellation question (`cancelled_by`) stops it mid-scan.
+  it "runs count_matching under a control that a caller's predicate cancels mid-scan" do
+    with_store do |store|
+      seed_query_flow(store)
+      store.count_matching(Gori::QL.parse("host:example"), Gori::Store::QueryControl.new).should eq(1)
+      stop = false
+      control = ObservedQueryControl.new(-> { stop })
+      result = Channel(Symbol).new(1)
+      spawn do
+        store.count_matching(expensive_query, control)
+        result.send(:completed)
+      rescue Gori::Store::QueryCancelled
+        result.send(:cancelled)
+      end
+      receive_within(control.started)
+      stop = true
+      receive_within(result).should eq(:cancelled)
+    end
+  end
+
   it "yields during a no-match read, cancels distinctly, and leaves the connection reusable" do
     with_store do |store|
       id = seed_query_flow(store)

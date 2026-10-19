@@ -82,9 +82,14 @@ module Gori
     # How many flows match `filter`: `search` without the rows, for a caller whose question is a
     # number (#1648). The same WHERE clause `search` runs, so a count and a page cannot disagree
     # about what matched. Raises on a failed query rather than degrading like `search`: a 0 that
-    # means "the query did not run" is a wrong answer wearing a right one's clothes.
-    def count_matching(filter : QL::Filter) : Int64
-      @db.scalar("SELECT COUNT(*) FROM flows WHERE #{filter.sql}", args: filter.args).as(Int64)
+    # means "the query did not run" is a wrong answer wearing a right one's clothes. `control`
+    # as on `search`: a COUNT over a big table is the same full scan, and must yield (P6).
+    def count_matching(filter : QL::Filter, control : QueryControl? = nil) : Int64
+      count = 0_i64
+      controlled_query("SELECT COUNT(*) FROM flows WHERE #{filter.sql}", filter.args.dup, control) do |rs|
+        rs.each { count = rs.read(Int64) }
+      end
+      count
     end
 
     # Which of `ids` satisfy `filter` — the id-scoped form of `search`, for a caller that already
