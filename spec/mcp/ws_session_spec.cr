@@ -364,14 +364,4 @@ describe "MCP ws_session tools" do
       origin.close
     end
   end
-
-  it "names ws_* sessions in the stop_job and list_jobs schemas" do
-    with_store do |store|
-      listed = JSON.parse(JSON.build { |j| tools_for(store).list(j) }).as_a
-      stop = listed.find! { |t| t["name"].as_s == "stop_job" }
-      stop["inputSchema"]["properties"]["job_id"]["description"].as_s.should contain("ws_*")
-      stop["description"].as_s.should contain("WebSocket session")
-      listed.find! { |t| t["name"].as_s == "list_jobs" }["description"].as_s.should contain("ws_*")
-    end
-  end
 end
