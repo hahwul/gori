@@ -2628,9 +2628,8 @@ module Gori::Tui
         # Hand a nil-session refusal to the drain so it reaps `flag` and clears inflight; a
         # blocked send here means the controller is tearing down, where the cell goes with it.
         begin
-          results.send({view, Repeater::WsSession::Opened.new(nil,
-            Repeater::WsEngine::Result.new(Bytes.new(0), [] of Repeater::WsEngine::Message, 0_i64,
-              "the connect failed (#{ex.message.presence || ex.class.name})")), flag})
+          results.send({view, Repeater::WsSession::Opened.refused(
+            "the connect failed (#{ex.message.presence || ex.class.name})"), flag})
         rescue
           view.inflight = false
         end

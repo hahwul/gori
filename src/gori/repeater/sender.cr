@@ -539,19 +539,16 @@ module Gori
       def open_ws(upgrade : Bytes, keep_key : Bool = false,
                   auto_replies : Array(WsSession::AutoReply) = [] of WsSession::AutoReply,
                   cancel : Proc(Bool)? = nil, gate : Proc(String?)? = nil) : WsSession::Opened
-        refused = ->(reason : String) {
-          WsSession::Opened.new(nil, WsEngine::Result.new(Bytes.new(0), [] of WsEngine::Message, 0_i64, reason))
-        }
         if reason = admit(cancel: cancel)
-          return refused.call(reason)
+          return WsSession::Opened.refused(reason)
         end
         wired = wire(upgrade)
         if reason = wire_refusal(wired, cancel, admitted: true)
-          return refused.call(reason)
+          return WsSession::Opened.refused(reason)
         end
         if reason = WsSession.refusal(wired)
           @outbound.refund(1)
-          return refused.call(reason)
+          return WsSession::Opened.refused(reason)
         end
         WsSession.open(wired, scheme: @scheme, host: @host, port: @port, verify_upstream: @verify,
           sni: @sni, overrides: @overrides, keep_key: keep_key, tls_preset: @tls_preset,

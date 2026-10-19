@@ -52,7 +52,12 @@ module Gori
       # What `open` produced: the session when the 101 came back, and always the handshake as
       # a `WsEngine::Result` (head, error, note, sent_head), so surfaces reuse their
       # handshake rendering.
-      record Opened, session : WsSession?, result : WsEngine::Result
+      record Opened, session : WsSession?, result : WsEngine::Result do
+        # No session, and `reason` as the handshake's error.
+        def self.refused(reason : String) : Opened
+          new(nil, WsEngine::Result.new(Bytes.new(0), [] of WsEngine::Message, 0_i64, reason))
+        end
+      end
 
       # The server's CLOSE status, once it sent one.
       getter close_code : Int32?
@@ -110,7 +115,7 @@ module Gori
                     expand : Proc(WsEngine::OutMsg, WsEngine::OutMsg)? = nil,
                     gate : Proc(String?)? = nil, outbound : Gori::Outbound? = nil) : Opened
         if reason = refusal(upgrade_request)
-          return Opened.new(nil, WsEngine::Result.new(Bytes.new(0), [] of WsEngine::Message, 0_i64, reason))
+          return Opened.refused(reason)
         end
         started = Time.instant
         opened = WsEngine.open_h1(upgrade_request, scheme: scheme, host: host, port: port,
