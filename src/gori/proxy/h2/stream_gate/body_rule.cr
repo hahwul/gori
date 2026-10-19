@@ -132,7 +132,7 @@ class Gori::Proxy::H2::StreamGate
     return nil unless rw && fc && head
     return nil if block.first.end_stream? || block.first.frame_type != Frame::Type::Headers
     host = @heads.host_of(block)
-    return nil unless body_rule_for?(rw, block.fields, host)
+    return nil unless body_rule_for?(rw, block.fields, host, block.stream_id)
     return nil if streaming?(block.fields) || unbufferable?(block, head)
     len = declared_body_length(block.fields)
     return nil if @ordered && unholdable_request?(block, len)
@@ -154,15 +154,21 @@ class Gori::Proxy::H2::StreamGate
     true
   end
 
-  private def body_rule_for?(rw : Proxy::HeadRewriter, fields : Array(HPACK::Field), host : String) : Bool
+  private def body_rule_for?(rw : Proxy::HeadRewriter, fields : Array(HPACK::Field), host : String,
+                             stream_id : UInt32) : Bool
     if @ordered
       # An extended CONNECT (RFC 8441) carries a tunnel, not an entity.
       HeadCodec.pseudo_of(fields, ":method") != "CONNECT" && rw.rewrites_request_body_for_host?(host)
     else
       status = HeadCodec.pseudo_of(fields, ":status").try(&.to_i?)
-      # An interim 1xx is not the message.
-      !(status && status < 200) && rw.rewrites_response_body_for_host?(host)
+      # An interim 1xx is not the message, and the answer to a CONNECT opens the tunnel: its
+      # 200 declares no length and never ends while the socket lives.
+      !(status && status < 200) && rw.rewrites_response_body_for_host?(host) && !tunnel?(stream_id)
     end
+  end
+
+  private def tunnel?(stream_id : UInt32) : Bool
+    @assembler.request_ref(stream_id).try(&.method) == "CONNECT"
   end
 
   # A body h1 would not buffer for a rule either: compressed, or a declared length over the

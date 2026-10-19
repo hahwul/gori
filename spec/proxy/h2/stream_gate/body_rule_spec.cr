@@ -1045,6 +1045,30 @@ describe "H2::StreamGate body rules (#1628)" do
       end
     end
   end
+
+  # A WebSocket over h2 (RFC 8441): the origin's `:status 200` opens a tunnel that never ends on
+  # its own, so a response rule buffering it would hold every server frame until the socket closed.
+  it "relays an extended CONNECT's tunnel with a response body rule live" do
+    with_rules do |rules, ic|
+      rules.add(RESP, BODY, "zzz", "yyy", host: "127.0.0.1")
+      opened = ->(stream : UInt32, origin : Peer) do
+        origin.send_head(stream, [{":status", "200"}], false)
+        origin.send_body(stream, Bytes[0x81, 0x05] + "hello".to_slice, false)
+        nil
+      end
+      rig = BodyRig.new(rules, ic, opened: opened) { |_, _| nil }
+      begin
+        head = [{":method", "CONNECT"}, {":protocol", "websocket"}, {":scheme", "https"},
+                {":authority", "127.0.0.1"}, {":path", "/chat"}, {"sec-websocket-version", "13"}]
+        rig.client.send_head(1_u32, head, false)
+        50.times { break if rig.client.bodies[1_u32].size > 0; sleep 20.milliseconds }
+        rig.client.bodies[1_u32].size.should eq(7)
+        (rig.client.errors + rig.wait_origin.errors).should be_empty
+      ensure
+        rig.close
+      end
+    end
+  end
 end
 
 # Against the gates directly, so the deadline can be short.
