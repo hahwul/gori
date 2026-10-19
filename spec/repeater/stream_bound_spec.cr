@@ -76,6 +76,7 @@ describe Gori::Repeater::StreamBound do
       result.incomplete?.should be_true # the socket still carries the rest
       result.timed_out?.should be_false
       events_in(result).should eq(3)
+      result.event_times.not_nil!.size.should eq(3) # one per kept event, for the row it records
     end
 
     it "stops a close-delimited stream at the event bound" do
@@ -118,6 +119,7 @@ describe Gori::Repeater::StreamBound do
       result.incomplete?.should be_true
       result.timed_out?.should be_false
       events_in(result).should eq(3)
+      result.event_times.not_nil!.size.should eq(3)
     end
 
     it "stops at the time bound even while a read is blocked" do

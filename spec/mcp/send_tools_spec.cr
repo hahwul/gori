@@ -153,7 +153,9 @@ describe Gori::MCP::Server do
         payload["bounded"].as_s.should eq("events")
         payload["incomplete_reason"].as_s.should contain("event bound")
         # A stop gori chose is not a failed response on the History row either.
-        store.get_flow(payload["recorded_flow_id"].as_i64).not_nil!.row.state.complete?.should be_true
+        detail = store.get_flow(payload["recorded_flow_id"].as_i64).not_nil!
+        detail.row.state.complete?.should be_true
+        detail.event_times.not_nil!.size.should eq(2) # `t_ms` in a later get_flow
       end
     end
 

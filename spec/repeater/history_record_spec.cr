@@ -129,6 +129,19 @@ describe Gori::Repeater::HistoryRecord do
     end
   end
 
+  # The Repeater shows `+0.412s` per event; the row it records keeps the same times (#1631).
+  it "records an event stream's arrival times on the flow" do
+    with_store do |store|
+      plan = plan_for("GET /events HTTP/1.1\r\nHost: t.test\r\n\r\n")
+      head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n".to_slice
+      result = Gori::Repeater::Result.new(head, "data: 1\n\ndata: 2\n\n".to_slice,
+        Gori::Proxy::Codec::Http1.parse_response_head(head), 100_i64, event_times: [5_i64, 412_005_i64])
+      id = Gori::Repeater::HistoryRecord.record(store, plan, result, created_at: 1_i64,
+        wire: plan.wire_bytes, surface: Gori::FlowSource::Surface::Cli)
+      store.get_flow(id).not_nil!.event_times.should eq([5_i64, 412_005_i64])
+    end
+  end
+
   # An `--apply-rules` send recorded the rewritten bytes with no trace of the rule, while the
   # same rule on the proxy path names itself on the flow and keeps what it replaced.
   it "records which rules rewrote an apply_rules send, and the bytes they replaced" do

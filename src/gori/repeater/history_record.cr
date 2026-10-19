@@ -78,12 +78,14 @@ module Gori
           # A bound gori chose to stop an event stream at is not a failed response (#1631).
           error ||= "upstream response body was incomplete" if result.incomplete? && !result.bounded
           state = error ? Store::FlowState::Error : Store::FlowState::Complete
-          store.update_response(FlowMapper.response(resp,
+          captured_resp = FlowMapper.response(resp,
             flow_id: id,
             body: result.body,
             duration_us: result.duration_us,
             state: state,
-            error: error))
+            error: error)
+          captured_resp.event_times = result.packed_event_times
+          store.update_response(captured_resp)
         else
           # A send that never got a response (connection refused, TLS failure, timeout) is a
           # visible ERROR flow, not a dangling request — the same shape the fuzz recorder and

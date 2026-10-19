@@ -197,7 +197,8 @@ module Gori
         final_seen : Bool,
         late_interim : Int32? = nil,
         trailer_pseudo : Array(String)? = nil,
-        bounded : String? = nil
+        bounded : String? = nil,
+        event_times : Array(Int64)? = nil
 
       # One h2 CONNECTION and the state that outlives a single request on it.
       #
@@ -453,7 +454,7 @@ module Gori
         Result.new(head, reply.body, resp, Engine.elapsed(started),
           error: send_side_reason(reply, flow, host, port),
           incomplete: !reply.clean_eos, delivered: true, timed_out: reply.timed_out,
-          bounded: reply.bounded)
+          bounded: reply.bounded, event_times: reply.event_times)
       end
 
       # Fold one finished exchange back into the CONNECTION: the state the next request on it
@@ -1175,7 +1176,7 @@ module Gori
 
         Reply.new(status, headers, body.size == 0 ? nil : body.to_slice, clean_eos,
           goaway, rst, trailers, timed_out, final_seen, late_interim, trailer_pseudo,
-          run.try(&.reason))
+          run.try(&.reason), run.try(&.times))
       ensure
         sock.try(&.read_timeout = idle) if run
       end

@@ -33,11 +33,12 @@ module Gori
       # The bounded read of a response the caller has already found to be an event stream
       # (`Sse.sse?` on its Content-Type, checked first because every swept response asks).
       # `head` is the response head: the events of a body it leaves compressed can't be
-      # counted as they arrive, so only the time axis applies to one. It also opens `live`.
+      # counted or timed as they arrive, so only the time axis applies to one. It also opens
+      # `live`, which shows the run's arrivals.
       def start(head : Bytes, chunked : Bool, cancel : Proc(Bool)? = nil) : StreamRun
-        countable = !Proxy::Codec::ContentDecode.content_encoded?(head)
-        live.try(&.open(head, countable ? Sse::Arrivals.new(chunked) : nil))
-        StreamRun.new(countable ? max_events : nil, max_time, chunked, cancel, live)
+        arrivals = Sse::Arrivals.new(chunked) unless Proxy::Codec::ContentDecode.content_encoded?(head)
+        live.try(&.open(head, arrivals))
+        StreamRun.new(arrivals ? max_events : nil, max_time, chunked, cancel, live, arrivals)
       end
     end
 
@@ -54,13 +55,20 @@ module Gori
       @deadline : Time::Instant?
 
       def initialize(@max_events : Int32?, max_time : Time::Span?, @chunked : Bool,
-                     @cancel : Proc(Bool)? = nil, @live : LiveBody? = nil)
+                     @cancel : Proc(Bool)? = nil, @live : LiveBody? = nil,
+                     @arrivals : Sse::Arrivals? = nil)
         @counter = Sse::WireCounter.new(@chunked) if @max_events
         @deadline = max_time.try { |t| Time.instant + t }
       end
 
       def stopped? : Bool
         !@reason.nil?
+      end
+
+      # When each kept event arrived (`Sse::Arrivals`), for the Result and the History row the
+      # send records. nil when untimed.
+      def times : Array(Int64)?
+        @arrivals.try(&.times)
       end
 
       # Time left on the time axis (nil when it has none). Records the stop once it is spent.
@@ -80,11 +88,15 @@ module Gori
       end
 
       # Counts the wire bytes just read and returns how many of them the capture keeps: all of
-      # them, or only those up to the end of the `max_events`th event. The kept ones go to
-      # `live` too.
+      # them, or only those up to the end of the `max_events`th event. The kept ones are timed,
+      # by `live` when there is one (it was opened on the same arrivals).
       def take(bytes : Bytes) : Int32
         n = keep(bytes)
-        @live.try(&.append(bytes[0, n]))
+        if live = @live
+          live.append(bytes[0, n])
+        else
+          @arrivals.try(&.feed(bytes[0, n]))
+        end
         n
       end
 

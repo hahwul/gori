@@ -72,7 +72,17 @@ module Gori
       def initialize(@head, @body, @response, @duration_us, @error = nil, @incomplete = false, *,
                      @delivered = false, @timed_out = false, @retried = false,
                      @wire : Bytes? = nil, @retryable_stale = false, @cut_short = false,
-                     @lf_framed = false, @bounded : String? = nil)
+                     @lf_framed = false, @bounded : String? = nil,
+                     @event_times : Array(Int64)? = nil)
+      end
+
+      # When each event of an event-stream response arrived (`Sse::Arrivals`), so the History
+      # row a send records keeps them (#1631). nil when the response is not one, or untimed.
+      getter event_times : Array(Int64)?
+
+      # `event_times` as a recorder stores them (`CapturedResponse#event_times`).
+      def packed_event_times : Bytes?
+        @event_times.try { |t| Sse::Arrivals.pack(t) unless t.empty? }
       end
 
       # A `StreamBound` ended this event stream: "events" or "time", or "cancelled" when the
@@ -100,7 +110,7 @@ module Gori
         Result.new(@head, @body, @response, @duration_us, @error, @incomplete,
           delivered: @delivered, timed_out: @timed_out, retried: @retried, wire: wire,
           retryable_stale: @retryable_stale, cut_short: @cut_short, lf_framed: @lf_framed,
-          bounded: @bounded)
+          bounded: @bounded, event_times: @event_times)
       end
 
       def ok? : Bool
@@ -118,7 +128,8 @@ module Gori
         # so this shape is the only one that compiles.
         Result.new(@head, @body, @response, @duration_us, @error, @incomplete,
           delivered: @delivered, timed_out: @timed_out, retried: true, wire: @wire,
-          retryable_stale: @retryable_stale, lf_framed: @lf_framed, bounded: @bounded)
+          retryable_stale: @retryable_stale, lf_framed: @lf_framed, bounded: @bounded,
+          event_times: @event_times)
       end
     end
 
@@ -456,9 +467,10 @@ module Gori
           end
           if why = run.try(&.reason)
             return Result.new(head, body, resp, elapsed(started), incomplete: true,
-              lf_framed: lf_framed, bounded: why)
+              lf_framed: lf_framed, bounded: why, event_times: run.try(&.times))
           end
-          Result.new(head, body, resp, elapsed(started), incomplete: !complete, lf_framed: lf_framed)
+          Result.new(head, body, resp, elapsed(started), incomplete: !complete, lf_framed: lf_framed,
+            event_times: run.try(&.times))
         rescue ex
           # The head was already read + parsed. A framing rejection (CL+TE — precisely the
           # ambiguous response a smuggling/desync probe is hunting) or a mid-body read error

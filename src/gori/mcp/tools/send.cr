@@ -921,13 +921,15 @@ module Gori
           # A bound gori chose to stop at is not a failed response (#1631).
           error ||= "upstream response body was incomplete" if result.incomplete? && !result.bounded
           state = error ? Store::FlowState::Error : Store::FlowState::Complete
-          store.update_response(FlowMapper.response(response,
+          captured = FlowMapper.response(response,
             flow_id: flow_id,
             body: result.body,
             duration_us: result.duration_us,
             state: state,
             error: error,
-            body_size: result.body.try(&.size.to_i64)))
+            body_size: result.body.try(&.size.to_i64))
+          captured.event_times = result.packed_event_times
+          store.update_response(captured)
         else
           store.update_response(FlowMapper.error_response(flow_id,
             result.error || "request failed before a response was received", result.duration_us))
