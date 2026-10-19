@@ -994,6 +994,25 @@ describe "H2::StreamGate body rules (#1628)" do
     end
   end
 
+  # A client that advertises a zero initial window and opens each stream only once its response
+  # head is in: that credit is the origin's only way to send at all, so it cannot stop at gori.
+  it "passes stream credit through to a sender that has none" do
+    with_rules do |rules, ic|
+      rules.add(RESP, BODY, "b", "c", host: "127.0.0.1")
+      rig = BodyRig.new(rules, ic, client_window: 0_i64) { |_, _| {ok, "bbbb".to_slice, nil} }
+      begin
+        rig.client.send_head(1_u32, get("/x"), true)
+        50.times { break if rig.client.heads.has_key?(1_u32); sleep 20.milliseconds }
+        rig.client.bump(1_u32, 100_000)
+        rig.client.wait_done(1_u32, 3.seconds).should be_true
+        rig.client.body_of(1_u32).should eq("cccc")
+        (rig.client.errors + rig.wait_origin.errors).should be_empty
+      ensure
+        rig.close
+      end
+    end
+  end
+
   # Review r2 #1: credit a client gives a stream AFTER its response ended (a slow reader acking
   # what it consumed) used to stay recorded for good, and past 1,024 such streams the stall the
   # pre-response credit fixes came back for every new one.

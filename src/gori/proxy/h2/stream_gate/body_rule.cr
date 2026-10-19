@@ -103,6 +103,9 @@ class Gori::Proxy::H2::StreamGate
     getter head : Bytes?
     getter? declares_length : Bool
     property window : Int64
+    # The sender's window on this stream as it sees it: what it may still send gori. It opens
+    # where `window` does, drops as DATA arrives and grows with each refund.
+    property sender : Int64
     # The held head, while one is held. nil once it went out, or when it was never held.
     property slot : Slot?
     # DATA as it arrived, while the body is buffering.
@@ -120,6 +123,7 @@ class Gori::Proxy::H2::StreamGate
     getter after = [] of {Frame::Header, Assembler::HeadBlock?}
 
     def initialize(@stream_id, @host, @request, @head, @declares_length, @window)
+      @sender = @window
     end
   end
 
@@ -366,6 +370,7 @@ class Gori::Proxy::H2::StreamGate
   end
 
   private def own_data_locked(fc : Flow, own : Owned, f : Frame::Header) : Nil
+    own.sender -= f.payload.size
     if own.spilled?
       own.sends << {f, f.payload.size}
       own.complete = true if f.end_stream?
@@ -376,7 +381,7 @@ class Gori::Proxy::H2::StreamGate
     own.size += f.payload.size
     fc.buffered += f.payload.size
     own.held_since = Time.instant if own.held_since # a body still arriving has not stalled
-    refund_locked(fc, own.stream_id, f.payload.size, f.end_stream?)
+    refund_locked(fc, own, f.payload.size, f.end_stream?)
     # A PADDED frame carries bytes only `Assembler#data_block` knows how to strip, so the body
     # is one gori will not rewrite — the same call `note_body_frame` makes for a hold.
     if f.padded?
@@ -501,7 +506,7 @@ class Gori::Proxy::H2::StreamGate
       own.window -= f.payload.size
       fc.debt += f.payload.size
       fc.buffered -= f.payload.size if credit == 0
-      refund_locked(fc, own.stream_id, credit, f.end_stream?) if credit > 0
+      refund_locked(fc, own, credit, f.end_stream?) if credit > 0
     end
     return unless own.sends.empty? && own.complete?
     own.after.each { |(f, pre)| write(f, pre) }
@@ -510,9 +515,11 @@ class Gori::Proxy::H2::StreamGate
 
   # Credit the sender for `n` bytes this gate took off it. Not on the stream for the frame that
   # ended it: the sender is done with that window.
-  private def refund_locked(fc : Flow, stream_id : UInt32, n : Int32, last : Bool) : Nil
+  private def refund_locked(fc : Flow, own : Owned, n : Int32, last : Bool) : Nil
     @swallowed += n
-    fc.refunds[stream_id] += n unless last || n <= 0
+    return if last || n <= 0
+    fc.refunds[own.stream_id] += n
+    own.sender += n
   end
 
   # The sender reset an owned stream. Its unsent credit is owed back; the RST reaches the far
@@ -666,7 +673,11 @@ class Gori::Proxy::H2::StreamGate
     elsif own = fc.owned[f.stream_id]?
       own.window += n
       pump_owned_locked(fc, own)
-      nil
+      # Refunds keep a sender going only once it has a window to send in. One opened at zero
+      # (SETTINGS_INITIAL_WINDOW_SIZE 0, credit granted only after the head) gets this credit.
+      return nil if own.sender > 0
+      own.sender += n
+      f
     else
       note_pre_credit(fc, f.stream_id, n) unless @ordered
       f
@@ -691,7 +702,10 @@ class Gori::Proxy::H2::StreamGate
         value = IO::ByteFormat::BigEndian.decode(UInt32, f.payload[at + 2, 4]).to_i64
         delta = value - fc.initial
         fc.initial = value
-        fc.owned.each_value { |own| own.window += delta }
+        fc.owned.each_value do |own|
+          own.window += delta
+          own.sender += delta
+        end
       end
       at += 6
     end
