@@ -39,6 +39,7 @@ module Gori
         apply_rules = false
         headers_only = false
         max_body : Int32? = nil
+        grpc_fields = [] of String
         format = :text
 
         positional = parse_args(args, "gori run send") do |p|
@@ -81,6 +82,7 @@ module Gori
           p.on("--apply-rules", APPLY_RULES_HELP) { apply_rules = true }
           p.on("--headers-only", HEADERS_ONLY_HELP) { headers_only = true }
           p.on("--max-body=BYTES", MAX_BODY_HELP) { |v| max_body = parse_count(v, "--max-body") }
+          p.on("--grpc-field=PATH=VALUE", GRPC_FIELD_HELP) { |v| grpc_fields << v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
         refresh_verify_upstream(!insecure)
@@ -117,6 +119,7 @@ module Gori
         # expands: those bytes are the body, the way MCP's `body_base64` is.
         body_bytes = body_file_bytes || body.try { |b| (verbatim ? b : Env.expand(b)).to_slice }
         built = send_built(dial_url, raw_content, method, header_pairs, body_bytes, verbatim)
+        request = grpc_fields_or_abort(built.bytes, grpc_fields, "gori run send")
         outbound = project_outbound(project, allow_unscoped)
         plan = begin
           # The shape MCP's `send_request{url}` hands the builder, for the reason it gives: the
@@ -124,7 +127,7 @@ module Gori
           # value that itself looks like a token, and a Content-Length resync would reframe a
           # raw request the operator framed by hand. `expand_bindings` is the one pass left for
           # the send seam, and `--verbatim` turns it off there too.
-          Repeater::Plan.build(Repeater::PlanOptions.new([built.bytes],
+          Repeater::Plan.build(Repeater::PlanOptions.new([request],
             expand_request: false, expand_bindings: !verbatim, auto_content_length: false,
             preserve_field_case: verbatim,
             origin: Repeater::Origin.new(built.scheme, built.host, built.port),

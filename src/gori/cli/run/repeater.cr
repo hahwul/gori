@@ -2527,6 +2527,18 @@ module Gori
         session_header_overrides(request, headers)
       end
 
+      GRPC_FIELD_HELP = "gRPC: set or ADD a field on the unary request message for this send (repeatable, applied in order; " \
+                        "PATH=VALUE as `repeater send --grpc-field` takes it). Re-compressed and reframed"
+
+      # `--grpc-field` on a one-shot send (`gori run send`, `gori run repeater <flow-id>`): the
+      # same `Repeater::GrpcFields.apply` as `repeater send` and MCP `send_request{grpc_fields}`.
+      # After `open_store`, which published the `.proto` schema the names resolve by.
+      private def self.grpc_fields_or_abort(request : Bytes, specs : Array(String), prefix : String) : Bytes
+        edited = Repeater::GrpcFields.apply(request, specs)
+        abort "#{prefix}: --grpc-field #{edited}" if edited.is_a?(String)
+        edited
+      end
+
       private def self.session_header_overrides(request : Bytes, headers : Array(String)) : {Bytes, Bool}
         return {request, false} if headers.empty?
         boundary = Env.head_body_boundary(request)
@@ -2583,6 +2595,7 @@ module Gori
         path_override : String? = nil
         headers_only = false
         max_body : Int32? = nil
+        grpc_fields = [] of String
 
         positional = parse_args(args, "gori run repeater") do |p|
           p.banner = "Usage: gori run repeater <flow-id> [options]\n\n" \
@@ -2620,6 +2633,7 @@ module Gori
           p.on("--allow-unscoped", "Send even if the target is outside the project scope (the Sandbox still applies)") { allow_unscoped = true }
           p.on("--headers-only", HEADERS_ONLY_HELP) { headers_only = true }
           p.on("--max-body=BYTES", MAX_BODY_HELP) { |v| max_body = parse_count(v, "--max-body") }
+          p.on("--grpc-field=PATH=VALUE", GRPC_FIELD_HELP) { |v| grpc_fields << v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
         refresh_verify_upstream(!insecure)
@@ -2734,7 +2748,8 @@ module Gori
         end
         warn_request_line_rewrite(built, "gori run repeater")
 
-        raw_bytes = built.bytes
+        # `--grpc-field` before `-H`, as `repeater send` orders them (`per_send_request`).
+        raw_bytes = grpc_fields_or_abort(built.bytes, grpc_fields, "gori run repeater")
         # `Env.head_body_boundary`, not a hand-rolled CRLFCRLF scan: a captured head may be
         # terminated with bare LFs, which is a front-end/back-end desync primitive gori can
         # already produce and stores byte-exact. Scanning for CRLFCRLF alone made replaying

@@ -475,6 +475,7 @@ gori run repeater <flow-id> --target https://staging.example.com --http2 --diff
 | `--save-as-repeater` | Also save the request and response as a new Repeater session and print its id (`saved_repeater_id` in JSON) |
 | `--apply-rules` | Run the project's enabled Match & Replace rules (request side) over the request first, as the live proxy would. Off by default: a direct send is byte-exact |
 | `--keep-request-line` | Send the stored request line as-is; do not rewrite an absolute-form line (`GET http://h/p`) to origin-form |
+| `--grpc-field=PATH=VALUE` | gRPC: set or add a field on the flow's unary message for this send, before `-H` applies (repeatable; the spec `repeater send --grpc-field` takes) |
 | `--diff` | Diff against the original response |
 | `--allow-unscoped` | Send outside the project scope. Sandbox mode still refuses each send; an exclude rule stops a hand-authored send only with the Sandbox on, as on the proxy |
 | `--headers-only` | Print the status line and headers only; the body is replaced by one line naming its size |
@@ -635,7 +636,7 @@ gori run send --url https://api.example.com --request-file req.http --headers-on
 | `--http2`, `--sni=HOST`, `--tls-preset=NAME`, `-k`, `--timeout=SEC`, `--sse-events`, `--sse-time`, `--slot=NAME`, `--allow-unscoped` | As on `repeater send` |
 | `--record-history` | Also write the request and response to History as a flow (`source: repeater`, `source_surface: cli`) and print its id. Off by default, as on `repeater send` |
 | `--save-as-repeater` | Also save the request and response as a new Repeater session and print its id (`saved_repeater_id` in JSON) |
-| `--headers-only`, `--max-body=BYTES`, `--format=FMT` | As on `repeater send` |
+| `--headers-only`, `--max-body=BYTES`, `--format=FMT`, `--grpc-field=PATH=VALUE` | As on `repeater send` |
 
 The exit status reports the exchange, not the HTTP verdict: a `404` or `500` exits `0` (`ok: true` in JSON), so check `status`. Exit `1` (`ok: false`) means there was no response, or gori could not frame or finish reading it.
 

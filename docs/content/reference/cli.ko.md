@@ -468,6 +468,7 @@ gori run repeater <flow-id> --target https://staging.example.com --http2 --diff
 | `--save-as-repeater` | 요청과 응답을 새 Repeater 세션으로 저장하고 id를 출력 (`--format json`에서는 `saved_repeater_id`) |
 | `--apply-rules` | 라이브 프록시처럼 프로젝트의 활성 Match & Replace 규칙(요청 쪽)을 먼저 요청에 적용. 기본값은 꺼짐: 직접 전송은 바이트 그대로입니다 |
 | `--keep-request-line` | 저장된 요청 라인을 그대로 전송. 절대 형식(`GET http://h/p`)을 origin 형식으로 고치지 않습니다 |
+| `--grpc-field=PATH=VALUE` | gRPC: 이번 전송에서만 플로우의 단항 메시지에 필드를 설정하거나 추가합니다. `-H`보다 먼저 적용됩니다(반복 가능, `repeater send --grpc-field`와 같은 스펙) |
 | `--diff` | 원본 응답과 비교 |
 | `--allow-unscoped` | 프로젝트 스코프 밖으로도 전송. 샌드박스는 매 전송을 여전히 거부합니다. 제외 규칙은 프록시와 마찬가지로 샌드박스가 켜져 있을 때만 직접 작성한 전송을 막습니다 |
 | `--headers-only` | 상태 라인과 헤더만 출력. 본문은 크기를 알려주는 한 줄로 대체 |
@@ -627,7 +628,7 @@ gori run send --url https://api.example.com --request-file req.http --headers-on
 | `--http2`, `--sni=HOST`, `--tls-preset=NAME`, `-k`, `--timeout=SEC`, `--sse-events`, `--sse-time`, `--slot=NAME`, `--allow-unscoped` | `repeater send`와 같음 |
 | `--record-history` | 요청과 응답을 History에 플로우로도 기록(`source: repeater`, `source_surface: cli`)하고 id를 출력. `repeater send`와 마찬가지로 기본값은 꺼짐 |
 | `--save-as-repeater` | 요청과 응답을 새 Repeater 세션으로 저장하고 id 출력 (`--format json`에서는 `saved_repeater_id`) |
-| `--headers-only`, `--max-body=BYTES`, `--format=FMT` | `repeater send`와 같음 |
+| `--headers-only`, `--max-body=BYTES`, `--format=FMT`, `--grpc-field=PATH=VALUE` | `repeater send`와 같음 |
 
 종료 코드는 HTTP 판정이 아니라 교환 성공 여부를 알립니다. `404`나 `500`도 `0`으로 끝나므로(JSON에서는 `ok: true`) `status`를 확인하세요. `1`(`ok: false`)은 응답이 없었거나 gori가 응답을 프레이밍하거나 끝까지 읽지 못했다는 뜻입니다.
 

@@ -34,3 +34,39 @@ describe "gori run repeater send --grpc-field" do
     Gori::CLI::Run.per_send_request(get_user_wire, [] of String, ["name=x"]).as(String).should contain("no .proto schema")
   end
 end
+
+module Gori::CLI::Run
+  def self.grpc_fields_for_spec(request : Bytes, specs : Array(String)) : Bytes
+    grpc_fields_or_abort(request, specs, "spec")
+  end
+end
+
+private def cli_method_source(path : String, method : String) : String
+  source = File.read(File.join(__DIR__, "../../../src/gori/cli/run", path))
+  tail = source[source.index!("private def self.#{method}(")..]
+  tail[0, tail.index("\n      private def self.", 1) || tail.size]
+end
+
+# MCP `send_request{grpc_fields}` applies on a raw request and a flow replay as well as a
+# saved session; the one-shot CLI sends take the same flag through the same function.
+describe "gori run send / gori run repeater <flow-id> --grpc-field" do
+  it "edits the one-shot request through Repeater::GrpcFields, and leaves it alone with no spec" do
+    Gori::Protobuf::Schemas.clear
+    edited = Gori::CLI::Run.grpc_fields_for_spec(get_user_wire, ["7:varint=1"])
+    msgs, _ = Gori::Proxy::H2::Grpc.scan(Gori::Fuzz::GrpcVerdict.body(edited).not_nil!)
+    msgs[0].data.should eq(Bytes[0x0a, 0x03, 0x62, 0x6f, 0x62, 0x38, 0x01])
+    wire = get_user_wire
+    Gori::CLI::Run.grpc_fields_for_spec(wire, [] of String).should eq(wire)
+  end
+
+  {
+    {"send.cr", "cmd_send"},
+    {"repeater.cr", "cmd_repeater_single"},
+  }.each do |path, method|
+    it "takes --grpc-field in #{method}" do
+      src = cli_method_source(path, method)
+      src.should contain(%("--grpc-field=PATH=VALUE"))
+      src.should contain("grpc_fields_or_abort(")
+    end
+  end
+end
