@@ -199,6 +199,15 @@ describe Gori::Protobuf::Edit do
         .should eq(Bytes[0x0a, 0x03, 0x0a, 0x01, 0x61, 0x0a, 0x03, 0x0a, 0x01, 0x62])
     end
 
+    it "keeps an untouched element's bytes and each element where it stood" do
+      schema, list = list_schema
+      # items "a" behind a padded two-byte length, an undeclared field 2 between the two items.
+      data = Bytes[0x0a, 0x83, 0x00, 0x0a, 0x01, 0x61, 0x10, 0x01, 0x0a, 0x03, 0x0a, 0x01, 0x62]
+      json = Gori::Protobuf::Edit.to_json(data, schema, list)
+      Gori::Protobuf::Edit.from_json(data, schema, list, json.sub(%("b"), %("c")))
+        .should eq(Bytes[0x0a, 0x83, 0x00, 0x0a, 0x01, 0x61, 0x10, 0x01, 0x0a, 0x03, 0x0a, 0x01, 0x63])
+    end
+
     it "refuses a key for a field on the wire that the JSON left out" do
       # name (2) as a varint, which the schema's string contradicts; scores (6) packed past
       # the lens's listing limit.

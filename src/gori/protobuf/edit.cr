@@ -341,7 +341,7 @@ module Gori::Protobuf
       return wanted if wanted.is_a?(String)
       shown_obj, shown = project(data, schema, type, depth)
       spans = Protobuf.field_spans(data)
-      chosen = {} of UInt32 => Bytes? # nil = keep the wire's occurrences verbatim
+      chosen = {} of UInt32 => Merged
       wanted.each do |n, (d, v)|
         on_wire = spans.select(&.number.==(n))
         # A key the projection left out, though the field is on the wire (a packed run past
@@ -371,10 +371,14 @@ module Gori::Protobuf
       wanted
     end
 
-    # What replaces one wanted field's occurrences (`on_wire`) — nil to keep them verbatim.
-    # `shown` is the capture's own JSON for it, when the projection showed it.
+    # What replaces one field's occurrences: nil keeps them verbatim, Bytes stand where the first
+    # of them did, and an Array holds one replacement per occurrence, each written in its place.
+    alias Merged = (Bytes | Array(Bytes))?
+
+    # What replaces one wanted field's occurrences (`on_wire`). `shown` is the capture's own
+    # JSON for it, when the projection showed it.
     private def merged_field(data : Bytes, on_wire : Array(Span), schema : Schema, d : Schema::FieldDef,
-                             v : JSON::Any, shown : JSON::Any?, depth : Int32) : Bytes? | String
+                             v : JSON::Any, shown : JSON::Any?, depth : Int32) : Merged | String
       packed = on_wire.all?(&.wire.length_delimited?)
       enc = encode_value(schema, d, v, packed, depth)
       return enc if enc.is_a?(String)
@@ -387,7 +391,7 @@ module Gori::Protobuf
     # A message edited where it stands, or nil when the field is not one. Merged into its own
     # bytes, so what the JSON could not show inside it survives too.
     private def nested_edit(data : Bytes, on_wire : Array(Span), schema : Schema, d : Schema::FieldDef,
-                            v : JSON::Any, shown : JSON::Any?, depth : Int32) : (Bytes | String)?
+                            v : JSON::Any, shown : JSON::Any?, depth : Int32) : Merged | String
       return nil unless d.type.message? && !v.raw.nil?
       return repeated_edit(data, on_wire, schema, d, v, shown, depth) if d.repeated
       # One that occurs twice is ONE message to a parser, which merges the occurrences; the JSON
@@ -405,23 +409,22 @@ module Gori::Protobuf
     end
 
     # A repeated message (a map is one too) edited element by element: the JSON's Nth element
-    # merged into the wire's Nth occurrence. An array whose length changed cannot be paired,
+    # merged into the wire's Nth occurrence, where it stands, and an element the edit left alone
+    # keeps its octets (a padded length too). An array whose length changed cannot be paired,
     # so it is encoded afresh (nil) — refused when that would drop bytes an occurrence holds
     # beyond its JSON. `encode_value` has already checked every element's shape.
     private def repeated_edit(data : Bytes, on_wire : Array(Span), schema : Schema, d : Schema::FieldDef,
-                              v : JSON::Any, shown : JSON::Any?, depth : Int32) : (Bytes | String)?
+                              v : JSON::Any, shown : JSON::Any?, depth : Int32) : (Array(Bytes) | String)?
       arr = v.as_a? || return nil
       t = d.type_name.try { |tn| schema.message?(tn) } || return nil
       if arr.size == on_wire.size && on_wire.all?(&.wire.length_delimited?)
-        io = IO::Memory.new
-        arr.each_with_index do |e, i|
+        return arr.map_with_index do |e, i|
           s = on_wire[i]
           o = e.as_h? || return nil
           inner = merge(data[s.body, s.body_size], schema, t, o, depth + 1)
           return "element #{i + 1}: #{inner}" if inner.is_a?(String)
-          io.write(retag(data, s, inner))
+          inner == data[s.body, s.body_size] ? data[s.start, s.size] : retag(data, s, inner)
         end
-        return io.to_slice
       end
       return nil if arr.empty?
       was = shown.try(&.as_a?) || [] of JSON::Any
@@ -435,24 +438,25 @@ module Gori::Protobuf
 
     private def write_merged(data : Bytes, spans : Array(Span), shown : Set(UInt32),
                              wanted : Hash(UInt32, {Schema::FieldDef, JSON::Any}),
-                             chosen : Hash(UInt32, Bytes?)) : Bytes
+                             chosen : Hash(UInt32, Merged)) : Bytes
       io = IO::Memory.new(data.size)
-      emitted = Set(UInt32).new
+      emitted = Hash(UInt32, Int32).new(0)
       spans.each do |s|
         n = s.number
         if chosen.has_key?(n)
-          if enc = chosen[n]
-            io.write(enc) if emitted.add?(n)
-          else
-            io.write(data[s.start, s.size])
+          case enc = chosen[n]
+          in Nil          then io.write(data[s.start, s.size])
+          in Array(Bytes) then io.write(enc[emitted[n]])
+          in Bytes        then io.write(enc) if emitted[n] == 0
           end
+          emitted[n] += 1
         elsif !shown.includes?(n)
           io.write(data[s.start, s.size])
         end # shown, and no longer in the JSON: the operator deleted it
       end
       wanted.each_key do |n|
         next if spans.any? { |s| s.number == n }
-        chosen[n].try { |enc| io.write(enc) }
+        chosen[n].as?(Bytes).try { |enc| io.write(enc) }
       end
       tail = spans.last?.try(&.finish) || 0
       io.write(data[tail, data.size - tail])
