@@ -800,6 +800,12 @@ module Gori
 
     # --- short circuit (#511) ------------------------------------------------
 
+    # Whether any short-circuit rule is live, on any host: the one rule kind that still costs a
+    # host HTTP/2 (`Tls::Tunnel#h2_downgrade_reason`), which the Rewriter tab says.
+    def short_circuits? : Bool
+      @short_circuit_count.get > 0
+    end
+
     # Whether a short-circuit rule could fire for one host (#526) — the same split, and for
     # the same reason, as `rewrites_body_for_host?` above. The host filter is exactly the one
     # `short_circuit` itself applies, so this answers "could `short_circuit` ever return a

@@ -287,11 +287,12 @@ module Gori::Tui
       inner = rect.inset(1, 1)
       return if inner.empty?
 
-      # Rows fill the card interior. Optional live note on the last row.
+      # Rows fill the card interior. `live` (a short-circuit rule is enabled) notes its cost on
+      # the last row: body and head rules stay on h2.
       list_top = inner.y
       list_h = inner.h
       if live && list_h > 1
-        note = "h2 hosts with a live rule fall back to HTTP/1.1"
+        note = "h2 hosts matching a short-circuit rule fall back to HTTP/1.1"
         screen.text(inner.x, inner.bottom - 1, note, Theme.muted, Theme.bg, width: inner.w)
         list_h -= 1
       end
