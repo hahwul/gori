@@ -5047,7 +5047,8 @@ and kept after the stream closes, when `flow_live_chunks` is gone.
   same `Sse::Counter` a bounded send uses, de-chunking first (`Sse::WireCounter`, moved out of
   `StreamRun`), and stamps each event the read that ended it. The index pairs with `Sse.events`
   of the same body, which a byte offset could not: the capture keeps the chunk framing, and the
-  events are parsed after it is removed. A compressed stream gets no times.
+  events are parsed after it is removed. A compressed stream gets no times, and is appended
+  on the time rule alone (2026-10-19): its bytes never spell a blank line.
 - **Beside the flow, batched, survives close.** `flow_event_times` (V52) holds one row per live
   append, the packed times from index `first`; they ride the `AppendLive` the chunk does, so a
   dropped append drops both and the retry carries both. The final response write replaces them
@@ -5059,3 +5060,30 @@ and kept after the stream closes, when `flow_live_chunks` is gone.
   `●` alone.
 - Cost: about 1 ns per stored byte on the SSE path only (`bench/capture_bench.cr`, 64 KiB of
   248-byte events: 77 → 148 µs).
+
+### 2026-10-19: a gRPC JSON edit pairs repeated messages by position, and refuses what it cannot pair (#1632)
+
+Refines the 2026-10-18 entry: "a field the JSON cannot show is copied" held for singular
+messages only, and a repeated message rebuilt every element from its JSON.
+
+- Each element of a repeated message (a map too) is merged into the occurrence at its index, so
+  bytes the JSON hides inside an element survive. An array whose length changed is re-encoded
+  only when every occurrence re-encodes to its own octets; otherwise the edit is refused.
+- A key for a field the projection left out (a packed run past `Lens::PACKED_MAX`, a contradicted
+  wire type) is refused rather than replacing occurrences the operator never saw.
+- A headless field set that changes nothing sends the captured frame, as the TUI does (P7).
+
+### 2026-10-19: an h2 body rule runs over a body held at Intercept, before the operator sees it (#1628)
+
+Refines 2026-10-17. h1 rewrites, then holds; the h2 relay now does the same.
+
+- The rule runs over the body the hold buffered, before the queue row. The result goes out as an
+  edit's body, so it cannot be owned flow-control-wise: a growth is applied only within the
+  receiver window known for sure (the request's initial stream window; for a response, none past
+  what the sender sent). Past that the body goes out unrewritten with an advisory.
+- An extended CONNECT (RFC 8441) is a tunnel in both directions: its `:status 200` is never
+  owned for a response body rule.
+- A rule body counts against `MAX_RULE_BUFFERED` until gori writes it, not until it has arrived.
+- A request head held for a body-rule body keeps the stall deadline, not a wall clock (Review r2
+  #2). Open option if one upload stalling the connection matters: a wall clock that runs only
+  while a later open waits behind the held head, then spill.
