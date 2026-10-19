@@ -69,7 +69,7 @@ module Gori
       # `issues_unshown_ids` (get_issue reads it), since the retest has no page of its own.
       private def diff_page(report : Gori::Diff::Report, opts : DiffOptions) : Result
         listed = report.rows.select { |row| opts.verdicts.includes?(row.verdict) }
-        page = listed[opts.offset..]? || [] of Gori::Diff::Row
+        page = offset_slice(listed, opts.offset)
         ctx = Gori::Diff::Record::Context.new(report.a.label, report.b.label)
         rows = fit_rows(page) { |rj, row, _| Gori::Diff::Render.row_json(rj, row, ctx) }
         issues = fit_rows(report.issues, rows.sum(&.bytesize)) { |rj, i, _| Gori::Diff::Render.issue_json(rj, i) } if opts.issues
@@ -78,11 +78,8 @@ module Gori
             endpoint_parts: rows, issue_parts: issues)
         end
         Result.new(with_fields(json) do |j|
-          j.field "returned", rows.size
-          j.field "offset", opts.offset
-          emit_cut(j, rows.size < page.size)
+          emit_offset_page(j, opts.offset, rows.size, page.size, listed.size)
           j.field "total", listed.size
-          j.field "has_more", opts.offset + rows.size < listed.size
           if issues && issues.size < report.issues.size
             j.field "issues_unshown_ids", report.issues[issues.size..].map(&.id)
           end

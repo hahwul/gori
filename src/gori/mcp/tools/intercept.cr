@@ -28,7 +28,7 @@ module Gori
         # bounded. `offset` pages the rest; the held set moves between calls, so a row can
         # shift past a page edge, and the next poll from 0 still lists it.
         offset = clamp_nonneg(optional_int_arg(h, "offset"))
-        page = items[offset..]? || [] of Store::HeldRow
+        page = offset_slice(items, offset)
         parts = fit_rows(page) { |rj, r, _| Serialize.intercept_item_row(rj, r, include_sensitive, now_ms) }
         shown = page.first(parts.size)
         # Stamp viewed_ms so the capturing instance's auto-forward reaper sees the agent is
@@ -47,10 +47,7 @@ module Gori
             j.field "filter", bridge.filter
             j.field "heartbeat_age_seconds", bridge.heartbeat_age_seconds(now_ms)
             j.field "pending_count", items.size
-            j.field "returned", parts.size
-            j.field "offset", offset
-            emit_cut(j, parts.size < page.size)
-            j.field "has_more", offset + parts.size < items.size
+            emit_offset_page(j, offset, parts.size, page.size, items.size)
             j.field("items") { raw_rows(j, parts) }
           end
         end)

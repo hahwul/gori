@@ -2877,6 +2877,23 @@ module Gori
         j.field "cut_by", "bytes" if cut
       end
 
+      # `rows` from `offset` on, for a list paged by `offset` alone (REPLY_ROWS_BUDGET ends the
+      # page, not a `limit`); `emit_offset_page` writes its fields.
+      private def offset_slice(rows : Array(T), offset : Int32) : Array(T) forall T
+        rows[offset..]? || [] of T
+      end
+
+      # The pagination fields of an `offset_slice` page: returned/offset, `cut_by` when the
+      # budget kept fewer than `page_size` rows, and `has_more` against the `total` rows the
+      # offset counts from. Each tool names its own total.
+      private def emit_offset_page(j : JSON::Builder, offset : Int32, returned : Int32,
+                                   page_size : Int32, total : Int32) : Nil
+        j.field "returned", returned
+        j.field "offset", offset
+        emit_cut(j, returned < page_size)
+        j.field "has_more", offset + returned < total
+      end
+
       private def page_args(h, limit : PageLimit) : Page
         req_off = optional_int_arg(h, "offset")
         req_lim = optional_int_arg(h, "limit")
