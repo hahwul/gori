@@ -2852,7 +2852,6 @@ module Gori
       private class RowBudget
         getter parts = [] of String
         getter? cut = false
-        getter used : Int32
 
         def initialize(@used : Int32 = 0)
         end
