@@ -32,6 +32,12 @@ module Gori::Tui
       @field.value.strip
     end
 
+    # The field exactly as typed, for a prompt whose input is a payload rather than a name: a
+    # gRPC `path=value` keeps a trailing space in its value, as the CLI and MCP send it.
+    def value : String
+      @field.value
+    end
+
     # --- Overlay contract (see overlay.cr) -----------------------------------
     def key : OverlayKind
       OverlayKind::NamePrompt

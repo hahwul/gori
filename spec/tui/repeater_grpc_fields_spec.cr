@@ -542,6 +542,20 @@ describe "RepeaterView gRPC whole-message edits (#1632)" do
       Gori::Proxy::H2::Grpc.inflate("gzip", sent_payload(view)).should eq(Bytes[0x0A, 0x03, 0x62, 0x6f, 0x62, 0x38, 0x01])
     end
   end
+
+  # `--grpc-field` and MCP `grpc_fields` hand `Edit.set` the spec as typed, so `name=admin `
+  # sends the trailing space. The add-field prompt must too: not `name`, which strips it.
+  # `Runner.new` owns a terminal, so the prompt's wiring is read from source.
+  it "adds a field from the prompt's text as typed, as the CLI and MCP do" do
+    Schemas.clear
+    grpc_tmp_store do |store|
+      view = grpc_view(store, get_user_request("bob"))
+      view.grpc_add_field("1=admin ").should be_nil
+      sent_payload(view).should eq(get_user_request("admin "))
+    end
+    src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner", "repeater.cr"))
+    src.should contain("view.grpc_add_field(np.value)")
+  end
 end
 
 # Shrink the payload out from under an open value field, the way a `^X` hex edit does —

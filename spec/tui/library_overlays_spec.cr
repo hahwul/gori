@@ -66,6 +66,7 @@ describe Gori::Tui::NamePromptOverlay do
   it "strips surrounding whitespace off the committed name" do
     ov = NamePromptOverlay.new("SAVE CHAIN", "hex", "  padded  ")
     ov.name.should eq("padded")
+    ov.value.should eq("  padded  ") # a payload prompt reads the text as typed
   end
 end
 

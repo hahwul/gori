@@ -82,7 +82,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
               end
     np = NamePromptOverlay.new("ADD gRPC FIELD", subject, "", action: "set", noun: "path=value")
     np.on_commit = -> {
-      if err = view.grpc_add_field(np.name)
+      if err = view.grpc_add_field(np.value)
         @toast = err
         false
       else
