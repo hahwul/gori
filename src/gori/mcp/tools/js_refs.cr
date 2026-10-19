@@ -122,30 +122,28 @@ module Gori
       end
 
       # The `unrequested` block `list_sitemap` adds under `include_unrequested` — the same
-      # listing `list_js_endpoints` pages, capped here because it rides beside a page of traffic.
+      # listing `list_js_endpoints` pages, capped here because it rides beside a page of traffic:
+      # by count, and by what is left of the reply budget after the page's entries (`used`).
       UNREQUESTED_MAX = 500
 
-      private def emit_unrequested(j : JSON::Builder) : Nil
+      private def emit_unrequested(j : JSON::Builder, used : Int32) : Nil
         report = JsRefs.list(store, JsRefs::ListOptions.new, Scope.load(store))
         rows = report.endpoints
-        j.field "unrequested" do
-          j.array do
-            rows.first(UNREQUESTED_MAX).each do |e|
-              {
-                scheme:         e.scheme,
-                host:           Serialize.text(e.host),
-                port:           e.port,
-                target:         Serialize.text(e.target),
-                flows:          e.flows,
-                templated:      e.templated,
-                in_comment:     e.in_comment,
-                source_flow_id: e.flow_id,
-              }.to_json(j)
-            end
-          end
+        parts = fit_rows(rows.first(UNREQUESTED_MAX), used) do |rj, e, _|
+          {
+            scheme:         e.scheme,
+            host:           Serialize.text(e.host),
+            port:           e.port,
+            target:         Serialize.text(e.target),
+            flows:          e.flows,
+            templated:      e.templated,
+            in_comment:     e.in_comment,
+            source_flow_id: e.flow_id,
+          }.to_json(rj)
         end
+        j.field("unrequested") { raw_rows(j, parts) }
         j.field "unrequested_total", rows.size
-        j.field "unrequested_truncated", rows.size > UNREQUESTED_MAX
+        j.field "unrequested_truncated", rows.size > parts.size
       end
 
       private def list_js_refs_tools(j : JSON::Builder) : Nil

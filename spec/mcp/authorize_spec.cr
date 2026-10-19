@@ -273,6 +273,33 @@ describe "MCP authorize tools" do
         call_json(tools, "stop_job", %({"job_id":#{job_id.to_json}}))["job_id"].as_s.should eq(job_id)
       end
     end
+
+    # #1649: `bypasses` is never paged, so it spends the reply budget first; what does not fit
+    # is still NAMED, by flow id, and `results` keeps at least one row so its offset moves.
+    it "holds bypasses to the reply budget and names the rest by flow id" do
+      port = start_authz_origin(enforce: false)
+      with_store do |store|
+        flow = seed_authz_flow(store, port, target: "/admin/#{"x" * 1000}")
+        tools = tools_for(store)
+        start = call_json(tools, "authorize_start", {"flow_ids" => [flow], "identities" => anon, "allow_unscoped" => true}.to_json)
+        job_id = start["job_id"].as_s
+        drain_job(tools, job_id)
+        job = tools.@authorize_jobs[job_id]
+        199.times do
+          job.bypassed << job.bypassed[0]
+          job.results << job.results[0]
+        end
+        results = call_json(tools, "authorize_results", %({"job_id":#{job_id.to_json},"limit":500}))
+        results.to_json.bytesize.should be < Gori::MCP::Tools::REPLY_ROWS_BUDGET + 8192
+        shown = results["bypasses"].as_a.size
+        shown.should be > 0
+        (shown + results["bypasses_unshown_ids"].as_a.size).should eq(200)
+        results["bypasses_unshown_ids"].as_a.map(&.as_i64).uniq!.should eq([flow])
+        results["results"].as_a.size.should eq(1)
+        results["cut_by"].as_s.should eq("bytes")
+        results["has_more"].as_bool.should be_true
+      end
+    end
   end
 
   # `Authorize::PlanError::Reason` documents that every member obligates an arm on all three

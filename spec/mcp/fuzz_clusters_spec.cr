@@ -170,3 +170,84 @@ describe "MCP fuzz clusters" do
     end
   end
 end
+
+# An origin whose body has as many tags as the payload's leading number, so `N-…` payloads
+# make N shapes and `0-…` payloads make one.
+private def start_count_origin : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    while conn = origin.accept?
+      head = Gori::Proxy::Codec::Http1.read_head(conn)
+      line = head ? String.new(head).lines.first : ""
+      body = "<b>x</b>" * (line[/q=(\d+)/, 1]? || "0").to_i
+      conn << "HTTP/1.1 200 OK\r\nContent-Length: #{body.bytesize}\r\nConnection: close\r\n\r\n" << body
+      conn.flush
+      conn.close
+    end
+  end
+  port
+end
+
+private def run_count_job(tools, port : Int32, payloads : Array(String)) : String
+  job_id = call_json(tools, "fuzz_start", {
+    "template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+    "url"            => "http://127.0.0.1:#{port}",
+    "payloads"       => [{"list" => payloads}],
+    "match"          => {"status" => "200"},
+    "allow_unscoped" => true,
+  })["job_id"].as_s
+  1000.times do
+    return job_id unless call_json(tools, "fuzz_status", {job_id: job_id})["status"].as_s == "running"
+    sleep 0.02.seconds
+  end
+  fail "fuzz job #{job_id} did not finish"
+end
+
+# #1649: a cluster page carries each shape's representative row and a member page full rows,
+# so both are held to the reply budget and paged by offset — every entry exactly once.
+describe "MCP fuzz clusters — reply budget" do
+  it "pages a cluster summary past the reply budget" do
+    port = start_count_origin
+    with_store do |store|
+      tools = tools_for(store)
+      job_id = run_count_job(tools, port, (1..120).map { |n| "#{n}-#{"z" * 700}" })
+      first = call_json(tools, "fuzz_results", {job_id: job_id, clusters: true, limit: 500})
+      first["cluster_count"].as_i.should eq(120)
+      first["cut_by"].as_s.should eq("bytes")
+      first.to_json.bytesize.should be < Gori::MCP::Tools::REPLY_ROWS_BUDGET + 8192
+      ids = [] of String
+      offset = 0
+      loop do
+        page = call_json(tools, "fuzz_results", {job_id: job_id, clusters: true, limit: 500, offset: offset})
+        ids.concat(page["clusters"].as_a.map(&.["id"].as_s))
+        offset += page["returned"].as_i
+        break unless page["has_more"].as_bool
+      end
+      ids.size.should eq(120)
+      ids.uniq.size.should eq(120)
+    end
+  end
+
+  it "pages a live cluster's members past the reply budget" do
+    port = start_count_origin
+    with_store do |store|
+      tools = tools_for(store)
+      job_id = run_count_job(tools, port, (1..120).map { |n| "0-#{n}-#{"z" * 700}" })
+      id = call_json(tools, "fuzz_results", {job_id: job_id, clusters: true})["clusters"][0]["id"].as_s
+      first = call_json(tools, "fuzz_results", {job_id: job_id, cluster: id, limit: 1000})
+      first["cut_by"].as_s.should eq("bytes")
+      first["has_more"].as_bool.should be_true
+      first.to_json.bytesize.should be < Gori::MCP::Tools::REPLY_ROWS_BUDGET + 8192
+      seen = [] of Int32
+      offset = 0
+      loop do
+        page = call_json(tools, "fuzz_results", {job_id: job_id, cluster: id, limit: 1000, offset: offset})
+        seen.concat(page["results"].as_a.map(&.["index"].as_i))
+        offset += page["returned"].as_i
+        break unless page["has_more"].as_bool
+      end
+      seen.should eq((0...120).to_a)
+    end
+  end
+end

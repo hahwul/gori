@@ -2836,9 +2836,10 @@ module Gori
       # at least one, so a page whose first row alone is larger still moves the cursor. The
       # caller emits the parts with `raw_rows` and treats `parts.size < rows.size` as a cut:
       # `has_more` stays true and the reply says `cut_by: "bytes"`, so a short page is never
-      # read as the end of the data.
-      private def fit_rows(rows : Array(T), & : JSON::Builder, T, Int32 ->) : Array(String) forall T
-        budget = RowBudget.new
+      # read as the end of the data. `used` is what earlier lists of the same reply already
+      # spent, so two lists share one budget; the first row of each still always fits.
+      private def fit_rows(rows : Array(T), used : Int32 = 0, & : JSON::Builder, T, Int32 ->) : Array(String) forall T
+        budget = RowBudget.new(used)
         rows.each_with_index do |r, i|
           break unless budget.add(JSON.build { |rj| yield rj, r, i })
         end
@@ -2851,7 +2852,10 @@ module Gori
       private class RowBudget
         getter parts = [] of String
         getter? cut = false
-        @used = 0
+        getter used : Int32
+
+        def initialize(@used : Int32 = 0)
+        end
 
         def add(part : String) : Bool
           return false if @cut

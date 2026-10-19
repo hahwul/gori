@@ -160,6 +160,37 @@ describe "MCP diff_projects" do
     end
   end
 
+  # #1649: the endpoint list is held to the reply budget, `offset` pages the rest, and the
+  # counts stay the whole diff's.
+  it "pages endpoints past the reply budget by offset, each exactly once" do
+    with_diff_home do |registry|
+      paths = (0...150).map { |i| "/#{(i // 26 + 'a'.ord).chr}#{(i % 26 + 'a'.ord).chr}/#{"w" * 600}" }
+      seed_diff_project(registry, "q1") { |s| diff_seed_flow(s, "/same", 200, 100) }
+      newer = seed_diff_project(registry, "q3") do |s|
+        paths.each { |p| diff_seed_flow(s, p, 200, 100) }
+      end
+      store = Gori::Store.open(newer.db_path, background_index: false)
+      begin
+        first = drive_diff(newer, store, %({"from":"q1","verdicts":["added"]}))
+        first["counts"]["added"].as_i.should eq(150)
+        first["cut_by"].as_s.should eq("bytes")
+        first["has_more"].as_bool.should be_true
+        first.to_json.bytesize.should be < Gori::MCP::Tools::REPLY_ROWS_BUDGET + 8192
+        seen = [] of String
+        offset = 0
+        loop do
+          page = drive_diff(newer, store, %({"from":"q1","verdicts":["added"],"offset":#{offset}}))
+          seen.concat(page["endpoints"].as_a.map(&.["path"].as_s))
+          offset += page["returned"].as_i
+          break unless page["has_more"].as_bool
+        end
+        seen.should eq(paths.sort)
+      ensure
+        store.close
+      end
+    end
+  end
+
   it "refuses an unknown project by name rather than diffing something else" do
     with_diff_home do |registry|
       newer = seed_diff_project(registry, "q3") { |s| diff_seed_flow(s, "/x", 200, 100) }

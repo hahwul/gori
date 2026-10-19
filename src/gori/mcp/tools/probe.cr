@@ -568,8 +568,13 @@ module Gori
             end
             j.field "issue_count", groups.size
             emit_probe_persisted(j, persist) if persist
-            j.field("issues") { j.array { groups.first(limit).each { |g| Probe.group_json(j, g) } } }
-            j.field "truncated", true if groups.size > limit
+            # Under REPLY_ROWS_BUDGET (#1649) as well as `limit`. A scan has no cursor (a second
+            # call would scan, and on active:true send, again), so a cut says `truncated` and
+            # `persist:true` + probe_issues is where the rest page.
+            parts = fit_rows(groups.first(limit)) { |rj, g, _| Probe.group_json(rj, g) }
+            j.field("issues") { raw_rows(j, parts) }
+            j.field "truncated", true if groups.size > parts.size
+            emit_cut(j, parts.size < {groups.size, limit}.min)
           end
         end
       end
@@ -620,7 +625,8 @@ module Gori
           "sample_repeater_id, remediation, cwe, cwe_name}]}, highest-severity first. " \
           "`cwe`/`cwe_name` are OMITTED for a code with no meaningful CWE — a technology " \
           "fingerprint, an informational jwt_in_* note, or a custom rule. Reports only, unless " \
-          "persist:true writes the findings into the project's triage list (probe_issues)." do |s|
+          "persist:true writes the findings into the project's triage list (probe_issues), " \
+          "which pages what `truncated:true` (limit or reply budget) left out." do |s|
           s.field "query", strprop("gori QL filter applied to History flows only; empty scans all (Repeater tabs are always scanned)")
           s.field "strict", boolprop("reject the query if any term is unrecognized/invalid (default false: the term is dropped, which BROADENS the result, and named in the reply's `ignored_terms`; ql_explain previews which terms would drop)")
           s.field "lenient", boolprop("search a `field:` QL does not implement as literal TEXT instead of refusing the query (default false) — the same escape hatch `gori run probe --lenient` spells")

@@ -19,14 +19,19 @@ module Gori
         end
         rules = Gori::Rules.merged(store)
         rules = rules.select { |r| r.scope == want } if want
+        # Under REPLY_ROWS_BUDGET (#1649): a short-circuit stub carries its whole response in
+        # `replacement`. `offset` pages the rest, in apply order.
+        offset = clamp_nonneg(optional_int_arg(h, "offset"))
+        page = rules[offset..]? || [] of Store::MatchRule
+        parts = fit_rows(page) { |rj, r, _| Serialize.match_rule(rj, r) }
         Result.new(JSON.build do |j|
           j.object do
             j.field "count", rules.size
-            j.field "rules" do
-              j.array do
-                rules.each { |r| Serialize.match_rule(j, r) }
-              end
-            end
+            j.field("rules") { raw_rows(j, parts) }
+            j.field "returned", parts.size
+            j.field "offset", offset
+            emit_cut(j, parts.size < page.size)
+            j.field "has_more", offset + parts.size < rules.size
           end
         end)
       end
@@ -874,6 +879,7 @@ module Gori
           "For a global rule, `enabled` is the state in THIS project and `default_enabled` the " \
           "library's own; `overridden` says the two were made to differ here." do |s|
           s.field "scope", enumprop("show only rules from this store (default: both)", RULE_SCOPES)
+          s.field "offset", intprop("rules to skip, in apply order (default 0); `has_more` says there are more")
         end
 
         tool j, "list_rule_presets",

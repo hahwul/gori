@@ -222,7 +222,7 @@ There is no `gori run session activate`: a `gori run` process sends and exits, s
 
 Four MCP tools drive the same engine as a background job: `authorize_start` (returns a `job_id`, the planned send count, the identity names, the scope gate, and everything it skipped), `authorize_status`, `authorize_results`, and `authorize_stop`.
 
-`authorize_results` puts the answer first. `access_control` names the outcome in one token (`BYPASS`, `enforced`, `review`, `error`, or `nothing_sent`; the last two both mean nothing was compared), `summary` says it in a sentence, and `bypasses` lists every request where a non-baseline identity was served the baseline's response, flat and never paged. An agent that reads nothing else still gets the finding.
+`authorize_results` puts the answer first. `access_control` names the outcome in one token (`BYPASS`, `enforced`, `review`, `error`, or `nothing_sent`; the last two both mean nothing was compared), `summary` says it in a sentence, and `bypasses` lists every request where a non-baseline identity was served the baseline's response, flat and never paged. An agent that reads nothing else still gets the finding. Past the 64 KB reply budget the rest are named by flow id in `bypasses_unshown_ids`, and their detail is in the `results` rows marked `bypass: true`.
 
 Six more manage the slots themselves: `list_session_slots` (with the active one named, header values `[REDACTED]` unless you ask), `create_session_slot`, `update_session_slot`, `delete_session_slot`, `set_active_session_slot`, which picks the identity every *other* tool's sends go out as, for the life of that server process, and `refresh_session_slot`, which runs a slot's refresh steps now.
 

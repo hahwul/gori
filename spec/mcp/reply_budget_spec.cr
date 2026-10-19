@@ -93,6 +93,47 @@ describe "MCP reply budget" do
     end
   end
 
+  it "cuts list_rules and pages every rule once by offset" do
+    with_store do |store|
+      80.times { |i| store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Body, "p#{i}", "r" * 1500) }
+      first = call(store, "list_rules", "{}")
+      first["cut_by"].as_s.should eq("bytes")
+      first.to_json.bytesize.should be < BUDGET + 4096
+      seen = [] of String
+      offset = 0
+      loop do
+        page = call(store, "list_rules", %({"offset":#{offset}}))
+        seen.concat(page["rules"].as_a.map(&.["pattern"].as_s))
+        offset += page["returned"].as_i
+        break unless page["has_more"].as_bool
+      end
+      seen.should eq((0...80).map { |i| "p#{i}" })
+    end
+  end
+
+  it "cuts list_evidence and pages every copy once by offset" do
+    with_store do |store|
+      iid = store.insert_issue("x", Gori::Store::Severity::Low, "a.test", nil)
+      tools = tools_for(store)
+      120.times do |i|
+        fid = mcp_seed_flow(store, "a.test", "GET", "/#{i}/#{"e" * 900}", 200)
+        tools.call("freeze_evidence", JSON.parse(%({"issue_id":#{iid},"ref_kind":"flow","ref_id":#{fid}}))).is_error.should be_false
+      end
+      first = call(store, "list_evidence", "{}")
+      first["cut_by"].as_s.should eq("bytes")
+      first["total"].as_i.should eq(120)
+      seen = [] of Int64
+      offset = 0
+      loop do
+        page = call(store, "list_evidence", %({"offset":#{offset}}))
+        seen.concat(page["evidence"].as_a.map(&.["id"].as_i64))
+        offset += page["returned"].as_i
+        break unless page["has_more"].as_bool
+      end
+      seen.uniq.size.should eq(120)
+    end
+  end
+
   it "always carries one row, even one larger than the whole budget" do
     with_store do |store|
       mcp_seed_flow(store, "a.test", "GET", "/#{"z" * (BUDGET + 1000)}", 200)

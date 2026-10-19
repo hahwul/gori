@@ -222,7 +222,7 @@ gori run session rm low-priv
 
 네 개의 MCP 도구가 같은 엔진을 백그라운드 잡으로 구동합니다. `authorize_start`(`job_id`, 예정된 전송 수, 아이덴티티 이름, 스코프 게이트, 건너뛴 목록을 반환), `authorize_status`, `authorize_results`, `authorize_stop`입니다.
 
-`authorize_results`는 답을 맨 앞에 놓습니다. `access_control`이 결과를 한 단어로 말하고(`BYPASS`, `enforced`, `review`, `error`, `nothing_sent`. 뒤의 둘은 비교된 것이 없다는 뜻), `summary`가 한 문장으로 풀어 주며, `bypasses`는 기준선이 아닌 아이덴티티가 기준선의 응답을 받은 요청을 페이징 없이 전부 나열합니다. 다른 것을 하나도 읽지 않는 에이전트도 발견 사항만은 받게 됩니다.
+`authorize_results`는 답을 맨 앞에 놓습니다. `access_control`이 결과를 한 단어로 말하고(`BYPASS`, `enforced`, `review`, `error`, `nothing_sent`. 뒤의 둘은 비교된 것이 없다는 뜻), `summary`가 한 문장으로 풀어 주며, `bypasses`는 기준선이 아닌 아이덴티티가 기준선의 응답을 받은 요청을 페이징 없이 전부 나열합니다. 다른 것을 하나도 읽지 않는 에이전트도 발견 사항만은 받게 됩니다. 64 KB 응답 예산을 넘는 나머지는 `bypasses_unshown_ids`에 플로우 id로 남고, 자세한 내용은 `bypass: true`로 표시된 `results` 행에 있습니다.
 
 슬롯 자체를 관리하는 도구가 여섯 개 더 있습니다. `list_session_slots`(활성 슬롯을 이름으로 표시하며, 요청하지 않는 한 헤더 값은 `[REDACTED]`), `create_session_slot`, `update_session_slot`, `delete_session_slot`, `set_active_session_slot`, 그리고 `refresh_session_slot`입니다. `set_active_session_slot`은 그 서버 프로세스가 살아 있는 동안 *다른* 모든 도구의 전송이 어떤 아이덴티티로 나갈지 고르고, `refresh_session_slot`은 슬롯의 갱신 단계를 지금 실행합니다.
 

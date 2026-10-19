@@ -125,6 +125,22 @@ describe "MCP list_sitemap include_unrequested" do
     end
   end
 
+  # #1649: the block rides beside a page of entries, so it gets what the page left of the
+  # reply budget, and says it was cut rather than returning a reply a client refuses.
+  it "holds the unrequested block to the reply budget the entries left" do
+    with_store do |store|
+      refs = (0...300).map { |i| %(fetch("/api/#{i}/#{"q" * 600}")) }.join(";")
+      je_flow(store, "/app.js", refs)
+      tools = tools_for(store)
+      je(tools, "scan_js_endpoints")
+      out = je(tools, "list_sitemap", %({"include_unrequested":true}))
+      out.to_json.bytesize.should be < Gori::MCP::Tools::REPLY_ROWS_BUDGET + 4096
+      out["unrequested_total"].should eq(300)
+      out["unrequested_truncated"].should be_true
+      out["unrequested"].as_a.size.should be < 300
+    end
+  end
+
   it "refuses include_unrequested with collapse_transport instead of dropping it" do
     with_store do |store|
       tools = tools_for(store)

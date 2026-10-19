@@ -24,9 +24,17 @@ module Gori
         end
         now_ms = Time.utc.to_unix_ms
         items = store.intercept_held_items(bridge)
+        # Under REPLY_ROWS_BUDGET (#1649): a held head previews up to 1 KiB, and a queue is not
+        # bounded. `offset` pages the rest; the held set moves between calls, so a row can
+        # shift past a page edge, and the next poll from 0 still lists it.
+        offset = clamp_nonneg(optional_int_arg(h, "offset"))
+        page = items[offset..]? || [] of Store::HeldRow
+        parts = fit_rows(page) { |rj, r, _| Serialize.intercept_item_row(rj, r, include_sensitive, now_ms) }
+        shown = page.first(parts.size)
         # Stamp viewed_ms so the capturing instance's auto-forward reaper sees the agent is
-        # watching (only meaningful when we can actually act — see `touches_held?`).
-        store.touch_intercept_held(bridge.token, items.map(&.item_id), now_ms) if touches_held? && !items.empty?
+        # watching (only meaningful when we can actually act — see `touches_held?`). Only the
+        # rows this reply carried: an item the agent never saw is not one it is handling.
+        store.touch_intercept_held(bridge.token, shown.map(&.item_id), now_ms) if touches_held? && !shown.empty?
         Result.new(JSON.build do |j|
           j.object do
             j.field "available", true
@@ -39,7 +47,11 @@ module Gori
             j.field "filter", bridge.filter
             j.field "heartbeat_age_seconds", bridge.heartbeat_age_seconds(now_ms)
             j.field "pending_count", items.size
-            j.field("items") { j.array { items.each { |r| Serialize.intercept_item_row(j, r, include_sensitive, now_ms) } } }
+            j.field "returned", parts.size
+            j.field "offset", offset
+            emit_cut(j, parts.size < page.size)
+            j.field "has_more", offset + parts.size < items.size
+            j.field("items") { raw_rows(j, parts) }
           end
         end)
       end
@@ -372,6 +384,7 @@ module Gori
           "edits typed into that hold right now — forwarding, editing or dropping it discards " \
           "their work, so leave it to them or ask first." do |s|
           s.field "include_sensitive", boolprop("show Authorization/Cookie/etc header values instead of [REDACTED] (default false)")
+          s.field "offset", intprop("held items to skip (default 0); `has_more` says a reply stopped short of pending_count")
         end
 
         tool j, "intercept_get",

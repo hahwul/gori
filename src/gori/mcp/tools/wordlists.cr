@@ -40,16 +40,18 @@ module Gori
       # them in an agent's context.
       @[Tool("list_wordlists", unbound: true)]
       private def list_wordlists(h) : Result
-        limit = clamp(optional_int_arg(h, "limit"), WORDLISTS_LIMIT)
-        listing = WordlistCatalog.list(limit)
+        pg = page_args(h, WORDLISTS_LIMIT)
+        # The whole catalog (`stat` only, at most LIST_MAX), then this page of it under
+        # REPLY_ROWS_BUDGET (#1649): a name runs to 200 bytes, so 1000 rows outgrow it.
+        listing = WordlistCatalog.list
+        page = listing.entries[pg.offset, pg.limit]? || [] of WordlistCatalog::Entry
+        parts = fit_rows(page) { |rj, e, _| rj.object { wordlist_entry_fields(rj, e) } }
         Result.new(JSON.build do |j|
           j.object do
             j.field "directory", Paths.wordlists_dir
-            j.field "wordlists" do
-              j.array { listing.entries.each { |e| j.object { wordlist_entry_fields(j, e) } } }
-            end
-            j.field "returned", listing.entries.size
-            j.field "truncated", listing.truncated
+            j.field("wordlists") { raw_rows(j, parts) }
+            emit_page(j, pg, parts.size, cut: parts.size < page.size)
+            j.field "truncated", (listing.truncated || pg.offset + parts.size < listing.entries.size)
           end
         end)
       end
@@ -262,6 +264,7 @@ module Gori
           "Never returns values. Use a name as `wordlist` in fuzz_start, mine_start or discover_start; " \
           "a name is looked up in the server's working directory first, then here." do |s|
           s.field "limit", limitprop("max lists to return", WORDLISTS_LIMIT)
+          s.field "offset", intprop("lists to skip (default 0); `truncated:true` means more follow")
         end
 
         tool j, "get_wordlist",

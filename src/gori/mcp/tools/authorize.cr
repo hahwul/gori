@@ -209,14 +209,20 @@ module Gori
         return ajob if ajob.is_a?(Result)
         pg = page_args(h, AUTHORIZE_RESULTS_LIMIT)
         page = ajob.results[pg.offset, pg.limit]? || [] of Authorize::Target
-        parts = fit_rows(page) { |rj, t, _| authorize_target_json(rj, t) }
+        # `bypasses` is never paged, so it spends the reply budget FIRST and `results` gets
+        # what is left (#1649). The bypasses that do not fit go out as flow ids: every one is
+        # still named, and its detail is a `results` row with `bypass:true`.
+        bypasses = fit_rows(ajob.bypassed) { |rj, t, _| authorize_bypass_json(rj, t) }
+        unshown = ajob.bypassed[bypasses.size..].map(&.flow_id)
+        parts = fit_rows(page, bypasses.sum(&.bytesize)) { |rj, t, _| authorize_target_json(rj, t) }
         cut = parts.size < page.size
         page = page.first(parts.size)
         Result.new(JSON.build do |j|
           j.object do
             emit_authorize_headline(j, ajob)
             emit_authorize_identities(j, ajob)
-            j.field("bypasses") { j.array { ajob.bypassed.each { |t| authorize_bypass_json(j, t) } } }
+            j.field("bypasses") { raw_rows(j, bypasses) }
+            j.field "bypasses_unshown_ids", unshown unless unshown.empty?
             j.field("results") { raw_rows(j, parts) }
             # The send-level failure total, here as well as in `authorize_status`: a caller
             # that jumps straight to the verdicts should not have to make a second call to
@@ -685,7 +691,9 @@ module Gori
         tool j, "authorize_results",
           "The verdicts for an authorize job. Read `access_control` and `bypasses` FIRST: " \
           "`bypasses` lists every request where a non-baseline identity was served the same " \
-          "response as the baseline — the access-control failures this tool exists to find. " \
+          "response as the baseline — the access-control failures this tool exists to find " \
+          "(never paged; past the reply budget the rest are flow ids in `bypasses_unshown_ids`, " \
+          "their detail in `results` rows with bypass:true). " \
           "`results` pages the full per-identity detail (verdict, status, size, delta, error), " \
           "`skipped` names every selected flow that was not replayed, and `failed[]` the ones " \
           "that could not be replayed at all. `unanswered_count` is the requests whose every " \

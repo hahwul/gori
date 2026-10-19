@@ -57,7 +57,8 @@ describe "MCP intercept_list" do
       publish_bridge(store)
       hold(store, 4_i64)
       out = JSON.parse(tools_for(store).call("intercept_list", JSON.parse("{}")).text)
-      out.as_h.keys.should eq(%w[available capturing enabled direction filter heartbeat_age_seconds pending_count items])
+      out.as_h.keys.should eq(%w[available capturing enabled direction filter heartbeat_age_seconds pending_count
+        returned offset has_more items])
       out["capturing"].as_bool.should be_true
       out["enabled"].as_bool.should be_true
       out["direction"].as_s.should eq("request")
@@ -77,6 +78,38 @@ describe "MCP intercept_list" do
       out = JSON.parse(tools_for(store).call("intercept_list", JSON.parse("{}")).text)
       out["capturing"].as_bool.should be_false
       out["heartbeat_age_seconds"].raw.should be_nil
+    end
+  end
+
+  # #1649: a held head previews up to 1 KiB and the queue is unbounded, so the list is held
+  # to the reply budget and `offset` reaches the rest — each item exactly once.
+  it "pages a queue past the reply budget by offset, stamping only the items it carried" do
+    with_store do |store|
+      publish_bridge(store)
+      store.publish_intercept_held("sess-1", (1_i64..200_i64).map do |i|
+        target = "/#{i}/#{"x" * 1000}"
+        Gori::Store::HeldRow.new("sess-1", i, "request", "GET", "a.test", 80, "http", target,
+          "GET #{target} HTTP/1.1\r\nHost: a.test\r\n\r\n".to_slice, 0_i64)
+      end)
+      tools = tools_for(store)
+      first = JSON.parse(tools.call("intercept_list", JSON.parse("{}")).text)
+      first["cut_by"].as_s.should eq("bytes")
+      first["has_more"].as_bool.should be_true
+      first["pending_count"].as_i.should eq(200)
+      first.to_json.bytesize.should be < Gori::MCP::Tools::REPLY_ROWS_BUDGET + 4096
+      shown = first["items"].as_a.map(&.["item_id"].as_i64)
+      stamped = viewed_ms(store)
+      stamped.count { |_, ms| ms > 0 }.should eq(shown.size)
+      seen = shown
+      offset = shown.size
+      loop do
+        page = JSON.parse(tools.call("intercept_list", JSON.parse(%({"offset":#{offset}}))).text)
+        got = page["items"].as_a.map(&.["item_id"].as_i64)
+        seen += got
+        offset += got.size
+        break unless page["has_more"].as_bool
+      end
+      seen.should eq((1_i64..200_i64).to_a)
     end
   end
 

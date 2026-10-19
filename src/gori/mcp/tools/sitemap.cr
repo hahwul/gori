@@ -71,7 +71,7 @@ module Gori
             # Endpoints captured JavaScript references and no request reached (#1243). NOT
             # entries: an entry is a captured transport key with counts, and these have none —
             # mixing them in would also make `has_more`/`offset` page two different things.
-            emit_unrequested(j) if unrequested
+            emit_unrequested(j, parts.sum(&.bytesize)) if unrequested
             j.field("entries") { raw_rows(j, parts) }
           end
         end)
@@ -747,7 +747,7 @@ module Gori
           s.field "fold_query", boolprop("fold the query-string variants of one path into a single entry (default true); false lists one entry per query string")
           s.field "collapse_transport", boolprop("collapse to distinct host/method/target only (legacy shape), dropping scheme/port/version + counts (default false)")
           s.field "hide_static", boolprop("leave out static assets — images, fonts, audio/video (not svg/css/js, never a status >= 400); the TUI's hide-static lens, same as `-static:true` in `query`. Default false")
-          s.field "include_unrequested", boolprop("add `unrequested`: endpoints captured JavaScript references that no request reached (up to #{UNREQUESTED_MAX}; `unrequested_total` says how many), from what scan_js_endpoints stored. Not filtered by `query` — a reference is not a flow. Default false")
+          s.field "include_unrequested", boolprop("add `unrequested`: endpoints captured JavaScript references that no request reached (up to #{UNREQUESTED_MAX} and what the reply budget leaves; `unrequested_total` says how many), from what scan_js_endpoints stored. Not filtered by `query` — a reference is not a flow. Default false")
           s.field "strict", boolprop("reject the query if any term is unrecognized/invalid (default false: the term is dropped, which BROADENS the result, and named in the reply's `ignored_terms`)")
           s.field "lenient", boolprop("search a `field:` QL does not implement as literal TEXT instead of refusing the query (default false). A typo like `methd:GET` free-texts its whole token and therefore matches nothing, which is indistinguishable from an empty project — so it is refused by default, the way `gori run history --lenient` spells the same escape hatch. `strict` is the other half and covers dropped terms, not unknown fields")
         end

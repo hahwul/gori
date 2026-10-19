@@ -79,11 +79,20 @@ module Gori
           return not_found("no issue with id #{issue_id}") unless store.get_issue(issue_id)
         end
         metas = issue_id ? store.issue_evidence(issue_id) : store.evidence
+        # Under REPLY_ROWS_BUDGET (#1649): a row carries two digests and a URL, so an archive
+        # of a hundred copies outgrew it. `offset` pages the rest.
+        offset = clamp_nonneg(optional_int_arg(h, "offset"))
+        page = metas[offset..]? || [] of Store::IssueEvidenceMeta
+        parts = fit_rows(page) { |rj, m, _| rj.object { Serialize.evidence_meta(rj, m) } }
         Result.new(JSON.build do |j|
           j.object do
             j.field "issue_id", issue_id
             j.field "scope", issue_id ? "issue" : "project"
-            j.field("evidence") { j.array { metas.each { |m| j.object { Serialize.evidence_meta(j, m) } } } }
+            j.field("evidence") { raw_rows(j, parts) }
+            j.field "returned", parts.size
+            j.field "offset", offset
+            emit_cut(j, parts.size < page.size)
+            j.field "has_more", offset + parts.size < metas.size
             j.field "total", metas.size
             j.field "bytes", metas.sum(&.bytes)
           end
@@ -156,6 +165,7 @@ module Gori
           "source_id cannot resolve to a later reused flow. A copy survives the Repeater's next " \
           "send and History retention; use get_evidence for its bytes." do |s|
           s.field "issue_id", intprop("one issue's copies only (omit for the whole project archive)")
+          s.field "offset", intprop("copies to skip (default 0); `has_more` says there are more")
         end
 
         tool j, "get_evidence",

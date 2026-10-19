@@ -91,6 +91,27 @@ describe "MCP probe_scan tool" do
     end
   end
 
+  # #1649: a scan has no cursor, so past the reply budget the report says `truncated` and the
+  # budget's `cut_by`, with `issue_count` still the whole scan's.
+  it "holds the report to the reply budget and says it was truncated" do
+    with_store do |store|
+      200.times do |i|
+        target = "/login/#{"p" * 1000}?token=supersecretvalue123"
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "https", host: "h#{i}.acme.test", port: 443,
+          method: "GET", target: target, http_version: "HTTP/1.1",
+          head: "GET #{target} HTTP/1.1\r\nHost: h#{i}.acme.test\r\n\r\n".to_slice, source: Gori::FlowSource::Kind::Proxy))
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice))
+      end
+      res = call_json(tools_for(store), "probe_scan", %({"limit":2000}))
+      res.to_json.bytesize.should be < Gori::MCP::Tools::REPLY_ROWS_BUDGET + 4096
+      res["cut_by"].as_s.should eq("bytes")
+      res["truncated"].as_bool.should be_true
+      res["issue_count"].as_i.should be > res["issues"].as_a.size
+    end
+  end
+
   it "filters by severity" do
     with_store do |store|
       seed_secret_flow(store)
