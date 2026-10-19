@@ -16,7 +16,7 @@ private class CliWsTestOrigin
   getter port : Int32
   getter frames = [] of WS::Frame
 
-  def initialize(&@handler : IO, CliWsTestOrigin -> Nil)
+  def initialize(@status : Int32 = 101, @bad_accept : Bool = false, &@handler : IO, CliWsTestOrigin -> Nil)
     @server = TCPServer.new("127.0.0.1", 0)
     @port = @server.local_address.port
     spawn do
@@ -47,10 +47,15 @@ private class CliWsTestOrigin
   private def serve(tcp : TCPSocket) : Nil
     tcp.read_timeout = 5.seconds
     head = Gori::Proxy::Codec::Http1.read_head(tcp).not_nil!
+    if @status != 101
+      tcp << "HTTP/1.1 #{@status} Forbidden\r\nContent-Length: 0\r\n\r\n"
+      tcp.flush
+      return
+    end
     key = String.new(head).each_line
       .find(&.downcase.starts_with?("sec-websocket-key:"))
       .try(&.split(':', 2)[1].strip) || ""
-    accept = Base64.strict_encode(Digest::SHA1.digest(key + WsEngine::GUID))
+    accept = @bad_accept ? "wrong-accept" : Base64.strict_encode(Digest::SHA1.digest(key + WsEngine::GUID))
     tcp << "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n" \
            "Connection: Upgrade\r\nSec-WebSocket-Accept: #{accept}\r\n\r\n"
     tcp.flush
@@ -61,8 +66,9 @@ private class CliWsTestOrigin
   end
 end
 
-private def cli_ws_echo_origin(initial_push : String? = nil) : CliWsTestOrigin
-  CliWsTestOrigin.new do |conn, o|
+private def cli_ws_echo_origin(initial_push : String? = nil, *,
+                               status : Int32 = 101, bad_accept : Bool = false) : CliWsTestOrigin
+  CliWsTestOrigin.new(status, bad_accept) do |conn, o|
     o.text(conn, initial_push) if initial_push
     while frame = o.read(conn)
       case frame.opcode
@@ -79,37 +85,33 @@ private def cli_ws_echo_origin(initial_push : String? = nil) : CliWsTestOrigin
   end
 end
 
-private def with_ws_project(& : Gori::Project ->) : Nil
-  dir = File.join(Dir.tempdir, "gori-cli-ws-#{Random::Secure.hex(6)}")
-  Dir.mkdir_p(dir)
-  db_path = File.join(dir, "gori.db")
-  project = Gori::Project.new("ws-test", db_path)
-  store = Gori::Store.open(db_path)
+private def with_store(& : Gori::Store, Gori::Project ->) : Nil
+  path = File.tempname("gori-spec", ".db")
+  store = Gori::Store.open(path)
+  prev_env = Gori::Settings.project_env_vars
+  prev_layer = Gori::Env.layer
+  raised = run_capturing { yield store, Gori::Project.new("ws-test", path) }
+  Gori::Env.layer = prev_layer
+  Gori::Settings.project_env_vars = prev_env
+  Gori::Env.bump_highlight_rev
   store.close
-  begin
-    yield project
-  ensure
-    FileUtils.rm_rf(dir)
-  end
+  delete_db_files(path)
+  raise raised if raised
 end
 
-private def insert_ws_repeater(project : Gori::Project, port : Int32, *,
+private def insert_ws_repeater(store : Gori::Store, port : Int32, *,
+                               target : String? = nil,
                                request : Bytes = WS_UPGRADE_REQ,
                                ws_http_only : Bool = false) : Int64
-  store = Gori::Store.open(project.db_path)
-  begin
-    store.insert_repeater(
-      target: "http://127.0.0.1:#{port}",
-      request: request,
-      http2: false,
-      auto_cl: true,
-      flow_id: nil,
-      position: 1,
-      ws_http_only: ws_http_only
-    )
-  ensure
-    store.close
-  end
+  store.insert_repeater(
+    target: target || "http://127.0.0.1:#{port}",
+    request: request,
+    http2: false,
+    auto_cl: true,
+    flow_id: nil,
+    position: 1,
+    ws_http_only: ws_http_only
+  )
 end
 
 describe "gori run repeater ws (#1660)" do
@@ -148,8 +150,8 @@ describe "gori run repeater ws (#1660)" do
     it "streams text frames from stdin, prints the transcript, and sends CLOSE on EOF" do
       origin = cli_ws_echo_origin
       begin
-        with_ws_project do |project|
-          id = insert_ws_repeater(project, origin.port)
+        with_store do |store, project|
+          id = insert_ws_repeater(store, origin.port)
           stdin = IO::Memory.new("hello\nworld\n")
           stdout = IO::Memory.new
           stderr = IO::Memory.new
@@ -173,11 +175,11 @@ describe "gori run repeater ws (#1660)" do
       end
     end
 
-    it "emits one JSON line per frame under --format json with MCP get_job's row shape" do
-      origin = cli_ws_echo_origin
+    it "emits one JSON line per frame under --format json with MCP get_job's row shape and prints handshake notes to stderr" do
+      origin = cli_ws_echo_origin(bad_accept: true)
       begin
-        with_ws_project do |project|
-          id = insert_ws_repeater(project, origin.port)
+        with_store do |store, project|
+          id = insert_ws_repeater(store, origin.port)
           stdin = IO::Memory.new("ping-one\n")
           stdout = IO::Memory.new
           stderr = IO::Memory.new
@@ -186,6 +188,7 @@ describe "gori run repeater ws (#1660)" do
             allow_unscoped: true, format: :json, stdin: stdin, stdout: stdout, stderr: stderr)
           err.should be_nil
           ok.should be_true
+          stderr.to_s.should contain("note: handshake accept mismatch")
 
           rows = stdout.to_s.lines.reject(&.empty?).map { |l| JSON.parse(l) }
           rows.size.should be >= 3
@@ -212,31 +215,65 @@ describe "gori run repeater ws (#1660)" do
       end
     end
 
-    it "bounds an open session with --for and closes cleanly when the duration elapses" do
-      origin = cli_ws_echo_origin(initial_push: "welcome")
-      r_in, w_in = IO.pipe
+    it "keeps the session open past stdin EOF when --for is set and prints a server push sent ~1s later" do
+      origin = CliWsTestOrigin.new do |conn, o|
+        if frame = o.read(conn)
+          o.text(conn, "ack:#{String.new(frame.payload)}")
+        end
+        sleep 900.milliseconds
+        o.text(conn, "late-push")
+        while frame = o.read(conn)
+          if frame.close?
+            conn.write(WS.encode(WS::OP_CLOSE, frame.payload, mask: false))
+            conn.flush
+            break
+          end
+        end
+      end
       begin
-        with_ws_project do |project|
-          id = insert_ws_repeater(project, origin.port)
+        with_store do |store, project|
+          id = insert_ws_repeater(store, origin.port)
+          stdin = IO::Memory.new("sub\n")
           stdout = IO::Memory.new
           stderr = IO::Memory.new
 
-          w_in.puts "before-deadline"
-          w_in.flush
-
-          started = Time.instant
           ok, err = Gori::CLI::Run.open_and_run_ws_session(id, project,
-            allow_unscoped: true, duration: 120.milliseconds,
-            stdin: r_in, stdout: stdout, stderr: stderr)
-          elapsed = Time.instant - started
-
+            allow_unscoped: true, duration: 2.seconds,
+            stdin: stdin, stdout: stdout, stderr: stderr)
           err.should be_nil
           ok.should be_true
-          elapsed.should be < 2.seconds
           out = stdout.to_s
-          out.should contain("← welcome")
-          out.should contain("→ before-deadline")
-          out.should contain("← echo:before-deadline")
+          out.should contain("→ sub")
+          out.should contain("← ack:sub")
+          out.should contain("← late-push")
+          origin.frames.any?(&.close?).should be_true
+        end
+      ensure
+        origin.close
+      end
+    end
+
+    it "stops cleanly and sends CLOSE when the cancel proc fires" do
+      origin = cli_ws_echo_origin(initial_push: "hello-live")
+      r_in, w_in = IO.pipe
+      begin
+        with_store do |store, project|
+          id = insert_ws_repeater(store, origin.port)
+          stdout = IO::Memory.new
+          stderr = IO::Memory.new
+          cancelled = false
+
+          spawn do
+            sleep 80.milliseconds
+            cancelled = true
+          end
+
+          ok, err = Gori::CLI::Run.open_and_run_ws_session(id, project,
+            allow_unscoped: true, stdin: r_in, stdout: stdout, stderr: stderr,
+            cancel: -> { cancelled })
+          err.should be_nil
+          ok.should be_true
+          stdout.to_s.should contain("← hello-live")
           origin.frames.any?(&.close?).should be_true
         end
       ensure
@@ -249,8 +286,8 @@ describe "gori run repeater ws (#1660)" do
     it "sends hex-decoded BINARY frames under --binary and flags invalid hex lines" do
       origin = cli_ws_echo_origin
       begin
-        with_ws_project do |project|
-          id = insert_ws_repeater(project, origin.port)
+        with_store do |store, project|
+          id = insert_ws_repeater(store, origin.port)
           stdin = IO::Memory.new("0xdeadbeef\n")
           stdout = IO::Memory.new
           stderr = IO::Memory.new
@@ -287,12 +324,16 @@ describe "gori run repeater ws (#1660)" do
         o.text(conn, "2")
         o.text(conn, "PING")
         while frame = o.read(conn)
-          break if frame.close?
+          if frame.close?
+            conn.write(WS.encode(WS::OP_CLOSE, frame.payload, mask: false))
+            conn.flush
+            break
+          end
         end
       end
       begin
-        with_ws_project do |project|
-          id = insert_ws_repeater(project, origin.port)
+        with_store do |store, project|
+          id = insert_ws_repeater(store, origin.port)
           r_in, w_in = IO.pipe
           stdout = IO::Memory.new
           stderr = IO::Memory.new
@@ -325,14 +366,9 @@ describe "gori run repeater ws (#1660)" do
     it "expands tokens in stdin text frames unless --verbatim is passed" do
       origin = cli_ws_echo_origin
       begin
-        with_ws_project do |project|
-          store = Gori::Store.open(project.db_path)
-          begin
-            Gori::Env.save_project(store, [{"WS_TOK", "expanded-val"}]).should be_true
-          ensure
-            store.close
-          end
-          id = insert_ws_repeater(project, origin.port)
+        with_store do |store, project|
+          Gori::Env.save_project(store, [{"WS_TOK", "expanded-val"}]).should be_true
+          id = insert_ws_repeater(store, origin.port)
 
           out_exp = IO::Memory.new
           ok1, err1 = Gori::CLI::Run.open_and_run_ws_session(id, project,
@@ -355,29 +391,45 @@ describe "gori run repeater ws (#1660)" do
       end
     end
 
-    it "refuses missing, non-WebSocket, ws_http_only, and RFC 8441 extended-CONNECT sessions" do
-      with_ws_project do |project|
-        ok, err = Gori::CLI::Run.open_and_run_ws_session(999_i64, project)
-        ok.should be_false
-        err.should eq("gori run repeater ws: no repeater session #999")
+    it "refuses missing, non-WebSocket, ws_http_only, RFC 8441, unresolved-token, and non-101 sessions" do
+      refusing_origin = cli_ws_echo_origin(status: 403)
+      begin
+        with_store do |store, project|
+          ok, err = Gori::CLI::Run.open_and_run_ws_session(999_i64, project)
+          ok.should be_false
+          err.should eq("gori run repeater ws: no repeater session #999")
 
-        http_id = insert_ws_repeater(project, 80,
-          request: "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice)
-        ok, err = Gori::CLI::Run.open_and_run_ws_session(http_id, project)
-        ok.should be_false
-        err.not_nil!.should contain("is not a WebSocket handshake")
+          http_id = insert_ws_repeater(store, 80,
+            request: "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice)
+          ok, err = Gori::CLI::Run.open_and_run_ws_session(http_id, project)
+          ok.should be_false
+          err.not_nil!.should contain("is not a WebSocket handshake")
 
-        http_only_id = insert_ws_repeater(project, 80, ws_http_only: true)
-        ok, err = Gori::CLI::Run.open_and_run_ws_session(http_only_id, project)
-        ok.should be_false
-        err.not_nil!.should contain("ws_http_only")
+          http_only_id = insert_ws_repeater(store, 80, ws_http_only: true)
+          ok, err = Gori::CLI::Run.open_and_run_ws_session(http_only_id, project)
+          ok.should be_false
+          err.not_nil!.should contain("ws_http_only")
 
-        rfc8441_req = ("CONNECT /ws HTTP/2\r\nHost: 127.0.0.1\r\n" \
-                       "X-Gori-Protocol: websocket\r\nSec-WebSocket-Version: 13\r\n\r\n").to_slice
-        h2_id = insert_ws_repeater(project, 80, request: rfc8441_req)
-        ok, err = Gori::CLI::Run.open_and_run_ws_session(h2_id, project)
-        ok.should be_false
-        err.not_nil!.should contain("RFC 8441 extended CONNECT")
+          rfc8441_req = ("CONNECT /ws HTTP/2\r\nHost: 127.0.0.1\r\n" \
+                         "X-Gori-Protocol: websocket\r\nSec-WebSocket-Version: 13\r\n\r\n").to_slice
+          h2_id = insert_ws_repeater(store, 80, request: rfc8441_req)
+          ok, err = Gori::CLI::Run.open_and_run_ws_session(h2_id, project)
+          ok.should be_false
+          err.not_nil!.should contain("RFC 8441 extended CONNECT")
+
+          unresolved_id = insert_ws_repeater(store, refusing_origin.port,
+            target: "http://$UNSET_WS_HOST:#{refusing_origin.port}")
+          ok, err = Gori::CLI::Run.open_and_run_ws_session(unresolved_id, project, allow_unscoped: true)
+          ok.should be_false
+          err.not_nil!.should contain("UNSET_WS_HOST")
+
+          refused_id = insert_ws_repeater(store, refusing_origin.port)
+          ok, err = Gori::CLI::Run.open_and_run_ws_session(refused_id, project, allow_unscoped: true)
+          ok.should be_false
+          err.not_nil!.should contain("status 403")
+        end
+      ensure
+        refusing_origin.close
       end
     end
   end

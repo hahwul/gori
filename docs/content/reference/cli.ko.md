@@ -572,7 +572,7 @@ done
 
 오리진에 닿은 전송은 그 뒤의 쓰기가 실패해도 `0`으로 종료하므로, 셸이 같은 요청을 다시 보내지 않습니다. 어느 쓰기가 실패했는지는 `--format json`이 알려 줍니다. `response_saved`(세션에 응답을 썼으면 나타나고, 프로젝트가 쓰기를 거부했거나 전송 중에 세션이 삭제됐으면 `false`와 함께 `response_save_error`가 붙습니다. 이때 다음 `--diff`는 이전 응답과 비교합니다)와, `--record-history`를 주었다면 `history_saved`가 나오며, 실패하면 `history_error`가 붙고 `recorded_flow_id`는 빠집니다. 텍스트 모드는 같은 문장을 STDERR에 찍습니다.
 
-**`repeater ws <repeater-id>`**: 저장된 repeater로 지속 HTTP/1.1 WebSocket 세션을 엽니다(TUI의 **Live session** 및 MCP의 `ws_session_open` / `ws_session_send` / `get_job` / `stop_job`에 대응하는 `gori run` 표면). stdin에서 읽은 각 줄은 TEXT 메시지로 프레이밍해 보내고(`--binary`를 주면 헥스로 디코드한 BINARY 메시지), 보낸 프레임과 받은 프레임 모두 도착하는 즉시 stdout에 찍습니다. stdin EOF, `--for=DURATION`, 또는 `Ctrl-C`가 오면 `CLOSE` 프레임을 보내고 깨끗하게 종료합니다.
+**`repeater ws <repeater-id>`**: 저장된 repeater로 지속 HTTP/1.1 WebSocket 세션을 엽니다(TUI의 **Live session** 및 MCP의 `ws_session_open` / `ws_session_send` / `get_job` / `stop_job`에 대응하는 `gori run` 표면). stdin에서 읽은 각 줄은 TEXT 메시지로 프레이밍해 보내고(`--binary`를 주면 헥스로 디코드한 BINARY 메시지), 보낸 프레임과 받은 프레임 모두 도착하는 즉시 stdout에 찍습니다. stdin EOF(`--for`가 없을 때), `--for=DURATION`, 또는 `Ctrl-C`가 오면 `CLOSE` 프레임을 보내고 깨끗하게 종료합니다. Windows에서는 파이프로 연결한 stdin 읽기가 블로킹되므로 서버 프레임은 다음 줄이 들어올 때 찍힙니다(콘솔 stdin은 괜찮습니다).
 
 ```bash
 printf '{"op":"ping"}\n' | gori run repeater ws 5 --engine-io
@@ -583,7 +583,7 @@ gori run repeater ws 5 --for 30s --format json
 |--------|-------------|
 | `--auto-reply=MATCH=REPLY` | 정확히 일치하는 수신 TEXT 페이로드에 TEXT 프레임으로 자동 응답 (반복 가능, 예: `--auto-reply=PING=PONG`) |
 | `--engine-io` | Engine.IO / Socket.IO `'2'` 하트비트 핑에 `'3'`으로 자동 응답 (`--auto-reply=2=3` 축약형) |
-| `--for=DURATION` | stdin이 열려 있어도 `DURATION`(`500ms`, `30s`, `5m`)이 지나면 세션을 닫음 |
+| `--for=DURATION` | stdin이 열려 있어도 `DURATION`(`30s`, `5m`, `1h`)이 지나면 세션을 닫음 |
 | `--binary` | 각 stdin 줄을 헥스 바이트(선택적 `0x` 접두사)로 읽어 BINARY(opcode 2) 프레임으로 전송 |
 | `--verbatim`, `--slot=NAME`, `--ws-keep-key`, `--tls-preset=NAME`, `-k`, `--allow-unscoped`, `--format=text\|json` (`--json`) | `repeater send`와 동일. `--format json`은 프레임마다 MCP `get_job` 행 모양(`seq`, `direction`, `opcode`, `origin`, `type`, `frame`, `payload` / `payload_base64`, `auto_reply`, `close_code`)의 JSON 객체 한 줄을 스트리밍합니다 |
 

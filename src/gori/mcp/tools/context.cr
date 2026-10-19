@@ -431,7 +431,7 @@ module Gori
                   j.object do
                     j.field "direction", m.direction
                     j.field "opcode", m.opcode
-                    j.field "type", Serialize.ws_frame_type(m.opcode)
+                    j.field "type", Repeater::WsSession.frame_type(m.opcode)
                     j.field "at", m.created_at
                     if m.text?
                       raw = String.new(m.payload)

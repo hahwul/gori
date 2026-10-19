@@ -53,10 +53,6 @@ module Gori
         def to_json(j : JSON::Builder, *, mask_secrets : Bool = false) : Nil
           WsSession.emit_message_json(j, @message, seq: @seq, auto: @auto, mask_secrets: mask_secrets)
         end
-
-        def to_json(*, mask_secrets : Bool = false) : String
-          JSON.build { |j| to_json(j, mask_secrets: mask_secrets) }
-        end
       end
 
       # RFC 6455 opcode → frame type name, so a caller reads text/binary/ping/pong/
@@ -134,6 +130,11 @@ module Gori
       getter close_code : Int32?
       # Why the session ended; nil while open.
       getter close_reason : String?
+      # True when `close_reason` is a transport/protocol failure, cap violation, or mid-session
+      # gate refusal rather than an operator close, server CLOSE, or clean EOF.
+      getter? close_abnormal = false
+      # True once `close` has started tearing the session down on the operator's behalf.
+      getter? closing = false
       # WHEN the session ended — the moment `end_with` first ran, not when a surface first
       # noticed (#1630). Set with `close_reason`, so a reader that sees `closed?` has it too.
       getter closed_at : Time?
@@ -153,7 +154,6 @@ module Gori
       @done = Channel(Nil).new
       # One slot, fed without blocking, so the reader never waits on an absent listener.
       @signal = Channel(Nil).new(1)
-      @closing = false
       @sent_close = false
       # The inbound message being reassembled (§5.4).
       @assembling = IO::Memory.new
@@ -263,7 +263,7 @@ module Gori
         # fiber (the MCP worker) and must not block; the reader exits when `@io` closes.
         if gate = @gate
           if reason = gate.call
-            end_with("a scope or Sandbox change refused a mid-session send (#{reason}); the session was closed")
+            end_with("a scope or Sandbox change refused a mid-session send (#{reason}); the session was closed", abnormal: true)
             @io.close rescue nil
             notify
             return "the send was refused: #{reason}; the session was closed"
@@ -349,7 +349,7 @@ module Gori
         nil
       rescue ex : IO::Error | OpenSSL::Error
         reason = "the write failed (#{ex.message.presence || ex.class.name})"
-        end_with("#{reason}; the session was closed")
+        end_with("#{reason}; the session was closed", abnormal: true)
         @io.close rescue nil
         reason
       end
@@ -391,16 +391,16 @@ module Gori
           if header.len > Proxy::WS::MAX_FRAME
             # Its payload stays unread, so the stream is out of step: the session ends.
             break end_with("a server frame declared #{header.len} bytes, over the " \
-                           "#{Proxy::WS::MAX_FRAME // (1024 * 1024)} MiB per-frame cap")
+                           "#{Proxy::WS::MAX_FRAME // (1024 * 1024)} MiB per-frame cap", abnormal: true)
           end
           frame = Proxy::WS.read_body(@io, header)
-          break end_with("the connection ended mid-frame") unless frame
+          break end_with("the connection ended mid-frame", abnormal: true) unless frame
           break unless on_frame(frame)
         end
       rescue ex : IO::Error | OpenSSL::Error
-        end_with("the connection failed (#{ex.message.presence || ex.class.name})")
+        end_with("the connection failed (#{ex.message.presence || ex.class.name})", abnormal: true)
       rescue ex
-        end_with("the session reader failed (#{ex.message.presence || ex.class.name})")
+        end_with("the session reader failed (#{ex.message.presence || ex.class.name})", abnormal: true)
       ensure
         flush_pending
         end_with("the connection ended")
@@ -411,9 +411,10 @@ module Gori
 
       # The first reason wins: an operator's close or a server CLOSE is not overwritten by the
       # EOF that follows it.
-      private def end_with(reason : String) : Nil
+      private def end_with(reason : String, abnormal : Bool = false) : Nil
         return if @close_reason
         @close_reason = reason
+        @close_abnormal = abnormal
         @closed_at = Time.utc
       end
 
@@ -457,7 +458,7 @@ module Gori
         @shape.note(frame)
         @assembling.write(frame.payload)
         if @assembling.bytesize > MAX_BYTES
-          end_with("a server message passed the #{MAX_BYTES // (1024 * 1024)} MiB cap; the session was closed")
+          end_with("a server message passed the #{MAX_BYTES // (1024 * 1024)} MiB cap; the session was closed", abnormal: true)
           return false
         end
         return true unless frame.fin?

@@ -580,7 +580,7 @@ It edits a copy of the stored request for this send (so do `-H` and `-b`): the s
 
 A send that reached the origin exits `0` even when the writes after it fail, so a shell does not resend it. `--format json` says which: `response_saved` (present once a response was written to the session, `false` with `response_save_error` when the project refused the write or the session was deleted mid-send, in which case a later `--diff` would compare against the previous response) and, under `--record-history`, `history_saved` with `history_error` beside a `recorded_flow_id` that is then absent. Text mode prints the same sentence on STDERR.
 
-**`repeater ws <repeater-id>`**: open a persistent HTTP/1.1 WebSocket session on a saved repeater (the `gori run` counterpart of the TUI's **Live session** and MCP's `ws_session_open` / `ws_session_send` / `get_job` / `stop_job`). Each line read from stdin is framed and sent as a TEXT message (or hex-decoded as a BINARY message under `--binary`), and every sent and received frame is printed to stdout as it arrives. EOF on stdin, `--for=DURATION`, or `Ctrl-C` sends a `CLOSE` frame and exits cleanly.
+**`repeater ws <repeater-id>`**: open a persistent HTTP/1.1 WebSocket session on a saved repeater (the `gori run` counterpart of the TUI's **Live session** and MCP's `ws_session_open` / `ws_session_send` / `get_job` / `stop_job`). Each line read from stdin is framed and sent as a TEXT message (or hex-decoded as a BINARY message under `--binary`), and every sent and received frame is printed to stdout as it arrives. EOF on stdin (without `--for`), `--for=DURATION`, or `Ctrl-C` sends a `CLOSE` frame and exits cleanly. On Windows a piped stdin blocks while reading, so server frames print when the next line arrives (a console stdin is fine).
 
 ```bash
 printf '{"op":"ping"}\n' | gori run repeater ws 5 --engine-io
@@ -591,7 +591,7 @@ gori run repeater ws 5 --for 30s --format json
 | -------- | ------------- |
 | `--auto-reply=MATCH=REPLY` | Auto-reply to an exact inbound TEXT payload with a TEXT frame (repeatable, e.g. `--auto-reply=PING=PONG`) |
 | `--engine-io` | Answer Engine.IO / Socket.IO `'2'` heartbeat pings with `'3'` (shorthand for `--auto-reply=2=3`) |
-| `--for=DURATION` | Close the session after `DURATION` (`500ms`, `30s`, `5m`) even when stdin is still open |
+| `--for=DURATION` | Close the session after `DURATION` (`30s`, `5m`, `1h`) even when stdin is still open |
 | `--binary` | Read each stdin line as hex-encoded bytes (optional `0x` prefix) and send it as a BINARY (opcode 2) frame |
 | `--verbatim`, `--slot=NAME`, `--ws-keep-key`, `--tls-preset=NAME`, `-k`, `--allow-unscoped`, `--format=text\|json` (`--json`) | As on `repeater send`. `--format json` streams one JSON object per frame in MCP `get_job`'s row shape (`seq`, `direction`, `opcode`, `origin`, `type`, `frame`, `payload` / `payload_base64`, `auto_reply`, `close_code`) |
 

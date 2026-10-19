@@ -1023,9 +1023,14 @@ module Gori
       # a bare exception message.
       private def self.repeater_plan_abort(prefix : String, ex : Repeater::PlanError,
                                            context : String? = nil) : NoReturn
+        abort repeater_plan_error(prefix, ex, context)
+      end
+
+      private def self.repeater_plan_error(prefix : String, ex : Repeater::PlanError,
+                                           context : String? = nil) : String
         where = context ? " for #{context}" : ""
         detail = ex.detail
-        abort(case ex.reason
+        case ex.reason
         in Repeater::PlanError::Reason::NoRequest
           "#{prefix}: the request is empty — nothing to send#{where}"
         in Repeater::PlanError::Reason::NoTarget
@@ -1038,10 +1043,10 @@ module Gori
           "#{prefix}: unsupported target scheme #{(detail || "").inspect} (use http:// or https://)"
         in Repeater::PlanError::Reason::UnresolvedEnv
           ex.mint_refusal.try { |note| "#{prefix}: #{note}#{where.empty? ? "" : " (#{where.strip})"} — set it with `gori run project env set KEY value` or as a global env var, or remove the token" } ||
-          "#{prefix}: #{env_unresolved_error(detail, where)}"
+            "#{prefix}: #{env_unresolved_error(detail, where)}"
         in Repeater::PlanError::Reason::TlsPreset
           "#{prefix}: #{ex.message}"
-        end)
+        end
       end
 
       # Persist a repeater SESSION's last response (V11) so it survives a reopen and a later
@@ -1802,16 +1807,7 @@ module Gori
         "invalid hex line #{CLI::Output.term_line(line).inspect} (expected an even number of hex digits)"
       end
 
-      # Format one live `WsSession::Entry` for `gori run repeater ws`: `:json` emits one JSON
-      # line matching MCP `get_job` (`Repeater::WsSession::Entry#to_json`); `:text` uses the
-      # arrow + shape transcript line shared with `repeater send`.
-      def self.ws_session_entry_line(entry : Repeater::WsSession::Entry, format : Symbol) : String
-        return entry.to_json(mask_secrets: false) if format == :json
-        CLI::Output.term_safe(ws_transcript_line(entry.message))
-      end
-
-      # Reference-type state shared between `run_ws_session` and its `gori-ws-stdin` fiber
-      # (`Atomic` is a value struct in Crystal and would be copied across call boundaries).
+      # Shared state between `run_ws_session` and the `gori-ws-stdin` fiber.
       private class WsStdinState
         property? done = false
         property? failed = false
@@ -1871,16 +1867,14 @@ module Gori
         auto_replies << Repeater::WsSession::ENGINE_IO_HEARTBEAT if engine_io
 
         project = resolve_read_project(proj.name, proj.db)
-        stop = Channel(Nil).new
-        install_interrupt_trap("ws-interrupt", "interrupted — closing WebSocket session…") do
-          stop.close unless stop.closed?
-        end
+        interrupted = install_interrupt_trap("ws-interrupt", "interrupted — closing WebSocket session…") { }
         ok, err = open_and_run_ws_session(id, project,
           insecure: insecure, allow_unscoped: allow_unscoped, verbatim: verbatim,
           slot: slot, ws_keep_key: ws_keep_key, tls_preset: tls_preset,
           auto_replies: auto_replies, binary: binary, duration: duration,
-          format: format, stop: stop)
+          format: format, cancel: interrupted)
         report_unbound_slot_overlay("gori run repeater ws")
+        Run.report_interrupted(1, "session", "closed") if interrupted.call
         if err
           STDERR.puts err
           exit 1
@@ -1906,7 +1900,7 @@ module Gori
                                        stdin : IO = STDIN,
                                        stdout : IO = STDOUT,
                                        stderr : IO = STDERR,
-                                       stop : Channel(Nil)? = nil) : {Bool, String?}
+                                       cancel : Proc(Bool)? = nil) : {Bool, String?}
         loaded = load_ws_session_repeater(id, project)
         return {false, loaded} if loaded.is_a?(String)
         rec, host_overrides = loaded
@@ -1918,22 +1912,33 @@ module Gori
             insecure: insecure, verbatim: verbatim, tls_preset: tls_preset)
           return {false, plan} if plan.is_a?(String)
 
-          cancel = stop ? -> { stop.closed? } : nil
           opened = plan.open_ws(ws_keep_key || rec.ws_keep_key?, auto_replies, cancel,
             gate: -> { plan.refusal })
-          record_ws_handshake_response(id, rec, opened.result, project, stderr)
           session = opened.session
           unless session
-            msg = opened.result.error || "the handshake was not upgraded; no session was opened"
-            return {false, "gori run repeater ws: #{CLI::Output.term_line(msg)}"}
+            return {false, ws_handshake_failure_line(opened.result, stderr)}
           end
-          emit_ws_session_upgraded(opened.result, stderr) if format != :json
+          stderr.puts "→ WebSocket upgraded=true in #{CLI::Output.human_us(opened.result.duration_us)}" if format != :json
+          stderr.puts "note: #{CLI::Output.term_line(opened.result.note.to_s)}" if opened.result.note
+          stderr.flush
           ok = run_ws_session(session, stdin: stdin, stdout: stdout, stderr: stderr,
-            format: format, binary: binary, duration: duration, verbatim: verbatim, stop: stop)
+            format: format, binary: binary, duration: duration, verbatim: verbatim, cancel: cancel)
           {ok, nil}
         ensure
           outbound.close
         end
+      end
+
+      private def self.ws_handshake_failure_line(result : Repeater::WsEngine::Result, stderr : IO) : String
+        if note = result.note
+          stderr.puts "note: #{CLI::Output.term_line(note)}"
+          stderr.flush
+        end
+        status = unless result.handshake_head.empty?
+          (Proxy::Codec::Http1.parse_response_head(result.handshake_head) rescue nil).try(&.status)
+        end
+        msg = result.error || "the handshake was not upgraded#{status ? " (status #{status})" : ""}; no session was opened"
+        "gori run repeater ws: #{CLI::Output.term_line(msg)}"
       end
 
       private def self.load_ws_session_repeater(id : Int64,
@@ -1968,8 +1973,7 @@ module Gori
           Repeater::Plan.build(session_plan_options(rec, insecure, host_overrides, verbatim, nil, false,
             tls_preset), outbound)
         rescue ex : Repeater::PlanError
-          outbound.close
-          repeater_plan_abort("gori run repeater ws", ex, "session ##{id}")
+          return repeater_plan_error("gori run repeater ws", ex, "session ##{id}")
         end
         verdict = repeater_scope_verdict(outbound, plan)
         if verdict.blocked?
@@ -1982,25 +1986,10 @@ module Gori
         plan
       end
 
-      private def self.record_ws_handshake_response(id : Int64, rec : Store::RepeaterRecord,
-                                                    result : Repeater::WsEngine::Result,
-                                                    project : Project, stderr : IO) : Nil
-        return unless result.answered?
-        rw = persist_repeater_response(id, result.handshake_head, Bytes.empty,
-          result.error, result.duration_us, project, Evidence.request_digest(rec.request))
-        stderr.puts "gori run repeater ws: WebSocket #{rw}#{project_write_warning_tail}" if rw
-      end
-
-      private def self.emit_ws_session_upgraded(result : Repeater::WsEngine::Result, stderr : IO) : Nil
-        stderr.puts "→ WebSocket upgraded=true in #{CLI::Output.human_us(result.duration_us)}"
-        stderr.puts "note: #{result.note}" if result.note
-        stderr.flush
-      end
-
       # Drive an open `Repeater::WsSession`: read lines from `stdin` on a worker fiber and
       # write each as a WebSocket frame; drain the transcript in order on the calling fiber
-      # (`WsSession#wait` has a single waiter slot) until `stdin` reaches EOF, `duration`
-      # (`--for`) elapses, `stop` is closed, or the peer closes the connection.
+      # (`WsSession#wait` has a single waiter slot) until `stdin` reaches EOF (when `--for` is
+      # absent), `duration` (`--for`) elapses, `cancel` fires, or the peer closes the connection.
       def self.run_ws_session(session : Repeater::WsSession, *,
                               stdin : IO = STDIN,
                               stdout : IO = STDOUT,
@@ -2009,14 +1998,16 @@ module Gori
                               binary : Bool = false,
                               duration : Time::Span? = nil,
                               verbatim : Bool = false,
-                              stop : Channel(Nil)? = nil) : Bool
-        cancel = stop ? -> { stop.closed? } : nil
-        state = spawn_ws_stdin_reader(session, stdin, stderr,
-          binary: binary, verbatim: verbatim, stop: stop, cancel: cancel)
-        cursor = drain_ws_session_until_done(session, state, stdout, format, duration, stop)
+                              cancel : Proc(Bool)? = nil) : Bool
+        state = WsStdinState.new
+        spawn(name: "gori-ws-stdin") do
+          pump_ws_stdin(session, stdin, stderr, state,
+            binary: binary, verbatim: verbatim, cancel: cancel)
+        end
+        cursor = drain_ws_session_until_done(session, state, stdout, format, duration, cancel)
         session.close unless session.closed?
         drain_ws_session_transcript(session, cursor, stdout, format)
-        if ws_session_abnormal_close?(session.close_reason)
+        if session.close_abnormal?
           stderr.puts "gori run repeater ws: #{CLI::Output.term_line(session.close_reason.to_s)}" unless state.failed?
           stderr.flush
           return false
@@ -2027,56 +2018,34 @@ module Gori
       private def self.drain_ws_session_until_done(session : Repeater::WsSession, state : WsStdinState,
                                                    stdout : IO, format : Symbol,
                                                    duration : Time::Span?,
-                                                   stop : Channel(Nil)?) : Int64
+                                                   cancel : Proc(Bool)?) : Int64
         cursor = 0_i64
         deadline = duration.try { |d| Time.instant + d }
-        eof_first : Time::Instant? = nil
-        eof_quiet : Time::Instant? = nil
 
         loop do
-          cursor, progressed = drain_ws_session_transcript(session, cursor, stdout, format)
-          break if session.closed? || stop.try(&.closed?)
-          now = Time.instant
-          if state.done?
-            first = eof_first || now
-            eof_first = first
-            quiet = (eof_quiet && !progressed) ? eof_quiet : now
-            eof_quiet = quiet
-            break if (now - quiet) >= 50.milliseconds || (now - first) >= 250.milliseconds
-          end
-          step = ws_session_wait_step(state.done?, deadline, now)
+          cursor = drain_ws_session_transcript(session, cursor, stdout, format)
+          break if session.closed? || cancel.try(&.call)
+          break if state.done? && deadline.nil?
+          step = ws_session_wait_step(deadline, Time.instant)
           break unless step
           session.wait(step)
         end
         cursor
       end
 
-      private def self.ws_session_wait_step(eof : Bool, deadline : Time::Instant?,
+      private def self.ws_session_wait_step(deadline : Time::Instant?,
                                             now : Time::Instant) : Time::Span?
-        step = eof ? 15.milliseconds : 50.milliseconds
+        step = 50.milliseconds
         return step unless dl = deadline
         rem = dl - now
         return nil if rem <= Time::Span.zero
         rem < step ? rem : step
       end
 
-      # Spawn the fiber that reads lines from `stdin` and frames them onto `session`.
-      private def self.spawn_ws_stdin_reader(session : Repeater::WsSession, stdin : IO, stderr : IO, *,
-                                             binary : Bool, verbatim : Bool,
-                                             stop : Channel(Nil)?,
-                                             cancel : Proc(Bool)?) : WsStdinState
-        state = WsStdinState.new
-        spawn(name: "gori-ws-stdin") do
-          pump_ws_stdin(session, stdin, stderr, state,
-            binary: binary, verbatim: verbatim, stop: stop, cancel: cancel)
-        end
-        state
-      end
-
       private def self.pump_ws_stdin(session : Repeater::WsSession, stdin : IO, stderr : IO,
                                      state : WsStdinState, *, binary : Bool, verbatim : Bool,
-                                     stop : Channel(Nil)?, cancel : Proc(Bool)?) : Nil
-        while !session.closed? && !stop.try(&.closed?)
+                                     cancel : Proc(Bool)?) : Nil
+        while !session.closed? && !cancel.try(&.call)
           line = stdin.gets(chomp: true) rescue nil
           break unless line
           msg = ws_stdin_out_msg(line, binary: binary, verbatim: verbatim, stderr: stderr)
@@ -2085,7 +2054,7 @@ module Gori
             next
           end
           if err = session.send(msg, cancel)
-            unless session.closed? && (stop.try(&.closed?) || err.starts_with?("the session is closed: closed by the operator"))
+            unless session.closing? || cancel.try(&.call)
               stderr.puts "gori run repeater ws: send failed: #{CLI::Output.term_line(err)}"
               stderr.flush
               state.failed = true
@@ -2115,27 +2084,22 @@ module Gori
         end
       end
 
-      # Emit any transcript rows past `cursor` to `stdout`. Returns `{new_cursor, any_emitted}`.
+      # Emit any transcript rows past `cursor` to `stdout`. Returns the updated `cursor`.
       private def self.drain_ws_session_transcript(session : Repeater::WsSession, cursor : Int64,
-                                                   stdout : IO, format : Symbol) : {Int64, Bool}
+                                                   stdout : IO, format : Symbol) : Int64
         entries = session.transcript(after: cursor)
-        return {cursor, false} if entries.empty?
+        return cursor if entries.empty?
         entries.each do |entry|
           cursor = entry.seq
-          stdout.puts ws_session_entry_line(entry, format)
+          line = if format == :json
+                   JSON.build { |j| entry.to_json(j) }
+                 else
+                   CLI::Output.term_safe(ws_transcript_line(entry.message))
+                 end
+          stdout.puts line
         end
         stdout.flush
-        {cursor, true}
-      end
-
-      # True when `close_reason` indicates a transport/protocol failure or mid-session gate
-      # refusal rather than a normal operator close, server CLOSE, or clean EOF.
-      private def self.ws_session_abnormal_close?(reason : String?) : Bool
-        return false unless reason
-        return false if reason.starts_with?("closed by the operator")
-        return false if reason.starts_with?("the server sent CLOSE")
-        return false if reason == "the connection ended"
-        true
+        cursor
       end
 
       # The session's outbound messages: `--message` overrides when given (each

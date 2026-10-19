@@ -1149,25 +1149,6 @@ module Gori
       WS_MSGS_MAX    =  500 # cap WS messages serialised for an LLM client
       WS_PAYLOAD_MAX = 4096 # cap each text frame's payload (chars)
 
-      # RFC 6455 opcode → frame type name, so a caller reads text/binary/ping/pong/
-      # close directly instead of decoding the numeric opcode.
-      def self.ws_frame_type(opcode : Int32) : String
-        case opcode
-        when 0x0 then "continuation"
-        when 0x1 then "text"
-        when 0x2 then "binary"
-        when 0x8 then "close"
-        when 0x9 then "ping"
-        when 0xA then "pong"
-        else          "opcode-#{opcode}"
-        end
-      end
-
-      # Who wrote a WebSocket message, as `emit_body` labels a body (#1586).
-      def self.ws_origin(direction : String) : String
-        direction == "out" ? "client" : "target"
-      end
-
       # A WebSocket flow (status 101) carries a separate message log the heads/bodies
       # don't show. Mirror the `gori run show` WS pane, bounded for LLM use: text
       # frames inline their (clipped) payload, binary frames report a size only.
@@ -1180,7 +1161,7 @@ module Gori
       # on a flow with no socket at all (`0 of 0`).
       # An injected frame's bytes are the operator's, not the client's (#1630).
       private def self.emit_ws_origin(j : JSON::Builder, m : Store::WsMessage) : Nil
-        return j.field("origin", ws_origin(m.direction)) unless m.injected?
+        return j.field("origin", Repeater::WsSession.origin(m.direction)) unless m.injected?
         j.field "origin", Store::WsMessage::ORIGIN_GORI
         j.field "injected", true
       end
@@ -1199,7 +1180,7 @@ module Gori
                   j.object do
                     j.field "direction", m.direction
                     j.field "opcode", m.opcode
-                    j.field "type", ws_frame_type(m.opcode)
+                    j.field "type", Repeater::WsSession.frame_type(m.opcode)
                     emit_ws_origin(j, m)
                     j.field "at", m.created_at
                     j.field "at_iso", Gori.iso_micros(m.created_at)
