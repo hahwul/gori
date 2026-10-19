@@ -12,12 +12,10 @@ module Gori
         {"history delete", "Hard-delete captured flows by id (one or more), or every match of -q QL (needs --yes)"},
         {"history clear", "Delete ALL captured flows in the project (needs --yes)"},
       ])]
-      # Takes a leading `ls` / `list` off `positional` — it is the listing itself (#1625), not a
-      # search for "ls" — and THEN refuses a discarded verb: `--format=json delete 42` lands in
-      # the listing because the dispatcher keys on args.first? (a leading `--project`/`--db` no
-      # longer does: `Run.hoist_target_flags`). `delete` is not QL; refused rather than searched
-      # for as the free text "delete 42", exiting 0 with the flow still on disk. In that order,
-      # or `history ls delete 42` was the search.
+      # Takes a leading `ls` / `list` off `positional` — the listing itself (#1625), not a search
+      # for "ls" — and THEN refuses a reserved verb the dispatcher did not see first
+      # (`--format=json delete 42`): `delete` is not QL, and searching for it would exit 0 with
+      # the flow still on disk.
       def self.history_verb_error(positional : Array(String)) : String?
         positional.shift if positional[0]?.in?("ls", "list")
         reserved_query_verb_error(positional, "history", ["delete", "rm", "clear", "show"], "delete/rm, clear, show")

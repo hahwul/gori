@@ -163,9 +163,7 @@ class Gori::Tui::RepeaterView
   # One live-session frame built the SAME way as the scripted `ws_out_messages` (#1630): a
   # TEXT payload takes `Env.expand` unless the tab is a captured flow (`@evidence`), and the
   # `evidence` flag rides along so the SEND SEAM's binding pass leaves a capture's bytes alone
-  # (P7). The live sends used to build `OutMsg.new(OP_TEXT, text.to_slice)` raw — so a draft's
-  # `$VAR` went out literally and a flow-seeded tab's captured bytes were run through the
-  # binding pass under a flag that promised they would not be.
+  # (P7).
   def ws_live_text_msg(text : String) : Repeater::WsEngine::OutMsg
     payload = @evidence ? text.to_slice : Env.expand(text).to_slice
     Repeater::WsEngine::OutMsg.new(Proxy::WS::OP_TEXT.to_i, payload, evidence: @evidence)

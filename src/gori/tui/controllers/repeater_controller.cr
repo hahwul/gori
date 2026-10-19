@@ -2618,11 +2618,8 @@ module Gori::Tui
           opened.session.try { |s| s.close rescue nil }
           next
         end
-        # A BLOCKING send, so every connect outcome reaches the drain — which is the ONLY place
-        # that reaps `flag` from `@ws_connect_flags` (`reject!(&.same?(flag))`). The old
-        # non-blocking `select … else` dropped the result when the buffer was full and left the
-        # cell behind forever, a cancel-tracking leak (#1630); blocking just parks this
-        # background fiber until the UI drain catches up.
+        # A BLOCKING send, so every connect outcome reaches the drain — the ONLY place that reaps
+        # `flag` from `@ws_connect_flags` — even past a full buffer; this background fiber parks.
         results.send({view, opened, flag})
       rescue ex
         ::Log.error(exception: ex) { "ws session connect fiber died" }
