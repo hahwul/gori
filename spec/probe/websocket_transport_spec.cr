@@ -132,6 +132,21 @@ describe "Probe over both WebSocket transports" do
     end
   end
 
+  # A frame the operator injected into the live socket (#1630) carries the operator's own bytes:
+  # the key or token they typed is not the target disclosing it.
+  it "does not report a secret or a JWT the operator injected" do
+    with_store do |store|
+      id = h1_ws_flow(store).row.id
+      jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJlLXZhbHVl"
+      store.insert_ws_message(id, "out", 1, "#{SECRET_FRAME} #{jwt}".to_slice,
+        origin: Gori::Store::WsMessage::ORIGIN_GORI)
+      store.flush
+      found = codes(Gori::Probe::Scan.scan_flows(store, [id], active: false))
+      found.should_not contain("secret_in_ws")
+      found.should_not contain("jwt_in_ws")
+    end
+  end
+
   it "does not treat a non-WebSocket 101 upgrade as a socket" do
     with_store do |store|
       # kubectl exec speaks SPDY over a 101. gori cannot decode it, so the frames are not

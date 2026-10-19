@@ -31,9 +31,10 @@ module Gori
           jwt_seen = false
           ctx.ws_messages.each do |msg|
             # Control frames (ping/pong/close) carry no application payload, and a `notice?` row is
-            # gori's own "[gori] …" advisory — scanning either would be scanning ourselves. Every
-            # other opcode, text or binary, is application data.
-            next if msg.control? || msg.notice?
+            # gori's own "[gori] …" advisory — scanning either would be scanning ourselves. So is an
+            # `injected?` frame (#1630): the operator's own bytes, and the JWT or key they typed is
+            # not the target disclosing it. Every other opcode, text or binary, is application data.
+            next if msg.control? || msg.notice? || msg.injected?
             text = payload_text(msg.payload, msg.text?)
             next if text.nil? || text.empty?
             Secrets::PATTERNS.each do |(pat, label)|

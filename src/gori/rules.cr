@@ -2103,12 +2103,13 @@ module Gori
     #
     # The three filters here are exactly the live relay's: direction from the rule's target,
     # text opcode only (a binary message is never rewritten, so counting it would promise a
-    # match the proxy will not make), and valid UTF-8.
+    # match the proxy will not make), and valid UTF-8. A frame gori injected (#1630) is skipped
+    # for the same reason: `Live.inject` bypasses Match & Replace, so no rule ever touched it.
     private def ws_rule_affects?(rule : Store::MatchRule, detail : Store::FlowDetail) : Bool
       return false unless detail.row.status == 101
       want_out = rule.target.request?
       @store.ws_messages(detail.row.id, RULE_PREVIEW_WS_MAX).any? do |msg|
-        next false unless msg.text?
+        next false unless msg.text? && !msg.injected?
         next false unless (msg.direction == "out") == want_out
         text = String.new(msg.payload)
         next false unless text.valid_encoding?

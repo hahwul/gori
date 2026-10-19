@@ -571,6 +571,26 @@ describe Gori::Rules do
       end
     end
 
+    # An injected frame (#1630) bypasses Match & Replace, so a preview counting it promises a
+    # rewrite the proxy never made.
+    it "does not count a frame gori injected in the rule preview" do
+      with_store do |store|
+        flow = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_000_i64, scheme: "http", host: "acme.test", port: 80,
+          method: "GET", target: "/ws", http_version: "HTTP/1.1",
+          head: "GET /ws HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: flow, status: 101,
+          head: "HTTP/1.1 101 Switching Protocols\r\n\r\n".to_slice, body: nil))
+        store.insert_ws_message(flow, "out", 1, %({"cmd":"ping"}).to_slice, origin: Gori::Store::WsMessage::ORIGIN_GORI)
+        store.flush
+
+        rule = Gori::Store::MatchRule.new(0_i64, true, Gori::Store::RuleTarget::Request,
+          Gori::Store::RulePart::Ws, "ping", "pong")
+        Gori::Rules.load(store).preview(rule).matched.should eq(0)
+      end
+    end
+
     # A plain-HTTP forward-proxy flow is recorded absolute-form, while the proxy matches every
     # rule on the origin-form head it forwards: a mock drafted from that very flow claimed it
     # live and previewed 0.
