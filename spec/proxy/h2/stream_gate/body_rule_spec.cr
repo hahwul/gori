@@ -1333,3 +1333,26 @@ describe "H2::StreamGate body rules: an intercept hold" do
     end
   end
 end
+
+# `Relay#gates` is private; a thin caller (test binary only) lets the spec read the gates it
+# builds for one connection.
+class Gori::Proxy::H2::Relay
+  def spec_gates : {Gori::Proxy::H2::StreamGate?, Gori::Proxy::H2::StreamGate?}
+    gates(1_i64, Gori::Proxy::H2::Assembler.new(@sink, @host, @port))
+  end
+end
+
+describe "H2::Relay body-rule path" do
+  # A connection no body rule matches pays nothing for the path (P6): no flow-control state, so
+  # every frame takes each gate's plain branch.
+  it "builds flow-control state only for a host a body rule matches" do
+    with_rules do |rules, ic|
+      rules.add(REQ, BODY, "a", "b", host: "alpha.test")
+      [{"127.0.0.1", false}, {"alpha.test", true}].each do |(host, built)|
+        relay = Gori::Proxy::H2::Relay.new(IO::Memory.new, IO::Memory.new, host, 443, BodySink.new,
+          rewriter: rules, interceptor: ic)
+        relay.spec_gates.each { |gate| gate.not_nil!.@flow.nil?.should eq(!built) }
+      end
+    end
+  end
+end
