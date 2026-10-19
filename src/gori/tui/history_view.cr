@@ -4731,15 +4731,20 @@ module Gori::Tui
     #
     # `plain` is the message's inflated payload, or why it has none — the hex keeps the WIRE
     # octets either way, and a compressed one that did not inflate says why above them.
+    # A JSON payload's render ceiling in bytes, beside `ProtobufTree::MAX_LINES`: about what
+    # those lines hold when wrapped, so a minified multi-MiB message is not styled whole.
+    JSON_RENDER_BYTES = 16 * 1024
+
     private def grpc_payload_lines(m : Proxy::H2::Grpc::Message, plain : Bytes | String, tree : Bool,
                                    binding : Protobuf::Schemas::Binding? = nil) : Array(String)
       if m.json && plain.is_a?(Bytes) && tree
         # The same ceiling as a protobuf tree (`ProtobufTree::MAX_LINES`): a payload is the
-        # origin's size, and the pane is styled eagerly.
-        text = String.new(plain).scrub.lines
+        # origin's size, and the pane is styled eagerly. Bytes too: compact JSON is one line.
+        text = String.new(plain[0, {plain.size, JSON_RENDER_BYTES}.min]).scrub.lines
         cut = text.size > ProtobufTree::MAX_LINES
         lines = text.first(ProtobufTree::MAX_LINES).map { |l| "  #{l}" }
         lines << "  … (render cut at #{ProtobufTree::MAX_LINES} lines)" if cut
+        lines << "  … (render cut at #{JSON_RENDER_BYTES} bytes of #{plain.size})" if !cut && plain.size > JSON_RENDER_BYTES
         return lines
       end
       unless plain.is_a?(Bytes) && ProtobufTree.decode?(m, plain, tree)

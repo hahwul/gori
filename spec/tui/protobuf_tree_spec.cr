@@ -294,4 +294,25 @@ describe "HistoryView Connect detail" do
       backend.contains?(%("k#{max + 1}")).should be_false
     end
   end
+
+  it "cuts a compact one-line JSON payload by bytes" do
+    pb_tmp_store do |store|
+      max = Gori::Tui::HistoryView::JSON_RENDER_BYTES
+      body = %({"blob":"#{"a" * (max * 4)}","tail":"zz"})
+      store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
+        method: "POST", target: "/svc/M", http_version: "HTTP/1.1",
+        head: "POST /svc/M HTTP/1.1\r\nHost: api.test\r\ncontent-type: application/connect+json\r\n\r\n".to_slice,
+        body: grpc_frame(body.to_slice), source: Gori::FlowSource::Kind::Proxy))
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      view.pretty = true
+      # Tall enough for the cut line wrapped at 160 columns, which is what the cut bounds.
+      backend = MemoryBackend.new(160, 300)
+      view.render_detail(Screen.new(backend), Rect.new(0, 0, 160, 300))
+      backend.contains?("render cut at #{max} bytes of #{body.bytesize}").should be_true
+      backend.contains?(%("tail")).should be_false
+    end
+  end
 end
