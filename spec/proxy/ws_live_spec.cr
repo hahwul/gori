@@ -556,6 +556,14 @@ describe "WS::Live.apply_command (the capturing instance's drain)" do
     end
   end
 
+  # The sender counts its budget on its own clock: a created_at ahead of this one (a wall clock
+  # stepped back since) must not stretch the deadline past what the sender waits.
+  it "never sets an inject's deadline past the sender's budget" do
+    budget = Gori::Store.ws_inject_ack_budget_ms.milliseconds - WS::Live::ACK_MARGIN
+    ahead = (Time.utc - Time::UNIX_EPOCH).total_microseconds.to_i64 + 3_600_000_000_i64
+    (WS::Live.ack_deadline(ahead) <= Time.instant + budget).should be_true
+  end
+
   it "acks a closed socket at once, naming why" do
     with_store do |store|
       id = store.enqueue_intercept_command("t", Gori::Store::WS_INJECT_VERB, item_id: 999_i64,

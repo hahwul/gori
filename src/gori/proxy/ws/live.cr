@@ -361,10 +361,12 @@ module Gori::Proxy::WS
 
     # The instant `cmd`'s sender stops polling for its ack, less `ACK_MARGIN`. `created_at` is
     # the sender's wall clock at enqueue (same host: both processes open the one SQLite file).
+    # Never later than a whole budget from now: a wall clock stepped back since the enqueue
+    # would otherwise run the inject after its sender reported it unconfirmed.
     def self.ack_deadline(created_at_us : Int64) : Time::Instant
-      left_us = created_at_us + Store.ws_inject_ack_budget_ms.to_i64 * 1000 -
-                ACK_MARGIN.total_microseconds.to_i64 - (Time.utc - Time::UNIX_EPOCH).total_microseconds.to_i64
-      Time.instant + left_us.microseconds
+      budget_us = Store.ws_inject_ack_budget_ms.to_i64 * 1000 - ACK_MARGIN.total_microseconds.to_i64
+      left_us = created_at_us + budget_us - (Time.utc - Time::UNIX_EPOCH).total_microseconds.to_i64
+      Time.instant + Math.min(left_us, budget_us).microseconds
     end
 
     # "5s", or "300ms" for a wait under a second, which would otherwise read as "0s".
