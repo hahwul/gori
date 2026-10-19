@@ -133,7 +133,9 @@ module Gori
 
       # Total byte budget for a compare_flows diff's emitted `text` (across all lines),
       # and the per-line ceiling. Generous enough for real request/response diffs while
-      # keeping one call off the multi-MB JSON-RPC cliff every other read tool avoids.
+      # keeping one call off the multi-MB JSON-RPC cliff every other read tool avoids. Above
+      # REPLY_ROWS_BUDGET on purpose (#1659): the diff has no offset or file to hold the rest,
+      # so a lower cap would only lose lines; `context` / `changes_only` are how it shrinks.
       COMPARE_MAX_DIFF_BYTES = 256 * 1024
       COMPARE_MAX_LINE_BYTES = Serialize::MAX_TEXT # 64 KiB — a single huge line still shows a prefix
 

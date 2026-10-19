@@ -109,6 +109,21 @@ describe "MCP export_openapi" do
     end
   end
 
+  # #1659: inline, the document defaults to the reply budget; past it, the notes point at the
+  # file that holds the whole of it.
+  it "holds the inline document to the reply budget and points at output_path" do
+    with_store do |store|
+      120.times do |i|
+        word = String.build { |b| n = i; 3.times { b << ('a' + n % 26); n //= 26 } }
+        eo_flow(store, "/#{word}/#{"section-" * 60}#{word}")
+      end
+      out = eo(tools_for(store), "{}")
+      out["truncated"].should be_true
+      out["document"].to_json.bytesize.should be <= Gori::MCP::Tools::REPLY_ROWS_BUDGET
+      out["notes"].as_a.map(&.as_s).join.should contain("output_path")
+    end
+  end
+
   it "counts skipped flows by reason" do
     with_store do |store|
       eo_flow(store, "/ok")

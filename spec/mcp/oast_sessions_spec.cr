@@ -364,4 +364,44 @@ describe "MCP oast_start persist" do
       Gori::Oast::Sessions.list(store).first.provider.should eq("lab collab")
     end
   end
+
+  # #1659: a callback's size is the caller's choice (`origin: "remote"`), so a poll answers
+  # within the reply budget. interactsh hands a hit over once, so what does not fit waits on
+  # the handle for the next poll, and the store still files every callback whole.
+  it "returns callbacks within the reply budget and keeps the rest for the next poll" do
+    big = "é" * 40_000 # 80,000 bytes: over MAX_TEXT, cut on a whole sequence
+    hits = [{"id" => "a", "raw_request" => "A" * 40_000}, {"id" => "b", "raw_request" => "B" * 40_000},
+            {"id" => "c", "raw_request" => big}].to_json
+    served = false
+    server = HTTP::Server.new do |ctx|
+      ctx.response.print(served ? "[]" : hits)
+      served = true
+    end
+    port = server.bind_unused_port("127.0.0.1").port
+    spawn { server.listen }
+    sleep 10.milliseconds
+    with_store do |store|
+      tools = tools_for(store, verify_upstream: true)
+      res = ok_json(tools, "oast_start",
+        %({"provider":"custom-http","server":"http://127.0.0.1:#{port}/hits","persist":true}))
+      sid = res["session_id"].as_s.to_json
+      polls = Array.new(3) { ok_json(tools, "oast_poll", %({"session_id":#{sid}})) }
+      polls.map(&.["callbacks"].as_a.map(&.["unique_id"].as_s)).should eq([["a"], ["b"], ["c"]])
+      polls.map(&.["has_more"].as_bool).should eq([true, true, false])
+      polls.first["cut_by"].should eq("bytes")
+      last = polls.last["callbacks"][0]
+      last["raw_request_truncated"].as_bool.should be_true
+      shown = last["raw_request"].as_s
+      shown.bytesize.should be <= Gori::MCP::Serialize::MAX_TEXT
+      big.starts_with?(shown).should be_true
+      polls.first["callbacks"][0].as_h.has_key?("raw_request_truncated").should be_false
+
+      store.flush
+      stored = store.oast_callbacks_since(0)
+      stored.size.should eq(3)
+      stored.max_of(&.raw_request.size).should eq(big.bytesize)
+    end
+  ensure
+    server.try(&.close) rescue nil
+  end
 end

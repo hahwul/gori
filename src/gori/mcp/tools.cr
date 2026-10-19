@@ -247,6 +247,10 @@ module Gori
         getter http : Oast::Http
         getter kind_label : String
         property seen = Oast::SeenWindow(String).new
+        # Callbacks caught but not yet returned: a poll answers within the reply budget and
+        # the rest wait here for the next one (#1659). interactsh hands a hit over once, so
+        # leaving it unseen would not bring it back.
+        getter pending = [] of Oast::Interaction
         # The `oast_sessions` row this handle was RESUMED from (nil for an ad-hoc oast_start).
         # Set means the handle is a project listener: oast_poll persists what it catches and
         # stamps last_poll_at, and oast_stop keeps the registration instead of dropping it.
@@ -1946,12 +1950,43 @@ module Gori
           store.touch_oast_session(row)
           fresh.each { |i| Oast::Sessions.record_callback(store, row, i) }
         end
-        callbacks = fresh.map { |i| Oast::Present.interaction(i, s.kind_label) }
-        Result.new({session_id: sid, count: fresh.size, callbacks: callbacks}.to_json)
+        # Under REPLY_ROWS_BUDGET (#1659): a callback's bytes are sized by whoever hit the
+        # listener, so the reply carries what fits and the rest stay pending for the next poll.
+        s.pending.concat(fresh)
+        parts = fit_rows(s.pending) { |rj, i, _| oast_callback_json(rj, i, s.kind_label) }
+        s.pending.shift(parts.size)
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "session_id", sid
+            j.field "count", parts.size
+            j.field("callbacks") { raw_rows(j, parts) }
+            emit_cut(j, !s.pending.empty?)
+            j.field "has_more", !s.pending.empty?
+          end
+        end)
       rescue ex
         # Transient by construction: a poll is a read the caller is expected to repeat, and the
         # session it names is still live here. See `oast_start`'s rescue for the contract.
         err("OAST poll failed: #{ex.message}", "NETWORK_ERROR", retryable: true)
+      end
+
+      # One callback, its raw_request / raw_response held to MAX_TEXT like a flow body and cut
+      # on a whole UTF-8 sequence; `*_truncated` says the text is a prefix. A resumed session
+      # filed the whole callback in the store before this cut.
+      private def oast_callback_json(j : JSON::Builder, i : Oast::Interaction, label : String) : Nil
+        req = oast_text_prefix(i.raw_request)
+        raw_res = i.raw_response
+        res = raw_res.try { |r| oast_text_prefix(r) }
+        j.object do
+          Oast::Present.interaction(i.copy_with(raw_request: req, raw_response: res), label).each { |k, v| j.field k, v }
+          j.field "raw_request_truncated", true if req.bytesize < i.raw_request.bytesize
+          j.field "raw_response_truncated", true if raw_res && res && res.bytesize < raw_res.bytesize
+        end
+      end
+
+      private def oast_text_prefix(s : String) : String
+        return s if s.bytesize <= Serialize::MAX_TEXT
+        String.new(s.to_slice[0, Serialize.utf8_whole_prefix(s.to_slice[0, Serialize::MAX_TEXT])])
       end
 
       @[Tool("oast_stop", gated: true, agent_action: true, unbound: true, requires: ["oast_release"], permission: "send")]
