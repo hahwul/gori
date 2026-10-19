@@ -511,6 +511,28 @@ describe "RepeaterView gRPC whole-message edits (#1632)" do
     end
   end
 
+  it "keeps the JSON text when re-compressing the edit is refused" do
+    with_demo_schema do
+      grpc_tmp_store do |store|
+        head = "POST /demo.Users/GetUser HTTP/2\r\nHost: api.test\r\ncontent-type: application/grpc\r\ngrpc-encoding: gzip\r\n\r\n"
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
+          method: "POST", target: "/demo.Users/GetUser", http_version: "HTTP/2",
+          head: head.to_slice,
+          body: Gori::Proxy::H2::Grpc.frame(true, Gori::Proxy::H2::Grpc.compress("gzip", get_user_request("bob")).not_nil!),
+          source: Gori::FlowSource::Kind::Proxy))
+        view = RepeaterView.new
+        view.load_grpc(store.get_flow(id).not_nil!)
+        # A codec gori inflates nothing with and writes nothing in: the store step refuses.
+        view.@editor.set_text(view.@editor.wire_text.sub("grpc-encoding: gzip", "grpc-encoding: br"))
+        view.grpc_edit_begin(schema: true).should be_nil
+        view.grpc_json_text
+        view.grpc_json_apply(%({"name": "admin"})).not_nil!.should contain("cannot re-compress")
+        view.grpc_json_text.should eq(%({"name": "admin"}))
+      end
+    end
+  end
+
   it "needs a descriptor set for JSON, but adds a field by number without one" do
     Schemas.clear
     grpc_tmp_store do |store|
