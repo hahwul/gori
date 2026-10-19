@@ -1868,6 +1868,9 @@ module Gori
     # Pending by design, not orphaned in-flight captures, so finalising them to Error would
     # fabricate a network failure for data the operator imported (#408).
     #
+    # A live event stream (#1631) keeps the status its head already wrote: its body is folded
+    # in below, and a 200 with events read as status 0 would not say what happened.
+    #
     # The WHERE is PENDING_WHERE, literal and not bound, so it matches `idx_flows_pending`'s
     # (V36) and the SELECT reads only that index; the UPDATE then touches the collected rows by
     # primary key, in the same transaction, so nothing can turn Pending in between.
@@ -1879,7 +1882,8 @@ module Gori
       ids.each_slice(ID_CHUNK) do |slice|
         args = [FlowState::Error.value, message] of DB::Any
         slice.each { |id| args << id }
-        conn.exec("UPDATE flows SET state = ?, error = ?, status = 0, static_asset = 0 " \
+        conn.exec("UPDATE flows SET state = ?, error = ?, " \
+                  "status = CASE WHEN response_head IS NULL THEN 0 ELSE status END, static_asset = 0 " \
                   "WHERE id IN (#{Array.new(slice.size, "?").join(", ")})", args: args)
       end
       fold_live_chunks(conn, ids)
@@ -1887,15 +1891,16 @@ module Gori
     end
 
     # An event stream cut off by a crash or a shutdown keeps the events it relayed (#1631): its
-    # live chunks become the stored body, and the row is re-dirtied so FTS indexes it. The
-    # table only ever holds open streams' bytes, so reading its keys is cheap.
+    # live chunks become the stored body, marked truncated because the stream never ended, and
+    # the row is re-dirtied so FTS indexes it. The table only ever holds open streams' bytes,
+    # so reading its keys is cheap.
     private def fold_live_chunks(conn : DB::Connection, ids : Array(Int64)) : Nil
       live = conn.query_all("SELECT DISTINCT flow_id FROM flow_live_chunks", as: Int64)
       return if live.empty?
       (live & ids).each do |id|
         if body = Store.live_body(conn, id) # the contiguous prefix: see `live_body`
           conn.exec("UPDATE flows SET response_body = ?, response_size = COALESCE(LENGTH(response_head), 0) + ?, " \
-                    "fts_dirty = 1 WHERE id = ?", body, body.size.to_i64, id)
+                    "response_body_truncated = 1, fts_dirty = 1 WHERE id = ?", body, body.size.to_i64, id)
         end
         conn.exec("DELETE FROM flow_live_chunks WHERE flow_id = ?", id)
       end

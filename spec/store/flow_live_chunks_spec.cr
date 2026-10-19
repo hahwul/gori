@@ -116,6 +116,11 @@ describe "Store live chunks (V50)" do
       store.get_flow(other).not_nil!.response_body.should be_nil
       store.@db.scalar("SELECT fts_dirty FROM flows WHERE id = ?", id).should eq(1)
       detail.row.response_size.should eq(LC_HEAD.bytesize + 22)
+      # The head the stream showed stays, and the body says it was cut off; a flow that never
+      # got a head is a failure with no status, as before.
+      detail.row.status.should eq(200)
+      detail.response_body_truncated?.should be_true
+      store.get_flow(other).not_nil!.row.status.should eq(0)
     end
   end
 
