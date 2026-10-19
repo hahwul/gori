@@ -102,14 +102,9 @@ describe "MCP wordlist catalog" do
         first["cut_by"].as_s.should eq("bytes")
         first["truncated"].as_bool.should be_true
         first.to_json.bytesize.should be < Gori::MCP::Tools::REPLY_ROWS_BUDGET + 4096
-        seen = [] of String
-        offset = 0
-        loop do
-          page = ok(t, "list_wordlists", %({"limit":1000,"offset":#{offset}}))
-          seen.concat(page["wordlists"].as_a.map(&.["name"].as_s))
-          offset += page["returned"].as_i
-          break unless page["truncated"].as_bool
-        end
+        seen = mcp_page_rows("wordlists", "truncated") do |o|
+          ok(t, "list_wordlists", %({"limit":1000,"offset":#{o}}))
+        end.map(&.["name"].as_s)
         seen.should eq(names)
       end
     end

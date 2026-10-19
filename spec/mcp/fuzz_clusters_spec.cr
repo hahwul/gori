@@ -216,14 +216,9 @@ describe "MCP fuzz clusters — reply budget" do
       first["cluster_count"].as_i.should eq(120)
       first["cut_by"].as_s.should eq("bytes")
       first.to_json.bytesize.should be < Gori::MCP::Tools::REPLY_ROWS_BUDGET + 8192
-      ids = [] of String
-      offset = 0
-      loop do
-        page = call_json(tools, "fuzz_results", {job_id: job_id, clusters: true, limit: 500, offset: offset})
-        ids.concat(page["clusters"].as_a.map(&.["id"].as_s))
-        offset += page["returned"].as_i
-        break unless page["has_more"].as_bool
-      end
+      ids = mcp_page_rows("clusters") do |o|
+        call_json(tools, "fuzz_results", {job_id: job_id, clusters: true, limit: 500, offset: o})
+      end.map(&.["id"].as_s)
       ids.size.should eq(120)
       ids.uniq.size.should eq(120)
     end
@@ -239,14 +234,9 @@ describe "MCP fuzz clusters — reply budget" do
       first["cut_by"].as_s.should eq("bytes")
       first["has_more"].as_bool.should be_true
       first.to_json.bytesize.should be < Gori::MCP::Tools::REPLY_ROWS_BUDGET + 8192
-      seen = [] of Int32
-      offset = 0
-      loop do
-        page = call_json(tools, "fuzz_results", {job_id: job_id, cluster: id, limit: 1000, offset: offset})
-        seen.concat(page["results"].as_a.map(&.["index"].as_i))
-        offset += page["returned"].as_i
-        break unless page["has_more"].as_bool
-      end
+      seen = mcp_page_rows("results") do |o|
+        call_json(tools, "fuzz_results", {job_id: job_id, cluster: id, limit: 1000, offset: o})
+      end.map(&.["index"].as_i)
       seen.should eq((0...120).to_a)
     end
   end

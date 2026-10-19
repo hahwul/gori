@@ -410,6 +410,20 @@ def tools_for(store : Gori::Store, allow_actions = true, verify_upstream = false
   Gori::MCP::Tools.new(store, allow_actions: allow_actions, verify_upstream: verify_upstream)
 end
 
+# Every row of an offset-paged MCP list: the block fetches the page at an offset, and the rows
+# under `key` are collected until the page's `more` flag goes false.
+def mcp_page_rows(key : String, more = "has_more", & : Int32 -> JSON::Any) : Array(JSON::Any)
+  rows = [] of JSON::Any
+  offset = 0
+  loop do
+    page = yield offset
+    rows.concat(page[key].as_a)
+    offset += page["returned"].as_i
+    break unless page[more].as_bool
+  end
+  rows
+end
+
 # Hand a fresh value to a new fiber. An origin loop in this tree passes the accepted
 # socket to its fiber one of two ways, and never through a block that names the loop
 # variable:

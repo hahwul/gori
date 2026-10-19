@@ -176,14 +176,9 @@ describe "MCP diff_projects" do
         first["cut_by"].as_s.should eq("bytes")
         first["has_more"].as_bool.should be_true
         first.to_json.bytesize.should be < Gori::MCP::Tools::REPLY_ROWS_BUDGET + 8192
-        seen = [] of String
-        offset = 0
-        loop do
-          page = drive_diff(newer, store, %({"from":"q1","verdicts":["added"],"offset":#{offset}}))
-          seen.concat(page["endpoints"].as_a.map(&.["path"].as_s))
-          offset += page["returned"].as_i
-          break unless page["has_more"].as_bool
-        end
+        seen = mcp_page_rows("endpoints") do |o|
+          drive_diff(newer, store, %({"from":"q1","verdicts":["added"],"offset":#{o}}))
+        end.map(&.["path"].as_s)
         seen.should eq(paths.sort)
       ensure
         store.close

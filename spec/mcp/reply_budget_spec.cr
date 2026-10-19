@@ -99,14 +99,7 @@ describe "MCP reply budget" do
       first = call(store, "list_rules", "{}")
       first["cut_by"].as_s.should eq("bytes")
       first.to_json.bytesize.should be < BUDGET + 4096
-      seen = [] of String
-      offset = 0
-      loop do
-        page = call(store, "list_rules", %({"offset":#{offset}}))
-        seen.concat(page["rules"].as_a.map(&.["pattern"].as_s))
-        offset += page["returned"].as_i
-        break unless page["has_more"].as_bool
-      end
+      seen = mcp_page_rows("rules") { |o| call(store, "list_rules", %({"offset":#{o}})) }.map(&.["pattern"].as_s)
       seen.should eq((0...80).map { |i| "p#{i}" })
     end
   end
@@ -122,14 +115,7 @@ describe "MCP reply budget" do
       first = call(store, "list_evidence", "{}")
       first["cut_by"].as_s.should eq("bytes")
       first["total"].as_i.should eq(120)
-      seen = [] of Int64
-      offset = 0
-      loop do
-        page = call(store, "list_evidence", %({"offset":#{offset}}))
-        seen.concat(page["evidence"].as_a.map(&.["id"].as_i64))
-        offset += page["returned"].as_i
-        break unless page["has_more"].as_bool
-      end
+      seen = mcp_page_rows("evidence") { |o| call(store, "list_evidence", %({"offset":#{o}})) }.map(&.["id"].as_i64)
       seen.uniq.size.should eq(120)
     end
   end
