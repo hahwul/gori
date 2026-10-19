@@ -1276,12 +1276,11 @@ describe "H2::StreamGate body rules: the stall deadline" do
   end
 
   # Review r2 #2: the deadline measures a STALL. A body still arriving is waited for, however
-  # long it takes in total.
+  # long it takes in total — with nothing waiting behind it, the wall never runs (#1658).
   it "waits for a request body that is slow but still arriving" do
     with_rules do |rules, ic|
       rules.add(REQ, BODY, "a", "b", host: API)
       g = GatePair.new(rules, ic, 80.milliseconds)
-      g.out_gate.rule_hold_wall = 30.milliseconds # nothing waits behind it, so this never runs
       g.request(1_u32, post("/slow", 6, authority: API))
       6.times do |i|
         sleep 40.milliseconds
@@ -1341,12 +1340,11 @@ describe "H2::StreamGate body rules: the stall deadline" do
   it "releases a slow upload by the wall clock once a later request waits behind it" do
     with_rules do |rules, ic|
       rules.add(REQ, BODY, "a", "b", host: API)
-      g = GatePair.new(rules, ic, 200.milliseconds)
-      g.out_gate.rule_hold_wall = 60.milliseconds
+      g = GatePair.new(rules, ic, 60.milliseconds)
       g.request(1_u32, post("/slow", 8, authority: API))
       g.request(3_u32, get("/next", API), true)
       8.times do |i|
-        sleep 20.milliseconds # never 200 idle: only the wall can release it
+        sleep 20.milliseconds # never 60 idle: only the wall can release it
         g.data(g.out_gate, 1_u32, "a", i == 7)
       end
       frames = shape(g.frames(g.up))
@@ -1354,6 +1352,31 @@ describe "H2::StreamGate body rules: the stall deadline" do
       data_of(g.frames(g.up), 1_u32).should eq("aaaaaaaa") # unmodified
       slow = g.sink.requests.find! { |r| r.target == "/slow" }
       slow.advisory.not_nil!.should contain("still arriving")
+      g.close
+    end
+  end
+
+  # Review of #1663: only the head first in line holds the opens behind it. One behind an
+  # intercept hold moves nothing by spilling, so it keeps waiting for its body and its rewrite.
+  it "runs no wall on an upload queued behind another hold" do
+    with_rules do |rules, ic|
+      rules.add(REQ, BODY, "a", "b", host: API)
+      ic.toggle
+      ic.set_filter("path:/held")
+      g = GatePair.new(rules, ic, 60.milliseconds)
+      g.request(1_u32, get("/held", API), true)
+      ic.pending.size.should eq(1)
+      g.request(3_u32, post("/slow", 8, authority: API))
+      g.request(5_u32, get("/next", API), true)
+      8.times do |i|
+        sleep 20.milliseconds # never 60 idle; 160 ms in all, past the wall
+        g.data(g.out_gate, 3_u32, "a", i == 7)
+      end
+      g.up.size.should eq(0) # stream 1 is still held
+      ic.forward(ic.pending.first.id)
+      sleep 50.milliseconds
+      data_of(g.frames(g.up), 3_u32).should eq("bbbbbbbb")
+      g.sink.requests.find! { |r| r.target == "/slow" }.advisory.should be_nil
       g.close
     end
   end
@@ -1407,6 +1430,25 @@ describe "H2::StreamGate body rules: the HPACK latch" do
       frames = g.frames(g.up)
       field(heads_of(frames, 1_u32).first, "content-length").should eq("4")
       heads_of(frames, 3_u32).first.should eq(second)
+      g.close
+    end
+  end
+
+  it "re-encodes trailers parked behind a held head, ahead of a head queued after them" do
+    with_rules do |rules, ic|
+      rules.add(REQ, BODY, "absent", "x", host: API)
+      g = GatePair.new(rules, ic, 5.seconds, indexing: true)
+      g.request(1_u32, post("/held", 3, authority: API))
+      g.request(3_u32, post("/stream", authority: API)) # no length: queued for order only
+      g.request(5_u32, get("/next", API) + [{"x-tag", "t5"}], true)
+      trailer = [{"x-tag", "t5"}] # indexed against stream 5's insertion
+      g.request(3_u32, trailer, true)
+      g.data(g.out_gate, 1_u32, "one", true)
+      frames = g.frames(g.up)
+      shape(frames).should eq([{Frame::Type::Headers, 1_u32}, {Frame::Type::Data, 1_u32}, {Frame::Type::Headers, 3_u32},
+                               {Frame::Type::Headers, 3_u32}, {Frame::Type::Headers, 5_u32}])
+      heads_of(frames, 3_u32).last.should eq(trailer)
+      heads_of(frames, 5_u32).first.should eq(get("/next", API) + [{"x-tag", "t5"}])
       g.close
     end
   end

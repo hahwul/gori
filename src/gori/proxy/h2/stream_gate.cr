@@ -390,8 +390,8 @@ module Gori::Proxy::H2
       slot.verbatim = !@heads.engaged?
       @slots[block.stream_id] = slot
       if ordered
-        start_walls_locked
         @opens << block.stream_id
+        start_wall_locked
       end
       {slot, block}
     end
@@ -1053,6 +1053,7 @@ module Gori::Proxy::H2
           @slots.delete(id)
           cross = cross + release_locked(slot)
         end
+        start_wall_locked
       else
         # Response direction: nothing opens streams, so each slot releases on its own.
         @slots.values.select(&.ready?).each do |slot|

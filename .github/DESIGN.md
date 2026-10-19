@@ -5093,11 +5093,14 @@ Refines 2026-10-17. h1 rewrites, then holds; the h2 relay now does the same.
 Refines both 2026-10-19 #1628 entries and P7. Takes the open option above.
 
 - The stall deadline stays, and nothing queued behind it, a body still arriving is still waited
-  for. Once a later stream open queues behind the held request head, `RULE_HOLD_WALL` starts.
-  It is 5 s, the buffering intercept hold's own wall (`HOLD_WAIT_DEADLINE`), so one slow upload
-  costs the streams behind it what a held one does. Past it the head goes out as it arrived and
-  the body follows unrewritten, with an advisory. The existing per-gate stall timer carries it,
-  so no new fiber.
+  for. Once the held request head is first in line and a later stream open waits on it, a wall
+  starts. It is `HOLD_WAIT_DEADLINE`, the buffering intercept hold's own 5 s wall, so one slow
+  upload costs the streams behind it what a held one does. Past it the head goes out as it
+  arrived and the body follows unrewritten, with an advisory. A head queued behind another hold
+  runs no wall: spilling it would lose its rewrite and move nothing. Its wall starts when it
+  reaches the front, so parallel uploads each get their own 5 s in turn. The existing per-gate
+  stall timer carries it, so no new fiber; one deadline for both keeps that timer from sleeping
+  past a wall started after it slept.
 - A request head deferred only for a body rule, or for order behind one, no longer engages the
   HPACK latch on defer. Rule 1 already keeps every later open behind it, so nothing has been
   reordered yet. The latch engages when a block really goes out ahead of a verbatim head (that
