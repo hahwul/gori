@@ -138,6 +138,10 @@ module Gori::Discover
     # reuse for a bounded descriptor count.
     MAX_IDLE_PER_POOL = 32
 
+    # A crawl reads an event stream as the Fuzzer's sweep does (#1631): a found SSE endpoint
+    # must not hold a worker until the idle timeout.
+    SSE = Repeater::StreamBound::SWEEP
+
     @header_block : String
     @pools : Hash(String, Repeater::Pool)?
     @keep_alive : Bool
@@ -219,10 +223,10 @@ module Gori::Discover
                  pool.send(req)
                elsif @http2
                  Repeater::H2Engine.send(req, scheme: scheme, host: host, port: port,
-                   verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
+                   verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides, sse: SSE)
                else
                  Repeater::Engine.send(req, scheme: scheme, host: host, port: port,
-                   verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
+                   verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides, sse: SSE)
                end
       result.with_wire(req)
     end
@@ -287,10 +291,10 @@ module Gori::Discover
       return nil if pools.size >= MAX_POOLS
       pool = if @http2
                Repeater::H2Pool.new(scheme, host, port, @verify, @sni, @timeout,
-                 @overrides, @idle_conns).as(Repeater::Pool)
+                 @overrides, @idle_conns, sse: SSE).as(Repeater::Pool)
              else
                Repeater::ConnPool.new(scheme, host, port, @verify, @sni, @timeout,
-                 @overrides, @idle_conns).as(Repeater::Pool)
+                 @overrides, @idle_conns, sse: SSE).as(Repeater::Pool)
              end
       pools[key] = pool
       pool

@@ -192,7 +192,9 @@ module Gori
         auto_content_length: rec.auto_content_length?,
         verify: verify,
         overrides: overrides,
-        tls_preset: rec.tls_preset)
+        tls_preset: rec.tls_preset,
+        # A step is checked, not watched: an event stream is read as a sweep reads one (#1631).
+        sse: Repeater::StreamBound::SWEEP)
     end
   end
 end

@@ -172,6 +172,12 @@ describe Gori::Repeater::StreamBound do
       Gori::Fuzz::Config.new.sse.should eq(StreamBound::SWEEP)
       Gori::Miner::Config.new.sse.should eq(StreamBound::SWEEP)
     end
+
+    # Authorize, active Probe, the Sequencer and a minimize build a sender without naming one.
+    it "is bounded by default on a sender that names no bound" do
+      Gori::Fuzz::Sender.new(Gori::Fuzz::Origin.new("http", "127.0.0.1", 1), ungated_outbound,
+        false, false).sse.should eq(StreamBound::SWEEP)
+    end
   end
 end
 

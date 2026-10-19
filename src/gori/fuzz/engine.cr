@@ -326,6 +326,11 @@ module Gori::Fuzz
     # `Fuzz::Config#tls_preset`, which is where the operator's choice comes from.
     getter tls_preset : String?
 
+    # How long one send reads an event stream (#1631). SWEEP unless the caller says otherwise,
+    # because every caller is a sweep (Fuzz and Miner pass their run's bound; Authorize, Probe,
+    # the Sequencer and a minimize take this): one request must not wait out an open stream.
+    getter sse : Repeater::StreamBound?
+
     # The run's TLS SNI override, or nil. BLANK IS NIL, normalised here for the same reason
     # `tls_preset` is: "" and nil both mean "no override", and the difference between them is
     # not cosmetic. `Upstream.dial_tls_result` passes `hostname: sni || host` to OpenSSL, and
@@ -356,7 +361,7 @@ module Gori::Fuzz
                    @evidence : Bool = false, @slot_overlay : Bool = true,
                    @ws_idle : Time::Span = Repeater::WsEngine::DEFAULT_IDLE,
                    @ws_keep_key : Bool = false, tls_preset : String? = nil,
-                   @sse : Repeater::StreamBound? = nil)
+                   @sse : Repeater::StreamBound? = Repeater::StreamBound::SWEEP)
       @sni = sni.presence
       @tls_preset = Settings.tls_preset_normalize(tls_preset)
       # h2 used to be excluded here, on the ground that "H2Engine frames its own connection

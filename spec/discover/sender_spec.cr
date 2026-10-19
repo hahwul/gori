@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "../support/sse_origin"
 
 private alias D = Gori::Discover
 
@@ -271,6 +272,20 @@ describe Gori::Discover::Sender do
         D::Sender.new(verify: false, timeout: 2.seconds).fetch("http", "127.0.0.1", port, "/a")
       end
       wire.should_not contain("X-Slot")
+    end
+  end
+end
+
+# #1631: a crawl that finds an event stream reads it as the Fuzzer's sweep does, pooled or not.
+describe "Discover::Sender on an event stream" do
+  it "stops at the sweep's event bound instead of reading to the idle timeout" do
+    port = start_sse_origin
+    {false, true}.each do |keep_alive|
+      sender = D::Sender.new(verify: false, timeout: 20.seconds, keep_alive: keep_alive, idle_conns: 1)
+      result = sender.fetch("http", "127.0.0.1", port, "/events")
+      result.bounded.should eq("events")
+      Gori::Sse.from_response(result.head, result.body).size.should eq(Gori::Repeater::StreamBound::SWEEP.max_events)
+      sender.close
     end
   end
 end

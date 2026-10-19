@@ -431,6 +431,16 @@ describe "Gori::Retest.confirm_note" do
 end
 
 describe Gori::Retest::LiveBackend do
+  # #1631: a step against an event stream must not read it to the idle timeout.
+  it "reads an event stream under the sweep's bound" do
+    with_store do |store|
+      rid = store.insert_repeater("http://sse.test", "GET / HTTP/1.1\r\nHost: sse.test\r\n\r\n".to_slice,
+        false, true, nil, 0)
+      rec = store.get_repeater(rid).not_nil!
+      Gori::Retest.plan_options(rec, nil, true, 1.second).sse.should eq(Gori::Repeater::StreamBound::SWEEP)
+    end
+  end
+
   # The surface's spelling of "send anyway" rides on the Outbound it hands over, the one
   # source every engine-phrased refusal reads (`Outbound#remedy`).
   it "phrases a scope refusal in the waiver the surface put on its Outbound" do
