@@ -37,8 +37,9 @@
 # A head that declares `content-length` is held (a Slot, the hold machinery's own) until the
 # body is in and the rules have run, then goes out with the length the body actually has. In
 # the request direction that holds later stream OPENS behind it (rule 1 in the class comment);
-# streams already open keep moving, and a body that STALLS for `HOLD_WAIT_DEADLINE` gives the
-# wait up. A held response head blocks no other stream, so it waits however long its body
+# streams already open keep moving, and a body that STALLS for `HOLD_WAIT_DEADLINE`, or that is
+# still arriving `RULE_HOLD_WALL` after a later open began waiting behind it, gives the wait up
+# (#1658). A held response head blocks no other stream, so it waits however long its body
 # takes. A response with no declared length goes out at once and only the DATA waits. Either way a body no rule changed goes out as the peer's own DATA frames.
 #
 # A REQUEST with no declared length is never buffered. Nothing on the wire tells a finite
@@ -59,6 +60,14 @@ class Gori::Proxy::H2::StreamGate
   # hundred concurrent streams hold a hundred times it (P6). The stream whose DATA would cross
   # this spills instead.
   MAX_RULE_BUFFERED = MAX_RULE_BODY
+
+  # How long a request head held for its body may keep a later stream open waiting behind it:
+  # the buffering intercept hold's own wall, so one slow upload costs the streams behind it what
+  # a held one does. Nothing queued behind it, a body still arriving is waited for (#1658).
+  RULE_HOLD_WALL = HOLD_WAIT_DEADLINE
+
+  # `RULE_HOLD_WALL` on every gate; settable only so a spec can trip it quickly.
+  property rule_hold_wall : Time::Span = RULE_HOLD_WALL
 
   # One leg's receiver, as gori the sender sees it — plus the receiver frames that arrived on
   # THIS gate's pump for the PEER to account (`heard`). Built only on a body-rule connection.
@@ -116,6 +125,8 @@ class Gori::Proxy::H2::StreamGate
     property? head_out = false
     # When a held head started waiting for its body (`expire_owned_heads_locked`).
     property held_since : Time::Instant?
+    # When a later stream open began waiting behind that held head (`RULE_HOLD_WALL`).
+    property blocked_since : Time::Instant?
     # DATA to send, each with the credit its sending returns to the sender (0 when that credit
     # was already returned on arrival, which keeps it in `Flow#buffered` until written).
     getter sends = [] of {Frame::Header, Int32}
@@ -244,6 +255,7 @@ class Gori::Proxy::H2::StreamGate
     @assembler.note_body_rewrite(own.stream_id, own.request?, hits, own.head, body)
     if slot && (pending = slot.pending)
       slot.decided = @heads.reencode(pending, with_length(pending.fields, rewritten.size))
+      unverbatim_after_locked(slot)
     end
   end
 
@@ -294,8 +306,8 @@ class Gori::Proxy::H2::StreamGate
   end
 
   # Take a stream on, after `defer?` has decided whether its head waits. A REQUEST head that
-  # waits for a declared length gets `HOLD_WAIT_DEADLINE` as a stall bound (`held_since`), since
-  # every later stream open waits behind it. A held response head blocks no other stream, so it
+  # waits for a declared length gets `HOLD_WAIT_DEADLINE` as a stall bound (`held_since`), and
+  # `RULE_HOLD_WALL` once a later open waits behind it (`start_walls_locked`). A held response head blocks no other stream, so it
   # waits for its body however slowly the body comes, as it did on the h1 path.
   private def adopt_locked(own : Owned?, slot : Slot?) : Nil
     fc = @flow
@@ -338,29 +350,59 @@ class Gori::Proxy::H2::StreamGate
     earliest = nil.as(Time::Instant?)
     unless @closed || fc.nil?
       fc.owned.each_value do |own|
-        since = own.held_since
-        earliest = since if since && own.slot && (earliest.nil? || since < earliest)
+        due = due_at(own)
+        earliest = due if due && (earliest.nil? || due < earliest)
       end
     end
     unless earliest
       @stall_timer = false
       return nil
     end
-    {earliest + hold_wait_deadline - Time.instant, 1.millisecond}.max
+    {earliest - Time.instant, 1.millisecond}.max
   end
 
-  # A held request head whose body has STALLED — no DATA for the deadline — goes out as it
-  # arrived and its body follows unmodified: a declared length says how big the body is, not
-  # that it is coming, and every later stream open waits behind it. Run on every frame and by
+  # When a held request head is next late: its stall deadline, or its wall once a later open
+  # waits behind it.
+  private def due_at(own : Owned) : Time::Instant?
+    since = own.held_since
+    return nil unless since && own.slot
+    due = since + hold_wait_deadline
+    blocked = own.blocked_since
+    blocked && behind?(own) ? {due, blocked + rule_hold_wall}.min : due
+  end
+
+  # A later stream open is about to queue: every head held for its body with nothing behind it
+  # yet starts its wall now. One already blocking keeps the time it started.
+  private def start_walls_locked : Nil
+    fc = @flow
+    return unless fc && !fc.owned.empty?
+    now = Time.instant
+    fc.owned.each_value { |own| own.blocked_since = now if own.held_since && !behind?(own) }
+  end
+
+  # Whether a later stream open waits behind this held head. A held request head is always in
+  # `@opens`, in arrival order.
+  private def behind?(own : Owned) : Bool
+    @opens.last? != own.stream_id
+  end
+
+  # A held request head whose body has STALLED — no DATA for the deadline — or has kept a later
+  # open waiting past `RULE_HOLD_WALL` goes out as it arrived and its body follows unmodified: a
+  # declared length says how big the body is, not when it will be in. Run on every frame and by
   # the stall timer, beside `check_waiting_locked`'s identical question.
   private def expire_owned_heads_locked : Nil
     fc = @flow
     return unless fc && !fc.owned.empty?
     now = Time.instant
-    return unless fc.owned.each_value.any? { |own| late?(own, now) }
-    fc.owned.values.select { |own| late?(own, now) }.each do |own|
-      spill_locked(fc, own, "its body stopped arriving for #{hold_wait_deadline.total_seconds.round(1)} s " \
-                            "while later requests waited behind it, so its head went out with the length it declared")
+    return unless fc.owned.each_value.any? { |own| late?(own, now) || walled?(own, now) }
+    fc.owned.values.each do |own|
+      if late?(own, now)
+        spill_locked(fc, own, "its body stopped arriving for #{hold_wait_deadline.total_seconds.round(1)} s " \
+                              "while later requests waited behind it, so its head went out with the length it declared")
+      elsif walled?(own, now)
+        spill_locked(fc, own, "its body was still arriving #{rule_hold_wall.total_seconds.round(1)} s after a later " \
+                              "request began waiting behind it, so its head went out with the length it declared")
+      end
     end
   end
 
@@ -446,6 +488,7 @@ class Gori::Proxy::H2::StreamGate
   # Give the buffer up: what arrived goes out as it arrived, and the rest follows as it comes.
   private def spill_locked(fc : Flow, own : Owned, why : String) : Nil
     own.held_since = nil
+    own.blocked_since = nil
     skip_body(own.stream_id, why)
     own.spilled = true
     own.complete = true if own.arrived.last?.try(&.end_stream?)
@@ -494,6 +537,11 @@ class Gori::Proxy::H2::StreamGate
   private def late?(own : Owned, now : Time::Instant) : Bool
     since = own.held_since
     !own.slot.nil? && !since.nil? && now - since >= hold_wait_deadline
+  end
+
+  private def walled?(own : Owned, now : Time::Instant) : Bool
+    due = due_at(own)
+    !due.nil? && now >= due && !late?(own, now)
   end
 
   private def with_length(fields : Array(HPACK::Field), size : Int32) : Array(HPACK::Field)
