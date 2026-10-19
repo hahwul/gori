@@ -215,7 +215,8 @@ jobs:
 
   specs:
     # The full suite, split four ways by scripts/spec_shard.sh (ci.yml's partition) over the one
-    # static runner `build` compiled: each shard pays for a checkout and a download, not a build.
+    # static runner `build` compiled: each shard pays for a checkout, `shards install` and a
+    # download, not a build.
     needs: [scope, build]
     if: ${{ !cancelled() && needs.scope.outputs.mode == 'full' && needs.build.outputs.specs == 'success' }}
     name: specs (${{ matrix.shard }}/4)
@@ -230,6 +231,12 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v6
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: 1.22.0
+      - name: Install shards
+        # Some specs read a shard's source (termisu's input loop), so `lib/` must exist.
+        run: shards install --production
       - uses: actions/download-artifact@v4
         with:
           name: windows-specs
