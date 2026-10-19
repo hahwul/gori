@@ -458,6 +458,29 @@ describe "WS::Live.apply_command (the capturing instance's drain)" do
     end
   end
 
+  # The sender stops polling `Store.ws_inject_ack_budget_ms` after enqueueing and reports the
+  # inject unconfirmed; one written after that would land again on the agent's retry.
+  it "refuses a command whose sender has stopped waiting, and writes nothing" do
+    with_store do |store|
+      sink = LiveSink.new
+      with_relay(sink, 417_i64) do |r|
+        id = store.enqueue_intercept_command("t", Gori::Store::WS_INJECT_VERB, item_id: 417_i64,
+          bytes: "late".to_slice, arg: Gori::Store.ws_inject_arg("out", WS::OP_TEXT))
+        cmd = store.intercept_commands_after(0_i64, 10).find(&.id.==(id)).not_nil!
+        cmd.created_at.should be > 0
+        stale = Gori::Store::CommandRow.new(cmd.id, cmd.session_token, cmd.verb, cmd.item_id,
+          cmd.bytes, cmd.arg, cmd.created_at - Gori::Store.ws_inject_ack_budget_ms.to_i64 * 1000)
+        WS::Live.apply_command(store, sink, ungated_outbound, stale) { |_| }.should be_true
+        200.times { break unless store.command_status(id).try(&.[0]) == "pending"; sleep 5.milliseconds }
+        store.command_status(id).should eq({"refused", WS::Live::EXPIRED})
+        # Nothing reached the origin: the next frame it reads is one written after the refusal.
+        r.cs_w.write(masked_frame(WS::OP_TEXT, "next"))
+        String.new(read_frame(r.ts_r).payload).should eq("next")
+        sink.rows.none?(&.[3]).should be_true
+      end
+    end
+  end
+
   it "acks a closed socket at once, naming why" do
     with_store do |store|
       id = store.enqueue_intercept_command("t", Gori::Store::WS_INJECT_VERB, item_id: 999_i64,

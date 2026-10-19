@@ -297,8 +297,11 @@ module Gori
         in .not_enqueued?
           busy("could not enqueue the inject (store write dropped); retry")
         in .not_confirmed?
+          # Not retryable: a write that started before the deadline may still land, so a blind
+          # retry can inject twice (`Live::EXPIRED` keeps one that had not started from going out).
           err("inject not confirmed within #{Store.ws_inject_ack_budget_ms}ms — the capturing instance may be busy; " \
-              "check the flow's messages before retrying, it may still have gone out", "NOT_CONFIRMED", retryable: true)
+              "check the flow's messages (get_flow) before retrying, it may still have gone out",
+            "NOT_CONFIRMED", retryable: false)
         end
       end
 

@@ -2385,8 +2385,11 @@ module Gori
       getter item_id : Int64?
       getter bytes : Bytes?
       getter arg : String?
+      # When the sender enqueued it (unix µs): `ws_inject` reads its ack deadline off it.
+      getter created_at : Int64
 
-      def initialize(@id, @session_token, @verb, @item_id = nil, @bytes = nil, @arg = nil)
+      def initialize(@id, @session_token, @verb, @item_id = nil, @bytes = nil, @arg = nil,
+                     @created_at = 0_i64)
       end
     end
   end

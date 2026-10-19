@@ -92,11 +92,13 @@ module Gori::Proxy::WS
     # control frame waits only for a write already in progress. Answers the Shape of what
     # went out (the mask key included, so the capture is the bytes the peer saw, P7), else
     # why nothing did (a String), or why the write failed after it started (`Live::Spent`).
-    def inject(opcode : UInt8, payload : Bytes, wait : Time::Span) : Shape | String | Live::Spent
+    # No write starts at or after `expires` (`Live.apply_command`'s sender deadline).
+    def inject(opcode : UInt8, payload : Bytes, wait : Time::Span,
+               expires : Time::Instant? = nil) : Shape | String | Live::Spent
       shape = Shape.new(masked: @mask, mask_key: @mask ? Random::Secure.random_bytes(4) : nil)
       frame = WS.encode(opcode, payload, shape, mask: @mask)
       control = opcode >= 0x8_u8
-      if refusal = await_turn(control, wait)
+      if refusal = await_turn(control, wait, expires)
         return refusal
       end
       write_bounded(frame, control ? nil : true, wait) || shape
@@ -106,12 +108,13 @@ module Gori::Proxy::WS
 
     # Poll until a frame may go out: nil then, with no yield before the caller's write, else
     # why it may not. Only one data frame per side waits at a time.
-    private def await_turn(control : Bool, wait : Time::Span) : String?
+    private def await_turn(control : Bool, wait : Time::Span, expires : Time::Instant?) : String?
       deadline = Time.instant + wait
       waiter = false
       loop do
-        return Live::CLOSED if @closed
-        return close_sent_refusal if @close_sent && !control
+        if refusal = refusal_now(control, expires)
+          return refusal
+        end
         return nil if !@busy && (control || !@mid_message)
         return wait_refusal(wait) if Time.instant >= deadline
         unless control || waiter
@@ -122,6 +125,13 @@ module Gori::Proxy::WS
       end
     ensure
       @waiting = false if waiter
+    end
+
+    # Why no frame may go out at all, however long it waits; nil when one may.
+    private def refusal_now(control : Bool, expires : Time::Instant?) : String?
+      return Live::CLOSED if @closed
+      return close_sent_refusal if @close_sent && !control
+      Live::EXPIRED if expires.try { |e| Time.instant >= e }
     end
 
     # The bytes of one write, and the message state they leave behind. A CLOSE always goes
@@ -222,6 +232,14 @@ module Gori::Proxy::WS
     # the request-budget slot it took stays spent.
     record Spent, reason : String
 
+    EXPIRED = "the sender stopped waiting for this inject's ack before it could go out, so it " \
+              "was not written: an inject is never written after its sender reported it unconfirmed"
+
+    # How long before the sender stops polling (`Store.ws_inject_ack_budget_ms` after the
+    # command row's `created_at`) the last write may start, so its ack is committed and read in
+    # time. Kept well under the budget's slack over `BOUNDARY_WAIT`.
+    ACK_MARGIN = 1.second
+
     ANOTHER_WAITING = "another injected data frame is already waiting for a message boundary on " \
                       "this side; nothing was written. Retry once it has gone out or been refused"
 
@@ -274,17 +292,24 @@ module Gori::Proxy::WS
     #
     # `outbound` is the CALLING surface's decision, and Layer 2 (`send_block`, Sandbox) is
     # asked here, against the handshake's own host: that is the host the socket dialled.
+    #
+    # `expires` is when a bridge sender stops waiting for the ack: past it nothing is written
+    # (the budget's rate wait included), so an inject reported unconfirmed never goes out late
+    # and a retry cannot land twice.
     def self.inject(sink : FlowSink, flow_id : Int64, direction : String, opcode : UInt8,
-                    payload : Bytes, outbound : Outbound, wait : Time::Span = BOUNDARY_WAIT) : String?
+                    payload : Bytes, outbound : Outbound, wait : Time::Span = BOUNDARY_WAIT,
+                    expires : Time::Instant? = nil) : String?
       entry = find(sink, flow_id) || return CLOSED
       ctx = entry.ctx
       if block = outbound.send_block(ctx.scheme, ctx.host, ctx.target, ctx.port)
         return block
       end
-      if refusal = outbound.admit
+      run_halt = outbound.halt
+      halt = expires.try { |e| -> { Time.instant >= e || run_halt.try(&.call) == true } } || run_halt
+      if refusal = outbound.admit(halt: halt)
         return refusal
       end
-      shape = entry.leg(direction).inject(opcode, payload, wait)
+      shape = entry.leg(direction).inject(opcode, payload, wait, expires)
       if shape.is_a?(String)
         outbound.refund(1)
         return shape
@@ -318,8 +343,9 @@ module Gori::Proxy::WS
         return false
       end
       payload = cmd.bytes || Bytes.empty
+      expires = ack_deadline(cmd.created_at)
       spawn(name: "gori-ws-inject") do
-        if refusal = inject(sink, flow_id, direction, opcode, payload, outbound)
+        if refusal = inject(sink, flow_id, direction, opcode, payload, outbound, expires: expires)
           store.ack_intercept_command(cmd.id, "refused", refusal)
         else
           kind = OPCODES.key_for?(opcode).try(&.upcase) || "opcode #{opcode}"
@@ -331,6 +357,14 @@ module Gori::Proxy::WS
         store.ack_intercept_command(cmd.id, "error", "ws_inject failed: #{ex.message}") rescue nil
       end
       true
+    end
+
+    # The instant `cmd`'s sender stops polling for its ack, less `ACK_MARGIN`. `created_at` is
+    # the sender's wall clock at enqueue (same host: both processes open the one SQLite file).
+    def self.ack_deadline(created_at_us : Int64) : Time::Instant
+      left_us = created_at_us + Store.ws_inject_ack_budget_ms.to_i64 * 1000 -
+                ACK_MARGIN.total_microseconds.to_i64 - (Time.utc - Time::UNIX_EPOCH).total_microseconds.to_i64
+      Time.instant + left_us.microseconds
     end
 
     # "5s", or "300ms" for a wait under a second, which would otherwise read as "0s".

@@ -121,11 +121,11 @@ module Gori
     # watermark. AUTOINCREMENT ids are never reused, so this can't silently skip a row.
     def intercept_commands_after(after_id : Int64, limit : Int32) : Array(CommandRow)
       rows = [] of CommandRow
-      @db.query("SELECT id, session_token, verb, item_id, bytes, arg FROM intercept_commands WHERE id > ? ORDER BY id ASC LIMIT ?",
+      @db.query("SELECT id, session_token, verb, item_id, bytes, arg, created_at FROM intercept_commands WHERE id > ? ORDER BY id ASC LIMIT ?",
         args: [after_id, limit.to_i64] of DB::Any) do |rs|
         rs.each do
           rows << CommandRow.new(rs.read(Int64), rs.read(String?), rs.read(String),
-            rs.read(Int64?), rs.read(Bytes?), rs.read(String?))
+            rs.read(Int64?), rs.read(Bytes?), rs.read(String?), rs.read(Int64))
         end
       end
       rows

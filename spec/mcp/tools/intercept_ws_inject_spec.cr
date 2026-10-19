@@ -54,6 +54,20 @@ describe "MCP ws_inject" do
     end
   end
 
+  # A write that started before the ack deadline may still land, so a blind retry could
+  # inject twice: the agent is told to look first, not that a retry is safe.
+  it "reports an unconfirmed inject as not retryable" do
+    with_store do |store|
+      id = flow_with(store, H1_HEAD)
+      store.set_intercept_bridge({"capturing" => true, "session_token" => "s",
+                                  "heartbeat_ms" => Time.utc.to_unix_ms}.to_json)
+      r = call(store, %({"flow_id":#{id},"allow_unscoped":true}))
+      r.error_code.should eq("NOT_CONFIRMED")
+      r.retryable.should be_false
+      r.text.should contain("check the flow's messages")
+    end
+  end
+
   it "marks an injected frame in get_flow, and leaves a peer's alone" do
     with_store do |store|
       id = flow_with(store, H1_HEAD)
