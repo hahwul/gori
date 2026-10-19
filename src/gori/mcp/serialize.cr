@@ -1100,7 +1100,7 @@ module Gori
                       emit_grpc_bytes(j, m.data)
                     elsif m.json
                       # A Connect `+json` payload or end-stream message: JSON text, not protobuf.
-                      j.field "json", text(String.new(plain))
+                      emit_connect_json(j, plain)
                     else
                       decoded = Protobuf.decode(plain)
                       j.field "protobuf" { decoded.to_json(j, budget) }
@@ -1753,6 +1753,17 @@ module Gori
         return if s.valid_encoding?
         j.field "#{field_name}_base64", Base64.strict_encode(s.to_slice)
         j.field "#{field_name}_lossy", true
+      end
+
+      # A Connect `+json` message's text, held to MAX_TEXT as a response body is: one message
+      # is not bounded by GRPC_MSGS_MAX, and the protobuf branch beside it has its own budget.
+      # Cut on a whole UTF-8 sequence; `json_truncated` says the text is a prefix. Shared with
+      # `gori run history show`, so the two surfaces cap one message the same way.
+      def self.emit_connect_json(j : JSON::Builder, plain : Bytes) : Nil
+        cut = plain.size > MAX_TEXT
+        shown = cut ? plain[0, utf8_whole_prefix(plain[0, MAX_TEXT])] : plain
+        j.field "json", text(String.new(shown))
+        j.field "json_truncated", true if cut
       end
 
       # The length of `bytes` without the UTF-8 sequence its end cut short — a lead byte

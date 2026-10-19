@@ -1553,7 +1553,7 @@ module Gori
                       j.field "bytes", Base64.strict_encode(m.data)
                     elsif m.json
                       # A Connect `+json` payload or end-stream message: JSON text, not protobuf.
-                      j.field "json", String.new(plain).scrub
+                      MCP::Serialize.emit_connect_json(j, plain)
                     else
                       decoded = Protobuf.decode(plain)
                       j.field "protobuf" do

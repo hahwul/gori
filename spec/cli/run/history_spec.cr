@@ -835,6 +835,25 @@ describe "gori run show --format json" do
       mcp_msgs[1]["json"].as_s.should eq(end_stream)
     end
 
+    # A JSON message is held to MCP's MAX_TEXT on both surfaces, as a body is: the protobuf
+    # branch beside it has a budget, and this one had none.
+    it "caps a long JSON message at MAX_TEXT and says so, on both surfaces" do
+      long = %({"error":{"message":"#{"é" * 40_000}"}})
+      body = grpc_frame_for_spec(Bytes[0x0a, 0x01, 0x61]) + grpc_frame_for_spec(long.to_slice, 0x02_u8)
+      d = connect_detail.call(
+        "POST /demo.Users/Watch HTTP/1.1\r\nHost: api.test\r\ncontent-type: application/connect+proto\r\n\r\n",
+        200, "HTTP/1.1 200 OK\r\ncontent-type: application/connect+proto\r\n\r\n", body, nil)
+      cli = JSON.parse(Gori::CLI::Run.show_json_for_spec(d, true, true))["response"]["grpc_messages"]["messages"][1]
+      mcp = JSON.parse(Gori::MCP::Serialize.flow_detail_json(d))["response_grpc_messages"]["messages"][1]
+      [cli, mcp].each do |m|
+        m["json_truncated"].as_bool.should be_true
+        m["json"].as_s.bytesize.should be <= Gori::MCP::Serialize::MAX_TEXT
+        m["json"].as_s.valid_encoding?.should be_true
+        m["json"].as_s.ends_with?("é").should be_true
+        long.starts_with?(m["json"].as_s).should be_true
+      end
+    end
+
     it "tells a stream cut before its end-stream message from one that ended cleanly" do
       req = "POST /demo.Users/Watch HTTP/1.1\r\nHost: api.test\r\ncontent-type: application/connect+proto\r\n\r\n"
       resp = "HTTP/1.1 200 OK\r\ncontent-type: application/connect+proto\r\n\r\n"
