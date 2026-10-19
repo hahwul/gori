@@ -12,14 +12,17 @@ module Gori::Proxy
   # that ends an event once FLUSH_EVERY has passed since the last append (the first event at
   # once), judged inside `write` with no timer fiber. "Ends an event" because the codec tees a
   # chunked body in pieces: the chunk-size line arrives a moment before the event it frames,
-  # and appending on it would hold that event back until the next one. What is appended is a
-  # prefix of what is stored, so the capture cap caps it too: once the buffer is full nothing
-  # more is pending and the appends stop. The final response write carries the whole body and
-  # drops the chunks (`CapturedResponse#live?`).
+  # and appending on it would hold that event back until the next one. A timed stream knows an
+  # event ended from its arrivals, so a blank line split across two writes still counts; a
+  # compressed one has no events to see, so any write that is not chunk framing (which ends in
+  # a line end) counts. What is appended is a prefix of what is stored, so the capture cap caps
+  # it too: once the buffer is full nothing more is pending and the appends stop. The final
+  # response write carries the whole body and drops the chunks (`CapturedResponse#live?`).
   #
   # ponytail: an event that lands within FLUSH_EVERY of an append and is followed by silence,
-  # or whose blank line is split across two writes, waits for the stream's next write (an SSE
-  # heartbeat, usually); a timer fiber per stream is the upgrade if that wait matters.
+  # or a compressed write whose last byte happens to be a line end, waits for the stream's next
+  # write (an SSE heartbeat, usually); a timer fiber per stream is the upgrade if that wait
+  # matters.
   #
   # `arrivals` times each event the stored bytes complete (`Sse::Arrivals`), so History shows
   # when each one landed; the times ride the same appends, and the final write carries all of
@@ -60,9 +63,19 @@ module Gori::Proxy
             elsif pending >= FLUSH_BYTES
               true
             else
-              event_end?(slice) && (at.nil? || Time.instant - at >= FLUSH_EVERY)
+              ended?(slice) && (at.nil? || Time.instant - at >= FLUSH_EVERY)
             end
       append_pending if due
+    end
+
+    # Whether this write ended an event the sink has not taken. `event_end?` stays beside the
+    # arrivals for a stream past `Sse::MAX_EVENTS`, whose times stop growing.
+    private def ended?(slice : Bytes) : Bool
+      if arrivals = @arrivals
+        arrivals.times.size > @timed || event_end?(slice)
+      else
+        !slice.last?.in?(0x0a_u8, 0x0d_u8)
+      end
     end
 
     # Whether `slice` holds the blank line that ends an SSE event: two line ends in a row, of

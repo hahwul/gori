@@ -40,8 +40,9 @@ private def live_head : Gori::Store::CapturedResponse
     state: Gori::Store::FlowState::Pending)
 end
 
+# Timed by default, as every stream the proxy can count is; `arrivals: nil` is a compressed one.
 private def live_capture(sink : LiveSink, limit : Int32 = 1 << 20,
-                         arrivals : Gori::Sse::Arrivals? = nil) : Gori::Proxy::LiveCapture
+                         arrivals : Gori::Sse::Arrivals? = Gori::Sse::Arrivals.new(chunked: false)) : Gori::Proxy::LiveCapture
   Gori::Proxy::LiveCapture.new(limit, 0_i64, sink, live_head, arrivals)
 end
 
@@ -63,7 +64,7 @@ describe Gori::Proxy::LiveCapture do
 
   it "appends on time only at the end of an event, so a chunk-size line does not hold it back" do
     sink = LiveSink.new
-    cap = live_capture(sink)
+    cap = live_capture(sink, arrivals: Gori::Sse::Arrivals.new(chunked: true))
     cap.write("b\r\n".to_slice)
     sink.appends.size.should eq(1) # the head only
     cap.write("data: one\n\n".to_slice)
@@ -151,7 +152,35 @@ describe Gori::Proxy::LiveCapture do
   end
 
   it "has no times for an untimed stream" do
-    live_capture(LiveSink.new).event_times.should be_nil
+    live_capture(LiveSink.new, arrivals: nil).event_times.should be_nil
+  end
+
+  it "appends an event whose blank line arrives in a write of its own" do
+    sink = LiveSink.new
+    cap = live_capture(sink)
+    cap.write("data: one\n".to_slice)
+    sink.appends.size.should eq(1) # the head only: no event has ended
+    cap.write("\n".to_slice)
+    sink.appends.last.should eq({0_i64, "data: one\n\n", false})
+  end
+
+  # A compressed stream's bytes almost never hold a blank line, so it appends on time alone,
+  # skipping only a write of chunk framing (which ends in a line end).
+  it "appends a compressed stream on time, not on its chunk framing" do
+    sink = LiveSink.new
+    cap = live_capture(sink, arrivals: nil)
+    deflated = Bytes.new(26) { |i| (0x20 + i).to_u8 }
+    cap.write("1a\r\n".to_slice)
+    sink.appends.size.should eq(1) # the head only
+    cap.write(deflated)
+    sink.appends.size.should eq(2)
+    cap.write("\r\n".to_slice)
+    sleep Gori::Proxy::LiveCapture::FLUSH_EVERY + 20.milliseconds
+    cap.write("1a\r\n".to_slice)
+    sink.appends.size.should eq(2)
+    cap.write(deflated)
+    sink.appends.size.should eq(3)
+    sink.body.should eq(String.new(cap.to_slice))
   end
 end
 
