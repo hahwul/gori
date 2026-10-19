@@ -254,6 +254,9 @@ module Gori
           {% if anns.size != 1 %}
             {% raise "#{m.name}: an entry point carries exactly one @[Subcommand] (found #{anns.size})" %}
           {% end %}
+          {% unless m.name.starts_with?("cmd_") %}
+            {% raise "#{m.name}: @[Subcommand] belongs on a cmd_* entry point — a def inserted between the annotation and its cmd_ takes it, and the subcommand silently runs that def instead" %}
+          {% end %}
           {% ann = anns[0] %}
           {% if ann.args.empty? || !ann.args.all?(&.is_a?(StringLiteral)) %}
             {% raise "#{m.name}: @[Subcommand] takes the name and its aliases as string arguments" %}
