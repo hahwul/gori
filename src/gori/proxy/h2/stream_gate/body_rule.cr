@@ -213,20 +213,41 @@ class Gori::Proxy::H2::StreamGate
     own = slot.rule
     rw = @body_rewriter
     return body unless own && rw && !body.empty?
-    hits = [] of Store::RuleRef
-    rewritten = own.request? ? rw.rewrite_request_body(body, own.host, hits) : rw.rewrite_response_body(body, own.host, hits)
-    rw.settle_hits(hits, 0, body, rewritten) { |b| b }
+    rewritten, hits = run_body_rule(rw, own, body)
     return body if rewritten == body
     room = own.request? ? @flow.try(&.initial) || DEFAULT_WINDOW : body.size.to_i64
     if rewritten.size > body.size && rewritten.size > room
       skip_body(own.stream_id, "it was held at intercept, and the rewrite would have grown it past the #{room}-byte window its receiver is known to allow")
       return body
     end
+    note_rewrite(own, slot, hits, body, rewritten)
+    slot.rebuilt = rewritten
+  end
+
+  # The body rules over one owned body, their hits settled. An empty body runs no rule, as on
+  # h1 (`ClientConn#apply_body_rewrite`): a `^` pattern would otherwise invent one for every
+  # bodiless message.
+  private def run_body_rule(rw : Proxy::HeadRewriter, own : Owned, body : Bytes) : {Bytes, Array(Store::RuleRef)}
+    hits = [] of Store::RuleRef
+    rewritten = if body.empty?
+                  body
+                elsif own.request?
+                  rw.rewrite_request_body(body, own.host, hits)
+                else
+                  rw.rewrite_response_body(body, own.host, hits)
+                end
+    rw.settle_hits(hits, 0, body, rewritten) { |b| b }
+    {rewritten, hits}
+  end
+
+  # A rewrite the rules made: recorded on the flow, and a held head's `content-length` made
+  # to describe the new body.
+  private def note_rewrite(own : Owned, slot : Slot?, hits : Array(Store::RuleRef), body : Bytes,
+                           rewritten : Bytes) : Nil
     @assembler.note_body_rewrite(own.stream_id, own.request?, hits, own.head, body)
-    if pending = slot.pending
+    if slot && (pending = slot.pending)
       slot.decided = @heads.reencode(pending, with_length(pending.fields, rewritten.size))
     end
-    slot.rebuilt = rewritten
   end
 
   # SSE and gRPC never end on a schedule gori can wait for: a body rule leaves them streaming,
@@ -456,17 +477,7 @@ class Gori::Proxy::H2::StreamGate
       f.payload.copy_to(entity + at)
       at += f.payload.size
     end
-    hits = [] of Store::RuleRef
-    # An empty body runs no rule, as on h1 (`ClientConn#apply_body_rewrite`): a `^` pattern
-    # would otherwise invent one for every bodiless message.
-    rewritten = if entity.empty?
-                  entity
-                elsif own.request?
-                  rw.rewrite_request_body(entity, own.host, hits)
-                else
-                  rw.rewrite_response_body(entity, own.host, hits)
-                end
-    rw.settle_hits(hits, 0, entity, rewritten) { |b| b }
+    rewritten, hits = run_body_rule(rw, own, entity)
     if rewritten == entity
       own.arrived.each { |f| own.sends << {f, 0} }
     else
@@ -474,10 +485,7 @@ class Gori::Proxy::H2::StreamGate
       ends = own.arrived.last?.try(&.end_stream?) || false
       data_frames(own.stream_id, rewritten, ends).each { |f| own.sends << {f, 0} }
       fc.buffered += rewritten.size - entity.size
-      @assembler.note_body_rewrite(own.stream_id, own.request?, hits, own.head, entity)
-      if (slot = own.slot) && (pending = slot.pending)
-        slot.decided = @heads.reencode(pending, with_length(pending.fields, rewritten.size))
-      end
+      note_rewrite(own, own.slot, hits, entity, rewritten)
     end
     own.arrived.clear
     if slot = own.slot
