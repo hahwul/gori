@@ -64,11 +64,15 @@ module Gori::Proxy::H2
   #      stream, PUSH_PROMISE, is never deferred at all (`defer?`).
   #   2. **HPACK is one sequential per-direction state** (RFC 7541 §2.2). A passthrough block
   #      delivered ahead of a deferred one resolves its dynamic indices against a table missing
-  #      the deferred block's insertions. `HeadRewrite#engage` is the answer and is called on
-  #      every defer: a re-encoded block reads no index and inserts none, so its position stops
-  #      mattering. Deferring therefore costs the direction its HPACK compression for the rest
-  #      of the connection — that is the price of legal reordering, paid only by connections
-  #      that actually hold something.
+  #      the deferred block's insertions. `HeadRewrite#engage` is the answer: a re-encoded
+  #      block reads no index and inserts none, so its position stops mattering. Deferring
+  #      therefore costs the direction its HPACK compression for the rest of the connection —
+  #      that is the price of legal reordering, paid only by connections that actually hold
+  #      something. An intercept hold, and any hold in the response direction, engages on
+  #      defer. A request head deferred only for a body rule or for order is held VERBATIM
+  #      (`Slot#verbatim?`, #1658): rule 1 already keeps every later open behind it, so the
+  #      latch waits for a block that really goes out ahead of it, or for the head itself not
+  #      going out as it arrived, and a connection where neither happens keeps its wire HEADERS.
   #
   # Everything else keeps flowing: stream 0 frames always, already-open streams' DATA and
   # WINDOW_UPDATE and RST_STREAM, and the entire opposite direction. A held RESPONSE blocks
@@ -188,8 +192,11 @@ module Gori::Proxy::H2
     private class Slot
       getter stream_id : UInt32
       # The head block as it arrived (already re-encoded — the latch engaged when this Slot was
-      # created). Written as-is on a forward-unedited, re-parsed against on an edit.
+      # created — unless `verbatim?`). Written as-is on a forward-unedited, re-parsed against on
+      # an edit.
       property pending : HeadRewrite::Block?
+      # `pending` is the client's own frames, the latch not engaged on it (rule 2, #1658).
+      property? verbatim = false
       # What to write instead, once an edit has been re-encoded.
       property decided : HeadRewrite::Block?
       # The queue entry, while a human still owns the decision.
@@ -357,14 +364,10 @@ module Gori::Proxy::H2
       waits = waits_for_body?(own, held)
       unless held || queued || waits
         adopt_locked(own, nil)
-        return false
+        return overtakes_verbatim_locked(block)
       end
 
-      block = @heads.engage(block) # rule 2 — MUST precede any later block going out
-      slot = Slot.new(block.stream_id)
-      slot.pending = block
-      @slots[block.stream_id] = slot
-      @opens << block.stream_id if ordered
+      slot, block = new_slot_locked(block, ordered, !held.nil?)
       if held
         start_hold_locked(slot, held, block, own)
       else
@@ -376,16 +379,61 @@ module Gori::Proxy::H2
       true
     end
 
+    # The Slot a deferred block waits in, with the block as it will be written.
+    private def new_slot_locked(block : HeadRewrite::Block, ordered : Bool,
+                                held : Bool) : {Slot, HeadRewrite::Block}
+      # rule 2 — MUST precede any later block going out, so a request head nothing holds at
+      # intercept stays verbatim until one does (`overtakes_verbatim_locked`)
+      block = @heads.engage(block) if held || !@ordered
+      slot = Slot.new(block.stream_id)
+      slot.pending = block
+      slot.verbatim = !@heads.engaged?
+      @slots[block.stream_id] = slot
+      if ordered
+        @opens << block.stream_id
+        start_wall_locked
+      end
+      {slot, block}
+    end
+
     # A later block on a stream already deferred or owned. Owned first: a body rule's trailers
     # follow its body, not its held head.
     private def follow_locked(block : HeadRewrite::Block) : Bool
       return true if follow_body_locked(block)
       slot = @slots[block.stream_id]?
       return false unless slot
-      # h2 trailers behind a held response head. Already re-encoded: the latch engaged when the
-      # Slot was created.
-      park_block(slot, block)
+      # h2 trailers behind a held head. Engaged here for a verbatim head's: parked, they go out
+      # ahead of any head queued after them. A latch already engaged returns the block as it is.
+      park_block(slot, @heads.engage(block))
       true
+    end
+
+    # A block about to go out ahead of a head still held verbatim is the reordering rule 2 is
+    # about, so the latch engages on it and it is written re-encoded here; every later block
+    # comes out of `finish` re-encoded. The heads it passed stay verbatim: they read only from
+    # blocks that arrived before them, and those reach the far end first.
+    private def overtakes_verbatim_locked(block : HeadRewrite::Block) : Bool
+      return false if @slots.empty? || @heads.engaged? || !@slots.each_value.any?(&.verbatim?)
+      write_block(@heads.engage(block))
+      true
+    end
+
+    # A verbatim head that will not go out as it arrived — suppressed, or re-encoded with a new
+    # length — leaves the far decoder short of its insertions, so every head queued verbatim
+    # behind it is re-encoded now, and the latch engages for whatever arrives next.
+    private def unverbatim_after_locked(slot : Slot) : Nil
+      return unless slot.verbatim?
+      slot.verbatim = false
+      @heads.latch
+      after = false
+      @opens.each do |id|
+        if id == slot.stream_id
+          after = true
+        elsif after && (s = @slots[id]?) && s.verbatim? && (b = s.pending)
+          s.pending = @heads.reencode(b, b.fields)
+          s.verbatim = false
+        end
+      end
     end
 
     # Whether this block OPENS its stream is stream state, not the presence of `:method`: a
@@ -407,8 +455,7 @@ module Gori::Proxy::H2
       return true if push_refuses_locked(block)
       return nil unless block.first.frame_type == Frame::Type::PushPromise
       return false unless @slots.has_key?(block.stream_id)
-      last = block.frames.size - 1
-      block.frames.each_with_index { |f, i| write(f, i == last ? block.pre : nil) }
+      write_block(block)
       true
     end
 
@@ -1003,6 +1050,7 @@ module Gori::Proxy::H2
           @slots.delete(id)
           cross = cross + release_locked(slot)
         end
+        start_wall_locked
       else
         # Response direction: nothing opens streams, so each slot releases on its own.
         @slots.values.select(&.ready?).each do |slot|
@@ -1084,6 +1132,12 @@ module Gori::Proxy::H2
       # exchange inside `feed`, which deletes the stream the extractor needs to scope on.
       @extract.try(&.observe(frame, pre))
       @assembler.feed(@direction, frame, pre)
+    end
+
+    # One header block's frames, its projection riding the last.
+    private def write_block(block : HeadRewrite::Block) : Nil
+      last = block.frames.size - 1
+      block.frames.each_with_index { |f, i| write(f, i == last ? block.pre : nil) }
     end
 
     # Feed a held head to the assembler for the DECODED projection only, without logging it as
@@ -1210,6 +1264,7 @@ module Gori::Proxy::H2
     private NO_CROSS = [] of CrossRst
 
     private def remove(slot : Slot) : Nil
+      unverbatim_after_locked(slot)
       @slots.delete(slot.stream_id)
       @opens.delete(slot.stream_id)
     end

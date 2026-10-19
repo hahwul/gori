@@ -5087,3 +5087,28 @@ Refines 2026-10-17. h1 rewrites, then holds; the h2 relay now does the same.
 - A request head held for a body-rule body keeps the stall deadline, not a wall clock (Review r2
   #2). Open option if one upload stalling the connection matters: a wall clock that runs only
   while a later open waits behind the held head, then spill.
+
+### 2026-10-19: an h2 body-rule head hold has a wall while an open waits behind it, and keeps its wire HEADERS (#1658)
+
+Refines both 2026-10-19 #1628 entries and P7. Takes the open option above.
+
+- The stall deadline stays, and nothing queued behind it, a body still arriving is still waited
+  for. Once the held request head is first in line and a later stream open waits on it, a wall
+  starts. It is `HOLD_WAIT_DEADLINE`, the buffering intercept hold's own 5 s wall, so one slow
+  upload costs the streams behind it what a held one does. Past it the head goes out as it
+  arrived and the body follows unrewritten, with an advisory. A head queued behind another hold
+  runs no wall: spilling it would lose its rewrite and move nothing. Its wall starts when it
+  reaches the front, so parallel uploads each get their own 5 s in turn. The existing per-gate
+  stall timer carries it, so no new fiber; one deadline for both keeps that timer from sleeping
+  past a wall started after it slept.
+- A request head deferred only for a body rule, or for order behind one, no longer engages the
+  HPACK latch on defer. Rule 1 already keeps every later open behind it, so nothing has been
+  reordered yet. The latch engages when a block really goes out ahead of a verbatim head (that
+  block is written re-encoded), when trailers park behind one, or when a verbatim head will not
+  go out as it arrived (reset, or re-encoded for a rewritten length). In those last cases every
+  head queued verbatim behind it is re-encoded too. A verbatim head that goes out after the latch
+  is still sound: it reads only from blocks that arrived before it, and those reached the far
+  end first. Intercept holds and response-direction holds still engage on defer, because their
+  overtakes are routine and their parked trailers would need re-encoding as raw frames.
+- Still open: holds still cost every request with a declared length on a body-rule host, whether
+  or not a pattern would match it. Cheaper gates (method, content-type) wait for the rule model.

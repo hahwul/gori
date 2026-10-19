@@ -3,15 +3,6 @@
 module Gori
   module CLI
     module Run
-      # `delete`/`clear`/`show`/`ls`/`list` are reserved as the first positional (same convention
-      # as `gori run probe`); a QL query starting with one goes through --query. `ls`/`list`
-      # name the default listing (#1625), as `issues list` and the top-level `ls` do. `history show
-      # <id>` is the top-level `gori run show <id>`, spelled the way the History tab reads.
-      @[Subcommand("history", "ls", help: [
-        {"history (ls)", "List / QL-query captured flows"},
-        {"history delete", "Hard-delete captured flows by id (one or more), or every match of -q QL (needs --yes)"},
-        {"history clear", "Delete ALL captured flows in the project (needs --yes)"},
-      ])]
       # Takes a leading `ls` / `list` off `positional` — the listing itself (#1625), not a search
       # for "ls" — and THEN refuses a reserved verb the dispatcher did not see first
       # (`--format=json delete 42`): `delete` is not QL, and searching for it would exit 0 with
@@ -21,6 +12,15 @@ module Gori
         reserved_query_verb_error(positional, "history", ["delete", "rm", "clear", "show"], "delete/rm, clear, show")
       end
 
+      # `delete`/`clear`/`show`/`ls`/`list` are reserved as the first positional (same convention
+      # as `gori run probe`); a QL query starting with one goes through --query. `ls`/`list`
+      # name the default listing (#1625), as `issues list` and the top-level `ls` do. `history show
+      # <id>` is the top-level `gori run show <id>`, spelled the way the History tab reads.
+      @[Subcommand("history", "ls", help: [
+        {"history (ls)", "List / QL-query captured flows"},
+        {"history delete", "Hard-delete captured flows by id (one or more), or every match of -q QL (needs --yes)"},
+        {"history clear", "Delete ALL captured flows in the project (needs --yes)"},
+      ])]
       private def self.cmd_history(args : Array(String)) : Nil
         case args.first?
         when "delete", "rm" then cmd_history_delete(args[1..])

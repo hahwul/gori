@@ -247,6 +247,11 @@ module Gori
         getter http : Oast::Http
         getter kind_label : String
         property seen = Oast::SeenWindow(String).new
+        # Callbacks caught but not yet returned, as serialized rows (`oast_callback_json`, so
+        # each holds at most its capped bytes): a poll answers within the reply budget and the
+        # rest wait here for the next one (#1659). interactsh hands a hit over once, so leaving
+        # it unseen would not bring it back.
+        getter pending = [] of String
         # The `oast_sessions` row this handle was RESUMED from (nil for an ad-hoc oast_start).
         # Set means the handle is a project listener: oast_poll persists what it catches and
         # stamps last_poll_at, and oast_stop keeps the registration instead of dropping it.
@@ -1939,6 +1944,9 @@ module Gori
         return s if s.is_a?(Result)
         sid = str(h, "session_id")
         fresh = s.provider.poll(s.http, s.session).select { |i| s.seen.add?(i.unique_id) }
+        # Queued BEFORE anything else can raise: they are marked seen and drained from the
+        # provider, so the retryable error below must not be the last anyone hears of them.
+        s.pending.concat(fresh.map { |i| oast_callback_json(i, s.kind_label) })
         # A RESUMED handle is a project listener, so its hits are project evidence: persist
         # them and stamp the liveness signal, exactly as the TUI listener does. An ad-hoc
         # oast_start handle has no row to file them under and stays ephemeral.
@@ -1946,12 +1954,42 @@ module Gori
           store.touch_oast_session(row)
           fresh.each { |i| Oast::Sessions.record_callback(store, row, i) }
         end
-        callbacks = fresh.map { |i| Oast::Present.interaction(i, s.kind_label) }
-        Result.new({session_id: sid, count: fresh.size, callbacks: callbacks}.to_json)
+        # Under REPLY_ROWS_BUDGET (#1659): a callback's bytes are sized by whoever hit the
+        # listener, so the reply carries what fits and the rest stay pending for the next poll.
+        parts = fit_rows(s.pending) { |rj, p, _| rj.raw(p) }
+        s.pending.shift(parts.size)
+        more = !s.pending.empty?
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "session_id", sid
+            j.field "count", parts.size
+            j.field("callbacks") { raw_rows(j, parts) }
+            emit_cut(j, more)
+            j.field "has_more", more
+          end
+        end)
       rescue ex
         # Transient by construction: a poll is a read the caller is expected to repeat, and the
         # session it names is still live here. See `oast_start`'s rescue for the contract.
         err("OAST poll failed: #{ex.message}", "NETWORK_ERROR", retryable: true)
+      end
+
+      # One callback, its raw_request / raw_response held to MAX_TEXT like a flow body and cut
+      # on a whole UTF-8 sequence; `*_truncated` says the text is a prefix. A resumed session
+      # filed the whole callback in the store before this cut.
+      private def oast_callback_json(i : Oast::Interaction, label : String) : String
+        req, res = i.raw_request, i.raw_response
+        req_cut = req.bytesize > Serialize::MAX_TEXT
+        res_cut = !!res && res.bytesize > Serialize::MAX_TEXT
+        req = String.new(Serialize.max_text_prefix(req.to_slice)) if req_cut
+        res = String.new(Serialize.max_text_prefix(res.to_slice)) if res && res_cut
+        JSON.build do |j|
+          j.object do
+            Oast::Present.interaction(i.copy_with(raw_request: req, raw_response: res), label).each { |k, v| j.field k, v }
+            j.field "raw_request_truncated", true if req_cut
+            j.field "raw_response_truncated", true if res_cut
+          end
+        end
       end
 
       @[Tool("oast_stop", gated: true, agent_action: true, unbound: true, requires: ["oast_release"], permission: "send")]

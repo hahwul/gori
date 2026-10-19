@@ -513,8 +513,9 @@ module Gori
         Result.new(openapi_json(doc, result.report, yaml, choice, ignored, written: {destination, text.bytesize}))
       end
 
-      # The inline document's default size cap, and the ceiling either way.
-      OPENAPI_INLINE_BYTES = 256 * 1024
+      # The inline document's default size cap, and the ceiling either way. Inline is the reply
+      # budget (#1659): `output_path` is where the rest of a larger document goes.
+      OPENAPI_INLINE_BYTES = REPLY_ROWS_BUDGET
       OPENAPI_MAX_BYTES    = 2 * 1024 * 1024
 
       # Where `output_path` asks the document to go, resolved; nil when the call wants it
@@ -656,7 +657,11 @@ module Gori
             j.field "flows_read", report.flows_read
             j.field "truncated", report.truncated?
             j.field("skipped") { j.object { report.skipped.each { |k, v| j.field k.key, v } } }
-            j.field "notes", openapi_notes(report, choice)
+            notes = openapi_notes(report, choice)
+            if !written && report.paths_dropped > 0
+              notes << "raise max_bytes (up to #{OPENAPI_MAX_BYTES}) or pass output_path for the whole document"
+            end
+            j.field "notes", notes
             j.field "examples_redacted", report.redacted if choice
             emit_ignored_terms(j, ignored)
           end

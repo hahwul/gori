@@ -1200,10 +1200,12 @@ private class GatePair
   getter down = IO::Memory.new # what the client was sent
   getter out_gate : Gori::Proxy::H2::StreamGate
   getter in_gate : Gori::Proxy::H2::StreamGate
-  @enc_out = HPACK::Encoder.new
   @enc_in = HPACK::Encoder.new
 
-  def initialize(rules : Gori::Rules, ic : Gori::Interceptor, deadline : Time::Span)
+  # `indexing`: the client's encoder inserts into its dynamic table, as a browser's does, so a
+  # block that reaches the origin out of order or re-encoded is one that would decode wrong.
+  def initialize(rules : Gori::Rules, ic : Gori::Interceptor, deadline : Time::Span, indexing = false)
+    @enc_out = HPACK::Encoder.new(indexing: indexing)
     host = "api.example.com"
     assembler = Gori::Proxy::H2::Assembler.new(@sink, host, 443)
     @out_gate = Gori::Proxy::H2::StreamGate.new("out", @up, 1_i64, @sink, assembler, host, 443, ic,
@@ -1216,9 +1218,12 @@ private class GatePair
     @in_gate.hold_wait_deadline = deadline
   end
 
-  def request(stream : UInt32, fields : Array({String, String}), end_stream = false) : Nil
+  # The HEADERS payload the client sent.
+  def request(stream : UInt32, fields : Array({String, String}), end_stream = false) : Bytes
     flags = Frame::END_HEADERS | (end_stream ? Frame::END_STREAM : 0_u8)
-    @out_gate.accept(Frame::Header.new(Frame::Type::Headers.value, flags, stream, @enc_out.encode(fields)))
+    payload = @enc_out.encode(fields)
+    @out_gate.accept(Frame::Header.new(Frame::Type::Headers.value, flags, stream, payload))
+    payload
   end
 
   def response(stream : UInt32, fields : Array({String, String})) : Nil
@@ -1271,7 +1276,7 @@ describe "H2::StreamGate body rules: the stall deadline" do
   end
 
   # Review r2 #2: the deadline measures a STALL. A body still arriving is waited for, however
-  # long it takes in total.
+  # long it takes in total — with nothing waiting behind it, the wall never runs (#1658).
   it "waits for a request body that is slow but still arriving" do
     with_rules do |rules, ic|
       rules.add(REQ, BODY, "a", "b", host: API)
@@ -1326,6 +1331,141 @@ describe "H2::StreamGate body rules: the stall deadline" do
       String.new(frames[4].payload).should eq("ONE")
       done = g.sink.requests.find! { |r| r.target == "/done" }
       done.advisory.should be_nil
+      g.close
+    end
+  end
+
+  # #1658: a body still arriving is waited for only while nothing queues behind it. Once a later
+  # open waits, the wall runs, and past it the upload goes out unmodified so the open can go.
+  it "releases a slow upload by the wall clock once a later request waits behind it" do
+    with_rules do |rules, ic|
+      rules.add(REQ, BODY, "a", "b", host: API)
+      g = GatePair.new(rules, ic, 60.milliseconds)
+      g.request(1_u32, post("/slow", 8, authority: API))
+      g.request(3_u32, get("/next", API), true)
+      8.times do |i|
+        sleep 20.milliseconds # never 60 idle: only the wall can release it
+        g.data(g.out_gate, 1_u32, "a", i == 7)
+      end
+      frames = shape(g.frames(g.up))
+      frames.index!({Frame::Type::Headers, 3_u32}).should be < frames.rindex!({Frame::Type::Data, 1_u32})
+      data_of(g.frames(g.up), 1_u32).should eq("aaaaaaaa") # unmodified
+      slow = g.sink.requests.find! { |r| r.target == "/slow" }
+      slow.advisory.not_nil!.should contain("still arriving")
+      g.close
+    end
+  end
+
+  # Review of #1663: only the head first in line holds the opens behind it. One behind an
+  # intercept hold moves nothing by spilling, so it keeps waiting for its body and its rewrite.
+  it "runs no wall on an upload queued behind another hold" do
+    with_rules do |rules, ic|
+      rules.add(REQ, BODY, "a", "b", host: API)
+      ic.toggle
+      ic.set_filter("path:/held")
+      g = GatePair.new(rules, ic, 60.milliseconds)
+      g.request(1_u32, get("/held", API), true)
+      ic.pending.size.should eq(1)
+      g.request(3_u32, post("/slow", 8, authority: API))
+      g.request(5_u32, get("/next", API), true)
+      8.times do |i|
+        sleep 20.milliseconds # never 60 idle; 160 ms in all, past the wall
+        g.data(g.out_gate, 3_u32, "a", i == 7)
+      end
+      g.up.size.should eq(0) # stream 1 is still held
+      ic.forward(ic.pending.first.id)
+      sleep 50.milliseconds
+      data_of(g.frames(g.up), 3_u32).should eq("bbbbbbbb")
+      g.sink.requests.find! { |r| r.target == "/slow" }.advisory.should be_nil
+      g.close
+    end
+  end
+end
+
+# #1658: a request head held only for a body rule, or for order behind one, keeps the client's
+# own HEADERS unless something actually goes out ahead of it or it does not go out as it came.
+describe "H2::StreamGate body rules: the HPACK latch" do
+  it "keeps the client's HEADERS byte for byte when nothing overtook a held head" do
+    with_rules do |rules, ic|
+      rules.add(REQ, BODY, "absent", "x", host: API)
+      g = GatePair.new(rules, ic, 5.seconds, indexing: true)
+      sent = [g.request(1_u32, post("/first", 3, authority: API))]
+      sent << g.request(3_u32, post("/second", 3, authority: API)) # queued behind stream 1
+      g.data(g.out_gate, 1_u32, "one", true)
+      g.data(g.out_gate, 3_u32, "two", true)
+      sent << g.request(5_u32, get("/third", API), true)
+      g.frames(g.up).select(&.frame_type.==(Frame::Type::Headers)).map(&.payload).should eq(sent)
+      g.out_gate.@heads.engaged?.should be_false
+      g.close
+    end
+  end
+
+  it "re-encodes a block that goes out ahead of a held head, and the held head still decodes" do
+    with_rules do |rules, ic|
+      rules.add(REQ, BODY, "absent", "x", host: API)
+      g = GatePair.new(rules, ic, 5.seconds, indexing: true)
+      g.request(1_u32, post("/stream", authority: API)) # no length: never held, stays open
+      g.request(3_u32, post("/held", 3, authority: API) + [{"x-tag", "t3"}])
+      trailer = [{"x-tag", "t3"}] # indexed against stream 3's insertion
+      g.request(1_u32, trailer, true)
+      g.data(g.out_gate, 3_u32, "one", true)
+      frames = g.frames(g.up)
+      shape(frames).should eq([{Frame::Type::Headers, 1_u32}, {Frame::Type::Headers, 1_u32},
+                               {Frame::Type::Headers, 3_u32}, {Frame::Type::Data, 3_u32}])
+      heads_of(frames, 1_u32).last.should eq(trailer)
+      heads_of(frames, 3_u32).first.should eq(post("/held", 3, authority: API) + [{"x-tag", "t3"}])
+      g.close
+    end
+  end
+
+  it "re-encodes a head queued behind one whose rewrite changed its length" do
+    with_rules do |rules, ic|
+      rules.add(REQ, BODY, "one", "ONE!", host: API)
+      g = GatePair.new(rules, ic, 5.seconds, indexing: true)
+      g.request(1_u32, post("/grown", 3, authority: API) + [{"x-tag", "t1"}])
+      second = post("/kept", 3, authority: API) + [{"x-tag", "t1"}] # indexed against stream 1's
+      g.request(3_u32, second)
+      g.data(g.out_gate, 3_u32, "two", true)
+      g.data(g.out_gate, 1_u32, "one", true)
+      frames = g.frames(g.up)
+      field(heads_of(frames, 1_u32).first, "content-length").should eq("4")
+      heads_of(frames, 3_u32).first.should eq(second)
+      g.close
+    end
+  end
+
+  it "re-encodes trailers parked behind a held head, ahead of a head queued after them" do
+    with_rules do |rules, ic|
+      rules.add(REQ, BODY, "absent", "x", host: API)
+      g = GatePair.new(rules, ic, 5.seconds, indexing: true)
+      g.request(1_u32, post("/held", 3, authority: API))
+      g.request(3_u32, post("/stream", authority: API)) # no length: queued for order only
+      g.request(5_u32, get("/next", API) + [{"x-tag", "t5"}], true)
+      trailer = [{"x-tag", "t5"}] # indexed against stream 5's insertion
+      g.request(3_u32, trailer, true)
+      g.data(g.out_gate, 1_u32, "one", true)
+      frames = g.frames(g.up)
+      shape(frames).should eq([{Frame::Type::Headers, 1_u32}, {Frame::Type::Data, 1_u32}, {Frame::Type::Headers, 3_u32},
+                               {Frame::Type::Headers, 3_u32}, {Frame::Type::Headers, 5_u32}])
+      heads_of(frames, 3_u32).last.should eq(trailer)
+      heads_of(frames, 5_u32).first.should eq(get("/next", API) + [{"x-tag", "t5"}])
+      g.close
+    end
+  end
+
+  it "re-encodes a head queued behind a held head the client reset" do
+    with_rules do |rules, ic|
+      rules.add(REQ, BODY, "absent", "x", host: API)
+      g = GatePair.new(rules, ic, 5.seconds, indexing: true)
+      g.request(1_u32, post("/gone", 3, authority: API) + [{"x-tag", "t1"}])
+      second = post("/kept", 3, authority: API) + [{"x-tag", "t1"}] # indexed against stream 1's
+      sent = g.request(3_u32, second)
+      g.out_gate.accept(Frame::Header.new(Frame::Type::RstStream.value, 0_u8, 1_u32, Bytes[0, 0, 0, 8]))
+      g.data(g.out_gate, 3_u32, "two", true)
+      frames = g.frames(g.up)
+      shape(frames).should eq([{Frame::Type::Headers, 3_u32}, {Frame::Type::Data, 3_u32}])
+      frames.first.payload.should_not eq(sent)
+      heads_of(frames, 3_u32).first.should eq(second)
       g.close
     end
   end

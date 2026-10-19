@@ -171,8 +171,10 @@ module Gori
 
         tool j, "oast_poll",
           "Poll an OAST session (from oast_start) for new out-of-band callbacks. Returns only " \
-          "interactions not already seen on this session; each has protocol/method/source/" \
-          "destination/raw_request. Use to confirm blind SSRF/XXE/RCE etc." do |s|
+          "interactions not already returned on this session; each has protocol/method/source/" \
+          "destination/raw_request (raw_request/raw_response capped at #{Serialize::MAX_TEXT // 1024} KB, " \
+          "`*_truncated`). `has_more`: more are already waiting — poll again. " \
+          "Use to confirm blind SSRF/XXE/RCE etc." do |s|
           s.field "session_id", strprop("session id returned by oast_start"), required: true
         end
 

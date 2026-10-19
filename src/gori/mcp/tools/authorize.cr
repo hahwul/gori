@@ -152,16 +152,15 @@ module Gori
       end
 
       # The flows a run reached and could not replay. Always emitted (an empty array when there
-      # were none), the same contract `emit_authorize_skipped` states for the same reason.
-      private def emit_authorize_failures(j : JSON::Builder, ajob : AuthorizeJob) : Nil
+      # were none), the same contract `emit_authorize_skipped` states for the same reason, and
+      # held to the reply budget the same way (`failed_unshown_ids`).
+      private def emit_authorize_failures(j : JSON::Builder, ajob : AuthorizeJob, used : Int32) : Nil
         j.field "failed_count", ajob.failed
-        j.field("failed") do
-          j.array do
-            ajob.failures.each do |(flow_id, url, msg)|
-              {flow_id: flow_id, url: Serialize.text(url), error: Serialize.text(msg)}.to_json(j)
-            end
-          end
+        parts = fit_rows(ajob.failures, used) do |rj, (flow_id, url, msg), _|
+          {flow_id: flow_id, url: Serialize.text(url), error: Serialize.text(msg)}.to_json(rj)
         end
+        j.field("failed") { raw_rows(j, parts) }
+        j.field "failed_unshown_ids", ajob.failures[parts.size..].map(&.[0]) if parts.size < ajob.failures.size
       end
 
       @[Tool("authorize_status", gated: true, read_only: true, permission: "send")]
@@ -191,8 +190,8 @@ module Gori
             j.field "job_complete", ajob.status != :running
             j.field "incomplete_reason", incomplete_reason(ajob.status)
             j.field "error", Serialize.text(ajob.error_msg)
-            emit_authorize_skipped(j, ajob.skipped)
-            emit_authorize_failures(j, ajob)
+            used = emit_authorize_skipped(j, ajob.skipped)
+            emit_authorize_failures(j, ajob, used)
             emit_audit(j, ajob.audit, ajob.ended_at_ms)
           end
         end)
@@ -214,7 +213,9 @@ module Gori
         # still named, and its detail is a `results` row with `bypass:true`.
         bypasses = fit_rows(ajob.bypassed) { |rj, t, _| authorize_bypass_json(rj, t) }
         unshown = ajob.bypassed[bypasses.size..].map(&.flow_id)
-        parts = fit_rows(page, bypasses.sum(&.bytesize)) { |rj, t, _| authorize_target_json(rj, t) }
+        used = bypasses.sum(&.bytesize)
+        parts = fit_rows(page, used) { |rj, t, _| authorize_target_json(rj, t) }
+        used += parts.sum(&.bytesize)
         cut = parts.size < page.size
         page = page.first(parts.size)
         Result.new(JSON.build do |j|
@@ -237,8 +238,8 @@ module Gori
             j.field "incomplete_reason", incomplete_reason(ajob.status)
             j.field "results_truncated", ajob.truncated?
             j.field "error", Serialize.text(ajob.error_msg)
-            emit_authorize_skipped(j, ajob.skipped)
-            emit_authorize_failures(j, ajob)
+            used = emit_authorize_skipped(j, ajob.skipped, used)
+            emit_authorize_failures(j, ajob, used)
           end
         end)
       end
@@ -423,22 +424,25 @@ module Gori
       # (an empty array when nothing was skipped) so a caller never has to tell "no skips" from
       # "this field does not exist" — and because "gori sent nothing" and "there was nothing
       # there" are different answers an operator has to be able to tell apart (P4).
-      private def emit_authorize_skipped(j : JSON::Builder, skipped : Array(Authorize::Skipped)) : Nil
+      #
+      # Under REPLY_ROWS_BUDGET (#1659), spending from `used` (what the reply already carries):
+      # the rows that do not fit are still named, as flow ids in `skipped_unshown_ids`, and
+      # `skipped_summary` tallies every one. Returns the budget spent so far.
+      private def emit_authorize_skipped(j : JSON::Builder, skipped : Array(Authorize::Skipped), used : Int32 = 0) : Int32
         j.field "skipped_count", skipped.size
         j.field "skipped_summary", skipped.empty? ? nil : Authorize::Plan.skip_tally(skipped)
-        j.field("skipped") do
-          j.array do
-            skipped.each do |s|
-              {
-                flow_id:      s.flow_id,
-                method:       Serialize.text(s.method),
-                url:          Serialize.text(s.url),
-                reason:       s.reason.to_s,
-                reason_label: s.label,
-              }.to_json(j)
-            end
-          end
+        parts = fit_rows(skipped, used) do |rj, s, _|
+          {
+            flow_id:      s.flow_id,
+            method:       Serialize.text(s.method),
+            url:          Serialize.text(s.url),
+            reason:       s.reason.to_s,
+            reason_label: s.label,
+          }.to_json(rj)
         end
+        j.field("skipped") { raw_rows(j, parts) }
+        j.field "skipped_unshown_ids", skipped[parts.size..].map(&.flow_id) if parts.size < skipped.size
+        used + parts.sum(&.bytesize)
       end
 
       private def emit_authorize_identities(j : JSON::Builder, ajob : AuthorizeJob) : Nil
@@ -684,6 +688,8 @@ module Gori
           "sends, errors, sends refused before the socket, the flows that were SKIPPED with the " \
           "reason for each, and the ones that could not be replayed at all (`failed_count` / " \
           "`failed[]` — a stored head gori cannot put on the wire; the run continues past them). " \
+          "Past the reply budget the rest of either list are flow ids in `skipped_unshown_ids` / " \
+          "`failed_unshown_ids`. " \
           "A run that sends nothing says so." do |s|
           s.field "job_id", strprop("id from authorize_start"), required: true
         end
@@ -696,7 +702,8 @@ module Gori
           "their detail in `results` rows with bypass:true). " \
           "`results` pages the full per-identity detail (verdict, status, size, delta, error), " \
           "`skipped` names every selected flow that was not replayed, and `failed[]` the ones " \
-          "that could not be replayed at all. `unanswered_count` is the requests whose every " \
+          "that could not be replayed at all (past the reply budget, as ids in `skipped_unshown_ids` / " \
+          "`failed_unshown_ids`). `unanswered_count` is the requests whose every " \
           "send failed at the socket: they compared nothing, so they are evidence of neither " \
           "a bypass nor enforcement. `baseline_denied_count` is the requests whose BASELINE was " \
           "itself refused (4xx/5xx): the privileged request the run is anchored on never got the " \

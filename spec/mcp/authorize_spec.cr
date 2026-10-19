@@ -300,6 +300,56 @@ describe "MCP authorize tools" do
         results["has_more"].as_bool.should be_true
       end
     end
+
+    # #1659: `authorize_start` names its skips through the same budgeted list.
+    it "holds authorize_start's skipped list to the reply budget" do
+      port = start_authz_origin(enforce: false)
+      with_store do |store|
+        ids = [seed_authz_flow(store, port)]
+        80.times { |i| ids << seed_authz_flow(store, port, method: "POST", target: "/#{i}/#{"x" * 1000}") }
+        tools = tools_for(store)
+        start = call_json(tools, "authorize_start", {"flow_ids" => ids, "identities" => anon, "allow_unscoped" => true}.to_json)
+        start.to_json.bytesize.should be < Gori::MCP::Tools::REPLY_ROWS_BUDGET + 8192
+        start["skipped_count"].as_i.should eq(80)
+        shown = start["skipped"].as_a.size
+        shown.should be > 0
+        (shown + start["skipped_unshown_ids"].as_a.size).should eq(80)
+        drain_job(tools, start["job_id"].as_s)
+      end
+    end
+
+    # #1659: `skipped[]` and `failed[]` run to AUTHORIZE_MAX_FLOWS rows each. They share the
+    # reply's one budget, the rest named by flow id, and the counts still cover every row.
+    it "holds skipped and failed to the reply budget and names the rest by flow id" do
+      port = start_authz_origin(enforce: false)
+      with_store do |store|
+        flow = seed_authz_flow(store, port)
+        tools = tools_for(store)
+        start = call_json(tools, "authorize_start", {"flow_ids" => [flow], "identities" => anon, "allow_unscoped" => true}.to_json)
+        job_id = start["job_id"].as_s
+        drain_job(tools, job_id)
+        job = tools.@authorize_jobs[job_id]
+        long = "http://127.0.0.1/#{"x" * 1000}"
+        300.times do |i|
+          job.skipped << Gori::Authorize::Skipped.new(i.to_i64, "POST", long, :unsafe_method)
+          job.failures << {i.to_i64, long, "unsendable head"}
+        end
+        job.failed = 300
+        {"authorize_status", "authorize_results"}.each do |name|
+          out = call_json(tools, name, %({"job_id":#{job_id.to_json}}))
+          out.to_json.bytesize.should be < Gori::MCP::Tools::REPLY_ROWS_BUDGET + 8192
+          out["skipped_count"].as_i.should eq(300)
+          out["failed_count"].as_i.should eq(300)
+          skipped = out["skipped"].as_a.size
+          skipped.should be > 0
+          (skipped + out["skipped_unshown_ids"].as_a.size).should eq(300)
+          out["skipped_unshown_ids"][0].as_i64.should eq(skipped)
+          # The budget is spent by then, so `failed` keeps only the one row every list keeps.
+          out["failed"].as_a.size.should eq(1)
+          out["failed_unshown_ids"].as_a.size.should eq(299)
+        end
+      end
+    end
   end
 
   # `Authorize::PlanError::Reason` documents that every member obligates an arm on all three

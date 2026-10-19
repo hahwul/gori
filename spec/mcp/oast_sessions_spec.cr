@@ -62,6 +62,52 @@ private def stub_interactsh(&)
   end
 end
 
+# A poll whose persist step raises, for the ordering `oast_poll` keeps (#1659): callbacks are
+# queued before the store is touched. `store.close` cannot stand in — a closed store's writes
+# degrade quietly instead of raising.
+private class OastTouchFailingStore < Gori::Store
+  property? fail_touch = false
+
+  def touch_oast_session(id : Int64)
+    raise DB::Error.new("database is locked") if @fail_touch
+    super
+  end
+end
+
+# Opened the long way round, like spec/mcp/agent_surface_spec.cr's `with_metadata_failing_store`.
+private def with_touch_failing_store(&)
+  path = File.tempname("gori-mcp-oast", ".db")
+  db = DB.open("sqlite3:#{path}?journal_mode=wal&synchronous=normal&busy_timeout=5000")
+  Gori::SafeRegexp.install(db)
+  Gori::Store::Schema.migrate!(db)
+  store = OastTouchFailingStore.new(db)
+  begin
+    yield store
+  ensure
+    store.close
+    File.delete?(path)
+    File.delete?("#{path}-wal")
+    File.delete?("#{path}-shm")
+  end
+end
+
+# A custom-http endpoint that serves `body` on its first poll and an empty list after.
+private def serve_once(body : String, &)
+  served = false
+  server = HTTP::Server.new do |ctx|
+    ctx.response.print(served ? "[]" : body)
+    served = true
+  end
+  port = server.bind_unused_port("127.0.0.1").port
+  spawn { server.listen }
+  sleep 10.milliseconds
+  begin
+    yield "http://127.0.0.1:#{port}/hits"
+  ensure
+    server.close rescue nil
+  end
+end
+
 describe "MCP OAST sessions" do
   it "lists the persisted sessions with their hits, and no secrets" do
     with_store do |store|
@@ -362,6 +408,56 @@ describe "MCP oast_start persist" do
       store.flush
       store.get_oast_session(row).not_nil!.provider_id.should eq(pid)
       Gori::Oast::Sessions.list(store).first.provider.should eq("lab collab")
+    end
+  end
+
+  # #1659: a callback's size is the caller's choice (`origin: "remote"`), so a poll answers
+  # within the reply budget. interactsh hands a hit over once, so what does not fit waits on
+  # the handle for the next poll, and the store still files every callback whole.
+  it "returns callbacks within the reply budget and keeps the rest for the next poll" do
+    big = "a" + "é" * 40_000 # 80,001 bytes: byte MAX_TEXT - 1 is a lead byte, so a naive cut splits "é"
+    hits = [{"id" => "a", "raw_request" => "A" * 40_000}, {"id" => "b", "raw_request" => "B" * 40_000},
+            {"id" => "c", "raw_request" => big}].to_json
+    serve_once(hits) do |url|
+      with_store do |store|
+        tools = tools_for(store, verify_upstream: true)
+        res = ok_json(tools, "oast_start", %({"provider":"custom-http","server":#{url.to_json},"persist":true}))
+        sid = res["session_id"].as_s.to_json
+        polls = Array.new(3) { ok_json(tools, "oast_poll", %({"session_id":#{sid}})) }
+        polls.map(&.["callbacks"].as_a.map(&.["unique_id"].as_s)).should eq([["a"], ["b"], ["c"]])
+        polls.map(&.["has_more"].as_bool).should eq([true, true, false])
+        polls.first["cut_by"].should eq("bytes")
+        last = polls.last["callbacks"][0]
+        last["raw_request_truncated"].as_bool.should be_true
+        shown = last["raw_request"].as_s
+        shown.bytesize.should eq(Gori::MCP::Serialize::MAX_TEXT - 1)
+        shown.valid_encoding?.should be_true
+        big.starts_with?(shown).should be_true
+        polls.first["callbacks"][0].as_h.has_key?("raw_request_truncated").should be_false
+
+        store.flush
+        stored = store.oast_callbacks_since(0)
+        stored.size.should eq(3)
+        stored.max_of(&.raw_request.size).should eq(big.bytesize)
+      end
+    end
+  end
+
+  # The callbacks are marked seen and drained from the provider before the store is touched,
+  # so a persist that raises must leave them queued for the retry, not lost with the error.
+  it "keeps a poll's callbacks for the next poll when persisting them raises" do
+    serve_once(%([{"id":"a","raw_request":"GET /a"}])) do |url|
+      with_touch_failing_store do |store|
+        tools = tools_for(store, verify_upstream: true)
+        res = ok_json(tools, "oast_start", %({"provider":"custom-http","server":#{url.to_json},"persist":true}))
+        sid = res["session_id"].as_s.to_json
+        store.fail_touch = true
+        failed = tools.call("oast_poll", JSON.parse(%({"session_id":#{sid}})))
+        failed.is_error.should be_true
+        failed.error_code.should eq("NETWORK_ERROR")
+        store.fail_touch = false
+        ok_json(tools, "oast_poll", %({"session_id":#{sid}}))["callbacks"].as_a.map(&.["unique_id"].as_s).should eq(["a"])
+      end
     end
   end
 end

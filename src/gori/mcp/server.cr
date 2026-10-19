@@ -909,7 +909,8 @@ module Gori
       # weight in every tool that pages (`@recon` sits close to its size ceiling).
       REPLY_BUDGET_NOTE = " A list reply is held to about #{Tools::REPLY_ROWS_BUDGET // 1024} KB: a page can end " \
                           "before `limit` with `cut_by:\"bytes\"` — keep paging from its cursor (`has_more`, " \
-                          "`next_cursor` or `next_offset` say there is more)."
+                          "`next_cursor` or `next_offset` say there is more). A single document is " \
+                          "exempt: it keeps its own cap and says `truncated`."
 
       # #1090, the backstop route: every agent, whatever its client, can read what the operator
       # said. The live routes make it immediate where one exists — a peer note in Claude Code,
