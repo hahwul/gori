@@ -218,10 +218,7 @@ module Gori::Diff
       JSON.build { |j| json(j, r, verdicts: verdicts, issues: issues) }
     end
 
-    # `endpoint_parts` / `issue_parts`: the two arrays already serialized (`row_json` /
-    # `issue_json`), for a caller that pages or budgets them; nil renders them whole.
-    def self.json(j : JSON::Builder, r : Report, *, verdicts : Array(Verdict) = ORDER, issues : Bool = true,
-                  endpoint_parts : Array(String)? = nil, issue_parts : Array(String)? = nil) : Nil
+    def self.json(j : JSON::Builder, r : Report, *, verdicts : Array(Verdict) = ORDER, issues : Bool = true) : Nil
       counts = r.counts
       j.object do
         j.field("a") { coverage_json(j, r.a) }
@@ -237,20 +234,12 @@ module Gori::Diff
         ctx = Record::Context.new(r.a.label, r.b.label)
         j.field("endpoints") do
           j.array do
-            if parts = endpoint_parts
-              parts.each { |p| j.raw(p) }
-            else
-              r.rows.each do |row|
-                row_json(j, row, ctx) if verdicts.includes?(row.verdict)
-              end
+            r.rows.each do |row|
+              row_json(j, row, ctx) if verdicts.includes?(row.verdict)
             end
           end
         end
-        if issues
-          j.field("issues") do
-            j.array { (parts = issue_parts) ? parts.each { |p| j.raw(p) } : r.issues.each { |i| issue_json(j, i) } }
-          end
-        end
+        j.field("issues") { j.array { r.issues.each { |i| issue_json(j, i) } } } if issues
       end
     end
 
@@ -275,7 +264,7 @@ module Gori::Diff
       end
     end
 
-    def self.row_json(j : JSON::Builder, row : Row, ctx : Record::Context) : Nil
+    private def self.row_json(j : JSON::Builder, row : Row, ctx : Record::Context) : Nil
       j.object do
         j.field "verdict", row.verdict.label
         # The one sentence saying what this row is evidence OF — verbatim the sentence a TUI
@@ -325,7 +314,7 @@ module Gori::Diff
       end
     end
 
-    def self.issue_json(j : JSON::Builder, i : IssueRetest) : Nil
+    private def self.issue_json(j : JSON::Builder, i : IssueRetest) : Nil
       j.object do
         j.field "id", i.id
         j.field "title", i.title

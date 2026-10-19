@@ -67,23 +67,31 @@ module Gori
       # `offset`, then the issue retest in what the page left. The diff is recomputed per call
       # and its rows are sorted, so `offset` pages it; an issue that does not fit is named in
       # `issues_unshown_ids` (get_issue reads it), since the retest has no page of its own.
+      # The report is built by the shared renderer, so the page is cut from its parsed arrays
+      # and this surface's fields go on after it rather than into it.
       private def diff_page(report : Gori::Diff::Report, opts : DiffOptions) : Result
-        listed = report.rows.select { |row| opts.verdicts.includes?(row.verdict) }
+        rendered = JSON.parse(Gori::Diff::Render.json(report, verdicts: opts.verdicts, issues: opts.issues)).as_h
+        listed = rendered["endpoints"].as_a
         page = offset_slice(listed, opts.offset)
-        ctx = Gori::Diff::Record::Context.new(report.a.label, report.b.label)
-        rows = fit_rows(page) { |rj, row, _| Gori::Diff::Render.row_json(rj, row, ctx) }
-        issues = fit_rows(report.issues, rows.sum(&.bytesize)) { |rj, i, _| Gori::Diff::Render.issue_json(rj, i) } if opts.issues
-        json = JSON.build do |dj|
-          Gori::Diff::Render.json(dj, report, verdicts: opts.verdicts, issues: opts.issues,
-            endpoint_parts: rows, issue_parts: issues)
-        end
-        Result.new(with_fields(json) do |j|
-          emit_offset_page(j, opts.offset, rows.size, page.size, listed.size)
-          j.field "total", listed.size
-          if issues && issues.size < report.issues.size
-            j.field "issues_unshown_ids", report.issues[issues.size..].map(&.id)
+        rows = fit_rows(page) { |rj, e, _| e.to_json(rj) }
+        all = rendered["issues"]?.try(&.as_a)
+        issues = all.try { |a| fit_rows(a, rows.sum(&.bytesize)) { |rj, e, _| e.to_json(rj) } }
+        Result.new(JSON.build do |j|
+          j.object do
+            rendered.each do |k, v|
+              case k
+              when "endpoints" then j.field(k) { raw_rows(j, rows) }
+              when "issues"    then j.field(k) { raw_rows(j, issues || [] of String) }
+              else                  j.field(k) { v.to_json(j) }
+              end
+            end
+            emit_offset_page(j, opts.offset, rows.size, page.size, listed.size)
+            j.field "total", listed.size
+            if all && issues && issues.size < all.size
+              j.field "issues_unshown_ids", all[issues.size..].map(&.["id"])
+            end
+            emit_ignored_terms(j, opts.dropped)
           end
-          emit_ignored_terms(j, opts.dropped)
         end)
       end
 
@@ -137,18 +145,6 @@ module Gori
         # diffs more endpoints than asked.
         dropped.concat(QL.analyze(q, scope: QL::SCOPE_SHAPE_ONLY).ignored)
         filter
-      end
-
-      # The rendered report with this surface's fields (the page, `ignored_terms`) added. The
-      # report is built by the shared renderer, so the fields go on after it rather than into it.
-      private def with_fields(json : String, & : JSON::Builder ->) : String
-        report = JSON.parse(json).as_h
-        JSON.build do |j|
-          j.object do
-            report.each { |k, v| j.field(k) { v.to_json(j) } }
-            yield j
-          end
-        end
       end
 
       # The NEWER side: a named project (opened read-only here, ours to close) or — when
