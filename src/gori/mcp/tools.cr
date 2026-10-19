@@ -2158,8 +2158,16 @@ module Gori
       # `sse_max_events` / `sse_max_ms` over the tool's default (#1631): an absent argument takes
       # the default's axis and 0 switches it off — the CLI's `--sse-events` / `--sse-time`.
       private def sse_bound(h, default : Repeater::StreamBound) : Repeater::StreamBound?
-        Repeater::StreamBound.resolve(optional_int_arg(h, "sse_max_events"),
-          optional_int_arg(h, "sse_max_ms").try(&.clamp(0_i64, 3_600_000_i64).milliseconds), default)
+        Repeater::StreamBound.resolve(sse_axis(h, "sse_max_events"),
+          sse_axis(h, "sse_max_ms").try(&.clamp(0_i64, 3_600_000_i64).milliseconds), default)
+      end
+
+      # One axis of `sse_bound`. A negative one is refused, as the CLI's `--sse-events` is:
+      # read as "no limit", it switched the bound off for a caller who meant to tighten it.
+      private def sse_axis(h, key : String) : Int64?
+        v = optional_int_arg(h, key)
+        raise ArgError.new("invalid '#{key}' (must not be negative; 0 = no limit)", key) if v && v < 0
+        v
       end
 
       # The two arguments' schema, worded with the tool's default.

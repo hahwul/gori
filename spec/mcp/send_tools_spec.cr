@@ -159,6 +159,20 @@ describe Gori::MCP::Server do
       end
     end
 
+    # The CLI's `--sse-events` refuses a negative count; MCP read one as "no limit".
+    it "refuses a negative sse_max_events or sse_max_ms" do
+      with_store do |store|
+        {"sse_max_events", "sse_max_ms"}.each do |key|
+          call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:1/","allow_unscoped":true,"#{key}":-1}}})
+          resp = mcp_drive(store, call, verify_upstream: false)[0]
+          resp["result"]["isError"].as_bool.should be_true
+          error = resp["result"]["structuredContent"]
+          error["error_code"].as_s.should eq("INVALID_ARGUMENT")
+          error["message"].as_s.should contain(key)
+        end
+      end
+    end
+
     it "lists sse_max_events and sse_max_ms on every tool that reads an event stream" do
       with_store do |store|
         listed = JSON.parse(JSON.build { |j| tools_for(store).list(j) }).as_a
