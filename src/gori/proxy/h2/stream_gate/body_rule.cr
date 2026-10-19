@@ -172,12 +172,9 @@ class Gori::Proxy::H2::StreamGate
       # 200 declares no length and never ends while the socket lives. A request the assembler
       # is not tracking (past `Assembler::MAX_LIVE_STREAMS`) may be that CONNECT, so it is
       # not owned either.
-      !(status && status < 200) && rw.rewrites_response_body_for_host?(host) && !tunnel?(stream_id)
+      !(status && status < 200) && rw.rewrites_response_body_for_host?(host) &&
+        !@assembler.request_ref(stream_id).try(&.method).in?(nil, "CONNECT")
     end
-  end
-
-  private def tunnel?(stream_id : UInt32) : Bool
-    @assembler.request_ref(stream_id).try(&.method).in?(nil, "CONNECT")
   end
 
   # A body h1 would not buffer for a rule either: compressed, or a declared length over the
