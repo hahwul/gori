@@ -89,7 +89,8 @@ class Gori::Proxy::H2::StreamGate
     # Streams whose response head has passed and whose response has not ended: credit for them
     # is not "before ownership", so it is not recorded.
     getter headed = Set(UInt32).new
-    # Bytes held in rule buffers across this direction's streams (`MAX_RULE_BUFFERED`).
+    # Bytes held in rule buffers across this direction's streams (`MAX_RULE_BUFFERED`): every
+    # byte its sender was credited for before gori wrote it, arriving or waiting in `sends`.
     property buffered = 0_i64
   end
 
@@ -113,7 +114,7 @@ class Gori::Proxy::H2::StreamGate
     # When a held head started waiting for its body (`expire_owned_heads_locked`).
     property held_since : Time::Instant?
     # DATA to send, each with the credit its sending returns to the sender (0 when that credit
-    # was already returned on arrival).
+    # was already returned on arrival, which keeps it in `Flow#buffered` until written).
     getter sends = [] of {Frame::Header, Int32}
     # Trailers, written once `sends` has drained.
     getter after = [] of {Frame::Header, Assembler::HeadBlock?}
@@ -397,7 +398,7 @@ class Gori::Proxy::H2::StreamGate
     own.spilled = true
     own.complete = true if own.arrived.last?.try(&.end_stream?)
     own.arrived.each { |f| own.sends << {f, 0} }
-    clear_arrived(fc, own)
+    own.arrived.clear
     if slot = own.slot
       # The held head goes as it arrived, with the length it declared, which is now true.
       slot.ready = true
@@ -438,12 +439,13 @@ class Gori::Proxy::H2::StreamGate
       # False when trailers end the message: the flag stays on whatever ended it.
       ends = own.arrived.last?.try(&.end_stream?) || false
       data_frames(own.stream_id, rewritten, ends).each { |f| own.sends << {f, 0} }
+      fc.buffered += rewritten.size - entity.size
       @assembler.note_body_rewrite(own.stream_id, own.request?, hits, own.head, entity)
       if (slot = own.slot) && (pending = slot.pending)
         slot.decided = @heads.reencode(pending, with_length(pending.fields, rewritten.size))
       end
     end
-    clear_arrived(fc, own)
+    own.arrived.clear
     if slot = own.slot
       slot.ready = true
       @deferred_cross.concat(drain_locked)
@@ -453,11 +455,6 @@ class Gori::Proxy::H2::StreamGate
   private def late?(own : Owned, now : Time::Instant) : Bool
     since = own.held_since
     !own.slot.nil? && !since.nil? && now - since >= hold_wait_deadline
-  end
-
-  private def clear_arrived(fc : Flow, own : Owned) : Nil
-    fc.buffered -= own.size unless own.arrived.empty?
-    own.arrived.clear
   end
 
   private def with_length(fields : Array(HPACK::Field), size : Int32) : Array(HPACK::Field)
@@ -493,14 +490,17 @@ class Gori::Proxy::H2::StreamGate
       if size > 0 && size > room
         break if f.padded? || room <= 0
         piece = room.to_i32
-        own.sends[0] = {Frame::Header.new(f.type, f.flags, f.stream_id, f.payload[piece..]), 0}
+        # A credit owed is the frame's size, so each piece returns its own share of it.
+        own.sends[0] = {Frame::Header.new(f.type, f.flags, f.stream_id, f.payload[piece..]), Math.max(credit - piece, 0)}
         f = Frame::Header.new(f.type, 0_u8, f.stream_id, f.payload[0, piece])
+        credit = Math.min(credit, piece)
       else
         own.sends.shift
       end
       write(f, nil)
       own.window -= f.payload.size
       fc.debt += f.payload.size
+      fc.buffered -= f.payload.size if credit == 0
       refund_locked(fc, own.stream_id, credit, f.end_stream?) if credit > 0
     end
     return unless own.sends.empty? && own.complete?
@@ -533,8 +533,11 @@ class Gori::Proxy::H2::StreamGate
   end
 
   private def forget_owned(fc : Flow, own : Owned) : Nil
-    own.sends.each { |(_, credit)| @swallowed += credit }
-    clear_arrived(fc, own)
+    own.sends.each do |(f, credit)|
+      credit > 0 ? (@swallowed += credit) : (fc.buffered -= f.payload.size)
+    end
+    fc.buffered -= own.arrived.sum(&.payload.size)
+    own.arrived.clear
     fc.owned.delete(own.stream_id)
   end
 

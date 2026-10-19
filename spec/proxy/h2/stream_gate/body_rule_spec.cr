@@ -875,6 +875,34 @@ describe "H2::StreamGate body rules (#1628)" do
     end
   end
 
+  # A body that finished arriving still sits with gori until a slow reader takes it, and its
+  # sender was credited on arrival: it counts against the budget until it is written, or three
+  # 8 MiB downloads to a client that never widens its streams hold 24 MiB.
+  it "counts a finished body against the budget until the receiver takes it" do
+    with_rules do |rules, ic|
+      rules.add(RESP, BODY, "zzz", "yyy", host: "127.0.0.1")
+      size = 8 * 1024 * 1024
+      sent = [] of UInt32
+      rig = BodyRig.new(rules, ic) do |s, p|
+        spawn do
+          p.send(s, ok(size), Bytes.new(size, 'a'.ord.to_u8))
+          sent << s
+        end
+        nil
+      end
+      begin
+        rig.client.stream_ack = 1_000_000_000_i64 # a slow reader: no stream credit past the first window
+        [1_u32, 3_u32, 5_u32].each do |id|
+          rig.client.send_head(id, get("/big#{id}"), true)
+          40.times { break if sent.includes?(id); sleep 50.milliseconds }
+        end
+        sent.should eq([1_u32, 3_u32]) # the third spilled, so its origin is credited only as gori sends
+      ensure
+        rig.close
+      end
+    end
+  end
+
   # Review #5: h1 runs no rule over an empty body, so a `^` pattern does not invent one.
   it "runs no rule over an empty body" do
     with_rules do |rules, ic|
