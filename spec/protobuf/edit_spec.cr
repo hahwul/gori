@@ -171,6 +171,13 @@ describe Gori::Protobuf::Edit do
         .as(String).should contain("cannot show")
     end
 
+    it "refuses a packed element that would split into several" do
+      Gori::Protobuf::Edit.from_json(Bytes.empty, demo_schema, user_type, %({"scores": ["1,2"]}))
+        .as(String).should contain("one element, not a list")
+      Gori::Protobuf::Edit.from_json(Bytes.empty, demo_schema, user_type, %({"scores": ["1 2"]}))
+        .as(String).should contain("one element, not a list")
+    end
+
     it "edits inside a nested message in place" do
       data = Base64.decode(DEMO_USER_B64)
       edited = Gori::Protobuf::Edit.from_json(data, demo_schema, user_type,

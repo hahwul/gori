@@ -425,6 +425,8 @@ module Gori::Protobuf
         arr.each_with_index do |e, i|
           t = scalar_text(d, e)
           return "element #{i + 1}: #{t[1]}" unless t[0]
+          # `encode_packed` splits its text on these, so `"1,2"` would go out as two elements.
+          return "element #{i + 1}: #{t[1].inspect} is one element, not a list" if t[1].strip.matches?(/[,\s]/)
           texts << t[1]
         end
         return Encoder.encode(schema, d, texts.join(","), packed: true)
