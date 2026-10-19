@@ -68,13 +68,14 @@ module Gori
                     "and its last response were left unchanged"
       end
 
-      # `gori run repeater [list|create|send|minimize|h2|move|delete] …`, or a bare flow id /
+      # `gori run repeater [list|create|send|ws|minimize|h2|move|delete] …`, or a bare flow id /
       # `--flow` for the one-shot resend.
       #
       # Matched on argv[0] only, so a subcommand name is never confused with the flow id the
       # bare form takes.
       @[Subcommand("repeater", help: [
         {"repeater", "Re-send a captured flow; list/create/send (replay, incl. WebSocket) repeater sessions"},
+        {"repeater ws", "Open a persistent WebSocket session on a saved repeater; stream frames to/from stdin/stdout"},
         {"repeater h2", "Send a field-native HTTP/2 request from an ordered HPACK field list (--target URL --fields FILE)"},
         {"repeater race", "Fire several saved sessions as one synchronized race (h1 last-byte, h2 single-packet)"},
         {"repeater timing", "Differential timing analysis of two saved sessions (which is consistently slower, by response order and quartiles)"},
@@ -92,6 +93,9 @@ module Gori
           return
         elsif sub == "send"
           cmd_repeater_send(args[1..])
+          return
+        elsif sub == "ws"
+          cmd_repeater_ws(args[1..])
           return
         elsif sub == "race"
           cmd_repeater_race(args[1..])
@@ -1778,6 +1782,362 @@ module Gori
         exit 1 unless result.ok?
       end
 
+      # Parse one `--auto-reply MATCH=REPLY` argument into an `AutoReply` rule, or return the
+      # refusal sentence. Splits on the first `=` so `REPLY` may itself contain `=` or be empty.
+      def self.ws_parse_auto_reply(spec : String) : Repeater::WsSession::AutoReply | String
+        match, sep, reply = spec.partition('=')
+        if sep.empty? || match.empty?
+          return "--auto-reply #{spec.inspect}: expected MATCH=REPLY with a non-empty MATCH (e.g. --auto-reply=PING=PONG)"
+        end
+        Repeater::WsSession::AutoReply.new(match, reply)
+      end
+
+      # Decode one `--binary` stdin line (hex digits, optional leading `0x`) into raw frame
+      # bytes, or return the error sentence when the line is not valid even-length hex.
+      def self.ws_parse_hex_line(line : String) : Bytes | String
+        cleaned = line.strip
+        cleaned = cleaned[2..] if cleaned.starts_with?("0x") || cleaned.starts_with?("0X")
+        cleaned.hexbytes
+      rescue ArgumentError
+        "invalid hex line #{CLI::Output.term_line(line).inspect} (expected an even number of hex digits)"
+      end
+
+      # Format one live `WsSession::Entry` for `gori run repeater ws`: `:json` emits one JSON
+      # line matching MCP `get_job` (`Repeater::WsSession::Entry#to_json`); `:text` uses the
+      # arrow + shape transcript line shared with `repeater send`.
+      def self.ws_session_entry_line(entry : Repeater::WsSession::Entry, format : Symbol) : String
+        return entry.to_json(mask_secrets: false) if format == :json
+        CLI::Output.term_safe(ws_transcript_line(entry.message))
+      end
+
+      # Reference-type state shared between `run_ws_session` and its `gori-ws-stdin` fiber
+      # (`Atomic` is a value struct in Crystal and would be copied across call boundaries).
+      private class WsStdinState
+        property? done = false
+        property? failed = false
+      end
+
+      # `gori run repeater ws <repeater-id>` — the `gori run` surface for `Repeater::WsSession`
+      # (#1660), matching the TUI's Connect (`c`) and MCP's `ws_session_open` / `ws_session_send`
+      # / `get_job` / `stop_job` (#1630). Dials the saved repeater's HTTP/1.1 WebSocket upgrade,
+      # sends each stdin line as a TEXT frame (or hex-decoded BINARY under `--binary`), and
+      # streams inbound + outbound transcript entries to stdout until EOF, `--for`, or Ctrl-C.
+      private def self.cmd_repeater_ws(args : Array(String)) : Nil
+        proj = ProjectFlags.new
+        insecure = false
+        allow_unscoped = false
+        verbatim = false
+        slot : String? = nil
+        ws_keep_key = false
+        tls_preset : String? = nil
+        binary = false
+        format = :text
+        duration : Time::Span? = nil
+        auto_replies = [] of Repeater::WsSession::AutoReply
+        engine_io = false
+        positional = [] of String
+
+        parser = option_parser("gori run repeater ws") do |p|
+          p.banner = "Usage: gori run repeater ws <repeater-id> [options]\n\n" \
+                     "Open a persistent WebSocket session on a saved repeater (ids from `gori run repeater list`).\n" \
+                     "Each line on stdin is sent as a TEXT frame (or hex-decoded BINARY with --binary); every\n" \
+                     "sent and received frame is printed to stdout as it arrives. EOF on stdin, --for, or Ctrl-C\n" \
+                     "sends CLOSE and exits cleanly."
+          project_options(p, proj, "read")
+          p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
+          p.on("--allow-unscoped", "Connect even if the target is outside the project scope (the Sandbox still applies)") { allow_unscoped = true }
+          p.on("--verbatim", "Send the handshake and stdin lines EXACTLY: no token expansion ($ENV.KEY, $BIND.NAME, $GEN.*)") { verbatim = true }
+          p.on("--slot=NAME", "Connect as this SESSION SLOT — its header overlay, and its binding table for $BIND.NAME tokens") { |v| slot = v.strip }
+          p.on("--ws-keep-key", "Send the request's own Sec-WebSocket-Key instead of a fresh one") { ws_keep_key = true }
+          p.on("--tls-preset=NAME", "#{TLS_PRESET_HELP}, overriding the session's stored one for this connect") { |v| tls_preset = v }
+          p.on("--auto-reply=MATCH=REPLY", "Auto-reply to an exact inbound TEXT payload with a TEXT frame (repeatable, e.g. --auto-reply=PING=PONG)") do |v|
+            parsed = ws_parse_auto_reply(v)
+            abort "gori run repeater ws: #{parsed}" if parsed.is_a?(String)
+            auto_replies << parsed
+          end
+          p.on("--engine-io", "Answer Engine.IO / Socket.IO '2' heartbeat pings with '3' (shorthand for --auto-reply=2=3)") { engine_io = true }
+          p.on("--for=DURATION", "Close the session after DURATION (e.g. 30s, 5m, 1h) even if stdin is still open") do |v|
+            duration = parse_duration(v)
+          end
+          p.on("--binary", "Read stdin lines as hex-encoded bytes and send each as a BINARY (opcode 2) frame") { binary = true }
+          format_flag(p, [:text, :json], "Output: text (default) | json (one JSON object per frame, matching MCP get_job)") { |f| format = f }
+          p.unknown_args { |before, after| positional = before + after }
+        end
+        parser.parse(args)
+        refresh_verify_upstream(!insecure)
+        abort "gori run repeater ws: missing <repeater-id>\n#{parser}" if positional.empty?
+        abort "gori run repeater ws: too many arguments (expected one <repeater-id>, got: #{positional.join(" ")})" if positional.size > 1
+        id = positional[0].to_i64? || abort "gori run repeater ws: invalid repeater id '#{positional[0]}'"
+        auto_replies << Repeater::WsSession::ENGINE_IO_HEARTBEAT if engine_io
+
+        project = resolve_read_project(proj.name, proj.db)
+        stop = Channel(Nil).new
+        install_interrupt_trap("ws-interrupt", "interrupted — closing WebSocket session…") do
+          stop.close unless stop.closed?
+        end
+        ok, err = open_and_run_ws_session(id, project,
+          insecure: insecure, allow_unscoped: allow_unscoped, verbatim: verbatim,
+          slot: slot, ws_keep_key: ws_keep_key, tls_preset: tls_preset,
+          auto_replies: auto_replies, binary: binary, duration: duration,
+          format: format, stop: stop)
+        report_unbound_slot_overlay("gori run repeater ws")
+        if err
+          STDERR.puts err
+          exit 1
+        end
+        exit 1 unless ok
+      end
+
+      # Resolve the saved repeater session, run its handshake through the `Repeater::Plan` +
+      # `Outbound` gate, and stream frames through `run_ws_session`. Returns `{ok, error_line}`
+      # without calling `exit` on session/handshake failures so specs can drive the full path
+      # with in-memory `stdin`/`stdout`/`stderr` buffers.
+      def self.open_and_run_ws_session(id : Int64, project : Project, *,
+                                       insecure : Bool = false,
+                                       allow_unscoped : Bool = false,
+                                       verbatim : Bool = false,
+                                       slot : String? = nil,
+                                       ws_keep_key : Bool = false,
+                                       tls_preset : String? = nil,
+                                       auto_replies : Array(Repeater::WsSession::AutoReply) = [] of Repeater::WsSession::AutoReply,
+                                       binary : Bool = false,
+                                       duration : Time::Span? = nil,
+                                       format : Symbol = :text,
+                                       stdin : IO = STDIN,
+                                       stdout : IO = STDOUT,
+                                       stderr : IO = STDERR,
+                                       stop : Channel(Nil)? = nil) : {Bool, String?}
+        loaded = load_ws_session_repeater(id, project)
+        return {false, loaded} if loaded.is_a?(String)
+        rec, host_overrides = loaded
+
+        activate_slot(slot, "gori run repeater ws")
+        outbound = project_outbound(project, allow_unscoped)
+        begin
+          plan = build_ws_session_plan(id, rec, host_overrides, outbound,
+            insecure: insecure, verbatim: verbatim, tls_preset: tls_preset)
+          return {false, plan} if plan.is_a?(String)
+
+          cancel = stop ? -> { stop.closed? } : nil
+          opened = plan.open_ws(ws_keep_key || rec.ws_keep_key?, auto_replies, cancel,
+            gate: -> { plan.refusal })
+          record_ws_handshake_response(id, rec, opened.result, project, stderr)
+          session = opened.session
+          unless session
+            msg = opened.result.error || "the handshake was not upgraded; no session was opened"
+            return {false, "gori run repeater ws: #{CLI::Output.term_line(msg)}"}
+          end
+          emit_ws_session_upgraded(opened.result, stderr) if format != :json
+          ok = run_ws_session(session, stdin: stdin, stdout: stdout, stderr: stderr,
+            format: format, binary: binary, duration: duration, verbatim: verbatim, stop: stop)
+          {ok, nil}
+        ensure
+          outbound.close
+        end
+      end
+
+      private def self.load_ws_session_repeater(id : Int64,
+                                                project : Project) : {Store::RepeaterRecord, Gori::HostOverrides} | String
+        store = open_store(project, read_only: true)
+        rec, host_overrides = begin
+          {store.get_repeater_full(id), Gori::HostOverrides.load(store)}
+        ensure
+          store.close
+        end
+        return "gori run repeater ws: no repeater session ##{id}" unless rec
+        unless Repeater::WsEngine.replayable?(String.new(rec.request))
+          return "gori run repeater ws: session ##{id} is not a WebSocket handshake " \
+                 "(neither an RFC 6455 `Upgrade:` request nor an RFC 8441 extended CONNECT)"
+        end
+        if rec.ws_http_only?
+          return "gori run repeater ws: session ##{id} is stored as HTTP-only (ws_http_only) — " \
+                 "use `gori run repeater send #{id}` to send its handshake as an ordinary HTTP request"
+        end
+        if reason = Repeater::WsSession.refusal(rec.request)
+          return "gori run repeater ws: #{reason}"
+        end
+        {rec, host_overrides}
+      end
+
+      private def self.build_ws_session_plan(id : Int64, rec : Store::RepeaterRecord,
+                                             host_overrides : Gori::HostOverrides,
+                                             outbound : Gori::Outbound, *,
+                                             insecure : Bool, verbatim : Bool,
+                                             tls_preset : String?) : Repeater::Plan | String
+        plan = begin
+          Repeater::Plan.build(session_plan_options(rec, insecure, host_overrides, verbatim, nil, false,
+            tls_preset), outbound)
+        rescue ex : Repeater::PlanError
+          outbound.close
+          repeater_plan_abort("gori run repeater ws", ex, "session ##{id}")
+        end
+        verdict = repeater_scope_verdict(outbound, plan)
+        if verdict.blocked?
+          return "gori run repeater ws: #{plan.host} is out of the project scope — " \
+                 "#{Gori::Outbound.remedy(verdict, "--allow-unscoped")}"
+        end
+        if reason = plan.refusal
+          return "gori run repeater ws: #{reason}"
+        end
+        plan
+      end
+
+      private def self.record_ws_handshake_response(id : Int64, rec : Store::RepeaterRecord,
+                                                    result : Repeater::WsEngine::Result,
+                                                    project : Project, stderr : IO) : Nil
+        return unless result.answered?
+        rw = persist_repeater_response(id, result.handshake_head, Bytes.empty,
+          result.error, result.duration_us, project, Evidence.request_digest(rec.request))
+        stderr.puts "gori run repeater ws: WebSocket #{rw}#{project_write_warning_tail}" if rw
+      end
+
+      private def self.emit_ws_session_upgraded(result : Repeater::WsEngine::Result, stderr : IO) : Nil
+        stderr.puts "→ WebSocket upgraded=true in #{CLI::Output.human_us(result.duration_us)}"
+        stderr.puts "note: #{result.note}" if result.note
+        stderr.flush
+      end
+
+      # Drive an open `Repeater::WsSession`: read lines from `stdin` on a worker fiber and
+      # write each as a WebSocket frame; drain the transcript in order on the calling fiber
+      # (`WsSession#wait` has a single waiter slot) until `stdin` reaches EOF, `duration`
+      # (`--for`) elapses, `stop` is closed, or the peer closes the connection.
+      def self.run_ws_session(session : Repeater::WsSession, *,
+                              stdin : IO = STDIN,
+                              stdout : IO = STDOUT,
+                              stderr : IO = STDERR,
+                              format : Symbol = :text,
+                              binary : Bool = false,
+                              duration : Time::Span? = nil,
+                              verbatim : Bool = false,
+                              stop : Channel(Nil)? = nil) : Bool
+        cancel = stop ? -> { stop.closed? } : nil
+        state = spawn_ws_stdin_reader(session, stdin, stderr,
+          binary: binary, verbatim: verbatim, stop: stop, cancel: cancel)
+        cursor = drain_ws_session_until_done(session, state, stdout, format, duration, stop)
+        session.close unless session.closed?
+        drain_ws_session_transcript(session, cursor, stdout, format)
+        if ws_session_abnormal_close?(session.close_reason)
+          stderr.puts "gori run repeater ws: #{CLI::Output.term_line(session.close_reason.to_s)}" unless state.failed?
+          stderr.flush
+          return false
+        end
+        !state.failed?
+      end
+
+      private def self.drain_ws_session_until_done(session : Repeater::WsSession, state : WsStdinState,
+                                                   stdout : IO, format : Symbol,
+                                                   duration : Time::Span?,
+                                                   stop : Channel(Nil)?) : Int64
+        cursor = 0_i64
+        deadline = duration.try { |d| Time.instant + d }
+        eof_first : Time::Instant? = nil
+        eof_quiet : Time::Instant? = nil
+
+        loop do
+          cursor, progressed = drain_ws_session_transcript(session, cursor, stdout, format)
+          break if session.closed? || stop.try(&.closed?)
+          now = Time.instant
+          if state.done?
+            first = eof_first || now
+            eof_first = first
+            quiet = (eof_quiet && !progressed) ? eof_quiet : now
+            eof_quiet = quiet
+            break if (now - quiet) >= 50.milliseconds || (now - first) >= 250.milliseconds
+          end
+          step = ws_session_wait_step(state.done?, deadline, now)
+          break unless step
+          session.wait(step)
+        end
+        cursor
+      end
+
+      private def self.ws_session_wait_step(eof : Bool, deadline : Time::Instant?,
+                                            now : Time::Instant) : Time::Span?
+        step = eof ? 15.milliseconds : 50.milliseconds
+        return step unless dl = deadline
+        rem = dl - now
+        return nil if rem <= Time::Span.zero
+        rem < step ? rem : step
+      end
+
+      # Spawn the fiber that reads lines from `stdin` and frames them onto `session`.
+      private def self.spawn_ws_stdin_reader(session : Repeater::WsSession, stdin : IO, stderr : IO, *,
+                                             binary : Bool, verbatim : Bool,
+                                             stop : Channel(Nil)?,
+                                             cancel : Proc(Bool)?) : WsStdinState
+        state = WsStdinState.new
+        spawn(name: "gori-ws-stdin") do
+          pump_ws_stdin(session, stdin, stderr, state,
+            binary: binary, verbatim: verbatim, stop: stop, cancel: cancel)
+        end
+        state
+      end
+
+      private def self.pump_ws_stdin(session : Repeater::WsSession, stdin : IO, stderr : IO,
+                                     state : WsStdinState, *, binary : Bool, verbatim : Bool,
+                                     stop : Channel(Nil)?, cancel : Proc(Bool)?) : Nil
+        while !session.closed? && !stop.try(&.closed?)
+          line = stdin.gets(chomp: true) rescue nil
+          break unless line
+          msg = ws_stdin_out_msg(line, binary: binary, verbatim: verbatim, stderr: stderr)
+          unless msg
+            state.failed = true
+            next
+          end
+          if err = session.send(msg, cancel)
+            unless session.closed? && (stop.try(&.closed?) || err.starts_with?("the session is closed: closed by the operator"))
+              stderr.puts "gori run repeater ws: send failed: #{CLI::Output.term_line(err)}"
+              stderr.flush
+              state.failed = true
+            end
+            break
+          end
+        end
+      ensure
+        state.done = true
+      end
+
+      # Convert one line from `stdin` into the `WsEngine::OutMsg` to send, or print the error to
+      # `stderr` and return nil.
+      private def self.ws_stdin_out_msg(line : String, *, binary : Bool, verbatim : Bool,
+                                        stderr : IO) : Repeater::WsEngine::OutMsg?
+        if binary
+          parsed = ws_parse_hex_line(line)
+          if parsed.is_a?(String)
+            stderr.puts "gori run repeater ws: #{parsed}"
+            stderr.flush
+            return nil
+          end
+          Repeater::WsEngine::OutMsg.new(Proxy::WS::OP_BIN.to_i, parsed)
+        else
+          payload = (verbatim ? line : Env.expand(line)).to_slice
+          Repeater::WsEngine::OutMsg.new(Proxy::WS::OP_TEXT.to_i, payload)
+        end
+      end
+
+      # Emit any transcript rows past `cursor` to `stdout`. Returns `{new_cursor, any_emitted}`.
+      private def self.drain_ws_session_transcript(session : Repeater::WsSession, cursor : Int64,
+                                                   stdout : IO, format : Symbol) : {Int64, Bool}
+        entries = session.transcript(after: cursor)
+        return {cursor, false} if entries.empty?
+        entries.each do |entry|
+          cursor = entry.seq
+          stdout.puts ws_session_entry_line(entry, format)
+        end
+        stdout.flush
+        {cursor, true}
+      end
+
+      # True when `close_reason` indicates a transport/protocol failure or mid-session gate
+      # refusal rather than a normal operator close, server CLOSE, or clean EOF.
+      private def self.ws_session_abnormal_close?(reason : String?) : Bool
+        return false unless reason
+        return false if reason.starts_with?("closed by the operator")
+        return false if reason.starts_with?("the server sent CLOSE")
+        return false if reason == "the connection ended"
+        true
+      end
+
       # The session's outbound messages: `--message` overrides when given (each
       # sent as a text frame), else the WS messages stored on the repeater (the
       # ones with direction "out"), env-expanded like MCP send_websocket.
@@ -2603,6 +2963,7 @@ module Gori
                      "  gori run repeater list                List repeater sessions in the workbench\n" \
                      "  gori run repeater create [options]    Create a repeater session (--flow/--request-file/--request-raw/--request-stdin)\n" \
                      "  gori run repeater send <id> [opts]    Replay a saved repeater SESSION (not a flow id)\n" \
+                     "  gori run repeater ws <id> [opts]      Open a persistent WebSocket session (stdin → frames, frames → stdout)\n" \
                      "  gori run repeater h2 [options]        Send a field-native HTTP/2 request (--target/--fields)\n\n" \
                      "#{EVIDENCE_LINK_HELP}\n\n" \
                      "Options (single-flow replay):"

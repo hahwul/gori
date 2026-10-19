@@ -58,10 +58,11 @@ WebSocket Repeater는 `permessage-deflate`를 협상하지 않고, 캡처 프록
 
 **Live session**을 끄면 연결이 끊어지고(gori가 `CLOSE`를 보낸 뒤 끊습니다), 서브탭을 닫거나 프로젝트를 떠나거나 종료할 때도 소켓이 닫힙니다. **Engine.IO heartbeat**(`Space` → `P`, 그다음 `b`)는 세션이 열려 있는 동안 서버의 Engine.IO 핑(`2`)에 퐁(`3`)으로 대신 답해, 앱 수준 하트비트를 놓쳐 긴 소켓이 끊기지 않게 합니다. 기본값은 꺼짐이고 다음 연결부터 적용됩니다. 트랜스크립트는 메모리에만 두고 상한이 있어 — 긴 세션은 가장 오래된 줄부터 버리며 몇 개를 버렸는지 알려 줍니다 — 모든 Repeater WebSocket 전송과 마찬가지로 History에는 아무것도 기록되지 않습니다.
 
-명령줄에서 Repeater를 실행하고, 선택적으로 새 대상을 지정할 수 있습니다.
+명령줄에서 Repeater를 실행하거나, `repeater ws`로 WebSocket 세션을 열어 둘 수 있습니다.
 
 ```bash
 gori run repeater <flow-id> --target https://staging.example.com --diff
+gori run repeater ws <repeater-id> --engine-io --for 30s
 ```
 
 ## 환경 변수 {#environment-variables}

@@ -63,6 +63,7 @@ gori run <subcommand> [verb] [options]
 | `intercept` | Inspect and drive a capturing TUI's live intercept queue |
 | `send [URL]` | Send one request built from a URL (curl-shaped) or a raw request, without creating a Repeater session |
 | `repeater <flow-id>` · `list` · `create` · `send` | Re-send a captured flow, or list / create / execute Repeater sessions (incl. WebSocket) |
+| `repeater ws <id>` | Open a persistent WebSocket session on a saved repeater; stream frames from stdin to stdout |
 | `repeater race <id> <id>…` | Fire several saved sessions as one synchronized race (HTTP/1.1 last-byte sync, HTTP/2 single-packet) |
 | `repeater timing <id> <id>` | Differential timing analysis of two saved sessions: which one is consistently slower, by response order and quartiles |
 | `repeater minimize <id>` | Strip a saved request to the smallest form that keeps the response |
@@ -578,6 +579,21 @@ done
 It edits a copy of the stored request for this send (so do `-H` and `-b`): the session keeps its own request **and its last response**, because storing another target's answer beside it would show the TUI tab a response to a request it does not hold, and make the next `--diff` compare against the wrong endpoint. So `response_saved` is absent from `--format json`, a `path` field names the target that was sent, and the text status line ends with it (`→ 200 in 218.4ms · /api/v1/items/42`). `--record-history` still records the request as it went out, new path included, and `--diff` compares against the session's stored response.
 
 A send that reached the origin exits `0` even when the writes after it fail, so a shell does not resend it. `--format json` says which: `response_saved` (present once a response was written to the session, `false` with `response_save_error` when the project refused the write or the session was deleted mid-send, in which case a later `--diff` would compare against the previous response) and, under `--record-history`, `history_saved` with `history_error` beside a `recorded_flow_id` that is then absent. Text mode prints the same sentence on STDERR.
+
+**`repeater ws <repeater-id>`**: open a persistent HTTP/1.1 WebSocket session on a saved repeater (the `gori run` counterpart of the TUI's **Live session** and MCP's `ws_session_open` / `ws_session_send` / `get_job` / `stop_job`). Each line read from stdin is framed and sent as a TEXT message (or hex-decoded as a BINARY message under `--binary`), and every sent and received frame is printed to stdout as it arrives. EOF on stdin, `--for=DURATION`, or `Ctrl-C` sends a `CLOSE` frame and exits cleanly.
+
+```bash
+printf '{"op":"ping"}\n' | gori run repeater ws 5 --engine-io
+gori run repeater ws 5 --for 30s --format json
+```
+
+| Option | Description |
+| -------- | ------------- |
+| `--auto-reply=MATCH=REPLY` | Auto-reply to an exact inbound TEXT payload with a TEXT frame (repeatable, e.g. `--auto-reply=PING=PONG`) |
+| `--engine-io` | Answer Engine.IO / Socket.IO `'2'` heartbeat pings with `'3'` (shorthand for `--auto-reply=2=3`) |
+| `--for=DURATION` | Close the session after `DURATION` (`500ms`, `30s`, `5m`) even when stdin is still open |
+| `--binary` | Read each stdin line as hex-encoded bytes (optional `0x` prefix) and send it as a BINARY (opcode 2) frame |
+| `--verbatim`, `--slot=NAME`, `--ws-keep-key`, `--tls-preset=NAME`, `-k`, `--allow-unscoped`, `--format=text\|json` (`--json`) | As on `repeater send`. `--format json` streams one JSON object per frame in MCP `get_job`'s row shape (`seq`, `direction`, `opcode`, `origin`, `type`, `frame`, `payload` / `payload_base64`, `auto_reply`, `close_code`) |
 
 **`repeater move <repeater-id>`**: reorder the workbench strip. `--to N` names the 1-based tab number `repeater list` prints; `--up` / `--down` step one place. Pass one of the three. Passing both `--to` and a direction is refused rather than resolved, and a `--to` outside `1-<count>` is refused rather than clamped, so a session never lands somewhere the command did not name. `--format json` reports `from_index` / `to_index` / `moved`.
 

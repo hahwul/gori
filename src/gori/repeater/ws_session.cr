@@ -1,3 +1,5 @@
+require "base64"
+require "json"
 require "./ws_engine"
 
 module Gori
@@ -47,6 +49,75 @@ module Gori
         def reply? : Bool
           message.direction == "in" && !keepalive
         end
+
+        def to_json(j : JSON::Builder, *, mask_secrets : Bool = false) : Nil
+          WsSession.emit_message_json(j, @message, seq: @seq, auto: @auto, mask_secrets: mask_secrets)
+        end
+
+        def to_json(*, mask_secrets : Bool = false) : String
+          JSON.build { |j| to_json(j, mask_secrets: mask_secrets) }
+        end
+      end
+
+      # RFC 6455 opcode → frame type name, so a caller reads text/binary/ping/pong/
+      # close directly instead of decoding the numeric opcode.
+      def self.frame_type(opcode : Int32) : String
+        case opcode
+        when 0x0 then "continuation"
+        when 0x1 then "text"
+        when 0x2 then "binary"
+        when 0x8 then "close"
+        when 0x9 then "ping"
+        when 0xA then "pong"
+        else          "opcode-#{opcode}"
+        end
+      end
+
+      # Who wrote a WebSocket message (`client` vs `target`).
+      def self.origin(direction : String) : String
+        direction == "out" ? "client" : "target"
+      end
+
+      # One transcript row of a WebSocket exchange as a JSON object — shared by MCP's
+      # `send_websocket` / `get_job` (`ws_session_status`) and `gori run repeater ws --format json`.
+      # `authored` is the operator's frame before expansion, for an "out" row whose source is
+      # known; `seq` / `auto` are a live session's (`WsSession::Entry`). `mask_secrets` is set by
+      # the MCP surface so project secrets do not reach the model in clear text or base64.
+      def self.emit_message_json(j : JSON::Builder, message : WsEngine::Message,
+                                 authored : Store::WsOutMessage? = nil, *, seq : Int64? = nil,
+                                 auto : Bool = false, mask_secrets : Bool = false) : Nil
+        j.object do
+          j.field "seq", seq if seq
+          j.field "auto_reply", true if auto
+          j.field "direction", message.direction
+          j.field "opcode", message.opcode
+          j.field "origin", origin(message.direction)
+          j.field "type", frame_type(message.opcode)
+          j.field "frame", Store::WsOutMessage.new(message.opcode, message.payload, message.shape).shape_label(message.direction == "out")
+          if message.opcode == Proxy::WS::OP_CLOSE.to_i && (code = WsEngine.close_status(message.payload))
+            j.field "close_code", code
+            reason = message.payload[2, message.payload.size - 2]
+            j.field "close_reason", String.new(reason).scrub unless reason.empty?
+          end
+          emit_payload_json(j, message, authored, mask_secrets)
+        end
+      end
+
+      private def self.emit_payload_json(j : JSON::Builder, message : WsEngine::Message,
+                                         authored : Store::WsOutMessage?, mask_secrets : Bool) : Nil
+        bytes = mask_secrets ? Env.mask_secrets(String.new(message.payload)).to_slice : message.payload
+        if message.opcode == Proxy::WS::OP_TEXT.to_i
+          s = String.new(bytes)
+          j.field "payload", s.scrub
+          j.field "payload_base64", Base64.strict_encode(bytes) unless s.valid_encoding?
+        else
+          j.field "binary", true
+          j.field "payload_base64", Base64.strict_encode(bytes)
+        end
+        return unless authored && authored.payload != message.payload
+        j.field "payload_expanded", true
+        raw = String.new(authored.payload)
+        j.field "payload_authored", (mask_secrets ? Env.mask_secrets(raw) : raw).scrub
       end
 
       # What `open` produced: the session when the 101 came back, and always the handshake as

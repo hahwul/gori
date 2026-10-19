@@ -225,7 +225,7 @@ module Gori
         j.field "keepalive_unrecorded", session.keepalive_unrecorded if session.keepalive_unrecorded > 0
         rows = session.transcript(after)
         page = rows.first(WS_SESSION_PAGE)
-        parts = fit_rows(page) { |rj, e, _| emit_ws_message(rj, e.message, seq: e.seq, auto: e.auto) }
+        parts = fit_rows(page) { |rj, e, _| e.to_json(rj, mask_secrets: true) }
         j.field "cursor", parts.empty? ? after : page[parts.size - 1].seq
         j.field "has_more", rows.size > parts.size
         emit_cut(j, parts.size < page.size)

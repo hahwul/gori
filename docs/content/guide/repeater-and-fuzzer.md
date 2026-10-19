@@ -58,10 +58,11 @@ The scripted replay above re-dials for every message. To keep ONE socket open an
 
 Toggle **Live session** off to disconnect (gori sends a `CLOSE` and hangs up), and closing the sub-tab, leaving the project or quitting all close the socket too. **Engine.IO heartbeat** (`Space` → `P`, then `b`) answers the server's Engine.IO ping (`2`) with a pong (`3`) for the duration of the session, so a long-lived socket is not timed out by a missed app-level heartbeat; it is off by default and takes effect at the next connect. The transcript is held in memory only and capped — a long session drops its oldest rows, and the transcript says how many — and, like every Repeater WebSocket send, nothing of it is written to History.
 
-Replay from the command line, optionally against a new target:
+Replay from the command line, optionally against a new target, or keep a WebSocket session open with `repeater ws`:
 
 ```bash
 gori run repeater <flow-id> --target https://staging.example.com --diff
+gori run repeater ws <repeater-id> --engine-io --for 30s
 ```
 
 ## Environment Variables

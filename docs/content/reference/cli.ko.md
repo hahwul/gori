@@ -63,6 +63,7 @@ gori run <subcommand> [verb] [options]
 | `intercept` | 캡처 중인 TUI의 라이브 인터셉트 큐 조회 및 조작 |
 | `send [URL]` | Repeater 세션을 만들지 않고, URL(curl 형태) 또는 원시 요청으로 조립한 요청 하나를 전송 |
 | `repeater <flow-id>` · `list` · `create` · `send` | 캡처한 플로우 재전송, 또는 Repeater 세션 목록 / 생성 / 실행 (WebSocket 포함) |
+| `repeater ws <id>` | 저장된 repeater로 지속 WebSocket 세션을 열고 stdin/stdout으로 프레임 스트리밍 |
 | `repeater race <id> <id>…` | 저장된 세션 여러 개를 하나의 동기화된 레이스로 발사(HTTP/1.1 last-byte sync, HTTP/2 single-packet) |
 | `repeater timing <id> <id>` | 저장된 세션 두 개의 차등 타이밍 분석: 응답 순서와 사분위수로 어느 쪽이 일관되게 느린지 판정 |
 | `repeater minimize <id>` | 저장된 요청을 응답이 유지되는 최소 형태로 축약 |
@@ -570,6 +571,21 @@ done
 이 옵션은 이번 전송을 위해 저장된 요청의 사본을 고칩니다(`-H`와 `-b`도 마찬가지입니다). 세션은 자신의 요청과 **마지막 응답**을 그대로 유지합니다. 다른 대상의 응답을 그 옆에 저장하면 TUI 탭이 자신이 가지고 있지 않은 요청에 대한 응답을 보여주게 되고, 다음 `--diff`가 엉뚱한 엔드포인트와 비교하게 되기 때문입니다. 그래서 `--format json`에는 `response_saved`가 빠지고, `path` 필드에 전송된 대상이 담기며, text 상태 줄은 그 값으로 끝납니다(`→ 200 in 218.4ms · /api/v1/items/42`). `--record-history`는 실제로 나간 대로(새 경로 포함) 요청을 여전히 기록하며, `--diff`는 세션에 저장된 응답과 계속 비교합니다.
 
 오리진에 닿은 전송은 그 뒤의 쓰기가 실패해도 `0`으로 종료하므로, 셸이 같은 요청을 다시 보내지 않습니다. 어느 쓰기가 실패했는지는 `--format json`이 알려 줍니다. `response_saved`(세션에 응답을 썼으면 나타나고, 프로젝트가 쓰기를 거부했거나 전송 중에 세션이 삭제됐으면 `false`와 함께 `response_save_error`가 붙습니다. 이때 다음 `--diff`는 이전 응답과 비교합니다)와, `--record-history`를 주었다면 `history_saved`가 나오며, 실패하면 `history_error`가 붙고 `recorded_flow_id`는 빠집니다. 텍스트 모드는 같은 문장을 STDERR에 찍습니다.
+
+**`repeater ws <repeater-id>`**: 저장된 repeater로 지속 HTTP/1.1 WebSocket 세션을 엽니다(TUI의 **Live session** 및 MCP의 `ws_session_open` / `ws_session_send` / `get_job` / `stop_job`에 대응하는 `gori run` 표면). stdin에서 읽은 각 줄은 TEXT 메시지로 프레이밍해 보내고(`--binary`를 주면 헥스로 디코드한 BINARY 메시지), 보낸 프레임과 받은 프레임 모두 도착하는 즉시 stdout에 찍습니다. stdin EOF, `--for=DURATION`, 또는 `Ctrl-C`가 오면 `CLOSE` 프레임을 보내고 깨끗하게 종료합니다.
+
+```bash
+printf '{"op":"ping"}\n' | gori run repeater ws 5 --engine-io
+gori run repeater ws 5 --for 30s --format json
+```
+
+| Option | Description |
+|--------|-------------|
+| `--auto-reply=MATCH=REPLY` | 정확히 일치하는 수신 TEXT 페이로드에 TEXT 프레임으로 자동 응답 (반복 가능, 예: `--auto-reply=PING=PONG`) |
+| `--engine-io` | Engine.IO / Socket.IO `'2'` 하트비트 핑에 `'3'`으로 자동 응답 (`--auto-reply=2=3` 축약형) |
+| `--for=DURATION` | stdin이 열려 있어도 `DURATION`(`500ms`, `30s`, `5m`)이 지나면 세션을 닫음 |
+| `--binary` | 각 stdin 줄을 헥스 바이트(선택적 `0x` 접두사)로 읽어 BINARY(opcode 2) 프레임으로 전송 |
+| `--verbatim`, `--slot=NAME`, `--ws-keep-key`, `--tls-preset=NAME`, `-k`, `--allow-unscoped`, `--format=text\|json` (`--json`) | `repeater send`와 동일. `--format json`은 프레임마다 MCP `get_job` 행 모양(`seq`, `direction`, `opcode`, `origin`, `type`, `frame`, `payload` / `payload_base64`, `auto_reply`, `close_code`)의 JSON 객체 한 줄을 스트리밍합니다 |
 
 **`repeater move <repeater-id>`**: 워크벤치 스트립의 순서를 바꿉니다. `--to N`은 `repeater list`가 출력하는 1부터 시작하는 탭 번호이고, `--up` / `--down`은 한 칸씩 옮깁니다. 셋 중 하나만 주세요. `--to`와 방향을 함께 주면 임의로 해석하지 않고 거절하며, `1-<개수>` 범위를 벗어난 `--to`도 잘라 맞추지 않고 거절합니다. 명령이 지목하지 않은 자리에 세션이 놓이는 일이 없도록 하기 위해서입니다. `--format json`은 `from_index` / `to_index` / `moved`를 보고합니다.
 
