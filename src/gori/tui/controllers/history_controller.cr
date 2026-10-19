@@ -827,6 +827,12 @@ module Gori::Tui
       end
     end
 
+    # The open detail's held-back refresh of an event stream (`HistoryView#live_detail_tick`),
+    # under the gate `on_external_change` refreshes it behind. Returns whether the frame is dirty.
+    def tick_live_detail : Bool
+      @host.overlay == :detail && @history.live_detail_tick(@host.session.store)
+    end
+
     # Apply any finished reflection on the UI fiber. Returns whether the frame is dirty.
     #
     # NON-BLOCKING, the same `select … else` shape `RepeaterController#drain_results` uses:

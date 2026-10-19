@@ -139,6 +139,10 @@ module Gori::Tui
     @host_suggest_refresh_at = Time.instant
     @host_suggest_pending = false
     @suggestions_pending = false
+    # When the open detail last read its flow, and whether a refresh since was skipped for the
+    # pause an open event stream waits between re-reads (`refresh_detail`).
+    @detail_read_at = Time.instant
+    @detail_stale = false
     @popup_requested = false
     # The detail body's read caret (mirrors RepeaterView#resp_cursor) — the pane's own
     # position, which the wrap walkers move in visual rows.
@@ -1707,6 +1711,8 @@ module Gori::Tui
     def open_detail_id(id : Int64, store : Store) : Bool
       @detail = store.get_flow(id)
       return false if @detail.nil?
+      @detail_read_at = Time.instant
+      @detail_stale = false
       @ws_narrow = nil # a narrow belongs to the flow it was made on, and so does its query
       @last_search = ""
       @detail_frozen = store.evidence_count_for(Store::LinkRefKind::Flow, id)
@@ -1910,7 +1916,7 @@ module Gori::Tui
     # Re-fetch the currently-open detail from the store (e.g. a peer instance filled
     # in the response, or appended ws/h2 frames) WITHOUT resetting the pane/scroll.
     # No-op when no detail is open. Returns true if it refreshed.
-    def refresh_detail(store : Store) : Bool
+    def refresh_detail(store : Store, now : Time::Instant = Time.instant) : Bool
       return false unless detail = @detail
       # A Complete, non-streaming flow's captured bytes are immutable (written once),
       # so a data_version poke from OTHER flows committing has nothing to pick up here.
@@ -1919,14 +1925,29 @@ module Gori::Tui
       # streaming flows — WebSocket (101) and HTTP/2, whose message/frame logs keep
       # growing — still refresh.
       return false if detail.row.state.complete? && detail.row.status != 101 && detail.h2_conn_id.nil?
+      # An open event stream is re-read whole and re-parsed on every refresh, so it waits the
+      # Repeater's size-stretched pause between them (P6); `live_detail_tick` catches up the one
+      # a quiet stream would otherwise leave unshown.
+      if open_stream?(detail.row) && now - @detail_read_at < RepeaterView.live_pause(detail.response_body.try(&.size) || 0)
+        @detail_stale = true
+        return false
+      end
       id = detail.row.id
       return false unless fresh = store.get_flow(id)
       @detail = fresh
+      @detail_read_at = now
+      @detail_stale = false
       load_detail_logs(store)
       drop_detail_cache # content changed → rebuild (windowed) on next render
       @detail_hex_bytes = nil
       @detail_scroll = @detail_scroll.clamp(0, detail_scroll_max) # content may have shrunk
       true
+    end
+
+    # One UI tick: the refresh `refresh_detail` held back for an open event stream, once its
+    # pause is over. True when it refreshed.
+    def live_detail_tick(store : Store, now : Time::Instant = Time.instant) : Bool
+      @detail_stale && refresh_detail(store, now)
     end
 
     def scroll_detail(delta : Int32) : Nil

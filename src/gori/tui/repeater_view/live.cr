@@ -9,6 +9,12 @@ class Gori::Tui::RepeaterView
   LIVE_EVERY   = 250.milliseconds
   LIVE_STRETCH = 1024 * 1024
 
+  # The pause after a render of `size` bytes of open stream. History's detail of an open
+  # stream re-parses it the same way, so it waits the same pause (`HistoryView#refresh_detail`).
+  def self.live_pause(size : Int32) : Time::Span
+    LIVE_EVERY * (1 + size // LIVE_STRETCH)
+  end
+
   @live : Repeater::LiveBody? = nil
   @live_result : Repeater::Result? = nil
   @live_started = Time.instant
@@ -38,7 +44,7 @@ class Gori::Tui::RepeaterView
   def live_tick(now : Time::Instant = Time.instant) : Bool
     live = @live || return false
     return false if live.head.nil? || live.size == @live_shown
-    return false if (at = @live_at) && now - at < LIVE_EVERY * (1 + live.size // LIVE_STRETCH)
+    return false if (at = @live_at) && now - at < RepeaterView.live_pause(live.size)
     @live_shown = live.size
     @live_at = now
     @live_renders += 1

@@ -56,6 +56,28 @@ describe "HistoryView — an open event stream" do
     end
   end
 
+  # Each refresh re-reads and re-parses the whole stream so far, so it waits the Repeater's
+  # pause (P6), and the tick shows what a quiet stream's last append brought.
+  it "re-reads an open stream's detail at most once per pause, and catches up on the tick" do
+    with_store do |store|
+      id = le_flow(store)
+      store.append_live(id, 0_i64, "data: a\n\n".to_slice, le_head(id))
+      store.flush
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail_id(id, store).should be_true
+      opened = Time.instant
+      store.append_live(id, 9_i64, "data: b\n\n".to_slice, nil)
+      store.flush
+      view.refresh_detail(store, opened).should be_false # inside the pause
+      view.live_detail_tick(store, opened).should be_false
+      later = opened + RepeaterView::LIVE_EVERY
+      view.live_detail_tick(store, later).should be_true
+      String.new(view.@detail.not_nil!.response_body.not_nil!).should eq("data: a\n\ndata: b\n\n")
+      view.live_detail_tick(store, later + RepeaterView::LIVE_EVERY).should be_false # nothing held back
+    end
+  end
+
   it "shows each event's arrival in EVENTS, and none for a stream captured untimed" do
     with_store do |store|
       id = le_flow(store)
