@@ -17,8 +17,9 @@ module Gori
       # agent that forgets `stop_job` should hit a sentence, not the fd limit.
       MAX_WS_SESSIONS = 8
 
-      # Transcript rows one `get_job` / `ws_session_send` hands back. The ring holds up to
-      # `WsSession::MAX_ENTRIES`; a page keeps one result inside a client's tool-result budget.
+      # Transcript rows one `get_job` / `ws_session_send` hands back, at most: the page is also
+      # held to REPLY_ROWS_BUDGET (#1649), since one row carries a whole payload. The ring holds
+      # up to `WsSession::MAX_ENTRIES`.
       WS_SESSION_PAGE = 200
 
       # Finished sessions retained before the oldest terminal ones are evicted. Far below the
@@ -33,10 +34,23 @@ module Gori
       # The `wait_ms` slice between cancellation checks.
       WS_WAIT_SLICE = 250.milliseconds
 
+      # The longest shutdown waits for the CLOSE handshakes to land — bounded, so a peer that
+      # stopped reading cannot hang the process (#1630).
+      WS_SHUTDOWN_GRACE = 1.second
+
       # Close every open session: on a rebind (`bind_project` / `unbind_project`) and at
-      # shutdown (`Server#run`). The CLOSE handshakes finish in the background.
-      def close_ws_sessions : Nil
-        @ws_jobs.each_value { |job| job.stop if job.live? }
+      # shutdown (`Server#run`). `job.stop` spawns each CLOSE handshake in the background; at
+      # shutdown (`wait`) we give them one bounded window to finish, since the process is about
+      # to exit and an unwaited spawn would never run its CLOSE. A rebind does not wait: the
+      # server keeps running, so the fibers finish on their own.
+      def close_ws_sessions(wait : Bool = false) : Nil
+        live = @ws_jobs.each_value.select(&.live?).to_a
+        live.each(&.stop)
+        return unless wait && !live.empty?
+        deadline = Time.instant + WS_SHUTDOWN_GRACE
+        until live.all?(&.session.closed?) || Time.instant >= deadline
+          sleep 20.milliseconds
+        end
       end
 
       # Connect a saved WebSocket repeater and keep the socket open. The handshake takes the
@@ -136,8 +150,11 @@ module Gori
         before = session.transcript.last?.try(&.seq) || 0_i64
         sent = 0
         error = nil.as(String?)
+        # Checked between messages: each write can block for the dial's write timeout on a
+        # peer that stopped reading, and this is the single MCP worker.
         ws_out_msgs(source, job.verbatim?).each do |m|
-          break if error = session.send(m)
+          return err("request cancelled", "CANCELLED") if cancelled?
+          break if error = session.send(m, cancel_signal)
           sent += 1
         end
         ws_wait_for_reply(session, before, wait_ms) if wait_ms > 0 && error.nil?
@@ -152,13 +169,13 @@ module Gori
         Result.new(payload, is_error: !error.nil?)
       end
 
-      # Wait up to `wait_ms` for the first server message after `before`, or until the session
-      # ends. Waited in ≤WS_WAIT_SLICE slices so `notifications/cancelled` is honoured within
-      # one slice — the single MCP worker is held here, so an uncancellable 30 s wait would
+      # Wait up to `wait_ms` for the first server message after `before` that is not a
+      # keepalive (a PING or an auto-replied heartbeat is no answer), or until the session ends.
+      # Waited in ≤WS_WAIT_SLICE slices so `notifications/cancelled` is honoured within one slice — the single MCP worker is held here, so an uncancellable 30 s wait would
       # wedge every other call behind it (#1630). One waiter per session (`WsSession#wait`).
       private def ws_wait_for_reply(session : Repeater::WsSession, before : Int64, wait_ms : Int64) : Nil
         deadline = Time.instant + wait_ms.milliseconds
-        until cancelled? || session.closed? || session.transcript(before).any? { |e| e.message.direction == "in" }
+        until cancelled? || session.closed? || session.transcript(before).any?(&.reply?)
           left = deadline - Time.instant
           break if left <= Time::Span.zero
           session.wait(left < WS_WAIT_SLICE ? left : WS_WAIT_SLICE)
@@ -188,7 +205,8 @@ module Gori
       end
 
       # The session's state and one page of rows with `seq > after`, oldest first. `cursor` is
-      # the `after` for the next read; `has_more` says a next page is already waiting.
+      # the `after` for the next read (the last row sent); `has_more` says a next page is
+      # already waiting, and `cut_by: "bytes"` that REPLY_ROWS_BUDGET ended this one (#1649).
       private def emit_ws_transcript(j : JSON::Builder, job : WsSessionJob, after : Int64) : Nil
         session = job.session
         j.field "status", job.status.to_s
@@ -196,15 +214,14 @@ module Gori
         session.close_reason.try { |r| j.field "close_reason", Env.mask_secrets(r) }
         session.close_code.try { |c| j.field "close_code", c }
         j.field "dropped", session.dropped if session.dropped > 0
+        j.field "keepalive_unrecorded", session.keepalive_unrecorded if session.keepalive_unrecorded > 0
         rows = session.transcript(after)
         page = rows.first(WS_SESSION_PAGE)
-        j.field "cursor", page.last?.try(&.seq) || after
-        j.field "has_more", rows.size > page.size
-        j.field "messages" do
-          j.array do
-            page.each { |e| emit_ws_message(j, e.message, seq: e.seq, auto: e.auto) }
-          end
-        end
+        parts = fit_rows(page) { |rj, e, _| emit_ws_message(rj, e.message, seq: e.seq, auto: e.auto) }
+        j.field "cursor", parts.empty? ? after : page[parts.size - 1].seq
+        j.field "has_more", rows.size > parts.size
+        emit_cut(j, parts.size < page.size)
+        j.field("messages") { raw_rows(j, parts) }
       end
 
       # `auto_replies` (exact TEXT match → TEXT reply pairs) plus the `engine_io` preset.
@@ -238,7 +255,7 @@ module Gori
           "pushes back — unlike send_websocket, which dials, runs a fixed script and hangs up. " \
           "ACTIVE: a real outbound connection, scope-gated like send_websocket. Returns a job_id " \
           "and the handshake result; read server messages with get_job{job_id, after}, send with " \
-          "ws_session_send, and close with stop_job. HTTP/1.1 only. The session lives in THIS " \
+          "ws_session_send, and close with stop_job (list_jobs lists it). HTTP/1.1 only. The session lives in THIS " \
           "server only and is not written to the project; it is closed on shutdown or a " \
           "switch_project. At most #{MAX_WS_SESSIONS} open at once." do |s|
           s.field "repeater_id", intprop("WebSocket repeater database id (an RFC 6455 Upgrade handshake)"), required: true

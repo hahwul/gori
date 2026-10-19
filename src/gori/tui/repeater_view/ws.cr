@@ -160,6 +160,23 @@ class Gori::Tui::RepeaterView
     end
   end
 
+  # One live-session frame built the SAME way as the scripted `ws_out_messages` (#1630): a
+  # TEXT payload takes `Env.expand` unless the tab is a captured flow (`@evidence`), and the
+  # `evidence` flag rides along so the SEND SEAM's binding pass leaves a capture's bytes alone
+  # (P7). The live sends used to build `OutMsg.new(OP_TEXT, text.to_slice)` raw — so a draft's
+  # `$VAR` went out literally and a flow-seeded tab's captured bytes were run through the
+  # binding pass under a flag that promised they would not be.
+  def ws_live_text_msg(text : String) : Repeater::WsEngine::OutMsg
+    payload = @evidence ? text.to_slice : Env.expand(text).to_slice
+    Repeater::WsEngine::OutMsg.new(Proxy::WS::OP_TEXT.to_i, payload, evidence: @evidence)
+  end
+
+  # A binary live frame: never env-expanded (the same rule the scripted path applies to a
+  # binary frame), but it still carries `evidence` so the binding pass respects provenance.
+  def ws_live_binary_msg(payload : Bytes) : Repeater::WsEngine::OutMsg
+    Repeater::WsEngine::OutMsg.new(Proxy::WS::OP_BIN.to_i, payload, evidence: @evidence)
+  end
+
   # Send the operator's own `Sec-WebSocket-Key` rather than a fresh one. Persisted per
   # session (`repeaters.ws_keep_key`) because it is a property of the handshake being
   # tested, not of one keystroke — and off by default, so every existing tab keeps the

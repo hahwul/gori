@@ -433,9 +433,9 @@ module Gori::Repeater
     # The persistent counterpart of `send_ws` (#1630): one gated connect, then a `WsSession`
     # the surface sends on and closes. `keep_key` is send-time for the reason above.
     # `gate` is the per-send Layer-2 re-check the session runs before every operator message
-    # (#1630). A surface passes `-> { refusal }` so a mid-session Sandbox/scope change closes
+    # (#1630). A surface passes `-> { refusal }` so a Sandbox turned on mid-session closes
     # the socket; the throttled scope reload lives in `Outbound#send_block`, which `refusal`
-    # reaches. Omit it and the session is gated only at the open, as `send_ws` is per exchange.
+    # reaches. An exclude alone passes it, as it passes any hand-authored send. Omit it and the session is gated only at the open, as `send_ws` is per exchange.
     def open_ws(keep_key : Bool = false,
                 auto_replies : Array(WsSession::AutoReply) = [] of WsSession::AutoReply,
                 cancel : Proc(Bool)? = nil, gate : Proc(String?)? = nil) : WsSession::Opened

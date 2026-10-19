@@ -279,4 +279,75 @@ describe "MCP ws_session tools" do
       to_fuzz.text.should_not contain("ws_session_status")
     end
   end
+
+  it "holds a transcript page to the reply byte budget and pages on from its cursor" do
+    big = "x" * 40_000
+    origin = WsOrigin.new do |conn|
+      while frame = WS.read_frame(conn)
+        break if frame.opcode == WS::OP_CLOSE
+        3.times { conn.write(WS.encode(WS::OP_TEXT, big.to_slice, mask: false)) }
+        conn.flush
+      end
+    end
+    begin
+      with_store do |store|
+        store.add_scope_rule("include", "host", "127.0.0.1")
+        tools = tools_for(store)
+        rid = seed_ws_repeater(store, origin.port)
+        job_id = call_json(tools, "ws_session_open", %({"repeater_id":#{rid}}))["job_id"].as_s
+        call_json(tools, "ws_session_send", %({"job_id":"#{job_id}","messages":["go"]}))
+        eventually do
+          call_json(tools, "get_job", %({"job_id":"#{job_id}","after":3}))["messages"].as_a.size == 1
+        end
+        first = call_json(tools, "get_job", %({"job_id":"#{job_id}"}))
+        first["cut_by"].as_s.should eq("bytes")
+        first["has_more"].as_bool.should be_true
+        seen = first["messages"].as_a.map(&.["seq"].as_i64)
+        seen.size.should be < 4
+        first["cursor"].as_i64.should eq(seen.last)
+        rest = call_json(tools, "get_job", %({"job_id":"#{job_id}","after":#{seen.last}}))
+        rest["messages"].as_a.first["seq"].as_i64.should eq(seen.last + 1)
+        call_json(tools, "stop_job", %({"job_id":"#{job_id}"}))
+      end
+    ensure
+      origin.close
+    end
+  end
+
+  it "waits past a server PING for the real answer" do
+    origin = WsOrigin.new do |conn|
+      while frame = WS.read_frame(conn)
+        break if frame.opcode == WS::OP_CLOSE
+        next unless frame.opcode == WS::OP_TEXT
+        conn.write(WS.encode(WS::OP_PING, "k".to_slice, mask: false))
+        conn.flush
+        sleep 300.milliseconds
+        conn.write(WS.encode(WS::OP_TEXT, "late".to_slice, mask: false))
+        conn.flush
+      end
+    end
+    begin
+      with_store do |store|
+        store.add_scope_rule("include", "host", "127.0.0.1")
+        tools = tools_for(store)
+        rid = seed_ws_repeater(store, origin.port)
+        job_id = call_json(tools, "ws_session_open", %({"repeater_id":#{rid}}))["job_id"].as_s
+        sent = call_json(tools, "ws_session_send", %({"job_id":"#{job_id}","messages":["q"],"wait_ms":3000}))
+        sent["messages"].as_a.any? { |m| m["payload"]?.try(&.as_s?) == "late" }.should be_true
+        call_json(tools, "stop_job", %({"job_id":"#{job_id}"}))
+      end
+    ensure
+      origin.close
+    end
+  end
+
+  it "names ws_* sessions in the stop_job and list_jobs schemas" do
+    with_store do |store|
+      listed = JSON.parse(JSON.build { |j| tools_for(store).list(j) }).as_a
+      stop = listed.find! { |t| t["name"].as_s == "stop_job" }
+      stop["inputSchema"]["properties"]["job_id"]["description"].as_s.should contain("ws_*")
+      stop["description"].as_s.should contain("WebSocket session")
+      listed.find! { |t| t["name"].as_s == "list_jobs" }["description"].as_s.should contain("ws_*")
+    end
+  end
 end

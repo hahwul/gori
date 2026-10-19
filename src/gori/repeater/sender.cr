@@ -535,7 +535,7 @@ module Gori
       # ONCE, at connect: the session's later messages ride the socket this verdict admitted.
       # The h2 refusal reads the WIRED bytes (what the session would dial) and hands the budget
       # slot back like the scope refusal does. Operator messages get `expand_messages` per
-      # send, as `send_ws` gives a script.
+      # send, as `send_ws` gives a script, and one budget slot each (`WsSession#send`).
       def open_ws(upgrade : Bytes, keep_key : Bool = false,
                   auto_replies : Array(WsSession::AutoReply) = [] of WsSession::AutoReply,
                   cancel : Proc(Bool)? = nil, gate : Proc(String?)? = nil) : WsSession::Opened
@@ -556,7 +556,8 @@ module Gori
         WsSession.open(wired, scheme: @scheme, host: @host, port: @port, verify_upstream: @verify,
           sni: @sni, overrides: @overrides, keep_key: keep_key, tls_preset: @tls_preset,
           cancel: cancel, auto_replies: auto_replies,
-          expand: ->(m : WsEngine::OutMsg) { expand_messages([m]).first }, gate: gate)
+          expand: ->(m : WsEngine::OutMsg) { expand_messages([m]).first }, gate: gate,
+          outbound: @outbound)
       end
 
       # Whole payload, not `expand_bindings`' head/body split: a WS frame has no head to take,

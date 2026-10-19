@@ -136,6 +136,29 @@ private def connect!(ctl, v : RepeaterView) : Nil
   wait_until { ctl.drain_results; v.ws_connected? }.should be_true
 end
 
+# A raw 127.0.0.1 origin that answers the upgrade with a 101 bearing a bogus accept header.
+private def bogus_accept_port : Int32
+  server = TCPServer.new("127.0.0.1", 0)
+  port = server.local_address.port
+  spawn do
+    while conn = server.accept?
+      spawn do
+        conn.read_timeout = 5.seconds
+        Gori::Proxy::Codec::Http1.read_head(conn)
+        conn << "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n" \
+                "Connection: Upgrade\r\nSec-WebSocket-Accept: WRONG==\r\n\r\n"
+        conn.flush
+        loop { break unless Gori::Proxy::WS.read_frame(conn) }
+      rescue
+      ensure
+        conn.close rescue nil
+      end
+    end
+  rescue
+  end
+  port
+end
+
 describe "RepeaterController WebSocket live session (#1630)" do
   it "connects, sends two lines on one handshake, and streams a server push between them" do
     origin = echo_origin
@@ -378,6 +401,84 @@ describe "RepeaterController WebSocket live session (#1630)" do
         connect!(ctl, v)
 
         wait_until { ctl.drain_results; origin.client_text.includes?("3") }.should be_true
+      end
+    ensure
+      origin.close
+    end
+  end
+  it "expands a draft's $VAR on a live send, and leaves an evidence tab's bytes literal" do
+    origin = echo_origin
+    prev = Gori::Settings.env_vars
+    Gori::Settings.env_vars = [{"TOK", "secret"}] of {String, String}
+    begin
+      with_ws_controller do |ctl, _host|
+        v = open_ws_tab(ctl, origin.port, ["$TOK"])
+        v.evidence?.should be_false # a draft
+        connect!(ctl, v)
+        ctl.repeater_ws_send_cursor
+        wait_until { ctl.drain_results; origin.client_text == ["secret"] }.should be_true
+
+        # The same bytes on an evidence tab are the payload, not a variable reference (P7).
+        v.ws_live_text_msg("$TOK").payload.should eq("secret".to_slice)
+        ev = RepeaterView.new
+        ev.restore("http://127.0.0.1:#{origin.port}", "GET / HTTP/1.1\r\n\r\n", false, true, evidence: true)
+        msg = ev.ws_live_text_msg("$TOK")
+        msg.payload.should eq("$TOK".to_slice)
+        msg.evidence.should be_true
+      end
+    ensure
+      Gori::Settings.env_vars = prev
+      origin.close
+    end
+  end
+
+  it "draws the handshake note on the live transcript" do
+    port = bogus_accept_port
+    with_ws_controller do |ctl, _host|
+      v = open_ws_tab(ctl, port, [] of String)
+      v.menu_registry = Gori::Verbs.registry
+      connect!(ctl, v)
+      v.ws_live_tick
+      b = MemoryBackend.new(120, 32)
+      v.render(Screen.new(b), Gori::Tui::Rect.new(0, 0, 120, 32))
+      b.contains?("⚠").should be_true
+      b.contains?("accept").should be_true
+    end
+  end
+
+  it "keeps a connected tab's socket when a peer deletes its row (reconcile)" do
+    origin = echo_origin
+    begin
+      with_ws_controller do |ctl, host|
+        v = open_ws_tab(ctl, origin.port, ["x"])
+        connect!(ctl, v)
+        s = v.ws_session.not_nil!
+        id = host.session.store.repeaters_meta.first.id
+        host.session.store.delete_repeater(id)
+
+        ctl.reconcile # a connected tab is locked, so it is not dropped and its socket is not orphaned
+        ctl.current_view.should be(v)
+        ctl.ws_session_connected?.should be_true
+        s.closed?.should be_false
+      end
+    ensure
+      origin.close
+    end
+  end
+
+  it "reaps every connect's cancel cell even when the result buffer fills" do
+    origin = echo_origin
+    begin
+      with_ws_controller do |ctl, _host|
+        6.times do |i|
+          open_ws_tab(ctl, origin.port, ["m#{i}"])
+          ctl.repeater_toggle_ws_session
+          ctl.repeater_send
+        end
+        ctl.ws_pending_connects.should eq(6)
+        # Let all six dials complete (buffer is 4) BEFORE any drain, then drain fully.
+        wait_until(5.seconds) { origin.accepts >= 6 }.should be_true
+        wait_until(5.seconds) { ctl.drain_results; ctl.ws_pending_connects == 0 }.should be_true
       end
     ensure
       origin.close

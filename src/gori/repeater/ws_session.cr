@@ -22,6 +22,12 @@ module Gori
       MAX_BYTES   = WsEngine::MAX_RECV_BYTES
       # How long `close` waits for the server's CLOSE before hanging up anyway (§7.1.1).
       CLOSE_GRACE = 2.seconds
+      # Keepalive rows one session records: a server PING/PONG, a heartbeat an auto-reply
+      # matched, and that reply. The scripted engine's MAX_CONTROL_MESSAGES, for its reason: an
+      # origin pinging every few seconds would otherwise push every data row out of the ring.
+      # Past it they are still answered, only counted (`keepalive_unrecorded`).
+      # ponytail: a lifetime cap, not a window; a rolling one if a session must show late pings.
+      MAX_KEEPALIVE_ROWS = WsEngine::MAX_CONTROL_MESSAGES
 
       # A heartbeat answered for the operator: an inbound TEXT message whose payload is
       # EXACTLY `match` gets a TEXT `reply`. Exact rather than a pattern, because it writes into
@@ -34,8 +40,14 @@ module Gori
 
       # One transcript row. `seq` counts every row ever appended, so `transcript(after:)`
       # still finds what is new after the ring dropped old rows. `auto` marks a row the session
-      # wrote itself (a heartbeat reply).
-      record Entry, seq : Int64, at : Time, message : WsEngine::Message, auto : Bool = false
+      # wrote itself (a heartbeat reply); `keepalive` a row under MAX_KEEPALIVE_ROWS.
+      record Entry, seq : Int64, at : Time, message : WsEngine::Message, auto : Bool = false,
+        keepalive : Bool = false do
+        # A server message a surface waiting for an answer should wake on: not a keepalive.
+        def reply? : Bool
+          message.direction == "in" && !keepalive
+        end
+      end
 
       # What `open` produced: the session when the 101 came back, and always the handshake as
       # a `WsEngine::Result` (head, error, note, sent_head), so surfaces reuse their
@@ -54,7 +66,10 @@ module Gori
       # Payload bytes currently held in the ring — a surface stretches its render throttle by
       # this, so a big transcript re-renders less often (#1630).
       getter ring_bytes = 0_i64
+      # Keepalive frames answered but not recorded, past MAX_KEEPALIVE_ROWS.
+      getter keepalive_unrecorded = 0_i64
 
+      @keepalive_rows = 0
       @ring = Deque(Entry).new
       @seq = 0_i64
       @write_lock = Mutex.new
@@ -80,9 +95,12 @@ module Gori
       # Dial, upgrade, start the reader. `expand` runs over each operator message before it is
       # framed (the send seam's binding pass, which `Sender#open_ws` supplies). `gate` is the
       # per-send Layer-2 re-check (#1630): the open is gated once, but a session lasts hours,
-      # so every operator `send` asks it again — the operator may enable the Sandbox or add an
-      # exclude mid-session, and the throttled scope reload behind it (`Outbound#send_block`)
-      # is how that change reaches an already-open socket. Ungated by itself otherwise:
+      # so every operator `send` asks it again. It is `Outbound#send_block`, a hand-authored
+      # send's Layer 2: the Sandbox the operator may turn on mid-session (with the port-bearing
+      # excludes it folds in), reached through its throttled scope reload. An exclude alone
+      # does not stop it, as it does not stop any hand-authored send (DESIGN.md §3).
+      # `outbound` charges each operator `send` to the project request budget (#1601), as
+      # `ws_inject` charges each injected frame. Ungated by itself otherwise:
       # `Sender#open_ws` is the gated door for the handshake.
       def self.open(upgrade_request : Bytes, *, scheme : String, host : String, port : Int32,
                     verify_upstream : Bool, sni : String? = nil,
@@ -90,7 +108,7 @@ module Gori
                     tls_preset : String? = nil, cancel : Proc(Bool)? = nil,
                     auto_replies : Array(AutoReply) = [] of AutoReply,
                     expand : Proc(WsEngine::OutMsg, WsEngine::OutMsg)? = nil,
-                    gate : Proc(String?)? = nil) : Opened
+                    gate : Proc(String?)? = nil, outbound : Gori::Outbound? = nil) : Opened
         if reason = refusal(upgrade_request)
           return Opened.new(nil, WsEngine::Result.new(Bytes.new(0), [] of WsEngine::Message, 0_i64, reason))
         end
@@ -103,12 +121,12 @@ module Gori
         opened.watcher.try(&.stop)
         result = WsEngine::Result.new(opened.head, [] of WsEngine::Message, Engine.elapsed(started),
           note: opened.note, upgraded: true).with_sent_head(opened.sent_head)
-        Opened.new(new(opened.io, auto_replies, expand, gate), result)
+        Opened.new(new(opened.io, auto_replies, expand, gate, outbound), result)
       end
 
       def initialize(@io : IO, @auto_replies : Array(AutoReply),
                      @expand : Proc(WsEngine::OutMsg, WsEngine::OutMsg)?,
-                     @gate : Proc(String?)? = nil)
+                     @gate : Proc(String?)? = nil, @outbound : Gori::Outbound? = nil)
         # Silence is normal on an open session, so no read bound. Cleared before the reader
         # parks: a timeout armed after a fiber has parked does not fire.
         io = @io
@@ -155,12 +173,15 @@ module Gori
       # Frame and write one operator message: masked, unless its shape asks for the unmasked
       # client frame (the same probe `WsEngine.exchange` allows). Nil when written, else why
       # not. A row means "gori wrote this", not "the peer got it".
-      def send(message : WsEngine::OutMsg) : String?
+      #
+      # May wait for the project request budget's rate (`outbound`), on the caller's fiber:
+      # `cancel`, a close, or the Outbound's own halt ends that wait.
+      def send(message : WsEngine::OutMsg, cancel : Proc(Bool)? = nil) : String?
         if reason = @close_reason
           return "the session is closed: #{reason}"
         end
-        # Layer 2, re-checked per send (#1630). A refusal ends the session: a scope or Sandbox
-        # change that now blocks this host is not a "skip one frame" — the operator has
+        # Layer 2, re-checked per send (#1630). A refusal ends the session: a Sandbox change
+        # that now blocks this host is not a "skip one frame" — the operator has
         # decided the target is off-limits, so the socket must not stay open for the next send.
         # Torn down WITHOUT the CLOSE grace (unlike `close`), since this runs on the caller's
         # fiber (the MCP worker) and must not block; the reader exits when `@io` closes.
@@ -172,13 +193,17 @@ module Gori
             return "the send was refused: #{reason}; the session was closed"
           end
         end
+        if reason = admit(cancel)
+          return reason
+        end
         message = @expand.try(&.call(message)) || message
         op = (message.opcode & 0x0f).to_u8
         bytes = Proxy::WS.encode(op, message.payload, message.shape, mask: true)
+        # Before the write, so a server CLOSE the reader handles meanwhile is not answered twice.
+        @sent_close = true if op == Proxy::WS::OP_CLOSE
         if reason = write(bytes)
           return reason
         end
-        @sent_close = true if op == Proxy::WS::OP_CLOSE
         append(WsEngine::Message.new("out", op.to_i, message.payload, message.shape))
         nil
       end
@@ -199,8 +224,10 @@ module Gori
           payload = IO::Memory.new
           payload.write_bytes(code.to_u16!, IO::ByteFormat::BigEndian)
           payload << reason
+          # Set BEFORE the write: it can yield (the lock, a slow peer), and a server CLOSE the
+          # reader takes meanwhile must not get a second CLOSE of its own (§5.5.1).
+          @sent_close = true
           if write(Proxy::WS.encode(Proxy::WS::OP_CLOSE, payload.to_slice, mask: true)).nil?
-            @sent_close = true
             append(WsEngine::Message.new("out", Proxy::WS::OP_CLOSE.to_i, payload.to_slice))
             select
             when @done.receive?
@@ -210,6 +237,20 @@ module Gori
         end
         @io.close rescue nil
         @done.receive?
+      end
+
+      # One slot of the project request budget for an operator `send` (#1601), or the refusal.
+      # Only the operator's frames: a pong, an auto-reply or the close is the session's own.
+      # A close that landed during the wait hands the slot back.
+      private def admit(cancel : Proc(Bool)?) : String?
+        ob = @outbound || return
+        halt = ob.halt
+        if reason = ob.admit(halt: -> { closed? || !!cancel.try(&.call) || !!halt.try(&.call) })
+          return reason
+        end
+        return unless reason = @close_reason
+        ob.refund(1)
+        "the session is closed: #{reason}"
       end
 
       # Every writer goes through here: the lock covers write+flush and nothing else.
@@ -231,10 +272,18 @@ module Gori
       end
 
       # Append a row, evicting the oldest past MAX_ENTRIES / MAX_BYTES (the newest row is
-      # always kept), and wake a waiter.
-      private def append(m : WsEngine::Message, auto : Bool = false) : Nil
+      # always kept), and wake a waiter. A `keepalive` row past MAX_KEEPALIVE_ROWS is only
+      # counted.
+      private def append(m : WsEngine::Message, auto : Bool = false, keepalive : Bool = false) : Nil
+        if keepalive
+          if @keepalive_rows >= MAX_KEEPALIVE_ROWS
+            @keepalive_unrecorded += 1
+            return
+          end
+          @keepalive_rows += 1
+        end
         @seq += 1
-        @ring << Entry.new(@seq, Time.utc, m, auto)
+        @ring << Entry.new(@seq, Time.utc, m, auto, keepalive)
         @ring_bytes += m.payload.size
         while @ring.size > MAX_ENTRIES || (@ring_bytes > MAX_BYTES && @ring.size > 1)
           @ring_bytes -= @ring.shift.message.payload.size
@@ -300,7 +349,7 @@ module Gori
           end
           return false
         end
-        append(WsEngine::Message.new("in", frame.opcode.to_i, frame.payload, frame.shape))
+        append(WsEngine::Message.new("in", frame.opcode.to_i, frame.payload, frame.shape), keepalive: true)
         if frame.opcode == Proxy::WS::OP_PING
           # Never amplify: a control payload is at most 125 bytes (§5.5).
           pong = frame.payload[0, Math.min(WsEngine::MAX_CONTROL_BYTES, frame.payload.size)]
@@ -331,8 +380,9 @@ module Gori
         return true unless frame.fin?
         payload = @assembling.to_slice.dup
         @assembling = IO::Memory.new
-        append(WsEngine::Message.new("in", @msg_opcode.to_i, payload, @shape.take))
-        auto_reply(payload) if @msg_opcode == Proxy::WS::OP_TEXT
+        rule = @msg_opcode == Proxy::WS::OP_TEXT ? @auto_replies.find { |r| r.match.to_slice == payload } : nil
+        append(WsEngine::Message.new("in", @msg_opcode.to_i, payload, @shape.take), keepalive: !rule.nil?)
+        auto_reply(rule) if rule
         true
       end
 
@@ -345,11 +395,10 @@ module Gori
         append(WsEngine::Message.new("in", @msg_opcode.to_i, payload, @shape.take))
       end
 
-      private def auto_reply(payload : Bytes) : Nil
-        rule = @auto_replies.find { |r| r.match.to_slice == payload } || return
+      private def auto_reply(rule : AutoReply) : Nil
         reply = rule.reply.to_slice
         if write(Proxy::WS.encode(Proxy::WS::OP_TEXT, reply, mask: true)).nil?
-          append(WsEngine::Message.new("out", Proxy::WS::OP_TEXT.to_i, reply), auto: true)
+          append(WsEngine::Message.new("out", Proxy::WS::OP_TEXT.to_i, reply), auto: true, keepalive: true)
         end
       end
     end

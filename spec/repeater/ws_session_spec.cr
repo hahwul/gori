@@ -129,6 +129,35 @@ private class StallingIO < IO
   end
 end
 
+# A transport whose every write yields first (a slow peer, a contended lock), fed server
+# frames through `feed`.
+private class SlowWriteIO < IO
+  getter written = IO::Memory.new
+
+  def initialize
+    @r, @w = IO.pipe
+  end
+
+  def read(slice : Bytes) : Int32
+    @r.read(slice)
+  end
+
+  def write(slice : Bytes) : Nil
+    sleep 100.milliseconds
+    @written.write(slice)
+  end
+
+  def feed(bytes : Bytes) : Nil
+    @w.write(bytes)
+    @w.flush
+  end
+
+  def close : Nil
+    @r.close rescue nil
+    @w.close rescue nil
+  end
+end
+
 private def tls_context : OpenSSL::SSL::Context::Server
   cert, key = Gori::Proxy::Tls::CertBuilder.build_root("origin.test")
   Gori::Proxy::Tls::ContextFactory.server_context(cert, key, advertise_h2: false)
@@ -437,5 +466,78 @@ describe Gori::Repeater::WsSession do
       Gori::Outbound::Budget.release(store)
       store.setting(Gori::Store::OUTBOUND_BUDGET_SPENT_KEY).should eq("0")
     end
+  end
+
+  it "charges each operator send to the project request budget, not just the open" do
+    origin = echo_origin
+    with_store do |store|
+      store.set_settings([{Gori::Settings::PROJECT_OUTBOUND_MAX_REQUESTS_KEY, "2"}] of {String, String?})
+      plan = Gori::Repeater::Plan.build(
+        Gori::Repeater::PlanOptions.new([UPGRADE], target: "http://127.0.0.1:#{origin.port}/",
+          expand_request: false),
+        Gori::Outbound.cli(Gori::Scope.load(store), true))
+      s = plan.open_ws.session.not_nil!
+      s.send(txt("one")).should be_nil
+      s.send(txt("two")).should eq(Gori::Outbound::BUDGET_SPENT_ERROR)
+      eventually { inbound(s).includes?("re:one") }
+      inbound(s).should_not contain("re:two")
+      s.close
+      Gori::Outbound::Budget.release(store)
+      store.setting(Gori::Store::OUTBOUND_BUDGET_SPENT_KEY).should eq("2")
+    end
+  ensure
+    origin.try(&.close)
+  end
+
+  it "sends one CLOSE when the server's CLOSE crosses the operator's" do
+    io = SlowWriteIO.new
+    s = WsSession.new(io, [] of WsSession::AutoReply, nil)
+    done = Channel(Nil).new
+    spawn { s.close; done.send(nil) }
+    Fiber.yield # the close is now inside its (slow) write
+    io.feed(WS.encode(WS::OP_CLOSE, Bytes[0x03, 0xE8], mask: false))
+    done.receive
+    written = IO::Memory.new(io.written.to_slice)
+    closes = 0
+    while frame = WS.read_frame(written)
+      closes += 1 if frame.close?
+    end
+    closes.should eq(1)
+  end
+
+  it "records keepalive up to a cap, still answers it, and keeps data rows" do
+    pings = WsSession::MAX_KEEPALIVE_ROWS + 10
+    origin = SessionOrigin.new do |conn, o|
+      pings.times { conn.write(WS.encode(WS::OP_PING, "k".to_slice, mask: false)) }
+      conn.flush
+      o.text(conn, "data")
+      while frame = o.read(conn)
+        break if frame.close?
+      end
+    end
+    s = open_session(origin.port)
+    eventually { s.keepalive_unrecorded == 10 && inbound(s).includes?("data") }
+    s.transcript.count(&.keepalive).should eq(WsSession::MAX_KEEPALIVE_ROWS)
+    s.transcript.select(&.reply?).map { |e| String.new(e.message.payload) }.should eq(["data"])
+    eventually { origin.frames.count { |f| f.opcode == WS::OP_PONG } == pings }
+    s.close
+  ensure
+    origin.try(&.close)
+  end
+
+  it "marks an auto-replied heartbeat and its reply as keepalive, not a reply" do
+    origin = SessionOrigin.new do |conn, o|
+      o.text(conn, "2")
+      while frame = o.read(conn)
+        break if frame.close?
+      end
+    end
+    s = open_session(origin.port, [WsSession::ENGINE_IO_HEARTBEAT])
+    eventually { s.transcript.any?(&.auto) }
+    s.transcript.all?(&.keepalive).should be_true
+    s.transcript.any?(&.reply?).should be_false
+    s.close
+  ensure
+    origin.try(&.close)
   end
 end

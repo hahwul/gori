@@ -2607,25 +2607,34 @@ module Gori::Tui
         # The per-send Layer-2 re-check the session runs before every operator frame (#1630),
         # wired exactly as MCP's `ws_session_open` does it: `plan.refusal` is `Outbound#send_block`
         # (Sandbox + its throttled scope reload), with no budget side effect, so an already-open
-        # socket honours a Sandbox or exclude the operator adds mid-session. `cancel` bounds the
-        # dial and lets a project exit abort it.
+        # socket honours a Sandbox the operator turns on mid-session. An exclude alone passes it,
+        # as it passes any hand-authored send (DESIGN.md §3). `cancel` bounds the dial and lets a
+        # project exit abort it.
         opened = plan.open_ws(keep_key, auto_replies, -> { flag[0] }, gate: -> { plan.refusal })
         # The exit flipped the cell after the dial finished: close the socket here rather than
-        # hand back a session nothing will drain.
+        # hand back a session nothing will drain. `stop_all` already discarded `@ws_connect_flags`,
+        # so the leaked cell goes with the controller — nothing to reap.
         if flag[0]
           opened.session.try { |s| s.close rescue nil }
           next
         end
-        select
-        when results.send({view, opened, flag})
-        else
-          # The buffer was full (the drain is far behind): close what we opened, so it does not leak.
-          opened.session.try { |s| spawn(name: "gori-ws-orphan-close") { s.close rescue nil } }
-          view.inflight = false
-        end
+        # A BLOCKING send, so every connect outcome reaches the drain — which is the ONLY place
+        # that reaps `flag` from `@ws_connect_flags` (`reject!(&.same?(flag))`). The old
+        # non-blocking `select … else` dropped the result when the buffer was full and left the
+        # cell behind forever, a cancel-tracking leak (#1630); blocking just parks this
+        # background fiber until the UI drain catches up.
+        results.send({view, opened, flag})
       rescue ex
         ::Log.error(exception: ex) { "ws session connect fiber died" }
-        view.inflight = false
+        # Hand a nil-session refusal to the drain so it reaps `flag` and clears inflight; a
+        # blocked send here means the controller is tearing down, where the cell goes with it.
+        begin
+          results.send({view, Repeater::WsSession::Opened.new(nil,
+            Repeater::WsEngine::Result.new(Bytes.new(0), [] of Repeater::WsEngine::Message, 0_i64,
+              "the connect failed (#{ex.message.presence || ex.class.name})")), flag})
+        rescue
+          view.inflight = false
+        end
       end
     end
 
@@ -2705,7 +2714,7 @@ module Gori::Tui
         # A refused send ENDS the session inside `WsSession#send`; the live tick then draws the
         # close reason, so this fiber touches neither host nor view (the rule at #apply_refusal)
         # — it only logs for a trace.
-        if reason = s.send(Repeater::WsEngine::OutMsg.new(Proxy::WS::OP_BIN.to_i, decoded))
+        if reason = s.send(tab.view.ws_live_binary_msg(decoded))
           ::Log.info { "ws binary send refused: #{reason}" }
         end
       rescue ex
@@ -2732,7 +2741,7 @@ module Gori::Tui
         # close reason, so this fiber touches neither host nor view (the rule at #apply_refusal)
         # — it only logs for a trace.
         texts.each do |text|
-          if reason = s.send(Repeater::WsEngine::OutMsg.new(Proxy::WS::OP_TEXT.to_i, text.to_slice))
+          if reason = s.send(view.ws_live_text_msg(text))
             ::Log.info { "ws text send refused: #{reason}" }
             break
           end
@@ -3490,7 +3499,11 @@ module Gori::Tui
       # `grpc_fields?` for the same reason as `request_hex?`: the FIELDS form is an editor
       # over the payload that the persisted request text cannot round-trip, so a reconcile
       # that restore()d under it would wipe an applied edit and put the caret nowhere.
-      v.inflight? || v.dirty? || v.request_hex? || v.grpc_fields? ||
+      # `ws_connected?` too (#1630): a live session's socket and reader fiber are held only by
+      # this tab's view, and `stop_all` / `close_live_ws` walk `@repeaters` to close them. A
+      # cross-session reconcile that dropped a connected tab (a peer deleted its row) because it
+      # was clean and not inflight would orphan the socket — it reads on, and nothing closes it.
+      v.inflight? || v.dirty? || v.request_hex? || v.grpc_fields? || v.ws_connected? ||
         v.pane_insert?(:request) || v.pane_insert?(:target)
     end
 

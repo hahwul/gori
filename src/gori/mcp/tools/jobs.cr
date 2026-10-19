@@ -174,7 +174,7 @@ module Gori
         end
       end
 
-      # Stop a fuzz, mine, discover, sequence, or authorize job. With wait:true, blocks (yielding to the runner
+      # Stop a fuzz, mine, discover, sequence, or authorize job, or close a ws_* session. With wait:true, blocks (yielding to the runner
       # fiber via sleep) until the job reaches a terminal state or wait_timeout_ms
       # elapses, so a caller can stop-and-confirm in one call instead of polling.
       @[Tool("stop_job", gated: true, agent_action: true, permission: "send")]
@@ -263,7 +263,7 @@ module Gori
         return unless @allow_actions
 
         tool j, "list_jobs",
-          "List all fuzz, mine, discover, sequence, and authorize jobs this session started " \
+          "List all fuzz, mine, discover, sequence, authorize, and WebSocket-session (ws_*) jobs this session started " \
           "(job_id, kind, status, counts, target) — one call to see everything in flight. " \
           "An authorize row carries bypass_count, so an access-control finding is visible here." { }
 
@@ -277,10 +277,10 @@ module Gori
         end
 
         tool j, "stop_job",
-          "Stop a fuzz, mine, discover, sequence, or authorize job. With wait:true, block until it reaches a terminal " \
+          "Stop a fuzz, mine, discover, sequence, or authorize job, or close a WebSocket session (ws_*). With wait:true, block until it reaches a terminal " \
           "state (or wait_timeout_ms elapses) and report the final status + stopped_at, " \
           "so stop-and-confirm is one call. Without wait, returns immediately (stop is async)." do |s|
-          s.field "job_id", strprop("a fuzz (fz_*), mine (mn_*), discover (ds_*), sequence (sq_*), or authorize (az_*) job id"), required: true
+          s.field "job_id", strprop("a fuzz (fz_*), mine (mn_*), discover (ds_*), sequence (sq_*), authorize (az_*), or WebSocket-session (ws_*) job id"), required: true
           s.field "wait", boolprop("block until the job actually stops (default false)")
           s.field "wait_timeout_ms", intprop("max ms to wait when wait:true (default 10000, max 60000)")
         end
