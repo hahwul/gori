@@ -1163,6 +1163,34 @@ describe "H2::StreamGate body rules (#1628)" do
       end
     end
   end
+
+  # Past `Assembler::MAX_LIVE_STREAMS` open streams the assembler tracks no new one, so the gate
+  # cannot see that this answer is to a CONNECT; it must not own a response it cannot place.
+  it "relays an extended CONNECT's tunnel the assembler is not tracking" do
+    with_rules do |rules, ic|
+      rules.add(RESP, BODY, "zzz", "yyy", host: "127.0.0.1")
+      last = 2_u32 * Gori::Proxy::H2::Assembler::MAX_LIVE_STREAMS + 1
+      opened = ->(stream : UInt32, origin : Peer) do
+        if stream == last
+          origin.send_head(stream, [{":status", "200"}], false)
+          origin.send_body(stream, Bytes[0x81, 0x05] + "hello".to_slice, false)
+        end
+        nil
+      end
+      rig = BodyRig.new(rules, ic, opened: opened) { |_, _| nil }
+      begin
+        (1_u32...last).step(2) { |id| rig.client.send_head(id, get("/open#{id}"), true) }
+        head = [{":method", "CONNECT"}, {":protocol", "websocket"}, {":scheme", "https"},
+                {":authority", "127.0.0.1"}, {":path", "/chat"}, {"sec-websocket-version", "13"}]
+        rig.client.send_head(last, head, false)
+        100.times { break if rig.client.bodies[last].size > 0; sleep 20.milliseconds }
+        rig.client.bodies[last].size.should eq(7)
+        (rig.client.errors + rig.wait_origin.errors).should be_empty
+      ensure
+        rig.close
+      end
+    end
+  end
 end
 
 # Against the gates directly, so the deadline can be short.
