@@ -12,6 +12,17 @@ module Gori
         {"history delete", "Hard-delete captured flows by id (one or more), or every match of -q QL (needs --yes)"},
         {"history clear", "Delete ALL captured flows in the project (needs --yes)"},
       ])]
+      # Takes a leading `ls` / `list` off `positional` — it is the listing itself (#1625), not a
+      # search for "ls" — and THEN refuses a discarded verb: `--format=json delete 42` lands in
+      # the listing because the dispatcher keys on args.first? (a leading `--project`/`--db` no
+      # longer does: `Run.hoist_target_flags`). `delete` is not QL; refused rather than searched
+      # for as the free text "delete 42", exiting 0 with the flow still on disk. In that order,
+      # or `history ls delete 42` was the search.
+      def self.history_verb_error(positional : Array(String)) : String?
+        positional.shift if positional[0]?.in?("ls", "list")
+        reserved_query_verb_error(positional, "history", ["delete", "rm", "clear", "show"], "delete/rm, clear, show")
+      end
+
       private def self.cmd_history(args : Array(String)) : Nil
         case args.first?
         when "delete", "rm" then cmd_history_delete(args[1..])
@@ -365,16 +376,9 @@ module Gori
           p.on("--include-sensitive", "Emit Authorization/Cookie/Set-Cookie/API-key values in --format json's per-row headers instead of [REDACTED]") { include_sensitive = true }
           redact_options(p, redaction)
         end
-        # `--format=json delete 42` lands here because the dispatcher keys on args.first?
-        # (a leading `--project`/`--db` no longer does: `Run.hoist_target_flags`).
-        # `delete` is not QL; it is the discarded verb. Refuse it rather than search
-        # for the free-text "delete 42" and exit 0 with the flow still on disk.
-        if err = Run.reserved_query_verb_error(positional, "history",
-             ["delete", "rm", "clear", "show"], "delete/rm, clear, show")
+        if err = history_verb_error(positional)
           abort err
         end
-        # `history ls` / `history list` is the listing itself (#1625), not a search for "ls".
-        positional.shift if positional[0]?.in?("ls", "list")
         # Accept a positional QL too ("gori run history status:404" / "-status:404"),
         # mirroring the TUI's `/` bar — otherwise a positional query was silently dropped
         # and EVERY flow dumped.

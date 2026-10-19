@@ -1687,3 +1687,16 @@ describe "gori run history --count — the clashes" do
     end
   end
 end
+
+describe "gori run history — `ls` and the reserved verbs" do
+  it "takes `ls` off before refusing a verb, so `history ls delete 42` is refused, not searched" do
+    words = %w[ls delete 42]
+    Gori::CLI::Run.history_verb_error(words).not_nil!.should contain("unknown subcommand 'delete'")
+  end
+
+  it "takes `ls` / `list` off a plain listing and leaves the query words" do
+    words = %w[list host:a.test]
+    Gori::CLI::Run.history_verb_error(words).should be_nil
+    words.should eq(%w[host:a.test])
+  end
+end
