@@ -38,6 +38,7 @@
 - JWT: a `--key` (or MCP `key`) file that is not PEM is refused as `<file> is not a PEM key` instead of being blamed as an unreadable path, and a file holding another file's path is no longer followed (#1700)
 - CLI: `gori run jwt --encode` takes `--header JSON` and repeatable `--set-header key=value` to edit the header (finishing the `kid`/`jku`/`jwk` payloads from `--attacks`), and mints without a token when `--header` or `--payload` is given, as MCP `jwt_encode` does (#1701)
 - Cookie: the `--salt` help and docs name both Django salts (default `django.core.signing` and the session-cookie `django.contrib.sessions.backends.signed_cookies`), and a failed Django `--verify`/`--crack` under the default salt hints at the session salt (#1712)
+- MCP: the `list_views` and `list_history{view}` descriptions now name all seven built-in views (WebSocket, gRPC, SSE and Errors included), generated from the view table, instead of claiming there are three (#1713)
 
 ## v0.8.1
 

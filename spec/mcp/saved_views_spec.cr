@@ -49,6 +49,26 @@ private def add_flow(store, source : Gori::FlowSource::Kind, host : String)
 end
 
 describe "MCP saved views" do
+  # #1713: the descriptions once claimed "three built-ins"; every built-in name must appear in
+  # both list_views and list_history{view}, so a new BUILTINS row cannot leave them stale.
+  it "names every built-in view in the list_views and list_history descriptions" do
+    with_store do |store|
+      catalogue = JSON.parse(JSON.build { |j| tools_for(store).list(j) }).as_a
+      # list_views names them in its description; list_history in the `view` field's — scan the
+      # whole served tool JSON so either placement counts.
+      tool_json = ->(name : String) {
+        catalogue.find { |t| t["name"].as_s == name }.not_nil!.to_json
+      }
+      list_views = tool_json.call("list_views")
+      list_history = tool_json.call("list_history")
+      Gori::SavedViews::BUILTINS.each do |v|
+        list_views.should contain(v.name)
+        list_history.should contain(v.name)
+      end
+      list_views.should_not contain("Three built-ins")
+    end
+  end
+
   it "lists the built-ins, then the global library, then this project's own" do
     with_globals do
       with_store do |store|
