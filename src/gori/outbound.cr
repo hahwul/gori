@@ -213,7 +213,7 @@ module Gori
       if verdict.excluded?
         fix = "delete or narrow the scope EXCLUDE rule that matches it (an include rule cannot override an exclude)"
         if waiver && waiver_passes_exclude
-          why = "with the Sandbox off, an exclude does not stop a hand-authored send"
+          why = "the Sandbox is off, so an exclude does not stop a hand-authored send"
           return edit_exclude ? "#{fix}, or pass #{waiver} (#{why})" : "pass #{waiver} (#{why}), or ask the operator to #{fix}"
         end
         return edit_exclude ? fix : "ask the operator to #{fix}"

@@ -5115,7 +5115,7 @@ Refines both 2026-10-19 #1628 entries and P7. Takes the open option above.
 
 ### 2026-10-21: a refusal names the waiver for an exclude where the waiver lifts it (#1694)
 
-Refines the #1585 entry's "delete the EXCLUDE rule, which no waiver lifts". That holds for a
+Refines the 2026-09-28 #1348 entry's "delete the EXCLUDE rule", which no waiver lifts. That holds for a
 sweep (`sweep_block`) and for a hand-authored send under the Sandbox. A hand-authored send with
 the Sandbox off passes an exclude once Layer 1 is waived (`send_block`, as on the proxy), so its
 remedy names the waiver beside the exclude (`Outbound.remedy(waiver_passes_exclude:)`, asked of
