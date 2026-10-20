@@ -343,10 +343,14 @@ describe "plan builders refuse an unresolved namespaced $ENV token in a draft (#
         # The TOTP secret never expands (#1591), so its token is unresolved by definition, and
         # the refusal says what reads it instead of "set it" (#1707).
         Gori::Env.unresolved_env("X: $ENV.TOTP_SECRET").should eq("$ENV.TOTP_SECRET")
-        note = Gori::Env.totp_secret_refusal("$ENV.TOTP_SECRET").not_nil!
+        note = Gori::Env.totp_secret_refusal("$ENV.TOTP_SECRET") { |rest| "REST #{rest}" }.not_nil!
         note.should contain("$ENV.TOTP_SECRET never expands")
         note.should contain("$GEN.TOTP")
-        Gori::Env.totp_secret_refusal("$ENV.NOPE").should be_nil
+        note.should_not contain("REST")
+        # Another unresolved token in the same request is still named, in the surface's words.
+        both = Gori::Env.totp_secret_refusal("$ENV.TOTP_SECRET, $ENV.NOPE") { |rest| "REST #{rest}" }.not_nil!
+        both.should end_with("; REST $ENV.NOPE")
+        Gori::Env.totp_secret_refusal("$ENV.NOPE") { |rest| rest }.should be_nil
       end
       with_env_syntax(Gori::Env::Syntax::Bare) do
         Gori::Env.unresolved_env("X: $NOPE").should be_nil

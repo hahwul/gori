@@ -426,7 +426,8 @@ module Gori::Tui
       in Miner::PlanError::Reason::NoNames
         "wordlist is empty"
       in Miner::PlanError::Reason::UnresolvedEnv
-        Env.totp_secret_refusal(ex.detail) || "unresolved env #{ex.detail} — add it in the Project tab's ENV pane"
+        Env.totp_secret_refusal(ex.detail) { |rest| "unresolved env #{rest} — add it in the Project tab's ENV pane" } ||
+          "unresolved env #{ex.detail} — add it in the Project tab's ENV pane"
       in Miner::PlanError::Reason::HookArgv
         "hook command does not parse: #{ex.detail}"
       end

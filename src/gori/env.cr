@@ -384,12 +384,16 @@ module Gori
 
     # The sentence for a refused `$ENV.TOTP_SECRET` in `detail` (as `mint_refusal` reads it), or
     # nil. That var is never a token (#1591), so "set it" is the wrong remedy: it may well be set,
-    # and `project env set` has just said only `$GEN.TOTP` reads it (#1707).
-    def self.totp_secret_refusal(detail : String?) : String?
-      refs = (detail || "").split(',').compact_map { |t| parse_ref?(t) }
-      return nil unless refs.any? { |r| r.ns.env? && r.name == TOTP_SECRET_VAR }
-      "#{spell(TOTP_SECRET_VAR, Namespace::Env)} never expands — #{TOTP_SECRET_VAR} is read only by " \
-      "#{spell("TOTP", Namespace::Gen)}; use that token, or remove this one"
+    # and `project env set` has just said only `$GEN.TOTP` reads it (#1707). Any OTHER token in
+    # `detail` is yielded, still spelled as listed, for the surface's own sentence to follow it.
+    def self.totp_secret_refusal(detail : String?, & : String -> String) : String?
+      tokens = (detail || "").split(',').map(&.strip).reject(&.empty?)
+      totp = ->(t : String) { (r = parse_ref?(t)) ? r.ns.env? && r.name == TOTP_SECRET_VAR : false }
+      return nil unless tokens.any?(&totp)
+      note = "#{spell(TOTP_SECRET_VAR, Namespace::Env)} never expands — #{TOTP_SECRET_VAR} is read only by " \
+             "#{spell("TOTP", Namespace::Gen)}; use that token, or remove this one"
+      rest = tokens.reject(&totp)
+      rest.empty? ? note : "#{note}; #{yield rest.join(", ")}"
     end
 
     # Why a token in `detail` (a refused build's comma-joined token list) cannot mint, as a

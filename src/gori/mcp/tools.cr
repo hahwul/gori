@@ -2646,7 +2646,7 @@ module Gori
       # on a namespaced install, `$SESSION, $TOKEN` on a bare one (`Env.token_list` decides), so
       # the names an agent reads here are already in the spelling it has to write back.
       private def env_unresolved_error(detail : String?) : String
-        if note = Gori::Env.totp_secret_refusal(detail)
+        if note = Gori::Env.totp_secret_refusal(detail) { |rest| env_unresolved_error(rest) }
           return note
         end
         refs = (detail || "").split(',').compact_map { |t| Gori::Env.parse_ref?(t) }

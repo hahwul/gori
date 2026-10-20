@@ -1556,7 +1556,7 @@ module Gori
       # on the FACT, not after the remedy — "...or remove the token for session #3" reads as
       # if the token were the session's.
       private def self.env_unresolved_error(detail : String?, where : String = "") : String
-        if note = Env.totp_secret_refusal(detail)
+        if note = Env.totp_secret_refusal(detail) { |rest| env_unresolved_error(rest) }
           return "#{note}#{where}"
         end
         refs = (detail || "").split(',').compact_map { |t| Gori::Env.parse_ref?(t) }
