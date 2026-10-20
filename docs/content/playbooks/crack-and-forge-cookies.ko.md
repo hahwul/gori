@@ -51,7 +51,7 @@ MCP에서는 `cookie_crack`입니다. 검증과 같은 원리를 목록 전체�
 
 **체크포인트.** 복구된 비밀키가 출력되거나, 그 비밀키가 목록에 없었다고 보고됩니다.
 
-Django 쿠키가 올바른 비밀키인데도 `invalid`로 나오면 세션 쿠키일 가능성이 높습니다. 세션 쿠키는 `django.core.signing` 기본이 아니라 `--salt django.contrib.sessions.backends.signed_cookies`로 서명합니다. Django 검증·크랙이 실패하면 이 힌트를 출력합니다.
+Django 쿠키가 올바른 비밀키인데도 `invalid`로 나오면 세션 쿠키일 가능성이 높습니다. 세션 쿠키는 `django.core.signing` 기본이 아니라 `--salt django.contrib.sessions.backends.signed_cookies`로 서명합니다. `gori run cookie`에서 Django 검증·크랙이 실패하면 이 힌트를 출력합니다(MCP `cookie_verify` / `cookie_crack`은 출력하지 않습니다).
 
 ## 4. 직접 위조하기 {#4-forge-your-own}
 
