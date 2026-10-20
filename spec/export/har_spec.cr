@@ -539,6 +539,35 @@ describe Gori::Export::Har do
     end
   end
 
+  # #1672: `Redact::Wire.flow` keeps the captured row's totals, so the true-wire-size arithmetic
+  # above gave a sanitized INTACT body its original length: the secret's length leaked, the size
+  # contradicted the sanitized Content-Length, and the body re-imported as truncated.
+  it "sizes a redacted intact body by the sanitized bytes and re-imports it whole" do
+    with_store do |store|
+      secret = "S" * 200
+      body = %({"user":"bob","password":"#{secret}"})
+      detail = capture_flow(store,
+        req_head: "POST /api/login HTTP/1.1\r\nHost: shop.test\r\nContent-Type: application/json\r\nContent-Length: #{body.bytesize}\r\n\r\n",
+        req_body: body.to_slice, method: "POST", target: "/api/login")
+      matcher = Gori::Redact::Matcher.new(Gori::Redact::Profile.new(name: "p", json_fields: ["password"]))
+      before = Gori::Redact.salt
+      Gori::Redact.salt = "spec-salt"
+      clean = begin
+        Gori::Redact::Wire.flow(detail, matcher)[0]
+      ensure
+        Gori::Redact.salt = before
+      end
+      har, report = export([clean])
+      report.truncated.should eq(0)
+
+      req = JSON.parse(har)["log"]["entries"][0]["request"]
+      text = req["postData"]["text"].as_s
+      text.should_not contain(secret)
+      req["bodySize"].as_i.should eq(text.bytesize)
+      reimport(har).request_body_truncated?.should be_false
+    end
+  end
+
   # R4. An exported entry has to carry what gori has to SAY about the exchange — HAR 1.2
   # gives `entry.comment` for exactly this. The pushed case matters most: a HAR reader has no
   # other way to tell a request the ORIGIN invented from one the client sent.

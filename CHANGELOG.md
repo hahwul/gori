@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Redaction: a `jsonpath:`, `regex:` or `position:` column in `gori run history` reads the redaction profile's sanitized body, as `show` and MCP `list_history` do, and `--redact`/`--no-redact` apply to such a column on the text and json listings; a redacted HAR export sizes an intact body by its sanitized bytes, so it no longer gives away the secret's length or re-imports as truncated (#1671, #1672)
 - Compare: the TUI Comparer, `gori run compare` and MCP `compare_flows` tell apart messages that differ only in CRLF vs LF or where a CR sits, instead of calling them identical, and `gori run compare --context` with a huge value no longer crashes (#1674, #1691)
 - CLI: `gori run repeater ws <id>` opens a persistent HTTP/1.1 WebSocket session on a saved repeater, sending each stdin line as a text frame (or hex-decoded binary under `--binary`) and streaming both directions to stdout as text or JSON lines (`--format json`), with `--auto-reply`, `--engine-io` and `--for=DURATION` (#1660)
 - MCP: list replies are held to about 64 KB, so a page at the advertised `limit` no longer exceeds a client's tool-result cap; a cut page says `cut_by: "bytes"` with `has_more` and its usual cursor or `offset`, an `ids` set returns the rest as `remaining_ids`, a list that is never paged names the rest by id (`*_unshown_ids`), `oast_poll` keeps what does not fit for the next poll, `export_openapi` inlines 64 KB by default, and `get_response_body_chunk` pages at most 64 KB (#1649, #1659)
