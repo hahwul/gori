@@ -498,7 +498,7 @@ module Gori
       private def self.apply_repeater_metadata(store : Store, id : Int64,
                                                name : String?, tags : String?) : Bool
         ok = true
-        ok = false if name && !store.set_repeater_name(id, Env.mask_secrets(name).presence)
+        ok = false if name && !store.set_repeater_name(id, Env.mask_secrets(name).strip.presence)
         ok = false if tags && !store.set_repeater_tags(id, Repeater::Tags.stored(tags))
         ok
       end

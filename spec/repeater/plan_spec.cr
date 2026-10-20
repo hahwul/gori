@@ -549,5 +549,7 @@ describe "Gori::Repeater::Plan.target_error" do
     R::Plan.target_error("http://127.0.0.1:65535").should be_nil
     R::Plan.target_error("not a url at all").not_nil!.should contain("could not determine a target host")
     R::Plan.target_error("http://").not_nil!.should contain("could not")
+    # An 8-bit host (a captured one, via --flow) is answered, never raised on.
+    R::Plan.target_error("http://\xFFh").should be_nil
   end
 end

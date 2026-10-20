@@ -687,7 +687,8 @@ module Gori::Repeater
       scheme, host, port = origin_of(raw)
       return "unsupported target scheme #{scheme.inspect}" unless scheme.in?("http", "https")
       return "target port #{port} is out of range (1-65535)" if port > 65535
-      return "could not determine a target host from #{raw.inspect}" if host.matches?(/\s/)
+      # `each_char`, not a regex: a captured 8-bit host is invalid UTF-8, which PCRE refuses.
+      return "could not determine a target host from #{raw.inspect}" if host.each_char.any?(&.whitespace?)
       nil
     rescue e : PlanError
       e.reason.unresolved_env? ? nil : e.message

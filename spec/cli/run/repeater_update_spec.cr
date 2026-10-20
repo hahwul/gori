@@ -46,11 +46,11 @@ describe "gori run repeater update" do
     end
   end
 
-  it "normalizes tags as MCP does, and a blank name or SNI clears it" do
+  it "normalizes tags as MCP does, and a blank (or whitespace-only) name or SNI clears it" do
     with_db_store do |store, path|
       id = seed_update_repeater(store)
       Gori::CLI::Run.repeater_update_for_spec([id.to_s, "--db", path,
-                                               "--tags", "#idor, x,,#IDOR", "--name", "", "--sni", ""])
+                                               "--tags", "#idor, x,,#IDOR", "--name", "   ", "--sni", ""])
       rec = store.get_repeater(id).not_nil!
       rec.name.should be_nil
       rec.sni.should be_nil
