@@ -5112,3 +5112,21 @@ Refines both 2026-10-19 #1628 entries and P7. Takes the open option above.
   overtakes are routine and their parked trailers would need re-encoding as raw frames.
 - Still open: holds still cost every request with a declared length on a body-rule host, whether
   or not a pattern would match it. Cheaper gates (method, content-type) wait for the rule model.
+
+### 2026-10-20: a draft's unresolved `$ENV.X` is refused, and an untouched flow seed is evidence (#1666, #1670)
+
+Refines P7's provenance axis and the #571 rule that a token with no value is literal text.
+
+- Under the namespaced grammar an `$ENV.X` is a reference by construction, the class `$GEN`
+  already is (#1591). So an AUTHORED request naming one that resolves to nothing is refused at
+  plan-build (`Env.unresolved_env`), as `PlanError::Reason::UnresolvedEnv`, the reason a `$GEN`
+  that cannot mint uses: no new member, so the surfaces word it with the sentence they have. It
+  is asked before the env pass, because that pass consumes the `$$ENV.X` escape. A bare `$name`,
+  a verbatim send, evidence and a slot header stay literal, as before. Not yet covered: a
+  Discover custom header (it may be copied off a capture, `Headers.from_flow`, with nothing to
+  say so) and a WebSocket frame.
+- A Repeater session is evidence while its bytes still equal what its flow seed produces
+  (`Repeater::DraftMarkers.evidence?`, against `FlowRequest.build`), so `gori run repeater send`,
+  `gori run fuzz --repeater` and MCP replay the capture's `$ENV`/`$GEN` tokens as the tab does.
+  Once the row, or the send's own `--path`/`-H`, edits it, the session is a draft: the tab
+  tracks provenance per name, the headless surfaces have no per-name record to read.

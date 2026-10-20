@@ -1,5 +1,6 @@
 require "../store"
 require "../fuzz/template"
+require "./flow_request"
 
 module Gori::Repeater
   # The one predicate the headless send seams ask before replaying a saved session:
@@ -56,6 +57,19 @@ module Gori::Repeater
       fid = rec.flow_id
       return true unless fid
       operator_marked?(store, fid)
+    end
+
+    # Whether the session is still EVIDENCE: seeded from a flow (`flow_id`) and carrying exactly
+    # the bytes that seed produced (`FlowRequest.build`), so a `$ENV`/`$GEN` token in it is one
+    # the capture brought and goes out literally (#1670) — as in the Repeater tab, whose
+    # flow-seeded tab expands only names the capture did not carry. An edited row, or one this
+    # send edits (`request`, as for `live?`), is the operator's draft again. A lost seed is too:
+    # there is nothing left to tell the capture's tokens from typed ones.
+    def self.evidence?(store : Store, rec : Store::RepeaterRecord, request : Bytes = rec.request) : Bool
+      return false unless (fid = rec.flow_id) && (detail = store.get_flow(fid))
+      FlowRequest.build(detail).bytes == request
+    rescue FlowRequest::PseudoHeaderHead
+      false
     end
 
     # `RepeaterView#adopt_capture_markers`' test, asked of the store instead of the tab: did

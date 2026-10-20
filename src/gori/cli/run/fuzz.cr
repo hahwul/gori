@@ -711,9 +711,9 @@ module Gori
       end
 
       # {template text, default target (nil for file/stdin), http2, is-evidence, sni} from the
-      # chosen source. `is-evidence` is PROVENANCE, not a knob: only the `--flow` branch
-      # hands back captured bytes, and only that branch may therefore skip the draft-time
-      # passes (see `Fuzz::PlanOptions#evidence?`). `sni` is the SOURCE's stored SNI (only a
+      # chosen source. `is-evidence` is PROVENANCE, not a knob: only the `--flow` branch, and
+      # `--repeater` on a session still holding its flow seed's bytes, hand back captured bytes,
+      # and only they may therefore skip the draft-time passes (see `Fuzz::PlanOptions#evidence?`). `sni` is the SOURCE's stored SNI (only a
       # repeater session carries one) and is a DEFAULT — an explicit `--sni` still wins.
       private def self.fuzz_source(flow_id : Int64?, repeater_id : Int64?, request_file : String?,
                                    project_name : String?, db_path : String?) : FuzzSeed
@@ -773,12 +773,12 @@ module Gori
       # the frames are where the positions go.
       private def self.fuzz_source_repeater(id : Int64, project_name : String?,
                                             db_path : String?) : FuzzSeed
-        rec, ws_rows = with_store(resolve_read_project(project_name, db_path), read_only: true) do |store|
+        rec, ws_rows, evidence = with_store(resolve_read_project(project_name, db_path), read_only: true) do |store|
           r = store.get_repeater(id)
           # Fetched while the store is open, and only for a session that IS one — the same
           # read `cmd_repeater_send_ws` makes one command over.
           rows = r && Repeater::WsEngine.replayable?(String.new(r.request)) ? store.ws_messages_for_repeater(id) : nil
-          {r, rows}
+          {r, rows, r ? Repeater::DraftMarkers.evidence?(store, r) : false}
         end
         abort "gori run fuzz: no repeater session ##{id}" unless rec
         # `evidence` per FRAME mirrors `cmd_repeater_send_ws`: a session SEEDED from a captured
@@ -789,8 +789,9 @@ module Gori
         # Markers are escaped, exactly as the `--flow` seed does: `§` is U+00A7 ordinary text a
         # stored request may carry, and the fuzz POSITIONS are what `--auto`/`--mark` define
         # here — an un-escaped `§` in the session would become a live position nobody marked.
-        # But evidence is FALSE (unlike `--flow`): a repeater session is the operator's authored
-        # draft, and its `$NAME` bindings are meant to expand, the same as `repeater send`.
+        # Evidence only while the session still holds its flow seed's bytes untouched
+        # (`Repeater::DraftMarkers.evidence?`, #1670): an authored or edited session is the
+        # operator's draft, and its `$NAME` bindings are meant to expand, the same as `repeater send`.
         # `rec.sni` rides along: a session pinned to a specific SNI (vhost routing, a cert-pinned
         # origin) must be swept against THAT name, or `fuzz --repeater N` reaches a different
         # vhost — or fails the handshake — where `repeater send N` succeeds.
@@ -798,7 +799,7 @@ module Gori
         # that answers a bare OpenSSL hello with a challenge is exactly why the tab carries a
         # preset, and a sweep that drops it measures the challenge, not the endpoint.
         FuzzSeed.new(String.new(Fuzz::Template.escape_literal_markers(rec.request)),
-          rec.target, rec.http2?, false, rec.sni, ws, rec.tls_preset)
+          rec.target, rec.http2?, evidence, rec.sni, ws, rec.tls_preset)
       end
 
       # A captured flow's outbound frames, as a fuzz seed. `evidence: true` throughout — every

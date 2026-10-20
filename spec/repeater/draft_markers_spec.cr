@@ -146,6 +146,57 @@ describe Gori::Repeater::DraftMarkers do
   end
 end
 
+# #1670: a flow-seeded session whose bytes are still the seed's is EVIDENCE, so its captured
+# `$ENV`/`$GEN` tokens go out as the capture had them, as the Repeater tab sends them.
+describe "Gori::Repeater::DraftMarkers.evidence?" do
+  it "is true only while a flow-seeded session holds its seed's bytes untouched" do
+    with_store_env do |store|
+      fid = seed_flow(store, "POST /l HTTP/1.1\r\nHost: a.test\r\nX-E: $ENV.TOKEN\r\n\r\nid=$GEN.UUID")
+      seed = String.new(Gori::Repeater::FlowRequest.build(store.get_flow(fid).not_nil!).bytes)
+      DM.evidence?(store, rec_for(seed, flow_id: fid)).should be_true
+      DM.evidence?(store, rec_for(seed.sub("id=", "id=x"), flow_id: fid)).should be_false
+      DM.evidence?(store, rec_for(seed, flow_id: fid), "GET / HTTP/1.1\r\n\r\n".to_slice).should be_false
+      DM.evidence?(store, rec_for(seed)).should be_false
+      DM.evidence?(store, rec_for(seed, flow_id: 4242_i64)).should be_false
+    end
+  end
+end
+
+describe "MCP send_request{repeater_id} — captured tokens on an unedited flow seed (#1670)" do
+  it "sends them literally, and expands them once the session is edited" do
+    with_store_env do |store|
+      Gori::Settings.env_vars = [{"TOKEN", "abc123"}]
+      with_env_syntax(Gori::Env::Syntax::Namespaced) do
+        sink = Channel(Bytes).new(1)
+        port = start_recording_origin(sink)
+        flow_id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: port,
+          method: "GET", target: "/ev", http_version: "HTTP/1.1",
+          head: "GET /ev HTTP/1.1\r\nHost: 127.0.0.1\r\nX-E: $ENV.TOKEN\r\nX-G: $GEN.UUID\r\n\r\n".to_slice,
+          body: nil, source: Gori::FlowSource::Kind::Import))
+        seed = Gori::Repeater::FlowRequest.build(store.get_flow(flow_id).not_nil!).bytes
+        id = store.insert_repeater("http://127.0.0.1:#{port}", seed, false, true, flow_id, 0)
+        args = JSON.parse(%({"repeater_id":#{id},"allow_unscoped":true,"record_history":false}))
+        tools_for(store).call("send_request", args).is_error.should be_false
+        wire = String.new(sink.receive)
+        wire.should contain("X-E: $ENV.TOKEN\r\n")
+        wire.should contain("X-G: $GEN.UUID\r\n")
+
+        sink2 = Channel(Bytes).new(1)
+        port2 = start_recording_origin(sink2)
+        edited = String.new(seed).sub("GET /ev", "GET /ev2")
+        store.update_repeater(id, "http://127.0.0.1:#{port2}", edited.to_slice, false, true).should be_true
+        tools_for(store).call("send_request", args).is_error.should be_false
+        wire2 = String.new(sink2.receive)
+        wire2.should contain("X-E: abc123\r\n")
+        wire2.should_not contain("$GEN.UUID")
+      end
+    ensure
+      Gori::Settings.env_vars = [] of {String, String}
+    end
+  end
+end
+
 describe "MCP send_request — a session whose §…§ the tab would render (#1068)" do
   it "refuses a send from a session with no source flow, and records no History flow" do
     with_store_env do |store|

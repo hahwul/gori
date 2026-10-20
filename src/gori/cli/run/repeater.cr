@@ -990,8 +990,11 @@ module Gori
                                             tls_preset : String? = nil,
                                             request : Bytes = rec.request,
                                             pinned_cl : Bool = false,
-                                            sse : Repeater::StreamBound? = nil) : Repeater::PlanOptions
+                                            sse : Repeater::StreamBound? = nil,
+                                            evidence : Bool = false) : Repeater::PlanOptions
         Repeater::PlanOptions.new([request],
+          # `Repeater::DraftMarkers.evidence?`: an unedited flow seed is a capture, not a draft.
+          evidence: evidence,
           reframe_grpc: reframe_grpc,
           default_target: rec.target, http2: rec.http2?, sni: rec.sni,
           timeout: timeout, sse: sse,
@@ -1536,7 +1539,7 @@ module Gori
         # keeps its own, see `FlowRequest.replace_request_target`) — so a `§id§` in the stored
         # target that `--path` replaced does not refuse a send that no longer carries it.
         pinned_cl = false
-        rec, host_overrides, markers_live, request = begin
+        rec, host_overrides, markers_live, request, seed_evidence = begin
           r = store.get_repeater_full(id)
           req = r.try { |row| (p = path_override) ? Repeater::FlowRequest.replace_request_target(row.request, p) : row.request }
           if bytes = req
@@ -1544,7 +1547,10 @@ module Gori
             abort "gori run repeater send: --grpc-field #{built}" if built.is_a?(String)
             req, pinned_cl = built
           end
-          {r, Gori::HostOverrides.load(store), r && req ? Repeater::DraftMarkers.live?(store, r, req) : false, req}
+          # Asked of the same bytes, for the same reason: an unedited flow seed replays its
+          # captured `$ENV`/`$GEN` tokens literally, as the tab does (#1670).
+          {r, Gori::HostOverrides.load(store), r && req ? Repeater::DraftMarkers.live?(store, r, req) : false, req,
+           r && req ? Repeater::DraftMarkers.evidence?(store, r, req) : false}
         ensure
           store.close
         end
@@ -1564,7 +1570,8 @@ module Gori
 
         plan = begin
           Repeater::Plan.build(session_plan_options(rec, insecure, host_overrides, verbatim, timeout, reframe_grpc,
-            tls_preset, request: request, pinned_cl: pinned_cl, sse: sse.bound(Repeater::StreamBound::SEND)), outbound)
+            tls_preset, request: request, pinned_cl: pinned_cl, sse: sse.bound(Repeater::StreamBound::SEND),
+            evidence: seed_evidence), outbound)
         rescue ex : Repeater::PlanError
           repeater_plan_abort("gori run repeater send", ex, "session ##{id}")
         end

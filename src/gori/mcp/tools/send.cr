@@ -1520,6 +1520,9 @@ module Gori
           # outright, naming a variable nobody had typed.
           return {Repeater::PlanOptions.new([rec.request], default_target: rec.target,
             http2: bool_arg(h, "http2", rec.http2?), sni: send_sni(h, rec.sni),
+            # An unedited flow seed is a capture, not a draft: its `$ENV`/`$GEN` tokens go out
+            # literally, as in the Repeater tab and `gori run repeater send` (#1670).
+            evidence: Repeater::DraftMarkers.evidence?(store, rec),
             expand_request: !verbatim,
             # The SEND-seam half of the promise, and the one that was missing on all three
             # verbatim surfaces at once (#910): `expand_request` reaches the builder, while a

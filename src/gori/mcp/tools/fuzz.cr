@@ -834,16 +834,18 @@ module Gori
         if rid = optional_int_arg(h, "repeater_id")
           rec = store.get_repeater(rid)
           raise FuzzArgError.new("no repeater session #{rid}") unless rec
-          # Markers escaped like the flow_id seed (a stored `§` is literal text, not a position),
-          # but evidence is FALSE: a repeater session is the operator's authored draft and its
-          # `$NAME` bindings expand, the same as send_request from a repeater.
+          # Markers escaped like the flow_id seed (a stored `§` is literal text, not a position).
+          # Evidence only while the session still holds its flow seed's bytes untouched
+          # (`Repeater::DraftMarkers.evidence?`, #1670): otherwise it is the operator's draft and
+          # its `$NAME` bindings expand, the same as send_request from a repeater.
           # `rec.sni` rides along: a session pinned to a specific SNI (vhost routing, a cert-pinned
           # origin) must be swept against THAT name, or this reaches a different vhost — or fails
           # the handshake — where `send_request{repeater_id}` succeeds. `rec.tls_preset` rides
           # along for the same reason one layer down the stack: an origin that answers a bare
           # OpenSSL hello with a challenge is exactly why the tab carries a preset, and a sweep
           # that dropped it would measure the challenge rather than the endpoint.
-          return {String.new(Fuzz::Template.escape_literal_markers(rec.request)), rec.target, rec.http2?, false, rec.sni, rec.tls_preset}
+          return {String.new(Fuzz::Template.escape_literal_markers(rec.request)), rec.target, rec.http2?,
+                  Repeater::DraftMarkers.evidence?(store, rec), rec.sni, rec.tls_preset}
         end
         raise FuzzArgError.new("provide a 'template' (raw request with §…§), a 'flow_id', or a 'repeater_id'")
       end
