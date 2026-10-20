@@ -689,7 +689,7 @@ gori run fuzz save 42 --auto --preset sqli
 gori run fuzz save --request request.txt --target https://api.example.com --project acme --payloads a,b
 ```
 
-파일/stdin에서 저장할 때는 `--project`나 `--db`가 필요합니다. 프로젝트를 지정하지 않은 스윕을 가장 최근 프로젝트에 조용히 써넣지 않기 때문입니다. `--record-history`는 이와 별개로 남습니다. 저장된 결과 집합이 아니라 History 플로우를 제어합니다.
+파일/stdin에서 저장할 때는 `--project`, `--db`, `GORI_PROJECT` 중 하나가 필요합니다. 프로젝트를 지정하지 않은 스윕을 가장 최근 프로젝트에 조용히 써넣지 않기 때문입니다. `--record-history`는 이와 별개로 남습니다. 저장된 결과 집합이 아니라 History 플로우를 제어합니다.
 
 | 명령 | 설명 |
 |------|------|

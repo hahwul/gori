@@ -99,7 +99,7 @@ module Gori
         # same way it does for a flow (whose read already hydrates them via open_store).
         # Always, not only when `flow_id` is nil: `--request` + `--flow` used to skip
         # this and then skip `open_store`, so `--slot` lied about no project.
-        hydrate_project_env(proj.name, proj.db) if proj.name || proj.db
+        hydrate_project_env(proj.name, proj.db) if project_named?(proj.name, proj.db)
         text, default_target, src_h2, evidence = mine_source(flow_id, request_file, proj.name, proj.db)
 
         config = Miner::Config.new
@@ -121,7 +121,7 @@ module Gori
           abort "gori run mine: --locations was empty — name at least one of query|form|multipart|json|headers|cookies (or omit it to auto-detect)"
         end
         # The project any `--payload-from` reads, open only for the plan build below.
-        named_project = !!(flow_id || proj.name || proj.db)
+        named_project = !!(flow_id || project_named?(proj.name, proj.db))
         payload_store = open_payload_from_store("gori run mine", name_specs, named_project, proj.name, proj.db)
         # …and the project a `--macro` reads its sessions from, on the same terms and released at
         # the same moment: the plan freezes the steps, so nothing reads it during the run.

@@ -35,6 +35,7 @@
 - Rewriter: a Match&Replace body rule now rewrites HTTP/2 bodies on the h2 relay instead of forcing matching hosts down to HTTP/1.1, so gRPC and other h2-only clients keep connecting while one is enabled. Streaming bodies (gRPC, SSE, WebSocket), requests with no declared length and an upload later requests have waited on for 5 s go through unrewritten, and a message held at Intercept shows the rule's rewrite as on HTTP/1.1 (#1628, #1658)
 - `gori run` sends, MCP `send_request`, the Fuzzer, the Miner and every other sweep (Discover, Authorize, Retest, active Probe) stop reading an SSE response after a number of events or seconds (100 / 10 s for a send, 50 / 5 s per sweep payload) instead of waiting out the idle timeout, and return the events so far as a success marked `bounded`; `--sse-events` / `--sse-time` or MCP `sse_max_events` / `sse_max_ms` change the limits. The TUI Repeater shows an SSE response live, per event under PRETTY, until **Stop send** ends it and keeps the events received (#1631)
 - MCP: a `--db` or `GORI_MCP_DB` file that does not exist leaves the server unbound with a `bind_error`, read-only or not, instead of creating and migrating an empty database there (#1667)
+- CLI: `fuzz`, `mine` and `sequence` with `--request` or stdin read the project `GORI_PROJECT` names, its env vars, host overrides, scope and Sandbox included, the same as `--project`, instead of sending unscoped (#1669)
 
 ## v0.8.1
 

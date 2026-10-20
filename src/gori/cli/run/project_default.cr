@@ -38,6 +38,16 @@ module Gori
         end
       end
 
+      # Did this run name its project? `--project`/`--db`, or `GORI_PROJECT` set in the
+      # environment (#1669): that is how a script names its project once, at the top, so a
+      # `--request`/stdin run under it is not one "outside any project" — it takes that
+      # project's env vars, overrides, scope and Sandbox like `--project` would. Only the pin
+      # and the most recent project stay ambient. Set but empty still counts, so it is
+      # refused by `default_project` rather than skipped.
+      def self.project_named?(project_name : String?, db_path : String?) : Bool
+        !!(project_name || db_path || ENV.has_key?(DEFAULT_PROJECT_ENV))
+      end
+
       # The file `project switch` writes (`ProjectRegistry::DEFAULT_PIN_FILE`): the pinned
       # project's short id (its slug for a legacy project with none), which survives a rename.
       def self.default_pin_path : String

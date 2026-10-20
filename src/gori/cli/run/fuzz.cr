@@ -255,16 +255,16 @@ module Gori
         # project: `optional_project_outbound` says so on STDERR and skips the scope gate. Writing
         # its results into the ambient default project anyway would put a sweep the operator kept
         # out of a project straight into that project's History. Name the project to record.
-        if (record_policy != :none || save_results) && !(flow_id || repeater_id || proj.name || proj.db)
+        if (record_policy != :none || save_results) && !(flow_id || repeater_id || project_named?(proj.name, proj.db))
           feature = save_results ? "fuzz save" : "--record-history"
           abort "gori run fuzz: #{feature} needs a project — this run has none (--request/stdin " \
-                "without --project/--db). Pass --project NAME or --db PATH to say where the results go."
+                "without --project/--db or $#{DEFAULT_PROJECT_ENV}). Pass --project NAME or --db PATH to say where the results go."
         end
 
         # Named project / --db always hydrates, even when `--request` is the template:
         # `--flow` used to skip this and `--request` then skipped `open_store`, so
         # `--slot` / `--bind-from` lied with SLOT_NO_PROJECT despite `--project`.
-        hydrate_project_env(proj.name, proj.db) if proj.name || proj.db
+        hydrate_project_env(proj.name, proj.db) if project_named?(proj.name, proj.db)
         seed = fuzz_source(flow_id, repeater_id, request_file, proj.name, proj.db)
         text = seed.text
         default_target = seed.target
@@ -379,7 +379,7 @@ module Gori
         # The project any `--payload-from` reads, open only for the plan build below. After every
         # refusal above, so a run that never builds holds no handle.
         payload_specs = sources.compact_map { |src| src.as?(Fuzz::ProjectSource).try(&.spec) }
-        named_project = !!(flow_id || repeater_id || proj.name || proj.db)
+        named_project = !!(flow_id || repeater_id || project_named?(proj.name, proj.db))
         payload_store = open_payload_from_store(command, payload_specs, named_project, proj.name, proj.db)
         # …and the project a `--macro` reads its sessions from, on the same terms and released at
         # the same moment: the plan freezes the steps, so nothing reads it during the run. When a

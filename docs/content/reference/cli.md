@@ -697,7 +697,7 @@ gori run fuzz save 42 --auto --preset sqli
 gori run fuzz save --request request.txt --target https://api.example.com --project acme --payloads a,b
 ```
 
-A file/stdin save needs `--project` or `--db`; gori will not silently write a project-less sweep into whichever project happens to be most recent. `--record-history` remains independent: it controls History flows, not the saved result set.
+A file/stdin save needs `--project`, `--db` or `GORI_PROJECT`; gori will not silently write a project-less sweep into whichever project happens to be most recent. `--record-history` remains independent: it controls History flows, not the saved result set.
 
 | Command | Description |
 | --------- | ------------- |
