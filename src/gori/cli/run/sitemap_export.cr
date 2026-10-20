@@ -117,8 +117,8 @@ module Gori
         else
           io.puts "#{cmd}: #{report.summary}"
         end
-        if report.hosts.size > 1
-          io.puts "#{cmd}: the flows span #{report.hosts.size} hosts, so each path lists the servers " \
+        if report.origins.size > 1
+          io.puts "#{cmd}: the flows span #{report.origins.size} origins, so each path lists the servers " \
                   "that answered it — --host H gives one API per document"
         end
         report.notes.each { |n| io.puts "#{cmd}: #{n}" }
