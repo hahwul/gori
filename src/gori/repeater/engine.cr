@@ -3,6 +3,7 @@ require "../proxy/codec/http1"
 require "../proxy/codec/body"
 require "../proxy/socket_tuning"
 require "./stream_bound"
+require "./conn_pool" # `Result` scrubs its error with `ConnPool.transport_detail`
 require "wait_group"
 
 module Gori
@@ -74,6 +75,10 @@ module Gori
                      @wire : Bytes? = nil, @retryable_stale = false, @cut_short = false,
                      @lf_framed = false, @bounded : String? = nil,
                      @event_times : Array(Int64)? = nil)
+        # The one seam every engine's failure passes through, so a raw `IO::Error` message
+        # (`write (#<TCPSocket:0x…>): Broken pipe`) loses its heap address here rather than at
+        # each `#{ex.message}` that builds one (#1696).
+        @error = @error.try { |e| ConnPool.transport_detail(e) || e }
       end
 
       # When each event of an event-stream response arrived (`Sse::Arrivals`), so the History
