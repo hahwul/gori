@@ -547,11 +547,11 @@ gori run ls --format json --column 'T=regex:tok=(\w+)'
 | **Set JSON field**(`json_set`) | 본문이나 WebSocket 메시지에서 JSON 경로가 가리키는 값을 설정(키가 없으면 추가) |
 | **Remove JSON field**(`json_remove`) | JSON 경로가 가리키는 멤버나 배열 원소를 삭제 |
 
-**Replace** 규칙은 요청이나 응답의 **헤드**(요청/상태 줄 + 헤더), **본문**(엔티티), 또는 **ws**(WebSocket 메시지. 아래 [WebSocket에서의 Match & Replace](#match-replace-websocket))를 대상으로 합니다. 리터럴과 정규식 중에서 고르며, 정규식 치환은 `$1`/`$2` 캡처 그룹 삽입을 지원합니다(리터럴 `$`는 `$$`). 헤더 동작은 항상 헤드에 적용되고, 헤더 이름을 대소문자 구분 없이 매칭합니다. 값이 비어 있으면 매칭된 텍스트를 삭제하거나 헤더를 제거합니다.
+**Replace** 규칙은 요청이나 응답의 **헤드**(요청/상태 줄 + 헤더), **본문**(엔티티), 또는 **ws**(WebSocket 메시지. 아래 [WebSocket에서의 Match & Replace](#match-replace-websocket))를 대상으로 합니다. 리터럴과 정규식 중에서 고르며, 정규식 치환은 `$1`/`$2` 캡처 그룹 삽입을 지원합니다(리터럴 `$`는 `$$`). 헤더 동작은 항상 헤드에 적용되고, 헤더 이름을 대소문자 구분 없이 매칭합니다. 값이 비어 있으면 매칭된 텍스트를 삭제하거나 헤더를 제거합니다. 요청 헤드 규칙은 프록시가 전달하는 origin-form 요청 줄(`GET /path HTTP/1.1`)에 매칭됩니다. History 헤드가 absolute-form(`GET http://host/path HTTP/1.1`)으로 보이는 평문 HTTP 프록시 플로우도 마찬가지입니다.
 
 두 **JSON** 동작은 경로로 JSON 본문이나 WebSocket 텍스트 메시지를 고치므로, 공백·키 순서·다른 깊이의 같은 이름 키 때문에 엉뚱한 필드를 건드리거나 놓치지 않습니다. `path:` 줄에는 `$.user.role`, `$["odd key"]`, `$.items[0]`, `$.items[-1]`(끝에서부터)을 쓰며, 와일드카드·`..`·필터는 거부됩니다. **Set JSON field**의 `JSON value:`는 JSON 텍스트입니다(따옴표까지 쓴 `"admin"`, `true`, `{"a":1}`). 그 밖의 값은 저장할 때 거부되고, 안의 `$ENV.NAME`/`$BIND.NAME`은 해석된 뒤 다시 검사합니다. 바뀌는 것은 그 값의 바이트뿐이고, 다른 곳의 숫자 표기·이스케이프·공백은 들어온 그대로 나갑니다. 마지막 키가 없으면 추가하고, 부모가 없거나 타입이 맞지 않거나 인덱스가 범위를 벗어나거나 본문이 JSON이 아니면(압축 포함) 메시지를 그대로 둡니다. 중복 키는 설정할 때 마지막 것을 고치고, 지울 때는 모두 지웁니다. **body**나 **ws**에만 쓰며 헤드에는 쓸 수 없습니다: `gori run rewriter add --op=json_set --target=response --find='$.isAdmin' --value=true`, 또는 MCP `create_rule`의 `op: json_set`.
 
-어떤 규칙이든 **호스트**로 범위를 좁혀 매칭되는 트래픽에만 적용할 수 있습니다. 일반 문자열은 그 호스트와 그 서브도메인에 매칭되고(`example.com`은 `example.com`과 `api.example.com`에 매칭되지만 `xexample.com`이나 `example.com.evil.net`에는 매칭되지 않습니다), 더 넓게 잡으려면 `*`를 명시적으로 씁니다(`*.example.com`). 비워 두면 모든 호스트에 적용됩니다.
+어떤 규칙이든 **호스트**로 범위를 좁혀 매칭되는 트래픽에만 적용할 수 있습니다. 일반 문자열은 그 호스트와 그 서브도메인에 매칭되고(`example.com`은 `example.com`과 `api.example.com`에 매칭되지만 `xexample.com`이나 `example.com.evil.net`에는 매칭되지 않습니다), 더 넓게 잡으려면 `*`를 명시적으로 씁니다(`*.example.com`). 비워 두면 모든 호스트에 적용됩니다. 포트, 스킴, 경로가 붙은 호스트는 거부됩니다. 규칙은 모든 포트에서 그 호스트에 매칭됩니다.
 
 목록은 `a` 추가, `e`/`Enter` 편집, `t` 켜기/끄기, `d` 삭제, `Space → s` 전역/프로젝트 전환, `Shift-J`/`Shift-K` 순서 변경(규칙은 위에서 아래로 적용), `space`로 전체 메뉴를 다룹니다. 편집기는 규칙이 최근 몇 개의 플로우에 영향을 줄지 실시간 미리보기로 보여 줍니다. 규칙은 저장 즉시 적용되고 재시작은 필요 없습니다.
 
@@ -682,7 +682,7 @@ Short circuit 규칙의 `source:` 행은 답을 어디서 가져올지 고릅니
 
 ### HTTP/2에서의 헤드 규칙 {#head-rules-on-http-2}
 
-헤드 규칙은 연결을 강등하지 않고 HTTP/2에 적용되므로 gRPC가 계속 동작합니다. 규칙은 플로우 상세 뷰가 보여 주는 것과 같은 헤드(`GET /path HTTP/2`, `:authority`를 대신하는 `Host:` 줄, 소문자 필드 이름)를 대상으로 쓰며, 실제 전송에도 그대로 그 헤드가 쓰입니다. HTTP/2에 자리가 없어서 HTTP/1.1과 다르게 동작하는 것들이 있습니다.
+헤드 규칙은 연결을 강등하지 않고 HTTP/2에 적용되므로 gRPC가 계속 동작합니다. 규칙은 HTTP/2 플로우의 상세 뷰가 보여 주는 origin-form 헤드(`GET /path HTTP/2`, `:authority`를 대신하는 `Host:` 줄, 소문자 필드 이름)를 대상으로 쓰며, 실제 전송에도 그대로 그 헤드가 쓰입니다. HTTP/2에 자리가 없어서 HTTP/1.1과 다르게 동작하는 것들이 있습니다.
 
 - 시작 줄은 `HTTP/2`이고 응답에는 reason phrase가 없습니다. `HTTP/1.1`이나 `200 OK`를 겨냥한 규칙은 매칭되지 않고, 버전이나 reason phrase를 쓰는 규칙은 버려집니다.
 - 필드 이름은 소문자로 나가므로, 이름의 대소문자만 바꾸는 규칙은 아무 일도 하지 않습니다.

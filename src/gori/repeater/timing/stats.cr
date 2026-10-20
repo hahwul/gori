@@ -81,7 +81,10 @@ module Gori::Repeater::Timing
       p_value : Float64,
       verdict : Verdict,
       # The permanent refusal that ended the run early (`Timing.run`), or nil.
-      refusal : String? = nil do
+      refusal : String? = nil,
+      # The first send error among the counted pairs, or nil — what a failed pair died of, so an
+      # inconclusive run can say whether it met a refused port, a timeout or a TLS failure.
+      error : String? = nil do
       # One line for the verdict banner / the CLI summary — the shape `Sequencer::Report#rationale`
       # has, phrased for a differential oracle.
       # The pairs that decided a direction (ties carry none) — the sign test's and the
@@ -92,6 +95,7 @@ module Gori::Repeater::Timing
 
       def rationale : String
         base = rationale_of_verdict
+        base = "#{base} · sends failed: #{e}" if verdict.inconclusive? && (e = error)
         (r = refusal) ? "#{base} · stopped early: #{r}" : base
       end
 

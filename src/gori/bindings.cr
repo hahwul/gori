@@ -492,7 +492,7 @@ module Gori
     # `create_extract_rule` and the TUI form refuse it in the same words.
     def validate(name : String, kind : Gori::ExtractKind, selector : String,
                  except_id : Int64? = nil, pos_start : Int32 = 0, pos_end : Int32 = 0,
-                 match_filter : String = "") : String?
+                 match_filter : String = "", host : String = "") : String?
       return "a binding needs a name" if name.empty?
       unless Env.valid_key?(name)
         return "#{name.inspect} is not a valid binding name (letters, digits and _ only, not starting with a digit)"
@@ -511,7 +511,7 @@ module Gori
       if kind.position? && pos_end <= pos_start
         return "a position descriptor needs a byte range with an end past its start (got #{pos_start}...#{pos_end})"
       end
-      nil
+      Rules.host_error(host)
     end
 
     # Returned by `add`/`update` when the STORE refused the write rather than the values being
@@ -528,7 +528,7 @@ module Gori
             selector : String = "", pos_start : Int32 = 0, pos_end : Int32 = 0,
             host : String = "") : String?
       if err = validate(name, kind, selector, pos_start: pos_start, pos_end: pos_end,
-           match_filter: match_filter)
+           match_filter: match_filter, host: host)
         return err
       end
       # 0 is `insert_extract_rule`'s "the write was dropped" (its own comment says so), and it
@@ -543,7 +543,7 @@ module Gori
                selector : String = "", pos_start : Int32 = 0, pos_end : Int32 = 0,
                host : String = "") : String?
       if err = validate(name, kind, selector, except_id: id, pos_start: pos_start,
-           pos_end: pos_end, match_filter: match_filter)
+           pos_end: pos_end, match_filter: match_filter, host: host)
         return err
       end
       previous = @mutex.synchronize { @rules.find(&.id.==(id)) }

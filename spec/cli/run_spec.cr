@@ -518,6 +518,26 @@ describe "gori run fuzz/mine/sequence — project host overrides (R2-1)" do
       File.delete?(path); File.delete?("#{path}-wal"); File.delete?("#{path}-shm")
     end
   end
+
+  # #1669: `GORI_PROJECT` names the project as surely as `--project` does, so a --request/stdin
+  # run under it loads that project instead of going out project-less.
+  it "treats an explicit GORI_PROJECT as a project in play" do
+    registry = Gori::ProjectRegistry.new(Gori::Paths.projects_dir)
+    project = registry.create("ov-env-1669")
+    store = Gori::Store.open(project.db_path)
+    Gori::HostOverrides.load(store).add("env.invalid", "127.0.0.2")
+    store.close
+    saved = ENV["GORI_PROJECT"]?
+    begin
+      ENV["GORI_PROJECT"] = "ov-env-1669"
+      ov = Gori::CLI::Run.cli_host_overrides_for_spec(nil, nil, nil)
+      ov.should_not be_nil
+      ov.not_nil!.connect_address("env.invalid").should eq("127.0.0.2")
+    ensure
+      saved ? (ENV["GORI_PROJECT"] = saved) : ENV.delete("GORI_PROJECT")
+      registry.delete(project) rescue nil
+    end
+  end
 end
 
 # `ws_out_messages` is private CLI glue (mirrors MCP send_websocket's default-messages

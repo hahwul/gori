@@ -108,6 +108,8 @@ gori run <subcommand> [verb] [options]
 | `grpc [schema]` · `reflect` · `forget` | gRPC `.proto` 렌즈: 무엇이 로드됐는지 보기, 서버 리플렉션으로 디스크립터 받기, 캐시된 대상 버리기 |
 | `project [list]` | 캡처된 트래픽이 있는 프로젝트 목록 (`--all`이면 전부) |
 | `project create <name>` | 이름으로 프로젝트 생성 (같은 이름이면 다시 열기) |
+| `project rename <name> <new-name>` | 프로젝트 표시 이름 변경 |
+| `project describe <name> <text>` · `--clear` | 프로젝트 설명 설정 또는 제거 |
 | `project switch <name>` (`use`) · `--clear` | `--project` 없는 모든 명령이 읽을 프로젝트 고정 |
 | `project export <name>` | 압축된 WAL 안전 `.gori` 프로젝트 아카이브 저장 |
 | `project import <archive>` | 프로젝트 아카이브를 새 프로젝트로 추가 |
@@ -284,7 +286,7 @@ gori run history -q 'status:5xx' --limit 100 --format json
 | `--no-columns` | 이 프로젝트에 설정된 History 컬럼을 그리지 않습니다 |
 | `--format=FMT` | `text`, `json`(배열 하나), `jsonl`(한 줄에 객체 하나), 또는 `har` |
 | `--include-sensitive` | `Authorization` / `Cookie` / `Set-Cookie` / `Proxy-Authorization` / API 키 값을 `[REDACTED]` 대신 그대로 냅니다. `json`의 행별 `headers`와 `header:`/`cookie:` 컬럼에 적용됩니다. 다른 형식에서는 아무 효과가 없으며, 그 사실을 STDERR로 알립니다 |
-| `--redact [PROFILE]` | [리댁션 프로파일](#run-redact)로 요청/응답 **본문**을 정제한 뒤 씁니다. 본문을 싣는 목록 형식은 `--format har` 하나뿐이므로 그 형식에서만 동작하고, 나머지에서는 무시하지 않고 거부합니다 |
+| `--redact [PROFILE]` | [리댁션 프로파일](#run-redact)로 요청/응답 **본문**을 정제한 뒤 씁니다. 본문을 싣는 목록 형식은 `--format har`이고, 다른 형식에서는 `regex:`, `jsonpath:`, `position:` 컬럼만 본문을 읽으므로 그런 컬럼이 표시될 때만 동작하고 아니면 무시하지 않고 거부합니다. 이 컬럼들은 `show`처럼 프로젝트 기본 프로파일로도 정제된 본문을 읽고, `--no-redact`면 캡처된 본문을 읽습니다 |
 | `--no-redact` | 리댁션이 기본으로 설정돼 있어도 캡처한 본문을 그대로 씁니다 |
 | `--redact-preview` | `--redact`가 무엇을 바꿀지 값마다 한 줄씩 나열하고 HAR은 쓰지 않습니다 |
 
@@ -356,7 +358,7 @@ gori run compare 41 42 --pane response --changes-only
 |--------|-------------|
 | `--pane=PANE` | 비교 대상: `request` 또는 `response` (기본값) |
 | `--changes-only` | 변경되지 않은 문맥은 빼고 추가 / 삭제된 줄만 출력 |
-| `--context=N` | 변경 지점 주변 N줄만 남기고 나머지 동일 구간은 `@@ N unchanged lines @@` 마커로 접기 (`--changes-only`와 함께 쓸 수 없음) |
+| `--context=N` | 변경 지점 주변 N줄만 남기고 나머지 동일 구간은 `@@ N unchanged lines @@` 마커로 접기 (`--changes-only`와 함께 쓸 수 없음). 플래그가 없으면 접지 않고, 값 없는 `--context=`는 3줄을 남기며, diff 길이보다 큰 값은 아무것도 접지 않습니다 |
 | `--format=FMT` | `text` (기본값) 또는 `json` |
 | `--redact [PROFILE]`, `--no-redact`, `--redact-preview` | [`show`](#run-show)와 같음: 정제된 본문을 비교합니다. 바뀐 줄 수와 판정은 여전히 캡처된 바이트 기준입니다 |
 
@@ -699,7 +701,9 @@ gori run fuzz save 42 --auto --preset sqli
 gori run fuzz save --request request.txt --target https://api.example.com --project acme --payloads a,b
 ```
 
-파일/stdin에서 저장할 때는 `--project`나 `--db`가 필요합니다. 프로젝트를 지정하지 않은 스윕을 가장 최근 프로젝트에 조용히 써넣지 않기 때문입니다. `--record-history`는 이와 별개로 남습니다. 저장된 결과 집합이 아니라 History 플로우를 제어합니다.
+`fuzz save`는 저장된 실행으로 답합니다. `--format jsonl`에서는 마지막 줄이 `{"run_id":N,"save_status":"done","saved_results":K}`이고(저장이 실패하면 `save_error`가 붙음), `--format json`에서는 결과 배열이 그 필드들과 함께 객체 안에 담깁니다(`{"results":[…],"run_id":N,…}`). 일반 `fuzz` 출력은 바뀌지 않습니다.
+
+파일/stdin에서 저장할 때는 `--project`, `--db`, `GORI_PROJECT` 중 하나가 필요합니다. 프로젝트를 지정하지 않은 스윕을 가장 최근 프로젝트에 조용히 써넣지 않기 때문입니다. `--record-history`는 이와 별개로 남습니다. 저장된 결과 집합이 아니라 History 플로우를 제어합니다.
 
 | 명령 | 설명 |
 |------|------|
@@ -1438,13 +1442,15 @@ gori run rewriter rm 3
 | `--from-flow=ID` | `short_circuit`: flow ID의 캡처된 응답을 규칙에 복사. `--find`, `--host`, `--value`가 초안을 덮어씀 |
 | `-f`, `--find=FIND` | `--from-flow`나 `--map-dir --strip-prefix`가 아니면 필수. 대상이 되는 리터럴, 패턴, 헤더 이름, 또는 (json 동작) `$.user.role` 같은 JSON 경로 |
 | `-v`, `--value=VALUE` | 치환할 텍스트, 헤더 값, `json_set`의 새 값(JSON 텍스트: `'"admin"'`, `true`), 또는 `--op=pipe`일 때 실행할 명령. [프로세스 훅](/ko/guide/scripting/#process-hooks) 참고 |
-| `--host=GLOB` | 규칙을 그 호스트와 서브도메인으로 한정(`example.com`은 `api.example.com`에도 매칭되지만 `xexample.com`에는 매칭되지 않음). `*`는 명시적 와일드카드. 생략하면 전체 적용 |
+| `--host=GLOB` | 규칙을 그 호스트와 서브도메인으로 한정(`example.com`은 `api.example.com`에도 매칭되지만 `xexample.com`에는 매칭되지 않음). `*`는 명시적 와일드카드. 포트, 스킴, 경로는 거부(규칙은 모든 포트에서 그 호스트에 매칭). 생략하면 전체 적용 |
 | `--name=NAME` | 규칙 목록에 표시할 라벨 |
 | `--disabled` | 규칙을 만들되 활성화하지 않음 |
 | `--scope=SCOPE` | `project`(기본값) 또는 `global`. 전역 규칙은 `settings.json`에 저장되어 모든 프로젝트에 적용됨. 목록에서는 그 저장소의 규칙만 표시(기본: 둘 다) |
 | `--everywhere` | 전역 규칙의 `enable`/`disable`에서, 이 프로젝트의 오버라이드 대신 규칙 자체의 기본값을 변경 |
 
-`preview`는 같은 규칙 플래그를 받아, 규칙을 저장하지 않고 저장된 플로우 중 몇 개가 바뀌었을지 보고합니다. `rm`(`delete`), `enable`, `disable`은 목록의 규칙 id와 함께 `--scope`도 받습니다. 두 저장소가 규칙 번호를 각자 매기므로 id 하나가 서로 다른 두 규칙을 가리키기 때문입니다. 목록은 범위를 `G`/`P` 접두어로 출력하고(`G*`는 이 프로젝트가 해당 전역 규칙의 기본값을 오버라이드했다는 뜻), 프록시가 적용하는 순서 그대로 전역 규칙을 먼저 보여 줍니다. [전역 규칙과 프로젝트 규칙](/ko/guide/proxy/#global-and-project-rules)을 참고하세요.
+요청 헤드 규칙은 프록시가 전달하는 origin-form 요청 줄(`GET /path`)에 매칭되며, 평문 HTTP 프록시 플로우에 History가 저장하는 absolute-form(`GET http://host/path`)에는 매칭되지 않습니다. 그러니 `--find 'GET /path'`로 쓰세요.
+
+`preview`는 같은 규칙 플래그를 받아, 규칙을 저장하지 않고 저장된 플로우 중 몇 개가 바뀌었을지 보고합니다. `--format json`에는 `skipped`(본문이 너무 커서 JSON 규칙이 미리보기에서 뺀 플로우 수)와, 읽은 500개보다 오래된 플로우가 있을 때만 참인 `scan_capped`가 담깁니다. `rm`(`delete`), `enable`, `disable`은 목록의 규칙 id와 함께 `--scope`도 받습니다. 두 저장소가 규칙 번호를 각자 매기므로 id 하나가 서로 다른 두 규칙을 가리키기 때문입니다. 목록은 범위를 `G`/`P` 접두어로 출력하고(`G*`는 이 프로젝트가 해당 전역 규칙의 기본값을 오버라이드했다는 뜻), 프록시가 적용하는 순서 그대로 전역 규칙을 먼저 보여 줍니다. [전역 규칙과 프로젝트 규칙](/ko/guide/proxy/#global-and-project-rules)을 참고하세요.
 
 본문 규칙은 HTTP/1.1과 HTTP/2 모두에서 필요에 따라 `Content-Length`를 다시 맞추고 청크를 해제합니다. 대화형 편집기는 [Proxy & History](/ko/guide/proxy/)를 참고하세요.
 
@@ -1456,7 +1462,7 @@ gori run rewriter preset add unhide-hidden-fields
 gori run rewriter preset add remove-csp --scope global --disabled
 ```
 
-이름은 `unhide-hidden-fields`, `enable-disabled-fields`, `remove-length-limits`, `strip-validation`, `remove-csp`, `remove-security-headers`, `disable-sri`입니다. `add`는 `--scope=project|global`과 `--disabled`(무장하지 않고 설치해 먼저 검토)를 받습니다. 설치되는 규칙은 `rewriter add`와 같은 경로를 지나므로 이후에도 목록에 나오고 편집·삭제됩니다. 같은 프리셋을 두 번 설치하면 병합되지 않고 눈에 보이게 중복됩니다.
+이름은 `unhide-hidden-fields`, `enable-disabled-fields`, `remove-length-limits`, `strip-validation`, `remove-csp`, `remove-security-headers`, `disable-sri`입니다. `add`는 `--scope=project|global`, `--disabled`(무장하지 않고 설치해 먼저 검토), `--format json`을 받습니다. `--format json`은 MCP `create_rule_from_preset`의 객체를 출력하며, 새 규칙의 `ids`도 거기 담깁니다. 설치되는 규칙은 `rewriter add`와 같은 경로를 지나므로 이후에도 목록에 나오고 편집·삭제됩니다. 같은 프리셋을 두 번 설치하면 병합되지 않고 눈에 보이게 중복됩니다.
 
 **`rewriter extract`**: [세션 바인딩](/ko/guide/proxy/#session-bindings)을 선언하는 규칙입니다. `$BIND.NAME`을 어느 응답의 어디에서 읽을지 정합니다. 동사: `list`(기본), `add`, `rm`(`delete`), `enable`, `disable`.
 
@@ -1631,7 +1637,25 @@ gori run project create api-test --format json
 | `--description=TEXT` | 프로젝트 설정에 저장됩니다 |
 | `--format=FMT` | `text`(기본) 또는 `json` |
 
-이미 있는 이름은 오류가 아니라 그 프로젝트를 다시 여는 것으로 처리하며, `--format json`은 `"created": false`로 알려 줍니다. 다시 열 때 저장된 표시 이름은 마지막 create의 대소문자로 갱신되고, `--description`을 주면 기존 설명을 덮어씁니다. 새 이름이 이미 다른 프로젝트의 디렉터리 slug나 짧은 id라면 거부합니다. 그 이름으로는 `--project`가 새로 만든 프로젝트에 닿을 수 없기 때문입니다.
+이미 있는 이름은 오류가 아니라 그 프로젝트를 다시 여는 것으로 처리하며, `--format json`은 `"created": false`로 알려 줍니다. 다시 열 때 저장된 표시 이름은 그대로 두고(`project rename`으로 바꿉니다), 비어 있지 않은 `--description`을 주면 기존 설명을 덮어씁니다(설명을 지우려면 `project describe --clear`). 새 이름이 이미 다른 프로젝트의 디렉터리 slug나 짧은 id라면 거부합니다. 그 이름으로는 `--project`가 새로 만든 프로젝트에 닿을 수 없기 때문입니다.
+
+#### project rename {#project-rename}
+
+프로젝트의 표시 이름을 바꿉니다. 디렉터리 slug와 짧은 id는 그대로라서 어느 쪽으로 준 `--project`도, 열려 있는 캡처도, `project switch` 고정도 계속 같은 프로젝트를 가리킵니다. 새 이름이 이미 다른 프로젝트의 slug나 짧은 id라면 `create`처럼 거부합니다.
+
+```bash
+gori run project rename api-test "API test (staging)"
+gori run project rename a1b2c3 "API test"      # 짧은 id로
+```
+
+#### project describe {#project-describe}
+
+프로젝트 설명을 설정하거나 지웁니다. 설명은 이 작업이 무엇을 위한 것인지 남기는 메모로, Project 탭과 `project list --format json`, MCP `project_info`에 나옵니다.
+
+```bash
+gori run project describe api-test "staging sweep, read-only creds"
+gori run project describe api-test --clear
+```
 
 #### project switch {#project-switch}
 
@@ -1753,6 +1777,7 @@ gori run project env                              # KEY=[REDACTED] 목록 (--sho
 gori run project env --format json
 gori run project env set TOKEN=secret
 gori run project env set HOST api.example.com
+printf %s "$TOKEN" | gori run project env set TOKEN --value-stdin
 gori run project env delete TOKEN
 ```
 
@@ -1760,6 +1785,7 @@ gori run project env delete TOKEN
 |---------------------|-------------|
 | (default) | 프로젝트 변수 목록; `--format`은 `text` 또는 `json` |
 | `set KEY=value` · `set KEY value` | 프로젝트 변수 upsert (KEY는 `[A-Za-z_][A-Za-z0-9_]*`) |
+| `set KEY --value-stdin` | 값을 stdin(파이프나 리다이렉트, 터미널은 거부)에서 읽어 토큰이 프로세스 목록과 셸 히스토리에 남지 않게 합니다. 끝의 줄바꿈 하나는 버립니다 |
 | `delete KEY` (`rm`) | 프로젝트 변수 제거 |
 
 #### project host-override {#project-host-override}

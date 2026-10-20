@@ -152,7 +152,7 @@ module Gori
         if password_stdin && !k.auth?
           abort "gori run project network set: --password-stdin applies to upstream_auth only"
         end
-        password = password_stdin ? read_network_password(STDIN) : nil
+        password = password_stdin ? read_stdin_secret(STDIN, "gori run project network set", "password", "--password-stdin") : nil
 
         project = resolve_read_project(proj.name, proj.db)
         store = open_store(project)
@@ -231,15 +231,6 @@ module Gori
           return "#{err} — set one first (`gori run project network set upstream_proxy=URI`)"
         end
         err
-      end
-
-      # The password, as the pipe delivered it minus ONE trailing line ending — `echo "$PASS" |`
-      # appends one the operator never typed, and a password that silently gained a newline
-      # fails authentication with nothing pointing at why. Only one: a second is data.
-      private def self.read_network_password(io : IO) : String
-        text = read_stdin_text(io, "gori run project network set", "password",
-          stdin_pipe_hint("gori run project network set", flag: "--password-stdin"))
-        text.chomp
       end
 
       # The value as STORED (`007` is stored as `7`, `*` clears the destination row), read off

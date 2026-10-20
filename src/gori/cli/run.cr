@@ -550,9 +550,7 @@ module Gori
             abort "gori run: #{ex.message}"
           end
           return found if found
-          projects = registry.list
-          have = projects.empty? ? "" : " (have: #{projects.map { |project| CLI::Output.term_safe(project.name) }.join(", ")})"
-          abort "gori run: no project matching '#{CLI::Output.term_safe(name)}'#{have}"
+          abort "gori run: no project matching '#{CLI::Output.term_safe(name)}'#{have_projects(registry, name)}"
         end
         case chosen = default_project(registry, ENV[DEFAULT_PROJECT_ENV]?, read_default_pin)
         in String then abort "gori run: #{chosen}"
@@ -727,6 +725,15 @@ module Gori
         io.gets_to_end
       rescue ex : IO::Error
         abort "#{what}: cannot read the #{noun} from stdin: #{ex.message}"
+      end
+
+      # A secret a `--…-stdin` flag reads instead of argv, where it would sit in the process
+      # listing and the shell history (`project network set upstream_auth --password-stdin`,
+      # `project env set --value-stdin`): the pipe's bytes minus ONE trailing line ending —
+      # `echo "$PASS" |` appends one the operator never typed, and a secret that silently gained
+      # a newline fails authentication with nothing pointing at why. Only one: a second is data.
+      def self.read_stdin_secret(io : IO, what : String, noun : String, flag : String) : String
+        read_stdin_text(io, what, noun, stdin_pipe_hint(what, flag: flag)).chomp
       end
 
       # The IMPLICIT stdin road's read: no terminal guard — a terminal there means "no source
@@ -1044,7 +1051,7 @@ module Gori
       # still apply inside Upstream.dial). Snapshots into memory, so the store can close.
       private def self.cli_host_overrides(project_name : String?, db_path : String?, flow_id : Int64?,
                                           repeater_id : Int64? = nil) : Gori::HostOverrides?
-        return nil unless flow_id || repeater_id || project_name || db_path
+        return nil unless flow_id || repeater_id || project_named?(project_name, db_path)
         with_store(resolve_read_project(project_name, db_path), read_only: true) do |store|
           Gori::HostOverrides.load(store)
         end
@@ -1075,14 +1082,14 @@ module Gori
         # other caller reads its subject (a repeater session, a flow) out of a project and
         # must use project_outbound, or an omitted --project would silently drop the gate.
         # `repeater_id` is such a subject too (`fuzz --repeater`), so it forces the scoped path.
-        return project_outbound(project_name, db_path, allow_unscoped) if flow_id || repeater_id || project_name || db_path
+        return project_outbound(project_name, db_path, allow_unscoped) if flow_id || repeater_id || project_named?(project_name, db_path)
         # Standalone run: no project context at all, the same condition on which
         # cli_host_overrides skips loading overrides. `resolve_read_project` WOULD still
         # resolve a default project here, so this is the one `gori run` active path where the
         # active project's Sandbox and exclude rules do not apply. Say so on STDERR rather
         # than letting an ungated run look gated — binding a standalone run to the ambient
         # project instead is a product call, tracked as a follow-up on #354.
-        STDERR.puts "gori run: no project in play (--request/stdin without --project/--db) — sending UNSCOPED; " \
+        STDERR.puts "gori run: no project in play (--request/stdin without --project/--db or $#{DEFAULT_PROJECT_ENV}) — sending UNSCOPED; " \
                     "the active project's scope and Sandbox rules do NOT apply to this run"
         Gori::Outbound.cli(nil, allow_unscoped)
       end
@@ -1141,7 +1148,7 @@ module Gori
       # The refusal for `--slot` with no project in play, which is a different fact from a
       # mistyped name and used to be indistinguishable from one. Mirrors
       # `BIND_FROM_NO_PROJECT`, for the same reason and on the same code path.
-      SLOT_NO_PROJECT = "--slot: no project is in play (--request/stdin without --project/--db), " \
+      SLOT_NO_PROJECT = "--slot: no project is in play (--request/stdin without --project/--db or $#{DEFAULT_PROJECT_ENV}), " \
                         "so no session slots are loaded — name the project with --project NAME " \
                         "(or --db PATH)"
 
@@ -1499,7 +1506,7 @@ module Gori
       # would also silently pull that project's Sandbox/scope into a run this surface announces as
       # UNSCOPED. One fact, one sentence; the behaviour change stays with #354.
       BIND_FROM_NO_PROJECT = "--bind-from: no project is in play (--request/stdin without " \
-                             "--project/--db), so no extract rules are loaded and a replay has " \
+                             "--project/--db or $#{DEFAULT_PROJECT_ENV}), so no extract rules are loaded and a replay has " \
                              "nothing to bind — name the project with --project NAME (or --db PATH)"
 
       private def self.bind_from_blocker(bindings : Gori::Bindings?) : String?

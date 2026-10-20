@@ -86,7 +86,7 @@ module Gori
         unless named_project
           abort "#{cmd}: --macro replays a project's Repeater sessions and none was named — replaying the default " \
                 "project's sessions silently is not something it will do (a --request/stdin run is deliberately " \
-                "outside any project). Pass --project NAME or --db PATH."
+                "outside any project). Pass --project NAME or --db PATH, or set #{DEFAULT_PROJECT_ENV}."
         end
         open_store(resolve_read_project(project_name, db_path), read_only: true)
       end

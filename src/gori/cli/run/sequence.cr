@@ -112,7 +112,7 @@ module Gori
         # only GLOBAL vars would resolve — a `$TOKEN` defined in the project would go out
         # literally. Explicit and identical to cmd_fuzz, rather than relying on the store that
         # `cli_host_overrides` happens to open below (see run.cr's open_store).
-        hydrate_project_env(proj.name, proj.db) if proj.name || proj.db
+        hydrate_project_env(proj.name, proj.db) if project_named?(proj.name, proj.db)
         bytes, default_target, src_h2, evidence = sequence_source(flow_id, request_file, proj.name, proj.db)
         token_loc = build_token_loc(k, selector)
 

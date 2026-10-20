@@ -227,6 +227,12 @@ private def start_never_idle_ws_origin(gap : Time::Span, limit : Int32 = 500) : 
 end
 
 describe Gori::Repeater::WsEngine do
+  it "keeps a socket's heap address out of its error (#1696)" do
+    r = Gori::Repeater::WsEngine::Result.new(Bytes.new(0), [] of Gori::Repeater::WsEngine::Message, 0_i64,
+      "ws repeater error: read (#<TCPSocket:0x104245c80>): Connection reset by peer")
+    r.error.should eq("ws repeater error: read: Connection reset by peer")
+  end
+
   # `start_ws_origin` computes the fake origin's Accept with `WsEngine::GUID` itself, so every
   # "no handshake note" assertion below is self-referential: a corrupted GUID would keep the
   # whole file green while `verify_accept` mismatched against every real origin on earth. Anchor

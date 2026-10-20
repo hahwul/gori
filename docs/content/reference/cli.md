@@ -108,6 +108,8 @@ gori run <subcommand> [verb] [options]
 | `grpc [schema]` · `reflect` · `forget` | The gRPC `.proto` lens: show what is loaded, fetch descriptors by server reflection, drop a cached target |
 | `project [list]` | List projects holding captured traffic (`--all` for every one) |
 | `project create <name>` | Create (or reopen) a project by name |
+| `project rename <name> <new-name>` | Change a project's display name |
+| `project describe <name> <text>` · `--clear` | Set or clear a project's description |
 | `project switch <name>` (`use`) · `--clear` | Pin the project every `--project`-less command reads |
 | `project export <name>` | Save a compact, WAL-safe `.gori` project archive |
 | `project import <archive>` | Add a project archive as a new project |
@@ -291,7 +293,7 @@ gori run history -q 'status:5xx' --limit 100 --format json
 | `--no-columns` | Don't draw this project's configured History columns |
 | `--format=FMT` | `text`, `json` (one array), `jsonl` (one object per line), or `har` |
 | `--include-sensitive` | Emit `Authorization` / `Cookie` / `Set-Cookie` / `Proxy-Authorization` / API-key values instead of `[REDACTED]`, in `json`'s per-row `headers` and in a `header:`/`cookie:` column. Inert in the other formats, which say so on STDERR |
-| `--redact [PROFILE]` | Sanitize request/response **bodies** before writing them, using a [redaction profile](#run-redact). `--format har` only (the one listing format that carries a body); refused on the others rather than ignored |
+| `--redact [PROFILE]` | Sanitize request/response **bodies** before writing them, using a [redaction profile](#run-redact). `--format har` carries a body; on the other formats only a `regex:`, `jsonpath:` or `position:` column reads one, so it applies there when such a column is shown and is refused rather than ignored otherwise. Those columns read through the project's default profile too, as `show` does; `--no-redact` reads the captured body |
 | `--no-redact` | Write the captured bodies even where redaction is the configured default |
 | `--redact-preview` | List what `--redact` would replace, one row per value, and write no HAR |
 
@@ -363,7 +365,7 @@ gori run compare 41 42 --pane response --changes-only
 | -------- | ------------- |
 | `--pane=PANE` | What to diff: `request` or `response` (default) |
 | `--changes-only` | Print only added / removed lines, omitting unchanged context |
-| `--context=N` | Collapse unchanged runs to `@@ N unchanged lines @@` markers, keeping N lines around each change (mutually exclusive with `--changes-only`) |
+| `--context=N` | Collapse unchanged runs to `@@ N unchanged lines @@` markers, keeping N lines around each change (mutually exclusive with `--changes-only`). Without the flag nothing is folded; `--context=` alone keeps 3, and a value past the diff's length folds nothing |
 | `--format=FMT` | `text` (default) or `json` |
 | `--redact [PROFILE]`, `--no-redact`, `--redact-preview` | As on [`show`](#run-show): diff the sanitized bodies. The line count and verdict still describe the captured bytes |
 
@@ -708,7 +710,9 @@ gori run fuzz save 42 --auto --preset sqli
 gori run fuzz save --request request.txt --target https://api.example.com --project acme --payloads a,b
 ```
 
-A file/stdin save needs `--project` or `--db`; gori will not silently write a project-less sweep into whichever project happens to be most recent. `--record-history` remains independent: it controls History flows, not the saved result set.
+`fuzz save` answers with the saved run: under `--format jsonl` its last line is `{"run_id":N,"save_status":"done","saved_results":K}` (with `save_error` when the save failed), and under `--format json` the result array sits in an object beside those fields, `{"results":[…],"run_id":N,…}`. Plain `fuzz` output is unchanged.
+
+A file/stdin save needs `--project`, `--db` or `GORI_PROJECT`; gori will not silently write a project-less sweep into whichever project happens to be most recent. `--record-history` remains independent: it controls History flows, not the saved result set.
 
 | Command | Description |
 | --------- | ------------- |
@@ -1447,13 +1451,15 @@ gori run rewriter rm 3
 | `--from-flow=ID` | `short_circuit`: copy flow ID's captured response into the rule. `--find`, `--host` and `--value` override what it drafts |
 | `-f`, `--find=FIND` | Required, except with `--from-flow` or `--map-dir --strip-prefix`. The literal, pattern, header name, or (json ops) JSON path such as `$.user.role` to act on |
 | `-v`, `--value=VALUE` | Replacement text, header value, the new value as JSON text for `json_set` (`'"admin"'`, `true`), or (with `--op=pipe`) the COMMAND to run. See [Process hooks](/guide/scripting/#process-hooks) |
-| `--host=GLOB` | Limit the rule to a host and its subdomains (`example.com` also matches `api.example.com`, but not `xexample.com`); `*` is the explicit wildcard. Omit to apply everywhere |
+| `--host=GLOB` | Limit the rule to a host and its subdomains (`example.com` also matches `api.example.com`, but not `xexample.com`); `*` is the explicit wildcard. A port, scheme or path is refused: the rule matches the host on every port. Omit to apply everywhere |
 | `--name=NAME` | Label shown in the rule list |
 | `--disabled` | Create the rule without arming it |
 | `--scope=SCOPE` | `project` (default) or `global`. A global rule lives in `settings.json` and applies in every project. On the bare listing: show only that store's rules (default: both) |
 | `--everywhere` | On `enable`/`disable` of a global rule: change the rule's own default instead of this project's override |
 
-`preview` takes the same rule flags and reports how many stored flows the rule would have changed, without writing it. `rm` (`delete`), `enable` and `disable` take a rule id from the list, plus `--scope`, because the two stores number their rules independently, so an id alone names two different rules. The list prints the scope as a `G`/`P` prefix (`G*` = this project overrides that global rule's default) and shows global rules first, the order the proxy applies them in. See [Global and project rules](/guide/proxy/#global-and-project-rules).
+A request-head rule matches the origin-form request line the proxy forwards (`GET /path`), never the absolute form (`GET http://host/path`) History stores for a plain-HTTP proxy flow, so write `--find 'GET /path'`.
+
+`preview` takes the same rule flags and reports how many stored flows the rule would have changed, without writing it. Its `--format json` carries `skipped`, the flows a JSON rule left out because their body was too large to preview, and `scan_capped`, true only when older flows than the 500 it read exist. `rm` (`delete`), `enable` and `disable` take a rule id from the list, plus `--scope`, because the two stores number their rules independently, so an id alone names two different rules. The list prints the scope as a `G`/`P` prefix (`G*` = this project overrides that global rule's default) and shows global rules first, the order the proxy applies them in. See [Global and project rules](/guide/proxy/#global-and-project-rules).
 
 Body rules re-sync `Content-Length` and de-chunk as needed, on HTTP/1.1 and HTTP/2 alike. See [Proxy & History](/guide/proxy/) for the interactive editor.
 
@@ -1465,7 +1471,7 @@ gori run rewriter preset add unhide-hidden-fields
 gori run rewriter preset add remove-csp --scope global --disabled
 ```
 
-Names are `unhide-hidden-fields`, `enable-disabled-fields`, `remove-length-limits`, `strip-validation`, `remove-csp`, `remove-security-headers` and `disable-sri`. `add` takes `--scope=project|global` and `--disabled` (install without arming, to review them first). The rules it writes go through the same path `rewriter add` does, so they are listed, editable and deletable afterwards. Installing the same preset twice duplicates visibly rather than merging.
+Names are `unhide-hidden-fields`, `enable-disabled-fields`, `remove-length-limits`, `strip-validation`, `remove-csp`, `remove-security-headers` and `disable-sri`. `add` takes `--scope=project|global`, `--disabled` (install without arming, to review them first) and `--format json`, which prints MCP `create_rule_from_preset`'s object, the new rules' `ids` among it. The rules it writes go through the same path `rewriter add` does, so they are listed, editable and deletable afterwards. Installing the same preset twice duplicates visibly rather than merging.
 
 **`rewriter extract`**: the rules that declare [session bindings](/guide/proxy/#session-bindings): which response a `$BIND.NAME` is read from, and where in it. Verbs: `list` (default), `add`, `rm` (`delete`), `enable`, `disable`.
 
@@ -1640,7 +1646,25 @@ gori run project create api-test --format json
 | `--description=TEXT` | Stored in the project's settings |
 | `--format=FMT` | `text` (default) or `json` |
 
-A name that already exists reopens that project instead of failing; `--format json` reports it as `"created": false`. The reopen rewrites the stored display name (so its casing follows the last create) and replaces the description when `--description` is given. A new name that is already another project's directory slug or short id is refused, since `--project` could not then reach the project it made.
+A name that already exists reopens that project instead of failing; `--format json` reports it as `"created": false`. The reopen keeps the stored display name (`project rename` changes it) and replaces the description when a non-empty `--description` is given (`project describe --clear` removes one). A new name that is already another project's directory slug or short id is refused, since `--project` could not then reach the project it made.
+
+#### project rename
+
+Change a project's display name. The directory slug and short id stay, so `--project` by either, an open capture and the `project switch` pin keep pointing at it. The new name is refused when it is already another project's slug or short id, as on `create`.
+
+```bash
+gori run project rename api-test "API test (staging)"
+gori run project rename a1b2c3 "API test"      # by short id
+```
+
+#### project describe
+
+Set or clear the project's description: the note on what the engagement is for, shown on the Project tab, in `project list --format json` and by MCP `project_info`.
+
+```bash
+gori run project describe api-test "staging sweep, read-only creds"
+gori run project describe api-test --clear
+```
 
 #### project switch
 
@@ -1762,6 +1786,7 @@ gori run project env                              # list KEY=[REDACTED] (--show-
 gori run project env --format json
 gori run project env set TOKEN=secret
 gori run project env set HOST api.example.com
+printf %s "$TOKEN" | gori run project env set TOKEN --value-stdin
 gori run project env delete TOKEN
 ```
 
@@ -1769,6 +1794,7 @@ gori run project env delete TOKEN
 | --------------------- | ------------- |
 | (default) | List project vars; `--format` is `text` or `json` |
 | `set KEY=value` · `set KEY value` | Upsert a project var (KEY must match `[A-Za-z_][A-Za-z0-9_]*`) |
+| `set KEY --value-stdin` | Read the value from stdin (a pipe or a redirect, never a terminal), so a token stays out of the process listing and the shell history; one trailing newline is dropped |
 | `delete KEY` (`rm`) | Remove a project var |
 
 #### project host-override

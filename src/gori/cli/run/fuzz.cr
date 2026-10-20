@@ -251,20 +251,20 @@ module Gori
         # `fuzz save 42` uses the default project exactly like legacy `fuzz 42`; treating 42 as
         # project-less here refused the primary documented save form.
         flow_id ||= positional.first?.try { |s| parse_flow_id(s, "gori run fuzz") }
-        # A project-less run (--request/stdin with no --project/--db) is DELIBERATELY outside any
+        # A project-less run (--request/stdin with no --project/--db/GORI_PROJECT) is DELIBERATELY outside any
         # project: `optional_project_outbound` says so on STDERR and skips the scope gate. Writing
         # its results into the ambient default project anyway would put a sweep the operator kept
         # out of a project straight into that project's History. Name the project to record.
-        if (record_policy != :none || save_results) && !(flow_id || repeater_id || proj.name || proj.db)
+        if (record_policy != :none || save_results) && !(flow_id || repeater_id || project_named?(proj.name, proj.db))
           feature = save_results ? "fuzz save" : "--record-history"
           abort "gori run fuzz: #{feature} needs a project — this run has none (--request/stdin " \
-                "without --project/--db). Pass --project NAME or --db PATH to say where the results go."
+                "without --project/--db or $#{DEFAULT_PROJECT_ENV}). Pass --project NAME or --db PATH to say where the results go."
         end
 
         # Named project / --db always hydrates, even when `--request` is the template:
         # `--flow` used to skip this and `--request` then skipped `open_store`, so
         # `--slot` / `--bind-from` lied with SLOT_NO_PROJECT despite `--project`.
-        hydrate_project_env(proj.name, proj.db) if proj.name || proj.db
+        hydrate_project_env(proj.name, proj.db) if project_named?(proj.name, proj.db)
         seed = fuzz_source(flow_id, repeater_id, request_file, proj.name, proj.db)
         text = seed.text
         default_target = seed.target
@@ -379,7 +379,7 @@ module Gori
         # The project any `--payload-from` reads, open only for the plan build below. After every
         # refusal above, so a run that never builds holds no handle.
         payload_specs = sources.compact_map { |src| src.as?(Fuzz::ProjectSource).try(&.spec) }
-        named_project = !!(flow_id || repeater_id || proj.name || proj.db)
+        named_project = !!(flow_id || repeater_id || project_named?(proj.name, proj.db))
         payload_store = open_payload_from_store(command, payload_specs, named_project, proj.name, proj.db)
         # …and the project a `--macro` reads its sessions from, on the same terms and released at
         # the same moment: the plan freezes the steps, so nothing reads it during the run. When a
@@ -891,6 +891,8 @@ module Gori
         shown = 0
         had_error = false
         saved_terminal = false
+        # The terminal status handed to `saved.finish`, for the `fuzz save` trailer (#1682).
+        save_status = "running"
         # Set when the run's own `stop_on` ended it: the run reached its goal, so it exits 0
         # even under --fail-if-no-matches (a `--stop-on 'regex:admin'` need not have "matched").
         condition_met = false
@@ -900,7 +902,9 @@ module Gori
         # The array writer opens before the engine starts and closes from ensure. Rows are emitted
         # one at a time (no Result buffer), while interrupt/setup exceptions still leave `[]` or
         # a valid partial array on stdout.
-        json_stream = format == :json ? CLI::Output::FuzzArrayStream.new(STDOUT) : nil
+        # Under `fuzz save` the array sits in an envelope that also carries the run id, the shape
+        # `retest --json` returns its `run_id` in.
+        json_stream = format == :json ? CLI::Output::FuzzArrayStream.new(STDOUT, prefix: saved ? %({"results":) : "") : nil
         begin
           say_request_line_rewrite # the run is about to send it — see `warn_request_line_rewrite`
           engine.run do |ev|
@@ -943,9 +947,9 @@ module Gori
               last_progress = ev.progress
               saved_terminal = true
               condition_met = !ev.stop_reason.nil?
+              save_status = Fuzz.terminal_status(ev.progress, ev.stopped, max_requests, had_error, ev.stop_reason)
               saved.try(&.finish(ev.progress.sent, ev.progress.matched, ev.progress.errors,
-                Fuzz.terminal_status(ev.progress, ev.stopped, max_requests, had_error, ev.stop_reason),
-                stop_idx: ev.stop_index))
+                save_status, stop_idx: ev.stop_index))
               fuzz_done(ev, shown, pool, max_requests, race, engine.matcher_constrained?, reframe_grpc)
             when Fuzz::ErrorEvent
               # The engine follows setup errors with Done. Defer the terminal write to that
@@ -955,18 +959,19 @@ module Gori
             end
           end
         ensure
-          # A broken stdout pipe must not strand a durable row in `running`: close the JSON
-          # document first, but put persistence in the nested ensure so it still finalizes when
-          # that close itself raises.
+          # A broken stdout pipe must not strand a durable row in `running`: finalize the
+          # persistence first, and close the JSON document in the nested ensure so it still
+          # closes when the finish raises. That order also lets a `fuzz save` envelope carry the
+          # status the finish recorded.
           begin
-            json_stream.try(&.close)
-          ensure
             unless saved_terminal
               p = last_progress
+              save_status = interrupted.call ? "stopped" : "error"
               saved.try(&.finish(p.try(&.sent) || 0_i64, p.try(&.matched) || 0_i64,
-                p.try(&.errors) || (had_error ? 1_i64 : 0_i64),
-                interrupted.call ? "stopped" : "error"))
+                p.try(&.errors) || (had_error ? 1_i64 : 0_i64), save_status))
             end
+          ensure
+            json_stream.try(&.close(saved.try { |s| ",#{fuzz_save_trailer(s, save_status).lchop('{')}" } || ""))
           end
         end
         if persist = saved
@@ -976,6 +981,7 @@ module Gori
             kept = persist.keep.interesting? && (p = last_progress) && p.sent > persist.written ? " (kept #{persist.written} of #{p.sent}, keep: interesting)" : ""
             STDERR.puts "saved fuzz run ##{persist.run_id} · #{Gori.plural(persist.written, "result")}#{kept}"
           end
+          puts fuzz_save_trailer(persist, save_status) if format == :jsonl
         end
         # STDERR so STDOUT stays the result rows/JSON alone. `get_flow <id>` (History) reads the
         # recorded flows; `record_history: matched` pairs the flow set with the shown rows.
@@ -1182,6 +1188,19 @@ module Gori
                     "#{pool.stale_retries > 0 ? " · #{pool.stale_retries} re-sent on a closed connection" : ""}" \
                     "#{pool.unsafe_stale > 0 ? " · #{pool.unsafe_stale} not re-sent (non-idempotent method)" : ""}" \
                     "#{pool.pooling? ? "" : " · keep-alive gave up (origin closes every connection)"}"
+      end
+
+      # `fuzz save`'s machine answer (#1682): the last jsonl line, or the `--json` envelope's
+      # fields beside `results`. The names are MCP `fuzz_start{save_results}`'s.
+      private def self.fuzz_save_trailer(persist : Fuzz::Persistence, status : String) : String
+        JSON.build do |j|
+          j.object do
+            j.field "run_id", persist.run_id if persist.run_id > 0
+            j.field "save_status", persist.failed? ? "save_failed" : status
+            j.field "saved_results", persist.written
+            j.field "save_error", MCP::Serialize.text(persist.error) if persist.error
+          end
+        end
       end
 
       # Prints/buffers a result; returns true when it was emitted. Errored sends are shown too
