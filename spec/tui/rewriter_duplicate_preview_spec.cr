@@ -207,6 +207,20 @@ describe "Gori::Tui::RewriterController#rewriter_duplicate" do
       host.statuses.first.should eq("rule duplicated")
     end
   end
+
+  # #1676: a row stored before host globs were judged keeps its `host:port`, and the write path
+  # now refuses it, so the toast names that rather than "project busy".
+  it "names a stored host the write path refuses, not a busy project" do
+    with_rewriter_controller do |ctl, host, session|
+      session.store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "a", "b", host: "127.0.0.1:8080").should_not eq(0)
+      session.rules.reload
+      host.statuses.clear
+      ctl.rewriter_duplicate
+      session.rules.rules.size.should eq(1)
+      host.statuses.first.should contain(":port")
+    end
+  end
 end
 
 describe "Gori::Tui::RewriterController#preview_target" do

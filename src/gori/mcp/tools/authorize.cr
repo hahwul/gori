@@ -547,15 +547,18 @@ module Gori
       # (`Outbound.agent` — strict Layer 1, unlike `gori run`'s permissive-when-unconfigured).
       private def authorize_nothing_to_send(ex : Authorize::PlanError, ob : Outbound) : Result
         skipped = ex.skipped
-        if !skipped.empty? && skipped.all? { |s| s.reason == :out_of_scope }
-          return authorize_scope_blocked(skipped, ob)
+        # A `:missing` id is no flow at all, so it neither makes nor breaks a scope refusal.
+        flows = skipped.reject(&.reason.==(:missing))
+        if !flows.empty? && flows.all? { |s| s.reason == :out_of_scope }
+          return authorize_scope_blocked(flows, ob)
         end
         err("every selected flow was skipped, so nothing would be sent: #{ex.detail}. " \
             "A flow is skipped when no identity would change it (add an identity that sets or " \
             "removes the header this endpoint authenticates with), when its method is not " \
             "GET/HEAD/OPTIONS (pass unsafe_methods:true to replay it anyway — it runs the side " \
             "effect again, once per identity), when the capture never completed or gori answered " \
-            "it itself, when it is outside the project scope, or when it was named twice",
+            "it itself, when it is outside the project scope, when it was named twice, or when no " \
+            "flow has that id",
           "NOTHING_TO_SEND", field: "flow_ids",
           details: JSON.parse(authorize_skipped_details(skipped)))
       end

@@ -60,13 +60,54 @@ module Gori
             unless text.valid_encoding?
               lines << "— body is not valid UTF-8 (shown with �), sha256 #{short_digest(b)} —"
             end
+            eol_note("body", b, crlf_expected: false).try { |n| lines << n }
           end
         end
         # The same identity line for the head: `X-Name: caf\xE9` and `caf\xE8` scrub alike.
         if head && !Unicode.valid?(head)
           lines << "— head is not valid UTF-8 (shown with �), sha256 #{short_digest(head)} —"
         end
+        head.try { |h| eol_note("head", h, crlf_expected: true).try { |n| lines << n } }
         lines
+      end
+
+      # `text_lines` drops the CRs ending a line, so CRLF vs LF, or a CR moved from one line to
+      # the next, would split to identical lines and compare as "no differences" — the very
+      # bytes a smuggling or CRLF-injection test is about (#1674). This is the identity line for
+      # them. Nothing is said for the section's ordinary convention (CRLF for a head, LF for a
+      # body), and a uniform other one is named without a digest, so two CRLF heads or two
+      # CRLF multipart bodies still diff only where their content differs. A mix, a doubled CR
+      # or a trailing bare CR carries a digest, as the #1162 notes above do — of the section's
+      # CR and LF bytes alone, not the whole section: where the projected lines agree, that
+      # sequence is what pins the dropped CRs, and a digest of everything would change with
+      # every content edit and count the note as one more changed line.
+      private def eol_note(name : String, bytes : Bytes, *, crlf_expected : Bool) : String?
+        crlf, lf, odd = eol_counts(bytes)
+        if odd || (crlf > 0 && lf > 0)
+          eols = String.build { |io| bytes.each { |b| io.write_byte(b) if b == 0x0Du8 || b == 0x0Au8 } }
+          "— #{name} has mixed line endings (CRs not shown), sha256 #{short_digest(eols.to_slice)} —"
+        elsif crlf > 0 && !crlf_expected
+          "— #{name} line endings are CRLF —"
+        elsif lf > 0 && crlf_expected
+          "— #{name} line endings are bare LF —"
+        end
+      end
+
+      # CRLF and bare-LF line ends, and whether any CR beyond a CRLF's one was dropped too (a
+      # doubled CR before an LF, or a trailing CR with no LF after it).
+      private def eol_counts(bytes : Bytes) : {Int32, Int32, Bool}
+        crlf = lf = 0
+        odd = bytes.size > 0 && bytes[bytes.size - 1] == 0x0Du8
+        bytes.each_with_index do |byte, i|
+          next unless byte == 0x0Au8
+          if i > 0 && bytes[i - 1] == 0x0Du8
+            crlf += 1
+            odd = true if i > 1 && bytes[i - 2] == 0x0Du8
+          else
+            lf += 1
+          end
+        end
+        {crlf, lf, odd}
       end
 
       # These lines are a DISPLAY projection, and every diff consumer (Comparer, CLI/MCP

@@ -87,6 +87,11 @@ module Gori
         expanded = File.expand_path(path)
         parent = File.dirname(expanded)
         raise Error.new("#{source} directory does not exist: #{parent}") unless Dir.exists?(parent)
+        # A missing file is refused too, read-only or not (#1667): `Store.open` would create and
+        # migrate it, so a typo in a client's `--db` started the agent on an empty project. This
+        # names a file to serve; `create_project` is how an agent makes one. Not at `Store.open`,
+        # whose read-only open of a workspace project not yet created has to keep creating it.
+        raise Error.new("#{source} database does not exist: #{expanded}") unless File.exists?(expanded)
         project = find_project_for_db(registry, expanded)
         # When it IS a registry project, carry the REGISTRY's spelling of the path forward, not
         # the caller's. Everything downstream compares this string: `list_projects` marks the

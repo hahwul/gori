@@ -11,7 +11,7 @@ module Gori
         proj = ProjectFlags.new
         pane = :response
         changes_only = false
-        context : Int32? = nil
+        context : Int64? = nil
         format = :text
         positional = [] of String
         redaction = RedactFlags.new
@@ -28,8 +28,8 @@ module Gori
                    end
           end
           p.on("--changes-only", "Only print added/removed lines (omit unchanged context)") { changes_only = true }
-          p.on("--context=N", "Collapse unchanged runs, keeping N lines around each change (default #{Repeater::Diff::FOLD_CONTEXT})") do |v|
-            n = v.strip.empty? ? Repeater::Diff::FOLD_CONTEXT : (v.to_i? || abort("gori run compare: --context must be a number"))
+          p.on("--context=N", "Collapse unchanged runs, keeping N lines around each change (without the flag nothing is folded; --context= alone keeps #{Repeater::Diff::FOLD_CONTEXT})") do |v|
+            n = v.strip.empty? ? Repeater::Diff::FOLD_CONTEXT.to_i64 : (v.to_i64? || abort("gori run compare: --context must be a number"))
             abort "gori run compare: --context must be >= 0" if n < 0
             context = n
           end

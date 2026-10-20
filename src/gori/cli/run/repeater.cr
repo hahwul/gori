@@ -68,13 +68,17 @@ module Gori
                     "and its last response were left unchanged"
       end
 
-      # `gori run repeater [list|create|send|ws|minimize|h2|move|delete] …`, or a bare flow id /
-      # `--flow` for the one-shot resend.
+      # `gori run repeater <sub> …` (the `repeater …` rows below, which are also the usage
+      # banner — `repeater_subcommand_rows`), or a bare flow id for the one-shot resend.
       #
       # Matched on argv[0] only, so a subcommand name is never confused with the flow id the
       # bare form takes.
       @[Subcommand("repeater", help: [
-        {"repeater", "Re-send a captured flow; list/create/send (replay, incl. WebSocket) repeater sessions"},
+        {"repeater", "Re-send a captured flow by id (a `repeater <sub>` row below manages saved sessions)"},
+        {"repeater list", "List the saved repeater sessions in the workbench"},
+        {"repeater create", "Create a repeater session (--flow / --request-file / --request-raw / --request-stdin / --curl)"},
+        {"repeater update", "Edit a saved session in place: target, request, name, tags, h1/h2, SNI, auto Content-Length"},
+        {"repeater send", "Replay a saved repeater SESSION (not a flow id), HTTP or WebSocket"},
         {"repeater ws", "Open a persistent WebSocket session on a saved repeater; stream frames to/from stdin/stdout"},
         {"repeater h2", "Send a field-native HTTP/2 request from an ordered HPACK field list (--target URL --fields FILE)"},
         {"repeater race", "Fire several saved sessions as one synchronized race (h1 last-byte, h2 single-packet)"},
@@ -85,39 +89,38 @@ module Gori
       ])]
       private def self.cmd_repeater(args : Array(String)) : Nil
         sub = args.first?
-        if sub == "list"
-          cmd_repeater_list(args[1..])
+        if sub && (run = REPEATER_SUBCOMMANDS[sub]?)
+          run.call(args[1..])
           return
-        elsif sub == "create"
-          cmd_repeater_create(args[1..])
-          return
-        elsif sub == "send"
-          cmd_repeater_send(args[1..])
-          return
-        elsif sub == "ws"
-          cmd_repeater_ws(args[1..])
-          return
-        elsif sub == "race"
-          cmd_repeater_race(args[1..])
-          return
-        elsif sub == "timing"
-          cmd_repeater_timing(args[1..])
-          return
-        elsif sub == "minimize"
-          cmd_repeater_minimize(args[1..])
-          return
-        elsif sub == "h2"
-          cmd_repeater_h2fields(args[1..])
-          return
-        elsif sub == "move"
-          cmd_repeater_move(args[1..])
-          return
-        elsif sub == "delete"
-          cmd_repeater_delete(args[1..])
-          return
+        end
+        # A word in subcommand position is a typo'd subcommand, not a flow id: `repeater bogus`
+        # said "invalid flow id 'bogus'". A number (or `#5`) still reaches the flow-id parse.
+        if sub && sub.matches?(/\A[a-z]/i)
+          abort unknown_verb_message("gori run repeater", sub, REPEATER_SUBCOMMANDS.keys)
         end
 
         cmd_repeater_single(args)
+      end
+
+      # `cmd_repeater`'s dispatch. Every key has a `repeater <key>` row in the `@[Subcommand]`
+      # help above, which is the usage banner (spec/cli/run/repeater_update_spec.cr checks).
+      REPEATER_SUBCOMMANDS = {
+        "list"     => ->(a : Array(String)) { cmd_repeater_list(a) },
+        "create"   => ->(a : Array(String)) { cmd_repeater_create(a) },
+        "update"   => ->(a : Array(String)) { cmd_repeater_update(a) },
+        "send"     => ->(a : Array(String)) { cmd_repeater_send(a) },
+        "ws"       => ->(a : Array(String)) { cmd_repeater_ws(a) },
+        "race"     => ->(a : Array(String)) { cmd_repeater_race(a) },
+        "timing"   => ->(a : Array(String)) { cmd_repeater_timing(a) },
+        "minimize" => ->(a : Array(String)) { cmd_repeater_minimize(a) },
+        "h2"       => ->(a : Array(String)) { cmd_repeater_h2fields(a) },
+        "move"     => ->(a : Array(String)) { cmd_repeater_move(a) },
+        "delete"   => ->(a : Array(String)) { cmd_repeater_delete(a) },
+      }
+
+      # The `repeater <sub>` rows of this command's `@[Subcommand]` help: the usage banner.
+      def self.repeater_subcommand_rows : Array({String, String})
+        SUBCOMMANDS.select(&.[0].starts_with?("repeater "))
       end
 
       # `gori run repeater h2 --target URL --fields FILE` — send a FIELD-NATIVE HTTP/2 request:
@@ -485,14 +488,18 @@ module Gori
       # a display choice with no wire consequence. The rule is "does this field become bytes
       # the origin sees", not "did the operator type it".
       #
+      # Tags go through `Repeater::Tags.stored`, as MCP's do: `#idor, x,,#IDOR` is stored
+      # `idor x`, and a token-free `#` stores nothing. A blank name stores NULL ("Untitled"),
+      # which on `update` is how a name is cleared.
+      #
       # Returns whether every write it made COMMITTED — the caller prints a success line, and
       # both writes are `exec_task_ok`, so a rolled-back batch (a busy store, a TUI capturing
       # into the same project) would otherwise be reported as a labelled session.
       private def self.apply_repeater_metadata(store : Store, id : Int64,
                                                name : String?, tags : String?) : Bool
         ok = true
-        ok = false if name && !store.set_repeater_name(id, Env.mask_secrets(name))
-        ok = false if tags && !store.set_repeater_tags(id, Env.mask_secrets(tags).strip.presence)
+        ok = false if name && !store.set_repeater_name(id, Env.mask_secrets(name).strip.presence)
+        ok = false if tags && !store.set_repeater_tags(id, Repeater::Tags.stored(tags))
         ok
       end
 
@@ -617,9 +624,10 @@ module Gori
       # reported as a clean "session #N created successfully." `sources` names the culprit, and
       # an EMPTY `sources` is the `--flow` case, whose request is seeded from the capture after
       # this point. Same shape and reason as `intercept edit`'s empty-replacement refusal.
-      def self.request_content_error(sources : Array(String), content : String) : String?
+      def self.request_content_error(sources : Array(String), content : String,
+                                     cmd : String = "gori run repeater create") : String?
         return nil if sources.empty? || !content.empty?
-        "gori run repeater create: the request must not be empty (#{sources.first} gave no bytes)"
+        "#{cmd}: the request must not be empty (#{sources.first} gave no bytes)"
       end
 
       # The request bytes from whichever single source the gate allowed through. `""` means no
@@ -727,6 +735,10 @@ module Gori
           abort "gori run repeater create: #{err}"
         end
         tls_preset = Settings.tls_preset_normalize(tls_preset)
+        # An explicit --target is argv too. A seeded one (--flow, --curl) is asked again below.
+        if (t = target) && (why = Repeater::Plan.target_error(t))
+          abort "gori run repeater create: invalid --target: #{why}"
+        end
 
         authored = !sources.empty?
         # Read here, before `open_store`: a pipe that never ends must not be holding the
@@ -807,6 +819,11 @@ module Gori
           end
 
           abort "gori run repeater create: --target is required" if tgt_str.empty?
+          # Refused at write time, as MCP `create_repeater` refuses it: a `ftp://` session was
+          # reported created and failed on every `repeater send` after.
+          if why = Repeater::Plan.target_error(tgt_str)
+            abort "gori run repeater create: invalid target: #{why}"
+          end
           # A hand-authored handshake is a WebSocket session too: `repeater send` runs WsEngine
           # on it exactly as on a cloned one, and MCP `create_repeater` asks the same question
           # of every source. Only the flow path above seeds frames.
@@ -885,6 +902,118 @@ module Gori
             puts "Repeater session ##{id} created successfully."
           end
         end
+      end
+
+      # `gori run repeater update <id>` (#1681): edit a saved session IN PLACE, the headless
+      # `update_repeater`. Delete + create was the only way before, and it changed the id —
+      # orphaning every retest step and evidence link that pointed at it. A flag left out keeps
+      # what the row holds; the target, name and tags take the write-time checks `create` runs.
+      #
+      # No slot disarm, unlike MCP: a slot whose refresh replays this session stops refreshing
+      # on its own there because an AGENT changed what it sends. The operator re-arms it from
+      # this surface, so the operator's own edit leaves it armed — as `repeater minimize --apply`
+      # does.
+      private def self.cmd_repeater_update(args : Array(String)) : Nil
+        cmd = "gori run repeater update"
+        proj = ProjectFlags.new
+        f = RepeaterUpdateFlags.new
+        format = :text
+
+        raw_id = one_positional(args, cmd, "<repeater-id>") do |p|
+          p.banner = "Usage: #{cmd} <repeater-id> [options]\n\n" \
+                     "Edit a saved session in place (the id, its retest steps and links are kept).\n" \
+                     "A flag left out keeps the stored value."
+          project_options(p, proj, "update")
+          p.on("-tURL", "--target=URL", "New target URL (scheme://host[:port])") { |v| f.target = v }
+          p.on("-fFILE", "--request-file=FILE", "Replace the stored request with FILE's bytes") { |v| f.request_file = v }
+          p.on("-rRAW", "--request-raw=RAW", "Replace the stored request with this string, verbatim") { |v| f.request_raw = v }
+          p.on("--request-stdin", "Replace the stored request with stdin, byte-for-byte (a pipe or a redirect, as on `repeater create`)") { f.request_stdin = true }
+          p.on("--name=NAME", "Tab name ('' resets it to Untitled)") { |v| f.name = v }
+          p.on("--tags=TAGS", "Tags for grouping tabs, replacing the stored ones ('' clears them)") { |v| f.tags = v }
+          p.on("--http2", "Use HTTP/2") { f.http2 = true }
+          p.on("--http1", "Use HTTP/1.1 (alias: --no-http2)") { f.http2 = false }
+          p.on("--no-http2", "Alias for --http1") { f.http2 = false }
+          p.on("--sni=HOST", "TLS SNI override ('' clears it)") { |v| f.sni = v }
+          p.on("--no-auto-cl", "Do not auto-calculate the Content-Length header") { f.auto_cl = false }
+          p.on("--auto-cl", "Auto-calculate the Content-Length header (the default a session is created with)") { f.auto_cl = true }
+          format_flag(p, [:text, :json], "Output: text (default) | json — the session as `repeater list --format json` prints it") { |v| format = v }
+        end
+        raw_id || abort "#{cmd}: missing <repeater-id>"
+        id = raw_id.to_i64? || abort "#{cmd}: invalid repeater id '#{raw_id}'"
+
+        # Every argv-only refusal above the read, as on `create`: `--request-stdin` blocks to EOF.
+        sources = f.sources
+        if err = repeater_update_error(f, sources)
+          abort "#{cmd}: #{err}"
+        end
+        content = request_content(file: f.request_file, raw: f.request_raw,
+          stdin: f.request_stdin?, io: STDIN, what: cmd)
+        if err = request_content_error(sources, content, cmd)
+          abort err
+        end
+
+        project = resolve_read_project(proj.name, proj.db)
+        with_store(project) do |store|
+          existing = store.get_repeater(id) || abort "#{cmd}: no repeater session ##{id}"
+          write_repeater_update(store, project, existing, f, sources.empty? ? existing.request : content.to_slice, format, cmd)
+        end
+      end
+
+      # `repeater update`'s flags. nil = the flag was not given, so the row keeps its value.
+      class RepeaterUpdateFlags
+        property target : String? = nil
+        property request_file : String? = nil
+        property request_raw : String? = nil
+        property? request_stdin = false
+        property name : String? = nil
+        property tags : String? = nil
+        property http2 : Bool? = nil
+        property auto_cl : Bool? = nil
+        property sni : String? = nil
+
+        def sources : Array(String)
+          Run.request_sources(file: request_file, raw: request_raw, stdin: request_stdin?)
+        end
+      end
+
+      # nil when `repeater update`'s argv is usable; the refusal (without the prefix) otherwise.
+      # Public so a spec can pin it: the command ends in `abort`.
+      def self.repeater_update_error(f : RepeaterUpdateFlags, sources : Array(String)) : String?
+        return "#{sources.join(", ")} cannot be combined — pick one request source" if sources.size > 1
+        if sources.empty? && [f.target, f.name, f.tags, f.http2, f.auto_cl, f.sni].all?(Nil)
+          return "nothing to change — pass --target, a request source, --name, --tags, " \
+                 "--http1/--http2, --sni or --auto-cl/--no-auto-cl"
+        end
+        return nil unless t = f.target
+        return "--target must not be empty" if t.empty?
+        Repeater::Plan.target_error(t).try { |why| "invalid --target: #{why}" }
+      end
+
+      # The write half of `repeater update`: the row, then its labels, then the report. The
+      # target, request and SNI are stored as authored, like `create`'s — see the insert there.
+      private def self.write_repeater_update(store : Store, project : Project, existing : Store::RepeaterRecord,
+                                             f : RepeaterUpdateFlags, request : Bytes, format : Symbol, cmd : String) : Nil
+        id = existing.id
+        http2 = f.http2.nil? ? existing.http2? : f.http2 == true
+        sni = (given = f.sni) ? given.presence : existing.sni
+        written = store.update_repeater(id: id, target: f.target || existing.target, request: request,
+          http2: http2, auto_cl: f.auto_cl.nil? ? existing.auto_content_length? : f.auto_cl == true,
+          sni: sni, ws_keep_key: existing.ws_keep_key?,
+          ws_http_only: existing.ws_http_only?, tls_preset: existing.tls_preset)
+        abort project_write_failure("#{cmd}: session ##{id} was NOT updated (it is unchanged)", project) unless written
+        unless apply_repeater_metadata(store, id, f.name, f.tags)
+          abort project_write_failure("#{cmd}: session ##{id}'s request was updated, but its name/tag metadata was NOT fully saved", project)
+        end
+        if unterminated_head?(request, ws_http_only: existing.ws_http_only?, http2: http2)
+          STDERR.puts "#{cmd}: #{unterminated_head_note}"
+        end
+        unless format == :json
+          puts "Repeater session ##{id} updated."
+          return
+        end
+        rows = store.repeaters_mcp
+        i = rows.index { |r| r.id == id } || abort_closing(store, "#{cmd}: session ##{id} was updated, but another gori deleted it before it could be read back")
+        puts(JSON.build { |j| j.object { repeater_row_fields(j, rows[i], i + 1) } })
       end
 
       # `--curl PATH|-`: the one request the curl command describes (`Import::Curl.parse_one`),
@@ -1107,6 +1236,7 @@ module Gori
         tls_preset : String? = nil
         force_http2 : Bool? = nil
         max_requests : Int32? = nil
+        max_body : Int32? = nil
         format = :text
         positional = [] of String
 
@@ -1126,12 +1256,14 @@ module Gori
           p.on("--reframe-grpc", "HTTP/2 only: recompute the gRPC length prefix over the body being sent") { reframe_grpc = true }
           p.on("--tls-preset=NAME", "#{TLS_PRESET_HELP}, overriding the sessions' stored one") { |v| tls_preset = v }
           p.on("--max-requests=N", "Refuse the race if it would exceed N members (a race is sent whole, never split)") { |v| max_requests = parse_count(v, "--max-requests") }
-          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
+          p.on("--max-body=BYTES", "--format json: hold each member's decoded body to BYTES, as `repeater send --max-body` does (a race is not stored, so this is the only copy)") { |v| max_body = parse_count(v, "--max-body") }
+          format_flag(p, [:text, :json], "Output: text (default) | json — each member adds its session id, head and body") { |f| format = f }
           p.unknown_args { |before, after| positional = before + after }
         end
         parser.parse(args)
         refresh_verify_upstream(!insecure)
         ids = race_member_ids(positional, max_requests, parser)
+        cap = body_cap(false, max_body, "gori run repeater race")
 
         project = resolve_read_project(proj.name, proj.db)
         store = open_store(project, read_only: true)
@@ -1174,7 +1306,11 @@ module Gori
 
         results = plan.send_race
         outbound.close
-        emit_repeater_race(labels, results, plan, format)
+        if format == :json
+          puts race_json(ids, labels, results, plan, cap)
+        else
+          emit_race_text(labels, results, plan)
+        end
         exit 1 unless results.any?(&.ok?)
       end
 
@@ -1373,26 +1509,26 @@ module Gori
         line && !line.empty? ? Output.term_safe(line) : "(no request line)"
       end
 
-      # Print one race's per-member results — status, size and RELEASE-RELATIVE timing (each
-      # member's duration is measured from the synchronized release, so the spread is the
-      # arrival order), plus a winners tally (a 2xx count > 1 where the app should allow one is
-      # the finding).
-      private def self.emit_repeater_race(labels : Array(String), results : Array(Repeater::Result),
-                                          plan : Repeater::Plan, format : Symbol) : Nil
-        format == :json ? emit_race_json(labels, results, plan) : emit_race_text(labels, results, plan)
-      end
-
-      private def self.emit_race_json(labels : Array(String), results : Array(Repeater::Result),
-                                      plan : Repeater::Plan) : Nil
-        JSON.build(STDOUT) do |j|
+      # One race's per-member results — status, size and RELEASE-RELATIVE timing (each member's
+      # duration is measured from the synchronized release, so the spread is the arrival order),
+      # plus MCP `race_requests`' neutral `responded` / `won_2xx` tally. Each member carries its
+      # session `id`, `head` and `body` (#1678): in a limit-overrun race every side usually
+      # answers 200, so the body is the only evidence of which request won — and a race is not
+      # stored, so this object is the only copy. `head`/`body` take `repeater send`'s shapes.
+      def self.race_json(ids : Array(Int64), labels : Array(String), results : Array(Repeater::Result),
+                         plan : Repeater::Plan, cap : BodyCap = BodyCap.new) : String
+        JSON.build do |j|
           j.object do
             j.field "target", "#{plan.scheme}://#{plan.host}:#{plan.port}"
             j.field "transport", plan.http2? ? "single-packet h2" : "last-byte-sync h1"
+            j.field "responded", results.count(&.ok?)
+            j.field "won_2xx", race_won_2xx(results)
             j.field "members" do
               j.array do
                 labels.each_with_index do |label, i|
                   r = results[i]?
                   j.object do
+                    j.field "id", ids[i]
                     j.field "label", label
                     j.field "ok", r.try(&.ok?) || false
                     j.field "status", r.try(&.response.try(&.status))
@@ -1400,21 +1536,33 @@ module Gori
                     j.field "duration_us", r.try(&.duration_us)
                     j.field "incomplete", r.try(&.incomplete?) || false
                     j.field "error", r.try(&.error)
+                    if r
+                      j.field "head", scrub(r.head)
+                      unless String.new(r.head).valid_encoding?
+                        j.field "head_lossy", true
+                        j.field "head_base64", Base64.strict_encode(r.head)
+                      end
+                      emit_body_json(j, "body", r.head, r.body, r.incomplete?, cap)
+                    end
                   end
                 end
               end
             end
           end
         end
-        STDOUT.puts
+      end
+
+      # How many members answered 2xx — a count, not a verdict: whether N distinct 2xx is a
+      # finding is the operator's call (a multi-endpoint race where each endpoint SHOULD answer
+      # 2xx is the normal case).
+      private def self.race_won_2xx(results : Array(Repeater::Result)) : Int32
+        results.count { |r| r.ok? && (s = r.response.try(&.status)) && 200 <= s < 300 }
       end
 
       private def self.emit_race_text(labels : Array(String), results : Array(Repeater::Result),
                                       plan : Repeater::Plan) : Nil
         transport = plan.http2? ? "single-packet h2" : "last-byte-sync h1"
-        # Facts only, no verdict: whether N distinct 2xx is a finding is the operator's call
-        # (a multi-endpoint race where each endpoint SHOULD answer 2xx is the normal case).
-        ok2xx = results.count { |r| r.ok? && (s = r.response.try(&.status)) && 200 <= s < 300 }
+        ok2xx = race_won_2xx(results)
         puts "race → #{plan.scheme}://#{plan.host}:#{plan.port} · #{results.size} requests together (#{transport})"
         labels.each_with_index { |label, i| puts race_member_line(label, results[i]?) }
         puts "→ #{results.count(&.ok?)}/#{results.size} responded · #{ok2xx}×2xx"
@@ -2430,6 +2578,9 @@ module Gori
         plan.scheme == "https" ? plan.tls_preset : nil
       end
 
+      # The binary-body marker's route to exact bytes: a send has no `--format raw` (#1708).
+      SEND_EXACT_BYTES = "--format json for exact bytes (body.base64, or body.text when it is UTF-8)"
+
       private def self.emit_repeater_result(result : Repeater::Result, new_body : Bytes?,
                                             diff : Array(Repeater::DiffLine)?, format : Symbol,
                                             diff_capped : Bool = false,
@@ -2471,7 +2622,7 @@ module Gori
             STDERR.puts compare_verdict(n, diff_capped)
             STDERR.puts "(diff truncated to #{Repeater::Diff::MAX_LINES} lines/side — lines past the cut were not compared)" if diff_capped
           else
-            print_message_text(result.head, new_body, result.body, cap)
+            print_message_text(result.head, new_body, result.body, cap, SEND_EXACT_BYTES)
           end
         else
           # Named after the command that sent it: `gori run send` said "repeater failed:", a
@@ -2487,7 +2638,7 @@ module Gori
           # the default one.
           unless result.head.empty?
             STDERR.puts "→ #{result.response.try(&.status) || "?"} in #{CLI::Output.human_us(result.duration_us)}#{at}#{result.incomplete? ? " (#{incomplete_reason(result, result.timed_out?)})" : ""}"
-            print_message_text(result.head, new_body, result.body, cap)
+            print_message_text(result.head, new_body, result.body, cap, SEND_EXACT_BYTES)
           end
         end
       end
@@ -2922,11 +3073,7 @@ module Gori
         positional = parse_args(args, "gori run repeater") do |p|
           p.banner = "Usage: gori run repeater <flow-id> [options]\n\n" \
                      "Re-send a captured flow. Or manage repeater sessions:\n" \
-                     "  gori run repeater list                List repeater sessions in the workbench\n" \
-                     "  gori run repeater create [options]    Create a repeater session (--flow/--request-file/--request-raw/--request-stdin)\n" \
-                     "  gori run repeater send <id> [opts]    Replay a saved repeater SESSION (not a flow id)\n" \
-                     "  gori run repeater ws <id> [opts]      Open a persistent WebSocket session (stdin → frames, frames → stdout)\n" \
-                     "  gori run repeater h2 [options]        Send a field-native HTTP/2 request (--target/--fields)\n\n" \
+                     "#{repeater_subcommand_rows.join { |(n, d)| "  gori run #{n.ljust(18)} #{d}\n" }}\n" \
                      "#{EVIDENCE_LINK_HELP}\n\n" \
                      "Options (single-flow replay):"
           project_options(p, proj, "read")

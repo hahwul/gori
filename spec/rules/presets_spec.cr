@@ -84,9 +84,9 @@ describe Gori::RulePresets do
   describe "Rules#add_preset" do
     it "installs a preset's rules as ordinary, named, enabled rules" do
       with_rules do |rules|
-        n = rules.add_preset(preset("remove-security-headers"))
-        n.should eq(3)
+        ids = rules.add_preset(preset("remove-security-headers"))
         installed = rules.rules
+        ids.should eq(installed.map(&.id)) # #1682: the ids a headless surface echoes
         installed.size.should eq(3)
         installed.all?(&.enabled?).should be_true
         installed.map(&.name).should contain("Remove X-Frame-Options")

@@ -115,13 +115,16 @@ describe "gori run history --format json — sensitive History columns" do
   # `row_columns` is private and the command it serves opens a store and writes to STDOUT, so
   # the APPLICATION of the policy is asserted over the source, like the `--include-sensitive`
   # wiring guard in history_spec. Both listing branches must state their intent explicitly —
-  # the parameter carries no default precisely so neither can inherit a fail-open one.
+  # the parameter carries no default precisely so neither can inherit a fail-open one. The
+  # redaction matcher likewise has no default, and both branches pass the listing's (#1671).
   it "applies the policy in row_columns and makes both listing branches declare intent" do
     src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "history.cr"))
     src.should contain("CLI::Output.sensitive_column?(c)")
-    src.should contain("include_sensitive : Bool) : {Array({String, String}), Bool}?")
+    src.should contain("include_sensitive : Bool,")
+    src.should contain("matcher : Redact::Matcher?) : {Array({String, String}), Bool}?")
+    src.should contain("prepared.row_values(store, row.id, matcher)")
     sites = src.lines.select(&.includes?("row_columns(store, r, prepared"))
     sites.size.should eq(2)
-    sites.each { |l| l.should match(/row_columns\(store, r, prepared, (include_sensitive|include_sensitive: true)\)/) }
+    sites.each { |l| l.should match(/row_columns\(store, r, prepared, (include_sensitive, matcher|include_sensitive: true, matcher: matcher)\)/) }
   end
 end

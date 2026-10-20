@@ -124,6 +124,17 @@ describe Gori::Authorize::Plan do
       end
     end
 
+    # An unknown id among real ones is named, not dropped, or the run looks complete (#1684).
+    it "reports an unknown flow id as a missing skip" do
+      with_store do |store|
+        id = seed(store, target: "/admin")
+        plan = Plan.build(options(store, flow_ids: [id, 9999_i64]), ungated_outbound)
+        plan.targets.map(&.row.id).should eq([id])
+        plan.skipped.map { |s| {s.flow_id, s.reason} }.should eq([{9999_i64, :missing}])
+        Plan.skip_tally(plan.skipped).should eq("1 no flow with that id")
+      end
+    end
+
     # `scope:` selects by the project's scope rules (#754), and on a project that HAS none a
     # negated scope term is a negated never-match — every flow — which `Plan.search`'s
     # `reject_empty?` cannot catch (it compares the compiled SQL against `1`, and `NOT (0)` is not

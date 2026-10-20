@@ -3,6 +3,7 @@ require "../proxy/codec/http1"
 require "../proxy/codec/body"
 require "../proxy/socket_tuning"
 require "./stream_bound"
+require "./conn_pool" # `Result` scrubs its error with `ConnPool.transport_detail`
 require "wait_group"
 
 module Gori
@@ -74,6 +75,10 @@ module Gori
                      @wire : Bytes? = nil, @retryable_stale = false, @cut_short = false,
                      @lf_framed = false, @bounded : String? = nil,
                      @event_times : Array(Int64)? = nil)
+        # The one seam every engine's failure passes through, so a raw `IO::Error` message
+        # (`write (#<TCPSocket:0x…>): Broken pipe`) loses its heap address here rather than at
+        # each `#{ex.message}` that builds one (#1696).
+        @error = @error.try { |e| ConnPool.transport_detail(e) || e }
       end
 
       # When each event of an event-stream response arrived (`Sse::Arrivals`), so the History
@@ -625,8 +630,11 @@ module Gori
         end
         # Reached only when the TCP layer is what failed, so the TLS clause that used to ride
         # along here (and made this a catch-all) is gone. "DNS" stays in the list because a
-        # dial through an upstream proxy resolves at the PROXY, where gori cannot see it.
-        "connect failed: #{host}:#{port} — host unreachable (DNS/refused/timeout)"
+        # dial through an upstream proxy resolves at the PROXY, where gori cannot see it —
+        # unless what was dialled is an address, which nothing resolves.
+        where = err.try(&.dialed(host, port)) || "#{host}:#{port}"
+        causes = (err.try(&.override_target) || ::Socket::IPAddress.valid?(host.lchop('[').rchop(']'))) ? "refused/timeout" : "DNS/refused/timeout"
+        "connect failed: #{where} — host unreachable (#{causes})"
       end
 
       # Microseconds since `started` — the `Result` duration the h1, h2 and WebSocket engines

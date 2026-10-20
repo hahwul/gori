@@ -130,9 +130,10 @@ module Gori
             j.field("ignored_args", ws_ignored.map(&.to_s)) unless ws_ignored.empty?
             j.field("budget_warning", warn) if warn
             j.field("marks_warning", marks_warn) if marks_warn
-            # Payload sets the chosen `mode` will never draw from. Beside `marks_warning` and
-            # for the same reason: the job runs either way, and an agent that passed two
-            # wordlists under the default `sniper` and heard nothing concludes both were swept.
+            # Payload sets the chosen `mode` will never draw from, or positions that have no set
+            # of their own and reuse set 1 (#1704). Beside `marks_warning` and for the same
+            # reason: the job runs either way, and an agent that passed two wordlists under the
+            # default `sniper` and heard nothing concludes both were swept.
             j.field("payload_sets_warning", sets_warn) if sets_warn
             # What each `payload_from` set read (#1352): the source, flows and values counted,
             # the sensitive-value policy that applied, and what cut it short — never a value.
@@ -709,10 +710,15 @@ module Gori
       end
 
       # MCP's wording for payload sets the run will never draw from (see
-      # `Fuzz::Plan#unused_payload_sets`). Worded here, from the plan, rather than passed as a
+      # `Fuzz::Plan#unused_payload_sets`), or for positions that reuse set 1 instead
+      # (`Fuzz::Plan#reused_set_note`, the same sentence `gori run fuzz` prints). Worded here, from the plan, rather than passed as a
       # raw count: the remedy differs by mode, and `sniper` (the DEFAULT, so the common way to
       # arrive here) wants a different answer than `pitchfork` does.
       private def unused_sets_warning(plan : Fuzz::Plan) : String?
+        # The two never coincide: fewer sets than positions leaves none unused (#1704).
+        if note = plan.reused_set_note
+          return note
+        end
         n = plan.unused_payload_sets
         return nil if n.zero?
         remedy =

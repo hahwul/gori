@@ -881,7 +881,7 @@ module Gori::Tui
     # preset installed a second time duplicates visibly (each row carries the preset's name)
     # rather than silently — the rules are deletable like any other.
     def install_preset(preset : RulePresets::Preset) : Nil
-      n = rules_engine.add_preset(preset, scope: Store::RuleScope::Project, enabled: true)
+      n = rules_engine.add_preset(preset, scope: Store::RuleScope::Project, enabled: true).size
       if n == 0
         return @host.status("preset NOT installed (project busy or unwritable)")
       end
@@ -993,6 +993,10 @@ module Gori::Tui
     def rewriter_duplicate : Nil
       rule = selected_rule || return @host.status("no rewrite rule selected")
       return @host.status("#{rule.inert_reason} — can't duplicate this rule; use a newer gori") if rule.inert?
+      # A stored host the write path now refuses (#1676): say so, not "project busy".
+      if why = Gori::Rules.host_error(rule.host)
+        return @host.status("can't duplicate this rule: #{why}; edit its host first")
+      end
       name = rule.name.empty? ? "" : "#{rule.name} copy"
       unless rules_engine.add(rule.target, rule.part, rule.pattern, rule.replacement,
                rule.op, rule.match_kind, name, rule.host, rule.body_file, scope: rule.scope,

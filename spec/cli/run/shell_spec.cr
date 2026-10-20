@@ -117,6 +117,25 @@ describe "gori run shell — which gori" do
     end
   end
 
+  # A pre-#1168 root breaks Python 3.13+, which the shell otherwise covers (#1706).
+  it "names a root CA that strict verifiers reject, and stays quiet for gori's own" do
+    with_capture_project do |_project, ca, root|
+      Gori::CLI::Run.strict_verify_note(ca).should be_nil
+      cfg = File.join(root, "legacy.cnf")
+      File.write(cfg, "[req]\ndistinguished_name = dn\n[dn]\n[v3]\nbasicConstraints = critical,CA:TRUE\n" \
+                      "subjectKeyIdentifier = none\nauthorityKeyIdentifier = none\n")
+      legacy = File.join(root, "legacy.crt.pem")
+      Process.run("openssl", ["req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1",
+                              "-nodes", "-subj", "/CN=legacy root", "-days", "30", "-config", cfg,
+                              "-extensions", "v3", "-keyout", File.join(root, "legacy.key.pem"),
+                              "-out", legacy]).success?.should be_true
+      note = Gori::CLI::Run.strict_verify_note(legacy).not_nil!
+      note.should contain("Python 3.13+")
+      note.should contain("gori ca regenerate")
+      Gori::CLI::Run.strict_verify_note(File.join(root, "missing.pem")).should be_nil
+    end
+  end
+
   it "refuses when the lock is held but no address was published" do
     with_capture_project do |project, _ca, _root|
       capturing(project) do

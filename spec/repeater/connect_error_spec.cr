@@ -105,6 +105,27 @@ describe "Gori::Repeater::Engine.connect_error" do
       .should eq("connect failed: proxy.test:8080 wants credentials (407)")
   end
 
+  it "names the address a host override dialed, and drops DNS for it (#1695)" do
+    closed = TCPServer.new("127.0.0.1", 0)
+    dead = closed.local_address.port
+    closed.close
+    Gori::Settings.hostname_overrides = [{"dead.test", "127.0.0.1:#{dead}"}]
+    begin
+      _, err = U.dial_result("dead.test", 80)
+      E.connect_error("http", "dead.test", 80, false, err)
+        .should eq("connect failed: 127.0.0.1:#{dead} (host override for dead.test) — host unreachable (refused/timeout)")
+    ensure
+      Gori::Settings.hostname_overrides = [] of {String, String}
+    end
+  end
+
+  it "drops DNS from the hint when the dial was to an IP literal" do
+    {"127.0.0.1", "[::1]"}.each do |ip|
+      E.connect_error("http", ip, 9, false, U::DialError::ORIGIN_UNREACHABLE)
+        .should eq("connect failed: #{ip}:9 — host unreachable (refused/timeout)")
+    end
+  end
+
   it "falls back to the reachability sentence when there is no DialError at all" do
     E.connect_error("https", "h.test", 443, true, nil)
       .should eq("connect failed: h.test:443 — host unreachable (DNS/refused/timeout)")

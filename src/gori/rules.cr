@@ -213,7 +213,7 @@ module Gori
                scope : Store::RuleScope = Store::RuleScope::Project, enabled : Bool = true,
                respond : Store::RespondKind = Store::RespondKind.implied(body_file),
                respond_args : String = "") : Int64
-      return 0_i64 if pattern.empty?
+      return 0_i64 unless savable?(pattern, host)
       target, part = normalize_shape(op, target, part)
       respond, respond_args, body_file = Rules.normalize_respond(op, respond, respond_args, body_file)
       # Both writers already answered — a global add returns the new id (0 = not written),
@@ -240,23 +240,25 @@ module Gori
       ok ? new_id : 0_i64
     end
 
-    # Install every rule of a preset (#821) through the SAME `add` path manual authoring uses
+    # Install every rule of a preset (#821) through the SAME `create` path manual authoring uses
     # (P1) — no private write path, so an installed rule is an ordinary rule the moment it
-    # lands: visible in the list, editable, disable-able, deletable (P4). Returns how many of
-    # the preset's rules committed; the caller reports it, so a preset added a second time
+    # lands: visible in the list, editable, disable-able, deletable (P4). Returns the ids of
+    # the preset's rules that committed (#1682: a headless surface echoes them); the caller
+    # reports them, so a preset added a second time
     # duplicates VISIBLY (each row carries the preset's name) rather than silently. `scope`
     # picks the store exactly as `add` does, and `enabled` lets a surface install a preset
     # switched off for the operator to review before it touches traffic.
     def add_preset(preset : RulePresets::Preset,
                    scope : Store::RuleScope = Store::RuleScope::Project,
-                   enabled : Bool = true) : Int32
-      committed = 0
+                   enabled : Bool = true) : Array(Int64)
+      ids = [] of Int64
       preset.rules.each do |spec|
-        committed += 1 if add(spec.target, spec.part, spec.pattern, spec.replacement,
-                            spec.op, spec.match_kind, spec.name, host: "", body_file: "",
-                            scope: scope, enabled: enabled)
+        id = create(spec.target, spec.part, spec.pattern, spec.replacement,
+          spec.op, spec.match_kind, spec.name, host: "", body_file: "",
+          scope: scope, enabled: enabled)
+        ids << id unless id == 0
       end
-      committed
+      ids
     end
 
     def update(id : Int64, target : Store::RuleTarget, part : Store::RulePart, pattern : String, replacement : String,
@@ -266,7 +268,7 @@ module Gori
                respond : Store::RespondKind? = nil, respond_args : String? = nil) : Bool
       existing = rules.find { |r| r.id == id && r.scope == scope }
       return false unless existing && !existing.inert?
-      return false if pattern.empty?
+      return false unless savable?(pattern, host)
       target, part = normalize_shape(op, target, part)
       # nil KEEPS the rule's own sub-kind: a caller that predates #1237 (or simply does not
       # speak of it) must not turn a dir or fault rule back into an inline stub by omission.
@@ -292,6 +294,11 @@ module Gori
       refresh
       ConfigLog.record(@store, "rule_update", "#{Rules.scope_word(scope)} rewrite rule changed — #{Rules.rule_phrase(id, name, target, part)}") if ok
       ok
+    end
+
+    # A pattern to match on, and a host glob that can match (`Rules.host_error`).
+    private def savable?(pattern : String, host : String) : Bool
+      !pattern.empty? && Rules.host_error(host).nil?
     end
 
     # How an audit line names a rewrite rule — by IDENTITY, never by the bytes it matches or
@@ -2007,6 +2014,21 @@ module Gori
       end
     end
 
+    # Why a rewrite or extract rule's host glob can never match, or nil. `host_matches?` is
+    # handed the BARE request host (the proxy strips the port first), so a glob copied with its
+    # port, scheme or path was stored as an enabled rule that never fired, which for a
+    # short_circuit block is a block that fails open (#1676). Judged at write time by every
+    # surface (and `create`/`update`/`Bindings#validate` refuse it); stored rows are not
+    # re-judged, so how they match is unchanged. An unbracketed glob with two or more colons is
+    # an IPv6 literal, never host:port.
+    def self.host_error(glob : String) : String?
+      return "host #{glob.inspect} must not include a scheme; give the host alone" if glob.includes?("://")
+      return "host #{glob.inspect} must not include a path; give the host alone" if glob.includes?('/')
+      port = glob.starts_with?('[') ? !glob.ends_with?(']') : glob.count(':') == 1
+      return "host #{glob.inspect} must not include a :port; a rule matches the host on every port" if port
+      nil
+    end
+
     # --- preview (shared by the Rewriter tab's test row + the MCP preview_rule tool) ---
 
     RULE_PREVIEW_SCAN = 500
@@ -2023,7 +2045,11 @@ module Gori
     # tuning a rule is looking at.
     RULE_PREVIEW_WS_MAX = 50
 
-    record Preview, scanned : Int32, matched : Int32, total : Int64
+    # `skipped`: flows left out of `scanned` because a json rule would only see a cut body
+    # (`json_body_cut?`). `capped`: the scan read its full `limit` of rows and older flows exist
+    # that it never looked at. `total > scanned` cannot say that on its own: a skip also widens the gap,
+    # and every surface read it as "scan capped" (#1699).
+    record Preview, scanned : Int32, matched : Int32, total : Int64, skipped : Int32 = 0, capped : Bool = false
 
     # How many of up to `limit` recent stored flows a candidate rule WOULD affect, by
     # replaying the SAME transform the live proxy uses (so regex / header ops / host-scope
@@ -2033,19 +2059,25 @@ module Gori
     def preview(rule : Store::MatchRule, limit : Int32 = RULE_PREVIEW_SCAN) : Preview
       scanned = 0
       matched = 0
+      skipped = 0
       # Head/header rules never touch the body, so fetch head-only; body rules cap the
       # fetched bytes (one past the cap, to tell a cut body). Without this the preview pulled
       # every flow's FULL request+response body into memory per keystroke, stalling
       # proportionally to stored body size.
       body_max = rule.part.body? ? RULE_PREVIEW_BODY_MAX + 1 : 0
-      @store.recent_flows(limit, nil).each do |row|
+      rows = @store.recent_flows(limit, nil)
+      rows.each do |row|
         detail = @store.get_flow(row.id, body_max: body_max)
         next unless detail
-        next if json_body_cut?(rule, detail)
+        if json_body_cut?(rule, detail)
+          skipped += 1
+          next
+        end
         scanned += 1
         matched += 1 if rule_affects?(rule, detail)
       end
-      Preview.new(scanned, matched, @store.count)
+      total = @store.count
+      Preview.new(scanned, matched, total, skipped, rows.size >= limit && total > rows.size)
     end
 
     # Whether applying `rule` to the relevant part of `detail` would change its bytes — or,
