@@ -694,6 +694,15 @@ describe Gori::Decoder do
       conv("html-unescape", "&lt;a&gt;&#65;").should eq "<a>A"
     end
 
+    # #1698: only the HTML5 legacy names may drop their ';' (matches Python's html.unescape).
+    it "html unescape decodes a ';'-less name only when it is a legacy entity" do
+      conv("html-unescape", "/p?a=1&lang=en&image=x&order=asc").should eq "/p?a=1&lang=en&image=x&order=asc"
+      conv("html-unescape", "&rarr= &int= &Not &hellipx").should eq "&rarr= &int= &Not &hellipx"
+      conv("html-unescape", "&amp= &copy= &not").should eq "&= ©= ¬"
+      conv("html-unescape", "&lang; &rarr; &notin; &notin &ampx &langx;").should eq "⟨ → ∉ ¬in &x &langx;"
+      conv("html-unescape", "&#x41 &#66; & &; &#").should eq "A B & &; &#"
+    end
+
     it "json string escape/unescape (quoted + bare)" do
       conv("json-escape", "a\nb").should eq "\"a\\nb\""
       conv("json-unescape", "\"a\\nb\"").should eq "a\nb"
