@@ -39,10 +39,8 @@ describe "History list covering index (schema V37)" do
       cols = index_columns(store, "idx_flows_list")
       cols.first.should eq("id")
       # `INTERCEPT_EDITED` and `RULE_HITS` are primary-key probes into side tables (V44, V49),
-      # and `FLOW_ERROR` one into `flows` itself for errored rows only (#1680), so they are the
-      # projected terms the index does not carry.
+      # not `flows` columns, so they are the projected terms the index does not carry.
       projected = Gori::Store::SELECT_ROW.sub(Gori::Store::INTERCEPT_EDITED, "").sub(Gori::Store::RULE_HITS, "")
-        .sub(Gori::Store::FLOW_ERROR, "")
         .split("FROM").first.sub("SELECT", "").split(',').map(&.strip).reject(&.empty?)
       (projected - cols).should be_empty
     end

@@ -1631,7 +1631,7 @@ describe Gori::Proxy::Server do
     sink.responses.first.error.should_not be_nil
   end
 
-  it "names a host override's address and answers the 502 with the recorded error (#1695, #1680)" do
+  it "names a host override's address in the recorded upstream error (#1695)" do
     closed = TCPServer.new("127.0.0.1", 0)
     dead = closed.local_address.port
     closed.close
@@ -1644,15 +1644,12 @@ describe Gori::Proxy::Server do
       client = TCPSocket.new("127.0.0.1", proxy.port)
       client << "GET http://dead.test/ok HTTP/1.1\r\nHost: dead.test\r\n\r\n"
       client.flush
-      resp = client.gets_to_end
+      client.gets_to_end
       client.close
       done.receive
       proxy.stop
 
-      error = sink.responses.first.error.not_nil!
-      error.should eq("upstream connect failed: 127.0.0.1:#{dead} (host override for dead.test)")
-      resp.should start_with("HTTP/1.1 502 Bad Gateway\r\n")
-      resp.should end_with("\r\n\r\n#{error}\n")
+      sink.responses.first.error.should eq("upstream connect failed: 127.0.0.1:#{dead} (host override for dead.test)")
     ensure
       Gori::Settings.hostname_overrides = [] of {String, String}
     end

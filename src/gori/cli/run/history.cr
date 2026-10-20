@@ -607,7 +607,7 @@ module Gori
             array = format == :json
             print '[' if array
             begin
-              rows.each_with_index do |r, i|
+              store.with_errors(rows).each_with_index do |r, i|
                 cols, cols_redacted = row_columns(store, r, prepared, include_sensitive) || {nil, false}
                 line = CLI::Output.flow_row_json(r, store.request_head(r.id), cols,
                   include_sensitive: include_sensitive, columns_redacted: cols_redacted)
