@@ -95,8 +95,11 @@ describe "gori run — project_named?" do
       Gori::CLI::Run.project_named?(nil, "x.db").should be_true
       ENV["GORI_PROJECT"] = "p"
       Gori::CLI::Run.project_named?(nil, nil).should be_true
-      ENV["GORI_PROJECT"] = "" # refused later by `default_project`, not skipped
-      Gori::CLI::Run.project_named?(nil, nil).should be_true
+      # Windows cannot hold an empty variable (assigning "" deletes it), so the case is POSIX-only.
+      {% unless flag?(:win32) %}
+        ENV["GORI_PROJECT"] = "" # refused later by `default_project`, not skipped
+        Gori::CLI::Run.project_named?(nil, nil).should be_true
+      {% end %}
     ensure
       saved ? (ENV["GORI_PROJECT"] = saved) : ENV.delete("GORI_PROJECT")
     end
