@@ -363,7 +363,7 @@ gori run compare 41 42 --pane response --changes-only
 | -------- | ------------- |
 | `--pane=PANE` | What to diff: `request` or `response` (default) |
 | `--changes-only` | Print only added / removed lines, omitting unchanged context |
-| `--context=N` | Collapse unchanged runs to `@@ N unchanged lines @@` markers, keeping N lines around each change (mutually exclusive with `--changes-only`) |
+| `--context=N` | Collapse unchanged runs to `@@ N unchanged lines @@` markers, keeping N lines around each change (mutually exclusive with `--changes-only`). Without the flag nothing is folded; `--context=` alone keeps 3, and a value past the diff's length folds nothing |
 | `--format=FMT` | `text` (default) or `json` |
 | `--redact [PROFILE]`, `--no-redact`, `--redact-preview` | As on [`show`](#run-show): diff the sanitized bodies. The line count and verdict still describe the captured bytes |
 

@@ -356,7 +356,7 @@ gori run compare 41 42 --pane response --changes-only
 |--------|-------------|
 | `--pane=PANE` | 비교 대상: `request` 또는 `response` (기본값) |
 | `--changes-only` | 변경되지 않은 문맥은 빼고 추가 / 삭제된 줄만 출력 |
-| `--context=N` | 변경 지점 주변 N줄만 남기고 나머지 동일 구간은 `@@ N unchanged lines @@` 마커로 접기 (`--changes-only`와 함께 쓸 수 없음) |
+| `--context=N` | 변경 지점 주변 N줄만 남기고 나머지 동일 구간은 `@@ N unchanged lines @@` 마커로 접기 (`--changes-only`와 함께 쓸 수 없음). 플래그가 없으면 접지 않고, 값 없는 `--context=`는 3줄을 남기며, diff 길이보다 큰 값은 아무것도 접지 않습니다 |
 | `--format=FMT` | `text` (기본값) 또는 `json` |
 | `--redact [PROFILE]`, `--no-redact`, `--redact-preview` | [`show`](#run-show)와 같음: 정제된 본문을 비교합니다. 바뀐 줄 수와 판정은 여전히 캡처된 바이트 기준입니다 |
 
