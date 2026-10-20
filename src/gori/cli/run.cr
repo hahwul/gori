@@ -550,9 +550,7 @@ module Gori
             abort "gori run: #{ex.message}"
           end
           return found if found
-          projects = registry.list
-          have = projects.empty? ? "" : " (have: #{projects.map { |project| CLI::Output.term_safe(project.name) }.join(", ")})"
-          abort "gori run: no project matching '#{CLI::Output.term_safe(name)}'#{have}"
+          abort "gori run: no project matching '#{CLI::Output.term_safe(name)}'#{have_projects(registry, name)}"
         end
         case chosen = default_project(registry, ENV[DEFAULT_PROJECT_ENV]?, read_default_pin)
         in String then abort "gori run: #{chosen}"

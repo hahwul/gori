@@ -523,9 +523,7 @@ module Gori
       end
 
       private def self.abort_unknown_project(registry : ProjectRegistry, name : String) : NoReturn
-        projects = registry.list
-        have = projects.empty? ? "" : " (have: #{projects.map { |project| terminal_project_name(project.name) }.join(", ")})"
-        abort "gori run project delete: no project matching '#{terminal_project_name(name)}'#{have}"
+        abort "gori run project delete: no project matching '#{terminal_project_name(name)}'#{have_projects(registry, name)}"
       end
 
       # What --yes would destroy. Exits NON-ZERO: this path removed nothing, and a script

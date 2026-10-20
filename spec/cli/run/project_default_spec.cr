@@ -53,3 +53,33 @@ describe "gori run — the default project (#1387)" do
     Gori::CLI::Run::DefaultSource::Recent.phrase.should eq("most recently active")
   end
 end
+
+# #1705: the refusal for a name that matches nothing listed EVERY project on one line.
+describe "gori run — the 'no project matching' hint" do
+  it "lists the closest few with their short ids, then how many more and where to look" do
+    with_projects do |registry|
+      %w[alpha beta gamma delta epsilon zeta eta theta].each { |n| registry.create(n) }
+      hint = Gori::CLI::Run.have_projects(registry, "zeta2")
+      shown = hint[/closest: ([^;]*);/, 1].split(", ")
+      shown.size.should eq(Gori::CLI::Run::NEAR_PROJECTS)
+      zeta = registry.find("zeta").not_nil!
+      shown.first.should eq("zeta [#{registry.id_of(zeta)}]") # the nearest by edit distance
+      hint.should contain("+3 more — gori run project list --all --query=TEXT")
+    end
+  end
+
+  it "says nothing about more when every project fits" do
+    with_projects do |registry|
+      registry.create("one")
+      registry.create("two")
+      hint = Gori::CLI::Run.have_projects(registry, "nope")
+      hint.should start_with(" (closest: ")
+      hint.should_not contain("more")
+      Gori::CLI::Run.have_projects(registry, "on").should contain("closest: one [") # substring first
+    end
+  end
+
+  it "is empty when there are no projects" do
+    with_projects { |registry| Gori::CLI::Run.have_projects(registry, "x").should eq("") }
+  end
+end

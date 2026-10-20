@@ -37,6 +37,7 @@
 - MCP: a `--db` or `GORI_MCP_DB` file that does not exist leaves the server unbound with a `bind_error`, read-only or not, instead of creating and migrating an empty database there (#1667)
 - CLI: `fuzz`, `mine` and `sequence` with `--request` or stdin read the project `GORI_PROJECT` names, its env vars, host overrides, scope and Sandbox included, the same as `--project`, instead of sending unscoped (#1669)
 - CLI: `gori run project env set KEY --value-stdin` reads the value from a pipe or a redirect, never a terminal, so a token stays off the argument vector (#1702)
+- CLI: a `--project`, `GORI_PROJECT`, `project switch` or `project delete` name that matches nothing lists the five closest projects with their short ids and how many more there are, instead of every project name on one line (#1705)
 
 ## v0.8.1
 
