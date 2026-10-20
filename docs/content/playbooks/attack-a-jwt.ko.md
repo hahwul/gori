@@ -64,6 +64,13 @@ gori run jwt eyJhbGci... --attacks
 gori run jwt eyJhbGci... --attacks --key ./server-public.pem   # ...algorithm confusion까지
 ```
 
+생성된 세트를 쓰는 대신 헤더 주입 토큰을 직접 만들려면 — `kid`를 파일로 겨누거나, `jku`/`jwk`를 내가 통제하는 키 자료로 설정 — `--encode`에서 `--set-header FIELD=VALUE`(반복 가능)나 `--header JSON`으로 헤더를 편집하세요. `alg`는 여전히 `--alg`에서 옵니다:
+
+```bash
+gori run jwt eyJhbGci... --encode --set-header kid=../../dev/null --secret ''   # 빈 키 kid 경로 조작
+gori run jwt --encode --header '{"jku":"https://you/jwks.json"}' --payload '{"sub":"admin"}' --alg RS256 --key ./yours.pem
+```
+
 공개키는 대상이 공개하는 것이면 무엇이든 됩니다. JWKS의 `x5c` 인증서도 순수 `PUBLIC KEY` 블록과 똑같이 동작하며, gori가 어느 쪽이든 서버가 들고 있을 SPKI PEM으로 환원합니다.
 
 MCP에서는 `jwt_attacks` 도구가 같은 키를 `public_key`로 받아 동일한 목록을 반환합니다(`jwt_decode` / `jwt_verify` / `jwt_encode`가 1·2단계를 담당). 모두 `--read-only`에서도 쓸 수 있는 읽기 도구로, 네트워크를 건드리지 않고 아무것도 쓰지 않습니다. 다만 `key` / `public_key`를 경로로 주면 디스크에서 파일을 읽습니다.

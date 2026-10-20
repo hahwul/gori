@@ -69,6 +69,8 @@ gori run jwt eyJhbGci...                       # decode (default)
 gori run jwt eyJhbGci... --encode --alg HS256 --secret s3cret
 gori run jwt eyJhbGci... --encode --set role=admin --secret s3cret   # claim 하나를 패치해 재서명
 gori run jwt eyJhbGci... --encode --payload '{"sub":"1","admin":true}' --secret s3cret   # claim 전체를 교체
+gori run jwt eyJhbGci... --encode --set-header kid=../../dev/null --secret ''   # 헤더 필드 주입 후 재서명
+gori run jwt --encode --header '{"jku":"https://evil"}' --payload '{"sub":"admin"}' --secret s3cret   # 토큰 없이 발급
 gori run jwt eyJhbGci... --encode --alg ES256 --key ./private.pem     # 비대칭 키로 서명
 gori run jwt eyJhbGci... --verify --key ./public.pem                  # 이 토큰은 유효한가?
 gori run jwt eyJhbGci... --attacks             # print the attack payloads
@@ -76,7 +78,7 @@ gori run jwt eyJhbGci... --attacks --key ./public.pem                 # ...algor
 cat token.txt | gori run jwt --attacks         # token from stdin
 ```
 
-토큰은 인자나 stdin에서 옵니다. 프로젝트나 캡처는 관여하지 않습니다(순수한 로컬 연산입니다). `--format`은 `text` 또는 `json`입니다. `--encode`에서 `--set KEY=VALUE`는 claim 하나를 패치하고(반복 가능. 값이 JSON으로 파싱되면 그 타입을 유지하므로 `admin=true`는 불리언, `role=admin`은 문자열입니다), `--payload JSON`은 claim 객체 전체를 교체합니다. 둘은 상호 배타적입니다. `--secret`과 `--key`는 같은 자리를 채우므로 하나만 넘기세요. `--verify`에는 `--secret`이나 `--key`가 필요하고(빈 secret을 확인하려면 `--secret ''`), `verified: yes|no`와 함께 no일 때는 `reason`을 출력하며, `gori run cookie --verify`처럼 토큰이 검증될 때만 0으로, 그렇지 않으면 1로 종료합니다. `--format json`에서는 no에 분기용 `code`도 붙습니다: 다른 키로 성공할 수 있는 것은 `signature_mismatch`와 `key_mismatch`(토큰의 alg에 맞지 않는 종류의 키)뿐이고, `unsigned`, `alg_unsupported`, `signature_malformed`, `jwe` 등은 어떤 키로도 검증되지 않는다는 뜻입니다. `--secret`과 `--key`를 함께 넘기면 `--secret ''`이라도 거부됩니다. [CLI Reference](/ko/reference/cli/#run-jwt)를 참고하세요.
+토큰은 인자나 stdin에서 옵니다. 프로젝트나 캡처는 관여하지 않습니다(순수한 로컬 연산입니다). `--format`은 `text` 또는 `json`입니다. `--encode`에서 `--set KEY=VALUE`는 claim 하나를 패치하고(반복 가능. 값이 JSON으로 파싱되면 그 타입을 유지하므로 `admin=true`는 불리언, `role=admin`은 문자열입니다), `--payload JSON`은 claim 객체 전체를 교체합니다. 둘은 상호 배타적입니다. `--set-header FIELD=VALUE`와 `--header JSON`은 같은 일을 **헤더**에 하며(`kid` / `jku` / `jwk` 헤더 주입 페이로드를 만드는 자리), `alg`는 항상 `--alg`에서 옵니다. `--header`와 `--payload`를 둘 다 주면 `--encode`는 토큰을 읽지 않고 새 토큰을 발급하고, 하나만 주면 나머지 쪽은 토큰에서 옵니다(`""`나 `</dev/null`을 주면 `{}`에서 시작). `--secret`과 `--key`는 같은 자리를 채우므로 하나만 넘기세요. `--verify`에는 `--secret`이나 `--key`가 필요하고(빈 secret을 확인하려면 `--secret ''`), `verified: yes|no`와 함께 no일 때는 `reason`을 출력하며, `gori run cookie --verify`처럼 토큰이 검증될 때만 0으로, 그렇지 않으면 1로 종료합니다. `--format json`에서는 no에 분기용 `code`도 붙습니다: 다른 키로 성공할 수 있는 것은 `signature_mismatch`와 `key_mismatch`(토큰의 alg에 맞지 않는 종류의 키)뿐이고, `unsigned`, `alg_unsupported`, `signature_malformed`, `jwe` 등은 어떤 키로도 검증되지 않는다는 뜻입니다. `--secret`과 `--key`를 함께 넘기면 `--secret ''`이라도 거부됩니다. [CLI Reference](/ko/reference/cli/#run-jwt)를 참고하세요.
 
 MCP에서는 `jwt_decode` / `jwt_verify` / `jwt_encode` / `jwt_attacks`가 `--read-only`에서도 사용할 수 있는 read 도구입니다. 네트워크를 건드리지 않고 아무것도 쓰지 않습니다. `jwt_encode`도 같은 `set` / `payload` claim 편집과 같은 `key`를 받고, `jwt_attacks`는 `public_key`를 받습니다. 다만 `key` / `public_key`는 **경로**도 받으므로 이 두 인자는 호출자가 지정한 파일을 읽습니다. 클라이언트가 파일시스템에 닿지 않아야 한다면 PEM을 인라인으로 넘기세요.
 

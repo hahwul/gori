@@ -1173,7 +1173,7 @@ gori run jwt eyJhbGci... --attacks --key ./public.pem
 | Option | Description |
 | -------- | ------------- |
 | `--decode` | Decode header / payload / signature (default) |
-| `--encode` | Re-sign the token's claims with `--alg` and `--secret` / `--key`; with `--header` or `--payload` no token is needed, and the half not given starts as `{}` |
+| `--encode` | Re-sign the token's claims with `--alg` and `--secret` / `--key`; with **both** `--header` and `--payload` no token is read, and with only one the other half is still taken from the `<token>` argument or STDIN (pass `""` or `</dev/null` to start it from `{}`) |
 | `--verify` | Check the token's own signature against `--secret` / `--key` (one is required; `--secret ''` checks the empty secret); prints `verified: yes\|no` and a `reason`, and exits 1 unless it verifies. `--format json` adds a `code` (`signature_mismatch`, `unsigned`, `alg_unsupported`, …) |
 | `--attacks` | Generate testing payloads (alg:none, weak-secret, header injection) |
 | `--alg=ALG` | Signing alg for `--encode`: `HS256` (default) \| `HS384` \| `HS512` \| `RS256/384/512` \| `PS256/384/512` \| `ES256/384/512` \| `EdDSA` \| `none` |
@@ -1182,7 +1182,7 @@ gori run jwt eyJhbGci... --attacks --key ./public.pem
 | `--payload=JSON` | `--encode`: replace the claims wholesale before re-signing (mutually exclusive with `--set`) |
 | `--set=CLAIM` | `--encode`: patch one claim before re-signing, as `key=value`, repeatable; the value is JSON if it parses (`true`/`3`), else a string |
 | `--header=JSON` | `--encode`: replace the header wholesale (mutually exclusive with `--set-header`); `alg` always comes from `--alg` |
-| `--set-header=FIELD` | `--encode`: patch one header field (`kid`, `jku`, `jwk`, …) as `key=value`, repeatable, typed like `--set` |
+| `--set-header=FIELD` | `--encode`: patch one header field (`kid`, `jku`, `jwk`, …) as `key=value`, repeatable, typed like `--set`; `alg` always comes from `--alg` |
 | `--format` | `text` (default) or `json` |
 
 ### run cookie

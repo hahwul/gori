@@ -27,7 +27,8 @@ module Gori
                      "from the <token> argument, or from STDIN when none is given."
           p.on("--decode", "Decode header / payload / signature (default)") { action = :decode }
           p.on("--encode", "Re-sign the token's claims with --alg and --secret / --key " \
-                           "(no token needed with --header or --payload: the other half starts as {})") { action = :encode }
+                           "(no token needed with --header AND --payload; with only one, the other half " \
+                           "is read from the <token> arg or STDIN — pass \"\" or </dev/null for {})") { action = :encode }
           p.on("--verify", "Check the token's own signature against --secret / --key; exits 1 unless it verifies") { action = :verify }
           p.on("--attacks", "Generate testing payloads (alg:none, weak-secret, header injection)") { action = :attacks }
           p.on("--alg=ALG", "Signing alg for --encode: HS256 (default) | HS384 | HS512 | " \
@@ -39,7 +40,7 @@ module Gori
           p.on("--payload=JSON", "--encode: replace the claims (payload) wholesale before re-signing") { |v| payload_override = v }
           p.on("--set=CLAIM", "--encode: patch one claim before re-signing, as key=value (repeatable). value is JSON if it parses (true/3), else a string") { |v| sets << v }
           p.on("--header=JSON", "--encode: replace the header wholesale (alg still comes from --alg)") { |v| header_override = v }
-          p.on("--set-header=FIELD", "--encode: patch one header field (kid, jku, jwk, …) as key=value, repeatable, typed like --set") { |v| header_sets << v }
+          p.on("--set-header=FIELD", "--encode: patch one header field (kid, jku, jwk, …) as key=value, repeatable, typed like --set (alg still comes from --alg)") { |v| header_sets << v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
 
@@ -52,11 +53,19 @@ module Gori
         if action == :decode && (secret || !key.empty?)
           abort "gori run jwt: --decode uses no key — add --verify to check the signature with it"
         end
-        token = jwt_token_input(positional)
-        # `--encode` mints from scratch when it is told what to sign, as MCP `jwt_encode` does.
-        minting = action == :encode && (header_override || payload_override)
+        token, minting = jwt_token_and_minting(action, positional, header_override, payload_override)
         abort "gori run jwt: no token — pass it as an argument or pipe it on STDIN" if token.empty? && !minting
         jwt_dispatch(action, token, alg, secret, key, payload_override, sets, header_override, header_sets, format)
+      end
+
+      # `--encode` mints from scratch when it is told what to sign, as MCP `jwt_encode` does. With
+      # BOTH halves given the token contributes nothing, so don't read STDIN for it — a
+      # `while read … jwt --encode` loop would swallow its next line and an open pipe would hang (#1721).
+      private def self.jwt_token_and_minting(action : Symbol, positional : Array(String),
+                                             header_override : String?, payload_override : String?) : {String, Bool}
+        minting = action == :encode && (header_override || payload_override) ? true : false
+        skip_stdin = minting && !!header_override && !!payload_override && positional.empty?
+        {skip_stdin ? "" : jwt_token_input(positional), minting}
       end
 
       # `--key` names a PEM, so it is resolved to the PEM text before the engine sees it — an
