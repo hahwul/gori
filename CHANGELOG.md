@@ -39,6 +39,10 @@
 - CLI: `gori run shell` warns, as `gori ca` does, when the root CA lacks the subjectKeyIdentifier or keyUsage extension that Python 3.13+ requires, and names `gori ca regenerate` (#1706)
 - CLI: a binary body on `gori run send` and `gori run repeater` points at `--format json` for its exact bytes instead of a `--format raw` those commands lack, and `gori run show --format curl|httpie` names `--request-only --format raw` on stderr for a body the command had to leave out (#1708)
 - CSRF PoC: the fetch() PoC for a PUT, DELETE or other non-form method says the method itself forces a CORS preflight, instead of blaming the body and Content-Type (#1709)
+- Probe: promoting a finding no longer links a later flow at the sample's own URL, one the finding never fired on, as Issue evidence (#1673)
+- Authorize: a flow id that names no flow is listed as skipped (`no flow with that id`) by `gori run authorize` and MCP `authorize_start` instead of being dropped silently (#1684)
+- Links: `gori run links` prints each link's ref kind and id (`[hist] flow #2 GET 127.0.0.1:8080/err`), a flow link's label keeps a non-default port, and the issues JSON export's `links` rows carry `id` and `ref_kind` beside `kind` (#1685)
+- Issues: an issue's host and seed flow can be changed after create with `gori run issues update --host` / `--flow N` (empty clears) and MCP `update_issue` `host` / `flow_id`; the old seed flow stays linked as removable evidence (#1686)
 
 ## v0.8.1
 

@@ -182,6 +182,10 @@ describe "gori run issues --format json" do
       links[0]["ref_id"].as_i64.should eq(fid)
       parsed[0]["flow_id"].as_i64.should eq(fid)
       links[1]["kind"].as_s.should eq("repeater")
+      # The `links list` / MCP `list_links` names for the same row, beside `kind` (#1685).
+      links[1]["ref_kind"].as_s.should eq("repeater")
+      links[1]["id"].as_i64.should eq(store.link_id(Gori::Store::LinkOwnerKind::Issue, issue_id,
+        Gori::Store::LinkRefKind::Repeater, 9_i64))
       links[1]["ref_id"].as_i.should eq(9)
       links[1]["label"].as_s.should_not be_empty
     end

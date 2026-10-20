@@ -136,16 +136,29 @@ module Gori
         if repeater_id && !store.get_repeater(repeater_id)
           return not_found("no repeater with id #{repeater_id}")
         end
+        # `host` / `flow_id` (#1686), read like `cvss`: null (or an empty host) clears it. A new
+        # seed flow is checked as create_issue checks it.
+        host, clear_host = cvss_arg(h, "host")
+        host = host.try { |hst| Env.mask_secrets(hst) }
+        flow_id = int(h, "flow_id")
+        clear_flow = h["flow_id"]?.try(&.raw.nil?) || false
+        return Result.new("invalid 'flow_id' (expected an integer)", is_error: true) if flow_id.nil? && present?(h, "flow_id")
+        if flow_id && !store.flow_row(flow_id)
+          return not_found("no flow with id #{flow_id}")
+        end
 
         # Don't claim updated:true on a no-op. With no resolvable field the store
         # write is a silent no-op, so returning success would mislead the caller
         # (e.g. it'd think a typo'd field name took effect).
-        if title.nil? && severity.nil? && notes.nil? && status.nil? && cvss.nil? && !clear_cvss && repeater_id.nil?
-          return Result.new("no fields to update (provide at least one of title/severity/notes/status/cvss)", is_error: true)
+        fields = !(title.nil? && severity.nil? && notes.nil? && status.nil? && cvss.nil? && !clear_cvss &&
+                   host.nil? && !clear_host && flow_id.nil? && !clear_flow)
+        if !fields && repeater_id.nil?
+          return Result.new("no fields to update (provide at least one of title/severity/notes/status/cvss/host/flow_id)", is_error: true)
         end
 
-        unless title.nil? && severity.nil? && notes.nil? && status.nil? && cvss.nil? && !clear_cvss
-          return busy("issue NOT updated (store busy or unwritable); it is unchanged") unless store.update_issue(id, title: title, severity: severity, notes: notes, status: status, cvss: cvss, clear_cvss: clear_cvss)
+        if fields
+          return busy("issue NOT updated (store busy or unwritable); it is unchanged") unless store.update_issue(id, title: title, severity: severity, notes: notes, status: status, cvss: cvss, clear_cvss: clear_cvss,
+                                                                                                host: host, clear_host: clear_host, flow_id: flow_id, clear_flow: clear_flow)
         end
         if repeater_id && !link_issue_repeater(id, repeater_id)
           return busy("repeater link NOT written (store busy or unwritable); try again")
@@ -213,6 +226,8 @@ module Gori
           s.field "cvss", strprop("optional CVSS vector or score (empty to clear)")
           s.field "notes", strprop("free-form notes (replaces existing)")
           s.field "status", enumprop("new triage state", ISSUE_STATUSES)
+          s.field "host", strprop("host the issue concerns (null or empty to clear)")
+          s.field "flow_id", intprop("the issue's seed flow (null to clear); the previous one stays linked")
           s.field "repeater_id", intprop("optional repeater id to link to the issue")
         end
 

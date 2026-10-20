@@ -2233,8 +2233,9 @@ module Gori
       # means "clear it", and anything else is the value. Read in one place because the two
       # call sites had each spelled it out and only one of them treated null as a clear.
       # A JSON number rides through `to_s`, so `cvss: 9.8` works as well as `"9.8"`.
-      private def cvss_arg(h) : {String?, Bool}
-        node = h["cvss"]?
+      # update_issue reads its `host` the same way (#1686).
+      private def cvss_arg(h, key : String = "cvss") : {String?, Bool}
+        node = h[key]?
         return {nil, false} unless node
         return {nil, true} if node.raw.nil?
         s = (node.as_s? || node.to_s).strip
