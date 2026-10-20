@@ -155,9 +155,91 @@ describe "Gori::Repeater::DraftMarkers.evidence?" do
       seed = String.new(Gori::Repeater::FlowRequest.build(store.get_flow(fid).not_nil!).bytes)
       DM.evidence?(store, rec_for(seed, flow_id: fid)).should be_true
       DM.evidence?(store, rec_for(seed.sub("id=", "id=x"), flow_id: fid)).should be_false
-      DM.evidence?(store, rec_for(seed, flow_id: fid), "GET / HTTP/1.1\r\n\r\n".to_slice).should be_false
       DM.evidence?(store, rec_for(seed)).should be_false
       DM.evidence?(store, rec_for(seed, flow_id: 4242_i64)).should be_false
+    end
+  end
+
+  # `--keep-request-line` / MCP `keep_request_line` seeds the ABSOLUTE form, which the default
+  # origin-form build never equals; either seed is untouched evidence.
+  it "accepts a seed kept in absolute form" do
+    with_store_env do |store|
+      fid = seed_flow(store, "GET http://a.test/abs HTTP/1.1\r\nHost: a.test\r\nX-N: $ENV.NOPE\r\n\r\n")
+      detail = store.get_flow(fid).not_nil!
+      kept = String.new(Gori::Repeater::FlowRequest.build(detail, rewrite_absolute_form: false).bytes)
+      kept.should start_with("GET http://a.test/abs ")
+      DM.evidence?(store, rec_for(kept, flow_id: fid)).should be_true
+      DM.evidence?(store, rec_for(String.new(Gori::Repeater::FlowRequest.build(detail).bytes), flow_id: fid)).should be_true
+    end
+  end
+end
+
+# An origin that answers every connection 204 and hands each request head to `sink`, for the
+# replay paths that open more than one connection (a race).
+private def start_recording_origin_many(sink : Channel(String)) : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    while conn = origin.accept?
+      spawn_with(conn) do |c|
+        head = Gori::Proxy::Codec::Http1.read_head(c)
+        sink.send(head ? String.new(head) : "") rescue nil
+        c << "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n" rescue nil
+        c.flush rescue nil
+        c.close rescue nil
+      end
+    end
+  rescue
+  end
+  port
+end
+
+# A captured flow holding `X-N: $ENV.NOPE`, and an untouched repeater seed of it.
+private def evidence_seed(store, port : Int32, path : String = "/ev") : Int64
+  fid = store.insert_flow(Gori::Store::CapturedRequest.new(
+    created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: port,
+    method: "GET", target: path, http_version: "HTTP/1.1",
+    head: "GET #{path} HTTP/1.1\r\nHost: 127.0.0.1\r\nX-N: $ENV.NOPE\r\n\r\n".to_slice,
+    body: nil, source: Gori::FlowSource::Kind::Import))
+  seed = Gori::Repeater::FlowRequest.build(store.get_flow(fid).not_nil!).bytes
+  store.insert_repeater("http://127.0.0.1:#{port}", seed, false, true, fid, 0)
+end
+
+# #1670 review: every replay of a saved session, not only `repeater send`, treats an untouched
+# seed as evidence, so a captured `$ENV.NOPE` goes out as captured instead of being refused.
+describe "replaying an untouched flow seed beyond repeater send (#1670)" do
+  it "a retest step sends the capture's unresolved $ENV token literally" do
+    with_store_env do |store|
+      with_env_syntax(Gori::Env::Syntax::Namespaced) do
+        sink = Channel(String).new(4)
+        port = start_recording_origin_many(sink)
+        rid = evidence_seed(store, port)
+        step = Gori::Store::RetestStep.new(1_i64, 1_i64, 1, Gori::Store::RetestRole::Variant,
+          Gori::Store::LinkRefKind::Repeater, rid, "", 0_i64, 0_i64)
+        planned = Gori::Retest::Planned.new(step, "GET", "http://127.0.0.1:#{port}/ev", "repeater ##{rid}")
+        backend = Gori::Retest::LiveBackend.new(store, ungated_outbound,
+          issue_id: 1_i64, surface: Gori::FlowSource::Surface::Cli)
+        obs = backend.send(planned)
+        obs.error.should be_nil
+        obs.status.should eq(204)
+        sink.receive.should contain("X-N: $ENV.NOPE\r\n")
+        backend.finish
+      end
+    end
+  end
+
+  it "MCP race_requests races untouched seeds without refusing their captured tokens" do
+    with_store_env do |store|
+      with_env_syntax(Gori::Env::Syntax::Namespaced) do
+        sink = Channel(String).new(4)
+        port = start_recording_origin_many(sink)
+        a = evidence_seed(store, port, "/a")
+        b = evidence_seed(store, port, "/b")
+        r = tools_for(store).call("race_requests", JSON.parse(%({"repeater_ids":[#{a},#{b}],"allow_unscoped":true})))
+        r.is_error.should be_false
+        r.text.should_not contain("unresolved env")
+        2.times { sink.receive.should contain("X-N: $ENV.NOPE\r\n") }
+      end
     end
   end
 end

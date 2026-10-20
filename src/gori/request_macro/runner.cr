@@ -46,7 +46,8 @@ module Gori::RequestMacro
     # Per-step connect + idle ceiling — a step that hangs stalls the candidate waiting on it.
     STEP_TIMEOUT = 20.seconds
 
-    private record Step, rec : Store::RepeaterRecord, label : String
+    # `evidence` is read with the session (`Repeater::DraftMarkers.evidence?`), frozen like it.
+    private record Step, rec : Store::RepeaterRecord, label : String, evidence : Bool
 
     getter spec : Spec
     @labels : Array(String)
@@ -82,7 +83,7 @@ module Gori::RequestMacro
                           "remove them, or use a copy of the session without markers")
         end
         plan = begin
-          Repeater::Plan.build(plan_options(rec, overrides, verify), outbound)
+          Repeater::Plan.build(plan_options(rec, overrides, verify, evidence: step.evidence), outbound)
         rescue ex : Repeater::PlanError
           raise Error.new("macro step #{n} (#{step.label}) could not be built: #{ex.message}")
         end
@@ -121,15 +122,17 @@ module Gori::RequestMacro
             raise Error.new("macro step #{n}: #{named.size} Repeater sessions are named #{token.inspect} (#{ids}) — name one by id")
           end
         end
-      Step.new(rec, SessionRefresh.step_label(rec))
+      Step.new(rec, SessionRefresh.step_label(rec), Repeater::DraftMarkers.evidence?(store, rec))
     end
 
     # A saved session replayed AS SAVED. `Retest::LiveBackend.plan_options` is the sibling and
     # the reasoning is its: no per-send override, `auto_content_length`, `sni` and `tls_preset`
     # come off the row so the step dials the handshake the tab was saved with.
+    # `evidence`, too: an untouched flow seed sends its capture's tokens as captured (#1670).
     def self.plan_options(rec : Store::RepeaterRecord, overrides : HostOverrides?,
-                          verify : Bool) : Repeater::PlanOptions
+                          verify : Bool, *, evidence : Bool = false) : Repeater::PlanOptions
       Repeater::PlanOptions.new([rec.request],
+        evidence: evidence,
         default_target: rec.target,
         http2: rec.http2?,
         sni: rec.sni,
@@ -252,7 +255,7 @@ module Gori::RequestMacro
           return Outcome.new(false, total, sent, n, step.label, nil, "the run was stopped", [] of String, flows, stopped: true)
         end
         plan = begin
-          Repeater::Plan.build(Runner.plan_options(step.rec, @overrides, @verify), @outbound)
+          Repeater::Plan.build(Runner.plan_options(step.rec, @overrides, @verify, evidence: step.evidence), @outbound)
         rescue ex : Repeater::PlanError
           return failed(total, sent, n, step.label, "could not build the request: #{ex.message}", nil, flows)
         end

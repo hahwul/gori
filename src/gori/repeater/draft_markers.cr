@@ -59,15 +59,17 @@ module Gori::Repeater
       operator_marked?(store, fid)
     end
 
-    # Whether the session is still EVIDENCE: seeded from a flow (`flow_id`) and carrying exactly
-    # the bytes that seed produced (`FlowRequest.build`), so a `$ENV`/`$GEN` token in it is one
-    # the capture brought and goes out literally (#1670) — as in the Repeater tab, whose
-    # flow-seeded tab expands only names the capture did not carry. An edited row, or one this
-    # send edits (`request`, as for `live?`), is the operator's draft again. A lost seed is too:
-    # there is nothing left to tell the capture's tokens from typed ones.
-    def self.evidence?(store : Store, rec : Store::RepeaterRecord, request : Bytes = rec.request) : Bool
+    # Whether the session is still EVIDENCE: seeded from a flow (`flow_id`) and still holding exactly
+    # the bytes that seed produced (`FlowRequest.build`, in either request-line form, since
+    # `--keep-request-line` / MCP `keep_request_line` stores the absolute one), so a `$ENV`/`$GEN`
+    # token in it is one the capture brought and goes out literally (#1670), as in the Repeater
+    # tab. Asked of the STORED row: a send's own `--path`/`-H` leaves it evidence and expands only
+    # what the operator added, as a flow replay does. An edited row is the operator's draft again,
+    # and so is one whose seed is gone: nothing is left to tell the capture's tokens from typed ones.
+    def self.evidence?(store : Store, rec : Store::RepeaterRecord) : Bool
       return false unless (fid = rec.flow_id) && (detail = store.get_flow(fid))
-      FlowRequest.build(detail).bytes == request
+      FlowRequest.build(detail).bytes == rec.request ||
+        FlowRequest.build(detail, rewrite_absolute_form: false).bytes == rec.request
     rescue FlowRequest::PseudoHeaderHead
       false
     end

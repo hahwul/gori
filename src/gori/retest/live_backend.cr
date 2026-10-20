@@ -96,7 +96,8 @@ module Gori
               "Remove them from the session, or point this step at one without markers.")))
         end
         plan = begin
-          Repeater::Plan.build(Retest.plan_options(rec, @overrides, @verify, @timeout), @outbound)
+          Repeater::Plan.build(Retest.plan_options(rec, @overrides, @verify, @timeout,
+            evidence: Repeater::DraftMarkers.evidence?(@store, rec)), @outbound)
         rescue ex : Repeater::PlanError
           return Observation.new(error: Retest.clip("could not build the request: #{ex.message}"))
         end
@@ -181,10 +182,12 @@ module Gori
     # a step reproduces the request its Repeater tab holds, and anything a run could change
     # about that is a second request the issue never described. `auto_content_length`,
     # `sni` and `tls_preset` come off the row for the same reason a reopened tab dials the
-    # handshake it was saved with.
+    # handshake it was saved with. `evidence`: the row is still its flow seed's bytes
+    # (`Repeater::DraftMarkers.evidence?`), so the capture's tokens go out as captured (#1670).
     def self.plan_options(rec : Store::RepeaterRecord, overrides : Gori::HostOverrides?,
-                          verify : Bool, timeout : Time::Span) : Repeater::PlanOptions
+                          verify : Bool, timeout : Time::Span, *, evidence : Bool = false) : Repeater::PlanOptions
       Repeater::PlanOptions.new([rec.request],
+        evidence: evidence,
         default_target: rec.target,
         http2: rec.http2?,
         sni: rec.sni,

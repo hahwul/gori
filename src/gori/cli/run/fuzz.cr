@@ -716,8 +716,9 @@ module Gori
       # {template text, default target (nil for file/stdin), http2, is-evidence, sni} from the
       # chosen source. `is-evidence` is PROVENANCE, not a knob: only the `--flow` branch, and
       # `--repeater` on a session still holding its flow seed's bytes, hand back captured bytes,
-      # and only they may therefore skip the draft-time passes (see `Fuzz::PlanOptions#evidence?`). `sni` is the SOURCE's stored SNI (only a
-      # repeater session carries one) and is a DEFAULT — an explicit `--sni` still wins.
+      # and only they may therefore skip the draft-time passes (see `Fuzz::PlanOptions#evidence?`).
+      # `sni` is the SOURCE's stored SNI (only a repeater session carries one) and is a DEFAULT —
+      # an explicit `--sni` still wins.
       private def self.fuzz_source(flow_id : Int64?, repeater_id : Int64?, request_file : String?,
                                    project_name : String?, db_path : String?) : FuzzSeed
         if file = request_file

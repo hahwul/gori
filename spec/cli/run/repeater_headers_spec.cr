@@ -296,3 +296,29 @@ describe "gori run repeater h2 — --fields parsing" do
     body.not_nil!.to_a.should eq([0x00, 0x01, 0x02, 0x80, 0xFF])
   end
 end
+
+# #1670 review: `repeater send` on an untouched flow seed keeps it evidence and expands only the
+# operator's own `-H` (`per_send_request(expand: true)`), the way a flow replay merges them. The
+# captured tokens around them stay as captured; an unresolved `$ENV` the OPERATOR typed is refused.
+describe "gori run repeater send -H on an evidence session" do
+  it "expands the operator's -H value only, and refuses its unresolved $ENV token" do
+    saved = Gori::Settings.env_vars
+    Gori::Settings.env_vars = [{"TOKEN", "abc123"}]
+    with_env_syntax(Gori::Env::Syntax::Namespaced) do
+      wire = "GET / HTTP/1.1\r\nHost: h\r\nX-E: $ENV.TOKEN\r\nX-N: $ENV.NOPE\r\n\r\n".to_slice
+      bytes, _ = Gori::CLI::Run.per_send_request(wire, ["Y: $ENV.TOKEN"], [] of String, expand: true).as({Bytes, Bool})
+      sent = String.new(bytes)
+      sent.should contain("Y: abc123\r\n")
+      sent.should contain("X-E: $ENV.TOKEN\r\n")
+      sent.should contain("X-N: $ENV.NOPE\r\n")
+      expect_raises(Gori::Repeater::PlanError, /\$ENV\.NOPE/) do
+        Gori::CLI::Run.per_send_request(wire, ["Y: $ENV.NOPE"], [] of String, expand: true)
+      end
+      # A draft leaves the whole merge to the plan, which expands (and checks) it all.
+      draft, _ = Gori::CLI::Run.per_send_request(wire, ["Y: $ENV.TOKEN"], [] of String).as({Bytes, Bool})
+      String.new(draft).should contain("Y: $ENV.TOKEN\r\n")
+    end
+  ensure
+    Gori::Settings.env_vars = saved || [] of {String, String}
+  end
+end

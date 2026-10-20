@@ -690,6 +690,7 @@ module Gori
       # A saved session replayed AS SAVED — `Retest.plan_options`, plus the slot it refreshes.
       private def plan_options(rec : Store::RepeaterRecord, slot : String) : Repeater::PlanOptions
         Repeater::PlanOptions.new([rec.request],
+          evidence: Repeater::DraftMarkers.evidence?(@store, rec),
           default_target: rec.target,
           http2: rec.http2?,
           sni: rec.sni,

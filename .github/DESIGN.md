@@ -5118,15 +5118,29 @@ Refines both 2026-10-19 #1628 entries and P7. Takes the open option above.
 Refines P7's provenance axis and the #571 rule that a token with no value is literal text.
 
 - Under the namespaced grammar an `$ENV.X` is a reference by construction, the class `$GEN`
-  already is (#1591). So an AUTHORED request naming one that resolves to nothing is refused at
-  plan-build (`Env.unresolved_env`), as `PlanError::Reason::UnresolvedEnv`, the reason a `$GEN`
-  that cannot mint uses: no new member, so the surfaces word it with the sentence they have. It
-  is asked before the env pass, because that pass consumes the `$$ENV.X` escape. A bare `$name`,
-  a verbatim send, evidence and a slot header stay literal, as before. Not yet covered: a
-  Discover custom header (it may be copied off a capture, `Headers.from_flow`, with nothing to
-  say so) and a WebSocket frame.
+  already is (#1591). So AUTHORED request text naming one that resolves to nothing is refused
+  before it dials (`Env.unresolved_env`), as `PlanError::Reason::UnresolvedEnv`, the reason a
+  `$GEN` that cannot mint uses: no new member, so the surfaces word it with the sentence they
+  have. It is asked before the env pass, because that pass consumes the `$$ENV.X` escape. A bare
+  `$name`, a verbatim send and a slot header stay literal, as before.
+- Where: the Repeater, Fuzzer, Miner and Sequencer plans for a draft; the TUI Repeater's `^R`
+  and `%%%` send group (`RepeaterView#env_refusal`); `gori run send` and MCP `send_request{url}`
+  (URL path and query, headers, body, a raw request: `UrlRequest.expand`); and the operator's
+  own `-H`/`-d`/`--path`/`-X` on `gori run repeater <flow-id>` and on an evidence session's
+  `repeater send`.
+- Not covered yet: Discover custom headers (`Headers.from_flow` may have copied them off a
+  capture, with nothing to say so), WebSocket frames, the three minimize paths, and an
+  operator-typed `$ENV.X` inside a TUI evidence tab, which the tab's per-name provenance cannot
+  tell from a captured one and so sends literally.
 - A Repeater session is evidence while its bytes still equal what its flow seed produces
-  (`Repeater::DraftMarkers.evidence?`, against `FlowRequest.build`), so `gori run repeater send`,
-  `gori run fuzz --repeater` and MCP replay the capture's `$ENV`/`$GEN` tokens as the tab does.
-  Once the row, or the send's own `--path`/`-H`, edits it, the session is a draft: the tab
-  tracks provenance per name, the headless surfaces have no per-name record to read.
+  (`Repeater::DraftMarkers.evidence?`: `FlowRequest.build` in either request-line form, so a
+  `keep_request_line` seed counts). Every headless replay of a session asks it: `repeater
+  send`/`race`/`timing`/`ws`, `fuzz --repeater`, MCP `send_request`/`send_websocket`/
+  `race_requests`/`timing_requests`/`fuzz_start`, retest steps, request macros and refresh
+  steps. A race or timing group is evidence only when every member is. It is asked of the
+  STORED row: a send's own `--path`/`-H`/`-b` leave the session evidence and expand alone, as on
+  a flow replay. An edited row is a draft; the tab tracks provenance per name instead, and the two
+  agree on an unedited row.
+- A session whose seed flow was deleted is a draft headlessly (nothing is left to compare) but
+  stays evidence in the TUI, which keys on `flow_id`. Left as is: the headless reading is the
+  conservative one.

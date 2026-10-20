@@ -245,6 +245,7 @@ module Gori
                                   verbatim : Bool, timeout : Time::Span?, st : Store,
                                   ob : Outbound) : {Repeater::Plan, Array(String)} | Result
         loaded = [] of {Int64, Store::RepeaterRecord}
+        seeds = Set(Int64).new # the members still holding their flow seed's bytes (#1670)
         members.each do |id|
           rec = st.get_repeater_full(id)
           return not_found("no repeater with id #{id}") unless rec
@@ -255,6 +256,7 @@ module Gori
             return err("#{Repeater::DraftMarkers.refusal(id, MARKER_REMEDY)} NOTHING was sent.",
               "INVALID_ARGUMENT", field: "repeater_ids")
           end
+          seeds << id if Repeater::DraftMarkers.evidence?(st, rec)
           loaded << {id, rec}
         end
         overrides = Gori::HostOverrides.load(st)
@@ -279,7 +281,8 @@ module Gori
         labels = [] of String
         loaded.each do |(id, rec)|
           probe = begin
-            Repeater::Plan.build(race_member_options([rec.request], rec, insecure, overrides, verbatim, timeout, rec.http2?), ob)
+            Repeater::Plan.build(race_member_options([rec.request], rec, insecure, overrides, verbatim, timeout, rec.http2?,
+              seeds.includes?(id)), ob)
           rescue ex : Repeater::PlanError
             return send_plan_error(ex, "repeater_ids")
           end
@@ -295,7 +298,9 @@ module Gori
 
         anchor = loaded.first[1]
         plan = begin
-          Repeater::Plan.build(race_member_options(wires, anchor, insecure, overrides, verbatim, timeout, mode), ob)
+          # One plan, one provenance: evidence only when EVERY member is an untouched seed.
+          Repeater::Plan.build(race_member_options(wires, anchor, insecure, overrides, verbatim, timeout, mode,
+            loaded.all? { |(id, _)| seeds.includes?(id) }), ob)
         rescue ex : Repeater::PlanError
           return send_plan_error(ex, "repeater_ids")
         end
@@ -306,8 +311,9 @@ module Gori
       # member's bytes and `rec` is the anchor). Mirrors the CLI's `session_plan_options`.
       private def race_member_options(requests : Array(Bytes), rec : Store::RepeaterRecord,
                                       insecure : Bool, overrides : Gori::HostOverrides?,
-                                      verbatim : Bool, timeout : Time::Span?, http2 : Bool) : Repeater::PlanOptions
-        Repeater::PlanOptions.new(requests,
+                                      verbatim : Bool, timeout : Time::Span?, http2 : Bool,
+                                      evidence : Bool) : Repeater::PlanOptions
+        Repeater::PlanOptions.new(requests, evidence: evidence,
           default_target: rec.target, http2: http2, sni: rec.sni, timeout: timeout,
           expand_request: !verbatim, expand_bindings: !verbatim, preserve_field_case: verbatim,
           auto_content_length: !verbatim && rec.auto_content_length?, verify: !insecure && @verify_upstream,
@@ -1326,13 +1332,16 @@ module Gori
         verify = !bool_arg(h, "insecure", false) && @verify_upstream
         plan = begin
           Repeater::Plan.build(Repeater::PlanOptions.new([repeater.request],
+            # An untouched flow seed's handshake is evidence, as on `send_request` (#1670).
+            evidence: Repeater::DraftMarkers.evidence?(store, repeater),
             default_target: repeater.target, sni: repeater.sni, verify: verify,
             # `verbatim` reaches the handshake HEAD, exactly as `gori run repeater send`
             # threads it through `session_plan_options`. (The head deliberately does NOT take
             # the `seeded` provenance the MESSAGES take: `repeaters.request` is rewritable by
             # `update_repeater` while `flow_id` persists, so a flow id is not evidence that
             # THOSE bytes are still the capture's — while nothing but a flow seed ever writes
-            # a captured `ws_messages` row's payload.)
+            # a captured `ws_messages` row's payload. `evidence?` above compares the bytes
+            # themselves, which is what the flow id alone could not say.)
             expand_request: !verbatim,
             # …and its send-seam half, which the head needs for the same reason the MESSAGES
             # above needed `!verbatim`: `expand_request` stops the builder's env var pass, and
