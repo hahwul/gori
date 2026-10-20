@@ -46,6 +46,7 @@ module Gori::Repeater::Timing
     plan.sender.outbound.halt = cancel
     samples = [] of Stats::Sample
     refusal = nil.as(String?)
+    failure = nil.as(String?)
     # The race releases its members in request order, and whichever sits first has a fixed edge
     # (it is written first, and read back in fiber-resume order) — identical requests came out
     # "A slower" at p≈1e-14. Swap the release order every other pair, as Interleaved does.
@@ -54,29 +55,31 @@ module Gori::Repeater::Timing
     sent = 0
     while sent < total
       break if cancel.call
-      pair, refusal = send_pair(plan, swapped, mode, sent)
+      pair, refusal, error = send_pair(plan, swapped, mode, sent)
       # A refusal no later pair can change (the budget is spent, Layer 2 said no): stop here
       # and say why, rather than loop to `iterations` and report a bare "inconclusive".
       break if refusal
       sent += 1
       next if sent <= warmup # discard the warm-up pairs (TLS / connection warm-up)
       samples << pair
+      failure ||= error
       progress.call(samples.size)
     end
 
-    Stats.analyze(samples).copy_with(refusal: refusal)
+    Stats.analyze(samples).copy_with(refusal: refusal, error: failure)
   end
 
   # One A/B pair → its two release-relative durations (recorded by MEMBER, not release order),
-  # and a permanent refusal when one member got one (`Outbound.permanent_refusal?`). A member that
-  # errored (timeout, reset, a refusal) contributes `nil` — no valid arrival time — so `Stats`
-  # drops it from that pair.
+  # a permanent refusal when one member got one (`Outbound.permanent_refusal?`), and the pair's
+  # first send error of any kind. A member that errored (timeout, reset, a refusal) contributes
+  # `nil` — no valid arrival time — so `Stats` drops it from that pair.
   private def self.send_pair(plan : Repeater::Plan, swapped : Repeater::Plan, mode : Mode,
-                             index : Int32) : {Stats::Sample, String?}
+                             index : Int32) : {Stats::Sample, String?, String?}
     results = pair_results(plan, swapped, mode, index)
     a, b = index.odd? ? {results[1]?, results[0]?} : {results[0]?, results[1]?}
-    refusal = results.compact_map(&.error).find { |e| Gori::Outbound.permanent_refusal?(e) }
-    {Stats::Sample.new(duration_of(a), duration_of(b)), refusal}
+    errors = results.compact_map(&.error)
+    refusal = errors.find { |e| Gori::Outbound.permanent_refusal?(e) }
+    {Stats::Sample.new(duration_of(a), duration_of(b)), refusal, errors.first?}
   end
 
   # The pair in RELEASE order: on odd pairs B goes first, so the caller maps back to members.
