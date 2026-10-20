@@ -2978,9 +2978,14 @@ describe "RepeaterView#request_bytes — an unresolved $ENV token" do
       escaped = RepeaterView.new
       escaped.restore("http://h.test", "GET / HTTP/1.1\nHost: h.test\nX: $$ENV.NOPE\n\n", false, false)
       String.new(escaped.request_bytes).should contain("X: $ENV.NOPE\r\n")
+      # The `%%%` send group asks the same question before it pipelines its chunks.
+      group = RepeaterView.new
+      group.restore("http://h.test", "GET /a HTTP/1.1\nHost: h.test\n\n%%%\nGET /b HTTP/1.1\nX: $ENV.NOPE\n\n", false, false)
+      group.env_refusal.not_nil!.should contain("unresolved env $ENV.NOPE")
       evidence = RepeaterView.new
       evidence.restore("http://h.test", "GET / HTTP/1.1\nHost: h.test\nX: $ENV.NOPE\n\n", false, false, evidence: true)
       String.new(evidence.request_bytes).should contain("X: $ENV.NOPE")
+      evidence.env_refusal.should be_nil
     end
   ensure
     Gori::Settings.env_vars = saved || [] of {String, String}

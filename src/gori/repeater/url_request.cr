@@ -25,14 +25,16 @@ module Gori::Repeater
     record Built, bytes : Bytes, scheme : String, host : String, port : Int32
 
     # The dialed origin of a URL, every check already run, plus the parsed URI the structured
-    # shape reads the path and query from.
-    record Target, uri : URI, scheme : String, host : String, port : Int32
+    # shape reads the path and query from, and the URL as authored (before `Env.expand`), which
+    # that shape checks for an unresolved `$ENV.KEY` (#1666).
+    record Target, uri : URI, scheme : String, host : String, port : Int32, authored : String
 
     # Resolve `url` (after `Env.expand`) to the origin a send would dial, with every check —
     # a missing/malformed host, a non-http scheme, a CR/LF in the authority, an out-of-range
     # port. Kept apart from the builders so a FIELD-NATIVE h2 send (whose fields are the whole
     # message) can resolve the same origin without building request bytes it will never send.
     def self.target(url : String) : Target
+      authored = url
       url = Env.expand(url)
       # URI.parse raises URI::Error on a malformed authority (e.g. a non-numeric port
       # "example.com:abc"); turn that into a clean Gori::Error so the caller gets an actionable
@@ -69,7 +71,7 @@ module Gori::Repeater
       # ":99999" would otherwise reach the dialer as a doomed connect. A valid TCP port is
       # 1..65535.
       raise Gori::Error.new("invalid port #{port} in url (expected 1..65535)") unless 1 <= port <= 65535
-      Target.new(uri, scheme, host, port)
+      Target.new(uri, scheme, host, port, authored)
     end
 
     # Exact caller-supplied octets as the request (MCP's `raw_base64`): nothing to normalise
@@ -115,6 +117,10 @@ module Gori::Repeater
       m = expand ? (method || "GET").upcase : method || "GET"
       check_method(m)
       request_target = request_target_of(target)
+      # The URL's path and query become this request's line, so a token there is request text:
+      # refused as a header's is. Here and not in `target`, which a field-native send also
+      # resolves its origin through, without ever sending that path.
+      Plan.refuse_unresolved_env(target.authored) if expand
 
       lines = [] of {String, String}
       headers.each do |(k, v)|

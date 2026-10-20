@@ -65,16 +65,28 @@ class Gori::Tui::RepeaterView
     if reason = group_framing_refusal
       raise Fuzz::ChainError.new(reason)
     end
-    # A DRAFT naming an `$ENV` var with no value is refused, as every surface's plan refuses it
-    # (#1666, `Env.unresolved_env`): every mode below expands the editor except the hex buffer.
-    if !@evidence && !(@req_hex_edit && !@grpc_mode) && (detail = Env.unresolved_env(@editor.wire_text))
-      raise Fuzz::ChainError.new("unresolved env #{detail} — add it in the Project tab's ENV pane")
+    # Every mode below expands the editor except the hex buffer, so each is checked
+    # (`env_refusal`). The DECODED pane is spliced in first, so a token typed there is read too.
+    unless @req_hex_edit && !@grpc_mode
+      commit_decoded if @decode_kind && !@grpc_mode
+      if why = env_refusal
+        raise Fuzz::ChainError.new(why)
+      end
     end
     return grpc_request_bytes if @grpc_mode                  # edited head + reframed body (owns its own hex buffer)
     return @req_hex_edit.not_nil!.to_bytes if @req_hex_edit  # byte-exact; NO auto-CL in hex mode
     return decoded_request_bytes if @decode_kind             # envelope + re-encoded decoded payload
     return marked_request_bytes unless marker_regions.empty? # §…§ inline Decoder chains applied on send
     finalize_wire(expanded_editor_bytes)
+  end
+
+  # Why this DRAFT may not be sent, or nil: it names an `$ENV` var with no value, which every
+  # surface's plan refuses (#1666, `Env.unresolved_env`). An evidence tab sends the capture's
+  # tokens as they arrived. Asked by `^R` (`request_bytes`) and the `%%%` send group alike.
+  def env_refusal : String?
+    return nil if @evidence
+    return nil unless detail = Env.unresolved_env(@editor.wire_text)
+    Env.totp_secret_refusal(detail) || "unresolved env #{detail} — add it in the Project tab's ENV pane"
   end
 
   # `wire_text`, NOT `text`: `text` is the LF projection, and joining the buffer with LF

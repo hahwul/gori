@@ -2852,6 +2852,10 @@ module Gori::Tui
         @host.status(reason)
         return
       end
+      if why = view.env_refusal # the same refusal ^R makes (#1666)
+        @host.status("repeater: #{why}")
+        return
+      end
       view.downgrade_h2_request_lines(group: true) # every chunk rides the same h1 connection
       reqs = view.pipeline_requests
       labels = reqs.map(&.[0])
@@ -3406,6 +3410,7 @@ module Gori::Tui
         "repeater: unsupported scheme #{(ex.detail || "").inspect} — use http:// or https://"
       in Repeater::PlanError::Reason::UnresolvedEnv
         ex.mint_refusal.try { |note| "repeater: #{note} — add it in the Project tab's ENV pane" } ||
+        Env.totp_secret_refusal(ex.detail).try { |note| "repeater: #{note}" } ||
         "repeater: unresolved env #{ex.detail} — add it in the Project tab's ENV pane"
       in Repeater::PlanError::Reason::TlsPreset
         # Unreachable from the TUI, where the value is only ever chosen by cycling the

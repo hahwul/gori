@@ -101,6 +101,14 @@ describe "Gori::Repeater::UrlRequest $ENV expansion" do
       expect_raises(Gori::Repeater::PlanError) { Gori::Repeater::UrlRequest.expand("b=$ENV.NOPE") }
       String.new(Gori::Repeater::UrlRequest.raw(t, "GET / HTTP/1.1\r\nX: $ENV.NOPE\r\n\r\n", true).bytes)
         .should contain("X: $ENV.NOPE")
+      # The URL's path and query become the request line, so a token there is refused too —
+      # but not by `target` alone, which a field-native send resolves its origin through.
+      q = Gori::Repeater::UrlRequest.target("http://h.test/p?q=$ENV.NOPE")
+      expect_raises(Gori::Repeater::PlanError, /\$ENV\.NOPE/) do
+        Gori::Repeater::UrlRequest.structured(q, nil, [] of {String, String}, nil)
+      end
+      String.new(Gori::Repeater::UrlRequest.structured(q, nil, [] of {String, String}, nil, expand: false).bytes)
+        .should start_with("GET /p?q=$ENV.NOPE ")
       # A bare `$name` is GraphQL/Mongo text and still goes out as typed.
       String.new(Gori::Repeater::UrlRequest.structured(t, nil, [{"X", "$ne"}], nil).bytes).should contain("X: $ne\r\n")
     end
