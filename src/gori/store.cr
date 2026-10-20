@@ -2580,10 +2580,11 @@ module Gori
       source_ref = rs.read(String?)
       intercept_edited = rs.read(Int64) != 0
       rewritten_by = rs.read(String?).try(&.split(',').compact_map { |h| RuleRef.parse?(h) }.uniq!)
+      error = rs.read(String?)
       FlowRow.new(id, created_at, scheme, method, host, port, target,
         status, total_size(req_size, resp_size), state, resp_size, duration_us, content_type,
         short_circuited, advisory, request_content_type, connect_protocol,
-        source, source_surface, source_ref, intercept_edited, rewritten_by)
+        source, source_surface, source_ref, intercept_edited, rewritten_by, error)
     end
 
     # A row's request + response size. Each column fits Int64 but a foreign or hand-edited row

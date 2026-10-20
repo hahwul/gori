@@ -457,8 +457,9 @@ module Gori::Proxy
       begin
         host, port, scheme, forward_head = resolve_forward(req)
       rescue ex : URI::Error | OverflowError
-        record_error(req, @scheme, req.host? || "", 0, created_at, "malformed absolute-form target: #{ex.message}")
-        write_gateway_error
+        why = "malformed absolute-form target: #{ex.message}"
+        record_error(req, @scheme, req.host? || "", 0, created_at, why)
+        write_gateway_error(why)
         return false
       end
 
@@ -484,8 +485,9 @@ module Gori::Proxy
       # listener — otherwise gori dials itself, accepts that as a new client, and
       # loops forever. Record it as a visible error instead.
       if (sa = @self_addr) && Upstream.loops_to_self?(host, port, @host_overrides, sa, @local_host)
-        record_error(req, scheme, host, port, created_at, "refusing to proxy to self (loop): #{host}:#{port}")
-        write_gateway_error
+        why = "refusing to proxy to self (loop): #{host}:#{port}"
+        record_error(req, scheme, host, port, created_at, why)
+        write_gateway_error(why)
         return false
       end
 
@@ -665,8 +667,9 @@ module Gori::Proxy
       end
       unless upstream && sent
         release_upstream
-        record_error(record_req, scheme, host, port, created_at, upstream_error_message(host, port, upstream))
-        write_gateway_error
+        why = upstream_error_message(host, port, upstream)
+        record_error(record_req, scheme, host, port, created_at, why)
+        write_gateway_error(why)
         return false
       end
       if client_gone
@@ -817,9 +820,9 @@ module Gori::Proxy
       upstream, reused, sent = acquire_and_send(host, port, dial_tls?(scheme), retryable) { |up| write_request(up, sent_head, edited_body) }
       unless upstream && sent
         release_upstream
-        record_error(recorded, scheme, host, port, created_at, upstream_error_message(host, port, upstream),
-          intercept_original: original)
-        write_gateway_error
+        why = upstream_error_message(host, port, upstream)
+        record_error(recorded, scheme, host, port, created_at, why, intercept_original: original)
+        write_gateway_error(why)
         return false
       end
       stored, trunc, size = capped(edited_body)
@@ -1093,8 +1096,9 @@ module Gori::Proxy
       upstream, reused, sent = acquire_and_send(host, port, dial_tls?(scheme), false) { |up| write_request(up, sent_head, fwd_body) }
       unless upstream && sent
         release_upstream
-        record_error(record_req, scheme, host, port, created_at, upstream_error_message(host, port, upstream))
-        write_gateway_error
+        why = upstream_error_message(host, port, upstream)
+        record_error(record_req, scheme, host, port, created_at, why)
+        write_gateway_error(why)
         return false
       end
       stored, trunc, size = capped(fwd_body)
@@ -2574,8 +2578,9 @@ module Gori::Proxy
           pin: dial_pin, origin_scheme: "https", refuse_self: true)
         @last_dial_error = dial_error
         unless upstream
-          record_error(req, "https", host, port, created_at, upstream_error_message(host, port, nil))
-          write_gateway_error
+          why = upstream_error_message(host, port, nil)
+          record_error(req, "https", host, port, created_at, why)
+          write_gateway_error(why)
           return false
         end
         # begin/ensure so the dialed origin fd is freed even if the 200 reply
@@ -2753,8 +2758,9 @@ module Gori::Proxy
       if (sa = @self_addr) && (tls = @tls) && tls.serve_landing? && get_or_head?(req)
         serve_self_page(req, tls, sa)
       else
-        record_error(req, scheme, host, port, created_at, "reserved host, not proxied: #{host}")
-        write_gateway_error
+        why = "reserved host, not proxied: #{host}"
+        record_error(req, scheme, host, port, created_at, why)
+        write_gateway_error(why)
       end
       true
     end
@@ -3698,8 +3704,13 @@ module Gori::Proxy
       Gori::Sse.sse?(resp.headers.get?("Content-Type"))
     end
 
-    private def write_gateway_error : Nil
-      @io.write("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n".to_slice)
+    # `reason` is the error this flow was recorded with — what History already shows the
+    # operator — so an HTTP client sees why instead of an empty 502 (#1680).
+    private def write_gateway_error(reason : String? = nil) : Nil
+      body = reason ? "#{reason}\n" : ""
+      @io.write("HTTP/1.1 502 Bad Gateway\r\n#{reason ? "Content-Type: text/plain\r\n" : ""}" \
+                "Content-Length: #{body.bytesize}\r\n\r\n".to_slice)
+      @io.write(body.to_slice)
       @io.flush
     rescue
     end

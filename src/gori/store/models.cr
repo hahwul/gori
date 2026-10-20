@@ -315,13 +315,16 @@ module Gori
       # The Match&Replace rules that changed this flow's bytes (V49), or nil when none did — or
       # when the flow predates the record, which is "not recorded", not "untouched".
       getter rewritten_by : Array(RuleRef)?
+      # The stored failure of an Error/Aborted flow (`FlowDetail#error`), nil otherwise — in the
+      # list projection so a row feed says why without a `show` per errored flow (#1680).
+      getter error : String?
 
       def initialize(@id, @created_at, @scheme, @method, @host, @port, @target,
                      @status, @size, @state, @response_size = nil, @duration_us = nil,
                      @content_type = nil, @short_circuited = false, @advisory = nil,
                      @request_content_type = nil, @connect_protocol = nil,
                      @source = nil, @source_surface = nil, @source_ref = nil,
-                     @intercept_edited = false, @rewritten_by = nil)
+                     @intercept_edited = false, @rewritten_by = nil, @error = nil)
       end
 
       def rewritten? : Bool

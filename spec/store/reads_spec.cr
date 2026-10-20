@@ -11,6 +11,23 @@ private def seed_count_flow(store : Gori::Store, host : String, status : Int32) 
 end
 
 describe Gori::Store do
+  # #1680: a row feed says why a flow failed without a `show` per errored flow.
+  it "carries an errored flow's stored error on its list row, and nil on any other" do
+    with_store do |store|
+      ok = seed_count_flow(store, "a.test", 200)
+      failed = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "b.test", port: 443,
+        method: "GET", target: "/", http_version: "HTTP/1.1",
+        head: "GET / HTTP/1.1\r\nHost: b.test\r\n\r\n".to_slice, source: Gori::FlowSource::Kind::Proxy))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: failed, status: 0, head: Bytes.empty, state: Gori::Store::FlowState::Error, error: "upstream connect failed: b.test:443"))
+      store.flow_row(failed).not_nil!.error.should eq("upstream connect failed: b.test:443")
+      store.recent_flows(10).find! { |r| r.id == failed }.error.should eq("upstream connect failed: b.test:443")
+      store.get_flow(failed).not_nil!.row.error.should eq("upstream connect failed: b.test:443")
+      store.flow_row(ok).not_nil!.error.should be_nil
+    end
+  end
+
   # #1648: `count_matching` is `search` without the rows, so the number an agent or a script
   # asks for and the pages it would otherwise walk can never disagree.
   describe "#count_matching" do

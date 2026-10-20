@@ -302,6 +302,19 @@ describe "gori run history — CLI::Output rows" do
     cli.should contain("created_at_iso") # …alongside the machine-readable one MCP names
   end
 
+  it "puts an errored flow's error on both row feeds, null on any other (#1680)" do
+    ok = flow_row(target: "/a", host: "h", status: 200, state: Gori::Store::FlowState::Complete)
+    JSON.parse(Gori::CLI::Output.flow_row_json(ok))["error"].raw.should be_nil
+    failed = Gori::Store::FlowRow.new(
+      id: 7_i64, created_at: 1_i64, scheme: "https", method: "GET", host: "h", port: 443,
+      target: "/x", status: nil, size: 79_i64, state: Gori::Store::FlowState::Error,
+      error: "upstream TLS verification failed: h:443")
+    cli = JSON.parse(Gori::CLI::Output.flow_row_json(failed))
+    mcp = JSON.parse(JSON.build { |j| Gori::MCP::Serialize.flow_row(j, failed) })
+    cli["error"].as_s.should eq("upstream TLS verification failed: h:443")
+    mcp["error"].should eq(cli["error"])
+  end
+
   # The half the key-set pin cannot see: the two surfaces spell the same instant the same way.
   it "renders created_at_iso byte-for-byte the same as the MCP serializer" do
     row = Gori::Store::FlowRow.new(

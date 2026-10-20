@@ -1631,6 +1631,33 @@ describe Gori::Proxy::Server do
     sink.responses.first.error.should_not be_nil
   end
 
+  it "names a host override's address and answers the 502 with the recorded error (#1695, #1680)" do
+    closed = TCPServer.new("127.0.0.1", 0)
+    dead = closed.local_address.port
+    closed.close
+    Gori::Settings.hostname_overrides = [{"dead.test", "127.0.0.1:#{dead}"}]
+    begin
+      done = Channel(Nil).new(1)
+      sink = RecordingSink.new(done)
+      proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+      proxy.start
+      client = TCPSocket.new("127.0.0.1", proxy.port)
+      client << "GET http://dead.test/ok HTTP/1.1\r\nHost: dead.test\r\n\r\n"
+      client.flush
+      resp = client.gets_to_end
+      client.close
+      done.receive
+      proxy.stop
+
+      error = sink.responses.first.error.not_nil!
+      error.should eq("upstream connect failed: 127.0.0.1:#{dead} (host override for dead.test)")
+      resp.should start_with("HTTP/1.1 502 Bad Gateway\r\n")
+      resp.should end_with("\r\n\r\n#{error}\n")
+    ensure
+      Gori::Settings.hostname_overrides = [] of {String, String}
+    end
+  end
+
   it "records a truncated upstream CONNECT reply without starting a tunnel (#1211)" do
     upstream = TCPServer.new("127.0.0.1", 0)
     upstream_port = upstream.local_address.port

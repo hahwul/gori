@@ -13,11 +13,17 @@ module Gori
     # rule whose target was edited mid-flow, recorded on both sides).
     RULE_HITS = "(SELECT group_concat(h.scope || '/' || h.rule_id) FROM flow_rule_hits h WHERE h.flow_id = flows.id)"
 
+    # The stored failure of an Error/Aborted flow (#1680), or NULL. A primary-key probe like the
+    # two above and only on those rows: `error` sits after the body BLOBs and outside
+    # `idx_flows_list`, so naming it in the outer SELECT would send every list read to the table.
+    FLOW_ERROR = "CASE WHEN state IN (#{FlowState::Error.value}, #{FlowState::Aborted.value}) " \
+                 "THEN (SELECT e.error FROM flows e WHERE e.id = flows.id) END"
+
     SELECT_ROW = <<-SQL
       SELECT id, created_at, scheme, method, host, port, target, status,
              request_size, response_size, state, duration_us, content_type,
              short_circuited, advisory, request_content_type, connect_protocol,
-             source, source_surface, source_ref, #{INTERCEPT_EDITED}, #{RULE_HITS}
+             source, source_surface, source_ref, #{INTERCEPT_EDITED}, #{RULE_HITS}, #{FLOW_ERROR}
       FROM flows
       SQL
 
@@ -526,7 +532,7 @@ module Gori
         SELECT id, created_at, scheme, method, host, port, target, status,
                request_size, response_size, state, duration_us, content_type,
                short_circuited, advisory, request_content_type, connect_protocol,
-               source, source_surface, source_ref, #{INTERCEPT_EDITED}, #{RULE_HITS},
+               source, source_surface, source_ref, #{INTERCEPT_EDITED}, #{RULE_HITS}, #{FLOW_ERROR},
                http_version, request_head, #{request_body}, response_head, #{response_body},
                h2_conn_id, h2_stream_id, request_body_truncated, response_body_truncated, error,
                sni
