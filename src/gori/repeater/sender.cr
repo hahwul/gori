@@ -218,7 +218,7 @@ module Gori
       private def scope_refusal(wire : Bytes) : String?
         target = Gori::Outbound.request_target(wire)
         verdict = @outbound.check_wire_request(@scheme, @host, target, @port)
-        return "#{SCOPE_REFUSAL_PREFIX} — #{@outbound.remedy(verdict)}" if verdict.blocked?
+        return "#{SCOPE_REFUSAL_PREFIX} — #{@outbound.remedy(verdict, send: true)}" if verdict.blocked?
         refusal_wired(wire)
       end
 

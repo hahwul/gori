@@ -1721,7 +1721,7 @@ gori run project scope disable
 | `delete <rule-id>` (`rm`) | Remove a rule by id |
 | `enable` / `disable` | Toggle whether scope filtering is applied |
 
-The listing prints a second line for the other thing the rules do: `Active-send gate: ON (N rules)` whenever a rule exists, **enabled or not**, because every active send (`send`, `repeater`, `fuzz`, `mine`, `discover`, MCP) refuses a target the rules leave out of scope unless `--allow-unscoped`. `--format json` carries it as `active_send_gate`. With no rules, `gori run` sends are unrestricted and MCP refuses every send.
+The listing prints a second line for the other thing the rules do: `Active-send gate: ON (N rules)` whenever a rule exists, **enabled or not**, because every active send (`send`, `repeater`, `fuzz`, `mine`, `discover`, MCP) refuses a target the rules leave out of scope unless `--allow-unscoped`. An exclude rule still stops `fuzz`, `mine` and `discover` under `--allow-unscoped`, and a scope with only exclude rules leaves every target out of scope (`scope add` warns when it makes one). `--format json` carries it as `active_send_gate`, beside `sandbox`. With no rules, `gori run` sends are unrestricted and MCP refuses every send, unless the [Sandbox](#project-sandbox) is on: it refuses every out-of-scope send, `--allow-unscoped` or not, and the line says so.
 
 #### project sandbox
 

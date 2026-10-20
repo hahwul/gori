@@ -1713,7 +1713,7 @@ gori run project scope disable
 | `delete <rule-id>` (`rm`) | id로 규칙 제거 |
 | `enable` / `disable` | 스코프 필터링 적용 여부 토글 |
 
-목록은 규칙이 하는 또 다른 일을 두 번째 줄로 출력합니다. 규칙이 하나라도 있으면 **활성 여부와 관계없이** `Active-send gate: ON (N rules)`가 찍히는데, 모든 액티브 전송(`send`, `repeater`, `fuzz`, `mine`, `discover`, MCP)이 `--allow-unscoped` 없이는 규칙상 스코프 밖인 대상을 거부하기 때문입니다. `--format json`에서는 `active_send_gate`로 실립니다. 규칙이 없으면 `gori run` 전송은 제한이 없고, MCP는 모든 전송을 거부합니다.
+목록은 규칙이 하는 또 다른 일을 두 번째 줄로 출력합니다. 규칙이 하나라도 있으면 **활성 여부와 관계없이** `Active-send gate: ON (N rules)`가 찍히는데, 모든 액티브 전송(`send`, `repeater`, `fuzz`, `mine`, `discover`, MCP)이 `--allow-unscoped` 없이는 규칙상 스코프 밖인 대상을 거부하기 때문입니다. exclude 규칙은 `--allow-unscoped`에서도 `fuzz`, `mine`, `discover`를 막고, exclude 규칙만 있는 스코프에서는 모든 대상이 스코프 밖입니다(`scope add`가 그런 스코프를 만들면 경고합니다). `--format json`에서는 `active_send_gate`로, `sandbox`와 함께 실립니다. 규칙이 없으면 `gori run` 전송은 제한이 없고 MCP는 모든 전송을 거부합니다. 단, [Sandbox](#project-sandbox)가 켜져 있으면 `--allow-unscoped`와 관계없이 스코프 밖 전송을 모두 거부하며, 이 줄도 그렇게 표시합니다.
 
 #### project sandbox {#project-sandbox}
 

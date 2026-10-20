@@ -5112,3 +5112,12 @@ Refines both 2026-10-19 #1628 entries and P7. Takes the open option above.
   overtakes are routine and their parked trailers would need re-encoding as raw frames.
 - Still open: holds still cost every request with a declared length on a body-rule host, whether
   or not a pattern would match it. Cheaper gates (method, content-type) wait for the rule model.
+
+### 2026-10-21: a refusal names the waiver for an exclude where the waiver lifts it (#1694)
+
+Refines the #1585 entry's "delete the EXCLUDE rule, which no waiver lifts". That holds for a
+sweep (`sweep_block`) and for a hand-authored send under the Sandbox. A hand-authored send with
+the Sandbox off passes an exclude once Layer 1 is waived (`send_block`, as on the proxy), so its
+remedy names the waiver beside the exclude (`Outbound.remedy(waiver_passes_exclude:)`, asked of
+`Outbound#send_passes_exclude?`). The caller says whether it is a send; `check` cannot, because
+one verdict serves both kinds of caller. Gating is unchanged, only what the refusal says.

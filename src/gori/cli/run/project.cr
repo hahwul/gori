@@ -703,6 +703,7 @@ module Gori
               j.object do
                 j.field "enabled", scope.enabled?
                 j.field "active_send_gate", scope.configured?
+                j.field "sandbox", scope.sandbox?
                 j.field "rules" do
                   j.array { scope.rules.each { |r| scope_rule_json(j, r) } }
                 end
@@ -727,14 +728,26 @@ module Gori
       # the rules existing at all (`Scope#configured?`), enabled or not. A listing that said only
       # "DISABLED" read as "nothing is enforced" while `gori run send` refused out-of-scope
       # targets. By design; now said.
+      #
+      # The Sandbox is said too (#1694): it refuses an out-of-scope send whatever the rules or
+      # --allow-unscoped say (`Outbound#send_block`), so "not restricted" beside it was false.
+      # So is the sweeps' exclude, which `--allow-unscoped` does not lift (`sweep_block`), and
+      # an excludes-only scope, which includes nothing and so leaves every target out of scope.
       def self.scope_gate_line(scope : Scope) : String
         n = scope.rules.size
-        if scope.configured?
-          "Active-send gate: ON (#{Gori.plural(n, "rule")}) — send/repeater/fuzz/mine/discover and MCP " \
-          "refuse a target these rules leave out of scope unless --allow-unscoped / allow_unscoped:true"
-        else
-          "Active-send gate: no rules — `gori run` sends are not restricted (MCP refuses every send until a rule exists)"
-        end
+        line =
+          if scope.configured?
+            "Active-send gate: ON (#{Gori.plural(n, "rule")}) — send/repeater/fuzz/mine/discover and MCP " \
+            "refuse a target these rules leave out of scope unless --allow-unscoped / allow_unscoped:true; " \
+            "an exclude rule still stops fuzz/mine/discover"
+          elsif scope.sandbox?
+            "Active-send gate: no rules — but the Sandbox refuses every send until an include rule exists"
+          else
+            "Active-send gate: no rules — `gori run` sends are not restricted (MCP refuses every send until a rule exists)"
+          end
+        line += ". No include rule, so every target is out of scope" if scope.configured? && scope.include_count.zero?
+        line += ". Sandbox ON: an out-of-scope send is refused even under --allow-unscoped" if scope.configured? && scope.sandbox?
+        line
       end
 
       # One scope rule as JSON — the element of `scope list --format json`'s `rules`, and the
@@ -869,7 +882,19 @@ module Gori
           else
             puts added ? "Scope rule ##{added.id} added successfully (#{kind} #{match_type} #{pat})." : "Scope rule added successfully."
           end
+          warn_excludes_only(scope, "gori run project scope add")
         end
+      end
+
+      # An excludes-only scope includes nothing, so the active-send gate judges EVERY target out
+      # of scope (`Scope#matches_url?` is false without an include) — intended, and said nowhere
+      # until the add that makes it (#1694). With the Sandbox on, `warn_scope_blackhole` says
+      # the larger thing: captured traffic is blocked too.
+      private def self.warn_excludes_only(scope : Scope, prefix : String) : Nil
+        return unless scope.include_count == 0
+        return warn_scope_blackhole(scope, prefix) if scope.sandbox?
+        STDERR.puts "#{prefix}: warning — the scope has no include rules, so every target is out of scope " \
+                    "and active sends are refused unless --allow-unscoped (add an include rule to scope them)"
       end
 
       # A scope WRITE that leaves Sandbox holding an empty allowlist turns the proxy into a
