@@ -36,6 +36,7 @@
 - `gori run` sends, MCP `send_request`, the Fuzzer, the Miner and every other sweep (Discover, Authorize, Retest, active Probe) stop reading an SSE response after a number of events or seconds (100 / 10 s for a send, 50 / 5 s per sweep payload) instead of waiting out the idle timeout, and return the events so far as a success marked `bounded`; `--sse-events` / `--sse-time` or MCP `sse_max_events` / `sse_max_ms` change the limits. The TUI Repeater shows an SSE response live, per event under PRETTY, until **Stop send** ends it and keeps the events received (#1631)
 - Sequencer: a byte range with a negative start or an end at or below 0 is refused before sending, like a reversed one, on the TUI, `gori run sequence --position` and MCP `position`, instead of spending the budget and rating the origin CRITICAL (#1692)
 - Fuzzer: `gori run fuzz` and MCP `fuzz_start` say when a pitchfork or cluster-bomb run has fewer payload sets than positions and the extra positions reuse set 1, as the TUI already did (#1704)
+- CLI: `gori run shell` warns, as `gori ca` does, when the root CA lacks the subjectKeyIdentifier or keyUsage extension that Python 3.13+ requires, and names `gori ca regenerate` (#1706)
 
 ## v0.8.1
 
