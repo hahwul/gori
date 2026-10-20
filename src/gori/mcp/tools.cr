@@ -2646,6 +2646,9 @@ module Gori
       # on a namespaced install, `$SESSION, $TOKEN` on a bare one (`Env.token_list` decides), so
       # the names an agent reads here are already in the spelling it has to write back.
       private def env_unresolved_error(detail : String?) : String
+        if note = Gori::Env.totp_secret_refusal(detail)
+          return note
+        end
         refs = (detail || "").split(',').compact_map { |t| Gori::Env.parse_ref?(t) }
         if !refs.empty? && refs.all?(&.ns.gen?)
           # See the CLI's copy: a REGISTERED generator here is refused by POSITION, so pointing

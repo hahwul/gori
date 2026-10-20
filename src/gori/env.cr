@@ -382,6 +382,16 @@ module Gori
       names.empty? ? nil : token_list(names)
     end
 
+    # The sentence for a refused `$ENV.TOTP_SECRET` in `detail` (as `mint_refusal` reads it), or
+    # nil. That var is never a token (#1591), so "set it" is the wrong remedy: it may well be set,
+    # and `project env set` has just said only `$GEN.TOTP` reads it (#1707).
+    def self.totp_secret_refusal(detail : String?) : String?
+      refs = (detail || "").split(',').compact_map { |t| parse_ref?(t) }
+      return nil unless refs.any? { |r| r.ns.env? && r.name == TOTP_SECRET_VAR }
+      "#{spell(TOTP_SECRET_VAR, Namespace::Env)} never expands — #{TOTP_SECRET_VAR} is read only by " \
+      "#{spell("TOTP", Namespace::Gen)}; use that token, or remove this one"
+    end
+
     # Why a token in `detail` (a refused build's comma-joined token list) cannot mint, as a
     # sentence, or nil when none is a generator that cannot.
     def self.mint_refusal(detail : String?) : String?

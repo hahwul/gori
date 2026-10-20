@@ -1549,6 +1549,9 @@ module Gori
       # on the FACT, not after the remedy — "...or remove the token for session #3" reads as
       # if the token were the session's.
       private def self.env_unresolved_error(detail : String?, where : String = "") : String
+        if note = Env.totp_secret_refusal(detail)
+          return "#{note}#{where}"
+        end
         refs = (detail || "").split(',').compact_map { |t| Gori::Env.parse_ref?(t) }
         if !refs.empty? && refs.all?(&.ns.gen?)
           # A REGISTERED generator refused here is not a typo and the catalog is no remedy —

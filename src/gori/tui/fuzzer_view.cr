@@ -1928,7 +1928,7 @@ module Gori::Tui
       in Fuzz::PlanError::Reason::NoPayloads
         "add a payload set — ^O config · + Add set (^L for a List)"
       in Fuzz::PlanError::Reason::UnresolvedEnv
-        "unresolved env #{ex.detail} — add it in the Project tab's ENV pane"
+        Env.totp_secret_refusal(ex.detail) || "unresolved env #{ex.detail} — add it in the Project tab's ENV pane"
       in Fuzz::PlanError::Reason::BadRaceCount
         if needed = ex.detail
           "race needs #{needed} requests, over Max requests — raise it or lower Race (^O config)"

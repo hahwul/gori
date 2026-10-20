@@ -537,7 +537,7 @@ module Gori::Tui
       in Sequencer::PlanError::Reason::BadPosition
         "set a byte range as A:B (A 0 or more, B greater than A)"
       in Sequencer::PlanError::Reason::UnresolvedEnv
-        "unresolved env #{ex.detail} — add it in the Project tab's ENV pane"
+        Env.totp_secret_refusal(ex.detail) || "unresolved env #{ex.detail} — add it in the Project tab's ENV pane"
       end
     end
 
