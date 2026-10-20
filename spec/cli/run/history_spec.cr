@@ -1700,3 +1700,45 @@ describe "gori run history — `ls` and the reserved verbs" do
     words.should eq(%w[host:a.test])
   end
 end
+
+# #1671: a body-reading `--column` on the text/json listing read the captured body while `show`
+# and MCP `list_history` read the profile's sanitized copy, so `default on` leaked exactly the
+# fields the profile names — and `--redact` was refused outright.
+describe "gori run history — body columns under a redaction profile" do
+  it "reads a body column through the configured profile, and refuses --redact only without one" do
+    with_store do |store|
+      before = Gori::Redact.salt
+      Gori::Redact.salt = "spec-salt"
+      begin
+        Gori::Redact::Policy.write_project_scope(store, Gori::Redact::Policy::ProjectScope.new(default: true))
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "r.test", port: 80, method: "POST", target: "/login",
+          http_version: "HTTP/1.1", head: "POST /login HTTP/1.1\r\nContent-Type: application/json\r\n\r\n".to_slice,
+          body: %({"password":"hunter2"}).to_slice, source: Gori::FlowSource::Kind::Proxy))
+        cols = ->(specs : Array(String)) do
+          parsed = Gori::DisplayColumns.parse_specs(specs).as(Array(Gori::DisplayColumns::Spec))
+          Gori::DisplayColumns.prepare(parsed.map_with_index { |sp, i| sp.to_column(i) })
+        end
+        flags = ->(mode : Bool?) { Gori::CLI::Run::RedactFlags.new.tap(&.mode = mode) }
+
+        body = cols.call(["PW=req:jsonpath:password"])
+        m = Gori::CLI::Run.history_columns_redaction(store, body, flags.call(nil)).as(Gori::Redact::Matcher)
+        body.row_values(store, id, m).first.should_not contain("hunter2")
+        Gori::CLI::Run.history_columns_redaction(store, body, flags.call(true)).should be_a(Gori::Redact::Matcher)
+        Gori::CLI::Run.history_columns_redaction(store, body, flags.call(false)).should be_nil
+
+        head = cols.call(["req:header:content-type"])
+        Gori::CLI::Run.history_columns_redaction(store, head, flags.call(nil)).should be_nil
+        Gori::CLI::Run.history_columns_redaction(store, head, flags.call(true)).as(String).should contain("--format har")
+
+        # A stale active profile under default-on: the plain listing fails closed onto the
+        # built-in rather than aborting, and only an explicit flag is refused over it.
+        Gori::Redact::Policy.write_project_scope(store, Gori::Redact::Policy::ProjectScope.new(active: "gone", default: true))
+        Gori::CLI::Run.history_columns_redaction(store, body, flags.call(nil)).as(Gori::Redact::Matcher).profile.name.should eq("default")
+        Gori::CLI::Run.history_columns_redaction(store, body, flags.call(true)).as(String).should contain("no redaction profile named")
+      ensure
+        Gori::Redact.salt = before
+      end
+    end
+  end
+end

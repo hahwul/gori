@@ -291,7 +291,7 @@ gori run history -q 'status:5xx' --limit 100 --format json
 | `--no-columns` | Don't draw this project's configured History columns |
 | `--format=FMT` | `text`, `json` (one array), `jsonl` (one object per line), or `har` |
 | `--include-sensitive` | Emit `Authorization` / `Cookie` / `Set-Cookie` / `Proxy-Authorization` / API-key values instead of `[REDACTED]`, in `json`'s per-row `headers` and in a `header:`/`cookie:` column. Inert in the other formats, which say so on STDERR |
-| `--redact [PROFILE]` | Sanitize request/response **bodies** before writing them, using a [redaction profile](#run-redact). `--format har` only (the one listing format that carries a body); refused on the others rather than ignored |
+| `--redact [PROFILE]` | Sanitize request/response **bodies** before writing them, using a [redaction profile](#run-redact). `--format har` carries a body; on the other formats only a `regex:`, `jsonpath:` or `position:` column reads one, so it applies there when such a column is shown and is refused rather than ignored otherwise. Those columns read through the project's default profile too, as `show` does; `--no-redact` reads the captured body |
 | `--no-redact` | Write the captured bodies even where redaction is the configured default |
 | `--redact-preview` | List what `--redact` would replace, one row per value, and write no HAR |
 

@@ -420,10 +420,11 @@ module Gori
         # Refused rather than ignored. A profile redacts BODIES, and `--format har` is the only
         # listing format that carries one — so `--redact` on the text/json listing would hand
         # back a document that is identical to the unredacted one while saying it was sanitized,
-        # which is the single most dangerous thing this feature could do.
-        if !redaction.mode.nil? && format != :har
-          abort "gori run history: --redact/--no-redact apply to bodies, which only --format har " \
-                "carries — pass --format har, or use `gori run show <id> --redact` for one flow"
+        # which is the single most dangerous thing this feature could do. The one exception, a
+        # `--column` that reads the body, is decided once the column set is known, below.
+        if redaction.preview? && format != :har
+          abort "gori run history: --redact-preview lists what a body redaction replaces, which only " \
+                "--format har carries — pass --format har, or use `gori run show <id> --redact-preview` for one flow"
         end
 
         # `body:` drains FTS, which is a write. Everything else is a read (#752).
@@ -572,6 +573,12 @@ module Gori
               DisplayColumns.load(store)
             end
           prepared = DisplayColumns.prepare(columns)
+          matcher = nil.as(Redact::Matcher?)
+          if format != :har
+            m = history_columns_redaction(store, prepared, redaction)
+            abort_closing(store, m) if m.is_a?(String)
+            matcher = m
+          end
           if format == :har
             # Said out loud rather than dropped: a HAR log has no per-row field to carry an
             # extracted value, and a `--column` that silently did nothing is the shape of silent
@@ -608,7 +615,7 @@ module Gori
             print '[' if array
             begin
               rows.each_with_index do |r, i|
-                cols, cols_redacted = row_columns(store, r, prepared, include_sensitive) || {nil, false}
+                cols, cols_redacted = row_columns(store, r, prepared, include_sensitive, matcher) || {nil, false}
                 line = CLI::Output.flow_row_json(r, store.request_head(r.id), cols,
                   include_sensitive: include_sensitive, columns_redacted: cols_redacted)
                 print ',' if array && i > 0
@@ -630,9 +637,34 @@ module Gori
             # (it is the interactive read, not the feed a script or an agent captures) and the
             # note above promises the flag changes `--format json` alone. Stated at the call
             # site rather than defaulted, so the choice is visible where it is made.
-            rows.each { |r| puts CLI::Output.flow_row_text(r, row_columns(store, r, prepared, include_sensitive: true).try(&.[0])) }
+            rows.each { |r| puts CLI::Output.flow_row_text(r, row_columns(store, r, prepared, include_sensitive: true, matcher: matcher).try(&.[0])) }
           end
         end
+      end
+
+      # The profile a text/json listing's columns read bodies through, or the refusal to print
+      # (#1671). The listing's one way to a body is a column that reads it (`body_scoped?`), so
+      # such a column reads the sanitized derivative `show` prints under the same profile — the
+      # configured default, or `--redact`/`--no-redact` — as MCP `list_history` does. Without
+      # one, `--redact` is refused for the reason `cmd_history_list` gives, and no profile is
+      # resolved, so a broken one cannot fail a listing it would not touch. With no flag the
+      # configured default is `Policy.ambient`, MCP's own call: it fails closed onto the built-in
+      # profile when the active one is gone, where `redact_choice` would refuse — and a plain
+      # `gori run history` over a configured body column must not abort on a stale setting. An
+      # explicit flag keeps `redact_choice`, so `--redact=typo` is still refused. Split out
+      # because `abort` is not spec-able.
+      def self.history_columns_redaction(store : Store, prepared : DisplayColumns::Prepared,
+                                         redaction : RedactFlags) : Redact::Matcher | String?
+        unless prepared.body_scoped?
+          return if redaction.mode.nil?
+          return "gori run history: --redact/--no-redact apply to bodies, which only --format har " \
+                 "or a --column reading the body carries — pass --format har, or use " \
+                 "`gori run show <id> --redact` for one flow"
+        end
+        return Redact::Policy.ambient(store) if redaction.mode.nil?
+        choice = redact_choice(store, redaction)
+        choice.error.try { |e| return "gori run history: #{e}" }
+        choice.matcher
       end
 
       # Why `--count` cannot run beside these flags, or nil (#1648). Split out of
@@ -687,9 +719,10 @@ module Gori
       # `{label, value}` and cannot tell a header column from a jsonpath one.
       private def self.row_columns(store : Store, row : Store::FlowRow,
                                    prepared : DisplayColumns::Prepared,
-                                   include_sensitive : Bool) : {Array({String, String}), Bool}?
+                                   include_sensitive : Bool,
+                                   matcher : Redact::Matcher?) : {Array({String, String}), Bool}?
         return nil if prepared.empty?
-        values = prepared.row_values(store, row.id)
+        values = prepared.row_values(store, row.id, matcher)
         redacted = false
         pairs = prepared.columns.map_with_index do |c, i|
           v = values[i]? || ""
