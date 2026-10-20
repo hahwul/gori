@@ -318,7 +318,7 @@ module Gori
       end
 
       # Install a preset's rules as ordinary Match & Replace rules, through the SAME
-      # `Gori::Rules#create` path `create_rule` uses (P1) — an installed rule is
+      # `Gori::Rules#create` path `create_rule` uses (P1, via `Rules#add_preset`) — an installed rule is
       # indistinguishable from a hand-authored one and is editable/disable-able/deletable (P4).
       # Returns the ids created; a partial write (some rows committed, one refused) reports
       # what landed rather than pretending it was all-or-nothing.
@@ -332,27 +332,11 @@ module Gori
         return scope if scope.is_a?(Result)
         enabled = bool_arg(h, "enabled", true)
 
-        model = rules_model
-        ids = [] of Int64
-        preset.rules.each do |spec|
-          id = model.create(spec.target, spec.part, spec.pattern, spec.replacement,
-            spec.op, spec.match_kind, spec.name, host: "", body_file: "",
-            scope: scope, enabled: enabled)
-          ids << id unless id == 0
-        end
+        ids = rules_model.add_preset(preset, scope: scope, enabled: enabled)
         if ids.empty?
           return busy(scope.global? ? "failed to persist preset rules (settings not writable)" : "failed to persist preset rules (store busy or unwritable)")
         end
-        Result.new(JSON.build do |j|
-          j.object do
-            j.field "preset", preset.key
-            j.field "name", preset.name
-            j.field "scope", scope.label
-            j.field "enabled", enabled
-            j.field "created", ids.size
-            j.field "ids" { j.array { ids.each { |id| j.number id } } }
-          end
-        end)
+        Result.new(Serialize.preset_install(preset, scope, enabled, ids))
       rescue ex : Gori::Error
         err(ex.message || "invalid preset arguments", "INVALID_ARGUMENT")
       end

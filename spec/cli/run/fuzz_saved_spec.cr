@@ -7,6 +7,10 @@ module Gori::CLI::Run
     end
   end
 
+  def self.fuzz_save_trailer_for_spec(persist : Fuzz::Persistence, status : String) : String
+    fuzz_save_trailer(persist, status)
+  end
+
   def self.fuzz_saved_mode_for_spec(mode : Fuzz::Mode, requested : Int32?, effective : Int32?) : String
     fuzz_saved_mode(mode, requested, effective)
   end
@@ -100,6 +104,23 @@ describe "gori run fuzz saved runs" do
     p = Gori::Fuzz::Progress.new(2_i64, 5_i64, 0_i64, 0_i64, requests: 3_i64)
     Gori::Fuzz.terminal_status(p, true, 3_i64).should eq("stopped")
     Gori::Fuzz.terminal_status(p, false, 3_i64, true).should eq("error")
+  end
+
+  # #1682: the run id went to stderr only, so a script had to scrape it.
+  it "answers fuzz save with the run id, as a jsonl trailer or around the --json array" do
+    with_store do |store|
+      persist = Gori::Fuzz::Persistence.new(store,
+        Gori::Fuzz::SavedRunMeta.new(nil, "http://h.test", "sniper", 1_i64, surface: "cli"))
+      persist.finish(1_i64, 0_i64, 0_i64, "done").should be_true
+      trailer = Gori::CLI::Run.fuzz_save_trailer_for_spec(persist, "done")
+      JSON.parse(trailer).should eq(JSON.parse(%({"run_id":#{persist.run_id},"save_status":"done","saved_results":0})))
+
+      io = IO::Memory.new
+      Gori::CLI::Output::FuzzArrayStream.new(io, prefix: %({"results":)).close(",#{trailer.lchop('{')}")
+      doc = JSON.parse(io.to_s)
+      doc["results"].as_a.should be_empty
+      doc["run_id"].as_i64.should eq(persist.run_id)
+    end
   end
 
   it "streams a valid empty or partial JSON array even when the producer raises" do

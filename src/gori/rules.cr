@@ -240,23 +240,25 @@ module Gori
       ok ? new_id : 0_i64
     end
 
-    # Install every rule of a preset (#821) through the SAME `add` path manual authoring uses
+    # Install every rule of a preset (#821) through the SAME `create` path manual authoring uses
     # (P1) — no private write path, so an installed rule is an ordinary rule the moment it
-    # lands: visible in the list, editable, disable-able, deletable (P4). Returns how many of
-    # the preset's rules committed; the caller reports it, so a preset added a second time
+    # lands: visible in the list, editable, disable-able, deletable (P4). Returns the ids of
+    # the preset's rules that committed (#1682: a headless surface echoes them); the caller
+    # reports them, so a preset added a second time
     # duplicates VISIBLY (each row carries the preset's name) rather than silently. `scope`
     # picks the store exactly as `add` does, and `enabled` lets a surface install a preset
     # switched off for the operator to review before it touches traffic.
     def add_preset(preset : RulePresets::Preset,
                    scope : Store::RuleScope = Store::RuleScope::Project,
-                   enabled : Bool = true) : Int32
-      committed = 0
+                   enabled : Bool = true) : Array(Int64)
+      ids = [] of Int64
       preset.rules.each do |spec|
-        committed += 1 if add(spec.target, spec.part, spec.pattern, spec.replacement,
-                            spec.op, spec.match_kind, spec.name, host: "", body_file: "",
-                            scope: scope, enabled: enabled)
+        id = create(spec.target, spec.part, spec.pattern, spec.replacement,
+          spec.op, spec.match_kind, spec.name, host: "", body_file: "",
+          scope: scope, enabled: enabled)
+        ids << id unless id == 0
       end
-      committed
+      ids
     end
 
     def update(id : Int64, target : Store::RuleTarget, part : Store::RulePart, pattern : String, replacement : String,

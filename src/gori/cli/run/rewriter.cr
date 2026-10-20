@@ -91,6 +91,7 @@ module Gori
         proj = ProjectFlags.new
         disabled = false
         scope = Store::RuleScope::Project
+        format = :text
 
         leftover = one_positional_list(args, "gori run rewriter preset add", "<preset-name>") do |p|
           p.banner = "Usage: gori run rewriter preset add <name> [options]\n\n" \
@@ -99,6 +100,7 @@ module Gori
           project_options(p, proj, "update")
           p.on("--scope=SCOPE", "project (default) | global — a global rule applies in EVERY project") { |v| scope = parse_rule_scope(v) }
           p.on("--disabled", "Install the rules disabled, to review before they touch traffic") { disabled = true }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
 
         name = leftover.first?
@@ -111,11 +113,16 @@ module Gori
         # is built over a store. See `cmd_rewriter_add` for the whole argument.
         project = resolve_read_project(proj.name, proj.db)
         with_store(project) do |store|
-          committed = Gori::Rules.load(store).add_preset(preset, scope: scope, enabled: !disabled)
-          if committed == 0
+          ids = Gori::Rules.load(store).add_preset(preset, scope: scope, enabled: !disabled)
+          if ids.empty?
             abort "gori run rewriter preset add: failed to persist rules " \
                   "(#{scope.global? ? "settings not writable" : "store busy or unwritable"})"
           end
+          if format == :json
+            puts MCP::Serialize.preset_install(preset, scope, !disabled, ids)
+            next
+          end
+          committed = ids.size
           suffix = committed == 1 ? "" : "s"
           state = disabled ? " (disabled)" : ""
           if scope.global?

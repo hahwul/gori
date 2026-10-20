@@ -1293,6 +1293,22 @@ module Gori
 
       # --- rewriter and colour rules --------------------------------------------
 
+      # What installing a preset answers, as MCP `create_rule_from_preset` and
+      # `gori run rewriter preset add --format json` both print it (#1682).
+      def self.preset_install(preset : RulePresets::Preset, scope : Store::RuleScope, enabled : Bool,
+                              ids : Array(Int64)) : String
+        JSON.build do |j|
+          j.object do
+            j.field "preset", preset.key
+            j.field "name", preset.name
+            j.field "scope", scope.label
+            j.field "enabled", enabled
+            j.field "created", ids.size
+            j.field "ids" { j.array { ids.each { |id| j.number id } } }
+          end
+        end
+      end
+
       # One Match & Replace rule, as MCP `list_rules` and `gori run rewriter --format json` both
       # print it. `enabled` is the EFFECTIVE state in this project; `default_enabled` and
       # `overridden` only appear for a global rule, where the library's own default may differ

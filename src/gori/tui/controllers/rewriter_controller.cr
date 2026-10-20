@@ -881,7 +881,7 @@ module Gori::Tui
     # preset installed a second time duplicates visibly (each row carries the preset's name)
     # rather than silently — the rules are deletable like any other.
     def install_preset(preset : RulePresets::Preset) : Nil
-      n = rules_engine.add_preset(preset, scope: Store::RuleScope::Project, enabled: true)
+      n = rules_engine.add_preset(preset, scope: Store::RuleScope::Project, enabled: true).size
       if n == 0
         return @host.status("preset NOT installed (project busy or unwritable)")
       end
