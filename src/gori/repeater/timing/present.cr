@@ -29,6 +29,7 @@ module Gori::Repeater::Timing
         subject.mode.try { |m| j.field "mode", m }
         j.field "iterations", rep.iterations
         j.field "pairs_valid", rep.pairs_valid
+        j.field "error", rep.error
         j.field "median_gap_us", rep.median_gap_us
         j.field "order" do
           j.object do

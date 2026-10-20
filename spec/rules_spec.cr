@@ -100,6 +100,32 @@ describe Gori::Rules do
     end
   end
 
+  # #1676: the proxy strips the port before `host_matches?`, so a glob copied with its port,
+  # scheme or path never matched — and a short_circuit block scoped by it failed open.
+  describe ".host_error" do
+    it "refuses a port, a scheme or a path, and keeps every glob that can match" do
+      ["127.0.0.1:8080", "*.acme.test:443", "[::1]:8080", "http://acme.test", "acme.test/api"].each do |bad|
+        Gori::Rules.host_error(bad).should_not be_nil
+      end
+      ["", "*", "acme.test", "*.acme.test", ".acme.test", "127.0.0.1", "::1", "[::1]", "2001:db8::*"].each do |ok|
+        Gori::Rules.host_error(ok).should be_nil
+      end
+    end
+
+    it "is enforced by create and update, the one write path" do
+      with_store do |store|
+        rules = Gori::Rules.load(store)
+        req, head = Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head
+        rules.create(req, head, "GET", "x", host: "127.0.0.1:8080").should eq(0)
+        rules.rules.should be_empty
+        id = rules.create(req, head, "GET", "x", host: "127.0.0.1")
+        id.should_not eq(0)
+        rules.update(id, req, head, "GET", "x", host: "http://127.0.0.1").should be_false
+        rules.rules.first.host.should eq("127.0.0.1")
+      end
+    end
+  end
+
   it "is inactive (and byte-identical) until an enabled rule exists" do
     with_store do |store|
       rules = Gori::Rules.load(store)
@@ -636,10 +662,15 @@ describe Gori::Rules do
           Gori::Store::RulePart::Body, "role", %("admin"), Gori::Store::RuleOp::JsonSet)
         pv = rules.preview(json)
         {pv.scanned, pv.matched}.should eq({2, 1}) # the cut body is left out, not a miss
+        # #1699: a skip is not the 500-row cap — every stored flow was read.
+        {pv.skipped, pv.capped}.should eq({1, false})
         literal = Gori::Store::MatchRule.new(0_i64, true, Gori::Store::RuleTarget::Response,
           Gori::Store::RulePart::Body, "usr", "admin")
         pv = rules.preview(literal)
         {pv.scanned, pv.matched}.should eq({3, 2}) # not the gzip one
+        {pv.skipped, pv.capped}.should eq({0, false})
+        rules.preview(literal, 2).capped.should be_true # older flows exist it never read
+        rules.preview(literal, 3).capped.should be_false
       end
     end
   end

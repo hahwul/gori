@@ -148,6 +148,9 @@ module Gori
         property operations = 0
         property paths = 0
         property hosts = [] of String
+        # The distinct origins (scheme + host + port, #1371) the document's root `servers` lists:
+        # two of one host are two servers, so this and not `hosts` says the paths may differ.
+        property origins = [] of String
         property flows_read = 0
         # `max_flows` stopped the walk with older matching flows left unread.
         property? flows_truncated = false
@@ -789,9 +792,9 @@ module Gori
           hosts.concat(op.hosts)
         end
         report.hosts = hosts.to_a.sort!
+        report.origins = origins.to_a.sort!
         report.paths = paths.size
         report.operations = b.ops.size
-        multi_host = hosts.size > 1
         ids = Set(String).new
 
         doc = {} of String => JSON::Any
@@ -805,9 +808,12 @@ module Gori
         doc["paths"] = JSON::Any.new(paths.to_h do |path|
           ops = by_path[path].sort_by! { |op| METHODS.index(op.method) || METHODS.size }
           item = {} of String => JSON::Any
-          if multi_host
-            item["servers"] = servers(ops.each_with_object(Set(String).new) { |op, s| s.concat(op.origins) })
-          end
+          # A path names its own servers whenever they are not the root's (#1675). Keyed on the
+          # ORIGIN set, not on how many hostnames there are: `http://h:1/a` beside `https://h:2/b`
+          # is one host and two servers, and gating on hostnames claimed both paths for both —
+          # so `import --oas` put each operation back on the wrong scheme and port.
+          path_origins = ops.each_with_object(Set(String).new) { |op, s| s.concat(op.origins) }
+          item["servers"] = servers(path_origins) unless path_origins == origins
           ops.each { |op| item[op.method] = operation(op, operation_id(op, ids)) }
           {path, JSON::Any.new(item)}
         end)

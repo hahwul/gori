@@ -21,6 +21,14 @@ module Gori::CLI::Run
   def self.scope_rule_json_for_spec(rule : Gori::Scope::Rule) : JSON::Any
     JSON.parse(JSON.build { |j| scope_rule_json(j, rule) })
   end
+
+  def self.cmd_project_rename_for_spec(args : Array(String)) : Nil
+    cmd_project_rename(args)
+  end
+
+  def self.cmd_project_describe_for_spec(args : Array(String)) : Nil
+    cmd_project_describe(args)
+  end
 end
 
 private def with_project_root(&)
@@ -244,8 +252,41 @@ end
 describe "gori run project import — the name clash hint" do
   it "names --name when it was not passed, and only for the clash" do
     msg = %(project "demo" already exists — choose another name)
-    Gori::CLI::Run.import_error_message(msg, nil).should end_with("(pass --name NEW to import it under another)")
+    Gori::CLI::Run.import_error_message(msg, nil).should end_with("(pass --name NEW to import it under another; `gori run project rename` changes either name later)")
     Gori::CLI::Run.import_error_message(msg, "demo").should eq(msg)
     Gori::CLI::Run.import_error_message("archive is corrupt", nil).should eq("archive is corrupt")
+  end
+end
+
+# #1703: renaming a project, or clearing its description, had no headless form — `create` on a
+# reopen keeps the name and skips an empty description.
+describe "gori run project rename / describe" do
+  it "renames the display name and keeps the slug and short id" do
+    registry = Gori::ProjectRegistry.new(Gori::Paths.projects_dir)
+    project = registry.create("rename-1703")
+    begin
+      Gori::CLI::Run.cmd_project_rename_for_spec([registry.id_of(project).not_nil!, "Renamed 1703"])
+      renamed = registry.find("Renamed 1703").not_nil!
+      renamed.dir.should eq(project.dir)
+      registry.id_of(renamed).should eq(registry.id_of(project))
+      registry.find("rename-1703").try(&.dir).should eq(project.dir) # the slug still answers
+    ensure
+      registry.delete(project)
+    end
+  end
+
+  it "sets and clears the description, which create cannot clear" do
+    registry = Gori::ProjectRegistry.new(Gori::Paths.projects_dir)
+    project = registry.create("describe-1703", "d1")
+    begin
+      registry.create("describe-1703", "") # a reopen: the description is left as it was
+      with_project_store(project, &.setting(Gori::Project::DESCRIPTION_KEY).should(eq("d1")))
+      Gori::CLI::Run.cmd_project_describe_for_spec(["describe-1703", "  staging sweep  "])
+      with_project_store(project, &.setting(Gori::Project::DESCRIPTION_KEY).should(eq("staging sweep")))
+      Gori::CLI::Run.cmd_project_describe_for_spec(["describe-1703", "--clear"])
+      with_project_store(project, &.setting(Gori::Project::DESCRIPTION_KEY).should(be_nil))
+    ensure
+      registry.delete(project)
+    end
   end
 end

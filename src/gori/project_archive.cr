@@ -29,7 +29,8 @@ module Gori
     # Per-project answers to the exporter's GLOBAL rule libraries, keyed by that machine's ids.
     GLOBAL_OVERRIDE_KEYS = {Store::REWRITER_OVERRIDES_KEY, Store::COLORMARKER_OVERRIDES_KEY}
     # How the CLI and the picker name another project when the archive's own name is unusable.
-    DEFAULT_RENAME_HINT = "with `--name NAME` or choose one in the project picker"
+    DEFAULT_RENAME_HINT = "with `--name NAME` or choose one in the project picker " \
+                          "(`gori run project rename` changes it later)"
 
     # An export refused because its destination already exists. Typed, so each surface names
     # its own override (`--force`, the picker's confirm, an MCP argument) instead of this one

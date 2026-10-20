@@ -121,4 +121,38 @@ describe Gori::Repeater::MessageLines do
     lines.should contain("X-B: \0")
     lines.none?(&.includes?("binary body")).should be_true
   end
+
+  # #1674: the CRs ending a line are dropped from the lines, so CRLF vs LF and a CR moved to the
+  # next line split alike; the line-ending note is what tells them apart.
+  it "tells two messages apart that differ only in their line endings" do
+    changed = ->(a : Array(String), b : Array(String)) { Gori::Repeater::Diff.change_count(Gori::Repeater::Diff.lines(a, b)) }
+    head = "POST /same HTTP/1.1\r\nHost: x\r\n\r\n".to_slice
+    a = MessageLines.of(head, "a\r\n\nb".to_slice, decode: false)
+    b = MessageLines.of(head, "a\n\r\nb".to_slice, decode: false)
+    changed.call(a, b).should be > 0
+    crlf = MessageLines.of("GET /eol HTTP/1.1\r\nHost: x\r\n\r\n".to_slice, nil, decode: false)
+    lf = MessageLines.of("GET /eol HTTP/1.1\nHost: x\n\n".to_slice, nil, decode: false)
+    changed.call(crlf, lf).should be > 0
+    changed.call(MessageLines.of(head, "x\r\n".to_slice, decode: false),
+      MessageLines.of(head, "x\r\r\n".to_slice, decode: false)).should be > 0
+  end
+
+  # The mixed-endings digest is of the CR/LF bytes alone, so a content edit between two
+  # mixed-ending messages is that one line's change, not that plus the note's.
+  it "counts only the content line when two mixed-ending bodies differ in a token" do
+    head = "HTTP/1.1 200 OK\r\n\r\n".to_slice
+    a = MessageLines.of(head, "tok=A\r\nx\ny".to_slice, decode: false)
+    b = MessageLines.of(head, "tok=B\r\nx\ny".to_slice, decode: false)
+    a.last.should contain("mixed line endings")
+    Gori::Repeater::Diff.change_count(Gori::Repeater::Diff.lines(a, b)).should eq(2)
+  end
+
+  it "says nothing about a section's ordinary or uniform line endings beyond their convention" do
+    MessageLines.of("GET / HTTP/1.1\r\nHost: x\r\n\r\n".to_slice, "a\nb".to_slice, decode: false)
+      .should eq(["GET / HTTP/1.1", "Host: x", "", "a", "b"])
+    a = MessageLines.of("POST / HTTP/1.1\r\nHost: x\r\n\r\n".to_slice, "--b\r\nk: 1\r\n".to_slice, decode: false)
+    b = MessageLines.of("POST / HTTP/1.1\r\nHost: y\r\n\r\n".to_slice, "--b\r\nk: 2\r\n".to_slice, decode: false)
+    a.last.should eq("— body line endings are CRLF —")
+    Gori::Repeater::Diff.change_count(Gori::Repeater::Diff.lines(a, b)).should eq(4)
+  end
 end

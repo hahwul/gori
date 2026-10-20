@@ -91,6 +91,7 @@ module Gori
         proj = ProjectFlags.new
         disabled = false
         scope = Store::RuleScope::Project
+        format = :text
 
         leftover = one_positional_list(args, "gori run rewriter preset add", "<preset-name>") do |p|
           p.banner = "Usage: gori run rewriter preset add <name> [options]\n\n" \
@@ -99,6 +100,7 @@ module Gori
           project_options(p, proj, "update")
           p.on("--scope=SCOPE", "project (default) | global — a global rule applies in EVERY project") { |v| scope = parse_rule_scope(v) }
           p.on("--disabled", "Install the rules disabled, to review before they touch traffic") { disabled = true }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
 
         name = leftover.first?
@@ -111,11 +113,16 @@ module Gori
         # is built over a store. See `cmd_rewriter_add` for the whole argument.
         project = resolve_read_project(proj.name, proj.db)
         with_store(project) do |store|
-          committed = Gori::Rules.load(store).add_preset(preset, scope: scope, enabled: !disabled)
-          if committed == 0
+          ids = Gori::Rules.load(store).add_preset(preset, scope: scope, enabled: !disabled)
+          if ids.empty?
             abort "gori run rewriter preset add: failed to persist rules " \
                   "(#{scope.global? ? "settings not writable" : "store busy or unwritable"})"
           end
+          if format == :json
+            puts MCP::Serialize.preset_install(preset, scope, !disabled, ids)
+            next
+          end
+          committed = ids.size
           suffix = committed == 1 ? "" : "s"
           state = disabled ? " (disabled)" : ""
           if scope.global?
@@ -154,11 +161,12 @@ module Gori
       end
 
       # `#3 [x] $SESSION <- status:200 AND path:/login <- cookie "sid" @acme.test`
+      # Filter, selector and host are rule text an agent or a peer instance may have written (#1677).
       private def self.extract_rule_row(r : Store::ExtractRule) : String
         mark = r.enabled? ? "x" : " "
-        host = r.host.empty? ? "" : " @#{r.host}"
-        cond = r.match_filter.empty? ? "any message" : r.match_filter
-        "##{r.id} [#{mark}] #{Env.spell(r.name, Env::Namespace::Bind)} <- #{cond} <- #{r.token_loc.label}#{host}"
+        host = r.host.empty? ? "" : " @#{CLI::Output.term_safe(r.host)}"
+        cond = r.match_filter.empty? ? "any message" : CLI::Output.term_safe(r.match_filter)
+        "##{r.id} [#{mark}] #{Env.spell(r.name, Env::Namespace::Bind)} <- #{cond} <- #{CLI::Output.term_safe(r.token_loc.label)}#{host}"
       end
 
       private def self.cmd_extract_list(args : Array(String)) : Nil
@@ -327,13 +335,18 @@ module Gori
           elsif rules.empty?
             puts "No bindings declared — add an extract rule with `gori run rewriter extract add`."
           else
-            rules.each do |r|
-              puts "#{Env.spell(r.name, Env::Namespace::Bind)}#{r.enabled? ? "" : " (rule disabled)"} <- #{r.token_loc.label}#{r.host.empty? ? "" : " @#{r.host}"}"
-            end
+            rules.each { |r| puts binding_row(r) }
             puts
             puts "Values are held in memory by the running gori and are never persisted."
           end
         end
+      end
+
+      # `$BIND.SESSION <- cookie "sid" @acme.test`, with the same rule text badged as in
+      # `extract_rule_row` (#1677).
+      private def self.binding_row(r : Store::ExtractRule) : String
+        host = r.host.empty? ? "" : " @#{CLI::Output.term_safe(r.host)}"
+        "#{Env.spell(r.name, Env::Namespace::Bind)}#{r.enabled? ? "" : " (rule disabled)"} <- #{CLI::Output.term_safe(r.token_loc.label)}#{host}"
       end
 
       # One text row for a rule: `G#3 [x] REQ sub/H @host  pattern -> value`. The scope letter
@@ -343,8 +356,9 @@ module Gori
       private def self.rewriter_rule_row(r : Store::MatchRule) : String
         mark = r.inert? ? "?" : (r.enabled? ? "x" : " ")
         side = r.target.request? ? "REQ" : "RES"
-        name = r.name.empty? ? "" : " [#{r.name}]"
-        host = r.host.empty? ? "" : " @#{r.host}"
+        # Rule text comes from agents (MCP `create_rule`) and shared settings files (#1677).
+        name = r.name.empty? ? "" : " [#{CLI::Output.term_safe(r.name)}]"
+        host = r.host.empty? ? "" : " @#{CLI::Output.term_safe(r.host)}"
         scope = "#{r.scope.badge}#{r.overridden? ? "*" : ""}"
         "#{scope}##{r.id} [#{mark}] #{side} #{rewriter_op_tag(r).ljust(5)}#{name}#{host}  #{rewriter_rule_body(r)}"
       end
@@ -366,6 +380,10 @@ module Gori
       # `=>` rather than `->` for a stub: it answers instead of forwarding, so the row should
       # not read like the four rewrite ops.
       private def self.rewriter_rule_body(r : Store::MatchRule) : String
+        CLI::Output.term_safe(rewriter_rule_text(r))
+      end
+
+      private def self.rewriter_rule_text(r : Store::MatchRule) : String
         return r.inert_reason || "unknown rule" if r.inert?
         case r.op
         when .remove_header?, .json_remove? then r.pattern
@@ -535,7 +553,22 @@ module Gori
         if op.short_circuit? && (err = RuleStub.respond_error(respond, value || "", body_file, respond_args))
           abort_closing(store, "gori run rewriter add: #{err}")
         end
+        if host && (err = Gori::Rules.host_error(host))
+          abort_closing(store, "gori run rewriter add: #{err}")
+        end
         {find || abort_closing(store, "gori run rewriter add: --find is required"), match, host || "", value || ""}
+      end
+
+      # #1711: a plain-HTTP proxy flow is stored with its absolute-form line, but rules run on
+      # the origin-form head the proxy forwards (`Rules#live_request_head`).
+      ORIGIN_FORM_NOTE = "A request-head rule matches the origin-form line the proxy forwards\n" \
+                         "(GET /path), not the absolute form (GET http://host/path) History\n" \
+                         "stores for a plain-HTTP proxy flow."
+
+      private def self.warn_absolute_form(target : Store::RuleTarget, part : Store::RulePart, find : String?) : Nil
+        return unless target.request? && part.head? && find.try(&.matches?(/\A(?:\^|\\A)?[A-Za-z]+ [A-Za-z][A-Za-z0-9+.\-]*:\/\//))
+        STDERR.puts "gori run rewriter add: warning: --find names an absolute-form request line, " \
+                    "which a rule never sees; match the origin form (#{find.try(&.lchop("\\A").lchop('^').split(' ', 2).first)} /path)"
       end
 
       private def self.cmd_rewriter_add(args : Array(String)) : Nil
@@ -574,7 +607,8 @@ module Gori
                      "only that value's bytes change. --part defaults to body.\n\n" \
                      "Mocking (short_circuit): --map-dir serves files from a directory by path,\n" \
                      "--fault answers with a close/reset/hang instead of a response, --delay\n" \
-                     "waits first, and --from-flow copies a captured response into the rule."
+                     "waits first, and --from-flow copies a captured response into the rule.\n\n" \
+                     "#{ORIGIN_FORM_NOTE}"
           project_options(p, proj, "update")
           p.on("--side=SIDE", "request|response (default request)") { |v| target_s = v }
           # `--side` is the name that does not collide (#1389): `--target` is a URL on every
@@ -622,6 +656,7 @@ module Gori
         # the operator fixed the pipe and only then learned the flags were wrong. Same
         # ordering, and same reason, as `repeater create` and `issues create` (#1034).
         check_ws_part(op, part, "add")
+        warn_absolute_form(target, part, find_arg)
         check_pipe_value(op, value_arg || "", "add")
         check_json_rule(op, part, find_arg, value_arg, "add")
         value_arg = check_short_circuit_args(op, value_arg, response_file, body_file)
@@ -829,7 +864,8 @@ module Gori
           "pass the match as --find FIND and the replacement as --value VALUE — quote them, a value " \
           "with spaces is one argument") do |p|
           p.banner = "Usage: gori run rewriter preview [options]\n\n" \
-                     "Estimate how many recent flows a rule WOULD affect, without creating it."
+                     "Estimate how many recent flows a rule WOULD affect, without creating it.\n\n" \
+                     "#{ORIGIN_FORM_NOTE}"
           project_options(p, proj, "read")
           p.on("--side=SIDE", "request|response (default request)") { |v| target_s = v }
           # `--side` is the name that does not collide (#1389): `--target` is a URL on every
@@ -870,12 +906,14 @@ module Gori
                 j.field "would_match", pv.matched
                 j.field "scanned", pv.scanned
                 j.field "total_flows", pv.total
-                j.field "scan_capped", pv.total > pv.scanned
+                j.field "skipped", pv.skipped
+                j.field "scan_capped", pv.capped
               end
             end)
           else
-            capped = pv.total > pv.scanned ? " (of #{pv.total} total; scan capped)" : ""
-            puts "Would affect #{pv.matched} of #{pv.scanned} recent flows#{capped}."
+            capped = pv.capped ? " (of #{pv.total} total; scan capped)" : ""
+            skipped = pv.skipped > 0 ? " #{pv.skipped} skipped: body too large to preview." : ""
+            puts "Would affect #{pv.matched} of #{pv.scanned} recent flows#{capped}.#{skipped}"
           end
         end
       end

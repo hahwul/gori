@@ -99,6 +99,15 @@ describe Gori::Repeater::Diff do
     Gori::Repeater::Diff.fold(diff, 0).any? { |f| f.line.try(&.text) == "SAME" }.should be_true
   end
 
+  # #1691: `i + context` overflowed Int32 on `--context 2147483647`; the clamp lives in `fold`, so
+  # neither surface has to remember it, and an Int64 past Int32 is folded the same way.
+  it "folds nothing, rather than overflowing, for a context at or past the diff's length" do
+    diff = Gori::Repeater::Diff.lines(private_lines.call("BEFORE"), private_lines.call("AFTER"))
+    [Int32::MAX, 5_000_000_000_i64, diff.size].each do |n|
+      Gori::Repeater::Diff.fold(diff, n).map(&.line).should eq(diff)
+    end
+  end
+
   it "collapses an identical pair to one marker and nothing else" do
     diff = Gori::Repeater::Diff.lines((1..20).map(&.to_s), (1..20).map(&.to_s))
     folded = Gori::Repeater::Diff.fold(diff, 3)

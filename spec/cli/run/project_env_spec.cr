@@ -36,3 +36,19 @@ describe "gori run project env set refusal" do
     Gori::CLI::Run.env_set_refusal(["TOKEN=#{invalid}"]).should contain("not valid UTF-8")
   end
 end
+
+# #1702: a token piped in rather than put on argv, read the way `--password-stdin` reads one.
+describe "gori run project env set --value-stdin" do
+  it "drops exactly one trailing line ending from what the pipe delivered" do
+    read = ->(text : String) { Gori::CLI::Run.read_stdin_secret(IO::Memory.new(text), "gori run project env set", "value", "--value-stdin") }
+    read.call("secret\n").should eq("secret")
+    read.call("secret\r\n").should eq("secret")
+    read.call("secret").should eq("secret")
+    read.call("secret\n\n").should eq("secret\n")
+    read.call("  spaced  \n").should eq("  spaced  ")
+  end
+
+  it "names the stdin door when the value is missing" do
+    Gori::CLI::Run.env_set_refusal(["TOKEN"]).should contain("--value-stdin")
+  end
+end

@@ -224,6 +224,32 @@ describe Gori::MCP::Server do
       end
     end
 
+    # #1686: host and seed flow were fixed at create; a wrong one cost delete + re-create.
+    it "updates an issue's host and seed flow, refusing a flow that does not exist" do
+      with_store do |store|
+        a = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "https", host: "app.test", port: 443, method: "GET",
+          target: "/a", http_version: "HTTP/1.1", head: "GET /a HTTP/1.1\r\n\r\n".to_slice,
+          source: Gori::FlowSource::Kind::Proxy))
+        id = store.insert_issue("f", Gori::Store::Severity::Info, "ex ample", nil)
+        call = ->(args : String) {
+          mcp_drive(store, %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"update_issue","arguments":{"id":#{id},#{args}}}}))[0]["result"]
+        }
+
+        call.call(%("host":"good","flow_id":#{a})).["isError"].as_bool.should be_false
+        store.get_issue(id).not_nil!.host.should eq("good")
+        store.get_issue(id).not_nil!.flow_id.should eq(a)
+
+        missing = call.call(%("flow_id":999999))
+        missing["isError"].as_bool.should be_true
+        store.get_issue(id).not_nil!.flow_id.should eq(a)
+
+        call.call(%("host":null,"flow_id":null)).["isError"].as_bool.should be_false
+        store.get_issue(id).not_nil!.host.should be_nil
+        store.get_issue(id).not_nil!.flow_id.should be_nil
+      end
+    end
+
     it "reports an error (not updated:true) when update_issue has no fields" do
       with_store do |store|
         store.insert_issue("f", Gori::Store::Severity::Info, nil, nil)

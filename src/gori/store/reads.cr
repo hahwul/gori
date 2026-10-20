@@ -21,6 +21,23 @@ module Gori
       FROM flows
       SQL
 
+    # `rows` with `FlowRow#error` filled on the Error/Aborted ones, in one keyed read per 500 ids
+    # (#1680). Not in `SELECT_ROW`: `error` sits after the body BLOBs and outside
+    # `idx_flows_list`, so every list read would walk each errored row's overflow chain — only
+    # the machine row feeds that print the field (`gori run history`/`capture`, MCP) ask for it.
+    def with_errors(rows : Array(FlowRow)) : Array(FlowRow)
+      ids = rows.compact_map { |r| r.id if r.state.error? || r.state.aborted? }
+      return rows if ids.empty?
+      errors = {} of Int64 => String
+      ids.each_slice(500) do |slice|
+        @db.query("SELECT id, error FROM flows WHERE error IS NOT NULL AND id IN (#{Array.new(slice.size, "?").join(',')})",
+          args: slice.map(&.as(DB::Any))) do |rs|
+          rs.each { errors[rs.read(Int64)] = rs.read(String) }
+        end
+      end
+      rows.map { |r| (e = errors[r.id]?) ? r.with_error(e) : r }
+    end
+
     # Newest-first page of the History list. `before_id` is a cursor for paging
     # into older rows (stable as new rows append, unlike OFFSET). `since_id` is the
     # opposite FORWARD cursor (id > since_id, OLDEST-first) so a caller — e.g. the #124
@@ -612,6 +629,7 @@ module Gori
       resp_trunc = rs.read(Int64) != 0
       err = rs.read(String?)
       sni = rs.read(String?)
+      row = row.with_error(err) if row.state.error? || row.state.aborted?
       FlowDetail.new(row, http_version, req_head, req_body, resp_head, resp_body,
         h2_conn, h2_stream, req_trunc, resp_trunc, err, sni)
     end

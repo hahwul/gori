@@ -93,3 +93,45 @@ describe "Store#insert_issue" do
     writers.map { |p| File.basename(p) }.should eq(["issues.cr"])
   end
 end
+
+# An issue's host and seed flow can be rewritten after create (#1686). A new seed gets its
+# link row as `insert_issue` writes one; the old seed stays as an ordinary link.
+describe "Store#update_issue host and flow" do
+  it "sets and clears the host and the seed flow, keeping the old seed linked" do
+    with_store do |store|
+      a, b = flow(store, "/a"), flow(store, "/b")
+      id = store.insert_issue("x", Gori::Store::Severity::Low, "ex ample", a)
+
+      store.update_issue(id, host: "good", flow_id: b).should be_true
+      issue = store.get_issue(id).not_nil!
+      issue.host.should eq("good")
+      issue.flow_id.should eq(b)
+      issue_links(store, id).map(&.ref_id).sort!.should eq([a, b].sort!)
+
+      store.update_issue(id, clear_host: true, clear_flow: true).should be_true
+      issue = store.get_issue(id).not_nil!
+      issue.host.should be_nil
+      issue.flow_id.should be_nil
+    end
+  end
+end
+
+# A seed with no link row of its own (a pre-migration or imported issue, a link deleted by
+# SQL) is synthesised by `Links.issue_links`; a reseed must not make it vanish (#1686).
+describe "Store#update_issue on a seed with no link row" do
+  it "keeps the old seed as evidence when the seed changes or is cleared" do
+    with_store do |store|
+      a, b = flow(store, "/a"), flow(store, "/b")
+      changed = store.insert_issue("x", Gori::Store::Severity::Low, nil, a)
+      cleared = store.insert_issue("y", Gori::Store::Severity::Low, nil, a)
+      [changed, cleared].each do |id|
+        store.remove_link(Gori::Store::LinkOwnerKind::Issue, id, Gori::Store::LinkRefKind::Flow, a).should be_true
+      end
+
+      store.update_issue(changed, flow_id: b).should be_true
+      store.update_issue(cleared, clear_flow: true).should be_true
+      issue_links(store, changed).map(&.ref_id).sort!.should eq([a, b].sort!)
+      issue_links(store, cleared).map(&.ref_id).should eq([a])
+    end
+  end
+end

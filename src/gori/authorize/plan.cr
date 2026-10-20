@@ -59,7 +59,7 @@ module Gori::Authorize
       # `detail` = the names, in order.
       MultipleBaselines
       # Flows were selected, and every one of them was skipped — unsafe method, incomplete,
-      # answered by gori, no identity changes it, out of scope, duplicate. `detail` = the
+      # answered by gori, no identity changes it, out of scope, duplicate, missing. `detail` = the
       # per-reason tally; `PlanError#skipped` carries the full per-flow list, because "a run
       # that sends nothing says so" (DESIGN.md §7, 2026-07-26) and a bare count cannot.
       NothingToSend
@@ -79,8 +79,8 @@ module Gori::Authorize
   end
 
   # One flow the selection reached but the run will not replay. `reason` is a
-  # `Passive.skip_reason` symbol (plus `:out_of_scope` / `:duplicate`, which the selection
-  # decides rather than the flow itself), so `Passive.reason_label` is the one place a
+  # `Passive.skip_reason` symbol (plus `:out_of_scope` / `:duplicate` / `:missing`, which the
+  # selection decides rather than the flow itself; a `:missing` row has no method or url), so `Passive.reason_label` is the one place a
   # sentence for it is written.
   struct Skipped
     getter flow_id : Int64
@@ -276,9 +276,10 @@ module Gori::Authorize
       # identities is a `NoTarget` ("name a flow id or --query"), and resolving identities
       # first answered it with `NoIdentities` — sending the operator off to configure a
       # tab when they had simply named nothing to replay.
-      details, query_rows = resolve_flows(options)
+      details, query_rows, missing = resolve_flows(options)
       identities = resolve_identities(options)
       targets, skipped = partition(details, identities, options, outbound)
+      skipped = missing + skipped
       if targets.empty?
         raise PlanError.new(PlanError::Reason::NothingToSend,
           "every selected flow was skipped", skip_tally(skipped), skipped)
@@ -364,16 +365,25 @@ module Gori::Authorize
     # dropping them silently would make `--flow 7 --flow 7` and `--flow 7` look identical
     # while one of them asked for something impossible.
     #
-    # Returns the flows AND how many rows the query contributed — the count `--limit` caps, and
-    # the only one a "capped" warning may be built from (see `Plan#query_capped?`).
-    private def self.resolve_flows(options : PlanOptions) : {Array(Store::FlowDetail), Int32}
+    # Returns the flows, how many rows the query contributed — the count `--limit` caps, and
+    # the only one a "capped" warning may be built from (see `Plan#query_capped?`) — and the
+    # explicit ids that name no flow.
+    private def self.resolve_flows(options : PlanOptions) : {Array(Store::FlowDetail), Int32, Array(Skipped)}
       query = options.query.try(&.strip).presence
       raise no_target_error if no_selection?(options.flow_ids, query)
       details = [] of Store::FlowDetail
-      # A pruned/unknown id contributes nothing rather than raising: it is not a flow that
+      missing = [] of Skipped
+      # A pruned/unknown id contributes no flow rather than raising: it is not a flow that
       # was declined, it is a flow that no longer exists, and `NoFlows` below is what fires
-      # when that leaves the selection empty.
-      options.flow_ids.each { |id| options.store.get_flow(id).try { |d| details << d } }
+      # when that leaves the selection empty. It is still NAMED as a `:missing` skip, the way
+      # a duplicate is, or a typo'd id would make the run look complete (#1684).
+      options.flow_ids.each do |id|
+        if d = options.store.get_flow(id)
+          details << d
+        else
+          missing << Skipped.new(id, "", "", :missing)
+        end
+      end
       query_rows = 0
       query.try do |q|
         rows = search(options, q)
@@ -386,7 +396,7 @@ module Gori::Authorize
       if details.empty?
         raise PlanError.new(PlanError::Reason::NoFlows, "no captured flows matched the selection", query)
       end
-      {details, query_rows}
+      {details, query_rows, missing}
     end
 
     # The query's rows. Mirrors `gori run history`'s reading of a QL query exactly, because

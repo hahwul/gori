@@ -133,6 +133,8 @@ module Gori
           unless advisories.empty?
             j.field("advisory") { j.array { advisories.each { |l| j.string(l.scrub) } } }
           end
+          # Why an Error/Aborted flow failed (`FlowRow#error`), null on every other row (#1680).
+          json_captured(j, "error", row.error)
           redacted = false
           if head = request_head
             j.field("headers") { redacted = request_headers_json(j, head, include_sensitive) }
@@ -528,9 +530,12 @@ module Gori
         # indices open at once), so it only ever engages when an index will never settle.
         MAX_HELD = 4096
 
+        # `prefix` opens an envelope around the array (`{"results":`), which `close`'s `suffix`
+        # finishes; `fuzz save --json` uses it to return the saved run's id (#1682).
         def initialize(@io : IO,
-                       @encoder : Proc(Fuzz::Result, String) = ->(result : Fuzz::Result) { Output.fuzz_row_json(result) })
-          @io << '['
+                       @encoder : Proc(Fuzz::Result, String) = ->(result : Fuzz::Result) { Output.fuzz_row_json(result) },
+                       prefix : String = "")
+          @io << prefix << '['
           @io.flush
         end
 
@@ -548,11 +553,11 @@ module Gori
           settle(index, nil)
         end
 
-        def close : Nil
+        def close(suffix : String = "") : Nil
           return if @closed
           @held.keys.sort!.each { |i| @held[i].each { |row| write(row) } }
           @held.clear
-          @io << "]\n"
+          @io << ']' << suffix << '\n'
           @io.flush
           @closed = true
         end

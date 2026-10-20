@@ -1,3 +1,4 @@
+require "base64"
 require "uri"
 require "../env"
 require "../proxy/codec/http1"
@@ -106,10 +107,7 @@ module Gori::Repeater
         lines << {k, value}
       end
 
-      unless header?(lines, "host")
-        hostline = target.port == default_port(target.scheme) ? target.host : "#{target.host}:#{target.port}"
-        lines << {"Host", hostline}
-      end
+      add_url_headers(lines, target)
       if body && !header?(lines, "content-length") && !header?(lines, "transfer-encoding")
         lines << {"Content-Length", body.size.to_s}
       end
@@ -120,6 +118,28 @@ module Gori::Repeater
       io << "\r\n"
       io.write(body) if body
       Built.new(io.to_slice, target.scheme, target.host, target.port)
+    end
+
+    # The headers the URL itself implies, each only when the caller left it out: `Host` from the
+    # authority, and Basic `Authorization` from a `user:pass@` (`basic_auth`).
+    private def self.add_url_headers(lines : Array({String, String}), target : Target) : Nil
+      unless header?(lines, "host")
+        hostline = target.port == default_port(target.scheme) ? target.host : "#{target.host}:#{target.port}"
+        lines << {"Host", hostline}
+      end
+      if !header?(lines, "authorization") && (auth = basic_auth(target.uri))
+        lines << {"Authorization", auth}
+      end
+    end
+
+    # The `Authorization` value curl derives from a URL's `user:pass@`, or nil when the URL names
+    # no user (#1690). Dropping it sent the request unauthenticated with nothing said, while
+    # `import --curl` already encoded it. `URI#user`/`#password` come back percent-decoded, as
+    # curl decodes each half; a missing password is an empty one. The dialed target never
+    # carries the userinfo either way. One home: `Import::Builder` asks it too.
+    def self.basic_auth(uri : URI) : String?
+      user = uri.user || return nil
+      "Basic #{Base64.strict_encode("#{user}:#{uri.password}")}"
     end
 
     # The URL's path and query as the request-target, refused when it holds a byte that would

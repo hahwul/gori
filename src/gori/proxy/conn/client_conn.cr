@@ -2862,7 +2862,7 @@ module Gori::Proxy
       if detail = err.try(&.detail)
         return "upstream connect failed: #{detail}"
       end
-      "upstream connect failed: #{host}:#{port}"
+      "upstream connect failed: #{err.try(&.dialed(host, port)) || "#{host}:#{port}"}"
     end
 
     private def resolve_forward(req : Codec::RawRequest) : {String, Int32, String, Bytes}

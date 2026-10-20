@@ -83,13 +83,17 @@ module Gori
           STDERR.puts "no links on #{owner_kind.label} ##{oid}"
           return
         end
-        resolved.each do |r|
-          # `Resolved#line` is "[tag] label", and the label is `"#{row.method} #{loc}"` off the
-          # wire — so an OSC 52 / set-window-title sequence in a captured request line drove the
-          # operator's terminal on every `gori run links`. Every other CLI printer of captured
-          # text goes through `term_safe`; this one did not.
-          puts "#{CLI::Output.term_safe(r.line)}#{r.stale? ? "  (stale)" : ""}"
-        end
+        resolved.each { |r| puts link_row_text(r) }
+      end
+
+      # One row of the text listing. The label is `"#{row.method} #{loc}"` off the wire — so
+      # an OSC 52 / set-window-title sequence in a captured request line drove the operator's
+      # terminal on every `gori run links`. Every other CLI printer of captured text goes
+      # through `term_safe`; this one did not. A present ref also names its `--ref`/`--ref-id`,
+      # which `links delete` needs (#1685); a gone one's label already reads "flow #5 (gone)".
+      private def self.link_row_text(r : Links::Resolved) : String
+        line = r.stale? ? r.line : "[#{r.tag}] #{r.link.ref_kind.label} ##{r.link.ref_id} #{r.label}"
+        "#{CLI::Output.term_safe(line)}#{r.stale? ? "  (stale)" : ""}"
       end
 
       # One link's fields: a row of `links list --format json`, and the body of `links add

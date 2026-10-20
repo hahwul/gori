@@ -5803,7 +5803,7 @@ module Gori::Tui
       ov = rule ? ExtractRuleOverlay.editing(rule) : ExtractRuleOverlay.adding
       ov.on_validate = ->(form : ExtractRuleOverlay) do
         @session.bindings.validate(form.name, form.kind, form.selector, except_id: form.edit_id,
-          match_filter: form.match_filter)
+          match_filter: form.match_filter, host: form.host)
       end
       ov.on_commit = -> { rewriter_controller.apply_extract_rule(ov) }
       open_overlay(ov)
@@ -5840,8 +5840,9 @@ module Gori::Tui
     # responsive; nothing is written.
     private def rewriter_preview_text(candidate : Store::MatchRule) : String
       pv = @session.rules.preview(candidate, 200)
-      more = pv.total > pv.scanned ? " (of #{pv.total})" : ""
-      "affects #{pv.matched} of #{pv.scanned} recent flows#{more}"
+      more = pv.capped ? " (of #{pv.total})" : ""
+      skipped = pv.skipped > 0 ? " · #{pv.skipped} too large to preview" : ""
+      "affects #{pv.matched} of #{pv.scanned} recent flows#{more}#{skipped}"
     end
 
     # Notes must not be reloaded out from under in-progress typing. Focus alone is

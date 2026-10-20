@@ -309,9 +309,8 @@ module Gori
     end
 
     # `GET a.test/login` — the RELATED row's identity: the copy's url without its scheme.
-    # Close to `Links.resolve_flow`'s `method host+target`, not identical: the url keeps a
-    # non-default port (`a.test:8443/x`) where the live row's label never carries one, and
-    # for a copy that is the right side to err on — a report reads the port off it.
+    # Close to `Links.resolve_flow`'s `method host+target`, which also keeps a non-default
+    # port (`a.test:8443/x`) since #1685 — a report reads the port off either one.
     #
     # `.scrub`, because the url is display text built from captured wire bytes and the TUI
     # funnels display text through `Hotkeys.retag`, whose regex raises on non-UTF-8.

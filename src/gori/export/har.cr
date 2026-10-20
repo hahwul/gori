@@ -309,8 +309,10 @@ module Gori
         req = Proxy::Codec::Http1.parse_request_head(detail.request_head)
         resp = Proxy::Codec::Http1.parse_response_head(resp_head)
         version = detail.http_version.presence || "HTTP/1.1"
-        req_body_size = wire_body_size(request_total(row), detail.request_head, detail.request_body)
-        resp_body_size = wire_body_size(row.response_size, resp_head, detail.response_body)
+        req_body_size = wire_body_size(request_total(row), detail.request_head, detail.request_body,
+          detail.request_body_truncated?)
+        resp_body_size = wire_body_size(row.response_size, resp_head, detail.response_body,
+          detail.response_body_truncated?)
         scrubbed = lossy_head?(row, req, resp, version)
 
         j.object do
@@ -644,9 +646,15 @@ module Gori
       # sent, which is what HAR's `bodySize` / `content.size` mean. Falls back to the stored
       # size if the arithmetic ever goes backwards, so a bad total can never understate the
       # bytes present in the file.
-      private def self.wire_body_size(total : Int64?, head : Bytes?, body : Bytes?) : Int64
+      #
+      # Only for a body the capture cap cut, which is the case the arithmetic exists for. An
+      # intact body is all there, so its size is the body's own — and under a redaction profile
+      # (`Redact::Wire.flow`, which keeps the captured row's totals) the totals describe the
+      # ORIGINAL message: the sum gave away the redacted value's length, contradicted the
+      # sanitized Content-Length, and read back as truncated on import (#1672).
+      private def self.wire_body_size(total : Int64?, head : Bytes?, body : Bytes?, truncated : Bool) : Int64
         stored = body.try(&.size.to_i64) || 0_i64
-        return stored unless total && head
+        return stored unless truncated && total && head
         n = total - head.size
         n > stored ? n : stored
       end

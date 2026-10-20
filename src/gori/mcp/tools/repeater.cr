@@ -147,7 +147,7 @@ module Gori
       private def repeater_tags_arg(h, key : String = "tags") : String?
         raw = str(h, key)
         return nil unless raw
-        Repeater::Tags.serialize(Repeater::Tags.parse(Env.mask_secrets(raw)))
+        Repeater::Tags.stored(raw)
       end
 
       # Everything a captured flow contributes to a new Repeater session.

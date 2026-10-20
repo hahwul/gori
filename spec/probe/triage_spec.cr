@@ -58,6 +58,19 @@ describe "Gori::Probe::Triage.promote report carry-over" do
     end
   end
 
+  it "does not link a newer flow at the sample's own URL that the finding never fired on (#1673)" do
+    with_store do |store|
+      a = triage_flow(store, "/a?token=1")
+      triage_flow(store, "/a?token=1") # later request at the same URL, no hit
+      triage_hit(store, "https://acme.test/a?token=1", a)
+      issue = store.probe_issues.first
+
+      res = Gori::Probe::Triage.promote(store, issue)
+      links = store.list_links(Gori::Store::LinkOwnerKind::Issue, res.issue_id.not_nil!)
+      links.map(&.ref_id).should eq([a])
+    end
+  end
+
   it "uses a custom rule's own description in place of the built-in remediation" do
     with_store do |store|
       rid = store.insert_probe_custom_rule("Internal hostname", "Strip internal hostnames from responses.",

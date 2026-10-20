@@ -145,9 +145,11 @@ module Gori
     # `Gori::Url.location`, not the `target.starts_with?("http")` this used to spell out: that
     # predicate is not the absolute-form test (RFC 3986 §3.1 makes a scheme case-insensitive),
     # so a captured `GET HTTP://host/x` was glued into `hostHTTP://host/x` — the exact doubling
-    # `Store::FlowRow.absolute_form?`'s comment says the check exists to prevent.
+    # `Store::FlowRow.absolute_form?`'s comment says the check exists to prevent. The host
+    # carries its non-default port (`Url.authority`), or two flows on one host but different
+    # ports read as the same evidence (#1685).
     private def self.flow_location(f : Store::FlowRow) : String
-      Gori::Url.location(f.host, f.target)
+      Gori::Url.location(Gori::Url.authority(f.scheme, f.host, f.port), f.target)
     end
 
     private def self.first_line(s : String) : String?

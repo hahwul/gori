@@ -1203,3 +1203,21 @@ describe Gori::MCP::Install do
     end
   end
 end
+
+# #1667: a served `--db` is never created, so installing one that does not exist yet is said.
+describe "gori mcp --install-* --db note" do
+  it "notes a --db file that does not exist, and stays quiet otherwise" do
+    missing = File.tempname("gori-install-note", ".db")
+    note = Gori::CLI.install_db_note(missing).not_nil!
+    note.should contain("#{File.expand_path(missing)} does not exist yet")
+    note.should contain("starts unbound")
+    File.touch(missing)
+    begin
+      Gori::CLI.install_db_note(missing).should be_nil
+    ensure
+      File.delete?(missing)
+    end
+    Gori::CLI.install_db_note(nil).should be_nil
+    Gori::CLI.install_db_note("").should be_nil
+  end
+end

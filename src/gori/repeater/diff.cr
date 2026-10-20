@@ -32,7 +32,12 @@ module Gori
       # Collapse the runs of unchanged lines that are more than `context` away from any
       # change. A run of ONE is left alone: the marker that replaces it is a row too, so
       # collapsing it saves nothing and only costs the reader the line's content.
-      def self.fold(diff : Array(DiffLine), context : Int32 = FOLD_CONTEXT) : Array(Folded)
+      #
+      # `context` is clamped to `0..diff.size` first: a context at or past the diff's length folds
+      # nothing, so the ceiling is exact, and it keeps `i + context` from overflowing on a caller's
+      # `--context 2147483647` (#1691).
+      def self.fold(diff : Array(DiffLine), context : Int = FOLD_CONTEXT) : Array(Folded)
+        context = context.clamp(0, diff.size).to_i
         keep = Array(Bool).new(diff.size, false)
         diff.each_index do |i|
           next if diff[i].kind == DiffKind::Same

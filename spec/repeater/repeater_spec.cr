@@ -29,6 +29,14 @@ private def start_origin(body : String, seen : Channel(String)) : Int32
 end
 
 describe Gori::Repeater::Engine do
+  it "keeps a socket's heap address out of every Result error (#1696)" do
+    r = Gori::Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64,
+      "race: release write failed — write (#<TCPSocket:0x1051b68c0>): Broken pipe")
+    r.error.should eq("race: release write failed — write: Broken pipe")
+    r.as_retried.error.should eq(r.error)
+    Gori::Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64).error.should be_nil
+  end
+
   it "sends the request byte-exact and captures the response" do
     seen = Channel(String).new(1)
     port = start_origin("pong", seen)

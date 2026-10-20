@@ -184,6 +184,7 @@ module Gori
         rows = rows.first(limit) if has_more
         # Under REPLY_ROWS_BUDGET (#1649): a cut page is a short page with `has_more`, and its
         # cursor is the last row it carried, so paging resumes exactly there.
+        rows = store.with_errors(rows)
         parts = fit_rows(rows) { |rj, r, _| Serialize.flow_row(rj, r, row_columns(r, prepared, include_sensitive, matcher)) }
         cut = parts.size < rows.size
         if cut
@@ -289,6 +290,7 @@ module Gori
         filtered_out = ids.select { |id| drop.includes?(id) }
         # Under REPLY_ROWS_BUDGET (#1649). A set has no cursor, so a cut names the rows it did
         # not carry, in the order asked: passing `remaining_ids` back as `ids` fetches the rest.
+        rows = store.with_errors(rows)
         parts = fit_rows(rows) { |rj, r, _| Serialize.flow_row(rj, r, row_columns(r, prepared, include_sensitive, matcher)) }
         remaining = rows[parts.size..].map(&.id)
 

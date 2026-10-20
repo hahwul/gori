@@ -293,6 +293,9 @@ module Gori
           unless advisories.empty?
             j.field("advisory") { j.array { advisories.each { |a| j.string text(a) } } }
           end
+          # Why an Error/Aborted flow failed (`FlowRow#error`), null on every other row (#1680).
+          # Kept in lockstep with `CLI::Output.flow_row_fields`.
+          j.field "error", text(row.error)
           # The user-defined columns this call asked for (#819) — `label → value`, and label →
           # ARRAY where two specs share a label (two specs MAY: the same header off the request
           # and off the response is a comparison, not a mistake). Only when asked for, so an
@@ -1292,6 +1295,22 @@ module Gori
       end
 
       # --- rewriter and colour rules --------------------------------------------
+
+      # What installing a preset answers, as MCP `create_rule_from_preset` and
+      # `gori run rewriter preset add --format json` both print it (#1682).
+      def self.preset_install(preset : RulePresets::Preset, scope : Store::RuleScope, enabled : Bool,
+                              ids : Array(Int64)) : String
+        JSON.build do |j|
+          j.object do
+            j.field "preset", preset.key
+            j.field "name", preset.name
+            j.field "scope", scope.label
+            j.field "enabled", enabled
+            j.field "created", ids.size
+            j.field "ids" { j.array { ids.each { |id| j.number id } } }
+          end
+        end
+      end
 
       # One Match & Replace rule, as MCP `list_rules` and `gori run rewriter --format json` both
       # print it. `enabled` is the EFFECTIVE state in this project; `default_enabled` and
