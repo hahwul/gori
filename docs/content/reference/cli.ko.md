@@ -1140,6 +1140,8 @@ JWT를 디코드, 검증, 재서명하거나 공격 페이로드를 생성합니
 gori run jwt eyJhbGci...                        # 디코드(기본)
 gori run jwt eyJhbGci... --encode --alg HS256 --secret s3cret
 gori run jwt eyJhbGci... --encode --set role=admin --secret s3cret
+gori run jwt eyJhbGci... --encode --set-header kid=../../dev/null --secret ''
+gori run jwt --encode --payload '{"sub":"admin"}' --secret s3cret   # 토큰 없이 발급
 gori run jwt eyJhbGci... --encode --alg ES256 --key ./private.pem
 gori run jwt eyJhbGci... --verify --key ./public.pem
 gori run jwt eyJhbGci... --attacks --key ./public.pem
@@ -1148,7 +1150,7 @@ gori run jwt eyJhbGci... --attacks --key ./public.pem
 | Option | Description |
 |--------|-------------|
 | `--decode` | header / payload / signature 디코드(기본) |
-| `--encode` | `--alg`와 `--secret` / `--key`로 토큰 클레임 재서명 |
+| `--encode` | `--alg`와 `--secret` / `--key`로 토큰 클레임 재서명; `--header`나 `--payload`가 있으면 토큰 없이도 되며, 주지 않은 쪽은 `{}`에서 시작 |
 | `--verify` | 토큰 자신의 서명을 `--secret` / `--key`로 검증(둘 중 하나 필수, `--secret ''`은 빈 secret 확인); `verified: yes\|no`와 `reason`을 출력하고 검증되지 않으면 1로 종료합니다. `--format json`은 `code`(`signature_mismatch`, `unsigned`, `alg_unsupported`, …)를 더합니다 |
 | `--attacks` | 테스트 페이로드 생성(alg:none, weak-secret, header injection) |
 | `--alg=ALG` | `--encode`용 서명 alg: `HS256`(기본) \| `HS384` \| `HS512` \| `RS256/384/512` \| `PS256/384/512` \| `ES256/384/512` \| `EdDSA` \| `none` |
@@ -1156,6 +1158,8 @@ gori run jwt eyJhbGci... --attacks --key ./public.pem
 | `--key=PEM` | RS/PS/ES/EdDSA 알고리즘용 PEM 키: PEM 본문을 그대로 넣거나 `.pem` 파일 경로. `--encode`는 개인키가 필요하고, `--verify`는 공개키·인증서·개인키 중 아무거나 받으며, `--attacks`는 서버의 공개키를 받아 알고리즘 혼동(algorithm confusion) 페이로드를 추가합니다. `--secret`과 상호 배타적 |
 | `--payload=JSON` | `--encode`: 재서명 전에 클레임을 통째로 교체(`--set`과 상호 배타적) |
 | `--set=CLAIM` | `--encode`: 재서명 전에 클레임 하나를 `key=value`로 패치, 반복 가능; 값이 JSON으로 파싱되면(`true`/`3`) 그 타입, 아니면 문자열 |
+| `--header=JSON` | `--encode`: 헤더를 통째로 교체(`--set-header`와 상호 배타적); `alg`는 항상 `--alg`에서 옴 |
+| `--set-header=FIELD` | `--encode`: 헤더 필드 하나(`kid`, `jku`, `jwk`, …)를 `key=value`로 패치, 반복 가능, 값 해석은 `--set`과 같음 |
 | `--format` | `text`(기본) 또는 `json` |
 
 ### run cookie {#run-cookie}

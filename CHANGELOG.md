@@ -36,6 +36,7 @@
 - `gori run` sends, MCP `send_request`, the Fuzzer, the Miner and every other sweep (Discover, Authorize, Retest, active Probe) stop reading an SSE response after a number of events or seconds (100 / 10 s for a send, 50 / 5 s per sweep payload) instead of waiting out the idle timeout, and return the events so far as a success marked `bounded`; `--sse-events` / `--sse-time` or MCP `sse_max_events` / `sse_max_ms` change the limits. The TUI Repeater shows an SSE response live, per event under PRETTY, until **Stop send** ends it and keeps the events received (#1631)
 - Decoder: `html-unescape` (and MCP `decode`) decodes a named entity missing its `;` only for the HTML5 legacy names, so `&lang=en` in a query string stays as written while `&amp=` and `&copy` still decode (#1698)
 - JWT: a `--key` (or MCP `key`) file that is not PEM is refused as `<file> is not a PEM key` instead of being blamed as an unreadable path, and a file holding another file's path is no longer followed (#1700)
+- CLI: `gori run jwt --encode` takes `--header JSON` and repeatable `--set-header key=value` to edit the header (finishing the `kid`/`jku`/`jwk` payloads from `--attacks`), and mints without a token when `--header` or `--payload` is given, as MCP `jwt_encode` does (#1701)
 
 ## v0.8.1
 

@@ -119,6 +119,12 @@ describe Gori::Jwt do
       end
     end
 
+    it "names a header patch as one when patching a header" do
+      expect_raises(Gori::Jwt::ForgeError, /invalid header patch/) do
+        Gori::Jwt.patch_payload(%({}), ["kid"], "header")
+      end
+    end
+
     it "raises ForgeError on an empty key" do
       expect_raises(Gori::Jwt::ForgeError, /empty key/) do
         Gori::Jwt.patch_payload(%({}), ["=admin"])
