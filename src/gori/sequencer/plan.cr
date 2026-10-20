@@ -174,7 +174,12 @@ module Gori::Sequencer
       request = if options.evidence?
                   options.request
                 else
-                  Fuzz::ContentLength.resync_expanded(options.request, Env.expand_wire(String.new(options.request)))
+                  # …except a namespaced `$ENV.X` with no value, refused in a draft (#1666).
+                  text = String.new(options.request)
+                  if detail = Env.unresolved_env(text)
+                    raise PlanError.new(PlanError::Reason::UnresolvedEnv, "unresolved env #{detail}", detail)
+                  end
+                  Fuzz::ContentLength.resync_expanded(options.request, Env.expand_wire(text))
                 end
       # `evidence:` carries the branch above to the SEND seam, where session bindings resolve
       # (`Fuzz::Sender#evidence?`). The Sequencer is the worst place in gori to get this

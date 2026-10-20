@@ -2964,3 +2964,25 @@ describe "RepeaterView copy under the ^X hex editor" do
     view.pane_copy_all_text.should start_with("PET /")
   end
 end
+
+# #1666: the tab refuses a draft's unresolved `$ENV.X` on send, as every surface's plan does,
+# and an evidence tab still sends a capture's token as it arrived.
+describe "RepeaterView#request_bytes — an unresolved $ENV token" do
+  it "refuses a draft and names the token, but not evidence or an escape" do
+    saved = Gori::Settings.env_vars
+    Gori::Settings.env_vars = [] of {String, String}
+    with_env_syntax(Gori::Env::Syntax::Namespaced) do
+      draft = RepeaterView.new
+      draft.restore("http://h.test", "GET / HTTP/1.1\nHost: h.test\nX: $ENV.NOPE\n\n", false, false)
+      expect_raises(Gori::Fuzz::ChainError, /unresolved env \$ENV\.NOPE/) { draft.request_bytes }
+      escaped = RepeaterView.new
+      escaped.restore("http://h.test", "GET / HTTP/1.1\nHost: h.test\nX: $$ENV.NOPE\n\n", false, false)
+      String.new(escaped.request_bytes).should contain("X: $ENV.NOPE\r\n")
+      evidence = RepeaterView.new
+      evidence.restore("http://h.test", "GET / HTTP/1.1\nHost: h.test\nX: $ENV.NOPE\n\n", false, false, evidence: true)
+      String.new(evidence.request_bytes).should contain("X: $ENV.NOPE")
+    end
+  ensure
+    Gori::Settings.env_vars = saved || [] of {String, String}
+  end
+end

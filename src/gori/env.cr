@@ -368,6 +368,20 @@ module Gori
       nil
     end
 
+    # The `$ENV` tokens in AUTHORED request text that the env-var pass would leave unresolved,
+    # spelled and comma-joined for a refusal's detail, or nil (#1666). Namespaced only: there an
+    # `$ENV.X` is a reference by construction, the class `unmintable` refuses for `$GEN`, while a
+    # bare `$name` is GraphQL or Mongo text and stays literal (#571). Asked of the text BEFORE that
+    # pass, since an `$$ENV.X` escape the pass consumes reads as a token afterwards. Never asked of
+    # evidence: a capture's `$ENV.X` is bytes the client sent.
+    def self.unresolved_env(text : String) : String?
+      prefix = Settings.env_prefix
+      return nil unless Settings.env_syntax.namespaced? && !prefix.empty?
+      return nil unless text.byte_index("#{prefix}#{Namespace::Env.label}.")
+      names = scan_unresolved(text.to_slice, effective_vars, prefix, nil, owns: Owns::Env)
+      names.empty? ? nil : token_list(names)
+    end
+
     # Why a token in `detail` (a refused build's comma-joined token list) cannot mint, as a
     # sentence, or nil when none is a generator that cannot.
     def self.mint_refusal(detail : String?) : String?

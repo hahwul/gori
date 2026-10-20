@@ -44,3 +44,25 @@ describe Gori::Repeater::UrlRequest do
     String.new(Gori::Repeater::UrlRequest.raw(t, raw, false).bytes).should eq("GET / HTTP/1.1\r\nHost: h\r\n\r\nbody\nline")
   end
 end
+
+describe "Gori::Repeater::UrlRequest $ENV expansion" do
+  # #1666: an `$ENV.KEY` that resolves to nothing is refused, in a raw request and a header.
+  it "refuses an unresolved $ENV.KEY in a raw request and a header value, never under verbatim" do
+    Gori::Settings.env_vars = [] of {String, String}
+    with_env_syntax(Gori::Env::Syntax::Namespaced) do
+      t = Gori::Repeater::UrlRequest.target("http://h.test/")
+      ex = expect_raises(Gori::Repeater::PlanError) do
+        Gori::Repeater::UrlRequest.raw(t, "GET / HTTP/1.1\r\nX: $ENV.NOPE\r\n\r\n", false)
+      end
+      ex.detail.should eq("$ENV.NOPE")
+      expect_raises(Gori::Repeater::PlanError) do
+        Gori::Repeater::UrlRequest.structured(t, nil, [{"X", "$ENV.NOPE"}], nil)
+      end
+      expect_raises(Gori::Repeater::PlanError) { Gori::Repeater::UrlRequest.expand("b=$ENV.NOPE") }
+      String.new(Gori::Repeater::UrlRequest.raw(t, "GET / HTTP/1.1\r\nX: $ENV.NOPE\r\n\r\n", true).bytes)
+        .should contain("X: $ENV.NOPE")
+      # A bare `$name` is GraphQL/Mongo text and still goes out as typed.
+      String.new(Gori::Repeater::UrlRequest.structured(t, nil, [{"X", "$ne"}], nil).bytes).should contain("X: $ne\r\n")
+    end
+  end
+end

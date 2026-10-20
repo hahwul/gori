@@ -246,6 +246,10 @@ module Gori::Miner
       request = if options.evidence?
                   options.request.to_slice
                 else
+                  # …except a namespaced `$ENV.X` with no value, refused in a draft (#1666).
+                  if detail = Env.unresolved_env(options.request)
+                    raise PlanError.new(PlanError::Reason::UnresolvedEnv, "unresolved env #{detail}", detail)
+                  end
                   Fuzz::ContentLength.resync_expanded(options.request.to_slice, Env.expand_wire(options.request))
                 end
       request = frame_unframed_body(request)

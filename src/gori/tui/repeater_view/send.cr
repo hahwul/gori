@@ -65,6 +65,11 @@ class Gori::Tui::RepeaterView
     if reason = group_framing_refusal
       raise Fuzz::ChainError.new(reason)
     end
+    # A DRAFT naming an `$ENV` var with no value is refused, as every surface's plan refuses it
+    # (#1666, `Env.unresolved_env`): every mode below expands the editor except the hex buffer.
+    if !@evidence && !(@req_hex_edit && !@grpc_mode) && (detail = Env.unresolved_env(@editor.wire_text))
+      raise Fuzz::ChainError.new("unresolved env #{detail} — add it in the Project tab's ENV pane")
+    end
     return grpc_request_bytes if @grpc_mode                  # edited head + reframed body (owns its own hex buffer)
     return @req_hex_edit.not_nil!.to_bytes if @req_hex_edit  # byte-exact; NO auto-CL in hex mode
     return decoded_request_bytes if @decode_kind             # envelope + re-encoded decoded payload

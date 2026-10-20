@@ -495,7 +495,8 @@ module Gori::Repeater
       # only to switch it off for `--verbatim`. A `$NAME` with no value is a literal string
       # on the wire at every seam now (see `Env::Escape`) — which is what `verbatim` always
       # wanted, and what a GraphQL `?query=…$id…`, a Mongo `$where` header and a JSON Schema
-      # `$ref` need in order to be sendable at all.
+      # `$ref` need in order to be sendable at all. The one exception is the namespaced
+      # `$ENV.X`, which is never such text and is refused in a draft (#1666, `expand_requests`).
       draft = !options.evidence?
       wires = expand_requests(options, draft)
 
@@ -607,9 +608,23 @@ module Gori::Repeater
     # Left INSIDE `evidence?` rather than left to each surface to remember (via
     # `expand_request: false`) precisely because that is how the two headless surfaces drifted:
     # MCP turned expansion off and `gori run repeater` did not, and nothing compared them.
+    #
+    # An `$ENV.X` that resolves to nothing is refused here, in the draft (#1666): see
+    # `Env.unresolved_env`. Before the pass, which consumes the `$$ENV.X` escape.
     private def self.expand_requests(options : PlanOptions, draft : Bool) : Array(Bytes)
       return options.requests unless options.expand_request? && draft
-      options.requests.map { |b| Env.expand_wire(String.new(b)) }
+      options.requests.map do |b|
+        text = String.new(b)
+        refuse_unresolved_env(text)
+        Env.expand_wire(text)
+      end
+    end
+
+    # Raise when authored `text` still names an `$ENV` var with no value (`Env.unresolved_env`).
+    # Public for the builder that expands before this one runs (`UrlRequest`).
+    def self.refuse_unresolved_env(text : String) : Nil
+      return unless detail = Env.unresolved_env(text)
+      raise PlanError.new(PlanError::Reason::UnresolvedEnv, "unresolved env #{detail}", detail)
     end
 
     # A field-native h2 send: dial origin + SNI resolution, then a `Sender` whose `send` will

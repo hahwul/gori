@@ -330,3 +330,69 @@ describe "plan builders no longer refuse an unresolved env token in the head" do
     end
   end
 end
+
+# #1666: the namespaced `$ENV.X` is the one request-text token that IS refused when it resolves
+# to nothing — in a DRAFT, at plan-build, through the same `UnresolvedEnv` refusal a `$GEN` that
+# cannot mint takes. A bare `$name`, an escape, evidence and a verbatim send stay literal.
+describe "plan builders refuse an unresolved namespaced $ENV token in a draft (#1666)" do
+  it "Env.unresolved_env names it, and nothing else, only under the namespaced grammar" do
+    with_vars([{"TOKEN", "abc"}]) do
+      with_env_syntax(Gori::Env::Syntax::Namespaced) do
+        Gori::Env.unresolved_env("X: $ENV.NOPE $ENV.TOKEN $nope $BIND.S $GEN.UUID $$ENV.ESC").should eq("$ENV.NOPE")
+        Gori::Env.unresolved_env("X: $ENV.TOKEN $id").should be_nil
+        # The TOTP secret never expands (#1591), so its token is unresolved by definition.
+        Gori::Env.unresolved_env("X: $ENV.TOTP_SECRET").should eq("$ENV.TOTP_SECRET")
+      end
+      with_env_syntax(Gori::Env::Syntax::Bare) do
+        Gori::Env.unresolved_env("X: $NOPE").should be_nil
+      end
+    end
+  end
+
+  it "Repeater::Plan.build refuses a draft, not evidence or pre-expanded bytes" do
+    with_vars([] of {String, String}) do
+      with_env_syntax(Gori::Env::Syntax::Namespaced) do
+        raw = "GET /a HTTP/1.1\r\nHost: t.test\r\nX: $ENV.NOPE\r\n\r\n".to_slice
+        ex = expect_raises(Gori::Repeater::PlanError) do
+          Gori::Repeater::Plan.build(Gori::Repeater::PlanOptions.new([raw], target: "http://t.test"), ungated_outbound)
+        end
+        ex.reason.unresolved_env?.should be_true
+        ex.detail.should eq("$ENV.NOPE")
+        ex.mint_refusal.should be_nil # the env sentence, not a generator's
+        [Gori::Repeater::PlanOptions.new([raw], evidence: true, target: "http://t.test"),
+         Gori::Repeater::PlanOptions.new([raw], expand_request: false, target: "http://t.test")].each do |opts|
+          String.new(Gori::Repeater::Plan.build(opts, ungated_outbound).bytes).should contain("X: $ENV.NOPE\r\n")
+        end
+        escaped = "GET /a HTTP/1.1\r\nHost: t.test\r\nX: $$ENV.NOPE\r\n\r\n".to_slice
+        String.new(Gori::Repeater::Plan.build(Gori::Repeater::PlanOptions.new([escaped], target: "http://t.test"),
+          ungated_outbound).bytes).should contain("X: $ENV.NOPE\r\n")
+      end
+    end
+  end
+
+  it "Fuzz, Miner and Sequencer refuse a draft and replay evidence literally" do
+    with_vars([] of {String, String}) do
+      with_env_syntax(Gori::Env::Syntax::Namespaced) do
+        raw = "GET /a?q=1 HTTP/1.1\r\nHost: t.test\r\nX: $ENV.NOPE\r\n\r\n"
+        sources = [Gori::Fuzz::InlineList.new(["p"])] of Gori::Fuzz::PayloadSource
+        loc = Gori::Sequencer::TokenLoc.new(kind: Gori::Sequencer::ExtractKind::Cookie, selector: "sid")
+        config = Gori::Sequencer::Config.new(mode: Gori::Sequencer::Mode::LiveReplay, token_loc: loc, goal: 10)
+        ex = expect_raises(Gori::Fuzz::PlanError) do
+          Gori::Fuzz::Plan.build(Gori::Fuzz::PlanOptions.new(raw.sub("q=1", "q=§1§"), target: "http://t.test",
+            sources: sources), ungated_outbound)
+        end
+        ex.reason.should eq(Gori::Fuzz::PlanError::Reason::UnresolvedEnv)
+        ex.detail.should eq("$ENV.NOPE")
+        expect_raises(Gori::Miner::PlanError, /\$ENV\.NOPE/) do
+          Gori::Miner::Plan.build(Gori::Miner::PlanOptions.new(raw, target: "http://t.test"), ungated_outbound)
+        end
+        expect_raises(Gori::Sequencer::PlanError, /\$ENV\.NOPE/) do
+          Gori::Sequencer::Plan.build(Gori::Sequencer::PlanOptions.new(raw.to_slice, target: "http://t.test",
+            config: config), ungated_outbound)
+        end
+        String.new(Gori::Miner::Plan.build(Gori::Miner::PlanOptions.new(raw, evidence: true,
+          target: "http://t.test"), ungated_outbound).request).should eq(raw)
+      end
+    end
+  end
+end

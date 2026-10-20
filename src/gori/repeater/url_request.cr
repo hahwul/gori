@@ -1,6 +1,7 @@
 require "uri"
 require "../env"
 require "../proxy/codec/http1"
+require "./plan"
 
 module Gori::Repeater
   # A hand-authored request that starts from a URL rather than from a capture or a saved session:
@@ -15,7 +16,9 @@ module Gori::Repeater
   # send that frames the request itself — so the typed half moved down here (DESIGN.md §2: option
   # PARSING is per-surface, everything after the normalized options exists once). MCP keeps what
   # is genuinely its own: reading `url`/`headers`/`body` out of JSON, and the `*_base64` forms.
-  # Every refusal raises `Gori::Error`, which both surfaces already turn into their own sentence.
+  # Every refusal raises `Gori::Error`, which both surfaces already turn into their own sentence,
+  # except an unresolved `$ENV.KEY`: that is the plan's `PlanError`, so it reads as it does on a
+  # session send.
   module UrlRequest
     record Built, bytes : Bytes, scheme : String, host : String, port : Int32
 
@@ -77,11 +80,19 @@ module Gori::Repeater
     # expansion and no bare-LF promotion. Without it the head's lone LFs become CRLF so a
     # hand-typed request still frames (`normalize_raw`), and `$ENV.KEY` tokens expand. A bare-LF
     # header terminator is a standard front-end/back-end desync primitive, which is why the flag
-    # exists; an unresolved `$VAR` is not refused anywhere (see `Env::Escape`) — the literal `$`
-    # is the SSTI/shell payload the flag exists to deliver.
+    # exists. A bare `$VAR` with no value stays literal (see `Env::Escape`), the SSTI/shell
+    # payload the flag exists to deliver; an unresolved `$ENV.KEY` is refused (`expand`).
     def self.raw(target : Target, raw : String, verbatim : Bool) : Built
-      bytes = verbatim ? raw.to_slice : normalize_raw(Env.expand(raw))
+      bytes = verbatim ? raw.to_slice : normalize_raw(expand(raw))
       Built.new(bytes, target.scheme, target.host, target.port)
+    end
+
+    # `Env.expand` for one AUTHORED part of a request, refusing an `$ENV.KEY` that resolves to
+    # nothing (`Plan.refuse_unresolved_env`, #1666). Public for the surfaces that expand a body
+    # before handing it to `structured`.
+    def self.expand(text : String) : String
+      Plan.refuse_unresolved_env(text)
+      Env.expand(text)
     end
 
     # The structured shape: `method` (default GET), the URL's path and query as the request
@@ -101,7 +112,7 @@ module Gori::Repeater
 
       lines = [] of {String, String}
       headers.each do |(k, v)|
-        value = expand ? Env.expand(v) : v
+        value = expand ? UrlRequest.expand(v) : v
         validate_header(k, value)
         lines << {k, value}
       end

@@ -455,6 +455,10 @@ module Gori::Fuzz
           # about the var TABLE; the escape belongs to the capture either way.
           (vars = options.env_vars) ? String.new(Env.expand_wire(options.template, vars, unescape: Env::Owns::None)) : options.template
         else
+          # …except a namespaced `$ENV.X` with no value, refused in a draft (#1666).
+          if detail = Env.unresolved_env(options.template)
+            raise PlanError.new(PlanError::Reason::UnresolvedEnv, "unresolved env #{detail}", detail)
+          end
           String.new(Env.expand_wire(options.template))
         end
       # The FRAME payloads, expanded on the same provenance axis as the head one line up: a

@@ -114,11 +114,7 @@ module Gori
         end
         activate_slot(slot, "gori run send")
 
-        # `-d` expands HERE, after `open_store` installed the project's env layer — before it, a
-        # `$ENV.KEY` the project defines would have gone out literally. `--body-file` never
-        # expands: those bytes are the body, the way MCP's `body_base64` is.
-        body_bytes = body_file_bytes || body.try { |b| (verbatim ? b : Env.expand(b)).to_slice }
-        built = send_built(dial_url, raw_content, method, header_pairs, body_bytes, verbatim)
+        built = send_built(dial_url, raw_content, method, header_pairs, body_file_bytes, body, verbatim)
         request = grpc_fields_or_abort(built.bytes, grpc_fields, "gori run send")
         outbound = project_outbound(project, allow_unscoped)
         plan = begin
@@ -244,16 +240,22 @@ module Gori
       # The request, built by the builder MCP's `send_request{url}` uses. After `open_store`,
       # because the URL, the headers and a raw request expand against the project's env.
       private def self.send_built(url : String, raw : String?, method : String?,
-                                  headers : Array({String, String}), body : Bytes?,
-                                  verbatim : Bool) : Repeater::UrlRequest::Built
+                                  headers : Array({String, String}), body_file : Bytes?,
+                                  body : String?, verbatim : Bool) : Repeater::UrlRequest::Built
         target = Repeater::UrlRequest.target(url)
         if r = raw
           Repeater::UrlRequest.raw(target, r, verbatim)
         else
-          Repeater::UrlRequest.structured(target, method, headers, body, expand: !verbatim)
+          # `-d` expands HERE, after `open_store` installed the project's env layer — before it, a
+          # `$ENV.KEY` the project defines would have gone out literally. `--body-file` never
+          # expands: those bytes are the body, the way MCP's `body_base64` is.
+          bytes = body_file || body.try { |b| (verbatim ? b : Repeater::UrlRequest.expand(b)).to_slice }
+          Repeater::UrlRequest.structured(target, method, headers, bytes, expand: !verbatim)
         end
       rescue ex : Gori::Error
         abort "gori run send: #{ex.message}"
+      rescue ex : Repeater::PlanError
+        repeater_plan_abort("gori run send", ex)
       end
 
       # Send `plan` and print what came back — the tail every repeater send shares: the History
