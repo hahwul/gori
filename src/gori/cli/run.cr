@@ -2207,8 +2207,11 @@ module Gori
       # caller with no chunked wire form has nothing to pass. `cap` is `--headers-only` /
       # `--max-body` (see `BodyCap`): the marker it leaves goes on STDOUT, in the body's place,
       # because a script reading the dump has to be able to tell a cut body from a short one.
+      # `exact` names the way to the body's exact bytes on THIS command: `history show` has
+      # `--format raw`, a send or repeater run only `--format json` (#1708).
       private def self.print_message_text(head : Bytes?, body : Bytes?, wire_body : Bytes? = nil,
-                                          cap : BodyCap = BodyCap.new) : Nil
+                                          cap : BodyCap = BodyCap.new,
+                                          exact : String = "--format raw for exact bytes, or view hex") : Nil
         # Neutralize ANSI/OSC/CSI escapes in captured (attacker-controlled) head/body
         # before writing to the live terminal; `binary_body?` only sniffs for NUL, so an
         # escape-only payload would otherwise pass through. `--format raw` stays exact.
@@ -2218,7 +2221,7 @@ module Gori
           if cap.omit
             STDOUT.puts "[body omitted by --headers-only: #{body.size} bytes]"
           elsif binary_body?(body)
-            STDOUT.puts "[binary body, #{body.size} bytes — use --format raw for exact bytes, or view hex]"
+            STDOUT.puts "[binary body, #{body.size} bytes — use #{exact}]"
           else
             shown = (max = cap.max) ? body_prefix(body, max) : body
             STDOUT.puts(CLI::Output.term_safe_multiline(String.new(shown).scrub))

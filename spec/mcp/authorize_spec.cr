@@ -468,6 +468,18 @@ describe "MCP authorize tools" do
       end
     end
 
+    # An unknown id is a `:missing` skip (#1684); it neither hides nor breaks the scope refusal.
+    it "still answers SCOPE_BLOCKED when an unknown flow id rides beside an out-of-scope one" do
+      with_store do |store|
+        flow = seed_authz_flow(store, 1)
+        store.add_scope_rule("include", "host", "only.example.com")
+        tools = tools_for(store)
+        r = call_result(tools, "authorize_start", {"flow_ids" => [flow, 9999], "identities" => anon}.to_json)
+        r.error_code.should eq("SCOPE_BLOCKED")
+        r.details.not_nil!["flows"].as_i.should eq(1)
+      end
+    end
+
     # Sandbox is Layer 2 and `allow_unscoped` deliberately does NOT lift it, so a waived run
     # can still have every send refused at the socket. Reporting that as "no identity matched
     # the baseline" would be a clean bill of health for traffic that never left (DESIGN.md §7).

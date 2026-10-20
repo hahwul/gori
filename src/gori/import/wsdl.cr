@@ -130,7 +130,7 @@ module Gori
 
         now = Time.utc.to_unix * 1_000_000
         pairs = [] of Builder::FlowPair
-        skipped = 0
+        skips = Skips.new
         notes = [] of String
         seen = Set(String).new
 
@@ -159,8 +159,8 @@ module Gori
               pairs << Builder.pending_request(now, loc, "POST",
                 headers_for(binding.version, action), body.to_slice,
                 source_surface: prov.surface, source_ref: prov.ref)
-            rescue
-              skipped += 1
+            rescue ex
+              skips.add("operation #{bop.name.inspect}", ex)
             end
           end
         end
@@ -168,10 +168,10 @@ module Gori
         # Nothing generated: say WHY. `import_file`'s generic "no flows found in …" would
         # hide a WSDL whose only ports are `http:binding`, which is a fact the operator can
         # act on. The notes are the reason they exist.
-        if pairs.empty? && skipped == 0 && (why = notes.first?)
+        if pairs.empty? && skips.count == 0 && (why = notes.first?)
           raise Gori::Error.new("no SOAP requests generated from #{path} — #{why}")
         end
-        ParseResult.new(pairs, skipped)
+        skips.result(pairs)
       end
 
       private def self.check_root!(root : Node, path : String) : Nil

@@ -102,7 +102,7 @@ module Gori
       #     — and it is fatal to the whole command, not to the one field: zero requests reach the
       #     wire, where curl / requests / fetch / net-http all send those same bytes verbatim. So
       #     the drop is what makes the rest of the command runnable.
-      private def self.carriable?(s : String) : Bool
+      def self.carriable?(s : String) : Bool
         !s.to_slice.includes?(0_u8) && s.valid_encoding?
       end
 

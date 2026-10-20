@@ -225,9 +225,12 @@ module Gori::Sequencer
     # Here rather than in each surface's argument parser, for the reason the builder exists:
     # this is the one seam all three sequence surfaces run through, so they refuse the same
     # descriptors by construction instead of by three copies agreeing.
+    #
+    # `TokenExtract.position` also clamps both ends to `0..size`, so a negative A is silently
+    # read as 0 and any B <= 0 misses every body the same way a reversed range does (#1692).
     private def self.check_token_loc(loc : TokenLoc) : Nil
       if loc.kind.position?
-        return if loc.pos_end > loc.pos_start
+        return if loc.pos_start >= 0 && loc.pos_end > loc.pos_start
         range = "#{loc.pos_start}:#{loc.pos_end}"
         raise PlanError.new(PlanError::Reason::BadPosition,
           "token byte range #{range} is empty", range)

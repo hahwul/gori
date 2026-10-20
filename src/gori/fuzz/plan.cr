@@ -305,6 +305,11 @@ module Gori::Fuzz
     # one run is the ordinary case), it is just inert — and being told nothing is how the
     # operator comes to believe both lists were swept.
     getter unused_payload_sets : Int32
+    # The opposite case, as a sentence both `gori run fuzz` and MCP print: Pitchfork /
+    # ClusterBomb given FEWER sets than positions hand each extra position set 1
+    # (`Generator#set_for`). Intended, but as silent as the surplus above, and it multiplies a
+    # cluster-bomb's request count. nil when every position has a set of its own (#1704).
+    getter reused_set_note : String?
     # Which positions this run percent-encodes for, and the encode itself. Exposed so a
     # surface can SAY so (the CLI notes it once, up front, and names `--no-encode`) and so
     # the TUI's request RECONSTRUCTION can reproduce the bytes the generator produced —
@@ -378,6 +383,7 @@ module Gori::Fuzz
                    @unframed_body : Bool = false,
                    @shadowed_marks : Array(String) = [] of String,
                    @unused_payload_sets : Int32 = 0,
+                   @reused_set_note : String? = nil,
                    @auto_encode : AutoEncode = AutoEncode.none,
                    @ws_script : WsScript? = nil,
                    @ws_ignored_knobs : Array(Symbol) = [] of Symbol,
@@ -586,6 +592,7 @@ module Gori::Fuzz
       # run's own position count — the two facts `Generator#set_for` actually maps through — so
       # this cannot drift from the contract it reports on. See `Plan#unused_payload_sets`.
       unused_sets = Math.max(sets.size - Math.min(gen_sets.size, marked.position_count), 0)
+      reused_set_note = reused_set_note(gen_sets.size, marked.position_count) if config.mode.per_position?
       # A payload a field's DECLARATION cannot hold, refused before the first dial — `abc` into
       # an `int32`, an enum name the schema does not carry. Beside `refuse_unrunnable_chains`
       # above and for the same reason its comment gives, over the sets the generator will
@@ -646,10 +653,18 @@ module Gori::Fuzz
         rewrites_content_length: config.update_content_length? &&
                                  ContentLength.sync(generator.baseline_raw, false) != generator.baseline_raw,
         unframed_body: unframed_body?(config, generator.baseline_raw),
-        shadowed_marks: shadowed_marks, unused_payload_sets: unused_sets, auto_encode: auto_encode,
+        shadowed_marks: shadowed_marks, unused_payload_sets: unused_sets,
+        reused_set_note: reused_set_note, auto_encode: auto_encode,
         ws_script: ws_script, ws_ignored_knobs: ws_ignored, grpc_fields: grpc_fields,
         tls_preset: sender.tls_preset, payload_reports: payload_reports,
         request_macro: request_macro)
+    end
+
+    # See `Plan#reused_set_note`. 1-based, as the operator counts positions and sets.
+    private def self.reused_set_note(sets : Int32, positions : Int32) : String?
+      return nil unless 0 < sets < positions
+      return "position #{positions} has no set of its own and reuses set 1" if sets + 1 == positions
+      "positions #{sets + 1}-#{positions} have no set of their own and reuse set 1"
     end
 
     # The run's macro lane, or nil when it has none (or has it `off`).

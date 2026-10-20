@@ -6,8 +6,10 @@ module Gori
       def self.parse_file(path : String, prov : Provenance = Provenance.none) : ParseResult
         now = Time.utc.to_unix * 1_000_000
         pairs = [] of Builder::FlowPair
-        skipped = 0
+        skips = Skips.new
+        lineno = 0
         File.each_line(path) do |line|
+          lineno += 1
           url = line.lchop('\u{FEFF}').strip
           next if url.empty?
           next if url.starts_with?('#')
@@ -17,11 +19,11 @@ module Gori
           begin
             pairs << Builder.pending_request(now, url,
               source_surface: prov.surface, source_ref: prov.ref)
-          rescue
-            skipped += 1
+          rescue ex
+            skips.add("line #{lineno}", ex)
           end
         end
-        ParseResult.new(pairs, skipped)
+        skips.result(pairs)
       end
     end
   end

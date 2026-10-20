@@ -37,6 +37,25 @@ describe Gori::Repeater::UrlRequest do
     expect_raises(Gori::Error, /only http\/https/) { Gori::Repeater::UrlRequest.target("ftp://h.test/") }
   end
 
+  # #1690: curl sends a URL's `user:pass@` as Basic auth; the send dropped it without a word.
+  it "encodes URL userinfo as Basic auth, percent-decoded, unless a header states Authorization" do
+    t = Gori::Repeater::UrlRequest.target("http://us%40er:p%3Ass@h.test:8080/creds")
+    {t.host, t.port}.should eq({"h.test", 8080})
+    none = [] of {String, String}
+    sent = String.new(Gori::Repeater::UrlRequest.structured(t, nil, none, nil).bytes)
+    sent.should eq("GET /creds HTTP/1.1\r\nHost: h.test:8080\r\n" \
+                   "Authorization: Basic #{Base64.strict_encode("us@er:p:ss")}\r\n\r\n")
+    mine = String.new(Gori::Repeater::UrlRequest.structured(t, nil, [{"authorization", "Bearer x"}], nil).bytes)
+    mine.should contain("authorization: Bearer x\r\n")
+    mine.should_not contain("Basic")
+    # A user with no password is an empty password, as curl sends it.
+    only = Gori::Repeater::UrlRequest.target("http://only@h.test/")
+    String.new(Gori::Repeater::UrlRequest.structured(only, nil, none, nil).bytes)
+      .should contain("Authorization: Basic #{Base64.strict_encode("only:")}\r\n")
+    # The raw shape is the operator's bytes: nothing is added.
+    String.new(Gori::Repeater::UrlRequest.raw(t, "GET / HTTP/1.1\r\n\r\n", true).bytes).should_not contain("Authorization")
+  end
+
   it "sends a raw request byte-exact under verbatim, and CRLF-promotes only its head otherwise" do
     t = Gori::Repeater::UrlRequest.target("http://h.test/")
     raw = "GET / HTTP/1.1\nHost: h\n\nbody\nline"

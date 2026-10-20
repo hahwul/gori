@@ -184,7 +184,7 @@ eval "$(gori run shell --print)"          # 지금 쓰는 셸에 적용할 expor
 gori run shell --print --shell fish | source
 ```
 
-주소는 프로젝트를 캡처 중인 gori에서 가져오고(포트 폴백 뒤에도 실제 포트), CA는 그 gori가 서명에 쓰는 것을 씁니다. 프로젝트를 캡처하는 gori가 없으면 `--proxy`로 주소를 주지 않는 한 거부합니다. 캡처가 일시정지 상태면 경고하고 진행합니다.
+주소는 프로젝트를 캡처 중인 gori에서 가져오고(포트 폴백 뒤에도 실제 포트), CA는 그 gori가 서명에 쓰는 것을 씁니다. 프로젝트를 캡처하는 gori가 없으면 `--proxy`로 주소를 주지 않는 한 거부합니다. 캡처가 일시정지 상태면 경고하고 진행합니다. 루트 CA에 Python 3.13+ 같은 엄격한 클라이언트가 요구하는 subjectKeyIdentifier나 keyUsage 확장이 없을 때도 경고하며 `gori ca regenerate`를 알려 줍니다.
 
 | Option | Description |
 |--------|-------------|
@@ -310,7 +310,7 @@ gori run history -q 'status:5xx' --limit 100 --format json
 gori run show <flow-id> --format raw
 ```
 
-`--format`은 `text`, `json`, `raw`(정확한 바이트), `har`(항목 하나짜리 HAR log), 또는 **요청을 코드로** 직렬화하는 `curl`, `python`(requests), `fetch`(JavaScript), `go`(net/http), `httpie`, `csrf`(스스로 제출하는 HTML CSRF PoC)입니다. 각각 TUI의 `Space → Y` **Copy as…**에서 같은 이름의 항목이 복사하는 것과 바이트 단위로 동일한 텍스트를 냅니다. `--request-only` / `--response-only`로 출력을 제한하며, `har`에는 적용되지 않습니다. 요청을 코드로 내는 형식은 모두 요청 그 자체이므로 `--response-only`는 거부됩니다. 두 가지 주의사항은 STDOUT의 스니펫이 아니라 STDERR로 나갑니다. 캡처 한도에서 잘린 요청 본문은 **짧은 채로** 실리고, WebSocket 플로우는 업그레이드 핸드셰이크만 직렬화되며 프레임은 담기지 않습니다. 디코드된 SAML/JWT/GraphQL/파라미터, WebSocket 메시지, SSE 이벤트가 있으면 함께 포함됩니다.
+`--format`은 `text`, `json`, `raw`(정확한 바이트), `har`(항목 하나짜리 HAR log), 또는 **요청을 코드로** 직렬화하는 `curl`, `python`(requests), `fetch`(JavaScript), `go`(net/http), `httpie`, `csrf`(스스로 제출하는 HTML CSRF PoC)입니다. 각각 TUI의 `Space → Y` **Copy as…**에서 같은 이름의 항목이 복사하는 것과 바이트 단위로 동일한 텍스트를 냅니다. `--request-only` / `--response-only`로 출력을 제한하며, `har`에는 적용되지 않습니다. 요청을 코드로 내는 형식은 모두 요청 그 자체이므로 `--response-only`는 거부됩니다. 세 가지 주의사항은 STDOUT의 스니펫이 아니라 STDERR로 나갑니다. 캡처 한도에서 잘린 요청 본문은 **짧은 채로** 실리고, WebSocket 플로우는 업그레이드 핸드셰이크만 직렬화되며 프레임은 담기지 않고, 명령줄에 실을 수 없는 `curl`·`httpie` 본문(NUL, httpie는 UTF-8이 아닌 바이트도)은 빠지며 정확한 바이트를 얻을 `--request-only --format raw`를 알려 줍니다. 디코드된 SAML/JWT/GraphQL/파라미터, WebSocket 메시지, SSE 이벤트가 있으면 함께 포함됩니다.
 
 `--headers-only`와 `--max-body=BYTES`는 `text`와 `json` 뷰를 간추립니다. `--headers-only`는 각 본문을 크기를 알려주는 한 줄로 바꾸고(`[body omitted by --headers-only: 149504 bytes]`; JSON에서는 body 객체가 `encoding`과 `size`를 유지한 채 `omitted: true`를 얻습니다), `--max-body`는 디코드된 각 본문의 앞쪽 BYTES바이트를 찍은 뒤 `[… truncated by --max-body: showing 2048 of 149504 bytes]`를 붙입니다(JSON에서는 `text`/`base64`가 그 앞부분을 담고, `size`는 전체 크기, `shown_size`는 보여준 부분, `truncated`는 true입니다). 둘 중 하나만 있어도 본문에서 파생되는 섹션(디코드 뷰, gRPC 메시지, WebSocket 프레임, SSE 이벤트)은 빠집니다. 트랜스크립트는 그래도 개수와 함께 이름이 남습니다(`=== SSE EVENTS (40) — not printed under --max-body ===`, 또는 `{"count": 40, "omitted": true}`). 이 둘은 전체 메시지를 그대로 쓰는 다른 형식들과 함께 쓸 수 없고, 서로도 함께 쓸 수 없습니다.
 
@@ -642,7 +642,7 @@ gori run send --url https://api.example.com --request-file req.http --headers-on
 
 | Option | Description |
 | -------- | ------------- |
-| `--url=URL` (또는 URL을 유일한 인자로) | 절대 `http://` / `https://` URL. 경로와 쿼리가 request-target이 됩니다. 원시 요청과 함께 쓰면 접속할 곳만 정합니다 |
+| `--url=URL` (또는 URL을 유일한 인자로) | 절대 `http://` / `https://` URL. 경로와 쿼리가 request-target이 됩니다. 원시 요청과 함께 쓰면 접속할 곳만 정합니다. URL의 `user:pass@`는 curl처럼 Basic `Authorization`으로 보내며, `-H`로 준 것이 있으면 그쪽을 씁니다 |
 | `-X`, `--method=METHOD` | HTTP 메서드 (기본값 `GET`, 본문이 있으면 curl처럼 `POST`) |
 | `-H`, `--header=HEADER` | `Name: value`, 반복 가능, 쓴 순서대로 전송. `Host`와 `Content-Length`는 빠뜨렸을 때만 추가됩니다. 두 줄로 쪼개질 헤더나 토큰이 아닌 이름은 거부됩니다. 잘못된 바이트를 보내려면 원시 요청을 쓰세요 |
 | `-d`, `--data=DATA` (`--body`) | curl의 `-d`처럼 요청 본문: 반복하면 `&`로 이어 붙이고, `-H`가 지정하지 않으면 `Content-Type: application/x-www-form-urlencoded`를 추가합니다. `$ENV.KEY` 토큰이 확장됩니다 |
@@ -670,12 +670,12 @@ WebSocket 핸드셰이크인 요청은 평범한 요청으로 나가고 그 `101
 |-------|---------|
 | Source | `--flow=ID`(캡처 플로우), `--repeater=ID`(저장된 리피터 세션. WebSocket 세션이면 핸드셰이크와 저장된 프레임을 함께 시드), `--request=FILE`, 또는 bare `<flow-id>` / stdin |
 | Transport | `--target=URL` (`--request`/stdin에 필수), `--http2`, `--sni=HOST`, `--tls-preset=NAME`(실행 전체에 쓰는 [TLS 지문](#per-send-tls-fingerprints) 하나), `-k`/`--insecure-upstream` |
-| Mode | `--mode=` `sniper` (기본값), `batteringram`, `pitchfork`, `clusterbomb`. 앞의 둘은 페이로드 세트를 **하나만**, 뒤의 둘은 표시된 위치마다 하나씩 사용합니다. 모드가 쓰지 않을 세트는 실행 전에 알려 줍니다 |
+| Mode | `--mode=` `sniper` (기본값), `batteringram`, `pitchfork`, `clusterbomb`. 앞의 둘은 페이로드 세트를 **하나만**, 뒤의 둘은 표시된 위치마다 하나씩 사용하며, 세트보다 많은 위치는 세트 1을 다시 씁니다. 모드가 쓰지 않을 세트와 세트 1을 다시 쓰는 위치는 실행 전에 알려 줍니다 |
 | gRPC fields | `--field=SPEC`(반복 가능)는 단항 gRPC 요청의 옥텟 대신 **스키마가 아는 필드**를 스윕합니다. `SPEC`은 필드 이름, 중첩 메시지 경로(`profile.age`), 필드 번호, 반복 필드의 특정 occurrence(`name[i]`)이며, `name¦chain`은 선언된 타입이 바이트로 인코딩하기 **전에** Decoder 체인을 돌립니다. 필드는 캡처된 메시지에 이미 있어야 하며(gori는 기존 occurrence를 바꿀 뿐 새로 추가하지 않습니다), `bytes` 필드의 페이로드는 **hex**(`de ad be ef`)로 읽습니다. 페이로드는 필드 선언을 거쳐 바이트가 되고(`-3`은 `int32`·`sint32`·`bool`·enum마다 다른 옥텟입니다), 메시지의 나머지 바이트는 캡처에서 그대로 복사되며, 5바이트 길이 접두사는 다시 계산됩니다. 해당 rpc를 해석할 descriptor set이 필요합니다(`gori run grpc schema`). 필드 위치는 템플릿 자신의 `§…§` 위치 뒤에 붙으므로 `--mode`와 페이로드 세트의 의미는 그대로입니다. 스키마가 선언하지 않은 필드, 선언과 와이어 타입이 충돌하는 필드, 선언된 타입이 담을 수 없는 페이로드는 모두 첫 요청 전에 거부됩니다 |
 | Payloads | `-w`/`--wordlist`(파일, 또는 저장한 목록의 이름), `--preset=NAME[:FILE]` (내장: `sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`, `cache-delimiters`), `--payloads=LIST`, `--numbers=FROM-TO[:STEP]`, `--null=N`, `--brute=CHARSET:MIN-MAX` |
 | Project data | `--payload-from='<QL> <projection>'`(반복 가능)은 프로젝트가 이미 캡처한 데이터에서 읽은 페이로드 세트입니다: `param-names`, `param-values`, `path-segments`, `js-endpoints`, `extracted`. 프로젝트를 읽기만 하고 아무것도 보내지 않으며, 직접 지정한 프로젝트(`--flow`, `--repeater`, `--project`, `--db`)가 필요합니다. `--payload-from-sensitive`는 자격 증명 값을 읽게 하고(기본은 제외, `extracted`는 필수), `--payload-from-locations=LIST`는 `headers`/`cookies`를 더하며, `--payload-from-max-flows=N`(2000, 최대 20000)과 `--payload-from-max-values=N`(10000, 최대 100000)은 한도를 올립니다. 모두 모든 `--payload-from`에 적용됩니다. 각 소스가 무엇을 읽었는지는 stderr에 나옵니다. [프로젝트에서 가져오는 페이로드](/ko/guide/repeater-and-fuzzer/#payloads-from-the-project) 참고 |
 | Encoding | **쿼리 문자열**이나 **form-urlencoded 본문** 값에 치환되는 페이로드는 기본으로 URL 인코딩됩니다. 경로 세그먼트·JSON/원시 본문·헤더·쿠키는 그대로 나갑니다. `--no-encode`는 쿼리/폼 위치도 원시로 보냅니다. 페이로드 자체가 이미 퍼센트 이스케이프인 경우에 쓰세요(`%00`이 `%2500`으로 나가므로, origin의 디코더 자체를 겨눈 `%00` / `%c0%af` / `%2e%2e%2f` 탐침은 그냥 텍스트로 도착합니다). `--encode`를 명시하면 기본 인코딩을 대체하며, 그 파이프라인이 모든 위치에 적용됩니다. `--prefix` / `--suffix` / `--case` / `--hash` / `--regex-replace`는 대체하지 않습니다: 페이로드가 무엇인지를 말할 뿐 와이어가 그것을 어떻게 적는지는 말하지 않으므로, 그 출력도 쿼리/폼 위치에서는 인코딩됩니다 |
-| Processors | `--prefix`, `--suffix`, `--encode` (`url`\|`urlall`\|`base64`\|`hex`), `--case` (`upper`\|`lower`), `--hash` (`md5`\|`sha1`\|`sha256`), `--regex-replace=/pat/rep/` |
+| Processors | `--prefix`, `--suffix`, `--encode` (`url`\|`urlall`\|`base64`\|`hex`), `--case` (`upper`\|`lower`), `--hash` (`md5`\|`sha1`\|`sha256`), `--regex-replace=/pat/rep/` (첫 글자가 구분자이므로 `#a/b#X#`처럼 쓰면 패턴에 `/`를 넣을 수 있습니다) |
 | Rate | `--concurrency` (20), `--rate=RPS`, `--throttle=MS`, `--timeout=SEC`, `--retries=N`, `--max-requests=N` (총 요청 상한. 재시도와 리다이렉트 홉도 포함), `--follow-redirects`, `--no-keep-alive`, `--sse-events=N` / `--sse-time=SEC` (이벤트 스트림 응답은 기본적으로 이벤트 50개 / 5초에서 멈춥니다. `0`은 그 한도를 끕니다) |
 | Macro | `--macro=STEPS`는 후보 **앞에서** 저장된 Repeater 세션(`repeater list`의 id 또는 탭 이름, 쉼표 구분, 반복 가능)을 다시 실행해서, 회전하는 CSRF 토큰이나 nonce가 후보가 `$BIND.NAME`을 풀 때 항상 새 값이 되게 합니다. `--macro-every=request\|N\|off`(기본 `request`: 후보마다 새 값을 받고 그래서 스윕은 후보를 한 번에 하나씩 보냅니다. `N`은 값 하나를 N개의 후보가 공유하며 최대 N개까지 동시에 나갑니다). `--macro-expect=NAME`(반복 가능)은 그 바인딩을 다시 바인딩하지 못하면 매크로를 실패로 처리합니다. `--macro-on-failure=skip\|stop`(기본 `skip`: 후보를 보내지 않고, 연속 세 번 실패하면 실행을 끝냅니다). 단계는 활성 `--slot`으로 실행되고 History에 `src:macro`로 기록되며 `--max-requests`에 합산되고 `--rate`에 묶입니다. 이름을 지정한 프로젝트가 필요합니다. `--race=N`과 함께 쓰면 `--macro-every`는 N 이상이어야 합니다. [매크로로 회전하는 토큰 다루기](/ko/guide/repeater-and-fuzzer/#rotating-tokens-with-a-macro) 참고 |
 | Race | `--race=N`은 연결 N개를 열어 각 요청을 마지막 1바이트 직전까지 보낸 뒤 동시에 풀어 놓습니다(last-byte sync). 레이스 그룹은 **요청 하나**의 복사본 N개이므로 `--mode`와 모든 페이로드/위치 플래그는 무시됩니다. `--race-warmup=FILE`은 레이스 요청을 붙잡기 전에 각 연결에서 이 원시 요청을 먼저 보내고 읽습니다 |
@@ -788,7 +788,7 @@ gori run authorize --query 'host:acme.test method:GET' --identities identities.j
 
 `set`은 헤더를 upsert하고 `remove`는 제거합니다. 어떤 항목도 `"baseline": true`를 갖지 않으면 캡처된 그대로의 요청이 기준선입니다. 기준선 외에 최소 한 개의 아이덴티티가 필요하며, 그렇지 않으면 비교할 것이 없습니다.
 
-의미 있게 재전송할 수 없는 플로우는 아무것도 보내기 전에 이유와 함께 STDERR에 나열됩니다(`no identity changes them`, `not a safe method to repeat`, `never completed`, `answered by gori`, `outside project scope`, `already queued`). 선택한 플로우가 전부 건너뛰어지면 실행하지 않고 거부합니다. 모든 전송이 소켓을 열기 전에 거부되면 깨끗한 결과를 보고하는 대신 `1`로 종료하며 그 사실을 말합니다. 아무것도 보내지 않은 실행은 접근 제어가 동작한다는 증거가 아니기 때문입니다.
+의미 있게 재전송할 수 없는 플로우는 아무것도 보내기 전에 이유와 함께 STDERR에 나열됩니다(`no identity changes them`, `not a safe method to repeat`, `never completed`, `answered by gori`, `outside project scope`, `already queued`, `no flow with that id`). 선택한 플로우가 전부 건너뛰어지면 실행하지 않고 거부합니다. 모든 전송이 소켓을 열기 전에 거부되면 깨끗한 결과를 보고하는 대신 `1`로 종료하며 그 사실을 말합니다. 아무것도 보내지 않은 실행은 접근 제어가 동작한다는 증거가 아니기 때문입니다.
 
 ### run cache-deception {#run-cache-deception}
 
@@ -1003,7 +1003,7 @@ gori run import --postman api.postman_collection.json --db ./assessment.db --for
 
 임포트는 플로우를 기록하므로 `discover`와 같은 방식으로 대상을 정합니다. `--db`를 주면 생성하거나 다시 열고, 주지 않으면 기본 프로젝트를 몰래 만들지 않고 기존 프로젝트에 씁니다.
 
-형식이 잘못된 항목은 파일 전체를 중단시키지 않고 건너뛰며, 결과에 양쪽 개수가 모두 담깁니다(`{"count": 12, "attempted": 12, "skipped": 3}`). 프로젝트가 파싱한 플로우를 모두 커밋하지 못하면(저장소가 바쁘거나 쓸 수 없는 경우) `count`가 `attempted`보다 작아지고, text 줄에 커밋되지 않은 개수가 나오며, 명령은 `1`로 끝납니다. 임포트를 다시 실행하면 그 플로우를 재시도합니다. 응답까지 가져오는 것은 `--har`와 `--burp`뿐이고, 나머지는 요청 템플릿이라 보내기 전까지 History에서 `Pending`으로 보입니다.
+형식이 잘못된 항목은 파일 전체를 중단시키지 않고 건너뛰며, 결과에 양쪽 개수가 모두 담기고(`{"count": 12, "attempted": 12, "skipped": 3}`), `notes`가 건너뛴 줄이나 항목과 그 이유를 알려줍니다(처음 20개). 프로젝트가 파싱한 플로우를 모두 커밋하지 못하면(저장소가 바쁘거나 쓸 수 없는 경우) `count`가 `attempted`보다 작아지고, text 줄에 커밋되지 않은 개수가 나오며, 명령은 `1`로 끝납니다. 임포트를 다시 실행하면 그 플로우를 재시도합니다. 응답까지 가져오는 것은 `--har`와 `--burp`뿐이고, 나머지는 요청 템플릿이라 보내기 전까지 History에서 `Pending`으로 보입니다.
 
 ### run sitemap {#run-sitemap}
 
@@ -1058,7 +1058,7 @@ gori run sitemap export --in-scope --examples > api.json
 - **보안**: `Authorization` 헤더는 `http` bearer, basic, digest 스킴이 됩니다. 다른 자격 증명 헤더(`X-Api-Key`, `X-Auth-Token` 등)와 세션 쿠키는 `apiKey` 스킴이 됩니다. 값은 절대 쓰지 않습니다.
 - **건너뜀**: gori가 직접 보낸 요청(Repeater, Fuzzer, Miner, Discover 등. `--include-gori`를 주면 포함), WebSocket, gRPC, SSE, 응답이 완료되지 않은 플로우, 그리고 OpenAPI에 자리가 없는 메서드(CONNECT, WebDAV)는 건너뛰고 stderr에 개수를 적습니다. 첫 번째 규칙이 없으면 Discover 브루트포스가 추측한 경로가 모두 들어가고, 퍼징이 모든 타입을 느슨하게 만들어 버립니다.
 
-`-q`/`--query=QL`(위치 인자로도 가능), `--in-scope`, `--hide-static`은 `history`처럼 플로우 단위로 읽을 대상을 좁힙니다. `--host`는 정확한 호스트, `--path=PREFIX`는 경로 접두사입니다. 여러 호스트에 걸친 플로우는 문서 하나에 모든 origin을 `servers`로 적고, 경로마다 응답한 origin을 따로 적습니다. API 하나당 문서 하나가 필요하면 `--host`를 쓰세요. `--max-samples=N`(기본값 20)은 operation마다 읽을 플로우 수, `--max-flows=N`(기본값 5000)은 전체 플로우 수, `--max-endpoints=N`(기본값 1000)은 남길 operation 수의 상한입니다. 상한 때문에 문서가 잘리면 stderr에 알려줍니다.
+`-q`/`--query=QL`(위치 인자로도 가능), `--in-scope`, `--hide-static`은 `history`처럼 플로우 단위로 읽을 대상을 좁힙니다. `--host`는 정확한 호스트, `--path=PREFIX`는 경로 접두사입니다. 여러 origin에 걸친 플로우는 문서 하나에 모든 origin을 `servers`로 적고, 그중 일부만 응답한 경로에는 그 origin을 따로 적습니다. API 하나당 문서 하나가 필요하면 `--host`를 쓰세요. `--max-samples=N`(기본값 20)은 operation마다 읽을 플로우 수, `--max-flows=N`(기본값 5000)은 전체 플로우 수, `--max-endpoints=N`(기본값 1000)은 남길 operation 수의 상한입니다. 상한 때문에 문서가 잘리면 stderr에 알려줍니다.
 
 `--examples`를 주지 않으면 `example` 값은 없습니다. 예시 값은 샘플 하나에서 가져와 redaction 프로필(`--redact=PROFILE`, 기본값은 프로젝트 프로필, 없으면 전역 프로필, 없으면 `default`)을 거칩니다. 프로필의 필드 이름과 폼 키 이름은 쿼리 파라미터에도 적용됩니다. 자격 증명처럼 보이는 이름(`X-Access-Token`, `apiKey`, `userPassword`, `sig`)은 프로필과 상관없이 placeholder가 되고, 쿠키 값은 항상 placeholder입니다. 경로 id는 비밀을 뜻하지 않는 세그먼트 아래의 짧은 숫자나 날짜일 때만 예시를 붙이고, UUID·16진수·토큰 모양 세그먼트에는 붙이지 않습니다. 경로 속 자격 증명과 구별할 수 없기 때문입니다. 토큰 모양 경로 세그먼트(JWT, 긴 무작위 문자열)와 `;jsessionid=` 같은 matrix 파라미터는 경로 키에 들어가지 않습니다. 출력은 결정적이어서 같은 플로우를 두 번 내보내면 바이트가 같습니다. 그래서 두 문서의 `diff`가 곧 API의 변화입니다.
 
@@ -1242,7 +1242,7 @@ report-generator | gori run issues update 7 --status confirmed --notes-stdin
 | `--export=PATH` | STDOUT 대신 `PATH`에 기록(바이트 그대로. STDOUT은 이스케이프를 제거) |
 | `--include-sensitive` | `sarif`의 `webRequest`/`webResponse` 헤더에서 `Authorization` / `Cookie` / `Set-Cookie` / `Proxy-Authorization` / API 키 값을 `[REDACTED]` 대신 그대로 씁니다. 다른 형식에서는 효과가 없으며 STDERR로 알려 줍니다 |
 | `create` | `-t`/`--title` (필수), `--cvss` (점수 또는 벡터. 이 값에서 severity를 자동 산정), `-s`/`--severity` (`info`\|`low`\|`medium`\|`high`\|`critical`), `--host`, `--flow=ID`, `-n`/`--notes`, `--notes-file=FILE`, `--notes-stdin` |
-| `update <id>` | `-t`/`--title`, `--cvss` (새 점수/벡터. 빈 문자열로 초기화), `-s`/`--severity`, `-n`/`--notes` (빈 문자열로 초기화), `--notes-file=FILE`, `--notes-stdin`, `--status` (`open`\|`confirmed`\|`false-positive`\|`resolved`) |
+| `update <id>` | `-t`/`--title`, `--cvss` (새 점수/벡터. 빈 문자열로 초기화), `-s`/`--severity`, `-n`/`--notes` (빈 문자열로 초기화), `--notes-file=FILE`, `--notes-stdin`, `--status` (`open`\|`confirmed`\|`false-positive`\|`resolved`), `--host` (빈 문자열로 초기화), `--flow=ID` (시드 플로우. 빈 문자열로 초기화하며, 이전 시드는 삭제 가능한 링크로 남음) |
 | `delete <id>` (`rm`) | 이슈와 그 증거 링크를 삭제합니다. `-y`/`--yes`가 필요합니다. 보고서에는 남기고 닫힌 상태로만 표시하려면 `update <id> --status=resolved`를 쓰세요 |
 
 `--format sarif`는 [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) 로그를 씁니다. GitHub code scanning, DefectDojo, Azure DevOps가 그대로 읽는 형식입니다. 이슈 하나가 result 하나가 되며, severity는 SARIF `level`로 매핑되고(5단계 원본은 `rank`와 룰의 `security-severity`에 보존), `false-positive`/`resolved` 상태는 `suppression`으로 나가 정리한 이슈가 다시 열린 것으로 보이지 않습니다. 연결된 플로우는 실제 헤더와 (디코딩·64 KiB 상한) 본문을 담은 `webRequest`/`webResponse`로 함께 실립니다.

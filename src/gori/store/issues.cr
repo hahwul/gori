@@ -56,11 +56,18 @@ module Gori
 
     # Returns whether the write committed (false = store busy/locked/closing). An empty
     # update (no fields supplied) is a no-op → true (nothing to persist, nothing failed).
+    #
+    # `host`/`flow_id` (#1686) are the singular's only: a new seed flow gets its `entity_links`
+    # row in the same transaction, as `insert_issue` writes it, and the old seed's row stays
+    # behind as an ordinary, now removable, link rather than vanishing from the evidence.
     def update_issue(id : Int64, *, title : String? = nil, severity : Severity? = nil,
                      notes : String? = nil, status : Status? = nil,
-                     cvss : String? = nil, clear_cvss : Bool = false) : Bool
+                     cvss : String? = nil, clear_cvss : Bool = false,
+                     host : String? = nil, clear_host : Bool = false,
+                     flow_id : Int64? = nil, clear_flow : Bool = false) : Bool
       update_issues([id], title: title, severity: severity, notes: notes, status: status,
-        cvss: cvss, clear_cvss: clear_cvss)
+        cvss: cvss, clear_cvss: clear_cvss, host: host, clear_host: clear_host,
+        flow_id: flow_id, clear_flow: clear_flow)
     end
 
     # Batch form of update_issue — the Issues list's multi-select severity/status set. ONE
@@ -80,7 +87,9 @@ module Gori
     # exec_task_ok, so the batch is still a single transaction and a single fsync.
     def update_issues(ids : Array(Int64), *, title : String? = nil, severity : Severity? = nil,
                       notes : String? = nil, status : Status? = nil,
-                      cvss : String? = nil, clear_cvss : Bool = false) : Bool
+                      cvss : String? = nil, clear_cvss : Bool = false,
+                      host : String? = nil, clear_host : Bool = false,
+                      flow_id : Int64? = nil, clear_flow : Bool = false) : Bool
       return true if ids.empty?
       sets = [] of String
       set_args = [] of DB::Any
@@ -101,17 +110,45 @@ module Gori
       elsif cv = canonical_cvss(cvss)
         sets << "cvss = ?"; set_args << cv
       end
+      set_or_clear(sets, set_args, "host", host, clear_host)
+      set_or_clear(sets, set_args, "flow_id", flow_id, clear_flow)
       return true if sets.empty?
       sets << "updated_at = ?"; set_args << now_us
       assignments = sets.join(", ")
+      reseed = clear_flow || !flow_id.nil?
       exec_task_ok ->(c : DB::Connection) {
+        link_seed_flows(c, ids, nil) if reseed
         ids.each_slice(ID_CHUNK) do |slice|
           args = set_args.dup
           slice.each { |id| args << id }
           c.exec("UPDATE issues SET #{assignments} WHERE id IN (#{Array.new(slice.size, "?").join(", ")})", args: args)
         end
+        link_seed_flows(c, ids, flow_id) unless clear_flow
         nil
       }
+    end
+
+    # One nullable column of `update_issues`: `col = NULL` on a clear, `col = ?` for a value.
+    private def set_or_clear(sets : Array(String), args : Array(DB::Any), col : String,
+                             value : DB::Any, clear : Bool) : Nil
+      if clear
+        sets << "#{col} = NULL"
+      elsif !value.nil?
+        sets << "#{col} = ?"; args << value
+      end
+    end
+
+    # A seed flow's link row, as `insert_issue` writes it (see its comment), and only for an
+    # issue that exists, so a peer's delete cannot leave an orphan row behind. With `flow_id`
+    # nil it links each issue's CURRENT seed instead — run before a reseed, so a seed that had
+    # no row (`Links.issue_links` synthesised it) stays as evidence rather than vanishing.
+    private def link_seed_flows(c : DB::Connection, ids : Array(Int64), flow_id : Int64?) : Nil
+      ts = now_us
+      ids.each do |id|
+        c.exec("INSERT OR IGNORE INTO entity_links (owner_kind, owner_id, ref_kind, ref_id, created_at) " \
+               "SELECT 'issue', id, 'flow', COALESCE(?, flow_id), ? FROM issues " \
+               "WHERE id = ? AND COALESCE(?, flow_id) IS NOT NULL", flow_id, ts, id, flow_id)
+      end
     end
 
     # Returns whether the write committed (false = store busy/locked/closing).

@@ -104,7 +104,7 @@ describe Gori::Tui::SequencerView do
             token_loc: Q::TokenLoc.new(Gori::ExtractKind::Position, "", 40, 8)))
         engine, err = view.build_engine(true, scope, nil)
         engine.should be_nil
-        err.should eq("set a byte range as A:B (B greater than A)")
+        err.should eq("set a byte range as A:B (A 0 or more, B greater than A)")
 
         # NoTokens — the manual-paste wording.
         view = Gori::Tui::SequencerView.new
