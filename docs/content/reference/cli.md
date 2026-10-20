@@ -191,7 +191,7 @@ eval "$(gori run shell --print)"          # export lines for the shell you are a
 gori run shell --print --shell fish | source
 ```
 
-The address comes from the gori capturing the project (its live port, even after a port fallback), and the CA from the one that gori signs with. When nothing is capturing the project, the command refuses unless `--proxy` names an address. When capture is paused, it warns and continues.
+The address comes from the gori capturing the project (its live port, even after a port fallback), and the CA from the one that gori signs with. When nothing is capturing the project, the command refuses unless `--proxy` names an address. When capture is paused, it warns and continues. It also warns when the root CA lacks the subjectKeyIdentifier or keyUsage extension that strict clients such as Python 3.13+ require, and names `gori ca regenerate`.
 
 | Option | Description |
 | -------- | ------------- |
@@ -323,7 +323,7 @@ gori run show <flow-id> --format raw
 
 `--original` prints a flow as it was before a [Match & Replace rule](/guide/proxy/#match-replace) or an Intercept edit changed it: the client's request and the origin's response, in any `--format`, with a side nothing changed shown as stored. A flow nothing changed is refused.
 
-`--format` is `text`, `json`, `raw` (exact bytes), `har` (a one-entry HAR log), or one of the **request-as-code** serializers: `curl`, `python` (requests), `fetch` (JavaScript), `go` (net/http), `httpie`, and `csrf` (a self-submitting HTML CSRF PoC). Each emits byte-identical text to the TUI's `Space → Y` **Copy as…** row of the same name. `--request-only` / `--response-only` limit the output and do not apply to `har`; every request-as-code format *is* the request, so `--response-only` is refused for all of them. Two caveats go to STDERR rather than into the snippet on STDOUT: a request body cut at the capture cap is carried **short**, and a WebSocket flow serializes as the upgrade handshake with none of its frames. Decoded SAML/JWT/GraphQL/params, WebSocket messages, and SSE events are included where present.
+`--format` is `text`, `json`, `raw` (exact bytes), `har` (a one-entry HAR log), or one of the **request-as-code** serializers: `curl`, `python` (requests), `fetch` (JavaScript), `go` (net/http), `httpie`, and `csrf` (a self-submitting HTML CSRF PoC). Each emits byte-identical text to the TUI's `Space → Y` **Copy as…** row of the same name. `--request-only` / `--response-only` limit the output and do not apply to `har`; every request-as-code format *is* the request, so `--response-only` is refused for all of them. Three caveats go to STDERR rather than into the snippet on STDOUT: a request body cut at the capture cap is carried **short**, a WebSocket flow serializes as the upgrade handshake with none of its frames, and a `curl` or `httpie` body no command line can carry (a NUL, or for httpie bytes that are not UTF-8) is left out, with `--request-only --format raw` named for its exact bytes. Decoded SAML/JWT/GraphQL/params, WebSocket messages, and SSE events are included where present.
 
 #### Safe evidence export
 

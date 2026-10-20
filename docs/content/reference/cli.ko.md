@@ -184,7 +184,7 @@ eval "$(gori run shell --print)"          # 지금 쓰는 셸에 적용할 expor
 gori run shell --print --shell fish | source
 ```
 
-주소는 프로젝트를 캡처 중인 gori에서 가져오고(포트 폴백 뒤에도 실제 포트), CA는 그 gori가 서명에 쓰는 것을 씁니다. 프로젝트를 캡처하는 gori가 없으면 `--proxy`로 주소를 주지 않는 한 거부합니다. 캡처가 일시정지 상태면 경고하고 진행합니다.
+주소는 프로젝트를 캡처 중인 gori에서 가져오고(포트 폴백 뒤에도 실제 포트), CA는 그 gori가 서명에 쓰는 것을 씁니다. 프로젝트를 캡처하는 gori가 없으면 `--proxy`로 주소를 주지 않는 한 거부합니다. 캡처가 일시정지 상태면 경고하고 진행합니다. 루트 CA에 Python 3.13+ 같은 엄격한 클라이언트가 요구하는 subjectKeyIdentifier나 keyUsage 확장이 없을 때도 경고하며 `gori ca regenerate`를 알려 줍니다.
 
 | Option | Description |
 |--------|-------------|
@@ -310,7 +310,7 @@ gori run history -q 'status:5xx' --limit 100 --format json
 gori run show <flow-id> --format raw
 ```
 
-`--format`은 `text`, `json`, `raw`(정확한 바이트), `har`(항목 하나짜리 HAR log), 또는 **요청을 코드로** 직렬화하는 `curl`, `python`(requests), `fetch`(JavaScript), `go`(net/http), `httpie`, `csrf`(스스로 제출하는 HTML CSRF PoC)입니다. 각각 TUI의 `Space → Y` **Copy as…**에서 같은 이름의 항목이 복사하는 것과 바이트 단위로 동일한 텍스트를 냅니다. `--request-only` / `--response-only`로 출력을 제한하며, `har`에는 적용되지 않습니다. 요청을 코드로 내는 형식은 모두 요청 그 자체이므로 `--response-only`는 거부됩니다. 두 가지 주의사항은 STDOUT의 스니펫이 아니라 STDERR로 나갑니다. 캡처 한도에서 잘린 요청 본문은 **짧은 채로** 실리고, WebSocket 플로우는 업그레이드 핸드셰이크만 직렬화되며 프레임은 담기지 않습니다. 디코드된 SAML/JWT/GraphQL/파라미터, WebSocket 메시지, SSE 이벤트가 있으면 함께 포함됩니다.
+`--format`은 `text`, `json`, `raw`(정확한 바이트), `har`(항목 하나짜리 HAR log), 또는 **요청을 코드로** 직렬화하는 `curl`, `python`(requests), `fetch`(JavaScript), `go`(net/http), `httpie`, `csrf`(스스로 제출하는 HTML CSRF PoC)입니다. 각각 TUI의 `Space → Y` **Copy as…**에서 같은 이름의 항목이 복사하는 것과 바이트 단위로 동일한 텍스트를 냅니다. `--request-only` / `--response-only`로 출력을 제한하며, `har`에는 적용되지 않습니다. 요청을 코드로 내는 형식은 모두 요청 그 자체이므로 `--response-only`는 거부됩니다. 세 가지 주의사항은 STDOUT의 스니펫이 아니라 STDERR로 나갑니다. 캡처 한도에서 잘린 요청 본문은 **짧은 채로** 실리고, WebSocket 플로우는 업그레이드 핸드셰이크만 직렬화되며 프레임은 담기지 않고, 명령줄에 실을 수 없는 `curl`·`httpie` 본문(NUL, httpie는 UTF-8이 아닌 바이트도)은 빠지며 정확한 바이트를 얻을 `--request-only --format raw`를 알려 줍니다. 디코드된 SAML/JWT/GraphQL/파라미터, WebSocket 메시지, SSE 이벤트가 있으면 함께 포함됩니다.
 
 `--headers-only`와 `--max-body=BYTES`는 `text`와 `json` 뷰를 간추립니다. `--headers-only`는 각 본문을 크기를 알려주는 한 줄로 바꾸고(`[body omitted by --headers-only: 149504 bytes]`; JSON에서는 body 객체가 `encoding`과 `size`를 유지한 채 `omitted: true`를 얻습니다), `--max-body`는 디코드된 각 본문의 앞쪽 BYTES바이트를 찍은 뒤 `[… truncated by --max-body: showing 2048 of 149504 bytes]`를 붙입니다(JSON에서는 `text`/`base64`가 그 앞부분을 담고, `size`는 전체 크기, `shown_size`는 보여준 부분, `truncated`는 true입니다). 둘 중 하나만 있어도 본문에서 파생되는 섹션(디코드 뷰, gRPC 메시지, WebSocket 프레임, SSE 이벤트)은 빠집니다. 트랜스크립트는 그래도 개수와 함께 이름이 남습니다(`=== SSE EVENTS (40) — not printed under --max-body ===`, 또는 `{"count": 40, "omitted": true}`). 이 둘은 전체 메시지를 그대로 쓰는 다른 형식들과 함께 쓸 수 없고, 서로도 함께 쓸 수 없습니다.
 
