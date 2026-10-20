@@ -36,3 +36,14 @@ describe "gori run project env set refusal" do
     Gori::CLI::Run.env_set_refusal(["TOKEN=#{invalid}"]).should contain("not valid UTF-8")
   end
 end
+
+# #1707: the TOTP secret never expands as a token (#1591), so the hint must not offer one.
+describe "gori run project env set confirmation" do
+  it "names $GEN.TOTP for TOTP_SECRET and the $ENV spelling for anything else" do
+    with_env_syntax(Gori::Env::Syntax::Namespaced) do
+      Gori::CLI::Run.env_set_confirmation("TOKEN").should eq("Env var TOKEN set — reference it as $ENV.TOKEN.")
+      Gori::CLI::Run.env_set_confirmation(Gori::Env::TOTP_SECRET_VAR)
+        .should eq("Env var TOTP_SECRET set — read by $GEN.TOTP (never expands as $ENV.TOTP_SECRET).")
+    end
+  end
+end

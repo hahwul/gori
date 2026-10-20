@@ -1098,10 +1098,19 @@ module Gori
           # in between — while still printing "set". The read happens inside the write
           # transaction, so only this key changes.
           Env.set_project_var(store, key, val) || abort_closing(store, "gori run project env set: project is busy (write did not commit) — try again")
-          # Spelled through `Env.spell`, because the answer to "how do I use it now?" is
-          # mode-dependent: `$ENV.KEY` on a namespaced install, `$KEY` on a bare one.
-          puts "Env var #{key} set — reference it as #{Env.spell(key, Env::Namespace::Env)}."
+          puts env_set_confirmation(key)
         end
+      end
+
+      # Spelled through `Env.spell`, because the answer to "how do I use it now?" is
+      # mode-dependent: `$ENV.KEY` on a namespaced install, `$KEY` on a bare one. Except the TOTP
+      # secret, which no token expands (#1591, #1707): only `$GEN.TOTP` reads it.
+      def self.env_set_confirmation(key : String) : String
+        if key == Env::TOTP_SECRET_VAR
+          return "Env var #{key} set — read by #{Env.spell("TOTP", Env::Namespace::Gen, Env::Syntax::Namespaced)} " \
+                 "(never expands as #{Env.spell(key, Env::Namespace::Env)})."
+        end
+        "Env var #{key} set — reference it as #{Env.spell(key, Env::Namespace::Env)}."
       end
 
       # argv has already separated KEY and VALUE for the two-argument form. Keep that split
