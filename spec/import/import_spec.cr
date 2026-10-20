@@ -135,6 +135,41 @@ describe Gori::Import do
     end
   end
 
+  # #1687: a bare rescue counted the skip and threw its reason away.
+  it "says which line of a URL list was skipped and why" do
+    urls = File.tempname("gori", ".txt")
+    begin
+      File.write(urls, "http://ok.test/a\n\nftp://ok.test/file\nhttp://ok.test:99999/badport\n")
+      with_store do |store|
+        result = Gori::Import.import_file(store, :urls, urls)
+        {result.count, result.skipped}.should eq({1, 2})
+        result.notes.size.should eq(2)
+        result.notes[0].should start_with("skipped line 3: invalid URL (missing scheme)")
+        result.notes[1].should start_with("skipped line 4: invalid URL (port out of range)")
+      end
+    ensure
+      File.delete?(urls)
+    end
+  end
+
+  it "says which HAR entry was skipped and why, and names the first reason when none landed" do
+    har = File.tempname("gori", ".har")
+    begin
+      File.write(har, %({"log": {"entries": [{"request": {"url": "http://h.test:99999/x"}}, {"nope": 1}]}}))
+      with_store do |store|
+        expect_raises(Gori::Error, /all 2 entries were skipped as malformed \(skipped entry 1: invalid URL \(port out of range\)/) do
+          Gori::Import.import_file(store, :har, har)
+        end
+      end
+      File.write(har, %({"log": {"entries": [{"request": {"url": "https://h.test/ok"}}, {"nope": 1}]}}))
+      with_store do |store|
+        Gori::Import.import_file(store, :har, har).notes.should eq(["skipped entry 2: no request"])
+      end
+    ensure
+      File.delete?(har)
+    end
+  end
+
   # #1690: curl sends `user:pass@` as Basic auth, and `import --curl` already did.
   it "encodes URL userinfo as Basic auth on a URL-list import, unless the source states one" do
     urls = File.tempname("gori", ".txt")
@@ -157,6 +192,14 @@ describe Gori::Import do
     ensure
       File.delete?(urls)
     end
+  end
+
+  it "caps the skip reasons and folds the rest into one line" do
+    skips = Gori::Import::Skips.new
+    25.times { |i| skips.add("line #{i + 1}", Gori::Error.new("bad")) }
+    skips.count.should eq(25)
+    skips.notes.size.should eq(Gori::Import::Skips::CAP + 1)
+    skips.notes.last.should eq("+5 more skipped")
   end
 
   it "indexes the imported request body for FTS body: search (response-bearing entry)" do

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Import: every format says which line or entry it skipped and why (the first 20, in `notes`), the error for an import where nothing landed names the first reason, and a HAR handshake written with a `ws://` or `wss://` URL imports with its WebSocket messages (#1687, #1688)
 - `gori run send`, MCP `send_request{url}` and `gori run import --urls` send a URL's `user:pass@` as Basic `Authorization`, as curl does, unless a header gives one (#1690)
 - Sitemap: OpenAPI export gives a path its own `servers` whenever the origins that answered it differ from the document's, so two origins of one host are no longer merged and `import --oas` puts each operation back on its own origin (#1675)
 - Sitemap: JavaScript endpoint discovery keeps a literal whole when it holds `:`, a query or non-ASCII (percent-encoded), finds `//host:port/…` references, and flags a cut it cannot close as templated; the next scan re-reads every bundle (#1697)

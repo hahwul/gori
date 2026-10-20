@@ -1001,7 +1001,7 @@ gori run import --postman api.postman_collection.json --db ./assessment.db --for
 
 Import writes flows, so it resolves its target like `discover`: an explicit `--db` is created or reopened, and without one it writes into an existing project rather than silently creating a default.
 
-A malformed entry is skipped rather than aborting the file; the result reports both counts (`{"count": 12, "attempted": 12, "skipped": 3}`). When the project cannot commit every parsed flow (a busy or unwritable store), `count` is smaller than `attempted`, the text line says how many did not commit, and the command exits `1`; re-run the import to retry them. Only `--har` and `--burp` carry responses; the rest import request templates that show as `Pending` in History until you send them.
+A malformed entry is skipped rather than aborting the file; the result reports both counts (`{"count": 12, "attempted": 12, "skipped": 3}`), and `notes` says which line or entry each skip was and why (the first 20). When the project cannot commit every parsed flow (a busy or unwritable store), `count` is smaller than `attempted`, the text line says how many did not commit, and the command exits `1`; re-run the import to retry them. Only `--har` and `--burp` carry responses; the rest import request templates that show as `Pending` in History until you send them.
 
 ### run sitemap
 

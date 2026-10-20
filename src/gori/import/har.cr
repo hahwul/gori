@@ -20,8 +20,9 @@ module Gori
       # got the tally. Every other parser already returns and lets `import_file` speak.
       def self.parse_file(path : String, prov : Provenance = Provenance.none) : ParseResult
         flows = [] of Builder::FlowPair
-        skipped = each_flow(path, prov) { |flow| flows << flow }
-        ParseResult.new(flows, skipped)
+        skips = Skips.new
+        each_flow(path, prov, skips) { |flow| flows << flow }
+        skips.result(flows)
       end
 
       # How long the walk runs before it hands the fiber back. A HAR is the one import that
@@ -35,7 +36,8 @@ module Gori
       # whole-file parse always used — so a 200 MB HAR is never in memory as one tree, and the
       # fiber yields every `PACE_SLICE` so a render loop keeps drawing while it runs. Yields
       # each flow; returns the number of entries SKIPPED as malformed (a bad body encoding, a
-      # bad date, an unexpected shape — one entry must never abort the file).
+      # bad date, an unexpected shape — one entry must never abort the file), each with its
+      # reason in `skips`.
       #
       # `cancelled` is polled per entry: true stops the walk where it is (the rest of the file
       # is not read), which is the palette cancel of a running TUI import.
@@ -66,7 +68,7 @@ module Gori
         end
       end
 
-      def self.each_flow(path : String, prov : Provenance = Provenance.none,
+      def self.each_flow(path : String, prov : Provenance = Provenance.none, skips : Skips = Skips.new,
                          cancelled : (-> Bool)? = nil, &block : Builder::FlowPair ->) : Int32
         File.open(path) do |file|
           skip_bom(file)
@@ -76,7 +78,7 @@ module Gori
           skipped = nil.as(Int32?)
           while !pull.kind.end_object?
             if pull.read_object_key == "log"
-              skipped = walk_log(pull, prov, cancelled, block)
+              skipped = walk_log(pull, prov, skips, cancelled, block)
             else
               pull.skip
             end
@@ -118,14 +120,14 @@ module Gori
 
       # The `log` object: its `entries` array is walked, everything else (version, creator,
       # pages, comment) skipped without being built. Returns the skipped-entry count.
-      private def self.walk_log(pull : JSON::PullParser, prov : Provenance,
+      private def self.walk_log(pull : JSON::PullParser, prov : Provenance, skips : Skips,
                                 cancelled : (-> Bool)?, block : Builder::FlowPair ->) : Int32
         raise Gori::Error.new("HAR file missing log object") unless pull.kind.begin_object?
         pull.read_begin_object
         skipped = nil.as(Int32?)
         while !pull.kind.end_object?
           if pull.read_object_key == "entries"
-            skipped = walk_entries(pull, prov, cancelled, block)
+            skipped = walk_entries(pull, prov, skips, cancelled, block)
           else
             pull.skip
           end
@@ -136,14 +138,15 @@ module Gori
 
       # The `entries` array, one entry at a time. A cancel unwinds through `Stopped` with the
       # parser still inside the array: the caller is stopping, and nothing past it is read.
-      private def self.walk_entries(pull : JSON::PullParser, prov : Provenance,
+      private def self.walk_entries(pull : JSON::PullParser, prov : Provenance, skips : Skips,
                                     cancelled : (-> Bool)?, block : Builder::FlowPair ->) : Int32
         raise Gori::Error.new("HAR file has no entries") unless pull.kind.begin_array?
         pull.read_begin_array
-        skipped = 0
+        index = 0
         last_pause = Time.instant
         while !pull.kind.end_array?
-          raise Stopped.new(skipped) if cancelled.try(&.call)
+          raise Stopped.new(skips.count) if cancelled.try(&.call)
+          index += 1
           # The entry as its own tree, straight off the parser. OUTSIDE the rescue below on
           # purpose: a JSON error here is the FILE being malformed, and swallowing it as one
           # skipped entry would leave the parser where it stopped and this loop spinning on it.
@@ -153,7 +156,8 @@ module Gori
           # type casts), which previously discarded every valid entry.
           flow = begin
             entry_to_flow(entry, prov)
-          rescue
+          rescue ex
+            skips.add("entry #{index}", ex)
             nil
           end
           if flow
@@ -170,8 +174,6 @@ module Gori
             rescue ex
               raise ConsumerRaise.new(ex)
             end
-          else
-            skipped += 1
           end
           if Time.instant - last_pause >= PACE_SLICE
             Fiber.yield
@@ -179,14 +181,13 @@ module Gori
           end
         end
         pull.read_end_array
-        skipped
+        skips.count
       end
 
-      private def self.entry_to_flow(entry : JSON::Any, prov : Provenance) : Builder::FlowPair?
-        req = entry["request"]?
-        return nil unless req
+      private def self.entry_to_flow(entry : JSON::Any, prov : Provenance) : Builder::FlowPair
+        req = entry["request"]? || raise Gori::Error.new("no request")
         url = http_url(req["url"]?.to_s)
-        return nil if url.empty?
+        raise Gori::Error.new("request has no url") if url.empty?
         method = req["method"]?.to_s.presence || "GET"
         http_version = normalize_http_version(req["httpVersion"]?.to_s)
         created_at = parse_started(entry["startedDateTime"]?.to_s)
