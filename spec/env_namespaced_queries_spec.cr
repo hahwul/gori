@@ -136,11 +136,12 @@ describe "Gori::Env — namespaced queries" do
       slot = Gori::SessionSlot.new("admin",
         set_headers: [{"Authorization", "Bearer $BIND.SESSION"}, {"X-Env", "$ENV.HOST"}],
         rules: ["SESSION"])
-      Gori::Env.slot_literals(slot).map(&.name).should eq(["SESSION"])
+      # The `$ENV.HOST` too, qualified: no pass over a slot header resolves env vars (#1689).
+      Gori::Env.slot_literals(slot).map(&.name).should eq(["SESSION", "ENV.HOST"])
       Gori::Env.spell_escaped("SESSION", Gori::Env::Namespace::Bind).should eq("$$BIND.SESSION")
-      # Bound ⇒ nothing to report.
+      # Bound ⇒ only the env var is left to report.
       Gori::Env.layer = QueryLayer.new(["SESSION"], {"SESSION" => "tok"})
-      Gori::Env.slot_literals(slot).map(&.name).should be_empty
+      Gori::Env.slot_literals(slot).map(&.name).should eq(["ENV.HOST"])
     end
   end
 
@@ -174,10 +175,27 @@ describe "Gori::Env — namespaced queries" do
         set_headers: [{"Authorization", "Bearer $SESSION"}], rules: ["SESSION"])
       Gori::Env.slot_literals(slot).map(&.name).should eq(["SESSION"])
       # A name in NEITHER list is plan-build's business, exactly as the namespaced half states —
-      # `$id` in a header value is not a reference gori may speak for.
+      # `$id` in a header value is not a reference gori may speak for. (`$ENV.HOST` is, #1689.)
       other = Gori::SessionSlot.new("admin",
         set_headers: [{"X-A", "$id"}, {"X-B", "$ENV.HOST"}], rules: [] of String)
-      Gori::Env.slot_literals(other).map(&.name).should be_empty
+      Gori::Env.slot_literals(other).map(&.name).should eq(["ENV.HOST"])
+    end
+  end
+
+  # #1689: a slot resolves BIND and GEN only, so an `$ENV.X` there always ships literally, set or
+  # not. Reported as its own cause; the doubled escape is consistent text and is not.
+  it "reports a slot header's $ENV.X, set or not, but not its $$ENV.X escape" do
+    with_q(vars: [{"TOKEN", "abc123"}]) do
+      slot = Gori::SessionSlot.new("envy",
+        set_headers: [{"X-Tok", "$ENV.TOKEN"}, {"X-Gen", "$GEN.UUID"}, {"X-Esc", "$$ENV.TOKEN"}])
+      lit = Gori::Env.slot_literals(slot)
+      lit.map(&.name).should eq(["ENV.TOKEN"])
+      lit[0].env.should be_true
+      warning = Gori::Env.slot_env_warning(slot).not_nil!
+      warning.should contain("$ENV.TOKEN goes out LITERALLY")
+      warning.should contain("$BIND.NAME and $GEN.NAME only")
+      warning.should_not contain("abc123")
+      Gori::Env.slot_env_warning(Gori::SessionSlot.new("ok", set_headers: [{"X", "$GEN.UUID"}])).should be_nil
     end
   end
 

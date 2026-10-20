@@ -116,7 +116,7 @@ module Gori
       # `edit --help` describe the same dialect (they are the same dialect).
       private def self.session_edit_flags(p : OptionParser, e : SlotEdit, cmd : String) : Nil
         p.on("--name=NAME", "The slot's name (on `edit`, renames it)") { |v| e.name = v.strip }
-        p.on("--set=LINE", "Header to UPSERT, as 'Name: value' (repeatable)") { |v| e.push_set(parse_session_header(v, cmd)) }
+        p.on("--set=LINE", "Header to UPSERT, as 'Name: value' (repeatable); its value resolves bindings and generators, never env vars") { |v| e.push_set(parse_session_header(v, cmd)) }
         p.on("--remove=NAME", "Header to STRIP before sending (repeatable)") { |v| e.push_remove(v.strip) }
         p.on("--rule=NAME", "Extract rule (binding NAME) whose values belong to THIS slot (repeatable)") { |v| e.push_rule(v.strip) }
         p.on("--baseline", "Make this the Authorize baseline every other slot is judged against") { e.baseline = true }
@@ -294,6 +294,7 @@ module Gori
           # The row as saved, not as built: `add` may auto-mark the first slot baseline and
           # drops empty entries, and the printed row must not deny either.
           puts session_slot_row(slots.find(name) || slot, false)
+          warn_slot_env(slot, "gori run session add")
         ensure
           store.close
         end
@@ -500,9 +501,15 @@ module Gori
           abort "gori run session edit: the project could not be written — " \
                 "#{target.inspect} is unchanged" unless slots.update(target, updated)
           puts session_slot_row(updated, false)
+          warn_slot_env(updated, "gori run session edit")
         ensure
           store.close
         end
+      end
+
+      # Said, not refused (#1689): a slot header's `$ENV.X` is sent as typed (`Env.slot_env_note`).
+      private def self.warn_slot_env(slot : Gori::SessionSlot, cmd : String) : Nil
+        Env.slot_env_warning(slot).try { |w| STDERR.puts "#{cmd}: warning: #{w}" }
       end
 
       # `current` with every flag `edit` carries applied — a flag left out keeps its field.

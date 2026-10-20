@@ -56,6 +56,8 @@ What the active slot changes, on `send_request`, a Repeater or Fuzzer send, and 
 - its **header overlay** is applied to the final wire bytes, after `$BIND.NAME` substitution, header lines only, so `Content-Length` never moves and the body is byte-exact;
 - `$BIND.NAME` resolves against **its** binding table. An extract rule a slot claims writes that slot's table; a rule no slot claims keeps writing the one global table it always did. So `Authorization: Bearer $BIND.SESSION` means admin's token on the `admin` slot and the low-priv user's on `low-priv`, off one saved string.
 
+A slot header resolves `$BIND.NAME` and `$GEN.NAME` only. An `$ENV.KEY` in one goes out as typed, and `gori run session add`/`edit` and MCP's slot writes warn when a header names one: write the value itself.
+
 Three things the active slot deliberately does **not** do:
 
 - **It does not apply to an Authorize run.** This tab supplies the identity itself, once per send, and comparing them *is* the measurement, so a run reads the list across and wears none of it, whichever slot is active. Left to apply, the active slot would write its `Cookie` over the top of every identity, including the one whose whole job is to remove it: every response would match the baseline by construction and every queued row would report a bypass that does not exist. What *does* still apply is the second half above: each identity's own `$BIND.NAME` resolves out of **that identity's** binding table as its overlay goes on, so `Cookie: session=$BIND.SESSION` on both `admin` and `low-priv` is two different sessions on the wire, which is the whole point of running them side by side.

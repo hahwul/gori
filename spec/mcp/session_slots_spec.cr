@@ -22,6 +22,22 @@ private def call_json(tools, name, args : String) : JSON::Any
 end
 
 describe "MCP session slots" do
+  # #1689: a slot header resolves BIND and GEN only; a write naming an `$ENV` var says so.
+  it "warns on a slot write whose header names an $ENV var, and only then" do
+    with_store do |store|
+      with_env_syntax(Gori::Env::Syntax::Namespaced) do
+        t = tools_for(store)
+        created = call_json(t, "create_session_slot", %({"name":"envy","set_headers":["X-Tok: $ENV.TOKEN"]}))
+        created["warning"].as_s.should contain("$ENV.TOKEN goes out LITERALLY")
+        plain = call_json(t, "create_session_slot", %({"name":"plain","set_headers":["X-Gen: $GEN.UUID"]}))
+        plain["warning"]?.should be_nil
+        updated = call_json(t, "update_session_slot", %({"name":"plain","set_headers":["X-E: $ENV.OTHER"]}))
+        updated["warning"].as_s.should contain("$ENV.OTHER")
+        call_json(t, "list_session_slots", "{}").to_json.should_not contain("goes out LITERALLY")
+      end
+    end
+  end
+
   it "creates, lists, updates and deletes, and persists to the project" do
     with_store do |store|
       t = tools_for(store)

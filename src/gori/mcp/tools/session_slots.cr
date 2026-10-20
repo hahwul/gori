@@ -99,7 +99,7 @@ module Gori
         # Re-read rather than echo what was built: `SessionSlots` owns the single-baseline
         # rule, so the FIRST slot in a project comes back holding a flag the caller did not
         # ask for — and a reply that denied it would have the agent set it a second time.
-        Result.new(JSON.build { |j| emit_session_slot(j, registry.find(slot.name) || slot, false, registry.active_name, sources) })
+        Result.new(JSON.build { |j| emit_session_slot(j, registry.find(slot.name) || slot, false, registry.active_name, sources, env_warning: true) })
       end
 
       # The overlay a `create_session_slot` call asked for, plus one line per SOURCE when it
@@ -229,7 +229,7 @@ module Gori
         # Re-read: dropping the baseline hands it to another row (see `create_session_slot`).
         Result.new(JSON.build do |j|
           emit_session_slot(j, registry.find(updated.name) || updated, false, registry.active_name,
-            auto_refresh_disarmed: disarmed)
+            auto_refresh_disarmed: disarmed, env_warning: true)
         end)
       end
 
@@ -462,7 +462,8 @@ module Gori
                                     include_sensitive : Bool, active : String?,
                                     sources : Array(String) = [] of String,
                                     refresh_status : Bool = false,
-                                    auto_refresh_disarmed : Bool = false) : Nil
+                                    auto_refresh_disarmed : Bool = false,
+                                    env_warning : Bool = false) : Nil
         j.object do
           j.field "name", slot.name
           # Where each header came from, when the overlay was READ off a flow rather than
@@ -493,6 +494,10 @@ module Gori
           j.field "refresh_before", slot.refresh_before.to_s
           emit_auto_refresh_disarmed(j, [slot.name]) if auto_refresh_disarmed
           emit_refresh_status(j, slot) if refresh_status
+          # On a WRITE: a header naming an `$ENV` var is saved, and said (#1689). Names, never values.
+          if env_warning && (w = Env.slot_env_warning(slot))
+            j.field "warning", w
+          end
         end
       end
 

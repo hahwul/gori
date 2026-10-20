@@ -90,6 +90,18 @@ describe "R1 · the unbound-overlay drain has a consumer" do
     end
   end
 
+  # #1689: an `$ENV.X` in a slot header has no binding remedy, so it gets its own sentence.
+  it "says an env var in a slot header goes out as typed, apart from the binding sentence" do
+    with_env_syntax(Gori::Env::Syntax::Namespaced) do
+      env_only = Gori::CLI::Run.unbound_overlay_note([{"envy", "ENV.TOKEN"}]).not_nil!
+      env_only.should contain("envy: $ENV.TOKEN goes out LITERALLY")
+      env_only.should_not contain("--bind-from")
+      mixed = Gori::CLI::Run.unbound_overlay_note([{"admin", "SESSION"}, {"admin", "ENV.TOKEN"}]).not_nil!
+      mixed.should contain("admin sent $BIND.SESSION.")
+      mixed.should contain("admin: $ENV.TOKEN goes out LITERALLY")
+    end
+  end
+
   describe "over the real seam" do
     it "an UNBOUND slot overlay produces the summary sentence" do
       with_store do |store|

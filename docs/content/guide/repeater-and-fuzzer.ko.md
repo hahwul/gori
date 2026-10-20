@@ -112,7 +112,7 @@ gori run repeater ws <repeater-id> --engine-io --for 30s
 
 "bare `$NAME`은 그냥 바이트"라는 규칙은 **요청 텍스트**(바디, 헤더, 붙여넣은 페이로드)에 대한 것입니다. [Match & Replace](/ko/guide/proxy/#match-replace)의 **치환 텍스트**에서는 그렇지 않습니다. 그 칼럼은 값을 주입하는 것만이 목적이므로, 알려진 환경 변수·extract 규칙·세션 슬롯이 주장하는 이름을 bare `$NAME`으로 적어 두었다면 그건 문법이 바뀐 뒤 남은 규칙입니다. gori는 **그 규칙을 적용하지 않고** 다시 적어야 할 철자를 알려주는 이벤트를 남깁니다. `$ENV.NAME` / `$BIND.NAME`으로 고치거나, 정말 리터럴 텍스트를 의도했다면 `$$NAME`으로 적으세요.
 
-알 수 없는 토큰은 요청이 *표시*되는 곳에서는 리터럴 텍스트로 그대로 남습니다. 에디터는 입력한 그대로를 유지하고, 하이라이터가 미등록 토큰을 등록된 토큰과 다르게 칠합니다. 다만 아무 값으로도 해석되지 않는 `$ENV.KEY`는 전송되지 않습니다. 직접 작성한 요청이면 Repeater, Fuzzer, Miner, Sequencer, `gori run send`와 `gori run repeater send`, MCP `send_request`가 연결 전에 그 토큰을 대며 거부합니다. 변수를 설정하거나 토큰을 지우세요. 캡처를 재전송하는 요청은, 시드된 바이트를 그대로 가진 Repeater 세션을 포함해, 캡처에 들어 있던 토큰을 그대로 보냅니다. 타깃과 SNI는 해석되지 않는 토큰이 하나라도 있으면 거부되고.
+알 수 없는 토큰은 요청이 *표시*되는 곳에서는 리터럴 텍스트로 그대로 남습니다. 에디터는 입력한 그대로를 유지하고, 하이라이터가 미등록 토큰을 등록된 토큰과 다르게 칠합니다. 다만 아무 값으로도 해석되지 않는 `$ENV.KEY`는 전송되지 않습니다. 직접 작성한 요청이면 Repeater, Fuzzer, Miner, Sequencer, `gori run send`와 `gori run repeater send`, MCP `send_request`가 연결 전에 그 토큰을 대며 거부합니다. 변수를 설정하거나 토큰을 지우세요. 캡처를 재전송하는 요청은, 시드된 바이트를 그대로 가진 Repeater 세션을 포함해, 캡처에 들어 있던 토큰을 그대로 보냅니다. 타깃과 SNI는 해석되지 않는 토큰이 하나라도 있으면 거부되고, 세션 슬롯의 헤더는 `$ENV`를 확장하지 않습니다([Authorize](/ko/guide/authorize/) 참고).
 
 ```http
 GET /api/me HTTP/1.1

@@ -1235,7 +1235,17 @@ module Gori
       #
       # `pairs` is `Env.take_unbound_overlay`'s output — {slot name, binding name}, in
       # first-seen order. nil when there is nothing to say, so a bound run stays silent.
+      #
+      # An `$ENV.X` pair (qualified, `Env::SlotLiteral#env`) is a different failure with no
+      # binding remedy, so it takes `Env.slot_env_note`'s sentence instead (#1689).
       def self.unbound_overlay_note(pairs : Array({String, String})) : String?
+        envs, binds = pairs.partition { |(_, name)| Env.split_qualified(name)[0].try(&.env?) || false }
+        notes = [binding_overlay_note(binds), slot_env_overlay_note(envs)].compact
+        notes.empty? ? nil : notes.join(". ")
+      end
+
+      # `unbound_overlay_note` for the binding names alone.
+      private def self.binding_overlay_note(pairs : Array({String, String})) : String?
         return nil if pairs.empty?
         # Grouped by SLOT, because the slot is the thing the operator fixes: two identities
         # each missing `$SESSION` are two configurations, not one.
@@ -1263,6 +1273,13 @@ module Gori
           io << "`#{Env.spell_escaped(first, Env::Namespace::Bind)}` if the literal is what you meant"
           io << bare_spelling_tail(first, one)
         end
+      end
+
+      # `Env.slot_env_note` per slot for the `$ENV` pairs, or nil when there are none.
+      private def self.slot_env_overlay_note(envs : Array({String, String})) : String?
+        envs.map(&.[0]).uniq!.join("; ") do |slot|
+          "#{slot}: #{Env.slot_env_note(envs.compact_map { |(s, n)| n if s == slot })}"
+        end.presence
       end
 
       # The sentence the NAMESPACED grammar adds, or "" — because under it the likeliest cause is not
