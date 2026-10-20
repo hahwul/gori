@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- `gori run send`, MCP `send_request{url}` and `gori run import --urls` send a URL's `user:pass@` as Basic `Authorization`, as curl does, unless a header gives one (#1690)
 - Sitemap: OpenAPI export gives a path its own `servers` whenever the origins that answered it differ from the document's, so two origins of one host are no longer merged and `import --oas` puts each operation back on its own origin (#1675)
 - Sitemap: JavaScript endpoint discovery keeps a literal whole when it holds `:`, a query or non-ASCII (percent-encoded), finds `//host:port/…` references, and flags a cut it cannot close as templated; the next scan re-reads every bundle (#1697)
 - CLI: `gori run repeater ws <id>` opens a persistent HTTP/1.1 WebSocket session on a saved repeater, sending each stdin line as a text frame (or hex-decoded binary under `--binary`) and streaming both directions to stdout as text or JSON lines (`--format json`), with `--auto-reply`, `--engine-io` and `--for=DURATION` (#1660)

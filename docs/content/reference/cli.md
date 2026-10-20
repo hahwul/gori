@@ -640,7 +640,7 @@ gori run send --url https://api.example.com --request-file req.http --headers-on
 
 | Option | Description |
 | -------- | ------------- |
-| `--url=URL` (or the URL as the only argument) | Absolute `http://` / `https://` URL. Its path and query become the request-target; with a raw request it only names where to dial |
+| `--url=URL` (or the URL as the only argument) | Absolute `http://` / `https://` URL. Its path and query become the request-target; with a raw request it only names where to dial. A `user:pass@` in it is sent as Basic `Authorization`, as curl does, unless a `-H` gives one |
 | `-X`, `--method=METHOD` | HTTP method (default `GET`, or `POST` when there is a body, as curl) |
 | `-H`, `--header=HEADER` | `Name: value`, repeatable, sent in order. `Host` and `Content-Length` are added only when you leave them out. A header that would split into two lines, or a name that is not a token, is refused: a raw request is the form for malformed bytes |
 | `-d`, `--data=DATA` (`--body`) | Request body, as curl's `-d`: repeat to join with `&`; adds `Content-Type: application/x-www-form-urlencoded` unless a `-H` names one. `$ENV.KEY` tokens expand |

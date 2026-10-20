@@ -632,7 +632,7 @@ gori run send --url https://api.example.com --request-file req.http --headers-on
 
 | Option | Description |
 | -------- | ------------- |
-| `--url=URL` (또는 URL을 유일한 인자로) | 절대 `http://` / `https://` URL. 경로와 쿼리가 request-target이 됩니다. 원시 요청과 함께 쓰면 접속할 곳만 정합니다 |
+| `--url=URL` (또는 URL을 유일한 인자로) | 절대 `http://` / `https://` URL. 경로와 쿼리가 request-target이 됩니다. 원시 요청과 함께 쓰면 접속할 곳만 정합니다. URL의 `user:pass@`는 curl처럼 Basic `Authorization`으로 보내며, `-H`로 준 것이 있으면 그쪽을 씁니다 |
 | `-X`, `--method=METHOD` | HTTP 메서드 (기본값 `GET`, 본문이 있으면 curl처럼 `POST`) |
 | `-H`, `--header=HEADER` | `Name: value`, 반복 가능, 쓴 순서대로 전송. `Host`와 `Content-Length`는 빠뜨렸을 때만 추가됩니다. 두 줄로 쪼개질 헤더나 토큰이 아닌 이름은 거부됩니다. 잘못된 바이트를 보내려면 원시 요청을 쓰세요 |
 | `-d`, `--data=DATA` (`--body`) | curl의 `-d`처럼 요청 본문: 반복하면 `&`로 이어 붙이고, `-H`가 지정하지 않으면 `Content-Type: application/x-www-form-urlencoded`를 추가합니다. `$ENV.KEY` 토큰이 확장됩니다 |

@@ -110,6 +110,30 @@ describe Gori::Import do
     end
   end
 
+  # #1690: curl sends `user:pass@` as Basic auth, and `import --curl` already did.
+  it "encodes URL userinfo as Basic auth on a URL-list import, unless the source states one" do
+    urls = File.tempname("gori", ".txt")
+    begin
+      File.write(urls, "http://us%40er:p%3Ass@h.test/creds\nhttp://only@h.test/user\nhttp://h.test/q?mail=a@b\n")
+      with_store do |store|
+        Gori::Import.import_file(store, :urls, urls).count.should eq(3)
+        heads = store.search(Gori::QL::EMPTY, 10).sort_by(&.target).map { |r| String.new(store.get_flow(r.id).not_nil!.request_head) }
+        heads[0].should contain("Authorization: Basic #{Base64.strict_encode("us@er:p:ss")}\r\n")
+        heads[0].should contain("Host: h.test\r\n")
+        heads[0].should_not contain("us%40er")
+        heads[1].should_not contain("Authorization")
+        heads[2].should contain("Authorization: Basic #{Base64.strict_encode("only:")}\r\n")
+      end
+      stated = Gori::Import::Builder.pending_request(0_i64, "http://u:p@h.test/x", "GET",
+        Gori::Import::Builder::Headers{ {"authorization", "Bearer mine"} })
+      head = String.new(stated.request.head)
+      head.should contain("authorization: Bearer mine\r\n")
+      head.should_not contain("Basic")
+    ensure
+      File.delete?(urls)
+    end
+  end
+
   it "indexes the imported request body for FTS body: search (response-bearing entry)" do
     har = File.tempname("gori", ".har")
     begin
