@@ -568,7 +568,7 @@ module Gori
       private def self.warn_absolute_form(target : Store::RuleTarget, part : Store::RulePart, find : String?) : Nil
         return unless target.request? && part.head? && find.try(&.matches?(/\A(?:\^|\\A)?[A-Za-z]+ [A-Za-z][A-Za-z0-9+.\-]*:\/\//))
         STDERR.puts "gori run rewriter add: warning: --find names an absolute-form request line, " \
-                    "which a rule never sees; match the origin form (#{find.try(&.split(' ', 2).first)} /path)"
+                    "which a rule never sees; match the origin form (#{find.try(&.lchop("\\A").lchop('^').split(' ', 2).first)} /path)"
       end
 
       private def self.cmd_rewriter_add(args : Array(String)) : Nil
