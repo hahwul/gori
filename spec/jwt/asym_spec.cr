@@ -175,6 +175,24 @@ describe Gori::Jwt::Asym do
       expect_raises(Gori::Jwt::ForgeError) { Gori::Jwt.key_material("", "s3cret") }
     end
 
+    it "names a readable non-PEM key file and never follows a file that holds a path (#1700)" do
+      dir = File.tempname("gori-spec-jose")
+      Dir.mkdir_p(dir)
+      begin
+        pub = JoseKeys.write(dir, "rsa.pub.pem", JoseKeys::RSA_PUB)
+        jwk = JoseKeys.write(dir, "jwk.json", %({"kty":"RSA","n":"AQAB","e":"AQAB"}))
+        indirect = JoseKeys.write(dir, "indirect.txt", pub)
+        expect_raises(Gori::Jwt::ForgeError, "#{jwk} is not a PEM key (JWK/JWKS not supported; convert to PEM)") do
+          Gori::Jwt.key_material("", jwk)
+        end
+        expect_raises(Gori::Jwt::ForgeError, "#{indirect} is not a PEM key") do
+          Gori::Jwt.key_material("", indirect)
+        end
+      ensure
+        FileUtils.rm_rf(dir)
+      end
+    end
+
     it "refuses a key path carrying a NUL byte instead of leaking an ArgumentError" do
       # `File.file?` raises ArgumentError, which is NOT an IO::Error, so it escaped every
       # caller's `rescue ForgeError` — reaching MCP's blanket rescue as INTERNAL ("gori is
