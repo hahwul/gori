@@ -132,7 +132,13 @@ module Gori::Proxy
       if err = route.configuration_error
         {nil, DialError.new(DialErrorKind::Proxy, "#{err} — the origin was never contacted")}
       elsif route.direct?
-        direct_dial_result(target, target_port, connect_timeout, io_timeout, refuse_self)
+        sock, err = direct_dial_result(target, target_port, connect_timeout, io_timeout, refuse_self)
+        # A host override moved this dial, so the request's own host:port is not what refused:
+        # say where gori actually dialled, or the operator debugs DNS and a port never used.
+        if err && err.kind.connect? && !err.detail && {target, target_port} != {pin || host, port}
+          err = DialError.new(DialErrorKind::Connect, override_target: Gori::BindAddress.authority(target, target_port))
+        end
+        {sock, err}
       elsif route.socks5?
         dial_via_socks5(route, target, target_port, connect_timeout, io_timeout, refuse_self)
       else
@@ -1301,8 +1307,18 @@ module Gori::Proxy
       # a direct dial, or for any kind where a proxy tag would be redundant or wrong.
       getter via_proxy : String?
 
+      # The address a DIRECT dial actually tried, when a host override moved it off the
+      # request's own host:port — nil otherwise. Never on a proxied dial: there `detail` speaks.
+      getter override_target : String?
+
       def initialize(@kind : DialErrorKind, @detail : String? = nil, @cause : String? = nil,
-                     @via_proxy : String? = nil)
+                     @via_proxy : String? = nil, *, @override_target : String? = nil)
+      end
+
+      # Where the failed connect went, worded for a sentence about `host`/`port`: the request's
+      # own authority, or the override's address and whose override it is.
+      def dialed(host : String, port : Int32) : String
+        (t = @override_target) ? "#{t} (host override for #{host})" : "#{host}:#{port}"
       end
 
       # A direct dial that did not connect. Deliberately carries NO detail: the caller already

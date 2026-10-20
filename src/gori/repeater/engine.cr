@@ -630,8 +630,11 @@ module Gori
         end
         # Reached only when the TCP layer is what failed, so the TLS clause that used to ride
         # along here (and made this a catch-all) is gone. "DNS" stays in the list because a
-        # dial through an upstream proxy resolves at the PROXY, where gori cannot see it.
-        "connect failed: #{host}:#{port} — host unreachable (DNS/refused/timeout)"
+        # dial through an upstream proxy resolves at the PROXY, where gori cannot see it —
+        # unless what was dialled is an address, which nothing resolves.
+        where = err.try(&.dialed(host, port)) || "#{host}:#{port}"
+        causes = (err.try(&.override_target) || ::Socket::IPAddress.valid?(host.lchop('[').rchop(']'))) ? "refused/timeout" : "DNS/refused/timeout"
+        "connect failed: #{where} — host unreachable (#{causes})"
       end
 
       # Microseconds since `started` — the `Result` duration the h1, h2 and WebSocket engines
