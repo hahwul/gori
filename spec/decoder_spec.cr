@@ -703,6 +703,16 @@ describe Gori::Decoder do
       conv("html-unescape", "&#x41 &#66; & &; &#").should eq "A B & &; &#"
     end
 
+    # #1721: a long `&name` run must not trigger a quadratic prefix scan (was 8.4 s at 200k).
+    it "html unescape stays linear on a long name run" do
+      big = "a" * 100_000
+      elapsed = Time.measure do
+        conv("html-unescape", "&not#{big}").should eq "¬#{big}"
+        conv("html-unescape", "&#{big};").should eq "&#{big};"
+      end
+      elapsed.should be < 1.second
+    end
+
     it "json string escape/unescape (quoted + bare)" do
       conv("json-escape", "a\nb").should eq "\"a\\nb\""
       conv("json-unescape", "\"a\\nb\"").should eq "a\nb"

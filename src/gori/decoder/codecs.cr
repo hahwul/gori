@@ -1377,6 +1377,13 @@ module Gori::Decoder
       "ugrave", "uml", "uuml", "yacute", "yen", "yuml",
     }
 
+    # Longest legacy name (6) and longest full entity name (31). Deriving them from the tables
+    # caps the lookups without a hand-typed number going stale, and keeps a long `&name` run
+    # from a quadratic prefix scan — "&" + "a"*200_000 was 8.4 s before the cap (#1721).
+    HTML_LEGACY_MAX = HTML_LEGACY_ENTITIES.max_of(&.size)
+    HTML_ENTITY_MAX = {HTML::SINGLE_CHAR_ENTITIES.max_of { |k, _| k.size },
+                       HTML::DOUBLE_CHAR_ENTITIES.max_of { |k, _| k.size }}.max
+
     # `HTML.unescape` longest-prefix-matches ANY name with or without its ';', so
     # `&lang=en` became `⟨=en`. Numeric references keep the stdlib decoding. A named one is
     # decoded whole when ';'-terminated, else through its longest legacy prefix (`&notin` →
@@ -1386,8 +1393,8 @@ module Gori::Decoder
       s.gsub(/&(?:#[0-9]+;?|#[xX][0-9a-fA-F]+;?|[A-Za-z][A-Za-z0-9]*;?)/) do |ref|
         next HTML.unescape(ref) if ref[1] == '#'
         name = ref[1..].rchop(';')
-        next HTML.unescape(ref) if ref.ends_with?(';') && html_entity?(name)
-        n = name.size.downto(2).find { |i| HTML_LEGACY_ENTITIES.includes?(name[0, i]) }
+        next HTML.unescape(ref) if ref.ends_with?(';') && name.size <= HTML_ENTITY_MAX && html_entity?(name)
+        n = {name.size, HTML_LEGACY_MAX}.min.downto(2).find { |i| HTML_LEGACY_ENTITIES.includes?(name[0, i]) }
         n ? HTML.unescape("&#{name[0, n]}") + ref[n + 1..] : ref
       end
     end
