@@ -214,7 +214,7 @@ module Gori
 
         results = plan.send_race
         Log.info { "race_requests #{plan.scheme}://#{plan.host}:#{plan.port} x#{results.size} (#{plan.http2? ? "h2" : "h1"}) -> #{results.count(&.ok?)} ok" }
-        Result.new(race_result_json(labels, results, plan))
+        Result.new(race_result_json(members, labels, results, plan))
       end
 
       # The validated race member ids, or the error Result to return as-is: an array of at least
@@ -324,9 +324,16 @@ module Gori
       # count (how many members answered 2xx). Whether that count is a finding is the agent's to
       # judge from the endpoints raced — for a multi-endpoint race each endpoint may legitimately
       # answer 2xx, so this does not editorialize.
-      private def race_result_json(labels : Array(String), results : Array(Repeater::Result),
+      #
+      # Each member also carries its session `id`, its `head` (redacted as send_request's headers
+      # are) and its `body` (#1678): when every side answers 200 the body is the only evidence of
+      # which request won. A race is not stored, so there is no chunk tool to page a body from —
+      # the bodies split what the reply budget leaves after the heads, evenly, instead.
+      private def race_result_json(ids : Array(Int64), labels : Array(String), results : Array(Repeater::Result),
                                    plan : Repeater::Plan) : String
         won = results.count { |r| r.ok? && (s = r.response.try(&.status)) && 200 <= s < 300 }
+        heads = results.sum(&.head.size)
+        body_cap = {REPLY_ROWS_BUDGET - heads, 0}.max // {results.size, 1}.max
         JSON.build do |j|
           j.object do
             j.field "target", "#{plan.scheme}://#{plan.host}:#{plan.port}"
@@ -338,6 +345,7 @@ module Gori
                 labels.each_with_index do |label, i|
                   r = results[i]?
                   j.object do
+                    j.field "id", ids[i]
                     j.field "label", label
                     j.field "ok", r.try(&.ok?) || false
                     j.field "status", r.try(&.response.try(&.status))
@@ -345,6 +353,10 @@ module Gori
                     j.field "duration_us", r.try(&.duration_us)
                     j.field "incomplete", r.try(&.incomplete?) || false
                     j.field "error", r.try(&.error)
+                    if r
+                      j.field "head", Serialize.redact_head(String.new(r.head).scrub, false)
+                      Serialize.emit_body(j, "body", "target", r.head, r.body, false, body_cap)
+                    end
                   end
                 end
               end
@@ -1782,10 +1794,11 @@ module Gori
           "different saved session. Transport: HTTP/1.1 last-byte-sync over N connections, or " \
           "HTTP/2 single-packet attack over one connection (pass http2:true). ALL members must " \
           "resolve to ONE origin (scheme://host:port) and share the transport, or the call is " \
-          "REFUSED. The result gives each member's status, size and RELEASE-RELATIVE timing " \
-          "(the arrival spread) plus `won_2xx`, a NEUTRAL count of how many members answered 2xx " \
-          "— whether that is a finding depends on the endpoints raced (a multi-endpoint race may " \
-          "legitimately see several 2xx)." do |s|
+          "REFUSED. The result gives each member's session `id`, status, size, RELEASE-RELATIVE " \
+          "timing (the arrival spread), response `head` (credentials redacted) and `body` (the " \
+          "bodies share the reply budget; a race is not stored, so nothing pages the rest), plus " \
+          "`won_2xx`, a NEUTRAL count of how many members answered 2xx — whether that is a finding " \
+          "depends on the endpoints raced (a multi-endpoint race may legitimately see several 2xx)." do |s|
           s.field "repeater_ids", JSON.parse(%({"type":"array","description":"two or more saved HTTP repeater ids (from list_history / the Repeater workbench) to race together; all must share one origin and transport","items":{"type":"integer"},"minItems":2})), required: true
           s.field "http2", boolprop("race over HTTP/2 (single-packet attack); default: the sessions' shared stored setting (refused if they disagree)")
           s.field "verbatim", boolprop("send each member's bytes EXACTLY: no token expansion, no Content-Length resync (see send_request.verbatim). Default false")

@@ -1235,6 +1235,7 @@ module Gori
         tls_preset : String? = nil
         force_http2 : Bool? = nil
         max_requests : Int32? = nil
+        max_body : Int32? = nil
         format = :text
         positional = [] of String
 
@@ -1254,12 +1255,14 @@ module Gori
           p.on("--reframe-grpc", "HTTP/2 only: recompute the gRPC length prefix over the body being sent") { reframe_grpc = true }
           p.on("--tls-preset=NAME", "#{TLS_PRESET_HELP}, overriding the sessions' stored one") { |v| tls_preset = v }
           p.on("--max-requests=N", "Refuse the race if it would exceed N members (a race is sent whole, never split)") { |v| max_requests = parse_count(v, "--max-requests") }
-          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
+          p.on("--max-body=BYTES", "--format json: hold each member's decoded body to BYTES, as `repeater send --max-body` does (a race is not stored, so this is the only copy)") { |v| max_body = parse_count(v, "--max-body") }
+          format_flag(p, [:text, :json], "Output: text (default) | json — each member adds its session id, head and body") { |f| format = f }
           p.unknown_args { |before, after| positional = before + after }
         end
         parser.parse(args)
         refresh_verify_upstream(!insecure)
         ids = race_member_ids(positional, max_requests, parser)
+        cap = body_cap(false, max_body, "gori run repeater race")
 
         project = resolve_read_project(proj.name, proj.db)
         store = open_store(project, read_only: true)
@@ -1302,7 +1305,11 @@ module Gori
 
         results = plan.send_race
         outbound.close
-        emit_repeater_race(labels, results, plan, format)
+        if format == :json
+          puts race_json(ids, labels, results, plan, cap)
+        else
+          emit_race_text(labels, results, plan)
+        end
         exit 1 unless results.any?(&.ok?)
       end
 
@@ -1501,26 +1508,26 @@ module Gori
         line && !line.empty? ? Output.term_safe(line) : "(no request line)"
       end
 
-      # Print one race's per-member results — status, size and RELEASE-RELATIVE timing (each
-      # member's duration is measured from the synchronized release, so the spread is the
-      # arrival order), plus a winners tally (a 2xx count > 1 where the app should allow one is
-      # the finding).
-      private def self.emit_repeater_race(labels : Array(String), results : Array(Repeater::Result),
-                                          plan : Repeater::Plan, format : Symbol) : Nil
-        format == :json ? emit_race_json(labels, results, plan) : emit_race_text(labels, results, plan)
-      end
-
-      private def self.emit_race_json(labels : Array(String), results : Array(Repeater::Result),
-                                      plan : Repeater::Plan) : Nil
-        JSON.build(STDOUT) do |j|
+      # One race's per-member results — status, size and RELEASE-RELATIVE timing (each member's
+      # duration is measured from the synchronized release, so the spread is the arrival order),
+      # plus MCP `race_requests`' neutral `responded` / `won_2xx` tally. Each member carries its
+      # session `id`, `head` and `body` (#1678): in a limit-overrun race every side usually
+      # answers 200, so the body is the only evidence of which request won — and a race is not
+      # stored, so this object is the only copy. `head`/`body` take `repeater send`'s shapes.
+      def self.race_json(ids : Array(Int64), labels : Array(String), results : Array(Repeater::Result),
+                         plan : Repeater::Plan, cap : BodyCap = BodyCap.new) : String
+        JSON.build do |j|
           j.object do
             j.field "target", "#{plan.scheme}://#{plan.host}:#{plan.port}"
             j.field "transport", plan.http2? ? "single-packet h2" : "last-byte-sync h1"
+            j.field "responded", results.count(&.ok?)
+            j.field "won_2xx", race_won_2xx(results)
             j.field "members" do
               j.array do
                 labels.each_with_index do |label, i|
                   r = results[i]?
                   j.object do
+                    j.field "id", ids[i]
                     j.field "label", label
                     j.field "ok", r.try(&.ok?) || false
                     j.field "status", r.try(&.response.try(&.status))
@@ -1528,21 +1535,33 @@ module Gori
                     j.field "duration_us", r.try(&.duration_us)
                     j.field "incomplete", r.try(&.incomplete?) || false
                     j.field "error", r.try(&.error)
+                    if r
+                      j.field "head", scrub(r.head)
+                      unless String.new(r.head).valid_encoding?
+                        j.field "head_lossy", true
+                        j.field "head_base64", Base64.strict_encode(r.head)
+                      end
+                      emit_body_json(j, "body", r.head, r.body, r.incomplete?, cap)
+                    end
                   end
                 end
               end
             end
           end
         end
-        STDOUT.puts
+      end
+
+      # How many members answered 2xx — a count, not a verdict: whether N distinct 2xx is a
+      # finding is the operator's call (a multi-endpoint race where each endpoint SHOULD answer
+      # 2xx is the normal case).
+      private def self.race_won_2xx(results : Array(Repeater::Result)) : Int32
+        results.count { |r| r.ok? && (s = r.response.try(&.status)) && 200 <= s < 300 }
       end
 
       private def self.emit_race_text(labels : Array(String), results : Array(Repeater::Result),
                                       plan : Repeater::Plan) : Nil
         transport = plan.http2? ? "single-packet h2" : "last-byte-sync h1"
-        # Facts only, no verdict: whether N distinct 2xx is a finding is the operator's call
-        # (a multi-endpoint race where each endpoint SHOULD answer 2xx is the normal case).
-        ok2xx = results.count { |r| r.ok? && (s = r.response.try(&.status)) && 200 <= s < 300 }
+        ok2xx = race_won_2xx(results)
         puts "race → #{plan.scheme}://#{plan.host}:#{plan.port} · #{results.size} requests together (#{transport})"
         labels.each_with_index { |label, i| puts race_member_line(label, results[i]?) }
         puts "→ #{results.count(&.ok?)}/#{results.size} responded · #{ok2xx}×2xx"

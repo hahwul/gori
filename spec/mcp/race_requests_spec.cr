@@ -2,7 +2,7 @@ require "../spec_helper"
 require "../support/mcp_harness"
 
 # An h1 origin that accepts N connections (one per race member) and records each request line,
-# replying 200 + a per-path body so a test can tell the members apart.
+# replying 200 + a per-path body (`hit /path`) so a test can tell the members apart.
 private def start_mcp_race_origin(seen : Channel(String)) : Int32
   origin = TCPServer.new("127.0.0.1", 0)
   port = origin.local_address.port
@@ -12,7 +12,7 @@ private def start_mcp_race_origin(seen : Channel(String)) : Int32
         head = Gori::Proxy::Codec::Http1.read_head(c)
         line = head ? String.new(head).lines.first? : nil
         seen.send(line || "")
-        body = "hit"
+        body = "hit #{line.try(&.split(' ')[1]?)}"
         c << "HTTP/1.1 200 OK\r\nContent-Length: #{body.bytesize}\r\nConnection: close\r\n\r\n" << body
         c.flush
         c.close rescue nil
@@ -47,9 +47,49 @@ describe Gori::MCP::Server do
         members.size.should eq(2)
         members.all?(&.["ok"].as_bool).should be_true
         members.all? { |m| m["status"].as_i == 200 }.should be_true
+        # #1678: each member names its session and carries its own head and body — when every
+        # side answers 200 the body is the only evidence of which request won.
+        members.map(&.["id"].as_i64).should eq([a, b])
+        members.each { |m| m["head"].as_s.should start_with("HTTP/1.1 200 OK\r\n") }
+        members.map(&.["body"]["text"].as_s).should eq(["hit /apply-coupon", "hit /checkout"])
+        payload["won_2xx"].as_i.should eq(2)
 
         got = [seen.receive, seen.receive].map(&.strip)
         got.sort.should eq(["GET /apply-coupon HTTP/1.1", "GET /checkout HTTP/1.1"])
+      end
+    end
+
+    # The heads are redacted as send_request's headers are, and the bodies share the reply
+    # budget: a race is not stored, so there is no chunk tool to page the rest from.
+    it "redacts each member's head and holds the bodies to the reply budget" do
+      with_store do |store|
+        origin = TCPServer.new("127.0.0.1", 0)
+        port = origin.local_address.port
+        big = "x" * Gori::MCP::Tools::REPLY_ROWS_BUDGET
+        spawn do
+          while conn = origin.accept?
+            spawn_with(conn) do |c|
+              Gori::Proxy::Codec::Http1.read_head(c)
+              c << "HTTP/1.1 200 OK\r\nSet-Cookie: sid=secret\r\nContent-Length: #{big.bytesize}\r\nConnection: close\r\n\r\n" << big
+              c.flush
+              c.close rescue nil
+            end
+          end
+        rescue
+        end
+        a = seed_race_repeater(store, port, "/a")
+        b = seed_race_repeater(store, port, "/b")
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"race_requests","arguments":{"repeater_ids":[#{a},#{b}],"allow_unscoped":true}}})
+        resp = mcp_drive(store, call, verify_upstream: false)[0]
+        members = mcp_tool_payload(resp)["members"].as_a
+        members.each do |m|
+          m["head"].as_s.should contain("Set-Cookie: [REDACTED]")
+          m["head"].as_s.should_not contain("secret")
+          m["body"]["size"].as_i.should eq(big.bytesize)
+          m["body"]["truncated"].as_bool.should be_true
+        end
+        members.sum(&.["body"]["text"].as_s.bytesize).should be < Gori::MCP::Tools::REPLY_ROWS_BUDGET
+        origin.close
       end
     end
 
