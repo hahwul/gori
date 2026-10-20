@@ -665,6 +665,9 @@ module Gori
       # many sets for Sniper/BatteringRam wants `--mode pitchfork`, while too many sets for the
       # per-position modes wants another marked position.
       private def self.note_fuzz_unused_sets(plan : Fuzz::Plan) : Nil
+        if note = plan.reused_set_note
+          STDERR.puts "gori run fuzz: note: #{note}"
+        end
         n = plan.unused_payload_sets
         return if n.zero?
         remedy =

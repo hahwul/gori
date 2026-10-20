@@ -713,6 +713,10 @@ module Gori
       # raw count: the remedy differs by mode, and `sniper` (the DEFAULT, so the common way to
       # arrive here) wants a different answer than `pitchfork` does.
       private def unused_sets_warning(plan : Fuzz::Plan) : String?
+        # The two never coincide: fewer sets than positions leaves none unused (#1704).
+        if note = plan.reused_set_note
+          return note
+        end
         n = plan.unused_payload_sets
         return nil if n.zero?
         remedy =
