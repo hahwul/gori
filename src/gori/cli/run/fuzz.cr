@@ -137,7 +137,7 @@ module Gori
           p.on("--encode=KIND", "Processing: url | urlall | base64 | hex") { |v| processors << Fuzz::Encode.new(parse_encode(v)) }
           p.on("--case=KIND", "Processing: upper | lower") { |v| processors << Fuzz::Case.new(parse_case(v)) }
           p.on("--hash=ALGO", "Processing: md5 | sha1 | sha256") { |v| processors << Fuzz::Hasher.new(parse_hash(v)) }
-          p.on("--regex-replace=SPEC", "Processing: /pattern/replacement/") { |v| processors << parse_regex_replace(v) }
+          p.on("--regex-replace=SPEC", "Processing: /pattern/replacement/ — the first character is the delimiter, so #a/b#X# puts a / in the pattern") { |v| processors << parse_regex_replace(v) }
           # A payload spliced into a query-string or form-body position is percent-encoded by
           # default (see `Fuzz::AutoEncode`); this is the way out, for a run whose payload IS
           # the raw byte. NOT `--verbatim`, which is the Content-Length knob two lines down —
@@ -665,6 +665,9 @@ module Gori
       # many sets for Sniper/BatteringRam wants `--mode pitchfork`, while too many sets for the
       # per-position modes wants another marked position.
       private def self.note_fuzz_unused_sets(plan : Fuzz::Plan) : Nil
+        if note = plan.reused_set_note
+          STDERR.puts "gori run fuzz: note: #{note}"
+        end
         n = plan.unused_payload_sets
         return if n.zero?
         remedy =

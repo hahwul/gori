@@ -44,26 +44,26 @@ module Gori
         root_security = spec["security"]?
         now = Time.utc.to_unix * 1_000_000
         pairs = [] of Builder::FlowPair
-        skipped = 0
+        skips = Skips.new
         # `url_path`, not `path`: the enclosing method's `path` is the SPEC FILE on disk, and a
         # block parameter named `path` shadows it for the whole loop body.
         paths_h.each do |url_path, item|
           resolved_item = resolve_path_item(spec, item)
           unless resolved_item
-            skipped += 1
+            skips.add("path #{url_path}", "unresolvable path item")
             next
           end
           HTTP_METHODS.each do |m|
-            flow, found = import_operation(now, base, url_path.to_s, m, resolved_item,
+            flow, why = import_operation(now, base, url_path.to_s, m, resolved_item,
               spec, swagger2, schemes, root_security, prov)
             if flow
               pairs << flow
-            elsif found
-              skipped += 1
+            elsif why
+              skips.add("#{m.upcase} #{url_path}", why)
             end
           end
         end
-        ParseResult.new(pairs, skipped)
+        skips.result(pairs)
       end
 
       private def self.resolve_path_item(spec : JSON::Any, item : JSON::Any) : JSON::Any?
@@ -74,15 +74,15 @@ module Gori
         nil
       end
 
-      # Return whether the path item had this method separately from the optional flow: a
-      # missing method is ordinary, while a malformed operation is a counted skip.
+      # Return why the operation was skipped separately from the optional flow: a missing
+      # method is ordinary (nil), while a malformed operation is a counted skip.
       private def self.import_operation(now : Int64, base : String, url_path : String,
                                         method : String, item : JSON::Any, spec : JSON::Any,
                                         swagger2 : Bool, schemes : Hash(String, String),
-                                        root_security : JSON::Any?, prov : Provenance) : Tuple(Builder::FlowPair?, Bool)
+                                        root_security : JSON::Any?, prov : Provenance) : Tuple(Builder::FlowPair?, String?)
         # External references are reported to the operator instead of being counted as skips.
         op = item[method]? rescue nil
-        return {nil, false} unless op
+        return {nil, nil} unless op
         op = resolve_ref(spec, op)
         # OpenAPI 3 lets an operation or a path item name its own servers, overriding the
         # root list — gori's own export writes one per path when a capture spans hosts.
@@ -91,11 +91,11 @@ module Gori
                  local_server_url(item.as_h?.try(&.["servers"]?)) || base
         end
         {operation_to_flow(now, base, url_path, method, op, item, spec, swagger2,
-          schemes, root_security, prov), true}
+          schemes, root_security, prov), nil}
       rescue ex : RemoteReference
         raise ex
-      rescue
-        {nil, true}
+      rescue ex
+        {nil, ex.message.presence || ex.class.name}
       end
 
       private def self.spec_file(path : String) : JSON::Any

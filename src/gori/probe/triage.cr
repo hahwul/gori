@@ -95,10 +95,14 @@ module Gori
 
       # The captured flow behind each affected URL, resolved the way the Probe tab's ↵ resolves
       # one (`Store#flow_id_for_url`, ranked on the sample flow's method), minus the sample flow
-      # `insert_issue` already links. Distinct, in the list's order.
+      # `insert_issue` already links. Distinct, in the list's order. The sample's own URL is
+      # skipped, not only its id: `flow_id_for_url` picks the NEWEST flow there, which may be a
+      # later request the finding never fired on (#1673).
       private def affected_flow_ids(store : Store, issue : Store::ProbeIssue) : Array(Int64)
-        method = issue.sample_flow_id.try { |fid| store.flow_row(fid).try(&.method) }
-        ids = issue.affected.compact_map { |url| store.flow_id_for_url(url, issue.host, method) }.uniq!
+        sample = issue.sample_flow_id.try { |fid| store.flow_row(fid) }
+        method = sample.try(&.method)
+        urls = sample ? issue.affected.reject(sample.url) : issue.affected
+        ids = urls.compact_map { |url| store.flow_id_for_url(url, issue.host, method) }.uniq!
         issue.sample_flow_id.try { |fid| ids.delete(fid) }
         ids
       end

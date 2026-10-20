@@ -108,9 +108,11 @@ describe Gori::Tui::SequenceConfigOverlay do
       on_position_kind("0:x").valid?.should be_false
     end
 
-    it "refuses an empty or reversed range, which extracts nothing by construction" do
+    it "refuses an empty, reversed or negative range, which extracts nothing by construction" do
       on_position_kind("8:8").valid?.should be_false
       on_position_kind("40:8").valid?.should be_false
+      on_position_kind("-10:-2").valid?.should be_false
+      on_position_kind("-5:20").valid?.should be_false
     end
 
     it "accepts a real range, spaces and all" do

@@ -19,8 +19,9 @@ module Gori
     # every surface that prints `count` has to say so when they do — a smaller number printed
     # as a success is how an import that half-failed looks like an import of a small file.
     #
-    # `notes` are what the source said that the import could not carry — today only a curl
-    # command's ignored transport flags. Empty for every file format.
+    # `notes` are what the source said that the import could not carry — a curl command's
+    # ignored transport flags, and for every format why each skipped entry was skipped
+    # (`Skips`).
     record Result, count : Int32, skipped : Int32 = 0, attempted : Int32 = 0,
       notes : Array(String) = [] of String do
       def short? : Bool
@@ -58,7 +59,52 @@ module Gori
     # bad ENTRY (invalid base64 body, non-http URL scheme, wrong-shaped path item)
     # rather than aborting the whole import — one stray line no longer discards an
     # otherwise-valid multi-thousand-entry file.
-    record ParseResult, flows : Array(Builder::FlowPair), skipped : Int32 = 0
+    record ParseResult, flows : Array(Builder::FlowPair), skipped : Int32 = 0,
+      notes : Array(String) = [] of String
+
+    # The per-entry skip tally plus WHY, in one place for every parser (#1687). A bare rescue
+    # that only counted threw away the Builder's specific message (`invalid URL (port out of
+    # range)`), so a headless operator had to diff History against the file to learn what was
+    # lost. The first `CAP` reasons are kept, the rest folded into one `+K more` line, so a
+    # 50k-entry file of junk cannot turn the notes into a second copy of itself.
+    class Skips
+      CAP = 20
+      # Characters kept of one note. The count cap does not bound a note's LENGTH, and the reason
+      # quotes the source: one 2 MB line in a URL list became a 2 MB note on every surface, and
+      # MCP's reply budget (#1649) with it.
+      NOTE_CHARS = 200
+      # A URL's `user:pass@` as the reasons quote it, masked: a note goes to stderr, JSON and MCP.
+      USERINFO = /:\/\/[^\/?#\s"@]*@/
+
+      getter count = 0
+
+      def initialize
+        @reasons = [] of String
+      end
+
+      # `where` names the entry in the source's own terms: `line 3`, `entry 7`, `GET /users`.
+      def add(where : String, ex : Exception) : Nil
+        add(where, ex.message.presence || ex.class.name)
+      end
+
+      def add(where : String, why : String) : Nil
+        @count += 1
+        @reasons << clip("skipped #{where}: #{why}".scrub.gsub(USERINFO, "://***@")) if @reasons.size < CAP
+      end
+
+      def notes : Array(String)
+        more = @count - @reasons.size
+        more > 0 ? @reasons + ["+#{more} more skipped"] : @reasons.dup
+      end
+
+      private def clip(s : String) : String
+        s.size > NOTE_CHARS ? "#{s[0, NOTE_CHARS]}…" : s
+      end
+
+      def result(flows : Array(Builder::FlowPair)) : ParseResult
+        ParseResult.new(flows, @count, notes)
+      end
+    end
 
     # Where an imported flow came from, threaded from `import_file` down to the format parsers.
     #
@@ -190,8 +236,9 @@ module Gori
         chunk.clear
         progress.try(&.call(committed, nil))
       }
+      skips = Skips.new
       skipped = begin
-        Har.each_flow(path, prov, cancelled: -> { refused || (cancelled.try(&.call) || false) }) do |pair|
+        Har.each_flow(path, prov, skips: skips, cancelled: -> { refused || (cancelled.try(&.call) || false) }) do |pair|
           chunk << pair
           flush.call if chunk.size >= IMPORT_CHUNK
         end
@@ -200,17 +247,19 @@ module Gori
         raise Gori::Error.new("#{ex.message} — #{committed} flows from the entries before it were written")
       end
       flush.call
-      raise_nothing_landed(path, skipped) if attempted == 0 && !cancelled.try(&.call)
-      Result.new(committed, skipped, attempted)
+      raise_nothing_landed(path, skipped, skips.notes.first?) if attempted == 0 && !cancelled.try(&.call)
+      Result.new(committed, skipped, attempted, skips.notes)
     end
 
     # Preserve WHY nothing landed: if every entry was skipped as malformed, say so (with the
     # count) instead of the generic "no flows found", which hid the real reason and threw
-    # away the skipped tally.
-    private def self.raise_nothing_landed(path : String, skipped : Int32) : NoReturn
+    # away the skipped tally. `first` is the first skip's reason, so the error that ends the
+    # import still names one.
+    private def self.raise_nothing_landed(path : String, skipped : Int32, first : String? = nil) : NoReturn
       if skipped > 0
         noun = skipped == 1 ? "entry was" : "entries were"
-        raise Gori::Error.new("no flows imported from #{path} — all #{skipped} #{noun} skipped as malformed")
+        why = first ? " (#{first})" : ""
+        raise Gori::Error.new("no flows imported from #{path} — all #{skipped} #{noun} skipped as malformed#{why}")
       end
       raise Gori::Error.new("no flows found in #{path}")
     end
@@ -274,9 +323,9 @@ module Gori
       rescue ex : File::Error
         raise Gori::Error.new("cannot read #{expanded}: #{ex.message}")
       end
-      raise_nothing_landed(expanded, parsed.skipped) if parsed.flows.empty?
+      raise_nothing_landed(expanded, parsed.skipped, parsed.notes.first?) if parsed.flows.empty?
       committed, attempted = insert_all(store, parsed.flows, cancelled: cancelled, progress: progress)
-      Result.new(committed, parsed.skipped, attempted)
+      Result.new(committed, parsed.skipped, attempted, parsed.notes)
     end
 
     # The warning for a file this project already imported under the same name, or nil. Asked

@@ -695,10 +695,16 @@ module Gori::Repeater
     # Why a session target `raw` can never be sent, or nil — the origin + scheme checks `build`
     # runs, for a surface WRITING a target (MCP create/update_repeater), so `ftp://x` is refused
     # when stored rather than at its first send. An unresolved `$NAME` is not refused here: it
-    # may be bound by the time the session is sent.
+    # may be bound by the time the session is sent. A port past 65535 and a host with
+    # whitespace in it (`not a url at all` parses as one) are write-time refusals only: no
+    # dial could ever reach either, and a send keeps failing on them the way it always has.
     def self.target_error(raw : String) : String?
-      scheme = origin_of(raw)[0]
-      scheme.in?("http", "https") ? nil : "unsupported target scheme #{scheme.inspect}"
+      scheme, host, port = origin_of(raw)
+      return "unsupported target scheme #{scheme.inspect}" unless scheme.in?("http", "https")
+      return "target port #{port} is out of range (1-65535)" if port > 65535
+      # `each_char`, not a regex: a captured 8-bit host is invalid UTF-8, which PCRE refuses.
+      return "could not determine a target host from #{raw.inspect}" if host.each_char.any?(&.whitespace?)
+      nil
     rescue e : PlanError
       e.reason.unresolved_env? ? nil : e.message
     end
@@ -739,7 +745,7 @@ module Gori::Repeater
     # captured upgrade whose response was not 101, so the CLI's 101 guard does not fire) went
     # out over a CLEARTEXT socket to a TLS port, leaking the request's cookies and auth
     # headers. Normalizing makes every engine's `== "https"` test correct by construction.
-    private def self.normalize_scheme(scheme : String) : String
+    def self.normalize_scheme(scheme : String) : String
       case scheme
       when "ws"  then "http"
       when "wss" then "https"

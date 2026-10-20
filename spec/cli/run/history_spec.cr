@@ -1198,6 +1198,37 @@ describe "gori run show --format curl" do
     Gori::CLI::Run.curl_command_for_spec(detail).should be_nil
   end
 
+  # The snippet's own note names the TUI's copy "Body" row, which this command does not have,
+  # and the snippet must stay byte-identical to the TUI's, so the route is said on STDERR (#1708).
+  it "names the route this command has to a body the snippet had to leave out" do
+    row = Gori::Store::FlowRow.new(
+      id: 15_i64, created_at: 0_i64, scheme: "https", method: "POST", host: "h.test",
+      port: 443, target: "/a", status: 200, size: 0_i64,
+      state: Gori::Store::FlowState::Complete)
+    head = "POST /a HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice
+    nul = Gori::Store::FlowDetail.new(row, "HTTP/1.1", head, Bytes[0x61, 0x00, 0x62], nil, nil)
+    note = Gori::CLI::Run.omitted_body_note(nul, :curl).not_nil!
+    note.should contain("gori run show 15 --request-only --format raw")
+    Gori::CLI::Run.omitted_body_note(nul, :httpie).should_not be_nil
+    Gori::CLI::Run.omitted_body_note(nul, :python).should be_nil
+    # httpie also drops a body that is not UTF-8; curl carries it in '…'.
+    latin = Gori::Store::FlowDetail.new(row, "HTTP/1.1", head, Bytes[0x63, 0xe9], nil, nil)
+    Gori::CLI::Run.omitted_body_note(latin, :httpie).should_not be_nil
+    Gori::CLI::Run.omitted_body_note(latin, :curl).should be_nil
+    plain = Gori::Store::FlowDetail.new(row, "HTTP/1.1", head, "a=1".to_slice, nil, nil)
+    Gori::CLI::Run.omitted_body_note(plain, :curl).should be_nil
+    # The serializers judge the de-chunked body, so the note must too: a chunked 'é' split
+    # across two chunks is valid UTF-8 once joined, and a NUL in a chunk extension never
+    # reaches the command.
+    chunked = "POST /a HTTP/1.1\r\nHost: h.test\r\nTransfer-Encoding: chunked\r\n\r\n".to_slice
+    split = Gori::Store::FlowDetail.new(row, "HTTP/1.1", chunked,
+      Bytes[0x31, 0x0d, 0x0a, 0xc3, 0x0d, 0x0a, 0x31, 0x0d, 0x0a, 0xa9, 0x0d, 0x0a, 0x30, 0x0d, 0x0a, 0x0d, 0x0a], nil, nil)
+    Gori::CLI::Run.omitted_body_note(split, :httpie).should be_nil
+    ext = Gori::Store::FlowDetail.new(row, "HTTP/1.1", chunked,
+      "3;x=\u0000\r\nabc\r\n0\r\n\r\n".to_slice, nil, nil)
+    Gori::CLI::Run.omitted_body_note(ext, :curl).should be_nil
+  end
+
   # curl speaks the upgrade handshake and nothing after it, so for a socket the command is a
   # faithful reproduction of a request that is not what the operator was looking at — the frames
   # are the capture. `show_har` refuses a transcript-less socket BY NAME and the TUI's copy menu

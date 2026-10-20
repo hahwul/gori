@@ -535,7 +535,7 @@ module Gori::Tui
       in Sequencer::PlanError::Reason::NoTokenLoc
         "set a token location first"
       in Sequencer::PlanError::Reason::BadPosition
-        "set a byte range as A:B (B greater than A)"
+        "set a byte range as A:B (A 0 or more, B greater than A)"
       in Sequencer::PlanError::Reason::UnresolvedEnv
         "unresolved env #{ex.detail} — add it in the Project tab's ENV pane"
       end

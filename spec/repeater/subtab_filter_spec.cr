@@ -26,6 +26,13 @@ describe Gori::Repeater::Tags do
   it "round-trips parse ∘ serialize" do
     Repeater::Tags.parse(Repeater::Tags.serialize(["a", "b-c"])).should eq(["a", "b-c"])
   end
+
+  # The column a surface writes (#1683): `gori run repeater create` stored the raw string.
+  it "stores the normalized set, and nothing for a token-free value" do
+    Repeater::Tags.stored("#idor, x,,#IDOR").should eq("idor x")
+    Repeater::Tags.stored("#").should be_nil
+    Repeater::Tags.stored("").should be_nil
+  end
 end
 
 describe Gori::Repeater::SubtabFilter do
