@@ -123,9 +123,9 @@ module Gori
           # `$BIND`/`$GEN` literal: one flag, two answers in one request. The URL still expands —
           # it names where to dial.
           verbatim = verbatim?(args)
+          # A text `body` expands inside `structured`, with the headers (one refusal for both).
           body = base64_arg(args, "body_base64") ||
                  wire_str(args, "body", "; stringify JSON yourself, or use body_base64 for exact octets")
-                   .try { |b| (verbatim ? b : Repeater::UrlRequest.expand(b)).to_slice }
           # …and the request-target before the headers are read: method, body, target, headers is
           # the order this has always refused two mistakes in.
           Repeater::UrlRequest.request_target_of(target)

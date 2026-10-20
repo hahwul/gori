@@ -2470,7 +2470,7 @@ module Gori::Tui
       unless env_names.empty?
         # `unresolved` already answers QUALIFIED under the namespaced grammar, so the list needs
         # the ENV namespace only as the fallback a bare name takes.
-        @host.status("minimize: unresolved env #{Env.token_list(env_names, ns: Env::Namespace::Env)} — add it in the Project tab's ENV pane")
+        @host.status("minimize: #{Tui.unresolved_env_status(Env.token_list(env_names, ns: Env::Namespace::Env))}")
         return
       end
       scheme, host, port = view.parse_target
@@ -3410,8 +3410,7 @@ module Gori::Tui
         "repeater: unsupported scheme #{(ex.detail || "").inspect} — use http:// or https://"
       in Repeater::PlanError::Reason::UnresolvedEnv
         ex.mint_refusal.try { |note| "repeater: #{note} — add it in the Project tab's ENV pane" } ||
-        Env.totp_secret_refusal(ex.detail) { |rest| "unresolved env #{rest} — add it in the Project tab's ENV pane" }.try { |note| "repeater: #{note}" } ||
-        "repeater: unresolved env #{ex.detail} — add it in the Project tab's ENV pane"
+        "repeater: #{Tui.unresolved_env_status(ex.detail)}"
       in Repeater::PlanError::Reason::TlsPreset
         # Unreachable from the TUI, where the value is only ever chosen by cycling the
         # known presets — but a tab restored from a project another version (or another

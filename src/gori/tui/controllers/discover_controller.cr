@@ -446,7 +446,7 @@ module Gori::Tui
       in Discover::PlanError::Reason::Wordlist
         "wordlist error: #{ex.detail}"
       in Discover::PlanError::Reason::UnresolvedEnv
-        "unresolved env #{ex.detail} — add it in the Project tab's ENV pane"
+        Tui.unresolved_env_status(ex.detail)
       end
     end
 

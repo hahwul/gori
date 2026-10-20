@@ -86,11 +86,7 @@ class Gori::Tui::RepeaterView
   def env_refusal : String?
     return nil if @evidence
     return nil unless detail = Env.unresolved_env(@editor.wire_text)
-    Env.totp_secret_refusal(detail) { |rest| tui_env_refusal(rest) } || tui_env_refusal(detail)
-  end
-
-  private def tui_env_refusal(detail : String) : String
-    "unresolved env #{detail} — add it in the Project tab's ENV pane"
+    Tui.unresolved_env_status(detail)
   end
 
   # `wire_text`, NOT `text`: `text` is the LF projection, and joining the buffer with LF

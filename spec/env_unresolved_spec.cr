@@ -350,6 +350,12 @@ describe "plan builders refuse an unresolved namespaced $ENV token in a draft (#
         # Another unresolved token in the same request is still named, in the surface's words.
         both = Gori::Env.totp_secret_refusal("$ENV.TOTP_SECRET, $ENV.NOPE") { |rest| "REST #{rest}" }.not_nil!
         both.should end_with("; REST $ENV.NOPE")
+        # Through `gori run send`'s builder, both headers' tokens reach that one sentence.
+        t = Gori::Repeater::UrlRequest.target("http://h.test/")
+        ex = expect_raises(Gori::Repeater::PlanError) do
+          Gori::Repeater::UrlRequest.structured(t, nil, [{"X", "$ENV.TOTP_SECRET"}, {"Y", "$ENV.NOPE"}], nil)
+        end
+        Gori::Env.totp_secret_refusal(ex.detail) { |rest| "REST #{rest}" }.not_nil!.should end_with("; REST $ENV.NOPE")
         Gori::Env.totp_secret_refusal("$ENV.NOPE") { |rest| rest }.should be_nil
       end
       with_env_syntax(Gori::Env::Syntax::Bare) do

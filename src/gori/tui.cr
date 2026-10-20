@@ -49,6 +49,17 @@ module Gori
     # The io is memoized and the binding re-applied on every call: three entrypoints share one
     # fd, and a caller that re-asserts after something else has had its say (App#run_tui does)
     # costs nothing.
+    # The status sentence for a builder's refused `$ENV` tokens (a `PlanError#detail`), in one place
+    # for every tab that sends (#1666). `$ENV.TOTP_SECRET` takes `Env.totp_secret_refusal`'s, which
+    # still names any other unresolved token (#1707).
+    def self.unresolved_env_status(detail : String?) : String
+      Env.totp_secret_refusal(detail) { |rest| unresolved_env_line(rest) } || unresolved_env_line(detail)
+    end
+
+    private def self.unresolved_env_line(detail : String?) : String
+      "unresolved env #{detail} — add it in the Project tab's ENV pane"
+    end
+
     def self.bind_log_file : Nil
       io = (@@log_io ||= File.open(File.join(Gori::Paths.home_dir, "gori.log"), "a"))
       ::Log.setup(:info, ::Log::IOBackend.new(io))

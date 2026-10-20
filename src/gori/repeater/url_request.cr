@@ -105,26 +105,24 @@ module Gori::Repeater
 
     # The structured shape: `method` (default GET), the URL's path and query as the request
     # target, `headers` in the caller's order (each VALUE expanded unless `expand` is off), and
-    # `body` as FINAL bytes — expanding it, or not, is the caller's call, because a byte-exact
-    # body (MCP's `body_base64`, `gori run send --body-file`) must not have its length changed
-    # under it. `expand: false` is `gori run send --verbatim`: a `$ENV.KEY` the operator typed in
-    # a header value is the payload, and MCP's `send_request{verbatim:true}` passes it the same way.
+    # `body` as FINAL bytes, or as authored TEXT that expands with the headers (`gori run send -d`,
+    # MCP's `body`). Bytes are never expanded: a byte-exact body (MCP's `body_base64`, `gori run
+    # send --body-file`) must not have its length changed under it. `expand: false` is `gori run
+    # send --verbatim`: a `$ENV.KEY` the operator typed in a header value is the payload, and
+    # MCP's `send_request{verbatim:true}` passes it the same way.
     def self.structured(target : Target, method : String?, headers : Array({String, String}),
-                        body : Bytes?, *, expand : Bool = true) : Built
+                        body : (Bytes | String)?, *, expand : Bool = true) : Built
       # Upper-cased unless `expand: false`: an agent's `"post"` means POST, while `--verbatim` /
       # `verbatim:true` sends `get` as typed — methods are case-sensitive tokens, and a lowercase
       # verb slipping past a case-sensitive ACL is a probe.
       m = expand ? (method || "GET").upcase : method || "GET"
       check_method(m)
       request_target = request_target_of(target)
-      # The URL's path and query become this request's line, so a token there is request text:
-      # refused as a header's is. Here and not in `target`, which a field-native send also
-      # resolves its origin through, without ever sending that path.
-      Plan.refuse_unresolved_env(target.authored) if expand
+      body = authored_body(target, headers, body, expand)
 
       lines = [] of {String, String}
       headers.each do |(k, v)|
-        value = expand ? UrlRequest.expand(v) : v
+        value = expand ? Env.expand(v) : v
         validate_header(k, value)
         lines << {k, value}
       end
@@ -162,6 +160,22 @@ module Gori::Repeater
     def self.basic_auth(uri : URI) : String?
       user = uri.user || return nil
       "Basic #{Base64.strict_encode("#{user}:#{uri.password}")}"
+    end
+
+    # ONE refusal over every authored part of a structured request (#1666), so it names every
+    # unresolved `$ENV.KEY` rather than the first part's; then the body as final bytes. The URL's
+    # path and query become the request line, so they are request text too: checked here and not
+    # in `target`, which a field-native send also resolves its origin through without sending
+    # that path.
+    private def self.authored_body(target : Target, headers : Array({String, String}),
+                                   body : (Bytes | String)?, expand : Bool) : Bytes?
+      if expand
+        authored = [target.authored] + headers.map(&.[1])
+        authored << body if body.is_a?(String)
+        Plan.refuse_unresolved_env(authored.join('\n'))
+      end
+      return body unless body.is_a?(String)
+      (expand ? Env.expand(body) : body).to_slice
     end
 
     # The URL's path and query as the request-target, refused when it holds a byte that would

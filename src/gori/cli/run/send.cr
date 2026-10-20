@@ -246,11 +246,11 @@ module Gori
         if r = raw
           Repeater::UrlRequest.raw(target, r, verbatim)
         else
-          # `-d` expands HERE, after `open_store` installed the project's env layer — before it, a
-          # `$ENV.KEY` the project defines would have gone out literally. `--body-file` never
-          # expands: those bytes are the body, the way MCP's `body_base64` is.
-          bytes = body_file || body.try { |b| (verbatim ? b : Repeater::UrlRequest.expand(b)).to_slice }
-          Repeater::UrlRequest.structured(target, method, headers, bytes, expand: !verbatim)
+          # `-d` goes in as TEXT and expands inside `structured`, with the headers, after `open_store`
+          # installed the project's env layer — before it, a `$ENV.KEY` the project defines would have
+          # gone out literally. `--body-file` never expands: those bytes are the body, the way MCP's
+          # `body_base64` is.
+          Repeater::UrlRequest.structured(target, method, headers, body_file || body, expand: !verbatim)
         end
       rescue ex : Gori::Error
         abort "gori run send: #{ex.message}"
