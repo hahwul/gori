@@ -211,7 +211,7 @@ module Gori
           return Builder.pending_request(created_at, url, method, req_headers, req_body,
             http_version, req_declared, frame_body: req_frame,
             source_surface: prov.surface, source_ref: prov.ref,
-            request_head_override: raw_request_head)
+            request_head_override: raw_request_head, userinfo_auth: false)
         end
         raw_response_head = resp["_goriRawResponseHead"]?.try(&.as_s?).try { |s| Base64.decode(s) }
 

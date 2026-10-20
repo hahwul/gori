@@ -643,9 +643,12 @@ module Gori
                                source : FlowSource::Kind = FlowSource::Kind::Import,
                                source_surface : FlowSource::Surface? = nil,
                                source_ref : String? = nil,
-                               request_head_override : Bytes? = nil) : FlowPair
+                               request_head_override : Bytes? = nil,
+                               userinfo_auth : Bool = true) : FlowPair
         scheme, host, port, target = endpoint(url)
-        headers = with_userinfo_auth(url, headers) if source.import? && request_head_override.nil?
+        if userinfo_auth && source.import? && request_head_override.nil?
+          headers = with_userinfo_auth(url, headers)
+        end
         stored, trunc, size = capped(body, declared_body_size)
         head = request_head_override || request_head(method, target, http_version, scheme, host, port, headers, body,
           trunc ? size : nil, trunc, frame_body)
@@ -669,7 +672,8 @@ module Gori
       # A request TEMPLATE whose URL carries `user:pass@` gets the Basic `Authorization` curl
       # would send for it, unless the source stated one (#1690): `import --curl` already did,
       # `--urls` dropped the credentials without a word. Only for an import's pending request —
-      # a recorded exchange is what was sent, and a Discover stub is a URL gori never authed.
+      # a recorded exchange is what was sent (a HAR passes `userinfo_auth: false` even for an
+      # entry with no response), and a Discover stub is a URL gori never authed.
       # The `@` test keeps the second parse off every URL that has no userinfo.
       private def self.with_userinfo_auth(url : String, headers : Headers) : Headers
         return headers unless url.includes?('@')

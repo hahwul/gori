@@ -204,6 +204,21 @@ describe Gori::Import do
     note.should contain("http://***@x")
   end
 
+  # A HAR is a recorded exchange (P7): a response-less entry keeps the headers it recorded.
+  it "adds no Basic auth to a response-less HAR entry with userinfo" do
+    har = File.tempname("gori", ".har")
+    begin
+      File.write(har, %({"log": {"entries": [{"request": {"method": "GET", "url": "http://u:p@h.test/x", "headers": []}}]}}))
+      with_store do |store|
+        Gori::Import.import_file(store, :har, har).count.should eq(1)
+        id = store.search(Gori::QL::EMPTY, 10).first.id
+        String.new(store.get_flow(id).not_nil!.request_head).should_not contain("Authorization")
+      end
+    ensure
+      File.delete?(har)
+    end
+  end
+
   it "caps the skip reasons and folds the rest into one line" do
     skips = Gori::Import::Skips.new
     25.times { |i| skips.add("line #{i + 1}", Gori::Error.new("bad")) }
