@@ -1190,7 +1190,7 @@ gori run cookie --forge --type flask --secret s3cret --payload '{"user":"admin"}
 | `--secret=S`, `--secrets=LIST`, `--wordlist=PATH` | The signing secret, a comma-separated candidate list, or a newline-delimited file (or the name of a saved [wordlist](#run-wordlist)) |
 | `--payload=JSON` | Session JSON to sign (Flask / Django `--forge`) |
 | `--value=B64` | Base64 Marshal cookie value (Rack `--forge`, opaque) |
-| `--salt=SALT` | Flask / Django signing salt |
+| `--salt=SALT` | Flask / Django signing salt (Flask default `cookie-session`; Django default `django.core.signing`, a Django session cookie uses `django.contrib.sessions.backends.signed_cookies`) |
 | `--algorithm=ALG` | Django HMAC algorithm: `sha256` (default) or `sha1`; when unset, `--verify` and `--crack` detect it |
 | `--timestamp=UNIX` | Unix second to stamp on `--forge` (default: now) |
 | `--format` | `text` (default) or `json` |

@@ -1182,7 +1182,7 @@ gori run cookie --forge --type flask --secret s3cret --payload '{"user":"admin"}
 | `--secret=S`, `--secrets=LIST`, `--wordlist=PATH` | 서명 시크릿, 쉼표로 구분한 후보 목록, 또는 줄 단위 파일(혹은 저장한 [wordlist](#run-wordlist)의 이름) |
 | `--payload=JSON` | 서명할 세션 JSON(Flask / Django `--forge`) |
 | `--value=B64` | base64 Marshal 쿠키 값(Rack `--forge`, 불투명) |
-| `--salt=SALT` | Flask / Django 서명 솔트 |
+| `--salt=SALT` | Flask / Django 서명 솔트 (Flask 기본 `cookie-session`; Django 기본 `django.core.signing`, Django 세션 쿠키는 `django.contrib.sessions.backends.signed_cookies` 사용) |
 | `--algorithm=ALG` | Django HMAC 알고리즘: `sha256`(기본) 또는 `sha1`. 지정하지 않으면 `--verify`와 `--crack`은 자동으로 감지합니다 |
 | `--timestamp=UNIX` | `--forge`에 찍을 유닉스 초(기본: 현재) |
 | `--format` | `text`(기본) 또는 `json` |

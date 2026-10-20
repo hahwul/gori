@@ -39,7 +39,7 @@ module Gori
           p.on("--wordlist=PATH", "Newline-delimited wordlist file, or the NAME of a saved list (for --crack)") { |v| wordlist = v }
           p.on("--payload=JSON", "Session JSON to sign (Flask/Django --forge)") { |v| payload = v }
           p.on("--value=B64", "Base64 Marshal cookie value (Rack --forge, opaque)") { |v| value = v }
-          p.on("--salt=SALT", "Flask/Django signing salt") { |v| salt = v }
+          p.on("--salt=SALT", Cookie::SALT_HELP) { |v| salt = v }
           p.on("--algorithm=ALG", "Django HMAC algorithm: sha256 (default) | sha1 (auto-detected for --verify/--crack when unset)") do |v|
             algorithm = v.downcase
             algorithm_pinned = true
@@ -141,6 +141,7 @@ module Gori
         else
           puts ok ? "valid (#{fmt})" : "invalid"
         end
+        cookie_salt_hint(fmt, salt).try { |h| STDERR.puts h } unless ok
         exit(ok ? 0 : 1)
       end
 
@@ -158,7 +159,15 @@ module Gori
         else
           puts "not found"
         end
+        cookie_salt_hint(fmt, salt).try { |h| STDERR.puts h } unless found
         exit(found ? 0 : 1)
+      end
+
+      # A Django verify or crack that failed under the default salt may simply be a session
+      # cookie, which signs under SESSION_SALT. On stderr, so stdout keeps its one verdict.
+      def self.cookie_salt_hint(fmt : String?, salt : String?) : String?
+        return nil unless fmt == "django" && (salt || Cookie::Django::DEFAULT_SALT) == Cookie::Django::DEFAULT_SALT
+        "hint: tried salt #{Cookie::Django::DEFAULT_SALT}; a session cookie uses --salt #{Cookie::Django::SESSION_SALT}"
       end
 
       private def self.emit_cookie_forge(type : String?, secret : String?, payload : String?, value : String?,
