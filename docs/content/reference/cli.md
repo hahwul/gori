@@ -1163,6 +1163,8 @@ Decode, verify, re-sign, or generate attack payloads for a JWT. Store-free compu
 gori run jwt eyJhbGci...                        # decode (default)
 gori run jwt eyJhbGci... --encode --alg HS256 --secret s3cret
 gori run jwt eyJhbGci... --encode --set role=admin --secret s3cret
+gori run jwt eyJhbGci... --encode --set-header kid=../../dev/null --secret ''
+gori run jwt --encode --payload '{"sub":"admin"}' --secret s3cret   # mint, no token
 gori run jwt eyJhbGci... --encode --alg ES256 --key ./private.pem
 gori run jwt eyJhbGci... --verify --key ./public.pem
 gori run jwt eyJhbGci... --attacks --key ./public.pem
@@ -1171,7 +1173,7 @@ gori run jwt eyJhbGci... --attacks --key ./public.pem
 | Option | Description |
 | -------- | ------------- |
 | `--decode` | Decode header / payload / signature (default) |
-| `--encode` | Re-sign the token's claims with `--alg` and `--secret` / `--key` |
+| `--encode` | Re-sign the token's claims with `--alg` and `--secret` / `--key`; with **both** `--header` and `--payload` no token is read, and with only one the other half is still taken from the `<token>` argument or STDIN (pass `""` or `</dev/null` to start it from `{}`) |
 | `--verify` | Check the token's own signature against `--secret` / `--key` (one is required; `--secret ''` checks the empty secret); prints `verified: yes\|no` and a `reason`, and exits 1 unless it verifies. `--format json` adds a `code` (`signature_mismatch`, `unsigned`, `alg_unsupported`, …) |
 | `--attacks` | Generate testing payloads (alg:none, weak-secret, header injection) |
 | `--alg=ALG` | Signing alg for `--encode`: `HS256` (default) \| `HS384` \| `HS512` \| `RS256/384/512` \| `PS256/384/512` \| `ES256/384/512` \| `EdDSA` \| `none` |
@@ -1179,6 +1181,8 @@ gori run jwt eyJhbGci... --attacks --key ./public.pem
 | `--key=PEM` | PEM key for an RS/PS/ES/EdDSA algorithm: inline PEM text or a path to a `.pem` file. `--encode` needs the PRIVATE key; `--verify` takes a public key, a certificate, or the private key; `--attacks` takes the server's PUBLIC key and adds the algorithm-confusion payloads. Mutually exclusive with `--secret` |
 | `--payload=JSON` | `--encode`: replace the claims wholesale before re-signing (mutually exclusive with `--set`) |
 | `--set=CLAIM` | `--encode`: patch one claim before re-signing, as `key=value`, repeatable; the value is JSON if it parses (`true`/`3`), else a string |
+| `--header=JSON` | `--encode`: replace the header wholesale (mutually exclusive with `--set-header`); `alg` always comes from `--alg` |
+| `--set-header=FIELD` | `--encode`: patch one header field (`kid`, `jku`, `jwk`, …) as `key=value`, repeatable, typed like `--set`; `alg` always comes from `--alg` |
 | `--format` | `text` (default) or `json` |
 
 ### run cookie
@@ -1201,7 +1205,7 @@ gori run cookie --forge --type flask --secret s3cret --payload '{"user":"admin"}
 | `--secret=S`, `--secrets=LIST`, `--wordlist=PATH` | The signing secret, a comma-separated candidate list, or a newline-delimited file (or the name of a saved [wordlist](#run-wordlist)) |
 | `--payload=JSON` | Session JSON to sign (Flask / Django `--forge`) |
 | `--value=B64` | Base64 Marshal cookie value (Rack `--forge`, opaque) |
-| `--salt=SALT` | Flask / Django signing salt |
+| `--salt=SALT` | Flask / Django signing salt (Flask default `cookie-session`; Django default `django.core.signing`, a Django session cookie uses `django.contrib.sessions.backends.signed_cookies`) |
 | `--algorithm=ALG` | Django HMAC algorithm: `sha256` (default) or `sha1`; when unset, `--verify` and `--crack` detect it |
 | `--timestamp=UNIX` | Unix second to stamp on `--forge` (default: now) |
 | `--format` | `text` (default) or `json` |

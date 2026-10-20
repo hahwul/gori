@@ -28,6 +28,12 @@ module Gori
   module Cookie
     extend self
 
+    # The help for every surface's salt option, built from the constants: a Django SESSION
+    # cookie signs under SESSION_SALT, and naming only the default made the right secret read
+    # as "invalid" (#1712).
+    SALT_HELP = "Flask/Django signing salt (Flask default #{Flask::SALT}; Django default " \
+                "#{Django::DEFAULT_SALT}, a Django session cookie uses #{Django::SESSION_SALT})"
+
     # A bad-input / unsupported-format signal the surfaces render inline (undetectable
     # format, malformed structure, invalid payload JSON on forge). Parse/verify/forge
     # raise it; the CLI/MCP/decoder paths rescue → message rather than crashing.

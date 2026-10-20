@@ -255,8 +255,8 @@ module Gori
         tool j, "list_views",
           "List the History VIEWS available in this project. A view is a named History QL " \
           "query used as a LENS: list_history{view} ANDs it over `query` rather than replacing " \
-          "it, the same way the TUI's `v` picker ANDs it over the filter bar. Three built-ins " \
-          "ship in every project (All, History = src:proxy, History + Repeater), then the " \
+          "it, the same way the TUI's `v` picker ANDs it over the filter bar. The built-ins " \
+          "that ship in every project are #{SavedViews.builtin_names}, then the " \
           "GLOBAL library from settings.json, then this project's own rows. `active` marks the " \
           "view the TUI is showing this project through — it does NOT apply to list_history, " \
           "which filters only by the `view` you pass it, so a stored UI preference can never " \

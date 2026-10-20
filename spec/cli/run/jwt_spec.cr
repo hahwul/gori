@@ -11,6 +11,10 @@ module Gori::CLI::Run
   def self.jwt_token_input_for_spec(positional : Array(String)) : String
     jwt_token_input(positional)
   end
+
+  def self.jwt_encode_header_for_spec(token : String?, header : String?, sets : Array(String)) : String
+    jwt_encode_header(token, header, sets)
+  end
 end
 
 describe "gori run jwt" do
@@ -20,6 +24,15 @@ describe "gori run jwt" do
     # A token pasted from a terminal or piped through a shell routinely arrives with
     # surrounding whitespace/newline; an untrimmed one fails to decode with no clue why.
     Gori::CLI::Run.jwt_token_input_for_spec(["  #{jwt}\n"]).should eq(jwt)
+  end
+
+  it "--set-header patches the token's header, and --header mints without a token (#1701)" do
+    patched = Gori::CLI::Run.jwt_encode_header_for_spec(jwt, nil, ["kid=../../dev/null", %(jku="https://a.test/j")])
+    JSON.parse(patched).as_h.should eq({"alg" => "HS256", "typ" => "JWT", "kid" => "../../dev/null", "jku" => "https://a.test/j"})
+    minted = Gori::CLI::Run.jwt_encode_header_for_spec(nil, nil, ["kid=x"])
+    signed = Gori::Jwt.encode(minted, %({"sub":"a"}), "HS256", "k")
+    JSON.parse(Gori::Jwt.header_json(signed)).as_h.should eq({"kid" => "x", "alg" => "HS256"})
+    Gori::CLI::Run.jwt_encode_header_for_spec(nil, %({"typ":"at+jwt"}), [] of String).should eq(%({"typ":"at+jwt"}))
   end
 
   it "decode_json carries nested header/payload objects + the signed flag" do

@@ -18,13 +18,17 @@ module Gori
         format = :text
         payload_override = nil.as(String?)
         sets = [] of String
+        header_override = nil.as(String?)
+        header_sets = [] of String
         positional = parse_args(args, "gori run jwt") do |p|
           p.banner = "Usage: gori run jwt [<token>] [options]\n\n" \
                      "Decode, verify, re-sign, or generate testing payloads for a JWT (JWS) —\n" \
                      "or read the protected header of an encrypted one (JWE). The token is read\n" \
                      "from the <token> argument, or from STDIN when none is given."
           p.on("--decode", "Decode header / payload / signature (default)") { action = :decode }
-          p.on("--encode", "Re-sign the token's claims with --alg and --secret / --key") { action = :encode }
+          p.on("--encode", "Re-sign the token's claims with --alg and --secret / --key " \
+                           "(no token needed with --header AND --payload; with only one, the other half " \
+                           "is read from the <token> arg or STDIN — pass \"\" or </dev/null for {})") { action = :encode }
           p.on("--verify", "Check the token's own signature against --secret / --key; exits 1 unless it verifies") { action = :verify }
           p.on("--attacks", "Generate testing payloads (alg:none, weak-secret, header injection)") { action = :attacks }
           p.on("--alg=ALG", "Signing alg for --encode: HS256 (default) | HS384 | HS512 | " \
@@ -35,10 +39,13 @@ module Gori
                             "--attacks takes the server's PUBLIC key and adds the algorithm-confusion payloads") { |v| key = v }
           p.on("--payload=JSON", "--encode: replace the claims (payload) wholesale before re-signing") { |v| payload_override = v }
           p.on("--set=CLAIM", "--encode: patch one claim before re-signing, as key=value (repeatable). value is JSON if it parses (true/3), else a string") { |v| sets << v }
+          p.on("--header=JSON", "--encode: replace the header wholesale (alg still comes from --alg)") { |v| header_override = v }
+          p.on("--set-header=FIELD", "--encode: patch one header field (kid, jku, jwk, …) as key=value, repeatable, typed like --set (alg still comes from --alg)") { |v| header_sets << v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
 
         jwt_refuse_conflicts(action, payload_override, sets, secret, key)
+        jwt_refuse_header_conflicts(action, header_override, header_sets)
         # `--verify` checks the token's OWN alg, so a pinned `--alg RS256` read as an
         # alg-confusion check while verifying HS256 regardless; decode and attacks sign nothing.
         abort "gori run jwt: --alg applies to --encode only (--verify checks the token's own alg)" if alg_given && action != :encode
@@ -46,15 +53,33 @@ module Gori
         if action == :decode && (secret || !key.empty?)
           abort "gori run jwt: --decode uses no key — add --verify to check the signature with it"
         end
-        token = jwt_token_input(positional)
-        abort "gori run jwt: no token — pass it as an argument or pipe it on STDIN" if token.empty?
-        # `--key` names a PEM, so it is resolved to the PEM text before the engine sees it — an
-        # HS algorithm would otherwise HMAC-sign the PATH (see Jwt.key_material). Resolved ONCE,
-        # inside the actions that use a key: `--decode` has no use for one (and used to abort
-        # over a typo in a flag it ignores), and `--attacks` fed the raw spec to a generator
-        # that opened the file twice more.
+        token, minting = jwt_token_and_minting(action, positional, header_override, payload_override)
+        abort "gori run jwt: no token — pass it as an argument or pipe it on STDIN" if token.empty? && !minting
+        jwt_dispatch(action, token, alg, secret, key, payload_override, sets, header_override, header_sets, format)
+      end
+
+      # `--encode` mints from scratch when it is told what to sign, as MCP `jwt_encode` does. With
+      # BOTH halves given the token contributes nothing, so don't read STDIN for it — a
+      # `while read … jwt --encode` loop would swallow its next line and an open pipe would hang (#1721).
+      private def self.jwt_token_and_minting(action : Symbol, positional : Array(String),
+                                             header_override : String?, payload_override : String?) : {String, Bool}
+        minting = action == :encode && (header_override || payload_override) ? true : false
+        skip_stdin = minting && !!header_override && !!payload_override && positional.empty?
+        {skip_stdin ? "" : jwt_token_input(positional), minting}
+      end
+
+      # `--key` names a PEM, so it is resolved to the PEM text before the engine sees it — an
+      # HS algorithm would otherwise HMAC-sign the PATH (see Jwt.key_material). Resolved ONCE,
+      # inside the actions that use a key: `--decode` has no use for one (and used to abort
+      # over a typo in a flag it ignores), and `--attacks` fed the raw spec to a generator
+      # that opened the file twice more.
+      private def self.jwt_dispatch(action : Symbol, token : String, alg : String, secret : String?,
+                                    key : String, payload_override : String?, sets : Array(String),
+                                    header_override : String?, header_sets : Array(String), format : Symbol) : Nil
         case action
-        when :encode  then emit_jwt_encode(token, alg, jwt_key(secret, key), payload_override, sets, format)
+        when :encode
+          header = jwt_encode_header(token.presence, header_override, header_sets)
+          emit_jwt_encode(token.presence, header, alg, jwt_key(secret, key), payload_override, sets, format)
         when :verify  then emit_jwt_verify(token, jwt_key(secret, key), format)
         when :attacks then emit_jwt_attacks(token, key.presence && jwt_key("", key), format)
         else               emit_jwt_decode(token, format)
@@ -83,6 +108,29 @@ module Gori
         if refusal = jwt_key_refusal(action, secret, key)
           abort "gori run jwt: #{refusal}"
         end
+      end
+
+      # --header / --set-header mirror --payload / --set: two spellings of one object, and
+      # only the re-sign path reads either.
+      private def self.jwt_refuse_header_conflicts(action : Symbol, header_override : String?,
+                                                   header_sets : Array(String)) : Nil
+        abort "gori run jwt: --header and --set-header are mutually exclusive" if header_override && !header_sets.empty?
+        if action != :encode && (header_override || !header_sets.empty?)
+          abort "gori run jwt: --header / --set-header apply to --encode only"
+        end
+      end
+
+      # The header to sign: `--header` wholesale, else the token's own (`{}` when minting),
+      # with `--set-header` patched in. A token header that does not decode is refused before
+      # a patch, which would otherwise re-sign `{}` plus the patch and drop it (#1169's shape).
+      private def self.jwt_encode_header(token : String?, header_override : String?,
+                                         header_sets : Array(String)) : String
+        header = header_override || token.try { |t| Jwt.header_json(t) } || "{}"
+        return header if header_sets.empty?
+        abort "gori run jwt: the token's header is not decodable JSON — pass --header instead" if header.empty?
+        Jwt.patch_payload(header, header_sets, "header")
+      rescue ex : Jwt::ForgeError
+        abort "gori run jwt: #{ex.message}"
       end
 
       # Why the key flags given cannot run `action`, or nil when they can. Checked before the
@@ -173,18 +221,19 @@ module Gori
         lines
       end
 
-      private def self.emit_jwt_encode(token : String, alg : String, secret : String,
+      private def self.emit_jwt_encode(token : String?, header : String, alg : String, secret : String,
                                        payload_override : String?, sets : Array(String), format : Symbol) : Nil
-        header = Jwt.header_json(token)
-        abort "gori run jwt: not a decodable JWT (need header.payload)" if header.empty? && Jwt.payload_json(token).empty?
+        if token && header.empty? && Jwt.payload_json(token).empty?
+          abort "gori run jwt: not a decodable JWT (need header.payload)"
+        end
         # The token's own claims only when they are the base: `signing_payload` refuses a payload
         # it cannot read, where a blank would re-sign `{}` plus the patch (#1169).
         payload = if po = payload_override
                     po
                   elsif !sets.empty?
-                    Jwt.patch_payload(Jwt.signing_payload(token), sets)
+                    Jwt.patch_payload(token ? Jwt.signing_payload(token) : "{}", sets)
                   else
-                    Jwt.signing_payload(token)
+                    token ? Jwt.signing_payload(token) : "{}"
                   end
         signed = Jwt.encode(header, payload, alg, secret)
         if format == :json
