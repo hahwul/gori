@@ -5,6 +5,7 @@ require "../proxy/codec/http1"
 require "../proxy/ws/frame"
 require "./flow_request"
 require "./h2_ws_stream"
+require "./conn_pool" # `Result` scrubs its error with `ConnPool.transport_detail`
 
 module Gori
   module Repeater
@@ -136,6 +137,9 @@ module Gori
 
         def initialize(@handshake_head, @messages, @duration_us, @error = nil,
                        @note = nil, @close_code = nil, @upgraded = false, @truncated = nil)
+          # `Repeater::Result`'s seam, for the same leak (#1696): a raw `IO::Error` message
+          # carries the socket's heap address.
+          @error = @error.try { |e| ConnPool.transport_detail(e) || e }
         end
 
         # A struct, so this sets the field on the copy it returns.

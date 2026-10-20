@@ -77,6 +77,18 @@ describe Gori::Repeater::Timing do
     seen.should be <= 4
   end
 
+  it "says what the sends died of when every pair failed (#1679)" do
+    closed = TCPServer.new("127.0.0.1", 0)
+    port = closed.local_address.port
+    closed.close
+    rep = Timing.run(build_pair_plan(port, "/a", "/b"), iterations: 2, mode: Timing::Mode::Race, warmup: 0)
+    rep.pairs_valid.should eq(0)
+    rep.error.not_nil!.should contain("connect failed: 127.0.0.1:#{port}")
+    rep.rationale.should end_with("sends failed: #{rep.error}")
+    subject = Timing::Present::Subject.new(a_label: "a", b_label: "b")
+    JSON.parse(Timing::Present.report_json(rep, subject))["error"].as_s.should eq(rep.error)
+  end
+
   it "stops at a spent project budget and says so" do
     with_store do |store|
       store.set_settings([{Gori::Settings::PROJECT_OUTBOUND_MAX_REQUESTS_KEY, "2"}] of {String, String?})

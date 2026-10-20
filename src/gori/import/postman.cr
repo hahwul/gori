@@ -40,16 +40,17 @@ module Gori
         now = Time.utc.to_unix * 1_000_000
         pairs = [] of Builder::FlowPair
         missing = Set(String).new
-        skipped = walk(items, Vars.merge!(Vars::Table.new, root["variable"]?), root["auth"]?,
-          0, now, pairs, missing, prov)
+        skips = Skips.new
+        walk(items, Vars.merge!(Vars::Table.new, root["variable"]?), root["auth"]?,
+          0, now, pairs, missing, prov, skips)
 
         # A collection whose `{{baseUrl}}` lives in a separate ENVIRONMENT file resolves to
         # nothing, and the generic "all N entries were skipped as malformed" would blame the
         # file. Name the variables instead — the collection is fine, it just isn't self-contained.
         if pairs.empty? && !missing.empty?
-          raise Gori::Error.new(unresolved_message(skipped, missing))
+          raise Gori::Error.new(unresolved_message(skips.count, missing))
         end
-        ParseResult.new(pairs, skipped)
+        skips.result(pairs)
       end
 
       # Depth-first over the item tree. Folders (an `item` array) may scope their own
@@ -57,16 +58,15 @@ module Gori
       private def self.walk(items : Array(JSON::Any), vars : Vars::Table, auth : JSON::Any?,
                             depth : Int32, now : Int64,
                             pairs : Array(Builder::FlowPair), missing : Set(String),
-                            prov : Provenance) : Int32
-        return 0 if depth > MAX_DEPTH
-        skipped = 0
+                            prov : Provenance, skips : Skips) : Nil
+        return if depth > MAX_DEPTH
         items.each do |node|
           h = node.as_h?
           next unless h
           scoped = h["variable"]? ? Vars.merge!(vars.dup, h["variable"]) : vars
           scoped_auth = own_auth(h) || auth
           if kids = h["item"]?.try(&.as_a?)
-            skipped += walk(kids, scoped, scoped_auth, depth + 1, now, pairs, missing, prov)
+            walk(kids, scoped, scoped_auth, depth + 1, now, pairs, missing, prov, skips)
             next
           end
           req = h["request"]?
@@ -75,11 +75,10 @@ module Gori
           # rather than aborting the collection — the contract every import parser shares.
           begin
             pairs << Vars.per_entry { request_to_flow(now, req, scoped, scoped_auth, missing, prov) }
-          rescue
-            skipped += 1
+          rescue ex
+            skips.add("request #{h["name"]?.try(&.as_s?).to_s.inspect}", ex)
           end
         end
-        skipped
       end
 
       # A node's own `auth`, nil when absent OR `null`: Postman reads `"auth": null` as

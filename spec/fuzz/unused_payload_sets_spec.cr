@@ -51,6 +51,23 @@ describe "Fuzz::Plan#unused_payload_sets" do
     unused(TWO_POS, F::Mode::Pitchfork, 1).should eq(0)
   end
 
+  # ...but it is as silent as the surplus case, and multiplies a cluster-bomb's request count,
+  # so `gori run fuzz` and MCP say it from `Plan#reused_set_note` (#1704).
+  it "names the positions a per-position mode fills from set 1" do
+    note = ->(text : String, mode : F::Mode, sets : Int32) do
+      sources = Array(F::PayloadSource).new(sets) { |k| F::InlineList.new(["p#{k}"]).as(F::PayloadSource) }
+      F::Plan.build(F::PlanOptions.new(text, target: "http://t.test", sources: sources,
+        config: F::Config.new(mode: mode, concurrency: 1),
+        matcher: F::Matcher.new(keep_bodies: :none)), ungated_outbound).reused_set_note
+    end
+    three = "GET /a?x=§1§&y=§2§&z=§3§ HTTP/1.1\r\nHost: t.test\r\n\r\n"
+    note.call(three, F::Mode::ClusterBomb, 2).should eq("position 3 has no set of its own and reuses set 1")
+    note.call(three, F::Mode::Pitchfork, 1).should eq("positions 2-3 have no set of their own and reuse set 1")
+    note.call(three, F::Mode::ClusterBomb, 3).should be_nil
+    note.call(three, F::Mode::ClusterBomb, 4).should be_nil
+    note.call(three, F::Mode::Sniper, 1).should be_nil
+  end
+
   it "opens no dropped wordlist — which is why the discard was silent" do
     # A set Sniper will never draw from is never opened, so a bad path in it raises nothing:
     # the plan builds, the run sends, and the operator hears about neither. The count is the

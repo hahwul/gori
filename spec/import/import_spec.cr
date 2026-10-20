@@ -110,6 +110,123 @@ describe Gori::Import do
     end
   end
 
+  # #1688: other generators write a handshake's socket URL; gori's own export writes http(s).
+  it "imports a HAR handshake written with a ws:// or wss:// url, transcript and all" do
+    har = File.tempname("gori", ".har")
+    begin
+      entry = ->(url : String) do
+        %({"startedDateTime": "2026-06-01T12:00:00.000Z", ) +
+        %("request": {"method": "GET", "url": "#{url}", "httpVersion": "HTTP/1.1", "headers": []}, ) +
+        %("response": {"status": 101, "httpVersion": "HTTP/1.1", "headers": [], "content": {"size": 0}}, ) +
+        %("_webSocketMessages": [{"type": "send", "time": 1780000000.125, "opcode": 1, "data": "hi"}]})
+      end
+      File.write(har, %({"log": {"entries": [#{entry.call("ws://chat.test:8080/ws")}, #{entry.call("WSS://chat.test/wss")}]}}))
+      with_store do |store|
+        result = Gori::Import.import_file(store, :har, har)
+        {result.count, result.skipped}.should eq({2, 0})
+        rows = store.search(Gori::QL::EMPTY, 10).sort_by(&.target)
+        rows.map { |r| {r.scheme, r.host, r.port, r.target} }.should eq([
+          {"http", "chat.test", 8080, "/ws"}, {"https", "chat.test", 443, "/wss"},
+        ])
+        rows.each { |r| String.new(store.ws_messages(r.id).first.payload).should eq("hi") }
+      end
+    ensure
+      File.delete?(har)
+    end
+  end
+
+  # #1687: a bare rescue counted the skip and threw its reason away.
+  it "says which line of a URL list was skipped and why" do
+    urls = File.tempname("gori", ".txt")
+    begin
+      File.write(urls, "http://ok.test/a\n\nftp://ok.test/file\nhttp://ok.test:99999/badport\n")
+      with_store do |store|
+        result = Gori::Import.import_file(store, :urls, urls)
+        {result.count, result.skipped}.should eq({1, 2})
+        result.notes.size.should eq(2)
+        result.notes[0].should start_with("skipped line 3: invalid URL (missing scheme)")
+        result.notes[1].should start_with("skipped line 4: invalid URL (port out of range)")
+      end
+    ensure
+      File.delete?(urls)
+    end
+  end
+
+  it "says which HAR entry was skipped and why, and names the first reason when none landed" do
+    har = File.tempname("gori", ".har")
+    begin
+      File.write(har, %({"log": {"entries": [{"request": {"url": "http://h.test:99999/x"}}, {"nope": 1}]}}))
+      with_store do |store|
+        expect_raises(Gori::Error, /all 2 entries were skipped as malformed \(skipped entry 1: invalid URL \(port out of range\)/) do
+          Gori::Import.import_file(store, :har, har)
+        end
+      end
+      File.write(har, %({"log": {"entries": [{"request": {"url": "https://h.test/ok"}}, {"nope": 1}]}}))
+      with_store do |store|
+        Gori::Import.import_file(store, :har, har).notes.should eq(["skipped entry 2: no request"])
+      end
+    ensure
+      File.delete?(har)
+    end
+  end
+
+  # #1690: curl sends `user:pass@` as Basic auth, and `import --curl` already did.
+  it "encodes URL userinfo as Basic auth on a URL-list import, unless the source states one" do
+    urls = File.tempname("gori", ".txt")
+    begin
+      File.write(urls, "http://us%40er:p%3Ass@h.test/creds\nhttp://only@h.test/user\nhttp://h.test/q?mail=a@b\n")
+      with_store do |store|
+        Gori::Import.import_file(store, :urls, urls).count.should eq(3)
+        heads = store.search(Gori::QL::EMPTY, 10).sort_by(&.target).map { |r| String.new(store.get_flow(r.id).not_nil!.request_head) }
+        heads[0].should contain("Authorization: Basic #{Base64.strict_encode("us@er:p:ss")}\r\n")
+        heads[0].should contain("Host: h.test\r\n")
+        heads[0].should_not contain("us%40er")
+        heads[1].should_not contain("Authorization")
+        heads[2].should contain("Authorization: Basic #{Base64.strict_encode("only:")}\r\n")
+      end
+      stated = Gori::Import::Builder.pending_request(0_i64, "http://u:p@h.test/x", "GET",
+        Gori::Import::Builder::Headers{ {"authorization", "Bearer mine"} })
+      head = String.new(stated.request.head)
+      head.should contain("authorization: Bearer mine\r\n")
+      head.should_not contain("Basic")
+    ensure
+      File.delete?(urls)
+    end
+  end
+
+  it "clips a long skip reason and masks a URL's userinfo in it" do
+    skips = Gori::Import::Skips.new
+    skips.add("line 1", Gori::Error.new("invalid URL (bad host): \"http://u:secret@#{"x" * 5000}\""))
+    note = skips.notes.first
+    note.size.should eq(Gori::Import::Skips::NOTE_CHARS + 1)
+    note.should end_with("…")
+    note.should_not contain("secret")
+    note.should contain("http://***@x")
+  end
+
+  # A HAR is a recorded exchange (P7): a response-less entry keeps the headers it recorded.
+  it "adds no Basic auth to a response-less HAR entry with userinfo" do
+    har = File.tempname("gori", ".har")
+    begin
+      File.write(har, %({"log": {"entries": [{"request": {"method": "GET", "url": "http://u:p@h.test/x", "headers": []}}]}}))
+      with_store do |store|
+        Gori::Import.import_file(store, :har, har).count.should eq(1)
+        id = store.search(Gori::QL::EMPTY, 10).first.id
+        String.new(store.get_flow(id).not_nil!.request_head).should_not contain("Authorization")
+      end
+    ensure
+      File.delete?(har)
+    end
+  end
+
+  it "caps the skip reasons and folds the rest into one line" do
+    skips = Gori::Import::Skips.new
+    25.times { |i| skips.add("line #{i + 1}", Gori::Error.new("bad")) }
+    skips.count.should eq(25)
+    skips.notes.size.should eq(Gori::Import::Skips::CAP + 1)
+    skips.notes.last.should eq("+5 more skipped")
+  end
+
   it "indexes the imported request body for FTS body: search (response-bearing entry)" do
     har = File.tempname("gori", ".har")
     begin

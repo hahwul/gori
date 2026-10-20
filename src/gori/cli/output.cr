@@ -133,6 +133,8 @@ module Gori
           unless advisories.empty?
             j.field("advisory") { j.array { advisories.each { |l| j.string(l.scrub) } } }
           end
+          # Why an Error/Aborted flow failed (`FlowRow#error`), null on every other row (#1680).
+          json_captured(j, "error", row.error)
           redacted = false
           if head = request_head
             j.field("headers") { redacted = request_headers_json(j, head, include_sensitive) }

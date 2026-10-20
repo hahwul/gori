@@ -18,8 +18,9 @@ ENV["GORI_HOME"] = GORI_TEST_HOME
 ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
  "http_proxy", "https_proxy", "all_proxy", "no_proxy"].each { |key| ENV.delete(key) }
 # …and the markers a `gori run shell` exports (#1238), so a suite started inside one reads the
-# same environment as anywhere else.
-ENV.keys.each { |key| ENV.delete(key) if key == "GORI_SHELL" || key == "GORI_PROXY" || key.starts_with?("GORI_SHELL_ORIG_") }
+# same environment as anywhere else. `GORI_PROJECT` too: a script's pin exported in the
+# developer's shell would re-aim every `gori run` default and `--request` run a spec drives.
+ENV.keys.each { |key| ENV.delete(key) if key == "GORI_SHELL" || key == "GORI_PROXY" || key == "GORI_PROJECT" || key.starts_with?("GORI_SHELL_ORIG_") }
 
 require "../src/gori"
 

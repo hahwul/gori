@@ -253,7 +253,7 @@ module Gori
       private def self.wordlist_save_from_project(name : String, specs : Array(PayloadFrom::Spec), overwrite : Bool,
                                                   project_name : String?, db_path : String?) : WordlistCatalog::Entry
         WordlistCatalog.check_name!(name) # refuse a bad name before the project is opened
-        store = open_payload_from_store("gori run wordlist save", specs, !!(project_name || db_path), project_name, db_path) ||
+        store = open_payload_from_store("gori run wordlist save", specs, project_named?(project_name, db_path), project_name, db_path) ||
                 abort("gori run wordlist save: --payload-from needs a project to read")
         values = [] of String
         seen = Set(String).new

@@ -542,4 +542,14 @@ describe "Gori::Repeater::Plan.target_error" do
   it "leaves an unresolved $NAME to be bound before the send" do
     R::Plan.target_error("$TARGET_NOT_BOUND_IN_SPEC").should be_nil
   end
+
+  # #1683: both surfaces stored these and failed on every send after.
+  it "refuses a port past 65535 and a host no dial could reach" do
+    R::Plan.target_error("http://127.0.0.1:99999").not_nil!.should contain("port 99999 is out of range")
+    R::Plan.target_error("http://127.0.0.1:65535").should be_nil
+    R::Plan.target_error("not a url at all").not_nil!.should contain("could not determine a target host")
+    R::Plan.target_error("http://").not_nil!.should contain("could not")
+    # An 8-bit host (a captured one, via --flow) is answered, never raised on.
+    R::Plan.target_error("http://\xFFh").should be_nil
+  end
 end

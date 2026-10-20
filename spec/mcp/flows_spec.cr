@@ -21,6 +21,19 @@ end
 
 describe Gori::MCP::Server do
   describe "list_history" do
+    it "puts an errored flow's stored error on its row, null on the others (#1680)" do
+      with_store do |store|
+        ok = mcp_seed_flow(store, "h.test", "GET", "/ok", 200)
+        failed = mcp_seed_flow(store, "h.test", "GET", "/fail", 200)
+        store.update_response(Gori::Store::CapturedResponse.new(flow_id: failed, status: 0, head: Bytes.empty,
+          state: Gori::Store::FlowState::Error, error: "upstream connect failed: h.test:80"))
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{}}})
+        rows = mcp_tool_payload(mcp_drive(store, call)[0])["flows"].as_a
+        rows.find! { |r| r["id"].as_i64 == failed }["error"].as_s.should eq("upstream connect failed: h.test:80")
+        rows.find! { |r| r["id"].as_i64 == ok }["error"].raw.should be_nil
+      end
+    end
+
     it "rejects a QL query that compiles to nothing (not match-all)" do
       with_store do |store|
         mcp_seed_flow(store, "ex.test", "GET", "/", 200)

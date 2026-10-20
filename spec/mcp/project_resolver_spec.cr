@@ -192,4 +192,17 @@ describe Gori::MCP::ProjectResolver do
       selected.source.should eq("active-tui")
     end
   end
+
+  it "refuses a --db (or GORI_MCP_DB) file that does not exist instead of creating it (#1667)" do
+    with_isolated_gori_home do |base|
+      missing = File.join(base, "nope.db")
+      expect_raises(Gori::MCP::ProjectResolver::Error, "--db database does not exist: #{missing}") do
+        Gori::MCP::ProjectResolver.resolve(missing, nil, workspace_project: false, env_db: nil, env_project: nil)
+      end
+      expect_raises(Gori::MCP::ProjectResolver::Error, "GORI_MCP_DB database does not exist") do
+        Gori::MCP::ProjectResolver.resolve(nil, nil, workspace_project: false, env_db: missing, env_project: nil)
+      end
+      Dir.children(base).should_not contain("nope.db")
+    end
+  end
 end

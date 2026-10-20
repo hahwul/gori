@@ -87,6 +87,26 @@ describe Gori::Export::CsrfPoc do
     html.should_not contain("no-cors")
   end
 
+  # `form_capable?` refuses a PUT/DELETE on its METHOD, before it looks at the body, and the
+  # method alone forces a preflight: blaming the body read as a form-encoded PUT firing as a
+  # simple request (#1709). The fetch() itself is unchanged.
+  it "names the method, not the body, as why a PUT or DELETE needs fetch()" do
+    put = poc("PUT /api HTTP/1.1\r\nHost: h.test\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\na=1&b=2", "https://h.test")
+    put.should contain("a <form> cannot send PUT, and the method itself forces a CORS preflight")
+    put.should_not contain("not form-encodable")
+    put.should_not contain("accepts this content-type")
+    put.should contain(%(method: "PUT",))
+    put.should_not contain("and this Content-Type")
+    json = poc("PUT /api HTTP/1.1\r\nHost: h.test\r\nContent-Type: application/json\r\n\r\n{}", "https://h.test")
+    json.should contain("allows PUT and this Content-Type")
+    del = poc("DELETE /api/1 HTTP/1.1\r\nHost: h.test\r\n\r\n", "https://h.test")
+    del.should contain("a <form> cannot send DELETE")
+    del.should_not contain("not form-encodable")
+    head = poc("HEAD /api HTTP/1.1\r\nHost: h.test\r\n\r\n", "https://h.test")
+    head.should contain("a <form> cannot send HEAD")
+    head.should_not contain("not form-encodable")
+  end
+
   it "builds a multipart form, carrying a text part and noting a file part it cannot pre-fill" do
     b = "----X"
     body = "--#{b}\r\nContent-Disposition: form-data; name=\"amount\"\r\n\r\n100\r\n" \

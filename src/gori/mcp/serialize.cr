@@ -293,6 +293,9 @@ module Gori
           unless advisories.empty?
             j.field("advisory") { j.array { advisories.each { |a| j.string text(a) } } }
           end
+          # Why an Error/Aborted flow failed (`FlowRow#error`), null on every other row (#1680).
+          # Kept in lockstep with `CLI::Output.flow_row_fields`.
+          j.field "error", text(row.error)
           # The user-defined columns this call asked for (#819) — `label → value`, and label →
           # ARRAY where two specs share a label (two specs MAY: the same header off the request
           # and off the response is a comparison, not a mistake). Only when asked for, so an

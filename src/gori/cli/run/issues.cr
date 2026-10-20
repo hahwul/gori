@@ -350,6 +350,10 @@ module Gori
         stat_s : String? = nil
         cvss : String? = nil
         clear_cvss = false
+        host : String? = nil
+        clear_host = false
+        flow_id : Int64? = nil
+        clear_flow = false
 
         positional = parse_args(args, "gori run issues update") do |p|
           p.banner = "Usage: gori run issues update <issue-id> [options]\n\n" \
@@ -370,9 +374,18 @@ module Gori
           p.on("--notes-file=FILE", "Read the notes from FILE, byte-for-byte") { |v| notes_file = v }
           p.on("--notes-stdin", "Read the notes from stdin, byte-for-byte, as --notes-file reads a file (`report-generator | gori run issues update 7 --notes-stdin`). Keeps a long write-up out of the argument vector, so it is not in the process listing or the shell history and cannot hit the command-line length limit. Needs a pipe or a redirect (`< notes.md`): a terminal is refused, because it would echo the notes back") { notes_stdin = true }
           p.on("--status=STATUS", "Status: open|confirmed|false-positive|resolved") { |v| stat_s = v }
+          p.on("--host=HOST", "Host concerning the issue (empty to clear)") do |v|
+            v.empty? ? (clear_host = true) : (host = v)
+          end
+          p.on("--flow=ID", "The issue's seed flow (empty to clear); the old one stays as a link") do |v|
+            v.strip.empty? ? (clear_flow = true) : (flow_id = parse_flow_id(v, "gori run issues update"))
+          end
         end
 
         id = take_id(positional, "gori run issues update", "<issue-id>", "issue id")
+        if err = issue_flow_range_error(flow_id)
+          abort "gori run issues update: #{err}"
+        end
 
         cvss.try do |c|
           abort "gori run issues update: invalid --cvss '#{c}' (a vector like CVSS:3.1/AV:N/... or a score 0.0-10.0)" unless Gori::Cvss.valid?(c)
@@ -407,9 +420,13 @@ module Gori
         project = resolve_read_project(proj.name, proj.db)
         with_store(project) do |store|
           store.get_issue(id) || abort_closing(store, "gori run issues update: no issue with id #{id}")
+          if err = issue_flow_error(store, flow_id)
+            abort_closing(store, "gori run issues update: #{err}")
+          end
 
-          if title.nil? && severity.nil? && notes.nil? && status.nil? && cvss.nil? && !clear_cvss
-            abort_closing(store, "gori run issues update: no fields to update (provide at least one of --title/--severity/--notes[-file|-stdin]/--status/--cvss)")
+          if title.nil? && severity.nil? && notes.nil? && status.nil? && cvss.nil? && !clear_cvss &&
+             host.nil? && !clear_host && flow_id.nil? && !clear_flow
+            abort_closing(store, "gori run issues update: no fields to update (provide at least one of --title/--severity/--notes[-file|-stdin]/--status/--cvss/--host/--flow)")
           end
 
           masked_title = title.try { |t| Env.mask_secrets(t) }
@@ -418,7 +435,8 @@ module Gori
           # update_issue returns false when the write didn't commit (store busy/locked):
           # don't report success then.
           unless store.update_issue(id, title: masked_title, severity: severity, notes: masked_notes, status: status,
-                   cvss: cvss, clear_cvss: clear_cvss)
+                   cvss: cvss, clear_cvss: clear_cvss, host: host.try { |h| Env.mask_secrets(h) }, clear_host: clear_host,
+                   flow_id: flow_id, clear_flow: clear_flow)
             abort_closing(store, "gori run issues update: project is busy (write did not commit) — try again")
           end
           puts "Issue ##{id} updated successfully."

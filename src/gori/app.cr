@@ -430,7 +430,7 @@ module Gori
         # An upgraded flow emits an :updated event for its handshake and another :updated event
         # for each captured message. Count it only on the one completion event after the tunnel
         # closes; ordinary flows still count on their response update.
-        print_capture_row(row, format, first: printed.zero?)
+        print_capture_row(session.store, row, format, first: printed.zero?)
         STDOUT.flush # stream each flow promptly even when piped (block-buffered)
         printed += 1
         if max && printed >= max
@@ -458,12 +458,13 @@ module Gori
 
     # One completed flow on the capture stream: an array element (comma-led after the first),
     # a JSON line, or a text row.
-    private def print_capture_row(row : Store::FlowRow, format : Symbol, *, first : Bool) : Nil
+    # A JSON row carries an errored flow's `error`, which the list read leaves out (#1680).
+    private def print_capture_row(store : Store, row : Store::FlowRow, format : Symbol, *, first : Bool) : Nil
       case format
       when :json
         print ',' unless first
-        print CLI::Output.flow_row_json(row)
-      when :jsonl then puts CLI::Output.flow_row_json(row)
+        print CLI::Output.flow_row_json(store.with_errors([row]).first)
+      when :jsonl then puts CLI::Output.flow_row_json(store.with_errors([row]).first)
       else             puts CLI::Output.flow_row_text(row)
       end
     end

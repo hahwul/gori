@@ -331,6 +331,7 @@ module Gori::CLI
     # Once, and read back off an Outcome: the argv is identical for every target, and this
     # is the array the installs actually wrote rather than a second build of it.
     outcomes.first?.try { |first| puts "Command: #{exe} #{first.args.join(" ")}" }
+    install_db_note(db_path).try { |note| STDERR.puts note }
     outcomes.all?(&.ok?)
   rescue ex
     # `executable_path` (gori invoked through a PATH entry that has since moved) and
@@ -339,6 +340,17 @@ module Gori::CLI
     # they were covered by this method's own rescue before it grew a loop, and a setup
     # failure affecting every target still belongs here rather than in an Outcome.
     abort "Failed to install MCP config: #{ex.message.presence || ex.class}"
+  end
+
+  # Said at install when `--db` names a file that does not exist yet: a served `--db` is never
+  # created (#1667), so every spawn of the installed command would start unbound until it does.
+  # A note, not a refusal — the file may well be created before the client first launches.
+  def self.install_db_note(db_path : String?) : String?
+    return nil unless db_path && !db_path.empty?
+    path = File.expand_path(db_path, home: true)
+    return nil if File.exists?(path)
+    "note: --db #{path} does not exist yet; the installed server starts unbound until it does " \
+    "(open it once with `gori --db #{path}` to create it)"
   end
 
   # The selection, plus the reason it could not be made. A resolution failure is a
