@@ -116,16 +116,12 @@ module Gori::Proxy
                          apply_host_overrides : Bool = true,
                          origin_scheme : String = "http",
                          refuse_self : Bool = false) : {IO?, DialError?}
-      if apply_host_overrides
-        unless resolved = connect_target(host, port, overrides, pin)
-          return {nil, DialError.new(DialErrorKind::Connect,
-            "host override for #{host} is not a dialable address (IP, IP:PORT or [v6]:PORT) — " \
-            "fix or remove it; the origin was never contacted")}
-        end
-        target, target_port = resolved
-      else
-        target, target_port = {pin || host, port}
+      unless resolved = dial_target(host, port, overrides, pin, apply_host_overrides)
+        return {nil, DialError.new(DialErrorKind::Connect,
+          "host override for #{host} is not a dialable address (IP, IP:PORT or [v6]:PORT) — " \
+          "fix or remove it; the origin was never contacted")}
       end
+      target, target_port = resolved
       # Nothing upstream range-checks an h1 Host/absolute-form port, and glibc's getaddrinfo
       # truncates one to 16 bits: `:73616` dials :8080, gori's own listener, past the self-loop
       # guard (which compares the untruncated number). One check here covers every route.
@@ -153,6 +149,13 @@ module Gori::Proxy
       else
         dial_via_proxy(route, target, target_port, connect_timeout, io_timeout, refuse_self)
       end
+    end
+
+    # `connect_target`, or the pin/host as given when overrides are off. Nil only for an
+    # override value that does not parse (#1714).
+    private def self.dial_target(host : String, port : Int32, overrides : Gori::HostOverrides?,
+                                 pin : String?, apply_host_overrides : Bool) : {String, Int32}?
+      apply_host_overrides ? connect_target(host, port, overrides, pin) : {pin || host, port}
     end
 
     # The address to actually dial for `host`: a project override (wins) → a global override
