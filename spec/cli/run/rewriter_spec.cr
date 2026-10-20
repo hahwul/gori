@@ -44,6 +44,10 @@ module Gori::CLI::Run
     extract_rule_row(r)
   end
 
+  def self.binding_row_for_spec(r : Store::ExtractRule) : String
+    binding_row(r)
+  end
+
   def self.extract_rule_json_for_spec(r : Store::ExtractRule) : String
     JSON.build { |j| Gori::MCP::Serialize.extract_rule(j, r) }
   end
@@ -267,9 +271,11 @@ describe "gori run rewriter — rule rows" do
     row.should_not contain('\e')
     row.should_not contain('\a')
     row.should contain("⟨ESC⟩")
-    Gori::CLI::Run.extract_rule_row_for_spec(
-      extract_rule(match_filter: "path:/x\e[2J", selector: "s\e]0;t\a", host: "a.test\e[1m"))
-      .should_not contain('\e')
+    escaped = extract_rule(match_filter: "path:/x\e[2J", selector: "s\e]0;t\a", host: "a.test\e[1m")
+    Gori::CLI::Run.extract_rule_row_for_spec(escaped).should_not contain('\e')
+    Gori::CLI::Run.binding_row_for_spec(escaped).should_not contain('\e')
+    Gori::CLI::Run.binding_row_for_spec(extract_rule(host: "acme.test"))
+      .should eq(%($SESSION <- cookie "sid" @acme.test))
   end
 
   # ljust(5) is what keeps the body column aligned across ops; the shortest tag is 4 chars.

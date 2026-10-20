@@ -335,13 +335,18 @@ module Gori
           elsif rules.empty?
             puts "No bindings declared — add an extract rule with `gori run rewriter extract add`."
           else
-            rules.each do |r|
-              puts "#{Env.spell(r.name, Env::Namespace::Bind)}#{r.enabled? ? "" : " (rule disabled)"} <- #{r.token_loc.label}#{r.host.empty? ? "" : " @#{r.host}"}"
-            end
+            rules.each { |r| puts binding_row(r) }
             puts
             puts "Values are held in memory by the running gori and are never persisted."
           end
         end
+      end
+
+      # `$BIND.SESSION <- cookie "sid" @acme.test`, with the same rule text badged as in
+      # `extract_rule_row` (#1677).
+      private def self.binding_row(r : Store::ExtractRule) : String
+        host = r.host.empty? ? "" : " @#{CLI::Output.term_safe(r.host)}"
+        "#{Env.spell(r.name, Env::Namespace::Bind)}#{r.enabled? ? "" : " (rule disabled)"} <- #{CLI::Output.term_safe(r.token_loc.label)}#{host}"
       end
 
       # One text row for a rule: `G#3 [x] REQ sub/H @host  pattern -> value`. The scope letter
