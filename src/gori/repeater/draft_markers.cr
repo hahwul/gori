@@ -78,11 +78,12 @@ module Gori::Repeater
     # plan, or nil. The group is one Sender, so an untouched seed beside a draft would have its
     # captured tokens expanded as the draft's (#1670); the TUI race refuses the same group. A
     # verbatim group expands no member, so it has nothing to mix.
-    def self.mixed_group_refusal(captured : Array(Bool), verbatim : Bool) : String?
+    # `what` names the group the caller sends ("a race", "a timing run").
+    def self.mixed_group_refusal(captured : Array(Bool), verbatim : Bool, what : String = "a race") : String?
       return nil if verbatim || captured.all? || captured.none?
-      "the sessions mix captured requests (untouched flow seeds) and drafts — a race needs one " \
+      "the sessions mix captured requests (untouched flow seeds) and drafts — #{what} needs one " \
       "provenance (all captured or all drafts), so the seeds' own tokens are not expanded as a " \
-      "draft's. Race them separately, or edit the seeds into drafts"
+      "draft's. Send them separately, or edit the seeds into drafts"
     end
 
     # `RepeaterView#adopt_capture_markers`' test, asked of the store instead of the tab: did

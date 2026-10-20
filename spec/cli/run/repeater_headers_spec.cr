@@ -357,3 +357,21 @@ describe "gori run repeater send -H on an evidence session, end to end" do
     end
   end
 end
+
+# A race or timing group rides one plan, so a seed beside a draft is refused (#1670), as the TUI
+# race and MCP `race_requests` refuse it, worded for the command that sends it.
+describe "gori run repeater race/timing — mixed provenance" do
+  it "refuses a group mixing an untouched seed and a draft, unless --verbatim" do
+    a = Gori::Store::RepeaterRecord.new(1_i64, "http://h.test", "GET /a HTTP/1.1\r\n\r\n".to_slice, false, true, 9_i64, 0)
+    b = Gori::Store::RepeaterRecord.new(2_i64, "http://h.test", "GET /b HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
+    loaded = [{1_i64, a}, {2_i64, b}]
+    race = Gori::CLI::Run.race_provenance_refusal(loaded, Set{1_i64}, false, "gori run repeater race").not_nil!
+    race.should start_with("gori run repeater race: the sessions mix captured requests")
+    race.should contain("a race needs one provenance")
+    Gori::CLI::Run.race_provenance_refusal(loaded, Set{1_i64}, false, "gori run repeater timing").not_nil!
+      .should contain("a timing run needs one provenance")
+    Gori::CLI::Run.race_provenance_refusal(loaded, Set{1_i64}, true, "gori run repeater race").should be_nil
+    Gori::CLI::Run.race_provenance_refusal(loaded, Set{1_i64, 2_i64}, false, "gori run repeater race").should be_nil
+    Gori::CLI::Run.race_provenance_refusal(loaded, Set(Int64).new, false, "gori run repeater race").should be_nil
+  end
+end

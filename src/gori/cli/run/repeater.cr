@@ -1459,6 +1459,15 @@ module Gori
       # validates its target / env), assert one origin across the group, and build ONE plan over
       # every member's request from the first session's send context. Aborts (closing `outbound`)
       # on a per-member builder refusal or a cross-origin group.
+      # `cmd_label`'s refusal for a race or timing group mixing untouched seeds (`seeds`) and drafts,
+      # or nil: one plan, one provenance (#1670, `DraftMarkers.mixed_group_refusal`).
+      def self.race_provenance_refusal(loaded : Array({Int64, Store::RepeaterRecord}), seeds : Set(Int64),
+                                       verbatim : Bool, cmd_label : String) : String?
+        captured = loaded.map { |(id, _)| seeds.includes?(id) }
+        what = cmd_label.ends_with?("timing") ? "a timing run" : "a race"
+        Repeater::DraftMarkers.mixed_group_refusal(captured, verbatim, what).try { |why| "#{cmd_label}: #{why}" }
+      end
+
       private def self.build_cli_race_plan(loaded : Array({Int64, Store::RepeaterRecord}), mode : Bool,
                                            outbound : Gori::Outbound, insecure : Bool,
                                            host_overrides : Gori::HostOverrides?, verbatim : Bool,
@@ -1494,16 +1503,14 @@ module Gori
                 "#{sigs.map { |(s, h, po, _, _, _)| "#{s}://#{h}:#{po}" }.uniq!.join(", ")})"
         end
 
-        # One plan, one provenance (#1670): see `DraftMarkers.mixed_group_refusal`.
-        captured = loaded.map { |(id, _)| seeds.includes?(id) }
-        if why = Repeater::DraftMarkers.mixed_group_refusal(captured, verbatim)
+        if why = race_provenance_refusal(loaded, seeds, verbatim, cmd_label)
           outbound.close
-          abort "#{cmd_label}: #{why}"
+          abort why
         end
         anchor = loaded.first[1]
         plan = begin
           Repeater::Plan.build(Repeater::PlanOptions.new(wires,
-            evidence: captured.all?,
+            evidence: loaded.all? { |(id, _)| seeds.includes?(id) },
             reframe_grpc: reframe_grpc, default_target: anchor.target, http2: mode, sni: anchor.sni,
             timeout: timeout, expand_request: !verbatim, expand_bindings: !verbatim,
             preserve_field_case: verbatim, auto_content_length: !verbatim && anchor.auto_content_length?,

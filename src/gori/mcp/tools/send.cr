@@ -243,7 +243,7 @@ module Gori
       # asserts one origin across the group, and builds ONE plan over every member's request.
       private def build_race_plan(members : Array(Int64), force_http2 : Bool?, insecure : Bool,
                                   verbatim : Bool, timeout : Time::Span?, st : Store,
-                                  ob : Outbound) : {Repeater::Plan, Array(String)} | Result
+                                  ob : Outbound, what : String = "a race") : {Repeater::Plan, Array(String)} | Result
         loaded = [] of {Int64, Store::RepeaterRecord}
         seeds = Set(Int64).new # the members still holding their flow seed's bytes (#1670)
         members.each do |id|
@@ -298,7 +298,7 @@ module Gori
 
         # One plan, one provenance (#1670): see `DraftMarkers.mixed_group_refusal`.
         captured = loaded.map { |(id, _)| seeds.includes?(id) }
-        if why = Repeater::DraftMarkers.mixed_group_refusal(captured, verbatim)
+        if why = Repeater::DraftMarkers.mixed_group_refusal(captured, verbatim, what)
           return err(why, "INVALID_ARGUMENT", field: "repeater_ids")
         end
         anchor = loaded.first[1]
@@ -417,7 +417,7 @@ module Gori
 
         # The same origin/transport unification the race uses — a differential pair rides one
         # connection shape too, so a mismatch is refused rather than flattened.
-        built = build_race_plan(members, force_http2, insecure, verbatim, timeout, store, ob)
+        built = build_race_plan(members, force_http2, insecure, verbatim, timeout, store, ob, "a timing run")
         return built if built.is_a?(Result)
         plan, labels = built
 

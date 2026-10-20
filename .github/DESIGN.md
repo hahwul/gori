@@ -5153,10 +5153,14 @@ Refines P7's provenance axis and the #571 rule that a token with no value is lit
   (`RepeaterView#evidence_send_literals`, `Env.literal_keys` of the captured bytes): the
   operator's `$ENV` expands at the merge, the capture's `$BIND`/`$GEN` names stay literal at the
   send seam, and any other name resolves there. A name the operator types that the capture also
-  carries stays literal; gori cannot tell the two apart, and evidence wins.
+  carries stays literal; gori cannot tell the two apart, and evidence wins. An accepted cost of
+  the same rule: the send seam's pass consumes no escape in evidence it does not resolve, so an
+  operator `-H 'Z: $$GEN.UUID'` on an evidence send goes out as `$$GEN.UUID`, not `$GEN.UUID`.
 - A race or timing group rides one Sender, so it has one provenance: a group that mixes untouched
   seeds and drafts is refused, CLI and MCP, as the TUI race refuses a group whose `evidence?`
   differs. `--verbatim` waives it, since nothing expands for any member.
 - A session whose seed flow was deleted is a draft headlessly (nothing is left to compare) but
   stays evidence in the TUI, which keys on `flow_id`. Left as is: the headless reading is the
-  conservative one.
+  conservative one. The same split follows `minimize --apply` (CLI `--apply`, MCP `apply`): it
+  rewrites the seed's row, so headless it is a draft from then on, while the TUI tab, keyed on
+  `flow_id`, keeps treating it as evidence.
