@@ -131,7 +131,9 @@ module Gori
           else
             m = html_comment_safe(method)
             b << "<!-- fetch() PoC: a <form> cannot send #{m}, and the method itself forces a CORS preflight. -->\n"
-            b << "<!-- It fires ONLY if the endpoint's preflight answer allows #{m} from this origin with credentials. -->\n"
+            # A non-safelisted Content-Type rides the same preflight, so the answer must allow it too.
+            also = ct.empty? || ct.in?("application/x-www-form-urlencoded", "multipart/form-data", "text/plain") ? "" : " and this Content-Type"
+            b << "<!-- It fires ONLY if the endpoint's preflight answer allows #{m}#{also} from this origin with credentials. -->\n"
           end
           dropped_headers_comment(b, parts, carried: ct.empty? ? nil : "content-type")
           b << "<body>\n<script>\n"
