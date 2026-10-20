@@ -5840,8 +5840,9 @@ module Gori::Tui
     # responsive; nothing is written.
     private def rewriter_preview_text(candidate : Store::MatchRule) : String
       pv = @session.rules.preview(candidate, 200)
-      more = pv.total > pv.scanned ? " (of #{pv.total})" : ""
-      "affects #{pv.matched} of #{pv.scanned} recent flows#{more}"
+      more = pv.capped ? " (of #{pv.total})" : ""
+      skipped = pv.skipped > 0 ? " · #{pv.skipped} too large to preview" : ""
+      "affects #{pv.matched} of #{pv.scanned} recent flows#{more}#{skipped}"
     end
 
     # Notes must not be reloaded out from under in-progress typing. Focus alone is

@@ -879,12 +879,14 @@ module Gori
                 j.field "would_match", pv.matched
                 j.field "scanned", pv.scanned
                 j.field "total_flows", pv.total
-                j.field "scan_capped", pv.total > pv.scanned
+                j.field "skipped", pv.skipped
+                j.field "scan_capped", pv.capped
               end
             end)
           else
-            capped = pv.total > pv.scanned ? " (of #{pv.total} total; scan capped)" : ""
-            puts "Would affect #{pv.matched} of #{pv.scanned} recent flows#{capped}."
+            capped = pv.capped ? " (of #{pv.total} total; scan capped)" : ""
+            skipped = pv.skipped > 0 ? " #{pv.skipped} skipped: body too large to preview." : ""
+            puts "Would affect #{pv.matched} of #{pv.scanned} recent flows#{capped}.#{skipped}"
           end
         end
       end

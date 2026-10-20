@@ -662,10 +662,15 @@ describe Gori::Rules do
           Gori::Store::RulePart::Body, "role", %("admin"), Gori::Store::RuleOp::JsonSet)
         pv = rules.preview(json)
         {pv.scanned, pv.matched}.should eq({2, 1}) # the cut body is left out, not a miss
+        # #1699: a skip is not the 500-row cap — every stored flow was read.
+        {pv.skipped, pv.capped}.should eq({1, false})
         literal = Gori::Store::MatchRule.new(0_i64, true, Gori::Store::RuleTarget::Response,
           Gori::Store::RulePart::Body, "usr", "admin")
         pv = rules.preview(literal)
         {pv.scanned, pv.matched}.should eq({3, 2}) # not the gzip one
+        {pv.skipped, pv.capped}.should eq({0, false})
+        rules.preview(literal, 2).capped.should be_true # older flows exist it never read
+        rules.preview(literal, 3).capped.should be_false
       end
     end
   end

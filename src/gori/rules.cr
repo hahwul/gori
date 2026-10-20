@@ -2043,7 +2043,11 @@ module Gori
     # tuning a rule is looking at.
     RULE_PREVIEW_WS_MAX = 50
 
-    record Preview, scanned : Int32, matched : Int32, total : Int64
+    # `skipped`: flows left out of `scanned` because a json rule would only see a cut body
+    # (`json_body_cut?`). `capped`: the scan read its full `limit` of rows and older flows exist
+    # that it never looked at. `total > scanned` cannot say that on its own: a skip also widens the gap,
+    # and every surface read it as "scan capped" (#1699).
+    record Preview, scanned : Int32, matched : Int32, total : Int64, skipped : Int32 = 0, capped : Bool = false
 
     # How many of up to `limit` recent stored flows a candidate rule WOULD affect, by
     # replaying the SAME transform the live proxy uses (so regex / header ops / host-scope
@@ -2053,19 +2057,25 @@ module Gori
     def preview(rule : Store::MatchRule, limit : Int32 = RULE_PREVIEW_SCAN) : Preview
       scanned = 0
       matched = 0
+      skipped = 0
       # Head/header rules never touch the body, so fetch head-only; body rules cap the
       # fetched bytes (one past the cap, to tell a cut body). Without this the preview pulled
       # every flow's FULL request+response body into memory per keystroke, stalling
       # proportionally to stored body size.
       body_max = rule.part.body? ? RULE_PREVIEW_BODY_MAX + 1 : 0
-      @store.recent_flows(limit, nil).each do |row|
+      rows = @store.recent_flows(limit, nil)
+      rows.each do |row|
         detail = @store.get_flow(row.id, body_max: body_max)
         next unless detail
-        next if json_body_cut?(rule, detail)
+        if json_body_cut?(rule, detail)
+          skipped += 1
+          next
+        end
         scanned += 1
         matched += 1 if rule_affects?(rule, detail)
       end
-      Preview.new(scanned, matched, @store.count)
+      total = @store.count
+      Preview.new(scanned, matched, total, skipped, rows.size >= limit && total > rows.size)
     end
 
     # Whether applying `rule` to the relevant part of `detail` would change its bytes — or,

@@ -496,7 +496,8 @@ module Gori
             j.field "would_match", pv.matched
             j.field "scanned", pv.scanned
             j.field "total_flows", pv.total
-            j.field "scan_capped", pv.total > pv.scanned
+            j.field "skipped", pv.skipped
+            j.field "scan_capped", pv.capped
             j.field "note", "Replays the rule transform over recent flows (bounded to #{Gori::Rules::RULE_PREVIEW_SCAN}); response bodies are matched as stored wire bytes."
             if part_defaulted
               j.field "part_defaulted", true
