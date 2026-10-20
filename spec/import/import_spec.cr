@@ -110,6 +110,31 @@ describe Gori::Import do
     end
   end
 
+  # #1688: other generators write a handshake's socket URL; gori's own export writes http(s).
+  it "imports a HAR handshake written with a ws:// or wss:// url, transcript and all" do
+    har = File.tempname("gori", ".har")
+    begin
+      entry = ->(url : String) do
+        %({"startedDateTime": "2026-06-01T12:00:00.000Z", ) +
+        %("request": {"method": "GET", "url": "#{url}", "httpVersion": "HTTP/1.1", "headers": []}, ) +
+        %("response": {"status": 101, "httpVersion": "HTTP/1.1", "headers": [], "content": {"size": 0}}, ) +
+        %("_webSocketMessages": [{"type": "send", "time": 1780000000.125, "opcode": 1, "data": "hi"}]})
+      end
+      File.write(har, %({"log": {"entries": [#{entry.call("ws://chat.test:8080/ws")}, #{entry.call("WSS://chat.test/wss")}]}}))
+      with_store do |store|
+        result = Gori::Import.import_file(store, :har, har)
+        {result.count, result.skipped}.should eq({2, 0})
+        rows = store.search(Gori::QL::EMPTY, 10).sort_by(&.target)
+        rows.map { |r| {r.scheme, r.host, r.port, r.target} }.should eq([
+          {"http", "chat.test", 8080, "/ws"}, {"https", "chat.test", 443, "/wss"},
+        ])
+        rows.each { |r| String.new(store.ws_messages(r.id).first.payload).should eq("hi") }
+      end
+    ensure
+      File.delete?(har)
+    end
+  end
+
   # #1690: curl sends `user:pass@` as Basic auth, and `import --curl` already did.
   it "encodes URL userinfo as Basic auth on a URL-list import, unless the source states one" do
     urls = File.tempname("gori", ".txt")

@@ -4,6 +4,7 @@ require "time"
 require "uri"
 require "./builder"
 require "../proxy/h2/head_codec" # PROTOCOL_MARKER — the `:protocol` line Export::Har writes
+require "../repeater/plan"       # Plan.normalize_scheme — the ws/wss → http/https fold
 
 module Gori
   module Import
@@ -184,7 +185,7 @@ module Gori
       private def self.entry_to_flow(entry : JSON::Any, prov : Provenance) : Builder::FlowPair?
         req = entry["request"]?
         return nil unless req
-        url = req["url"]?.to_s
+        url = http_url(req["url"]?.to_s)
         return nil if url.empty?
         method = req["method"]?.to_s.presence || "GET"
         http_version = normalize_http_version(req["httpVersion"]?.to_s)
@@ -259,6 +260,19 @@ module Gori
           response_head_override: raw_response_head)
         msgs = ws_messages(entry, created_at)
         msgs.empty? ? pair : Builder::FlowPair.new(pair.request, pair.response, msgs)
+      end
+
+      # A WebSocket handshake's `request.url` with its `ws`/`wss` scheme folded to the
+      # `http`/`https` it was sent over (#1688). gori's own export writes the http(s) form, but
+      # other generators write the socket's URL, and `Builder.normalize_url` refuses anything
+      # not http(s) — so a third-party HAR's handshakes were dropped as malformed together with
+      # the `_webSocketMessages` `ws_messages` exists to read. Only here: a URL LIST keeps
+      # refusing `ws://`, since a bare socket URL there describes no request.
+      private def self.http_url(url : String) : String
+        colon = url.index("://") || return url
+        scheme = url[0, colon].downcase
+        folded = Repeater::Plan.normalize_scheme(scheme)
+        folded == scheme ? url : folded + url[colon..]
       end
 
       # The RFC 8441 `:protocol` this entry's handshake declared, or nil — the inverse of the
