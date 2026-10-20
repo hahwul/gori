@@ -729,6 +729,15 @@ module Gori
         abort "#{what}: cannot read the #{noun} from stdin: #{ex.message}"
       end
 
+      # A secret a `--…-stdin` flag reads instead of argv, where it would sit in the process
+      # listing and the shell history (`project network set upstream_auth --password-stdin`,
+      # `project env set --value-stdin`): the pipe's bytes minus ONE trailing line ending —
+      # `echo "$PASS" |` appends one the operator never typed, and a secret that silently gained
+      # a newline fails authentication with nothing pointing at why. Only one: a second is data.
+      def self.read_stdin_secret(io : IO, what : String, noun : String, flag : String) : String
+        read_stdin_text(io, what, noun, stdin_pipe_hint(what, flag: flag)).chomp
+      end
+
       # The IMPLICIT stdin road's read: no terminal guard — a terminal there means "no source
       # was given", and each caller already answers that with its own usage line — but the
       # same `IO::Error` rescue the explicit doors get. `CLI.run` re-raises any non-EPIPE

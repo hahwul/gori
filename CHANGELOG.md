@@ -36,6 +36,7 @@
 - `gori run` sends, MCP `send_request`, the Fuzzer, the Miner and every other sweep (Discover, Authorize, Retest, active Probe) stop reading an SSE response after a number of events or seconds (100 / 10 s for a send, 50 / 5 s per sweep payload) instead of waiting out the idle timeout, and return the events so far as a success marked `bounded`; `--sse-events` / `--sse-time` or MCP `sse_max_events` / `sse_max_ms` change the limits. The TUI Repeater shows an SSE response live, per event under PRETTY, until **Stop send** ends it and keeps the events received (#1631)
 - MCP: a `--db` or `GORI_MCP_DB` file that does not exist leaves the server unbound with a `bind_error`, read-only or not, instead of creating and migrating an empty database there (#1667)
 - CLI: `fuzz`, `mine` and `sequence` with `--request` or stdin read the project `GORI_PROJECT` names, its env vars, host overrides, scope and Sandbox included, the same as `--project`, instead of sending unscoped (#1669)
+- CLI: `gori run project env set KEY --value-stdin` reads the value from a pipe or a redirect, never a terminal, so a token stays off the argument vector (#1702)
 
 ## v0.8.1
 

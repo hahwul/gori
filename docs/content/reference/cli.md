@@ -1751,6 +1751,7 @@ gori run project env                              # list KEY=[REDACTED] (--show-
 gori run project env --format json
 gori run project env set TOKEN=secret
 gori run project env set HOST api.example.com
+printf %s "$TOKEN" | gori run project env set TOKEN --value-stdin
 gori run project env delete TOKEN
 ```
 
@@ -1758,6 +1759,7 @@ gori run project env delete TOKEN
 | --------------------- | ------------- |
 | (default) | List project vars; `--format` is `text` or `json` |
 | `set KEY=value` · `set KEY value` | Upsert a project var (KEY must match `[A-Za-z_][A-Za-z0-9_]*`) |
+| `set KEY --value-stdin` | Read the value from stdin (a pipe or a redirect, never a terminal), so a token stays out of the process listing and the shell history; one trailing newline is dropped |
 | `delete KEY` (`rm`) | Remove a project var |
 
 #### project host-override

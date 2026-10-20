@@ -1743,6 +1743,7 @@ gori run project env                              # KEY=[REDACTED] 목록 (--sho
 gori run project env --format json
 gori run project env set TOKEN=secret
 gori run project env set HOST api.example.com
+printf %s "$TOKEN" | gori run project env set TOKEN --value-stdin
 gori run project env delete TOKEN
 ```
 
@@ -1750,6 +1751,7 @@ gori run project env delete TOKEN
 |---------------------|-------------|
 | (default) | 프로젝트 변수 목록; `--format`은 `text` 또는 `json` |
 | `set KEY=value` · `set KEY value` | 프로젝트 변수 upsert (KEY는 `[A-Za-z_][A-Za-z0-9_]*`) |
+| `set KEY --value-stdin` | 값을 stdin(파이프나 리다이렉트, 터미널은 거부)에서 읽어 토큰이 프로세스 목록과 셸 히스토리에 남지 않게 합니다. 끝의 줄바꿈 하나는 버립니다 |
 | `delete KEY` (`rm`) | 프로젝트 변수 제거 |
 
 #### project host-override {#project-host-override}

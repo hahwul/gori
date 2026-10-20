@@ -1042,6 +1042,7 @@ module Gori
                      "Or run with a subcommand:\n" \
                      "  gori run project env set KEY=value\n" \
                      "  gori run project env set KEY value\n" \
+                     "  gori run project env set KEY --value-stdin\n" \
                      "  gori run project env delete|rm KEY\n\n" \
                      "VALUES are [REDACTED] — an env var is usually a token, and this list is\n" \
                      "scrollback. --show-values prints them."
@@ -1078,14 +1079,23 @@ module Gori
 
       private def self.cmd_env_set(args : Array(String)) : Nil
         proj = ProjectFlags.new
+        value_stdin = false
 
         positional = parse_args(args, "gori run project env set") do |p|
           p.banner = "Usage: gori run project env set KEY=value [options]\n" \
-                     "       gori run project env set KEY value [options]"
+                     "       gori run project env set KEY value [options]\n" \
+                     "       gori run project env set KEY --value-stdin [options]"
           project_options(p, proj, "update")
+          p.on("--value-stdin", "Read the value from stdin (a pipe or a redirect, never a terminal) instead of the argument vector, where it would sit in the process listing and the shell history. One trailing newline is dropped") { value_stdin = true }
         end
 
         abort "gori run project env set: missing KEY=value (or KEY value)" if positional.empty?
+        if value_stdin
+          # Argv-only, so ABOVE the stdin read: a bad call must not first block on the pipe.
+          abort "gori run project env set: --value-stdin takes the KEY alone — the value comes from stdin" if positional.size > 1 || positional[0].includes?('=')
+          abort "gori run project env set: #{env_set_refusal(positional)}" unless Env.valid_key?(positional[0])
+          positional << read_stdin_secret(STDIN, "gori run project env set", "value", "--value-stdin")
+        end
         parsed = env_set_pair(positional)
         abort "gori run project env set: #{env_set_refusal(positional)}" unless parsed
         key, val = parsed
@@ -1127,7 +1137,7 @@ module Gori
       def self.env_set_refusal(positional : Array(String)) : String
         key = positional.size == 1 ? positional[0].partition('=')[0] : positional[0]
         return "invalid KEY (use [A-Za-z_][A-Za-z0-9_]*)" unless Env.valid_key?(key)
-        return "missing value for #{key} (KEY=value, or KEY value; KEY= sets it empty)" if positional.size == 1 && !positional[0].includes?('=')
+        return "missing value for #{key} (KEY=value, KEY value, or KEY --value-stdin; KEY= sets it empty)" if positional.size == 1 && !positional[0].includes?('=')
         "the value for #{key} is not valid UTF-8"
       end
 
