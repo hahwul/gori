@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Sitemap: OpenAPI export gives a path its own `servers` whenever the origins that answered it differ from the document's, so two origins of one host are no longer merged and `import --oas` puts each operation back on its own origin (#1675)
 - CLI: `gori run repeater ws <id>` opens a persistent HTTP/1.1 WebSocket session on a saved repeater, sending each stdin line as a text frame (or hex-decoded binary under `--binary`) and streaming both directions to stdout as text or JSON lines (`--format json`), with `--auto-reply`, `--engine-io` and `--for=DURATION` (#1660)
 - MCP: list replies are held to about 64 KB, so a page at the advertised `limit` no longer exceeds a client's tool-result cap; a cut page says `cut_by: "bytes"` with `has_more` and its usual cursor or `offset`, an `ids` set returns the rest as `remaining_ids`, a list that is never paged names the rest by id (`*_unshown_ids`), `oast_poll` keeps what does not fit for the next poll, `export_openapi` inlines 64 KB by default, and `get_response_body_chunk` pages at most 64 KB (#1649, #1659)
 - History: `gori run history --count` and MCP `list_history{count_only: true}` report how many flows match the same filters as the listing, without reading the rows; a count or listing stops when the call is cancelled, and a query that cannot run is an error on both (#1648)
