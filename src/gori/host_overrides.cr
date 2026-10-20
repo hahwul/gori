@@ -96,6 +96,15 @@ module Gori
       @mutex.synchronize { @entries }.find { |e| e.host == h }.try(&.ip)
     end
 
+    # The entry mapping `host` (compared as its `OverrideHost.key`, the form `add`/`update`
+    # store), other than entry `except` — nil when none does. One home for the duplicate
+    # question every writing surface asks BEFORE `add`/`update`, whose single `false` cannot
+    # tell a deterministic duplicate from a busy store (#414, #1693).
+    def entry_for(host : String, except : Int64? = nil) : Entry?
+      key = OverrideHost.key(host)
+      snapshot.find { |e| e.id != except && e.host == key }
+    end
+
     # Add an override (validates, folds the host to its `OverrideHost.key`, dedupes on it).
     # Returns false
     # (no-op) on an empty/invalid pair, a host that's already mapped (edit it instead) — or a
@@ -115,7 +124,7 @@ module Gori
       added = @write_mutex.synchronize do
         # `next`, not `return`: the config event is emitted outside the mutex, so the method has
         # to reach its own end (see `Scope#add` for the same shape).
-        next false if snapshot.any? { |e| e.host == host }
+        next false if entry_for(host)
         @store.add_host_override(host, ip)
         reload
         snapshot.any? { |e| e.host == host && e.ip == ip }
@@ -136,7 +145,7 @@ module Gori
       return false unless HostOverrides.valid?(host, ip)
       before = snapshot.find { |e| e.id == id }
       changed = @write_mutex.synchronize do
-        next false if snapshot.any? { |e| e.id != id && e.host == host }
+        next false if entry_for(host, except: id)
         committed = @store.update_host_override(id, host, ip)
         reload
         committed # false also when the store write rolled back (busy/locked), not just on dup

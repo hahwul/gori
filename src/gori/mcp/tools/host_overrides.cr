@@ -26,7 +26,7 @@ module Gori
         # here as a non-retryable INVALID_ARGUMENT — reporting it as retryable PROJECT_BUSY made
         # an agent that trusts `retryable` loop forever (the #414 shape, fixed there in
         # add_scope_rule).
-        if ov.entries.any? { |e| e.host == normalized }
+        if ov.entry_for(normalized)
           return err("a host override for '#{normalized}' already exists (update it by id with update_host_override)",
             "INVALID_ARGUMENT", field: "host")
         end
@@ -38,7 +38,7 @@ module Gori
           return busy("host override NOT added (store busy or unwritable); no override was created")
         end
         forget_host_approvals(normalized)
-        entry = ov.entries.find { |e| e.host == normalized }
+        entry = ov.entry_for(normalized)
         Result.new({id: entry.try(&.id), host: normalized, ip: ip}.to_json)
       end
 
@@ -56,7 +56,7 @@ module Gori
         # `OverrideHost.key` for the same reason as `add` above — `update` dedupes on the folded
         # host, so a check spelled any other way hands the deterministic case to `busy`.
         normalized = Gori::OverrideHost.key(host)
-        if ov.entries.any? { |e| e.id != id && e.host == normalized }
+        if ov.entry_for(normalized, except: id)
           return err("another host override already covers '#{normalized}'", "INVALID_ARGUMENT", field: "host")
         end
         unless ov.update(id, host, ip)

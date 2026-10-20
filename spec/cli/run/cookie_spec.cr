@@ -22,9 +22,25 @@ module Gori::CLI::Run
   def self.cookie_effective_algo_for_spec(cookie : String, type : String?, algorithm : String, pinned : Bool) : String
     cookie_effective_algo(cookie, type, algorithm, pinned)
   end
+
+  def self.cookie_salt_hint_for_spec(fmt : String?, salt : String?) : String?
+    cookie_salt_hint(fmt, salt)
+  end
 end
 
 describe "gori run cookie" do
+  # #1712: a Django verify/crack that failed under the default salt may be a session cookie.
+  it "hints at the Django session salt only when a failed Django run used the default salt" do
+    hint = Gori::CLI::Run.cookie_salt_hint_for_spec("django", nil)
+    hint.should_not be_nil
+    hint.not_nil!.should contain(Gori::Cookie::Django::SESSION_SALT)
+    # An explicit default salt still hints; a non-default salt, a non-Django format, and Flask do not.
+    Gori::CLI::Run.cookie_salt_hint_for_spec("django", Gori::Cookie::Django::DEFAULT_SALT).should_not be_nil
+    Gori::CLI::Run.cookie_salt_hint_for_spec("django", Gori::Cookie::Django::SESSION_SALT).should be_nil
+    Gori::CLI::Run.cookie_salt_hint_for_spec("flask", nil).should be_nil
+    Gori::CLI::Run.cookie_salt_hint_for_spec(nil, nil).should be_nil
+  end
+
   it "takes the cookie from the positional argument, trimmed" do
     # A cookie pasted from a terminal or piped through a shell routinely arrives with
     # surrounding whitespace/newline.

@@ -141,6 +141,12 @@ module Gori
       View.new("errors", "Errors", "status:>=400", "builtin"),
     ]
 
+    # The built-in names for a tool/help description, each annotated with its lens query —
+    # generated so a new BUILTINS row cannot leave the MCP descriptions saying "three" (#1713).
+    def self.builtin_names : String
+      BUILTINS.map { |v| v.query.empty? ? v.name : "#{v.name} (#{v.query})" }.join(", ")
+    end
+
     # The All builtin — what every degraded path lands on. All rather than the DEFAULT, and the
     # difference matters: a view the operator picked has just gone missing, and on a security
     # proxy the safe direction is to hide nothing rather than to quietly apply a different

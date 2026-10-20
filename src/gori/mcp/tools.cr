@@ -938,8 +938,9 @@ module Gori
         serves?("delete_scope_rule") || serves?("update_scope_rule")
       end
 
-      def scope_remedy(verdict : ScopeCheck) : String
-        Outbound.remedy(verdict, "allow_unscoped:true", add_include: can_add_include?, edit_exclude: can_edit_exclude?)
+      def scope_remedy(verdict : ScopeCheck, passes_exclude : Bool = false) : String
+        Outbound.remedy(verdict, "allow_unscoped:true", add_include: can_add_include?, edit_exclude: can_edit_exclude?,
+          waiver_passes_exclude: passes_exclude)
       end
 
       # `Outbound.agent` spelled for this server's refusals: the ones a core engine phrases

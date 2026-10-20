@@ -195,10 +195,14 @@ module Gori
     # include will ever help. `waiver` is the surface's own spelling of the override flag
     # (`--allow-unscoped`, `allow_unscoped:true`); nil when the surface has none.
     # `add_include: false` / `edit_exclude: false` is a reader that cannot make that fix
-    # itself (an agent whose scope tools are switched off): it is then the operator's, and for
-    # an excluded target, which no waiver lifts, the operator is the only fix offered.
+    # itself (an agent whose scope tools are switched off): it is then the operator's.
+    #
+    # An excluded target is one the waiver lifts only for a hand-authored send while the
+    # Sandbox is off (`send_block`); a sweep holds the exclude regardless (`sweep_block`). The
+    # caller says which it is with `waiver_passes_exclude` (`#send_passes_exclude?`), and
+    # without it the exclude is the only fix offered (#1694).
     def self.remedy(verdict : Verdict, waiver : String?, *, add_include : Bool = true,
-                    edit_exclude : Bool = true) : String
+                    edit_exclude : Bool = true, waiver_passes_exclude : Bool = false) : String
       # An approval refusal (#1585) is lifted by the operator's answer, not by a scope rule; only
       # an agent's Outbound carries an Approval, so the card is raised by one call of its own.
       if verdict.pending?
@@ -208,6 +212,10 @@ module Gori
       end
       if verdict.excluded?
         fix = "delete or narrow the scope EXCLUDE rule that matches it (an include rule cannot override an exclude)"
+        if waiver && waiver_passes_exclude
+          why = "the Sandbox is off, so an exclude does not stop a hand-authored send"
+          return edit_exclude ? "#{fix}, or pass #{waiver} (#{why})" : "pass #{waiver} (#{why}), or ask the operator to #{fix}"
+        end
         return edit_exclude ? fix : "ask the operator to #{fix}"
       end
       base = "add a scope include rule"
@@ -222,8 +230,17 @@ module Gori
     property? can_add_include : Bool = true
     property? can_edit_exclude : Bool = true
 
-    def remedy(verdict : Verdict) : String
-      Outbound.remedy(verdict, @waiver, add_include: @can_add_include, edit_exclude: @can_edit_exclude)
+    # `send` is a hand-authored send's refusal, which the waiver can lift past an exclude.
+    def remedy(verdict : Verdict, *, send : Bool = false) : String
+      Outbound.remedy(verdict, @waiver, add_include: @can_add_include, edit_exclude: @can_edit_exclude,
+        waiver_passes_exclude: send && send_passes_exclude?)
+    end
+
+    # True when a waived hand-authored send would pass a target an EXCLUDE rule matches:
+    # `send_block` stops one only through the Sandbox, so with it off the waiver lifts the
+    # exclude. A sweep's `sweep_block` holds excludes regardless, so this is a send's question.
+    def send_passes_exclude? : Bool
+      !@scope.try(&.sandbox?)
     end
 
     # "<host> is out of the project scope — <remedy>", the sentence a core engine reports a

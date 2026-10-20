@@ -55,24 +55,32 @@ module Gori
     def self.parse(value : String) : Target?
       v = value.strip
       return nil if v.empty?
-      if v.starts_with?('[')
-        return nil unless close = v.index(']')
-        inner = v[1...close]
-        rest = v[(close + 1)..]
-        return nil unless ip?(inner)
-        return Target.new(inner, nil) if rest.empty?
-        return nil unless rest.starts_with?(':')
-        port = valid_port(rest[1..])
-        return port ? Target.new(inner, port) : nil
-      end
+      return parse_bracketed(v) if v.starts_with?('[')
       # A bare IPv6 literal ("::1") is tried WHOLE first: its own colons would otherwise be
       # split as a port separator and the address silently truncated.
       return Target.new(v, nil) if ip?(v)
       return nil unless idx = v.rindex(':')
       host = v[0...idx]
+      # A host part with a colon of its own is a v6 literal, and an unbracketed one has no
+      # port: "::1:8080" is an address and "::1:18190" (not a hex group) would otherwise be
+      # read as ::1 on port 18190 — the same spelling dialing a different place depending on
+      # whether the last group happens to be valid hex. Brackets say it unambiguously.
+      return nil if host.includes?(':')
       return nil unless ip?(host)
       port = valid_port(v[(idx + 1)..])
       port ? Target.new(host, port) : nil
+    end
+
+    # `[v6]` or `[v6]:PORT`.
+    private def self.parse_bracketed(v : String) : Target?
+      return nil unless close = v.index(']')
+      inner = v[1...close]
+      rest = v[(close + 1)..]
+      return nil unless ip?(inner)
+      return Target.new(inner, nil) if rest.empty?
+      return nil unless rest.starts_with?(':')
+      port = valid_port(rest[1..])
+      port ? Target.new(inner, port) : nil
     end
 
     def self.valid?(value : String) : Bool

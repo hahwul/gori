@@ -509,6 +509,15 @@ module Gori
       QL::ScopeLens.new(rules.empty? ? nil : filter_sql(rules))
     end
 
+    # The rule holding the kind/type/pattern triple (`scope_rules` is UNIQUE on it), other than
+    # rule `except` — nil when none does. One home for the duplicate question every writing
+    # surface asks BEFORE `add`/`update`, whose single `false` cannot tell a deterministic
+    # duplicate from a busy store (#414, #1693), and for the read-back of the id `add` assigned.
+    def find_rule(kind : String, match_type : String, pattern : String, except : Int64? = nil) : Rule?
+      pattern = pattern.strip
+      rules_snapshot.find { |r| r.id != except && r.kind == kind && r.match_type == match_type && r.pattern == pattern }
+    end
+
     # Add a rule (validates regex, dedupes on the kind/type/pattern triple). Returns
     # false (no-op) on an empty pattern, an invalid regex, a duplicate — or a store write
     # that did not commit.
@@ -525,10 +534,10 @@ module Gori
       added = @write_mutex.synchronize do
         # `next`, not `return`: the config event below is emitted OUTSIDE the mutex (a store
         # round-trip has no business holding this lock), so the method must reach its own end.
-        next false if rules_snapshot.any? { |r| r.kind == kind && r.match_type == match_type && r.pattern == pattern }
+        next false if find_rule(kind, match_type, pattern)
         @store.add_scope_rule(kind, match_type, pattern)
         reload_rules
-        rules_snapshot.any? { |r| r.kind == kind && r.match_type == match_type && r.pattern == pattern }
+        !find_rule(kind, match_type, pattern).nil?
       end
       # Only a COMMITTED write is a change. `add` answers by re-reading its own reload precisely
       # because the store cannot tell it otherwise, and an attempt recorded as a change would
@@ -543,7 +552,7 @@ module Gori
       pattern = pattern.strip
       return false if pattern.empty? || !KINDS.includes?(kind) || !Scope.valid?(match_type, pattern)
       changed = @write_mutex.synchronize do
-        next false if rules_snapshot.any? { |r| r.id != id && r.kind == kind && r.match_type == match_type && r.pattern == pattern }
+        next false if find_rule(kind, match_type, pattern, except: id)
         # The store's answer, not an unconditional `true`. `update_scope_rule` is `exec_task_ok`
         # and has always reported whether the UPDATE committed; `remove` below returns it, and
         # `HostOverrides#update` next door returns it with the note "false also when the store

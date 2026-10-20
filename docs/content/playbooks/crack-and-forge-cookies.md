@@ -38,6 +38,8 @@ Over MCP this is `cookie_verify`. It answers a single question: does this secret
 
 **Checkpoint.** Verify reports whether the candidate secret signs the cookie.
 
+If a Django cookie reads as `invalid` under the correct secret, it is likely a session cookie: those sign under `--salt django.contrib.sessions.backends.signed_cookies` rather than the `django.core.signing` default. A failed Django verify or crack on `gori run cookie` prints this hint (MCP `cookie_verify` / `cookie_crack` do not).
+
 ## 3. Crack the secret
 
 When you don't know the secret, brute-force it. Crack re-signs the cookie with each candidate and stops at the one whose signature matches, drawing candidates from a newline-delimited file (`--wordlist`) or a comma-separated list (`--secrets`):

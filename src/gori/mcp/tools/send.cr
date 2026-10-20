@@ -701,11 +701,11 @@ module Gori
         requests = plan.scope_requests
         first = requests.first? || plan.bytes
         sc = ob.check(request_scope_url(plan, first), plan.host, request_exclude_url(plan, first), plan.port)
-        return scope_blocked(sc) if sc.blocked?
+        return scope_blocked(sc, passes_exclude: ob.send_passes_exclude?) if sc.blocked?
         requests.each_with_index do |req, i|
           next if i == 0
           member = ob.check(request_scope_url(plan, req), plan.host, request_exclude_url(plan, req), plan.port)
-          return scope_blocked(member, "member #{i + 1}") if member.blocked?
+          return scope_blocked(member, "member #{i + 1}", passes_exclude: ob.send_passes_exclude?) if member.blocked?
         end
         if reason = plan.refusal
           return sandbox_blocked(reason, plan.host, "url")
@@ -1370,7 +1370,7 @@ module Gori
         # WS repeater it was written to allow, while the identical send_request passed.
         upgrade = plan.scope_requests.first? || plan.bytes
         sc = ob.check(request_scope_url(plan, upgrade), host, request_exclude_url(plan, upgrade), plan.port)
-        return scope_blocked(sc) if sc.blocked?
+        return scope_blocked(sc, passes_exclude: ob.send_passes_exclude?) if sc.blocked?
         # Layer 2 (Sandbox) — allow_unscoped does not lift it; refuse before the link write.
         if reason = plan.refusal
           return sandbox_blocked(reason, host, "repeater_id")
@@ -1707,7 +1707,11 @@ module Gori
       # `what` names the request when it is not the first of a group: a path rule can refuse a
       # later race/timing member on a host the first one was allowed, and "target host is outside
       # the scope" would send the agent to add a host include that changes nothing.
-      private def scope_blocked(sc : ScopeCheck, what : String? = nil, field : String = "url") : Result
+      #
+      # `passes_exclude` is a hand-authored send's (`Outbound#send_passes_exclude?`), whose
+      # remedy may then name allow_unscoped:true for an excluded target too (#1694).
+      private def scope_blocked(sc : ScopeCheck, what : String? = nil, field : String = "url",
+                                passes_exclude : Bool = false) : Result
         return host_approval(sc) if sc.pending?
         reason = if sc.unscoped?
                    "no scope is configured for this project, so active requests are refused by default"
@@ -1716,7 +1720,7 @@ module Gori
                  else
                    "target host #{sc.host} is outside the project's configured scope"
                  end
-        err("#{reason}; #{scope_remedy(sc)}",
+        err("#{reason}; #{scope_remedy(sc, passes_exclude)}",
           "SCOPE_BLOCKED", field: field,
           details: JSON.parse({"scope_decision" => sc.decision, "host" => sc.host}.to_json))
       end

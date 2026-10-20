@@ -269,6 +269,28 @@ describe "MCP tool permissions" do
     end
   end
 
+  # #1694: allow_unscoped:true takes a hand-authored send past an exclude while the Sandbox
+  # is off, so send_request's remedy names it; a sweep's (mine_start) does not.
+  it "names allow_unscoped:true for an excluded send only while the Sandbox is off" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "in.test").should be_true
+      scope.add("exclude", "host", "ex.in.test").should be_true
+      t = tools_for(store)
+      sent = t.call("send_request", JSON.parse(%({"url":"http://ex.in.test/"})))
+      sent.error_code.should eq("SCOPE_BLOCKED")
+      sent.text.should contain("EXCLUDE rule that matches it (an include rule cannot override an exclude), or pass allow_unscoped:true")
+      mined = t.call("mine_start", JSON.parse({"url"      => "http://ex.in.test/",
+                                               "template" => "GET / HTTP/1.1\r\nHost: ex.in.test\r\n\r\n"}.to_json))
+      mined.error_code.should eq("SCOPE_BLOCKED")
+      mined.text.should_not contain("allow_unscoped")
+      scope.enable_sandbox.should be_true
+      boxed = t.call("send_request", JSON.parse(%({"url":"http://ex.in.test/"})))
+      boxed.error_code.should eq("SCOPE_BLOCKED")
+      boxed.text.should_not contain("allow_unscoped")
+    end
+  end
+
   # Each fix is the agent's when the one tool it needs is served: `--tools` can hand it
   # add_scope_rule without delete_scope_rule, and the include advice must stay its own.
   it "judges each SCOPE_BLOCKED fix by the tool that makes it" do

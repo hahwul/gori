@@ -75,6 +75,18 @@ describe Gori::HostOverrides do
     end
   end
 
+  # #1693: the duplicate question the CLI and MCP ask before `add`/`update`, on the stored key.
+  it "entry_for finds the entry on the folded host, other than the one being edited" do
+    with_store do |store|
+      ov = Gori::HostOverrides.load(store)
+      ov.add("example.com", "10.0.0.1").should be_true
+      e = ov.entries.first
+      ov.entry_for("EXAMPLE.com.").try(&.id).should eq(e.id)
+      ov.entry_for("example.com", except: e.id).should be_nil
+      ov.entry_for("other.test").should be_nil
+    end
+  end
+
   it "updates an override in place (self-edit of the IP is allowed)" do
     with_store do |store|
       ov = Gori::HostOverrides.load(store)
@@ -239,6 +251,17 @@ describe Gori::HostOverrides do
       a.port.should be_nil
     end
 
+    # #1714: "::1:18190" is not an address (18190 is no hex group), and it used to fall back to
+    # the last-colon split and read as ::1 on port 18190 — so "::1:8080" and "::1:18190" dialed
+    # different kinds of place. An unbracketed v6 value is a literal by itself or nothing.
+    it "refuses an unbracketed v6 value that only parses as address-plus-port" do
+      Gori::DialAddress.parse("::1:18190").should be_nil
+      Gori::DialAddress.parse("fe80::1:99999").should be_nil
+      b = Gori::DialAddress.parse("[::1]:18190").not_nil!
+      b.ip.should eq("::1")
+      b.port.should eq(18190)
+    end
+
     it "rejects a hostname, which TCPSocket would re-resolve" do
       Gori::DialAddress.parse("example.org").should be_nil
       Gori::DialAddress.parse("example.org:8443").should be_nil
@@ -316,7 +339,10 @@ describe Gori::Settings do
     end
   end
 
-  it "drops a hand-edited entry whose ip is not a literal (no DNS re-resolution)" do
+  # Kept rather than dropped since #1714: a dropped entry dials the host's real DNS address,
+  # which is the place the operator wrote the override to steer away from. The dial refuses it
+  # instead (see the Upstream spec below), so the value itself is still never resolved.
+  it "keeps a hand-edited entry whose ip is not a literal, for the dial to refuse" do
     dir = File.tempname("gori-settings-hostov-badip")
     Dir.mkdir_p(dir)
     prev = ENV["GORI_HOME"]?
@@ -326,8 +352,7 @@ describe Gori::Settings do
         %({"hostname_overrides":[{"host":"api.test","ip":"evil.example.com"},{"host":"ok.test","ip":"10.0.0.1"}]}))
       Gori::Settings.hostname_overrides = [] of {String, String}
       Gori::Settings.load
-      # The bogus "ip" (a hostname) is dropped; the literal-IP entry survives.
-      Gori::Settings.hostname_overrides.should eq([{"ok.test", "10.0.0.1"}])
+      Gori::Settings.hostname_overrides.should eq([{"api.test", "evil.example.com"}, {"ok.test", "10.0.0.1"}])
     ensure
       prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
       FileUtils.rm_rf(dir)
@@ -391,6 +416,29 @@ describe Gori::Proxy::Upstream do
     ensure
       Gori::Settings.hostname_overrides = [] of {String, String}
     end
+  end
+
+  # #1714: a stored value the grammar no longer accepts — a hand-edited name, or "::1:18190"
+  # written before an unbracketed v6 value stopped carrying a port — refuses the dial. It used
+  # to fall through to the request's own name, i.e. the real host the override steered away
+  # from: here that is `localhost`, whose listener would have accepted.
+  it "refuses the dial when a stored override value does not parse" do
+    server = TCPServer.new("127.0.0.1", 0)
+    port = server.local_address.port
+    with_store do |store|
+      ov = Gori::HostOverrides.load(store)
+      %w[evil.example.com ::1:18190].each do |bad|
+        store.add_host_override("localhost", bad) # straight to the table: every writer validates
+        ov.reload
+        sock, err = Gori::Proxy::Upstream.dial_result("localhost", port, connect_timeout: 2.seconds, overrides: ov)
+        sock.should be_nil
+        err.not_nil!.detail.not_nil!.should contain("host override for localhost is not a dialable address")
+        Gori::Proxy::Upstream.loops_to_self?("localhost", port, ov, {"127.0.0.1", port}).should be_false
+        store.host_overrides.each { |(id, _, _)| store.remove_host_override(id) }
+      end
+    end
+  ensure
+    server.try(&.close)
   end
 
   it "does not redirect a host without an override (so the override is what connects)" do

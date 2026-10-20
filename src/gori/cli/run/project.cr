@@ -782,6 +782,7 @@ module Gori
               j.object do
                 j.field "enabled", scope.enabled?
                 j.field "active_send_gate", scope.configured?
+                j.field "sandbox", scope.sandbox?
                 j.field "rules" do
                   j.array { scope.rules.each { |r| scope_rule_json(j, r) } }
                 end
@@ -806,14 +807,26 @@ module Gori
       # the rules existing at all (`Scope#configured?`), enabled or not. A listing that said only
       # "DISABLED" read as "nothing is enforced" while `gori run send` refused out-of-scope
       # targets. By design; now said.
+      #
+      # The Sandbox is said too (#1694): it refuses an out-of-scope send whatever the rules or
+      # --allow-unscoped say (`Outbound#send_block`), so "not restricted" beside it was false.
+      # So is the sweeps' exclude, which `--allow-unscoped` does not lift (`sweep_block`), and
+      # an excludes-only scope, which includes nothing and so leaves every target out of scope.
       def self.scope_gate_line(scope : Scope) : String
         n = scope.rules.size
-        if scope.configured?
-          "Active-send gate: ON (#{Gori.plural(n, "rule")}) — send/repeater/fuzz/mine/discover and MCP " \
-          "refuse a target these rules leave out of scope unless --allow-unscoped / allow_unscoped:true"
-        else
-          "Active-send gate: no rules — `gori run` sends are not restricted (MCP refuses every send until a rule exists)"
-        end
+        line =
+          if scope.configured?
+            "Active-send gate: ON (#{Gori.plural(n, "rule")}) — send/repeater/fuzz/mine/discover and MCP " \
+            "refuse a target these rules leave out of scope unless --allow-unscoped / allow_unscoped:true; " \
+            "an exclude rule still stops fuzz/mine/discover"
+          elsif scope.sandbox?
+            "Active-send gate: no rules — but the Sandbox refuses every send until an include rule exists"
+          else
+            "Active-send gate: no rules — `gori run` sends are not restricted (MCP refuses every send until a rule exists)"
+          end
+        line += ". No include rule, so every target is out of scope" if scope.configured? && scope.include_count.zero?
+        line += ". Sandbox ON: an out-of-scope send is refused even under --allow-unscoped" if scope.configured? && scope.sandbox?
+        line
       end
 
       # One scope rule as JSON — the element of `scope list --format json`'s `rules`, and the
@@ -849,6 +862,12 @@ module Gori
 
         id_s = positional.first? || abort("gori run project scope update: <id> is required (see `gori run project scope list`)")
         id = id_s.to_i64? || abort("gori run project scope update: invalid rule id #{id_s.inspect}")
+        # An ABSENT --pattern keeps the current one; a SUPPLIED blank one is a mistake, not a
+        # no-op — keeping the old pattern reported success for an edit that never happened, on
+        # the rule that gates outbound traffic. MCP's `update_scope_rule` refuses it the same way.
+        if pattern.try(&.strip.empty?)
+          abort "gori run project scope update: --pattern must not be blank (omit it to keep the current pattern)"
+        end
 
         project = resolve_read_project(proj.name, proj.db)
         with_store(project) do |store|
@@ -868,10 +887,10 @@ module Gori
           # `scope_rules` carries UNIQUE(kind, match_type, pattern) (store/schema.cr), and
           # `Scope#update` collapses a collision and a rolled-back write into ONE false.
           # Without this pre-check the busy-store abort below reported a duplicate as "store
-          # busy or unwritable" — sending the operator to hunt for a lock. `scope add` already
-          # names the duplicate; this makes the two agree, and leaves whatever false survives
-          # it meaning the store, exactly as MCP's `update_scope_rule` splits the same pair.
-          if scope.rules.any? { |r| r.id != id && r.kind == new_kind && r.match_type == new_type && r.pattern == new_pattern }
+          # busy or unwritable" — sending the operator to hunt for a lock. `scope add` names
+          # the duplicate the same way; this leaves whatever false survives it meaning the
+          # store, exactly as MCP's `update_scope_rule` splits the same pair.
+          if scope.find_rule(new_kind, new_type, new_pattern, except: id)
             abort_closing(store, "gori run project scope update: rule ##{id} NOT updated — #{new_kind} #{new_type} #{new_pattern} " \
                                  "already exists as another rule; the scope is unchanged")
           end
@@ -907,23 +926,30 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json — the new rule, as `scope --format json` lists it") { |f| format = f }
         end
 
-        abort "gori run project scope add: --pattern is required" if (pat = pattern).nil? || pat.empty?
+        # Stripped BEFORE the empty check, so `-p '  '` is the missing pattern it is rather than
+        # a blank that `Scope#add` refuses later as "NOT added".
+        pat = pattern.try(&.strip)
+        abort "gori run project scope add: --pattern is required" if pat.nil? || pat.empty?
         abort "gori run project scope add: invalid kind '#{kind}' (must be include or exclude)" unless kind.in?(Scope::KINDS)
         abort "gori run project scope add: invalid type '#{match_type}' (must be host, string, or regex)" unless match_type.in?(Scope::TYPES)
-        if err = Scope.validation_error(match_type, pat.strip)
+        if err = Scope.validation_error(match_type, pat)
           abort "gori run project scope add: #{err}"
         end
 
         project = resolve_read_project(proj.name, proj.db)
         with_store(project) do |store|
           scope = Scope.load(store)
-          scope.add(kind, match_type, pat) || abort_closing(store, "gori run project scope add: rule NOT added (duplicate, empty, invalid, " \
-                                                                   "or the store was busy/unwritable); the scope is unchanged")
+          # The duplicate is answered before the write, as MCP's `add_scope_rule` does: it is
+          # deterministic, and `Scope#add`'s one `false` used to report it as a busy store.
+          if scope.find_rule(kind, match_type, pat)
+            abort_closing(store, "gori run project scope add: rule NOT added — #{kind} #{match_type} #{pat} already exists; the scope is unchanged")
+          end
+          scope.add(kind, match_type, pat) || abort_closing(store, "gori run project scope add: rule NOT added (store busy or unwritable); the scope is unchanged")
           # `Scope#add` reloads its own rule list, so the new rule — and the id every later
           # `scope update`/`delete` takes — is found by the triple it was added under (the
           # table is UNIQUE on it). It used to be printed nowhere, so a script adding a rule it
           # meant to remove later had no handle for it (#1117).
-          added = scope.rules.find { |r| r.kind == kind && r.match_type == match_type && r.pattern == pat.strip }
+          added = scope.find_rule(kind, match_type, pat)
           if format == :json
             unless rule = added
               # Committed, then gone before the read — a peer deleted it in between. Refused like
@@ -933,9 +959,21 @@ module Gori
             end
             puts(JSON.build { |j| scope_rule_json(j, rule) })
           else
-            puts added ? "Scope rule ##{added.id} added successfully (#{kind} #{match_type} #{pat.strip})." : "Scope rule added successfully."
+            puts added ? "Scope rule ##{added.id} added successfully (#{kind} #{match_type} #{pat})." : "Scope rule added successfully."
           end
+          warn_excludes_only(scope, "gori run project scope add")
         end
+      end
+
+      # An excludes-only scope includes nothing, so the active-send gate judges EVERY target out
+      # of scope (`Scope#matches_url?` is false without an include) — intended, and said nowhere
+      # until the add that makes it (#1694). With the Sandbox on, `warn_scope_blackhole` says
+      # the larger thing: captured traffic is blocked too.
+      private def self.warn_excludes_only(scope : Scope, prefix : String) : Nil
+        return unless scope.include_count == 0
+        return warn_scope_blackhole(scope, prefix) if scope.sandbox?
+        STDERR.puts "#{prefix}: warning — the scope has no include rules, so every target is out of scope " \
+                    "and active sends are refused unless --allow-unscoped (add an include rule to scope them)"
       end
 
       # A scope WRITE that leaves Sandbox holding an empty allowlist turns the proxy into a
@@ -1335,7 +1373,7 @@ module Gori
                      "Add a project host override (dial IP — or IP:PORT — for HOST; SNI/Host header unchanged)."
           project_options(p, proj, "update")
           p.on("--host=HOST", "Hostname to override (case-insensitive)") { |v| host = v }
-          p.on("--ip=IP", "IPv4/IPv6 literal to dial, optionally IP:PORT") { |v| ip = v }
+          p.on("--ip=IP", "IPv4/IPv6 literal to dial, optionally IP:PORT or [v6]:PORT") { |v| ip = v }
           format_flag(p, [:text, :json], "Output: text (default) | json — the new override, as `host-override --format json` lists it") { |f| format = f }
         end
 
@@ -1359,8 +1397,8 @@ module Gori
         project = resolve_read_project(proj.name, proj.db)
         with_store(project) do |store|
           ov = HostOverrides.load(store)
-          ov.add(h, i) || abort_closing(store, "gori run project host-override add: override NOT added (duplicate host, empty, " \
-                                               "invalid, or the store was busy/unwritable); nothing was created")
+          abort_if_override_taken(store, ov, h, "gori run project host-override add")
+          ov.add(h, i) || abort_closing(store, "gori run project host-override add: override NOT added (store busy or unwritable); nothing was created")
           # `OverrideHost.key` is the form `add` stored, so this is the lookup that finds it.
           # `downcase` alone missed a fully-qualified `--host=api.test.` and dropped this to
           # the id-less fallback below — the id being the operator's only handle for a later
@@ -1378,6 +1416,15 @@ module Gori
         end
       end
 
+      # The duplicate is answered before the write, as MCP's `add_host_override` and
+      # `update_host_override` do: it is deterministic, and the one `false` of
+      # `HostOverrides#add`/`#update` used to report it as a busy store (#1693).
+      private def self.abort_if_override_taken(store : Store, ov : HostOverrides, host : String, prefix : String,
+                                               except : Int64? = nil) : Nil
+        return unless dup = ov.entry_for(host, except: except)
+        abort_closing(store, "#{prefix}: a host override for '#{dup.host}' already exists (##{dup.id}); nothing was changed")
+      end
+
       private def self.cmd_host_override_update(args : Array(String)) : Nil
         proj = ProjectFlags.new
         host : String? = nil
@@ -1387,7 +1434,7 @@ module Gori
           p.banner = "Usage: gori run project host-override update <id> --host=HOST --ip=IP [options]"
           project_options(p, proj, "update")
           p.on("--host=HOST", "New hostname (case-insensitive)") { |v| host = v }
-          p.on("--ip=IP", "New IPv4/IPv6 literal to dial, optionally IP:PORT") { |v| ip = v }
+          p.on("--ip=IP", "New IPv4/IPv6 literal to dial, optionally IP:PORT or [v6]:PORT") { |v| ip = v }
         end
 
         id = take_id(positional, "gori run project host-override update", "<id>", "id")
@@ -1400,7 +1447,8 @@ module Gori
         with_store(project) do |store|
           ov = HostOverrides.load(store)
           ov.entries.any? { |e| e.id == id } || abort_closing(store, "gori run project host-override update: no override with id #{id}")
-          ov.update(id, h, i) || abort_closing(store, "gori run project host-override update: NOT updated (duplicate host, or store busy or unwritable)")
+          abort_if_override_taken(store, ov, h, "gori run project host-override update", except: id)
+          ov.update(id, h, i) || abort_closing(store, "gori run project host-override update: NOT updated (store busy or unwritable); it is unchanged")
           puts "Host override ##{id} updated: #{i} → #{OverrideHost.key(h)}" # the stored form, not the typed one
         end
       end

@@ -1075,7 +1075,8 @@ module Gori
         verdict = repeater_scope_verdict(outbound, plan)
         return unless verdict.blocked?
         outbound.close
-        abort "#{prefix}: #{plan.host} is out of the project scope — #{Gori::Outbound.remedy(verdict, "--allow-unscoped")}"
+        abort "#{prefix}: #{plan.host} is out of the project scope — " \
+              "#{Gori::Outbound.remedy(verdict, "--allow-unscoped", waiver_passes_exclude: outbound.send_passes_exclude?)}"
       end
 
       # The Layer-1 verdict `abort_if_out_of_scope!` acts on, split out so it can be asserted
@@ -2141,7 +2142,7 @@ module Gori
         verdict = repeater_scope_verdict(outbound, plan)
         if verdict.blocked?
           return "gori run repeater ws: #{plan.host} is out of the project scope — " \
-                 "#{Gori::Outbound.remedy(verdict, "--allow-unscoped")}"
+                 "#{Gori::Outbound.remedy(verdict, "--allow-unscoped", waiver_passes_exclude: outbound.send_passes_exclude?)}"
         end
         if reason = plan.refusal
           return "gori run repeater ws: #{reason}"

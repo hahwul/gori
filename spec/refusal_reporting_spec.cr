@@ -50,7 +50,7 @@ describe "refusal reporting" do
       Gori::Outbound.remedy(plain, "allow_unscoped:true", add_include: false)
         .should eq("pass allow_unscoped:true, or ask the operator to add a scope include rule")
       Gori::Outbound.remedy(plain, nil, add_include: false).should eq("ask the operator to add a scope include rule")
-      # No waiver lifts an exclude, so the operator is the only fix offered.
+      # A sweep's waiver does not lift an exclude, so the operator is the only fix offered.
       Gori::Outbound.remedy(excluded, "allow_unscoped:true", edit_exclude: false)
         .should eq("ask the operator to delete or narrow the scope EXCLUDE rule that matches it (an include rule cannot override an exclude)")
       # Each fix is judged on its own: a reader that may add an include but not delete one
@@ -59,6 +59,32 @@ describe "refusal reporting" do
         .should eq("add a scope include rule or pass allow_unscoped:true")
       Gori::Outbound.remedy(excluded, nil, add_include: false).should contain("delete or narrow")
       Gori::Outbound.remedy(excluded, nil, add_include: false).should_not contain("ask the operator")
+    end
+
+    # #1694: a hand-authored send passes an exclude once Layer 1 is waived, unless the Sandbox
+    # is on (`send_block`), so its remedy names the waiver; a sweep's never does (`sweep_block`).
+    it "names the waiver for an excluded target only where it lifts the exclude" do
+      excluded = Gori::Outbound::Verdict.new("out_of_scope", "h", nil, true, true)
+      Gori::Outbound.remedy(excluded, "--allow-unscoped", waiver_passes_exclude: true)
+        .should start_with("delete or narrow the scope EXCLUDE rule that matches it (an include rule cannot override an exclude), or pass --allow-unscoped")
+      Gori::Outbound.remedy(excluded, "allow_unscoped:true", edit_exclude: false, waiver_passes_exclude: true)
+        .should start_with("pass allow_unscoped:true (")
+      Gori::Outbound.remedy(excluded, nil, waiver_passes_exclude: true).should_not contain("pass")
+
+      with_store do |store|
+        scope = Gori::Scope.load(store)
+        scope.add("include", "host", "acme.test")
+        scope.add("exclude", "string", "/logout")
+        ob = Gori::Outbound.cli(scope, false)
+        ob.waiver = "--allow-unscoped"
+        verdict = ob.check("http://acme.test/logout", "acme.test")
+        ob.send_passes_exclude?.should be_true
+        ob.remedy(verdict, send: true).should contain("or pass --allow-unscoped")
+        ob.remedy(verdict).should_not contain("--allow-unscoped") # a sweep, or a core engine's refusal
+        scope.enable_sandbox
+        ob.send_passes_exclude?.should be_false
+        ob.remedy(verdict, send: true).should_not contain("--allow-unscoped")
+      end
     end
   end
 

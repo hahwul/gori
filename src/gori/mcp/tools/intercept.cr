@@ -264,8 +264,9 @@ module Gori
           return err(refusal, "INVALID_ARGUMENT", field: "flow_id")
         end
         row = flow.row
-        sc = outbound(bool_arg(h, "allow_unscoped", false)).check_request(row.scheme, row.host, row.target, row.port)
-        return scope_blocked(sc, field: "flow_id") if sc.blocked?
+        ob = outbound(bool_arg(h, "allow_unscoped", false))
+        sc = ob.check_request(row.scheme, row.host, row.target, row.port)
+        return scope_blocked(sc, field: "flow_id", passes_exclude: ob.send_passes_exclude?) if sc.blocked?
         ws_inject_result(store.send_ws_inject(flow_id, direction, opcode, payload), row.host)
       end
 

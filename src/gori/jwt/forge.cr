@@ -278,13 +278,15 @@ module Gori
     # keep their order and their numbers' literal digits (`RawJson`); a patched key that occurs
     # more than once is replaced at every occurrence, so no parser reads the old value. Raises
     # ForgeError when the payload isn't a JSON object (nothing to key into) or a patch carries
-    # no `=`.
-    def patch_payload(base_payload : String, sets : Array(String)) : String
-      members = object_members(base_payload.presence || "{}", "payload")
+    # no `=`. `what` is "header" for `gori run jwt --set-header`, which patches a header the
+    # same way (its `alg` is still forced by `encode`).
+    def patch_payload(base_payload : String, sets : Array(String), what : String = "payload") : String
+      members = object_members(base_payload.presence || "{}", what)
+      noun = what == "payload" ? "claim" : what
       sets.each do |kv|
         key, sep, val = kv.partition('=')
-        raise ForgeError.new("invalid claim patch #{kv.inspect} (expected key=value)") if sep.empty?
-        raise ForgeError.new("invalid claim patch #{kv.inspect} (empty key)") if key.empty?
+        raise ForgeError.new("invalid #{noun} patch #{kv.inspect} (expected key=value)") if sep.empty?
+        raise ForgeError.new("invalid #{noun} patch #{kv.inspect} (empty key)") if key.empty?
         value = claim_value_json(val)
         if members.any? { |(k, _)| k == key }
           members.map! { |(k, v)| k == key ? {k, value} : {k, v} }

@@ -193,7 +193,7 @@ module Gori
           s.field "cookie", strprop("the raw cookie value"), required: true
           s.field "secret", strprop("the candidate signing secret"), required: true
           s.field "format", enumprop("force a format (default auto-detect)", Cookie::FORMATS)
-          s.field "salt", strprop("Flask/Django signing salt (Flask default 'cookie-session', Django 'django.core.signing')")
+          s.field "salt", strprop(Cookie::SALT_HELP)
           s.field "algorithm", enumprop("Django HMAC algorithm (auto-detected from the signature length when unset)", Cookie::Django::SUPPORTED_ALGOS)
         end
 
@@ -205,7 +205,7 @@ module Gori
           s.field "secrets", strarrprop("inline candidate secrets to try (in order)")
           s.field "wordlist", strprop("path to a newline-delimited wordlist file, or the name of a saved list (list_wordlists)")
           s.field "format", enumprop("force a format (default auto-detect)", Cookie::FORMATS)
-          s.field "salt", strprop("Flask/Django signing salt")
+          s.field "salt", strprop(Cookie::SALT_HELP)
           s.field "algorithm", enumprop("Django HMAC algorithm (auto-detected from the signature length when unset)", Cookie::Django::SUPPORTED_ALGOS)
           s.requires_one_of "secrets", "wordlist"
         end
@@ -219,7 +219,7 @@ module Gori
           s.field "payload", strprop("session JSON to sign (Flask/Django)")
           s.field "value", strprop("the base64 Marshal cookie value (Rack — opaque bytes)")
           s.field "timestamp", intprop("unix second to stamp (Flask/Django; defaults to now)")
-          s.field "salt", strprop("Flask/Django signing salt")
+          s.field "salt", strprop(Cookie::SALT_HELP)
           s.field "algorithm", enumprop("Django HMAC algorithm (default #{Cookie::Django::DEFAULT_ALGO})", Cookie::Django::SUPPORTED_ALGOS)
         end
       end

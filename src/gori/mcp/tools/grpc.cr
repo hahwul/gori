@@ -39,7 +39,7 @@ module Gori
         # `allow_unscoped:true`. `fetch` re-checks both layers regardless, so this is the
         # message, not the gate.
         if blocked = client.blocked_verdict
-          return scope_blocked(blocked)
+          return scope_blocked(blocked, passes_exclude: ob.send_passes_exclude?)
         end
         # The in-scope verdict that rides on the result, for the audit trail.
         sc = ob.check_request(parts.scheme, parts.host,

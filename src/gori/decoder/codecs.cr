@@ -1359,6 +1359,51 @@ module Gori::Decoder
       0 <= n <= 0x10FFFF && !(0xD800 <= n <= 0xDFFF)
     end
 
+    # ---- HTML (named + numeric character references, HTML5 text rules) ----
+    # The named references HTML5 decodes WITHOUT a closing ';' (the "legacy" entries of the
+    # named character reference table). Every other name needs its ';': `&lang=en` stays
+    # `&lang=en`, while `&copy=` and `&not` still decode, as they do in a browser.
+    HTML_LEGACY_ENTITIES = Set{
+      "AElig", "AMP", "Aacute", "Acirc", "Agrave", "Aring", "Atilde", "Auml", "COPY", "Ccedil",
+      "ETH", "Eacute", "Ecirc", "Egrave", "Euml", "GT", "Iacute", "Icirc", "Igrave", "Iuml",
+      "LT", "Ntilde", "Oacute", "Ocirc", "Ograve", "Oslash", "Otilde", "Ouml", "QUOT", "REG",
+      "THORN", "Uacute", "Ucirc", "Ugrave", "Uuml", "Yacute", "aacute", "acirc", "acute", "aelig",
+      "agrave", "amp", "aring", "atilde", "auml", "brvbar", "ccedil", "cedil", "cent", "copy",
+      "curren", "deg", "divide", "eacute", "ecirc", "egrave", "eth", "euml", "frac12", "frac14",
+      "frac34", "gt", "iacute", "icirc", "iexcl", "igrave", "iquest", "iuml", "laquo", "lt",
+      "macr", "micro", "middot", "nbsp", "not", "ntilde", "oacute", "ocirc", "ograve", "ordf",
+      "ordm", "oslash", "otilde", "ouml", "para", "plusmn", "pound", "quot", "raquo", "reg",
+      "sect", "shy", "sup1", "sup2", "sup3", "szlig", "thorn", "times", "uacute", "ucirc",
+      "ugrave", "uml", "uuml", "yacute", "yen", "yuml",
+    }
+
+    # Longest legacy name (6) and longest full entity name (31). Deriving them from the tables
+    # caps the lookups without a hand-typed number going stale, and keeps a long `&name` run
+    # from a quadratic prefix scan — "&" + "a"*200_000 was 8.4 s before the cap (#1721).
+    HTML_LEGACY_MAX = HTML_LEGACY_ENTITIES.max_of(&.size)
+    HTML_ENTITY_MAX = {HTML::SINGLE_CHAR_ENTITIES.max_of { |k, _| k.size },
+                       HTML::DOUBLE_CHAR_ENTITIES.max_of { |k, _| k.size }}.max
+
+    # `HTML.unescape` longest-prefix-matches ANY name with or without its ';', so
+    # `&lang=en` became `⟨=en`. Numeric references keep the stdlib decoding. A named one is
+    # decoded whole when ';'-terminated, else through its longest legacy prefix (`&notin` →
+    # `¬in`, as `html.unescape` and a browser's text rule give), else left as written.
+    def html_unescape(s : String) : String
+      return s unless s.includes?('&')
+      s.gsub(/&(?:#[0-9]+;?|#[xX][0-9a-fA-F]+;?|[A-Za-z][A-Za-z0-9]*;?)/) do |ref|
+        next HTML.unescape(ref) if ref[1] == '#'
+        name = ref[1..].rchop(';')
+        next HTML.unescape(ref) if ref.ends_with?(';') && name.size <= HTML_ENTITY_MAX && html_entity?(name)
+        n = {name.size, HTML_LEGACY_MAX}.min.downto(2).find { |i| HTML_LEGACY_ENTITIES.includes?(name[0, i]) }
+        n ? HTML.unescape("&#{name[0, n]}") + ref[n + 1..] : ref
+      end
+    end
+
+    private def html_entity?(name : String) : Bool
+      key = name.to_slice
+      HTML::SINGLE_CHAR_ENTITIES.has_key?(key) || HTML::DOUBLE_CHAR_ENTITIES.has_key?(key)
+    end
+
     # ---- XML (the five predefined entities) ----
     def xml_escape(s : String) : String
       String.build(s.bytesize) do |io|

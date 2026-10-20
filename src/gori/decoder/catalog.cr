@@ -260,7 +260,7 @@ module Gori::Decoder
       description: "HTML-escape & < > \" ' (only)") { |s| HTML.escape(s) }
     r.register text("html-unescape", "html-decode", "unhtml",
       category: Category::Escape, direction: Direction::Decode,
-      description: "HTML-unescape named + numeric entities") { |s| HTML.unescape(s) }
+      description: "HTML-unescape named + numeric entities") { |s| Codecs.html_unescape(s) }
 
     r.register text("json-escape", "json-encode", "jsonstring",
       category: Category::Escape, direction: Direction::Encode,

@@ -1123,13 +1123,16 @@ module Gori
       # by the seam: an unconfigured project stays permissive, a configured one refuses an
       # out-of-scope target unless --allow-unscoped. This is only the soft include boundary;
       # Sandbox mode + explicit exclude rules are still enforced per-request by
-      # `Fuzz::Sender`/`Repeater::Sender` regardless of --allow-unscoped.
+      # `Fuzz::Sender`/`Repeater::Sender` regardless of --allow-unscoped. `send` marks a
+      # hand-authored send, whose remedy may name the waiver for an exclude (#1694).
       private def self.guard_outbound(outbound : Gori::Outbound, scheme : String, host : String,
-                                      target : String, port : Int32, cmd : String) : Nil
+                                      target : String, port : Int32, cmd : String, send : Bool = false) : Nil
         verdict = outbound.check_request(scheme, host, target, port)
         return unless verdict.blocked?
+        passes = send && outbound.send_passes_exclude?
         outbound.close
-        abort "#{cmd}: #{host} is out of the project scope — #{Gori::Outbound.remedy(verdict, "--allow-unscoped")}"
+        abort "#{cmd}: #{host} is out of the project scope — " \
+              "#{Gori::Outbound.remedy(verdict, "--allow-unscoped", waiver_passes_exclude: passes)}"
       end
 
       # ── the active session slot, headless ────────────────────────────────────────────

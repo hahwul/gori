@@ -245,6 +245,31 @@ describe "gori run project scope — the active-send gate line" do
       Gori::CLI::Run.scope_gate_line(scope).should start_with("Active-send gate: ON (1 rule)")
     end
   end
+
+  # #1694: the Sandbox refuses an out-of-scope send whatever --allow-unscoped says, a sweep's
+  # exclude holds under it too, and an excludes-only scope includes nothing.
+  it "names the Sandbox, the sweeps' excludes and an excludes-only scope" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      scope.enable_sandbox
+      line = Gori::CLI::Run.scope_gate_line(scope)
+      line.should contain("no rules")
+      line.should contain("the Sandbox refuses every send")
+      line.should_not contain("not restricted")
+
+      scope.add("exclude", "string", "/admin")
+      line = Gori::CLI::Run.scope_gate_line(scope)
+      line.should contain("an exclude rule still stops fuzz/mine/discover")
+      line.should contain("No include rule, so every target is out of scope")
+      line.should contain("Sandbox ON: an out-of-scope send is refused even under --allow-unscoped")
+
+      scope.add("include", "host", "example.com")
+      scope.disable_sandbox
+      line = Gori::CLI::Run.scope_gate_line(scope)
+      line.should_not contain("No include rule")
+      line.should_not contain("Sandbox")
+    end
+  end
 end
 
 # #1389: an import that clashes with an existing name said "choose another name" and never

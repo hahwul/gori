@@ -5113,7 +5113,16 @@ Refines both 2026-10-19 #1628 entries and P7. Takes the open option above.
 - Still open: holds still cost every request with a declared length on a body-rule host, whether
   or not a pattern would match it. Cheaper gates (method, content-type) wait for the rule model.
 
-### 2026-10-20: a draft's unresolved `$ENV.X` is refused, and an untouched flow seed is evidence (#1666, #1670)
+### 2026-10-21: a refusal names the waiver for an exclude where the waiver lifts it (#1694)
+
+Refines the 2026-09-28 #1348 entry's "delete the EXCLUDE rule", which no waiver lifts. That holds for a
+sweep (`sweep_block`) and for a hand-authored send under the Sandbox. A hand-authored send with
+the Sandbox off passes an exclude once Layer 1 is waived (`send_block`, as on the proxy), so its
+remedy names the waiver beside the exclude (`Outbound.remedy(waiver_passes_exclude:)`, asked of
+`Outbound#send_passes_exclude?`). The caller says whether it is a send; `check` cannot, because
+one verdict serves both kinds of caller. Gating is unchanged, only what the refusal says.
+
+### 2026-10-21: a draft's unresolved `$ENV.X` is refused, and an untouched flow seed is evidence (#1666, #1670)
 
 Refines P7's provenance axis and the #571 rule that a token with no value is literal text.
 

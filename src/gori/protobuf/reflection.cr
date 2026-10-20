@@ -248,7 +248,7 @@ module Gori::Protobuf
       def refusal : String?
         if verdict = blocked_verdict
           return "#{@scheme}://#{authority} is #{verdict.decision} — " \
-                 "#{@outbound.remedy(verdict)}"
+                 "#{@outbound.remedy(verdict, send: true)}"
         end
         # Layer 2, over BOTH paths for the reason `blocked_verdict` states.
         Reflection.scope_paths.each do |target_path|

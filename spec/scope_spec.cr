@@ -739,6 +739,19 @@ describe Gori::Scope do
     end
   end
 
+  # #1693: the duplicate question the CLI and MCP ask before `add`/`update`, whose one `false`
+  # cannot tell a duplicate from a busy store. `except` is the rule being edited.
+  it "find_rule names the rule holding a triple, other than the one being edited" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "acme.test").should be_true
+      rule = scope.rules.first
+      scope.find_rule("include", "host", " acme.test ").try(&.id).should eq(rule.id) # stripped like `add`
+      scope.find_rule("exclude", "host", "acme.test").should be_nil
+      scope.find_rule("include", "host", "acme.test", except: rule.id).should be_nil
+    end
+  end
+
   it "reload picks up an external scope edit on the SAME live instance (Sitemap's data_version " \
      "poll / headless capture's periodic reload)" do
     with_store do |store|

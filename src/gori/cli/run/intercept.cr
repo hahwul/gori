@@ -584,7 +584,7 @@ module Gori
           end
           row = flow.row
           outbound = project_outbound(project, allow_unscoped)
-          guard_outbound(outbound, row.scheme, row.host, row.target, row.port, cmd)
+          guard_outbound(outbound, row.scheme, row.host, row.target, row.port, cmd, send: true)
           outbound.close
           outcome = store.send_ws_inject(flow_id, direction, opcode, payload)
           next {outcome.status, outcome.detail} if outcome.is_a?(Store::InterceptAck)
