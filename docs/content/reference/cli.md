@@ -502,6 +502,10 @@ or a pipe that produced nothing) is refused instead of creating a session that c
 `--flow` is not one of the four: it doubles as provenance, so it pairs with any one of them.
 `--curl` reads one curl command (see [Repeater → Paste cURL](/guide/repeater-and-fuzzer/#repeater))
 and supplies `--target` and `--http2` from it unless you pass them.
+A target no send could reach (a scheme other than http/https/ws/wss, a port past 65535, a host
+with spaces in it) is refused at create, as MCP `create_repeater` refuses it. `--tags` is stored
+as MCP stores it (`#idor, x,,#IDOR` becomes `idor x`, and `#` stores nothing), and a blank
+`--name` leaves the tab `Untitled`.
 
 `--request-stdin` reads a pipe or a redirect (`--request-stdin < req.http`), and refuses a
 terminal. A terminal echoes every byte back (the whole raw request, `Cookie` and

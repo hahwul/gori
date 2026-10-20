@@ -495,6 +495,9 @@ pbpaste | gori run repeater create --curl - --name "from devtools"
 넷 중 어느 하나와도 함께 쓸 수 있습니다. `--curl`은 curl 명령 하나를 읽고
 ([Repeater → Paste cURL](/ko/guide/repeater-and-fuzzer/#repeater) 참고), 따로 주지 않으면
 `--target`과 `--http2`도 그 명령에서 가져옵니다.
+어떤 전송도 닿을 수 없는 대상(http/https/ws/wss가 아닌 스킴, 65535를 넘는 포트, 공백이 든 호스트)은
+MCP `create_repeater`처럼 생성 시점에 거부합니다. `--tags`는 MCP와 같은 방식으로 저장되고
+(`#idor, x,,#IDOR`는 `idor x`가 되며 `#`는 아무것도 저장하지 않음), 빈 `--name`은 탭을 `Untitled`로 둡니다.
 
 `--request-stdin`은 파이프나 리다이렉트(`--request-stdin < req.http`)를 읽으며, 터미널은
 거부합니다. 터미널은 입력한 바이트를 그대로 되돌려 출력하므로, `Cookie`와 `Authorization`을

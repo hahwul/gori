@@ -485,14 +485,18 @@ module Gori
       # a display choice with no wire consequence. The rule is "does this field become bytes
       # the origin sees", not "did the operator type it".
       #
+      # Tags go through `Repeater::Tags.stored`, as MCP's do: `#idor, x,,#IDOR` is stored
+      # `idor x`, and a token-free `#` stores nothing. A blank name stores NULL ("Untitled"),
+      # which on `update` is how a name is cleared.
+      #
       # Returns whether every write it made COMMITTED — the caller prints a success line, and
       # both writes are `exec_task_ok`, so a rolled-back batch (a busy store, a TUI capturing
       # into the same project) would otherwise be reported as a labelled session.
       private def self.apply_repeater_metadata(store : Store, id : Int64,
                                                name : String?, tags : String?) : Bool
         ok = true
-        ok = false if name && !store.set_repeater_name(id, Env.mask_secrets(name))
-        ok = false if tags && !store.set_repeater_tags(id, Env.mask_secrets(tags).strip.presence)
+        ok = false if name && !store.set_repeater_name(id, Env.mask_secrets(name).presence)
+        ok = false if tags && !store.set_repeater_tags(id, Repeater::Tags.stored(tags))
         ok
       end
 
@@ -727,6 +731,10 @@ module Gori
           abort "gori run repeater create: #{err}"
         end
         tls_preset = Settings.tls_preset_normalize(tls_preset)
+        # An explicit --target is argv too. A seeded one (--flow, --curl) is asked again below.
+        if (t = target) && (why = Repeater::Plan.target_error(t))
+          abort "gori run repeater create: invalid --target: #{why}"
+        end
 
         authored = !sources.empty?
         # Read here, before `open_store`: a pipe that never ends must not be holding the
@@ -807,6 +815,11 @@ module Gori
           end
 
           abort "gori run repeater create: --target is required" if tgt_str.empty?
+          # Refused at write time, as MCP `create_repeater` refuses it: a `ftp://` session was
+          # reported created and failed on every `repeater send` after.
+          if why = Repeater::Plan.target_error(tgt_str)
+            abort "gori run repeater create: invalid target: #{why}"
+          end
           # A hand-authored handshake is a WebSocket session too: `repeater send` runs WsEngine
           # on it exactly as on a cloned one, and MCP `create_repeater` asks the same question
           # of every source. Only the flow path above seeds frames.
