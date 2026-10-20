@@ -104,7 +104,7 @@ module Gori
           contains = {project.name, registry.slug_of(project), handle}.any?(&.downcase.includes?(q))
           { {contains ? 0 : 1, Levenshtein.distance(project.name.downcase, q), i}, project, handle }
         end.sort_by!(&.[0])
-        shown = ranked.first(NEAR_PROJECTS).join(", ") { |(_, project, handle)| "#{CLI::Output.term_safe(project.name)} [#{handle}]" }
+        shown = ranked.first(NEAR_PROJECTS).join(", ") { |(_, project, handle)| "#{CLI::Output.term_safe(project.name)} [#{CLI::Output.term_safe(handle)}]" }
         more = projects.size - NEAR_PROJECTS
         return " (closest: #{shown})" unless more > 0
         " (closest: #{shown}; +#{more} more — gori run project list --all --query=TEXT)"

@@ -172,7 +172,7 @@ describe "gori run project list" do
     source.should contain("terminal_project_name(project.name)}  (id")
     # The "no project matching" list moved to one helper for every surface (#1705).
     default_source = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "project_default.cr"))
-    default_source.should contain(%q("#{CLI::Output.term_safe(project.name)} [#{handle}]"))
+    default_source.should contain(%q("#{CLI::Output.term_safe(project.name)} [#{CLI::Output.term_safe(handle)}]"))
 
     cli_root = File.join(__DIR__, "..", "..", "..", "src", "gori", "cli")
     run_source = File.read(File.join(cli_root, "run.cr"))
