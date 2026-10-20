@@ -36,6 +36,7 @@
 - `gori run` sends, MCP `send_request`, the Fuzzer, the Miner and every other sweep (Discover, Authorize, Retest, active Probe) stop reading an SSE response after a number of events or seconds (100 / 10 s for a send, 50 / 5 s per sweep payload) instead of waiting out the idle timeout, and return the events so far as a success marked `bounded`; `--sse-events` / `--sse-time` or MCP `sse_max_events` / `sse_max_ms` change the limits. The TUI Repeater shows an SSE response live, per event under PRETTY, until **Stop send** ends it and keeps the events received (#1631)
 - Probe: promoting a finding no longer links a later flow at the sample's own URL, one the finding never fired on, as Issue evidence (#1673)
 - Authorize: a flow id that names no flow is listed as skipped (`no flow with that id`) by `gori run authorize` and MCP `authorize_start` instead of being dropped silently (#1684)
+- Links: `gori run links` prints each link's ref kind and id (`[hist] flow #2 GET 127.0.0.1:8080/err`), a flow link's label keeps a non-default port, and the issues JSON export's `links` rows carry `id` and `ref_kind` beside `kind` (#1685)
 
 ## v0.8.1
 
