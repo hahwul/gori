@@ -778,7 +778,7 @@ gori run authorize --query 'host:acme.test method:GET' --identities identities.j
 
 `set`은 헤더를 upsert하고 `remove`는 제거합니다. 어떤 항목도 `"baseline": true`를 갖지 않으면 캡처된 그대로의 요청이 기준선입니다. 기준선 외에 최소 한 개의 아이덴티티가 필요하며, 그렇지 않으면 비교할 것이 없습니다.
 
-의미 있게 재전송할 수 없는 플로우는 아무것도 보내기 전에 이유와 함께 STDERR에 나열됩니다(`no identity changes them`, `not a safe method to repeat`, `never completed`, `answered by gori`, `outside project scope`, `already queued`). 선택한 플로우가 전부 건너뛰어지면 실행하지 않고 거부합니다. 모든 전송이 소켓을 열기 전에 거부되면 깨끗한 결과를 보고하는 대신 `1`로 종료하며 그 사실을 말합니다. 아무것도 보내지 않은 실행은 접근 제어가 동작한다는 증거가 아니기 때문입니다.
+의미 있게 재전송할 수 없는 플로우는 아무것도 보내기 전에 이유와 함께 STDERR에 나열됩니다(`no identity changes them`, `not a safe method to repeat`, `never completed`, `answered by gori`, `outside project scope`, `already queued`, `no flow with that id`). 선택한 플로우가 전부 건너뛰어지면 실행하지 않고 거부합니다. 모든 전송이 소켓을 열기 전에 거부되면 깨끗한 결과를 보고하는 대신 `1`로 종료하며 그 사실을 말합니다. 아무것도 보내지 않은 실행은 접근 제어가 동작한다는 증거가 아니기 때문입니다.
 
 ### run cache-deception {#run-cache-deception}
 
