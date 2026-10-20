@@ -327,13 +327,25 @@ module Gori
       #
       # Each member also carries its session `id`, its `head` (redacted as send_request's headers
       # are) and its `body` (#1678): when every side answers 200 the body is the only evidence of
-      # which request won. A race is not stored, so there is no chunk tool to page a body from —
-      # the bodies split what the reply budget leaves after the heads, evenly, instead.
+      # which request won. A race is not stored, so there is no chunk tool to page either from —
+      # so each member gets an equal share of the reply budget, half for its body (a floor large
+      # heads cannot eat) and a quarter for its head (`head_truncated` past it). JSON escaping and
+      # base64 can still outgrow a share, so the reply is measured and both caps halved until it fits.
       private def race_result_json(ids : Array(Int64), labels : Array(String), results : Array(Repeater::Result),
                                    plan : Repeater::Plan) : String
+        share = REPLY_ROWS_BUDGET // {results.size, 1}.max
+        head_cap, body_cap = share // 4, share // 2
+        loop do
+          json = race_result_json(ids, labels, results, plan, head_cap, body_cap)
+          return json if json.bytesize <= REPLY_ROWS_BUDGET || body_cap == 0
+          head_cap //= 2
+          body_cap //= 2
+        end
+      end
+
+      private def race_result_json(ids : Array(Int64), labels : Array(String), results : Array(Repeater::Result),
+                                   plan : Repeater::Plan, head_cap : Int32, body_cap : Int32) : String
         won = results.count { |r| r.ok? && (s = r.response.try(&.status)) && 200 <= s < 300 }
-        heads = results.sum(&.head.size)
-        body_cap = {REPLY_ROWS_BUDGET - heads, 0}.max // {results.size, 1}.max
         JSON.build do |j|
           j.object do
             j.field "target", "#{plan.scheme}://#{plan.host}:#{plan.port}"
@@ -353,16 +365,27 @@ module Gori
                     j.field "duration_us", r.try(&.duration_us)
                     j.field "incomplete", r.try(&.incomplete?) || false
                     j.field "error", r.try(&.error)
-                    if r
-                      j.field "head", Serialize.redact_head(String.new(r.head).scrub, false)
-                      Serialize.emit_body(j, "body", "target", r.head, r.body, false, body_cap)
-                    end
+                    emit_race_member_message(j, r, head_cap, body_cap) if r
                   end
                 end
               end
             end
           end
         end
+      end
+
+      # One member's `head` — redacted BEFORE the cut, so a cut cannot split a credential out of
+      # the redaction's reach — and its `body`.
+      private def emit_race_member_message(j : JSON::Builder, r : Repeater::Result, head_cap : Int32, body_cap : Int32) : Nil
+        head = Serialize.redact_head(String.new(r.head).scrub, false)
+        if head.bytesize > head_cap
+          j.field "head", head.byte_slice(0, head_cap).scrub
+          j.field "head_truncated", true
+          j.field "head_size", head.bytesize
+        else
+          j.field "head", head
+        end
+        Serialize.emit_body(j, "body", "target", r.head, r.body, false, body_cap)
       end
 
       @[Tool("timing_requests", gated: true, agent_action: true, env_refresh: true, permission: "send")]

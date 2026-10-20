@@ -29,6 +29,26 @@ private def seed_race_repeater(store, port : Int32, path : String) : Int64
     http2: false, auto_cl: true, flow_id: nil, position: 0, sni: nil)
 end
 
+# An origin answering every request with a REPLY_ROWS_BUDGET-sized body, a credential and
+# `pad` bytes of filler header — the shape that outgrows a reply when nothing caps the members.
+private def start_big_race_origin(pad : Int32 = 0) : TCPServer
+  origin = TCPServer.new("127.0.0.1", 0)
+  big = "x" * Gori::MCP::Tools::REPLY_ROWS_BUDGET
+  filler = pad > 0 ? "X-Pad: #{"p" * pad}\r\n" : ""
+  spawn do
+    while conn = origin.accept?
+      spawn_with(conn) do |c|
+        Gori::Proxy::Codec::Http1.read_head(c)
+        c << "HTTP/1.1 200 OK\r\nSet-Cookie: sid=secret\r\n#{filler}Content-Length: #{big.bytesize}\r\nConnection: close\r\n\r\n" << big
+        c.flush
+        c.close rescue nil
+      end
+    end
+  rescue
+  end
+  origin
+end
+
 describe Gori::MCP::Server do
   describe "race_requests" do
     it "races two saved repeaters against one origin and returns a result per member" do
@@ -63,20 +83,8 @@ describe Gori::MCP::Server do
     # budget: a race is not stored, so there is no chunk tool to page the rest from.
     it "redacts each member's head and holds the bodies to the reply budget" do
       with_store do |store|
-        origin = TCPServer.new("127.0.0.1", 0)
+        origin = start_big_race_origin
         port = origin.local_address.port
-        big = "x" * Gori::MCP::Tools::REPLY_ROWS_BUDGET
-        spawn do
-          while conn = origin.accept?
-            spawn_with(conn) do |c|
-              Gori::Proxy::Codec::Http1.read_head(c)
-              c << "HTTP/1.1 200 OK\r\nSet-Cookie: sid=secret\r\nContent-Length: #{big.bytesize}\r\nConnection: close\r\n\r\n" << big
-              c.flush
-              c.close rescue nil
-            end
-          end
-        rescue
-        end
         a = seed_race_repeater(store, port, "/a")
         b = seed_race_repeater(store, port, "/b")
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"race_requests","arguments":{"repeater_ids":[#{a},#{b}],"allow_unscoped":true}}})
@@ -85,10 +93,32 @@ describe Gori::MCP::Server do
         members.each do |m|
           m["head"].as_s.should contain("Set-Cookie: [REDACTED]")
           m["head"].as_s.should_not contain("secret")
-          m["body"]["size"].as_i.should eq(big.bytesize)
+          m["body"]["size"].as_i.should eq(Gori::MCP::Tools::REPLY_ROWS_BUDGET)
           m["body"]["truncated"].as_bool.should be_true
         end
         members.sum(&.["body"]["text"].as_s.bytesize).should be < Gori::MCP::Tools::REPLY_ROWS_BUDGET
+        origin.close
+      end
+    end
+
+    # Large heads must not eat the bodies (Σheads past the budget used to cut every body to 0
+    # bytes) nor push the reply past the budget (heads went out whole: 256 KiB × 20 members).
+    it "caps large heads too, keeping a body floor and the whole reply under budget" do
+      with_store do |store|
+        origin = start_big_race_origin(pad: 40_000)
+        port = origin.local_address.port
+        ids = %w[/a /b /c].map { |path| seed_race_repeater(store, port, path) }
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"race_requests","arguments":{"repeater_ids":#{ids},"allow_unscoped":true}}})
+        resp = mcp_drive(store, call, verify_upstream: false)[0]
+        resp["result"]["content"][0]["text"].as_s.bytesize.should be <= Gori::MCP::Tools::REPLY_ROWS_BUDGET
+        members = mcp_tool_payload(resp)["members"].as_a
+        members.size.should eq(3)
+        members.each do |m|
+          m["head_truncated"].as_bool.should be_true
+          m["head_size"].as_i.should be > 40_000
+          m["head"].as_s.should contain("Set-Cookie: [REDACTED]")
+          m["body"]["text"].as_s.bytesize.should be > 0
+        end
         origin.close
       end
     end
