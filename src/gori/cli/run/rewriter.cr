@@ -554,6 +554,18 @@ module Gori
         {find || abort_closing(store, "gori run rewriter add: --find is required"), match, host || "", value || ""}
       end
 
+      # #1711: a plain-HTTP proxy flow is stored with its absolute-form line, but rules run on
+      # the origin-form head the proxy forwards (`Rules#live_request_head`).
+      ORIGIN_FORM_NOTE = "A request-head rule matches the origin-form line the proxy forwards\n" \
+                         "(GET /path), not the absolute form (GET http://host/path) History\n" \
+                         "stores for a plain-HTTP proxy flow."
+
+      private def self.warn_absolute_form(target : Store::RuleTarget, part : Store::RulePart, find : String?) : Nil
+        return unless target.request? && part.head? && find.try(&.matches?(/\A(?:\^|\\A)?[A-Za-z]+ [A-Za-z][A-Za-z0-9+.\-]*:\/\//))
+        STDERR.puts "gori run rewriter add: warning: --find names an absolute-form request line, " \
+                    "which a rule never sees; match the origin form (#{find.try(&.split(' ', 2).first)} /path)"
+      end
+
       private def self.cmd_rewriter_add(args : Array(String)) : Nil
         proj = ProjectFlags.new
         target_s = "request"
@@ -590,7 +602,8 @@ module Gori
                      "only that value's bytes change. --part defaults to body.\n\n" \
                      "Mocking (short_circuit): --map-dir serves files from a directory by path,\n" \
                      "--fault answers with a close/reset/hang instead of a response, --delay\n" \
-                     "waits first, and --from-flow copies a captured response into the rule."
+                     "waits first, and --from-flow copies a captured response into the rule.\n\n" \
+                     "#{ORIGIN_FORM_NOTE}"
           project_options(p, proj, "update")
           p.on("--side=SIDE", "request|response (default request)") { |v| target_s = v }
           # `--side` is the name that does not collide (#1389): `--target` is a URL on every
@@ -638,6 +651,7 @@ module Gori
         # the operator fixed the pipe and only then learned the flags were wrong. Same
         # ordering, and same reason, as `repeater create` and `issues create` (#1034).
         check_ws_part(op, part, "add")
+        warn_absolute_form(target, part, find_arg)
         check_pipe_value(op, value_arg || "", "add")
         check_json_rule(op, part, find_arg, value_arg, "add")
         value_arg = check_short_circuit_args(op, value_arg, response_file, body_file)
@@ -845,7 +859,8 @@ module Gori
           "pass the match as --find FIND and the replacement as --value VALUE — quote them, a value " \
           "with spaces is one argument") do |p|
           p.banner = "Usage: gori run rewriter preview [options]\n\n" \
-                     "Estimate how many recent flows a rule WOULD affect, without creating it."
+                     "Estimate how many recent flows a rule WOULD affect, without creating it.\n\n" \
+                     "#{ORIGIN_FORM_NOTE}"
           project_options(p, proj, "read")
           p.on("--side=SIDE", "request|response (default request)") { |v| target_s = v }
           # `--side` is the name that does not collide (#1389): `--target` is a URL on every

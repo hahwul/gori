@@ -1444,6 +1444,8 @@ gori run rewriter rm 3
 | `--scope=SCOPE` | `project` (default) or `global`. A global rule lives in `settings.json` and applies in every project. On the bare listing: show only that store's rules (default: both) |
 | `--everywhere` | On `enable`/`disable` of a global rule: change the rule's own default instead of this project's override |
 
+A request-head rule matches the origin-form request line the proxy forwards (`GET /path`), never the absolute form (`GET http://host/path`) History stores for a plain-HTTP proxy flow, so write `--find 'GET /path'`.
+
 `preview` takes the same rule flags and reports how many stored flows the rule would have changed, without writing it. Its `--format json` carries `skipped`, the flows a JSON rule left out because their body was too large to preview, and `scan_capped`, true only when older flows than the 500 it read exist. `rm` (`delete`), `enable` and `disable` take a rule id from the list, plus `--scope`, because the two stores number their rules independently, so an id alone names two different rules. The list prints the scope as a `G`/`P` prefix (`G*` = this project overrides that global rule's default) and shows global rules first, the order the proxy applies them in. See [Global and project rules](/guide/proxy/#global-and-project-rules).
 
 Body rules re-sync `Content-Length` and de-chunk as needed, on HTTP/1.1 and HTTP/2 alike. See [Proxy & History](/guide/proxy/) for the interactive editor.
