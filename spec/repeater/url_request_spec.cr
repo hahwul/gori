@@ -46,6 +46,27 @@ describe Gori::Repeater::UrlRequest do
 end
 
 describe "Gori::Repeater::UrlRequest $ENV expansion" do
+  # #1668: the env pass changes the body's length, so Content-Length follows it — as the send
+  # seam's `$GEN` pass and a session replay already did. A token-free body keeps its CL.
+  it "re-frames a raw request's Content-Length only when the env pass changed the body" do
+    Gori::Settings.env_vars = [{"TOKEN", "abc123"}, {"UNI", "héllo wörld!!"}]
+    with_env_syntax(Gori::Env::Syntax::Namespaced) do
+      t = Gori::Repeater::UrlRequest.target("http://h.test/")
+      head = "POST /raw HTTP/1.1\r\nHost: h\r\n"
+      shorter = Gori::Repeater::UrlRequest.raw(t, "#{head}Content-Length: 15\r\n\r\nbody=$ENV.TOKEN", false)
+      String.new(shorter.bytes).should eq("#{head}Content-Length: 11\r\n\r\nbody=abc123")
+      longer = Gori::Repeater::UrlRequest.raw(t, "#{head}Content-Length: 14\r\n\r\nb=$ENV.UNI&z=1", false)
+      String.new(longer.bytes).should eq("#{head}Content-Length: 21\r\n\r\nb=héllo wörld!!&z=1")
+      # A deliberate CL mismatch over a token-free body, and anything under verbatim, is as typed.
+      probe = "#{head}Content-Length: 99\r\n\r\nab"
+      String.new(Gori::Repeater::UrlRequest.raw(t, probe, false).bytes).should eq(probe)
+      typed = "#{head}Content-Length: 15\r\n\r\nbody=$ENV.TOKEN"
+      String.new(Gori::Repeater::UrlRequest.raw(t, typed, true).bytes).should eq(typed)
+    end
+  ensure
+    Gori::Settings.env_vars = [] of {String, String}
+  end
+
   # #1666: an `$ENV.KEY` that resolves to nothing is refused, in a raw request and a header.
   it "refuses an unresolved $ENV.KEY in a raw request and a header value, never under verbatim" do
     Gori::Settings.env_vars = [] of {String, String}

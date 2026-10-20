@@ -1,5 +1,6 @@
 require "uri"
 require "../env"
+require "../fuzz/content_length"
 require "../proxy/codec/http1"
 require "./plan"
 
@@ -82,8 +83,12 @@ module Gori::Repeater
     # header terminator is a standard front-end/back-end desync primitive, which is why the flag
     # exists. A bare `$VAR` with no value stays literal (see `Env::Escape`), the SSTI/shell
     # payload the flag exists to deliver; an unresolved `$ENV.KEY` is refused (`expand`).
+    #
+    # An expansion that changed the body's length re-frames Content-Length (#1668), as the plan
+    # does for a session (`resync_cl_after_expansion`) and the send seam does for `$GEN`. A
+    # token-free body keeps a hand-set CL as written.
     def self.raw(target : Target, raw : String, verbatim : Bool) : Built
-      bytes = verbatim ? raw.to_slice : normalize_raw(expand(raw))
+      bytes = verbatim ? raw.to_slice : Fuzz::ContentLength.resync_expanded(raw.to_slice, normalize_raw(expand(raw)))
       Built.new(bytes, target.scheme, target.host, target.port)
     end
 
