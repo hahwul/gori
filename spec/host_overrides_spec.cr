@@ -75,6 +75,18 @@ describe Gori::HostOverrides do
     end
   end
 
+  # #1693: the duplicate question the CLI and MCP ask before `add`/`update`, on the stored key.
+  it "entry_for finds the entry on the folded host, other than the one being edited" do
+    with_store do |store|
+      ov = Gori::HostOverrides.load(store)
+      ov.add("example.com", "10.0.0.1").should be_true
+      e = ov.entries.first
+      ov.entry_for("EXAMPLE.com.").try(&.id).should eq(e.id)
+      ov.entry_for("example.com", except: e.id).should be_nil
+      ov.entry_for("other.test").should be_nil
+    end
+  end
+
   it "updates an override in place (self-edit of the IP is allowed)" do
     with_store do |store|
       ov = Gori::HostOverrides.load(store)

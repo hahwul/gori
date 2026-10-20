@@ -21,7 +21,7 @@ module Gori
         # It is deterministic and will never succeed on retry, so it must be a non-retryable
         # INVALID_ARGUMENT — reporting it as PROJECT_BUSY/retryable made an agent that trusts
         # `retryable` loop forever (#414).
-        if scope.rules.any? { |r| r.kind == kind && r.match_type == match_type && r.pattern == pattern }
+        if scope.find_rule(kind, match_type, pattern)
           return err("scope rule already exists (identical kind/match_type/pattern)",
             "INVALID_ARGUMENT", field: "pattern")
         end
@@ -36,7 +36,7 @@ module Gori
         end
         # Scope#add reloads @rules from the store before returning, so this lookup
         # already sees the freshly assigned id.
-        rule = scope.rules.find { |r| r.kind == kind && r.match_type == match_type && r.pattern == pattern }
+        rule = scope.find_rule(kind, match_type, pattern)
         Result.new({id: rule.try(&.id), kind: kind, match_type: match_type, pattern: pattern}.to_json)
       end
 
@@ -74,7 +74,7 @@ module Gori
         # already makes next door, and `gori run project scope update` too — with a comment naming
         # this exact misreport: "the busy-store abort below reported a duplicate as 'store busy or
         # unwritable' — sending the operator to hunt for a lock".
-        if scope.rules.any? { |r| r.id != id && r.kind == kind && r.match_type == match_type && r.pattern == pattern }
+        if scope.find_rule(kind, match_type, pattern, except: id)
           return err("another scope rule already matches #{kind} #{match_type} #{pattern}",
             "INVALID_ARGUMENT", field: "pattern")
         end
