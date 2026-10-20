@@ -1217,6 +1217,16 @@ describe "gori run show --format curl" do
     Gori::CLI::Run.omitted_body_note(latin, :curl).should be_nil
     plain = Gori::Store::FlowDetail.new(row, "HTTP/1.1", head, "a=1".to_slice, nil, nil)
     Gori::CLI::Run.omitted_body_note(plain, :curl).should be_nil
+    # The serializers judge the de-chunked body, so the note must too: a chunked 'é' split
+    # across two chunks is valid UTF-8 once joined, and a NUL in a chunk extension never
+    # reaches the command.
+    chunked = "POST /a HTTP/1.1\r\nHost: h.test\r\nTransfer-Encoding: chunked\r\n\r\n".to_slice
+    split = Gori::Store::FlowDetail.new(row, "HTTP/1.1", chunked,
+      Bytes[0x31, 0x0d, 0x0a, 0xc3, 0x0d, 0x0a, 0x31, 0x0d, 0x0a, 0xa9, 0x0d, 0x0a, 0x30, 0x0d, 0x0a, 0x0d, 0x0a], nil, nil)
+    Gori::CLI::Run.omitted_body_note(split, :httpie).should be_nil
+    ext = Gori::Store::FlowDetail.new(row, "HTTP/1.1", chunked,
+      "3;x=\u0000\r\nabc\r\n0\r\n\r\n".to_slice, nil, nil)
+    Gori::CLI::Run.omitted_body_note(ext, :curl).should be_nil
   end
 
   # curl speaks the upgrade handshake and nothing after it, so for a socket the command is a

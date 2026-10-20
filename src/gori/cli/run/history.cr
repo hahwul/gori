@@ -1092,14 +1092,17 @@ module Gori
       # The snippet's own note for a body it had to leave out names the TUI copy menu's "Body"
       # row (curl) or a FILE it does not say how to get (httpie), and the snippet stays
       # byte-identical to the TUI's, so the route THIS command has is said here (#1708).
+      # Judged on the body the serializers put on the command (de-chunked, `sendable`), not the
+      # stored wire bytes: chunk framing can split a UTF-8 character or carry a NUL in an extension.
       def self.omitted_body_note(detail : Store::FlowDetail, format : Symbol) : String?
-        body = detail.request_body
-        return nil if body.nil? || body.empty?
-        omitted = case format
-                  when :curl   then body.includes?(0_u8)
-                  when :httpie then !Export::Httpie.carriable?(String.new(body))
-                  else              false
-                  end
+        return nil unless format.in?(:curl, :httpie)
+        row = detail.row
+        parts = Export::RequestParts.from_wire(String.new(request_wire_bytes(detail)),
+          Repeater::FlowRequest.build_target(row.scheme, row.host, row.port))
+        return nil unless parts
+        body = Export::RequestParts.sendable(parts).body
+        return nil if body.empty?
+        omitted = format == :curl ? body.to_slice.includes?(0_u8) : !Export::Httpie.carriable?(body)
         return nil unless omitted
         "flow ##{detail.row.id}'s request body holds bytes no #{format} command line can carry, so " \
         "it is left out — `gori run show #{detail.row.id} --request-only --format raw` prints the exact request"
