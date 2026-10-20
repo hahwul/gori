@@ -213,7 +213,7 @@ module Gori
         in Sequencer::PlanError::Reason::NoTokenLoc
           "token location selector is empty"
         in Sequencer::PlanError::Reason::BadPosition
-          "--position #{ex.detail} extracts nothing — B must be greater than A"
+          "--position #{ex.detail} extracts nothing — A must be 0 or more and B greater than A"
         in Sequencer::PlanError::Reason::NoTokens
           # Unreachable here: --tokens is handled above and never builds a plan.
           "no tokens to analyze"

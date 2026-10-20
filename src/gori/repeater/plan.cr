@@ -724,7 +724,7 @@ module Gori::Repeater
     # captured upgrade whose response was not 101, so the CLI's 101 guard does not fire) went
     # out over a CLEARTEXT socket to a TLS port, leaking the request's cookies and auth
     # headers. Normalizing makes every engine's `== "https"` test correct by construction.
-    private def self.normalize_scheme(scheme : String) : String
+    def self.normalize_scheme(scheme : String) : String
       case scheme
       when "ws"  then "http"
       when "wss" then "https"

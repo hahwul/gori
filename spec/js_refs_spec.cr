@@ -75,6 +75,25 @@ describe Gori::JsRefs do
       lit(%(`/api/q/${never), "/api/q/{expr}").templated.should be_true
     end
 
+    # #1697: the path run stops at the first byte outside its class. Only the closing quote, a
+    # `$` or a `+` end the literal; any other stop took a prefix the JS never names.
+    it "takes the whole quoted literal when the path run stops short of its quote" do
+      js = %(a("/v1/users:batchGet"); b("//127.0.0.1:8080/protorel"); c("//127.0.0.1/noport-rel"); ) +
+           %(d("/files/日本.pdf"); e('/api/v3/한글'); f("/q?x=1");)
+      found = lits(js)
+      found.map(&.text).should eq(["/v1/users:batchGet", "//127.0.0.1:8080/protorel", "//127.0.0.1/noport-rel",
+                                   "/files/日本.pdf", "/api/v3/한글", "/q?x=1"])
+      found.none?(&.templated).should be_true
+      # A concatenation keeps its prefix, as it always did.
+      lit(%(fetch("/api/users/"+id)), "/api/users/").templated.should be_false
+    end
+
+    it "keeps the cut, flagged, when the quote does not close before whitespace or an escape" do
+      lit(%(x = "/api/x yz"), "/api/x").templated.should be_true
+      lit(%(x = "/api/a:b\\"c"), "/api/a").templated.should be_true
+      lit(%(x = `/api/a:${b}`), "/api/a").templated.should be_true
+    end
+
     it "flags a literal in a comment, and prefers the code occurrence of the same literal" do
       l = lit(%(// fetch("/api/old")\nvar x = 1;), "/api/old")
       l.in_comment.should be_true
@@ -155,6 +174,18 @@ describe Gori::JsRefs do
       abs.host.should eq("api.other.test")
       abs.path.should eq("/v1") # the node path: trailing slash dropped, as the tree does
       abs.base.should eq("absolute")
+    end
+
+    it "percent-encodes a non-ASCII path and query, keeping the literal as written" do
+      r = JR.resolve(JR::Literal.new("/files/日本.pdf?q=한", 0, 1, false, false), base, JR::Base::Page).as(Gori::Store::JsRef)
+      r.path.should eq("/files/%E6%97%A5%E6%9C%AC.pdf")
+      r.target.should eq("/files/%E6%97%A5%E6%9C%AC.pdf?q=%ED%95%9C")
+      r.literal.should eq("/files/日本.pdf?q=한")
+    end
+
+    it "resolves a scheme-relative literal with a port to its own origin" do
+      r = JR.resolve(JR::Literal.new("//127.0.0.1:8080/protorel", 0, 1, false, false), base, JR::Base::Guessed).as(Gori::Store::JsRef)
+      {r.scheme, r.host, r.port, r.path, r.base}.should eq({"https", "127.0.0.1", 8080, "/protorel", "absolute"})
     end
 
     it "keys on the query-less node path and keeps the query for a replay" do

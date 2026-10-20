@@ -507,6 +507,33 @@ describe Gori::Export::OpenApi do
     end
   end
 
+  # #1675: the gate was the HOSTNAME count, so two origins of one host shared every path.
+  it "scopes servers to a path whose origins are not the root's, even on one host" do
+    with_store do |store|
+      oa_flow(store, "/only-a", host: "127.0.0.1", scheme: "http", port: 8081)
+      oa_flow(store, "/only-b", host: "127.0.0.1", scheme: "https", port: 8082)
+      result = OA.build(store)
+      doc = result.doc
+      doc["paths"]["/only-a"]["servers"].should eq(JSON.parse(%([{"url":"http://127.0.0.1:8081"}])))
+      doc["paths"]["/only-b"]["servers"].should eq(JSON.parse(%([{"url":"https://127.0.0.1:8082"}])))
+      result.report.origins.should eq(["http://127.0.0.1:8081", "https://127.0.0.1:8082"])
+
+      # And `import --oas` puts each operation back on the origin that answered it.
+      file = File.tempname("gori", ".json")
+      begin
+        File.write(file, OA.to_json(doc))
+        with_store do |other|
+          Gori::Import.import_file(other, :oas, file).count.should eq(2)
+          other.search(Gori::QL::EMPTY, 10).map { |r| {r.target, r.scheme, r.port} }.sort!.should eq([
+            {"/only-a", "http", 8081}, {"/only-b", "https", 8082},
+          ])
+        end
+      ensure
+        File.delete?(file)
+      end
+    end
+  end
+
   it "honours the sample and endpoint caps, and says so" do
     with_store do |store|
       5.times { |i| oa_flow(store, "/a/#{i}") }

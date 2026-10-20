@@ -1044,6 +1044,7 @@ module Gori
           STDERR.puts "gori run show: flow ##{row.id}'s request body was truncated at the capture cap — " \
                       "this command sends the SHORT body"
         end
+        omitted_body_note(detail, :curl).try { |n| STDERR.puts "gori run show: #{n}" }
       end
 
       # The flow's REQUEST serialized as client code — the headless twin of the TUI's
@@ -1085,6 +1086,26 @@ module Gori
           STDERR.puts "gori run show: flow ##{row.id}'s request body was truncated at the capture cap — " \
                       "this #{format} snippet carries the SHORT body"
         end
+        omitted_body_note(detail, format).try { |n| STDERR.puts "gori run show: #{n}" }
+      end
+
+      # The snippet's own note for a body it had to leave out names the TUI copy menu's "Body"
+      # row (curl) or a FILE it does not say how to get (httpie), and the snippet stays
+      # byte-identical to the TUI's, so the route THIS command has is said here (#1708).
+      # Judged on the body the serializers put on the command (de-chunked, `sendable`), not the
+      # stored wire bytes: chunk framing can split a UTF-8 character or carry a NUL in an extension.
+      def self.omitted_body_note(detail : Store::FlowDetail, format : Symbol) : String?
+        return nil unless format.in?(:curl, :httpie)
+        row = detail.row
+        parts = Export::RequestParts.from_wire(String.new(request_wire_bytes(detail)),
+          Repeater::FlowRequest.build_target(row.scheme, row.host, row.port))
+        return nil unless parts
+        body = Export::RequestParts.sendable(parts).body
+        return nil if body.empty?
+        omitted = format == :curl ? body.to_slice.includes?(0_u8) : !Export::Httpie.carriable?(body)
+        return nil unless omitted
+        "flow ##{detail.row.id}'s request body holds bytes no #{format} command line can carry, so " \
+        "it is left out — `gori run show #{detail.row.id} --request-only --format raw` prints the exact request"
       end
 
       # What a curl command for a SOCKET flow leaves out, or nil when the flow is plain HTTP.

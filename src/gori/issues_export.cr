@@ -253,7 +253,12 @@ module Gori
         links = Links.issue_links(store.list_links(Store::LinkOwnerKind::Issue, f.id), f)
         Links.resolve_all(store, links).each do |res|
           j.object do
+            # `id` and `ref_kind` are the names `gori run links` and MCP `list_links` use for
+            # the same row; `kind` stays for existing readers (#1685). A synthesised seed flow
+            # has `id` 0 (`Links.issue_links`).
+            j.field "id", res.link.id
             j.field "kind", res.link.ref_kind.label
+            j.field "ref_kind", res.link.ref_kind.label
             j.field "ref_id", res.link.ref_id
             # `one_line`, exactly like the title/host fields of the object this array sits in —
             # and like `append_related_links`, the Markdown sibling twenty lines up, which has

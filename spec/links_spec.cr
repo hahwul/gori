@@ -52,6 +52,14 @@ describe Gori::Links do
       end
     end
 
+    it "keeps a non-default port in the location (#1685)" do
+      with_store do |store|
+        fid = insert_flow_row(store, host: "127.0.0.1", target: "/err", port: 8999)
+        r = Gori::Links.resolve(store, link_for(Gori::Store::LinkRefKind::Flow, fid))
+        r.label.should eq("GET 127.0.0.1:8999/err")
+      end
+    end
+
     it "prefixes host to a relative target (origin-form) for the location" do
       with_store do |store|
         fid = insert_flow_row(store, host: "shop.example", target: "/cart?id=1", method: "POST")

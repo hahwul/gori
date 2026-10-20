@@ -73,6 +73,31 @@ module Gori::CLI::Run
   def self.link_row_json_for_spec(r : Links::Resolved) : String
     JSON.build { |j| j.object { link_row_fields(j, r) } }
   end
+
+  def self.link_row_text_for_spec(r : Links::Resolved) : String
+    link_row_text(r)
+  end
+end
+
+# The text row names the ref the way `links delete --ref --ref-id` takes it, and two flows on
+# one host but different ports no longer print the same line (#1685).
+describe "gori run links — text row" do
+  it "prints the ref kind, ref id and the flow's port" do
+    with_store do |store|
+      fid = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: 8999, method: "GET",
+        target: "/err", http_version: "HTTP/1.1",
+        head: "GET /err HTTP/1.1\r\nHost: 127.0.0.1:8999\r\n\r\n".to_slice, source: Gori::FlowSource::Kind::Proxy))
+      iid = store.insert_issue("finding", Gori::Store::Severity::Low, "127.0.0.1", nil)
+      store.add_link(Gori::Store::LinkOwnerKind::Issue, iid, Gori::Store::LinkRefKind::Flow, fid)
+      store.add_link(Gori::Store::LinkOwnerKind::Issue, iid, Gori::Store::LinkRefKind::Flow, 999_i64)
+      rows = Gori::Links.resolve_all(store, store.list_links(Gori::Store::LinkOwnerKind::Issue, iid))
+      rows.map { |r| Gori::CLI::Run.link_row_text_for_spec(r) }.should eq([
+        "[hist] flow ##{fid} GET 127.0.0.1:8999/err",
+        "[hist] flow #999 (gone)  (stale)",
+      ])
+    end
+  end
 end
 
 describe "gori run links — flag parsing" do

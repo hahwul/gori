@@ -39,6 +39,7 @@ describe "gori run sitemap export" do
     report.paths = 3
     report.flows_read = 9
     report.hosts = ["a.test", "b.test"]
+    report.origins = ["https://a.test", "https://b.test"]
     report.endpoints_dropped = 2
     report.skip(Gori::Export::OpenApi::Skip::Gori)
     out = Gori::CLI::Run.sitemap_export_notes_for_spec(report, nil)
@@ -48,6 +49,15 @@ describe "gori run sitemap export" do
     out.should contain("skipped 1 sent by gori")
     out.should contain("2 operations left out (max endpoints)")
     out.should_not contain("sanitized") # no examples, no redaction sentence
+  end
+
+  # #1675: two origins of one host are two servers, and the note keys on that.
+  it "says the paths list their servers when one host spans two origins" do
+    report = OAR.new
+    report.operations = 2
+    report.hosts = ["a.test"]
+    report.origins = ["http://a.test:8080", "https://a.test"]
+    Gori::CLI::Run.sitemap_export_notes_for_spec(report, nil).should contain("the flows span 2 origins")
   end
 
   it "says what an empty export read" do

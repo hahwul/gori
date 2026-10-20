@@ -2429,6 +2429,9 @@ module Gori
         plan.scheme == "https" ? plan.tls_preset : nil
       end
 
+      # The binary-body marker's route to exact bytes: a send has no `--format raw` (#1708).
+      SEND_EXACT_BYTES = "--format json for exact bytes (body.base64, or body.text when it is UTF-8)"
+
       private def self.emit_repeater_result(result : Repeater::Result, new_body : Bytes?,
                                             diff : Array(Repeater::DiffLine)?, format : Symbol,
                                             diff_capped : Bool = false,
@@ -2470,7 +2473,7 @@ module Gori
             STDERR.puts compare_verdict(n, diff_capped)
             STDERR.puts "(diff truncated to #{Repeater::Diff::MAX_LINES} lines/side — lines past the cut were not compared)" if diff_capped
           else
-            print_message_text(result.head, new_body, result.body, cap)
+            print_message_text(result.head, new_body, result.body, cap, SEND_EXACT_BYTES)
           end
         else
           # Named after the command that sent it: `gori run send` said "repeater failed:", a
@@ -2486,7 +2489,7 @@ module Gori
           # the default one.
           unless result.head.empty?
             STDERR.puts "→ #{result.response.try(&.status) || "?"} in #{CLI::Output.human_us(result.duration_us)}#{at}#{result.incomplete? ? " (#{incomplete_reason(result, result.timed_out?)})" : ""}"
-            print_message_text(result.head, new_body, result.body, cap)
+            print_message_text(result.head, new_body, result.body, cap, SEND_EXACT_BYTES)
           end
         end
       end

@@ -131,6 +131,7 @@ group = "워크벤치"
 | **answered by gori** | gori가 이 요청을 직접 처리했습니다. 뒤에 오리진이 없습니다 | — |
 | **outside project scope** | 아웃바운드 게이트가 소켓을 열기 전에 대상을 거부했습니다 | `--allow-unscoped`(CLI), `allow_unscoped:true`(MCP), 또는 스코프 include 규칙 추가 |
 | **already queued** | 같은 플로우를 두 번 지정했습니다 | — |
+| **no flow with that id** | 지정한 플로우 id가 없습니다(오타이거나 정리된 플로우) | — |
 | **sent by gori, not the browser** | 패시브 재전송에만 해당합니다. 브라우징한 것이 아니라 gori 자신의 트래픽(Repeater 전송, 퍼즈 행, 에이전트의 요청)입니다 | — |
 
 첫 번째 행은 새겨 둘 만합니다. 이 판단은 "이 요청에 `Cookie`가 있는가?" 하는 검사가 아닙니다. 그 질문은 `X-Api-Key` 같은 헤더로 인증하는 API를 놓쳤고, 로그인하지 않은 사이트에서는 아무 말 없이 전부 건너뛰었습니다. gori는 정확한 질문을 대신 던집니다. *어떤 아이덴티티든 이 바이트를 바꾸는가?* 아니라면 비교할 것이 없고, 그 사실을 말해 줍니다.

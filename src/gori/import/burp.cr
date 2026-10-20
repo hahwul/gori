@@ -49,7 +49,7 @@ module Gori
 
         now = Time.utc.to_unix * 1_000_000
         pairs = [] of Builder::FlowPair
-        skipped = 0
+        skips = Skips.new
         found = 0
         pos = 0
         while block = next_element(raw, "item", pos)
@@ -59,12 +59,12 @@ module Gori
           # rather than discarding the rest of the export — the contract every parser shares.
           begin
             pairs << item_to_flow(inner, now, prov)
-          rescue
-            skipped += 1
+          rescue ex
+            skips.add("item #{found}", ex)
           end
         end
         raise Gori::Error.new("no <item> entries in #{path}") if found == 0
-        ParseResult.new(pairs, skipped)
+        skips.result(pairs)
       end
 
       private def self.item_to_flow(item : String, now : Int64, prov : Provenance) : Builder::FlowPair
