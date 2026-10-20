@@ -259,6 +259,19 @@ describe "gori run rewriter — rule rows" do
       .should eq("P#7 [ ] RES -hdr  [strip csp] @*.corp.internal  Content-Security-Policy")
   end
 
+  # #1677: an agent's `create_rule` or a synced settings file writes these fields, and a raw
+  # ESC in the listing cleared the screen or retitled the terminal.
+  it "badges terminal escapes in a rule's name, host, pattern and value" do
+    row = Gori::CLI::Run.rewriter_rule_row_for_spec(
+      rule(name: "n\e[31mred", host: "a.test\e[1m", pattern: "zz\e[2J", replacement: "b\e]0;pwned\a"))
+    row.should_not contain('\e')
+    row.should_not contain('\a')
+    row.should contain("⟨ESC⟩")
+    Gori::CLI::Run.extract_rule_row_for_spec(
+      extract_rule(match_filter: "path:/x\e[2J", selector: "s\e]0;t\a", host: "a.test\e[1m"))
+      .should_not contain('\e')
+  end
+
   # ljust(5) is what keeps the body column aligned across ops; the shortest tag is 4 chars.
   it "pads the op tag so the body column lines up across ops" do
     rows = [

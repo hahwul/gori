@@ -154,11 +154,12 @@ module Gori
       end
 
       # `#3 [x] $SESSION <- status:200 AND path:/login <- cookie "sid" @acme.test`
+      # Filter, selector and host are rule text an agent or a peer instance may have written (#1677).
       private def self.extract_rule_row(r : Store::ExtractRule) : String
         mark = r.enabled? ? "x" : " "
-        host = r.host.empty? ? "" : " @#{r.host}"
-        cond = r.match_filter.empty? ? "any message" : r.match_filter
-        "##{r.id} [#{mark}] #{Env.spell(r.name, Env::Namespace::Bind)} <- #{cond} <- #{r.token_loc.label}#{host}"
+        host = r.host.empty? ? "" : " @#{CLI::Output.term_safe(r.host)}"
+        cond = r.match_filter.empty? ? "any message" : CLI::Output.term_safe(r.match_filter)
+        "##{r.id} [#{mark}] #{Env.spell(r.name, Env::Namespace::Bind)} <- #{cond} <- #{CLI::Output.term_safe(r.token_loc.label)}#{host}"
       end
 
       private def self.cmd_extract_list(args : Array(String)) : Nil
@@ -343,8 +344,9 @@ module Gori
       private def self.rewriter_rule_row(r : Store::MatchRule) : String
         mark = r.inert? ? "?" : (r.enabled? ? "x" : " ")
         side = r.target.request? ? "REQ" : "RES"
-        name = r.name.empty? ? "" : " [#{r.name}]"
-        host = r.host.empty? ? "" : " @#{r.host}"
+        # Rule text comes from agents (MCP `create_rule`) and shared settings files (#1677).
+        name = r.name.empty? ? "" : " [#{CLI::Output.term_safe(r.name)}]"
+        host = r.host.empty? ? "" : " @#{CLI::Output.term_safe(r.host)}"
         scope = "#{r.scope.badge}#{r.overridden? ? "*" : ""}"
         "#{scope}##{r.id} [#{mark}] #{side} #{rewriter_op_tag(r).ljust(5)}#{name}#{host}  #{rewriter_rule_body(r)}"
       end
@@ -366,6 +368,10 @@ module Gori
       # `=>` rather than `->` for a stub: it answers instead of forwarding, so the row should
       # not read like the four rewrite ops.
       private def self.rewriter_rule_body(r : Store::MatchRule) : String
+        CLI::Output.term_safe(rewriter_rule_text(r))
+      end
+
+      private def self.rewriter_rule_text(r : Store::MatchRule) : String
         return r.inert_reason || "unknown rule" if r.inert?
         case r.op
         when .remove_header?, .json_remove? then r.pattern
