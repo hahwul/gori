@@ -39,6 +39,7 @@
 - CLI: `gori run shell` warns, as `gori ca` does, when the root CA lacks the subjectKeyIdentifier or keyUsage extension that Python 3.13+ requires, and names `gori ca regenerate` (#1706)
 - CLI: a binary body on `gori run send` and `gori run repeater` points at `--format json` for its exact bytes instead of a `--format raw` those commands lack, and `gori run show --format curl|httpie` names `--request-only --format raw` on stderr for a body the command had to leave out (#1708)
 - CSRF PoC: the fetch() PoC for a PUT, DELETE or other non-form method says the method itself forces a CORS preflight, instead of blaming the body and Content-Type (#1709)
+- Fuzzer: `gori run fuzz --regex-replace` documents that its first character is the delimiter (`#a/b#X#` puts a `/` in the pattern), and a malformed spec is refused with `<d>pattern<d>replacement<d>` instead of the operator's own character spliced into the template (#1710)
 
 ## v0.8.1
 

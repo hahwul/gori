@@ -127,8 +127,13 @@ module Gori
         end
       end
 
+      # The template is spelled with `<d>`, never the operator's own first character: `nope`
+      # read back as "must be npatternnreplacementn" (#1710).
+      REGEX_REPLACE_FORM = "must be <d>pattern<d>replacement<d>, where <d> is the first character " \
+                           "(/a/b/, or #a/b#X# for a pattern holding /)"
+
       private def self.parse_regex_replace(v : String) : Fuzz::RegexReplace
-        abort "gori run fuzz: --regex-replace needs /pattern/replacement/" if v.size < 3
+        abort "gori run fuzz: --regex-replace #{REGEX_REPLACE_FORM}" if v.size < 3
         delim = v[0]
         # Splitting on every delimiter dropped any part of the replacement past a
         # second delimiter (e.g. `/foo//bar/` lost `/bar`). Take the pattern up to
@@ -136,7 +141,7 @@ module Gori
         # trailing delimiter (the documented `/pattern/replacement/` terminator) so a
         # delimiter inside the replacement survives.
         pattern, sep, rest = v[1..].partition(delim)
-        abort "gori run fuzz: --regex-replace must be #{delim}pattern#{delim}replacement#{delim}" if sep.empty?
+        abort "gori run fuzz: --regex-replace #{REGEX_REPLACE_FORM}" if sep.empty?
         replacement = rest.ends_with?(delim) ? rest[0...-1] : rest
         Fuzz::RegexReplace.new(parse_regex(pattern), replacement)
       end
