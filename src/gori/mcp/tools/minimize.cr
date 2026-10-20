@@ -18,6 +18,22 @@ module Gori
       # ACTIVE: sends many real outbound requests, so it is write-gated AND scope-gated
       # (the Gori::Outbound decision its Fuzz::Sender carries hard-blocks a Sandbox/exclude
       # at the socket seam).
+      # The candidate → wire bytes proc `minimize_repeater` hands the engine (see the comments at
+      # its call). An untouched flow seed (`evidence`) gets only the head's CRLF, as the TUI
+      # minimize resolves it, so its captured tokens stay literal (#1670).
+      private def minimize_resolve(text : String, verbatim : Bool, evidence : Bool,
+                                   auto_cl : Bool) : Proc(String, Bytes)
+        stored_crlf = Repeater::Minimize.head_crlf?(text)
+        ->(t : String) do
+          raw = if verbatim
+                  stored_crlf ? Repeater::Minimize.restore_eol(t, true).to_slice : t.to_slice
+                else
+                  evidence ? Env.normalize_wire(t) : Env.expand_wire(t)
+                end
+          auto_cl ? Repeater::FlowRequest.resync_content_length(raw) : raw
+        end
+      end
+
       @[Tool("minimize_repeater", gated: true, agent_action: true, env_refresh: true, permission: "send")]
       private def minimize_repeater(h) : Result
         # `id` — the spelling `delete_repeater` / `update_repeater` use — arrives here folded
@@ -35,6 +51,8 @@ module Gori
         # substituted bytes with a reframed Content-Length, i.e. against a request that a later
         # `--verbatim` send would never put on the wire.
         verbatim = bool_arg(h, "verbatim", false)
+        # An untouched flow seed is minimized as captured, its tokens literal (#1670).
+        evidence = Repeater::DraftMarkers.evidence?(store, rec)
         # Read BEFORE the search, not after: `apply` used to be parsed once the sends were
         # already spent, so an unintelligible value would refuse a run that had put up to 250
         # real requests on the wire.
@@ -63,15 +81,7 @@ module Gori
         # in #556; this is the same restore, through the engine's own (idempotent) helper, so
         # the report's already-CRLF text round-trips through it unchanged. The BODY is byte
         # for byte either way — `restore_eol` is head-only.
-        stored_crlf = Repeater::Minimize.head_crlf?(text)
-        resolve = ->(t : String) do
-          raw = if verbatim
-                  stored_crlf ? Repeater::Minimize.restore_eol(t, true).to_slice : t.to_slice
-                else
-                  Env.expand_wire(t)
-                end
-          auto_cl ? Repeater::FlowRequest.resync_content_length(raw) : raw
-        end
+        resolve = minimize_resolve(text, verbatim, evidence, auto_cl)
         # Minimize dials Fuzz::Sender directly (many capped probe sends) rather than through
         # Repeater::Plan, so it needs the project's host overrides threaded by hand — without
         # them this was the one repeater send path left resolving the target for real while
@@ -89,7 +99,7 @@ module Gori
         backend = Fuzz::CappedBackend.new(
           Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), ob, rec.http2?,
             @verify_upstream, rec.sni.try { |v| Env.expand(v) }, timeout: 10.seconds,
-            overrides: HostOverrides.load(store), evidence: verbatim,
+            overrides: HostOverrides.load(store), evidence: verbatim || evidence,
             # …and the tab's own TLS fingerprint (#844). A minimize is a SEND path — up to
             # SEND_CAP probes at the origin — so it has to dial the handshake the tab dials, or
             # every candidate is judged by an answer the tab will never get: an origin that

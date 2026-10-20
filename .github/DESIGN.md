@@ -5128,19 +5128,26 @@ Refines P7's provenance axis and the #571 rule that a token with no value is lit
   (URL path and query, headers, body, a raw request: `UrlRequest.expand`); and the operator's
   own `-H`/`-d`/`--path`/`-X` on `gori run repeater <flow-id>` and on an evidence session's
   `repeater send`.
-- Not covered yet: Discover custom headers (`Headers.from_flow` may have copied them off a
-  capture, with nothing to say so), WebSocket frames, the three minimize paths, and an
-  operator-typed `$ENV.X` inside a TUI evidence tab, which the tab's per-name provenance cannot
-  tell from a captured one and so sends literally.
+- Not covered yet by the refusal: Discover custom headers (`Headers.from_flow` may have copied
+  them off a capture, with nothing to say so), WebSocket frames, the three minimize paths (a
+  draft's unresolved `$ENV.X` is minimized as text), and an operator-typed `$ENV.X` inside a TUI
+  evidence tab, which the tab's per-name provenance cannot tell from a captured one and so sends
+  literally.
 - A Repeater session is evidence while its bytes still equal what its flow seed produces
   (`Repeater::DraftMarkers.evidence?`: `FlowRequest.build` in either request-line form, so a
   `keep_request_line` seed counts). Every headless replay of a session asks it: `repeater
-  send`/`race`/`timing`/`ws`, `fuzz --repeater`, MCP `send_request`/`send_websocket`/
-  `race_requests`/`timing_requests`/`fuzz_start`, retest steps, request macros and refresh
-  steps. A race or timing group is evidence only when every member is. It is asked of the
-  STORED row: a send's own `--path`/`-H`/`-b` leave the session evidence and expand alone, as on
-  a flow replay. An edited row is a draft; the tab tracks provenance per name instead, and the two
-  agree on an unedited row.
+  send`/`race`/`timing`/`ws`/`minimize`, `fuzz --repeater`, MCP `send_request`/`send_websocket`/
+  `race_requests`/`timing_requests`/`minimize_repeater`/`fuzz_start`, retest steps, request
+  macros and refresh steps. It is asked of the STORED row, and an edited row is a draft.
+- A send that adds its own bytes to an evidence session (`repeater send -H`/`-b`/`--path`, a flow
+  replay's `-H`/`-d`/`--path`) keeps it evidence per NAME, the TUI's rule
+  (`RepeaterView#evidence_send_literals`, `Env.literal_keys` of the captured bytes): the
+  operator's `$ENV` expands at the merge, the capture's `$BIND`/`$GEN` names stay literal at the
+  send seam, and any other name resolves there. A name the operator types that the capture also
+  carries stays literal; gori cannot tell the two apart, and evidence wins.
+- A race or timing group rides one Sender, so it has one provenance: a group that mixes untouched
+  seeds and drafts is refused, CLI and MCP, as the TUI race refuses a group whose `evidence?`
+  differs. `--verbatim` waives it, since nothing expands for any member.
 - A session whose seed flow was deleted is a draft headlessly (nothing is left to compare) but
   stays evidence in the TUI, which keys on `flow_id`. Left as is: the headless reading is the
   conservative one.

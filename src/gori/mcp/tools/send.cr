@@ -296,11 +296,15 @@ module Gori
             "INVALID_ARGUMENT", field: "repeater_ids")
         end
 
+        # One plan, one provenance (#1670): see `DraftMarkers.mixed_group_refusal`.
+        captured = loaded.map { |(id, _)| seeds.includes?(id) }
+        if why = Repeater::DraftMarkers.mixed_group_refusal(captured, verbatim)
+          return err(why, "INVALID_ARGUMENT", field: "repeater_ids")
+        end
         anchor = loaded.first[1]
         plan = begin
-          # One plan, one provenance: evidence only when EVERY member is an untouched seed.
           Repeater::Plan.build(race_member_options(wires, anchor, insecure, overrides, verbatim, timeout, mode,
-            loaded.all? { |(id, _)| seeds.includes?(id) }), ob)
+            captured.all?), ob)
         rescue ex : Repeater::PlanError
           return send_plan_error(ex, "repeater_ids")
         end

@@ -1,6 +1,13 @@
 require "../../spec_helper"
 
 module Gori::CLI::Run
+  # `repeater send`'s plan for session `rec` as `cmd_repeater_send` builds it.
+  def self.repeater_send_plan_for_spec(store : Store, rec : Store::RepeaterRecord, headers : Array(String)) : Repeater::Plan
+    req, pinned, evidence = session_send_request(store, rec, nil, headers, [] of String, false).as({Bytes?, Bool, Bool})
+    Repeater::Plan.build(session_plan_options(rec, true, nil, request: req.not_nil!, pinned_cl: pinned,
+      evidence: evidence, evidence_literals: seed_send_literals(rec, evidence)), ungated_outbound)
+  end
+
   def self.build_single_flow_request_for_spec(head : Bytes, body : Bytes, headers : Array(String),
                                               body_override : String?, target_override : String?,
                                               removed : Array(String) = [] of String) : {Bytes, Bool}
@@ -320,5 +327,33 @@ describe "gori run repeater send -H on an evidence session" do
     end
   ensure
     Gori::Settings.env_vars = saved || [] of {String, String}
+  end
+end
+
+# Round 2 of the #1670 review: the session stays evidence under the operator's `-H`, but only the
+# capture's own names stay literal at the send seam; a `$GEN` the operator added still mints.
+describe "gori run repeater send -H on an evidence session, end to end" do
+  it "keeps the captured $ENV/$GEN literal and mints the operator's $GEN" do
+    with_store_env do |store|
+      saved = Gori::Settings.env_vars
+      Gori::Settings.env_vars = [{"TOKEN", "abc123"}]
+      with_env_syntax(Gori::Env::Syntax::Namespaced) do
+        fid = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+          method: "GET", target: "/ev", http_version: "HTTP/1.1",
+          head: "GET /ev HTTP/1.1\r\nHost: h.test\r\nX-E: $ENV.TOKEN\r\nX-G: $GEN.UUID\r\n\r\n".to_slice,
+          body: nil, source: Gori::FlowSource::Kind::Import))
+        seed = Gori::Repeater::FlowRequest.build(store.get_flow(fid).not_nil!).bytes
+        id = store.insert_repeater("http://h.test", seed, false, true, fid, 0)
+        rec = store.get_repeater(id).not_nil!
+        wire = String.new(Gori::CLI::Run.repeater_send_plan_for_spec(store, rec, ["Z: $GEN.RANDOM_HEX", "Y: $ENV.TOKEN"]).wire_bytes)
+        wire.should contain("X-E: $ENV.TOKEN\r\n")
+        wire.should contain("X-G: $GEN.UUID\r\n")
+        wire.should contain("Y: abc123\r\n")
+        wire.should match(/\r\nZ: [0-9a-f]{32}\r\n/)
+      end
+    ensure
+      Gori::Settings.env_vars = saved || [] of {String, String}
+    end
   end
 end

@@ -52,8 +52,10 @@ module Gori
         # Loaded from the SAME open that fetched `rec` rather than via cli_host_overrides,
         # which returns nil without an explicit --project/--db — a repeater session always
         # belongs to a resolved project, so the overrides must not depend on the flag.
-        rec, host_overrides = begin
-          {store.get_repeater(id), Gori::HostOverrides.load(store)}
+        # `evidence`: an untouched flow seed is minimized as captured, its tokens literal (#1670).
+        rec, host_overrides, evidence = begin
+          r = store.get_repeater(id)
+          {r, Gori::HostOverrides.load(store), r ? Repeater::DraftMarkers.evidence?(store, r) : false}
         ensure
           store.close
         end
@@ -70,7 +72,7 @@ module Gori
         # Content-Length disagreed with it for a reason the operator did not choose.
         # (`session_plan_options` folds the same two flags together the same way.)
         auto_cl = !verbatim && rec.auto_content_length?
-        resolve = minimize_resolver(id, text, verbatim, auto_cl)
+        resolve = minimize_resolver(id, text, verbatim, auto_cl, evidence)
         # Fuzz::Sender applies the Outbound gate (Sandbox / exclude) at the socket seam;
         # CappedBackend bounds total sends. Same stack the TUI builds.
         # `evidence: verbatim` is the SEND-seam half of the same flag `resolve` honours just
@@ -84,7 +86,7 @@ module Gori
         backend = Fuzz::CappedBackend.new(
           Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), outbound, rec.http2?,
             !insecure, rec.sni.try { |v| Env.expand(v) }, timeout: 10.seconds,
-            overrides: host_overrides, evidence: verbatim,
+            overrides: host_overrides, evidence: verbatim || evidence,
             # …and the tab's own TLS fingerprint (#844). A minimize is a SEND path — up to
             # SEND_CAP probes at the origin — so it has to dial the handshake the tab dials, or
             # every candidate is judged by an answer the tab will never get: an origin that
@@ -219,7 +221,7 @@ module Gori
       # verbatim resolver that simply took the bytes would have put a CRLF-stored session on
       # the wire bare-LF, inventing the very desync primitive the flag exists to preserve.
       private def self.minimize_resolver(id : Int64, text : String, verbatim : Bool,
-                                         auto_cl : Bool) : Proc(String, Bytes)
+                                         auto_cl : Bool, evidence : Bool = false) : Proc(String, Bytes)
         # HEAD only, and the same question `Minimize.run` asks: a CRLF pair inside a multipart
         # body says nothing about how the operator terminated their header lines, and reading
         # it as if it did would re-terminate an LF-headed session on the way out.
@@ -237,7 +239,8 @@ module Gori
           if verbatim
             stored_crlf ? restore_head_crlf(t) : t.to_slice
           else
-            raw = Env.expand_wire(t)
+            # Evidence owes the wire its CRLF and nothing else, as the TUI minimize resolves it.
+            raw = evidence ? Env.normalize_wire(t) : Env.expand_wire(t)
             auto_cl ? Repeater::FlowRequest.resync_content_length(raw) : raw
           end
         end

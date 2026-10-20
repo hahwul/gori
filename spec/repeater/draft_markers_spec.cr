@@ -242,6 +242,59 @@ describe "replaying an untouched flow seed beyond repeater send (#1670)" do
       end
     end
   end
+
+  # One plan rides one Sender, so a seed beside a draft would be expanded as the draft is: the
+  # group is refused, as the TUI race refuses a group whose provenance differs. Nothing dials.
+  it "MCP race_requests refuses a group mixing an untouched seed and a draft" do
+    with_store_env do |store|
+      with_env_syntax(Gori::Env::Syntax::Namespaced) do
+        sink = Channel(String).new(4)
+        port = start_recording_origin_many(sink)
+        seed = evidence_seed(store, port, "/a")
+        draft = store.insert_repeater("http://127.0.0.1:#{port}",
+          "GET /b HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice, false, true, nil, 0)
+        r = tools_for(store).call("race_requests", JSON.parse(%({"repeater_ids":[#{seed},#{draft}],"allow_unscoped":true})))
+        r.is_error.should be_true
+        r.error_code.should eq("INVALID_ARGUMENT")
+        r.text.should contain("mix captured requests")
+      end
+    end
+  end
+
+  it "MCP minimize_repeater minimizes an untouched seed as captured, never with the secret" do
+    with_store_env do |store|
+      saved = Gori::Settings.env_vars
+      Gori::Settings.env_vars = [{"TOKEN", "abc123"}]
+      with_env_syntax(Gori::Env::Syntax::Namespaced) do
+        sink = Channel(String).new(1000)
+        port = start_recording_origin_many(sink)
+        fid = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: port,
+          method: "GET", target: "/ev?a=1&b=2", http_version: "HTTP/1.1",
+          head: "GET /ev?a=1&b=2 HTTP/1.1\r\nHost: 127.0.0.1\r\nX-E: $ENV.TOKEN\r\n\r\n".to_slice,
+          body: nil, source: Gori::FlowSource::Kind::Import))
+        seed = Gori::Repeater::FlowRequest.build(store.get_flow(fid).not_nil!).bytes
+        id = store.insert_repeater("http://127.0.0.1:#{port}", seed, false, true, fid, 0)
+        r = tools_for(store).call("minimize_repeater", JSON.parse(%({"repeater_id":#{id},"allow_unscoped":true})))
+        r.text.should_not contain("abc123")
+        r.is_error.should be_false
+        # Every probe's head reached the sink before its answer, so the call returning means all are in.
+        heads = [] of String
+        loop do
+          select
+          when h = sink.receive
+            heads << h
+          else
+            break
+          end
+        end
+        heads.should_not be_empty
+        heads.none?(&.includes?("abc123")).should be_true
+      end
+    ensure
+      Gori::Settings.env_vars = saved || [] of {String, String}
+    end
+  end
 end
 
 describe "MCP send_request{repeater_id} — captured tokens on an unedited flow seed (#1670)" do

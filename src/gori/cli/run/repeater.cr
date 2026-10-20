@@ -1120,10 +1120,12 @@ module Gori
                                             request : Bytes = rec.request,
                                             pinned_cl : Bool = false,
                                             sse : Repeater::StreamBound? = nil,
-                                            evidence : Bool = false) : Repeater::PlanOptions
+                                            evidence : Bool = false,
+                                            evidence_literals : Set(String)? = nil) : Repeater::PlanOptions
         Repeater::PlanOptions.new([request],
           # `Repeater::DraftMarkers.evidence?`: an unedited flow seed is a capture, not a draft.
-          evidence: evidence,
+          # `evidence_literals` narrows that to the capture's own names, for a send that adds its own.
+          evidence: evidence, evidence_literals: evidence_literals,
           reframe_grpc: reframe_grpc,
           default_target: rec.target, http2: rec.http2?, sni: rec.sni,
           timeout: timeout, sse: sse,
@@ -1491,11 +1493,16 @@ module Gori
                 "#{sigs.map { |(s, h, po, _, _, _)| "#{s}://#{h}:#{po}" }.uniq!.join(", ")})"
         end
 
+        # One plan, one provenance (#1670): see `DraftMarkers.mixed_group_refusal`.
+        captured = loaded.map { |(id, _)| seeds.includes?(id) }
+        if why = Repeater::DraftMarkers.mixed_group_refusal(captured, verbatim)
+          outbound.close
+          abort "#{cmd_label}: #{why}"
+        end
         anchor = loaded.first[1]
         plan = begin
-          # One plan, one provenance: evidence only when EVERY member is an untouched seed (#1670).
           Repeater::Plan.build(Repeater::PlanOptions.new(wires,
-            evidence: loaded.all? { |(id, _)| seeds.includes?(id) },
+            evidence: captured.all?,
             reframe_grpc: reframe_grpc, default_target: anchor.target, http2: mode, sni: anchor.sni,
             timeout: timeout, expand_request: !verbatim, expand_bindings: !verbatim,
             preserve_field_case: verbatim, auto_content_length: !verbatim && anchor.auto_content_length?,
@@ -1692,26 +1699,15 @@ module Gori
         # carries — the `--path` copy when there is one (it edits a COPY for this send; the row
         # keeps its own, see `FlowRequest.replace_request_target`) — so a `§id§` in the stored
         # target that `--path` replaced does not refuse a send that no longer carries it.
-        pinned_cl = false
         rec, host_overrides, markers_live, request, seed_evidence = begin
           r = store.get_repeater_full(id)
-          # Asked of the STORED row (#1670): an unedited flow seed replays its captured `$ENV`/`$GEN`
-          # tokens literally, as the tab does, and this send's own `--path`/`-H`/`-b` are then the
-          # only operator bytes in it, so they expand here, as on a flow replay.
-          evidence = r ? Repeater::DraftMarkers.evidence?(store, r) : false
-          own = evidence && !verbatim
-          req = r.try do |row|
-            (p = path_override) ? Repeater::FlowRequest.replace_request_target(row.request, own ? expand_override(p, "gori run repeater send") : p) : row.request
+          sent = begin
+            r ? session_send_request(store, r, path_override, headers, grpc_fields, verbatim) : {nil, false, false}
+          rescue ex : Repeater::PlanError
+            repeater_plan_abort("gori run repeater send", ex, "session ##{id}")
           end
-          if bytes = req
-            built = begin
-              per_send_request(bytes, headers, grpc_fields, expand: own)
-            rescue ex : Repeater::PlanError
-              repeater_plan_abort("gori run repeater send", ex, "session ##{id}")
-            end
-            abort "gori run repeater send: --grpc-field #{built}" if built.is_a?(String)
-            req, pinned_cl = built
-          end
+          abort "gori run repeater send: --grpc-field #{sent}" if sent.is_a?(String)
+          req, pinned_cl, evidence = sent
           {r, Gori::HostOverrides.load(store), r && req ? Repeater::DraftMarkers.live?(store, r, req) : false, req, evidence}
         ensure
           store.close
@@ -1733,7 +1729,7 @@ module Gori
         plan = begin
           Repeater::Plan.build(session_plan_options(rec, insecure, host_overrides, verbatim, timeout, reframe_grpc,
             tls_preset, request: request, pinned_cl: pinned_cl, sse: sse.bound(Repeater::StreamBound::SEND),
-            evidence: seed_evidence), outbound)
+            evidence: seed_evidence, evidence_literals: seed_send_literals(rec, seed_evidence)), outbound)
         rescue ex : Repeater::PlanError
           repeater_plan_abort("gori run repeater send", ex, "session ##{id}")
         end
@@ -3034,6 +3030,36 @@ module Gori
         edited
       end
 
+      # The bytes `repeater send` carries for session `row`, whether a `-H` pinned their CL, and
+      # whether the row is evidence (#1670) — or the `--grpc-field` refusal. Raises `PlanError`
+      # for an operator value naming an `$ENV` var with no value.
+      #
+      # Evidence is asked of the STORED row: an unedited flow seed replays its captured tokens
+      # literally, as the tab does, and this send's own `--path`/`-H`/`-b` are then the only
+      # operator bytes in it, so their `$ENV` expands here, as on a flow replay.
+      def self.session_send_request(store : Store, row : Store::RepeaterRecord, path_override : String?,
+                                    headers : Array(String), grpc_fields : Array(String),
+                                    verbatim : Bool) : {Bytes?, Bool, Bool} | String
+        evidence = Repeater::DraftMarkers.evidence?(store, row)
+        own = evidence && !verbatim
+        req = if p = path_override
+                Repeater::FlowRequest.replace_request_target(row.request, own ? Repeater::UrlRequest.expand(p) : p)
+              else
+                row.request
+              end
+        return {nil, false, evidence} unless req
+        built = per_send_request(req, headers, grpc_fields, expand: own)
+        return built if built.is_a?(String)
+        {built[0], built[1], evidence}
+      end
+
+      # The names an evidence session's send keeps literal at the send seam: the capture's own,
+      # the TUI's per-name rule (`RepeaterView#evidence_send_literals`), so a `$BIND`/`$GEN` this
+      # send's `-H`/`-b`/`--path` added resolves like any draft's. nil for a draft.
+      def self.seed_send_literals(rec : Store::RepeaterRecord, evidence : Bool) : Set(String)?
+        evidence ? Env.literal_keys(String.new(rec.request)) : nil
+      end
+
       # `expand`: the session is evidence, so the plan will not expand it and the operator's own
       # `-H` values expand here (`build_single_flow_request`). A draft leaves them to the plan.
       private def self.session_header_overrides(request : Bytes, headers : Array(String),
@@ -3310,6 +3336,9 @@ module Gori
             # operator's OWN `-H`/`-b`/`--target` above, so nothing downstream needs to (and
             # nothing downstream can still tell the operator's bytes from the capture's).
             evidence: true,
+            # …and at the send seam, per NAME (`seed_send_literals`): the capture's own `$BIND`/`$GEN`
+            # stay literal while one an operator `-H` added resolves. `--verbatim` resolves none.
+            evidence_literals: verbatim ? nil : Env.literal_keys(String.new(raw_bytes)),
             # `--verbatim`: the h2 encoder keeps the field-name case the operator typed.
             preserve_field_case: verbatim,
             verify: !insecure, timeout: timeout, overrides: host_overrides,

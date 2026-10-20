@@ -74,6 +74,17 @@ module Gori::Repeater
       false
     end
 
+    # Why a race/timing group whose members' `evidence?` answers are `captured` cannot ride one
+    # plan, or nil. The group is one Sender, so an untouched seed beside a draft would have its
+    # captured tokens expanded as the draft's (#1670); the TUI race refuses the same group. A
+    # verbatim group expands no member, so it has nothing to mix.
+    def self.mixed_group_refusal(captured : Array(Bool), verbatim : Bool) : String?
+      return nil if verbatim || captured.all? || captured.none?
+      "the sessions mix captured requests (untouched flow seeds) and drafts — a race needs one " \
+      "provenance (all captured or all drafts), so the seeds' own tokens are not expanded as a " \
+      "draft's. Race them separately, or edit the seeds into drafts"
+    end
+
     # `RepeaterView#adopt_capture_markers`' test, asked of the store instead of the tab: did
     # the flow this session was seeded from carry a `§` of its own? Head AND body, because a
     # `§` in either is one gori cannot attribute — and the seed read these same stored bytes,
