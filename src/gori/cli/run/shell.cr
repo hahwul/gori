@@ -54,6 +54,7 @@ module Gori
         project = proxy ? nil : resolve_read_project(project_name, db_path)
         target = capture_target(project, proxy, ca_dir)
         abort target if target.is_a?(String)
+        strict_verify_note(target.ca_cert_path).try { |note| target.warnings << note }
 
         result =
           begin
@@ -191,6 +192,17 @@ module Gori
         hint = live.empty? ? "" : " (capturing now: #{live.join(", ")} — pass --project NAME)"
         "#{prefix}: no gori is capturing #{project.name} — start gori (or gori run capture) " \
         "first, or pass --proxy HOST:PORT#{hint}"
+      end
+
+      # A root minted before #1168, or imported without these extensions, fails Python 3.13+'s
+      # strict verify, which this shell otherwise covers: said the way `gori ca` says it (#1706).
+      def self.strict_verify_note(ca_path : String) : String?
+        gaps = Proxy::Tls::CertAuthority.strict_verify_gaps(Proxy::Tls::Cert.read_pem(ca_path))
+        return nil if gaps.empty?
+        "#{Proxy::Tls::CertAuthority.strict_verify_warning(gaps)}. Run `gori ca regenerate` to " \
+        "mint a root that has them, then re-trust it"
+      rescue
+        nil # a diagnostic that cannot run is not a reason to refuse the shell
       end
 
       # `--print`'s comment header: what was set, how to apply it, and what it cannot reach.

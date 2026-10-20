@@ -137,7 +137,7 @@ module Gori
           p.on("--encode=KIND", "Processing: url | urlall | base64 | hex") { |v| processors << Fuzz::Encode.new(parse_encode(v)) }
           p.on("--case=KIND", "Processing: upper | lower") { |v| processors << Fuzz::Case.new(parse_case(v)) }
           p.on("--hash=ALGO", "Processing: md5 | sha1 | sha256") { |v| processors << Fuzz::Hasher.new(parse_hash(v)) }
-          p.on("--regex-replace=SPEC", "Processing: /pattern/replacement/") { |v| processors << parse_regex_replace(v) }
+          p.on("--regex-replace=SPEC", "Processing: /pattern/replacement/ — the first character is the delimiter, so #a/b#X# puts a / in the pattern") { |v| processors << parse_regex_replace(v) }
           # A payload spliced into a query-string or form-body position is percent-encoded by
           # default (see `Fuzz::AutoEncode`); this is the way out, for a run whose payload IS
           # the raw byte. NOT `--verbatim`, which is the Content-Length knob two lines down —
@@ -251,20 +251,20 @@ module Gori
         # `fuzz save 42` uses the default project exactly like legacy `fuzz 42`; treating 42 as
         # project-less here refused the primary documented save form.
         flow_id ||= positional.first?.try { |s| parse_flow_id(s, "gori run fuzz") }
-        # A project-less run (--request/stdin with no --project/--db) is DELIBERATELY outside any
+        # A project-less run (--request/stdin with no --project/--db/GORI_PROJECT) is DELIBERATELY outside any
         # project: `optional_project_outbound` says so on STDERR and skips the scope gate. Writing
         # its results into the ambient default project anyway would put a sweep the operator kept
         # out of a project straight into that project's History. Name the project to record.
-        if (record_policy != :none || save_results) && !(flow_id || repeater_id || proj.name || proj.db)
+        if (record_policy != :none || save_results) && !(flow_id || repeater_id || project_named?(proj.name, proj.db))
           feature = save_results ? "fuzz save" : "--record-history"
           abort "gori run fuzz: #{feature} needs a project — this run has none (--request/stdin " \
-                "without --project/--db). Pass --project NAME or --db PATH to say where the results go."
+                "without --project/--db or $#{DEFAULT_PROJECT_ENV}). Pass --project NAME or --db PATH to say where the results go."
         end
 
         # Named project / --db always hydrates, even when `--request` is the template:
         # `--flow` used to skip this and `--request` then skipped `open_store`, so
         # `--slot` / `--bind-from` lied with SLOT_NO_PROJECT despite `--project`.
-        hydrate_project_env(proj.name, proj.db) if proj.name || proj.db
+        hydrate_project_env(proj.name, proj.db) if project_named?(proj.name, proj.db)
         seed = fuzz_source(flow_id, repeater_id, request_file, proj.name, proj.db)
         text = seed.text
         default_target = seed.target
@@ -379,7 +379,7 @@ module Gori
         # The project any `--payload-from` reads, open only for the plan build below. After every
         # refusal above, so a run that never builds holds no handle.
         payload_specs = sources.compact_map { |src| src.as?(Fuzz::ProjectSource).try(&.spec) }
-        named_project = !!(flow_id || repeater_id || proj.name || proj.db)
+        named_project = !!(flow_id || repeater_id || project_named?(proj.name, proj.db))
         payload_store = open_payload_from_store(command, payload_specs, named_project, proj.name, proj.db)
         # …and the project a `--macro` reads its sessions from, on the same terms and released at
         # the same moment: the plan freezes the steps, so nothing reads it during the run. When a
@@ -665,6 +665,9 @@ module Gori
       # many sets for Sniper/BatteringRam wants `--mode pitchfork`, while too many sets for the
       # per-position modes wants another marked position.
       private def self.note_fuzz_unused_sets(plan : Fuzz::Plan) : Nil
+        if note = plan.reused_set_note
+          STDERR.puts "gori run fuzz: note: #{note}"
+        end
         n = plan.unused_payload_sets
         return if n.zero?
         remedy =

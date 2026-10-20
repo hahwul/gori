@@ -50,9 +50,10 @@ describe Gori::MCP::ProjectResolver do
   it "still serves a db that belongs to no project, under the path it was given" do
     with_symlinked_home do |link, _real|
       loose = File.join(link, "loose.db")
+      File.touch(loose)
       selection = Gori::MCP::ProjectResolver.resolve(loose, nil,
         workspace_project: false, env_db: nil, env_project: nil)
-      selection.db_path.should eq(loose) # not yet created — only the parent has to exist
+      selection.db_path.should eq(loose)
       selection.project_name.should be_nil
       selection.source.should eq("--db")
     end

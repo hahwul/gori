@@ -170,12 +170,13 @@ describe "gori run project list" do
     source.should contain("CLI::Output.pad(terminal_project_name(pr.name), 24)")
     source.should contain("terminal_project_name(project.name, quoted: true)")
     source.should contain("terminal_project_name(project.name)}  (id")
-    source.should contain("projects.map { |project| terminal_project_name(project.name) }")
+    # The "no project matching" list moved to one helper for every surface (#1705).
+    default_source = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "project_default.cr"))
+    default_source.should contain(%q("#{CLI::Output.term_safe(project.name)} [#{CLI::Output.term_safe(handle)}]"))
 
     cli_root = File.join(__DIR__, "..", "..", "..", "src", "gori", "cli")
     run_source = File.read(File.join(cli_root, "run.cr"))
     run_source.should contain("CLI::Output.term_safe(project.name)")
-    run_source.should contain("CLI::Output.term_safe(project.name) }.join")
     run_source.should contain("CLI::Output.term_safe(name)")
     run_source.should contain("CLI::Output.term_safe(name).inspect")
     run_source.should contain("CLI::Output.term_safe(line)")

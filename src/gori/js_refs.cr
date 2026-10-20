@@ -35,7 +35,7 @@ module Gori
     # The extractor's version, recorded on every scan marker (`js_ref_scans.version`). Bump it
     # when extraction changes what a body yields: every flow scanned by an older version then
     # reads as unscanned, and the next scan redoes it.
-    VERSION = 1
+    VERSION = 2
 
     # The same bounds the crawl puts on one body, for the same reasons (`Extract::MAX_SCAN`,
     # `Extract::MAX_LINKS`): a hostile or generated bundle must not buy unbounded work.
@@ -175,17 +175,47 @@ module Gori
     # reads `/api/users/{expr}/orders`. Only when the literal really is a template — opened by a
     # backtick, where `${` interpolates; in a quoted string it is text. The path branch of
     # ENDPOINT stops right before `${`; the URL branch runs through it (its class admits `$` and
-    # `{`), so there the cut is made inside the value.
+    # `{`), so there the cut is made inside the value. Any other path-branch stop goes to
+    # `whole_literal`.
     private def template_path(s : String, value : String, from : Int32, to : Int32) : {String, Bool}
       bytes = s.to_slice
-      if bytes[from] == '`'.ord
-        return {value, false} unless interp_at?(bytes, to)
+      if bytes[from] == '`'.ord && interp_at?(bytes, to)
         continue_template(bytes, value, to)
+      elsif quote?(bytes[from])
+        whole_literal(bytes, value, from, to)
       elsif from > 0 && bytes[from - 1] == '`'.ord && (cut = value.byte_index("${"))
         continue_template(bytes, value.byte_slice(0, cut), from + cut)
       else
         {value, false}
       end
+    end
+
+    # The path branch's run ends at the first byte outside its class, and only three of those
+    # ends are the literal's own (#1697): its closing quote, and a `$` or `+` where an
+    # interpolation or a concatenation takes over and the prefix is all the page names. Any
+    # other stop — `/v1/users:batchGet`, `/files/日本.pdf`, `//host:8080/p`, a `?query` — cut a
+    # path the JS never names, and `//host:port` lost everything after the host. Those take the
+    # whole quoted literal instead; one whose quote does not close within TEMPLATE_MAX before
+    # whitespace, an escape or an interpolation (prose, a runaway) keeps the cut and says so with
+    # the templated flag rather than passing it off as the reference.
+    private def whole_literal(bytes : Bytes, value : String, from : Int32, to : Int32) : {String, Bool}
+      return {value, false} if to >= bytes.size
+      q = bytes[from]
+      c = bytes[to]
+      return {value, false} if c == q || c == '$'.ord || c == '+'.ord
+      limit = Math.min(bytes.size, from + 1 + TEMPLATE_MAX)
+      i = to
+      while i < limit
+        b = bytes[i]
+        return {String.new(bytes[from + 1, i - from - 1]), false} if b == q
+        break if b <= 0x20_u8 || b == '\\'.ord || (q == '`'.ord && interp_at?(bytes, i))
+        i += 1
+      end
+      {value, true}
+    end
+
+    private def quote?(b : UInt8) : Bool
+      b == '"'.ord || b == '\''.ord || b == '`'.ord
     end
 
     private def interp_at?(bytes : Bytes, pos : Int32) : Bool
@@ -326,15 +356,33 @@ module Gori
       url = Discover::Url.resolve(base, lit.text) || return Drop::Unresolvable
       parts = Discover::Url.parse(url) || return Drop::Unresolvable
       return Drop::Unsafe unless Discover::Headers.safe_url?(parts)
-      path = Sitemap.path_part(Sitemap.node_path(parts.path))
-      return Drop::Filtered if path == "/" || Discover::Url.binary_asset?(parts.path)
-      target = (q = parts.query) ? "#{parts.path}?#{q}" : parts.path
+      raw_path = ascii_only(parts.path)
+      path = Sitemap.path_part(Sitemap.node_path(raw_path))
+      return Drop::Filtered if path == "/" || Discover::Url.binary_asset?(raw_path)
+      target = (q = parts.query) ? "#{raw_path}?#{ascii_only(q)}" : raw_path
       kind = absolute?(lit.text) ? Base::Absolute : base_kind
       flags = (lit.in_comment ? FLAG_COMMENT : 0) | (lit.templated ? FLAG_TEMPLATED : 0)
       # `Url.parse` keeps an IPv6 literal bracketed; a flow stores it bare, and `url_of` re-brackets.
       host = parts.host.starts_with?('[') ? parts.host[1...-1] : parts.host
       Store::JsRef.new(parts.scheme, host, parts.port, path, target, clip(lit.text),
         lit.offset, lit.line, flags, kind.label)
+    end
+
+    # Non-ASCII in a path or query percent-encoded, as a browser sends `/files/日本.pdf` — so the
+    # reference keys like the captured request for it, and a Repeater send puts ASCII on the
+    # request line. The literal itself is kept as written.
+    private def ascii_only(s : String) : String
+      return s if s.ascii_only?
+      String.build(s.bytesize * 3) do |io|
+        s.each_byte do |b|
+          if b < 0x80_u8
+            io.write_byte(b)
+          else
+            io << '%'
+            b.to_s(io, 16, upcase: true)
+          end
+        end
+      end
     end
 
     private def absolute?(text : String) : Bool

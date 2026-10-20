@@ -43,7 +43,7 @@ module Gori
         now = Time.utc.to_unix * 1_000_000
         pairs = [] of Builder::FlowPair
         missing = Set(String).new
-        skipped = 0
+        skips = Skips.new
         found = 0
         resources.each do |res|
           h = res.as_h?
@@ -54,15 +54,15 @@ module Gori
           begin
             table = folder_tables.put_if_absent(h["parentId"]?.to_s) { folder_vars(h, groups, vars) }
             pairs << Vars.per_entry { resource_to_flow(now, h, table, missing, prov) }
-          rescue
-            skipped += 1
+          rescue ex
+            skips.add("request #{found}", ex)
           end
         end
         raise Gori::Error.new("Insomnia export has no request resources") if found == 0
         # Same reasoning as Postman: a workspace whose `{{ _.base_url }}` lives in an
         # environment that was not exported must not be reported as "malformed".
-        raise Gori::Error.new(unresolved_message(skipped, missing)) if pairs.empty? && !missing.empty?
-        ParseResult.new(pairs, skipped)
+        raise Gori::Error.new(unresolved_message(skips.count, missing)) if pairs.empty? && !missing.empty?
+        skips.result(pairs)
       end
 
       private def self.v5?(raw : String) : Bool

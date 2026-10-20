@@ -67,7 +67,7 @@ module Gori
 
       # The project a source is read from, opened for the lifetime of one plan build. A source
       # reads captured data, so it needs a project the operator NAMED: a `--flow` / `--repeater`
-      # seed and `--project` / `--db` all name one, and a bare `--request` / stdin run
+      # seed, `--project` / `--db` and `GORI_PROJECT` all name one, and a bare `--request` / stdin run
       # (deliberately outside any project) does not — reading the ambient default there would put
       # another engagement's values into this run, silently. `read_only` unless a source's query
       # reads the search index (a `body:` term drains it, which is a write).
@@ -77,7 +77,7 @@ module Gori
         unless named_project
           abort "#{cmd}: --payload-from reads a project's captured data and none was named — reading the default " \
                 "project's data in silently is not something it will do (a --request/stdin run is deliberately outside " \
-                "any project). Pass --project NAME or --db PATH."
+                "any project). Pass --project NAME or --db PATH, or set #{DEFAULT_PROJECT_ENV}."
         end
         open_store(resolve_read_project(project_name, db_path), read_only: specs.none? { |s| PayloadFrom.uses_fts?(s) })
       end

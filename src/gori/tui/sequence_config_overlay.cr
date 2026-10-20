@@ -217,7 +217,7 @@ module Gori::Tui
       return nil if sep.empty?
       lo = a.strip.to_i?
       hi = b.strip.to_i?
-      return nil unless lo && hi && hi > lo
+      return nil unless lo && hi && lo >= 0 && hi > lo
       {lo, hi}
     end
 
@@ -230,7 +230,7 @@ module Gori::Tui
     # missing token location, and being told it is sends the operator to the wrong row.
     # `commit_sequence` toasts this; the Start row draws the short form (`start_label`).
     def invalid_hint : String
-      kind.position? ? "set a byte range as A:B (B greater than A)" : "set a token location first"
+      kind.position? ? "set a byte range as A:B (A 0 or more, B greater than A)" : "set a token location first"
     end
 
     # The Start row's own text. Short on purpose: this card is as narrow as 34 columns

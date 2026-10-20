@@ -261,7 +261,7 @@ module Gori
         in Sequencer::PlanError::Reason::NoTokenLoc
           "provide exactly one token location: cookie|header|regex|position|jsonpath"
         in Sequencer::PlanError::Reason::BadPosition
-          "'position' #{(ex.detail || "").inspect} extracts nothing — B must be greater than A"
+          "'position' #{(ex.detail || "").inspect} extracts nothing — A must be 0 or more and B greater than A"
         in Sequencer::PlanError::Reason::NoTokens
           # Unreachable here: a pasted token list goes to sequence_analyze, which builds no plan.
           "provide a non-empty 'tokens' array"

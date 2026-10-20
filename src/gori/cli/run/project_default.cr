@@ -38,6 +38,16 @@ module Gori
         end
       end
 
+      # Did this run name its project? `--project`/`--db`, or `GORI_PROJECT` set in the
+      # environment (#1669): that is how a script names its project once, at the top, so a
+      # `--request`/stdin run under it is not one "outside any project" — it takes that
+      # project's env vars, overrides, scope and Sandbox like `--project` would. Only the pin
+      # and the most recent project stay ambient. Set but empty still counts, so it is
+      # refused by `default_project` rather than skipped.
+      def self.project_named?(project_name : String?, db_path : String?) : Bool
+        !!(project_name || db_path || ENV.has_key?(DEFAULT_PROJECT_ENV))
+      end
+
       # The file `project switch` writes (`ProjectRegistry::DEFAULT_PIN_FILE`): the pinned
       # project's short id (its slug for a legacy project with none), which survives a rename.
       def self.default_pin_path : String
@@ -56,7 +66,7 @@ module Gori
           name = env.strip
           return "#{DEFAULT_PROJECT_ENV} is set but empty — unset it, or name a project" if name.empty?
           return pinned_project(registry, name, DefaultSource::Env) do
-            "#{DEFAULT_PROJECT_ENV}=#{CLI::Output.term_safe(name).inspect} names no project#{have_projects(registry)}"
+            "#{DEFAULT_PROJECT_ENV}=#{CLI::Output.term_safe(name).inspect} names no project#{have_projects(registry, name)}"
           end
         end
         if p = pin
@@ -77,10 +87,27 @@ module Gori
         "#{source.env? ? DEFAULT_PROJECT_ENV : "the pinned default project"}: #{ex.message}"
       end
 
-      private def self.have_projects(registry : ProjectRegistry) : String
+      # How many near matches a "no project matching NAME" refusal lists.
+      NEAR_PROJECTS = 5
+
+      # The tail of every "no project matching NAME" refusal (#1705). It used to list every
+      # project's display name on one line: 10 KB on a host holding 500, with repeated names
+      # that could not be told apart. Now the few nearest NAME, each with the short id that
+      # addresses it (the slug for a legacy project with none): a name, slug or id containing
+      # NAME first, then by edit distance, then in the registry's own order.
+      def self.have_projects(registry : ProjectRegistry, name : String) : String
         projects = registry.list
         return "" if projects.empty?
-        " (have: #{projects.map { |project| CLI::Output.term_safe(project.name) }.join(", ")})"
+        q = name.strip.downcase
+        ranked = projects.map_with_index do |project, i|
+          handle = registry.id_of(project) || registry.slug_of(project)
+          contains = {project.name, registry.slug_of(project), handle}.any?(&.downcase.includes?(q))
+          { {contains ? 0 : 1, Levenshtein.distance(project.name.downcase, q), i}, project, handle }
+        end.sort_by!(&.[0])
+        shown = ranked.first(NEAR_PROJECTS).join(", ") { |(_, project, handle)| "#{CLI::Output.term_safe(project.name)} [#{CLI::Output.term_safe(handle)}]" }
+        more = projects.size - NEAR_PROJECTS
+        return " (closest: #{shown})" unless more > 0
+        " (closest: #{shown}; +#{more} more — gori run project list --all --query=TEXT)"
       end
 
       # `gori run project switch [NAME | --clear]`.
@@ -116,7 +143,7 @@ module Gori
         rescue ex : ProjectRegistry::Ambiguous
           abort "gori run project switch: #{ex.message}"
         end
-        abort "gori run project switch: no project matching '#{CLI::Output.term_safe(name)}'#{have_projects(registry)}" unless project
+        abort "gori run project switch: no project matching '#{CLI::Output.term_safe(name)}'#{have_projects(registry, name)}" unless project
         # Written to a sibling and renamed, so a concurrent reader sees the old pin or the new
         # one, never half of either.
         tmp = "#{default_pin_path}.#{Process.pid}.tmp"

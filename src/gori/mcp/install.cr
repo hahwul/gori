@@ -192,10 +192,11 @@ module Gori
                           config_path : String? = nil, tools_spec : String? = nil,
                           pin_project : Bool = false) : Array(String)
         args = ["mcp"]
-        # expand_path throughout (not realpath): neither the db nor the config need exist yet
-        # — `gori mcp` creates the db on first serve, and realpath raises File::NotFoundError
-        # on a fresh path and aborts the install. Absolute either way, because the client
-        # spawns this command from a working directory the user never chose.
+        # expand_path throughout (not realpath): neither the db nor the config need exist yet,
+        # and realpath raises File::NotFoundError on a fresh path and aborts the install. A
+        # `--db` that does not exist is still written — the installed server starts unbound
+        # until the file does (#1667; the CLI says so at install time). Absolute either way,
+        # because the client spawns this command from a working directory the user never chose.
         #
         # `home: true` because a QUOTED tilde reaches us unexpanded (`--db '~/e.db'`), and
         # without it the leading `~` is kept as a literal directory name joined onto the CWD.

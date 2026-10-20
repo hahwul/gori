@@ -7,6 +7,8 @@ module Gori
       @[Subcommand("project", help: [
         {"project [list]", "List projects holding captured traffic (--all for every one)"},
         {"project create", "Create (or reopen) a project by name"},
+        {"project rename", "Change a project's display name"},
+        {"project describe", "Set or clear a project's description"},
         {"project switch", "Pin the default project for every --project-less command (--clear to unpin)"},
         {"project export", "Export a project to a portable archive"},
         {"project import", "Import a project archive as a new project"},
@@ -28,6 +30,10 @@ module Gori
           cmd_project_list(args[1..])
         when "create"
           cmd_project_create(args[1..])
+        when "rename"
+          cmd_project_rename(args[1..])
+        when "describe"
+          cmd_project_describe(args[1..])
         when "switch", "use"
           cmd_project_switch(args[1..])
         when "export", "import"
@@ -66,7 +72,7 @@ module Gori
           cmd_project_list(args)
         else
           abort unknown_verb_message("gori run project", sub,
-            %w[list create switch use export import delete rm scope sandbox env host-override network net])
+            %w[list create rename describe switch use export import delete rm scope sandbox env host-override network net])
         end
       end
 
@@ -81,6 +87,10 @@ module Gori
                                --query=TEXT narrows to the ones whose name, slug, short id
                                or bound workspace path contains TEXT
             create <name>      Create (or reopen) a project by name
+            rename <name> <new>
+                               Change a project's display name (its slug and short id stay)
+            describe <name> <text>
+                               Set the project's description (--clear removes it)
             switch <name>      Pin the project every --project-less command reads (--clear unpins;
                                no name prints the default). GORI_PROJECT=<name> wins over the pin
             export <name>      Write a portable project archive (-o PATH)
@@ -98,6 +108,8 @@ module Gori
             gori run project list --all
             gori run project list --query=acme
             gori run project create "API test" --description="staging sweep"
+            gori run project rename api-test "API test (staging)"
+            gori run project describe api-test --clear
             gori run project delete api-test --yes
             gori run project scope add --kind=include --type=host --pattern=api.example.com
             gori run project sandbox on
@@ -454,7 +466,7 @@ module Gori
       # and only when the operator has not already passed `--name`.
       def self.import_error_message(message : String, name : String?) : String
         return message unless name.nil? && message.includes?("choose another name")
-        "#{message} (pass --name NEW to import it under another)"
+        "#{message} (pass --name NEW to import it under another; `gori run project rename` changes either name later)"
       end
 
       # `gori run project delete` — remove a project directory and everything in it. Until
@@ -487,7 +499,7 @@ module Gori
           # keep for itself, since a guess is not good enough for an rm_rf.
           abort "gori run project delete: #{ex.message}"
         end
-        project ||= abort_unknown_project(registry, name)
+        project ||= abort_unknown_project(registry, name, "gori run project delete")
         print_delete_preview(registry, project, format) unless yes # NoReturn
 
         # Read the sidecars while they still exist — rm_rf takes them with the directory.
@@ -522,10 +534,77 @@ module Gori
         end
       end
 
-      private def self.abort_unknown_project(registry : ProjectRegistry, name : String) : NoReturn
-        projects = registry.list
-        have = projects.empty? ? "" : " (have: #{projects.map { |project| terminal_project_name(project.name) }.join(", ")})"
-        abort "gori run project delete: no project matching '#{terminal_project_name(name)}'#{have}"
+      private def self.abort_unknown_project(registry : ProjectRegistry, name : String, cmd : String) : NoReturn
+        abort "#{cmd}: no project matching '#{terminal_project_name(name)}'#{have_projects(registry, name)}"
+      end
+
+      # The project a project-admin verb names, by `ProjectRegistry#find`'s rules; refused when
+      # the name addresses two (#1163) or none.
+      private def self.find_named_project(registry : ProjectRegistry, name : String, cmd : String) : Project
+        found = begin
+          registry.find(name)
+        rescue ex : ProjectRegistry::Ambiguous
+          abort "#{cmd}: #{ex.message}"
+        end
+        found || abort_unknown_project(registry, name, cmd)
+      end
+
+      # `gori run project rename <name> <new-name>` (#1703): the display name only, as the
+      # picker's rename. The directory slug and short id stay, so `--project` by either, an open
+      # capture and the `project switch` pin all keep pointing at it.
+      private def self.cmd_project_rename(args : Array(String)) : Nil
+        positional = parse_args(args, "gori run project rename") do |p|
+          p.banner = "Usage: gori run project rename <name> <new-name>\n\n" \
+                     "Change a project's display name. Its directory slug and short id stay.\n" \
+                     "<name> matches a short id, id prefix, directory slug, or display name."
+        end
+        unless positional.size == 2
+          abort "gori run project rename: expected <name> <new-name> (quote a name that contains spaces)"
+        end
+        registry = ProjectRegistry.new(Paths.projects_dir)
+        project = find_named_project(registry, positional[0], "gori run project rename")
+        renamed = begin
+          registry.rename(project, positional[1])
+        rescue ex : Gori::Error | File::Error | IO::Error
+          abort "gori run project rename: #{ex.message}"
+        end
+        puts "Project #{terminal_project_name(project.name, quoted: true)} renamed to " \
+             "#{terminal_project_name(renamed.name, quoted: true)}."
+      end
+
+      # `gori run project describe <name> <text> | --clear` (#1703). `create --description`
+      # cannot clear one: a reopen skips an empty description, since it cannot tell "omitted"
+      # from "empty".
+      private def self.cmd_project_describe(args : Array(String)) : Nil
+        clear = false
+        positional = parse_args(args, "gori run project describe") do |p|
+          p.banner = "Usage: gori run project describe <name> <text>\n" \
+                     "       gori run project describe <name> --clear\n\n" \
+                     "Set or clear the project's description: the note on what the engagement is\n" \
+                     "for, shown on the Project tab and read by MCP project_info."
+          p.on("--clear", "Remove the description") { clear = true }
+        end
+        text = describe_text(positional, clear)
+        registry = ProjectRegistry.new(Paths.projects_dir)
+        project = find_named_project(registry, positional[0], "gori run project describe")
+        with_store(project) do |store|
+          ok = text ? store.set_setting(Project::DESCRIPTION_KEY, text) : store.delete_setting(Project::DESCRIPTION_KEY)
+          ok || abort_closing(store, "gori run project describe: project is busy (write did not commit) — try again")
+        end
+        puts "Project #{terminal_project_name(project.name, quoted: true)} description #{text ? "set" : "cleared"}."
+      end
+
+      # The description `describe` stores, nil for `--clear`; every refusal is argv-only.
+      private def self.describe_text(positional : Array(String), clear : Bool) : String?
+        abort "gori run project describe: missing <name>" if positional.empty?
+        abort "gori run project describe: too many arguments (quote a description that contains spaces)" if positional.size > 2
+        abort "gori run project describe: pass <text> or --clear, not both" if clear && positional.size == 2
+        return nil if clear
+        text = positional[1]?.try(&.strip)
+        abort "gori run project describe: missing <text> (or --clear to remove the description)" unless text
+        abort "gori run project describe: the description is empty — pass --clear to remove it" if text.empty?
+        abort "gori run project describe: the description is not valid UTF-8" unless text.valid_encoding?
+        text
       end
 
       # What --yes would destroy. Exits NON-ZERO: this path removed nothing, and a script
@@ -1042,6 +1121,7 @@ module Gori
                      "Or run with a subcommand:\n" \
                      "  gori run project env set KEY=value\n" \
                      "  gori run project env set KEY value\n" \
+                     "  gori run project env set KEY --value-stdin\n" \
                      "  gori run project env delete|rm KEY\n\n" \
                      "VALUES are [REDACTED] — an env var is usually a token, and this list is\n" \
                      "scrollback. --show-values prints them."
@@ -1078,14 +1158,23 @@ module Gori
 
       private def self.cmd_env_set(args : Array(String)) : Nil
         proj = ProjectFlags.new
+        value_stdin = false
 
         positional = parse_args(args, "gori run project env set") do |p|
           p.banner = "Usage: gori run project env set KEY=value [options]\n" \
-                     "       gori run project env set KEY value [options]"
+                     "       gori run project env set KEY value [options]\n" \
+                     "       gori run project env set KEY --value-stdin [options]"
           project_options(p, proj, "update")
+          p.on("--value-stdin", "Read the value from stdin (a pipe or a redirect, never a terminal) instead of the argument vector, where it would sit in the process listing and the shell history. One trailing newline is dropped") { value_stdin = true }
         end
 
         abort "gori run project env set: missing KEY=value (or KEY value)" if positional.empty?
+        if value_stdin
+          # Argv-only, so ABOVE the stdin read: a bad call must not first block on the pipe.
+          abort "gori run project env set: --value-stdin takes the KEY alone — the value comes from stdin" if positional.size > 1 || positional[0].includes?('=')
+          abort "gori run project env set: #{env_set_refusal(positional)}" unless Env.valid_key?(positional[0])
+          positional << read_stdin_secret(STDIN, "gori run project env set", "value", "--value-stdin")
+        end
         parsed = env_set_pair(positional)
         abort "gori run project env set: #{env_set_refusal(positional)}" unless parsed
         key, val = parsed
@@ -1127,7 +1216,7 @@ module Gori
       def self.env_set_refusal(positional : Array(String)) : String
         key = positional.size == 1 ? positional[0].partition('=')[0] : positional[0]
         return "invalid KEY (use [A-Za-z_][A-Za-z0-9_]*)" unless Env.valid_key?(key)
-        return "missing value for #{key} (KEY=value, or KEY value; KEY= sets it empty)" if positional.size == 1 && !positional[0].includes?('=')
+        return "missing value for #{key} (KEY=value, KEY value, or KEY --value-stdin; KEY= sets it empty)" if positional.size == 1 && !positional[0].includes?('=')
         "the value for #{key} is not valid UTF-8"
       end
 

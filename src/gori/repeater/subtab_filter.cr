@@ -33,6 +33,14 @@ module Gori
       def self.serialize(tags : Array(String)) : String?
         tags.empty? ? nil : tags.join(' ')
       end
+
+      # The column value a surface WRITES for an operator-typed tag string (MCP
+      # create/update_repeater, `gori run repeater create/update`): secrets masked — a tag is
+      # a caption and never reaches a socket — then parsed and re-joined, so `#` or `,,`
+      # stores nothing rather than a tag no filter can match.
+      def self.stored(raw : String) : String?
+        serialize(parse(Env.mask_secrets(raw)))
+      end
     end
 
     # An in-memory predicate over Repeater sub-tabs, parsed from a History-like filter
