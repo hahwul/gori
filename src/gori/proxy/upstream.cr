@@ -116,7 +116,16 @@ module Gori::Proxy
                          apply_host_overrides : Bool = true,
                          origin_scheme : String = "http",
                          refuse_self : Bool = false) : {IO?, DialError?}
-      target, target_port = apply_host_overrides ? connect_target(host, port, overrides, pin) : {pin || host, port}
+      if apply_host_overrides
+        unless resolved = connect_target(host, port, overrides, pin)
+          return {nil, DialError.new(DialErrorKind::Connect,
+            "host override for #{host} is not a dialable address (IP, IP:PORT or [v6]:PORT) — " \
+            "fix or remove it; the origin was never contacted")}
+        end
+        target, target_port = resolved
+      else
+        target, target_port = {pin || host, port}
+      end
       # Nothing upstream range-checks an h1 Host/absolute-form port, and glibc's getaddrinfo
       # truncates one to 16 bits: `:73616` dials :8080, gori's own listener, past the self-loop
       # guard (which compares the untruncated number). One check here covers every route.
@@ -167,13 +176,14 @@ module Gori::Proxy
     # can still reach that override's address, but only an address the operator already put in
     # their own table by name.
     private def self.connect_target(host : String, port : Int32, overrides : Gori::HostOverrides?,
-                                    pin : String? = nil) : {String, Int32}
+                                    pin : String? = nil) : {String, Int32}?
       if value = override_address(host, overrides)
-        # An unparseable value can only come from a hand-edited settings.json / DB row: both
-        # writers validate. Fall through to the name rather than dialing garbage.
-        if parsed = Gori::DialAddress.parse(value)
-          return {parsed.ip, parsed.port || port}
-        end
+        # An unparseable value comes from a hand-edited settings.json / DB row, or from a row
+        # an older grammar accepted ("::1:18190", #1714): both writers validate. Nil, so the
+        # dial is refused — falling through to the name would silently dial the real host the
+        # operator wrote this override to steer away from.
+        return nil unless parsed = Gori::DialAddress.parse(value)
+        return {parsed.ip, parsed.port || port}
       end
       {pin || host, port}
     end
@@ -216,8 +226,9 @@ module Gori::Proxy
       # move the port, so the question "would this dial land on our own listener?" is about the
       # port we will ACTUALLY dial — testing the request's port first would let an override
       # pointing at gori's own bind walk straight into the self-proxy loop this exists to stop.
-      resolved, target_port = connect_target(host, port, overrides)
-      addresses_self?(resolved, target_port, self_addr, local_host)
+      # An unparseable override is refused by the dial itself, so it never reaches ourselves.
+      return false unless target = connect_target(host, port, overrides)
+      addresses_self?(target[0], target[1], self_addr, local_host)
     end
 
     # True when the request LITERALLY targets gori's own listener `self_addr` — the

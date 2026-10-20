@@ -349,7 +349,10 @@ module Gori::Settings
       host = o["host"]?.try(&.as_s?)
       ip = o["ip"]?.try(&.as_s?)
       next if host.nil? || host.empty? || ip.nil? || ip.empty?
-      next unless Gori::DialAddress.valid?(ip) # defense-in-depth: a hand-edited non-literal "ip" would re-resolve via DNS
+      # An "ip" that is not a `Gori::DialAddress` (a hand-edited name, or "::1:18190" from before
+      # #1714) is KEPT, not dropped: the dial refuses it (`Upstream.connect_target`), where a
+      # dropped entry would silently dial the host's real DNS address instead. Neither one
+      # re-resolves the value itself.
       key = Gori::OverrideHost.key(host)
       next if key.empty? # a hand-edited "." folds to nothing and could never match a request
       out << {key, ip}
