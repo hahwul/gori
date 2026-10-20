@@ -251,7 +251,7 @@ module Gori
         # `fuzz save 42` uses the default project exactly like legacy `fuzz 42`; treating 42 as
         # project-less here refused the primary documented save form.
         flow_id ||= positional.first?.try { |s| parse_flow_id(s, "gori run fuzz") }
-        # A project-less run (--request/stdin with no --project/--db) is DELIBERATELY outside any
+        # A project-less run (--request/stdin with no --project/--db/GORI_PROJECT) is DELIBERATELY outside any
         # project: `optional_project_outbound` says so on STDERR and skips the scope gate. Writing
         # its results into the ambient default project anyway would put a sweep the operator kept
         # out of a project straight into that project's History. Name the project to record.

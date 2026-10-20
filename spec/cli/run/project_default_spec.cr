@@ -83,3 +83,22 @@ describe "gori run — the 'no project matching' hint" do
     with_projects { |registry| Gori::CLI::Run.have_projects(registry, "x").should eq("") }
   end
 end
+
+# #1669: the predicate every `--request`/stdin gate shares (host overrides, scope + Sandbox, env).
+describe "gori run — project_named?" do
+  it "counts --project, --db and a set GORI_PROJECT, empty included" do
+    saved = ENV["GORI_PROJECT"]?
+    begin
+      ENV.delete("GORI_PROJECT")
+      Gori::CLI::Run.project_named?(nil, nil).should be_false
+      Gori::CLI::Run.project_named?("p", nil).should be_true
+      Gori::CLI::Run.project_named?(nil, "x.db").should be_true
+      ENV["GORI_PROJECT"] = "p"
+      Gori::CLI::Run.project_named?(nil, nil).should be_true
+      ENV["GORI_PROJECT"] = "" # refused later by `default_project`, not skipped
+      Gori::CLI::Run.project_named?(nil, nil).should be_true
+    ensure
+      saved ? (ENV["GORI_PROJECT"] = saved) : ENV.delete("GORI_PROJECT")
+    end
+  end
+end
