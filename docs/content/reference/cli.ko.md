@@ -62,7 +62,7 @@ gori run <subcommand> [verb] [options]
 | `diff --from A --to B` | 리테스트 리포트: 프로젝트 두 개를 엔드포인트 단위로 비교 (added / gone / changed / unchanged / removed) |
 | `intercept` | 캡처 중인 TUI의 라이브 인터셉트 큐 조회 및 조작 |
 | `send [URL]` | Repeater 세션을 만들지 않고, URL(curl 형태) 또는 원시 요청으로 조립한 요청 하나를 전송 |
-| `repeater <flow-id>` · `list` · `create` · `send` | 캡처한 플로우 재전송, 또는 Repeater 세션 목록 / 생성 / 실행 (WebSocket 포함) |
+| `repeater <flow-id>` · `list` · `create` · `update` · `send` | 캡처한 플로우 재전송, 또는 Repeater 세션 목록 / 생성 / 수정 / 실행 (WebSocket 포함) |
 | `repeater ws <id>` | 저장된 repeater로 지속 WebSocket 세션을 열고 stdin/stdout으로 프레임 스트리밍 |
 | `repeater race <id> <id>…` | 저장된 세션 여러 개를 하나의 동기화된 레이스로 발사(HTTP/1.1 last-byte sync, HTTP/2 single-packet) |
 | `repeater timing <id> <id>` | 저장된 세션 두 개의 차등 타이밍 분석: 응답 순서와 사분위수로 어느 쪽이 일관되게 느린지 판정 |
@@ -537,6 +537,13 @@ MCP `create_repeater`처럼 생성 시점에 거부합니다. `--tags`는 MCP와
 ```bash
 id=$(gori run repeater create -t https://api.example.com -f req.http --format json | jq .id)
 gori run repeater send "$id"
+```
+
+**`repeater update <repeater-id>`**: 저장된 세션을 그 자리에서 수정합니다. MCP `update_repeater`의 헤드리스 형태입니다. id가 그대로이므로 이 세션을 가리키는 리테스트 단계와 링크도 계속 동작합니다(삭제 후 다시 만들면 끊깁니다). 주지 않은 플래그는 저장된 값을 유지합니다. `--target`(`create`처럼 검사), `-f`/`--request-file`, `-r`/`--request-raw`, `--request-stdin`(`create`처럼 하나만), `--name`과 `--tags`(`''`는 비움), `--http2` / `--http1`, `--sni`(`''`는 비움), `--no-auto-cl` / `--auto-cl`. `--format json`은 `repeater list --format json`과 같은 모양으로 세션을 찍습니다.
+
+```bash
+gori run repeater update 7 --target https://staging.example.com --tags "idor auth"
+generate-request | gori run repeater update 7 --request-stdin
 ```
 
 **`repeater send <repeater-id>`**: 저장된 세션을 실행합니다. HTTP와 WebSocket 모두 해당됩니다.

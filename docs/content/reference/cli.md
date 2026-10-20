@@ -62,7 +62,7 @@ gori run <subcommand> [verb] [options]
 | `diff --from A --to B` | Retest report: diff two projects at endpoint scale (added / gone / changed / unchanged / removed) |
 | `intercept` | Inspect and drive a capturing TUI's live intercept queue |
 | `send [URL]` | Send one request built from a URL (curl-shaped) or a raw request, without creating a Repeater session |
-| `repeater <flow-id>` · `list` · `create` · `send` | Re-send a captured flow, or list / create / execute Repeater sessions (incl. WebSocket) |
+| `repeater <flow-id>` · `list` · `create` · `update` · `send` | Re-send a captured flow, or list / create / edit / execute Repeater sessions (incl. WebSocket) |
 | `repeater ws <id>` | Open a persistent WebSocket session on a saved repeater; stream frames from stdin to stdout |
 | `repeater race <id> <id>…` | Fire several saved sessions as one synchronized race (HTTP/1.1 last-byte sync, HTTP/2 single-packet) |
 | `repeater timing <id> <id>` | Differential timing analysis of two saved sessions: which one is consistently slower, by response order and quartiles |
@@ -546,6 +546,13 @@ backtrace, as the flag doors already did.
 ```bash
 id=$(gori run repeater create -t https://api.example.com -f req.http --format json | jq .id)
 gori run repeater send "$id"
+```
+
+**`repeater update <repeater-id>`**: edit a saved session in place, the headless MCP `update_repeater`. The id stays, so the retest steps and links that point at it keep working, which a delete and re-create would break. A flag left out keeps the stored value. `--target` (refused as on `create`), `-f`/`--request-file`, `-r`/`--request-raw` or `--request-stdin` (one at most, as on `create`), `--name` and `--tags` (`''` clears either), `--http2` / `--http1`, `--sni` (`''` clears it) and `--no-auto-cl` / `--auto-cl`. `--format json` prints the session as `repeater list --format json` does.
+
+```bash
+gori run repeater update 7 --target https://staging.example.com --tags "idor auth"
+generate-request | gori run repeater update 7 --request-stdin
 ```
 
 **`repeater send <repeater-id>`**: execute a saved session, HTTP or WebSocket.

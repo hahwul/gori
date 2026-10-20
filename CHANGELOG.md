@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- CLI: `gori run repeater update <id>` edits a saved session in place (target, request, name, tags, HTTP/1.1 or HTTP/2, SNI, auto Content-Length), keeping its id and the retest steps and links on it; `gori run repeater --help` lists every subcommand, and an unknown word in its place says `unknown subcommand` instead of `invalid flow id` (#1681)
 - `gori run repeater create` refuses a target no send could reach, as MCP `create_repeater` does, and stores `--tags` and a blank `--name` the way MCP does; both surfaces now also refuse a port past 65535 or a host with spaces in it (#1683)
 - CLI: `gori run repeater ws <id>` opens a persistent HTTP/1.1 WebSocket session on a saved repeater, sending each stdin line as a text frame (or hex-decoded binary under `--binary`) and streaming both directions to stdout as text or JSON lines (`--format json`), with `--auto-reply`, `--engine-io` and `--for=DURATION` (#1660)
 - MCP: list replies are held to about 64 KB, so a page at the advertised `limit` no longer exceeds a client's tool-result cap; a cut page says `cut_by: "bytes"` with `has_more` and its usual cursor or `offset`, an `ids` set returns the rest as `remaining_ids`, a list that is never paged names the rest by id (`*_unshown_ids`), `oast_poll` keeps what does not fit for the next poll, `export_openapi` inlines 64 KB by default, and `get_response_body_chunk` pages at most 64 KB (#1649, #1659)
