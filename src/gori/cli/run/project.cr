@@ -1275,7 +1275,7 @@ module Gori
                      "Add a project host override (dial IP — or IP:PORT — for HOST; SNI/Host header unchanged)."
           project_options(p, proj, "update")
           p.on("--host=HOST", "Hostname to override (case-insensitive)") { |v| host = v }
-          p.on("--ip=IP", "IPv4/IPv6 literal to dial, optionally IP:PORT") { |v| ip = v }
+          p.on("--ip=IP", "IPv4/IPv6 literal to dial, optionally IP:PORT or [v6]:PORT") { |v| ip = v }
           format_flag(p, [:text, :json], "Output: text (default) | json — the new override, as `host-override --format json` lists it") { |f| format = f }
         end
 
@@ -1336,7 +1336,7 @@ module Gori
           p.banner = "Usage: gori run project host-override update <id> --host=HOST --ip=IP [options]"
           project_options(p, proj, "update")
           p.on("--host=HOST", "New hostname (case-insensitive)") { |v| host = v }
-          p.on("--ip=IP", "New IPv4/IPv6 literal to dial, optionally IP:PORT") { |v| ip = v }
+          p.on("--ip=IP", "New IPv4/IPv6 literal to dial, optionally IP:PORT or [v6]:PORT") { |v| ip = v }
         end
 
         id = take_id(positional, "gori run project host-override update", "<id>", "id")
