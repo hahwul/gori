@@ -194,6 +194,16 @@ describe Gori::Import do
     end
   end
 
+  it "clips a long skip reason and masks a URL's userinfo in it" do
+    skips = Gori::Import::Skips.new
+    skips.add("line 1", Gori::Error.new("invalid URL (bad host): \"http://u:secret@#{"x" * 5000}\""))
+    note = skips.notes.first
+    note.size.should eq(Gori::Import::Skips::NOTE_CHARS + 1)
+    note.should end_with("…")
+    note.should_not contain("secret")
+    note.should contain("http://***@x")
+  end
+
   it "caps the skip reasons and folds the rest into one line" do
     skips = Gori::Import::Skips.new
     25.times { |i| skips.add("line #{i + 1}", Gori::Error.new("bad")) }

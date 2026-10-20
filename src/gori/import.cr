@@ -69,6 +69,12 @@ module Gori
     # 50k-entry file of junk cannot turn the notes into a second copy of itself.
     class Skips
       CAP = 20
+      # Characters kept of one note. The count cap does not bound a note's LENGTH, and the reason
+      # quotes the source: one 2 MB line in a URL list became a 2 MB note on every surface, and
+      # MCP's reply budget (#1649) with it.
+      NOTE_CHARS = 200
+      # A URL's `user:pass@` as the reasons quote it, masked: a note goes to stderr, JSON and MCP.
+      USERINFO = /:\/\/[^\/?#\s"@]*@/
 
       getter count = 0
 
@@ -83,12 +89,16 @@ module Gori
 
       def add(where : String, why : String) : Nil
         @count += 1
-        @reasons << "skipped #{where}: #{why}" if @reasons.size < CAP
+        @reasons << clip("skipped #{where}: #{why}".scrub.gsub(USERINFO, "://***@")) if @reasons.size < CAP
       end
 
       def notes : Array(String)
         more = @count - @reasons.size
         more > 0 ? @reasons + ["+#{more} more skipped"] : @reasons.dup
+      end
+
+      private def clip(s : String) : String
+        s.size > NOTE_CHARS ? "#{s[0, NOTE_CHARS]}…" : s
       end
 
       def result(flows : Array(Builder::FlowPair)) : ParseResult
