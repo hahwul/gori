@@ -535,6 +535,9 @@ module Gori
         if op.short_circuit? && (err = RuleStub.respond_error(respond, value || "", body_file, respond_args))
           abort_closing(store, "gori run rewriter add: #{err}")
         end
+        if host && (err = Gori::Rules.host_error(host))
+          abort_closing(store, "gori run rewriter add: #{err}")
+        end
         {find || abort_closing(store, "gori run rewriter add: --find is required"), match, host || "", value || ""}
       end
 

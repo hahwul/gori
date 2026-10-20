@@ -292,6 +292,7 @@ module Gori::Tui
     # request with gori's own 502 and still never reach the origin.
     def valid? : Bool
       return false if pattern.empty?
+      return false unless Gori::Rules.host_error(host).nil?
       return false if short_circuit_op? && !respond_error.nil?
       # A pipe rule's `value:` is the command, so an empty or unparseable one is exactly as
       # unsaveable as an empty pattern: the rule would match live traffic and then do nothing
@@ -309,6 +310,9 @@ module Gori::Tui
     # What is missing, for the Save row's label.
     def invalid_reason : String
       return "enter a #{find_row[1]}" if pattern.empty?
+      if why = Gori::Rules.host_error(host)
+        return why
+      end
       if short_circuit_op? && (why = respond_error)
         # The editor says what is wrong with a response as it is typed; the Save row only has to
         # say where to go.

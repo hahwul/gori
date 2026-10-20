@@ -213,7 +213,7 @@ module Gori
                scope : Store::RuleScope = Store::RuleScope::Project, enabled : Bool = true,
                respond : Store::RespondKind = Store::RespondKind.implied(body_file),
                respond_args : String = "") : Int64
-      return 0_i64 if pattern.empty?
+      return 0_i64 unless savable?(pattern, host)
       target, part = normalize_shape(op, target, part)
       respond, respond_args, body_file = Rules.normalize_respond(op, respond, respond_args, body_file)
       # Both writers already answered — a global add returns the new id (0 = not written),
@@ -266,7 +266,7 @@ module Gori
                respond : Store::RespondKind? = nil, respond_args : String? = nil) : Bool
       existing = rules.find { |r| r.id == id && r.scope == scope }
       return false unless existing && !existing.inert?
-      return false if pattern.empty?
+      return false unless savable?(pattern, host)
       target, part = normalize_shape(op, target, part)
       # nil KEEPS the rule's own sub-kind: a caller that predates #1237 (or simply does not
       # speak of it) must not turn a dir or fault rule back into an inline stub by omission.
@@ -292,6 +292,11 @@ module Gori
       refresh
       ConfigLog.record(@store, "rule_update", "#{Rules.scope_word(scope)} rewrite rule changed — #{Rules.rule_phrase(id, name, target, part)}") if ok
       ok
+    end
+
+    # A pattern to match on, and a host glob that can match (`Rules.host_error`).
+    private def savable?(pattern : String, host : String) : Bool
+      !pattern.empty? && Rules.host_error(host).nil?
     end
 
     # How an audit line names a rewrite rule — by IDENTITY, never by the bytes it matches or
@@ -2005,6 +2010,21 @@ module Gori
         # `*` stays the explicit wildcard for anything wider.
         h == g || h.ends_with?(g.starts_with?('.') ? g : ".#{g}")
       end
+    end
+
+    # Why a rewrite or extract rule's host glob can never match, or nil. `host_matches?` is
+    # handed the BARE request host (the proxy strips the port first), so a glob copied with its
+    # port, scheme or path was stored as an enabled rule that never fired, which for a
+    # short_circuit block is a block that fails open (#1676). Judged at write time by every
+    # surface (and `create`/`update`/`Bindings#validate` refuse it); stored rows are not
+    # re-judged, so how they match is unchanged. An unbracketed glob with two or more colons is
+    # an IPv6 literal, never host:port.
+    def self.host_error(glob : String) : String?
+      return "host #{glob.inspect} must not include a scheme; give the host alone" if glob.includes?("://")
+      return "host #{glob.inspect} must not include a path; give the host alone" if glob.includes?('/')
+      port = glob.starts_with?('[') ? !glob.ends_with?(']') : glob.count(':') == 1
+      return "host #{glob.inspect} must not include a :port; a rule matches the host on every port" if port
+      nil
     end
 
     # --- preview (shared by the Rewriter tab's test row + the MCP preview_rule tool) ---

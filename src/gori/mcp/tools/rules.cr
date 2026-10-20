@@ -237,6 +237,9 @@ module Gori
         replacement = str(h, "replacement").presence || draft.try(&.replacement) || ""
         name = str(h, "name") || ""
         host = str(h, "host").presence || draft.try(&.host) || ""
+        if bad = Gori::Rules.host_error(host)
+          return err(bad, "INVALID_ARGUMENT", field: "host")
+        end
         mock = mock_rule_args(h, op, str(h, "body_file") || "")
         return mock if mock.is_a?(Result)
         respond, respond_args, body_file = mock
@@ -391,6 +394,9 @@ module Gori
         replacement = present?(h, "replacement") ? (str(h, "replacement") || "") : (draft.try(&.replacement) || existing.replacement)
         name = present?(h, "name") ? (str(h, "name") || "") : existing.name
         host = present?(h, "host") ? (str(h, "host") || "") : existing.host
+        if bad = Gori::Rules.host_error(host)
+          return err(bad, "INVALID_ARGUMENT", field: "host")
+        end
         # A stub's file/dir does not survive a switch to an op that never reads it, as the TUI
         # form's `body_file` row empties for one — keeping it refused every such switch over a
         # `body_file` the caller never passed.
@@ -782,8 +788,12 @@ module Gori
         enabled = enabled_arg(h, true)
         return enabled if enabled.is_a?(Result)
         enabled = enabled.nil? ? true : enabled
+        host = str(h, "host") || ""
+        if bad = Gori::Rules.host_error(host)
+          return err(bad, "INVALID_ARGUMENT", field: "host")
+        end
         bindings = extract_bindings
-        if bad = bindings.add(name, when_s, kind, selector, pos_start, pos_end, str(h, "host") || "")
+        if bad = bindings.add(name, when_s, kind, selector, pos_start, pos_end, host)
           return bad == Gori::Bindings::STORE_REFUSED ? busy(bad) : err(bad, "INVALID_ARGUMENT", field: "name")
         end
         row = store.extract_rules.find { |r| r.name == name }
@@ -819,6 +829,9 @@ module Gori
           return bad
         end
         host = keep(h, "host", existing.host)
+        if bad = Gori::Rules.host_error(host)
+          return err(bad, "INVALID_ARGUMENT", field: "host")
+        end
         en = enabled_arg(h, existing.enabled?)
         return en if en.is_a?(Result)
         if bad = extract_bindings.update(id, name, filter, kind, selector, pos_start, pos_end, host)
@@ -911,7 +924,7 @@ module Gori
           mock_rule_props(s)
           s.field "match", enumprop("for replace: how `pattern` is read (default literal). Regex supports $1/\\1 capture groups", RULE_MATCHES)
           s.field "name", strprop("optional label for the rule")
-          s.field "host", strprop("optional host glob scoping the rule (e.g. 'example.com' substring, '*.example.com' wildcard; empty = all hosts). With from_flow_id an empty host keeps the flow's own host — pass '*' for all hosts")
+          s.field "host", strprop("optional host glob scoping the rule ('example.com' = that host and its subdomains; '*' for wider, e.g. '*.example.com'; no scheme, port or path; empty = all hosts). With from_flow_id an empty host keeps the flow's own host — pass '*' for all hosts")
           s.field "enabled", boolprop("create the rule already enabled (default true); pass false for an atomic disabled creation (no live window before you can preview/adjust it)")
         end
 
@@ -985,7 +998,7 @@ module Gori
           s.field "kind", enumprop("where the token is read from (default cookie). cookie and header read the parsed head; the rest read the DECODED body", EXTRACT_KINDS)
           s.field "selector", strprop("cookie name, header name, regex source, or JSON path ($.a.b[0]) — required for every kind except position")
           s.field "when", strprop("which messages to read, in intercept-filter syntax (host:/path:/method:/scheme:/status:, AND/OR/NOT, '' = any). status: matches responses only")
-          s.field "host", strprop("optional host glob scoping the rule ('example.com' substring, '*.example.com' wildcard; empty = all hosts)")
+          s.field "host", strprop("optional host glob scoping the rule ('example.com' = that host and its subdomains; '*' for wider, e.g. '*.example.com'; no scheme, port or path; empty = all hosts)")
           s.field "pos_start", intprop("kind=position only: start byte offset into the decoded body")
           s.field "pos_end", intprop("kind=position only: end byte offset (exclusive); must exceed pos_start")
           s.field "enabled", boolprop("create the rule already enabled (default true)")

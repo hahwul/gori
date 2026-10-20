@@ -5803,7 +5803,7 @@ module Gori::Tui
       ov = rule ? ExtractRuleOverlay.editing(rule) : ExtractRuleOverlay.adding
       ov.on_validate = ->(form : ExtractRuleOverlay) do
         @session.bindings.validate(form.name, form.kind, form.selector, except_id: form.edit_id,
-          match_filter: form.match_filter)
+          match_filter: form.match_filter, host: form.host)
       end
       ov.on_commit = -> { rewriter_controller.apply_extract_rule(ov) }
       open_overlay(ov)

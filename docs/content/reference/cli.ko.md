@@ -1428,7 +1428,7 @@ gori run rewriter rm 3
 | `--from-flow=ID` | `short_circuit`: flow ID의 캡처된 응답을 규칙에 복사. `--find`, `--host`, `--value`가 초안을 덮어씀 |
 | `-f`, `--find=FIND` | `--from-flow`나 `--map-dir --strip-prefix`가 아니면 필수. 대상이 되는 리터럴, 패턴, 헤더 이름, 또는 (json 동작) `$.user.role` 같은 JSON 경로 |
 | `-v`, `--value=VALUE` | 치환할 텍스트, 헤더 값, `json_set`의 새 값(JSON 텍스트: `'"admin"'`, `true`), 또는 `--op=pipe`일 때 실행할 명령. [프로세스 훅](/ko/guide/scripting/#process-hooks) 참고 |
-| `--host=GLOB` | 규칙을 그 호스트와 서브도메인으로 한정(`example.com`은 `api.example.com`에도 매칭되지만 `xexample.com`에는 매칭되지 않음). `*`는 명시적 와일드카드. 생략하면 전체 적용 |
+| `--host=GLOB` | 규칙을 그 호스트와 서브도메인으로 한정(`example.com`은 `api.example.com`에도 매칭되지만 `xexample.com`에는 매칭되지 않음). `*`는 명시적 와일드카드. 포트, 스킴, 경로는 거부(규칙은 모든 포트에서 그 호스트에 매칭). 생략하면 전체 적용 |
 | `--name=NAME` | 규칙 목록에 표시할 라벨 |
 | `--disabled` | 규칙을 만들되 활성화하지 않음 |
 | `--scope=SCOPE` | `project`(기본값) 또는 `global`. 전역 규칙은 `settings.json`에 저장되어 모든 프로젝트에 적용됨. 목록에서는 그 저장소의 규칙만 표시(기본: 둘 다) |

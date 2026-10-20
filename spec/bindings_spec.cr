@@ -82,6 +82,16 @@ describe Gori::Bindings do
       end
     end
 
+    it "refuses a host glob with a port, which could never match (#1676)" do
+      with_store do |store|
+        b = Gori::Bindings.load(store)
+        b.add("SID", "", Gori::ExtractKind::Cookie, "sid", host: "127.0.0.1:8080").not_nil!.should contain(":port")
+        b.rules.should be_empty
+        b.add("SID", "", Gori::ExtractKind::Cookie, "sid", host: "127.0.0.1").should be_nil
+        b.update(b.rules.first.id, "SID", "", Gori::ExtractKind::Cookie, "sid", host: "acme.test/x").should_not be_nil
+      end
+    end
+
     it "refuses a regex descriptor that does not compile" do
       with_store do |store|
         b = Gori::Bindings.load(store)
