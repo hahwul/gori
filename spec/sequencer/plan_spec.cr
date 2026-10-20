@@ -480,7 +480,7 @@ describe Gori::Sequencer::Plan do
     # whole max-sends budget and reported `CRITICAL · 0 usable / N total · no usable tokens` —
     # a verdict about the origin's entropy from a descriptor that read none of it.
     it "reports BadPosition for a byte range that can never match" do
-      [{40, 8}, {8, 8}, {0, 0}].each do |(lo, hi)|
+      [{40, 8}, {8, 8}, {0, 0}, {-10, -2}, {-5, 20}, {-5, 0}].each do |(lo, hi)|
         ex = expect_raises(Q::PlanError) do
           Q::Plan.build(Q::PlanOptions.new(RAW.to_slice, target: "http://t.test",
             config: live_config(Q::TokenLoc.new(Q::ExtractKind::Position, "", lo, hi), 5)), ungated_outbound)
