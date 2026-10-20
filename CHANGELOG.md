@@ -37,6 +37,7 @@
 - Sequencer: a byte range with a negative start or an end at or below 0 is refused before sending, like a reversed one, on the TUI, `gori run sequence --position` and MCP `position`, instead of spending the budget and rating the origin CRITICAL (#1692)
 - Fuzzer: `gori run fuzz` and MCP `fuzz_start` say when a pitchfork or cluster-bomb run has fewer payload sets than positions and the extra positions reuse set 1, as the TUI already did (#1704)
 - CLI: `gori run shell` warns, as `gori ca` does, when the root CA lacks the subjectKeyIdentifier or keyUsage extension that Python 3.13+ requires, and names `gori ca regenerate` (#1706)
+- CLI: a binary body on `gori run send` and `gori run repeater` points at `--format json` for its exact bytes instead of a `--format raw` those commands lack, and `gori run show --format curl|httpie` names `--request-only --format raw` on stderr for a body the command had to leave out (#1708)
 
 ## v0.8.1
 
