@@ -533,7 +533,8 @@ module Gori
           "Create a session slot (a named identity). A slot that sets and strips nothing is " \
           "'as captured' — the no-overlay baseline. Values may reference a binding: " \
           "\"Bearer $BIND.SESSION\" (\"Bearer $SESSION\" under the legacy bare syntax) resolves " \
-          "against THIS slot's own table when it claims the rule. " \
+          "against THIS slot's own table when it claims the rule. A slot value resolves $BIND and " \
+          "$GEN tokens only, never $ENV: the reply carries 'warning' when a header names one. " \
           "Pass 'flow_id' instead of 'set_headers' to BUILD the overlay from a captured login " \
           "exchange: gori copies the response's Set-Cookie pairs into one Cookie header and its " \
           "Authorization (or a top-level access_token/token/id_token string in a JSON body, as a " \
@@ -558,7 +559,8 @@ module Gori
 
         tool j, "update_session_slot",
           "Change a session slot. Only the fields you pass change — omit 'rules' and the slot " \
-          "keeps the rules it claims. Pass an empty array to clear a collection." do |s|
+          "keeps the rules it claims. Pass an empty array to clear a collection. As on create, a " \
+          "value resolves $BIND/$GEN only, and 'warning' names a header that holds $ENV." do |s|
           s.field "name", strprop("the slot to change (see list_session_slots)"), required: true
           s.field "new_name", strprop("rename the slot")
           s.field "set_headers", session_headers_prop
