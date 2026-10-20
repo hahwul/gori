@@ -108,6 +108,8 @@ gori run <subcommand> [verb] [options]
 | `grpc [schema]` · `reflect` · `forget` | The gRPC `.proto` lens: show what is loaded, fetch descriptors by server reflection, drop a cached target |
 | `project [list]` | List projects holding captured traffic (`--all` for every one) |
 | `project create <name>` | Create (or reopen) a project by name |
+| `project rename <name> <new-name>` | Change a project's display name |
+| `project describe <name> <text>` · `--clear` | Set or clear a project's description |
 | `project switch <name>` (`use`) · `--clear` | Pin the project every `--project`-less command reads |
 | `project export <name>` | Save a compact, WAL-safe `.gori` project archive |
 | `project import <archive>` | Add a project archive as a new project |
@@ -1629,7 +1631,25 @@ gori run project create api-test --format json
 | `--description=TEXT` | Stored in the project's settings |
 | `--format=FMT` | `text` (default) or `json` |
 
-A name that already exists reopens that project instead of failing; `--format json` reports it as `"created": false`. The reopen rewrites the stored display name (so its casing follows the last create) and replaces the description when `--description` is given. A new name that is already another project's directory slug or short id is refused, since `--project` could not then reach the project it made.
+A name that already exists reopens that project instead of failing; `--format json` reports it as `"created": false`. The reopen keeps the stored display name (`project rename` changes it) and replaces the description when a non-empty `--description` is given (`project describe --clear` removes one). A new name that is already another project's directory slug or short id is refused, since `--project` could not then reach the project it made.
+
+#### project rename
+
+Change a project's display name. The directory slug and short id stay, so `--project` by either, an open capture and the `project switch` pin keep pointing at it. The new name is refused when it is already another project's slug or short id, as on `create`.
+
+```bash
+gori run project rename api-test "API test (staging)"
+gori run project rename a1b2c3 "API test"      # by short id
+```
+
+#### project describe
+
+Set or clear the project's description: the note on what the engagement is for, shown on the Project tab, in `project list --format json` and by MCP `project_info`.
+
+```bash
+gori run project describe api-test "staging sweep, read-only creds"
+gori run project describe api-test --clear
+```
 
 #### project switch
 

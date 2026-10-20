@@ -38,6 +38,7 @@
 - CLI: `fuzz`, `mine` and `sequence` with `--request` or stdin read the project `GORI_PROJECT` names, its env vars, host overrides, scope and Sandbox included, the same as `--project`, instead of sending unscoped (#1669)
 - CLI: `gori run project env set KEY --value-stdin` reads the value from a pipe or a redirect, never a terminal, so a token stays off the argument vector (#1702)
 - CLI: a `--project`, `GORI_PROJECT`, `project switch` or `project delete` name that matches nothing lists the five closest projects with their short ids and how many more there are, instead of every project name on one line (#1705)
+- CLI: `gori run project rename OLD NEW` changes a project's display name, keeping its slug and short id, and `gori run project describe NAME TEXT` sets its description, or removes it with `--clear` (#1703)
 
 ## v0.8.1
 
