@@ -131,6 +131,7 @@ A selection can reach flows that cannot be replayed meaningfully. gori names eve
 | **answered by gori** | gori short-circuited this request itself; there is no origin behind it | — |
 | **outside project scope** | The outbound gate refused the target before the socket | `--allow-unscoped` (CLI), `allow_unscoped:true` (MCP), or add a scope include rule |
 | **already queued** | The same flow was named twice | — |
+| **no flow with that id** | A flow id you named does not exist (a typo, or a pruned flow) | — |
 | **sent by gori, not the browser** | Passive replay only: the flow is gori's own traffic (a Repeater send, a fuzz row, an agent's request), not something you browsed | — |
 
 The first row is the one worth internalizing. The skip is not a "does this request carry a `Cookie`?" test; that question missed APIs authenticating through `X-Api-Key`, and on a site you were not logged into it skipped everything while saying nothing. gori asks the exact question instead: *would any identity change these bytes?* If not, there is nothing to compare, and it says so.

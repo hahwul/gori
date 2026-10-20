@@ -131,6 +131,7 @@ module Gori
         when :gori_originated    then "sent by gori, not the browser"
         when :out_of_scope       then "outside project scope"
         when :duplicate          then "already queued"
+        when :missing            then "no flow with that id"
         when :pseudo_header_head then "stored as an HTTP/2 field list, not a replayable request line"
         when :nothing_to_strip   then "carries no Cookie or Authorization to strip, so the anonymous request is the authenticated one"
         else                          reason.to_s
