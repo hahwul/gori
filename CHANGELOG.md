@@ -38,6 +38,7 @@
 - Fuzzer: `gori run fuzz` and MCP `fuzz_start` say when a pitchfork or cluster-bomb run has fewer payload sets than positions and the extra positions reuse set 1, as the TUI already did (#1704)
 - CLI: `gori run shell` warns, as `gori ca` does, when the root CA lacks the subjectKeyIdentifier or keyUsage extension that Python 3.13+ requires, and names `gori ca regenerate` (#1706)
 - CLI: a binary body on `gori run send` and `gori run repeater` points at `--format json` for its exact bytes instead of a `--format raw` those commands lack, and `gori run show --format curl|httpie` names `--request-only --format raw` on stderr for a body the command had to leave out (#1708)
+- CSRF PoC: the fetch() PoC for a PUT, DELETE or other non-form method says the method itself forces a CORS preflight, instead of blaming the body and Content-Type (#1709)
 
 ## v0.8.1
 
