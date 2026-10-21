@@ -822,6 +822,31 @@ describe "H2::StreamGate body rules (#1628)" do
     end
   end
 
+  # The stall timer may be asleep until a held upload's 5 s deadline; a gRPC grace started under
+  # it still runs out on time.
+  it "ends a gRPC grace on time while a held upload's timer sleeps" do
+    with_rules do |rules, ic|
+      rules.add(REQ, BODY, "ping", "PONG", host: "127.0.0.1")
+      message = Bytes[0, 0, 0, 0, 4] + "ping".to_slice
+      rig = BodyRig.new(rules, ic) { |s, p| echo(s, p) }
+      begin
+        rig.client.send_head(1_u32, grpc_post, false)
+        rig.client.send_head(3_u32, post("/up", 100), false)
+        rig.client.send_body(3_u32, ("a" * 10).to_slice, false)
+        sleep 50.milliseconds
+        rig.client.send_body(1_u32, message, false)
+        origin = rig.wait_origin
+        deadline = Time.instant + 1.second
+        until origin.bodies[1_u32].size == message.size || Time.instant > deadline
+          sleep 5.milliseconds
+        end
+        origin.bodies[1_u32].to_slice.should eq(message)
+      ensure
+        rig.close
+      end
+    end
+  end
+
   # Review #1: curl/nghttp2 and Firefox widen a stream's window right after the request and ack
   # late. That credit reached the origin before gori owned the response, so it is gori's to
   # spend: seeding the owned stream at the initial window alone stalled it at 65,535 bytes.

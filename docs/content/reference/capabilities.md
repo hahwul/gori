@@ -54,7 +54,7 @@ difference.
   forces the next connection for that host onto HTTP/1.1. An HTTP/2-only client, including gRPC,
   cannot use that host while the downgrade applies. Match & Replace head and body rules,
   Intercept, and the Sandbox stay on h2; a body rule rewrites a unary gRPC call
-  and leaves streaming gRPC and SSE unbuffered.
+  and lets streaming gRPC and SSE stream.
 - **RFC 8441 messages cannot be intercepted or rewritten live.** gori captures a WebSocket over
   HTTP/2 and reopens it in Repeater/Fuzzer, but per-message Intercept and Match & Replace on
   messages are HTTP/1.1 only: both would have to reframe a DATA payload to a different length,

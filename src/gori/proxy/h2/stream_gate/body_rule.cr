@@ -129,6 +129,8 @@ class Gori::Proxy::H2::StreamGate
     getter? grpc : Bool
     # When a gRPC body became one whole message whose end has not arrived (`GRPC_END_GRACE`).
     property whole_since : Time::Instant?
+    # Its message's prefix once all five bytes are in (`grpc_prefix`), read from `arrived` once.
+    property grpc_head : {UInt8, Int64}?
     # When a held head started waiting for its body (`expire_owned_heads_locked`).
     property held_since : Time::Instant?
     # When that held head became the one a later stream open waits on (`start_wall_locked`).
@@ -557,13 +559,40 @@ class Gori::Proxy::H2::StreamGate
   # A gRPC body still arriving: given up the moment it cannot be one unary message, and given
   # `GRPC_END_GRACE` to end once it is one whole message.
   private def grpc_progress_locked(fc : Flow, own : Owned) : Nil
-    first = own.arrived.first.payload
-    prefix = grpc_prefix(first.size >= 5 ? first : entity_of(own))
+    prefix = own.grpc_head ||= arrived_prefix(own)
     if why = grpc_breach(prefix, own.size)
       spill_locked(fc, own, why)
-    elsif prefix.try(&.[1]) == own.size
-      own.whole_since ||= Time.instant
-      arm_stall_timer
+    elsif prefix.try(&.[1]) == own.size && own.whole_since.nil?
+      own.whole_since = Time.instant
+      arm_grace_check
+    end
+  end
+
+  # The first five bytes of the body, gathered across however many frames carried them.
+  private def arrived_prefix(own : Owned) : {UInt8, Int64}?
+    return nil if own.size < 5
+    head = Bytes.new(5)
+    at = 0
+    own.arrived.each do |f|
+      n = Math.min(f.payload.size, 5 - at)
+      f.payload[0, n].copy_to(head + at)
+      break if (at += n) == 5
+    end
+    grpc_prefix(head)
+  end
+
+  # The stall timer re-reads its deadline only when it wakes, and it may be asleep until a held
+  # upload's `hold_wait_deadline`, so a grace started under it gets a check of its own.
+  private def arm_grace_check : Nil
+    return arm_stall_timer unless @stall_timer
+    spawn do
+      sleep GRPC_END_GRACE
+      begin
+        run_cross(@mutex.synchronize { @closed ? NO_CROSS : (expire_owned_heads_locked; take_deferred_cross(NO_CROSS)) })
+      rescue
+        # a release that writes to a leg already dead; see `arm_stall_timer`
+      end
+      refund_swallowed
     end
   end
 
