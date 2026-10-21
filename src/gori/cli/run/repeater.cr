@@ -76,6 +76,7 @@ module Gori
       @[Subcommand("repeater", help: [
         {"repeater", "Re-send a captured flow by id (a `repeater <sub>` row below manages saved sessions)"},
         {"repeater list", "List the saved repeater sessions in the workbench"},
+        {"repeater show", "Print a saved session's request and its last stored response, without sending"},
         {"repeater create", "Create a repeater session (--flow / --request-file / --request-raw / --request-stdin / --curl)"},
         {"repeater update", "Edit a saved session in place: target, request, name, tags, h1/h2, SNI, auto Content-Length"},
         {"repeater send", "Replay a saved repeater SESSION (not a flow id), HTTP or WebSocket"},
@@ -106,6 +107,7 @@ module Gori
       # help above, which is the usage banner (spec/cli/run/repeater_update_spec.cr checks).
       REPEATER_SUBCOMMANDS = {
         "list"     => ->(a : Array(String)) { cmd_repeater_list(a) },
+        "show"     => ->(a : Array(String)) { cmd_repeater_show(a) },
         "create"   => ->(a : Array(String)) { cmd_repeater_create(a) },
         "update"   => ->(a : Array(String)) { cmd_repeater_update(a) },
         "send"     => ->(a : Array(String)) { cmd_repeater_send(a) },
@@ -280,7 +282,12 @@ module Gori
                 # say which tab is the odd one out. See `unterminated_head_note`.
                 bad_head = unterminated_head?(r.request, ws_http_only: r.ws_http_only?, http2: r.http2?)
                 head = bad_head ? "  !head-unterminated" : ""
-                puts "#{(i + 1).to_s.rjust(width)}  ##{r.id}  [#{h2}]  #{CLI::Output.pad(CLI::Output.term_safe(name), 20)}  → #{CLI::Output.term_safe(r.target)}#{tls}#{head}"
+                # The last send's outcome (#1665): the TUI filter's `status:` token (a code,
+                # `error` or `unsent`) and the stored body's size, so a 401 reads apart from a 200
+                # without re-sending.
+                last = Repeater::SubtabFilter::Subject.status_token(r.response_error, r.response_head)
+                r.response_body_size.try { |n| last += " #{CLI::Output.human_size(n)}" }
+                puts "#{(i + 1).to_s.rjust(width)}  ##{r.id}  [#{h2}]  #{last.ljust(14)}  #{CLI::Output.pad(CLI::Output.term_safe(name), 20)}  → #{CLI::Output.term_safe(r.target)}#{tls}#{head}"
               end
             end
           end
@@ -298,6 +305,8 @@ module Gori
         j.field "tui_index", tui_index
         j.field "position", r.position
         j.field "name", r.name || "Untitled"
+        # What tells two unnamed sessions on one origin apart (`GET /`) — MCP's field.
+        j.field "summary", Repeater::SubtabFilter::Subject.listing_summary(String.new(r.request))
         j.field "tags", r.tags
         j.field "target", r.target
         j.field "http2", r.http2?
@@ -316,6 +325,142 @@ module Gori
         end
         j.field "last_error", r.response_error
         j.field "last_duration_us", r.response_duration_us
+        # The last response's status and stored body size (#1665); null when never answered.
+        j.field "last_status", last_status(r.response_head)
+        j.field "last_size", r.response_body_size
+      end
+
+      # The status code of a stored response head, nil when there is none (never sent, or an
+      # errored send saved as an EMPTY head) or it does not parse.
+      private def self.last_status(head : Bytes?) : Int32?
+        return nil if head.nil? || head.empty?
+        Proxy::Codec::Http1.parse_response_head(head).status
+      rescue
+        nil
+      end
+
+      # `gori run repeater show <id>` (#1665): a saved session's request and its last stored
+      # response, read back without sending — the read half of MCP
+      # `get_repeater_context{include_content}`. `gori run show` takes a FLOW id, and a session
+      # send writes no flow unless `--record-history` was passed.
+      private def self.cmd_repeater_show(args : Array(String)) : Nil
+        proj = ProjectFlags.new
+        format = :text
+        redaction = RedactFlags.new
+        headers_only = false
+        max_body : Int32? = nil
+
+        positional = parse_args(args, "gori run repeater show") do |p|
+          p.banner = "Usage: gori run repeater show <repeater-id> [options]\n\n" \
+                     "Print a saved session's request and its last stored response, without sending."
+          project_options(p, proj, "read")
+          p.on("--headers-only", HEADERS_ONLY_HELP) { headers_only = true }
+          p.on("--max-body=BYTES", MAX_BODY_HELP) { |v| max_body = parse_count(v, "--max-body") }
+          redact_options(p, redaction)
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
+        end
+        id = take_id(positional, "gori run repeater show", "<repeater-id>", "repeater id")
+        cap = body_cap(headers_only, max_body, "gori run repeater show")
+
+        # The listing row (tab number, body size) and the full row (bodies), read before the
+        # store closes; refusals come after it, because `abort` skips `ensure`.
+        found, choice = with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
+          rows = store.repeaters_mcp
+          i = rows.index { |r| r.id == id }
+          full = i && store.get_repeater_full(id)
+          {i && full ? {rows[i], i + 1, full} : nil, redact_choice(store, redaction)}
+        end
+        row, tui_index, rec = found || abort "gori run repeater show: no repeater session ##{id} (ids from `gori run repeater list`)"
+        abort "gori run repeater show: #{choice.error}" if choice.error
+
+        req_head, req_body, resp_head, resp_body, report = repeater_show_sides(rec, choice.matcher)
+        if report && redaction.preview?
+          print_redact_preview(redact_one(report), choice, "repeater show")
+          return
+        end
+
+        if format == :json
+          puts repeater_show_json(row, tui_index, req_head, req_body, resp_head, resp_body,
+            Evidence.drifted?(rec), cap)
+        else
+          print_repeater_show_text(rec, req_head, req_body, resp_head, resp_body, cap)
+        end
+        # After the document, on STDERR: the pair no longer describes one exchange.
+        if Evidence.drifted?(rec)
+          STDERR.puts "gori run repeater show: session ##{id}'s request was edited after this response was " \
+                      "received, so the two are not one exchange — `gori run repeater send #{id}` to refresh it"
+        end
+        redact_notes(redact_one(report), choice, "repeater show")
+      end
+
+      # The session's request split into head and body, and its last response (nil when never
+      # answered: an errored send is saved as an EMPTY head) — sanitized when a redaction
+      # profile is in play, with the report that says what it did.
+      private def self.repeater_show_sides(rec : Store::RepeaterRecord, matcher : Redact::Matcher?) : {Bytes, Bytes?, Bytes?, Bytes?, Redact::Report?}
+        req_head, req_body = Env.split_head_body(rec.request)
+        resp_head = rec.response_head.try { |h| h.empty? ? nil : h }
+        resp_body = resp_head ? rec.response_body : nil
+        return {req_head, req_body, resp_head, resp_body, nil} unless matcher
+        req = Redact::Wire.message(req_head, req_body, matcher)
+        res = Redact::Wire.message(resp_head, resp_body, matcher)
+        report = Redact::Report.new(matcher.profile, req, res, matcher.pattern_errors)
+        {req.head, req.body, resp_head && res.head, res.body, report}
+      end
+
+      private def self.print_repeater_show_text(rec : Store::RepeaterRecord, req_head : Bytes, req_body : Bytes?,
+                                                resp_head : Bytes?, resp_body : Bytes?, cap : BodyCap) : Nil
+        puts "=== REQUEST ==="
+        print_message_text(req_head, display_body(req_head, req_body), req_body, cap, SEND_EXACT_BYTES)
+        puts ""
+        took = rec.response_duration_us.try { |d| " (in #{CLI::Output.human_us(d)})" } || ""
+        puts "=== LAST RESPONSE#{took} ==="
+        if err = rec.response_error
+          puts "send failed: #{CLI::Output.term_line(err)}"
+        elsif resp_head.nil?
+          puts "(never sent — `gori run repeater send #{rec.id}`)"
+        end
+        print_message_text(resp_head, display_body(resp_head, resp_body), resp_body, cap, SEND_EXACT_BYTES) if resp_head
+      end
+
+      # `repeater show --format json`: the listing row's fields, then the request and the last
+      # response as `repeater send --format json` shapes them.
+      def self.repeater_show_json(row : Store::RepeaterRecord, tui_index : Int32,
+                                  req_head : Bytes, req_body : Bytes?,
+                                  resp_head : Bytes?, resp_body : Bytes?,
+                                  drifted : Bool, cap : BodyCap = BodyCap.new) : String
+        JSON.build do |j|
+          j.object do
+            repeater_row_fields(j, row, tui_index)
+            j.field "request_drifted", true if drifted
+            j.field "request" do
+              j.object do
+                j.field "head", scrub(req_head)
+                emit_lossy_head_json(j, req_head)
+                emit_body_json(j, "body", req_head, req_body, false, cap)
+              end
+            end
+            j.field "response" do
+              if head = resp_head
+                j.object do
+                  resp = begin
+                    Proxy::Codec::Http1.parse_response_head(head)
+                  rescue
+                    nil
+                  end
+                  if resp
+                    j.field "status", resp.status
+                    repeater_response_fields(j, resp)
+                  end
+                  j.field "head", scrub(head)
+                  emit_lossy_head_json(j, head)
+                  emit_body_json(j, "body", head, resp_body, false, cap)
+                end
+              else
+                j.null
+              end
+            end
+          end
+        end
       end
 
       # `gori run repeater move <id> --to N | --up | --down` — rearrange the sub-tab strip.

@@ -487,7 +487,9 @@ gori run repeater <flow-id> --target https://staging.example.com --http2 --diff
 
 `--headers-only` and `--max-body` shape what is **printed**, never what is sent or stored: the body is replaced by `[body omitted by --headers-only: 149504 bytes]`, or cut and followed by `[… truncated by --max-body: showing 2048 of 149504 bytes]`, so a cut body never reads as a short one. The size is the decoded body's (de-chunked, decompressed), the one an uncut dump prints. In `--format json` the `body` object keeps `size` as the whole decoded size; `--max-body` holds the prefix in `text`/`base64` and adds `shown_size`, with `truncated: true`, and `--headers-only` drops the bytes and adds `omitted: true`. The two flags are refused together. `--headers-only --diff` compares the two heads alone; `--max-body` is refused with `--diff`, whose comparison is of the whole messages. They take the same shape on `repeater send`, `repeater h2`, [`send`](#run-send) and [`show`](#run-show).
 
-**`repeater list`**: list saved Repeater sessions (`--format text|json`).
+**`repeater list`**: list saved Repeater sessions (`--format text|json`). Each row carries the last send's outcome: the text line shows its status (a code, `error` or `unsent`) and the stored body's size, and the JSON adds `summary` (`GET /`), `last_status` and `last_size` (null when never answered; the stored body's bytes as received, before any decoding) beside `last_error` and `last_duration_us`.
+
+**`repeater show <repeater-id>`**: print a saved session's stored request and its last stored response without sending, the read half of MCP `get_repeater_context{include_content}` for an HTTP session (a WebSocket session's stored frames are not printed). `--format json` prints the `repeater list` fields plus `request` and `response` (null when never answered) in `repeater send --format json`'s shape. `--headers-only` and `--max-body` cap the bodies as above, and `--redact` / `--no-redact` / `--redact-preview` work as on [`show`](#run-show). A request edited since that response is flagged on STDERR (`request_drifted: true` in JSON).
 
 **`repeater create`**: create a Repeater session:
 

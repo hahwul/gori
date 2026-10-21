@@ -79,17 +79,21 @@ module Gori
     end
 
     # Persisted repeater tabs for MCP: request-side fields plus the last response HEAD
-    # (no response body — keeps the tool lightweight).
+    # (no response body, only its `length()`, which SQLite answers without reading the BLOB).
+    # An empty body is stored as NULL (an empty `Bytes` binds as NULL), so an ANSWERED row
+    # with no body — a 204, a 101 — is sized 0 by its head rather than read as never sent.
     def repeaters_mcp : Array(RepeaterRecord)
       list = [] of RepeaterRecord
       @db.query(
         "SELECT #{HEAD_COLS}, sni, name, tags, response_head, response_error, response_duration_us, " \
-        "ws_keep_key, ws_http_only, tls_preset FROM repeaters ORDER BY position, id") do |rs|
+        "ws_keep_key, ws_http_only, tls_preset, " \
+        "IFNULL(length(response_body), CASE WHEN length(response_head) > 0 THEN 0 END) FROM repeaters ORDER BY position, id") do |rs|
         rs.each do
           list << RepeaterRecord.new(*read_head(rs),
             sni: rs.read(String?), name: rs.read(String?), tags: rs.read(String?),
             response_head: rs.read(Bytes?), response_error: rs.read(String?), response_duration_us: rs.read(Int64?),
-            ws_keep_key: rs.read(Int32) != 0, ws_http_only: rs.read(Int32) != 0, tls_preset: rs.read(String?))
+            ws_keep_key: rs.read(Int32) != 0, ws_http_only: rs.read(Int32) != 0, tls_preset: rs.read(String?),
+            response_body_size: rs.read(Int64?))
         end
       end
       list

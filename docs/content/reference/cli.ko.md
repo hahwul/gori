@@ -480,7 +480,9 @@ gori run repeater <flow-id> --target https://staging.example.com --http2 --diff
 
 `--headers-only`와 `--max-body`는 **출력되는 것**만 바꿀 뿐, 무엇이 전송되거나 저장되는지는 절대 바꾸지 않습니다. 본문은 `[body omitted by --headers-only: 149504 bytes]`로 대체되거나, 잘린 뒤 `[… truncated by --max-body: showing 2048 of 149504 bytes]`가 뒤따르므로, 잘린 본문이 짧은 본문처럼 읽히는 일은 없습니다. 크기는 디코드된 본문의 크기(청크 해제, 압축 해제 후)이며, 자르지 않은 덤프가 찍는 것과 같은 값입니다. `--format json`에서는 `body` 객체가 `size`로 전체 디코드 크기를 유지합니다. `--max-body`는 `text`/`base64`에 그 앞부분을 담고 `shown_size`를 더하며 `truncated: true`를, `--headers-only`는 바이트를 빼고 `omitted: true`를 더합니다. 두 플래그는 함께 쓸 수 없습니다. `--headers-only --diff`는 두 헤드만 비교하고, `--max-body`는 `--diff`와 함께 쓸 수 없습니다. `--diff`의 비교 대상은 메시지 전체이기 때문입니다. 이 둘은 `repeater send`, `repeater h2`, [`send`](#run-send), [`show`](#run-show)에서 같은 형태로 동작합니다.
 
-**`repeater list`**: 저장된 Repeater 세션 목록 (`--format text|json`).
+**`repeater list`**: 저장된 Repeater 세션 목록 (`--format text|json`). 각 행에 마지막 전송 결과가 붙습니다. 텍스트 줄은 상태(코드, `error`, `unsent`)와 저장된 본문 크기를 보여 주고, JSON은 `last_error`, `last_duration_us` 옆에 `summary`(`GET /`), `last_status`, `last_size`(응답이 없으면 null, 디코딩 전 저장된 본문의 바이트 수)를 더합니다.
+
+**`repeater show <repeater-id>`**: 저장된 세션의 요청과 마지막으로 저장된 응답을 전송 없이 찍습니다. HTTP 세션에서 MCP `get_repeater_context{include_content}`의 읽기 쪽입니다(WebSocket 세션의 저장된 프레임은 찍지 않습니다). `--format json`은 `repeater list` 필드에 `request`와 `response`(응답이 없으면 null)를 `repeater send --format json`과 같은 모양으로 더합니다. `--headers-only`와 `--max-body`는 위처럼 본문을 줄이고, `--redact` / `--no-redact` / `--redact-preview`는 [`show`](#run-show)와 같이 동작합니다. 그 응답 이후 요청이 수정됐으면 STDERR로 알립니다(JSON은 `request_drifted: true`).
 
 **`repeater create`**: Repeater 세션 생성:
 

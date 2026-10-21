@@ -1956,12 +1956,16 @@ module Gori
       # RECORDED (a response persisted before V28, or by a projection that does not select the
       # column), which is an unknown rather than a verdict — see `Evidence.from_repeater`.
       getter response_request_sha256 : String?
+      # Byte length of the stored (wire, undecoded) response body, read without the BLOB
+      # (`repeaters_mcp`). nil from the projections that do not select it, and for a row with
+      # no stored response.
+      getter response_body_size : Int64?
 
       def initialize(@id, @target, @request, @http2, @auto_content_length, @flow_id, @position,
                      @response_head = nil, @response_body = nil, @response_error = nil,
                      @response_duration_us = nil, @name = nil, @sni = nil,
                      @tags = nil, @ws_keep_key = false, @ws_http_only = false,
-                     @tls_preset = nil, @response_request_sha256 = nil)
+                     @tls_preset = nil, @response_request_sha256 = nil, @response_body_size = nil)
       end
     end
 

@@ -1,5 +1,6 @@
 require "uri"
 require "../filter_ast"
+require "../env"
 require "../store"
 require "../proxy/codec/http1"
 
@@ -104,6 +105,16 @@ module Gori
           parts = line.split(' ')
           s = "#{parts[0]?} #{parts[1]?}".strip
           s.empty? ? line : s
+        end
+
+        # The `summary` the headless listings print (MCP's repeater tools, `gori run repeater
+        # list`/`show`): `summary_of`, MASKED — the stored request may carry a secret in the
+        # request-target (e.g. ?token=…) — and capped at 80. The whole LINE is masked before the
+        # cut: an env value holding a space spans past the "METHOD target" summary, and masking
+        # only that would leave the value's prefix bare.
+        def self.listing_summary(request : String) : String
+          s = summary_of(Env.mask_secrets(first_nonblank_line(request)))
+          s.size > 80 ? "#{s[0, 79]}…" : s
         end
 
         # The leading METHOD token, for `method:`.

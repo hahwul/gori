@@ -471,6 +471,7 @@ module Gori
               j.field "last_status", resp.status
               j.field "last_reason", Serialize.text(resp.reason)
             end
+            j.field "last_size", r.response_body_size if r.response_body_size
             if include_content
               j.field "last_response_head", Serialize.redact_head_opt(Serialize.head_text(head), include_sensitive)
               # A response head comes straight off a remote socket — the least trustworthy
