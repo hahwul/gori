@@ -92,11 +92,11 @@ By default `gori mcp` advertises every tool, so an agent can reach the whole wor
 
 | Start with | Tools | `tools/list` | Tokens | For |
 | --- | ---: | ---: | ---: | --- |
-| `gori mcp` | 198 | ~249 KB | ~64k | Everything (the default) |
-| `--read-only` | 64 | ~79 KB | ~20k | Read tools and pure compute; no live requests |
-| `--tools=@recon` | 39 | ~61 KB | ~16k | Read and map the capture, scan it passively, replay a request, record issues and notes |
-| `--tools=@recon --read-only` | 29 | ~45 KB | ~12k | `@recon` minus what `--read-only` disables |
-| `--tools=@minimal` | 18 | ~30 KB | ~8k | Read History, flows and the current TUI context; talk to the operator |
+| `gori mcp` | 198 | ~180 KB | ~46k | Everything (the default) |
+| `--read-only` | 64 | ~56 KB | ~14k | Read tools and pure compute; no live requests |
+| `--tools=@recon` | 39 | ~41 KB | ~11k | Read and map the capture, scan it passively, replay a request, record issues and notes |
+| `--tools=@recon --read-only` | 29 | ~30 KB | ~8k | `@recon` minus what `--read-only` disables |
+| `--tools=@minimal` | 18 | ~19 KB | ~5k | Read History, flows and the current TUI context; talk to the operator |
 
 Tokens are bytes ÷ 4, a rough rule for JSON; your client's tokenizer has the final word.
 

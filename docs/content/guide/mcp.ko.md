@@ -92,11 +92,11 @@ gori mcp --read-only
 
 | 시작 방법 | 도구 | `tools/list` | 토큰 | 용도 |
 | --- | ---: | ---: | ---: | --- |
-| `gori mcp` | 198 | ~249 KB | ~64k | 전부 (기본값) |
-| `--read-only` | 64 | ~79 KB | ~20k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
-| `--tools=@recon` | 39 | ~61 KB | ~16k | 캡처를 읽고 파악, 패시브 스캔, 요청 재전송, 이슈·노트 기록 |
-| `--tools=@recon --read-only` | 29 | ~45 KB | ~12k | `--read-only`가 끄는 도구를 뺀 `@recon` |
-| `--tools=@minimal` | 18 | ~30 KB | ~8k | History와 flow, 현재 TUI 컨텍스트를 읽고 오퍼레이터와 대화 |
+| `gori mcp` | 198 | ~180 KB | ~46k | 전부 (기본값) |
+| `--read-only` | 64 | ~56 KB | ~14k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
+| `--tools=@recon` | 39 | ~41 KB | ~11k | 캡처를 읽고 파악, 패시브 스캔, 요청 재전송, 이슈·노트 기록 |
+| `--tools=@recon --read-only` | 29 | ~30 KB | ~8k | `--read-only`가 끄는 도구를 뺀 `@recon` |
+| `--tools=@minimal` | 18 | ~19 KB | ~5k | History와 flow, 현재 TUI 컨텍스트를 읽고 오퍼레이터와 대화 |
 
 토큰은 바이트 ÷ 4로 잡은 JSON 어림값이며, 실제 값은 클라이언트의 토크나이저가 정합니다.
 
