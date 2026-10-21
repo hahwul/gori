@@ -283,7 +283,7 @@ module Gori
           "replace an existing list unless overwrite:true." do |s|
           s.field "name", strprop("letters, digits, _ . + - and inner spaces; not a path"), required: true
           s.field "values", strarrprop("the values")
-          s.field "payload_from", strprop("'<QL> <projection>' over captured data; projection: param-names | param-values | path-segments | js-endpoints | extracted (e.g. 'host:api.example param-names'). Credential material stays out unless include_sensitive; values with a line break are dropped and counted")
+          s.field "payload_from", strprop("'<QL> <projection>' over captured data; projection: param-names | param-values | path-segments | js-endpoints | extracted (e.g. 'host:api.example param-names'). Credential material stays out unless include_sensitive; values with a line break are dropped and counted. Instead of values, not both")
           s.field "include_sensitive", boolprop("payload_from: keep credential material (`extracted` needs it)")
           s.field "locations", strprop("payload_from: comma list of query,form,multipart,json,headers,cookies (default: the first four)")
           s.field "max_flows", intprop("payload_from: newest flows read (default #{PayloadFrom::DEFAULT_MAX_FLOWS}, max #{PayloadFrom::MAX_FLOWS})")

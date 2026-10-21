@@ -62,8 +62,8 @@ module Gori
         "Request-time macro for a rotating CSRF token/nonce: saved Repeater sessions (ids from get_repeater_context, or tab " \
         "names) replayed IN ORDER before each #{noun}, so their extract rules' bindings are fresh for $BIND.NAME (bare: " \
         "$NAME). The binding must appear in a `template` (a `flow_id` template substitutes nothing) or an active-slot " \
-        "header, or the run is refused. Steps go out as the active session slot through the same scope/Sandbox gates and " \
-        "count toward max_requests and rate; a per-request macro runs one #{noun} at a time."
+        "header, or the run is refused. Steps go out as the active session slot through the same scope/Sandbox gates, are " \
+        "recorded in History (source `macro`) and count toward max_requests and rate; a per-request macro runs one #{noun} at a time."
       end
 
       private def request_macro_every_doc(noun : String, race : Bool) : String

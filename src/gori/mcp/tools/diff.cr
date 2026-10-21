@@ -214,7 +214,7 @@ module Gori
           "differently since the last engagement. Endpoints are keyed by list_sitemap's " \
           "folded path template (/users/{uuid}); 'changed' uses a tolerance band, not byte " \
           "equality. Returns per-side summaries `a`/`b`, `counts`, `caveats`, " \
-          "`scope_mismatch`, `endpoints:[{verdict,observation,host,method,path,a,b,changes}]`, " \
+          "`scope_mismatch` (read `caveats` first: a cut side says so there), `endpoints:[{verdict,observation,host,method,path,a,b,changes}]`, " \
           "`issues`. READ VERDICTS EXACTLY: 'removed' = the newer project captured NO request " \
           "there — a coverage gap, NOT evidence of deletion; 'gone' = confirmed (404/410). " \
           "Quote a row's 'observation' (what it IS and IS NOT evidence of) when filing an " \

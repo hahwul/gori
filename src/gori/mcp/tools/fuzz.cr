@@ -1598,7 +1598,8 @@ module Gori
 
         tool j, "fuzz_status", "Counts + state of a fuzz job (running|done|budget_exhausted|condition_met|stopped|error). " \
                                "budget_exhausted (max_requests hit) and condition_met (stop_on fired; stop_reason, " \
-                               "stop_index) are partial, NOT exhaustive: see incomplete_reason, candidates_remaining." do |s|
+                               "stop_index) are partial, NOT exhaustive: see incomplete_reason, candidates_remaining. The stop_index row is absent " \
+                               "from fuzz_results if results_truncated." do |s|
           s.field "job_id", strprop("id from fuzz_start"), required: true
         end
 
@@ -1615,7 +1616,7 @@ module Gori
           s.field "clusters", boolprop("one entry per RESPONSE SHAPE instead of rows (default false), over EVERY result: id, counts, status or error_class, metric ranges, sample_indices, a representative row. Rare clusters are usually the interesting ones")
           s.field "cluster", strprop("cluster id: its member ROWS + summary. members_retained can be below count; a save_results run pages all via get_fuzz_run{cluster}")
           s.field "cluster_order", enumprop("order of clusters:true (default rare = smallest first; common = largest first; first = by first appearance)", Fuzz::Clusters::Order.names)
-          s.field "matched_only", boolprop("only matcher hits (default false; with clusters:true, clusters holding one). Unfiltered pages also hold failed rows (send error, re-send, truncation, `chain_error` = payload sent UNTRANSFORMED); check each row's `matched`")
+          s.field "matched_only", boolprop("only matcher hits (default false; with clusters:true, clusters holding one). Unfiltered pages also hold failed rows (send error, re-send, truncation, `chain_error` = payload sent UNTRANSFORMED or a gRPC field kept its captured value, its text says which); check each row's `matched`")
         end
 
         tool j, "fuzz_stop", "Stop a running fuzz job (in-flight requests finish)." do |s|

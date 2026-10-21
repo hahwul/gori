@@ -824,8 +824,9 @@ module Gori
       private def list_flows_tools(j : JSON::Builder) : Nil
         tool j, "list_history",
           "List captured HTTP flows, newest first, as light rows (no bodies; get_flow for " \
-          "detail). Optional gori QL `query`, e.g. 'host:example.com status:>=500 dur:>500', " \
-          "'body~secret\\d+' (`~` = regex, dur in ms; ql_reference for syntax). Returns " \
+          "detail). Optional gori QL `query`, e.g. 'host:example.com status:>=500 size:>10000 " \
+          "dur:>500', 'header:set-cookie', 'body~secret\\d+' (`~` = regex, dur in ms; " \
+          "ql_reference for full syntax). Returns " \
           "{flows, returned, limit, order, has_more, next_before_id | next_since}, not a bare " \
           "array. Page OLDER: pass `next_before_id` as `before_id` until `has_more` is false. " \
           "TAIL newer: pass `since`; rows come OLDEST-first; pass `next_since` back; an empty " \
@@ -917,6 +918,7 @@ module Gori
           "get_repeater_context reported truncated. Decodes content encoding by default so " \
           "offsets continue the inline view (a request part is exact stored bytes). Returns " \
           "text or base64 + next_offset/complete; a past-the-end offset is clamped and flagged. " \
+          "Exactly one of flow_id / repeater_id. " \
           "`complete:true` = the WHOLE body; on a message the capture cap cut it stays false " \
           "with `source_truncated`: those bytes exist nowhere — re-send, do not page further." do |s|
           s.field "flow_id", intprop("History flow id")

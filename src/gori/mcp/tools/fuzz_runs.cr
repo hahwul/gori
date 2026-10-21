@@ -145,7 +145,7 @@ module Gori
         end
 
         tool j, "get_fuzz_run",
-          "Get one saved fuzz run and page its stored results. run.stop_index is the result stop_on tripped on (fetch with result_index). include_content:true returns at most 25 rows, redacted and capped by max_head_bytes / max_body_bytes even with include_sensitive." do |s|
+          "Get one saved fuzz run and page its stored results. run.stop_index is the result stop_on tripped on (fetch with result_index). include_content:true returns at most 25 rows, capped by max_head_bytes / max_body_bytes even with include_sensitive (which returns exact unredacted prefix bytes); stop_index is null when not recorded." do |s|
           s.field "run_id", intprop("permanent run id"), required: true
           s.field "result_index", intprop("optional exact result index (zero-based)")
           s.field "offset", intprop("result rows to skip (default 0)")

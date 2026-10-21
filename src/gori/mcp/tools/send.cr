@@ -1803,7 +1803,7 @@ module Gori
           s.field "grpc_fields", strarrprop("gRPC: set or add fields on the unary message, each \"path=value\": a declared name with a .proto (role=ROLE_ADMIN) or number:type (7:varint=1); \"-path\" removes one. Reframed")
           s.field "h2_fields", h2fieldsprop
           s.field "http2", boolprop("use real HTTP/2 (default: the flow's version with flow_id)")
-          s.field "timeout_ms", intprop("connect + idle timeout, ms (1-600000)")
+          s.field "timeout_ms", intprop("connect + idle timeout, ms (1-600000); a timeout is a network-error result with error_kind")
           sse_props(s, Repeater::StreamBound::SEND)
           s.field "sni", strprop("TLS SNI override, independent of Host; overrides a stored source's SNI")
           s.field "tls_preset", strprop("ClientHello fingerprint for this send: #{Settings::TLS_PRESET_NAMES.join(" | ")}; overrides a repeater's (\"\" drops it). Approximate, NOT byte-exact JA3; https only")

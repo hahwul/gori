@@ -686,7 +686,7 @@ module Gori
           "in `bypasses_unshown_ids`). `results` pages per-identity detail (verdict, status, " \
           "size, delta, error). `unanswered_count`: every send failed, evidence of nothing. " \
           "`baseline_denied_count`: the BASELINE itself got 4xx/5xx, so its rows are `review`, " \
-          "not bypasses." do |s|
+          "not bypasses. `skipped` / `failed[]`: selected flows NOT replayed." do |s|
           s.field "job_id", strprop("id from authorize_start"), required: true
           s.field "offset", intprop("start row (default 0)")
           s.field "limit", limitprop("max requests per page", AUTHORIZE_RESULTS_LIMIT)

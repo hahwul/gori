@@ -699,7 +699,7 @@ module Gori
           s.field "description", strprop("what the rule is for")
           s.field "side", enumprop("half of the exchange read (default response)", Probe::CustomRule::SIDES)
           s.field "region", enumprop("part of that half matched (default body)", Probe::CustomRule::REGIONS)
-          s.field "match_kind", enumprop("how `pattern` is read (default string). exec RUNS A LOCAL COMMAND (argv, no shell) with the operator's privileges, refused when \"Run local commands\" is off: the region goes to stdin, exit 0 raises the finding, the first stdout line is the evidence", Probe::CustomRule::KINDS)
+          s.field "match_kind", enumprop("how `pattern` is read (default string). exec RUNS A LOCAL COMMAND (argv, no shell) with the operator's privileges, refused when \"Run local commands\" is off: the region goes to stdin, exit 0 raises the finding, the first stdout line is the evidence; a spawn failure or timeout raises nothing (a warn event says so)", Probe::CustomRule::KINDS)
           s.field "severity", enumprop("severity of the raised finding (default info)", SEVERITIES)
         end
 

@@ -135,7 +135,8 @@ module Gori
           "Test one captured flow for WEB CACHE DECEPTION: replay it as its captured " \
           "(AUTHENTICATED) identity to prime a cache, then re-request the SAME url with NO " \
           "session. Anonymous served the authenticated response FROM a cache = `verdict:cached`, " \
-          "`deception:true`. `cached` needs the anonymous control refused (401/403) or " \
+          "`deception:true`. `cached` needs the control (an anonymous cache-busted query request) " \
+          "refused (401/403) or " \
           "redirected; anything else, or a control that is itself a cache hit, is " \
           "`verdict:review`. Each trial has a `cache` signal (same classifier as get_flow's " \
           "`cache` / QL `cache:`). To find CRAFTED trigger paths, fuzz the path with the " \

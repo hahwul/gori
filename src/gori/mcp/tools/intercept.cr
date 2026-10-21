@@ -407,7 +407,7 @@ module Gori
           "unsaved human edits (operator_editing:true). Returns forwarded (edited:true, " \
           "content_length_synced) | no_such_item | not_confirmed." do |s|
           s.field "item_id", intprop("held item id (intercept_list)"), required: true
-          s.field "raw", strprop("message as text; a lone LF in the HEADER block becomes CRLF, body untouched")
+          s.field "raw", strprop("message as text (not with raw_base64); a lone LF in the HEADER block becomes CRLF, body untouched")
           s.field "raw_base64", strprop("message as base64, byte-exact (round-trips intercept_get's raw_base64); the only way a binary body survives")
           s.requires_one_of "raw", "raw_base64"
           s.field "update_content_length", boolprop("recompute Content-Length to the edited body (default true). FALSE keeps your framing (CL mismatching the body, or CL + Transfer-Encoding: the smuggling primitive); raw_base64 is then byte-exact end to end")
