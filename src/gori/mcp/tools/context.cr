@@ -804,6 +804,7 @@ module Gori
           "says none is exposed. SITEMAP selects (host, path) `nodes`, no `ids` (see `kind`). " \
           "`truncated` is the ONLY sign the list was cut — not `marked_count`, which counts " \
           "marks even when `target_source` overrides them; never act on a cut list. " \
+          "`marked_hidden_count` = marks the operator's own filter hides. " \
           "`marked_subtabs` are CHIP NUMBERS that shift as sessions change: resolve via " \
           "get_repeater_context. `marks_elsewhere` = other tabs holding marks. " \
           "`tui.live`/`tui.windows` = attached TUIs (sharing ONE state row); `tui.unknown` = " \
