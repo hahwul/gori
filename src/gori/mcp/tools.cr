@@ -2211,8 +2211,8 @@ module Gori
 
       # The two arguments' schema, worded with the tool's default.
       private def sse_props(s : SchemaBuilder, default : Repeater::StreamBound) : Nil
-        s.field "sse_max_events", intprop("text/event-stream responses only: stop reading after this many events (default #{default.max_events}; 0 = no limit). A stop is a success: the events so far are the body, with `bounded`")
-        s.field "sse_max_ms", intprop("text/event-stream responses only: stop reading after this many ms of streaming (default #{default.max_time.try(&.total_milliseconds.to_i)}; 0 = no limit)")
+        s.field "sse_max_events", intprop("SSE only: stop after this many events (default #{default.max_events}; 0 = no limit); the events so far are the body, with `bounded`")
+        s.field "sse_max_ms", intprop("SSE only: stop after this many ms of streaming (default #{default.max_time.try(&.total_milliseconds.to_i)}; 0 = no limit)")
       end
 
       private def clamp_nonneg(n : Int64?) : Int32
@@ -3148,13 +3148,12 @@ module Gori
       # ONLY frame this argument could ever produce.
       private def ws_out_messages_prop(desc : String? = nil) : JSON::Any
         d = desc || "outbound WebSocket messages"
-        d += ". A plain string (or an array of them, or a newline-separated string) is a " \
-             "TEXT frame. For any other frame shape use either an object " \
-             "{opcode, text|payload_base64|payload_hex, fin, rsv, mask, mask_key, declared_len} " \
-             "or a spec string \"opcode=ping,text=hi\" (fields: opcode=text|bin|cont|close|" \
-             "ping|pong|0-15, fin=0|1, rsv=0-7 (RSV1=4), mask=0|1, mask_key=<hex>, " \
-             "len=<declared length>, and one of hex=|b64=|text=; text= runs to the end). " \
-             "declared_len/len sets the LENGTH HEADER independently of the payload"
+        d += ". A plain string (or array, or newline-separated string) is a TEXT frame. Other " \
+             "frames: an object {opcode, text|payload_base64|payload_hex, fin, rsv, mask, mask_key, " \
+             "declared_len} or a spec string \"opcode=ping,text=hi\" (opcode=text|bin|cont|close|" \
+             "ping|pong|0-15, fin=0|1, rsv=0-7, mask=0|1, mask_key=<hex>, len=<declared length>, " \
+             "one of hex=|b64=|text=; text= runs to the end). declared_len/len sets the length " \
+             "header independently of the payload"
         JSON.parse(%({"description":#{d.to_json},"oneOf":) +
                    %([{"type":"array","items":{"oneOf":[{"type":"string"},{"type":"object"}]}},{"type":"string"}]}))
       end
