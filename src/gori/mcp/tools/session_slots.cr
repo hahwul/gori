@@ -519,86 +519,72 @@ module Gori
       # wrong side of it by landing in the wrong place in a 1,300-line method.
       private def list_session_slots_tools(j : JSON::Builder) : Nil
         tool j, "list_session_slots",
-          "List the project's SESSION SLOTS — named identities, each a header overlay (headers to " \
-          "set / to strip) plus the extract rules whose bound values belong to it — and which one " \
-          "is ACTIVE. The active slot is what send_request/send_websocket/fuzz_start/repeater sends " \
-          "go out as; authorize_start replays under the whole list. Header values are [REDACTED] " \
-          "by default (a slot carries a session cookie); pass include_sensitive:true to see them." do |s|
-          s.field "include_sensitive", boolprop("return actual header values instead of [REDACTED] (default false)")
+          "List SESSION SLOTS (named identities: a header overlay plus owned extract rules) and " \
+          "the ACTIVE one, which every send goes out as; authorize_start replays under all." do |s|
+          s.field "include_sensitive", boolprop("real header values instead of [REDACTED]")
         end
 
         return unless @allow_actions
 
         tool j, "create_session_slot",
-          "Create a session slot (a named identity). A slot that sets and strips nothing is " \
-          "'as captured' — the no-overlay baseline. Values may reference a binding: " \
-          "\"Bearer $BIND.SESSION\" (\"Bearer $SESSION\" under the legacy bare syntax) resolves " \
-          "against THIS slot's own table when it claims the rule. A slot value resolves $BIND and " \
-          "$GEN tokens only, never $ENV: the reply carries 'warning' when a header names one. " \
-          "Pass 'flow_id' instead of 'set_headers' to BUILD the overlay from a captured login " \
-          "exchange: gori copies the response's Set-Cookie pairs into one Cookie header and its " \
-          "Authorization (or a top-level access_token/token/id_token string in a JSON body, as a " \
-          "Bearer token). That overlay is a LITERAL snapshot of the response bytes: it does " \
-          "NOT re-authenticate by itself — give the slot 'refresh' steps (Repeater sessions that " \
-          "log in) for that. The slot is project-wide and its active overlay " \
-          "can affect every outbound request from this server, so consider the blast radius. " \
-          "For a token that ROTATES, use the extract-rule path (create_extract_rule) instead. " \
-          "Pass 'from_request_flow_id' together with 'copy_headers' to copy selected headers " \
-          "from the captured request; that is also a literal snapshot and never auto-reauthenticates." do |s|
-          s.field "name", strprop("slot name (unique in the project; how every surface refers to it)"), required: true
-          s.field "flow_id", intprop("build a literal overlay from THIS captured flow's login response (see list_history); mutually exclusive with set_headers and the request-source mode")
+          "Create a session slot (named identity); setting and stripping nothing = the " \
+          "as-captured baseline. Values may use $BIND/$GEN (\"Bearer $BIND.SESSION\", against " \
+          "THIS slot's table when it claims the rule), never $ENV ('warning' names such a " \
+          "header). 'flow_id' BUILDS the overlay from a login response (Set-Cookie → Cookie; " \
+          "Authorization or a top-level access_token/token/id_token → Bearer); " \
+          "'from_request_flow_id' + 'copy_headers' copy request headers. Either is a LITERAL " \
+          "snapshot that never auto-reauthenticates: add 'refresh' steps, or for a token that " \
+          "ROTATES use create_extract_rule. A slot is project-wide and its active overlay can " \
+          "affect every outbound request: mind the blast radius." do |s|
+          s.field "name", strprop("unique slot name"), required: true
+          s.field "flow_id", intprop("login flow (list_history) to build the overlay from; excludes set_headers, from_request_flow_id")
           s.field "set_headers", session_headers_prop
-          s.field "from_request_flow_id", intprop("copy selected request headers from THIS captured flow (see list_history); must be supplied with copy_headers and is mutually exclusive with flow_id and set_headers")
-          s.field "copy_headers", strarrprop("request header names to copy verbatim from from_request_flow_id; must be supplied with from_request_flow_id (values stay redacted in replies). Content-Length, Transfer-Encoding and Host are refused — a slot is applied to a message with a different body and target")
-          s.field "remove_headers", strarrprop("header names to STRIP before sending (e.g. [\"Cookie\",\"Authorization\"] for an anonymous identity)")
-          s.field "rules", strarrprop("extract-rule binding NAMES whose observed values belong to this slot instead of the global table (see list_extract_rules)")
-          s.field "baseline", boolprop("make this the authorize BASELINE every other slot is judged against (exactly one slot holds it)")
+          s.field "from_request_flow_id", intprop("flow whose request headers to copy (with copy_headers); excludes flow_id, set_headers")
+          s.field "copy_headers", strarrprop("header names to copy (values redacted in replies); Content-Length, Transfer-Encoding, Host refused")
+          s.field "remove_headers", strarrprop("header names to STRIP (e.g. [\"Cookie\",\"Authorization\"] for anonymous)")
+          s.field "rules", strarrprop("extract-rule binding NAMES owned by this slot (not the global table)")
+          s.field "baseline", boolprop("make this the authorize BASELINE (one slot holds it)")
           s.field "refresh", refresh_ids_prop
           s.field "refresh_before", refresh_before_prop
         end
 
         tool j, "update_session_slot",
-          "Change a session slot. Only the fields you pass change — omit 'rules' and the slot " \
-          "keeps the rules it claims. Pass an empty array to clear a collection. As on create, a " \
-          "value resolves $BIND/$GEN only, and 'warning' names a header that holds $ENV." do |s|
-          s.field "name", strprop("the slot to change (see list_session_slots)"), required: true
-          s.field "new_name", strprop("rename the slot")
-          s.field "set_headers", session_headers_prop
-          s.field "remove_headers", strarrprop("replace the header names this slot strips")
-          s.field "rules", strarrprop("replace the extract-rule binding names this slot claims")
+          "Change a session slot; only passed fields change, [] clears a collection. Values " \
+          "resolve $BIND/$GEN only; 'warning' names a header holding $ENV." do |s|
+          s.field "name", strprop("slot to change (list_session_slots)"), required: true
+          s.field "new_name", strprop("rename")
+          s.field "set_headers", session_headers_prop("as create_session_slot")
+          s.field "remove_headers", strarrprop("replaces the stripped header names")
+          s.field "rules", strarrprop("replaces the claimed binding names")
           s.field "baseline", boolprop("make this the authorize baseline")
-          s.field "refresh", refresh_ids_prop
-          s.field "refresh_before", refresh_before_prop
+          s.field "refresh", id_list_prop("as create_session_slot")
+          s.field "refresh_before", strprop("as create_session_slot")
         end
 
         tool j, "refresh_session_slot",
-          "Run a session slot's REFRESH steps now: its Repeater sessions, in order (e.g. csrf-fetch " \
-          "then login), each response going through the slot's own extract rules so the slot's " \
-          "bindings are rebound. Steps resolve THIS slot's $BIND values and carry no slot header " \
-          "overlay. Each step is recorded in History (source refresh) and the outcome in the event " \
-          "log. Returns ok/failed_step/status and the binding NAMES rebound — never a value. The " \
-          "values live in this server process only. A slot with refresh_before set also refreshes " \
-          "on its own before a send that goes out as it; a failed automatic refresh cools down " \
+          "Run a slot's REFRESH steps now: its Repeater sessions in order, " \
+          "each response through the slot's extract rules to rebind them. Steps use " \
+          "THIS slot's $BIND values, no header overlay; each lands in History (source refresh). " \
+          "Returns ok/failed_step/status and the rebound binding NAMES, never values. A failed " \
+          "automatic refresh (refresh_before) cools down " \
           "#{Gori::SessionRefresh::COOLDOWN.total_seconds.to_i}s and stops after " \
           "#{Gori::SessionRefresh::FAILURE_LIMIT} failures until a manual refresh succeeds." do |s|
-          s.field "name", strprop("the slot to refresh (see list_session_slots)"), required: true
-          s.field "allow_unscoped", boolprop("send the steps even when their host is outside the project scope (default false)")
+          s.field "name", strprop("slot to refresh"), required: true
+          s.field "allow_unscoped", boolprop("send even when a step's host is outside the project scope")
         end
 
         tool j, "delete_session_slot",
-          "Delete a session slot. Any extract rule it claimed goes back to writing the GLOBAL " \
-          "binding table. If it was active, the next send goes out as captured." do |s|
-          s.field "name", strprop("the slot to delete (see list_session_slots)"), required: true
+          "Delete a session slot. Its claimed extract rules go back to the GLOBAL table; if it " \
+          "was active, the next send goes out as captured." do |s|
+          s.field "name", strprop("slot to delete"), required: true
         end
 
         tool j, "set_active_session_slot",
-          "Choose the SEND CONTEXT for this server: the slot whose header overlay is applied to " \
-          "every outbound request (send_request, send_websocket, repeater, fuzz/mine/sequence/" \
-          "discover) and whose binding table a $BIND.NAME token (bare syntax: $NAME) resolves " \
-          "against. Pass name:null for " \
-          "as-captured (no overlay). Held in memory by THIS process only — it is never persisted, " \
-          "so a new connection starts as-captured." do |s|
-          s.field "name", strprop("slot name, or null/omitted for as-captured (no overlay)")
+          "Choose the SEND CONTEXT: the slot whose overlay applies to every outbound request " \
+          "(sends, repeater, fuzz/mine/sequence/discover) and whose " \
+          "table $BIND.NAME resolves against. In THIS process's memory only: " \
+          "a new connection starts as-captured." do |s|
+          s.field "name", strprop("slot name; null/omitted = as-captured (no overlay)")
         end
       end
 
@@ -606,20 +592,16 @@ module Gori
       # rest of this surface uses, and the "Name: value" lines an operator copies out of a
       # request. Declaring both beats refusing one an LLM will send anyway.
       private def refresh_ids_prop : JSON::Any
-        id_list_prop("Repeater session ids that RE-AUTHENTICATE this slot, in the order they run " \
-                     "(e.g. [csrf-fetch id, login id]). Omit to keep the current list; [] clears it")
+        id_list_prop("Repeater session ids that RE-AUTHENTICATE this slot, in order; omit keeps, [] clears")
       end
 
       private def refresh_before_prop : JSON::Any
-        strprop("when the slot refreshes on its own before a send. Only \"off\" is accepted here: the " \
-                "operator arms \"jwt-exp\" or \"ttl=10m\" from the gori TUI or `gori run session`, and " \
-                "changing 'refresh' on an armed slot turns it back off")
+        strprop("only \"off\" accepted here (the operator arms auto-refresh in gori); changing " \
+                "'refresh' on an armed slot disarms it")
       end
 
-      private def session_headers_prop : JSON::Any
-        desc = "headers this slot UPSERTS (replace if present, append if absent). Either " \
-               "[{\"name\":\"Cookie\",\"value\":\"session=…\"}] or [\"Cookie: session=…\"]. " \
-               "Header-only by design: Content-Length never moves and the body is byte-exact."
+      private def session_headers_prop(desc = "headers to UPSERT: [{\"name\":\"Cookie\",\"value\":\"s=1\"}] or " \
+                                              "[\"Cookie: s=1\"]; body and Content-Length untouched") : JSON::Any
         JSON.parse(%({"type":"array","description":#{desc.to_json},) +
                    %("items":{"oneOf":[{"type":"object"},{"type":"string"}]}}))
       end

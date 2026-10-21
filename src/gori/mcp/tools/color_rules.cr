@@ -376,119 +376,88 @@ module Gori
       # wrong side of it by landing in the wrong place in a 1,300-line method.
       private def list_color_rules_tools(j : JSON::Builder) : Nil
         tool j, "list_color_rules",
-          "List the Colormarker rules for this project — which captured History rows get " \
-          "COLOURED, and how. DISPLAY ONLY: a colour rule never modifies traffic. Listed in " \
-          "PRECEDENCE order (GLOBAL library first, then the project's own): unlike Match & " \
-          "Replace rules, which all compose, the FIRST enabled match paints a row and the rest " \
-          "are never consulted — so order is the rule set's meaning, and move_color_rule " \
-          "changes it. `id` is unique only within a scope, so pass both to the mutation tools. " \
-          "For a global rule, `enabled` is the state in THIS project and `default_enabled` the " \
-          "library's own." do |s|
-          s.field "scope", enumprop("show only rules from this store (default: both)", RULE_SCOPES)
+          "List Colormarker rules (History row colours, DISPLAY ONLY) in " \
+          "PRECEDENCE order, GLOBAL first: the FIRST enabled match paints a row, so order is " \
+          "meaning (move_color_rule). id/scope/enabled/default_enabled read as in list_rules." do |s|
+          s.field "scope", enumprop("only this store (default: both)", RULE_SCOPES)
         end
 
         tool j, "preview_color_rule",
-          "Estimate how many recent flows a colour-rule condition would MATCH, and how many it " \
-          "would actually PAINT once the rules that already resolve ahead of it are counted " \
-          "(an earlier enabled rule may claim the row first), WITHOUT creating anything. " \
-          "Display only — nothing here modifies traffic." do |s|
-          s.field "when", strprop("the condition to test (see create_color_rule)"), required: true
-          s.field "scope", enumprop("preview as a rule in this store (default project). It changes " \
-                                    "`would_paint`: every global rule resolves before every project one, " \
-                                    "so no project rule can claim a row from a global candidate", RULE_SCOPES)
+          "Count recent flows a colour condition would MATCH and would actually PAINT (an " \
+          "earlier enabled rule may claim a row first), WITHOUT creating anything." do |s|
+          s.field "when", strprop("condition to test (see create_color_rule)"), required: true
+          s.field "scope", enumprop("preview as a rule in this store (default project); global rules " \
+                                    "resolve first (`would_paint`)", RULE_SCOPES)
           s.field "limit", limitprop("recent flows to scan", COLOR_PREVIEW_LIMIT)
         end
 
         tool j, "list_custom_colors",
-          "List the GLOBAL custom colours — user-defined names the Colormarker picker offers " \
-          "in every project on top of the six built-ins. Each is a name (what a rule's `color` " \
-          "references) and an absolute hex. Unlike a built-in, a custom does NOT track the " \
-          "active theme. Display only." do |_s|
+          "List GLOBAL custom colours: name (a rule's `color`) and absolute hex (NOT theme-aware)." do |_s|
         end
 
         return unless @allow_actions
 
         tool j, "create_color_rule",
-          "Add a Colormarker rule: colour the History rows whose captured flow matches a " \
-          "condition. Persisted to the project, or to the global library shared by every " \
-          "project when scope=global. The FIRST enabled matching rule paints a row and the " \
-          "rest are never consulted, so precedence matters — use move_color_rule to change " \
-          "it. Display only — a colour rule never modifies traffic." do |s|
-          s.field "when", strprop("the condition, in History QL — the SAME query language and the same fields list_history takes: host: path: url: method: scheme: proto: status: size: reqsize: respsize: dur: header: body: stub: static: scope:, ~regex on host/path/url/header/body, plus AND/OR/NOT, -negation and (grouping). Matched against the captured flow. CAVEATS, each of which otherwise fails silently: `host:` is a SUBSTRING, not a DNS-label glob, so host:alpha.test also matches xalpha.test; a flow with no response yet has no status, and is painted once the response lands; `scope:in`/`scope:out` follows the project's scope rules as they change and ignores the `s` display lens, so with NO scope rules configured nothing is in scope and both spellings paint nothing; and `body:` here SCANS rather than reading the trigram index list_history uses, so it reaches binary bodies that index skips, but it reads only the first 64 KiB of each side and reads the bytes AS CAPTURED, so a match past that bound — or inside a gzipped body — is not painted"), required: true
-          s.field "color", strprop("red | orange | yellow | green | blue | purple (default yellow) — resolved through the active theme, so it reads correctly on light and dark alike — OR the name of a custom colour (list_custom_colors / create_custom_color), which carries an absolute hex")
-          s.field "style", enumprop("full tints the whole History row; strip paints one colour cell in a narrow column ahead of TIME (default full)", Settings::COLORMARKER_STYLES)
-          s.field "name", strprop("optional label for the rule")
-          s.field "scope", enumprop("which store the rule lives in (default project). A global rule lives in settings.json and applies in EVERY project", RULE_SCOPES)
-          s.field "enabled", boolprop("create the rule already enabled (default true)")
+          "Add a Colormarker rule colouring History rows matching a condition (FIRST enabled match paints)." do |s|
+          s.field "when", strprop("History QL, as list_history's query (ql_reference). SILENT CAVEATS: `host:` is a SUBSTRING (host:alpha.test matches xalpha.test); no status until the response lands; with NO scope rules `scope:in`/`scope:out` paint nothing; `body:` scans only the first 64 KiB of each side AS CAPTURED (gzipped bodies miss)"), required: true
+          s.field "color", strprop("built-in red, orange, yellow (default), green, blue, purple, or a custom colour's name")
+          s.field "style", enumprop("full tints the row; strip paints one cell ahead of TIME (default full)", Settings::COLORMARKER_STYLES)
+          s.field "name", strprop("optional label")
+          s.field "scope", enumprop("rule store (default project); global = settings.json, EVERY project", RULE_SCOPES)
+          s.field "enabled", boolprop("default true")
         end
 
         tool j, "update_color_rule",
-          "Update an existing Colormarker rule by id. Omitted fields are left unchanged. " \
-          "For a global rule this edits the LIBRARY entry, which every project sees; to change " \
-          "only this project's on/off answer use set_color_rule_enabled. Display only — a " \
-          "colour rule never modifies traffic." do |s|
-          s.field "id", intprop("rule id from list_color_rules"), required: true
-          s.field "scope", enumprop("which store `id` is in (default project)", RULE_SCOPES)
-          s.field "when", strprop("new condition (see create_color_rule for the grammar and its caveats)")
-          s.field "color", strprop("a built-in (red | orange | yellow | green | blue | purple) or a custom colour's name")
-          s.field "style", enumprop("full tints the whole row; strip paints one colour cell", Settings::COLORMARKER_STYLES)
-          s.field "name", strprop("rule label")
+          "Update a Colormarker rule by id; omitted fields unchanged. On a global rule this " \
+          "edits the LIBRARY entry (every project)." do |s|
+          s.field "id", intprop("rule id"), required: true
+          s.field "scope", enumprop("`id`'s store (default project)", RULE_SCOPES)
+          s.field "when", strprop("new condition (grammar and caveats: create_color_rule)")
+          s.field "color", strprop("built-in or custom colour name")
+          s.field "style", enumprop("full row or strip cell", Settings::COLORMARKER_STYLES)
+          s.field "name", strprop("label")
         end
 
         tool j, "set_color_rule_enabled",
-          "Enable or disable a Colormarker rule by id. For a GLOBAL rule this writes THIS " \
-          "project's override by default; everywhere=true changes the rule's own default, which " \
-          "every project that has not overridden it follows. Setting a global rule back to its " \
-          "own default DROPS the override rather than pinning it, so this project keeps " \
-          "following later changes to that default." do |s|
-          s.field "id", intprop("rule id from list_color_rules"), required: true
-          s.field "enabled", boolprop("true to enable, false to disable"), required: true
-          s.field "scope", enumprop("which store `id` is in (default project)", RULE_SCOPES)
-          s.field "everywhere", boolprop("global rules only: change the default for every project instead of this one")
+          "Enable/disable a Colormarker rule. For a GLOBAL rule this writes THIS project's " \
+          "override (matching the default DROPS it); everywhere=true changes the default." do |s|
+          s.field "id", intprop("rule id"), required: true
+          s.field "enabled", boolprop("new state"), required: true
+          s.field "scope", enumprop("`id`'s store (default project)", RULE_SCOPES)
+          s.field "everywhere", boolprop("global only: change the default for every project")
         end
 
         tool j, "move_color_rule",
-          "Move a Colormarker rule one slot up or down in PRECEDENCE order. This changes WHICH " \
-          "rule paints a row — the first enabled match wins — so it is a semantic edit, not " \
-          "cosmetics. Moves within the rule's own scope only: every global rule resolves " \
-          "before every project one, so the boundary is not a position." do |s|
-          s.field "id", intprop("rule id from list_color_rules"), required: true
-          s.field "direction", enumprop("up raises the rule's precedence, down lowers it", MOVE_DIRS), required: true
-          s.field "scope", enumprop("which store `id` is in (default project)", RULE_SCOPES)
+          "Move a Colormarker rule one slot in PRECEDENCE (changes which rule paints a row). " \
+          "Within its own scope only: global rules always precede project ones." do |s|
+          s.field "id", intprop("rule id"), required: true
+          s.field "direction", enumprop("up raises precedence", MOVE_DIRS), required: true
+          s.field "scope", enumprop("`id`'s store (default project)", RULE_SCOPES)
         end
 
         tool j, "delete_color_rule",
-          "Delete a Colormarker rule by id. Deleting a GLOBAL rule removes it from every " \
-          "project, and takes this project's override of it along." do |s|
-          s.field "id", intprop("rule id from list_color_rules"), required: true
-          s.field "scope", enumprop("which store `id` is in (default project)", RULE_SCOPES)
+          "Delete a Colormarker rule (a GLOBAL one, with its overrides, everywhere)." do |s|
+          s.field "id", intprop("rule id"), required: true
+          s.field "scope", enumprop("`id`'s store (default project)", RULE_SCOPES)
         end
 
         tool j, "create_custom_color",
-          "Define a GLOBAL custom colour the Colormarker picker offers in every project on " \
-          "top of the six built-ins. The name is what a rule's `color` references (and must " \
-          "not be blank or a built-in word); the hex is an absolute #rrggbb, which does NOT " \
-          "track the active theme. Display only — colours never modify traffic." do |s|
-          s.field "name", strprop("the colour's name — a rule's `color` value and the picker label; unique, not a built-in word"), required: true
-          s.field "hex", strprop("the colour as #rrggbb (or #rgb)"), required: true
+          "Define a GLOBAL custom colour (absolute hex, NOT theme-aware)." do |s|
+          s.field "name", strprop("colour name (a rule's `color`); unique, not blank or a built-in word"), required: true
+          s.field "hex", strprop("#rrggbb or #rgb"), required: true
         end
 
         tool j, "update_custom_color",
-          "Edit a global custom colour in place, keyed by its CURRENT name. Both `new_name` " \
-          "and `hex` are optional and default to the colour's current value, so `hex` alone " \
-          "recolours it and `new_name` alone renames it. A RENAME leaves colour rules naming " \
-          "the old colour dangling on a visible default (the same trade delete_custom_color " \
-          "makes) — recolouring does not, since a rule references a colour by name." do |s|
-          s.field "name", strprop("the colour's current name (from list_custom_colors)"), required: true
-          s.field "new_name", strprop("rename it to this (default: unchanged); unique, not a built-in word")
-          s.field "hex", strprop("recolour it to this #rrggbb (or #rgb) (default: unchanged)")
+          "Edit a global custom colour by its CURRENT name; omitted fields unchanged. A RENAME " \
+          "leaves rules naming the old colour on a visible default." do |s|
+          s.field "name", strprop("current name (list_custom_colors)"), required: true
+          s.field "new_name", strprop("new name; unique, not a built-in word")
+          s.field "hex", strprop("new #rrggbb or #rgb")
         end
 
         tool j, "delete_custom_color",
-          "Delete a global custom colour by name. A colour rule that still names it is left " \
-          "inert — its rows fall back to a visible default rather than the deletion cascading " \
-          "into every project's rules." do |s|
-          s.field "name", strprop("the custom colour's name (from list_custom_colors)"), required: true
+          "Delete a global custom colour. Rules still naming it stay, inert, on a visible default." do |s|
+          s.field "name", strprop("colour name (list_custom_colors)"), required: true
         end
       end
     end

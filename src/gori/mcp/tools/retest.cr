@@ -22,9 +22,11 @@ module Gori
       RETEST_ROLES = Store::RetestRole.values.map(&.label)
 
       # `assertion` is one string in the grammar `Retest::Assertion` parses. The schema quotes
-      # `FORMS` verbatim so the tool description and the parser cannot drift.
+      # `FORMS`' syntax column so the tool description and the parser cannot drift; the
+      # explanations are folded into one short note to keep the catalogue small.
       private def retest_assertion_help : String
-        Retest::Assertion::FORMS.join("; ")
+        Retest::Assertion::FORMS.join("; ", &.split(/\s{2,}/, 2).first) +
+          " (e.g. status:2xx; json:<path> alone = field present)"
       end
 
       @[Tool("list_retest_steps")]
@@ -301,100 +303,83 @@ module Gori
 
       private def list_retest_tools(j : JSON::Builder) : Nil
         tool j, "list_retest_steps",
-          "An Issue's RETEST: the ordered Repeater sends that reproduce the finding, each " \
-          "with a role (setup/baseline/variant/control/cleanup) and at most one assertion. " \
-          "Every step is resolved against the project as it is now, so the reply already " \
-          "says what each one will SEND (method + url), which steps change state, and which " \
-          "cannot run at all — read this before run_retest rather than sending to find out." do |s|
-          s.field "issue_id", intprop("the issue whose retest to list"), required: true
+          "An Issue's RETEST plan (ordered Repeater sends, each with a role and at most one " \
+          "assertion) resolved NOW: what each step will SEND (method + url), which change " \
+          "state, which cannot run. Read before run_retest." do |s|
+          s.field "issue_id", intprop("issue id"), required: true
         end
 
         tool j, "list_retest_runs",
-          "The Issue's bounded retest history, newest first (the last #{Retest::RUN_HISTORY} " \
-          "runs are kept): verdict, when, from which surface, and the per-outcome counts. " \
-          "Use it to answer \"did this regress\" without re-sending anything." do |s|
-          s.field "issue_id", intprop("the issue"), required: true
-          s.field "limit", limitprop("how many runs", PageLimit.new(Retest::RUN_HISTORY, Retest::RUN_HISTORY))
+          "An Issue's retest history, newest first (last #{Retest::RUN_HISTORY} kept): verdict, " \
+          "time, surface, per-outcome counts." do |s|
+          s.field "issue_id", intprop("issue id"), required: true
+          s.field "limit", limitprop("runs", PageLimit.new(Retest::RUN_HISTORY, Retest::RUN_HISTORY))
         end
 
         tool j, "get_retest_run",
-          "One run's result table: role, Repeater session, the expected result, what actually " \
-          "happened and pass/fail per step. Each row keeps the History flow id of its own " \
-          "send, so an old row still opens the exact response it reported (get_flow)." do |s|
-          s.field "run_id", intprop("the run id (from list_retest_runs)"), required: true
+          "One run's result table: role, Repeater session, expected vs actual and pass/fail " \
+          "per step, plus each send's History flow id (get_flow)." do |s|
+          s.field "run_id", intprop("run id (list_retest_runs)"), required: true
         end
 
         return unless @allow_actions
 
         tool j, "add_retest_step",
-          "Append a Repeater session to an Issue's retest. The session is NOT copied — the " \
-          "step sends whatever the tab holds when the retest runs, which is what makes a " \
-          "retest track a fixed request rather than freeze one (freeze_evidence keeps bytes). " \
-          "Roles: setup establishes the precondition (a failed one halts the measurement " \
-          "steps), baseline is the anchor body:same/body:diff compare against, variant is the " \
-          "case under test, control the negative case, cleanup the undo. " \
-          "Assertions — at most one, omit to record the outcome and assert nothing: " \
-          "#{retest_assertion_help}" do |s|
-          s.field "issue_id", intprop("the issue that owns the retest"), required: true
-          s.field "repeater_id", intprop("the Repeater session this step sends"), required: true
-          s.field "role", enumprop("what this step is for (default variant)", RETEST_ROLES)
-          s.field "assertion", strprop("the one expected result, e.g. \"status:403\" or \"json:data.role=admin\" (omit for none)")
+          "Append a Repeater session as a step of an Issue's retest. NOT copied: the step sends " \
+          "whatever the tab holds at run time. Roles: setup = precondition (a failure halts " \
+          "measurement), baseline = what body:same/body:diff compare against, variant = case " \
+          "under test, control = negative case, cleanup = undo. Assertion (at most one; omit " \
+          "to only record the outcome): #{retest_assertion_help}" do |s|
+          s.field "issue_id", intprop("owning issue"), required: true
+          s.field "repeater_id", intprop("Repeater session to send"), required: true
+          s.field "role", enumprop("default variant", RETEST_ROLES)
+          s.field "assertion", strprop("expected result, e.g. \"status:403\" (omit for none)")
         end
 
         tool j, "update_retest_step",
-          "Change one step's role and/or its expected result. Pass assertion:\"\" to drop the " \
-          "assertion and only record the outcome. Assertions: #{retest_assertion_help}" do |s|
-          s.field "id", intprop("the retest step id (from list_retest_steps)"), required: true
-          s.field "role", enumprop("the new role", RETEST_ROLES)
-          s.field "assertion", strprop("the new expected result (\"\" clears it)")
+          "Change a step's role and/or assertion (grammar: add_retest_step)." do |s|
+          s.field "id", intprop("step id (list_retest_steps)"), required: true
+          s.field "role", enumprop("new role", RETEST_ROLES)
+          s.field "assertion", strprop("new expected result; \"\" drops it (outcome only recorded)")
         end
 
         tool j, "move_retest_step",
-          "Move one step to a 1-based position, shifting the rest. Order is what a run " \
-          "executes in — a `baseline` must run before any step that compares against it." do |s|
-          s.field "id", intprop("the retest step id"), required: true
-          s.field "position", intprop("the new 1-based position (clamped to the list)"), required: true
+          "Move a step to a 1-based position. Order is execution order: a baseline must " \
+          "precede the steps comparing against it." do |s|
+          s.field "id", intprop("step id"), required: true
+          s.field "position", intprop("1-based, clamped to the list"), required: true
         end
 
         tool j, "remove_retest_step",
-          "Remove one step and close the gap its position left. The Repeater session and any " \
-          "entity link to it are untouched: a retest step is a test plan, not a link." do |s|
-          s.field "id", intprop("the retest step id"), required: true
+          "Remove a step and close the gap. The Repeater session and entity links are untouched." do |s|
+          s.field "id", intprop("step id"), required: true
         end
 
         tool j, "clear_retest_steps",
-          "Drop every step of an Issue's retest. The run history is KEPT: re-planning the " \
-          "check does not un-run it, and an old summary is the regression baseline." do |s|
-          s.field "issue_id", intprop("the issue whose steps to clear"), required: true
+          "Drop every step of an Issue's retest. The run history is KEPT." do |s|
+          s.field "issue_id", intprop("issue id"), required: true
         end
 
         tool j, "delete_retest_run",
-          "Delete one run summary and its result rows. The steps stay, and so do the History " \
-          "flows each send recorded — this drops the report, not the evidence. The history " \
-          "prunes itself to the newest #{Retest::RUN_HISTORY}, so use this for a run that " \
-          "should not be on the record at all (sent at the wrong target, or under a scope " \
-          "since fixed)." do |s|
-          s.field "run_id", intprop("the run id (from list_retest_runs)"), required: true
+          "Delete one run summary and its rows; the steps and the History flows it recorded stay." do |s|
+          s.field "run_id", intprop("run id (list_retest_runs)"), required: true
         end
 
         tool j, "run_retest",
-          "Run an Issue's retest: every step in order, through the project's scope and " \
-          "Sandbox gates, judged against its assertion. This is the answer to \"is the " \
-          "finding still there\" after a fix. Each send is recorded in History as " \
-          "`src:retest` with the issue and step on the row, and the summary is kept on the " \
-          "Issue. Returns verdict pass|fail|inconclusive|blocked plus a row per step; " \
-          "isError is set on anything but `pass`. A batch containing a state-changing method " \
-          "is REFUSED (CONFIRM_REQUIRED) with the exact request count until confirm:true — " \
-          "each of those re-runs its side effect on the target. Once gori refuses a send " \
-          "(scope/Sandbox/exclude) the rest is skipped, cleanup included, unless " \
+          "Run an Issue's retest: every step in order through the scope and Sandbox gates, " \
+          "judged by its assertion; sends land in History as `src:retest`, the summary on the " \
+          "Issue. Returns verdict pass|fail|inconclusive|blocked plus a row per step; isError " \
+          "unless `pass`. A batch with a state-changing method is REFUSED (CONFIRM_REQUIRED, " \
+          "with the request count) until confirm:true, as each re-runs its side effect. After " \
+          "a refused send (scope/Sandbox/exclude) the rest is skipped, cleanup too, unless " \
           "allow_cleanup:true." do |s|
-          s.field "issue_id", intprop("the issue to retest"), required: true
-          s.field "confirm", boolprop("required when the batch contains a state-changing method (default false)")
-          s.field "allow_cleanup", boolprop("run cleanup steps even after gori refused a send (default false)")
-          s.field "allow_unscoped", boolprop("send even if a target is outside the project scope; Sandbox and explicit excludes still apply (default false)")
-          s.field "record_history", boolprop("write each send to History (default true — a retest is evidence)")
-          s.field "verify", boolprop("verify upstream TLS certificates (default true; can only tighten the server's own setting)")
-          s.field "timeout_ms", intprop("per-step connect + idle timeout in ms (default #{Retest::LiveBackend::DEFAULT_TIMEOUT.total_milliseconds.to_i}, 100-120000)")
+          s.field "issue_id", intprop("issue id"), required: true
+          s.field "confirm", boolprop("required for a state-changing batch")
+          s.field "allow_cleanup", boolprop("run cleanup steps even after a refused send")
+          s.field "allow_unscoped", boolprop("send even outside the project scope; Sandbox and explicit excludes still apply")
+          s.field "record_history", boolprop("write sends to History (default true)")
+          s.field "verify", boolprop("verify upstream TLS (default true; can only tighten the server's setting)")
+          s.field "timeout_ms", intprop("per-step connect + idle timeout, ms (default #{Retest::LiveBackend::DEFAULT_TIMEOUT.total_milliseconds.to_i}, 100-120000)")
         end
       end
     end

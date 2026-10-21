@@ -369,116 +369,81 @@ module Gori
       # wrong side of it by landing in the wrong place in a 1,300-line method.
       private def list_intercept_tools(j : JSON::Builder) : Nil
         tool j, "intercept_list",
-          "List HTTP messages currently HELD by the live intercept queue of the capturing " \
-          "gori instance, plus intercept state (enabled/direction/filter) and a liveness " \
-          "heartbeat. This is how an agent 'sits in the loop' alongside the human — inspect " \
-          "held requests/responses, then forward/drop/edit them (see intercept_forward etc). " \
-          "available:false when no bridge has ever been published; capturing:false (with a " \
-          "growing heartbeat_age_seconds) when the last capturing instance is no longer live, " \
-          "in which case mutating verbs refuse. Header values redacted unless " \
-          "include_sensitive:true. An HTTP row carries head_preview + body_size; a WebSocket " \
-          "row has no head at all, so it carries body_preview (omitted for a BINARY frame) and " \
-          "body_size is the whole payload. operator_editing:true means the HUMAN has unsaved " \
-          "edits typed into that hold right now — forwarding, editing or dropping it discards " \
-          "their work, so leave it to them or ask first." do |s|
-          s.field "include_sensitive", boolprop("show Authorization/Cookie/etc header values instead of [REDACTED] (default false)")
-          s.field "offset", intprop("held items to skip (default 0); `has_more` says a reply stopped short of pending_count")
+          "List messages HELD by the capturing gori's live intercept queue, plus state " \
+          "(enabled/direction/filter) and heartbeat. available:false = no bridge ever; " \
+          "capturing:false (growing heartbeat_age_seconds) = capturer gone, mutating verbs " \
+          "refuse. HTTP row: head_preview + body_size; WebSocket row: body_preview (omitted for " \
+          "BINARY), body_size = payload. operator_editing:true = the HUMAN has unsaved edits in " \
+          "that hold; forwarding/editing/dropping discards them, so leave it or ask first." do |s|
+          s.field "include_sensitive", boolprop("show Authorization/Cookie/etc values instead of [REDACTED]")
+          s.field "offset", intprop("held items to skip (default 0); `has_more` = stopped short of pending_count")
         end
 
         tool j, "intercept_get",
-          "Full detail for ONE held intercept item (redacted head + body size; a WebSocket " \
-          "message has no head, so it returns body_preview and body_size is the payload). Pass " \
-          "include_sensitive:true to ALSO get the full raw message base64 (unredacted; edit it " \
-          "and send it back as intercept_forward_edit's raw_base64 for a byte-exact round " \
-          "trip) — otherwise raw is withheld " \
-          "(raw_redacted:true) since base64 is not redaction. NOT_FOUND if the item was " \
-          "already forwarded/dropped or never held. Header values redacted unless " \
-          "include_sensitive:true." do |s|
-          s.field "item_id", intprop("held item id from intercept_list"), required: true
-          s.field "include_sensitive", boolprop("show sensitive header values instead of [REDACTED] (default false)")
+          "Detail for ONE held item (redacted head + body size; WebSocket: body_preview, " \
+          "body_size = payload). NOT_FOUND once forwarded/dropped or never held." do |s|
+          s.field "item_id", intprop("held item id (intercept_list)"), required: true
+          s.field "include_sensitive", boolprop("unredacted headers plus raw_base64 (byte-exact, for intercept_forward_edit); else raw_redacted:true")
         end
 
         return unless @allow_actions
 
         tool j, "intercept_forward",
-          "Forward a currently-held intercept item (from intercept_list) byte-exact, letting " \
-          "the request/response continue. The action is applied by the capturing gori instance " \
-          "and surfaced as a visible notification to the human operator. An item intercept_list " \
-          "reported as operator_editing:true carries unsaved human edits, and a byte-exact " \
-          "forward discards them. Returns the outcome " \
-          "(forwarded | no_such_item if it was already released | not_confirmed to retry)." do |s|
-          s.field "item_id", intprop("held item id from intercept_list"), required: true
+          "Forward a held item byte-exact (shown to the operator). Discards unsaved human edits (operator_editing:true). Returns forwarded | " \
+          "no_such_item (already released) | not_confirmed (retry)." do |s|
+          s.field "item_id", intprop("held item id (intercept_list)"), required: true
         end
 
         tool j, "intercept_drop",
-          "Drop a currently-held intercept item: the proxy answers the client a canned 502 and " \
-          "the message never reaches its destination. Applied by the capturing instance and " \
-          "surfaced to the human. An item intercept_list reported as operator_editing:true " \
-          "carries unsaved human edits, and dropping it destroys them along with the message. " \
-          "Returns dropped | no_such_item | not_confirmed." do |s|
-          s.field "item_id", intprop("held item id from intercept_list"), required: true
+          "Drop a held item: the client gets a canned 502 and the message never reaches its " \
+          "destination. Destroys unsaved human edits (operator_editing:true). Returns dropped | " \
+          "no_such_item | not_confirmed." do |s|
+          s.field "item_id", intprop("held item id (intercept_list)"), required: true
         end
 
         tool j, "intercept_forward_edit",
-          "Forward a held intercept item with EDITED bytes. Supply the full replacement wire " \
-          "message in EITHER `raw_base64` (byte-exact; the round trip for the bytes " \
-          "intercept_get returns as raw_base64, and the only channel a binary body survives) " \
-          "OR `raw` (plain text, for an ordinary edit). Content-Length is recomputed to match " \
-          "the body by default; pass update_content_length:false to forward your framing " \
-          "headers untouched (a CL/TE desync). Otherwise the bytes are forwarded byte-exact " \
-          "(NO variable expansion — a " \
-          "security tool forwards exactly what you send). In `raw`, a lone LF in the HEADER " \
-          "block becomes CRLF so a hand-typed message still frames; the BODY is untouched. " \
-          "An item intercept_list reported as operator_editing:true has unsaved human edits in " \
-          "it, and your bytes replace them wholesale. " \
-          "Applied by the capturing instance + surfaced to the human. Returns " \
-          "forwarded (edited:true — meaning YOUR edit was applied, content_length_synced) | " \
-          "no_such_item | not_confirmed." do |s|
-          s.field "item_id", intprop("held item id from intercept_list"), required: true
-          s.field "raw", strprop("the full edited HTTP wire message as text (request/status line + headers + body)")
-          s.field "raw_base64", strprop("the full edited wire message, base64 — byte-exact; use this for a binary body")
+          "Forward a held item with EDITED bytes: the full wire message, sent verbatim (NO " \
+          "variable expansion) except Content-Length (update_content_length). Replaces any " \
+          "unsaved human edits (operator_editing:true). Returns forwarded (edited:true, " \
+          "content_length_synced) | no_such_item | not_confirmed." do |s|
+          s.field "item_id", intprop("held item id (intercept_list)"), required: true
+          s.field "raw", strprop("message as text; a lone LF in the HEADER block becomes CRLF, body untouched")
+          s.field "raw_base64", strprop("message as base64, byte-exact (round-trips intercept_get's raw_base64); the only way a binary body survives")
           s.requires_one_of "raw", "raw_base64"
-          s.field "update_content_length", boolprop("recompute Content-Length to match the edited body (default true). Set FALSE to hold your own value — a Content-Length shorter or longer than the body, or Content-Length alongside Transfer-Encoding, is the canonical request-smuggling primitive and the reason to hold a request at all. With it false, `raw_base64` really is byte-exact end to end.")
+          s.field "update_content_length", boolprop("recompute Content-Length to the edited body (default true). FALSE keeps your framing (CL mismatching the body, or CL + Transfer-Encoding: the smuggling primitive); raw_base64 is then byte-exact end to end")
         end
 
         tool j, "intercept_toggle",
-          "Enable or disable the live intercept catch (desired state — idempotent). Applies " \
-          "to live connections too, HTTP/2 streams included. Applied by the capturing " \
-          "instance. Returns toggled | busy." do |s|
-          s.field "enable", boolprop("true = start holding matching traffic; false = stop (auto-forwards anything currently held)"), required: true
+          "Enable/disable the live intercept catch (idempotent; applies to live " \
+          "connections). Returns toggled | busy." do |s|
+          s.field "enable", boolprop("true holds matching traffic; false stops and auto-forwards everything held"), required: true
         end
 
         tool j, "intercept_set_filter",
-          "Set the conditional-intercept filter — a gori-QL-like query that NARROWS which " \
-          "in-flight messages are held (e.g. 'host:api.example.com method:POST'). Empty " \
-          "clears it (hold everything in scope). Applied by the capturing instance." do |s|
-          s.field "query", strprop("filter query; empty string clears the filter"), required: true
+          "Set the intercept filter NARROWING which in-flight messages are held." do |s|
+          s.field "query", strprop("QL-like query, e.g. 'host:api.example.com method:POST'; '' clears (hold everything in scope)"), required: true
         end
 
         tool j, "ws_inject",
-          "Inject ONE frame into a still-open WebSocket the proxy is relaying (a captured " \
-          "HTTP/1.1 Upgrade flow), in either direction, on the socket the app already has — its " \
-          "session and server-side state included. ACTIVE and scope-gated against the flow's " \
-          "host like send_request. The bytes go out verbatim: no token expansion, no Match & " \
-          "Replace, and ahead of any message Intercept is holding. A text/binary frame waits up " \
-          "to 5 s for a fragmented message on that side to finish, then is REFUSED; a " \
-          "ping/pong/close goes in at once. Applied by the capturing TUI (a headless capture " \
-          "cannot inject); the frame is recorded on the flow with origin:\"gori\". HTTP/2 " \
-          "(RFC 8441) WebSockets are refused. Returns injected | REFUSED (closed, mid-message, " \
-          "sandbox) | not_confirmed." do |s|
-          s.field "flow_id", intprop("the WebSocket flow id (from list_history)"), required: true
-          s.field "direction", enumprop("out = client→server (masked with a fresh key), in = server→client (default out)", %w[out in])
-          s.field "opcode", enumprop("frame type (default text)", Proxy::WS::Live::OPCODES.keys)
-          s.field "payload", strprop("the payload as text, taken literally (default empty)")
-          s.field "payload_base64", strprop("the payload, base64 — byte-exact; use this for a binary frame")
-          s.field "allow_unscoped", boolprop("inject even when the flow's host is outside (or without) a configured scope (default false)")
+          "Inject ONE frame into a still-open WebSocket the proxy relays (captured HTTP/1.1 " \
+          "Upgrade flow), on the app's own socket and session. ACTIVE, scope-gated on the " \
+          "flow's host. Sent verbatim (no token expansion, no Match & Replace), ahead of any " \
+          "held message. A text/binary frame waits up to 5 s for a fragmented message on that " \
+          "side, then is REFUSED. Needs the capturing TUI (not headless); recorded on the flow " \
+          "with origin:\"gori\". HTTP/2 WebSockets refused. Returns injected | REFUSED (closed, " \
+          "mid-message, sandbox) | not_confirmed." do |s|
+          s.field "flow_id", intprop("WebSocket flow id (list_history)"), required: true
+          s.field "direction", enumprop("out = client→server (masked), in = server→client (default out)", %w[out in])
+          s.field "opcode", enumprop("default text", Proxy::WS::Live::OPCODES.keys)
+          s.field "payload", strprop("payload text, literal")
+          s.field "payload_base64", strprop("payload as base64, byte-exact")
+          s.field "allow_unscoped", boolprop("inject even outside (or without) a configured scope")
         end
 
         tool j, "intercept_set_direction",
-          "Set which leg(s) intercept holds: both | request | response (default request; the requestonly / " \
-          "responseonly spellings intercept_list reports are accepted too). Applied by the " \
-          "capturing instance." do |s|
-          s.field "direction", enumprop("which side of a flow the proxy holds", INTERCEPT_DIRECTION_ARGS), required: true
+          "Set which leg(s) intercept holds (default request; intercept_list's " \
+          "requestonly/responseonly spellings accepted)." do |s|
+          s.field "direction", enumprop("side(s) held", INTERCEPT_DIRECTION_ARGS), required: true
         end
       end
     end

@@ -253,46 +253,36 @@ module Gori
       # then be added on the wrong side of it by landing in the wrong place in a long method.
       private def list_saved_views_tools(j : JSON::Builder) : Nil
         tool j, "list_views",
-          "List the History VIEWS available in this project. A view is a named History QL " \
-          "query used as a LENS: list_history{view} ANDs it over `query` rather than replacing " \
-          "it, the same way the TUI's `v` picker ANDs it over the filter bar. The built-ins " \
-          "that ship in every project are #{SavedViews.builtin_names}, then the " \
-          "GLOBAL library from settings.json, then this project's own rows. `active` marks the " \
-          "view the TUI is showing this project through — it does NOT apply to list_history, " \
-          "which filters only by the `view` you pass it, so a stored UI preference can never " \
-          "silently drop rows from your answer. Names are unique only WITHIN a scope." do |s|
-          s.field "scope", enumprop("show only views from this store (default: all three)", VIEW_SCOPES_R)
+          "List History VIEWS: named History QL queries used as a LENS (list_history{view} ANDs " \
+          "one over `query`). Built-ins #{SavedViews::BUILTINS.join(", ", &.name)} first, then GLOBAL " \
+          "(settings.json), then the project's. `active` marks only the TUI's current view: " \
+          "list_history filters by nothing but the `view` you pass. Names are unique per scope." do |s|
+          s.field "scope", enumprop("only this store (default: all three)", VIEW_SCOPES_R)
         end
 
         return unless @allow_actions
 
         tool j, "create_view",
-          "Save a named History view — a QL query the History list narrows to, on top of " \
-          "whatever else is filtering. Persisted to this project, or to the global library " \
-          "every project sees when scope=global. The query is VALIDATED here rather than at " \
-          "apply time: one whose every term drops would narrow nothing while the TUI's `v:` " \
-          "chip claims it does, so it is refused." do |s|
-          s.field "name", strprop("the view's name — how list_history{view} and `gori run history --view` address it; unique within its scope, and not one of the built-in names"), required: true
-          s.field "query", strprop("the view's query, in History QL — the SAME language and fields list_history's `query` takes (host: path: url: method: status: src: size: dur: header: body: scope: …, ~regex, AND/OR/NOT, -negation, grouping)"), required: true
-          s.field "scope", enumprop("which store the view lives in (default project). A global view appears in EVERY project", RULE_SCOPES)
+          "Save a named History view (a QL query the History list narrows to). The query is " \
+          "VALIDATED: one whose every term drops, narrowing nothing, is refused." do |s|
+          s.field "name", strprop("view name (list_history{view} addresses it); unique in its scope, not a built-in name"), required: true
+          s.field "query", strprop("History QL, same language and fields as list_history's `query`"), required: true
+          s.field "scope", enumprop("view store (default project); global = EVERY project", RULE_SCOPES)
         end
 
         tool j, "update_view",
-          "Update a saved view: rename it (new_name), change its query (query), move it between " \
-          "the project and global stores (new_scope), or any combination. Omitted fields are " \
-          "left unchanged. Built-in views cannot be edited." do |s|
-          s.field "name", strprop("the view to update, as listed by list_views"), required: true
-          s.field "scope", enumprop("which store `name` is in (default project)", RULE_SCOPES)
-          s.field "new_name", strprop("rename the view")
-          s.field "query", strprop("replace the view's query (see create_view for the grammar)")
-          s.field "new_scope", enumprop("move the view to the other store", RULE_SCOPES)
+          "Update a saved view; omitted fields unchanged. Built-ins cannot be edited." do |s|
+          s.field "name", strprop("view to update (list_views)"), required: true
+          s.field "scope", enumprop("`name`'s store (default project)", RULE_SCOPES)
+          s.field "new_name", strprop("rename")
+          s.field "query", strprop("new query")
+          s.field "new_scope", enumprop("move to the other store", RULE_SCOPES)
         end
 
         tool j, "delete_view",
-          "Delete a saved view. Built-in views cannot be deleted. If this project was looking " \
-          "through the deleted view it falls back to All." do |s|
-          s.field "name", strprop("the view to delete, as listed by list_views"), required: true
-          s.field "scope", enumprop("which store `name` is in (default project)", RULE_SCOPES)
+          "Delete a saved view (not a built-in). A project looking through it falls back to All." do |s|
+          s.field "name", strprop("view to delete"), required: true
+          s.field "scope", enumprop("`name`'s store (default project)", RULE_SCOPES)
         end
       end
     end

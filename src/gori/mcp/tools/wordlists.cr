@@ -260,52 +260,50 @@ module Gori
 
       private def list_wordlists_tools(j : JSON::Builder) : Nil
         tool j, "list_wordlists",
-          "List the global wordlist catalog (named lists under GORI_HOME/wordlists): name, size, modified time. " \
-          "Never returns values. Use a name as `wordlist` in fuzz_start, mine_start or discover_start; " \
-          "a name is looked up in the server's working directory first, then here." do |s|
-          s.field "limit", limitprop("max lists to return", WORDLISTS_LIMIT)
-          s.field "offset", intprop("lists to skip (default 0); `truncated:true` means more follow")
+          "List the global wordlist catalog (GORI_HOME/wordlists): name, size, mtime; never " \
+          "values. Pass a name as `wordlist` to fuzz_start/mine_start/discover_start (looked " \
+          "up in the server's working directory first, then here)." do |s|
+          s.field "limit", limitprop("max lists", WORDLISTS_LIMIT)
+          s.field "offset", intprop("lists to skip (default 0); `truncated:true` = more follow")
         end
 
         tool j, "get_wordlist",
-          "One catalog list's metadata: path, bytes and a line count (bounded — `lines_complete:false` means " \
-          "more). Values are returned only with include_values:true, and may be sensitive." do |s|
-          s.field "name", strprop("catalog list name"), required: true
-          s.field "include_values", boolprop("also return the first lines (default false)")
-          s.field "max_lines", intprop("lines to return with include_values (default #{WORDLIST_PREVIEW_DEFAULT}, max #{WORDLIST_PREVIEW_MAX})")
+          "One catalog list's metadata: path, bytes, bounded line count (`lines_complete:false` " \
+          "= more). Values only with include_values:true (may be sensitive)." do |s|
+          s.field "name", strprop("list name"), required: true
+          s.field "include_values", boolprop("also return the first lines")
+          s.field "max_lines", intprop("lines with include_values (default #{WORDLIST_PREVIEW_DEFAULT}, max #{WORDLIST_PREVIEW_MAX})")
         end
 
         return unless @allow_actions
 
         tool j, "save_wordlist",
-          "Save a list in the global catalog, one value per line exactly as given (a blank or `#` line stays a " \
-          "payload), from `values` or from the bound project's data with `payload_from`. Atomic and owner-only; " \
-          "refuses to replace an existing list unless overwrite:true. A value cannot contain a line break." do |s|
-          s.field "name", strprop("catalog name: letters, digits, _ . + - and inner spaces; not a path"), required: true
-          s.field "values", strarrprop("the values, one per line (or use payload_from)")
-          s.field "payload_from", strprop("instead of values: read them from the bound project's captured data, '<QL> <projection>' " \
-                                          "(param-names | param-values | path-segments | js-endpoints | extracted; e.g. 'host:api.example param-names'). " \
-                                          "Credential material stays out unless include_sensitive; values with a line break are left out and counted")
-          s.field "include_sensitive", boolprop("with payload_from: also save credential material (default false; `extracted` needs it)")
-          s.field "locations", strprop("with payload_from: comma list of query,form,multipart,json,headers,cookies (default query,form,multipart,json)")
-          s.field "max_flows", intprop("with payload_from: newest flows read (default #{PayloadFrom::DEFAULT_MAX_FLOWS}, max #{PayloadFrom::MAX_FLOWS})")
-          s.field "max_values", intprop("with payload_from: distinct values kept (default #{PayloadFrom::DEFAULT_MAX_VALUES}, max #{PayloadFrom::MAX_VALUES})")
-          s.field "overwrite", boolprop("replace a list of that name (default false)")
+          "Save a catalog list, one value per line exactly as given (blank or `#` lines stay " \
+          "payloads; a value cannot contain a line break). Atomic, owner-only; refuses to " \
+          "replace an existing list unless overwrite:true." do |s|
+          s.field "name", strprop("letters, digits, _ . + - and inner spaces; not a path"), required: true
+          s.field "values", strarrprop("the values")
+          s.field "payload_from", strprop("'<QL> <projection>' over captured data; projection: param-names | param-values | path-segments | js-endpoints | extracted (e.g. 'host:api.example param-names'). Credential material stays out unless include_sensitive; values with a line break are dropped and counted")
+          s.field "include_sensitive", boolprop("payload_from: keep credential material (`extracted` needs it)")
+          s.field "locations", strprop("payload_from: comma list of query,form,multipart,json,headers,cookies (default: the first four)")
+          s.field "max_flows", intprop("payload_from: newest flows read (default #{PayloadFrom::DEFAULT_MAX_FLOWS}, max #{PayloadFrom::MAX_FLOWS})")
+          s.field "max_values", intprop("payload_from: distinct values kept (default #{PayloadFrom::DEFAULT_MAX_VALUES}, max #{PayloadFrom::MAX_VALUES})")
+          s.field "overwrite", boolprop("replace an existing list")
           s.requires_one_of "values", "payload_from"
         end
 
         tool j, "rename_wordlist",
-          "Rename a catalog list. Refuses to replace an existing list unless overwrite:true." do |s|
-          s.field "name", strprop("current catalog name"), required: true
-          s.field "new_name", strprop("new catalog name"), required: true
-          s.field "overwrite", boolprop("replace a list already named new_name (default false)")
+          "Rename a catalog list; refuses to replace an existing one unless overwrite:true." do |s|
+          s.field "name", strprop("current name"), required: true
+          s.field "new_name", strprop("new name"), required: true
+          s.field "overwrite", boolprop("replace a list named new_name")
         end
 
         tool j, "delete_wordlist",
-          "Delete a catalog list. Requires confirm:true — without it the call is refused and reports what it " \
-          "would have removed. This cannot be undone." do |s|
-          s.field "name", strprop("catalog list name"), required: true
-          s.field "confirm", boolprop("must be true to actually delete; anything else refuses"), required: true
+          "Delete a catalog list, irreversibly. Without confirm:true it is refused and reports " \
+          "what it would remove." do |s|
+          s.field "name", strprop("list name"), required: true
+          s.field "confirm", boolprop("must be true to delete"), required: true
         end
       end
     end

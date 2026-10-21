@@ -124,27 +124,26 @@ module Gori
       # wrong side of it by landing in the wrong place in a 1,300-line method.
       private def list_notes_tools(j : JSON::Builder) : Nil
         tool j, "list_notes",
-          "List all project notes (markdown/text documents) with metadata like title and line " \
-          "count. `current_id` is the id of the open note (null when there is none); every " \
-          "row's `current` says the same thing per note." { }
+          "List project notes (title, line count, ...). `current_id` is the open note (null if " \
+          "none); each row's `current` says the same." { }
 
-        tool j, "get_note", "Get the full text and metadata of a specific note by its database ID." do |s|
-          s.field "id", intprop("database note ID"), required: true
+        tool j, "get_note", "Full text and metadata of a note." do |s|
+          s.field "id", intprop("note id"), required: true
         end
 
         return unless @allow_actions
 
-        tool j, "create_note", "Create a new note with optional text content." do |s|
-          s.field "text", strprop("initial text content for the new note")
+        tool j, "create_note", "Create a note." do |s|
+          s.field "text", strprop("initial text (optional)")
         end
 
-        tool j, "update_note", "Update the text content of an existing note by its database ID." do |s|
-          s.field "id", intprop("database note ID to update"), required: true
-          s.field "text", strprop("new text content for the note"), required: true
+        tool j, "update_note", "Replace a note's text." do |s|
+          s.field "id", intprop("note id"), required: true
+          s.field "text", strprop("new text"), required: true
         end
 
-        tool j, "delete_note", "Delete a note by its database ID." do |s|
-          s.field "id", intprop("database note ID to delete"), required: true
+        tool j, "delete_note", "Delete a note." do |s|
+          s.field "id", intprop("note id"), required: true
         end
       end
     end
