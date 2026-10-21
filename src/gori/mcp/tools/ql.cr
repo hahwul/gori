@@ -252,18 +252,15 @@ module Gori
       # wrong side of it by landing in the wrong place in a 1,300-line method.
       private def list_ql_tools(j : JSON::Builder) : Nil
         tool j, "ql_reference",
-          "Return the gori QL (query language) syntax reference for filtering flows " \
-          "(list_history, list_sitemap). Call this before writing complex queries." { }
+          "The gori QL syntax reference for list_history/list_sitemap queries; read it before " \
+          "writing complex ones." { }
 
         tool j, "ql_explain",
-          "Diagnose a gori QL query WITHOUT running it: which terms were applied, which " \
-          "would be dropped (broadening results), which regex terms are invalid " \
-          "(match nothing), the compiled SQL, and warnings. Use to debug a query that " \
-          "returns too many or zero rows. `matches_everything` means every term was dropped " \
-          "and the query narrows nothing; `unknown_fields` names a `field:` QL does not " \
-          "implement (its whole token is searched as text, so it matches nothing); " \
-          "`refused_by_query_tools` means list_history / " \
-          "list_sitemap / probe_scan will answer QUERY_SYNTAX rather than run it." do |s|
+          "Diagnose a gori QL query WITHOUT running it: applied, dropped (broadening) and " \
+          "invalid-regex (match-nothing) terms, compiled SQL, warnings. `matches_everything` = " \
+          "nothing narrowed; `unknown_fields` = `field:`s QL lacks (they match nothing); " \
+          "`refused_by_query_tools` = list_history / list_sitemap / probe_scan would answer " \
+          "QUERY_SYNTAX." do |s|
           s.field "query", strprop("the gori QL query to analyze"), required: true
         end
       end

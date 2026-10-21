@@ -210,33 +210,24 @@ module Gori
 
       private def list_diff_tools(j : JSON::Builder) : Nil
         tool j, "diff_projects",
-          "Retest diff: compare two PROJECTS at endpoint scale — what is new, what is gone, " \
-          "and what answers differently since the last engagement. (compare_flows is the " \
-          "message-level counterpart.) Endpoints are keyed by the same folded path template " \
-          "list_sitemap shows (/users/{uuid}), so captured ids don't turn every row into an " \
-          "added/removed pair, and 'changed' is judged by a tolerance band rather than byte " \
-          "equality, so a dynamic page is not a finding. " \
-          "Returns {a,b:{label,flows,endpoints,hosts,first_seen,last_seen,scope_rules,truncated}, " \
-          "counts:{added,gone,changed,unchanged,removed}, caveats[], scope_mismatch, " \
-          "endpoints:[{verdict,observation,host,method,path,a,b,changes[]}], issues:[…]}. " \
-          "READ THE VERDICTS EXACTLY: 'removed' means the newer project captured NO request " \
-          "to that endpoint — a coverage gap, NOT evidence it was deleted; 'gone' is the " \
-          "confirmed case (the newer capture asked and got 404/410). Every row carries an " \
-          "'observation': one sentence naming what that row IS and IS NOT evidence of, worded " \
-          "for a report — quote or paraphrase it when filing an issue from a row rather than " \
-          "restating the verdict yourself. Each side carries a " \
-          "sample_flow_id, which compare_flows/get_flow take for the byte-level detail. " \
-          "Pure read: no network, nothing written — re-confirming a finding is a send_request " \
-          "you make deliberately." do |s|
+          "Retest diff: compare two PROJECTS per endpoint — new, gone, and answering " \
+          "differently since the last engagement. Endpoints are keyed by list_sitemap's " \
+          "folded path template (/users/{uuid}); 'changed' uses a tolerance band, not byte " \
+          "equality. Returns per-side summaries `a`/`b`, `counts`, `caveats`, " \
+          "`scope_mismatch`, `endpoints:[{verdict,observation,host,method,path,a,b,changes}]`, " \
+          "`issues`. READ VERDICTS EXACTLY: 'removed' = the newer project captured NO request " \
+          "there — a coverage gap, NOT evidence of deletion; 'gone' = confirmed (404/410). " \
+          "Quote a row's 'observation' (what it IS and IS NOT evidence of) when filing an " \
+          "issue. Each side's sample_flow_id feeds compare_flows/get_flow. Pure read." do |s|
           s.field "from", strprop("BASELINE project — the earlier engagement (name, slug or short id)"), required: true
-          s.field "to", strprop("newer project (default: the project this server is bound to)")
-          s.field "query", strprop("narrow BOTH sides with a QL query (host: method: path: status: …). A `scope:` term is answered as an unconfigured project — there is no single scope across two projects; use in_scope, which asks each side its own rules")
-          s.field "in_scope", boolprop("only hosts inside each project's own scope rules (default false)")
-          s.field "verdicts", strarrprop("only return endpoints with these verdicts: added, gone, changed, unchanged, removed (default: all)")
-          s.field "issues", boolprop("include the issue retest — which endpoint each of the baseline's open issues sits on, and whether it still answers the same way (default true)")
+          s.field "to", strprop("newer project (default: the one this server is bound to)")
+          s.field "query", strprop("narrow BOTH sides with QL; a `scope:` term sees no scope (use in_scope)")
+          s.field "in_scope", boolprop("only hosts inside each project's own scope rules")
+          s.field "verdicts", strarrprop("only these verdicts: added, gone, changed, unchanged, removed (default all)")
+          s.field "issues", boolprop("include the retest of the baseline's open issues (default true)")
           s.field "limit", limitprop("max endpoint groups to read per side", DIFF_LIMIT)
-          s.field "offset", intprop("endpoint rows to skip (default 0): a reply holds about 64 KB, and `has_more` / `total` say what is left")
-          s.field "lenient", boolprop("search a `field:` QL does not implement as literal TEXT instead of refusing the query (default false) — a typo free-texts its whole token and matches nothing on both sides")
+          s.field "offset", intprop("endpoint rows to skip (default 0); `has_more`/`total` say what a ~64 KB reply left")
+          s.field "lenient", boolprop("free-text an unknown `field:` instead of refusing (a typo then matches nothing)")
         end
       end
     end

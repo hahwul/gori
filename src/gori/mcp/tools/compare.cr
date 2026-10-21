@@ -262,27 +262,19 @@ module Gori
       # wrong side of it by landing in the wrong place in a 1,300-line method.
       private def list_compare_tools(j : JSON::Builder) : Nil
         tool j, "compare_flows",
-          "Line-diff two flows' request or response — the MCP equivalent of the TUI's Comparer " \
-          "tab. Response bodies are decoded (de-chunked/decompressed) before diffing; request " \
-          "bodies are compared byte-faithful. Returns {changed_lines, identical, truncated, " \
-          "source_truncated, " \
-          "meta:{a,b:{status,size,duration_us}, delta}, " \
-          "diff:[{kind: same|add|del, text} | {kind: fold, hidden}]} (add = only in flow B, " \
-          "del = only in flow A; fold = a run of `hidden` identical lines collapsed by `context`). " \
-          "`meta.delta` answers the usual question — a status flip, a size or timing shift — " \
-          "before any diff line is read. `identical` is only ever true over a COMPLETE " \
-          "comparison: a diff cut at the line/byte cap, or a body the capture cap already cut " \
-          "(`source_truncated` names which side), sets `truncated` and leaves `identical` " \
-          "false, because matching prefixes are not matching bodies. " \
-          "Authorization/Cookie/Set-Cookie/API-key header values are [REDACTED] in the diff " \
-          "text unless include_sensitive=true; the diff itself is taken over the captured values, so a " \
-          "changed credential is still a del/add pair. Pure read: no network, nothing written." do |s|
+          "Line-diff two flows' request or response. Response bodies are decoded first; " \
+          "request bodies byte-faithful. Returns {changed_lines, identical, truncated, " \
+          "source_truncated, meta (per-side status/size/duration + `delta`), diff:[{kind: " \
+          "same|add|del, text} | {kind: fold, hidden}]} (add = only in B). `identical` is true " \
+          "only over a COMPLETE comparison: a cap-cut diff or capture-cut body " \
+          "(`source_truncated`) sets `truncated` and leaves it false. Credential headers are " \
+          "[REDACTED] in the text unless include_sensitive, but diffed on captured values." do |s|
           s.field "flow_id_a", intprop("first flow id (the 'original' side)"), required: true
           s.field "flow_id_b", intprop("second flow id (the 'new' side)"), required: true
           s.field "pane", enumprop("which half of the two flows to diff (default response)", MESSAGE_SIDES)
-          s.field "changes_only", boolprop("omit unchanged (same) lines from the diff (default false)")
-          s.field "context", intprop("collapse unchanged runs to {kind:fold,hidden} markers, keeping N lines around each change — the readable form for a long response (mutually exclusive with changes_only)")
-          s.field "include_sensitive", boolprop("return Authorization/Cookie/Set-Cookie/API-key header values instead of [REDACTED] (default false)")
+          s.field "changes_only", boolprop("omit unchanged lines")
+          s.field "context", intprop("collapse unchanged runs to {kind:fold,hidden}, keeping N lines around each change; exclusive with changes_only")
+          s.field "include_sensitive", boolprop("unredact credential header values")
         end
       end
     end

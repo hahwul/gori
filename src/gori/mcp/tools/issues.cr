@@ -189,17 +189,16 @@ module Gori
       # wrong side of it by landing in the wrong place in a 1,300-line method.
       private def list_issues_tools(j : JSON::Builder) : Nil
         tool j, "list_issues",
-          "List triage issues (severity + status), newest/most-severe first. " \
-          "Returns an object {issues, returned, offset, total} — not a bare array. " \
-          "Each issue's `links` lists everything backing it, the flow it was filed from first; " \
-          "`flow_id` is that first linked flow." do |s|
+          "List triage issues, newest/most-severe first. Returns {issues, returned, offset, " \
+          "total}, not a bare array. Each issue's `links` lists what backs it, the flow it was " \
+          "filed from first (`flow_id`)." do |s|
           s.field "limit", limitprop("max rows", ISSUES_LIMIT)
           s.field "offset", intprop("start row (default 0)")
         end
 
         tool j, "get_issue",
-          "Get one issue by id. `links` lists everything backing it, the flow it was filed " \
-          "from first; `flow_id` is that first linked flow. `evidence` holds the frozen copies." do |s|
+          "One issue: `links` (what backs it, the filing flow first = `flow_id`) and " \
+          "`evidence` (frozen copies)." do |s|
           s.field "id", intprop("issue id"), required: true
         end
 
@@ -211,29 +210,29 @@ module Gori
         # only read once this tool has already been picked.
         tool j, "create_issue", "Record a new issue in the project, with its notes body, in one transaction." do |s|
           s.field "title", strprop("issue title"), required: true
-          s.field "severity", enumprop("issue severity (default: derived from cvss, else info)", SEVERITIES)
-          s.field "cvss", strprop("optional CVSS vector or numeric score (e.g. 9.8 or CVSS:3.1/...)")
-          s.field "notes", strprop("optional free-form notes — the issue's body, written with the issue in one transaction")
-          s.field "host", strprop("optional host the issue concerns")
-          s.field "flow_id", intprop("optional flow this issue is filed from — it becomes the issue's first linked flow")
-          s.field "repeater_id", intprop("optional repeater id this issue links to")
+          s.field "severity", enumprop("default: derived from cvss, else info", SEVERITIES)
+          s.field "cvss", strprop("CVSS vector or score (e.g. 9.8)")
+          s.field "notes", strprop("the issue's free-form body")
+          s.field "host", strprop("host the issue concerns")
+          s.field "flow_id", intprop("flow it is filed from; becomes its first linked flow")
+          s.field "repeater_id", intprop("repeater id to link")
         end
 
         tool j, "update_issue", "Update an existing issue's fields." do |s|
           s.field "id", intprop("issue id"), required: true
           s.field "title", strprop("new title")
           s.field "severity", enumprop("new severity", SEVERITIES)
-          s.field "cvss", strprop("optional CVSS vector or score (empty to clear)")
-          s.field "notes", strprop("free-form notes (replaces existing)")
+          s.field "cvss", strprop("CVSS vector or score (empty clears)")
+          s.field "notes", strprop("free-form body (replaces existing)")
           s.field "status", enumprop("new triage state", ISSUE_STATUSES)
-          s.field "host", strprop("host the issue concerns (null or empty to clear)")
-          s.field "flow_id", intprop("the issue's seed flow (null to clear); the previous one stays linked")
-          s.field "repeater_id", intprop("optional repeater id to link to the issue")
+          s.field "host", strprop("host the issue concerns (null/empty clears)")
+          s.field "flow_id", intprop("seed flow (null clears); the previous one stays linked")
+          s.field "repeater_id", intprop("repeater id to link")
         end
 
         tool j, "delete_issue",
-          "Delete an issue outright, along with its entity links. Distinct from setting " \
-          "status resolved/false-positive, which KEEPS it in the report." do |s|
+          "Delete an issue and its links. Setting status resolved/false-positive instead KEEPS " \
+          "it in the report." do |s|
           s.field "id", intprop("issue id"), required: true
         end
       end

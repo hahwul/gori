@@ -148,18 +148,17 @@ module Gori
 
       private def list_js_refs_tools(j : JSON::Builder) : Nil
         tool j, "list_js_endpoints",
-          "Endpoints REFERENCED in captured JavaScript (literals like fetch(\"/api/users\") in JS " \
-          "responses and inline scripts), one row per origin+path; by default only those no captured " \
-          "request reached. Rows carry flow_id, byte offset, line and the literal; `templated` = " \
-          "`{expr}` stands for a `${…}` (not sendable as-is); `base` = what a relative literal " \
-          "resolved against (guessed: no Referer). Hosts never captured are hidden unless scoped " \
-          "(`hidden_hosts`). Reads what scan_js_endpoints stored; sends nothing." do |s|
+          "Endpoints REFERENCED in captured JavaScript (e.g. fetch(\"/api/users\")), one row per " \
+          "origin+path, by default only those no request reached. Rows carry flow_id, offset, " \
+          "line, literal; `templated` = has a `{expr}` placeholder (not sendable as-is); `base` " \
+          "= guessed base of a relative literal. Unscoped never-captured hosts are hidden " \
+          "(`hidden_hosts`). Reads scan_js_endpoints' results; sends nothing." do |s|
           s.field "host", strprop("only this host (exact)")
           s.field "path_prefix", strprop("only paths starting with this")
-          s.field "include_requested", boolprop("also list references traffic reached (default false)")
-          s.field "all_hosts", boolprop("also list never-captured, unscoped hosts (default false)")
-          s.field "include_comments", boolprop("list references seen only in comments (default true)")
-          s.field "in_scope", boolprop("only in-scope references (default false)")
+          s.field "include_requested", boolprop("also references traffic reached")
+          s.field "all_hosts", boolprop("also never-captured, unscoped hosts")
+          s.field "include_comments", boolprop("include references seen only in comments (default true)")
+          s.field "in_scope", boolprop("only in-scope references")
           s.field "limit", limitprop("rows per page", JS_ENDPOINTS_LIMIT)
           s.field "offset", intprop("rows to skip (default 0)")
         end
@@ -167,15 +166,15 @@ module Gori
         return unless @allow_actions
 
         tool j, "scan_js_endpoints",
-          "Read the captured JS responses and HTML pages not scanned yet (newest first) and store the " \
-          "endpoints they reference, for list_js_endpoints and the Sitemap. Sends NOTHING. " \
-          "Incremental; `truncated:true` = unscanned ones remain, call again." do |s|
+          "Scan captured JS and HTML responses not yet scanned (newest first) and store the " \
+          "endpoints they reference. Sends NOTHING. Incremental: `truncated:true` = more " \
+          "remain, call again." do |s|
           s.field "query", strprop("gori QL filter over the flows to read")
-          s.field "in_scope", boolprop("only in-scope flows (default false)")
+          s.field "in_scope", boolprop("only in-scope flows")
           s.field "max_flows", intprop("responses to read (default #{JsRefs::DEFAULT_MAX_FLOWS}, max 5000)")
-          s.field "rescan", boolprop("re-read scanned responses (default false)")
-          s.field "strict", boolprop("reject an unrecognized query term (default false: it is dropped and named in `ignored_terms`)")
-          s.field "lenient", boolprop("free-text an unknown `field:` (default false)")
+          s.field "rescan", boolprop("re-read scanned responses")
+          s.field "strict", boolprop("refuse an unrecognized query term (otherwise dropped and named in `ignored_terms`)")
+          s.field "lenient", boolprop("free-text an unknown `field:`")
         end
       end
     end

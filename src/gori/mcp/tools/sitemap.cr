@@ -724,114 +724,89 @@ module Gori
       # wrong side of it by landing in the wrong place in a 1,300-line method.
       private def list_sitemap_tools(j : JSON::Builder) : Nil
         tool j, "list_sitemap",
-          "Distinct endpoints discovered in capture, keyed by TRANSPORT " \
-          "(scheme, host, port, http_version, method, target) so the same path over " \
-          "http vs https vs HTTP/2 stays separate — each with its observed status set, " \
-          "success/error counts, and first/last-seen. An entry also carries a `tag` field " \
-          "when the operator pinned a memo on that path (see set_sitemap_tag). By DEFAULT " \
-          "the query-string variants of one path fold into a single entry (/search?q=1 + " \
-          "/search?q=2 -> /search), matching the TUI tree and `gori run sitemap`: `target` " \
-          "is then the path only, `query_variants` says how many query strings it stands " \
-          "for, and `query_targets` carries up to #{QUERY_SAMPLE_MAX} of the raw ones to " \
-          "replay. Counts and the seen window are summed over the variants, and any memo " \
-          "pinned on a variant is reported under `variant_tags`. Pass " \
-          "fold_query:false for one entry per query string. Pass collapse_transport:true " \
-          "for the legacy host/method/target-only view. Optional QL `query` filter, which also takes " \
-          "the sitemap's own `tag:x`, keeping what the TUI Sitemap's tag filter keeps: endpoints at or " \
-          "under a path whose memo (set_sitemap_tag) contains x, case-insensitive, and those above " \
-          "one; `-tag:x` drops a matching path's subtree. " \
-          "Returns an object {entries, returned, scanned, offset, limit, has_more} — not a " \
-          "bare array. `has_more:true` means the surface is LARGER than this page: advance " \
-          "`offset` (or narrow `query`) until it is false, or you are mapping a fraction of " \
-          "the capture and cannot tell. `limit`/`offset` page the raw endpoint rows BEFORE " \
-          "query-folding — `scanned` is how many that was — so one folded entry can continue " \
-          "onto the next page." do |s|
-          s.field "query", strprop("gori QL filter, plus the sitemap-only `tag:x` / `-tag:x` (memo substring, case-insensitive)")
-          s.field "limit", limitprop("max endpoint rows scanned per page, before query-folding", SITEMAP_LIMIT)
-          s.field "offset", intprop("skip this many endpoint rows — the page cursor (default 0). The ordering is total, so paging with it is deterministic and reaches every endpoint")
-          s.field "fold_query", boolprop("fold the query-string variants of one path into a single entry (default true); false lists one entry per query string")
-          s.field "collapse_transport", boolprop("collapse to distinct host/method/target only (legacy shape), dropping scheme/port/version + counts (default false)")
-          s.field "hide_static", boolprop("leave out static assets — images, fonts, audio/video (not svg/css/js, never a status >= 400); the TUI's hide-static lens, same as `-static:true` in `query`. Default false")
-          s.field "include_unrequested", boolprop("add `unrequested`: endpoints captured JavaScript references that no request reached (up to #{UNREQUESTED_MAX} and what the reply budget leaves; `unrequested_total` says how many), from what scan_js_endpoints stored. Not filtered by `query` — a reference is not a flow. Default false")
-          s.field "strict", boolprop("reject the query if any term is unrecognized/invalid (default false: the term is dropped, which BROADENS the result, and named in the reply's `ignored_terms`)")
-          s.field "lenient", boolprop("search a `field:` QL does not implement as literal TEXT instead of refusing the query (default false). A typo like `methd:GET` free-texts its whole token and therefore matches nothing, which is indistinguishable from an empty project — so it is refused by default, the way `gori run history --lenient` spells the same escape hatch. `strict` is the other half and covers dropped terms, not unknown fields")
+          "Distinct endpoints in capture, keyed by TRANSPORT (scheme, host, port, " \
+          "http_version, method, target), with status set, success/error counts, " \
+          "first/last-seen, and `tag` for an operator memo (set_sitemap_tag). Query-string " \
+          "variants fold by default: `target` = path, `query_variants` = count, " \
+          "`query_targets` = up to #{QUERY_SAMPLE_MAX} raw ones, memos in `variant_tags`. " \
+          "Returns {entries, returned, scanned, offset, limit, has_more}, not a bare array. " \
+          "`has_more:true` = more endpoints: advance `offset` until false, or you map only a " \
+          "fraction. Paging counts raw rows BEFORE folding (`scanned`), so a folded entry can " \
+          "span pages." do |s|
+          s.field "query", strprop("gori QL, plus sitemap-only `tag:x` (paths at/under/above a memo containing x) and `-tag:x` (drops that subtree)")
+          s.field "limit", limitprop("max endpoint rows scanned per page, before folding", SITEMAP_LIMIT)
+          s.field "offset", intprop("endpoint rows to skip (default 0); ordering is total, so paging reaches every endpoint")
+          s.field "fold_query", boolprop("fold the query-string variants of a path into one entry (default true)")
+          s.field "collapse_transport", boolprop("legacy shape: host/method/target only, no counts")
+          s.field "hide_static", boolprop("omit static assets (images, fonts, audio/video; never svg/css/js or status >= 400); = `-static:true`")
+          s.field "include_unrequested", boolprop("add `unrequested`: JS-referenced endpoints no request reached, from scan_js_endpoints (≤#{UNREQUESTED_MAX} within budget; `unrequested_total` = all); not filtered by `query`")
+          s.field "strict", boolprop("refuse a query with an invalid term (else it is dropped, BROADENING the result, and named in `ignored_terms`)")
+          s.field "lenient", boolprop("free-text an unknown `field:` instead of refusing (a typo then matches nothing, like an empty project)")
         end
 
         tool j, "list_params",
           "Per-endpoint PARAMETER INVENTORY from captured requests: one row per (scheme, host, " \
-          "port, method, path, location, name), location = query|form|multipart|json|headers|cookies, with " \
-          "`count` (flows), sample values, first/last flow id and `reflected` (a 4+ byte value " \
-          "seen verbatim in the decoded response; a triage hint, not a finding). JSON names are " \
-          "paths (items[].id; [] is not JsonPath). Standard browser headers are omitted unless " \
-          "all_headers. Cookie, credential-header and credential-named values are [REDACTED] " \
-          "unless include_sensitive. Reads the newest max_flows flows (truncated:true = older " \
-          "ones unread). Names from a host's OTHER endpoints make good mine_start `names`." do |s|
-          s.field "query", strprop("gori QL filter over the flows read (see ql_reference)")
-          s.field "in_scope", boolprop("only flows in the project's configured scope (default false; empty with a note when no scope is configured)")
-          s.field "hide_static", boolprop("leave out static assets — images, fonts, audio/video; the TUI's hide-static lens, same as `-static:true` in `query` (default false)")
+          "port, method, path, location, name) with `count`, sample values, first/last flow id " \
+          "and `reflected` (a 4+ byte value seen verbatim in the decoded response; a hint, not " \
+          "a finding). JSON names are paths (items[].id; not JsonPath). Credential values are " \
+          "[REDACTED] unless include_sensitive. truncated:true = flows older than max_flows " \
+          "unread. Names from a host's OTHER endpoints suit mine_start `names`." do |s|
+          s.field "query", strprop("gori QL filter over the flows read")
+          s.field "in_scope", boolprop("only in-scope flows (empty, with a note, when no scope is configured)")
+          s.field "hide_static", boolprop("omit static assets (images, fonts, audio/video)")
           s.field "host", strprop("only this host (exact, case-insensitive)")
-          s.field "origin", strprop("only this origin — scheme, host and port, e.g. http://127.0.0.1:19021 (instead of host)")
-          s.field "path_prefix", strprop("only endpoints whose path starts with this, e.g. /api/v1")
-          s.field "location", arr_or_str_prop("only these locations: query, form, multipart, json, headers, cookies (array or comma list; default all)")
-          s.field "all_headers", boolprop("include standard browser headers (User-Agent, Accept*, Sec-*, …) (default false)")
+          s.field "origin", strprop("only this origin (scheme://host:port), instead of host")
+          s.field "path_prefix", strprop("only paths starting with this, e.g. /api/v1")
+          s.field "location", arr_or_str_prop("only these: query, form, multipart, json, headers, cookies (array or comma list; default all)")
+          s.field "all_headers", boolprop("include standard browser headers (User-Agent, Accept*, Sec-*…)")
           s.field "max_flows", intprop("newest matching flows to read (default 2000, max 20000)")
-          s.field "samples", intprop("distinct sample values kept per parameter (default 5, max 50)")
-          s.field "include_sensitive", boolprop("return cookie / credential / token sample values instead of [REDACTED] (default false)")
+          s.field "samples", intprop("distinct samples per parameter (default 5, max 50)")
+          s.field "include_sensitive", boolprop("unredact cookie / credential / token samples")
           s.field "limit", limitprop("max rows per page", PARAMS_LIMIT)
-          s.field "offset", intprop("skip this many rows (default 0)")
-          s.field "strict", boolprop("reject a query with an unrecognized/invalid term (default false: it is dropped and named in `ignored_terms`)")
-          s.field "lenient", boolprop("free-text an unknown `field:` instead of refusing the query (default false)")
+          s.field "offset", intprop("rows to skip (default 0)")
+          s.field "strict", boolprop("refuse a query with an invalid term (else dropped, named in `ignored_terms`)")
+          s.field "lenient", boolprop("free-text an unknown `field:` instead of refusing")
         end
 
         tool j, "export_openapi",
-          "The captured API as an OpenAPI 3.0.3 document, returned inline (`document`: an object, " \
-          "or a YAML string with format:yaml) — or written to `output_path` on the MCP server's " \
-          "filesystem, keeping it out of the reply. Paths are templated (/users/123 -> " \
-          "/users/{userId}); query/header/cookie parameters are `required` only when every sample " \
-          "carried them; request bodies and responses per status carry JSON schemas inferred from " \
-          "the samples; credentials become securitySchemes and their values are never included. " \
-          "No example values unless examples:true, and those pass the redaction profile. WebSocket, " \
-          "gRPC, SSE and incomplete flows are skipped and counted in `skipped`. Bounded by " \
-          "max_endpoints and max_bytes: `truncated:true` means operations or paths were left out " \
-          "(see `notes`) — narrow with host or path_prefix. Deterministic: the same flows give the " \
-          "same document." do |s|
-          s.field "query", strprop("gori QL filter over the flows read (see ql_reference)")
-          s.field "in_scope", boolprop("only flows in the project's configured scope (default false; refused when no scope is configured)")
-          s.field "hide_static", boolprop("leave out static assets — images, fonts, audio/video (default false)")
-          s.field "host", strprop("only this host (exact, case-insensitive) — one API per document")
-          s.field "origin", strprop("only this origin — scheme, host and port, e.g. http://127.0.0.1:19021 (instead of host)")
-          s.field "path_prefix", strprop("only endpoints whose path starts with this, e.g. /api/v1")
-          s.field "format", strprop("json (default) or yaml; with output_path, a .yaml/.yml extension picks yaml")
-          s.field "output_path", strprop("write the document to this file instead of returning it (refused under --read-only; the parent directory must exist; not inside gori's home). max_bytes then defaults to its maximum")
-          s.field "overwrite", boolprop("with output_path, replace an existing file (default false: refused); only an existing OpenAPI document is ever replaced")
-          s.field "include_gori", boolprop("keep the requests gori itself sent — Repeater, Fuzzer, Miner, Discover… (default false: a brute force or a fuzz run would describe gori's probing, not the API)")
-          s.field "examples", boolprop("add example values from one sample each, redacted through the profile (default false)")
-          s.field "redact", strprop("redaction profile the examples pass through (default: the project's, else the global one, else `default`); needs examples:true")
+          "The captured API as an OpenAPI 3.0.3 document, inline (`document`; a YAML string " \
+          "with format:yaml) or written to `output_path`. Paths templated (/users/123 -> " \
+          "/users/{userId}); schemas inferred from samples; credentials become " \
+          "securitySchemes, values never included. WebSocket, gRPC, SSE and incomplete flows " \
+          "are counted in `skipped`. `truncated:true` = operations or paths left out by " \
+          "max_endpoints/max_bytes (see `notes`): narrow with host or path_prefix." do |s|
+          s.field "query", strprop("gori QL filter over the flows read")
+          s.field "in_scope", boolprop("only in-scope flows (refused when no scope is configured)")
+          s.field "hide_static", boolprop("omit static assets")
+          s.field "host", strprop("only this host (exact, case-insensitive)")
+          s.field "origin", strprop("only this origin (scheme://host:port), instead of host")
+          s.field "path_prefix", strprop("only paths starting with this, e.g. /api/v1")
+          s.field "format", strprop("json (default) or yaml; an output_path ending .yaml/.yml picks yaml")
+          s.field "output_path", strprop("write to this server-side file instead of returning it (refused under --read-only; parent must exist; not in gori's home); max_bytes then defaults to its max")
+          s.field "overwrite", boolprop("with output_path, replace an existing file if it is an OpenAPI document (otherwise refused)")
+          s.field "include_gori", boolprop("keep gori's own requests (Repeater, Fuzzer, Miner…), which describe its probing, not the API")
+          s.field "examples", boolprop("add example values (one sample each), redacted via the profile")
+          s.field "redact", strprop("examples' redaction profile (default: project's, else global, else `default`)")
           s.field "max_endpoints", intprop("operations kept (default 200, max 2000)")
           s.field "max_samples", intprop("flows read per operation (default 10, max 50)")
           s.field "max_flows", intprop("newest flows read in all (default 5000, max 20000)")
-          s.field "max_bytes", intprop("largest document, measured as compact JSON; whole paths past it are dropped (default #{OPENAPI_INLINE_BYTES} inline, #{OPENAPI_MAX_BYTES} with output_path; max #{OPENAPI_MAX_BYTES})")
-          s.field "strict", boolprop("reject a query with an unrecognized/invalid term (default false: it is dropped and named in `ignored_terms`)")
-          s.field "lenient", boolprop("free-text an unknown `field:` instead of refusing the query (default false)")
+          s.field "max_bytes", intprop("max compact-JSON size; whole paths past it are dropped (default #{OPENAPI_INLINE_BYTES} inline, #{OPENAPI_MAX_BYTES} with output_path; max #{OPENAPI_MAX_BYTES})")
+          s.field "strict", boolprop("refuse a query with an invalid term (else dropped, named in `ignored_terms`)")
+          s.field "lenient", boolprop("free-text an unknown `field:` instead of refusing")
         end
 
         tool j, "list_sitemap_tags",
-          "List the free-text memos the operator pinned onto sitemap paths, as " \
-          "{items:[{host, path, tag}]}. These are the same tags list_sitemap stamps onto its entries." do |s|
-          s.field "host", strprop("only list tags on this host")
+          "List the operator's sitemap path memos as {items:[{host, path, tag}]}." do |s|
+          s.field "host", strprop("only tags on this host")
         end
 
         return unless @allow_actions
 
         tool j, "set_sitemap_tag",
-          "Pin a free-text memo onto one sitemap endpoint, or clear it with an empty/absent " \
-          "`tag`. Keyed by the node path exactly as the Sitemap tree stamps it — which " \
-          "INCLUDES any query string, so /search?q=1 is a different node from /search. " \
-          "Pass the `target` you saw in list_sitemap verbatim — but note that a FOLDED entry " \
-          "(query_variants > 0) shows the path only, and that folded row is synthetic: like " \
-          "a {uuid} fold it holds no tag of its own. Tag one of its `query_targets`, or call " \
-          "list_sitemap with fold_query:false first. A tag filed under a path no node has is " \
-          "silently invisible in both list_sitemap and the TUI." do |s|
+          "Pin a free-text memo on one sitemap node (empty/absent `tag` clears it). Keyed by " \
+          "the exact node path, query string INCLUDED. A FOLDED list_sitemap entry " \
+          "(query_variants > 0) holds no tag: tag one of its `query_targets` or list with " \
+          "fold_query:false. A tag on a path no node has is silently invisible." do |s|
           s.field "host", strprop("host the path belongs to"), required: true
           s.field "path", strprop("node path as list_sitemap shows it, e.g. /api/users or /search?q=1"), required: true
           s.field "tag", strprop("the memo; empty or absent CLEARS the tag")

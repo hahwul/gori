@@ -154,63 +154,54 @@ module Gori
 
       private def list_evidence_tools(j : JSON::Builder) : Nil
         tool j, "list_evidence",
-          "List FROZEN evidence: immutable copies of a flow's or a Repeater tab's exchange, " \
-          "taken at the moment they proved the finding, with provenance (source, time, status, " \
-          "size), the issues each is linked to, and SHA-256 of the stored request and response. " \
-          "Without issue_id this is the whole project archive, newest first, including orphans " \
-          "(no issue link left). A deleted History source is marked detached and its negative " \
-          "source_id cannot resolve to a later reused flow. A copy survives the Repeater's next " \
-          "send and History retention; use get_evidence for its bytes." do |s|
-          s.field "issue_id", intprop("one issue's copies only (omit for the whole project archive)")
+          "List FROZEN evidence (immutable exchange copies) with provenance, linked issues and " \
+          "SHA-256s. Without issue_id: the whole archive, newest first, orphans included. A " \
+          "deleted History source shows as detached (negative source_id, never a reused " \
+          "flow). get_evidence returns the bytes." do |s|
+          s.field "issue_id", intprop("one issue's copies only (omit for the whole archive)")
           s.field "offset", intprop("copies to skip (default 0); `has_more` says there are more")
         end
 
         tool j, "get_evidence",
-          "One frozen copy with its bytes — request/response heads (Authorization/Cookie " \
-          "redacted unless include_sensitive) and bodies (decoded, capped like get_flow). " \
-          "The SHA-256s cover the stored wire bytes, so verifying them needs include_sensitive." do |s|
+          "One frozen copy with its bytes: heads (credentials redacted unless " \
+          "include_sensitive) and decoded bodies, capped like get_flow. The SHA-256s cover " \
+          "stored wire bytes; verifying them needs include_sensitive." do |s|
           s.field "id", intprop("the frozen evidence id (from list_evidence or get_issue)"), required: true
-          s.field "include_sensitive", boolprop("emit credential header values verbatim (default false)")
-          s.field "body_mode", enumprop("how much body to inline: the default is the whole decoded body up to the cap, preview the first 2 KB, none the shape only", ["full", "preview", "none"])
+          s.field "include_sensitive", boolprop("emit credential header values verbatim")
+          s.field "body_mode", enumprop("default: whole decoded body up to the cap; preview: first 2 KB; none: shape only", ["full", "preview", "none"])
           s.field "max_body_bytes", intprop("cap on each inlined decoded body (default 65536)")
         end
 
         return unless @allow_actions
 
         tool j, "freeze_evidence",
-          "Freeze a flow's or a Repeater tab's CURRENT exchange as immutable evidence on an " \
-          "issue — request, response, status, timing, protocol, error and truncation state, " \
-          "with a SHA-256 of each. Do this the moment a response proves a finding: the tab's " \
-          "next send replaces its response and retention prunes flows, but a frozen copy is " \
-          "never changed or pruned. Freeze again after a retest to keep both. A never-sent " \
-          "Repeater tab is refused (there is no exchange), and so is one whose request was " \
-          "edited after its stored response arrived — that request and that response are not " \
-          "one exchange. Send the tab again, or set allow_drift to keep the mismatched pair " \
-          "anyway. `link:true` (default) also files the live link add_link would, in the " \
-          "same transaction." do |s|
+          "Freeze a flow's or Repeater tab's CURRENT exchange as immutable evidence on an " \
+          "issue, with a SHA-256 per message. Do it the moment a response proves a finding: a " \
+          "tab's next send and flow retention replace live copies; a frozen one never changes. " \
+          "Refused: a never-sent tab, or one whose request was edited after its response — " \
+          "re-send, or set allow_drift. `link` (default true) also files the add_link link." do |s|
           s.field "issue_id", intprop("the issue that owns the copy"), required: true
           s.field "ref_kind", enumprop("what to copy from", FREEZE_SOURCES), required: true
           s.field "ref_id", intprop("the flow or repeater id"), required: true
           s.field "link", boolprop("also attach the live link (default true)")
-          s.field "allow_drift", boolprop("freeze a Repeater tab whose request was edited after its stored response (default false)")
+          s.field "allow_drift", boolprop("freeze a Repeater tab whose request was edited after its stored response")
         end
         tool j, "link_evidence",
-          "Link an existing frozen snapshot to another issue without changing its bytes, " \
-          "hashes or provenance. Evidence can belong to multiple issues." do |s|
+          "Link a frozen copy to another issue too; bytes, hashes and provenance are unchanged." do |s|
           s.field "id", intprop("the frozen evidence id"), required: true
           s.field "issue_id", intprop("the issue to link"), required: true
         end
 
         tool j, "unlink_evidence",
-          "Remove one issue link without deleting the frozen snapshot. Removing its last " \
-          "link leaves an orphan that can be linked again or deleted explicitly." do |s|
+          "Remove one issue link, keeping the frozen copy; removing its last link leaves an " \
+          "orphan to relink or delete." do |s|
           s.field "id", intprop("the frozen evidence id"), required: true
           s.field "issue_id", intprop("the issue link to remove"), required: true
         end
 
         tool j, "delete_evidence",
-          "Delete one frozen copy. The bytes cannot be recovered from the source — that is " \
-          "why they were frozen — so prefer freezing a newer copy beside it to replacing it." do |s|
+          "Delete one frozen copy. Its bytes cannot be recovered from the source — prefer " \
+          "freezing a newer copy beside it." do |s|
           s.field "id", intprop("the frozen evidence id"), required: true
         end
       end

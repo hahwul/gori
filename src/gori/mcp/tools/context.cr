@@ -781,70 +781,47 @@ module Gori
       # here rather than around one long block, so a new write tool cannot be added on the
       # wrong side of it by landing in the wrong place in a 1,300-line method.
       private def list_context_tools(j : JSON::Builder) : Nil
-        tool j, "list_scope", "List the project's scope include/exclude rules, plus the three gates they feed: " \
-                              "`enabled` (the CAPTURE-side lens the Target/Sitemap \u21e7S filter uses), " \
-                              "`active_send_gate` (what this server may SEND — keyed on the rules EXISTING, not on " \
-                              "`enabled`, so an active call at an unmatched target is refused SCOPE_BLOCKED even " \
-                              "with `enabled:false`), and `sandbox` (hard containment; `blocks_all` when it is on " \
-                              "with no include rule)." { }
+        tool j, "list_scope",
+          "List scope include/exclude rules and the gates they feed: `enabled` (the " \
+          "capture-side view lens only), `active_send_gate` (what this server may SEND — keyed " \
+          "on rules EXISTING, so an unmatched target is refused SCOPE_BLOCKED even with " \
+          "`enabled:false`), `sandbox` (hard containment; `blocks_all` when on with no include " \
+          "rule)." { }
 
         tool j, "project_info",
-          "Project totals: flow count, issue count, captured bytes, earliest capture time, " \
-          "the operator's project `description` (what this engagement is for — the one call " \
-          "that reads back what create_project stored), " \
-          "plus which project/db is being served and how it was selected. When unbound " \
-          "(bound:false), #{project_recovery}. " \
-          "This is the LIVE binding, and it overrides the server instructions — those " \
-          "describe the binding as of the call that produced them and no switch_project " \
-          "updates them. " \
-          "Always verify this before reading or mutating security-test data." { }
+          "Project totals (flows, issues, bytes, earliest capture), the operator's " \
+          "`description` of the engagement, and which project/db is served and why. When " \
+          "unbound (bound:false), #{project_recovery}. This LIVE binding overrides the server " \
+          "instructions (no switch_project updates them): verify it before reading or mutating " \
+          "test data." { }
 
         tool j, "get_current_context",
-          "What the operator is looking at in the gori TUI — and WHAT THEY HAVE SELECTED, so " \
-          "\"do X with the rows I marked\" is one call instead of a request to paste ids. " \
-          "Reports the active tab, focused pane, sub-tab index and the History-selected flow id, " \
-          "plus — on the four list tabs (History, Issues, Sitemap, Intercept) — a `selection` " \
-          "block. `selection.ids` is the set every TUI batch verb would act on: the MARKED rows " \
-          "when any are marked, else the ONE row under the cursor, else the flow an open detail " \
-          "pins; `target_source` says which of the three, so do not re-derive that rule. " \
-          "`selection_next_call` names the available tool that turns them into data, or says " \
-          "when a required follow-up is not exposed — only History has a one-call form " \
-          "(`list_history{ids}`). SITEMAP SELECTS (host, path) PAIRS, not flow ids: " \
-          "it reports `nodes` and no `ids` at all, which is what `kind` is there to tell you. " \
-          "`truncated` is the ONLY signal that the array was cut, and a partial list is not a " \
-          "safe thing to act on. Do not infer it from `marked_count`, which describes the MARK " \
-          "SET and is reported even when `target_source` overrides it: with a drill-in open you " \
-          "get one id beside `marked_count:4` and nothing was cut. `marked_hidden_count` is " \
-          "marks the operator's own filter is hiding. " \
-          "`marked_subtabs` are CHIP NUMBERS on a sub-tab strip, which shift whenever a session " \
-          "is created, deleted or moved — cross-reference them through get_repeater_context " \
-          "before acting. `marks_elsewhere` names tabs holding marks this `selection` does not " \
-          "carry — each row is a `tab` plus a count, and a `kind` only where those marks have " \
-          "one (a sub-tab strip's do not). " \
-          "`tui.live` says a gori TUI window is attached to this project's database and " \
-          "`tui.windows` how many (two windows share ONE state row, so a selection may be the " \
-          "other one's). It is evidence, not proof: when this server cannot look you get " \
-          "`tui.unknown` rather than a false. `recorded_at`/`age_seconds` are when the view last " \
-          "MOVED — the TUI records on change, so an old timestamp under a live window means the " \
-          "operator is sitting still, not that this is stale. `available:false` means no TUI has " \
-          "published a view for this project yet." { }
+          "What the operator sees in the gori TUI and WHAT THEY SELECTED: tab, pane, sub-tab, " \
+          "History-selected flow, and on History/Issues/Sitemap/Intercept a `selection`. " \
+          "`selection.ids` = what a TUI batch verb would act on (MARKED rows, else the cursor " \
+          "row, else an open detail's flow; `target_source` says which). " \
+          "`selection_next_call` names the tool to read them (History: `list_history{ids}`) or " \
+          "says none is exposed. SITEMAP selects (host, path) `nodes`, no `ids` (see `kind`). " \
+          "`truncated` is the ONLY sign the list was cut — not `marked_count`, which counts " \
+          "marks even when `target_source` overrides them; never act on a cut list. " \
+          "`marked_subtabs` are CHIP NUMBERS that shift as sessions change: resolve via " \
+          "get_repeater_context. `marks_elsewhere` = other tabs holding marks. " \
+          "`tui.live`/`tui.windows` = attached TUIs (sharing ONE state row); `tui.unknown` = " \
+          "cannot tell. `age_seconds` = since the view last MOVED (old = operator idle, not " \
+          "stale). `available:false` = no TUI view yet." { }
 
         tool j, "get_repeater_context",
-          "The Repeater workbench state. Defaults to metadata only so request headers, WebSocket " \
-          "payloads, response headers, and the live TUI editor snapshot are not copied into the " \
-          "model context. Set include_content=true only when those bytes are necessary. Supports " \
-          "single-id lookup, pagination, and filtering. Every session reports BOTH ids: 'id' (also " \
-          "as 'db_id'), which every repeater tool takes, and 'tui_index', the 1-based number the TUI " \
-          "paints on its sub-tab chip — the number the operator says out loud. tui_index shifts " \
-          "whenever a session is created, deleted or moved, so read it fresh; id is the durable address." do |s|
-          s.field "id", intprop("return one repeater DATABASE id (not a tui_index)")
+          "The Repeater workbench sessions, metadata only unless include_content. Each reports " \
+          "`id` (= `db_id`), the durable address every repeater tool takes, and `tui_index`, " \
+          "the 1-based chip number the operator says, which shifts as sessions change." do |s|
+          s.field "id", intprop("one repeater DATABASE id (not a tui_index)")
           s.field "limit", limitprop("max rows to return", REPEATER_CONTEXT_LIMIT)
           s.field "offset", intprop("start row (default 0)")
-          s.field "query", strprop("case-insensitive SUBSTRING match over a session's name, target URL and stored request bytes. For a field query (tags, host, method, last status) use 'filter' — both may be passed and both must match")
-          s.field "filter", strprop("the same sub-tab filter language the TUI's `/` takes, matched in memory: #{Repeater::SubtabFilter::FIELDS.map { |f| "#{f}:" }.join(" ")}, `-` before a term negates it, and a bare word searches name/summary/target/tags. `status:` is the LAST send's outcome as one token — a code (`status:404`, and `status:4` matches every 4xx by prefix), `status:error`, or `status:unsent`. ANDed with 'query' when both are given")
-          s.field "include_content", boolprop("include request text, WebSocket payloads, response head, the env-binding shape of each credential header, and the live TUI repeater snapshot (default false; may expose secrets)")
-          s.field "include_sensitive", boolprop("with include_content, return Authorization/Cookie/Set-Cookie/API-key header values instead of [REDACTED], and bodies without the project's default redaction profile (default false)")
-          s.field "include_response_body", boolprop("also inline each session's stored last response BODY, decoded and capped (default false). Its own BLOB read per row, so it is hydrated for the first #{MCP_REPEATER_BODY_ROWS} rows of a page and the rest are reported as omitted — pass 'id' or narrow with 'filter' to read one. Page past the cap with get_response_body_chunk")
+          s.field "query", strprop("case-insensitive SUBSTRING over name, target URL and stored request bytes; ANDed with 'filter'")
+          s.field "filter", strprop("TUI sub-tab filter: #{Repeater::SubtabFilter::FIELDS.map { |f| "#{f}:" }.join(" ")}; `-` negates; bare words search name/summary/target/tags; `status:` = LAST send's outcome (a code, `status:4` for any 4xx, `error`, `unsent`)")
+          s.field "include_content", boolprop("add request text, WS payloads, response head, credential headers' env-binding shape and the live TUI snapshot (may expose secrets)")
+          s.field "include_sensitive", boolprop("with include_content, unredact credential headers and skip the default body redaction profile")
+          s.field "include_response_body", boolprop("inline each session's last response BODY, decoded and capped; first #{MCP_REPEATER_BODY_ROWS} rows of a page only (rest omitted: pass 'id' or 'filter'); page further with get_response_body_chunk")
           s.field "max_body_bytes", intprop("cap for each inlined response body (default #{MCP_REPEATER_BODY_DEFAULT}, max #{MCP_REPEATER_BODY_MAX})")
         end
       end
