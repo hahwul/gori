@@ -359,51 +359,44 @@ module Gori
         return unless @allow_actions
 
         tool j, "mine_start",
-          "Discover hidden/unlinked parameters a server accepts (Burp \"Param Miner\"). " \
-          "Stuffs a built-in wordlist of names into the request and bisects to isolate " \
-          "the ones that change the response. Returns a job_id immediately (poll with " \
-          "mine_status / mine_results; end with mine_stop). ACTIVE: sends many real " \
-          "outbound requests. Capped at #{MINE_MAX_REQUESTS} requests / #{MINE_MAX_CONCURRENCY} concurrency." do |s|
+          "Discover hidden parameters a server accepts by stuffing name wordlists into the " \
+          "request and bisecting to the ones that change the response. Returns a job_id at once " \
+          "(poll mine_status / mine_results; end with mine_stop). ACTIVE: many real outbound " \
+          "requests. Capped at #{MINE_MAX_REQUESTS} requests / #{MINE_MAX_CONCURRENCY} concurrency." do |s|
           s.field "template", strprop("raw HTTP request to mine")
-          s.field "flow_id", intprop("seed the request from a captured flow id (instead of template)")
-          s.field "url", strprop("absolute target URL (scheme+host) that sets the origin — a 'template' or 'flow_id' is still REQUIRED; url alone does NOT define the request (unlike send_request)")
+          s.field "flow_id", intprop("seed the request from a captured flow id")
+          s.field "url", strprop("absolute URL (scheme+host) setting the origin only; does NOT define the request (unlike send_request)")
           s.requires_one_of "template", "flow_id"
-          s.field "locations", strprop("comma list of where to mine: #{MINE_LOCATIONS.join(",")} (default: auto-detect; multipart is applicable but off by default — pass it explicitly)")
-          s.field "wordlist", strprop("path to an extra param-name wordlist, or the name of a saved list (list_wordlists); merged with the built-in list")
-          s.field "names", strarrprop("names to test FIRST, ahead of the built-in list and any wordlist — e.g. list_params names seen on this host's other endpoints but not on this one")
-          s.field "payload_from", strarrprop("candidate names read from the project's captured data, each '<QL> param-names' (e.g. 'host:api.example param-names'), tested after `names` and BEFORE the built-in list and `wordlist`. Reads the project, sends nothing; the reply's payload_sources says what each read. Cookies and headers only when payload_from_locations names them")
-          s.field "payload_from_include_sensitive", boolprop("also read credential material for payload_from (default false; a NAME is never withheld, so this only matters for cookie/header locations you name)")
+          s.field "locations", strprop("comma list of where to mine: #{MINE_LOCATIONS.join(",")} (default: auto-detect; multipart only when named)")
+          s.field "wordlist", strprop("extra param-name wordlist (server path or saved name, see list_wordlists), merged with the built-in list")
+          s.field "names", strarrprop("names to test FIRST (e.g. from list_params)")
+          s.field "payload_from", strarrprop("names read from the project's captures, each '<QL> param-names' (e.g. 'host:api.example param-names'); tested after `names`. Sends nothing; the reply's payload_sources says what each read")
+          s.field "payload_from_include_sensitive", boolprop("also read credential cookies/headers for payload_from (default false)")
           s.field "payload_from_locations", strprop("locations payload_from reads, comma list of query,form,multipart,json,headers,cookies (default query,form,multipart,json)")
           s.field "payload_from_max_flows", intprop("newest flows each payload_from source reads (default #{PayloadFrom::DEFAULT_MAX_FLOWS}, max #{PayloadFrom::MAX_FLOWS})")
           s.field "payload_from_max_values", intprop("distinct names each payload_from source keeps (default #{PayloadFrom::DEFAULT_MAX_VALUES}, max #{PayloadFrom::MAX_VALUES})")
           s.field "bucket", intprop("names stuffed per request before bisection (per location)")
           s.field "concurrency", intprop("parallel requests (default 10, max #{MINE_MAX_CONCURRENCY})")
-          s.field "rate", numprop("requests/sec cap, fractional allowed (0 = unlimited; 0.5 = one request every two seconds)")
-          s.field "timeout_ms", intprop("per-request connect + idle timeout in milliseconds")
+          s.field "rate", numprop("requests/sec cap, fractional ok (0 = unlimited)")
+          s.field "timeout_ms", intprop("per-request connect + idle timeout, ms")
           sse_props(s, Repeater::StreamBound::SWEEP)
           s.field "retries", intprop("retries per request on a network error")
           s.field "http2", boolprop("use real HTTP/2 (default false)")
           s.field "insecure", boolprop("skip upstream TLS verification (default false)")
-          s.field "throttle_ms", intprop("fixed delay between requests in ms, for a target that limits on the gap between requests rather than throughput (CLI --throttle)")
-          s.field "sni", strprop("TLS SNI override, independent of the Host header — the vhost-confusion / domain-fronting test (mirrors CLI --sni)")
+          s.field "throttle_ms", intprop("fixed delay between requests, ms (for gap-based rate limits)")
+          s.field "sni", strprop("TLS SNI override, independent of Host (vhost confusion / domain fronting)")
           s.field "max_requests", intprop("caller cap on total requests")
-          s.field "hook", strprop("pipe each assembled request through an external command (argv, no shell, e.g. \"./sign.sh\"); its stdout is the request sent. RUNS A LOCAL COMMAND: refused when the operator switched off \"Run local commands\". For a signed/HMAC/nonce API that rejects a raw candidate. A hook that fails SKIPS the candidate with a reason (never a clean negative). #{Gori::Settings.hook_timeout_secs}s (settings.hooks.timeout_secs) per request, bounded overall by max_requests.")
+          s.field "hook", strprop("pipe each request through an external command (argv, no shell); its stdout is sent. RUNS A LOCAL COMMAND: refused when the operator switched off \"Run local commands\". A failing hook SKIPS the candidate (never a clean negative). #{Gori::Settings.hook_timeout_secs}s per request")
           request_macro_props(s, "request")
-          s.field "keep_alive", boolprop("reuse one HTTP/1.1 connection per worker across probes (default true), which saves most of a mine's wall clock. Set false to dial per probe: for connection-scoped rate limits or a load balancer pinning by connection.")
-          s.field "allow_unscoped", boolprop("run even when the target host is outside the project's configured scope — REQUIRED to run against an out-of-scope target, or when no scope is configured at all (active requests are refused by default without a matching scope)")
+          s.field "keep_alive", boolprop("reuse one connection per worker (default true). false dials per probe")
+          s.field "allow_unscoped", boolprop("REQUIRED to run against a target outside the project's scope, or when no scope is configured (refused by default)")
         end
 
         tool j, "mine_status", "Counts + state of a mine job (running|done|budget_exhausted|stopped|error). " \
-                               "budget_exhausted means max_requests halted the run before every name was tried; see incomplete_reason. " \
-                               "`skipped` lists wordlist names that were NOT tested, per location, against `candidate_names` " \
-                               "(the wordlist's own size), each with a reason: `invalid-at-location` (a header/cookie name must be " \
-                               "an RFC 7230 token, and framing headers are never injected), `already-in-request` (a name the " \
-                               "request already carries there is a VISIBLE parameter, not a hidden one) or `not-applicable` (a " \
-                               "requested location this request cannot carry, e.g. json with no JSON body; every name at it). " \
-                               "names_total counts only the names that survived those filters, so without `skipped` an incomplete sweep reads as a clean " \
-                               "one. `baseline_warning` names anything that makes findings tentative — READ IT even when " \
-                               "baseline_stable is true: the endpoint-echoes-any-input note (reflection findings are disabled " \
-                               "at those locations) is independent of stability." do |s|
+                               "budget_exhausted: max_requests hit early (see incomplete_reason). `skipped` lists " \
+                               "names NOT tested per location, with a reason; names_total omits them, so read `skipped` " \
+                               "before calling a sweep clean. `baseline_warning` makes findings tentative: READ IT even " \
+                               "when baseline_stable is true." do |s|
           s.field "job_id", strprop("id from mine_start"), required: true
         end
 

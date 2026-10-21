@@ -138,14 +138,14 @@ module Gori
 
       private def list_fuzz_run_tools(j : JSON::Builder) : Nil
         tool j, "list_fuzz_runs",
-          "List permanent fuzz runs in the current project, newest first. These survive MCP jobs and process restarts." do |s|
+          "List saved fuzz runs, newest first (they outlive jobs and restarts)." do |s|
           s.field "session_id", intprop("optional TUI fuzz-session id filter")
           s.field "offset", intprop("runs to skip (default 0)")
           s.field "limit", limitprop("runs to return", FUZZ_RUNS_LIMIT)
         end
 
         tool j, "get_fuzz_run",
-          "Get one permanent fuzz run and page every stored result. A run whose stop_on ended it (status condition_met) names the result it tripped on as run.stop_index — fetch that row with result_index; null when not recorded (a run saved before gori recorded it). Metrics, including result_index, use a scalar-only projection. Set include_content:true for at most 25 SQLite-capped content rows; max_head_bytes and max_body_bytes bound redacted previews before retained BLOBs enter the process. include_sensitive:true adds exact capped prefix bytes and never bypasses those limits." do |s|
+          "Get one saved fuzz run and page its stored results. run.stop_index is the result stop_on tripped on (fetch with result_index). include_content:true returns at most 25 rows, redacted and capped by max_head_bytes / max_body_bytes even with include_sensitive." do |s|
           s.field "run_id", intprop("permanent run id"), required: true
           s.field "result_index", intprop("optional exact result index (zero-based)")
           s.field "offset", intprop("result rows to skip (default 0)")
@@ -154,20 +154,20 @@ module Gori
                                    "with include_content: default and max #{FUZZ_RUN_CONTENT_ROWS_LIMIT.max}; " \
                                    "a cluster listing: default #{FUZZ_CLUSTER_LIMIT.default}, max #{FUZZ_CLUSTER_LIMIT.max})")
           s.field "matched_only", boolprop("only matcher hits (default false; with clusters:true, only clusters holding a match)")
-          s.field "clusters", boolprop("return one entry per RESPONSE SHAPE instead of rows (default false), aggregated over every stored row with the same fields fuzz_results{clusters} emits; paged by offset/limit (default 50, max 500). A run saved before shapes were recorded clusters by status/error/words/lines and marks those clusters approximate:true; a keep:interesting run clusters only the rows it kept (run.filtered).")
-          s.field "cluster", strprop("a cluster id from clusters:true — page that cluster's member rows (the default row shape; include_content applies)")
+          s.field "clusters", boolprop("one entry per RESPONSE SHAPE over stored rows, as fuzz_results{clusters} (default false). Older runs cluster approximately (approximate:true); a keep:interesting run only its kept rows")
+          s.field "cluster", strprop("a cluster id from clusters:true: page its member rows (include_content applies)")
           s.field "cluster_order", enumprop("order of clusters:true (default rare = smallest first; common; first)", Fuzz::Clusters::Order.names)
           s.field "include_content", boolprop("include request/wire/response content summaries (default false)")
-          s.field "include_sensitive", boolprop("include unredacted exact raw request/wire/head base64 when content is requested, and unmask cookie/credential-header extractor values (default false)")
+          s.field "include_sensitive", boolprop("with include_content: unredacted raw base64; also unmasks credential extractor values (default false)")
           s.field "max_body_bytes", intprop("decoded body/raw inline cap (default 2048, max #{Serialize::MAX_TEXT})")
           s.field "max_head_bytes", intprop("request/response head inline cap (default #{Serialize::SAVED_HEAD_PREVIEW_BYTES}, max #{Serialize::MAX_TEXT})")
         end
 
         return unless @allow_actions
         tool j, "delete_fuzz_run",
-          "Delete one terminal permanent fuzz run and all of its stored results. Refuses a live writer. force_stale:true recovers a running/saving row left by a crashed process; never use it while another gori is saving." do |s|
+          "Delete one finished saved fuzz run and its results (irreversible). Refuses a live writer." do |s|
           s.field "run_id", intprop("permanent run id"), required: true
-          s.field "force_stale", boolprop("delete a running/saving row believed to have no live writer (default false)")
+          s.field "force_stale", boolprop("delete a running/saving row a crashed process left (default false); never while another gori is saving")
         end
       end
     end

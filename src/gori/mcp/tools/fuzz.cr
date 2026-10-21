@@ -1544,85 +1544,78 @@ module Gori
         return unless @allow_actions
 
         tool j, "fuzz_start",
-          "Start a fuzz/intruder run and return a job_id immediately (poll fuzz_status / " \
-          "fuzz_results; end with fuzz_stop). ACTIVE: sends many real outbound requests from " \
-          "this host. Mark positions with §…§ in `template`, with `marks`, or `flow_id` + " \
-          "auto:true, and give payload sets in `payloads`. OR set `race_count` for a " \
-          "last-byte-sync race of one request, no payloads. Capped at #{FUZZ_MAX_REQUESTS} " \
-          "requests / #{FUZZ_MAX_CONCURRENCY} concurrency." do |s|
-          s.field "template", strprop("raw HTTP request with §…§ position markers; §value¦chain§ runs a Decoder chain over each payload, and a chain with an exec: step (or a saved chain holding one) RUNS A LOCAL COMMAND, refused when the operator switched off \"Run local commands\"")
-          s.field "flow_id", intprop("seed the template from a captured flow id (instead of template)")
-          s.field "repeater_id", intprop("seed the template from a saved repeater session id (instead of template/flow_id). A WebSocket session seeds its handshake AND its outbound frames — see 'messages'")
-          s.field "url", strprop("absolute target URL (scheme+host) that sets the origin — a 'template', 'flow_id' or 'repeater_id' is still REQUIRED; url alone does NOT define the request (unlike send_request)")
+          "Start a fuzz run; returns a job_id at once (poll fuzz_status / fuzz_results; end with " \
+          "fuzz_stop). ACTIVE: many real outbound requests. Positions: §…§ in `template`, " \
+          "`marks`, or auto:true; payload sets in `payloads`. OR `race_count` races one request. Capped at " \
+          "#{FUZZ_MAX_REQUESTS} requests / #{FUZZ_MAX_CONCURRENCY} concurrency." do |s|
+          s.field "template", strprop("raw HTTP request with §…§ positions; §value¦chain§ runs a Decoder chain per payload. An exec: step RUNS A LOCAL COMMAND, refused when the operator switched off \"Run local commands\"")
+          s.field "flow_id", intprop("seed the template from a captured flow id")
+          s.field "repeater_id", intprop("seed the template from a saved repeater id. A WebSocket session seeds its handshake AND outbound frames (see messages)")
+          s.field "url", strprop("absolute URL (scheme+host) setting the origin only; does NOT define the request (unlike send_request)")
           s.requires_one_of "template", "flow_id", "repeater_id"
-          s.field "auto", boolprop("auto-mark every query/cookie/body param when the template has no § markers")
-          s.field "marks", strarrprop("literal tokens to wrap as §…§ positions, every occurrence (like CLI --mark) — an alternative to §…§ in template. An occurrence inside or flush against an existing §…§ is skipped (it would merge the two), and a token left with none is named in `marks_warning`")
-          s.field "fields", strarrprop("gRPC: schema-known fields of a UNARY request to sweep — a name, a nested path ('profile.age') or a field number, with [i] for one occurrence of a repeated field ('tags[1]'); append ¦chain to run a Decoder chain BEFORE the type encodes. Each payload is encoded by the field's DECLARED type (-3 is different octets as int32, sint32, bool or an enum); the rest of the message is copied from the capture and the 5-byte length prefix is recomputed. Needs a descriptor set that resolves the rpc (grpc_schema / grpc_reflect). These positions follow the template's own §…§ ones, so mode and payloads keep their meaning. The field must be PRESENT in the capture (replaced, never added: a proto3 default is not a position). An undeclared field, a wire-type mismatch or a payload the type cannot hold is refused before the first request. `bytes` payloads are HEX ('de ad be ef').")
-          s.field "mode", enumprop("how payload sets are combined across marks (default sniper)", FUZZ_MODES)
-          s.field "payloads", arrprop(%(payload sets, a JSON array (NOT a string): {"list":["a","b"]} (sent as UTF-8), {"list_base64":["gA=="]} (byte-exact, for 0x00, 0x80-0xFF or invalid UTF-8), {"wordlist":"/p.txt"} (a server path or a saved name, see list_wordlists), {"preset":"sqli"} (one of #{Fuzz::Presets.names.join(", ")}; add "file":"/extra.txt" to merge a file in), {"numbers":"1-100"} or {"numbers":{"from":1,"to":100,"step":2}}, {"brute":"abc:1-3"} or {"brute":{"charset":"abc","min":1,"max":3}} (length max #{BRUTE_MAX_LEN}), {"null":5}. {"payload_from":"host:api.example param-names"} reads values the PROJECT captured and sends nothing: a QL query, then a projection (param-names, param-values, path-segments, js-endpoints, extracted); optional siblings include_sensitive (default false: credentials stay out, and `extracted` needs it), locations, max_flows, max_values. The reply's payload_sources says what each read, never the values.))
-          s.field "processors", arrprop(%(ordered pipeline applied to EVERY payload before it is spliced in (mirrors CLI --prefix/--suffix/--encode/--case/--hash/--regex-replace): {"type":"prefix","text":".."} {"type":"suffix","text":".."} {"type":"encode","kind":"url|urlall|base64|hex"} {"type":"case","kind":"upper|lower"} {"type":"hash","algo":"md5|sha1|sha256"} {"type":"regex_replace","pattern":"..","replacement":".."}. Query and form-body positions are ALREADY percent-encoded (see no_encode); use an encode step for a path segment, JSON body, header or cookie, where a raw space, CRLF or quote would break the framing. An encode step REPLACES that default for every position; the other steps leave it applied to their output.))
-          s.field "no_encode", boolprop("send payloads into query-string / form-body positions RAW, turning off their default percent-encoding (other positions are raw either way). For a payload that IS the raw byte (a bare & for parameter pollution, a CRLF probe), or that is ALREADY an escape aimed at the origin's decoder (%00, %c0%af, %2e%2e%2f), which the default would encode again (%00 -> %2500).")
-          s.field "match", jsonprop(%(keep only responses matching, e.g. {"status":"200,500-599","size":">1000","regex":"err"} — object or JSON string. "regex" sees only the BODY; "header" is a case-insensitive substring of the response HEAD ("set-cookie"). "time" is the round trip in ms ({"time":">=5000"}), the only evidence of a time-based blind injection; a TIMED-OUT send matches "time" and nothing else. "grpc" matches the grpc-status trailer ("7", ">0", "1-16"; native h2 or grpc-web): a gRPC HTTP status is 200 granted or denied, so "status" cannot tell them apart. Rows carry grpc_status/grpc_status_name/grpc_message.))
-          s.field "filter", jsonprop(%(drop responses matching, same shape as match — object or JSON string))
-          s.field "extract", strprop("regex; grep a value (capture group 1) from each response, as `extracted`")
-          s.field "extractors", strarrprop(%(named values pulled out of each response, at most #{Gori::DisplayColumns::MAX_COLUMNS}: [LABEL=]kind:selector, kind cookie|header|regex|position|jsonpath, e.g. "RID=header:x-request-id", "jsonpath:data.id", "regex:code=(\\d+)". Response side only. Rows gain extracts {label: value}, "" for a miss))
-          s.field "include_sensitive", boolprop("unmask cookie / credential-header extractor values in this job's rows (default false: [REDACTED])")
+          s.field "auto", boolprop("auto-mark every query/cookie/body param when the template has no §…§")
+          s.field "marks", strarrprop("literal tokens to mark as positions, every occurrence (one touching an existing position is skipped; a token with none is named in `marks_warning`)")
+          s.field "fields", strarrprop("gRPC unary fields to sweep: name, path ('profile.age') or number, [i] for one repeated occurrence; append ¦chain for a Decoder chain run BEFORE encoding. Payloads are encoded by the DECLARED type, length prefix recomputed. Needs a descriptor set (grpc_schema / grpc_reflect). The field must be PRESENT in the capture (replaced, never added); an undeclared field, type mismatch or unholdable payload is refused up front. `bytes` payloads are HEX")
+          s.field "mode", enumprop("how payload sets combine across marks (default sniper)", FUZZ_MODES)
+          s.field "payloads", arrprop(%(payload sets, a JSON array (NOT a string): {"list":["a","b"]}, {"list_base64":["gA=="]} (byte-exact), {"wordlist":"/p.txt"} (path or saved name, see list_wordlists), {"preset":"sqli"} (#{Fuzz::Presets.names.join(", ")}; "file":"/x.txt" merges a file), {"numbers":"1-100"} (or {from,to,step}), {"brute":"abc:1-3"} (or {charset,min,max}; length max #{BRUTE_MAX_LEN}), {"null":5}. {"payload_from":"host:api.example param-names"} reads values the PROJECT captured (sends nothing): QL query + projection (param-names, param-values, path-segments, js-endpoints, extracted); options include_sensitive (default false; `extracted` needs it), locations, max_flows, max_values. payload_sources in the reply says what each read.))
+          s.field "processors", arrprop(%(ordered steps for EVERY payload, each {"type":T,...}: prefix/suffix {text}, encode {kind:url|urlall|base64|hex}, case {kind:upper|lower}, hash {algo:md5|sha1|sha256}, regex_replace {pattern,replacement}. Query/form positions are ALREADY percent-encoded (see no_encode), other positions raw; an encode step REPLACES that default.))
+          s.field "no_encode", boolprop("send query/form payloads RAW, without default percent-encoding: for a raw byte (bare &, CRLF) or a ready escape (%00 would go out as %2500)")
+          s.field "match", jsonprop(%(keep only responses matching, e.g. {"status":"200,500-599","size":">1000","regex":"err"}. "regex" sees only the BODY; "header" is a substring of the response HEAD; "time" is ms (">=5000"; a TIMED-OUT send matches only "time"). "grpc" matches grpc-status ("7", ">0"); "status" cannot tell gRPC grant from denial.))
+          s.field "filter", jsonprop(%(drop responses matching; same shape as match))
+          s.field "extract", strprop("regex; capture group 1 from each response, as `extracted`")
+          s.field "extractors", strarrprop(%(named response values, at most #{Gori::DisplayColumns::MAX_COLUMNS}: [LABEL=]kind:selector, kind cookie|header|regex|position|jsonpath, e.g. "RID=header:x-request-id", "jsonpath:data.id". Rows gain extracts {label: value}; "" is a miss))
+          s.field "include_sensitive", boolprop("unmask cookie/credential-header extractor values (default false: [REDACTED])")
           s.field "concurrency", intprop("parallel requests (default 20, max #{FUZZ_MAX_CONCURRENCY})")
-          s.field "rate", numprop("requests/sec cap, fractional allowed (0 = unlimited; 0.5 = one request every two seconds)")
-          s.field "timeout_ms", intprop("per-request connect + idle (read/write) timeout in milliseconds")
+          s.field "rate", numprop("requests/sec cap, fractional ok (0 = unlimited)")
+          s.field "timeout_ms", intprop("per-request connect + idle timeout, ms")
           sse_props(s, Repeater::StreamBound::SWEEP)
           s.field "retries", intprop("retries per request on a network error")
-          s.field "follow_redirects", boolprop("follow 3xx responses (default false). Without it, against an endpoint that 302s every matcher reads the redirect STUB and the run looks uniform. Mirrors CLI --follow.")
-          s.field "max_redirects", intprop("hop limit when follow_redirects is on")
-          s.field "auto_calibrate", boolprop("drop responses identical to the baseline, so only what a payload CHANGED is reported (mirrors CLI --ac)")
-          s.field "throttle_ms", intprop("fixed delay between requests in ms, for a target that limits on the gap between requests rather than throughput (CLI --throttle)")
-          s.field "sni", strprop("TLS SNI override, independent of the Host header — the vhost-confusion / domain-fronting test")
-          s.field "tls_preset", strprop("TLS fingerprint for the WHOLE run: shape every ClientHello like #{Settings::TLS_PRESET_NAMES.join(" | ")} instead of gori's own (settings.json untouched). The destination's client certificate, protocol range and permissive flag still apply; echoed back on the reply. An approximation, NOT a byte-exact JA3. https only")
-          s.field "keep_alive", boolprop("reuse connections across requests (default true; h2 reuses one serially). Set false to dial per request: for connection-scoped rate limits, a load balancer pinning by connection, or when keep-alive handling is the test.")
-          s.field "http2", boolprop("use real HTTP/2 (default false). A run seeded from a captured h2 flow selects it on its own. Pooled like h1 unless keep_alive is false")
+          s.field "follow_redirects", boolprop("follow 3xx (default false); without it, matchers read the redirect stub of an endpoint that always 302s")
+          s.field "max_redirects", intprop("hop limit with follow_redirects")
+          s.field "auto_calibrate", boolprop("drop responses identical to the baseline, so only what a payload CHANGED is reported")
+          s.field "throttle_ms", intprop("fixed delay between requests, ms (for gap-based rate limits)")
+          s.field "sni", strprop("TLS SNI override, independent of Host (vhost confusion / domain fronting)")
+          s.field "tls_preset", strprop("ClientHello fingerprint for the run: #{Settings::TLS_PRESET_NAMES.join(" | ")}. Approximate, NOT byte-exact JA3; https only")
+          s.field "keep_alive", boolprop("reuse connections (default true). false dials per request (connection-scoped rate limits, LB pinning)")
+          s.field "http2", boolprop("use real HTTP/2 (default false; a run seeded from an h2 flow selects it)")
           s.field "insecure", boolprop("skip upstream TLS verification (default false)")
           s.field "max_requests", intprop("caller cap on total requests")
-          s.field "stop_on", jsonprop(%(end the run early — {after_matches, match, filter}. after_matches:N stops after N hits of the run's own matchers; match/filter is a SEPARATE condition shaped like the top-level ones ({"match":{"regex":"Welcome admin"}} stops when the body has it; {"filter":{"regex":"Invalid password"}} when it no longer does). Ends with status "condition_met", NOT "done" (fuzz_status stop_reason and stop_index). Cannot combine with race_count.))
-          s.field "keep", enumprop("which rows a save_results archive stores (default all). interesting keeps matched rows plus rows with an observed fault (an error, a re-send, a truncated capture, the stop row); counts stay whole-run and idx stays the payload position. Requires save_results: true.", %w[all interesting])
-          s.field "allow_unscoped", boolprop("run even when the target host is outside the project's configured scope — REQUIRED to run against an out-of-scope target, or when no scope is configured at all (active requests are refused by default without a matching scope)")
-          s.field "record_history", enumprop("record each sent request+response as a History flow (default none; 'all' is capped at #{FUZZ_HISTORY_MAX}). Matched rows in fuzz_results carry the flow_id (read with get_flow) while that flow still belongs to the job. Booleans are aliases (true = all, false = none); any other value is refused.", RECORD_HISTORY_MODES)
-          s.field "save_results", boolprop("persist EVERY result in the project (rendered and wire request, response head and body), independent of record_history and the live cache. Replies carry run_id + save_status; read it later with list_fuzz_runs / get_fuzz_run.")
-          s.field "update_content_length", boolprop("recompute Content-Length after each splice, and add one to a body that declares none (default true). Set FALSE to send the template's framing verbatim: a wrong Content-Length, or one beside Transfer-Encoding, is the request-smuggling primitive the default re-frames away. With false, a body with neither Content-Length nor chunked goes out UNFRAMED (an HTTP/1.1 origin reads it as empty). Mirrors CLI `gori run fuzz --verbatim`.")
-          s.field "reframe_grpc", boolprop("recompute the gRPC 5-byte length prefix after each splice (default FALSE). By default a length-changing payload keeps the stale prefix: a real server rejects it and fuzz_status counts it as grpc_stale_prefix (a wrong prefix is itself a parser test). Set TRUE for an ordinary unary sweep. Unary only; a client-streaming body is left alone. Mirrors CLI --reframe-grpc.")
+          s.field "stop_on", jsonprop(%(end early: {after_matches:N} stops after N hits; {match|filter} is a SEPARATE condition shaped like the top-level ones (filter stops once a response escapes it). Ends with status "condition_met", NOT "done". Not with race_count.))
+          s.field "keep", enumprop("rows a save_results archive stores (default all). interesting: matched plus faulted rows (error, re-send, truncation, stop row); counts stay whole-run. Requires save_results", %w[all interesting])
+          s.field "allow_unscoped", boolprop("REQUIRED to run against a target outside the project's scope, or when no scope is configured (refused by default)")
+          s.field "record_history", enumprop("record requests+responses as History flows (default none; all is capped at #{FUZZ_HISTORY_MAX}); fuzz_results rows then carry flow_id (get_flow). true = all, false = none", RECORD_HISTORY_MODES)
+          s.field "save_results", boolprop("persist EVERY result (request, wire, response) in the project. Replies carry run_id + save_status; read with get_fuzz_run")
+          s.field "update_content_length", boolprop("recompute Content-Length after each splice, adding one if absent (default true). FALSE sends the template's framing verbatim (smuggling tests); a body with neither CL nor chunked then goes out UNFRAMED (read as empty)")
+          s.field "reframe_grpc", boolprop("recompute the gRPC length prefix after each splice (default FALSE: a stale prefix is kept, counted as grpc_stale_prefix). TRUE for an ordinary unary sweep")
           request_macro_props(s, "candidate", race: true)
-          s.field "race_count", intprop("race (last-byte-sync) mode: open this many DEDICATED connections, hold back each request's final byte, then release them all at once — for TOCTOU bugs (double-spend, coupon reuse, limit bypass). Ignores mode/payloads/marks: the template goes out byte-identical (no §…§), so template or flow_id alone is enough; set match:{status:...} so `matched` marks the success (a guarded endpoint shows at most one). Max #{Fuzz::Engine::MAX_RACE_SIZE}. HTTP/1.1 only (h2 degrades to independent sends).")
-          s.field "race_warmup", strprop("race_count only: a raw request sent, its response read, on each connection before it holds the race request, to even out handshake latency. Sent EXACTLY as given (no §…§, no env) — use a harmless GET to the same origin, never the race request (its side effect would run once per connection).")
-          s.field "messages", ws_out_messages_prop("WebSocket only: the outbound frame script, REPLACING a flow_id/repeater_id seed's frames (the grammar send_websocket takes). Mark §…§ positions IN these payloads. Each variation is one full session (dial, handshake, script, drain, close), so concurrency N means N sockets. A WebSocket seed with no frames and no messages is swept as plain HTTP")
-          s.field "idle_ms", intprop("WebSocket only: per-session server-silence timeout after the first inbound frame (100-60000, default 3000). timeout_ms does not pace a WebSocket run and is reported in ignored_args.")
-          s.field "keep_sec_websocket_key", boolprop("WebSocket only: send the template's own Sec-WebSocket-Key on every session instead of a fresh one, so a bad key can be the test (default false).")
-          s.field "ws_http_only", boolprop("sweep a WebSocket template as plain HTTP: the handshake goes out as an ordinary request and its answer (a 101, or an RFC 8441 CONNECT's 2xx) is the response. Bytes unchanged. Needed for race_count / record_history on a WebSocket seed and http2 on an `Upgrade:` one.")
+          s.field "race_count", intprop("race (TOCTOU) mode: this many connections each hold back the last byte, then release together. Template sent byte-identical, payloads ignored; set match:{status:...} so `matched` marks success (a guarded endpoint shows at most one). Max #{Fuzz::Engine::MAX_RACE_SIZE}. HTTP/1.1 only (h2 sends independently)")
+          s.field "race_warmup", strprop("race_count only: a raw request sent EXACTLY as given on each connection first, to even out latency. Use a harmless GET, never the race request (its side effect would run per connection)")
+          s.field "messages", ws_out_messages_prop("WebSocket only: the outbound frames with §…§ positions, REPLACING a seed's frames. Each variation is a full session, so concurrency N means N sockets. A WebSocket seed with no frames and no messages is swept as plain HTTP")
+          s.field "idle_ms", intprop("WebSocket only: per-session server-silence timeout, ms, after the first inbound frame (100-60000, default 3000; replaces timeout_ms)")
+          s.field "keep_sec_websocket_key", boolprop("WebSocket only: send the template's own Sec-WebSocket-Key on every session, not a fresh one (default false)")
+          s.field "ws_http_only", boolprop("sweep a WebSocket template as plain HTTP (the handshake is the request, its 101/2xx the response). Needed for race_count / record_history on a WebSocket seed, and http2 on an `Upgrade:` one")
         end
 
         tool j, "fuzz_status", "Counts + state of a fuzz job (running|done|budget_exhausted|condition_met|stopped|error). " \
-                               "budget_exhausted means max_requests halted the run before every candidate was checked — " \
-                               "a partial result, NOT an exhaustive one; condition_met means the run's own stop_on ended it " \
-                               "(see stop_reason, and stop_index for the result it tripped on — in fuzz_results unless results_truncated) — it reached its goal but is likewise not exhaustive; " \
-                               "see incomplete_reason and candidates_remaining." do |s|
+                               "budget_exhausted (max_requests hit) and condition_met (stop_on fired; stop_reason, " \
+                               "stop_index) are partial, NOT exhaustive: see incomplete_reason, candidates_remaining." do |s|
           s.field "job_id", strprop("id from fuzz_start"), required: true
         end
 
         tool j, "fuzz_results",
-          "Paged matched results for a fuzz job (status/length/words/lines/duration/" \
-          "extracted, plus a per-result flow_id when the run used record_history and its History row still exists. No raw " \
-          "bodies are inlined: fetch a hit's full request+response with get_flow(flow_id), " \
-          "or re-issue it with send_request by substituting the payload into your template. " \
-          "On a large run, pass clusters:true first: one entry per distinct response shape, " \
-          "then cluster:<id> for the members of the ones worth reading." do |s|
+          "Paged results of a fuzz job (metrics, extracted, flow_id if recorded). No bodies: " \
+          "fetch a hit with get_flow(flow_id) or re-send with send_request. On a large run use " \
+          "clusters:true first, then cluster:<id>." do |s|
           s.field "job_id", strprop("id from fuzz_start"), required: true
           s.field "offset", intprop("start row (default 0)")
           # Prose, not `limitprop`: the numbers depend on the mode, and one `default`/`maximum`
           # pair would be wrong for the cluster listing (Copilot on #1398).
           s.field "limit", intprop("max rows (default #{FUZZ_RESULTS_LIMIT.default}, max #{FUZZ_RESULTS_LIMIT.max}; " \
                                    "a cluster listing: default #{FUZZ_CLUSTER_LIMIT.default}, max #{FUZZ_CLUSTER_LIMIT.max})")
-          s.field "clusters", boolprop("return one entry per RESPONSE SHAPE instead of rows (default false): responses that are the same answer — payload echoes, numbers, ids, timestamps and volatile headers normalized away — group together, counted over EVERY result of the job (not only the stored rows). Each cluster has an id, count, matched/errored/incomplete counts, status/grpc_status/ws_close_code or error_class, metric ranges, the lowest member indices (sample_indices) and a representative row. Paged by offset/limit (default 50, max 500 clusters). Start here on a large run: the rare clusters are usually the interesting ones.")
-          s.field "cluster", strprop("a cluster id from clusters:true — return that cluster's member ROWS (same row shape as the default page) plus its summary. The live cache keeps only interesting rows, so members_retained can be below count; a save_results run pages every member through get_fuzz_run{cluster}.")
-          s.field "cluster_order", enumprop("order of clusters:true (default rare = smallest cluster first; common = largest first; first = by first appearance)", Fuzz::Clusters::Order.names)
-          s.field "matched_only", boolprop("return only rows the matcher accepted (default false; with clusters:true, only clusters holding a match). The stored set is NOT matched-only: a row that FAILED is kept too — the send errored (dead target, TLS, refused by scope), a §…§ position's ¦chain could not run on that payload so it went out UNTRANSFORMED, or a gRPC field's declaration could not hold it so that field kept the capture's own value (both `chain_error`, whose sentence says which), the request was re-sent or retried, or the response came back truncated — so the unfiltered page mixes matches with non-matches. Every row carries `matched` either way, and failures can never crowd matches out of the buffer.")
+          s.field "clusters", boolprop("one entry per RESPONSE SHAPE instead of rows (default false), over EVERY result: id, counts, status or error_class, metric ranges, sample_indices, a representative row. Rare clusters are usually the interesting ones")
+          s.field "cluster", strprop("cluster id: its member ROWS + summary. members_retained can be below count; a save_results run pages all via get_fuzz_run{cluster}")
+          s.field "cluster_order", enumprop("order of clusters:true (default rare = smallest first; common = largest first; first = by first appearance)", Fuzz::Clusters::Order.names)
+          s.field "matched_only", boolprop("only matcher hits (default false; with clusters:true, clusters holding one). Unfiltered pages also hold failed rows (send error, re-send, truncation, `chain_error` = payload sent UNTRANSFORMED); check each row's `matched`")
         end
 
         tool j, "fuzz_stop", "Stop a running fuzz job (in-flight requests finish)." do |s|

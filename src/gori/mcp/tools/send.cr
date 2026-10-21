@@ -1781,120 +1781,94 @@ module Gori
         return unless @allow_actions
 
         tool j, "send_request",
-          "Send/resend an HTTP request to its origin and return the response. " \
-          "ACTIVE: makes a real outbound request from this host. Pass `flow_id` to resend a " \
-          "captured flow byte-exact, `repeater_id` to execute a saved HTTP repeater (send_websocket " \
-          "for WS), OR an absolute `url` with optional method/headers/body, or a verbatim `raw`. " \
-          "A stored source is EXCLUSIVE: combined with url/method/headers/body/body_base64/raw/" \
-          "raw_base64/h2_fields (or each other) it is REFUSED as INVALID_ARGUMENT " \
-          "(`details.conflicting_fields`) and nothing is sent; to edit one, read it with " \
-          "get_flow/get_repeater_context and send it back through url/raw. Per-send modifiers " \
-          "(http2, sni, tls_preset, verbatim, timeout_ms, sse_max_events, sse_max_ms, insecure, " \
-          "reframe_grpc, grpc_fields) combine with a " \
-          "source, keep_request_line with flow_id. The result includes `effective_request` (what " \
-          "was actually sent). The url path adds Host + Content-Length when omitted. Match & " \
-          "Replace rules apply only with apply_rules:true. On a failed send, branch on " \
-          "`retryable`: PROTOCOL_ERROR (gori proved the message malformed) and REQUEST_TRUNCATED " \
-          "(the origin answered before the body finished, RFC 9113 §8.1; the response is here) " \
-          "are final." do |s|
-          s.field "flow_id", intprop("resend a captured flow by id (no url needed; like the TUI Repeater)")
-          s.field "keep_request_line", boolprop("flow_id only: send the STORED request line instead of rewriting an absolute-form line (GET http://h/p) to origin-form (GET /p). Default false: a proxy capture's absolute form is a proxy artifact, but on a flow from a direct send it is the routing / cache-poisoning / SSRF payload. `request_line_rewritten:true` reports a rewrite")
-          s.field "repeater_id", intprop("execute a saved HTTP repeater by id (no url needed; respects its target/http2/sni/auto-Content-Length). A session not from a flow that still holds §…§ markers is REFUSED: only the Repeater tab renders them")
-          s.field "url", strprop("absolute URL incl. scheme+host, e.g. https://api.example.com/v1/x (required unless flow_id/repeater_id is given)")
+          "Send an HTTP request and return the response. ACTIVE: a real outbound request. " \
+          "Source: `flow_id` (byte-exact resend), `repeater_id` (HTTP repeater; send_websocket " \
+          "for WS), `url` + method/headers/body (Host, Content-Length added if omitted), or " \
+          "`raw`. A stored source plus url/method/headers/body*/raw*/h2_fields or the other " \
+          "source is REFUSED (INVALID_ARGUMENT, `details.conflicting_fields`), nothing sent; to edit, read it " \
+          "(get_flow/get_repeater_context) and send via url/raw. `effective_request` is what " \
+          "went out. On failure check `retryable` (REQUEST_TRUNCATED still carries the response)." do |s|
+          s.field "flow_id", intprop("resend a captured flow by id")
+          s.field "keep_request_line", boolprop("flow_id only: keep the STORED request line instead of rewriting absolute-form (GET http://h/p) to origin-form (default false); true when the absolute form is the payload. `request_line_rewritten:true` reports a rewrite")
+          s.field "repeater_id", intprop("execute a saved HTTP repeater. A non-flow session holding §…§ markers is REFUSED unless verbatim:true")
+          s.field "url", strprop("absolute URL incl. scheme+host (required unless flow_id/repeater_id)")
           s.field "method", strprop("HTTP method (default GET)")
-          s.field "headers", header_map_prop("request headers: a name->value map, or the [{\"name\":\"Cookie\",\"value\":\"a=1\"}] list the session-slot and authorize tools take")
+          s.field "headers", header_map_prop("request headers: a name->value map, or a [{\"name\":\"Cookie\",\"value\":\"a=1\"}] list")
           s.field "body", strprop("request body, sent as-is")
-          s.field "body_base64", strprop("request body as base64, the byte-exact form, on the url path and the h2_fields path alike. Use it for a non-UTF-8 body (binary, protobuf/gRPC, gzip, multipart, overlong UTF-8) or an octet a JSON string cannot carry (0x00, 0x80-0xFF); 'body' is sent as UTF-8. Wins over 'body'; no project env expansion, but a session binding or $GEN token still resolves (Content-Length follows) unless verbatim:true")
+          s.field "body_base64", strprop("request body as base64, byte-exact: for binary/non-UTF-8 bodies or octets JSON cannot carry. Wins over 'body'. No $ENV expansion, but $BIND/$GEN tokens resolve unless verbatim:true")
           s.field "raw", strprop("verbatim raw HTTP/1.1 request; overrides method/headers/body (scheme/host/port still come from url)")
-          s.field "raw_base64", strprop("the whole raw HTTP/1.1 request as base64: the byte-exact form, and the only way to send a latin-1/invalid-UTF-8 header or a binary body ('é' in a JSON string goes out as 2 bytes). Implies verbatim")
-          s.field "verbatim", boolprop("send the bytes EXACTLY as stored/given (default false): no token expansion ($ENV.KEY, $BIND.NAME, $GEN.UUID, bare $KEY/$NAME stay literal, and a $$ escape is not consumed either), no bare-LF→CRLF promotion, no Content-Length resync, no h2 field-name lowercasing, no method upper-casing. The active session slot's header overlay still applies. Applies to 'raw', to a structured url send's headers and body (the URL itself still expands), and to a repeater_id replay (like `gori run repeater send --verbatim`), where it also sends a stored § literally instead of refusing it; a flow_id replay is byte-exact anyway. For desync/smuggling tests where a bare LF IS the payload, or a literal token in the stored request is")
-          s.field "reframe_grpc", boolprop("HTTP/2 only: recompute the gRPC 5-byte length prefix over the body being sent (default FALSE). By default an edited body keeps its captured/authored prefix: a byte-exact replay, and the test when a wrong prefix is the point. Set TRUE after editing a unary message the origin should accept. Single messages only; client-streaming and grpc-web-text bodies are left alone. Reflected in effective_request")
+          s.field "raw_base64", strprop("raw request as base64: byte-exact, for non-UTF-8 headers or a binary body. Implies verbatim")
+          s.field "verbatim", boolprop("send bytes EXACTLY (default false): $ENV/$BIND/$GEN tokens and $$ stay literal; no LF to CRLF, Content-Length resync or case changes. The session slot's header overlay still applies; the URL still expands")
+          s.field "reframe_grpc", boolprop("HTTP/2: recompute the gRPC length prefix (default FALSE: an edited body keeps its prefix). TRUE after editing a unary message the origin should accept")
           s.field "grpc_fields", strarrprop("gRPC: set or add fields on the unary message, each \"path=value\": a declared name with a .proto (role=ROLE_ADMIN) or number:type (7:varint=1); \"-path\" removes one. Reframed")
           s.field "h2_fields", h2fieldsprop
-          s.field "http2", boolprop("use real HTTP/2; defaults to the flow's version when flow_id is set)")
-          s.field "timeout_ms", intprop("per-operation connect + idle (read/write) timeout in milliseconds; a timeout surfaces as a network-error result with error_kind (1-600000)")
+          s.field "http2", boolprop("use real HTTP/2 (default: the flow's version with flow_id)")
+          s.field "timeout_ms", intprop("connect + idle timeout, ms (1-600000)")
           sse_props(s, Repeater::StreamBound::SEND)
-          s.field "sni", strprop("TLS SNI override, independent of the Host header (vhost confusion / domain fronting). OVERRIDES a flow_id/repeater_id source's SNI; omit to keep it.")
-          s.field "tls_preset", strprop("TLS fingerprint for THIS send: shape the ClientHello like #{Settings::TLS_PRESET_NAMES.join(" | ")} instead of gori's own (settings.json untouched) — to ask whether an origin answers differently by handshake. The destination's client certificate, protocol range and permissive flag still apply. OVERRIDES a repeater_id source's preset (\"\" drops it). An approximation, NOT a byte-exact JA3; `gori settings tls-fingerprint HOST --preset NAME` prints what goes out. https only")
+          s.field "sni", strprop("TLS SNI override, independent of Host; overrides a stored source's SNI")
+          s.field "tls_preset", strprop("ClientHello fingerprint for this send: #{Settings::TLS_PRESET_NAMES.join(" | ")}; overrides a repeater's (\"\" drops it). Approximate, NOT byte-exact JA3; https only")
           s.field "insecure", boolprop("skip upstream TLS verification (default false)")
-          s.field "apply_rules", boolprop("apply the project's enabled Match & Replace rules (REQUEST side only) to the outgoing request before sending, matching the live proxy; default false — direct sends are byte-exact")
-          s.field "record_history", boolprop("record the outbound request and response in History for audit/evidence (default true)")
-          s.field "save_as_repeater", boolprop("save this request and its response to the Repeater workbench (default false)")
-          s.field "include_sensitive_headers", boolprop("return Cookie/Set-Cookie/Authorization/API-key response values instead of [REDACTED] (default false); `include_sensitive` is an alias")
-          s.field "include_sensitive", boolprop("alias for include_sensitive_headers, spelled the way get_flow/compare_flows/get_repeater_context spell it")
-          s.field "body_mode", enumprop("how much response body to inline. Default: up to #{AUTO_BODY_BYTES} bytes when the response is recorded (record_history) or saved, a longer body cut with a `more` pointer to get_response_body_chunk; full (the default when neither) inlines up to #{Serialize::MAX_TEXT}", BODY_MODES)
+          s.field "apply_rules", boolprop("apply enabled request-side Match & Replace rules (default false: byte-exact)")
+          s.field "record_history", boolprop("record request and response in History (default true)")
+          s.field "save_as_repeater", boolprop("also save request and response as a Repeater session (default false)")
+          s.field "include_sensitive_headers", boolprop("unredact credential response headers (default false)")
+          s.field "include_sensitive", boolprop("alias for include_sensitive_headers")
+          s.field "body_mode", enumprop("response body to inline. Default: #{AUTO_BODY_BYTES} bytes when recorded or saved (rest via the `more` pointer to get_response_body_chunk), else full up to #{Serialize::MAX_TEXT}", BODY_MODES)
           s.field "max_body_bytes", intprop("cap inlined response-body bytes (clamped to 65536)")
-          s.field "allow_unscoped", boolprop("send even when the target host is outside the project's configured scope — REQUIRED to run against an out-of-scope target, or when no scope is configured at all (active requests are refused by default without a matching scope)")
-          s.field "name", strprop("optional custom name for the saved repeater tab (only when save_as_repeater=true)")
-          s.field "issue_id", intprop("optional issue to link to the saved repeater; requires save_as_repeater=true")
+          s.field "allow_unscoped", boolprop("REQUIRED to send to a target outside the project's scope, or when no scope is configured (refused by default)")
+          s.field "name", strprop("name for the saved repeater (save_as_repeater only)")
+          s.field "issue_id", intprop("issue to link to the saved repeater (save_as_repeater only)")
         end
 
         tool j, "race_requests",
-          "Fire several saved HTTP repeaters as ONE synchronized race — N DISTINCT requests on " \
-          "the wire in the same narrow window, to hit a multi-endpoint TOCTOU (e.g. apply-coupon " \
-          "racing checkout). ACTIVE: makes real outbound requests from this host. Distinct from " \
-          "the Fuzzer race (N byte-identical copies of ONE request): here every member is a " \
-          "different saved session. Transport: HTTP/1.1 last-byte-sync over N connections, or " \
-          "HTTP/2 single-packet attack over one connection (pass http2:true). ALL members must " \
-          "resolve to ONE origin (scheme://host:port) and share the transport, or the call is " \
-          "REFUSED. The result gives each member's session `id`, status, size, RELEASE-RELATIVE " \
-          "timing (the arrival spread), response `head` (credentials redacted) and `body` (the " \
-          "bodies share the reply budget; a race is not stored, so nothing pages the rest), plus " \
-          "`won_2xx`, a NEUTRAL count of how many members answered 2xx — whether that is a finding " \
-          "depends on the endpoints raced (a multi-endpoint race may legitimately see several 2xx)." do |s|
-          s.field "repeater_ids", JSON.parse(%({"type":"array","description":"two or more saved HTTP repeater ids (from list_history / the Repeater workbench) to race together; all must share one origin and transport","items":{"type":"integer"},"minItems":2})), required: true
-          s.field "http2", boolprop("race over HTTP/2 (single-packet attack); default: the sessions' shared stored setting (refused if they disagree)")
-          s.field "verbatim", boolprop("send each member's bytes EXACTLY: no token expansion, no Content-Length resync (see send_request.verbatim). Default false")
-          s.field "timeout_ms", intprop("per-operation connect + idle timeout in milliseconds (1-600000)")
+          "Fire several DISTINCT saved HTTP repeaters as ONE synchronized race (multi-endpoint " \
+          "TOCTOU). ACTIVE: real outbound requests. All must share ONE origin and transport, " \
+          "else REFUSED. Per member: `id`, status, size, timing, `head` (redacted), `body` " \
+          "(shared budget; not stored, nothing pages the rest). `won_2xx` is a NEUTRAL 2xx " \
+          "count; whether it is a finding depends on the endpoints." do |s|
+          s.field "repeater_ids", JSON.parse(%({"type":"array","description":"saved HTTP repeater ids to race together","items":{"type":"integer"},"minItems":2})), required: true
+          s.field "http2", boolprop("race over HTTP/2 (single-packet); default: the sessions' shared stored setting (refused if they disagree)")
+          s.field "verbatim", boolprop("send each member's bytes EXACTLY: no token expansion, no Content-Length resync (default false)")
+          s.field "timeout_ms", intprop("per-operation connect + idle timeout, ms (1-600000)")
           s.field "insecure", boolprop("skip upstream TLS verification (default false)")
-          s.field "allow_unscoped", boolprop("send even when the shared origin is outside (or without) a configured scope — the Sandbox still applies (default false)")
+          s.field "allow_unscoped", boolprop("send even when the origin is outside (or without) a configured scope; the Sandbox still applies (default false)")
         end
 
         tool j, "timing_requests",
-          "Differential TIMING analysis of exactly TWO saved HTTP repeaters (A vs B): send the " \
-          "pair many times and decide which is CONSISTENTLY slower by response ORDER and " \
-          "quartiles, not eyeballed latency (PortSwigger \"Listen to the whispers\"). ACTIVE: " \
-          "makes real outbound requests. Each iteration releases A and B together in one narrow " \
-          "window (HTTP/2 single-packet on one connection, HTTP/1.1 last-byte-sync on two) so " \
-          "their common network/load noise cancels and the SIGN of (A-B) survives — pass " \
-          "interleaved:true to send them sequentially instead. BOTH must resolve to ONE origin " \
-          "and share the transport, or the call is REFUSED. The result is a VERDICT " \
-          "(a_slower / b_slower / no_difference / inconclusive) with the order-bias fraction, a " \
-          "binomial p-value, per-variant quartiles (min/q1/median/q3/max, microseconds) and " \
-          "distribution histograms — never a single number. Use it for unkeyed-parameter, " \
-          "blind-injection and scoped-SSRF oracles." do |s|
-          s.field "repeater_ids", JSON.parse(%({"type":"array","description":"exactly two saved HTTP repeater ids (from list_history / the Repeater workbench): the A and B variants to compare; both must share one origin and transport","items":{"type":"integer"},"minItems":2,"maxItems":2})), required: true
-          s.field "count", intprop("how many A/B pairs to send after warm-up (1-#{Repeater::Timing::Stats::MAX_ITERATIONS}; default #{Repeater::Timing::Stats::DEFAULT_ITERATIONS}). Below #{Repeater::Timing::Stats::SMALL_SAMPLE} usable pairs the verdict is clamped to inconclusive")
-          s.field "warmup", intprop("initial pairs discarded before measuring, to absorb TLS/connection warm-up (default #{Repeater::Timing::Stats::DEFAULT_WARMUP})")
-          s.field "interleaved", boolprop("send A then B sequentially (alternating order each iteration) instead of the synchronized single-packet/last-byte race — noisier, but the fallback when a race cannot assemble (default false)")
+          "Differential TIMING of TWO saved HTTP repeaters (A vs B): send the pair together many " \
+          "times and judge which is CONSISTENTLY slower by response ORDER. ACTIVE: real outbound " \
+          "requests. Both must share ONE origin and transport, else REFUSED. Reply: a VERDICT " \
+          "(a_slower, b_slower, no_difference, inconclusive), p-value, quartiles (µs), histograms." do |s|
+          s.field "repeater_ids", JSON.parse(%({"type":"array","description":"the A and B saved HTTP repeater ids","items":{"type":"integer"},"minItems":2,"maxItems":2})), required: true
+          s.field "count", intprop("A/B pairs to send after warm-up (1-#{Repeater::Timing::Stats::MAX_ITERATIONS}; default #{Repeater::Timing::Stats::DEFAULT_ITERATIONS}). Below #{Repeater::Timing::Stats::SMALL_SAMPLE} usable pairs the verdict is clamped to inconclusive")
+          s.field "warmup", intprop("initial pairs discarded before measuring (default #{Repeater::Timing::Stats::DEFAULT_WARMUP})")
+          s.field "interleaved", boolprop("send A and B sequentially instead of together: noisier fallback (default false)")
           s.field "http2", boolprop("send over HTTP/2 (single-packet); default: the sessions' shared stored setting (refused if they disagree)")
           s.field "verbatim", boolprop("send each member's bytes EXACTLY: no token expansion, no Content-Length resync (default false)")
-          s.field "timeout_ms", intprop("per-operation connect + idle timeout in milliseconds (1-600000)")
+          s.field "timeout_ms", intprop("per-operation connect + idle timeout, ms (1-600000)")
           s.field "insecure", boolprop("skip upstream TLS verification (default false)")
-          s.field "allow_unscoped", boolprop("send even when the shared origin is outside (or without) a configured scope — the Sandbox still applies (default false)")
+          s.field "allow_unscoped", boolprop("send even when the origin is outside (or without) a configured scope; the Sandbox still applies (default false)")
         end
 
         tool j, "send_websocket",
-          "Execute a persisted WebSocket repeater: re-open the socket with the handshake the " \
-          "session holds — an RFC 6455 `Upgrade:` request over HTTP/1.1, or an RFC 8441 " \
-          "extended CONNECT over HTTP/2 — send the repeater's outbound messages (or a supplied " \
-          "override), and return inbound frames. ACTIVE: makes a real outbound connection. The " \
-          "handshake response is persisted on the repeater, while the outbound message " \
-          "template is left unchanged." do |s|
+          "Execute a saved WebSocket repeater: open the socket with its stored handshake (h1 " \
+          "Upgrade or h2 extended CONNECT), send its messages (or `messages`), return inbound " \
+          "frames. ACTIVE: a real outbound connection. Saves the handshake response on the " \
+          "repeater; stored messages are unchanged." do |s|
           s.field "repeater_id", intprop("WebSocket repeater database id"), required: true
-          s.field "messages", ws_out_messages_prop("optional outbound message override; stored repeater messages are used when absent")
-          s.field "keep_sec_websocket_key", boolprop("send the repeater request's OWN Sec-WebSocket-Key instead of a fresh one, so an absent/short/duplicate/non-base64 key can be tested (default: the repeater's stored setting, itself false). HTTP/1.1 handshakes only — RFC 8441 §5.1 carries no Sec-WebSocket-Key, and the result says so rather than ignoring the flag")
-          s.field "tls_preset", strprop("TLS fingerprint for this handshake: shape the ClientHello like #{Settings::TLS_PRESET_NAMES.join(" | ")} instead of gori's own, without touching the settings.json outbound_tls table (default: the repeater's stored setting). The destination's client certificate, protocol range and permissive flag still apply. An APPROXIMATION of that client's hello, not a byte-exact JA3 match. wss:// targets only")
+          s.field "messages", ws_out_messages_prop("overrides the stored messages")
+          s.field "keep_sec_websocket_key", boolprop("send the request's OWN Sec-WebSocket-Key, not a fresh one (default: stored setting). HTTP/1.1 handshakes only")
+          s.field "tls_preset", strprop("ClientHello fingerprint: #{Settings::TLS_PRESET_NAMES.join(" | ")} (default: stored setting). Approximate, NOT byte-exact JA3; wss:// only")
           s.field "idle_ms", intprop("server-silence timeout after the first inbound frame (100-60000 ms; default 3000)")
           s.field "insecure", boolprop("skip upstream TLS verification (default false)")
           s.field "allow_unscoped", boolprop("connect even when the target host is outside (or without) a configured scope (default false)")
-          s.field "issue_id", intprop("optional issue to link to this repeater before sending")
+          s.field "issue_id", intprop("issue to link to this repeater before sending")
           # Parity with `gori run repeater send --verbatim`. Without it a `messages`
           # payload carrying a literal `$where`/`$IFS`/`$user.name` — a NoSQL, shell or
           # SSTI probe — could not be expressed from MCP at all: the token was either
           # substituted or the call was refused. (Stored frames of a flow-seeded session
           # are evidence and are already sent byte-exact without this flag.)
-          s.field "verbatim", boolprop("send the bytes EXACTLY: no token expansion — project env vars, session bindings, or generators — in the handshake head or in any frame payload, no bare-LF→CRLF promotion, no Content-Length resync. The active session slot's header overlay still applies to the handshake. Use it when a literal $ENV.KEY / $BIND.NAME / $GEN.UUID token (bare syntax: $KEY / $NAME) is the payload (default false)")
+          s.field "verbatim", boolprop("send bytes EXACTLY: $ENV/$BIND/$GEN tokens stay literal in the handshake and frames; no LF→CRLF or Content-Length resync. The session slot's header overlay still applies (default false)")
         end
       end
     end

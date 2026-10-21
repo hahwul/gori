@@ -1268,103 +1268,88 @@ module Gori
         return unless @allow_actions
 
         tool j, "create_repeater",
-          "Create a new repeater tab/session in the database. Provide either ('target' and 'request') " \
-          "OR ('flow_id') OR ('issue_id'). The reply carries both 'id' (the durable database id, " \
-          "which every tool here takes) and 'tui_index' (the 1-based number the TUI paints on the " \
-          "sub-tab chip, which is what the operator says out loud). To seed many tabs from one " \
-          "import, use create_repeaters. A copied curl command can stand in for 'target' and " \
-          "'request': pass it as 'curl'." do |s|
-          s.field "target", strprop("absolute target URL (scheme+host+optional port), e.g. https://api.example.com")
-          s.field "curl", strprop("a curl command to build the request from (curl's own flag meanings: -b is a cookie, -d a body). Supplies 'target' (the URL's origin) and 'http2' (curl's --http2) unless given; transport flags (-k, -x, -L…) are ignored and listed in curl_notes. Exclusive with 'request'/'request_base64'")
-          s.field "request", strprop(%(verbatim raw HTTP request bytes/text — stored byte-for-byte and never repaired or refused, because a malformed request is a legitimate thing to send. A head with no blank-line terminator is therefore kept (and is what shell $(...) leaves behind, since it strips trailing newlines); the reply, get_repeater_context and send_request all carry head_unterminated:true for such a session))
-          s.field "request_base64", strprop("the raw HTTP request as base64 — the byte-exact form; use it when the request carries an octet a JSON string cannot (0x00, 0x80-0xFF, invalid UTF-8, a binary body). Overrides 'request'")
+          "Create a repeater session from target + request (or curl), flow_id or issue_id. " \
+          "Reply: 'id' (the database id every tool takes) and 'tui_index' (the TUI chip number " \
+          "the operator says). For many flows use create_repeaters." do |s|
+          s.field "target", strprop("absolute target URL (scheme+host+optional port)")
+          s.field "curl", strprop("a curl command to build the request (and target/http2) from; ignored transport flags are listed in curl_notes. Exclusive with request/request_base64")
+          s.field "request", strprop("raw HTTP request, stored byte-for-byte, never repaired or refused. A head missing its blank-line terminator is kept and flagged head_unterminated:true")
+          s.field "request_base64", strprop("the raw request as base64, byte-exact (binary, non-UTF-8). Overrides 'request'")
           s.field "http2", boolprop("use HTTP/2 (default false)")
           s.field "auto_content_length", boolprop("auto-calculate Content-Length header (default true)")
-          s.field "flow_id", intprop("optional original flow id this repeater stems from")
-          s.field "keep_request_line", boolprop("flow_id/issue_id seeding only: store the captured request line as-is instead of rewriting an absolute-form line (GET http://h/p) to origin-form (GET /p). Default false. The rewrite is PERMANENT once stored — not even send_request --verbatim can recover the line — so pass true when the absolute form is the payload. `request_line_rewritten:true` comes back whenever it fired")
-          s.field "issue_id", intprop("optional issue id to populate target/request/messages from")
-          s.field "position", intprop("0-based tab index to insert at, clamped to the strip (optional, defaults to appending at end)")
-          s.field "sni", strprop("optional TLS Server Name Indication override")
-          s.field "name", strprop("optional custom name for the repeater tab")
-          s.field "tags", strprop("free-text tags for grouping tabs (the TUI subtab label). Space- or comma-separated, a leading # optional; stored deduped and space-joined. Filter on them with get_repeater_context{filter:\"tag:idor\"}")
+          s.field "flow_id", intprop("original flow id this repeater stems from")
+          s.field "keep_request_line", boolprop("flow_id/issue_id: keep an absolute-form request line (GET http://h/p) instead of rewriting it to origin-form (default false). The rewrite is PERMANENT; `request_line_rewritten:true` reports it")
+          s.field "issue_id", intprop("issue id to populate target/request/messages from")
+          s.field "position", intprop("0-based index to insert at, clamped (default: append)")
+          s.field "sni", strprop("TLS SNI override")
+          s.field "name", strprop("custom tab name")
+          s.field "tags", strprop("tags, space- or comma-separated (filter: get_repeater_context{filter:\"tag:x\"})")
           s.field "ws_out_messages", ws_out_messages_prop
           s.field "ws_keep_key", boolprop("WebSocket: send this session's own Sec-WebSocket-Key instead of a fresh one (default false)")
-          s.field "tls_preset", strprop("TLS fingerprint this session presents: shape the ClientHello like #{Settings::TLS_PRESET_NAMES.join(" | ")} instead of gori's own, without touching the settings.json outbound_tls table. Stored on the session, so `send_request{repeater_id}`, `gori run repeater send` and a reopened TUI tab all present it. Two sessions on ONE host with different values dial two separate SSL contexts — that A/B is what it is for. The destination's client certificate, protocol range and permissive flag still apply. An APPROXIMATION of that client's hello, not a byte-exact JA3 match. https targets only")
-          s.field "ws_http_only", boolprop("WebSocket: treat this session as plain HTTP — `gori run repeater send` and the TUI send the upgrade handshake as an ordinary request and read the 101 as a response, instead of performing the framed exchange. The bytes are unchanged and the session's messages are kept (default false)")
+          s.field "tls_preset", strprop("ClientHello fingerprint stored for this session's sends: #{Settings::TLS_PRESET_NAMES.join(" | ")}. Approximate, NOT byte-exact JA3; https only")
+          s.field "ws_http_only", boolprop("WebSocket: send the handshake as plain HTTP, reading the 101 as the response (default false)")
         end
 
         tool j, "update_repeater",
-          "Update an existing repeater tab's properties by database id — including the request " \
-          "bytes, target and transport flags. To re-label several tabs at once (tags and name " \
-          "affixes only) use update_repeaters." do |s|
-          s.field "id", intprop("repeater DATABASE id — not the number on the TUI sub-tab chip. get_repeater_context returns both, as 'id' and 'tui_index'"), required: true
+          "Update a repeater session by database id (any field below). Bulk re-label: " \
+          "update_repeaters." do |s|
+          s.field "id", intprop("repeater DATABASE id ('id'), not the TUI chip number ('tui_index')"), required: true
           s.field "target", strprop("absolute target URL")
-          s.field "request", strprop(%(verbatim raw HTTP request bytes/text — stored byte-for-byte and never repaired or refused, because a malformed request is a legitimate thing to send. A head with no blank-line terminator is therefore kept (and is what shell $(...) leaves behind, since it strips trailing newlines); the reply, get_repeater_context and send_request all carry head_unterminated:true for such a session))
-          s.field "request_base64", strprop("the raw HTTP request as base64 — the byte-exact form (see create_repeater). Overrides 'request'")
+          s.field "request", strprop("raw HTTP request, stored byte-for-byte, never repaired or refused (see create_repeater)")
+          s.field "request_base64", strprop("the raw request as base64, byte-exact. Overrides 'request'")
           s.field "http2", boolprop("use HTTP/2")
           s.field "auto_content_length", boolprop("auto-calculate Content-Length")
           s.field "sni", strprop("TLS SNI override")
-          s.field "name", strprop("custom name for the repeater tab")
-          s.field "tags", strprop("free-text tags for grouping tabs (the TUI subtab label); empty string clears them")
+          s.field "name", strprop("custom tab name")
+          s.field "tags", strprop("free-text tags; empty string clears them")
           s.field "ws_out_messages", ws_out_messages_prop
           s.field "ws_keep_key", boolprop("WebSocket: send this session's own Sec-WebSocket-Key instead of a fresh one")
-          s.field "tls_preset", strprop("TLS fingerprint this session presents (#{Settings::TLS_PRESET_NAMES.join(" | ")}), overriding the settings.json outbound_tls policy for its own sends only. Pass \"\" to clear it; omit to leave it unchanged")
-          s.field "ws_http_only", boolprop("WebSocket: treat this session as plain HTTP — the handshake is sent as an ordinary request and the 101 read as a response. The bytes are unchanged and the session's messages are kept")
+          s.field "tls_preset", strprop("ClientHello fingerprint (#{Settings::TLS_PRESET_NAMES.join(" | ")}); \"\" clears it")
+          s.field "ws_http_only", boolprop("WebSocket: send the handshake as plain HTTP")
         end
 
         tool j, "delete_repeater",
-          "Delete a repeater tab by database id. The reply names what was destroyed — its id, " \
-          "name and the 'was_tui_index' it had — because every later tab shifts down by one, so " \
-          "tab numbers read before this call are stale afterwards. The remaining sessions are " \
-          "renumbered densely." do |s|
-          s.field "id", intprop("repeater DATABASE id — not the number on the TUI sub-tab chip"), required: true
+          "Delete a repeater session by database id; the reply names it (id, name, " \
+          "was_tui_index). Later tabs shift down, so earlier-read tab numbers go stale." do |s|
+          s.field "id", intprop("repeater DATABASE id, not the TUI chip number"), required: true
         end
 
         tool j, "move_repeater",
-          "Move a repeater session to another place in the TUI's sub-tab strip — the order the " \
-          "operator sees, and the order a reopened TUI restores. Pass exactly one of 'to_index' " \
-          "(absolute placement) or 'direction' (a one-step nudge). The reply returns the full " \
-          "resulting order with each session's new tui_index, so there is no need to re-list." do |s|
+          "Reorder a repeater session in the TUI tab strip. Exactly one of to_index / direction. " \
+          "The reply has the full new order with each tui_index." do |s|
           s.field "id", intprop("repeater DATABASE id of the session to move"), required: true
-          s.field "to_index", intprop("the 1-based tab number to move it to (1 = first chip). This is the one argument on this surface that takes a tab NUMBER, and only because it is a destination: getting it wrong misplaces this session, it cannot act on a different one. Out of range is refused, never clamped")
-          s.field "direction", enumprop("move one place: up toward tab 1, down toward the end. Refused when the session is already at that end", MOVE_DIRS)
+          s.field "to_index", intprop("1-based destination tab NUMBER; out of range is refused, not clamped")
+          s.field "direction", enumprop("move one place: up toward tab 1, down toward the end; refused at that end", MOVE_DIRS)
           s.requires_one_of "to_index", "direction"
         end
 
         tool j, "create_repeaters",
-          "Seed a Repeater tab from each of several captured flows — the second hop of an " \
-          "OpenAPI/HAR import. import_flows already parses the spec and joins servers[0].url " \
-          "with each operation path, so the recipe is: import_flows{kind:\"oas\"} then " \
-          "list_history{query:\"src:import\"} to collect the ids, then this. Every flow is " \
-          "checked to exist before the first session is created; tabs append in the order given. " \
-          "For one tab, or for a tab from raw request bytes, use create_repeater." do |s|
-          s.field "flow_ids", id_list_prop("captured flow ids to seed from, in the order the tabs should appear (ids come from list_history). An array of integers, a single integer, or a comma list. At most #{MCP_REPEATER_BULK_MAX} per call"), required: true
-          s.field "name_prefix", strprop("prepend this to each new tab's name; the rest of the name is the label gori derives from the request line (\"METHOD /path\"). Omit to leave the tabs deriving their own labels")
-          s.field "tags", strprop("tags to place on every session created by this call (space- or comma-separated, leading # optional)")
-          s.field "keep_request_line", boolprop("store each captured request line as-is instead of rewriting an absolute-form line (GET http://h/p) to origin-form (GET /p). Default false; see create_repeater for why this is permanent once stored")
+          "Create one repeater session per captured flow, appended in order (e.g. after " \
+          "import_flows, ids from list_history{query:\"src:import\"}). All flows are checked " \
+          "before any is created. For one tab or raw bytes use create_repeater." do |s|
+          s.field "flow_ids", id_list_prop("captured flow ids, in tab order (or a comma list). At most #{MCP_REPEATER_BULK_MAX}"), required: true
+          s.field "name_prefix", strprop("prepend to each derived name (\"METHOD /path\")")
+          s.field "tags", strprop("tags for every new session")
+          s.field "keep_request_line", boolprop("keep absolute-form request lines (default false; see create_repeater)")
         end
 
         tool j, "delete_repeaters",
-          "Delete several repeater sessions by database id. Requires confirm:true — without it " \
-          "the call is refused and reports how many it would have destroyed. This takes ids and " \
-          "never a filter: narrow the listing with get_repeater_context{filter} first and pass " \
-          "the ids it returned, so the set you read and the set destroyed are the same set. If " \
-          "any id is unknown the whole call is refused and nothing is deleted. Cannot be undone." do |s|
-          s.field "ids", id_list_prop("repeater DATABASE ids to delete (get_repeater_context returns them as 'id'). An array of integers, a single integer, or a comma list. At most #{MCP_REPEATER_BULK_MAX} per call"), required: true
-          s.field "confirm", boolprop("must be true to actually delete; anything else refuses and reports the count"), required: true
+          "Delete several repeater sessions by database id; irreversible. Ids only, never a " \
+          "filter (get them from get_repeater_context{filter}). Any unknown id refuses the whole " \
+          "call, nothing deleted." do |s|
+          s.field "ids", id_list_prop("repeater DATABASE ids (or a comma list). At most #{MCP_REPEATER_BULK_MAX}"), required: true
+          s.field "confirm", boolprop("must be true to delete; otherwise refused with the count"), required: true
         end
 
         tool j, "update_repeaters",
-          "Re-label several repeater sessions at once: tags and name affixes, nothing else. It " \
-          "never touches request bytes, target, transport flags or WebSocket frames — " \
-          "update_repeater is the tool that writes those. If any id is unknown the whole call is " \
-          "refused and nothing is changed." do |s|
-          s.field "ids", id_list_prop("repeater DATABASE ids to re-label. An array of integers, a single integer, or a comma list. At most #{MCP_REPEATER_BULK_MAX} per call"), required: true
-          s.field "tags_set", strprop("replace each session's tags with these (space- or comma-separated; an empty string clears them). Mutually exclusive with tags_add/tags_remove")
-          s.field "tags_add", strprop("add these tags to each session, keeping the ones it already has (deduped case-insensitively)")
-          s.field "tags_remove", strprop("remove these tags from each session; tags it does not have are ignored")
-          s.field "name_prefix", strprop("prepend this to each session's name. A session with no stored name has one derived from its request line — affixing materialises that label as a stored name, and the reply names the sessions where that happened")
-          s.field "name_suffix", strprop("append this to each session's name (same materialising note as name_prefix)")
+          "Re-label several repeater sessions: tags and name affixes only (update_repeater " \
+          "edits the rest). Any unknown id refuses the whole call, nothing changed." do |s|
+          s.field "ids", id_list_prop("repeater DATABASE ids (or a comma list). At most #{MCP_REPEATER_BULK_MAX}"), required: true
+          s.field "tags_set", strprop("replace the tags (\"\" clears). Exclusive with tags_add/tags_remove")
+          s.field "tags_add", strprop("add tags to the existing ones")
+          s.field "tags_remove", strprop("remove these tags")
+          s.field "name_prefix", strprop("prepend to each name (an unnamed session's derived label is stored first; the reply lists those)")
+          s.field "name_suffix", strprop("append to each name")
         end
       end
     end
