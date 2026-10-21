@@ -256,15 +256,14 @@ module Gori
         return unless @allow_actions
 
         tool j, "minimize_repeater",
-          "Strip cosmetic headers, tracking-cookie crumbs, and unused query/body params " \
-          "from a saved repeater request while keeping the response within tolerance of a " \
-          "calibrated baseline (Caido-\"squash\"-style). ACTIVE: sends MANY real outbound " \
-          "requests (capped at 250) and is scope-gated. Returns the trimmed request plus " \
-          "what was removed; pass apply:true to also save it back to the session." do |s|
+          "Strip cosmetic headers, tracking-cookie crumbs and unused query/body params from a " \
+          "saved repeater request while keeping the response within tolerance of a calibrated " \
+          "baseline. ACTIVE: sends MANY real requests (capped at 250), scope-gated. Returns the " \
+          "trimmed request and what was removed; apply:true also saves it back." do |s|
           s.field "repeater_id", intprop("repeater database id"), required: true
           s.field "apply", boolprop("write the minimized request back into the session (default false)")
-          s.field "verbatim", boolprop("search with the stored bytes EXACTLY, as send_request/--verbatim would send them: no token expansion, no bare-LF→CRLF promotion, no Content-Length resync (so body params stop being removal candidates). Use it for a session seeded from a capture, where a stored $filter/$top/$where is evidence rather than a typo — under the legacy bare syntax those ARE references and such a session is otherwise refused by name or minimized against substituted bytes; under the namespaced syntax only $ENV.KEY / $BIND.NAME / $GEN.UUID forms are references, so they never were. Default false")
-          s.field "allow_unscoped", boolprop("minimize even when the target host is outside — or without — a configured scope (default false)")
+          s.field "verbatim", boolprop("search with the stored bytes EXACTLY: no token expansion, bare-LF->CRLF promotion or Content-Length resync (body params stop being removal candidates). For a capture-seeded session whose stored $filter/$top is evidence, not a reference. Default false")
+          s.field "allow_unscoped", boolprop("minimize outside (or without) a configured scope (default false)")
         end
       end
     end

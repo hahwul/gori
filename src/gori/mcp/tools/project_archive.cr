@@ -280,27 +280,24 @@ module Gori
         return unless @allow_actions
 
         tool j, "export_project",
-          "Write a whole project to a portable .gori archive (a manifest plus a WAL-safe SQLite " \
-          "snapshot) on the MCP SERVER's filesystem — the same file `gori run project export` " \
-          "writes. Exports the bound project unless 'project' names another. The archive is " \
-          "UNREDACTED: captured credentials, session slots, env values and upstream proxy " \
-          "credentials all go in it, and the result carries the inventory and a disclosure. An " \
-          "existing file is refused unless overwrite:true, and a path inside gori's home always is." do |s|
-          s.field "path", strprop("destination file for the archive (relative paths resolve against " \
-                                  "the MCP server's working directory; the result reports the absolute path)"), required: true
-          s.field "project", strprop("project to export: short id, dir slug, or display name (default: the bound project)")
-          s.field "overwrite", boolprop("replace an existing file at 'path' (default false); only an earlier gori project archive is ever replaced")
+          "Write a whole project to a portable .gori archive (manifest + WAL-safe SQLite " \
+          "snapshot) on the MCP SERVER's filesystem. Exports the bound project unless 'project' " \
+          "names another. UNREDACTED: captured credentials, session slots, env values and " \
+          "upstream proxy credentials all go in it (the result carries a disclosure). An " \
+          "existing file is refused unless overwrite:true; a path inside gori's home always is." do |s|
+          s.field "path", strprop("destination file (relative paths resolve against the MCP server's working directory; the result reports the absolute path)"), required: true
+          s.field "project", strprop("project to export: short id, dir slug or display name (default: the bound project)")
+          s.field "overwrite", boolprop("replace an existing file at 'path' (default false); only an earlier gori archive is ever replaced")
         end
 
         tool j, "import_project",
-          "Import a .gori project archive as a NEW project (never reopens or overwrites one), " \
-          "through the same validation as `gori run project import`: pipe Rewriter rules, exec " \
-          "Probe rules and file-backed stubs are disabled, project network settings, host and " \
-          "global-rule overrides, Probe mode and slot auto-refresh are reset, and archives over " \
-          "2 GiB uncompressed are refused. Without " \
-          "confirm:true nothing is imported: the archive is validated and the call returns " \
-          "CONFIRM_REQUIRED with its inventory, the disclosure, and whether the name is free. " \
-          "Does not change which project this server is bound to." do |s|
+          "Import a .gori archive as a NEW project (never reopens or overwrites one). Pipe " \
+          "Rewriter rules, exec Probe rules and file-backed stubs are disabled; network " \
+          "settings, host/global-rule overrides, Probe mode and slot auto-refresh are reset; " \
+          "archives over 2 GiB uncompressed are refused. Without confirm:true nothing is " \
+          "imported: the archive is validated and the call returns CONFIRM_REQUIRED with its " \
+          "inventory, the disclosure, and whether the name is free. Does not change the bound " \
+          "project." do |s|
           s.field "path", strprop("the .gori archive on the MCP server's filesystem"), required: true
           s.field "name", strprop("display name for the imported project (default: the name in the archive)")
           s.field "confirm", boolprop("must be true to import; anything else validates and previews only")

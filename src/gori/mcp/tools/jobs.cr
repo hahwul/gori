@@ -263,24 +263,22 @@ module Gori
         return unless @allow_actions
 
         tool j, "list_jobs",
-          "List all fuzz, mine, discover, sequence, authorize, and WebSocket-session (ws_*) jobs this session started " \
-          "(job_id, kind, status, counts, target) — one call to see everything in flight. " \
-          "An authorize row carries bypass_count, so an access-control finding is visible here." { }
+          "List all fuzz, mine, discover, sequence, authorize and WebSocket-session (ws_*) jobs " \
+          "this session started (job_id, kind, status, counts, target). An authorize row carries " \
+          "bypass_count, so an access-control finding is visible here." { }
 
         tool j, "get_job",
-          "Full status of a fuzz, mine, discover, sequence, authorize, or WebSocket-session " \
-          "(ws_*) job by id (dispatches by the id prefix), so you can poll any job with one " \
-          "tool. For a ws_* session this returns the live transcript; pass 'after' to read " \
-          "only the rows past a cursor from the previous read." do |s|
-          s.field "job_id", strprop("a fuzz (fz_*), mine (mn_*), discover (ds_*), sequence (sq_*), authorize (az_*), or WebSocket-session (ws_*) job id"), required: true
-          s.field "after", intprop("ws_* sessions only: return only transcript rows with seq greater than this cursor (from a previous read's 'cursor'); default 0, the whole transcript")
+          "Full status of any job by id (dispatches by id prefix). For a ws_* session this " \
+          "returns the live transcript; pass 'after' to read only rows past a cursor." do |s|
+          s.field "job_id", strprop("a job id: fz_* fuzz, mn_* mine, ds_* discover, sq_* sequence, az_* authorize, ws_* WebSocket-session"), required: true
+          s.field "after", intprop("ws_* only: return only transcript rows with seq greater than this cursor (from a previous read's 'cursor'); default 0")
         end
 
         tool j, "stop_job",
-          "Stop a fuzz, mine, discover, sequence, or authorize job, or close a WebSocket session (ws_*). With wait:true, block until it reaches a terminal " \
-          "state (or wait_timeout_ms elapses) and report the final status + stopped_at, " \
-          "so stop-and-confirm is one call. Without wait, returns immediately (stop is async)." do |s|
-          s.field "job_id", strprop("a fuzz (fz_*), mine (mn_*), discover (ds_*), sequence (sq_*), authorize (az_*), or WebSocket-session (ws_*) job id"), required: true
+          "Stop any fuzz/mine/discover/sequence/authorize job, or close a WebSocket session " \
+          "(ws_*). With wait:true, block until it reaches a terminal state (or wait_timeout_ms) " \
+          "and report final status + stopped_at; without wait, returns immediately (async)." do |s|
+          s.field "job_id", strprop("a job id: fz_* fuzz, mn_* mine, ds_* discover, sq_* sequence, az_* authorize, ws_* WebSocket-session"), required: true
           s.field "wait", boolprop("block until the job actually stops (default false)")
           s.field "wait_timeout_ms", intprop("max ms to wait when wait:true (default 10000, max 60000)")
         end

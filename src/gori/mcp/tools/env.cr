@@ -122,34 +122,24 @@ module Gori
       private def list_env_tools(j : JSON::Builder) : Nil
         tool j, "list_env",
           "List the project's env vars, substituted into outbound requests (send_request/" \
-          "send_websocket). Result: {syntax, prefix, example, vars:[…], generators:[…], " \
-          "user_agents:{source, count}}. " \
-          "Each generator row has its name, complete token, output format and, when it cannot " \
-          "mint now, 'unavailable' (why); generators are " \
-          "available under namespaced syntax and mint a fresh value per request; 'user_agents' says " \
-          "whether the USER_AGENT generators draw from the operator's settings list or the " \
-          "built-in one. 'syntax' is THIS " \
-          "install's token grammar and decides how you write a reference: namespaced = " \
-          "$ENV.KEY (session bindings are $BIND.NAME), bare = $KEY (the legacy grammar, where " \
-          "an app's own $id/$ne/$filter in a body IS a reference and needs the $$ escape). " \
-          "'prefix' is the sigil, configurable in both; 'example' is the two applied, so a " \
-          "non-default sigil needs no assembling. Values are [REDACTED] by default (a project " \
-          "env var is exactly the kind of place a credential/token lives); pass " \
-          "include_sensitive:true to see them (TOTP_SECRET stays redacted). Each var also carries 'length' and, when the " \
-          "value already begins with one, 'scheme' (Bearer/Basic/…) — enough to tell whether a " \
-          "header should read \"Bearer <token>\" or just the token, without the value. To see " \
-          "which key a saved request is actually wired to, read " \
-          "get_repeater_context{include_content:true}'s env_headers." do |s|
+          "send_websocket). Result: {syntax, " \
+          "prefix, example, vars:[…], generators:[…], user_agents:{source, count}}. Each " \
+          "generator row carries 'unavailable' when it cannot mint now; generators mint a fresh " \
+          "value per request. 'syntax' is THIS install's grammar: namespaced = $ENV.KEY " \
+          "(bindings are $BIND.NAME), bare = $KEY (legacy, where an app's own $id in a body IS a " \
+          "reference needing the $$ escape). Values are [REDACTED] by default; " \
+          "include_sensitive:true shows them (TOTP_SECRET stays redacted). Each var carries " \
+          "'length' and, when the value begins with one, 'scheme'. For the key a saved request " \
+          "is wired to, read get_repeater_context{include_content:true}'s env_headers." do |s|
           s.field "include_sensitive", boolprop("return actual values instead of [REDACTED], except TOTP_SECRET (default false)")
         end
 
         return unless @allow_actions
 
         tool j, "set_env_var",
-          "Set (create or update) a project env var substituted into outbound requests " \
-          "(send_request, send_websocket, repeater sends). Reference it as $ENV.KEY, or as " \
-          "$KEY under the legacy bare syntax — read list_env's 'syntax'/'example' for which " \
-          "one this install speaks." do |s|
+          "Set (create or update) a project env var substituted into outbound requests. " \
+          "Reference it as $ENV.KEY, or $KEY under the legacy bare syntax (see list_env's " \
+          "'syntax'/'example')." do |s|
           s.field "key", strprop("variable name ([A-Za-z_][A-Za-z0-9_]*)"), required: true
           s.field "value", strprop("variable value (default empty)")
         end

@@ -179,53 +179,48 @@ module Gori
       # wrong side of it by landing in the wrong place in a 1,300-line method.
       private def list_cookie_tools(j : JSON::Builder) : Nil
         tool j, "cookie_decode",
-          "Parse a framework signed session cookie — Flask (itsdangerous), Rack (Ruby), or " \
-          "Django (django.core.signing) — into its structured parts (payload, timestamp, " \
-          "signature). Auto-detects the format from the cookie's punctuation. Pure transform: " \
-          "no network, no signature verification. Returns {format, payload, timestamp, signature, …}." do |s|
-          s.field "cookie", strprop("the raw cookie value (URL-decoded)"), required: true
+          "Parse a framework signed session cookie (Flask/itsdangerous, Rack, Django) into its " \
+          "parts. Auto-detects the format. Pure transform, no verification. Returns {format, " \
+          "payload, timestamp, signature, ...}." do |s|
+          s.field "cookie", strprop("raw cookie value (URL-decoded)"), required: true
           s.field "format", enumprop("force a format instead of auto-detect", Cookie::FORMATS)
         end
 
         tool j, "cookie_verify",
-          "Verify a signed session cookie against a candidate secret — the offline check that " \
-          "confirms a guessed/cracked signing key. Returns {valid, format}." do |s|
-          s.field "cookie", strprop("the raw cookie value"), required: true
-          s.field "secret", strprop("the candidate signing secret"), required: true
+          "Verify a signed session cookie against a candidate secret (offline). Returns {valid, format}." do |s|
+          s.field "cookie", strprop("raw cookie value"), required: true
+          s.field "secret", strprop("candidate signing secret"), required: true
           s.field "format", enumprop("force a format (default auto-detect)", Cookie::FORMATS)
           s.field "salt", strprop(Cookie::SALT_HELP)
-          s.field "algorithm", enumprop("Django HMAC algorithm (auto-detected from the signature length when unset)", Cookie::Django::SUPPORTED_ALGOS)
+          s.field "algorithm", enumprop("Django HMAC algorithm (auto-detected if unset)", Cookie::Django::SUPPORTED_ALGOS)
         end
 
         tool j, "cookie_crack",
-          "Brute-force a session cookie's signing secret over a wordlist and report the first " \
-          "match — the classic weak-SECRET_KEY move. Supply candidates inline via 'secrets' " \
-          "and/or a 'wordlist' file path. Pure offline compute: no network. Returns {found, secret, format}." do |s|
-          s.field "cookie", strprop("the raw cookie value"), required: true
-          s.field "secrets", strarrprop("inline candidate secrets to try (in order)")
-          s.field "wordlist", strprop("path to a newline-delimited wordlist file, or the name of a saved list (list_wordlists)")
+          "Brute-force a session cookie's signing secret over a wordlist; reports the first " \
+          "match. Candidates via 'secrets' and/or a 'wordlist'. Pure offline compute. Returns " \
+          "{found, secret, format}." do |s|
+          s.field "cookie", strprop("raw cookie value"), required: true
+          s.field "secrets", strarrprop("inline candidate secrets, in order")
+          s.field "wordlist", strprop("wordlist file path, or a saved list name (list_wordlists)")
           s.field "format", enumprop("force a format (default auto-detect)", Cookie::FORMATS)
           s.field "salt", strprop(Cookie::SALT_HELP)
-          s.field "algorithm", enumprop("Django HMAC algorithm (auto-detected from the signature length when unset)", Cookie::Django::SUPPORTED_ALGOS)
+          s.field "algorithm", enumprop("Django HMAC algorithm (auto-detected if unset)", Cookie::Django::SUPPORTED_ALGOS)
           s.requires_one_of "secrets", "wordlist"
         end
 
         tool j, "cookie_forge",
-          "Re-sign a (possibly edited) payload with a known/cracked secret and emit a valid " \
-          "session cookie — forge an admin session once the key is known. Flask/Django take a " \
-          "'payload' JSON; Rack takes the opaque base64 'value'. Returns {cookie, format}." do |s|
+          "Re-sign a (possibly edited) payload with a known secret and emit a valid session " \
+          "cookie. Flask/Django take a 'payload' JSON; Rack takes the opaque base64 'value'. " \
+          "Returns {cookie, format}." do |s|
           s.field "format", enumprop("which framework's cookie to forge", Cookie::FORMATS), required: true
-          s.field "secret", strprop("the signing secret"), required: true
+          s.field "secret", strprop("signing secret"), required: true
           s.field "payload", strprop("session JSON to sign (Flask/Django)")
-          s.field "value", strprop("the base64 Marshal cookie value (Rack — opaque bytes)")
+          s.field "value", strprop("base64 Marshal cookie value (Rack, opaque bytes)")
           s.field "timestamp", intprop("unix second to stamp (Flask/Django; defaults to now)")
           s.field "salt", strprop(Cookie::SALT_HELP)
           s.field "algorithm", enumprop("Django HMAC algorithm (default #{Cookie::Django::DEFAULT_ALGO})", Cookie::Django::SUPPORTED_ALGOS)
         end
       end
-
-      # `str_list` lives in tools.cr now: `secrets` and `tokens` had two near-identical readers
-      # that BOTH dropped a non-string entry, and one grammar gets one behaviour.
     end
   end
 end

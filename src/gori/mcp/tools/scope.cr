@@ -162,11 +162,10 @@ module Gori
         return unless @allow_actions
 
         tool j, "add_scope_rule",
-          "Add a scope include/exclude rule (the Target/Sitemap `s` lens, and the intercept " \
-          "gate). Deduped on the kind/match_type/pattern triple." do |s|
-          s.field "kind", enumprop("whether the rule brings hosts INTO scope or carves them out (default include)", Scope::KINDS)
+          "Add a scope include/exclude rule. Deduped on the kind/match_type/pattern triple." do |s|
+          s.field "kind", enumprop("bring hosts INTO scope or carve them out (default include)", Scope::KINDS)
           s.field "match_type", enumprop("how `pattern` is matched against a request (default host)", Scope::TYPES)
-          s.field "pattern", strprop("host: exact/subdomain/'*' glob; string: substring of scheme://host/target; regex: over the same (case-sensitive; use (?i) to opt out)"), required: true
+          s.field "pattern", strprop("host: exact/subdomain/'*' glob; string: substring of scheme://host/target; regex: over the same (case-sensitive; (?i) to opt out)"), required: true
         end
 
         tool j, "delete_scope_rule", "Delete a scope rule by id (see list_scope)." do |s|
@@ -174,32 +173,28 @@ module Gori
         end
 
         tool j, "set_scope_enabled",
-          "Turn the CAPTURE-side scope lens on or off (the rules themselves are untouched) — " \
-          "the Target/Sitemap \u21e7S filter. It does NOT govern whether this server may send: " \
-          "active tools (send_request, send_websocket, fuzz_*, mine_*, probe active) are gated " \
-          "on the RULES being present, whatever this flag says, so turning it off does not " \
-          "lift a SCOPE_BLOCKED refusal and turning it on does not cause one. To send at a " \
-          "target the rules do not cover, add_scope_rule or pass allow_unscoped:true." do |s|
+          "Turn the CAPTURE-side scope display lens on or off (rules untouched). It does NOT " \
+          "govern sending: active tools are gated on the RULES being present whatever this flag " \
+          "says, so it neither lifts nor causes a SCOPE_BLOCKED. To send at an uncovered target, " \
+          "add_scope_rule or pass allow_unscoped:true." do |s|
           s.field "enabled", boolprop("true = filter captured views to in-scope; false = show everything. Does not change what may be SENT"), required: true
         end
 
         tool j, "set_sandbox",
-          "Turn the HARD-CONTAINMENT sandbox gate on or off — the headless equivalent of the " \
-          "TUI Project NETWORK pane toggle. When ON, the capture proxy forwards ONLY requests " \
-          "the scope allows and BLOCKS everything else; with NO include rule it blocks ALL " \
-          "captured traffic (reported as blocks_all). Distinct from set_scope_enabled, which is " \
-          "only the display lens. See list_scope for the current state." do |s|
+          "Turn the HARD-CONTAINMENT sandbox gate on or off. ON, the capture proxy forwards " \
+          "ONLY scope-allowed requests and BLOCKS the rest; with NO include rule it blocks ALL " \
+          "captured traffic (blocks_all). Distinct from set_scope_enabled (display only). See " \
+          "list_scope for state." do |s|
           s.field "enabled", boolprop("true = block every request the scope does not allow; false = stop blocking"), required: true
         end
 
         tool j, "update_scope_rule",
-          "Edit an existing scope rule in place (ids from list_scope). Every field defaults " \
-          "to the rule's current value, so you can change just the pattern. Prefer this over " \
-          "delete + re-add, which changes the id and briefly drops the rule from the gate." do |s|
+          "Edit a scope rule in place (ids from list_scope). Omitted fields keep their value. " \
+          "Prefer this over delete + re-add, which changes the id and briefly drops the rule." do |s|
           s.field "id", intprop("scope rule id"), required: true
-          s.field "kind", enumprop("whether the rule includes or excludes (default: unchanged)", Scope::KINDS)
-          s.field "match_type", enumprop("how `pattern` is matched (default: unchanged)", Scope::TYPES)
-          s.field "pattern", strprop("new pattern (default: unchanged)")
+          s.field "kind", enumprop("include or exclude", Scope::KINDS)
+          s.field "match_type", enumprop("how `pattern` is matched", Scope::TYPES)
+          s.field "pattern", strprop("new pattern")
         end
       end
     end

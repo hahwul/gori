@@ -157,25 +157,22 @@ module Gori
 
       private def list_oast_sessions_tools(j : JSON::Builder) : Nil
         tool j, "list_oast_sessions",
-          "List the PERSISTED OAST listening sessions of this project — the rows behind the " \
-          "TUI's RESUME LISTENER picker, as opposed to the ad-hoc registrations oast_start " \
-          "mints. Each has its payload host, how many callbacks it has collected, and when it " \
-          "was last polled. `session_id` is non-null when this server is already polling it." { }
+          "List this project's PERSISTED OAST sessions (not oast_start's ad-hoc ones): payload " \
+          "host, callback count, last poll. `session_id` is non-null when this server is " \
+          "already polling it." { }
 
         return unless @allow_actions
 
         tool j, "oast_resume",
-          "Re-arm a persisted OAST session so its ALREADY-PLANTED payloads keep resolving, and " \
-          "return a {session_id} for oast_poll / oast_payload. Use for callbacks that arrive " \
-          "late (a stored payload, a nightly job). Unlike oast_start, a resumed session's " \
-          "callbacks are PERSISTED into the project, so the TUI sees the same hits." do |s|
+          "Re-arm a persisted OAST session so ALREADY-PLANTED payloads keep resolving (late " \
+          "callbacks); returns {session_id} for oast_poll / oast_payload. Callbacks are " \
+          "persisted into the project." do |s|
           s.field "id", strprop("persisted session id from list_oast_sessions"), required: true
         end
 
         tool j, "oast_release",
-          "Deregister a persisted OAST session server-side, for a finished engagement. Its " \
-          "stored callbacks stay; payloads minted from it stop resolving. To merely stop " \
-          "polling and keep it resumable, call oast_stop instead." do |s|
+          "Deregister a persisted OAST session server-side. Stored callbacks stay; its payloads " \
+          "stop resolving. To only stop polling, use oast_stop." do |s|
           s.field "id", strprop("persisted session id from list_oast_sessions"), required: true
         end
       end

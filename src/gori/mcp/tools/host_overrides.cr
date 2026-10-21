@@ -83,15 +83,14 @@ module Gori
       # wrong side of it by landing in the wrong place in a 1,300-line method.
       private def list_host_overrides_tools(j : JSON::Builder) : Nil
         tool j, "list_host_overrides",
-          "List the project's host overrides (/etc/hosts-style: dial a specific IP for a hostname; " \
-          "SNI/Host header unchanged). Project overrides win over the global Settings ones on a " \
-          "collision." { }
+          "List the project's host overrides (/etc/hosts-style: dial a specific IP for a " \
+          "hostname; SNI/Host unchanged). Project overrides win over global Settings ones." { }
 
         return unless @allow_actions
 
         tool j, "add_host_override",
-          "Add a host override (dial a specific IP for a hostname; SNI/Host header unchanged) — " \
-          "used by send_request/send_websocket/repeater and the live proxy." do |s|
+          "Add a host override (dial a specific IP for a hostname; SNI/Host unchanged): used by " \
+          "send_request/send_websocket/repeater and the live proxy." do |s|
           s.field "host", strprop("hostname to override (case-insensitive)"), required: true
           s.field "ip", strprop("IPv4/IPv6 literal to dial, optionally IP:PORT (or [v6]:PORT) to move the port too"), required: true
         end

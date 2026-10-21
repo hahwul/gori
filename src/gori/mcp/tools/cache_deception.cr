@@ -132,27 +132,20 @@ module Gori
         return unless @allow_actions
 
         tool j, "cache_deception_check",
-          "Test one captured flow for WEB CACHE DECEPTION (PortSwigger \"Gotta cache 'em all\"): " \
-          "replay it as its captured (AUTHENTICATED) identity to prime any cache, then re-request " \
-          "the SAME url with NO session, and compare. If the anonymous re-request is served the " \
-          "authenticated response FROM a cache (`verdict:cached`, `deception:true`), that private " \
-          "response was cached under a key an anonymous client hits; an anonymous cache-busted " \
-          "query request checks whether matching content is public. If that control is itself a cache " \
-          "hit, matching content is inconclusive (`verdict:review`), because the query may be ignored. " \
-          "`cached` needs the control refused (401/403) or redirected; any other differing control is `review`. " \
-          "Each trial includes its `cache` signal; the top-level `cache` is the anonymous response. Reads " \
-          "the same cache classifier as get_flow's `cache` / QL `cache:`. To find the CRAFTED paths that trigger " \
-          "it (`;`, `.css`, `%00`, dot-segments), fuzz the path with the `cache-delimiters` payload " \
-          "set, then check the promising hits here. ACTIVE: sends up to 3 real requests (safe methods only " \
-          "unless unsafe_methods:true). Only GET/HEAD/OPTIONS are checked by default." do |s|
+          "Test one captured flow for WEB CACHE DECEPTION: replay it as its captured " \
+          "(AUTHENTICATED) identity to prime a cache, then re-request the SAME url with NO " \
+          "session. Anonymous served the authenticated response FROM a cache = `verdict:cached`, " \
+          "`deception:true`. `cached` needs the anonymous control refused (401/403) or " \
+          "redirected; anything else, or a control that is itself a cache hit, is " \
+          "`verdict:review`. Each trial has a `cache` signal (same classifier as get_flow's " \
+          "`cache` / QL `cache:`). To find CRAFTED trigger paths, fuzz the path with the " \
+          "`cache-delimiters` set then check hits here. ACTIVE: up to 3 requests, " \
+          "GET/HEAD/OPTIONS only unless unsafe_methods:true." do |s|
           s.field "flow_id", intprop("captured flow id to check (from list_history)"), required: true
-          s.field "unsafe_methods", boolprop("also check a flow whose method is not GET/HEAD/OPTIONS " \
-                                             "(default false) — its side effect can run up to three times")
+          s.field "unsafe_methods", boolprop("also check a non-GET/HEAD/OPTIONS flow: its side effect can run up to three times")
           s.field "verify", boolprop("verify upstream TLS certificates (default true)")
-          s.field "timeout_ms", intprop("per-request connect + idle timeout in milliseconds (default 15000)")
-          s.field "allow_unscoped", boolprop("check even when the flow's host is outside the project's " \
-                                             "configured scope — REQUIRED for an out-of-scope target, or when " \
-                                             "no scope is configured (active requests are refused by default)")
+          s.field "timeout_ms", intprop("per-request connect + idle timeout in ms (default 15000)")
+          s.field "allow_unscoped", boolprop("check outside the configured scope, or when none is configured (else refused)")
         end
       end
     end

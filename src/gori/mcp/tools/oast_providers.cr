@@ -157,11 +157,10 @@ module Gori
       # wrong side of it by landing in the wrong place in a 1,300-line method.
       private def list_oast_providers_tools(j : JSON::Builder) : Nil
         tool j, "list_oast_providers",
-          "List the SAVED OAST providers (the TUI OAST tab's Providers sub-tab) — the entries " \
-          "an operator configured once and reuses, as opposed to oast_start's per-call ad-hoc " \
-          "provider/server/token. `id` is scope-qualified: p_<n> is this project's, g_<hex> is " \
-          "a global one from settings.json. Tokens are [REDACTED] unless include_sensitive." do |s|
-          s.field "include_sensitive", boolprop("return provider tokens instead of [REDACTED] (default false)")
+          "List the operator's SAVED OAST providers (vs oast_start's ad-hoc provider/server/" \
+          "token). `id`: p_<n> project, g_<hex> global (settings.json). Tokens are [REDACTED] " \
+          "unless include_sensitive." do |s|
+          s.field "include_sensitive", boolprop("return provider tokens instead of [REDACTED]")
         end
 
         tool j, "oast_presets",
@@ -170,78 +169,69 @@ module Gori
         return unless @allow_actions
 
         tool j, "oast_poll",
-          "Poll an OAST session (from oast_start) for new out-of-band callbacks. Returns only " \
-          "interactions not already returned on this session; each has protocol/method/source/" \
-          "destination/raw_request (raw_request/raw_response capped at #{Serialize::MAX_TEXT // 1024} KB, " \
-          "`*_truncated`). `has_more`: more are already waiting — poll again. " \
-          "Use to confirm blind SSRF/XXE/RCE etc." do |s|
-          s.field "session_id", strprop("session id returned by oast_start"), required: true
+          "Poll an OAST session for new out-of-band callbacks (each returned once): " \
+          "protocol/method/source/destination/raw_request (raw_request/raw_response capped at " \
+          "#{Serialize::MAX_TEXT // 1024} KB, `*_truncated`). `has_more`: more already " \
+          "waiting, poll again." do |s|
+          s.field "session_id", strprop("session id from oast_start"), required: true
         end
 
         tool j, "oast_payload",
-          "Generate a fresh OAST payload URL for an existing session (local, no network). All " \
-          "payloads in a session share the correlation id oast_poll watches." do |s|
-          s.field "session_id", strprop("session id returned by oast_start"), required: true
+          "Mint a fresh payload URL for an existing session (local, no network); all share the " \
+          "session's correlation id." do |s|
+          s.field "session_id", strprop("session id from oast_start"), required: true
         end
 
         tool j, "oast_start",
-          "Register an OAST listener and return {session_id, store_session_id, provider, " \
-          "provider_id, server, payload_url}. Put payload_url in a target, then oast_poll for " \
-          "hits. Two ways to pick where it registers: pass `provider_id` to use one of the " \
-          "operator's SAVED providers (list_oast_providers — it supplies the host AND the auth " \
-          "token, which you cannot read back yourself since tokens come back [REDACTED]), or " \
-          "pass an ad-hoc `provider`/`server`/`token`. With NEITHER it defaults to interactsh " \
-          "on a PUBLIC server, which means the callbacks — and the hostnames you are testing — " \
-          "land on third-party infrastructure. Pass persist:true to make it a PROJECT listener " \
-          "— required if you want probe_scan's blind SSRF/XXE/command-injection/RFI rules to plant " \
-          "anything, since they mint against a stored session." do |s|
-          s.field "provider_id", strprop("id of a saved provider from list_oast_providers (p_<n> project, g_<hex> global); supplies host + token, and cannot be combined with server/token")
-          s.field "provider", enumprop("ad-hoc provider kind to register with (default interactsh)", OAST_KINDS)
-          s.field "server", strprop("provider server/base URL (default: the provider's public preset)")
-          s.field "token", strprop("optional provider auth token")
-          s.field "persist", boolprop("save the registration as a project OAST session (default false). It then appears in list_oast_sessions, oast_poll files its callbacks into the project, probe_scan's out-of-band rules can mint against it, and oast_resume can re-open it in a later process — but oast_stop no longer deregisters it; use oast_release for that")
+          "Register an OAST listener; returns {session_id, store_session_id, provider, " \
+          "provider_id, server, payload_url}. Put payload_url in a target, then oast_poll. " \
+          "Use a SAVED provider (`provider_id`: supplies host AND token) or ad-hoc " \
+          "`provider`/`server`/`token`. With NEITHER it uses interactsh on a PUBLIC server, so " \
+          "callbacks and tested hostnames land on third-party infrastructure. probe_scan's " \
+          "blind out-of-band rules plant only with persist:true." do |s|
+          s.field "provider_id", strprop("saved provider id from list_oast_providers; not combinable with server/token")
+          s.field "provider", enumprop("ad-hoc provider kind (default interactsh)", OAST_KINDS)
+          s.field "server", strprop("provider server/base URL (default: the kind's public preset)")
+          s.field "token", strprop("provider auth token")
+          s.field "persist", boolprop("save as a project OAST session: listed by list_oast_sessions, callbacks filed into the project, usable by probe_scan, re-openable via oast_resume. oast_stop then no longer deregisters it; oast_release does")
         end
 
         tool j, "oast_stop",
-          "Stop polling an OAST session. An ad-hoc session (oast_start without persist) is " \
-          "also DEREGISTERED, freeing the server-side registration; a persisted one keeps its " \
-          "registration so already-planted payloads keep resolving and oast_resume can re-open " \
-          "it — call oast_release to tear that one down." do |s|
-          s.field "session_id", strprop("session id returned by oast_start"), required: true
+          "Stop polling an OAST session. An ad-hoc session is also DEREGISTERED; a persisted " \
+          "one stays registered (planted payloads keep resolving, oast_resume can re-open it) " \
+          "until oast_release." do |s|
+          s.field "session_id", strprop("session id from oast_start"), required: true
         end
 
         tool j, "create_oast_provider",
-          "Save a project OAST provider for reuse. `host` defaults to that kind's public " \
-          "preset when it has one." do |s|
+          "Save a project OAST provider for reuse." do |s|
           s.field "name", strprop("display name"), required: true
           s.field "kind", enumprop("provider kind (default interactsh)", OAST_KINDS)
-          s.field "host", strprop("server/base URL; required for kinds with no preset")
-          s.field "token", strprop("optional provider auth token")
-          s.field "enabled", boolprop("whether the provider is active (default true)")
+          s.field "host", strprop("server/base URL; defaults to the kind's public preset, required for kinds without one")
+          s.field "token", strprop("provider auth token")
+          s.field "enabled", boolprop("default true")
         end
 
         tool j, "update_oast_provider",
-          "Update a project provider (same fields as create_oast_provider). " \
-          "Fields you omit keep their current value — so editing the name will not drop " \
-          "the provider's token. A GLOBAL provider (g_<hex>) belongs to settings.json and " \
-          "is not editable here." do |s|
-          s.field "id", strprop("provider id from list_oast_providers (p_<n>)"), required: true
-          s.field "name", strprop("display name (default: unchanged)")
-          s.field "kind", enumprop("provider kind (default: unchanged)", OAST_KINDS)
-          s.field "host", strprop("server/base URL (default: unchanged)")
-          s.field "token", strprop("provider auth token (default: unchanged — omit to KEEP the existing token)")
-          s.field "enabled", boolprop("whether the provider is active (default: unchanged)")
+          "Update a project provider (p_<n>); omitted fields keep their value (incl. the token). " \
+          "Global g_<hex> providers are not editable here." do |s|
+          s.field "id", strprop("provider id (p_<n>)"), required: true
+          s.field "name", strprop("display name")
+          s.field "kind", enumprop("provider kind", OAST_KINDS)
+          s.field "host", strprop("server/base URL")
+          s.field "token", strprop("provider auth token")
+          s.field "enabled", boolprop("active or not")
         end
 
         tool j, "set_oast_provider_enabled",
-          "Turn one saved project provider on or off without editing its other fields." do |s|
-          s.field "id", strprop("provider id from list_oast_providers (p_<n>)"), required: true
-          s.field "enabled", boolprop("true to enable, false to disable"), required: true
+          "Enable or disable a saved project provider." do |s|
+          s.field "id", strprop("provider id (p_<n>)"), required: true
+          s.field "enabled", boolprop("true to enable"), required: true
         end
 
         tool j, "delete_oast_provider",
           "Delete a saved project OAST provider." do |s|
-          s.field "id", strprop("provider id from list_oast_providers (p_<n>)"), required: true
+          s.field "id", strprop("provider id (p_<n>)"), required: true
         end
       end
     end

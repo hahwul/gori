@@ -407,46 +407,43 @@ module Gori
         return unless @allow_actions
 
         tool j, "discover_start",
-          "Spider a target and brute-force unlinked directories/paths (like Burp's crawl + " \
-          "content discovery / ZAP's spider + forced browse). Follows links AND probes a " \
-          "built-in path wordlist, with per-directory soft-404 calibration to keep false " \
-          "positives down. Discovered endpoints are written into the project so list_sitemap / " \
-          "get_flow see them. Returns a job_id immediately (poll with discover_status / " \
-          "discover_results; end with discover_stop). ACTIVE: sends many real outbound requests. " \
-          "Capped at #{DISCOVER_MAX_REQUESTS} requests / #{DISCOVER_MAX_CONCURRENCY} concurrency." do |s|
+          "Spider a target and brute-force unlinked paths (built-in wordlist, per-directory " \
+          "soft-404 calibration). Found endpoints are written into the project (list_sitemap / " \
+          "get_flow). Returns a job_id at once (discover_status, discover_results, " \
+          "discover_stop). ACTIVE: many real requests. Capped at #{DISCOVER_MAX_REQUESTS} " \
+          "requests / #{DISCOVER_MAX_CONCURRENCY} concurrency." do |s|
           s.field "url", strprop("seed URL (scheme+host, optionally a path subtree to confine to)"), required: true
           s.field "spider", boolprop("follow links (default true)")
-          s.field "bruteforce", boolprop("brute-force directory/path names (default true)")
-          s.field "max_depth", intprop("spider depth from the seed (default 4, max #{DISCOVER_MAX_DEPTH})")
-          s.field "wordlist", strprop("path to an extra path wordlist, or the name of a saved list (list_wordlists); merged with the built-in list")
+          s.field "bruteforce", boolprop("brute-force path names (default true)")
+          s.field "max_depth", intprop("spider depth (default 4, max #{DISCOVER_MAX_DEPTH})")
+          s.field "wordlist", strprop("extra wordlist: file path or saved list name (list_wordlists); merged with the built-in")
           s.field "extensions", strprop("comma list of extensions to also probe (e.g. php,json,bak)")
-          s.field "headers", header_map_prop("custom request headers added to every probe (e.g. Authorization/Cookie): a name->value map, or a [{\"name\",\"value\"}] list; overrides Accept/User-Agent, Host/Connection are ignored")
-          s.field "containment", enumprop("how far off the seed the crawl may wander (default scope-aware)", DISCOVER_CONTAINMENTS)
+          s.field "headers", header_map_prop("headers added to every probe: name->value map or [{\"name\",\"value\"}]; Host/Connection ignored")
+          s.field "containment", enumprop("how far off the seed the crawl may go (default scope-aware)", DISCOVER_CONTAINMENTS)
           s.field "concurrency", intprop("parallel requests (default 20, max #{DISCOVER_MAX_CONCURRENCY})")
-          s.field "rate", numprop("requests/sec cap, fractional allowed (0 = unlimited; 0.5 = one request every two seconds)")
-          s.field "timeout_ms", intprop("per-request connect + idle timeout in milliseconds")
+          s.field "rate", numprop("requests/sec cap (0 = unlimited)")
+          s.field "timeout_ms", intprop("per-request connect + idle timeout (ms)")
           s.field "retries", intprop("retries per request on a network error")
-          s.field "insecure", boolprop("skip upstream TLS verification (default false)")
-          s.field "sni", strprop("TLS SNI override, independent of the Host header — the vhost-confusion / domain-fronting test (mirrors CLI --sni). The crawler owns its own Host header, so this is the only way to sweep a name-based vhost by IP.")
-          s.field "http2", boolprop("send over HTTP/2 (TLS+ALPN h2, or h2c prior-knowledge on http://) instead of HTTP/1.1 (default false, mirrors CLI --http2)")
-          s.field "throttle_ms", intprop("fixed delay between requests in ms — an alternative to 'rate' for a target that rate-limits on inter-request gap rather than throughput (mirrors CLI --throttle)")
+          s.field "insecure", boolprop("skip upstream TLS verification")
+          s.field "sni", strprop("TLS SNI override, independent of Host (vhost confusion)")
+          s.field "http2", boolprop("send over HTTP/2 (TLS+ALPN h2, or h2c prior-knowledge on http://)")
+          s.field "throttle_ms", intprop("fixed ms delay between requests (alternative to 'rate')")
           s.field "max_requests", intprop("caller cap on total requests")
-          s.field "keep_alive", boolprop("reuse one connection per origin across many probes (default true) — one TCP/TLS handshake per worker instead of per probe, which is the largest cost of a brute-force pass. Set false to dial a fresh connection per probe, which is what you want when the target behaves per-connection (connection-scoped rate limits, a load balancer pinning by connection).")
-          s.field "crawl_assets", boolprop("fetch the images, fonts, media and archives a page links (default false). Off, those URLs are not requested at all: their bodies carry no endpoint any extractor can read, they cost a full download each, and they spend the same page budget as HTML. Their DIRECTORY is still brute-forced, so /uploads/ is still swept because /uploads/photo.jpg was linked — only the picture's own row is missing. Turn on to inventory a target's static surface; discover_status.assets_skipped says how many rows that adds.")
-          s.field "allow_unscoped", boolprop("run even when the target host is outside the project's configured scope — REQUIRED for an out-of-scope target, or when no scope is configured")
+          s.field "keep_alive", boolprop("reuse one connection per origin (default true); false dials fresh per probe")
+          s.field "crawl_assets", boolprop("also fetch linked images/fonts/media/archives (default off); their DIRECTORY is still brute-forced regardless, and discover_status.assets_skipped counts them")
+          s.field "allow_unscoped", boolprop("run when the target is outside the configured scope, or no scope is configured (otherwise refused)")
         end
 
-        tool j, "discover_status", "Counts + state of a discover job (running|done|budget_exhausted|stopped|error), " \
-                                   "including the FP/FN figures (calibrated_out / *_suppressed). " \
-                                   "budget_exhausted means max_requests halted the run with tasks still queued — a " \
-                                   "partial sweep, NOT an exhaustive one; see incomplete_reason and queued. " \
-                                   "unsaved_flows counts findings whose History/Sitemap rows could not be written " \
-                                   "(project busy); those findings are listed but cannot be opened with get_flow." do |s|
+        tool j, "discover_status", "State (running|done|budget_exhausted|stopped|error) and counts of a discover job, " \
+                                   "incl. FP/FN figures (calibrated_out / *_suppressed). budget_exhausted: " \
+                                   "max_requests halted a PARTIAL sweep (see incomplete_reason). " \
+                                   "unsaved_flows: findings with no History/Sitemap row, which get_flow " \
+                                   "cannot open." do |s|
           s.field "job_id", strprop("id from discover_start"), required: true
         end
 
         tool j, "discover_results",
-          "Paged discovered endpoints for a discover job (url, method, status, length, content_type, source, depth, confidence). " \
+          "Paged endpoints of a discover job (url, method, status, length, content_type, source, depth, confidence). " \
           "has_more is about THIS page; incomplete_reason says whether the RUN covered everything it queued." do |s|
           s.field "job_id", strprop("id from discover_start"), required: true
           s.field "offset", intprop("start row (default 0)")

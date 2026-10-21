@@ -279,89 +279,61 @@ module Gori
       # wrong side of it by landing in the wrong place in a 1,300-line method.
       private def list_decode_tools(j : JSON::Builder) : Nil
         tool j, "decode",
-          "Run a gori Decoder chain (encode/decode/hash/compress) over `input` and return the " \
-          "result — the same engine as the TUI Decoder tab. Pure transform: no network, no state. " \
-          "`spec` is converter tokens separated by '>', '|' or ',' applied left-to-right, e.g. " \
-          "'base64-decode > gunzip', 'url-encode', 'sha256'. A BARE format name DECODES here: " \
-          "`base64` runs base64-decode, `hex` hex-decode, `url` url-decode, `gzip`/`deflate` " \
-          "decompress and `html`/`xml` unescape (the Decoder tab and `gori run decoder` read a " \
-          "bare name as the encode half). To ENCODE, spell it: base64-encode, hex-encode, " \
-          "url-encode, gzip-compress, html-escape. Common converters: base64-encode, " \
-          "base64-decode, url-encode, url-encode-all, url-decode, hex-encode, hex-decode, gzip, gunzip, " \
-          "deflate, inflate, raw-deflate, raw-inflate, brotli, zstd (both decompress-only), " \
-          "msgpack-decode, cbor-decode (binary document -> JSON), " \
-          "java-deserialize, dotnet-viewstate, php-unserialize, pickle-disasm " \
-          "(native serialization -> JSON; pickle is disassembled, never executed), " \
-          "jwt-decode, html-encode, md5, sha256, crc32, " \
-          "decimal, binary, rot47, quoted-printable, punycode-encode, punycode-decode, base36, " \
-          "base62, xml-escape, shell-escape, powershell-escape, c-string-escape, homoglyph, typo. " \
-          "An unknown token returns the full list." do |s|
-          s.field "input", strprop("the value to transform (UTF-8 text unless input_base64 is set)"), required: true
-          s.field "spec", strprop("converter chain, e.g. 'base64-decode > gunzip'. A token that names no direction (base64, hex, url, gzip, html) DECODES; spell 'base64-encode' to encode. The reply's `steps[].converter` reports what each token resolved to. 'exec:' steps (external commands) are refused here — this tool is pure compute"), required: true
-          s.field "input_base64", boolprop("treat `input` as base64 and decode it to raw bytes first (for binary input)")
+          "Run a Decoder chain (encode/decode/hash/compress) over `input`. Pure transform: no " \
+          "network, no state. A BARE format name DECODES (`base64`, `hex`, `url`, `gzip`, " \
+          "`html`); spell `base64-encode` etc. to encode. Covers base64/url/hex, compression, " \
+          "java/dotnet/php/pickle deserialization (pickle never executed), jwt-decode, hashes " \
+          "and text escapes. An unknown token returns the full list." do |s|
+          s.field "input", strprop("value to transform (UTF-8 unless input_base64)"), required: true
+          s.field "spec", strprop("tokens separated by '>', '|' or ',', applied left-to-right, e.g. 'base64-decode > gunzip'. Reply `steps[].converter` shows what each token resolved to. 'exec:' steps are refused"), required: true
+          s.field "input_base64", boolprop("`input` is base64 of raw bytes (binary input)")
         end
 
         tool j, "jwt_decode",
-          "Decode a JWT into its header + payload JSON and signature — the same engine as the " \
-          "TUI JWT tab. Pure transform: no network, no state, no signature verification (use " \
-          "jwt_verify for that). A SIGNED token returns {type:\"JWS\", alg, header, payload, " \
-          "signature, signed}. An ENCRYPTED five-part token (JWE) returns {type:\"JWE\", alg, enc, " \
-          "kid, header, payload:null, encrypted:true, encrypted_key, iv, ciphertext, tag} — gori " \
-          "reads the JWE protected header and does NOT decrypt, so the claims are not available " \
-          "at any surface and `payload` is null rather than absent. Branch on `type`. A " \
-          "malformed token stays type JWS but also carries a `note`: one segment (not a " \
-          "decodable token) or, past three, `extra_segments` too — the raw trailing segments " \
-          "of data smuggled after a JWS prefix, which `jwt_verify` refuses." do |s|
-          s.field "token", strprop("the JWT: a JWS (header.payload[.signature]) or a JWE (header.encrypted_key.iv.ciphertext.tag)"), required: true
+          "Decode a JWT without verifying it (jwt_verify does that). Pure transform. Branch on " \
+          "`type`: JWS -> {alg, header, payload, signature, signed}; JWE -> {alg, enc, kid, " \
+          "header, payload:null, encrypted:true, ...}, NOT decrypted. A malformed token stays " \
+          "JWS with a `note`; past three segments also `extra_segments` (data smuggled after a " \
+          "JWS, which jwt_verify refuses)." do |s|
+          s.field "token", strprop("JWS (header.payload[.signature]) or JWE (5 parts)"), required: true
         end
 
         tool j, "jwt_verify",
-          "Check whether a JWT's OWN signature verifies under a key you supply — the question " \
-          "\"would a server holding this key accept this token\". Verification always uses the alg " \
-          "the TOKEN declares, never one you pick, because that is what a vulnerable server does " \
-          "too. Pure compute: no network. Returns {alg, verified, code, reason, caveat}. A false " \
-          "`verified` is an ANSWER, not an error, and always carries a `code` to branch on plus " \
-          "a prose `reason`. Another key may succeed only after signature_mismatch (a " \
-          "well-formed signature this key did not make) or key_mismatch (a key of the wrong type " \
-          "or size for the token's alg, which a server holding it rejects). No key helps after " \
-          "signature_malformed (not base64, or a width no key produces), unsigned (alg=none or " \
-          "no signature), alg_unsupported, no_alg, jwe (encrypted, nothing to verify), " \
-          "extra_segments or malformed. code is null when `verified` is true; caveat alg_confusion " \
-          "(reason says why) marks an HS* token verified with a PEM as secret, which only an " \
-          "algorithm-confusion-vulnerable server accepts. Pass 'secret' or " \
-          "'key' — a call with neither is refused rather than checked against an empty secret." do |s|
+          "Check whether a JWT's OWN signature verifies under a supplied key, always using the " \
+          "alg the TOKEN declares. Pure compute. Returns {alg, verified, code, reason, caveat}. " \
+          "verified:false is an ANSWER with a `code`: another key may succeed only after " \
+          "signature_mismatch or key_mismatch (wrong key type/size for the alg); no key helps " \
+          "after signature_malformed, unsigned (alg=none or no signature), alg_unsupported, " \
+          "no_alg, jwe, extra_segments or malformed. code is null when verified; caveat " \
+          "alg_confusion marks an HS* token verified with a PEM as secret (only an " \
+          "algorithm-confusion-vulnerable server accepts it)." do |s|
           s.field "token", strprop("the JWT to check"), required: true
-          s.field "secret", strprop("HMAC secret, for an HS256/384/512 token. \"\" checks the empty secret")
-          s.field "key", strprop("PEM key for an RS/PS/ES/EdDSA token — inline PEM text, or a path to a .pem file. A PUBLIC KEY, a CERTIFICATE, or the private key all work. Mutually exclusive with 'secret'")
+          s.field "secret", strprop("HMAC secret for HS256/384/512; \"\" checks the empty secret")
+          s.field "key", strprop("PEM for RS/PS/ES/EdDSA (public key, certificate or private key), inline or a .pem path. Exclusive with 'secret'")
           s.requires_one_of "secret", "key"
         end
 
         tool j, "jwt_encode",
-          "Re-sign a JWT with a chosen algorithm + key — the classic testing move (swap alg to " \
-          "none, or re-sign with a guessed HS secret). Takes the header + payload from `token` " \
-          "(or the explicit `header`/`payload` JSON overrides), FORCES `alg` into the header, and " \
-          "signs: HMAC with `secret` for HS256/384/512, the PEM private key in `key` for " \
-          "RS/PS/ES/EdDSA, or nothing at all for `none`. gori generates no keys — an asymmetric " \
-          "alg requires the private key you already hold. Returns {token, alg}." do |s|
-          s.field "token", strprop("a JWT to take the header + payload from (optional if header+payload are given)")
-          s.field "header", strprop("header JSON object (overrides the token's header)")
-          s.field "payload", strprop("payload JSON (overrides the token's payload wholesale; mutually exclusive with 'set')")
-          s.field "set", strarrprop("patch individual claims before signing, each \"key=value\" (e.g. \"role=admin\"); value is JSON if it parses (true/3), else a string. Mutually exclusive with 'payload'")
-          s.field "alg", enumprop("signing algorithm (default HS256; none emits an unsigned token)", Gori::Jwt::ALGS)
-          s.field "secret", strprop("HMAC secret for an HS algorithm")
-          s.field "key", strprop("PEM PRIVATE key for an RS/PS/ES/EdDSA algorithm — inline PEM text, or a path to a .pem file. Mutually exclusive with 'secret'")
+          "Re-sign a JWT: header + payload from `token` (or `header`/`payload` overrides), " \
+          "`alg` FORCED into the header, signed with `secret` (HS*), the PEM private `key` " \
+          "(RS/PS/ES/EdDSA) or nothing (`none`). No keys are generated. Returns {token, alg}." do |s|
+          s.field "token", strprop("JWT to take header + payload from")
+          s.field "header", strprop("header JSON object (overrides the token's)")
+          s.field "payload", strprop("payload JSON (replaces the token's wholesale; exclusive with 'set')")
+          s.field "set", strarrprop("claim patches \"key=value\" (value is JSON if it parses, else a string). Exclusive with 'payload'")
+          s.field "alg", enumprop("signing algorithm (default HS256)", Gori::Jwt::ALGS)
+          s.field "secret", strprop("HMAC secret for HS*")
+          s.field "key", strprop("PEM PRIVATE key for RS/PS/ES/EdDSA, inline or a .pem path. Exclusive with 'secret'")
           s.requires_one_of "token", "header", "payload"
         end
 
         tool j, "jwt_attacks",
-          "Generate testing payloads from a JWT: alg:none variants + signature strip, weak-secret " \
-          "HS256 re-signs, and header-parameter injection (kid path-traversal/SQLi, jku/x5u/jwk). " \
-          "With `public_key`, also the algorithm-confusion family for an RS/PS/ES token — HS256 " \
-          "re-signs keyed with the public key's own bytes, in each spelling a server might hold. " \
-          "Pure transform: no network. Returns {items:[{name, category, note, token, verified}]}. " \
-          "An encrypted JWE yields nothing: it has no claims segment to tamper with." do |s|
-          s.field "token", strprop("the JWT to derive testing payloads from"), required: true
-          s.field "public_key", strprop("the server's PUBLIC verification key for the algorithm-confusion family — inline PEM text (a PUBLIC KEY or a CERTIFICATE), or a path to a .pem file. Only meaningful for a token whose alg is RS*/PS*/ES*")
+          "Generate testing payloads from a JWT: alg:none variants, signature strip, weak-secret " \
+          "HS256 re-signs, header injection (kid traversal/SQLi, jku/x5u/jwk), and with " \
+          "`public_key` the algorithm-confusion family. Pure transform. Returns {items:[{name, " \
+          "category, note, token, verified}]}. A JWE yields nothing." do |s|
+          s.field "token", strprop("the JWT"), required: true
+          s.field "public_key", strprop("server's PUBLIC key (PEM key or certificate, inline or .pem path) for algorithm confusion; RS*/PS*/ES* tokens only")
         end
       end
     end

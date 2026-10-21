@@ -163,31 +163,27 @@ module Gori
         # READ-ONLY tools first: they stay available on a `--read-only` server, because
         # naming the schema a body was rendered through is part of reading the body.
         tool j, "grpc_schema",
-          "What .proto schema this project renders captured gRPC through, and where each piece " \
-          "came from — a descriptor-set FILE (Project settings → Proto schema) or a server " \
-          "REFLECTION fetch against a target. Read-only; sends nothing." do |_s|
+          "What .proto schema this project renders captured gRPC through, and its source — a " \
+          "descriptor-set FILE (Project settings) or a server REFLECTION fetch. Read-only." do |_s|
         end
 
         return unless @allow_actions
 
         tool j, "grpc_reflect",
-          "Ask a gRPC target's server-reflection service (grpc.reflection.v1, falling back to " \
-          "v1alpha) for its descriptors, and cache them in the project so every flow on that " \
-          "target renders as named, typed fields instead of the schema-less 'every reading that " \
-          "fits' tree. ACTIVE: opens a real h2 connection to the target — one per discovery " \
-          "round (list_services, then the symbols, then their imports). Nothing re-fetches on " \
-          "its own; run this again to refresh, grpc_forget to drop it. The raw wire bytes stay " \
-          "authoritative: an undeclared field number is still shown, and a schema/wire " \
-          "disagreement is reported as a disagreement." do |s|
-          s.field "url", strprop("target origin, e.g. https://api.test:443 (the path is ignored)"), required: true
-          s.field "insecure", boolprop("skip upstream TLS verification (default false)")
-          s.field "timeout_ms", intprop("per-operation connect + idle timeout in ms (default: the project's io timeout)")
-          s.field "allow_unscoped", boolprop("reflect even when the target host is outside the project's configured scope — REQUIRED for an out-of-scope target, or when no scope is configured")
+          "Fetch a gRPC target's server-reflection descriptors (grpc.reflection.v1, falling " \
+          "back to v1alpha) and cache them so its flows render as named, typed fields. ACTIVE: " \
+          "a real h2 connection per discovery round. Re-run to refresh, grpc_forget to drop. " \
+          "The wire bytes stay authoritative: an undeclared field number is still shown, a " \
+          "schema/wire disagreement reported as such." do |s|
+          s.field "url", strprop("target origin, e.g. https://api.test:443 (path ignored)"), required: true
+          s.field "insecure", boolprop("skip upstream TLS verification")
+          s.field "timeout_ms", intprop("per-operation connect + idle timeout (ms, default: the project's io timeout)")
+          s.field "allow_unscoped", boolprop("reflect outside the configured scope, or when none is configured (else refused)")
         end
 
         tool j, "grpc_forget",
           "Drop a cached reflection result, by target (as grpc_schema prints it) or all:true. " \
-          "A descriptor-set FILE is unloaded by clearing the path in Project settings instead." do |s|
+          "A descriptor-set FILE is unloaded by clearing its path in Project settings instead." do |s|
           s.field "target", strprop("scheme://host:port, as grpc_schema reports it")
           s.field "all", boolprop("forget every cached reflection target")
           s.requires_one_of "target", "all"

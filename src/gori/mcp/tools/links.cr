@@ -126,10 +126,9 @@ module Gori
       # wrong side of it by landing in the wrong place in a 1,300-line method.
       private def list_links_tools(j : JSON::Builder) : Nil
         tool j, "list_links",
-          "List the evidence pointers an Issue or Note carries — to a captured Flow, a " \
-          "Repeater tab, or a Fuzz/Miner run — each resolved to a human label and URL. " \
-          "A pointer whose target was pruned comes back with stale:true rather than being " \
-          "dropped, so you can tell \"no evidence\" from \"evidence that is gone\"." do |s|
+          "List the evidence pointers an Issue or Note carries (to a Flow, Repeater tab, or " \
+          "Fuzz/Miner run), each resolved to a label and URL. A pointer whose target was pruned " \
+          "comes back with stale:true rather than dropped." do |s|
           s.field "owner_kind", enumprop("which kind of record owns the link", LINK_OWNERS), required: true
           s.field "owner_id", intprop("the issue or note id"), required: true
         end
@@ -137,9 +136,8 @@ module Gori
         return unless @allow_actions
 
         tool j, "add_link",
-          "Attach an evidence pointer from an Issue or Note to a Flow / Repeater tab / " \
-          "Fuzz or Miner run. Idempotent — re-linking the same pair returns " \
-          "already_linked:true rather than erroring or duplicating. A pointer only: for a " \
+          "Attach an evidence pointer from an Issue or Note to a Flow / Repeater tab / Fuzz or " \
+          "Miner run. Idempotent: a re-link returns already_linked:true. A pointer only; for a " \
           "flow or repeater whose bytes must survive, use freeze_evidence (it links too)." do |s|
           s.field "owner_kind", enumprop("which kind of record owns the link", LINK_OWNERS), required: true
           s.field "owner_id", intprop("the issue or note id"), required: true
@@ -148,9 +146,8 @@ module Gori
         end
 
         tool j, "remove_link",
-          "Detach an evidence pointer, addressed by the same (owner, ref) pair add_link " \
-          "takes — no need to look up the link row's own id first. An issue's seed flow " \
-          "(its flow_id) is not a removable link and is refused." do |s|
+          "Detach an evidence pointer by the same (owner, ref) pair add_link takes. An issue's " \
+          "seed flow (its flow_id) is not a removable link and is refused." do |s|
           s.field "owner_kind", enumprop("which kind of record owns the link", LINK_OWNERS), required: true
           s.field "owner_id", intprop("the issue or note id"), required: true
           s.field "ref_kind", enumprop("which workbench entity the link points at", LINK_REFS), required: true

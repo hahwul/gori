@@ -86,19 +86,16 @@ module Gori
         return unless @allow_actions
 
         tool j, "import_flows",
-          "Bulk-import flows into the project's History from a HAR export, a URL list, an " \
-          "OpenAPI 3.x or Swagger 2.0 spec (local refs only), a Postman Collection v2 or Insomnia v4 export, a Burp Suite " \
-          "item export, a WSDL 1.1 service description (SOAP 1.1/1.2), or curl commands — the MCP " \
-          "equivalent of `gori run import`. Pass the source as `path` (read from the MCP SERVER's local " \
-          "filesystem — this process runs locally, same trust boundary as send_request) or as `text`, " \
-          "the document itself. For curl, one flow per request; transport flags such as -k/-x/-L are " \
-          "ignored and listed in `notes`. Only `har` and `burp` carry responses; the rest import " \
-          "request templates with no response. Imports are not deduplicated: re-importing a file " \
-          "adds its flows again, and `notes` says so when this project already holds flows from a " \
-          "file of the same name." do |s|
+          "Bulk-import flows into History (format in `kind`; OpenAPI/Swagger use local refs " \
+          "only). Source as `path` (read from the MCP SERVER's filesystem, same trust boundary " \
+          "as send_request) or `text`. For curl, one flow per request; transport flags like " \
+          "-k/-x/-L are ignored and listed in `notes`. Only `har` and `burp` carry responses; " \
+          "the rest import request templates only. NOT deduplicated: re-importing adds the flows " \
+          "again, and `notes` warns when this project already holds flows from a file of the " \
+          "same name." do |s|
           s.field "kind", enumprop("the source format to read", KINDS.keys), required: true
           s.field "path", strprop("filesystem path to the source file (this or 'text')")
-          s.field "text", strprop("the source document itself (a HAR, a URL list, a spec, curl commands, …) instead of a file")
+          s.field "text", strprop("the source document itself instead of a file")
           s.requires_one_of "path", "text"
         end
       end

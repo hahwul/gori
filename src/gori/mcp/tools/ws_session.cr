@@ -258,34 +258,32 @@ module Gori
         return unless @allow_actions
 
         tool j, "ws_session_open",
-          "Open a PERSISTENT WebSocket session from a saved repeater and keep the socket open " \
-          "(#1630): connect once, then ws_session_send one message at a time while the server " \
-          "pushes back — unlike send_websocket, which dials, runs a fixed script and hangs up. " \
-          "ACTIVE: a real outbound connection, scope-gated like send_websocket. Returns a job_id " \
-          "and the handshake result; read server messages with get_job{job_id, after}, send with " \
-          "ws_session_send, and close with stop_job (list_jobs lists it). HTTP/1.1 only. The session lives in THIS " \
-          "server only and is not written to the project; it is closed on shutdown or a " \
-          "switch_project. At most #{MAX_WS_SESSIONS} open at once." do |s|
-          s.field "repeater_id", intprop("WebSocket repeater database id (an RFC 6455 Upgrade handshake)"), required: true
-          s.field "auto_replies", JSON.parse(%({"type":"array","description":"optional heartbeat auto-replies: for each {match, reply}, an inbound TEXT frame whose payload is EXACTLY 'match' is answered with a TEXT 'reply'. Exact match, because it writes into the session unasked","items":{"type":"object","properties":{"match":{"type":"string"},"reply":{"type":"string"}},"required":["match","reply"]}}))
-          s.field "engine_io", boolprop("answer the Engine.IO heartbeat for you: an inbound TEXT '2' (ping) gets a TEXT '3' (pong). Shorthand for one auto_replies pair (default false)")
+          "Open a PERSISTENT WebSocket session from a saved repeater and keep the socket open: " \
+          "connect once, then ws_session_send one message at a time while the server pushes " \
+          "back (send_websocket instead runs a fixed script and hangs up). ACTIVE: a real " \
+          "outbound connection, scope-gated. Returns a job_id and the handshake; read server " \
+          "messages with get_job{job_id, after}, close with stop_job. HTTP/1.1 only. Lives in " \
+          "THIS server only (closed on shutdown or switch_project). At most #{MAX_WS_SESSIONS} " \
+          "open at once." do |s|
+          s.field "repeater_id", intprop("WebSocket repeater database id"), required: true
+          s.field "auto_replies", JSON.parse(%({"type":"array","description":"heartbeat auto-replies: for each {match, reply}, an inbound TEXT frame whose payload is EXACTLY 'match' is answered with a TEXT 'reply'","items":{"type":"object","properties":{"match":{"type":"string"},"reply":{"type":"string"}},"required":["match","reply"]}}))
+          s.field "engine_io", boolprop("answer the Engine.IO heartbeat: inbound TEXT '2' gets TEXT '3'. Shorthand for one auto_replies pair")
           s.field "keep_sec_websocket_key", boolprop("send the repeater's OWN Sec-WebSocket-Key instead of a fresh one (default: the repeater's stored setting)")
-          s.field "tls_preset", strprop("TLS fingerprint for the handshake: #{Settings::TLS_PRESET_NAMES.join(" | ")} (default: the repeater's stored setting). wss:// only")
-          s.field "insecure", boolprop("skip upstream TLS verification (default false)")
-          s.field "allow_unscoped", boolprop("connect even when the target host is outside (or without) a configured scope (default false)")
-          s.field "verbatim", boolprop("send the handshake, and every later message, EXACTLY: no token expansion in the head or in TEXT payloads (default false)")
+          s.field "tls_preset", strprop("TLS fingerprint: #{Settings::TLS_PRESET_NAMES.join(" | ")} (default: the repeater's stored setting). wss:// only")
+          s.field "insecure", boolprop("skip upstream TLS verification")
+          s.field "allow_unscoped", boolprop("connect outside (or without) a configured scope (default false)")
+          s.field "verbatim", boolprop("send the handshake and every later message EXACTLY: no token expansion in the head or TEXT payloads (default false)")
         end
 
         tool j, "ws_session_send",
-          "Send one or more messages on an open WebSocket session (from ws_session_open). " \
-          "Each entry is a plain string (TEXT), or the object/key=value form send_websocket's " \
-          "'messages' takes — binary as base64, a PING, a CLOSE with a chosen code, an unmasked " \
-          "or lying-length frame. Returns immediately with the transcript since before the send; " \
-          "with wait_ms it waits up to that long for the first server message. Read later " \
-          "messages with get_job{job_id, after: cursor}." do |s|
+          "Send one or more messages on an open WebSocket session (from ws_session_open). Each " \
+          "entry is a plain string (TEXT) or the object/key=value form send_websocket's " \
+          "'messages' takes. Returns the transcript since before the send; with wait_ms it waits " \
+          "up to that long for the first server message. Read later messages with " \
+          "get_job{job_id, after: cursor}." do |s|
           s.field "job_id", strprop("a ws_session_open job id (ws_*)"), required: true
           s.field "messages", ws_out_messages_prop("the outbound messages to send"), required: true
-          s.field "wait_ms", intprop("wait up to this many ms for a server message before returning (0-#{WS_SESSION_MAX_WAIT_MS}; default 0, return at once)")
+          s.field "wait_ms", intprop("wait up to this many ms for a server message before returning (0-#{WS_SESSION_MAX_WAIT_MS}; default 0)")
         end
       end
     end

@@ -324,69 +324,58 @@ module Gori
       # wrong side of it by landing in the wrong place in a 1,300-line method.
       private def list_sequence_tools(j : JSON::Builder) : Nil
         tool j, "sequence_analyze",
-          "Analyze the randomness/predictability of a set of security tokens (session IDs, " \
-          "CSRF tokens, reset tokens, API keys) — the same math as Burp/Caido Sequencer. " \
-          "Pure compute, no network: pass a `tokens` array (collect them yourself, or use " \
-          "sequence_start to replay a request). Returns a report with an overall rating " \
-          "(SECURE/MODERATE/WEAK/CRITICAL), effective + Shannon entropy, character-set, " \
-          "uniqueness/duplicate + sequential detection, and FIPS-style bit tests." do |s|
-          s.field "tokens", strarrprop("the tokens to analyze (one per array element; ≥20 recommended)"), required: true
+          "Analyze the randomness of tokens you already have (session IDs, CSRF/reset tokens, " \
+          "API keys). Pure compute. Returns a rating (SECURE/MODERATE/WEAK/CRITICAL), " \
+          "effective + Shannon entropy, character set, uniqueness/sequential detection, " \
+          "FIPS-style bit tests." do |s|
+          s.field "tokens", strarrprop("tokens, one per element (>=20 recommended)"), required: true
         end
 
         return unless @allow_actions
 
         tool j, "sequence_start",
-          "Collect security tokens by replaying ONE request many times, then analyze their " \
-          "randomness (Burp/Caido \"Sequencer\"). Each response's token is extracted via the " \
-          "chosen location (cookie/header/regex/position/jsonpath). Returns a job_id immediately " \
-          "(poll with sequence_status; get the report with sequence_results; end with " \
-          "sequence_stop). To analyze tokens you already have, use sequence_analyze instead. " \
-          "ACTIVE: sends many real requests. Capped at #{SEQUENCE_MAX_REQUESTS} requests / " \
-          "#{SEQUENCE_MAX_CONCURRENCY} concurrency. Provide exactly ONE token location." do |s|
+          "Collect tokens by replaying ONE request many times, extracting each response's token " \
+          "from exactly ONE location (cookie/header/regex/position/jsonpath), then analyze " \
+          "randomness. Returns a job_id at once (sequence_status, sequence_results, " \
+          "sequence_stop). For tokens you already have, use sequence_analyze. ACTIVE: many real " \
+          "requests. Capped at #{SEQUENCE_MAX_REQUESTS} requests / #{SEQUENCE_MAX_CONCURRENCY} " \
+          "concurrency." do |s|
           s.field "template", strprop("raw HTTP request to replay")
           s.field "flow_id", intprop("seed the request from a captured flow id (instead of template)")
-          s.field "url", strprop("absolute target URL (scheme+host) that sets the origin — a 'template' or 'flow_id' is still REQUIRED; url alone does NOT define the request (unlike send_request)")
-          s.field "cookie", strprop("token location: a Set-Cookie value by name")
-          s.field "header", strprop("token location: a response header value by name")
-          s.field "regex", strprop("token location: capture group 1 of this regex over the body")
-          s.field "position", strprop("token location: a fixed body byte range 'A:B'")
-          s.field "jsonpath", strprop("token location: a JSON body path ($.a.b[0])")
+          s.field "url", strprop("absolute target URL (scheme+host) that sets the origin; 'template' or 'flow_id' is still REQUIRED (url alone does NOT define the request)")
+          s.field "cookie", strprop("token = a Set-Cookie value by name")
+          s.field "header", strprop("token = a response header value by name")
+          s.field "regex", strprop("token = capture group 1 of this regex over the body")
+          s.field "position", strprop("token = a fixed body byte range 'A:B'")
+          s.field "jsonpath", strprop("token = a JSON body path ($.a.b[0])")
           s.requires_one_of "template", "flow_id"
           s.requires_one_of "cookie", "header", "regex", "position", "jsonpath"
           s.field "count", intprop("target tokens to collect (default 500, max #{SEQUENCE_MAX_GOAL})")
-          s.field "concurrency", intprop("parallel requests (default 1 — session tokens are often stateful; max #{SEQUENCE_MAX_CONCURRENCY})")
-          s.field "rate", numprop("requests/sec cap, fractional allowed (0 = unlimited; 0.5 = one request every two seconds)")
-          s.field "timeout_ms", intprop("per-request connect + idle timeout in milliseconds")
+          s.field "concurrency", intprop("parallel requests (default 1 for stateful tokens; max #{SEQUENCE_MAX_CONCURRENCY})")
+          s.field "rate", numprop("requests/sec cap (0 = unlimited)")
+          s.field "timeout_ms", intprop("per-request connect + idle timeout (ms)")
           s.field "retries", intprop("retries per request on a network error")
-          s.field "http2", boolprop("use real HTTP/2 (default false)")
-          # The escape hatch matters more here than anywhere else in gori: this tool's output
-          # is a statistical claim about how an origin GENERATES tokens, so an origin whose
-          # session issuance is connection-bound has its verdict shaped by socket reuse. `gori
-          # run sequence --no-keep-alive` has always been able to re-take the sample over fresh
-          # connections and compare; an agent had no way to ask for the second reading at all.
-          s.field "keep_alive", boolprop("reuse ONE connection across the collection (default true) — set false to re-take the sample over fresh connections, for an origin whose token issuance may be connection-bound")
-          s.field "insecure", boolprop("skip upstream TLS verification (default false)")
-          s.field "throttle_ms", intprop("fixed delay between requests in ms — an alternative to 'rate' for a target that rate-limits on inter-request gap rather than throughput (mirrors CLI --throttle)")
-          s.field "sni", strprop("TLS SNI override, independent of the Host header — the vhost-confusion / domain-fronting test (mirrors CLI --sni)")
+          s.field "http2", boolprop("send over HTTP/2")
+          s.field "keep_alive", boolprop("reuse ONE connection across the collection (default true); false re-takes the sample over fresh connections, for connection-bound token issuance")
+          s.field "insecure", boolprop("skip upstream TLS verification")
+          s.field "throttle_ms", intprop("fixed ms delay between requests (alternative to 'rate')")
+          s.field "sni", strprop("TLS SNI override, independent of Host (vhost confusion)")
           s.field "max_requests", intprop("caller cap on total requests")
-          s.field "allow_unscoped", boolprop("run even when the target host is outside the project's configured scope — REQUIRED to run against an out-of-scope target, or when no scope is configured at all (active requests are refused by default without a matching scope)")
+          s.field "allow_unscoped", boolprop("run outside the configured scope, or when none is configured (else refused)")
         end
 
-        tool j, "sequence_status", "Counts + state of a sequence job " \
-                                   "(running|done|budget_exhausted|stopped|error): goal, collected, " \
-                                   "sent (collection attempts), requests (what actually went on the " \
-                                   "wire — retries charge this and not 'sent'), errors, tokens_stored. " \
-                                   "budget_exhausted means the run ended UNDER its goal because the " \
-                                   "request budget ran out, so the report rests on a short sample." do |s|
+        tool j, "sequence_status", "State (running|done|budget_exhausted|stopped|error) and counts of a sequence job: " \
+                                   "goal, collected, sent (collection attempts), requests (wire, retries charge this " \
+                                   "not 'sent'), errors, tokens_stored. budget_exhausted: the run ended UNDER goal " \
+                                   "so the report rests on a short sample." do |s|
           s.field "job_id", strprop("id from sequence_start"), required: true
         end
 
         tool j, "sequence_results",
-          "The randomness REPORT over a sequence job's collected tokens (rating, effective + " \
-          "Shannon entropy, character-set, uniqueness/sequential, per-test verdicts). The raw " \
-          "tokens are never returned (they are secrets). Read `error` and `status` before the " \
-          "rating: a run whose every replay failed still grades CRITICAL / 'no usable tokens', " \
-          "which is a verdict about nothing, not about the target." do |s|
+          "The randomness REPORT over a sequence job's tokens (rating, entropy, character set, " \
+          "uniqueness/sequential, per-test verdicts). Raw tokens are never returned. Read " \
+          "`error` and `status` before the rating: a run whose every replay failed still grades " \
+          "CRITICAL / 'no usable tokens', a verdict about nothing." do |s|
           s.field "job_id", strprop("id from sequence_start"), required: true
         end
 

@@ -468,27 +468,21 @@ module Gori
       # wrong side of it by landing in the wrong place in a 1,300-line method.
       private def list_projects_tools(j : JSON::Builder) : Nil
         tool j, "list_projects",
-          "Find a gori project on this host: one page of them (name, slug, short id, db_path, " \
-          "db_size, last_modified, workspace binding), MOST-RECENTLY-ACTIVE FIRST, plus the one " \
-          "this server is currently serving (current_project, and current:true on its row when " \
-          "the page carries it). A host accumulates a project per worktree, so this is a paged " \
-          "listing: pass 'query' to locate the one you mean before switch_project, and read " \
-          "'total' / 'has_more' rather than assuming the page is everything. Use switch_project " \
-          "to change the active project. When the server started unbound (no project), " \
-          "#{project_recovery}." do |s|
-          s.field "query", strprop("keep only projects whose display name, directory slug, short id, " \
-                                   "or bound workspace path CONTAINS this text (case-insensitive)")
+          "List gori projects on this host (name, slug, short id, db path/size, last_modified, " \
+          "workspace binding), MOST-RECENTLY-ACTIVE FIRST, plus current_project (current:true on " \
+          "its row). Paged: pass 'query' to locate one before switch_project, read 'total' / " \
+          "'has_more'. When the server started unbound, #{project_recovery}." do |s|
+          s.field "query", strprop("keep only projects whose display name, slug, short id or bound workspace path CONTAINS this text (case-insensitive)")
           s.field "limit", limitprop("max projects returned", PageLimit.new(MCP_PROJECTS_DEFAULT, MCP_PROJECTS_MAX))
-          s.field "offset", intprop("skip this many matching projects — the page cursor (default 0)")
+          s.field "offset", intprop("page cursor: skip this many matching projects (default 0)")
         end
 
         tool j, "switch_project",
-          "Point this server at a different project for all subsequent tools, or pass " \
-          "unbind:true instead of 'project' to leave the current one, so it can be deleted. Always " \
-          "available (including --read-only and when the server started unbound). Refused while a " \
-          "background job is running. Verify with project_info afterwards." do |s|
+          "Point this server at a different project for all later tools, or unbind:true to leave " \
+          "the current one (so it can be deleted). Always available (incl. --read-only and " \
+          "unbound). Refused while a background job runs. Verify with project_info." do |s|
           s.field "project", strprop("target project display name or directory slug")
-          s.field "unbind", boolprop("true leaves the current project and returns the server to the unbound state")
+          s.field "unbind", boolprop("true leaves the current project, returning the server to the unbound state")
           s.requires_one_of "project", "unbind"
         end
 
@@ -501,10 +495,9 @@ module Gori
         # `create_project_entry`, which is unchanged; this is only what the client is told
         # exists, and the description already says which call does what.
         tool j, "create_project",
-          "Create a new gori project (or reopen an existing one with the same name). " \
-          "When the server is unbound, create auto-binds to the new project; when already " \
-          "bound, call switch_project to make it active. Under --read-only this works only " \
-          "while the server is still unbound." do |s|
+          "Create a project (or reopen one with the same name). Auto-binds when the server is " \
+          "unbound; otherwise call switch_project to make it active. Under --read-only works " \
+          "only while still unbound." do |s|
           s.field "name", strprop("project display name (slugified for its directory)"), required: true
           s.field "description", strprop("optional description stored in the project settings")
         end
@@ -513,10 +506,10 @@ module Gori
 
         tool j, "delete_project",
           "Delete a project's data from disk. TWO-STEP + destructive: first call with " \
-          "dry_run:true (default) to get object counts, disk size, capture-lock status, and a " \
+          "dry_run:true (default) for object counts, disk size, capture-lock status and a " \
           "short-lived confirmation_token; then call again with dry_run:false and that token. " \
-          "Refuses the currently-served project (switch away, or switch_project unbind:true, first) " \
-          "and any project locked by a live capture." do |s|
+          "Refuses the currently-served project (switch away or unbind first) and any project " \
+          "locked by a live capture." do |s|
           s.field "project", strprop("target project display name or directory slug"), required: true
           s.field "dry_run", boolprop("true (default) previews and issues a confirmation_token; false performs the delete")
           s.field "confirmation_token", strprop("the token from a dry_run:true call (required when dry_run:false)")

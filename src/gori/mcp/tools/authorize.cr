@@ -654,73 +654,47 @@ module Gori
         return unless @allow_actions
 
         tool j, "authorize_start",
-          "Test for BROKEN ACCESS CONTROL (Burp \"Autorize\" / \"Auth Analyzer\"): replay captured " \
-          "requests under several identities — an admin session, a low-privilege user, an anonymous " \
-          "client — and compare each response against the baseline. An identity that receives the " \
-          "SAME status and content as the baseline is a likely authorization bypass. Select the " \
-          "requests with 'flow_ids' and/or a QL 'query'; identities default to the ones saved in the " \
-          "project (TUI Authorize tab) and can be passed inline. Returns a job_id immediately (poll " \
-          "with authorize_status; read the verdicts with authorize_results; end with authorize_stop). " \
-          "ACTIVE: sends flows × identities real requests, on a FRESH connection per identity " \
-          "(connection-oriented auth would otherwise fake a bypass). Capped at #{AUTHORIZE_MAX_SENDS} sends." do |s|
-          s.field "flow_ids", id_list_prop("captured flow ids to replay, in the order given (ids come from list_history). " \
-                                           "An array of integers, a single integer, or a comma list. Combined with 'query' " \
-                                           "when both are passed; at least one of the two is required.")
-          s.field "query", strprop("QL query over history whose rows are replayed too (same grammar as " \
-                                   "list_history — call ql_reference). Appended after flow_ids")
-          s.field "lenient", boolprop("search a `field:` QL does not implement as literal TEXT instead of refusing the query (default false) — a typo free-texts its whole token, selects no rows, and reads as \"nothing matched, widen it\"")
-          s.field "limit", limitprop("max rows the query may contribute — every row becomes one request PER identity", AUTHORIZE_QUERY_LIMIT)
+          "Test for BROKEN ACCESS CONTROL: replay captured requests under several identities " \
+          "(admin, low-privilege, anonymous) selected by `flow_ids` and/or `query` (one required), and compare each response with the baseline; the " \
+          "SAME status and content as the baseline is a likely bypass. Returns a job_id at once " \
+          "(authorize_status, authorize_results, authorize_stop). ACTIVE: sends flows × " \
+          "identities real requests, a FRESH connection per identity. Capped at " \
+          "#{AUTHORIZE_MAX_SENDS} sends." do |s|
+          s.field "flow_ids", id_list_prop("captured flow ids to replay, in order (from list_history): array, single integer, or comma list")
+          s.field "query", strprop("QL query over history whose rows are replayed too, after flow_ids (call ql_reference)")
+          s.field "lenient", boolprop("treat a `field:` QL does not implement as literal TEXT instead of refusing (a typo then matches nothing)")
+          s.field "limit", limitprop("max rows the query may contribute; each row is one request PER identity", AUTHORIZE_QUERY_LIMIT)
           s.field "identities", authorize_identities_prop
-          s.field "unsafe_methods", boolprop("also replay flows whose method is not GET/HEAD/OPTIONS " \
-                                             "(default false). A replayed POST/PUT/PATCH/DELETE runs the " \
-                                             "side effect again, once per identity — only set this for " \
-                                             "requests you named explicitly by flow id")
+          s.field "unsafe_methods", boolprop("also replay non-GET/HEAD/OPTIONS flows: the side effect runs again once per identity. Use only for flows named by id")
           s.field "verify", boolprop("verify upstream TLS certificates (default true)")
-          s.field "timeout_ms", intprop("per-request connect + idle timeout in milliseconds (default 15000)")
-          s.field "allow_unscoped", boolprop("replay even when a flow's host is outside the project's configured " \
-                                             "scope — REQUIRED for an out-of-scope target, or when no scope is " \
-                                             "configured at all (active requests are refused by default without " \
-                                             "a matching scope). Out-of-scope flows are otherwise reported in `skipped`")
+          s.field "timeout_ms", intprop("per-request connect + idle timeout (ms, default 15000)")
+          s.field "allow_unscoped", boolprop("replay flows outside the configured scope, or when none is configured (else refused, reported in `skipped`)")
         end
 
         tool j, "authorize_status",
-          "Counts + state of an authorize job (running|done|stopped|error): the access_control " \
-          "verdict so far (BYPASS|enforced|review|error|nothing_sent — the last two mean NOTHING " \
-          "was compared and are never a clean bill of health), bypass_count, unanswered_count, " \
-          "baseline_denied_count, requests replayed, " \
-          "sends, errors, sends refused before the socket, the flows that were SKIPPED with the " \
-          "reason for each, and the ones that could not be replayed at all (`failed_count` / " \
-          "`failed[]` — a stored head gori cannot put on the wire; the run continues past them). " \
-          "Past the reply budget the rest of either list are flow ids in `skipped_unshown_ids` / " \
-          "`failed_unshown_ids`. " \
-          "A run that sends nothing says so." do |s|
+          "State (running|done|stopped|error) and counts of an authorize job: the access_control " \
+          "verdict so far (BYPASS|enforced|review|error|nothing_sent; the last two mean NOTHING " \
+          "was compared, never a clean bill of health), bypass_count, baseline_denied_count, and " \
+          "`skipped`/`failed[]` flows (overflow ids in `skipped_unshown_ids` / " \
+          "`failed_unshown_ids`)." do |s|
           s.field "job_id", strprop("id from authorize_start"), required: true
         end
 
         tool j, "authorize_results",
-          "The verdicts for an authorize job. Read `access_control` and `bypasses` FIRST: " \
-          "`bypasses` lists every request where a non-baseline identity was served the same " \
-          "response as the baseline — the access-control failures this tool exists to find " \
-          "(never paged; past the reply budget the rest are flow ids in `bypasses_unshown_ids`, " \
-          "their detail in `results` rows with bypass:true). " \
-          "`results` pages the full per-identity detail (verdict, status, size, delta, error), " \
-          "`skipped` names every selected flow that was not replayed, and `failed[]` the ones " \
-          "that could not be replayed at all (past the reply budget, as ids in `skipped_unshown_ids` / " \
-          "`failed_unshown_ids`). `unanswered_count` is the requests whose every " \
-          "send failed at the socket: they compared nothing, so they are evidence of neither " \
-          "a bypass nor enforcement. `baseline_denied_count` is the requests whose BASELINE was " \
-          "itself refused (4xx/5xx): the privileged request the run is anchored on never got the " \
-          "resource either, so a matching denial is not a bypass and every row on them is " \
-          "`review` — usually one stale baseline credential, not N quiet endpoints." do |s|
+          "Verdicts for an authorize job. Read `access_control` and `bypasses` FIRST (requests " \
+          "where a non-baseline identity got the baseline's response; never paged, overflow ids " \
+          "in `bypasses_unshown_ids`). `results` pages per-identity detail (verdict, status, " \
+          "size, delta, error). `unanswered_count`: every send failed, evidence of nothing. " \
+          "`baseline_denied_count`: the BASELINE itself got 4xx/5xx, so its rows are `review`, " \
+          "not bypasses." do |s|
           s.field "job_id", strprop("id from authorize_start"), required: true
           s.field "offset", intprop("start row (default 0)")
           s.field "limit", limitprop("max requests per page", AUTHORIZE_RESULTS_LIMIT)
         end
 
         tool j, "authorize_stop",
-          "Stop a running authorize job. Cooperative: the stop is honoured between identities as " \
-          "well as between requests, and a request cut short mid-identity yields NO verdict (a " \
-          "partial comparison must not read as \"enforced\")." do |s|
+          "Stop a running authorize job (between identities or requests). A request cut short " \
+          "mid-identity yields NO verdict." do |s|
           s.field "job_id", strprop("id from authorize_start"), required: true
         end
       end
@@ -728,15 +702,11 @@ module Gori
       # The `identities` schema: an array of identity objects, or the same array as a JSON
       # string (LLM clients vary — the same leniency `jsonprop` gives the object-shaped args).
       private def authorize_identities_prop : JSON::Any
-        desc = "the identities to replay under, as [{\"name\":\"admin\",\"set\":[{\"name\":\"Cookie\"," \
-               "\"value\":\"session=…\"}]},{\"name\":\"anonymous\",\"remove\":[\"Cookie\",\"Authorization\"]}]. " \
-               "Each is a static header overlay: `set` upserts headers, `remove` strips them. " \
-               "Exactly one may carry \"baseline\":true — the identity the others are judged against; " \
-               "with none, the request AS CAPTURED (its own session) is the baseline. At least one " \
-               "identity besides the baseline is required, or there is nothing to compare. Names " \
-               "must be UNIQUE (compared case-insensitively) — the name is what tells the " \
-               "per-identity result rows apart, so a duplicate is refused rather than run. " \
-               "Omit to use the identities saved in this project (TUI Authorize tab)."
+        desc = "identities as [{\"name\":\"admin\",\"set\":[{\"name\":\"Cookie\",\"value\":\"s=…\"}]}," \
+               "{\"name\":\"anon\",\"remove\":[\"Cookie\"]}]: `set` upserts headers, `remove` strips " \
+               "them. At most one \"baseline\":true; with none, the request AS CAPTURED is the " \
+               "baseline. Needs at least one non-baseline identity; names must be unique " \
+               "(case-insensitive). Omit to use the project's saved identities."
         JSON.parse(%({"description":#{desc.to_json},"oneOf":[{"type":"array","items":{"type":"object"}},{"type":"string"}]}))
       end
     end
