@@ -163,7 +163,7 @@ module Gori
 
       Rewritten: rewritten:true|false  rewritten:project/4  rewritten:global/3 — flows a Match&Replace
       rule CHANGED (a bare id is ambiguous: global and project rules number independently). A flow
-      captured before gori recorded rules matches NEITHER true nor false.
+      captured before gori recorded rules matches NEITHER true nor a rule (rewritten:false keeps it).
 
       Static assets: static:true|false — images, fonts, audio/video by response Content-Type (else
       path extension), 2xx/304 only; svg, JS, CSS, JSON and the like are never static.
@@ -189,10 +189,12 @@ module Gori
       either direction; unindexed scan. -ws:x keeps flows with no matching (or no) messages.
 
       JSON-RPC / MCP: rpc:tools/call  rpc:tools/ — REQUEST body is a JSON-RPC call whose method starts
-      with the value (case-sensitive); unindexed, compressed bodies are not read.
+      with the value (case-sensitive); unindexed, compressed bodies are not read, and a nested "method"
+      key counts too.
 
       Regex (~): host~^api\\.  body~secret\\d+  path~/admin — on host path url method scheme header body
-      ws (and req./resp. header/body). Case-sensitive; (?i) folds. `~` on another QL field is DROPPED.
+      ws (and req./resp. header/body). Case-sensitive; (?i) folds. `~` on another QL field is DROPPED;
+      on a name that is not a QL field the whole token is free text.
 
       body: USES A BOUNDED INDEX: only the FIRST 8 KiB of each side, and no binary or compressed body.
       So body: can MISS content that is there. body~regex scans the stored bytes with no cap — use it
