@@ -1598,8 +1598,8 @@ module Gori
 
         tool j, "fuzz_status", "Counts + state of a fuzz job (running|done|budget_exhausted|condition_met|stopped|error). " \
                                "budget_exhausted (max_requests hit) and condition_met (stop_on fired; stop_reason, " \
-                               "stop_index) are partial, NOT exhaustive: see incomplete_reason, candidates_remaining. The stop_index row is absent " \
-                               "from fuzz_results if results_truncated." do |s|
+                               "stop_index) are partial, NOT exhaustive: see incomplete_reason, candidates_remaining. The stop_index row is in " \
+                               "fuzz_results unless results_truncated." do |s|
           s.field "job_id", strprop("id from fuzz_start"), required: true
         end
 

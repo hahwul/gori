@@ -137,7 +137,7 @@ module Gori
           "session. Anonymous served the authenticated response FROM a cache = `verdict:cached`, " \
           "`deception:true`. `cached` needs the control (an anonymous cache-busted query request) " \
           "refused (401/403) or " \
-          "redirected; anything else, or a control that is itself a cache hit, is " \
+          "redirected; any other differing control, or one that is itself a cache hit, is " \
           "`verdict:review`. Each trial has a `cache` signal (same classifier as get_flow's " \
           "`cache` / QL `cache:`). To find CRAFTED trigger paths, fuzz the path with the " \
           "`cache-delimiters` set then check hits here. ACTIVE: up to 3 requests, " \
