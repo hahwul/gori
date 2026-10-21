@@ -64,20 +64,21 @@ module Gori::Proxy::H2
     # other only through `peer`. {nil, nil} when intercept is off, so a relay without it keeps
     # exactly the frame path (and the zero locking) it has today.
     #
-    # A body rule live for this host turns on the gates' body-rule path (`body_rule.cr`). Asked
-    # ONCE, here, on the CONNECT host — the question the HTTP/1.1 downgrade used to ask
-    # (`Tls::Tunnel#h2_downgrade_reason`) — so a connection no body rule matched keeps the frame
-    # path it always had, and a rule enabled later reaches the next connection (`HeadRewrite`
-    # says so). Every `Session` wires an Interceptor; a relay built without one has no gates
-    # to carry the path, and a body rule does not reach it.
+    # A body or short-circuit rule live for this host turns on the gates' rule path
+    # (`body_rule.cr`, `stub.cr`): both make gori a sender of DATA, which needs the flow-control
+    # accounting. Asked ONCE, here, on the CONNECT host — the question the HTTP/1.1 downgrade
+    # used to ask (`Tls::Tunnel#h2_downgrade_reason`) — so a connection no such rule matched
+    # keeps the frame path it always had, and a rule enabled later reaches the next connection
+    # (`HeadRewrite` says so). Every `Session` wires an Interceptor; a relay built without one
+    # has no gates to carry the path, and neither rule reaches it.
     private def gates(conn_id : Int64, assembler : Assembler) : {StreamGate?, StreamGate?}
       ic = @interceptor
       return {nil, nil} unless ic
-      body = @rewriter if @rewriter.try(&.rewrites_body_for_host?(@host))
+      body = @rewriter if @rewriter.try { |rw| rw.rewrites_body_for_host?(@host) || rw.short_circuits_for_host?(@host) }
       out_gate = StreamGate.new("out", @upstream, conn_id, @sink, assembler, @host, @port, ic,
-        HeadRewrite.new("out", @rewriter, assembler, @host, @extractor, !body.nil?), body_rewriter: body)
+        HeadRewrite.new("out", @rewriter, assembler, @host, !body.nil?), body_rewriter: body)
       in_gate = StreamGate.new("in", @client, conn_id, @sink, assembler, @host, @port, ic,
-        HeadRewrite.new("in", @rewriter, assembler, @host, @extractor, !body.nil?), extract_for(assembler), body)
+        HeadRewrite.new("in", @rewriter, assembler, @host, !body.nil?), extract_for(assembler), body)
       out_gate.peer = in_gate
       in_gate.peer = out_gate
       {out_gate, in_gate}
@@ -127,18 +128,15 @@ module Gori::Proxy::H2
       # setting that is read live per response, so a switch thrown mid-connection would be
       # honoured on h1 and silently ignored here.
       #
-      # The REQUEST direction keeps its own two reasons, and `strip_alt_svc?` was never one of
-      # them: `Alt-Svc` is a response header. It needs the pipeline for a rule to run, and for
-      # `notice_unreachable` — the #536 warning that a session-binding extract descriptor targets
-      # a stream this relay cannot reach — which is why `@extractor` is asked here rather than
-      # being left to ride on an unrelated object being present.
+      # The REQUEST direction needs it only for a rule to run (`notice_unreachable` included),
+      # and `strip_alt_svc?` was never a reason: `Alt-Svc` is a response header.
       #
       # Costs the passthrough case nothing either way: the block is decoded exactly once (the
       # assembler is handed `pre`), `head_text` is gated on having a consumer, and holding a
       # header block until END_HEADERS delays the peer by zero (see `HeadRewrite`'s class
       # comment).
-      heads = if rw || @extractor || direction == "in"
-                HeadRewrite.new(direction, rw, assembler, @host, @extractor)
+      heads = if rw || direction == "in"
+                HeadRewrite.new(direction, rw, assembler, @host)
               end
       extract = direction == "in" ? extract_for(assembler) : nil
       begin

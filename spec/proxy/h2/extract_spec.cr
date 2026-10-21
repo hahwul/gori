@@ -177,18 +177,66 @@ describe Gori::Proxy::H2::Extract do
     end
   end
 
-  # DATA streams past this relay untouched, so a body-scoped descriptor has nothing to read.
-  # It should not get there at all — `Tls::Tunnel#h2_candidate?` downgrades the host first —
-  # but if it does, it says which of the two it was rather than blaming its own selector.
+  # #1635: the delivered DATA is copied aside for a body-scoped descriptor and offered with the
+  # head at END_STREAM, the shape h1's buffering path gives it.
+  it "reads the delivered body for a body-scoped rule at END_STREAM" do
+    with_bindings do |bindings, store|
+      bindings.add("CSRF", "", Gori::ExtractKind::Regex, "tok=(\\w+)").should be_nil
+      extract, assembler = pipeline(bindings)
+      open_stream(assembler, 1_u32)
+      extract.observe(response_frame(1_u32), HeadBlock.new([{":status", "200"}]))
+      bindings.bound?("CSRF").should be_false # nothing is offered before the body is in
+      extract.observe(Frame::Header.new(Frame::Type::Data.value, 0_u8, 1_u32, "x=1&to".to_slice), nil)
+      extract.observe(Frame::Header.new(Frame::Type::Data.value, Frame::END_STREAM, 1_u32, "k=abc123".to_slice), nil)
+      bindings.values["CSRF"].should eq "abc123"
+      store.events_after(0, 50).any? { |e| e.kind == "extract_no_body" }.should be_false
+    end
+  end
+
+  it "offers the body when trailers end the response" do
+    with_bindings do |bindings, _|
+      bindings.add("CSRF", "", Gori::ExtractKind::Regex, "tok=(\\w+)").should be_nil
+      extract, assembler = pipeline(bindings)
+      open_stream(assembler, 1_u32)
+      extract.observe(response_frame(1_u32), HeadBlock.new([{":status", "200"}]))
+      extract.observe(Frame::Header.new(Frame::Type::Data.value, 0_u8, 1_u32, "tok=t1".to_slice), nil)
+      extract.observe(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS | Frame::END_STREAM,
+        1_u32, Bytes.empty), HeadBlock.new([{"grpc-status", "0"}]))
+      bindings.values["CSRF"].should eq "t1"
+    end
+  end
+
+  # A body it cannot read whole is no body, and the rule says which of the two it was rather
+  # than blaming its own selector.
   it "tells a body-scoped rule there was no body, rather than that it found nothing" do
     with_bindings do |bindings, store|
       bindings.add("CSRF", "", Gori::ExtractKind::Regex, "tok=(\\w+)").should be_nil
       extract, assembler = pipeline(bindings)
       open_stream(assembler, 1_u32)
       extract.observe(response_frame(1_u32), HeadBlock.new([{":status", "200"}]))
+      # Padding is the assembler's to strip, so a padded frame gives the copy up.
+      extract.observe(Frame::Header.new(Frame::Type::Data.value, Frame::PADDED | Frame::END_STREAM,
+        1_u32, Bytes[0] + "tok=abc".to_slice), nil)
       events = store.events_after(0, 50)
       events.count { |e| e.kind == "extract_no_body" }.should eq 1
       events.any? { |e| e.kind == "extract_miss" }.should be_false
+      bindings.bound?("CSRF").should be_false
+    end
+  end
+
+  # A reset response is offered with what was delivered, as h1 offers a truncated body, and
+  # nothing after it is read.
+  it "offers what was delivered when the stream is reset" do
+    with_bindings do |bindings, _|
+      bindings.add("CSRF", "", Gori::ExtractKind::Regex, "tok=(\\w+)").should be_nil
+      extract, assembler = pipeline(bindings)
+      open_stream(assembler, 1_u32)
+      extract.observe(response_frame(1_u32), HeadBlock.new([{":status", "200"}]))
+      extract.observe(Frame::Header.new(Frame::Type::Data.value, 0_u8, 1_u32, "tok=part".to_slice), nil)
+      extract.observe(Frame::Header.new(Frame::Type::RstStream.value, 0_u8, 1_u32, Bytes[0, 0, 0, 8]), nil)
+      bindings.values["CSRF"].should eq "part"
+      extract.observe(Frame::Header.new(Frame::Type::Data.value, Frame::END_STREAM, 1_u32, "tok=late".to_slice), nil)
+      bindings.values["CSRF"].should eq "part"
     end
   end
 

@@ -251,7 +251,7 @@ module Gori::Tui
       target = preview_target
       sync_preview_out(target)
       @view.render(screen, inner, list, @sel, @scroll, rules_engine.enabled_count,
-        @focus, body_focused, rules_engine.short_circuits?, @preview_input, @out, target, @preview_host,
+        @focus, body_focused, @preview_input, @out, target, @preview_host,
         empty_hint: keys("no rules — press {rewriter.add} to add"))
     end
 
@@ -307,7 +307,7 @@ module Gori::Tui
     # so the window and the draw walk the same list by construction.
     private def ensure_visible(inner : Rect, count : Int32) : Nil
       @scroll = Viewport.scroll_to_show(@sel, @scroll,
-        @view.list_row_capacity(inner, rules_engine.short_circuits?), count)
+        @view.list_row_capacity(inner), count)
     end
 
     # Point the OUTPUT pane at the current transform. Recomputed rather than cached, exactly as
@@ -515,7 +515,7 @@ module Gori::Tui
         if @sub != :rules
           @view.sub_row_capacity(@last_body)
         elsif @focus == :list
-          @view.list_row_capacity(@last_body, rules_engine.short_circuits?)
+          @view.list_row_capacity(@last_body)
         else
           return nil
         end
@@ -661,7 +661,7 @@ module Gori::Tui
       end
       # The RULES list's scroll gauge rides the card's right hairline, which `row_at` excludes.
       inner = rules_list_rect(inner)
-      if row = @view.rules_gauge_row_at(inner, mx, my, rule_list.size, rules_engine.short_circuits?)
+      if row = @view.rules_gauge_row_at(inner, mx, my, rule_list.size)
         @focus = :list
         @sel = row
         return true
@@ -669,7 +669,7 @@ module Gori::Tui
       case @view.pane_at(inner, mx, my)
       when :list
         @focus = :list
-        if idx = @view.row_at(inner, mx, my, @scroll, rule_list.size, rules_engine.short_circuits?)
+        if idx = @view.row_at(inner, mx, my, @scroll, rule_list.size)
           @sel = idx
         end
       when :preview_in
@@ -731,7 +731,7 @@ module Gori::Tui
     private def double_click_row(inner : Rect, mx : Int32, my : Int32) : Bool
       case @sub
       when :rules
-        return false unless @view.row_at(rules_list_rect(inner), mx, my, @scroll, rule_list.size, rules_engine.short_circuits?)
+        return false unless @view.row_at(rules_list_rect(inner), mx, my, @scroll, rule_list.size)
         rewriter_edit
       when :extract
         return false unless @view.sub_row_at(inner, mx, my, @sub_scroll, sub_count)

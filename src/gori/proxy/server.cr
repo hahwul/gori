@@ -406,9 +406,8 @@ module Gori::Proxy
     #     ALPN-negotiated h2 stream on the same reverse listener reaches `relay_h2` with only
     #     the pre-handshake host test in front of it — so h2c here is precisely as gated as the
     #     h2 the listener serves today, and no new hole is opened.
-    #   * the three rule gates (`h2c_refusal`) — apply, for the reason they apply on
-    #     CONNECT: they live on `ClientConn`'s h1 path, the relay cannot run them, and with the
-    #     preface already sent the only honest answers are refuse or lie.
+    #   * the rule gates — none: the relay runs every rule kind (#1628, #1635), so nothing is
+    #     left for `h2c_refusal` to refuse but the setting answered above.
     #
     # Every refusal CLOSES the socket. Nothing else will: ownership never passes to a
     # `ClientConn#run` on this path, and the accept fiber's rescue only covers pre-run setup —

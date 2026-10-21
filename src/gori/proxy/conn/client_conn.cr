@@ -52,11 +52,8 @@ module Gori::Proxy
     # arrived without one. ALPN lives inside a TLS handshake, so there was nothing to reflect,
     # and gori has no h2c of its own to offer instead.
     Cleartext
-    # The three `h2_candidate?` downgrades. Each one DID write a `gori.log` line, so each one
-    # may point at it.
+    # The `h2_candidate?` downgrade. It DID write a `gori.log` line, so it may point at it.
     DisabledBySetting
-    ShortCircuitRule
-    ExtractRule
     # The origin completed a TLS handshake and chose HTTP/1.1 at ALPN, so gori did not offer
     # h2 to the client either (there is no h2↔h1 bridge — see `reflect_origin_h2`).
     UpstreamDeclined
@@ -72,8 +69,6 @@ module Gori::Proxy
       in Offered             then "HTTP/2 was offered to this client and it selected HTTP/1.1 at ALPN, then spoke the HTTP/2 preface anyway"
       in Cleartext           then "this connection has a cleartext leg that carried no ALPN — and ALPN, inside a TLS handshake, is the only way gori offers HTTP/2; gori does not serve h2c prior-knowledge here"
       in DisabledBySetting   then "HTTP/2 is switched off (settings network.http2; set it back to \"auto\" to keep h2) — gori.log has the matching \"h2 downgrade: <host> ...\" line"
-      in ShortCircuitRule    then "a Match&Replace short-circuit rule is live for this host and the h2 relay cannot answer a request locally — gori.log has the matching \"h2 downgrade: <host> ...\" line"
-      in ExtractRule         then "a session-binding extract rule reads the response BODY for this host and body extraction on HTTP/2 is not implemented yet — gori.log has the matching \"h2 downgrade: <host> ...\" line"
       in UpstreamDeclined    then "the ORIGIN did not negotiate HTTP/2 (it chose HTTP/1.1 at ALPN), so gori did not offer h2 to this client either — gori does not translate between h2 and h1. Nothing on this proxy needs changing"
       in UpstreamUnreachable then "gori's HTTP/2 ALPN probe to the origin did not complete (unreachable, or the upstream TLS handshake was refused), so it could not learn whether the origin speaks h2 and kept this client on HTTP/1.1"
       end
@@ -2121,12 +2116,11 @@ module Gori::Proxy
 
     # Why gori will not serve this h2c-in-CONNECT tunnel, or nil for one it will.
     #
-    # `http2_disabled?` first, then `tls/tunnel.cr#h2_candidate?`'s two rule gates — a
-    # short-circuit stub and a body-scoped extract rule — both of which live on `ClientConn`'s h1
-    # path and are unreachable from the h2 relay. A body Match&Replace rule is not one of them
-    # any more: the relay runs it (#1628). On the TLS path each
-    # earns a downgrade to h1; here the client has already sent the preface, so the only honest
-    # answers are refuse or lie.
+    # `http2_disabled?`, and nothing else. The rule gates that once stood beside it are gone:
+    # the relay runs body rules (#1628), answers short-circuit stubs and reads the body a
+    # body-scoped extract rule wants (#1635). On the TLS path the setting earns a downgrade to
+    # h1; here the client has already sent the preface, so the only honest answers are refuse
+    # or lie.
     #
     # The SANDBOX is deliberately absent from this list (#731). It used to head it, because the
     # h2c relay really was wired with no gates at all — until #549 threaded `interceptor:` into
@@ -2135,15 +2129,9 @@ module Gori::Proxy
     # reaches this tunnel exactly as it reaches the TLS h2 one, and the blanket refusal was
     # short-circuiting ahead of a gate that fails closed.
     private def h2c_refusal(host : String) : String?
-      if Settings.http2_disabled?
-        # Silently relaying would make "force HTTP/1.1" quietly untrue for this path, which is
-        # worse than a visible refusal.
-        "HTTP/2 is switched off (settings network.http2)"
-      elsif @rewriter.try(&.short_circuits_for_host?(host))
-        "a Match&Replace short-circuit rule is live and the h2 relay cannot answer a request locally"
-      elsif @extractor.try(&.extracts_body_for_host?(host))
-        "a body-scoped session-binding extract rule is live and the h2 relay never holds a body"
-      end
+      # Silently relaying would make "force HTTP/1.1" quietly untrue for this path, which is
+      # worse than a visible refusal.
+      "HTTP/2 is switched off (settings network.http2)" if Settings.http2_disabled?
     end
 
     # Refuse an h2c-in-CONNECT tunnel, VISIBLY (#731). Two of these refusals used to be a bare
@@ -2237,11 +2225,10 @@ module Gori::Proxy
     # and `tls/tunnel.cr#relay_h2`). A third spelling in `Server` would be worse than the gap
     # #737 describes.
     #
-    # The three RULE gates come with it rather than being re-tested by the caller: same
-    # question, same answer, and with the preface already sent the only honest options are
-    # refuse or lie. `http2_disabled?` — which `h2c_refusal` also reports — has already been
-    # answered by `Server#serve_h2c`, which refuses it in the listener's own words before ever
-    # reaching here; a second look costs one `Settings` read and cannot fire.
+    # `h2c_refusal` comes with it rather than being re-tested by the caller. Its one question,
+    # `http2_disabled?`, has already been answered by `Server#serve_h2c`, which refuses it in
+    # the listener's own words before ever reaching here; a second look costs one `Settings`
+    # read and cannot fire.
     #
     # Refusal is a log line and nothing else, unlike the CONNECT path's `refuse_h2c`. There is
     # no request to record against: `record_error` projects a flow from a `RawRequest`, and on
@@ -2643,11 +2630,9 @@ module Gori::Proxy
           refuse_non_tls_connect(req, host, port, peeked)
           return
         end
-        # Cleartext h2 (h2c) tunnelled inside CONNECT. `h2c_refusal` is the whole gate:
-        # the setting, and the three rule kinds the h2 relay structurally cannot apply — a
-        # tunnel that looked like it honoured the rule table while a stub rule quietly let
-        # the request reach the origin would be worse than a visible refusal. The SANDBOX is
-        # not among them and no longer refuses this tunnel outright (#731): `intercept_h2c`
+        # Cleartext h2 (h2c) tunnelled inside CONNECT. `h2c_refusal` is the whole gate: the
+        # setting, and no rule kind any more — the relay runs them all (#1628, #1635). The
+        # SANDBOX is not among them and no longer refuses this tunnel outright (#731): `intercept_h2c`
         # wires the interceptor into the relay, so `H2::StreamGate` blocks out-of-scope
         # streams here per stream, exactly as it does on the TLS h2 path.
         if reason = h2c_refusal(host)

@@ -154,9 +154,9 @@ describe Gori::AltSvc do
       # where the decoded fields exist and nothing has been written yet. Gating that pipeline
       # on `@rewriter` would make "on both transports" a claim about an unrelated object; on
       # `strip_alt_svc?` it would read a live-per-response switch once per connection. The
-      # REQUEST direction keeps its own gates — a rule, or `notice_unreachable`'s extractor.
+      # REQUEST direction keeps its own gate: a rule.
       src = File.read(File.join(__DIR__, "..", "src/gori/proxy/h2/relay.cr"))
-      src.should contain(%(if rw || @extractor || direction == "in"))
+      src.should contain(%(if rw || direction == "in"))
     end
   end
 

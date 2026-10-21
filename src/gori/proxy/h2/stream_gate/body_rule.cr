@@ -27,9 +27,9 @@
 #     instead of earning a FLOW_CONTROL_ERROR. gori never writes past the receiver's window, so
 #     the debt is bounded by that window, and the queue by the window the sender believes in.
 #
-# Nothing here exists unless a body rule matched the CONNECT host when the relay was built
-# (`Relay#gates`, the same once-per-connection question the old HTTP/1.1 downgrade asked), so
-# a connection no body rule can touch keeps exactly the frame path it had: no buffer, no
+# Nothing here exists unless a body or stub rule (`stub.cr`) matched the CONNECT host when the
+# relay was built (`Relay#gates`, the same once-per-connection question the old HTTP/1.1
+# downgrade asked), so a connection no such rule can touch keeps exactly the frame path it had: no buffer, no
 # window arithmetic, no WINDOW_UPDATE detour through the opposite gate.
 #
 # ## The head, and content-length
@@ -823,7 +823,7 @@ class Gori::Proxy::H2::StreamGate
   # deadlock a full-duplex exchange whose origin finishes the response only after the request.
   private def forward_heard(f : Frame::Header) : Nil
     @mutex.synchronize do
-      next if @closed || @refused.includes?(f.stream_id)
+      next if @closed || @refused.includes?(f.stream_id) || @stubbed.includes?(f.stream_id)
       if @ordered && f.stream_id != 0 && (slot = @slots[f.stream_id]?)
         park(slot, f, nil)
       else

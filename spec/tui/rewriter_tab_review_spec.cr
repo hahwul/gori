@@ -430,18 +430,6 @@ describe "Gori::Tui::RewriterController (tab review)" do
     end
   end
 
-  # Since #1628 only a short-circuit rule costs a host HTTP/2 (`Tls::Tunnel#h2_downgrade_reason`).
-  it "names the HTTP/1.1 fallback only while a short-circuit rule is live" do
-    with_rewriter_controller do |ctl, _, session|
-      add_project(session.rules, "head-rule")
-      session.rules.add(Gori::Store::RuleTarget::Response, Gori::Store::RulePart::Body, "a", "b")
-      render(ctl).contains?("fall back to HTTP/1.1").should be_false
-      session.rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "/pay",
-        "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n", op: Gori::Store::RuleOp::ShortCircuit)
-      render(ctl).contains?("short-circuit rule fall back to HTTP/1.1").should be_true
-    end
-  end
-
   describe "the empty-state line names the effective chord" do
     it "on the rules list" do
       with_rebind({"rewriter.add" => ["n"]}) do

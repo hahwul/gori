@@ -6,7 +6,7 @@ require "compress/gzip"
 #
 # The gates are pinned as hard as the behaviour, because they are what makes slice 2 safe to
 # put on the hot path at all: a proxy with no extract rule must buffer nothing (P6), and a
-# body-scoped rule must cost its own hosts an h2 downgrade and no others (#526/#531).
+# body-scoped rule must buffer for its own hosts and no others (#526/#531).
 
 private def gzip(text : String) : Bytes
   io = IO::Memory.new
@@ -107,11 +107,11 @@ describe "Gori::Bindings — the proxy response seam (#501 slice 2)" do
       end
     end
 
-    # #526/#531. The h2 downgrade gate costs a host its protocol, so it must be asked about
-    # THAT host. A rule scoped to `alpha.test` downgrading `127.0.0.1` is the regression #531
+    # #526/#531. Buffering a body costs a host its streaming, so it must be asked about
+    # THAT host. A rule scoped to `alpha.test` buffering for `127.0.0.1` is the regression #531
     # fixed for Match&Replace, and adding a second rule table with the host-blind shape would
     # be the same bug wearing different clothes.
-    it "scopes the h2 downgrade to the hosts the rule's glob can match" do
+    it "scopes body buffering to the hosts the rule's glob can match" do
       with_store do |store|
         b = Gori::Bindings.load(store)
         b.add("CSRF", "", Gori::ExtractKind::Regex, "tok=(\\w+)", host: "alpha.test").should be_nil
@@ -122,7 +122,7 @@ describe "Gori::Bindings — the proxy response seam (#501 slice 2)" do
       end
     end
 
-    it "an unscoped body rule still downgrades everywhere" do
+    it "an unscoped body rule still buffers everywhere" do
       with_store do |store|
         b = Gori::Bindings.load(store)
         b.add("CSRF", "", Gori::ExtractKind::Regex, "tok=(\\w+)").should be_nil

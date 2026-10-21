@@ -1,9 +1,10 @@
 require "../../spec_helper"
 require "log/spec"
 
-# #730: the gates that let a body / short-circuit / body-scoped extract rule run on a host are
-# evaluated ONCE per connection — the HTTP/1.1 downgrade inside CONNECT
-# (`tls/tunnel.cr#h2_downgrade_reason`), and since #1628 the body-rule path (`H2::Relay#gates`).
+# #730: the gate that lets a body / short-circuit rule run on a host is evaluated ONCE per
+# connection — once the HTTP/1.1 downgrade inside CONNECT, since #1628/#1635 the relay's rule
+# path (`H2::Relay#gates`). A body-scoped extract rule left this list in #1635: `H2::Extract`
+# reads the delivered body on every connection.
 # The tables they read are live-mutated in place and nothing tears down an open relay when they
 # change, so a rule enabled while an h2 connection is already open applies to nothing on that
 # connection — and before this it said nothing at all.
@@ -49,10 +50,9 @@ private def with_live_tables(&)
 end
 
 private def live_pipe(rewriter : Gori::Proxy::HeadRewriter?,
-                      extractor : Gori::Proxy::ResponseExtract? = nil,
                       direction = "out", body_rules = false) : {Gori::Proxy::H2::HeadRewrite, Gori::Proxy::H2::Assembler}
   assembler = Gori::Proxy::H2::Assembler.new(LiveSink.new, CONNECT_HOST, 443)
-  {Gori::Proxy::H2::HeadRewrite.new(direction, rewriter, assembler, CONNECT_HOST, extractor, body_rules), assembler}
+  {Gori::Proxy::H2::HeadRewrite.new(direction, rewriter, assembler, CONNECT_HOST, body_rules), assembler}
 end
 
 private def feed_request(pipe : Gori::Proxy::H2::HeadRewrite,
@@ -99,13 +99,15 @@ describe "h2 live-rule window (#730)" do
     end
   end
 
-  # #1628: a connection built with the body-rule path runs a body rule per stream, on the stream's
-  # own host, so one going live — here or on a coalesced authority — is not a seam it misses.
-  it "says nothing for a BODY rule on a connection that runs the body-rule path" do
+  # #1628/#1635: a connection built with the rule path runs a body or stub rule per stream, on the
+  # stream's own host, so one going live — here or on a coalesced authority — is not a seam it
+  # misses.
+  it "says nothing for a BODY or SHORT-CIRCUIT rule on a connection that runs the rule path" do
     with_live_tables do |rules, _|
       pipe, assembler = live_pipe(rules, body_rules: true)
       Log.capture(level: :warn) do |logs|
         rules.add(LIVE_REQ, LIVE_BODY, "secret", "REDACTED")
+        rules.add(LIVE_REQ, LIVE_HEAD, "/x", "403 Forbidden", op: LIVE_SC)
         feed_request(pipe, assembler)
         feed_request(pipe, assembler, authority: "alpha.test", stream: 3_u32)
         logs.empty
@@ -124,29 +126,16 @@ describe "h2 live-rule window (#730)" do
     end
   end
 
-  it "warns for a body-scoped session-binding EXTRACT rule" do
-    with_live_tables do |rules, bindings|
-      pipe, assembler = live_pipe(rules, bindings)
-      Log.capture(level: :warn) do |logs|
-        # No Match&Replace rule at all — the rewriter is INACTIVE, so this cannot ride `rewrite`.
-        bindings.add("SESSION", "", Gori::ExtractKind::Regex, "tok=(\\w+)", host: CONNECT_HOST).should be_nil
-        rules.active?.should be_false
-        feed_request(pipe, assembler)
-        logs.check(:warn, /a session-binding EXTRACT rule that reads the response body now matches/)
-      end
-    end
-  end
-
   it "names every live kind in one line" do
-    with_live_tables do |rules, bindings|
-      pipe, assembler = live_pipe(rules, bindings)
+    with_live_tables do |rules, _|
+      pipe, assembler = live_pipe(rules)
       Log.capture(level: :warn) do |logs|
         rules.add(LIVE_REQ, LIVE_BODY, "secret", "REDACTED", host: CONNECT_HOST)
-        bindings.add("SESSION", "", Gori::ExtractKind::Regex, "tok=(\\w+)", host: CONNECT_HOST).should be_nil
+        rules.add(LIVE_REQ, LIVE_HEAD, "/x", "403 Forbidden", op: LIVE_SC, host: CONNECT_HOST)
         feed_request(pipe, assembler)
         logs.check(:warn, /now matches/)
         logs.entry.message.should contain("a Match&Replace BODY rule")
-        logs.entry.message.should contain("a session-binding EXTRACT rule that reads the response body")
+        logs.entry.message.should contain("a Match&Replace SHORT-CIRCUIT rule")
       end
     end
   end
@@ -154,11 +143,10 @@ describe "h2 live-rule window (#730)" do
   # The host scoping #526/#531 bought is not given back: a rule that cannot match this
   # connection's host costs it nothing, and says nothing either.
   it "says nothing for a rule scoped to a host this connection is not" do
-    with_live_tables do |rules, bindings|
-      pipe, assembler = live_pipe(rules, bindings)
+    with_live_tables do |rules, _|
+      pipe, assembler = live_pipe(rules)
       Log.capture(level: :warn) do |logs|
         rules.add(LIVE_REQ, LIVE_BODY, "secret", "REDACTED", host: "alpha.test")
-        bindings.add("SESSION", "", Gori::ExtractKind::Regex, "tok=(\\w+)", host: "alpha.test").should be_nil
         feed_request(pipe, assembler)
         logs.empty
       end
@@ -166,13 +154,15 @@ describe "h2 live-rule window (#730)" do
   end
 
   # The reachable seams stay quiet, because they are not the window: a HEAD rule runs on this
-  # very pipeline from the next request head, and a head-scoped extract runs in `H2::Extract`.
-  it "says nothing for a HEAD rule or a head-scoped extract rule, which DO reach this relay" do
+  # very pipeline from the next request head, and an extract rule of either scope runs in
+  # `H2::Extract` (#1635).
+  it "says nothing for a HEAD rule or an extract rule, which DO reach this relay" do
     with_live_tables do |rules, bindings|
-      pipe, assembler = live_pipe(rules, bindings)
+      pipe, assembler = live_pipe(rules)
       Log.capture(level: :warn) do |logs|
         rules.add(LIVE_REQ, LIVE_HEAD, "/x", "/y", host: CONNECT_HOST)
         bindings.add("SESSION", "", Gori::ExtractKind::Cookie, "sid", host: CONNECT_HOST).should be_nil
+        bindings.add("TOKEN", "", Gori::ExtractKind::Regex, "tok=(\\w+)", host: CONNECT_HOST).should be_nil
         bindings.extracts?.should be_true # live, just not unreachable
         feed_request(pipe, assembler)
         logs.empty

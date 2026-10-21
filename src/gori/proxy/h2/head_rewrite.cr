@@ -4,7 +4,6 @@ require "./head_codec"
 require "./assembler"
 require "../head_rewriter"
 require "../../alt_svc"
-require "../extractor"
 require "../upstream"
 
 module Gori::Proxy::H2
@@ -105,16 +104,10 @@ module Gori::Proxy::H2
     # constructor argument: the gate needs a live `HeadRewrite` to construct itself around.
     property deferrer : Deferrer?
 
-    # `extractor` is read for ONE thing: `notice_unreachable`, which runs on request heads only.
-    # The "in" direction therefore never touches it, and extraction itself happens in
-    # `H2::Extract` on the response side — this seam only has to be able to ASK whether a
-    # body-scoped extract rule would have wanted a stream the connection gate could not see.
-    #
-    # `body_rules` says this connection runs the body-rule path (`Relay#gates`), so a body rule
-    # is no longer a seam it cannot reach.
+    # `body_rules` says this connection runs the gates' rule path (`Relay#gates`), so a body or
+    # short-circuit rule is no longer a seam it cannot reach.
     def initialize(@direction : String, @rewriter : Proxy::HeadRewriter?,
-                   @assembler : Assembler, @host : String,
-                   @extractor : Proxy::ResponseExtract? = nil, @body_rules : Bool = false)
+                   @assembler : Assembler, @host : String, @body_rules : Bool = false)
       @encoder = HPACK::Encoder.new
       @engaged = false
       @warned = false
@@ -212,6 +205,15 @@ module Gori::Proxy::H2
       head = block.head && head_text(fields, block.first, block.request)
       Block.new(reframe(block.first, block.prefix, @encoder.encode(fields)),
         Assembler::HeadBlock.new(pairs(fields)), fields, head, block.first, block.prefix, block.request)
+    end
+
+    # The frames of a head gori AUTHORS on this direction — a short-circuit stub's answer
+    # (#1635). No latch: the encoder never inserts into or reads the dynamic table, so the block
+    # leaves the far decoder's table exactly as it found it and may go out between any two of
+    # the peer's own blocks.
+    def authored(stream_id : UInt32, fields : Array(HPACK::Field), end_stream : Bool) : Array(Frame::Header)
+      first = Frame::Header.new(Frame::Type::Headers.value, end_stream ? Frame::END_STREAM : 0_u8, stream_id, Bytes.empty)
+      reframe(first, Bytes.empty, @encoder.encode(fields))
     end
 
     # The bare host a rule's glob is matched against for this block's stream.
@@ -387,17 +389,17 @@ module Gori::Proxy::H2
         alt_svc_stripped = true
       end
       # `head_text` synthesizes the whole h1-equivalent head, and nothing reads it unless a rule
-      # seam, the intercept gate or `notice_unreachable` will: `Block#head` is the text a human
+      # seam or the intercept gate will: `Block#head` is the text a human
       # edits. Gated because the response pipeline is now built even with no rewriter (see
       # `Relay#pump_plain`), and a rules-less connection must not pay a synthesis per response
       # for a value with no consumer.
-      head = if @rewriter || @deferrer || (request && @extractor)
+      head = if @rewriter || @deferrer
                head_text(fields, first, request)
              end
       # Before the rewrite, and NOT from inside it: what this announces is a seam the relay
       # cannot reach at all, which is true whether or not a head rule is live. Running it from
-      # `rewrite` put it behind `rw.active?`, so an operator whose only rule is a session-binding
-      # extract descriptor — the case #536 is about — got nothing.
+      # `rewrite` put it behind `rw.active?`, so an operator whose only rule is a body or stub rule
+      # got nothing.
       notice_unreachable(fields) if request && head
       # Never an interim 1xx, as on HTTP/1.1 (`client_conn.cr#skip_interim_responses`: "no
       # rewrite on interim"): the flow keeps only the final head, so a rule's change to a 103 is
@@ -724,7 +726,7 @@ module Gori::Proxy::H2
     #
     # Enforcement is right in both — a rule this relay cannot run must not half-fire — so what
     # is wrong is only that it is SILENT: the operator sees a request they stubbed reach the
-    # origin, or `$SESSION` never bind, with nothing anywhere saying why.
+    # origin, or a body go out unrewritten, with nothing anywhere saying why.
     private def notice_unreachable(fields : Array(HPACK::Field)) : Nil
       host = request_host(fields)
       if host.compare(@host, case_insensitive: true) == 0
@@ -745,7 +747,7 @@ module Gori::Proxy::H2
     # authority goes unapplied where the pre-#526 blanket downgrade would have caught it.
     #
     # One line per connection, naming the authority, the connection host, and WHICH KIND of rule
-    # was skipped — three kinds share this notice and they fail differently, so a line that did
+    # was skipped — two kinds share this notice and they fail differently, so a line that did
     # not name them would send the operator to the wrong rule table (#536).
     private def notice_coalesced(host : String) : Nil
       return if @warned_coalesced
@@ -755,22 +757,22 @@ module Gori::Proxy::H2
       ::Log.warn do
         "h2 #{@direction}: stream authority #{host.inspect} is not the CONNECT host " \
         "#{@host.inspect} (RFC 9113 §9.1.1 coalescing), and it is matched by rules this relay " \
-        "cannot apply: #{kinds.join(", ")}. The connection was not downgraded because no such " \
-        "rule matches #{@host.inspect}, so they do not fire on this stream. Reach this host on " \
+        "cannot apply: #{kinds.join(", ")}. The connection does not run the rule path because no " \
+        "such rule matches #{@host.inspect}, so they do not fire on this stream. Reach this host on " \
         "its own connection to have them apply."
       end
     end
 
-    # The same three unreachable kinds, on the ORDINARY stream — the one whose authority IS the
+    # The same unreachable kinds, on the ORDINARY stream — the one whose authority IS the
     # CONNECT host. The gate that would have taken this host down to h1 ran once, inside CONNECT,
-    # but the rule tables are live-mutated in place, so a body / short-circuit / body-scoped
-    # extract rule enabled afterwards reaches nothing on this connection until the client opens a
+    # but the rule tables are live-mutated in place, so a body or short-circuit rule enabled
+    # afterwards reaches nothing on this connection until the client opens a
     # new one. Spoken once per connection; the relay is not downgraded or GOAWAYed (#730).
     #
     # DO NOT LATCH THE NEGATIVE. This is reached on every request head until it has something to
     # say, and that is the point — a rule can go live at any moment, so remembering "nothing
-    # matched" re-opens the window this closes. The cost is bounded by the three predicates'
-    # lock-free atomic counts: a connection with no such rule anywhere pays three atomic loads
+    # matched" re-opens the window this closes. The cost is bounded by the two predicates'
+    # lock-free atomic counts: a connection with no such rule anywhere pays two atomic loads
     # per head. While one exists on some OTHER host the count is non-zero and each head takes the
     # lock, for the life of the connection. Only a line actually written is latched.
     private def notice_live_rule(host : String) : Nil
@@ -780,8 +782,8 @@ module Gori::Proxy::H2
       @warned_live_rule = true
       ::Log.warn do
         "h2 #{@direction}: #{kinds.join(", ")} now matches #{host.inspect}, but this HTTP/2 " \
-        "connection was already open when it went live. What lets such a rule run (the body-rule " \
-        "path, or the HTTP/1.1 downgrade) is decided once per CONNECT, so it fires on nothing " \
+        "connection was already open when it went live. What lets such a rule run (the relay's " \
+        "rule path) is decided once per CONNECT, so it fires on nothing " \
         "carried by this connection. Open a new connection to this host to have it apply. " \
         "(Match&Replace HEAD rules are not affected — they run on this relay from the next " \
         "request head.)"
@@ -796,14 +798,10 @@ module Gori::Proxy::H2
       kinds = [] of String
       if rw = @rewriter
         kinds << "a Match&Replace BODY rule" if !@body_rules && rw.rewrites_body_for_host?(host)
-        kinds << "a Match&Replace SHORT-CIRCUIT rule" if rw.short_circuits_for_host?(host)
+        kinds << "a Match&Replace SHORT-CIRCUIT rule" if !@body_rules && rw.short_circuits_for_host?(host)
       end
-      # Head-scoped extraction is deliberately absent: `H2::Extract` reads the response head on
-      # this relay and scopes it on the stream's own request, so a cookie/header descriptor is
-      # applied correctly on a coalesced stream and has nothing to announce.
-      if @extractor.try(&.extracts_body_for_host?(host))
-        kinds << "a session-binding EXTRACT rule that reads the response body"
-      end
+      # Extraction is deliberately absent: `H2::Extract` reads the response head, and the body
+      # it was delivered with (#1635), on every connection, scoped on the stream's own request.
       kinds
     end
 

@@ -185,6 +185,11 @@ module Gori::Proxy::H2
       # capture printer event must wait until END_STREAM/RST/connection close flushes frames.
       property? websocket_accepted = false
       property? tunnel_completion_notified = false
+      # The rule that answered this request in gori's place (#1635), nil on every stream the
+      # origin answered. h1's `short_circuited` + `source_ref` pair.
+      property stub_ref : String? = nil
+      # Why that stub could not answer as authored (gori's 502), h1's flow error for it.
+      property stub_error : String? = nil
 
       # Record an advisory once; the same sentence from two producers is one line.
       def advise(text : String) : Nil
@@ -354,6 +359,16 @@ module Gori::Proxy::H2
         else
           stream.resp_rewrite = merged
         end
+      end
+    end
+
+    # A short-circuit rule answered `stream_id` (#1635): the request is projected as one the
+    # origin never saw, and `ref` names the rule as h1's `source_ref` does.
+    def note_short_circuit(stream_id : UInt32, ref : String, error : String? = nil) : Nil
+      @mutex.synchronize do
+        next unless stream = open_entry(stream_id)
+        stream.stub_ref = ref
+        stream.stub_error = error
       end
     end
 
@@ -794,7 +809,8 @@ module Gori::Proxy::H2
         body_truncated: cap.truncated?, body_size: cap.total,
         h2_conn_id: @conn_id, h2_stream_id: stream_id.to_i64,
         advisory: advisory_of(stream), connect_protocol: protocol,
-        source: FlowSource::Kind::Proxy, intercept_original: stream.intercept_original)
+        source: FlowSource::Kind::Proxy, intercept_original: stream.intercept_original,
+        short_circuited: !stream.stub_ref.nil?, source_ref: stream.stub_ref.try(&.presence))
       captured.rewrite = stream.req_rewrite
       stream.flow_id = @sink.on_request(captured)
     end
@@ -817,12 +833,14 @@ module Gori::Proxy::H2
                       "before this response; gori stopped counting them there")
       end
       now = Time.instant
-      duration_us = (now - stream.started_at).total_microseconds.to_i64
-      ttfb_us = stream.resp_first_at.try { |t| (t - stream.started_at).total_microseconds.to_i64 }
+      # A stub had no round trip to measure; h1 leaves both nil for the same reason.
+      stubbed = !stream.stub_ref.nil?
+      duration_us = (now - stream.started_at).total_microseconds.to_i64 unless stubbed
+      ttfb_us = stream.resp_first_at.try { |t| (t - stream.started_at).total_microseconds.to_i64 } unless stubbed
       captured = Store::CapturedResponse.new(
         flow_id: flow_id, status: status, head: head, body: body,
         body_truncated: cap.truncated?, body_size: cap.total,
-        content_type: content_type, content_encoding: content_encoding, state: state, error: error,
+        content_type: content_type, content_encoding: content_encoding, state: state, error: error || stream.stub_error,
         ttfb_us: ttfb_us, duration_us: duration_us, advisory: advisory_of(stream),
         interims: stream.resp.interims)
       captured.rewrite = stream.resp_rewrite

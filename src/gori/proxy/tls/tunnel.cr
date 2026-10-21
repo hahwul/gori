@@ -411,9 +411,8 @@ module Gori::Proxy::Tls
     end
 
     # Whether this host may take the fast h2 relay at all. FALSE — forcing HTTP/1.1, the
-    # ClientConn path — when HTTP/2 is switched off, or a Match&Replace SHORT-CIRCUIT rule is
-    # live FOR THIS HOST, or a session-binding extract rule reads the response BODY for it. Anything else is a candidate, subject to the origin actually speaking h2 (see
-    # reflect_origin_h2). Placing the check here also means a downgrade skips the origin ALPN
+    # ClientConn path — only when HTTP/2 is switched off. Anything else is a candidate, subject
+    # to the origin actually speaking h2 (see reflect_origin_h2). Placing the check here also means a downgrade skips the origin ALPN
     # probe entirely: reflect_origin_h2 consults this before dialing.
     #
     # A downgrade is never free, which is why what remains is only what is still REQUIRED.
@@ -432,7 +431,10 @@ module Gori::Proxy::Tls
     # buffered-body rewrite lives. Dropping it outright would have regressed body rules from
     # working to silently not working. #1628 then took the body term out: the relay rewrites a
     # body itself now (`H2::StreamGate`'s `body_rule.cr`), and `Relay#gates` asks this same
-    # host-scoped question to decide whether a connection runs that path at all.
+    # host-scoped question to decide whether a connection runs that path at all. #1635 took out
+    # the last two rule terms the same way: the relay answers a SHORT-CIRCUIT stub on the client
+    # leg (`stub.cr`, on that same path) and copies the delivered body for a BODY-scoped extract
+    # rule (`H2::Extract`), so neither costs a host its protocol any more.
     #
     # The INTERCEPT gate came out in step 3, which made the hold reachable per stream
     # (`H2::StreamGate`). `intercepts_host?` is not consulted by
@@ -456,17 +458,18 @@ module Gori::Proxy::Tls
     #
     # ## What #526 narrowed, and what that costs
     #
-    # Both remaining rewriter terms were HOST-BLIND: they read a global atomic count, so ONE
+    # Both rewriter terms (body, short-circuit) were HOST-BLIND: they read a global atomic count, so ONE
     # rule scoped to `alpha.test` downgraded every h2 host on the proxy, including hosts its
     # own glob can never match. That is the same shape step 2 fixed for head rules — a gate
     # true for something it is not protecting — and it took the same remedy: narrow, don't
     # remove. `rewrites_body_for_host?` / `short_circuits_for_host?` (`rules.cr`) keep the
-    # atomic counts as a lock-free fast path and then ask the host glob. An UNSCOPED rule
-    # matches every host and still downgrades everything, exactly as before.
+    # atomic counts as a lock-free fast path and then ask the host glob — the question
+    # `Relay#gates` still asks to decide whether a connection runs the rule path.
     #
     # The cost is a stream whose `:authority` is NOT the CONNECT host (§9.1.1 coalescing):
     # such a stream can now carry a rule this per-connection gate never saw, where the blanket
-    # downgrade caught it. gori's leaf certs carry a SAN of exactly the requested host
+    # downgrade caught it (and that the rule path, decided per connection, now has to have been
+    # switched on by a rule matching the CONNECT host). gori's leaf certs carry a SAN of exactly the requested host
     # (`cert_builder.cr`), so a conformant client cannot coalesce onto one and the case needs a
     # hand-rolled peer — but it is not impossible, so it is not left silent: `H2::HeadRewrite`
     # already computes the per-stream authority for rule scoping and logs once per connection
@@ -480,33 +483,6 @@ module Gori::Proxy::Tls
         notice_downgrade(host, "HTTP/2 is switched off (settings network.http2; set it back to " \
                                "\"auto\" to keep h2)")
         return Proxy::H2Offer::DisabledBySetting
-      end
-      # A SHORT-CIRCUIT rule (#511) earns the downgrade: `HeadRewriter#short_circuit` is
-      # consulted in `ClientConn#handle_request`, and the h2 relay never asks. Unlike the sandbox this IS a seam, so an unreachable one lets traffic
-      # through rather than blocking it — but that is precisely the failure, because the rule's
-      # whole purpose is that the request must NOT reach the origin. Left ungated, an operator
-      # who stubbed an endpoint would watch an h2 host send the request anyway, with nothing
-      # anywhere saying why.
-      if @rewriter.try(&.short_circuits_for_host?(host))
-        notice_downgrade(host, "a Match&Replace short-circuit rule is live and the h2 relay " \
-                               "cannot answer a request locally (disable the stub rule to keep h2)")
-        return Proxy::H2Offer::ShortCircuitRule
-      end
-      # A BODY-scoped session-binding extract rule (#501 slice 2) earns the downgrade because it
-      # needs the response ENTITY, and the relay buffers a body only for a Match&Replace body
-      # rule (#1628), which an extract rule is not. Head-scoped extraction (cookie / header) does
-      # NOT appear here — it reads the response head, which `H2::Extract` reaches on the relay,
-      # so a `$SESSION` bound off a `Set-Cookie` costs an h2 host nothing.
-      #
-      # Host-scoped, per #526 and #531: the gate costs a host its protocol, so it must be asked
-      # about THIS host. A rule scoped to `alpha.test` downgrading `127.0.0.1` is the regression
-      # #531 fixed, and re-introducing it through a second gate would be the same bug wearing a
-      # different rule table.
-      if @extractor.try(&.extracts_body_for_host?(host))
-        notice_downgrade(host, "a session-binding extract rule reads the response BODY and body " \
-                               "extraction on HTTP/2 is not implemented yet (a cookie / header " \
-                               "descriptor works on h2 and costs nothing)")
-        return Proxy::H2Offer::ExtractRule
       end
       nil
     end

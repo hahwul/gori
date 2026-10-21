@@ -5164,3 +5164,35 @@ Refines P7's provenance axis and the #571 rule that a token with no value is lit
   conservative one. The same split follows `minimize --apply` (CLI `--apply`, MCP `apply`): it
   rewrites the seed's row, so headless it is a draft from then on, while the TUI tab, keyed on
   `flow_id`, keeps treating it as evidence.
+
+### 2026-10-21: a short-circuit stub and a body extract run on the h2 relay, and no rule downgrades a host (#1635)
+
+Refines: the 2026-10-17 #1628 entry, [P6](#p6), [P7](#p7).
+
+The last two rule terms in `Tls::Tunnel#h2_downgrade_reason` came out, and with them
+`H2Offer::ShortCircuitRule` / `ExtractRule` and the h2c refusal for a live rule. Only
+`network.http2 = off` downgrades now.
+
+- **A stub answers the stream on the client leg.** The request head is suppressed exactly as a
+  sandbox refusal suppresses one (HPACK latch, projection only), so the stream never opens
+  upstream. Its body is drained and credited back on the stream and the connection, and the
+  answer goes out at the request's END_STREAM, h1's order. The answer's HEADERS come from the
+  response gate's own encoder, which never touches the dynamic table, so that leg is not latched.
+  Its DATA is queued as an owned stream, so it is paced by the client's windows and the client's
+  credit for it repays the connection debt instead of reaching the origin. That is why a stub
+  rule switches on the #1628 rule path (`Relay#gates`), and why it needs no other machinery.
+- **A fault resets one stream, not the connection.** `close` and a released `hang` send
+  `RST_STREAM(CANCEL)`, `reset` sends `INTERNAL_ERROR`. Ending the connection was rejected: on h2
+  it would fail every unrelated stream the client multiplexes on it. Delays and hangs wait on a
+  fiber per stream with no `MAX_HELD_CONNECTIONS` cap; the origin's own concurrent-stream limit
+  bounds them.
+- **Stubbed stream ids are remembered in their own set**, evicting the lowest id past
+  `MAX_REFUSED_STREAMS`, not in `@refused`, whose ceiling ends the connection: a page polling a
+  stubbed endpoint would reach it, and a frame that late on a stream that old is not a blocking
+  gate's business.
+- **A body extract copies the delivered DATA instead of owning the stream.** Extraction reads; it
+  changes no byte. Holding delivery to END_STREAM would trade the client's latency and the whole
+  flow-control path for nothing, so `H2::Extract` keeps a copy of what `write` already sent and
+  offers head and body at END_STREAM. A padded frame, an event stream or a copy past
+  `MAX_REWRITE_BODY` (shared across the connection's copies) is offered as no body, as h1 offers
+  a streaming response.

@@ -3,20 +3,25 @@ require "./head_codec"
 require "./assembler"
 require "../extractor"
 require "../upstream"
+require "../../sse"
 
 module Gori::Proxy::H2
   # Session-binding extraction on the h2 relay (#501 slice 2).
   #
-  # ## What runs here, and what deliberately does not
+  # ## Head and body
   #
-  # HEAD-scoped descriptors only — a cookie or a header off the response head. A BODY-scoped
-  # descriptor (regex / position / jsonpath) needs the response entity, and on this relay DATA
-  # frames stream past untouched: body rewriting on h2 is #492 step 5 and does not exist. So a
-  # body-scoped extract rule earns the SAME h2→h1 downgrade a Match&Replace body rule earns
-  # (`tls/tunnel.cr#h2_candidate?`), host-scoped per #526/#531 so it costs only the hosts its
-  # own glob can match. By the time a stream reaches this file, a body-scoped rule for this
-  # host has therefore already moved the connection to `ClientConn`, and what is left here
-  # cannot need a body.
+  # A HEAD-scoped descriptor (a cookie or a header) reads the response head and runs the moment
+  # that head is delivered — unless a body-scoped rule matches the host too, in which case both
+  # run together at the end, as on h1's buffering path. A BODY-scoped one (regex / position / jsonpath) needs the entity, so
+  # for a host such a rule matches the delivered DATA is copied aside as it goes out, and the
+  # rules run once at END_STREAM over head and body together — what h1's buffering path offers
+  # them (#1635). The copy never holds anything back: frames reach the client exactly as they
+  # would with no rule live, so extraction costs the host neither its protocol nor its latency.
+  #
+  # A body gori cannot read whole is offered as no body at all, as h1 offers a streaming one:
+  # an event stream, a tunnel, a padded DATA frame (padding is `Assembler#data_block`'s to
+  # strip), or one that runs past `MAX_BODY` — a ceiling shared by every response this
+  # connection is copying (P6).
   #
   # ## Where it is called
   #
@@ -27,18 +32,30 @@ module Gori::Proxy::H2
   # the assembler by `project`, never by `write`, so it never reaches this observer.
   #
   # `pre` is non-nil on exactly the LAST frame of a decoded header block, so a DATA frame costs
-  # one nil test and a response with no rule live costs one atomic read on top of that.
+  # one nil test plus an empty-Hash test, and a response with no rule live costs one atomic read
+  # on top of that.
   #
   # One instance per direction per connection; only the "in" direction ever constructs one.
   class Extract
+    # h1's buffering ceiling for the same rule (`ClientConn::MAX_REWRITE_BODY`), here across
+    # every body this connection is copying at once.
+    MAX_BODY = Proxy::ClientConn::MAX_REWRITE_BODY
+
+    # A delivered response head waiting for its body.
+    private record Pending, head : Bytes, ref : Assembler::RequestRef, status : Int32,
+      body : IO::Memory
+
     def initialize(@extractor : Proxy::ResponseExtract, @assembler : Assembler,
                    @host : String, @port : Int32)
       @warned_unscopable = false
+      @pending = {} of UInt32 => Pending
+      @buffered = 0
     end
 
-    # Offer a delivered response head to the extract rules. `pre` is the projection the caller
-    # already decoded; nil for every frame that is not the end of a header block.
+    # Offer a delivered frame to the extract rules. `pre` is the projection the caller already
+    # decoded; nil for every frame that is not the end of a header block.
     def observe(frame : Frame::Header, pre : Assembler::HeadBlock?) : Nil
+      return collect(frame) if !@pending.empty? && @pending.has_key?(frame.stream_id)
       return unless pre
       return unless @extractor.extracts? # lock-free: nothing configured, nothing decoded
       fields = pre.fields
@@ -59,17 +76,74 @@ module Gori::Proxy::H2
         warn_unscopable(frame.stream_id)
         return
       end
-      host, port = Upstream.split_host_port(ref.authority, @port)
-      # No entity: DATA is untouched on this relay, and a body-scoped rule for this host would
-      # have downgraded the connection before it got here (see the class comment). Passing nil
-      # rather than an empty slice is what makes the observer say "there was no body" instead
-      # of "the selector found nothing".
-      @extractor.observe_response(HeadCodec.synth_response(fields), nil,
-        method: ref.method, host: host, target: ref.target, scheme: ref.scheme,
-        status: status, flow_id: @assembler.flow_id_of(frame.stream_id), port: port)
+      head = HeadCodec.synth_response(fields)
+      if copies_body?(frame, ref, fields)
+        forget_gone
+        @pending[frame.stream_id] = Pending.new(head, ref, status, IO::Memory.new)
+        return
+      end
+      # Passing nil rather than an empty slice is what makes the observer say "there was no
+      # body" instead of "the selector found nothing".
+      offer(frame.stream_id, head, ref, status, nil)
     rescue ex
       # An extract rule must never be able to break a relayed connection.
       ::Log.warn { "extract rules skipped for an h2 response: #{ex.message}" }
+    end
+
+    # Whether a body-scoped rule wants this response's body, and it is one that ends.
+    private def copies_body?(frame : Frame::Header, ref : Assembler::RequestRef,
+                             fields : Array({String, String})) : Bool
+      return false if frame.end_stream? || ref.method == "CONNECT"
+      host, _ = Upstream.split_host_port(ref.authority, @port)
+      @extractor.extracts_body_for_host?(host) &&
+        !Sse.sse?(fields.find { |(n, _)| n == "content-type" }.try(&.[1]))
+    end
+
+    # One delivered frame of a response whose body is being copied.
+    private def collect(frame : Frame::Header) : Nil
+      pending = @pending[frame.stream_id]
+      case frame.frame_type
+      when Frame::Type::Data
+        if frame.padded? || @buffered + frame.payload.size > MAX_BODY
+          return finish(frame.stream_id, nil)
+        end
+        pending.body.write(frame.payload)
+        @buffered += frame.payload.size
+        finish(frame.stream_id, pending.body.to_slice) if frame.end_stream?
+      when Frame::Type::Headers
+        # Trailers end the message when they carry END_STREAM (RFC 9113 §8.1).
+        finish(frame.stream_id, pending.body.to_slice) if frame.end_stream?
+      when Frame::Type::RstStream
+        # Cut short: offered with what was delivered, as h1 offers a truncated body.
+        finish(frame.stream_id, pending.body.to_slice)
+      end
+    rescue ex
+      ::Log.warn { "extract rules skipped for an h2 response: #{ex.message}" }
+    end
+
+    private def finish(stream_id : UInt32, body : Bytes?) : Nil
+      pending = drop(stream_id) || return
+      offer(stream_id, pending.head, pending.ref, pending.status, body)
+    end
+
+    private def drop(stream_id : UInt32) : Pending?
+      pending = @pending.delete(stream_id)
+      @buffered -= pending.body.size if pending
+      pending
+    end
+
+    # A response the CLIENT reset is never seen here (its RST_STREAM goes the other way), so its
+    # copy is let go once the assembler has forgotten the stream.
+    private def forget_gone : Nil
+      @pending.keys.each { |id| drop(id) if @assembler.request_ref(id).nil? }
+    end
+
+    private def offer(stream_id : UInt32, head : Bytes, ref : Assembler::RequestRef, status : Int32,
+                      body : Bytes?) : Nil
+      host, port = Upstream.split_host_port(ref.authority, @port)
+      @extractor.observe_response(head, body,
+        method: ref.method, host: host, target: ref.target, scheme: ref.scheme,
+        status: status, flow_id: @assembler.flow_id_of(stream_id), port: port)
     end
 
     private def warn_unscopable(stream_id : UInt32) : Nil

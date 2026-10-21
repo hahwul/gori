@@ -11,11 +11,13 @@ require "../../outbound"
 # The class body continues in `stream_gate/` — one class-reopen file per slice, the same shape
 # `repeater_view/` and `runner/` use. This file keeps the state (ivars + `initialize`), the pump
 # and hold paths, and the lock invariant they are all bound by; the slices are the blocking
-# sandbox gate (`sandbox.cr`), the body buffer + DATA re-framer (`body.cr`), and Match&Replace
-# body rules with the flow-control accounting they need (`body_rule.cr`).
+# sandbox gate (`sandbox.cr`), the body buffer + DATA re-framer (`body.cr`), Match&Replace
+# body rules with the flow-control accounting they need (`body_rule.cr`), and short-circuit
+# stubs answered on the client leg (`stub.cr`).
 require "./stream_gate/sandbox"
 require "./stream_gate/body"
 require "./stream_gate/body_rule"
+require "./stream_gate/stub"
 
 module Gori::Proxy::H2
   # One direction's writer, and the intercept + sandbox gates in front of it (#492 steps 3-4).
@@ -294,9 +296,9 @@ module Gori::Proxy::H2
       # The request direction is the one that opens streams, and the one whose deferred streams
       # the FAR leg has therefore never seen.
       @ordered = @direction == "out"
-      # This leg's receiver as gori the sender sees it, for Match&Replace body rules. nil — and
-      # every frame on the path it has always had — unless `Relay#gates` found a body rule live
-      # for this connection's host.
+      # This leg's receiver as gori the sender sees it, for Match&Replace body and stub rules.
+      # nil — and every frame on the path it has always had — unless `Relay#gates` found one
+      # live for this connection's host.
       @flow = @body_rewriter ? Flow.new : nil
       @heads.deferrer = self
     end
@@ -304,6 +306,7 @@ module Gori::Proxy::H2
     # Feed one frame off the wire. Never blocks on a human.
     def accept(frame : Frame::Header) : Nil
       run_cross(@mutex.synchronize { accept_locked(frame) })
+      answer_stubs
       run_flow
       refund_swallowed
     end
@@ -355,6 +358,8 @@ module Gori::Proxy::H2
       # refused stream is never held: there is no decision to offer a human about a request
       # that is not going anywhere.
       return true if sandbox_refuses_locked(block, opener)
+      # A stub answers before a hold could, as on h1: a request going nowhere is not held.
+      return true if stub_locked(block)
       held = plan_hold(block)
       # Rule 1 orders every request head, and a methodless opener with it (it opens an id too).
       ordered = opener || (@ordered && !block.head.nil?)
@@ -400,6 +405,7 @@ module Gori::Proxy::H2
     # A later block on a stream already deferred or owned. Owned first: a body rule's trailers
     # follow its body, not its held head.
     private def follow_locked(block : HeadRewrite::Block) : Bool
+      return stub_trailers_locked(block) if @stubbed.includes?(block.stream_id)
       return true if follow_body_locked(block)
       slot = @slots[block.stream_id]?
       return false unless slot
@@ -582,6 +588,8 @@ module Gori::Proxy::H2
           # downstream will ever credit them back, so they are counted here and refunded once
           # `accept` is out of the lock. See `refund_swallowed`.
           @swallowed += f.payload.size if f.frame_type == Frame::Type::Data
+        elsif @stubbed.includes?(f.stream_id)
+          stub_frame_locked(f)
         elsif fc && own_frame_locked(f)
           # an owned stream's DATA or reset, or a reset behind DATA waiting for the window
         elsif slot.nil?
@@ -1119,7 +1127,7 @@ module Gori::Proxy::H2
 
     # Forward one frame, then capture it, then project it — `Relay#emit`'s order, moved here so
     # a released hold and the pump write through the same lock and the same code.
-    private def write(frame : Frame::Header, pre : Assembler::HeadBlock?) : Nil
+    private def write(frame : Frame::Header, pre : Assembler::HeadBlock?, observe : Bool = true) : Nil
       @dst.write(frame.wire_bytes)
       @dst.flush
       @flow.try { |fc| note_written(fc, frame) }
@@ -1131,7 +1139,7 @@ module Gori::Proxy::H2
       #
       # BEFORE `feed`, and see `Relay#emit` for why: a bodiless response head completes the
       # exchange inside `feed`, which deletes the stream the extractor needs to scope on.
-      @extract.try(&.observe(frame, pre))
+      @extract.try(&.observe(frame, pre)) if observe
       @assembler.feed(@direction, frame, pre)
     end
 
@@ -1221,7 +1229,8 @@ module Gori::Proxy::H2
     #
     # Connection level only (stream 0). The stream itself is refused or dropped and its own
     # window dies with it; it is the shared one that wedges the connection. A body rule's
-    # stream (`body_rule.cr`) is the exception: it lives on, so its stream credit goes back too.
+    # stream (`body_rule.cr`) and a stubbed one still uploading (`stub.cr`) are the exceptions:
+    # they live on, so their stream credit goes back too.
     #
     # Written on the PEER's leg, because that is the one facing the sender — the same
     # `@peer` seam `write_cross_rst` uses, and with `@mutex` released for the same reason.

@@ -26,9 +26,8 @@ module Gori::Proxy
   # descriptor (cookie / header) reads the parsed head, which every response already has; a
   # body-scoped one (regex / position / jsonpath) needs the entity, which means buffering a
   # response that would otherwise stream. ClientConn uses it for
-  # each response on a multi-host HTTP/1 connection; the h2 downgrade gate uses it for the
-  # CONNECT host. A body-scoped extraction needs the entity in hand, so it earns the same
-  # downgrade to HTTP/1.1 only for hosts its glob can actually match. Downgrading a host no rule
+  # each response on a multi-host HTTP/1 connection; `H2::Extract` uses it per response to
+  # decide whether to copy the delivered body aside (#1635). Buffering for a host no rule
   # matches is the regression #531 fixed.
   module ResponseExtract
   end

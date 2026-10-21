@@ -4,7 +4,9 @@ require "socket"
 require "openssl"
 require "file_utils"
 
-# The h2 downgrade gate, narrowed to the host a rule can actually match (#526).
+# The h2 downgrade gate, narrowed to the host a rule can actually match (#526). Since #1628 and
+# #1635 the same host-scoped question decides only whether a connection runs the relay's rule
+# path; no rule downgrades a host any more.
 #
 # Before this, `Tls::Tunnel#h2_candidate?` asked two HOST-BLIND questions — "is any body rule
 # live", "is any short-circuit rule live" — both of which read a global atomic count. One rule
@@ -135,9 +137,9 @@ private def with_gate_bindings(&)
 end
 
 private def gate_pipe(rewriter : Gori::Proxy::HeadRewriter?,
-                      extractor : Gori::Proxy::ResponseExtract? = nil) : {Gori::Proxy::H2::HeadRewrite, Gori::Proxy::H2::Assembler}
+                      rule_path : Bool = false) : {Gori::Proxy::H2::HeadRewrite, Gori::Proxy::H2::Assembler}
   assembler = Gori::Proxy::H2::Assembler.new(GateSink.new, "api.example.com", 443)
-  {Gori::Proxy::H2::HeadRewrite.new("out", rewriter, assembler, "api.example.com", extractor), assembler}
+  {Gori::Proxy::H2::HeadRewrite.new("out", rewriter, assembler, "api.example.com", rule_path), assembler}
 end
 
 private def feed_authority(pipe : Gori::Proxy::H2::HeadRewrite,
@@ -228,30 +230,15 @@ describe "h2 downgrade gate, host-scoped (#526)" do
       end
     end
 
-    it "keeps h2 for a host a SHORT-CIRCUIT rule cannot match, and downgrades the host it can" do
-      with_gate_rules do |rules|
-        rules.add(SCOPED_REQ, SCOPED_HEAD, "/admin", "403 Forbidden", op: SCOPED_SC, host: "alpha.test")
-        alpn_through_proxy(rules, "stub-scoped-away") do |negotiated, accepts|
-          negotiated.should eq("h2")
-          accepts.should eq(1)
-        end
-      end
-
-      with_gate_rules do |rules|
-        rules.add(SCOPED_REQ, SCOPED_HEAD, "/admin", "403 Forbidden", op: SCOPED_SC, host: "localhost")
-        alpn_through_proxy(rules, "stub-scoped-here") do |negotiated, accepts|
-          negotiated.should_not eq("h2")
-          accepts.should eq(0)
-        end
-      end
-    end
-
-    it "still downgrades EVERY host for an unscoped short-circuit rule (the regression guard)" do
-      with_gate_rules do |rules|
-        rules.add(SCOPED_REQ, SCOPED_HEAD, "/admin", "403 Forbidden", op: SCOPED_SC)
-        alpn_through_proxy(rules, "stub-unscoped") do |negotiated, accepts|
-          negotiated.should_not eq("h2")
-          accepts.should eq(0)
+    # Nor does a SHORT-CIRCUIT rule (#1635): the relay answers the stub on the client leg.
+    it "keeps h2 for every host a SHORT-CIRCUIT rule could match (#1635)" do
+      {"alpha.test", "localhost", ""}.each do |glob|
+        with_gate_rules do |rules|
+          rules.add(SCOPED_REQ, SCOPED_HEAD, "/admin", "403 Forbidden", op: SCOPED_SC, host: glob)
+          alpn_through_proxy(rules, "stub-#{glob.empty? ? "unscoped" : glob}") do |negotiated, accepts|
+            negotiated.should eq("h2")
+            accepts.should eq(1)
+          end
         end
       end
     end
@@ -314,30 +301,13 @@ describe "h2 downgrade gate, host-scoped (#526)" do
       end
     end
 
-    # #536: a body-scoped session-binding extract rule (#501 slice 2) is host-scoped through the
-    # same gate and unreachable on this relay for the same reason, so it belongs in this notice.
-    it "names a body-scoped EXTRACT rule that the connection gate never saw" do
-      with_gate_bindings do |rules, bindings|
-        bindings.add("SESSION", "", Gori::ExtractKind::Regex, "tok=(\\w+)", host: "alpha.test").should be_nil
-        # No Match&Replace rule at all — the rewriter is INACTIVE. Before #536 the notice ran
-        # from inside `rewrite`, behind `rw.active?`, so this case produced nothing.
-        rules.active?.should be_false
-        pipe, assembler = gate_pipe(rules, bindings)
-        Log.capture do |logs|
-          feed_authority(pipe, assembler, "alpha.test")
-          logs.check(:warn, /stream authority "alpha\.test" is not the CONNECT host "api\.example\.com"/)
-          logs.entry.message.should contain("a session-binding EXTRACT rule that reads the response body")
-          feed_authority(pipe, assembler, "alpha.test")
-          logs.empty # once per connection, same latch
-        end
-      end
-    end
-
-    it "says nothing for a HEAD-scoped extract rule — `H2::Extract` applies it on the relay" do
-      with_gate_bindings do |rules, bindings|
-        bindings.add("SESSION", "", Gori::ExtractKind::Cookie, "sid", host: "alpha.test").should be_nil
-        bindings.extracts?.should be_true # live, just not unreachable
-        pipe, assembler = gate_pipe(rules, bindings)
+    # A connection that runs the rule path answers both kinds on every stream it carries,
+    # coalesced or not (`StreamGate` asks per stream, on the stream's own authority).
+    it "says nothing on a connection that runs the rule path" do
+      with_gate_rules do |rules|
+        rules.add(SCOPED_REQ, SCOPED_BODY, "secret", "REDACTED", host: "alpha.test")
+        rules.add(SCOPED_REQ, SCOPED_HEAD, "/admin", "403 Forbidden", op: SCOPED_SC, host: "alpha.test")
+        pipe, assembler = gate_pipe(rules, rule_path: true)
         Log.capture do |logs|
           feed_authority(pipe, assembler, "alpha.test")
           logs.empty
@@ -345,10 +315,12 @@ describe "h2 downgrade gate, host-scoped (#526)" do
       end
     end
 
-    it "says nothing when the extract rule's glob cannot match the coalesced authority" do
+    # #1635: `H2::Extract` reads the delivered body on every connection, so an extract rule of
+    # any scope is never unreachable here.
+    it "says nothing for a body-scoped EXTRACT rule" do
       with_gate_bindings do |rules, bindings|
-        bindings.add("SESSION", "", Gori::ExtractKind::Regex, "tok=(\\w+)", host: "beta.test").should be_nil
-        pipe, assembler = gate_pipe(rules, bindings)
+        bindings.add("SESSION", "", Gori::ExtractKind::Regex, "tok=(\\w+)", host: "alpha.test").should be_nil
+        pipe, assembler = gate_pipe(rules)
         Log.capture do |logs|
           feed_authority(pipe, assembler, "alpha.test")
           logs.empty
@@ -357,15 +329,15 @@ describe "h2 downgrade gate, host-scoped (#526)" do
     end
 
     it "names every kind that matches, in one line" do
-      with_gate_bindings do |rules, bindings|
+      with_gate_rules do |rules|
         rules.add(SCOPED_REQ, SCOPED_BODY, "secret", "REDACTED", host: "alpha.test")
-        bindings.add("SESSION", "", Gori::ExtractKind::Regex, "tok=(\\w+)", host: "alpha.test").should be_nil
-        pipe, assembler = gate_pipe(rules, bindings)
+        rules.add(SCOPED_REQ, SCOPED_HEAD, "/admin", "403 Forbidden", op: SCOPED_SC, host: "alpha.test")
+        pipe, assembler = gate_pipe(rules)
         Log.capture do |logs|
           feed_authority(pipe, assembler, "alpha.test")
           logs.check(:warn, /stream authority "alpha\.test"/)
           logs.entry.message.should contain("a Match&Replace BODY rule")
-          logs.entry.message.should contain("a session-binding EXTRACT rule that reads the response body")
+          logs.entry.message.should contain("a Match&Replace SHORT-CIRCUIT rule")
         end
       end
     end

@@ -71,14 +71,14 @@ module Gori::Tui
     # line names a chord — the literal default here is for a registry-less render.
     def render(screen : Screen, rect : Rect, rules : Array(Store::MatchRule), sel : Int32,
                scroll : Int32, enabled_count : Int32, focus : Symbol, body_focused : Bool,
-               live : Bool, preview_input : TextArea, preview_out : ReadPane,
+               preview_input : TextArea, preview_out : ReadPane,
                target : Store::RuleTarget = Store::RuleTarget::Request, host : String = "",
                empty_hint : String = "no rules — press a to add") : Nil
       return if rect.w < 6 || rect.h < 2
       render_sub_strip(screen, rect, :rules, body_focused)
       list_r, pin_r, pout_r = layout(rect)
       render_list(screen, list_r, rules, sel, scroll, enabled_count,
-        body_focused && focus == :list, live, empty_hint)
+        body_focused && focus == :list, empty_hint)
       unless pin_r.empty?
         render_preview_input(screen, pin_r, preview_input, body_focused && focus == :preview_in, target)
         render_preview_output(screen, pout_r, preview_out, body_focused && focus == :preview_out, target, host)
@@ -247,15 +247,12 @@ module Gori::Tui
       Frame.scroll_gauge_row(body.inset(1, 1), count, mx, my)
     end
 
-    # The RULES list's own gauge: the card is `layout`'s first rect, and `live` steals its
-    # bottom row for the engine note exactly as `row_at` accounts for.
-    def rules_gauge_row_at(rect : Rect, mx : Int32, my : Int32, count : Int32, live : Bool) : Int32?
+    # The RULES list's own gauge: the card is `layout`'s first rect.
+    def rules_gauge_row_at(rect : Rect, mx : Int32, my : Int32, count : Int32) : Int32?
       list_r, _, _ = layout(rect)
       inner = list_r.inset(1, 1)
       return nil if inner.empty?
-      list_h = inner.h
-      list_h -= 1 if live && list_h > 1
-      Frame.scroll_gauge_row(Rect.new(inner.x, inner.y, inner.w, list_h), count, mx, my)
+      Frame.scroll_gauge_row(inner, count, mx, my)
     end
 
     # The sub-tab whose strip label contains (mx,my), or nil.
@@ -273,7 +270,7 @@ module Gori::Tui
 
     private def render_list(screen : Screen, rect : Rect, rules : Array(Store::MatchRule),
                             sel : Int32, scroll : Int32, enabled_count : Int32,
-                            focused : Bool, live : Bool, empty_hint : String) : Nil
+                            focused : Bool, empty_hint : String) : Nil
       return if rect.w < 6 || rect.h < 2
       Frame.card(screen, rect, "MATCH & REPLACE", bg: Theme.bg, border: Frame.pane_border(focused))
       meta = "#{enabled_count}/#{rules.size} enabled"
@@ -287,15 +284,9 @@ module Gori::Tui
       inner = rect.inset(1, 1)
       return if inner.empty?
 
-      # Rows fill the card interior. `live` (a short-circuit rule is enabled) notes its cost on
-      # the last row: body and head rules stay on h2.
+      # Rows fill the card interior.
       list_top = inner.y
       list_h = inner.h
-      if live && list_h > 1
-        note = "h2 hosts matching a short-circuit rule fall back to HTTP/1.1"
-        screen.text(inner.x, inner.bottom - 1, note, Theme.muted, Theme.bg, width: inner.w)
-        list_h -= 1
-      end
 
       if rules.empty?
         screen.text(inner.x, list_top, empty_hint, Theme.muted, Theme.bg, width: inner.w)
@@ -307,8 +298,7 @@ module Gori::Tui
         break if idx >= rules.size
         render_row(screen, inner, rules[idx], list_top + i, idx == sel, focused)
       end
-      # The gauge tracks the LIST viewport, not the whole interior — the live note below it
-      # is not a row you can scroll to. No-ops when everything fits.
+      # No-ops when everything fits.
       Frame.scroll_gauge(screen, Rect.new(inner.x, list_top, inner.w, list_h),
         rules.size, scroll, focused)
     end
@@ -417,24 +407,19 @@ module Gori::Tui
     end
 
     # Visible row count inside the list card (for scroll clamping).
-    def list_row_capacity(rect : Rect, live : Bool) : Int32
+    def list_row_capacity(rect : Rect) : Int32
       list_r, _, _ = layout(rect)
-      inner = list_r.inset(1, 1)
-      h = inner.h
-      h -= 1 if live && h > 1
-      {h, 0}.max
+      {list_r.inset(1, 1).h, 0}.max
     end
 
     # The rule index under (mx,my) in the list card.
-    def row_at(rect : Rect, mx : Int32, my : Int32, scroll : Int32, count : Int32, live : Bool) : Int32?
+    def row_at(rect : Rect, mx : Int32, my : Int32, scroll : Int32, count : Int32) : Int32?
       list_r, _, _ = layout(rect)
       return nil unless list_r.contains?(mx, my)
       inner = list_r.inset(1, 1)
       return nil if inner.empty?
-      list_h = inner.h
-      list_h -= 1 if live && list_h > 1
       i = my - inner.y
-      return nil if i < 0 || i >= list_h
+      return nil if i < 0 || i >= inner.h
       idx = scroll + i
       idx < count ? idx : nil
     end

@@ -138,25 +138,6 @@ private def with_sandbox_scope(&)
   end
 end
 
-# A rewriter whose only claim is one `h2c_refusal` asks about.
-private class StubRuleRewriter < Gori::Proxy::HeadRewriter
-  def rewrite_request(head : Bytes, host : String) : Bytes
-    head
-  end
-
-  def rewrite_response(head : Bytes, host : String) : Bytes
-    head
-  end
-
-  def short_circuits_for_host?(host : String) : Bool
-    true
-  end
-
-  def active? : Bool
-    true
-  end
-end
-
 describe "h2c via CONNECT (cleartext HTTP/2)" do
   it "relays a cleartext-h2 stream and captures it as an HTTP/2 flow" do
     ca_dir = File.tempname("gori-h2c-ca")
@@ -326,34 +307,55 @@ describe "h2c via CONNECT (cleartext HTTP/2)" do
     FileUtils.rm_rf(ca_dir) if ca_dir
   end
 
-  # The three rule gates already wrote a `gori.log` line but recorded no flow. Same refusal
-  # helper now, so History carries them too.
-  it "records the refusal when a rule the h2 relay cannot apply is live" do
+  # #1635: a live stub rule used to refuse this tunnel, because the relay could not answer
+  # locally. It answers on the client leg now, and the origin never sees the stubbed stream.
+  it "answers a short-circuit rule on the tunnel instead of refusing it" do
     ca_dir = File.tempname("gori-h2c-rule-ca")
     Dir.mkdir_p(ca_dir)
     ca = Gori::Proxy::Tls::CertAuthority.load_or_create(ca_dir)
     tunnel = Gori::Proxy::Tls::Tunnel.new(ca, verify_upstream: false)
 
-    origin = MultiH2cOrigin.new
+    origin = MultiH2cOrigin.new("h2c-ok")
     origin.start
-    sink = RecSink.new
-    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, tls: tunnel, rewriter: StubRuleRewriter.new)
-    proxy.start
+    authority = "127.0.0.1:#{origin.port}"
+    with_store do |store|
+      rules = Gori::Rules.load(store)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "/stubbed",
+        "200 OK\n\nFROM-RULE", op: Gori::Store::RuleOp::ShortCircuit).should be_true
+      sink = RecSink.new
+      proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, tls: tunnel, rewriter: rules,
+        interceptor: Gori::Interceptor.new(Gori::Scope.load(store)))
+      proxy.start
 
-    client = connect_tunnel(proxy.port, "127.0.0.1:#{origin.port}")
-    client.write(Frame::PREFACE)
-    client.flush
-    client.gets_to_end.should eq("")
-    client.close
+      client = connect_tunnel(proxy.port, authority)
+      client.write(Frame::PREFACE)
+      client.write(Frame::Header.new(Frame::Type::Settings.value, 0_u8, 0_u32, Bytes.empty).to_bytes)
+      encoder = HPACK::Encoder.new
+      client.write(h2_headers(encoder, 1_u32, authority, "/stubbed"))
+      client.write(h2_headers(encoder, 3_u32, authority, "/real"))
+      client.flush
 
-    await_response(sink)
-    proxy.stop
+      bodies = {} of UInt32 => String
+      client.read_timeout = 2.seconds
+      begin
+        loop do
+          f = Frame.read(client)
+          break if f.nil?
+          bodies[f.stream_id] = String.new(f.payload) if f.frame_type == Frame::Type::Data
+          break if bodies.size == 2
+        end
+      rescue IO::TimeoutError
+        # what did and did not arrive is the assertion
+      end
+      client.close
+      await_response(sink)
+      proxy.stop
 
-    origin.seen.should be_empty
-    sink.responses.should_not be_empty # the refusal is RECORDED, not silent
-    err = sink.responses.last.error.not_nil!
-    err.should contain("h2c CONNECT tunnel refused")
-    err.should contain("Match&Replace short-circuit rule")
+      bodies[1_u32]?.should eq("FROM-RULE")
+      bodies[3_u32]?.should eq("h2c-ok")
+      origin.seen.should eq([3_u32])
+      sink.requests.find! { |r| r.target == "/stubbed" }.short_circuited?.should be_true
+    end
   ensure
     origin.try(&.stop)
     FileUtils.rm_rf(ca_dir) if ca_dir

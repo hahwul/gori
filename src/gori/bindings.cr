@@ -740,8 +740,8 @@ module Gori
     end
 
     # Whether a BODY-scoped extract rule that can actually MATCH `host` is live (#526/#531).
-    # The response buffer and h2 downgrade gates both need the host-specific answer: an
-    # unrelated body condition must not buffer this response or cost this host its protocol.
+    # The h1 response buffer and the h2 body copy (`H2::Extract`) both need the host-specific
+    # answer: an unrelated body condition must not buffer this response.
     # Same split and atomic-count fast path as `Rules#rewrites_body_for_host?`.
     def extracts_body_for_host?(host : String) : Bool
       return false if @body_count.get == 0 # lock-free fast path

@@ -200,7 +200,7 @@ describe Gori::Tui::RewriterView do
     pane.source(["OUTMARK one", "OUTMARK two"])
     b = MemoryBackend.new(100, 30)
     v.render(Screen.new(b), rect, [] of Gori::Store::MatchRule, 0, 0, 0,
-      :preview_out, true, false, TextArea.new("GET / HTTP/1.1\r\nHost: h\r\n\r\n"), pane)
+      :preview_out, true, TextArea.new("GET / HTTP/1.1\r\nHost: h\r\n\r\n"), pane)
     b.contains?("PREVIEW OUTPUT").should be_true
     b.contains?("OUTMARK one").should be_true
 

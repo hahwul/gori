@@ -49,11 +49,10 @@ gori에는 같은 프로젝트 데이터와 엔진 모듈을 쓰는 세 진입�
 
 ## 현재 경계 {#current-boundaries}
 
-- **두 종류의 규칙은 HTTP/2를 포기하게 만들 수 있습니다.** 매칭되는 body 범위 extract
-  규칙과 short-circuit 규칙은 그 호스트의 다음 연결을 HTTP/1.1로 내립니다. 다운그레이드가
-  적용되는 동안 gRPC를 포함한 HTTP/2 전용 클라이언트는 그 호스트를 사용할 수 없습니다.
-  Match & Replace head·body 규칙, Intercept, Sandbox는 h2에 남습니다. body 규칙은 gRPC와 SSE
-  스트림을 버퍼링하지 않습니다.
+- **body·short-circuit 규칙은 HTTP/2 연결 단위로 결정됩니다.** 이제 어떤 규칙도 호스트의
+  HTTP/2를 포기하게 만들지 않지만, 연결이 body·스텁 규칙을 실행하는지는 연결이 열릴 때
+  결정됩니다. 그런 규칙이 없던 호스트에 새로 켠 규칙은 클라이언트의 다음 연결부터 적용됩니다.
+  body 규칙은 유니어리 gRPC 호출을 재작성하고 스트리밍 gRPC와 SSE는 그대로 흘려보냅니다.
 - **RFC 8441 메시지는 실시간 인터셉트·재작성이 불가합니다.** HTTP/2 WebSocket을 캡처하고
   Repeater/Fuzzer에서 다시 열지만, 메시지 단위 Intercept와 메시지 Match & Replace는
   HTTP/1.1 전용입니다. 둘 다 DATA 페이로드를 다른 길이로 다시 프레이밍해야 하고, 그것은

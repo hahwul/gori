@@ -50,11 +50,10 @@ difference.
 
 ## Current boundaries
 
-- **Two rule kinds can cost HTTP/2.** A matching body-scoped extract rule or short-circuit rule
-  forces the next connection for that host onto HTTP/1.1. An HTTP/2-only client, including gRPC,
-  cannot use that host while the downgrade applies. Match & Replace head and body rules,
-  Intercept, and the Sandbox stay on h2; a body rule rewrites a unary gRPC call
-  and lets streaming gRPC and SSE stream.
+- **Body and short-circuit rules are decided per HTTP/2 connection.** No rule kind costs a host
+  HTTP/2 any more, but whether a connection runs body and stub rules is decided when it opens,
+  so one enabled on a host with no such rule reaches it on the client's next connection. A body
+  rule rewrites a unary gRPC call and lets streaming gRPC and SSE stream.
 - **RFC 8441 messages cannot be intercepted or rewritten live.** gori captures a WebSocket over
   HTTP/2 and reopens it in Repeater/Fuzzer, but per-message Intercept and Match & Replace on
   messages are HTTP/1.1 only: both would have to reframe a DATA payload to a different length,
