@@ -139,136 +139,74 @@ module Gori
       gori QL filters captured HTTP flows:
 
         host:example.com status:>=500 method:POST   # AND is implicit (whitespace)
-        host:api AND status:5xx                     # ...and can also be spelled out
+        host:api AND status:5xx                     # ...or spelled out
         host:api OR status:5xx                      # OR
         (host:a OR host:b) -method:GET              # parentheses group
-        NOT (host:cdn OR host:static)               # NOT negates a term or a group
-        -(host:cdn OR host:static)                  # so do `-(` and `NOT(` fused to the paren
+        NOT (host:cdn OR host:static)               # NOT (or -) negates a term or group
         host:"my host"  "two words"                 # quotes keep spaces in one term
         -host:cdn login                             # negation + free-text search
 
-      AND/OR/NOT are recognised UPPERCASE and unquoted, so searching for the words
-      and/or/not still works; quote them ("AND") to force a literal. Precedence is
-      NOT > AND > OR. `-term` and `NOT term` are equivalent.
+      AND/OR/NOT count only UPPERCASE and unquoted ("AND" is a literal). Precedence NOT > AND > OR.
 
-      Fields (use : for value match, ~ for regex):
-        host path method scheme proto status size reqsize respsize dur header body ws rpc url stub rewritten static src scope cache
+      Fields (: value match, ~ regex):
+        host path method scheme proto status size reqsize respsize dur header body ws rpc url stub rewritten static src via scope cache
 
-      Sides: header: and body: search the REQUEST AND THE RESPONSE. Prefix either with `req.` or
-      `resp.` to search one side — req.body:token resp.header:set-cookie resp.body~secret\\d+ —
-      and negate as usual (-resp.body:abcd). `res.` is accepted as a synonym of `resp.`, and
-      req.size/resp.size are synonyms of reqsize/respsize. Fields that only ever have one side
-      (host, method, status, …) take no prefix.
+      Sides: header: and body: search REQUEST AND RESPONSE; prefix req. or resp. (res.) for one side —
+      req.body:token resp.header:set-cookie -resp.body:abcd. req.size/resp.size = reqsize/respsize.
 
-      Comparisons (status size reqsize respsize dur):
-        status:>=500  size:>10000  dur:>=500  dur:<2s  (dur defaults to ms; suffix ms|s)
+      Comparisons (status size reqsize respsize dur): status:>=500  size:>10000  dur:<2s (ms default; ms|s)
+      Status class: status:5xx  status:4xx
+      Protocol: proto:ws  proto:grpc  proto:sse  proto:http
 
-      Status class shorthand: status:5xx  status:4xx
+      Short-circuited: stub:true|false — responses gori fabricated from a Match&Replace short-circuit
+      rule, NO origin involved. Use stub:false before treating History as evidence.
 
-      Protocol: proto:ws  proto:grpc  proto:sse  proto:http  (ws = the 101 upgrade or an accepted
-      RFC 8441 extended CONNECT; grpc/sse by Content-Type, grpc including a Connect stream)
+      Rewritten: rewritten:true|false  rewritten:project/4  rewritten:global/3 — flows a Match&Replace
+      rule CHANGED (a bare id is ambiguous: global and project rules number independently). A flow
+      captured before gori recorded rules matches NEITHER true nor false.
 
-      Short-circuited: stub:true  stub:false  — flows gori answered ITSELF from a Match&Replace
-      short-circuit rule, with NO origin involved. Their response bytes came from the rule, not
-      from the server, so `stub:false` is what you want before treating History as evidence.
+      Static assets: static:true|false — images, fonts, audio/video by response Content-Type (else
+      path extension), 2xx/304 only; svg, JS, CSS, JSON and the like are never static.
+      `-static:true` = the hide_static lens.
 
-      Rewritten: rewritten:true  rewritten:false  rewritten:project/4  rewritten:global/3  — flows a
-      Match&Replace rule CHANGED, any rule or one by its scope and id (a rule id alone names two
-      rules: the global library and the project number theirs independently). History keeps what
-      went on each wire; the bytes the rule replaced are the flow's ORIGINAL. A rule that matched
-      and left the bytes equal is not recorded. A flow captured before gori recorded rules
-      matches NEITHER `true` nor a rule.
+      Source: src:proxy  src:repeater  src:fuzzer  src:import  …  src:gori (every gori-sent request).
+      Surface: via:tui  via:cli  via:mcp — the entry point that sent it (send_request records
+      src:repeater, so via:mcp = what the agent sent; a proxy capture has no via:).
+      CAUTION: a flow captured before gori recorded provenance matches NEITHER src: direction.
 
-      Static assets: static:true  static:false  — images, fonts and audio/video, judged by the
-      response Content-Type (image/svg+xml is NOT static: it can carry script) and, when a row has
-      no Content-Type (a 304, a pending flow), by the path's extension before `?`. Only a successful
-      fetch is static (2xx or 304): an error, a redirect or a flow with no response never is. JS,
-      CSS, source maps, JSON, archives, PDFs, octet-stream, HLS playlists and an image fetched
-      through a URL parameter (`/_next/image?url=…`, an image proxy) stay visible. Decided once,
-      when the flow is captured. `-static:true` hides the noise — the TUI's hide-static lens,
-      `--hide-static` and list_history/list_sitemap/list_params `hide_static` are that term.
+      Scope: scope:in  scope:out — the project's scope rules as a term (independent of any lens).
+      With NO scope rules, scope:in and scope:out both match nothing (and -scope:in matches all);
+      ql_explain says whether rules exist.
 
-      Source: src:proxy  src:repeater  src:fuzzer  src:import  …  src:gori — where the flow came
-      from. `proxy` is traffic a client sent through gori; every other value is a request gori
-      itself put on the wire (`src:gori` is all of them at once), and `import` is a capture read
-      out of somebody else's file. The SRC column's short tags are accepted too (src:rptr).
-      CAUTION: a flow captured before gori recorded provenance matches NEITHER direction — see
-      the caveat list.
+      Cache: cache:hit  cache:miss  cache:dynamic  cache:none — the RESPONSE HEADERS' caching signal.
+      `hit` = served from a shared cache (positive Age, X-Cache: HIT, CF-Cache-Status hit);
+      `miss` = a cache went to origin (X-Cache: MISS, X-Cache-Hits: 0); `dynamic` = declared
+      uncacheable (no-store, bare private, CF DYNAMIC); `none` = no verdict (no cache headers, or
+      neutral ones: Age: 0, field-limited private="set-cookie", a vendor value gori
+      does not recognise). Headers, not proof: confirm a hit with a no-session re-request.
 
-      Surface: via:tui  via:cli  via:mcp  — which gori entry point sent the flow, where `src:` says
-      which tool did. MCP send_request records `src:repeater`, so `via:mcp` is "what the agent
-      sent" and `src:repeater via:tui` is "what I sent by hand". A proxy capture has no surface:
-      it matches no `via:` value and `-via:mcp` keeps it.
+      WebSocket messages: ws:needle (case-insensitive substring)  ws~regex — TEXT/BINARY messages in
+      either direction; unindexed scan. -ws:x keeps flows with no matching (or no) messages.
 
-      Scope: scope:in  scope:out  — the project's scope rules (the include/exclude boundary the
-      TUI's `s` lens and `--in-scope` apply), as an ordinary term: it negates and it groups.
-      INDEPENDENT of whether that lens is switched on, because a filter term is a question, not
-      a mode. With NO scope rules configured nothing is in scope, so `scope:in` AND `scope:out`
-      both match nothing — the question is not asked rather than answered "everything". Note
-      that makes `-scope:in` (which matches everything, like any negated never-match) different
-      from `scope:out` in that one state; ql_explain says when a project has no scope rules. On
-      a surface with no project scope at all the term is DROPPED like a bad numeric, and
-      ql_explain / strict:true name it.
+      JSON-RPC / MCP: rpc:tools/call  rpc:tools/ — REQUEST body is a JSON-RPC call whose method starts
+      with the value (case-sensitive); unindexed, compressed bodies are not read.
 
-      Cache: cache:hit  cache:miss  cache:dynamic  cache:none  — what the RESPONSE HEADERS say
-      about caching, normalised to one signal. `hit` = served from a shared cache (a positive
-      `Age`, `X-Cache: HIT`, a served-from `CF-Cache-Status`) — the web-cache-deception
-      candidate; `miss` = a cache saw it but went to origin (`X-Cache: MISS`,
-      `CF-Cache-Status: MISS`, `X-Cache-Hits: 0`); `dynamic` = declared uncacheable
-      (`CF-Cache-Status: DYNAMIC`, `Cache-Control: no-store`, a bare `private`); `none` = no
-      cache verdict — no cache headers, or only neutral ones (`Age: 0`, a field-limited
-      `private="set-cookie"`, a vendor value gori does not recognise); a Pending flow is
-      `none`. Read from the stored head on read, so it names what the wire said, not what a
-      cache did — confirm a `hit` with a no-session re-request. An unknown value (cache:yes)
-      drops the term.
+      Regex (~): host~^api\\.  body~secret\\d+  path~/admin — on host path url method scheme header body
+      ws (and req./resp. header/body). Case-sensitive; (?i) folds. `~` on another QL field is DROPPED.
 
-      WebSocket messages: ws:needle  ws~regex — a flow whose socket carried a TEXT or BINARY
-      message matching, in either direction (ws: is a case-insensitive substring, ws~ a regex).
-      The stored payload bytes are searched as captured, with no index, so a ws: term scans
-      the transcript of every socket. Ping/pong/close frames and gori's own `[gori] ` notice
-      rows never match; -ws:x keeps every flow none of whose messages match, a flow with no
-      messages included.
+      body: USES A BOUNDED INDEX: only the FIRST 8 KiB of each side, and no binary or compressed body.
+      So body: can MISS content that is there. body~regex scans the stored bytes with no cap — use it
+      when body: comes back empty.
+      NEITHER READS A COMPRESSED BODY (gori stores wire bytes): body: skips it and body~ sees the
+      compressed bytes. Under NEGATION, -body:secret KEEPS every compressed response, so a "clean"
+      result has not looked. Probe custom rules decode; QL does not.
 
-      JSON-RPC / MCP: rpc:tools/call  rpc:initialize  rpc:tools/  — a flow whose REQUEST body is a
-      JSON-RPC 2.0 call whose method starts with the value (case-sensitive). It scans the stored request
-      bytes like body~, with no index, so a compressed request body is not read, and a "method" key
-      nested in params counts too.
+      Free text (no field:): substring of method, host or target (case-insensitive).
 
-      Regex (~): host~^api\\.  body~secret\\d+  path~/admin  method~^P(OST|UT)$ — on host path url
-      method scheme header body ws (and req./resp. header/body). Case-sensitive; prefix (?i) to fold.
-      A `~` on any OTHER field QL has (status size dur proto stub src scope …) is DROPPED and
-      reported like a bad numeric, not searched as text; a `~` on a name QL does not have at all
-      is free text, the whole token.
-
-      body: SEARCHES AN INDEX, AND THE INDEX IS BOUNDED. `body:` reads a trigram index that
-      covers only the FIRST 8 KiB of each side (request and response), and a body is not
-      indexed at all when its Content-Type is binary or its Content-Encoding is compressed.
-      So `body:` can return NOTHING for content that is genuinely there — deep in a large
-      body, or in a gzipped/binary one. `body~regex` scans the stored bytes instead, with no
-      cap and no content-type rule, so it is the one to reach for when `body:` comes back
-      empty and you expected a hit. (`body:` is the fast path; `body~` is the more complete one.)
-
-      NEITHER READS A COMPRESSED BODY. gori stores the WIRE form (DESIGN.md P7) and decompresses
-      only at display time, so `body:` skips a gzip/br/zstd body at index time and `body~` regexes
-      the compressed bytes. Most real response bodies are compressed, which matters most under
-      NEGATION: `-body:secret` and `-body~secret` both KEEP every compressed response, so a query
-      that comes back "clean" has not actually looked. Decode-aware matching lives on the Probe
-      custom rules (side/region + Content-Encoding decode), not here.
-      A COLOUR RULE's `body:` is the complete one: a rule has to paint the row that just
-      arrived, and the index lags capture, so create_color_rule scans the bytes instead. Same
-      language, one deliberate difference — a colour rule can paint what this query misses.
-
-      Free text (no field:): matches method, host, or target (case-insensitive substring).
-
-      Invalid syntax (e.g. status:>=foo with no numeric value) is rejected — it does NOT match all flows.
-      A mixed query (host:beta status:>=foo) silently drops only the bad comparison/field terms and
-      applies the rest (a dropped term BROADENS the result). A dropped term is treated as if it were
-      never typed, so inside NOT(...) or OR it can SHIFT what the query matches — e.g.
-      `NOT (host:x AND size:>bogus)` becomes `NOT host:x` (excludes host x), not match-all. Note the
-      further asymmetry with regex: an invalid `~` pattern is a HARD ERROR, not dropped — because a bad
-      regex would otherwise silently match NOTHING (indistinguishable from a genuinely empty result),
-      so it must be fixed or removed. Use strict:true (or ql_explain) to see exactly which terms were
-      dropped before relying on results.
+      Errors: a term with an invalid value (status:>=foo) or unknown value is DROPPED and the rest
+      applies — a dropped term BROADENS the result, and inside NOT/OR it can shift what matches
+      (NOT (host:x AND size:>bogus) = NOT host:x). An all-invalid query is rejected, not match-all.
+      An invalid `~` regex is a HARD ERROR. strict:true or ql_explain names dropped terms.
       DOC
 
     # A non-blank user query must compile to at least one clause. EMPTY means every
