@@ -45,6 +45,16 @@
 # A REQUEST with no declared length is never buffered. Nothing on the wire tells a finite
 # upload from a full-duplex stream (Connect, ndjson, a hand-rolled RPC) whose client waits for
 # the reply before it ends the request, and buffering that one to END_STREAM deadlocks it.
+#
+# ## Unary gRPC (#1637)
+#
+# Native gRPC is the exception, because its body says where a message ends: a 5-byte prefix
+# (flag, big-endian length) in front of each. Either direction is owned for ONE message: the
+# stream is given up (`spill_locked`) the moment it is anything else — compressed, a second
+# message, or a whole message whose end (END_STREAM, or a response's trailers) has not come
+# `GRPC_END_GRACE` after it. A streaming call that waits for the reply to its first message
+# costs that grace once per direction, never a deadlock. A unary one has the rules run over
+# its payload and the prefix re-framed around what they made (`run_grpc_rule`).
 class Gori::Proxy::H2::StreamGate
   # RFC 9113 §6.9.2: what a receiver allows before any SETTINGS or WINDOW_UPDATE of its own,
   # connection and stream alike.
@@ -115,6 +125,10 @@ class Gori::Proxy::H2::StreamGate
     property? spilled = false
     property? complete = false
     property? head_out = false
+    # Native gRPC, owned for one unary message (see the file comment).
+    getter? grpc : Bool
+    # When a gRPC body became one whole message whose end has not arrived (`GRPC_END_GRACE`).
+    property whole_since : Time::Instant?
     # When a held head started waiting for its body (`expire_owned_heads_locked`).
     property held_since : Time::Instant?
     # When that held head became the one a later stream open waits on (`start_wall_locked`).
@@ -127,7 +141,7 @@ class Gori::Proxy::H2::StreamGate
     # Trailers, written once `sends` has drained.
     getter after = [] of {Frame::Header, Assembler::HeadBlock?}
 
-    def initialize(@stream_id, @host, @request, @head, @declares_length, @window)
+    def initialize(@stream_id, @host, @request, @head, @declares_length, @window, @grpc)
       @sender = @window
     end
   end
@@ -143,17 +157,20 @@ class Gori::Proxy::H2::StreamGate
     return nil if block.first.end_stream? || block.first.frame_type != Frame::Type::Headers
     host = @heads.host_of(block)
     return nil unless body_rule_for?(rw, block.fields, host, block.stream_id)
-    return nil if streaming?(block.fields) || unbufferable?(block, head)
+    grpc = grpc?(block.fields)
+    return nil if (!grpc && streaming?(block.fields)) || unbufferable?(block, head)
     len = declared_body_length(block.fields)
-    return nil if @ordered && unholdable_request?(block, len)
-    Owned.new(block.stream_id, host, @ordered, head, !len.nil?, fc.initial + pre_credit)
+    return nil if @ordered && unholdable_request?(block, len, grpc)
+    Owned.new(block.stream_id, host, @ordered, head, !len.nil?, fc.initial + pre_credit, grpc)
   end
 
   # A request whose head this gate cannot hold for its body. With no declared length it may be
-  # full duplex (see the file comment); with `expect: 100-continue` the client sends no body
-  # until the origin answers a head gori would be holding, so it waits out its own timeout.
-  private def unholdable_request?(block : HeadRewrite::Block, len : Int32?) : Bool
+  # full duplex (see the file comment) — unless it is gRPC, which is owned for one message only;
+  # with `expect: 100-continue` the client sends no body until the origin answers a head gori
+  # would be holding, so it waits out its own timeout.
+  private def unholdable_request?(block : HeadRewrite::Block, len : Int32?, grpc : Bool) : Bool
     if len.nil?
+      return false if grpc
       skip_body(block.stream_id, "it declares no content-length, so it may be a stream whose " \
                                  "client waits for the reply before ending it")
       return true
@@ -228,6 +245,11 @@ class Gori::Proxy::H2::StreamGate
   # h1 (`ClientConn#apply_body_rewrite`): a `^` pattern would otherwise invent one for every
   # bodiless message.
   private def run_body_rule(rw : Proxy::HeadRewriter, own : Owned, body : Bytes) : {Bytes, Array(Store::RuleRef)}
+    return run_grpc_rule(rw, own, body) if own.grpc?
+    apply_body_rules(rw, own, body)
+  end
+
+  private def apply_body_rules(rw : Proxy::HeadRewriter, own : Owned, body : Bytes) : {Bytes, Array(Store::RuleRef)}
     hits = [] of Store::RuleRef
     rewritten = if body.empty?
                   body
@@ -251,9 +273,53 @@ class Gori::Proxy::H2::StreamGate
     end
   end
 
-  # SSE and gRPC never end on a schedule gori can wait for: a body rule leaves them streaming,
-  # as h1 leaves SSE. A gRPC body is length-prefixed frames, and a bidirectional call would wait
-  # forever for an END_STREAM its client only sends after reading the reply.
+  # One unary gRPC body: the rules run over its message's payload, never the prefix, and the
+  # prefix is re-framed around what they made. Anything but one whole plain message goes out as
+  # it arrived, and the flow says why.
+  private def run_grpc_rule(rw : Proxy::HeadRewriter, own : Owned, body : Bytes) : {Bytes, Array(Store::RuleRef)}
+    return {body, [] of Store::RuleRef} if body.empty?
+    prefix = grpc_prefix(body)
+    why = grpc_breach(prefix, body.size)
+    why ||= "it ended partway through its gRPC message" unless prefix.try(&.[1]) == body.size
+    if why
+      skip_body(own.stream_id, why)
+      return {body, [] of Store::RuleRef}
+    end
+    payload = body[5..]
+    rewritten, hits = apply_body_rules(rw, own, payload)
+    {rewritten == payload ? body : Grpc.frame(false, rewritten), hits}
+  end
+
+  # How long a whole gRPC message waits for the end of its stream before the stream is taken
+  # for a streaming call and given up. A unary peer sends the end with the message — the same
+  # frame, or the trailers right behind it — so this is only ever spent by a call that streams.
+  GRPC_END_GRACE = 100.milliseconds
+
+  # A gRPC message's 5-byte prefix: {flag, bytes the message spans with it}, or nil before all
+  # five are in.
+  private def grpc_prefix(bytes : Bytes) : {UInt8, Int64}?
+    return nil if bytes.size < 5
+    {bytes[0], 5_i64 + IO::ByteFormat::BigEndian.decode(UInt32, bytes[1, 4])}
+  end
+
+  # Why a gRPC body `size` bytes long so far cannot be one unary message, or nil while it can.
+  private def grpc_breach(prefix : {UInt8, Int64}?, size : Int32) : String?
+    flag, span = prefix || return nil
+    return "its gRPC message arrived compressed and gori never decompresses on the wire path" if flag & 0x01 != 0
+    return "its gRPC frame flag is 0x#{flag.to_s(16)}, not a plain message" if flag != 0
+    "it carries more than one gRPC message, so it is a streaming call" if size > span
+  end
+
+  # Native gRPC — not gRPC-Web, whose outcome rides in the body as a frame of its own.
+  private def grpc?(fields : Array(HPACK::Field)) : Bool
+    type = fields.find { |f| f.name == "content-type" }.try(&.value)
+    Grpc.grpc?(type) && !Grpc.web?(type)
+  end
+
+  # SSE and streaming gRPC never end on a schedule gori can wait for: a body rule leaves them
+  # streaming, as h1 leaves SSE. A bidirectional gRPC call would wait forever for an END_STREAM
+  # its client only sends after reading the reply, so native gRPC is owned one message at a
+  # time instead (`grpc_progress_locked`); gRPC-Web stays here.
   private def streaming?(fields : Array(HPACK::Field)) : Bool
     type = fields.find { |f| f.name == "content-type" }.try(&.value.downcase) || return false
     STREAMING_TYPES.any? { |prefix| type.starts_with?(prefix) }
@@ -316,8 +382,9 @@ class Gori::Proxy::H2::StreamGate
   @stall_timer = false
 
   # One timer per gate, not per held head: it sleeps until the earliest held head could have
-  # stalled, checks, and stops once no request head is held. Only a body-rule connection with a
-  # request head held for its declared length ever starts it (P6).
+  # stalled, or a whole gRPC message's grace runs out, checks, and stops once neither is left.
+  # Only a body-rule connection with a request head held for its declared length, or a gRPC
+  # message waiting for its end, ever starts it (P6).
   private def arm_stall_timer : Nil
     return if @stall_timer
     @stall_timer = true
@@ -358,10 +425,12 @@ class Gori::Proxy::H2::StreamGate
   # slow upload costs the streams behind it what a held one does — and a wall, started after
   # the timer last slept, is never due before the stall deadline it slept to.
   private def due_at(own : Owned) : Time::Instant?
+    ended = own.whole_since.try { |t| t + GRPC_END_GRACE }
     since = own.held_since
-    return nil unless since && own.slot
+    return ended unless since && own.slot
     blocked = own.blocked_since
-    {since, blocked && blocking?(own) ? blocked : since}.min + hold_wait_deadline
+    due = {since, blocked && blocking?(own) ? blocked : since}.min + hold_wait_deadline
+    ended ? {due, ended}.min : due
   end
 
   # `@opens` changed: the head first in line starts its wall if a later open now waits on it, and
@@ -390,6 +459,10 @@ class Gori::Proxy::H2::StreamGate
     secs = hold_wait_deadline.total_seconds.round(1)
     fc.owned.values.each do |own|
       next unless due?(own, now)
+      if (whole = own.whole_since) && now - whole >= GRPC_END_GRACE
+        spill_locked(fc, own, "its stream had not ended #{GRPC_END_GRACE.total_milliseconds.to_i} ms after one whole gRPC message, so it may be a streaming call")
+        next
+      end
       why = late?(own, now) ? "stopped arriving for #{secs} s while later requests waited behind it" : "was still arriving #{secs} s after a later request began waiting on it"
       spill_locked(fc, own, "its body #{why}, so its head went out with the length it declared")
     end
@@ -476,12 +549,28 @@ class Gori::Proxy::H2::StreamGate
     elsif f.end_stream?
       finish_owned_locked(fc, own)
       pump_owned_locked(fc, own)
+    elsif own.grpc?
+      grpc_progress_locked(fc, own)
+    end
+  end
+
+  # A gRPC body still arriving: given up the moment it cannot be one unary message, and given
+  # `GRPC_END_GRACE` to end once it is one whole message.
+  private def grpc_progress_locked(fc : Flow, own : Owned) : Nil
+    first = own.arrived.first.payload
+    prefix = grpc_prefix(first.size >= 5 ? first : entity_of(own))
+    if why = grpc_breach(prefix, own.size)
+      spill_locked(fc, own, why)
+    elsif prefix.try(&.[1]) == own.size
+      own.whole_since ||= Time.instant
+      arm_stall_timer
     end
   end
 
   # Give the buffer up: what arrived goes out as it arrived, and the rest follows as it comes.
   private def spill_locked(fc : Flow, own : Owned, why : String) : Nil
     own.held_since = nil
+    own.whole_since = nil
     own.blocked_since = nil
     skip_body(own.stream_id, why)
     own.spilled = true
@@ -503,14 +592,10 @@ class Gori::Proxy::H2::StreamGate
     own.complete = true
     # Done arriving: it may still wait behind a lower stream, but it has not stalled.
     own.held_since = nil
+    own.whole_since = nil
     rw = @body_rewriter
     return unless rw
-    entity = Bytes.new(own.size)
-    at = 0
-    own.arrived.each do |f|
-      f.payload.copy_to(entity + at)
-      at += f.payload.size
-    end
+    entity = entity_of(own)
     rewritten, hits = run_body_rule(rw, own, entity)
     if rewritten == entity
       own.arrived.each { |f| own.sends << {f, 0} }
@@ -526,6 +611,17 @@ class Gori::Proxy::H2::StreamGate
       slot.ready = true
       @deferred_cross.concat(drain_locked)
     end
+  end
+
+  # The body as it arrived so far, in one piece.
+  private def entity_of(own : Owned) : Bytes
+    entity = Bytes.new(own.size)
+    at = 0
+    own.arrived.each do |f|
+      f.payload.copy_to(entity + at)
+      at += f.payload.size
+    end
+    entity
   end
 
   private def late?(own : Owned, now : Time::Instant) : Bool

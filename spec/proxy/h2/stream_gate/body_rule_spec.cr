@@ -409,6 +409,11 @@ private def ok(length : Int32? = nil, type = "text/plain") : Array({String, Stri
   head
 end
 
+private def grpc_post : Array({String, String})
+  [{":method", "POST"}, {":scheme", "https"}, {":authority", "127.0.0.1"},
+   {":path", "/pkg.Svc/Ping"}, {"content-type", "application/grpc"}, {"te", "trailers"}]
+end
+
 private def echo(stream : UInt32, peer : Peer) : Answer
   {ok, "ok".to_slice, nil}
 end
@@ -731,26 +736,86 @@ describe "H2::StreamGate body rules (#1628)" do
     end
   end
 
-  # gRPC: length-prefixed messages, `te: trailers`, and the status in TRAILERS. A body rule live
-  # for the host leaves it streaming — and the connection stays h2 for it, which is the point.
-  it "keeps a gRPC exchange whole, trailers included, with a body rule live" do
+  # gRPC (#1637): length-prefixed messages, `te: trailers`, and the status in TRAILERS. A unary
+  # call has the rule run over each message's payload and the 5-byte prefix re-framed around it,
+  # on a connection that stays h2.
+  it "rewrites a unary gRPC call both ways, re-framing each message" do
     with_rules do |rules, ic|
-      rules.add(REQ, BODY, "ping", "PONG", host: "127.0.0.1")
-      rules.add(RESP, BODY, "pong", "PING", host: "127.0.0.1")
+      rules.add(REQ, BODY, "ping", "PINGED", host: "127.0.0.1")
+      rules.add(RESP, BODY, "pong", "P", host: "127.0.0.1")
       message = Bytes[0, 0, 0, 0, 4] + "ping".to_slice
       reply = Bytes[0, 0, 0, 0, 4] + "pong".to_slice
       rig = BodyRig.new(rules, ic) do |_, _|
         {[{":status", "200"}, {"content-type", "application/grpc"}], reply, [{"grpc-status", "0"}]}
       end
       begin
-        head = [{":method", "POST"}, {":scheme", "https"}, {":authority", "127.0.0.1"},
-                {":path", "/pkg.Svc/Ping"}, {"content-type", "application/grpc"}, {"te", "trailers"}]
-        rig.client.send(1_u32, head, message)
+        rig.client.send(1_u32, grpc_post, message)
+        rig.client.wait_done(1_u32).should be_true
+        origin = rig.wait_origin
+        origin.bodies[1_u32].to_slice.should eq(Bytes[0, 0, 0, 0, 6] + "PINGED".to_slice)
+        rig.client.bodies[1_u32].to_slice.should eq(Bytes[0, 0, 0, 0, 1] + "P".to_slice)
+        rig.client.trailers[1_u32].should eq([{"grpc-status", "0"}])
+        rig.sink.requests.first.rewrite.not_nil!.body.not_nil!.should eq(message)
+        (rig.client.errors + origin.errors).should be_empty
+        settled(rig.client, origin)
+      ensure
+        rig.close
+      end
+    end
+  end
+
+  it "leaves a client-streaming gRPC call as it arrived" do
+    with_rules do |rules, ic|
+      rules.add(REQ, BODY, "ping", "PONG", host: "127.0.0.1")
+      body = Bytes[0, 0, 0, 0, 4] + "ping".to_slice + Bytes[0, 0, 0, 0, 4] + "ping".to_slice
+      rig = BodyRig.new(rules, ic) { |s, p| echo(s, p) }
+      begin
+        rig.client.send(1_u32, grpc_post, body)
+        rig.client.wait_done(1_u32).should be_true
+        rig.wait_origin.bodies[1_u32].to_slice.should eq(body)
+        rig.sink.requests.first.advisory.not_nil!.should contain("more than one gRPC message")
+      ensure
+        rig.close
+      end
+    end
+  end
+
+  it "leaves a compressed gRPC message as it arrived" do
+    with_rules do |rules, ic|
+      rules.add(REQ, BODY, "ping", "PONG", host: "127.0.0.1")
+      message = Bytes[1, 0, 0, 0, 4] + "ping".to_slice
+      rig = BodyRig.new(rules, ic) { |s, p| echo(s, p) }
+      begin
+        rig.client.send(1_u32, grpc_post << {"grpc-encoding", "gzip"}, message)
         rig.client.wait_done(1_u32).should be_true
         rig.wait_origin.bodies[1_u32].to_slice.should eq(message)
-        rig.client.bodies[1_u32].to_slice.should eq(reply)
-        rig.client.trailers[1_u32].should eq([{"grpc-status", "0"}])
-        (rig.client.errors + rig.wait_origin.errors).should be_empty
+        rig.sink.requests.first.advisory.not_nil!.should contain("compressed")
+      ensure
+        rig.close
+      end
+    end
+  end
+
+  # A bidirectional call whose client sends one message and waits for the reply before ending
+  # the request: buffering it to END_STREAM would deadlock, so it goes on after the grace.
+  it "lets a gRPC message whose stream does not end go on after the grace" do
+    with_rules do |rules, ic|
+      rules.add(REQ, BODY, "ping", "PONG", host: "127.0.0.1")
+      message = Bytes[0, 0, 0, 0, 4] + "ping".to_slice
+      rig = BodyRig.new(rules, ic) { |s, p| echo(s, p) }
+      begin
+        rig.client.send_head(1_u32, grpc_post, false)
+        rig.client.send_body(1_u32, message, false)
+        origin = rig.wait_origin
+        deadline = Time.instant + 2.seconds
+        until origin.bodies[1_u32].size == message.size || Time.instant > deadline
+          sleep 5.milliseconds
+        end
+        origin.bodies[1_u32].to_slice.should eq(message)
+        rig.client.send_body(1_u32, Bytes.empty, true)
+        rig.client.wait_done(1_u32).should be_true
+        rig.sink.requests.first.advisory.not_nil!.should contain("may be a streaming call")
+        (rig.client.errors + origin.errors).should be_empty
       ensure
         rig.close
       end
