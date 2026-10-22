@@ -2,6 +2,7 @@
 # Type-checks every harness in bench/ and reports the ones that no longer compile.
 #
 # Usage: scripts/bench_check.sh   (just benchmark-check, and the CI `benchmarks` job)
+#        scripts/bench_check.sh WHAT UNIT FILE...   (how scripts/script_check.sh reuses it)
 #
 # ONE implementation with two callers on purpose. The justfile recipe is the local entry
 # point and CI runs the same script, so the two cannot drift into checking different things —
@@ -17,9 +18,13 @@ set -uo pipefail
 
 cd "$(dirname "$0")/.."
 
+[ $# -eq 0 ] && set -- "bench harnesses" harnesses bench/*.cr
+what=$1 unit=$2
+shift 2
+
 fail=0
 broken=()
-for f in bench/*.cr; do
+for f in "$@"; do
   if ! crystal build "$f" -o /dev/null --no-codegen 2>/dev/null; then
     broken+=("$f")
     fail=1
@@ -27,7 +32,7 @@ for f in bench/*.cr; do
 done
 
 if [ "$fail" -ne 0 ]; then
-  echo "bench harnesses that no longer compile:" >&2
+  echo "$what that no longer compile:" >&2
   for f in "${broken[@]}"; do
     echo "  $f" >&2
   done
@@ -36,4 +41,4 @@ if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 
-echo "all bench harnesses build ($(ls bench/*.cr | wc -l | tr -d ' ') harnesses)"
+echo "all $what build ($# $unit)"
