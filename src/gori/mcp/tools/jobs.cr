@@ -65,7 +65,7 @@ module Gori
                     j.field "kind", "authorize"
                     j.field "status", a.status.to_s
                     j.field "sent", a.sent
-                    j.field "requests_total", a.planned
+                    j.field "requests_total", a.plan.targets.size
                     j.field "requests_replayed", a.replayed
                     # The finding, on the ROW: a caller scanning its jobs must be able to see
                     # that one of them found a bypass without opening each one's results.

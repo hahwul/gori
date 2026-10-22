@@ -130,7 +130,7 @@ describe "gRPC field positions reach every fuzz surface" do
     root = File.expand_path(File.join(__DIR__, "..", ".."))
     {
       "src/gori/cli/run/fuzz.cr"    => "--field",
-      "src/gori/mcp/tools/fuzz.cr"  => "fuzz_grpc_fields",
+      "src/gori/mcp/tools/fuzz.cr"  => %(string_array_arg(h, "fields")),
       "src/gori/tui/fuzzer_view.cr" => "grpc_field_specs",
     }.each do |rel, own_input|
       src = File.read(File.join(root, rel))

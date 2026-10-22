@@ -14,7 +14,7 @@ require "../issues_export" # Issues::Export.one_line
 require "../export/curl"   # Export::Curl.fold_line?
 require "../jwt"
 require "../authorize/engine"
-# `Serialize.sensitive_header?` — the ONE predicate behind every `[REDACTED]` in the tree.
+# `Serialize.redact_head` and the MCP row serializers — the redaction `gori mcp` applies.
 # `cli/run/intercept.cr` already reaches for its `redact_head`/`redact_message_lines`: the
 # layering contract gates CORE subsystems knowing about a surface, not surface ↔ surface.
 require "../mcp/serialize"
@@ -203,7 +203,7 @@ module Gori
       # NAME rather than by running `Serialize.redact_head` over the bytes and re-parsing:
       # the stored octets are canonical and this object is a derived projection of them, so
       # the projection is what filters — re-parsing a head nothing ever sent inverts that.
-      # `Serialize.sensitive_header?` is the ONE predicate (same list `redact_head` and every
+      # `Redact.sensitive_header?` is the ONE predicate (same list `redact_head` and every
       # redacting MCP tool use); a second copy here is a second answer, and the wrong answer
       # prints a secret. Redaction keys off the DOWNCASED name, not the emitted key, because
       # the fold emits the first spelling seen — `COOKIE:` has to redact too.
@@ -262,7 +262,7 @@ module Gori
             # `strip.downcase` on a key this loop already downcased: `String#downcase` always
             # allocates, and this is a per-header, per-row loop on a streaming listing. The
             # predicate stays for its un-normalized callers.
-            sensitive = !include_sensitive && MCP::Serialize::SENSITIVE_HEADERS.includes?(name.downcase)
+            sensitive = !include_sensitive && Redact::SENSITIVE_HEADERS.includes?(name.downcase)
             redacted ||= sensitive
             if values.size == 1
               j.field name.scrub, sensitive ? "[REDACTED]" : values[0].scrub

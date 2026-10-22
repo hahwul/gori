@@ -331,7 +331,7 @@ describe "MCP authorize tools" do
         job = tools.@authorize_jobs[job_id]
         long = "http://127.0.0.1/#{"x" * 1000}"
         300.times do |i|
-          job.skipped << Gori::Authorize::Skipped.new(i.to_i64, "POST", long, :unsafe_method)
+          job.plan.skipped << Gori::Authorize::Skipped.new(i.to_i64, "POST", long, :unsafe_method)
           job.failures << {i.to_i64, long, "unsendable head"}
         end
         job.failed = 300

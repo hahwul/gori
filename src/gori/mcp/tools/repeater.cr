@@ -6,68 +6,6 @@ require "../../plural"
 module Gori
   module MCP
     class Tools
-      # The request bytes to PERSIST: the author's own, verbatim.
-      #
-      # These used to be `Env.mask_secrets(request).to_slice`, and that is a draft-time
-      # transform applied to the operator's authored test case — the P7 line. `mask_secrets`
-      # resolves against `Env.masking_vars`, which folds in `Bindings#held_values`, so an
-      # agent that typed a LIVE token had gori rewrite it to `$CTOK` **in the stored row**.
-      # No other writer does this: the TUI persists what the operator typed
-      # (`RepeaterController#save_current_repeater`) and so does `gori run repeater`.
-      #
-      # It was not merely surprising, it SPLIT the surfaces. `flow_id` survives an
-      # `update_repeater` that replaces every byte, and the TUI turns `flow_id` into
-      # `RepeaterView#evidence?` — which by design does NOT expand `$NAME` (a capture's
-      # `$filter` is a byte the origin saw, not a reference anybody wrote). So one stored row
-      # put `Authorization: Bearer $CTOK` on the wire from the TUI and the real token from
-      # MCP and the CLI, under `✓ sent → 200` on all three.
-      #
-      # Redaction is kept where it belongs: on the way OUT. Every field this tool returns to
-      # the LLM (`summary`, `target`, `name`) is still derived from a masked copy, exactly as
-      # `send_request`'s reply already separates `wire` from its masked display. What changes
-      # is that a value the AUTHOR put in a request draft is stored the way they wrote it —
-      # the same standing as an operator typing it into the TUI editor, and the same standing
-      # `flows` already gives it for captured traffic. `bindings.cr`'s redaction guarantee
-      # names this exception alongside the capture one.
-      private def stored_request(request : String) : Bytes
-        request.to_slice
-      end
-
-      # A repeater field that REACHES THE WIRE, to PERSIST: the author's own, verbatim.
-      #
-      # `target` and `sni` used to go through `Env.mask_secrets` on the way in, justified as
-      # "short author-typed fields with no wire semantics of their own … re-expanded
-      # identically by every surface". Half of that is true and the half that is not destroys
-      # the value:
-      #
-      #   * **They have wire semantics.** `sni` IS the TLS `server_name` extension — the field
-      #     a vhost-confusion, certificate-routing or CDN-origin test exists to control — and
-      #     `target` is the dial tuple, which also supplies the ClientHello ServerName whenever
-      #     `sni` is absent. Neither is a label.
-      #   * **The two ends do not share a vocabulary.** Masking resolves against
-      #     `Env.masking_vars`, which folds in every session-binding value currently held
-      #     (including disabled rules); the send path resolves with `Env.effective_vars` — env
-      #     vars only — and `Repeater::Plan` additionally runs
-      #     `refuse_unresolved(Env.unresolved(s, deferred: nil))`, which refuses a declared
-      #     binding name outright. So a binding value masked into an SNI mints a `$NAME` that
-      #     can never resolve on any send path, from any surface. A one-way door.
-      #
-      # An author who typed `prod-edge-07.internal.example.com` while a rule bound `$edge` to
-      # `prod-edge-07` got `$edge.internal.example.com` in the row, every send refused, the
-      # original string unrecoverable, and a prescription ("set the env var") that would put a
-      # GUESSED hostname in the ClientHello of a vhost test. `update_repeater` re-reads and
-      # re-masks a field the caller never mentioned, so a plain RENAME destroyed an SNI the
-      # CLI had stored correctly.
-      #
-      # Same seam, same reason and same resolution as `stored_request` (round 5) and the
-      # WebSocket-frame store (round 6): a store row is a claim that those exact bytes are the
-      # author's. Redaction stays on the way OUT — `masked_target` still feeds every field
-      # this tool returns to the LLM. `name` and `tags` keep masking on the way in because
-      # they are TUI labels and never reach a socket.
-      private def wire_field(value : String) : String
-        value
-      end
-
       # Only when it FIRED. `summary` is the masked projection, so without this an author who
       # sent a live value reads a summary spelling it `$CTOK` with no statement anywhere that
       # the two are the same bytes — a silent substitution where a named report belonged.
@@ -143,7 +81,7 @@ module Gori
       #
       # Masked on the way in, unlike `target`/`sni`: a tag is a TUI caption and never reaches a
       # socket, so masking it costs nothing and keeps a secret out of a string the strip paints
-      # (see `wire_field` for the fields where that reasoning does NOT hold).
+      # (see `create_repeater` for the fields where that reasoning does NOT hold).
       private def repeater_tags_arg(h, key : String = "tags") : String?
         raw = str(h, key)
         return nil unless raw
@@ -243,6 +181,10 @@ module Gori
         j.field "head_unterminated_note", CLI::Run.unterminated_head_note
       end
 
+      # `target`, `request` and `sni` are STORED as the author wrote them, never through
+      # `Env.mask_secrets`: a masked row put `$NAME` on the wire from the TUI and the value from
+      # MCP and the CLI, and a binding value masked into an SNI minted a `$NAME` no send path can
+      # resolve. Redaction happens on the way OUT: every field returned to the LLM is masked.
       @[Tool("create_repeater", gated: true, agent_action: true, permission: "write")]
       private def create_repeater(h) : Result
         issue_id = int(h, "issue_id")
@@ -350,14 +292,13 @@ module Gori
           return Result.new("'position' out of range", is_error: true)
         end
 
-        # Masked for the REPLY only — see `stored_request` and `wire_field`. There is no
-        # `masked_sni`: this reply never carried the SNI, so that projection existed for the
-        # STORE alone, which is exactly what `wire_field` argues it must not do.
+        # Masked for the REPLY only. There is no `masked_sni`: this reply never carried the
+        # SNI, so that projection would exist for the STORE alone.
         masked_target = Env.mask_secrets(target)
         masked_request = Env.mask_secrets(request)
         # `name` is a TAB LABEL: it never reaches a socket, so masking it on the way in costs
         # nothing and keeps a secret out of a string the TUI paints. `target` and `sni` do
-        # reach one, and are stored as authored — see `wire_field`.
+        # reach one, and are stored as authored.
         name = str(h, "name").try { |n| Env.mask_secrets(n) }
         # Same standing as `name`, and readable here for the same reason the flags above are:
         # `update_repeater` has always taken `tags` and this tool did not, so a session created
@@ -387,13 +328,13 @@ module Gori
           end
 
         id = store.insert_repeater(
-          target: wire_field(target),
-          request: stored_request(request),
+          target: target,
+          request: request.to_slice,
           http2: http2,
           auto_cl: auto_cl,
           flow_id: flow_id,
           position: position.to_i32,
-          sni: sni.try { |s| wire_field(s) },
+          sni: sni,
           ws_keep_key: bool_arg(h, "ws_keep_key", false),
           ws_http_only: bool_arg(h, "ws_http_only", false),
           tls_preset: tls_preset
@@ -680,7 +621,7 @@ module Gori
           return Result.new(err, is_error: true)
         end
 
-        # Masked for the REPLY only. `target`/`sni` are stored as authored (`wire_field`) —
+        # Masked for the REPLY only. `target`/`sni` are stored as authored (`create_repeater`) —
         # this is the write that made a plain RENAME destroy them: both fall back to the
         # EXISTING row when the caller did not mention them, so re-masking here rewrote a
         # field nobody touched.
@@ -694,11 +635,11 @@ module Gori
 
         unless store.update_repeater(
                  id: id,
-                 target: wire_field(target),
-                 request: stored_request(request),
+                 target: target,
+                 request: request.to_slice,
                  http2: http2,
                  auto_cl: auto_cl,
-                 sni: sni.try { |s| wire_field(s) },
+                 sni: sni,
                  ws_keep_key: ws_keep_key,
                  ws_http_only: ws_http_only,
                  tls_preset: tls_preset
@@ -1020,8 +961,8 @@ module Gori
 
           seed = seed_from_flow(flow, fid, keep_request_line, seed_ws_messages: true)
           id = store.insert_repeater(
-            target: wire_field(seed.target),
-            request: stored_request(seed.request),
+            target: seed.target,
+            request: seed.request.to_slice,
             http2: seed.http2,
             auto_cl: true,
             flow_id: fid,

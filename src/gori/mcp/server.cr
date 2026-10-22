@@ -1173,42 +1173,30 @@ module Gori
       # valid JSON text; `JSON.parse` built a whole JSON::Any tree of it only to serialise
       # that tree straight back out, which on a large list_history/fuzz_results answer is
       # megabytes of garbage per call — on a server that lives for the whole session and
-      # whose peak memory is what an agent notices. `json_shape` validates the same thing a
-      # parse did (nothing non-JSON may be emitted raw) without materialising any of it:
-      # measured 1.7x faster with ~3x fewer bytes allocated on a 725 KB payload.
+      # whose peak memory is what an agent notices. The pull-parser pass validates the same
+      # thing a parse did (nothing non-JSON may be emitted raw) without materialising any of
+      # it: measured 1.7x faster with ~3x fewer bytes allocated on a 725 KB payload. TRAILING
+      # bytes fail it too: `{"a":1} oops` parses a value and would otherwise be copied through
+      # verbatim, breaking the frame for every client on the connection — the one failure
+      # mode a raw copy has that a parse-and-rebuild did not.
       private def emit_structured(j : JSON::Builder, text : String) : Nil
-        case json_shape(text)
-        in JsonShape::Object then j.field("structuredContent") { j.raw(text) }
-        in JsonShape::Array  then j.field("structuredContent") { j.object { j.field("items") { j.raw(text) } } }
-        in JsonShape::Scalar then j.field("structuredContent") { j.object { j.field("value") { j.raw(text) } } }
-        in JsonShape::Invalid
-          # A plain-message tool result (no error_code, so not the error branch above):
-          # content[0].text carries it alone, exactly as before.
+        kind = begin
+          pull = JSON::PullParser.new(text)
+          first = pull.kind
+          pull.skip
+          first if pull.kind.eof?
+        rescue JSON::ParseException
         end
-      end
-
-      private enum JsonShape
-        Object
-        Array
-        Scalar
-        Invalid
-      end
-
-      # The shape of `text` as one JSON document, or Invalid when it is not one. TRAILING
-      # bytes make it Invalid too: `{"a":1} oops` parses a value and would otherwise be
-      # copied through verbatim, breaking the frame for every client on the connection —
-      # the one failure mode a raw copy has that a parse-and-rebuild did not.
-      private def json_shape(text : String) : JsonShape
-        pull = JSON::PullParser.new(text)
-        shape = case pull.kind
-                when .begin_object? then JsonShape::Object
-                when .begin_array?  then JsonShape::Array
-                else                     JsonShape::Scalar
-                end
-        pull.skip
-        pull.kind.eof? ? shape : JsonShape::Invalid
-      rescue JSON::ParseException
-        JsonShape::Invalid
+        # A plain-message tool result (no error_code, so not the error branch above):
+        # content[0].text carries it alone, exactly as before.
+        return unless kind
+        j.field("structuredContent") do
+          case kind
+          when .begin_object? then j.raw(text)
+          when .begin_array?  then j.object { j.field("items") { j.raw(text) } }
+          else                     j.object { j.field("value") { j.raw(text) } }
+          end
+        end
       end
 
       # Field of a JSON object that may be nil/non-object — never raises.

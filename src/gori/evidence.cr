@@ -186,7 +186,7 @@ module Gori
     # after the send that proved the finding, which is when the two agree.
     #
     # The request is one wire blob (`repeaters.request`, head and body together); it is
-    # split at the blank line the way MCP's `split_wire_request` splits it, tolerating a
+    # split at the blank line the way `Env.split_head_body` splits it, tolerating a
     # bare-LF head, and the head KEEPS its terminator — the shape `flows.request_head`
     # has, so the viewer and the hash treat both sources alike. The start line is read
     # leniently for the same reason, and filed as the Repeater's History row files it (#1423).

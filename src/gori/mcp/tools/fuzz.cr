@@ -664,8 +664,9 @@ module Gori
           # draft. See `Fuzz::PlanOptions#evidence?`.
           evidence: evidence,
           default_target: default_target, target: str(h, "url"),
-          auto_mark: bool_arg(h, "auto", false), marks: fuzz_marks(h),
-          grpc_fields: fuzz_grpc_fields(h), http2: use_h2,
+          auto_mark: bool_arg(h, "auto", false), marks: string_array_arg(h, "marks"),
+          # The schema-known gRPC fields to sweep, as the caller NAMED them.
+          grpc_fields: string_array_arg(h, "fields"), http2: use_h2,
           sources: fuzz_sources(h), processors: fuzz_processors(h),
           # A payload spliced into a query-string / form-body position is percent-encoded by
           # default (`Fuzz::AutoEncode`), on this surface for the same reason as on the other
@@ -989,19 +990,7 @@ module Gori
         Fuzz::Mode.parse?(s) || raise FuzzArgError.new("invalid mode '#{s}' (#{FUZZ_MODES.join("|")})")
       end
 
-      # Mirrors `fuzz_sets`'s array-pulling pattern (bare array, or a JSON-encoded
-      # string — LLM clients vary), but for plain string tokens.
-      private def fuzz_marks(h) : Array(String)
-        string_array_arg(h, "marks")
-      end
-
-      # The schema-known gRPC fields to sweep, as the caller NAMED them. Same acceptance as
-      # `marks` — an agent that sends a JSON-encoded string instead of an array is the common
-      # case, not an error — and the same parser, so the two cannot drift.
-      private def fuzz_grpc_fields(h) : Array(String)
-        string_array_arg(h, "fields")
-      end
-
+      # `marks` and `fields`: a bare array, or a JSON-encoded string of one (LLM clients vary).
       private def string_array_arg(h, key : String) : Array(String)
         arr = json_array_arg(h[key]?, key, " of strings") || return [] of String
         arr.map { |v| v.as_s? || raise FuzzArgError.new("each '#{key}' entry must be a string") }
@@ -1050,7 +1039,7 @@ module Gori
       # The processing pipeline applied to EVERY payload set (mirrors the CLI's
       # `--prefix`/`--suffix`/`--encode`/`--case`/`--hash`/`--regex-replace`, which all
       # feed one shared `processors` array applied to every source — see cli/run/fuzz.cr).
-      # Mirrors fuzz_marks/fuzz_sets's dual bare-array/JSON-encoded-string acceptance
+      # Mirrors string_array_arg's dual bare-array/JSON-encoded-string acceptance
       # (LLM clients vary in whether they send a real array or a JSON string).
       private def fuzz_processors(h) : Array(Fuzz::Processor)
         arr = json_array_arg(h["processors"]?, "processors") || return [] of Fuzz::Processor

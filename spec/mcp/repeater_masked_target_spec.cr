@@ -1,6 +1,6 @@
 require "../spec_helper"
 
-# `create_repeater`/`update_repeater` store `target` as the author wrote it (`wire_field`) and
+# `create_repeater`/`update_repeater` store `target` as the author wrote it (verbatim) and
 # project it through `Env.mask_secrets` on the way OUT. `secrets_masked` / `secrets_masked_note`
 # exist so that projection is never a SILENT substitution — but they were computed from the
 # REQUEST bytes alone, so a masking that fired on the target and nowhere else went unreported:

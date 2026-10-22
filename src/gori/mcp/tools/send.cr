@@ -906,7 +906,7 @@ module Gori
                                           h2_fields : Array({String, String})? = nil,
                                           source_ref : String? = nil,
                                           rewrite : Store::Rewrite? = nil) : Int64
-        head, body = split_wire_request(Repeater::SendPersistence.replayable_request(
+        head, body = Env.split_head_body(Repeater::SendPersistence.replayable_request(
           h2_fields, built.host, built.port, wire))
         # Field-native: `head` is the h1 PROJECTION, not the pseudo-explicit dump, so the
         # method/target COLUMNS (list_history / QL / sitemap read them) come off the FIELDS a
@@ -1082,7 +1082,7 @@ module Gori
               j.field "headers" do
                 j.array do
                   response.headers.each do |header|
-                    sensitive = sensitive_header?(header.name) && !include_sensitive_headers
+                    sensitive = Redact.sensitive_header?(header.name) && !include_sensitive_headers
                     redacted ||= sensitive
                     j.object do
                       j.field "name", Serialize.text(header.name)
@@ -1120,11 +1120,6 @@ module Gori
         return body_more_hint("flow_id: #{recorded_flow_id}") if recorded_flow_id
         return body_more_hint("repeater_id: #{repeater_id}") if repeater_id && repeater_id > 0
         nil
-      end
-
-      # One redaction policy across Flow, Repeater, and send_request responses.
-      private def sensitive_header?(name : String) : Bool
-        Serialize.sensitive_header?(name)
       end
 
       # Execute a stored WebSocket repeater from MCP. Unlike send_request, this runs

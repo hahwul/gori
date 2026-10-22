@@ -18,7 +18,7 @@ module Gori
       @[Tool("list_sitemap")]
       private def list_sitemap(h) : Result
         limit = clamp(optional_int_arg(h, "limit"), SITEMAP_LIMIT)
-        offset = (optional_int_arg(h, "offset") || 0_i64).clamp(0_i64, Int32::MAX.to_i64).to_i
+        offset = clamp_nonneg(optional_int_arg(h, "offset"))
         # `tag:` is the sitemap's own field, not QL's (`Sitemap.split_tag_terms`, the cut the TUI
         # bar and `gori run sitemap` make): only the QL half is compiled, refused or reported.
         terms = Sitemap.split_tag_terms(str(h, "query") || "")

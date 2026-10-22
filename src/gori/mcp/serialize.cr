@@ -32,17 +32,6 @@ module Gori
       OMIT_SNIFF_BYTES         = 512         # body prefix body_mode:none reads to pick `encoding`
       SAVED_SOURCE_BYTES       = 1024 * 1024 # encoded/chunk-framed input read from SQLite
 
-      # Header names whose VALUES carry credentials/session material. Redacted to
-      # [REDACTED] in read-tool output (get_flow, get_repeater_context content)
-      # unless the caller opts in with include_sensitive:true. The list lives in
-      # `Redact::SENSITIVE_HEADERS` (redact/headers.cr) so the SARIF export shares it
-      # without reaching into MCP; these are the names every MCP/CLI caller already uses.
-      SENSITIVE_HEADERS = Redact::SENSITIVE_HEADERS
-
-      def self.sensitive_header?(name : String) : Bool
-        Redact.sensitive_header?(name)
-      end
-
       # The auth schemes a credential header may carry in FRONT of its secret. Kept verbatim
       # by `env_header_shapes`, because "is the scheme already inside `$AUTH`, or do I write
       # `Bearer $AUTH`?" is precisely the question that projection exists to answer — and a
@@ -56,7 +45,7 @@ module Gori
       # `…`.
       #
       # It exists because `redact_head` cannot tell the two apart. A repeater row stores what
-      # the author typed (see `MCP::Tools#stored_request`), so a session wired to an env var
+      # the author typed (see `MCP::Tools#create_repeater`), so a session wired to an env var
       # holds the literal bytes `Authorization: Bearer $AUTH` — and `redact_head` blanks that
       # to `[REDACTED]` exactly as it blanks a live token. The operator then cannot confirm
       # which key is wired into a request without asking for `include_sensitive`, i.e. without
@@ -87,7 +76,7 @@ module Gori
           colon = line.index(':')
           next unless colon
           name = line[0...colon]
-          next unless sensitive_header?(name)
+          next unless Redact.sensitive_header?(name)
           value = line[(colon + 1)..].strip
           next if value.empty?
           masked = Env.mask_secrets(value)
@@ -221,7 +210,7 @@ module Gori
           else
             colon = line.index(0x3a_u8)
             sensitive_continuation = false
-            if colon && sensitive_header?(String.new(line[0, colon]).scrub)
+            if colon && Redact.sensitive_header?(String.new(line[0, colon]).scrub)
               # A malformed head may begin directly with Authorization/Cookie rather than a
               # request/status line. Fail closed on that header-shaped first line too.
               buffer.write(line[0, colon])
@@ -292,7 +281,7 @@ module Gori
       # the whole Bearer token, from a tool that had no `include_sensitive` argument at all.
       #
       # So the head is dropped rather than rewritten, and only when it actually carries one of
-      # `Serialize::SENSITIVE_HEADERS` — a request with nothing to withhold pages exactly as
+      # `Redact::SENSITIVE_HEADERS` — a request with nothing to withhold pages exactly as
       # before. `offset`/`total_bytes`/`next_offset` then describe the body alone, which is why
       # the omission is NAMED in the reply instead of shortening the payload silently.
       def self.drop_sensitive_head(bytes : Bytes) : {Bytes, Bool}
@@ -321,7 +310,7 @@ module Gori
         # A section past the parser's field cap is withheld whole: a field it did not lift is one
         # it cannot say is harmless.
         unless trailers.size >= Proxy::Codec::ContentDecode::MAX_TRAILERS ||
-               trailers.any? { |(name, _)| sensitive_header?(name) }
+               trailers.any? { |(name, _)| Redact.sensitive_header?(name) }
           return {bytes, false}
         end
         {bytes[0, base + at], true}
@@ -514,7 +503,7 @@ module Gori
       # `redact_head` skips line 0 (an HTTP start line) and stops at the first blank line (the
       # end of an HTTP header block). A WebSocket message has neither — it is all payload — so
       # a credential on its first line, or after a blank line inside it, would be handed back
-      # in the clear by the HTTP rule. Same `SENSITIVE_HEADERS` list, same `[REDACTED]`, same
+      # in the clear by the HTTP rule. Same `Redact::SENSITIVE_HEADERS` list, same `[REDACTED]`, same
       # line endings preserved; only the two HTTP-shaped exemptions are dropped.
       def self.redact_message_lines(text : String, include_sensitive : Bool) : String
         return text if include_sensitive || !text.includes?(':')
@@ -522,7 +511,7 @@ module Gori
           colon = line.index(':')
           next line unless colon
           name = line[0, colon]
-          next line unless sensitive_header?(name)
+          next line unless Redact.sensitive_header?(name)
           "#{name}: [REDACTED]#{"\r" if line.ends_with?('\r')}"
         end.join('\n')
       end
@@ -1817,7 +1806,7 @@ module Gori
             trailers.each do |(name, value)|
               j.object do
                 j.field "name", text(name)
-                if sensitive_header?(name) && !include_sensitive
+                if Redact.sensitive_header?(name) && !include_sensitive
                   # Base64 is encoding, not redaction: do not emit an exact alternate beside
                   # the redacted trailer value.
                   j.field "value", "[REDACTED]"

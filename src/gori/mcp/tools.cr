@@ -1277,27 +1277,6 @@ module Gori
           super(id, audit, db_path)
         end
 
-        # The selection's size, snapshotted from the plan so a status read never walks it.
-        def planned : Int32
-          @plan.targets.size
-        end
-
-        def sends_planned : Int32
-          @plan.total_sends
-        end
-
-        def skipped : Array(Authorize::Skipped)
-          @plan.skipped
-        end
-
-        def identities : Array(String)
-          @plan.identities.map(&.name)
-        end
-
-        def baseline_identity : String?
-          @plan.identities.find(&.baseline?).try(&.name)
-        end
-
         private def halt : Nil
           @stop_requested = true
         end
@@ -2112,21 +2091,6 @@ module Gori
         end
       end
 
-      # Split a wire-form request into head + body for the History row.
-      #
-      # This used to scan for `\r\n\r\n` ONLY and RAISE when it found none — which made
-      # `record_history` (default true) refuse the whole send, so a bare-LF-terminated
-      # request never reached a socket at all. That is the canonical payload `verbatim:true`
-      # exists to deliver, and the error named History while naming no way out. Recording is
-      # bookkeeping; it must never decide whether a request is sendable.
-      #
-      # `Env.split_head_body` is the shared answer: first of `\n\n` or `\r\n\r\n`,
-      # whichever comes earlier, and the whole message as the head when there is no
-      # terminator, rather than a split landing inside the body.
-      private def split_wire_request(bytes : Bytes) : {Bytes, Bytes?}
-        Env.split_head_body(bytes)
-      end
-
       # Evict the OLDEST terminal (non-:running) jobs from `jobs` so it never grows past
       # MAX_JOBS_RETAINED across a long session. Insertion order (Hash preserves it) is
       # age order, so the first removable entries are the oldest. :running jobs are kept
@@ -2542,7 +2506,7 @@ module Gori
       end
 
       # A list-of-strings argument in any shape a client sends: a real array, a JSON-ENCODED
-      # array (LLM clients stringify — `fuzz_marks` accepts the same two), or a BARE string as
+      # array (LLM clients stringify — `string_array_arg` accepts the same two), or a BARE string as
       # a one-element list, which is what a caller with a single secret reaches for and which
       # used to become an empty list and an error naming the argument it had just supplied.
       # Anything else is refused rather than silently emptied.

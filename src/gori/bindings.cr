@@ -34,7 +34,7 @@ module Gori
   # bytes: a request draft in which the OPERATOR (TUI editor, `gori run repeater`) or an
   # AGENT (MCP `create_repeater`/`update_repeater`) typed the value is stored as typed.
   # Rewriting a draft to `$NAME` is that same P7 violation one surface earlier, and it split
-  # the surfaces apart — see `MCP::Tools#stored_request`.
+  # the surfaces apart — see `MCP::Tools#create_repeater`.
   #
   # One instance is SHARED between the TUI (which edits rules and reads the table), the
   # Repeater send path (which writes it) and every send seam (which reads it), so a Mutex

@@ -14,8 +14,4 @@ describe "Gori::Redact.sensitive_header?" do
       Gori::Redact.sensitive_header?(n).should be_false
     end
   end
-
-  it "is the list MCP::Serialize redacts with" do
-    Gori::MCP::Serialize::SENSITIVE_HEADERS.should eq(Gori::Redact::SENSITIVE_HEADERS)
-  end
 end

@@ -172,12 +172,12 @@ module Gori
           j.object do
             j.field "job_id", ajob.id
             j.field "status", ajob.status.to_s
-            j.field "requests_total", ajob.planned
+            j.field "requests_total", ajob.plan.targets.size
             j.field "requests_replayed", ajob.replayed
             # Minus the flows that could not be replayed at all: they are not still coming,
             # and a `remaining` that never reaches zero reads as a job that never finished.
-            j.field "requests_remaining", {0, ajob.planned - ajob.replayed - ajob.failed}.max
-            j.field "sends_planned", ajob.sends_planned
+            j.field "requests_remaining", {0, ajob.plan.targets.size - ajob.replayed - ajob.failed}.max
+            j.field "sends_planned", ajob.plan.total_sends
             j.field "sent", ajob.sent
             j.field "errors", ajob.errors
             # Refused before the socket (Sandbox / an EXCLUDE rule), NOT counted as a finding.
@@ -191,7 +191,7 @@ module Gori
             j.field "job_complete", ajob.status != :running
             j.field "incomplete_reason", incomplete_reason(ajob.status)
             j.field "error", Serialize.text(ajob.error_msg)
-            used = emit_authorize_skipped(j, ajob.skipped)
+            used = emit_authorize_skipped(j, ajob.plan.skipped)
             emit_authorize_failures(j, ajob, used)
             emit_audit(j, ajob.audit, ajob.ended_at_ms)
           end
@@ -239,7 +239,7 @@ module Gori
             j.field "incomplete_reason", incomplete_reason(ajob.status)
             j.field "results_truncated", ajob.truncated?
             j.field "error", Serialize.text(ajob.error_msg)
-            used = emit_authorize_skipped(j, ajob.skipped, used)
+            used = emit_authorize_skipped(j, ajob.plan.skipped, used)
             emit_authorize_failures(j, ajob, used)
           end
         end)
@@ -358,7 +358,7 @@ module Gori
           return "nothing was replayed — #{ajob.failed} selected flow#{ajob.failed == 1 ? "" : "s"} could " \
                  "not be replayed at all (see `failed`)#{tail}"
         end
-        "nothing was replayed#{ajob.skipped.empty? ? "" : " — every selected flow was skipped"}#{tail}"
+        "nothing was replayed#{ajob.plan.skipped.empty? ? "" : " — every selected flow was skipped"}#{tail}"
       end
 
       # The bypasses alone, flat and complete (never paged) — the rows worth acting on, so a
@@ -447,8 +447,8 @@ module Gori
       end
 
       private def emit_authorize_identities(j : JSON::Builder, ajob : AuthorizeJob) : Nil
-        j.field("identities") { j.array { ajob.identities.each { |n| j.string Serialize.text(n) } } }
-        j.field "baseline_identity", Serialize.text(ajob.baseline_identity)
+        j.field("identities") { j.array { ajob.plan.identities.each { |i| j.string Serialize.text(i.name) } } }
+        j.field "baseline_identity", Serialize.text(ajob.plan.identities.find(&.baseline?).try(&.name))
       end
 
       # --- plan construction ---------------------------------------------------

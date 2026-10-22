@@ -983,7 +983,7 @@ module Gori
           pos = store.next_repeater_position
 
           # The REQUEST, the TARGET and the SNI are all stored as authored. Same seam and same
-          # reason as `MCP::Tools#stored_request`: `mask_secrets` here rewrote an author's live
+          # reason as `MCP::Tools#create_repeater`: `mask_secrets` here rewrote an author's live
           # value — or, on `--flow`, a CAPTURE's own bytes — to `$KEY` in the stored row, and
           # the TUI then read that row through `RepeaterView#evidence?`, which does not expand
           # `$NAME`. One row, `$KEY` on the wire from the TUI and the value from here.
@@ -995,7 +995,7 @@ module Gori
           # path resolves with `Env.effective_vars` and refuses a declared binding name
           # outright — so a binding value masked in here mints a `$NAME` no surface can ever
           # resolve, and the operator's string is gone. `--sni` was already stored verbatim;
-          # this makes the two agree. See `MCP::Tools#wire_field`, which argues it at length.
+          # this makes the two agree.
           id = store.insert_repeater(
             target: tgt_str,
             request: req_content.to_slice,

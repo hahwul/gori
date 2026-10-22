@@ -670,7 +670,7 @@ module Gori
             if head_omitted
               j.field "head_omitted", true
               j.field "head_omitted_note",
-                "the request head carries a sensitive header (#{Serialize::SENSITIVE_HEADERS.to_a.sort.join(", ")}) " \
+                "the request head carries a sensitive header (#{Redact::SENSITIVE_HEADERS.to_a.sort.join(", ")}) " \
                 "and this tool pages the EXACT stored bytes, which cannot be redacted and stay bytes — the range " \
                 "below is the body alone. Pass include_sensitive:true to page the head too, or read it redacted " \
                 "from get_flow / get_repeater_context"
