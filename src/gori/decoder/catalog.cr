@@ -80,19 +80,19 @@ module Gori::Decoder
       category: Category::Encoding, description: "Ascii85 decode") { |s| Codecs.ascii85_decode(s) }
 
     r.register encode("base58-encode", "base58", "b58",
-      category: Category::Encoding, description: "Base58 encode (Bitcoin alphabet)") { |b| Codecs.base58_encode(b) }
+      category: Category::Encoding, description: "Base58 encode (Bitcoin alphabet)") { |b| Codecs.base_x_encode(b, Codecs::B58, "base58", Codecs::B58_MAX_IN) }
     r.register decode("base58-decode", "unbase58",
-      category: Category::Encoding, description: "Base58 decode (Bitcoin alphabet)") { |s| Codecs.base58_decode(s) }
+      category: Category::Encoding, description: "Base58 decode (Bitcoin alphabet)") { |s| Codecs.base_x_decode(s, Codecs::B58, "base58", Codecs::B58_MAX_IN, fold_case: false) }
 
     r.register encode("base36-encode", "base36", "b36",
-      category: Category::Encoding, description: "Base36 encode (0-9a-z, leading NULs kept as '0')") { |b| Codecs.base36_encode(b) }
+      category: Category::Encoding, description: "Base36 encode (0-9a-z, leading NULs kept as '0')") { |b| Codecs.base_x_encode(b, Codecs::BASE36, "base36", Codecs::BASE_X_MAX_IN) }
     r.register decode("base36-decode", "unbase36",
-      category: Category::Encoding, description: "Base36 decode (case-insensitive)") { |s| Codecs.base36_decode(s) }
+      category: Category::Encoding, description: "Base36 decode (case-insensitive)") { |s| Codecs.base_x_decode(s, Codecs::BASE36, "base36", Codecs::BASE_X_MAX_IN, fold_case: true) }
 
     r.register encode("base62-encode", "base62", "b62",
-      category: Category::Encoding, description: "Base62 encode (0-9A-Za-z, leading NULs kept as '0')") { |b| Codecs.base62_encode(b) }
+      category: Category::Encoding, description: "Base62 encode (0-9A-Za-z, leading NULs kept as '0')") { |b| Codecs.base_x_encode(b, Codecs::BASE62, "base62", Codecs::BASE_X_MAX_IN) }
     r.register decode("base62-decode", "unbase62",
-      category: Category::Encoding, description: "Base62 decode (case-sensitive)") { |s| Codecs.base62_decode(s) }
+      category: Category::Encoding, description: "Base62 decode (case-sensitive)") { |s| Codecs.base_x_decode(s, Codecs::BASE62, "base62", Codecs::BASE_X_MAX_IN, fold_case: false) }
 
     r.register encode("quoted-printable-encode", "quoted-printable", "qp", "qp-encode",
       category: Category::Encoding,
@@ -152,17 +152,17 @@ module Gori::Decoder
     r.register encode("decimal-encode", "decimal", "to-decimal", "dec",
       category: Category::Encoding, description: "Bytes to space-separated decimal (0-255)") { |b| Codecs.decimal_encode(b) }
     r.register decode("decimal-decode", "from-decimal", "undecimal",
-      category: Category::Encoding, description: "Space/comma-separated decimal to bytes") { |s| Codecs.decimal_decode(s) }
+      category: Category::Encoding, description: "Space/comma-separated decimal to bytes") { |s| Codecs.parse_numbers(s, 10) }
 
     r.register encode("binary-encode", "binary", "to-binary", "bin",
       category: Category::Encoding, description: "Bytes to space-separated 8-bit binary") { |b| Codecs.binary_encode(b) }
     r.register decode("binary-decode", "from-binary", "unbinary",
-      category: Category::Encoding, description: "Space/comma-separated binary to bytes") { |s| Codecs.binary_decode(s) }
+      category: Category::Encoding, description: "Space/comma-separated binary to bytes") { |s| Codecs.parse_numbers(s, 2) }
 
     r.register encode("octal-encode", "octal", "to-octal", "oct",
       category: Category::Encoding, description: "Bytes to space-separated octal") { |b| Codecs.octal_encode(b) }
     r.register decode("octal-decode", "from-octal", "unoctal",
-      category: Category::Encoding, description: "Space/comma-separated octal to bytes") { |s| Codecs.octal_decode(s) }
+      category: Category::Encoding, description: "Space/comma-separated octal to bytes") { |s| Codecs.parse_numbers(s, 8) }
 
     # ---------------- COMPRESSION ----------------
     r.register bytes("gzip-compress", "gzip", "gz",
@@ -232,18 +232,21 @@ module Gori::Decoder
 
     # Framework signed session cookies — parse into payload / timestamp / signature, no
     # verify (that + crack/forge live in `gori run cookie` and the MCP cookie_* tools).
+    # `cookie-decode` auto-detects; the pinned variants force one format so a cookie another
+    # format could also match still decodes as intended. Cookie::CookieError is a Gori::Error,
+    # which the chain surfaces as a step error.
     r.register encode("cookie-decode", "cookie", "session-cookie",
       category: Category::Token, direction: Direction::Decode,
-      description: "Decode a Flask/Rack/Django signed session cookie (auto-detect)") { |b| Codecs.cookie_decode(b) }
+      description: "Decode a Flask/Rack/Django signed session cookie (auto-detect)") { |b| Gori::Cookie.decode(String.new(b).strip) }
     r.register encode("flask-decode", "flask", "flask-cookie", "itsdangerous",
       category: Category::Token, direction: Direction::Decode,
-      description: "Decode a Flask (itsdangerous) session cookie") { |b| Codecs.flask_cookie_decode(b) }
+      description: "Decode a Flask (itsdangerous) session cookie") { |b| Gori::Cookie::Flask.decode_text(String.new(b).strip) }
     r.register encode("rack-decode", "rack", "rack-cookie",
       category: Category::Token, direction: Direction::Decode,
-      description: "Decode a Rack (Ruby) session cookie") { |b| Codecs.rack_cookie_decode(b) }
+      description: "Decode a Rack (Ruby) session cookie") { |b| Gori::Cookie::Rack.decode_text(String.new(b).strip) }
     r.register encode("django-decode", "django", "django-cookie",
       category: Category::Token, direction: Direction::Decode,
-      description: "Decode a Django (django.core.signing) session cookie") { |b| Codecs.django_cookie_decode(b) }
+      description: "Decode a Django (django.core.signing) session cookie") { |b| Gori::Cookie::Django.decode_text(String.new(b).strip) }
 
     # ---------------- HASH ----------------
     r.register encode("md5", category: Category::Hash, direction: Direction::Hash, description: "MD5 digest (hex)") { |b| Digest::MD5.hexdigest(b) }

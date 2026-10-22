@@ -291,7 +291,7 @@ module Gori::Decoder
     # ---- bignum radix bases (base58 / base36 / base62) — BigInt, O(n^2), so input is capped ----
     B58           = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
     BASE36        = "0123456789abcdefghijklmnopqrstuvwxyz"
-    BASE62        = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+    BASE62        = Gori::Cookie::BASE62
     B58_MAX_IN    = 4 * 1024 # base58 is for keys/hashes, not blobs
     BASE_X_MAX_IN = 4 * 1024 # same for base36/62 — short IDs and tokens, not blobs
 
@@ -299,7 +299,7 @@ module Gori::Decoder
     # they are preserved out-of-band as leading zero DIGITS (`alphabet[0]`) and restored on
     # decode — the Bitcoin base58 convention, applied uniformly so all three round-trip
     # byte-exactly instead of silently eating a NUL prefix.
-    private def base_x_encode(data : Bytes, alphabet : String, label : String, max_in : Int32) : String
+    def base_x_encode(data : Bytes, alphabet : String, label : String, max_in : Int32) : String
       raise DecoderError.new("input too large for #{label} (max #{max_in}B)") if data.size > max_in
       radix = alphabet.size
       zeros = 0
@@ -322,7 +322,7 @@ module Gori::Decoder
     # `fold_case` is per-alphabet, not a convenience: base36 is case-insensitive because its
     # alphabet holds one case, while base58/base62 use BOTH cases as distinct digits and
     # folding them would decode a different number.
-    private def base_x_decode(s : String, alphabet : String, label : String, max_in : Int32, fold_case : Bool) : Bytes
+    def base_x_decode(s : String, alphabet : String, label : String, max_in : Int32, fold_case : Bool) : Bytes
       s = s.strip
       raise DecoderError.new("input too large for #{label}") if s.size > max_in * 2
       radix = alphabet.size
@@ -350,30 +350,6 @@ module Gori::Decoder
       leading.times { sink.write_byte(0_u8) }
       sink.write(body)
       sink.to_slice
-    end
-
-    def base58_encode(data : Bytes) : String
-      base_x_encode(data, B58, "base58", B58_MAX_IN)
-    end
-
-    def base58_decode(s : String) : Bytes
-      base_x_decode(s, B58, "base58", B58_MAX_IN, fold_case: false)
-    end
-
-    def base36_encode(data : Bytes) : String
-      base_x_encode(data, BASE36, "base36", BASE_X_MAX_IN)
-    end
-
-    def base36_decode(s : String) : Bytes
-      base_x_decode(s, BASE36, "base36", BASE_X_MAX_IN, fold_case: true)
-    end
-
-    def base62_encode(data : Bytes) : String
-      base_x_encode(data, BASE62, "base62", BASE_X_MAX_IN)
-    end
-
-    def base62_decode(s : String) : Bytes
-      base_x_decode(s, BASE62, "base62", BASE_X_MAX_IN, fold_case: false)
     end
 
     # ---- unicode \uXXXX (surrogate-pair aware) ----
@@ -453,17 +429,9 @@ module Gori::Decoder
       end
     end
 
-    # ---- rot13 (String#tr can't express the wrap-around map, so do it by hand) ----
+    # ---- rot13 ----
     def rot13(s : String) : String
-      String.build do |io|
-        s.each_char do |c|
-          io << case c
-          when 'a'..'z' then 'a' + (c.ord - 'a'.ord + 13) % 26
-          when 'A'..'Z' then 'A' + (c.ord - 'A'.ord + 13) % 26
-          else               c
-          end
-        end
-      end
+      s.tr("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz", "NOPQRSTUVWXYZABCDEFGHIJKLMnopqrstuvwxyzabcdefghijklm")
     end
 
     # ---- json string unescape (tolerant of bare, unquoted input) ----
@@ -478,27 +446,6 @@ module Gori::Decoder
         raise DecoderError.new("invalid JSON string: not a string literal")
     rescue ex : JSON::ParseException
       raise DecoderError.new("invalid JSON string: #{ex.message}")
-    end
-
-    # ---- framework signed session cookies — parse only, no signature verify ----
-    # Thin delegators to Gori::Cookie so the Decoder catalog reads the same as jwt_decode.
-    # `cookie_decode` auto-detects Flask / Rack / Django; the pinned variants force one
-    # format so a cookie that another format could also match still decodes as intended.
-    # Cookie::CookieError is a Gori::Error, which the chain surfaces as a step error.
-    def cookie_decode(data : Bytes) : String
-      Gori::Cookie.decode(String.new(data).strip)
-    end
-
-    def flask_cookie_decode(data : Bytes) : String
-      Gori::Cookie::Flask.decode_text(String.new(data).strip)
-    end
-
-    def rack_cookie_decode(data : Bytes) : String
-      Gori::Cookie::Rack.decode_text(String.new(data).strip)
-    end
-
-    def django_cookie_decode(data : Bytes) : String
-      Gori::Cookie::Django.decode_text(String.new(data).strip)
     end
 
     # ---- JWT (header.payload[.signature]) — decode only, no signature verify ----
@@ -523,7 +470,7 @@ module Gori::Decoder
         end
         # alg:none is a classic auth-bypass — the token is unsigned and anyone can
         # mint one. Surface it prominently rather than decoding it silently as "ok".
-        if (alg = jwt_alg(parts[0])) && alg.downcase == "none"
+        if (alg = Gori::Jwt.claim_s(parts[0], "alg")) && alg.downcase == "none"
           io << "\n\n// WARNING: alg=none — this token is UNSIGNED and can be forged by anyone; never trust it as authentication."
         end
         # >3 segments isn't a plain JWT (JWS). A real 5-part JWE never reaches here (it is
@@ -538,13 +485,6 @@ module Gori::Decoder
           extra.each_with_index(3) { |seg, i| io << "//   [#{i}] #{seg}\n" }
         end
       end
-    end
-
-    # The `alg` from a JWT header segment (base64url JSON), or nil if unreadable.
-    private def jwt_alg(header_seg : String) : String?
-      Gori::RawJson.member(String.new(Base64.decode(header_seg)), "alg").try(&.as_s?)
-    rescue
-      nil
     end
 
     # Numbers are shown as the digits the token carries (`RawJson`): one claim past
@@ -786,20 +726,8 @@ module Gori::Decoder
       end
     end
 
-    def decimal_decode(s : String) : Bytes
-      parse_numbers(s, 10)
-    end
-
-    def binary_decode(s : String) : Bytes
-      parse_numbers(s, 2)
-    end
-
-    def octal_decode(s : String) : Bytes
-      parse_numbers(s, 8)
-    end
-
     # Split on whitespace/commas; every token must parse in `base` and fit a byte.
-    private def parse_numbers(s : String, base : Int32) : Bytes
+    def parse_numbers(s : String, base : Int32) : Bytes
       toks = s.split(/[\s,]+/).reject(&.empty?)
       out = Bytes.new(toks.size)
       toks.each_with_index do |t, i|
@@ -820,17 +748,11 @@ module Gori::Decoder
 
     # ROT47: rotate printable ASCII 33..126 by 47 (mod 94); all else passes through.
     # Self-inverse — applying it twice restores the original.
+    ROT47_FROM = String.new(Bytes.new(94) { |i| (33 + i).to_u8 })
+    ROT47_TO   = ROT47_FROM[47..] + ROT47_FROM[...47]
+
     def rot47(s : String) : String
-      String.build do |io|
-        s.each_char do |c|
-          o = c.ord
-          if 33 <= o <= 126
-            io << ((o - 33 + 47) % 94 + 33).chr
-          else
-            io << c
-          end
-        end
-      end
+      s.tr(ROT47_FROM, ROT47_TO)
     end
 
     # ---- quoted-printable (RFC 2045) ----
@@ -1405,19 +1327,10 @@ module Gori::Decoder
     end
 
     # ---- XML (the five predefined entities) ----
+    XML_ESCAPES = {'&' => "&amp;", '<' => "&lt;", '>' => "&gt;", '"' => "&quot;", '\'' => "&apos;"}
+
     def xml_escape(s : String) : String
-      String.build(s.bytesize) do |io|
-        s.each_char do |c|
-          case c
-          when '&'  then io << "&amp;"
-          when '<'  then io << "&lt;"
-          when '>'  then io << "&gt;"
-          when '"'  then io << "&quot;"
-          when '\'' then io << "&apos;"
-          else           io << c
-          end
-        end
-      end
+      s.gsub(XML_ESCAPES)
     end
 
     # Byte-level scan (entities are pure ASCII, so a multibyte char is copied through

@@ -154,7 +154,7 @@ describe Gori::Decoder do
     it "base58-decode counts leading zeros consistently across embedded whitespace" do
       # "11 1abc" and "111abc" are numerically identical to the value parser (whitespace
       # skipped); the leading-zero byte count must agree too.
-      Gori::Decoder::Codecs.base58_decode("11 1abc").should eq Gori::Decoder::Codecs.base58_decode("111abc")
+      conv_bytes("base58-decode", "11 1abc".to_slice).should eq conv_bytes("base58-decode", "111abc".to_slice)
     end
 
     it "base32 round-trips and matches the RFC 4648 vector" do

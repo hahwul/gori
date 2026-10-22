@@ -332,7 +332,7 @@ module Gori::Decoder
         {"java-serialized", Java.render(data, indent: indent)}
       elsif data[0] == 0xff_u8 && data[1] == 0x01_u8
         {"aspnet-viewstate", DotnetViewState.render(data, indent: indent)}
-      elsif data[0] == 0x80_u8 && 2_u8 <= data[1] <= Pickle::MAX_PROTOCOL.to_u8
+      elsif data[0] == Pickle::PROTO_OPCODE && 2_u8 <= data[1] <= Pickle::MAX_PROTOCOL.to_u8
         {"python-pickle", Pickle.render(data, indent: indent)}
       elsif php_head?(data)
         {"php-serialized", Php.render(data, indent: indent)}

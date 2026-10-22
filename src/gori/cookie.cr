@@ -235,15 +235,12 @@ module Gori
     # django.core.signing timestamp codec: base62 of the plain unix second.
     def base62_encode(n : Int64) : String
       return "0" if n <= 0
-      String.build do |io|
-        x = n
-        buf = [] of Char
-        while x > 0
-          buf.unshift(BASE62[(x % 62)])
-          x //= 62
-        end
-        buf.each { |c| io << c }
+      digits = [] of Char
+      while n > 0
+        digits << BASE62[n % 62]
+        n //= 62
       end
+      digits.reverse.join
     end
 
     # nil on anything that isn't a base62 unix second — an out-of-alphabet character OR a
