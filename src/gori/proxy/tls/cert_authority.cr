@@ -43,12 +43,12 @@ module Gori::Proxy::Tls
     # a checked-out directory, a bare `.` the working directory. A dir gori CREATES is still
     # made 0700 (see Paths.ensure_dir), and what actually protects the secret either way is
     # the key file's own 0600 below: the cert beside it is public by design.
-    def self.load_or_create(dir : String, common_name : String = DEFAULT_CN) : CertAuthority
+    def self.load_or_create(dir : String) : CertAuthority
       Gori::Paths.ensure_dir(dir, tighten: false) # race-tolerant (two instances may start at once)
-      with_dir_lock(dir) { load_or_create_locked(dir, common_name) }
+      with_dir_lock(dir) { load_or_create_locked(dir) }
     end
 
-    private def self.load_or_create_locked(dir : String, common_name : String) : CertAuthority
+    private def self.load_or_create_locked(dir : String) : CertAuthority
       cert_path = File.join(dir, CA_CERT_FILE)
       key_path = File.join(dir, CA_KEY_FILE)
 
@@ -78,7 +78,7 @@ module Gori::Proxy::Tls
           "#{missing} from backup, or run `gori ca regenerate` to mint a fresh CA (existing " \
           "clients will need to re-trust it)")
       else
-        cert, key = CertBuilder.build_root(common_name)
+        cert, key = CertBuilder.build_root(DEFAULT_CN)
         write_pair_locked(dir, cert, key) # key at 0600 from its first byte — see KeyPair#write_pem
         new(cert, key, cert_path)
       end
@@ -165,8 +165,8 @@ module Gori::Proxy::Tls
     # subsequent connection is signed by the NEW root. The Tunnel/proxy hold THIS
     # object, so the swap is live (no restart) — but the new root is a different
     # key+identity, so any client that trusted the OLD CA must re-trust it.
-    def regenerate!(common_name : String = DEFAULT_CN) : Nil
-      cert, key = CertBuilder.build_root(common_name)
+    def regenerate! : Nil
+      cert, key = CertBuilder.build_root(DEFAULT_CN)
       install!(cert, key)
     end
 
@@ -366,8 +366,8 @@ module Gori::Proxy::Tls
     # load_or_create, so it hit the same refusal and aborted. The advertised repair was blocked
     # by the very check that advertised it, leaving no non-manual way out of a broken CA dir.
     # A rotation never needs the old pair, so it no longer asks for it.
-    def self.regenerate_at(dir : String, common_name : String = DEFAULT_CN) : String
-      cert, key = CertBuilder.build_root(common_name)
+    def self.regenerate_at(dir : String) : String
+      cert, key = CertBuilder.build_root(DEFAULT_CN)
       write_pair(dir, cert, key)
     end
 
