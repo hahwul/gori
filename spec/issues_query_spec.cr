@@ -183,15 +183,15 @@ describe Gori::Issues::Filter do
 
     it "answers for every spelling build_term dispatches on, canonical or alias" do
       Issues::Filter::KNOWN.each do |spelling|
-        Issues::Filter.field_help(spelling).should_not be_nil
+        Issues::Filter::FIELD_HELP_PROC.call(spelling).should_not be_nil
       end
     end
 
     it "declines a field this backend does not implement" do
       # `QuerySuggest.describe_for` asks by the name the OPERATOR typed, so a table that
       # answered for QL's vocabulary would explain a term that compiles to free text.
-      Issues::Filter.field_help("path").should be_nil
-      Issues::Filter.field_help("dur").should be_nil
+      Issues::Filter::FIELD_HELP_PROC.call("path").should be_nil
+      Issues::Filter::FIELD_HELP_PROC.call("dur").should be_nil
     end
 
     it "keeps ALSO_ACCEPTED to the aliases, never the canonical spellings" do

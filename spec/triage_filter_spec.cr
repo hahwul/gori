@@ -96,8 +96,7 @@ private def report : String
     {% for k in [Gori::Issues::Filter, Gori::Probe::Filter] %}
       NAMES.each do |n|
         io << {{ k.stringify }} << " " << n.inspect << " known=" << {{ k }}.known_field?(n) << "/" << {{ k }}.known_field?(n, regex: true)
-        io << " suggest=" << {{ k }}.suggest_field(n).inspect << " help=" << {{ k }}.field_help(n).inspect
-        io << " proc=" << ({{ k }}::FIELD_HELP_PROC.call(n) == {{ k }}.field_help(n))
+        io << " suggest=" << {{ k }}.suggest_field(n).inspect << " help=" << {{ k }}::FIELD_HELP_PROC.call(n).inspect
         io << " shaped=" << {{ k }}::FIELD_SHAPED.call(n, ':', "x") << "/" << {{ k }}::FIELD_SHAPED.call(n, ':', "//e") << "\n"
       end
       io << {{ k.stringify }} << " FIELDS=" << {{ k }}::FIELDS.inspect << "\n"
@@ -226,28 +225,28 @@ private EXPECTED = <<-TXT
   suggest "sev:high host:a"@3 issues=["sev:high"] probe=["sev:high"]
   suggest "title:x co"@2 issues=[] probe=[]
   suggest default pools issues=[] probe=[]
-  Gori::Issues::Filter "severity" known=true/false suggest=nil help="info low medium high critical — takes >= <= > <" proc=true shaped=true/true
-  Gori::Issues::Filter "sev" known=true/false suggest=nil help="info low medium high critical — takes >= <= > <" proc=true shaped=true/true
-  Gori::Issues::Filter "SEV" known=true/false suggest=nil help="info low medium high critical — takes >= <= > <" proc=true shaped=true/true
-  Gori::Issues::Filter "st" known=true/false suggest=nil help="triage state — open confirmed fp resolved (closed = any non-open)" proc=true shaped=true/true
-  Gori::Issues::Filter "status" known=true/false suggest=nil help="triage state — open confirmed fp resolved (closed = any non-open)" proc=true shaped=true/true
-  Gori::Issues::Filter "host" known=true/false suggest=nil help="the issue's host — substring" proc=true shaped=true/true
-  Gori::Issues::Filter "title" known=true/false suggest=nil help="the issue's title — substring" proc=true shaped=true/true
-  Gori::Issues::Filter "cvss" known=true/false suggest=nil help="score, with >= <= > < — or a substring of the vector" proc=true shaped=true/true
-  Gori::Issues::Filter "category" known=false/false suggest=nil help=nil proc=true shaped=true/false
-  Gori::Issues::Filter "cat" known=false/false suggest=nil help=nil proc=true shaped=true/false
-  Gori::Issues::Filter "code" known=false/false suggest=nil help=nil proc=true shaped=true/false
-  Gori::Issues::Filter "sevrity" known=false/false suggest="severity" help=nil proc=true shaped=true/false
-  Gori::Issues::Filter "stauts" known=false/false suggest="status" help=nil proc=true shaped=true/false
-  Gori::Issues::Filter "catgory" known=false/false suggest=nil help=nil proc=true shaped=true/false
-  Gori::Issues::Filter "titl" known=false/false suggest="title" help=nil proc=true shaped=true/false
-  Gori::Issues::Filter "cod" known=false/false suggest=nil help=nil proc=true shaped=true/false
-  Gori::Issues::Filter "hots" known=false/false suggest="host" help=nil proc=true shaped=true/false
-  Gori::Issues::Filter "cvs" known=false/false suggest="cvss" help=nil proc=true shaped=true/false
-  Gori::Issues::Filter "foo" known=false/false suggest=nil help=nil proc=true shaped=true/false
-  Gori::Issues::Filter "req.host" known=false/false suggest=nil help=nil proc=true shaped=false/false
-  Gori::Issues::Filter "acme.test" known=false/false suggest=nil help=nil proc=true shaped=false/false
-  Gori::Issues::Filter "" known=false/false suggest=nil help=nil proc=true shaped=false/false
+  Gori::Issues::Filter "severity" known=true/false suggest=nil help="info low medium high critical — takes >= <= > <" shaped=true/true
+  Gori::Issues::Filter "sev" known=true/false suggest=nil help="info low medium high critical — takes >= <= > <" shaped=true/true
+  Gori::Issues::Filter "SEV" known=true/false suggest=nil help="info low medium high critical — takes >= <= > <" shaped=true/true
+  Gori::Issues::Filter "st" known=true/false suggest=nil help="triage state — open confirmed fp resolved (closed = any non-open)" shaped=true/true
+  Gori::Issues::Filter "status" known=true/false suggest=nil help="triage state — open confirmed fp resolved (closed = any non-open)" shaped=true/true
+  Gori::Issues::Filter "host" known=true/false suggest=nil help="the issue's host — substring" shaped=true/true
+  Gori::Issues::Filter "title" known=true/false suggest=nil help="the issue's title — substring" shaped=true/true
+  Gori::Issues::Filter "cvss" known=true/false suggest=nil help="score, with >= <= > < — or a substring of the vector" shaped=true/true
+  Gori::Issues::Filter "category" known=false/false suggest=nil help=nil shaped=true/false
+  Gori::Issues::Filter "cat" known=false/false suggest=nil help=nil shaped=true/false
+  Gori::Issues::Filter "code" known=false/false suggest=nil help=nil shaped=true/false
+  Gori::Issues::Filter "sevrity" known=false/false suggest="severity" help=nil shaped=true/false
+  Gori::Issues::Filter "stauts" known=false/false suggest="status" help=nil shaped=true/false
+  Gori::Issues::Filter "catgory" known=false/false suggest=nil help=nil shaped=true/false
+  Gori::Issues::Filter "titl" known=false/false suggest="title" help=nil shaped=true/false
+  Gori::Issues::Filter "cod" known=false/false suggest=nil help=nil shaped=true/false
+  Gori::Issues::Filter "hots" known=false/false suggest="host" help=nil shaped=true/false
+  Gori::Issues::Filter "cvs" known=false/false suggest="cvss" help=nil shaped=true/false
+  Gori::Issues::Filter "foo" known=false/false suggest=nil help=nil shaped=true/false
+  Gori::Issues::Filter "req.host" known=false/false suggest=nil help=nil shaped=false/false
+  Gori::Issues::Filter "acme.test" known=false/false suggest=nil help=nil shaped=false/false
+  Gori::Issues::Filter "" known=false/false suggest=nil help=nil shaped=false/false
   Gori::Issues::Filter FIELDS=["severity:", "status:", "host:", "title:", "cvss:"]
   Gori::Issues::Filter KNOWN=["severity", "sev", "status", "st", "host", "title", "cvss"]
   Gori::Issues::Filter CANDIDATE_FIELDS=["severity", "sev", "status", "st", "host", "title", "cvss"]
@@ -257,28 +256,28 @@ private EXPECTED = <<-TXT
   Gori::Issues::Filter SEVERITY_VALUES=["info", "low", "medium", "high", "critical"]
   Gori::Issues::Filter STATUS_VALUES=["open", "confirmed", "false-positive", "resolved", "closed"]
   Gori::Issues::Filter SEVERITY_SAMPLES=[">=medium", ">=high", ">=critical"]
-  Gori::Probe::Filter "severity" known=true/false suggest=nil help="info low medium high critical — takes >= <= > <" proc=true shaped=true/true
-  Gori::Probe::Filter "sev" known=true/false suggest=nil help="info low medium high critical — takes >= <= > <" proc=true shaped=true/true
-  Gori::Probe::Filter "SEV" known=true/false suggest=nil help="info low medium high critical — takes >= <= > <" proc=true shaped=true/true
-  Gori::Probe::Filter "st" known=true/false suggest=nil help="triage state — open confirmed fp resolved (closed = any non-open)" proc=true shaped=true/true
-  Gori::Probe::Filter "status" known=true/false suggest=nil help="triage state — open confirmed fp resolved (closed = any non-open)" proc=true shaped=true/true
-  Gori::Probe::Filter "host" known=true/false suggest=nil help="the finding's host — substring" proc=true shaped=true/true
-  Gori::Probe::Filter "title" known=false/false suggest=nil help=nil proc=true shaped=true/false
-  Gori::Probe::Filter "cvss" known=false/false suggest=nil help=nil proc=true shaped=true/false
-  Gori::Probe::Filter "category" known=true/false suggest=nil help="which check found it — headers cookies tech infoleak cors client active custom" proc=true shaped=true/true
-  Gori::Probe::Filter "cat" known=true/false suggest=nil help="which check found it — headers cookies tech infoleak cors client active custom" proc=true shaped=true/true
-  Gori::Probe::Filter "code" known=true/false suggest=nil help="the rule's code — substring" proc=true shaped=true/true
-  Gori::Probe::Filter "sevrity" known=false/false suggest="severity" help=nil proc=true shaped=true/false
-  Gori::Probe::Filter "stauts" known=false/false suggest="status" help=nil proc=true shaped=true/false
-  Gori::Probe::Filter "catgory" known=false/false suggest="category" help=nil proc=true shaped=true/false
-  Gori::Probe::Filter "titl" known=false/false suggest=nil help=nil proc=true shaped=true/false
-  Gori::Probe::Filter "cod" known=false/false suggest="code" help=nil proc=true shaped=true/false
-  Gori::Probe::Filter "hots" known=false/false suggest="host" help=nil proc=true shaped=true/false
-  Gori::Probe::Filter "cvs" known=false/false suggest=nil help=nil proc=true shaped=true/false
-  Gori::Probe::Filter "foo" known=false/false suggest=nil help=nil proc=true shaped=true/false
-  Gori::Probe::Filter "req.host" known=false/false suggest=nil help=nil proc=true shaped=false/false
-  Gori::Probe::Filter "acme.test" known=false/false suggest=nil help=nil proc=true shaped=false/false
-  Gori::Probe::Filter "" known=false/false suggest=nil help=nil proc=true shaped=false/false
+  Gori::Probe::Filter "severity" known=true/false suggest=nil help="info low medium high critical — takes >= <= > <" shaped=true/true
+  Gori::Probe::Filter "sev" known=true/false suggest=nil help="info low medium high critical — takes >= <= > <" shaped=true/true
+  Gori::Probe::Filter "SEV" known=true/false suggest=nil help="info low medium high critical — takes >= <= > <" shaped=true/true
+  Gori::Probe::Filter "st" known=true/false suggest=nil help="triage state — open confirmed fp resolved (closed = any non-open)" shaped=true/true
+  Gori::Probe::Filter "status" known=true/false suggest=nil help="triage state — open confirmed fp resolved (closed = any non-open)" shaped=true/true
+  Gori::Probe::Filter "host" known=true/false suggest=nil help="the finding's host — substring" shaped=true/true
+  Gori::Probe::Filter "title" known=false/false suggest=nil help=nil shaped=true/false
+  Gori::Probe::Filter "cvss" known=false/false suggest=nil help=nil shaped=true/false
+  Gori::Probe::Filter "category" known=true/false suggest=nil help="which check found it — headers cookies tech infoleak cors client active custom" shaped=true/true
+  Gori::Probe::Filter "cat" known=true/false suggest=nil help="which check found it — headers cookies tech infoleak cors client active custom" shaped=true/true
+  Gori::Probe::Filter "code" known=true/false suggest=nil help="the rule's code — substring" shaped=true/true
+  Gori::Probe::Filter "sevrity" known=false/false suggest="severity" help=nil shaped=true/false
+  Gori::Probe::Filter "stauts" known=false/false suggest="status" help=nil shaped=true/false
+  Gori::Probe::Filter "catgory" known=false/false suggest="category" help=nil shaped=true/false
+  Gori::Probe::Filter "titl" known=false/false suggest=nil help=nil shaped=true/false
+  Gori::Probe::Filter "cod" known=false/false suggest="code" help=nil shaped=true/false
+  Gori::Probe::Filter "hots" known=false/false suggest="host" help=nil shaped=true/false
+  Gori::Probe::Filter "cvs" known=false/false suggest=nil help=nil shaped=true/false
+  Gori::Probe::Filter "foo" known=false/false suggest=nil help=nil shaped=true/false
+  Gori::Probe::Filter "req.host" known=false/false suggest=nil help=nil shaped=false/false
+  Gori::Probe::Filter "acme.test" known=false/false suggest=nil help=nil shaped=false/false
+  Gori::Probe::Filter "" known=false/false suggest=nil help=nil shaped=false/false
   Gori::Probe::Filter FIELDS=["severity:", "status:", "category:", "host:", "code:"]
   Gori::Probe::Filter KNOWN=["severity", "sev", "status", "st", "category", "cat", "host", "code"]
   Gori::Probe::Filter CANDIDATE_FIELDS=["severity", "sev", "status", "st", "category", "cat", "host", "code"]
