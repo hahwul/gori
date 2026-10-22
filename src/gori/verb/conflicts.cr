@@ -15,12 +15,8 @@ module Gori
         end
       end
 
-      def self.overlap?(a : Scope, b : Scope) : Bool
-        a == b
-      end
-
-      # First verb (other than `verb_id`) whose EFFECTIVE chords include `chord` in an
-      # overlapping scope, evaluated against the in-progress `overrides` so two pending
+      # First verb (other than `verb_id`) whose EFFECTIVE chords include `chord` in the same
+      # scope, evaluated against the in-progress `overrides` so two pending
       # rebinds are mutually checked. nil when `chord` is free for `verb_id`.
       def self.detect(registry : Registry, os : OsProfile::Os,
                       overrides : Hash(String, Array(Chord)),
@@ -29,7 +25,7 @@ module Gori
         target = registry[verb_id]
         registry.each do |other|
           next if other.id == verb_id
-          next unless overlap?(other.scope, target.scope)
+          next unless other.scope == target.scope
           # Under the ACTIVE keyset, so the editor answers about the keymap the operator is
           # actually running: a `vim` user binding something to `⇧V` must be told that
           # Select line is there, even though the verb file says `x`.

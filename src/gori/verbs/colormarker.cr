@@ -71,8 +71,8 @@ module Gori
       # THIS project (`colormarker.toggle`, above). In the clear-all scopes ⇧X is the wipe chord
       # instead — the registry's `:wipe` band (`history.clear`, `probe.clear`, `authorize.clear`,
       # `activity.clear`, `issues.clear`) —
-      # deliberate cross-scope reuse, and invisible to `Conflicts.overlap?`, which is `a == b`
-      # on the scope. This tab has no clear-all verb for it to be confused with.
+      # deliberate cross-scope reuse, and invisible to `Conflicts.detect`, which compares only
+      # within one scope. This tab has no clear-all verb for it to be confused with.
       on_global_rule = ->(ctx : Verb::ExecContext) do
         ctx.current_tab == :colormarker && ctx.colormarker_rule_list_focused? && ctx.colormarker_global_rule_selected?
       end

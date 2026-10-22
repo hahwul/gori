@@ -84,7 +84,7 @@ module Gori
       # scopes ⇧X is the wipe chord instead — every verb in the registry's `:wipe` band
       # (`history.clear`, `probe.clear`, `authorize.clear`, `activity.clear`, `issues.clear`) —
       # deliberate cross-scope reuse, and invisible to
-      # `Conflicts.overlap?`, which is `a == b` on the scope. This tab has no clear-all verb
+      # `Conflicts.detect`, which compares only within one scope. This tab has no clear-all verb
       # for it to be confused with.
       #
       # Both gate on a selected rule for the reason `rewriter_rule_selected?` documents — the
