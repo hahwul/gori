@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "../support/fake_host"
 require "../support/memory_backend"
 require "file_utils"
 
@@ -11,150 +12,15 @@ include Gori::Tui
 # `short_pane_clamp_spec`: clamp one axis, forget the other. Every size below is one the app
 # renders at (`Layout.usable?` is 40x8).
 
-private class NotesFakeHost
-  include Gori::Tui::Host
-
-  getter statuses = [] of String
-
-  def initialize(@session : Gori::Session)
-    @jobs = Gori::Tui::Jobs.new
-    @notifications = Gori::Tui::Notifications.new
-  end
-
-  def session : Gori::Session
-    @session
-  end
-
-  def jobs : Gori::Tui::Jobs
-    @jobs
-  end
-
-  def notifications : Gori::Tui::Notifications
-    @notifications
-  end
-
-  def status(message : String) : Nil
-    @statuses << message
-  end
-
-  def request_overlay(kind : Symbol) : Nil
-  end
-
-  def request_focus(pane : Symbol) : Nil
-  end
-
-  def focus_body : Nil
-  end
-
-  def resolve_subtab_focus : Nil
-  end
-
-  def switch_tab(tab : Symbol) : Nil
-  end
-
-  def goto_tab(tab : Symbol) : Nil
-  end
-
-  def open_palette : Nil
-  end
-
-  def open_help_query(surface : Symbol) : Nil
-  end
-
-  def open_space_menu : Nil
-  end
-
-  def open_fuzz_set_editor(edit_index : Int32?) : Nil
-  end
-
-  def open_fuzz_advanced_editor : Nil
-  end
-
-  def open_authorize_identities : Nil
-  end
-
-  def reconfigure_sequence : Nil
-  end
-
-  def open_scope_rule_editor(edit_id : Int64?, kind : String, match_type : String, pattern : String) : Nil
-  end
-
-  def open_custom_rule_editor(rule : Gori::Probe::CustomRule?) : Nil
-  end
-
-  def open_rewriter_preset_picker : Nil
-  end
-
-  def open_rewriter_rule_editor(rule : Gori::Store::MatchRule?) : Nil
-  end
-
-  def open_colormarker_rule_editor(rule : Gori::Store::ColorRule?) : Nil
-  end
-
-  def open_colormarker_color_editor(color : Gori::Settings::ColormarkerColor?) : Nil
-  end
-
-  def open_extract_rule_editor(rule : Gori::Store::ExtractRule?) : Nil
-  end
-
-  def open_chain_save : Nil
-  end
-
-  def open_chain_load : Nil
-  end
-
-  def open_oast_provider_editor(provider : Gori::Oast::ProviderConfig?) : Nil
-  end
-
-  def confirm(title : String, message : String, *, confirm_label : String, danger : Bool,
-              return_to : Symbol = :none, &action : -> Nil) : Nil
-    # No modal in a spec: a confirmed action runs straight through, unless a spec holds it
-    # to change the world between the prompt and the answer.
-    hold_confirm? ? (@held_confirm = action) : action.call
-  end
-
+private class NotesFakeHost < FakeHost
   property? hold_confirm = false
   getter held_confirm : Proc(Nil)? = nil
 
-  def overlay : Symbol
-    :none
-  end
-
-  def active_tab : Symbol
-    :notes
-  end
-
-  def focus : Symbol
-    :body
-  end
-
-  def reveal? : Bool
-    false
-  end
-
-  def toggle_reveal : Nil
-  end
-
-  def pretty? : Bool
-    false
-  end
-
-  def toggle_pretty : Nil
-  end
-
-  def toggle_scope_lens : Nil
-  end
-
-  def toggle_sandbox : Nil
-  end
-
-  def apply_project_network(bind_host : String, bind_port : Int32, upstream : String,
-                            connect_secs : Int32, io_secs : Int32, capture_mib : Int32) : String
-    ""
-  end
-
-  def apply_project_protos(spec : String) : String
-    ""
+  # No modal in a spec: a confirmed action runs straight through, unless a spec holds it
+  # to change the world between the prompt and the answer.
+  def confirm(title : String, message : String, *, confirm_label : String, danger : Bool,
+              return_to : Symbol = :none, &action : -> Nil) : Nil
+    hold_confirm? ? (@held_confirm = action) : action.call
   end
 end
 
@@ -169,7 +35,7 @@ private def with_notes_controller(&)
   session = Gori::Session.open(Gori::Config.new(listen: "127.0.0.1", port: 0),
     Gori::Proxy::Tls::CertAuthority.load_or_create(NOTES_CA_ROOT), Gori::Verbs.registry, project)
   begin
-    controller = NotesController.new(NotesFakeHost.new(session))
+    controller = NotesController.new(NotesFakeHost.new(session, :notes))
     # Two notes, so the sub-tab strip and the `/ filter` bar are both on the pane — the two
     # rows the link preview must not land on.
     3.times { controller.notes_new }

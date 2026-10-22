@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "../support/fake_host"
 require "file_utils"
 
 include Gori::Tui
@@ -14,149 +15,6 @@ include Gori::Tui
 # probe/event.cr has always promised the opposite — "the controller coalesces them into a
 # single list reload per frame" — so these examples pin the promise: one reload per drain, no
 # reload at all while Probe is not the active tab, and a bounded number of events per tick.
-
-# The narrow shell facade a controller is given; everything here is inert except `session`,
-# `notifications`, `status` and `active_tab` — the only members this drain touches. File-local
-# for the same reason oast_callback_cap_spec's identical double is: `Host` is ~30 abstract
-# methods, and a shared support double would be another file to keep in sync with the module.
-private class FakeHost
-  include Gori::Tui::Host
-
-  getter statuses = [] of String
-  property active_tab : Symbol = :probe
-
-  def initialize(@session : Gori::Session)
-    @jobs = Gori::Tui::Jobs.new
-    @notifications = Gori::Tui::Notifications.new
-  end
-
-  def session : Gori::Session
-    @session
-  end
-
-  def jobs : Gori::Tui::Jobs
-    @jobs
-  end
-
-  def notifications : Gori::Tui::Notifications
-    @notifications
-  end
-
-  def status(message : String) : Nil
-    @statuses << message
-  end
-
-  def request_overlay(kind : Symbol) : Nil
-  end
-
-  def request_focus(pane : Symbol) : Nil
-  end
-
-  def focus_body : Nil
-  end
-
-  def resolve_subtab_focus : Nil
-  end
-
-  def switch_tab(tab : Symbol) : Nil
-  end
-
-  def goto_tab(tab : Symbol) : Nil
-  end
-
-  def open_palette : Nil
-  end
-
-  def open_help_query(surface : Symbol) : Nil
-  end
-
-  def open_space_menu : Nil
-  end
-
-  def open_fuzz_set_editor(edit_index : Int32?) : Nil
-  end
-
-  def open_fuzz_advanced_editor : Nil
-  end
-
-  def open_authorize_identities : Nil
-  end
-
-  def reconfigure_sequence : Nil
-  end
-
-  def open_scope_rule_editor(edit_id : Int64?, kind : String, match_type : String, pattern : String) : Nil
-  end
-
-  def open_custom_rule_editor(rule : Gori::Probe::CustomRule?) : Nil
-  end
-
-  def open_rewriter_preset_picker : Nil
-  end
-
-  def open_rewriter_rule_editor(rule : Gori::Store::MatchRule?) : Nil
-  end
-
-  def open_colormarker_rule_editor(rule : Gori::Store::ColorRule?) : Nil
-  end
-
-  def open_colormarker_color_editor(color : Gori::Settings::ColormarkerColor?) : Nil
-  end
-
-  def open_extract_rule_editor(rule : Gori::Store::ExtractRule?) : Nil
-  end
-
-  def open_chain_save : Nil
-  end
-
-  def open_chain_load : Nil
-  end
-
-  def open_oast_provider_editor(provider : Gori::Oast::ProviderConfig?) : Nil
-  end
-
-  def confirm(title : String, message : String, *, confirm_label : String, danger : Bool,
-              return_to : Symbol = :none, &action : -> Nil) : Nil
-    action.call
-  end
-
-  def overlay : Symbol
-    :none
-  end
-
-  def focus : Symbol
-    :body
-  end
-
-  def reveal? : Bool
-    false
-  end
-
-  def toggle_reveal : Nil
-  end
-
-  def pretty? : Bool
-    false
-  end
-
-  def toggle_pretty : Nil
-  end
-
-  def toggle_scope_lens : Nil
-  end
-
-  def toggle_sandbox : Nil
-  end
-
-  def apply_project_network(bind_host : String, bind_port : Int32, upstream : String,
-                            connect_secs : Int32, io_secs : Int32, capture_mib : Int32) : String
-    ""
-  end
-
-  def apply_project_protos(spec : String) : String
-    ""
-  end
-end
 
 # Counts the full-table reloads the drain triggers. Crystal has no `override`, so this
 # deliberately shadows the base method and chains with `super` — the point is to observe how
@@ -187,7 +45,7 @@ private def with_probe_controller(&)
   session = Gori::Session.open(Gori::Config.new(listen: "127.0.0.1", port: 0),
     Gori::Proxy::Tls::CertAuthority.load_or_create(PROBE_DRAIN_CA_ROOT), Gori::Verbs.registry, project)
   begin
-    host = FakeHost.new(session)
+    host = FakeHost.new(session, :probe)
     yield SpyProbeController.new(host), host, session
   ensure
     session.close

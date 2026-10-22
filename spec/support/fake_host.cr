@@ -14,7 +14,7 @@ class FakeHost
 
   getter statuses = [] of String
 
-  def initialize(@session : Gori::Session)
+  def initialize(@session : Gori::Session, @active_tab : Symbol = :project)
     @jobs = Gori::Tui::Jobs.new
     @notifications = Gori::Tui::Notifications.new
   end

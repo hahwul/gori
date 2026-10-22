@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "../support/fake_host"
 require "file_utils"
 require "../support/fake_context"
 require "../../src/gori/tui/controllers/diff_controller"
@@ -17,148 +18,6 @@ include Gori::Tui
 #     anything here — and after `s` that is A, not B.
 #   * that a capture pruned between the run and the keystroke is dropped rather than filed
 #     as a link row pointing at a rowid SQLite will later hand to an unrelated flow.
-
-private class DiffFakeHost
-  include Gori::Tui::Host
-
-  getter statuses = [] of String
-  property active_tab : Symbol = :target
-
-  def initialize(@session : Gori::Session)
-    @jobs = Gori::Tui::Jobs.new
-    @notifications = Gori::Tui::Notifications.new
-  end
-
-  def session : Gori::Session
-    @session
-  end
-
-  def jobs : Gori::Tui::Jobs
-    @jobs
-  end
-
-  def notifications : Gori::Tui::Notifications
-    @notifications
-  end
-
-  def status(message : String) : Nil
-    @statuses << message
-  end
-
-  def request_overlay(kind : Symbol) : Nil
-  end
-
-  getter focus_requests = [] of Symbol
-
-  def request_focus(pane : Symbol) : Nil
-    @focus_requests << pane
-  end
-
-  def focus_body : Nil
-  end
-
-  def resolve_subtab_focus : Nil
-  end
-
-  def switch_tab(tab : Symbol) : Nil
-  end
-
-  def goto_tab(tab : Symbol) : Nil
-  end
-
-  def open_palette : Nil
-  end
-
-  def open_help_query(surface : Symbol) : Nil
-  end
-
-  def open_space_menu : Nil
-  end
-
-  def open_fuzz_set_editor(edit_index : Int32?) : Nil
-  end
-
-  def open_fuzz_advanced_editor : Nil
-  end
-
-  def open_authorize_identities : Nil
-  end
-
-  def reconfigure_sequence : Nil
-  end
-
-  def open_scope_rule_editor(edit_id : Int64?, kind : String, match_type : String, pattern : String) : Nil
-  end
-
-  def open_custom_rule_editor(rule : Gori::Probe::CustomRule?) : Nil
-  end
-
-  def open_rewriter_preset_picker : Nil
-  end
-
-  def open_rewriter_rule_editor(rule : Gori::Store::MatchRule?) : Nil
-  end
-
-  def open_colormarker_rule_editor(rule : Gori::Store::ColorRule?) : Nil
-  end
-
-  def open_colormarker_color_editor(color : Gori::Settings::ColormarkerColor?) : Nil
-  end
-
-  def open_extract_rule_editor(rule : Gori::Store::ExtractRule?) : Nil
-  end
-
-  def open_chain_save : Nil
-  end
-
-  def open_chain_load : Nil
-  end
-
-  def open_oast_provider_editor(provider : Gori::Oast::ProviderConfig?) : Nil
-  end
-
-  def confirm(title : String, message : String, *, confirm_label : String, danger : Bool,
-              return_to : Symbol = :none, &action : -> Nil) : Nil
-    action.call
-  end
-
-  def overlay : Symbol
-    :none
-  end
-
-  def focus : Symbol
-    :body
-  end
-
-  def reveal? : Bool
-    false
-  end
-
-  def toggle_reveal : Nil
-  end
-
-  def pretty? : Bool
-    false
-  end
-
-  def toggle_pretty : Nil
-  end
-
-  def toggle_scope_lens : Nil
-  end
-
-  def toggle_sandbox : Nil
-  end
-
-  def apply_project_network(bind_host : String, bind_port : Int32, upstream : String,
-                            connect_secs : Int32, io_secs : Int32, capture_mib : Int32) : String
-    ""
-  end
-
-  def apply_project_protos(spec : String) : String
-    ""
-  end
-end
 
 # The CA is the slow part of standing a Session up and no example asserts anything about it.
 private DIFF_CTRL_CA_ROOT = File.tempname("gori-diff-ctrl-ca")
@@ -187,7 +46,7 @@ private def with_diff_controller(&)
   session = Gori::Session.open(Gori::Config.new(listen: "127.0.0.1", port: 0),
     Gori::Proxy::Tls::CertAuthority.load_or_create(DIFF_CTRL_CA_ROOT), Gori::Verbs.registry, now)
   begin
-    host = DiffFakeHost.new(session)
+    host = FakeHost.new(session, :target)
     yield Gori::Tui::DiffController.new(host), host, session, before
   ensure
     session.close
