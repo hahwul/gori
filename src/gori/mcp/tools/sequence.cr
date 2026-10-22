@@ -160,6 +160,7 @@ module Gori
       private def sequence_status(h) : Result
         sjob = lookup_job(h, @sequence_jobs, "sequence", "status")
         return sjob if sjob.is_a?(Result)
+        wait_for_job(sjob, h)
         Result.new(JSON.build do |j|
           j.object do
             j.field "job_id", sjob.id
@@ -369,6 +370,7 @@ module Gori
                                    "not 'sent'), errors, tokens_stored. budget_exhausted: the run ended UNDER goal " \
                                    "so the report rests on a short sample." do |s|
           s.field "job_id", strprop("id from sequence_start"), required: true
+          s.field "wait_ms", job_wait_prop
         end
 
         tool j, "sequence_results",

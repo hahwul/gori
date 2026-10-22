@@ -399,6 +399,7 @@ module Gori
       private def fuzz_status(h) : Result
         fjob = lookup_job(h, @jobs, "fuzz", "status")
         return fjob if fjob.is_a?(Result)
+        wait_for_job(fjob, h)
         Result.new(JSON.build do |j|
           j.object do
             j.field "job_id", fjob.id
@@ -1601,6 +1602,7 @@ module Gori
                                "stop_index) are partial, NOT exhaustive: see incomplete_reason, candidates_remaining. The stop_index row is in " \
                                "fuzz_results unless results_truncated." do |s|
           s.field "job_id", strprop("id from fuzz_start"), required: true
+          s.field "wait_ms", job_wait_prop
         end
 
         tool j, "fuzz_results",

@@ -167,6 +167,7 @@ module Gori
       private def authorize_status(h) : Result
         ajob = lookup_job(h, @authorize_jobs, "authorize", "status", missing_field: "job_id")
         return ajob if ajob.is_a?(Result)
+        wait_for_job(ajob, h)
         Result.new(JSON.build do |j|
           j.object do
             j.field "job_id", ajob.id
@@ -678,6 +679,7 @@ module Gori
           "`skipped`/`failed[]` flows (overflow ids in `skipped_unshown_ids` / " \
           "`failed_unshown_ids`)." do |s|
           s.field "job_id", strprop("id from authorize_start"), required: true
+          s.field "wait_ms", job_wait_prop
         end
 
         tool j, "authorize_results",

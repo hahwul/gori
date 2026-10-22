@@ -111,6 +111,7 @@ module Gori
       private def mine_status(h) : Result
         mjob = lookup_job(h, @mine_jobs, "mine", "status")
         return mjob if mjob.is_a?(Result)
+        wait_for_job(mjob, h)
         Result.new(JSON.build do |j|
           j.object do
             j.field "job_id", mjob.id
@@ -398,6 +399,7 @@ module Gori
                                "before calling a sweep clean. `baseline_warning` makes findings tentative: READ IT even " \
                                "when baseline_stable is true." do |s|
           s.field "job_id", strprop("id from mine_start"), required: true
+          s.field "wait_ms", job_wait_prop
         end
 
         tool j, "mine_results",

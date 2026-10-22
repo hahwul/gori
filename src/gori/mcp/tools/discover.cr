@@ -326,6 +326,7 @@ module Gori
       private def discover_status(h) : Result
         djob = lookup_job(h, @discover_jobs, "discover", "status")
         return djob if djob.is_a?(Result)
+        wait_for_job(djob, h)
         s = djob.stats
         Result.new(JSON.build do |j|
           j.object do
@@ -440,6 +441,7 @@ module Gori
                                    "unsaved_flows: findings with no History/Sitemap row, which get_flow " \
                                    "cannot open." do |s|
           s.field "job_id", strprop("id from discover_start"), required: true
+          s.field "wait_ms", job_wait_prop
         end
 
         tool j, "discover_results",

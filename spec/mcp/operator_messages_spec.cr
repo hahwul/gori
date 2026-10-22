@@ -143,7 +143,7 @@ describe "MCP operator_messages (#1090)" do
         %({"jsonrpc":"2.0","id":2,"method":"tools/list"}))
       tools = lines.find { |l| l["id"]? == 2 }.not_nil!["result"]["tools"].as_a
       op = tools.find { |t| t["name"] == "operator_messages" }.not_nil!
-      op["inputSchema"]["properties"].as_h.keys.sort!.should eq(%w[include_delivered limit since])
+      op["inputSchema"]["properties"].as_h.keys.sort!.should eq(%w[include_delivered limit since wait_ms])
     end
   end
 

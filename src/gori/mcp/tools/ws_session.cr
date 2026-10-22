@@ -195,6 +195,10 @@ module Gori
         job = lookup_job(h, @ws_jobs, "ws_session", "status")
         return job if job.is_a?(Result)
         after = optional_int_arg(h, "after") || 0_i64
+        # A session is long-lived, so `wait_ms` here waits for a reply past `after`, not for
+        # the session to end.
+        wait_ms = wait_ms_arg(h)
+        ws_wait_for_reply(job.session, after, wait_ms) if wait_ms > 0
         # `status` first: reading it is what lazily stamps `ended_at_ms` off the session's
         # close time, so a peer close is reported WITH its end time on the very first poll,
         # before `ended_at` below reads it.

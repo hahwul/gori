@@ -272,6 +272,7 @@ module Gori
           "returns the live transcript; pass 'after' to read only rows past a cursor." do |s|
           s.field "job_id", strprop("a job id: fz_* fuzz, mn_* mine, ds_* discover, sq_* sequence, az_* authorize, ws_* WebSocket-session"), required: true
           s.field "after", intprop("ws_* only: return only transcript rows with seq greater than this cursor (from a previous read's 'cursor'); default 0")
+          s.field "wait_ms", intprop("wait up to this many ms while the job runs (ws_*: for a reply past 'after'); max #{LONG_POLL_MAX_WAIT_MS}")
         end
 
         tool j, "stop_job",
