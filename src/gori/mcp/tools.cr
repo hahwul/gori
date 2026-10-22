@@ -1718,7 +1718,7 @@ module Gori
       end
 
       private def job_wait_prop : JSON::Any
-        intprop("wait up to this many ms while the job runs, returning as soon as it ends (max #{LONG_POLL_MAX_WAIT_MS})")
+        intprop("hold up to N ms while running, max #{LONG_POLL_MAX_WAIT_MS}")
       end
 
       # A job status read with `wait_ms`: hold it while the job is still running.

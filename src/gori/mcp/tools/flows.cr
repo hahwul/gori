@@ -179,15 +179,20 @@ module Gori
           page = history_rows(filter, filtered, scope_unconfigured, fetch, before_id, since_id)
           # `wait_ms`: the flows are written by another process, so each slice reads the mark
           # (indexed scalars) and re-runs the page only once it moves. A new flow the filter
-          # rejects moves it too, and the wait goes on.
+          # rejects moves it too, and the wait goes on. A filtered re-read can scan bodies
+          # over the whole tail, so under live capture it runs at most once per
+          # HISTORY_REREAD_GAP. It never drains the FTS index here (a write, contending with
+          # the capturing gori for SQLite's one writer slot, P6): rows still unindexed are
+          # waited out, since the gori that wrote them indexes its own.
+          reread_at = Time.instant
           if page.empty? && !scope_unconfigured
             long_poll(wait_ms) do
               next false if (now = history_mark(filtered)) == mark
-              mark = now
-              # A busy writer leaves the new rows unindexed: wait on rather than answer
-              # without them (the next slice drains again; an empty page keeps the cursor).
-              next false if drain_fts_or_error(filter.uses_fts?)
+              next false if filtered && Time.instant < reread_at
+              next false if filter.uses_fts? && store.fts_backlog > 0
               page = history_rows(filter, filtered, scope_unconfigured, fetch, before_id, since_id)
+              mark = now
+              reread_at = Time.instant + HISTORY_REREAD_GAP
               !page.empty?
             end
           end
@@ -229,6 +234,9 @@ module Gori
           end
         end)
       end
+
+      # The least time between two filtered `list_history` re-reads while a wait is held.
+      HISTORY_REREAD_GAP = 1.second
 
       # What a `list_history` wait watches: the flow id high-water mark, which every capture
       # moves. A filtered tail also needs `data_version`, since a flow inserted at request
@@ -442,13 +450,15 @@ module Gori
         actor = closed_filter(h, "actor", EVENT_ACTORS)
         return actor if actor.is_a?(Result)
         kind = str(h, "kind")
-        rows, next_cursor = events_page(since, limit, source, kind, actor)
+        rows, next_cursor, full = events_page(since, limit, source, kind, actor)
         # `wait_ms`: re-read past the cursor each slice — a primary-key range read that finds
-        # nothing is the cheap check. Pages the filters emptied still advance the cursor.
+        # nothing is the cheap check. Only the feed's END is waited at: a full page the filters
+        # emptied answers at once with its advanced cursor, or a stored match deep in a long
+        # feed would be reached one page per slice.
         long_poll(wait_ms_arg(h)) do
-          rows, next_cursor = events_page(next_cursor, limit, source, kind, actor)
-          !rows.empty?
-        end if rows.empty?
+          rows, next_cursor, full = events_page(next_cursor, limit, source, kind, actor)
+          !rows.empty? || full
+        end if rows.empty? && !full
         # Under REPLY_ROWS_BUDGET (#1649): a cut page resumes after the last event it carried.
         parts = fit_rows(rows) { |rj, r, _| Serialize.event_row(rj, r) }
         cut = parts.size < rows.size
@@ -462,16 +472,17 @@ module Gori
         end)
       end
 
-      # One `list_events` page past `since`: the rows the filters keep, and the max id scanned.
+      # One `list_events` page past `since`: the rows the filters keep, the max id scanned, and
+      # whether the scan filled `limit` (more of the feed is stored past it).
       private def events_page(since : Int64, limit : Int32, source : String?, kind : String?,
-                              actor : String?) : {Array(Store::EventRow), Int64}
+                              actor : String?) : {Array(Store::EventRow), Int64, Bool}
         scanned = store.events_after(since, limit)
         next_cursor = scanned.empty? ? since : scanned.last.id
         rows = scanned
         rows = rows.select { |r| r.source == source } if source
         rows = rows.select { |r| r.kind == kind } if kind && !kind.empty?
         rows = rows.select { |r| r.actor == actor } if actor
-        {rows, next_cursor}
+        {rows, next_cursor, scanned.size >= limit}
       end
 
       @[Tool("get_flow", requires: ["get_response_body_chunk"])]

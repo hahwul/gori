@@ -199,13 +199,16 @@ module Gori
         mark = store.last_event_id
         page, fresh, read_since = operator_messages_page(since, pid, limit, read_on)
         rows = include_delivered ? page.rows : fresh
-        if rows.empty?
+        # Only the feed's END is waited at: a full page with nothing to hand over (rows already
+        # carried, or another session's) answers at once with `has_more`, or the wait would
+        # re-read that same page until it ran out.
+        if rows.empty? && !page.full
           long_poll(wait_ms) do
             next false if (last = store.last_event_id) <= mark
             mark = last
             page, fresh, read_since = operator_messages_page(since, pid, limit, read_on)
             rows = include_delivered ? page.rows : fresh
-            !rows.empty?
+            !rows.empty? || page.full
           end
         end
         {page, fresh, read_since, rows}

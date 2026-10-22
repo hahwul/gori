@@ -146,6 +146,34 @@ describe "MCP wait_ms long polls" do
     end
   end
 
+  it "list_events{wait_ms} answers a full page its filter emptied at once, cursor advanced" do
+    with_store do |store|
+      tools = tools_for(store)
+      noise = (1..250).map { |i| store.insert_event("probe", "noise", :info, "n#{i}") }
+      store.insert_event("probe", "want", :info, "match")
+      j = nil
+      took = elapsed { j = call_json(tools, "list_events", %({"since":0,"kind":"want","limit":10,"wait_ms":30000})) }
+      took.should be < 1.second
+      j.not_nil!["events"].as_a.should be_empty
+      j.not_nil!["next_cursor"].as_i64.should eq(noise[9])
+    end
+  end
+
+  it "operator_messages{since, wait_ms} answers a full page of carried rows at once" do
+    with_store do |store|
+      tools = tools_for(store)
+      tools.call("operator_messages", JSON.parse("{}")) # take the floor
+      3.times { |i| store.post_agent_message("carried #{i}", "all", nil) }
+      call_json(tools, "operator_messages", "{}")["messages"].as_a.size.should eq(3) # carries them
+      store.post_agent_message("fresh", "all", nil)
+      j = nil
+      took = elapsed { j = call_json(tools, "operator_messages", %({"since":0,"limit":2,"wait_ms":3000})) }
+      took.should be < 1.second
+      j.not_nil!["messages"].as_a.should be_empty
+      j.not_nil!["has_more"].as_bool.should be_true
+    end
+  end
+
   it "operator_messages{wait_ms} returns a message the operator writes mid-wait" do
     with_two_connections do |writer, reader|
       tools = tools_for(reader)
@@ -171,6 +199,9 @@ describe "MCP wait_ms long polls" do
       }.to_json)["job_id"].as_s
       call_json(tools, "fuzz_status", {job_id: job_id}.to_json)["status"].as_s.should eq("running")
       call_json(tools, "get_job", {job_id: job_id, wait_ms: 15000}.to_json)["status"].as_s.should eq("done")
+      # Already over: the wait returns at once.
+      took = elapsed { call_json(tools, "get_job", {job_id: job_id, wait_ms: 30000}.to_json) }
+      took.should be < 1.second
     end
   end
 end
