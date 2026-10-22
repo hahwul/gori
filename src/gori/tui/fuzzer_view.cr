@@ -841,7 +841,7 @@ module Gori::Tui
       crlf = text.index("\r\n\r\n")
       lf = text.index("\n\n")
       # First blank line wins, whichever form it is (an LF head whose BODY holds a CRLFCRLF
-      # must not be split at the body's) — same rule as Fuzz::ContentLength.boundary.
+      # must not be split at the body's) — same rule as Env.head_body_separator.
       sep, sep_w = if crlf && (lf.nil? || crlf <= lf)
                      {crlf, 4}
                    elsif lf
