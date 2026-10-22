@@ -27,10 +27,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     decoder_controller.clear_all
   end
 
-  forward decoder_copy_selection : Nil,
-    decoder_copy_all : Nil,
-    decoder_read_mode? : Bool,
-    to: decoder_controller
+  forward decoder_read_mode? : Bool, to: decoder_controller
 
   def decoder_cycle_mode : Nil
     decoder_controller.cycle_output_mode

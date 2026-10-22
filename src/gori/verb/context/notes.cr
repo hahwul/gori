@@ -6,8 +6,6 @@ abstract class Gori::Verb::ExecContext
   abstract def notes_new : Nil              # open a fresh blank note sub-tab
   abstract def notes_close : Nil            # close the active note sub-tab (keeps ≥1)
   abstract def notes_duplicate_subtab : Nil # clone the active note's text into a new sibling
-  abstract def notes_copy : Nil             # copy selection or current line (READ mode)
-  abstract def notes_copy_all : Nil         # copy the entire current note to the clipboard
   abstract def notes_read_mode? : Bool      # READ vs INS (gates y/copy verbs)
   abstract def notes_clear : Nil            # clear the current note's text
   abstract def notes_export : Nil           # open the destination-path popup, then write the note as .md

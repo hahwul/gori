@@ -21,9 +21,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     notes_controller.notes_duplicate
   end
 
-  forward notes_copy : Nil,
-    notes_copy_all : Nil,
-    notes_read_mode? : Bool,
+  forward notes_read_mode? : Bool,
     notes_clear : Nil,
     to: notes_controller
 

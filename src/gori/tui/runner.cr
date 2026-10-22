@@ -6244,14 +6244,14 @@ module Gori::Tui
 
     private def read_copy_dispatch : Nil
       case @active_tab
-      when :notes    then read_selection_active? ? notes_copy : notes_copy_all
+      when :notes    then read_selection_active? ? notes_controller.notes_copy : notes_controller.notes_copy_all
       when :repeater then read_selection_active? ? repeater_controller.copy : repeater_controller.copy_all
       when :fuzzer   then read_selection_active? ? fuzzer_controller.copy : fuzzer_controller.copy_all
-      when :decoder  then read_selection_active? ? decoder_copy_selection : decoder_copy_all
+      when :decoder  then read_selection_active? ? decoder_controller.decoder_copy_selection : decoder_controller.decoder_copy_all
       when :jwt      then jwt_copy
       when :cookie   then cookie_copy
-      when :issues   then read_selection_active? ? issues_copy : issues_copy_all
-      when :project  then read_selection_active? ? project_copy : project_copy_all
+      when :issues   then read_selection_active? ? issues_controller.issues_copy : issues_controller.issues_copy_all
+      when :project  then read_selection_active? ? project_controller.project_copy : project_controller.project_copy_all
         # One delegator, not the selection/all pair: the pane's own copy verb already picks
         # between them and formats the toast, because "all" here means the whole TRANSFORM —
         # a string that exists nowhere else, not a buffer the shell could re-read.

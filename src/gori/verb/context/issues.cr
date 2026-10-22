@@ -46,8 +46,6 @@ abstract class Gori::Verb::ExecContext
   abstract def issue_set_cvss : Nil
   abstract def issue_edit_notes : Nil
   abstract def issues_notes_read_mode? : Bool # detail open, notes not in INS (gates y/copy)
-  abstract def issues_copy : Nil              # copy selection from issue notes (READ)
-  abstract def issues_copy_all : Nil          # copy all issue notes (space menu)
   abstract def issue_edit_title : Nil         # rename + set severity via the form overlay
   # `r` — the selected RELATED row into a Repeater tab (a live flow's capture, a frozen row's
   # frozen request), falling back to the issue's first flow row. There is no `issue_open_flow`
@@ -70,6 +68,5 @@ abstract class Gori::Verb::ExecContext
   abstract def issue_evidence_delete : Nil
   abstract def issue_related_freezable? : Bool
   abstract def issue_related_frozen? : Bool
-  abstract def issues_export_pick : Nil             # ask for the format, then the path
-  abstract def issues_export(format : Symbol) : Nil # :markdown | :json | :sarif → asks for the path
+  abstract def issues_export_pick : Nil # ask for the format, then the path
 end

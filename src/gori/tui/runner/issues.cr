@@ -147,8 +147,6 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   forward issue_edit_notes : Nil,
     issues_notes_read_mode? : Bool,
-    issues_copy : Nil,
-    issues_copy_all : Nil,
     to: issues_controller
 
   # Re-open the create form seeded from the open issue (title + severity), in
