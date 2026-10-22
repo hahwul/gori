@@ -51,9 +51,12 @@ module Gori
           return nil if req.malformed?
           return nil unless method_allowed?(req.method.upcase, opts)
           return nil unless detail.row.status == 429
-          request = rebuild_with_bypass_headers(detail.request_head, detail.request_body, opts.aggressive)
-          control = rebuild_with_bypass_headers(detail.request_head, detail.request_body,
-            opts.aggressive, insert: false)
+          request = rebuild_with_headers(detail.request_head, detail.request_body,
+            *ForbiddenBypass.bypass_edit(opts.aggressive, insert: true))
+          # CONTROL — the same rebuild without the forged values, so the two legs differ in exactly
+          # one thing.
+          control = rebuild_with_headers(detail.request_head, detail.request_body,
+            *ForbiddenBypass.bypass_edit(opts.aggressive, insert: false))
           Plan.new(request, [] of Param, key_string(detail, req.method.upcase, req.target, opts.aggressive), [control])
         end
 
@@ -92,45 +95,6 @@ module Gori
                                aggressive : Bool) : String
           tag = aggressive ? "aggr" : "base"
           endpoint_key(detail, method_upcase, path_only(Active.origin_form(target)), tag: tag)
-        end
-
-        # Drop any client-IP headers the browser sent, insert one authoritative copy of each (the
-        # spoofed value), and normalize the request line to origin-form. `insert: false` builds the
-        # CONTROL — the same rebuild without the forged values, so the two legs differ in exactly
-        # one thing. Mirrors ForbiddenBypass#rebuild_with_bypass_headers (kept local so the two
-        # rules stay independent; the header list is shared via the constants).
-        private def rebuild_with_bypass_headers(head : Bytes, body : Bytes?, aggressive : Bool,
-                                                insert : Bool = true) : Bytes
-          headers = aggressive ? ForbiddenBypass::BYPASS_HEADERS_AGGRESSIVE : ForbiddenBypass::BYPASS_HEADERS
-          drop_set = aggressive ? ForbiddenBypass::BYPASS_HEADER_SET_AGGRESSIVE : ForbiddenBypass::BYPASS_HEADER_SET
-          combined = if body && !body.empty?
-                       io = IO::Memory.new(head.size + body.size)
-                       io.write(head)
-                       io.write(body)
-                       io.to_slice
-                     else
-                       head
-                     end
-          hbytes, bbytes, eol = Miner::Inject.split(combined)
-          lines = String.new(hbytes).split(eol)
-          kept = [] of String
-          lines.each_with_index do |l, i|
-            next if i > 0 && bypass_header?(l, drop_set)
-            kept << l
-          end
-          unless kept.empty?
-            rl = kept[0].split(' ')
-            kept[0] = "#{rl[0]} #{Active.origin_form(rl[1])} #{rl[2]}" if rl.size == 3
-            headers.each_with_index { |name, i| kept.insert(1 + i, "#{name}: #{ForbiddenBypass::BYPASS_VALUE}") } if insert
-          end
-          io = IO::Memory.new
-          io << kept.join(eol) << eol << eol
-          io.write(bbytes) unless bbytes.empty?
-          io.to_slice
-        end
-
-        private def bypass_header?(line : String, drop_set : Set(String)) : Bool
-          (c = line.index(':')) ? drop_set.includes?(line[0...c].strip.downcase) : false
         end
       end
     end

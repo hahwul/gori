@@ -105,12 +105,13 @@ module Gori
           return nil if req.malformed?
           return nil unless method_allowed?(req.method.upcase, opts)
           return nil unless denied_status?(detail.row.status)
-          request = rebuild_with_bypass_headers(detail.request_head, detail.request_body, opts.aggressive)
+          request = rebuild_with_headers(detail.request_head, detail.request_body,
+            *ForbiddenBypass.bypass_edit(opts.aggressive, insert: true))
           # The control carries NO spoofing headers — but is otherwise rebuilt through the same
           # path (origin-form request line, browser-sent copies of those headers dropped), so the
           # two legs differ in exactly one thing: whether our forged values are present.
-          control = rebuild_with_bypass_headers(detail.request_head, detail.request_body,
-            opts.aggressive, insert: false)
+          control = rebuild_with_headers(detail.request_head, detail.request_body,
+            *ForbiddenBypass.bypass_edit(opts.aggressive, insert: false))
           Plan.new(request, [] of Param, key_string(detail, req.method.upcase, req.target, opts.aggressive), [control])
         end
 
@@ -165,52 +166,20 @@ module Gori
           endpoint_key(detail, method_upcase, path_only(Active.origin_form(target)), tag: tag)
         end
 
-        # Rebuild the request with the full IP-spoofing header set inserted right after the request
-        # line: first drop any of those headers the browser already sent (so exactly one authoritative
-        # copy of each remains), then insert ours. The body is untouched — none of the inserted names
-        # is Content-Length — so no resync is needed. `aggressive` selects the wider header set.
+        # The `rebuild_with_headers` edit for the IP-spoofing header set: drop any of those headers
+        # the browser already sent (so exactly one authoritative copy of each remains), then insert
+        # ours right after the request line. `aggressive` selects the wider header set. Shared with
+        # RateLimitBypass, which sends the same set.
         #
         # `insert: false` builds the CONTROL: the same rebuild — same dropped headers, same
         # origin-form request line — but without our forged values, so the only difference between
         # the two legs is the thing under test. Dropping the browser's own copies on the control
         # too is deliberate: if the browser sent an X-Forwarded-For and we kept it only there, a
         # difference between the legs could come from ITS value rather than ours.
-        private def rebuild_with_bypass_headers(head : Bytes, body : Bytes?, aggressive : Bool,
-                                                insert : Bool = true) : Bytes
+        def self.bypass_edit(aggressive : Bool, insert : Bool) : {Set(String), Array(String)}
           headers = aggressive ? BYPASS_HEADERS_AGGRESSIVE : BYPASS_HEADERS
           drop_set = aggressive ? BYPASS_HEADER_SET_AGGRESSIVE : BYPASS_HEADER_SET
-          combined = if body && !body.empty?
-                       io = IO::Memory.new(head.size + body.size)
-                       io.write(head)
-                       io.write(body)
-                       io.to_slice
-                     else
-                       head
-                     end
-          hbytes, bbytes, eol = Miner::Inject.split(combined)
-          lines = String.new(hbytes).split(eol)
-          kept = [] of String
-          lines.each_with_index do |l, i|
-            next if i > 0 && bypass_header?(l, drop_set) # request line (i == 0) is normalized below
-            kept << l
-          end
-          # Normalize an absolute-form (forward-proxy) request line to origin-form: like the other
-          # active probes this is sent DIRECT to the origin (no proxy rewrite), and some origins
-          # reject an absolute-form target on a non-proxied request — which would make the bypass
-          # probe silently miss a real header-controllable gate. Origin-form passes through.
-          unless kept.empty?
-            rl = kept[0].split(' ')
-            kept[0] = "#{rl[0]} #{Active.origin_form(rl[1])} #{rl[2]}" if rl.size == 3
-            headers.each_with_index { |name, i| kept.insert(1 + i, "#{name}: #{BYPASS_VALUE}") } if insert
-          end
-          io = IO::Memory.new
-          io << kept.join(eol) << eol << eol
-          io.write(bbytes) unless bbytes.empty?
-          io.to_slice
-        end
-
-        private def bypass_header?(line : String, drop_set : Set(String)) : Bool
-          (c = line.index(':')) ? drop_set.includes?(line[0...c].strip.downcase) : false
+          {drop_set, insert ? headers.map { |name| "#{name}: #{BYPASS_VALUE}" } : [] of String}
         end
       end
     end

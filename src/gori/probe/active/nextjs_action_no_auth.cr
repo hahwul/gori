@@ -189,49 +189,21 @@ module Gori
         # origin-form (this goes DIRECT to the origin, like the sibling probes), and rejoin. The
         # body is untouched and no dropped header is Content-Length, so no resync is needed.
         private def rebuild_without_credentials(head : Bytes, body : Bytes?) : Bytes
-          combined = if body && !body.empty?
-                       io = IO::Memory.new(head.size + body.size)
-                       io.write(head)
-                       io.write(body)
-                       io.to_slice
-                     else
-                       head
-                     end
-          hbytes, bbytes, eol = Miner::Inject.split(combined)
-          lines = String.new(hbytes).split(eol)
-          kept = [] of String
-          dropping = false
-          lines.each_with_index do |l, i|
-            if i == 0 # request line — normalized below, never a header
-              kept << l
-              next
+          rebuild(head, body) do |lines|
+            dropping = false
+            i = -1
+            lines.reject! do |l|
+              next false if (i += 1) == 0 # request line — normalized below, never a header
+              # An obs-fold continuation (RFC 7230 §3.2.4: a line starting with SP/HTAB continues
+              # the previous header) belongs to whatever header it follows. Testing each line on
+              # its own dropped a folded `Cookie:` first line and KEPT its continuation, which
+              # then reads as a header line of its own — a head we forged, sent to the origin as
+              # the control request the whole finding rests on. Carry the drop across the fold.
+              next dropping if l.starts_with?(' ') || l.starts_with?('\t')
+              dropping = CRED_HEADERS.includes?(header_name(l) || "")
             end
-            # An obs-fold continuation (RFC 7230 §3.2.4: a line starting with SP/HTAB continues
-            # the previous header) belongs to whatever header it follows. Testing each line on
-            # its own dropped a folded `Cookie:` first line and KEPT its continuation, which
-            # then reads as a header line of its own — a head we forged, sent to the origin as
-            # the control request the whole finding rests on. Carry the drop across the fold.
-            if l.starts_with?(' ') || l.starts_with?('\t')
-              next if dropping
-              kept << l
-              next
-            end
-            dropping = credential_header?(l)
-            next if dropping
-            kept << l
+            origin_form_request_line!(lines)
           end
-          unless kept.empty?
-            rl = kept[0].split(' ')
-            kept[0] = "#{rl[0]} #{Active.origin_form(rl[1])} #{rl[2]}" if rl.size == 3
-          end
-          io = IO::Memory.new
-          io << kept.join(eol) << eol << eol
-          io.write(bbytes) unless bbytes.empty?
-          io.to_slice
-        end
-
-        private def credential_header?(line : String) : Bool
-          (c = line.index(':')) ? CRED_HEADERS.includes?(line[0...c].strip.downcase) : false
         end
       end
     end
