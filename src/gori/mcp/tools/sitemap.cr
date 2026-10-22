@@ -113,9 +113,11 @@ module Gori
           j.field "first_seen_iso", Gori.iso_micros(e.first_seen)
           j.field "last_seen", e.last_seen
           j.field "last_seen_iso", Gori.iso_micros(e.last_seen)
-          # Active tool → flow count, keyed by the path without its query (`Sitemap::Coverage`).
-          touched = coverage.touched_by(e.scheme, e.host, e.port, e.method, e.target)
-          j.field "touched_by", touched unless touched.empty?
+          # Active tool → count of recorded flows / saved fuzz results, keyed by the path
+          # without its query (`Sitemap::Coverage`).
+          if touched = coverage.touched_by(e.scheme, e.host, e.port, e.method, e.target)
+            j.field "touched_by", touched
+          end
           # The operator's free-text memo for this endpoint, when one is pinned. The key
           # is the tree's node path, which includes any query string.
           # NOT on a folded row, which is synthetic: `Sitemap.stamp_tags!` bars a tag on
@@ -739,7 +741,7 @@ module Gori
           "Distinct endpoints in capture, keyed by TRANSPORT (scheme, host, port, " \
           "http_version, method, target), with status set, success/error counts, " \
           "first/last-seen, `tag` for an operator memo (set_sitemap_tag), and `touched_by` " \
-          "(active tool -> flow count, per path sans query). Query-string " \
+          "(active tool -> recorded flows or saved fuzz results, per path sans query). Query-string " \
           "variants fold by default: `target` = path, `query_variants` = count, " \
           "`query_targets` = up to #{QUERY_SAMPLE_MAX} raw ones, memos in `variant_tags`. " \
           "Returns {entries, returned, scanned, offset, limit, has_more}, not a bare array. " \
@@ -752,7 +754,7 @@ module Gori
           s.field "fold_query", boolprop("fold the query-string variants of a path into one entry (default true)")
           s.field "collapse_transport", boolprop("legacy shape: host/method/target only, no counts")
           s.field "hide_static", boolprop("omit static assets (images, fonts, audio/video; never svg/css/js or status >= 400); = `-static:true`")
-          s.field "untested", boolprop("only endpoints no active tool (#{FlowSource::Kind.values.select(&.active?).join(", ", &.token)}) has touched")
+          s.field "untested", boolprop("only endpoints with no recorded flow from #{FlowSource::Kind.active.join("/", &.token)} and no saved fuzz run; while testing, re-call from offset 0 instead of paging")
           s.field "include_unrequested", boolprop("add `unrequested`: JS-referenced endpoints no request reached, from scan_js_endpoints (≤#{UNREQUESTED_MAX} within budget; `unrequested_total` = all); not filtered by `query`")
           s.field "strict", boolprop("refuse a query with an invalid term (else it is dropped, BROADENING the result, and named in `ignored_terms`)")
           s.field "lenient", boolprop("free-text an unknown `field:` instead of refusing (a typo then matches nothing, like an empty project)")

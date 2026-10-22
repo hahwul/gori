@@ -115,6 +115,11 @@ module Gori
         end
       end
 
+      # The `active?` members, in declaration order.
+      def self.active : Array(Kind)
+        values.select(&.active?)
+      end
+
       # Does the surface that produced this flow ALREADY run its own explicit passive scan on
       # the very same send?
       #

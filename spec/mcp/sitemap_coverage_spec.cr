@@ -33,6 +33,20 @@ describe "MCP list_sitemap coverage" do
     end
   end
 
+  it "counts a saved fuzz run that recorded nothing in History" do
+    with_store do |store|
+      seed(store, "/search?q=test", Gori::FlowSource::Kind::Proxy)
+      run = store.insert_fuzz_run(nil, "http://acme.test:80", "sniper", 1_i64)
+      store.insert_fuzz_result(run, 0_i64, "p", 200, 0_i64, 0, 0, 0_i64, nil, false, nil,
+        request: "GET /search?q=p HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice)
+      store.flush
+      tools = tools_for(store)
+
+      call_json(tools, "{}")["entries"][0]["touched_by"].should eq(JSON.parse(%({"fuzzer":1})))
+      call_json(tools, %({"untested":true}))["entries"].as_a.should be_empty
+    end
+  end
+
   it "keeps only untested endpoints under untested, paging what survives" do
     with_store do |store|
       seed(store, "/a", Gori::FlowSource::Kind::Proxy)

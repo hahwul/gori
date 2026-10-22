@@ -59,7 +59,7 @@ describe Gori::FlowSource do
     it "counts only the tools that test an endpoint as active" do
       # A crawl maps, a refresh or macro replay re-authenticates on the way to the real send,
       # and proxy/import traffic is not gori's: none of them makes an endpoint "tested".
-      FS::Kind.values.select(&.active?).map(&.token)
+      FS::Kind.active.map(&.token)
         .should eq(%w[repeater fuzzer miner sequencer authorize probe retest])
     end
 

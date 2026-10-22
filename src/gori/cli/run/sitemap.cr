@@ -156,7 +156,7 @@ module Gori
           # many ways, id folding about many endpoints sharing a route. Overloading --no-group
           # to mean both would make "show me every literal id" also dump every fuzz payload.
           p.on("--no-fold-query", "Don't fold query-string variants (/search?q=1, /search?q=2) onto their path") { fold_query = false }
-          p.on("--untested", "Only endpoints no active tool (#{FlowSource::Kind.values.select(&.active?).join(", ", &.token)}) has touched") { untested = true }
+          p.on("--untested", "Only endpoints with no recorded flow from #{FlowSource::Kind.active.join("/", &.token)} and no saved fuzz run (unrecorded, unsaved sweeps leave no trace)") { untested = true }
           p.on("--js-refs", "Also draw the endpoints captured JavaScript references and nobody requested (see `sitemap js --scan`)") { js_refs = true }
           format_flag(p, [:text, :json, :paths], "Output: text (default tree) | json | paths") { |f| format = f }
         end

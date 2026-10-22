@@ -122,12 +122,8 @@ describe "Sitemap covering index (schema V38)" do
 
   it "reads endpoint coverage off idx_flows_list without touching a row" do
     with_store do |store|
-      # `endpoint_coverage` (reads.cr): `source` sits after the body BLOBs.
-      plan = query_plan(store, "SELECT scheme, host, port, method, " \
-                               "substr(target, 1, instr(target || '?', '?') - 1) AS path, source, COUNT(*) " \
-                               "FROM flows WHERE source IN ('repeater', 'fuzzer') " \
-                               "GROUP BY scheme, host, port, method, path, source")
-      plan.should contain("COVERING INDEX idx_flows_list")
+      # `endpoint_coverage` runs exactly this: `source` sits after the body BLOBs.
+      query_plan(store, Gori::Store::COVERAGE_SQL).should contain("COVERING INDEX idx_flows_list")
     end
   end
 
