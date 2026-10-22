@@ -144,7 +144,9 @@ module Gori
       exp.to_s
     end
 
-    private def claim_s(seg : String, key : String) : String?
+    # The string claim `key` of a base64url JSON segment, or nil when unreadable. Public for
+    # the Decoder's `jwt-decode` alg:none warning and `token_alg`.
+    def claim_s(seg : String, key : String) : String?
       RawJson.member(String.new(Base64.decode(seg)), key).try(&.as_s?)
     rescue
       nil

@@ -339,11 +339,7 @@ module Gori
     # The header's declared `alg`, for pre-selecting the alg badge when a token is loaded
     # into the Encode editors. nil when unreadable or absent.
     def token_alg(token : String) : String?
-      seg = token.strip.split('.')[0]?
-      return nil unless seg
-      RawJson.member(String.new(Base64.decode(seg)), "alg").try(&.as_s?)
-    rescue
-      nil
+      token.strip.split('.')[0]?.try { |seg| claim_s(seg, "alg") }
     end
 
     # --- internals ----------------------------------------------------------
