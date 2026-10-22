@@ -127,7 +127,7 @@ module Gori
       # HOST-level tree (`build` over bare (host, method, target) triples — the retest diff's
       # keys), where the label is the bare host.
       property origin : Origin?
-      # Active tool token → flow count (`Coverage#stamp!`); nil when none touched this node.
+      # Active tool token → recorded flows or saved fuzz results (`Coverage#stamp!`); nil when none touched this node.
       property touched_by : Hash(String, Int64)?
 
       # Build-time label→child index so `child` is O(1) instead of a linear sibling scan —

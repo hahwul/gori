@@ -1097,8 +1097,10 @@ module Gori
     record FuzzRunCoverage, origin : String, request_line : Bytes, count : Int64
 
     # The saved-run half of the coverage. A sweep is recorded in History only on request, but a
-    # saved run (`save_results`, `--save`, the TUI's save) keeps every result's rendered
-    # `request` (`keep_bodies` is forced to all), and its request line names the endpoint. The
+    # saved run (`save_results`, `--save`, the TUI's save) keeps every result's request
+    # (`keep_bodies` is forced to all), and its request line names the endpoint: `wire` when
+    # the send seam rewrote the template (`$NAME`), else `request` — what
+    # `Fuzz::HistoryRecord` records, so a sweep both saved and recorded keys the same. The
     # run row itself holds only the origin. A WebSocket run's request is a frame, not a request
     # line, and a compacted result holds no request: both are skipped. Release build: 3.6 ms
     # over 10k saved results carrying 8 KB bodies.
@@ -1106,10 +1108,12 @@ module Gori
       rows = [] of FuzzRunCoverage
       # Cut at the query in SQL, so a sweep of `?q=` groups into one row rather than handing
       # back one line per payload to parse. A `?` past the LF is a header's, not the target's.
+      # `wire` is non-NULL only on a rewritten result, so only there is its overflow walked.
       @db.query("SELECT r.target, CASE WHEN q > 0 AND q < lf THEN substr(request, 1, q - 1) " \
                 "ELSE substr(request, 1, lf) END AS line, COUNT(*) " \
                 "FROM (SELECT run_id, request, instr(request, X'3F') AS q, instr(request, X'0A') AS lf " \
-                "FROM fuzz_results WHERE request IS NOT NULL) f JOIN fuzz_runs r ON r.id = f.run_id " \
+                "FROM (SELECT run_id, COALESCE(wire, request) AS request FROM fuzz_results) " \
+                "WHERE request IS NOT NULL) f JOIN fuzz_runs r ON r.id = f.run_id " \
                 "WHERE r.websocket = 0 AND f.lf > 0 GROUP BY r.target, line") do |rs|
         rs.each { rows << FuzzRunCoverage.new(rs.read(String), rs.read(Bytes), rs.read(Int64)) }
       end

@@ -57,6 +57,32 @@ describe Gori::Sitemap::Coverage do
     end
   end
 
+  it "keys a saved result on the bytes it sent, as History records it" do
+    with_store do |store|
+      run = store.insert_fuzz_run(nil, "https://acme.test:443", "sniper", 1_i64)
+      store.insert_fuzz_results(run, [Gori::Store::FuzzResultWrite.new(0_i64, "p", nil, 200, 0_i64, 0, 0, 0_i64,
+        nil, false, false, nil, "GET /api/$VER/users HTTP/1.1\r\n\r\n".to_slice,
+        wire: "GET /api/v2/users HTTP/1.1\r\n\r\n".to_slice)])
+      cov_flow(store, "/api/v2/users", Gori::FlowSource::Kind::Fuzzer)
+      store.flush
+
+      cov = Gori::Sitemap::Coverage.load(store)
+      cov.touched_by("https", "acme.test", 443, "GET", "/api/v2/users").should eq({"fuzzer" => 1_i64})
+      cov.touched?("https", "acme.test", 443, "GET", "/api/$VER/users").should be_false
+    end
+  end
+
+  it "cuts a saved request line at its own query, not at a header's '?'" do
+    with_store do |store|
+      run = store.insert_fuzz_run(nil, "https://acme.test:443", "sniper", 1_i64)
+      store.insert_fuzz_result(run, 0_i64, "p", 200, 0_i64, 0, 0, 0_i64, nil, false, nil,
+        request: "GET /a HTTP/1.1\r\nReferer: /x?y\r\n\r\n".to_slice)
+      store.flush
+
+      Gori::Sitemap::Coverage.load(store).touched_by("https", "acme.test", 443, "GET", "/a").should eq({"fuzzer" => 1_i64})
+    end
+  end
+
   it "reads a saved run's origin and request line, and refuses what is neither" do
     # As the store hands it over: cut at the query, or whole with its version when none.
     Gori::Sitemap::Coverage.run_key("http://::1:8080", "POST /a/".to_slice)
