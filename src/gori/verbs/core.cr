@@ -145,7 +145,7 @@ module Gori
       r.register Verb::Definition.new(
         "settings.open", "Settings", "Open Settings — the preferences modal (all sections)",
         Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_preferences; nil }
-      Tui::SettingsCatalog.all.each do |s|
+      Tui::SettingsCatalog::SECTIONS.each do |s|
         r.register Verb::Definition.new(
           s.id, "Settings: #{s.title}", s.desc,
           Verb::Scope::Global, category: Verb::Category::Settings, keywords: s.keywords) { |ctx| ctx.open_settings(s.sym); nil }

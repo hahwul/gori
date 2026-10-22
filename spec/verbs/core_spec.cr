@@ -68,7 +68,7 @@ describe "Gori::Verbs.register_core" do
     # section registered without a verb (or a verb passing the wrong sym) silently makes
     # that section unreachable from Ctrl-P.
     it "registers one Settings verb per catalog section, passing that section's sym" do
-      Gori::Tui::SettingsCatalog.all.each do |s|
+      Gori::Tui::SettingsCatalog::SECTIONS.each do |s|
         verb = r[s.id]
         verb.category.should eq(Gori::Verb::Category::Settings)
         verb.scope.should eq(Gori::Verb::Scope::Global)

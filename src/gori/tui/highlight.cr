@@ -811,23 +811,6 @@ module Gori::Tui
       String.build { |io| line.each { |span| io << span.text } }
     end
 
-    # Drawn column span of a styled line — used to clamp a horizontal scroll offset against
-    # the widest currently-visible row. Measures what `draw` actually advances by: ≥1 per
-    # cluster so an embedded tab keeps its cell, but ONE cluster per glyph so a ZWJ emoji
-    # doesn't inflate the line by its codepoint count and let the view scroll past the end of
-    # the content. Stops summing once the running width reaches `limit` — and
-    # caps WITHIN a span too (a huge minified body is one plain span > MAX_HL_LINE), so
-    # the per-frame h-scroll clamp never fully measures a multi-MB line. See
-    # Screen.draw_width_upto. Exact for lines narrower than limit.
-    def self.line_width_upto(line : Line, limit : Int32) : Int32
-      w = 0
-      line.each do |span|
-        break if w >= limit
-        w += Screen.draw_width_upto(span.text, limit - w)
-      end
-      w
-    end
-
     # --- line builders -------------------------------------------------------
 
     private def self.start_line(raw : String, request : Bool) : Line

@@ -250,7 +250,7 @@ describe Gori::Tui::RepeaterView do
   end
 
   # The memo reuses the SAME styled Line object across frames — safe only because every
-  # downstream consumer (Highlight.draw / slice_chars / line_width_upto) is read-only.
+  # downstream consumer (Highlight.draw / slice_chars) is read-only.
   #
   # ASSERTION INVERTED BY SOFT WRAP. This used to prove the guard by scrolling the pane
   # sideways so `slice_left` ran on the cached Line and checking the head disappeared. The

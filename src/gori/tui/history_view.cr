@@ -4868,17 +4868,11 @@ module Gori::Tui
         lines << Highlight::Line.new if i > 0
         brief = f.brief
         lines << derived_header(brief ? "#{f.location} · #{brief}" : f.location)
-        lines << [Highlight::Span.new(token_preview(f.token), Theme.muted)] of Highlight::Span
+        lines << [Highlight::Span.new(Fmt.token_preview(f.token), Theme.muted)] of Highlight::Span
         lines << Highlight::Line.new
         append_styled(lines, f.decoded, :json)
       end
       lines
-    end
-
-    # A JWT can be hundreds of chars; show a head…tail preview so the raw token is
-    # available (to read/copy) without dominating the pane.
-    private def token_preview(tok : String) : String
-      tok.size > 64 ? "#{tok[0, 40]}…#{tok[-12, 12]}" : tok
     end
 
     # The GRAPHQL pane: the request body's operation, the transcript's operations, or both —

@@ -27,15 +27,8 @@ module Gori::Tui
     PANE_ORDER      = [:config, :samples, :analysis]
     REPORT_THROTTLE = 25 # recompute the report every N new samples while running
 
-    property name : String?
     getter focus : Symbol
     getter config : Sequencer::Config
-    property job_id : Int32
-    # PROVENANCE: `@request` is a CAPTURED FLOW's stored bytes, not a request the operator
-    # drafted. Like MinerView this session has NO editor — `@request` is only ever assigned
-    # from a seed or from the store — so the flag is decided once, at load, and there is no
-    # draft interpretation to fall back to. See `Sequencer::PlanOptions#evidence?`.
-    getter? evidence : Bool
 
     def initialize
       @target = ""
@@ -86,20 +79,7 @@ module Gori::Tui
       @job_id = 0
     end
 
-    # --- seed / restore ---
-    # `evidence` is the seed's `flow_id` having been non-nil (a History/Sitemap/Issues
-    # flow); a Repeater-sourced or current-session seed is a draft.
-    def load(target : String, request : Bytes, http2 : Bool, sni : String?,
-             config : Sequencer::Config, evidence : Bool = false) : Nil
-      @target = target
-      @request = request
-      @http2 = http2
-      @sni = sni || ""
-      @config = config
-      @evidence = evidence
-      @dirty = true
-    end
-
+    # --- seed / restore (`load`, `restore`: SeededSession) ---
     # Replace the config (a reconfigure of the token descriptor / goal via the overlay).
     def set_config(config : Sequencer::Config) : Nil
       @config = config
@@ -111,33 +91,6 @@ module Gori::Tui
     def append_manual_tokens(tokens : Array(String)) : Nil
       @config.manual_tokens.concat(tokens)
       @dirty = true
-    end
-
-    def restore(rec : Store::SequencerSessionRecord) : Nil
-      @target = rec.target
-      @request = rec.request
-      @http2 = rec.http2?
-      @sni = rec.sni || ""
-      # Provenance survives a restart: `flow_id` is what `insert_sequencer_session`
-      # already stored for a flow-seeded session and nothing else sets it.
-      @evidence = !rec.flow_id.nil?
-      @name = rec.name
-      apply_config_json(rec.config)
-      @last_synced_config = rec.config
-      @dirty = false
-    end
-
-    def apply_peer_session(rec : Store::SequencerSessionRecord) : Nil
-      restore(rec) # the request-side fields only — focus, results and a running job are untouched
-    end
-
-    def session_side_matches?(rec : Store::SequencerSessionRecord) : Bool
-      @target == rec.target &&
-        @request == rec.request &&
-        @http2 == rec.http2? &&
-        (sni_override || "") == (rec.sni || "") &&
-        (@name || "") == (rec.name || "") &&
-        @last_synced_config == rec.config
     end
 
     def summary(max : Int32 = 32) : String

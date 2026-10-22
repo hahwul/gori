@@ -547,11 +547,7 @@ module Gori::Tui
       apply_config_json(src.config_json)
       @name = SubtabClone.copy_name(src.name)
       @dirty = true
-      @result_window.clear
-      reset_clusters
-      @run_result_count = 0_i64
-      @run_matched_count = 0_i64
-      @run_error_count = 0_i64
+      reset_results
       @result_io_state = ResultIoState::Idle
       @results_rev += 1
       @sel = 0
@@ -983,11 +979,7 @@ module Gori::Tui
 
     def begin_run(total : Int64?) : Nil
       @run_generation += 1
-      @result_window.clear
-      reset_clusters
-      @run_result_count = 0_i64
-      @run_matched_count = 0_i64
-      @run_error_count = 0_i64
+      reset_results
       @result_io_state = ResultIoState::Spooling
       @run_template = @pending_template         # freeze the template these results are rendered against
       @run_policy = @pending_policy             # ...and the CL knobs + retention its generator ran under
@@ -1000,11 +992,7 @@ module Gori::Tui
       # `@detail_source_lines` goes with it: dropping the cache alone would already force a
       # rebuild (and so a re-source, the Array being new), but tying the two together keeps
       # the "the pane is pointed at THAT Array" invariant readable in one place.
-      @detail_lines_cache = nil
-      @detail_source_lines = nil
-      @detail_lines_key = nil
-      @detail_styled_cache = nil
-      @detail_styled_key = nil
+      drop_detail_caches
       @sel = 0
       @scroll = 0
       @running = true
@@ -1240,11 +1228,7 @@ module Gori::Tui
       @sel = 0
       @scroll = 0
       @focus = :results
-      @detail_lines_cache = nil
-      @detail_source_lines = nil
-      @detail_lines_key = nil
-      @detail_styled_cache = nil
-      @detail_styled_key = nil
+      drop_detail_caches
       clear_detail_decode
     end
 
@@ -1256,11 +1240,7 @@ module Gori::Tui
       return unless @saved_run_id == id
       if @loaded_saved_run
         @run_generation += 1
-        @result_window.clear
-        reset_clusters
-        @run_result_count = 0_i64
-        @run_matched_count = 0_i64
-        @run_error_count = 0_i64
+        reset_results
         @results_rev += 1
         @progress = nil
         @run_total = nil
@@ -2094,6 +2074,24 @@ module Gori::Tui
       true
     end
 
+    # Empty the results: the window, the clusters and the run counters.
+    private def reset_results : Nil
+      @result_window.clear
+      reset_clusters
+      @run_result_count = 0_i64
+      @run_matched_count = 0_i64
+      @run_error_count = 0_i64
+    end
+
+    # The {pane, index}-keyed detail caches and the Array `@detail_read` is pointed at, together.
+    private def drop_detail_caches : Nil
+      @detail_lines_cache = nil
+      @detail_source_lines = nil
+      @detail_lines_key = nil
+      @detail_styled_cache = nil
+      @detail_styled_key = nil
+    end
+
     private def reset_clusters(clusters : Fuzz::Clusters = Fuzz::Clusters.new) : Nil
       @clusters = clusters
       @expanded.clear
@@ -2320,11 +2318,7 @@ module Gori::Tui
       return if i < 0 || i >= panes.size
       @detail_pane = panes[i]
       @detail_read.reset
-      @detail_source_lines = nil
-      @detail_lines_cache = nil
-      @detail_lines_key = nil
-      @detail_styled_cache = nil
-      @detail_styled_key = nil
+      drop_detail_caches
     end
 
     # Parse the OPEN result's request/response into the optional protocol panes
@@ -2599,7 +2593,7 @@ module Gori::Tui
     # half (extends instead of collapsing), like the arrows.
     #
     # These move the EDITOR's caret directly, so READ mode has to adopt the result — the anchor
-    # rules live in `@template_read`, and `paint_template_read_chrome`'s per-frame `sync_from`
+    # rules live in `@template_read`, and the per-frame `paint_chrome` (its `sync_from`)
     # copies cy/cx while leaving the anchor alone. Without `sync_to`: a plain Home left the anchor
     # where it was and painted a band from there to column 0, over a selection the operator had
     # just collapsed — and `y` then copied "" because the band's two ends had crossed. ⇧Home/⇧End
@@ -3094,24 +3088,19 @@ module Gori::Tui
       inner = rect.inset(1, 1)
       read_active = focused && !ins
       @editor.render(screen, inner, cursor: ins, highlight: :request, peek: focused, gauge: true, gauge_focused: focused)
-      paint_template_read_chrome(screen, inner, read_active)
-    end
-
-    # READ-mode over-paint (selection band + block caret) on top of the frame the editor drew.
-    #
-    # Band and caret both go through the EDITOR, which owns the concealed-run map. This pane is
-    # THE place operators write `§value¦chain§`, and the `¦chain` is concealed here — so measuring
-    # a span on the raw line put the tint and the caret N columns right of the text they addressed
-    # (N = the hidden width to their left), and re-drawing the raw segment for the band put the
-    # hidden chain back on screen: selecting a line UNCONCEALED it and shifted the rest of the row.
-    # The copy was right all along (it reads buffer coordinates), so the band highlighted different
-    # bytes than `y` copied. See the READ-mode over-paint seam in `text_area.cr`.
-    #
-    # The shared over-paint — `TextReadState#paint_chrome`, which inverts the row list the
-    # editor actually drew instead of the `li - scroll` sum this method used to carry. That sum
-    # stopped being the screen row the moment this pane started soft-wrapping.
-    private def paint_template_read_chrome(screen : Screen, rect : Rect, active : Bool) : Nil
-      @template_read.paint_chrome(screen, rect, @editor, active)
+      # READ-mode over-paint (selection band + block caret) on top of the frame the editor drew.
+      #
+      # Band and caret both go through the EDITOR, which owns the concealed-run map. This pane is
+      # THE place operators write `§value¦chain§`, and the `¦chain` is concealed here — so measuring
+      # a span on the raw line put the tint and the caret N columns right of the text they addressed
+      # (N = the hidden width to their left), and re-drawing the raw segment for the band put the
+      # hidden chain back on screen: selecting a line UNCONCEALED it and shifted the rest of the row.
+      # The copy was right all along (it reads buffer coordinates), so the band highlighted different
+      # bytes than `y` copied. See the READ-mode over-paint seam in `text_area.cr`.
+      #
+      # `TextReadState#paint_chrome` inverts the row list the editor actually drew instead of an
+      # `li - scroll` sum, which stopped being the screen row the moment this pane soft-wrapped.
+      @template_read.paint_chrome(screen, inner, @editor, read_active)
     end
 
     # `TargetField`'s selection band (Repeater answers with its wrap-aware variant).
@@ -4101,17 +4090,11 @@ module Gori::Tui
         lines << "" if i > 0
         brief = f.brief
         lines << (brief ? "▸ #{f.location} · #{brief}" : "▸ #{f.location}")
-        lines << detail_jwt_token(f.token)
+        lines << Fmt.token_preview(f.token)
         lines << ""
         lines.concat(f.decoded.scrub.split('\n'))
       end
       lines
-    end
-
-    # A JWT can be hundreds of chars; show a head…tail preview so the raw token is
-    # available to read without dominating the pane (mirrors the History detail).
-    private def detail_jwt_token(tok : String) : String
-      tok.size > 64 ? "#{tok[0, 40]}…#{tok[-12, 12]}" : tok
     end
 
     private def graphql_detail_lines : Array(String)
