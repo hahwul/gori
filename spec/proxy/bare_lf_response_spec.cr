@@ -38,10 +38,6 @@ private class LfBodyRewriter < Gori::Proxy::HeadRewriter
     head
   end
 
-  def rewrites_response_body? : Bool
-    true
-  end
-
   def rewrites_response_body_for_host?(host : String) : Bool
     true
   end

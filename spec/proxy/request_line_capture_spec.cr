@@ -168,7 +168,7 @@ private class BodyGrowRewriter < Gori::Proxy::HeadRewriter
     head
   end
 
-  def rewrites_request_body? : Bool
+  def rewrites_request_body_for_host?(host : String) : Bool
     true
   end
 

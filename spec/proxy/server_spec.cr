@@ -50,19 +50,11 @@ private class BodyRewriter < Gori::Proxy::HeadRewriter
     head
   end
 
-  def rewrites_request_body? : Bool
-    true
-  end
-
   def rewrites_request_body_for_host?(host : String) : Bool
     true
   end
 
   def rewrites_response_body_for_host?(host : String) : Bool
-    true
-  end
-
-  def rewrites_response_body? : Bool
     true
   end
 
@@ -88,7 +80,7 @@ private class AlwaysBodyRewriter < Gori::Proxy::HeadRewriter
     head
   end
 
-  def rewrites_response_body? : Bool
+  def rewrites_response_body_for_host?(host : String) : Bool
     true
   end
 
@@ -300,14 +292,6 @@ private class HostScopedBodyRewriter < Gori::Proxy::HeadRewriter
 
   def rewrite_response(head : Bytes, host : String) : Bytes
     head
-  end
-
-  def rewrites_request_body? : Bool
-    true
-  end
-
-  def rewrites_response_body? : Bool
-    true
   end
 
   def rewrites_request_body_for_host?(host : String) : Bool

@@ -67,7 +67,7 @@ module Gori::Proxy
     # — the pre-#526 behaviour for the rule set most operators have, unchanged.
     #
     # Called once per h2 connection, not per frame.
-    # Default false, matching the host-blind pair — a no-op stub rewrites nothing anywhere.
+    # Default false — a no-op stub rewrites nothing anywhere.
     def rewrites_body_for_host?(host : String) : Bool
       false
     end
@@ -86,26 +86,15 @@ module Gori::Proxy
       false
     end
 
-    # Whether a BODY rule is live for the request/response side, regardless of host.
-    # Kept for callers that need the overall rule-set state; ClientConn uses the host-scoped
-    # directional predicates below before paying to buffer a body (P6). Default false so a
-    # stub never buffers.
-    def rewrites_request_body? : Bool
-      false
-    end
-
-    def rewrites_response_body? : Bool
-      false
-    end
-
-    # Whether a request-body rule can apply to this host. Implementations with no host-scoped
-    # rules keep the old direction-only answer; `Rules` narrows it to the rule target and host.
+    # Whether a request/response BODY rule can apply to this host. ClientConn asks before
+    # paying to buffer a body (P6); `Rules` narrows it to the rule target and host. Default
+    # false so a stub never buffers.
     def rewrites_request_body_for_host?(host : String) : Bool
-      rewrites_request_body?
+      false
     end
 
     def rewrites_response_body_for_host?(host : String) : Bool
-      rewrites_response_body?
+      false
     end
 
     # Rewrite the ENTITY body (de-chunked, not decompressed). MUST return the SAME
