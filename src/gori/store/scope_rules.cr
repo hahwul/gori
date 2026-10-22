@@ -31,18 +31,12 @@ module Gori
     # IGNORE turns the collision into a no-op, so nothing is poisoned and nothing unrelated is
     # lost; `changes()` inside the same transaction is what still reports it as not applied.
     def update_scope_rule(id : Int64, kind : String, match_type : String, pattern : String) : Bool
-      changed = 0_i64
-      ok = exec_task_ok ->(c : DB::Connection) {
-        c.exec("UPDATE OR IGNORE scope_rules SET kind = ?, match_type = ?, pattern = ? WHERE id = ?", kind, match_type, pattern, id)
-        changed = c.scalar("SELECT changes()").as(Int64)
-        nil
-      }
-      ok && changed > 0
+      exec_row("UPDATE OR IGNORE scope_rules SET kind = ?, match_type = ?, pattern = ? WHERE id = ?", kind, match_type, pattern, id)
     end
 
     # Returns whether the write committed (false = store busy/locked/closing).
     def remove_scope_rule(id : Int64) : Bool
-      exec_task_ok ->(c : DB::Connection) { c.exec("DELETE FROM scope_rules WHERE id = ?", id); nil }
+      exec_ok("DELETE FROM scope_rules WHERE id = ?", id)
     end
   end
 end

@@ -127,10 +127,7 @@ module Gori
     # events arrive, and can never be handed a REUSED id belonging to a different event. The
     # same property `trim_events` relies on, for the same reason.
     def clear_events : Bool
-      exec_task_ok ->(c : DB::Connection) {
-        c.exec("DELETE FROM events")
-        nil
-      }
+      exec_ok("DELETE FROM events")
     end
   end
 end

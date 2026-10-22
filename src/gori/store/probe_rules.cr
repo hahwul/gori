@@ -126,7 +126,7 @@ module Gori
     end
 
     def delete_probe_custom_rule(id : Int64) : Bool
-      exec_task_ok ->(c : DB::Connection) { c.exec("DELETE FROM probe_custom_rules WHERE id = ?", id); nil }
+      exec_ok("DELETE FROM probe_custom_rules WHERE id = ?", id)
     end
   end
 end

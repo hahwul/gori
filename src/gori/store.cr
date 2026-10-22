@@ -2525,7 +2525,7 @@ module Gori
     # window is real on any surface that dials between reading the row and writing to it (a
     # headless send, a minimize) and it is the class #1118 set out to close. `changes()` is read
     # inside the same transaction, right after the statement, which is the only place it is
-    # unambiguous (`update_scope_rule`, `finish_fuzz_run` do the same by hand).
+    # unambiguous.
     private def exec_task_row(run : DB::Connection -> Nil) : Bool
       changed = 0_i64
       ok = exec_task_ok ->(c : DB::Connection) {
@@ -2534,6 +2534,20 @@ module Gori
         nil
       }
       ok && changed > 0
+    end
+
+    # One-statement forms of `exec_task` / `exec_task_ok` / `exec_task_row`: run
+    # `c.exec(sql, *args)` on the writer and answer as the long form does.
+    private def exec_insert(sql : String, *args) : Int64
+      exec_task ->(c : DB::Connection) { c.exec(sql, *args); nil }
+    end
+
+    private def exec_ok(sql : String, *args) : Bool
+      exec_task_ok ->(c : DB::Connection) { c.exec(sql, *args); nil }
+    end
+
+    private def exec_row(sql : String, *args) : Bool
+      exec_task_row ->(c : DB::Connection) { c.exec(sql, *args); nil }
     end
 
     private def read_issue(rs : DB::ResultSet) : Issue

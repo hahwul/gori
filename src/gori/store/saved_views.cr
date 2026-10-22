@@ -55,19 +55,13 @@ module Gori
     # not raise inside the writer's transaction (see `insert_saved_view`). The TUI, `gori run
     # views rename` and MCP `update_view` are all supported peers against one project.
     def update_saved_view(id : Int64, name : String, query : String) : Bool
-      changed = 0_i64
-      ok = exec_task_ok ->(c : DB::Connection) {
-        c.exec("UPDATE OR IGNORE saved_views SET name = ?, query = ? WHERE id = ?", name, query, id)
-        changed = c.scalar("SELECT changes()").as(Int64)
-        nil
-      }
-      ok && changed > 0
+      exec_row("UPDATE OR IGNORE saved_views SET name = ?, query = ? WHERE id = ?", name, query, id)
     end
 
     # Returns whether the write committed (false = store busy/locked/closing → the caller must
     # not report the view as deleted; it is still in the picker).
     def delete_saved_view(id : Int64) : Bool
-      exec_task_ok ->(c : DB::Connection) { c.exec("DELETE FROM saved_views WHERE id = ?", id); nil }
+      exec_ok("DELETE FROM saved_views WHERE id = ?", id)
     end
   end
 end

@@ -63,18 +63,12 @@ module Gori
 
     # Drop one target's cache. No-op on an unknown target; returns whether the write committed.
     def delete_grpc_reflection(target : String) : Bool
-      exec_task_ok ->(c : DB::Connection) {
-        c.exec("DELETE FROM grpc_reflection WHERE target = ?", target)
-        nil
-      }
+      exec_ok("DELETE FROM grpc_reflection WHERE target = ?", target)
     end
 
     # Drop every cached target.
     def clear_grpc_reflections : Bool
-      exec_task_ok ->(c : DB::Connection) {
-        c.exec("DELETE FROM grpc_reflection")
-        nil
-      }
+      exec_ok("DELETE FROM grpc_reflection")
     end
   end
 end

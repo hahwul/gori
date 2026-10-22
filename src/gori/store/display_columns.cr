@@ -69,7 +69,7 @@ module Gori
     # Returns whether the write committed (false = store busy/locked/closing → the caller must
     # not report the column as removed; it is still in the list).
     def delete_display_column(id : Int64) : Bool
-      exec_task_ok ->(c : DB::Connection) { c.exec("DELETE FROM display_columns WHERE id = ?", id); nil }
+      exec_ok("DELETE FROM display_columns WHERE id = ?", id)
     end
   end
 end

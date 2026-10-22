@@ -125,7 +125,7 @@ module Gori
 
     # Returns whether the write committed (false = store busy/locked/closing).
     def delete_rule(id : Int64) : Bool
-      exec_task_ok ->(c : DB::Connection) { c.exec("DELETE FROM match_rules WHERE id = ?", id); nil }
+      exec_ok("DELETE FROM match_rules WHERE id = ?", id)
     end
 
     # --- this project's answer to a GLOBAL rule ------------------------------------------

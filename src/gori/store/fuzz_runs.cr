@@ -60,8 +60,7 @@ module Gori
     def finish_fuzz_run(id : Int64, sent : Int64, matched : Int64, errors : Int64,
                         status : String, finished_at : Int64? = now_us, *,
                         stop_idx : Int64? = nil) : Bool
-      changed = 0_i64
-      committed = exec_task_ok ->(c : DB::Connection) {
+      exec_task_row ->(c : DB::Connection) {
         stop = stop_idx if status == "condition_met"
         if idx = stop
           stop = nil unless c.query_one?("SELECT 1 FROM fuzz_results WHERE run_id = ? AND idx = ? LIMIT 1",
@@ -70,10 +69,8 @@ module Gori
         c.exec("UPDATE fuzz_runs SET sent=?, matched=?, errors=?, status=?, finished_at=?, stop_idx=? " \
                "WHERE id=? AND status IN ('running', 'saving')",
           sent, matched, errors, status, finished_at, stop, id)
-        changed = c.scalar("SELECT changes()").as(Int64)
         nil
       }
-      committed && changed == 1
     end
 
     def get_fuzz_run(id : Int64) : FuzzRunRecord?

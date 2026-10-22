@@ -141,10 +141,7 @@ module Gori
     # committed. Runs are left alone: they are the record of what already happened, and
     # re-planning the check does not un-run it.
     def clear_retest_steps(issue_id : Int64) : Bool
-      exec_task_ok ->(c : DB::Connection) {
-        c.exec("DELETE FROM issue_retest_steps WHERE issue_id = ?", issue_id)
-        nil
-      }
+      exec_ok("DELETE FROM issue_retest_steps WHERE issue_id = ?", issue_id)
     end
 
     def retest_steps(issue_id : Int64) : Array(RetestStep)

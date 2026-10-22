@@ -6,10 +6,7 @@ module Gori
 
     def insert_h2_connection(host : String, port : Int32, alpn : String) : Int64
       ts = now_us
-      exec_task ->(c : DB::Connection) {
-        c.exec("INSERT INTO h2_connections (created_at, host, port, alpn) VALUES (?,?,?,?)", ts, host, port, alpn)
-        nil
-      }
+      exec_insert("INSERT INTO h2_connections (created_at, host, port, alpn) VALUES (?,?,?,?)", ts, host, port, alpn)
     end
 
     # Records one raw h2 frame, FIRE-AND-FORGET — never blocks the caller (the h2

@@ -65,16 +65,13 @@ module Gori
     def update_extract_rule(id : Int64, name : String, match_filter : String, kind : Gori::ExtractKind,
                             selector : String = "", pos_start : Int32 = 0, pos_end : Int32 = 0,
                             host : String = "") : Bool
-      changed = 0_i64
-      ok = exec_task_ok ->(c : DB::Connection) {
-        # OR IGNORE + changes(), like `update_scope_rule`: renaming onto another rule's UNIQUE
-        # `name` must not raise inside the writer's transaction.
+      # OR IGNORE + changes(), like `update_scope_rule`: renaming onto another rule's UNIQUE
+      # `name` must not raise inside the writer's transaction.
+      exec_task_row ->(c : DB::Connection) {
         c.exec("UPDATE OR IGNORE extract_rules SET name = ?, match_filter = ?, kind = ?, selector = ?, pos_start = ?, pos_end = ?, host = ? WHERE id = ?",
           name, match_filter, kind.label, selector, pos_start, pos_end, host, id)
-        changed = c.scalar("SELECT changes()").as(Int64)
         nil
       }
-      ok && changed > 0
     end
 
     def set_extract_rule_enabled(id : Int64, enabled : Bool) : Bool
@@ -82,7 +79,7 @@ module Gori
     end
 
     def delete_extract_rule(id : Int64) : Bool
-      exec_task_ok ->(c : DB::Connection) { c.exec("DELETE FROM extract_rules WHERE id = ?", id); nil }
+      exec_ok("DELETE FROM extract_rules WHERE id = ?", id)
     end
   end
 end

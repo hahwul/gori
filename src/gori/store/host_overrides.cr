@@ -30,18 +30,12 @@ module Gori
     # with it and poisoning the connection's cached statement until the error surfaces at
     # teardown. A no-op plus `changes()` says the same thing without either cost.
     def update_host_override(id : Int64, host : String, ip : String) : Bool
-      changed = 0_i64
-      ok = exec_task_ok ->(c : DB::Connection) {
-        c.exec("UPDATE OR IGNORE host_overrides SET host = ?, ip = ? WHERE id = ?", host, ip, id)
-        changed = c.scalar("SELECT changes()").as(Int64)
-        nil
-      }
-      ok && changed > 0
+      exec_row("UPDATE OR IGNORE host_overrides SET host = ?, ip = ? WHERE id = ?", host, ip, id)
     end
 
     # Returns whether the write committed (false = store busy/locked/closing).
     def remove_host_override(id : Int64) : Bool
-      exec_task_ok ->(c : DB::Connection) { c.exec("DELETE FROM host_overrides WHERE id = ?", id); nil }
+      exec_ok("DELETE FROM host_overrides WHERE id = ?", id)
     end
   end
 end
