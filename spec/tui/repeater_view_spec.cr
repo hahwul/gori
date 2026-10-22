@@ -2590,7 +2590,7 @@ describe Gori::Tui::RepeaterView do
   # them. Every §/¦ helper is handed `@editor.text` — the CR-free projection its offsets index —
   # and used to push that projection straight back through `set_text`, so the marking chord the
   # status line advertises flattened the capture's body before the tab had sent anything.
-  # `edit_buffer_text` documents the same loss for ^E; `FuzzerView#restore_wire_eols` has guarded
+  # `edit_buffer_text` documents the same loss for ^E; the Fuzzer has guarded
   # the identical five helpers all along. Non-multipart on purpose: `request_bytes` restores CRLF
   # delimiters only for multipart, so a smuggling payload has nothing else standing behind it.
   describe "marking keeps a captured request's wire terminators" do
