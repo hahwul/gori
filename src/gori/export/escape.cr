@@ -21,6 +21,16 @@ module Gori
         end
       end
 
+      # A whole `"…"` literal of `s`, byte-wise through the table above. `prefix` goes before the
+      # opening quote (`b` for a Python bytes literal, which shares the same escape table).
+      def self.double_quoted(s : String, prefix : String = "") : String
+        String.build do |io|
+          io << prefix << '"'
+          s.to_slice.each { |b| double_quoted_byte(io, b) }
+          io << '"'
+        end
+      end
+
       # A captured string for a COMMENT or prose note inside generated code — `# note: …` in
       # Python, `# header '…' omitted` in a shell command, `<!-- … -->` in the CSRF page. A
       # comment is not a literal, so the language does no unescaping there and nothing has to

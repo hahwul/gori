@@ -577,7 +577,9 @@ module Gori
       # An obs-fold continuation line: its first BYTE is SP or HTAB. Byte-wise rather than
       # `starts_with?(' ')` for the reason `split_lines` is byte-wise — a captured header line
       # need not be valid UTF-8, and char iteration answers about U+FFFD instead of the byte.
-      private def self.fold_line?(line : String) : Bool
+      # Shared with `Issues::Export::Sarif` and `CLI::Output`, which ask it of a parsed field
+      # NAME (`Http1.parse_headers` leaves the name unstripped, so the line's first byte is it).
+      def self.fold_line?(line : String) : Bool
         return false if line.empty?
         b = line.to_slice[0]
         b == 0x20_u8 || b == 0x09_u8

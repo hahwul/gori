@@ -1557,7 +1557,7 @@ module Gori
           # it never names a flow `links` does not also carry.
           j.field "flow_id", f.flow_id
           # notes is multi-line by design — scrub only, don't collapse (mirrors Export.json).
-          j.field "notes", Issues::Export.scrub_only(f.notes)
+          j.field "notes", f.notes.scrub
           j.field "links" do
             j.array { Issues::Export.append_links_json(j, f, store) if store }
           end

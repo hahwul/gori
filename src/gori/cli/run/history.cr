@@ -706,7 +706,7 @@ module Gori
       # by `--limit`. A flow a peer deleted between the search and this read yields blanks rather
       # than dropping the row: the row matched, and the listing has to say so.
       #
-      # A column extracting a sensitive header (`Output.sensitive_column?`) is `[REDACTED]`
+      # A column extracting a sensitive header (`DisplayColumns.sensitive?`) is `[REDACTED]`
       # under the same `--include-sensitive` the `headers` block obeys, and for a reason the
       # `headers` block alone could not fix: the project's CONFIGURED columns are drawn by
       # default, so a `req:header:authorization` set once in the TUI printed the credential on
@@ -726,7 +726,7 @@ module Gori
         redacted = false
         pairs = prepared.columns.map_with_index do |c, i|
           v = values[i]? || ""
-          if !include_sensitive && !v.empty? && CLI::Output.sensitive_column?(c)
+          if !include_sensitive && !v.empty? && DisplayColumns.sensitive?(c)
             redacted = true
             v = "[REDACTED]"
           end

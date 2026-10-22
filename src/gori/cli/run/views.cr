@@ -37,7 +37,7 @@ module Gori
       end
 
       # `--scope` on every subcommand: WHICH store the name lives in. Aborts rather than
-      # clamping, for the reason `parse_color_scope` states — silently reading "globl" as
+      # clamping, for the reason `parse_rule_scope` states — silently reading "globl" as
       # "project" would report success for an edit the operator meant to make everywhere.
       # The listing's `--scope`, where `builtin` IS a legal answer. Refuses like its mutator
       # twin below rather than clamping: `--scope globl` printing "No views match." reads as

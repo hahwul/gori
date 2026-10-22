@@ -178,17 +178,6 @@ module Gori
         {rules.max_of? { |r| CLI::Output.cell_width(r.color) } || 6, 6}.max
       end
 
-      # `--scope` on every rule subcommand: WHICH store the id names (or, on list, which half
-      # to print). Aborts rather than clamping — silently reading "globl" as "project" would
-      # report success for an edit the operator meant to make everywhere.
-      private def self.parse_color_scope(s : String) : Store::RuleScope
-        case s.downcase
-        when "project" then Store::RuleScope::Project
-        when "global"  then Store::RuleScope::Global
-        else                abort "gori run colormarker: invalid --scope '#{s}' (project|global)"
-        end
-      end
-
       # A colour LABEL: one of the six built-in words, or the name of a user-defined custom
       # colour (settings.json `colormarker.colors`). Aborts rather than clamping — silently
       # reading an unknown colour as yellow would paint rows the operator did not ask to.
@@ -229,7 +218,7 @@ module Gori
                      "Or run with a subcommand: add, update/edit, rm/delete, enable, disable, move,\n" \
                      "preview, color (each takes -h)"
           project_options(p, proj, "read")
-          p.on("--scope=SCOPE", "Show only project | global rules") { |v| scope = parse_color_scope(v) }
+          p.on("--scope=SCOPE", "Show only project | global rules") { |v| scope = parse_rule_scope(v, "gori run colormarker") }
           format_flag(p, [:text, :json], "text (default) | json") { |f| format = f }
         end
         refuse_list_leftovers(leftover, "colormarker", "add, update/edit, rm/delete, enable, disable, move, preview, color")
@@ -276,7 +265,7 @@ module Gori
           p.on("-wFILTER", "--when=FILTER", "Condition the flow must match (required)") { |v| filter = v }
           p.on("--color=NAME", "#{marker_color_choices} (default yellow)") { |v| color_s = v }
           p.on("--style=STYLE", "full (tint the whole row) | strip (one colour cell) — default full") { |v| style_s = v }
-          p.on("--scope=SCOPE", "project (default) | global — a global rule applies in EVERY project") { |v| scope = parse_color_scope(v) }
+          p.on("--scope=SCOPE", "project (default) | global — a global rule applies in EVERY project") { |v| scope = parse_rule_scope(v, "gori run colormarker") }
           p.on("--name=NAME", "Optional rule label") { |v| name = v }
           p.on("--disabled", "Create the rule disabled") { disabled = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
@@ -364,7 +353,7 @@ module Gori
           p.on("--color=NAME", "#{marker_color_choices} (default: unchanged)") { |v| color_s = v }
           p.on("--style=STYLE", "full | strip (default: unchanged)") { |v| style_s = v }
           p.on("--name=NAME", "New rule label — pass an empty string to clear it (default: unchanged)") { |v| name = v }
-          p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_color_scope(v) }
+          p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_rule_scope(v, "gori run colormarker") }
         end
         id = take_id(positional, "gori run colormarker update", "<id>", "rule id")
         # Copied out of the OptionParser closures before use, so Crystal narrows them below —
@@ -431,7 +420,7 @@ module Gori
         positional = parse_args(args, "gori run colormarker rm") do |p|
           p.banner = "Usage: gori run colormarker rm <id> [options]"
           project_options(p, proj, "update")
-          p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_color_scope(v) }
+          p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_rule_scope(v, "gori run colormarker") }
         end
         id = take_id(positional, "gori run colormarker rm", "<id>", "rule id")
 
@@ -472,7 +461,7 @@ module Gori
                      "way `x` does in the Colormarker tab. --everywhere changes the rule's own\n" \
                      "default instead, which every project without an override follows."
           project_options(p, proj, "update")
-          p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_color_scope(v) }
+          p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_rule_scope(v, "gori run colormarker") }
           p.on("--everywhere", "global rules only: change the default for every project") { everywhere = true }
         end
         id = take_id(positional, "gori run colormarker #{action}", "<id>", "rule id")
@@ -526,7 +515,7 @@ module Gori
                      "every global rule resolves before every project one, so moving past the end\n" \
                      "of a block is a scope change, not a step."
           project_options(p, proj, "update")
-          p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_color_scope(v) }
+          p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_rule_scope(v, "gori run colormarker") }
           # Refused like `repeater move`: last-flag-wins moved the rule the other way.
           p.on("--up", "Give the rule higher precedence") do
             abort "gori run colormarker move: pass one of --up or --down" if dir == 1
@@ -600,7 +589,7 @@ module Gori
           # the rule would be CREATED at decides which existing rules can claim a row from it.
           # Without this the answer was always the project one, and a `--scope=global` rule was
           # previewed as though every project rule outranked it.
-          p.on("--scope=SCOPE", "Preview as a project (default) | global rule — global resolves first") { |v| scope = parse_color_scope(v) }
+          p.on("--scope=SCOPE", "Preview as a project (default) | global rule — global resolves first") { |v| scope = parse_rule_scope(v, "gori run colormarker") }
           p.on("--limit=N", "Recent flows to scan (default #{Colormarker::PREVIEW_SCAN})") { |v| limit = parse_count(v, "--limit") }
           format_flag(p, [:text, :json], "text (default) | json") { |f| format = f }
         end

@@ -10,7 +10,8 @@ require "../discover"
 require "../sitemap"
 require "../probe/group"
 require "../notes"
-require "../issues_export" # Issues::Export.one_line / .scrub_only
+require "../issues_export" # Issues::Export.one_line
+require "../export/curl"   # Export::Curl.fold_line?
 require "../jwt"
 require "../authorize/engine"
 # `Serialize.sensitive_header?` — the ONE predicate behind every `[REDACTED]` in the tree.
@@ -66,7 +67,7 @@ module Gori
       # is the fail-closed one because the parameter is threaded through existing call sites
       # that predate it, so a caller that never heard of the flag redacts.
       # `columns_redacted` says whether the CALLER already blanked a sensitive column value
-      # (`sensitive_column?`, applied where the column descriptors are — see
+      # (`DisplayColumns.sensitive?`, applied where the column descriptors are — see
       # `Run.row_columns`). It only feeds the marker: a `res:header:set-cookie` column can be
       # the sole redaction on a row whose REQUEST carried nothing sensitive, and the marker
       # has to be true for that row rather than only for the `headers` block's own hits.
@@ -220,7 +221,22 @@ module Gori
         # The field the next obs-fold continuation belongs to.
         last_key : String? = nil
         Proxy::Codec::Http1.parse_request_head(head).headers.each do |h|
-          if fold_continuation?(h.name)
+          # Is this parsed header name actually an obs-fold CONTINUATION of the field before it?
+          #
+          # A field line beginning with SP or HTAB is a continuation by definition (RFC 9110 §5.2,
+          # RFC 7230 §3.2.4), and `Codec::Http1.parse_headers` has no fold handling at all: it
+          # splits every colon-bearing line into name/value, so
+          # `Cookie: sid=X` + `\r\n redirect=https://x/?tok=T` arrived here as a SECOND header
+          # literally named `" redirect=https"` with value `"//x/?tok=T"`. That invented field was
+          # not sensitive by name, so its value printed in the clear beside the `Cookie: [REDACTED]`
+          # it was part of — and redacting only the VALUE would not have been enough either,
+          # because the split put `redirect=https` in the KEY. `Serialize.redact_head` states the
+          # rule this path was missing: "An obs-fold continuation of a sensitive field is
+          # sensitive too."
+          #
+          # `name` is unstripped here (parse_headers takes the bytes before the colon verbatim), so
+          # leading whitespace appears if and only if the LINE had it — the signal is exact.
+          if Gori::Export::Curl.fold_line?(h.name)
             fold_into(by_key, last_key, h)
             next
           end
@@ -258,25 +274,6 @@ module Gori
         redacted
       end
 
-      # Is this parsed header name actually an obs-fold CONTINUATION of the field before it?
-      #
-      # A field line beginning with SP or HTAB is a continuation by definition (RFC 9110 §5.2,
-      # RFC 7230 §3.2.4), and `Codec::Http1.parse_headers` has no fold handling at all: it
-      # splits every colon-bearing line into name/value, so
-      # `Cookie: sid=X` + `\r\n redirect=https://x/?tok=T` arrived here as a SECOND header
-      # literally named `" redirect=https"` with value `"//x/?tok=T"`. That invented field was
-      # not sensitive by name, so its value printed in the clear beside the `Cookie: [REDACTED]`
-      # it was part of — and redacting only the VALUE would not have been enough either,
-      # because the split put `redirect=https` in the KEY. `Serialize.redact_head` states the
-      # rule this path was missing: "An obs-fold continuation of a sensitive field is
-      # sensitive too."
-      #
-      # `name` is unstripped here (parse_headers takes the bytes before the colon verbatim), so
-      # leading whitespace appears if and only if the LINE had it — the signal is exact.
-      private def self.fold_continuation?(name : String) : Bool
-        name.starts_with?(' ') || name.starts_with?('\t')
-      end
-
       # Join a continuation into the field it continues, per RFC 7230 §3.2.4 (the fold becomes
       # one SP), instead of emitting it as a field of its own. The colon the parser cut on is
       # put back, because it was value bytes.
@@ -296,23 +293,6 @@ module Gori
         return unless lk = last_key
         return unless bucket = by_key[lk]?
         bucket[-1] = "#{bucket[-1]} #{h.name.strip}:#{h.value}"
-      end
-
-      # Does this History column extract a SENSITIVE header value (#1002)?
-      #
-      # It exists because the project's CONFIGURED columns are drawn by default, with no flag
-      # on the invocation: a `req:header:authorization` set once in the TUI's Columns… dialog
-      # printed its value on every later `--format json` run, in the same object as the
-      # `sensitive_headers_redacted: true` the redacted `headers` block had just asserted. One
-      # row cannot both withhold a credential and print it.
-      #
-      # `cookie:` is covered whatever its selector, because a named cookie's value is by
-      # construction a substring of the `Cookie` header this row redacts. The three
-      # content-scoped kinds (`regex:`, `jsonpath:`, `position:`) are NOT: they can lift a
-      # credential out of any byte of the message and the descriptor cannot say whether they
-      # do, so the docs name them as uncovered rather than implying a guarantee.
-      def self.sensitive_column?(c : Store::DisplayColumn) : Bool
-        Gori::DisplayColumns.sensitive?(c)
       end
 
       # Emit `name` carrying a CAPTURED string, scrubbed to U+FFFD. The JSON counterpart of
@@ -1078,7 +1058,7 @@ module Gori
       # STDIN (its own banner suggests `some-tool | gori run notes create`) or from whatever the
       # external $EDITOR wrote, so piping a gzip/binary response body stores raw non-UTF-8 bytes
       # that the settings KV round-trips verbatim — and `--format json` then emitted a document
-      # whose `valid_encoding?` was false. Same split `Issues::Export.json` makes: `scrub_only`
+      # whose `valid_encoding?` was false. Same split `Issues::Export.json` makes: `scrub`
       # for the multi-line body, `one_line` for the single-line title. `title` stays NILABLE —
       # its null for a blank note is the documented contract, distinct from the listing's
       # positional "note 3" fallback.
@@ -1091,7 +1071,7 @@ module Gori
           j.field "lines", Notes.line_count(text)
           j.field "bytes", text.bytesize
           j.field "current", current
-          j.field "text", Issues::Export.scrub_only(text) if with_text
+          j.field "text", text.scrub if with_text
         end
       end
 
