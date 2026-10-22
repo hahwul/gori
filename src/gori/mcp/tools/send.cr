@@ -614,8 +614,8 @@ module Gori
         # doubled space still reports the real method/target/version (see Outbound.request_target).
         parts = (String.new(wire).each_line.first? || "").split
         if fields = h2_fields
-          method = Repeater::H2Engine.pseudo_field(fields, ":method") || ""
-          target = Repeater::H2Engine.pseudo_field(fields, ":path") || "/"
+          method = Proxy::H2::HeadCodec.pseudo(fields, ":method") || ""
+          target = Proxy::H2::HeadCodec.pseudo(fields, ":path") || "/"
         else
           method = parts[0]? || ""
           target = parts[1]? || "/"
@@ -913,8 +913,8 @@ module Gori
         # receiver routes on and agree with the head text. See
         # `Repeater::SendPersistence.replayable_request`.
         if fields = h2_fields
-          method = Repeater::H2Engine.pseudo_field(fields, ":method") || ""
-          target = Repeater::H2Engine.pseudo_field(fields, ":path") || "/"
+          method = Proxy::H2::HeadCodec.pseudo(fields, ":method") || ""
+          target = Proxy::H2::HeadCodec.pseudo(fields, ":path") || "/"
           version = "HTTP/2"
         else
           # Not `parse_request_head`: these bytes are the caller's, and under `verbatim` a bare-LF

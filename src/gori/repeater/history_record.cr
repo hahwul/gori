@@ -104,8 +104,8 @@ module Gori
         if fields = plan.h2_fields
           authority = Proxy::H2::HeadCodec.pseudo(fields, ":authority") || "#{plan.host}:#{plan.port}"
           head = Proxy::H2::HeadCodec.synth_request(fields, authority)
-          method = H2Engine.pseudo_field(fields, ":method") || ""
-          target = H2Engine.pseudo_field(fields, ":path") || "/"
+          method = Proxy::H2::HeadCodec.pseudo(fields, ":method") || ""
+          target = Proxy::H2::HeadCodec.pseudo(fields, ":path") || "/"
           {head, plan.h2_body, method, target, "HTTP/2"}
         else
           head, body = Env.split_head_body(wire)

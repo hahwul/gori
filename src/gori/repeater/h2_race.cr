@@ -141,16 +141,10 @@ module Gori
         private def finish(started : Time::Instant) : Bool
           unless @done
             @done = true
-            @duration_us = H2Engine.race_elapsed(started)
+            @duration_us = Engine.elapsed(started)
           end
           true
         end
-      end
-
-      # `elapsed` is private; the reassembly class above needs it. Named distinctly so it does
-      # not shadow the private one inside the module.
-      def self.race_elapsed(started : Time::Instant) : Int64
-        (Time.instant - started).total_microseconds.to_i64
       end
 
       # Fire N DISTINCT requests as one HTTP/2 single-packet attack. `wires` are the already-
