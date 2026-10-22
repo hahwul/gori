@@ -134,6 +134,7 @@ module Gori
         group = true
         fold_query = true
         js_refs = false
+        untested = false
         format = :text
         lenient = false
 
@@ -155,6 +156,7 @@ module Gori
           # many ways, id folding about many endpoints sharing a route. Overloading --no-group
           # to mean both would make "show me every literal id" also dump every fuzz payload.
           p.on("--no-fold-query", "Don't fold query-string variants (/search?q=1, /search?q=2) onto their path") { fold_query = false }
+          p.on("--untested", "Only endpoints with no recorded flow from #{FlowSource::Kind.active.join("/", &.token)} and no saved fuzz run (unrecorded, unsaved sweeps leave no trace)") { untested = true }
           p.on("--js-refs", "Also draw the endpoints captured JavaScript references and nobody requested (see `sitemap js --scan`)") { js_refs = true }
           format_flag(p, [:text, :json, :paths], "Output: text (default tree) | json | paths") { |f| format = f }
         end
@@ -206,7 +208,7 @@ module Gori
         filter = QL.and(filter, QL.hide_static) if hide_static
         hosts, truncated = begin
           collect_sitemap(store, filter, limit, in_scope, group, fold_query,
-            js_refs: js_refs, narrowed: !query.to_s.strip.empty?, tags: tags)
+            js_refs: js_refs, narrowed: !query.to_s.strip.empty?, tags: tags, untested: untested)
         rescue ex
           abort "gori run sitemap: query #{query.inspect} failed: #{ex.message}"
         ensure
@@ -253,7 +255,7 @@ module Gori
       private def self.collect_sitemap(store : Store, filter : QL::Filter, limit : Int32,
                                        in_scope : Bool, group : Bool, fold_query : Bool, *,
                                        js_refs : Bool = false, narrowed : Bool = false,
-                                       tags : Sitemap::TagTerms? = nil) : {Array(Sitemap::Node), Bool}
+                                       tags : Sitemap::TagTerms? = nil, untested : Bool = false) : {Array(Sitemap::Node), Bool}
         # A `--query body:…` filter arrives here already drained and CHECKED — see
         # `cmd_sitemap_tree`, which refuses outright when the off-commit trigram index (Store V4)
         # is still behind.
@@ -264,6 +266,9 @@ module Gori
         # `Diff::Snapshot` (`rows.size >= limit`) — the read is capped, not cursored, so a
         # group that lost the cut is not on a later page, it is simply absent.
         truncated = entries.size >= limit
+        coverage = Sitemap::Coverage.load(store)
+        # Per entry, before the build, so a node keeps only its untested methods.
+        entries.reject! { |e| coverage.touched?(e.scheme, e.host, e.port, e.method, e.target) } if untested
         hosts = Sitemap.build(entries)
         # Right after the build, before tags, as SitemapView#apply_reload does, and not under a
         # query (a reference is not a flow the query can judge — `JsRefs.attach!`). --in-scope
@@ -286,6 +291,8 @@ module Gori
         # Queries LAST and on their own switch, so the id passes above see the literal
         # children they always did (/items/7?ref=home still joins the /items/7 numeric run).
         hosts.each { |h| Sitemap.fold_queries!(h) } if fold_query
+        # After every fold, so a query fold carries its path's coverage.
+        coverage.stamp!(hosts)
         hosts.each { |h| h.endpoints = Sitemap.endpoint_count(h) }
         {hosts, truncated}
       end

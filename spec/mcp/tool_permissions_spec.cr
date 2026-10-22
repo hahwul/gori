@@ -16,6 +16,8 @@ private UNSWITCHED_WRITERS = {
   # A READ tool whose one argument writes a file: `output_path` is refused per call under
   # `write` (`Tools#call_denied_permission`), and the inline document is never switched off.
   "export_openapi" => "per-call write (output_path)",
+  # A READ tool whose `send: true` dials: refused per call under `send`, the read never is.
+  "graphql_schema" => "per-call send (send)",
 }
 
 private def denied_tools(store, *keys : String) : Gori::MCP::Tools
@@ -147,6 +149,17 @@ describe "MCP tool permissions" do
       active.error_code.should eq("TOOL_DISABLED")
       active.text.should contain("Send traffic")
       tools.call("probe_scan", JSON.parse("{}")).is_error.should be_false
+    end
+  end
+
+  it "refuses only the send mode of graphql_schema when Send traffic is off" do
+    with_store do |store|
+      tools = denied_tools(store, "send")
+      tools.serves?("graphql_schema").should be_true
+      sent = tools.call("graphql_schema", JSON.parse(%({"flow_id":1,"send":true})))
+      sent.error_code.should eq("TOOL_DISABLED")
+      # The read reaches the handler (and finds no flow), the permission does not stop it.
+      tools.call("graphql_schema", JSON.parse(%({"flow_id":1}))).error_code.should eq("NOT_FOUND")
     end
   end
 

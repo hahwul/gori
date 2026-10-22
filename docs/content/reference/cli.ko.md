@@ -106,6 +106,7 @@ gori run <subcommand> [verb] [options]
 | `views` · `add` · `set` · `rename` · `scope` · `rm` | 저장된 History 뷰 관리: 목록을 좁히는 이름 붙은 QL 쿼리를 렌즈로 적용 |
 | `session` · `add` · `from-flow` · `edit` · `rm` · `baseline` · `show` · `refresh` · `from-request` | 세션 슬롯: 전송이나 Authorize 실행이 그 이름으로 나가는 신원과, 그 신원을 다시 인증하는 Repeater 단계 |
 | `grpc [schema]` · `reflect` · `forget` | gRPC `.proto` 렌즈: 무엇이 로드됐는지 보기, 서버 리플렉션으로 디스크립터 받기, 캐시된 대상 버리기 |
+| `graphql schema <flow-id>` | GraphQL 스키마를 간결한 SDL로. 응답이 인트로스펙션 결과인 플로우에서 읽거나, `--send`면 플로우의 요청을 인트로스펙션 쿼리로 다시 보냅니다(스코프 게이트). `--filter`, `--max-bytes`, `--legacy`, `--format json`(MCP `graphql_schema`와 같은 객체) |
 | `project [list]` | 캡처된 트래픽이 있는 프로젝트 목록 (`--all`이면 전부) |
 | `project create <name>` | 이름으로 프로젝트 생성 (같은 이름이면 다시 열기) |
 | `project rename <name> <new-name>` | 프로젝트 표시 이름 변경 |
@@ -1019,7 +1020,7 @@ gori run import --postman api.postman_collection.json --db ./assessment.db --for
 gori run sitemap --in-scope --format paths
 ```
 
-`-q`/`--query=QL`는 history와 같은 QL로 엔드포인트를 거릅니다(위치 인자로도 넘길 수 있습니다). Sitemap 전용 경로 메모 필드 `tag:`도 받습니다([적용 범위](/ko/reference/query-language/#where-it-applies)). `-n`/`--limit=N`은 스캔할 엔드포인트 수를 제한합니다(기본값 10000). `--in-scope`는 스코프 내 호스트로 한정하고, `--hide-static`은 이미지·폰트·오디오·비디오를 뺍니다(TUI 트리처럼 플로우 단위). `--no-group`은 id 접기를, `--no-fold-query`는 쿼리 문자열 접기를 끕니다(서로 다른 축입니다). `--js-refs`는 캡처한 JavaScript가 참조하지만 아무도 요청하지 않은 경로도 함께 그립니다(`sitemap js` 참고. JSON에서는 `js_refs`와 `unrequested`로 나오며, `paths`에는 나오지 않습니다). `--format`은 `text`(트리), `json`, `paths` 중에서 고릅니다. `--lenient`는 없는 필드 이름을 쓴 쿼리를 거절하지 않고 받아들입니다.
+`-q`/`--query=QL`는 history와 같은 QL로 엔드포인트를 거릅니다(위치 인자로도 넘길 수 있습니다). Sitemap 전용 경로 메모 필드 `tag:`도 받습니다([적용 범위](/ko/reference/query-language/#where-it-applies)). `-n`/`--limit=N`은 스캔할 엔드포인트 수를 제한합니다(기본값 10000). `--in-scope`는 스코프 내 호스트로 한정하고, `--hide-static`은 이미지·폰트·오디오·비디오를 뺍니다(TUI 트리처럼 플로우 단위). `--no-group`은 id 접기를, `--no-fold-query`는 쿼리 문자열 접기를 끕니다(서로 다른 축입니다). `--js-refs`는 캡처한 JavaScript가 참조하지만 아무도 요청하지 않은 경로도 함께 그립니다(`sitemap js` 참고. JSON에서는 `js_refs`와 `unrequested`로 나오며, `paths`에는 나오지 않습니다). `--untested`는 능동 도구(Repeater, Fuzzer, Miner, Sequencer, Authorize, Probe, Retest)가 History에 기록한 플로우도, 저장된 퍼즈 실행도 없는 엔드포인트만 남기고, 그런 기록이 있는 엔드포인트에는 text와 JSON에 `touched_by`(도구 → 기록된 플로우 또는 저장된 퍼즈 결과 수, 쿼리를 뺀 경로 기준)가 붙습니다. 기록도 저장도 하지 않은 스윕은 셀 흔적을 남기지 않습니다. `--format`은 `text`(트리), `json`, `paths` 중에서 고릅니다. `--lenient`는 없는 필드 이름을 쓴 쿼리를 거절하지 않고 받아들입니다.
 
 트리의 루트는 오리진(스킴, 호스트, 포트)마다 하나라서, `http://127.0.0.1:19021`, `http://127.0.0.1:19022`, `https://127.0.0.1:8443`은 루트 세 개가 됩니다. `paths`는 엔드포인트마다 기본 포트를 뺀 전체 URL을 출력합니다(`GET  https://127.0.0.1:8443/only-tls`). `json`의 호스트 객체는 `host`에 포트 없는 호스트를 그대로 두고 `scheme`, `port`, `origin`(`paths`가 앞에 붙이는 값)을 더합니다. 태그는 호스트에 붙으므로 그 호스트의 모든 오리진 아래에 보입니다.
 

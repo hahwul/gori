@@ -127,6 +127,8 @@ module Gori
       # HOST-level tree (`build` over bare (host, method, target) triples — the retest diff's
       # keys), where the label is the bare host.
       property origin : Origin?
+      # Active tool token → recorded flows or saved fuzz results (`Coverage#stamp!`); nil when none touched this node.
+      property touched_by : Hash(String, Int64)?
 
       # Build-time label→child index so `child` is O(1) instead of a linear sibling scan —
       # a path-param explosion (thousands of `/users/<id>` siblings under one parent) made
@@ -150,6 +152,7 @@ module Gori
         @js_refs = 0
         @unrequested = false
         @origin = nil
+        @touched_by = nil
       end
 
       # The bare host a host (depth-0) node stands for: its origin's host, or the label of a
@@ -861,3 +864,4 @@ module Gori
 end
 
 require "./sitemap/tag_filter"
+require "./sitemap/coverage"
