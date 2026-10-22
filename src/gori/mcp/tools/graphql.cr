@@ -82,22 +82,9 @@ module Gori
           result = plan.send_wire(plan.wire_bytes, cancel_signal, admitted: true)
           return err("request cancelled", "CANCELLED") if cancelled?
           status = result.response.try(&.status)
-          if e = result.error
-            return err("introspection request failed: #{e}", "NETWORK_ERROR", field: "flow_id", retryable: true)
-          end
-          # A body cut short (closed early, or past the read cap) is no schema, and no reason to
-          # suggest the legacy query: say what happened instead of "not JSON".
-          if result.incomplete?
-            return err("the endpoint's response was cut short (closed early or past the read cap, status " \
-                       "#{status || "?"}), so the schema is incomplete", "INTROSPECTION_FAILED", field: "flow_id")
-          end
-          parsed = Graphql::Schema.parse(result.head, result.body)
-          if parsed.is_a?(String)
-            hint = legacy ? "" : " (an older server may take legacy:true)"
-            return err("the endpoint did not return a schema (status #{status || "?"}): #{parsed}#{hint}",
-              "INTROSPECTION_FAILED", field: "flow_id")
-          end
-          {parsed, gate, status}
+          answered = graphql_answer(result, status, legacy)
+          return answered if answered.is_a?(Result)
+          {answered, gate, status}
         rescue ex : Repeater::PlanError
           send_plan_error(ex, "flow_id")
         rescue ex : Gori::Error
@@ -105,6 +92,24 @@ module Gori
         ensure
           ob.close
         end
+      end
+
+      # The schema in one introspection send's result, or why there is none.
+      private def graphql_answer(result : Repeater::Result, status : Int32?, legacy : Bool) : JSON::Any | Result
+        if e = result.error
+          return err("introspection request failed: #{e}", "NETWORK_ERROR", field: "flow_id", retryable: true)
+        end
+        # A body cut short (closed early, or past the read cap) is no schema, and no reason to
+        # suggest the legacy query: say what happened instead of "not JSON".
+        if result.incomplete?
+          return err("the endpoint's response was cut short (closed early or past the read cap, status " \
+                     "#{status || "?"}), so the schema is incomplete", "INTROSPECTION_FAILED", field: "flow_id")
+        end
+        parsed = Graphql::Schema.parse(result.head, result.body)
+        return parsed unless parsed.is_a?(String)
+        hint = legacy ? "" : " (an older server may take legacy:true)"
+        err("the endpoint did not return a schema (status #{status || "?"}): #{parsed}#{hint}",
+          "INTROSPECTION_FAILED", field: "flow_id")
       end
 
       private def list_graphql_tools(j : JSON::Builder) : Nil
