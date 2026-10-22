@@ -22,12 +22,7 @@ module Gori
       ClusterBomb
 
       def label : String
-        case self
-        in Sniper       then "sniper"
-        in BatteringRam then "battering-ram"
-        in Pitchfork    then "pitchfork"
-        in ClusterBomb  then "cluster-bomb"
-        end
+        to_s.underscore.tr("_", "-")
       end
 
       # One payload set shared across all positions (Sniper/BatteringRam) vs one set
@@ -431,13 +426,7 @@ module Gori
 
       # The durable spelling — `fuzz_runs.status`, MCP's `status`, the CLI's JSON.
       def label : String
-        case self
-        in Done            then "done"
-        in BudgetExhausted then "budget_exhausted"
-        in ConditionMet    then "condition_met"
-        in Stopped         then "stopped"
-        in Error           then "error"
-        end
+        to_s.underscore
       end
     end
 
@@ -507,10 +496,7 @@ module Gori
       Interesting
 
       def label : String
-        case self
-        in All         then "all"
-        in Interesting then "interesting"
-        end
+        to_s.underscore
       end
 
       def self.parse?(token : String?) : Keep?

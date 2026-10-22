@@ -67,28 +67,28 @@ end
 
 describe "gori run history --format json — sensitive History columns" do
   it "covers a header column whose selector names a sensitive header, in any case" do
-    Gori::CLI::Output.sensitive_column?(col(Gori::ExtractKind::Header, "authorization")).should be_true
-    Gori::CLI::Output.sensitive_column?(col(Gori::ExtractKind::Header, "Authorization")).should be_true
-    Gori::CLI::Output.sensitive_column?(col(Gori::ExtractKind::Header, "SET-COOKIE")).should be_true
-    Gori::CLI::Output.sensitive_column?(col(Gori::ExtractKind::Header, "x-api-key")).should be_true
+    Gori::DisplayColumns.sensitive?(col(Gori::ExtractKind::Header, "authorization")).should be_true
+    Gori::DisplayColumns.sensitive?(col(Gori::ExtractKind::Header, "Authorization")).should be_true
+    Gori::DisplayColumns.sensitive?(col(Gori::ExtractKind::Header, "SET-COOKIE")).should be_true
+    Gori::DisplayColumns.sensitive?(col(Gori::ExtractKind::Header, "x-api-key")).should be_true
   end
 
   # A named cookie's value is by construction a substring of the `Cookie` header the row
   # redacts, so covering `header:cookie` and not `cookie:sid` would leave the same credential
   # printing beside the same `[REDACTED]`.
   it "covers a cookie column whatever its selector" do
-    Gori::CLI::Output.sensitive_column?(col(Gori::ExtractKind::Cookie, "sid")).should be_true
-    Gori::CLI::Output.sensitive_column?(col(Gori::ExtractKind::Cookie, "theme")).should be_true
+    Gori::DisplayColumns.sensitive?(col(Gori::ExtractKind::Cookie, "sid")).should be_true
+    Gori::DisplayColumns.sensitive?(col(Gori::ExtractKind::Cookie, "theme")).should be_true
   end
 
   # The three content-scoped kinds can lift a credential out of any byte of the message and
   # the descriptor cannot say whether they do. Left alone rather than guessed at — the docs
   # name them as uncovered instead of implying a guarantee.
   it "does not claim the content-scoped kinds, nor an ordinary header" do
-    Gori::CLI::Output.sensitive_column?(col(Gori::ExtractKind::Header, "x-request-id")).should be_false
-    Gori::CLI::Output.sensitive_column?(col(Gori::ExtractKind::Regex, "tok=(\\w+)")).should be_false
-    Gori::CLI::Output.sensitive_column?(col(Gori::ExtractKind::JsonPath, "data.token")).should be_false
-    Gori::CLI::Output.sensitive_column?(col(Gori::ExtractKind::Position, "")).should be_false
+    Gori::DisplayColumns.sensitive?(col(Gori::ExtractKind::Header, "x-request-id")).should be_false
+    Gori::DisplayColumns.sensitive?(col(Gori::ExtractKind::Regex, "tok=(\\w+)")).should be_false
+    Gori::DisplayColumns.sensitive?(col(Gori::ExtractKind::JsonPath, "data.token")).should be_false
+    Gori::DisplayColumns.sensitive?(col(Gori::ExtractKind::Position, "")).should be_false
   end
 
   # The marker has to be true for a row whose ONLY redaction was a column: a
@@ -119,7 +119,7 @@ describe "gori run history --format json — sensitive History columns" do
   # redaction matcher likewise has no default, and both branches pass the listing's (#1671).
   it "applies the policy in row_columns and makes both listing branches declare intent" do
     src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "history.cr"))
-    src.should contain("CLI::Output.sensitive_column?(c)")
+    src.should contain("DisplayColumns.sensitive?(c)")
     src.should contain("include_sensitive : Bool,")
     src.should contain("matcher : Redact::Matcher?) : {Array({String, String}), Bool}?")
     src.should contain("prepared.row_values(store, row.id, matcher)")

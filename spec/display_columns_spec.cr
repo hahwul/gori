@@ -23,7 +23,7 @@ private def column(kind : Gori::ExtractKind, selector : String = "",
 end
 
 private def value_of(col : Gori::Store::DisplayColumn, d : Gori::Store::FlowDetail) : String
-  Gori::DisplayColumns.prepare([col]).values(d).first
+  Gori::DisplayColumns::Prepared.new([col]).values(d).first
 end
 
 describe Gori::DisplayColumns do
@@ -75,7 +75,7 @@ describe Gori::DisplayColumns do
     # runs on the render fiber, where a raise is the whole tab.
     it "survives a regex that does not compile, and keeps the other columns" do
       d = detail("GET / HTTP/1.1\r\nX-Ok: yes\r\n\r\n", "HTTP/1.1 200 OK\r\nX-Ok: yes\r\n\r\n")
-      prepared = Gori::DisplayColumns.prepare([
+      prepared = Gori::DisplayColumns::Prepared.new([
         column(Gori::ExtractKind::Regex, "([unclosed", label: "bad"),
         column(Gori::ExtractKind::Header, "x-ok", label: "ok"),
       ])
@@ -106,11 +106,11 @@ describe Gori::DisplayColumns do
     # PER PREFIX, because a narrow pane draws only the columns that fit and must not pay a
     # 512 KiB read plus a content-decode per row for a dropped one.
     it "reports whether a given prefix of the set needs the body" do
-      Gori::DisplayColumns.prepare([column(Gori::ExtractKind::Header, "x")]).body_scoped?.should be_false
-      Gori::DisplayColumns.prepare([column(Gori::ExtractKind::Cookie, "x")]).body_scoped?.should be_false
-      Gori::DisplayColumns.prepare([column(Gori::ExtractKind::JsonPath, "a")]).body_scoped?.should be_true
+      Gori::DisplayColumns::Prepared.new([column(Gori::ExtractKind::Header, "x")]).body_scoped?.should be_false
+      Gori::DisplayColumns::Prepared.new([column(Gori::ExtractKind::Cookie, "x")]).body_scoped?.should be_false
+      Gori::DisplayColumns::Prepared.new([column(Gori::ExtractKind::JsonPath, "a")]).body_scoped?.should be_true
 
-      mixed = Gori::DisplayColumns.prepare([
+      mixed = Gori::DisplayColumns::Prepared.new([
         column(Gori::ExtractKind::Header, "x"),
         column(Gori::ExtractKind::JsonPath, "a"),
       ])
@@ -121,7 +121,7 @@ describe Gori::DisplayColumns do
 
     it "evaluates only the requested prefix" do
       d = detail("GET / HTTP/1.1\r\n\r\n", "HTTP/1.1 200 OK\r\nX-A: one\r\nX-B: two\r\n\r\n")
-      prepared = Gori::DisplayColumns.prepare([
+      prepared = Gori::DisplayColumns::Prepared.new([
         column(Gori::ExtractKind::Header, "x-a"),
         column(Gori::ExtractKind::Header, "x-b"),
       ])

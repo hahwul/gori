@@ -32,10 +32,6 @@ private class FakeDrillHost
     (0...rail_count).map { |i| DrillIn::RailRow.new("200", "GET api.test/v1/item/#{i}") }
   end
 
-  def rail_cursor : Int32
-    (@here || 0) - DrillIn.window_start(@total, @here || 0)
-  end
-
   def detail_crumb : Frame::Crumb?
     Frame::Crumb.new("HISTORY", "GET api.test/v1/me", "#{(@here || 0) + 1}/#{@total}")
   end

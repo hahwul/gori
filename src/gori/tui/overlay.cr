@@ -850,4 +850,64 @@ module Gori::Tui
       @editor.set_preedit(text)
     end
   end
+
+  # An `EditorCard` SUB-EDITOR with no cancel path (the Discover headers and User-Agents
+  # editors): esc and a click away from the card both save, unless `refusal` names a line that
+  # cannot be used — and then only while the card that explains it is on screen. The includer
+  # holds `@refused : String?` and `@card_drawn : Bool` (true until the first frame; its render
+  # writes it) and answers `refusal` and `overlay_box`.
+  module SavingEditorCard
+    include EditorCard
+
+    # There is nothing to cancel INTO, so a click outside the card saves exactly like esc.
+    #
+    # This path is handed `area`, so it settles the "is the card on screen" question from
+    # live geometry and tells the key path too — then defers to the one policy in
+    # try_commit rather than restating it. No card means no refusal to read, so the click
+    # saves; going through try_commit is what keeps @refused consistent with the geometry.
+    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      box = overlay_box(area)
+      @card_drawn = !box.nil?
+      return try_commit unless box
+      return try_commit unless box.contains?(mx, my)
+      @editor.click_to_cursor(editor_rect(box), mx, my) # a press inside is a caret, not a no-op
+      :stay
+    end
+
+    # esc = save & close (:commit); every other key edits the buffer (:stay).
+    def handle_key(ev : Termisu::Event::Key) : Symbol
+      return try_commit if ev.key.escape?
+      edit(ev)
+      :stay
+    end
+
+    # Close only when `refusal` has nothing to say; otherwise stay open with it on the hint row.
+    #
+    # …unless the last frame had no room for the card. The refusal lives on the hint row of
+    # a card that was never drawn, and the editor the user would fix the line in is not on
+    # screen either, so holding here is an inescapable modal rather than a correction the
+    # operator can act on. A refusal nobody can read is a lock, not a guard: close instead,
+    # and the degraded render line says what that costs.
+    private def try_commit : Symbol
+      @refused = refusal
+      (@refused && @card_drawn) ? :stay : :commit
+    end
+
+    # Every key but esc is `TextArea#handle_edit_key` — the ONE editor keymap (⏎ inserts a
+    # line, ⇧arrows select, ⌥/⌃←→ by word, ⌥⌫ …); ↑/↓ have no pane to cross into, the card is
+    # the whole surface. Any edit retracts a standing refusal — it is re-derived on the next
+    # commit attempt, so the red line can never outlive the line it was about.
+    private def edit(ev : Termisu::Event::Key) : Nil
+      @refused = nil
+      @editor.handle_edit_key(ev)
+    end
+
+    # The buffer's rect inside a drawn card. Shared by `render` and the three pointer entries
+    # so the caret cannot land on a row it wasn't drawn on — a click inverting one geometry
+    # while the draw used another is #587's shape.
+    private def editor_rect(box : Rect) : Rect
+      top = box.y + 1
+      Rect.new(box.x + 2, top, box.w - 4, {(box.bottom - 2) - top, 1}.max)
+    end
+  end
 end

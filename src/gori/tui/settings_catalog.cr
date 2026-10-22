@@ -116,11 +116,6 @@ module Gori::Tui
         "Which tool groups an agent attached over gori mcp may use — send traffic, intercept control, project edits, scope & sandbox, project management, local commands; reading the capture is always allowed", :ai, :form),
     ]
 
-    # Every section, in registration order — drives the palette verb loop.
-    def self.all : Array(Section)
-      SECTIONS
-    end
-
     # The tab rows for one group, in catalog order (skips in_tab: false sections).
     def self.sections_in(group : Symbol) : Array(Section)
       SECTIONS.select { |s| s.in_tab && s.group == group }

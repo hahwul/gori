@@ -157,7 +157,7 @@ describe "Gori::Tui::FuzzerView template soft wrap" do
   end
 
   # A READ selection that covers a wrap boundary must tint to the END of the visual row, then
-  # continue on the next one. `paint_template_read_chrome` used to clip every span to the LINE
+  # continue on the next one. The template's READ over-paint used to clip every span to the LINE
   # and paint it at the row of that line's FIRST visual row — so a selection running past a
   # break was banded once, in the wrong cells.
   it "tints a READ selection across a wrap break to the end of the row and onto the next" do

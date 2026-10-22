@@ -141,36 +141,9 @@ module Gori
 
         # Rebuild the request with a single authoritative `X-Forwarded-Host: <probe>` after the request
         # line: drop any the browser sent, normalize the request line to origin-form (probes go direct
-        # to the origin). Body untouched — no Content-Length resync. Mirrors CorsReflection#rebuild.
+        # to the origin). Body untouched — no Content-Length resync.
         private def rebuild_with_xfh(head : Bytes, body : Bytes?) : Bytes
-          combined = if body && !body.empty?
-                       io = IO::Memory.new(head.size + body.size)
-                       io.write(head)
-                       io.write(body)
-                       io.to_slice
-                     else
-                       head
-                     end
-          hbytes, bbytes, eol = Miner::Inject.split(combined)
-          lines = String.new(hbytes).split(eol)
-          kept = [] of String
-          lines.each_with_index do |l, i|
-            next if i > 0 && header_named?(l, "x-forwarded-host") # request line (i == 0) normalized below
-            kept << l
-          end
-          unless kept.empty?
-            rl = kept[0].split(' ')
-            kept[0] = "#{rl[0]} #{Active.origin_form(rl[1])} #{rl[2]}" if rl.size == 3
-            kept.insert(1, "#{PROBE_HEADER}: #{PROBE_HOST}")
-          end
-          io = IO::Memory.new
-          io << kept.join(eol) << eol << eol
-          io.write(bbytes) unless bbytes.empty?
-          io.to_slice
-        end
-
-        private def header_named?(line : String, name : String) : Bool
-          (c = line.index(':')) ? line[0...c].strip.downcase == name : false
+          rebuild_with_headers(head, body, Set{"x-forwarded-host"}, ["#{PROBE_HEADER}: #{PROBE_HOST}"])
         end
       end
     end

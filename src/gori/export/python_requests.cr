@@ -33,39 +33,19 @@ module Gori
               b << "# or see --format curl. --format raw has the exact bytes.\n"
             end
             b << "headers = {\n"
-            s.headers.each { |(n, v)| b << "    " << pystr(n) << ": " << pystr(v) << ",\n" }
+            s.headers.each { |(n, v)| b << "    " << Escape.double_quoted(n) << ": " << Escape.double_quoted(v) << ",\n" }
             b << "}\n"
           end
           # The body is a bytes literal, not a str: requests sends `data=<bytes>` verbatim, so a
           # binary body (protobuf, a raw upload) is reproduced exactly, and the kept Content-Type
           # header tells the server how to read it.
-          b << "data = " << pybytes(s.body) << "\n" unless s.body.empty?
-          b << "resp = requests.request(" << pystr(parts.method.empty? ? "GET" : parts.method) << ", url"
+          b << "data = " << Escape.double_quoted(s.body, "b") << "\n" unless s.body.empty?
+          b << "resp = requests.request(" << Escape.double_quoted(parts.method.empty? ? "GET" : parts.method) << ", url"
           b << ", headers=headers" unless s.headers.empty?
           b << ", data=data" unless s.body.empty?
           b << ")\n"
           b << "print(resp.status_code)\n"
           b << "print(resp.text)\n"
-        end
-      end
-
-      # A Python double-quoted str, byte-safe. Header/URL text; requests encodes a str latin-1
-      # on the wire, so a `\xNN` escape round-trips a single byte.
-      private def self.pystr(s : String) : String
-        String.build do |b|
-          b << '"'
-          s.to_slice.each { |byte| Escape.double_quoted_byte(b, byte) }
-          b << '"'
-        end
-      end
-
-      # A Python bytes literal (`b"…"`) — lossless for a body of arbitrary bytes. Python's `b"…"`
-      # and `"…"` share the same escape table (`Export::Escape`).
-      private def self.pybytes(s : String) : String
-        String.build do |b|
-          b << "b\""
-          s.to_slice.each { |byte| Escape.double_quoted_byte(b, byte) }
-          b << '"'
         end
       end
     end

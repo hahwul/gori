@@ -486,7 +486,7 @@ describe Gori::Tui::TextArea do
     end
   end
 
-  # Lifted from `FuzzerView#restore_wire_eols`: a transform computed over the LF projection
+  # Shared by the Fuzzer and Repeater editors: a transform computed over the LF projection
   # (every offset it works from indexes that string) must not write the projection back.
   describe "#set_text_keeping_eols / #replace_all_keeping_eols" do
     it "reattaches the original terminators line for line" do

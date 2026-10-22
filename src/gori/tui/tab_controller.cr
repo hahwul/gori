@@ -48,8 +48,8 @@ module Gori::Tui
     # Open the Sitemap cursor row's representative flow in the History detail — the `o`
     # verb's body, on the Runner because it crosses tabs. A double-click on a leaf row asks
     # for the same thing the key does, and the controller has no other way to reach it. A
-    # default rather than an abstract: some thirty spec doubles implement this module by
-    # hand for one pane each, and a seam only the Sitemap reaches should not tax them all.
+    # default rather than an abstract: spec hosts (`FakeHost` and its subclasses) drive one
+    # pane each, and a seam only the Sitemap reaches should not tax them all.
     def sitemap_open_flow : Nil
     end
 
@@ -69,9 +69,8 @@ module Gori::Tui
     # live capture advances the list cursor while the detail stays on its flow), so the
     # selection this tab publishes has to say the same thing the keys would do. The overlay
     # state lives on the Runner and a controller cannot read it — hence the seam.
-    # A default and not an abstract, for `sitemap_open_flow`'s reason above: thirty spec
-    # doubles implement this module by hand, and a read only History reaches should not tax
-    # them all.
+    # A default and not an abstract, for `sitemap_open_flow`'s reason above: a read only
+    # History reaches should not tax every spec host.
     def detail_pinned_flow_id : Int64?
       nil
     end
@@ -177,7 +176,7 @@ module Gori::Tui
     end
 
     # The strip's ⌕ affordance is the current stop — one step LEFT of the first chip, inside
-    # `:subtabs` focus. CONCRETE, not abstract: nine spec files `include Host` to drive a
+    # `:subtabs` focus. CONCRETE, not abstract: spec hosts `include Host` to drive a
     # controller, and `false` is the right answer for every one of them. Runner overrides.
     def subtab_find_focused? : Bool
       false
@@ -460,16 +459,14 @@ module Gori::Tui
     #
     # Safe against the keymap by construction: `Verb::Chord` parses only letters, digits and
     # punctuation, so none of these can ever BE a binding. Repeater and Fuzzer each carried a
-    # byte-identical private copy of this and its `word_delete?` half; the Decoder and JWT
+    # byte-identical private copy of this and of `LineEdit.word_delete_key?`; the Decoder and JWT
     # needed it too, and a fourth copy is how the first three drifted apart in every other
     # part of this sweep.
     def editing_motion?(ev : Termisu::Event::Key) : Bool
       return false unless ev.ctrl? || ev.alt?
       key = ev.key
       return true if key.left? || key.right? || key.home? || key.end?
-      return true if key.backspace?
-      c = ev.char
-      !!c && (c == '\u{7F}' || c == '\b')
+      LineEdit.word_delete_key?(ev)
     end
 
     # An arrow OR its vim twin — and the twin only when the press carries NO command

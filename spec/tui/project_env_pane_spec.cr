@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "../support/fake_host"
 require "../support/memory_backend"
 require "file_utils"
 
@@ -271,155 +272,12 @@ end
 # "it did not" — `exec_task_ok` catches Channel::ClosedError and answers false, the same false a
 # rolled-back batch produces (see project_desc_persist_spec, which uses it for the same reason).
 
-private class FakeHost
-  include Gori::Tui::Host
-
-  getter statuses = [] of String
+private class NetworkHost < FakeHost
   getter applied_config : Gori::Settings::ProjectNetworkConfig? = nil
-  # Runs while the confirm is "up", before the action — the tick that reloads under a modal.
-  property under_modal : Proc(Nil)? = nil
-
-  def initialize(@session : Gori::Session)
-    @jobs = Gori::Tui::Jobs.new
-    @notifications = Gori::Tui::Notifications.new
-  end
-
-  def session : Gori::Session
-    @session
-  end
-
-  def jobs : Gori::Tui::Jobs
-    @jobs
-  end
-
-  def notifications : Gori::Tui::Notifications
-    @notifications
-  end
-
-  def status(message : String) : Nil
-    @statuses << message
-  end
-
-  # The delete path is behind a confirm; run the action, which is what pressing "delete" does.
-  def confirm(title : String, message : String, *, confirm_label : String, danger : Bool,
-              return_to : Symbol = :none, &action : -> Nil) : Nil
-    @under_modal.try(&.call)
-    action.call
-  end
-
-  def request_overlay(kind : Symbol) : Nil
-  end
-
-  def request_focus(pane : Symbol) : Nil
-  end
-
-  def focus_body : Nil
-  end
-
-  def resolve_subtab_focus : Nil
-  end
-
-  def switch_tab(tab : Symbol) : Nil
-  end
-
-  def goto_tab(tab : Symbol) : Nil
-  end
-
-  def open_palette : Nil
-  end
-
-  def open_help_query(surface : Symbol) : Nil
-  end
-
-  def open_space_menu : Nil
-  end
-
-  def open_fuzz_set_editor(edit_index : Int32?) : Nil
-  end
-
-  def open_fuzz_advanced_editor : Nil
-  end
-
-  def open_authorize_identities : Nil
-  end
-
-  def reconfigure_sequence : Nil
-  end
-
-  def open_scope_rule_editor(edit_id : Int64?, kind : String, match_type : String, pattern : String) : Nil
-  end
-
-  def open_custom_rule_editor(rule : Gori::Probe::CustomRule?) : Nil
-  end
-
-  def open_rewriter_preset_picker : Nil
-  end
-
-  def open_rewriter_rule_editor(rule : Gori::Store::MatchRule?) : Nil
-  end
-
-  def open_colormarker_rule_editor(rule : Gori::Store::ColorRule?) : Nil
-  end
-
-  def open_colormarker_color_editor(color : Gori::Settings::ColormarkerColor?) : Nil
-  end
-
-  def open_extract_rule_editor(rule : Gori::Store::ExtractRule?) : Nil
-  end
-
-  def open_chain_save : Nil
-  end
-
-  def open_chain_load : Nil
-  end
-
-  def open_oast_provider_editor(provider : Gori::Oast::ProviderConfig?) : Nil
-  end
-
-  def overlay : Symbol
-    :none
-  end
-
-  def active_tab : Symbol
-    :project
-  end
-
-  def focus : Symbol
-    :body
-  end
-
-  def reveal? : Bool
-    false
-  end
-
-  def toggle_reveal : Nil
-  end
-
-  def pretty? : Bool
-    false
-  end
-
-  def toggle_pretty : Nil
-  end
-
-  def toggle_scope_lens : Nil
-  end
-
-  def toggle_sandbox : Nil
-  end
-
-  def apply_project_network(bind_host : String, bind_port : Int32, upstream : String,
-                            connect_secs : Int32, io_secs : Int32, capture_mib : Int32) : String
-    ""
-  end
 
   def apply_project_network(config : Gori::Settings::ProjectNetworkConfig) : String
     @applied_config = config
     "project network captured"
-  end
-
-  def apply_project_protos(spec : String) : String
-    ""
   end
 end
 
@@ -436,7 +294,7 @@ private def with_env_controller(&)
   saved_prefix = Gori::Settings.env_prefix
   Gori::Settings.env_prefix = "$"
   begin
-    host = FakeHost.new(session)
+    host = NetworkHost.new(session)
     c = ProjectController.new(host)
     c.view.focus_pane(:env)
     yield c, host, session

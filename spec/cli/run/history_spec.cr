@@ -1761,7 +1761,7 @@ describe "gori run history — body columns under a redaction profile" do
           body: %({"password":"hunter2"}).to_slice, source: Gori::FlowSource::Kind::Proxy))
         cols = ->(specs : Array(String)) do
           parsed = Gori::DisplayColumns.parse_specs(specs).as(Array(Gori::DisplayColumns::Spec))
-          Gori::DisplayColumns.prepare(parsed.map_with_index { |sp, i| sp.to_column(i) })
+          Gori::DisplayColumns::Prepared.new(parsed.map_with_index { |sp, i| sp.to_column(i) })
         end
         flags = ->(mode : Bool?) { Gori::CLI::Run::RedactFlags.new.tap(&.mode = mode) }
 

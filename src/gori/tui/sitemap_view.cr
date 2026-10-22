@@ -1069,23 +1069,11 @@ module Gori::Tui
                listen : {String, Int32}? = nil, capturing : Bool = true) : Nil
       return if rect.empty?
       render_tree_body(screen, rect, focused, listen: listen, capturing: capturing)
-      render_query_popup(screen, rect)
+      render_query_popup(screen, rect, list_top(rect), QUERY_PREFIX, @ql_help)
     end
 
     # Anchored below the column header's divider — never over it — and bounded by the tree,
     # which is the only region it may occlude.
-    private def render_query_popup(screen : Screen, rect : Rect) : Nil
-      return unless @querying && @popup.open?
-      top = list_top(rect)
-      bounds = Rect.new(rect.x + 1, top, {rect.w - 2, 0}.max, {rect.bottom - top, 0}.max)
-      # Anchored at the START of the query text, not at the token's offset within it.
-      # `Screen#input_line` scrolls its window horizontally once the query outgrows the bar, so
-      # `base + token.start` stops being the token's screen column on exactly the long queries
-      # where precision would matter — the card would drift right of what it completes and then
-      # clamp. A fixed anchor is always adjacent to the bar and never lies.
-      @popup.render(screen, rect.x + 1 + QUERY_PREFIX.size, top - 1, bounds, @ql_help)
-    end
-
     private def render_tree_body(screen : Screen, rect : Rect, focused : Bool = true, *,
                                  listen : {String, Int32}? = nil, capturing : Bool = true) : Nil
       render_ql_bar(screen, rect)

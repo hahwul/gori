@@ -105,38 +105,7 @@ module Gori
         # existing Origin the browser sent, then insert ours right after the request line. The
         # body is untouched, so Content-Length stays valid (no resync needed).
         private def rebuild_with_origin(head : Bytes, body : Bytes?, origin : String) : Bytes
-          combined = if body && !body.empty?
-                       io = IO::Memory.new(head.size + body.size)
-                       io.write(head)
-                       io.write(body)
-                       io.to_slice
-                     else
-                       head
-                     end
-          hbytes, bbytes, eol = Miner::Inject.split(combined)
-          lines = String.new(hbytes).split(eol)
-          kept = [] of String
-          lines.each_with_index do |l, i|
-            next if i > 0 && origin_header?(l) # the request line (i == 0) is normalized below
-            kept << l
-          end
-          # Normalize an absolute-form (forward-proxy) request line to origin-form: like the
-          # ReflectedParam probe, this is sent DIRECT to the origin (no proxy rewrite), and some
-          # origins reject an absolute-form target on a non-proxied request — which would make the
-          # CORS probe silently miss a real arbitrary-origin reflection. Origin-form passes through.
-          unless kept.empty?
-            rl = kept[0].split(' ')
-            kept[0] = "#{rl[0]} #{Active.origin_form(rl[1])} #{rl[2]}" if rl.size == 3
-          end
-          kept.insert(1, "Origin: #{origin}") unless kept.empty?
-          io = IO::Memory.new
-          io << kept.join(eol) << eol << eol
-          io.write(bbytes) unless bbytes.empty?
-          io.to_slice
-        end
-
-        private def origin_header?(line : String) : Bool
-          (c = line.index(':')) ? line[0...c].strip.downcase == "origin" : false
+          rebuild_with_headers(head, body, Set{"origin"}, ["Origin: #{origin}"])
         end
 
         # Dedup path: origin-form target with the query stripped (a CORS policy is per-endpoint,

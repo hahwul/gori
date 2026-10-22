@@ -73,8 +73,11 @@ module Gori::Fuzz
     # the splice and the socket and can change the head's length. Returning the edit instead
     # of the whole mapping keeps the (dominant) untouched-request path allocation-free.
     def self.sync_at(bytes : Bytes, add_when_missing : Bool = false) : {Bytes, Int32, Int32}
-      sep, sep_w, eol = boundary(bytes)
-      return {bytes, 0, 0} if sep.nil?
+      sep, sep_w = Env.head_body_separator(bytes) || return {bytes, 0, 0}
+      # The terminator of the header line BEFORE the blank line. The mixed `\n\r\n` separator
+      # (width 3) is not a repeated `eol`, so callers splice `bytes[sep, sep_w]` VERBATIM
+      # instead of doubling `eol` (see replace_cl / append_cl).
+      eol = sep_w == 4 ? "\r\n" : "\n"
 
       body_start = sep + sep_w
       body_len = bytes.size - body_start
@@ -216,39 +219,7 @@ module Gori::Fuzz
       io.to_slice
     end
 
-    # ── boundary + chunked ────────────────────────────────────────────────────────
-
-    # Locate the head/body separator = the FIRST blank line. Returns its start index
-    # (nil if none), its full byte WIDTH, and the terminator of the header line that
-    # PRECEDES the blank line. Three spellings are recognized:
-    #   LFLF `\n\n` (width 2, prior eol `\n`), CRLFCRLF `\r\n\r\n` (width 4, prior eol `\r\n`),
-    #   and the mixed `\n\r\n` (width 3, prior eol `\n`) — the last header line ended in a bare
-    #   LF and the blank line itself was CRLF. `\r\n\n` needs no branch: it is already caught as
-    #   LFLF one byte in (the leading CR stays in the head, matching the old behavior).
-    # For the mixed spelling the separator is NOT a repeated `eol`, so callers splice
-    # `bytes[start, width]` VERBATIM instead of doubling `eol` (see replace_cl / append_cl);
-    # `eol` is retained only as the prior line's terminator (all `append_cl` needs).
-    # A single left-to-right scan (not "all CRLFCRLF, then all LFLF") matters when the head is
-    # LF-terminated but the BODY contains a CRLFCRLF: scanning all CRLFCRLF first would find the
-    # body's and split at the wrong place. A well-formed CRLF head has no LFLF/`\n\r\n` inside
-    # it, so this is unchanged for normal CRLF messages; the earliest match wins because every
-    # spelling is tested at the same `i` and the leftmost hit is returned first.
-    private def self.boundary(bytes : Bytes) : {Int32?, Int32, String}
-      i = 0
-      while i + 1 < bytes.size
-        return {i, 2, "\n"} if bytes[i] == 0x0a_u8 && bytes[i + 1] == 0x0a_u8 # LFLF
-        if i + 2 < bytes.size && bytes[i] == 0x0a_u8 &&
-           bytes[i + 1] == 0x0d_u8 && bytes[i + 2] == 0x0a_u8 # mixed `\n\r\n` (bare-LF header + CRLF blank)
-          return {i, 3, "\n"}
-        end
-        if i + 3 < bytes.size && bytes[i] == 0x0d_u8 && bytes[i + 1] == 0x0a_u8 &&
-           bytes[i + 2] == 0x0d_u8 && bytes[i + 3] == 0x0a_u8 # CRLFCRLF
-          return {i, 4, "\r\n"}
-        end
-        i += 1
-      end
-      {nil, 0, "\r\n"}
-    end
+    # ── chunked ────────────────────────────────────────────────────────
 
     # True when the final transfer-coding is `chunked` (RFC 7230 §3.3.1) — mirrors
     # ContentDecode's strict check, not a loose substring scan. Tokenizes the head on

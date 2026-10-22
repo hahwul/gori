@@ -501,10 +501,10 @@ describe "Gori::Miner.decide against a width-matched control" do
   end
 end
 
-describe "Gori::Miner::Canary.bogus_name" do
+describe "Gori::Miner::Canary.bogus_batch name shape" do
   it "is exactly the requested number of bytes, odd lengths included" do
     (3..40).each do |n|
-      name = M::Canary.bogus_name(n)
+      name = M::Canary.bogus_batch(1, n).first
       name.bytesize.should eq(n)
       name.should start_with("zz")
       # A control name has to survive every location's encoding unchanged, and be a legal

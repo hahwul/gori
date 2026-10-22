@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "../support/fake_host"
 require "file_utils"
 require "../../src/gori/tui/controllers/issues_controller"
 require "../../src/gori/tui/controllers/intercept_controller"
@@ -20,146 +21,9 @@ include Gori::Tui
 # where `peer_add` reaches the row through its own loader): what makes something a peer edit is
 # that it lands in the COLUMN without going through this pane, and that is what these write.
 
-private class PeerSyncHost
-  include Gori::Tui::Host
-
-  getter statuses = [] of String
-  property active_tab : Symbol = :issues
-
-  def initialize(@session : Gori::Session)
-    @jobs = Gori::Tui::Jobs.new
-    @notifications = Gori::Tui::Notifications.new
-  end
-
-  def session : Gori::Session
-    @session
-  end
-
-  def jobs : Gori::Tui::Jobs
-    @jobs
-  end
-
-  def notifications : Gori::Tui::Notifications
-    @notifications
-  end
-
-  def status(message : String) : Nil
-    @statuses << message
-  end
-
+private class PeerSyncHost < FakeHost
   def last_status : String
     @statuses.last? || ""
-  end
-
-  def request_overlay(kind : Symbol) : Nil
-  end
-
-  def request_focus(pane : Symbol) : Nil
-  end
-
-  def focus_body : Nil
-  end
-
-  def resolve_subtab_focus : Nil
-  end
-
-  def switch_tab(tab : Symbol) : Nil
-  end
-
-  def goto_tab(tab : Symbol) : Nil
-  end
-
-  def open_palette : Nil
-  end
-
-  def open_help_query(surface : Symbol) : Nil
-  end
-
-  def open_space_menu : Nil
-  end
-
-  def open_fuzz_set_editor(edit_index : Int32?) : Nil
-  end
-
-  def open_fuzz_advanced_editor : Nil
-  end
-
-  def open_authorize_identities : Nil
-  end
-
-  def reconfigure_sequence : Nil
-  end
-
-  def open_scope_rule_editor(edit_id : Int64?, kind : String, match_type : String, pattern : String) : Nil
-  end
-
-  def open_custom_rule_editor(rule : Gori::Probe::CustomRule?) : Nil
-  end
-
-  def open_rewriter_preset_picker : Nil
-  end
-
-  def open_rewriter_rule_editor(rule : Gori::Store::MatchRule?) : Nil
-  end
-
-  def open_colormarker_rule_editor(rule : Gori::Store::ColorRule?) : Nil
-  end
-
-  def open_colormarker_color_editor(color : Gori::Settings::ColormarkerColor?) : Nil
-  end
-
-  def open_extract_rule_editor(rule : Gori::Store::ExtractRule?) : Nil
-  end
-
-  def open_chain_save : Nil
-  end
-
-  def open_chain_load : Nil
-  end
-
-  def open_oast_provider_editor(provider : Gori::Oast::ProviderConfig?) : Nil
-  end
-
-  def confirm(title : String, message : String, *, confirm_label : String, danger : Bool,
-              return_to : Symbol = :none, &action : -> Nil) : Nil
-    action.call
-  end
-
-  def overlay : Symbol
-    :none
-  end
-
-  def focus : Symbol
-    :body
-  end
-
-  def reveal? : Bool
-    false
-  end
-
-  def toggle_reveal : Nil
-  end
-
-  def pretty? : Bool
-    false
-  end
-
-  def toggle_pretty : Nil
-  end
-
-  def toggle_scope_lens : Nil
-  end
-
-  def toggle_sandbox : Nil
-  end
-
-  def apply_project_network(bind_host : String, bind_port : Int32, upstream : String,
-                            connect_secs : Int32, io_secs : Int32, capture_mib : Int32) : String
-    ""
-  end
-
-  def apply_project_protos(spec : String) : String
-    ""
   end
 end
 
@@ -192,7 +56,7 @@ end
 private def with_issues_controller(&)
   with_sessions(1) do |sessions|
     session = sessions.first
-    host = PeerSyncHost.new(session)
+    host = PeerSyncHost.new(session, :issues)
     yield Gori::Tui::IssuesController.new(host), host, session.store
   end
 end
@@ -682,7 +546,7 @@ describe "intercept in a VIEW-ONLY window" do
       capturer.capturing_lock_held?.should be_true
       viewer.capturing_lock_held?.should be_false
 
-      host = PeerSyncHost.new(viewer)
+      host = PeerSyncHost.new(viewer, :issues)
       ctrl = Gori::Tui::InterceptController.new(host)
       ctrl.intercept_toggle
       # The flag it would have flipped gates the OTHER session's proxy; this one holds nothing.
@@ -697,7 +561,7 @@ describe "intercept in a VIEW-ONLY window" do
   it "refuses the catch direction and the catch condition too" do
     with_sessions(2) do |sessions|
       _, viewer = sessions
-      host = PeerSyncHost.new(viewer)
+      host = PeerSyncHost.new(viewer, :issues)
       ctrl = Gori::Tui::InterceptController.new(host)
 
       ctrl.intercept_cycle_direction
@@ -713,7 +577,7 @@ describe "intercept in a VIEW-ONLY window" do
   it "still toggles in the window that holds capture" do
     with_sessions(1) do |sessions|
       session = sessions.first
-      host = PeerSyncHost.new(session)
+      host = PeerSyncHost.new(session, :issues)
       ctrl = Gori::Tui::InterceptController.new(host)
       ctrl.intercept_toggle
       session.interceptor.enabled?.should be_true

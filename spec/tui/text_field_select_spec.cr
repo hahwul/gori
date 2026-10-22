@@ -14,7 +14,7 @@ include Gori::Tui
 #
 # The anchor is `LineFieldRead`, the SAME model the Repeater/Fuzzer target rows use, so there
 # is one single-line selection in the tree rather than a second one written here. The word
-# rule is `TextArea#word_char?`'s, so a field and a buffer break in the same places.
+# rule is `LineEdit.word_left`/`word_right`'s, so a field and a buffer break in the same places.
 #
 # The pointer half works because the field REMEMBERS the x/y/width `render` last drew it at
 # and inverts its own clicks. The geometry of a "label value" row lives in the overlay's

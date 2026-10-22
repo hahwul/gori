@@ -216,8 +216,8 @@ module Gori
       # filename in a `Content-Disposition` is the everyday one — and PCRE2 raises
       # `ArgumentError: UTF-8 error` on an invalid-UTF-8 subject rather than not matching.
       # Every import parser's bare per-entry rescue caught that and dropped the entry SILENTLY,
-      # so an obs-text header cost the whole flow. `Issues::Export.scrub_only` names the same
-      # hazard from the writing side. These three are ASCII, so `inject_bytes?` answers exactly
+      # so an obs-text header cost the whole flow. The `scrub` in `Issues::Export.json` names
+      # the same hazard from the writing side. These three are ASCII, so `inject_bytes?` answers exactly
       # the same question for every subject and cannot raise; the bytes are never sanitised,
       # only rejected.
       HEADER_INJECT = StaticArray[0x0d_u8, 0x0a_u8, 0x00_u8]
