@@ -127,7 +127,7 @@ module Gori
       def field(line : Bytes) : Nil
         return if line[0] == ':'.ord # a comment
         # SSE is UTF-8; invalid bytes become U+FFFD (display-only, never re-sent).
-        name, value = split(line)
+        name, value = Sse.split(line)
         case name
         when "event".to_slice
           @type = value.empty? ? nil : Utf8.text(value) # empty ⇒ default (nil)
@@ -138,10 +138,6 @@ module Gori
         when "retry".to_slice
           @retry = Sse.retry_ms(value) || @retry # invalid keeps the prior
         end
-      end
-
-      private def split(line : Bytes) : {Bytes, Bytes}
-        Sse.split(line)
       end
 
       private def data(value : Bytes) : Nil
