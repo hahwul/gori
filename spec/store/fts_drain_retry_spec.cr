@@ -63,6 +63,16 @@ private def seed_dirty_flow(store, needle : String) : Int64
 end
 
 describe "Gori::Store#drain_fts!" do
+  it "answers fts_dirty? as fts_backlog > 0, stopping at the first dirty row" do
+    contended_drain_store do |store, _|
+      store.fts_dirty?.should be_false
+      seed_dirty_flow(store, "needledirty")
+      store.fts_dirty?.should be_true
+      store.drain_fts!.should eq(0)
+      store.fts_dirty?.should be_false
+    end
+  end
+
   it "waits out a peer that holds the writer briefly, instead of reporting a backlog" do
     contended_drain_store do |store, peer|
       seed_dirty_flow(store, "needleone")

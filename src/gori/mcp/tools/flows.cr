@@ -180,19 +180,24 @@ module Gori
           # `wait_ms`: the flows are written by another process, so each slice reads the mark
           # (indexed scalars) and re-runs the page only once it moves. A new flow the filter
           # rejects moves it too, and the wait goes on. A filtered re-read can scan bodies
-          # over the whole tail, so under live capture it runs at most once per
-          # HISTORY_REREAD_GAP. It never drains the FTS index here (a write, contending with
-          # the capturing gori for SQLite's one writer slot, P6): rows still unindexed are
-          # waited out, since the gori that wrote them indexes its own.
+          # over the whole tail, so under live capture it is TRIED at most once per
+          # HISTORY_REREAD_GAP — and so is the FTS drain a free-text filter needs first. Only a
+          # capturing TUI indexes in the background (`gori mcp`, `gori run` and a view-only TUI
+          # do not), so the wait drains itself; a write, so it is capped at one a second (P6).
+          # Rows still unindexed after it (a read-only server, a contended writer) are waited
+          # out: a page read past one could hand back a cursor beyond a match it omitted.
           reread_at = Time.instant
           if page.empty? && !scope_unconfigured
             long_poll(wait_ms) do
               next false if (now = history_mark(filtered)) == mark
               next false if filtered && Time.instant < reread_at
-              next false if filter.uses_fts? && store.fts_backlog > 0
+              reread_at = Time.instant + HISTORY_REREAD_GAP
+              if filter.uses_fts? && store.fts_dirty?
+                store.drain_fts!(LONG_POLL_SLICE) unless store.read_only?
+                next false if store.fts_dirty?
+              end
               page = history_rows(filter, filtered, scope_unconfigured, fetch, before_id, since_id)
               mark = now
-              reread_at = Time.instant + HISTORY_REREAD_GAP
               !page.empty?
             end
           end

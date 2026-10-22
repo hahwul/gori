@@ -1110,6 +1110,14 @@ module Gori
       remaining
     end
 
+    # Whether any flow is waiting to be (re)indexed: `fts_backlog` stopped at the first row,
+    # for a caller that polls it. A failed probe answers false, as `fts_backlog` answers 0.
+    def fts_dirty? : Bool
+      !@db.query_one?("SELECT 1 FROM flows WHERE fts_dirty = 1 LIMIT 1", as: Int32).nil?
+    rescue
+      false
+    end
+
     # How many flows are waiting to be (re)indexed for `body:`/free-text search — i.e. how
     # far behind the search index is. Capped at FTS_BACKLOG_PROBE_MAX (a bigger number would
     # only ever be shown as "lots"), and answered from the partial index, so it is cheap

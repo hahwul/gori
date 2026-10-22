@@ -20,12 +20,12 @@ end
 
 # A writer on its OWN connection to the project's file, as the TUI's proxy is to `gori mcp`:
 # the wait has no in-process signal to lean on.
-private def with_two_connections(&)
+private def with_two_connections(background_index : Bool = true, &)
   dir = File.tempname("gori-long-poll")
   Dir.mkdir_p(dir)
   db = File.join(dir, "p.db")
-  writer = Gori::Store.open(db)
-  reader = Gori::Store.open(db)
+  writer = Gori::Store.open(db, background_index: background_index)
+  reader = Gori::Store.open(db, background_index: background_index)
   begin
     yield writer, reader
   ensure
@@ -94,6 +94,40 @@ describe "MCP wait_ms long polls" do
       end
       j = call_json(tools, "list_history", %({"since":#{top},"wait_ms":10000,"query":"status:500"}))
       j["flows"].as_a.map(&.["id"].as_i64).should eq([pending])
+    end
+  end
+
+  # Only a capturing TUI indexes in the background: with none, the wait drains the index
+  # itself, or a body: tail never sees a match another process wrote.
+  it "list_history wakes a body: tail when a non-indexing writer adds a match" do
+    with_two_connections(background_index: false) do |writer, reader|
+      tools = tools_for(reader)
+      top = mcp_seed_flow(writer, "/before")
+      spawn do
+        sleep 200.milliseconds
+        mcp_seed_flow(writer, "h.test", "GET", "/during", 200, "HTTP/1.1 200 OK\r\n\r\n", "needle-xyz".to_slice, "text/plain")
+      end
+      j = nil
+      took = elapsed { j = call_json(tools, "list_history", %({"since":#{top},"wait_ms":3000,"query":"body:needle-xyz"})) }
+      j.not_nil!["flows"].as_a.map(&.["target"].as_s).should eq(["/during"])
+      took.should be < 2.seconds
+    end
+  end
+
+  it "list_history answers a filtered tail within the re-read gap after a rejected row" do
+    with_store do |store|
+      tools = tools_for(store)
+      top = mcp_seed_flow(store, "/a")
+      spawn do
+        sleep 100.milliseconds
+        mcp_seed_flow(store, "/skip")
+        sleep 100.milliseconds
+        mcp_seed_flow(store, "/want")
+      end
+      j = nil
+      took = elapsed { j = call_json(tools, "list_history", %({"since":#{top},"wait_ms":10000,"query":"path:/want"})) }
+      j.not_nil!["flows"].as_a.map(&.["target"].as_s).should eq(["/want"])
+      took.should be < 1.5.seconds
     end
   end
 
