@@ -24,14 +24,7 @@ module Gori
       Cookies
 
       def label : String
-        case self
-        in Query     then "query"
-        in Form      then "form"
-        in Multipart then "multipart"
-        in Json      then "json"
-        in Headers   then "headers"
-        in Cookies   then "cookies"
-        end
+        to_s.underscore
       end
 
       # The location a CLI/MCP token names (lenient: case/whitespace-insensitive).
@@ -57,13 +50,7 @@ module Gori
       Lines
 
       def label : String
-        case self
-        in Reflection then "reflection"
-        in Status     then "status"
-        in Length     then "length"
-        in Words      then "words"
-        in Lines      then "lines"
-        end
+        to_s.underscore
       end
     end
 
@@ -84,20 +71,12 @@ module Gori
       Always    # always post, even when zero parameters were found
 
       def label : String
-        case self
-        in WhenFound then "when found"
-        in Off       then "off"
-        in Always    then "always"
-        end
+        to_s.underscore.tr("_", " ")
       end
 
       # Canonical persisted token (round-trips through JSON config).
       def token : String
-        case self
-        in WhenFound then "when-found"
-        in Off       then "off"
-        in Always    then "always"
-        end
+        to_s.underscore.tr("_", "-")
       end
 
       # True when a finished mine should post to the notification center.
