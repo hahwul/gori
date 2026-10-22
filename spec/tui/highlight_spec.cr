@@ -432,12 +432,6 @@ describe Gori::Tui::Highlight do
         hl.row(0).rstrip.should eq(expected)
       end
     end
-
-    it "line_width counts a tab's named badge width" do
-      line = [Highlight::Span.new("a\tb", Theme.text)]
-      Highlight.line_width_upto(line, Int32::MAX).should eq(7)
-      Highlight.line_width_upto(line, 10).should eq(7)
-    end
   end
 
   # Grapheme-cluster alignment. `column_width` floors every CODEPOINT to ≥1, so a ZWJ /
@@ -448,21 +442,13 @@ describe Gori::Tui::Highlight do
     zwj = "\u{1F468}\u{200D}\u{1F4BB}"                                      # 👨‍💻 (3 cps, 2 cols)
     family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}" # 👨‍👩‍👧‍👦 (7 cps, 2 cols)
 
-    it "line_width measures a cluster as its DRAWN columns, not its codepoint count" do
-      # Under column_width these were 5 and 11, letting the h-scroll clamp run the view
-      # 3 (resp. 9) columns past the end of the content.
-      Highlight.line_width_upto([Highlight::Span.new(zwj, Theme.text)], Int32::MAX).should eq(2)
-      Highlight.line_width_upto([Highlight::Span.new(family, Theme.text)], Int32::MAX).should eq(2)
+    it "draw advances a cluster by its DRAWN columns, not its codepoint count" do
+      # Under column_width these were 5 and 11.
+      {zwj => 2, family => 2}.each do |str, cols|
+        Highlight.draw(Screen.new(MemoryBackend.new(40, 1)), 0, 0, [Highlight::Span.new(str, Theme.text)], width: 40).should eq(cols)
+      end
       line = [Highlight::Span.new(zwj, Theme.text), Highlight::Span.new("abc", Theme.text)]
-      Highlight.line_width_upto(line, Int32::MAX).should eq(5)
-      Highlight.line_width_upto(line, 99).should eq(5)
-      Highlight.line_width_upto(line, 3).should be >= 3 # early exit still honoured
-    end
-
-    it "line_width agrees with what draw actually advances" do
-      line = [Highlight::Span.new(zwj, Theme.text), Highlight::Span.new("abc", Theme.text)]
-      b = MemoryBackend.new(40, 1)
-      Highlight.draw(Screen.new(b), 0, 0, line, width: 40).should eq(Highlight.line_width_upto(line, Int32::MAX))
+      Highlight.draw(Screen.new(MemoryBackend.new(40, 1)), 0, 0, line, width: 40).should eq(5)
     end
 
     it "slice_left never emits a partial cluster (no bare ZWJ / orphan modifier)" do

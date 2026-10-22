@@ -273,6 +273,16 @@ module Gori
         # Rebuild the request with a new request-line target; headers and body are untouched (no
         # Content-Length change), so no resync is needed.
         protected def rebuild_target(head : Bytes, body : Bytes?, new_target : String) : Bytes
+          rebuild(head, body) do |lines|
+            parts = lines[0].split(' ')
+            lines[0] = "#{parts[0]} #{new_target} #{parts[2]}" if parts.size == 3
+          end
+        end
+
+        # Split head+body at the blank line, yield the head lines (request line first, never
+        # empty) for in-place editing, and rejoin them with the request's own line ending. The
+        # body bytes are appended untouched.
+        protected def rebuild(head : Bytes, body : Bytes?, &) : Bytes
           combined = if body && !body.empty?
                        io = IO::Memory.new(head.size + body.size)
                        io.write(head)
@@ -283,14 +293,43 @@ module Gori
                      end
           hbytes, bbytes, eol = Miner::Inject.split(combined)
           lines = String.new(hbytes).split(eol)
-          unless lines.empty?
-            parts = lines[0].split(' ')
-            lines[0] = "#{parts[0]} #{new_target} #{parts[2]}" if parts.size == 3
-          end
+          yield lines unless lines.empty?
           io = IO::Memory.new
           io << lines.join(eol) << eol << eol
           io.write(bbytes) unless bbytes.empty?
           io.to_slice
+        end
+
+        # A head line's header name, downcased; nil for a line with no colon.
+        protected def header_name(line : String) : String?
+          (c = line.index(':')) ? line[0...c].strip.downcase : nil
+        end
+
+        # Drop every header line (never the request line, `lines[0]`) whose name is in `names`.
+        protected def drop_headers!(lines : Array(String), names : Set(String)) : Nil
+          i = -1
+          lines.reject! { |l| (i += 1) > 0 && (n = header_name(l)) && names.includes?(n) }
+        end
+
+        # Normalize an absolute-form (forward-proxy) request line to origin-form: active probes are
+        # sent DIRECT to the origin (no proxy rewrite), and some origins reject an absolute-form
+        # target on a non-proxied request, which would make a probe silently miss a real finding.
+        # Origin-form passes through.
+        protected def origin_form_request_line!(lines : Array(String)) : Nil
+          rl = lines[0].split(' ')
+          lines[0] = "#{rl[0]} #{Active.origin_form(rl[1])} #{rl[2]}" if rl.size == 3
+        end
+
+        # Rebuild with exactly one authoritative copy of each forged header: drop the `drop` headers
+        # the browser sent, normalize the request line to origin-form, then insert `insert` right
+        # after it. The body is untouched (no inserted name is Content-Length), so no resync.
+        protected def rebuild_with_headers(head : Bytes, body : Bytes?, drop : Set(String),
+                                           insert : Array(String)) : Bytes
+          rebuild(head, body) do |lines|
+            drop_headers!(lines, drop)
+            origin_form_request_line!(lines)
+            insert.each_with_index { |l, i| lines.insert(1 + i, l) }
+          end
         end
 
         # Reassemble the request with a new query on the request line, preserving the body and

@@ -250,7 +250,7 @@ describe Gori::Tui::RepeaterView do
   end
 
   # The memo reuses the SAME styled Line object across frames — safe only because every
-  # downstream consumer (Highlight.draw / slice_chars / line_width_upto) is read-only.
+  # downstream consumer (Highlight.draw / slice_chars) is read-only.
   #
   # ASSERTION INVERTED BY SOFT WRAP. This used to prove the guard by scrolling the pane
   # sideways so `slice_left` ran on the cached Line and checking the head disappeared. The
@@ -2590,7 +2590,7 @@ describe Gori::Tui::RepeaterView do
   # them. Every §/¦ helper is handed `@editor.text` — the CR-free projection its offsets index —
   # and used to push that projection straight back through `set_text`, so the marking chord the
   # status line advertises flattened the capture's body before the tab had sent anything.
-  # `edit_buffer_text` documents the same loss for ^E; `FuzzerView#restore_wire_eols` has guarded
+  # `edit_buffer_text` documents the same loss for ^E; the Fuzzer has guarded
   # the identical five helpers all along. Non-multipart on purpose: `request_bytes` restores CRLF
   # delimiters only for multipart, so a smuggling payload has nothing else standing behind it.
   describe "marking keeps a captured request's wire terminators" do

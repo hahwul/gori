@@ -21,18 +21,20 @@ module Gori
         binary = !s.body.empty? && !s.body.valid_encoding?
         String.build do |b|
           b << "fetch(" << Escape.double_quoted_url(Escape.percent_encode_non_ascii(parts.url)) << ", {\n"
-          b << "  method: " << jsstr(parts.method.empty? ? "GET" : parts.method) << ",\n"
+          b << "  method: " << Escape.double_quoted(parts.method.empty? ? "GET" : parts.method) << ",\n"
           unless s.headers.empty?
+            # The method and headers stay byte-wise (`\xNN`): a `Headers` value is a byte
+            # sequence and fetch puts each code unit on the wire as one byte.
             # An object literal collapses a repeated header name to the last value. When the
             # capture has one, emit the array-of-pairs `headers` form instead — fetch accepts it
             # and it preserves every occurrence, so a duplicate is reproduced rather than lost.
             if RequestParts.duplicate_header_names(s.headers).empty?
               b << "  headers: {\n"
-              s.headers.each { |(n, v)| b << "    " << jsstr(n) << ": " << jsstr(v) << ",\n" }
+              s.headers.each { |(n, v)| b << "    " << Escape.double_quoted(n) << ": " << Escape.double_quoted(v) << ",\n" }
               b << "  },\n"
             else
               b << "  headers: [\n"
-              s.headers.each { |(n, v)| b << "    [" << jsstr(n) << ", " << jsstr(v) << "],\n" }
+              s.headers.each { |(n, v)| b << "    [" << Escape.double_quoted(n) << ", " << Escape.double_quoted(v) << "],\n" }
               b << "  ],\n"
             end
           end
@@ -67,18 +69,6 @@ module Gori
       private def self.bodyless_method?(method : String) : Bool
         m = method.empty? ? "GET" : method.upcase
         m == "GET" || m == "HEAD"
-      end
-
-      # A JS double-quoted string, byte-safe with `\xNN` (a single code unit 0x00-0xFF). For the
-      # HEADERS and the method, where that is exactly right: a `Headers` value is a byte sequence
-      # and fetch puts each code unit on the wire as one byte. The URL and the body are TEXT the
-      # engine re-encodes, and take `Escape.double_quoted_url` / `jstext` instead.
-      private def self.jsstr(s : String) : String
-        String.build do |b|
-          b << '"'
-          s.to_slice.each { |byte| Escape.double_quoted_byte(b, byte) }
-          b << '"'
-        end
       end
 
       # A JS double-quoted string for text fetch RE-ENCODES as UTF-8 — the body. Character-wise

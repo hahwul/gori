@@ -1180,14 +1180,7 @@ module Gori
           note = ev.progress.blocked_reason
           STDERR.puts "blocked · #{blocked} refused before the socket#{note ? " — #{note}" : ""}"
         end
-        # Handshakes actually paid for. Worth a line: it is how an operator sees whether the
-        # origin honoured keep-alive at all (dialed ≈ sent means it closed after every
-        # response, or the requests were too odd to share a socket — see ConnPool).
-        return unless pool && pool.dialed > 0
-        STDERR.puts "connections · #{pool.dialed} dialed · #{pool.reused} reused" \
-                    "#{pool.stale_retries > 0 ? " · #{pool.stale_retries} re-sent on a closed connection" : ""}" \
-                    "#{pool.unsafe_stale > 0 ? " · #{pool.unsafe_stale} not re-sent (non-idempotent method)" : ""}" \
-                    "#{pool.pooling? ? "" : " · keep-alive gave up (origin closes every connection)"}"
+        print_pool_connections(pool)
       end
 
       # `fuzz save`'s machine answer (#1682): the last jsonl line, or the `--json` envelope's

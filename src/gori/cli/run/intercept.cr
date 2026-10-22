@@ -533,11 +533,7 @@ module Gori
         boundary = Env.head_body_boundary(raw)
         head = Env.normalize_crlf(raw[0, boundary])
         return head if boundary >= raw.size
-        body = raw[boundary..]
-        buf = IO::Memory.new(head.size + body.size)
-        buf.write(head)
-        buf.write(body)
-        buf.to_slice
+        head + raw[boundary..]
       end
 
       # One frame into a live proxied WebSocket (#1630), written by the capturing TUI because

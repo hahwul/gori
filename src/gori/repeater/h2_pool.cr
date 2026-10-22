@@ -52,24 +52,11 @@ module Gori::Repeater
   # nor the counter bumps yield, so a worker fiber can never observe a half-updated pool —
   # the same argument `ConnPool` makes.
   class H2Pool < Pool
-    # As `ConnPool::STALE_GIVE_UP`: an origin that closes every parked connection turns each
-    # park into a wasted probe and a redial, so after this many consecutive stale checkouts
-    # the pool runs in dial-per-send mode for the rest of the run.
-    STALE_GIVE_UP = 3
-
-    getter dialed : Int64 = 0_i64
-    getter reused : Int64 = 0_i64
-    getter stale_retries : Int64 = 0_i64
-    getter stale_checkouts : Int64 = 0_i64
-    getter unsafe_stale : Int64 = 0_i64
-    getter? pooling : Bool = true
-
     def initialize(@scheme : String, @host : String, @port : Int32, @verify : Bool,
                    @sni : String?, @timeout : Time::Span?,
                    @overrides : Gori::HostOverrides?, @max_idle : Int32,
                    @tls_preset : String? = nil, @sse : StreamBound? = nil)
       @idle = [] of H2Engine::Conn
-      @consecutive_stale = 0
     end
 
     def send(bytes : Bytes) : Repeater::Result
@@ -115,10 +102,6 @@ module Gori::Repeater
         return result
       end
       dial_and_send(bytes, keepable, method)
-    end
-
-    def close_all : Nil
-      drain
     end
 
     # Whether this request may share a connection with the sweep's others.
@@ -228,13 +211,6 @@ module Gori::Repeater
       else
         conn.close
       end
-    end
-
-    private def note_stale : Nil
-      @consecutive_stale += 1
-      return if @consecutive_stale < STALE_GIVE_UP
-      @pooling = false
-      drain
     end
 
     private def drain : Nil

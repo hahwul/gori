@@ -28,18 +28,18 @@ module Gori
         String.build do |b|
           b << "package main\n\n"
           b << "import (\n"
-          imports.each { |i| b << "\t" << gostr(i) << "\n" }
+          imports.each { |i| b << "\t" << Escape.double_quoted(i) << "\n" }
           b << ")\n\n"
           b << "func main() {\n"
           if has_body
             if binary
               b << "\tbody := bytes.NewReader([]byte{" << s.body.to_slice.map { |x| "0x#{x.to_s(16).rjust(2, '0')}" }.join(", ") << "})\n"
             else
-              b << "\tbody := strings.NewReader(" << gostr(s.body) << ")\n"
+              b << "\tbody := strings.NewReader(" << Escape.double_quoted(s.body) << ")\n"
             end
-            b << "\treq, err := http.NewRequest(" << gostr(method) << ", " << url << ", body)\n"
+            b << "\treq, err := http.NewRequest(" << Escape.double_quoted(method) << ", " << url << ", body)\n"
           else
-            b << "\treq, err := http.NewRequest(" << gostr(method) << ", " << url << ", nil)\n"
+            b << "\treq, err := http.NewRequest(" << Escape.double_quoted(method) << ", " << url << ", nil)\n"
           end
           b << "\tif err != nil {\n\t\tpanic(err)\n\t}\n"
           s.headers.each do |(n, v)|
@@ -47,11 +47,11 @@ module Gori
             # survived the sendable drop (one that disagrees with the URL) has to be set there,
             # or the program would silently send the URL's host instead of the captured one.
             if n.downcase == "host"
-              b << "\treq.Host = " << gostr(v) << "\n"
+              b << "\treq.Host = " << Escape.double_quoted(v) << "\n"
             else
               # Add, not Set: a repeated header (two Cookie lines, multiple Accept) is preserved
               # rather than collapsed to the last value.
-              b << "\treq.Header.Add(" << gostr(n) << ", " << gostr(v) << ")\n"
+              b << "\treq.Header.Add(" << Escape.double_quoted(n) << ", " << Escape.double_quoted(v) << ")\n"
             end
           end
           b << "\tresp, err := http.DefaultClient.Do(req)\n"
@@ -61,15 +61,6 @@ module Gori
           b << "\tfmt.Println(resp.Status)\n"
           b << "\tfmt.Println(string(out))\n"
           b << "}\n"
-        end
-      end
-
-      # A Go interpreted (double-quoted) string literal, byte-safe with `\xNN` (`Export::Escape`).
-      private def self.gostr(s : String) : String
-        String.build do |b|
-          b << '"'
-          s.to_slice.each { |byte| Escape.double_quoted_byte(b, byte) }
-          b << '"'
         end
       end
     end

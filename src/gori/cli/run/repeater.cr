@@ -1416,37 +1416,11 @@ module Gori
         cap = body_cap(false, max_body, "gori run repeater race")
 
         project = resolve_read_project(proj.name, proj.db)
-        store = open_store(project, read_only: true)
-        # `abort` inside the block still runs the `ensure` (the store closes), and it narrows
-        # each row to a non-nil record, so `loaded` needs no `not_nil!` below. The §…§ marker
-        # guard is asked HERE, with the store open (`DraftMarkers.live?` may read the seed flow),
-        # exactly as `repeater send` asks it — the race renders no markers, so a live one would
-        # put the literal § bytes on the wire; `--verbatim` waives it, matching `repeater send`.
-        seeds = Set(Int64).new # the members still holding their flow seed's bytes (#1670)
-        loaded, host_overrides = begin
-          rows = ids.map do |id|
-            rec = store.get_repeater_full(id)
-            abort "gori run repeater race: no repeater session ##{id}" unless rec
-            if !verbatim && Repeater::DraftMarkers.live?(store, rec)
-              abort "gori run repeater race: #{Repeater::DraftMarkers.refusal(id, MARKER_REMEDY)}"
-            end
-            seeds << id if Repeater::DraftMarkers.evidence?(store, rec)
-            {id, rec}
-          end
-          {rows, Gori::HostOverrides.load(store)}
-        ensure
-          store.close
-        end
-
-        # The transport: forced by --http1/--http2, else the sessions' shared stored setting.
-        mode = force_http2
-        if mode.nil?
-          modes = loaded.map { |(_, rec)| rec.http2? }.uniq!
-          if modes.size > 1
-            abort "gori run repeater race: the sessions mix HTTP/1.1 and HTTP/2 — pass --http1 or --http2 to force one"
-          end
-          mode = modes.first
-        end
+        # The §…§ marker guard is asked inside `load_group_members`, with the store open
+        # (`DraftMarkers.live?` may read the seed flow), exactly as `repeater send` asks it — the
+        # race renders no markers, so a live one would put the literal § bytes on the wire;
+        # `--verbatim` waives it, matching `repeater send`.
+        loaded, host_overrides, mode, seeds = load_group_members(project, ids, verbatim, force_http2, "gori run repeater race")
 
         activate_slot(slot, "gori run repeater race")
         outbound = project_outbound(project, allow_unscoped)
@@ -1512,7 +1486,7 @@ module Gori
         warmup = warmup.clamp(0, count - 1)
 
         project = resolve_read_project(proj.name, proj.db)
-        loaded, host_overrides, mode, seeds = load_timing_members(project, ids, verbatim, force_http2)
+        loaded, host_overrides, mode, seeds = load_group_members(project, ids, verbatim, force_http2, "gori run repeater timing")
 
         activate_slot(slot, "gori run repeater timing")
         outbound = project_outbound(project, allow_unscoped)
@@ -1550,20 +1524,22 @@ module Gori
         positional.map { |s| s.to_i64? || abort("gori run repeater timing: invalid repeater id '#{s}'") }
       end
 
-      # Load the pair (read-only), refusing a live §…§ marker unless verbatim, and resolve the shared
-      # transport (forced by --http1/--http2, else the sessions' agreed setting). Aborts, closing the
-      # store, on a missing session or a mixed-transport pair. Extracted from `cmd_repeater_timing`
-      # so its body stays under the complexity gate.
-      private def self.load_timing_members(project, ids : Array(Int64), verbatim : Bool,
-                                           force_http2 : Bool?) : {Array({Int64, Store::RepeaterRecord}), Gori::HostOverrides?, Bool, Set(Int64)}
+      # Load a race or timing group (read-only), refusing a live §…§ marker unless verbatim, and
+      # resolve the shared transport (forced by --http1/--http2, else the sessions' agreed setting).
+      # Aborts, closing the store, on a missing session or a mixed-transport group; `cmd` prefixes
+      # every message. `seeds` is the members still holding their flow seed's bytes (#1670).
+      private def self.load_group_members(project, ids : Array(Int64), verbatim : Bool,
+                                          force_http2 : Bool?, cmd : String) : {Array({Int64, Store::RepeaterRecord}), Gori::HostOverrides?, Bool, Set(Int64)}
         store = open_store(project, read_only: true)
-        seeds = Set(Int64).new # see `cmd_repeater_race`
+        seeds = Set(Int64).new
+        # `abort` inside the block still runs the `ensure` (the store closes), and it narrows
+        # each row to a non-nil record.
         loaded, host_overrides = begin
           rows = ids.map do |id|
             rec = store.get_repeater_full(id)
-            abort "gori run repeater timing: no repeater session ##{id}" unless rec
+            abort "#{cmd}: no repeater session ##{id}" unless rec
             if !verbatim && Repeater::DraftMarkers.live?(store, rec)
-              abort "gori run repeater timing: #{Repeater::DraftMarkers.refusal(id, MARKER_REMEDY)}"
+              abort "#{cmd}: #{Repeater::DraftMarkers.refusal(id, MARKER_REMEDY)}"
             end
             seeds << id if Repeater::DraftMarkers.evidence?(store, rec)
             {id, rec}
@@ -1576,7 +1552,7 @@ module Gori
         mode = force_http2
         if mode.nil?
           modes = loaded.map { |(_, rec)| rec.http2? }.uniq!
-          abort "gori run repeater timing: the sessions mix HTTP/1.1 and HTTP/2 — pass --http1 or --http2 to force one" if modes.size > 1
+          abort "#{cmd}: the sessions mix HTTP/1.1 and HTTP/2 — pass --http1 or --http2 to force one" if modes.size > 1
           mode = modes.first
         end
         {loaded, host_overrides, mode, seeds}
@@ -2464,31 +2440,15 @@ module Gori
         end
       end
 
-      # Whether a stored WebSocket row is a gori ADVISORY rather than a frame the socket
-      # carried. A diagnostic is not traffic: round 3's parked-control notice was written on
-      # the `out` direction, which is exactly what a repeater seed reads, so replaying a
-      # flow captured by that build put gori's own 242-byte sentence on the wire as a TEXT
-      # message the client never sent. The row is fixed at the source; this is the seed-side
-      # guard, so an older capture already in a project cannot replay one either — and two
-      # PRE-EXISTING markers are seedable today regardless of that fix, because they stand in
-      # for a real frame at its position and legitimately keep its opcode and direction: the
-      # ping-flood marker (opcode 9, and under §5.5's 125-byte cap, so it would replay as a
-      # real PING) and `forward_oversized_frame`'s. Hence NO opcode filter here — the prefix
-      # is the whole test, and an opcode-1 test would have let the PING through.
-      #
-      # Byte-level: a notice row is compared, never decoded. `scrub` on a payload that is not
-      # valid UTF-8 would rewrite the bytes being tested.
-      def self.ws_notice_row?(opcode : Int32, payload : Bytes) : Bool
-        Gori::Proxy::WS.notice?(payload)
-      end
-
       # The `out` frames of a captured flow, minus gori's own advisory rows, and HOW MANY
       # were dropped. Every seed reader goes through this rather than repeating the filter,
       # and none of them may go quiet about it: a seed that silently holds fewer frames than
       # the capture is the same class of problem as one that holds an extra.
       def self.ws_seed_rows(rows : Array(Store::WsMessage)) : {Array(Store::WsMessage), Int32}
         out = rows.select { |m| m.direction == "out" }
-        kept = out.reject { |m| ws_notice_row?(m.opcode, m.payload) }
+        # The prefix is the whole test, NOT the opcode: the ping-flood marker keeps its PING
+        # opcode (9), so an opcode filter would replay it as a real control frame.
+        kept = out.reject { |m| Gori::Proxy::WS.notice?(m.payload) }
         {kept, out.size - kept.size}
       end
 
@@ -3241,11 +3201,7 @@ module Gori
       end
 
       private def self.combine_head_body(head : Bytes, body : Bytes) : Bytes
-        return head if body.empty?
-        io = IO::Memory.new(head.size + body.size)
-        io.write(head)
-        io.write(body)
-        io.to_slice
+        body.empty? ? head : head + body
       end
 
       private def self.cmd_repeater_single(args : Array(String)) : Nil

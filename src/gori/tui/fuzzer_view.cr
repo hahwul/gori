@@ -51,6 +51,7 @@ module Gori::Tui
     # seeded from History (⇧I) needs an SNI, and `@sni` is persisted, restored, reconciled,
     # cloned and handed to `build_engine` like the Repeater's.
     include TargetField
+    include ChainPaneHost # commit / discard / key routing on the CHAIN pane, shared with Repeater
     @registry : Verb::Registry? = nil
     enum ResultIoState
       Idle
@@ -546,11 +547,7 @@ module Gori::Tui
       apply_config_json(src.config_json)
       @name = SubtabClone.copy_name(src.name)
       @dirty = true
-      @result_window.clear
-      reset_clusters
-      @run_result_count = 0_i64
-      @run_matched_count = 0_i64
-      @run_error_count = 0_i64
+      reset_results
       @result_io_state = ResultIoState::Idle
       @results_rev += 1
       @sel = 0
@@ -789,44 +786,6 @@ module Gori::Tui
       nil
     end
 
-    # Commit the CHAIN pane back to the bound marker + return focus to the template editor.
-    # Idempotent so the focus changers above can call it freely.
-    def commit_chain_pane : Nil
-      return unless @chain_focused
-      # The marker's open § (value region) is unchanged by the chain edit, so it's a stable
-      # anchor — restoring the raw cursor could land inside a now-longer hidden chain.
-      anchor = Fuzz::Template.marker_start_at(@editor.text, @chain_marker_cursor) || @chain_marker_cursor
-      if updated = Fuzz::Template.set_chain(@editor.text, @chain_marker_cursor, @chain_pane.value)
-        @editor.set_text(restore_wire_eols(updated))
-        @editor.place_at_offset(anchor) # back into the marker (set_text reset it) → tooltip stays up
-        @dirty = true
-      end
-      @chain_focused = false
-    end
-
-    # Leave the CHAIN pane WITHOUT writing its edits back to the marker (esc = cancel,
-    # matching the pane's own "esc cancel" hint). The template text is only touched by
-    # commit_chain_pane, so dropping focus is a clean discard; restore the cursor onto
-    # the marker so its tooltip stays up.
-    def discard_chain_pane : Nil
-      return unless @chain_focused
-      anchor = Fuzz::Template.marker_start_at(@editor.text, @chain_marker_cursor) || @chain_marker_cursor
-      @editor.place_at_offset(anchor)
-      @chain_focused = false
-    end
-
-    # Route a key while the CHAIN pane is focused (typing/autocomplete stays; ↵/tab/↑
-    # commit + return to the template editor, while esc cancels — discards the edit).
-    def handle_chain_pane_key(ev : Termisu::Event::Key) : Nil
-      return if @chain_pane.handle_key(ev)
-      key = ev.key
-      if key.escape?
-        discard_chain_pane
-      elsif key.enter? || key.tab? || key.up?
-        commit_chain_pane
-      end
-    end
-
     # "§N" label for the marker under the template cursor (1-based), or "§" when not in one.
     private def marker_label : String
       cur = @editor.cursor_offset
@@ -835,32 +794,6 @@ module Gori::Tui
     end
 
     # --- marking -------------------------------------------------------------
-    # Re-attach the buffer's ORIGINAL line terminators to the result of a marking transform.
-    #
-    # The § / ¦ helpers (auto_mark, mark_word, clear_markers, set_chain) all take the LF
-    # projection, because every offset they are given — `@editor.cursor_offset`, the cached
-    # `marked_spans` — indexes THAT string; handing them wire text would shift every offset by
-    # one per CRLF line and mark the wrong span. But they only ever insert or delete `§`/`¦`
-    # WITHIN a line, never a newline, so the line count is invariant and the terminators can
-    # simply be put back. Without this, `set_text(transformed)` stores the LF projection and a
-    # captured body's CRLFs are gone before the run even starts — which is how ^K (the marking
-    # chord the status line names on every fuzz session open) defeated a byte-exact send path.
-    #
-    # Falls back to `lf_text` unchanged when the line count did move: better a template that
-    # lost its CRLFs than one whose terminators were reattached to the wrong lines.
-    private def restore_wire_eols(lf_text : String) : String
-      wl = @editor.wire_lines
-      parts = lf_text.split('\n')
-      return lf_text unless parts.size == wl.size
-      return lf_text if wl.all? { |(_, eol)| eol == "\n" || eol.empty? } # nothing to restore
-      String.build do |io|
-        parts.each_with_index do |p, i|
-          io << p
-          io << wl[i][1]
-        end
-      end
-    end
-
     def auto_mark : String
       before = @editor.text
       text = Fuzz::Template.auto_mark(before)
@@ -878,7 +811,7 @@ module Gori::Tui
         return "§ here is literal (escaped §§) — auto-mark won't add positions; ^K marks the token at the cursor" if Fuzz::Template.marker_bytes_in?(before.to_slice)
         return "nothing to auto-mark — no query, cookie or body values found"
       end
-      @editor.set_text(restore_wire_eols(text))
+      @editor.set_text_keeping_eols(text)
       @dirty = true
       n = Fuzz::Template.parse(text).position_count
       "auto-marked #{Gori.plural(n, "position")}"
@@ -902,13 +835,13 @@ module Gori::Tui
     # Reformat the template's BODY. Reads `wire_text` and splices the head back verbatim: a
     # pretty-print is an explicit request to rewrite the body, but it is not a licence to
     # re-encode the head's terminators — this is the one marking-adjacent transform whose line
-    # count moves, so restore_wire_eols cannot cover it.
+    # count moves, so set_text_keeping_eols cannot cover it.
     def pretty_print_template : String?
       text = @editor.wire_text
       crlf = text.index("\r\n\r\n")
       lf = text.index("\n\n")
       # First blank line wins, whichever form it is (an LF head whose BODY holds a CRLFCRLF
-      # must not be split at the body's) — same rule as Fuzz::ContentLength.boundary.
+      # must not be split at the body's) — same rule as Env.head_body_separator.
       sep, sep_w = if crlf && (lf.nil? || crlf <= lf)
                      {crlf, 4}
                    elsif lf
@@ -938,7 +871,7 @@ module Gori::Tui
       before = @editor.text
       after = Fuzz::Template.mark_word(before, @editor.cursor_offset)
       return "no word at the cursor — place it on a token (or ^A to auto-mark)" if after == before
-      @editor.set_text(restore_wire_eols(after))
+      @editor.set_text_keeping_eols(after)
       @dirty = true
       Fuzz::Template.parse(after).position_count < Fuzz::Template.parse(before).position_count ? "unmarked position" : "marked position"
     end
@@ -964,7 +897,7 @@ module Gori::Tui
     def clear_marks : String
       # clear_markers renders the defaults inline — drops both the § delimiters AND any
       # ¦chain (a naive gsub("§","") would leave a stray value¦chain behind).
-      @editor.set_text(restore_wire_eols(Fuzz::Template.clear_markers(@editor.text)))
+      @editor.set_text_keeping_eols(Fuzz::Template.clear_markers(@editor.text))
       @dirty = true
       "cleared all § markers"
     end
@@ -1046,11 +979,7 @@ module Gori::Tui
 
     def begin_run(total : Int64?) : Nil
       @run_generation += 1
-      @result_window.clear
-      reset_clusters
-      @run_result_count = 0_i64
-      @run_matched_count = 0_i64
-      @run_error_count = 0_i64
+      reset_results
       @result_io_state = ResultIoState::Spooling
       @run_template = @pending_template         # freeze the template these results are rendered against
       @run_policy = @pending_policy             # ...and the CL knobs + retention its generator ran under
@@ -1063,11 +992,7 @@ module Gori::Tui
       # `@detail_source_lines` goes with it: dropping the cache alone would already force a
       # rebuild (and so a re-source, the Array being new), but tying the two together keeps
       # the "the pane is pointed at THAT Array" invariant readable in one place.
-      @detail_lines_cache = nil
-      @detail_source_lines = nil
-      @detail_lines_key = nil
-      @detail_styled_cache = nil
-      @detail_styled_key = nil
+      drop_detail_caches
       @sel = 0
       @scroll = 0
       @running = true
@@ -1303,11 +1228,7 @@ module Gori::Tui
       @sel = 0
       @scroll = 0
       @focus = :results
-      @detail_lines_cache = nil
-      @detail_source_lines = nil
-      @detail_lines_key = nil
-      @detail_styled_cache = nil
-      @detail_styled_key = nil
+      drop_detail_caches
       clear_detail_decode
     end
 
@@ -1319,11 +1240,7 @@ module Gori::Tui
       return unless @saved_run_id == id
       if @loaded_saved_run
         @run_generation += 1
-        @result_window.clear
-        reset_clusters
-        @run_result_count = 0_i64
-        @run_matched_count = 0_i64
-        @run_error_count = 0_i64
+        reset_results
         @results_rev += 1
         @progress = nil
         @run_total = nil
@@ -1848,7 +1765,7 @@ module Gori::Tui
     #     has none), the body is copied through byte-for-byte, and no `$` is touched.
     #
     # Provenance is about where the bytes CAME FROM, so an operator edit does not clear it:
-    # ^A/^K only insert §/¦ within a line (`restore_wire_eols` keeps every terminator), and
+    # ^A/^K only insert §/¦ within a line (`set_text_keeping_eols` keeps every terminator), and
     # dropping evidence on the first keystroke would put the substitution back on the most
     # common workflow there is — seed a capture, tweak a header, mark, run.
     #
@@ -2157,6 +2074,24 @@ module Gori::Tui
       true
     end
 
+    # Empty the results: the window, the clusters and the run counters.
+    private def reset_results : Nil
+      @result_window.clear
+      reset_clusters
+      @run_result_count = 0_i64
+      @run_matched_count = 0_i64
+      @run_error_count = 0_i64
+    end
+
+    # The {pane, index}-keyed detail caches and the Array `@detail_read` is pointed at, together.
+    private def drop_detail_caches : Nil
+      @detail_lines_cache = nil
+      @detail_source_lines = nil
+      @detail_lines_key = nil
+      @detail_styled_cache = nil
+      @detail_styled_key = nil
+    end
+
     private def reset_clusters(clusters : Fuzz::Clusters = Fuzz::Clusters.new) : Nil
       @clusters = clusters
       @expanded.clear
@@ -2383,11 +2318,7 @@ module Gori::Tui
       return if i < 0 || i >= panes.size
       @detail_pane = panes[i]
       @detail_read.reset
-      @detail_source_lines = nil
-      @detail_lines_cache = nil
-      @detail_lines_key = nil
-      @detail_styled_cache = nil
-      @detail_styled_key = nil
+      drop_detail_caches
     end
 
     # Parse the OPEN result's request/response into the optional protocol panes
@@ -2606,7 +2537,7 @@ module Gori::Tui
       new_text, caret = Fuzz::Template.strip_marker(@editor.text, span)
       # `caret` is an offset into the LF projection, which is what `replace_all` →
       # `place_at_offset` walks (@lines is CR-free), so restoring the terminators is caret-safe.
-      @editor.replace_all(restore_wire_eols(new_text), caret)
+      @editor.replace_all_keeping_eols(new_text, caret)
       @dirty = true
     end
 
@@ -2662,7 +2593,7 @@ module Gori::Tui
     # half (extends instead of collapsing), like the arrows.
     #
     # These move the EDITOR's caret directly, so READ mode has to adopt the result — the anchor
-    # rules live in `@template_read`, and `paint_template_read_chrome`'s per-frame `sync_from`
+    # rules live in `@template_read`, and the per-frame `paint_chrome` (its `sync_from`)
     # copies cy/cx while leaving the anchor alone. Without `sync_to`: a plain Home left the anchor
     # where it was and painted a band from there to column 0, over a selection the operator had
     # just collapsed — and `y` then copied "" because the band's two ends had crossed. ⇧Home/⇧End
@@ -3157,45 +3088,25 @@ module Gori::Tui
       inner = rect.inset(1, 1)
       read_active = focused && !ins
       @editor.render(screen, inner, cursor: ins, highlight: :request, peek: focused, gauge: true, gauge_focused: focused)
-      paint_template_read_chrome(screen, inner, read_active)
+      # READ-mode over-paint (selection band + block caret) on top of the frame the editor drew.
+      #
+      # Band and caret both go through the EDITOR, which owns the concealed-run map. This pane is
+      # THE place operators write `§value¦chain§`, and the `¦chain` is concealed here — so measuring
+      # a span on the raw line put the tint and the caret N columns right of the text they addressed
+      # (N = the hidden width to their left), and re-drawing the raw segment for the band put the
+      # hidden chain back on screen: selecting a line UNCONCEALED it and shifted the rest of the row.
+      # The copy was right all along (it reads buffer coordinates), so the band highlighted different
+      # bytes than `y` copied. See the READ-mode over-paint seam in `text_area.cr`.
+      #
+      # `TextReadState#paint_chrome` inverts the row list the editor actually drew instead of an
+      # `li - scroll` sum, which stopped being the screen row the moment this pane soft-wrapped.
+      @template_read.paint_chrome(screen, inner, @editor, read_active)
     end
 
-    # READ-mode over-paint (selection band + block caret) on top of the frame the editor drew.
-    #
-    # Band and caret both go through the EDITOR, which owns the concealed-run map. This pane is
-    # THE place operators write `§value¦chain§`, and the `¦chain` is concealed here — so measuring
-    # a span on the raw line put the tint and the caret N columns right of the text they addressed
-    # (N = the hidden width to their left), and re-drawing the raw segment for the band put the
-    # hidden chain back on screen: selecting a line UNCONCEALED it and shifted the rest of the row.
-    # The copy was right all along (it reads buffer coordinates), so the band highlighted different
-    # bytes than `y` copied. See the READ-mode over-paint seam in `text_area.cr`.
-    #
-    # The shared over-paint — `TextReadState#paint_chrome`, which inverts the row list the
-    # editor actually drew instead of the `li - scroll` sum this method used to carry. That sum
-    # stopped being the screen row the moment this pane started soft-wrapping.
-    private def paint_template_read_chrome(screen : Screen, rect : Rect, active : Bool) : Nil
-      @template_read.paint_chrome(screen, rect, @editor, active)
-    end
-
+    # `TargetField`'s selection band (Repeater answers with its wrap-aware variant).
     private def paint_char_span_bg(screen : Screen, x : Int32, y : Int32, line : String,
                                    x0 : Int32, x1 : Int32, bg : Color) : Nil
-      return if x0 >= x1
-      # Cluster-wise, matching the base draw and the caret. Summing draw_width over single
-      # CHARS is exactly the retired per-codepoint measure: it drifts right by each
-      # cluster's inflation (1 column for a skin tone, 9 for a ZWJ family), and drawing
-      # char-by-char also SHREDS a cluster across cells, stranding a bare combining mark in
-      # one of its own. Span edges snap outward so the tint covers whole glyphs.
-      a = Screen.cluster_start(line, {x0, line.size}.min)
-      b = Screen.cluster_end(line, {x1, line.size}.min)
-      px = x + Screen.draw_width(line[0, a])
-      i = a
-      while i < b
-        e = Screen.cluster_end(line, i + 1)
-        seg = line[i...e]
-        screen.text(px, y, seg, Theme.text, bg)
-        px += Screen.draw_width(seg)
-        i = e
-      end
+      screen.char_span_bg(x, y, line, x0, x1, bg)
     end
 
     # The calm CONFIG summary: a header, the payload-set rows + an Add row, then the
@@ -4179,17 +4090,11 @@ module Gori::Tui
         lines << "" if i > 0
         brief = f.brief
         lines << (brief ? "▸ #{f.location} · #{brief}" : "▸ #{f.location}")
-        lines << detail_jwt_token(f.token)
+        lines << Fmt.token_preview(f.token)
         lines << ""
         lines.concat(f.decoded.scrub.split('\n'))
       end
       lines
-    end
-
-    # A JWT can be hundreds of chars; show a head…tail preview so the raw token is
-    # available to read without dominating the pane (mirrors the History detail).
-    private def detail_jwt_token(tok : String) : String
-      tok.size > 64 ? "#{tok[0, 40]}…#{tok[-12, 12]}" : tok
     end
 
     private def graphql_detail_lines : Array(String)
@@ -4247,20 +4152,11 @@ module Gori::Tui
       true
     end
 
-    # Mouse: place the TEMPLATE editor caret at a click. Re-derives the template
-    # half-pane exactly as render/render_top do (target band → 45%-tall top row →
-    # left half → the card's 1-cell inset), so the caret lands where the click points.
+    # Mouse: place the TEMPLATE editor caret at a click, in the rect render draws the
+    # editor in (`template_editor_rect`), so the caret lands where the click points.
     def template_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
-      return unless @loaded
-      target_h = {rect.h, target_card_h}.min
-      rest = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
-      return if rest.h <= 0
-      top_h = {rest.h * 45 // 100, 5}.max
-      top_h = rest.h if rest.h < 6
-      half = {(rest.w - 1) // 2, 1}.max
-      left = Rect.new(rest.x, rest.y, half, top_h)
+      inner = template_editor_rect(rect) || return
       commit_chain_pane if @chain_focused # a click outside the ^Q modal commits + dismisses it
-      inner = left.inset(1, 1)
       template_insert? ? @editor.click_to_cursor(inner, mx, my) : @template_read.click(@editor, inner, mx, my)
     end
 
@@ -4282,18 +4178,19 @@ module Gori::Tui
       template_insert? ? @editor.select_word_at(inner, mx, my) : @template_read.select_word(@editor, inner, mx, my)
     end
 
-    # The template editor's content rect inside `rect` — the derivation
-    # `template_click_to_cursor` walks, factored out so click, drag and double-click cannot
-    # land on three slightly different rects.
+    # The template editor's content rect inside `rect` (the card's 1-cell inset), one
+    # derivation so click, drag and double-click cannot land on three slightly different rects.
     private def template_editor_rect(rect : Rect) : Rect?
+      template_card_rect(rect).try(&.inset(1, 1))
+    end
+
+    # The TEMPLATE card within body `rect`: `stack_rects`' middle band → `render_top`'s left
+    # half. nil before a load or when the body has no room under TARGET.
+    private def template_card_rect(rect : Rect) : Rect?
       return nil unless @loaded
-      target_h = {rect.h, target_card_h}.min
-      rest = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
-      return nil if rest.h <= 0
-      top_h = {rest.h * 45 // 100, 5}.max
-      top_h = rest.h if rest.h < 6
-      half = {(rest.w - 1) // 2, 1}.max
-      Rect.new(rest.x, rest.y, half, top_h).inset(1, 1)
+      _, top, _ = stack_rects(rect)
+      return nil if top.h <= 0
+      Rect.new(top.x, top.y, {(top.w - 1) // 2, 1}.max, top.h)
     end
 
     # Mouse: the sorted-view result index under a click in the RESULTS pane, or nil
@@ -4321,9 +4218,9 @@ module Gori::Tui
         sorted_results.size, mx, my)
     end
 
-    # The RESULTS pane rect within body `rect`, re-deriving render → render_bottom →
-    # render_results' split (target band → 45%-tall top row → bottom minus the DIST
-    # sidebar). nil when the layout leaves no room. Backs results_row_at hit-testing.
+    # The RESULTS pane rect within body `rect`: `stack_rects`' bottom band minus
+    # render_bottom's DIST sidebar. nil when the layout leaves no room. Backs results_row_at
+    # hit-testing.
     private def results_rect(rect : Rect) : Rect?
       return nil unless @loaded
       # render_bottom hands the whole band to RESULT DETAIL when `@focus == :detail`, so
@@ -4333,12 +4230,7 @@ module Gori::Tui
       # out of the detail via `focus_pane(:results)`. With `@show_dist` on, the two rects do
       # not even share a right edge — this one is `dist_width` narrower than the card drawn.
       return nil if @focus == :detail
-      target_h = {rect.h, target_card_h}.min
-      rest = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
-      return nil if rest.h <= 0
-      top_h = {rest.h * 45 // 100, 5}.max
-      top_h = rest.h if rest.h < 6
-      bottom = Rect.new(rest.x, rest.y + top_h, rest.w, {rest.h - top_h, 0}.max)
+      _, _, bottom = stack_rects(rect)
       return nil if bottom.h <= 0
       vw = @show_dist ? dist_width(bottom.w) : 0
       rw = vw > 0 ? bottom.w - vw - 1 : bottom.w
@@ -4362,14 +4254,7 @@ module Gori::Tui
     # Hit-test the TEMPLATE border chrome (^R:RUN, ^U:PRETTY, NOR/INS). Geometry mirrors
     # render_template. Miss → nil (caller falls through to caret/focus).
     def template_chrome_hit(rect : Rect, mx : Int32, my : Int32) : Symbol?
-      return nil unless @loaded
-      target_h = {rect.h, target_card_h}.min
-      rest = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
-      return nil if rest.h <= 0
-      top_h = {rest.h * 45 // 100, 5}.max
-      top_h = rest.h if rest.h < 6
-      half = {(rest.w - 1) // 2, 1}.max
-      left = Rect.new(rest.x, rest.y, half, top_h)
+      left = template_card_rect(rect) || return nil
       return nil if left.w < 2 || my != left.y
       label = @http2 ? "TEMPLATE (h2)" : "TEMPLATE"
       min_x = left.x + label.size + 4

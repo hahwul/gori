@@ -20,12 +20,7 @@ module Gori
     LINES_FLOOR  =     2
 
     # 2x the observed jitter (`max - min`), floored at `max(floor, base / 100)`.
-    def self.band(min : Int64, max : Int64, base : Int64, floor : Int64) : Int64
-      {(max - min) * 2, {floor, base // 100}.max}.max
-    end
-
-    # :ditto:
-    def self.band(min : Int32, max : Int32, base : Int32, floor : Int32) : Int32
+    def self.band(min : T, max : T, base : T, floor : T) : T forall T
       {(max - min) * 2, {floor, base // 100}.max}.max
     end
   end

@@ -108,17 +108,9 @@ module Gori::Tui
       editor_enter_insert
     end
 
-    # A modified ⌫ — delete a WORD. The `char` half is not defensive padding: a terminal sends
-    # ⌥⌫ as ESC + 0x7F, and termisu's Alt-prefix branch maps the payload byte through
-    # `Key.from_char`, which has no name for DEL — so the event arrives as `Key::Unknown` +
-    # Alt carrying DEL rather than as `Key::Backspace`. Reading the char is what makes
-    # the chord work on a real terminal; the `backspace?` half covers a terminal (or a
-    # keyboard-protocol mode) that does report it as the named key.
+    # A modified ⌫ — `LineEdit.word_delete_key?`, which says why the `char` half matters.
     private def word_delete?(ev : Termisu::Event::Key) : Bool
-      return false unless ev.ctrl? || ev.alt?
-      return true if ev.key.backspace?
-      c = ev.char
-      !!c && (c == '\u{7F}' || c == '\b')
+      LineEdit.word_delete_key?(ev)
     end
 
     # A backspace/forward-delete of a marker delimiter (§/¦) would unbalance the marker

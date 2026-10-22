@@ -65,10 +65,6 @@ module Gori
         canon ? FIELD_HELP[canon]? : nil
       end
 
-      def self.field_help(name : String) : String?
-        FIELD_HELP_PROC.call(name)
-      end
-
       # The subset a one-row cold hint samples — see `QL::HINT_FIELDS` for why a hint samples
       # at all. All five fit, so this is the whole vocabulary rather than a sample.
       HINT_FIELDS = ALIASES.keys

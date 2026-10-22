@@ -26,16 +26,8 @@ module Gori::Tui
     include SeededSession
     PANE_ORDER = [:summary, :results]
 
-    property name : String?
     getter focus : Symbol
     getter config : Miner::Config
-    property job_id : Int32
-    # PROVENANCE: `@request` is a CAPTURED FLOW's stored bytes (a History/Sitemap/Issues
-    # seed), not something the operator drafted. This view has NO editor at all —
-    # `@request` is only ever assigned from a seed or from the store — so the flag is
-    # decided once, at load, and there is no draft interpretation to fall back to.
-    # See `Miner::PlanOptions#evidence?`.
-    getter? evidence : Bool
 
     def initialize
       @target = ""
@@ -71,49 +63,6 @@ module Gori::Tui
       # `ReadPane#render` is never called — `viewport_top` and `row_marked?` are.
       @finding = ReadPane.new(line_select_only: true)
       @job_id = 0
-    end
-
-    # Seed a fresh session from the config overlay. `evidence` is the seed's `flow_id`
-    # having been non-nil (a History/Sitemap/Issues flow); a Repeater-sourced seed is
-    # editor text the operator authored and stays a draft.
-    def load(target : String, request : Bytes, http2 : Bool, sni : String?,
-             config : Miner::Config, evidence : Bool = false) : Nil
-      @target = target
-      @request = request
-      @http2 = http2
-      @sni = sni || ""
-      @config = config
-      @evidence = evidence
-      @dirty = true
-    end
-
-    def restore(rec : Store::MinerSessionRecord) : Nil
-      @target = rec.target
-      @request = rec.request
-      @http2 = rec.http2?
-      @sni = rec.sni || ""
-      # Provenance survives a restart: `flow_id` is what `insert_miner_session` already
-      # stored for a flow-seeded session and nothing else sets it.
-      @evidence = !rec.flow_id.nil?
-      @name = rec.name
-      apply_config_json(rec.config)
-      @last_synced_config = rec.config
-      @dirty = false
-    end
-
-    # Live cross-session request-side sync. Updates seed request/config WITHOUT
-    # wiping focus, in-memory findings, scroll/selection, or a running job.
-    def apply_peer_session(rec : Store::MinerSessionRecord) : Nil
-      restore(rec) # the request-side fields only — focus, results and a running job are untouched
-    end
-
-    def session_side_matches?(rec : Store::MinerSessionRecord) : Bool
-      @target == rec.target &&
-        @request == rec.request &&
-        @http2 == rec.http2? &&
-        (sni_override || "") == (rec.sni || "") &&
-        (@name || "") == (rec.name || "") &&
-        @last_synced_config == rec.config
     end
 
     # Content-only clone for sub-tab Duplicate: request + config. No findings/progress.

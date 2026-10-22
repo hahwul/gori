@@ -56,7 +56,7 @@ module Gori::Repeater
     # origin may well have processed the request.
     #
     # An origin that refuses reuse outright turns every park into a wasted probe and a redial.
-    # After this many consecutive stale checkouts — of EITHER kind — the pool gives up and
+    # After `STALE_GIVE_UP` consecutive stale checkouts — of EITHER kind — the pool gives up and
     # runs in dial-per-send mode for the rest of the run.
     #
     # On `max_requests`: a stale re-send is not charged against the CAP (CappedBackend counts
@@ -66,7 +66,6 @@ module Gori::Repeater
     # origin "demonstrably did not process" the first copy; it demonstrably did not ANSWER it,
     # which is a different fact, so a tester working inside an agreed request budget has to be
     # told about the extra one.
-    STALE_GIVE_UP = 3
 
     # The methods a closed parked socket may be replayed on.
     #
@@ -105,25 +104,6 @@ module Gori::Repeater
     # can ask the same question of an upstream it retires (see there for the three outcomes).
     alias Checkout = Proxy::SocketResidue::State
 
-    # Connections dialed (== handshakes paid) and requests served off a parked socket.
-    # `dialed + reused == sends` for a run that never hit a stale retry.
-    getter dialed : Int64 = 0_i64
-    getter reused : Int64 = 0_i64
-    # Re-sends caused by a parked socket the origin had already closed (see STALE_GIVE_UP).
-    getter stale_retries : Int64 = 0_i64
-    # Parked sockets found ALREADY CLOSED at checkout, before a byte of this request went
-    # onto them. NOT re-sends: nothing had been sent, so the fresh connection carries the
-    # request's FIRST and only copy and no `retried` marker is warranted. Counted separately
-    # from `stale_retries` because the two answer different questions — this one is "how
-    # often did parking turn out to be pointless", which is what STALE_GIVE_UP acts on.
-    getter stale_checkouts : Int64 = 0_i64
-    # Sends that hit a closed parked socket and were NOT replayed because the method is not
-    # idempotent (see REPLAYABLE_METHODS). These came back as errors, exactly as they would
-    # with keep-alive off — counted so a surface can say why a pooled run and an unpooled one
-    # now agree instead of leaving the operator to wonder where the failures came from.
-    getter unsafe_stale : Int64 = 0_i64
-    getter? pooling : Bool = true
-
     # The origin is taken apart rather than as a struct: `Fuzz::Origin` (which folds ws→http)
     # and a Discover URL's `Url::Parts` are different types carrying the same three fields,
     # and the pool needs nothing else from either.
@@ -137,7 +117,6 @@ module Gori::Repeater
                    @overrides : Gori::HostOverrides?, @max_idle : Int32,
                    @tls_preset : String? = nil, @sse : StreamBound? = nil)
       @idle = [] of IO
-      @consecutive_stale = 0
     end
 
     # Send one request, over a parked connection when both this request and the pool's
@@ -214,22 +193,6 @@ module Gori::Repeater
         return result
       end
       dial_and_send(bytes, keepable, method)
-    end
-
-    # Close every parked socket. Idempotent; call when a run ends so a stopped sweep does
-    # not leave file descriptors open until GC.
-    def close_all : Nil
-      drain
-    end
-
-    # One more parked socket that turned out to be dead, from EITHER discovery point. Give up
-    # on pooling for the rest of the run rather than pay a wasted probe-and-redial on every
-    # send; already-parked sockets are dropped, because they are the same vintage.
-    private def note_stale : Nil
-      @consecutive_stale += 1
-      return if @consecutive_stale < STALE_GIVE_UP
-      @pooling = false
-      drain
     end
 
     # The row for a request that died on a parked socket and may NOT be replayed.

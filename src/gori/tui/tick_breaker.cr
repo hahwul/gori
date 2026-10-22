@@ -6,9 +6,6 @@ module Gori::Tui
   # Runner-free for the same reason `Runner.decorate_status` is: `Runner.new` owns a terminal
   # and appears nowhere under spec/, so the rule has to live where a spec can reach it.
   class TickBreaker
-    getter limit : Int32
-    getter window : Time::Span
-
     def initialize(@limit : Int32, @window : Time::Span)
       @stamps = [] of Time::Instant
     end

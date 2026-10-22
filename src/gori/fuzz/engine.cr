@@ -903,10 +903,7 @@ module Gori::Fuzz
     end
 
     def send(bytes : Bytes, verbatim : Array({Int32, Int32})?) : Repeater::Result
-      o = origin
-      if err = @outbound.sweep_block(o.scheme, o.host, Gori::Outbound.request_target(bytes), o.port) || @outbound.admit
-        @blocked += 1
-        @blocked_reason ||= err
+      if err = gate(bytes)
         return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err)
       end
       @inner.send(bytes, verbatim)
@@ -917,13 +914,20 @@ module Gori::Fuzz
     # `Outbound.request_target` to read and no separate destination to judge.
     def send_ws(handshake : Bytes, frames : Array(WsFrame),
                 verbatim : Array({Int32, Int32})?) : {Repeater::Result, WsOutcome}
-      o = origin
-      if err = @outbound.sweep_block(o.scheme, o.host, Gori::Outbound.request_target(handshake), o.port) || @outbound.admit
-        @blocked += 1
-        @blocked_reason ||= err
+      if err = gate(handshake)
         return {Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err), WsOutcome.failed}
       end
       @inner.send_ws(handshake, frames, verbatim)
+    end
+
+    # The refusal for a request whose line is in `bytes`, counted; nil when it may go.
+    private def gate(bytes : Bytes) : String?
+      o = origin
+      if err = @outbound.sweep_block(o.scheme, o.host, Gori::Outbound.request_target(bytes), o.port) || @outbound.admit
+        @blocked += 1
+        @blocked_reason ||= err
+      end
+      err
     end
   end
 

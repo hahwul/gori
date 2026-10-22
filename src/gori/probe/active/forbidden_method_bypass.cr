@@ -145,36 +145,11 @@ module Gori
         # (dropping any override copies the browser sent, so exactly one authoritative copy remains).
         private def rebuild_override(head : Bytes, body : Bytes?, wire : String, override_method : String) : Bytes
           rebuild(head, body) do |lines|
-            kept = [lines[0]]
-            lines[1..].each { |l| kept << l unless override_header?(l) }
-            lines.clear
-            lines.concat(kept)
+            drop_headers!(lines, OVERRIDE_DROP)
             rl = lines[0].split(' ')
             lines[0] = "#{wire} #{Active.origin_form(rl[1])} #{rl[2]}" if rl.size == 3
             OVERRIDE_HEADERS.each_with_index { |name, i| lines.insert(1 + i, "#{name}: #{override_method}") }
           end
-        end
-
-        private def override_header?(line : String) : Bool
-          (c = line.index(':')) ? OVERRIDE_DROP.includes?(line[0...c].strip.downcase) : false
-        end
-
-        private def rebuild(head : Bytes, body : Bytes?, &) : Bytes
-          combined = if body && !body.empty?
-                       io = IO::Memory.new(head.size + body.size)
-                       io.write(head)
-                       io.write(body)
-                       io.to_slice
-                     else
-                       head
-                     end
-          hbytes, bbytes, eol = Miner::Inject.split(combined)
-          lines = String.new(hbytes).split(eol)
-          yield lines unless lines.empty?
-          io = IO::Memory.new
-          io << lines.join(eol) << eol << eol
-          io.write(bbytes) unless bbytes.empty?
-          io.to_slice
         end
       end
     end

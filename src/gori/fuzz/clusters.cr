@@ -34,11 +34,7 @@ module Gori
         First
 
         def label : String
-          case self
-          in Rare   then "rare"
-          in Common then "common"
-          in First  then "first"
-          end
+          to_s.underscore
         end
 
         def self.names : Array(String)

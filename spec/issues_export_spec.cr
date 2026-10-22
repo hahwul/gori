@@ -46,17 +46,6 @@ describe Gori::Issues::Export do
     end
   end
 
-  describe ".scrub_only" do
-    it "fixes invalid UTF-8 but leaves newlines/control characters untouched" do
-      # notes is multi-line by design — the encoding-safety half of one_line, without its
-      # newline-collapsing half, since collapsing would mangle a legitimate multi-line note.
-      scrubbed = Gori::Issues::Export.scrub_only(String.new(Bytes[0x6c, 0x31, 0xff, 0x0a, 0x6c, 0x32])) # "l1\xFF\nl2"
-      scrubbed.valid_encoding?.should be_true
-      scrubbed.should eq("l1�\nl2")
-      scrubbed.lines.size.should eq(2) # the newline survived
-    end
-  end
-
   describe ".scrub_controls" do
     it "strips terminal escape sequences (ESC/BEL/OSC/CSI, C0/C1) but preserves newlines and tabs" do
       # An OSC "set window title" (ESC ] 0 ; … BEL) printed raw to a TTY would drive the terminal.
@@ -325,7 +314,7 @@ describe Gori::Issues::Export do
     it "does not raise on a multi-line notes field with an invalid UTF-8 byte, and keeps its newlines" do
       # Bug: title/host were routed through one_line (which scrubs), but the notes line
       # (`io << f.notes` directly) was not — the ONE field markdown's own .scrub convention
-      # missed. notes is multi-line by design, so it needs scrub_only, not one_line.
+      # missed. notes is multi-line by design, so it needs a bare scrub, not one_line.
       with_store do |store|
         id = store.insert_issue("clean title", Gori::Store::Severity::Low, "clean.host", nil)
         store.update_issue(id, notes: String.new(Bytes[0x6c, 0x31, 0xff, 0x0a, 0x6c, 0x32])) # "l1\xFF\nl2"
@@ -371,7 +360,7 @@ describe Gori::Issues::Export do
         issue["title"].as_s.valid_encoding?.should be_true
         issue["host"].as_s.valid_encoding?.should be_true
         issue["notes"].as_s.valid_encoding?.should be_true
-        issue["notes"].as_s.lines.size.should eq(2) # notes keeps its newline (scrub_only, not one_line)
+        issue["notes"].as_s.lines.size.should eq(2) # notes keeps its newline (scrub, not one_line)
       end
     end
 
