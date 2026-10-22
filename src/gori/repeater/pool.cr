@@ -27,6 +27,19 @@ module Gori::Repeater
   #                   silently re-sent, which is the whole point of the distinction.
   #   pooling?        false once the pool has given up on reuse for the rest of the run.
   abstract class Pool
+    # An origin that refuses reuse turns every park into a wasted probe and a redial, so after
+    # this many consecutive stale checkouts the pool runs in dial-per-send mode for the rest of
+    # the run. `ConnPool` documents what it bounds.
+    STALE_GIVE_UP = 3
+
+    getter dialed : Int64 = 0_i64
+    getter reused : Int64 = 0_i64
+    getter stale_retries : Int64 = 0_i64
+    getter stale_checkouts : Int64 = 0_i64
+    getter unsafe_stale : Int64 = 0_i64
+    getter? pooling : Bool = true
+    @consecutive_stale = 0
+
     # One request over a pooled connection when this request and the pool's state allow it.
     # Never raises: every failure comes back as an error `Result`, exactly as the unpooled
     # engines do.
@@ -34,13 +47,21 @@ module Gori::Repeater
 
     # Close every parked connection. Idempotent; call when a run ends so a stopped sweep
     # does not leave file descriptors open until GC.
-    abstract def close_all : Nil
+    def close_all : Nil
+      drain
+    end
 
-    abstract def dialed : Int64
-    abstract def reused : Int64
-    abstract def stale_retries : Int64
-    abstract def stale_checkouts : Int64
-    abstract def unsafe_stale : Int64
-    abstract def pooling? : Bool
+    # Close and forget every parked connection.
+    private abstract def drain : Nil
+
+    # One more parked connection that turned out to be dead, from EITHER discovery point. Give
+    # up on pooling for the rest of the run rather than pay a wasted probe-and-redial on every
+    # send; already-parked connections are dropped, because they are the same vintage.
+    private def note_stale : Nil
+      @consecutive_stale += 1
+      return if @consecutive_stale < STALE_GIVE_UP
+      @pooling = false
+      drain
+    end
   end
 end
