@@ -156,7 +156,7 @@ module Gori
 
     # Drop this project's disagreement, so the rule follows the global default again.
     def clear_rewriter_override(id : Int64) : Bool
-      clear_global_override(REWRITER_OVERRIDES_KEY, id)
+      set_global_override(REWRITER_OVERRIDES_KEY, id, nil)
     end
 
     # The one implementation behind both override maps (this one and
@@ -181,21 +181,13 @@ module Gori
       {} of Int64 => Bool
     end
 
-    private def set_global_override(key : String, id : Int64, enabled : Bool) : Bool
-      write_global_override(key, id, enabled)
-    end
-
-    private def clear_global_override(key : String, id : Int64) : Bool
-      write_global_override(key, id, nil)
-    end
-
     # Set (`enabled`) or drop (nil) ONE entry, with the map read inside the writer transaction.
     # A pool read followed by a whole-map write let two gori processes toggling DIFFERENT global
     # rules erase each other's override, both reporting success — the lost update
     # `mutate_setting` documents. Not that helper, because it cannot delete a row: an EMPTY map
     # deletes the key outright rather than storing "{}", which is what makes "the override
     # disappeared when the two agreed again" observable from outside.
-    private def write_global_override(key : String, id : Int64, enabled : Bool?) : Bool
+    private def set_global_override(key : String, id : Int64, enabled : Bool?) : Bool
       exec_task_ok ->(c : DB::Connection) {
         map = parse_global_overrides(c.query_one?("SELECT value FROM settings WHERE key = ?", key, as: String))
         unless map[id]? == enabled

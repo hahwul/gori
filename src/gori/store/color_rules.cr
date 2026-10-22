@@ -110,7 +110,7 @@ module Gori
 
     # Drop this project's disagreement, so the rule follows the global default again.
     def clear_colormarker_override(id : Int64) : Bool
-      clear_global_override(COLORMARKER_OVERRIDES_KEY, id)
+      set_global_override(COLORMARKER_OVERRIDES_KEY, id, nil)
     end
   end
 end
