@@ -538,26 +538,20 @@ module Gori
         loaded = load_chunk_source(options)
         return loaded if loaded.is_a?(Result)
         head, body, source_truncated = loaded
-        stored = body || Bytes.new(0)
-        head_omitted = false
-        trailers_omitted = false
-        unless options.include_sensitive
-          stored, trailers_omitted = drop_sensitive_trailers(head, stored, options.request?)
-        end
-        if options.request? && !options.include_sensitive
-          stored, head_omitted = drop_sensitive_head(stored)
-        end
-        # A REQUEST part is stored wire bytes, not a content-encoded response entity: there is
-        # nothing to decode and decoding would be a lie about what is on disk.
-        decoded, decode_note = (options.raw || options.request?) ? {nil, nil} : decode_for_chunk(head, stored)
-        bytes = decoded || stored
-        # A decoded view never carried the trailers, so it has nothing to say about them.
-        trailers_omitted &&= decoded.nil?
+        view = Serialize.page_view(head, body || Bytes.new(0), request: options.request?, raw: options.raw,
+          include_sensitive: options.include_sensitive) { |hd, stored| decode_for_chunk(hd, stored) }
+        bytes = view.bytes
+        decoded = view.decoded? ? bytes : nil
+        decode_note, head_omitted, trailers_omitted = view.decode_note, view.head_omitted?, view.trailers_omitted?
         total = bytes.size.to_i64
         # The decoded view is capped at ContentDecode::MAX_OUT (decompression-bomb ceiling).
         # At the cap, `complete:true` at the end would falsely imply the whole body — flag it
         # so a caller knows more decoded data may exist and can page the wire bytes with raw:true.
         decode_capped = !decoded.nil? && decoded.size >= Proxy::Codec::ContentDecode::MAX_OUT
+        if pattern = options.find
+          return find_in_body(options, pattern, bytes, !decoded.nil?, decode_capped, source_truncated,
+            head_omitted, trailers_omitted)
+        end
         # An offset past the end used to silently clamp to the body end (0 bytes,
         # complete:true) — indistinguishable from a legitimate final read. Surface
         # both the requested and the effective offset plus a warning so the caller
@@ -661,52 +655,57 @@ module Gori
         end
         offset = bounded_int_arg(h, "offset", 0_i64, min: 0_i64)
         limit = bounded_int_arg(h, "limit", BODY_CHUNK_LIMIT.default.to_i64, min: 1_i64, max: BODY_CHUNK_LIMIT.max.to_i64).to_i
+        find = str(h, "find")
+        raise Gori::Error.new("invalid 'find' (expected a non-empty regex)") if find.try(&.empty?)
         BodyChunkOptions.new(flow_id, repeater_id, offset, limit, bool_arg(h, "raw", false), part,
-          bool_arg(h, "include_sensitive", false))
+          bool_arg(h, "include_sensitive", false), find,
+          bounded_int_arg(h, "max_matches", FIND_MATCHES.default.to_i64, min: 1_i64, max: FIND_MATCHES.max.to_i64).to_i,
+          bounded_int_arg(h, "context", FIND_CONTEXT.default.to_i64, min: 0_i64, max: FIND_CONTEXT.max.to_i64).to_i)
       end
 
-      # A `part:"request"` payload is head+body wire bytes, and this tool pages them EXACTLY —
-      # `Serialize.emit_head_base64` states the rule those bytes fall under: "base64 is
-      # encoding, not redaction … redacting INSIDE the base64 is not an option — it would no
-      # longer be the bytes", so it withholds the byte-exact head unless `include_sensitive`.
-      # The same head reached here ungated: `get_flow` answered `authorization: [REDACTED]`
-      # while `get_response_body_chunk{flow_id, part:"request"}` on the same flow handed back
-      # the whole Bearer token, from a tool that had no `include_sensitive` argument at all.
-      #
-      # So the head is dropped rather than rewritten, and only when it actually carries one of
-      # `Serialize::SENSITIVE_HEADERS` — a request with nothing to withhold pages exactly as
-      # before. `offset`/`total_bytes`/`next_offset` then describe the body alone, which is why
-      # the omission is NAMED in the reply instead of shortening the payload silently.
-      private def drop_sensitive_head(bytes : Bytes) : {Bytes, Bool}
-        head, body = split_wire_request(bytes)
-        text = String.new(head).scrub
-        return {bytes, false} if Serialize.redact_head(text, false) == text
-        {body || Bytes.new(0), true}
-      end
+      FIND_MATCHES = PageLimit.new(20, 100)
+      FIND_CONTEXT = PageLimit.new(40, BodyFind::CONTEXT_MAX)
 
-      # `drop_sensitive_head`'s rule for the other end of a chunked message: the trailer section
-      # is header fields too, and `get_flow`'s `trailers` redacts a sensitive one
-      # (`Serialize.emit_trailers`) — so the pager of the same exact bytes stops at the 0-chunk
-      # line instead of handing the value over. Only when such a field is there; the decoded
-      # view never carried trailers at all. `request` bytes are the whole wire message, whose
-      # head says whether the body is chunked.
-      private def drop_sensitive_trailers(head : Bytes?, bytes : Bytes, request : Bool) : {Bytes, Bool}
-        base = 0
-        if request
-          head, body = split_wire_request(bytes)
-          base = head.size
-        else
-          body = bytes
+      # `find`: a regex over the SAME bytes a page reads — after the same head/trailer
+      # withholding and the same decode — so every match `offset` is an `offset` for this tool
+      # with the same `part`/`raw`/`include_sensitive`, and a withheld credential is never
+      # searched. The search starts at `offset`; `next_offset` continues it.
+      private def find_in_body(options : BodyChunkOptions, pattern : String, bytes : Bytes, decoded : Bool,
+                               decode_capped : Bool, source_truncated : Bool, head_omitted : Bool,
+                               trailers_omitted : Bool) : Result
+        page = BodyFind.run(bytes, pattern, options.offset, options.max_matches, options.context)
+        parts = fit_rows(page.matches) do |rj, m, _|
+          rj.object do
+            rj.field "offset", m.offset
+            rj.field "length", m.length
+            rj.field "snippet", m.snippet
+          end
         end
-        return {bytes, false} unless at = Proxy::Codec::ContentDecode.trailer_offset(head, body)
-        trailers = Proxy::Codec::ContentDecode.trailers(head, body)
-        # A section past the parser's field cap is withheld whole: a field it did not lift is one
-        # it cannot say is harmless.
-        unless trailers.size >= Proxy::Codec::ContentDecode::MAX_TRAILERS ||
-               trailers.any? { |(name, _)| Serialize.sensitive_header?(name) }
-          return {bytes, false}
-        end
-        {bytes[0, base + at], true}
+        cut = parts.size < page.matches.size
+        next_offset = cut ? page.matches[parts.size].offset : page.next_offset
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "flow_id", options.flow_id
+            j.field "repeater_id", options.repeater_id
+            j.field "part", options.part
+            j.field "find", pattern
+            j.field "offset", options.offset
+            j.field "total_bytes", bytes.size
+            j.field "representation", decoded ? "decoded" : "raw"
+            j.field "head_omitted", true if head_omitted
+            j.field "trailers_omitted", true if trailers_omitted
+            j.field "decode_capped", true if decode_capped
+            j.field "source_truncated", true if source_truncated
+            j.field "returned", parts.size
+            j.field("matches") { raw_rows(j, parts) }
+            emit_cut(j, cut)
+            j.field "has_more", !next_offset.nil?
+            j.field "next_offset", next_offset
+            j.field "stopped", "regex time budget ran out; matches past next_offset are unknown" if page.stopped
+          end
+        end)
+      rescue ex : ArgumentError
+        err("invalid 'find' regex: #{ex.message}", "INVALID_ARGUMENT", field: "find")
       end
 
       # The last response body `get_response_body_chunk` decoded: {head, stored bytes, decoded,
@@ -929,6 +928,9 @@ module Gori
           s.field "limit", limitprop("bytes to return", BODY_CHUNK_LIMIT)
           s.field "raw", boolprop("page stored response wire bytes without content decoding")
           s.field "include_sensitive", boolprop("also page a request HEAD or chunked TRAILERS carrying a credential; otherwise withheld (head_omitted / trailers_omitted)")
+          s.field "find", strprop("regex (as QL body~): return {offset, length, snippet} matches from `offset` on instead of a page")
+          s.field "max_matches", limitprop("find: max matches", FIND_MATCHES)
+          s.field "context", intprop("find: snippet bytes each side (default #{FIND_CONTEXT.default}, max #{FIND_CONTEXT.max})")
         end
 
         return unless @allow_actions

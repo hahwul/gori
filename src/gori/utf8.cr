@@ -87,8 +87,9 @@ module Gori
     # The width of the UTF-8 sequence starting at `i`, or 0 where `Char::Reader` would call it
     # an error (its `decode_char_at`: no overlong forms, no surrogates, nothing past U+10FFFF).
     # A byte past `len` is never a continuation byte, as the reader's NUL terminator is not.
+    # Public for `BodyFind`, which maps a scrubbed offset back to the raw byte by the same verdict.
     @[AlwaysInline]
-    private def self.width_at(ptr : Pointer(UInt8), i : Int32, len : Int32) : Int32
+    def self.width_at(ptr : Pointer(UInt8), i : Int32, len : Int32) : Int32
       first = ptr[i]
       return 1 if first < 0x80
       need = lead_width(first)
