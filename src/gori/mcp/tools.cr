@@ -38,6 +38,7 @@ require "./tools/decode"
 require "./tools/cookie"
 require "./tools/discover"
 require "./tools/grpc"
+require "./tools/graphql"
 require "./tools/env"
 require "./tools/flows"
 require "./tools/fuzz"
@@ -535,15 +536,21 @@ module Gori
           return "write"
         end
         return nil unless groups.includes?("send")
-        sends = case name
-                when "probe_scan" then bool_arg(h, "active", false)
-                  # Raising the mode arms the capture pipeline's AUTOMATIC active probes, so it
-                  # is a send by proxy; lowering it (or a label that is not a mode) is not.
-                when "set_probe_mode"
-                  str(h, "mode").try { |m| Probe::Mode.values.find(&.label.==(m.strip.downcase)) }.try(&.probes_actively?) || false
-                else false
-                end
-        sends ? "send" : nil
+        call_sends?(name, h) ? "send" : nil
+      end
+
+      # Whether this call of a tool outside the `send` group dials anyway: the one mode of
+      # `probe_scan` / `graphql_schema` that sends, or a probe mode raised to an active one.
+      private def call_sends?(name : String, h) : Bool
+        case name
+        when "probe_scan"     then bool_arg(h, "active", false)
+        when "graphql_schema" then bool_arg(h, "send", false)
+          # Raising the mode arms the capture pipeline's AUTOMATIC active probes, so it
+          # is a send by proxy; lowering it (or a label that is not a mode) is not.
+        when "set_probe_mode"
+          str(h, "mode").try { |m| Probe::Mode.values.find(&.label.==(m.strip.downcase)) }.try(&.probes_actively?) || false
+        else false
+        end
       end
 
       # Whether `tools/list` actually carries `name` — the `--tools` filter AND the
@@ -1546,6 +1553,7 @@ module Gori
           list_mine_tools j
           list_discover_tools j
           list_grpc_tools j
+          list_graphql_tools j
           list_authorize_tools j
           list_cache_deception_tools j
           list_jobs_tools j
@@ -1699,6 +1707,7 @@ module Gori
         return true if AGENT_ACTION_TOOLS.includes?(name)
         case name
         when "probe_scan"     then bool_arg(h, "active", false) || bool_arg(h, "persist", false)
+        when "graphql_schema" then bool_arg(h, "send", false)
         when "export_openapi" then describes?(h, "output_path")
           # A confirmed delete never moves the binding (the served project is refused), so the
           # post-call append lands in the right feed — and it is the most destructive call on

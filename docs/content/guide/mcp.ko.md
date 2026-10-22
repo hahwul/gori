@@ -73,7 +73,7 @@ gori mcp --read-only
 
 | 묶음 | 끄면 빠지는 도구 |
 |------|------------------|
-| **Send traffic** | 대상이나 OAST 서버로 요청을 보내는 모든 도구와, 그 도구가 시작한 작업의 폴러: `send_request`, `send_websocket`, `ws_session_*`, `ws_inject`, `race_requests`, `timing_requests`, `fuzz_*`, `mine_*`, `discover_*`, `authorize_*`, `sequence_*`(`sequence_analyze` 제외), `run_retest`, `minimize_repeater`, `cache_deception_check`, `grpc_reflect`, `refresh_session_slot`, `oast_*`(`oast_presets` 제외), `list_jobs` / `get_job` / `stop_job`, `active:true`인 `probe_scan`, `active`나 `aggressive`로 올리는 `set_probe_mode` |
+| **Send traffic** | 대상이나 OAST 서버로 요청을 보내는 모든 도구와, 그 도구가 시작한 작업의 폴러: `send_request`, `send_websocket`, `ws_session_*`, `ws_inject`, `race_requests`, `timing_requests`, `fuzz_*`, `mine_*`, `discover_*`, `authorize_*`, `sequence_*`(`sequence_analyze` 제외), `run_retest`, `minimize_repeater`, `cache_deception_check`, `grpc_reflect`, `refresh_session_slot`, `oast_*`(`oast_presets` 제외), `list_jobs` / `get_job` / `stop_job`, `active:true`인 `probe_scan`, `send:true`인 `graphql_schema`, `active`나 `aggressive`로 올리는 `set_probe_mode` |
 | **Intercept control** | `intercept_forward`, `intercept_forward_edit`, `intercept_drop`, `intercept_toggle`, `intercept_set_filter`, `intercept_set_direction` |
 | **Edit project data** | 그 밖의 프로젝트 쓰기 전부: 이슈, 노트, repeater, 규칙, env, host override, 세션 슬롯, evidence, 링크, 뷰, 저장된 wordlist(`save_wordlist`, `rename_wordlist`, `delete_wordlist`: 프로젝트가 아니라 전역 카탈로그), probe 스캔과 판정(패시브 `probe_scan`도 찾은 결과를 기록합니다), OpenAPI 문서의 파일 쓰기(`export_openapi`의 `output_path`. 인라인 문서는 꺼지지 않습니다), JavaScript 엔드포인트 스캔(`scan_js_endpoints`는 읽은 것을 저장할 뿐 요청은 보내지 않습니다), flow·히스토리 삭제 |
 | **Change scope & sandbox** | `add_scope_rule`, `update_scope_rule`, `delete_scope_rule`, `set_scope_enabled`, `set_sandbox`(`list_scope`는 계속 제공) |
@@ -92,8 +92,8 @@ gori mcp --read-only
 
 | 시작 방법 | 도구 | `tools/list` | 토큰 | 용도 |
 | --- | ---: | ---: | ---: | --- |
-| `gori mcp` | 198 | ~180 KB | ~46k | 전부 (기본값) |
-| `--read-only` | 64 | ~56 KB | ~14k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
+| `gori mcp` | 199 | ~182 KB | ~47k | 전부 (기본값) |
+| `--read-only` | 65 | ~57 KB | ~15k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
 | `--tools=@recon` | 39 | ~41 KB | ~11k | 캡처를 읽고 파악, 패시브 스캔, 요청 재전송, 이슈·노트 기록 |
 | `--tools=@recon --read-only` | 29 | ~30 KB | ~8k | `--read-only`가 끄는 도구를 뺀 `@recon` |
 | `--tools=@minimal` | 18 | ~19 KB | ~5k | History와 flow, 현재 TUI 컨텍스트를 읽고 오퍼레이터와 대화 |
@@ -209,6 +209,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `list_color_rules` / `list_custom_colors` | [Colormarker](/ko/guide/proxy/#colouring-rows-colormarker-tab) 규칙을 우선순위 순으로, 그리고 규칙의 `color`가 참조할 수 있는 전역 커스텀 색상. 표시 전용이며 색상 규칙은 트래픽을 건드리지 않습니다 |
 | `preview_color_rule` | 어떤 색상 조건이 최근 플로우 몇 개에 **매칭**되는지, 그리고 앞서 해소되는 규칙들을 셈한 뒤 실제로 몇 개를 **칠하는지**. 전역 후보는 모든 프로젝트 규칙보다 먼저 해석되므로 `scope`를 받습니다 |
 | `grpc_schema` | 이 프로젝트가 캡처된 gRPC를 어떤 `.proto` 스키마로 렌더하는지, 각 조각이 어디서 왔는지(디스크립터 셋 파일 또는 리플렉션 페치). 리플렉션 목록에는 프로젝트에 저장된 모든 대상과, 이 서버가 가져왔지만 저장하지 못한 대상이 함께 나옵니다. 아무것도 보내지 않습니다 |
+| `graphql_schema` | GraphQL 엔드포인트의 스키마를 간결한 SDL로: 루트 오퍼레이션과 인자·반환 타입, 그다음 거기서 닿는 타입(내장 타입 제외). 이름 `filter`와 `max_bytes` 상한을 받습니다. 응답이 인트로스펙션 결과인 플로우를 읽고 아무것도 보내지 않습니다. `send:true`면 그 플로우의 요청을 인트로스펙션 쿼리로 바꿔(세션 헤더 유지) 다시 보내며, `send_request`처럼 스코프 게이트를 지나고 `--read-only`에서는 거절됩니다 |
 | `list_rules` | 프로젝트에 적용되는 Match & Replace 규칙을 적용 순서로 나열. 전역 규칙이 먼저, 그다음이 프로젝트 규칙(`scope`로 한쪽만 조회) |
 | `list_env` | 치환에 쓰이는 프로젝트 env 토큰과 내장 생성기. 결과는 `{syntax, prefix, example, vars, generators}`입니다(env 값은 가려지며, `include_sensitive`로 볼 수 있지만 `TOTP_SECRET`은 예외). 앞의 세 값은 참조를 어떻게 **적을지** 알려 줍니다. `syntax`는 이 설치의 문법(`namespaced`이면 `$ENV.KEY`, `$BIND.NAME`, `$GEN.UUID`; `bare`이면 생성기 없이 레거시 `$KEY`), `prefix`는 시길, `example`은 앞의 둘을 적용한 예시여서 기본이 아닌 시길도 조립할 필요가 없습니다. `vars`의 각 행은 bare 이름과 `length`, 값이 스킴으로 시작할 때의 `scheme`을 싣고, `generators`의 각 행은 완성된 토큰과 출력 형식을 싣고, 지금 값을 만들 수 없으면(`TOTP_SECRET`이 없는 `$GEN.TOTP`) 그 이유를 `unavailable`로 싣습니다 |
 | `list_host_overrides` | 이 프로젝트에 적용 중인 호스트 → IP 다이얼 맵 |
@@ -227,7 +228,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `ql_reference` | 쿼리 언어 레퍼런스 |
 | `ql_explain` | 쿼리를 실행하지 않고 진단. 요청을 쓰기 전에 필터를 점검할 때 사용 |
 
-**액션 도구**(`--read-only`로 비활성화됨. 단, `switch_project`는 `--pin-project`로 빼지 않는 한 동작하고 `create_project`는 서버가 언바운드일 때 동작합니다). 소켓을 여는 도구(`send_request`, `send_websocket`, `ws_session_open`, `ws_inject`, `fuzz_*`, `mine_*`, `authorize_*`, `cache_deception_check`, `sequence_*`, `discover_*`, `grpc_reflect`, `minimize_repeater`, `race_requests`, `timing_requests`, `run_retest`, `refresh_session_slot`, 그리고 `active:true`를 준 `probe_scan`)는 모두 스코프 게이트를 지납니다. 설정된 스코프 밖의 대상, 또는 스코프가 없는 대상은 호출에 명시적 예외 선언인 `allow_unscoped:true`를 주지 않는 한 `SCOPE_BLOCKED`로 거부됩니다. 그때도 샌드박스는 그대로 적용되고, 스윕하는 도구(`fuzz_*`, `mine_*`, `discover_*`, `sequence_*`, `authorize_*`, `minimize_repeater`, `run_retest`, active `probe_scan`)에는 명시적 제외 규칙도 적용됩니다. `send_request`처럼 손으로 작성한 단일 전송은 프록시와 마찬가지로 제외 규칙에 막히지 않습니다. 프로젝트 [요청 예산](/ko/reference/config/#per-project-overrides)은 이 모두에 상한을 둡니다. 예산이 거부한 전송은 `BUDGET_EXHAUSTED`(재시도 불가)로, 프로젝트 데이터베이스가 슬롯을 내주지 못했으면 `PROJECT_BUSY`(재시도 가능)로 실패하고, 총량을 다 쓴 실행은 `budget_exhausted`로 끝납니다.
+**액션 도구**(`--read-only`로 비활성화됨. 단, `switch_project`는 `--pin-project`로 빼지 않는 한 동작하고 `create_project`는 서버가 언바운드일 때 동작합니다). 소켓을 여는 도구(`send_request`, `send_websocket`, `ws_session_open`, `ws_inject`, `fuzz_*`, `mine_*`, `authorize_*`, `cache_deception_check`, `sequence_*`, `discover_*`, `grpc_reflect`, `minimize_repeater`, `race_requests`, `timing_requests`, `run_retest`, `refresh_session_slot`, `active:true`를 준 `probe_scan`, 그리고 `send:true`를 준 `graphql_schema`)는 모두 스코프 게이트를 지납니다. 설정된 스코프 밖의 대상, 또는 스코프가 없는 대상은 호출에 명시적 예외 선언인 `allow_unscoped:true`를 주지 않는 한 `SCOPE_BLOCKED`로 거부됩니다. 그때도 샌드박스는 그대로 적용되고, 스윕하는 도구(`fuzz_*`, `mine_*`, `discover_*`, `sequence_*`, `authorize_*`, `minimize_repeater`, `run_retest`, active `probe_scan`)에는 명시적 제외 규칙도 적용됩니다. `send_request`처럼 손으로 작성한 단일 전송은 프록시와 마찬가지로 제외 규칙에 막히지 않습니다. 프로젝트 [요청 예산](/ko/reference/config/#per-project-overrides)은 이 모두에 상한을 둡니다. 예산이 거부한 전송은 `BUDGET_EXHAUSTED`(재시도 불가)로, 프로젝트 데이터베이스가 슬롯을 내주지 못했으면 `PROJECT_BUSY`(재시도 가능)로 실패하고, 총량을 다 쓴 실행은 `budget_exhausted`로 끝납니다.
 
 캡처한 바이트는 데이터이지 지시가 아닙니다. 결과에 담긴 본문, WebSocket 메시지, SSE 이벤트, 보류된 intercept 항목, gRPC 메시지, OAST 히트, 디코딩한 JSON-RPC·LLM 텍스트에는 모두 `origin`이 붙습니다. `target`(테스트 대상 서버가 쓴 것), `client`(브라우저나 앱이 쓴 것), `remote`(OAST 콜백 같은 외부 당사자)입니다. `list_params`와 `export_openapi`의 `origin` 인자(scheme, host, port)와는 다른 것입니다.
 

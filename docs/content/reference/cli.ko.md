@@ -106,6 +106,7 @@ gori run <subcommand> [verb] [options]
 | `views` · `add` · `set` · `rename` · `scope` · `rm` | 저장된 History 뷰 관리: 목록을 좁히는 이름 붙은 QL 쿼리를 렌즈로 적용 |
 | `session` · `add` · `from-flow` · `edit` · `rm` · `baseline` · `show` · `refresh` · `from-request` | 세션 슬롯: 전송이나 Authorize 실행이 그 이름으로 나가는 신원과, 그 신원을 다시 인증하는 Repeater 단계 |
 | `grpc [schema]` · `reflect` · `forget` | gRPC `.proto` 렌즈: 무엇이 로드됐는지 보기, 서버 리플렉션으로 디스크립터 받기, 캐시된 대상 버리기 |
+| `graphql schema <flow-id>` | GraphQL 스키마를 간결한 SDL로. 응답이 인트로스펙션 결과인 플로우에서 읽거나, `--send`면 플로우의 요청을 인트로스펙션 쿼리로 다시 보냅니다(스코프 게이트). `--filter`, `--max-bytes`, `--legacy`, `--format json`(MCP `graphql_schema`와 같은 객체) |
 | `project [list]` | 캡처된 트래픽이 있는 프로젝트 목록 (`--all`이면 전부) |
 | `project create <name>` | 이름으로 프로젝트 생성 (같은 이름이면 다시 열기) |
 | `project rename <name> <new-name>` | 프로젝트 표시 이름 변경 |

@@ -106,6 +106,7 @@ gori run <subcommand> [verb] [options]
 | `views` · `add` · `set` · `rename` · `scope` · `rm` | Manage saved History views: named QL queries the list is narrowed by, as a lens |
 | `session` · `add` · `from-flow` · `edit` · `rm` · `baseline` · `show` · `refresh` · `from-request` | Session slots: the named identities a send or an Authorize run goes out as, and the Repeater steps that re-authenticate one |
 | `grpc [schema]` · `reflect` · `forget` | The gRPC `.proto` lens: show what is loaded, fetch descriptors by server reflection, drop a cached target |
+| `graphql schema <flow-id>` | A GraphQL schema as compact SDL, read from a flow whose response is an introspection result, or with `--send` by re-sending the flow's request as the introspection query (scope-gated); `--filter`, `--max-bytes`, `--legacy`, `--format json` (MCP `graphql_schema`'s object) |
 | `project [list]` | List projects holding captured traffic (`--all` for every one) |
 | `project create <name>` | Create (or reopen) a project by name |
 | `project rename <name> <new-name>` | Change a project's display name |
