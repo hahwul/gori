@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "../support/fake_host"
 require "file_utils"
 
 include Gori::Tui
@@ -17,147 +18,6 @@ include Gori::Tui
 # The assertion reads `session.probe.@oob` directly, the same ivar seam the sibling OAST specs
 # use for `@reg_events` / `@oast_events` — a StoreMinter is non-nil exactly when the analyzer can
 # mint, which is the whole of what the wiring changed.
-
-# The narrow shell facade a controller reaches the world through. Inert except `session`, `jobs`
-# and `notifications` — the members `apply_registration` and its drain touch.
-private class FakeHost
-  include Gori::Tui::Host
-
-  def initialize(@session : Gori::Session)
-    @jobs = Gori::Tui::Jobs.new
-    @notifications = Gori::Tui::Notifications.new
-  end
-
-  def session : Gori::Session
-    @session
-  end
-
-  def jobs : Gori::Tui::Jobs
-    @jobs
-  end
-
-  def notifications : Gori::Tui::Notifications
-    @notifications
-  end
-
-  def status(message : String) : Nil
-  end
-
-  def request_overlay(kind : Symbol) : Nil
-  end
-
-  def request_focus(pane : Symbol) : Nil
-  end
-
-  def focus_body : Nil
-  end
-
-  def resolve_subtab_focus : Nil
-  end
-
-  def switch_tab(tab : Symbol) : Nil
-  end
-
-  def goto_tab(tab : Symbol) : Nil
-  end
-
-  def open_palette : Nil
-  end
-
-  def open_help_query(surface : Symbol) : Nil
-  end
-
-  def open_space_menu : Nil
-  end
-
-  def open_fuzz_set_editor(edit_index : Int32?) : Nil
-  end
-
-  def open_fuzz_advanced_editor : Nil
-  end
-
-  def open_authorize_identities : Nil
-  end
-
-  def reconfigure_sequence : Nil
-  end
-
-  def open_scope_rule_editor(edit_id : Int64?, kind : String, match_type : String, pattern : String) : Nil
-  end
-
-  def open_custom_rule_editor(rule : Gori::Probe::CustomRule?) : Nil
-  end
-
-  def open_rewriter_preset_picker : Nil
-  end
-
-  def open_rewriter_rule_editor(rule : Gori::Store::MatchRule?) : Nil
-  end
-
-  def open_colormarker_rule_editor(rule : Gori::Store::ColorRule?) : Nil
-  end
-
-  def open_colormarker_color_editor(color : Gori::Settings::ColormarkerColor?) : Nil
-  end
-
-  def open_extract_rule_editor(rule : Gori::Store::ExtractRule?) : Nil
-  end
-
-  def open_chain_save : Nil
-  end
-
-  def open_chain_load : Nil
-  end
-
-  def open_oast_provider_editor(provider : Gori::Oast::ProviderConfig?) : Nil
-  end
-
-  def confirm(title : String, message : String, *, confirm_label : String, danger : Bool,
-              return_to : Symbol = :none, &action : -> Nil) : Nil
-    action.call
-  end
-
-  def overlay : Symbol
-    :none
-  end
-
-  def active_tab : Symbol
-    :oast
-  end
-
-  def focus : Symbol
-    :body
-  end
-
-  def reveal? : Bool
-    false
-  end
-
-  def toggle_reveal : Nil
-  end
-
-  def pretty? : Bool
-    false
-  end
-
-  def toggle_pretty : Nil
-  end
-
-  def toggle_scope_lens : Nil
-  end
-
-  def toggle_sandbox : Nil
-  end
-
-  def apply_project_network(bind_host : String, bind_port : Int32, upstream : String,
-                            connect_secs : Int32, io_secs : Int32, capture_mib : Int32) : String
-    ""
-  end
-
-  def apply_project_protos(spec : String) : String
-    ""
-  end
-end
 
 # A Provider that never dials a socket: register would be a network call the fixture must not
 # make, and apply_registration only ever calls generate_payload/deregister on a fresh RegOk.
@@ -194,7 +54,7 @@ private def with_arm_controller(&)
     Gori::Proxy::Tls::CertAuthority.load_or_create(ARM_CA_ROOT), Gori::Verbs.registry, project)
   begin
     pid = session.store.insert_oast_provider("prov", "interactsh", "https://oast.test", nil, true, 0)
-    host = FakeHost.new(session)
+    host = FakeHost.new(session, :oast)
     yield OastController.new(host), session, "p_#{pid}"
   ensure
     session.close

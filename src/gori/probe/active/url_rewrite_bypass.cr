@@ -120,36 +120,18 @@ module Gori
         # browser sent, then (for the PROBE, orig != nil) insert one authoritative copy of each naming
         # the gated path. Body untouched.
         private def rebuild_root(head : Bytes, body : Bytes?, orig : String?) : Bytes
-          combined = if body && !body.empty?
-                       io = IO::Memory.new(head.size + body.size)
-                       io.write(head)
-                       io.write(body)
-                       io.to_slice
-                     else
-                       head
-                     end
-          hbytes, bbytes, eol = Miner::Inject.split(combined)
-          lines = String.new(hbytes).split(eol)
-          return head if lines.empty?
-          parts = lines[0].split(' ')
-          method = parts.size == 3 ? parts[0] : "GET"
-          version = parts.size == 3 ? parts[2] : "HTTP/1.1"
-          kept = ["#{method} / #{version}"]
-          lines[1..].each do |l|
-            kept << l unless header_named?(l, "x-original-url") || header_named?(l, "x-rewrite-url")
+          request = rebuild(head, body) do |lines|
+            parts = lines[0].split(' ')
+            method = parts.size == 3 ? parts[0] : "GET"
+            version = parts.size == 3 ? parts[2] : "HTTP/1.1"
+            lines[0] = "#{method} / #{version}"
+            drop_headers!(lines, Set{"x-original-url", "x-rewrite-url"})
+            if orig
+              lines.insert(1, "X-Original-URL: #{orig}")
+              lines.insert(2, "X-Rewrite-URL: #{orig}")
+            end
           end
-          if orig
-            kept.insert(1, "X-Original-URL: #{orig}")
-            kept.insert(2, "X-Rewrite-URL: #{orig}")
-          end
-          io = IO::Memory.new
-          io << kept.join(eol) << eol << eol
-          io.write(bbytes) unless bbytes.empty?
-          Fuzz::ContentLength.sync(io.to_slice, false)
-        end
-
-        private def header_named?(line : String, name : String) : Bool
-          (c = line.index(':')) ? line[0...c].strip.downcase == name : false
+          Fuzz::ContentLength.sync(request, false)
         end
 
         private def body_size(result : Repeater::Result) : Int32

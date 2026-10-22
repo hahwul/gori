@@ -1977,11 +1977,7 @@ module Gori
                   else          1_000_000_000_i64
                   end
         abort "gori run: --for '#{v}' is out of range" if n.to_i64 > Int64::MAX // unit_ns
-        case m[2]?
-        when "m" then n.minutes
-        when "h" then n.hours
-        else          n.seconds
-        end
+        Time::Span.new(nanoseconds: n.to_i64 * unit_ns)
       end
 
       # `--wordlist` on mine/discover names ONE list (the plan takes one). A second used to

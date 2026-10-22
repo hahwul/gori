@@ -9,12 +9,7 @@ module Gori
   # fails the build — keep the two in step.
   module EmbeddedList
     def self.parse(raw : String) : Array(String)
-      out = [] of String
-      raw.each_line do |line|
-        stripped = line.strip
-        out << stripped unless stripped.empty? || stripped.starts_with?('#')
-      end
-      out
+      raw.each_line.map(&.strip).reject { |l| l.empty? || l.starts_with?('#') }.to_a
     end
   end
 end

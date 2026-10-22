@@ -282,7 +282,7 @@ module Gori
           when Miner::BaselineEvent then mine_baseline(ev)
           when Miner::FindingEvent  then findings << ev.finding; emit_mine_finding(ev.finding, format)
           when Miner::ProgressEvent then mine_progress(ev, total)
-          when Miner::DoneEvent     then mine_done(ev, findings.size, config); note_request_macro_result("gori run mine", ev.progress.request_macro); mine_connections(pool)
+          when Miner::DoneEvent     then mine_done(ev, findings.size, config); note_request_macro_result("gori run mine", ev.progress.request_macro); print_pool_connections(pool)
           when Miner::ErrorEvent    then had_error = true; STDERR.puts "mine error: #{ev.message}"
           end
         end
@@ -362,12 +362,12 @@ module Gori
         STDERR.puts "#{why} · #{left} of #{p.names_total} names never tested"
       end
 
-      # Handshakes actually paid for. Worth a line for the same reason `gori run fuzz` prints
-      # it: it is how an operator sees whether the origin honoured keep-alive at all (dialed ≈
-      # sent means it closed after every response, or the probes were too odd to share a socket
+      # Handshakes actually paid for, for `gori run fuzz` and `gori run mine`. Worth a line: it
+      # is how an operator sees whether the origin honoured keep-alive at all (dialed ≈ sent
+      # means it closed after every response, or the requests were too odd to share a socket
       # — see ConnPool / H2Pool). Nothing is printed for a --no-keep-alive run, which has no
-      # pool; an h2 mine has one and prints this like any other.
-      private def self.mine_connections(pool : Fuzz::Pool?) : Nil
+      # pool; an h2 run has one and prints this like any other.
+      private def self.print_pool_connections(pool : Fuzz::Pool?) : Nil
         return unless pool && pool.dialed > 0
         STDERR.puts "connections · #{pool.dialed} dialed · #{pool.reused} reused" \
                     "#{pool.stale_retries > 0 ? " · #{pool.stale_retries} re-sent on a closed connection" : ""}" \

@@ -4,6 +4,12 @@ module Gori::Tui
   # Screen/Theme) so any view can reuse them — kept here so there is ONE rounding
   # convention (e.g. 1023.6 KB rolls up to "1.0MB", not the misleading "1024KB").
   module Fmt
+    # A JWT can be hundreds of chars; a head…tail preview keeps the raw token available (to
+    # read/copy) without dominating a decode pane. History's and the Fuzzer's.
+    def self.token_preview(tok : String) : String
+      tok.size > 64 ? "#{tok[0, 40]}…#{tok[-12, 12]}" : tok
+    end
+
     # Compact response size (B/KB/MB/GB), bounded to ≤6 cols. "—" until the response
     # lands. The unit is picked from the ROUNDED magnitude so a value just under a
     # boundary (e.g. 1023.6 KB) rolls up to the next unit ("1.0MB") instead of the

@@ -85,8 +85,8 @@ module Gori::Tui
       !!c && (c == '\u{7F}' || c == '\b')
     end
 
-    # The word rule `TextField` uses: a run of word characters, or a run of punctuation, with
-    # whitespace skipped first.
+    # The word rule `TextField` and `TextArea` use: a run of word characters, or a run of
+    # punctuation, with whitespace skipped first.
     def self.word_left(text : String, caret : Int32) : Int32
       i = caret.clamp(0, text.size)
       while i > 0 && text[i - 1].whitespace?
@@ -242,6 +242,42 @@ module Gori::Tui
       popup_close if close
       query_edited
       true
+    end
+
+    # The completion row under the bar: what ↹ would take, what it MEANS (`help`, the backend's
+    # own — QL's would describe Issues' and Probe's triage-state `status:` as an HTTP code), and
+    # what else is on offer. With nothing to complete, a cold-start token (empty, or the caret
+    # just past a space) shows the standing `hint` so the grammar is discoverable from the
+    # moment `/` opens; a non-empty token that matches nothing stays quiet — the operator is
+    # free-texting a word. Sitemap (hint slot read off the whole token) and Intercept
+    # (refused-field notes) draw their own.
+    private def render_query_suggestions(screen : Screen, rect : Rect, y : Int32, hint : String,
+                                         help : Proc(String, String?) = QuerySuggest::QL_HELP) : Nil
+      w = {rect.w - 2, 0}.max
+      sugg = query_suggestions
+      unless sugg.empty?
+        QuerySuggest.render(screen, rect.x + 1, y, w, sugg, help)
+        return
+      end
+      return unless QuerySuggest.hint_slot?(FilterAst.token_at(@query, @qcx).core)
+      screen.text(rect.x + 1, y, hint, Theme.muted, width: w)
+    end
+
+    # The `↓` dropdown, hung from `top` (the list's first row — not the row under the bar: the
+    # column header and its divider sit between the two, and a card straddling them reads as a
+    # rendering fault rather than a menu) and bounded by the list, the only region it may
+    # occlude.
+    #
+    # Anchored at the START of the query text (`prefix` is the bar's label), not at the token's
+    # offset within it. `Screen#input_line` scrolls its window horizontally once the query
+    # outgrows the bar, so `base + token.start` stops being the token's screen column on exactly
+    # the long queries where precision would matter — the card would drift right of what it
+    # completes and then clamp. A fixed anchor is always adjacent to the bar and never lies.
+    private def render_query_popup(screen : Screen, rect : Rect, top : Int32, prefix : String,
+                                   help : Proc(String, String?) = QuerySuggest::QL_HELP) : Nil
+      return unless @querying && @popup.open?
+      bounds = Rect.new(rect.x + 1, top, {rect.w - 2, 0}.max, {rect.bottom - top, 0}.max)
+      @popup.render(screen, rect.x + 1 + prefix.size, top - 1, bounds, help)
     end
   end
 

@@ -166,10 +166,6 @@ module Gori
       end
     end
 
-    def self.prepare(columns : Array(Store::DisplayColumn)) : Prepared
-      Prepared.new(columns)
-    end
-
     # An extracted value as a SINGLE-LINE cell. `TokenExtract` is byte-faithful by design — a
     # `Position` range hands back raw bytes, and a header value may carry anything the peer put
     # on the wire — so a value reaching a terminal row, a padded CLI column or a JSON string has

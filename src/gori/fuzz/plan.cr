@@ -921,32 +921,6 @@ module Gori::Fuzz
       Settings.tls_preset_normalize(name)
     end
 
-    # Refuse a run whose `§value¦chain§` markers name a converter the registry cannot apply.
-    #
-    # `Template#apply_chains` returns the payload VERBATIM when its chain does not run, with a
-    # comment arguing that a streaming fuzz run has nowhere to surface a per-position error.
-    # That was written when the only way to reach it was a typo. The saved-chain library added
-    # a class that is not a typo: a name the operator saved, that the `^Y` autocomplete offers
-    # and `gori run decoder list` prints as an ordinary converter, and that the library
-    # registered as an always-raising step precisely so the failure would be VISIBLE — and this
-    # path swallowed the raise. Five marked positions, three of them naming such a chain, put
-    # the raw payload in the query string under `1 sent · 0 errors`, `"error":null`,
-    # `"matched":true`. `gori run decoder` names the identical refusal off the identical
-    # registry one screen away.
-    #
-    # So it is refused HERE, the argument `FlowRequest.refuse_unresolved_dial` makes for a
-    # target's `$KEY`: this builder is the surface-independent chokepoint every fuzz surface goes
-    # through, and a refusal before the first dial is the only report a sweep of ten thousand
-    # requests can act on.
-    #
-    # Two kinds, both answerable from the registry with no side effect:
-    #   * the token resolves to nothing         → unknown converter
-    #   * it resolves to an UNUSABLE saved chain → `Converter#unusable` carries the reason
-    # The second is why this is not a build-time dry run over each position's default: a dry
-    # run cannot tell "this chain is broken" from "this chain is fine and the DEFAULT value
-    # isn't valid input for it" (`base64-decode` over a `§admin§` default raises, and refusing
-    # that run would block a legitimate sweep). Asking whether the converter can run at all
-    # answers the first question and leaves the second — genuinely per-payload — alone.
     # The TEMPLATE-level chain guard, and it is PUBLIC and SHARED (§2.1). It used to have a
     # verbatim twin in `RepeaterView#refuse_unrunnable_chains` — the same scan, in the same
     # words, raising the same envelope. Two copies of a refusal is exactly the drift the

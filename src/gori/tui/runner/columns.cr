@@ -66,7 +66,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     return nil unless id
     col = Gori::Store::DisplayColumn.new(0_i64, 0, form.label, form.side, form.kind,
       form.selector, form.pos_start, form.pos_end, form.width)
-    prepared = Gori::DisplayColumns.prepare([col])
+    prepared = Gori::DisplayColumns::Prepared.new([col])
     detail = @session.store.get_flow(id, body_max: prepared.body_scoped? ? Gori::DisplayColumns::BODY_CAP : 0)
     return nil unless detail
     value = prepared.values(detail).first?

@@ -478,18 +478,17 @@ describe "WebSocket message provenance across the three surfaces" do
 
   it "never seeds or sends a [gori] advisory row as a client frame, whatever its opcode" do
     notice = "#{Gori::Proxy::WS::NOTICE_PREFIX}more than 8 control frames arrived"
-    Gori::CLI::Run.ws_notice_row?(1, notice.to_slice).should be_true
+    Gori::Proxy::WS.notice?(notice.to_slice).should be_true
     # NOT keyed on the opcode. Two pre-existing markers stand in for a real frame at its
     # position and keep that frame's own opcode — the ping-flood marker is a PING (9) and
     # is under §5.5's 125-byte cap, so an opcode-1 test would have let it replay as a real
-    # control frame. Every marker is built from one prefix, so the prefix is the whole test.
-    Gori::CLI::Run.ws_notice_row?(9, notice.to_slice).should be_true
-    Gori::CLI::Run.ws_notice_row?(2, notice.to_slice).should be_true
+    # control frame. Every marker is built from one prefix, so the prefix is the whole test;
+    # the seed below carries an opcode-9 marker and must drop it too.
     # Complements: a frame that MENTIONS the marker without leading with it is the
     # operator's, and a truncated prefix is not a marker.
-    Gori::CLI::Run.ws_notice_row?(1, "the [gori] proxy said".to_slice).should be_false
-    Gori::CLI::Run.ws_notice_row?(1, "[gori".to_slice).should be_false
-    Gori::CLI::Run.ws_notice_row?(1, Bytes.empty).should be_false
+    Gori::Proxy::WS.notice?("the [gori] proxy said".to_slice).should be_false
+    Gori::Proxy::WS.notice?("[gori".to_slice).should be_false
+    Gori::Proxy::WS.notice?(Bytes.empty).should be_false
 
     with_prov_store do |store|
       fid = store.insert_flow(Gori::Store::CapturedRequest.new(

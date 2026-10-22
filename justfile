@@ -206,13 +206,13 @@ fix:
 # snap/snapcraft.yaml, packaging/aur/PKGBUILD, flake.nix and the spec assertion.
 [group('version')]
 version-check:
-    crystal run scripts/version_check.cr
+    crystal run scripts/version.cr
 
 # Show the current version, then prompt for a new one (blank keeps it).
 # Writes every version-bearing file and resets the PKGBUILD pkgrel to 1.
 [group('version')]
 version-update:
-    crystal run scripts/version_update.cr
+    crystal run scripts/version.cr -- update
 
 # Type-check every harness in bench/ without generating code.
 #

@@ -363,13 +363,15 @@ module Gori
         "#{scope}##{r.id} [#{mark}] #{side} #{rewriter_op_tag(r).ljust(5)}#{name}#{host}  #{rewriter_rule_body(r)}"
       end
 
-      # `--scope` on every rule subcommand: WHICH store the id names (or, on list, which half
-      # to print). Same vocabulary as the MCP tools and the TUI's `scope:` row.
-      private def self.parse_rule_scope(s : String) : Store::RuleScope
+      # `--scope` on every rule subcommand (rewriter and colormarker): WHICH store the id names
+      # (or, on list, which half to print). Same vocabulary as the MCP tools and the TUI's
+      # `scope:` row. Aborts rather than clamping — silently reading "globl" as "project" would
+      # report success for an edit the operator meant to make everywhere.
+      private def self.parse_rule_scope(s : String, cmd : String = "gori run rewriter") : Store::RuleScope
         case s.downcase
         when "project" then Store::RuleScope::Project
         when "global"  then Store::RuleScope::Global
-        else                abort "gori run rewriter: invalid --scope '#{s}' (project|global)"
+        else                abort "#{cmd}: invalid --scope '#{s}' (project|global)"
         end
       end
 

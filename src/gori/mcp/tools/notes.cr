@@ -1,6 +1,6 @@
 require "json"
 require "../../notes"
-require "../../issues_export" # Issues::Export.one_line / .scrub_only
+require "../../issues_export" # Issues::Export.one_line
 
 module Gori
   module MCP
@@ -50,10 +50,10 @@ module Gori
             # `some-tool | gori run notes create`, so piping a gzip/binary response body (or a
             # file the external $EDITOR wrote) stores raw non-UTF-8 bytes, which the settings KV
             # round-trips verbatim. Unscrubbed, that byte reached JSON::Builder and broke this
-            # tool's whole JSON-RPC line. See `Serialize.text`'s contract; `scrub_only` (not
+            # tool's whole JSON-RPC line. See `Serialize.text`'s contract; `scrub` (not
             # `one_line`) because a note is multi-line BY DESIGN, the same split
             # `Serialize.issue` makes for an issue's free-text `notes`.
-            j.field "text", Issues::Export.scrub_only(entry.text)
+            j.field "text", entry.text.scrub
             j.field "title", note_title(entry)
             j.field "current", doc.cur == idx
           end
@@ -110,7 +110,7 @@ module Gori
       end
 
       # The note's display title, scrubbed for the JSON-RPC wire. `one_line` rather than
-      # `scrub_only`: `Notes.title` returns ONE line (the first with text, Markdown heading
+      # `scrub`: `Notes.title` returns ONE line (the first with text, Markdown heading
       # marker dropped), so it is a single-line field here exactly as an issue's `title` is —
       # and a lone CR or a stray C0 inside that line would otherwise ride out into a field a
       # client renders inline.

@@ -38,7 +38,7 @@ describe "MCP note tools — JSON-RPC UTF-8" do
       res.valid_encoding?.should be_true
       note = JSON.parse(res)
       note["text"].as_s.valid_encoding?.should be_true
-      # `scrub_only`, not `one_line`: a note is multi-line BY DESIGN, so its line break stays.
+      # A bare `scrub`, not `one_line`: a note is multi-line BY DESIGN, so its line break stays.
       note["text"].as_s.should contain('\n')
       note["title"].as_s.should eq("hi\u{FFFD}")
     end

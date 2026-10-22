@@ -227,7 +227,9 @@ module Gori::Tui
       @version_idx = idx
       sel = @selections[idx]
       VERSIONS[idx].metrics.each do |m|
-        v = metric_value(vec.to_s, m.code)
+        # Every metric on this card is a base metric of the matched version, so this answers
+        # rather than raising for a key the version lacks.
+        v = vec.metric_code?(m.code)
         next unless v
         opt = m.options.index { |o| o[0] == v }
         sel[m.code] = opt if opt
@@ -240,17 +242,6 @@ module Gori::Tui
     # reading of "you edited it with the 3.1 table".
     private def version_matches?(s : Spec, version : String) : Bool
       s.label == version || (s.label == "3.1" && version.starts_with?("3."))
-    end
-
-    # The value a canonical vector string gives `code`, walking the same `KEY:VALUE` segments
-    # the vector is built from. A plain scan rather than a regex: the codes overlap as
-    # substrings (`C` inside `VC`/`SC`/`AC`), so anything less exact reads the wrong metric.
-    private def metric_value(vector : String, code : String) : String?
-      vector.split('/').each do |part|
-        k, _, v = part.partition(':')
-        return v if k == code && !v.empty?
-      end
-      nil
     end
 
     # --- Overlay contract (see overlay.cr) ---

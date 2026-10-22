@@ -460,13 +460,13 @@ describe Gori::Probe::Filter do
 
     it "answers for every spelling build_term dispatches on" do
       Gori::Probe::Filter::KNOWN.each do |spelling|
-        Gori::Probe::Filter.field_help(spelling).should_not be_nil
+        Gori::Probe::Filter::FIELD_HELP_PROC.call(spelling).should_not be_nil
       end
     end
 
     it "declines a field this backend does not implement" do
-      Gori::Probe::Filter.field_help("path").should be_nil
-      Gori::Probe::Filter.field_help("cvss").should be_nil
+      Gori::Probe::Filter::FIELD_HELP_PROC.call("path").should be_nil
+      Gori::Probe::Filter::FIELD_HELP_PROC.call("cvss").should be_nil
     end
 
     it "keeps ALSO_ACCEPTED to the aliases only" do

@@ -18,22 +18,22 @@ KNOWN_SETTINGS_SECTIONS = [
 describe Gori::Tui::SettingsCatalog do
   it "registers exactly one palette verb per catalog section (ids match)" do
     registry = Gori::Verbs.registry
-    SettingsCatalog.all.each do |s|
+    SettingsCatalog::SECTIONS.each do |s|
       registry[s.id]?.should_not be_nil # the loop in verbs/core.cr must have registered it
       registry[s.id].category.should eq(Gori::Verb::Category::Settings)
     end
     # …and the only Settings-category verbs are the catalog sections + the generic
     # "settings.open" (opens the modal at its group picker), nothing stray.
     settings_ids = registry.select(&.category.settings?).map(&.id).sort
-    (settings_ids - ["settings.open"]).should eq(SettingsCatalog.all.map(&.id).sort)
+    (settings_ids - ["settings.open"]).should eq(SettingsCatalog::SECTIONS.map(&.id).sort)
   end
 
   it "only names sections open_settings can actually dispatch" do
-    SettingsCatalog.all.each { |s| KNOWN_SETTINGS_SECTIONS.should contain(s.sym) }
+    SettingsCatalog::SECTIONS.each { |s| KNOWN_SETTINGS_SECTIONS.should contain(s.sym) }
   end
 
   it "gives every inline (:form) section fields the shared engine can render" do
-    SettingsCatalog.all.select(&.kind.==(:form)).each do |s|
+    SettingsCatalog::SECTIONS.select(&.kind.==(:form)).each do |s|
       SettingsView::SECTIONS[s.sym]?.should_not be_nil # render_fields_into reads this
       SettingsView::SECTIONS[s.sym].empty?.should be_false
     end
@@ -41,7 +41,7 @@ describe Gori::Tui::SettingsCatalog do
 
   it "assigns every tab-visible section to a declared group" do
     group_syms = SettingsCatalog::GROUPS.map(&.first)
-    SettingsCatalog.all.select(&.in_tab).each { |s| group_syms.should contain(s.group) }
+    SettingsCatalog::SECTIONS.select(&.in_tab).each { |s| group_syms.should contain(s.group) }
   end
 
   it "yields a non-empty, in_tab-only member list for each group (drives the sub-tabs)" do
@@ -58,11 +58,11 @@ describe Gori::Tui::SettingsCatalog do
   # false ones hold operator DATA (typed env values, a hand-built hostname map, a User-Agent list) rather
   # than preferences — only the full factory reset clears those, and it warns first.
   it "marks exactly the data-holding openers as having no factory default" do
-    SettingsCatalog.all.reject(&.resettable).map(&.sym).sort_by(&.to_s).should eq([:env, :hosts, :user_agents])
+    SettingsCatalog::SECTIONS.reject(&.resettable).map(&.sym).sort_by(&.to_s).should eq([:env, :hosts, :user_agents])
   end
 
   it "keeps the Hostnames section out of the tab (reachable via Network's opener field)" do
-    hosts = SettingsCatalog.all.find(&.sym.==(:hosts)).not_nil!
+    hosts = SettingsCatalog::SECTIONS.find(&.sym.==(:hosts)).not_nil!
     hosts.in_tab.should be_false
     SettingsCatalog.sections_in(hosts.group).map(&.sym).should_not contain(:hosts)
   end

@@ -174,15 +174,7 @@ module Gori
       # nothing was dropped the comment still prints, saying so — silence would read as "there
       # was nothing to drop", which is a different (and usually wrong) claim.
       private def self.dropped_headers_comment(b : IO, parts : RequestParts::Parts, carried : String?) : Nil
-        dropped = [] of String
-        seen = Set(String).new
-        parts.headers.each do |(name, _)|
-          down = name.downcase
-          next if carried && down == carried
-          next if seen.includes?(down)
-          seen << down
-          dropped << name
-        end
+        dropped = parts.headers.map(&.[0]).reject! { |name| name.downcase == carried }.uniq!(&.downcase)
         b << "<!-- Headers a cross-site page CANNOT forge — dropped so this demo reflects what an\n"
         b << "     attacker page can actually send (it relies on the victim's ambient cookies): "
         b << (dropped.empty? ? "none" : html_comment_safe(dropped.join(", ")))

@@ -108,18 +108,7 @@ module Gori
         Other
 
         def label : String
-          case self
-          in Blocked         then "blocked"
-          in Budget          then "budget"
-          in RedirectRefused then "redirect_refused"
-          in Timeout         then "timeout"
-          in Refused         then "refused"
-          in Dns             then "dns"
-          in Tls             then "tls"
-          in Reset           then "reset"
-          in Malformed       then "malformed"
-          in Other           then "other"
-          end
+          to_s.underscore
         end
       end
 

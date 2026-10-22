@@ -6,6 +6,7 @@ require "../links"
 require "../proxy/codec/http1"
 require "../redact/headers"
 require "../redact/wire"
+require "../export/curl"
 
 module Gori
   module Issues
@@ -332,7 +333,7 @@ module Gori
       end
 
       private def self.sarif_message_text(f : Store::Issue, title : String) : String
-        notes = scrub_only(f.notes).strip
+        notes = f.notes.scrub.strip
         notes.empty? ? title : "#{title}\n\n#{notes}"
       end
 
@@ -463,7 +464,9 @@ module Gori
         last = nil.as(String?)                 # the key an obs-fold continuation continues
         redacted = false
         list.each do |h|
-          if fold_name?(h.name)
+          # The name is UNSTRIPPED, so its first byte is the line's: SP/HTAB marks `  X-Fake:
+          # part2` (part of the value above) apart from `X-Fake: part2`, and `one_line` erases it.
+          if Gori::Export::Curl.fold_line?(h.name)
             # Not a field. It continues the one above — or nothing, if it opened the block, in
             # which case it belongs to no field and must not become one.
             if (key = last) && !withheld?(key, include_sensitive)
@@ -518,16 +521,6 @@ module Gori
       # credential header redacts (`COOKIE:` as well as `Cookie:`).
       private def self.withheld?(name : String, include_sensitive : Bool) : Bool
         !include_sensitive && Redact.sensitive_header?(name)
-      end
-
-      # Is this parsed field NAME really an obs-fold continuation — i.e. did its line start with
-      # SP or HTAB? `Http1.parse_headers` hands the name over UNSTRIPPED precisely so the caller
-      # can still tell; the byte is the only thing that distinguishes `  X-Fake: part2` (part of
-      # the value above) from `X-Fake: part2` (a field), and `one_line` erases it.
-      private def self.fold_name?(name : String) : Bool
-        return false if name.empty?
-        b = name.to_slice[0]
-        b == 0x20_u8 || b == 0x09_u8
       end
 
       # The body as `artifactContent.text`, through the SAME evidence rules the Markdown

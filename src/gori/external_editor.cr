@@ -71,12 +71,8 @@ module Gori
     # nothing else". Removing the strip outright would have been the mirror-image defect —
     # a request that ended WITHOUT a newline would silently gain one.
     private def self.normalize(edited : String, original : String, kind : Symbol) : String
-      return edited if WIRE_KINDS.includes?(kind) && ends_with_newline?(original)
+      return edited if WIRE_KINDS.includes?(kind) && original.ends_with?('\n')
       chop_newline(edited)
-    end
-
-    private def self.ends_with_newline?(s : String) : Bool
-      s.ends_with?('\n')
     end
 
     # Strip exactly ONE trailing "\n" (or "\r\n").
