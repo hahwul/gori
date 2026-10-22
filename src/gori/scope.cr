@@ -747,7 +747,7 @@ module Gori
       return nil if s.empty?
       return nil if s.each_char.any? { |c| c.whitespace? || c.in?(HOST_PATTERN_FORBIDDEN) }
       s = host_without_port(s) if host_pattern_has_port?(s)
-      bare_host(s).presence
+      HostPattern.bare(s).presence
     end
 
     # True ⇔ a host-type pattern carries an explicit :PORT suffix a host rule can never
@@ -765,17 +765,6 @@ module Gori
       return false unless i && i < pattern.size - 1 # no ':' or nothing after it
       return false if pattern[0...i].includes?(':') # unbracketed IPv6 literal → no port
       pattern[(i + 1)..].each_char.all?(&.ascii_number?)
-    end
-
-    # A host / host-pattern reduced to the bare, bracket-free form the CONNECT/tunnel
-    # path stores ("[::1]" → "::1"). IPv6 flow hosts arrive bracketed via some URL-parsing
-    # paths but bare via the dominant HTTPS-MITM CONNECT path; peeling surrounding brackets
-    # on BOTH the rule pattern and the flow host lets "[::1]" and "::1" match interchangeably
-    # (Rule#host_match? / host_cond) and keeps the suggested form the one actually stored.
-    # Kept as Scope's own name (several call sites here, plus specs) but delegating, so
-    # there is ONE implementation shared with the TLS passthrough list.
-    def self.bare_host(host : String) : String
-      HostPattern.bare(host)
     end
 
     # True when `host_cond`'s NATIVE SQL spelling provably means the same thing as
@@ -808,7 +797,7 @@ module Gori
     # ROW means the UDF on every row of every reload, for a host no DNS resolver would answer.
     def self.sql_native_host?(pattern : String) : Bool
       pattern.ascii_only? && !pattern.includes?('{') && !pattern.includes?('}') &&
-        bare_host(pattern) == pattern
+        HostPattern.bare(pattern) == pattern
     end
 
     # The pattern with its :PORT stripped AND surrounding brackets peeled, for the
@@ -817,10 +806,10 @@ module Gori
     # so following the suggestion yields a rule that actually matches.
     private def self.host_without_port(pattern : String) : String
       if pattern.starts_with?('[') && (close = pattern.index(']'))
-        return bare_host(pattern[0..close])
+        return HostPattern.bare(pattern[0..close])
       end
       i = pattern.rindex(':')
-      bare_host(i ? pattern[0...i] : pattern)
+      HostPattern.bare(i ? pattern[0...i] : pattern)
     end
 
     # Regex compiles? (the historical `valid?` body, now a helper of validation_error.)
@@ -971,7 +960,7 @@ module Gori
       return {"gori_host_match(host, ?)", [pattern] of DB::Any} unless Scope.sql_native_host?(pattern)
       # Peel brackets so a "[::1]" rule compares against the bare "::1" the host column
       # stores — matches Rule#host_match?'s @pattern_host normalization (keeps SQL parity).
-      pattern = Scope.bare_host(pattern)
+      pattern = HostPattern.bare(pattern)
       if pattern.includes?('*')
         {"lower(#{HOST_BARE}) GLOB ?", [pattern.downcase] of DB::Any}
       else

@@ -1586,7 +1586,7 @@ module Gori
       # never a wire format itself — the wire is the HPACK block `write_request` encodes from
       # the identical array. It is deliberately NOT a valid HTTP/1.1 head (a duplicate `:method`
       # has no request line that could hold it); a consumer that needs method/target reads them
-      # off the fields with `pseudo_field`, not by parsing this text.
+      # off the fields with `HeadCodec.pseudo`, not by parsing this text.
       def self.field_dump(fields : Array({String, String}), body : Bytes?) : Bytes
         head = String.build do |io|
           fields.each { |(n, v)| io << n << ": " << v << "\r\n" }
@@ -1599,22 +1599,14 @@ module Gori
         joined
       end
 
-      # The FIRST value of a pseudo-header (`:method`, `:path`, …) in a field list, or nil.
-      # A field-native request may carry the pseudo more than once (that IS a probe); the
-      # scope gate and the History columns anchor on the first, the same one a conformant
-      # receiver would act on.
-      def self.pseudo_field(fields : Array({String, String}), name : String) : String?
-        HeadCodec.pseudo(fields, name)
-      end
-
       # A synthetic `METHOD PATH HTTP/2` head for the SCOPE / extract path only. The Sandbox
       # gate and the binding-extract subject key off a request line (`Outbound.request_target`
       # reads the path token), and a field-native send has no head text — so one is derived
       # from the first `:method`/`:path`, the fields a conformant receiver routes on. Never put
       # on the wire; the HPACK block is.
       def self.field_scope_line(fields : Array({String, String})) : Bytes
-        method = pseudo_field(fields, ":method") || "GET"
-        path = pseudo_field(fields, ":path") || "/"
+        method = HeadCodec.pseudo(fields, ":method") || "GET"
+        path = HeadCodec.pseudo(fields, ":path") || "/"
         "#{method} #{path} HTTP/2\r\n\r\n".to_slice
       end
 
@@ -1649,15 +1641,9 @@ module Gori
       # Split at the first CRLFCRLF (head/body boundary); the editor always joins
       # lines with CRLF, so the blank line is exact.
       private def self.split_head_body(bytes : Bytes) : {Bytes, Bytes?}
-        i = 0
-        while i + 3 < bytes.size
-          if bytes[i] == 0x0d && bytes[i + 1] == 0x0a && bytes[i + 2] == 0x0d && bytes[i + 3] == 0x0a
-            body = i + 4 < bytes.size ? bytes[(i + 4)..] : nil
-            return {bytes[0...i], body}
-          end
-          i += 1
-        end
-        {bytes, nil}
+        i = AsciiBytes.index(bytes, "\r\n\r\n".to_slice) || return {bytes, nil}
+        body = i + 4 < bytes.size ? bytes[(i + 4)..] : nil
+        {bytes[0...i], body}
       end
 
       # PUBLIC for `H2WsStream` — see `SendFlow` (the same frame carries the same

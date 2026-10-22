@@ -1010,19 +1010,7 @@ module Gori::Tui
       return if rect.empty?
       @body_focused = focused
       render_panes(screen, rect, focused, listen: listen, capturing: capturing, holding: holding)
-      render_query_popup(screen, rect)
-    end
-
-    private def render_query_popup(screen : Screen, rect : Rect) : Nil
-      return unless @querying && @popup.open?
-      top = rect.y + bar_h
-      bounds = Rect.new(rect.x + 1, top, {rect.w - 2, 0}.max, {rect.bottom - top, 0}.max)
-      # Anchored at the START of the query text, not at the token's offset within it.
-      # `Screen#input_line` scrolls its window horizontally once the query outgrows the bar, so
-      # `base + token.start` stops being the token's screen column on exactly the long queries
-      # where precision would matter — the card would drift right of what it completes and then
-      # clamp. A fixed anchor is always adjacent to the bar and never lies.
-      @popup.render(screen, rect.x + 1 + QUERY_PREFIX.size, top - 1, bounds, GATE_HELP)
+      render_query_popup(screen, rect, rect.y + bar_h, QUERY_PREFIX, GATE_HELP)
     end
 
     private def render_panes(screen : Screen, rect : Rect, focused : Bool = true, *,

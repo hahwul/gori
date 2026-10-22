@@ -157,30 +157,12 @@ module Gori::Tui
     # buffer break at the same places: `-` is inside a run and `.`/`/`/`?`/`=`/`&`/`:` are
     # not, which makes a URL step token by token instead of end to end.
     def word_left(selecting : Bool = false) : Nil
-      i = @caret.clamp(0, @value.size)
-      while i > 0 && @value[i - 1].whitespace?
-        i -= 1
-      end
-      if i > 0
-        word = word_char?(@value[i - 1])
-        while i > 0 && !@value[i - 1].whitespace? && word_char?(@value[i - 1]) == word
-          i -= 1
-        end
-      end
+      i = LineEdit.word_left(@value, @caret)
       @caret = @sel.move_cx(@caret, i - @caret, @value.size, selecting: selecting)
     end
 
     def word_right(selecting : Bool = false) : Nil
-      i = @caret.clamp(0, @value.size)
-      if i < @value.size && !@value[i].whitespace?
-        word = word_char?(@value[i])
-        while i < @value.size && !@value[i].whitespace? && word_char?(@value[i]) == word
-          i += 1
-        end
-      end
-      while i < @value.size && @value[i].whitespace?
-        i += 1
-      end
+      i = LineEdit.word_right(@value, @caret)
       @caret = @sel.move_cx(@caret, i - @caret, @value.size, selecting: selecting)
     end
 
@@ -207,12 +189,6 @@ module Gori::Tui
       @value = @value[@caret..]
       @caret = 0
       true
-    end
-
-    # See `TextArea#word_char?` — the two must agree, or ⌥←/→ and a double-click would
-    # disagree about where a word ends in the same value.
-    private def word_char?(c : Char) : Bool
-      c.alphanumeric? || c == '_' || c == '-'
     end
 
     def blank? : Bool

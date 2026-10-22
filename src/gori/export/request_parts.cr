@@ -90,18 +90,7 @@ module Gori
       # fetch serializers use this to either preserve the duplicates (fetch's pair-array form) or
       # say they could not (Python's note) — curl and Go emit a line per occurrence and need it not.
       def self.duplicate_header_names(headers : Array({String, String})) : Array(String)
-        counts = Hash(String, Int32).new(0)
-        headers.each { |(n, _)| counts[n.downcase] += 1 }
-        seen = Set(String).new
-        dups = [] of String
-        headers.each do |(n, _)|
-          d = n.downcase
-          next unless counts[d] > 1
-          next if seen.includes?(d)
-          seen << d
-          dups << n
-        end
-        dups
+        headers.group_by { |(n, _)| n.downcase }.compact_map { |_, g| g[0][0] if g.size > 1 }
       end
     end
   end

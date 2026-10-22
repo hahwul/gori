@@ -152,7 +152,7 @@ module Gori::Fuzz
     end
 
     # The body slice of a raw request, or nil when there is no head/body boundary. Same
-    # LFLF-or-CRLFCRLF rule as `Fuzz::ContentLength.boundary` — a bare-LF head is a desync
+    # LFLF-or-CRLFCRLF rule as `Env.head_body_separator` — a bare-LF head is a desync
     # primitive the fuzzer deliberately crafts, and it still has a body.
     def self.body(request : Bytes) : Bytes?
       sep, width = boundary(request)

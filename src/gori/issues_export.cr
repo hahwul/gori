@@ -134,7 +134,8 @@ module Gori
           j.field "updated_at", f.updated_at
           # notes is multi-line BY DESIGN (free-text) — only the encoding-safety half of
           # one_line applies; collapsing its newlines would mangle a legitimate multi-line note.
-          j.field "notes", scrub_only(f.notes)
+          # Unscrubbed, a raw invalid byte breaks the JSON's UTF-8 contract.
+          j.field "notes", f.notes.scrub
           j.field "links" do
             j.array { append_links_json(j, f, store) }
           end
@@ -144,17 +145,6 @@ module Gori
         end
       end
 
-      # Fix invalid-UTF-8 bytes only, leaving control characters (incl. newlines) intact —
-      # the encoding-safety half of `one_line`, split out for a field that is multi-line BY
-      # DESIGN (e.g. an issue's free-text `notes`) and must not have its line breaks collapsed,
-      # but still needs the same guarantee `one_line` exists for: a captured value can carry a
-      # raw invalid byte (e.g. an h2 :path pseudo-header), and unscrubbed output either breaks
-      # the exporter's encoding contract (JSON/Markdown must stay valid UTF-8) or crashes a
-      # later PCRE gsub over it.
-      def self.scrub_only(s : String) : String
-        s.scrub
-      end
-
       # Terminal-safety sibling of `one_line`: neutralize the control characters a TTY would
       # interpret as escape sequences — ESC (0x1B), BEL (0x07), the CSI/OSC introducers, and
       # every other C0/C1 control — while PRESERVING newlines and tabs so a multi-line value
@@ -162,10 +152,10 @@ module Gori
       # BYTES defangs OSC/CSI sequences without modelling the full grammar: an OSC "set window
       # title" or OSC 52 clipboard-write can no longer reach the terminal. Use this for text
       # printed to STDOUT/a TTY — unlike one_line it does NOT collapse to a single line, and
-      # unlike scrub_only it does NOT leave ESC/BEL intact. (scrub first: a captured value can
+      # unlike a bare `scrub` it does NOT leave ESC/BEL intact. (scrub first: a captured value can
       # be invalid UTF-8, which would make the following per-char walk operate on U+FFFD safely.)
       def self.scrub_controls(s : String) : String
-        scrub_only(s).gsub { |ch| ch.control? && ch != '\n' && ch != '\t' ? "" : ch }
+        s.scrub.gsub { |ch| ch.control? && ch != '\n' && ch != '\t' ? "" : ch }
       end
 
       # Collapse control characters (CR/LF/tab/…) to a single space so a value with
@@ -175,7 +165,7 @@ module Gori
       def self.one_line(s : String) : String
         # scrub: captured values (target/host/method/title, e.g. an h2 :path with a raw byte) can
         # be invalid UTF-8, which would make the PCRE gsub raise and crash the markdown/text export.
-        scrub_only(s).gsub(/[[:cntrl:]]+/, " ").strip
+        s.scrub.gsub(/[[:cntrl:]]+/, " ").strip
       end
 
       private def self.append_related_links(io : String::Builder, resolved : Array(Links::Resolved)) : Nil
@@ -360,19 +350,10 @@ module Gori
 
       # A CommonMark fenced block is closed only by a line of >= as many backticks
       # as the opener, so use one more than the longest backtick run in the content
-      # (minimum 3) — guaranteeing no embedded line can terminate it.
+      # (minimum 3) — guaranteeing no embedded line can terminate it. `content` is valid
+      # UTF-8 (scrubbed head, a body only when it decoded as text), so the regex cannot raise.
       private def self.fence_len(content : String) : Int32
-        longest = 0
-        run = 0
-        content.each_char do |ch|
-          if ch == '`'
-            run += 1
-            longest = run if run > longest
-          else
-            run = 0
-          end
-        end
-        {3, longest + 1}.max
+        {3, (content.scan(/`+/).max_of?(&.[0].size) || 0) + 1}.max
       end
     end
   end

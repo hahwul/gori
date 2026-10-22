@@ -49,7 +49,7 @@ module Gori::Tui
     def initialize(@allowed_openers : Set(Symbol)? = nil)
       # One SettingsView per form section, reloaded from live Settings.
       @forms = {} of Symbol => SettingsView
-      SettingsCatalog.all.each do |s|
+      SettingsCatalog::SECTIONS.each do |s|
         next unless s.kind == :form
         v = SettingsView.new
         v.reload(s.sym)
@@ -112,7 +112,7 @@ module Gori::Tui
 
     # The titles of sections edited but not yet saved (↵ saves the focused section only).
     private def dirty_titles : Array(String)
-      SettingsCatalog.all.compact_map do |s|
+      SettingsCatalog::SECTIONS.compact_map do |s|
         f = @forms[s.sym]?
         s.title if f && f.dirty?
       end

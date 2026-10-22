@@ -1309,18 +1309,6 @@ module Gori::Tui
       @rows.size
     end
 
-    # First index of the window the rail shows. Private: everything outside reads
-    # `rail_rows`/`rail_cursor`, which are derived from it.
-    private def rail_start : Int32
-      here = detail_row_index || return 0
-      DrillIn.window_start(@rows.size, here)
-    end
-
-    # See DrillIn::Host.
-    def rail_cursor : Int32
-      (detail_row_index || 0) - rail_start
-    end
-
     # The rail's window of list context around the open flow — see DrillIn. Maps the list row
     # onto the shared three-part shape; nothing of the list RENDERER is involved, which is
     # what keeps a 200-line column layout out of a three-row readout.
@@ -2923,25 +2911,7 @@ module Gori::Tui
                                  listen : {String, Int32}? = nil, capturing : Bool = true) : Nil
       return if rect.empty?
       render_list_rows(screen, rect, focused, listen: listen, capturing: capturing)
-      render_query_popup(screen, rect)
-    end
-
-    # Anchored under the suggestion row (so it never covers the inline hint it expands on) and
-    # bounded by the list, which is the only region it is allowed to occlude.
-    private def render_query_popup(screen : Screen, rect : Rect) : Nil
-      return unless @querying && @popup.open?
-      # `list_top`, not the row under the bar: the column header and its divider sit between the
-      # two, and a card straddling them reads as a rendering fault rather than a menu. The list
-      # is also the only region this is allowed to cover.
-      top = list_top(rect)
-      anchor_y = top - 1
-      bounds = Rect.new(rect.x + 1, top, {rect.w - 2, 0}.max, {rect.bottom - top, 0}.max)
-      # Anchored at the START of the query text, not at the token's offset within it.
-      # `Screen#input_line` scrolls its window horizontally once the query outgrows the bar, so
-      # `base + token.start` stops being the token's screen column on exactly the long queries
-      # where precision would matter — the card would drift right of what it completes and then
-      # clamp. A fixed anchor is always adjacent to the bar and never lies.
-      @popup.render(screen, rect.x + 1 + QUERY_PREFIX.size, anchor_y, bounds)
+      render_query_popup(screen, rect, list_top(rect), QUERY_PREFIX)
     end
 
     private def render_list_rows(screen : Screen, rect : Rect, focused : Bool, *,
@@ -2949,7 +2919,7 @@ module Gori::Tui
       render_ql_bar(screen, rect)
       hdr_y = rect.y + 1
       if @querying
-        render_suggestions(screen, rect, hdr_y)
+        render_query_suggestions(screen, rect, hdr_y, QUERY_HINT)
         hdr_y += 1
       end
 
@@ -4241,20 +4211,6 @@ module Gori::Tui
       hidden > 0 ? "#{@marks.size} marked ·#{hidden} hidden" : "#{@marks.size} marked"
     end
 
-    private def render_suggestions(screen : Screen, rect : Rect, y : Int32) : Nil
-      sugg = query_suggestions
-      unless sugg.empty?
-        QuerySuggest.render(screen, rect.x + 1, y, rect.w - 2, sugg)
-        return
-      end
-      # No live completions to Tab through. At a cold start (nothing typed yet, or the
-      # cursor sits just after a space) show a standing hint so the query language is
-      # discoverable from the moment `/` opens; on a non-empty token with no match stay
-      # quiet — the user is deliberately free-texting a word.
-      return unless QuerySuggest.hint_slot?(FilterAst.token_at(@query, @qcx).core)
-      screen.text(rect.x + 1, y, QUERY_HINT, Theme.muted, width: rect.w - 2)
-    end
-
     # Static pools for low-cardinality fields; `host:` is DISTINCT from the store
     # (capped + prefix-filtered) so a large History stays cheap to complete.
     #
@@ -4912,17 +4868,11 @@ module Gori::Tui
         lines << Highlight::Line.new if i > 0
         brief = f.brief
         lines << derived_header(brief ? "#{f.location} · #{brief}" : f.location)
-        lines << [Highlight::Span.new(token_preview(f.token), Theme.muted)] of Highlight::Span
+        lines << [Highlight::Span.new(Fmt.token_preview(f.token), Theme.muted)] of Highlight::Span
         lines << Highlight::Line.new
         append_styled(lines, f.decoded, :json)
       end
       lines
-    end
-
-    # A JWT can be hundreds of chars; show a head…tail preview so the raw token is
-    # available (to read/copy) without dominating the pane.
-    private def token_preview(tok : String) : String
-      tok.size > 64 ? "#{tok[0, 40]}…#{tok[-12, 12]}" : tok
     end
 
     # The GRAPHQL pane: the request body's operation, the transcript's operations, or both —
