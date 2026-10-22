@@ -572,7 +572,7 @@ module Gori
               # is the way back to the plain listing.
               DisplayColumns.load(store)
             end
-          prepared = DisplayColumns.prepare(columns)
+          prepared = DisplayColumns::Prepared.new(columns)
           matcher = nil.as(Redact::Matcher?)
           if format != :har
             m = history_columns_redaction(store, prepared, redaction)

@@ -131,11 +131,11 @@ module Gori
         #
         # Parsed BEFORE the FTS drain below, which is a WRITE: a call that is going to be
         # refused must not take a write lock on its way to the refusal.
-        prepared = Gori::DisplayColumns.prepare([] of Store::DisplayColumn)
+        prepared = Gori::DisplayColumns::Prepared.new([] of Store::DisplayColumn)
         if (specs = str_list(h, "columns")) && !specs.empty?
           parsed = Gori::DisplayColumns.parse_specs(specs)
           return err(parsed, "INVALID_ARGUMENT", field: "columns") if parsed.is_a?(String)
-          prepared = Gori::DisplayColumns.prepare(parsed.map_with_index { |sp, i| sp.to_column(i) })
+          prepared = Gori::DisplayColumns::Prepared.new(parsed.map_with_index { |sp, i| sp.to_column(i) })
         end
         include_sensitive = bool_arg(h, "include_sensitive", false)
         matcher = columns_matcher(prepared, include_sensitive)
