@@ -1111,11 +1111,11 @@ module Gori
     end
 
     # Whether any flow is waiting to be (re)indexed: `fts_backlog` stopped at the first row,
-    # for a caller that polls it. A failed probe answers false, as `fts_backlog` answers 0.
+    # for a caller that polls it. A failed probe RAISES, unlike `fts_backlog`: its caller
+    # decides whether a page is complete, and a failure read as "clean" would hand back a
+    # cursor past a match the partial index left out.
     def fts_dirty? : Bool
       !@db.query_one?("SELECT 1 FROM flows WHERE fts_dirty = 1 LIMIT 1", as: Int32).nil?
-    rescue
-      false
     end
 
     # How many flows are waiting to be (re)indexed for `body:`/free-text search — i.e. how

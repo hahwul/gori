@@ -2426,6 +2426,12 @@ module Gori
         read_only = s.read_only?
         backlog = s.drain_fts!
         return nil if backlog.zero?
+        fts_backlog_error(backlog, read_only)
+      end
+
+      # The FTS_BACKLOG refusal itself, for `drain_fts_or_error` and a `list_history` wait that
+      # ran out with the index still partial.
+      private def fts_backlog_error(backlog : Int32, read_only : Bool) : Result
         if read_only
           err("#{backlog} flow(s) are not yet indexed for free-text search, and this server is " \
               "read-only (gori mcp --read-only) so it cannot index them — a body:/free-text " \

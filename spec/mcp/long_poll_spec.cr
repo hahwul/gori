@@ -35,6 +35,39 @@ private def with_two_connections(background_index : Bool = true, &)
   end
 end
 
+# Always dirty, counting the drains a wait asks of it. Untyped blocks only in this file: a
+# typed block beside a Store subclass in a spec hits a codegen bug.
+private class DirtyCountingStore < Gori::Store
+  getter drains = 0
+
+  def drain_fts!(budget : Time::Span = FTS_DRAIN_BUDGET) : Int32
+    @drains += 1
+    0
+  end
+
+  def fts_dirty? : Bool
+    true
+  end
+end
+
+# Opened the long way round (the `Store.open` recipe minus the subclass), like
+# spec/mcp/probe_spec.cr's `with_rule_update_failing_store`.
+private def with_dirty_counting_store(&)
+  path = File.tempname("gori-long-poll-dirty", ".db")
+  db = DB.open("sqlite3:#{path}?journal_mode=wal&synchronous=normal&busy_timeout=5000")
+  Gori::SafeRegexp.install(db)
+  Gori::Store::Schema.migrate!(db)
+  store = DirtyCountingStore.new(db)
+  begin
+    yield store
+  ensure
+    store.close
+    File.delete?(path)
+    File.delete?("#{path}-wal")
+    File.delete?("#{path}-shm")
+  end
+end
+
 # An origin that answers each request after `delay`, so a short fuzz run is still running
 # when its status is first read.
 private def slow_origin(delay : Time::Span) : Int32
@@ -128,6 +161,48 @@ describe "MCP wait_ms long polls" do
       took = elapsed { j = call_json(tools, "list_history", %({"since":#{top},"wait_ms":10000,"query":"path:/want"})) }
       j.not_nil!["flows"].as_a.map(&.["target"].as_s).should eq(["/want"])
       took.should be < 1.5.seconds
+    end
+  end
+
+  it "list_history drains a still-dirty index at most once a re-read gap, then says it is partial" do
+    with_dirty_counting_store do |store|
+      tools = tools_for(store)
+      top = mcp_seed_flow(store, "/a")
+      moving = true
+      spawn do
+        while moving
+          sleep 50.milliseconds
+          mcp_seed_flow(store, "/m") if moving
+        end
+      end
+      r = tools.call("list_history", JSON.parse(%({"since":#{top},"wait_ms":2500,"query":"body:xyzzy"})))
+      moving = false
+      # One drain before the page, then at most one per HISTORY_REREAD_GAP while the mark moves.
+      (store.drains - 1).should be <= 3
+      r.error_code.should eq("FTS_BACKLOG")
+    end
+  end
+
+  it "list_history refuses a body: wait that ran out with the index still partial (read-only)" do
+    dir = File.tempname("gori-long-poll-ro")
+    Dir.mkdir_p(dir)
+    db = File.join(dir, "p.db")
+    writer = Gori::Store.open(db, background_index: false)
+    top = mcp_seed_flow(writer, "/before")
+    writer.drain_fts!.should eq(0)
+    reader = Gori::Store.open(db, read_only: true, background_index: false)
+    begin
+      spawn do
+        sleep 150.milliseconds
+        mcp_seed_flow(writer, "h.test", "GET", "/during", 200, "HTTP/1.1 200 OK\r\n\r\n", "needle-ro".to_slice, "text/plain")
+      end
+      r = tools_for(reader).call("list_history", JSON.parse(%({"since":#{top},"wait_ms":800,"query":"body:needle-ro"})))
+      r.is_error.should be_true
+      r.error_code.should eq("FTS_BACKLOG")
+    ensure
+      reader.close
+      writer.close
+      FileUtils.rm_rf(dir)
     end
   end
 

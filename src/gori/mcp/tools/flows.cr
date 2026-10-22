@@ -200,6 +200,12 @@ module Gori
               mark = now
               !page.empty?
             end
+            # Ran out empty with rows still unindexed: "no match" and "not indexed yet" would
+            # read the same, the ambiguity the drain above the page refuses (read-only, or a
+            # drain that kept losing the writer).
+            if wait_ms > 0 && page.empty? && filter.uses_fts? && store.fts_dirty?
+              return fts_backlog_error(store.fts_backlog, store.read_only?)
+            end
           end
           page
         rescue ex
