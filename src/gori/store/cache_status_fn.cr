@@ -60,12 +60,3 @@ module Gori
     end
   end
 end
-
-class SQLite3::Connection
-  # Register `gori_cache_status` on this connection's raw SQLite handle. Called from
-  # `Store.configure_connections`' single setup block — see the comment there for why a
-  # second `setup_connection` call would silently drop the earlier one.
-  def gori_install_cache_status : Nil
-    Gori::CacheStatusFn.install(@db)
-  end
-end

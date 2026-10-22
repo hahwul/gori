@@ -312,7 +312,7 @@ QL is a Lucene/KQL-style boolean filter over captured flows: bare terms for free
 It compiles to a SQL `WHERE` fragment plus bound params. Values are always parameterised,
 never interpolated, so the projection columns stay injection-safe. Regex terms are evaluated
 by the `Gori::SafeRegexp` function that `Store` installs into the connection
-(`Store.configure_connections` calls `gori_install_safe_regexp`, `src/gori/store.cr`), so an invalid pattern or a byte-unsafe body
+(`Store.configure_connections` calls `SafeRegexp.install_fn`, `src/gori/store.cr`), so an invalid pattern or a byte-unsafe body
 fails closed rather than crashing the scan.
 
 QL is the only way you navigate History, because there is no queue and no ranking (P8). One

@@ -548,22 +548,20 @@ module Gori
     def self.install(db : DB::Database) : Nil
       db.setup_connection do |conn|
         next unless sqlite = conn.as?(SQLite3::Connection)
-        sqlite.gori_install_safe_regexp
+        install_fn(sqlite.to_unsafe)
         # The Scope match functions come with it: no caller wants a handle that can run a
         # regex scope rule but not a string or non-ASCII/brace host one, and `Scope#filter`
         # emits calls to these unconditionally — a handle without them fails the QUERY
         # ("no such function"), it does not merely match differently. Store.open installs
         # both through its own single setup block; this is the same set for the standalone
         # handles that don't come through it.
-        sqlite.gori_install_scope_match
+        ScopeMatch.install(sqlite.to_unsafe)
       end
     end
-  end
-end
 
-class SQLite3::Connection
-  # Re-register the byte-safe `regexp` on this connection's raw SQLite handle.
-  def gori_install_safe_regexp : Nil
-    LibSQLite3.create_function(@db, "regexp", 2, 1, nil, Gori::SafeRegexp::FN, nil, nil)
+    # Re-register the byte-safe `regexp` on one connection's raw SQLite handle.
+    def self.install_fn(db : LibSQLite3::SQLite3) : Nil
+      LibSQLite3.create_function(db, "regexp", 2, 1, nil, FN, nil, nil)
+    end
   end
 end

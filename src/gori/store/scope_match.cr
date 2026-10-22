@@ -148,12 +148,3 @@ module Gori
     end
   end
 end
-
-class SQLite3::Connection
-  # Register the two Scope match functions on this connection's raw SQLite handle. Called
-  # from `Store.configure_connections`' single setup block — see the comment there for why
-  # a second `setup_connection` call would silently drop this one.
-  def gori_install_scope_match : Nil
-    Gori::ScopeMatch.install(@db)
-  end
-end

@@ -2363,7 +2363,7 @@ module Gori
             # A backfill calls gori's own SQL functions, and not every caller hands in a pooled
             # Store connection — a bench fixture migrates a bare `DB.open`. Registering is
             # idempotent, so a Store connection pays nothing.
-            conn.as(SQLite3::Connection).gori_install_scope_match if current < VERSION
+            ScopeMatch.install(conn.as(SQLite3::Connection).to_unsafe) if current < VERSION
             MIGRATIONS[current..]?.try &.each_with_index(offset: current) do |statements, idx|
               run_statements(conn, statements).each { |sql| conn.exec(sql) }
               BACKFILLS[idx + 1]?.try { |sql| conn.exec(sql) }
