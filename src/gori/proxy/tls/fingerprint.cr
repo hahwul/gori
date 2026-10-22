@@ -48,15 +48,7 @@ module Gori::Proxy::Tls
     # Everything gori can say about one ClientHello. `ja3_text` and `ja4_r` are carried
     # alongside the digests deliberately: a hash an operator cannot decompose is not evidence,
     # and the raw forms are what let them see WHICH field their setting moved.
-    struct Report
-      getter ja3_text : String
-      getter ja3 : String
-      getter ja4 : String
-      getter ja4_r : String
-
-      def initialize(@ja3_text, @ja3, @ja4, @ja4_r)
-      end
-    end
+    record Report, ja3_text : String, ja3 : String, ja4 : String, ja4_r : String
 
     RECORD_HANDSHAKE       = 0x16_u8
     HANDSHAKE_CLIENT_HELLO = 0x01_u8

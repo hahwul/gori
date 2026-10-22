@@ -834,17 +834,8 @@ module Gori
     lowercase_label LinkRefKind, parse: parse
 
     # A link from an Issue or Note to a workbench entity (flow/repeater/fuzz/miner).
-    struct EntityLink
-      getter id : Int64
-      getter owner_kind : LinkOwnerKind
-      getter owner_id : Int64
-      getter ref_kind : LinkRefKind
-      getter ref_id : Int64
-      getter created_at : Int64
-
-      def initialize(@id, @owner_kind, @owner_id, @ref_kind, @ref_id, @created_at)
-      end
-    end
+    record EntityLink, id : Int64, owner_kind : LinkOwnerKind, owner_id : Int64,
+      ref_kind : LinkRefKind, ref_id : Int64, created_at : Int64
 
     # --- issue retest (V27, #1036) -------------------------------------------
     #
@@ -1062,16 +1053,8 @@ module Gori
 
     # The frozen exchange itself: its meta plus the stored bytes, for the read-only viewer and
     # the raw export. Mirrors `FlowDetail` over `FlowRow`.
-    struct IssueEvidence
-      getter meta : IssueEvidenceMeta
-      getter request_head : Bytes
-      getter request_body : Bytes?
-      getter response_head : Bytes?
-      getter response_body : Bytes?
-
-      def initialize(@meta, @request_head, @request_body, @response_head, @response_body)
-      end
-    end
+    record IssueEvidence, meta : IssueEvidenceMeta, request_head : Bytes, request_body : Bytes?,
+      response_head : Bytes?, response_body : Bytes?
 
     # A human-confirmed issue (DESIGN.md §6: the final output). Optionally linked
     # to a captured flow. One per project DB.
@@ -2275,20 +2258,8 @@ module Gori
     # One raw HTTP/2 frame as it crossed the wire. `direction` is "out"
     # (client→server) or "in" (server→client); `payload` excludes the 9-octet
     # frame header (kept byte-exact).
-    struct H2Frame
-      getter id : Int64
-      getter conn_id : Int64
-      getter created_at : Int64
-      getter direction : String
-      getter stream_id : Int64
-      getter type : Int32
-      getter flags : Int32
-      getter length : Int32
-      getter payload : Bytes
-
-      def initialize(@id, @conn_id, @created_at, @direction, @stream_id, @type, @flags, @length, @payload)
-      end
-    end
+    record H2Frame, id : Int64, conn_id : Int64, created_at : Int64, direction : String,
+      stream_id : Int64, type : Int32, flags : Int32, length : Int32, payload : Bytes
 
     # Best-effort notification that a flow row changed or an upgraded tunnel closed. Row
     # changes publish AFTER commit; tunnel completion is a non-blocking wakeup after transcript writes.
@@ -2391,19 +2362,10 @@ module Gori
 
     # One row of the intercept_commands queue (MCP -> TUI). Drained forward-cursored and
     # applied by the lock-holding TUI (#123).
-    struct CommandRow
-      getter id : Int64
-      getter session_token : String?
-      getter verb : String
-      getter item_id : Int64?
-      getter bytes : Bytes?
-      getter arg : String?
-      # When the sender enqueued it (unix µs): `ws_inject` reads its ack deadline off it.
-      getter created_at : Int64
-
-      # No default for `created_at`: a 0 would put every inject's ack deadline in the past.
-      def initialize(@id, @session_token, @verb, @item_id, @bytes, @arg, @created_at)
-      end
-    end
+    #
+    # `created_at` is when the sender enqueued it (unix µs): `ws_inject` reads its ack deadline
+    # off it. No default: a 0 would put every inject's ack deadline in the past.
+    record CommandRow, id : Int64, session_token : String?, verb : String, item_id : Int64?,
+      bytes : Bytes?, arg : String?, created_at : Int64
   end
 end
