@@ -670,21 +670,13 @@ module Gori::Proxy
     def self.proxy_tls_context(verify : Bool = !Settings.upstream_proxy_insecure?,
                                ca : String = Settings.upstream_proxy_ca) : OpenSSL::SSL::Context::Client
       @@proxy_tls_contexts[{verify, ca}] ||= begin
-        ctx = OpenSSL::SSL::Context::Client.new
-        {% if OpenSSL.has_constant?(:KTLS) %}
-          ctx.remove_options(OpenSSL::SSL::Options::ENABLE_KTLS) # see ContextFactory.lean_server
-        {% end %}
-        if verify
-          apply_system_trust(ctx) unless env_ca_override?
-          # ADDITIVE (SSL_CTX_load_verify_locations appends), like apply_system_trust: a private
-          # proxy CA is trusted IN ADDITION to the system roots, so configuring one does not
-          # quietly stop trusting everything else. Deliberately NOT rescued — a CA path that
-          # cannot be loaded must fail the dial with a message rather than silently degrade to
-          # the system store and report "the proxy certificate was rejected" instead.
-          ctx.ca_certificates = ca unless ca.empty?
-        else
-          ctx.verify_mode = OpenSSL::SSL::VerifyMode::NONE
-        end
+        ctx = base_client_context(verify)
+        # ADDITIVE (SSL_CTX_load_verify_locations appends), like apply_system_trust: a private
+        # proxy CA is trusted IN ADDITION to the system roots, so configuring one does not
+        # quietly stop trusting everything else. Deliberately NOT rescued — a CA path that
+        # cannot be loaded must fail the dial with a message rather than silently degrade to
+        # the system store and report "the proxy certificate was rejected" instead.
+        ctx.ca_certificates = ca if verify && !ca.empty?
         Tls::KeyLog.install(ctx)
         ctx
       end
@@ -1143,19 +1135,26 @@ module Gori::Proxy
     private def self.client_context(verify : Bool, alpn : String?,
                                     tls : Settings::OutboundTlsRule = Settings::DEFAULT_OUTBOUND_TLS) : OpenSSL::SSL::Context::Client
       @@tls_contexts[{verify, alpn, tls.cache_key}] ||= begin
-        ctx = OpenSSL::SSL::Context::Client.new
-        {% if OpenSSL.has_constant?(:KTLS) %}
-          ctx.remove_options(OpenSSL::SSL::Options::ENABLE_KTLS) # see ContextFactory.lean_server
-        {% end %}
-        if verify
-          apply_system_trust(ctx) unless env_ca_override?
-        else
-          ctx.verify_mode = OpenSSL::SSL::VerifyMode::NONE
-        end
+        ctx = base_client_context(verify)
         apply_outbound_tls(ctx, tls, alpn)
         Tls::KeyLog.install(ctx)
         ctx
       end
+    end
+
+    # What `proxy_tls_context` and `client_context` both start from: no kTLS, then system
+    # trust or no verification.
+    private def self.base_client_context(verify : Bool) : OpenSSL::SSL::Context::Client
+      ctx = OpenSSL::SSL::Context::Client.new
+      {% if OpenSSL.has_constant?(:KTLS) %}
+        ctx.remove_options(OpenSSL::SSL::Options::ENABLE_KTLS) # see ContextFactory.lean_server
+      {% end %}
+      if verify
+        apply_system_trust(ctx) unless env_ca_override?
+      else
+        ctx.verify_mode = OpenSSL::SSL::VerifyMode::NONE
+      end
+      ctx
     end
 
     # The TLS context for one outbound-TLS policy, built the way a real dial builds it. Public
