@@ -123,6 +123,10 @@ module Gori
         if e = result.error
           abort "#{prefix}: #{CLI::Output.term_line(e)}"
         end
+        if result.incomplete?
+          abort "#{prefix}: the endpoint's response was cut short (closed early or past the read cap, " \
+                "status #{status || "?"}), so the schema is incomplete"
+        end
         parsed = Graphql::Schema.parse(result.head, result.body)
         if parsed.is_a?(String)
           abort "#{prefix}: the endpoint did not return a schema (status #{status || "?"}): " \

@@ -4,6 +4,7 @@ require "../host_overrides"
 require "../proxy/codec/content_decode"
 require "../repeater/flow_request"
 require "../repeater/plan"
+require "../repeater/ws_engine"
 require "./introspection"
 
 module Gori
@@ -65,20 +66,24 @@ module Gori
       # endpoint, with the same session (headers) as captured. The rewritten bytes go out as the
       # capture's do on a flow replay: `evidence` (no `$NAME` expansion of captured headers) and
       # no Content-Length resync, since `rewrite_request` already framed the new body. Raises
-      # `Gori::Error` when the stored request has no request line to rewrite.
+      # `Gori::Error` when the stored request has no request line to rewrite, or is a WebSocket
+      # handshake: its Upgrade headers would ride the rewritten POST and the send would be spent.
       def plan_options(detail : Store::FlowDetail, *, legacy : Bool = false, verify : Bool = true,
                        timeout : Time::Span? = nil,
                        overrides : HostOverrides? = nil) : Repeater::PlanOptions
         flow = Repeater::FlowRequest.build(detail)
+        if Repeater::WsEngine.replayable?(String.new(flow.bytes))
+          raise Gori::Error.new("flow #{detail.row.id} is a WebSocket handshake; pick the HTTP GraphQL flow")
+        end
         text = Introspection.rewrite_request(String.new(flow.bytes), legacy)
         Repeater::PlanOptions.new([text.to_slice], default_target: flow.target,
           expand_request: false, evidence: true, auto_content_length: false,
           http2: flow.http2, sni: flow.sni, verify: verify, timeout: timeout, overrides: overrides)
       end
 
-      # `schema` as SDL-like text within `max_bytes`. A case-insensitive `filter` keeps the root
-      # fields whose name contains it and the other types whose name, or one of whose field
-      # names, contains it. The cut is by line, so a root type with thousands of fields still
+      # `schema` as SDL-like text within `max_bytes`. A case-insensitive `filter` keeps a root
+      # whose own name contains it whole, the fields of the other roots whose name contains it,
+      # and the other types whose name, or one of whose field names, contains it. The cut is by line, so a root type with thousands of fields still
       # answers with as many as fit rather than nothing. A malformed entry (a type with no name,
       # a field that is not an object) is skipped, not raised: the schema is the server's bytes.
       def summarize(schema : JSON::Any, filter : String? = nil, max_bytes : Int32 = 64 * 1024) : Summary
@@ -90,19 +95,22 @@ module Gori
         roots = ["queryType", "mutationType", "subscriptionType"].map { |k| name_of(at(schema, k)) }
         needle = filter.try(&.downcase).presence
         lines = [] of String
-        shown = 0
+        starts = [] of Int32 # the line each shown type opens on
         reachable(types, roots.compact).each do |name|
           t = types[name]
           root = roots.includes?(name)
           next if needle && !root && !matches?(t, needle)
-          block = render(t, name, root ? needle : nil)
+          field_filter = root && needle && !name.downcase.includes?(needle) ? needle : nil
+          block = render(t, name, field_filter)
           # A root with no matching field is only its braces.
-          next if block.nil? || (root && needle && block.size <= 2)
+          next if block.nil? || (field_filter && block.size <= 2)
+          starts << lines.size
           lines.concat(block)
-          shown += 1
         end
-        sdl, truncated = cut(lines, max_bytes)
-        Summary.new(sdl, roots[0], roots[1], roots[2], types.size, shown, truncated)
+        kept = fit(lines, max_bytes)
+        # A type counts as shown when the cut left at least its first line.
+        Summary.new(lines.first(kept).join('\n'), roots[0], roots[1], roots[2], types.size,
+          starts.count(&.< kept), kept < lines.size)
       end
 
       private def builtin?(name : String) : Bool
@@ -232,8 +240,8 @@ module Gori
         (d = at(v, "defaultValue").try(&.as_s?)) ? "#{s} = #{d}" : s
       end
 
-      # The lines that fit `max_bytes` (joined with newlines), and whether any were left out.
-      private def cut(lines : Array(String), max_bytes : Int32) : {String, Bool}
+      # How many of `lines`, joined with newlines, fit `max_bytes`.
+      private def fit(lines : Array(String), max_bytes : Int32) : Int32
         used = 0
         kept = 0
         lines.each do |line|
@@ -241,7 +249,7 @@ module Gori
           used += line.bytesize + 1
           kept += 1
         end
-        {lines.first(kept).join('\n'), kept < lines.size}
+        kept
       end
     end
   end

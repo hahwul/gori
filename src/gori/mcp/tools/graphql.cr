@@ -85,6 +85,12 @@ module Gori
           if e = result.error
             return err("introspection request failed: #{e}", "NETWORK_ERROR", field: "flow_id", retryable: true)
           end
+          # A body cut short (closed early, or past the read cap) is no schema, and no reason to
+          # suggest the legacy query: say what happened instead of "not JSON".
+          if result.incomplete?
+            return err("the endpoint's response was cut short (closed early or past the read cap, status " \
+                       "#{status || "?"}), so the schema is incomplete", "INTROSPECTION_FAILED", field: "flow_id")
+          end
           parsed = Graphql::Schema.parse(result.head, result.body)
           if parsed.is_a?(String)
             hint = legacy ? "" : " (an older server may take legacy:true)"

@@ -147,6 +147,13 @@ describe Gori::Graphql::Schema do
       s = Schema.summarize(demo_schema, nil, 40)
       s.sdl.should eq("type Query {\n  user(id: ID!): User")
       s.truncated.should be_true
+      s.types_shown.should eq(1) # only Query's opening survived the cut
+    end
+
+    it "keeps a root whole when the filter names the root itself" do
+      s = Schema.summarize(demo_schema, "mutation")
+      s.sdl.should eq("type Mutation {\n  createUser(input: UserInput!): User\n}")
+      s.types_shown.should eq(1)
     end
 
     it "skips malformed entries instead of raising" do
@@ -156,6 +163,19 @@ describe Gori::Graphql::Schema do
   end
 
   describe ".plan_options" do
+    it "refuses a WebSocket handshake flow instead of posting its Upgrade headers" do
+      with_store do |store|
+        head = "GET /graphql HTTP/1.1\r\nHost: api.test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" \
+               "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n" \
+               "Sec-WebSocket-Protocol: graphql-transport-ws\r\n\r\n"
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
+          method: "GET", target: "/graphql", http_version: "HTTP/1.1",
+          head: head.to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
+        expect_raises(Gori::Error, /WebSocket handshake/) { Schema.plan_options(store.get_flow(id).not_nil!) }
+      end
+    end
+
     it "rewrites the captured request into the introspection POST, keeping its headers" do
       with_store do |store|
         head = "GET /graphql?query=%7Bme%7D&key=1 HTTP/1.1\r\nHost: api.test\r\nAuthorization: Bearer t\r\n\r\n"

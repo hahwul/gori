@@ -20,7 +20,8 @@ private def graphql_flow(store, port : Int32, resp_body : String) : Int64
 end
 
 # A one-shot origin that answers the introspection result and hands back the request it read.
-private def start_graphql_origin(sink : Channel(String)) : Int32
+# `declared` overstates Content-Length so the origin closes before the body is whole.
+private def start_graphql_origin(sink : Channel(String), declared : Int32 = SCHEMA_RESULT.bytesize) : Int32
   origin = TCPServer.new("127.0.0.1", 0)
   port = origin.local_address.port
   spawn do
@@ -32,7 +33,7 @@ private def start_graphql_origin(sink : Channel(String)) : Int32
     body = Bytes.new(len)
     conn.read_fully(body)
     sink.send(text + String.new(body))
-    conn << "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: #{SCHEMA_RESULT.bytesize}\r\n\r\n#{SCHEMA_RESULT}"
+    conn << "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: #{declared}\r\n\r\n#{SCHEMA_RESULT}"
     conn.flush
     conn.close
     origin.close
@@ -86,6 +87,19 @@ describe "MCP graphql_schema" do
       out["status"].as_i.should eq(200)
       out["sdl"].as_s.should contain("me: String")
       out["scope_decision"].as_s.should_not be_empty
+    end
+  end
+
+  it "says a response cut short is incomplete rather than not JSON" do
+    with_store do |store|
+      sink = Channel(String).new(1)
+      port = start_graphql_origin(sink, SCHEMA_RESULT.bytesize + 1000)
+      id = graphql_flow(store, port, %({"data":{"a":1}}))
+      r = call_tool(tools_for(store), %({"flow_id":#{id},"send":true,"allow_unscoped":true,"timeout_ms":3000}))
+      sink.receive
+      r.error_code.should eq("INTROSPECTION_FAILED")
+      r.text.should contain("cut short")
+      r.text.should_not contain("legacy")
     end
   end
 
