@@ -257,7 +257,7 @@ module Gori::Proxy::H2
       @mutex.synchronize do
         stream = @streams[stream_id]?
         headers = stream.try(&.req.headers)
-        headers.try { |fields| pseudo(fields, ":authority") } || stream.try(&.request_authority)
+        headers.try { |fields| HeadCodec.pseudo(fields, ":authority") } || stream.try(&.request_authority)
       end
     end
 
@@ -265,8 +265,8 @@ module Gori::Proxy::H2
       @mutex.synchronize do
         headers = @streams[stream_id]?.try(&.req.headers)
         next nil unless headers
-        RequestRef.new(pseudo(headers, ":method") || "GET", pseudo(headers, ":path") || "/",
-          pseudo(headers, ":scheme") || "https", pseudo(headers, ":authority") || @host)
+        RequestRef.new(HeadCodec.pseudo(headers, ":method") || "GET", HeadCodec.pseudo(headers, ":path") || "/",
+          HeadCodec.pseudo(headers, ":scheme") || "https", HeadCodec.pseudo(headers, ":authority") || @host)
       end
     end
 
@@ -660,7 +660,7 @@ module Gori::Proxy::H2
       if interims.saturated?
         side.interim_overflow = true
       elsif interims.accepting?
-        interims.add(pseudo(head, ":status").try(&.to_i?) || 0, synth_response_head(head))
+        interims.add(HeadCodec.pseudo(head, ":status").try(&.to_i?) || 0, HeadCodec.synth_response(head))
       else
         interims.omit
       end
@@ -786,11 +786,11 @@ module Gori::Proxy::H2
       note_extended_connect(stream, headers)
       note_trailer_pseudo(stream, stream.req, "request")
       note_head_truncated(stream, stream.req, "request")
-      method = pseudo(headers, ":method") || "GET"
-      path = pseudo(headers, ":path") || "/"
-      scheme = pseudo(headers, ":scheme") || "https"
-      authority = pseudo(headers, ":authority") || @host
-      host, port = split_authority(authority)
+      method = HeadCodec.pseudo(headers, ":method") || "GET"
+      path = HeadCodec.pseudo(headers, ":path") || "/"
+      scheme = HeadCodec.pseudo(headers, ":scheme") || "https"
+      authority = HeadCodec.pseudo(headers, ":authority") || @host
+      host, port = Upstream.split_host_port(authority, @port)
       cap = stream.req.body
       body = cap.total == 0 ? nil : cap.to_slice
 
@@ -801,7 +801,7 @@ module Gori::Proxy::H2
       # and `connect-ip` (RFC 9484) are extended CONNECTs that are not RFC 6455 framing, and the
       # distinction this file already makes has to survive onto disk.
       protocol = extended_connect_protocol(headers)
-      head = synth_request_head(headers, authority, stream.req.trailer_names, stream.pushed_by,
+      head = HeadCodec.synth_request(headers, authority, stream.req.trailer_names, stream.pushed_by,
         protocol)
       captured = Store::CapturedRequest.new(
         created_at: stream.created_at, scheme: scheme, host: host, port: port,
@@ -822,12 +822,12 @@ module Gori::Proxy::H2
       headers = stream.resp.headers.not_nil!
       note_trailer_pseudo(stream, stream.resp, "response")
       note_head_truncated(stream, stream.resp, "response")
-      status = (pseudo(headers, ":status") || "0").to_i? || 0
+      status = (HeadCodec.pseudo(headers, ":status") || "0").to_i? || 0
       cap = stream.resp.body
       body = cap.total == 0 ? nil : cap.to_slice
-      content_type = header_value(headers, "content-type")
-      content_encoding = header_value(headers, "content-encoding")
-      head = synth_response_head(headers, stream.resp.trailer_names)
+      content_type = HeadCodec.pseudo(headers, "content-type")
+      content_encoding = HeadCodec.pseudo(headers, "content-encoding")
+      head = HeadCodec.synth_response(headers, stream.resp.trailer_names)
       if stream.resp.interim_overflow?
         stream.advise("the origin sent more than #{Store::Interims::MAX_RUN} interim 1xx header blocks " \
                       "before this response; gori stopped counting them there")
@@ -949,12 +949,12 @@ module Gori::Proxy::H2
       flow_id = stream.flow_id || return
       headers = side.headers || return
       status = final_response_status(stream) || return
-      content_type = header_value(headers, "content-type")
+      content_type = HeadCodec.pseudo(headers, "content-type")
       return unless Sse.sse?(content_type)
       head = Store::CapturedResponse.new(
-        flow_id: flow_id, status: status, head: synth_response_head(headers, side.trailer_names),
+        flow_id: flow_id, status: status, head: HeadCodec.synth_response(headers, side.trailer_names),
         content_type: content_type,
-        content_encoding: header_value(headers, "content-encoding"),
+        content_encoding: HeadCodec.pseudo(headers, "content-encoding"),
         ttfb_us: stream.resp_first_at.try { |t| (t - stream.started_at).total_microseconds.to_i64 },
         state: Store::FlowState::Pending)
       arrivals = Sse::Arrivals.for(head.head, false)
@@ -1018,7 +1018,7 @@ module Gori::Proxy::H2
     # An interim answer does not decide whether extended CONNECT opened the tunnel.
     private def final_response_status(stream : Stream) : Int32?
       headers = stream.resp.headers || return
-      status = pseudo(headers, ":status").try(&.to_i?) || return
+      status = HeadCodec.pseudo(headers, ":status").try(&.to_i?) || return
       return if status >= 100 && status < 200
       status
     end
@@ -1101,7 +1101,7 @@ module Gori::Proxy::H2
 
     # The `:protocol` pseudo-header's value, or nil when this is not an extended CONNECT.
     private def extended_connect_protocol(headers : Array({String, String})) : String?
-      protocol = pseudo(headers, ":protocol")
+      protocol = HeadCodec.pseudo(headers, ":protocol")
       protocol.nil? || protocol.empty? ? nil : protocol
     end
 
@@ -1140,55 +1140,8 @@ module Gori::Proxy::H2
     # is not interim, so a stray `:status` block on the request side is treated as trailers
     # too rather than replacing the request.
     private def interim_status?(headers : Array({String, String})) : Bool
-      code = pseudo(headers, ":status").try(&.to_i?)
+      code = HeadCodec.pseudo(headers, ":status").try(&.to_i?)
       !code.nil? && code >= 100 && code < 200
-    end
-
-    private def pseudo(headers : Array({String, String}), name : String) : String?
-      headers.find { |(n, _)| n == name }.try(&.[1])
-    end
-
-    private def header_value(headers : Array({String, String}), name : String) : String?
-      headers.find { |(n, _)| n == name }.try(&.[1])
-    end
-
-    # Reuse the one authority parser (bracketed-IPv6 aware) instead of a second
-    # hand-rolled copy that mishandles "[::1]:8443".
-    private def split_authority(authority : String) : {String, Int32}
-      Upstream.split_host_port(authority, @port)
-    end
-
-    # A readable HTTP/2 request/response head (the bytes shown in the detail view). The
-    # authoritative octets are the raw frames; this is the normalized view.
-    #
-    # The synthesis itself lives in `HeadCodec` because the Match&Replace path has to
-    # produce the SAME bytes to run rules against — that is what makes the Rewriter tab's
-    # preview (`rules.cr:331-345`, which reads exactly this head off a stored flow) agree
-    # with what the live proxy does to an h2 head. Two copies would drift; there is one.
-    #
-    # `trailers` is the same CAPTURE-only extra `synth_response_head` passes, and it was
-    # one-sided by omission: a request trailer block is merged into `headers` by
-    # `finish_header_block` exactly as a response one is, so after the merge `x-req-trailer`
-    # read like a header the client sent in its head. `Side#trailer_names` was already being
-    # recorded for both sides.
-    #
-    # `protocol` is the third such capture-only extra, and it is here for the reason
-    # `note_extended_connect` states: `regular(fields)` filters every pseudo-header, so an
-    # RFC 8441 extended CONNECT's `:protocol` reached no stored byte at all and the head read
-    # as an ordinary CONNECT tunnel.
-    private def synth_request_head(headers : Array({String, String}), authority : String,
-                                   trailers : Array(String)? = nil,
-                                   pushed_by : UInt32? = nil,
-                                   protocol : String? = nil) : Bytes
-      HeadCodec.synth_request(headers, authority, trailers, pushed_by, protocol)
-    end
-
-    # `trailers` is the CAPTURE projection's extra: only the stored head names which fields
-    # came from a trailing HEADERS block. The rewrite path builds its own head from the live
-    # fields, so the marker never reaches a wire.
-    private def synth_response_head(headers : Array({String, String}),
-                                    trailers : Array(String)? = nil) : Bytes
-      HeadCodec.synth_response(headers, trailers)
     end
   end
 end

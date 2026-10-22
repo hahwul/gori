@@ -64,7 +64,7 @@ class Gori::Proxy::H2::StreamGate
     @stubs[block.stream_id] = Stubbed.new(stub, method == "HEAD")
     # A client asking for `100-continue` sends no body until it hears back, so it is answered
     # now and its body (if it sends one anyway) is swallowed, as h1's fault path leaves it unread.
-    expects = block.fields.find { |f| f.name == "expect" }.try(&.value.downcase) == "100-continue"
+    expects = HeadCodec.pseudo_of(block.fields, "expect").try(&.downcase) == "100-continue"
     @answers << block.stream_id if block.first.end_stream? || expects
     true
   end

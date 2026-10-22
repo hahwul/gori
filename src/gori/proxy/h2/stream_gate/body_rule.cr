@@ -177,7 +177,7 @@ class Gori::Proxy::H2::StreamGate
                                  "client waits for the reply before ending it")
       return true
     end
-    expect = block.fields.find { |f| f.name == "expect" }.try(&.value.downcase)
+    expect = HeadCodec.pseudo_of(block.fields, "expect").try(&.downcase)
     return false unless expect == "100-continue"
     skip_body(block.stream_id, "it asks for 100-continue, which the origin can only answer once it has the head")
     true
@@ -314,7 +314,7 @@ class Gori::Proxy::H2::StreamGate
 
   # Native gRPC — not gRPC-Web, whose outcome rides in the body as a frame of its own.
   private def grpc?(fields : Array(HPACK::Field)) : Bool
-    type = fields.find { |f| f.name == "content-type" }.try(&.value)
+    type = HeadCodec.pseudo_of(fields, "content-type")
     Grpc.grpc?(type) && !Grpc.web?(type)
   end
 
@@ -323,7 +323,7 @@ class Gori::Proxy::H2::StreamGate
   # its client only sends after reading the reply, so native gRPC is owned one message at a
   # time instead (`grpc_progress_locked`); gRPC-Web stays here.
   private def streaming?(fields : Array(HPACK::Field)) : Bool
-    type = fields.find { |f| f.name == "content-type" }.try(&.value.downcase) || return false
+    type = HeadCodec.pseudo_of(fields, "content-type").try(&.downcase) || return false
     STREAMING_TYPES.any? { |prefix| type.starts_with?(prefix) }
   end
 

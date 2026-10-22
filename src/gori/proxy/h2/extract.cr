@@ -96,7 +96,7 @@ module Gori::Proxy::H2
       return false if frame.end_stream? || ref.method == "CONNECT"
       host, _ = Upstream.split_host_port(ref.authority, @port)
       @extractor.extracts_body_for_host?(host) &&
-        !Sse.sse?(fields.find { |(n, _)| n == "content-type" }.try(&.[1]))
+        !Sse.sse?(HeadCodec.pseudo(fields, "content-type"))
     end
 
     # One delivered frame of a response whose body is being copied.

@@ -33,7 +33,8 @@ module Gori::Proxy::H2
   module HeadCodec
     extend self
 
-    # Synthesized h1-equivalent request head. HTTP/2 carries the target host in the
+    # Synthesized h1-equivalent request head: the normalized view the detail pane shows (the
+    # authoritative octets are the raw frames). HTTP/2 carries the target host in the
     # `:authority` pseudo-header (RFC 9113 §8.3.1) rather than a `Host:` field, and the
     # loop below skips ALL pseudo-headers — so without the `Host:` line the head has no
     # host at all, breaking `gori run show` / MCP get_flow / QL `header:host`. Emitted only
@@ -509,6 +510,7 @@ module Gori::Proxy::H2
       fields.any? { |f| host_field?(f.name) }
     end
 
+    # The first field named `name` (exact match, so lowercase for a regular field), or nil.
     def pseudo(fields : Array({String, String}), name : String) : String?
       fields.find { |(n, _)| n == name }.try(&.[1])
     end
