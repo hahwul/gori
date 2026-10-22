@@ -1027,7 +1027,7 @@ module Gori::Tui
         spool_run = @spool_runs[v]?
         archive_ready = !!spool_run && !spool_run.failed? && spool_run.finished?
         v.finish_run(terminal, archive_ready: archive_ready, stop_idx: ev.stop_index)
-        # A view being CLOSED (`close_at`, `stop_all`) drains its own Done while it is still
+        # A view being CLOSED (`close_subtab_at`, `stop_all`) drains its own Done while it is still
         # in `@sessions`; its job was already finished `:stopped` by the close, and a "Fuzzer:
         # N hits (stopped)" toast with a jump to a session that no longer exists is not a
         # completion — it is the close, reported a second time as a result.
@@ -1828,14 +1828,14 @@ module Gori::Tui
         @host.status(reason)
         return
       end
-      orphaned = close_at(@current_idx)
+      orphaned = close_subtab_at(@current_idx)
       auto_load_current_saved_run
       @host.status(TabClose.message(@sessions.empty? ? "closed — none open (^N new · ⇧I from History)" : "closed (#{@sessions.size} open)", orphaned))
     end
 
     # Close sub-tab `idx` and report whether the store rolled its DELETE back. Toast-free and
     # index-taking, so a batch can loop it; the caller checks `close_subtab_refusal` first.
-    private def close_at(idx : Int32) : Bool
+    protected def close_subtab_at(idx : Int32) : Bool
       return false if idx < 0 || idx >= @sessions.size
       tab = @sessions[idx]
       was_running = tab.view.running?

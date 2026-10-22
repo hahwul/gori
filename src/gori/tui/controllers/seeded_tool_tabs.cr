@@ -4,10 +4,11 @@ module Gori::Tui
   # filtered, reconciled, renamed and closed the same way. An includer supplies `current_view`,
   # `view_at`, the pane keys (`session_key`, `wheel_pane`, `navigable_pane?`), its run channel
   # (`session_events`), `close_wording`, and the store calls that differ per tool:
-  # `session_rows`, `restore_tab`, `delete_session_row` and `save_session_name`.
+  # `session_rows`, `restore_tab`, `delete_session_row`, `update_session_row` and
+  # `save_session_name`.
   #
   # FuzzerController includes it for the strip, filter, wheel, render and rename; its own keys,
-  # drain, reconcile and close shadow the ones here.
+  # drain, reconcile, close and save shadow the ones here.
   module SeededToolTabs
     DRAIN_CAP = 512 # bounded per-tick drain so a fast run can't starve render
 
@@ -123,6 +124,18 @@ module Gori::Tui
 
     def commit : Nil
       save_current
+    end
+
+    def save_current : Nil
+      return unless tab = current_tab_obj
+      return unless (id = tab.db_id) && tab.view.dirty?
+      v = tab.view
+      cfg = v.config_json
+      unless update_session_row(id, v, cfg)
+        return @host.status("session NOT saved (project busy, or closed in another gori) — the tab stays dirty")
+      end
+      v.mark_config_synced(cfg)
+      v.clear_dirty
     end
 
     # --- focus ring ---
@@ -258,19 +271,15 @@ module Gori::Tui
       @host.resolve_subtab_focus
     end
 
-    protected def close_subtab_at(idx : Int32) : Bool
-      close_at(idx)
-    end
-
     def close_tab : Nil
       return if @current_idx < 0 || @current_idx >= @sessions.size
-      orphaned = close_at(@current_idx)
+      orphaned = close_subtab_at(@current_idx)
       @host.status(TabClose.message(@sessions.empty? ? "closed — none open" : "closed (#{@sessions.size} open)", orphaned))
     end
 
     # Close sub-tab `idx` and report whether the store rolled its DELETE back. Toast-free and
     # index-taking, so the batch driver can loop it.
-    private def close_at(idx : Int32) : Bool
+    protected def close_subtab_at(idx : Int32) : Bool
       return false if idx < 0 || idx >= @sessions.size
       tab = @sessions[idx]
       tab.view.request_stop # halt a running job before detaching (the run fiber polls this)

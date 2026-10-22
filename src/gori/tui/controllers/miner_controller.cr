@@ -656,16 +656,8 @@ module Gori::Tui
       {"MINER", "mining", "results"}
     end
 
-    def save_current : Nil
-      return unless tab = current_tab_obj
-      return unless (id = tab.db_id) && tab.view.dirty?
-      v = tab.view
-      cfg = v.config_json
-      unless @host.session.store.update_miner_session(id, v.target_origin, v.request_bytes, v.http2?, v.sni_override, cfg, v.name)
-        return @host.status("session NOT saved (project busy, or closed in another gori) — the tab stays dirty")
-      end
-      v.mark_config_synced(cfg)
-      v.clear_dirty
+    private def update_session_row(id : Int64, v : MinerView, cfg : String) : Bool
+      @host.session.store.update_miner_session(id, v.target_origin, v.request_bytes, v.http2?, v.sni_override, cfg, v.name)
     end
   end
 end

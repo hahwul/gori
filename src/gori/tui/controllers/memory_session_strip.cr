@@ -89,7 +89,7 @@ module Gori::Tui
           confirm_label: "close", danger: true) { close_marked_sessions(refs) }
         return
       end
-      close_at(@idx)
+      close_subtab_at(@idx)
       after_change
       @host.status(@sessions.size == 1 ? cleared : "#{closed} (#{@sessions.size} open)")
     end
@@ -101,16 +101,11 @@ module Gori::Tui
       @host.resolve_subtab_focus
     end
 
-    # Nothing here is persisted, so a close can never leave a saved session behind.
-    protected def close_subtab_at(idx : Int32) : Bool
-      close_at(idx)
-      false
-    end
-
     # Close sub-tab `idx`, keeping at least one session: the last one is REPLACED by
-    # `blank_session` rather than removed.
-    private def close_at(idx : Int32) : Nil
-      return if idx < 0 || idx >= @sessions.size
+    # `blank_session` rather than removed. Nothing here is persisted, so a close can never
+    # leave a saved session behind: always false.
+    protected def close_subtab_at(idx : Int32) : Bool
+      return false if idx < 0 || idx >= @sessions.size
       if @sessions.size <= 1
         @sessions[0] = blank_session(@sessions[0])
         @idx = 0
@@ -121,6 +116,7 @@ module Gori::Tui
         @idx -= 1 if idx < @idx
         @idx = @idx.clamp(0, @sessions.size - 1)
       end
+      false
     end
 
     # The session's view, for the rename prompt (re-found by view identity).
