@@ -19,7 +19,7 @@ module Gori::Tui
   # is on screen; where it cannot be drawn, esc closes WITHOUT saving and the degraded line says
   # so, since there is no partial list worth writing.
   class UserAgentsOverlay < Overlay
-    include EditorCard
+    include SavingEditorCard # `on_commit` (Runner#user_agents_editor) saves only a list that parsed
 
     def initialize
       @opened_with = Settings.user_agents
@@ -65,40 +65,8 @@ module Gori::Tui
       "type one per line · empty = built-in list · esc saves & closes"
     end
 
-    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
-      box = overlay_box(area)
-      @card_drawn = !box.nil?
-      return try_commit unless box
-      return try_commit unless box.contains?(mx, my)
-      @editor.click_to_cursor(editor_rect(box), mx, my)
-      :stay
-    end
-
-    def handle_key(ev : Termisu::Event::Key) : Symbol
-      return try_commit if ev.key.escape?
-      edit(ev)
-      :stay
-    end
-
-    # A refusal nobody can read is a lock, not a guard: with no card on screen, close — and
-    # `on_commit` (Runner#user_agents_editor) saves only a list that parsed.
-    private def try_commit : Symbol
-      @refused = refusal
-      (@refused && @card_drawn) ? :stay : :commit
-    end
-
-    private def edit(ev : Termisu::Event::Key) : Nil
-      @refused = nil
-      @editor.handle_edit_key(ev)
-    end
-
     def overlay_box(area : Rect) : Rect?
       area.card?(100, 18, 34, 8)
-    end
-
-    private def editor_rect(box : Rect) : Rect
-      top = box.y + 1
-      Rect.new(box.x + 2, top, box.w - 4, {(box.bottom - 2) - top, 1}.max)
     end
 
     def render(screen : Screen, area : Rect) : Nil

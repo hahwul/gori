@@ -35,7 +35,7 @@ module Gori::Tui
   # not a guard: where the editor cannot show the line, esc saves and the degraded line
   # says how many lines that drops, so the save is still never silent.
   class DiscoverHeadersOverlay < Overlay
-    include EditorCard
+    include SavingEditorCard
 
     def initialize(headers : Array({String, String}))
       text = headers.map { |name, value| "#{name}: #{value}" }.join("\n")
@@ -90,70 +90,8 @@ module Gori::Tui
       "type headers · esc saves & closes"
     end
 
-    # There is nothing to cancel INTO — the user is still inside the Discover popup — so a
-    # click outside the card saves exactly like esc, which is what the shell did before.
-    #
-    # This path is handed `area`, so it settles the "is the card on screen" question from
-    # live geometry and tells the key path too — then defers to the one policy in
-    # try_commit rather than restating it. No card means no refusal to read, so the click
-    # saves; `on_commit` here re-opens the Discover popup and reports false
-    # (Runner#open_discover_headers), and going through try_commit is what keeps @refused
-    # consistent with the geometry on the off chance the card survives that.
-    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
-      box = overlay_box(area)
-      @card_drawn = !box.nil?
-      return try_commit unless box
-      return try_commit unless box.contains?(mx, my)
-      @editor.click_to_cursor(editor_rect(box), mx, my) # a press inside is a caret, not a no-op
-      :stay
-    end
-
-    # esc = save & close (:commit); every other key edits the buffer (:stay).
-    def handle_key(ev : Termisu::Event::Key) : Symbol
-      key = ev.key
-      case
-      when key.escape? then return try_commit
-      else                  edit(ev)
-      end
-      :stay
-    end
-
-    # Close only when every non-blank line is a header gori will actually put on the wire;
-    # otherwise stay open with the refusal on the hint row.
-    #
-    # …unless the last frame had no room for the card. The refusal lives on the hint row of
-    # a card that was never drawn, and the editor the user would fix the line in is not on
-    # screen either, so holding here is an inescapable modal rather than a correction the
-    # operator can act on. Save instead; the degraded render line names the dropped lines.
-    private def try_commit : Symbol
-      @refused = refusal
-      (@refused && @card_drawn) ? :stay : :commit
-    end
-
-    # ⏎ inserts a new header line; the rest are the usual TextArea editing/caret keys.
-    # Any edit retracts a standing refusal — it is re-derived on the next commit attempt,
-    # so the red line can never outlive the line it was about.
-    # ↑/↓ have no pane to cross into (the card is the whole surface), so everything below
-    # ⏎/⌫/Del is `TextArea#handle_motion_key` — the ONE editor keymap: ⇧arrows select,
-    # PageUp/PageDown, ⇧Home/⇧End, ⌥/⌃←→ by word, ⌥⌫. It hand-rolled bare ←→↑↓ and Home/End
-    # and passed no `selecting:` anywhere, so the buffer whose whole job is a list of header
-    # lines had no way to select one and retype it.
-    private def edit(ev : Termisu::Event::Key) : Nil
-      @refused = nil
-      @editor.handle_edit_key(ev)
-    end
-
     def overlay_box(area : Rect) : Rect?
       area.card?(64, 16, 34, 8)
-    end
-
-    # The buffer's rect inside a drawn card. Shared by `render` and the three pointer entries
-    # so the caret cannot land on a row it wasn't drawn on — a click inverting one geometry
-    # while the draw used another is #587's shape, and here it would select the header line
-    # above or below the one pointed at.
-    private def editor_rect(box : Rect) : Rect
-      top = box.y + 1
-      Rect.new(box.x + 2, top, box.w - 4, {(box.bottom - 2) - top, 1}.max)
     end
 
     def render(screen : Screen, area : Rect) : Nil

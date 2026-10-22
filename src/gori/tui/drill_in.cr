@@ -195,11 +195,8 @@ module Gori::Tui
       abstract def detail_row_index : Int32?
       abstract def row_count : Int32
 
-      # The rows themselves, and — separately, so a caller that only needs the index pays
-      # nothing — where the OPEN row sits within them. A click on rail row `i` steps by
-      # `i - rail_cursor`.
+      # The rows themselves, the window `rail_start` opens.
       abstract def rail_rows : Array(RailRow)
-      abstract def rail_cursor : Int32
 
       abstract def detail_crumb : Frame::Crumb?
 
@@ -208,6 +205,19 @@ module Gori::Tui
       # a single click used to rebuild it four times, and a drag once per motion event.
       def rail_count : Int32
         detail_row_index ? {RAIL_ROWS, row_count}.min : 0
+      end
+
+      # First index of the window the rail shows. Private: everything outside reads
+      # `rail_rows`/`rail_cursor`, which are derived from it.
+      private def rail_start : Int32
+        here = detail_row_index || return 0
+        DrillIn.window_start(row_count, here)
+      end
+
+      # Where the OPEN row sits within `rail_rows` — separately, so a caller that only needs
+      # the index pays nothing for the rows. A click on rail row `i` steps by `i - rail_cursor`.
+      def rail_cursor : Int32
+        (detail_row_index || 0) - rail_start
       end
 
       # Can the step keys actually MOVE from here? False when the open item is not a row of

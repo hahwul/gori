@@ -142,4 +142,48 @@ module Gori::Tui
       {s, e}
     end
   end
+
+  # The CHAIN pane's commit/discard/key routing, identical in Repeater and Fuzzer. The includer
+  # supplies `@editor : TextArea`, `@chain_pane : ChainPane`, `@chain_focused : Bool`,
+  # `@chain_marker_cursor : Int32` (where `focus_chain_pane` bound the pane) and `@dirty`.
+  module ChainPaneHost
+    # Commit the CHAIN pane's text back to the bound marker and return focus to the editor.
+    # Idempotent — a no-op when the pane isn't focused (so set_focus can call it freely).
+    def commit_chain_pane : Nil
+      return unless @chain_focused
+      # The marker's open § (value region) is unchanged by the chain edit, so it's a stable
+      # anchor — restoring the raw cursor could land inside a now-longer hidden chain.
+      anchor = Fuzz::Template.marker_start_at(@editor.text, @chain_marker_cursor) || @chain_marker_cursor
+      if updated = Fuzz::Template.set_chain(@editor.text, @chain_marker_cursor, @chain_pane.value)
+        @editor.set_text_keeping_eols(updated)
+        @editor.place_at_offset(anchor) # back into the marker (set_text reset it) → tooltip stays up
+        @dirty = true
+      end
+      @chain_focused = false
+    end
+
+    # Leave the CHAIN pane WITHOUT writing its edits back to the marker (esc =
+    # cancel, the universal editor convention). The editor text was never touched
+    # while the pane had focus — only commit_chain_pane writes — so dropping focus
+    # is a clean discard; restore the cursor onto the marker so its tooltip stays up.
+    def discard_chain_pane : Nil
+      return unless @chain_focused
+      anchor = Fuzz::Template.marker_start_at(@editor.text, @chain_marker_cursor) || @chain_marker_cursor
+      @editor.place_at_offset(anchor)
+      @chain_focused = false
+    end
+
+    # Route a key while the CHAIN pane is focused: typing/autocomplete stays in the
+    # pane; ↵/tab/↑ commit the edit and return to the editor, while esc
+    # cancels (discards the edit) — matching how esc backs out elsewhere.
+    def handle_chain_pane_key(ev : Termisu::Event::Key) : Nil
+      return if @chain_pane.handle_key(ev) # consumed by the pane (edit / completion nav)
+      key = ev.key
+      if key.escape?
+        discard_chain_pane
+      elsif key.enter? || key.tab? || key.up?
+        commit_chain_pane
+      end
+    end
+  end
 end

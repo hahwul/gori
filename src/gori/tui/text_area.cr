@@ -546,10 +546,9 @@ module Gori::Tui
     #
     # These transforms only ever insert or delete characters WITHIN a line (^F's query and
     # replacement cannot hold a newline — `handle_search_key` drops control chars), so the
-    # line count is invariant and the terminators can simply be put back. Lifted from
-    # `FuzzerView#restore_wire_eols`, which is the same guard around the same five helpers;
-    # the fallback is its fallback too — better a buffer that lost its CRLFs than one whose
-    # terminators were reattached to the wrong lines.
+    # line count is invariant and the terminators can simply be put back. Falls back to
+    # `lf_text` unchanged when the line count did move — better a buffer that lost its CRLFs
+    # than one whose terminators were reattached to the wrong lines.
     def set_text_keeping_eols(lf_text : String) : Nil
       set_text(with_wire_eols(lf_text))
     end
@@ -762,18 +761,7 @@ module Gori::Tui
         move(0, -1, selecting: selecting) # at column 0 a word step is just "up a line"
         return
       end
-      line = @lines[@cy]
-      i = @cx.clamp(0, line.size)
-      while i > 0 && line[i - 1].whitespace?
-        i -= 1
-      end
-      if i > 0
-        word = word_char?(line[i - 1])
-        while i > 0 && !line[i - 1].whitespace? && word_char?(line[i - 1]) == word
-          i -= 1
-        end
-      end
-      @cx = i
+      @cx = LineEdit.word_left(@lines[@cy], @cx)
       snap_cx_to_cluster(-1)
       snap_cx_out_of_conceal(-1) unless @conceal_spans.empty?
       break_run # a caret move ends the typing run — see push_undo
@@ -787,17 +775,7 @@ module Gori::Tui
         move(0, 1, selecting: selecting) # at EOL a word step is "down a line"
         return
       end
-      i = @cx.clamp(0, line.size)
-      if i < line.size && !line[i].whitespace?
-        word = word_char?(line[i])
-        while i < line.size && !line[i].whitespace? && word_char?(line[i]) == word
-          i += 1
-        end
-      end
-      while i < line.size && line[i].whitespace?
-        i += 1
-      end
-      @cx = i
+      @cx = LineEdit.word_right(line, @cx)
       snap_cx_to_cluster(1)
       snap_cx_out_of_conceal(1) unless @conceal_spans.empty?
       break_run # a caret move ends the typing run — see push_undo
@@ -823,10 +801,6 @@ module Gori::Tui
       @edits += 1
       refresh_env_complete
       true
-    end
-
-    private def word_char?(c : Char) : Bool
-      c.alphanumeric? || c == '_' || c == '-'
     end
 
     # Forward delete: remove the char under the cursor, or join the next line when at EOL.

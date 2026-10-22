@@ -140,14 +140,6 @@ module Gori::Tui
         end
     end
 
-    def move(delta : Int32) : Nil
-      if preview_enabled? && @preview_focus == :preview
-        scroll_preview(delta)
-        return
-      end
-      move_list(delta)
-    end
-
     # The list cursor whatever has keyboard focus — the wheel over the list (`move` would
     # scroll a focused preview instead).
     def move_list(delta : Int32) : Nil
@@ -169,35 +161,6 @@ module Gori::Tui
       hdr_y = list_rect.y + 1
       hdr_y += 1 if @querying
       hdr_y + 2 # past the column header and its divider
-    end
-
-    # Inverts render_list's row layout: maps a click to an issue index, or nil past the last
-    # populated row / outside the list pane.
-    def list_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
-      list_rect, _ = list_split(rect)
-      return nil if mx < list_rect.x || mx >= list_rect.right
-      top = list_top(list_rect)
-      list_h = {list_rect.bottom - top, 0}.max
-      i = my - top
-      return nil if i < 0 || i >= list_h
-      idx = @scroll + i
-      idx < @issues.size ? idx : nil
-    end
-
-    # The row a click on the list's scroll gauge asks for. The gauge rides the frame's right
-    # hairline — one column OUTSIDE the list rect, which is why `list_row_at` cannot answer it
-    # — and this list's `@scroll` is DERIVED from the selection by render's `ensure_visible`,
-    # so the answer is a selection, not an offset. See `Frame.scroll_gauge_row`.
-    def gauge_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
-      list_rect, _ = list_split(rect)
-      top = list_top(list_rect) # same band list_row_at and the gauge draw measure
-      Frame.scroll_gauge_row(Rect.new(list_rect.x, top, list_rect.w, {list_rect.bottom - top, 0}.max),
-        @issues.size, mx, my)
-    end
-
-    def preview_at?(rect : Rect, mx : Int32, my : Int32) : Bool
-      _, prev = list_split(rect)
-      !!prev.try(&.contains?(mx, my))
     end
 
     # Sets the list selection (clamped like #move); render's ensure_visible then
@@ -273,18 +236,6 @@ module Gori::Tui
     # Rows in the filtered list — the bound the item step clamps against.
     def row_count : Int32
       @issues.size
-    end
-
-    # First index of the window the rail shows. Private: everything outside reads
-    # `rail_rows`/`rail_cursor`, which are derived from it.
-    private def rail_start : Int32
-      here = detail_row_index || return 0
-      DrillIn.window_start(@issues.size, here)
-    end
-
-    # See DrillIn::Host.
-    def rail_cursor : Int32
-      (detail_row_index || 0) - rail_start
     end
 
     # The rail's window of list context around the open item — see DrillIn.
@@ -1162,7 +1113,7 @@ module Gori::Tui
         render_preview_pane(screen, preview_rect, focused) if preview_rect
         # LAST: the dropdown is the only thing allowed to occlude the list, so it has to be
         # painted over both panes rather than inside `render_list`.
-        render_query_popup(screen, list_rect)
+        render_query_popup(screen, list_rect, list_top(list_rect), QUERY_PREFIX, Issues::Filter::FIELD_HELP_PROC)
       end
     end
 
@@ -1181,7 +1132,11 @@ module Gori::Tui
       # inverse and the hit-tests read it.
       hdr_y = rect.y + 1
       if @querying
-        render_suggestions(screen, rect, hdr_y)
+        # The suggestion row owes its own vertical bound, like the column header below it:
+        # `Screen#text` clips to the SCREEN, not to this pane, and a 40x9 terminal
+        # (`Layout.usable?`'s floor plus a row) leaves this list a one-row interior — the `↹ …`
+        # row landed on the shell's key-hint line. Contract: `spec/tui/contract_render_bounds_spec.cr`.
+        render_query_suggestions(screen, rect, hdr_y, QUERY_HINT, Issues::Filter::FIELD_HELP_PROC) if hdr_y < rect.bottom
         hdr_y += 1
       end
       # Bounds-guarded like Probe's twin: `Screen#text` clips to the SCREEN, not to this pane,
@@ -1311,34 +1266,8 @@ module Gori::Tui
         FilterAst::EMPTY_NAMESPACES, Issues::Filter::CANDIDATE_FIELDS)
     end
 
-    private def render_preview_pane(screen : Screen, rect : Rect, focused : Bool) : Nil
-      return if rect.empty? || rect.h < 2
-      border = Frame.pane_border(focused)
-      Frame.inner_divider(screen, rect, rect.y, border: border)
-      f = @issues[@selected]?
-      unless f
-        screen.text(rect.x + 1, rect.y + 1, "preview — select an issue", Theme.muted,
-          width: {rect.w - 2, 0}.max)
-        return
-      end
-      active = focused && @preview_focus == :preview
-      body = Rect.new(rect.x, rect.y + 1, rect.w, {rect.h - 1, 0}.max)
-      return if body.h < 1
-      screen.fill(body, Theme.selection_dim) if active
-      bg = active ? Theme.selection_dim : Theme.bg
-      lines = issues_preview_lines(f)
-      # Write the clamp back (as Probe's twin does) so overscrolling a short preview can't
-      # inflate @preview_scroll and leave later scroll-up presses dead until it drains back.
-      @preview_scroll = @preview_scroll.clamp(0, {lines.size - 1, 0}.max)
-      sc = @preview_scroll
-      w = {body.w - 2, 0}.max
-      (0...body.h).each do |i|
-        li = sc + i
-        break if li >= lines.size
-        fg, text = lines[li]
-        screen.text(body.x + 1, body.y + i, text, fg, bg, width: w)
-      end
-      Frame.scroll_gauge(screen, body, lines.size, sc, false, bg)
+    private def selected_preview_lines : Array({Color, String})?
+      @issues[@selected]?.try { |f| issues_preview_lines(f) }
     end
 
     private def issues_preview_lines(f : Store::Issue) : Array({Color, String})
@@ -1397,42 +1326,6 @@ module Gori::Tui
       else
         screen.text(rect.x + 1, rect.y, QuerySuggest.idle_hint("/ filter", Issues::Filter::HINT_FIELDS, left_w), Theme.muted, width: left_w)
       end
-    end
-
-    # The completion row under the bar: what ↹ would take, what it MEANS, and what else is on
-    # offer — else the standing hint at a cold start. `Issues::Filter::FIELD_HELP_PROC`, never
-    # the default: `QuerySuggest`'s fallback is `QL::FIELD_HELP`, which would describe this
-    # bar's triage-state `status:` as an HTTP code.
-    private def render_suggestions(screen : Screen, rect : Rect, y : Int32) : Nil
-      # This row owes its own vertical bound, like the column header below it: `Screen#text`
-      # clips to the SCREEN, not to this pane, and a 40x9 terminal (`Layout.usable?`'s floor
-      # plus a row) leaves this list a one-row interior — the `↹ …` row landed on the shell's
-      # key-hint line. Contract: `spec/tui/contract_render_bounds_spec.cr`.
-      return if y >= rect.bottom
-      w = {rect.w - 2, 0}.max
-      sugg = query_suggestions
-      unless sugg.empty?
-        QuerySuggest.render(screen, rect.x + 1, y, w, sugg, Issues::Filter::FIELD_HELP_PROC)
-        return
-      end
-      # Nothing to complete. At a cold start (nothing typed, or the caret just past a space)
-      # show the standing hint so the grammar is discoverable from the moment `/` opens; on a
-      # non-empty token that matches nothing stay quiet — the operator is free-texting a word.
-      return unless QuerySuggest.hint_slot?(FilterAst.token_at(@query, @qcx).core)
-      screen.text(rect.x + 1, y, QUERY_HINT, Theme.muted, width: w)
-    end
-
-    # Anchored under the suggestion row and bounded by the list, which is the only region it
-    # may occlude. Anchored at the START of the query text, not at the token's offset within
-    # it: `Screen#input_line` scrolls its window once the query outgrows the bar, so
-    # `base + token.start` stops being the token's screen column on exactly the long queries
-    # where precision would matter.
-    private def render_query_popup(screen : Screen, rect : Rect) : Nil
-      return unless @querying && @popup.open?
-      top = list_top(rect)
-      bounds = Rect.new(rect.x + 1, top, {rect.w - 2, 0}.max, {rect.bottom - top, 0}.max)
-      @popup.render(screen, rect.x + 1 + QUERY_PREFIX.size, top - 1, bounds,
-        Issues::Filter::FIELD_HELP_PROC)
     end
 
     # Mark count, drawn right-to-left ending just left of `right_x`; returns the new left

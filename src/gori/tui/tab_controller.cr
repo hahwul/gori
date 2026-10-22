@@ -460,16 +460,14 @@ module Gori::Tui
     #
     # Safe against the keymap by construction: `Verb::Chord` parses only letters, digits and
     # punctuation, so none of these can ever BE a binding. Repeater and Fuzzer each carried a
-    # byte-identical private copy of this and its `word_delete?` half; the Decoder and JWT
+    # byte-identical private copy of this and of `LineEdit.word_delete_key?`; the Decoder and JWT
     # needed it too, and a fourth copy is how the first three drifted apart in every other
     # part of this sweep.
     def editing_motion?(ev : Termisu::Event::Key) : Bool
       return false unless ev.ctrl? || ev.alt?
       key = ev.key
       return true if key.left? || key.right? || key.home? || key.end?
-      return true if key.backspace?
-      c = ev.char
-      !!c && (c == '\u{7F}' || c == '\b')
+      LineEdit.word_delete_key?(ev)
     end
 
     # An arrow OR its vim twin — and the twin only when the press carries NO command

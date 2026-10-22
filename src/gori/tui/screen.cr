@@ -676,12 +676,9 @@ module Gori::Tui
     # SHREDS a cluster across cells, stranding a bare combining mark in one of its own. Span
     # edges snap outward so the tint covers whole glyphs.
     #
-    # Seven views carry this as an identical private method (`paint_char_span_bg`); two of
-    # them — the WRAPPING panes, History detail and the Repeater request — carry a variant
-    # that takes a `row_start` and measures with `Wrap.row_col` instead. This is the plain
-    # one, promoted so `TextField` could paint a band without becoming an eighth copy. The
-    # existing seven are untouched: folding them in is a cleanup of its own, and the two
-    # wrap-aware ones are not this function.
+    # The WRAPPING panes, History detail and the Repeater request, carry a variant
+    # (`paint_char_span_bg`) that takes a `row_start` and measures with `Wrap.row_col` instead;
+    # this is the plain one.
     def char_span_bg(x : Int32, y : Int32, line : String, x0 : Int32, x1 : Int32, bg : Color) : Nil
       return if x0 >= x1
       a = Screen.cluster_start(line, {x0, line.size}.min)
