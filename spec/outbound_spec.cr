@@ -88,7 +88,7 @@ describe Gori::Outbound do
         scope.add("include", "host", "other.test")
         agent = Gori::Outbound.agent(scope, true)
         agent.check(URL, "acme.test").blocked?.should be_false
-        agent.gated?.should be_false
+        agent.gate.waived?.should be_true
         agent.reason.should eq(Gori::Outbound::Reason::Operator)
         agent.label.should eq("unscoped:operator")
         # The waiver does not rewrite what the scope actually said.
@@ -103,7 +103,7 @@ describe Gori::Outbound do
     it "turns a missing project into an explicit Unscoped(NoProject), not a silent skip" do
       ob = Gori::Outbound.cli(nil, false)
       ob.scope.should be_nil
-      ob.gated?.should be_false
+      ob.gate.waived?.should be_true
       ob.reason.should eq(Gori::Outbound::Reason::NoProject)
       ob.label.should eq("unscoped:no_project")
       # Permissive exactly as the old `scope ? ScopedBackend.new(...) : sender` was — the

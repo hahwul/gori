@@ -916,9 +916,9 @@ describe SettingsView do
       v.toggle_or_move(1)
       v.save
       Gori::Settings.mcp_permission_state("send").should eq("ask")
-      Gori::Settings.mcp_permitted?("intercept").should be_false
-      Gori::Settings.mcp_permitted?("write").should be_true
-      Gori::Settings.mcp_permitted?("future").should be_false
+      Gori::Settings.mcp_permission_state("intercept").should eq("off")
+      Gori::Settings.mcp_permission_state("write").should eq("on")
+      Gori::Settings.mcp_permission_state("future").should eq("off")
 
       v.reset_to_defaults
       v.save

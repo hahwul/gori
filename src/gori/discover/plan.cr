@@ -217,8 +217,8 @@ module Gori::Discover
     # The waiver test is on `Reason::Operator` specifically, NOT on `gate.waived?`: the TUI's
     # Outbound is also waived, for `Reason::Interactive`, and "the human typed this target"
     # is not a request to drop the include boundary the same human configured. (That test
-    # would read better as an `Outbound#operator_waived?` predicate — `src/gori/outbound.cr`
-    # already names `gated?` for the same reason — but that file belongs to another issue.)
+    # would read better as an `Outbound#operator_waived?` predicate, but that file belongs to
+    # another issue.)
     private def self.resolve_policy(outbound : Gori::Outbound, seed : String, host : String) : ScopePolicy
       scope = outbound.scope
       # The scope's OWN reading of the seed, not a second copy of it: `Verdict#decision` is

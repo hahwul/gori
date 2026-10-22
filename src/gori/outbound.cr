@@ -369,12 +369,6 @@ module Gori
       check_request(scheme, host, target, port)
     end
 
-    # Whether Layer 1 is enforced at all — for the log/audit line that records how a send
-    # was authorised.
-    def gated? : Bool
-      !@gate.waived?
-    end
-
     # A short audit token for logs: "gated" or "unscoped:operator".
     def label : String
       (r = @reason) ? "unscoped:#{r.label}" : "gated"

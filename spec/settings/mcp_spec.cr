@@ -99,9 +99,9 @@ describe "Settings mcp section" do
         File.write(File.join(dir, "settings.json"),
           %({"mcp_permissions":{"send":"false","intercept":0,"write":true,"custom":"x"}}))
         Gori::Settings.load
-        Gori::Settings.mcp_permitted?("send").should be_false
-        Gori::Settings.mcp_permitted?("intercept").should be_false
-        Gori::Settings.mcp_permitted?("write").should be_true
+        Gori::Settings.mcp_permission_state("send").should eq("off")
+        Gori::Settings.mcp_permission_state("intercept").should eq("off")
+        Gori::Settings.mcp_permission_state("write").should eq("on")
         Gori::Settings.mcp_denied_permissions.should_not contain("custom")
       end
     end
@@ -134,7 +134,7 @@ describe "Settings mcp section" do
   describe "permissions" do
     it "allows every group by default and writes nothing for it" do
       with_mcp_home do
-        Gori::Settings::MCP_PERMISSIONS.all? { |p| Gori::Settings.mcp_permitted?(p.key) }.should be_true
+        Gori::Settings::MCP_PERMISSIONS.all? { |p| Gori::Settings.mcp_permission_state(p.key) == "on" }.should be_true
         Gori::Settings.document_keys.should_not contain("mcp_permissions")
       end
     end
@@ -143,7 +143,7 @@ describe "Settings mcp section" do
     # with `channels` let a window that toggled Channel delivery write back stale denials.
     it "writes only the denied groups, in their own section apart from channels" do
       with_mcp_home do
-        Gori::Settings.set_mcp_permitted("send", false)
+        Gori::Settings.set_mcp_permission_state("send", "off")
         Gori::Settings.document_keys.should contain("mcp_permissions")
         Gori::Settings.document_keys.should_not contain("mcp")
         perms = JSON.parse(Gori::Settings.export_document(["mcp_permissions"]))["mcp_permissions"].as_h
@@ -166,21 +166,21 @@ describe "Settings mcp section" do
 
     it "round-trips through save/load" do
       with_mcp_home do
-        Gori::Settings.set_mcp_permitted("intercept", false)
+        Gori::Settings.set_mcp_permission_state("intercept", "off")
         Gori::Settings.save.should be_true
         Gori::Settings.mcp_denied_permissions = Set(String).new
         Gori::Settings.load
-        Gori::Settings.mcp_permitted?("intercept").should be_false
-        Gori::Settings.mcp_permitted?("send").should be_true
+        Gori::Settings.mcp_permission_state("intercept").should eq("off")
+        Gori::Settings.mcp_permission_state("send").should eq("on")
       end
     end
 
     it "treats the section as the whole set: a key it no longer names is allowed again" do
       with_mcp_home do
-        Gori::Settings.set_mcp_permitted("send", false)
+        Gori::Settings.set_mcp_permission_state("send", "off")
         Gori::Settings.import_document(%({"mcp_permissions":{"write":false,"send":true}}))
-        Gori::Settings.mcp_permitted?("send").should be_true
-        Gori::Settings.mcp_permitted?("write").should be_false
+        Gori::Settings.mcp_permission_state("send").should eq("on")
+        Gori::Settings.mcp_permission_state("write").should eq("off")
       end
     end
 
@@ -190,23 +190,23 @@ describe "Settings mcp section" do
     it "reads a pre-split write:false as scope denied, and round-trips write off with scope on" do
       with_mcp_home do
         Gori::Settings.import_document(%({"mcp_permissions":{"write":false}}))
-        Gori::Settings.mcp_permitted?("scope").should be_false
-        Gori::Settings.set_mcp_permitted("scope", true)
+        Gori::Settings.mcp_permission_state("scope").should eq("off")
+        Gori::Settings.set_mcp_permission_state("scope", "on")
         doc = Gori::Settings.export_document(["mcp_permissions"])
         Gori::Settings.mcp_denied_permissions = Set(String).new
         Gori::Settings.import_document(doc)
-        Gori::Settings.mcp_permitted?("write").should be_false
-        Gori::Settings.mcp_permitted?("scope").should be_true
+        Gori::Settings.mcp_permission_state("write").should eq("off")
+        Gori::Settings.mcp_permission_state("scope").should eq("on")
       end
     end
 
     it "keeps the current set for an absent or non-object section" do
       with_mcp_home do
-        Gori::Settings.set_mcp_permitted("send", false)
+        Gori::Settings.set_mcp_permission_state("send", "off")
         Gori::Settings.import_document(%({"mcp":{"channels":true}}))
-        Gori::Settings.mcp_permitted?("send").should be_false
+        Gori::Settings.mcp_permission_state("send").should eq("off")
         Gori::Settings.import_document(%({"mcp_permissions":"none"}))
-        Gori::Settings.mcp_permitted?("send").should be_false
+        Gori::Settings.mcp_permission_state("send").should eq("off")
       end
     end
 
@@ -214,14 +214,14 @@ describe "Settings mcp section" do
     it "keeps an unknown denied key through a save" do
       with_mcp_home do
         Gori::Settings.import_document(%({"mcp_permissions":{"future":false}}))
-        Gori::Settings.mcp_permitted?("future").should be_false
+        Gori::Settings.mcp_permission_state("future").should eq("off")
         JSON.parse(Gori::Settings.export_document(["mcp_permissions"]))["mcp_permissions"]["future"].as_bool.should be_false
       end
     end
 
     it "is cleared by the factory reset" do
       with_mcp_home do
-        Gori::Settings.set_mcp_permitted("projects", false)
+        Gori::Settings.set_mcp_permission_state("projects", "off")
         Gori::Settings.save.should be_true
         Gori::Settings.reset_to_factory.should eq(Gori::Settings::ResetResult::Saved)
         Gori::Settings.mcp_denied_permissions.empty?.should be_true
@@ -243,7 +243,6 @@ describe "Settings mcp section" do
           Gori::Settings.mcp_permission_state("send").should eq("ask")
           Gori::Settings.mcp_permission_state("projects").should eq("off")
           Gori::Settings.mcp_permission_state("write").should eq("on")
-          Gori::Settings.mcp_permitted?("send").should be_true
         end
       end
 

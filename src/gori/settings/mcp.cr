@@ -95,14 +95,6 @@ module Gori::Settings
     MCP_PERMISSIONS.select { |p| keys.includes?(p.key) }
   end
 
-  def self.mcp_permitted?(key : String) : Bool
-    !mcp_denied_permissions.includes?(key)
-  end
-
-  def self.set_mcp_permitted(key : String, allowed : Bool) : Nil
-    set_mcp_permission_state(key, allowed ? "on" : "off")
-  end
-
   # "on", "ask" or "off".
   def self.mcp_permission_state(key : String) : String
     return "off" if mcp_denied_permissions.includes?(key)
