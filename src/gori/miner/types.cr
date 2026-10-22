@@ -207,7 +207,7 @@ module Gori
         Array(String).new(n) { |i| "gq#{raw[i * 4, 4].hexstring}" }
       end
 
-      # A random name that almost certainly does not exist — for the per-location
+      # Random names that almost certainly do not exist — for the per-location
       # baseline control (does the app react to ANY unknown param here?) and for the padding
       # that keeps every probe of the run the same width as that control.
       #
@@ -215,14 +215,8 @@ module Gori
       # a page does about the LENGTH of the names it is handed as distinct from how many of
       # them there were (`Baseline::Reference#echo`). Odd lengths get one extra hex digit and
       # are then trimmed, so the name is always exactly `len` bytes of `zz` + lower hex.
-      def self.bogus_name(len : Int32 = 12) : String
-        n = len.clamp(3, 128)
-        "zz#{Random::Secure.hex((n - 1) // 2)}"[0, n]
-      end
-
-      # `n` bogus names of exactly `len` bytes, GUARANTEED DISTINCT, from one CSPRNG draw.
       #
-      # Two reasons this is not `n` calls to `bogus_name`. The names must be distinct: a
+      # `n` of them, GUARANTEED DISTINCT, from one CSPRNG draw. The names must be distinct: a
       # control bucket that carries the same name twice is one parameter NARROWER than the
       # probes measured against it, so on a page that reacts to how many parameters it was
       # handed, every single probe then shows the extra row and the whole wordlist bisects to
