@@ -481,7 +481,7 @@ module Gori
 
       # Rewrite a request line's HTTP-version token to match the transport when the user
       # flips the h1↔h2 toggle. The h1 `Engine` sends the request line VERBATIM, so a flow
-      # captured over h2 (stored with a "…​ HTTP/2" line, see H2 Assembler#synth_request_head)
+      # captured over h2 (stored with a "…​ HTTP/2" line, see H2::HeadCodec.synth_request)
       # would otherwise reach an h1 origin as a malformed "GET / HTTP/2"; `H2Engine` ignores
       # the token, but we still normalize it so the editor display agrees with the wire.
       # The version is the LAST space-delimited token (a raw space inside the target is
