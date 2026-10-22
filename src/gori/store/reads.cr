@@ -1055,6 +1055,40 @@ module Gori
       [] of SitemapEntry
     end
 
+    # How many flows one active tool (`FlowSource::Kind#active?`) sent to one origin endpoint.
+    # `path` is the target cut at its query: a fuzz sweep over `?q=` sends a new target per
+    # payload, and every one of them tested the same endpoint.
+    record CoverageEntry, scheme : String, host : String, port : Int32, method : String,
+      path : String, source : String, count : Int64
+
+    # Every active tool's flows, grouped per origin endpoint and tool — the sitemap's coverage
+    # (`Sitemap::Coverage`). Unfiltered on purpose: whether an endpoint was tested does not
+    # depend on which of its flows a query shows.
+    #
+    # `source` sits after the body BLOBs, so reading it off the table would walk every active
+    # row's overflow chain. `idx_flows_list` (V37) covers every column read here, so the
+    # planner scans that index and never touches a row (`spec/store/sitemap_index_spec.cr`
+    # pins the plan). Release build: 6 ms at 20k flows, 41 ms at 100k, against 33 ms / 362 ms
+    # for the same read off the table.
+    # ponytail: a whole-index scan, since no index leads with `source`. If a 1M-flow project
+    # makes it hurt, a partial index on (source, scheme, host, port, method, target) WHERE
+    # source <> 'proxy' seeks only gori's own rows and leaves proxy capture writes untouched.
+    def endpoint_coverage : Array(CoverageEntry)
+      tokens = FlowSource::Kind.values.select(&.active?).map(&.token)
+      rows = [] of CoverageEntry
+      sql = "SELECT scheme, host, port, method, " \
+            "substr(target, 1, instr(target || '?', '?') - 1) AS path, source, COUNT(*) " \
+            "FROM flows WHERE source IN (#{Array.new(tokens.size, "?").join(", ")}) " \
+            "GROUP BY scheme, host, port, method, path, source"
+      @db.query(sql, args: tokens.map(&.as(DB::Any))) do |rs|
+        rs.each do
+          rows << CoverageEntry.new(rs.read(String), rs.read(String), rs.read(Int32), rs.read(String),
+            rs.read(String), rs.read(String), rs.read(Int64))
+        end
+      end
+      rows
+    end
+
     #
     # `control` makes the read cooperative (`controlled_query`): the Sitemap's `/` bar runs
     # this on a worker fiber, and the DISTINCT scan over the flow table is the two thirds of
