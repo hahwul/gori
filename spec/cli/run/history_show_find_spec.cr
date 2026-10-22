@@ -6,7 +6,7 @@ require "json"
 module Gori::CLI::Run
   def self.show_find_json_for_spec(detail : Store::FlowDetail, f : ShowFind, request : Bool) : JSON::Any
     io = IO::Memory.new
-    show_find(detail, f, request, true, io)
+    show_find(detail, f, request, true, Redact::Policy::Choice.new, io)
     JSON.parse(io.to_s)
   end
 end
@@ -32,6 +32,7 @@ describe "gori run show --find" do
       find_flags("token=\\w+"), false)
     m = j["matches"][0]
     {m["offset"].as_i, m["length"].as_i, j["part"].as_s, j["has_more"].as_bool}.should eq({2, 9, "response", false})
+    j["origin"].as_s.should eq("target")
   end
 
   it "withholds a request head carrying a credential, as paging does" do
@@ -39,6 +40,7 @@ describe "gori run show --find" do
     j = Gori::CLI::Run.show_find_json_for_spec(detail, find_flags("s3cr3t"), true)
     j["matches"].as_a.should be_empty
     j["head_omitted"].as_bool.should be_true
+    j["origin"].as_s.should eq("client")
     j = Gori::CLI::Run.show_find_json_for_spec(detail, find_flags("s3cr3t", include_sensitive: true), true)
     j["matches"][0]["offset"].as_i.should eq(38)
   end
@@ -51,7 +53,17 @@ describe "gori run show --find" do
     tuned = Gori::CLI::Run::ShowFind.new
     tuned.tuned = true
     Gori::CLI::Run.show_find_error(tuned, :text, redaction).not_nil!.should contain("need --find")
+    Gori::CLI::Run.show_find_error(find_flags("x"), :text, redaction, ["--original", "--max-body"])
+      .not_nil!.should contain("--original, --max-body cannot apply")
     redaction.mode = true
     Gori::CLI::Run.show_find_error(find_flags("x"), :text, redaction).not_nil!.should contain("--redact")
+  end
+
+  it "refuses a redaction profile that is on by default, and one that does not resolve" do
+    Gori::CLI::Run.show_find_choice_error(Gori::Redact::Policy::Choice.new).should be_nil
+    on = Gori::Redact::Policy::Choice.new(matcher: Gori::Redact::Matcher.new(Gori::Redact::DEFAULT_PROFILE))
+    Gori::CLI::Run.show_find_choice_error(on).not_nil!.should contain("--no-redact")
+    bad = Gori::Redact::Policy::Choice.new(error: "no redaction profile named 'x'")
+    Gori::CLI::Run.show_find_choice_error(bad).should eq("no redaction profile named 'x'")
   end
 end

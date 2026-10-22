@@ -549,8 +549,7 @@ module Gori
         # so a caller knows more decoded data may exist and can page the wire bytes with raw:true.
         decode_capped = !decoded.nil? && decoded.size >= Proxy::Codec::ContentDecode::MAX_OUT
         if pattern = options.find
-          return find_in_body(options, pattern, bytes, !decoded.nil?, decode_capped, source_truncated,
-            head_omitted, trailers_omitted)
+          return find_in_body(options, pattern, view, decode_capped, source_truncated)
         end
         # An offset past the end used to silently clamp to the body end (0 bytes,
         # complete:true) — indistinguishable from a legitimate final read. Surface
@@ -670,10 +669,9 @@ module Gori
       # withholding and the same decode — so every match `offset` is an `offset` for this tool
       # with the same `part`/`raw`/`include_sensitive`, and a withheld credential is never
       # searched. The search starts at `offset`; `next_offset` continues it.
-      private def find_in_body(options : BodyChunkOptions, pattern : String, bytes : Bytes, decoded : Bool,
-                               decode_capped : Bool, source_truncated : Bool, head_omitted : Bool,
-                               trailers_omitted : Bool) : Result
-        page = BodyFind.run(bytes, pattern, options.offset, options.max_matches, options.context)
+      private def find_in_body(options : BodyChunkOptions, pattern : String, view : Serialize::PageView,
+                               decode_capped : Bool, source_truncated : Bool) : Result
+        page = BodyFind.run(view.bytes, pattern, options.offset, options.max_matches, options.context)
         parts = fit_rows(page.matches) do |rj, m, _|
           rj.object do
             rj.field "offset", m.offset
@@ -688,12 +686,14 @@ module Gori
             j.field "flow_id", options.flow_id
             j.field "repeater_id", options.repeater_id
             j.field "part", options.part
+            j.field "origin", options.request? ? "client" : "target" # as the pager labels it (#1586)
             j.field "find", pattern
             j.field "offset", options.offset
-            j.field "total_bytes", bytes.size
-            j.field "representation", decoded ? "decoded" : "raw"
-            j.field "head_omitted", true if head_omitted
-            j.field "trailers_omitted", true if trailers_omitted
+            j.field "total_bytes", view.bytes.size
+            j.field "representation", view.decoded? ? "decoded" : "raw"
+            j.field "decode_note", view.decode_note if view.decode_note
+            j.field "head_omitted", true if view.head_omitted?
+            j.field "trailers_omitted", true if view.trailers_omitted?
             j.field "decode_capped", true if decode_capped
             j.field "source_truncated", true if source_truncated
             j.field "returned", parts.size
@@ -701,7 +701,7 @@ module Gori
             emit_cut(j, cut)
             j.field "has_more", !next_offset.nil?
             j.field "next_offset", next_offset
-            j.field "stopped", "regex time budget ran out; matches past next_offset are unknown" if page.stopped
+            j.field "stopped", BodyFind::STOPPED if page.stopped
           end
         end)
       rescue ex : ArgumentError
@@ -747,9 +747,7 @@ module Gori
           return not_found("no flow with id #{id}") unless detail
           # `get_flow` already returns a captured request head with a base64 companion; this
           # is the paged route to the same bytes plus the body, for a request too big to inline.
-          head = detail.request_head || Bytes.new(0)
-          body = detail.request_body
-          {nil, body ? join_bytes(head, body) : head, detail.request_body_truncated?}
+          {nil, Serialize.request_wire(detail.request_head, detail.request_body), detail.request_body_truncated?}
         else
           Result.new("pass exactly one of flow_id or repeater_id", is_error: true)
         end
@@ -783,15 +781,6 @@ module Gori
         return busy("history NOT cleared (store busy or unwritable); every flow is still there") unless store.clear_flows
         @body_chunk_memo = nil
         Result.new({"deleted" => n, "cleared" => true}.to_json)
-      end
-
-      # head+body as one buffer, copied in two block moves (a per-byte block over a request of
-      # several MiB was a closure call per byte).
-      private def join_bytes(head : Bytes, body : Bytes) : Bytes
-        joined = Bytes.new(head.size + body.size)
-        head.copy_to(joined)
-        body.copy_to(joined + head.size)
-        joined
       end
 
       private def load_response_body(flow_id : Int64?, repeater_id : Int64?) : ChunkSource | Result

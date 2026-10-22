@@ -1333,7 +1333,7 @@ describe "MCP get_response_body_chunk find" do
         resp_head: "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\n\r\n",
         resp_body: gzip_bytes("aaa SECRET-1 bbb SECRET-22 ccc"), content_type: "text/plain")
       j = JSON.parse(chunk_call(store, %({"flow_id":#{id},"find":"SECRET-\\\\d+","max_matches":1,"context":2})).text)
-      j["representation"].as_s.should eq("decoded")
+      {j["representation"].as_s, j["origin"].as_s}.should eq({"decoded", "target"})
       m = j["matches"][0]
       {m["offset"].as_i, m["length"].as_i, m["snippet"].as_s}.should eq({4, 8, "a SECRET-1 b"})
       j["has_more"].as_bool.should be_true

@@ -256,6 +256,18 @@ module Gori
         end
       end
 
+      # A request as the pager reads it: the stored head and body as one wire message. Copied in
+      # two block moves (a per-byte block over a request of several MiB was a closure call per
+      # byte).
+      def self.request_wire(head : Bytes?, body : Bytes?) : Bytes
+        head ||= Bytes.new(0)
+        return head unless body
+        joined = Bytes.new(head.size + body.size)
+        head.copy_to(joined)
+        body.copy_to(joined + head.size)
+        joined
+      end
+
       def self.page_view(head : Bytes?, stored : Bytes, *, request : Bool, raw : Bool, include_sensitive : Bool,
                          & : Bytes?, Bytes -> {Bytes?, String?}) : PageView
         head_omitted = false

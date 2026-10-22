@@ -318,7 +318,7 @@ gori run show <flow-id> --format raw
 
 `--ws-match=QUERY`는 트랜스크립트를 싣는 모든 형식에서 매칭되는 WebSocket 메시지만 찍습니다. `ws:needle`(대소문자 무시), `ws~regex`, 또는 접두어 없는 needle을 받고, [`ws:` 쿼리 필드](/ko/reference/query-language/#websocket-messages)와 똑같이 매칭합니다. 소켓의 메시지 중 몇 개를 남겼는지는 STDERR 한 줄로 알려 줍니다.
 
-`--find=REGEX`는 응답 본문(`--request-only`면 요청)에서 REGEX(QL `body~`와 같은 매칭)가 나오는 곳을 한 줄에 `offset`, `length`, 따옴표 친 스니펫으로 찍습니다. `--format json`은 MCP `get_response_body_chunk{find}`와 같은 객체입니다. 그 도구가 페이징하는 바이트를 검색하므로 각 오프셋은 같은 쪽의 `get_response_body_chunk` 오프셋입니다. `--find-raw`가 없으면 디코드된 본문을 검색하고, 자격 증명을 실은 요청 헤드나 chunked 트레일러는 `--include-sensitive`가 없으면 건너뜁니다. `--find-max=N`(기본 20), `--find-context=BYTES`(기본 40), `--find-from=OFFSET`(더 있을 때 STDERR가 알려 주는 `next_offset`)으로 조절합니다. text와 json만 되고, 리댁션된 사본은 오프셋이 다르므로 `--redact`는 거부합니다.
+`--find=REGEX`는 응답 본문(`--request-only`면 요청)에서 REGEX(QL `body~`와 같은 매칭)가 나오는 곳을 한 줄에 `offset`, `length`, 따옴표 친 스니펫으로 찍습니다. `--format json`은 MCP `get_response_body_chunk{find}`와 같은 객체입니다. 그 도구가 페이징하는 바이트를 검색하므로 각 오프셋은 같은 쪽의 `get_response_body_chunk` 오프셋입니다. `--find-raw`가 없으면 디코드된 본문을 검색하고, 자격 증명을 실은 요청 헤드나 chunked 트레일러는 `--include-sensitive`가 없으면 건너뜁니다. `--find-max=N`(기본 20), `--find-context=BYTES`(기본 40), `--find-from=OFFSET`(더 있을 때 STDERR가 알려 주는 `next_offset`)으로 조절합니다. text와 json만 됩니다. `--redact`, 기본으로 켜진 리댁션 프로파일(`--no-redact`를 주세요), `--original`, `--headers-only`, `--max-body`, `--ws-match`는 페이저와 다른 바이트를 검색하게 되므로 거부합니다.
 
 `--original`은 [Match & Replace 규칙](/ko/guide/proxy/#match-replace)이나 Intercept 편집이 바꾸기 전의 플로우, 곧 클라이언트의 요청과 원본 서버의 응답을 어느 `--format`으로든 찍습니다. 바뀌지 않은 쪽은 저장된 그대로 나옵니다. 아무것도 바뀌지 않은 플로우는 거부합니다.
 

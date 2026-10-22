@@ -52,10 +52,20 @@ describe Gori::BodyFind do
     expect_raises(ArgumentError) { find("x", "(") }
   end
 
-  it "reports a budget trip as stopped, with where it gave up" do
+  describe "a budget trip" do
     slow = "(?:(?:[\\s\\S]|[\\s\\S]){20}(?!))?[\\x01-\\x02]"
-    page = find(("X-A: " + "a" * 60 + "\r\n") * 1100, slow)
-    page.stopped.should be_true
-    page.next_offset.should_not be_nil
+    subject = ("X-A: " + "a" * 60 + "\r\n") * 1100
+
+    it "offers no resume point when nothing was found past the start, so a caller cannot loop" do
+      page = find(subject, slow, from: 5_i64)
+      {page.stopped, page.matches.empty?, page.next_offset}.should eq({true, true, nil})
+    end
+
+    it "resumes just after the last match it returned" do
+      page = find("\x01" + subject, slow)
+      page.stopped.should be_true
+      page.matches.map(&.offset).should eq([0])
+      page.next_offset.should eq(1)
+    end
   end
 end

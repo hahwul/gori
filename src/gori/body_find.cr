@@ -16,12 +16,15 @@ module Gori
     # The most of the MATCH a snippet carries: `.*` over a 2 MiB body is one match, and its
     # snippet must stay a snippet. `length` still reports the whole match.
     MATCH_SHOWN = 200
+    # The `stopped` text both surfaces put on a page the budget cut.
+    STOPPED = "regex time budget ran out before the end of the body; matches after those returned are unknown"
 
     record Match, offset : Int64, length : Int64, snippet : String
 
     # `next_offset` is where the next unreturned match starts (pass it back as the start
     # offset), or nil when there is none. `stopped` = the regex budget ran out (or PCRE2 gave
-    # up) at `next_offset`, so matches past it are unknown, not absent.
+    # up) before the end of the body, so matches after those returned are unknown, not absent;
+    # `next_offset` is then just past the last match returned, or nil when there was none.
     record Page, matches : Array(Match), next_offset : Int64?, stopped : Bool do
       def has_more? : Bool
         !next_offset.nil?
@@ -50,8 +53,11 @@ module Gori
       end
       Page.new(found, nil, false)
     rescue Regex::Error
-      # Budget trip: what was found stands, and the scan resumes where it gave up.
-      Page.new(found || [] of Match, map.try(&.to_raw(pos || 0)).try(&.to_i64), true)
+      # Budget trip: what was found stands. A resume point is offered only past `from` (just
+      # after the last match returned): handing back `from` itself would re-run the search that
+      # just tripped, forever.
+      resume = map.try(&.to_raw(pos || 0)).try(&.to_i64)
+      Page.new(found || [] of Match, resume && resume > from ? resume : nil, true)
     end
 
     # The subject around [s, e), the match part capped at MATCH_SHOWN, every edge moved onto a

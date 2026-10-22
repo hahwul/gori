@@ -930,7 +930,8 @@ module Gori
           redact_options(p, redaction)
           show_find_options(p, find)
         end
-        if err = show_preflight_error(format, req_only, resp_only, find, redaction)
+        if err = show_preflight_error(format, req_only, resp_only, find, redaction,
+             {"--original" => original, "--headers-only" => headers_only, "--max-body" => !max_body.nil?, "--ws-match" => !ws_spec.nil?})
           abort "gori run show: #{err}"
         end
         cap = body_cap(headers_only, max_body, "gori run show")
@@ -956,7 +957,7 @@ module Gori
            ws_match && d ? store.count_ws_messages(id) : 0, original && o.nil?}
         end
         abort "gori run show: no flow ##{id}" unless detail
-        return show_find(detail, find, req_only, format == :json) if find.pattern
+        return show_find(detail, find, req_only, format == :json, choice) if find.pattern
         detail, ws_msgs, redact_report, previewed = show_redaction(detail, ws_msgs, choice, redaction)
         return if previewed
 
@@ -992,25 +993,46 @@ module Gori
         p.on("--include-sensitive", "--find: also search a request head or chunked trailers carrying a credential (withheld otherwise, as MCP paging withholds them)") { f.tuned = true; f.include_sensitive = true }
       end
 
+      # `given` names the other view flags and whether each was passed; `--find` refuses them.
       private def self.show_preflight_error(format : Symbol, req_only : Bool, resp_only : Bool,
-                                            find : ShowFind, redaction : RedactFlags) : String?
-        show_side_error(format, req_only, resp_only) || show_find_error(find, format, redaction)
+                                            find : ShowFind, redaction : RedactFlags,
+                                            given : Hash(String, Bool)) : String?
+        show_side_error(format, req_only, resp_only) ||
+          show_find_error(find, format, redaction, given.select { |_, on| on }.keys)
       end
 
-      def self.show_find_error(f : ShowFind, format : Symbol, redaction : RedactFlags) : String?
+      # `others`: the view flags passed beside `--find`. Each reshapes or swaps the bytes shown
+      # (`--original` searches pre-Match&Replace bytes), so none can keep the pager's offsets.
+      def self.show_find_error(f : ShowFind, format : Symbol, redaction : RedactFlags,
+                               others : Array(String) = [] of String) : String?
         unless pattern = f.pattern
           return f.tuned? ? "--find-from/--find-max/--find-context/--find-raw/--include-sensitive need --find" : nil
         end
         return "--find needs a non-empty REGEX" if pattern.empty?
         return "--find prints text or json, not --format #{format}" unless format.in?(:text, :json)
         # Offsets index the captured bytes the MCP pager serves; a redacted copy has other offsets.
-        "--find searches the captured bytes; --redact does not apply" if redaction.mode
+        return "--find searches the captured bytes; --redact does not apply" if redaction.mode
+        "--find searches the stored bytes at get_response_body_chunk offsets; #{others.join(", ")} cannot apply" unless others.empty?
+      end
+
+      # A redaction profile ON BY DEFAULT redacts plain `show` with no flag, and `--find` cannot
+      # honour it (its snippets are captured bytes at the pager's offsets), so it is refused
+      # rather than skipped; so is a configured profile that does not resolve.
+      def self.show_find_choice_error(choice : Redact::Policy::Choice) : String?
+        return choice.error if choice.error
+        return nil unless m = choice.matcher
+        "redaction is on by default here (profile #{m.profile.name}) and --find prints captured " \
+        "bytes; pass --no-redact to search them"
       end
 
       # One side's matches over the bytes `get_response_body_chunk` would page for it
       # (`MCP::Serialize.page_view`), so each offset is one an agent can page from.
-      private def self.show_find(d : Store::FlowDetail, f : ShowFind, request : Bool, json : Bool, io : IO = STDOUT) : Nil
+      private def self.show_find(d : Store::FlowDetail, f : ShowFind, request : Bool, json : Bool,
+                                 choice : Redact::Policy::Choice, io : IO = STDOUT) : Nil
         pattern = f.pattern || return
+        if err = show_find_choice_error(choice)
+          abort "gori run show: #{err}"
+        end
         head, stored, truncated = show_find_source(d, request)
         view = MCP::Serialize.page_view(head, stored, request: request, raw: f.raw?,
           include_sensitive: f.include_sensitive?) { |h, s| Proxy::Codec::ContentDecode.decode(h, s) }
@@ -1035,12 +1057,7 @@ module Gori
           head = d.response_head || abort("gori run show: flow ##{d.row.id} has no response captured")
           return {head, d.response_body || Bytes.new(0), d.response_body_truncated?}
         end
-        head = d.request_head || Bytes.new(0)
-        return {nil, head, d.request_body_truncated?} unless body = d.request_body
-        joined = Bytes.new(head.size + body.size)
-        head.copy_to(joined)
-        body.copy_to(joined + head.size)
-        {nil, joined, d.request_body_truncated?}
+        {nil, MCP::Serialize.request_wire(d.request_head, d.request_body), d.request_body_truncated?}
       end
 
       # MCP `get_response_body_chunk{find}`'s object, without its reply-budget cut.
@@ -1051,10 +1068,12 @@ module Gori
           j.object do
             j.field "flow_id", id
             j.field "part", request ? "request" : "response"
+            j.field "origin", request ? "client" : "target"
             j.field "find", pattern
             j.field "offset", from
             j.field "total_bytes", view.bytes.size
             j.field "representation", view.decoded? ? "decoded" : "raw"
+            j.field "decode_note", view.decode_note if view.decode_note
             j.field "head_omitted", true if view.head_omitted?
             j.field "trailers_omitted", true if view.trailers_omitted?
             j.field "decode_capped", true if capped
@@ -1073,7 +1092,7 @@ module Gori
             end
             j.field "has_more", page.has_more?
             j.field "next_offset", page.next_offset
-            j.field "stopped", "regex time budget ran out; matches past next_offset are unknown" if page.stopped
+            j.field "stopped", BodyFind::STOPPED if page.stopped
           end
         end
       end
@@ -1085,7 +1104,10 @@ module Gori
           STDERR.puts "gori run show: no match" if page.matches.empty? && !page.stopped
           STDERR.puts "gori run show: more matches — continue with --find-from=#{page.next_offset}" if page.has_more? && !page.stopped
         end
-        STDERR.puts "gori run show: the regex time budget ran out at offset #{page.next_offset}; matches past it are unknown" if page.stopped
+        if page.stopped
+          resume = page.next_offset.try { |n| " (--find-from=#{n} retries after the last match shown)" }
+          STDERR.puts "gori run show: #{BodyFind::STOPPED}#{resume}"
+        end
         STDERR.puts "gori run show: the request head carries a credential and was not searched (--include-sensitive searches it)" if view.head_omitted?
         STDERR.puts "gori run show: the chunked trailers carry a credential and were not searched (--include-sensitive searches them)" if view.trailers_omitted?
         STDERR.puts "gori run show: the decoded body is capped at #{Proxy::Codec::ContentDecode::MAX_OUT} bytes; --find-raw searches the wire bytes" if capped
