@@ -55,7 +55,9 @@ module Gori::Proxy
       if h = path.index('#')
         path = path[0, h]
       end
-      path = strip_authority(path)
+      # A proxy-configured client sends the ABSOLUTE form (`GET http://gori.proxy/ca.der`, any
+      # scheme case); reduce it to the path, after the query strip so a '/' in a query can't pass.
+      path = Gori::Url.origin_path(path)
       case path
       when "", "/"                   then :index
       when "/ca.pem", "/gori-ca.pem" then :pem
@@ -64,21 +66,6 @@ module Gori::Proxy
       when "/favicon.ico" then :favicon
       else                     :not_found
       end
-    end
-
-    # A proxy-configured client sends the ABSOLUTE form — `GET http://gori.proxy/ca.der`
-    # — so the request-target carries a scheme and authority the route table above would
-    # never match, silently 404ing every download. Reduce it to the path. Runs AFTER the
-    # query strip, so a '/' inside a query string can't be mistaken for the path start.
-    # No path at all ("http://gori.proxy") is the index, matching the "" case above.
-    #
-    # `Url.origin_path` and not a `starts_with?("http://")` pair here: RFC 3986 §3.1 makes a
-    # URI scheme case-INSENSITIVE, so the hand-rolled test missed `GET HTTP://gori.proxy/ca.pem`
-    # and 404'd the CA download for a client that spells its own request-line that way. That is
-    # the fourth copy of this predicate to get it wrong, which is why `Url` owns it — see that
-    # module's own header, where the other three are named.
-    private def self.strip_authority(target : String) : String
-      Gori::Url.origin_path(target)
     end
 
     # Build the complete HTTP/1.1 response bytes for `target`. `pem`/`der` are nil
