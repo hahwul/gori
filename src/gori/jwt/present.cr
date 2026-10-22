@@ -47,7 +47,7 @@ module Gori
             # would otherwise be dropped on the floor and the token reported as a clean signed
             # JWS — what the text decoder WARNS on (fix #22) and `verify` REFUSES.
             extra = parts[3..]
-            j.field "extra_segments" { j.array { extra.each { |seg| j.string seg } } }
+            j.field "extra_segments", extra
             j.field "note", "#{parts.size} dot-separated segments — a JWS has 3 and a JWE 5; " \
                             "#{extra.size} segment(s) beyond header.payload.signature shown raw, not decoded"
           end

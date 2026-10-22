@@ -136,10 +136,7 @@ module Gori
           j.field "description", description unless description.empty?
           {"json_fields" => json_fields, "json_pointers" => json_pointers,
            "form_keys" => form_keys, "patterns" => patterns}.each do |key, values|
-            next if values.empty?
-            j.field key do
-              j.array { values.each { |v| j.string v } }
-            end
+            j.field key, values unless values.empty?
           end
         end
       end

@@ -148,9 +148,7 @@ module Gori::Settings
           unless keymap_overrides.empty?
             j.field "bindings" do
               j.object do
-                keymap_overrides.each do |id, labels|
-                  j.field(id) { j.array { labels.each { |l| j.string l } } }
-                end
+                keymap_overrides.each { |id, labels| j.field id, labels }
               end
             end
           end

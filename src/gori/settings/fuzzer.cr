@@ -98,16 +98,8 @@ module Gori::Settings
     return if fuzz_recent_wordlists.empty? && fuzz_favorite_wordlists.empty?
     j.field "fuzzer" do
       j.object do
-        unless fuzz_recent_wordlists.empty?
-          j.field "recent_wordlists" do
-            j.array { fuzz_recent_wordlists.each { |p| j.string p } }
-          end
-        end
-        unless fuzz_favorite_wordlists.empty?
-          j.field "favorite_wordlists" do
-            j.array { fuzz_favorite_wordlists.each { |p| j.string p } }
-          end
-        end
+        j.field "recent_wordlists", fuzz_recent_wordlists unless fuzz_recent_wordlists.empty?
+        j.field "favorite_wordlists", fuzz_favorite_wordlists unless fuzz_favorite_wordlists.empty?
       end
     end
   end

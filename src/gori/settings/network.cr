@@ -732,7 +732,7 @@ module Gori::Settings
         # Written even when empty: the whole problem this setting solves is that a
         # non-MITM'd host was previously inexpressible, so the key should be discoverable
         # in the file rather than appearing only once someone already knew to add it.
-        j.field "tls_passthrough" { j.array { tls_passthrough.each { |p| j.string p } } }
+        j.field "tls_passthrough", tls_passthrough
         j.field "http2", http2
         j.field "strip_alt_svc", strip_alt_svc?
       end

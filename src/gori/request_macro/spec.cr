@@ -186,10 +186,10 @@ module Gori
 
       def to_json(j : JSON::Builder) : Nil
         j.object do
-          j.field("steps") { j.array { @steps.each { |s| j.string s } } }
+          j.field "steps", @steps
           j.field "every", @cadence.token
           j.field "on_failure", @on_failure.token
-          j.field("expect") { j.array { @expect.each { |s| j.string s } } }
+          j.field "expect", @expect
         end
       end
 

@@ -314,7 +314,7 @@ module Gori::Decoder::Serialized
 
       private def visibility(j : JSON::Builder, field : String, names : Array(String)) : Nil
         return if names.empty?
-        j.field(field) { j.array { names.each { |n| j.string(n) } } }
+        j.field field, names
       end
 
       # `\0Class\0prop` (private) and `\0*\0prop` (protected) back to `prop`, with the property

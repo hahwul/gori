@@ -67,9 +67,7 @@ module Gori::Settings
     if mine_prefs_saved?
       j.field "mine" do
         j.object do
-          j.field "locations" do
-            j.array { mine_locations.each { |l| j.string l } }
-          end
+          j.field "locations", mine_locations
           j.field "concurrency", mine_concurrency
           j.field "notify", mine_notify
           j.field "keep_alive", mine_keep_alive?

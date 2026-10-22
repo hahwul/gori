@@ -387,7 +387,7 @@ module Gori::Settings
   # Omit when empty so an untouched install never writes "user_agents": [].
   private def self.serialize_user_agents(j : JSON::Builder) : Nil
     return if user_agents.empty?
-    j.field "user_agents" { j.array { user_agents.each { |ua| j.string ua } } }
+    j.field "user_agents", user_agents
   end
 
   # Omit when empty so an untouched install never writes "hostname_overrides": [].

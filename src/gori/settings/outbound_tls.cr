@@ -418,11 +418,7 @@ module Gori::Settings
     j.field "groups", r.groups unless r.groups.empty?
     j.field "sigalgs", r.sigalgs unless r.sigalgs.empty?
     j.field "ciphersuites", r.ciphersuites unless r.ciphersuites.empty?
-    unless r.alpn.empty?
-      j.field "alpn" do
-        j.array { r.alpn.each { |p| j.string p } }
-      end
-    end
+    j.field "alpn", r.alpn unless r.alpn.empty?
     # Written only when STATED. Emitting the effective value would bake a preset's choice into
     # the file as if the operator had typed it, and the next release's preset edit would then
     # be silently overridden by its own former self.
