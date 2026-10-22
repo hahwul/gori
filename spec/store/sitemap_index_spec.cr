@@ -120,6 +120,13 @@ describe "Sitemap covering index (schema V38)" do
     end
   end
 
+  it "reads endpoint coverage off idx_flows_list without touching a row" do
+    with_store do |store|
+      # `endpoint_coverage` runs exactly this: `source` sits after the body BLOBs.
+      query_plan(store, Gori::Store::COVERAGE_SQL).should contain("COVERING INDEX idx_flows_list")
+    end
+  end
+
   it "returns exactly the groups the old GROUP BY order did" do
     with_store do |store|
       120.times { |i| seed_flow(store, i) }

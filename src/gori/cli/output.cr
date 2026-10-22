@@ -1151,6 +1151,9 @@ module Gori
         # of a target that ran past Sitemap::MAX_DEPTH segments.
         io << "  … +depth (truncated)" if node.truncated
         sitemap_js_label(node, io)
+        if by = node.touched_by
+          io << "  (touched: " << by.join(", ") { |src, n| "#{src} #{n}" } << ')'
+        end
         if t = node.tag
           io << "  # " << term_safe(t)
         end
@@ -1246,7 +1249,8 @@ module Gori
       # QUERY fold is marked `query_fold:true` and DOES carry `path` (the path-only endpoint)
       # plus `queries` (how many query strings it stands for). Under `--js-refs` a node may add
       # `js_refs` (flows whose JavaScript references it) and `unrequested:true` (it exists only
-      # because of such a reference; a host can carry it too). The stable, documented machine contract. Unlike the text tree
+      # because of such a reference; a host can carry it too). An endpoint or query fold an
+      # active tool sent flows to adds `touched_by` (tool → recorded flows or saved fuzz results). The stable, documented machine contract. Unlike the text tree
       # (which collapses a numeric fold and shows one representative under an ID fold),
       # JSON always keeps every child nested — the complete tree, with `grouped` as the
       # hint so a consumer can collapse it itself.
@@ -1350,6 +1354,11 @@ module Gori
         # reaches it or anything under it, and it never carries `methods`.
         io << %(,"js_refs":) << node.js_refs if node.js_refs > 0
         io << %(,"unrequested":true) if node.unrequested?
+        # Active tool token → recorded flows or saved fuzz results (`Sitemap::Coverage`); absent when none touched it.
+        if by = node.touched_by
+          io << %(,"touched_by":)
+          by.to_json(io)
+        end
       end
 
       # Iterative for the same reason as `sitemap_text_children`. Unlike the text walks this

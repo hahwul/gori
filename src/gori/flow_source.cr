@@ -101,6 +101,25 @@ module Gori
         end
       end
 
+      # Did this flow TEST the endpoint it was sent to? The sitemap's coverage (`touched_by`,
+      # `untested`) counts only these.
+      #
+      # Narrower than `sent_by_gori?`: a Discover crawl maps an endpoint without attacking it,
+      # and a `Refresh` or `Macro` replay only re-authenticates or mints a token on the way to
+      # the request that does. Counting them would mark a login page "tested" because a slot
+      # refreshed against it.
+      def active? : Bool
+        case self
+        in Repeater, Fuzzer, Miner, Sequencer, Authorize, Probe, Retest then true
+        in Proxy, Import, Discover, Refresh, Macro                      then false
+        end
+      end
+
+      # The `active?` members, in declaration order.
+      def self.active : Array(Kind)
+        values.select(&.active?)
+      end
+
       # Does the surface that produced this flow ALREADY run its own explicit passive scan on
       # the very same send?
       #

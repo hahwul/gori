@@ -33,20 +33,25 @@ module Gori
           return fts_error
         end
         unrequested = bool_arg(h, "include_unrequested", false)
+        untested = bool_arg(h, "untested", false)
         if bool_arg(h, "collapse_transport", false)
           # Refused rather than dropped: an answer without the block reads as "no references".
           return err("include_unrequested is not available with collapse_transport — call without it, or use list_js_endpoints",
             "INVALID_ARGUMENT", field: "include_unrequested") if unrequested
+          # Coverage is keyed by origin, which a collapsed row no longer carries.
+          return err("untested is not available with collapse_transport — call without it",
+            "INVALID_ARGUMENT", field: "untested") if untested
           return collapsed_sitemap(filter, limit, offset, dropped, terms)
         end
         tags = store.sitemap_tags
-        rows, has_more, tag_capped = sitemap_page(filter, limit, offset, terms, tags)
+        coverage = Sitemap::Coverage.load(store)
+        rows, has_more, tag_capped = sitemap_page(filter, limit, offset, terms, tags, untested ? coverage : nil)
         # Folded by DEFAULT, matching `gori run sitemap` and the TUI tree: an agent mapping a
         # surface should not read one entry per fuzz payload. `fold_query:false` is the twin
         # of the CLI's --no-fold-query.
         fold = bool_arg(h, "fold_query", true)
         entries = fold_query_entries(rows, fold)
-        parts = fit_rows(entries) { |rj, e, _| sitemap_entry_json(rj, e, tags) }
+        parts = fit_rows(entries) { |rj, e, _| sitemap_entry_json(rj, e, tags, coverage) }
         # Under REPLY_ROWS_BUDGET (#1649). The cut is made in RAW rows, because `offset` pages
         # raw rows and a folded entry stands for several: the page shrinks until its entries fit,
         # and `scanned` — what the caller advances `offset` by — shrinks with it. Each pass keeps
@@ -56,7 +61,7 @@ module Gori
           cut = has_more = true
           rows = rows.first((rows.size * parts.size // entries.size).clamp(1, rows.size - 1))
           entries = fold_query_entries(rows, fold)
-          parts = fit_rows(entries) { |rj, e, _| sitemap_entry_json(rj, e, tags) }
+          parts = fit_rows(entries) { |rj, e, _| sitemap_entry_json(rj, e, tags, coverage) }
         end
         Result.new(JSON.build do |j|
           j.object do
@@ -79,7 +84,8 @@ module Gori
 
       # One `list_sitemap` entry: the transport key, the fold's variants, counts, seen window
       # and the operator's memo.
-      private def sitemap_entry_json(j : JSON::Builder, e : SitemapRow, tags : Hash({String, String}, String)) : Nil
+      private def sitemap_entry_json(j : JSON::Builder, e : SitemapRow, tags : Hash({String, String}, String),
+                                     coverage : Sitemap::Coverage) : Nil
         j.object do
           j.field "scheme", Serialize.text(e.scheme)
           j.field "host", Serialize.text(e.host)
@@ -107,6 +113,11 @@ module Gori
           j.field "first_seen_iso", Gori.iso_micros(e.first_seen)
           j.field "last_seen", e.last_seen
           j.field "last_seen_iso", Gori.iso_micros(e.last_seen)
+          # Active tool → count of recorded flows / saved fuzz results, keyed by the path
+          # without its query (`Sitemap::Coverage`).
+          if touched = coverage.touched_by(e.scheme, e.host, e.port, e.method, e.target)
+            j.field "touched_by", touched
+          end
           # The operator's free-text memo for this endpoint, when one is pinned. The key
           # is the tree's node path, which includes any query string.
           # NOT on a folded row, which is synthetic: `Sitemap.stamp_tags!` bars a tag on
@@ -313,11 +324,14 @@ module Gori
       # One page of endpoint rows, whether it ran into `has_more`, and whether a tag filter's
       # read hit its cap (`tag_filtered_page`).
       private def sitemap_page(filter : QL::Filter, limit : Int32, offset : Int32, terms : Sitemap::TagTerms,
-                               tags : Hash({String, String}, String)) : {Array(Store::SitemapEntry), Bool, Bool}
-        if terms.filtering?
-          # Before the query fold, as the tree prunes before it folds.
+                               tags : Hash({String, String}, String),
+                               untested : Sitemap::Coverage?) : {Array(Store::SitemapEntry), Bool, Bool}
+        if terms.filtering? || untested
+          # Before the query fold, as the tree prunes before it folds. `untested` drops on the
+          # whole endpoint like `tag:`, so it pages the same way.
           all = store.sitemap_entries_detailed(filter, Store::SITEMAP_MAX)
           kept = Sitemap.select_by_tags(all, tags, terms) { |e| Store::SitemapOriginEntry.new(e.scheme, e.host, e.port, e.method, e.target) }
+          kept = kept.reject { |e| untested.touched?(e.scheme, e.host, e.port, e.method, e.target) } if untested
           return tag_filtered_page(all, kept, limit, offset)
         end
         # One row OVER the page, then dropped: `has_more` costs a row instead of a second
@@ -347,7 +361,7 @@ module Gori
         return unless capped
         j.field "tag_filter_capped", true
         j.field "tag_filter_note",
-          "the tag: filter read only the first #{Store::SITEMAP_MAX} endpoint keys, so tagged " \
+          "the tag:/untested filter read only the first #{Store::SITEMAP_MAX} endpoint keys, so matching " \
           "endpoints past them are missing — narrow the rest of the query (host:, path:) to reach them"
       end
 
@@ -726,7 +740,8 @@ module Gori
         tool j, "list_sitemap",
           "Distinct endpoints in capture, keyed by TRANSPORT (scheme, host, port, " \
           "http_version, method, target), with status set, success/error counts, " \
-          "first/last-seen, and `tag` for an operator memo (set_sitemap_tag). Query-string " \
+          "first/last-seen, `tag` for an operator memo (set_sitemap_tag), and `touched_by` " \
+          "(active tool -> recorded flows or saved fuzz results, per path sans query). Query-string " \
           "variants fold by default: `target` = path, `query_variants` = count, " \
           "`query_targets` = up to #{QUERY_SAMPLE_MAX} raw ones, memos in `variant_tags`. " \
           "Returns {entries, returned, scanned, offset, limit, has_more}, not a bare array. " \
@@ -739,6 +754,7 @@ module Gori
           s.field "fold_query", boolprop("fold the query-string variants of a path into one entry (default true)")
           s.field "collapse_transport", boolprop("legacy shape: host/method/target only, no counts")
           s.field "hide_static", boolprop("omit static assets (images, fonts, audio/video; never svg/css/js or status >= 400); = `-static:true`")
+          s.field "untested", boolprop("only endpoints with no recorded flow from #{FlowSource::Kind.active.join("/", &.token)} and no saved fuzz run; while testing, re-call from offset 0 instead of paging")
           s.field "include_unrequested", boolprop("add `unrequested`: JS-referenced endpoints no request reached, from scan_js_endpoints (≤#{UNREQUESTED_MAX} within budget; `unrequested_total` = all); not filtered by `query`")
           s.field "strict", boolprop("refuse a query with an invalid term (else it is dropped, BROADENING the result, and named in `ignored_terms`)")
           s.field "lenient", boolprop("free-text an unknown `field:` instead of refusing (a typo then matches nothing, like an empty project)")

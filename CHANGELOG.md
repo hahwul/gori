@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Sitemap: MCP `list_sitemap` and `gori run sitemap` show which active tools have tested each endpoint, from their History-recorded flows and saved fuzz runs, as `touched_by`, and `untested:true` / `--untested` keeps only the endpoints with neither (#1741)
 - Redaction: a `jsonpath:`, `regex:` or `position:` column in `gori run history` reads the redaction profile's sanitized body, as `show` and MCP `list_history` do, and `--redact`/`--no-redact` apply to such a column on the text and json listings; a redacted HAR export sizes an intact body by its sanitized bytes, so it no longer gives away the secret's length or re-imports as truncated (#1671, #1672)
 - Compare: the TUI Comparer, `gori run compare` and MCP `compare_flows` tell apart messages that differ only in CRLF vs LF or where a CR sits, instead of calling them identical, and `gori run compare --context` with a huge value no longer crashes (#1674, #1691)
 - Send and WebSocket replay errors no longer carry a socket's heap address (`#<TCPSocket:0x…>`), so identical failures compare equal, and a connect failure through a host override names the address gori dialled and whose override it was, without suggesting DNS for an IP address, in the Repeater, `gori run`, MCP and the proxy's recorded error (#1695, #1696)
