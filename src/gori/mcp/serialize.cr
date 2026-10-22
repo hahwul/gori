@@ -237,6 +237,96 @@ module Gori
         String.new(buffer.to_slice)
       end
 
+      # The bytes `get_response_body_chunk` pages, and its `find` and `gori run show --find`
+      # search, so an offset from one is an offset for the others: trailers and a request head
+      # carrying a credential withheld unless `include_sensitive`, then a response decoded
+      # unless `raw` — `decode` is the caller's (MCP memoizes it across pages).
+      record PageView, bytes : Bytes, decoded : Bool, decode_note : String?, head_omitted : Bool,
+        trailers_omitted : Bool do
+        def decoded? : Bool
+          decoded
+        end
+
+        def head_omitted? : Bool
+          head_omitted
+        end
+
+        def trailers_omitted? : Bool
+          trailers_omitted
+        end
+      end
+
+      # A request as the pager reads it: the stored head and body as one wire message. Copied in
+      # two block moves (a per-byte block over a request of several MiB was a closure call per
+      # byte).
+      def self.request_wire(head : Bytes?, body : Bytes?) : Bytes
+        head ||= Bytes.new(0)
+        return head unless body
+        joined = Bytes.new(head.size + body.size)
+        head.copy_to(joined)
+        body.copy_to(joined + head.size)
+        joined
+      end
+
+      def self.page_view(head : Bytes?, stored : Bytes, *, request : Bool, raw : Bool, include_sensitive : Bool,
+                         & : Bytes?, Bytes -> {Bytes?, String?}) : PageView
+        head_omitted = false
+        trailers_omitted = false
+        unless include_sensitive
+          stored, trailers_omitted = drop_sensitive_trailers(head, stored, request)
+          stored, head_omitted = drop_sensitive_head(stored) if request
+        end
+        # A REQUEST part is stored wire bytes, not a content-encoded response entity: there is
+        # nothing to decode and decoding would be a lie about what is on disk.
+        decoded, decode_note = (raw || request) ? {nil, nil} : yield(head, stored)
+        # A decoded view never carried the trailers, so it has nothing to say about them.
+        PageView.new(decoded || stored, !decoded.nil?, decode_note, head_omitted, trailers_omitted && decoded.nil?)
+      end
+
+      # A `part:"request"` payload is head+body wire bytes, and `get_response_body_chunk` pages
+      # them EXACTLY — `Serialize.emit_head_base64` states the rule those bytes fall under:
+      # "base64 is encoding, not redaction … redacting INSIDE the base64 is not an option — it
+      # would no longer be the bytes", so it withholds the byte-exact head unless `include_sensitive`.
+      # The same head reached here ungated: `get_flow` answered `authorization: [REDACTED]`
+      # while `get_response_body_chunk{flow_id, part:"request"}` on the same flow handed back
+      # the whole Bearer token, from a tool that had no `include_sensitive` argument at all.
+      #
+      # So the head is dropped rather than rewritten, and only when it actually carries one of
+      # `Serialize::SENSITIVE_HEADERS` — a request with nothing to withhold pages exactly as
+      # before. `offset`/`total_bytes`/`next_offset` then describe the body alone, which is why
+      # the omission is NAMED in the reply instead of shortening the payload silently.
+      def self.drop_sensitive_head(bytes : Bytes) : {Bytes, Bool}
+        head, body = Env.split_head_body(bytes)
+        text = String.new(head).scrub
+        return {bytes, false} if redact_head(text, false) == text
+        {body || Bytes.new(0), true}
+      end
+
+      # `drop_sensitive_head`'s rule for the other end of a chunked message: the trailer section
+      # is header fields too, and `get_flow`'s `trailers` redacts a sensitive one
+      # (`Serialize.emit_trailers`) — so the pager of the same exact bytes stops at the 0-chunk
+      # line instead of handing the value over. Only when such a field is there; the decoded
+      # view never carried trailers at all. `request` bytes are the whole wire message, whose
+      # head says whether the body is chunked.
+      def self.drop_sensitive_trailers(head : Bytes?, bytes : Bytes, request : Bool) : {Bytes, Bool}
+        base = 0
+        if request
+          head, body = Env.split_head_body(bytes)
+          base = head.size
+        else
+          body = bytes
+        end
+        return {bytes, false} unless at = Proxy::Codec::ContentDecode.trailer_offset(head, body)
+        trailers = Proxy::Codec::ContentDecode.trailers(head, body)
+        # A section past the parser's field cap is withheld whole: a field it did not lift is one
+        # it cannot say is harmless.
+        unless trailers.size >= Proxy::Codec::ContentDecode::MAX_TRAILERS ||
+               trailers.any? { |(name, _)| sensitive_header?(name) }
+          return {bytes, false}
+        end
+        {bytes[0, base + at], true}
+      end
+
       # nil-tolerant redact_head, for the optional heads of a Pending/errored flow.
       def self.redact_head_opt(text : String?, include_sensitive : Bool) : String?
         text ? redact_head(text, include_sensitive) : nil

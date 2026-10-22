@@ -1055,6 +1055,71 @@ module Gori
       [] of SitemapEntry
     end
 
+    # How many flows one active tool (`FlowSource::Kind#active?`) sent to one origin endpoint.
+    # `path` is the target cut at its query: a fuzz sweep over `?q=` sends a new target per
+    # payload, and every one of them tested the same endpoint.
+    record CoverageEntry, scheme : String, host : String, port : Int32, method : String,
+      path : String, source : String, count : Int64
+
+    # The read `endpoint_coverage` runs, held here so `spec/store/sitemap_index_spec.cr` plans
+    # exactly it. The active tokens are enum constants, so they are spelled into the SQL.
+    COVERAGE_SQL = "SELECT scheme, host, port, method, " \
+                   "substr(target, 1, instr(target || '?', '?') - 1) AS path, source, COUNT(*) " \
+                   "FROM flows WHERE source IN (#{FlowSource::Kind.active.join(", ") { |k| "'#{k.token}'" }}) " \
+                   "GROUP BY scheme, host, port, method, path, source"
+
+    # Every active tool's RECORDED flows, grouped per origin endpoint and tool — the History
+    # half of the sitemap's coverage (`Sitemap::Coverage`). Unfiltered on purpose: whether an
+    # endpoint was tested does not depend on which of its flows a query shows.
+    #
+    # `source` sits after the body BLOBs, so reading it off the table would walk every active
+    # row's overflow chain. `idx_flows_list` (V37) covers every column read here, so the
+    # planner scans that index and never touches a row (`spec/store/sitemap_index_spec.cr`
+    # pins the plan). Release build: 6 ms at 20k flows, 41 ms at 100k, against 33 ms / 362 ms
+    # for the same read off the table.
+    # ponytail: a whole-index scan, since no index leads with `source`. If a 1M-flow project
+    # makes it hurt, a partial index on (source, scheme, host, port, method, target) WHERE
+    # source <> 'proxy' seeks only gori's own rows and leaves proxy capture writes untouched.
+    def endpoint_coverage : Array(CoverageEntry)
+      rows = [] of CoverageEntry
+      @db.query(COVERAGE_SQL) do |rs|
+        rs.each do
+          rows << CoverageEntry.new(rs.read(String), rs.read(String), rs.read(Int32), rs.read(String),
+            rs.read(String), rs.read(String), rs.read(Int64))
+        end
+      end
+      rows
+    end
+
+    # One saved Fuzzer run's stored results, grouped by the request line they were rendered
+    # with: the run's `scheme://host:port` target, the line cut at its query (or at its LF when
+    # it has none), and how many results carried it.
+    record FuzzRunCoverage, origin : String, request_line : Bytes, count : Int64
+
+    # The saved-run half of the coverage. A sweep is recorded in History only on request, but a
+    # saved run (`save_results`, `--save`, the TUI's save) keeps every result's request
+    # (`keep_bodies` is forced to all), and its request line names the endpoint: `wire` when
+    # the send seam rewrote the template (`$NAME`), else `request` — what
+    # `Fuzz::HistoryRecord` records, so a sweep both saved and recorded keys the same. The
+    # run row itself holds only the origin. A WebSocket run's request is a frame, not a request
+    # line, and a compacted result holds no request: both are skipped. Release build: 3.6 ms
+    # over 10k saved results carrying 8 KB bodies.
+    def fuzz_run_coverage : Array(FuzzRunCoverage)
+      rows = [] of FuzzRunCoverage
+      # Cut at the query in SQL, so a sweep of `?q=` groups into one row rather than handing
+      # back one line per payload to parse. A `?` past the LF is a header's, not the target's.
+      # `wire` is non-NULL only on a rewritten result, so only there is its overflow walked.
+      @db.query("SELECT r.target, CASE WHEN q > 0 AND q < lf THEN substr(request, 1, q - 1) " \
+                "ELSE substr(request, 1, lf) END AS line, COUNT(*) " \
+                "FROM (SELECT run_id, request, instr(request, X'3F') AS q, instr(request, X'0A') AS lf " \
+                "FROM (SELECT run_id, COALESCE(wire, request) AS request FROM fuzz_results) " \
+                "WHERE request IS NOT NULL) f JOIN fuzz_runs r ON r.id = f.run_id " \
+                "WHERE r.websocket = 0 AND f.lf > 0 GROUP BY r.target, line") do |rs|
+        rs.each { rows << FuzzRunCoverage.new(rs.read(String), rs.read(Bytes), rs.read(Int64)) }
+      end
+      rows
+    end
+
     #
     # `control` makes the read cooperative (`controlled_query`): the Sitemap's `/` bar runs
     # this on a worker fiber, and the DISTINCT scan over the flow table is the two thirds of

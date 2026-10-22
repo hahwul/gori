@@ -106,6 +106,7 @@ gori run <subcommand> [verb] [options]
 | `views` · `add` · `set` · `rename` · `scope` · `rm` | 저장된 History 뷰 관리: 목록을 좁히는 이름 붙은 QL 쿼리를 렌즈로 적용 |
 | `session` · `add` · `from-flow` · `edit` · `rm` · `baseline` · `show` · `refresh` · `from-request` | 세션 슬롯: 전송이나 Authorize 실행이 그 이름으로 나가는 신원과, 그 신원을 다시 인증하는 Repeater 단계 |
 | `grpc [schema]` · `reflect` · `forget` | gRPC `.proto` 렌즈: 무엇이 로드됐는지 보기, 서버 리플렉션으로 디스크립터 받기, 캐시된 대상 버리기 |
+| `graphql schema <flow-id>` | GraphQL 스키마를 간결한 SDL로. 응답이 인트로스펙션 결과인 플로우에서 읽거나, `--send`면 플로우의 요청을 인트로스펙션 쿼리로 다시 보냅니다(스코프 게이트). `--filter`, `--max-bytes`, `--legacy`, `--format json`(MCP `graphql_schema`와 같은 객체) |
 | `project [list]` | 캡처된 트래픽이 있는 프로젝트 목록 (`--all`이면 전부) |
 | `project create <name>` | 이름으로 프로젝트 생성 (같은 이름이면 다시 열기) |
 | `project rename <name> <new-name>` | 프로젝트 표시 이름 변경 |
@@ -317,6 +318,8 @@ gori run show <flow-id> --format raw
 `--headers-only`와 `--max-body=BYTES`는 `text`와 `json` 뷰를 간추립니다. `--headers-only`는 각 본문을 크기를 알려주는 한 줄로 바꾸고(`[body omitted by --headers-only: 149504 bytes]`; JSON에서는 body 객체가 `encoding`과 `size`를 유지한 채 `omitted: true`를 얻습니다), `--max-body`는 디코드된 각 본문의 앞쪽 BYTES바이트를 찍은 뒤 `[… truncated by --max-body: showing 2048 of 149504 bytes]`를 붙입니다(JSON에서는 `text`/`base64`가 그 앞부분을 담고, `size`는 전체 크기, `shown_size`는 보여준 부분, `truncated`는 true입니다). 둘 중 하나만 있어도 본문에서 파생되는 섹션(디코드 뷰, gRPC 메시지, WebSocket 프레임, SSE 이벤트)은 빠집니다. 트랜스크립트는 그래도 개수와 함께 이름이 남습니다(`=== SSE EVENTS (40) — not printed under --max-body ===`, 또는 `{"count": 40, "omitted": true}`). 이 둘은 전체 메시지를 그대로 쓰는 다른 형식들과 함께 쓸 수 없고, 서로도 함께 쓸 수 없습니다.
 
 `--ws-match=QUERY`는 트랜스크립트를 싣는 모든 형식에서 매칭되는 WebSocket 메시지만 찍습니다. `ws:needle`(대소문자 무시), `ws~regex`, 또는 접두어 없는 needle을 받고, [`ws:` 쿼리 필드](/ko/reference/query-language/#websocket-messages)와 똑같이 매칭합니다. 소켓의 메시지 중 몇 개를 남겼는지는 STDERR 한 줄로 알려 줍니다.
+
+`--find=REGEX`는 응답 본문(`--request-only`면 요청)에서 REGEX(QL `body~`와 같은 매칭)가 나오는 곳을 한 줄에 `offset`, `length`, 따옴표 친 스니펫으로 찍습니다. `--format json`은 MCP `get_response_body_chunk{find}`와 같은 객체입니다. 그 도구가 페이징하는 바이트를 검색하므로 각 오프셋은 같은 쪽의 `get_response_body_chunk` 오프셋입니다. `--find-raw`가 없으면 디코드된 본문을 검색하고, 자격 증명을 실은 요청 헤드나 chunked 트레일러는 `--include-sensitive`가 없으면 건너뜁니다. `--find-max=N`(기본 20), `--find-context=BYTES`(기본 40), `--find-from=OFFSET`(더 있을 때 STDERR가 알려 주는 `next_offset`)으로 조절합니다. text와 json만 됩니다. `--redact`, 기본으로 켜진 리댁션 프로파일(`--no-redact`를 주세요), `--original`, `--headers-only`, `--max-body`, `--ws-match`는 페이저와 다른 바이트를 검색하게 되므로 거부합니다.
 
 `--original`은 [Match & Replace 규칙](/ko/guide/proxy/#match-replace)이나 Intercept 편집이 바꾸기 전의 플로우, 곧 클라이언트의 요청과 원본 서버의 응답을 어느 `--format`으로든 찍습니다. 바뀌지 않은 쪽은 저장된 그대로 나옵니다. 아무것도 바뀌지 않은 플로우는 거부합니다.
 
@@ -1017,7 +1020,7 @@ gori run import --postman api.postman_collection.json --db ./assessment.db --for
 gori run sitemap --in-scope --format paths
 ```
 
-`-q`/`--query=QL`는 history와 같은 QL로 엔드포인트를 거릅니다(위치 인자로도 넘길 수 있습니다). Sitemap 전용 경로 메모 필드 `tag:`도 받습니다([적용 범위](/ko/reference/query-language/#where-it-applies)). `-n`/`--limit=N`은 스캔할 엔드포인트 수를 제한합니다(기본값 10000). `--in-scope`는 스코프 내 호스트로 한정하고, `--hide-static`은 이미지·폰트·오디오·비디오를 뺍니다(TUI 트리처럼 플로우 단위). `--no-group`은 id 접기를, `--no-fold-query`는 쿼리 문자열 접기를 끕니다(서로 다른 축입니다). `--js-refs`는 캡처한 JavaScript가 참조하지만 아무도 요청하지 않은 경로도 함께 그립니다(`sitemap js` 참고. JSON에서는 `js_refs`와 `unrequested`로 나오며, `paths`에는 나오지 않습니다). `--format`은 `text`(트리), `json`, `paths` 중에서 고릅니다. `--lenient`는 없는 필드 이름을 쓴 쿼리를 거절하지 않고 받아들입니다.
+`-q`/`--query=QL`는 history와 같은 QL로 엔드포인트를 거릅니다(위치 인자로도 넘길 수 있습니다). Sitemap 전용 경로 메모 필드 `tag:`도 받습니다([적용 범위](/ko/reference/query-language/#where-it-applies)). `-n`/`--limit=N`은 스캔할 엔드포인트 수를 제한합니다(기본값 10000). `--in-scope`는 스코프 내 호스트로 한정하고, `--hide-static`은 이미지·폰트·오디오·비디오를 뺍니다(TUI 트리처럼 플로우 단위). `--no-group`은 id 접기를, `--no-fold-query`는 쿼리 문자열 접기를 끕니다(서로 다른 축입니다). `--js-refs`는 캡처한 JavaScript가 참조하지만 아무도 요청하지 않은 경로도 함께 그립니다(`sitemap js` 참고. JSON에서는 `js_refs`와 `unrequested`로 나오며, `paths`에는 나오지 않습니다). `--untested`는 능동 도구(Repeater, Fuzzer, Miner, Sequencer, Authorize, Probe, Retest)가 History에 기록한 플로우도, 저장된 퍼즈 실행도 없는 엔드포인트만 남기고, 그런 기록이 있는 엔드포인트에는 text와 JSON에 `touched_by`(도구 → 기록된 플로우 또는 저장된 퍼즈 결과 수, 쿼리를 뺀 경로 기준)가 붙습니다. 기록도 저장도 하지 않은 스윕은 셀 흔적을 남기지 않습니다. `--format`은 `text`(트리), `json`, `paths` 중에서 고릅니다. `--lenient`는 없는 필드 이름을 쓴 쿼리를 거절하지 않고 받아들입니다.
 
 트리의 루트는 오리진(스킴, 호스트, 포트)마다 하나라서, `http://127.0.0.1:19021`, `http://127.0.0.1:19022`, `https://127.0.0.1:8443`은 루트 세 개가 됩니다. `paths`는 엔드포인트마다 기본 포트를 뺀 전체 URL을 출력합니다(`GET  https://127.0.0.1:8443/only-tls`). `json`의 호스트 객체는 `host`에 포트 없는 호스트를 그대로 두고 `scheme`, `port`, `origin`(`paths`가 앞에 붙이는 값)을 더합니다. 태그는 호스트에 붙으므로 그 호스트의 모든 오리진 아래에 보입니다.
 

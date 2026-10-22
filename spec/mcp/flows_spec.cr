@@ -1321,3 +1321,48 @@ describe "MCP get_current_context" do
     end
   end
 end
+
+private def chunk_call(store, args : String) : Gori::MCP::Tools::Result
+  tools_for(store).call("get_response_body_chunk", JSON.parse(args))
+end
+
+describe "MCP get_response_body_chunk find" do
+  it "finds in the decoded body, and each offset pages straight to its match" do
+    with_store do |store|
+      id = mcp_seed_flow(store, "ex.test", "GET", "/", 200,
+        resp_head: "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\n\r\n",
+        resp_body: gzip_bytes("aaa SECRET-1 bbb SECRET-22 ccc"), content_type: "text/plain")
+      j = JSON.parse(chunk_call(store, %({"flow_id":#{id},"find":"SECRET-\\\\d+","max_matches":1,"context":2})).text)
+      {j["representation"].as_s, j["origin"].as_s}.should eq({"decoded", "target"})
+      m = j["matches"][0]
+      {m["offset"].as_i, m["length"].as_i, m["snippet"].as_s}.should eq({4, 8, "a SECRET-1 b"})
+      j["has_more"].as_bool.should be_true
+      nxt = j["next_offset"].as_i
+
+      page = JSON.parse(chunk_call(store, %({"flow_id":#{id},"offset":#{m["offset"]},"limit":#{m["length"]}})).text)
+      page["text"].as_s.should eq("SECRET-1")
+      rest = JSON.parse(chunk_call(store, %({"flow_id":#{id},"find":"SECRET-\\\\d+","offset":#{nxt}})).text)
+      rest["matches"].as_a.map(&.["offset"].as_i).should eq([17])
+      rest["has_more"].as_bool.should be_false
+    end
+  end
+
+  it "searches the wire bytes under raw:true" do
+    with_store do |store|
+      id = mcp_seed_flow(store, "ex.test", "GET", "/", 200,
+        resp_head: "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\n\r\n",
+        resp_body: gzip_bytes("needle"), content_type: "text/plain")
+      j = JSON.parse(chunk_call(store, %({"flow_id":#{id},"find":"needle","raw":true})).text)
+      j["representation"].as_s.should eq("raw")
+      j["matches"].as_a.should be_empty
+    end
+  end
+
+  it "refuses a pattern that does not compile, naming the field" do
+    with_store do |store|
+      id = mcp_seed_flow(store, "ex.test", "GET", "/", 200, resp_body: "x".to_slice)
+      r = chunk_call(store, %[{"flow_id":#{id},"find":"("}])
+      {r.is_error, r.error_code, r.field}.should eq({true, "INVALID_ARGUMENT", "find"})
+    end
+  end
+end

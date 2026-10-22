@@ -73,3 +73,21 @@ describe "MCP get_response_body_chunk request head" do
     end
   end
 end
+
+describe "MCP get_response_body_chunk find over a request head" do
+  it "never searches a withheld head, and finds it at a pageable offset when opted in" do
+    with_store do |store|
+      id = seed_authed_flow(store)
+      j = call_json(store, "get_response_body_chunk", %({"flow_id":#{id},"part":"request","find":"s3cr3t"}))
+      j["matches"].as_a.should be_empty
+      j["head_omitted"].as_bool.should be_true
+
+      j = call_json(store, "get_response_body_chunk",
+        %({"flow_id":#{id},"part":"request","include_sensitive":true,"find":"s3cr3t-\\\\w+"}))
+      m = j["matches"][0]
+      page = call_json(store, "get_response_body_chunk",
+        %({"flow_id":#{id},"part":"request","include_sensitive":true,"offset":#{m["offset"]},"limit":#{m["length"]}}))
+      page["text"].as_s.should eq("s3cr3t-token")
+    end
+  end
+end

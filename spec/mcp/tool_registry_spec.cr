@@ -98,6 +98,8 @@ describe "MCP tool registry" do
     # project's env has to be re-read before the race. `refresh_session_slot` (#1233) replays
     # a slot's Repeater steps and binds through the extract rules, so it needs both the env
     # and the rule set a peer may have changed since the last call.
+    # `graphql_schema` because its `send: true` re-sends a captured request under the active
+    # session slot's overlay, as `send_request{flow_id}` does.
     # `ws_session_open` / `ws_session_send` for the same reason the WS senders are here: the
     # handshake and every frame payload may carry a `$KEY` and are overlaid with the active
     # session slot, so the project's env has to be re-read before the dial and each send (#1630).
@@ -106,6 +108,7 @@ describe "MCP tool registry" do
                                                       "fuzz_start", "mine_start",
                                                       "sequence_start", "discover_start", "run_retest",
                                                       "minimize_repeater", "probe_scan", "authorize_start",
+                                                      "graphql_schema",
                                                       "ws_session_open", "ws_session_send",
                                                       "list_env", "set_env_var", "delete_env_var"})
     Gori::MCP::Tools::UNBOUND_SAFE.should contain("decode")

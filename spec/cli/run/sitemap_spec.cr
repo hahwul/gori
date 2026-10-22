@@ -7,8 +7,9 @@ require "json"
 # Private CLI glue; reopen the module for bare-call wrappers (the same whitebox trick the
 # other CLI specs use).
 module Gori::CLI::Run
-  def self.collect_sitemap_for_spec(store : Gori::Store, limit : Int32, in_scope : Bool = false) : {Array(Gori::Sitemap::Node), Bool}
-    collect_sitemap(store, Gori::QL::EMPTY, limit, in_scope, true, true)
+  def self.collect_sitemap_for_spec(store : Gori::Store, limit : Int32, in_scope : Bool = false,
+                                    untested : Bool = false) : {Array(Gori::Sitemap::Node), Bool}
+    collect_sitemap(store, Gori::QL::EMPTY, limit, in_scope, true, true, untested: untested)
   end
 
   def self.sitemap_truncation_notice_for_spec(truncated : Bool, limit : Int32) : String?
@@ -426,5 +427,30 @@ describe "gori run sitemap tag --list — the TSV line" do
   it "names controls in the host and path halves too, and leaves ordinary text untouched" do
     Gori::CLI::Run.sitemap_tag_row_for_spec("acme.test", "/a\nb", "ok").should eq("acme.test/a⟨LF⟩b\tok")
     Gori::CLI::Run.sitemap_tag_row_for_spec("acme.test", "/api", "payment flow").should eq("acme.test/api\tpayment flow")
+  end
+end
+
+describe "gori run sitemap — coverage" do
+  it "stamps touched_by in text and json, and --untested drops tested methods" do
+    sitemap_store do |store|
+      store.insert_flow(sitemap_captured("acme.test", "/a"))
+      store.insert_flow(sitemap_captured("acme.test", "/b"))
+      store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_000_i64, scheme: "https", host: "acme.test", port: 443,
+        method: "GET", target: "/a?x=1", http_version: "HTTP/1.1",
+        head: "GET /a?x=1 HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice,
+        source: Gori::FlowSource::Kind::Fuzzer))
+      store.flush
+
+      hosts, _ = Gori::CLI::Run.collect_sitemap_for_spec(store, 100)
+      Gori::CLI::Output.sitemap_text(hosts).should contain("a  (1 query)  [GET]  (touched: fuzzer 1)")
+      json = JSON.parse(Gori::CLI::Output.sitemap_json(hosts))
+      kids = json[0]["children"].as_a
+      kids.find! { |c| c["path"]? == "/a" }["touched_by"].should eq(JSON.parse(%({"fuzzer":1})))
+      kids.find! { |c| c["path"]? == "/b" }["touched_by"]?.should be_nil
+
+      hosts, _ = Gori::CLI::Run.collect_sitemap_for_spec(store, 100, untested: true)
+      Gori::CLI::Output.sitemap_paths(hosts).should eq("GET  https://acme.test/b\n")
+    end
   end
 end
