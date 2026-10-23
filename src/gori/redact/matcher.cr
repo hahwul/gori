@@ -38,10 +38,8 @@ module Gori
 
       def initialize(@profile : Profile)
         @pattern_errors = [] of String
-        @fields = {} of String => String
-        @profile.json_fields.each { |f| @fields[f.strip.downcase] = f unless f.strip.empty? }
-        @form = {} of String => String
-        @profile.form_keys.each { |f| @form[f.strip.downcase] = f unless f.strip.empty? }
+        @fields = name_set(@profile.json_fields, "json field")
+        @form = name_set(@profile.form_keys, "form key")
         @pointers = [] of {Array(String), String}
         @profile.json_pointers.each do |p|
           next if p.strip.empty?
@@ -66,6 +64,22 @@ module Gori
         end
         BUILTIN_PATTERNS.each { |(rx, label)| @patterns << {rx, label} }
         @text_rules = build_text_rules
+      end
+
+      # A name that is not UTF-8 stays in the set — `a%FF` form-decodes to one, so the
+      # structural walk can still match it — but `build_text_rules` leaves it out, because
+      # `Regex.new` raises on such a source. That gap is reported like a pattern that failed
+      # to compile.
+      private def name_set(names : Array(String), kind : String) : Hash(String, String)
+        set = {} of String => String
+        names.each do |f|
+          next if f.strip.empty?
+          unless f.valid_encoding?
+            @pattern_errors << "#{kind} #{f.inspect} is not valid UTF-8, so the text fallback for unparsed bodies cannot match it"
+          end
+          set[f.strip.downcase] = f
+        end
+        set
       end
 
       # Whether `src` spells the `\C` escape: a `C` after an odd run of backslashes (an even
@@ -466,8 +480,9 @@ module Gori
       # hang.
       private def build_text_rules : Array({Regex, String})
         rules = [] of {Regex, String}
-        unless @fields.empty?
-          alt = @fields.keys.map { |k| Regex.escape(k) }.join('|')
+        fields = @fields.keys.select(&.valid_encoding?)
+        unless fields.empty?
+          alt = fields.map { |k| Regex.escape(k) }.join('|')
           # `"name" : "value"`, with backslash escapes inside the value kept whole — and the
           # closing quote OPTIONAL at end of subject. That last part is not a nicety: this rule
           # runs over bodies that are truncated (a capture cut at the cap, an MCP projection cut
@@ -487,8 +502,9 @@ module Gori
                               "|[^\\s,{}\\[\\]\"]++)",
             Regex::Options::IGNORE_CASE | Regex::Options::DOTALL), "json_field (text fallback)"}
         end
-        unless @form.empty?
-          alt = @form.keys.map { |k| Regex.escape(k) }.join('|')
+        form = @form.keys.select(&.valid_encoding?)
+        unless form.empty?
+          alt = form.map { |k| Regex.escape(k) }.join('|')
           # `name=value` as it appears in a query string, a form body or a cookie run.
           rules << {Regex.new("(?:\\A|[&?;\\s])(?:#{alt})=([^&;\\s\"']*)",
             Regex::Options::IGNORE_CASE), "form_key (text fallback)"}

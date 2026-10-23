@@ -241,4 +241,41 @@ describe Gori::Redact::Matcher do
       Gori::Redact::Matcher.single_code_unit?("x\\\\C").should be_false
     end
   end
+
+  # A name is compiled into the text-fallback alternation, and `Regex.new` raises on a source
+  # that is not UTF-8 — so one such key (a `--form-key=$'a\xff'`, or a hand-edited settings.json
+  # that JSON round-trips raw) took down every export the profile was used for. Refused into
+  # pattern_errors like a bad regex; the other names keep working, fallback included.
+  describe "a non-UTF-8 field or form key" do
+    bad = String.new(Bytes[0x61, 0xFF])
+
+    it "is refused into pattern_errors and the remaining keys still redact" do
+      with_salt do
+        m = Gori::Redact::Matcher.new(Gori::Redact::Profile.new(name: "p",
+          json_fields: [bad, "token"], form_keys: [bad, "password"]))
+        m.pattern_errors.size.should eq(2)
+        m.pattern_errors.each(&.valid_encoding?.should(be_true))
+        m.body("password=s3cret".to_slice, "application/x-www-form-urlencoded").text.should_not contain("s3cret")
+        m.body("x password=s3cret".to_slice, "text/plain").text.should_not contain("s3cret")
+        m.body(%({"token":"tk1).to_slice, "application/json").text.should_not contain("tk1")
+      end
+    end
+
+    # The key is still a NAME the structural walk matches: `a%FF` form-decodes to it. Only the
+    # text-fallback rule, which matches undecoded text, cannot hold it.
+    it "still redacts a form body whose decoded key is that name" do
+      with_salt do
+        m = Gori::Redact::Matcher.new(Gori::Redact::Profile.new(name: "p", form_keys: [bad]))
+        m.body("a%FF=s3cret".to_slice, "application/x-www-form-urlencoded").text.should_not contain("s3cret")
+        m.pattern_errors.should eq([%(form key "a\\xFF" is not valid UTF-8, so the text fallback for unparsed bodies cannot match it)])
+        m.body("x=1".to_slice, "text/plain").text.should eq("x=1")
+      end
+    end
+
+    it "is refused the same way when it comes back from persisted JSON" do
+      raw = String.new(Bytes[0x5B, 0x7B] + %("name":"p","form_keys":[").to_slice + Bytes[0x61, 0xFF] + %(","pin"]}]).to_slice)
+      profiles = Gori::Redact::Profile.list_from_json(JSON.parse(raw))
+      Gori::Redact::Matcher.new(profiles.first).pattern_errors.size.should eq(1)
+    end
+  end
 end
