@@ -1518,9 +1518,12 @@ module Gori::Tui
     # an offset. See `Frame.scroll_gauge_row`.
     def gauge_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
       rows = visible_rows
-      # `list_h`, matching the draw: while the tag prompt is open the tree gets one row less.
-      list_h = @tagging ? {rect.h - 1, 0}.max : rect.h
-      Frame.scroll_gauge_row(Rect.new(rect.x, rect.y, rect.w, list_h), rows.size, mx, my)
+      # The rect render draws the gauge over: the tree below the chrome band (`list_top`), and
+      # `list_h` — while the tag prompt is open the tree gets one row less.
+      top = list_top(rect)
+      tree_h = {rect.bottom - top, 0}.max
+      list_h = @tagging ? {tree_h - 1, 0}.max : tree_h
+      Frame.scroll_gauge_row(Rect.new(rect.x, top, rect.w, list_h), rows.size, mx, my)
     end
 
     # Inverts render's marker column `rect.x + 1 + depth*2` for visible_rows[ri].

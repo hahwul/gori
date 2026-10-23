@@ -402,6 +402,22 @@ describe Gori::Tui::SitemapView do
     end
   end
 
+  # The gauge is drawn over the TREE, below the bar, header and divider; the hit-test measured
+  # the whole rect, so a click on the bar row jumped the cursor and the gauge's own ends were off.
+  it "hit-tests the scroll gauge over the rows it was drawn on" do
+    with_store do |store|
+      40.times { |i| capture(store, "h#{i}.test", "GET", "/") }
+      view = SitemapView.new
+      view.reload(store)
+      rect = Rect.new(1, 1, 60, 20)
+      view.render(Screen.new(MemoryBackend.new(70, 25)), rect)
+      top = rect.y + 3 # filter bar, column header, divider
+      view.gauge_row_at(rect, rect.right, rect.y).should be_nil
+      view.gauge_row_at(rect, rect.right, top).should eq(0)
+      view.gauge_row_at(rect, rect.right, rect.bottom - 1).should eq(view.row_count - 1)
+    end
+  end
+
   it "folds a long numeric sequence into a collapsed group; `g` unfolds it" do
     with_store do |store|
       (1001..1012).each { |i| capture(store, "acme.test", "GET", "/users/#{i}") } # 12 > threshold(10)
