@@ -159,6 +159,27 @@ private def bogus_accept_port : Int32
   port
 end
 
+# The first dial upgrades, sends one frame and CLOSE; every later dial is refused with a 403.
+private def upgrade_then_refuse(conn : TCPSocket, first : Bool) : Nil
+  conn.read_timeout = 5.seconds
+  head = Gori::Proxy::Codec::Http1.read_head(conn).not_nil!
+  if first
+    key = String.new(head).each_line.find(&.downcase.starts_with?("sec-websocket-key:")).try(&.split(':', 2)[1].strip) || ""
+    accept = Base64.strict_encode(Digest::SHA1.digest(key + WsEngine::GUID))
+    conn << "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: #{accept}\r\n\r\n"
+    conn.write(WS.encode(WS::OP_TEXT, "old-frame".to_slice, mask: false))
+    conn.write(WS.encode(WS::OP_CLOSE, Bytes[0x03, 0xe8], mask: false))
+    conn.flush
+    sleep 200.milliseconds
+  else
+    conn << "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n"
+    conn.flush
+  end
+rescue
+ensure
+  conn.close rescue nil
+end
+
 describe "RepeaterController WebSocket live session (#1630)" do
   it "connects, sends two lines on one handshake, and streams a server push between them" do
     origin = echo_origin
@@ -530,30 +551,11 @@ describe "RepeaterController WebSocket live session (#1630)" do
   it "shows a failed reconnect's error instead of the closed session's transcript" do
     server = TCPServer.new("127.0.0.1", 0)
     port = server.local_address.port
-    dials = 0
     spawn do
+      dials = 0
       while conn = server.accept?
         dials += 1
-        first = dials == 1
-        spawn do
-          conn.read_timeout = 5.seconds
-          head = Gori::Proxy::Codec::Http1.read_head(conn).not_nil!
-          if first
-            key = String.new(head).each_line.find(&.downcase.starts_with?("sec-websocket-key:")).try(&.split(':', 2)[1].strip) || ""
-            accept = Base64.strict_encode(Digest::SHA1.digest(key + WsEngine::GUID))
-            conn << "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: #{accept}\r\n\r\n"
-            conn.write(WS.encode(WS::OP_TEXT, "old-frame".to_slice, mask: false))
-            conn.write(WS.encode(WS::OP_CLOSE, Bytes[0x03, 0xe8], mask: false))
-            conn.flush
-            sleep 200.milliseconds
-          else
-            conn << "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n"
-            conn.flush
-          end
-        rescue
-        ensure
-          conn.close rescue nil
-        end
+        spawn upgrade_then_refuse(conn, first: dials == 1) # a method arg, not a captured loop var
       end
     rescue
     end
