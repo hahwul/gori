@@ -98,7 +98,8 @@ module Gori
       # bare number is seconds, as `--for` reads one. A zero TTL is refused: it would refresh
       # before every send, which is a login flood with a policy's name on it.
       def self.parse?(raw : String) : RefreshBefore?
-        v = raw.strip.downcase
+        # `.scrub`: argv and JSON strings can carry non-UTF-8 bytes, and PCRE2 raises on them.
+        v = raw.scrub.strip.downcase
         return off if v == "off" || v.empty?
         return new(Kind::JwtExp) if v == "jwt-exp" || v == "jwt_exp"
         # `[0-9]`, not `\d`: PCRE's `\d` also takes `٣`, which `to_i64` refuses by raising.

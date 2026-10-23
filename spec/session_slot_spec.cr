@@ -85,6 +85,13 @@ describe Gori::SessionSlot do
       Slot.parse_json(%([{"name":"a","refresh_before":"ttl=٣"}])).map(&.name).should eq(["a"])
     end
 
+    # argv and a JSON string can both carry bytes that are not UTF-8, and PCRE2 RAISES on such a
+    # subject rather than failing to match: `gori run session add --refresh-before $'\xff'`
+    # printed a backtrace out of `main`.
+    it "refuses a policy that is not valid UTF-8 rather than raising" do
+      Slot::RefreshBefore.parse?(String.new(Bytes[0x74, 0x74, 0x6c, 0x3d, 0xff])).should be_nil
+    end
+
     it "skips a malformed entry and keeps the rest" do
       raw = %([{"set":[]},{"name":"ok","rules":["A","",7]}])
       back = Slot.parse_json(raw)
