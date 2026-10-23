@@ -1558,6 +1558,33 @@ describe Gori::Discover::Engine do
     # One probe was in flight when stop was requested; the remaining seven must not go out.
     bogus.should eq(1)
   end
+
+  # Stop is terminal. A pause (or resume) pressed after ^X but before the orchestrator saw the
+  # stop used to overwrite the state: the run parked "paused" forever instead of ending.
+  it "ends a stopped run even when pause and resume are pressed after the stop" do
+    cfg = D::Config.new(spider: true, bruteforce: false, concurrency: 1, retries: 0)
+    engine = uninitialized D::Engine
+    backend = RouteBackend.new(->(t : String) do
+      if t == "/"
+        engine.stop
+        engine.pause
+        engine.resume
+        engine.pause
+      end
+      html(%(<a href="/a">a</a><a href="/b">b</a>))
+    end)
+    engine = D::Engine.new("http://t/", [] of String, backend, cfg, D::OpenScope.new)
+    done = Channel(Bool).new(1)
+    spawn do
+      stopped = false
+      engine.run { |ev| stopped = ev.stopped if ev.is_a?(D::DoneEvent) }
+      done.send(stopped)
+    end
+    select
+    when stopped = done.receive then stopped.should be_true
+    when timeout(5.seconds) then fail "a stop followed by pause/resume never ended the run"
+    end
+  end
   # ── what a brute-force HIT's body says ─────────────────────────────────────────────────
   #
   # Only Crawl/Fetch outcomes used to carry links, so a wordlist hit was a dead end: the sweep

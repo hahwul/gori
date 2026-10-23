@@ -821,11 +821,14 @@ module Gori::Discover
       poke
     end
 
+    # Stop is terminal: a pause or resume that lands after it (before the orchestrator has seen
+    # the stop) must not overwrite it, or the run parks paused, or crawls on, instead of ending.
     def pause : Nil
-      @state = State::Paused
+      @state = State::Paused unless @state == State::Stopped
     end
 
     def resume : Nil
+      return if @state == State::Stopped
       @state = State::Running
       poke
     end
