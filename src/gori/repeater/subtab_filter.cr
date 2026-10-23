@@ -18,7 +18,8 @@ module Gori
         return [] of String unless raw
         seen = Set(String).new
         out = [] of String
-        raw.split(/[\s,]+/).each do |tok|
+        # `.scrub`: a tag is a caption, never wire bytes, and PCRE2 raises on a non-UTF-8 subject.
+        raw.scrub.split(/[\s,]+/).each do |tok|
           t = tok.strip.lstrip('#')
           next if t.empty?
           key = t.downcase

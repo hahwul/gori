@@ -33,6 +33,12 @@ describe Gori::Repeater::Tags do
     Repeater::Tags.stored("#").should be_nil
     Repeater::Tags.stored("").should be_nil
   end
+
+  # The split is a PCRE2 regex, which RAISES on a non-UTF-8 subject: `gori run repeater update
+  # 1 --tags $'\xff'` crashed out of `main`, and MCP update_repeater answered INTERNAL.
+  it "parses a non-UTF-8 tag string instead of raising" do
+    Repeater::Tags.parse(String.new(Bytes[0x61, 0xff, 0x20, 0x62])).size.should eq(2)
+  end
 end
 
 describe Gori::Repeater::SubtabFilter do
