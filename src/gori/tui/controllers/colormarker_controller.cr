@@ -374,7 +374,19 @@ module Gori::Tui
       true
     end
 
+    # Opens the row only when the pair landed ON one — the Rewriter's rule list's shape — so a
+    # double-click in a card's empty space or on its scroll gauge does not edit whatever was
+    # highlighted. False hands the second press back to the shell as a click.
     def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      rules_r, colors_r = @view.pane_rects(BodyChrome.frame_inner(rect))
+      if !colors_r.empty? && colors_r.contains?(mx, my)
+        n = custom_colors.size
+        return false if @colors_view.gauge_row_at(colors_r, mx, my, n) || !@colors_view.row_at(colors_r, my, @color_scroll, n)
+      else
+        rules_r = rules_list_rect(rules_r)
+        n = rule_list.size
+        return false if @view.gauge_row_at(rules_r, mx, my, n) || !@view.row_at(rules_r, my, @scroll, n)
+      end
       handle_click(rect, mx, my)
       @focus == :colors ? customcolor_edit : colormarker_edit
       true
