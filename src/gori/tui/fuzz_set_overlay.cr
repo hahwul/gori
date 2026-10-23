@@ -205,8 +205,8 @@ module Gori::Tui
 
     # Which pasted keystrokes reach this card (see `Overlay#takes_pasted?`): the VALUES editor takes a line break as a newline; the other rows keep the default.
     def takes_pasted?(ev : Termisu::Event::Key) : Bool
-      return !ev.key.enter? if @saving # a pasted line break must not answer the name prompt
-      focused == :values || !ev.key.enter?
+      return super if @saving # a pasted line break must not answer the name prompt
+      focused == :values || super
     end
 
     private def focused : Symbol

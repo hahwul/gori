@@ -246,10 +246,13 @@ module Gori::Tui
     # `/tmp/a.har⏎` submitted the import and typed whatever followed into the pane the shell
     # restored; on a confirm card a pasted `y` was an answer. The default lets text through
     # and holds back ↵: a one-line field takes the first line and the operator sees the rest
-    # refused rather than acted on. A multi-line editor overrides to take ↵ as the newline
-    # it is; the confirm card overrides to take nothing — a clipboard is not a decision.
+    # refused rather than acted on. ↹ is held back for the same reason: on a form it moves
+    # to the next field, and the rest of the clipboard landed there. A multi-line editor
+    # overrides to take ↵ as the newline it is; the confirm card overrides to take nothing —
+    # a clipboard is not a decision.
     def takes_pasted?(ev : Termisu::Event::Key) : Bool
-      !ev.key.enter?
+      key = ev.key
+      !(key.enter? || key.tab? || key.back_tab?)
     end
 
     # Whether a bracketed paste over this modal is collected and handed over whole

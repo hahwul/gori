@@ -76,6 +76,12 @@ module Gori::Tui
       "1-#{@question.choices.size}/↵ answer · ↑/↓ choose · x dismiss · esc later"
     end
 
+    # A pasted digit or `x` is not an answer: on an approval it APPROVED the agent's call
+    # (`1` Once) with nothing pressed at the card. Like `ConfirmDialog`, it takes no paste.
+    def takes_pasted?(ev : Termisu::Event::Key) : Bool
+      false
+    end
+
     def handle_key(ev : Termisu::Event::Key) : Symbol
       k = ev.key
       return :cancel if k.escape?
@@ -164,8 +170,8 @@ module Gori::Tui
         return
       end
       text_w = box.w - 4
-      Frame.card(screen, box, "AGENT ASKS", border: Theme.border_focus)
-      Frame.border_meta(screen, box, "AGENT ASKS", @who, bg: Theme.panel)
+      Frame.card(screen, box, title, border: Theme.border_focus)
+      Frame.border_meta(screen, box, title, @who, bg: Theme.panel)
       y = box.y + 1
       question_lines(text_w).each do |line|
         screen.text(box.x + 2, y, line, Theme.text_bright, Theme.panel, Attribute::Bold, width: text_w)

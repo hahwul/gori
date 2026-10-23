@@ -103,6 +103,12 @@ module Gori::Tui
       end
     end
 
+    # A pasted character matching a mnemonic commits that row on the spot (the Android picker's
+    # `s` runs the system-CA setup over adb), so a paste is not a pick: none of it is taken.
+    def takes_pasted?(ev : Termisu::Event::Key) : Bool
+      false
+    end
+
     # ↑/↓ pick, ↵ sets, esc cancels. A printable matching a row's mnemonic sets that row
     # DIRECTLY (one keystroke, no ↵); j/k fall back to vim-style nav only when they aren't
     # themselves a mnemonic, so the reflex keystroke moves the highlight instead of being

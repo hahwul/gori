@@ -172,7 +172,7 @@ module Gori::Tui
 
     # Which pasted keystrokes reach this card (see `Overlay#takes_pasted?`): the headers editor takes a line break as a newline; the name/remove rows keep the default.
     def takes_pasted?(ev : Termisu::Event::Key) : Bool
-      @selected == EDITOR_ROW || !ev.key.enter?
+      @selected == EDITOR_ROW || super
     end
 
     def text_fields : Array(TextField)

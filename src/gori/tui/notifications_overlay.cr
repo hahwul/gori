@@ -122,6 +122,11 @@ module Gori::Tui
 
     # Formerly Runner#handle_notifications_key. ↵ commits (the open-site's closure jumps
     # to the selected note's result); `c` empties the store in place and stays open.
+    # Nothing here takes text, and a pasted `c` wiped every notification: no paste at all.
+    def takes_pasted?(ev : Termisu::Event::Key) : Bool
+      false
+    end
+
     def handle_key(ev : Termisu::Event::Key) : Symbol
       k = ev.key
       c = ev.char

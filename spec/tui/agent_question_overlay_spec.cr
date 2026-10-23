@@ -26,6 +26,9 @@ describe Gori::Tui::AgentQuestionOverlay do
   # #1585: gori's own approval card about an agent's call is not the agent's question.
   it "titles a server-written approval as one" do
     card(question.copy_with(approval: true)).title.should eq("APPROVE AGENT CALL")
+    # …on the card the operator reads, too, not only the top-bar badge.
+    h = OverlayHarness.new(card(question.copy_with(approval: true)))
+    h.render.row(h.box.not_nil!.y).should contain("APPROVE AGENT CALL")
   end
 
   it "draws the question, how long it has waited and has left, the detail and each choice" do

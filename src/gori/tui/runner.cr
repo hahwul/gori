@@ -1458,6 +1458,13 @@ module Gori::Tui
         return false if @paste_dropped
         return false if buffer_bulk_paste(ev)
         handle_key(ev)
+        # A pasted ↵ can commit the one-line field it was typed into (a `/` query bar, the
+        # Repeater TARGET row, a prompt) and hand the focus back to a keymap: the rest of the
+        # clipboard would then run as that tab's commands. Re-asked after every pasted key.
+        if @paste_newline.pasting? && paste_runs_as_commands?
+          @paste_dropped = true
+          @toast = PASTE_REFUSED
+        end
       when Termisu::Event::Mouse
         # A click is not part of a paste, and acting on one mid-paste moves the target out from
         # under it: the tab/focus changes, and the buffered clipboard is then flushed into
@@ -2051,7 +2058,12 @@ module Gori::Tui
       # (`Overlay#takes_pasted?`). The refusal is named ONCE per paste, on the first key
       # held back, so a long clipboard does not toast a hundred times.
       if @paste_newline.pasting? && !ov.takes_pasted?(ev)
-        status(PASTE_MODAL_REFUSED) unless @toast == PASTE_MODAL_REFUSED
+        # Latched: the rest of this paste is refused too. Letting the keys after the held-back
+        # one through glued the next line onto the first (`a.com⏎b.com` → `a.comb.com`) under
+        # a toast that said the paste had stopped.
+        @paste_dropped = true
+        msg = ev.key.enter? || ev.key.tab? || ev.key.back_tab? ? PASTE_MODAL_REFUSED : PASTE_MODAL_IGNORED
+        status(msg) unless @toast == msg
         return
       end
       case ov.handle_key(ev)
@@ -2073,6 +2085,7 @@ module Gori::Tui
 
     # Shown when a pasted keystroke was held back from a modal (see `dispatch_overlay_key`).
     PASTE_MODAL_REFUSED = "paste stopped at the line break — ↵ here means commit; press it yourself"
+    PASTE_MODAL_IGNORED = "paste ignored — this card answers keys you press, not a clipboard"
 
     private def dispatch_overlay_click(ov : Overlay, area : Rect, mx : Int32, my : Int32) : Nil
       apply_overlay_outcome(ov, ov.handle_click(area, mx, my))
