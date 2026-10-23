@@ -768,6 +768,66 @@ describe Gori::Proxy::H2::Assembler do
     sink.responses.last.status.should eq(200)
   end
 
+  # A stream id is never reused (RFC 9113 §5.1.1), so a head arriving on a CLOSED id projects
+  # nothing at the head. Two paths projected one anyway — a PUSH_PROMISE naming the closed id,
+  # and an extended CONNECT head (projected at the head, `open_ws_capture`) — and the late-frame
+  # branch then forgot the stream, so its row sat Pending until shutdown.
+  it "projects no flow for a PUSH_PROMISE that names an already-closed stream" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443)
+    get = hexb("828684418cf1e3c2e5f23a6ba0ab90f4ff")
+    assembler.feed("out", headers_frame(1_u32, Frame::END_HEADERS | Frame::END_STREAM, get))
+    assembler.feed("in", headers_frame(2_u32, Frame::END_HEADERS, Bytes[0x88_u8]))
+    assembler.feed("in", Frame::Header.new(Frame::Type::RstStream.value, 0_u8, 2_u32, Bytes[0, 0, 0, 8]))
+    # A late head whose framing fails (pad past the payload) leaves an entry under the closed id.
+    assembler.feed("in", headers_frame(2_u32, Frame::END_HEADERS | Frame::PADDED, Bytes[0xff_u8, 0x88_u8]))
+    pp = IO::Memory.new
+    pp.write(Bytes[0x00, 0x00, 0x00, 0x02]) # promises the stream just reset
+    pp.write(get)
+    assembler.feed("in", Frame::Header.new(Frame::Type::PushPromise.value, Frame::END_HEADERS, 1_u32, pp.to_slice))
+    assembler.feed("in", data_frame(2_u32, Frame::END_STREAM, "late"))
+    assembler.finalize_all("h2 connection closed")
+
+    sink.requests.map(&.h2_stream_id).should eq([1_i64])
+    sink.responses.size.should eq(sink.requests.size) # nothing left Pending
+  end
+
+  # Refused promises must not hold a live-stream slot: one each, never projected or deleted,
+  # and MAX_LIVE_STREAMS of them blinded capture for the rest of the connection.
+  it "does not let PUSH_PROMISEs naming closed streams exhaust the live-stream cap" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443)
+    get = hexb("828684418cf1e3c2e5f23a6ba0ab90f4ff")
+    rounds = Gori::Proxy::H2::Assembler::MAX_LIVE_STREAMS + 8
+    rounds.times do |i|
+      sid = (i * 2 + 2).to_u32
+      assembler.feed("in", headers_frame(sid, Frame::END_HEADERS, Bytes[0x88_u8]))
+      assembler.feed("in", Frame::Header.new(Frame::Type::RstStream.value, 0_u8, sid, Bytes[0, 0, 0, 8]))
+      pp = IO::Memory.new
+      IO::ByteFormat::BigEndian.encode(sid, pp)
+      pp.write(get)
+      assembler.feed("in", Frame::Header.new(Frame::Type::PushPromise.value, Frame::END_HEADERS, 1_u32, pp.to_slice))
+    end
+    sink.requests.should be_empty
+    assembler.feed("out", headers_frame(1_u32, Frame::END_HEADERS | Frame::END_STREAM, get))
+    sink.requests.map(&.h2_stream_id).should eq([1_i64]) # still tracked
+  end
+
+  it "projects no flow for an extended CONNECT head on an already-closed stream" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443)
+    assembler.feed("in", headers_frame(1_u32, Frame::END_HEADERS | Frame::END_STREAM, Bytes[0x88_u8]))
+    assembler.feed("in", Frame::Header.new(Frame::Type::RstStream.value, 0_u8, 1_u32, Bytes[0, 0, 0, 7]))
+    assembler.feed("out", headers_frame(1_u32, Frame::END_HEADERS, connect_block))
+    sink.requests.should be_empty
+
+    # A CONNECT on a fresh id is still projected at its head, as before.
+    assembler.feed("out", headers_frame(3_u32, Frame::END_HEADERS, connect_block))
+    sink.requests.map(&.h2_stream_id).should eq([3_i64])
+    assembler.finalize_all("h2 connection closed")
+    sink.responses.size.should eq(sink.requests.size)
+  end
+
   # --- RFC 8441 extended CONNECT (a WebSocket over h2) ----------------------------------
   #
   # The relay works end to end, and that is exactly the problem these cover: the flow it

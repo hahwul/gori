@@ -424,6 +424,10 @@ module Gori::Proxy::H2
       request = direction == "out"
       side = request ? stream.req : stream.resp
       decoder = request ? @req_decoder : @resp_decoder
+      # A stream id is never reused (RFC 9113 §5.1.1). A head on a closed one is still decoded,
+      # but nothing may project at the head (`head_complete`): the branch at the end forgets the
+      # stream, and a row projected here would never get its response.
+      late = @closed.includes?(frame.stream_id)
 
       # First response byte (ttfb anchor): the first HEADERS/DATA in the response
       # direction. Guard to those frame types so a leading WINDOW_UPDATE/PRIORITY
@@ -451,7 +455,7 @@ module Gori::Proxy::H2
         if frame.end_headers?
           side.awaiting_continuation = false
           finish_header_block(side, decoder, pre)
-          head_complete(frame.stream_id, stream, request)
+          head_complete(frame.stream_id, stream, request) unless late
         else
           side.awaiting_continuation = true # a CONTINUATION may now legally follow
         end
@@ -465,7 +469,7 @@ module Gori::Proxy::H2
         if frame.end_headers?
           side.awaiting_continuation = false
           finish_header_block(side, decoder, pre)
-          head_complete(frame.stream_id, stream, request)
+          head_complete(frame.stream_id, stream, request) unless late
         end
         # END_STREAM is illegal on CONTINUATION (RFC 7540 §6.10) but a hostile peer
         # can set it; mirror HEADERS/DATA so the request still emits and the stream
@@ -487,7 +491,7 @@ module Gori::Proxy::H2
         return
       end
 
-      if @closed.includes?(frame.stream_id)
+      if late
         # A late HEADERS on a finished stream still had to be decoded (the HPACK table must
         # track the sender), but it projects nothing: forget it once its block is whole.
         @streams.delete(frame.stream_id) unless side.awaiting_continuation?
@@ -705,10 +709,12 @@ module Gori::Proxy::H2
       # §5.1.1); reject 0 / odd ids so a forged PUSH_PROMISE can't fabricate or
       # collide with a real (odd, client) request stream.
       return if promised_id == 0 || promised_id.odd?
-      promised = @streams[promised_id]?
-      if promised.nil?
-        return if @streams.size >= MAX_LIVE_STREAMS # at cap — don't track new streams
-        promised = @streams[promised_id] = Stream.new
+      # A closed id (never reused, RFC 9113 §5.1.1) or the live-stream cap: track nothing, but
+      # still decode the block, which can insert into the dynamic table the next head reads.
+      # Closed is asked first: a late head whose decode raised can leave an entry under it.
+      if @closed.includes?(promised_id) || (promised = open_entry(promised_id)).nil?
+        decoder.decode(block) unless pre
+        return
       end
       return if promised.req.headers # already promised
       # Same rule as finish_header_block: `pre` means the block is already decoded.
