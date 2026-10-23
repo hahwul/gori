@@ -66,7 +66,8 @@ describe "Runner — the rest of a paste after a refusal" do
     body = runner_body("private def dispatch_overlay_key(ov : Overlay, ev : Termisu::Event::Key) : Nil")
     guard = body[/if @paste_newline\.pasting\? && !ov\.takes_pasted\?\(ev\).*?return/m]?
     guard.should_not be_nil
-    guard.not_nil!.should contain("@paste_dropped = true")
+    guard.not_nil!.should contain("refuse_modal_paste(ev)")
+    runner_body("private def refuse_modal_paste(ev : Termisu::Event::Key) : Nil").should contain("@paste_dropped = true")
   end
 
   it "re-asks after each pasted key whether the rest would now run as commands" do
