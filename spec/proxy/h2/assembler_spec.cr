@@ -62,6 +62,21 @@ private def amplified_block(prefix : Bytes, refs : Int32) : Bytes
   io.to_slice
 end
 
+# A GET whose block touches only the static table, so it leaves the dynamic one alone.
+private STATIC_GET = Bytes[0x82_u8, 0x84_u8, 0x86_u8]
+# `:path /secret` as a literal WITH incremental indexing: it inserts into the dynamic table.
+private INSERT_SECRET = Bytes[0x82_u8, 0x86_u8, 0x44_u8, 0x07_u8] + "/secret".to_slice
+# A GET whose `:path` is the newest dynamic entry (index 62).
+private REF_SECRET = Bytes[0x82_u8, 0x86_u8, 0xbe_u8]
+
+private def push_promise(stream : UInt32, promised : UInt32, block : Bytes,
+                         flags : UInt8 = Frame::END_HEADERS) : Frame::Header
+  io = IO::Memory.new
+  IO::ByteFormat::BigEndian.encode(promised, io)
+  io.write(block)
+  Frame::Header.new(Frame::Type::PushPromise.value, flags, stream, io.to_slice)
+end
+
 # Records emitted flows (decoded projection) without a DB.
 private class RecSink < Gori::Proxy::FlowSink
   getter requests = [] of Gori::Store::CapturedRequest
@@ -779,7 +794,7 @@ describe Gori::Proxy::H2::Assembler do
     assembler.feed("out", headers_frame(1_u32, Frame::END_HEADERS | Frame::END_STREAM, get))
     assembler.feed("in", headers_frame(2_u32, Frame::END_HEADERS, Bytes[0x88_u8]))
     assembler.feed("in", Frame::Header.new(Frame::Type::RstStream.value, 0_u8, 2_u32, Bytes[0, 0, 0, 8]))
-    # A late head whose framing fails (pad past the payload) leaves an entry under the closed id.
+    # A late head whose framing fails (pad past the payload) must leave no entry under the closed id.
     assembler.feed("in", headers_frame(2_u32, Frame::END_HEADERS | Frame::PADDED, Bytes[0xff_u8, 0x88_u8]))
     pp = IO::Memory.new
     pp.write(Bytes[0x00, 0x00, 0x00, 0x02]) # promises the stream just reset
@@ -826,6 +841,145 @@ describe Gori::Proxy::H2::Assembler do
     sink.requests.map(&.h2_stream_id).should eq([3_i64])
     assembler.finalize_all("h2 connection closed")
     sink.responses.size.should eq(sink.requests.size)
+  end
+
+  # A header block gori projects nothing from still has to run through the sender's decoder: it
+  # can insert into the dynamic table, and every later head on the connection reads that table.
+  # Each of these sends one inserting block down a path that used to skip it, then a head that
+  # references the entry (`0xbe`, the newest dynamic one) — which decoded wrong or raised.
+  it "decodes a HEADERS block past the live-stream cap, so a later head reads the right table" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443)
+    cap = Gori::Proxy::H2::Assembler::MAX_LIVE_STREAMS
+    cap.times { |i| assembler.feed("out", headers_frame((i * 2 + 1).to_u32, Frame::END_HEADERS, STATIC_GET)) }
+    over = (cap * 2 + 1).to_u32
+    assembler.feed("out", headers_frame(over, Frame::END_HEADERS | Frame::END_STREAM, INSERT_SECRET))
+    assembler.feed("out", Frame::Header.new(Frame::Type::RstStream.value, 0_u8, 1_u32, Bytes[0, 0, 0, 8]))
+    assembler.feed("out", headers_frame(over + 2, Frame::END_HEADERS | Frame::END_STREAM, REF_SECRET))
+    sink.requests.last.h2_stream_id.should eq(over + 2)
+    sink.requests.last.target.should eq("/secret")
+  end
+
+  # A stub's synthetic frames can be fed between an untracked block's frames; that must not
+  # abandon the block, or its table insert is lost as it never was for a tracked Side's block.
+  it "keeps a split untracked block across a frame fed on another stream" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443)
+    cap = Gori::Proxy::H2::Assembler::MAX_LIVE_STREAMS
+    cap.times { |i| assembler.feed("out", headers_frame((i * 2 + 1).to_u32, Frame::END_HEADERS, STATIC_GET)) }
+    over = (cap * 2 + 1).to_u32
+    assembler.feed("out", headers_frame(over, Frame::END_STREAM, INSERT_SECRET))
+    assembler.feed("out", data_frame(3_u32, 0_u8, "interleaved"))
+    assembler.feed("out", Frame::Header.new(Frame::Type::Continuation.value, Frame::END_HEADERS, over, Bytes.empty))
+    assembler.feed("out", Frame::Header.new(Frame::Type::RstStream.value, 0_u8, 1_u32, Bytes[0, 0, 0, 8]))
+    assembler.feed("out", headers_frame(over + 2, Frame::END_HEADERS | Frame::END_STREAM, REF_SECRET))
+    sink.requests.last.target.should eq("/secret")
+  end
+
+  it "decodes the block of every PUSH_PROMISE it refuses, so a later push reads the right table" do
+    cases = {
+      "already promised"      => {push_promise(1_u32, 2_u32, STATIC_GET), push_promise(1_u32, 2_u32, INSERT_SECRET)},
+      "odd promised id"       => {push_promise(1_u32, 3_u32, INSERT_SECRET), nil},
+      "promised id 0"         => {push_promise(1_u32, 0_u32, INSERT_SECRET), nil},
+      "split by CONTINUATION" => {
+        push_promise(1_u32, 2_u32, INSERT_SECRET[0, 4], 0_u8),
+        Frame::Header.new(Frame::Type::Continuation.value, Frame::END_HEADERS, 1_u32, INSERT_SECRET[4..]),
+      },
+    }
+    targets = cases.transform_values do |(first, second)|
+      sink = RecSink.new
+      assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443)
+      assembler.feed("out", headers_frame(1_u32, Frame::END_HEADERS, STATIC_GET))
+      assembler.feed("in", first)
+      assembler.feed("in", second) if second
+      assembler.feed("in", push_promise(1_u32, 4_u32, REF_SECRET))
+      sink.requests.find { |r| r.h2_stream_id == 4 }.try(&.target)
+    end
+    targets.should eq(cases.transform_values { "/secret" })
+  end
+
+  # A HEADERS whose framing or decode failed left its freshly opened, empty entry behind for
+  # good, and MAX_LIVE_STREAMS of them blinded capture for the rest of the connection (#412).
+  it "does not let failed header blocks exhaust the live-stream cap" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443)
+    rounds = Gori::Proxy::H2::Assembler::MAX_LIVE_STREAMS + 8
+    rounds.times do |i|
+      sid = (i * 2 + 1).to_u32
+      if i.even? # pad length past the payload
+        assembler.feed("out", headers_frame(sid, Frame::END_HEADERS | Frame::PADDED, Bytes[0xff_u8, 0x82_u8]))
+      else # a dynamic index into an empty table
+        assembler.feed("out", headers_frame(sid, Frame::END_HEADERS, Bytes[0xbe_u8]))
+      end
+    end
+    fresh = (rounds * 2 + 1).to_u32
+    assembler.feed("out", headers_frame(fresh, Frame::END_HEADERS | Frame::END_STREAM, STATIC_GET))
+    sink.requests.map(&.h2_stream_id).should eq([fresh.to_i64])
+  end
+
+  # A late head with no END_HEADERS waited in an entry for a CONTINUATION that never came.
+  it "does not let late heads awaiting CONTINUATION exhaust the live-stream cap" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443)
+    rounds = Gori::Proxy::H2::Assembler::MAX_LIVE_STREAMS + 8
+    rounds.times do |i|
+      sid = (i * 2 + 1).to_u32
+      assembler.feed("out", headers_frame(sid, Frame::END_HEADERS | Frame::END_STREAM, STATIC_GET))
+      assembler.feed("out", Frame::Header.new(Frame::Type::RstStream.value, 0_u8, sid, Bytes[0, 0, 0, 8]))
+      assembler.feed("in", headers_frame(sid, 0_u8, Bytes[0x88_u8]))
+    end
+    fresh = (rounds * 2 + 1).to_u32
+    assembler.feed("out", headers_frame(fresh, Frame::END_HEADERS | Frame::END_STREAM, STATIC_GET))
+    sink.requests.size.should eq(rounds + 1)
+    sink.requests.last.h2_stream_id.should eq(fresh)
+  end
+
+  # The response pump can feed before the request block does (`remember_request_authority`),
+  # so a failed RESPONSE head must not write off the stream its request is about to open.
+  it "keeps the request when a response head that arrived first fails to decode" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443)
+    assembler.feed("in", headers_frame(1_u32, Frame::END_HEADERS, Bytes[0xbe_u8]))
+    assembler.feed("out", headers_frame(1_u32, Frame::END_HEADERS | Frame::END_STREAM, STATIC_GET))
+    sink.requests.map(&.h2_stream_id).should eq([1_i64])
+  end
+
+  # A split PUSH_PROMISE's CONTINUATION rides the ASSOCIATED stream, which is a tracked request:
+  # its failure belongs to the promise and must not touch that stream's entry.
+  it "leaves the associated stream alone when a split PUSH_PROMISE fails to decode" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443)
+    assembler.remember_request_authority(1_u32, "example.com")
+    assembler.feed("in", push_promise(1_u32, 2_u32, INSERT_SECRET[0, 4], 0_u8))
+    assembler.feed("in", Frame::Header.new(Frame::Type::Continuation.value, Frame::END_HEADERS, 1_u32, Bytes[0x2f_u8]))
+    assembler.feed("out", headers_frame(1_u32, Frame::END_HEADERS | Frame::END_STREAM, STATIC_GET))
+    sink.requests.map(&.h2_stream_id).should eq([1_i64])
+  end
+
+  # A split promise whose CONTINUATION never came must not swallow a later block on that id.
+  it "routes a CONTINUATION to the head it continues, not to an abandoned push block" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443)
+    assembler.feed("out", headers_frame(1_u32, Frame::END_HEADERS | Frame::END_STREAM, STATIC_GET))
+    assembler.feed("in", push_promise(1_u32, 2_u32, STATIC_GET, 0_u8))
+    assembler.feed("in", headers_frame(1_u32, Frame::END_STREAM, Bytes.empty))
+    assembler.feed("in", Frame::Header.new(Frame::Type::Continuation.value, Frame::END_HEADERS, 1_u32, Bytes[0x88_u8]))
+    sink.responses.map(&.status).should eq([200])
+  end
+
+  # A promise refused at the cap left its id open, so the pushed response opened an entry
+  # nothing ever emitted once a slot freed — and took that slot for good.
+  it "does not let the response to a push refused at the cap take a live-stream slot" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443)
+    cap = Gori::Proxy::H2::Assembler::MAX_LIVE_STREAMS
+    cap.times { |i| assembler.feed("out", headers_frame((i * 2 + 1).to_u32, Frame::END_HEADERS, STATIC_GET)) }
+    assembler.feed("in", push_promise(1_u32, 2_u32, STATIC_GET))
+    assembler.feed("out", Frame::Header.new(Frame::Type::RstStream.value, 0_u8, 3_u32, Bytes[0, 0, 0, 8]))
+    assembler.feed("in", headers_frame(2_u32, Frame::END_HEADERS | Frame::END_STREAM, Bytes[0x88_u8]))
+    fresh = (cap * 2 + 1).to_u32
+    assembler.feed("out", headers_frame(fresh, Frame::END_HEADERS | Frame::END_STREAM, STATIC_GET))
+    sink.requests.last.h2_stream_id.should eq(fresh)
   end
 
   # --- RFC 8441 extended CONNECT (a WebSocket over h2) ----------------------------------

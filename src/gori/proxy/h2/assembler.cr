@@ -203,6 +203,11 @@ module Gori::Proxy::H2
       end
     end
 
+    # Per direction, a header block no Stream tracks that is still waiting for CONTINUATION
+    # frames, with the id of the stream it rides on. See `skip_block`.
+    @req_untracked : {UInt32, IO::Memory}? = nil
+    @resp_untracked : {UInt32, IO::Memory}? = nil
+
     # A flow's `created_at` is not the connection's open time: see `Stream#created_at`, which
     # each request stamps for itself.
     def initialize(@sink : FlowSink, @host : String, @port : Int32, @conn_id : Int64 = 0_i64)
@@ -395,19 +400,43 @@ module Gori::Proxy::H2
     # caller that already decoded this frame's header block (see `HeadBlock`).
     def feed(direction : String, frame : Frame::Header, pre : HeadBlock? = nil) : Nil
       return if frame.stream_id == 0 # connection-level (SETTINGS/PING/...) — not a stream
-      @mutex.synchronize { feed_locked(direction, frame, pre) }
-    rescue Gori::Error | IndexError | OverflowError
-      # malformed/hostile HPACK or framing (bad pad length, overflowing integer,
-      # oversized/truncated block): skip the decoded projection. The raw frame log
-      # is the truth (P7) and the live relay already forwarded the bytes.
+      @mutex.synchronize do
+        fresh = !@streams.has_key?(frame.stream_id)
+        feed_locked(direction, frame, pre)
+      rescue Gori::Error | IndexError | OverflowError
+        # malformed/hostile HPACK or framing (bad pad length, overflowing integer,
+        # oversized/truncated block): skip the decoded projection. The raw frame log
+        # is the truth (P7) and the live relay already forwarded the bytes.
+        abandon_head(direction == "out", frame.stream_id) if fresh
+      end
+    end
+
+    # A HEADERS that opened `stream_id` failed to frame or decode, so the entry it allocated
+    # would never project and would hold a MAX_LIVE_STREAMS slot for good (#412): forget it. A
+    # failed REQUEST head also writes the id off, so the origin's answer arrives late instead
+    # of opening a second such entry. A failed RESPONSE head does not: the response pump can
+    # feed before the request block does (`remember_request_authority`), which must still open.
+    private def abandon_head(request : Bool, stream_id : UInt32) : Nil
+      stream = @streams[stream_id]? || return
+      return if stream.flow_id || (request ? stream.req : stream.resp).headers # decoded: finalize projects it
+      @streams.delete(stream_id)
+      note_closed(stream_id) if request
     end
 
     private def feed_locked(direction : String, frame : Frame::Header, pre : HeadBlock?) : Nil
+      request = direction == "out"
+      # An untracked block (`skip_block`) ends at its END_HEADERS CONTINUATION; any other frame
+      # on its stream abandons it. A frame on another stream leaves it: a stub's synthetic answer
+      # can be fed in between, as a tracked Side's block survives that too.
+      if (pending = request ? @req_untracked : @resp_untracked) && pending[0] == frame.stream_id
+        request ? (@req_untracked = nil) : (@resp_untracked = nil)
+        return skip_block(request, frame, frame.payload, pre, pending[1]) if frame.frame_type == Frame::Type::Continuation
+      end
       # PUSH_PROMISE opens the PROMISED stream itself (with its own cap check) and never touches
       # frame.stream_id's slot, so handle it before the lookup below — otherwise it would
       # allocate an unused Stream for the associated id.
       if frame.frame_type == Frame::Type::PushPromise
-        handle_push_promise(direction, frame, direction == "out" ? @req_decoder : @resp_decoder, pre)
+        handle_push_promise(direction, frame, request ? @req_decoder : @resp_decoder, pre)
         return
       end
 
@@ -418,16 +447,17 @@ module Gori::Proxy::H2
         # tracking slot, or a cheap flood of them exhausts MAX_LIVE_STREAMS and blinds capture
         # for the rest of the connection (#412). The raw frame log stays the truth (P7).
         return unless frame.frame_type == Frame::Type::Headers
-        return if @streams.size >= MAX_LIVE_STREAMS # at cap — don't track new streams
+        if @closed.includes?(frame.stream_id) || @streams.size >= MAX_LIVE_STREAMS
+          # A late head (a stream id is never reused, RFC 9113 §5.1.1) or one past the cap
+          # projects nothing. A REQUEST past the cap is written off, so the origin's answer
+          # cannot open an entry nothing would ever emit; only the client picks those ids.
+          note_closed(frame.stream_id) if request
+          return skip_block(request, frame, header_block(frame), pre)
+        end
         stream = @streams[frame.stream_id] = Stream.new
       end
-      request = direction == "out"
       side = request ? stream.req : stream.resp
       decoder = request ? @req_decoder : @resp_decoder
-      # A stream id is never reused (RFC 9113 §5.1.1). A head on a closed one is still decoded,
-      # but nothing may project at the head (`head_complete`): the branch at the end forgets the
-      # stream, and a row projected here would never get its response.
-      late = @closed.includes?(frame.stream_id)
 
       # First response byte (ttfb anchor): the first HEADERS/DATA in the response
       # direction. Guard to those frame types so a leading WINDOW_UPDATE/PRIORITY
@@ -455,7 +485,7 @@ module Gori::Proxy::H2
         if frame.end_headers?
           side.awaiting_continuation = false
           finish_header_block(side, decoder, pre)
-          head_complete(frame.stream_id, stream, request) unless late
+          head_complete(frame.stream_id, stream, request)
         else
           side.awaiting_continuation = true # a CONTINUATION may now legally follow
         end
@@ -469,7 +499,7 @@ module Gori::Proxy::H2
         if frame.end_headers?
           side.awaiting_continuation = false
           finish_header_block(side, decoder, pre)
-          head_complete(frame.stream_id, stream, request) unless late
+          head_complete(frame.stream_id, stream, request)
         end
         # END_STREAM is illegal on CONTINUATION (RFC 7540 §6.10) but a hostile peer
         # can set it; mirror HEADERS/DATA so the request still emits and the stream
@@ -491,12 +521,6 @@ module Gori::Proxy::H2
         return
       end
 
-      if late
-        # A late HEADERS on a finished stream still had to be decoded (the HPACK table must
-        # track the sender), but it projects nothing: forget it once its block is whole.
-        @streams.delete(frame.stream_id) unless side.awaiting_continuation?
-        return
-      end
       emit_ready(frame.stream_id, stream)
     end
 
@@ -555,6 +579,27 @@ module Gori::Proxy::H2
     private def append_header_fragment(side : Side, chunk : Bytes) : Nil
       raise Gori::Error.new("h2 header block exceeds #{MAX_HEADER_BLOCK} bytes") if side.header_buf.size + chunk.size > MAX_HEADER_BLOCK
       side.header_buf.write(chunk)
+    end
+
+    # A header block nothing projects — a late head, one past MAX_LIVE_STREAMS, a refused
+    # PUSH_PROMISE — still goes through the sender's decoder: it can insert into the dynamic
+    # table every later head on the connection reads. No Stream holds it, so it holds no
+    # live-stream slot either. Blocks never interleave within a direction (RFC 9113 §4.3), so
+    # one pending buffer per direction (`buf`, the block so far) carries it across its
+    # CONTINUATION frames. `pre` means the caller already decoded it (`HeadBlock`).
+    private def skip_block(request : Bool, frame : Frame::Header, fragment : Bytes, pre : HeadBlock?,
+                           buf : IO::Memory? = nil) : Nil
+      if buf || !frame.end_headers?
+        buf ||= IO::Memory.new
+        raise Gori::Error.new("h2 header block exceeds #{MAX_HEADER_BLOCK} bytes") if buf.size + fragment.size > MAX_HEADER_BLOCK
+        buf.write(fragment)
+        unless frame.end_headers?
+          request ? (@req_untracked = {frame.stream_id, buf}) : (@resp_untracked = {frame.stream_id, buf})
+          return
+        end
+        fragment = buf.to_slice
+      end
+      (request ? @req_decoder : @resp_decoder).decode(fragment) unless pre
     end
 
     # Decode one completed header block and merge it into the side's header list,
@@ -703,22 +748,28 @@ module Gori::Proxy::H2
     private def handle_push_promise(direction : String, frame : Frame::Header, decoder : HPACK::Decoder,
                                     pre : HeadBlock?) : Nil
       return unless direction == "in" # push is server-initiated only
-      return unless frame.end_headers?
       promised_id, block = parse_push_promise(frame)
+      # Decoded before any refusal below, which still has to advance the server's dynamic table.
+      # Same rule as finish_header_block: `pre` means the block is already decoded. v1 projects
+      # no promise split across CONTINUATION frames.
+      if frame.end_headers?
+        fields = pre ? pre.fields : decoder.decode(block)
+      else
+        skip_block(false, frame, block, pre)
+      end
       # Server-pushed streams are server-initiated → MUST be even (RFC 7540
       # §5.1.1); reject 0 / odd ids so a forged PUSH_PROMISE can't fabricate or
       # collide with a real (odd, client) request stream.
       return if promised_id == 0 || promised_id.odd?
-      # A closed id (never reused, RFC 9113 §5.1.1) or the live-stream cap: track nothing, but
-      # still decode the block, which can insert into the dynamic table the next head reads.
-      # Closed is asked first: a late head whose decode raised can leave an entry under it.
-      if @closed.includes?(promised_id) || (promised = open_entry(promised_id)).nil?
-        decoder.decode(block) unless pre
+      # A closed id (never reused, RFC 9113 §5.1.1), the live-stream cap or an unreadable block:
+      # track nothing, and write the id off so the pushed response cannot open an entry nothing
+      # would ever emit.
+      unless promised = fields && open_entry(promised_id)
+        note_closed(promised_id) unless @streams.has_key?(promised_id)
         return
       end
       return if promised.req.headers # already promised
-      # Same rule as finish_header_block: `pre` means the block is already decoded.
-      promised.req.headers = pre ? (pre.fields || raise Gori::Error.new("h2 push block failed to decode")) : decoder.decode(block)
+      promised.req.headers = fields
       promised.req.ended = true
       promised.pushed_by = frame.stream_id
       # As DATA on the flow row, not only as the `X-Gori-Pushed` line inside the projected
