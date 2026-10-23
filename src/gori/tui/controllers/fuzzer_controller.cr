@@ -398,18 +398,28 @@ module Gori::Tui
       @host.status(h2 ? "transport: HTTP/2 (h2)" : "transport: HTTP/1.1")
     end
 
-    # The Runner calls these when an overlay applies (esc / ↵-on-last-field).
-    def apply_fuzz_set(edit_index : Int32?, spec : SetSpec?) : Nil
-      return unless v = current_view
+    # The Runner calls these when an overlay applies (esc / ↵-on-last-field), with the view the
+    # card was opened on. Reconcile keeps running under the modal, so a peer closing that session
+    # re-anchors `current_view` on a neighbour: writing there replaced ITS set, or — Advanced —
+    # flipped a running sweep's live `Config` (the engine reads it per request).
+    def apply_fuzz_set(v : FuzzerView, edit_index : Int32?, spec : SetSpec?) : Nil
+      return unless tab = tab_for_edit(v)
       v.apply_set(edit_index, spec)
       Settings.record_recent_wordlist(spec.value) if spec && spec.kind == :file
-      save_current
+      save_tab(tab)
     end
 
-    def apply_fuzz_advanced(snap : AdvancedSnapshot) : Nil
-      return unless v = current_view
+    def apply_fuzz_advanced(v : FuzzerView, snap : AdvancedSnapshot) : Nil
+      return unless tab = tab_for_edit(v)
+      return @host.status("fuzz running — ^X to stop before editing Advanced", :busy) if v.running?
       v.apply_advanced(snap)
-      save_current
+      save_tab(tab)
+    end
+
+    private def tab_for_edit(v : FuzzerView) : FuzzerTab?
+      tab = @sessions.find(&.view.same?(v))
+      @host.status("that fuzz session was closed — nothing applied") unless tab
+      tab
     end
 
     private def printable(ev : Termisu::Event::Key) : Char?

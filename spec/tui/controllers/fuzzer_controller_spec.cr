@@ -15,7 +15,7 @@ private def with_fuzzer_controller(&)
   session = Gori::Session.open(Gori::Config.new(listen: "127.0.0.1", port: 0),
     Gori::Proxy::Tls::CertAuthority.load_or_create(FUZZ_CTL_CA), Gori::Verbs.registry, project)
   begin
-    yield FuzzerController.new(FakeHost.new(session))
+    yield FuzzerController.new(FakeHost.new(session)), session
   ensure
     session.close
     FileUtils.rm_rf(root) if Dir.exists?(root)
@@ -133,6 +133,45 @@ describe "FuzzerController#fuzz_focus_chain_pane" do
       ctl.fuzz_focus_chain_pane
 
       host.statuses.last.should contain("NOT saved")
+    end
+  end
+end
+
+# The Set and Advanced cards commit to the view they were opened on. Reconcile runs under the
+# modal, so a peer closing that session re-anchors `current_view` on a neighbour.
+describe "FuzzerController — a card's commit after a peer closed its session" do
+  it "does not write a Set edit into the neighbour" do
+    with_fuzzer_controller do |ctl, session|
+      ctl.fuzz_from_request("https://a.invalid", "GET /a?x=§1§ HTTP/1.1\r\nHost: a\r\n\r\n", false, nil)
+      ctl.fuzz_from_request("https://b.invalid", "GET /b?y=§1§ HTTP/1.1\r\nHost: b\r\n\r\n", false, nil)
+      ctl.view_at(1).not_nil!.apply_set(nil, SetSpec.new(:list, "b-own\n"))
+      ctl.jump_subtab(0)
+      ctl.save_all
+      a = ctl.view_at(0).not_nil!
+      b = ctl.view_at(1).not_nil!
+      before = b.set_specs.map(&.value)
+      session.store.delete_fuzz_session(ctl.db_id_at(0).not_nil!).should be_true
+      ctl.reconcile
+      ctl.apply_fuzz_set(a, 0, SetSpec.new(:list, "other\n"))
+      b.set_specs.map(&.value).should eq(before)
+    end
+  end
+
+  it "does not reach a running neighbour's live Config with an Advanced edit" do
+    with_fuzzer_controller do |ctl, session|
+      ctl.fuzz_from_request("https://a.invalid", "GET /a?x=§1§ HTTP/1.1\r\nHost: a\r\n\r\n", false, nil)
+      ctl.fuzz_from_request("https://b.invalid", "GET /b?y=§1§ HTTP/1.1\r\nHost: b\r\n\r\n", false, nil)
+      ctl.save_all
+      b = ctl.view_at(1).not_nil!
+      b.begin_run(nil) # mid-sweep: its Config is shared with the live engine
+      ctl.jump_subtab(0)
+      a = ctl.view_at(0).not_nil!
+      flipped = a.advanced_snapshot.copy_with(follow: !b.config.follow_redirects?)
+      session.store.delete_fuzz_session(ctl.db_id_at(0).not_nil!).should be_true
+      ctl.reconcile
+      before = b.config.follow_redirects?
+      ctl.apply_fuzz_advanced(a, flipped)
+      b.config.follow_redirects?.should eq(before)
     end
   end
 end

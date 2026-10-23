@@ -5672,7 +5672,7 @@ module Gori::Tui
           FuzzSetOverlay.for_list
         end
       ov.on_commit = -> {
-        fuzzer_controller.apply_fuzz_set(ov.edit_index, ov.build_spec)
+        fuzzer_controller.apply_fuzz_set(v, ov.edit_index, ov.build_spec)
         true
       }
       open_overlay(ov)
@@ -5688,7 +5688,7 @@ module Gori::Tui
       return status("fuzz running — ^X to stop before editing Advanced", :busy) if v.running?
       ov = FuzzAdvancedOverlay.new(v.advanced_snapshot)
       ov.on_commit = -> {
-        fuzzer_controller.apply_fuzz_advanced(ov.snapshot)
+        fuzzer_controller.apply_fuzz_advanced(v, ov.snapshot)
         true
       }
       open_overlay(ov)
