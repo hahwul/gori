@@ -216,6 +216,16 @@ describe Gori::Scope do
     Gori::Scope::Rule.new(2_i64, "include", "regex", "/(?:a|b)*!").matches?(url, "x.test").should be_false
   end
 
+  # The bare-host suggestion split the pattern on a PCRE2 regex, which RAISES on a subject that
+  # is not UTF-8: `gori run project scope add --pattern $'http://h/\xff'` printed a backtrace
+  # out of `main`, and MCP add_scope_rule answered INTERNAL instead of the refusal.
+  it "refuses a URL-shaped host pattern carrying a non-UTF-8 byte instead of raising" do
+    pattern = String.new("http://127.0.0.1/".to_slice + Bytes[0xff])
+    err = Gori::Scope.validation_error("host", pattern).not_nil!
+    err.should contain("bare host")
+    err.should contain("127.0.0.1")
+  end
+
   it "rejects a host pattern carrying a port at add/update (never stored; points at the bare host)" do
     with_store do |store|
       scope = Gori::Scope.load(store)

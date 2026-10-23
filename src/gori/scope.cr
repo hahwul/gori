@@ -736,7 +736,8 @@ module Gori
     # worse than saying nothing), so the message degrades to the plain complaint rather than
     # suggesting a pattern that is itself dead.
     private def self.host_from_urlish(pattern : String) : String?
-      s = pattern.strip
+      # `.scrub`: this only words a suggestion, and PCRE2 raises on a non-UTF-8 subject below.
+      s = pattern.scrub.strip
       if i = s.index("://")
         s = s[(i + 3)..]
       end
