@@ -104,6 +104,7 @@ module Gori::Tui
                    @snapshots : Array(Evidence::Snapshot) = [] of Evidence::Snapshot)
       @cx = @issue_title.size
       @preedit = ""
+      @title_start = 0 # first title char the last frame drew (`Screen#input_line`), for clicks
       @sel = ROW_TITLE
       # An EDIT opens on the stored pair. The severity the store holds wins — an operator who
       # overrode it once must not have that overridden back by the mere act of re-opening the
@@ -194,7 +195,8 @@ module Gori::Tui
       return :cancel if box.nil? || !box.contains?(mx, my)
       if my == box.y + TITLE_ROW
         focus_title
-        @cx = Screen.column_for_click(@issue_title, mx - title_base(box))
+        # Rebased by the window the last frame drew (0 when the row was not focused).
+        @cx = Screen.input_click(@issue_title, @title_start, mx - title_base(box))
         @preedit = ""
       elsif my == box.y + CVSS_ROW
         # The whole row is the button — there is nothing else on it to hit, and a hit box
@@ -290,9 +292,10 @@ module Gori::Tui
       screen.text(box.x + 2, box.y + TITLE_ROW, TITLE_PREFIX, on_title ? Theme.accent : Theme.muted, Theme.panel)
       tw = w - TITLE_PREFIX.size - 4
       if on_title
-        screen.input_line(title_base(box), box.y + TITLE_ROW, @issue_title, @cx, @preedit,
+        @title_start = screen.input_line(title_base(box), box.y + TITLE_ROW, @issue_title, @cx, @preedit,
           Theme.text_bright, Theme.panel, width: tw)
       else
+        @title_start = 0
         screen.text(title_base(box), box.y + TITLE_ROW, @issue_title, Theme.text, Theme.panel, width: {tw, 0}.max)
       end
 

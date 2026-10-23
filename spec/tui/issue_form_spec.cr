@@ -265,6 +265,21 @@ describe Gori::Tui::IssueForm do
     form.issue_title.should eq("abcXdef")
   end
 
+  # A title wider than the field scrolls with the caret, so the click must rebase by the
+  # window the frame drew — measured against the raw title it landed `start` chars early.
+  it "rebases a title click by the scrolled window the last frame drew" do
+    title = String.build { |io| 90.times { |i| io << ('!'.ord + i).chr } } # 90 distinct chars
+    h = OverlayHarness.new(IssueForm.new(title))
+    mb = h.render # caret at the end: the frame shows the TAIL of the title
+    box = h.box.not_nil!
+    first = mb.row(box.y + IssueForm::TITLE_ROW)[box.x + 10] # the field's first visible cell
+    start = title.index!(first)
+    start.should be > 0 # it really scrolled
+    h.click_in_box(10, IssueForm::TITLE_ROW)
+    h.type("~") # '~' is past the 90 chars used, so its index is the caret's
+    h.overlay.as(IssueForm).issue_title.index!('~').should eq(start)
+  end
+
   it "clamps a click past the end of the title to the end of the text" do
     h = OverlayHarness.new(IssueForm.new("ab"))
     h.click_in_box(40, IssueForm::TITLE_ROW)

@@ -40,6 +40,9 @@ module Gori::Tui
     @status_counts : Array({Int32?, Int64})
     @sev_tally : StaticArray(Int64, 5)
     @desc_area : TextArea
+    # {field index, first visible char} of the text field the last frame drew windowed, so a
+    # click rebases by what was on screen (`Screen.input_click`). Nil: none was focused.
+    @set_drawn : {Int32, Int32}? = nil
     # Registry sidecar facts, nil off the canonical registry db (see `overview_groups`).
     @proj_id : String?
     @workspace : String?
@@ -983,7 +986,10 @@ module Gori::Tui
       return unless card = card_rect(rect, :settings)
       inner = card.inset(1, 1)
       vx = inner.x + 1 + SETTINGS_LABEL_W + 1
-      @set_cursor = (mx - vx).clamp(0, @set_values[@set_sel - SETTINGS_FIELD_BASE].size)
+      fi = @set_sel - SETTINGS_FIELD_BASE
+      drawn = @set_drawn
+      start = drawn && drawn[0] == fi ? drawn[1] : 0
+      @set_cursor = Screen.input_click(@set_values[fi], start, mx - vx)
     end
 
     # --- SCOPE pane (list navigation; add/edit is ScopeRuleOverlay via the controller) ---
@@ -2713,6 +2719,7 @@ module Gori::Tui
       Frame.card(screen, rect, bg: Theme.bg, border: Frame.pane_border(focused))
       inner = rect.inset(1, 1)
       return if inner.h <= 0 || inner.w <= 0
+      @set_drawn = nil
       # Scrolled, not clipped: every selected row remains visible on a short terminal.
       start = settings_scroll(inner.h)
       inner.h.times do |row|
@@ -2836,7 +2843,7 @@ module Gori::Tui
       shown = masked ? "•" * value.size : value
       preedit = masked ? "•" * @set_preedit.size : @set_preedit
       if selected
-        screen.input_line(vx, y, shown, @set_cursor, preedit, Theme.text_bright, bg, width: fw)
+        @set_drawn = {fi, screen.input_line(vx, y, shown, @set_cursor, preedit, Theme.text_bright, bg, width: fw)}
       else
         screen.text(vx, y, shown, Theme.text, bg, width: fw)
       end
@@ -2860,7 +2867,7 @@ module Gori::Tui
       fw = {mx - vx - 1, 3}.max
       value = @set_values[SETTINGS_PROTOS_FIELD]? || ""
       if selected
-        screen.input_line(vx, y, value, @set_cursor, @set_preedit, Theme.text_bright, bg, width: fw)
+        @set_drawn = {SETTINGS_PROTOS_FIELD, screen.input_line(vx, y, value, @set_cursor, @set_preedit, Theme.text_bright, bg, width: fw)}
       else
         # Blank field → say what blank MEANS, rather than leaving an empty cell the operator
         # has to guess at.

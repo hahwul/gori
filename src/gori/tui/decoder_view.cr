@@ -184,7 +184,7 @@ module Gori::Tui
     # column by the same offset or a click into a scrolled spec lands `off` chars early.
     def chain_window(card : Rect, chain : String, chain_cx : Int32, chain_pre : String) : {Int32, Int32}
       vw = {card.inset(1, 1).w - 2, 1}.max
-      {TextField.window_start(chain, chain_cx, chain_pre, vw), vw}
+      {Screen.input_start(chain, chain_cx, chain_pre, vw), vw}
     end
 
     # PIPELINE — a read-only card (never focusable), one row per step.

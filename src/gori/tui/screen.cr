@@ -702,21 +702,32 @@ module Gori::Tui
     # the same frame, leaving ⇧←/→ on the Repeater and Fuzzer target rows a selection that
     # copied correctly and was INVISIBLE. Painting after the whole call instead would erase
     # the caret whenever the selection grew leftward (the caret cell is inside the span then).
+    #
+    # The field scrolls horizontally with the caret (`Screen.input_start`): a value wider than
+    # `width` used to clip at the edge with the caret, its cursor sync and any IME preedit all
+    # past it, so the operator typed blind. Returns the first visible CHARACTER index, which a
+    # caller that maps clicks back to a caret keeps and hands to `Screen.input_click` — the
+    # offset is the last frame's, not something the click re-derives.
     def input_line(x : Int32, y : Int32, value : String, cx : Int32, preedit : String,
                    fg : Color, bg : Color = Theme.bg, width : Int32? = nil,
-                   colors : Array(Color)? = nil, sel : {Int32, Int32}? = nil) : Nil
+                   colors : Array(Color)? = nil, sel : {Int32, Int32}? = nil) : Int32
       cx = cx.clamp(0, value.size)
       right = x + (width || (@width - x))
+      # Everything below indexes the visible slice; `colors` and `sel` index the whole value,
+      # so they are shifted by `start` where they are read. `value[0..]` is `value` itself.
+      start = Screen.input_start(value, cx, preedit, right - x)
+      value = value[start..]
+      cx -= start
       prefix = value[0, cx]
       suffix = value[cx..]
       px = x
-      px = styled_run(px, y, prefix, 0, colors, fg, bg, right) unless prefix.empty?
+      px = styled_run(px, y, prefix, start, colors, fg, bg, right) unless prefix.empty?
       px = text(px, y, preedit, fg, bg, attr: Attribute::Underline, width: {right - px, 0}.max) unless preedit.empty?
-      styled_run(px, y, suffix, cx, colors, fg, bg, right) unless suffix.empty?
+      styled_run(px, y, suffix, start + cx, colors, fg, bg, right) unless suffix.empty?
       # Only meaningful with no preedit in flight: composing text shifts every column right
       # of the caret, and a band measured against `value` would sit under the wrong glyphs.
       if sel && preedit.empty?
-        char_span_bg(x, y, value, sel[0].clamp(0, value.size), sel[1].clamp(0, value.size), Theme.accent_bg)
+        char_span_bg(x, y, value, (sel[0] - start).clamp(0, value.size), (sel[1] - start).clamp(0, value.size), Theme.accent_bg)
       end
       # Block caret sits just after prefix+preedit, over the suffix's first cell
       # (or a space). The terminal's own IME UI anchors at the hardware cursor.
@@ -755,6 +766,38 @@ module Gori::Tui
         cell(caret_x, y, caret_ch, Theme.bg, Theme.accent)
         cursor(caret_x, y)
       end
+      start
+    end
+
+    # First visible character index of an `input_line` field `width` columns wide: 0 until
+    # the caret (plus any preedit, plus the caret cell itself) would overflow, then far enough
+    # right to keep it on screen. Walks by COLUMN width so a CJK value scrolls by columns —
+    # specifically `draw_width`, the measure `input_line` places the caret with: under
+    # display_width a zero-width char cost 0 here but >=1 there, so the window under-counted
+    # and let the caret run off the right edge. It steps `start` back one CHARACTER at a
+    # time, the unit `cx` and `value[start..]` are indexed in. Idempotent: a value already
+    # windowed by it fits, so it answers 0 for that slice.
+    def self.input_start(value : String, cx : Int32, preedit : String, width : Int32) : Int32
+      c = cx.clamp(0, value.size)
+      used = draw_width(value[0, c]) + draw_width(preedit) + 1
+      return 0 if used <= width
+      used = draw_width(preedit) + 1 # the caret cell always stays visible
+      start = c
+      while start > 0
+        w = draw_width(value[start - 1].to_s)
+        break if used + w > width
+        used += w
+        start -= 1
+      end
+      start
+    end
+
+    # The character index a click `dx` columns into an `input_line` field lands on, given the
+    # `start` that field's last frame drew from (`input_line`'s return; 0 for a field drawn
+    # unwindowed). The one place a click is rebased by the scroll offset.
+    def self.input_click(value : String, start : Int32, dx : Int32) : Int32
+      start = start.clamp(0, value.size)
+      start + column_for_click(value[start..], dx)
     end
 
     # Per-character-coloured text with no caret — the static counterpart to input_line,
