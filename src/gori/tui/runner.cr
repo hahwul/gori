@@ -1404,6 +1404,11 @@ module Gori::Tui
     # A bracketed paste being DROPPED because its keystrokes would run as commands — see
     # `paste_runs_as_commands?`. Cleared at the paste's end marker.
     @paste_dropped = false
+    # The drop above began MID-paste (a modal held a key back, or a pasted ↵ committed a field):
+    # what came before it went in as typed. `@paste_cut_note` is the toast still owed, named on
+    # the first key the cut actually drops.
+    @paste_cut = false
+    @paste_cut_note = nil.as(String?)
     # Bounds a paste whose end marker never comes — the decision lives there, not here.
     @paste_stall = PasteStall.new
 
@@ -1458,16 +1463,10 @@ module Gori::Tui
       return !(was_pasting && @paste_newline.pasting?) if swallowed
       case ev
       when Termisu::Event::Key
-        return false if @paste_dropped
+        return false if drop_pasted_key?
         return false if buffer_bulk_paste(ev)
         handle_key(ev)
-        # A pasted ↵ can commit the one-line field it was typed into (a `/` query bar, the
-        # Repeater TARGET row, a prompt) and hand the focus back to a keymap: the rest of the
-        # clipboard would then run as that tab's commands. Re-asked after every pasted key.
-        if @paste_newline.pasting? && paste_runs_as_commands?
-          @paste_dropped = true
-          @toast = PASTE_REFUSED
-        end
+        cut_paste_at_commands
       when Termisu::Event::Mouse
         # A click is not part of a paste, and acting on one mid-paste moves the target out from
         # under it: the tab/focus changes, and the buffered clipboard is then flushed into
@@ -2087,6 +2086,7 @@ module Gori::Tui
     # that said the paste had stopped.
     private def refuse_modal_paste(ev : Termisu::Event::Key) : Nil
       @paste_dropped = true
+      @paste_cut = true
       key = ev.key
       msg = key.enter? || key.tab? || key.back_tab? ? PASTE_MODAL_REFUSED : PASTE_MODAL_IGNORED
       status(msg) unless @toast == msg

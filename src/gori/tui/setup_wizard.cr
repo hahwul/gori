@@ -321,8 +321,7 @@ module Gori::Tui
     # The printable character a key event carries, or nil for a non-text key (or a
     # ctrl/alt combo, which must not type into a field).
     private def typed_char(ev : Termisu::Event::Key) : Char?
-      return nil if ev.ctrl? || ev.alt?
-      ev.char || ev.key.to_char
+      LineEdit.typed_char(ev)
     end
 
     # Theme step: ↑/↓/←/→ cycle the selection (live-previewed); ↵/⇥ next; ⇧⇥ back.

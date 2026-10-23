@@ -262,6 +262,13 @@ describe Gori::Tui::Screen do
   # field's click-to-cursor goes through Screen.column_for, which floors each CODEPOINT to
   # ≥1. `parse_printable` accepts U+200B / U+FEFF / a combining mark unfiltered, and a URL
   # carrying a zero-width char is a stock filter-bypass payload — reachable input here.
+  it "never opens an input_line window on a combining mark" do
+    value = "ab" + "e\u0301" * 10 # ten é, each a base + combining acute
+    start = Screen.input_start(value, value.size, "", 6)
+    start.should be > 0
+    Screen.cluster_start(value, start).should eq(start)
+  end
+
   it "input_line uses the named badge width for the caret and click inverse" do
     value = "ab\u{200B}cd" # ZWSP at index 2 is drawn as a six-column badge
     (0..value.size).each do |cx|

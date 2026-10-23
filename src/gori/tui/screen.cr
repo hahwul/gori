@@ -783,11 +783,13 @@ module Gori::Tui
       return 0 if used <= width
       used = draw_width(preedit) + 1 # the caret cell always stays visible
       start = c
+      # Whole clusters, so the window never opens on a combining mark or a ZWJ tail.
       while start > 0
-        w = draw_width(value[start - 1].to_s)
+        prev = cluster_start(value, start - 1)
+        w = draw_width(value[prev...start])
         break if used + w > width
         used += w
-        start -= 1
+        start = prev
       end
       start
     end

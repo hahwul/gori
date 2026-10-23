@@ -74,7 +74,19 @@ describe "Runner — the rest of a paste after a refusal" do
     body = runner_body("private def handle(ev : Termisu::Event::Any) : Bool")
     tail = body[/handle_key\(ev\)\n.*?when Termisu::Event::Mouse/m]?
     tail.should_not be_nil
-    tail.not_nil!.should contain("paste_runs_as_commands?")
-    tail.not_nil!.should contain("@paste_dropped = true")
+    tail.not_nil!.should contain("cut_paste_at_commands")
+    cut = runner_src("runner/paste.cr")[/private def cut_paste_at_commands : Nil.*?^  end$/m]?.not_nil!
+    cut.should contain("paste_runs_as_commands?")
+    cut.should contain("@paste_dropped = true")
+    # …and it owes its toast, rather than saying it: a copied line's trailing ↵ that commits
+    # the `/` bar is the paste's LAST key, and nothing was dropped.
+    cut.should_not contain("@toast")
+  end
+
+  # The Issues/Probe `/` bars and the Rewriter/Colormarker filters take text with no `:editor`
+  # badge; asked by the badge alone, a paste into them was refused whole.
+  it "lets a paste into a bar that takes text but reports no editor badge" do
+    body = runner_src("runner/paste.cr")[/private def paste_runs_as_commands\? : Bool.*?^  end$/m]?.not_nil!
+    body.should contain("body_takes_text?")
   end
 end

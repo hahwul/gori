@@ -497,7 +497,7 @@ module Gori::Tui
       when key.home?      then v.target_home
       when key.end?       then v.target_end
       else
-        printable(ev).try { |ch| v.target_insert(ch) }
+        LineEdit.typed_char(ev).try { |ch| v.target_insert(ch) }
       end
     end
 

@@ -68,6 +68,29 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # than refused (`arm_editor_for_paste`), so what is left here is the focus that takes no
   # text at all: the tab bar, the sub-tab strip, a list body.
   PASTE_REFUSED = "paste ignored — nothing focused takes text (i edits the pane, ↵ its fields)"
+  PASTE_CUT     = "paste stopped at the line break — the rest would have run as commands"
+
+  # A pasted ↵ can commit the one-line field it was typed into (a `/` query bar, the Repeater
+  # TARGET row, a prompt) and hand the focus back to a keymap: the rest of the clipboard would
+  # then run as that tab's commands. Asked after every pasted key; the rest is dropped.
+  private def cut_paste_at_commands : Nil
+    return unless @paste_newline.pasting? && !@paste_dropped && paste_runs_as_commands?
+    @paste_dropped = true
+    @paste_cut = true
+    @paste_cut_note = PASTE_CUT
+  end
+
+  # Whether this pasted key is dropped. A cut is named on the first key it actually drops, so
+  # a paste whose LAST key was the ↵ that committed its field (a copied line with its newline)
+  # dropped nothing and says nothing.
+  private def drop_pasted_key? : Bool
+    return false unless @paste_dropped
+    if note = @paste_cut_note
+      @paste_cut_note = nil
+      @toast = note
+    end
+    true
+  end
 
   # --- a paste whose END MARKER never came ---------------------------------
   #
@@ -115,7 +138,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     @paste_stall.closed
     if @paste_dropped
       @paste_dropped = false
-      return :refused # a refused paste inserted nothing, by definition
+      cut, @paste_cut, @paste_cut_note = @paste_cut, false, nil
+      return :typed if cut # what came before the cut went in as typed
+      return :refused      # a refused paste inserted nothing, by definition
     end
     return :typed unless @paste_buf # no bulk buffer: it went in live, nothing was withheld
     flush_bulk_paste ? :inserted : :empty
@@ -179,7 +204,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     return true if @space_menu_open || copy_as_shown? || send_to_shown?
     return false if @goto_open || @search_open || @rename_open || @tag_edit_open
     return false if @tabs[@active_tab]?.try(&.subtab_filter_editing?)
-    return false if @focus == :body && @tabs[@active_tab]?.try(&.body_badge) == :editor
+    # `body_takes_text?` too: the Issues/Probe `/` bars and the Rewriter/Colormarker filters
+    # take text without reporting an `:editor` badge.
+    return false if @focus == :body && (tab = @tabs[@active_tab]?) && (tab.body_badge == :editor || tab.body_takes_text?)
     true
   end
 

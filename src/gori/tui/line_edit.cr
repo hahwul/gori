@@ -91,7 +91,7 @@ module Gori::Tui
     # flag, and Tab reads as '\t'. A multi-line editor that takes Tab keeps its own guard.
     def self.typed_char(ev : Termisu::Event::Key) : Char?
       c = ev.char
-      c if c && !ev.ctrl? && !ev.alt? && !c.control?
+      c if c && !ev.ctrl? && !ev.alt? && c.ord >= 0x20 && c.ord != 0x7F # C0 and DEL only: a C1 char like NEL is text
     end
 
     # The word rule `TextField` and `TextArea` use: a run of word characters, or a run of

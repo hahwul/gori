@@ -160,6 +160,16 @@ describe "the `/` bars take LineEdit" do
   end
 end
 
+describe "LineEdit.typed_char" do
+  it "refuses C0 and DEL but types a C1 char such as NEL" do
+    ev = ->(c : Char) { Termisu::Event::Key.new(Termisu::Input::Key::Unknown, Termisu::Input::Modifier::None, c) }
+    LineEdit.typed_char(ev.call('\u{1F}')).should be_nil
+    LineEdit.typed_char(ev.call('\u{7F}')).should be_nil
+    LineEdit.typed_char(ev.call('\u{85}')).should eq('\u{85}')
+    LineEdit.typed_char(ev.call('한')).should eq('한')
+  end
+end
+
 # `QueryBarEdit` owns the plumbing of all six bars; what an edit SETTLES stays each bar's own,
 # through the hooks. These pin the settle differences no other spec reaches.
 describe "QueryBarEdit's per-bar hooks" do

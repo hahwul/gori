@@ -200,7 +200,7 @@ describe "Runner — a paste in progress does not re-render per key" do
   it "reports buffered, dropped and mid-paste-swallowed input as not changing the frame" do
     body = method_body("runner.cr", "private def handle(ev : Termisu::Event::Any) : Bool")
     body.should contain("return false if buffer_bulk_paste(ev)")
-    body.should contain("return false if @paste_dropped")
+    body.should contain("return false if drop_pasted_key?") # its owed toast draws at the end marker
     # A swallowed event is inert only strictly INSIDE a paste: the markers themselves (and a
     # PasteStart that closed an abandoned paste) are transitions that flush, toast or arm.
     body.should contain("return !(was_pasting && @paste_newline.pasting?) if swallowed")
