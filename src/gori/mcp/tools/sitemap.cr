@@ -542,7 +542,7 @@ module Gori
         # Blank is absent: a client that fills every property sends `output_path: ""` with the
         # inline document in mind (`describes?`).
         return nil unless describes?(h, "output_path")
-        raw = str(h, "output_path").try(&.strip).presence
+        raw = path_str(h, "output_path").try(&.strip).presence
         return err("'output_path' is blank", "INVALID_ARGUMENT", field: "output_path") unless raw
         unless @allow_actions
           return err("output_path writes a file (disabled by gori mcp --read-only); drop it to get the document inline",

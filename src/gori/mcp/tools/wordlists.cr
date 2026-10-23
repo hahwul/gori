@@ -23,6 +23,7 @@ module Gori
       # never ends or never starts. A missing path or a directory passes, so the reader keeps
       # its own wording for those. *spec* is passed as its reader resolves it (stripped or not).
       private def wordlist_stream_refusal(spec : String) : String?
+        return "wordlist path contains a NUL byte, which no file path can hold" if spec.includes?('\0')
         path = WordlistCatalog.resolve_path(spec)
         info = File.info?(path) || return
         return if info.type.file? || info.type.directory?

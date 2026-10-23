@@ -69,7 +69,7 @@ module Gori
       # name that file would be a detour (`Import.import_text`). A refused combination comes
       # back as the error `Result`.
       private def import_source(h, kind : Symbol, kind_s : String) : Import::Result | Result
-        path = str(h, "path").try(&.strip).presence
+        path = path_str(h, "path").try(&.strip).presence
         # Blank is absent, as `path` above: a client filling every property sends `text: ""`.
         text = str(h, "text").presence
         return err("pass 'path' or 'text', not both", "INVALID_ARGUMENT", field: "text") if text && path

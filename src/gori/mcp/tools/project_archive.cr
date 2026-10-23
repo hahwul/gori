@@ -31,7 +31,7 @@ module Gori
       # copy of the engagement leaving gori is what the operator should see an agent do.
       @[Tool("export_project", gated: true, agent_action: true, unbound: true, permission: "projects")]
       private def export_project(h) : Result
-        path = str(h, "path").try(&.strip).presence
+        path = path_str(h, "path").try(&.strip).presence
         unless path
           return err("missing required 'path' (where to write the .gori archive)",
             "INVALID_ARGUMENT", field: "path")
@@ -141,7 +141,8 @@ module Gori
       # read THEN, so its own result carries the inventory of what was actually imported.
       @[Tool("import_project", gated: true, agent_action: true, unbound: true, permission: "projects")]
       private def import_project(h) : Result
-        path = required_str(h, "path", "(the .gori archive to import)")
+        path = path_str(h, "path").try(&.strip).presence ||
+               raise ArgError.new("missing required 'path' (the .gori archive to import)", "path")
         name = str(h, "name").try(&.strip).presence
         confirm = bool_arg(h, "confirm", false)
         source = Path[path].expand(home: true).to_s

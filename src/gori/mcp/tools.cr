@@ -2644,6 +2644,15 @@ module Gori
         int(h, key) || raise ArgError.new(id_error(h, key), key)
       end
 
+      # A file path argument. No path can hold a NUL, and every `File` call raises
+      # `ArgumentError` on one, which `call`'s blanket rescue coded INTERNAL — "the server is
+      # broken" for a mistake in the caller's own argument. Refused by name instead.
+      private def path_str(h, key : String) : String?
+        v = str(h, key)
+        raise ArgError.new("'#{key}' contains a NUL byte, which no file path can hold", key) if v.try(&.includes?('\0'))
+        v
+      end
+
       # The required string argument `key`, stripped, or an `ArgError` ("missing required 'key'",
       # then `hint`) when it is absent or blank. `blank: true` returns the value as sent and
       # refuses only its absence — for an argument where "" means something (clear, match all).

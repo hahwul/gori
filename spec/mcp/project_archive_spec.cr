@@ -54,6 +54,15 @@ private def archive_entries(path : String) : Hash(String, String)
 end
 
 describe "MCP export_project" do
+  # `File` raises ArgumentError on a NUL, which the blanket rescue coded INTERNAL.
+  it "refuses a path with a NUL byte as INVALID_ARGUMENT" do
+    with_archive_server do |tools, _, _, _, root|
+      r = archive_call(tools, "export_project", {"path" => "#{root}/a\0b.gori"})
+      r.error_code.should eq("INVALID_ARGUMENT")
+      r.field.should eq("path")
+    end
+  end
+
   it "writes the bound project as the CLI's archive and says it is unredacted" do
     with_archive_server do |tools, registry, project, store, root|
       store.insert_flow(archive_flow("/captured"))

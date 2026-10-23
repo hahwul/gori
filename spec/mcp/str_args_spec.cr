@@ -476,3 +476,33 @@ describe "MCP tools/call — a stringified `arguments` object" do
     end
   end
 end
+
+# A NUL in a path argument: every `File` call raises `ArgumentError` on one, which the blanket
+# rescue in `call` coded INTERNAL ("String contains null byte") — "the server is broken" for
+# a mistake in the caller's own argument. Refused by name, as INVALID_ARGUMENT.
+describe "MCP path arguments with a NUL byte" do
+  it "are refused as INVALID_ARGUMENT, never INTERNAL" do
+    with_store do |store|
+      flow = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: 1, method: "GET",
+        target: "/?a=1", http_version: "HTTP/1.1",
+        head: "GET /?a=1 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice,
+        source: Gori::FlowSource::Kind::Proxy))
+      tools = tools_for(store)
+      nul = "/tmp/a\\u0000b"
+      fuzz = %("template":"GET /§x§ HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\n\\r\\n","url":"http://127.0.0.1:1","allow_unscoped":true)
+      calls = {
+        "export_openapi"  => %({"output_path":"#{nul}.json"}),
+        "cookie_crack"    => %({"cookie":"eyJhIjoxfQ.YWJj.ZGVm","wordlist":"#{nul}"}),
+        "import_flows"    => %({"path":"#{nul}","kind":"har"}),
+        "discover_start"  => %({"url":"http://127.0.0.1:1/","wordlist":"#{nul}","allow_unscoped":true}),
+        "mine_start"      => %({"flow_id":#{flow},"wordlist":"#{nul}","allow_unscoped":true}),
+        "fuzz_start"      => %({#{fuzz},"payloads":[{"wordlist":"#{nul}"}]}),
+        "import_project"  => %({"path":"#{nul}.gori"}),
+        "fuzz_start file" => %({#{fuzz},"payloads":[{"preset":"sqli","file":"#{nul}"}]}),
+      }
+      codes = calls.to_h { |name, args| {name, tools.call(name.split(' ').first, JSON.parse(args)).error_code} }
+      codes.should eq(calls.transform_values { "INVALID_ARGUMENT" })
+    end
+  end
+end
