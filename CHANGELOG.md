@@ -78,7 +78,7 @@
 - CLI: `gori run project env set KEY --value-stdin` reads the value from a pipe or a redirect, never a terminal, so a token stays off the argument vector (#1702)
 - CLI: a `--project`, `GORI_PROJECT`, `project switch` or `project delete` name that matches nothing lists the five closest projects with their short ids and how many more there are, instead of every project name on one line (#1705)
 - CLI: `gori run project rename OLD NEW` changes a project's display name, keeping its slug and short id, and `gori run project describe NAME TEXT` sets its description, or removes it with `--clear` (#1703)
-- Retest: a `json:` assertion on an object or array whose value holds an unpaired surrogate escape (`"\ud83d"`, a cut emoji) is judged instead of failing the whole run, and a `jsonpath:` token extract from such a body returns the value instead of nothing
+- Retest: a `json:` assertion on an object or array whose value holds an unpaired surrogate escape (`"\ud83d"`, a cut emoji) is judged instead of failing the whole run, and a `jsonpath:` token extract from such a body returns the value instead of nothing (#1745)
 
 ## v0.8.1
 
