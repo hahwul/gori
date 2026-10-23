@@ -5,8 +5,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # Mnemonics the project picker hands out: 1-9 then a-z. A registry deeper than this is
   # still fully navigable with ↑/↓ — only the type-one-key shortcut runs out, and the
   # picker title says how many rows it is showing out of how many exist rather than
-  # quietly listing a prefix.
-  DIFF_PICK_KEYS = ("1".."9").to_a.map(&.[0]) + ('a'..'z').to_a
+  # quietly listing a prefix. No `j`/`k`: ChoicePicker tries a mnemonic before its vim nav
+  # (see `EVIDENCE_PICK_KEYS`).
+  DIFF_PICK_KEYS = ('1'..'9').to_a + ('a'..'z').to_a.reject { |c| c == 'j' || c == 'k' }
 
   def diff_pick(slot : Symbol) : Nil
     controller = target_controller.diff
