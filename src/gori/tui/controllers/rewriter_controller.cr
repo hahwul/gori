@@ -642,7 +642,8 @@ module Gori::Tui
       @host.focus_body
       inner = BodyChrome.frame_inner(rect)
       @last_body = inner
-      if s = @view.sub_at(inner, mx, my)
+      # The strip rides the RULES card, which the `/` bar pushes down a row: test where it is drawn.
+      if s = @view.sub_at(rules_list_rect(inner), mx, my)
         unless s == @sub
           @sub = s
           @sub_sel = 0

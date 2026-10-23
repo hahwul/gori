@@ -246,6 +246,25 @@ describe "Gori::Tui::RewriterController (tab review)" do
     end
   end
 
+  # The `/` bar takes the card's top row and pushes the sub-tab strip down one; the strip's
+  # hit-test read the unshifted rect, so a click on the bar switched sub-tabs and a click on
+  # the drawn `Extract` label did not.
+  it "hit-tests the sub-tab strip where it is drawn while the `/` bar is shown" do
+    with_rewriter_controller do |ctl, _, session|
+      add_project(session.rules, "one")
+      ctl.rewriter_filter
+      ctl.handle_list_filter_key(key(Termisu::Input::Key::LowerO, char: 'o'))
+      ctl.handle_list_filter_key(key(Termisu::Input::Key::Enter))
+      backend = render(ctl)
+      y = (0...BODY.h).find { |row| backend.row(row).includes?("Extract") }.not_nil!
+      x = backend.row(y).index("Extract").not_nil!
+      ctl.handle_click(BODY, x, y - 1) # the bar's row, one above the strip
+      ctl.@sub.should eq(:rules)
+      ctl.handle_click(BODY, x, y)
+      ctl.@sub.should eq(:extract)
+    end
+  end
+
   describe "the extract sub-tab's add/delete are the chords its strip names" do
     it "follows a rebind of rewriter.add" do
       with_rebind({"rewriter.add" => ["n"]}) do
