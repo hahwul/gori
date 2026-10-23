@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- HTTP/2 capture: header blocks gori does not record (past the live-stream cap, on a closed stream, or in a refused server push) still update the HPACK table, so later requests no longer decode wrong or go missing, and a late head or a malformed single-frame head no longer uses up the live-stream cap
+- HTTP/2 capture: header blocks gori does not record (past the live-stream cap, on a closed stream, or in a refused server push) still update the HPACK table, so later requests no longer decode wrong or go missing, and a late head or a malformed single-frame head no longer uses up the live-stream cap (#1752)
 - HTTP/2 capture: a server push or a WebSocket CONNECT that names a stream id already closed on the connection no longer leaves a History row stuck Pending until the proxy stops (#1747)
 - Settings: an unparseable settings.json that also holds a non-UTF-8 byte (a Latin-1 hand edit) is reported on load like any other unparseable file, and its stated `env.syntax` is still recovered, instead of falling back to defaults silently (#1748)
 - Discover: a run stopped with ^X now ends even when `p` (pause or resume) is pressed before the stop takes effect, instead of staying paused or crawling on (#1750)
