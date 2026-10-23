@@ -82,7 +82,7 @@
 - CLI: `gori run project rename OLD NEW` changes a project's display name, keeping its slug and short id, and `gori run project describe NAME TEXT` sets its description, or removes it with `--clear` (#1703)
 - CLI: a non-UTF-8 byte in `gori run repeater <word>`, `repeater create`/`update --tags`, `rewriter add --find`, `session add`/`edit --refresh-before` or `project scope add --pattern` gets the usual refusal or is stored, instead of crashing with a backtrace; MCP `create_repeater`/`update_repeater`, `add_scope_rule` and the session-slot tools no longer answer it with an internal error (#1746)
 - Retest: a `json:` assertion on an object or array whose value holds an unpaired surrogate escape (`"\ud83d"`, a cut emoji) is judged instead of failing the whole run, and a `jsonpath:` token extract from such a body returns the value instead of nothing (#1745)
-- MCP: a NUL byte in a file path argument (`export_openapi` `output_path`, `import_flows` and the project archive tools' `path`, and a `wordlist` or payload `file`) is refused as INVALID_ARGUMENT naming the argument, instead of INTERNAL "String contains null byte"
+- MCP: a NUL byte in a file path argument (`export_openapi` `output_path`, `import_flows` and the project archive tools' `path`, and a `wordlist` or payload `file`) is refused as INVALID_ARGUMENT naming the argument, instead of INTERNAL "String contains null byte" (#1749)
 
 ## v0.8.1
 
