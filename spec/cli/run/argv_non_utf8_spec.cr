@@ -20,6 +20,14 @@ module Gori::CLI::Run
   def self.split_ql_negations_for_spec(args : Array(String))
     split_ql_negations(args)
   end
+
+  def self.verb_word_for_spec?(sub : String) : Bool
+    verb_word?(sub)
+  end
+
+  def self.warn_absolute_form_for_spec(target : Store::RuleTarget, part : Store::RulePart, find : String?) : Nil
+    warn_absolute_form(target, part, find)
+  end
 end
 
 private def raw(bytes : Bytes) : String
@@ -57,5 +65,21 @@ describe "CLI::Run.split_ql_negations — non-UTF-8 argv" do
       ["host:x", "-resp.body:secret", "-req.header:Cookie", "-n50"])
     neg.should eq(["-resp.body:secret", "-req.header:Cookie"])
     rest.should eq(["host:x", "-n50"])
+  end
+end
+
+# `gori run repeater $'\xff'` and `gori run rewriter add --find $'\xff'` raised out of `main` the
+# same way: a regex matched straight against an argv byte. A raw 0xff is a legitimate `--find`
+# (P7), so it must reach the rule untouched; only the match subject is scrubbed.
+describe "CLI::Run — other regex checks on non-UTF-8 argv" do
+  it "reads a non-UTF-8 repeater positional as no subcommand word" do
+    Gori::CLI::Run.verb_word_for_spec?(raw(Bytes[0xff])).should be_false
+    Gori::CLI::Run.verb_word_for_spec?("bogus").should be_true
+    Gori::CLI::Run.verb_word_for_spec?("12").should be_false
+  end
+
+  it "checks a non-UTF-8 rewriter --find for an absolute-form line without raising" do
+    Gori::CLI::Run.warn_absolute_form_for_spec(Gori::Store::RuleTarget::Request,
+      Gori::Store::RulePart::Head, raw(Bytes[0xff])).should be_nil
   end
 end

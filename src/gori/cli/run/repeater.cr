@@ -96,11 +96,17 @@ module Gori
         end
         # A word in subcommand position is a typo'd subcommand, not a flow id: `repeater bogus`
         # said "invalid flow id 'bogus'". A number (or `#5`) still reaches the flow-id parse.
-        if sub && sub.matches?(/\A[a-z]/i)
+        if sub && verb_word?(sub)
           abort unknown_verb_message("gori run repeater", sub, REPEATER_SUBCOMMANDS.keys)
         end
 
         cmd_repeater_single(args)
+      end
+
+      # `.scrub` is the match SUBJECT only: argv is unvalidated bytes, and PCRE2 raises on a
+      # non-UTF-8 subject instead of failing to match (`gori run repeater $'\xff'`).
+      private def self.verb_word?(sub : String) : Bool
+        sub.scrub.matches?(/\A[a-z]/i)
       end
 
       # `cmd_repeater`'s dispatch. Every key has a `repeater <key>` row in the `@[Subcommand]`

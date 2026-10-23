@@ -568,7 +568,9 @@ module Gori
                          "stores for a plain-HTTP proxy flow."
 
       private def self.warn_absolute_form(target : Store::RuleTarget, part : Store::RulePart, find : String?) : Nil
-        return unless target.request? && part.head? && find.try(&.matches?(/\A(?:\^|\\A)?[A-Za-z]+ [A-Za-z][A-Za-z0-9+.\-]*:\/\//))
+        # `.scrub` the match subject only: a raw 0xff is a legitimate --find (P7), and PCRE2
+        # raises on a non-UTF-8 subject instead of failing to match.
+        return unless target.request? && part.head? && find.try(&.scrub.matches?(/\A(?:\^|\\A)?[A-Za-z]+ [A-Za-z][A-Za-z0-9+.\-]*:\/\//))
         STDERR.puts "gori run rewriter add: warning: --find names an absolute-form request line, " \
                     "which a rule never sees; match the origin form (#{find.try(&.lchop("\\A").lchop('^').split(' ', 2).first)} /path)"
       end
