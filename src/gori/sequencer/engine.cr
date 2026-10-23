@@ -154,7 +154,7 @@ module Gori::Sequencer
       # Regex::Error) for an invalid pattern, so catch both.
       if @config.token_loc.kind.regex? && !@config.token_loc.selector.empty?
         begin
-          @token_re = Regex.new(@config.token_loc.selector)
+          @token_re = Gori::SafeRegexp.budgeted(@config.token_loc.selector)
         rescue ex : ArgumentError | Regex::Error
           @events.send(ErrorEvent.new("invalid token regex: #{ex.message}"))
           return

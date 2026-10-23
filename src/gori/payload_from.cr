@@ -539,7 +539,7 @@ module Gori
                         "for `extracted` to have something to read")
       end
       rules.map do |r|
-        re = r.kind.regex? && !r.selector.empty? ? (Regex.new(r.selector) rescue nil) : nil
+        re = r.kind.regex? && !r.selector.empty? ? (Gori::SafeRegexp.budgeted(r.selector) rescue nil) : nil
         {r, InterceptFilter.new(r.match_filter), re}
       end
     end

@@ -1601,9 +1601,9 @@ module Gori::Tui
             ws_emit_live_status(view)
           else
             # Keep-open was turned off (or WS mode left) while the dial was in flight (#1630): don't install it.
-            # `sess` (not `session`) goes into the closure so `session` stays narrowed above.
-            sess = session
-            spawn(name: "gori-ws-close") { sess.close rescue nil }
+            # A block parameter, not a local: the `while` shares one local across iterations, so a
+            # captured `sess` would close the last session twice and leak the others.
+            opened.session.try { |s| spawn(name: "gori-ws-close") { s.close rescue nil } }
             @host.status("connected, but the live session was turned off — disconnected")
           end
         else

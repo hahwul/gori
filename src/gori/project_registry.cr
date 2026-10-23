@@ -180,7 +180,7 @@ module Gori
       Dir.each_child(@root) do |child|
         next if child.starts_with?(TEMP_PREFIX) || child.starts_with?('.')
         dir = File.join(@root, child)
-        next unless Dir.exists?(dir)
+        next unless (Dir.exists?(dir) rescue false)
         project = Project.new(display_name(dir, child), File.join(dir, Project::DB_FILE))
         return project if workspace_of(project) == wanted
       end
@@ -245,7 +245,7 @@ module Gori
         next if child.starts_with?(TEMP_PREFIX) || child.starts_with?('.')
         dir = File.join(@root, child)
         db = File.join(dir, Project::DB_FILE)
-        next unless Dir.exists?(dir) && File.exists?(db)
+        next unless (Dir.exists?(dir) rescue false) && File.exists?(db)
         projects << Project.new(display_name(dir, child), db)
       end
       projects.sort_by! { |p| -(p.last_modified.try(&.to_unix) || 0_i64) }

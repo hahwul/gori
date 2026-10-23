@@ -1009,21 +1009,29 @@ module Gori
     # History, Repeater tab or capture start dies on every open. Not every narrow column is
     # listed: one that is not just keeps today's behaviour.
     INT32_COLUMNS = {
-      "color_rules"     => %w[enabled],
-      "display_columns" => %w[position pos_start pos_end width],
-      "extract_rules"   => %w[enabled pos_start pos_end],
-      "grpc_reflection" => %w[services files],
-      "h2_frames"       => %w[type flags length],
-      "js_refs"         => %w[port],
-      "probe_issues"    => %w[severity status],
-      "flows"           => %w[port status state short_circuited],
-      "flow_interims"   => %w[status omitted],
-      "issues"          => %w[severity status],
-      "issue_evidence"  => %w[status],
-      "match_rules"     => %w[enabled position],
-      "repeaters"       => %w[position http2 auto_content_length ws_keep_key ws_http_only],
-      "ws_messages"     => %w[opcode],
+      "color_rules"        => %w[enabled],
+      "display_columns"    => %w[position pos_start pos_end width],
+      "extract_rules"      => %w[enabled pos_start pos_end],
+      "grpc_reflection"    => %w[services files],
+      "h2_frames"          => %w[type flags length],
+      "js_refs"            => %w[port],
+      "probe_issues"       => %w[severity status],
+      "flows"              => %w[port status state short_circuited],
+      "flow_interims"      => %w[status omitted],
+      "issues"             => %w[severity status],
+      "issue_evidence"     => %w[status],
+      "match_rules"        => %w[enabled position],
+      "oast_providers"     => %w[enabled position],
+      "fuzz_sessions"      => %w[http2 position],
+      "miner_sessions"     => %w[http2 position],
+      "sequencer_sessions" => %w[http2 position],
+      "probe_custom_rules" => %w[enabled],
+      "probe_oast_probes"  => %w[severity],
+      "repeaters"          => %w[position http2 auto_content_length ws_keep_key ws_http_only],
+      "ws_messages"        => %w[opcode],
     }
+
+    STRING_ONLY_TABLES = %w[flows scope_rules]
 
     # gori binds only integers (or NULL) into an INTEGER column, and the store reads every one
     # of them with a typed read that raises `DB::ColumnTypeMismatchError` on anything else. So
@@ -1039,6 +1047,14 @@ module Gori
           col = quote_ident(column)
           check = "typeof(#{col}) NOT IN ('integer', 'null')"
           narrow.includes?(column) ? "#{check} OR #{col} NOT BETWEEN #{Int32::MIN} AND #{Int32::MAX}" : check
+        end
+        # A BLOB in a TEXT-affinity column is stored as-is and `rs.read(String)` raises on it.
+        # Only tables whose TEXT columns the store always binds as Strings: elsewhere (a
+        # repeater's `request`) gori itself binds bytes into a TEXT column.
+        if STRING_ONLY_TABLES.includes?(table)
+          checks += conn.query_all("SELECT name FROM pragma_table_info(?) WHERE instr(upper(type), 'INT') = 0 " \
+                                   "AND (instr(upper(type), 'CHAR') > 0 OR instr(upper(type), 'TEXT') > 0)",
+            table, as: String).map { |column| "typeof(#{quote_ident(column)}) NOT IN ('text', 'null')" }
         end
         next if checks.empty?
         next unless conn.query_one?("SELECT 1 FROM #{quote_ident(table)} WHERE #{checks.join(" OR ")} LIMIT 1", as: Int64)

@@ -803,6 +803,28 @@ describe Gori::ProjectArchive do
     end
   end
 
+  # The TUI reconciles these tables' narrow columns on every data_version bump, so an
+  # out-of-range cell ended the process through the tick breaker on each open.
+  it "refuses an archive whose session or provider column is out of Int32 range" do
+    with_archive_project do |_registry, project, store, root|
+      store.insert_flow(archive_request("/a"))
+      store.flush
+      archive_path = export_archive(project, File.join(root, "sessions.gori"))
+      original = File.read(archive_path)
+      tamper_archive_database(archive_path, root) do |conn|
+        conn.exec("INSERT INTO oast_providers (created_at, updated_at, name, kind, host, enabled, position) VALUES (1, 1, 'n', 'k', 'h', 1, 4294967296)")
+      end
+      error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
+      error.message.not_nil!.should contain(%(never writes in "oast_providers"))
+      File.write(archive_path, original)
+      tamper_archive_database(archive_path, root) do |conn|
+        conn.exec("UPDATE flows SET host = X'6162'")
+      end
+      error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
+      error.message.not_nil!.should contain(%(never writes in "flows"))
+    end
+  end
+
   # SQLite gives INTEGER affinity to any declared type containing "INT", and a table rebuilt
   # with CREATE TABLE … AS SELECT declares its integer columns `INT`, not `INTEGER`. A table
   # with no `id` column, so the primary-key check below does not answer first.
