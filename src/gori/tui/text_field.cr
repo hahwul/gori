@@ -226,8 +226,7 @@ module Gori::Tui
         # every printable to this field typed a tab into a project name. Refused (false), so
         # the owning card gets to move focus with it — or leave it a no-op.
         return false if key.tab? || key.back_tab?
-        ch = ev.char || key.to_char
-        return false unless ch && !ev.ctrl? && !ev.alt?
+        return false unless ch = LineEdit.typed_char(ev)
         insert(ch)
       end
       true

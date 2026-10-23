@@ -115,7 +115,7 @@ module Gori::Tui
         @evidence.query_move(1)
       elsif key.backspace?
         @evidence.query_backspace
-      elsif (ch = ev.char || key.to_char) && !ev.ctrl? && !ev.alt?
+      elsif ch = LineEdit.typed_char(ev)
         @evidence.query_insert(ch)
         @evidence.set_preedit("")
       end

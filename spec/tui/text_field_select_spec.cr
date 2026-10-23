@@ -119,6 +119,20 @@ describe Gori::Tui::TextField do
     end
   end
 
+  # ^\ ^] ^^ ^_ arrive as `Key::Unknown` with the raw C0 char and no ctrl flag, so the
+  # `!ev.ctrl?` guard let them through — typing a control byte into a path or a regex,
+  # and over a live selection, deleting it.
+  it "refuses a raw C0 control char that arrives without a ctrl flag" do
+    f = TextField.new("abc")
+    f.home
+    f.handle_edit_key(field_key(Termisu::Input::Key::Right, shift: true))
+    "\u001C\u001D\u001E\u001F".each_char do |c|
+      f.handle_edit_key(field_key(Termisu::Input::Key::Unknown, c)).should be_false
+    end
+    f.value.should eq("abc")
+    f.selection_text.should eq("a")
+  end
+
   describe "editing replaces the selection" do
     it "typing over a selection substitutes it" do
       f = TextField.new("hello world")

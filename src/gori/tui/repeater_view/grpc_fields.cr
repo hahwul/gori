@@ -378,8 +378,7 @@ class Gori::Tui::RepeaterView
       @grpc_field_input = value[0, @grpc_field_caret] + value[({@grpc_field_caret + 1, value.size}.min)..]
       edited_grpc_field_value
     else
-      c = ev.char || key.to_char
-      return true if c.nil? || ev.ctrl? || ev.alt?
+      return true unless c = LineEdit.typed_char(ev) # refuses Tab ('\t') and raw C0 too
       @grpc_field_input = value[0, @grpc_field_caret] + c.to_s + value[@grpc_field_caret..]
       @grpc_field_caret += 1
       edited_grpc_field_value

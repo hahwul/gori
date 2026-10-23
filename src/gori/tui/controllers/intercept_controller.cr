@@ -367,7 +367,6 @@ module Gori::Tui
 
     def handle_query_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
-      c = ev.char || key.to_char
       ic = @host.session.interceptor
       return true if query_nav(ev)
       case
@@ -378,7 +377,7 @@ module Gori::Tui
       # Above the printable arm below, which would otherwise type the `?` (see ql_help_key?).
       when TabController.ql_help_key?(ev, @intercept.query) then @host.open_help_query(:intercept)
       else
-        if c && !ev.ctrl? && !ev.alt?
+        if c = LineEdit.typed_char(ev)
           @intercept.query_insert(c)
           ic.set_filter(@intercept.query) # live: narrow holding as you type (only ever narrows from "all")
           @intercept.set_preedit("")

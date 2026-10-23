@@ -926,8 +926,8 @@ module Gori::Tui
           refilter_popup
         end
       else
-        if c && !ev.ctrl? && !ev.alt?
-          s.chain = s.chain[0, s.chain_cx] + c.to_s + s.chain[s.chain_cx..]
+        if ch = LineEdit.typed_char(ev)
+          s.chain = s.chain[0, s.chain_cx] + ch.to_s + s.chain[s.chain_cx..]
           s.chain_cx += 1
           @chain_pre = ""
           touch

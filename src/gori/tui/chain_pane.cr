@@ -53,8 +53,7 @@ module Gori::Tui
       when key.left?      then move_caret(-1)
       when key.right?     then move_caret(1)
       else
-        c = ev.char || key.to_char
-        return false unless c && !ev.ctrl? && !ev.alt?
+        return false unless c = LineEdit.typed_char(ev)
         insert(c)
       end
       true

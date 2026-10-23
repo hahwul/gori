@@ -85,6 +85,15 @@ module Gori::Tui
       !!c && (c == '\u{7F}' || c == '\b')
     end
 
+    # The character a keystroke TYPES into a single-line field, or nil: never on a ⌃/⌥ chord
+    # and never a control char. The last half is not `!ev.ctrl?`'s job: ^\ ^] ^^ ^_ (and ^/ on
+    # xterm, 0x1F) arrive from termisu as `Key::Unknown` carrying the raw C0 byte with NO ctrl
+    # flag, and Tab reads as '\t'. A multi-line editor that takes Tab keeps its own guard.
+    def self.typed_char(ev : Termisu::Event::Key) : Char?
+      c = ev.char
+      c if c && !ev.ctrl? && !ev.alt? && !c.control?
+    end
+
     # The word rule `TextField` and `TextArea` use: a run of word characters, or a run of
     # punctuation, with whitespace skipped first.
     def self.word_left(text : String, caret : Int32) : Int32

@@ -628,7 +628,7 @@ module Gori::Tui
         end
       elsif ev.ctrl_c?
         return :quit
-      elsif (c = ev.char || key.to_char) && !ev.ctrl? && !ev.alt?
+      elsif c = LineEdit.typed_char(ev)
         # Any printable key filters: enter the Search row (if not already) and append.
         @selected = 2
         @query += c

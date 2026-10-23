@@ -3754,8 +3754,7 @@ module Gori::Tui
       when key.end?       then view.target_end
       when key.delete?    then view.target_delete
       else
-        c = ev.char || key.to_char
-        if c && !ev.ctrl? && !ev.alt?
+        if c = LineEdit.typed_char(ev)
           view.target_insert(c)
           view.set_preedit("")
         end

@@ -10,6 +10,14 @@ private def key(k : Termisu::Input::Key, mods = Termisu::Input::Modifier::None, 
   Termisu::Event::Key.new(k, mods, char)
 end
 
+private def type_c0_then_a(controller) : String
+  "\u001C\u001D\u001E\u001F".each_char do |c|
+    controller.handle_query_key(key(Termisu::Input::Key::Unknown, char: c))
+  end
+  controller.handle_query_key(key(Termisu::Input::Key::LowerA, char: 'a'))
+  controller.view.query
+end
+
 describe Gori::Tui::LineEdit do
   it "reads the word chords, the line ends, forward delete and the modified backspace" do
     LineEdit.action(key(Termisu::Input::Key::Left, Termisu::Input::Modifier::Ctrl)).should eq(:word_left)
@@ -127,6 +135,27 @@ describe "the `/` bars take LineEdit" do
           v.query.should eq("host:a method:")
         end
       end
+    end
+  end
+
+  # ^\ ^] ^^ ^_ (and ^/ on xterm, 0x1F) reach the bars as `Key::Unknown` carrying the raw C0
+  # char and NO ctrl flag, so a `!ev.ctrl?` guard alone typed them into the query.
+  it "refuses a raw C0 control char that arrives without a ctrl flag" do
+    TuiContract.with_session("line-edit-c0") do |session|
+      seen = 0
+      TuiContract.each_controller(session) do |controller, _host|
+        case controller
+        when HistoryController, IssuesController, ProbeController
+          controller.view.start_query
+          type_c0_then_a(controller).should eq("a")
+          seen += 1
+        when InterceptController
+          controller.view.start_query(session.store)
+          type_c0_then_a(controller).should eq("a")
+          seen += 1
+        end
+      end
+      seen.should eq(4)
     end
   end
 end

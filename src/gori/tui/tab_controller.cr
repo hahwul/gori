@@ -1270,7 +1270,6 @@ module Gori::Tui
     # gestures. `bar` is the tab's view; the block is the tab's Esc. Returns true (swallows).
     protected def handle_ql_bar_key(ev : Termisu::Event::Key, bar, help : Symbol, & : -> Nil) : Bool
       key = ev.key
-      c = ev.char || key.to_char
       return true if ql_bar_nav(ev, bar)
       case
       when key.enter?     then ql_bar_enter(bar)
@@ -1280,7 +1279,7 @@ module Gori::Tui
         # Above the printable arm below, which would otherwise type the `?` (see ql_help_key?).
       when TabController.ql_help_key?(ev, bar.query) then @host.open_help_query(help)
       else
-        if c && !ev.ctrl? && !ev.alt?
+        if c = LineEdit.typed_char(ev)
           bar.query_insert(c)
           on_query_edit
           # Clear the preedit on a committed char. Issues and Probe name the bar's setter apart

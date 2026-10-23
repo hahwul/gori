@@ -155,6 +155,22 @@ describe "RepeaterView gRPC FIELDS editor (#828)" do
       end
     end
 
+    # Tab reads as '\t' and ^\ ^] ^^ ^_ as raw C0 chars with no ctrl flag; the value field
+    # typed every one of them into the string it re-encodes.
+    it "refuses Tab and raw C0 control chars in the value field" do
+      with_demo_schema do
+        grpc_tmp_store do |store|
+          view = grpc_view(store, get_user_request("hahwul"))
+          view.toggle_grpc_fields
+          view.grpc_field_begin.should be_nil
+          type_into(view, "ad\tmi\u001C\u001D\u001E\u001Fn")
+          view.grpc_field_input_key(key_ev(Termisu::Input::Key::Tab)).should be_true
+          view.grpc_field_apply.should be_nil
+          PB.decode(sent_payload(view)).fields[0].string.should eq("admin")
+        end
+      end
+    end
+
     it "re-encoding with no edit is byte-identical to the capture" do
       with_demo_schema do
         grpc_tmp_store do |store|

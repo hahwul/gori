@@ -149,7 +149,6 @@ module Gori::Tui
 
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
-      c = ev.char
       case
       when key.escape?            then return :cancel
       when key.enter?             then return enter
@@ -172,7 +171,7 @@ module Gori::Tui
         # jumping focus to the title (what the severity row does) would throw a vector
         # someone started typing into the title of their issue. The row's own `(↵ calc)`
         # label and this form's `hint` both name the key that does work here.
-        if c && !ev.ctrl? && !ev.alt? && @sel != ROW_CVSS
+        if (c = LineEdit.typed_char(ev)) && @sel != ROW_CVSS
           focus_title
           insert_title(c)
           set_preedit("")

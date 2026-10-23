@@ -1396,7 +1396,6 @@ module Gori::Tui
     # ←/→ move the caret (clamped — they no longer escape the card sideways).
     private def handle_project_settings_field_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
-      c = ev.char || key.to_char
       if key.enter?
         commit_project_settings(on_leave: false)
       elsif key.left?
@@ -1405,7 +1404,7 @@ module Gori::Tui
         @project_view.set_move_cursor(1)
       elsif key.backspace?
         @project_view.set_backspace
-      elsif c && !ev.ctrl? && !ev.alt?
+      elsif c = LineEdit.typed_char(ev)
         @project_view.set_input(c)
         @project_view.set_preedit("") # commit any preedit
       end
