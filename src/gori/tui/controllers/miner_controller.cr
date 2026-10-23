@@ -533,7 +533,11 @@ module Gori::Tui
         # error text, the notification AND the persisted event log, and it names nothing.
         events.send({view, Miner::ErrorEvent.new("#{ex.class}: #{ex.message}")}) unless terminal_sent
       ensure
-        view.finish_run # backstop — the drain's Done also clears it
+        # Backstop only when no verdict was queued: once Done/Error is on the channel the drain
+        # clears it, and by the time this fiber resumes from that blocking send the operator may
+        # have started a NEWER run on this view — clearing then unflagged a live mine (the
+        # Sequencer's #1429 sibling).
+        view.finish_run unless terminal_sent
       end
       # The request-time macro, when the run has one (#1350): said up front, because a per-request
       # macro serialises the mine and an operator otherwise learns that from the stopwatch.
