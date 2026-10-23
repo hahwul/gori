@@ -3,4 +3,6 @@
 abstract class Gori::Verb::ExecContext
   # project: the description pane (READ mode on the DESCRIPTION card)
   abstract def project_desc_read_mode? : Bool
+  # project: the registry's tags for this project (the Edit tags card)
+  abstract def project_edit_tags : Nil
 end

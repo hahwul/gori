@@ -71,6 +71,42 @@ describe "Gori::MCP::Tools project lifecycle" do
   end
 end
 
+describe "Gori::MCP::Tools project tags" do
+  it "stores create_project tags, lists them, narrows #tag, and reports them in project_info" do
+    root = File.tempname("gori-projtags")
+    Dir.mkdir_p(root)
+    prev = ENV["GORI_HOME"]?
+    ENV["GORI_HOME"] = root
+    prev_layer = Gori::Env.layer
+    tools = Gori::MCP::Tools.new(nil, allow_actions: true, verify_upstream: false,
+      selection_source: "unbound")
+    begin
+      made = JSON.parse(tools.call("create_project", JSON.parse(%({"name":"Tagged","tags":["web","#External"]}))).text)
+      made["tags"].as_a.map(&.as_s).should eq(["web", "External"])
+      plain = JSON.parse(tools.call("create_project", JSON.parse(%({"name":"Plain","tags":"api,mobile"}))).text)
+      plain["tags"].as_a.map(&.as_s).should eq(["api", "mobile"]) # a comma string splits, as on the CLI
+      refused = tools.call("create_project", JSON.parse(%({"name":"Bad","tags":["#{"x" * 40}"]})))
+      refused.is_error.should be_true
+      refused.text.should contain("invalid tag")
+
+      hits = JSON.parse(tools.call("list_projects", JSON.parse(%({"query":"#external"}))).text)["projects"].as_a
+      hits.map(&.["name"].as_s).should eq(["Tagged"])
+      JSON.parse(tools.call("list_projects", JSON.parse(%({"query":"#mob"}))).text)["projects"].as_a.map(&.["name"].as_s).should eq(["Plain"])
+      hits.first["tags"].as_a.map(&.as_s).should eq(["web", "External"])
+      # create_project auto-bound the first project, so project_info reads its tags
+      JSON.parse(tools.call("project_info", JSON.parse("{}")).text)["tags"].as_a.map(&.as_s).should eq(["web", "External"])
+      # a reopen with tags replaces them; [] clears
+      tools.call("create_project", JSON.parse(%({"name":"Tagged","tags":[]})))
+      JSON.parse(tools.call("project_info", JSON.parse("{}")).text)["tags"].as_a.should be_empty
+    ensure
+      tools.@store.try(&.close) rescue nil
+      Gori::Env.layer = prev_layer
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(root)
+    end
+  end
+end
+
 describe "Gori::MCP::Tools project name resolution (#1163)" do
   it "refuses a name that addresses two projects, naming each by a handle that is unique" do
     root = File.tempname("gori-projambig")

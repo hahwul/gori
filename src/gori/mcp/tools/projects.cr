@@ -70,6 +70,7 @@ module Gori
             rj.field "db_size", p.db_size
             rj.field "current", !current.nil? && p.db_path == current
             rj.field "workspace", e.workspace
+            rj.field "tags", e.tags
             if lm = p.last_modified
               rj.field "last_modified", lm.to_unix
               rj.field "last_modified_iso", lm.to_rfc3339
@@ -118,7 +119,7 @@ module Gori
         if query && matched.zero?
           return "no project matched query #{query.inspect}; this host has #{total} " \
                  "project#{total == 1 ? "" : "s"}. 'query' is a case-insensitive SUBSTRING of the " \
-                 "display name, directory slug, short id, or bound workspace path"
+                 "display name, directory slug, short id, bound workspace path or a tag ('#TAG' matches a tag starting with TAG)"
         end
         if returned.zero? && matched > 0
           return "offset #{offset} is past the last of #{matched} matching project#{matched == 1 ? "" : "s"} " \
@@ -134,12 +135,18 @@ module Gori
         name = str(h, "name")
         return err("missing required 'name'", "INVALID_ARGUMENT", field: "name") if name.nil? || name.strip.empty?
         description = str(h, "description") || ""
+        # Absent (or null) leaves a reopened project's tags alone; a list, `[]` included, replaces them.
+        tags = begin
+          h["tags"]?.try { |v| v.raw.nil? ? nil : ProjectRegistry.normalize_tags(str_list(h, "tags").flat_map(&.split(','))) }
+        rescue ex : Gori::Error
+          return err(ex.message || "invalid tags", "INVALID_ARGUMENT", field: "tags")
+        end
         reg = registry
         # The registry reports created-vs-reopened (and materializes the DB, so the project
         # is immediately visible to list_projects/switch_project). Asking #find beforehand
         # instead would call a brand-new project a reopen whenever its name happens to be a
         # prefix of another project's short id.
-        proj, created = reg.create_or_reopen(name, description)
+        proj, created = reg.create_or_reopen(name, description, tags)
 
         # First-run UX: when the server has no project yet, bind immediately so the
         # agent can use traffic tools without a separate switch_project call.
@@ -156,6 +163,7 @@ module Gori
             j.field "id", reg.id_of(proj)
             j.field "slug", reg.slug_of(proj)
             j.field "db_path", proj.db_path
+            j.field "tags", reg.tags_of(proj)
             j.field "created", created # false = reopened an existing same-name project
             j.field "switched", auto_bound
             if auto_bound
@@ -469,10 +477,10 @@ module Gori
       private def list_projects_tools(j : JSON::Builder) : Nil
         tool j, "list_projects",
           "List gori projects on this host (name, slug, short id, db path/size, last_modified, " \
-          "workspace binding), MOST-RECENTLY-ACTIVE FIRST, plus current_project (current:true on " \
+          "workspace binding, tags), MOST-RECENTLY-ACTIVE FIRST, plus current_project (current:true on " \
           "its row). Paged: pass 'query' to locate one before switch_project, read 'total' / " \
           "'has_more'. When the server started unbound, #{project_recovery}." do |s|
-          s.field "query", strprop("keep only projects whose display name, slug, short id or bound workspace path CONTAINS this text (case-insensitive)")
+          s.field "query", strprop("keep only projects whose display name, slug, short id, bound workspace path or a tag CONTAINS this text (case-insensitive); '#TAG' keeps the projects with a tag starting with TAG")
           s.field "limit", limitprop("max projects returned", PageLimit.new(MCP_PROJECTS_DEFAULT, MCP_PROJECTS_MAX))
           s.field "offset", intprop("page cursor: skip this many matching projects (default 0)")
         end
@@ -500,6 +508,7 @@ module Gori
           "only while still unbound." do |s|
           s.field "name", strprop("project display name (slugified for its directory)"), required: true
           s.field "description", strprop("optional description stored in the project settings")
+          s.field "tags", strarrprop("optional labels classifying the project (web, bugbounty, …); on a reopen they REPLACE its tags, [] clears them")
         end
 
         return unless @allow_actions

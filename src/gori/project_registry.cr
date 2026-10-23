@@ -35,6 +35,15 @@ module Gori
     # `#delete` clears it: a project deleted from MCP or the TUI picker otherwise left every
     # later `gori run` refusing a pin that can never resolve again.
     DEFAULT_PIN_FILE = ".cli-default"
+    # The operator's classification labels for a project (`web`, `bugbounty`, `모바일`), one per
+    # line. A sidecar beside `.name` rather than a DB setting like the description, because the
+    # surfaces that READ tags are listings: the picker's search and the new-project form's
+    # suggestions read every project's tags, and a sidecar is one small file where a setting is
+    # one database open per project. Case is kept as typed; two spellings differing only in case
+    # are one tag (`#normalize_tags`).
+    TAGS_FILE     = ".tags"
+    MAX_TAGS      = 10
+    MAX_TAG_CHARS = 32
 
     # Why a name gori will not make a directory out of was refused, in the one sentence the
     # three surfaces print verbatim ("gori run project create: …", MCP's INVALID_ARGUMENT,
@@ -209,7 +218,8 @@ module Gori
     # separate small file read, so a surface that filters AND prints them must read them
     # once rather than twice per project — on a host holding a project per worktree that is
     # hundreds of syscalls either way.
-    record Entry, project : Project, id : String?, slug : String, workspace : String? do
+    record Entry, project : Project, id : String?, slug : String, workspace : String?,
+      tags : Array(String) = [] of String do
       # Whether an operator's free-text narrowing keeps this project. A case-insensitive
       # SUBSTRING over every spelling that ADDRESSES a project, plus the workspace path a
       # headless bind uses. Deliberately looser than `#find`, whose exact/unique-prefix
@@ -217,16 +227,110 @@ module Gori
       # in the first place — and ONE predicate, because `gori run project list --query` and
       # MCP `list_projects{query}` offering the same narrowing must not disagree about what
       # "acme" matches.
+      #
+      # A needle starting with `#` asks for a TAG and nothing else, by prefix so the picker's
+      # live search narrows as the word is typed (`#mo` keeps `mobile`); a bare `#` keeps every
+      # tagged project. A plain needle also reaches the tags, by substring like every other
+      # spelling here.
       def matches?(needle : String) : Bool
         return true if needle.empty?
+        if needle.starts_with?('#')
+          tag = needle.lstrip('#')
+          return tags.any?(&.downcase.starts_with?(tag))
+        end
         project.name.downcase.includes?(needle) || slug.downcase.includes?(needle) ||
-          !!id.try(&.downcase.includes?(needle)) || !!workspace.try(&.downcase.includes?(needle))
+          !!id.try(&.downcase.includes?(needle)) || !!workspace.try(&.downcase.includes?(needle)) ||
+          tags.any?(&.downcase.includes?(needle))
       end
     end
 
     # `list`, with each project's sidecars read once. Same most-recently-active-first order.
     def entries : Array(Entry)
-      list.map { |project| Entry.new(project, id_of(project), slug_of(project), workspace_of(project)) }
+      list.map do |project|
+        Entry.new(project, id_of(project), slug_of(project), workspace_of(project), tags_of(project))
+      end
+    end
+
+    # The tags in the `.tags` sidecar, salvaged: `#set_tags` normalized them on the way in, but
+    # a hand-edited line `normalize_tags` would refuse must not make every later edit of the
+    # project's tags refuse it again. Empty for an untagged or legacy project, and for one
+    # whose sidecar cannot be read.
+    def tags_of(project : Project) : Array(String)
+      ProjectRegistry.salvage_tags(File.read(File.join(project.dir, TAGS_FILE)).lines)
+    rescue
+      [] of String
+    end
+
+    # `normalize_tags` for tags gori did not just take from the operator (a sidecar on disk, an
+    # archive's manifest): a tag it refuses is dropped rather than raised, and past MAX_TAGS the
+    # rest are dropped too.
+    def self.salvage_tags(raw : Enumerable(String)) : Array(String)
+      kept = raw.compact_map do |t|
+        normalize_tags([t]).first?
+      rescue Gori::Error
+        nil
+      end
+      normalize_tags(kept.uniq(&.downcase).first(MAX_TAGS))
+    end
+
+    # Replace a project's tags (an empty list removes the sidecar), answering what was stored.
+    # Raises `Gori::Error` with the reason for a tag `#normalize_tags` refuses, before anything
+    # is written.
+    def set_tags(project : Project, tags : Enumerable(String)) : Array(String)
+      raise Gori::Error.new("project directory missing") unless Dir.exists?(project.dir)
+      normalized = ProjectRegistry.normalize_tags(tags)
+      write_tags(project.dir, normalized)
+      normalized
+    end
+
+    private def write_tags(dir : String, tags : Array(String)) : Nil
+      path = File.join(dir, TAGS_FILE)
+      if tags.empty?
+        File.delete?(path)
+      else
+        DurableFile.write(path, tags.join('\n') + '\n', perm: File::Permissions.new(0o600))
+      end
+    end
+
+    # Every tag on this host with how many projects carry it, most-used first (ties keep the
+    # most-recently-active project's order). Spellings that differ only in case count as one,
+    # shown as the spelling most projects use. What the new-project form suggests.
+    def self.tag_counts(entries : Array(Entry)) : Array({String, Int32})
+      groups = {} of String => Hash(String, Int32)
+      entries.each do |e|
+        e.tags.each do |t|
+          spellings = groups[t.downcase] ||= {} of String => Int32
+          spellings[t] = (spellings[t]? || 0) + 1
+        end
+      end
+      counted = groups.values.map do |spellings|
+        {spellings.max_by { |(_, n)| n }[0], spellings.values.sum}
+      end
+      counted.each_with_index.to_a.sort_by! { |(pair, i)| {-pair[1], i} }.map(&.[0])
+    end
+
+    # The one rule every surface stores tags under: trimmed, a leading `#` dropped (it is how
+    # the picker's search spells a tag, so an operator types it), each whitespace run turned
+    # into `-` so a tag stays one word on a row, and a later spelling that differs only in
+    # case dropped as a duplicate. Case is otherwise kept, so a non-English tag is stored as
+    # typed. Refuses a comma (the separator the CLI and the TUI form split on), control
+    # characters, invalid UTF-8, a tag over MAX_TAG_CHARS characters, and more than MAX_TAGS.
+    def self.normalize_tags(raw : Enumerable(String)) : Array(String)
+      tags = [] of String
+      raw.each do |r|
+        raise Gori::Error.new("invalid tag: it must be valid UTF-8") unless r.valid_encoding?
+        t = r.strip.lstrip('#').strip.gsub(/\s+/, "-")
+        next if t.empty?
+        if t.each_char.any? { |c| c == ',' || c.control? }
+          raise Gori::Error.new("invalid tag #{t.inspect}: commas and control characters are not allowed")
+        end
+        if t.size > MAX_TAG_CHARS
+          raise Gori::Error.new("invalid tag #{t.inspect}: at most #{MAX_TAG_CHARS} characters")
+        end
+        tags << t unless tags.any? { |o| o.downcase == t.downcase }
+      end
+      raise Gori::Error.new("too many tags: at most #{MAX_TAGS} per project") if tags.size > MAX_TAGS
+      tags
     end
 
     # The needle `Entry#matches?` takes: a caller's raw query folded once, or nil when it
@@ -268,8 +372,8 @@ module Gori
     # directory; the original name is kept for display.
     # `description` is optional and persisted immediately into the project's
     # settings (so it is available on first open in the Project tab).
-    def create(name : String, description : String = "") : Project
-      create_or_reopen(name, description)[0]
+    def create(name : String, description : String = "", tags : Array(String)? = nil) : Project
+      create_or_reopen(name, description, tags)[0]
     end
 
     # The display name and directory slug an import under *name* would claim, or the
@@ -346,7 +450,13 @@ module Gori
     # is the one that resolves the slug — so every caller that reports "created" (CLI, MCP)
     # reads it from here instead of guessing beforehand with #find, which also matches a
     # short-id prefix and would call a brand-new project a reopen.
-    def create_or_reopen(name : String, description : String = "") : {Project, Bool}
+    #
+    # `tags`, when given, replaces the project's tags — on a reopen too, the way a non-empty
+    # description does; nil leaves a reopened project's tags alone. Validated before anything
+    # touches disk, so a refused tag creates nothing.
+    def create_or_reopen(name : String, description : String = "",
+                         tags : Array(String)? = nil) : {Project, Bool}
+      tags = tags.try { |t| ProjectRegistry.normalize_tags(t) }
       display = validated_display_name(name)
       slug = slugify(display)
       raise Gori::Error.new(UNSLUGGABLE_NAME) if slug.empty?
@@ -380,6 +490,7 @@ module Gori
         display = stored
       end
       write_id_if_absent(dir) # a fresh project gets a stable short id; a reopen keeps its own
+      tags.try { |t| write_tags(dir, t) }
       proj = Project.new(display, db_path)
       # Open once even with no description: this creates the DB + runs migrations, and #list
       # SKIPS a directory without one. Leaving it lazy made a freshly created project

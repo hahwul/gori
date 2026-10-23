@@ -49,7 +49,7 @@ gori mcp --no-project              # force unbound even inside a Git workspace
 
 **선택된 프로젝트를 열 수 없으면**(데이터베이스가 없거나 깨졌거나 읽을 수 없을 때, 프로젝트 이름이 더 이상 존재하지 않을 때) 서버는 종료하지 않고 핸드셰이크를 마친 뒤 unbound로 시작합니다. 실패 이유는 stderr에 기록되고, 핸드셰이크 `instructions`에 실리며, 모든 `NO_PROJECT` 도구 오류에 함께 반환되고, `project_info`의 `bind_error` 필드로도 보고됩니다. 에이전트는 재시작 없이 `list_projects`와 `switch_project`로 복구할 수 있습니다.
 
-데이터를 사용하기 전에 `project_info`를 호출하세요. `bound`, 선택된 프로젝트, 데이터베이스 경로, 워크스페이스 루트, 선택 출처, 그리고 프로젝트 `description`(`create_project`가 저장하는 "이 프로젝트가 무엇을 위한 것인가")을 보고합니다. 그 설명을 되읽어 주는 호출은 이것뿐입니다.
+데이터를 사용하기 전에 `project_info`를 호출하세요. `bound`, 선택된 프로젝트, 데이터베이스 경로, 워크스페이스 루트, 선택 출처, 프로젝트 `description`(`create_project`가 저장하는 "이 프로젝트가 무엇을 위한 것인가"), 그리고 프로젝트 `tags`를 보고합니다. 그 설명을 되읽어 주는 호출은 이것뿐입니다.
 
 **`instructions`에 적힌 프로젝트는 핸드셰이크 시점의 바인딩입니다.** 이 텍스트는 한 번만 전달되고 갱신을 밀어주는 수단이 없어서, `switch_project` 이후에도 그때의 바인딩을 계속 설명합니다. 실제 읽기와 쓰기는 새 프로젝트로 갑니다. 현재 값은 `project_info`가 답합니다. `switch_project`(그리고 자동 바인딩하는 `create_project`)는 같은 정정을 결과에 담아, 직전 바인딩을 `previous_project`로 함께 돌려줍니다.
 
@@ -203,7 +203,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `compare_flows` | 두 플로우의 요청 또는 응답 줄 단위 diff. 양쪽의 status/size/time과 A→B 델타 포함. `context:N`은 동일 구간을 `{kind:fold,hidden}` 마커로 접음 |
 | `diff_projects` | 리테스트 diff: **프로젝트 두 개**를 엔드포인트 단위로 비교. 지난 엔게이지먼트 이후 무엇이 새로 생겼고, 사라졌고, 다르게 응답하는지. 엔드포인트 키는 Sitemap의 폴딩된 템플릿을 그대로 쓰고, `removed`(새 캡처가 아예 요청한 적 없음)와 `gone`(요청했고 404/410을 받음)은 별개의 판정 |
 | `intercept_list` / `intercept_get` | 라이브 인터셉트 큐와 홀드된 항목 하나의 전체 내용 조회 |
-| `list_projects` | 이 호스트에서 프로젝트 **찾기**. 최근 활동순 **한 페이지**를 돌려줍니다. `query`는 표시 이름·디렉터리 슬러그·짧은 id·바인딩된 워크스페이스 경로에 포함되는지로 걸러내고, `limit`/`offset`으로 페이지를 넘깁니다(기본 50, 최대 500). 현재 서빙 중인 프로젝트는 페이지와 별개로 `current_project`에 실리므로 좁힌 목록에서도 "지금 어느 프로젝트인가"에 답할 수 있고, `total` 옆의 `total_projects` 덕분에 매치 0건이 "프로젝트가 하나도 없다"로 읽히지 않습니다 |
+| `list_projects` | 이 호스트에서 프로젝트 **찾기**. 최근 활동순 **한 페이지**를 돌려줍니다. `query`는 표시 이름·디렉터리 슬러그·짧은 id·바인딩된 워크스페이스 경로·태그에 포함되는지로 걸러내고(`#TAG`는 TAG로 시작하는 태그가 붙은 것만), 각 행에 `tags`가 실리며, `limit`/`offset`으로 페이지를 넘깁니다(기본 50, 최대 500). 현재 서빙 중인 프로젝트는 페이지와 별개로 `current_project`에 실리므로 좁힌 목록에서도 "지금 어느 프로젝트인가"에 답할 수 있고, `total` 옆의 `total_projects` 덕분에 매치 0건이 "프로젝트가 하나도 없다"로 읽히지 않습니다 |
 | `list_notes` / `get_note` | 프로젝트 노트 읽기 |
 | `list_wordlists` / `get_wordlist` | 전역 [wordlist 카탈로그](/ko/guide/repeater-and-fuzzer/#wordlist-catalog): `GORI_HOME/wordlists` 아래의 이름 붙은 목록을 이름·크기·수정 시각만으로 나열합니다. `get_wordlist`는 경로와 최대 32 MiB까지 읽어 센 줄 수(`lines_complete:false`면 목록이 더 깁니다)를 더하고, **값**은 `include_values:true`일 때만 돌려줍니다(`max_lines` 기본 20, 최대 200). 목록이 자격 증명 목록일 수 있기 때문입니다. 프로젝트가 바인딩되지 않아도 쓸 수 있습니다 |
 | `list_rule_presets` | 응답 수정 [프리셋](/ko/guide/proxy/#rewriter-presets). 평범한 Match & Replace 규칙을 설치하는 이름 붙은 출발점(hidden 필드 드러내기, disabled 컨트롤 활성화, `maxlength` 제거, 클라이언트 검증 제거, CSP / 보안 헤더 제거, SRI 비활성화). 각 행이 설치할 규칙을 밝힙니다 |
@@ -265,7 +265,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `import_flows` | HAR / URL 목록 / OpenAPI / Postman / Insomnia / Burp / WSDL 문서나 curl 명령을 파일(`path`) 또는 `text`로 받아 History로 일괄 임포트. 임포트는 중복을 제거하지 않으며, 같은 이름의 파일에서 온 플로우가 이미 있으면 `notes`가 알려 줍니다 |
 | `delete_flow` / `clear_history` | 플로우 하나 삭제, 또는 캡처된 History 전체 삭제 |
 | `set_sitemap_tag` | Sitemap 경로에 자유 형식 메모 고정 |
-| `create_project` / `switch_project` / `delete_project` | 프로젝트 생성 또는 다시 열기, 이 서버를 다른 프로젝트로 전환(`unbind:true`면 현재 프로젝트에서 빠져나옴), 프로젝트 삭제. 서비스 중인 프로젝트는 빠져나온 뒤 삭제합니다. 삭제는 2단계로, `dry_run` 후 확인 토큰 필요 |
+| `create_project` / `switch_project` / `delete_project` | 프로젝트 생성 또는 다시 열기(선택 `tags`는 다시 연 프로젝트의 태그를 교체, `[]`는 비움), 이 서버를 다른 프로젝트로 전환(`unbind:true`면 현재 프로젝트에서 빠져나옴), 프로젝트 삭제. 서비스 중인 프로젝트는 빠져나온 뒤 삭제합니다. 삭제는 2단계로, `dry_run` 후 확인 토큰 필요 |
 | `export_project` / `import_project` | 프로젝트를 이식 가능한 [`.gori` 아카이브](/ko/guide/proxy/#project-archives)로 쓰거나, 아카이브를 새 프로젝트로 가져옵니다. `gori run project export` / `import`와 같은 엔진을 씁니다. 두 경로 모두 MCP 서버의 파일시스템 기준입니다. 내보내기는 `project`로 다른 프로젝트를 지정하지 않으면 바인딩된 프로젝트를 쓰고, `overwrite:true` 없이는 기존 파일을(`overwrite:true`도 이전 `.gori` 아카이브만 덮어씁니다), gori 홈 디렉터리 안의 경로는 항상 거부하며, 결과에 아카이브가 마스킹되지 않았다고 밝힙니다. 가져오기는 `confirm:true` 전까지 아카이브의 인벤토리, 공개 문구, 이름 사용 가능 여부를 담아 `CONFIRM_REQUIRED`로 답하고, 같은 가져오기 안전 조치(실행형·파일 기반 규칙 비활성화, 프로젝트 라우팅·전역 규칙 오버라이드·Probe 모드·슬롯 자동 갱신 초기화, 2 GiB 상한)를 적용하며, 새 프로젝트로 전환하지는 않습니다 |
 | `add_scope_rule` / `update_scope_rule` / `delete_scope_rule` / `set_scope_enabled` | 프로젝트의 include / exclude 규칙 편집과 스코프 렌즈 토글 |
 | `set_sandbox` | 하드 컨테인먼트. 켜면 프록시가 스코프가 허용한 것만 전달하고 나머지는 차단 |

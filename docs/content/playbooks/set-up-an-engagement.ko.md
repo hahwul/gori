@@ -18,7 +18,7 @@ group = "기초"
 TUI에서는 커맨드 팔레트(`Ctrl-P`, 이어서 *project* 입력)로 프로젝트 피커를 열어 새로 시작합니다. 또는 프록시가 뜨기 전에 셸에서 만들어, 스크립트가 스코프와 env를 먼저 깔아 둘 수도 있습니다:
 
 ```bash
-gori run project create "Acme API" --description="staging engagement"
+gori run project create "Acme API" --description="staging engagement" --tag=web --tag=acme
 ```
 
 이미 있는 이름으로 만들면 그 프로젝트를 다시 열 뿐이므로, 다시 실행해도 안전합니다.

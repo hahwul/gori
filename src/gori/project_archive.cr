@@ -131,7 +131,10 @@ module Gori
       gori_version : String,
       schema_version : Int32,
       created_at : String,
-      flow_count : Int64 do
+      flow_count : Int64,
+      # The registry's `.tags` sidecar, which the database does not carry. Optional, so an
+      # archive from before tags (or for a `--db` project) still reads; an older gori ignores it.
+      tags : Array(String)? = nil do
       include JSON::Serializable
     end
 
@@ -152,7 +155,11 @@ module Gori
       def import_into(registry : ProjectRegistry, name : String? = nil, *,
                       rename_hint : String = DEFAULT_RENAME_HINT) : Project
         raise Gori::Error.new("project archive is already closed") if @closed
-        registry.import_database(target_name(name), @database_path)
+        project = registry.import_database(target_name(name), @database_path)
+        # Best-effort and salvaged, not validated: the archive is untrusted, and a bad tag is no
+        # reason to refuse the traffic it came with.
+        @manifest.tags.try { |tags| registry.set_tags(project, ProjectRegistry.salvage_tags(tags)) rescue nil }
+        project
       rescue ex : Gori::Error
         raise explain_name_error(ex, name, rename_hint)
       end
@@ -375,8 +382,9 @@ module Gori
         File.chmod(snapshot, File::Permissions.new(0o600))
         raise Gori::Error.new("project database exceeds the 2 GiB uncompressed archive size limit") if File.info(snapshot).size > MAX_DATABASE_BYTES
         version, inventory = inspect_database(snapshot)
+        tags = project.canonical? ? ProjectRegistry.new(File.dirname(project.dir)).tags_of(project) : [] of String
         manifest = Manifest.new(FORMAT_VERSION, project.name, Gori::VERSION,
-          version, Time.utc.to_rfc3339, inventory.flows)
+          version, Time.utc.to_rfc3339, inventory.flows, tags.empty? ? nil : tags)
         prepared = PreparedExport.new(workdir, snapshot, project, manifest, inventory, loose_database)
         success = true
         prepared

@@ -111,6 +111,7 @@ gori run <subcommand> [verb] [options]
 | `project create <name>` | Create (or reopen) a project by name |
 | `project rename <name> <new-name>` | Change a project's display name |
 | `project describe <name> <text>` · `--clear` | Set or clear a project's description |
+| `project tag <name> <tag>...` · `--clear` | Replace or clear a project's tags |
 | `project switch <name>` (`use`) · `--clear` | Pin the project every `--project`-less command reads |
 | `project export <name>` | Save a compact, WAL-safe `.gori` project archive |
 | `project import <archive>` | Add a project archive as a new project |
@@ -1630,17 +1631,18 @@ gori run project --format json
 gori run project list
 gori run project list --all
 gori run project list --query=acme
+gori run project list --query=#bugbounty
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--all` | Include projects with nothing captured in them |
-| `--query=TEXT` | Keep only the projects whose display name, directory slug, short id or bound workspace path contains TEXT (case-insensitive) |
+| `--query=TEXT` | Keep only the projects whose display name, directory slug, short id, bound workspace path or a tag contains TEXT (case-insensitive). `#TAG` keeps the projects with a tag starting with TAG |
 | `--format=FMT` | `text` (default) or `json` |
 
 `list` hides the **empty** projects (zero captured flows), because a project per worktree or per checkout accumulates into hundreds of them and buries the two or three holding traffic. Emptiness is counted, not inferred from file size: a project created a second ago is the same size as a leftover from March. Two are always listed however empty they are, and marked: `◆` is the project a `--project`-less `gori run` reads, `◇` the one the TUI last opened. In `--format json` those are the `current` and `tui_active` fields, beside a `flows` count and the project `description` (read in the same pass as the count, so it costs no extra open); the count of what was hidden goes to stderr, so a JSON pipe stays a clean array.
 
-`--query` is the other half of that: a **substring** of any spelling that addresses a project, so a half-remembered name finds it. It is looser than `--project`, which wants an exact name, slug or short id. It is applied **before** the flow census, which opens every listed project's database, so a query is also the fast path on a host holding hundreds. It is orthogonal to `--all`, and it narrows the row source rather than the display, so what it excludes is said on stderr: a query that matched nothing reports how many projects the host actually has, and a query that filtered out the `◆` project names it: unlike the empty-hiding default, `--query` does not pin that row. `--format json` carries the bound `workspace` beside the rest, so a consumer can filter on the same fact the query does. The same narrowing is MCP `list_projects{query}`, over the same predicate.
+`--query` is the other half of that: a **substring** of any spelling that addresses a project, so a half-remembered name finds it. It is looser than `--project`, which wants an exact name, slug or short id. It is applied **before** the flow census, which opens every listed project's database, so a query is also the fast path on a host holding hundreds. It is orthogonal to `--all`, and it narrows the row source rather than the display, so what it excludes is said on stderr: a query that matched nothing reports how many projects the host actually has, and a query that filtered out the `◆` project names it: unlike the empty-hiding default, `--query` does not pin that row. `--format json` carries the bound `workspace` and the `tags` beside the rest, so a consumer can filter on the same facts the query does. The same narrowing is MCP `list_projects{query}`, over the same predicate.
 
 #### project create
 
@@ -1649,6 +1651,7 @@ Create a project without capturing into it first. `gori run capture --project=NA
 ```bash
 gori run project create "API test"
 gori run project create api-test --description="staging sweep"
+gori run project create api-test --tag=web --tag=bugbounty
 gori run project create api-test --format json
 ```
 
@@ -1656,9 +1659,10 @@ gori run project create api-test --format json
 | --------------------- | ------------- |
 | `<name>` | Display name. Quote it if it contains spaces |
 | `--description=TEXT` | Stored in the project's settings |
+| `--tag=TAG` | A tag classifying the project. Repeatable, or comma-separated (`--tag=web,api`) |
 | `--format=FMT` | `text` (default) or `json` |
 
-A name that already exists reopens that project instead of failing; `--format json` reports it as `"created": false`. The reopen keeps the stored display name (`project rename` changes it) and replaces the description when a non-empty `--description` is given (`project describe --clear` removes one). A new name that is already another project's directory slug or short id is refused, since `--project` could not then reach the project it made.
+A name that already exists reopens that project instead of failing; `--format json` reports it as `"created": false`. The reopen keeps the stored display name (`project rename` changes it), replaces the description when a non-empty `--description` is given (`project describe --clear` removes one), and replaces the tags when any `--tag` is given. A new name that is already another project's directory slug or short id is refused, since `--project` could not then reach the project it made.
 
 #### project rename
 
@@ -1677,6 +1681,17 @@ Set or clear the project's description: the note on what the engagement is for, 
 gori run project describe api-test "staging sweep, read-only creds"
 gori run project describe api-test --clear
 ```
+
+#### project tag
+
+Replace the project's tags: the labels that classify the engagement (`web`, `mobile`, `bugbounty`, a client name). Tags are found by `project list --query=#TAG`, by MCP `list_projects{query:"#TAG"}`, and by typing `#TAG` in the TUI picker's search; the Project tab shows them and edits them with `Ctrl-P` → **Edit project tags**.
+
+```bash
+gori run project tag api-test web external
+gori run project tag api-test --clear
+```
+
+Tags travel in a project archive (`project export` / `import`). A tag keeps its case, so a non-English tag is stored as typed, but two spellings that differ only in case are one tag. A leading `#` is dropped and spaces become `-`. A tag may not hold a comma or a control character, is at most 32 characters, and a project holds at most 10.
 
 #### project switch
 

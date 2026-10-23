@@ -25,6 +25,7 @@ require "./project_search_overlay"
 require "./export_overlay"
 require "./import_overlay"
 require "./name_prompt_overlay"
+require "./tag_input"
 require "./viewport"
 require "../plural"
 
@@ -141,7 +142,7 @@ module Gori::Tui
       @open_error = notice
       # Held as the base Backend: TermisuBackend is generic over the terminal type.
       @backend = TermisuBackend.new(@term).as(Backend)
-      # ENTRIES, not `list`: the search narrows on the same four spellings the two headless
+      # ENTRIES, not `list`: the search narrows on the same spellings (and tags) the two headless
       # listings do (see `ProjectPicker.narrow`), and those live in sidecars the registry
       # reads once per project here rather than per keystroke.
       @entries = @registry.entries
@@ -150,13 +151,16 @@ module Gori::Tui
       # constant between mutations while `render_list` runs ~20×/s off the starfield clock.
       @projects = @entries.map(&.project).as(Array(Project))
       @discriminators = ProjectPicker.row_discriminators(@entries).as(Hash(String, String))
+      # Shown only under the card for the project row the cursor is on — never on the rows.
+      @tags_by_dir = ProjectPicker.tags_by_dir(@entries).as(Hash(String, Array(String)))
       @query = "" # current search filter; only editable when Search row selected
       @selected = ProjectPicker.initial_selection(@projects.size)
       @results_scroll = 0
       @mode = :list # :list | :new | :confirm | :space | :rename | :settings | :theme | :compress | archive forms | + BUSY_LABELS
       @name = ""
       @desc = ""
-      @new_field = :name # :name | :desc (only in :new mode)
+      @tag_input = TagInput.new([] of String, [] of {String, Int32})
+      @new_field = :name # :name | :desc | :tags (only in :new mode)
       @resized = false   # set on a Resize event → next frame full-repaints
       @preedit = ""      # live IME composing text for the active field (search/name/desc)
       # Delete confirmation (project deletion is irreversible — wipes its dir).
@@ -491,7 +495,7 @@ module Gori::Tui
     # slug the ONLY way to tell them apart and the one spelling that was not accepted.
     #
     # Fuzzy on the name FIRST and ranked exactly as it always was, so the common gesture is
-    # byte-identical. The other three spellings then follow, below every fuzzy hit, matched
+    # byte-identical. The other spellings and the tags then follow, below every fuzzy hit, matched
     # by plain SUBSTRING: a subsequence matcher over an absolute path matches very nearly any
     # query, so fuzzing those would fill the list with noise instead of finding anything. A
     # name that fails the fuzzy pass cannot pass a name-substring test either (a substring is
@@ -514,6 +518,11 @@ module Gori::Tui
       end
       named.sort_by! { |(_, score)| -score }
       named.map { |(e, _)| e } + addressed
+    end
+
+    # Each project's tags by directory, for the line under the card. Only tagged ones.
+    def self.tags_by_dir(entries : Array(ProjectRegistry::Entry)) : Hash(String, Array(String))
+      entries.reject(&.tags.empty?).to_h { |e| {e.project.dir, e.tags} }
     end
 
     # What tells a project apart from ANOTHER project on this host carrying the same display
@@ -865,6 +874,7 @@ module Gori::Tui
       @mode = :new
       @name = @query.strip
       @desc = ""
+      @tag_input = TagInput.new([] of String, ProjectRegistry.tag_counts(@entries))
       @new_field = :name
     end
 
@@ -886,8 +896,8 @@ module Gori::Tui
     # it, which reads as a broken key rather than a rejected name — and the disk-full case
     # read the same way as the typo. The raised sentence is the reason, because only it can
     # tell "invalid project name" from "no space left on device".
-    private def safe_create(name : String, description : String = "") : Project?
-      @registry.create(name, description)
+    private def safe_create(name : String, description : String = "", tags : Array(String)? = nil) : Project?
+      @registry.create(name, description, tags)
     rescue ex : Gori::Error | IO::Error | DB::Error | SQLite3::Exception
       set_flash(ProjectPicker.failed_flash("create", name, ex), ok: false)
       nil
@@ -1137,6 +1147,7 @@ module Gori::Tui
       @entries = @registry.entries
       @projects = @entries.map(&.project)
       @discriminators = ProjectPicker.row_discriminators(@entries)
+      @tags_by_dir = ProjectPicker.tags_by_dir(@entries)
       @marks.retain(@projects.map(&.dir))
       invalidate_running_cache
     end
@@ -1595,6 +1606,13 @@ module Gori::Tui
       @flash = nil  # …and dismisses the last refusal, as on the list
       if key.escape?
         @mode = :list
+      elsif @new_field == :tags
+        case @tag_input.handle(ev)
+        in .submit?    then return create_from_form
+        in .refused?   then set_flash(@tag_input.refusal || "invalid tag", ok: false)
+        in .unhandled? then move_new_field(key)
+        in .handled?   then nil
+        end
       elsif key.enter?
         if @new_field == :name
           # An empty (or whitespace-only) name used to fall through to nothing at all: no
@@ -1611,15 +1629,7 @@ module Gori::Tui
             @new_field = :desc
           end
         else
-          # On desc field: create (description is optional/empty ok)
-          name = @name.strip
-          desc = @desc.strip
-          if !name.empty? && (proj = safe_create(name, desc))
-            return proj
-          end
-          # Refused → stay on the form. `safe_create` has already put the reason in the
-          # flash row; an EMPTY name is the one case with nothing to report, because the
-          # form's own `name ›` row is showing it.
+          @new_field = :tags # description is optional: ↵ moves on to the (optional) tags
         end
       elsif key.backspace?
         if @new_field == :name
@@ -1628,7 +1638,7 @@ module Gori::Tui
           @desc = @desc[0, {@desc.size - 1, 0}.max]
         end
       elsif key.up? || key.down? || key.tab? || key.back_tab?
-        @new_field = @new_field == :name ? :desc : :name
+        move_new_field(key)
       elsif (c = ev.char || key.to_char) && !c.control? && !ev.ctrl? && !ev.alt?
         if @new_field == :name
           @name += c
@@ -1638,6 +1648,34 @@ module Gori::Tui
       end
 
       nil
+    end
+
+    NEW_FIELDS = [:name, :desc, :tags]
+
+    # ↓ / tab to the next field, ↑ / shift-tab to the previous one, wrapping. Any other key is
+    # not a move.
+    private def move_new_field(key : Termisu::Input::Key) : Nil
+      return unless key.up? || key.down? || key.tab? || key.back_tab?
+      i = NEW_FIELDS.index(@new_field) || 0
+      @new_field = NEW_FIELDS[(i + (key.up? || key.back_tab? ? -1 : 1)) % NEW_FIELDS.size]
+    end
+
+    # ↵ on the tags field with nothing left to commit. A word still in the tags buffer is kept,
+    # not dropped. Refused → stay on the form: `safe_create` (or the tag check) has put the
+    # reason in the flash row, and an EMPTY name is the one case with nothing to report,
+    # because the form's own `name ›` row is showing it.
+    private def create_from_form : Project?
+      name = @name.strip
+      return nil if name.empty?
+      tags = begin
+        @tag_input.final_tags
+      rescue ex : Gori::Error
+        set_flash(ex.message || "invalid tag", ok: false)
+        return nil
+      end
+      # No tags typed leaves a reopened project's tags alone, as an empty description does —
+      # `[]` would clear them.
+      safe_create(name, @desc.strip, tags.empty? ? nil : tags)
     end
 
     # --- cross-project flow search (ctrl-f) ------------------------------------
@@ -2170,6 +2208,7 @@ module Gori::Tui
         end
       end
 
+      render_selected_tags(screen, box, h)
       companion = draw_companion(screen, w, h)
       render_notice_row(screen, companion, w, h)
 
@@ -2199,6 +2238,17 @@ module Gori::Tui
                end
         centered(screen, h - 2, hint, Theme.muted, w)
       end
+    end
+
+    # The cursor project's tags, on the row under the card: tags are found by search (`#tag`)
+    # and read here, never drawn on the rows themselves. Only where that row is clear of the
+    # notice row (h - 3) and the hint.
+    private def render_selected_tags(screen : Screen, box : Rect, h : Int32) : Nil
+      return unless (proj = selected_project) && (tags = @tags_by_dir[proj.dir]?)
+      y = box.bottom
+      return if y >= h - 3
+      screen.text(box.x + 3, y, tags.map { |t| "##{t}" }.join(' '), Theme.syn_header, Theme.bg,
+        width: {box.w - 5, 1}.max)
     end
 
     # Miss Ring stands in the bottom-right corner, over the starfield and beside the card
@@ -2510,19 +2560,19 @@ module Gori::Tui
         # `width:` like both sibling branches: the old 18-column placeholder happened to fit
         # every card, so the missing cap was invisible until this one grew to 30 and started
         # overdrawing the card's right border on a narrow terminal.
-        screen.text(qx, y, "search name, slug, id or path…", Theme.muted, bg, width: box.w - 7)
+        screen.text(qx, y, "search name, slug, id, path or #tag…", Theme.muted, bg, width: box.w - 7)
       else
         screen.text(qx, y, @query, Theme.text, bg, width: box.w - 7)
       end
     end
 
     private def render_new(screen : Screen, cx : Int32, cw : Int32, w : Int32, h : Int32) : Nil
-      top = {(h - 5) // 2, 1}.max
+      top = {(h - 6) // 2, 1}.max
       Chrome.render_wordmark(screen, 0, top, center_w: w, bg: Theme.bg)
       centered(screen, top + 2, "new project", Theme.muted, w)
       iy = top + 3
-      # Two-row input area: name (required) + description (optional)
-      screen.fill(Rect.new(cx, iy, cw, 3), Theme.panel)
+      # Input area: name (required), description and tags (optional), the tag suggestions
+      screen.fill(Rect.new(cx, iy, cw, 4), Theme.panel)
       name_active = @new_field == :name
       name_fg = name_active ? Theme.text_bright : Theme.text
       name_prefix = "name › "
@@ -2551,9 +2601,30 @@ module Gori::Tui
         end
       end
 
-      render_form_flash(screen, w, h, iy + 2) # the panel is three rows tall
-      hint = "↵ next/create   ↑/↓ fields   esc cancel"
+      render_tags_field(screen, cx, cw, iy + 2, h)
+
+      render_form_flash(screen, w, h, iy + 3) # the panel is four rows tall
+      hint = if @new_field == :tags
+               "↵ add/create   tab complete   ←/→ pick   ⌫ remove   ↑/↓ fields   esc cancel"
+             else
+               "↵ next   ↑/↓ fields   esc cancel"
+             end
       centered(screen, h - 2, hint, Theme.muted, w)
+    end
+
+    # The form's tags row and, while it has focus, the suggestions beneath it.
+    private def render_tags_field(screen : Screen, cx : Int32, cw : Int32, y : Int32, h : Int32) : Nil
+      active = @new_field == :tags
+      fg = active ? Theme.text_bright : Theme.text
+      untouched = @tag_input.tags.empty? && @tag_input.buffer.empty? && !active
+      prefix = untouched ? "tags (optional) › " : "tags › "
+      screen.text(cx + 2, y, prefix, fg, Theme.panel)
+      return if untouched
+      base = cx + 2 + Screen.display_width(prefix)
+      width = {cw - Screen.display_width(prefix) - 2, 1}.max
+      @tag_input.render_field(screen, base, y, width, fg, Theme.panel, active, @preedit)
+      # Off a terminal so short that the row would land on the hint (h - 2).
+      @tag_input.render_suggestions(screen, base, y + 1, width, Theme.panel) if active && y + 1 < h - 2
     end
 
     # `width` caps the drawn text (Screen#text ellipsizes past it). Uncapped by default,

@@ -20,7 +20,7 @@ gori
 
 The first launch runs a short [setup wizard](#first-run-wizard) (global bind, theme, and the Miss Ring mascot), then offers a [guided UI tour](#guided-ui-tour). You can take the tour now or skip it and come back; this page covers the same ground against live traffic.
 
-At the picker, select **New project**, enter a name, then press `Enter` twice (the description is optional). The guided tour returns you to this picker when it finishes on first launch.
+At the picker, select **New project**, enter a name, then press `Enter` three times (the description and the tags are optional). On the tags row, `,` or `Enter` adds a tag and `Tab` completes one of the tags your other projects already use; type `#tag` in the picker's search to find the projects carrying it. The guided tour returns you to this picker when it finishes on first launch.
 
 To find which project captured something (a token, a host, an endpoint), press `Ctrl-F` at the picker and type it. gori searches the flows of every project by host and path, and by body text once you have typed three characters, then lists the hits under each project. `Enter` opens that project with the flow's detail showing. `Esc` stops a search that is still running, and closes the search once it has finished.
 

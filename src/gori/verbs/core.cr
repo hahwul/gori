@@ -246,6 +246,12 @@ module Gori
         Verb::Scope::ProjectDesc, [Verb::Chord.new("y"), Verb::Chord.new("y", ctrl: true)],
         available: in_project_desc_copy, intent: :copy) { |ctx| ctx.read_copy; nil }
 
+      # App-wide and chordless like `scope.edit`: the tags are the open project's, whichever
+      # tab or Project pane has focus.
+      r.register Verb::Definition.new(
+        "project.edit-tags", "Edit project tags", "Edit the tags that classify this project (search them as #tag in the project picker)",
+        Verb::Scope::Global, keywords: ["tags", "label"]) { |ctx| ctx.project_edit_tags; nil }
+
       # Match & Replace now lives in the Rewriter tab; this palette entry jumps there
       # (kept under the familiar "Match & Replace" name so a search still finds it).
       r.register Verb::Definition.new(

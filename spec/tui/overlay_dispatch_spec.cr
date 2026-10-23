@@ -33,7 +33,7 @@ private EXPECTED_OVERLAY_SYMS = {
   :discover_config, :discover_headers, :fuzz_set, :fuzz_advanced, :oast_provider,
   :oast_provider_pick, :oast_session,
   :probe_rule, :rewriter_rule, :colormarker_rule, :colormarker_color, :extract_rule, :rewriter_stub, :rewriter_respond, :authorize_identities, :authorize_identity, :ca_import, :import, :curl_paste, :export, :scope_rule, :sequence_config,
-  :mine_config, :name_prompt, :columns, :column, :library_pick, :cvss_calculator, :copy_as, :send_to,
+  :mine_config, :name_prompt, :tag_prompt, :columns, :column, :library_pick, :cvss_calculator, :copy_as, :send_to,
   :evidence, :retest, :retest_assert, :timing_report, :agent_question, :keyset_playground, :ws_inject,
 }
 
@@ -113,6 +113,8 @@ private MIGRATED_KINDS = [
   # likewise never in MODAL_OVERLAYS.
   OverlayKind::NamePrompt,
   OverlayKind::LibraryPick,
+  # TagPrompt — the Project tab's Edit tags card, born on the seam.
+  OverlayKind::TagPrompt,
   # CvssCalculator — the issue scorer (#575), born on the seam: reached from the issue form's
   # cvss row and from the Space menu's Set CVSS, so likewise never in MODAL_OVERLAYS.
   OverlayKind::CvssCalculator,

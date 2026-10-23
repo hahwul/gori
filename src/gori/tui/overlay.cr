@@ -90,6 +90,8 @@ module Gori::Tui
     # reads. One pair rather than four kinds — the modal is the same in both tabs, only
     # its rows and its injected on_commit differ.
     NamePrompt
+    # The Project tab's Edit tags card (TagPromptOverlay), born on the seam.
+    TagPrompt
     # The History tab's user-defined columns (#819): a LIST card (pick / reorder / delete) and
     # the per-column FORM it hands off to. Two members, for the reason AuthorizeIdentities gives
     # — the list stays the thing the form returns to.

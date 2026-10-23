@@ -46,6 +46,8 @@ module Gori::Tui
     # Registry sidecar facts, nil off the canonical registry db (see `overview_groups`).
     @proj_id : String?
     @workspace : String?
+    # The `.tags` sidecar, nil off the registry like the two above. Edit tags writes it back.
+    property tags : Array(String)?
     @probe_count : Int32
     # Live capture state. NOT snapshotted by `reload`: capture starts and stops while this tab
     # sits open, so the controller re-supplies it on every render instead.
@@ -68,6 +70,7 @@ module Gori::Tui
       @sev_tally = StaticArray(Int64, 5).new(0_i64)
       @proj_id = nil
       @workspace = nil
+      @tags = nil
       @probe_count = 0
       @capturing = false
       @desc_area = TextArea.new
@@ -222,15 +225,16 @@ module Gori::Tui
     # two cannot drift.
     private def load_registry_facts(project : Project) : Nil
       unless registry_project?(project)
-        @proj_id = @workspace = nil
+        @proj_id = @workspace = @tags = nil
         return
       end
       reg = ProjectRegistry.new(Paths.projects_dir)
       @proj_id = reg.id_of(project)
       @workspace = reg.workspace_of(project)
+      @tags = reg.tags_of(project)
     rescue
       # A sidecar that vanished or is unreadable costs two rows, never the tab.
-      @proj_id = @workspace = nil
+      @proj_id = @workspace = @tags = nil
     end
 
     # Whether this project's directory is one the REGISTRY owns.
@@ -241,7 +245,7 @@ module Gori::Tui
     # project. That is the same "a confidently wrong identifier is worse than none" this guard
     # exists for, one level out. So require both: the canonical filename AND a parent that is
     # the projects root.
-    private def registry_project?(project : Project) : Bool
+    def registry_project?(project : Project) : Bool
       project.canonical? && File.dirname(project.dir) == Paths.projects_dir
     end
 
@@ -2108,6 +2112,9 @@ module Gori::Tui
       # than none, so `reload` leaves them nil off the registry and the rows aren't offered.
       ident << OvRow.new("ID", id) if id
       ident << OvRow.new("Workspace", ws, elide: true) if ws
+      @tags.try do |tags|
+        ident << (tags.empty? ? OvRow.new("Tags", "—") : OvRow.new("Tags", tags.map { |t| "##{t}" }.join(' '), Theme.syn_header))
+      end
       [
         OvGroup.new(ident, fold_identity),
         OvGroup.new([OvRow.new("Proxy", proxy_value, proxy_color)], proxy_value),

@@ -705,3 +705,80 @@ describe Gori::Session do
     end
   end
 end
+
+describe "Gori::ProjectRegistry tags" do
+  it "normalizes tags: trims, drops a leading #, joins words with -, keeps case and dedups by case" do
+    Gori::ProjectRegistry.normalize_tags(["  #Web ", "red team", "web", "모바일", "", "##api"]).should eq(["Web", "red-team", "모바일", "api"])
+  end
+
+  it "refuses a comma, a control character, an overlong tag and too many tags" do
+    expect_raises(Gori::Error, /commas/) { Gori::ProjectRegistry.normalize_tags(["a,b"]) }
+    expect_raises(Gori::Error, /commas/) { Gori::ProjectRegistry.normalize_tags(["a\u0007"]) }
+    expect_raises(Gori::Error, /at most 32/) { Gori::ProjectRegistry.normalize_tags(["x" * 33]) }
+    expect_raises(Gori::Error, /too many/) { Gori::ProjectRegistry.normalize_tags((1..11).map(&.to_s)) }
+    expect_raises(Gori::Error, /UTF-8/) { Gori::ProjectRegistry.normalize_tags([String.new(Bytes[0xff])]) }
+  end
+
+  it "stores tags at create, keeps them on a plain reopen, replaces them on a tagged one" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      p = reg.create("Acme", tags: ["web", "external"])
+      reg.tags_of(p).should eq(["web", "external"])
+      reg.create("Acme")
+      reg.tags_of(p).should eq(["web", "external"])
+      reg.create("Acme", tags: [] of String)
+      reg.tags_of(p).should be_empty
+      File.exists?(File.join(p.dir, Gori::ProjectRegistry::TAGS_FILE)).should be_false
+      reg.set_tags(p, ["api"]).should eq(["api"])
+      reg.entries.first.tags.should eq(["api"])
+    end
+  end
+
+  it "salvages a hand-edited sidecar instead of refusing every later edit" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      p = reg.create("Acme")
+      File.write(File.join(p.dir, Gori::ProjectRegistry::TAGS_FILE), "web\na,b\nWEB\n" + (1..12).map { |i| "t#{i}\n" }.join)
+      tags = reg.tags_of(p)
+      tags.first.should eq("web")
+      tags.size.should eq(Gori::ProjectRegistry::MAX_TAGS)
+      tags.should_not contain("a,b")
+      reg.set_tags(p, tags.first(9) + ["new"]).last.should eq("new")
+    end
+  end
+
+  it "creates nothing when a tag is refused" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      expect_raises(Gori::Error) { reg.create("Acme", tags: ["a,b"]) }
+      reg.list.should be_empty
+    end
+  end
+
+  it "counts tags across projects, case-folded, most-used first under the majority spelling" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      reg.create("a", tags: ["web", "mobile"])
+      reg.create("b", tags: ["Web"])
+      reg.create("c", tags: ["web", "api"])
+      counts = Gori::ProjectRegistry.tag_counts(reg.entries)
+      counts.first.should eq({"web", 3})
+      counts.map(&.[1]).should eq([3, 1, 1])
+    end
+  end
+
+  it "narrows #tag to a tag prefix and a plain needle to a tag substring" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      reg.create("alpha", tags: ["webapp"])
+      reg.create("beta", tags: ["Web"])
+      reg.create("gamma")
+      names = ->(q : String) { reg.entries.select(&.matches?(Gori::ProjectRegistry.needle(q).not_nil!)).map(&.project.name).sort! }
+      names.call("#web").should eq(["alpha", "beta"])
+      names.call("#weba").should eq(["alpha"])
+      names.call("#app").should be_empty # a prefix, not a substring
+      names.call("#").should eq(["alpha", "beta"])
+      names.call("bap").should eq(["alpha"])
+    end
+  end
+end

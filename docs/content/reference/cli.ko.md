@@ -111,6 +111,7 @@ gori run <subcommand> [verb] [options]
 | `project create <name>` | 이름으로 프로젝트 생성 (같은 이름이면 다시 열기) |
 | `project rename <name> <new-name>` | 프로젝트 표시 이름 변경 |
 | `project describe <name> <text>` · `--clear` | 프로젝트 설명 설정 또는 제거 |
+| `project tag <name> <tag>...` · `--clear` | 프로젝트 태그 교체 또는 제거 |
 | `project switch <name>` (`use`) · `--clear` | `--project` 없는 모든 명령이 읽을 프로젝트 고정 |
 | `project export <name>` | 압축된 WAL 안전 `.gori` 프로젝트 아카이브 저장 |
 | `project import <archive>` | 프로젝트 아카이브를 새 프로젝트로 추가 |
@@ -1621,17 +1622,18 @@ gori run project --format json
 gori run project list
 gori run project list --all
 gori run project list --query=acme
+gori run project list --query=#bugbounty
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--all` | 캡처된 것이 없는 프로젝트까지 모두 출력 |
-| `--query=TEXT` | 표시 이름·디렉터리 슬러그·짧은 id·바인딩된 워크스페이스 경로에 TEXT를 포함하는 프로젝트만 남김(대소문자 무시) |
+| `--query=TEXT` | 표시 이름·디렉터리 슬러그·짧은 id·바인딩된 워크스페이스 경로·태그에 TEXT를 포함하는 프로젝트만 남김(대소문자 무시). `#TAG`는 TAG로 시작하는 태그가 붙은 프로젝트만 남김 |
 | `--format=FMT` | `text`(기본) 또는 `json` |
 
 `list`는 **비어 있는** 프로젝트(캡처된 플로우가 0개)를 숨깁니다. 워크트리나 체크아웃마다 프로젝트를 만들다 보면 수백 개가 쌓여, 정작 트래픽이 든 두세 개가 묻히기 때문입니다. 비어 있는지는 파일 크기가 아니라 행 수로 셉니다. 방금 만든 프로젝트도 3월에 남은 찌꺼기와 크기가 같습니다. 다음 두 개는 아무리 비어 있어도 항상 표시하고 표시자를 붙입니다. `◆`는 `--project` 없이 실행한 `gori run`이 읽는 프로젝트, `◇`는 TUI가 마지막으로 연 프로젝트입니다. `--format json`에서는 각각 `current`, `tui_active` 필드이고, `flows` 개수와 프로젝트 `description`(개수를 셀 때 같은 핸들로 함께 읽으므로 추가 open 비용이 없습니다)이 함께 나옵니다. 몇 개를 숨겼는지는 stderr로 나가므로 JSON 파이프는 깨끗한 배열로 남습니다.
 
-`--query`는 그 나머지 절반입니다. 프로젝트를 가리키는 모든 철자에 대한 **부분 문자열**이라, 이름이 가물가물해도 찾을 수 있습니다. 정확한 이름·슬러그·짧은 id를 요구하는 `--project`보다 느슨합니다. 나열된 프로젝트의 데이터베이스를 전부 여는 플로우 집계 **앞에** 적용되므로, 수백 개를 가진 호스트에서는 빠른 경로이기도 합니다. `--all`과는 직교하며, 표시가 아니라 행 공급원을 좁히므로 제외한 것을 stderr로 밝힙니다. 매치가 0건이면 이 호스트에 실제로 몇 개가 있는지를 알려 주고, `◆` 프로젝트가 걸러졌다면 그 사실을 이름과 함께 말합니다. 빈 프로젝트 숨김 기본값과 달리 `--query`는 그 행을 고정해 두지 않기 때문입니다. `--format json`은 바인딩된 `workspace`도 함께 실으므로, 소비자도 쿼리와 같은 사실로 걸러낼 수 있습니다. 같은 좁히기를 MCP `list_projects{query}`가 같은 술어로 제공합니다.
+`--query`는 그 나머지 절반입니다. 프로젝트를 가리키는 모든 철자에 대한 **부분 문자열**이라, 이름이 가물가물해도 찾을 수 있습니다. 정확한 이름·슬러그·짧은 id를 요구하는 `--project`보다 느슨합니다. 나열된 프로젝트의 데이터베이스를 전부 여는 플로우 집계 **앞에** 적용되므로, 수백 개를 가진 호스트에서는 빠른 경로이기도 합니다. `--all`과는 직교하며, 표시가 아니라 행 공급원을 좁히므로 제외한 것을 stderr로 밝힙니다. 매치가 0건이면 이 호스트에 실제로 몇 개가 있는지를 알려 주고, `◆` 프로젝트가 걸러졌다면 그 사실을 이름과 함께 말합니다. 빈 프로젝트 숨김 기본값과 달리 `--query`는 그 행을 고정해 두지 않기 때문입니다. `--format json`은 바인딩된 `workspace`와 `tags`도 함께 실으므로, 소비자도 쿼리와 같은 사실로 걸러낼 수 있습니다. 같은 좁히기를 MCP `list_projects{query}`가 같은 술어로 제공합니다.
 
 #### project create {#project-create}
 
@@ -1640,6 +1642,7 @@ gori run project list --query=acme
 ```bash
 gori run project create "API test"
 gori run project create api-test --description="staging sweep"
+gori run project create api-test --tag=web --tag=bugbounty
 gori run project create api-test --format json
 ```
 
@@ -1647,9 +1650,10 @@ gori run project create api-test --format json
 |---------------------|-------------|
 | `<name>` | 표시 이름. 공백이 들어가면 따옴표로 감쌉니다 |
 | `--description=TEXT` | 프로젝트 설정에 저장됩니다 |
+| `--tag=TAG` | 프로젝트를 분류하는 태그. 여러 번 주거나 쉼표로 구분합니다(`--tag=web,api`) |
 | `--format=FMT` | `text`(기본) 또는 `json` |
 
-이미 있는 이름은 오류가 아니라 그 프로젝트를 다시 여는 것으로 처리하며, `--format json`은 `"created": false`로 알려 줍니다. 다시 열 때 저장된 표시 이름은 그대로 두고(`project rename`으로 바꿉니다), 비어 있지 않은 `--description`을 주면 기존 설명을 덮어씁니다(설명을 지우려면 `project describe --clear`). 새 이름이 이미 다른 프로젝트의 디렉터리 slug나 짧은 id라면 거부합니다. 그 이름으로는 `--project`가 새로 만든 프로젝트에 닿을 수 없기 때문입니다.
+이미 있는 이름은 오류가 아니라 그 프로젝트를 다시 여는 것으로 처리하며, `--format json`은 `"created": false`로 알려 줍니다. 다시 열 때 저장된 표시 이름은 그대로 두고(`project rename`으로 바꿉니다), 비어 있지 않은 `--description`을 주면 기존 설명을 덮어쓰고(설명을 지우려면 `project describe --clear`), `--tag`를 하나라도 주면 태그를 교체합니다. 새 이름이 이미 다른 프로젝트의 디렉터리 slug나 짧은 id라면 거부합니다. 그 이름으로는 `--project`가 새로 만든 프로젝트에 닿을 수 없기 때문입니다.
 
 #### project rename {#project-rename}
 
@@ -1668,6 +1672,17 @@ gori run project rename a1b2c3 "API test"      # 짧은 id로
 gori run project describe api-test "staging sweep, read-only creds"
 gori run project describe api-test --clear
 ```
+
+#### project tag {#project-tag}
+
+프로젝트 태그를 교체합니다. 태그는 작업을 분류하는 라벨(`web`, `mobile`, `bugbounty`, 고객사 이름 등)입니다. `project list --query=#TAG`, MCP `list_projects{query:"#TAG"}`, TUI 프로젝트 선택 화면 검색창의 `#TAG`로 찾을 수 있고, Project 탭에 표시되며 `Ctrl-P` → **Edit project tags**로 편집합니다.
+
+```bash
+gori run project tag api-test web external
+gori run project tag api-test --clear
+```
+
+태그는 프로젝트 아카이브(`project export` / `import`)에도 함께 담깁니다. 태그는 입력한 대소문자를 그대로 저장하므로 영어가 아닌 태그도 입력한 대로 남지만, 대소문자만 다른 두 표기는 같은 태그로 봅니다. 앞의 `#`은 떼고 공백은 `-`로 바꿉니다. 쉼표와 제어 문자는 쓸 수 없고, 태그 하나는 32자 이하, 프로젝트당 10개까지입니다.
 
 #### project switch {#project-switch}
 

@@ -9,6 +9,7 @@ module Gori
         {"project create", "Create (or reopen) a project by name"},
         {"project rename", "Change a project's display name"},
         {"project describe", "Set or clear a project's description"},
+        {"project tag", "Set or clear a project's tags"},
         {"project switch", "Pin the default project for every --project-less command (--clear to unpin)"},
         {"project export", "Export a project to a portable archive"},
         {"project import", "Import a project archive as a new project"},
@@ -31,10 +32,8 @@ module Gori
           cmd_project_list(args[1..])
         when "create"
           cmd_project_create(args[1..])
-        when "rename"
-          cmd_project_rename(args[1..])
-        when "describe"
-          cmd_project_describe(args[1..])
+        when "rename", "describe", "tag", "tags"
+          cmd_project_label(sub, args[1..])
         when "switch", "use"
           cmd_project_switch(args[1..])
         when "export", "import"
@@ -47,6 +46,15 @@ module Gori
           cmd_project_config(sub, args[1..])
         else
           cmd_project_other(sub, args)
+        end
+      end
+
+      # The verbs that change how a project is LABELLED (name, description, tags), one dispatch.
+      private def self.cmd_project_label(sub : String, args : Array(String)) : Nil
+        case sub
+        when "rename"   then cmd_project_rename(args)
+        when "describe" then cmd_project_describe(args)
+        else                 cmd_project_tag(args)
         end
       end
 
@@ -75,7 +83,7 @@ module Gori
           cmd_project_list(args)
         else
           abort unknown_verb_message("gori run project", sub,
-            %w[list create rename describe switch use export import delete rm prune scope sandbox env host-override network net])
+            %w[list create rename describe tag switch use export import delete rm prune scope sandbox env host-override network net])
         end
       end
 
@@ -87,13 +95,15 @@ module Gori
 
           Subcommands:
             list               List projects holding captured traffic (default when no subcommand);
-                               --query=TEXT narrows to the ones whose name, slug, short id
-                               or bound workspace path contains TEXT
-            create <name>      Create (or reopen) a project by name
+                               --query=TEXT narrows to the ones whose name, slug, short id,
+                               bound workspace path or tag contains TEXT (--query=#TAG: a tag starting with TAG)
+            create <name>      Create (or reopen) a project by name (--tag=TAG, repeatable)
             rename <name> <new>
                                Change a project's display name (its slug and short id stay)
             describe <name> <text>
                                Set the project's description (--clear removes it)
+            tag <name> <tag>...
+                               Replace the project's tags (--clear removes them)
             switch <name>      Pin the project every --project-less command reads (--clear unpins;
                                no name prints the default). GORI_PROJECT=<name> wins over the pin
             export <name>      Write a portable project archive (-o PATH)
@@ -112,9 +122,11 @@ module Gori
             gori run project --format json
             gori run project list --all
             gori run project list --query=acme
-            gori run project create "API test" --description="staging sweep"
+            gori run project list --query=#bugbounty
+            gori run project create "API test" --description="staging sweep" --tag=web --tag=staging
             gori run project rename api-test "API test (staging)"
             gori run project describe api-test --clear
+            gori run project tag api-test web external
             gori run project delete api-test --yes
             gori run project prune --yes
             gori run project scope add --kind=include --type=host --pattern=api.example.com
@@ -190,8 +202,9 @@ module Gori
         leftover = parse_args(args, "gori run project") do |p|
           p.banner = "Usage: gori run project [list] [options]"
           p.on("--all", "Include projects with nothing captured in them (hidden by default)") { all = true }
-          p.on("--query=TEXT", "Keep only projects whose name, dir slug, short id or bound " \
-                               "workspace path contains TEXT (case-insensitive)") { |v| query = once(query, v, "--query") }
+          p.on("--query=TEXT", "Keep only projects whose name, dir slug, short id, bound " \
+                               "workspace path or tag contains TEXT (case-insensitive; #TAG: " \
+                               "a tag starting with TAG)") { |v| query = once(query, v, "--query") }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
         refuse_list_leftovers(leftover, "project",
@@ -236,6 +249,7 @@ module Gori
                   # The fourth thing `--query` matches on, so a consumer filtering the same
                   # way has the field to do it with rather than a match it cannot explain.
                   j.field "workspace", row.entry.workspace
+                  j.field "tags", row.entry.tags
                   j.field "last_modified", pr.last_modified.try(&.to_unix)
                   j.field "time", pr.last_modified.try { |t| LocalTime.of(t).to_s("%Y-%m-%dT%H:%M:%S%:z") }
                   j.field "flows", row.flows
@@ -257,8 +271,9 @@ module Gori
             ts = pr.last_modified.try { |t| LocalTime.of(t).to_s("%Y-%m-%d %H:%M") } || "—"
             id = row.entry.id || "—"
             flows = row.flows.try(&.to_s) || "?"
+            tags = row.entry.tags.map { |t| "  ##{CLI::Output.term_safe(t)}" }.join
             puts "#{project_row_marker(row)} #{CLI::Output.pad(terminal_project_name(pr.name), 24)}  #{id.ljust(8)}  #{ts}  " \
-                 "#{CLI::Output.human_size(pr.db_size).rjust(8)}  #{flows.rjust(6)} flows"
+                 "#{CLI::Output.human_size(pr.db_size).rjust(8)}  #{flows.rjust(6)} flows#{tags}"
           end
         end
         # On STDERR in BOTH formats, so a `--format json` consumer's pipe stays a clean
@@ -289,7 +304,7 @@ module Gori
         if query && matched.empty?
           notes << "no project matched --query=#{query} — #{entries.size} " \
                    "project#{entries.size == 1 ? "" : "s"} on this host; --query is a " \
-                   "case-insensitive substring of the name, dir slug, short id or workspace path"
+                   "case-insensitive substring of the name, dir slug, short id, workspace path or tag"
         elsif hidden >= 1
           notes << "#{hidden} empty project#{hidden == 1 ? "" : "s"} hidden " \
                    "(nothing captured) — pass --all to list every project"
@@ -327,12 +342,18 @@ module Gori
       # create_project). Reopening by name is not an error — it mirrors both.
       private def self.cmd_project_create(args : Array(String)) : Nil
         description = ""
+        tags = [] of String
+        tagged = false # `--tag=` given at all: on a reopen even an empty one replaces the tags
         format = :text
 
         positional = parse_args(args, "gori run project create") do |p|
           p.banner = "Usage: gori run project create <name> [options]\n\n" \
                      "Create a project, or reopen the existing one with that name."
           p.on("--description=TEXT", "Description stored in the project's settings") { |v| description = v }
+          p.on("--tag=TAG", "Tag the project (repeatable, or comma-separated); on a reopen, replaces its tags") do |v|
+            tagged = true
+            tags.concat(v.split(','))
+          end
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
 
@@ -341,7 +362,7 @@ module Gori
         name = positional[0]
 
         registry = ProjectRegistry.new(Paths.projects_dir)
-        project, created = create_project_entry(registry, name, description)
+        project, created = create_project_entry(registry, name, description, tagged ? tags : nil)
 
         if format == :json
           puts(JSON.build do |j|
@@ -350,6 +371,7 @@ module Gori
               j.field "id", registry.id_of(project)
               j.field "slug", registry.slug_of(project)
               j.field "db_path", project.db_path
+              j.field "tags", registry.tags_of(project)
               j.field "created", created # false = reopened an existing same-name project
             end
           end)
@@ -366,8 +388,8 @@ module Gori
       # driver error. Every one of them becomes a clean `gori run project create:` message
       # (the TUI picker's safe_create rescues the same four).
       private def self.create_project_entry(registry : ProjectRegistry, name : String,
-                                            description : String) : {Project, Bool}
-        registry.create_or_reopen(name, description)
+                                            description : String, tags : Array(String)?) : {Project, Bool}
+        registry.create_or_reopen(name, description, tags)
       rescue ex : Gori::Error
         abort "gori run project create: #{ex.message} (#{terminal_project_name(name, quoted: true)})"
       rescue ex : File::Error | IO::Error
@@ -697,6 +719,35 @@ module Gori
           ok || abort_closing(store, "gori run project describe: project is busy (write did not commit) — try again")
         end
         puts "Project #{terminal_project_name(project.name, quoted: true)} description #{text ? "set" : "cleared"}."
+      end
+
+      # `gori run project tag <name> <tag>... | --clear`: replace the project's tags, the edit
+      # the TUI Project tab's Edit tags makes. Each argument may itself be comma-separated.
+      private def self.cmd_project_tag(args : Array(String)) : Nil
+        clear = false
+        positional = parse_args(args, "gori run project tag") do |p|
+          p.banner = "Usage: gori run project tag <name> <tag>...\n" \
+                     "       gori run project tag <name> --clear\n\n" \
+                     "Replace the project's tags: the labels that classify the engagement (web,\n" \
+                     "bugbounty, …), searched as #TAG by the picker and project list --query."
+          p.on("--clear", "Remove every tag") { clear = true }
+        end
+        abort "gori run project tag: missing <name>" if positional.empty?
+        abort "gori run project tag: pass <tag>... or --clear, not both" if clear && positional.size > 1
+        abort "gori run project tag: missing <tag> (or --clear to remove the tags)" if !clear && positional.size == 1
+        registry = ProjectRegistry.new(Paths.projects_dir)
+        project = find_named_project(registry, positional[0], "gori run project tag")
+        tags = begin
+          registry.set_tags(project, positional[1..].flat_map(&.split(',')))
+        rescue ex : Gori::Error | File::Error | IO::Error
+          abort "gori run project tag: #{ex.message}"
+        end
+        if tags.empty?
+          puts "Project #{terminal_project_name(project.name, quoted: true)} tags cleared."
+        else
+          puts "Project #{terminal_project_name(project.name, quoted: true)} tagged " \
+               "#{tags.map { |t| "##{CLI::Output.term_safe(t)}" }.join(' ')}."
+        end
       end
 
       # The description `describe` stores, nil for `--clear`; every refusal is argv-only.

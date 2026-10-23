@@ -68,6 +68,10 @@ module Gori
               # own included. Reported here rather than in `list_projects`, which is a roster
               # that deliberately opens no databases; this call already holds one open.
               j.field "description", s.setting(Project::DESCRIPTION_KEY)
+              # The registry's `.tags` sidecar; a `--db` database has no registry slug and no tags.
+              if (db = @db_path) && @project_slug
+                j.field "tags", ProjectRegistry.new(Paths.projects_dir).tags_of(Project.new(@project_name || "", db))
+              end
               j.field "flows", s.count
               j.field "issues", s.count_issues
               j.field "total_bytes", s.total_size

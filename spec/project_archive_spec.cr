@@ -211,6 +211,34 @@ describe Gori::ProjectArchive do
     end
   end
 
+  it "carries the project's tags in the manifest and salvages bad ones on import" do
+    with_archive_project do |registry, project, _store, root|
+      registry.set_tags(project, ["web", "모바일"])
+      exported = Gori::ProjectArchive.prepare_export(project)
+      archive_path = File.join(root, "tags.gori")
+      exported.write(archive_path)
+      exported.close
+      imported = Gori::ProjectArchive.prepare_import(archive_path)
+      begin
+        registry.tags_of(imported.import_into(registry, "Tagged copy")).should eq(["web", "모바일"])
+      ensure
+        imported.close
+      end
+
+      entries = read_archive(archive_path)
+      manifest = JSON.parse(entries["manifest.json"]).as_h
+      manifest["tags"] = JSON.parse(%(["ok", "a,b", "\\u001b[31m"]))
+      entries["manifest.json"] = JSON::Any.new(manifest).to_json
+      write_archive(archive_path, entries.to_a)
+      tampered = Gori::ProjectArchive.prepare_import(archive_path)
+      begin
+        registry.tags_of(tampered.import_into(registry, "Tampered copy")).should eq(["ok"])
+      ensure
+        tampered.close
+      end
+    end
+  end
+
   it "refuses an archive with unexpected entries before extracting them" do
     with_archive_project do |_registry, _project, _store, root|
       archive_path = File.join(root, "unexpected.gori")

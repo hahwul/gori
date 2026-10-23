@@ -29,6 +29,10 @@ module Gori::CLI::Run
   def self.cmd_project_describe_for_spec(args : Array(String)) : Nil
     cmd_project_describe(args)
   end
+
+  def self.cmd_project_tag_for_spec(args : Array(String)) : Nil
+    cmd_project_tag(args)
+  end
 end
 
 private def with_project_root(&)
@@ -310,6 +314,19 @@ describe "gori run project rename / describe" do
       with_project_store(project, &.setting(Gori::Project::DESCRIPTION_KEY).should(eq("staging sweep")))
       Gori::CLI::Run.cmd_project_describe_for_spec(["describe-1703", "--clear"])
       with_project_store(project, &.setting(Gori::Project::DESCRIPTION_KEY).should(be_nil))
+    ensure
+      registry.delete(project)
+    end
+  end
+
+  it "replaces and clears the tags, comma-separated arguments included" do
+    registry = Gori::ProjectRegistry.new(Gori::Paths.projects_dir)
+    project = registry.create("tag-cli", tags: ["old"])
+    begin
+      Gori::CLI::Run.cmd_project_tag_for_spec(["tag-cli", "web,External", "#api"])
+      registry.tags_of(project).should eq(["web", "External", "api"])
+      Gori::CLI::Run.cmd_project_tag_for_spec(["tag-cli", "--clear"])
+      registry.tags_of(project).should be_empty
     ensure
       registry.delete(project)
     end

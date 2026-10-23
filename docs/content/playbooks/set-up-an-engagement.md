@@ -18,7 +18,7 @@ A project is one SQLite database: its own history, scope, issues, and notes, iso
 In the TUI, open the project picker from the command palette (`Ctrl-P`, then type *project*) and start a new one. Or create it from the shell before the proxy ever starts, so a script can lay down scope and env first:
 
 ```bash
-gori run project create "Acme API" --description="staging engagement"
+gori run project create "Acme API" --description="staging engagement" --tag=web --tag=acme
 ```
 
 Creating a name that already exists just reopens it, so this is safe to re-run.
