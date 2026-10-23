@@ -66,6 +66,11 @@ describe Gori::ExtractSubject do
     Gori::TokenExtract.extract(texted, Gori::TokenLoc.new(Gori::ExtractKind::Regex, "token=(\\w+)")).should eq("t1")
   end
 
+  it "extracts a container from a body holding an unpaired surrogate escape" do
+    subject = Gori::ExtractSubject.response("HTTP/1.1 200 OK\r\n\r\n".to_slice, %({"user":{"name":"\\ud83d"}}).to_slice)
+    Gori::TokenExtract.extract(subject, Gori::TokenLoc.new(Gori::ExtractKind::JsonPath, "user")).should_not be_nil
+  end
+
   it "decodes once and memoises it for every body-scoped descriptor" do
     subject = Gori::ExtractSubject.response("HTTP/1.1 200 OK\r\n\r\n".to_slice, "body".to_slice)
     subject.decoded.should be(subject.decoded)

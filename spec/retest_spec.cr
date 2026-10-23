@@ -151,6 +151,12 @@ describe "Gori::Retest.evaluate" do
     RT.evaluate(RT::Assertion.parse(%(json:$["data"].token=s3cr3t)).as(RT::Assertion), obs(body: body), nil)[0].pass?.should be_true
   end
 
+  it "judges a JSON object field whose value holds an unpaired surrogate escape" do
+    body = %({"user":{"name":"\\ud83d"}})
+    RT.evaluate(RT::Assertion.parse("json:user").as(RT::Assertion), obs(body: body), nil)[0].pass?.should be_true
+    RT.evaluate(RT::Assertion.parse("json-absent:user").as(RT::Assertion), obs(body: body), nil)[0].fail?.should be_true
+  end
+
   it "counts a present-but-null field as PRESENT" do
     # `{"error": null}` HAS the field. A reader that answered "absent" would let a step
     # asserting `json-absent:error` pass on a response that carries it.

@@ -61,6 +61,14 @@ describe Gori::JsonPath do
     JP.raw_at(json, JP.parse("a.nope").as(Array)).should be_nil
   end
 
+  it "reads a container holding an unpaired surrogate escape, as `RawJson.parse` does" do
+    # `JSON.stringify` of a cut emoji. `RawJson.parse` accepts it, so `resolve` finds the value
+    # and `raw_at` must not then raise on the same text.
+    json = %({"user":{"name":"\\ud83d"},"n":1})
+    JP.raw_at(json, JP.parse("user").as(Array)).should eq(%({"name":"\u{FFFD}"}))
+    JP.raw_at(json, JP.parse("$").as(Array)).should eq(%({"user":{"name":"\u{FFFD}"},"n":1}))
+  end
+
   it "keeps a quoted name's characters, JSONPath syntax included" do
     JP.parse(%(a["*[x]:y"])).should eq([JP::Step.new(key: "a", index: nil), JP::Step.new(key: "*[x]:y")])
   end

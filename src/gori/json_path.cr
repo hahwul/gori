@@ -86,7 +86,10 @@ module Gori
     # `RawJson.parse` carries a number past Int64 as a String, so writing a container back out
     # of it would quote that number (`{"id":"18446744073709551615"}`). Same last-wins rule for
     # a duplicated key as `resolve`. Raises JSON::ParseException when `json` is not JSON.
+    # `RawJson.tolerant` first, as `RawJson.parse` does: a body whose tree `resolve` just read
+    # must not then raise here on an unpaired surrogate escape (`"\ud83d"`).
     def raw_at(json : String, steps : Array(Step)) : String?
+      json = RawJson.tolerant(json)
       return RawJson.reformat(json) if steps.empty?
       text = json
       steps.each do |st|
