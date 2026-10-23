@@ -13,6 +13,7 @@ module Gori
         {"project export", "Export a project to a portable archive"},
         {"project import", "Import a project archive as a new project"},
         {"project delete", "Delete a project and everything captured in it"},
+        {"project prune", "Delete the empty projects whose bound workspace directory is gone"},
         {"project scope", "Manage scope rules (list, add, update, delete, enable/disable)"},
         {"project sandbox", "Get/set the hard-containment sandbox gate (status, on, off)"},
         {"project env", "Manage project env vars ($ENV.KEY substitution; bare syntax: $KEY)"},
@@ -40,6 +41,8 @@ module Gori
           cmd_project_archive(args)
         when "delete", "rm"
           cmd_project_delete(args[1..])
+        when "prune"
+          cmd_project_prune(args[1..])
         when "scope", "sandbox", "env", "host-override", "host-overrides", "network", "net"
           cmd_project_config(sub, args[1..])
         else
@@ -72,7 +75,7 @@ module Gori
           cmd_project_list(args)
         else
           abort unknown_verb_message("gori run project", sub,
-            %w[list create rename describe switch use export import delete rm scope sandbox env host-override network net])
+            %w[list create rename describe switch use export import delete rm prune scope sandbox env host-override network net])
         end
       end
 
@@ -96,6 +99,8 @@ module Gori
             export <name>      Write a portable project archive (-o PATH)
             import <archive>   Import a project archive as a new project
             delete|rm <name>   Delete a project and everything captured in it
+            prune              Delete every empty project whose bound workspace directory is gone
+                               (a removed worktree's leftover); previews without --yes
             scope              Manage scope rules (list, add, update, delete, enable/disable)
             sandbox            Get/set the hard-containment sandbox gate (status, on, off)
             env                Manage project env vars ($ENV.KEY substitution; bare syntax: $KEY)
@@ -111,6 +116,7 @@ module Gori
             gori run project rename api-test "API test (staging)"
             gori run project describe api-test --clear
             gori run project delete api-test --yes
+            gori run project prune --yes
             gori run project scope add --kind=include --type=host --pattern=api.example.com
             gori run project sandbox on
             gori run project env set TOKEN=secret
@@ -189,7 +195,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
         refuse_list_leftovers(leftover, "project",
-          "list, create, switch, export, import, delete/rm, scope, sandbox, env, network, host-override")
+          "list, create, switch, export, import, delete/rm, prune, scope, sandbox, env, network, host-override")
 
         registry = ProjectRegistry.new(Paths.projects_dir)
         entries = registry.entries
@@ -531,6 +537,105 @@ module Gori
           puts "Project #{terminal_project_name(project.name, quoted: true)} deleted (#{project.dir})."
           STDERR.puts "gori run project delete: it was the pinned default project — the pin is cleared " \
                       "(the default is the most recently active project again)" if was_default
+        end
+      end
+
+      # Which projects `prune` removes: bound to a workspace directory that no longer exists, and
+      # holding nothing. A project with no binding was made by hand and is never pruned, however
+      # empty. Every "could not tell" keeps it: a workspace whose stat raises (EACCES, a stale
+      # mount), a database `Store.project_empty?` cannot read, a file in the directory gori did
+      # not put there (an env-migration backup, the operator's own).
+      def self.prunable_projects(entries : Array(ProjectRegistry::Entry)) : Array(ProjectRegistry::Entry)
+        entries.select do |entry|
+          (ws = entry.workspace) && !(Dir.exists?(ws) rescue true) && prune_empty?(entry.project)
+        end
+      end
+
+      # The files a project directory holds with nothing in it: the database, its journal and
+      # lock files, the registry's sidecars, and the presence/status markers live sessions write.
+      private PRUNE_SIDECARS = {Project::DB_FILE, "#{Project::DB_FILE}-wal", "#{Project::DB_FILE}-shm",
+                                Project::DB_FILE + AgentPresence::DIR_SUFFIX, Project::DB_FILE + AgentPresence::TUI_DIR_SUFFIX,
+                                ProjectRegistry::NAME_FILE, ProjectRegistry::ID_FILE, ProjectRegistry::WORKSPACE_FILE,
+                                CaptureStatus::STATUS_FILE}
+
+      private def self.prune_empty?(project : Project) : Bool
+        files = Dir.children(project.dir) rescue return false
+        files.all? { |f| PRUNE_SIDECARS.includes?(f) || f.ends_with?(".lock") } &&
+          Store.project_empty?(project.db_path) == true
+      end
+
+      # `gori run project prune` — every `gori mcp` started in a new worktree binds a project to
+      # it, and removing the worktree leaves that project behind. Without --yes it lists them and
+      # exits non-zero, as `delete` previews; a project another instance has open is skipped.
+      private def self.cmd_project_prune(args : Array(String)) : Nil
+        yes = false
+        format = :text
+        parse_no_positionals(args, "gori run project prune", "prune takes only options") do |p|
+          p.banner = "Usage: gori run project prune [options]\n\n" \
+                     "Deletes every project bound to a workspace directory that no longer\n" \
+                     "exists and holding nothing (no flows, repeaters, issues, notes, rules,\n" \
+                     "…). Without --yes it only lists them."
+          p.on("--yes", "Actually delete (without it, nothing is removed)") { yes = true }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
+        end
+
+        registry = ProjectRegistry.new(Paths.projects_dir)
+        targets = prunable_projects(registry.entries)
+        skipped = {} of String => String
+        deleted = [] of ProjectRegistry::Entry
+        if yes
+          targets.each do |entry|
+            # Re-judged under `delete`'s open lock; it clears the pin when it named this project.
+            if registry.delete(entry.project, -> { prune_empty?(entry.project) })
+              STDERR.puts "gori run project prune: #{entry.slug} was the pinned default project — the pin is cleared"
+            end
+            deleted << entry
+          rescue ex : Gori::Error | File::Error | IO::Error
+            skipped[entry.slug] = ex.message || ex.class.name
+          end
+        else
+          # The preview lists what `--yes` would remove, so a project `delete` will refuse is a
+          # skip here too, as `project delete`'s preview reports `deletable`.
+          targets.each { |entry| skipped[entry.slug] = "open in another gori instance" if OpenLock.in_use?(entry.project.db_path) }
+          targets = targets.reject { |entry| skipped.has_key?(entry.slug) }
+        end
+
+        print_prune_report(yes ? deleted : targets, skipped, yes, format)
+        abort "gori run project prune: #{targets.size} project(s) would be deleted — re-run with --yes" if !yes && !targets.empty?
+        exit 1 unless skipped.empty?
+      end
+
+      private def self.print_prune_report(rows : Array(ProjectRegistry::Entry), skipped : Hash(String, String),
+                                          yes : Bool, format : Symbol) : Nil
+        if format == :json
+          puts(JSON.build do |j|
+            j.object do
+              j.field "dry_run", !yes
+              j.field "projects" do
+                j.array do
+                  rows.each do |entry|
+                    j.object do
+                      j.field "name", entry.project.name
+                      j.field "id", entry.id
+                      j.field "slug", entry.slug
+                      j.field "workspace", entry.workspace
+                    end
+                  end
+                end
+              end
+              j.field "skipped" { j.array { skipped.each { |slug, why| j.object { j.field "slug", slug; j.field "reason", why } } } }
+            end
+          end)
+        else
+          rows.each do |entry|
+            puts "#{CLI::Output.pad(terminal_project_name(entry.project.name), 32)}  #{terminal_project_name(entry.workspace || "")}"
+          end
+          skipped.each { |slug, why| STDERR.puts "gori run project prune: skipped #{slug}: #{why}" }
+          if rows.empty? && skipped.empty?
+            STDERR.puts "gori run project prune: nothing to prune"
+          elsif yes
+            STDERR.puts "gori run project prune: deleted #{rows.size} of #{rows.size + skipped.size}"
+          end
         end
       end
 

@@ -115,6 +115,7 @@ gori run <subcommand> [verb] [options]
 | `project export <name>` | 압축된 WAL 안전 `.gori` 프로젝트 아카이브 저장 |
 | `project import <archive>` | 프로젝트 아카이브를 새 프로젝트로 추가 |
 | `project delete <name>` | 프로젝트와 그 안에 캡처된 모든 것 삭제 (`--yes`로 확인) |
+| `project prune` | 연결된 워크스페이스 디렉터리가 사라진 빈 프로젝트 삭제 (`--yes`로 확인) |
 | `project scope` | 스코프 규칙 목록 / 추가 / 수정 / 삭제 / 활성화 / 비활성화 |
 | `project sandbox` | 하드 컨테인먼트 샌드박스 게이트 조회 / 설정 (`status`, `on`, `off`) |
 | `project env` | 프로젝트 env 변수 목록 / 설정 / 삭제 (`$ENV.KEY` 치환) |
@@ -1735,6 +1736,18 @@ gori run project rm api-test --yes            # 실제로 삭제
 미리보기는 플로우/이슈 개수, 디스크 사용량과 함께, 삭제가 지키는 잠금 **둘 다**를 보여 줍니다. 캡처가 살아 있는지(`capture_lock_held`), 그리고 다른 gori 인스턴스가 DB를 열어 두고 있는지(`open_in_another_instance`. MCP 서버는 캡처 잠금 없이도 쓰기를 하기 때문입니다). `deletable`은 이 둘을 합한 판정이고, 마지막 줄이 `--yes`가 실제로 통과할지를 말해 줍니다. 둘 중 하나라도 걸린 프로젝트는 삭제를 거부하므로 그 캡처를 중지하거나 그쪽에서 닫아야 합니다. `capture_lock_held`가 `null`이면 잠금 자체를 읽지 못한 것이고(쓰기 권한 없는 프로젝트 디렉터리), 이때도 삭제는 거부됩니다.
 
 표시 이름은 유일하지 않습니다(같은 basename을 쓰는 두 워크스페이스는 이름을 공유합니다). 이름이 여러 프로젝트에 걸리면 다른 모든 `--project`와 마찬가지로 삭제를 거부하고 각각의 slug와 짧은 id를 보여 줍니다. 잘못 고르면 되돌릴 수 없기 때문입니다. slug와 짧은 id는 유일하므로 언제나 하나로 확정됩니다.
+
+#### project prune {#project-prune}
+
+새 워크트리에서 `gori mcp`를 띄울 때마다 그 워크트리에 프로젝트가 하나 연결되고, 워크트리를 지워도 프로젝트는 남습니다. `prune`은 주인을 잃었고 비어 있기도 한 프로젝트를 지웁니다. 연결된 워크스페이스 디렉터리가 더는 없고, 아무것도(플로우, 리피터, 이슈, 노트, 규칙 등 어떤 행도) 담고 있지 않은 프로젝트입니다. 직접 만든 프로젝트는 워크스페이스 연결이 없으므로 절대 지우지 않습니다. `delete`처럼 `--yes` 없이 실행하면 대상만 보여 주고 0이 아닌 코드로 종료합니다.
+
+```bash
+gori run project prune                 # 목록만, 아무것도 지우지 않음
+gori run project prune --yes           # 삭제
+gori run project prune --yes --format json
+```
+
+다른 gori 인스턴스가 열어 둔 프로젝트는 건너뛰고 stderr에 이름을 남기며(JSON에서는 `skipped`), 이때 명령은 0이 아닌 코드로 끝납니다. 비어 있는지는 삭제 잠금을 잡은 뒤 한 번 더 확인하고, gori가 쓰지 않은 파일(env 마이그레이션 백업 등)이 프로젝트 디렉터리에 있으면 남깁니다. 언마운트된 볼륨의 워크스페이스는 사라진 것으로 읽히므로 그 빈 프로젝트는 지워지고, 다음에 그곳에서 `gori mcp`를 띄우면 새 프로젝트가 연결됩니다.
 
 #### project scope {#project-scope}
 

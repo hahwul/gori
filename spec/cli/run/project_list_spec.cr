@@ -68,6 +68,52 @@ private def with_gori_home(&)
   end
 end
 
+describe Gori::Store do
+  describe ".project_empty?" do
+    it "is true for a fresh project and false once anything is in it" do
+      with_project_root do |registry|
+        project = registry.create("spec proj")
+        with_project_store(project) { }
+        Gori::Store.project_empty?(project.db_path).should be_true
+        # Not a flow: a scope rule alone is something the operator made.
+        with_project_store(project) { |store| store.add_scope_rule("include", "host", "ex.test") }
+        Gori::Store.project_empty?(project.db_path).should be_false
+      end
+    end
+
+    it "cannot tell for a missing database" do
+      Gori::Store.project_empty?(File.tempname("gori-nodb")).should be_nil
+    end
+  end
+end
+
+describe "gori run project prune" do
+  it "selects only empty projects whose bound workspace directory is gone" do
+    with_project_root do |registry|
+      root = File.tempname("gori-ws")
+      begin
+        Dir.mkdir_p(root)
+        ws = ->(name : String) { File.join(root, name).tap { |d| Dir.mkdir(d) } }
+        gone = registry.create_for_workspace("gone", ws.call("gone"))
+        live = registry.create_for_workspace("live", ws.call("live"))
+        full = registry.create_for_workspace("full", ws.call("full"))
+        backup = registry.create_for_workspace("backup", ws.call("backup"))
+        manual = registry.create("manual")
+        [gone, live, full, backup, manual].each { |pr| with_project_store(pr) { } }
+        with_project_store(full) { |store| seed_project_flow(store) }
+        # A file gori did not write there (an env-migration backup) is content too.
+        File.write(File.join(backup.dir, "gori.db.pre-bare-1"), "x")
+        %w[gone full backup].each { |name| FileUtils.rm_rf(File.join(root, name)) }
+
+        picked = Gori::CLI::Run.prunable_projects(registry.entries).map(&.project.db_path)
+        picked.should eq([gone.db_path])
+      ensure
+        FileUtils.rm_rf(root)
+      end
+    end
+  end
+end
+
 private def seed_project_flow(store) : Int64
   store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "https", host: "ex.test", port: 443,

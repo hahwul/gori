@@ -559,7 +559,11 @@ module Gori
     # silent, total loss of everything captured after the delete.
     #
     # True when the project was the pinned `gori run` default, whose pin is then cleared.
-    def delete(project : Project) : Bool
+    #
+    # `only_if` is asked while the open lock is held, so a caller that judged the project by its
+    # contents (`gori run project prune`) judges the bytes it removes, not ones a writer added
+    # since; false refuses the delete.
+    def delete(project : Project, only_if : Proc(Bool)? = nil) : Bool
       return false unless Dir.exists?(project.dir)
       # `CaptureLock.try_at` deliberately RE-RAISES a non-contention failure so it is never
       # read as "someone else holds it" (see its comment). That contract is right, and it
@@ -589,6 +593,7 @@ module Gori
       # Asked before the rm_rf, which takes the `.id` sidecar the pin names.
       pinned = default_pin.try { |pin| (find(pin) rescue nil).try(&.dir) == project.dir } || false
       begin
+        raise Gori::Error.new("project changed since it was checked — kept") if only_if && !only_if.call
         FileUtils.rm_rf(project.dir)
       ensure
         guard.close

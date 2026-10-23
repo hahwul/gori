@@ -115,6 +115,7 @@ gori run <subcommand> [verb] [options]
 | `project export <name>` | Save a compact, WAL-safe `.gori` project archive |
 | `project import <archive>` | Add a project archive as a new project |
 | `project delete <name>` | Delete a project and everything captured in it (`--yes` to confirm) |
+| `project prune` | Delete the empty projects whose bound workspace directory is gone (`--yes` to confirm) |
 | `project scope` | List / add / update / delete / enable / disable scope rules |
 | `project sandbox` | Get / set the hard-containment sandbox gate (`status`, `on`, `off`) |
 | `project env` | List / set / delete project env vars (`$ENV.KEY` substitution) |
@@ -1744,6 +1745,18 @@ gori run project rm api-test --yes            # actually delete
 The preview reports flow and issue counts, on-disk size, and both of the locks the delete honours: whether a capture is live (`capture_lock_held`) and whether any other gori instance has the database open (`open_in_another_instance`; an MCP server takes no capture lock and still writes to it). `deletable` is the verdict those two add up to, and the closing line says whether `--yes` would go through. Deleting a project either one covers is refused: stop that capture, or close it there, first. A `capture_lock_held` of `null` means the lock could not be read at all (an unwritable project directory), which the delete also refuses.
 
 Display names are not unique (two workspaces with the same basename share one). When a name matches more than one project, delete refuses and lists their slugs and short ids, as every `--project` does, since the wrong guess is unrecoverable. Slugs and short ids are unique, so either always resolves.
+
+#### project prune
+
+Every `gori mcp` started in a new worktree binds a project to it, and removing the worktree leaves that project behind. `prune` deletes the ones that are both orphaned and empty: bound to a workspace directory that no longer exists, and holding nothing at all (no flows, repeaters, issues, notes, rules or other rows). A project you created by hand has no workspace binding and is never pruned. Like `delete`, it lists the targets and exits non-zero without `--yes`.
+
+```bash
+gori run project prune                 # list only, nothing is removed
+gori run project prune --yes           # delete them
+gori run project prune --yes --format json
+```
+
+A project another gori instance has open is skipped and named on stderr (`skipped` in JSON), and the command then exits non-zero. Its emptiness is checked again under the delete's lock, and a project directory holding any file gori did not write there (an env-migration backup, for one) is kept. A workspace on an unmounted volume reads as gone: its empty project is pruned, and the next `gori mcp` there binds a new one.
 
 #### project scope
 

@@ -531,7 +531,37 @@ module Gori
     # list` sort a project by one time and print another, and every later reader (MCP
     # `list_projects`, the TUI picker) would see the older time for good.
     def self.project_census(path : String) : ProjectCensus
-      return ProjectCensus.new(nil, nil) unless File.exists?(path)
+      read_quietly(path) do |db|
+        flows = db.scalar("SELECT COUNT(*) FROM flows").as(Int64)
+        desc = begin
+          db.query_one?("SELECT value FROM settings WHERE key = ?", Project::DESCRIPTION_KEY,
+            as: String).try(&.presence)
+        rescue
+          nil
+        end
+        ProjectCensus.new(flows, desc)
+      end || ProjectCensus.new(nil, nil)
+    end
+
+    # Whether a project database holds nothing anyone put there: every table empty but the ones
+    # gori fills by itself (SQLite's bookkeeping, the FTS index's own rows, and the `env.syntax`
+    # setting a new project is stamped with). Every table, not a list of the ones that hold
+    # operator data, so a table a later migration adds counts as content until said otherwise.
+    # nil when it cannot tell, which `gori run project prune` reads as "keep".
+    def self.project_empty?(path : String) : Bool?
+      read_quietly(path) do |db|
+        db.query_all("SELECT name FROM sqlite_master WHERE type = 'table'", as: String).none? do |table|
+          next false if table.starts_with?("sqlite_") || table.starts_with?("flows_fts")
+          where = table == "settings" ? " WHERE key <> '#{Env::PROJECT_SYNTAX_KEY}'" : ""
+          db.scalar(%(SELECT EXISTS (SELECT 1 FROM "#{table.gsub('"', %(""))}"#{where}))) == 1
+        end
+      end
+    end
+
+    # One read-only connection to another project's database, its mtimes put back after (see
+    # `project_census`). nil when the file is missing, not a database, or the read raised.
+    private def self.read_quietly(path : String, &)
+      return nil unless File.exists?(path)
       # Same pre-flight `Store.open` and `Compact.measure` run, and for the first of their
       # two reasons: a non-database file leaks the driver's fd inside `DB.open`, and this
       # is a path that opens hundreds of files in one command.
@@ -542,14 +572,7 @@ module Gori
       db = DB.open("sqlite3:#{path}?busy_timeout=2000")
       begin
         db.exec("PRAGMA query_only = ON")
-        flows = db.scalar("SELECT COUNT(*) FROM flows").as(Int64)
-        desc = begin
-          db.query_one?("SELECT value FROM settings WHERE key = ?", Project::DESCRIPTION_KEY,
-            as: String).try(&.presence)
-        rescue
-          nil
-        end
-        ProjectCensus.new(flows, desc)
+        yield db
       ensure
         db.close
         # Both files, each to what a reader must still get. The db file goes to the ACTIVITY
@@ -565,7 +588,7 @@ module Gori
         put_back(wal, wal_before, wal_before || activity)
       end
     rescue
-      ProjectCensus.new(nil, nil)
+      nil
     end
 
     private def self.mtime_of(file : String) : Time?

@@ -251,6 +251,16 @@ describe Gori::ProjectRegistry do
     end
   end
 
+  it "keeps the project when `only_if` says no under the open lock" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      p = reg.create("kept")
+      Gori::Store.open(p.db_path).close
+      expect_raises(Gori::Error, /changed since it was checked/) { reg.delete(p, -> { false }) }
+      Dir.exists?(p.dir).should be_true
+    end
+  end
+
   it "clears the `gori run` default pin only when it deletes the pinned project" do
     with_root do |root|
       reg = Gori::ProjectRegistry.new(root)
