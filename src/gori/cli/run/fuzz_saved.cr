@@ -26,7 +26,7 @@ module Gori
           if format == :json
             puts JSON.build { |j| j.array { runs.each { |run| fuzz_saved_run_json(j, run, counts[run.id]? || 0_i64) } } }
           elsif runs.empty?
-            puts "No saved fuzz runs."
+            puts offset > 0 ? "No saved fuzz runs past --offset #{offset}." : "No saved fuzz runs."
           else
             runs.each { |run| puts fuzz_saved_run_line(run, counts[run.id]? || 0_i64) }
           end
@@ -57,6 +57,7 @@ module Gori
         clusters = false
         cluster : Int64? = nil
         order = Fuzz::Clusters::Order::Rare
+        order_given = false
 
         positional = parse_args(args, "gori run fuzz show") do |p|
           p.banner = "Usage: gori run fuzz show RUN_ID [RESULT_INDEX] [options]"
@@ -69,6 +70,7 @@ module Gori
             cluster = Fuzz::Shape.parse_hex?(v) || abort "gori run fuzz show: invalid --cluster #{v.inspect} (a 16-hex-digit id from --clusters)"
           end
           p.on("--order=ORDER", "Cluster order: rare (default, smallest first) | common | first") do |v|
+            order_given = true
             order = Fuzz::Clusters::Order.parse?(v) || abort "gori run fuzz show: invalid --order #{v.inspect} (#{Fuzz::Clusters::Order.names.join("|")})"
           end
           format_flag(p, [:text, :json, :jsonl], "Output: text (default) | json | jsonl") { |f| format = f }
@@ -77,6 +79,7 @@ module Gori
         run_id = parse_id(positional[0], "gori run fuzz show", "run id")
         result_idx = positional[1]?.try { |v| parse_id(v, "gori run fuzz show", "result index") }
         check_fuzz_show_modes(clusters, cluster, result_idx)
+        abort "gori run fuzz show: --order orders --clusters, and none was given" if order_given && !clusters
 
         with_store(resolve_read_project(proj.name, proj.db), read_only: true) do |store|
           run = store.get_fuzz_run(run_id) || abort "gori run fuzz show: no saved run ##{run_id}"

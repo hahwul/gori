@@ -54,6 +54,7 @@ module Gori
         marks = [] of String
         grpc_fields = [] of String
         mode = Fuzz::Mode::Sniper
+        mode_given = false
         sources = [] of Fuzz::PayloadSource
         payload_from = PayloadFromFlags.new
         macro_flags = RequestMacroFlags.new
@@ -121,7 +122,7 @@ module Gori
           p.on("--idle-ms=N", "WebSocket: per-session server-silence timeout after the first inbound frame (100-60000, default 3000)") { |v| ws_idle_ms = parse_count(v, "--idle-ms").to_i64 }
           p.on("--ws-keep-key", "WebSocket: send the template's own Sec-WebSocket-Key instead of a fresh one per session (lets an absent/short/duplicate/non-base64 key be the thing under test)") { ws_keep_key = true }
           p.on("--ws-http-only", "Sweep a WebSocket template as plain HTTP: the handshake goes out as an ordinary request and its own answer (a 101, or the 2xx of an RFC 8441 extended CONNECT) is read as the response, instead of the framed exchange. The bytes are unchanged — this selects the engine, not a rewrite") { ws_http_only = true }
-          p.on("--mode=MODE", "#{Fuzz::Mode.names.join(" | ")} (default sniper)") { |v| mode = parse_mode(v) }
+          p.on("--mode=MODE", "#{Fuzz::Mode.names.join(" | ")} (default sniper)") { |v| mode = parse_mode(v); mode_given = true }
           p.on("-wPATH", "--wordlist=PATH", "Payload set: a wordlist file, or the NAME of a saved list (`gori run wordlist`); repeatable, order → positions") { |v| sources << Fuzz::WordlistFile.new(v) }
           p.on("--preset=NAME", "Payload set: a built-in preset (#{Fuzz::Presets.names.join("|")}); NAME:FILE merges a user file into it") { |v| sources << parse_preset(v) }
           p.on("--payloads=LIST", "Payload set: inline comma list (a,b,c)") { |v| sources << Fuzz::InlineList.new(v.split(',')) }
@@ -445,11 +446,13 @@ module Gori
         warn_fuzz_marks(plan)
         warn_fuzz_content_length(plan)
         warn_fuzz_unframed_body(plan)
-        note_fuzz_auto_encode(plan)
-        note_fuzz_grpc_fields(plan)
+        # A race sends the request as written, so the encode, field and unused-set notes describe a
+        # sweep this run is not; the race note names what it drops instead.
+        note_fuzz_auto_encode(plan) unless race
+        note_fuzz_grpc_fields(plan) unless race
         note_fuzz_ws_ignored(plan)
-        note_fuzz_race_ignored(race, follow, retries)
-        note_fuzz_unused_sets(plan)
+        note_fuzz_race_ignored(race, follow, retries, !sources.empty? || mode_given, auto_cal)
+        note_fuzz_unused_sets(plan) unless race
         # Last-byte-sync needs ONE persistent socket per connection to hold back the final byte;
         # h2 frames its own connection per send, so `Backend#send_race` degrades to independent
         # sends and a configured --race-warmup cannot be honored. Say so rather than drop it
@@ -691,9 +694,12 @@ module Gori
       # is how an operator comes to believe a sweep followed redirects it never followed.
       # The same kind of note for a race group: it is released once, whole, so there is no hop
       # to follow and no per-request retry (`Engine#run_race` sends each copy exactly once).
-      private def self.note_fuzz_race_ignored(race : Int32?, follow : Bool, retries : Int32) : Nil
+      private def self.note_fuzz_race_ignored(race : Int32?, follow : Bool, retries : Int32,
+                                              payloads : Bool = false, auto_cal : Bool = false) : Nil
         return unless race
         named = [] of String
+        named << "payload sets, §…§ positions and --mode (each copy is the request as written)" if payloads
+        named << "--ac (there is no sweep to calibrate)" if auto_cal
         named << "--follow-redirects (each copy's 3xx is the result)" if follow
         named << "--retries (a race group is released once; a failed copy is not re-sent)" if retries > 0
         return if named.empty?

@@ -75,8 +75,12 @@ module Gori
       NOTE_CHARS = 200
       # A URL's `user:pass@` as the reasons quote it, masked: a note goes to stderr, JSON and MCP.
       USERINFO = /:\/\/[^\/?#\s"@]*@/
+      # …and a scheme-relative `//user:pass@`, which a WSDL port's refusal quotes.
+      BARE_USERINFO = /(?<!:)\/\/[^\/?#\s"@]*@/
 
       getter count = 0
+      # The counted skips among `@reasons`, which also holds uncounted `note`s.
+      @shown = 0
 
       def initialize
         @reasons = [] of String
@@ -89,11 +93,19 @@ module Gori
 
       def add(where : String, why : String) : Nil
         @count += 1
-        @reasons << clip("skipped #{where}: #{why}".scrub.gsub(USERINFO, "://***@")) if @reasons.size < CAP
+        return unless @reasons.size < CAP
+        @reasons << clip("skipped #{where}: #{why}".scrub.gsub(USERINFO, "://***@"))
+        @shown += 1
+      end
+
+      # A reason said without counting it as damage (a WSDL port gori does not speak), masked
+      # and clipped as `add`'s are: it reaches the same stderr, JSON and MCP reply.
+      def note(why : String) : Nil
+        @reasons << clip(why.scrub.gsub(USERINFO, "://***@").gsub(BARE_USERINFO, "//***@")) if @reasons.size < CAP
       end
 
       def notes : Array(String)
-        more = @count - @reasons.size
+        more = @count - @shown
         more > 0 ? @reasons + ["+#{more} more skipped"] : @reasons.dup
       end
 

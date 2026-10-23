@@ -119,8 +119,8 @@ module Gori
         p.on("--set=LINE", "Header to UPSERT, as 'Name: value' (repeatable); its value resolves bindings and generators, never env vars") { |v| e.push_set(parse_session_header(v, cmd)) }
         p.on("--remove=NAME", "Header to STRIP before sending (repeatable)") { |v| e.push_remove(v.strip) }
         p.on("--rule=NAME", "Extract rule (binding NAME) whose values belong to THIS slot (repeatable)") { |v| e.push_rule(v.strip) }
-        p.on("--baseline", "Make this the Authorize baseline every other slot is judged against") { e.baseline = true }
-        p.on("--no-baseline", "Clear the baseline flag (the first slot then inherits it)") { e.baseline = false }
+        p.on("--baseline", "Make this the Authorize baseline every other slot is judged against") { e.baseline = agree(e.baseline, true, "--baseline/--no-baseline") }
+        p.on("--no-baseline", "Clear the baseline flag (the first slot then inherits it)") { e.baseline = agree(e.baseline, false, "--baseline/--no-baseline") }
         p.on("--clear-set", "Drop every set-header (combine with --set to replace them)") { e.set = [] of {String, String} }
         p.on("--clear-remove", "Drop every remove-header") { e.remove = [] of String }
         p.on("--clear-rules", "Claim no extract rule (its bindings go back to the global table)") { e.rules = [] of String }

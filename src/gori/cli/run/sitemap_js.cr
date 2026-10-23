@@ -67,7 +67,7 @@ module Gori
           project_options(p, o.proj, "read")
           p.on("--scan", "First scan the JS/HTML responses not scanned yet (writes derived rows, sends nothing)") { o.scan = true }
           p.on("--rescan", "Like --scan, but read already-scanned responses again") { o.rescan = true }
-          p.on("-qQL", "--query=QL", "With --scan: only scan flows matching this QL query") { |v| o.query = v }
+          p.on("-qQL", "--query=QL", "With --scan: only scan flows matching this QL query") { |v| o.query = once(o.query, v, "-q/--query") }
           p.on("--max-flows=N", "With --scan: newest responses to read (default #{JsRefs::DEFAULT_MAX_FLOWS})") do |v|
             o.max_flows = parse_count(v, "--max-flows")
             o.max_flows_given = true

@@ -29,7 +29,7 @@ module Gori
                      "unless --include-sensitive. JSON names are paths (user.email, items[].id); the\n" \
                      "`[]` is display-only, not JsonPath syntax."
           project_options(p, proj, "read")
-          p.on("-qQL", "--query=QL", "Only flows matching this QL query") { |v| query = v }
+          p.on("-qQL", "--query=QL", "Only flows matching this QL query") { |v| query = once(query, v, "-q/--query") }
           p.on("--host=HOST", "Only this host (exact, case-insensitive)") { |v| host = v }
           p.on("--origin=URL", "Only this origin — scheme, host and port, e.g. http://127.0.0.1:19021") { |v| origin = v }
           p.on("--path=PREFIX", "Only endpoints whose path starts with PREFIX") { |v| path_prefix = v }

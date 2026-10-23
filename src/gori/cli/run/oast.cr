@@ -211,7 +211,7 @@ module Gori
         end
         configs.each do |c|
           tok = c.token.nil? ? "" : "  token=#{show_tokens ? c.token : "[REDACTED]"}"
-          puts "#{c.enabled ? "[on ]" : "[off]"} #{CLI::Output.pad(c.key, 12)} #{c.kind.ljust(13)} #{CLI::Output.pad(c.name, 24)} #{c.host}#{tok}"
+          puts "#{c.enabled ? "[on ]" : "[off]"} #{CLI::Output.pad(c.key, 12)} #{c.kind.ljust(13)} #{CLI::Output.pad(CLI::Output.term_line(c.name), 24)} #{CLI::Output.term_line(c.host)}#{tok}"
         end
       end
 
@@ -452,8 +452,8 @@ module Gori
         end
         sessions.each do |s|
           last = s.last_poll_at.try { |t| LocalTime.of(t).to_s("%Y-%m-%d %H:%M") } || "never"
-          puts "##{s.id.to_s.ljust(5)} #{CLI::Output.pad(s.provider, 24)} #{s.kind.ljust(13)} " \
-               "#{CLI::Output.pad(s.payload_host, 34)} #{s.hits.to_s.rjust(5)} hits  " \
+          puts "##{s.id.to_s.ljust(5)} #{CLI::Output.pad(CLI::Output.term_line(s.provider), 24)} #{s.kind.ljust(13)} " \
+               "#{CLI::Output.pad(CLI::Output.term_line(s.payload_host), 34)} #{s.hits.to_s.rjust(5)} hits  " \
                "started #{LocalTime.of(s.created_at).to_s("%Y-%m-%d %H:%M")}  last poll #{last}"
         end
       end

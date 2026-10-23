@@ -71,7 +71,7 @@ module Gori
                      "Those words are reserved as the first argument — to scan with a QL query\n" \
                      "starting with one, pass it as --query."
           project_options(p, proj, "read")
-          p.on("-qQL", "--query=QL", "Only scan flows matching this QL query (host: status:>=500 size: …)") { |v| query = v }
+          p.on("-qQL", "--query=QL", "Only scan flows matching this QL query (host: status:>=500 size: …)") { |v| query = once(query, v, "-q/--query") }
           p.on("--severity=LEVEL", "Only show issues at/above LEVEL (info|low|medium|high|critical)") { |v| min_sev = parse_severity(v) }
           p.on("--fail-on=LEVEL", "Exit 3 when a REPORTED issue is at/above LEVEL — a CI gate (the --severity/--category/--in-scope filters apply first)") { |v| fail_on = parse_severity(v, "--fail-on") }
           p.on("--category=CAT", "Only show issues in CAT (#{PROBE_CATEGORIES.join("|")})") { |v| category = parse_probe_category(v) }

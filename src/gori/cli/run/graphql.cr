@@ -13,9 +13,16 @@ module Gori
       ])]
       private def self.cmd_graphql(args : Array(String)) : Nil
         case sub = args.first?
-        when "schema" then cmd_graphql_schema(args[1..])
-        else               abort "gori run graphql: #{sub ? "unknown subcommand '#{sub}'" : "a subcommand is required"} (schema)"
+        when "schema"       then cmd_graphql_schema(args[1..])
+        when "-h", "--help" then cmd_graphql_schema(["--help"])
+        else                     abort "gori run graphql: #{sub ? "unknown subcommand '#{sub}'" : "a subcommand is required"} (schema)"
         end
+      end
+
+      # Ignored without --send, where they read like they took effect.
+      private def self.refuse_orphan_send_flags(prefix : String, send : Bool, given : Array(Bool)) : Nil
+        return if send || given.none?
+        abort "#{prefix}: --legacy/--allow-unscoped/--insecure-upstream/--timeout need --send"
       end
 
       private def self.cmd_graphql_schema(args : Array(String)) : Nil
@@ -50,6 +57,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
         abort "#{prefix}: a flow id is required" unless id
+        refuse_orphan_send_flags(prefix, send, [legacy, allow_unscoped, insecure, !timeout.nil?])
         flow_id = parse_flow_id(id, prefix)
         refresh_verify_upstream(!insecure)
 

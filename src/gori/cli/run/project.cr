@@ -185,7 +185,7 @@ module Gori
           p.banner = "Usage: gori run project [list] [options]"
           p.on("--all", "Include projects with nothing captured in them (hidden by default)") { all = true }
           p.on("--query=TEXT", "Keep only projects whose name, dir slug, short id or bound " \
-                               "workspace path contains TEXT (case-insensitive)") { |v| query = v }
+                               "workspace path contains TEXT (case-insensitive)") { |v| query = once(query, v, "--query") }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
         refuse_list_leftovers(leftover, "project",
@@ -795,7 +795,7 @@ module Gori
               puts "No scope rules configured."
             else
               scope.rules.each do |r|
-                puts "##{r.id}  #{r.kind.ljust(8)}  #{r.match_type.ljust(6)}  #{r.pattern}"
+                puts "##{r.id}  #{r.kind.ljust(8)}  #{r.match_type.ljust(6)}  #{CLI::Output.term_line(r.pattern)}"
               end
             end
           end
@@ -902,7 +902,7 @@ module Gori
           unless scope.update(id, new_kind, new_type, new_pattern)
             abort "gori run project scope update: rule NOT updated (store busy or unwritable); it is unchanged and still gates traffic"
           end
-          puts "Scope rule ##{id} updated: #{new_kind} #{new_type} #{new_pattern}"
+          puts "Scope rule ##{id} updated: #{new_kind} #{new_type} #{CLI::Output.term_line(new_pattern)}"
           # `Scope#update` reloads its own rule list, so this reads the edit rather than the
           # list as it stood one write ago.
           warn_scope_blackhole(scope, "gori run project scope update")
@@ -959,7 +959,7 @@ module Gori
             end
             puts(JSON.build { |j| scope_rule_json(j, rule) })
           else
-            puts added ? "Scope rule ##{added.id} added successfully (#{kind} #{match_type} #{pat})." : "Scope rule added successfully."
+            puts added ? "Scope rule ##{added.id} added successfully (#{kind} #{match_type} #{CLI::Output.term_line(pat)})." : "Scope rule added successfully."
           end
           warn_excludes_only(scope, "gori run project scope add")
         end

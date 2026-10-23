@@ -163,7 +163,7 @@ module Gori
           if format == :json
             puts(JSON.build { |j| j.object { MCP::Serialize.retest_planned(j, planned) } })
           else
-            puts "Added step #{step.position} to issue ##{iid}: #{retest_step_line(planned)}"
+            puts "Added step ##{step.id} to issue ##{iid}: #{retest_step_line(planned)}"
           end
         end
       end
@@ -203,7 +203,7 @@ module Gori
           in .ok?         then nil
           end
           step = store.get_retest_step(id) || abort("gori run retest update: step ##{id} vanished before it could be read back")
-          puts "Updated step #{step.position} of issue ##{step.issue_id}: #{retest_step_line(Retest.plan(store, [step]).first)}"
+          puts "Updated step ##{step.id} of issue ##{step.issue_id}: #{retest_step_line(Retest.plan(store, [step]).first)}"
         end
       end
 
@@ -212,8 +212,10 @@ module Gori
 
         positional = parse_args(args, "gori run retest remove") do |p|
           p.banner = "Usage: gori run retest remove STEP\n\n" \
-                     "Remove one step and close the gap its position left. The Repeater session and\n" \
-                     "any entity link to it are untouched: a retest step is a test plan, not a link."
+                     "Remove one step and close the gap its position left. STEP is the step id (the\n" \
+                     "[id] column of `gori run retest steps`), not its position — a position moves.\n" \
+                     "The Repeater session and any entity link to it are untouched: a retest step is\n" \
+                     "a test plan, not a link."
           project_options(p, proj, "update")
         end
         id = require_positional_id(positional, "gori run retest remove", "step", "gori run retest")
@@ -225,7 +227,7 @@ module Gori
           in .busy?                    then abort "gori run retest remove: NOT removed (project busy or unwritable)"
           in .ok?                      then nil
           end
-          puts "Removed step #{step.position} (#{step.role.label}, #{step.ref_label}) from issue ##{step.issue_id}."
+          puts "Removed step ##{step.id} (position #{step.position}, #{step.role.label}, #{step.ref_label}) from issue ##{step.issue_id}."
         end
       end
 
@@ -235,7 +237,8 @@ module Gori
 
         positional = parse_args(args, "gori run retest move") do |p|
           p.banner = "Usage: gori run retest move STEP --to=POS\n\n" \
-                     "Move one step to position POS (1-based), shifting the rest. Clamped to the\n" \
+                     "Move one step to position POS (1-based), shifting the rest. STEP is the step id\n" \
+                     "(the [id] column of `gori run retest steps`), not its position. Clamped to the\n" \
                      "list, so --to=1 always means \"first\"."
           project_options(p, proj, "update")
           # Clamped BEFORE `to_i`, for the reason MCP's `move_retest_step` states: the store

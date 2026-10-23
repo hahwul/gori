@@ -114,6 +114,8 @@ module Gori
         # `cli_host_overrides` happens to open below (see run.cr's open_store).
         hydrate_project_env(proj.name, proj.db) if project_named?(proj.name, proj.db)
         bytes, default_target, src_h2, evidence = sequence_source(flow_id, request_file, proj.name, proj.db)
+        # A blank request dialled empty connections, as `mine`'s did; MCP refuses it too.
+        abort "gori run sequence: the request must not be empty" if bytes.all?(&.unsafe_chr.ascii_whitespace?)
         token_loc = build_token_loc(k, selector)
 
         config = Sequencer::Config.new(mode: Sequencer::Mode::LiveReplay, token_loc: token_loc, goal: count, concurrency: concurrency)

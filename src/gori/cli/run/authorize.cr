@@ -16,6 +16,7 @@ module Gori
         unsafe_methods = false
         allow_unscoped = false
         insecure = false
+        lenient = false
         timeout = Authorize::ACTIVE_TIMEOUT
         format = :text
 
@@ -37,7 +38,8 @@ module Gori
                      "Only safe methods (GET/HEAD/OPTIONS) are replayed without --unsafe-methods:\n" \
                      "every other method re-runs its side effect once per identity."
           p.on("--flow=ID", "Replay this captured flow (repeatable; same as a positional id)") { |v| flow_ids << parse_flow_id(v, "gori run authorize") }
-          p.on("-qQL", "--query=QL", "Also replay every flow matching this QL query (host: path: status: …)") { |v| query = v }
+          p.on("-qQL", "--query=QL", "Also replay every flow matching this QL query (host: path: status: …)") { |v| query = once(query, v, "-q/--query") }
+          p.on("--lenient", "Don't refuse a query naming an unknown field — search that token as text") { lenient = true }
           p.on("-nN", "--limit=N", "Max flows --query may contribute (default #{Authorize::Plan::DEFAULT_LIMIT})") { |v| limit = parse_count(v, "--limit") }
           p.on("--identities=FILE", "Identity set as JSON ('-' = stdin, which needs a pipe or a redirect — a terminal is refused); default: the project's saved set") { |v| identities_file = v }
           project_options(p, proj, "read")
@@ -53,6 +55,7 @@ module Gori
         positional.each { |s| flow_ids << parse_flow_id(s, "gori run authorize") }
         # An unrecognized/uncompilable term makes the selection BROADER than asked, and every
         # extra row here is `identities.size` more requests on a target.
+        Run.refuse_unknown_query_fields("authorize", query, lenient)
         query.try { |q| Run.warn_query_terms("authorize", q) }
 
         # …and ABOVE the read, because the read can block: "no flow id and no --query" is

@@ -57,7 +57,7 @@ module Gori
                      "deleted), or every flow a QL query matches. " \
                      "This can't be undone."
           project_options(p, proj, "update")
-          p.on("-qQL", "--query=QL", "Delete every flow matching this QL query (host: status:>=500 method: …)") { |v| query = v }
+          p.on("-qQL", "--query=QL", "Delete every flow matching this QL query (host: status:>=500 method: …)") { |v| query = once(query, v, "-q/--query") }
           p.on("--yes", "Actually delete the query's matches (required — there is no interactive prompt here)") { yes = true }
         end
         query, dropped = Run.compose_history_query(query, [] of String, neg_terms)
@@ -361,7 +361,7 @@ module Gori
           p.banner = "Usage: gori run history [QL query] [options]   (alias: ls)\n\n" \
                      "Subcommands: history show <id> · history delete <id> · history clear --yes"
           project_options(p, proj, "read")
-          p.on("-qQL", "--query=QL", "Filter with a QL query (host: status:>=500 size:>10000 dur:>500 header: body~rx …)") { |v| query = v }
+          p.on("-qQL", "--query=QL", "Filter with a QL query (host: status:>=500 size:>10000 dur:>500 header: body~rx …)") { |v| query = once(query, v, "-q/--query") }
           p.on("-nN", "--limit=N", "Max rows, newest first (default 50)") { |v| limit = parse_count(v, "--limit"); limit_given = true }
           p.on("--count", "Print how many flows match (the same filters as the listing) instead of listing them") { count_only = true }
           p.on("--view=NAME", "Apply a saved History view — ANDed with -q, like the TUI's `v` picker (see `gori run views`)") { |v| view_name = v }
@@ -998,7 +998,14 @@ module Gori
                                             find : ShowFind, redaction : RedactFlags,
                                             given : Hash(String, Bool)) : String?
         show_side_error(format, req_only, resp_only) ||
+          preview_format_error(redaction, format) ||
           show_find_error(find, format, redaction, given.select { |_, on| on }.keys)
+      end
+
+      # `--redact-preview` prints its own table and no document, so `--format json` beside it
+      # handed a script a text table on STDOUT, exit 0.
+      private def self.preview_format_error(redaction : RedactFlags, format : Symbol) : String?
+        "--redact-preview prints a text table, not --format #{format}" if redaction.preview? && format != :text
       end
 
       # `others`: the view flags passed beside `--find`. Each reshapes or swaps the bytes shown

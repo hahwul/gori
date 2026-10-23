@@ -1957,6 +1957,19 @@ module Gori
         n
       end
 
+      # A single-valued flag given twice: the parser kept the last one in silence, so
+      # `history delete -q A -q B` deleted B's matches. Refused, like a repeated `--project`.
+      private def self.once(prev : String?, v : String, flag : String) : String
+        abort "gori run: #{flag} is given twice — pass it once" if prev
+        v
+      end
+
+      # Two flags for one setting that disagree (`--http1 --http2`): refused, not last-wins.
+      private def self.agree(prev : Bool?, v : Bool, flags : String) : Bool
+        abort "gori run: #{flags} disagree — pass one" if !prev.nil? && prev != v
+        v
+      end
+
       # "30s" / "5m" / "1h" / bare seconds → a Time::Span.
       private def self.parse_duration(v : String) : Time::Span
         # .scrub for the same reason as `split_ql_negations` above: `--for $'\xff'` is a

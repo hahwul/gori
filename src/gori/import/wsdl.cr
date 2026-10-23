@@ -171,6 +171,10 @@ module Gori
         if pairs.empty? && skips.count == 0 && (why = notes.first?)
           raise Gori::Error.new("no SOAP requests generated from #{path} — #{why}")
         end
+        # Beside good ports the reasons are still said, though not counted as damage (an
+        # http:binding port is not malformed): dropped, a three-port WSDL imported two with no
+        # word about the third.
+        notes.each { |n| skips.note(n) }
         skips.result(pairs)
       end
 

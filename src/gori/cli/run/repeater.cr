@@ -378,6 +378,7 @@ module Gori
         end
         row, tui_index, rec = found || abort "gori run repeater show: no repeater session ##{id} (ids from `gori run repeater list`)"
         abort "gori run repeater show: #{choice.error}" if choice.error
+        preview_format_error(redaction, format).try { |err| abort "gori run repeater show: #{err}" }
 
         req_head, req_body, resp_head, resp_body, report = repeater_show_sides(rec, choice.matcher)
         if report && redaction.preview?
@@ -849,12 +850,12 @@ module Gori
           p.on("--curl=PATH", "Build the request from the curl command in PATH (- reads stdin: `pbpaste | gori run repeater create --curl -`). It also supplies --target (the URL's origin) and --http2 (curl's --http2) unless those are given; curl's transport flags (-k, -x, -L…) are ignored and named") { |v| curl_path = v }
           p.on("--name=NAME", "Custom repeater tab name") { |v| name = v }
           p.on("--tags=TAGS", "Free-text tags for grouping tabs (the TUI subtab label)") { |v| tags = v }
-          p.on("--http2", "Use HTTP/2 (default: false, how --flow was captured, or what --curl says)") { http2 = true; http2_given = true }
+          p.on("--http2", "Use HTTP/2 (default: false, how --flow was captured, or what --curl says)") { http2 = agree(http2_given ? http2 : nil, true, "--http1/--http2"); http2_given = true }
           # The other half of the toggle: without it a session cloned from an h2 flow
           # (`--flow=N`) inherited h2 and `repeater send` had no way to override it, so an
           # h2 capture could never be replayed as h1 from the CLI at all.
-          p.on("--http1", "Use HTTP/1.1 — overrides an h2-captured --flow (alias: --no-http2)") { http2 = false; http2_given = true }
-          p.on("--no-http2", "Alias for --http1") { http2 = false; http2_given = true }
+          p.on("--http1", "Use HTTP/1.1 — overrides an h2-captured --flow (alias: --no-http2)") { http2 = agree(http2_given ? http2 : nil, false, "--http1/--http2"); http2_given = true }
+          p.on("--no-http2", "Alias for --http1") { http2 = agree(http2_given ? http2 : nil, false, "--http1/--http2"); http2_given = true }
           p.on("--no-auto-cl", "Do not auto-calculate Content-Length header") { auto_cl = false }
           p.on("--flow=ID", "Optional original flow ID this repeater stems from") { |v| flow_id = parse_flow_id(v, "gori run repeater create") }
           p.on("--keep-request-line", "With --flow: store the flow's request line as-is — do not rewrite an absolute-form line (\"GET http://h/p\") to origin-form") { keep_request_line = true }
@@ -1081,12 +1082,12 @@ module Gori
           p.on("--request-stdin", "Replace the stored request with stdin, byte-for-byte (a pipe or a redirect, as on `repeater create`)") { f.request_stdin = true }
           p.on("--name=NAME", "Tab name ('' resets it to Untitled)") { |v| f.name = v }
           p.on("--tags=TAGS", "Tags for grouping tabs, replacing the stored ones ('' clears them)") { |v| f.tags = v }
-          p.on("--http2", "Use HTTP/2") { f.http2 = true }
-          p.on("--http1", "Use HTTP/1.1 (alias: --no-http2)") { f.http2 = false }
-          p.on("--no-http2", "Alias for --http1") { f.http2 = false }
+          p.on("--http2", "Use HTTP/2") { f.http2 = agree(f.http2, true, "--http1/--http2") }
+          p.on("--http1", "Use HTTP/1.1 (alias: --no-http2)") { f.http2 = agree(f.http2, false, "--http1/--http2") }
+          p.on("--no-http2", "Alias for --http1") { f.http2 = agree(f.http2, false, "--http1/--http2") }
           p.on("--sni=HOST", "TLS SNI override ('' clears it)") { |v| f.sni = v }
-          p.on("--no-auto-cl", "Do not auto-calculate the Content-Length header") { f.auto_cl = false }
-          p.on("--auto-cl", "Auto-calculate the Content-Length header (the default a session is created with)") { f.auto_cl = true }
+          p.on("--no-auto-cl", "Do not auto-calculate the Content-Length header") { f.auto_cl = agree(f.auto_cl, false, "--auto-cl/--no-auto-cl") }
+          p.on("--auto-cl", "Auto-calculate the Content-Length header (the default a session is created with)") { f.auto_cl = agree(f.auto_cl, true, "--auto-cl/--no-auto-cl") }
           format_flag(p, [:text, :json], "Output: text (default) | json — the session as `repeater list --format json` prints it") { |v| format = v }
         end
         raw_id || abort "#{cmd}: missing <repeater-id>"
@@ -1404,8 +1405,8 @@ module Gori
           project_options(p, proj, "read")
           p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
           p.on("--timeout=SEC", "Per-operation connect + idle timeout (seconds)") { |v| timeout = parse_count(v, "--timeout").seconds }
-          p.on("--http2", "Race over HTTP/2 (single-packet attack), overriding the sessions' stored setting") { force_http2 = true }
-          p.on("--http1", "Race over HTTP/1.1 (last-byte sync), overriding the sessions' stored setting") { force_http2 = false }
+          p.on("--http2", "Race over HTTP/2 (single-packet attack), overriding the sessions' stored setting") { force_http2 = agree(force_http2, true, "--http1/--http2") }
+          p.on("--http1", "Race over HTTP/1.1 (last-byte sync), overriding the sessions' stored setting") { force_http2 = agree(force_http2, false, "--http1/--http2") }
           p.on("--allow-unscoped", "Send even if the target is outside the project scope (the Sandbox still applies)") { allow_unscoped = true }
           p.on("--verbatim", "Send the stored bytes EXACTLY: no token expansion, no Content-Length resync (see `repeater send --verbatim`)") { verbatim = true }
           p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay and $BIND table for every member") { |v| slot = v.strip }
@@ -1475,8 +1476,8 @@ module Gori
           p.on("--count=N", "How many A/B pairs to send after warm-up (1-#{Repeater::Timing::Stats::MAX_ITERATIONS}; default #{Repeater::Timing::Stats::DEFAULT_ITERATIONS})") { |v| count = parse_count(v, "--count") }
           p.on("--warmup=N", "Initial pairs discarded before measuring (default #{Repeater::Timing::Stats::DEFAULT_WARMUP})") { |v| warmup = parse_nonneg(v, "--warmup") }
           p.on("--interleaved", "Send A then B sequentially (alternating order) instead of the synchronized race") { interleaved = true }
-          p.on("--http2", "Send over HTTP/2 (single-packet), overriding the sessions' stored setting") { force_http2 = true }
-          p.on("--http1", "Send over HTTP/1.1 (last-byte sync), overriding the sessions' stored setting") { force_http2 = false }
+          p.on("--http2", "Send over HTTP/2 (single-packet), overriding the sessions' stored setting") { force_http2 = agree(force_http2, true, "--http1/--http2") }
+          p.on("--http1", "Send over HTTP/1.1 (last-byte sync), overriding the sessions' stored setting") { force_http2 = agree(force_http2, false, "--http1/--http2") }
           p.on("--allow-unscoped", "Send even if the target is outside the project scope (the Sandbox still applies)") { allow_unscoped = true }
           p.on("--verbatim", "Send the stored bytes EXACTLY: no token expansion, no Content-Length resync") { verbatim = true }
           p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay and $BIND table for both variants") { |v| slot = v.strip }
@@ -1788,7 +1789,7 @@ module Gori
           p.on("--path=TARGET", PATH_OVERRIDE_HELP) { |v| path_override = v }
           p.on("-HHEADER", "--header=HEADER", "Overwrite/add a header for THIS send (repeat a name for duplicate lines); the session keeps its own. $ENV.KEY tokens expand with the rest of the request (see --verbatim)") { |v| headers << v }
           p.on("-bCOOKIE", "--cookie=COOKIE", "Cookie 'name=value' for THIS send (curl's -b), replacing the stored Cookie header; repeat to join them into one. A value with no '=' is refused") { |v| cookies << v }
-          p.on("--grpc-field=PATH=VALUE", "gRPC: set or ADD a field on the session's unary message for THIS send (repeatable, applied in order). PATH is declared names with a loaded .proto (profile.role=ADMIN) or field numbers (4.1=30); an undeclared field the message lacks names its type (7:varint=1 — #{Protobuf::Edit::TYPE_HINT}). -PATH alone removes every occurrence (-profile.role, -7). Re-compressed and reframed") { |v| grpc_fields << v }
+          p.on("--grpc-field PATH=VALUE", "gRPC: set or ADD a field on the session's unary message for THIS send (repeatable, applied in order). PATH is declared names with a loaded .proto (profile.role=ADMIN) or field numbers (4.1=30); an undeclared field the message lacks names its type (7:varint=1 — #{Protobuf::Edit::TYPE_HINT}). -PATH alone removes every occurrence (-profile.role, -7). Re-compressed and reframed") { |v| grpc_fields << v }
           p.on("--apply-rules", APPLY_RULES_HELP) { apply_rules = true }
           p.on("--headers-only", HEADERS_ONLY_HELP) { headers_only = true }
           p.on("--max-body=BYTES", MAX_BODY_HELP) { |v| max_body = parse_count(v, "--max-body") }
@@ -2146,7 +2147,7 @@ module Gori
           p.on("--slot=NAME", "Connect as this SESSION SLOT — its header overlay, and its binding table for $BIND.NAME tokens") { |v| slot = v.strip }
           p.on("--ws-keep-key", "Send the request's own Sec-WebSocket-Key instead of a fresh one") { ws_keep_key = true }
           p.on("--tls-preset=NAME", "#{TLS_PRESET_HELP}, overriding the session's stored one for this connect") { |v| tls_preset = v }
-          p.on("--auto-reply=MATCH=REPLY", "Auto-reply to an exact inbound TEXT payload with a TEXT frame (repeatable, e.g. --auto-reply=PING=PONG)") do |v|
+          p.on("--auto-reply MATCH=REPLY", "Auto-reply to an exact inbound TEXT payload with a TEXT frame (repeatable, e.g. --auto-reply=PING=PONG)") do |v|
             parsed = ws_parse_auto_reply(v)
             abort "gori run repeater ws: #{parsed}" if parsed.is_a?(String)
             auto_replies << parsed
@@ -3253,9 +3254,9 @@ module Gori
           project_options(p, proj, "read")
           p.on("--target=URL", "Send to this origin (scheme://host[:port]) instead of the captured one; path/query kept (see --path)") { |v| target_override = v }
           p.on("--path=TARGET", PATH_OVERRIDE_HELP) { |v| path_override = v }
-          p.on("--http2", "Force HTTP/2 (default follows how the flow was captured)") { http2_override = true }
-          p.on("--http1", "Force HTTP/1.1 — downgrades an h2-captured flow (default follows how the flow was captured)") { http2_override = false }
-          p.on("--no-http2", "Alias for --http1") { http2_override = false }
+          p.on("--http2", "Force HTTP/2 (default follows how the flow was captured)") { http2_override = agree(http2_override, true, "--http1/--http2") }
+          p.on("--http1", "Force HTTP/1.1 — downgrades an h2-captured flow (default follows how the flow was captured)") { http2_override = agree(http2_override, false, "--http1/--http2") }
+          p.on("--no-http2", "Alias for --http1") { http2_override = agree(http2_override, false, "--http1/--http2") }
           p.on("--sni=HOST", "TLS SNI override") { |v| sni_override = v }
           p.on("--tls-preset=NAME", TLS_PRESET_HELP) { |v| tls_preset = v }
           p.on("--timeout=SEC", "Per-operation connect + idle timeout (seconds)") { |v| timeout = parse_count(v, "--timeout").seconds }
@@ -3277,7 +3278,7 @@ module Gori
           p.on("--allow-unscoped", "Send even if the target is outside the project scope (the Sandbox still applies)") { allow_unscoped = true }
           p.on("--headers-only", HEADERS_ONLY_HELP) { headers_only = true }
           p.on("--max-body=BYTES", MAX_BODY_HELP) { |v| max_body = parse_count(v, "--max-body") }
-          p.on("--grpc-field=PATH=VALUE", GRPC_FIELD_HELP) { |v| grpc_fields << v }
+          p.on("--grpc-field PATH=VALUE", GRPC_FIELD_HELP) { |v| grpc_fields << v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
         refresh_verify_upstream(!insecure)

@@ -146,7 +146,7 @@ module Gori
                      "By default the query-string variants of one path fold into a single row\n" \
                      "(/search?q=1 + /search?q=2 → /search); --no-fold-query lists them separately."
           project_options(p, proj, "read")
-          p.on("-qQL", "--query=QL", "Filter endpoints with a QL query (host: method: path: status: scheme: …), plus the tree's own tag: (a path memo; -tag: excludes)") { |v| query = v }
+          p.on("-qQL", "--query=QL", "Filter endpoints with a QL query (host: method: path: status: scheme: …), plus the tree's own tag: (a path memo; -tag: excludes)") { |v| query = once(query, v, "-q/--query") }
           p.on("-nN", "--limit=N", "Max distinct endpoints to scan (default #{Store::SITEMAP_MAX})") { |v| limit = parse_count(v, "--limit") }
           p.on("--in-scope", "Only hosts in the project's configured scope") { in_scope = true }
           p.on("--hide-static", "Leave out static assets — images, fonts, media (the TUI's hide-static lens; same as -q -static:true)") { hide_static = true }

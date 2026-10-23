@@ -383,6 +383,7 @@ gori run diff --from q1-audit --to q3-retest --format md
 | `--to=NAME` | 이후 프로젝트 (기본값: `GORI_PROJECT`나 `project switch`로 정한 프로젝트, 없으면 가장 최근에 활성화한 프로젝트) |
 | `--from-db=PATH` / `--to-db=PATH` | 레지스트리 프로젝트 대신 SQLite 파일을 직접 지정 |
 | `-q`, `--query=QL` | **양쪽 모두**를 [QL 쿼리](/ko/reference/query-language/)로 좁힘 |
+| `--lenient` | 없는 필드 이름을 쓴 쿼리를 거절하지 않고 그 토큰을 텍스트로 검색 |
 | `--in-scope` | 각 프로젝트 자신의 스코프 규칙 안에 있는 호스트만 |
 | `-n`, `--limit=N` | 한쪽에서 읽을 엔드포인트 그룹 최대치(기본 40000) |
 | `--verdict=LIST` | 지정한 판정만 나열 (`added,gone,changed,unchanged,removed`) |
@@ -780,6 +781,7 @@ gori run authorize --query 'host:acme.test method:GET' --identities identities.j
 |--------|-------------|
 | `<flow-id>…`, `--flow=ID` | 재전송할 캡처 플로우(지정한 순서대로, 반복 가능) |
 | `-q`, `--query=QL` | QL 쿼리에 매칭되는 플로우도 재전송(id 뒤에 이어 붙습니다) |
+| `--lenient` | 없는 필드 이름을 쓴 쿼리를 거절하지 않고 그 토큰을 텍스트로 검색 |
 | `-n`, `--limit=N` | `--query`가 기여할 수 있는 최대 플로우 수(기본값 50). 한 행이 *아이덴티티 수만큼*의 요청이 됩니다 |
 | `--identities=FILE` | 아이덴티티 집합 JSON(`-`=stdin은 파이프나 리다이렉트만 받고 터미널은 거부). 기본값은 프로젝트에 저장된 집합 |
 | `--unsafe-methods` (`--unsafe`) | `POST`/`PUT`/`PATCH`/`DELETE`도 재전송합니다. 아이덴티티마다 부수 효과가 다시 실행됩니다 |

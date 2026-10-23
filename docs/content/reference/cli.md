@@ -390,6 +390,7 @@ gori run diff --from q1-audit --to q3-retest --format md
 | `--to=NAME` | Newer project (default: the `GORI_PROJECT` or `project switch` project, else the most-recently-active one) |
 | `--from-db=PATH` / `--to-db=PATH` | Explicit SQLite files instead of registry projects |
 | `-q`, `--query=QL` | Narrow **both** sides with a [QL query](/reference/query-language/) |
+| `--lenient` | Don't refuse a query naming an unknown field; search that token as text |
 | `--in-scope` | Only hosts inside each project's own scope rules |
 | `-n`, `--limit=N` | Max endpoint groups to read per side (default 40000) |
 | `--verdict=LIST` | List only these verdicts (`added,gone,changed,unchanged,removed`) |
@@ -789,6 +790,7 @@ gori run authorize --query 'host:acme.test method:GET' --identities identities.j
 | -------- | ------------- |
 | `<flow-id>…`, `--flow=ID` | Captured flows to replay, in the order given (repeatable) |
 | `-q`, `--query=QL` | Also replay every flow matching this QL query, appended after the ids |
+| `--lenient` | Don't refuse a query naming an unknown field; search that token as text |
 | `-n`, `--limit=N` | Max flows `--query` may contribute (default 50). Every row becomes one request *per identity* |
 | `--identities=FILE` | Identity set as JSON (`-` = stdin from a pipe or a redirect, a terminal is refused); default: the project's saved set |
 | `--unsafe-methods` (`--unsafe`) | Also replay `POST`/`PUT`/`PATCH`/`DELETE`; each identity re-runs the side effect |

@@ -24,6 +24,7 @@ module Gori
         issues = true
         verdicts : Array(Gori::Diff::Verdict)? = nil
         unchanged = false
+        lenient = false
         format = :text
 
         parser = option_parser("gori run diff") do |p|
@@ -38,8 +39,9 @@ module Gori
           p.on("--to=NAME", "Newer project (#{DEFAULT_PROJECT_HELP})") { |v| to_name = v }
           p.on("--from-db=PATH", "Explicit SQLite db file for the baseline side") { |v| from_db = v }
           p.on("--to-db=PATH", "Explicit SQLite db file for the newer side") { |v| to_db = v }
-          p.on("-qQL", "--query=QL", "Narrow BOTH sides with a QL query (host: method: path: status: …)") { |v| query = v }
+          p.on("-qQL", "--query=QL", "Narrow BOTH sides with a QL query (host: method: path: status: …)") { |v| query = once(query, v, "-q/--query") }
           p.on("--in-scope", "Only hosts in each project's own configured scope") { in_scope = true }
+          p.on("--lenient", "Don't refuse a query naming an unknown field — search that token as text") { lenient = true }
           p.on("-nN", "--limit=N", "Max endpoint groups to read per side (default #{Store::ENDPOINT_OBSERVATION_MAX})") { |v| limit = parse_count(v, "--limit") }
           p.on("--verdict=LIST", "Only list these verdicts: #{DIFF_VERDICTS.map(&.label).join(",")}") { |v| verdicts = parse_diff_verdicts(v) }
           p.on("--unchanged", "Also list the unchanged endpoints (they are always COUNTED)") { unchanged = true }
@@ -51,6 +53,7 @@ module Gori
         parser.parse(normalize_query_flag(args))
 
         abort "gori run diff: need a baseline side — pass --from NAME (or --from-db PATH)\n#{parser}" if from_name.nil? && from_db.nil?
+        Run.refuse_unknown_query_fields("diff", query, lenient)
         filter = diff_filter(query)
         # Into a fresh local first: `verdicts` is assigned inside an OptionParser block, so
         # the compiler keeps it a union and `||` cannot narrow it.

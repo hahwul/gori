@@ -134,7 +134,7 @@ module Gori
                      "a query whose every term drops would narrow NOTHING while a `v:` chip on the\n" \
                      "filter row claims it does."
           project_options(p, proj, "update")
-          p.on("-qQL", "--query=QL", "The view's query (required)") { |v| query = v }
+          p.on("-qQL", "--query=QL", "The view's query (required)") { |v| query = once(query, v, "-q/--query") }
           p.on("--scope=SCOPE", "project (default) | global — a global view appears in EVERY project") { |v| scope = parse_view_scope(v) }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
@@ -235,7 +235,7 @@ module Gori
           p.banner = "Usage: gori run views set <name> --query=QL [--scope=project|global]\n\n" \
                      "Replace a view's query, keeping its name."
           project_options(p, proj, "update")
-          p.on("-qQL", "--query=QL", "The view's new query (required)") { |v| query = v }
+          p.on("-qQL", "--query=QL", "The view's new query (required)") { |v| query = once(query, v, "-q/--query") }
           p.on("--scope=SCOPE", "Which <name>: project (default) | global") { |v| scope = parse_view_scope(v) }
         end
         abort "gori run views set: --query is required" if (q = query).nil?

@@ -26,14 +26,17 @@ module Gori
         p.on("--redact [PROFILE]",
           "Sanitize request/response BODIES before printing, using PROFILE " \
           "(default: the project's, else the global one, else the built-in `default`)") do |v|
-          flags.mode = true
-          flags.profile = v.presence
+          flags.mode = agree(flags.mode, true, "--redact/--no-redact")
+          if (had = flags.profile) && (named = v.presence) && named != had
+            abort "gori run: --redact names two profiles (#{had}, #{named}) — pass one"
+          end
+          flags.profile ||= v.presence
         end
         p.on("--no-redact", "Print bodies exactly as captured, even when redaction is the configured default") do
-          flags.mode = false
+          flags.mode = agree(flags.mode, false, flags.preview? ? "--redact-preview/--no-redact" : "--redact/--no-redact")
         end
         p.on("--redact-preview", "List what --redact would replace and print nothing else") do
-          flags.mode = true
+          flags.mode = agree(flags.mode, true, "--redact-preview/--no-redact")
           flags.preview = true
         end
       end

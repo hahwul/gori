@@ -478,6 +478,7 @@ describe Gori::Import::Wsdl do
                %(<soap:address location="https://svc.test/other"/></wsdl:port>)))
       result.flows.size.should eq(1)
       result.skipped.should eq(0)
+      result.notes.join.should contain(%("Typo"))
 
       expect_raises(Gori::Error, /"Typo".*undeclared XML namespace prefix "nope"/) do
         parse(wsdl(ports: %(<wsdl:port name="Typo" binding="nope:B">) +
@@ -495,6 +496,24 @@ describe Gori::Import::Wsdl do
       msg = ex.message.not_nil!
       msg.should contain("absolute")
       msg.should contain(%("Rel")) # WHICH port, so the operator can go and look
+    end
+
+    it "says why a bad port beside a good one was left out" do
+      result = parse(wsdl(ports: %(<wsdl:port name="P" binding="tns:B">) +
+                                 %(<soap:address location="https://svc.test/endpoint"/></wsdl:port>) +
+                                 %(<wsdl:port name="Q" binding="tns:B">) +
+                                 %(<soap:address location="jms://queue/Calc"/></wsdl:port>)))
+      result.flows.size.should eq(1)
+      result.notes.join.should contain(%("Q"))
+    end
+
+    it "masks a credential in a left-out port's note" do
+      result = parse(wsdl(ports: %(<wsdl:port name="P" binding="tns:B">) +
+                                 %(<soap:address location="https://svc.test/endpoint"/></wsdl:port>) +
+                                 %(<wsdl:port name="Q" binding="tns:B">) +
+                                 %(<soap:address location="//admin:hunter2@svc.test/x"/></wsdl:port>)))
+      result.notes.join.should contain(%("Q"))
+      result.notes.join.should_not contain("hunter2")
     end
 
     it "raises on a port whose address is not an HTTP transport" do

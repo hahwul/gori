@@ -101,6 +101,9 @@ module Gori
         # this and then skip `open_store`, so `--slot` lied about no project.
         hydrate_project_env(proj.name, proj.db) if project_named?(proj.name, proj.db)
         text, default_target, src_h2, evidence = mine_source(flow_id, request_file, proj.name, proj.db)
+        # A blank request dialled empty connections and waited out each server's timeout; MCP
+        # `mine_start` refuses a blank template the same way.
+        abort "gori run mine: the request must not be empty" if text.strip.empty?
 
         config = Miner::Config.new
         config.concurrency = concurrency

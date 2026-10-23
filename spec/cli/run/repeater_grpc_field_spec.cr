@@ -65,7 +65,7 @@ describe "gori run send / gori run repeater <flow-id> --grpc-field" do
   }.each do |path, method|
     it "takes --grpc-field in #{method}" do
       src = cli_method_source(path, method)
-      src.should contain(%("--grpc-field=PATH=VALUE"))
+      src.should contain(%("--grpc-field PATH=VALUE"))
       src.should contain("grpc_fields_or_abort(")
     end
   end
