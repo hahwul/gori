@@ -488,9 +488,15 @@ module Gori::Tui
         return true
       end
       list_rect, _ = @issues.list_split(inner)
+      # Hit-test against the frame that was clicked, BEFORE leaving QL edit mode: `list_top`
+      # counts the suggestion row painted while querying. A row or gauge click then applies the
+      # query, like ↵ — otherwise the bar stays live behind the detail and hijacks its keys.
+      gauge_row = @issues.gauge_row_at(inner, mx, my)
+      idx = @issues.list_row_at(inner, mx, my)
+      @issues.stop_query if @issues.querying? && (gauge_row || idx)
       # The list's scroll gauge on the frame's right hairline: jump the cursor to the row it
       # points at. Before the filter-bar arm, which has no `mx` bound of its own.
-      if row = @issues.gauge_row_at(inner, mx, my)
+      if row = gauge_row
         @issues.set_preview_focus(:list)
         @issues.select_index(row)
         return true
@@ -499,7 +505,7 @@ module Gori::Tui
         @issues.start_query
         return true
       end
-      return true unless idx = @issues.list_row_at(inner, mx, my)
+      return true unless idx
       @issues.set_preview_focus(:list)
       if idx == @issues.selected_index
         issues_open

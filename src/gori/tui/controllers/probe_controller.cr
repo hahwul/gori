@@ -265,9 +265,14 @@ module Gori::Tui
         return true
       end
       list_rect, _ = @probe.list_split(content)
+      # Hit-test before leaving QL edit mode (the suggestion row shifts the list), then let a
+      # row or gauge click apply the query like ↵ — Issues' `handle_click` says why.
+      gauge_row = @probe.gauge_row_at(content, mx, my)
+      idx = @probe.list_row_at(content, mx, my)
+      @probe.stop_query if @probe.querying? && (gauge_row || idx)
       # The list's scroll gauge on the frame's right hairline — `list_row_at` excludes that
       # column, so it was the one part of the list a click could not reach.
-      if row = @probe.gauge_row_at(content, mx, my)
+      if row = gauge_row
         @probe.set_preview_focus(:list)
         @probe.select_index(row)
         return true
@@ -283,7 +288,7 @@ module Gori::Tui
         @probe.start_query
         return true
       end
-      return true unless idx = @probe.list_row_at(content, mx, my)
+      return true unless idx
       @probe.set_preview_focus(:list)
       idx == @probe.selected_index ? probe_open : @probe.select_index(idx) # select-first, then open
       true
