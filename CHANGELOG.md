@@ -3,6 +3,7 @@
 ## Unreleased
 
 - HTTP/2 capture: a server push or a WebSocket CONNECT that names a stream id already closed on the connection no longer leaves a History row stuck Pending until the proxy stops (#1747)
+- Settings: an unparseable settings.json that also holds a non-UTF-8 byte (a Latin-1 hand edit) is reported on load like any other unparseable file, and its stated `env.syntax` is still recovered, instead of falling back to defaults silently
 - MCP: `list_history` with `since`, `list_events`, `operator_messages`, the `*_status` tools and `get_job` take `wait_ms` (up to 30 s) and answer as soon as a new row arrives or the job ends, so an agent no longer spends a turn on every empty poll (#1740)
 - MCP `get_response_body_chunk{find}` and `gori run show --find` locate a regex (matched as QL `body~`) inside one flow's body and return `{offset, length, snippet}` matches with `has_more`/`next_offset`, where each offset pages straight to its match (#1742)
 - Sitemap: MCP `list_sitemap` and `gori run sitemap` show which active tools have tested each endpoint, from their History-recorded flows and saved fuzz runs, as `touched_by`, and `untested:true` / `--untested` keeps only the endpoints with neither (#1741)

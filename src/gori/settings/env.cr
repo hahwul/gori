@@ -305,7 +305,9 @@ module Gori::Settings
     # rewritten against it until it parses again. Recovered or not, the origin says `Unreadable`.
     self.env_syntax_origin = EnvSyntaxOrigin::Unreadable
     values = Env::Syntax.values.join('|', &.to_s.downcase)
-    if m = raw.match(/"syntax"\s*:\s*"(#{values})"/)
+    # `scrub`: PCRE2 raises on a subject that is not valid UTF-8 (a Latin-1 hand edit), and that
+    # raise skipped the warning `load_root` builds after this.
+    if m = raw.scrub.match(/"syntax"\s*:\s*"(#{values})"/)
       if s = Env::Syntax.parse?(m[1])
         self.env_syntax = s
         return nil

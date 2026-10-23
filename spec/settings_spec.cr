@@ -1372,6 +1372,28 @@ describe Gori::Settings do
       end
     end
 
+    # A Latin-1 byte from a hand edit is not valid UTF-8, and the grammar recovery's regex
+    # raised on it: the warning was never recorded and the stated grammar was lost.
+    it "still reports an unparseable file that is not valid UTF-8, and recovers its grammar" do
+      dir = File.tempname("gori-settings-latin1")
+      Dir.mkdir_p(dir)
+      prev = ENV["GORI_HOME"]?
+      prev_syntax = Gori::Settings.env_syntax
+      begin
+        ENV["GORI_HOME"] = dir
+        File.write(Gori::Settings.path, %({"env":{"syntax":"namespaced"},"theme":"caf\xE9",}))
+        Gori::Settings.load
+
+        Gori::Settings.load_warning.not_nil!.should contain("not valid JSON")
+        Gori::Settings.env_syntax.should eq(Gori::Env::Syntax::Namespaced)
+      ensure
+        prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+        FileUtils.rm_rf(dir)
+        Gori::Settings.env_syntax = prev_syntax
+        Gori::Settings.bind_port = 8070
+      end
+    end
+
     it "is nil after a load that parses" do
       dir = File.tempname("gori-settings-ok")
       Dir.mkdir_p(dir)
