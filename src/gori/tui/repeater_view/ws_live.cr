@@ -74,9 +74,10 @@ class Gori::Tui::RepeaterView
     {i, @decoded.lines_snapshot[i]? || ""}
   end
 
-  # Every non-blank MESSAGES line with its index, in order — what `^R` sends while live.
+  # Every non-empty MESSAGES line with its index, in order — what `^R` sends while live. A
+  # whitespace-only line is a frame the operator typed (P7); only an empty one is skipped.
   def ws_all_messages : Array({Int32, String})
-    @decoded.lines_snapshot.each_with_index.compact_map { |line, i| {i, line} unless line.blank? }.to_a
+    @decoded.lines_snapshot.each_with_index.compact_map { |line, i| {i, line} unless line.empty? }.to_a
   end
 
   # Record that MESSAGES line `idx` was sent now — drawn as `✓ ss.mmm` at the row's right edge.
@@ -124,6 +125,8 @@ class Gori::Tui::RepeaterView
     # Seed @result so the HANDSHAKE RESPONSE card renders the 101, the seed `apply_ws` makes.
     @result = Repeater::Result.new(result.handshake_head, Bytes.empty, nil, result.duration_us, result.error)
     @resp_alt = {0, 0, 0, 0}
+    @scroll = 0 # a new session starts at its first row, as `apply_ws` does
+    @resp_cursor.reset
     resp_wrap_reset
     reset_result_caches
   end

@@ -511,4 +511,106 @@ describe "RepeaterController WebSocket live session (#1630)" do
       origin.close
     end
   end
+
+  it "sends a whitespace-only MESSAGES line on a live ^R (P7)" do
+    origin = echo_origin
+    begin
+      with_ws_controller do |ctl, _host|
+        v = open_ws_tab(ctl, origin.port, ["  ", "x"])
+        connect!(ctl, v)
+        ctl.repeater_send
+        wait_until { ctl.drain_results; origin.client_text.size >= 2 }.should be_true
+        origin.client_text.should eq(["  ", "x"])
+      end
+    ensure
+      origin.close
+    end
+  end
+
+  it "shows a failed reconnect's error instead of the closed session's transcript" do
+    server = TCPServer.new("127.0.0.1", 0)
+    port = server.local_address.port
+    dials = 0
+    spawn do
+      while conn = server.accept?
+        dials += 1
+        first = dials == 1
+        spawn do
+          conn.read_timeout = 5.seconds
+          head = Gori::Proxy::Codec::Http1.read_head(conn).not_nil!
+          if first
+            key = String.new(head).each_line.find(&.downcase.starts_with?("sec-websocket-key:")).try(&.split(':', 2)[1].strip) || ""
+            accept = Base64.strict_encode(Digest::SHA1.digest(key + WsEngine::GUID))
+            conn << "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: #{accept}\r\n\r\n"
+            conn.write(WS.encode(WS::OP_TEXT, "old-frame".to_slice, mask: false))
+            conn.write(WS.encode(WS::OP_CLOSE, Bytes[0x03, 0xe8], mask: false))
+            conn.flush
+            sleep 200.milliseconds
+          else
+            conn << "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n"
+            conn.flush
+          end
+        rescue
+        ensure
+          conn.close rescue nil
+        end
+      end
+    rescue
+    end
+    begin
+      with_ws_controller do |ctl, host|
+        v = open_ws_tab(ctl, port, ["hi"])
+        v.menu_registry = Gori::Verbs.registry
+        ctl.repeater_toggle_ws_session
+        ctl.repeater_send # the server upgrades, sends one frame, then CLOSE
+        wait_until { ctl.drain_results; v.ws_session.try(&.closed?) }.should be_true
+        v.ws_live_tick
+        ctl.repeater_send # reconnect → 403
+        wait_until { ctl.drain_results; !v.inflight? && host.statuses.last?.to_s.includes?("ws session:") }.should be_true
+        v.ws_session.should be_nil
+        b = MemoryBackend.new(120, 32)
+        v.render(Screen.new(b), Gori::Tui::Rect.new(0, 0, 120, 32))
+        b.contains?("old-frame").should be_false
+      end
+    ensure
+      server.close
+    end
+  end
+
+  it "opens a reconnected session at its first row, not the last one's scroll" do
+    origin = LiveOrigin.new do |conn, o|
+      dial = o.accepts
+      40.times { |i| o.text(conn, "d#{dial}-#{i}") }
+      while frame = o.read(conn)
+        if frame.opcode == WS::OP_CLOSE
+          conn.write(WS.encode(WS::OP_CLOSE, frame.payload, mask: false)); conn.flush
+          break
+        end
+      end
+    end
+    begin
+      with_ws_controller do |ctl, _host|
+        v = open_ws_tab(ctl, origin.port, ["hi"])
+        v.menu_registry = Gori::Verbs.registry
+        connect!(ctl, v)
+        wait_until { v.ws_session.not_nil!.transcript.size >= 40 }.should be_true
+        v.ws_live_tick
+        b = MemoryBackend.new(120, 32)
+        v.render(Screen.new(b), Gori::Tui::Rect.new(0, 0, 120, 32))
+        v.scroll(30)                   # the operator scrolled deep into the first session
+        ctl.repeater_toggle_ws_session # disconnect
+        wait_until { v.ws_session.not_nil!.closed? }.should be_true
+        ctl.repeater_toggle_ws_session # arm again
+        ctl.repeater_send              # reconnect
+        wait_until { ctl.drain_results; v.ws_connected? && origin.accepts == 2 }.should be_true
+        wait_until { v.ws_session.not_nil!.transcript.size >= 40 }.should be_true
+        v.ws_live_tick
+        b = MemoryBackend.new(120, 32)
+        v.render(Screen.new(b), Gori::Tui::Rect.new(0, 0, 120, 32))
+        b.contains?("d2-0").should be_true
+      end
+    ensure
+      origin.close
+    end
+  end
 end

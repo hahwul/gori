@@ -1607,7 +1607,9 @@ module Gori::Tui
             @host.status("connected, but the live session was turned off — disconnected")
           end
         else
-          # The handshake failed or the gate refused it — show it like a scripted WS error.
+          # The handshake failed or the gate refused it — show it like a scripted WS error. Drop a
+          # previous (closed) session first: the transcript draws its ring while one is set.
+          view.end_ws_session
           view.apply_ws(opened.result)
           @host.status("ws session: #{opened.result.error}#{result_origin(view)}", :error)
         end

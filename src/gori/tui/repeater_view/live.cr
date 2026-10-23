@@ -36,6 +36,7 @@ class Gori::Tui::RepeaterView
     @live_shown = -1
     @live_at = nil
     @live_renders = 0
+    @scroll = 0 # the stream is a new document; don't open it at the last response's row
   end
 
   # One UI tick. Re-renders when the stream grew and LIVE_EVERY has passed since the last
