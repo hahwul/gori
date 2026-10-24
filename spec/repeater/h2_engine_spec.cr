@@ -2392,3 +2392,52 @@ describe "Gori::Repeater::H2Engine — GOAWAY last-stream-id and write-phase cre
     r.body.try(&.size).should eq(200_000)
   end
 end
+
+# An HTTP/1.1-only origin answering the prior-knowledge preface with its own status line.
+# `Frame.read` took `HTTP/1.1 ` for a frame header and lost the rest at EOF, so the send
+# came back `no_response` / retryable — when the origin had answered, and always will.
+private def start_h1_only_origin : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    while conn = origin.accept?
+      spawn_with(conn) do |c|
+        c.read_timeout = 2.seconds
+        c.read(Bytes.new(4096)) rescue nil
+        c.write("HTTP/1.1 505 HTTP Version Not Supported\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_slice)
+        c.flush
+        hang_up(c)
+      end
+    end
+  rescue
+  end
+  port
+end
+
+describe "Gori::Repeater::H2Engine — an h1-only origin behind an h2c send" do
+  it "names the HTTP/1 answer and is not retryable" do
+    port = start_h1_only_origin
+    r = Gori::Repeater::H2Engine.send("GET /x HTTP/2\r\nHost: h\r\n\r\n".to_slice,
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false, timeout: 3.seconds)
+    error = r.error.not_nil!
+    error.should eq("h2c not spoken: 127.0.0.1:#{port} answered the HTTP/2 preface with " \
+                    "`HTTP/1.1 505`; send this request as HTTP/1.1")
+    kind = Gori::Repeater::SendError.kind(error)
+    kind.should eq("protocol")
+    Gori::Repeater::SendError.retryable?(Gori::Repeater::SendError.code(kind), r.delivered?).should be_false
+  end
+
+  it "names it on the body-writing path too (the answer lands while awaiting SETTINGS)" do
+    port = start_h1_only_origin
+    r = Gori::Repeater::H2Engine.send("POST /x HTTP/2\r\nHost: h\r\n\r\nbody".to_slice,
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false, timeout: 3.seconds)
+    r.error.not_nil!.should contain("answered the HTTP/2 preface with `HTTP/1.1 505`")
+  end
+
+  it "keeps a zero-byte close retryable no_response" do
+    r = Gori::Repeater::H2Engine.send("GET /x HTTP/2\r\nHost: h\r\n\r\n".to_slice,
+      scheme: "http", host: "127.0.0.1", port: start_h2_origin_hangup, verify_upstream: false,
+      timeout: 3.seconds)
+    Gori::Repeater::SendError.kind(r.error).should eq("no_response")
+  end
+end

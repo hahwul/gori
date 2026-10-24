@@ -170,6 +170,8 @@ module Gori
         # Shared with `read_response` so the MAX_FRAMES hostile-origin ceiling counts the
         # frames absorbed during the write too.
         property frames = 0
+        # The status line an h1-only origin answered the preface with (`h1_answer`).
+        property h1_answer : String? = nil
 
         # Bytes the peer will accept on this exchange's stream right now. Never negative: §6.9.2 lets a
         # SETTINGS shrink drive a window below zero, and that simply means "send nothing".
@@ -458,6 +460,13 @@ module Gori
         write_request(upstream, headers, body, flow)
         reply = read_response(upstream, flow, conn.decoder, sse, cancel)
         carry_over(conn, flow, reply)
+        # Not `no_response`: the origin answered, in HTTP/1, and will every time — so it must
+        # not read as the retryable silence a zero-byte close is. "HTTP/2" keeps it `protocol`.
+        if h1 = flow.h1_answer
+          return Result.new(Bytes.new(0), nil, nil, Engine.elapsed(started),
+            "h2c not spoken: #{host}:#{port} answered the HTTP/2 preface with `#{h1}`; " \
+            "send this request as HTTP/1.1")
+        end
         # "Did a FINAL response arrive", not "is the status zero". An origin that answered
         # `HEADERS(:status 100)` and then went silent used to come back `ok:true, status:100,
         # error:null` after a full idle timeout, with the head rendered as `HTTP/2 100` — an
@@ -720,12 +729,33 @@ module Gori
         end
       end
 
+      # An HTTP/1.1-only origin answers the prior-knowledge preface with its own status line
+      # (`HTTP/1.1 505`, usually), which `Frame.read` takes for a 4.7 MB frame header and then
+      # loses at EOF — so the send read as "no response", retryable, when retrying cannot help.
+      # PEEKED, never read, so a real h2 peer's opening frame is untouched; only on a connection
+      # that has sent no frame yet. Just version + code, never the reason phrase: that is
+      # remote-chosen text, and a `408 Request Timeout` would flip `SendError.kind` to timeout.
+      private def self.h1_answer(io : IO, flow : SendFlow) : String?
+        return nil if flow.settings_seen? || flow.frames > 0
+        head = io.as?(IO::Buffered).try(&.peek) || return nil
+        return nil unless head.size >= 12 && head[0, 7] == H1_PREFIX && head[8] == 0x20_u8 &&
+                          {7, 9, 10, 11}.all? { |i| 0x30_u8 <= head[i] <= 0x39_u8 }
+        String.new(head[0, 12])
+      end
+
+      private H1_PREFIX = "HTTP/1.".to_slice
+
       # Read and dispatch ONE frame from the peer while the request is still being written.
       # SETTINGS/PING/WINDOW_UPDATE are handled here (they are the write loop's business);
       # everything else is stashed for `read_response`, which drains `pending` before it
       # touches the socket. Returns false once the socket goes quiet.
       private def self.pump_once(io : IO, flow : SendFlow) : Bool
         frame = begin
+          if flow.h1_answer = h1_answer(io, flow)
+            flow.eof = true
+            flow.closed = true
+            return false
+          end
           Frame.read(io)
         rescue IO::TimeoutError
           return false # idle, not dead — the caller decides whether that is fatal
@@ -1101,7 +1131,12 @@ module Gori
             # identical h2c event (`start_h2_origin_truncated`) has always kept its status and
             # body, so the transport alone decided whether a decoded response survived.
             frame = begin
-              Frame.read(io)
+              if flow.h1_answer = h1_answer(io, flow)
+                flow.eof = true
+                nil
+              else
+                Frame.read(io)
+              end
             rescue IO::TimeoutError
               # The bound's own deadline is a stop, not the origin going silent.
               timed_out = true unless run.try(&.stop_on_error)
