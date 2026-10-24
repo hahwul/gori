@@ -559,7 +559,7 @@ The two **JSON** operations edit a JSON body or WebSocket text message by path, 
 
 Scope any rule to a **host** so it only fires for matching traffic: a plain string means that host and its subdomains (`example.com` matches `example.com` and `api.example.com`, but not `xexample.com` or `example.com.evil.net`), and `*` is the explicit wildcard for anything wider (`*.example.com`). Leave it empty to apply to every host. A host with a port, a scheme or a path is refused: a rule matches the host on every port.
 
-Manage the list with `a` add, `e`/`Enter` edit, `t` enable/disable, `d` delete, `Space → s` global/project, `Shift-J`/`Shift-K` reorder (rules apply top to bottom), and `space` for the full menu. The editor shows a live preview of how many recent flows a rule would affect. Rules take effect as soon as you save, with no restart.
+Manage the list with `a` add, `e`/`Enter` edit, `t` enable/disable, `d` delete, `Space` → `s` **Global/project** moves a rule between project and global, `Shift-J`/`Shift-K` reorder (rules apply top to bottom), and `space` for the full menu. The editor shows a live preview of how many recent flows a rule would affect. Rules take effect as soon as you save, with no restart.
 
 A rule written by a newer gori (an operation, target, part, match kind or short-circuit source this build does not know, or a key it does not read) is listed with a `?` mark, its row names the label this build did not recognise, and it never fires. It keeps its fields through a settings save. Here it can be disabled or deleted, but not enabled, edited, duplicated, moved between global and project, or reordered; trying one of those says so on the status line.
 
@@ -599,7 +599,7 @@ Global rules apply **first**, in their own order, then the project's own: the st
 A global rule carries a **default** on/off state, and a project may disagree with it:
 
 - `t` toggles the rule **in this project**. For a global rule that writes an override, and the row is marked `G*`.
-- **Enable/disable everywhere** (`Space → T`, the broad form of the toggle; no direct key, and not `X`, which wipes a tab everywhere it appears) flips the global default itself, which every project that has not overridden it follows.
+- **Enable/disable everywhere** (`Space` → `T`, the broad form of the toggle; no direct key, and not `X`, which wipes a tab everywhere it appears) flips the global default itself, which every project that has not overridden it follows.
 - Toggling back to the default **removes** the override, so the project follows the library again, including later changes to it.
 
 Deleting a global rule removes it from every project. Another running gori picks up a global change without a restart: the TUI re-reads the library whenever its project database changes (a peer's write or its own capture), `gori run capture` every two seconds, and `gori mcp` before each tool call.
@@ -727,14 +727,14 @@ Conditions speak the same query language History's filter bar does: every field 
 - **`host:` is a substring, not a DNS-label glob.** `host:alpha.test` also matches `xalpha.test`.
 - **A condition is validated when you save it.** An unknown field, an invalid regex, a condition that matches every flow, and a value the field does not take are all refused with the reason. Left alone, `hsot:evil.com` would quietly become a free-text search and the rule would never fire, and a dropped term would make a standing rule paint more than you wrote.
 
-A rule lives either in this project or in the **global library** every project reads, exactly like a Match & Replace rule: `Space → s` moves it between the two, `t` toggles it here, and `Space → T` flips a global rule's default everywhere. A project that disagrees with the library stores only the disagreement, and that disagreement is dropped the moment the two agree again, so a rule you toggled off and back on goes back to following the library rather than pinning today's answer.
+A rule lives either in this project or in the **global library** every project reads, exactly like a Match & Replace rule: `Space` → `s` **Global/project** moves it between the two, `t` toggles it here, and `Space` → `T` **Enable/disable everywhere** flips a global rule's default everywhere. A project that disagrees with the library stores only the disagreement, and that disagreement is dropped the moment the two agree again, so a rule you toggled off and back on goes back to following the library rather than pinning today's answer.
 
 | Action | Key |
 |--------|-----|
 | Add / edit a rule | `a` / `Enter` or `e` |
 | Enable or disable here | `t` |
-| Flip a global rule's default everywhere | `Space → T` |
-| Move between project and global | `Space → s` |
+| Flip a global rule's default everywhere | `Space` → `T` **Enable/disable everywhere** |
+| Move between project and global | `Space` → `s` **Global/project** |
 | Reorder (changes which rule wins) | `Shift-J` / `Shift-K` |
 | Delete | `d` |
 
