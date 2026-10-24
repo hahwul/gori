@@ -93,7 +93,7 @@ private def result(text, code = nil, field = nil, details = nil) : Gori::MCP::To
     details: details.try { |d| JSON.parse(d.to_json) })
 end
 
-JOB_STOP_KEYS = %w[job_id status stop_requested stopped stop_requested_at stopped_at]
+JOB_STOP_KEYS = %w[job_id status stop_requested stopped stop_requested_at stopped_at note]
 
 describe "MCP job lookup and stop, across all five kinds" do
   it "resolves each kind's job_id, and refuses missing, unknown, and wrong-kind ids exactly" do
@@ -215,6 +215,10 @@ describe "MCP job lookup and stop, across all five kinds" do
         stop["stopped"].as_bool.should be_false
         stop["stop_requested_at"].as_i64.should be > 0
         stop["stopped_at"].raw.should be_nil
+        # `running` beside `stop_requested` reads as a stop that did not take; the note says
+        # how to watch it land, naming this kind's own status tool.
+        stop["note"].as_s.should contain("poll #{kind}_status")
+        stop["note"].as_s.should contain("stop_job{job_id, wait:true}")
         first[kind] = stop
       end
 

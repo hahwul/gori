@@ -268,6 +268,13 @@ module Gori
               j.field "stop_requested_at", sr
             end
             j.field "stopped_at", stopped_at
+            # Still winding down: `status: running` beside `stop_requested: true` reads as a
+            # stop that did not take, so say how to see it land.
+            if status == "running"
+              poll = job_kind_of(job.id).try { |k| suggest_job_tool(k, "status") } || "get_job"
+              j.field "note", "stop requested; the run is still winding down — poll #{poll}, " \
+                              "or stop_job{job_id, wait:true} to block until it ends"
+            end
           end
         end)
       end
