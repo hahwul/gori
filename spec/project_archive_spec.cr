@@ -236,6 +236,16 @@ describe Gori::ProjectArchive do
       ensure
         tampered.close
       end
+
+      manifest["tags"] = JSON::Any.new("web")
+      entries["manifest.json"] = JSON::Any.new(manifest).to_json
+      write_archive(archive_path, entries.to_a)
+      odd = Gori::ProjectArchive.prepare_import(archive_path) # a bad shape does not refuse the traffic
+      begin
+        registry.tags_of(odd.import_into(registry, "Odd copy")).should be_empty
+      ensure
+        odd.close
+      end
     end
   end
 

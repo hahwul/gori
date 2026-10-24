@@ -645,7 +645,7 @@ module Gori::Tui
       elsif ev.ctrl? && key.lower_n?
         # ctrl-n: quick new. If query has text, prefill (or direct-create).
         name = @query.strip
-        if name.empty?
+        if name.empty? || name.starts_with?('#') # a `#tag` search is a tag, not a name
           start_new
         elsif proj = safe_create(name)
           return proj
@@ -872,10 +872,18 @@ module Gori::Tui
 
     private def start_new : Nil
       @mode = :new
-      @name = @query.strip
+      @name, tags = ProjectPicker.new_form_prefill(@query)
       @desc = ""
-      @tag_input = TagInput.new([] of String, ProjectRegistry.tag_counts(@entries))
+      @tag_input = TagInput.new(tags, ProjectRegistry.tag_counts(@entries))
       @new_field = :name
+    end
+
+    # The New form's {name, tags} from the search query. A `#tag` search names a tag, so it
+    # prefills that tag rather than a project called `#web`.
+    def self.new_form_prefill(query : String) : {String, Array(String)}
+      q = query.strip
+      return {q, [] of String} unless q.starts_with?('#')
+      {"", (ProjectRegistry.normalize_tags([q]) rescue [] of String)}
     end
 
     # Kept up on failure for the reason `safe_create` gives below: nothing above `run` rescues.

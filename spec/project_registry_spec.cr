@@ -781,4 +781,15 @@ describe "Gori::ProjectRegistry tags" do
       names.call("bap").should eq(["alpha"])
     end
   end
+
+  it "finds a tag typed with a space by the space, as it was saved" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      reg.create("alpha", tags: ["red team"])
+      names = ->(q : String) { reg.entries.select(&.matches?(Gori::ProjectRegistry.needle(q).not_nil!)).map(&.project.name) }
+      names.call("#red team").should eq(["alpha"])
+      names.call("# red").should eq(["alpha"])
+      names.call("red team").should eq(["alpha"])
+    end
+  end
 end

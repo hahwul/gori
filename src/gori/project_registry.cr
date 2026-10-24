@@ -232,15 +232,19 @@ module Gori
       # live search narrows as the word is typed (`#mo` keeps `mobile`); a bare `#` keeps every
       # tagged project. A plain needle also reaches the tags, by substring like every other
       # spelling here.
+      #
+      # Against a tag the needle is folded as `normalize_tags` stored it, so `#red team` finds
+      # the `red-team` that typing it saved.
       def matches?(needle : String) : Bool
         return true if needle.empty?
         if needle.starts_with?('#')
-          tag = needle.lstrip('#')
+          tag = needle.lstrip('#').strip.gsub(/\s+/, "-")
           return tags.any?(&.downcase.starts_with?(tag))
         end
+        tag = needle.strip.gsub(/\s+/, "-")
         project.name.downcase.includes?(needle) || slug.downcase.includes?(needle) ||
           !!id.try(&.downcase.includes?(needle)) || !!workspace.try(&.downcase.includes?(needle)) ||
-          tags.any?(&.downcase.includes?(needle))
+          tags.any?(&.downcase.includes?(tag))
       end
     end
 

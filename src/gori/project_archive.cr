@@ -134,8 +134,14 @@ module Gori
       flow_count : Int64,
       # The registry's `.tags` sidecar, which the database does not carry. Optional, so an
       # archive from before tags (or for a `--db` project) still reads; an older gori ignores it.
-      tags : Array(String)? = nil do
+      # Any JSON, not `Array(String)`: a hand-made `"tags":"web"` must not refuse the archive.
+      tags : JSON::Any? = nil do
       include JSON::Serializable
+
+      # The string tags, whatever shape the untrusted manifest gave them.
+      def tag_strings : Array(String)
+        tags.try(&.as_a?).try(&.compact_map(&.as_s?)) || [] of String
+      end
     end
 
     # A validated, extracted archive that has not yet changed the local project registry.
@@ -158,7 +164,9 @@ module Gori
         project = registry.import_database(target_name(name), @database_path)
         # Best-effort and salvaged, not validated: the archive is untrusted, and a bad tag is no
         # reason to refuse the traffic it came with.
-        @manifest.tags.try { |tags| registry.set_tags(project, ProjectRegistry.salvage_tags(tags)) rescue nil }
+        unless (tags = @manifest.tag_strings).empty?
+          registry.set_tags(project, ProjectRegistry.salvage_tags(tags)) rescue nil
+        end
         project
       rescue ex : Gori::Error
         raise explain_name_error(ex, name, rename_hint)
@@ -384,7 +392,7 @@ module Gori
         version, inventory = inspect_database(snapshot)
         tags = project.canonical? ? ProjectRegistry.new(File.dirname(project.dir)).tags_of(project) : [] of String
         manifest = Manifest.new(FORMAT_VERSION, project.name, Gori::VERSION,
-          version, Time.utc.to_rfc3339, inventory.flows, tags.empty? ? nil : tags)
+          version, Time.utc.to_rfc3339, inventory.flows, tags.empty? ? nil : JSON::Any.new(tags.map { |t| JSON::Any.new(t) }))
         prepared = PreparedExport.new(workdir, snapshot, project, manifest, inventory, loose_database)
         success = true
         prepared

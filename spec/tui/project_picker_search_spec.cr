@@ -147,3 +147,11 @@ describe "ProjectPicker.delete_confirm_body with disambiguated names" do
     body.should_not contain("Delete 2 projects?")
   end
 end
+
+describe "ProjectPicker.new_form_prefill" do
+  it "prefills a #tag search as a tag and a plain one as the name" do
+    ProjectPicker.new_form_prefill("  acme ").should eq({"acme", [] of String})
+    ProjectPicker.new_form_prefill("#red team").should eq({"", ["red-team"]})
+    ProjectPicker.new_form_prefill("#").should eq({"", [] of String})
+  end
+end
