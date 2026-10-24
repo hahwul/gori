@@ -666,6 +666,8 @@ module Gori
           # A `flow_id` template is CAPTURED evidence; a `template` string is the caller's
           # draft. See `Fuzz::PlanOptions#evidence?`.
           evidence: evidence,
+          # `verbatim:true` — `send_request`'s word, with its meaning: see `Fuzz::PlanOptions#verbatim?`.
+          verbatim: bool_arg(h, "verbatim", false),
           default_target: default_target, target: str(h, "url"),
           auto_mark: bool_arg(h, "auto", false), marks: string_array_arg(h, "marks"),
           # The schema-known gRPC fields to sweep, as the caller NAMED them.
@@ -1580,6 +1582,7 @@ module Gori
           s.field "record_history", enumprop("record requests+responses as History flows (default none; all is capped at #{FUZZ_HISTORY_MAX}); fuzz_results rows then carry flow_id (get_flow). true = all, false = none", RECORD_HISTORY_MODES)
           s.field "save_results", boolprop("persist EVERY result (request, wire, response) in the project. Replies carry run_id + save_status; read with get_fuzz_run")
           s.field "update_content_length", boolprop("recompute Content-Length after each splice, adding one if absent (default true). FALSE sends the template's framing verbatim (smuggling tests); a body with neither CL nor chunked then goes out UNFRAMED (read as empty)")
+          s.field "verbatim", boolprop("send the template exactly as written: no $VAR/$GEN/binding expansion, no CRLF promotion of a bare-LF head, no client hints; implies update_content_length:false. Only the §…§ splice changes it")
           s.field "reframe_grpc", boolprop("recompute the gRPC length prefix after each splice (default FALSE: a stale prefix is kept, counted as grpc_stale_prefix). TRUE for an ordinary unary sweep")
           request_macro_props(s, "candidate", race: true)
           s.field "race_count", intprop("race (TOCTOU) mode: this many connections each hold back the last byte, then release together. Template sent byte-identical, payloads ignored; set match:{status:...} so `matched` marks success (a guarded endpoint shows at most one). Max #{Fuzz::Engine::MAX_RACE_SIZE}. HTTP/1.1 only (h2 sends independently)")

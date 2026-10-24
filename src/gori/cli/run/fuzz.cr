@@ -163,10 +163,11 @@ module Gori
           p.on("--race-warmup=FILE", "Race mode: send+read this raw request on each connection before it holds the race request") { |v| race_warmup_file = v }
           p.on("--follow-redirects", "Follow same-origin redirects") { follow = true }
           p.on("--no-keep-alive", "Dial a fresh connection for every request (default: reuse, on HTTP/1.1 and h2 alike)") { keep_alive = false }
-          # The Repeater's `--verbatim` and Intercept's `update_content_length:false` by the
-          # same name and for the same reason: a CL/CL-TE desync template is the payload, and
-          # recomputing its Content-Length swept a different request than the one written.
-          p.on("--verbatim", "Send the template's Content-Length as written — no auto-resync after payload substitution, and none added to a body that declares none (for CL / CL-TE desync payloads)") { update_cl = false }
+          # The Repeater's `--verbatim`, by the same name and with the same meaning: the template
+          # goes out as written (see `Fuzz::PlanOptions#verbatim?`). It used to stop only the
+          # Content-Length resync, so a bare-LF head was still promoted to CRLF and `$VAR`s still
+          # expanded under the flag that says the bytes are the message.
+          p.on("--verbatim", "Send the template as written: no $VAR/$GEN/binding expansion, no CRLF promotion of a bare-LF head, no client hints, and no Content-Length resync or insertion (CL / CL-TE desync payloads)") { update_cl = false }
           # The mirror image of `--verbatim`, for the OTHER length declaration in the same
           # request. Default off, and the note below still fires for a run that leaves a
           # prefix stale — see `Fuzz::Config#reframe_grpc?` for why the default is that way.
@@ -392,7 +393,7 @@ module Gori
         options = Fuzz::PlanOptions.new(text,
           # A `--flow` template is a CAPTURED request; --request/stdin is a draft the operator
           # authored. See `Fuzz::PlanOptions#evidence?`.
-          evidence: evidence,
+          evidence: evidence, verbatim: !update_cl,
           default_target: default_target, target: target_override,
           auto_mark: auto, marks: marks, grpc_fields: grpc_fields, http2: http2,
           sources: sources, processors: processors, auto_encode: auto_encode,

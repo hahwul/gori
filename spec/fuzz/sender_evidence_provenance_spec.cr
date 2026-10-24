@@ -468,3 +468,85 @@ describe "the plan builders thread PlanOptions#evidence? to the seam" do
     end
   end
 end
+
+# `Sender#expand_bindings?` false is `--verbatim` / `verbatim:true` at the send seam: the
+# operator's own draft goes out with no binding resolved and no client hints added.
+describe "Gori::Fuzz::Sender#expand_bindings? — verbatim at the send seam" do
+  it "resolves no binding when off, while the default still does" do
+    with_ev_store do |store|
+      with_ev_layer(ev_bound(store, "id", TOKEN)) do
+        origin = EvOrigin.new
+        origin.serve
+        begin
+          o = F::Origin.new("http", "127.0.0.1", origin.port)
+          req = "GET /?id=$id HTTP/1.1\r\nHost: 127.0.0.1:#{origin.port}\r\n\r\n".to_slice
+          F::Sender.new(o, ev_outbound, false, false, expand_bindings: false).send(req).error.should be_nil
+          origin.wait_for(1)
+          origin.requests[0].should start_with("GET /?id=$id HTTP/1.1\r\n")
+          F::Sender.new(o, ev_outbound, false, false).send(req).error.should be_nil
+          origin.wait_for(2)
+          origin.requests[1].should start_with("GET /?id=#{TOKEN} HTTP/1.1\r\n")
+          # `$GEN.*` mints at this same seam, so verbatim leaves it literal too.
+          with_env_syntax(Gori::Env::Syntax::Namespaced) do
+            gen = "GET /?u=$GEN.UUID HTTP/1.1\r\nHost: 127.0.0.1:#{origin.port}\r\n\r\n".to_slice
+            F::Sender.new(o, ev_outbound, false, false, expand_bindings: false).send(gen).error.should be_nil
+            F::Sender.new(o, ev_outbound, false, false).send(gen).error.should be_nil
+          end
+          origin.wait_for(4)
+          origin.requests[2].should contain("u=$GEN.UUID ")
+          origin.requests[3].should_not contain("$GEN.UUID")
+        ensure
+          origin.close
+        end
+      end
+    end
+  end
+
+  # `chrome` hints are added only on an https leg; the TLS handshake against this hang-up
+  # listener fails, but `Result#wire` is the bytes the seam built either way.
+  it "adds no chrome client hints when off" do
+    server = TCPServer.new("127.0.0.1", 0)
+    spawn do
+      while c = server.accept?
+        c.close
+      end
+    end
+    begin
+      ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      req = "GET / HTTP/1.1\r\nHost: t.test\r\nUser-Agent: #{ua}\r\n\r\n".to_slice
+      o = F::Origin.new("https", "127.0.0.1", server.local_address.port)
+      wire = ->(expand : Bool) do
+        r = F::Sender.new(o, ev_outbound, false, false, timeout: 2.seconds, tls_preset: "chrome",
+          expand_bindings: expand).send(req)
+        String.new(r.wire.should_not be_nil)
+      end
+      wire.call(true).should contain("sec-ch-ua")
+      wire.call(false).should eq(String.new(req))
+    ensure
+      server.close
+    end
+  end
+end
+
+# `Backend#send_pipeline` documents every member as whole-buffer verbatim, and the probe path
+# (its only caller) marks every other send that way. `Sender` resolved bindings in it anyway.
+describe "Gori::Fuzz::Sender#send_pipeline — members are verbatim" do
+  it "resolves no binding inside a pipeline member" do
+    with_ev_store do |store|
+      with_ev_layer(ev_bound(store, "id", TOKEN)) do
+        origin = EvOrigin.new
+        origin.serve
+        begin
+          o = F::Origin.new("http", "127.0.0.1", origin.port)
+          rs = F::Sender.new(o, ev_outbound, false, false).send_pipeline([gql_request(origin.port)], 2.seconds)
+          rs.size.should eq(1)
+          origin.wait_for(1)
+          origin.requests[0].should contain("query GetUser($id: ID!)")
+          origin.requests[0].should_not contain(TOKEN)
+        ensure
+          origin.close
+        end
+      end
+    end
+  end
+end

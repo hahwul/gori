@@ -133,6 +133,17 @@ module Gori::Fuzz
     # ARE a draft, the editor's fresh lines really do end in LF, and a `$KEY` there is a
     # variable reference the operator meant.
     property? evidence : Bool
+    # LITERALNESS: send the template the operator wrote AS WRITTEN — `gori run fuzz
+    # --verbatim`, MCP `fuzz_start{verbatim:true}`. The Repeater's `--verbatim` by the same
+    # name and the same meaning (`Repeater::PlanOptions#expand_request?`/`#expand_bindings?`):
+    # no `Env.expand_wire` (so a bare-LF head stays bare-LF and `$ENV`/`$GEN`/`$$` stay the
+    # literal bytes), no session-binding pass and no client hints at the send seam
+    # (`Sender#expand_bindings?`). The `§…§` splice is the only change a payload makes.
+    #
+    # A separate word from `evidence?` because it is not provenance: the template is the
+    # operator's draft. It switches `Config#update_content_length?` off (`Plan.build`, before
+    # anything reads it): a `--verbatim` that re-framed the body would not be one.
+    property? verbatim : Bool
     # The origin the seeding flow implies, when there is one (nil for --request/stdin).
     property default_target : String?
     # An explicit target, which wins over `default_target` when non-blank.
@@ -221,6 +232,7 @@ module Gori::Fuzz
     def initialize(@template : String = "",
                    *,
                    @evidence : Bool = false,
+                   @verbatim : Bool = false,
                    @default_target : String? = nil,
                    @target : String? = nil,
                    @auto_mark : Bool = false,
@@ -427,6 +439,7 @@ module Gori::Fuzz
     end
 
     def self.build(options : PlanOptions, outbound : Gori::Outbound) : Plan
+      options.config.update_content_length = false if options.verbatim?
       # ONE `Env.expand_wire` over the template, before anything reads it.
       #
       # There USED to be a refusal in front of it, when a token in the HEAD resolved to
@@ -460,6 +473,10 @@ module Gori::Fuzz
           # narrowed evidence expansion CONSUMED `$$ENV.X` and replayed `$ENV.X`. The narrowing is
           # about the var TABLE; the escape belongs to the capture either way.
           (vars = options.env_vars) ? String.new(Env.expand_wire(options.template, vars, unescape: Env::Owns::None)) : options.template
+        elsif options.verbatim?
+          # `PlanOptions#verbatim?`: the operator's bytes, no pass at all — and so no
+          # unresolved-env refusal either, as for the Repeater's `--verbatim`.
+          options.template
         else
           # …except a namespaced `$ENV.X` with no value, refused in a draft (#1666).
           if detail = Env.unresolved_env(options.template)
@@ -471,7 +488,7 @@ module Gori::Fuzz
       # frame the operator typed (`--message`, MCP `messages`) resolves its `$KEY`, a CAPTURED
       # frame does not. `Env.expand`, not `expand_wire` — a frame has no head, so there is no
       # LF→CRLF promotion to make and nothing in it is a message boundary.
-      ws_texts = options.ws_messages.try(&.map { |m| m.evidence ? m.payload : Env.expand(m.payload) })
+      ws_texts = options.ws_messages.try(&.map { |m| m.evidence || options.verbatim? ? m.payload : Env.expand(m.payload) })
 
       if options.auto_mark?
         text = Template.auto_mark(text)
@@ -641,7 +658,7 @@ module Gori::Fuzz
         # nil and the surfaces' handshake-count line naturally prints nothing.
         keep_alive: config.keep_alive? && ws_script.nil?,
         idle_conns: config.concurrency.clamp(1, Engine::MAX_CONCURRENCY),
-        evidence: options.evidence?,
+        evidence: options.evidence?, expand_bindings: !options.verbatim?,
         ws_idle: config.ws_idle, ws_keep_key: config.ws_keep_key?,
         # The run's fingerprint override (#844), validated just above so an unknown name is
         # refused before the first dial rather than applying nothing and dialling with gori's

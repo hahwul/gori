@@ -255,7 +255,7 @@ The ordinary `gori run fuzz …` command remains ephemeral. Over MCP, pass `save
 
 ### Framing a Sweep
 
-`Content-Length` is recomputed after every payload is spliced in, and one is **added** when the template carries a body but declares no length at all, so an ordinary sweep stays self-consistent; `--verbatim` (MCP `update_content_length: false`, or turning off **Auto Content-Length** on the Fuzzer's ADVANCED card) turns both halves off, because a length that disagrees with the body is the whole point of a CL / CL-TE desync test.
+`Content-Length` is recomputed after every payload is spliced in, and one is **added** when the template carries a body but declares no length at all, so an ordinary sweep stays self-consistent; `--verbatim` (MCP `update_content_length: false`, or turning off **Auto Content-Length** on the Fuzzer's ADVANCED card) turns both halves off, because a length that disagrees with the body is the whole point of a CL / CL-TE desync test. `--verbatim` (MCP `verbatim: true`) goes further, as on the Repeater: the template is sent as written, with no token expansion (`$ENV.KEY`, `$BIND.NAME` and `$GEN.*` stay literal and `$$` is not consumed), no bare-LF promotion and no client hints, so the `§…§` splice is the only change a payload makes. The TUI Fuzzer has no such toggle yet.
 
 That second half matters more than it sounds: an HTTP/1.1 request body has no close-delimited form, so a body with neither `Content-Length` nor a chunked `Transfer-Encoding` is read by the origin as a **zero-length body**: the payloads go out unread while every row still reports a status. When `--verbatim` leaves a template in exactly that shape, gori says so before the first send rather than letting the run go quiet.
 

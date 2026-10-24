@@ -99,7 +99,7 @@ describe "Fuzz::Engine redirect following" do
       "GET /start?q=one HTTP/1.1",
       "GET /next?ok=1 HTTP/1.1",
     ])
-    wire[1].should match(/\AGET \/next\?ok=1 HTTP\/1\.1\r\nHost: 127\.0\.0\.1:\d+\r\nConnection: close\r\n\r\n\z/)
+    wire[1].should match(/\AGET \/next\?ok=1 HTTP\/1\.1\r\nHost: 127\.0\.0\.1\r\nConnection: close\r\n\r\n\z/)
   end
 
   it "drops a Location's fragment from the hop's request line" do
@@ -300,7 +300,7 @@ describe "Fuzz::Engine redirect following on a keep-alive run" do
     lines = origin.heads[0].map(&.lines.first)
     lines.should eq(["GET /start?q=one HTTP/1.1", "GET /next HTTP/1.1",
                      "GET /start?q=two HTTP/1.1", "GET /next HTTP/1.1"])
-    origin.heads[0][1].should match(/\AGET \/next HTTP\/1\.1\r\nHost: 127\.0\.0\.1:\d+\r\n\r\n\z/)
+    origin.heads[0][1].should match(/\AGET \/next HTTP\/1\.1\r\nHost: 127\.0\.0\.1\r\n\r\n\z/)
     pool = backend.pool.should_not be_nil
     pool.dialed.should eq(1_i64)
     pool.reused.should eq(3_i64)

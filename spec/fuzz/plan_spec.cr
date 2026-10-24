@@ -704,3 +704,28 @@ describe "Gori::Fuzz::Plan --mark over already-marked text" do
     plan.template.render(plan.template.default_payloads).to_a.should eq("#{head}#{plain}".to_slice.to_a)
   end
 end
+
+# `PlanOptions#verbatim?` (`gori run fuzz --verbatim`, MCP `verbatim:true`): the operator's
+# template as written. It used to stop only the Content-Length resync, so `expand_wire` still
+# promoted a bare-LF head to CRLF and expanded `$GEN` / consumed `$$` under the flag.
+describe "Fuzz::Plan.build — verbatim" do
+  raw = "GET /?q=§a§&u=$GEN.UUID&e=$$ENV.X HTTP/1.1\r\nHost: t.test\r\nX-A: 1\nX-B: 2\r\n\r\n"
+  build = ->(verbatim : Bool, cfg : F::Config) do
+    F::Plan.build(F::PlanOptions.new(raw, verbatim: verbatim, target: "http://t.test",
+      sources: [F::InlineList.new(["P"])] of F::PayloadSource, config: cfg, verify: false),
+      ungated_outbound)
+  end
+
+  it "skips expand_wire and the Content-Length resync, and the draft control still runs both" do
+    with_env_syntax(Gori::Env::Syntax::Namespaced) do
+      cfg = F::Config.new(keep_bodies: :none)
+      base = String.new(build.call(true, cfg).generator.baseline_raw)
+      base.should eq("GET /?q=a&u=$GEN.UUID&e=$$ENV.X HTTP/1.1\r\nHost: t.test\r\nX-A: 1\nX-B: 2\r\n\r\n")
+      cfg.update_content_length?.should be_false
+
+      draft = String.new(build.call(false, F::Config.new(keep_bodies: :none)).generator.baseline_raw)
+      draft.should contain("X-A: 1\r\nX-B: 2")
+      draft.should contain("e=$ENV.X ")
+    end
+  end
+end

@@ -294,6 +294,20 @@ module Gori::Fuzz
     # the probe/analyzer paths, whose buffers are handled at their own call sites.
     getter? evidence : Bool
 
+    # LITERALNESS, carried from `PlanOptions#verbatim?` — the twin of
+    # `Repeater::Sender#expand_bindings?`, and a separate word from `evidence?` for that one's
+    # reason: a `--verbatim` template is the operator's own draft, not a capture. Off, no byte
+    # of an outbound request or frame resolves a session binding (the caller's spans widen to
+    # `Backend.all_verbatim`, as for evidence) and the `chrome` preset's client hints are not
+    # added: `--verbatim` / `verbatim:true` promise the bytes the operator wrote, exactly. The
+    # session-slot overlay still applies, as on the Repeater (`Repeater::Sender#wire`).
+    getter? expand_bindings : Bool
+
+    # No byte of what this sender is handed may resolve a binding: evidence, or verbatim.
+    private def literal? : Bool
+      @evidence || !@expand_bindings
+    end
+
     # `keep_alive` reuses one connection across many sends (see ConnPool). `idle_conns` bounds
     # the parked sockets and should be the run's concurrency: one per worker fiber is the most
     # that can ever be checked out at once, so a larger pool would only hold dead sockets open.
@@ -359,6 +373,7 @@ module Gori::Fuzz
                    @overrides : Gori::HostOverrides? = nil,
                    keep_alive : Bool = false, idle_conns : Int32 = 0,
                    @evidence : Bool = false, @slot_overlay : Bool = true,
+                   @expand_bindings : Bool = true,
                    @ws_idle : Time::Span = Repeater::WsEngine::DEFAULT_IDLE,
                    @ws_keep_key : Bool = false, tls_preset : String? = nil,
                    @sse : Repeater::StreamBound? = Repeater::StreamBound::SWEEP)
@@ -403,7 +418,7 @@ module Gori::Fuzz
       # `evidence?` for why this is the only place the two ideas need to meet: a run is
       # either template+payloads (narrow spans) or evidence (the maximal one), and the
       # maximal span contains every narrow one, so nothing a previous fix protected is lost.
-      verbatim = Backend.all_verbatim(bytes) if @evidence
+      verbatim = Backend.all_verbatim(bytes) if literal?
       # Session bindings (#501) resolve HERE, per send, not at plan-build: a rotating token
       # can change between request 1 and request 20 of the same run, which is exactly the
       # run that otherwise produces a page of 401s. Env vars are untouched — the plan
@@ -454,8 +469,8 @@ module Gori::Fuzz
       bytes = Gori::Env.overlay_slot(bytes, gen) if @slot_overlay
       # The `chrome` preset's client hints (#1174), last, from the User-Agent these bytes now
       # carry — with or without the slot overlay, since an Authorize identity is still sent
-      # over the same handshake.
-      bytes = Gori::Env.client_hints(bytes, gen)
+      # over the same handshake. Not under `verbatim` (`expand_bindings?`).
+      bytes = Gori::Env.client_hints(bytes, gen) if @expand_bindings
       # Sandbox mode / an explicit EXCLUDE rule hard-blocks BEFORE the socket, so a
       # blocked attempt never reaches the network. It still costs a request from the
       # engine's budget, exactly as CappedBackend already charges retries and redirect
@@ -501,7 +516,7 @@ module Gori::Fuzz
       # handshake was authored by anyone, so the caller's exclusion grows to the whole buffer.
       # The FRAMES carry provenance individually (`WsFrame#evidence`) because the two
       # populations mix in one script — a `--message` override sits beside seeded rows.
-      verbatim = Backend.all_verbatim(handshake) if @evidence
+      verbatim = Backend.all_verbatim(handshake) if literal?
       if err = @outbound.admit # before the refresh and the mint, as in `send`
         return {refused(err), WsOutcome.failed}
       end
@@ -515,13 +530,13 @@ module Gori::Fuzz
       wire = Gori::Env.overlay_slot(wire, ws_gen) if @slot_overlay
       # A handshake gets no hints (`ClientHints.apply` says why); called so this seam holds the
       # same pair as every other and a later answer lands here too.
-      wire = Gori::Env.client_hints(wire, ws_gen)
+      wire = Gori::Env.client_hints(wire, ws_gen) if @expand_bindings
       if err = @outbound.sweep_block(@origin.scheme, @origin.host, Gori::Outbound.request_target(wire), @origin.port)
         @outbound.refund(1)
         return {refused(err), WsOutcome.failed}
       end
       msgs = frames.map do |f|
-        payload = f.evidence ? f.payload : Gori::Env.expand_bindings_frame(f.payload, f.payload_spans, generation: generation)
+        payload = f.evidence || !@expand_bindings ? f.payload : Gori::Env.expand_bindings_frame(f.payload, f.payload_spans, generation: generation)
         # `f.shape` rides along. Rebuilding without it silently resets every frame a binding
         # touched back to FIN=1 / RSV=0 / fresh-mask — the one defect
         # `Repeater::Sender#expand_messages` names in its own comment.
@@ -644,8 +659,12 @@ module Gori::Fuzz
       # per member, and the verdict is taken on the bytes the pipeline will write.
       reqs = requests.map do |b|
         gen = generation
-        wired = @evidence ? b : Gori::Env.expand_bindings(b, generation: gen)
-        Gori::Env.client_hints(Gori::Env.overlay_slot(wired, gen), gen)
+        # WHOLE-buffer verbatim, as `Backend#send_pipeline` documents and as the probe path marks
+        # every other send (`Fuzz::Backend.all_verbatim` at each call site in `probe/`): a crafted
+        # smuggling probe — or a captured member — carries no operator `$NAME`, so nothing in
+        # it resolves a binding. That is `expand_bindings` over the maximal span: a no-op.
+        wired = Gori::Env.overlay_slot(b, gen)
+        @expand_bindings ? Gori::Env.client_hints(wired, gen) : wired
       end
       # GROUP-GATE, sweep-side, mirroring `Repeater::Sender#group_refusal`: one blocked member
       # refuses the WHOLE batch and returns all-error Results — a group is one connection
@@ -691,10 +710,10 @@ module Gori::Fuzz
       # race's whole premise is that nothing else happens in that window.
       before_send_refresh
       bytes = jobs[0].bytes
-      verbatim = @evidence ? Backend.all_verbatim(bytes) : jobs[0].payload_spans
+      verbatim = literal? ? Backend.all_verbatim(bytes) : jobs[0].payload_spans
       race_gen = generation
       expanded = Gori::Env.overlay_slot(Gori::Env.expand_bindings(bytes, verbatim, generation: race_gen), race_gen)
-      expanded = Gori::Env.client_hints(expanded, race_gen)
+      expanded = Gori::Env.client_hints(expanded, race_gen) if @expand_bindings
       # Nothing to hold back — degrade rather than slice a negative/empty tail. Never hit by a
       # real HTTP request (always well over 2 bytes); a defensive floor for a hand-built Job.
       if expanded.size < 2
@@ -1607,6 +1626,7 @@ module Gori::Fuzz
       current = raw
       total_us = raw.duration_us
       base = Gori::Outbound.request_target(request)
+      authority = request_authority(request, @backend.origin)
       # A keep-alive re-send ANYWHERE in the chain has to reach the row: the collapsed Result
       # below keeps the last hop's fields, so without this an original request that was
       # re-sent and then redirected would report as a single clean send.
@@ -1629,7 +1649,7 @@ module Gori::Fuzz
         break unless resp && (300..399).includes?(resp.status)
         loc = resp.headers.get?("location")
         break unless loc
-        nxt, path = redirect_request(loc, base)
+        nxt, path = redirect_request(loc, base, authority)
         break unless nxt && path
         base = path
         # WHOLE-message verbatim, and not `nil` and not the job's spans. `Sender#send`'s
@@ -1681,11 +1701,30 @@ module Gori::Fuzz
         wire: raw.wire) : current
     end
 
+    # The authority the request ADDRESSED: its own single `Host:` value when it has one gori
+    # may write back into a line it authors, else the dial origin's. A template dialled at
+    # `10.0.0.5` with `Host: app.internal` is a request to the `app.internal` vhost, so a hop
+    # written with `Host: 10.0.0.5` followed `302 Location: /next` to the DEFAULT vhost, and an
+    # absolute `Location: http://app.internal/next` was judged cross-origin and not followed.
+    #
+    # Operator bytes, but they land in a hop gori writes, so `request_token_safe?` (no SP, CTL
+    # or DEL: nothing that could end the line) and a parsable authority are required; a
+    # duplicated or unsafe `Host:` is a test of its own and the hop falls back to the dial
+    # origin. Only `Host` carries over. Cookie / Authorization do not, as before.
+    private def request_authority(request : Bytes, o : Origin) : String
+      dial = Repeater::FlowRequest.authority(o.scheme, o.host, o.port)
+      hosts = Proxy::Codec::Http1.parse_request_head(request).headers.get_all("host")
+      return dial unless hosts.size == 1 && (h = hosts[0]).presence
+      return dial unless Proxy::Codec::Http1.request_token_safe?(h)
+      (URI.parse("#{o.scheme}://#{h}/").host.presence rescue nil) ? h : dial
+    end
+
     # The next hop's request bytes and its request-target, or `{nil, nil}` when the
-    # `Location` is not one this run may follow. `base` is the request-target the 3xx answered.
-    private def redirect_request(loc : String, base : String) : {Bytes?, String?}
+    # `Location` is not one this run may follow. `base` is the request-target the 3xx answered;
+    # `authority` is the one it addressed (`request_authority`), and the hop's `Host:`.
+    private def redirect_request(loc : String, base : String, authority : String) : {Bytes?, String?}
       o = @backend.origin
-      path = resolve_redirect_path(loc, o, base)
+      path = resolve_redirect_path(loc, o, base, authority)
       # The `Location` is chosen by whatever host answered, and the next line splices it
       # straight into a request line — so it gets the same rule as any other remote-chosen
       # request-line token (#397). Checked HERE rather than inside resolve_redirect_path
@@ -1705,10 +1744,10 @@ module Gori::Fuzz
       # the run reporting the 3xx it actually got. That matches the existing treatment of a
       # cross-origin Location — the chain stops, the 3xx is the result.
       return {nil, nil} unless path && Proxy::Codec::Http1.request_token_safe?(path)
-      # `FlowRequest.authority` is the one spelling of a `Host:` value gori writes: an IPv6
-      # literal bracketed (`Host: ::1:8080` is not a host and a port, it is a parse error), the
-      # port dropped when it is the scheme default.
-      host = Repeater::FlowRequest.authority(o.scheme, o.host, o.port)
+      # The request's own `Host:`, else `FlowRequest.authority` — the one spelling of a `Host:`
+      # value gori writes: an IPv6 literal bracketed (`Host: ::1:8080` is not a host and a port,
+      # it is a parse error), the port dropped when it is the scheme default.
+      host = authority
       # `Connection: close` is an h1 instruction, and it is only written when nothing pools: on
       # a pooled h1 run it made `ConnPool.reusable_request?` refuse the socket, so every hop
       # dialed a fresh one for a bodyless GET gori wrote itself — no operator bytes to keep.
@@ -1724,7 +1763,7 @@ module Gori::Fuzz
     # resolves against (`next`, `?page=2`, `../login` — all legal per RFC 7231 §7.1.2, and all
     # of them used to be dropped on the floor as "unparsable", so the sweep reported the 3xx
     # and the operator read "followed nothing" as "nothing to follow").
-    private def resolve_redirect_path(loc : String, o : Origin, base : String) : String?
+    private def resolve_redirect_path(loc : String, o : Origin, base : String, authority : String) : String?
       # `//host/x` is a network-path reference (RFC 3986 §4.2) — it names ANOTHER authority, and
       # is the canonical open-redirect answer. Resolved against the origin's scheme so the
       # same-origin check below decides: a cross-origin authority is dropped like any other,
@@ -1733,26 +1772,43 @@ module Gori::Fuzz
       # A fragment is never part of a request-target (RFC 9112 §3.2.1); the `resolve` branch
       # below drops it via path + query, so this one must too.
       return loc.partition('#')[0] if loc.starts_with?('/')
-      uri = (redirect_base(o, base).resolve(loc) rescue nil)
-      return nil unless uri
-      # Scheme and host are case-insensitive (RFC 3986 §3.1, §3.2.2); `Location: HTTP://Host/`
-      # is the same origin. `parse_target`'s bracket rule for an IPv6 literal, in reverse.
-      sc = (uri.scheme || o.scheme).downcase
-      host = (uri.host || "")
-      host = host[1..-2] if host.starts_with?('[') && host.ends_with?(']')
-      return nil unless host.downcase == o.host.downcase
-      pt = uri.port || (sc == "https" ? 443 : 80)
-      return nil unless sc == o.scheme && pt == o.port
+      uri = (redirect_base(o, base, authority).resolve(loc) rescue nil)
+      return nil unless uri && same_origin?(uri, o, authority)
       p = uri.path
       p = "/" if p.empty?
       uri.query ? "#{p}?#{uri.query}" : p
     end
 
+    # Scheme and host are case-insensitive (RFC 3986 §3.1, §3.2.2); `Location: HTTP://Host/`
+    # is the same origin. Same origin is the dial origin OR the authority the request
+    # addressed (`request_authority`): the hop dials the same socket address either way.
+    private def same_origin?(uri : URI, o : Origin, authority : String) : Bool
+      sc = (uri.scheme || o.scheme).downcase
+      return false unless sc == o.scheme
+      return true if same_authority?(uri, sc, o.host, o.port)
+      addressed = URI.parse("#{o.scheme}://#{authority}/") rescue nil
+      !!addressed && same_authority?(uri, sc, addressed.host || "", addressed.port || default_port(sc))
+    end
+
+    # `uri`'s host and port against `host`/`port`. `parse_target`'s bracket rule for an IPv6
+    # literal, in reverse, on both sides.
+    private def same_authority?(uri : URI, sc : String, host : String, port : Int32) : Bool
+      unbracket(uri.host || "").downcase == unbracket(host).downcase && (uri.port || default_port(sc)) == port
+    end
+
+    private def unbracket(h : String) : String
+      h.starts_with?('[') && h.ends_with?(']') ? h[1..-2] : h
+    end
+
+    private def default_port(sc : String) : Int32
+      sc == "https" ? 443 : 80
+    end
+
     # The absolute URI the last request went to, for `URI#resolve`. An origin-form target
-    # hangs off the dial origin; an absolute-form one already is a URI; anything else (`*`,
-    # a garbled line) resolves from the root, which is the least surprising base there is.
-    private def redirect_base(o : Origin, target : String) : URI
-      authority = Repeater::FlowRequest.authority(o.scheme, o.host, o.port)
+    # hangs off the authority the request addressed; an absolute-form one already is a URI;
+    # anything else (`*`, a garbled line) resolves from the root, which is the least
+    # surprising base there is.
+    private def redirect_base(o : Origin, target : String, authority : String) : URI
       root = "#{o.scheme}://#{authority}/"
       abs = if target.starts_with?('/')
               "#{o.scheme}://#{authority}#{target}"
