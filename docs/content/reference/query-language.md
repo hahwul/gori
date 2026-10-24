@@ -13,6 +13,7 @@ Match a field with `field:value` (substring or exact, depending on the field):
 | Field | Matches |
 |-------|---------|
 | `host` | Request host |
+| `port` | Server port, an integer (`port:8443`, `port:>=8000`), so two services on one host can be told apart |
 | `path` | Request path **and query string**, so `-path:x` also drops `?q=x` |
 | `url` | Full URL |
 | `method` | HTTP method |
@@ -163,7 +164,7 @@ status:2xx      status:4xx      status:5xx
 
 ## Comparisons
 
-Numeric fields (`status`, `size`, `reqsize`, `respsize`, `dur`) support comparison operators `<`, `<=`, `>`, `>=`, `=`:
+Numeric fields (`status`, `port`, `size`, `reqsize`, `respsize`, `dur`) support comparison operators `<`, `<=`, `>`, `>=`, `=`:
 
 ```text
 status:>=500        server errors
@@ -272,7 +273,7 @@ Every filter bar shares the boolean grammar above (`AND`/`OR`/`NOT`, `-`, parent
 | History, `gori run history`, MCP | The full table above |
 | Sitemap, `gori run sitemap`, MCP `list_sitemap` | The same, plus `tag:` for per-node path memos: a case-insensitive substring of the memo, matching the tagged path, everything under it and the paths leading to it; `-tag:` drops that subtree, and every `tag:` term is ANDed with the rest of the query |
 | Colour rules (Colormarker) | The same. A colour rule takes the query the History bar takes |
-| Intercept catch condition, extract-rule condition | `host`, `path`, `url`, `method`, `scheme`, `status`, `proto`, `header`, `body`. **Every other field is refused** (see below). `proto` answers only `ws` or `http` here: gRPC and SSE are read off a captured response's Content-Type, so `proto:grpc`, `proto:sse` and the TLS spellings never match |
+| Intercept catch condition, extract-rule condition | `host`, `port`, `path`, `url`, `method`, `scheme`, `status`, `proto`, `header`, `body`. **Every other field is refused** (see below). `proto` answers only `ws` or `http` here: gRPC and SSE are read off a captured response's Content-Type, so `proto:grpc`, `proto:sse` and the TLS spellings never match |
 | Probe | `severity` (`sev`), `status` (`st`), `category` (`cat`), `host`, `code` |
 | Issues | `severity` (`sev`), `status` (`st`), `host`, `title`, `cvss` |
 | Sub-tab strip `/` filter (Repeater and the other tool tabs), MCP `get_repeater_context` `filter` | `tag`, `name`, `host` (`target`), `method` (`verb`), `status`: the last send's outcome as a code matched by prefix (`status:4` is every 4xx), `error` or `unsent` |

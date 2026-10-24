@@ -149,12 +149,12 @@ module Gori
       AND/OR/NOT count only UPPERCASE and unquoted ("AND" is a literal). Precedence NOT > AND > OR.
 
       Fields (: value match, ~ regex):
-        host path method scheme proto status size reqsize respsize dur header body ws rpc url stub rewritten static src via scope cache
+        host port path method scheme proto status size reqsize respsize dur header body ws rpc url stub rewritten static src via scope cache
 
       Sides: header: and body: search REQUEST AND RESPONSE; prefix req. or resp. (res.) for one side —
       req.body:token resp.header:set-cookie -resp.body:abcd. req.size/resp.size = reqsize/respsize.
 
-      Comparisons (status size reqsize respsize dur): status:>=500  size:>10000  dur:<2s (ms default; ms|s)
+      Comparisons (status port size reqsize respsize dur): status:>=500  port:8443  size:>10000  dur:<2s (ms default; ms|s)
       Status class: status:5xx  status:4xx
       Protocol: proto:ws  proto:grpc  proto:sse  proto:http
 
@@ -450,7 +450,7 @@ module Gori
     # History's and Colormarker's completion pools, Colormarker's unknown-field refusal and the
     # docs all read it, so a field added to `field_cond` becomes offerable everywhere at once
     # instead of in the four hand-kept copies that used to drift.
-    FIELDS = %w[host path url method scheme proto status size reqsize respsize dur header body ws rpc stub rewritten static src via scope cache
+    FIELDS = %w[host port path url method scheme proto status size reqsize respsize dur header body ws rpc stub rewritten static src via scope cache
       req.header resp.header req.body resp.body]
 
     # The fields `~` compiles on. `method` and `scheme` are text columns like `host`, so a regex over
@@ -636,6 +636,7 @@ module Gori
     # naming the bound rather than restating the field name.
     FIELD_HELP = {
       "host"        => "server host — substring; host~ for regex",
+      "port"        => "server port — exact; >= <= compare",
       "path"        => "path AND query string — substring",
       "url"         => "scheme://host + path — substring",
       "method"      => "exact — GET POST …; method~ for regex",
@@ -744,7 +745,7 @@ module Gori
       {"-path:/static", "leading - excludes — so does NOT path:/static"},
       {"NOT (host:cdn OR host:img)", "NOT or -( negates a whole group"},
       {"body~secret\\d+", "~ is regex; : is plain substring"},
-      {"status:>=500 dur:>1.5s", ">= <= > < = on status size dur"},
+      {"status:>=500 dur:>1.5s", ">= <= > < = on status port size dur"},
       {"resp.body:token", "req. / resp. picks one side of body: header:"},
       {"host:\"my host\"", "quotes keep spaces inside one term"},
       {"login", "a bare word searches method, host and path"},
@@ -834,6 +835,7 @@ module Gori
       when "scheme"                              then {"scheme = ?", [value.downcase] of DB::Any}
       when "proto"                               then proto_cond(value)
       when "status"                              then status_cond(value)
+      when "port"                                then port_cond(value)
       when "size", "reqsize", "respsize"         then size_cond(field, value)
       when "dur"                                 then duration_cond(value)
       when "header", "req.header", "resp.header" then header_cond(value, side_of(field))
@@ -1336,6 +1338,15 @@ module Gori
       n = rest.to_i?
       return nil unless n
       {"status #{op} ?", [n] of DB::Any}
+    end
+
+    # `port:` — the server port every row carries, so two services on one host can be told apart
+    # (`host:` is the hostname alone). An integer with `status:`'s comparison forms, minus the
+    # class shorthand a port has no use for; a non-number drops the term, like a bad status:.
+    private def self.port_cond(value : String) : {String, Array(DB::Any)}?
+      op, rest = split_op(value)
+      n = rest.to_i?
+      n ? {"port #{op} ?", [n] of DB::Any} : nil
     end
 
     # Numeric comparison on an INTEGER column/expression. `size:` uses the total

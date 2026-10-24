@@ -169,6 +169,14 @@ describe Gori::InterceptFilter do
     Gori::InterceptFilter.new("status:<400").matches?(res(200)).should be_true
   end
 
+  it "matches port: with comparisons, and does not refuse it as a field it cannot answer" do
+    on = ->(port : Int32?) { Gori::InterceptFilter::Subject.new(method: "GET", host: "acme.test", target: "/", scheme: "http", port: port) }
+    Gori::InterceptFilter.new("port:8080").matches?(on.call(8080)).should be_true
+    Gori::InterceptFilter.new("port:8080").matches?(on.call(9090)).should be_false
+    Gori::InterceptFilter.new("port:>=9000").matches?(on.call(9090)).should be_true
+    Gori::InterceptFilter.unsupported_field_reason("port:8080").should be_nil
+  end
+
   it "ANDs terms within a group, ORs across OR" do
     f = Gori::InterceptFilter.new("method:POST host:acme")
     f.matches?(req(method: "POST", host: "acme.test")).should be_true
@@ -264,7 +272,7 @@ describe Gori::InterceptFilter do
       # message carries its payload); `header:`/`url:` joined when the gates began passing the
       # head they already had. What is still missing needs an exchange that has FINISHED —
       # `size:`/`respsize:`/`dur:` — or a capture decision not yet made (`stub:`).
-      Gori::InterceptFilter::FIELDS.should eq(%w(host path url method scheme status proto header body))
+      Gori::InterceptFilter::FIELDS.should eq(%w(host port path url method scheme status proto header body))
       Gori::InterceptFilter.suggestions("s", 1).should eq(["scheme:", "status:"]) # not size:
       Gori::InterceptFilter.suggestions("d", 1).should be_empty
       Gori::InterceptFilter.suggestions("he", 2).should eq(["header:"])

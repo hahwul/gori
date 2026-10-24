@@ -303,10 +303,10 @@ Cited from `src/gori/ql.cr`.
 QL is a Lucene/KQL-style boolean filter over captured flows: bare terms for free text,
 `field:value` predicates, `~`-prefixed regex, and `AND` / `OR` / `NOT` / grouping.
 
-- `:` fields: `host` `path` `method` `scheme` `proto` `status` `size` `reqsize` `respsize`
+- `:` fields: `host` `port` `path` `method` `scheme` `proto` `status` `size` `reqsize` `respsize`
   `dur` `header` `body`
 - `~` regex on: `host` `path` `url` `header` `body`
-- comparison ops (`<=` `>=` `<` `>` `=`) apply to `status`, `size`, `reqsize`, `respsize`,
+- comparison ops (`<=` `>=` `<` `>` `=`) apply to `status`, `port`, `size`, `reqsize`, `respsize`,
   `dur`
 
 It compiles to a SQL `WHERE` fragment plus bound params. Values are always parameterised,

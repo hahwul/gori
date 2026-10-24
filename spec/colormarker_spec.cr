@@ -516,14 +516,14 @@ describe Gori::Colormarker do
         # A value each field actually ACCEPTS: a term QL drops (`proto:x`) folds the condition to
         # match-all, and being refused for THAT is a different — and correct — answer.
         value = case field
-                when "status", "size", "reqsize", "respsize", "dur" then "1"
-                when "proto"                                        then "ws"
-                when "stub", "rewritten", "static"                  then "true"
-                when "scope"                                        then "in"
-                when "src"                                          then "repeater"
-                when "via"                                          then "mcp"
-                when "cache"                                        then "hit"
-                else                                                     "x"
+                when "status", "port", "size", "reqsize", "respsize", "dur" then "1"
+                when "proto"                                                then "ws"
+                when "stub", "rewritten", "static"                          then "true"
+                when "scope"                                                then "in"
+                when "src"                                                  then "repeater"
+                when "via"                                                  then "mcp"
+                when "cache"                                                then "hit"
+                else                                                             "x"
                 end
         Gori::Colormarker.unusable_reason("#{field}:#{value}").should be_nil
       end

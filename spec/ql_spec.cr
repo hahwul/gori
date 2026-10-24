@@ -291,6 +291,21 @@ describe Gori::QL do
     end
   end
 
+  # Two services on one host: `host:` is the hostname alone, so only `port:` tells them apart.
+  it "port: separates two services on one host, with status:'s comparisons" do
+    with_store do |store|
+      api = capture_on_port(store, "http", "acme.test", 8080, "/x")
+      admin = capture_on_port(store, "https", "acme.test", 9443, "/x")
+      ids = ->(q : String) { store.search(Gori::QL.parse(q), 50).map(&.id).sort! }
+      ids.call("host:acme.test port:8080").should eq([api])
+      ids.call("port:>=9000").should eq([admin])
+      ids.call("-port:8080").should eq([admin])
+      Gori::QL.known_field?("port").should be_true
+      Gori::QL.analyze("port:abc").ignored.should eq(["port:abc"])
+      Gori::QL.analyze("port:8xx").ignored.should eq(["port:8xx"]) # no class shorthand on a port
+    end
+  end
+
   # `path:` reads the PATH, not the raw target. A plaintext forward-proxy flow keeps its
   # absolute-form target (P7), so `path~^/admin` missed it while `path:http` and `path:<port>`
   # matched every such flow.

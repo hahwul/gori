@@ -13,6 +13,7 @@ gori에는 플로우를 걸러내는 작은 쿼리 언어(QL)가 있습니다. �
 | 필드 | 매칭 대상 |
 |-------|---------|
 | `host` | 요청 호스트 |
+| `port` | 서버 포트, 정수(`port:8443`, `port:>=8000`). 한 호스트의 두 서비스를 가를 때 씁니다 |
 | `path` | 요청 경로와 **쿼리 문자열**. 그래서 `-path:x`는 `?q=x`도 걸러 냅니다 |
 | `url` | 전체 URL |
 | `method` | HTTP 메서드 |
@@ -163,7 +164,7 @@ status:2xx      status:4xx      status:5xx
 
 ## 비교 {#comparisons}
 
-숫자 필드(`status`, `size`, `reqsize`, `respsize`, `dur`)는 비교 연산자 `<`, `<=`, `>`, `>=`, `=`를 지원합니다:
+숫자 필드(`status`, `port`, `size`, `reqsize`, `respsize`, `dur`)는 비교 연산자 `<`, `<=`, `>`, `>=`, `=`를 지원합니다:
 
 ```text
 status:>=500        서버 오류
@@ -273,7 +274,7 @@ host:"my host"                        공백까지 포함한 하나의 host 값
 | History, `gori run history`, MCP | 위 표 전체 |
 | Sitemap, `gori run sitemap`, MCP `list_sitemap` | 위와 동일, 여기에 노드별 경로 메모용 `tag:` 추가: 대소문자 구분 없이 메모의 일부와 비교하고, 태그가 붙은 경로와 그 아래 전부, 그리고 거기로 이어지는 경로가 매칭됩니다. `-tag:`는 그 하위 트리를 빼고, 모든 `tag:` 항목은 쿼리의 나머지와 AND로 묶입니다 |
 | 컬러 규칙(Colormarker) | 위와 동일. History 필터 바에 쓰는 그 쿼리를 그대로 받습니다 |
-| Intercept 캐치 조건, Extract 규칙 조건 | `host`, `path`, `url`, `method`, `scheme`, `status`, `proto`, `header`, `body`. **나머지 필드는 모두 거부**(아래 참고). 여기서 `proto`는 `ws`나 `http`만 답합니다. gRPC와 SSE는 캡처된 응답의 Content-Type으로 판단하므로 `proto:grpc`, `proto:sse`와 TLS 표기는 절대 매칭되지 않습니다 |
+| Intercept 캐치 조건, Extract 규칙 조건 | `host`, `port`, `path`, `url`, `method`, `scheme`, `status`, `proto`, `header`, `body`. **나머지 필드는 모두 거부**(아래 참고). 여기서 `proto`는 `ws`나 `http`만 답합니다. gRPC와 SSE는 캡처된 응답의 Content-Type으로 판단하므로 `proto:grpc`, `proto:sse`와 TLS 표기는 절대 매칭되지 않습니다 |
 | Probe | `severity`(`sev`), `status`(`st`), `category`(`cat`), `host`, `code` |
 | Issues | `severity`(`sev`), `status`(`st`), `host`, `title`, `cvss` |
 | 하위 탭 스트립 `/` 필터(Repeater와 다른 도구 탭), MCP `get_repeater_context` `filter` | `tag`, `name`, `host`(`target`), `method`(`verb`), `status`: 마지막 전송 결과로, 앞부분 일치로 비교하는 코드(`status:4`는 모든 4xx), `error`, `unsent` 중 하나 |

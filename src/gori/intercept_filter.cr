@@ -11,6 +11,7 @@ module Gori
   # compilation can't be reused (there's no row to query yet). Supported fields:
   #
   #   host:acme        substring of the host
+  #   port:8443        server port, with status:'s comparisons (no class shorthand)
   #   path:/api        substring of the request target (path+query)
   #   url:acme/api     substring of scheme://host + target (`Url.request_url`)
   #   method:POST      exact method (case-insensitive)
@@ -142,6 +143,8 @@ module Gori
         when :method then s.method.compare(value, case_insensitive: true) == 0
         when :scheme then s.scheme.compare(value, case_insensitive: true) == 0
         when :status then (st = s.status) ? InterceptFilter.status_match?(st, value) : false
+          # No `8xx` class on a port, as `QL.port_cond` has none: the two bars agree on the term.
+        when :port   then (pt = s.port) && !value.includes?('x') ? InterceptFilter.status_match?(pt, value) : false
         when :proto  then InterceptFilter.proto_name(s.proto) == value
         when :header then (h = s.head) ? AsciiBytes.contains_ci?(h, value.to_slice) : false
         when :body   then (p = s.payload) ? AsciiBytes.contains_ci?(p, value.to_slice) : false
@@ -162,7 +165,7 @@ module Gori
     # are here because the bytes and the parts are both in hand; `body:` joined with #500 step 2.
     # Must stay in lockstep with `field_symbol` below: completing a field this parser doesn't
     # know would silently degrade the whole token to free text (see `parse_term`).
-    FIELDS = %w[host path url method scheme status proto header body]
+    FIELDS = %w[host port path url method scheme status proto header body]
 
     # Fields QL implements that this backend REFUSES BY NAME, and the whole of that list.
     #
@@ -672,6 +675,7 @@ module Gori
       when "method" then :method
       when "scheme" then :scheme
       when "status" then :status
+      when "port"   then :port
       when "proto"  then :proto
       when "header" then :header
       when "body"   then :body
