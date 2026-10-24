@@ -39,6 +39,7 @@ module Gori
         head = detail.request_head
         body = detail.request_body
         refuse_pseudo_header_head(head)
+        head = drop_capture_markers(head) if detail.http_version == "HTTP/2"
         # The captured body is capped at CAPTURE_MAX. If it was truncated, a faithful
         # h1 repeater would BLOCK the origin waiting for bytes that no longer exist (a
         # Content-Length over-promising, or a chunked stream cut before its 0-chunk). Byte-
@@ -53,6 +54,21 @@ module Gori
           sni: detail.sni,
           rewrote_request_line: rewrote,
         )
+      end
+
+      # gori's capture-only annotation lines on a synthesized h2 head (`HeadCodec.synth_request`):
+      # no client sent them, and a replay put them on the wire as ordinary fields. NOT the
+      # `X-Gori-Protocol` marker — `H2Engine.parse_request` folds that back into `:protocol`, which
+      # is what lets a captured RFC 8441 WebSocket be re-opened.
+      SEED_DROPPED_MARKERS = Export::Curl::MARKER_HEADERS - [Proxy::H2::HeadCodec::PROTOCOL_MARKER.downcase]
+
+      private def self.drop_capture_markers(head : Bytes) : Bytes
+        lines = String.new(head).split("\r\n")
+        kept = lines.reject do |line|
+          name, sep, _ = line.partition(':')
+          !sep.empty? && SEED_DROPPED_MARKERS.includes?(name.downcase)
+        end
+        kept.size == lines.size ? head : kept.join("\r\n").to_slice
       end
 
       # Would `build` refuse this head? The predicate behind `refuse_pseudo_header_head`, public

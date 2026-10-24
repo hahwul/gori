@@ -78,7 +78,8 @@ module Gori::Discover
       req = Proxy::Codec::Http1.parse_request_head(request_head)
       out = [] of {String, String}
       req.headers.each do |h|
-        next if DROP.includes?(h.name.downcase)
+        # gori's own h2 capture annotations are not headers any client sent.
+        next if DROP.includes?(h.name.downcase) || Export::Curl::MARKER_HEADERS.includes?(h.name.downcase)
         next unless safe_value?(h.value)
         out << {h.name, h.value}
       end

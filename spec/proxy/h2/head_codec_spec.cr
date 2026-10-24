@@ -157,6 +157,15 @@ private CORPUS = [
 ]
 
 describe Gori::Proxy::H2::HeadCodec do
+  # An empty token is the operator's: it went out as `:method "GET  HTTP/2"` + `:path "/"`.
+  describe ".request_pseudo" do
+    it "keeps an empty path or method empty" do
+      HeadCodec.request_pseudo("GET  HTTP/2").should eq({"GET", ""})
+      HeadCodec.request_pseudo(" / HTTP/2").should eq({"", "/"})
+      HeadCodec.request_pseudo("GET").should eq({"GET", "/"})
+    end
+  end
+
   describe "synth" do
     it "renders :authority as a Host line and omits the pseudo-headers" do
       fields = req_fields + [f("user-agent", "curl/8"), f("accept", "*/*")]

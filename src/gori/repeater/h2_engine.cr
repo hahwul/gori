@@ -1527,8 +1527,13 @@ module Gori
       def self.parse_request(request : Bytes, scheme : String, host : String,
                              port : Int32, preserve_field_case : Bool = false,
                              reframe_grpc : Bool = false) : {Array({String, String}), Bytes?}
-        head_bytes, body = split_head_body(request)
-        lines = String.new(head_bytes).split('\n').map(&.rstrip('\r'))
+        # `Env.split_head_body`, the one boundary rule: a CRLFCRLF-only scan read a bare-LF
+        # request's body as header lines and sent no DATA at all.
+        head_bytes, body = Gori::Env.split_head_body(request)
+        # At most ONE trailing CR — the line terminator's. `rstrip` ate every one, so
+        # `X: v\r\r\n` went out as `x: v` while a mid-value CR is refused below; a CR that is
+        # part of the value is refused the same way wherever it sits.
+        lines = String.new(head_bytes).split('\n').map(&.chomp('\r'))
         line = lines[0]? || "GET / HTTP/2"
         method, path = HeadCodec.request_pseudo(line)
 
@@ -1556,7 +1561,11 @@ module Gori
         regular = [] of {String, String}
         lines[1..]?.try &.each do |field_line|
           next if field_line.empty?
-          pair = HeadCodec.header_field(field_line)
+          # Under `preserve_field_case` the name keeps its whitespace too (`X-A : v`, a
+          # `Transfer-Encoding : chunked` obfuscation probe): the operator said the bytes ARE the
+          # message, exactly as an uppercase name is kept. The default path trims it with the
+          # case fold — it is the paste-buffer normalization, not a probe.
+          pair = HeadCodec.header_field(field_line, trim_name: !preserve_field_case)
           raise Gori::Error.new(unencodable_line(field_line)) unless pair
           raw_name, value = pair
           # `X-Gori-Protocol` back to `:protocol` — the inverse of `HeadCodec.synth_request`,
@@ -1655,8 +1664,12 @@ module Gori
         # `protocol:` so the RFC 8441 marker line the parse just consumed comes back — this is
         # the projection of the fields that WILL be encoded, and a `:protocol` dropped here
         # would report an ordinary CONNECT tunnel for a request opening a WebSocket.
+        # `authority_line:` so `:authority` is always the FIRST `Host:` line, the one
+        # `parse_request` reads back into it: the capture projection drops it beside an
+        # explicit `host` field and when empty, so a recorded duplicate-Host or empty-Host
+        # send replayed as `:authority <second host>` or the dial target.
         head = HeadCodec.synth_request(fields, HeadCodec.pseudo(fields, ":authority") || "",
-          protocol: HeadCodec.pseudo(fields, ":protocol"))
+          protocol: HeadCodec.pseudo(fields, ":protocol"), authority_line: true)
         return head unless body && !body.empty?
         joined = Bytes.new(head.size + body.size)
         head.copy_to(joined)
@@ -1701,8 +1714,8 @@ module Gori
         "#{method} #{path} HTTP/2\r\n\r\n".to_slice
       end
 
-      # RFC 9113 §8.2.1: a field name or value may carry no CR, LF or NUL. `rstrip('\r')`
-      # above only removes a TRAILING CR, so a lone CR mid-value survived the split and went
+      # RFC 9113 §8.2.1: a field name or value may carry no CR, LF or NUL. The split
+      # above only removes the line terminator's CR, so a lone CR mid-value survived the split and went
       # out raw, and a NUL was never looked at — both producing a field a conformant peer must
       # treat as malformed, with no notice to the operator and the Fuzzer still labelling the
       # row with the payload it believed it sent. Refusing here keeps the h1/h2 divergence
@@ -1727,14 +1740,6 @@ module Gori
             "cannot send over h2: #{name.inspect} carries a CR, LF or NUL, which has no " \
             "HTTP/2 representation (RFC 9113 §8.2.1) — h1 sends those bytes verbatim, h2 cannot.")
         end
-      end
-
-      # Split at the first CRLFCRLF (head/body boundary); the editor always joins
-      # lines with CRLF, so the blank line is exact.
-      private def self.split_head_body(bytes : Bytes) : {Bytes, Bytes?}
-        i = AsciiBytes.index(bytes, "\r\n\r\n".to_slice) || return {bytes, nil}
-        body = i + 4 < bytes.size ? bytes[(i + 4)..] : nil
-        {bytes[0...i], body}
       end
 
       # PUBLIC for `H2WsStream` — see `SendFlow` (the same frame carries the same

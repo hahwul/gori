@@ -63,12 +63,17 @@ module Gori::Proxy::H2
     # nothing, so this line can never reach an h2 wire.
     def synth_request(fields : Array({String, String}), authority : String,
                       trailers : Array(String)? = nil, pushed_by : UInt32? = nil,
-                      protocol : String? = nil) : Bytes
+                      protocol : String? = nil, authority_line : Bool = false) : Bytes
       method = pseudo(fields, ":method") || "GET"
       path = pseudo(fields, ":path") || "/"
       String.build do |io|
         io << line_safe(method) << ' ' << line_safe(path) << " HTTP/2\r\n"
-        io << "Host: " << line_safe(authority) << "\r\n" if !authority.empty? && !explicit_host?(fields)
+        # `authority_line` (only `H2Engine.encoded_request`) writes `:authority` as the first
+        # `Host:` line even when empty or beside an explicit `host` — the shape that engine's
+        # text parse reads back into `:authority`, so a recorded send replays as itself.
+        if authority_line || (!authority.empty? && !explicit_host?(fields))
+          io << "Host: " << line_safe(authority) << "\r\n"
+        end
         regular(fields) { |n, v| io << line_safe(n) << ": " << line_safe(v) << "\r\n" }
         if trailers && !trailers.empty?
           io << TRAILER_MARKER << ": " << line_safe(trailers.join(", ")) << "\r\n"
@@ -615,10 +620,14 @@ module Gori::Proxy::H2
     # after a bare-LF blank rather than silently drop it.
     #
     # See `regular_faithful?` for why the `strip`/`lstrip` asymmetry is what it is.
-    def header_field(line : String) : {String, String}?
+    #
+    # `trim_name: false` is `H2Engine`'s `preserve_field_case`: there the operator's name goes
+    # out as typed, whitespace included. The round trip keeps the trim (`regular_faithful?`).
+    def header_field(line : String, trim_name : Bool = true) : {String, String}?
       idx = line.index(':')
       return nil if idx.nil? || idx == 0
-      {line[0, idx].strip, line[(idx + 1)..].lstrip(' ')}
+      name = line[0, idx]
+      {trim_name ? name.strip : name, line[(idx + 1)..].lstrip(' ')}
     end
 
     # {method, path} from a rewritten request line. Splits on the FIRST space, and on the
@@ -632,23 +641,32 @@ module Gori::Proxy::H2
     # differential probe writes, and what hand-editing the line in the TUI editor produces —
     # had `last_sp == first_sp`, fell through the ternary, and went out as `:path` `/`.
     def request_line(start : String) : {String?, String?}
-      sp = start.index(' ')
-      return {nil, nil} if sp.nil? || sp == 0
-      rest = start[(sp + 1)..]
-      if (last = rest.rindex(' ')) && rest[(last + 1)..].starts_with?("HTTP/")
-        rest = rest[0, last]
-      end
-      return {nil, nil} if rest.empty?
-      {start[0, sp], rest}
+      method, rest = start_tokens(start) || return {nil, nil}
+      return {nil, nil} if method.empty? || rest.empty?
+      {method, rest}
     end
 
     # The {`:method`, `:path`} a TEXT h2 send puts on the wire for its start line. No space at
     # all is not a request line; keep the whole token as the method rather than inventing one,
     # which is what a `:method` probe (`GET\r\n…`) would want to see, and a missing path is
     # `/`. One home, because `FlowMapper.authored_request` files the pair `H2Engine` sent.
+    #
+    # An EMPTY token is the operator's, not a missing one: `GET  HTTP/2` is an empty `:path`
+    # and ` / HTTP/2` an empty `:method`. Through `request_line`'s nil both went out as
+    # `:method "GET  HTTP/2"` + `:path "/"`, a request nobody wrote.
     def request_pseudo(start : String) : {String, String}
-      method, path = request_line(start)
-      {method || start, path || "/"}
+      start_tokens(start) || {start, "/"}
+    end
+
+    # {method, target} split at the first space, the target losing a trailing version token;
+    # either may be empty. nil when there is no space at all.
+    private def start_tokens(start : String) : {String, String}?
+      sp = start.index(' ') || return nil
+      rest = start[(sp + 1)..]
+      if (last = rest.rindex(' ')) && rest[(last + 1)..].starts_with?("HTTP/")
+        rest = rest[0, last]
+      end
+      {start[0, sp], rest}
     end
 
     # The status code out of a rewritten `HTTP/2 404` line. h2 has no reason phrase, so a

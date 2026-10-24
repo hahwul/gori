@@ -298,7 +298,8 @@ module Gori
             return Result.new(head, [] of Message, Engine.elapsed(started),
               error: "server did not upgrade (status #{resp.status})", upgraded: false).with_sent_head(handshake)
           end
-          opened = H1Open.new(upstream, head, verify_accept(resp, keys), handshake, watcher)
+          opened = H1Open.new(upstream, head, with_extension_note(verify_accept(resp, keys), resp),
+            handshake, watcher)
           upgraded = true # only now: a raise above must still close the socket and the watcher
           opened
         rescue ex
@@ -956,8 +957,8 @@ module Gori
       end
 
       # Rebuilds the upgrade request for repeater: origin-form request line, Sec-WebSocket-
-      # Extensions stripped (no permessage-deflate → frames are plain), and — unless
-      # `keep_key` — a FRESH Sec-WebSocket-Key. Everything else (Host, Cookie,
+      # Extensions stripped (no permessage-deflate → frames are plain) and a FRESH
+      # Sec-WebSocket-Key — both unless `keep_key`. Everything else (Host, Cookie,
       # Authorization, Origin, …) is kept so the repeater carries the original session.
       # Header VALUE bytes are copied verbatim (only the ASCII request line + header NAMES
       # are decoded) so a non-UTF-8-bearing cookie/auth token survives byte-exact, mirroring
@@ -994,7 +995,10 @@ module Gori
         lines.skip(1).each do |line|
           next if line.empty?
           name = header_name(line)
-          next if name == "sec-websocket-extensions"
+          # Stripped by default because gori does not decode permessage-deflate (see the
+          # module comment). NOT under `keep_key`, whose contract is "the block goes out as
+          # written": there an extension the server accepts is reported in the note instead.
+          next if name == "sec-websocket-extensions" && !keep_key
           if name == "sec-websocket-key"
             next unless keep_key
             keys << header_value(line)
@@ -1071,6 +1075,16 @@ module Gori
                  "header (RFC 6455 §4.2.2 requires #{want.inspect})"
         end
         got == want ? nil : "handshake accept mismatch (got #{got.inspect}, want #{want.inspect})"
+      end
+
+      # A `keep_key` handshake sends `Sec-WebSocket-Extensions` as written, so a server may
+      # accept one. gori does not decode permessage-deflate: say so rather than show
+      # compressed payloads as if they were the messages.
+      private def self.with_extension_note(note : String?, resp : Proxy::Codec::RawResponse) : String?
+        ext = resp.headers.get?("Sec-WebSocket-Extensions") || return note
+        x = "the server accepted Sec-WebSocket-Extensions #{ext.inspect}; gori does not decode " \
+            "permessage-deflate, so its frames are shown as compressed wire bytes"
+        note ? "#{note}; #{x}" : x
       end
 
       private def self.err(message : String, started : Time::Instant) : Result

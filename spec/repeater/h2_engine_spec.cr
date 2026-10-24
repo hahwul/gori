@@ -1247,6 +1247,28 @@ describe Gori::Repeater::H2Engine do
     headers.any? { |(n, v)| n.to_slice == want && v == "v" }.should be_true
   end
 
+  # A bare-LF head: a CRLFCRLF-only split parsed the body as header fields and sent no DATA.
+  it "splits a bare-LF request at its blank line, sending the body as the body" do
+    req = "POST /api HTTP/1.1\nHost: x\nContent-Length: 7\n\n{\"a\":1}".to_slice
+    headers, body = Gori::Repeater::H2Engine.parse_request(req, "http", "h", 80, true, false)
+    headers.should eq([{":method", "POST"}, {":path", "/api"}, {":scheme", "http"},
+                       {":authority", "x"}, {"Content-Length", "7"}])
+    String.new(body.not_nil!).should eq(%({"a":1}))
+  end
+
+  # Only the terminator's CR is removed; a second one is the value's and is refused like a
+  # mid-value CR. Under preserve_field_case the name keeps its whitespace (`X-A : v`).
+  it "strips one terminator CR and keeps name whitespace under preserve_field_case" do
+    expect_raises(Gori::Error, /CR, LF or NUL/) do
+      Gori::Repeater::H2Engine.parse_request("GET / HTTP/2\r\nX: v\r\r\n\r\n".to_slice, "http", "h", 80)
+    end
+    req = "GET / HTTP/2\r\nTransfer-Encoding : chunked\r\n\r\n".to_slice
+    kept, _ = Gori::Repeater::H2Engine.parse_request(req, "http", "h", 80, true, false)
+    kept.should contain({"Transfer-Encoding ", "chunked"})
+    folded, _ = Gori::Repeater::H2Engine.parse_request(req, "http", "h", 80)
+    folded.should contain({"transfer-encoding", "chunked"})
+  end
+
   it "preserves field-name case under preserve_field_case" do
     seen = Channel({Array({String, String}), Array({String, Int32})}).new(1)
     port = start_h2_origin_recording(seen)
@@ -1345,6 +1367,19 @@ describe Gori::Repeater::H2Engine do
       wire.should contain("Host: claimed.example\r\n") # the :authority actually encoded
       wire.should contain("x-mixed: Keep\r\n")         # folded, as the wire has it
       wire.should contain("transfer-encoding: chunked\r\n")
+    end
+
+    # The recorded projection must replay as the request that went out: a duplicate Host and
+    # an empty Host both lost their `:authority` (the second host, or the dial target, went out).
+    it "records :authority so a replay of the projection encodes the same fields" do
+      ["GET / HTTP/2\r\nHost: first\r\nHost: second\r\n\r\n",
+       "GET / HTTP/2\r\nHost:\r\n\r\n"].each do |text|
+        sent, _ = Gori::Repeater::H2Engine.parse_request(text.to_slice, "http", "dial", 80)
+        recorded = Gori::Repeater::H2Engine.encoded_request(text.to_slice,
+          scheme: "http", host: "dial", port: 80)
+        replayed, _ = Gori::Repeater::H2Engine.parse_request(recorded, "http", "dial", 80)
+        replayed.should eq(sent)
+      end
     end
 
     it "carries the body through unchanged" do

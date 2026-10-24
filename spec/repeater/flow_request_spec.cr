@@ -1,11 +1,11 @@
 require "../spec_helper"
 
 # A `Store::FlowDetail` the way a proxy capture stores one.
-private def flow_detail(head : String, body : Bytes? = nil) : Gori::Store::FlowDetail
+private def flow_detail(head : String, body : Bytes? = nil, version : String = "HTTP/1.1") : Gori::Store::FlowDetail
   row = Gori::Store::FlowRow.new(
     id: 1_i64, created_at: 0_i64, scheme: "http", method: "GET", host: "h", port: 80,
     target: "/", status: 200, size: 0_i64, state: Gori::Store::FlowState::Complete)
-  Gori::Store::FlowDetail.new(row, "HTTP/1.1", head.to_slice, body, nil, nil)
+  Gori::Store::FlowDetail.new(row, version, head.to_slice, body, nil, nil)
 end
 
 describe Gori::Repeater::FlowRequest do
@@ -279,6 +279,19 @@ describe Gori::Repeater::FlowRequest do
   end
 
   # `gori run repeater <flow-id> -X` (#1384): the method, and nothing else, is replaced.
+  # gori's capture-only lines on a synthesized h2 head went on the wire as ordinary fields.
+  describe ".build — h2 capture markers" do
+    it "drops the trailer and push markers but keeps X-Gori-Protocol for the :protocol fold" do
+      head = "CONNECT /ws HTTP/2\r\nHost: h\r\nX-Gori-Trailers: grpc-status\r\n" \
+             "X-Gori-Pushed: server push promised on stream 1\r\nX-Gori-Protocol: websocket\r\n\r\n"
+      built = Gori::Repeater::FlowRequest.build(flow_detail(head, version: "HTTP/2"))
+      String.new(built.bytes).should eq("CONNECT /ws HTTP/2\r\nHost: h\r\nX-Gori-Protocol: websocket\r\n\r\n")
+      # An h1 capture is the client's own bytes.
+      h1 = Gori::Repeater::FlowRequest.build(flow_detail(head))
+      String.new(h1.bytes).should contain("X-Gori-Trailers")
+    end
+  end
+
   describe ".replace_method" do
     it "swaps the method and keeps the target, spacing, headers and body byte-exact" do
       wire = "GET  /a b\tHTTP/1.1\nHost: h\n\n".to_slice + Bytes[0xff]

@@ -115,6 +115,12 @@ describe Gori::Discover::Headers do
         [{"Cookie", "sid=1"}, {"Authorization", "Bearer t"}, {"User-Agent", "curl/8"}])
     end
 
+    it "drops gori's h2 capture marker lines" do
+      head = "GET / HTTP/2\r\nHost: h\r\nX-Gori-Trailers: grpc-status\r\n" \
+             "X-Gori-Pushed: server push promised on stream 1\r\nCookie: a=1\r\n\r\n"
+      H.from_flow(head.to_slice).should eq([{"Cookie", "a=1"}])
+    end
+
     it "returns no headers when the flow carries only framing headers" do
       head = "GET / HTTP/1.1\r\nHost: h\r\nConnection: close\r\n\r\n"
       H.from_flow(head.to_slice).should be_empty
