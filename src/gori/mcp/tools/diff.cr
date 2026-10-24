@@ -211,8 +211,10 @@ module Gori
       private def list_diff_tools(j : JSON::Builder) : Nil
         tool j, "diff_projects",
           "Retest diff: compare two PROJECTS per endpoint — new, gone, and answering " \
-          "differently since the last engagement. Endpoints are keyed by list_sitemap's " \
-          "folded path template (/users/{uuid}); 'changed' uses a tolerance band, not byte " \
+          "differently since the last engagement. Endpoints are keyed by host + method + " \
+          "folded path template (/users/{uuid}), ignoring port and scheme on purpose (a " \
+          "service can move ports between engagements; list_sitemap's roots are per origin); " \
+          "'changed' uses a tolerance band, not byte " \
           "equality. Returns per-side summaries `a`/`b`, `counts`, `caveats`, " \
           "`scope_mismatch` (read `caveats` first: a cut side says so there), `endpoints:[{verdict,observation,host,method,path,a,b,changes}]`, " \
           "`issues`. READ VERDICTS EXACTLY: 'removed' = the newer project captured NO request " \

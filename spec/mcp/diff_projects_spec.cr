@@ -78,6 +78,17 @@ private def diff_error(project : Gori::Project, store, args : String) : String
 end
 
 describe "MCP diff_projects" do
+  # The diff keys host + method + path (DESIGN §7 2026-09-30, #1371) while list_sitemap is per
+  # origin, so the description must not send an agent to list_sitemap's key.
+  it "describes its key as port- and scheme-free, not as list_sitemap's" do
+    with_store do |store|
+      listed = JSON.parse(JSON.build { |j| tools_for(store).list(j) }).as_a
+      desc = listed.find!(&.["name"].as_s.==("diff_projects"))["description"].as_s
+      desc.should contain("ignoring port and scheme")
+      desc.should_not contain("keyed by list_sitemap's")
+    end
+  end
+
   it "diffs the named baseline against the bound project" do
     with_diff_home do |registry|
       seed_diff_project(registry, "q1") do |s|
