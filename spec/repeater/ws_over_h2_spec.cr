@@ -524,6 +524,27 @@ describe "WebSocket over HTTP/2 (RFC 8441) replay" do
       res.note.not_nil!.should contain "GOAWAY"
     end
 
+    # RFC 9113 §6.8: a graceful GOAWAY whose last-stream-id covers the CONNECT stream stops new
+    # streams only. It used to raise on arrival and end a WebSocket the origin kept serving.
+    it "keeps the session going after a GOAWAY that still covers its stream" do
+      seen = Channel(H2WsSeen).new
+      port = start_h2_ws_origin(seen) do |conn, send_ws, frames|
+        read_ws_frames(conn, 1, frames)
+        payload = Bytes.new(8)
+        IO::ByteFormat::BigEndian.encode(1_u32, payload[0, 4]) # last stream id = ours
+        conn.write(Frame::Header.new(Frame::Type::Goaway.value, 0_u8, 0_u32, payload).to_bytes)
+        conn.flush
+        send_ws.call(WS.encode(WS::OP_TEXT, "after-goaway".to_slice, mask: false))
+        send_ws.call(CLOSE_1000)
+      end
+
+      res = send_over_h2(port, [text("go")], idle: 2.seconds)
+      receive_within(seen, what: "the origin's observations")
+      res.messages.select { |m| m.direction == "in" && m.opcode == WS::OP_TEXT.to_i }
+        .map { |m| String.new(m.payload) }.should eq ["after-goaway"]
+      res.close_code.should eq(1000)
+    end
+
     it "reports an origin that never grants flow-control window" do
       seen = Channel(H2WsSeen).new
       # A 1-byte initial window and no WINDOW_UPDATE ever: the message cannot go out.

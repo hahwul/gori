@@ -123,6 +123,16 @@ module Gori
         property? eof = false
         property goaway : String? = nil
         property rst : String? = nil
+        # A GOAWAY whose last-stream-id still covers this stream (RFC 9113 §6.8): the origin
+        # finishes answering it, so the read goes on — but the CONNECTION is ending, and must
+        # not carry another request.
+        property? draining = false
+        # A GOAWAY whose last-stream-id is BELOW this stream: §6.8 says the origin did not
+        # process it, so it may go out again on a new connection.
+        property? unprocessed = false
+        # DATA bytes on this stream `pump_once` stashed (and credited) during the write — the
+        # cap that keeps that credit from buying an unbounded `pending`.
+        property stashed = 0
         # Wall-clock budget for ONE contiguous wait — for send-window credit, and for any
         # progress at all on this exchange's stream. The per-read io_timeout fires only on IDLE, so ANY
         # frame (a keepalive PING, a SETTINGS, a `WINDOW_UPDATE +0`) resets it and the only
@@ -257,6 +267,14 @@ module Gori
         # `H2Pool`, which retires rather than parks. Never a verdict on the request itself —
         # the Result carries that — only on the socket.
         property? poisoned : Bool = false
+        # The last request was refused while gori ENCODED it (`parse_request` — a bare LF in a
+        # header value, a common fuzz payload), before a byte was written or a stream id taken.
+        # The socket is exactly as healthy as before, so `H2Pool` parks it instead of reading
+        # the refusal as a dead parked connection.
+        property? unsent : Bool = false
+        # The last exchange's stream was above a GOAWAY's last-stream-id: never processed
+        # (RFC 9113 §6.8), so `H2Pool` may redial it as a FIRST send, for any method.
+        property? unprocessed : Bool = false
 
         def initialize(@io : IO)
           @decoder = HPACK::Decoder.new
@@ -319,7 +337,16 @@ module Gori
                                 preserve_field_case : Bool = false,
                                 reframe_grpc : Bool = false,
                                 sse : StreamBound? = nil) : Result
-        headers, body = parse_request(request, scheme, host, port, preserve_field_case, reframe_grpc)
+        conn.unsent = false
+        conn.unprocessed = false
+        headers, body = begin
+          parse_request(request, scheme, host, port, preserve_field_case, reframe_grpc)
+        rescue ex
+          # Raised before `exchange` wrote anything: a refusal of THIS request, not news about
+          # the connection — so it is neither poisoned nor left for `H2Pool#stale?` to misread.
+          conn.unsent = true
+          return failure(ex.message || "h2 repeater error", started)
+        end
         exchange(conn, headers, body, host, port, started, timeout, sse)
       rescue ex
         # The connection is in an unknown state after a raise mid-exchange; make sure the pool
@@ -467,13 +494,19 @@ module Gori
         # request succeed": a stream the peer RESET leaves the connection usable in theory,
         # but on a sweep it is the shape that precedes a GOAWAY, and a truncated read leaves
         # frames of unknown provenance on the wire for the next request to trip over.
-        conn.poisoned = true if conn.spent? || flow.eof? || flow.goaway || flow.rst ||
-                                flow.stall || reply.timed_out || !reply.clean_eos
+        conn.poisoned = true if spent_socket?(conn, flow, reply)
+        conn.unprocessed = flow.unprocessed?
         # …and, separately, whether anything EXPLAINED how it ended. Not the same question:
         # this one decides whether the request may go on the wire a SECOND time. See
         # `Conn#explained?`.
         conn.explained = !(reply.rst || reply.goaway || flow.rst || flow.goaway ||
                            flow.stall).nil?
+      end
+
+      # The `poisoned?` verdict `carry_over` records — see there.
+      private def self.spent_socket?(conn : Conn, flow : SendFlow, reply : Reply) : Bool
+        conn.spent? || flow.eof? || !flow.goaway.nil? || !flow.rst.nil? || !flow.stall.nil? ||
+          reply.timed_out || !reply.clean_eos || flow.draining?
       end
 
       # Everything gori has to say about how an exchange went, or nil when it went cleanly:
@@ -729,8 +762,13 @@ module Gori
         when Frame::Type::WindowUpdate
           credit(frame, flow)
         when Frame::Type::Goaway
-          flow.goaway = goaway_reason(frame)
-          flow.closed = true
+          # A GOAWAY that still covers this stream (§6.8) leaves it open: the origin will read
+          # the rest of the body and answer, so keep writing. `read_response` reads the stashed
+          # frame either way.
+          unless goaway_covers?(frame, flow.id)
+            flow.goaway = goaway_reason(frame)
+            flow.closed = true
+          end
           flow.pending << frame
         when Frame::Type::RstStream
           if frame.stream_id == flow.id
@@ -751,6 +789,18 @@ module Gori
           # `Expect: 100-continue` origin still gets the body it asked to see.
           flow.closed = true if frame.stream_id == flow.id && frame.end_stream?
           flow.pending << frame
+          # Stashed DATA is CREDITED now, not when `read_response` drains it. An origin that
+          # streams its answer while still reading the request (an echo, a streaming proxy)
+          # grants request window only as its own response moves; withholding receive credit
+          # until the write ended deadlocked both sides, and gori then truncated the body and
+          # blamed the origin's window. Capped at MAX_BODY, as the read is.
+          if frame.frame_type == Frame::Type::Data && frame.stream_id == flow.id
+            flow.stashed += frame.payload.size
+            if flow.stashed <= MAX_BODY
+              window_update(io, 0_u32, frame.payload.size)
+              window_update(io, flow.id, frame.payload.size) unless frame.end_stream?
+            end
+          end
         else
           flow.pending << frame
         end
@@ -997,7 +1047,9 @@ module Gori
         idle = sock.try(&.read_timeout)
 
         until done
-          if at < pending.size
+          # A DATA frame `pump_once` stashed has already been credited — see there.
+          stashed = at < pending.size
+          if stashed
             frame = pending[at]
             at += 1
           else
@@ -1087,7 +1139,16 @@ module Gori
             ack_soft(io, Frame::Type::Ping, frame.payload) unless frame.ack?
           when Frame::Type::Goaway
             goaway = goaway_reason(frame)
-            done = true
+            # RFC 9113 §6.8: a stream at or below last-stream-id is still answered — nginx sends
+            # GOAWAY(NO_ERROR, last = this stream) at keepalive_requests BEFORE the response, so
+            # ending here threw a 200 away. Only a stream above it is over, and was never
+            # processed at all.
+            if goaway_covers?(frame, flow.id)
+              flow.draining = true
+            else
+              flow.unprocessed = true if goaway_last(frame)
+              done = true
+            end
           when Frame::Type::RstStream
             if frame.stream_id == flow.id
               # The 4-byte error code used to be read only as "stop looping", so
@@ -1140,7 +1201,7 @@ module Gori
             # what we just consumed, so the origin keeps sending past the 65535-byte
             # default window. Without this, any response body > 64 KiB stalls until
             # the IO timeout (no WINDOW_UPDATE was ever sent).
-            if consumed > 0
+            if consumed > 0 && !stashed
               # The CONNECTION window is credited for EVERY DATA frame, the one that ended the
               # stream included. The `!done &&` that used to guard both lines cost a one-shot
               # connection nothing — the socket closed a moment later — but on a POOLED one it
@@ -1174,6 +1235,8 @@ module Gori
           end
         end
 
+        # A covering GOAWAY that the stream then outlived says nothing about this response.
+        goaway = nil if clean_eos && flow.draining? && !flow.goaway
         Reply.new(status, headers, body.size == 0 ? nil : body.to_slice, clean_eos,
           goaway, rst, trailers, timed_out, final_seen, late_interim, trailer_pseudo,
           run.try(&.reason), run.try(&.times))
@@ -1307,6 +1370,19 @@ module Gori
         debug = payload.size > 8 ? String.new(payload[8..]).scrub.strip : ""
         debug = UnicodeReveal.visible(debug) || debug
         debug.empty? ? "h2 GOAWAY #{name}" : "h2 GOAWAY #{name} (#{debug})"
+      end
+
+      # A GOAWAY's last-stream-id (§6.8: the highest stream the sender may still act on), or
+      # nil when the payload is too short to be a GOAWAY at all.
+      # PUBLIC for `H2Race` and `H2WsStream`, which honour it on their own streams.
+      def self.goaway_last(frame : Frame::Header) : UInt32?
+        return nil if frame.payload.size < 8
+        IO::ByteFormat::BigEndian.decode(UInt32, frame.payload[0, 4]) & 0x7fffffff_u32
+      end
+
+      # Does this GOAWAY still cover `stream_id`, i.e. will the origin finish answering it?
+      def self.goaway_covers?(frame : Frame::Header, stream_id : UInt32) : Bool
+        (last = goaway_last(frame)) ? stream_id <= last : false
       end
 
       # A RST_STREAM payload as a sentence (§6.4: a single 4-octet error code). The sibling

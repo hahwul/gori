@@ -80,6 +80,15 @@ module Gori::Repeater
         started = Time.instant
         result = H2Engine.exchange_request(conn, bytes, scheme: @scheme, host: @host,
           port: @port, started: started, timeout: @timeout, sse: @sse)
+        if conn.unprocessed? && result.response.nil? && !result.delivered?
+          # The origin retired this parked connection with a GOAWAY whose last-stream-id is
+          # below our stream (RFC 9113 §6.8): it provably never processed the request, so —
+          # like a FIN found at checkout — the redial is a FIRST send for any method.
+          conn.close
+          @stale_checkouts += 1
+          note_stale
+          return dial_and_send(bytes, keepable, method)
+        end
         if stale?(result, conn)
           conn.close
           note_stale
@@ -169,7 +178,7 @@ module Gori::Repeater
     # those distinctions.
     private def stale?(result : Repeater::Result, conn : H2Engine::Conn) : Bool
       !result.error.nil? && result.response.nil? && !result.delivered? &&
-        !result.timed_out? && !conn.explained?
+        !result.timed_out? && !conn.explained? && !conn.unsent?
     end
 
     private def unsafe_stale_result(result : Repeater::Result, method : String) : Repeater::Result
@@ -205,8 +214,9 @@ module Gori::Repeater
     # verdict on the RESULT, and both have to hold — an errored or truncated exchange leaves
     # frames of unknown provenance on a wire the next request would be read from.
     private def recycle(conn : H2Engine::Conn, result : Repeater::Result, keepable : Bool) : Nil
-      if @pooling && keepable && !conn.poisoned? && result.error.nil? && !result.incomplete? &&
-         @idle.size < @max_idle
+      # An `unsent?` refusal never touched the socket, so its error says nothing about it.
+      clean = conn.unsent? || (result.error.nil? && !result.incomplete?)
+      if @pooling && keepable && !conn.poisoned? && clean && @idle.size < @max_idle
         @idle.push(conn)
       else
         conn.close

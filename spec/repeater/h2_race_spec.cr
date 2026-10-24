@@ -103,6 +103,30 @@ describe "Repeater::H2Engine.single_packet" do
     slow.duration_us.should be > fast.duration_us
   end
 
+  # RFC 9113 §6.8: a GOAWAY ends only the streams ABOVE its last-stream-id. The race used to
+  # stop reading at any GOAWAY, so a graceful one that covered every member dropped them all.
+  it "keeps the members a GOAWAY still covers and cuts only the ones above it" do
+    port = start_h2_scripted_origin(3) do |io, ended|
+      sids = ended.to_h { |(sid, path)| {path, sid} }
+      last = Math.max(sids["/a"], sids["/b"])
+      payload = IO::Memory.new
+      payload.write_bytes(last, IO::ByteFormat::BigEndian)
+      payload.write_bytes(0_u32, IO::ByteFormat::BigEndian) # NO_ERROR
+      io.write(Frame::Header.new(Frame::Type::Goaway.value, 0_u8, 0_u32, payload.to_slice).to_bytes)
+      {"/a", "/b"}.each do |path|
+        h2_headers(io, sids[path], [{":status", "200"}], end_stream: false)
+        h2_data(io, sids[path], "ok", end_stream: true)
+      end
+    end
+
+    a, b, c = Gori::Repeater::H2Engine.single_packet(race_wires("/a", "/b", "/c"),
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false, timeout: 2.seconds)
+
+    a.response.try(&.status).should eq(200)
+    b.response.try(&.status).should eq(200)
+    c.response.should be_nil
+  end
+
   # A header block the origin chose that breaks the HPACK decode must come back as a failed
   # result, not raise out of the race: the connection-wide decoder is desynced, so every stream
   # still open fails with that error while one that already finished keeps its response.

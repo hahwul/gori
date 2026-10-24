@@ -2235,3 +2235,106 @@ describe "Gori::Repeater::H2Engine.goaway_reason" do
     reason.should eq("h2 GOAWAY PROTOCOL_ERROR (bad⟨ESC⟩]0;PWNED⟨BEL⟩ frame)")
   end
 end
+
+private def goaway_frame(last : UInt32, code : UInt32 = 0_u32) : Bytes
+  payload = IO::Memory.new
+  payload.write_bytes(last, IO::ByteFormat::BigEndian)
+  payload.write_bytes(code, IO::ByteFormat::BigEndian)
+  Frame::Header.new(Frame::Type::Goaway.value, 0_u8, 0_u32, payload.to_slice).to_bytes
+end
+
+# nginx at keepalive_requests: GOAWAY(NO_ERROR, last = this stream) goes out BEFORE that
+# stream's response, which then follows in full.
+private def start_h2_origin_goaway_then_answer : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    next unless conn = origin.accept?
+    conn.read_timeout = 5.seconds
+    Frame.read_preface(conn)
+    send_server_preface(conn)
+    loop do
+      f = Frame.read(conn) || break
+      next unless f.frame_type == Frame::Type::Headers && f.end_stream?
+      conn.write(goaway_frame(f.stream_id))
+      block = HPACK::Encoder.new.encode([{":status", "200"}])
+      conn.write(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS, f.stream_id, block).to_bytes)
+      conn.write(Frame::Header.new(Frame::Type::Data.value, Frame::END_STREAM, f.stream_id, "ok".to_slice).to_bytes)
+      conn.flush
+      break
+    end
+    hang_up(conn)
+  end
+  port
+end
+
+# An origin that echoes the request body AS IT ARRIVES (a Go `io.Copy(w, r.Body)` handler) and
+# grants request window only as its echo moves — so the client has to credit the DATA it reads
+# while it is still writing, or both sides wait on each other.
+private def start_h2_origin_streaming_echo : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    next unless conn = origin.accept?
+    conn.read_timeout = 4.seconds
+    Frame.read_preface(conn)
+    send_server_preface(conn)
+    send_win = 65_535_i64
+    pending = IO::Memory.new
+    at = 0
+    got_end = false
+    loop do
+      f = Frame.read(conn) || break
+      case f.frame_type
+      when Frame::Type::Headers
+        block = HPACK::Encoder.new.encode([{":status", "200"}])
+        conn.write(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS, 1_u32, block).to_bytes)
+      when Frame::Type::Data
+        pending.write(f.payload)
+        got_end = f.end_stream?
+      when Frame::Type::WindowUpdate
+        send_win += IO::ByteFormat::BigEndian.decode(UInt32, f.payload[0, 4]).to_i64 if f.stream_id == 0
+      else
+        # SETTINGS ACK / PING
+      end
+      buf = pending.to_slice
+      while at < buf.size && send_win > 0
+        n = Math.min(Math.min(16384_i64, send_win), (buf.size - at).to_i64).to_i
+        conn.write(Frame::Header.new(Frame::Type::Data.value, 0_u8, 1_u32, buf[at, n]).to_bytes)
+        send_win -= n
+        at += n
+        inc = Bytes.new(4)
+        IO::ByteFormat::BigEndian.encode(n.to_u32, inc)
+        {0_u32, 1_u32}.each { |sid| conn.write(Frame::Header.new(Frame::Type::WindowUpdate.value, 0_u8, sid, inc).to_bytes) }
+      end
+      conn.flush
+      if got_end && at >= pending.size
+        conn.write(Frame::Header.new(Frame::Type::Data.value, Frame::END_STREAM, 1_u32, Bytes.empty).to_bytes)
+        conn.flush
+        break
+      end
+    end
+    hang_up(conn)
+  end
+  port
+end
+
+describe "Gori::Repeater::H2Engine — GOAWAY last-stream-id and write-phase credit" do
+  it "keeps reading a stream a graceful GOAWAY still covers (RFC 9113 §6.8)" do
+    port = start_h2_origin_goaway_then_answer
+    r = Gori::Repeater::H2Engine.send("GET /x HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice,
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false, timeout: 2.seconds)
+    r.error.should be_nil
+    r.response.try(&.status).should eq(200)
+    String.new(r.body || Bytes.empty).should eq("ok")
+  end
+
+  it "credits DATA read while the body is still going out, so a streaming echo completes" do
+    port = start_h2_origin_streaming_echo
+    req = "POST /echo HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n#{"a" * 200_000}".to_slice
+    r = Gori::Repeater::H2Engine.send(req, scheme: "http", host: "127.0.0.1", port: port,
+      verify_upstream: false, timeout: 2.seconds)
+    r.error.should be_nil
+    r.body.try(&.size).should eq(200_000)
+  end
+end

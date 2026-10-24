@@ -568,6 +568,21 @@ describe Gori::Repeater::WsEngine do
     result.close_code.should eq(1000)
   end
 
+  # A CONT with no message to continue is the server's §5.4 violation; `WsSession` and the
+  # capture relay record it as opcode 0, and this engine used to file it under the PREVIOUS
+  # message's opcode — identical server bytes, three surfaces, two answers.
+  it "records a lone server CONT as opcode 0, not the previous message's opcode" do
+    port = start_scripted_ws_origin(
+      Bytes[0x82, 0x01, 0x41] +      # BIN fin=1 "A"
+      Bytes[0x80, 0x01, 0x58] +      # CONT fin=1 "X" — nothing to continue
+      Bytes[0x88, 0x02, 0x03, 0xE8]) # CLOSE 1000
+    result = WsEngine.send(UPGRADE, [] of WsEngine::OutMsg,
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
+
+    inbound = result.messages.select { |m| m.direction == "in" }
+    inbound[0..1].map { |m| {m.opcode, String.new(m.payload)} }.should eq([{2, "A"}, {0, "X"}])
+  end
+
   it "keeps an unterminated fragment the origin sent before its CLOSE" do
     port = start_scripted_ws_origin(
       Bytes[0x01, 0x0C] + "UNTERMINATED".to_slice + # TEXT fin=0, no FIN ever follows

@@ -796,6 +796,10 @@ module Gori
                 end
               end
               st.msg_opcode = frame.opcode
+            elsif st.shape.frames == 0
+              # A CONT with no message to continue (§5.4 violation): opcode 0, not the previous
+              # message's — what `WsSession#on_data` and the capture relay record for it too.
+              st.msg_opcode = Proxy::WS::OP_CONT
             end
             st.shape.note(frame)
             st.assembling.write(frame.payload)

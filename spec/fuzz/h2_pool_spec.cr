@@ -478,3 +478,102 @@ describe "H2Pool — the connection-scoped state a one-shot never needed" do
     end
   end
 end
+
+# An origin that answers each connection's FIRST request, then retires the connection with
+# GOAWAY(NO_ERROR, last = that stream) and holds it open, ignoring any later stream — nginx at
+# its keepalive_requests limit.
+private class H2RetiringOrigin
+  getter port : Int32
+  getter connections = 0
+  @server : TCPServer
+
+  def initialize
+    @server = TCPServer.new("127.0.0.1", 0)
+    @port = @server.local_address.port
+    spawn { accept_loop }
+  end
+
+  def close : Nil
+    @server.close rescue nil
+  end
+
+  private def accept_loop : Nil
+    while conn = @server.accept?
+      @connections += 1
+      spawn serve(conn)
+    end
+  rescue
+  end
+
+  private def serve(conn : TCPSocket) : Nil
+    conn.read_timeout = 5.seconds
+    Frame.read_preface(conn)
+    conn.write(Frame::Header.new(Frame::Type::Settings.value, 0_u8, 0_u32, Bytes.empty).to_bytes)
+    conn.flush
+    answered = false
+    loop do
+      f = Frame.read(conn)
+      break if f.nil?
+      # A SETTINGS ack carries the same 0x1 bit, so only HEADERS/DATA end a request.
+      next unless f.end_stream? && f.frame_type.in?(Frame::Type::Headers, Frame::Type::Data)
+      next if answered
+      answered = true
+      block = HPACK::Encoder.new.encode([{":status", "200"}])
+      conn.write(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS, f.stream_id, block).to_bytes)
+      conn.write(Frame::Header.new(Frame::Type::Data.value, Frame::END_STREAM, f.stream_id, "ok".to_slice).to_bytes)
+      goaway = IO::Memory.new
+      goaway.write_bytes(f.stream_id, IO::ByteFormat::BigEndian)
+      goaway.write_bytes(0_u32, IO::ByteFormat::BigEndian) # NO_ERROR
+      conn.write(Frame::Header.new(Frame::Type::Goaway.value, 0_u8, 0_u32, goaway.to_slice).to_bytes)
+      conn.flush
+    end
+  rescue
+  ensure
+    conn.close rescue nil
+  end
+end
+
+describe "H2Pool — GOAWAY last-stream-id and pre-write refusals" do
+  it "redials a request a parked connection's GOAWAY never processed, as a first send" do
+    origin = H2RetiringOrigin.new
+    pool = Gori::Repeater::H2Pool.new("http", "127.0.0.1", origin.port, false, nil, 2.seconds, nil, 2)
+    begin
+      pool.send(post("127.0.0.1:#{origin.port}", "one")).error.should be_nil
+      # Stream 3 is above the GOAWAY's last-stream-id 1: §6.8 says the origin never processed
+      # it, so even a POST goes out again — it used to fail with "h2 GOAWAY NO_ERROR".
+      r = pool.send(post("127.0.0.1:#{origin.port}", "two"))
+      r.error.should be_nil
+      r.response.try(&.status).should eq(200)
+      r.retried?.should be_false
+      pool.dialed.should eq(2_i64)
+      pool.unsafe_stale.should eq(0_i64)
+    ensure
+      pool.close_all
+      origin.close
+    end
+  end
+
+  it "keeps a parked connection, and pooling, through a request gori could not encode" do
+    origin = H2Origin.new
+    pool = Gori::Repeater::H2Pool.new("http", "127.0.0.1", origin.port, false, nil, 2.seconds, nil, 2)
+    host = "127.0.0.1:#{origin.port}"
+    begin
+      pool.send(post(host, "one")).error.should be_nil
+      # A bare LF in a header value is refused before a byte is written. It used to be read as
+      # a stale parked socket: "closed by the origin … may or may not have reached it", and
+      # pooling switched off for the rest of the run.
+      bad = "POST /x HTTP/1.1\r\nHost: #{host}\r\nX-F: be\naf\r\nContent-Length: 1\r\n\r\nb".to_slice
+      r = pool.send(bad)
+      err = r.error.should_not be_nil
+      err.should_not contain("closed by the origin")
+      r.retried?.should be_false
+      pool.pooling?.should be_true
+      pool.send(post(host, "three")).error.should be_nil
+      pool.dialed.should eq(1_i64)
+      origin.connections.should eq(1)
+    ensure
+      pool.close_all
+      origin.close
+    end
+  end
+end

@@ -126,6 +126,9 @@ module Gori
         @outbuf = IO::Memory.new
         @eof = false
         @frames = 0
+        # A GOAWAY that still covered this stream (see `dispatch`): the reason the socket ended,
+        # should it end before the stream does.
+        @goaway = nil.as(String?)
         # A trailing header block still being assembled from HEADERS + CONTINUATION fragments,
         # or nil between blocks. See `absorb_trailers`.
         @trailer_buf = nil.as(IO::Memory?)
@@ -554,13 +557,9 @@ module Gori
           # going away, which is what happened. Raising instead would escape the drain's
           # `IO::Error | OpenSSL::Error` rescue and destroy a transcript that is already
           # complete.
-          @eof = true
-          return
+          return socket_ended
         end
-        if frame.nil?
-          @eof = true
-          return
-        end
+        return socket_ended if frame.nil?
         @frames += 1
         if @frames > H2Engine::MAX_FRAMES
           @eof = true
@@ -568,6 +567,13 @@ module Gori
                               "this WebSocket stream without ending it")
         end
         dispatch(frame)
+      end
+
+      # The socket ended under the stream. After a covering GOAWAY that is the origin's stated
+      # reason, not a quiet end.
+      private def socket_ended : Nil
+        @eof = true
+        @goaway.try { |reason| raise IO::Error.new(reason) }
       end
 
       # One frame. Returns true when the caller may stop reading — bytes are queued, or the
@@ -626,9 +632,18 @@ module Gori
           raise IO::Error.new("#{H2Engine.rst_reason(frame)} from #{@host}:#{@port} — the origin " \
                               "reset the WebSocket stream")
         when Frame::Type::Goaway
+          reason = "#{H2Engine.goaway_reason(frame)} from #{@host}:#{@port} — the origin closed " \
+                   "the HTTP/2 connection carrying the WebSocket"
+          # A graceful GOAWAY covering this stream (RFC 9113 §6.8) only stops NEW streams: the
+          # WebSocket on this one carries on, and the reason is kept for the socket's end. An
+          # error code still ends it here — §5.4.1 has that sender close the connection.
+          if H2Engine.goaway_covers?(frame, @flow.id) &&
+             IO::ByteFormat::BigEndian.decode(UInt32, frame.payload[4, 4]) == 0
+            @goaway = reason
+            return false
+          end
           @eof = true
-          raise IO::Error.new("#{H2Engine.goaway_reason(frame)} from #{@host}:#{@port} — the " \
-                              "origin closed the HTTP/2 connection carrying the WebSocket")
+          raise IO::Error.new(reason)
         else
           false
         end

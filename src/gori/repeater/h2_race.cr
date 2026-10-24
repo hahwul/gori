@@ -326,7 +326,9 @@ module Gori
 
           case frame.frame_type
           when Frame::Type::Settings, Frame::Type::Ping, Frame::Type::Goaway
-            break if handle_connection_frame(io, frame) # GOAWAY tears the connection down
+            # nil: a GOAWAY too short to name a last-stream-id, which ends the whole read.
+            break unless closed = handle_connection_frame(io, frame, streams, started)
+            remaining -= closed
           when Frame::Type::Headers, Frame::Type::Continuation, Frame::Type::Data, Frame::Type::RstStream
             break unless routed = route_or_fail(io, conn, streams, frame, started)
             advanced, closed = routed
@@ -354,15 +356,26 @@ module Gori
         end
       end
 
-      # A connection-level frame while reading responses: ACK a SETTINGS/PING, and report GOAWAY
-      # (returns true) so the caller stops reading. Returns false otherwise.
-      private def self.handle_connection_frame(io : IO, frame : Frame::Header) : Bool
+      # A connection-level frame while reading responses: ACK a SETTINGS/PING, and on a GOAWAY
+      # close the streams it no longer covers. Returns how many streams it closed, or nil for a
+      # GOAWAY with no last-stream-id, which ends the read.
+      #
+      # RFC 9113 §6.8: streams at or below last-stream-id are still answered, so only the ones
+      # above it are over. Ending the whole read on any GOAWAY dropped every member of a race
+      # the origin had accepted in full.
+      private def self.handle_connection_frame(io : IO, frame : Frame::Header,
+                                               streams : Hash(UInt32, PacketStream),
+                                               started : Time::Instant) : Int32?
         case frame.frame_type
         when Frame::Type::Settings then ack_soft(io, Frame::Type::Settings, Bytes.empty) unless frame.ack?
         when Frame::Type::Ping     then ack_soft(io, Frame::Type::Ping, frame.payload) unless frame.ack?
-        when Frame::Type::Goaway   then return true
+        when Frame::Type::Goaway
+          return nil unless last = goaway_last(frame)
+          above = streams.reject { |sid, st| st.done? || sid <= last }.values
+          above.each(&.close_incomplete(started))
+          return above.size
         end
-        false
+        0
       end
 
       # Route one HEADERS/CONTINUATION/DATA/RST frame to its `PacketStream` and reassemble it.
