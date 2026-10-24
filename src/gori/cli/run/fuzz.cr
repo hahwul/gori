@@ -72,6 +72,7 @@ module Gori
         follow = false
         keep_alive = true
         update_cl = true
+        verbatim = false
         reframe_grpc = false
         auto_cal = false
         format = :text
@@ -167,7 +168,13 @@ module Gori
           # goes out as written (see `Fuzz::PlanOptions#verbatim?`). It used to stop only the
           # Content-Length resync, so a bare-LF head was still promoted to CRLF and `$VAR`s still
           # expanded under the flag that says the bytes are the message.
-          p.on("--verbatim", "Send the template as written: no $VAR/$GEN/binding expansion, no CRLF promotion of a bare-LF head, no client hints, and no Content-Length resync or insertion (CL / CL-TE desync payloads)") { update_cl = false }
+          p.on("--verbatim", "Send the template as written: no $VAR/$GEN/binding expansion, no CRLF promotion of a bare-LF head, no client hints, and no Content-Length resync or insertion") do
+            verbatim = true
+            update_cl = false
+          end
+          # The Content-Length half alone (CL / CL-TE desync payloads that still use `$VAR`s or
+          # bound session tokens), as `intercept edit` and MCP `update_content_length: false` have it.
+          p.on("--no-update-content-length", "Leave Content-Length as the template declares it (no resync, no insertion); everything else still expands") { update_cl = false }
           # The mirror image of `--verbatim`, for the OTHER length declaration in the same
           # request. Default off, and the note below still fires for a run that leaves a
           # prefix stale — see `Fuzz::Config#reframe_grpc?` for why the default is that way.
@@ -393,7 +400,7 @@ module Gori
         options = Fuzz::PlanOptions.new(text,
           # A `--flow` template is a CAPTURED request; --request/stdin is a draft the operator
           # authored. See `Fuzz::PlanOptions#evidence?`.
-          evidence: evidence, verbatim: !update_cl,
+          evidence: evidence, verbatim: verbatim,
           default_target: default_target, target: target_override,
           auto_mark: auto, marks: marks, grpc_fields: grpc_fields, http2: http2,
           sources: sources, processors: processors, auto_encode: auto_encode,
@@ -596,10 +603,10 @@ module Gori
       private def self.warn_fuzz_content_length(plan : Fuzz::Plan) : Nil
         return unless plan.rewrites_content_length?
         STDERR.puts "gori run fuzz: note: the template's Content-Length disagrees with its own body " \
-                    "and is being recomputed on every request — pass --verbatim to send it as written"
+                    "and is being recomputed on every request — pass --no-update-content-length to send it as written"
       end
 
-      # The template has a body that NOTHING frames, and --verbatim is what left it that way.
+      # The template has a body that NOTHING frames, and the Content-Length knob left it that way.
       # An HTTP/1.1 origin reads such a request as having a zero-length body (a request body has
       # no close-delimited form), so every payload spliced into it would be scored against a
       # request the origin never read a body from. The remedy is the OPPOSITE direction to
@@ -608,10 +615,10 @@ module Gori
       private def self.warn_fuzz_unframed_body(plan : Fuzz::Plan) : Nil
         return unless plan.unframed_body?
         STDERR.puts "gori run fuzz: warning: the template has a body but declares neither " \
-                    "Content-Length nor chunked Transfer-Encoding, and --verbatim leaves it that " \
-                    "way — an HTTP/1.1 origin reads that as a zero-length body, so the payloads " \
-                    "go out unread. Drop --verbatim to have gori frame it, or declare the header " \
-                    "in the template"
+                    "Content-Length nor chunked Transfer-Encoding, and --verbatim / " \
+                    "--no-update-content-length leaves it that way — an HTTP/1.1 origin reads that " \
+                    "as a zero-length body, so the payloads go out unread. Drop the flag to have " \
+                    "gori frame it, or declare the header in the template"
       end
 
       # The run percent-encodes for its query / form positions. Said once, up front, naming
@@ -659,10 +666,10 @@ module Gori
         # refused: `--verbatim` means "send it as written" and a CL desync is a real test, so
         # combining the two is the operator's call to make knowingly.
         return if plan.config.update_content_length?
-        STDERR.puts "gori run fuzz: note: --verbatim leaves Content-Length at the capture's " \
-                    "value while a field position changes the message's size — every request " \
-                    "will declare the wrong body length. Drop --verbatim unless the desync is " \
-                    "the test"
+        STDERR.puts "gori run fuzz: note: Content-Length stays at the capture's value " \
+                    "(--verbatim / --no-update-content-length) while a field position changes the " \
+                    "message's size — every request will declare the wrong body length. Drop the " \
+                    "flag unless the desync is the test"
       end
 
       # Payload sets this run was handed and will never draw from — the silent half of

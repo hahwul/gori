@@ -208,6 +208,7 @@ module Gori::Repeater
       return Report.new(restore_eol(base_text, crlf), [] of Removed, 0, false, "already minimal — nothing removable (0 sends)") if candidates.empty?
 
       sends = 0
+      extras = backend.extra_requests
       # --- calibrate a FROZEN baseline from the original request ---
       metrics = [] of Fuzz::Metrics
       sigs = [] of Hash(String, String)
@@ -222,7 +223,10 @@ module Gori::Repeater
           return Report.new(restore_eol(base_text, crlf), [] of Removed, sends, true,
             "refused: #{why} — request left unchanged (#{sends} sends)")
         end
-        sends += 1
+        # Plus any keep-alive re-send the pool made: `sends` is what the origin got, and the
+        # cap counts those too.
+        sends += 1 + resent(backend, extras)
+        extras = backend.extra_requests
         if r.error.nil? && !r.incomplete?
           metrics << Miner::Fingerprint.probe(r).metrics
           sigs << behavior_signature(r.head)
@@ -267,7 +271,8 @@ module Gori::Repeater
         # A variant the scope refuses (a removal that moved the path under an exclude) was not
         # sent either; it is kept, since it was never tested.
         next if Outbound.permanent_refusal?(r.error)
-        sends += 1
+        sends += 1 + resent(backend, extras)
+        extras = backend.extra_requests
         if unchanged?(r, baseline)
           working = variant
           removed << Removed.new(cand.kind, cand.label)
@@ -653,6 +658,11 @@ module Gori::Repeater
     end
 
     # ── notes ──────────────────────────────────────────────────────────────────────────
+
+    # Keep-alive re-sends the backend made since `before` (`Fuzz::Backend#extra_requests`).
+    private def self.resent(backend : Fuzz::Backend, before : Int64) : Int32
+      (backend.extra_requests - before).to_i32
+    end
 
     private def self.summary_note(removed : Array(Removed), sends : Int32) : String
       return "already minimal — nothing removed (#{sends} sends)" if removed.empty?

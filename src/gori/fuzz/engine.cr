@@ -160,7 +160,7 @@ module Gori::Fuzz
     # A wrapper's say on a pooled stale re-send (`Repeater::Pool#resend_gate`): `CappedBackend`
     # charges it to `max_requests` or refuses it at the cap. Only `Sender` holds a pool; for
     # every other backend this is a no-op, and a wrapper forwards it down.
-    def resend_veto=(veto : Proc(String?)) : Nil
+    def resend_veto=(veto : Proc(String?, String?)) : Nil
     end
 
     # Send a GROUP of requests as ONE same-connection sequence, capturing each response in
@@ -310,6 +310,24 @@ module Gori::Fuzz
     getter? expand_bindings : Bool
 
     # No byte of what this sender is handed may resolve a binding: evidence, or verbatim.
+    # The one race request as it goes out: bindings outside the payload spans (none on a literal
+    # run), the slot overlay, and client hints unless verbatim.
+    private def race_wire(job : Job) : Bytes
+      verbatim = literal? ? Backend.all_verbatim(job.bytes) : job.payload_spans
+      gen = generation
+      wired = Gori::Env.overlay_slot(Gori::Env.expand_bindings(job.bytes, verbatim, generation: gen), gen)
+      @expand_bindings ? Gori::Env.client_hints(wired, gen) : wired
+    end
+
+    # One pipeline member as it goes out. Bindings and `$GEN` resolve per member unless the run
+    # is evidence or verbatim (pinned: spec/env_generators_spec.cr "gates the pipeline on the
+    # bytes it will write").
+    private def pipeline_member(b : Bytes, gen : Gori::Env::Generation) : Bytes
+      wired = literal? ? b : Gori::Env.expand_bindings(b, generation: gen)
+      wired = Gori::Env.overlay_slot(wired, gen)
+      @expand_bindings ? Gori::Env.client_hints(wired, gen) : wired
+    end
+
     private def literal? : Bool
       @evidence || !@expand_bindings
     end
@@ -415,9 +433,9 @@ module Gori::Fuzz
       @pool.try(&.resend_gate = -> { admit_resend })
     end
 
-    @resend_veto : Proc(String?)? = nil
+    @resend_veto : Proc(String?, String?)? = nil
 
-    def resend_veto=(veto : Proc(String?)) : Nil
+    def resend_veto=(veto : Proc(String?, String?)) : Nil
       @resend_veto = veto
     end
 
@@ -425,11 +443,15 @@ module Gori::Fuzz
     # then the cap of whatever `CappedBackend` wraps this sender, refunding the slot when the
     # cap says no. Without it an origin that drops every other keep-alive request drew twice
     # the traffic `outbound_max_requests` was set to allow.
+    #
+    # The veto hears a budget refusal too (its argument), so the cap's owner latches it and the
+    # run ends `budget_exhausted` — the row itself keeps the failure the first copy got.
     private def admit_resend : String?
       if err = @outbound.admit
+        @resend_veto.try(&.call(err))
         return err
       end
-      if err = @resend_veto.try(&.call)
+      if err = @resend_veto.try(&.call(nil))
         @outbound.refund(1)
       end
       err
@@ -695,12 +717,7 @@ module Gori::Fuzz
       # per member, and the verdict is taken on the bytes the pipeline will write.
       reqs = requests.map do |b|
         gen = generation
-        # WHOLE-buffer verbatim, as `Backend#send_pipeline` documents and as the probe path marks
-        # every other send (`Fuzz::Backend.all_verbatim` at each call site in `probe/`): a crafted
-        # smuggling probe — or a captured member — carries no operator `$NAME`, so nothing in
-        # it resolves a binding. That is `expand_bindings` over the maximal span: a no-op.
-        wired = Gori::Env.overlay_slot(b, gen)
-        @expand_bindings ? Gori::Env.client_hints(wired, gen) : wired
+        pipeline_member(b, gen)
       end
       # GROUP-GATE, sweep-side, mirroring `Repeater::Sender#group_refusal`: one blocked member
       # refuses the WHOLE batch and returns all-error Results — a group is one connection
@@ -748,11 +765,7 @@ module Gori::Fuzz
       # A refresh happens BEFORE the group is dialled, never between warm-up and release: the
       # race's whole premise is that nothing else happens in that window.
       before_send_refresh
-      bytes = jobs[0].bytes
-      verbatim = literal? ? Backend.all_verbatim(bytes) : jobs[0].payload_spans
-      race_gen = generation
-      expanded = Gori::Env.overlay_slot(Gori::Env.expand_bindings(bytes, verbatim, generation: race_gen), race_gen)
-      expanded = Gori::Env.client_hints(expanded, race_gen) if @expand_bindings
+      expanded = race_wire(jobs[0])
       # Nothing to hold back — degrade rather than slice a negative/empty tail. Never hit by a
       # real HTTP request (always well over 2 bytes); a defensive floor for a hand-built Job.
       if expanded.size < 2
@@ -835,7 +848,7 @@ module Gori::Fuzz
     delegate blocked, blocked_reason, extra_requests, evidence?, http2?, pooled?,
       ws_notes, ws_note_reason, close, to: @inner
 
-    def resend_veto=(veto : Proc(String?)) : Nil
+    def resend_veto=(veto : Proc(String?, String?)) : Nil
       @inner.resend_veto = veto
     end
 
@@ -892,10 +905,14 @@ module Gori::Fuzz
     @resent = 0_i64
 
     def initialize(@inner : Backend, @cap : Int64?)
-      @inner.resend_veto = -> { charge_resend }
+      @inner.resend_veto = ->(budget : String?) { charge_resend(budget) }
     end
 
-    private def charge_resend : String?
+    private def charge_resend(budget : String?) : String?
+      if budget
+        @budget_refusal ||= budget unless budget == Gori::Outbound::BUDGET_STOPPED_ERROR
+        return budget
+      end
       return CAP_ERROR if cap_reached?
       @resent += 1
       nil
@@ -1691,7 +1708,8 @@ module Gori::Fuzz
       current = raw
       total_us = raw.duration_us
       base = Gori::Outbound.request_target(request)
-      authority = request_authority(request, @backend.origin)
+      # The bytes that went out (a `$BIND` Host resolved), judged against the template's own.
+      authority = request_authority(raw.wire || request, @backend.origin)
       # A keep-alive re-send ANYWHERE in the chain has to reach the row: the collapsed Result
       # below keeps the last hop's fields, so without this an original request that was
       # re-sent and then redirected would report as a single clean send.
@@ -1776,12 +1794,24 @@ module Gori::Fuzz
     # or DEL: nothing that could end the line) and a parsable authority are required; a
     # duplicated or unsafe `Host:` is a test of its own and the hop falls back to the dial
     # origin. Only `Host` carries over. Cookie / Authorization do not, as before.
+    #
+    # Only the TEMPLATE's Host, never a payload's: a sweep of the Host header against an origin
+    # that reflects it into `Location` must keep that 3xx as the row (it is the finding), not
+    # follow it. So the value is honoured only when it equals the baseline template's own, and
+    # only as a bare authority — a path, userinfo, query or fragment would leak into the hop.
     private def request_authority(request : Bytes, o : Origin) : String
       dial = Repeater::FlowRequest.authority(o.scheme, o.host, o.port)
-      hosts = Proxy::Codec::Http1.parse_request_head(request).headers.get_all("host")
-      return dial unless hosts.size == 1 && (h = hosts[0]).presence
+      h = single_host(request) || return dial
+      return dial unless h == (@template_host ||= single_host(@generator.baseline_request) || "")
       return dial unless Proxy::Codec::Http1.request_token_safe?(h)
-      (URI.parse("#{o.scheme}://#{h}/").host.presence rescue nil) ? h : dial
+      uri = URI.parse("#{o.scheme}://#{h}/") rescue nil
+      bare = uri && uri.host.presence && uri.user.nil? && uri.path == "/" && uri.query.nil? && uri.fragment.nil?
+      bare ? h : dial
+    end
+
+    private def single_host(request : Bytes) : String?
+      hosts = Proxy::Codec::Http1.parse_request_head(request).headers.get_all("host")
+      hosts.size == 1 ? hosts[0].presence : nil
     end
 
     # The next hop's request bytes and its request-target, or `{nil, nil}` when the
@@ -1811,8 +1841,9 @@ module Gori::Fuzz
       return {nil, nil} unless path && Proxy::Codec::Http1.request_token_safe?(path)
       # The request's own `Host:`, else `FlowRequest.authority` — the one spelling of a `Host:`
       # value gori writes: an IPv6 literal bracketed (`Host: ::1:8080` is not a host and a port,
-      # it is a parse error), the port dropped when it is the scheme default.
-      host = authority
+      # it is a parse error), the port dropped when it is the scheme default. An absolute
+      # Location that names the DIAL address goes to that address's vhost, not the template's.
+      host = names_dial?(loc, o) ? Repeater::FlowRequest.authority(o.scheme, o.host, o.port) : authority
       # `Connection: close` is an h1 instruction, and it is only written when nothing pools: on
       # a pooled h1 run it made `ConnPool.reusable_request?` refuse the socket, so every hop
       # dialed a fresh one for a bodyless GET gori wrote itself — no operator bytes to keep.
@@ -1845,14 +1876,22 @@ module Gori::Fuzz
     end
 
     # Scheme and host are case-insensitive (RFC 3986 §3.1, §3.2.2); `Location: HTTP://Host/`
-    # is the same origin. Same origin is the dial origin OR the authority the request
-    # addressed (`request_authority`): the hop dials the same socket address either way.
+    # is the same origin. Same origin is the dial origin OR the host the request addressed
+    # (`request_authority`) on the DIAL port: the hop dials that one socket address, so a
+    # Location on another port is another origin whatever its host.
     private def same_origin?(uri : URI, o : Origin, authority : String) : Bool
       sc = (uri.scheme || o.scheme).downcase
       return false unless sc == o.scheme
       return true if same_authority?(uri, sc, o.host, o.port)
       addressed = URI.parse("#{o.scheme}://#{authority}/") rescue nil
-      !!addressed && same_authority?(uri, sc, addressed.host || "", addressed.port || default_port(sc))
+      !!addressed && same_authority?(uri, sc, addressed.host || "", o.port)
+    end
+
+    # Whether an absolute (or network-path) `Location` names the dial address itself.
+    private def names_dial?(loc : String, o : Origin) : Bool
+      return false unless loc.includes?("://") || loc.starts_with?("//")
+      uri = URI.parse(loc.starts_with?("//") ? "#{o.scheme}:#{loc}" : loc) rescue nil
+      !!uri && same_authority?(uri, o.scheme, o.host, o.port)
     end
 
     # `uri`'s host and port against `host`/`port`. `parse_target`'s bracket rule for an IPv6

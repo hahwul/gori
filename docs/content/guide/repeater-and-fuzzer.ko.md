@@ -254,7 +254,7 @@ gori run fuzz delete RUN_ID --yes
 
 ### 스윕의 프레이밍 {#framing-a-sweep}
 
-`Content-Length`는 페이로드가 삽입될 때마다 다시 계산되고, 템플릿에 본문은 있는데 길이 선언이 아예 없으면 **추가**되므로, 일반적인 스윕은 항상 일관된 상태를 유지합니다. `--verbatim`(MCP `update_content_length: false`, 또는 Fuzzer ADVANCED 카드의 **Auto Content-Length** 끄기)은 이 두 가지를 모두 끕니다. 본문과 어긋나는 길이 자체가 CL / CL-TE 디싱크 테스트의 목적이기 때문입니다. `--verbatim`(MCP `verbatim: true`)은 Repeater에서처럼 한발 더 나아가 템플릿을 쓰인 그대로 보냅니다. 토큰을 확장하지 않고(`$ENV.KEY`, `$BIND.NAME`, `$GEN.*`는 리터럴로 남고 `$$`도 소비되지 않음), 단독 LF를 승격하지 않으며, 클라이언트 힌트도 붙이지 않으므로 페이로드가 바꾸는 것은 `§…§` 삽입뿐입니다. TUI Fuzzer에는 아직 이 토글이 없습니다.
+`Content-Length`는 페이로드가 삽입될 때마다 다시 계산되고, 템플릿에 본문은 있는데 길이 선언이 아예 없으면 **추가**되므로, 일반적인 스윕은 항상 일관된 상태를 유지합니다. `--no-update-content-length`(MCP `update_content_length: false`, 또는 Fuzzer ADVANCED 카드의 **Auto Content-Length** 끄기)는 이 두 가지를 모두 끕니다. 본문과 어긋나는 길이 자체가 CL / CL-TE 디싱크 테스트의 목적이기 때문입니다. `--verbatim`(MCP `verbatim: true`)은 Repeater에서처럼 한발 더 나아가 템플릿을 쓰인 그대로 보냅니다. 토큰을 확장하지 않고(`$ENV.KEY`, `$BIND.NAME`, `$GEN.*`는 리터럴로 남고 `$$`도 소비되지 않음), 단독 LF를 승격하지 않으며, 클라이언트 힌트도 붙이지 않으므로 페이로드가 바꾸는 것은 `§…§` 삽입뿐입니다. TUI Fuzzer에는 아직 이 토글이 없습니다.
 
 뒤쪽 절반은 들리는 것보다 중요합니다. HTTP/1.1 요청 본문에는 연결 종료로 경계를 잡는 형태가 없어서, `Content-Length`도 청크 `Transfer-Encoding`도 없는 본문은 오리진이 **길이 0인 본문**으로 읽습니다. 페이로드는 읽히지 않은 채 나가는데 모든 행은 여전히 상태 코드를 보고합니다. `--verbatim`이 템플릿을 바로 그 형태로 남기는 경우, gori는 실행이 조용히 지나가게 두지 않고 첫 전송 전에 이를 알려줍니다.
 

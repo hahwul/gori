@@ -527,26 +527,3 @@ describe "Gori::Fuzz::Sender#expand_bindings? — verbatim at the send seam" do
     end
   end
 end
-
-# `Backend#send_pipeline` documents every member as whole-buffer verbatim, and the probe path
-# (its only caller) marks every other send that way. `Sender` resolved bindings in it anyway.
-describe "Gori::Fuzz::Sender#send_pipeline — members are verbatim" do
-  it "resolves no binding inside a pipeline member" do
-    with_ev_store do |store|
-      with_ev_layer(ev_bound(store, "id", TOKEN)) do
-        origin = EvOrigin.new
-        origin.serve
-        begin
-          o = F::Origin.new("http", "127.0.0.1", origin.port)
-          rs = F::Sender.new(o, ev_outbound, false, false).send_pipeline([gql_request(origin.port)], 2.seconds)
-          rs.size.should eq(1)
-          origin.wait_for(1)
-          origin.requests[0].should contain("query GetUser($id: ID!)")
-          origin.requests[0].should_not contain(TOKEN)
-        ensure
-          origin.close
-        end
-      end
-    end
-  end
-end

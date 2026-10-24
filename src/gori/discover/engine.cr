@@ -413,7 +413,10 @@ module Gori::Discover
     # A pool's stale re-send is one more real send: charged to `sent` like a fetch (so the
     # run's progress counts it), or refused at the cap.
     def charge_resend : Bool
-      return false if cap_reached?
+      if cap_reached?
+        @refused += 1 # a cap refusal like `fetch`'s, so `budget_exhausted?` sees it
+        return false
+      end
       @sent += 1
       true
     end
@@ -2191,6 +2194,12 @@ module Gori::Discover
     # the fetch ends with the failure its first copy got.
     private def resend_refusal : String?
       if err = @scope.admit
+        # Latched as `paced_fetch` does, so the run ends `budget_exhausted` and not on the
+        # transport failure the refused re-send's first copy got.
+        unless stopped?
+          @first_error ||= err
+          @budget_refusal = err
+        end
         return err
       end
       return nil if @capped.charge_resend

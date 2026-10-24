@@ -719,7 +719,8 @@ module Gori::Fuzz
       end
       runner = RequestMacro::Runner.build(spec, store, outbound,
         overrides: options.overrides, verify: options.verify?)
-      runner.check_reachable!(candidates, options.evidence?)
+      # Verbatim resolves no `$BIND` either, so it is judged as evidence is.
+      runner.check_reachable!(candidates, options.evidence? || options.verbatim?)
       RequestMacro::Lane.new(spec, runner, "fuzzer")
     end
 

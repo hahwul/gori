@@ -103,7 +103,6 @@ module Gori::Repeater
             return unsafe_stale_result(result, method)
           end
           return result if resend_refused? # see `Pool#resend_gate`
-          @stale_retries += 1
           return dial_and_send(bytes, keepable, method, retried: true)
         end
         @consecutive_stale = 0
@@ -199,10 +198,9 @@ module Gori::Repeater
       started = Time.instant
       conn, err = H2Engine.dial(@scheme, @host, @port, @verify, @sni, @timeout, @overrides,
         @tls_preset)
-      unless conn
-        e = Repeater::Engine.error(err || "h2 connect failed", started)
-        return retried ? e.as_retried : e
-      end
+      # A re-dial that FAILS put no second copy on the wire (`ConnPool#dial_and_send`'s rule).
+      return Repeater::Engine.error(err || "h2 connect failed", started) unless conn
+      @stale_retries += 1 if retried
       @dialed += 1
       result = H2Engine.exchange_request(conn, bytes, scheme: @scheme, host: @host,
         port: @port, started: started, timeout: @timeout, sse: @sse)

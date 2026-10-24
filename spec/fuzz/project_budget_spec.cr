@@ -243,3 +243,37 @@ describe "a fuzz group send's project budget slots" do
     end
   end
 end
+
+# Holds the cap's re-send veto, the hook a pooled `Sender` calls before a stale re-send.
+private class VetoCapture < F::Backend
+  getter veto : Proc(String?, String?)? = nil
+
+  def origin : F::Origin
+    F::Origin.new("http", "x", 80)
+  end
+
+  def resend_veto=(veto : Proc(String?, String?)) : Nil
+    @veto = veto
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    Gori::Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, nil)
+  end
+end
+
+describe "a pooled re-send the project budget refuses" do
+  # The row keeps the first copy's failure, so the cap has to hear the refusal to end the run
+  # `budget_exhausted` rather than `done` with an error row.
+  it "latches the refusal on the cap, as a refused send does" do
+    inner = VetoCapture.new
+    capped = F::CappedBackend.new(inner, nil)
+    inner.veto.not_nil!.call(Gori::Outbound::BUDGET_SPENT_ERROR).should eq(Gori::Outbound::BUDGET_SPENT_ERROR)
+    capped.budget_refusal.should eq(Gori::Outbound::BUDGET_SPENT_ERROR)
+    capped.cap_reached?.should be_true
+    # …but a stop ending the wait is the operator's stop, not the budget's.
+    inner2 = VetoCapture.new
+    capped2 = F::CappedBackend.new(inner2, nil)
+    inner2.veto.not_nil!.call(Gori::Outbound::BUDGET_STOPPED_ERROR)
+    capped2.budget_refusal.should be_nil
+  end
+end
