@@ -254,13 +254,15 @@ module Gori
 
     # ── Env::Layer ────────────────────────────────────────────────────────────
 
-    # Names declared by an ENABLED rule. A disabled rule declares nothing: its name goes
-    # back to being an ordinary unknown key, which plan-build then refuses by #525's rule.
-    # That is deliberate — disabling the writer must not leave the reader silently
-    # injecting a stale value, and it must not leave `$SESSION` sailing out literally
-    # either.
+    # Names declared by an ENABLED rule. A disabled rule declares nothing: disabling the writer
+    # must not leave the reader silently injecting a stale value. Nor may it leave `$SESSION`
+    # sailing out literally: a rewrite rule reads `withheld` below and skips instead.
     def declared : Array(String)
       @mutex.synchronize { @compiled.select(&.rule.enabled?).map(&.rule.name) }
+    end
+
+    def withheld : Array(String)
+      disabled_rule_ids.keys
     end
 
     # The OTHER half of `declared`: `{name => rule id}` for every rule that is switched OFF.

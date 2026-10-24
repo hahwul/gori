@@ -741,6 +741,13 @@ module Gori
     abstract class Layer
       # Names an extract rule declares, whether or not one is bound yet.
       abstract def declared : Array(String)
+
+      # Names only a DISABLED extract rule declares. Not part of `declared`, but a rewrite rule
+      # injecting one must skip, as for an unbound name, rather than send `$NAME` literally.
+      def withheld : Array(String)
+        [] of String
+      end
+
       # Values available for RESOLUTION — what `$NAME` may expand to at send time.
       abstract def values : Hash(String, String)
 
@@ -825,6 +832,11 @@ module Gori
     # seams pass `deferred: nil` to get it back.
     def self.declared_bindings : Array(String)
       @@layer.try(&.declared) || [] of String
+    end
+
+    # See `Layer#withheld`.
+    def self.withheld_bindings : Array(String)
+      @@layer.try(&.withheld) || [] of String
     end
 
     # Bound values only. Never merged into `effective_vars`; see the note above.

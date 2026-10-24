@@ -989,7 +989,7 @@ module Gori
 
         tool j, "set_extract_rule_enabled",
           "Enable/disable an extract rule. Disabling UN-DECLARES its name: a Match & Replace " \
-          "rule injecting it then refuses instead of sending a stale value." do |s|
+          "rule injecting it then skips (no stale value, no literal token on the wire)." do |s|
           s.field "id", intprop("extract rule id"), required: true
           s.field "enabled", boolprop("new state"), required: true
         end

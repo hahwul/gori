@@ -1656,8 +1656,10 @@ module Gori
         # running process (`Settings.env_syntax=` bumps `highlight_rev` for exactly that reason)
         # and a snapshot holding only the merged one would then route `$ENV.X` through a table
         # that also carries the bindings.
+        # A disabled extract rule's name counts as declared-and-unbound HERE, so the rule skips
+        # rather than injecting a literal `$NAME` (`Layer#withheld`).
         cached = SubstSnapshot.new(Env.display_vars, Env.effective_vars, Env.binding_values,
-          Env.declared_bindings, Env.active_slot_claims)
+          Env.declared_bindings | Env.withheld_bindings, Env.active_slot_claims)
         @subst_snap = cached
         @subst_env_rev = erev
         @subst_binding_rev = brev
@@ -1728,6 +1730,12 @@ module Gori
       case refused.reason
       in Refusal::Unbound
         names = Env.unbound(rule.replacement)
+        if names.empty? && Env.withheld_bindings.includes?(refused.key)
+          @store.insert_event("bindings", "unbound", "warn",
+            "rewrite rule #{label.inspect} not applied: the extract rule declaring " \
+            "#{Env.token_list([refused.key], ns: Env::Namespace::Bind)} is disabled")
+          return
+        end
         return if names.empty?
         # `Refused#key` and `unbound` both answer in BARE names (they index the binding table);
         # the SPELLING is applied here, and it is the BIND namespace's by construction — this

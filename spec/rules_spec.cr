@@ -399,6 +399,27 @@ describe Gori::Rules do
         end
       end
     end
+
+    # Disabling the writer un-declares the name; the rule used to apply and put the literal
+    # `$SESSION` in the header, where an unbound name skips it.
+    it "skips a rule whose binding's extract rule is disabled, bound value or not" do
+      with_store do |store|
+        b = Gori::Bindings.load(store)
+        b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid").should be_nil
+        b.toggle(b.rules.first.id)
+        with_layer(b) do
+          rules = Gori::Rules.new(store, store.match_rules)
+          rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "X-Auth",
+            "$SESSION", Gori::Store::RuleOp::SetHeader, Gori::Store::MatchKind::Literal,
+            "inject", "", "")
+          out = rules.transform_message("GET /a HTTP/1.1\r\nHost: acme.test\r\n\r\n",
+            Gori::Store::RuleTarget::Request, "acme.test")
+          out.should_not contain("X-Auth")
+          ev = store.events_after(0, 50).find { |e| e.kind == "unbound" }.not_nil!
+          ev.message.should eq(%(rewrite rule "inject" not applied: the extract rule declaring $SESSION is disabled))
+        end
+      end
+    end
   end
 
   it "reorders rules in apply order" do
