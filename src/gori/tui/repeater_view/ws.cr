@@ -171,6 +171,9 @@ class Gori::Tui::RepeaterView
       if detail = Env.unresolved_env(text)
         return Tui.unresolved_env_status(detail)
       end
+      if (token = Env.unmintable(text.to_slice)) && (why = Env.mint_refusal(token))
+        return "ws repeater: #{why}"
+      end
     end
     nil
   end

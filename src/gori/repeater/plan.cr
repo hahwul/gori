@@ -636,8 +636,14 @@ module Gori::Repeater
     # Raise when authored `text` still names an `$ENV` var with no value (`Env.unresolved_env`).
     # Public for the builder that expands before this one runs (`UrlRequest`).
     def self.refuse_unresolved_env(text : String) : Nil
-      return unless detail = Env.unresolved_env(text)
-      raise PlanError.new(PlanError::Reason::UnresolvedEnv, "unresolved env #{detail}", detail)
+      if detail = Env.unresolved_env(text)
+        raise PlanError.new(PlanError::Reason::UnresolvedEnv, "unresolved env #{detail}", detail)
+      end
+      # …and a `$GEN` that cannot mint, as `build` refuses it in a request (#1591). Here too for
+      # the text that never reaches `build`: a WebSocket frame went out with `$GEN.TOTP` in it.
+      if (token = Env.unmintable(text.to_slice)) && (why = Env.mint_refusal(token))
+        raise PlanError.new(PlanError::Reason::UnresolvedEnv, why, token)
+      end
     end
 
     # A field-native h2 send: dial origin + SNI resolution, then a `Sender` whose `send` will
