@@ -271,7 +271,9 @@ module Gori
         default_target = seed.target
         evidence = seed.evidence
         # An explicit --sni wins; otherwise the source's own (a repeater session's stored SNI).
-        sni ||= seed.sni
+        # A capture's SNI goes with the capture's origin, never onto a `--target` (as
+        # `repeater create --flow` has it).
+        sni ||= seed.sni unless flow_id && target_override
         # …and the same precedence for the fingerprint. `||=` rather than a `presence` fold, so
         # an explicit `--tls-preset ""` still means "no override for this run" and can take the
         # baseline half of an A/B against a tab that carries one.

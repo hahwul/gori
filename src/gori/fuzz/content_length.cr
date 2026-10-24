@@ -72,8 +72,17 @@ module Gori::Fuzz
     # payload's span — cannot re-derive them afterwards, because this rewrite happens between
     # the splice and the socket and can change the head's length. Returning the edit instead
     # of the whole mapping keeps the (dominant) untouched-request path allocation-free.
-    def self.sync_at(bytes : Bytes, add_when_missing : Bool = false) : {Bytes, Int32, Int32}
+    #
+    # `payloads` are those spans, and a PAYLOAD that supplies the framing keeps it: when the
+    # blank line that ends the head, or the Content-Length line itself, lies inside one, the
+    # request is returned untouched. A header-position `a\r\n\r\nGET /admin …` or a marked
+    # `Content-Length: §5§` is a smuggling/desync test whose whole point is the framing it
+    # writes; inserting gori's own line in the middle of it, or overwriting its value, sent a
+    # different test (P7 — malformed input is the payload).
+    def self.sync_at(bytes : Bytes, add_when_missing : Bool = false,
+                     payloads : Array({Int32, Int32}) = [] of {Int32, Int32}) : {Bytes, Int32, Int32}
       sep, sep_w = Env.head_body_separator(bytes) || return {bytes, 0, 0}
+      return {bytes, 0, 0} if touches?(payloads, sep, sep + sep_w)
       # The terminator of the header line BEFORE the blank line. The mixed `\n\r\n` separator
       # (width 3) is not a repeated `eol`, so callers splice `bytes[sep, sep_w]` VERBATIM
       # instead of doubling `eol` (see replace_cl / append_cl).
@@ -108,6 +117,7 @@ module Gori::Fuzz
       # CL present: a chunked request keeps its (unused) header verbatim (out of scope).
       return {bytes, 0, 0} if chunked?(bytes, sep, eol)
       ls, le = cl
+      return {bytes, 0, 0} if touches?(payloads, ls, le)
       # Skip the rebuild when the line is already exactly the canonical form we'd emit —
       # same early-out as the old `lines[idx] == "Content-Length: #{body_len}"` guard.
       canon = "#{CL_CANON}#{body_len}"
@@ -117,6 +127,11 @@ module Gori::Fuzz
       # is what this pass overwrites, and the caller is told the region ends at `le`.
       {replace_cl(bytes, ls, le, sep, sep_w, body_start, body_len, canon), le,
        canon.bytesize - (le - ls)}
+    end
+
+    # Does any `[a, b)` span overlap `[lo, hi)`?
+    private def self.touches?(spans : Array({Int32, Int32}), lo : Int32, hi : Int32) : Bool
+      spans.any? { |(a, b)| a < hi && b > lo }
     end
 
     # ── head scanning (byte level, no String/Array allocation) ────────────────────

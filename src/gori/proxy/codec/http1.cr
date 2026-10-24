@@ -114,7 +114,10 @@ module Gori::Proxy::Codec::Http1
         if @bytes.empty?
           "#{label} read timed out before any bytes arrived"
         else
-          "#{label} not CRLFCRLF-terminated within #{deadline.total_seconds.to_i} s (#{@bytes.size} bytes received)"
+          # "Before the read timed out", not "within <deadline>": the idle timeout can end a
+          # stalled head sooner (`arm_remaining`), and the deadline is only the upper bound.
+          "#{label} not CRLFCRLF-terminated before the read timed out (#{@bytes.size} bytes received, " \
+          "head deadline #{deadline.total_seconds.to_i} s)"
         end
       when State::Failed
         message = @error.try(&.message).presence || "upstream read failed"

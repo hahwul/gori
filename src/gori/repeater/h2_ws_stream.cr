@@ -636,9 +636,8 @@ module Gori
                    "the HTTP/2 connection carrying the WebSocket"
           # A graceful GOAWAY covering this stream (RFC 9113 §6.8) only stops NEW streams: the
           # WebSocket on this one carries on, and the reason is kept for the socket's end. An
-          # error code still ends it here — §5.4.1 has that sender close the connection.
-          if H2Engine.goaway_covers?(frame, @flow.id) &&
-             IO::ByteFormat::BigEndian.decode(UInt32, frame.payload[4, 4]) == 0
+          # error code still ends it here (`goaway_covers?` is graceful-only).
+          if H2Engine.goaway_covers?(frame, @flow.id)
             @goaway = reason
             return false
           end

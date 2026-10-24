@@ -328,7 +328,7 @@ module Gori::Fuzz
       chain_error ||= field_error
       bytes = raw
       if @config.update_content_length?
-        bytes, at, delta = ContentLength.sync_at(raw, true)
+        bytes, at, delta = ContentLength.sync_at(raw, true, spans)
         spans = shift_spans(spans, at, delta) unless delta == 0
       end
       bytes = reframed(bytes)
@@ -357,7 +357,7 @@ module Gori::Fuzz
       r = script.render_spans(values)
       hs, spans = r.handshake, r.handshake_spans
       if @config.update_content_length?
-        hs, at, delta = ContentLength.sync_at(hs, true)
+        hs, at, delta = ContentLength.sync_at(hs, true, spans)
         spans = shift_spans(spans, at, delta) unless delta == 0
       end
       Job.new(idx, payloads, pos, hs, spans, chain_error, r.frames)
@@ -367,18 +367,11 @@ module Gori::Fuzz
     # between the splice and the wire and can change a byte offset. `at`/`delta` come from
     # `ContentLength.sync_at`: everything at or past `at` moved by `delta`.
     #
-    # A span that lay INSIDE the rewritten header line is left where it is rather than
-    # dropped. Those payload bytes have no image in the output — the line was replaced by
-    # the canonical `Content-Length: N` — so the range now covers digits gori wrote itself,
-    # and excluding those from a `$NAME` scan is a no-op either way. Dropping it would be a
-    # silent narrowing of the exclusion instead, which is the direction that bites.
-    #
-    # A span that STRADDLES `at` keeps its start and moves its end: a payload carrying its own
-    # blank line (`a\r\n\r\n$TOKEN`) is where the Content-Length line gets inserted, and an
-    # unmoved end would leave the payload's tail — `$TOKEN` — outside the exclusion.
+    # No span lies inside the rewritten line or across `at`: `sync_at` leaves a request whose
+    # framing a payload wrote untouched.
     private def shift_spans(spans : Array({Int32, Int32}), at : Int32,
                             delta : Int32) : Array({Int32, Int32})
-      spans.map { |(a, b)| a >= at ? {a + delta, b + delta} : {a, b > at ? b + delta : b} }
+      spans.map { |(a, b)| a >= at ? {a + delta, b + delta} : {a, b} }
     end
 
     # A random alphanumeric string with no whitespace — safe to drop into a query/body

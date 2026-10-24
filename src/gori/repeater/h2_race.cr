@@ -370,7 +370,8 @@ module Gori
         when Frame::Type::Settings then ack_soft(io, Frame::Type::Settings, Bytes.empty) unless frame.ack?
         when Frame::Type::Ping     then ack_soft(io, Frame::Type::Ping, frame.payload) unless frame.ack?
         when Frame::Type::Goaway
-          return nil unless last = goaway_last(frame)
+          # An error GOAWAY ends the read: its sender closes the connection (§5.4.1).
+          return nil unless (last = goaway_last(frame)) && goaway_code(frame) == 0
           above = streams.reject { |sid, st| st.done? || sid <= last }.values
           above.each(&.close_incomplete(started))
           return above.size

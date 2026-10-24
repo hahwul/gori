@@ -1146,7 +1146,9 @@ module Gori
             if goaway_covers?(frame, flow.id)
               flow.draining = true
             else
-              flow.unprocessed = true if goaway_last(frame)
+              # Above last-stream-id only: an ERROR GOAWAY that names this stream may have
+              # processed it, and an unprocessed stream is one the pool re-sends, POST included.
+              flow.unprocessed = true if (last = goaway_last(frame)) && flow.id > last
               done = true
             end
           when Frame::Type::RstStream
@@ -1380,9 +1382,19 @@ module Gori
         IO::ByteFormat::BigEndian.decode(UInt32, frame.payload[0, 4]) & 0x7fffffff_u32
       end
 
-      # Does this GOAWAY still cover `stream_id`, i.e. will the origin finish answering it?
+      # Does this GOAWAY still cover `stream_id`, i.e. will the origin finish answering it? Only
+      # a graceful (NO_ERROR) one: an error GOAWAY's sender closes the connection (§5.4.1), so
+      # writing on or waiting for an answer that will not come only trades its reason for a
+      # stall or a write error that drops the frames already read.
       def self.goaway_covers?(frame : Frame::Header, stream_id : UInt32) : Bool
-        (last = goaway_last(frame)) ? stream_id <= last : false
+        return false unless (last = goaway_last(frame)) && goaway_code(frame) == 0
+        stream_id <= last
+      end
+
+      # A GOAWAY's error code, or nil when the payload is too short to carry one.
+      def self.goaway_code(frame : Frame::Header) : UInt32?
+        return nil if frame.payload.size < 8
+        IO::ByteFormat::BigEndian.decode(UInt32, frame.payload[4, 4])
       end
 
       # A RST_STREAM payload as a sentence (§6.4: a single 4-octet error code). The sibling

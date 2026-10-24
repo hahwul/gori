@@ -3943,9 +3943,10 @@ module Gori::Tui
       # (`Job#position`): only the substituted position was encoded, the rest kept their
       # template defaults.
       payloads = (@run_auto_encode || Fuzz::AutoEncode.none).apply(payloads, r.position)
-      raw = grpc ? grpc.render_spans(payloads)[0] : tmpl.render(payloads)
+      raw, spans = grpc ? grpc.render_spans(payloads)[0..1] : tmpl.render_spans(payloads)
       sync, add, _ = run_policy
-      raw = Fuzz::ContentLength.sync(raw, add) if sync
+      # With the spans, as `Generator#emit` does: a payload that wrote its own framing kept it.
+      raw = Fuzz::ContentLength.sync_at(raw, add, spans)[0] if sync
       # AFTER the Content-Length pass, the order `Generator#emit` uses and for its reason: the
       # reframe is size-preserving, so it can neither invalidate the CL just written nor move a
       # byte. Skipped when THAT run did not reframe (`@run_reframe_grpc`), which is the common case.

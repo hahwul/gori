@@ -96,6 +96,22 @@ describe "an origin that answers before the request body is written" do
   end
 end
 
+describe "a 408 waiting when a request write fails" do
+  # On a parked keep-alive that is the server closing a connection it thought unused, not an
+  # answer to this request: it stays the stale case the pool replays.
+  it "is not taken as the request's answer" do
+    port = one_shot_origin do |c|
+      c << "HTTP/1.1 408 Request Timeout\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+      c.flush
+    end
+    body = "A" * (32 * 1024 * 1024)
+    req = "POST /big HTTP/1.1\r\nHost: x\r\nContent-Length: #{body.bytesize}\r\n\r\n#{body}".to_slice
+    r = E.send(req, scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false, timeout: 1.second)
+    r.response.should be_nil
+    r.retryable_stale?.should be_true
+  end
+end
+
 describe "an h1 race warm-up" do
   it "refuses a connection with bytes left past the warm-up's response" do
     srv = TCPServer.new("127.0.0.1", 0)

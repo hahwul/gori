@@ -2329,6 +2329,14 @@ describe "Gori::Repeater::H2Engine — GOAWAY last-stream-id and write-phase cre
     String.new(r.body || Bytes.empty).should eq("ok")
   end
 
+  # §5.4.1: an ERROR GOAWAY's sender closes the connection, so it covers nothing still to come.
+  it "counts only a graceful GOAWAY as covering a stream" do
+    graceful = Frame.read(IO::Memory.new(goaway_frame(3_u32))).not_nil!
+    error = Frame.read(IO::Memory.new(goaway_frame(3_u32, 3_u32))).not_nil!
+    Gori::Repeater::H2Engine.goaway_covers?(graceful, 1_u32).should be_true
+    Gori::Repeater::H2Engine.goaway_covers?(error, 1_u32).should be_false
+  end
+
   it "credits DATA read while the body is still going out, so a streaming echo completes" do
     port = start_h2_origin_streaming_echo
     req = "POST /echo HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n#{"a" * 200_000}".to_slice
