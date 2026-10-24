@@ -125,7 +125,7 @@ module Gori
         # `pending_edit` comment calls out. Mirrors the TUI: WS is never offered the toggle.
         ws = row.try(&.ws?) || false
         sync = !ws && bool_arg(h, "update_content_length", true)
-        bytes = sync ? Fuzz::ContentLength.sync(edited, add_when_missing: true) : edited
+        bytes = sync ? Fuzz::ContentLength.sync_edit(edited) : edited
         enqueue_intercept("forward_edit", item_id: id, bytes: bytes,
           extra: {"content_length_synced" => JSON::Any.new(sync && bytes != edited)})
       end

@@ -440,7 +440,7 @@ gori run intercept inject 42 --direction in --data '{"role":"admin"}'
 | `get <item-id>` | 붙잡힌 항목 하나의 전체 상세 |
 | `forward <item-id>` | 바이트 그대로 통과 |
 | `drop <item-id>` | 폐기. 클라이언트는 정해진 502를 받음 |
-| `edit <item-id>` | 편집한 바이트로 통과: `--raw=RAW` 또는 `--raw-file=PATH`. 그대로 전달되며(`$ENV.KEY` / `$BIND.NAME` 확장 없음) `Content-Length`만 다시 맞춤. `--no-update-content-length`를 주면 선언한 값을 그대로 보냄(CL 디싱크 프리미티브) |
+| `edit <item-id>` | 편집한 바이트로 통과: `--raw=RAW` 또는 `--raw-file=PATH`. 그대로 전달되며(`$ENV.KEY` / `$BIND.NAME` 확장 없음), 헤더 줄은 CRLF로 맞추되 `--verbatim`이면 쓴 그대로 두고, `Content-Length`는 다시 맞춤. `--no-update-content-length`를 주면 선언한 값을 그대로 보냄(CL 디싱크 프리미티브, `Content-Length` 헤더가 둘이면 항상 그대로 둠) |
 | `enable` / `disable` | 라이브 캐치 켜기 / 끄기 |
 | `filter <query>` | 조건부 인터셉트 쿼리 설정. `""`를 넘기면 해제 |
 | `direction <both\|request\|response>` | 캐치가 붙잡을 구간 선택 (기본값 `request`) |

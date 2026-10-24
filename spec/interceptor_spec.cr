@@ -685,6 +685,14 @@ describe "Interceptor scope gates over an ABSOLUTE-FORM target" do
       body.should be_true
     end
 
+    # The mixed `\n\r\n` (bare-LF last header, CRLF blank line) is the third spelling the h1
+    # edit path splits at (`Env.head_body_separator`); missing it read the body as header lines.
+    it "takes the mixed LF-CRLF blank line, as the h1 path does" do
+      head, body = Gori::Interceptor.split_edit("POST / HTTP/2\r\nHost: h\r\nx-a: 1\n\r\n{\"a\":1}".to_slice)
+      String.new(head).should eq("POST / HTTP/2\r\nHost: h\r\nx-a: 1\n\r\n")
+      body.should be_true
+    end
+
     it "reports no body for a head-only edit, in either spelling" do
       Gori::Interceptor.split_edit("GET / HTTP/2\r\nHost: h\r\n\r\n".to_slice)[1].should be_false
       Gori::Interceptor.split_edit("GET / HTTP/2\nHost: h\n\n".to_slice)[1].should be_false
@@ -746,6 +754,9 @@ describe "Interceptor scope gates over an ABSOLUTE-FORM target" do
         item = ic.enqueue_request("GET /p HTTP/2\r\nHost: h\r\n\r\n".to_slice, method: "GET",
           target: "/p", host: "h", port: 443, scheme: "https", head_only: true).not_nil!
         item.refuse_edit("GET /edited HTTP/2\r\nHost: h\r\n\r\nOPERATORBODY".to_slice)
+          .not_nil!.should contain("HEAD only")
+        # ...behind the mixed LF-CRLF blank line too, which the split used to miss and ack.
+        item.refuse_edit("GET /edited HTTP/2\r\nHost: h\n\r\nOPERATORBODY".to_slice)
           .not_nil!.should contain("HEAD only")
         # Complement: the same edit without a body is applied.
         item.refuse_edit("GET /edited HTTP/2\r\nHost: h\r\n\r\n".to_slice).should be_nil

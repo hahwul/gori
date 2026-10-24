@@ -64,6 +64,15 @@ describe Gori::RuleStub do
     String.new(head.bytes).should_not contain("X-Injected")
   end
 
+  # The mixed `\n\r\n` (bare-LF last header, CRLF blank line) ends the head as it does on the
+  # send path; a two-spelling scan read the body line as a header and served an empty 200.
+  it "takes a mixed LF-CRLF blank line as the separator" do
+    stub = "200 OK\r\nContent-Type: application/json\n\r\n{\"isAdmin\": true}"
+    String.new(Gori::RuleStub.inline_body(stub)).should eq("{\"isAdmin\": true}")
+    String.new(Gori::RuleStub.parse_head(stub).not_nil!.bytes)
+      .should eq("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n")
+  end
+
   it "still takes a CRLF-authored head's own separator" do
     stub = "200 OK\r\nContent-Type: text/plain\r\n\r\nbody\n\ntail"
     String.new(Gori::RuleStub.inline_body(stub)).should eq("body\n\ntail")

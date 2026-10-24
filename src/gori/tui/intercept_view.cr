@@ -548,7 +548,7 @@ module Gori::Tui
     # A WebSocket message payload is taken VERBATIM, and the kind gate comes before anything
     # else touches the buffer, because both of the steps below corrupt it:
     #
-    #   * `ContentLength.sync(add_when_missing: true)` is the editor's "update
+    #   * `ContentLength.sync_edit` is the editor's "update
     #     Content-Length" affordance. On a WS payload there is no head to update, so
     #     `add_when_missing` splices a `Content-Length: N` header LINE into the message body
     #     — #513's `restore_content_length` trap with nothing to restore it from.
@@ -583,7 +583,7 @@ module Gori::Tui
       # the visible buffer by `reflect_content_length_in_editor`, so the call below is
       # normally a no-op that only catches a typed `$KEY` whose expansion changed the body length.
       return {id, raw} unless @sync_content_length
-      {id, Fuzz::ContentLength.sync(raw, add_when_missing: true)}
+      {id, Fuzz::ContentLength.sync_edit(raw)}
     end
 
     # What gori will do with an EDIT to a held message, said BEFORE one is written: the badge
@@ -684,7 +684,7 @@ module Gori::Tui
       return if @loaded_ws # no head to update — see pending_edit
       # The forward's own bytes, so the pane measures what the socket gets — see `edited_wire`.
       raw = edited_wire
-      synced = Fuzz::ContentLength.sync(raw, add_when_missing: true)
+      synced = Fuzz::ContentLength.sync_edit(raw)
       return if synced == raw # already agrees (or chunked / no boundary — sync no-ops)
       synced_head = String.new(synced).split("\r\n\r\n", limit: 2).first
       new_line = synced_head.split("\r\n").find { |l| content_length_line?(l) } || return

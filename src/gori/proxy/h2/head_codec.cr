@@ -387,9 +387,8 @@ module Gori::Proxy::H2
     # `strip`s the name and `lstrip(' ')`s the value (so leading whitespace is eaten — a
     # trailing space survives, and is left alone), and `append_regular` lowercases the name.
     # A CR or LF anywhere is a line break in the text: CRLF splits the field in two, a second
-    # CRLF truncates the head and drops every field after it, and a lone CR/LF survives here
-    # today only because the synthesized EOL happens to be CRLF — the same byte still ends
-    # the head early for `StreamGate#split_edit`'s `\n\n` scan on an intercept edit.
+    # CRLF truncates the head and drops every field after it, and a lone LF splits the line
+    # as well (`split_head` cuts per line, as the h1 send path reads it).
     private def regular_reason(f : HPACK::Field) : String?
       name = f.name
       return "a header field has an empty name" if name.empty?
@@ -585,10 +584,15 @@ module Gori::Proxy::H2
     end
 
     # {start line, header lines}. nil start line = not a head at all.
+    #
+    # Split PER LINE (LF, one trailing CR dropped — `lines(chomp: true)`), as `Repeater::H2Engine`
+    # splits the same text. Picking one EOL for the whole head (CRLF if any line had it) merged a
+    # bare-LF line into the one before it, so an edit's `x-a: 1\nx-b: 2` went out as ONE field
+    # whose HPACK value carried a raw LF — bytes gori produced, not the operator. A peer value
+    # with a CR/LF never reaches here (`regular_reason` refuses it at hold time), so no round
+    # trip loses a byte. Same one-String-per-line allocation as the `split` it replaces.
     private def split_head(head : Bytes) : {String?, Array(String)}
-      text = String.new(head)
-      eol = text.includes?("\r\n") ? "\r\n" : "\n"
-      lines = text.split(eol)
+      lines = String.new(head).lines
       start = lines.shift?
       return {nil, lines} if start.nil? || start.empty?
       {start, lines}

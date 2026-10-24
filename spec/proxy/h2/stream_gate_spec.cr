@@ -392,6 +392,40 @@ describe Gori::Proxy::H2::StreamGate do
     end
   end
 
+  # A bare-LF line in a CRLF head is its own field, as the h1 path and `Repeater::H2Engine`
+  # read it — not an LF gori writes into the previous field's HPACK value.
+  it "encodes a mixed-EOL edited head per line, never a value carrying an LF" do
+    with_ic do |ic|
+      rig = Rig.new(ic)
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/p"))))
+      settle
+      ic.forward(ic.pending.first.id, "GET /p HTTP/2\r\nHost: api.example.com\r\nx-a: 1\nx-b: 2\r\n\r\n".to_slice)
+      settle
+      head = head_of(rig.to_origin, 1_u32).not_nil!
+      head.select { |(n, _)| n.starts_with?("x-") }.should eq([{"x-a", "1"}, {"x-b", "2"}])
+    end
+  end
+
+  # The mixed `\n\r\n` blank line ends the head on the h1 path; on h2 the body after it went
+  # out as an invented header field over empty DATA.
+  it "splits a head+body edit at a mixed LF-CRLF blank line into head and DATA" do
+    with_ic do |ic|
+      rig = Rig.new(ic)
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(post_len("/up", 5)), Frame::END_HEADERS))
+      rig.c2s.accept(data(1_u32, "hello", Frame::END_STREAM))
+      settle
+      item = ic.pending.first
+      edit = "POST /up HTTP/2\r\nHost: api.example.com\r\nx-a: 1\n\r\n{\"a\":1}".to_slice
+      item.refuse_edit(edit).should be_nil
+      ic.forward(item.id, edit)
+      settle
+      head = head_of(rig.to_origin, 1_u32).not_nil!
+      head.find { |(n, _)| n == "x-a" }.not_nil![1].should eq("1")
+      head.any? { |(n, _)| n.includes?('{') }.should be_false
+      data_payloads(rig.to_origin, 1_u32).join.should eq("{\"a\":1}")
+    end
+  end
+
   it "shows the operator the synthesized h1 head, the same bytes capture stores" do
     with_ic do |ic|
       rig = Rig.new(ic)

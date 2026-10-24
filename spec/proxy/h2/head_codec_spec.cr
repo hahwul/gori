@@ -348,6 +348,14 @@ describe Gori::Proxy::H2::HeadCodec do
       tuples(HeadCodec.parse_request(head, fields).not_nil!).should eq(tuples(fields))
     end
 
+    # One EOL picked for the whole head (CRLF when any line had it) merged a bare-LF line into
+    # the field before it, an HPACK value with a raw LF that gori wrote.
+    it "cuts a mixed-EOL head per line, so a bare-LF line is its own field" do
+      head = "GET /x HTTP/2\r\nHost: api.example.com\r\nx-a: 1\nx-b: 2\r\n\r\n".to_slice
+      back = HeadCodec.parse_request(head, req_fields).not_nil!
+      tuples(back).select { |(n, _)| n.starts_with?("x-") }.should eq([{"x-a", "1"}, {"x-b", "2"}])
+    end
+
     it "preserves :scheme, which the synthesized head has nowhere to carry" do
       fields = [f(":method", "GET"), f(":scheme", "http"), f(":authority", "h"), f(":path", "/")]
       head = HeadCodec.synth_request(tuples(fields), "h")

@@ -1,5 +1,6 @@
 require "json"
 require "http/status"
+require "../env"
 require "../proxy/head_rewriter"
 require "../store/models"
 
@@ -221,16 +222,13 @@ module Gori
     # first body lines into the head. The operator then saw "unparseable stub response" (a
     # body line has no colon) or, worse, a body line that happened to look like a header
     # silently became one.
+    #
+    # The scan is `Env.head_body_separator`, so the mixed `\n\r\n` (a bare-LF last header, a
+    # CRLF blank line) counts too: a two-spelling scan read the body line as a header and
+    # served an empty 200. Byte offsets, sliced as bytes.
     private def self.split(text : String) : {String, String}
-      crlf = text.index("\r\n\r\n")
-      lf = text.index("\n\n")
-      if crlf && (lf.nil? || crlf < lf)
-        {text[0, crlf], text[(crlf + 4)..]}
-      elsif lf
-        {text[0, lf], text[(lf + 2)..]}
-      else
-        {text, ""}
-      end
+      at, width = Env.head_body_separator(text.to_slice) || return {text, ""}
+      {text.byte_slice(0, at), text.byte_slice(at + width)}
     end
 
     # `{status, reason}` from a status line. Accepts a bare code, a code + reason, or a full

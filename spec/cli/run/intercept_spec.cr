@@ -63,6 +63,20 @@ describe "Gori::CLI::Run.intercept_edit_bytes" do
     String.new(Gori::CLI::Run.intercept_edit_bytes(raw, false))
       .should eq("POST /h HTTP/1.1\r\nHost: h\r\n\r\nalpha\ngamma")
   end
+
+  # MCP has `raw_base64` and the TUI its hex editor; `--verbatim` is the CLI's way to send a
+  # bare-LF header line (an LF-lenient-origin desync) as written.
+  it "keeps a bare-LF header line with --verbatim" do
+    raw = "GET / HTTP/1.1\r\nHost: a\nX-Smuggle: 1\r\n\r\n"
+    String.new(Gori::CLI::Run.intercept_edit_bytes(raw, false, verbatim: true)).should eq(raw)
+  end
+
+  # An edit is the operator's own request, so a CL.CL pair is the test (the Repeater rule),
+  # not a first header to resync as the Fuzzer does.
+  it "leaves two Content-Length headers as written with the resync on" do
+    raw = "POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 5\r\nContent-Length: 7\r\n\r\nhello!!"
+    String.new(Gori::CLI::Run.intercept_edit_bytes(raw, true)).should eq(raw)
+  end
 end
 
 # R9/F1 — a held WebSocket message has NO head/body split at all (no start line, no headers),

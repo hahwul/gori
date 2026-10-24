@@ -1002,28 +1002,12 @@ module Gori
     # this ONCE PER FRAME. A `pipe` rule there would fork the operator's command sixty times a
     # second over a sample they are merely looking at, and a hook is by definition allowed to
     # have side effects. Such a rule is skipped instead (its region passes through) and the
-    # pane says so. The default is TRUE, because the other caller — `mcp/tools/send.cr` — is a
-    # real send, where the rule has to do what it says it does.
+    # pane says so. The default is TRUE, so a caller that really sends (MCP and `gori run`
+    # once did, before `Repeater::RequestRules`) gets a rule that does what it says.
     #
-    # `report` follows it by default, and that default is the fix rather than the shorthand.
-    # The event a refused rule writes was hard-coded OFF here on the stated ground that "a
-    # preview is a keystroke path over stored flows and must not write an event per keypress" —
-    # true of the pane, and false of the other caller. So an MCP `send_request{apply_rules:
-    # true}` whose `SetHeader $SESSION` rule was blocked on an unbound name (or on a bound one
-    # carrying a CR, `Refusal::Boundary`) injected nothing, said nothing, and answered with the
-    # origin's reply to a request the rule never touched — while the SAME rule on the proxy
-    # path writes the row that names it. `run_hooks` already answers "is this a real send"
-    # (its own doc says so), and the two questions it now drives — may this fork a process, may
-    # this write a row — have the same answer for both callers; a third caller that wants one
-    # without the other still says so.
-    #
-    # `report_refused`'s throttle is per {rule, binding revision} on THIS `Rules` INSTANCE, so
-    # what it bounds depends on who holds the instance. The proxy holds one for the life of the
-    # project and writes one row per refused rule per rebind; `mcp/tools/send.cr` builds a fresh
-    # `Rules.load(store)` per call (it wants the current rule set), so an agent looping
-    # `send_request{apply_rules: true}` against a rule that stays refused writes one row per
-    # send. That is the honest reading of an explicitly requested send — each one really did go
-    # out without the header — but it is NOT deduplicated the way the proxy path's is.
+    # `report` follows `run_hooks` by default: the two questions it drives — may this fork a
+    # process, may this write a refused-rule event — have the same answer for a preview (no)
+    # and a send (yes); a caller that wants one without the other still says so.
     def transform_message(text : String, target : Store::RuleTarget, host : String = "",
                           run_hooks : Bool = true, report : Bool? = nil) : String
       say = report.nil? ? run_hooks : report
@@ -1050,9 +1034,10 @@ module Gori
       end
     end
 
-    # Split an HTTP message into {head, body, separator}. Separator is "\r\n\r\n" or
-    # "\n\n" when a blank line exists; otherwise the whole text is the head and sep/body
-    # are empty (so header-only samples still rewrite).
+    # Split an HTTP message into {head, body, separator}. Separator is the blank line as
+    # written ("\r\n\r\n", "\n\n" or the mixed "\n\r\n" — `Env.head_body_separator`, byte
+    # offsets) when one exists; otherwise the whole text is the head and sep/body are empty
+    # (so header-only samples still rewrite).
     #
     # The EARLIEST blank line wins, in either spelling. Preferring `\r\n\r\n` wherever it
     # appeared let the message's own BODY move the boundary: the Rewriter preview feeds
@@ -1063,15 +1048,8 @@ module Gori
     # fixed in `RuleStub.split`; two spellings of one delimiter take min(index), never a
     # fixed preference order.
     private def split_message(text : String) : {String, String, String}
-      crlf = text.index("\r\n\r\n")
-      lf = text.index("\n\n")
-      if crlf && (lf.nil? || crlf < lf)
-        {text[0, crlf], text[crlf + 4..], "\r\n\r\n"}
-      elsif lf
-        {text[0, lf], text[lf + 2..], "\n\n"}
-      else
-        {text, "", ""}
-      end
+      at, width = Env.head_body_separator(text.to_slice) || return {text, "", ""}
+      {text.byte_slice(0, at), text.byte_slice(at + width), text.byte_slice(at, width)}
     end
 
     # Apply every enabled rule for {target, part} that also matches `host` over the bytes.

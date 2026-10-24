@@ -411,6 +411,7 @@ module Gori
         raw : String? = nil
         raw_file : String? = nil
         update_cl = true
+        verbatim = false
 
         positional = parse_args(args, "gori run intercept edit") do |p|
           p.banner = "Usage: gori run intercept edit <item-id> (--raw=RAW | --raw-file=PATH) [options]\n\n" \
@@ -418,8 +419,9 @@ module Gori
                      "(whichever leg — request or response — is held). The BODY is forwarded\n" \
                      "VERBATIM (no token expansion: an $ENV.KEY / $BIND.NAME / $GEN.UUID token — bare syntax\n" \
                      "$KEY / $NAME — stays literal; no line-ending rewrite); header lines are\n" \
-                     "CRLF-terminated and Content-Length is resynced to the new body unless\n" \
-                     "--no-update-content-length holds the value you declared.\n\n" \
+                     "CRLF-terminated (--verbatim keeps them as written) and Content-Length is\n" \
+                     "resynced to the new body unless --no-update-content-length holds the value\n" \
+                     "you declared (two Content-Length headers are always left as written).\n\n" \
                      "A held WebSocket message has no head at all, so it is taken literally —\n" \
                      "no CRLF rewrite, no Content-Length resync. A BINARY WS frame additionally\n" \
                      "requires --raw-file (the byte-exact channel): --raw is a shell argument\n" \
@@ -427,6 +429,7 @@ module Gori
           project_options(p, proj, "update")
           p.on("--raw=RAW", "Verbatim replacement wire message") { |v| raw = v }
           p.on("--raw-file=PATH", "Read the replacement wire message from FILE") { |v| raw_file = v }
+          p.on("--verbatim", "Keep the head's line endings as written (a bare-LF header line survives); with --no-update-content-length the message is byte-exact, like MCP raw_base64") { verbatim = true }
           p.on("--no-update-content-length", "Forward the Content-Length you declared instead of resyncing it to the body (the CL-desync / CL+TE smuggling primitive; mirrors MCP intercept_forward_edit{update_content_length:false})") { update_cl = false }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
@@ -467,7 +470,7 @@ module Gori
             # `alpha\rbeta\ngamma` body came out a byte longer with the LF promoted. (That
             # split, and the Content-Length choice beside it, live in `intercept_edit_bytes` so
             # a spec can pin the exact bytes.)
-            intercept_edit_bytes(content, update_cl)
+            intercept_edit_bytes(content, update_cl, verbatim)
           end
         status, detail = enqueue_intercept(proj.name, proj.db, "forward_edit", item_id: item_id, bytes: bytes)
         emit_intercept_ack(status, detail, format)
@@ -519,10 +522,14 @@ module Gori
       # *the* canonical reason to hold a request in the first place, and the RFC 9113 §8.1.1
       # probe — unexpressible from the CLI, and made `--raw-file`'s advertised byte-exact
       # channel not byte-exact. The gate on the other end already honours a declared value.
-      def self.intercept_edit_bytes(content : String, update_content_length : Bool) : Bytes
-        head_normalized = normalize_head_crlf(content.to_slice)
-        return head_normalized unless update_content_length
-        Fuzz::ContentLength.sync(head_normalized, add_when_missing: true)
+      #
+      # `verbatim` (`--verbatim`) skips the head's CRLF rewrite as well, MCP's `raw_base64`:
+      # without it a bare-LF header line (`Host: a\nX-Smuggle: 1`, an LF-lenient-origin desync)
+      # was the one edit the CLI could not forward, where MCP and the TUI's hex editor can.
+      def self.intercept_edit_bytes(content : String, update_content_length : Bool, verbatim : Bool = false) : Bytes
+        head = verbatim ? content.to_slice : normalize_head_crlf(content.to_slice)
+        return head unless update_content_length
+        Fuzz::ContentLength.sync_edit(head)
       end
 
       # `Env.normalize_crlf` over the HEAD only — through and including the blank-line

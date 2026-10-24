@@ -459,6 +459,18 @@ describe Gori::Rules do
     end
   end
 
+  # The preview splits where the proxy does (`Env.head_body_separator`): behind a mixed
+  # `\n\r\n` the body is the body, so a head rule leaves it alone and the separator survives.
+  it "splits a preview sample at a mixed LF-CRLF blank line" do
+    with_store do |store|
+      rules = Gori::Rules.load(store)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "q", "Q")
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Body, "b", "B")
+      rules.transform_message("GET / HTTP/1.1\r\nHost: q\n\r\nq b", Gori::Store::RuleTarget::Request, "")
+        .should eq("GET / HTTP/1.1\r\nHost: Q\n\r\nq B")
+    end
+  end
+
   it "transforms a full HTTP message for the live preview (head + body seams)" do
     with_store do |store|
       rules = Gori::Rules.load(store)

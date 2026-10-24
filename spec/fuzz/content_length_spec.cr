@@ -63,6 +63,24 @@ describe F::ContentLength do
     end
   end
 
+  # `sync_edit` (an Intercept edit) keeps a CL.CL pair whole where `sync` (the Fuzzer, pinned
+  # above) rewrites the first; a lone header is still resynced and a missing one added.
+  describe ".sync_edit" do
+    it "leaves a CL.CL pair alone, a bare-LF-hidden one included" do
+      {
+        "POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 5\r\nContent-Length: 7\r\n\r\nhello!!",
+        "POST / HTTP/1.1\r\nContent-Length: 6\nContent-Length: 100\r\n\r\nabc",
+      }.each { |req| String.new(F::ContentLength.sync_edit(req.to_slice)).should eq(req) }
+    end
+
+    it "resyncs a single Content-Length and adds a missing one" do
+      String.new(F::ContentLength.sync_edit("POST / HTTP/1.1\r\nContent-Length: 1\r\n\r\nabc".to_slice))
+        .should eq("POST / HTTP/1.1\r\nContent-Length: 3\r\n\r\nabc")
+      String.new(F::ContentLength.sync_edit("POST / HTTP/1.1\r\nHost: a\r\n\r\nabc".to_slice))
+        .should eq("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 3\r\n\r\nabc")
+    end
+  end
+
   # A malformed length is a probe: found (so nothing is added beside it) but never rewritten,
   # the rule `FlowRequest.resync_content_length` applies through the same predicate.
   describe "a Content-Length that rewriting would change the meaning of" do

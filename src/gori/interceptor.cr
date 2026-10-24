@@ -247,10 +247,13 @@ module Gori
 
     # Where the HEAD of a held message ends, and whether anything followed it.
     #
-    # The EARLIEST blank line, in either spelling — `Rules#split_message`'s rule and for the
-    # same reason. `||` preferred the CRLF form wherever it appeared, so an operator whose
-    # edited head is LF-joined (the intercept editor's `TextArea#text` is) and whose BODY
-    # carries a CRLFCRLF got the boundary taken inside the body.
+    # The EARLIEST blank line, in any of the three spellings — `Env.head_body_separator`, the
+    # split the h1 edit path takes over the same bytes. `||` preferred the CRLF form wherever it
+    # appeared, so an operator whose edited head is LF-joined (the intercept editor's
+    # `TextArea#text` is) and whose BODY carries a CRLFCRLF got the boundary taken inside the
+    # body. A local two-spelling scan then missed the mixed `\n\r\n` (a bare-LF last header,
+    # a CRLF blank line): the h2 gate encoded the body as header lines and sent empty DATA,
+    # and `Item#refuse_edit` acked a body added to a head-only hold.
     #
     # Lives here rather than in `H2::StreamGate` because two callers need the same answer: the
     # gate splits the bytes it is about to encode, and the settle surface has to know whether an
@@ -264,15 +267,8 @@ module Gori
     # are not guaranteed to be valid UTF-8 either, which is why `Gori::AsciiBytes` stays
     # byte-level for the same kind of question.
     def self.split_edit(bytes : Bytes) : {Bytes, Bool}
-      crlf = AsciiBytes.index(bytes, "\r\n\r\n".to_slice)
-      lf = AsciiBytes.index(bytes, "\n\n".to_slice)
-      idx =
-        if crlf && (lf.nil? || crlf < lf)
-          crlf + 4
-        elsif lf
-          lf + 2
-        end
-      return {bytes, false} unless idx
+      at, width = Env.head_body_separator(bytes) || return {bytes, false}
+      idx = at + width
       {bytes[0, idx], idx < bytes.size}
     end
 

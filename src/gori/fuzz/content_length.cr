@@ -27,6 +27,20 @@ module Gori::Fuzz
       sync_at(bytes, add_when_missing)[0]
     end
 
+    # `sync(add_when_missing: true)` for the operator's OWN request — an Intercept edit on the
+    # TUI, MCP and `gori run` alike — which leaves a CL.CL pair alone. The Fuzzer rewrites the
+    # first of two on purpose (only it is bounded, the second rides along as the probe); an
+    # edit has no such script, so `5`/`7` coming back `7`/`7` replaced the disagreement the
+    # operator wrote with agreement. `FlowRequest.resync_content_length` refuses the pair on
+    # the same ground. A bare-LF-hidden second line counts: an LF-lenient origin reads it.
+    def self.sync_edit(bytes : Bytes) : Bytes
+      if (sep = Env.head_body_separator(bytes).try(&.[0])) &&
+         (first = find_cl_line(bytes, sep)) && find_cl_line(bytes, sep, first[1])
+        return bytes
+      end
+      sync(bytes, add_when_missing: true)
+    end
+
     # `after` — `Env.expand_wire` of `before` — re-framed when the expansion changed the BODY's
     # byte length. The Miner and Sequencer plans' shared policy.
     #
@@ -160,7 +174,7 @@ module Gori::Fuzz
     # ── head scanning (byte level, no String/Array allocation) ────────────────────
 
     # Byte range `{line_start, content_end}` of the Content-Length header line within the
-    # head `[0, sep)`, or nil when absent. `content_end` is the START of the line's terminator
+    # head `[from, sep)`, or nil when absent. `content_end` is the START of the line's terminator
     # (or `sep` for the last header line, whose terminator is the blank-line separator). The
     # name is matched case-insensitively with leading/trailing ASCII whitespace stripped and a
     # colon required past the line start — 1:1 with the old `header_name?`.
@@ -174,8 +188,8 @@ module Gori::Fuzz
     # matching the already-correct CRLF-visible-duplicate case. Splitting on `eol` (CRLF-only)
     # would instead swallow the bare LF, merge the two headers into one "line", and silently
     # delete the hidden one on rewrite — corrupting the very primitive under test.
-    private def self.find_cl_line(bytes : Bytes, sep : Int32) : {Int32, Int32}?
-      a = 0
+    private def self.find_cl_line(bytes : Bytes, sep : Int32, from : Int32 = 0) : {Int32, Int32}?
+      a = from
       while a < sep
         nl = a
         while nl < sep && bytes[nl] != 0x0a_u8

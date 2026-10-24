@@ -447,7 +447,7 @@ gori run intercept inject 42 --direction in --data '{"role":"admin"}'
 | `get <item-id>` | Full detail for one held item |
 | `forward <item-id>` | Release a held item byte-exact |
 | `drop <item-id>` | Drop it. The client gets a canned 502 |
-| `edit <item-id>` | Release with edited bytes: `--raw=RAW` or `--raw-file=PATH`. Forwarded verbatim (no `$ENV.KEY` / `$BIND.NAME` expansion), with `Content-Length` resynced unless `--no-update-content-length` keeps the one you declared (the CL-desync primitive) |
+| `edit <item-id>` | Release with edited bytes: `--raw=RAW` or `--raw-file=PATH`. Forwarded verbatim (no `$ENV.KEY` / `$BIND.NAME` expansion), with header lines CRLF-terminated unless `--verbatim` keeps them as written, and `Content-Length` resynced unless `--no-update-content-length` keeps the one you declared (the CL-desync primitive; two `Content-Length` headers are always left as written) |
 | `enable` / `disable` | Arm or disarm the live catch |
 | `filter <query>` | Set the conditional-intercept query. Pass `""` to clear it |
 | `direction <both\|request\|response>` | Which leg(s) the catch holds (default `request`) |
