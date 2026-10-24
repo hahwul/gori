@@ -30,7 +30,9 @@ module Gori::Repeater::Timing
         j.field "iterations", rep.iterations
         j.field "pairs_valid", rep.pairs_valid
         j.field "error", rep.error
-        j.field "median_gap_us", rep.median_gap_us
+        # A side with no responses has no median: `Stats` fills it with 0.0, so the gap would be
+        # the other side's median passed off as a measurement. null, like the side's own stats.
+        j.field "median_gap_us", (rep.a.n == 0 || rep.b.n == 0) ? nil : rep.median_gap_us
         j.field "order" do
           j.object do
             j.field "a_slower", rep.a_slower
@@ -63,11 +65,12 @@ module Gori::Repeater::Timing
       j.object do
         j.field "label", label
         j.field "n", d.n
-        j.field "min_us", d.min
-        j.field "q1_us", d.q1
-        j.field "median_us", d.median
-        j.field "q3_us", d.q3
-        j.field "max_us", d.max
+        none = d.n == 0 # `Stats.distribution`'s zeros are placeholders, not a 0µs response
+        j.field "min_us", none ? nil : d.min
+        j.field "q1_us", none ? nil : d.q1
+        j.field "median_us", none ? nil : d.median
+        j.field "q3_us", none ? nil : d.q3
+        j.field "max_us", none ? nil : d.max
         j.field "histogram" do
           j.array do
             Stats.histogram(d.samples, Stats::HIST_BINS, lo, hi).each { |c| j.number c }
