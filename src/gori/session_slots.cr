@@ -87,6 +87,21 @@ module Gori
       @mutex.synchronize { @slots.find(&.name.==(name)) }
     end
 
+    # The slot holding the Authorize baseline, or nil with no slots.
+    def baseline_name : String?
+      @mutex.synchronize { @slots.find(&.baseline?).try(&.name) }
+    end
+
+    # The line a writing surface says when a create, edit or delete moved the baseline as a
+    # side effect (`with_one_baseline`), or nil when it stayed put. `before` is the baseline's
+    # name before the write, already following a rename of that same slot.
+    def self.baseline_moved_note(before : String?, after : String?) : String?
+      return nil if before == after
+      return "no slot holds the Authorize baseline any more" unless after
+      "the Authorize baseline is now #{after.inspect}#{before ? " (was #{before.inspect})" : ""} — " \
+      "every other slot's response is judged against it"
+    end
+
     # The slot already holding `name` CASE-INSENSITIVELY, ignoring `except` (the row a rename
     # is moving), or nil when the name is free. The WRITE side's question, and a different one
     # from `find`.

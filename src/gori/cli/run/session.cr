@@ -290,11 +290,13 @@ module Gori
             edit.baseline == true, edit.rules || [] of String,
             refresh: edit.refresh || [] of Int64,
             refresh_before: edit.refresh_before || Gori::SessionSlot::RefreshBefore.off)
+          baseline_before = slots.baseline_name
           abort "gori run session add: the project could not be written — #{name.inspect} was NOT saved" unless slots.add(slot)
           # The row as saved, not as built: `add` may auto-mark the first slot baseline and
           # drops empty entries, and the printed row must not deny either.
           puts session_slot_row(slots.find(name) || slot, false)
           warn_slot_env(slot, "gori run session add")
+          warn_baseline_moved(baseline_before, slots, "gori run session add")
         ensure
           store.close
         end
@@ -498,13 +500,21 @@ module Gori
           abort "gori run session edit: a slot needs a name" if renamed.empty?
           check_refresh_ids(store, edit.refresh, "gori run session edit")
           updated = session_edited(current, edit, renamed)
+          baseline_before = slots.baseline_name
+          baseline_before = updated.name if baseline_before == current.name # a rename is not a move
           abort "gori run session edit: the project could not be written — " \
                 "#{target.inspect} is unchanged" unless slots.update(target, updated)
           puts session_slot_row(updated, false)
           warn_slot_env(updated, "gori run session edit")
+          warn_baseline_moved(baseline_before, slots, "gori run session edit")
         ensure
           store.close
         end
+      end
+
+      # The baseline moved as a side effect of the write (`SessionSlots.baseline_moved_note`).
+      private def self.warn_baseline_moved(before : String?, slots : Gori::SessionSlots, cmd : String) : Nil
+        Gori::SessionSlots.baseline_moved_note(before, slots.baseline_name).try { |n| STDERR.puts "#{cmd}: #{n}" }
       end
 
       # Said, not refused (#1689): a slot header's `$ENV.X` is sent as typed (`Env.slot_env_note`).
@@ -539,9 +549,11 @@ module Gori
         store, slots = session_slots(proj.name, proj.db)
         begin
           abort "gori run session rm: no session slot named #{name.inspect}" unless slots.find(name)
+          baseline_before = slots.baseline_name
           abort "gori run session rm: the project could not be written — " \
                 "#{name.inspect} is still there" unless slots.remove(name)
           puts "deleted session slot #{name.inspect}"
+          warn_baseline_moved(baseline_before, slots, "gori run session rm")
         ensure
           store.close
         end

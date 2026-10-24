@@ -67,6 +67,16 @@ describe Gori::SessionSlots do
   # names case-insensitively (`PlanError::DuplicateIdentity`) and the TUI's form always did —
   # so a CLI/MCP writer that only asked `find` could create `admin` beside `Admin` and leave
   # every Authorize run in the project refusing to start.
+  describe ".baseline_moved_note" do
+    it "is nil when the baseline stayed put, and names both ends when it moved" do
+      Gori::SessionSlots.baseline_moved_note("a", "a").should be_nil
+      Gori::SessionSlots.baseline_moved_note(nil, nil).should be_nil
+      Gori::SessionSlots.baseline_moved_note("a", "b").not_nil!.should contain(%(now "b" (was "a")))
+      Gori::SessionSlots.baseline_moved_note(nil, "b").not_nil!.should_not contain("was")
+      Gori::SessionSlots.baseline_moved_note("a", nil).not_nil!.should contain("no slot holds")
+    end
+  end
+
   describe "#name_clash" do
     it "answers the EXISTING spelling for a name that differs only in case" do
       with_store do |store|

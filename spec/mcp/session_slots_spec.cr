@@ -70,6 +70,26 @@ describe "MCP session slots" do
     end
   end
 
+  # The baseline moves as a side effect of create/update/delete (`with_one_baseline`); the
+  # reply says so, and stays quiet when it did not move (a rename is not a move).
+  it "says when a write moved the Authorize baseline, and only then" do
+    with_store do |store|
+      t = tools_for(store)
+      first = call_json(t, "create_session_slot", %({"name":"admin"}))
+      first["baseline_slot"].as_s.should eq("admin")
+      first["baseline_note"].as_s.should contain(%(baseline is now "admin"))
+      call_json(t, "create_session_slot", %({"name":"user"}))["baseline_note"]?.should be_nil
+      call_json(t, "update_session_slot", %({"name":"admin","new_name":"root"}))["baseline_note"]?.should be_nil
+      took = call_json(t, "update_session_slot", %({"name":"user","baseline":true}))
+      took["baseline_slot"].as_s.should eq("user")
+      took["baseline_note"].as_s.should contain(%((was "root")))
+      gone = call_json(t, "delete_session_slot", %({"name":"user"}))
+      gone["baseline_slot"].as_s.should eq("root")
+      call_json(t, "delete_session_slot", %({"name":"root"}))["baseline_note"].as_s
+        .should contain("no slot holds the Authorize baseline")
+    end
+  end
+
   it "shows header values only under include_sensitive" do
     with_store do |store|
       t = tools_for(store)

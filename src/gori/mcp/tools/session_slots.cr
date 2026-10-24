@@ -74,6 +74,7 @@ module Gori
       private def create_session_slot(h) : Result
         name = required_str(h, "name")
         registry = fresh_slots
+        baseline_before = registry.baseline_name
         # Deterministic and un-retryable, so INVALID_ARGUMENT rather than PROJECT_BUSY — the
         # #414 shape: an agent that trusts `retryable` loops forever on a duplicate.
         # Case-INSENSITIVELY (`SessionSlots#name_clash`), which is the comparison Authorize
@@ -99,7 +100,10 @@ module Gori
         # Re-read rather than echo what was built: `SessionSlots` owns the single-baseline
         # rule, so the FIRST slot in a project comes back holding a flag the caller did not
         # ask for — and a reply that denied it would have the agent set it a second time.
-        Result.new(JSON.build { |j| emit_session_slot(j, registry.find(slot.name) || slot, false, registry.active_name, sources, env_warning: true) })
+        Result.new(JSON.build do |j|
+          emit_session_slot(j, registry.find(slot.name) || slot, false, registry.active_name, sources,
+            env_warning: true, baseline_before: baseline_before, registry: registry)
+        end)
       end
 
       # The overlay a `create_session_slot` call asked for, plus one line per SOURCE when it
@@ -203,6 +207,7 @@ module Gori
         registry = fresh_slots
         current = registry.find(name)
         return not_found("no session slot named '#{name}' (see list_session_slots)") unless current
+        baseline_before = registry.baseline_name
         target = update_slot_target(registry, name, h)
         return target if target.is_a?(Result)
         target_name = target[0]
@@ -228,8 +233,10 @@ module Gori
         end
         # Re-read: dropping the baseline hands it to another row (see `create_session_slot`).
         Result.new(JSON.build do |j|
+          # A rename of the baseline slot is not a move.
           emit_session_slot(j, registry.find(updated.name) || updated, false, registry.active_name,
-            auto_refresh_disarmed: disarmed, env_warning: true)
+            auto_refresh_disarmed: disarmed, env_warning: true,
+            baseline_before: baseline_before == name ? updated.name : baseline_before, registry: registry)
         end)
       end
 
@@ -254,13 +261,21 @@ module Gori
         name = required_str(h, "name")
         registry = fresh_slots
         return not_found("no session slot named '#{name}' (see list_session_slots)") unless registry.find(name)
+        baseline_before = registry.baseline_name
         unless registry.remove(name)
           return busy("session slot NOT deleted (store busy or unwritable); it is unchanged")
         end
         # Deleting the ACTIVE slot deactivates it (`SessionSlots#save`), which is a behaviour
         # change the caller has to see: the next send goes out as captured, not as the slot it
-        # last selected.
-        Result.new({name: name, deleted: true, active: registry.active_name}.to_json)
+        # last selected. Deleting the BASELINE hands it on, which is the same kind of change.
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "name", name
+            j.field "deleted", true
+            j.field "active", registry.active_name
+            emit_baseline_moved(j, baseline_before, registry)
+          end
+        end)
       end
 
       # The send context for THIS server process. `name: null` (or omitted) deactivates, which
@@ -463,7 +478,9 @@ module Gori
                                     sources : Array(String) = [] of String,
                                     refresh_status : Bool = false,
                                     auto_refresh_disarmed : Bool = false,
-                                    env_warning : Bool = false) : Nil
+                                    env_warning : Bool = false,
+                                    baseline_before : String? = nil,
+                                    registry : Gori::SessionSlots? = nil) : Nil
         j.object do
           j.field "name", slot.name
           # Where each header came from, when the overlay was READ off a flow rather than
@@ -498,7 +515,16 @@ module Gori
           if env_warning && (w = Env.slot_env_warning(slot))
             j.field "warning", w
           end
+          emit_baseline_moved(j, baseline_before, registry) if registry
         end
+      end
+
+      # `baseline_slot` + `baseline_note` when a write moved the baseline; nothing when it did not.
+      private def emit_baseline_moved(j : JSON::Builder, before : String?, registry : Gori::SessionSlots) : Nil
+        after = registry.baseline_name
+        return unless note = Gori::SessionSlots.baseline_moved_note(before, after)
+        j.field "baseline_slot", after
+        j.field "baseline_note", note
       end
 
       # THIS process's refresh state for the slot: refreshing now, the last outcome (names,
