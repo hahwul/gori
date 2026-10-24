@@ -1330,8 +1330,8 @@ module Gori
       # TUI's copy menu feeds it (`HistoryView#request_wire`).
       private def self.request_wire_bytes(detail : Store::FlowDetail) : Bytes
         body = detail.request_body
-        return detail.request_head if body.nil? || body.empty?
-        head = detail.request_head
+        head = Repeater::FlowRequest.export_head(detail)
+        return head if body.nil? || body.empty?
         buf = Bytes.new(head.size + body.size)
         head.copy_to(buf)
         body.copy_to(buf + head.size)

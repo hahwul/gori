@@ -100,6 +100,16 @@ module Gori
           "later header off by one. Re-send it field-natively (`gori run repeater h2 --fields`).")
       end
 
+      # The head an EXPORT of `detail` writes: self-framed over the stored bytes when the
+      # captured body was capped (the same rule a replay uses), else the head as captured. A
+      # copied command that kept the original, larger Content-Length waited on bytes that were
+      # never stored.
+      def self.export_head(detail : Store::FlowDetail) : Bytes
+        head = detail.request_head
+        return head unless detail.request_body_truncated?
+        resync_truncated_head(head, detail.request_body.try(&.size) || 0)
+      end
+
       # Make a TRUNCATED request self-framed so the repeater can't hang. Used ONLY when the
       # captured body was capped. Rewrites an existing Content-Length to the stored byte
       # count, OR replaces a Transfer-Encoding (chunked — whose stored wire-form bytes were

@@ -2298,7 +2298,7 @@ module Gori::Tui
     end
 
     private def request_wire(d : Store::FlowDetail) : String
-      String.new(combine_bytes(d.request_head, d.request_body) || Bytes.empty)
+      String.new(combine_bytes(Repeater::FlowRequest.export_head(d), d.request_body) || Bytes.empty)
     end
 
     private def copy_target(d : Store::FlowDetail) : String

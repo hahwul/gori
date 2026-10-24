@@ -499,3 +499,21 @@ describe Gori::Repeater::FlowRequest do
     end
   end
 end
+
+describe "Gori::Repeater::FlowRequest.export_head" do
+  # A copied command that kept the capture's larger Content-Length waited on bytes never stored.
+  it "self-frames a capped request body over the stored bytes, and only then" do
+    req_head = "POST /big HTTP/1.1\r\nHost: e.test\r\nContent-Length: 9000\r\n\r\n"
+    resp_head = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n"
+    row = Gori::Store::FlowRow.new(
+      id: 1_i64, created_at: 0_i64, scheme: "http", method: "POST", host: "e.test",
+      port: 80, target: "/big", status: 200, state: Gori::Store::FlowState::Complete,
+      size: 0_i64, response_size: 0_i64)
+    capped = Gori::Store::FlowDetail.new(row, "HTTP/1.1", req_head.to_slice, "short".to_slice,
+      resp_head.to_slice, "ok".to_slice, request_body_truncated: true)
+    String.new(Gori::Repeater::FlowRequest.export_head(capped)).should contain("Content-Length: 5\r\n")
+    whole = Gori::Store::FlowDetail.new(row, "HTTP/1.1", req_head.to_slice, "short".to_slice,
+      resp_head.to_slice, "ok".to_slice)
+    String.new(Gori::Repeater::FlowRequest.export_head(whole)).should eq(req_head)
+  end
+end
