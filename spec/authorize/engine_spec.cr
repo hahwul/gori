@@ -179,8 +179,19 @@ describe Gori::Authorize::Engine do
       ]).not_nil!
       target.uncompared?.should be_true
       target.unanswered?.should be_true
+      # The host answered the baseline, so "is it reachable" is the wrong question to ask.
+      target.baseline_only_answered?.should be_true
       target.same_count.should eq(0) # …which is why the count alone reads as "enforced"
       Gori::CLI::Output.authorize_verdict(target).should eq(:error)
+    end
+
+    it "is not `baseline_only_answered?` when the baseline failed too" do
+      target = engine({"*" => err_resp}).run(detail, [
+        Identity.new("admin", baseline: true),
+        Identity.new("anon", set_headers: [{"X-Id", "anon"}]),
+      ]).not_nil!
+      target.unanswered?.should be_true
+      target.baseline_only_answered?.should be_false
     end
 
     it "is not `uncompared?` while one identity still answered" do
@@ -601,6 +612,7 @@ describe Gori::Authorize::Engine do
       target.trials.size.should eq(1)
       target.uncompared?.should be_true
       target.unanswered?.should be_true
+      target.baseline_only_answered?.should be_false # no other identity was there to fail
       Gori::CLI::Output.authorize_verdict(target).should eq(:error)
     end
   end

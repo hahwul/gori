@@ -135,6 +135,13 @@ module Gori
         !fully_blocked? && uncompared?
       end
 
+      # `unanswered?` where the BASELINE did answer: the host is reachable, and only the other
+      # identities' sends failed — so "check the host is reachable" is the wrong next step.
+      def baseline_only_answered? : Bool
+        b = baseline
+        unanswered? && !compared.empty? && !b.nil? && b.summary.error.nil?
+      end
+
       def baseline : Trial?
         @trials.find(&.baseline?)
       end

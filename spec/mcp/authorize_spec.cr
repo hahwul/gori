@@ -43,6 +43,29 @@ private def dead_authz_port : Int32
   port
 end
 
+# An origin that answers a request carrying a Cookie and hangs up on one without, so the
+# baseline answers and every other identity's send fails. `hold: true` instead keeps every
+# connection open unanswered (returned so a spec can close them).
+private def start_half_answering_origin(hold = false) : {Int32, Array(TCPSocket)}
+  server = TCPServer.new("127.0.0.1", 0)
+  held = [] of TCPSocket
+  spawn do
+    while conn = server.accept?
+      if hold
+        held << conn
+        next
+      end
+      head = Gori::Proxy::Codec::Http1.read_head(conn) rescue nil
+      if head && String.new(head).downcase.includes?("cookie:")
+        conn << "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+        conn.flush
+      end
+      conn.close rescue nil
+    end
+  end
+  {server.local_address.port, held}
+end
+
 # A completed capture pointing at the local origin. `cookie` decides whether any identity that
 # REMOVES Cookie would change the request — without it `Passive.skip_reason` answers
 # `:no_effect` and the flow is (correctly) never replayed.
@@ -527,6 +550,43 @@ describe "MCP authorize tools" do
         results["access_control"].as_s.should eq("error")
         results["unanswered_count"].as_i.should eq(1)
         results["errors"].as_i.should be > 0
+      end
+    end
+
+    it "says the baseline answered when only the other identities' sends failed" do
+      port, _ = start_half_answering_origin
+      with_store do |store|
+        flow = seed_authz_flow(store, port)
+        tools = tools_for(store)
+        start = call_json(tools, "authorize_start",
+          {"flow_ids" => [flow], "identities" => anon, "allow_unscoped" => true}.to_json)
+        status = drain_job(tools, start["job_id"].as_s)
+        status["access_control"].as_s.should eq("error")
+        summary = status["summary"].as_s
+        summary.should contain("the baseline answered but every other identity's send failed")
+        summary.should_not contain("check the host is reachable")
+      end
+    end
+
+    it "says a running or stopped job with nothing replayed has not finished one, not 'skipped'" do
+      port, held = start_half_answering_origin(hold: true)
+      with_store do |store|
+        flow = seed_authz_flow(store, port)
+        tools = tools_for(store)
+        start = call_json(tools, "authorize_start",
+          {"flow_ids" => [flow], "identities" => anon, "allow_unscoped" => true}.to_json)
+        job_id = start["job_id"].as_s
+        sleep 0.05.seconds
+        running = call_json(tools, "authorize_status", %({"job_id":#{job_id.to_json}}))
+        running["status"].as_s.should eq("running")
+        running["summary"].as_s.should contain("no request has finished yet")
+        call_json(tools, "authorize_stop", %({"job_id":#{job_id.to_json}}))
+        held.each { |c| c.close rescue nil }
+        stopped = drain_job(tools, job_id)
+        stopped["status"].as_s.should eq("stopped")
+        stopped["requests_replayed"].as_i.should eq(0)
+        stopped["summary"].as_s.should contain("stopped before any request finished")
+        stopped["summary"].as_s.should_not contain("skipped")
       end
     end
 

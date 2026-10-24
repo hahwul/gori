@@ -119,6 +119,7 @@ module Gori
         ajob.fully_blocked += 1 if target.fully_blocked?
         if target.unanswered?
           ajob.unanswered += 1
+          ajob.baseline_only_answered += 1 if target.baseline_only_answered?
           ajob.unanswered_reason ||= target.trials.each.compact_map(&.summary.error).first?
         elsif target.baseline_denied?
           ajob.baseline_denied += 1
@@ -309,10 +310,16 @@ module Gori
         when "nothing_sent" then authorize_nothing_sent_summary(ajob)
         when "error"
           why = ajob.unanswered_reason
-          "nothing came back — every send failed for #{ajob.unanswered} of " \
-          "#{Gori.plural(ajob.replayed, "request")} replayed" \
-          "#{why ? " (#{Serialize.text(why)})" : ""}. Nothing was compared, so this is NOT " \
-          "evidence that access control works — check the host is reachable from here and re-run"
+          why = why ? " (#{Serialize.text(why)})" : ""
+          if ajob.baseline_only_answered == ajob.unanswered
+            "the baseline answered but every other identity's send failed for #{ajob.unanswered} of " \
+            "#{Gori.plural(ajob.replayed, "request")} replayed#{why}. Nothing was compared, so this " \
+            "is NOT evidence that access control works — check why those identities' requests fail and re-run"
+          else
+            "nothing came back — every send failed for #{ajob.unanswered} of " \
+            "#{Gori.plural(ajob.replayed, "request")} replayed#{why}. Nothing was compared, so this is NOT " \
+            "evidence that access control works — check the host is reachable from here and re-run"
+          end
         when "BYPASS"
           "BROKEN ACCESS CONTROL: #{ajob.bypasses} identity result#{ajob.bypasses == 1 ? "" : "s"} across " \
           "#{Gori.plural(ajob.bypassed.size, "request")} " \
@@ -358,6 +365,9 @@ module Gori
           return "nothing was replayed — #{ajob.failed} selected flow#{ajob.failed == 1 ? "" : "s"} could " \
                  "not be replayed at all (see `failed`)#{tail}"
         end
+        # A job still running, or stopped early, has not skipped anything: it has not finished one yet.
+        return "no request has finished yet#{tail}" if ajob.status == :running
+        return "stopped before any request finished#{tail}" if ajob.status == :stopped
         "nothing was replayed#{ajob.plan.skipped.empty? ? "" : " — every selected flow was skipped"}#{tail}"
       end
 

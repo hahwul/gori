@@ -1250,6 +1250,8 @@ module Gori
         # not reach. See `Authorize::Target#unanswered?`.
         property unanswered = 0
         property unanswered_reason : String? = nil
+        # The `unanswered` requests whose baseline DID answer (`Target#baseline_only_answered?`).
+        property baseline_only_answered = 0
         # Requests whose BASELINE was itself refused (4xx/5xx). Nothing on such a request can
         # be judged — `Judge.verdict` demotes every comparison against a denied baseline to
         # `review` — so these contribute to neither count below, and a job made only of them

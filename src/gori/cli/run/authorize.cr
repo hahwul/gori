@@ -145,6 +145,7 @@ module Gori
         # could not reach. See `Authorize::Target#unanswered?`.
         unanswered = 0
         unanswered_reason : String? = nil
+        baseline_only_answered = 0 # of `unanswered`: the baseline did answer
         # Requests whose BASELINE was refused. Counted for the third time in the same shape as
         # the two above: nothing here could be judged, so a run made of these also ends in
         # "0 possible bypasses" — and the cause is almost always one stale credential rather
@@ -172,6 +173,7 @@ module Gori
           elsif target.unanswered?
             unanswered += 1
             unanswered_reason ||= target.trials.each.compact_map(&.summary.error).first?
+            baseline_only_answered += 1 if target.baseline_only_answered?
           elsif target.baseline_denied?
             baseline_denied += 1
           end
@@ -192,7 +194,7 @@ module Gori
         # matters: a run stopped early has not demonstrated that every send was refused.
         Run.report_interrupted(sent, "request", "replayed") if interrupted.call
         exit 1 if report_authorize_empty_handed(sent, blocked_runs, blocked_reason,
-                    unanswered, unanswered_reason)
+                    unanswered, unanswered_reason, baseline_only_answered)
         # Nothing was replayed and the reason was not a stop or the gate: every selected flow
         # raised. Same rule as `report_authorize_empty_handed` — a run that sent nothing must
         # not exit 0 with a summary that reads like a clean result.
@@ -210,7 +212,8 @@ module Gori
       private def self.report_authorize_empty_handed(sent : Int32, blocked_runs : Int32,
                                                      blocked_reason : String?,
                                                      unanswered : Int32,
-                                                     unanswered_reason : String?) : Bool
+                                                     unanswered_reason : String?,
+                                                     baseline_only_answered : Int32) : Bool
         return false if sent.zero?
         if blocked_runs == sent
           STDERR.puts "authorize: every send was refused before the socket — " \
@@ -218,7 +221,8 @@ module Gori
           return true
         end
         return false unless unanswered + blocked_runs == sent
-        STDERR.puts "authorize: nothing came back — every send failed" \
+        what = baseline_only_answered == unanswered ? "the baseline answered but every other identity's send failed" : "nothing came back — every send failed"
+        STDERR.puts "authorize: #{what}" \
                     "#{unanswered_reason ? " (#{unanswered_reason})" : ""}. Nothing was compared, " \
                     "so this is not evidence that access control works"
         true
