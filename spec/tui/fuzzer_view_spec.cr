@@ -2152,7 +2152,9 @@ describe "Gori::Tui::FuzzerController fuzz → Comparer slot" do
     slot.method.should eq("GET")
     slot.meta.status.should eq(500)
     slot.meta.duration_us.should eq(12_000)
-    slot.meta.size.should eq(91) # the run's measured length, not the held body's
+    # Head + wire body, the measure a captured flow's slot states — not the run's DECODED
+    # `length` (91), which would read as a size change against the same response from History.
+    slot.meta.size.should eq("HTTP/1.1 500 Internal Server Error\r\n\r\n".bytesize + "stack trace".bytesize)
     slot.lines(:response).should contain("stack trace")
     slot.lines(:request).first.should contain("' OR 1=1")
   end

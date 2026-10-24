@@ -3,6 +3,7 @@ require "../flow_mapper"
 require "../env"
 require "../flow_source"
 require "../proxy/codec/http1"
+require "../repeater/h2_engine"
 
 module Gori
   module Fuzz
@@ -77,7 +78,7 @@ module Gori
         return nil if websocket
         request = r.wire || r.request
         return nil unless request
-        head, body = Env.split_head_body(request)
+        head, body = Env.split_head_body(recorded_request(request, scheme, host, port, http2))
         # A line `split(' ')` cannot frame is filed the way the proxy files it (#1423).
         method, target, version = FlowMapper.authored_request(head, http2: http2)
         fid = store.insert_flow(Store::CapturedRequest.new(
@@ -107,13 +108,31 @@ module Gori
       private def write_response(store : Store, fid : Int64, r : Result) : Nil
         rhead = r.head
         if rhead && !rhead.empty? && (resp = (Proxy::Codec::Http1.parse_response_head(rhead) rescue nil))
+          # A body the origin cut short is an Error row, as `Repeater::HistoryRecord` files the
+          # same Result; a bound gori chose to stop an event stream at is not (#1631).
+          error = r.error
+          error ||= "upstream response body was incomplete" if r.incomplete? && !r.bounded
           store.update_response(FlowMapper.response(resp, flow_id: fid, body: r.body,
             duration_us: r.duration_us,
-            state: r.error ? Store::FlowState::Error : Store::FlowState::Complete,
-            error: r.error, body_size: r.body.try(&.size.to_i64)))
+            state: error ? Store::FlowState::Error : Store::FlowState::Complete,
+            error: error, body_size: r.body.try(&.size.to_i64)))
         else
-          store.update_response(FlowMapper.error_response(fid, r.error || "no response recorded"))
+          store.update_response(FlowMapper.error_response(fid, r.error || "no response recorded",
+            duration_us: r.duration_us))
         end
+      end
+
+      # The request TEXT to file: over h2 the fields `H2Engine` encoded from it (`:path`
+      # resolved, `Host:` folded into `:authority`, names lowercased), not the source text no
+      # stream carried — `Repeater::Plan#recorded_request`'s rule, with the Fuzzer's send flags
+      # (it sends through `H2Engine.send` with both left at their defaults; a gRPC reframe is
+      # already in `request`). The source text when the encoding raises, as the send did.
+      private def recorded_request(request : Bytes, scheme : String, host : String, port : Int32,
+                                   http2 : Bool) : Bytes
+        return request unless http2
+        Repeater::H2Engine.encoded_request(request, scheme: scheme, host: host, port: port)
+      rescue Gori::Error
+        request
       end
 
       # Whether `policy` (:none | :matched | :all) records this result. `all` records every sent

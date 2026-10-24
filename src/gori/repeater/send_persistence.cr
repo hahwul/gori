@@ -38,11 +38,14 @@ module Gori::Repeater
     # Evidence gori writes must be replayable by gori. Nil `fields` means this was never a
     # field-native send, so the operator's request text passes through unchanged and no caller
     # needs its own branch.
-    def self.replayable_request(fields : Array({String, String})?, host : String, port : Int32,
-                                wire : Bytes) : Bytes
+    #
+    # The fallback authority is `FlowRequest.authority`: a bare `host:port` lost an IPv6
+    # literal's brackets (`Host: ::1:8443`) and kept a default port, so the head did not re-parse.
+    def self.replayable_request(fields : Array({String, String})?, scheme : String, host : String,
+                                port : Int32, wire : Bytes) : Bytes
       return wire unless fields
 
-      authority = Proxy::H2::HeadCodec.pseudo(fields, ":authority") || "#{host}:#{port}"
+      authority = Proxy::H2::HeadCodec.pseudo(fields, ":authority") || FlowRequest.authority(scheme, host, port)
       head = Proxy::H2::HeadCodec.synth_request(fields, authority)
       boundary = Env.head_body_boundary(wire)
       body_size = wire.size - boundary
@@ -86,7 +89,7 @@ module Gori::Repeater
       # `host` is the bare dial host (IPv6 unbracketed); `build_target` brackets it back so
       # the row re-parses on the next send.
       target = FlowRequest.build_target(scheme, host, port)
-      saved_request = replayable_request(h2_fields, host, port, request)
+      saved_request = replayable_request(h2_fields, scheme, host, port, request)
       # These are for probe scanning or safe presentation only. Never write them to the row.
       masked_target = Env.mask_secrets(target)
       masked_request = Env.mask_secrets(String.new(saved_request))

@@ -65,7 +65,9 @@ module Gori::Tui
 
     # A live exchange that was never captured as a flow: a Repeater send, a Fuzz result.
     # `status`/`duration_us` come from the sender, which measured them; the size is the
-    # response body it actually holds.
+    # response it actually holds, head + wire body — `FlowRow#response_size`'s measure, so a
+    # live send diffed against its own captured flow reads a size delta of 0 and not the
+    # head's length.
     def self.from_exchange(source : String, method : String, url : String,
                            request_head : Bytes?, request_body : Bytes?,
                            response_head : Bytes?, response_body : Bytes?, *,
@@ -79,7 +81,10 @@ module Gori::Tui
       # `size` likewise overrides the held body's length: a sender that measured the response
       # knows how long it was even when it kept no bytes (a fuzz run without `keep bodies`),
       # and 0 B would be a claim about the origin that nothing observed.
-      meta = Repeater::ExchangeMeta.of(status, size || response_body.try(&.size.to_i64), duration_us, error)
+      if response_head || response_body
+        size ||= (response_head.try(&.size) || 0).to_i64 + (response_body.try(&.size) || 0).to_i64
+      end
+      meta = Repeater::ExchangeMeta.of(status, size, duration_us, error)
       new(label || "#{method} #{path}", method, url, host, path, meta,
         source: source, flow_id: flow_id, named: !label.nil?,
         request_head: request_head, request_body: request_body,
@@ -91,14 +96,10 @@ module Gori::Tui
     # survives independently of History pruning or Repeater deletion.
     def self.from_evidence(ev : Store::IssueEvidence) : ComparerSlot
       m = ev.meta
-      response_size = if ev.response_head || ev.response_body
-                        (ev.response_head.try(&.size) || 0).to_i64 +
-                          (ev.response_body.try(&.size) || 0).to_i64
-                      end
       from_exchange("evidence", m.method, m.url,
         ev.request_head, ev.request_body, ev.response_head, ev.response_body,
         status: m.status, duration_us: m.duration_us, error: m.error,
-        size: response_size, label: "##{m.id}",
+        label: "##{m.id}",
         request_cut: m.request_truncated?, response_cut: m.response_truncated?)
     end
 

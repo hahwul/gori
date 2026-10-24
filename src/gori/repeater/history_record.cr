@@ -89,9 +89,11 @@ module Gori
         else
           # A send that never got a response (connection refused, TLS failure, timeout) is a
           # visible ERROR flow, not a dangling request — the same shape the fuzz recorder and
-          # the proxy record for a failed exchange.
+          # the proxy record for a failed exchange. `head` keeps the bytes of a head gori could
+          # not frame (`Engine.response_head_error`): an SSH banner or a truncated status line
+          # is the finding, and dropping it left an Error row with nothing to look at.
           store.update_response(FlowMapper.error_response(id, result.error || "no response recorded",
-            duration_us: result.duration_us))
+            duration_us: result.duration_us, head: result.head))
         end
         id
       end
@@ -102,13 +104,17 @@ module Gori
       # so the method/target COLUMNS (list_history / QL / sitemap read them) agree with the head.
       private def request_projection(plan : Plan, wire : Bytes) : {Bytes, Bytes?, String, String, String}
         if fields = plan.h2_fields
-          authority = Proxy::H2::HeadCodec.pseudo(fields, ":authority") || "#{plan.host}:#{plan.port}"
+          # `FlowRequest.authority`, not `host:port`: an IPv6 literal needs its brackets and a
+          # default port is not part of the authority, or the Host line does not re-parse.
+          authority = Proxy::H2::HeadCodec.pseudo(fields, ":authority") ||
+                      FlowRequest.authority(plan.scheme, plan.host, plan.port)
           head = Proxy::H2::HeadCodec.synth_request(fields, authority)
           method = Proxy::H2::HeadCodec.pseudo(fields, ":method") || ""
           target = Proxy::H2::HeadCodec.pseudo(fields, ":path") || "/"
           {head, plan.h2_body, method, target, "HTTP/2"}
         else
-          head, body = Env.split_head_body(wire)
+          # Over h2 the text is only the encoder's input; file the fields that went out.
+          head, body = Env.split_head_body(plan.recorded_request(wire))
           # Not the strict parser: the bytes are the operator's and under `--verbatim` a bare-LF
           # terminator is the payload, and a line it cannot frame is filed the way the proxy
           # files it (#1423) — the same call MCP's recorder makes.

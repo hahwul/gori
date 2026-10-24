@@ -2,6 +2,7 @@ require "./proxy/codec/message"
 require "./proxy/codec/http1"
 require "./proxy/h2/head_codec"
 require "./store/models"
+require "./url"
 
 module Gori
   # The single boundary where wire messages (truth) become storage projections.
@@ -60,10 +61,20 @@ module Gori
     # `split(' ')` cannot frame. Over h2 there is no request line on the wire: `H2Engine` sent
     # the `:path` `HeadCodec.request_pseudo` cut, which keeps `/a b` whole, so that is the
     # target — the h1 rule would file an h1 line no h2 stream ever carried (#1423).
+    #
+    # The target is cut to ORIGIN form (`Url.origin_path`). A recorder files the authority gori
+    # DIALLED in its host/port columns, and an absolute-form line (`GET http://evil.test/x`
+    # sent to `http://t.test`) left in the target column made `FlowRow#url` — and with it
+    # `list_history`, QL `url:` and the scope lens — read `evil.test` beside a host column of
+    # `t.test`. The head bytes stay verbatim (P7); only this derived column moves, the same
+    # split the proxy draws for a pinned connection (`ClientConn#pinned_origin_head`).
     def self.authored_request(head : Bytes, *, http2 : Bool) : {String, String, String}
-      return Proxy::Codec::Http1.authored_projection(head) unless http2
+      unless http2
+        method, target, version = Proxy::Codec::Http1.authored_projection(head)
+        return {method, Gori::Url.origin_path(target), version}
+      end
       method, path = Proxy::H2::HeadCodec.request_pseudo(String.new(head).split('\n', 2).first.rstrip('\r'))
-      {method, path, "HTTP/2"}
+      {method, Gori::Url.origin_path(path), "HTTP/2"}
     end
 
     def self.response(resp : Proxy::Codec::RawResponse, *, flow_id : Int64,

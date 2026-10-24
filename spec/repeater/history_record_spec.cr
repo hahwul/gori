@@ -159,4 +159,60 @@ describe Gori::Repeater::HistoryRecord do
       String.new(body.not_nil!).should eq("hello")
     end
   end
+
+  # `GET http://evil.test/x` sent to `http://t.test` went to t.test; the row's url, QL `url:`
+  # and the scope lens must say so, while the head keeps the line the operator wrote (P7).
+  it "files an absolute-form send under the authority gori dialled" do
+    with_store do |store|
+      plan = plan_for("GET http://evil.test/x HTTP/1.1\r\nHost: evil.test\r\n\r\n")
+      id = Gori::Repeater::HistoryRecord.record(store, plan, result_for("HTTP/1.1 200 OK\r\n\r\n", nil),
+        created_at: 1_i64, wire: plan.wire_bytes, surface: Gori::FlowSource::Surface::Cli)
+      d = store.get_flow(id).not_nil!
+      d.row.url.should eq("http://t.test/x")
+      String.new(d.request_head).should start_with("GET http://evil.test/x HTTP/1.1\r\n")
+      store.search(Gori::QL.parse("url:t.test"), 10).map(&.id).should contain(id)
+    end
+  end
+
+  it "records a field-native send with no :authority under a Host that re-parses" do
+    with_store do |store|
+      {"https://[::1]:8443" => "Host: [::1]:8443\r\n", "https://t.test" => "Host: t.test\r\n"}.each do |target, host|
+        opts = Gori::Repeater::PlanOptions.new([] of Bytes, default_target: target)
+        opts.h2_fields = [{":method", "GET"}, {":scheme", "https"}, {":path", "/x"}]
+        plan = Gori::Repeater::Plan.build(opts, ungated_outbound)
+        id = Gori::Repeater::HistoryRecord.record(store, plan, result_for("HTTP/2 200\r\n\r\n", nil),
+          created_at: 1_i64, wire: plan.wire_bytes, surface: Gori::FlowSource::Surface::Cli)
+        String.new(store.get_flow(id).not_nil!.request_head).should contain(host)
+      end
+    end
+  end
+
+  # An SSH banner where a status line belonged is the finding; the Error row keeps its bytes.
+  it "keeps the bytes of a response head gori could not frame" do
+    with_store do |store|
+      plan = plan_for("GET /x HTTP/1.1\r\nHost: t.test\r\n\r\n")
+      got = "SSH-2.0-OpenSSH_9.6\r\n".to_slice
+      r = Gori::Repeater::Result.new(got, nil, nil, 5_i64, "response head truncated from t.test:80", true, delivered: true)
+      id = Gori::Repeater::HistoryRecord.record(store, plan, r, created_at: 1_i64, wire: plan.wire_bytes,
+        surface: Gori::FlowSource::Surface::Cli)
+      d = store.get_flow(id).not_nil!
+      d.row.state.error?.should be_true
+      String.new(d.response_head.not_nil!).should eq("SSH-2.0-OpenSSH_9.6\r\n")
+    end
+  end
+
+  # Over h2 the text is the encoder's input: `Host:` becomes `:authority` and names go out
+  # lowercase. The row holds what the stream carried, as MCP `send_request` records it.
+  it "records an h2 text send as the fields H2Engine encoded" do
+    with_store do |store|
+      opts = Gori::Repeater::PlanOptions.new(["GET /a HTTP/1.1\r\nX-Up: 1\r\n\r\n".to_slice],
+        default_target: "https://t.test")
+      opts.http2 = true
+      plan = Gori::Repeater::Plan.build(opts, ungated_outbound)
+      id = Gori::Repeater::HistoryRecord.record(store, plan, result_for("HTTP/2 200\r\n\r\n", nil),
+        created_at: 1_i64, wire: plan.wire_bytes, surface: Gori::FlowSource::Surface::Cli)
+      String.new(store.get_flow(id).not_nil!.request_head)
+        .should eq("GET /a HTTP/2\r\nHost: t.test\r\nx-up: 1\r\n\r\n")
+    end
+  end
 end

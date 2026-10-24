@@ -94,5 +94,12 @@ describe Gori::FlowMapper do
       Gori::FlowMapper.authored_request("POST /a b HTTP/1.1\nHost: h\n\n".to_slice, http2: true)
         .should eq({"POST", "/a b", "HTTP/2"})
     end
+
+    # The host/port columns name the authority gori DIALLED, so an absolute-form line must not
+    # put a second authority in the target column `FlowRow#url` reads.
+    it "files an absolute-form target in origin form" do
+      Gori::FlowMapper.authored_request("GET HTTP://evil.test/x?q=1 HTTP/1.1\r\n\r\n".to_slice, http2: false)
+        .should eq({"GET", "/x?q=1", "HTTP/1.1"})
+    end
   end
 end

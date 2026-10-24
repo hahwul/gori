@@ -384,6 +384,19 @@ module Gori::Repeater
       @h2_fields ? bytes : @sender.wire(bytes)
     end
 
+    # `wire` (from `wire_bytes`) as the request TEXT a recorder files. On h1 it is the wire. On
+    # an h2 byte-path send the text is only the encoder's input — it resolves `:path`, folds
+    # `Host:` into `:authority` and lowercases names — so this is `H2Engine.encoded_request`,
+    # the fields that go out. Falls back to `wire` when the encoding raises: the send hits the
+    # same refusal and reports it. Field-native has no text here at all (see `wire_bytes`).
+    def recorded_request(wire : Bytes) : Bytes
+      return wire unless @http2 && @h2_fields.nil?
+      H2Engine.encoded_request(wire, scheme: @scheme, host: @host, port: @port,
+        preserve_field_case: @preserve_field_case, reframe_grpc: @reframe_grpc)
+    rescue Gori::Error
+      wire
+    end
+
     # Send bytes already taken from `wire_bytes`. Field-native ignores them, for the reason
     # `wire_bytes` states. `admitted`: the caller took the budget slot first (`admit`).
     def send_wire(wire : Bytes, cancel : Proc(Bool)? = nil, admitted : Bool = false) : Result

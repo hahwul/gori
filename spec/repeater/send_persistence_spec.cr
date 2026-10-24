@@ -11,10 +11,19 @@ describe Gori::Repeater::SendPersistence do
     ]
     dump = Gori::Repeater::H2Engine.field_dump(fields, "body".to_slice)
 
-    saved = Gori::Repeater::SendPersistence.replayable_request(fields, "dial.example.test", 443, dump)
+    saved = Gori::Repeater::SendPersistence.replayable_request(fields, "https", "dial.example.test", 443, dump)
 
     String.new(saved).should eq(
       "POST /h2 HTTP/2\r\nHost: api.example.test\r\ncontent-type: text/plain\r\n\r\nbody")
+  end
+
+  it "falls back to a bracketed, default-port-free authority when the fields carry none" do
+    fields = [{":method", "GET"}, {":path", "/x"}]
+    dump = Gori::Repeater::H2Engine.field_dump(fields, nil)
+    String.new(Gori::Repeater::SendPersistence.replayable_request(fields, "https", "::1", 8443, dump))
+      .should contain("Host: [::1]:8443\r\n")
+    String.new(Gori::Repeater::SendPersistence.replayable_request(fields, "https", "t.test", 443, dump))
+      .should contain("Host: t.test\r\n")
   end
 
   it "keeps wire values in the saved row and returns separate masked scan values" do

@@ -592,12 +592,7 @@ module Gori
         # Field-native: `built.bytes` is already the faithful field dump — the fields go on the
         # wire verbatim, so there is no h1-text to re-encode and nothing to project away.
         return built.bytes if plan.h2_fields
-        return h1_wire unless plan.http2?
-        Repeater::H2Engine.encoded_request(h1_wire, scheme: built.scheme, host: built.host,
-          port: built.port, preserve_field_case: plan.preserve_field_case?,
-          reframe_grpc: plan.reframe_grpc?)
-      rescue Gori::Error
-        h1_wire
+        plan.recorded_request(h1_wire)
       end
 
       # The request actually put on the wire, parsed back from the encoded bytes, so
@@ -907,7 +902,7 @@ module Gori
                                           source_ref : String? = nil,
                                           rewrite : Store::Rewrite? = nil) : Int64
         head, body = Env.split_head_body(Repeater::SendPersistence.replayable_request(
-          h2_fields, built.host, built.port, wire))
+          h2_fields, built.scheme, built.host, built.port, wire))
         # Field-native: `head` is the h1 PROJECTION, not the pseudo-explicit dump, so the
         # method/target COLUMNS (list_history / QL / sitemap read them) come off the FIELDS a
         # receiver routes on and agree with the head text. See
@@ -976,8 +971,11 @@ module Gori
           captured.event_times = result.packed_event_times
           store.update_response(captured)
         else
+          # `head`: the bytes of a head gori could not frame are the finding (see
+          # `Repeater::HistoryRecord#record`).
           store.update_response(FlowMapper.error_response(flow_id,
-            result.error || "request failed before a response was received", result.duration_us))
+            result.error || "request failed before a response was received", result.duration_us,
+            head: result.head))
         end
       rescue ex
         # The request already left the host. Keep its result usable, but surface

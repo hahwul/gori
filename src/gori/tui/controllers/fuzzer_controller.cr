@@ -1720,7 +1720,9 @@ module Gori::Tui
         v.result_request_note(r) ? "fuzz·rebuilt" : "fuzz",
         ComparerSlot.method_of(req), v.result_target_origin,
         req_head, req_body, r.head, r.body,
-        status: r.status, duration_us: r.duration_us, error: r.error, size: r.length,
+        # `r.length` is the DECODED body, a different measure from the head + wire body every
+        # other slot states; it is only the fallback for a row that kept no bytes.
+        status: r.status, duration_us: r.duration_us, error: r.error, size: r.head ? nil : r.length,
         label: "##{r.index} #{payload}".rstrip)
     end
 

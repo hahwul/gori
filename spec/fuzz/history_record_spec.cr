@@ -112,6 +112,48 @@ describe Gori::Fuzz::HistoryRecord do
       end
     end
 
+    it "keeps the attempt's duration on an error flow" do
+      with_store do |store|
+        r = Gori::Fuzz::Result.new(
+          index: 0_i64, payloads: ["p"], position: nil, status: nil, length: 0_i64, words: 0, lines: 0,
+          duration_us: 777_i64, error: "connection refused", matched: true, incomplete: false, retried: false,
+          extracted: nil, head: nil, body: nil, request: "GET /x HTTP/1.1\r\nHost: t.test\r\n\r\n".to_slice)
+        id = Gori::Fuzz::HistoryRecord.record(store, r, scheme: "http", host: "t.test", port: 80, http2: false,
+          source: Gori::FlowSource::Kind::Fuzzer, surface: Gori::FlowSource::Surface::Cli) { }.not_nil!
+        row = store.flow_row(id).not_nil!
+        row.state.error?.should be_true
+        row.duration_us.should eq(777_i64)
+      end
+    end
+
+    # The Repeater recorder files the same Result as Error (its spec: "a cut-short body as
+    # Error"); a bound gori chose to stop at stays Complete (#1631).
+    it "records a cut-short body as Error and a bounded stream as Complete" do
+      with_store do |store|
+        {nil => true, "events" => false}.each do |bounded, errored|
+          r = Gori::Fuzz::Result.new(
+            index: 0_i64, payloads: ["p"], position: nil, status: 200, length: 2_i64, words: 1, lines: 1,
+            duration_us: 1_i64, error: nil, matched: true, incomplete: true, retried: false,
+            extracted: nil, head: "HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n".to_slice,
+            body: "ok".to_slice, request: "GET /x HTTP/1.1\r\nHost: t.test\r\n\r\n".to_slice, bounded: bounded)
+          id = Gori::Fuzz::HistoryRecord.record(store, r, scheme: "http", host: "t.test", port: 80, http2: false,
+            source: Gori::FlowSource::Kind::Fuzzer, surface: Gori::FlowSource::Surface::Cli) { }.not_nil!
+          store.flow_row(id).not_nil!.state.error?.should eq(errored)
+        end
+      end
+    end
+
+    it "records an h2 text send as the fields H2Engine encoded" do
+      with_store do |store|
+        r = result_with("GET /a HTTP/1.1\r\nX-Up: 1\r\n\r\n", "HTTP/2 200\r\n\r\n", matched: true)
+        id = Gori::Fuzz::HistoryRecord.record(store, r, scheme: "https", host: "t.test", port: 443,
+          http2: true, source: Gori::FlowSource::Kind::Fuzzer,
+          surface: Gori::FlowSource::Surface::Cli) { }.not_nil!
+        String.new(store.get_flow(id).not_nil!.request_head)
+          .should eq("GET /a HTTP/2\r\nHost: t.test\r\nx-up: 1\r\n\r\n")
+      end
+    end
+
     it "returns nil when the result kept no request bytes (keep_bodies was :none)" do
       with_store do |store|
         r = result_with(nil, "HTTP/1.1 200 OK\r\n\r\n", matched: true)

@@ -115,6 +115,15 @@ describe ComparerView do
     v.copy_all.lines.each { |l| l.should start_with("  ") }
   end
 
+  # The flow's size is head + wire body; a live slot of the same response must state the
+  # same measure, or the A→B delta reads the head's length as a change.
+  it "states a live slot's size in the measure a captured flow uses" do
+    head = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n"
+    live = ComparerSlot.from_exchange("repeater", "GET", "http://t.test/x", nil, nil,
+      head.to_slice, "ok".to_slice, status: 200)
+    live.meta.size.should eq(head.bytesize + 2)
+  end
+
   it "truncates a slot label by display width, not char count" do
     v = ComparerView.new
     # 12 CJK chars ≈ 24 display cols; char-count truncation (path[0,11]) would keep ~22
