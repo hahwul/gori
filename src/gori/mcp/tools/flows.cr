@@ -650,9 +650,25 @@ module Gori
           chunk = chunk[0, whole]
           text = trimmed
         end
-        # Valid UTF-8 can still JSON-escape to six bytes a byte (NUL padding is valid UTF-8), so
-        # text that escapes past the budget goes out as budgeted base64 instead.
-        force_base64 = text.valid_encoding? && text.to_json.bytesize > REPLY_ROWS_BUDGET
+        # JSON escaping grows text past the budget: a `\n` or `"` costs one more byte, so nearly
+        # every full page of HTML or JSON did, and went out whole as base64 a model cannot read.
+        # Such a page is cut to fit and stays text; only text that escapes to several bytes a byte
+        # (NUL padding is valid UTF-8, six bytes each) goes out as budgeted base64.
+        force_base64 = false
+        text_cut = false
+        if text.valid_encoding?
+          while (escaped = text.to_json.bytesize) > REPLY_ROWS_BUDGET
+            fit = Serialize.utf8_whole_prefix(chunk[0, (count.to_i64 * REPLY_ROWS_BUDGET // escaped).to_i - 16])
+            if fit < REPLY_ROWS_BUDGET // 4
+              force_base64 = true
+              break
+            end
+            count = fit
+            chunk = chunk[0, count]
+            text = String.new(chunk)
+            text_cut = true
+          end
+        end
         base64_cut = (force_base64 || !text.valid_encoding?) && count > BASE64_CHUNK_MAX
         if base64_cut
           count = BASE64_CHUNK_MAX
@@ -673,7 +689,7 @@ module Gori
             j.field "warning", "requested offset #{requested} is past the #{total}-byte body; clamped to the end" if offset_out_of_range
             j.field "returned_bytes", count
             j.field "total_bytes", total
-            emit_cut(j, base64_cut)
+            emit_cut(j, base64_cut || text_cut)
             if head_omitted
               j.field "head_omitted", true
               j.field "head_omitted_note",

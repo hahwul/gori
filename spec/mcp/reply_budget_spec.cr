@@ -160,6 +160,22 @@ describe "MCP reply budget" do
     end
   end
 
+  # A newline escapes to two bytes, so a full page of HTML or JSON lands just over the budget;
+  # it used to go out whole as base64.
+  it "cuts ordinary text that escapes past the budget and keeps it text" do
+    with_store do |store|
+      body = ("{\"k\": \"v\"}\n" * 8_000).to_slice
+      id = mcp_seed_flow(store, "a.test", "GET", "/json", 200, resp_body: body)
+      page = call(store, "get_response_body_chunk", %({"flow_id":#{id},"raw":true}))
+      page["encoding"].as_s.should eq("text")
+      page["cut_by"].as_s.should eq("bytes")
+      got = page["returned_bytes"].as_i
+      page["text"].as_s.to_json.bytesize.should be <= Gori::MCP::Tools::REPLY_ROWS_BUDGET
+      page["text"].as_s.should eq(String.new(body[0, got]))
+      page["next_offset"].as_i.should eq(got)
+    end
+  end
+
   it "holds a binary body chunk to the budget once base64-encoded" do
     with_store do |store|
       body = Bytes.new(100_000) { |i| (i % 256).to_u8 }
