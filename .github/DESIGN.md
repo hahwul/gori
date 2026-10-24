@@ -5205,3 +5205,14 @@ the TUI), scripted or live: MCP `send_websocket`/`ws_session_send`, `gori run re
 and a fuzz sweep's typed frames (`Fuzz::Plan`, every surface).
 A flow-seeded session's stored frames are evidence and still go out as captured; a bare `$name`
 and `verbatim` stay literal.
+
+### 2026-10-25: a slot header's undeclared `$BIND.X` is said, a bare `$id` still is not (#525)
+
+Refines #525's "an unknown token is plan-build's business" for one place: a session slot header
+under the namespaced grammar. `$BIND.X` is a reference by its own spelling, so when no enabled
+extract rule declares `X` and the slot does not claim it, nothing will ever bind it and the
+identity goes out unauthenticated. `Env.slot_literals` reports it (`SlotLiteral#undeclared`,
+qualified name) through `Env.slot_env_warning` on a slot write (MCP, `gori run session`) and the
+send-time `Run.unbound_overlay_note` (MCP sends and Authorize, `gori run` summaries). A report,
+not a refusal; the remedy is the rule plus a `rules` claim, or `$$BIND.X`. A bare `$id`/`$NOSUCH`,
+and every name under the bare grammar, stays silent.

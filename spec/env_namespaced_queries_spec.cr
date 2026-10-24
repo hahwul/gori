@@ -199,6 +199,26 @@ describe "Gori::Env — namespaced queries" do
     end
   end
 
+  # A typed `$BIND.X` is a reference by its own spelling, so one that no rule declares and the
+  # slot does not claim is said rather than shipped silently. The bare `$id` stays silent (#525).
+  it "reports a qualified $BIND.X nothing declares or claims, with its own remedy" do
+    with_q(declared: [] of String, bound: {} of String => String) do
+      slot = Gori::SessionSlot.new("admin",
+        set_headers: [{"Authorization", "Bearer $BIND.NOSUCH"}, {"X-A", "$id"}, {"X-E", "$$BIND.ESC"}])
+      lit = Gori::Env.slot_literals(slot)
+      lit.map(&.name).should eq(["BIND.NOSUCH"])
+      lit[0].undeclared.should be_true
+      warning = Gori::Env.slot_env_warning(slot).not_nil!
+      warning.should contain("$BIND.NOSUCH goes out LITERALLY")
+      warning.should contain("claim it in the slot's `rules`")
+      warning.should contain("$$BIND.NOSUCH")
+      # Claimed ⇒ the ordinary unbound cause, which binding fixes.
+      claimed = slot.copy_with(rules: ["NOSUCH"])
+      Gori::Env.slot_literals(claimed)[0].undeclared.should be_false
+      Gori::Env.slot_env_warning(claimed).should be_nil
+    end
+  end
+
   it "escapes still work, and the escaped spelling is not reported" do
     with_q(declared: ["SESSION"], bound: {} of String => String) do
       # `$$SESSION` under the namespaced grammar is two literal bytes plus a re-examined sigil, so

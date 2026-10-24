@@ -102,6 +102,15 @@ describe "R1 · the unbound-overlay drain has a consumer" do
     end
   end
 
+  it "says a qualified $BIND.X nothing declares or claims apart from the binding sentence" do
+    with_env_syntax(Gori::Env::Syntax::Namespaced) do
+      note = Gori::CLI::Run.unbound_overlay_note([{"admin", "SESSION"}, {"admin", "BIND.NOSUCH"}]).not_nil!
+      note.should contain("admin sent $BIND.SESSION.")
+      note.should contain("admin: $BIND.NOSUCH goes out LITERALLY — no enabled extract rule declares it")
+      note.should_not contain("sent $BIND.SESSION, $BIND.NOSUCH")
+    end
+  end
+
   describe "over the real seam" do
     it "an UNBOUND slot overlay produces the summary sentence" do
       with_store do |store|

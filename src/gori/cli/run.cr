@@ -1249,9 +1249,15 @@ module Gori
       #
       # An `$ENV.X` pair (qualified, `Env::SlotLiteral#env`) is a different failure with no
       # binding remedy, so it takes `Env.slot_env_note`'s sentence instead (#1689).
+      #
+      # A QUALIFIED `$BIND.X` pair is `Env::SlotLiteral#undeclared`: no rule declares it and the slot
+      # does not claim it, so binding first is not the remedy either (`Env.slot_undeclared_note`).
       def self.unbound_overlay_note(pairs : Array({String, String})) : String?
         envs, binds = pairs.partition { |(_, name)| Env.split_qualified(name)[0].try(&.env?) || false }
-        notes = [binding_overlay_note(binds), slot_env_overlay_note(envs)].compact
+        undeclared, binds = binds.partition { |(_, name)| !Env.split_qualified(name)[0].nil? }
+        notes = [binding_overlay_note(binds),
+                 per_slot_overlay_note(envs) { |names| Env.slot_env_note(names) },
+                 per_slot_overlay_note(undeclared) { |names| Env.slot_undeclared_note(names) }].compact
         notes.empty? ? nil : notes.join(". ")
       end
 
@@ -1286,10 +1292,10 @@ module Gori
         end
       end
 
-      # `Env.slot_env_note` per slot for the `$ENV` pairs, or nil when there are none.
-      private def self.slot_env_overlay_note(envs : Array({String, String})) : String?
-        envs.map(&.[0]).uniq!.join("; ") do |slot|
-          "#{slot}: #{Env.slot_env_note(envs.compact_map { |(s, n)| n if s == slot })}"
+      # The block's sentence per slot over that slot's names, or nil when there are no pairs.
+      private def self.per_slot_overlay_note(pairs : Array({String, String}), & : Array(String) -> String) : String?
+        pairs.map(&.[0]).uniq!.join("; ") do |slot|
+          "#{slot}: #{yield pairs.compact_map { |(s, n)| n if s == slot }}"
         end.presence
       end
 

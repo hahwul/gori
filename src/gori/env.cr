@@ -916,7 +916,12 @@ module Gori
     # `env` marks a third: an `$ENV.X`, which no pass over a slot header ever resolves (a slot
     # resolves BIND and GEN only, `expand_bindings_as`), so its `name` is the QUALIFIED one and the
     # only remedy is the value itself (`slot_env_note`, #1689).
-    record SlotLiteral, name : String, bare_spelled : Bool, env : Bool = false do
+    #
+    # `undeclared` marks a fourth: a QUALIFIED `$BIND.X` that no enabled extract rule declares and
+    # the slot does not claim. Under the namespaced grammar `$BIND.` is a reference by its own
+    # spelling, so it is said (`slot_undeclared_note`); its `name` is qualified too.
+    record SlotLiteral, name : String, bare_spelled : Bool, env : Bool = false,
+      undeclared : Bool = false do
       # What the operator should write instead. For a bare spelling that is the RE-SPELLING; for a
       # genuinely unbound reference it is the escape, since the value is what they wanted.
       def remedy : String
@@ -982,8 +987,13 @@ module Gori
       # ever reads a slot header (#1689).
       token_names(value, prefix, Namespace::Bind).each do |name|
         next if vals.has_key?(name)
-        next unless declared.includes?(name) || slot.claims?(name)
-        literal << SlotLiteral.new(name, false) if seen.add?(name)
+        if declared.includes?(name) || slot.claims?(name)
+          literal << SlotLiteral.new(name, false) if seen.add?(name)
+        elsif !syntax.bare?
+          # The bare grammar's `$id` stays plan-build's business (#525); a typed `$BIND.X` does not.
+          key = qualify(Namespace::Bind, name)
+          literal << SlotLiteral.new(key, false, undeclared: true) if seen.add?(key)
+        end
       end
       return if syntax.bare?
       token_names(value, prefix, Namespace::Env).each do |name|
@@ -1022,7 +1032,9 @@ module Gori
       # gori.log (#411). Once per (slot, name) until a surface drains the list: this runs
       # per SEND, and a Fuzzer sweep under a slot would otherwise write one line per request.
       envs, fresh = fresh.partition(&.env)
+      undeclared, fresh = fresh.partition(&.undeclared)
       ::Log.warn { "session slot #{slot.name.inspect}: #{slot_env_note(envs.map(&.name))}" } unless envs.empty?
+      ::Log.warn { "session slot #{slot.name.inspect}: #{slot_undeclared_note(undeclared.map(&.name))}" } unless undeclared.empty?
       ::Log.warn { unbound_overlay_warning(slot.name, fresh) } unless fresh.empty?
       found.map(&.name)
     end
@@ -1065,10 +1077,26 @@ module Gori
       "an env var, so write the value itself"
     end
 
-    # `slot_env_note` for one slot, or nil when its headers name no `$ENV` var.
+    # The sentence for QUALIFIED `$BIND.X` names nothing will ever bind (`SlotLiteral#undeclared`):
+    # no enabled extract rule declares them and the slot does not claim them.
+    def self.slot_undeclared_note(names : Array(String)) : String
+      one = names.size == 1
+      "#{token_list(names)} #{one ? "goes" : "go"} out LITERALLY — no enabled extract rule " \
+      "declares #{one ? "it" : "them"} and this slot does not claim #{one ? "it" : "them"}, so " \
+      "nothing will ever bind #{one ? "it" : "them"}. Create the extract rule and claim it in " \
+      "the slot's `rules`, or write `#{spell_escaped(names[0], Namespace::Bind)}` if the literal " \
+      "is what you meant"
+    end
+
+    # `slot_env_note` and `slot_undeclared_note` for one slot, or nil when it has neither cause.
     def self.slot_env_warning(slot : SessionSlot) : String?
-      names = slot_literals(slot).select(&.env).map(&.name)
-      names.empty? ? nil : slot_env_note(names)
+      found = slot_literals(slot)
+      envs = found.select(&.env).map(&.name)
+      undeclared = found.select(&.undeclared).map(&.name)
+      notes = [] of String
+      notes << slot_env_note(envs) unless envs.empty?
+      notes << slot_undeclared_note(undeclared) unless undeclared.empty?
+      notes.empty? ? nil : notes.join(". ")
     end
 
     # Drain the record — `{slot name, binding name}` pairs, in the order they were first seen.
