@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "../support/mcp_harness"
 require "socket"
 require "base64"
 require "compress/gzip"
@@ -1880,5 +1881,33 @@ describe "MCP fuzz_start extractors (#1592)" do
       end
       store.fuzz_runs.should be_empty
     end
+  end
+end
+
+# The client going away (EOF on stdin) ends the process. A `save_results` run still in flight
+# used to stay `running` in the project forever, with `sent` never written.
+describe "MCP fuzz_start{save_results} when the client disconnects" do
+  it "closes the saved run as stopped" do
+    origin = TCPServer.new("127.0.0.1", 0)
+    port = origin.local_address.port
+    spawn do
+      while conn = origin.accept?
+        Gori::Proxy::Codec::Http1.read_head(conn)
+        sleep 2.seconds # never answers within the run's timeout
+        conn.close
+      end
+    end
+    with_store do |store|
+      call = {"jsonrpc" => "2.0", "id" => 1, "method" => "tools/call", "params" => {
+        "name" => "fuzz_start", "arguments" => {
+          "template" => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n", "url" => "http://127.0.0.1:#{port}",
+          "payloads" => [{"list" => ["a", "b", "c"]}], "concurrency" => 1, "timeout_ms" => 500,
+          "save_results" => true, "allow_unscoped" => true,
+        },
+      }}.to_json
+      mcp_tool_payload(mcp_drive(store, call, verify_upstream: false)[0])["job_id"].as_s.should_not be_empty
+      store.fuzz_runs.first.status.should eq("stopped")
+    end
+    origin.close
   end
 end
