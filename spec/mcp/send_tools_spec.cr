@@ -208,6 +208,21 @@ describe Gori::MCP::Server do
 
     # The tab keeps its old answer when rules rewrote the send; the reply has to say so, or the
     # next freeze_evidence on the tab freezes an exchange the agent never saw.
+    it "keeps the tab's response, and says so, when grpc_fields edited the send" do
+      with_store do |store|
+        port = start_mcp_http_origin("ok")
+        body = Bytes[0, 0, 0, 0, 2, 8, 1]
+        head = "POST /svc.S/M HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\ncontent-type: application/grpc\r\n" \
+               "Content-Length: #{body.size}\r\n\r\n"
+        rid = store.insert_repeater("http://127.0.0.1:#{port}", head.to_slice + body, false, true, nil, 0)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"repeater_id":#{rid},"grpc_fields":["1:varint=7"],"allow_unscoped":true}}})
+        payload = mcp_tool_payload(mcp_drive(store, call, verify_upstream: false)[0])
+        payload["repeater_response_written"].as_bool.should be_false
+        payload["repeater_response_note"].as_s.should contain("grpc_fields edited this send")
+        store.get_repeater(rid).not_nil!.response_head.should be_nil
+      end
+    end
+
     it "says a rule-rewritten repeater send left the tab's stored response alone" do
       with_store do |store|
         port = start_mcp_http_origin("ok")

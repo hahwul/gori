@@ -147,7 +147,9 @@ module Gori
         # sentence with the three `gori run` surfaces (`CLI::Run.unbound_overlay_note`).
         unbound_overlay = CLI::Run.unbound_overlay_note(Env.take_unbound_overlay)
         flow_response_saved = recorded_flow_id ? record_outbound_response(recorded_flow_id, result) : false
-        write_back_repeater_response(h, result, applied_rules, sent_row_digest)
+        # What made this send's bytes differ from the saved row (the CLI's `per_send_edits`).
+        per_send_edit = applied_rules ? "Match & Replace rewrote this send" : (str_list(h, "grpc_fields").empty? ? nil : "grpc_fields edited this send")
+        write_back_repeater_response(h, result, per_send_edit, sent_row_digest)
         # Audit trail on STDERR — never STDOUT (reserved for JSON-RPC).
         Log.info { "send_request #{built.scheme}://#{built.host}:#{built.port} http2=#{http2} scope=#{sc.decision} flow_id=#{recorded_flow_id || "none"} -> #{result.ok? ? "ok" : result.error}" }
 
@@ -183,7 +185,7 @@ module Gori
           # report a handshake that did not happen.
           tls_preset: plan.scheme == "https" ? plan.tls_preset : nil,
           body_more: body_more, via: Proxy::Upstream.via(plan.host, plan.scheme, plan.port),
-          rules_kept_repeater: applied_rules && result.ok? ? int(h, "repeater_id") : nil,
+          kept_repeater: per_send_edit && result.ok? ? int(h, "repeater_id").try { |id| {id, per_send_edit} } : nil,
           freeze_ref: if repeater_id && repeater_response_saved
             %(ref_kind:"repeater" ref_id:#{repeater_id})
           elsif recorded_flow_id && flow_response_saved
@@ -840,10 +842,10 @@ module Gori
       # stored response), digested over the ROW's request as read before the send (the drift
       # check compares the row, not the wire, so `$NAME` expansion and the slot overlay do not
       # count), and not when this send's bytes differ from the row's by more than that —
-      # `apply_rules` rewrote them.
-      private def write_back_repeater_response(h, result : Repeater::Result, applied_rules : Bool,
+      # `per_send_edit` names what changed them (`apply_rules`, `grpc_fields`).
+      private def write_back_repeater_response(h, result : Repeater::Result, per_send_edit : String?,
                                                digest : String?) : Nil
-        return unless result.ok? && !applied_rules && digest
+        return unless result.ok? && per_send_edit.nil? && digest
         return unless id = int(h, "repeater_id")
         return if store.update_repeater_response(id, result.head, result.body, result.error,
                     result.duration_us, request_sha256: digest)
@@ -1019,7 +1021,7 @@ module Gori
                                    unbound_overlay : String? = nil,
                                    head_unterminated : Bool = false,
                                    tls_preset : String? = nil, body_more : String? = nil,
-                                   via : String? = nil, rules_kept_repeater : Int64? = nil,
+                                   via : String? = nil, kept_repeater : {Int64, String}? = nil,
                                    freeze_ref : String? = nil) : String
         JSON.build do |j|
           j.object do
@@ -1039,15 +1041,16 @@ module Gori
             # mentioned it. gori still SENT it — see `CLI::Run.unterminated_head_note`.
             emit_head_unterminated(j, head_unterminated)
             j.field "match_replace_applied", true if applied_rules
-            # `write_back_repeater_response` keeps the tab's old answer when rules rewrote the
-            # send, and said nothing — so the next `freeze_evidence` on the tab froze a response
-            # this send never got, under a request it never sent.
-            if id = rules_kept_repeater
+            # `write_back_repeater_response` keeps the tab's old answer when this send's bytes
+            # differ from its row, and said nothing — so the next `freeze_evidence` on the tab
+            # froze a response this send never got, under a request it never sent.
+            if kept = kept_repeater
+              id, why = kept
               j.field "repeater_response_written", false
               j.field "repeater_response_note",
-                "Match & Replace rewrote this send, so repeater ##{id} keeps its PREVIOUS response; " \
+                "#{why}, so repeater ##{id} keeps its PREVIOUS response; " \
                 "freeze_evidence on the repeater freezes that older exchange, not this one — " +
-                (freeze_ref ? "freeze #{freeze_ref} instead" : "re-send with record_history to freeze this one")
+                (freeze_ref ? "freeze #{freeze_ref} instead" : "re-send with record_history or save_as_repeater to freeze this one")
             end
             # Beside `effective_request`, which is where the literal `$NAME` is visible in the
             # bytes — an agent that reads the response alone cannot tell this send from one
