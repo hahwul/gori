@@ -90,7 +90,7 @@ describe Gori::Proxy::Codec::ContentDecode do
       head("HTTP/1.1 200 OK", "Transfer-Encoding: chunked"), wire, 33)
     decoded.not_nil!.size.should eq(33)
     String.new(decoded.not_nil!).should eq("x" * 33)
-    note.not_nil!.should contain("truncated")
+    note.should eq("de-chunked (partial — stopped at the 33-byte decode cap)")
     clean.should be_false
   end
 
@@ -98,8 +98,20 @@ describe Gori::Proxy::Codec::ContentDecode do
     decoded, note, clean = decode_full(
       head("HTTP/1.1 200 OK", "Content-Encoding: gzip"), gzip("z" * 200_000), 33)
     decoded.not_nil!.size.should eq(33)
-    note.not_nil!.should contain("truncated")
+    note.should eq("decoded: gzip (partial — stopped at the 33-byte decode cap)")
     clean.should be_false
+  end
+
+  # A WHOLE gzip body bigger than an inline preview cap (get_flow's) stopped at the cap, not at
+  # a cut — "stream truncated" sent the reader looking for a capture cut that never happened.
+  # A real cut under the same cap keeps the truncation wording.
+  it "words a cap stop as the cap and a real cut as truncation" do
+    gz = head("HTTP/1.1 200 OK", "Content-Encoding: gzip")
+    whole = gzip("z" * 200_000)
+    _, note, _ = decode_full(gz, whole, 1000)
+    note.should eq("decoded: gzip (partial — stopped at the 1000-byte decode cap)")
+    _, cut_note, _ = decode_full(gz, gzip(word_soup)[0, 200], 1_000_000)
+    cut_note.should eq("decoded: gzip (stream truncated)")
   end
 
   it "treats a chunk size with a leading '+' as malformed (no smuggled length)" do

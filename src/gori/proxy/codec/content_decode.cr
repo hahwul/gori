@@ -113,7 +113,20 @@ module Gori::Proxy::Codec
     private def self.dechunk_step(body : Bytes, max_out : Int32) : {Bytes, Bool, Array(String)}
       entity, wire_complete, capped = dechunk_bounded(body, max_out)
       complete = wire_complete && !capped
-      {entity, complete, [complete ? "de-chunked" : "de-chunked (stream truncated)"]}
+      note = if capped
+               "de-chunked #{capped_clause(max_out)}"
+             else
+               complete ? "de-chunked" : "de-chunked (stream truncated)"
+             end
+      {entity, complete, [note]}
+    end
+
+    # A decode that stopped because the CALLER's `max_out` was reached, not because the stream
+    # did: a whole body larger than an inline preview cap is not a truncated one, and calling it
+    # "stream truncated" sent readers hunting for a capture cut that never happened. "partial"
+    # keeps it off the clean (green) note in History.
+    private def self.capped_clause(max_out : Int32) : String
+      "(partial — stopped at the #{max_out}-byte decode cap)"
     end
 
     # Did a chunked wire body reach its terminating 0-chunk? False for a stream cut
@@ -238,8 +251,8 @@ module Gori::Proxy::Codec
     # no surface can report a truncated decode as a finished one.
     private def self.inflate(data : Bytes, enc : String, max_out : Int32) : {Bytes?, String?, Bool}
       case enc
-      when "gzip", "x-gzip" then partial_note(bound_output(gunzip(data, max_out), max_out), "gzip")
-      when "deflate"        then partial_note(bound_output(inflate_deflate(data, max_out), max_out), "deflate")
+      when "gzip", "x-gzip" then partial_note(bound_output(gunzip(data, max_out), max_out), "gzip", max_out)
+      when "deflate"        then partial_note(bound_output(inflate_deflate(data, max_out), max_out), "deflate", max_out)
       when "br"
         return {nil, "compressed: br — decoder not built in", true} unless Brotli::AVAILABLE
         # `decode_full`, never the one-value `decode`: both FFI decoders DO report their own
@@ -249,10 +262,10 @@ module Gori::Proxy::Codec
         # was reported "decoded: br", the clean note, on every surface: the History note, the
         # `decode_truncated` field in `--format json`, and Probe, for which an encoded body
         # that never finished is the whole point of the scan.
-        partial_note(bound_output(Brotli.decode_full(data, max_out), max_out), "br")
+        partial_note(bound_output(Brotli.decode_full(data, max_out), max_out), "br", max_out)
       when "zstd"
         return {nil, "compressed: zstd — decoder not built in", true} unless Zstd::AVAILABLE
-        partial_note(bound_output(Zstd.decode_full(data, max_out), max_out), "zstd")
+        partial_note(bound_output(Zstd.decode_full(data, max_out), max_out), "zstd", max_out)
       else
         {nil, "compressed: #{enc} — decode unsupported", true}
       end
@@ -273,10 +286,14 @@ module Gori::Proxy::Codec
     # says the decode succeeded, with the captured bytes reachable only through the hex view.
     # Same rule as `Decoder::Codecs#native`: produced nothing AND did not end cleanly is the
     # one shape neither a truncated body nor a legal empty payload can take.
-    private def self.partial_note(result : {Bytes, Bool}, enc : String) : {Bytes?, String?, Bool}
+    #
+    # Output that reached `max_out` stopped at the cap (`read_all` and `bound_output` both stop
+    # exactly there), which is worded as the cap: the stream may well be whole.
+    private def self.partial_note(result : {Bytes, Bool}, enc : String, max_out : Int32) : {Bytes?, String?, Bool}
       bytes, clean = result
       return {nil, "decode error (#{enc}): no output — not a #{enc} stream, or cut before its first byte", false} if bytes.empty? && !clean
-      {bytes, clean ? "decoded: #{enc}" : "decoded: #{enc} (stream truncated)", clean}
+      return {bytes, "decoded: #{enc}", true} if clean
+      {bytes, "decoded: #{enc} #{bytes.size >= max_out ? capped_clause(max_out) : "(stream truncated)"}", false}
     end
 
     # Native decoders drain in fixed-size buffers and may return one buffer past max_out. Keep
