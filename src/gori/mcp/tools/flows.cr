@@ -244,6 +244,10 @@ module Gori
             end
             emit_cut(j, cut)
             emit_ignored_terms(j, dropped)
+            # The CLI's empty listing names this too; an empty page alone reads as "no such traffic".
+            if rows.empty? && (hint = query.try { |q| QL.missing_colon_hint(q) })
+              j.field "query_hint", hint
+            end
             j.field("flows") { raw_rows(j, parts) }
           end
         end)

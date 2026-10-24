@@ -600,17 +600,23 @@ module Gori
     MISSING_COLON = /\A([a-z][a-z0-9_.]*)(>=|<=|!=|>|<|=)([^<>=!].*)\z/i
 
     def self.missing_colon_hint(query : String) : String?
-      FilterAst.terms(FilterAst.parse(query)).each do |term|
-        next if term.negate? || term.source.includes?('"')
-        next unless m = MISSING_COLON.match(term.text)
-        name, op, value = m[1].downcase, m[2], m[3]
-        next unless known_field?(name)
-        meant = case op
-                when "="  then "#{name}:#{value}"
-                when "!=" then "-#{name}:#{value}"
-                else           "#{name}:#{op}#{value}"
-                end
-        return "`#{term.source}` is searched as text — did you mean `#{meant}`?"
+      terms = FilterAst.terms(FilterAst.parse(query)).reject { |t| t.negate? || t.source.includes?('"') }
+      terms.each_index do |i|
+        # `status >= 400` parses as three bare words, so a run of up to three is read back
+        # as the one comparison it was typed as.
+        (1..3).each do |n|
+          run = terms[i, n]
+          break if run.size < n
+          next unless m = MISSING_COLON.match(run.join(&.text))
+          name, op, value = m[1].downcase, m[2], m[3]
+          next unless known_field?(name)
+          meant = case op
+                  when "="  then "#{name}:#{value}"
+                  when "!=" then "-#{name}:#{value}"
+                  else           "#{name}:#{op}#{value}"
+                  end
+          return "`#{run.join(' ', &.source)}` is searched as text — did you mean `#{meant}`?"
+        end
       end
       nil
     end

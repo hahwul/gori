@@ -131,3 +131,16 @@ describe "MCP query tools: an unknown QL field" do
     end
   end
 end
+
+describe "MCP list_history: a comparison typed without its colon" do
+  it "names the colon form on the empty page, spaced or not" do
+    with_store do |store|
+      {"status>=400", "status >= 400"}.each do |query|
+        r = call_tools(store, "list_history", q(query))
+        r.is_error.should be_false
+        JSON.parse(r.text)["query_hint"].as_s.should contain("`status:>=400`")
+      end
+      JSON.parse(call_tools(store, "list_history", q("status:>=400")).text)["query_hint"]?.should be_nil
+    end
+  end
+end
