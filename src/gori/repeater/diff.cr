@@ -73,6 +73,8 @@ module Gori
       end
 
       def self.lines(a : Array(String), b : Array(String)) : Array(DiffLine)
+        cut_a = a.size > MAX_LINES
+        cut_b = b.size > MAX_LINES
         a = a.first(MAX_LINES)
         b = b.first(MAX_LINES)
         m = a.size
@@ -100,7 +102,18 @@ module Gori
         p.times { |k| acc << DiffLine.new(DiffKind::Same, a[k]) }
         emit_middle(acc, a, b, aid, bid, p, m - p - s, n - p - s)
         s.times { |k| acc << DiffLine.new(DiffKind::Same, a[m - s + k]) }
-        acc
+        drop_cut_tail(acc, cut_a, cut_b)
+      end
+
+      # Past the last Same row, a Del is "absent from b's window", not absent from b, when b
+      # was CUT: its twin may sit just past the cut (one inserted line shifts the window), and
+      # diffing the two windows as complete invented it as a deleted line. The same for an Add
+      # when a was cut. Only the tail: before the last Same both sides are still in view.
+      private def self.drop_cut_tail(acc : Array(DiffLine), cut_a : Bool, cut_b : Bool) : Array(DiffLine)
+        return acc unless cut_a || cut_b
+        last_same = acc.rindex(&.kind.same?) || -1
+        tail = acc[(last_same + 1)..].reject { |dl| (cut_b && dl.kind.del?) || (cut_a && dl.kind.add?) }
+        acc[0, last_same + 1] + tail
       end
 
       # Diff the changed middle a[p, mm] vs b[p, nn] (the prefix/suffix already peeled),

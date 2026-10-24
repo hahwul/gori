@@ -38,6 +38,38 @@ describe Gori::Repeater::Diff do
     Diff.truncated?(a, b).should be_true             # ...and this is what says so
   end
 
+  # One line inserted early shifts b's window by one, so a's last in-window line has its twin
+  # just past b's cut. Diffing the windows as complete invented it as a deleted line.
+  it "does not invent a deleted line at the cut" do
+    a = lines(Diff::MAX_LINES + 50, "same")
+    b = a.dup
+    b.insert(10, "INSERTED")
+
+    d = Diff.lines(a, b)
+    d.select(&.kind.del?).should be_empty
+    d.select(&.kind.add?).map(&.text).should eq(["INSERTED"])
+    Diff.change_count(d).should eq(1)
+  end
+
+  it "does not invent an added line when only the ORIGINAL side was cut" do
+    b = lines(Diff::MAX_LINES + 50, "same")
+    a = b.dup
+    a.insert(10, "REMOVED")
+
+    d = Diff.lines(a, b)
+    d.select(&.kind.add?).should be_empty
+    d.select(&.kind.del?).map(&.text).should eq(["REMOVED"])
+  end
+
+  it "drops only the rows the cut leaves unprovable" do
+    a = lines(5, "a") + ["ONLY IN A"]
+    b = lines(5, "a") + lines(Diff::MAX_LINES, "b")
+
+    d = Diff.lines(a, b)
+    d.select(&.kind.del?).map(&.text).should eq([] of String) # b cut: a's tail is unprovable
+    d.count(&.kind.add?).should eq(Diff::MAX_LINES - 5)       # a is whole: b's tail is real
+  end
+
   it "still finds a difference that falls before the cap" do
     a = lines(Diff::MAX_LINES + 50, "same")
     b = a.dup

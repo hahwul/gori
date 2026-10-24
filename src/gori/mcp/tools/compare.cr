@@ -50,7 +50,8 @@ module Gori
         truncated = Repeater::Diff.truncated?(lines_a, lines_b) || !cut_sides.empty?
         raw_diff = Repeater::Diff.lines(lines_a, lines_b)
         change_count = Repeater::Diff.change_count(raw_diff)
-        full_diff, redaction, shown_redacted = redact_diff(raw_diff, detail_a, detail_b, pane, include_sensitive)
+        full_diff, redaction, shown_redacted = redact_diff(raw_diff, detail_a, detail_b, pane, include_sensitive,
+          Repeater::Diff.truncated?(lines_a, lines_b))
         # `context` folds the unchanged runs to counted markers; `changes_only` drops them
         # outright. Folding is the one an agent wants for a long response: it keeps the
         # changes readable in place without claiming the message had nothing else in it.
@@ -197,14 +198,16 @@ module Gori
       # and the third element says so — `changed_lines`/`identical` still describe the bytes.
       private def redact_diff(diff : Array(Repeater::DiffLine), detail_a : Store::FlowDetail,
                               detail_b : Store::FlowDetail, pane : Symbol,
-                              include_sensitive : Bool) : {Array(Repeater::DiffLine), Serialize::RedactionNote?, Bool}
+                              include_sensitive : Bool, cut : Bool) : {Array(Repeater::DiffLine), Serialize::RedactionNote?, Bool}
         return {diff, nil, false} if include_sensitive
         matcher = Redact::Policy.ambient(store)
         shown_a, hits_a, decoded_a = shown_lines(detail_a, pane, matcher)
         shown_b, hits_b, decoded_b = shown_lines(detail_b, pane, matcher)
         note = matcher.try { |m| Serialize::RedactionNote.new(m.profile.name, hits_a + hits_b, 0, decoded_a || decoded_b) }
-        if hits_a + hits_b > 0 || shown_a.size != diff.count { |dl| !dl.kind.add? } ||
-           shown_b.size != diff.count { |dl| !dl.kind.del? }
+        # A CUT diff dropped its unprovable tail (`Diff.drop_cut_tail`), so it may walk fewer
+        # lines than a side shows; the cursors only need never to run past one.
+        if hits_a + hits_b > 0 || !walks?(shown_a.size, diff.count { |dl| !dl.kind.add? }, cut) ||
+           !walks?(shown_b.size, diff.count { |dl| !dl.kind.del? }, cut)
           return {Repeater::Diff.lines(shown_a, shown_b), note, true}
         end
         i = 0
@@ -221,6 +224,10 @@ module Gori
           Repeater::DiffLine.new(dl.kind, text)
         end
         {shown, note, false}
+      end
+
+      private def walks?(shown : Int32, walked : Int32, cut : Bool) : Bool
+        cut ? walked <= shown : walked == shown
       end
 
       # One side's lines as shown: header values redacted, and the pane's body through the

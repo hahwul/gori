@@ -170,3 +170,21 @@ describe "get_flow source_size on a cut body" do
     end
   end
 end
+
+# A diff CUT at MAX_LINES drops the unprovable tail rows (`Diff.drop_cut_tail`), so it walks
+# fewer lines than a side shows. The pairing check used to read that as a redaction reshape and
+# re-diff the redacted copies, flagging `diff_of_redacted_copies` over a diff no profile touched.
+describe "compare_flows over a diff cut at MAX_LINES" do
+  it "invents no deleted line at the cut and keeps the captured-line diff" do
+    with_store do |store|
+      rows = Array.new(Gori::Repeater::Diff::MAX_LINES + 50) { |i| "row #{i}" }
+      a = seed_body(store, rows.join("\n"), truncated: false)
+      b = seed_body(store, rows.dup.insert(10, "INSERTED").join("\n"), truncated: false)
+
+      r = cmp(tools_for(store), %({"flow_id_a":#{a},"flow_id_b":#{b},"changes_only":true}))
+      r["changed_lines"].as_i.should eq(1)
+      r["truncated"].as_bool.should be_true
+      r.as_h.has_key?("diff_of_redacted_copies").should be_false
+    end
+  end
+end
