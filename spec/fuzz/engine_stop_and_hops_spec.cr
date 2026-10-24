@@ -274,7 +274,7 @@ end
 describe "Fuzz redirect hops and the template Host" do
   # Host-header injection sweep: the server builds an absolute Location from the Host it was sent.
   it "keeps a Host-header payload's reflected absolute Location as the row" do
-    reflect = ->(_r : String) { "http://#{hop_host_of(r)}/login".as(String?) }
+    reflect = ->(r : String) { "http://#{hop_host_of(r)}/login".as(String?) }
     sent, results = run_hops(F::Origin.new("http", "10.0.0.5", 80), "GET /reset HTTP/1.1\r\nHost: §a§\r\n\r\n", "evil.test",
       [reflect, ->(_r : String) { nil.as(String?) }])
     sent.size.should eq(1)
