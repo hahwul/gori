@@ -110,7 +110,10 @@ module Gori
           p.on("--tls-preset=NAME", "TLS fingerprint for this whole run: shape every ClientHello like #{Settings::TLS_PRESET_NAMES.join(" | ")} instead of gori's own, without touching the settings.json outbound_tls table. The destination's client certificate, protocol range and permissive flag still apply. An APPROXIMATION of that client's hello, not a byte-exact JA3 match — `gori settings tls-fingerprint HOST --preset NAME` prints what actually goes out") { |v| tls_preset = v }
           p.on("-k", "--insecure-upstream", "Do not verify upstream TLS certificates") { insecure = true }
           p.on("--auto", "Auto-mark every query / cookie / body parameter value") { auto = true }
-          p.on("--mark=TOKEN", "Mark each literal TOKEN occurrence as a position (repeatable)") { |v| marks << v }
+          p.on("--mark=TOKEN", "Mark each literal TOKEN occurrence as a position (repeatable)") do |v|
+            abort "gori run fuzz: --mark needs a non-empty TOKEN" if v.empty?
+            marks << v
+          end
           # A gRPC field is named, not marked. Its wire encoding is not something a `§…§` can
           # usefully wrap — marking an `int32` means marking the octets of a varint, and `-3` is
           # a different set of octets as `int32`, `sint32`, `bool` or an enum — so the position
@@ -589,7 +592,7 @@ module Gori
         end
         plan.mark_matches.each do |(tok, occ)|
           next unless occ > 1
-          STDERR.puts "gori run fuzz: note: --mark #{tok.inspect} matches #{occ} positions (including any in headers)"
+          STDERR.puts "gori run fuzz: note: --mark #{tok.inspect} occurs #{occ} times (including any in headers)"
         end
         # …and the other end of the same count: the token occurs, but only inside — or flush
         # against — `§…§` that `--auto` or an earlier `--mark` had already made, so it added NO

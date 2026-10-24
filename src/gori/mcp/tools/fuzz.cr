@@ -658,7 +658,7 @@ module Gori
           # `verbatim:true` — `send_request`'s word, with its meaning: see `Fuzz::PlanOptions#verbatim?`.
           verbatim: bool_arg(h, "verbatim", false),
           default_target: default_target, target: str(h, "url"),
-          auto_mark: bool_arg(h, "auto", false), marks: string_array_arg(h, "marks"),
+          auto_mark: bool_arg(h, "auto", false), marks: fuzz_marks(h),
           # The schema-known gRPC fields to sweep, as the caller NAMED them.
           grpc_fields: string_array_arg(h, "fields"), http2: use_h2,
           sources: fuzz_sources(h), processors: fuzz_processors(h),
@@ -728,6 +728,13 @@ module Gori
         "#{n} payload set#{n == 1 ? "" : "s"} will not be used: #{remedy}"
       end
 
+      # `marks`, refusing an empty token, which every occurrence check would read as "not found".
+      private def fuzz_marks(h) : Array(String)
+        marks = string_array_arg(h, "marks")
+        raise FuzzArgError.new("'marks' has an empty token — name the literal text to mark") if marks.any?(&.empty?)
+        marks
+      end
+
       # What the `marks` did that the run's count alone does not say, or nil — the CLI's
       # `warn_fuzz_marks` notes, in one field. A token that is not in the request at all used to
       # pass in silence, as did one that swept several spots (the HTTP version, the Host port).
@@ -742,7 +749,8 @@ module Gori
                    "flush against one; those positions are swept, this token added none"
         end
         plan.mark_matches.each do |(tok, occ)|
-          notes << "#{tok.inspect} matches #{occ} positions (including any in the request line and headers)" if occ > 1
+          # Occurrences, not positions: two that touch fold into one (`Fuzz::Plan`).
+          notes << "#{tok.inspect} occurs #{occ} times (including any in the request line and headers)" if occ > 1
         end
         notes.empty? ? nil : notes.join("; ")
       end

@@ -1539,11 +1539,18 @@ describe "MCP fuzz_start — a 'marks' token that made no position" do
       warned.should contain(%("zzz": not found in the request))
       warned.should_not contain(%("b=2"))
       call_json(tools, "fuzz_start", base.merge({"marks" => ["1"]}).to_json)["marks_warning"].as_s
-        .should contain(%("1" matches))
+        .should contain(%("1" occurs))
 
       text, is_error = call_raw(tools, "fuzz_start", base.merge({"marks" => ["zzz"]}).to_json)
       is_error.should be_true
       text.should contain(%(none of 'marks' occurs in the request ("zzz")))
+
+      # A repeated token is one mark, not a shadowed one beside a landed one.
+      (call_json(tools, "fuzz_start", base.merge({"marks" => ["b=2", "b=2"]}).to_json)["marks_warning"]?.try(&.as_s) || "")
+        .should_not contain("added no position")
+      text, is_error = call_raw(tools, "fuzz_start", base.merge({"marks" => [""]}).to_json)
+      is_error.should be_true
+      text.should contain("'marks' has an empty token")
     end
   end
 end

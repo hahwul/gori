@@ -517,7 +517,8 @@ module Gori::Fuzz
       end
 
       shadowed_marks = [] of String
-      mark_matches = options.marks.map do |tok|
+      # Once per token: a repeat was reported both shadowed (by its first copy) and matched.
+      mark_matches = options.marks.uniq.map do |tok|
         text, count, shadowed = wrap_token(text, tok)
         # Across EVERY part. A `--mark` aimed at a value that lives in a frame would otherwise
         # report `{token, 0}` and mark nothing, while the operator watched the flag they typed
