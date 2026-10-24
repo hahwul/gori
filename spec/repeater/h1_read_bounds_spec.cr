@@ -81,6 +81,7 @@ end
 describe "an origin that answers before the request body is written" do
   {false, true}.each do |close_after|
     it "reports its answer (#{close_after ? "then closes" : "then holds the socket"})" do
+      posix_only!("a Windows loopback accepts the whole 32 MiB write, so it never fails")
       port = one_shot_origin do |c|
         c << "HTTP/1.1 413 Payload Too Large\r\nContent-Length: 17\r\nConnection: close\r\n\r\nrequest too large"
         c.flush
@@ -100,6 +101,7 @@ describe "a 408 waiting when a request write fails" do
   # On a parked keep-alive that is the server closing a connection it thought unused, not an
   # answer to this request: it stays the stale case the pool replays.
   it "is not taken as the request's answer" do
+    posix_only!("a Windows loopback accepts the whole 32 MiB write, so it never fails")
     port = one_shot_origin do |c|
       c << "HTTP/1.1 408 Request Timeout\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
       c.flush
