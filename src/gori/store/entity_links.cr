@@ -93,6 +93,22 @@ module Gori
       false
     end
 
+    # Every owner linking this ref, oldest link first: what a delete of the ref silently drops
+    # (the delete cascades its `entity_links` rows, see `reads.cr`), read beforehand so the
+    # reply can name it. The same scan as `ref_linked?`.
+    def link_owners(ref_kind : LinkRefKind, ref_id : Int64) : Array({LinkOwnerKind, Int64})
+      owners = [] of {LinkOwnerKind, Int64}
+      @db.query("SELECT owner_kind, owner_id FROM entity_links WHERE ref_kind = ? AND ref_id = ? " \
+                "ORDER BY created_at, id", ref_kind.label, ref_id) do |rs|
+        rs.each do
+          kind = LinkOwnerKind.parse(rs.read(String))
+          owner_id = rs.read(Int64)
+          owners << {kind, owner_id} if kind
+        end
+      end
+      owners
+    end
+
     # Does the row a link would point at exist? Asked before a link is filed, so a pointer to
     # nothing is refused rather than stored and later listed as stale. Each kind is checked
     # against its own table: a flow id is not a repeater id.

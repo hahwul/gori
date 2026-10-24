@@ -862,9 +862,16 @@ module Gori
         # flow_row is the row-only read; get_flow would materialize both BLOBs to answer
         # "does this exist?" — a 40 MB response would be read and discarded.
         return not_found("no flow with id #{id}") unless store.flow_row(id)
+        owners = store.link_owners(Store::LinkRefKind::Flow, id)
         return busy("flow NOT deleted (store busy or unwritable); it is unchanged") unless store.delete_flow(id)
         @body_chunk_memo = nil # correct either way (content-keyed); this just frees the buffer
-        Result.new({id: id, deleted: true}.to_json)
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "id", id
+            j.field "deleted", true
+            emit_unlinked(j, owners)
+          end
+        end)
       end
 
       # Wipe EVERY captured flow. The TUI puts a danger confirm in front of this; here

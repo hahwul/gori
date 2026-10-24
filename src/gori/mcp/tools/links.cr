@@ -12,6 +12,24 @@ module Gori
       # create_repeater) but had no way to read or remove one, so an agent could attach evidence
       # it could never review or correct. These are the read/unlink halves.
 
+      # `"unlinked":[{owner_kind, owner_id}]` on a delete reply, when the deleted row was linked:
+      # the delete cascades those links away, and an agent that filed the evidence would
+      # otherwise learn it only by listing the issue. `owners` is `Store#link_owners`, read
+      # before the delete. Precedent: delete_evidence's `issue_ids`.
+      private def emit_unlinked(j : JSON::Builder, owners : Array({Store::LinkOwnerKind, Int64})) : Nil
+        return if owners.empty?
+        j.field("unlinked") do
+          j.array do
+            owners.each do |(kind, id)|
+              j.object do
+                j.field "owner_kind", kind.label
+                j.field "owner_id", id
+              end
+            end
+          end
+        end
+      end
+
       @[Tool("list_links")]
       private def list_links(h) : Result
         owner = link_owner(h)

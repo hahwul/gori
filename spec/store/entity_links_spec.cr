@@ -213,4 +213,23 @@ describe "Gori::Store#link_ref_exists?" do
       store.link_ref_exists?(Gori::Store::LinkRefKind::Flow, 99_999_i64).should be_false
     end
   end
+
+  # What a delete of the ref drops: read before it, so the delete's reply can name it.
+  it "lists every owner linking a ref, oldest first, and nothing for an unlinked ref" do
+    with_store do |store|
+      first = store.insert_issue("a", Gori::Store::Severity::Info, nil, nil)
+      second = store.insert_issue("b", Gori::Store::Severity::Info, nil, nil)
+      flow = Gori::Store::LinkRefKind::Flow
+      store.add_link(Gori::Store::LinkOwnerKind::Issue, second, flow, 7_i64)
+      store.add_link(Gori::Store::LinkOwnerKind::Note, 3_i64, flow, 7_i64)
+      store.add_link(Gori::Store::LinkOwnerKind::Issue, first, flow, 7_i64)
+      store.add_link(Gori::Store::LinkOwnerKind::Issue, first, Gori::Store::LinkRefKind::Repeater, 7_i64)
+      store.link_owners(flow, 7_i64).should eq([
+        {Gori::Store::LinkOwnerKind::Issue, second},
+        {Gori::Store::LinkOwnerKind::Note, 3_i64},
+        {Gori::Store::LinkOwnerKind::Issue, first},
+      ])
+      store.link_owners(flow, 8_i64).should be_empty
+    end
+  end
 end

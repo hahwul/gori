@@ -733,6 +733,7 @@ module Gori
         # echoing it: a caller that acted on "tab 6" needs the reply to name the object that
         # was actually destroyed, not `{"success":true}` and a re-listing to find out.
         was = repeater_tui_index(id, ordered)
+        owners = store.link_owners(Store::LinkRefKind::Repeater, id)
 
         return busy("repeater NOT deleted (store busy or unwritable); it is unchanged") unless store.delete_repeater(id)
 
@@ -756,6 +757,7 @@ module Gori
                               "re-read tui_index from get_repeater_context before naming a tab again" if rest.size >= n
             end
             j.field "remaining", rest.size
+            emit_unlinked(j, owners)
           end
         end)
       end
@@ -1060,18 +1062,19 @@ module Gori
             details: JSON.parse({"repeaters" => n, "ids" => targets.map(&.id)}.to_json))
         end
 
-        deleted = [] of {Int64, String?, Int32?}
+        deleted = [] of {Int64, String?, Int32?, Array({Store::LinkOwnerKind, Int64})}
         failed = [] of Int64
         targets.each do |r|
           was = repeater_tui_index(r.id, rows)
+          owners = store.link_owners(Store::LinkRefKind::Repeater, r.id)
           if store.delete_repeater(r.id)
-            deleted << {r.id, r.name, was}
+            deleted << {r.id, r.name, was, owners}
           else
             failed << r.id
           end
         end
 
-        gone = deleted.map { |(id, _, _)| id }.to_set
+        gone = deleted.map { |(id, _, _, _)| id }.to_set
         survivors = rows.reject { |r| gone.includes?(r.id) }
         # Renumber once, after the whole batch: renumbering per delete would make every
         # `was_tui_index` above relative to a different strip.
@@ -1083,11 +1086,12 @@ module Gori
             j.field "deleted_count", deleted.size
             j.field("deleted") do
               j.array do
-                deleted.each do |(id, name, was)|
+                deleted.each do |(id, name, was, owners)|
                   j.object do
                     j.field "id", id
                     j.field "name", name || ""
                     j.field "was_tui_index", was if was
+                    emit_unlinked(j, owners)
                   end
                 end
               end

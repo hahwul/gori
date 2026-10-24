@@ -657,3 +657,36 @@ describe "MCP issue-repeater links over a write that did not commit" do
     end
   end
 end
+
+# Deleting a linked flow or repeater cascades its links away (`reads.cr`); the reply names
+# what went, as delete_evidence's `issue_ids` does.
+describe "MCP delete of a linked flow or repeater" do
+  it "names the owners whose links the delete dropped, and says nothing for an unlinked row" do
+    with_store do |store|
+      tools = tools_for(store)
+      fid = mcp_seed_flow(store, "/linked")
+      bare = mcp_seed_flow(store, "/bare")
+      iid = store.insert_issue("x", Gori::Store::Severity::Info, nil, nil)
+      store.add_link(Gori::Store::LinkOwnerKind::Issue, iid, Gori::Store::LinkRefKind::Flow, fid)
+      store.add_link(Gori::Store::LinkOwnerKind::Note, 5_i64, Gori::Store::LinkRefKind::Flow, fid)
+
+      res = mcp_ok_json(tools, "delete_flow", %({"id":#{fid}}))
+      res["unlinked"].should eq(JSON.parse(%([{"owner_kind":"issue","owner_id":#{iid}},{"owner_kind":"note","owner_id":5}])))
+      store.list_links(Gori::Store::LinkOwnerKind::Issue, iid).should be_empty
+      mcp_ok_json(tools, "delete_flow", %({"id":#{bare}})).as_h.has_key?("unlinked").should be_false
+
+      raw = "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice
+      one = store.insert_repeater("https://acme.test/", raw, false, true, nil, 0)
+      two = store.insert_repeater("https://acme.test/", raw, false, true, nil, 1)
+      three = store.insert_repeater("https://acme.test/", raw, false, true, nil, 2)
+      [one, two].each { |r| store.add_link(Gori::Store::LinkOwnerKind::Issue, iid, Gori::Store::LinkRefKind::Repeater, r) }
+      issue_owner = JSON.parse(%([{"owner_kind":"issue","owner_id":#{iid}}]))
+
+      mcp_ok_json(tools, "delete_repeater", %({"id":#{one}}))["unlinked"].should eq(issue_owner)
+
+      rows = mcp_ok_json(tools, "delete_repeaters", %({"ids":[#{two},#{three}],"confirm":true}))["deleted"].as_a
+      rows.find! { |r| r["id"].as_i64 == two }["unlinked"].should eq(issue_owner)
+      rows.find! { |r| r["id"].as_i64 == three }.as_h.has_key?("unlinked").should be_false
+    end
+  end
+end
