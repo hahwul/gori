@@ -2499,6 +2499,21 @@ describe Gori::Tui::RepeaterView do
       String.new(view.request_bytes).should eq("GET /x HTTP/1.1\r\nHost: h.test\r\n\r\n")
     end
 
+    # The terminator lands in the BUFFER at send prep too, so the row ^R saves (which
+    # `gori run repeater send` and MCP `{repeater_id}` send as written) is the request it sent.
+    it "reflects the head terminator into the editor so the saved row matches the send" do
+      view = RepeaterView.new
+      view.restore("http://h.test", "GET /x HTTP/1.1\r\nHost: h.test\r\n", false, true)
+      view.terminate_head_in_editor
+      view.request_text.should eq("GET /x HTTP/1.1\r\nHost: h.test\n\n")
+      String.new(view.request_bytes).should eq("GET /x HTTP/1.1\r\nHost: h.test\r\n\r\n")
+
+      done = RepeaterView.new
+      done.restore("http://h.test", "GET /x HTTP/1.1\nHost: h.test\n\n", false, true)
+      done.terminate_head_in_editor
+      done.request_text.should eq("GET /x HTTP/1.1\nHost: h.test\n\n") # already terminated: untouched
+    end
+
     it "terminates once, whatever trailing newlines the paste carried" do
       view = RepeaterView.new
       view.restore("http://h.test", "GET /x HTTP/1.1\nHost: h.test\n", false, true)

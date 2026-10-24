@@ -2294,6 +2294,7 @@ module Gori::Tui
       view.commit_chain_pane                        # flush an in-progress CHAIN-pane edit so ^R can't send stale bytes (matches the SEND-chip click)
       view.sync_host_to_target_once                 # ^R defers past exit_target_insert!, so mirror a fresh ^N tab's target into Host here too (one-shot)
       view.downgrade_h2_request_lines(group: false) # a request line pasted from an h2 view can't ride this h1 socket (origins answer 400)
+      view.terminate_head_in_editor                 # the head terminator ^R adds, in the saved row too (headless sends the row as written)
       if view.inflight?                             # one outstanding round-trip per view — don't pile up fibers on ^R mashing
         @host.status("repeater already in flight…") unless quiet
         return false

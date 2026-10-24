@@ -123,6 +123,19 @@ class Gori::Tui::RepeaterView
     terminate_head(raw[0, n])
   end
 
+  # `ensure_head_terminator`'s blank line, written into the BUFFER at send prep (beside
+  # `downgrade_h2_request_lines`), the way auto-CL is reflected: the row ^R saves is then the
+  # request it sends. Otherwise the tab sent a terminated head while the saved text stayed
+  # unterminated, and `gori run repeater send`, MCP `{repeater_id}`, retest steps and macros
+  # sent that row as written and waited on an origin waiting for more headers.
+  def terminate_head_in_editor : Nil
+    return if @req_hex_edit || @grpc_mode || ws_mode? || @decode_kind
+    wire = @editor.wire_text
+    return if has_head_terminator?(text_wire_form(wire))
+    @editor.replace_all("#{wire.rstrip("\r\n")}\n\n", @editor.cursor_offset)
+    @dirty = true
+  end
+
   # Env-expand the LF editor text and normalize to CRLF wire form. Uses
   # `Env.expand_wire` (gsub `/\r?\n/`) — NOT `split('\n').join("\r\n")` — so a `$KEY`
   # whose value itself carries a CRLF isn't doubled into `\r\r\n`, which would corrupt
