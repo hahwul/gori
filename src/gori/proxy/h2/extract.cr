@@ -50,11 +50,16 @@ module Gori::Proxy::H2
       @warned_unscopable = false
       @pending = {} of UInt32 => Pending
       @buffered = 0
+      # END_STREAM of the HEADERS frame that opened the block in flight. It rides only that
+      # frame, while `pre` rides the block's LAST one — a CONTINUATION when the block is split.
+      # One flag, because header blocks never interleave on a connection.
+      @block_ends_stream = false
     end
 
     # Offer a delivered frame to the extract rules. `pre` is the projection the caller already
     # decoded; nil for every frame that is not the end of a header block.
     def observe(frame : Frame::Header, pre : Assembler::HeadBlock?) : Nil
+      @block_ends_stream = frame.end_stream? if frame.frame_type == Frame::Type::Headers
       return collect(frame) if !@pending.empty? && @pending.has_key?(frame.stream_id)
       return unless pre
       return unless @extractor.extracts? # lock-free: nothing configured, nothing decoded
@@ -93,7 +98,7 @@ module Gori::Proxy::H2
     # Whether a body-scoped rule wants this response's body, and it is one that ends.
     private def copies_body?(frame : Frame::Header, ref : Assembler::RequestRef,
                              fields : Array({String, String})) : Bool
-      return false if frame.end_stream? || ref.method == "CONNECT"
+      return false if @block_ends_stream || ref.method == "CONNECT"
       host, _ = Upstream.split_host_port(ref.authority, @port)
       @extractor.extracts_body_for_host?(host) &&
         !Sse.sse?(HeadCodec.pseudo(fields, "content-type"))

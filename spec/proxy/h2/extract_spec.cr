@@ -240,6 +240,21 @@ describe Gori::Proxy::H2::Extract do
     end
   end
 
+  # END_STREAM rides the HEADERS frame and `pre` the block's last one, so a split head that
+  # ends the stream must not wait for a body that never comes.
+  it "binds at once from a bodiless head split across CONTINUATION" do
+    with_bindings do |bindings, _|
+      bindings.add("CSRF", "", Gori::ExtractKind::Regex, "tok=(\\w+)").should be_nil
+      bindings.add("SESSION", "path:/login", Gori::ExtractKind::Cookie, "sid").should be_nil
+      extract, assembler = pipeline(bindings)
+      open_stream(assembler, 1_u32)
+      extract.observe(Frame::Header.new(Frame::Type::Headers.value, Frame::END_STREAM, 1_u32, Bytes.empty), nil)
+      extract.observe(Frame::Header.new(Frame::Type::Continuation.value, Frame::END_HEADERS, 1_u32, Bytes.empty),
+        HeadBlock.new([{":status", "302"}, {"set-cookie", "sid=split; Path=/"}]))
+      bindings.values["SESSION"].should eq "split"
+    end
+  end
+
   it "costs nothing when no extract rule is configured" do
     with_bindings do |bindings, store|
       extract, assembler = pipeline(bindings)
