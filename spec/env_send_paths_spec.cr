@@ -361,6 +361,8 @@ describe "WebSocket draft frames naming an unset $ENV var (#1666)" do
           JSON.parse(%({"repeater_id":#{rid},"messages":["u=$ENV.NOPE"],"allow_unscoped":true})))
         r.is_error.should be_true
         r.text.should contain("unresolved env $ENV.NOPE")
+        r.text.should contain("a WebSocket frame")
+        r.text.should contain("verbatim:true")
       end
     end
   end

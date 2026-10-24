@@ -1343,7 +1343,10 @@ module Gori
           Repeater::WsEngine::OutMsg.new(m.opcode, payload, m.shape, evidence)
         end
       rescue ex : Repeater::PlanError
-        send_plan_error(ex, "messages")
+        # Which bytes named it: only frames reach here (the handshake is its plan's to refuse) —
+        # the call's `messages`, or the session's stored ones when none was given.
+        err("a WebSocket frame: #{send_plan_message(ex)}; verbatim:true sends the frames as written",
+          "INVALID_ARGUMENT", field: "messages")
       end
 
       # The repeater's handshake as a plan, through Layer 1 (scope) and Layer 2 (sandbox), or
@@ -1440,21 +1443,23 @@ module Gori
       # MCP's wording for a builder refusal. Exhaustive on `Reason` so a new builder failure
       # reaches the agent as a coded INVALID_ARGUMENT rather than a bare exception string.
       private def send_plan_error(ex : Repeater::PlanError, field : String) : Result
+        err(send_plan_message(ex), "INVALID_ARGUMENT", field: field)
+      end
+
+      private def send_plan_message(ex : Repeater::PlanError) : String
         detail = ex.detail
-        message =
-          case ex.reason
-          in Repeater::PlanError::Reason::NoRequest         then "the request is empty"
-          in Repeater::PlanError::Reason::NoTarget          then "'url' is required"
-          in Repeater::PlanError::Reason::BadTarget         then "could not parse a target host from #{detail.inspect}"
-          in Repeater::PlanError::Reason::UnsupportedScheme then "unsupported scheme: #{detail} (only http/https)"
-          in Repeater::PlanError::Reason::UnresolvedEnv
-            # The operator is named first: a second-factor secret is better set in gori than
-            # handed to an agent, and a global env var stays out of project exports.
-            ex.mint_refusal.try { |note| "#{note} — ask the operator to set it (a global env var stays out of project exports), or set it with set_env_var, or remove the token" } ||
-              env_unresolved_error(detail)
-          in Repeater::PlanError::Reason::TlsPreset then ex.message || "unknown tls_preset"
-          end
-        err(message, "INVALID_ARGUMENT", field: field)
+        case ex.reason
+        in Repeater::PlanError::Reason::NoRequest         then "the request is empty"
+        in Repeater::PlanError::Reason::NoTarget          then "'url' is required"
+        in Repeater::PlanError::Reason::BadTarget         then "could not parse a target host from #{detail.inspect}"
+        in Repeater::PlanError::Reason::UnsupportedScheme then "unsupported scheme: #{detail} (only http/https)"
+        in Repeater::PlanError::Reason::UnresolvedEnv
+          # The operator is named first: a second-factor secret is better set in gori than
+          # handed to an agent, and a global env var stays out of project exports.
+          ex.mint_refusal.try { |note| "#{note} — ask the operator to set it (a global env var stays out of project exports), or set it with set_env_var, or remove the token" } ||
+            env_unresolved_error(detail)
+        in Repeater::PlanError::Reason::TlsPreset then ex.message || "unknown tls_preset"
+        end
       end
 
       # Either replays a persisted repeater (repeater_id), repeaters a captured flow
