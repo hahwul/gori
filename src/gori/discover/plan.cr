@@ -169,13 +169,20 @@ module Gori::Discover
       # `idle_conns` is the run's concurrency for the reason Fuzz uses it: one worker fiber
       # can hold at most one socket per origin, so a larger pool would only keep dead ones open.
       sender = Sender.new(verify: options.verify?, timeout: config.timeout,
-        http2: options.http2?, sni: options.sni,
+        http2: options.http2?, sni: resolve_sni(options.sni),
         headers: Headers.expand(config.headers), overrides: options.overrides,
         keep_alive: config.keep_alive?, idle_conns: config.concurrency)
       engine = Engine.new(seed, words, sender, config, policy)
       outbound.halt = ->engine.stopped?
       new(engine: engine, seed: seed, host: parts.host,
         policy: policy, config: config, word_count: words.size, sender: sender)
+    end
+
+    # The SNI override expanded as the Repeater plan expands it (`FlowRequest.dial_sni`).
+    private def self.resolve_sni(raw : String?) : String?
+      Repeater::FlowRequest.dial_sni(raw)
+    rescue e : Repeater::FlowRequest::DialTargetError
+      raise PlanError.new(PlanError::Reason::UnresolvedEnv, e.message.to_s, e.detail)
     end
 
     # ONE `Env.expand` over the seed, then the scheme default: `acme.test/admin` means

@@ -244,10 +244,7 @@ class Gori::Tui::RepeaterView
   private def origin_head_text(detail : Store::FlowDetail) : String
     lines = String.new(detail.request_head).split('\n').map(&.rstrip('\r'))
     return "" if lines.empty?
-    parts = lines[0].split(' ')
-    if parts.size == 3 && (parts[1].starts_with?("http://") || parts[1].starts_with?("https://"))
-      lines[0] = "#{parts[0]} #{to_origin(parts[1])} #{parts[2]}"
-    end
+    lines[0] = Repeater::FlowRequest.rewrite_request_line(lines[0]) || lines[0]
     while !lines.empty? && lines.last.empty?
       lines.pop
     end

@@ -178,10 +178,18 @@ class Gori::Tui::RepeaterView
   # than anything typed since. On a draft they are empty either way (`pipeline_live?` and
   # `operator_env_vars` short-circuit on `@evidence`); recording them anyway keeps a later
   # `duplicate_from` or an evidence flip from inheriting a stale baseline.
-  private def seed_draft_baselines : Nil
-    wire = @editor.wire_text
+  private def seed_draft_baselines(wire : String = @editor.wire_text) : Nil
     @evidence_pipeline_seps = pipeline_sep_count_in(wire)
     adopt_evidence_env_seed(wire)
+  end
+
+  # A REOPENED evidence tab's baselines, taken from the capture it was seeded off rather than
+  # the restored row. `restore` can only seed them from the row, so after a project reopen a
+  # `$ENV.X` (or `%%%`) the operator had typed into the capture read as the capture's own and
+  # went out literally — while `gori run repeater send` and MCP `send_request{repeater_id}`
+  # expanded it. The same per-name rule the tab applied before the reopen.
+  def adopt_capture_baselines(detail : Store::FlowDetail) : Nil
+    seed_draft_baselines(origin_form_text(detail)) if @evidence
   end
 
   # Record the SEED BYTES every `$NAME` baseline is derived from, and derive them now — the

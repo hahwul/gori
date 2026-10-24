@@ -3524,6 +3524,7 @@ module Gori::Tui
       # reconcile, a row appearing mid-session — comes through here right after, so this is
       # the one call site. See `RepeaterView#adopt_capture_markers`.
       view.adopt_capture_markers(detail.request_head, detail.request_body)
+      view.adopt_capture_baselines(detail)
     end
 
     private def edit_repeater_request(ev : Termisu::Event::Key, view : RepeaterView) : Bool

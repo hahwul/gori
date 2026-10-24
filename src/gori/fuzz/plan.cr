@@ -633,7 +633,7 @@ module Gori::Fuzz
       # hops, and `calibrate_baseline`, whose nonces are safe but whose CARRIER is this same
       # template rendered with them.
       sender = Sender.new(origin, outbound, http2: options.http2?, verify: options.verify?,
-        sni: options.sni, timeout: config.timeout, overrides: options.overrides,
+        sni: resolve_sni(options.sni), timeout: config.timeout, overrides: options.overrides,
         # Forced OFF for a WebSocket run, silently. One variation is one session on its own
         # socket, which `WsEngine` closes in its own `ensure` — there is nothing for the pool
         # to park. Silently because `keep_alive` DEFAULTS true, so reporting it as ignored
@@ -843,6 +843,13 @@ module Gori::Fuzz
       out << :timeout if config.timeout
       out << :auto_calibrate if config.auto_calibrate?
       out
+    end
+
+    # The SNI override expanded as the Repeater plan expands it (`FlowRequest.dial_sni`).
+    private def self.resolve_sni(raw : String?) : String?
+      Repeater::FlowRequest.dial_sni(raw)
+    rescue e : Repeater::FlowRequest::DialTargetError
+      raise PlanError.new(PlanError::Reason::UnresolvedEnv, e.message.to_s, e.detail)
     end
 
     # The explicit target when it has one, else the seeding flow's. Blank counts as absent

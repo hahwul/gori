@@ -185,35 +185,15 @@ class Gori::Tui::RepeaterView
     Repeater::FlowRequest.build_target(scheme, host, port) # shared with the engine (was duplicated)
   end
 
-  # Rewrites an absolute-form request-line ("GET http://h/p ...") to origin-form
-  # ("GET /p ..."); origin-form requests are left unchanged.
-  # The captured request as editor text, with ONLY the request line rewritten (absolute-form
-  # → origin-form). Everything after the first line is passed through byte for byte.
-  #
-  # It used to split/rstrip/re-join the whole message, which flattened every terminator in
-  # the request — head AND body — before `set_text` ever saw it. That happened at LOAD, so
-  # no amount of care in the send path could have recovered the bytes.
+  # The captured request as editor text: `FlowRequest.build`'s bytes, the seed every headless
+  # surface stores, so only an absolute-form request line is rewritten and a body the capture
+  # cap cut is re-framed to a Content-Length over what is left. Seeding the raw bytes put a
+  # truncated chunked stream on the wire under its chunked head, and the origin waited for a
+  # 0-chunk that no longer exists. A pseudo-header head (`build` refuses it) loads as stored.
   private def origin_form_text(detail : Store::FlowDetail) : String
-    raw = String.new(combine(detail.request_head, detail.request_body))
-    nl = raw.index('\n')
-    first = nl ? raw[0, nl] : raw
-    rest = nl ? raw[nl..] : ""
-    line = first.rstrip('\r')
-    eol = first[line.size..] # the CRs the request line carried — put back verbatim
-    parts = line.split(' ')
-    if parts.size == 3 && (parts[1].starts_with?("http://") || parts[1].starts_with?("https://"))
-      line = "#{parts[0]} #{to_origin(parts[1])} #{parts[2]}"
-    end
-    "#{line}#{eol}#{rest}"
-  end
-
-  private def to_origin(url : String) : String
-    uri = URI.parse(url)
-    path = uri.path
-    path = "/" if path.empty?
-    uri.query ? "#{path}?#{uri.query}" : path
-  rescue
-    url
+    String.new(Repeater::FlowRequest.build(detail).bytes)
+  rescue Repeater::FlowRequest::PseudoHeaderHead
+    String.new(combine(detail.request_head, detail.request_body))
   end
 
   private def combine(head : Bytes, body : Bytes?) : Bytes

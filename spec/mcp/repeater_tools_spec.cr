@@ -76,6 +76,24 @@ describe Gori::MCP::Server do
       end
     end
 
+    # A fronted / vhost-routed capture (SNI != Host) keeps its SNI in the saved session, as
+    # `send_request{flow_id}` already presents it; a caller's own `target` does not inherit it.
+    it "seeds the captured SNI from a flow_id when it differs from the host" do
+      with_store do |store|
+        flow_id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "https", host: "origin.test", port: 443,
+          method: "GET", target: "/x", http_version: "HTTP/1.1",
+          head: "GET /x HTTP/1.1\r\nHost: origin.test\r\n\r\n".to_slice,
+          sni: "front.test", source: Gori::FlowSource::Kind::Proxy))
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_repeater","arguments":{"flow_id":#{flow_id}}}})
+        id = mcp_tool_payload(mcp_drive(store, call)[0])["id"].as_i64
+        store.get_repeater(id).not_nil!.sni.should eq("front.test")
+        own = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"create_repeater","arguments":{"flow_id":#{flow_id},"target":"https://other.test"}}})
+        id = mcp_tool_payload(mcp_drive(store, own)[0])["id"].as_i64
+        store.get_repeater(id).not_nil!.sni.should be_nil
+      end
+    end
+
     it "creates a new repeater from a issue_id" do
       with_store do |store|
         flow_id = mcp_seed_flow(store, "ex.test", "POST", "/submit", 200)

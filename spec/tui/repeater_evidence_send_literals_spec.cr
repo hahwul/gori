@@ -80,4 +80,29 @@ describe "Gori::Tui::RepeaterView#evidence_send_literals" do
       view.evidence_send_literals.should be_empty
     end
   end
+
+  # A REOPENED tab: `restore` reads only the row, so tokens the operator had typed into the
+  # capture read as the capture's own and went out literally, while `gori run repeater send` and
+  # MCP `send_request{repeater_id}` expanded them. The controller hands the capture back
+  # (`seed_repeater_original`), and the baselines are the ones the tab had before the reopen.
+  it "re-derives a reopened tab's baselines from its capture, not the edited row" do
+    with_env_syntax(Gori::Env::Syntax::Namespaced) do
+      saved_vars = Gori::Settings.env_vars
+      saved_project = Gori::Settings.project_env_vars
+      Gori::Settings.env_vars = [{"X", "live"}]
+      Gori::Settings.project_env_vars = [] of {String, String}
+      begin
+        edited = "GET /a?k=$ENV.X&t=$BIND.TOKEN HTTP/1.1\r\nHost: h.test\r\n\r\n"
+        view = Gori::Tui::RepeaterView.new
+        view.restore("https://h.test", edited, false, false, evidence: true)
+        view.adopt_capture_baselines(flow("GET /a HTTP/1.1\r\nHost: h.test\r\n\r\n"))
+        view.evidence?.should be_true
+        view.evidence_send_literals.should_not contain("BIND.TOKEN")
+        String.new(view.request_bytes).should contain("k=live")
+      ensure
+        Gori::Settings.env_vars = saved_vars
+        Gori::Settings.project_env_vars = saved_project
+      end
+    end
+  end
 end

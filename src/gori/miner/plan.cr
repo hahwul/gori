@@ -307,7 +307,7 @@ module Gori::Miner
       # the overlay alone and `HookBackend` applies it BEFORE the hook — the hook signs the slot's
       # identity headers along with everything else.
       sender = Fuzz::Sender.new(origin, outbound, http2: options.http2?, verify: options.verify?,
-        sni: options.sni, timeout: config.timeout, overrides: options.overrides,
+        sni: resolve_sni(options.sni), timeout: config.timeout, overrides: options.overrides,
         keep_alive: config.keep_alive?, idle_conns: config.concurrency,
         evidence: options.evidence?, slot_overlay: hook_argv.nil?, sse: config.sse)
       # The per-request transform hook (#846), when the run has one. Wrapped OUTSIDE the raw
@@ -415,6 +415,13 @@ module Gori::Miner
         "GORI_HOOK"   => "miner",
         "GORI_TARGET" => "#{origin.scheme}://#{origin.host}:#{origin.port}",
       }
+    end
+
+    # The SNI override expanded as the Repeater plan expands it (`FlowRequest.dial_sni`).
+    private def self.resolve_sni(raw : String?) : String?
+      Repeater::FlowRequest.dial_sni(raw)
+    rescue e : Repeater::FlowRequest::DialTargetError
+      raise PlanError.new(PlanError::Reason::UnresolvedEnv, e.message.to_s, e.detail)
     end
 
     # The explicit target when it has one, else the seeding flow's. Blank counts as absent

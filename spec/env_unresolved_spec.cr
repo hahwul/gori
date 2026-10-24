@@ -230,6 +230,40 @@ describe "plan builders no longer refuse an unresolved env token in the head" do
     end
   end
 
+  # The SNI override is a dial value too, so every plan treats it as the Repeater plan does
+  # (`FlowRequest.dial_sni`): expanded, and refused when a token in it resolves to nothing. The
+  # four sweep plans handed `$SNI` to the handshake as five literal characters.
+  it "expands the SNI override on every sweep plan and refuses an unresolved one" do
+    with_vars([{"SNI", "front.test"}]) do
+      raw = "GET /a?q=1 HTTP/1.1\r\nHost: t.test\r\n\r\n"
+      plan = Gori::Miner::Plan.build(Gori::Miner::PlanOptions.new(raw, target: "https://t.test", sni: "$SNI"),
+        ungated_outbound)
+      plan.sender.@sni.should eq("front.test")
+    end
+    with_vars([] of {String, String}) do
+      raw = "GET /a?q=1 HTTP/1.1\r\nHost: t.test\r\n\r\n"
+      sources = [Gori::Fuzz::InlineList.new(["p"])] of Gori::Fuzz::PayloadSource
+      expect_raises(Gori::Fuzz::PlanError) do
+        Gori::Fuzz::Plan.build(Gori::Fuzz::PlanOptions.new(raw.sub("q=1", "q=§1§"), target: "https://t.test",
+          sources: sources, sni: "$NOSNI"), ungated_outbound)
+      end.reason.should eq(Gori::Fuzz::PlanError::Reason::UnresolvedEnv)
+      expect_raises(Gori::Miner::PlanError) do
+        Gori::Miner::Plan.build(Gori::Miner::PlanOptions.new(raw, target: "https://t.test", sni: "$NOSNI"),
+          ungated_outbound)
+      end.reason.should eq(Gori::Miner::PlanError::Reason::UnresolvedEnv)
+      loc = Gori::Sequencer::TokenLoc.new(kind: Gori::Sequencer::ExtractKind::Cookie, selector: "sid")
+      config = Gori::Sequencer::Config.new(mode: Gori::Sequencer::Mode::LiveReplay, token_loc: loc, goal: 10)
+      expect_raises(Gori::Sequencer::PlanError) do
+        Gori::Sequencer::Plan.build(Gori::Sequencer::PlanOptions.new(raw.to_slice, target: "https://t.test",
+          config: config, sni: "$NOSNI"), ungated_outbound)
+      end.reason.should eq(Gori::Sequencer::PlanError::Reason::UnresolvedEnv)
+      expect_raises(Gori::Discover::PlanError) do
+        Gori::Discover::Plan.build(Gori::Discover::PlanOptions.new("https://t.test/", sni: "$NOSNI"),
+          ungated_outbound)
+      end.reason.should eq(Gori::Discover::PlanError::Reason::UnresolvedEnv)
+    end
+  end
+
   # Discover expands TWICE inside its builder — the seed and the custom header values. The
   # SEED keeps its refusal (it is the dial tuple); the HEADERS lost theirs, and that is the
   # example the owner named: `--header 'X-Mongo: $ne'` must reach the wire as written.

@@ -207,7 +207,7 @@ module Gori::Sequencer
       # sample over fresh connections and compare. Worth knowing on h2 specifically, because
       # a sequence seeded from a captured h2 flow selects h2 without being asked.
       sender = Fuzz::Sender.new(origin, outbound, http2: options.http2?, verify: options.verify?,
-        sni: options.sni, timeout: config.timeout, overrides: options.overrides,
+        sni: resolve_sni(options.sni), timeout: config.timeout, overrides: options.overrides,
         evidence: options.evidence?, keep_alive: config.keep_alive?, idle_conns: config.concurrency)
       engine = Engine.new(request, options.http2?, sender, config)
       outbound.halt = ->engine.stopped?
@@ -252,6 +252,13 @@ module Gori::Sequencer
       end
       new(engine: Engine.new(Bytes.empty, false, nil, config), config: config,
         origin: nil, request: Bytes.empty, request_target: "", http2: false)
+    end
+
+    # The SNI override expanded as the Repeater plan expands it (`FlowRequest.dial_sni`).
+    private def self.resolve_sni(raw : String?) : String?
+      Repeater::FlowRequest.dial_sni(raw)
+    rescue e : Repeater::FlowRequest::DialTargetError
+      raise PlanError.new(PlanError::Reason::UnresolvedEnv, e.message.to_s, e.detail)
     end
 
     # The explicit target when it has one, else the seeding flow's. Blank counts as absent

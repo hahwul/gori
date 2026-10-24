@@ -837,7 +837,8 @@ module Gori
           # capture that is legitimately not valid UTF-8 had every such byte rewritten to
           # U+FFFD, with Content-Length resynced to the corruption, before the sweep ran.
           # `render` puts the single `§` back, so the request still replays byte-exact.
-          return {String.new(Fuzz::Template.escape_literal_markers(built.bytes)), built.target, built.http2, true, nil, nil}
+          return {String.new(Fuzz::Template.escape_literal_markers(built.bytes)), built.target, built.http2, true,
+                  Repeater::FlowRequest.seed_sni(detail), nil}
         end
         if rid = optional_int_arg(h, "repeater_id")
           rec = store.get_repeater(rid)

@@ -125,7 +125,9 @@ class Gori::Tui::RepeaterView
     @ws_result = nil
     @ws_lines_cache = nil
     seed_target(detail)
-    @editor.set_text(String.new(detail.request_head))
+    # Origin-form, as the CLI/MCP seeds store it: the editor text IS the saved session, and a
+    # `^V` handshake goes out as a plain request with no `WsEngine` rewrite in between.
+    @editor.set_text(origin_form_text(detail))
     seed_draft_baselines
     seed_ws_out(out_messages)
     @original_lines = [] of String

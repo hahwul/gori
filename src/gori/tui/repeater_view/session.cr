@@ -171,11 +171,13 @@ class Gori::Tui::RepeaterView
     @scroll_req = 0
   end
 
-  # The target field seeded from a captured flow: its origin, no SNI override, caret at the end.
+  # The target field seeded from a captured flow: its origin, caret at the end, and the
+  # captured SNI when it differs from the host (`FlowRequest.seed_sni`) — dropping it sent a
+  # saved session to whatever vhost the bare host answers for.
   private def seed_target(detail : Store::FlowDetail) : Nil
     @target = build_target(detail.row.scheme, detail.row.host, detail.row.port)
     @tcx = @target.size
-    @sni = ""
+    @sni = Repeater::FlowRequest.seed_sni(detail) || ""
     @scx = 0
     @target_field = :url
   end

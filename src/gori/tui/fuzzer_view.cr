@@ -440,6 +440,10 @@ module Gori::Tui
       @http2 = built.http2
       @target = built.target
       @tcx = @target.size
+      # The capture's SNI when it is not just the host (`FlowRequest.seed_sni`): a sweep of a
+      # fronted / vhost-routed flow has to present the name the client did.
+      @sni = Repeater::FlowRequest.seed_sni(detail) || ""
+      @scx = @sni.size
       @target_field = :url
       @editor.set_text(String.new(Fuzz::Template.escape_literal_markers(built.bytes)))
       @evidence = true

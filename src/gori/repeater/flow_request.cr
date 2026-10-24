@@ -332,6 +332,24 @@ module Gori
         {scheme, host, port}
       end
 
+      # A dial SNI override as a plan sends it: refused like a dial target when a token in it
+      # resolves to nothing, else expanded, nil when blank. The Repeater plan always did this;
+      # the Fuzz/Miner/Sequencer/Discover plans handed `$ENV.SNI` to the handshake as text.
+      def self.dial_sni(raw : String?) : String?
+        return nil unless raw
+        refuse_unresolved_dial(raw)
+        Env.expand(raw).presence
+      end
+
+      # The captured SNI as a SAVED session's override: nil when it only repeats the host the
+      # target dials anyway, so a seed carries the one case that matters (SNI != Host: vhost
+      # routing, fronting) without pinning an SNI the operator would then have to clear before
+      # retargeting the tab.
+      def self.seed_sni(detail : Store::FlowDetail) : String?
+        sni = detail.sni.presence
+        sni unless sni.nil? || sni.compare(detail.row.host, case_insensitive: true) == 0
+      end
+
       # {scheme, host, port} parsed back out of a target string (the inverse of
       # build_target; also used when the CLI accepts a hand-supplied --target).
       def self.parse_target(target : String) : {String, String, Int32}

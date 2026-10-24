@@ -2991,3 +2991,44 @@ describe "RepeaterView#request_bytes — an unresolved $ENV token" do
     Gori::Settings.env_vars = saved || [] of {String, String}
   end
 end
+
+# The flow seeds `load`/`load_ws` take, held to what `FlowRequest.build` gives the CLI/MCP seeds.
+private def seed_flow(head : String, body : String? = nil, *, truncated = false, sni : String? = nil) : Gori::Store::FlowDetail
+  row = Gori::Store::FlowRow.new(11_i64, 1_i64, "https", "POST", "h.test", 443, "/a",
+    200, 100_i64, Gori::Store::FlowState::Complete, 50_i64, 1_i64, "text/html")
+  Gori::Store::FlowDetail.new(row, "HTTP/1.1", head.to_slice, body.try(&.to_slice),
+    "HTTP/1.1 200 OK\r\n\r\n".to_slice, nil, request_body_truncated: truncated, sni: sni)
+end
+
+describe "Gori::Tui::RepeaterView flow seeds" do
+  # A chunked stream the capture cap cut has no 0-chunk, so sending it under its chunked head
+  # left the origin waiting; `gori run repeater <id>` and MCP re-frame it to a Content-Length.
+  it "re-frames a truncated chunked body to a Content-Length on load" do
+    view = RepeaterView.new
+    view.load(seed_flow("POST /a HTTP/1.1\r\nHost: h.test\r\nTransfer-Encoding: chunked\r\n\r\n",
+      "5\r\nhel", truncated: true))
+    sent = String.new(view.request_bytes)
+    sent.should_not contain("Transfer-Encoding")
+    sent.should contain("Content-Length: 6\r\n")
+  end
+
+  # The capture's SNI rides a seed only when it is not just the host the target dials.
+  it "seeds the captured SNI when it differs from the host" do
+    view = RepeaterView.new
+    view.load(seed_flow("GET /a HTTP/1.1\r\nHost: h.test\r\n\r\n", sni: "front.test"))
+    view.sni_override.should eq("front.test")
+    same = RepeaterView.new
+    same.load(seed_flow("GET /a HTTP/1.1\r\nHost: h.test\r\n\r\n", sni: "H.test"))
+    same.sni_override.should be_nil
+  end
+
+  # The editor text is the saved session, and `^V` sends it as a plain request with no
+  # `WsEngine` rewrite, so it holds the origin-form line the CLI/MCP seeds store.
+  it "seeds a WebSocket handshake in origin-form" do
+    view = RepeaterView.new
+    view.load_ws(seed_flow("GET http://h.test/chat HTTP/1.1\r\nHost: h.test\r\nUpgrade: websocket\r\n" \
+                           "Connection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" \
+                           "Sec-WebSocket-Version: 13\r\n\r\n"), [] of Gori::Store::WsOutMessage)
+    view.request_text.should start_with("GET /chat HTTP/1.1\r\n")
+  end
+end

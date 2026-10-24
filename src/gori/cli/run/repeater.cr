@@ -939,6 +939,9 @@ module Gori
             if tgt_str.empty?
               bt = built.target
               tgt_str = bt ? bt : ""
+              # The capture's SNI goes with the capture's origin, never onto an operator's
+              # `--target`; an explicit `--sni` wins. MCP `create_repeater{flow_id}` does the same.
+              sni ||= Repeater::FlowRequest.seed_sni(detail)
             end
 
             # A `--curl` request already said which protocol it speaks (`--http2` or not), and with

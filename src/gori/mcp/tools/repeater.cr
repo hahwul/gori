@@ -129,9 +129,6 @@ module Gori
       # `send_repeater --verbatim` can recover it. `keep_request_line` turns it off and
       # `request_line_rewritten` reports it when it fires, matching
       # `gori run repeater --keep-request-line` and `send_request`.
-      #
-      # `built.sni` is deliberately NOT seeded: `gori run repeater create --flow` takes SNI
-      # from the operator's flag alone, and this tool is its MCP twin.
       private def seed_from_flow(flow, flow_id : Int64, keep_request_line : Bool,
                                  seed_ws_messages : Bool) : FlowSeed
         built = Repeater::FlowRequest.build(flow, rewrite_absolute_form: !keep_request_line)
@@ -243,6 +240,7 @@ module Gori
         ws_messages_override = nil.as(Array(Store::WsOutMessage)?)
         rewrote_request_line = false
         notice_rows_dropped = 0
+        flow_sni = nil.as(String?)
 
         if flow_id
           flow = store.get_flow(flow_id)
@@ -250,7 +248,12 @@ module Gori
 
           seed = seed_from_flow(flow, flow_id, keep_request_line,
             seed_ws_messages: !present?(h, "ws_out_messages"))
-          target = seed.target if target.nil? || target.empty?
+          if target.nil? || target.empty?
+            target = seed.target
+            # The capture's SNI goes with the capture's origin, never onto a caller's `target`.
+            # Same default `gori run repeater create --flow` takes; an explicit `sni` wins.
+            flow_sni = Repeater::FlowRequest.seed_sni(flow)
+          end
           if request.nil? || request.empty?
             request = seed.request
             # Only when the SEEDED bytes are the ones being stored: an explicit `request`
@@ -282,7 +285,7 @@ module Gori
           return err("invalid 'target': #{why}", "INVALID_ARGUMENT", field: "target")
         end
 
-        sni = str(h, "sni")
+        sni = str(h, "sni") || flow_sni
 
         position = int(h, "position")
         if position.nil?
