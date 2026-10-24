@@ -1752,36 +1752,43 @@ module Gori
           "carries #{Rules.and_list(classes)} and would forge a message boundary in a header " \
           "(the value is still bound — a body-scoped rule can carry it)")
       in Refusal::BareSpelling
-        ns = refused.ns || Env::Namespace::Env
-        bare = Env.spell(refused.key, ns, Env::Syntax::Bare)
-        # The remedy is the SPELLING, so the message carries both of them: the one that resolves,
-        # and the escape for an operator who really did mean those bytes as text.
-        #
-        # A PIPE rule's `replacement` is an argv, not text spliced into a message, and the names an
-        # operator writes into one are overwhelmingly shell-shaped — `$HOME`, `$PATH`, `$TMPDIR`.
-        # There is no shell here (`ProcessHook.parse_argv` tokenizes and `pipe_argv` resolves per
-        # element), so gori cannot know which was meant; prescribing the re-spelling as THE fix told
-        # an operator to inject a gori variable where they had written a shell one. Both, with the
-        # escape named first for that kind of rule.
-        remedy =
-          if rule.op.pipe?
-            "this is a command argv and there is no shell here — escape it as " \
-            "#{Env.spell_escaped(refused.key, ns, Env::Syntax::Bare)} if the literal " \
-            "#{bare} is what you meant, or write #{Env.spell(refused.key, ns)} to inject " \
-            "gori's value"
-          else
-            "write #{Env.spell(refused.key, ns)} to inject the value, or " \
-            "#{Env.spell_escaped(refused.key, ns, Env::Syntax::Bare)} to inject the text"
-          end
-        @store.insert_event("bindings", "bare_spelling", "warn",
-          "rewrite rule #{label.inspect} not applied: " \
-          "#{bare} is the bare spelling and this install reads " \
-          "#{EnvMigration.spelling(Env::Syntax::Namespaced)} — #{remedy}")
+        report_bare_spelling(rule, label, refused)
       in Refusal::NotJson
         @store.insert_event("rewriter", "json_value_refused", "warn",
           "rewrite rule #{label.inspect} not applied: its value is not one JSON value once " \
           "its references resolve (a bound string goes inside quotes: \"$BIND.NAME\")")
       end
+    end
+
+    # `report_refused`'s BareSpelling sentence.
+    private def report_bare_spelling(rule : Store::MatchRule, label : String, refused : Refused) : Nil
+      ns = refused.ns || Env::Namespace::Env
+      bare = Env.spell(refused.key, ns, Env::Syntax::Bare)
+      # The remedy is the SPELLING, so the message carries both of them: the one that resolves,
+      # and the escape for an operator who really did mean those bytes as text.
+      #
+      # A PIPE rule's `replacement` is an argv, not text spliced into a message, and the names an
+      # operator writes into one are overwhelmingly shell-shaped — `$HOME`, `$PATH`, `$TMPDIR`.
+      # There is no shell here (`ProcessHook.parse_argv` tokenizes and `pipe_argv` resolves per
+      # element), so gori cannot know which was meant; prescribing the re-spelling as THE fix told
+      # an operator to inject a gori variable where they had written a shell one. Both, with the
+      # escape named first for that kind of rule.
+      remedy =
+        if rule.op.pipe?
+          "this is a command argv and there is no shell here — escape it as " \
+          "#{Env.spell_escaped(refused.key, ns, Env::Syntax::Bare)} if the literal " \
+          "#{bare} is what you meant, or write #{Env.spell(refused.key, ns)} to inject " \
+          "gori's value"
+        else
+          "write #{Env.spell(refused.key, ns)} to inject the value, or " \
+          "#{Env.spell_escaped(refused.key, ns, Env::Syntax::Bare)} to inject the text"
+        end
+      # A disabled writer's name (`Layer#withheld`): the re-spelling alone would be refused again.
+      disabled = ns.bind? && Env.withheld_bindings.includes?(refused.key) ? "; its extract rule is disabled, so enable it too" : ""
+      @store.insert_event("bindings", "bare_spelling", "warn",
+        "rewrite rule #{label.inspect} not applied: " \
+        "#{bare} is the bare spelling and this install reads " \
+        "#{EnvMigration.spelling(Env::Syntax::Namespaced)} — #{remedy}#{disabled}")
     end
 
     # `report_refused`'s Unbound sentence: a declared name with no value yet, or a name whose

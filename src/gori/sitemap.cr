@@ -421,6 +421,9 @@ module Gori
 
     # `templated_hit` at a `{expr}` segment: the first captured child it names that the rest of
     # the reference also reaches.
+    # ponytail: scans `node`'s children per TEMPLATED reference (O(children × templated refs) a
+    # reload — the shape `captured_variant` below removed for query variants); index children by
+    # segment shape if a reload under tens of thousands of ids shows it.
     private def self.expr_hit(node : Node, segments : Array(String), i : Int32,
                               variants : Hash(UInt64, Hash(String, Node))) : Node?
       seg = segments[i]

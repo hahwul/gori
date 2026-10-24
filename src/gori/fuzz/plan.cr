@@ -494,8 +494,9 @@ module Gori::Fuzz
       # frame the operator typed (`--message`, MCP `messages`) resolves its `$KEY`, a CAPTURED
       # frame does not. `Env.expand`, not `expand_wire` — a frame has no head, so there is no
       # LF→CRLF promotion to make and nothing in it is a message boundary.
-      # A typed frame takes the head's #1666 refusal too. A BINARY frame is never expanded, as on
-      # every other WebSocket send path (`send_websocket`, `gori run repeater send`, the TUI).
+      # A typed frame takes the head's #1666 refusal too. A BINARY frame takes no `$ENV` pass, as
+      # on the Repeater's frame paths (`send_websocket`, `gori run repeater send`, the TUI); the send
+      # seam's binding pass is a separate step and still sees it.
       ws_texts = options.ws_messages.try(&.map do |m|
         next m.payload if m.evidence || options.verbatim? || m.opcode != Proxy::WS::OP_TEXT.to_i
         if detail = Env.unresolved_env(m.payload)

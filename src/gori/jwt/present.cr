@@ -117,8 +117,6 @@ module Gori
       end
     end
 
-    # header_json/payload_json return PRETTY JSON; compact it so the emitted object is a
-    # single clean line (valid either way — this is just tidier).
     # Why a 2/3-segment token's header or payload came back null, or nil when both decoded: a
     # null with no reason reads as "this token has no claims". A pasted `Authorization` value
     # is the common cause, so its `Bearer ` prefix is named.
@@ -130,6 +128,8 @@ module Gori
       note + " — the token starts with a `Bearer ` prefix; pass only the part after it"
     end
 
+    # header_json/payload_json return PRETTY JSON; compact it so the emitted object is a
+    # single clean line (valid either way — this is just tidier).
     private def segment_field(j : JSON::Builder, name : String, seg_json : String) : Nil
       j.field(name) { seg_json.empty? ? j.null : j.raw(RawJson.reformat(seg_json)) }
     end

@@ -172,6 +172,7 @@ describe "Rules#substitute — namespaced" do
           Gori::Store::RuleTarget::Request, "acme.test").should_not contain("X-Auth")
         ev = store.events_after(0, 50).find { |e| e.kind == "bare_spelling" }.not_nil!
         ev.message.should contain("write $BIND.SESSION to inject the value")
+        ev.message.should contain("its extract rule is disabled")
       end
     end
   end
