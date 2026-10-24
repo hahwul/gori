@@ -8,8 +8,8 @@ require "json"
 # other CLI specs use).
 module Gori::CLI::Run
   def self.collect_sitemap_for_spec(store : Gori::Store, limit : Int32, in_scope : Bool = false,
-                                    untested : Bool = false) : {Array(Gori::Sitemap::Node), Bool}
-    collect_sitemap(store, Gori::QL::EMPTY, limit, in_scope, true, true, untested: untested)
+                                    untested : Bool = false, js_refs : Bool = false) : {Array(Gori::Sitemap::Node), Bool}
+    collect_sitemap(store, Gori::QL::EMPTY, limit, in_scope, true, true, untested: untested, js_refs: js_refs)
   end
 
   def self.sitemap_truncation_notice_for_spec(truncated : Bool, limit : Int32) : String?
@@ -451,6 +451,31 @@ describe "gori run sitemap — coverage" do
 
       hosts, _ = Gori::CLI::Run.collect_sitemap_for_spec(store, 100, untested: true)
       Gori::CLI::Output.sitemap_paths(hosts).should eq("GET  https://acme.test/b\n")
+    end
+  end
+
+  it "does not regrow a tested path as unrequested from a JavaScript reference under --untested" do
+    sitemap_store do |store|
+      store.insert_flow(sitemap_captured("acme.test", "/api/a"))
+      store.insert_flow(sitemap_captured("acme.test", "/api/b"))
+      js = store.insert_flow(sitemap_captured("acme.test", "/app.js"))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: js, status: 200, head: "HTTP/1.1 200 OK\r\nContent-Type: application/javascript\r\n\r\n".to_slice,
+        body: %(fetch("/api/a");fetch("/api/c")).to_slice, content_type: "application/javascript"))
+      store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_000_i64, scheme: "https", host: "acme.test", port: 443,
+        method: "GET", target: "/api/a", http_version: "HTTP/1.1",
+        head: "GET /api/a HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice,
+        source: Gori::FlowSource::Kind::Repeater))
+      store.flush
+      Gori::JsRefs.scan(store)
+
+      hosts, _ = Gori::CLI::Run.collect_sitemap_for_spec(store, 100, untested: true, js_refs: true)
+      paths = [] of String
+      hosts.each { |h| Gori::Sitemap.post_order(h) { |n| paths << n.path } }
+      paths.should contain("/api/b")
+      paths.should contain("/api/c")
+      paths.should_not contain("/api/a")
     end
   end
 end

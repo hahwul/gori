@@ -268,13 +268,22 @@ module Gori
         truncated = entries.size >= limit
         coverage = Sitemap::Coverage.load(store)
         # Per entry, before the build, so a node keeps only its untested methods.
-        entries.reject! { |e| coverage.touched?(e.scheme, e.host, e.port, e.method, e.target) } if untested
+        tested = Set(JsRefs::OriginPath).new
+        if untested
+          entries.reject! do |e|
+            coverage.touched?(e.scheme, e.host, e.port, e.method, e.target).tap do |hit|
+              tested << untested_key(e.scheme, e.host, e.port, e.target) if hit
+            end
+          end
+          # A path some method still leaves untested keeps its node, so its references stay.
+          entries.each { |e| tested.delete(untested_key(e.scheme, e.host, e.port, e.target)) }
+        end
         hosts = Sitemap.build(entries)
         # Right after the build, before tags, as SitemapView#apply_reload does, and not under a
         # query (a reference is not a flow the query can judge — `JsRefs.attach!`). --in-scope
         # below then drops a host's references with the host.
         scope = Scope.load(store) if js_refs || in_scope
-        attach_sitemap_js_refs(store, hosts, scope, narrowed) if js_refs
+        attach_sitemap_js_refs(store, hosts, scope, narrowed, tested) if js_refs
         Sitemap.stamp_tags!(hosts, store.sitemap_tags)
         Sitemap.filter_by_tags!(hosts, tags.positives, tags.negatives) if tags
         if in_scope && scope
@@ -301,7 +310,7 @@ module Gori
       # not under a query (a reference is not a flow the query can match), and not before any
       # scan. Split out of `collect_sitemap` for the complexity bar.
       private def self.attach_sitemap_js_refs(store : Store, hosts : Array(Sitemap::Node), scope : Scope?,
-                                              narrowed : Bool) : Nil
+                                              narrowed : Bool, tested : Set(JsRefs::OriginPath)) : Nil
         if narrowed
           STDERR.puts "gori run sitemap: --js-refs draws nothing under a query — a JavaScript reference is not a flow the query can match"
           return
@@ -311,7 +320,14 @@ module Gori
         end
         nodes, capped = store.js_ref_nodes
         STDERR.puts "gori run sitemap: --js-refs read the first #{Store::SITEMAP_MAX} referenced endpoints only" if capped
+        # `--untested` pruned these paths as tested; attached, a reference would regrow one and
+        # call it never requested.
+        nodes = nodes.reject { |r| tested.includes?(untested_key(r.scheme, r.host, r.port, r.path)) } unless tested.empty?
         JsRefs.attach!(hosts, nodes, scope, lens: false)
+      end
+
+      private def self.untested_key(scheme : String, host : String, port : Int32, target : String) : JsRefs::OriginPath
+        {scheme.downcase, host.downcase, port, Sitemap::Coverage.path_of(target)}
       end
 
       # The sentence for a tree built off a capped read, or nil when the read was complete.
