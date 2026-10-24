@@ -3184,6 +3184,24 @@ describe "Gori::Tui::HistoryView marks" do
     end
   end
 
+  # `gori run show --format curl|…` warns on stderr that a capped body is re-sent SHORT; the
+  # picker heading is where the TUI says it, before the clipboard.
+  it "marks the copy heading when a request body was cut at the capture cap" do
+    with_store do |store|
+      cut = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+        method: "POST", target: "/u", http_version: "HTTP/1.1",
+        head: "POST /u HTTP/1.1\r\nHost: h.test\r\nContent-Length: 9\r\n\r\n".to_slice,
+        body: "abc".to_slice, body_truncated: true, source: Gori::FlowSource::Kind::Proxy))
+      whole = add_flow(store, "GET", "/a", 200)
+      view = HistoryView.new
+      view.reload(store)
+      view.list_copy_as_menu(store, [cut])[0].should eq("COPY REQUEST AS · BODY TRUNCATED")
+      view.list_copy_as_menu(store, [cut, whole])[0].should eq("COPY 2 FLOWS AS · BODY TRUNCATED")
+      view.list_copy_as_menu(store, [whole])[0].should eq("COPY REQUEST AS")
+    end
+  end
+
   # The exchange, which neither raw variant carries alone: request then response, both verbatim.
   it "offers the req+res pair for one flow and per-flow pairs for a set" do
     with_store do |store|

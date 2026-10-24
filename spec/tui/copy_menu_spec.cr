@@ -20,7 +20,7 @@ describe Gori::Tui::CopyMenu do
            "Host: example.com\r\n" \
            "Content-Type: application/json\r\n" \
            "Cookie: sid=abc; theme=dark\r\n" \
-           "Content-Length: 21\r\n" \
+           "Content-Length: 14\r\n" \
            "\r\n" \
            "{\"user\":\"neo\"}"
     target = "https://example.com"

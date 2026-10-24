@@ -1,4 +1,5 @@
 require "../url"
+require "../env"
 require "../proxy/h2/head_codec"
 require "../proxy/codec/content_decode"
 require "./escape"
@@ -60,10 +61,25 @@ module Gori
         method, req_target, version = parse_request_line(request_line)
         url = resolve_url(req_target, target, header_lines)
         return nil if url.empty?
-        # A target no URL can carry — a raw `#` (the URL parser cuts the fragment, query and all)
-        # or the asterisk form — goes out verbatim through curl's own override.
-        verbatim = req_target if req_target == "*" || (req_target.includes?('#') && !Gori::Url.absolute_form?(req_target))
-        command(method, url, header_lines, body, version, verbatim)
+        # A target no URL can carry goes out verbatim through curl's own override: a raw `#` (the
+        # URL parser cuts the fragment, query and all), and anything that does not open with `/`
+        # — the asterisk form, `?x=1`, an authority-form `h:443` — which curl would otherwise
+        # send as the URL's path (`GET ?x=1` came out `GET /?x=1`). An absolute-form target stays
+        # the URL, and so goes out in origin-form the way gori's own forward does; the command
+        # says so (`absolute_form_note`).
+        absolute = Gori::Url.absolute_form?(req_target)
+        verbatim = req_target if !absolute && !req_target.empty? &&
+                                 (!req_target.starts_with?('/') || req_target.includes?('#'))
+        command(method, url, header_lines, body, version, verbatim, absolute ? req_target : nil)
+      end
+
+      # The note for an absolute-form request line, which the command sends in origin-form: curl
+      # writes the URL's path. For a forward-proxy capture that is what gori itself sent upstream;
+      # for a hand-authored absolute-form probe it is not the request, so say how to send it.
+      private def self.absolute_form_note(req_target : String) : String
+        "# request-target sent in origin-form: the capture's line names the absolute-form " \
+        "#{Escape.comment(req_target)}, and curl writes the URL's path instead. Add " \
+        "--request-target with that target to send it as captured"
       end
 
       # A copy-pasteable `curl` invocation reproducing the request. URL first (browser
@@ -84,7 +100,8 @@ module Gori
       # second one IN THE OPERATOR'S SHELL the moment they pasted what gori handed them, which
       # is the one place a hostile capture could aim this command. Quoted like the rest now.
       def self.command(method : String, url : String, header_lines : Array(String),
-                       body : String, version : String = "", request_target : String? = nil) : String
+                       body : String, version : String = "", request_target : String? = nil,
+                       absolute_target : String? = nil) : String
         # FIRST, and a refusal rather than a note: the URL is the one argument the command IS.
         # There is no curl line without it and no `-X`-style fallback to fall back to, so a NUL
         # in it means there is nothing runnable to hand over — see `nul_url_note`.
@@ -98,15 +115,36 @@ module Gori
         notes = [] of String
         # The stored body is WIRE bytes. curl frames `--data-raw` itself, so the chunk framing
         # has to come off with the coding that declared it.
+        #
+        # Header names are compared EXACTLY (`exact_name`): `Content-Length : 5` is not curl's
+        # Content-Length, nor the framing one a strict origin reads, so it is sent as captured
+        # rather than treated as framing.
         pairs = [] of {String, String}
-        each_header(header_lines) { |n, v| pairs << {n, v} }
+        each_header(header_lines) { |n, v, raw| pairs << {exact_name(n, raw), v} }
         entity, transfer_encoding = unchunk(transfer_codings(pairs), body, notes)
+        cl_count = pairs.count { |(n, _)| n.downcase == "content-length" }
+        # curl frames `--data-raw` ONE way. A capture that framed its body both ways (the CL.TE
+        # desync shape) cannot be sent by it, so the de-chunked command drops the Content-Length
+        # and says so, instead of quietly becoming an ordinary request.
+        framed_twice = !transfer_encoding.nil? && cl_count > 0
+        if framed_twice
+          notes << "# Content-Length not sent: the capture carries both Content-Length and " \
+                   "Transfer-Encoding: chunked, a framing curl cannot produce — it frames the body " \
+                   "one way. --format raw has the wire bytes"
+        end
         parts = ["curl #{shell_quote(Escape.percent_encode_non_ascii(url))}"]
         parts << "--globoff" if globbed?(url)
         parts << "--path-as-is" if dot_segments?(url)
         request_target.try { |t| parts << "--request-target #{shell_quote(t)}" }
-        if flag = version_flag(version, url)
-          parts << flag
+        absolute_target.try { |t| notes << absolute_form_note(t) }
+        flag = version_flag(version, url)
+        parts << flag if flag
+        # curl writes the version token itself, and only the ones it speaks, so `HTTP/1.2`,
+        # `HTTP/0.9` or a lowercase `http/1.1` went out in curl's own spelling without a word.
+        unless version.empty? || version.in?("HTTP/1.1", "HTTP/1.0", "HTTP/2")
+          sent = flag ? (flag == "--http1.0" ? "HTTP/1.0" : "HTTP/2") : "HTTP/1.1"
+          notes << "# version #{Escape.comment(version)} sent as #{sent}: curl writes the request " \
+                   "line's version itself. --format raw has the captured line"
         end
         # Emit -X unless it's a plain bodyless GET (curl's default). A GET *with* a body
         # still needs -X GET, else curl silently promotes the request to POST.
@@ -122,18 +160,34 @@ module Gori
           end
         end
         te_written = false
-        content_type = false
-        each_header(header_lines) do |name, value|
+        host_seen = false
+        extra_hosts = 0
+        each_header(header_lines) do |field, value, raw|
+          name = exact_name(field, raw)
           down = name.downcase
-          content_type = true if down == "content-type"
-          # curl derives the length from `--data-raw`, and sends NONE for a bodiless POST, which
-          # a server that requires one answers 411. A captured `Content-Length: 0` stays.
-          next if down == "content-length" && !(entity.empty? && value.strip == "0" && method != "GET" && method != "HEAD")
+          # curl derives the length from `--data-raw`, so a single Content-Length that AGREES
+          # with the entity is left to it — except a `Content-Length: 0` on a bodiless non-GET,
+          # since curl sends NONE there and a server that requires one answers 411. One that
+          # disagrees with the body, or repeats, is the request (a CL desync probe), and a custom
+          # `-H` replaces curl's own (measured, curl 8.7.1), so it rides as captured.
+          if down == "content-length"
+            next if framed_twice
+            next if cl_count == 1 && value == entity.bytesize.to_s &&
+                    !(entity.empty? && method != "GET" && method != "HEAD")
+          end
           next if MARKER_HEADERS.includes?(down) || PROXY_ONLY_HEADERS.includes?(down)
           # curl derives Host FROM THE URL — which is the captured header only when the capture's
           # Host IS the URL's authority. When it is not, that disagreement is the request (a Host
-          # header injection test is nothing else), so it has to ride on the command.
-          next if down == "host" && host_is_url_authority?(value, url)
+          # header injection test is nothing else), so it has to ride on the command. curl sends
+          # only the FIRST `-H Host` (measured, curl 8.7.1), so a repeated Host is named, not sent.
+          if down == "host"
+            if host_seen
+              extra_hosts += 1
+              next
+            end
+            host_seen = true
+            next if host_is_url_authority?(value, url)
+          end
           if down == "transfer-encoding" && (te = transfer_encoding)
             next if te_written # the peeled list is emitted once, at the first TE line
             te_written = true
@@ -145,8 +199,20 @@ module Gori
             notes << note
             next
           end
-          parts << "-H #{shell_quote(header_item(name, value))}"
+          # The captured LINE when there is one: curl sends a `-H` verbatim, so the operator's
+          # spacing (`X-A:   v  `, `X-B :v`) survives. A folded field has no one line to send.
+          parts << "-H #{shell_quote(raw && !value.empty? ? raw : header_item(field, value))}"
         end
+        if extra_hosts > 0
+          notes << "# #{extra_hosts} more Host line#{extra_hosts == 1 ? "" : "s"} not sent: curl " \
+                   "sends one Host header. --format raw has them all"
+        end
+        # curl adds `User-Agent: curl/…` and `Accept: */*` of its own, so a capture that had
+        # neither came out of the command with both. `-H 'Name:'` is curl's "send none".
+        {"user-agent" => "User-Agent:", "accept" => "Accept:"}.each do |down, none|
+          parts << "-H #{shell_quote(none)}" unless pairs.any? { |(n, _)| n.downcase == down }
+        end
+        content_type = pairs.any? { |(n, _)| n.downcase == "content-type" }
         # curl gives a `--data-raw` body a `Content-Type: application/x-www-form-urlencoded` of
         # its own when the command names none — measured, curl 8.7.1 — so a capture that sent a
         # body with NO Content-Type came out of the command with one. `-H 'Content-Type:'` is
@@ -251,11 +317,37 @@ module Gori
         end
         cut = complete ? "" : " That stream never reached its terminating 0-chunk, so the " \
                               "capture itself is cut."
-        notes << "# body de-chunked: --data-raw carries the #{entity.bytesize}-byte entity, not " \
-                 "the #{wire.size} chunk-framed bytes of the capture — curl frames --data-raw " \
+        # Not "--data-raw carries…": an empty entity puts no --data-raw on the line, and a NUL
+        # one is omitted (`data_argument`).
+        notes << "# body de-chunked: the command sends the #{entity.bytesize}-byte entity, not " \
+                 "the #{wire.size} chunk-framed bytes of the capture — curl frames the body " \
                  "itself, and sending the wire bytes under a chunked coding frames them twice." \
                  "#{cut} --format raw has the wire bytes"
+        if tail = chunked_tail(wire)
+          notes << "# #{tail} bytes after the terminating 0-chunk not sent (trailer fields, or " \
+                   "bytes past the chunked body): curl ends the body it frames at its own " \
+                   "0-chunk. --format raw has them"
+        end
         {entity, codings[0, codings.size - 1].join(", ")}
+      end
+
+      # How many bytes follow a complete chunked body's 0-chunk line beyond the blank line that
+      # ends it, or nil when there are none. `trailer_offset` is gated on a head declaring
+      # chunked; `unchunk` has already established that, so a one-line head stands in for it.
+      private CHUNKED_HEAD = "Transfer-Encoding: chunked".to_slice
+
+      private def self.chunked_tail(wire : Bytes) : Int32?
+        off = Proxy::Codec::ContentDecode.trailer_offset(CHUNKED_HEAD, wire) || return nil
+        rest = wire[off..]
+        rest.empty? || rest == "\r\n".to_slice || rest == "\n".to_slice ? nil : rest.size
+      end
+
+      # The field name exactly as captured — the bytes before the colon, unstripped — for an
+      # unfolded field (`each_header`'s `raw`), else the stripped name a folded field has.
+      # `Content-Length : 5` is then not Content-Length: neither curl (whose `-H` override test
+      # wants the colon right after the name) nor a strict origin reads it as one.
+      private def self.exact_name(name : String, raw : String?) : String
+        raw ? raw.partition(':')[0] : name
       end
 
       # Every Transfer-Encoding coding on the request, in wire order, lowercased. Across ALL
@@ -386,16 +478,15 @@ module Gori
 
       # --- the pure request primitives, shared with Tui::CopyMenu -------------------------
 
-      # Split an HTTP message into {head, body} on the first blank line — CRLF wire
-      # form first, bare-LF (an editor snapshot) as a fallback.
+      # Split an HTTP message into {head, body} on the EARLIEST blank line, in whichever of the
+      # three spellings the send path accepts (`Env.head_body_separator`). Preferring a CRLFCRLF
+      # anywhere over an earlier bare-LF one moved the body of an LF-framed head that carries a
+      # CRLFCRLF of its own into the headers. Byte offsets, so a non-UTF-8 head splits where
+      # its bytes do.
       def self.split_message(text : String) : {String, String}
-        if idx = text.index("\r\n\r\n")
-          {text[0, idx], text[(idx + 4)..]}
-        elsif idx = text.index("\n\n")
-          {text[0, idx], text[(idx + 2)..]}
-        else
-          {text, ""}
-        end
+        bytes = text.to_slice
+        off, width = Gori::Env.head_body_separator(bytes) || return {text, ""}
+        {String.new(bytes[0, off]), String.new(bytes[(off + width)..])}
       end
 
       # `head` split into lines on LF, each with one trailing CR dropped — what `split(/\r?\n/)`
@@ -544,9 +635,13 @@ module Gori
       # the tool an operator points at header-parsing differences; the command it hands them must
       # not have one of its own. Folded here into `part1 part2` — obs-fold replaced by one SP,
       # which is what a recipient that accepts one is required to do.
-      def self.each_header(header_lines : Array(String), & : String, String ->) : Nil
+      #
+      # The third value is the field's line exactly as captured, or nil when a continuation was
+      # folded into it — what `command` sends as `-H` and reads the exact name from.
+      def self.each_header(header_lines : Array(String), & : String, String, String? ->) : Nil
         name = nil.as(String?)
         value = ""
+        raw = nil.as(String?)
         header_lines.each do |line|
           if fold_line?(line)
             # An ORPHAN fold — a continuation with no field above it (a head that starts with
@@ -555,11 +650,12 @@ module Gori
             if name
               cont = line.strip
               value = value.empty? ? cont : "#{value} #{cont}" unless cont.empty?
+              raw = nil
             end
             next
           end
           if n = name
-            yield n, value
+            yield n, value, raw
             name = nil
           end
           fname, sep, fvalue = line.partition(":")
@@ -568,9 +664,10 @@ module Gori
           next if fname.empty?
           name = fname
           value = fvalue.strip
+          raw = line
         end
         if n = name
-          yield n, value
+          yield n, value, raw
         end
       end
 

@@ -61,7 +61,7 @@ describe Gori::Export::Curl do
         cmd = curl_of("GET#{tail} /a HTTP/1.1\r\nHost: h\r\n\r\n", "http://h")
         cmd.should contain("-X 'GET#{tail}'")
         # …and nothing outside the quotes for a shell to read as syntax.
-        cmd.lines.last.should eq("  -X 'GET#{tail}'")
+        cmd.lines.should contain("  -X 'GET#{tail}' \\")
       end
     end
 
@@ -374,6 +374,69 @@ describe Gori::Export::Curl do
         .should_not contain("'Content-Type:'")
       curl_of("POST /a HTTP/1.1\r\nHost: h\r\n\r\n", "http://h").should_not contain("Content-Type")
     end
+  end
+
+  # Each measured against a raw listener, curl 8.7.1: the command either reproduces the capture
+  # or says in a `#` note why it cannot, never quietly sends a different request.
+  describe "a capture curl would turn into a different request" do
+    it "names a body framed by both Content-Length and chunked, and a tail past the 0-chunk" do
+      cmd = curl_of("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 4\r\nTransfer-Encoding: chunked\r\n\r\n" \
+                    "5\r\nhello\r\n0\r\n\r\nGET /smuggled HTTP/1.1\r\n\r\n", "http://h")
+      cmd.should contain("# Content-Length not sent")
+      cmd.should contain("bytes after the terminating 0-chunk not sent")
+      cmd.should_not contain("--data-raw carries")
+      cmd.lines.none?(&.lstrip.starts_with?("-H 'Content-Length")).should be_true
+    end
+
+    it "keeps a Content-Length that disagrees with the body, or repeats" do
+      curl_of("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\n\r\nhello", "http://h")
+        .should contain("-H 'Content-Length: 3'")
+      curl_of("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 5\r\nContent-Length: 5\r\n\r\nhello", "http://h")
+        .scan("-H 'Content-Length: 5'").size.should eq(2)
+    end
+
+    it "sends each header line as captured, and does not read a spaced name as framing" do
+      cmd = curl_of("POST /a HTTP/1.1\r\nHost: h\r\nX-A:   v  \r\nContent-Length : 5\r\n\r\nhello", "http://h")
+      cmd.should contain("-H 'X-A:   v  '")
+      cmd.should contain("-H 'Content-Length : 5'")
+    end
+
+    it "names a repeated Host curl cannot send" do
+      cmd = curl_of("GET /a HTTP/1.1\r\nHost: a.test\r\nHost: b.test\r\n\r\n", "http://h")
+      cmd.should contain("-H 'Host: a.test'")
+      cmd.should_not contain("b.test'")
+      cmd.should contain("# 1 more Host line not sent")
+    end
+
+    it "suppresses curl's own User-Agent and Accept when the capture had neither" do
+      cmd = curl_of("GET /a HTTP/1.1\r\nHost: h\r\n\r\n", "http://h")
+      cmd.should contain("-H 'User-Agent:'")
+      cmd.should contain("-H 'Accept:'")
+      kept = curl_of("GET /a HTTP/1.1\r\nHost: h\r\nUser-Agent: ua\r\naccept: */*\r\n\r\n", "http://h")
+      kept.should_not contain("'User-Agent:'")
+      kept.should_not contain("'Accept:'")
+    end
+
+    it "sends a request-target that does not open with / verbatim, and names an absolute-form rewrite" do
+      curl_of("GET ?x=1 HTTP/1.1\r\nHost: h\r\n\r\n", "http://h").should contain("--request-target '?x=1'")
+      curl_of("CONNECT h:443 HTTP/1.1\r\nHost: h:443\r\n\r\n", "http://h").should contain("--request-target 'h:443'")
+      curl_of("GET http://h/x HTTP/1.1\r\nHost: h\r\n\r\n", "http://h")
+        .should contain("# request-target sent in origin-form")
+    end
+
+    it "names a request-line version curl cannot write" do
+      {"HTTP/1.2", "HTTP/0.9", "http/1.1"}.each do |v|
+        curl_of("GET /a #{v}\r\nHost: h\r\n\r\n", "http://h").should contain("# version #{v} sent as HTTP/1.1")
+      end
+      curl_of("GET /a HTTP/1.1\r\nHost: h\r\n\r\n", "http://h").should_not contain("# version")
+    end
+  end
+
+  # The EARLIEST blank line ends the head, in any of the spellings the send path accepts — an
+  # LF-framed head whose body holds a CRLFCRLF used to lose that body into its headers.
+  it "splits a message on the earliest head terminator" do
+    Gori::Export::Curl.split_message("GET / HTTP/1.1\nHost: h\n\nX: 1\r\n\r\nrest")
+      .should eq({"GET / HTTP/1.1\nHost: h", "X: 1\r\n\r\nrest"})
   end
 
   describe "a body no shell argument can carry" do

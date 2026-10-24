@@ -41,6 +41,14 @@ module Gori::Tui
       count ? "#{title} · SANITIZED (#{count})" : title
     end
 
+    # The picker heading for a request whose stored body was cut at the capture cap, so every
+    # row built from it (the cURL line, the five snippets, the raw request) carries the SHORT
+    # body. `gori run show --format curl|…` says so on stderr; the heading is this surface's
+    # place for it, for the reason `sanitized_title` puts its count there.
+    def self.truncated_title(title : String, truncated : Bool?) : String
+      truncated ? "#{title} · BODY TRUNCATED" : title
+    end
+
     # Options for a REQUEST pane. `wire` is the request as it'd be sent (CRLF-framed,
     # env-expanded — the bytes repeater uses), `target` the "scheme://host[:port]" base
     # that resolves an origin-form request line ("GET /p HTTP/1.1") into a full URL.

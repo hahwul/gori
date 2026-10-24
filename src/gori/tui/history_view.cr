@@ -2206,7 +2206,8 @@ module Gori::Tui
         if pair = pair_option(d, req)
           opts << pair
         end
-        return {CopyMenu.sanitized_title("COPY REQUEST AS", redactor && redacted_count), opts}
+        title = CopyMenu.sanitized_title("COPY REQUEST AS", redactor && redacted_count)
+        return {CopyMenu.truncated_title(title, d.request_body_truncated?), opts}
       end
       # URLs and the host list need only the ROW, so read flow_row here — get_flow pulls the
       # full request+response bodies (2 MiB each), and ⇧T can hand this a full PAGE of marks.
@@ -2224,9 +2225,9 @@ module Gori::Tui
       # and not off `redactor`: a URL list that says SANITIZED would be claiming a profile ran
       # over something it never saw.
       bytes = rows.size <= COPY_BYTES_CAP ? byte_copy_options(store, ids, redactor) : nil
-      bytes.try { |(rows_opts, _)| opts.concat(rows_opts) }
-      {CopyMenu.sanitized_title("COPY #{rows.size} FLOWS AS",
-        redactor && bytes.try(&.[1])), opts}
+      bytes.try { |(rows_opts, _, _)| opts.concat(rows_opts) }
+      title = CopyMenu.sanitized_title("COPY #{rows.size} FLOWS AS", redactor && bytes.try(&.[1]))
+      {CopyMenu.truncated_title(title, bytes.try(&.[2])), opts}
     end
 
     # The detail a COPY works from: the captured one, or the sanitized derivative when this
@@ -2241,10 +2242,11 @@ module Gori::Tui
       {clean, report.count}
     end
 
-    # curl / raw-request / raw-response across the set. Only called within COPY_BYTES_CAP, so
+    # curl / raw-request / raw-response across the set, the redaction count, and whether any
+    # request body in it was cut at the capture cap. Only called within COPY_BYTES_CAP, so
     # this is the one place that loads N full details.
     private def byte_copy_options(store : Store, ids : Array(Int64),
-                                  redactor : Redact::Matcher?) : {Array(CopyMenu::Option), Int32}
+                                  redactor : Redact::Matcher?) : {Array(CopyMenu::Option), Int32, Bool}
       redacted_count = 0
       details = ids.compact_map do |id|
         d = store.get_flow(id) || next nil
@@ -2278,7 +2280,7 @@ module Gori::Tui
         "#{copy_separator(d.row)}\n#{body}"
       end
       opts << CopyMenu::Option.new("Req + Res pairs", 'p', pairs.join("\n\n")) unless pairs.empty?
-      {opts, redacted_count}
+      {opts, redacted_count, details.any?(&.request_body_truncated?)}
     end
 
     # The whole exchange — request, one blank line, response — both messages verbatim (P7).
@@ -2322,7 +2324,8 @@ module Gori::Tui
         if pair = pair_option(detail, wire)
           opts << pair
         end
-        {CopyMenu.sanitized_title("COPY REQUEST AS", marked), opts}
+        {CopyMenu.truncated_title(CopyMenu.sanitized_title("COPY REQUEST AS", marked),
+          detail.request_body_truncated?), opts}
       when :response
         head = detail.response_head
         opts = if head
