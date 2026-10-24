@@ -381,6 +381,11 @@ module Gori
                                 variants : Hash(UInt64, Hash(String, Node))) : Nil
       segments, truncated = segments_of(r.path)
       return if segments.empty? # the bare root is never stored (`JsRefs.resolve`)
+      if r.path.includes?(JsRefs::EXPR) && (hit = templated_hit(host_node, segments, 0, variants))
+        hit.truncated = true if truncated
+        hit.js_refs += r.flows
+        return
+      end
       node = host_node
       acc = ""
       last = segments.size - 1
@@ -399,6 +404,35 @@ module Gori
       end
       node.truncated = true if truncated
       node.js_refs += r.flows
+    end
+
+    # The captured endpoint a templated reference names (`JsRefs.segment_matches?`), or nil — so
+    # `/api/users/{expr}` lands on the captured `/api/users/5` that `JsRefs.list` calls
+    # requested, rather than growing a never-requested `{expr}` node beside it.
+    private def self.templated_hit(node : Node, segments : Array(String), i : Int32,
+                                   variants : Hash(UInt64, Hash(String, Node))) : Node?
+      return node.methods.empty? ? nil : node if i == segments.size
+      seg = segments[i]
+      last = i == segments.size - 1
+      return expr_hit(node, segments, i, variants) if seg == JsRefs::EXPR
+      child = node.child?(seg) || (last ? captured_variant(node, seg, variants) : nil)
+      child && !child.unrequested? ? templated_hit(child, segments, i + 1, variants) : nil
+    end
+
+    # `templated_hit` at a `{expr}` segment: the first captured child it names that the rest of
+    # the reference also reaches.
+    private def self.expr_hit(node : Node, segments : Array(String), i : Int32,
+                              variants : Hash(UInt64, Hash(String, Node))) : Node?
+      seg = segments[i]
+      last = i == segments.size - 1
+      node.children.each do |c|
+        next if c.unrequested? || (!last && c.label.includes?('?'))
+        next unless JsRefs.segment_matches?(seg, last ? path_part(c.label) : c.label)
+        if hit = templated_hit(c, segments, i + 1, variants)
+          return hit
+        end
+      end
+      nil
     end
 
     # A captured child of `node` whose label is `seg` plus a query string, or nil. Indexed per

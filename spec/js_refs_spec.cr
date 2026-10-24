@@ -618,6 +618,22 @@ describe Gori::JsRefs do
       end
     end
 
+    # A `{expr}` placeholder stands for one non-empty segment: `/api/users/5` captured makes the
+    # template requested on that origin, the way the tree lands it on the captured node.
+    it "judges a templated reference requested when a captured path fills its placeholder" do
+      with_store do |store|
+        jr_flow(store, "/api/users/5", "[]", ctype: "application/json")
+        jr_flow(store, "/a.js", %(fetch(`/api/users/${id}`);fetch(`/api/users/${id}/orders`);fetch(`/api/items/${id}`)))
+        JR.scan(store)
+        JR.list(store, JR::ListOptions.new(include_requested: true)).endpoints
+          .map { |e| {e.path, e.requested} }.sort_by!(&.[0]).should eq([
+          {"/api/items/{expr}", false}, {"/api/users/{expr}", true}, {"/api/users/{expr}/orders", false},
+        ])
+        JR.path_matches?("/api/users/{expr}", "/api/users/").should be_false
+        JR.path_matches?("/api/users/:id", "/api/users/5").should be_false
+      end
+    end
+
     it "hides a host the project never captured unless a scope include names it" do
       with_store do |store|
         jr_flow(store, "/app.js", %(var ns="http://www.w3.org/2000/svg";fetch("https://api.shop.test/v1/me")))
@@ -691,6 +707,20 @@ describe "Gori::Sitemap.attach_js_refs!" do
     keys.js_only?.should be_true
     keys.methods.should be_empty
     Gori::Sitemap.endpoint_count(hosts[0]).should eq(before)
+  end
+
+  it "lands a templated reference on the captured path it names instead of growing a {expr} node" do
+    hosts = Gori::Sitemap.build([oe("shop.test", "/api/users/5?x=1")])
+    refs = [
+      Gori::Store::JsRefNode.new("https", "shop.test", 443, "/api/users/{expr}", 2),
+      Gori::Store::JsRefNode.new("https", "shop.test", 443, "/api/users/{expr}/orders", 1),
+    ]
+    Gori::Sitemap.attach_js_refs!(hosts, refs) { false }
+    users = hosts[0].children.find!(&.label.==("api")).children.find!(&.label.==("users"))
+    users.children.map(&.label).sort!.should eq(["5?x=1", "{expr}"])
+    users.children.find!(&.label.==("5?x=1")).js_refs.should eq(2)
+    # The /orders template names nothing captured, so it still grows as never requested.
+    users.children.find!(&.label.==("{expr}")).unrequested?.should be_true
   end
 
   it "lands a query-less reference on the captured query variant instead of growing an unrequested sibling" do

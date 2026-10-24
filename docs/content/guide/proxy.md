@@ -152,7 +152,7 @@ A reference is read the way a browser would resolve it:
 
 - An inline script resolves against its page, or the page's `<base href>`.
 - An external script resolves against the page its captured request's `Referer` names, since a CDN bundle's `"/api/cart"` targets the page's origin. Without a `Referer` it falls back to the script's own origin, and the reference is marked `guessed`.
-- A template literal keeps its shape: `` `/api/users/${id}/orders` `` becomes `/api/users/{expr}/orders`, never the directory `/api/users/`.
+- A template literal keeps its shape: `` `/api/users/${id}/orders` `` becomes `/api/users/{expr}/orders`, never the directory `/api/users/`. Each `{expr}` stands for one path segment, so once `/api/users/5/orders` is captured the reference counts as requested and sits on that row.
 - A literal inside a comment is kept (old routes are worth seeing) and marked as such.
 - The bytes are treated as page-authored: a space is percent-encoded, and a literal carrying CR or LF is dropped rather than repaired. Images, fonts and a bare `/` are skipped.
 

@@ -632,7 +632,7 @@ module Gori
       # captured endpoint exists at that (host, path) on any origin.
       captured, _, _ = captured_paths(store)
       h = host.downcase
-      captured.none? { |(_, ch, _, cp)| ch == h && cp == path }
+      captured.none? { |(_, ch, _, cp)| ch == h && path_matches?(path, cp) }
     end
 
     # A tree reference's URL, for a scope question.
@@ -643,12 +643,38 @@ module Gori
     private def endpoint(group : Array(Store::JsRefSighting), captured : Set(OriginPath),
                          unknown : Bool) : Endpoint
       first = group.find { |s| s.flags & FLAG_COMMENT == 0 } || group.first
-      requested = captured.includes?({first.scheme, first.host, first.port, first.path}) ? true : (unknown ? nil : false)
+      requested = requested?(first, captured) ? true : (unknown ? nil : false)
       flows = group.map(&.flow_id).uniq!.size
       Endpoint.new(first.scheme, first.host, first.port, first.path, first.target, flows, requested,
         group.all? { |s| s.flags & FLAG_COMMENT != 0 }, group.any? { |s| s.flags & FLAG_TEMPLATED != 0 },
         Base.from_label?(first.base) || Base::Guessed, first.flow_id, first.offset, first.line,
         first.literal, first.source_url)
+    end
+
+    # Exact on the reference's origin, or — for a template — any captured path on that origin it
+    # names (`path_matches?`), which is where the tree lands the reference too.
+    # ponytail: a templated reference scans every captured path; index by origin if that shows.
+    private def requested?(s : Store::JsRefSighting, captured : Set(OriginPath)) : Bool
+      return true if captured.includes?({s.scheme, s.host, s.port, s.path})
+      return false unless s.path.includes?(EXPR)
+      captured.any? { |(cs, ch, cport, cp)| cs == s.scheme && ch == s.host && cport == s.port && path_matches?(s.path, cp) }
+    end
+
+    # Does one segment of a stored reference path name this captured segment? Equal, or the
+    # template placeholder standing for exactly ONE non-empty segment: `/api/users/{expr}` names
+    # `/api/users/5`, never `/api/users/` or `/api/users/5/orders`. A `:id` route literal or a
+    # cut concatenation (`/api/users/`) is not a template and stays exact. THE rule the list
+    # (`requested?`) and the tree (`Sitemap.attach_ref`) both read.
+    def segment_matches?(ref_seg : String, seg : String) : Bool
+      ref_seg == seg || (ref_seg == EXPR && !seg.empty?)
+    end
+
+    # `segment_matches?` over a whole query-less path.
+    def path_matches?(ref_path : String, path : String) : Bool
+      return true if ref_path == path
+      a = ref_path.split('/')
+      b = path.split('/')
+      a.size == b.size && a.each_with_index.all? { |(t, i)| segment_matches?(t, b[i]) }
     end
 
     # (scheme, host, port, query-less node path) — one captured endpoint on its origin.
