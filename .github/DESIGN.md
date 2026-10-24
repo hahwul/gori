@@ -5201,6 +5201,7 @@ The last two rule terms in `Tls::Tunnel#h2_downgrade_reason` came out, and with 
 
 Closes one of the gaps the 2026-10-21 #1666 entry left open. A TEXT frame of a draft session takes
 the same refusal as the handshake (`UrlRequest.expand` headless, `RepeaterView#ws_env_refusal` in
-the TUI), scripted or live: MCP `send_websocket`/`ws_session_send`, `gori run repeater send`/`ws`.
+the TUI), scripted or live: MCP `send_websocket`/`ws_session_send`, `gori run repeater send`/`ws`,
+and a fuzz sweep's typed frames (`Fuzz::Plan`, every surface).
 A flow-seeded session's stored frames are evidence and still go out as captured; a bare `$name`
 and `verbatim` stay literal.

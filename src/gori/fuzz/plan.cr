@@ -494,7 +494,14 @@ module Gori::Fuzz
       # frame the operator typed (`--message`, MCP `messages`) resolves its `$KEY`, a CAPTURED
       # frame does not. `Env.expand`, not `expand_wire` — a frame has no head, so there is no
       # LF→CRLF promotion to make and nothing in it is a message boundary.
-      ws_texts = options.ws_messages.try(&.map { |m| m.evidence || options.verbatim? ? m.payload : Env.expand(m.payload) })
+      # A typed frame takes the head's #1666 refusal too.
+      ws_texts = options.ws_messages.try(&.map do |m|
+        next m.payload if m.evidence || options.verbatim?
+        if m.opcode == Proxy::WS::OP_TEXT.to_i && (detail = Env.unresolved_env(m.payload))
+          raise PlanError.new(PlanError::Reason::UnresolvedEnv, "unresolved env #{detail}", detail)
+        end
+        Env.expand(m.payload)
+      end)
 
       if options.auto_mark?
         text = Template.auto_mark(text)

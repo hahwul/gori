@@ -206,6 +206,23 @@ module Gori
         emit_stop_result(job, waited_out)
       end
 
+      # At shutdown (`Server#run`): the process is about to exit, and a job left running left a
+      # `save_results` run at `running` forever, its last batch unwritten. Every live job is
+      # stopped, and each fuzz save is closed now as `stopped` with the counters so far, since
+      # its in-flight requests cannot outlive the process to report.
+      def stop_jobs_for_shutdown : Nil
+        {@jobs, @mine_jobs, @discover_jobs, @sequence_jobs, @authorize_jobs}.each do |jobs|
+          jobs.each_value { |job| request_stop(job) }
+        end
+        @jobs.each_value do |fjob|
+          next unless fjob.live?
+          finish_fuzz_persistence(fjob, :stopped)
+          # A finish the job's own fiber already has in flight returns at once above; `close`
+          # waits it out, so the store is not closed under an uncommitted terminal row.
+          fjob.persistence.try(&.close)
+        end
+      end
+
       # `job.stop` plus the honest answer, for the five per-kind stop tools
       # (fuzz_stop / mine_stop / discover_stop / sequence_stop / authorize_stop).
       #
@@ -215,17 +232,6 @@ module Gori
       # aborted a run that was in flight" and reports a COMPLETE run as cancelled, or its
       # results as partial. `stop_job` has always re-read the status; this is the same read,
       # so all six stop surfaces now answer the same way.
-      # At shutdown (`Server#run`): the process is about to exit, and a job left running left a
-      # `save_results` run at `running` forever, its last batch unwritten. Every live job is
-      # stopped, and each fuzz save is closed now as `stopped` with the counters so far, since
-      # its in-flight requests cannot outlive the process to report.
-      def stop_jobs_for_shutdown : Nil
-        {@jobs, @mine_jobs, @discover_jobs, @sequence_jobs, @authorize_jobs}.each do |jobs|
-          jobs.each_value { |job| request_stop(job) }
-        end
-        @jobs.each_value { |fjob| finish_fuzz_persistence(fjob, :stopped) if fjob.live? }
-      end
-
       private def stop_and_report(job : Job) : Result
         emit_stop_result(job, already_finished: !request_stop(job))
       end

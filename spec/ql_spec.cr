@@ -1551,6 +1551,7 @@ describe "Gori::QL.missing_colon_hint" do
       .should eq("`status >= 400` is searched as text — did you mean `status:>=400`?")
     Gori::QL.missing_colon_hint("host:api dur >500ms").not_nil!.should contain("`dur:>500ms`")
     Gori::QL.missing_colon_hint("status 200").should be_nil
+    Gori::QL.missing_colon_hint(%(status "x" >=400)).should be_nil # never joined across a quoted word
   end
 
   it "stays quiet on everything else" do

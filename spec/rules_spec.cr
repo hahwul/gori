@@ -402,7 +402,32 @@ describe Gori::Rules do
 
     # Disabling the writer un-declares the name; the rule used to apply and put the literal
     # `$SESSION` in the header, where an unbound name skips it.
-    it "skips a rule whose binding's extract rule is disabled, bound value or not" do
+    # The disabled name is skipped ONLY as an unbound binding: an env var of the same name is the
+    # operator's bytes and still goes in verbatim, with no boundary refusal (P7).
+    it "still injects an env var that shares a disabled binding's name, verbatim" do
+      with_store do |store|
+        b = Gori::Bindings.load(store)
+        b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid").should be_nil
+        b.toggle(b.rules.first.id)
+        Gori::Settings.env_vars = [{"SESSION", "a\r\nX-Admin: 1"}]
+        begin
+          with_layer(b) do
+            rules = Gori::Rules.new(store, store.match_rules)
+            rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "X-Auth",
+              "$SESSION", Gori::Store::RuleOp::SetHeader, Gori::Store::MatchKind::Literal,
+              "inject", "", "")
+            out = rules.transform_message("GET /a HTTP/1.1\r\nHost: acme.test\r\n\r\n",
+              Gori::Store::RuleTarget::Request, "acme.test")
+            out.should contain("X-Admin: 1")
+            store.events_after(0, 50).any? { |e| e.kind == "boundary_refused" || e.kind == "unbound" }.should be_false
+          end
+        ensure
+          Gori::Settings.env_vars = [] of {String, String}
+        end
+      end
+    end
+
+    it "skips a rule whose binding's extract rule is disabled" do
       with_store do |store|
         b = Gori::Bindings.load(store)
         b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid").should be_nil

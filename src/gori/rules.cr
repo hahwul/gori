@@ -1589,7 +1589,11 @@ module Gori
       key = found.name
       vars = snap.table_for(found.ns)
       declared = snap.declarable?(found.ns) ? snap.declared : EMPTY_DECLARED
-      return Refused.new(Refusal::Unbound, key) if !vars.has_key?(key) && declared.includes?(key)
+      # A disabled writer's name skips the rule too, rather than going out as a literal `$NAME`.
+      withheld = snap.declarable?(found.ns) ? snap.withheld : EMPTY_DECLARED
+      if !vars.has_key?(key) && (declared.includes?(key) || withheld.includes?(key))
+        return Refused.new(Refusal::Unbound, key)
+      end
       return Refused.new(Refusal::Boundary, key) if head && forges_boundary?(vars, declared, key)
       if val = vars[key]?
         buf << (regex ? Rules.escape_backrefs(val) : val)
@@ -1656,10 +1660,8 @@ module Gori
         # running process (`Settings.env_syntax=` bumps `highlight_rev` for exactly that reason)
         # and a snapshot holding only the merged one would then route `$ENV.X` through a table
         # that also carries the bindings.
-        # A disabled extract rule's name counts as declared-and-unbound HERE, so the rule skips
-        # rather than injecting a literal `$NAME` (`Layer#withheld`).
         cached = SubstSnapshot.new(Env.display_vars, Env.effective_vars, Env.binding_values,
-          Env.declared_bindings | Env.withheld_bindings, Env.active_slot_claims)
+          Env.declared_bindings, Env.active_slot_claims, Env.withheld_bindings)
         @subst_snap = cached
         @subst_env_rev = erev
         @subst_binding_rev = brev
@@ -1678,7 +1680,11 @@ module Gori
       env : Hash(String, String),
       bind : Hash(String, String),
       declared : Array(String),
-      claimed : Array(String) = EMPTY_DECLARED do
+      claimed : Array(String) = EMPTY_DECLARED,
+      # Names only a disabled extract rule declares (`Layer#withheld`). Read by the Unbound skip
+      # alone: `declared` also decides the boundary refusal and the bare-spelling remedy, where an
+      # env var of the same name is the operator's own bytes, not a binding.
+      withheld : Array(String) = EMPTY_DECLARED do
       # Exhaustive over the namespace set rather than `ns.bind? ? bind : env`: a two-way branch
       # answers for a THIRD namespace by resolving it out of the env vars, silently, which is the
       # one failure the namespaces exist to remove.
@@ -1729,20 +1735,7 @@ module Gori
       label = rule.name.presence || rule.pattern
       case refused.reason
       in Refusal::Unbound
-        names = Env.unbound(rule.replacement)
-        if names.empty? && Env.withheld_bindings.includes?(refused.key)
-          @store.insert_event("bindings", "unbound", "warn",
-            "rewrite rule #{label.inspect} not applied: the extract rule declaring " \
-            "#{Env.token_list([refused.key], ns: Env::Namespace::Bind)} is disabled")
-          return
-        end
-        return if names.empty?
-        # `Refused#key` and `unbound` both answer in BARE names (they index the binding table);
-        # the SPELLING is applied here, and it is the BIND namespace's by construction — this
-        # refusal exists only for a declared binding.
-        @store.insert_event("bindings", "unbound", "warn",
-          "rewrite rule #{label.inspect} not applied: " \
-          "#{Env.token_list(names, ns: Env::Namespace::Bind)} is not bound yet")
+        report_unbound(rule, label, refused.key)
       in Refusal::Boundary
         classes = Bindings.boundary_bytes(subst_snapshot.bind[refused.key]? ||
                                           subst_snapshot.display[refused.key]? || "")
@@ -1786,6 +1779,25 @@ module Gori
           "rewrite rule #{label.inspect} not applied: its value is not one JSON value once " \
           "its references resolve (a bound string goes inside quotes: \"$BIND.NAME\")")
       end
+    end
+
+    # `report_refused`'s Unbound sentence: a declared name with no value yet, or a name whose
+    # extract rule is disabled (`Layer#withheld`).
+    private def report_unbound(rule : Store::MatchRule, label : String, key : String) : Nil
+      # `key` and `unbound` both answer in BARE names (they index the binding table); the
+      # SPELLING is applied here, and it is the BIND namespace's by construction — this refusal
+      # exists only for a binding.
+      names = Env.unbound(rule.replacement)
+      if names.empty? && Env.withheld_bindings.includes?(key)
+        @store.insert_event("bindings", "unbound", "warn",
+          "rewrite rule #{label.inspect} not applied: the extract rule declaring " \
+          "#{Env.token_list([key], ns: Env::Namespace::Bind)} is disabled")
+        return
+      end
+      return if names.empty?
+      @store.insert_event("bindings", "unbound", "warn",
+        "rewrite rule #{label.inspect} not applied: " \
+        "#{Env.token_list(names, ns: Env::Namespace::Bind)} is not bound yet")
     end
 
     # "CR" / "CR and LF" / "CR, LF and NUL". Small enough that reaching for a helper module

@@ -376,6 +376,22 @@ describe "WebSocket draft frames naming an unset $ENV var (#1666)" do
     end
   end
 
+  it "a fuzz sweep's typed frame is refused at plan build, a captured one is not" do
+    with_no_vars do
+      with_env_syntax(Gori::Env::Syntax::Namespaced) do
+        build = ->(evidence : Bool) do
+          Gori::Fuzz::Plan.build(Gori::Fuzz::PlanOptions.new(WS_UPGRADE,
+            default_target: "http://127.0.0.1:9",
+            sources: [Gori::Fuzz::InlineList.new(["a"])] of Gori::Fuzz::PayloadSource,
+            ws_messages: [Gori::Fuzz::WsMessageSource.new(1, "u=$ENV.NOPE&q=§x§", evidence: evidence)]),
+            ungated_outbound)
+        end
+        expect_raises(Gori::Fuzz::PlanError, "unresolved env $ENV.NOPE") { build.call(false) }
+        build.call(true).should be_a(Gori::Fuzz::Plan)
+      end
+    end
+  end
+
   it "the TUI refuses a hand-authored frame, scripted or live, and never a captured one" do
     with_no_vars do
       with_env_syntax(Gori::Env::Syntax::Namespaced) do

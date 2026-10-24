@@ -1118,8 +1118,8 @@ module Gori::Tui
       unless bindings.toggle(rule.id)
         return @host.status("enable/disable NOT applied (project busy) — the extract rule is unchanged")
       end
-      # Disabling the WRITER also un-declares the name, so a rewrite rule naming it goes
-      # back to refusing rather than injecting a value nothing is refreshing any more.
+      # Disabling the WRITER also un-declares the name, so a rewrite rule naming it is skipped
+      # rather than injecting a value nothing is refreshing any more (`Layer#withheld`).
       spelled = Env.spell(rule.name, Env::Namespace::Bind)
       @host.status(rule.enabled? ? "#{spelled} extract rule disabled" : "#{spelled} extract rule enabled")
     end

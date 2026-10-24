@@ -183,7 +183,12 @@ module Gori
           # report a handshake that did not happen.
           tls_preset: plan.scheme == "https" ? plan.tls_preset : nil,
           body_more: body_more, via: Proxy::Upstream.via(plan.host, plan.scheme, plan.port),
-          rules_kept_repeater: applied_rules && result.ok? ? int(h, "repeater_id") : nil),
+          rules_kept_repeater: applied_rules && result.ok? ? int(h, "repeater_id") : nil,
+          freeze_ref: if repeater_id && repeater_response_saved
+            %(ref_kind:"repeater" ref_id:#{repeater_id})
+          elsif recorded_flow_id && flow_response_saved
+            %(ref_kind:"flow" ref_id:#{recorded_flow_id})
+          end),
           is_error: !result.ok?, event_flow_id: recorded_flow_id, event_note: send_event_note(built, result))
       rescue ex : Gori::Error
         # Bad input (missing/invalid url, illegal header, …) — return a clean
@@ -1014,7 +1019,8 @@ module Gori
                                    unbound_overlay : String? = nil,
                                    head_unterminated : Bool = false,
                                    tls_preset : String? = nil, body_more : String? = nil,
-                                   via : String? = nil, rules_kept_repeater : Int64? = nil) : String
+                                   via : String? = nil, rules_kept_repeater : Int64? = nil,
+                                   freeze_ref : String? = nil) : String
         JSON.build do |j|
           j.object do
             emit_scope(j, sc)
@@ -1041,7 +1047,7 @@ module Gori
               j.field "repeater_response_note",
                 "Match & Replace rewrote this send, so repeater ##{id} keeps its PREVIOUS response; " \
                 "freeze_evidence on the repeater freezes that older exchange, not this one — " +
-                (recorded_flow_id ? "freeze ref_kind:\"flow\" ref_id:#{recorded_flow_id} instead" : "re-send with record_history to freeze this one")
+                (freeze_ref ? "freeze #{freeze_ref} instead" : "re-send with record_history to freeze this one")
             end
             # Beside `effective_request`, which is where the literal `$NAME` is visible in the
             # bytes — an agent that reads the response alone cannot tell this send from one
