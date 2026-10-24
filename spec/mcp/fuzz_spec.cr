@@ -1527,6 +1527,24 @@ describe "MCP fuzz_start — a 'marks' token that made no position" do
       landed["marks_warning"]?.should be_nil
     end
   end
+
+  it "names a mark that is not in the request, and one that sweeps several spots" do
+    with_store do |store|
+      tools = tools_for(store)
+      base = {"url" => "http://127.0.0.1:9/", "payloads" => %([{"list":["a"]}]),
+              "allow_unscoped" => true, "record_history" => false,
+              "template" => "GET /p?a=1&b=2 HTTP/1.1\r\nHost: 127.0.0.1:9\r\n\r\n"}
+      warned = call_json(tools, "fuzz_start", base.merge({"marks" => ["zzz", "b=2"]}).to_json)["marks_warning"].as_s
+      warned.should contain(%("zzz": not found in the request))
+      warned.should_not contain(%("b=2"))
+      call_json(tools, "fuzz_start", base.merge({"marks" => ["1"]}).to_json)["marks_warning"].as_s
+        .should contain(%("1" matches))
+
+      text, is_error = call_raw(tools, "fuzz_start", base.merge({"marks" => ["zzz"]}).to_json)
+      is_error.should be_true
+      text.should contain(%(none of 'marks' occurs in the request ("zzz")))
+    end
+  end
 end
 
 # A row an agent can never see is a row that did not happen.

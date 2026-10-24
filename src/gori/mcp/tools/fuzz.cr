@@ -28,7 +28,7 @@ module Gori
       private def launch_fuzz(h, extractors : Array(Fuzz::Extractor)) : Result
         ob = outbound(bool_arg(h, "allow_unscoped", false))
         save_results = bool_arg(h, "save_results", false)
-        engine, origin, total, http2, shadowed_marks, ws_frames, ws_ignored, grpc, tls_preset, mode_label, effective_sni, effective_max_requests, sets_warn, payload_reports, request_target =
+        engine, origin, total, http2, marks_warn, ws_frames, ws_ignored, grpc, tls_preset, mode_label, effective_sni, effective_max_requests, sets_warn, payload_reports, request_target =
           build_fuzz_job(h, ob, save_results)
         # Scope gate before launching any real send, on the template's real request-target —
         # the check `sequence_start` and `gori run fuzz` make. Asking about a bare `/` refused
@@ -73,16 +73,6 @@ module Gori
         evict_finished_jobs(@jobs)
         @jobs[id] = fjob
         warn = budget_warning(total, caller_cap)
-        # A `marks` token that occurs ONLY inside `§…§` that were already there — or flush
-        # against one, where a second pair would merge into it — makes no position of its own,
-        # and the builder can neither refuse the run (those earlier positions are real) nor
-        # report it in a count that is legitimately 0. Said here for the same reason as
-        # `budget_warning`: the job runs either way, and an agent told nothing concludes its
-        # token is being swept. See `Fuzz::Plan#shadowed_marks`.
-        marks_warn = shadowed_marks.empty? ? nil : "#{shadowed_marks.map(&.inspect).join(", ")}: added no position — " \
-                                                   "every occurrence is inside a §…§ that was already there (`auto`, an " \
-                                                   "earlier mark, or the flow_id capture's own), or flush against one; " \
-                                                   "those positions are swept, this token added none"
         # Audit on STDERR — never STDOUT (reserved for JSON-RPC).
         Log.info { "fuzz_start #{id} #{origin.scheme}://#{origin.host}:#{origin.port} scope=#{sc.decision} record=#{fjob.record_history} total=#{total || "?"}" }
         spawn(name: "mcp-fuzz-#{id}") { run_fuzz_job(fjob, engine) }
@@ -589,11 +579,10 @@ module Gori
         stop_and_report(fjob)
       end
 
-      # Build a ready-to-run engine + its origin + total + effective http2 + the `marks`
-      # tokens that made no position of their own (`Fuzz::Plan#shadowed_marks`, reported by
-      # `fuzz_start`) from the tool args. Raises FuzzArgError (clean message) on any malformed
+      # Build a ready-to-run engine + its origin + total + effective http2 + what the `marks`
+      # did (`fuzz_marks_warning`, reported by `fuzz_start`) from the tool args. Raises FuzzArgError (clean message) on any malformed
       # input.
-      private def build_fuzz_job(h, ob : Outbound, save_results : Bool = false) : {Fuzz::Engine, Fuzz::Origin, Int64?, Bool, Array(String), Int32?, Array(Symbol), Fuzz::GrpcFieldTemplate?, String?, String, String?, Int64?, String?, Array(PayloadFrom::Report), String}
+      private def build_fuzz_job(h, ob : Outbound, save_results : Bool = false) : {Fuzz::Engine, Fuzz::Origin, Int64?, Bool, String?, Int32?, Array(Symbol), Fuzz::GrpcFieldTemplate?, String?, String, String?, Int64?, String?, Array(PayloadFrom::Report), String}
         text, default_target, src_h2, evidence, src_sni, src_tls_preset = fuzz_template_source(h)
         use_h2 = bool_arg(h, "http2", false) || src_h2
         mode = fuzz_mode(h)
@@ -698,7 +687,7 @@ module Gori
         # `ws_frames` is nil for an HTTP sweep and the OUTBOUND frame count for a WebSocket one,
         # so `fuzz_start`'s echo can say which engine the job actually took. An agent that seeded
         # from a `repeater_id` cannot otherwise tell whether its frames were picked up.
-        {plan.engine, plan.origin, plan.total, use_h2, plan.shadowed_marks,
+        {plan.engine, plan.origin, plan.total, use_h2, fuzz_marks_warning(plan),
          plan.ws_script.try(&.frames.size), plan.ws_ignored_knobs, plan.grpc_fields,
          plan.tls_preset,
          plan.engine.race_count.try { |n| "race ×#{n}" } || mode.label,
@@ -739,6 +728,25 @@ module Gori
         "#{n} payload set#{n == 1 ? "" : "s"} will not be used: #{remedy}"
       end
 
+      # What the `marks` did that the run's count alone does not say, or nil — the CLI's
+      # `warn_fuzz_marks` notes, in one field. A token that is not in the request at all used to
+      # pass in silence, as did one that swept several spots (the HTTP version, the Host port).
+      private def fuzz_marks_warning(plan : Fuzz::Plan) : String?
+        notes = [] of String
+        unless (missing = plan.missing_marks).empty?
+          notes << "#{missing.map(&.inspect).join(", ")}: not found in the request, so added no position"
+        end
+        unless (shadowed = plan.shadowed_marks).empty?
+          notes << "#{shadowed.map(&.inspect).join(", ")}: added no position — every occurrence is inside a " \
+                   "§…§ that was already there (`auto`, an earlier mark, or the flow_id capture's own), or " \
+                   "flush against one; those positions are swept, this token added none"
+        end
+        plan.mark_matches.each do |(tok, occ)|
+          notes << "#{tok.inspect} matches #{occ} positions (including any in the request line and headers)" if occ > 1
+        end
+        notes.empty? ? nil : notes.join("; ")
+      end
+
       # MCP's wording for a plan the args can't produce — the builder reports the
       # machine-readable `reason`, the sentence (and the arg names it points at) is ours.
       # `template` is the seeded text, needed only to tell the two NoPositions cases apart.
@@ -755,7 +763,11 @@ module Gori
             "is escaped to §§ so the site's own text is not swept), and 'auto' adds nothing " \
             "while any § is present; name a position with 'marks'"
           else
-            "template has no §…§ positions (add markers, or pass auto:true with a flow_id)"
+            if missing = ex.detail
+              "none of 'marks' occurs in the request (#{missing}), so the template has no §…§ positions"
+            else
+              "template has no §…§ positions (add markers, name a token with 'marks', or pass auto:true)"
+            end
           end
         in Fuzz::PlanError::Reason::NoTarget
           "provide a 'url' target (scheme://host) or a flow_id that carries one"
@@ -1550,7 +1562,7 @@ module Gori
           s.field "url", strprop("absolute URL (scheme+host) setting the origin only; does NOT define the request (unlike send_request)")
           s.requires_one_of "template", "flow_id", "repeater_id"
           s.field "auto", boolprop("auto-mark every query/cookie/body param when the template has no §…§")
-          s.field "marks", strarrprop("literal tokens to mark as positions, every occurrence (one touching an existing position is skipped; a token with none is named in `marks_warning`)")
+          s.field "marks", strarrprop("literal tokens to mark as positions, every occurrence (one touching an existing position is skipped; a token that adds none, or sweeps several spots, is named in `marks_warning`)")
           s.field "fields", strarrprop("gRPC unary fields to sweep: name, path ('profile.age') or number, [i] for one repeated occurrence; append ¦chain for a Decoder chain run BEFORE encoding. Payloads are encoded by the DECLARED type, length prefix recomputed. Needs a descriptor set (grpc_schema / grpc_reflect). The field must be PRESENT in the capture (replaced, never added); an undeclared field, type mismatch or unholdable payload is refused up front. `bytes` payloads are HEX")
           s.field "mode", enumprop("how payload sets combine across marks (default sniper)", FUZZ_MODES)
           s.field "payloads", arrprop(%(payload sets, a JSON array (NOT a string): {"list":["a","b"]}, {"list_base64":["gA=="]} (byte-exact), {"wordlist":"/p.txt"} (path or saved name, see list_wordlists), {"preset":"sqli"} (#{Fuzz::Presets.names.join(", ")}; "file":"/x.txt" merges a file), {"numbers":"1-100"} (or {from,to,step}), {"brute":"abc:1-3"} (or {charset,min,max}; length max #{BRUTE_MAX_LEN}), {"null":5}. {"payload_from":"host:api.example param-names"} reads values the PROJECT captured (sends nothing): QL query + projection (param-names, param-values, path-segments, js-endpoints, extracted); options include_sensitive (default false; `extracted` needs it), locations, max_flows, max_values. payload_sources in the reply says what each read.))

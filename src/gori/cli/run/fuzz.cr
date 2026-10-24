@@ -555,7 +555,11 @@ module Gori
             "escaped to §§ so the site's own text is not swept), and --auto adds nothing " \
             "while any § is present; name a position with --mark TOKEN"
           else
-            "no positions — add §…§ markers, --auto, or --mark TOKEN"
+            if missing = ex.detail
+              "no positions — no --mark token occurs in the request (#{missing})"
+            else
+              "no positions — add §…§ markers, --auto, or --mark TOKEN"
+            end
           end
         in Fuzz::PlanError::Reason::NoTarget
           "--target is required for --request/stdin"
@@ -580,6 +584,9 @@ module Gori
       # headers, silently exploding the position count. Say so rather than let the run
       # quietly become 40× bigger than intended.
       private def self.warn_fuzz_marks(plan : Fuzz::Plan) : Nil
+        plan.missing_marks.each do |tok|
+          STDERR.puts "gori run fuzz: note: --mark #{tok.inspect} is not in the request, so it added no position"
+        end
         plan.mark_matches.each do |(tok, occ)|
           next unless occ > 1
           STDERR.puts "gori run fuzz: note: --mark #{tok.inspect} matches #{occ} positions (including any in headers)"

@@ -423,6 +423,6 @@ describe "the NoPositions refusal names a literal § instead of re-recommending 
       .should eq("no positions — add §…§ markers, --auto, or --mark TOKEN")
     tools = Gori::MCP::Tools.new(Gori::Store.open(":memory:"), allow_actions: false, verify_upstream: false)
     tools.fuzz_plan_error_for_spec(r, none)
-      .should eq("template has no §…§ positions (add markers, or pass auto:true with a flow_id)")
+      .should eq("template has no §…§ positions (add markers, name a token with 'marks', or pass auto:true)")
   end
 end

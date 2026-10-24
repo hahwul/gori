@@ -301,6 +301,12 @@ module Gori::Fuzz
     # Reported here for the same reason `rewrites_content_length?` is: a fact about the run
     # that only the builder can see, said ONCE, up front, by whichever surface asked.
     getter shadowed_marks : Array(String)
+
+    # The marks that do not occur in the request at all: `{token, 0}` minus `shadowed_marks`.
+    def missing_marks : Array(String)
+      mark_matches.compact_map { |(tok, n)| tok if n.zero? && !shadowed_marks.includes?(tok) }
+    end
+
     # How many payload sets this run was given but will never draw from — the count, not the
     # sets, because the operator identifies them by the ORDER they typed them in.
     #
@@ -568,7 +574,11 @@ module Gori::Fuzz
       # `Config#race_count` — so it has no use for §…§ positions or payload sets at all, and
       # both guards below (and NoPayloads, one screen down) are skipped when it is set.
       # (`race_count` is validated above, ahead of the gRPC field guard — see there.)
-      raise PlanError.new(PlanError::Reason::NoPositions, "the template has no §…§ positions") if marked.position_count == 0 && !race_count
+      # `detail` = the marks that occur nowhere, comma-joined, so the refusal can name them.
+      if marked.position_count == 0 && !race_count
+        missing = mark_matches.compact_map { |(tok, n)| tok.inspect if n.zero? && !shadowed_marks.includes?(tok) }
+        raise PlanError.new(PlanError::Reason::NoPositions, "the template has no §…§ positions", missing.join(", ").presence)
+      end
       # The twin of the target's unresolved-token refusal (`resolve_origin`, below), for the same
       # reason: a `¦chain` this run cannot apply leaves the position's payload UNTRANSFORMED on
       # the wire. See `refuse_unrunnable_chains` (the shared validator the Repeater send path
