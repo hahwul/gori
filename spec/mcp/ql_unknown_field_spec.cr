@@ -143,4 +143,14 @@ describe "MCP list_history: a comparison typed without its colon" do
       JSON.parse(call_tools(store, "list_history", q("status:>=400")).text)["query_hint"]?.should be_nil
     end
   end
+
+  it "names it on a count and on an empty sitemap too" do
+    with_store do |store|
+      counted = JSON.parse(call_tools(store, "list_history", q("status >= 400", count_only: true)).text)
+      counted["count"].as_i.should eq(0)
+      counted["query_hint"].as_s.should contain("`status:>=400`")
+      JSON.parse(call_tools(store, "list_sitemap", q("status >= 400")).text)["query_hint"].as_s
+        .should contain("`status:>=400`")
+    end
+  end
 end

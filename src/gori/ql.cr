@@ -601,12 +601,15 @@ module Gori
 
     def self.missing_colon_hint(query : String) : String?
       terms = FilterAst.terms(FilterAst.parse(query))
+      typed = query.split.join(' ')
       terms.each_index do |i|
         # `status >= 400` parses as three bare words, so a run of up to three is read back
-        # as the one comparison it was typed as.
+        # as the one comparison it was typed as — only when the operator typed it as one run:
+        # `terms` flattens OR and parentheses, and `status OR >= 400` is not that comparison.
         (1..3).each do |n|
           run = terms[i, n]
           break if run.size < n || run.any? { |t| t.negate? || t.source.includes?('"') }
+          next if n > 1 && !typed.includes?(run.join(' ', &.source))
           next unless m = MISSING_COLON.match(run.join(&.text))
           name, op, value = m[1].downcase, m[2], m[3]
           next unless known_field?(name)

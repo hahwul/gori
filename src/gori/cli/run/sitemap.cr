@@ -215,7 +215,7 @@ module Gori
           store.close
         end
 
-        emit_sitemap(hosts, format, truncated, limit)
+        emit_sitemap(hosts, format, truncated, limit, query)
       end
 
       # A tree query's QL half and its `tag:` terms. `tag:` is the tree's own field, not QL's
@@ -347,7 +347,7 @@ module Gori
       # Results → STDOUT; the empty-state and truncation notes → STDERR (STDOUT-purity). JSON
       # always emits a (possibly empty) array so scripts get valid JSON either way.
       private def self.emit_sitemap(hosts : Array(Sitemap::Node), format : Symbol,
-                                    truncated : Bool, limit : Int32) : Nil
+                                    truncated : Bool, limit : Int32, query : String? = nil) : Nil
         if note = sitemap_truncation_notice(truncated, limit)
           STDERR.puts "gori run sitemap: #{note}"
         end
@@ -355,6 +355,9 @@ module Gori
           puts CLI::Output.sitemap_json(hosts)
         elsif hosts.empty?
           STDERR.puts "no endpoints (capture some traffic, or relax --in-scope / --hide-static / the query)"
+          if hint = query.try { |q| QL.missing_colon_hint(q) }
+            STDERR.puts "gori run sitemap: #{hint}"
+          end
         elsif format == :paths
           print CLI::Output.sitemap_paths(hosts)
         else

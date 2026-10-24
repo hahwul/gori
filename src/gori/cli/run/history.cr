@@ -535,7 +535,7 @@ module Gori
             end
           end
           if count_only
-            emit_history_count(store, scope_unconfigured, combined, failed, format)
+            emit_history_count(store, scope_unconfigured, combined, failed, format, query)
             next
           end
           # The rescue covers a query or view that PARSES but SQLite still refuses to run (a
@@ -688,7 +688,8 @@ module Gori
       # number, or `{"count": N}` under --format json/jsonl. `--in-scope` with no rules is 0, as
       # the listing is empty; the note saying so was already printed.
       private def self.emit_history_count(store : Store, scope_unconfigured : Bool,
-                                          combined : QL::Filter?, failed : String, format : Symbol) : Nil
+                                          combined : QL::Filter?, failed : String, format : Symbol,
+                                          query : String? = nil) : Nil
         n =
           begin
             scope_unconfigured ? 0_i64 : store.count_matching(combined || QL::EMPTY)
@@ -696,6 +697,9 @@ module Gori
             abort_closing(store, "gori run history: #{failed} failed: #{ex.message}")
           end
         puts format.in?(:json, :jsonl) ? {count: n}.to_json : n
+        if n.zero? && (hint = query.try { |q| QL.missing_colon_hint(q) })
+          STDERR.puts "gori run history: #{hint}"
+        end
       end
 
       # One row's user-column values as `{label, value}` pairs plus whether any value was

@@ -244,10 +244,7 @@ module Gori
             end
             emit_cut(j, cut)
             emit_ignored_terms(j, dropped)
-            # The CLI's empty listing names this too; an empty page alone reads as "no such traffic".
-            if rows.empty? && (hint = query.try { |q| QL.missing_colon_hint(q) })
-              j.field "query_hint", hint
-            end
+            emit_query_hint(j, query) if rows.empty?
             j.field("flows") { raw_rows(j, parts) }
           end
         end)
@@ -294,8 +291,16 @@ module Gori
             j.field "scope_configured", false if scope_unconfigured
             j.field "limit_ignored", true if present?(h, "limit")
             emit_ignored_terms(j, ignored)
+            emit_query_hint(j, str(h, "query")) if count.zero?
           end
         end)
+      end
+
+      # The CLI's empty listing names this too; an empty answer alone reads as "no such traffic".
+      private def emit_query_hint(j : JSON::Builder, query : String?) : Nil
+        if hint = query.try { |q| QL.missing_colon_hint(q) }
+          j.field "query_hint", hint
+        end
       end
 
       # A History read that yields to the reader fiber and stops when the client cancels the

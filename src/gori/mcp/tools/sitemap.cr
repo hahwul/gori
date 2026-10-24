@@ -77,6 +77,7 @@ module Gori
             # entries: an entry is a captured transport key with counts, and these have none —
             # mixing them in would also make `has_more`/`offset` page two different things.
             emit_unrequested(j, parts.sum(&.bytesize)) if unrequested
+            emit_query_hint(j, terms.ql) if entries.empty?
             j.field("entries") { raw_rows(j, parts) }
           end
         end)
