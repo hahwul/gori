@@ -59,9 +59,9 @@ class Gori::Proxy::H2::StreamGate
   # their bytes (R3-F2).
   #
   # Derived from the bytes, not asserted by the caller, because the caller does not reliably
-  # know: `gori run intercept edit` runs `ContentLength.sync` over `--raw-file` unconditionally,
-  # the MCP tool runs it unless `update_content_length:false`, and the TUI editor runs it
-  # unless `^L` is off. What every one of those affordances PRODUCES is a `content-length`
+  # know: `gori run intercept edit` runs `ContentLength.sync_edit` unless
+  # `--no-update-content-length`, the MCP tool runs it unless `update_content_length:false`, and
+  # the TUI editor runs it unless `^L` is off. What every one of those affordances PRODUCES is a `content-length`
   # that agrees with the body the edit carries, and a HEAD-ONLY h2 hold carries no body — so a
   # value that DISAGREES cannot have come from any of them. That is the operator declaring one,
   # which on h2 is the RFC 9113 §8.1.1 probe (does this origin/CDN/WAF/gRPC gateway enforce
