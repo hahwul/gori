@@ -420,8 +420,15 @@ describe Gori::Export::Curl do
     it "sends a request-target that does not open with / verbatim, and names an absolute-form rewrite" do
       curl_of("GET ?x=1 HTTP/1.1\r\nHost: h\r\n\r\n", "http://h").should contain("--request-target '?x=1'")
       curl_of("CONNECT h:443 HTTP/1.1\r\nHost: h:443\r\n\r\n", "http://h").should contain("--request-target 'h:443'")
-      curl_of("GET http://h/x HTTP/1.1\r\nHost: h\r\n\r\n", "http://h")
+      curl_of("GET http://h/x HTTP/1.1\r\nHost: other.test\r\n\r\n", "http://h")
         .should contain("# request-target sent in origin-form")
+      # A forward-proxy capture: gori sent it upstream in origin-form too, so no note.
+      curl_of("GET http://h/x HTTP/1.1\r\nHost: h\r\n\r\n", "http://h").should_not contain("# request-target")
+    end
+
+    it "counts only the bytes past the chunked body's closing blank line" do
+      wire = "POST /a HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n\r\n"
+      curl_of(wire, "http://h").should contain("# 2 bytes after the terminating 0-chunk")
     end
 
     it "names a request-line version curl cannot write" do

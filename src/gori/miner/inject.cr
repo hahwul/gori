@@ -580,10 +580,14 @@ module Gori::Miner
         lines.each_with_index do |line, i|
           io << eol if i > 0
           if i == idx
-            io << line.rstrip << "; "
+            # The line's own CR stays at its end: on a mixed `\n\r\n` head `eol` is `\n`, so a
+            # CRLF Cookie line arrives here ending in `\r`, which `rstrip` used to eat.
+            cr = line.ends_with?('\r') ? "\r" : ""
+            io << line.rchop('\r').rstrip << "; "
             start = io.pos.to_i32
             io << joined
             stop = io.pos.to_i32
+            io << cr
           else
             io << line
           end

@@ -70,7 +70,20 @@ module Gori
         absolute = Gori::Url.absolute_form?(req_target)
         verbatim = req_target if !absolute && !req_target.empty? &&
                                  (!req_target.starts_with?('/') || req_target.includes?('#'))
-        command(method, url, header_lines, body, version, verbatim, absolute ? req_target : nil)
+        command(method, url, header_lines, body, version, verbatim,
+          absolute && !proxy_shaped?(req_target, url, header_lines) ? req_target : nil)
+      end
+
+      # A forward-proxy capture's absolute-form line — the URL itself, with a Host naming the same
+      # authority — goes upstream in origin-form from gori too, so the note would only be noise on
+      # every plain-HTTP capture. A disagreeing Host, or a target the URL does not reproduce, is
+      # the probe the note is for.
+      private def self.proxy_shaped?(req_target : String, url : String, header_lines : Array(String)) : Bool
+        return false unless req_target == url
+        host = header_lines.find { |l| l.partition(':')[0].strip.compare("host", case_insensitive: true) == 0 }
+        return true unless host
+        authority = url.partition("://")[2].split('/', 2)[0].partition('?')[0]
+        authority.compare(host.partition(':')[2].strip, case_insensitive: true) == 0
       end
 
       # The note for an absolute-form request line, which the command sends in origin-form: curl
@@ -339,7 +352,19 @@ module Gori
       private def self.chunked_tail(wire : Bytes) : Int32?
         off = Proxy::Codec::ContentDecode.trailer_offset(CHUNKED_HEAD, wire) || return nil
         rest = wire[off..]
-        rest.empty? || rest == "\r\n".to_slice || rest == "\n".to_slice ? nil : rest.size
+        # Less the blank line that ENDS the chunked body (after any trailers): it is framing,
+        # not bytes left over, and counting it put a phantom 2 in the note.
+        blank = if rest[0, 2]? == "\r\n".to_slice
+                  2
+                elsif rest[0, 1]? == "\n".to_slice
+                  1
+                elsif AsciiBytes.index(rest, "\r\n\r\n".to_slice)
+                  2
+                else
+                  0
+                end
+        n = rest.size - blank
+        n > 0 ? n : nil
       end
 
       # The field name exactly as captured — the bytes before the colon, unstripped — for an

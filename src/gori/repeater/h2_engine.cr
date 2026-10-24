@@ -1527,15 +1527,17 @@ module Gori
       # Where the text head ends. `Env.split_head_body`'s rule for a bare-LF request — a
       # CRLFCRLF-only scan read its body as header lines and sent no DATA — but only when the
       # head is not CRLF-framed: in a CRLF head an earlier `\n\n` / `\n\r\n` is a payload's
-      # bare LF at the end of a header VALUE (a fuzz `x\n`), which used to be refused as
-      # uncarriable and must not quietly end the head and send the real headers as DATA.
+      # bare LF at the end of a header VALUE (a fuzz `x\n`). That is refused: HTTP/2 has no
+      # encoding for it, ending the head there would send the headers below as DATA, and reading
+      # on to the CRLFCRLF dropped the LF silently — while the slot overlay, which splits at the
+      # shared boundary, put its header above the request's own and both went out.
       private def self.h2_split(request : Bytes) : {Bytes, Bytes?}
         sep = Gori::Env.head_body_separator(request)
         return Gori::Env.split_head_body(request) unless sep && sep[1] != 4
         crlf = AsciiBytes.index(request, "\r\n".to_slice)
         return Gori::Env.split_head_body(request) unless crlf && crlf < sep[0]
-        at = AsciiBytes.index(request, "\r\n\r\n".to_slice) || return {request, nil}
-        {request[0, at + 4], at + 4 < request.size ? request[at + 4, request.size - at - 4] : nil}
+        raise Gori::Error.new("a header value ends in a bare LF, which HTTP/2 cannot carry " \
+                              "(send it over HTTP/1.1, where the bytes go out as written)")
       end
 
       def self.parse_request(request : Bytes, scheme : String, host : String,

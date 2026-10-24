@@ -312,6 +312,12 @@ describe Gori::Miner::Inject do
     text(res).should eq("GET /a HTTP/1.1\r\nHost: h\r\n\r\n")
   end
 
+  # A mixed `\n\r\n` head splits on `\n`, so the CRLF Cookie line keeps its own CR.
+  it "keeps a CRLF Cookie line's terminator on a mixed head" do
+    res = M::Inject.apply(req("GET / HTTP/1.1\r\nCookie: a=b\r\nX: y\n\r\nBODY"), M::Location::Cookies, [{"zz", "1"}])
+    text(res).should eq("GET / HTTP/1.1\r\nCookie: a=b; zz=1\r\nX: y\n\r\nBODY")
+  end
+
   it "extends an existing Cookie header" do
     res = M::Inject.apply(req("GET /a HTTP/1.1\r\nHost: h\r\nCookie: s=1\r\n\r\n"), M::Location::Cookies, [{"p", "v"}])
     text(res).should contain("Cookie: s=1; p=v")
