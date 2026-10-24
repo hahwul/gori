@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script>
+    /* Set the color theme before first paint to avoid a flash. Default: dark. */
+    (function () {
+      document.documentElement.classList.add("has-js");
+      try {
+        var t = localStorage.getItem("gori-theme");
+        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Replay the requests you captured as another user, and as nobody, to see which ones the server forgets to check.">
+  
+  <title>Test access control - gori</title>
+  <link rel="icon" type="image/png" href="https://gori.hahwul.com/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="https://gori.hahwul.com/icons/favicon.svg" />
+  <link rel="shortcut icon" href="https://gori.hahwul.com/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="https://gori.hahwul.com/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Gori" />
+  <link rel="manifest" href="https://gori.hahwul.com/icons/site.webmanifest" />
+  <meta property="og:title" content="Test access control">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://gori.hahwul.com/playbooks/test-access-control/">
+  <meta property="og:description" content="Replay the requests you captured as another user, and as nobody, to see which ones the server forgets to check.">
+  <meta property="og:image" content="https://gori.hahwul.com/og-images/playbooks-test-access-control.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Test access control">
+  <meta name="twitter:description" content="Replay the requests you captured as another user, and as nobody, to see which ones the server forgets to check.">
+  <meta name="twitter:image" content="https://gori.hahwul.com/og-images/playbooks-test-access-control.png">
+  <meta property="og:site_name" content="gori">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:locale:alternate" content="ko_KR">
+  
+  <link rel="canonical" href="https://gori.hahwul.com/playbooks/test-access-control/">
+  
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Test access control","url":"https://gori.hahwul.com/playbooks/test-access-control/","description":"Replay the requests you captured as another user, and as nobody, to see which ones the server forgets to check.","image":"https://gori.hahwul.com/og-images/playbooks-test-access-control.png"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"gori","item":"https://gori.hahwul.com/"},{"@type":"ListItem","position":2,"name":"Playbooks","item":"https://gori.hahwul.com/playbooks/"},{"@type":"ListItem","position":3,"name":"Test access control"}]}</script>
+  <link rel="alternate" hreflang="en" href="https://gori.hahwul.com/playbooks/test-access-control/">
+<link rel="alternate" hreflang="ko" href="https://gori.hahwul.com/ko/playbooks/test-access-control/">
+  <link rel="alternate" hreflang="x-default" href="https://gori.hahwul.com/playbooks/test-access-control/">
+  
+  
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/style.css">
+  <link rel="stylesheet" href="https://gori.hahwul.com/css/docs.css">
+  
+  <link rel="preload" href="https://gori.hahwul.com/fonts/charis-sil-400.woff2" as="font" type="font/woff2" crossorigin>
+  
+  
+  
+</head>
+<body class="is-doc is-book" data-section="playbooks">
+  <a class="skip-link" href="#main">Skip to content</a>
+<header class="docs-header">
+  <a href="https://gori.hahwul.com/" class="logo" aria-label="gori home">
+    <span class="logo-mark" aria-hidden="true" style="--logo-src: url('https://gori.hahwul.com/images/gori.png')" title="Right-click to download logo"></span>
+    <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
+  </a>
+
+  
+  <nav class="top-nav" aria-label="Primary">
+    <a href="https://gori.hahwul.com/getting-started/">Start</a>
+    <a href="https://gori.hahwul.com/playbooks/" class="active" aria-current="true">Playbooks</a>
+    <a href="https://gori.hahwul.com/guide/">Guide</a>
+    <a href="https://gori.hahwul.com/reference/">Reference</a>
+  </nav>
+
+  
+  <details class="nav-compact">
+    <summary class="nav-compact-trigger" aria-label="Primary">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </summary>
+    <div class="nav-compact-panel" role="navigation" aria-label="Primary">
+      <a href="https://gori.hahwul.com/getting-started/">Start</a>
+      <a href="https://gori.hahwul.com/playbooks/" class="active" aria-current="true">Playbooks</a>
+      <a href="https://gori.hahwul.com/guide/">Guide</a>
+      <a href="https://gori.hahwul.com/reference/">Reference</a>
+      <a href="https://gori.hahwul.com/getting-started/installation/">Install</a>
+    </div>
+  </details>
+
+  
+  <div class="header-right">
+    <button class="search-trigger" onclick="openSearch()" aria-label="Search documentation" title="Search documentation (&#8984;K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+    </button>
+    
+    
+    <nav class="lang-switch" aria-label="Language">
+      
+      <a href="https://gori.hahwul.com/playbooks/test-access-control/" hreflang="en" lang="en" aria-label="EN: English" title="English" class="is-current" aria-current="true">EN</a>
+      
+      <a href="https://gori.hahwul.com/ko/playbooks/test-access-control/" hreflang="ko" lang="ko" aria-label="KO: 한국어" title="한국어">KO</a>
+      
+    </nav>
+    
+    <a class="github-link" href="https://github.com/hahwul/gori" target="_blank" rel="noopener noreferrer" aria-label="View on GitHub" title="View on GitHub">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58C20.57 22.29 24 17.79 24 12.5 24 5.87 18.63.5 12 .5z"/></svg>
+    </a>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle color theme" title="Toggle theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2v2.2M12 19.8V22M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2 12h2.2M19.8 12H22M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="logo-menu" id="logo-menu" hidden role="menu" aria-label="Download logo">
+  <div class="logo-menu-sep" aria-hidden="true">PNG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.png" download="gori-logo.png">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.png" download="gori-logo-dark.png">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.png" download="gori-logo-color.png">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">WebP</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.webp" download="gori-logo.webp">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.webp" download="gori-logo-dark.webp">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.webp" download="gori-logo-color.webp">Color</a>
+  <div class="logo-menu-sep" aria-hidden="true">SVG</div>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori.svg" download="gori-logo.svg">Mark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_dark.svg" download="gori-logo-dark.svg">Dark</a>
+  <a role="menuitem" href="https://gori.hahwul.com/images/gori_white.svg" download="gori-logo-color.svg">Color</a>
+  <div class="logo-menu-sep logo-menu-sep--rule" aria-hidden="true"></div>
+  <button type="button" role="menuitem" id="copy-logo-url" data-logo-url="https://gori.hahwul.com/images/gori.svg" data-label="Copy SVG URL" data-copied="Copied">Copy SVG URL</button>
+  <a role="menuitem" href="https://gori.hahwul.com/reference/brand/">Brand kit →</a>
+</div>
+<div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)closeSearch()">
+  <div class="search-modal" role="dialog" aria-modal="true" aria-label="Search documentation">
+    <div class="search-input-wrap">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m21 21-4.3-4.3"></path>
+      </svg>
+      <input type="search" id="searchInput" aria-label="Search" placeholder="Search the docs…" autocomplete="off" spellcheck="false">
+      <kbd class="search-esc" onclick="closeSearch()">ESC</kbd>
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+</div>
+
+
+<div class="docs-container book-reader">
+  <aside class="docs-sidebar">
+  <details class="docs-navigation" open>
+    <summary class="docs-navigation-toggle">Browse documentation</summary>
+
+    
+    <nav class="manual-nav book-nav" aria-label="The gori field guide">
+      
+      <a class="book-back" href="https://gori.hahwul.com/guide/">← Back to documentation</a>
+      
+
+      
+      <header class="book-nav-header">
+        <span class="manual-nav-label">The gori field guide</span>
+        <strong>Playbooks</strong>
+      </header>
+      <a class="nav-overview" href="https://gori.hahwul.com/playbooks/">Overview</a>
+      <p class="book-contents-label">Contents</p>
+
+      
+      
+      
+      
+      <details class="nav-group book-part">
+        <summary>Foundations</summary>
+        <ol class="nav-links book-chapters">
+      
+          <li>
+            <a href="https://gori.hahwul.com/playbooks/set-up-an-engagement/">
+              <span class="chapter-number" aria-hidden="true">1</span>
+              <span>Set up an engagement</span>
+            </a>
+          </li>
+      
+      
+      
+          <li>
+            <a href="https://gori.hahwul.com/playbooks/map-the-attack-surface/">
+              <span class="chapter-number" aria-hidden="true">2</span>
+              <span>Map the attack surface</span>
+            </a>
+          </li>
+      
+      
+      
+      </ol></details>
+      <details class="nav-group book-part">
+        <summary>The manual loop</summary>
+        <ol class="nav-links book-chapters">
+      
+          <li>
+            <a href="https://gori.hahwul.com/playbooks/intercept-and-modify/">
+              <span class="chapter-number" aria-hidden="true">3</span>
+              <span>Intercept and modify in flight</span>
+            </a>
+          </li>
+      
+      
+      
+          <li>
+            <a href="https://gori.hahwul.com/playbooks/fuzz-a-parameter/">
+              <span class="chapter-number" aria-hidden="true">4</span>
+              <span>Fuzz a parameter</span>
+            </a>
+          </li>
+      
+      
+      
+          <li>
+            <a href="https://gori.hahwul.com/playbooks/carry-a-session/">
+              <span class="chapter-number" aria-hidden="true">5</span>
+              <span>Carry a session</span>
+            </a>
+          </li>
+      
+      
+      
+      </ol></details>
+      <details class="nav-group book-part" open>
+        <summary>Workbenches</summary>
+        <ol class="nav-links book-chapters">
+      
+          <li>
+            <a href="https://gori.hahwul.com/playbooks/test-access-control/" class="active" aria-current="page">
+              <span class="chapter-number" aria-hidden="true">6</span>
+              <span>Test access control</span>
+            </a>
+          </li>
+      
+      
+      
+          <li>
+            <a href="https://gori.hahwul.com/playbooks/decode-and-transform/">
+              <span class="chapter-number" aria-hidden="true">7</span>
+              <span>Decode and transform data</span>
+            </a>
+          </li>
+      
+      
+      
+          <li>
+            <a href="https://gori.hahwul.com/playbooks/attack-a-jwt/">
+              <span class="chapter-number" aria-hidden="true">8</span>
+              <span>Attack a JWT</span>
+            </a>
+          </li>
+      
+      
+      
+          <li>
+            <a href="https://gori.hahwul.com/playbooks/crack-and-forge-cookies/">
+              <span class="chapter-number" aria-hidden="true">9</span>
+              <span>Crack and forge session cookies</span>
+            </a>
+          </li>
+      
+      
+      
+          <li>
+            <a href="https://gori.hahwul.com/playbooks/grade-token-randomness/">
+              <span class="chapter-number" aria-hidden="true">10</span>
+              <span>Grade token randomness</span>
+            </a>
+          </li>
+      
+      
+      
+          <li>
+            <a href="https://gori.hahwul.com/playbooks/confirm-blind-vulns-oast/">
+              <span class="chapter-number" aria-hidden="true">11</span>
+              <span>Confirm blind vulnerabilities with OAST</span>
+            </a>
+          </li>
+      
+      
+      
+      </ol></details>
+      <details class="nav-group book-part">
+        <summary>Wrap up</summary>
+        <ol class="nav-links book-chapters">
+      
+          <li>
+            <a href="https://gori.hahwul.com/playbooks/triage-and-report/">
+              <span class="chapter-number" aria-hidden="true">12</span>
+              <span>Triage and report</span>
+            </a>
+          </li>
+      
+      
+      
+          <li>
+            <a href="https://gori.hahwul.com/playbooks/run-an-ai-co-pilot/">
+              <span class="chapter-number" aria-hidden="true">13</span>
+              <span>Run an AI co-pilot session</span>
+            </a>
+          </li>
+      </ol></details>
+      
+      
+    </nav>
+
+    
+  </details>
+</aside>
+  <main id="main" class="docs-main">
+    <nav class="document-path" aria-label="You are here">
+      <a href="https://gori.hahwul.com/playbooks/">The gori field guide</a>
+      
+      <span aria-hidden="true">/</span><span>Workbenches</span>
+    </nav>
+    <header class="document-heading">
+      
+      
+      
+      <p class="chapter-label">Chapter <span>6</span> <span class="chapter-total">/ 13</span></p>
+      
+      
+      <h1>Test access control</h1>
+    </header>
+    <div class="toc-placeholder" aria-hidden="true"></div>
+    <article class="document-body"><p>You browsed the app as one user, and every page worked. That proves very little. The real question is what happens when someone <em>else</em> asks for the same thing: a user with fewer rights, a user from another account, or someone who is not logged in at all. This playbook sets up those people as identities, replays your captured requests as each of them, and reads which requests came back the same when they should not have. Budget about fifteen minutes.</p>
+<blockquote>
+<p><strong>Before you begin.</strong> <a href="/playbooks/set-up-an-engagement/">Set up an engagement</a> so your target is scoped, and get two test accounts from whoever authorized the test: one with more rights than the other. <a href="/playbooks/carry-a-session/">Carry a session</a> explains session slots in more depth, but you do not need it first. Only test a target you are authorized to test; the examples use <code>api.example.com</code> as a stand-in.</p>
+</blockquote>
+<h2 id="1-browse-as-the-stronger-user">1. Browse as the stronger user</h2>
+<p>Log in as the account with more rights (an admin, or the owner of some data) and use the app normally through gori. Open the pages, list the records, view a single record, change a setting. Every request you make now is one you can replay later as someone else, so the more of the app you touch, the more you get to test.</p>
+<p>Watch for requests that carry an id or name a resource: <code>/orders/1042</code>, <code>/api/users/7/profile</code>, <code>?account=acme</code>. Those are where access-control bugs usually live.</p>
+<p><strong>Checkpoint.</strong> <strong>History</strong> holds the admin's traffic, including a few requests that fetch one specific record.</p>
+<h2 id="2-make-an-identity-for-the-weaker-user">2. Make an identity for the weaker user</h2>
+<p>An identity is a set of header changes gori applies before it replays a request. A new project already has two: <strong>as-captured</strong>, which sends the request exactly as you captured it, and <strong>anonymous</strong>, which removes <code>Cookie</code> and <code>Authorization</code>. You only need to add the weaker user.</p>
+<p>The quickest way is to let gori read a login. Log in as the weaker account through gori in a second browser or a private window, find that login in History, and build a slot from it. Do not log the admin out to do this: on most apps that kills the session cookie your captured requests carry, and every replay would start from a dead session.</p>
+<pre><code class="language-bash hljs">gori run history -q 'path:/login status:200'
+gori run session from-flow &lt;login-flow-id&gt; --name low-priv
+</code></pre>
+<p>gori takes the cookies (or the bearer token) from the login response and saves them as the <code>low-priv</code> identity. In the TUI you can do the same by hand: open the <strong>Authorize</strong> tab, press <code>i</code>, then <code>a</code>, name it <code>low-priv</code>, and paste the user's <code>Cookie:</code> line into the set-headers field.</p>
+<p>The Authorize tab is not on the tab bar by default. Press <code>0</code> and type &quot;auth&quot;, or use <code>Ctrl-P</code> → <strong>Go to Authorize</strong>.</p>
+<p><strong>Checkpoint.</strong> <code>gori run session list</code> (or <code>i</code> on the Authorize tab) shows three identities: <code>as-captured</code>, <code>anonymous</code> and <code>low-priv</code>.</p>
+<h2 id="3-queue-the-requests-and-run">3. Queue the requests and run</h2>
+<p>In <strong>History</strong>, select the requests worth testing and press <code>Space</code> → <code>&gt;</code> → <code>a</code> (<strong>Send flow to…</strong> → <strong>Send to Authorize</strong>). Pick requests that return something private: a record, a profile, a settings page, an admin list. A public page tells you nothing.</p>
+<p>On the <strong>Authorize</strong> tab, press <code>Ctrl-R</code>. gori replays each queued request once per identity, each on its own connection, and compares every answer with the as-captured one.</p>
+<p>Headless, name the flows (or a query) instead:</p>
+<pre><code class="language-bash hljs">gori run authorize 12 13 14
+gori run authorize --query 'host:api.example.com method:GET status:200' --limit 20
+</code></pre>
+<p>By default only <code>GET</code>, <code>HEAD</code> and <code>OPTIONS</code> are replayed headless. A replayed <code>POST</code> or <code>DELETE</code> does its job again, once for every identity, so gori skips those unless you pass <code>--unsafe-methods</code>. Only do that on a test account where running the action again is harmless. In the TUI, a request you queued by hand is replayed whatever its method, because you chose it.</p>
+<p><strong>Checkpoint.</strong> Every queued row has a verdict, and <code>⇥</code> shows how each identity answered.</p>
+<h2 id="4-read-the-results">4. Read the results</h2>
+<p>Each identity's answer is compared with the baseline on status, size and content:</p>
+<table>
+<thead>
+<tr>
+<th>Verdict</th>
+<th>What it means</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>same</code></td>
+<td>This identity got what the admin got. If it should not have, that is your bug</td>
+</tr>
+<tr>
+<td><code>different</code></td>
+<td>A different kind of answer, such as a <code>403</code> or a redirect to the login page. Access control did its job</td>
+</tr>
+<tr>
+<td><code>review</code></td>
+<td>Close but not the same. Look at it yourself</td>
+</tr>
+<tr>
+<td><code>error</code></td>
+<td>The request failed. Nothing was compared</td>
+</tr>
+</tbody>
+</table>
+<p>A request row reads <strong>BYPASS</strong> when any identity came back <code>same</code>. That is a lead, not a finding yet. <code>same</code> for <code>anonymous</code> on <code>/admin/users</code> is a real problem. <code>same</code> for <code>low-priv</code> on a page every user is allowed to see is fine. gori can compare the answers, but only you know who is supposed to see what.</p>
+<p>If almost every row reads <code>review</code>, check the baseline first. When the admin's own replay comes back <code>401</code> or <code>403</code>, the captured session has expired and there is nothing to compare against. Log in as the admin again, capture fresh requests, and rerun.</p>
+<p><code>review</code> needs a careful look. Some apps answer a denied request with a friendly &quot;access denied&quot; page and a <code>200</code>, and some pages are almost the same for every user. Open the row and read both bodies.</p>
+<p>Headless output puts <code>[!] BYPASS</code> at the start of the line so it is easy to spot:</p>
+<pre><code>[!] BYPASS    #1     GET    https://api.example.com/admin/users  · 1 of 2 identities matched the baseline
+      as-captured         baseline  200  4.1KB    —
+      anonymous           different 302  0B       Δ status 200 → 302 · …
+      low-priv            same      200  4.1KB    Δ status 200 · size same · …
+</code></pre>
+<p><strong>Checkpoint.</strong> You have a short list of <code>BYPASS</code> and <code>review</code> rows, and you know which of them are real.</p>
+<h2 id="5-confirm-one-by-hand">5. Confirm one by hand</h2>
+<p>Before you write anything up, prove it once by hand. Send the request to the <strong>Repeater</strong> (<code>Ctrl-R</code> from History), pick the weaker identity with <code>Ctrl-P</code> → <strong>Session slot</strong>, and send it. Headless:</p>
+<pre><code class="language-bash hljs">gori run repeater &lt;flow-id&gt; --slot low-priv
+</code></pre>
+<p>Check that the response really holds the admin's data, not an empty shell or a cached page. For an id in the path, try a record that belongs to another user, too. A bug that lets user A read user B's order is worth more than one that shows A their own.</p>
+<p><strong>Checkpoint.</strong> A Repeater send as <code>low-priv</code> returns data that user should not see.</p>
+<h2 id="6-file-it">6. File it</h2>
+<p>Turn the confirmed row into an issue with the flow attached, so the evidence stays with it:</p>
+<pre><code class="language-bash hljs">gori run issues create --title &quot;Low-privilege user can list all users&quot; \
+  --severity high --host api.example.com --flow &lt;flow-id&gt;
+</code></pre>
+<p><a href="/playbooks/triage-and-report/">Triage and report</a> covers the rest: severity, notes, and the export.</p>
+<h2 id="when-nothing-comes-back">When nothing comes back</h2>
+<p>An empty result is not always good news. gori tells you when it skipped a request instead of quietly sending less:</p>
+<ul>
+<li><strong>no identity changes them</strong>: the request carries no header any identity changes, so every identity would send the same bytes. The endpoint probably authenticates in a header you did not cover (<code>X-Api-Key</code>, for example). Add an identity that sets or removes it.</li>
+<li><strong>not a safe method to repeat</strong>: see step 3.</li>
+<li><strong>outside project scope</strong>: add the host to the scope.</li>
+</ul>
+<p>If every send was refused or failed, the run says nothing was sent. It never reports that as &quot;access control held&quot;. And <code>enforced</code> only covers the identities and requests you tried. An endpoint you never browsed is untested, not safe.</p>
+<h2 id="next-steps">Next Steps</h2>
+<ul>
+<li><a href="/guide/authorize/">Authorization Testing</a>: every verdict rule, passive replay, and the MCP tools</li>
+<li><a href="/playbooks/carry-a-session/">Carry a session</a>: tokens that rotate, and refresh steps for long runs</li>
+<li><a href="/playbooks/triage-and-report/">Triage and report</a>: turn the bypass into a report</li>
+</ul>
+</article>
+    
+
+
+<nav class="page-navigation" aria-label="Continue reading">
+  
+  <a href="https://gori.hahwul.com/playbooks/carry-a-session/" rel="prev"><span>← Previous</span><strong>Carry a session</strong></a>
+  
+  
+  <a href="https://gori.hahwul.com/playbooks/decode-and-transform/" rel="next"><span>Next →</span><strong>Decode and transform data</strong></a>
+  
+</nav>
+
+  </main>
+  <aside class="docs-toc-rail" id="tocRail" aria-label="On this page" data-title="On this page"></aside>
+</div>
+
+
+<footer class="docs-footer">
+  <p class="footer-meta">
+    <a class="footer-sig" href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul, Built with Love">
+      <span class="hahwul-img" aria-hidden="true"></span>
+      <span class="footer-love">Built with Love</span>
+    </a>
+    <span aria-hidden="true">·</span>
+    <span>Apache-2.0 · © HAHWUL</span>
+  </p>
+</footer>
+<script>
+  /* Theme toggle: flip data-theme, remember the choice, and swap the TUI
+     screenshots to the matching light/dark capture. */
+  (function () {
+    /* Point every TUI screenshot at its light or dark capture. The light set
+       lives under images/tui/light/; the theme gallery (theme-*.svg) is left
+       alone, and any shot without a light twin falls back to the dark one. */
+    function syncTuiShots() {
+      var light = document.documentElement.getAttribute("data-theme") === "light";
+      var imgs = document.querySelectorAll('img[src*="/images/tui/"]');
+      for (var i = 0; i < imgs.length; i++) {
+        var img = imgs[i];
+        if (img.dataset.noLight === "1") continue;
+        /* Decide from the ORIGINAL dark src, not the live one (which may already
+           be swapped to the light path from a previous toggle). */
+        var orig = img.dataset.darkSrc || img.getAttribute("src");
+        if (orig.indexOf("/images/tui/light/") !== -1 || /\/images\/tui\/theme-/.test(orig)) continue;
+        if (!img.dataset.darkSrc) img.dataset.darkSrc = orig;
+        var want = light ? orig.replace("/images/tui/", "/images/tui/light/") : orig;
+        if (img.getAttribute("src") === want) continue;
+        if (light) {
+          img.onerror = function () { this.onerror = null; this.dataset.noLight = "1"; this.setAttribute("src", this.dataset.darkSrc); };
+        } else {
+          img.onerror = null;
+        }
+        img.setAttribute("src", want);
+      }
+    }
+
+    var btn = document.getElementById("themeToggle");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", next);
+        try { localStorage.setItem("gori-theme", next); } catch (e) {}
+        syncTuiShots();
+      });
+    }
+    syncTuiShots();
+  })();
+
+  /* The search tooltip ships as ⌘K; outside Apple platforms say Ctrl K
+     instead (search.js already answers to both modifiers). */
+  (function () {
+    var st = document.querySelector(".search-trigger");
+    if (st && !/Mac|iPhone|iPad|iPod/.test(navigator.platform || "")) {
+      st.title = st.title.replace("⌘K", "Ctrl K");
+    }
+  })();
+
+  /* Hero install picker: swap the one-liner for the chosen channel, copy it
+     on click. Present only on the home page. */
+  (function () {
+    var root = document.getElementById("heroInstall");
+    if (!root) return;
+    var cmd = document.getElementById("installCmd");
+    var tabs = root.querySelectorAll(".install-tab");
+    function pick() {
+      for (var i = 0; i < tabs.length; i++) tabs[i].setAttribute("aria-pressed", tabs[i] === this ? "true" : "false");
+      cmd.textContent = this.getAttribute("data-cmd");
+    }
+    for (var i = 0; i < tabs.length; i++) tabs[i].addEventListener("click", pick);
+
+    var btn = document.getElementById("installCopy");
+    var timer = null;
+    btn.addEventListener("click", function () {
+      var text = cmd.textContent;
+      function done() {
+        btn.classList.add("copied");
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(function () { btn.classList.remove("copied"); }, 1600);
+      }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      } else {
+        /* http:// preview, or clipboard API rejections (focus/permission) */
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { if (document.execCommand("copy")) done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  })();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+<script src="https://gori.hahwul.com/js/search.js" defer></script>
+<script src="https://gori.hahwul.com/js/toc.js" defer></script>
+<script src="https://gori.hahwul.com/js/docs.js" defer></script>
+<script src="https://gori.hahwul.com/js/codecopy.js" defer></script>
+<script src="https://gori.hahwul.com/js/logo-menu.js" defer></script>
+
+</body>
+</html>
