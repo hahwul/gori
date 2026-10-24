@@ -875,7 +875,7 @@ gori settings tls-fingerprint shop.example.com
 
 **프리셋은 근사치로 읽으세요.** 분류기가 읽는 값 수준 필드는 전부 맞추지만, 브라우저의 JA3를 바이트 단위로 재현하지는 못합니다. 확장 순서와 GREASE 배치는 OpenSSL의 것이고 거기서 설정할 수 없습니다. 그래도 "순정 OpenSSL 클라이언트로 보이는 것"은 대개 면할 수 있고, 탐지되는 실체가 바로 그것입니다. 다만 비교는 다이제스트가 아니라 `JA4_r` 목록으로 하고, 다이제스트는 다를 것으로 예상하세요.
 
-**`chrome`은 Chrome의 클라이언트 힌트도 보냅니다.** gori가 직접 보내는 `https` 요청(Repeater, Fuzzer, Discover, Authorize, Miner, `gori run`, MCP)에 `chrome` 프리셋이 걸려 있으면, Chrome이 보내는 `sec-ch-ua`·`sec-ch-ua-mobile`·`sec-ch-ua-platform` 헤더를 `User-Agent` 바로 앞에 넣습니다. 값은 그 요청의 User-Agent에서 Chrome 자신의 브랜드 알고리즘으로 계산하므로, `$GEN.USER_AGENT`와 브랜드 목록은 언제나 같은 버전을 말합니다. User-Agent가 Chrome 자신이 보내는 형태가 아닐 때(Edge, Opera, 스캐너 문자열), 요청에 이미 `sec-ch-ua` 계열 헤더가 하나라도 있을 때(직접 쓴 값이 이깁니다), WebSocket 핸드셰이크, 그리고 프록시를 지나가는 트래픽에는 아무것도 넣지 않습니다. Firefox와 Safari는 클라이언트 힌트를 보내지 않으므로 그 프리셋은 아무것도 넣지 않습니다.
+**`chrome`은 Chrome의 클라이언트 힌트도 보냅니다.** gori가 직접 보내는 `https` 요청(Repeater, Fuzzer, Discover, Authorize, Miner, `gori run`, MCP)에 `chrome` 프리셋이 걸려 있으면, Chrome이 보내는 `sec-ch-ua`·`sec-ch-ua-mobile`·`sec-ch-ua-platform` 헤더를 `User-Agent` 바로 앞에 넣습니다. 값은 그 요청의 User-Agent에서 Chrome 자신의 브랜드 알고리즘으로 계산하므로, `$GEN.USER_AGENT`와 브랜드 목록은 언제나 같은 버전을 말합니다. User-Agent가 Chrome 자신이 보내는 형태가 아닐 때(Edge, Opera, 스캐너 문자열), 요청에 이미 `sec-ch-ua` 계열 헤더가 하나라도 있을 때(직접 쓴 값이 이깁니다), `--verbatim` / `verbatim: true` 전송, WebSocket 핸드셰이크, 그리고 프록시를 지나가는 트래픽에는 아무것도 넣지 않습니다. Firefox와 Safari는 클라이언트 힌트를 보내지 않으므로 그 프리셋은 아무것도 넣지 않습니다.
 
 ### 질문을 반대로 던지기 {#asking-the-question-the-other-way-round}
 

@@ -324,10 +324,11 @@ module Gori
       #
       #   * the `chrome` TLS preset's client hints (#1174, `Env.client_hints`), last, read off
       #     the User-Agent the first two passes left — so they agree with the UA the socket
-      #     gets, whoever wrote it. Regardless of `verbatim` for the slot's reason: the preset
-      #     is the operator answering "present as which browser", and a Chrome handshake with
-      #     no hints answers it wrongly. A request that already names any `sec-ch-ua*` header
-      #     is the operator's own set and gets nothing added.
+      #     gets, whoever wrote it. NOT under `verbatim`, unlike the slot: a slot is named in
+      #     the same command, while the preset is often a standing destination policy, and
+      #     `--verbatim` / `verbatim:true` promise the bytes the operator typed, EXACTLY — three
+      #     headers nobody typed broke that on every Chrome-UA request. A request that already
+      #     names any `sec-ch-ua*` header is the operator's own set and gets nothing added.
       #
       # Header-only passes, so Content-Length cannot move and the body stays byte-exact (P7).
       #
@@ -361,7 +362,7 @@ module Gori
         Gori::SessionRefresh.before_send(Gori::Env.active_slot_name) unless refreshing
         bytes = expand_send(bytes, gen, refreshing) if resolve_bindings?
         bytes = Gori::Env.overlay_slot(bytes, gen) unless refreshing
-        Gori::Env.client_hints(bytes, gen)
+        @expand_bindings ? Gori::Env.client_hints(bytes, gen) : bytes
       end
 
       def send(bytes : Bytes) : Result

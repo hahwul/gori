@@ -160,6 +160,16 @@ describe "client hints on the Repeater wire" do
     end
   end
 
+  # `--verbatim` / `verbatim:true` (`expand_bindings: false`) promise the typed bytes exactly.
+  it "adds none on a verbatim send" do
+    req = "GET / HTTP/1.1\r\nUser-Agent: #{WIN_153}\r\n\r\n".to_slice
+    {true, false}.each do |expand|
+      sender = Gori::Repeater::Sender.new(ungated_outbound, scheme: "https", host: "any.test",
+        port: 443, verify: false, tls_preset: "chrome", expand_bindings: expand)
+      String.new(sender.wire(req)).includes?("sec-ch-ua").should eq(expand)
+    end
+  end
+
   it "adds none under another preset or none" do
     {"firefox", nil}.each do |preset|
       sender = Gori::Repeater::Sender.new(ungated_outbound, scheme: "https", host: "any.test",
