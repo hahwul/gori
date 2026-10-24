@@ -347,8 +347,25 @@ module Gori::Fuzz
     num_spec match_time
     num_spec filter_time
 
-    property match_regex : Regex?
-    property filter_regex : Regex?
+    # The surfaces hand over the operator's own `Regex` (its `source` is what the TUI saves),
+    # and the per-response match runs a `SafeRegexp.budgeted` twin under `within_budget` (P6):
+    # PCRE2's match limit resets at every start position, so one `--mr` over a body could hold
+    # the scheduler thread for seconds on every response. A pattern that cannot carry the
+    # budget keeps running bare, as it did before.
+    getter match_regex : Regex?
+    getter filter_regex : Regex?
+    @match_budgeted : Regex?
+    @filter_budgeted : Regex?
+
+    def match_regex=(re : Regex?)
+      @match_regex = re
+      @match_budgeted = re.try { |r| Gori::SafeRegexp.budgeted(r.source) rescue r }
+    end
+
+    def filter_regex=(re : Regex?)
+      @filter_regex = re
+      @filter_budgeted = re.try { |r| Gori::SafeRegexp.budgeted(r.source) rescue r }
+    end
 
     # Substring over the response head. Cache the lowercased needle ONCE on assignment
     # (like the num_spec/status_spec setters) so the per-response check neither re-lowercases
@@ -809,7 +826,7 @@ module Gori::Fuzz
         # (a PCRE match over the whole body): both are pure predicates, so `&&` short-circuits
         # identically either way, but this order lets a failing --mh skip the body match.
         header_pass?(@match_header_lc, raw, default: true) &&
-        regex_pass?(@match_regex, text, default: true)
+        regex_pass?(@match_budgeted, text, default: true)
     end
 
     # Any filter dimension that passes removes the result.
@@ -826,7 +843,7 @@ module Gori::Fuzz
         # scan over the short head is cheaper than a PCRE match over the whole body, and `||`
         # short-circuits identically either way.
         header_pass?(@filter_header_lc, raw, default: false) ||
-        regex_pass?(@filter_regex, text, default: false)
+        regex_pass?(@filter_budgeted, text, default: false)
     end
 
     # `matches_at_byte_index?(text, 0)`, not `matches?(text)`. The two run the same PCRE2 match
@@ -837,7 +854,8 @@ module Gori::Fuzz
     # for the match itself: more than twice the response's regex cost spent deciding that byte 0
     # is byte 0. Same answer, on an empty body too (`char_index_to_byte_index(0)` is 0 there).
     private def regex_pass?(re : Regex?, text : String, default : Bool) : Bool
-      re ? re.matches_at_byte_index?(text, 0) : default
+      return default unless re
+      Gori::SafeRegexp.within_budget(re.source, text.bytesize) { re.matches_at_byte_index?(text, 0) }
     rescue Regex::Error
       # A catastrophic-backtracking user regex (--mr / --fr) raises "match limit exceeded" on a
       # large response body instead of returning false; treat an un-evaluable pattern as no-match

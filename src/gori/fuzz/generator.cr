@@ -372,9 +372,13 @@ module Gori::Fuzz
     # the canonical `Content-Length: N` — so the range now covers digits gori wrote itself,
     # and excluding those from a `$NAME` scan is a no-op either way. Dropping it would be a
     # silent narrowing of the exclusion instead, which is the direction that bites.
+    #
+    # A span that STRADDLES `at` keeps its start and moves its end: a payload carrying its own
+    # blank line (`a\r\n\r\n$TOKEN`) is where the Content-Length line gets inserted, and an
+    # unmoved end would leave the payload's tail — `$TOKEN` — outside the exclusion.
     private def shift_spans(spans : Array({Int32, Int32}), at : Int32,
                             delta : Int32) : Array({Int32, Int32})
-      spans.map { |(a, b)| a >= at ? {a + delta, b + delta} : {a, b} }
+      spans.map { |(a, b)| a >= at ? {a + delta, b + delta} : {a, b > at ? b + delta : b} }
     end
 
     # A random alphanumeric string with no whitespace — safe to drop into a query/body

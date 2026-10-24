@@ -1047,7 +1047,11 @@ module Gori::Fuzz
           # skip exists to prevent. One byte of separation is enough: `§x§Z§b§` is two
           # positions. (The advance above is therefore `<`, not `<=`: a span ending AT `i`
           # still touches an occurrence starting there.)
-          if si < spans.size && i + needle.size >= spans[si][0]
+          # An ESCAPED `§§` right after the token is not in `spans` but touches all the same:
+          # `5§§` would wrap to `§5§§§`, whose inner `§§` `parse` reads as an escape, so the
+          # position becomes `5§` and the capture's literal `§` is swept away with each payload.
+          if (si < spans.size && i + needle.size >= spans[si][0]) ||
+             hay[i + needle.size, marker.size]? == marker
             shadowed = true
           else
             io.write(marker)

@@ -386,6 +386,34 @@ describe F::ConnPool do
   end
 
   describe "over a real socket" do
+    # The re-dial after a stale EOF FAILS (the origin is gone): no second copy went out, so the
+    # row is not marked a re-send and `stale_retries` stays 0.
+    it "does not count a failed re-dial as a re-send" do
+      srv = TCPServer.new("127.0.0.1", 0)
+      port = srv.local_address.port
+      spawn do
+        if conn = srv.accept?
+          srv.close # nothing answers the re-dial
+          Gori::Proxy::Codec::Http1.read_head(conn)
+          conn << "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
+          conn.flush
+          Gori::Proxy::Codec::Http1.read_head(conn) # the second request, then EOF unanswered
+          conn.close
+        end
+      rescue
+      end
+      pool = F::ConnPool.new("http", "127.0.0.1", port, false, nil, 1.second, nil, 1)
+      begin
+        pool.send(req("GET /one HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")).error.should be_nil
+        result = pool.send(req("GET /two HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"))
+        result.error.should_not be_nil
+        result.retried?.should be_false
+        pool.stale_retries.should eq(0)
+      ensure
+        pool.close_all
+      end
+    end
+
     it "does not replay a reused GET after its response read times out" do
       origin = SilentResponseOrigin.new(500.milliseconds)
       pool = F::ConnPool.new("http", "127.0.0.1", origin.port, false, nil,

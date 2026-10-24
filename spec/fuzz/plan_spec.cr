@@ -622,6 +622,14 @@ describe "Gori::Fuzz::Plan --mark over already-marked text" do
       .should eq("GET /?q=a§b HTTP/1.1\r\nHost: t.test\r\n\r\n")
   end
 
+  # The mirror case: a token flush BEFORE an escaped `§§` would wrap to `§a§§§b`, whose inner
+  # `§§` `parse` reads as an escape — the position became `a§` and the capture's `§` was swept.
+  it "skips a token flush before an escaped literal § and reports it shadowed" do
+    plan = mark_plan("GET /?q=a§§b&z=§1§ HTTP/1.1\r\nHost: t.test\r\n\r\n", ["a"])
+    plan.template.default_payloads.should eq(["1"])
+    plan.shadowed_marks.should eq(["a"])
+  end
+
   # A token that is not in the text is NOT a shadowed mark: it has nothing to report beyond
   # the 0 count, and conflating the two would make the note fire for a plain typo.
   it "does not report a token that simply does not occur" do

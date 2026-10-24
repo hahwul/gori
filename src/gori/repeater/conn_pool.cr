@@ -184,7 +184,6 @@ module Gori::Repeater
             drain
             return unsafe_stale_result(result, method)
           end
-          @stale_retries += 1
           return dial_and_send(bytes, keepable, method, retried: true)
         end
         @consecutive_stale = 0
@@ -252,11 +251,13 @@ module Gori::Repeater
       started = Time.instant
       io, dial_error = Repeater::Engine.dial_result(@scheme, @host, @port, @verify,
         @sni, @timeout, @overrides, @tls_preset)
+      # A re-dial that FAILS put no second copy on the wire, so it is neither counted in
+      # `stale_retries` nor marked `retried`.
       unless io
-        err = Repeater::Engine.error(
+        return Repeater::Engine.error(
           Repeater::Engine.connect_error(@scheme, @host, @port, @verify, dial_error), started)
-        return retried ? err.as_retried : err
       end
+      @stale_retries += 1 if retried
       @dialed += 1
       result = Repeater::Engine.exchange(io, bytes, @host, @port, started, origin_scheme: @scheme, sse: @sse)
       recycle(io, result, keepable, method)

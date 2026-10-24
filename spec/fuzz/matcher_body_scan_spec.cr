@@ -168,3 +168,20 @@ describe "Fuzz::Matcher named extractors (#1592)" do
     build_for("x".to_slice) { }.extracts.should be_nil
   end
 end
+
+describe "a --mr / --fr regex over a response body" do
+  # PCRE2's match limit resets at every start position, so without the time budget this
+  # pattern held the scheduler thread ~5 s on one 20 KB body (P6).
+  it "runs under the match budget" do
+    m = F::Matcher.new
+    m.match_regex = Regex.new("(?:(?:[\\s\\S]|[\\s\\S]){16}(?!))?[\\x01-\\x02]")
+    body = (("X-A: " + "a" * 60 + "\r\n") * 300).to_slice
+    head = "HTTP/1.1 200 OK\r\nContent-Length: #{body.size}\r\n\r\n".to_slice
+    raw = Gori::Repeater::Result.new(head, body, Gori::Proxy::Codec::Http1.parse_response_head(head), 1_i64, nil)
+    job = F::Job.new(0_i64, ["x"], nil, "GET / HTTP/1.1\r\n\r\n".to_slice)
+    t = Time.instant
+    m.build(job, raw)
+    (Time.instant - t).should be < 1.second
+    m.match_regex.try(&.source).should eq("(?:(?:[\\s\\S]|[\\s\\S]){16}(?!))?[\\x01-\\x02]")
+  end
+end

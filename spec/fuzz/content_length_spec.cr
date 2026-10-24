@@ -138,3 +138,18 @@ describe F::ContentLength do
     end
   end
 end
+
+describe "the Content-Length pass and a payload's verbatim span" do
+  # A header-injection payload carrying its own blank line is where the inserted
+  # `Content-Length:` lands; the span must still cover the payload's tail, or a `$TOKEN` there
+  # would be resolved against the live session.
+  it "moves the end of a span the inserted line splits" do
+    tmpl = F::Template.parse("POST / HTTP/1.1\r\nHost: t\r\nX: §v§\r\n\r\n")
+    gen = F::Generator.new(tmpl, [F::PayloadSet.new(F::InlineList.new(["a\r\n\r\n$TOKEN"]))], F::Config.new)
+    job = nil.as(F::Job?)
+    gen.each { |j| job = j }
+    j = job.should_not be_nil
+    a, b = j.payload_spans[0]
+    String.new(j.bytes[a, b - a]).should end_with("$TOKEN")
+  end
+end

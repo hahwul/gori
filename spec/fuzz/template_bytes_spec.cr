@@ -150,3 +150,11 @@ describe "Gori::Fuzz::Template — byte fidelity" do
     end
   end
 end
+
+describe "Template.mark_word beside an escaped literal §" do
+  # `§5§§§` would parse as the ONE position `5§`: the capture's literal `§` would be swept.
+  it "refuses a token flush before an escaped §§" do
+    text = "GET /s?q=5§§ HTTP/1.1"
+    T.mark_word(text, text.index('5').not_nil!).should eq(text)
+  end
+end

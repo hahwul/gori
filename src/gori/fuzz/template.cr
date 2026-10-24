@@ -622,6 +622,8 @@ module Gori::Fuzz
       end
       if lo == hi
         text # on a delimiter/space: no token to wrap (a bare §§ would parse as an escaped literal §, not a position)
+      elsif chars[hi]? == MARKER
+        text # flush against an escaped `§§`: `§5§§§` would parse as the one position `5§`
       else
         "#{text[0, lo]}#{MARKER}#{text[lo, hi - lo]}#{MARKER}#{text[hi..]}"
       end
