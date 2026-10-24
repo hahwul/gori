@@ -26,7 +26,8 @@ module Gori
       # The one sentence every surface uses to refuse recording a WebSocket sweep, so the CLI
       # and MCP cannot word it differently — the same job `CLI::Run.ws_notice_dropped_note` does
       # for the seed side.
-      WS_UNSUPPORTED = "--record-history is HTTP-only: a WebSocket sweep is a framed exchange, " \
+      WS_UNSUPPORTED = "recording history (`record_history`/`--record-history`) is HTTP-only: " \
+                       "a WebSocket sweep is a framed exchange, " \
                        "not a request/response flow"
 
       # Record `r`'s rendered request + response as one flow and return the new id, or nil when

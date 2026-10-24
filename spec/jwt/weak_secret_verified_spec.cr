@@ -42,7 +42,10 @@ describe "Jwt.attacks · a weak key that is THIS token's key" do
     verified[0].name.should eq("HS256 secret=secret")
     verified[0].note.should contain("SECRET FOUND")
     # …and says what to DO with it, which is the whole reason the finding is worth a field.
+    # The note reaches the TUI, MCP and the CLI alike, so it names each surface's way.
     verified[0].note.should contain("--encode --secret secret")
+    verified[0].note.should contain("jwt_encode")
+    verified[0].note.should contain("ENCODE lens")
   end
 
   it "reads a header holding a number past Int64, and keeps its digits in every payload" do

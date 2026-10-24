@@ -285,7 +285,8 @@ module Gori
       Refusal.new(NO_CREDENTIAL,
         "#{why}. A session slot is built from what a LOGIN response hands back — point at that " \
         "flow, or write the overlay by hand. A token that ROTATES belongs on the extract-rule " \
-        "path instead (`gori run rewriter extract` + `--bind-from`), which re-mints it per run")
+        "path instead (`create_extract_rule` claimed by the slot's `rules`, or `gori run rewriter " \
+        "extract` + `--bind-from`), which re-mints it per run")
     end
   end
 end

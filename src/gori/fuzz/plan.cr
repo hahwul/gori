@@ -801,7 +801,7 @@ module Gori::Fuzz
       end
       if options.config.race_count
         raise GrpcFieldError.new(
-          "a gRPC field position and --race cannot combine: a race group is N byte-identical " \
+          "a gRPC field position and a race (`race_count`/`--race`) cannot combine: a race group is N byte-identical " \
           "copies of ONE request released together, which bypasses payload substitution " \
           "entirely — there is nothing for a field position to substitute into")
       end
@@ -854,13 +854,13 @@ module Gori::Fuzz
       # construction (`http2 = force_h2 || seed.http2`), which is why the test is on the
       # handshake shape and not on the flag alone.
       if options.http2? && !extended
-        raise WsError.new("--http2 and an `Upgrade: websocket` script cannot combine: HTTP/2 has no " \
+        raise WsError.new("HTTP/2 (`http2`/`--http2`) and an `Upgrade: websocket` script cannot combine: HTTP/2 has no " \
                           "upgrade mechanism (RFC 9113 §8.1), so a WebSocket over h2 is opened by an " \
                           "RFC 8441 extended CONNECT instead — which this template is not. Sweep it over " \
                           "HTTP/1.1, or drop the frames to sweep the handshake itself as an h2 request")
       end
       if options.config.race_count
-        raise WsError.new("--race and a WebSocket script cannot combine: a race group is N byte-identical " \
+        raise WsError.new("a race (`race_count`/`--race`) and a WebSocket script cannot combine: a race group is N byte-identical " \
                           "copies of ONE request released together, which bypasses payload substitution " \
                           "entirely and has no framed-exchange form. Drop the frames to race the handshake")
       end
@@ -953,9 +953,10 @@ module Gori::Fuzz
       return unless race_count
       return unless config.stop_after_matches || matcher.stop_condition
       raise Gori::Error.new(
-        "stop_on cannot combine with --race: a race group is N byte-identical copies of ONE " \
-        "request released together in a single write, so there is no per-response verdict for a " \
-        "stop condition or a match count to fire on. Drop --race, or drop the stop condition")
+        "a stop condition (`stop_on`/`--stop-on`) cannot combine with a race (`race_count`/`--race`): " \
+        "a race group is N byte-identical copies of ONE request released together in a single " \
+        "write, so there is no per-response verdict for a stop condition or a match count to fire " \
+        "on. Drop the race, or drop the stop condition")
     end
 
     private def self.validate_tls_preset(name : String?) : String?

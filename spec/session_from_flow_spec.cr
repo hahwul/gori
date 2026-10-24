@@ -390,6 +390,8 @@ describe Gori::SessionFromFlow do
       # broken gori — and it has to point at the surface that DOES handle a rotating token.
       r.message.should contain("no cookie")
       r.message.should contain("--bind-from")
+      # MCP `create_session_slot` quotes it too, so the MCP spelling is named beside it.
+      r.message.should contain("create_extract_rule")
     end
 
     it "refuses a flow with no captured response, and says so" do

@@ -76,5 +76,7 @@ describe Gori::Fuzz::HistoryRecord do
   it "publishes the refusal sentence both surfaces quote" do
     Fuzz::HistoryRecord::WS_UNSUPPORTED.should contain("HTTP-only")
     Fuzz::HistoryRecord::WS_UNSUPPORTED.should contain("framed exchange")
+    # Both surfaces quote it verbatim, so it names both spellings.
+    Fuzz::HistoryRecord::WS_UNSUPPORTED.should contain("`record_history`/`--record-history`")
   end
 end

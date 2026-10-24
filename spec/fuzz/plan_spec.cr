@@ -297,6 +297,18 @@ describe Gori::Fuzz::Plan do
       ex.reason.should eq(F::PlanError::Reason::BadRaceCount)
     end
 
+    # One sentence reaches MCP `fuzz_start` and `gori run fuzz` alike, so it names both
+    # spellings instead of telling an agent to "drop --race".
+    it "refuses a stop condition on a race, in surface-neutral words" do
+      ex = expect_raises(Gori::Error) do
+        F::Plan.build(F::PlanOptions.new("GET / HTTP/1.1\r\nHost: t.test\r\n\r\n",
+          target: "http://t.test", config: F::Config.new(race_count: 3, stop_after_matches: 1)), ungated_outbound)
+      end
+      msg = ex.message.to_s
+      %w[`stop_on`/`--stop-on` `race_count`/`--race`].each { |s| msg.should contain(s) }
+      msg.should_not contain("Drop --race")
+    end
+
     # A group is released whole, so a cap below it can only be honoured by refusing the run
     # before any dial — not by sending the group and recording a cap that never held (#1204).
     it "refuses a race group larger than max_requests, warm-ups included" do

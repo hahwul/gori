@@ -136,7 +136,8 @@ module Gori
         found = hs_secret_verifies?(header, header_seg, payload_seg, signature, secret)
         note = if found
                  "SECRET FOUND — this token's own signature verifies with #{named}; " \
-                 "forge any claims with `--encode --secret #{shown}`"
+                 "forge any claims by re-signing with it (the JWT tab's ENCODE lens, `jwt_encode` " \
+                 "`secret`, or `gori run jwt --encode --secret #{shown}`)"
                else
                  "verifies if the server's HMAC key is #{named}"
                end
