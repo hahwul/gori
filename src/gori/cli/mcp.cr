@@ -164,6 +164,7 @@ module Gori::CLI
         project_name: nil, project_slug: nil, db_path: nil,
         selection_source: selection.source, workspace_root: nil, project_id: nil,
         bind_error: bind_error, tool_filter: tool_filter, denied_permissions: denied, asked_permissions: asked)
+      server.trap_shutdown_signals
       server.run
       server.current_store.try(&.close) # bound later by create/switch_project
       return
@@ -212,6 +213,7 @@ module Gori::CLI
           project_name: nil, project_slug: nil, db_path: nil,
           selection_source: "unbound", workspace_root: nil, project_id: nil,
           bind_error: reason, tool_filter: tool_filter, denied_permissions: denied, asked_permissions: asked)
+        server.trap_shutdown_signals
         server.run
         server.current_store.try(&.close) # bound later by create/switch_project
         return
@@ -222,7 +224,8 @@ module Gori::CLI
         project_name: project_name, project_slug: project_slug, db_path: resolved,
         selection_source: selection.source, workspace_root: selection.workspace_root,
         project_id: project_id, tool_filter: tool_filter, denied_permissions: denied, asked_permissions: asked)
-      server.run # blocks until STDIN EOF (client closed)
+      server.trap_shutdown_signals
+      server.run # blocks until STDIN EOF (client closed), or INT/TERM
     ensure
       # A `switch_project` left another store live; it closes too (its budget lease goes back).
       server.try(&.current_store).try(&.close)

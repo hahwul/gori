@@ -85,6 +85,21 @@ module Gori
         @channel_declared = false
       end
 
+      # SIGINT / SIGTERM end the session as stdin EOF does: closing `input` ends `run`'s read
+      # loop, so its ensure stops live jobs and closes their saves before the store is closed.
+      # Killed outright instead, a `save_results` run stayed `running` forever. A second signal
+      # exits at once, so a stop stuck on in-flight requests never needs SIGKILL.
+      def trap_shutdown_signals : Nil
+        signalled = false
+        {Signal::INT, Signal::TERM}.each do |sig|
+          sig.trap do |s|
+            exit 128 + s.value if signalled
+            signalled = true
+            @input.close rescue nil
+          end
+        end
+      end
+
       # Reads until EOF on `input` (client closed the pipe). Each line is parsed
       # and dispatched independently; a bad line never stops the loop. A broken
       # transport (the client process died) ends the session cleanly — a normal
