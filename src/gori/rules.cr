@@ -1556,6 +1556,9 @@ module Gori
       name = parsed[0]
       return {name, Env::Namespace::Bind} if snap.binds?(name)
       return {name, Env::Namespace::Env} if snap.env.has_key?(name)
+      # Last, so an env var of the same name is the remedy named: a disabled writer's name is
+      # still a binding's, and spelled bare it used to slip past as a literal.
+      return {name, Env::Namespace::Bind} if snap.withheld.includes?(name)
       nil
     end
 

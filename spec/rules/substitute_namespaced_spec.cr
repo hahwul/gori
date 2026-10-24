@@ -157,6 +157,25 @@ describe "Rules#substitute — namespaced" do
     end
   end
 
+  # A disabled extract rule's name is still a binding's: spelled bare it used to go out literally.
+  it "refuses a bare $NAME whose extract rule is disabled" do
+    with_store do |store|
+      b = Gori::Bindings.load(store)
+      b.add("SESSION", "", Gori::ExtractKind::Cookie, "sid").should be_nil
+      b.toggle(b.rules.first.id)
+      with_ns_layer(b) do
+        rules = Gori::Rules.new(store, store.match_rules)
+        rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "X-Auth",
+          "$SESSION", Gori::Store::RuleOp::SetHeader, Gori::Store::MatchKind::Literal,
+          "stale-bind", "", "")
+        rules.transform_message("GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n",
+          Gori::Store::RuleTarget::Request, "acme.test").should_not contain("X-Auth")
+        ev = store.events_after(0, 50).find { |e| e.kind == "bare_spelling" }.not_nil!
+        ev.message.should contain("write $BIND.SESSION to inject the value")
+      end
+    end
+  end
+
   # The half the `Refusal` enum's comment already promised: "or a name a session slot claims". A slot
   # written through `--identities FILE` or MCP `create_session_slot` names bindings the project does
   # not hold yet — no extract rule, nothing bound — and a replacement spelling one of those BARE was
